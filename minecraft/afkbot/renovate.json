@@ -1,0 +1,27 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Renovate is the single owner of dependency updates for this repo; keep repository-level (UI) Dependabot disabled.",
+    "Covers: npm dependencies (package.json + package-lock.json), GitHub Actions pins, and the digest-pinned Node base image in the Dockerfile."
+  ],
+  "extends": ["github>jdwlabs/.github"],
+  "packageRules": [
+    {
+      "description": [
+        "@types/node describes the runtime, so its major must track the Node base image rather than its own latest.",
+        "Left alone Renovate raises it to the newest major, which type-allows APIs the running Node does not have — a failure that typechecks clean and appears at runtime.",
+        "Raise this ceiling in the same change that moves the Dockerfile to a newer Node."
+      ],
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<25"
+    },
+    {
+      "description": [
+        "bedrock-protocol tracks the Minecraft wire protocol, and this image bakes in the protocol data for exactly one Bedrock version.",
+        "An upgrade can therefore change which server versions the bot can reach at all, so it is reviewed on its own rather than inside the weekly batch."
+      ],
+      "matchPackageNames": ["bedrock-protocol"],
+      "groupName": null
+    }
+  ]
+}

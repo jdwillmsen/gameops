@@ -1,0 +1,24 @@
+{
+  "name": "minecraft-afk-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless Bedrock client that holds a player slot and mirrors in-game chat to stdout",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bedrock-protocol": "3.58.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
+  }
+}
