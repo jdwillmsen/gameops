@@ -39,6 +39,18 @@ jobs:
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Labels only — tags stay on the custom version logic above. metadata-action
+      # would otherwise emit its own tag set derived from the git ref, which
+      # duplicates and could drift from the never-`latest` rule that logic exists
+      # to enforce.
+      - id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot
+          tags: type=raw,value=unused
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+
       # linux/amd64 only: every node in the target cluster is amd64, and the
       # native RakNet addon is compiled from source, so an arm64 variant would
       # roughly double build time for an image nothing would pull.
@@ -50,6 +62,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:${{ steps.version.outputs.value }}
             ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:sha-${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
