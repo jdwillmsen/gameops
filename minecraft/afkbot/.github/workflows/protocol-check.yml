@@ -1,0 +1,86 @@
+name: Protocol Check
+
+# Dispatched hourly by the jdw-deployments cluster's version-check CronJob,
+# which is the only thing that knows the production server's current
+# version — this repo's GitHub-hosted runner has no network path to the
+# LAN-only server itself.
+on:
+  workflow_dispatch:
+    inputs:
+      production_version:
+        description: Bedrock version string the production server currently reports (e.g. 1.26.45)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      # --ignore-scripts skips the native RakNet addon build; only
+      # minecraft-data's version table is needed here.
+      - run: npm ci --ignore-scripts
+
+      - id: check
+        env:
+          PRODUCTION_VERSION: ${{ inputs.production_version }}
+        run: node scripts/check-protocol.mjs "$PRODUCTION_VERSION"
+
+      # A default-token push/PR would silently never trigger ci.yml on the
+      # resulting PR — GitHub suppresses workflow runs triggered by the
+      # default GITHUB_TOKEN to prevent recursive-workflow loops. RELEASE_PR_TOKEN
+      # is a separate PAT (repo secret, not yet created — see README/PR notes)
+      # scoped to Contents: write + Pull requests: write, used only for this
+      # push and PR so ci.yml actually runs.
+      - if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PRODUCTION_VERSION: ${{ inputs.production_version }}
+          OLD_VERSION: ${{ steps.check.outputs.old_version }}
+          NEW_VERSION: ${{ steps.check.outputs.new_version }}
+          OLD_PROTOCOL: ${{ steps.check.outputs.old_protocol }}
+          NEW_PROTOCOL: ${{ steps.check.outputs.new_protocol }}
+          NEW_PACKAGE_VERSION: ${{ steps.check.outputs.new_package_version }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="chore/bump-protocol-${PRODUCTION_VERSION}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git checkout -b "$BRANCH"
+          git add Dockerfile package.json
+          git commit -m "chore: bump baked protocol ${OLD_PROTOCOL} -> ${NEW_PROTOCOL} (${OLD_VERSION} -> ${NEW_VERSION})"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: bump baked protocol to ${NEW_VERSION} (protocol ${NEW_PROTOCOL})" \
+            --body "$(cat <<EOF
+          Production server now reports **${NEW_VERSION}** (protocol ${NEW_PROTOCOL}), which no longer matches this image's baked **${OLD_VERSION}** (protocol ${OLD_PROTOCOL}).
+
+          Opened automatically by [\`protocol-check.yml\`](../actions/workflows/protocol-check.yml) after the jdw-deployments version-check CronJob reported the server's current version. Both sides were resolved to protocol numbers via \`minecraft-data\`'s own table before deciding this is a real change, and \`${NEW_VERSION}\` was confirmed to have full block/item data available.
+
+          - [ ] Manually verify a bot built from this branch can actually connect and authenticate against the production server (Xbox Live auth is not exercised in CI)
+          - [ ] Tag and push \`v${NEW_PACKAGE_VERSION}\` (or manually dispatch \`release.yml\`) once merged
+          EOF
+          )"
