@@ -5,6 +5,7 @@ export interface Config {
   port: number
   username: string
   version: NonNullable<Options['version']>
+  protocolSpoof: boolean
   viewDistance: number
   profilesFolder: string
   reconnectMinMs: number
@@ -50,6 +51,12 @@ export function loadConfig(): Config {
     // the matching entry. Pinned explicitly rather than left to default so a
     // library upgrade cannot move the negotiated protocol on its own.
     version: (process.env.MC_VERSION?.trim() || '1.26.40') as NonNullable<Options['version']>,
+    // Announce the server's advertised protocol number when it differs from
+    // what the baked data maps to (see negotiateProtocol). On by default:
+    // without it the bot is offline from the moment the LATEST-tracking
+    // server crosses a protocol bump until upstream minecraft-data catches
+    // up, which is exactly the window it exists to cover.
+    protocolSpoof: process.env.MC_PROTOCOL_SPOOF?.trim().toLowerCase() !== 'false',
     // Must be a writable path that survives restarts. prismarine-auth caches
     // the Xbox Live tokens here; losing it means another interactive
     // device-code login.

@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs'
 import { createClient } from 'bedrock-protocol'
 import { loadConfig, type Config } from './config'
 import { log } from './log'
+import { negotiateProtocol } from './protocol'
 
 /** Chat the server broadcasts to every client. Other `text` types are server
  *  plumbing (tips, popups, translated system strings) and would drown the
@@ -109,6 +110,11 @@ async function run(): Promise<void> {
   let delay = config.reconnectMinMs
 
   while (!shuttingDown) {
+    // Every attempt, not just the first: the server restarts hourly when its
+    // LATEST-tracking version moves, so the protocol can change mid-run.
+    if (config.protocolSpoof) {
+      await negotiateProtocol(config.host, config.port, config.version)
+    }
     const startedAt = Date.now()
     await session(config)
     if (shuttingDown) break

@@ -30,6 +30,7 @@ ships `send-command`, so `say` and `tellraw` already work from outside.
 | `MC_USERNAME` | yes | — | Key the auth token caches under, not the gamertag the server shows |
 | `MC_PORT` | no | `19132` | Server port |
 | `MC_VERSION` | no | baked at build | Protocol version to negotiate |
+| `MC_PROTOCOL_SPOOF` | no | `true` | Announce the server's advertised protocol number when it outruns the baked data (see src/protocol.ts) |
 | `MC_VIEW_DISTANCE` | no | `4` | Chunks the server sends this client |
 | `AUTH_CACHE_DIR` | no | `/data/auth` | Where the Xbox Live token cache lives |
 | `RECONNECT_MIN_MS` | no | `5000` | Backoff floor |

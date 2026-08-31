@@ -30,6 +30,9 @@ jobs:
       # job is here to catch type errors, which do not need it.
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
+      # Unit tests only touch the pure protocol-negotiation core, which is
+      # deliberately importable without the native RakNet addon skipped above.
+      - run: npm test
 
       # Builds without pushing. The Dockerfile asserts that minecraft-data
       # still loads after pruning and that bedrock-protocol still loads after
