@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.122.0",
     "bedrock-protocol": "3.58.2"
   },
   "devDependencies": {

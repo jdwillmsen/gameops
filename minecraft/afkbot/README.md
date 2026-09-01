@@ -1,11 +1,12 @@
 # minecraft-afk-bot
 
-A headless Minecraft Bedrock client. It holds a player slot on the FWB server
-and mirrors in-game chat to stdout as structured JSON.
+A headless Minecraft Bedrock client. It holds a player slot on the FWB server,
+mirrors in-game chat to stdout as structured JSON, and answers players'
+questions in chat via Claude.
 
 ## Why it exists
 
-Two jobs, one process:
+Three jobs, one process:
 
 **Keeping a player in the world.** Mob farms need a player present in the
 dimension — ticking areas keep chunks loaded but never spawn mobs. This bot is
@@ -19,8 +20,14 @@ connected client, which is what this is. Each chat message becomes one JSON
 line on stdout, so the cluster's existing log pipeline makes it searchable
 with no extra plumbing.
 
-Sending messages *into* the server does not need this bot — the server image
-ships `send-command`, so `say` and `tellraw` already work from outside.
+**Answering questions.** Any chat line containing `?` (other than the bot's
+own) is sent to Claude, and the answer is broadcast back as chat under the
+bot's own name (`src/answer.ts`, `src/reply.ts`). A failed or slow answer is
+logged and otherwise ignored — it never affects the connection.
+
+Sending messages into the server for anything else does not need this bot —
+the server image ships `send-command`, so `say` and `tellraw` already work
+from outside.
 
 ## Configuration
 
@@ -35,6 +42,7 @@ ships `send-command`, so `say` and `tellraw` already work from outside.
 | `AUTH_CACHE_DIR` | no | `/data/auth` | Where the Xbox Live token cache lives |
 | `RECONNECT_MIN_MS` | no | `5000` | Backoff floor |
 | `RECONNECT_MAX_MS` | no | `300000` | Backoff ceiling |
+| `ANTHROPIC_API_KEY` | yes | — | Claude API key used to answer chat questions |
 
 `MC_VERSION` is effectively build-time. The image strips the `minecraft-data`
 directories for every other version, so overriding it at runtime will fail to
@@ -75,8 +83,9 @@ The bot is an ordinary player once connected: it occupies a slot, shows up in
 ```
 
 Lifecycle events use the same shape with `event` set to `starting`, `joined`,
-`spawned`, `disconnected`, `kicked`, `reconnecting`, or `device_code_required`.
-Errors go to stderr.
+`spawned`, `disconnected`, `kicked`, `reconnecting`, `device_code_required`,
+`replied` (a Claude answer was broadcast), or `answer_error` (Claude call or
+send failed). Errors go to stderr.
 
 ## Development
 

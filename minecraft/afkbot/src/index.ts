@@ -3,11 +3,8 @@ import { createClient } from 'bedrock-protocol'
 import { loadConfig, type Config } from './config'
 import { log } from './log'
 import { negotiateProtocol } from './protocol'
-
-/** Chat the server broadcasts to every client. Other `text` types are server
- *  plumbing (tips, popups, translated system strings) and would drown the
- *  interesting lines. */
-const CHAT_TYPES = new Set(['chat', 'announcement', 'whisper'])
+import { answerQuestion } from './answer'
+import { CHAT_TYPES, isQuestion, buildReplyPacket } from './reply'
 
 let shuttingDown = false
 
@@ -62,6 +59,20 @@ function session(config: Config): Promise<void> {
         xuid: packet.xuid || null,
         message: packet.message,
       })
+
+      if (isQuestion(packet, config.username)) {
+        answerQuestion(packet.source_name || 'a player', packet.message).then(
+          (reply) => {
+            client.queue('text', buildReplyPacket(config.username, reply))
+            log('info', 'replied', { player: packet.source_name || null, reply })
+          },
+          (error: Error) => {
+            // Never let a bad LLM call take down the connection — the chat
+            // mirror above already logged the question either way.
+            log('error', 'answer_error', { error: error.message })
+          },
+        )
+      }
     })
 
     client.on('disconnect', (packet) => {
