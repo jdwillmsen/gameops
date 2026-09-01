@@ -1,15 +1,30 @@
 import { mkdirSync } from 'node:fs'
-import { createClient } from 'bedrock-protocol'
+import { createClient, type Client } from 'bedrock-protocol'
 import { loadConfig, type Config } from './config'
 import { log } from './log'
 import { negotiateProtocol } from './protocol'
-
-/** Chat the server broadcasts to every client. Other `text` types are server
- *  plumbing (tips, popups, translated system strings) and would drown the
- *  interesting lines. */
-const CHAT_TYPES = new Set(['chat', 'announcement', 'whisper'])
+import { answerQuestion } from './answer'
+import { TEXT_TYPES, isQuestion, chatAuthor, chatAskerLabel, buildReplyPacket, SERVER_ORIGIN_KEY } from './reply'
+import { createAnswerGate, type AnswerGate } from './throttle'
 
 let shuttingDown = false
+
+// One gate for the whole process, not per-session: a reconnect should not
+// hand a flood-in-progress a fresh budget.
+let answerGate: AnswerGate | undefined
+
+/**
+ * bedrock-protocol reassigns `username` from the login-time value (the
+ * prismarine-auth cache key, config.username) to the real Xbox Live
+ * gamertag once auth completes, but its shipped types never grew this field
+ * on Client, hence the cast. Using the pre-login value here would make the
+ * bot's own self-exclusion check compare against a name the server never
+ * actually sends, letting the bot answer its own broadcasts forever.
+ */
+function resolveSelfName(client: Client, fallback: string): string {
+  const live = (client as unknown as { username?: string }).username
+  return live && live.trim() !== '' ? live.trim() : fallback
+}
 
 /**
  * Runs one connection to exhaustion. Resolves when the session ends for any
@@ -18,10 +33,37 @@ let shuttingDown = false
  */
 function session(config: Config): Promise<void> {
   return new Promise((resolve) => {
+    const configuredBotNames = new Set(config.botNames)
+    const llmOptions = {
+      baseUrl: config.llmBaseUrl,
+      model: config.llmModel,
+      apiKey: config.llmApiKey,
+      timeoutMs: config.llmTimeoutMs,
+      maxTokens: config.llmMaxTokens,
+    }
+
+    // Memoized rather than recomputed per message: the resolved name only
+    // ever changes once, from the pre-login fallback to the real gamertag.
+    let resolvedBotNames: { selfName: string; names: ReadonlySet<string> } | undefined
+    function getBotNames(): { selfName: string; names: ReadonlySet<string> } {
+      const selfName = resolveSelfName(client, config.username)
+      if (resolvedBotNames?.selfName !== selfName) {
+        resolvedBotNames = { selfName, names: new Set(configuredBotNames).add(selfName.trim().toLowerCase()) }
+      }
+      return resolvedBotNames
+    }
+
     let settled = false
+    // Distinct from `settled`/resolve() timing: an in-flight LLM call closes
+    // over this session's `client`, and can resolve after the session has
+    // already ended and run() has opened a new one. Sending through — or
+    // even just logging as if we sent through — the old, dead `client` at
+    // that point would silently lose the reply while claiming success.
+    let sessionEnded = false
     const end = (event: string, fields: Record<string, unknown> = {}) => {
       if (settled) return
       settled = true
+      sessionEnded = true
       log(event === 'session_error' ? 'error' : 'warn', event, fields)
       try {
         client.disconnect()
@@ -55,13 +97,53 @@ function session(config: Config): Promise<void> {
     client.on('spawn', () => log('info', 'spawned'))
 
     client.on('text', (packet) => {
-      if (!CHAT_TYPES.has(packet.type)) return
+      // Logged in full — including types the bot never answers — so the
+      // real wire shape of a console `send-command say`/`tellraw` message
+      // can be confirmed against the log pipeline before ANSWERABLE_TYPES is
+      // ever widened to include them (see reply.ts).
+      if (!TEXT_TYPES.has(packet.type)) return
       log('info', 'chat', {
         chat_type: packet.type,
+        category: packet.category ?? null,
         player: packet.source_name || null,
         xuid: packet.xuid || null,
         message: packet.message,
       })
+
+      if (!config.answerEnabled) return
+
+      const { selfName, names: botNames } = getBotNames()
+      if (!isQuestion(packet, botNames)) return
+
+      const author = chatAuthor(packet)
+      const source = author === SERVER_ORIGIN_KEY ? 'server' : 'player'
+      const gateResult = answerGate!.tryAcquire(author, Date.now())
+      if (gateResult !== 'ok') {
+        log('info', 'answer_skipped', { reason: gateResult, source, player: packet.source_name || null })
+        return
+      }
+
+      const startedAt = Date.now()
+      answerQuestion(chatAskerLabel(packet), packet.message ?? '', llmOptions)
+        .then((reply) => {
+          if (sessionEnded) {
+            log('info', 'answer_skipped', { reason: 'session_ended', source, player: packet.source_name || null })
+            return
+          }
+          if (reply === '') {
+            log('info', 'answer_skipped', { reason: 'empty_reply', source, player: packet.source_name || null })
+            return
+          }
+          client.queue('text', buildReplyPacket(selfName, reply))
+          log('info', 'replied', { source, player: packet.source_name || null, reply, ms: Date.now() - startedAt })
+        })
+        .catch((error: unknown) => {
+          // Never let a bad LLM call take down the connection — the chat
+          // mirror above already logged the question either way.
+          const message = error instanceof Error ? error.message : String(error)
+          log('error', 'answer_error', { source, player: packet.source_name || null, error: message, ms: Date.now() - startedAt })
+        })
+        .finally(() => answerGate!.release())
     })
 
     client.on('disconnect', (packet) => {
@@ -99,12 +181,22 @@ async function run(): Promise<void> {
   const config = loadConfig()
   mkdirSync(config.profilesFolder, { recursive: true })
 
+  answerGate = createAnswerGate({
+    cooldownMs: config.answerCooldownMs,
+    maxPerMinute: config.answerMaxPerMinute,
+    maxInFlight: config.answerMaxInFlight,
+  })
+
   log('info', 'starting', {
     host: config.host,
     port: config.port,
     username: config.username,
     version: config.version,
     profiles_folder: config.profilesFolder,
+    answer_enabled: config.answerEnabled,
+    llm_base_url: config.llmBaseUrl,
+    llm_model: config.llmModel,
+    llm_key_present: config.llmApiKey !== '',
   })
 
   let delay = config.reconnectMinMs

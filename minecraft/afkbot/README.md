@@ -1,11 +1,12 @@
 # minecraft-afk-bot
 
-A headless Minecraft Bedrock client. It holds a player slot on the FWB server
-and mirrors in-game chat to stdout as structured JSON.
+A headless Minecraft Bedrock client. It holds a player slot on the FWB server,
+mirrors in-game chat to stdout as structured JSON, and answers chat questions
+via any OpenAI-compatible LLM backend.
 
 ## Why it exists
 
-Two jobs, one process:
+Three jobs, one process:
 
 **Keeping a player in the world.** Mob farms need a player present in the
 dimension — ticking areas keep chunks loaded but never spawn mobs. This bot is
@@ -19,8 +20,22 @@ connected client, which is what this is. Each chat message becomes one JSON
 line on stdout, so the cluster's existing log pipeline makes it searchable
 with no extra plumbing.
 
-Sending messages *into* the server does not need this bot — the server image
-ships `send-command`, so `say` and `tellraw` already work from outside.
+**Answering questions.** Any chat line containing `?` — from a player, or from
+the server console itself via `send-command say` — other than the bot's own
+broadcasts or a listed sibling bot, is sent to a configured LLM backend, and
+the answer is broadcast back as chat under the bot's own name (`src/answer.ts`,
+`src/reply.ts`, `src/throttle.ts`). Off by default (`MC_ANSWER_ENABLED`); a
+failed, slow, or rate-limited answer is logged and otherwise ignored — it
+never affects the connection.
+
+Answering is guarded against runaway cost/GPU load even though the default
+backend is free: a hard per-request timeout, a cap of one in-flight LLM call
+at a time (a burst of questions drops the extras rather than queueing them),
+a per-asker cooldown, and a global per-minute cap. See `src/throttle.ts`.
+
+Sending messages into the server for anything else does not need this bot —
+the server image ships `send-command`, so `say` and `tellraw` already work
+from outside.
 
 ## Configuration
 
@@ -35,6 +50,29 @@ ships `send-command`, so `say` and `tellraw` already work from outside.
 | `AUTH_CACHE_DIR` | no | `/data/auth` | Where the Xbox Live token cache lives |
 | `RECONNECT_MIN_MS` | no | `5000` | Backoff floor |
 | `RECONNECT_MAX_MS` | no | `300000` | Backoff ceiling |
+| `MC_ANSWER_ENABLED` | no | `false` | Answer chat questions. Enable on exactly one bot per server — two answering bots answer each other forever |
+| `MC_LLM_BASE_URL` | no | `http://192.168.1.50:8000/v1` | OpenAI-compatible `/chat/completions` base URL. Defaults to the cluster's local vLLM instance — unmetered, no auth needed |
+| `MC_LLM_MODEL` | no | `qwen/qwen3-coder-30b-a3b` | Model name to request |
+| `MC_LLM_API_KEY` | no | — | Bearer token, if the backend needs one (the local vLLM default does not) |
+| `MC_LLM_TIMEOUT_MS` | no | `8000` | Abort an LLM call after this long |
+| `MC_LLM_MAX_TOKENS` | no | `96` | Output token cap per answer |
+| `MC_ANSWER_COOLDOWN_MS` | no | `30000` | Minimum gap between two answers to the same asker (server-console messages share one cooldown bucket, separate from any player's) |
+| `MC_ANSWER_MAX_PER_MINUTE` | no | `6` | Global answer-rate cap, regardless of asker |
+| `MC_LLM_MAX_IN_FLIGHT` | no | `1` | Concurrent LLM calls allowed; a question arriving while at the cap is dropped, not queued |
+| `MC_BOT_NAMES` | no | — | Comma-separated Xbox Live gamertags of sibling bots on the same server, so this bot never answers one into a loop. Case-insensitive; this bot's own resolved gamertag is always added automatically |
+
+### Trying a different LLM backend
+
+`MC_LLM_BASE_URL`/`MC_LLM_MODEL`/`MC_LLM_API_KEY` work with any OpenAI-compatible
+`/chat/completions` endpoint — verify the exact model ID against the
+provider's current docs before setting it:
+
+| Provider | `MC_LLM_BASE_URL` | `MC_LLM_API_KEY` |
+|---|---|---|
+| Local vLLM (default) | `http://192.168.1.50:8000/v1` | not needed |
+| Groq free tier | `https://api.groq.com/openai/v1` | Groq API key |
+| Google AI Studio (Gemini) | `https://generativelanguage.googleapis.com/v1beta/openai/` | AI Studio API key |
+| `platform-litellm` gateway | `http://platform-litellm.ai-sre.svc.cluster.local:4000/v1` | a scoped LiteLLM virtual key — never the master key, and never `sre-investigator`, whose free quota is shared with AI-SRE tooling |
 
 `MC_VERSION` is effectively build-time. The image strips the `minecraft-data`
 directories for every other version, so overriding it at runtime will fail to
@@ -75,8 +113,16 @@ The bot is an ordinary player once connected: it occupies a slot, shows up in
 ```
 
 Lifecycle events use the same shape with `event` set to `starting`, `joined`,
-`spawned`, `disconnected`, `kicked`, `reconnecting`, or `device_code_required`.
+`spawned`, `disconnected`, `kicked`, `reconnecting`, `device_code_required`,
+`replied` (an answer was broadcast), `answer_skipped` (cooldown/rate-limit/
+in-flight cap — see `reason`), or `answer_error` (LLM call or send failed).
 Errors go to stderr.
+
+The `chat` event is logged for every `text` packet type the server sends, not
+just the ones the bot can answer — useful for confirming what a console
+`send-command say`/`tellraw` message actually looks like on the wire (`type`,
+`category`, `source_name`) before deciding whether to widen `ANSWERABLE_TYPES`
+in `src/reply.ts` to cover it.
 
 ## Development
 
