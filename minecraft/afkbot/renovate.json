@@ -2,10 +2,31 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Renovate is the single owner of dependency updates for this repo; keep repository-level (UI) Dependabot disabled.",
-    "Covers: npm dependencies (package.json + package-lock.json), GitHub Actions pins, and the digest-pinned Node base image in the Dockerfile."
+    "Covers: npm dependencies (package.json + package-lock.json), GitHub Actions pins, and the digest-pinned Node base image in the Dockerfile.",
+    "The org preset (github>jdwlabs/.github) is inlined below rather than extended: this repo's Renovate runs on the fine-grained RELEASE_PR_TOKEN, which is scoped to this jdwillmsen repo and cannot fetch a preset from the jdwlabs org — the first real run failed with config-presets-invalid on exactly that. jdw-deployments' own config avoids the org preset the same way."
   ],
-  "extends": ["github>jdwlabs/.github"],
+  "extends": ["config:recommended", ":semanticCommits", ":semanticCommitTypeAll(chore)"],
+  "labels": ["dependencies"],
+  "schedule": ["before 8am on saturday"],
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 10,
+  "rebaseWhen": "behind-base-branch",
+  "dependencyDashboard": true,
+  "configMigration": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "prCreation": "immediate",
+    "labels": ["dependencies", "security"]
+  },
+  "osvVulnerabilityAlerts": true,
   "packageRules": [
+    {
+      "description": "Batch all non-major updates into a single weekly PR per repo to keep noise reviewable",
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-minor-patch",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"]
+    },
     {
       "description": [
         "@types/node describes the runtime, so its major must track the Node base image rather than its own latest.",
@@ -18,7 +39,7 @@
     {
       "description": [
         "bedrock-protocol tracks the Minecraft wire protocol, and this image bakes in the protocol data for exactly one Bedrock version.",
-        "An upgrade can therefore change which server versions the bot can reach at all, so it is reviewed on its own rather than inside the weekly batch."
+        "An upgrade can therefore change which server versions the bot can reach at all, so it is reviewed on its own rather than inside the weekly batch, and not gated to the weekly window — the protocol-drift pipeline needs upstream support in the lockfile as soon as it ships."
       ],
       "matchPackageNames": ["bedrock-protocol"],
       "groupName": null,
