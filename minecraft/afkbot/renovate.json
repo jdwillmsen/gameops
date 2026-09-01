@@ -21,7 +21,8 @@
         "An upgrade can therefore change which server versions the bot can reach at all, so it is reviewed on its own rather than inside the weekly batch."
       ],
       "matchPackageNames": ["bedrock-protocol"],
-      "groupName": null
+      "groupName": null,
+      "schedule": ["at any time"]
     }
   ]
 }
