@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "bedrock-protocol": "3.58.2"
+    "bedrock-protocol": "3.58.3"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
