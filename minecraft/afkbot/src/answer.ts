@@ -58,7 +58,6 @@ export function extractAnswerText(payload: unknown): string {
   return content.trim().replace(/\s+/g, ' ').slice(0, MAX_REPLY_CHARS)
 }
 
-/** Asks the configured OpenAI-compatible backend to answer a chat question. */
 export async function answerQuestion(asker: string, question: string, opts: AnswerOptions): Promise<string> {
   const { url, headers, body } = buildAnswerRequest(asker, question, opts)
   const response = await fetch(url, {

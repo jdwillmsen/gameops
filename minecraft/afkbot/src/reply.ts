@@ -58,13 +58,25 @@ export function chatAuthor(packet: ChatPacket): string {
 export function isQuestion(packet: ChatPacket, botNames: ReadonlySet<string>): boolean {
   if (!ANSWERABLE_TYPES.has(packet.type)) return false
 
-  const name = packet.source_name?.trim() ?? ''
-  const xuid = packet.xuid?.trim() ?? ''
-  const isServerOrigin = name === '' && xuid === ''
-  if (name === '' && !isServerOrigin) return false
-  if (!isServerOrigin && botNames.has(name.toLowerCase())) return false
+  const author = chatAuthor(packet)
+  // '' is chatAuthor's output for a blank name paired with a non-empty xuid
+  // — unidentifiable, not the same thing as the server's genuinely blank
+  // identity (SERVER_ORIGIN_KEY), so it is dropped rather than guessed at.
+  if (author === '') return false
+  if (author !== SERVER_ORIGIN_KEY && botNames.has(author)) return false
 
   return (packet.message ?? '').includes('?')
+}
+
+/**
+ * Display name for the LLM prompt/log — real casing, trimmed, or 'the
+ * server' for a server-origin message. Derived from chatAuthor rather than
+ * re-trimming source_name itself, so a whitespace-only name can never read
+ * as a real asker here while chatAuthor buckets the same packet as
+ * server-origin for the cooldown key.
+ */
+export function chatAskerLabel(packet: ChatPacket): string {
+  return chatAuthor(packet) === SERVER_ORIGIN_KEY ? 'the server' : (packet.source_name?.trim() || 'a player')
 }
 
 /** Shape bedrock-protocol expects to broadcast a chat line as the bot.

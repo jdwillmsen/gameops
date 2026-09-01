@@ -94,10 +94,10 @@ export function loadConfig(): Config {
     // would answer the first bot's replies right back, forever. Flip it on
     // exactly one bot.
     answerEnabled: process.env.MC_ANSWER_ENABLED?.trim().toLowerCase() === 'true',
-    // Defaults to the cluster's local vLLM instance: unmetered and free,
-    // unlike the OpenRouter free tier ai-sre's LiteLLM gateway shares across
-    // SRE investigations (50 req/day). Any OpenAI-compatible endpoint works
-    // here, so pointing this at Groq/Gemini/LiteLLM instead is just env vars.
+    // Defaults to the cluster's own local instance: unmetered and free,
+    // unlike a shared hosted free tier this bot could otherwise contend with.
+    // Any OpenAI-compatible endpoint works here, so pointing this at a
+    // different backend instead is just env vars — see the README.
     llmBaseUrl: process.env.MC_LLM_BASE_URL?.trim() || 'http://192.168.1.50:8000/v1',
     llmModel: process.env.MC_LLM_MODEL?.trim() || 'qwen/qwen3-coder-30b-a3b',
     // Empty by default: the local vLLM endpoint takes no auth. A hosted

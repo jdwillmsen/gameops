@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isQuestion, buildReplyPacket, chatAuthor, SERVER_ORIGIN_KEY } from './reply'
+import { isQuestion, buildReplyPacket, chatAuthor, chatAskerLabel, SERVER_ORIGIN_KEY } from './reply'
 
 const BOT_NAMES = new Set(['bot', 'fwb-afk-bot-2'])
 
@@ -46,6 +46,18 @@ test('chatAuthor keys a real player by their lowercased name', () => {
 
 test('chatAuthor keys a server-console message under the shared sentinel', () => {
   assert.equal(chatAuthor({ type: 'announcement', source_name: '', xuid: '' }), SERVER_ORIGIN_KEY)
+})
+
+test('chatAskerLabel keeps a real player\'s original casing', () => {
+  assert.equal(chatAskerLabel({ type: 'chat', source_name: 'Josh', xuid: '123' }), 'Josh')
+})
+
+test('chatAskerLabel calls a server-console message "the server"', () => {
+  assert.equal(chatAskerLabel({ type: 'announcement', source_name: '', xuid: '' }), 'the server')
+})
+
+test('chatAskerLabel falls back for a whitespace-only name paired with an xuid', () => {
+  assert.equal(chatAskerLabel({ type: 'chat', source_name: '   ', xuid: '123' }), 'a player')
 })
 
 test('builds a chat packet attributed to the bot', () => {
