@@ -10,6 +10,19 @@ export interface Config {
   profilesFolder: string
   reconnectMinMs: number
   reconnectMaxMs: number
+  answerEnabled: boolean
+  llmBaseUrl: string
+  llmModel: string
+  llmApiKey: string
+  llmTimeoutMs: number
+  llmMaxTokens: number
+  answerCooldownMs: number
+  answerMaxPerMinute: number
+  answerMaxInFlight: number
+  // Lowercased. Never includes the bot's own gamertag — that name is only
+  // known once bedrock-protocol resolves it post-login, so index.ts adds it
+  // to this set at runtime rather than storing it here.
+  botNames: string[]
 }
 
 function required(name: string): string {
@@ -28,6 +41,15 @@ function positiveInt(name: string, fallback: number): number {
     throw new Error(`${name} must be a positive integer, got ${JSON.stringify(raw)}`)
   }
   return value
+}
+
+function stringList(name: string): string[] {
+  const raw = process.env[name]
+  if (raw === undefined) return []
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '')
 }
 
 export function loadConfig(): Config {
@@ -68,6 +90,28 @@ export function loadConfig(): Config {
     viewDistance: positiveInt('MC_VIEW_DISTANCE', 4),
     reconnectMinMs: positiveInt('RECONNECT_MIN_MS', 5_000),
     reconnectMaxMs: positiveInt('RECONNECT_MAX_MS', 300_000),
+    // Off by default: a second bot pointed at the same server with this on
+    // would answer the first bot's replies right back, forever. Flip it on
+    // exactly one bot.
+    answerEnabled: process.env.MC_ANSWER_ENABLED?.trim().toLowerCase() === 'true',
+    // Defaults to the cluster's local vLLM instance: unmetered and free,
+    // unlike the OpenRouter free tier ai-sre's LiteLLM gateway shares across
+    // SRE investigations (50 req/day). Any OpenAI-compatible endpoint works
+    // here, so pointing this at Groq/Gemini/LiteLLM instead is just env vars.
+    llmBaseUrl: process.env.MC_LLM_BASE_URL?.trim() || 'http://192.168.1.50:8000/v1',
+    llmModel: process.env.MC_LLM_MODEL?.trim() || 'qwen/qwen3-coder-30b-a3b',
+    // Empty by default: the local vLLM endpoint takes no auth. A hosted
+    // OpenAI-compatible API (Groq, Gemini, LiteLLM) needs a real key here.
+    llmApiKey: process.env.MC_LLM_API_KEY?.trim() || '',
+    llmTimeoutMs: positiveInt('MC_LLM_TIMEOUT_MS', 8_000),
+    llmMaxTokens: positiveInt('MC_LLM_MAX_TOKENS', 96),
+    answerCooldownMs: positiveInt('MC_ANSWER_COOLDOWN_MS', 30_000),
+    answerMaxPerMinute: positiveInt('MC_ANSWER_MAX_PER_MINUTE', 6),
+    answerMaxInFlight: positiveInt('MC_LLM_MAX_IN_FLIGHT', 1),
+    // Gamertags of sibling bots on the same server (e.g. fwb-afk-bot-2), so
+    // this bot never answers one of them into a chat loop. Not this bot's
+    // own name — see the Config field comment.
+    botNames: stringList('MC_BOT_NAMES'),
   }
 
   if (config.reconnectMaxMs < config.reconnectMinMs) {
