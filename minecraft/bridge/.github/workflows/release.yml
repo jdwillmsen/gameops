@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version to publish, without the leading v; a matching v<version> tag must already exist
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # A v0.1.0 tag publishes 0.1.0 and never `latest`: this image runs as a
+  # sidecar with write access to the server console, so a moving tag would let
+  # any later push silently replace what running deployments already trust.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.resolve.outputs.value }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - id: resolve
+        env:
+          TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version="${TAG:-${REF_NAME#v}}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$ ]]; then
+            echo "refusing to publish '$version': not an immutable semantic version" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "ref=refs/tags/v$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: version
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.version.outputs.ref }}
+
+  publish:
+    needs: [version, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.ref }}
+
+      - id: revision
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4.2.0
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/mc-console-bridge
+          tags: |
+            type=raw,value=${{ needs.version.outputs.value }}
+            type=raw,value=sha-${{ steps.revision.outputs.value }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.value }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+
+      - uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max

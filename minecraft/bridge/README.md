@@ -118,6 +118,28 @@ The binary is static (`CGO_ENABLED=0`) and ships on a distroless nonroot
 base, so the sidecar image carries no shell. CI runs these same checks
 (`.github/workflows/ci.yml`).
 
+## Releases
+
+Pushing a `v<version>` tag runs CI against that tag and then publishes a
+`linux/amd64` image to GHCR:
+
+```
+ghcr.io/<owner>/mc-console-bridge:<version>
+ghcr.io/<owner>/mc-console-bridge:sha-<commit>
+```
+
+`latest` is never published. This sidecar has write access to the server
+console, so a moving tag would let a later push silently replace what a
+running deployment already trusts — deployments (the Helm chart) pin the
+version tag instead.
+
+`<version>` is the tag without its leading `v`, and must be a semantic
+version; the workflow refuses anything else, so a moving name like `latest`
+or a branch name cannot reach the registry.
+`.github/workflows/release.yml` can also be dispatched manually with a
+version whose `v<version>` tag already exists, which re-publishes from that
+tag — never from a branch.
+
 ## Status
 
 Stage 0/1 scaffold: allowlist, permissions/allowlist parsing, console
