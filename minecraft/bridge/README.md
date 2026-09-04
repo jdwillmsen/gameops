@@ -128,6 +128,11 @@ ghcr.io/<owner>/mc-console-bridge:<version>
 ghcr.io/<owner>/mc-console-bridge:sha-<commit>
 ```
 
+When the repository defines a `DOCKERHUB_USERNAME` variable and a
+`DOCKERHUB_TOKEN` secret, the same tags are also pushed to Docker Hub as a
+redundant copy (`docker.io/<username>/mc-console-bridge`); deployments keep
+pulling from GHCR.
+
 `latest` is never published. This sidecar has write access to the server
 console, so a moving tag would let a later push silently replace what a
 running deployment already trusts — deployments (the Helm chart) pin the
