@@ -13,6 +13,11 @@ import (
 	"strings"
 )
 
+// Bedrock's maximum tick-distance, and the largest radius measured as granted
+// in full (see ViewDistance below). Nothing above this was tried, so it is a
+// verified ceiling rather than a known limit.
+const maxTickDistance = 12
+
 // Config is everything the bot needs to hold a player slot.
 type Config struct {
 	Host string
@@ -25,10 +30,20 @@ type Config struct {
 
 	// ViewDistance is the chunk radius the bot asks for.
 	//
-	// Low on purpose. The server's own tick-distance governs what simulates
-	// around a player, so a bot holding a farm loaded does not need to see
-	// far -- it needs to be present. Asking for a large radius would cost
-	// bandwidth and server work for chunks nobody looks at.
+	// This defaulted to 4, on the reasoning that the server's own tick-distance
+	// governs what simulates around a player, so a bot holding a farm loaded
+	// needs to be present rather than to see far.
+	//
+	// Measured on the live server on 2026-09-08, that is wrong. Requesting 4
+	// was granted 5, and requesting 12 was granted 12: the server honours what
+	// the client asks for rather than extending to tick-distance. A bot asking
+	// for 4 holds five chunks and nothing further out ticks, so the farm it
+	// exists to keep running was covered about a fifth of the way.
+	//
+	// Nothing observable distinguished the two cases beforehand -- the farm
+	// produced either way, and no metric or log separated "working" from
+	// "working over a fifth of the area" -- which is why this defaults to the
+	// maximum rather than to a value that has to be reasoned about.
 	ViewDistance int32
 
 	AuthCacheDir   string
@@ -52,7 +67,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	viewDistance, err := positiveInt("MC_VIEW_DISTANCE", 4)
+	viewDistance, err := positiveInt("MC_VIEW_DISTANCE", maxTickDistance)
 	if err != nil {
 		return Config{}, err
 	}
