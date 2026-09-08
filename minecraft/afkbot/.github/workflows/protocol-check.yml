@@ -27,19 +27,19 @@ jobs:
         with:
           ref: main
 
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-go@v7
         with:
-          node-version: '24'
-          cache: npm
+          go-version-file: go.mod
+          cache: true
+
 
       # --ignore-scripts skips the native RakNet addon build; only
       # minecraft-data's version table is needed here.
-      - run: npm ci --ignore-scripts
 
       - id: check
         env:
           PRODUCTION_VERSION: ${{ inputs.production_version }}
-        run: node scripts/check-protocol.mjs "$PRODUCTION_VERSION"
+        run: go run ./cmd/protocolcheck -production-version "${{ inputs.production_version }}"
 
       # A default-token push/PR would silently never trigger ci.yml on the
       # resulting PR — GitHub suppresses workflow runs triggered by the
