@@ -4,7 +4,7 @@
 // put a credential in this bot's Docker build -- the build of the workload
 // that keeps the farm's chunks loaded. Vendoring instead costs 2177 files and
 // 24MB to share 514 lines, and turns every dependency bump into a diff nobody
-// reads. Four small, finished packages are the cheaper duplication.
+// reads. Five small, finished packages are the cheaper duplication.
 //
 // Fix bugs upstream first, then port here.
 
@@ -96,6 +96,17 @@ func (l *Logger) Debug(event string, fields Fields) {
 		return
 	}
 	l.write(l.stdout, "debug", event, fields)
+}
+
+// Warn logs a noteworthy but handled event to stdout.
+//
+// Stdout rather than stderr on purpose: a warning means the program adapted
+// to something unexpected and carried on, so routing it to stderr would put
+// it in the same stream as the failures that stop work, and inflate every
+// error-rate alert built on that stream. The level was already part of this
+// package's field shape, so existing Loki queries for it keep working.
+func (l *Logger) Warn(event string, fields Fields) {
+	l.write(l.stdout, "warn", event, fields)
 }
 
 // Error logs an error event to stderr.

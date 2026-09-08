@@ -4,7 +4,7 @@
 // put a credential in this bot's Docker build -- the build of the workload
 // that keeps the farm's chunks loaded. Vendoring instead costs 2177 files and
 // 24MB to share 514 lines, and turns every dependency bump into a diff nobody
-// reads. Four small, finished packages are the cheaper duplication.
+// reads. Five small, finished packages are the cheaper duplication.
 //
 // Fix bugs upstream first, then port here.
 

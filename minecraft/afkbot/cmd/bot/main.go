@@ -29,6 +29,7 @@ import (
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/liveness"
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/logging"
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/mcauth"
+	"github.com/jdwillmsen/minecraft-afk-bot/internal/mcproto"
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/skin"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
@@ -111,8 +112,24 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	// regenerated every connect: Bedrock skins are uploaded by the client from
 	// its own installation, and a headless client has none.
 	botSkin := skin.For(cfg.Username)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+
+	// The server upgrades itself to Mojang's latest on restart, and a point
+	// release that only bumps the protocol number still gets this client
+	// kicked before login -- which is how a whole fleet of bots goes offline
+	// over a release that changed no packets. One ping per session buys the
+	// server's own number to announce.
+	proto := mcproto.Negotiate(ctx, addr, func(ad mcproto.Advertisement) {
+		log.Warn("protocol_spoofed", logging.Fields{
+			"compiled_protocol":   minecraft.DefaultProtocol.ID(),
+			"advertised_protocol": ad.Protocol,
+			"server_version":      ad.Version,
+		})
+	})
+
 	dialer := minecraft.Dialer{
 		TokenSource: ts,
+		Protocol:    proto,
 		ClientData: login.ClientData{
 			SkinID:          botSkin.ID,
 			SkinData:        botSkin.Data,
@@ -122,7 +139,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	conn, err := dialer.DialContext(dialCtx, "raknet", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
+	conn, err := dialer.DialContext(dialCtx, "raknet", addr)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
