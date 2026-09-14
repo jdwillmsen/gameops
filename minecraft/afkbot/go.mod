@@ -38,7 +38,7 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
-	golang.org/x/image v0.21.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
