@@ -1,5 +1,7 @@
 # mc-console-bridge
 
+[![License](https://img.shields.io/badge/License-PolyForm%20NonCommercial%201.0-blue)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
+
 A sidecar for the FWB Bedrock server pod that exposes the server console over
 HTTP, behind a fixed command allowlist. It is the only component with write
 access to the console — nothing upstream of it (including any LLM) can run
