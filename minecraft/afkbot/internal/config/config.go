@@ -18,6 +18,25 @@ import (
 // verified ceiling rather than a known limit.
 const maxTickDistance = 12
 
+// Ceilings for the numeric environment variables. Each exists because the
+// value is narrowed or range-bound somewhere the narrowing cannot report a
+// problem.
+const (
+	// RequestChunkRadius carries MaxChunkRadius as a uint8, so anything above
+	// 255 wraps silently. 64 rather than 255: it leaves room to try radii well
+	// above the verified maxTickDistance, while a value big enough to ask a
+	// server for an absurd amount of chunk data is far more likely a typo than
+	// an intent.
+	maxViewDistance = 64
+
+	// A TCP/UDP port number is 16 bits.
+	maxPort = 65535
+
+	// One hour. The backoff ceiling is a wait before reconnecting, so a value
+	// past this is indistinguishable from the bot never coming back.
+	maxBackoffMs = 3_600_000
+)
+
 // Config is everything the bot needs to hold a player slot.
 type Config struct {
 	Host string
@@ -63,19 +82,19 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := positiveInt("MC_PORT", 19132)
+	port, err := positiveInt("MC_PORT", 19132, maxPort)
 	if err != nil {
 		return Config{}, err
 	}
-	viewDistance, err := positiveInt("MC_VIEW_DISTANCE", maxTickDistance)
+	viewDistance, err := positiveInt("MC_VIEW_DISTANCE", maxTickDistance, maxViewDistance)
 	if err != nil {
 		return Config{}, err
 	}
-	reconnectMin, err := positiveInt("RECONNECT_MIN_MS", 5000)
+	reconnectMin, err := positiveInt("RECONNECT_MIN_MS", 5000, maxBackoffMs)
 	if err != nil {
 		return Config{}, err
 	}
-	reconnectMax, err := positiveInt("RECONNECT_MAX_MS", 300000)
+	reconnectMax, err := positiveInt("RECONNECT_MAX_MS", 300000, maxBackoffMs)
 	if err != nil {
 		return Config{}, err
 	}
@@ -112,7 +131,13 @@ func stringDefault(name, def string) string {
 // positiveInt rejects zero and negatives rather than silently falling back.
 // A zero view distance would produce a bot that connects, looks healthy, and
 // loads nothing -- the exact silent failure this rewrite has to avoid.
-func positiveInt(name string, def int) (int, error) {
+//
+// max closes the other road to that same zero. MC_VIEW_DISTANCE=256 passed the
+// check above, was stored as int32, and reached `uint8(cfg.ViewDistance)` as 0
+// -- the refused value arriving anyway, by wrapping. Every caller here feeds
+// something narrowed or range-bound further down, so the ceiling is a required
+// argument: a bound that holds only for the default is what let this through.
+func positiveInt(name string, def, max int) (int, error) {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
 		return def, nil
@@ -123,6 +148,9 @@ func positiveInt(name string, def int) (int, error) {
 	}
 	if n <= 0 {
 		return 0, fmt.Errorf("environment variable %s must be a positive integer, got %d", name, n)
+	}
+	if n > max {
+		return 0, fmt.Errorf("environment variable %s must be at most %d, got %d", name, max, n)
 	}
 	return n, nil
 }
