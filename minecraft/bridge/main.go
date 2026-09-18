@@ -24,7 +24,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	console := NewConsole(cfg.ConsoleAddr, cfg.ConsolePassword, cfg.CommandTimeout, logger)
+	console := NewConsole(cfg.ConsoleAddr, cfg.ConsolePassword, cfg.ConsoleOrigin, cfg.CommandTimeout, logger)
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -49,7 +49,7 @@ func main() {
 		httpServer.Shutdown(shutdownCtx)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "console_addr", cfg.ConsoleAddr)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "console_addr", cfg.ConsoleAddr, "console_origin", cfg.ConsoleOrigin)
 	err = httpServer.ListenAndServe()
 	stop() // unblocks console.Run's ctx.Done() promptly if ListenAndServe returned on its own
 	wg.Wait()

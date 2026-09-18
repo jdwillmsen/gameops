@@ -72,6 +72,7 @@ type wsMessage struct {
 type Console struct {
 	addr           string
 	password       string
+	origin         string
 	commandTimeout time.Duration
 	logger         *slog.Logger
 
@@ -103,10 +104,11 @@ type Console struct {
 	Events *EventLog
 }
 
-func NewConsole(addr, password string, commandTimeout time.Duration, logger *slog.Logger) *Console {
+func NewConsole(addr, password, origin string, commandTimeout time.Duration, logger *slog.Logger) *Console {
 	return &Console{
 		addr:           addr,
 		password:       password,
+		origin:         origin,
 		commandTimeout: commandTimeout,
 		logger:         logger,
 
@@ -176,8 +178,15 @@ func (c *Console) connectAndRead(ctx context.Context) error {
 	// channel mc-server-runner reads it from. Declaring it via Subprotocols
 	// (rather than a hand-set header) also lets the dialer accept the
 	// negotiated protocol the server echoes back in its 101 response.
+	//
+	// coder/websocket sends no Origin of its own, so without this header the
+	// server sees an empty origin, which no WEBSOCKET_ALLOWED_ORIGINS entry
+	// can match: its flag parser drops blank list entries. Sending a real
+	// origin is what lets the server keep its origin check enabled; a server
+	// with the check disabled ignores the header.
 	conn, resp, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
 		Subprotocols: []string{authSubproto, c.password},
+		HTTPHeader:   http.Header{"Origin": []string{c.origin}},
 	})
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusUnauthorized {

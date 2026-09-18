@@ -53,3 +53,41 @@ func TestLoadConfig_CommandTimeoutZeroIsRejected(t *testing.T) {
 		t.Fatal("LoadConfig with COMMAND_TIMEOUT_MS=0 returned no error — a zero timeout would make every console write fail instantly")
 	}
 }
+
+func TestLoadConfig_ConsoleOriginDefault(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ConsoleOrigin != defaultConsoleOrigin {
+		t.Errorf("ConsoleOrigin = %q, want %q", cfg.ConsoleOrigin, defaultConsoleOrigin)
+	}
+}
+
+func TestLoadConfig_ConsoleOriginFromEnv(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("CONSOLE_ORIGIN", "https://console.example.test:8443")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.ConsoleOrigin != "https://console.example.test:8443" {
+		t.Errorf("ConsoleOrigin = %q, want the configured value", cfg.ConsoleOrigin)
+	}
+}
+
+func TestLoadConfig_ConsoleOriginInvalidIsAnError(t *testing.T) {
+	for _, raw := range []string{"example.test", "https://", "https://example.test/console"} {
+		t.Run(raw, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("CONSOLE_ORIGIN", raw)
+
+			if _, err := LoadConfig(); err == nil {
+				t.Fatalf("LoadConfig with CONSOLE_ORIGIN=%q returned no error — a malformed origin fails every handshake, and the reconnect loop would never say why", raw)
+			}
+		})
+	}
+}

@@ -18,7 +18,7 @@ import (
 )
 
 func testConsole() *Console {
-	return NewConsole("127.0.0.1:0", "pw", 2*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return NewConsole("127.0.0.1:0", "pw", testOrigin, 2*time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestConsoleIngestEvents_LineSplitAcrossFrames(t *testing.T) {
@@ -126,10 +126,10 @@ func TestHealthzStaysGreenWhileConsoleIsDown(t *testing.T) {
 
 // startFakeConsole runs a minimal server that speaks just enough of
 // mc-server-runner's websocket console protocol to drive Console against it.
-// handler receives the connection and the password the client offered via
-// the Sec-WebSocket-Protocol subprotocol list (there is no other channel
-// mc-server-runner reads it from), and owns the whole connection lifecycle.
-func startFakeConsole(t *testing.T, handler func(ctx context.Context, conn *websocket.Conn, password string)) (addr string, connections *atomic.Int64) {
+// handler receives the connection and the handshake request - the dial
+// carries its credentials there, in the Sec-WebSocket-Protocol subprotocol
+// list and the Origin header - and owns the whole connection lifecycle.
+func startFakeConsole(t *testing.T, handler func(ctx context.Context, conn *websocket.Conn, r *http.Request)) (addr string, connections *atomic.Int64) {
 	t.Helper()
 	var count atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +139,7 @@ func startFakeConsole(t *testing.T, handler func(ctx context.Context, conn *webs
 			return
 		}
 		defer conn.CloseNow()
-		handler(r.Context(), conn, subprotocolPassword(r))
+		handler(r.Context(), conn, r)
 	}))
 	t.Cleanup(srv.Close)
 	return strings.TrimPrefix(srv.URL, "http://"), &count
@@ -157,6 +157,10 @@ func subprotocolPassword(r *http.Request) string {
 	}
 	return strings.TrimSpace(parts[1])
 }
+
+// testOrigin is deliberately not defaultConsoleOrigin, so a test asserting
+// the configured origin cannot pass on the default leaking through.
+const testOrigin = "mc-console-bridge://test"
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -198,11 +202,11 @@ func waitConnected(t *testing.T, c *Console) {
 }
 
 func TestConsoleConnectAndRead_AuthFailureNeverEstablishes(t *testing.T) {
-	addr, attempts := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, password string) {
+	addr, attempts := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
 		writeTestMsg(t, ctx, conn, wsMessage{Type: "authFailure", Reason: "bad password"})
 	})
 
-	c := NewConsole(addr, "wrong-password", 2*time.Second, testLogger())
+	c := NewConsole(addr, "wrong-password", testOrigin, 2*time.Second, testLogger())
 
 	err := c.connectAndRead(context.Background())
 	if !errors.Is(err, ErrAuthFailure) {
@@ -219,14 +223,14 @@ func TestConsoleConnectAndRead_AuthFailureNeverEstablishes(t *testing.T) {
 func TestConsoleRun_AuthFailureDoesNotResetBackoff(t *testing.T) {
 	var mu sync.Mutex
 	var attempts []time.Time
-	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, password string) {
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
 		mu.Lock()
 		attempts = append(attempts, time.Now())
 		mu.Unlock()
 		writeTestMsg(t, ctx, conn, wsMessage{Type: "authFailure", Reason: "bad password"})
 	})
 
-	c := NewConsole(addr, "wrong-password", 2*time.Second, testLogger())
+	c := NewConsole(addr, "wrong-password", testOrigin, 2*time.Second, testLogger())
 	c.minReconnectDelay = 200 * time.Millisecond
 	c.maxReconnectDelay = 2 * time.Second
 
@@ -273,11 +277,11 @@ func TestConsoleRun_AuthFailureDoesNotResetBackoff(t *testing.T) {
 }
 
 func TestConsoleConnectAndRead_SilentPeerDoesNotHangForever(t *testing.T) {
-	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, password string) {
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
 		<-ctx.Done()
 	})
 
-	c := NewConsole(addr, "pw", 2*time.Second, testLogger())
+	c := NewConsole(addr, "pw", testOrigin, 2*time.Second, testLogger())
 	c.firstFrameTimeout = 200 * time.Millisecond
 
 	// A peer that completes the handshake and then sends nothing never
@@ -303,12 +307,12 @@ func TestConsoleConnectAndRead_SilentPeerDoesNotHangForever(t *testing.T) {
 }
 
 func TestConsoleConnectAndRead_EstablishesOnFirstRealFrame(t *testing.T) {
-	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, password string) {
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
 		writeTestMsg(t, ctx, conn, wsMessage{Type: "logHistory"})
 		<-ctx.Done()
 	})
 
-	c := NewConsole(addr, "pw", 2*time.Second, testLogger())
+	c := NewConsole(addr, "pw", testOrigin, 2*time.Second, testLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -323,7 +327,7 @@ func TestConsoleConnectAndRead_EstablishesOnFirstRealFrame(t *testing.T) {
 }
 
 func TestConsoleSendCommand_ConcurrentCallsDoNotInterleave(t *testing.T) {
-	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, password string) {
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
 		writeTestMsg(t, ctx, conn, wsMessage{Type: "logHistory"})
 		for {
 			msg, err := readTestMsg(ctx, conn)
@@ -342,7 +346,7 @@ func TestConsoleSendCommand_ConcurrentCallsDoNotInterleave(t *testing.T) {
 		}
 	})
 
-	c := NewConsole(addr, "pw", 2*time.Second, testLogger())
+	c := NewConsole(addr, "pw", testOrigin, 2*time.Second, testLogger())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go c.Run(ctx)
@@ -383,5 +387,75 @@ func TestCommandRejectsOversizedBody(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("oversized body = %d, want 400", rec.Code)
+	}
+}
+
+// dialHandshake captures the handshake request of the first dial a Console
+// makes against a fake console, then lets the connection idle until the
+// caller's context ends.
+func dialHandshake(t *testing.T, newConsole func(addr string) *Console) *http.Request {
+	t.Helper()
+	got := make(chan *http.Request, 1)
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, r *http.Request) {
+		select {
+		case got <- r:
+		default:
+		}
+		writeTestMsg(t, ctx, conn, wsMessage{Type: "logHistory"})
+		<-ctx.Done()
+	})
+	c := newConsole(addr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		c.connectAndRead(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	select {
+	case r := <-got:
+		return r
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake console saw no handshake")
+		return nil
+	}
+}
+
+func TestConsoleConnectAndRead_SendsConfiguredOrigin(t *testing.T) {
+	r := dialHandshake(t, func(addr string) *Console {
+		return NewConsole(addr, "pw", testOrigin, 2*time.Second, testLogger())
+	})
+
+	// An absent Origin is the failure this guards: mc-server-runner then
+	// compares "" against WEBSOCKET_ALLOWED_ORIGINS, which can never contain
+	// a blank entry, so every dial is refused once its origin check is on.
+	if got := r.Header.Get("Origin"); got != testOrigin {
+		t.Errorf("Origin = %q, want %q", got, testOrigin)
+	}
+	// The password still has to ride in the subprotocol list; the Origin
+	// header must not have displaced it.
+	if got := subprotocolPassword(r); got != "pw" {
+		t.Errorf("subprotocol password = %q, want %q", got, "pw")
+	}
+}
+
+func TestConsoleConnectAndRead_SendsDefaultOriginWhenUnconfigured(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	r := dialHandshake(t, func(addr string) *Console {
+		return NewConsole(addr, cfg.ConsolePassword, cfg.ConsoleOrigin, cfg.CommandTimeout, testLogger())
+	})
+
+	if got := r.Header.Get("Origin"); got != defaultConsoleOrigin {
+		t.Errorf("Origin = %q, want the default %q — this is the value an operator puts in WEBSOCKET_ALLOWED_ORIGINS", got, defaultConsoleOrigin)
 	}
 }

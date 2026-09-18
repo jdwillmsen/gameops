@@ -26,8 +26,11 @@ bridge speaks the console's real transport (`mc-server-runner`'s
 - Messages are JSON: send `{"type":"stdin","data":"<command>\n"}`; the server
   broadcasts `{"type":"stdout"|"stderr","data":"..."}` for console output and
   `{"type":"logHistory","lines":[...]}` once on connect.
-- **Origin checking is on by default and rejects every dial** unless the
-  server container turns it off — see
+- Origin checking is on by default. `mc-server-runner` compares the request's
+  `Origin` against `WEBSOCKET_ALLOWED_ORIGINS` by exact string equality, and
+  its flag parser drops blank entries from that list — so a client that sends
+  no `Origin` at all can never be allow-listed. The bridge therefore always
+  sends one (`CONSOLE_ORIGIN`); see
   [Server-side prerequisites](#server-side-prerequisites).
 - The protocol carries no request/response correlation id. The bridge
   serializes its own commands, so two concurrent `POST /command` calls cannot
@@ -79,6 +82,7 @@ genuine fault: an unreadable mount or unparseable contents.
 | `CONSOLE_PASSWORD` | yes | — | Must match the server's `WEBSOCKET_PASSWORD` |
 | `HTTP_ADDR` | no | `:8080` | Bridge's own HTTP bind address |
 | `CONSOLE_ADDR` | no | `127.0.0.1:8765` | Server's websocket console address |
+| `CONSOLE_ORIGIN` | no | `mc-console-bridge://sidecar` | `Origin` sent on the console handshake; must appear verbatim in the server's `WEBSOCKET_ALLOWED_ORIGINS` when its origin check is enabled. Must be `scheme://host[:port]` — anything else fails startup |
 | `COMMAND_TIMEOUT_MS` | no | `2000` | Bounds the console write for one `/command`, and caps the window spent collecting that command's output. The HTTP response write deadline is derived from it |
 | `DATA_DIR` | no | `/data` | Mounted server data volume (read-only) |
 
@@ -86,11 +90,19 @@ genuine fault: an unreadable mount or unparseable contents.
 
 The bridge cannot connect at all unless the **server** container — not this
 sidecar — runs `mc-server-runner` with `WEBSOCKET_CONSOLE=true`, a
-`WEBSOCKET_PASSWORD` matching the bridge's `CONSOLE_PASSWORD`, and
-`WEBSOCKET_DISABLE_ORIGIN_CHECK=true` (or `WEBSOCKET_ALLOWED_ORIGINS` covering
-the Origin this bridge sends, which by default is none). Disabling the origin
-check adds no exposure here: the console is bound to loopback (`127.0.0.1`)
-and is unreachable from outside the pod.
+`WEBSOCKET_PASSWORD` matching the bridge's `CONSOLE_PASSWORD`, and either
+
+- `WEBSOCKET_ALLOWED_ORIGINS` containing this bridge's `CONSOLE_ORIGIN`
+  verbatim (default `mc-console-bridge://sidecar`) — the preferred setting,
+  which keeps the origin check enabled; or
+- `WEBSOCKET_DISABLE_ORIGIN_CHECK=true`, which adds no exposure here because
+  the console is bound to loopback (`127.0.0.1`) and is unreachable from
+  outside the pod.
+
+The default `CONSOLE_ORIGIN` uses a scheme browsers cannot load pages from,
+so no website can mint that origin; allow-listing it leaves the check
+meaningful against Cross-Site WebSocket Hijacking in a way that
+allow-listing, say, `http://localhost` would not.
 
 Those values are owned by the deployment chart
 (`jdw-deployments/charts/minecraft-fwb`, `extraEnv`); the list above is only
