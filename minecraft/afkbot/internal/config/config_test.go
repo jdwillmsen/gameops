@@ -14,20 +14,37 @@ func setRequired(t *testing.T) {
 }
 
 // The regression this package exists to prevent. MC_VIEW_DISTANCE=256 passed
-// the old `n > 0` check, was stored as int32, and reached
-// `uint8(cfg.ViewDistance)` as 0 -- so the bot connected, reported healthy and
-// requested a chunk radius of zero. Nothing observed the failure until someone
-// noticed the mob farms had stopped.
+// the old `n > 0` check, was stored as int32, and reached the packet's uint8
+// MaxChunkRadius as 0 -- so the bot connected, reported healthy and requested a
+// chunk radius of zero. Nothing observed the failure until someone noticed the
+// mob farms had stopped.
+//
+// ViewDistance is a uint8 now, so 256 cannot be represented rather than merely
+// being refused. This test outlives that change on purpose: it pins the
+// behaviour at the boundary, not the mechanism enforcing it.
 func TestLoadRejectsViewDistanceThatWouldWrapToZero(t *testing.T) {
 	setRequired(t)
 	t.Setenv("MC_VIEW_DISTANCE", "256")
 
 	_, err := Load()
 	if err == nil {
-		t.Fatal("MC_VIEW_DISTANCE=256 was accepted; it wraps to a chunk radius of 0 at the uint8 conversion")
+		t.Fatal("MC_VIEW_DISTANCE=256 was accepted; it used to wrap to a chunk radius of 0")
 	}
 	if !strings.Contains(err.Error(), "MC_VIEW_DISTANCE") {
 		t.Fatalf("error should name the offending variable, got %q", err)
+	}
+}
+
+// 255 and 256 fail by different routes now -- 256 cannot be parsed into a
+// uint8 at all, while 255 parses and is then refused for exceeding
+// maxViewDistance. Both must fail, and a change that collapsed one into the
+// other would be invisible to a test that only tried 256.
+func TestLoadRejectsViewDistanceAboveCeilingButWithinUint8(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_VIEW_DISTANCE", "255")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("MC_VIEW_DISTANCE=255 was accepted; it is within uint8 but above the ceiling")
 	}
 }
 

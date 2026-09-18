@@ -27,7 +27,7 @@ const (
 	// above the verified maxTickDistance, while a value big enough to ask a
 	// server for an absurd amount of chunk data is far more likely a typo than
 	// an intent.
-	maxViewDistance = 64
+	maxViewDistance uint8 = 64
 
 	// A TCP/UDP port number is 16 bits.
 	maxPort = 65535
@@ -63,7 +63,13 @@ type Config struct {
 	// produced either way, and no metric or log separated "working" from
 	// "working over a fifth of the area" -- which is why this defaults to the
 	// maximum rather than to a value that has to be reasoned about.
-	ViewDistance int32
+	//
+	// uint8 because that is the width RequestChunkRadius.MaxChunkRadius uses.
+	// Holding it at the protocol's width means the packet needs no narrowing
+	// conversion, so there is no point where an out-of-range value could wrap
+	// to a radius of zero -- it cannot be represented here in the first place.
+	// ChunkRadius is int32 on the wire, and widening to it is always exact.
+	ViewDistance uint8
 
 	AuthCacheDir   string
 	ReconnectMinMs int
@@ -86,7 +92,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	viewDistance, err := positiveInt("MC_VIEW_DISTANCE", maxTickDistance, maxViewDistance)
+	viewDistance, err := positiveUint8("MC_VIEW_DISTANCE", maxTickDistance, maxViewDistance)
 	if err != nil {
 		return Config{}, err
 	}
@@ -106,7 +112,7 @@ func Load() (Config, error) {
 		Host:           host,
 		Port:           port,
 		Username:       username,
-		ViewDistance:   int32(viewDistance),
+		ViewDistance:   viewDistance,
 		AuthCacheDir:   stringDefault("AUTH_CACHE_DIR", "/data/auth"),
 		ReconnectMinMs: reconnectMin,
 		ReconnectMaxMs: reconnectMax,
@@ -128,15 +134,41 @@ func stringDefault(name, def string) string {
 	return def
 }
 
+// positiveUint8 parses a value the protocol carries as a uint8, at that width.
+//
+// ParseUint with a bitSize of 8 is the point: it refuses anything that would
+// not survive the conversion, so the narrowing below cannot lose information.
+// Checking an int and then converting cannot promise that -- MC_VIEW_DISTANCE=256
+// once passed a `> 0` check, was stored as int32, and reached
+// `uint8(cfg.ViewDistance)` as 0, leaving the bot connected and loading
+// nothing. Parsing at the destination width removes the conversion that
+// wrapped rather than guarding it from a distance.
+func positiveUint8(name string, def, max uint8) (uint8, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseUint(raw, 10, 8)
+	if err != nil {
+		return 0, fmt.Errorf("environment variable %s must be an integer in 1..%d, got %q", name, max, raw)
+	}
+	v := uint8(n) // exact: ParseUint with bitSize 8 cannot return more than 255
+	if v == 0 {
+		return 0, fmt.Errorf("environment variable %s must be a positive integer, got %d", name, v)
+	}
+	if v > max {
+		return 0, fmt.Errorf("environment variable %s must be at most %d, got %d", name, max, v)
+	}
+	return v, nil
+}
+
 // positiveInt rejects zero and negatives rather than silently falling back.
 // A zero view distance would produce a bot that connects, looks healthy, and
 // loads nothing -- the exact silent failure this rewrite has to avoid.
 //
-// max closes the other road to that same zero. MC_VIEW_DISTANCE=256 passed the
-// check above, was stored as int32, and reached `uint8(cfg.ViewDistance)` as 0
-// -- the refused value arriving anyway, by wrapping. Every caller here feeds
-// something narrowed or range-bound further down, so the ceiling is a required
-// argument: a bound that holds only for the default is what let this through.
+// max is a required argument for the same reason positiveUint8 exists: every
+// caller feeds something range-bound further down, and a bound that holds only
+// for the default is what let the view-distance wrap through.
 func positiveInt(name string, def, max int) (int, error) {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {

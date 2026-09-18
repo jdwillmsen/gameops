@@ -159,8 +159,8 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	// loads nothing is indistinguishable from a healthy one until someone
 	// notices the farm has stopped.
 	if err := conn.WritePacket(&packet.RequestChunkRadius{
-		ChunkRadius:    cfg.ViewDistance,
-		MaxChunkRadius: uint8(cfg.ViewDistance),
+		ChunkRadius:    int32(cfg.ViewDistance),
+		MaxChunkRadius: cfg.ViewDistance,
 	}); err != nil {
 		return fmt.Errorf("request chunk radius: %w", err)
 	}
@@ -190,8 +190,8 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 				// player is replaced, so it is asked for again rather than
 				// assumed to have survived.
 				if err := conn.WritePacket(&packet.RequestChunkRadius{
-					ChunkRadius:    cfg.ViewDistance,
-					MaxChunkRadius: uint8(cfg.ViewDistance),
+					ChunkRadius:    int32(cfg.ViewDistance),
+					MaxChunkRadius: cfg.ViewDistance,
 				}); err != nil {
 					return fmt.Errorf("request chunk radius after respawn: %w", err)
 				}
