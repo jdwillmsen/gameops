@@ -35,7 +35,10 @@
   "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
-      "description": "Batch all non-major updates into a single weekly PR per repo to keep noise reviewable",
+      "description": [
+        "Batch all non-major updates into a single weekly PR per repo to keep noise reviewable",
+        "Automerged. Merging here neither releases nor deploys: release.yml fires on a v* tag rather than on push, and this image is enabled:false in jdw-deployments' Renovate config, so the tag the cluster runs only ever moves by hand. A merged update changes the default branch and nothing else -- which is what makes automerge safe here and not in jdw-deployments. The required checks still gate it, and majors are not in this group."
+      ],
       "groupName": "all non-major dependencies",
       "groupSlug": "all-minor-patch",
       "matchUpdateTypes": [
@@ -43,7 +46,8 @@
         "patch",
         "pin",
         "digest"
-      ]
+      ],
+      "automerge": true
     },
     {
       "description": [
@@ -59,7 +63,8 @@
     {
       "description": [
         "bedrock-protocol tracks the Minecraft wire protocol, and this image bakes in the protocol data for exactly one Bedrock version.",
-        "An upgrade can therefore change which server versions the bot can reach at all, so it is reviewed on its own rather than inside the weekly batch, and not gated to the weekly window \u2014 the protocol-drift pipeline needs upstream support in the lockfile as soon as it ships."
+        "An upgrade can therefore change which server versions the bot can reach at all, so it is reviewed on its own rather than inside the weekly batch, and not gated to the weekly window \u2014 the protocol-drift pipeline needs upstream support in the lockfile as soon as it ships.",
+        "Never automerged, for the same reason it is ungrouped: an upgrade can change which server versions the bot can reach at all."
       ],
       "matchPackageNames": [
         "bedrock-protocol"
@@ -67,7 +72,9 @@
       "groupName": null,
       "schedule": [
         "at any time"
-      ]
+      ],
+      "automerge": false
     }
-  ]
+  ],
+  "platformAutomerge": true
 }
