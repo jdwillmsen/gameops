@@ -1,9 +1,8 @@
 // Package config reads the bot's settings from the environment.
 //
-// Deliberately smaller than the TypeScript configuration it replaces. Chat
-// answering moved to minecraft-server-agent on 2026-09-08, so MC_ANSWER_* and
-// MC_LLM_* are gone rather than carried across dead: porting configuration for
-// a feature this program no longer has would be the first thing to rot.
+// It covers presence and nothing else. Configuration for a feature this
+// program does not have would be the first thing to rot, so settings that
+// moved to minecraft-server-agent were dropped rather than carried across.
 package config
 
 import (
@@ -49,20 +48,12 @@ type Config struct {
 
 	// ViewDistance is the chunk radius the bot asks for.
 	//
-	// This defaulted to 4, on the reasoning that the server's own tick-distance
-	// governs what simulates around a player, so a bot holding a farm loaded
-	// needs to be present rather than to see far.
-	//
-	// Measured on the live server on 2026-09-08, that is wrong. Requesting 4
-	// was granted 5, and requesting 12 was granted 12: the server honours what
-	// the client asks for rather than extending to tick-distance. A bot asking
-	// for 4 holds five chunks and nothing further out ticks, so the farm it
-	// exists to keep running was covered about a fifth of the way.
-	//
-	// Nothing observable distinguished the two cases beforehand -- the farm
-	// produced either way, and no metric or log separated "working" from
-	// "working over a fifth of the area" -- which is why this defaults to the
-	// maximum rather than to a value that has to be reasoned about.
+	// The server grants what the client asks for rather than extending the
+	// request to its own tick-distance, so this decides how much world the bot
+	// actually holds. Nothing observable distinguishes a radius that covers the
+	// farm from one that covers a fifth of it -- the farm produces either way --
+	// which is why it defaults to the maximum rather than to a value that has
+	// to be reasoned about (docs/decisions.md).
 	//
 	// uint8 because that is the width RequestChunkRadius.MaxChunkRadius uses.
 	// Holding it at the protocol's width means the packet needs no narrowing

@@ -1,10 +1,10 @@
 // Copied from github.com/jdwillmsen/minecraft-server-agent/pkg/skin.
 //
-// Copied rather than imported: that module is private, so importing it would
-// put a credential in this bot's Docker build -- the build of the workload
-// that keeps the farm's chunks loaded. Vendoring instead costs 2177 files and
-// 24MB to share 514 lines, and turns every dependency bump into a diff nobody
-// reads. Five small, finished packages are the cheaper duplication.
+// Copied rather than imported so the workload the farms depend on does not
+// ride the agent's release cadence -- it should never need a new agent release
+// to ship, nor inherit a regression from one. Vendoring instead costs 2177
+// files and 24MB to share 514 lines, and turns every dependency bump into a
+// diff nobody reads. Five small, finished packages are the cheaper duplication.
 //
 // Fix bugs upstream first, then port here.
 

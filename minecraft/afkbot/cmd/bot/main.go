@@ -2,16 +2,8 @@
 // stay loaded.
 //
 // That is the whole job. It does not answer chat, run commands or persist
-// anything: minecraft-server-agent does those, and this program was
-// deliberately stripped back to presence on 2026-09-08 so the two do not
-// overlap.
-//
-// Rewritten from TypeScript in Go for two reasons. The measured one: the Node
-// implementation used roughly eight times the CPU and memory of the Go agent
-// while doing considerably less -- 48-56m CPU and 92-97Mi against 6m and 12Mi.
-// The structural one: respawn-on-death, device-code auth, structured logging
-// and a generated skin already exist in the agent's pkg/, and writing them a
-// second time in another language guarantees the second copy rots.
+// anything: minecraft-server-agent does those, and keeping this program to
+// presence alone is what stops the two overlapping (docs/decisions.md).
 package main
 
 import (

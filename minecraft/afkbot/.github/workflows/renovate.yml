@@ -1,10 +1,9 @@
 name: Renovate
 
-# renovate.json existed since the repo's first commit, but nothing ever
-# executed it — no GitHub App installation, no workflow. Dead config: not a
-# single Renovate PR was ever opened, so a bedrock-protocol release would
-# have sat unnoticed until a human bumped the lockfile by hand, and the
-# protocol-check workflow tests against the lockfile.
+# Renovate runs from this workflow rather than the hosted GitHub App: the
+# App is not installed on this account, and without a runner renovate.json is
+# config nothing executes. A gophertunnel release would then sit unnoticed
+# until someone bumped the module by hand.
 on:
   schedule:
     - cron: '0 */3 * * *'

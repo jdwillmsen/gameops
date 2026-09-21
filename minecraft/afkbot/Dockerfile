@@ -2,10 +2,9 @@ FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c062
 WORKDIR /src
 
 COPY go.mod go.sum ./
-# No credentials needed here, deliberately. The four packages shared with
-# minecraft-server-agent are copied into internal/ rather than imported: that
-# module is private, so importing it would put a token in this build -- the
-# build of the workload that keeps the farm's chunks loaded.
+# No credential is needed here, deliberately. The packages shared with
+# minecraft-server-agent are copies under internal/ rather than imports, so
+# nothing this build fetches is tied to that module (docs/decisions.md).
 RUN go mod download
 
 COPY . .

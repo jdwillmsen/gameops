@@ -51,9 +51,8 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
 
-      # linux/amd64 only: every node in the target cluster is amd64, and the
-      # native RakNet addon is compiled from source, so an arm64 variant would
-      # roughly double build time for an image nothing would pull.
+      # linux/amd64 only: every node in the target cluster is amd64, so an
+      # arm64 variant would add build time for an image nothing would pull.
       - uses: docker/build-push-action@v7.3.0
         with:
           context: .

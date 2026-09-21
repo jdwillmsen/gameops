@@ -1,10 +1,9 @@
 // Command protocolcheck reports whether the version gophertunnel speaks still
 // matches the production server's.
 //
-// The Go replacement for scripts/check-protocol.mjs, which asked the same
-// question of bedrock-protocol. The check itself is not optional: the server
-// runs Mojang's LATEST and upgrades itself on restart, so the version it
-// speaks moves without anyone deciding it should. If gophertunnel falls
+// The check is not optional: the server runs Mojang's LATEST and upgrades
+// itself on restart, so the version it speaks moves without anyone deciding
+// it should. If gophertunnel falls
 // behind, every bot fails to connect at once, and the first symptom is an
 // empty server.
 //

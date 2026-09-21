@@ -1,10 +1,10 @@
 // Copied from github.com/jdwillmsen/minecraft-server-agent/pkg/mcproto.
 //
-// Copied rather than imported: that module is private, so importing it would
-// put a credential in this bot's Docker build -- the build of the workload
-// that keeps the farm's chunks loaded. Vendoring instead costs 2177 files and
-// 24MB to share 514 lines, and turns every dependency bump into a diff nobody
-// reads. Five small, finished packages are the cheaper duplication.
+// Copied rather than imported so the workload the farms depend on does not
+// ride the agent's release cadence -- it should never need a new agent release
+// to ship, nor inherit a regression from one. Vendoring instead costs 2177
+// files and 24MB to share 514 lines, and turns every dependency bump into a
+// diff nobody reads. Five small, finished packages are the cheaper duplication.
 //
 // Fix bugs upstream first, then port here.
 
@@ -12,21 +12,17 @@
 // releases that bump the protocol number without changing the packet schema.
 //
 // The server hard-kicks any client announcing an older protocol number --
-// play_status: failed_client, before login even starts -- so a release like
-// 1.26.40 to 1.26.45, shipped as "various bug fixes" with no packet changes,
-// takes every bot offline at once anyway. That has happened: 1.26.45 arrived
-// as protocol 2169 over unchanged packets and disconnected the whole fleet
-// until the client library caught up days later.
+// play_status: failed_client, before login even starts -- so a point release
+// shipped as "various bug fixes" with no packet changes still takes every bot
+// offline at once.
 //
-// The fix is to ping the server before dialling and announce whatever number
-// it advertises, while still speaking the schema this binary was built
-// against. On a release that really does change the schema this trades a
-// clean pre-login kick for a parse failure mid-join -- the same reconnect
-// loop either way, and the spoof is logged by name so the cause is visible.
+// So this pings the server before dialling and announces whatever number it
+// advertises, while still speaking the schema this binary was built against.
+// On a release that really does change the schema this trades a clean
+// pre-login kick for a parse failure mid-join -- the same reconnect loop
+// either way, and the substitution is logged by name so the cause is visible.
 //
-// The TypeScript AFK bot this fleet is migrating away from did exactly this
-// (its src/protocol.ts); the Go clients did not, which made a protocol bump a
-// fleet-wide outage waiting to happen rather than a bad afternoon.
+// docs/protocol-drift.md records the releases this has been needed for.
 package mcproto
 
 import (
