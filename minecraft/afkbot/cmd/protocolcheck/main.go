@@ -3,9 +3,8 @@
 //
 // The check is not optional: the server runs Mojang's LATEST and upgrades
 // itself on restart, so the version it speaks moves without anyone deciding
-// it should. If gophertunnel falls
-// behind, every bot fails to connect at once, and the first symptom is an
-// empty server.
+// it should. If gophertunnel falls behind, every bot fails to connect at
+// once, and the first symptom is an empty server.
 //
 // Dispatched hourly by the jdw-deployments version-check CronJob, which is the
 // only thing with a network path to the LAN-only server.
