@@ -1,38 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
-    "Renovate is the single owner of dependency updates for this repo; keep repository-level (UI) Dependabot disabled.",
-    "Covers: Go modules (go.mod + go.sum), GitHub Actions pins, and the digest-pinned build and runtime base images in the Dockerfile.",
-    "The org preset (github>jdwlabs/.github) is inlined below rather than extended: this repo's Renovate runs on the fine-grained RELEASE_PR_TOKEN, which is scoped to this jdwillmsen repo and cannot fetch a preset from the jdwlabs org — the first real run failed with config-presets-invalid on exactly that. jdw-deployments' own config avoids the org preset the same way."
+    "Renovate runs as the GitHub App on this account, not as a self-hosted workflow. That is what makes its commits signed: an App installation token creates them through the API and GitHub signs them with its web-flow key, which verify-pr-signatures requires. A PAT gets attribution but no signature.",
+    "This file used to restate the shared jdwlabs preset key for key -- same schedule, limits, labels and vulnerability handling -- which is the drift a preset exists to prevent. It extends it now, and keeps only what is true of this repository: the Bedrock protocol library and the Go toolchain both need a human."
   ],
   "extends": [
-    "config:recommended",
-    ":semanticCommits",
-    ":semanticCommitTypeAll(chore)"
+    "github>jdwlabs/.github"
   ],
-  "labels": [
-    "dependencies"
-  ],
-  "schedule": [
-    "before 8am on saturday"
-  ],
-  "prHourlyLimit": 0,
-  "prConcurrentLimit": 10,
-  "rebaseWhen": "behind-base-branch",
-  "dependencyDashboard": true,
-  "configMigration": true,
-  "vulnerabilityAlerts": {
-    "enabled": true,
-    "schedule": [
-      "at any time"
-    ],
-    "prCreation": "immediate",
-    "labels": [
-      "dependencies",
-      "security"
-    ]
-  },
-  "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
       "description": [
