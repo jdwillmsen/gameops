@@ -41,20 +41,47 @@ func vendoredVersion() string {
 	return ""
 }
 
-// emit appends a key=value pair to the GitHub step output file when running
+// emit appends key=value pairs to the GitHub step output file when running
 // under Actions, so callers can branch on the result without re-deriving it.
-func emit(pairs map[string]string) {
+//
+// Every failure is returned rather than swallowed, for the same reason the
+// mismatch path below exits 1: this runs unattended, and the workflow decides
+// what to do next by reading this file. A write that fails silently leaves the
+// next step reading an empty string for `status` and `changed`, which is not
+// "no change" -- it is no answer, and it looks exactly like one.
+//
+// Close is called explicitly rather than deferred: a buffered write can fail
+// at close and nowhere else, which is the case the deferred form drops.
+func emit(pairs map[string]string) error {
 	path := os.Getenv("GITHUB_OUTPUT")
 	if path == "" {
-		return
+		return nil
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
-		return
+		return fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
 	for k, v := range pairs {
-		fmt.Fprintf(f, "%s=%s\n", k, v)
+		if _, err := fmt.Fprintf(f, "%s=%s\n", k, v); err != nil {
+			f.Close()
+			return fmt.Errorf("write %s to %s: %w", k, path, err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", path, err)
+	}
+	return nil
+}
+
+// emitOrDie reports an unwritable step output as a failure of the run.
+//
+// Exit 2, the same code as a usage error, because that is what this is: the
+// check could not tell anyone its answer, which is a different thing from a
+// protocol mismatch and must not be mistaken for one.
+func emitOrDie(pairs map[string]string) {
+	if err := emit(pairs); err != nil {
+		fmt.Fprintf(os.Stderr, "protocolcheck: cannot report the result: %v\n", err)
+		os.Exit(2)
 	}
 }
 
@@ -103,7 +130,7 @@ func main() {
 
 	if result == statusMatch {
 		fmt.Println("protocolcheck: gophertunnel matches production")
-		emit(map[string]string{
+		emitOrDie(map[string]string{
 			"status":             string(statusMatch),
 			"changed":            "false",
 			"library_version":    protocol.CurrentVersion,
@@ -117,7 +144,7 @@ func main() {
 	// way to tell "different string, same protocol" apart from a real gap
 	// without a network call this check cannot make.
 
-	emit(map[string]string{
+	emitOrDie(map[string]string{
 		"status":             string(result),
 		"changed":            "true",
 		"library_version":    protocol.CurrentVersion,
