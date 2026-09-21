@@ -50,9 +50,10 @@ func vendoredVersion() string {
 // next step reading an empty string for `status` and `changed`, which is not
 // "no change" -- it is no answer, and it looks exactly like one.
 //
-// Close is called explicitly rather than deferred: a buffered write can fail
-// at close and nowhere else, which is the case the deferred form drops.
-func emit(pairs map[string]string) error {
+// The close is deferred into a closure that checks its error, not the bare
+// `defer f.Close()` this started as. A buffered write can fail at close and
+// nowhere else, so dropping that error loses the only report of it.
+func emit(pairs map[string]string) (err error) {
 	path := os.Getenv("GITHUB_OUTPUT")
 	if path == "" {
 		return nil
@@ -61,14 +62,22 @@ func emit(pairs map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
-	for k, v := range pairs {
-		if _, err := fmt.Fprintf(f, "%s=%s\n", k, v); err != nil {
-			f.Close()
-			return fmt.Errorf("write %s to %s: %w", k, path, err)
+	// Deferred, but not the bare `defer f.Close()` this function had before:
+	// that form drops the error, and a buffered write can fail at close and
+	// nowhere else. The named return is what lets a close failure become the
+	// result when the writes themselves succeeded.
+	//
+	// A write error wins over a close error. Both describe the same broken
+	// output file, and the write is the one that says which key was lost.
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close %s: %w", path, cerr)
 		}
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", path, err)
+	}()
+	for k, v := range pairs {
+		if _, werr := fmt.Fprintf(f, "%s=%s\n", k, v); werr != nil {
+			return fmt.Errorf("write %s to %s: %w", k, path, werr)
+		}
 	}
 	return nil
 }
