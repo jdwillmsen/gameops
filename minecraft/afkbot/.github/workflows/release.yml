@@ -30,9 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.value }}
+      revision: ${{ steps.revision.outputs.value }}
     steps:
-      - uses: actions/checkout@v7.0.1
-
       - uses: docker/setup-buildx-action@v4.2.0
 
       - uses: docker/login-action@v4.6.0
@@ -59,6 +58,17 @@ jobs:
           fi
           echo "value=$version" >> "$GITHUB_OUTPUT"
 
+      # A manual dispatch runs on the dispatching branch, so building its
+      # checkout would publish branch code under a release version. Checking
+      # out the tag makes a re-publish rebuild exactly what was released, and
+      # fails when no such tag exists.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/v${{ steps.version.outputs.value }}
+
+      - id: revision
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       # latest=false is explicit so no future tag rule can let metadata-action
       # add its automatic `latest` and break the rule above.
       # url, source and created keep their defaults (the repository URL and
@@ -73,17 +83,17 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ steps.version.outputs.value }}
-            type=sha,format=long
+            type=raw,value=sha-${{ steps.revision.outputs.value }}
           labels: |
             ${{ env.IMAGE_METADATA }}
             org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
           annotations: |
             ${{ env.IMAGE_METADATA }}
             org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
 
       # linux/amd64 only: every node in the target cluster is amd64, so an
       # arm64 variant would add build time for an image nothing would pull.
@@ -138,13 +148,16 @@ jobs:
           SOURCE: ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:${{ needs.publish.outputs.version }}
           TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/minecraft-afk-bot
           VERSION: ${{ needs.publish.outputs.version }}
+          REVISION: ${{ needs.publish.outputs.revision }}
         run: |
           docker buildx imagetools create \
             --tag "$TARGET:$VERSION" \
-            --tag "$TARGET:sha-$GITHUB_SHA" \
+            --tag "$TARGET:sha-$REVISION" \
             "$SOURCE"
 
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/v${{ needs.publish.outputs.version }}
 
       # Updating the repository overview needs a Docker Hub PAT with Read,
       # Write, Delete scope — more than the image push above requires — so a
