@@ -87,6 +87,31 @@ upstream changes reach it only when they fix token handling both share.
 
 [copies]: docs/decisions.md#shared-packages-are-copied-not-imported
 
+## Publishing
+
+Pushing a `v*` tag runs [`release.yml`](.github/workflows/release.yml): a tag
+of `v0.3.0` publishes `0.3.0` and `sha-<commit>`, never `latest`. The image is
+built once, pushed to `ghcr.io/jdwillmsen/minecraft-afk-bot`, then copied
+registry-to-registry to `docker.io/jdwillmsen/minecraft-afk-bot`, so both tags
+have identical digests. The cluster pulls from GHCR; Docker Hub is a public
+mirror, and a failure there never blocks the GHCR publish.
+
+Each image carries OCI labels and annotations, a max-mode provenance
+attestation and an SBOM:
+
+```bash
+docker buildx imagetools inspect ghcr.io/jdwillmsen/minecraft-afk-bot:<version> --format '{{ json .Provenance }}'
+docker buildx imagetools inspect ghcr.io/jdwillmsen/minecraft-afk-bot:<version> --format '{{ json .SBOM }}'
+```
+
+The Docker Hub copy is skipped until two one-time settings exist: a
+`DOCKERHUB_USERNAME` repository variable (`jdwillmsen`) and a `DOCKERHUB_TOKEN`
+secret holding a Docker Hub personal access token with Read, Write, Delete
+scope — the last is what lets the job update the Hub overview from
+[`README.docker.md`](README.docker.md). A human sets the token with
+`gh secret set DOCKERHUB_TOKEN` in a terminal outside any agent session, so it
+never lands in a transcript.
+
 ## Documentation
 
 - [docs/operations.md](docs/operations.md) — first run, allowlist, auth cache
