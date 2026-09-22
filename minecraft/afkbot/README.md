@@ -82,7 +82,8 @@ The image is distroless and runs as nonroot, so there is no shell in it —
 `internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcproto`
 and `internal/skin` are copies of packages from [`minecraft-server-agent`][agent]'s
 `pkg/`, each carrying a header saying so. **Fix bugs upstream first, then port
-them here** ([why copied][copies]).
+them here** ([why copied][copies]). `mcauth` is the exception: it is a fork, and
+upstream changes reach it only when they fix token handling both share.
 
 [copies]: docs/decisions.md#shared-packages-are-copied-not-imported
 

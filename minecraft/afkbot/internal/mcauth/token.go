@@ -1,12 +1,10 @@
-// Copied from github.com/jdwillmsen/minecraft-server-agent/pkg/mcauth.
+// Forked from github.com/jdwillmsen/minecraft-server-agent/pkg/mcauth.
 //
-// Copied rather than imported so the workload the farms depend on does not
-// ride the agent's release cadence -- it should never need a new agent release
-// to ship, nor inherit a regression from one. Vendoring instead costs 2177
-// files and 24MB to share 514 lines, and turns every dependency bump into a
-// diff nobody reads. Five small, finished packages are the cheaper duplication.
-//
-// Fix bugs upstream first, then port here.
+// Upstream has since moved the token cache behind a Store so its warm standby
+// can read it. This bot runs one process per account and has no standby, so it
+// keeps the file cache. Upstream changes are not ported by default; a fix to
+// the token handling both share still is, adapted to this version.
+// docs/decisions.md has the full reasoning.
 
 // Package mcauth handles Xbox Live device-code authentication and caches
 // the resulting token to disk so the agent doesn't need an interactive
