@@ -176,9 +176,11 @@ func saveToken(path string, tok *oauth2.Token) error {
 		return err
 	}
 	tmpName := tmp.Name()
+	// Cleanup only: after a successful rename the file is already closed and
+	// gone, so both errors are expected and carry nothing to act on.
 	defer func() {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 	}()
 
 	if err := tmp.Chmod(tokenFileMode); err != nil {

@@ -77,10 +77,11 @@ func (l *Logger) write(w io.Writer, level, event string, fields Fields) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if err != nil {
-		fmt.Fprintf(l.stderr, "{\"level\":\"error\",\"event\":\"log_marshal_failed\",\"error\":%q}\n", err.Error())
+		// A logger has nowhere left to report its own failed write.
+		_, _ = fmt.Fprintf(l.stderr, "{\"level\":\"error\",\"event\":\"log_marshal_failed\",\"error\":%q}\n", err.Error())
 		return
 	}
-	fmt.Fprintln(w, string(enc))
+	_, _ = fmt.Fprintln(w, string(enc))
 }
 
 // Info logs an informational event to stdout.
