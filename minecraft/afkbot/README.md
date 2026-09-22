@@ -89,8 +89,17 @@ upstream changes reach it only when they fix token handling both share.
 
 ## Publishing
 
-Pushing a `v*` tag runs [`release.yml`](.github/workflows/release.yml): a tag
-of `v0.3.0` publishes `0.3.0` and `sha-<commit>`, never `latest`. The image is
+Releases are cut by
+[`semantic-release.yml`](.github/workflows/semantic-release.yml), not by hand.
+After CI passes on a push to `main`, it reads the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last
+tag: `feat` cuts a minor version; `fix`, `perf` and `chore(deps)` a patch (so
+dependency security fixes ship); `ci`, `docs`, `test` and other `chore`
+commits cut nothing. A breaking change cuts a major. When it cuts a version it
+tags `v<version>`, writes the GitHub release, and runs
+[`release.yml`](.github/workflows/release.yml); pushing a `v*` tag by hand
+still runs `release.yml` directly. A tag of `v0.3.0` publishes `0.3.0` and
+`sha-<commit>`, never `latest`. The image is
 built once, pushed to `ghcr.io/jdwillmsen/minecraft-afk-bot`, then copied
 registry-to-registry to `docker.io/jdwillmsen/minecraft-afk-bot`, so both tags
 have identical digests. The cluster pulls from GHCR; Docker Hub is a public
