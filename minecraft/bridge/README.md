@@ -135,17 +135,40 @@ base, so the sidecar image carries no shell. CI runs these same checks
 ## Releases
 
 Pushing a `v<version>` tag runs CI against that tag and then publishes a
-`linux/amd64` image to GHCR:
+`linux/amd64` image to GHCR, then mirrors it to Docker Hub:
 
 ```
 ghcr.io/<owner>/mc-console-bridge:<version>
 ghcr.io/<owner>/mc-console-bridge:sha-<commit>
+docker.io/<username>/mc-console-bridge:<version>
+docker.io/<username>/mc-console-bridge:sha-<commit>
 ```
 
-When the repository defines a `DOCKERHUB_USERNAME` variable and a
-`DOCKERHUB_TOKEN` secret, the same tags are also pushed to Docker Hub as a
-redundant copy (`docker.io/<username>/mc-console-bridge`); deployments keep
-pulling from GHCR.
+The Docker Hub tags are copied registry-to-registry from GHCR, not rebuilt,
+so both registries serve identical digests. Deployments (the Helm chart and
+the cluster) keep pulling from GHCR; Docker Hub is a redundant copy, and its
+mirror job runs after the GHCR publish so a Docker Hub failure never blocks
+it. The same job pushes `README.docker.md` as the Docker Hub Overview.
+
+Each image carries OCI labels and index annotations (title, description,
+source, license, version, revision) plus provenance (`mode=max`) and SBOM
+attestations. Inspect them with:
+
+```sh
+docker buildx imagetools inspect ghcr.io/<owner>/mc-console-bridge:<version> --format '{{ json .Provenance }}'
+docker buildx imagetools inspect ghcr.io/<owner>/mc-console-bridge:<version> --format '{{ json .SBOM }}'
+```
+
+The Docker Hub mirror is skipped until a human does a one-time setup: a
+`DOCKERHUB_USERNAME` repository variable (`jdwillmsen`) and a
+`DOCKERHUB_TOKEN` secret holding a Docker Hub personal access token with
+Read, Write, Delete scope (the Overview update needs Delete). Set the token
+from a terminal outside any agent session so it never lands in a transcript:
+
+```sh
+gh variable set DOCKERHUB_USERNAME --body jdwillmsen
+gh secret set DOCKERHUB_TOKEN   # paste the token at the prompt
+```
 
 `latest` is never published. This sidecar has write access to the server
 console, so a moving tag would let a later push silently replace what a
@@ -154,7 +177,7 @@ version tag instead.
 
 `<version>` is the tag without its leading `v`, and must be a semantic
 version; the workflow refuses anything else, so a moving name like `latest`
-or a branch name cannot reach the registry.
+or a branch name cannot reach either registry.
 `.github/workflows/release.yml` can also be dispatched manually with a
 version whose `v<version>` tag already exists, which re-publishes from that
 tag — never from a branch.
