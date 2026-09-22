@@ -134,7 +134,17 @@ base, so the sidecar image carries no shell. CI runs these same checks
 
 ## Releases
 
-Pushing a `v<version>` tag runs CI against that tag and then publishes a
+Releases are cut by
+[`semantic-release.yml`](.github/workflows/semantic-release.yml), not by hand.
+After CI passes on a push to `main`, it reads the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last
+tag: `feat` cuts a minor version; `fix`, `perf` and `chore(deps)` a patch (so
+dependency security fixes ship); `ci`, `docs`, `test` and other `chore`
+commits cut nothing. A breaking change cuts a major. When it cuts a version it
+tags `v<version>` and writes the GitHub release, then hands the version to
+`release.yml`. Pushing a `v<version>` tag by hand still works too.
+
+Either way, `release.yml` runs CI against that tag and then publishes a
 `linux/amd64` image to GHCR, then mirrors it to Docker Hub:
 
 ```
