@@ -47,11 +47,29 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      version: ${{ needs.version.outputs.value }}
+      sha-tag: sha-${{ steps.revision.outputs.value }}
+      ref: ${{ needs.version.outputs.ref }}
+    # metadata-action feeds custom values into labels and annotations
+    # separately, so the shared set lives here once. GitHub does not recognise
+    # the PolyForm license, and a repo without a detected license would
+    # otherwise publish an empty licenses value.
+    env:
+      IMAGE_METADATA: |
+        org.opencontainers.image.title=mc-console-bridge
+        org.opencontainers.image.description=Sidecar exposing the Bedrock server console over HTTP behind a command allowlist
+        org.opencontainers.image.vendor=jdwillmsen
+        org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+        org.opencontainers.image.documentation=https://github.com/jdwillmsen/mc-console-bridge#readme
+        org.opencontainers.image.version=${{ needs.version.outputs.value }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ needs.version.outputs.ref }}
 
+      # A manual dispatch runs with github.sha of the dispatching branch, so the
+      # revision is read from the checked-out tag instead.
       - id: revision
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -63,27 +81,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Docker Hub is a redundant copy; the cluster keeps pulling from ghcr.io.
-      # Publishing there is gated on the DOCKERHUB_USERNAME variable (set by a
-      # human together with the DOCKERHUB_TOKEN secret) so an unprovisioned
-      # Docker Hub account never blocks the ghcr.io publish.
-      - if: vars.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v4.6.0
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
+      # Index-level annotations are what GHCR renders as the package
+      # description and source link; labels alone never reach it.
       - id: meta
         uses: docker/metadata-action@v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
-          images: |
-            ghcr.io/${{ github.repository_owner }}/mc-console-bridge
-            name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/mc-console-bridge,enable=${{ vars.DOCKERHUB_USERNAME != '' }}
+          images: ghcr.io/${{ github.repository_owner }}/mc-console-bridge
           tags: |
             type=raw,value=${{ needs.version.outputs.value }}
             type=raw,value=sha-${{ steps.revision.outputs.value }}
           labels: |
-            org.opencontainers.image.version=${{ needs.version.outputs.value }}
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+          annotations: |
+            ${{ env.IMAGE_METADATA }}
             org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
 
       - uses: docker/build-push-action@v7.3.0
@@ -93,6 +106,65 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
+          sbom: true
+
+  # Docker Hub is a redundant copy; the cluster keeps pulling from ghcr.io.
+  # It runs as its own job after the ghcr.io push so a missing credential, a
+  # revoked token, or a Docker Hub outage fails loudly here without ever
+  # blocking the primary publish. It is skipped until a human sets the
+  # DOCKERHUB_USERNAME repo variable and DOCKERHUB_TOKEN secret, because CI
+  # must not mint that credential itself. The username is a variable, not a
+  # secret, because it is part of the image reference and a masked value
+  # would redact the ref from every log line.
+  mirror-dockerhub:
+    needs: publish
+    if: vars.DOCKERHUB_USERNAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # With a single source and no --annotation or --platform flags,
+      # imagetools pushes the source index bytes unchanged, so the Docker Hub
+      # digest matches ghcr.io and keeps the index annotations and the
+      # provenance and SBOM attestation manifests. Adding --annotation would
+      # rewrite the index and break that digest match.
+      - env:
+          SOURCE: ghcr.io/${{ github.repository_owner }}/mc-console-bridge:${{ needs.publish.outputs.version }}
+          TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/mc-console-bridge
+          VERSION: ${{ needs.publish.outputs.version }}
+          SHA_TAG: ${{ needs.publish.outputs.sha-tag }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$TARGET:$VERSION" \
+            --tag "$TARGET:$SHA_TAG" \
+            "$SOURCE"
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.publish.outputs.ref }}
+
+      # Updating the Overview needs a Docker Hub PAT with Read, Write, Delete
+      # scope; a Read & Write token pushes the image but is refused here.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/mc-console-bridge
+          short-description: Sidecar exposing the Bedrock server console over HTTP behind a command allowlist
+          readme-filepath: ./README.docker.md
