@@ -6,16 +6,30 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Image tag to publish
+        description: Version to publish, with or without a leading v
         required: true
 
 permissions:
   contents: read
   packages: write
 
+env:
+  # Shared by the OCI description label and the Docker Hub short description,
+  # which Docker Hub caps at 100 characters.
+  IMAGE_DESCRIPTION: Headless Minecraft Bedrock client that holds a player slot so mob farms keep ticking
+  # metadata-action copies custom `labels` into neither manifest nor index
+  # annotations, so this one set feeds both inputs to keep them from drifting.
+  IMAGE_METADATA: |
+    org.opencontainers.image.title=minecraft-afk-bot
+    org.opencontainers.image.vendor=jdwillmsen
+    org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+    org.opencontainers.image.documentation=https://github.com/jdwillmsen/minecraft-afk-bot#readme
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -30,26 +44,46 @@ jobs:
       # The tag drives the image tag. A git tag of v0.1.0 publishes 0.1.0 —
       # never `latest`, because the chart pins a tag and a moving one would
       # reintroduce exactly the silent-upgrade hazard the server version pin
-      # exists to prevent.
+      # exists to prevent. The dispatch input arrives through env rather than
+      # being expanded into the script, so its text is data and never shell,
+      # and the pattern keeps it to characters a registry tag accepts.
       - id: version
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          if [ -n "${{ inputs.tag }}" ]; then
-            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          raw="${TAG:-$GITHUB_REF_NAME}"
+          version="${raw#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::release version must be semver starting with a digit: $version"
+            exit 1
           fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
 
-      # Labels only — tags stay on the custom version logic above. metadata-action
-      # would otherwise emit its own tag set derived from the git ref, which
-      # duplicates and could drift from the never-`latest` rule that logic exists
-      # to enforce.
+      # latest=false is explicit so no future tag rule can let metadata-action
+      # add its automatic `latest` and break the rule above.
+      # url, source and created keep their defaults (the repository URL and
+      # the build time); licenses is set by hand because GitHub does not
+      # recognise PolyForm Noncommercial and would leave it empty.
       - id: meta
         uses: docker/metadata-action@v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot
-          tags: type=raw,value=unused
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=sha,format=long
           labels: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
             org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          annotations: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       # linux/amd64 only: every node in the target cluster is amd64, so an
       # arm64 variant would add build time for an image nothing would pull.
@@ -58,10 +92,67 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:${{ steps.version.outputs.value }}
-            ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:sha-${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: false
+          provenance: mode=max
+          sbom: true
+
+  # Docker Hub is a redundant copy; the cluster keeps pulling from ghcr.io.
+  # It runs as its own job after the ghcr.io push so a missing credential, a
+  # revoked token, or a Docker Hub outage fails loudly here without ever
+  # blocking the primary publish. It is skipped until a human sets the
+  # DOCKERHUB_USERNAME repo variable and DOCKERHUB_TOKEN secret, because CI
+  # must not mint that credential itself. The username is a variable, not a
+  # secret, because it is part of the image reference and a masked value
+  # would redact the ref from every log line.
+  mirror-dockerhub:
+    needs: publish
+    if: vars.DOCKERHUB_USERNAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # imagetools copies the index and every blob registry-to-registry, so the
+      # Docker Hub tags share the ghcr.io digest with no rebuild. Given one
+      # index source and no --annotation or --platform, buildx pushes the
+      # source index bytes unchanged, which is what keeps the index
+      # annotations and the provenance and SBOM attestation manifests intact.
+      # Passing --annotation here would make it rebuild the index and change
+      # the digest, so the annotations deliberately ride along with the copy.
+      - env:
+          SOURCE: ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:${{ needs.publish.outputs.version }}
+          TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/minecraft-afk-bot
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$TARGET:$VERSION" \
+            --tag "$TARGET:sha-$GITHUB_SHA" \
+            "$SOURCE"
+
+      - uses: actions/checkout@v7.0.1
+
+      # Updating the repository overview needs a Docker Hub PAT with Read,
+      # Write, Delete scope — more than the image push above requires — so a
+      # narrower DOCKERHUB_TOKEN would mirror the image and then fail here.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/minecraft-afk-bot
+          short-description: ${{ env.IMAGE_DESCRIPTION }}
+          readme-filepath: ./README.docker.md
