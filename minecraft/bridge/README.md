@@ -55,9 +55,18 @@ console:
 | `tellraw <target> <json with "rawtext">` | `tellraw @a {"rawtext":[{"text":"hi"}]}` |
 | `time query <day\|daytime\|gametime>` | `time query day` |
 | `gamerule <name>` (no value — read-only query) | `gamerule doDaylightCycle` |
+| `kick <gamertag>` or `kick "<gamertag>"`, only for a gamertag in `BRIDGE_KICKABLE` | `kick "Afk Bot Two"` |
 
 Commands containing a newline or carriage return are refused outright, so
 one HTTP request cannot smuggle a second console line.
+
+`kick` exists so the agent can force one of its own actors (itself or an AFK
+bot) off the server; it is never a moderation tool. It takes exactly one
+target and no reason. A gamertag with spaces has to be quoted, since unquoted
+Bedrock would read everything after the first space as the reason. The name
+must equal an entry in `BRIDGE_KICKABLE` apart from ASCII letter case.
+Selectors are always refused, and with `BRIDGE_KICKABLE` empty every kick is,
+so a leaked bridge token cannot remove a real player.
 
 ## Permissions
 
@@ -85,6 +94,7 @@ genuine fault: an unreadable mount or unparseable contents.
 | `CONSOLE_ORIGIN` | no | `mc-console-bridge://sidecar` | `Origin` sent on the console handshake; must appear verbatim in the server's `WEBSOCKET_ALLOWED_ORIGINS` when its origin check is enabled. Must be `scheme://host[:port]` — anything else fails startup |
 | `COMMAND_TIMEOUT_MS` | no | `2000` | Bounds the console write for one `/command`, and caps the window spent collecting that command's output. The HTTP response write deadline is derived from it |
 | `DATA_DIR` | no | `/data` | Mounted server data volume (read-only) |
+| `BRIDGE_KICKABLE` | no | empty | Comma-separated gamertags `kick` may name (the server's own actors). Empty refuses every kick. An entry containing `"`, `\` or a control character, or starting with `@`, fails startup |
 
 ## Server-side prerequisites
 

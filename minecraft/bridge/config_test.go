@@ -91,3 +91,39 @@ func TestLoadConfig_ConsoleOriginInvalidIsAnError(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_KickableDefaultsToNobody(t *testing.T) {
+	setRequiredEnv(t)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Kickable.Len() != 0 {
+		t.Errorf("Kickable.Len = %d, want 0 when BRIDGE_KICKABLE is unset", cfg.Kickable.Len())
+	}
+}
+
+func TestLoadConfig_KickableFromEnv(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("BRIDGE_KICKABLE", "AfkBotOne,Afk Bot Two")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	for _, name := range []string{"AfkBotOne", "Afk Bot Two"} {
+		if !cfg.Kickable.Contains(name) {
+			t.Errorf("Kickable.Contains(%q) = false, want true", name)
+		}
+	}
+}
+
+func TestLoadConfig_KickableUnsafeEntryIsAnError(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("BRIDGE_KICKABLE", "AfkBotOne,@a")
+
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("LoadConfig with a selector in BRIDGE_KICKABLE returned no error — the operator would believe it was applied")
+	}
+}

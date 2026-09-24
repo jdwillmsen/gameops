@@ -49,7 +49,7 @@ func main() {
 		httpServer.Shutdown(shutdownCtx)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "console_addr", cfg.ConsoleAddr, "console_origin", cfg.ConsoleOrigin)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "console_addr", cfg.ConsoleAddr, "console_origin", cfg.ConsoleOrigin, "kickable_actors", cfg.Kickable.Len())
 	err = httpServer.ListenAndServe()
 	stop() // unblocks console.Run's ctx.Done() promptly if ListenAndServe returned on its own
 	wg.Wait()

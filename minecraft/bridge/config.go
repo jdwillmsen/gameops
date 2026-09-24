@@ -114,6 +114,10 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	kickable, err := ParseKickable(os.Getenv("BRIDGE_KICKABLE"))
+	if err != nil {
+		return Config{}, fmt.Errorf("BRIDGE_KICKABLE: %w", err)
+	}
 
 	return Config{
 		HTTPAddr:        envOr("HTTP_ADDR", ":8080"),
@@ -123,5 +127,6 @@ func LoadConfig() (Config, error) {
 		ConsoleOrigin:   consoleOrigin,
 		CommandTimeout:  commandTimeout,
 		DataDir:         envOr("DATA_DIR", "/data"),
+		Kickable:        kickable,
 	}, nil
 }
