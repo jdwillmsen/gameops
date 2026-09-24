@@ -43,6 +43,9 @@ type Config struct {
 	// DataDir is where the server's permissions.json and allowlist.json live
 	// (the mounted /data volume).
 	DataDir string
+
+	// Kickable is the set of gamertags POST /command may kick.
+	Kickable Kickable
 }
 
 func requiredEnv(name string) (string, error) {

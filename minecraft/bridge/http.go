@@ -122,7 +122,7 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rule, err := CheckAllowlist(req.Command)
+	rule, err := CheckAllowlist(req.Command, s.cfg.Kickable)
 	if err != nil {
 		metricCommandsRefused.Inc()
 		s.logger.Info("command refused", "command", req.Command, "error", err)

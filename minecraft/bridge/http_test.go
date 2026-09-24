@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -8,6 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
 )
 
 // testDataServer builds a mux whose DataDir is an empty temp directory, so
@@ -94,5 +100,108 @@ func TestDataEndpoints_ValidFileIsServed(t *testing.T) {
 	}
 	if got, want := rec.Body.String(), `{"2535000000000001":"operator"}`; got != want+"\n" {
 		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+func postCommand(t *testing.T, mux http.Handler, cmd string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(commandRequest{Command: cmd})
+	if err != nil {
+		t.Fatalf("marshal command: %v", err)
+	}
+	req := httptest.NewRequest("POST", "/command", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+// kickServer wires the HTTP API to a fake console that records every stdin
+// line it receives, so a test can assert what did and did not reach the
+// server.
+func kickServer(t *testing.T, kickable string) (http.Handler, <-chan string) {
+	t.Helper()
+	received := make(chan string, 16)
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
+		writeTestMsg(t, ctx, conn, wsMessage{Type: "logHistory"})
+		for {
+			msg, err := readTestMsg(ctx, conn)
+			if err != nil {
+				return
+			}
+			if msg.Type == "stdin" {
+				received <- msg.Data
+			}
+		}
+	})
+
+	k, err := ParseKickable(kickable)
+	if err != nil {
+		t.Fatalf("ParseKickable: %v", err)
+	}
+	c := NewConsole(addr, "pw", testOrigin, 2*time.Second, testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		c.Run(ctx)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	waitConnected(t, c)
+
+	return newMux(&server{
+		cfg:     Config{BridgeToken: "tok", Kickable: k},
+		console: c,
+		logger:  testLogger(),
+	}), received
+}
+
+func TestCommand_KickReachesConsoleOnlyForActors(t *testing.T) {
+	mux, received := kickServer(t, "AfkBotOne,Afk Bot Two")
+
+	rec := postCommand(t, mux, `kick "Afk Bot Two"`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("kick of an actor = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	var resp commandResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Rule != "kick" {
+		t.Errorf("rule = %q, want kick", resp.Rule)
+	}
+	select {
+	case got := <-received:
+		if want := "kick \"Afk Bot Two\"\n"; got != want {
+			t.Errorf("console received %q, want %q", got, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("an accepted kick never reached the console")
+	}
+
+	for _, cmd := range []string{"kick Steve", "kick @a", "kick AfkBotOne reason", "kick AfkBotOne\nstop"} {
+		if rec := postCommand(t, mux, cmd); rec.Code != http.StatusForbidden {
+			t.Errorf("POST /command %q = %d, want 403", cmd, rec.Code)
+		}
+	}
+	// Refusal happens before the console is touched, so anything received
+	// now came from a refused command.
+	select {
+	case got := <-received:
+		t.Errorf("a refused kick reached the console as %q", got)
+	default:
+	}
+}
+
+// A bridge deployed without BRIDGE_KICKABLE must refuse every kick, including
+// one naming a real actor's gamertag.
+func TestCommand_KickRefusedWithoutKickableList(t *testing.T) {
+	mux := testServer(t, testConsole())
+
+	if rec := postCommand(t, mux, "kick AfkBotOne"); rec.Code != http.StatusForbidden {
+		t.Errorf("kick with no kickable list = %d, want 403", rec.Code)
 	}
 }

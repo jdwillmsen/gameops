@@ -22,8 +22,8 @@ var rules = []struct {
 	name string
 	re   *regexp.Regexp
 	// validate runs after a regex match for templates that need more than
-	// syntax checking (e.g. tellraw's JSON payload).
-	validate func(matches []string) error
+	// syntax checking (e.g. tellraw's JSON payload, kick's actor list).
+	validate func(matches []string, kickable Kickable) error
 }{
 	{
 		name: "list",
@@ -43,7 +43,7 @@ var rules = []struct {
 	{
 		name: "tellraw",
 		re:   regexp.MustCompile(`^tellraw ` + targetPattern + ` (\{.+\})$`),
-		validate: func(m []string) error {
+		validate: func(m []string, _ Kickable) error {
 			var v any
 			if err := json.Unmarshal([]byte(m[2]), &v); err != nil {
 				return fmt.Errorf("tellraw payload is not valid JSON: %w", err)
@@ -68,12 +68,27 @@ var rules = []struct {
 		// Bedrock; a second token would be a write and must not match.
 		re: regexp.MustCompile(`^gamerule ([A-Za-z][A-Za-z0-9]*)$`),
 	},
+	{
+		name: "kick",
+		// Exactly one player and no reason. A gamertag with spaces must be
+		// quoted, as Bedrock requires; a bare name cannot start with @, so
+		// no selector matches.
+		re: regexp.MustCompile(`^kick (?:"([^"\\]+)"|([^\s"\\@][^\s"\\]*))$`),
+		validate: func(m []string, kickable Kickable) error {
+			name := m[1] + m[2]
+			if !kickable.Contains(name) {
+				return fmt.Errorf("%q is not a kickable actor", name)
+			}
+			return nil
+		},
+	},
 }
 
 // CheckAllowlist reports whether cmd matches an allowlisted template. It
 // returns the matched rule name on success, or ErrCommandNotAllowed (wrapped
-// with a reason) on refusal.
-func CheckAllowlist(cmd string) (string, error) {
+// with a reason) on refusal. kick is accepted only for a gamertag in
+// kickable.
+func CheckAllowlist(cmd string, kickable Kickable) (string, error) {
 	if cmd == "" {
 		return "", fmt.Errorf("%w: empty command", ErrCommandNotAllowed)
 	}
@@ -87,7 +102,7 @@ func CheckAllowlist(cmd string) (string, error) {
 			continue
 		}
 		if r.validate != nil {
-			if err := r.validate(m); err != nil {
+			if err := r.validate(m, kickable); err != nil {
 				return "", fmt.Errorf("%w: %s: %s", ErrCommandNotAllowed, r.name, err)
 			}
 		}
