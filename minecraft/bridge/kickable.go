@@ -15,9 +15,14 @@ type Kickable struct {
 
 // ParseKickable reads BRIDGE_KICKABLE's comma-separated gamertags. Blank
 // entries are skipped, so an empty value or a trailing comma is harmless.
-// An entry that could change how the console parses the command is an error
-// rather than a dropped name: a quote or backslash could end a quoted name
-// early, and a leading @ is a selector, not a player.
+// An entry that could change how the console parses the command, or that
+// could make the name look different than it displays, is an error rather
+// than a dropped name: a quote or backslash could end a quoted name early, a
+// leading @ is a selector rather than a player, a control or format
+// character (e.g. a zero-width space or a bidi override) can hide inside the
+// name invisibly, and non-ASCII whitespace (e.g. a no-break or ideographic
+// space) can pass for a plain space without being one. A plain ASCII space
+// stays allowed, since gamertags can contain them.
 func ParseKickable(raw string) (Kickable, error) {
 	k := Kickable{names: make(map[string]struct{})}
 	for entry := range strings.SplitSeq(raw, ",") {
@@ -25,12 +30,24 @@ func ParseKickable(raw string) (Kickable, error) {
 		if name == "" {
 			continue
 		}
-		if strings.HasPrefix(name, "@") || strings.ContainsAny(name, `"\`) || strings.ContainsFunc(name, unicode.IsControl) {
+		if strings.HasPrefix(name, "@") || strings.ContainsAny(name, `"\`) || strings.ContainsFunc(name, isUnsafeRune) {
 			return Kickable{}, fmt.Errorf("gamertag %q cannot be passed to kick safely", name)
 		}
 		k.names[foldASCII(name)] = struct{}{}
 	}
 	return k, nil
+}
+
+// isUnsafeRune reports whether r has no place in a gamertag: a control
+// character, a format character (invisible but not a control, such as a
+// zero-width space or a bidi override), or any non-ASCII whitespace (which
+// can pass for a plain space without being one). A plain ASCII space is
+// none of these, so it stays allowed.
+func isUnsafeRune(r rune) bool {
+	if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		return true
+	}
+	return r > 0x7F && unicode.IsSpace(r)
 }
 
 // Len reports how many distinct gamertags are kickable.

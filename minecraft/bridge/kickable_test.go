@@ -67,7 +67,14 @@ func TestParseKickable_DuplicatesCollapse(t *testing.T) {
 // the quoted name early, a leading @ is a selector, and a control character
 // has no place in a gamertag.
 func TestParseKickable_UnsafeEntryIsAnError(t *testing.T) {
-	for _, raw := range []string{`Afk"Bot`, `Afk\Bot`, "@a", "@p[name=Steve]", "Afk\tBot", "AfkBot\x00"} {
+	for _, raw := range []string{
+		`Afk"Bot`, `Afk\Bot`, "@a", "@p[name=Steve]", "Afk\tBot", "AfkBot\x00",
+		"Afk\u200bBot", // zero-width space (Cf)
+		"Afk\u202eBot", // right-to-left override (Cf)
+		"Afk\ufeffBot", // byte order mark (Cf)
+		"Afk\u00a0Bot", // no-break space (Zs, non-ASCII)
+		"Afk\u3000Bot", // ideographic space (Zs, non-ASCII)
+	} {
 		if _, err := ParseKickable("AfkBotOne," + raw); err == nil {
 			t.Errorf("ParseKickable with entry %q returned no error", raw)
 		}
