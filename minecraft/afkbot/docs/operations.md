@@ -81,12 +81,14 @@ What to look for in the logs:
 | `presence_enabled` | Feature on at startup, with actor, URL, default and interval |
 | `presence_changed` | The desired state moved, `from` → `to` |
 | `session_parked` | The session was closed because the bot was parked |
-| `presence_fetch_unreachable` / `presence_report_unreachable` | Agent down, timing out or answering 5xx; the bot is holding `acting_on` |
+| `presence_fetch_unreachable` / `presence_report_unreachable` | Agent down, timing out, or answering 5xx, 408 or 429; the bot is holding `acting_on` |
 | `presence_fetch_rejected` / `presence_report_rejected` | 401: the token is wrong. 403 on a fetch: the token lacks `presence:read`. 403 on a report: it lacks `presence:report`, is bound to another actor, or is unbound. 404: `PRESENCE_ACTOR_ID` is not in the agent's `PRESENCE_ACTORS` — or the agent's presence API isn't mounted at all (`PRESENCE_TOKENS`/`PRESENCE_ACTORS` empty on the agent), which answers with the agent's plain-text 404 instead of the contract's JSON body |
 | `presence_fetch_invalid` | The agent answered with something this bot cannot act on — usually a contract change this image predates |
 | `presence_fetch_recovered` / `presence_report_recovered` | The failure above has ended |
 
 Each failure is logged once when it starts and once when it ends, not on
-every poll. A bot that stays parked when it should not is almost always
-holding an answer from before a `rejected` line: fix the token or actor, and
-it acts on the next poll.
+every poll — and again if its kind changes while it is still failing, e.g. an
+agent that was merely unreachable starts rejecting the token: that is a
+second, more actionable line, not noise to filter out. A bot that stays
+parked when it should not is almost always holding an answer from before a
+`rejected` line: fix the token or actor, and it acts on the next poll.
