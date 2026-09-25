@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -85,11 +86,22 @@ func presenceGate(cfg config.Config, log presence.Logger) (presence.Gate, func(c
 	r := presence.NewReconciler(client, p.Default, time.Duration(p.PollMs)*time.Millisecond, version, log)
 	log.Info("presence_enabled", logging.Fields{
 		"actor_id": p.ActorID,
-		"url":      p.URL,
+		"url":      redactedURL(p.URL),
 		"default":  string(p.Default),
 		"poll_ms":  p.PollMs,
 	})
 	return r, r.Run
+}
+
+// redactedURL hides a URL's userinfo password before it reaches the log.
+// config.Load already proved p.URL parses, so the fallback here is normally
+// unreached; it exists only so a caller that skips Load (a test, or a future
+// caller) still cannot leak a password through this line.
+func redactedURL(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		return u.Redacted()
+	}
+	return raw
 }
 
 // connectFunc runs one session until it ends, calling spawned once the bot

@@ -185,6 +185,27 @@ func TestPresenceGateOffIsAlwaysPresent(t *testing.T) {
 	}
 }
 
+// A PRESENCE_URL with embedded userinfo (a proxy credential, say) must never
+// reach the pod log through the startup line that announces the feature.
+func TestPresenceGateLogsRedactUserinfo(t *testing.T) {
+	log := &recordingLog{}
+	cfg := config.Config{Presence: config.Presence{
+		URL: "http://bot:ZZZZZZZZZZZZZZZZZZZZ@fwb-server-agent:8080", Token: "unrelated-token", ActorID: "afk-bot-1",
+		Default: presenceapi.StateParked, PollMs: 10000,
+	}}
+	presenceGate(cfg, log)
+
+	if len(log.lines) != 1 {
+		t.Fatalf("lines = %v, want one presence_enabled", log.lines)
+	}
+	if strings.Contains(log.lines[0], "ZZZZZZZZZZZZZZZZZZZZ") {
+		t.Errorf("presence_enabled carries the URL's password: %s", log.lines[0])
+	}
+	if !strings.Contains(log.lines[0], "xxxxx") {
+		t.Errorf("presence_enabled should log the redacted URL, got %s", log.lines[0])
+	}
+}
+
 func TestPresenceGateLogsNoToken(t *testing.T) {
 	log := &recordingLog{}
 	cfg := config.Config{Presence: config.Presence{
