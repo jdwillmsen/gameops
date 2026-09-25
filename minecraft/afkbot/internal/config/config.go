@@ -7,9 +7,13 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
 )
 
 // Bedrock's maximum tick-distance, and the largest radius measured as granted
@@ -34,7 +38,15 @@ const (
 	// One hour. The backoff ceiling is a wait before reconnecting, so a value
 	// past this is indistinguishable from the bot never coming back.
 	maxBackoffMs = 3_600_000
+
+	// Ten minutes. The poll interval is how long a park or resume takes to
+	// reach the bot, and parking is meant to work mid-game.
+	maxPollMs = 600_000
 )
+
+// The shared contract's actor id shape, checked here so a typo fails at
+// startup rather than as a 404 on every poll.
+var actorIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 // Config is everything the bot needs to hold a player slot.
 type Config struct {
@@ -65,7 +77,26 @@ type Config struct {
 	AuthCacheDir   string
 	ReconnectMinMs int
 	ReconnectMaxMs int
+
+	// Presence is the zero value, and the reconciler is off, unless
+	// PRESENCE_URL is set.
+	Presence Presence
 }
+
+// Presence configures the desired-state reconciler that lets the agent park
+// this bot.
+type Presence struct {
+	URL     string
+	Token   string
+	ActorID string
+	// Default is acted on until the agent first answers, so a bot that
+	// starts during an agent outage still does what git says.
+	Default presenceapi.State
+	PollMs  int
+}
+
+// Enabled reports whether the bot should ask the agent before connecting.
+func (p Presence) Enabled() bool { return p.URL != "" }
 
 // Load reads the environment, returning an error rather than a partial
 // config: a bot that starts with a missing host fails later, further from the
@@ -98,6 +129,10 @@ func Load() (Config, error) {
 	if reconnectMax < reconnectMin {
 		return Config{}, fmt.Errorf("RECONNECT_MAX_MS (%d) must be >= RECONNECT_MIN_MS (%d)", reconnectMax, reconnectMin)
 	}
+	presence, err := loadPresence()
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -107,6 +142,7 @@ func Load() (Config, error) {
 		AuthCacheDir:   stringDefault("AUTH_CACHE_DIR", "/data/auth"),
 		ReconnectMinMs: reconnectMin,
 		ReconnectMaxMs: reconnectMax,
+		Presence:       presence,
 	}, nil
 }
 
@@ -176,4 +212,49 @@ func positiveInt(name string, def, max int) (int, error) {
 		return 0, fmt.Errorf("environment variable %s must be at most %d, got %d", name, max, n)
 	}
 	return n, nil
+}
+
+// loadPresence reads nothing beyond PRESENCE_URL while it is unset, so a
+// stray variable on a bot deployed without the agent cannot stop it starting.
+//
+// No error here quotes PRESENCE_TOKEN: startup errors go to the pod log.
+func loadPresence() (Presence, error) {
+	raw := strings.TrimSpace(os.Getenv("PRESENCE_URL"))
+	if raw == "" {
+		return Presence{}, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return Presence{}, fmt.Errorf("environment variable PRESENCE_URL must be an http or https URL, got %q", raw)
+	}
+	token, err := required("PRESENCE_TOKEN")
+	if err != nil {
+		return Presence{}, err
+	}
+	actorID, err := required("PRESENCE_ACTOR_ID")
+	if err != nil {
+		return Presence{}, err
+	}
+	if !actorIDPattern.MatchString(actorID) {
+		return Presence{}, fmt.Errorf("environment variable PRESENCE_ACTOR_ID must match %s", actorIDPattern)
+	}
+	def, err := required("PRESENCE_DEFAULT")
+	if err != nil {
+		return Presence{}, err
+	}
+	state := presenceapi.State(def)
+	if !state.Valid() {
+		return Presence{}, fmt.Errorf("environment variable PRESENCE_DEFAULT must be %q or %q", presenceapi.StatePresent, presenceapi.StateParked)
+	}
+	pollMs, err := positiveInt("PRESENCE_POLL_MS", 10000, maxPollMs)
+	if err != nil {
+		return Presence{}, err
+	}
+	return Presence{
+		URL:     strings.TrimRight(raw, "/"),
+		Token:   token,
+		ActorID: actorID,
+		Default: state,
+		PollMs:  pollMs,
+	}, nil
 }
