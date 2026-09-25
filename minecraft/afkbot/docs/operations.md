@@ -46,3 +46,47 @@ event table in the [README](../README.md#output).
 `chunk_radius_granted` is the one to watch. It is the only evidence the bot
 loads the area it was asked to load; a farm producing at a fraction of its
 rate looks identical to a healthy one from every other signal.
+
+## Parking
+
+The agent can take the bot out of the world and put it back, so the chunks
+around it stop ticking without touching `replicas`. Parking is decided on the
+agent — `!park`, `!unpark`, the HTTP API or `tools/mc presence` — and the bot
+only follows. The chart sets these variables:
+
+| Variable | Meaning |
+|---|---|
+| `PRESENCE_URL` | The agent's HTTP address. Unset turns the feature off: no call to the agent, and the bot behaves as it always has |
+| `PRESENCE_TOKEN` | Bearer token with `presence:read` and `presence:report`, bound to this bot's actor |
+| `PRESENCE_ACTOR_ID` | This bot's actor id, e.g. `afk-bot-1` |
+| `PRESENCE_DEFAULT` | `present` or `parked`: what the bot does until the agent first answers |
+| `PRESENCE_POLL_MS` | How often it asks, default `10000`; a park or resume reaches the bot within one interval |
+
+Parked means disconnected: the reconnect loop waits instead of retrying, and
+reconnects as soon as the state returns to `present`, without a backoff.
+
+This also changed shutdown for every bot, presence on or off: a SIGTERM now
+closes the connection immediately, rather than waiting for the server to send
+the next packet before the process exits.
+
+**The agent being down never moves the bot.** Unreachable, erroring or
+refusing, the bot keeps doing what it was last told, and a bot started during
+an agent outage does what `PRESENCE_DEFAULT` says. It keeps polling, so it
+picks up the agent's answer when the agent returns.
+
+What to look for in the logs:
+
+| Event | Means |
+|---|---|
+| `presence_enabled` | Feature on at startup, with actor, URL, default and interval |
+| `presence_changed` | The desired state moved, `from` → `to` |
+| `session_parked` | The session was closed because the bot was parked |
+| `presence_fetch_unreachable` / `presence_report_unreachable` | Agent down, timing out or answering 5xx; the bot is holding `acting_on` |
+| `presence_fetch_rejected` / `presence_report_rejected` | 401: the token is wrong. 403 on a fetch: the token lacks `presence:read`. 403 on a report: it lacks `presence:report`, is bound to another actor, or is unbound. 404: `PRESENCE_ACTOR_ID` is not in the agent's `PRESENCE_ACTORS` — or the agent's presence API isn't mounted at all (`PRESENCE_TOKENS`/`PRESENCE_ACTORS` empty on the agent), which answers with the agent's plain-text 404 instead of the contract's JSON body |
+| `presence_fetch_invalid` | The agent answered with something this bot cannot act on — usually a contract change this image predates |
+| `presence_fetch_recovered` / `presence_report_recovered` | The failure above has ended |
+
+Each failure is logged once when it starts and once when it ends, not on
+every poll. A bot that stays parked when it should not is almost always
+holding an answer from before a `rejected` line: fix the token or actor, and
+it acts on the next poll.

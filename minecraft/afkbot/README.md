@@ -27,11 +27,17 @@ farms depend on is kept with as little in it as possible to go wrong.
 | `RECONNECT_MIN_MS` | no | `5000` | 1–3600000 | Backoff floor |
 | `RECONNECT_MAX_MS` | no | `300000` | 1–3600000, ≥ `RECONNECT_MIN_MS` | Backoff ceiling |
 | `LOG_LEVEL` | no | `info` | — | `debug` adds debug lines; anything else is info |
+| `PRESENCE_URL` | no | — | http(s) URL | The agent's address. Unset: parking is off and no other `PRESENCE_*` variable is read ([parking][parking]) |
+| `PRESENCE_TOKEN` | with `PRESENCE_URL` | — | non-empty | Bearer token for the agent's presence API |
+| `PRESENCE_ACTOR_ID` | with `PRESENCE_URL` | — | `^[a-z0-9][a-z0-9-]{0,62}$` | This bot's actor id |
+| `PRESENCE_DEFAULT` | with `PRESENCE_URL` | — | `present`, `parked` | Acted on until the agent first answers |
+| `PRESENCE_POLL_MS` | no | `10000` | 1–600000 | How often the agent is asked |
 
 Every value is validated at startup. A missing host or an out-of-range number
 fails immediately rather than surfacing later, further from the cause.
 
 [radius]: docs/decisions.md#2026-09-08-chunk-radius-defaults-to-the-maximum
+[parking]: docs/operations.md#parking
 
 ## Running it
 
@@ -57,6 +63,14 @@ One JSON line per event on stdout, errors on stderr:
 | `reconnecting` | info | Backing off before the next attempt |
 | `session_ended` | info | Connection closed without an error |
 | `session_error` | error | Connection failed or dropped |
+| `session_parked` | info | The agent parked this bot; the session was closed and the loop is waiting |
+| `presence_enabled` | info | Parking is on; names the actor, URL, default and poll interval |
+| `presence_changed` | info | The desired state moved (`from`, `to`) |
+| `presence_fetch_unreachable` | warn | The agent could not be asked; the bot holds its last answer |
+| `presence_fetch_rejected` | error | The agent refused the token or does not know the actor |
+| `presence_fetch_invalid` | error | The agent's answer could not be acted on |
+| `presence_fetch_recovered` | info | Asking the agent works again |
+| `presence_report_unreachable`, `presence_report_rejected`, `presence_report_recovered` | warn, error, info | The same, for the status report |
 | `respawn_failed` | error | The respawn handshake could not be completed |
 | `config_invalid` | error | Startup validation failed; the process exits |
 | `auth_failed` | error | Device-code login or token refresh failed; the process exits |
@@ -123,6 +137,6 @@ never lands in a transcript.
 
 ## Documentation
 
-- [docs/operations.md](docs/operations.md) — first run, allowlist, auth cache
+- [docs/operations.md](docs/operations.md) — first run, allowlist, auth cache, parking
 - [docs/protocol-drift.md](docs/protocol-drift.md) — staying connectable across Bedrock releases
 - [docs/decisions.md](docs/decisions.md) — why the bot is shaped this way

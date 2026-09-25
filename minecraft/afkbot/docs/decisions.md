@@ -63,6 +63,36 @@ Every other numeric variable gained a ceiling for the same reason: each is
 narrowed or range-bound somewhere that cannot report a problem. A bound that
 holds only for the default is what let this through.
 
+## 2026-09-23: the presence contract is imported, not copied
+
+The bot polls the agent for whether it should be in the world and reports
+what it is doing. The request and response types come from
+`github.com/jdwillmsen/minecraft-server-agent/presenceapi`, imported rather
+than copied — the opposite of the packages below, for reasons that do not
+apply to them.
+
+- **It is its own module with no dependencies beyond the standard library.**
+  Importing the agent's root module raised 20 of this bot's module versions
+  through minimum version selection. `presenceapi` has its own `go.mod`, so
+  adding it changed exactly one line of this bot's `go.mod` and no other
+  version.
+- **It is versioned on its own.** It is tagged `presenceapi/vX.Y.Z`, separate
+  from the agent's `vX.Y.Z` releases, so Renovate proposes a bump here only
+  when the contract changes, not for every agent release.
+- **A copy of a wire contract is a bug waiting.** The copied packages are
+  finished code that only this process runs; a drifted copy costs nothing
+  until someone ports a fix. Two copies of the types both ends of an HTTP call
+  decode would drift into a request the other side rejects, found in
+  production. `internal/presence/contract_test.go` decodes the agent's own
+  golden files from the pinned module, so a contract change fails CI on the
+  bump that brings it.
+
+The feature is off unless `PRESENCE_URL` is set, and the bot then makes no
+call to the agent at all. When it is on and the agent is unreachable or
+refuses, the bot keeps acting on the last answer — or on `PRESENCE_DEFAULT`
+before the first — because a bot that followed the agent's health would drop
+the farms every time the agent restarted.
+
 ## Shared packages are copied, not imported
 
 `internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcproto`
@@ -73,6 +103,9 @@ Originally the agent's module was private, so importing it would have put a
 credential in this bot's Docker build. It went public on 2026-09-16, and the
 decision was revisited on 2026-09-21 package by package rather than as a
 block. All five stay copies, for different reasons.
+
+`presenceapi` is imported, not copied; the 2026-09-23 section above says why
+that reasoning does not carry over to it.
 
 ### `mcauth` is a fork, not a copy
 
