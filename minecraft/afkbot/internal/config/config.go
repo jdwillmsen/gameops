@@ -6,6 +6,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -42,6 +43,10 @@ const (
 	// Ten minutes. The poll interval is how long a park or resume takes to
 	// reach the bot, and parking is meant to work mid-game.
 	maxPollMs = 600_000
+
+	// One second. Below this, "poll the agent" becomes "hammer the agent"
+	// for a responsiveness gain nobody watching a park or resume would see.
+	minPollMs = 1_000
 )
 
 // The shared contract's actor id shape, checked here so a typo fails at
@@ -225,7 +230,14 @@ func loadPresence() (Presence, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return Presence{}, fmt.Errorf("environment variable PRESENCE_URL must be an http or https URL, got %q", raw)
+		msg := "environment variable PRESENCE_URL must be an http or https URL"
+		// u is non-nil whenever Parse itself succeeded (the scheme/host check
+		// is what failed); Redacted() keeps a userinfo password this error
+		// would otherwise echo straight into the pod log.
+		if u != nil {
+			msg = fmt.Sprintf("%s, got %q", msg, u.Redacted())
+		}
+		return Presence{}, errors.New(msg)
 	}
 	token, err := required("PRESENCE_TOKEN")
 	if err != nil {
@@ -249,6 +261,9 @@ func loadPresence() (Presence, error) {
 	pollMs, err := positiveInt("PRESENCE_POLL_MS", 10000, maxPollMs)
 	if err != nil {
 		return Presence{}, err
+	}
+	if pollMs < minPollMs {
+		return Presence{}, fmt.Errorf("environment variable PRESENCE_POLL_MS must be at least %d, got %d", minPollMs, pollMs)
 	}
 	return Presence{
 		URL:     strings.TrimRight(raw, "/"),

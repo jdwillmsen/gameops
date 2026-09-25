@@ -183,6 +183,7 @@ func TestLoadPresenceRefusals(t *testing.T) {
 		{"url not http", "PRESENCE_URL", "ftp://fwb-server-agent"},
 		{"url without host", "PRESENCE_URL", "http://"},
 		{"poll zero", "PRESENCE_POLL_MS", "0"},
+		{"poll below the floor", "PRESENCE_POLL_MS", "999"},
 		{"poll above the ceiling", "PRESENCE_POLL_MS", "600001"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -212,6 +213,43 @@ func TestLoadPresencePollAtTheCeiling(t *testing.T) {
 	}
 	if cfg.Presence.PollMs != 600000 {
 		t.Errorf("PollMs = %d, want 600000", cfg.Presence.PollMs)
+	}
+}
+
+// The poll interval is how long a park or resume takes to reach the bot, so
+// anything under a second turns "poll the agent" into "hammer the agent" for
+// no gain a human would notice.
+func TestLoadPresencePollAtTheFloor(t *testing.T) {
+	setRequired(t)
+	setPresence(t)
+	t.Setenv("PRESENCE_POLL_MS", "1000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("PRESENCE_POLL_MS=1000 was refused: %v", err)
+	}
+	if cfg.Presence.PollMs != 1000 {
+		t.Errorf("PollMs = %d, want 1000", cfg.Presence.PollMs)
+	}
+}
+
+// A password embedded in PRESENCE_URL (a proxy in front of the agent, say)
+// must never reach the pod log through the config error that names the
+// rejected value.
+func TestLoadPresenceURLErrorRedactsUserinfo(t *testing.T) {
+	setRequired(t)
+	setPresence(t)
+	t.Setenv("PRESENCE_URL", "ftp://bot:ZZZZZZZZZZZZZZZZZZZZ@fwb-server-agent")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("ftp:// PRESENCE_URL was accepted")
+	}
+	if strings.Contains(err.Error(), "ZZZZZZZZZZZZZZZZZZZZ") {
+		t.Errorf("error echoes the URL's password: %q", err)
+	}
+	if !strings.Contains(err.Error(), "PRESENCE_URL") {
+		t.Errorf("error should name PRESENCE_URL, got %q", err)
 	}
 }
 
