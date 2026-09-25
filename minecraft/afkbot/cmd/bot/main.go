@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/logging"
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/mcauth"
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/mcproto"
+	"github.com/jdwillmsen/minecraft-afk-bot/internal/presence"
 	"github.com/jdwillmsen/minecraft-afk-bot/internal/skin"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
@@ -33,6 +35,14 @@ import (
 // reconnect backoff. Without it, a bot that connects and is immediately kicked
 // retries as eagerly as one recovering from a momentary blip.
 const stableSession = 60 * time.Second
+
+// Bounds one poll of the agent, so a hung agent delays the next answer
+// rather than stopping the poller.
+const presenceTimeout = 5 * time.Second
+
+// version is what the bot reports to the agent. The image build stamps the
+// release into it; a plain go build reports "dev".
+var version = "dev"
 
 func main() {
 	log := logging.New(os.Getenv("LOG_LEVEL"))
@@ -54,15 +64,45 @@ func main() {
 		os.Exit(1)
 	}
 
-	runConnectLoop(ctx, cfg, ts, log)
+	gate, runPresence := presenceGate(cfg, log)
+	if runPresence != nil {
+		go runPresence(ctx)
+	}
+
+	runConnectLoop(ctx, cfg, gate, func(ctx context.Context, spawned func()) error {
+		return session(ctx, cfg, ts, log, spawned)
+	}, log)
 }
 
-// runConnectLoop keeps the bot connected for the life of the process.
+// presenceGate returns what the connect loop waits on, and the poller to run
+// beside it when PRESENCE_URL is set.
+func presenceGate(cfg config.Config, log presence.Logger) (presence.Gate, func(context.Context)) {
+	p := cfg.Presence
+	if !p.Enabled() {
+		return presence.AlwaysPresent{}, nil
+	}
+	client := presence.NewClient(p.URL, p.ActorID, p.Token, &http.Client{Timeout: presenceTimeout})
+	r := presence.NewReconciler(client, p.Default, time.Duration(p.PollMs)*time.Millisecond, version, log)
+	log.Info("presence_enabled", logging.Fields{
+		"actor_id": p.ActorID,
+		"url":      p.URL,
+		"default":  string(p.Default),
+		"poll_ms":  p.PollMs,
+	})
+	return r, r.Run
+}
+
+// connectFunc runs one session until it ends, calling spawned once the bot
+// is in the world.
+type connectFunc func(ctx context.Context, spawned func()) error
+
+// runConnectLoop keeps the bot connected for the life of the process, except
+// while the gate holds it out.
 //
 // It reconnects rather than exiting, because exiting moves the retry loop into
 // Kubernetes: a coarser backoff, a fresh pod, and a token reload on every
 // attempt.
-func runConnectLoop(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger) {
+func runConnectLoop(ctx context.Context, cfg config.Config, gate presence.Gate, connect connectFunc, log *logging.Logger) {
 	minDelay := time.Duration(cfg.ReconnectMinMs) * time.Millisecond
 	maxDelay := time.Duration(cfg.ReconnectMaxMs) * time.Millisecond
 	delay := minDelay
@@ -83,11 +123,26 @@ func runConnectLoop(ctx context.Context, cfg config.Config, ts oauth2.TokenSourc
 		}
 		first = false
 
+		sess, release, err := gate.Admit(ctx)
+		if err != nil {
+			return
+		}
 		started := time.Now()
-		err := session(ctx, cfg, ts, log)
+		err = connect(sess, func() { gate.Connected(true) })
 		lasted := time.Since(started)
+		gate.Connected(false)
+		parked := sess.Err() != nil
+		release()
 		if ctx.Err() != nil {
 			return
+		}
+		if parked {
+			// A deliberate disconnect is not a failure, so it neither grows
+			// the backoff nor delays the return once the gate admits again.
+			log.Info("session_parked", logging.Fields{"session_lasted_ms": lasted.Milliseconds()})
+			delay = minDelay
+			first = true
+			continue
 		}
 		if err != nil {
 			log.Error("session_error", logging.Fields{"error": err.Error(), "session_lasted_ms": lasted.Milliseconds()})
@@ -99,7 +154,7 @@ func runConnectLoop(ctx context.Context, cfg config.Config, ts oauth2.TokenSourc
 }
 
 // session runs one connection until it drops.
-func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger, spawned func()) error {
 	// Without this the bot joins as a black silhouette under a SkinID
 	// regenerated every connect: Bedrock skins are uploaded by the client from
 	// its own installation, and a headless client has none.
@@ -138,6 +193,12 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	}
 	defer func() { _ = conn.Close() }()
 
+	// ReadPacket does not watch ctx, so without this a park would take effect
+	// only when the server next sent something, and the player would stay
+	// listed until then.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
 	if err := conn.DoSpawnContext(ctx); err != nil {
 		return fmt.Errorf("spawn: %w", err)
 	}
@@ -145,6 +206,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		"xuid":          conn.IdentityData().XUID,
 		"view_distance": cfg.ViewDistance,
 	})
+	spawned()
 
 	// The reason this program exists. Without a chunk radius request the
 	// server has no view distance to honour for this client, and a bot that
@@ -165,6 +227,9 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		}
 		pk, err := conn.ReadPacket()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("read: %w", err)
 		}
 

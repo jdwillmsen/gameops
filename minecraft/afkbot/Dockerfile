@@ -2,13 +2,14 @@ FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c062
 WORKDIR /src
 
 COPY go.mod go.sum ./
-# The packages shared with minecraft-server-agent are copies under internal/,
-# not imports, so this build fetches nothing from that module; why is in
-# docs/decisions.md.
+# The packages shared with minecraft-server-agent are copies under internal/.
+# The one module this fetches from that repository is its standard-library-only
+# presence contract; docs/decisions.md has why each is handled the way it is.
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bot ./cmd/bot
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/bot ./cmd/bot
 
 # gophertunnel's RakNet implementation is pure Go, so the only runtime needs
 # are the binary and TLS roots for the Xbox Live device-code login.
