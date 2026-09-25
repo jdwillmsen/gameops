@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,52 @@ func TestEventLog_SinceLatestReturnsEmpty(t *testing.T) {
 
 	if got := log.Since(1); len(got) != 0 {
 		t.Errorf("got %d events, want 0 when since == latest ID", len(got))
+	}
+}
+
+func TestEventLog_IngestBackfillMarksEventsAsBackfill(t *testing.T) {
+	log := NewEventLog()
+	log.IngestBackfill("Player connected: Steve, xuid: 111", time.Now())
+
+	got := log.Since(0)
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1", len(got))
+	}
+	if !got[0].Backfill {
+		t.Errorf("Backfill = false, want true for a logHistory-replayed event")
+	}
+}
+
+func TestEventLog_IngestLeavesBackfillFalse(t *testing.T) {
+	log := NewEventLog()
+	log.Ingest("Player connected: Steve, xuid: 111", time.Now())
+
+	got := log.Since(0)
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1", len(got))
+	}
+	if got[0].Backfill {
+		t.Errorf("Backfill = true, want false for a live line")
+	}
+}
+
+func TestEvent_BackfillOmittedFromJSONWhenFalse(t *testing.T) {
+	data, err := json.Marshal(Event{Type: EventConnect, Player: "Steve", Raw: "raw"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), "backfill") {
+		t.Errorf("json = %s, want no backfill key when false", data)
+	}
+}
+
+func TestEvent_BackfillPresentInJSONWhenTrue(t *testing.T) {
+	data, err := json.Marshal(Event{Type: EventConnect, Player: "Steve", Raw: "raw", Backfill: true})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"backfill":true`) {
+		t.Errorf("json = %s, want \"backfill\":true", data)
 	}
 }
 

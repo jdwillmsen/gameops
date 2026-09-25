@@ -125,7 +125,7 @@ the contract this bridge depends on, not a second copy of the chart's config.
 | `POST /command` | bearer | `{"command": "..."}` → allowlist check → console → `{"rule": "...", "output": "..."}` |
 | `GET /permissions` | bearer | Parsed `permissions.json` |
 | `GET /allowlist` | bearer | Parsed `allowlist.json` |
-| `GET /events?since=<id>` | bearer | Typed events (connect/disconnect/crash/content-error), fed from the same console websocket's stdout/stderr/logHistory broadcasts - no separate log-tailing |
+| `GET /events?since=<id>` | bearer | Typed events (connect/disconnect/crash/content-error), fed from the same console websocket's stdout/stderr/logHistory broadcasts - no separate log-tailing. Events replayed from a logHistory backfill (sent on every connect/redial) carry `"backfill":true`; live stdout/stderr events omit the field, so a consumer can ignore replayed history instead of treating it as a fresh arrival |
 | `GET /healthz` | none | Liveness - process is up. Stays green while the console is down, since a restart cannot fix a server that has not opened its console yet |
 | `GET /readyz` | none | Readiness - 200 only while the console websocket is established, so a bridge whose console auth is rejected stops receiving traffic |
 | `GET /metrics` | none | Prometheus |

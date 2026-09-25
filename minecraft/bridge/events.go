@@ -29,6 +29,13 @@ type Event struct {
 	Time   time.Time `json:"time"`
 	Player string    `json:"player,omitempty"`
 	Raw    string    `json:"raw"`
+
+	// Backfill is true only for events produced from mc-server-runner's
+	// logHistory replay on connect, never for a live stdout/stderr line. A
+	// backfilled event's Time is still the receive time (see ingestEvents in
+	// console.go), so consumers need this flag - not the timestamp - to avoid
+	// treating months-old history as a fresh arrival.
+	Backfill bool `json:"backfill,omitempty"`
 }
 
 // The connect/disconnect patterns match the ones the platform's Grafana
@@ -96,11 +103,23 @@ func NewEventLog() *EventLog {
 // pattern, appends it to the log with a freshly assigned ID. Unrecognized
 // lines are silently dropped, matching ParseEvents' tolerance.
 func (l *EventLog) Ingest(raw string, receivedAt time.Time) {
+	l.ingest(raw, receivedAt, false)
+}
+
+// IngestBackfill is Ingest for a line replayed from mc-server-runner's
+// logHistory backfill rather than seen live, so the resulting event carries
+// Backfill=true.
+func (l *EventLog) IngestBackfill(raw string, receivedAt time.Time) {
+	l.ingest(raw, receivedAt, true)
+}
+
+func (l *EventLog) ingest(raw string, receivedAt time.Time, backfill bool) {
 	e, ok := parseLine(raw)
 	if !ok {
 		return
 	}
 	e.Time = receivedAt
+	e.Backfill = backfill
 
 	l.mu.Lock()
 	defer l.mu.Unlock()

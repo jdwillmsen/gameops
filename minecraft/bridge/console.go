@@ -281,13 +281,16 @@ func (c *Console) keepalive(ctx context.Context, conn *websocket.Conn, onFailure
 // ingestEvents feeds Events from a console broadcast: the one-shot
 // logHistory backfill on connect, and every stdout/stderr line as it
 // arrives. Received-at time is used for all events, including backfilled
-// history, since the raw line's own timestamp format isn't parsed here.
+// history, since the raw line's own timestamp format isn't parsed here -
+// backfilled events also carry Backfill=true so a consumer can tell replayed
+// history from a live line instead of mistaking a months-old reconnect for
+// one happening now.
 func (c *Console) ingestEvents(msg wsMessage) {
 	now := time.Now()
 	switch msg.Type {
 	case "logHistory":
 		for _, line := range msg.Lines {
-			c.Events.Ingest(line, now)
+			c.Events.IngestBackfill(line, now)
 		}
 	case "stdout", "stderr":
 		buf := c.residual[msg.Type] + msg.Data

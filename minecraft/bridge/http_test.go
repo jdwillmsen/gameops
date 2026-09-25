@@ -103,6 +103,20 @@ func TestDataEndpoints_ValidFileIsServed(t *testing.T) {
 	}
 }
 
+func TestHandleEvents_IncludesBackfillFlag(t *testing.T) {
+	c := testConsole()
+	c.Events.IngestBackfill("Player connected: Steve, xuid: 111", time.Now())
+	mux := testServer(t, c)
+
+	rec := getAuthed(t, mux, "/events")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /events = %d, want 200", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"backfill":true`)) {
+		t.Errorf("body = %s, want a backfilled event with \"backfill\":true", rec.Body.String())
+	}
+}
+
 func postCommand(t *testing.T, mux http.Handler, cmd string) *httptest.ResponseRecorder {
 	t.Helper()
 	body, err := json.Marshal(commandRequest{Command: cmd})

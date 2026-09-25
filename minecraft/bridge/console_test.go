@@ -43,6 +43,26 @@ func TestConsoleIngestEvents_LineSplitAcrossFrames(t *testing.T) {
 	}
 }
 
+func TestConsoleIngestEvents_LogHistoryIsMarkedBackfill(t *testing.T) {
+	c := testConsole()
+
+	c.ingestEvents(wsMessage{Type: "logHistory", Lines: []string{
+		"[INFO] Player connected: Steve, xuid: 111",
+	}})
+	c.ingestEvents(wsMessage{Type: "stdout", Data: "[INFO] Player connected: Alex, xuid: 222\n"})
+
+	got := c.Events.Since(0)
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2: %+v", len(got), got)
+	}
+	if !got[0].Backfill {
+		t.Errorf("logHistory event Backfill = false, want true: %+v", got[0])
+	}
+	if got[1].Backfill {
+		t.Errorf("live stdout event Backfill = true, want false: %+v", got[1])
+	}
+}
+
 func TestConsoleIngestEvents_StdoutAndStderrResidualsAreIndependent(t *testing.T) {
 	c := testConsole()
 
