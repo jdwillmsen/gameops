@@ -317,6 +317,65 @@ func TestRejectedTokenIsLoggedNotFatal(t *testing.T) {
 	}
 }
 
+// 5xx means the agent itself is broken, not that the bot did anything wrong
+// -- the same as a dropped connection -- so it must warn as unreachable
+// rather than error as rejected.
+func TestServerErrorClassifiesAsUnreachable(t *testing.T) {
+	agent := &fakeAgent{state: presenceapi.StateParked, fail: http.StatusServiceUnavailable}
+	r, _, log := newTestReconciler(t, agent, presenceapi.StatePresent)
+	r.tick(context.Background())
+
+	lines := log.all("presence_fetch_unreachable")
+	if len(lines) != 1 {
+		t.Fatalf("presence_fetch_unreachable logged %d times, want once", len(lines))
+	}
+	if lines[0].level != "warn" || lines[0].fields["status"] != http.StatusServiceUnavailable {
+		t.Errorf("line = %+v, want warn with status %d", lines[0], http.StatusServiceUnavailable)
+	}
+}
+
+// 408 and 429 are the agent asking the bot to slow down or retry, not a bad
+// token or an unregistered actor -- they heal on their own, unlike the rest
+// of 4xx, so they must warn as unreachable rather than error as rejected.
+func TestTimeoutAndTooManyRequestsClassifyAsUnreachable(t *testing.T) {
+	for _, status := range []int{http.StatusRequestTimeout, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			agent := &fakeAgent{state: presenceapi.StateParked, fail: status}
+			r, _, log := newTestReconciler(t, agent, presenceapi.StatePresent)
+			r.tick(context.Background())
+
+			if lines := log.all("presence_fetch_rejected"); len(lines) != 0 {
+				t.Errorf("presence_fetch_rejected logged for status %d: %+v", status, lines)
+			}
+			lines := log.all("presence_fetch_unreachable")
+			if len(lines) != 1 || lines[0].level != "warn" || lines[0].fields["status"] != status {
+				t.Errorf("presence_fetch_unreachable = %+v, want one warn line with status %d", lines, status)
+			}
+		})
+	}
+}
+
+// The streak only re-logs on a kind change, so an unreachable agent that
+// starts rejecting the token must produce a second line rather than being
+// silently absorbed into the first streak.
+func TestFailureKindChangeLogsAgain(t *testing.T) {
+	agent := &fakeAgent{state: presenceapi.StateParked, fail: http.StatusServiceUnavailable}
+	r, _, log := newTestReconciler(t, agent, presenceapi.StatePresent)
+	r.tick(context.Background())
+
+	agent.with(func(f *fakeAgent) { f.fail = http.StatusUnauthorized })
+	r.tick(context.Background())
+
+	unreachable := log.all("presence_fetch_unreachable")
+	rejected := log.all("presence_fetch_rejected")
+	if len(unreachable) != 1 {
+		t.Errorf("presence_fetch_unreachable logged %d times, want once", len(unreachable))
+	}
+	if len(rejected) != 1 {
+		t.Errorf("presence_fetch_rejected logged %d times, want once after the kind changed", len(rejected))
+	}
+}
+
 func TestInvalidStateKeepsLastAnswer(t *testing.T) {
 	agent := &fakeAgent{state: presenceapi.StateParked}
 	r, _, log := newTestReconciler(t, agent, presenceapi.StatePresent)
@@ -375,6 +434,21 @@ func TestAlwaysPresentAdmitsAtOnceAndNeverCancels(t *testing.T) {
 	cancel()
 	if _, _, err := (AlwaysPresent{}).Admit(ctx); err == nil {
 		t.Error("AlwaysPresent admitted on a cancelled context")
+	}
+}
+
+// gate.go's contract is that Admit fails only when ctx ends, and does so
+// before admitting -- AlwaysPresent checks ctx.Err() first for the same
+// reason. Without that ordering here, a reconciler holding a present desired
+// state would hand back a session built on an already-cancelled context
+// instead of the error the caller is checking for.
+func TestAdmitReturnsCtxErrFirstEvenWhenDesiredIsPresent(t *testing.T) {
+	r, _, _ := newTestReconciler(t, &fakeAgent{state: presenceapi.StatePresent}, presenceapi.StatePresent)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, _, err := r.Admit(ctx); err == nil {
+		t.Error("Admit admitted on an already-cancelled context")
 	}
 }
 

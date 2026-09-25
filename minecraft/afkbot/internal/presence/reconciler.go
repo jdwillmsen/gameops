@@ -3,6 +3,7 @@ package presence
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sync"
 	"time"
 
@@ -142,6 +143,13 @@ func (r *Reconciler) Connected(c bool) {
 
 func (r *Reconciler) Admit(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	for {
+		// Checked before the desired state so a caller that raced shutdown
+		// against a present bot still gets ctx.Err() rather than a session
+		// built on an already-cancelled context -- matching AlwaysPresent.
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+
 		r.mu.Lock()
 		state, changed := r.desired, r.changed
 		r.mu.Unlock()
@@ -220,6 +228,11 @@ func classify(err error) (kind string, status int) {
 	switch {
 	case errors.Is(err, ErrInvalidResponse):
 		return "invalid", 0
+	case errors.As(err, &he) && (he.StatusCode == http.StatusRequestTimeout || he.StatusCode == http.StatusTooManyRequests):
+		// Unlike the rest of 4xx below, these mean the agent wants the bot to
+		// slow down or retry, not that the token or actor is wrong -- waiting
+		// can fix them, so they warn as unreachable rather than error.
+		return "unreachable", he.StatusCode
 	case errors.As(err, &he) && he.StatusCode >= 400 && he.StatusCode < 500:
 		return "rejected", he.StatusCode
 	case errors.As(err, &he):
