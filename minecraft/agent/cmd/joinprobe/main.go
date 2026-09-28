@@ -25,8 +25,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/joinprobe"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/joinprobe"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 func main() {

@@ -1187,8 +1187,8 @@ route serves and a 405 `invalid`, with `Allow`, for a wrong method. A database t
 acting on their last answer. A token bound to one actor (every
 `presence:report` token, and any bound `presence:write` token) may change
 only that actor and may never write a group. The request and response types
-live in the `github.com/jdwillmsen/minecraft-server-agent/presenceapi`
-module, which imports nothing beyond the standard library.
+live in the `github.com/jdwillmsen/gameops/internal/presenceapi` package,
+which imports nothing beyond the standard library.
 
 Every override write, removal and wake is also recorded in
 `minecraft.command_audit` with `command = 'presence'`. The `args` column

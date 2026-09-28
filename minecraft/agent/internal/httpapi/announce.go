@@ -14,10 +14,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/pgerr"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/pgerr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // AnnouncementPublisher stores an announcement and sends it to whoever is

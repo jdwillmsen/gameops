@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/toolset"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/wiki"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/toolset"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/wiki"
 )
 
 // partialMarker is the wording knowledge_lookup puts in front of an entry

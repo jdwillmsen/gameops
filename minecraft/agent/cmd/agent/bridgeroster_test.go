@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // fakeBridgeFeed is the console bridge as the roster follower reads it: a

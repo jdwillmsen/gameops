@@ -13,15 +13,15 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/audit"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/chat"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/ratelimit"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/liveness"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/audit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/ratelimit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/liveness"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 const (

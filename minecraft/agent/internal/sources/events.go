@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/pgerr"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/pgerr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // Publisher stores an announcement and sends it to whoever is online.

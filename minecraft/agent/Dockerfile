@@ -1,22 +1,21 @@
 FROM golang:1.27-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS build
 WORKDIR /src
 
-# The contract module is a local replace target, so go mod download needs
-# its go.mod before the rest of the source arrives.
+# Built from the repo root: the whole monorepo is one Go module, so the
+# module files live there, not beside this Dockerfile.
 COPY go.mod go.sum ./
-COPY presenceapi/go.mod presenceapi/
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent ./cmd/agent
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent ./minecraft/agent/cmd/agent
 # One codebase, one image: census runs as a scheduled job beside the
 # server rather than inside the agent process, so its binary rides along
 # here instead of getting a Dockerfile of its own.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/census ./cmd/census
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/census ./minecraft/agent/cmd/census
 # Same reasoning as census: the probe speaks the same Bedrock handshake this
 # module already implements, so it rides here rather than growing a second
 # image to pin, pull and keep in step with the protocol code it shares.
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/joinprobe ./cmd/joinprobe
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/joinprobe ./minecraft/agent/cmd/joinprobe
 
 # gophertunnel's RakNet implementation is pure Go - no cgo, no native
 # addon - so the only runtime requirement is the binary and TLS roots for

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // testLogger is a real *logging.Logger writing nowhere anyone asserts on;

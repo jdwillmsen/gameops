@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/chat"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/sources"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/sources"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // scheduleBook is the schedule store as this binary uses it: a schedule

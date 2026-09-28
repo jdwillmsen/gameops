@@ -14,9 +14,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // fakeJoinDeliverer is a small stand-in for AnnounceDeliverer: it returns

@@ -9,11 +9,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/chat"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/pgerr"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/pgerr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
 )
 
 const scheduleUsage = "Usage: !schedule add daily HH:MM [!now] [!urgent] <message>, !schedule add every <N>m|<N>h [!now] [!urgent] <message>, !schedule list, or !schedule del <id>. Times are UTC."

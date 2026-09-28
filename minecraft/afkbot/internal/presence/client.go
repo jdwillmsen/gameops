@@ -13,7 +13,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 // Presence and error bodies are a few hundred bytes. The cap stops a

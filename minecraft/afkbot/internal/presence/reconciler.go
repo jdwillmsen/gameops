@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-afk-bot/internal/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
 )
 
 // Logger is the subset of *logging.Logger the reconciler writes to.

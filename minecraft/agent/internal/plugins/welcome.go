@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/bus"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/bus"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // Welcome greets a genuinely new arrival with one deterministic message.

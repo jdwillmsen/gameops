@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // Run probes address every interval until ctx ends, publishing each result.

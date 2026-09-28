@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/audit"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/config"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/presence"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/audit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/presence"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
 )
 
 func unusedBridge() *adapters.BridgeClient {

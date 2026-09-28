@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // Voice is what a Deliverer speaks through. Declared here — structurally

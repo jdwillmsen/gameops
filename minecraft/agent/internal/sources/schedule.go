@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/pgerr"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/pgerr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // ScheduleRunner is the part of the schedule store the loop needs: what is

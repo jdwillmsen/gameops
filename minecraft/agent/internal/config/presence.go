@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
 )
 
 // PresenceActor is one entry of PRESENCE_ACTORS: an account that puts a

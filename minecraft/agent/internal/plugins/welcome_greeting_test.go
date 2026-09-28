@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
 )
 
 var now = time.Date(2026, 9, 8, 3, 0, 0, 0, time.UTC)

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
 )
 
 func TestPresenceGauges(t *testing.T) {

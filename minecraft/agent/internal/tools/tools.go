@@ -14,7 +14,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
 )
 
 // MaxToolResultChars bounds what one tool feeds back into the model's

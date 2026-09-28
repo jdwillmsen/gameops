@@ -9,7 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 func TestRunProbesImmediatelyAndRepeats(t *testing.T) {

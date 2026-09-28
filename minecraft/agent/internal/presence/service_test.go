@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 func parkReq(version int64) Request {

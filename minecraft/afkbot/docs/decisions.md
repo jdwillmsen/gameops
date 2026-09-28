@@ -93,6 +93,16 @@ refuses, the bot keeps acting on the last answer — or on `PRESENCE_DEFAULT`
 before the first — because a bot that followed the agent's health would drop
 the farms every time the agent restarted.
 
+## 2026-09-28: the contract is a package in the gameops module
+
+The bot and the agent now build from one Go module, so the first two reasons
+above no longer apply: there is one set of module versions for every
+component, and the contract has no version of its own. It lives at
+`internal/presenceapi` in the repo root. The third reason still holds. The
+contract is imported, never copied, and `internal/presence/contract_test.go`
+still decodes the contract's own golden files, now found through the package
+directory.
+
 ## Shared packages are copied, not imported
 
 `internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcproto`

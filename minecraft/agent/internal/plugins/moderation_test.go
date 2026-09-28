@@ -10,12 +10,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/chat"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/moderation"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/moderation"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 const (

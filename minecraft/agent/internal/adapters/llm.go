@@ -12,10 +12,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/tools"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/tools"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // MaxReplyChars is a readability and cost budget, not a protocol limit.

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // One leader parks the agent for a while and a bot indefinitely, then goes

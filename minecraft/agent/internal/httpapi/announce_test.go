@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 const testToken = "s3cret-token"

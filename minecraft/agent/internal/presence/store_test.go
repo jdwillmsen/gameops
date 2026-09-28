@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 // With no database there is nothing to read an override from, so every call

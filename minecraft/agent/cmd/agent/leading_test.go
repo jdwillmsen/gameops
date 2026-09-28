@@ -14,11 +14,11 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/httpapi"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/mcauth"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/httpapi"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
 )
 
 // fakeTerm is the leadership a live agent holds, with the two facts the

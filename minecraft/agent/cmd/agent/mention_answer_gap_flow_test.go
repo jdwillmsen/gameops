@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/bus"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/bus"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // consoleBridge stands in for mc-console-bridge, which is a separate service

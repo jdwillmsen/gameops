@@ -4,12 +4,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/config"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/sources"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/sources"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // announcingProfiles is the profile store as this binary uses it: every

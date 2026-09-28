@@ -1,0 +1,8 @@
+/bin/
+/out/
+*.exe
+*.log
+*.out
+node_modules
+# What `go build` writes when run inside a single-package component directory.
+/minecraft/bridge/mc-console-bridge

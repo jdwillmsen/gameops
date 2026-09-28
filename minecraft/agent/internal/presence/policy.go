@@ -3,8 +3,8 @@ package presence
 import (
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
 )
 
 // Join is a player arriving on the server.

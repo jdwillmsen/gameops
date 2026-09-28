@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/config"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
 )
 
 // flakyDatabase refuses its first `failures` opens with err, then connects.

@@ -26,7 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/oauth2"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/mcauth"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
 )
 
 func livePool(t *testing.T) *pgxpool.Pool {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/tools"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/tools"
 )
 
 // The questions this path exists for, and the ones it must keep its hands

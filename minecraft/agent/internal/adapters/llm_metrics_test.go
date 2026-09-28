@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/tools"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/tools"
 )
 
 const toolCallsMetric = "mc_agent_tool_calls_total"

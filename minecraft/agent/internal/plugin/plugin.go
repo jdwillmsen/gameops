@@ -18,13 +18,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/bus"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/knowledge"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/moderation"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/waypoints"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/bus"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/knowledge"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/moderation"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/waypoints"
 )
 
 // DefaultDispatchTimeout bounds how long a single command's Run may take

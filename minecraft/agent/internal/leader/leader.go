@@ -61,7 +61,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // DefaultPoll is how often a standby asks whether the lock has come free.

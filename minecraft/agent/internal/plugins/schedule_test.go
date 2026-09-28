@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/chat"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 )
 
 type fakeScheduleStore struct {

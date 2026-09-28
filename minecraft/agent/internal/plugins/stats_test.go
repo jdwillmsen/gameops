@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 )
 
 type fakeFacts struct {

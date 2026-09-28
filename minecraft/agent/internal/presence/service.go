@@ -9,10 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/audit"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/audit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 var (

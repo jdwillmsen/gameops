@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 func threeActors() []Actor {

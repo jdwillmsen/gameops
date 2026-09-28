@@ -14,8 +14,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/audit"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/audit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // countingAudit is an audit.Store that fails every write with a fixed error

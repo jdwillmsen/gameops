@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 )
 
 // Stats provides read-only server information commands.

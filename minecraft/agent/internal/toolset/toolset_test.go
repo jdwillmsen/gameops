@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/knowledge"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/tools"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/waypoints"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/knowledge"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/tools"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/waypoints"
 )
 
 func TestBuildToolsetOmitsAbsentCapabilities(t *testing.T) {

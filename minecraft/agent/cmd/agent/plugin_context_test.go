@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/adapters"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/announce"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/config"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/knowledge"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/moderation"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/roster"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/store"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/waypoints"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/wiki"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/adapters"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/knowledge"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/moderation"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/waypoints"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/wiki"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // testPluginContext builds the context exactly as main does with no database

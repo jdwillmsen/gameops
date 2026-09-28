@@ -1,13 +1,13 @@
-module github.com/jdwillmsen/minecraft-server-agent
+module github.com/jdwillmsen/gameops
 
 go 1.27
 
 toolchain go1.27.1
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/df-mc/goleveldb v1.1.9
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/jdwillmsen/minecraft-server-agent/presenceapi v0.1.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/common v0.71.0
 	github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6
@@ -19,7 +19,6 @@ require (
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
 	github.com/df-mc/go-nethernet v1.0.20 // indirect
 	github.com/df-mc/go-playfab/v2 v2.0.3 // indirect
@@ -64,5 +63,3 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
-
-replace github.com/jdwillmsen/minecraft-server-agent/presenceapi => ./presenceapi
