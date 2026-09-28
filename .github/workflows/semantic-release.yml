@@ -1,0 +1,121 @@
+name: Semantic Release
+
+# Every commit that lands on main and passes CI is a release candidate, once
+# per component. semantic-release reads the Conventional Commit history since
+# that component's last tag, narrowed by tools/release/component-filter.mjs to
+# the commits that affect it, and decides whether it amounts to a new
+# version; if it does, it tags <tag>-v<version>, writes the GitHub release,
+# and the publish job below builds exactly that tag.
+#
+# Chained off CI with workflow_run rather than running on push so a release can
+# never race ahead of, or skip, the checks that gate it.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+# Serialized, never cancelled: a release that has tagged must finish publishing
+# its image, or the tag names a version no registry has. A newer run queued
+# behind this one supersedes any older queued run, which is safe -- it releases
+# everything the older one would have.
+concurrency:
+  group: semantic-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # workflow_run fires for every CI completion, including failures and pull
+    # requests whose head branch happens to be called main (from a fork, say).
+    # Only a green push to this repository's main is a release candidate.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      # Tags and GitHub releases. Nothing else: the success and failure comments
+      # that would need issues and pull-requests write are turned off in
+      # .releaserc.json.
+      contents: write
+    outputs:
+      tags: ${{ steps.released.outputs.tags }}
+    steps:
+      # Under workflow_run, checkout defaults to the newest commit on main, not
+      # the one CI just passed -- if main moved while CI ran, that would tag an
+      # untested commit. Check out the exact commit CI ran against instead. If
+      # main has since moved on, semantic-release sees the local branch is
+      # behind and releases nothing; the newer commit's own CI run will.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          # The whole history and every tag: each next version is derived from
+          # the commits since that component's last tag.
+          fetch-depth: 0
+          # semantic-release authenticates its tag push with GITHUB_TOKEN
+          # itself; leaving checkout's credential in the git config is just a
+          # second copy of it on disk.
+          persist-credentials: false
+
+      # The filter plugin asks tools/components which commits belong to each
+      # component.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # semantic-release 25 needs Node 22.14 or later, newer than the runner's
+      # preinstalled Node.
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+
+      # A lockfile rather than npx pins: the local filter plugin imports the
+      # analyzer and notes generator, so they must resolve from a real tree.
+      - run: npm ci --prefix tools/release --no-fund --no-audit
+
+      # One run per component, in series so their tag pushes never race, and
+      # a failing component does not stop the rest. The exec plugin appends
+      # each tag it pushes to RELEASED_FILE as it goes, so a failure cannot
+      # hide a tag already pushed.
+      - id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASED_FILE: ${{ runner.temp }}/released
+        run: |
+          : > "$RELEASED_FILE"
+          tools/release/release-all.sh
+
+      # always(): an already-pushed tag must reach the publish job even if a
+      # later component's run failed, or the tag names an image that was never
+      # built.
+      - id: released
+        if: always()
+        env:
+          RELEASED_FILE: ${{ runner.temp }}/released
+        run: |
+          tags="$(jq -Rsc 'split("\n") | map(select(length > 0) | split(" ")[1])' "$RELEASED_FILE" 2>/dev/null || echo '[]')"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "released: $tags"
+
+  # A tag pushed with GITHUB_TOKEN does not start other workflows, so the tags
+  # semantic-release just pushed never fire release.yml's own tag trigger.
+  # Calling it here keeps one image-build definition for both paths.
+  publish:
+    needs: release
+    if: always() && needs.release.outputs.tags != '' && needs.release.outputs.tags != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.release.outputs.tags) }}
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ matrix.tag }}
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

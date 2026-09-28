@@ -140,21 +140,25 @@ docker build -t mc-console-bridge .
 
 The binary is static (`CGO_ENABLED=0`) and ships on a distroless nonroot
 base, so the sidecar image carries no shell. CI runs these same checks
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml` at the repo root).
 
 ## Releases
 
 Releases are cut by
-[`semantic-release.yml`](.github/workflows/semantic-release.yml), not by hand.
-After CI passes on a push to `main`, it reads the
-[Conventional Commits](https://www.conventionalcommits.org/) since the last
-tag: `feat` cuts a minor version; `fix`, `perf` and `chore(deps)` a patch (so
-dependency security fixes ship); `ci`, `docs`, `test` and other `chore`
-commits cut nothing. A breaking change cuts a major. When it cuts a version it
-tags `v<version>` and writes the GitHub release, then hands the version to
-`release.yml`. Pushing a `v<version>` tag by hand still works too.
+[`semantic-release.yml`](../../.github/workflows/semantic-release.yml), not by
+hand. After CI passes on a push to `main`, it reads the
+[Conventional Commits](https://www.conventionalcommits.org/) since this
+component's last tag that touch this component (its directory, a path in
+`depends` in its `component.yaml`, or `go.mod`/`go.sum`): `feat` cuts a minor
+version; `fix`, `perf`, `build` and `chore(deps)` a patch (so dependency
+security fixes ship); `ci`, `docs`, `test` and other `chore` commits cut
+nothing. A breaking change cuts a major. When it cuts a version it tags
+`bridge-v<version>`, writes the GitHub release, and runs
+[`release.yml`](../../.github/workflows/release.yml); pushing a
+`bridge-v<version>` tag by hand still runs `release.yml` directly.
 
-Either way, `release.yml` runs CI against that tag and then publishes a
+Either way, `release.yml` runs this component's tests against that tag and
+then publishes a
 `linux/amd64` image to GHCR, then mirrors it to Docker Hub:
 
 ```
