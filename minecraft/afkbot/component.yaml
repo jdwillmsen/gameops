@@ -1,0 +1,16 @@
+name: afkbot
+kind: service
+language: go
+depends:
+  - internal/presenceapi/
+tasks:
+  build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/afkbot/...
+  test: go test -race ./minecraft/afkbot/...
+  lint: test -z "$(gofmt -l minecraft/afkbot)" && go vet ./minecraft/afkbot/...
+release:
+  tag: afkbot
+  artifacts: [image]
+  image:
+    name: minecraft-afk-bot
+    description: Headless Minecraft Bedrock client that holds a player slot so mob farms keep ticking
+    short_description: Headless Minecraft Bedrock client that holds a player slot so mob farms keep ticking
