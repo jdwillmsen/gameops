@@ -1,0 +1,111 @@
+name: Protocol Check
+
+# Dispatched hourly by the jdw-deployments cluster's version-check CronJob,
+# which is the only thing that knows the production server's current
+# version — this repo's GitHub-hosted runner has no network path to the
+# LAN-only server itself.
+on:
+  workflow_dispatch:
+    inputs:
+      production_version:
+        description: Bedrock version string the production server currently reports (e.g. 1.26.45)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Resolved here rather than inside protocolcheck: the binary is kept free
+      # of network calls so it stays runnable offline and in tests.
+      - id: upstream
+        run: |
+          set -euo pipefail
+          version="$(go list -m -f '{{.Version}}' github.com/sandertv/gophertunnel@latest)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "newest gophertunnel upstream: ${version}"
+
+      # Exits non-zero only when a newer gophertunnel exists to bump to. A gap
+      # that upstream has not closed yet warns instead, so a red run always
+      # means there is something to do.
+      - id: check
+        env:
+          PRODUCTION_VERSION: ${{ inputs.production_version }}
+        run: |
+          go run ./minecraft/afkbot/cmd/protocolcheck \
+            -production-version "${{ inputs.production_version }}" \
+            -upstream-version "${{ steps.upstream.outputs.version }}"
+
+      # Opens the bump PR as RELEASE_PR_TOKEN, not the default GITHUB_TOKEN:
+      # GitHub suppresses workflow runs triggered by the default token to
+      # prevent recursive-workflow loops, so ci.yml would never run on the PR
+      # and its required checks could never report.
+      - if: steps.check.outputs.status == 'behind'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PRODUCTION_VERSION: ${{ inputs.production_version }}
+          LIBRARY_VERSION: ${{ steps.check.outputs.library_version }}
+          VENDORED_VERSION: ${{ steps.check.outputs.vendored_version }}
+          UPSTREAM_VERSION: ${{ steps.check.outputs.upstream_version }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="chore/bump-gophertunnel-${UPSTREAM_VERSION}"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "$BRANCH already exists; nothing to open."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          go get "github.com/sandertv/gophertunnel@${UPSTREAM_VERSION}"
+          go mod tidy
+
+          # The bump is the whole point of the branch -- if the module graph did
+          # not move, upstream and vendored disagreed only as strings and there
+          # is nothing to review.
+          if git diff --quiet -- go.mod go.sum; then
+            echo "go.mod/go.sum unchanged after bumping to ${UPSTREAM_VERSION}; nothing to open."
+            exit 0
+          fi
+
+          git checkout -b "$BRANCH"
+          git add go.mod go.sum
+          git commit -m "chore(deps): bump gophertunnel ${VENDORED_VERSION} -> ${UPSTREAM_VERSION}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(deps): bump gophertunnel to ${UPSTREAM_VERSION}" \
+            --body "$(cat <<EOF
+          Production reports **${PRODUCTION_VERSION}**; the bots speak **${LIBRARY_VERSION}** on gophertunnel \`${VENDORED_VERSION}\`, and upstream has published \`${UPSTREAM_VERSION}\`.
+
+          Opened automatically by [\`protocol-check.yml\`](../actions/workflows/protocol-check.yml) after the jdw-deployments version-check CronJob reported the server's current version.
+
+          gophertunnel exposes a single protocol constant rather than a table, so this bump may or may not close the gap by version string -- check what the new release actually speaks before assuming the bots reconnect.
+
+          - [ ] Verify a bot built from this branch can connect and authenticate against the production server (Xbox Live auth is not exercised in CI)
+          - [ ] Merging releases every Go component that uses gophertunnel
+          EOF
+          )"

@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Which components this change touches, decided by the same tool that
+  # decides what a release ships.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - id: plan
+        env:
+          # PRs diff against their base; pushes against the previous tip. An
+          # empty or all-zero base (manual run, new branch) runs everything.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          go run ./tools/components validate
+          matrix="$(go run ./tools/components affected -base "${BASE:-}" -head HEAD)"
+          echo "$matrix" | jq .
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  component:
+    needs: plan
+    if: needs.plan.outputs.matrix != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      # Every component gets Go: the release glue and repo tooling shell out
+      # to tools/components even when the component itself is not Go.
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - if: matrix.language == 'node' || matrix.language == 'typescript'
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 24
+      - name: lint
+        if: matrix.lint != ''
+        run: ${{ matrix.lint }}
+      - name: test
+        run: ${{ matrix.test }}
+      - name: build
+        run: ${{ matrix.build }}
+      - if: matrix.image
+        uses: docker/setup-buildx-action@v4
+      - name: image (no push)
+        if: matrix.image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dir }}/Dockerfile
+          push: false
+
+  # The one required check. Its name never changes, however many component
+  # jobs a change fans out to; a change touching no component skips them and
+  # still passes here.
+  ci-ok:
+    if: always()
+    needs: [plan, component]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          PLAN: ${{ needs.plan.result }}
+          COMPONENTS: ${{ needs.component.result }}
+        run: |
+          echo "plan=$PLAN components=$COMPONENTS"
+          [[ "$PLAN" == success ]] && [[ "$COMPONENTS" == success || "$COMPONENTS" == skipped ]]
