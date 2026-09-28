@@ -1,0 +1,16 @@
+name: agent
+kind: service
+language: go
+depends:
+  - internal/presenceapi/
+tasks:
+  build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/agent/...
+  test: go test -race ./minecraft/agent/...
+  lint: test -z "$(gofmt -l minecraft/agent)" && go vet ./minecraft/agent/...
+release:
+  tag: agent
+  artifacts: [image]
+  image:
+    name: minecraft-server-agent
+    description: "Minecraft Bedrock server chat agent: tool-calling LLM assistant, welcomes, stats, knowledge lookup"
+    short_description: Minecraft Bedrock chat agent - tool-calling LLM assistant, welcomes, stats

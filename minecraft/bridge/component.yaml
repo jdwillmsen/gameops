@@ -1,0 +1,14 @@
+name: bridge
+kind: service
+language: go
+tasks:
+  build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/bridge/...
+  test: go test -race ./minecraft/bridge/...
+  lint: test -z "$(gofmt -l minecraft/bridge)" && go vet ./minecraft/bridge/...
+release:
+  tag: bridge
+  artifacts: [image]
+  image:
+    name: mc-console-bridge
+    description: Sidecar exposing the Bedrock server console over HTTP behind a command allowlist
+    short_description: Sidecar exposing the Bedrock server console over HTTP behind a command allowlist

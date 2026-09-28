@@ -1,0 +1,7 @@
+name: components
+kind: cli
+language: go
+tasks:
+  build: go build -o /dev/null ./tools/components
+  test: go test -race ./tools/components
+  lint: test -z "$(gofmt -l tools/components)" && go vet ./tools/components
