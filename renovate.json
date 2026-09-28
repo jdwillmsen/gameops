@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Runs as the Renovate GitHub App, whose commits GitHub signs, which verify-pr-signatures requires.",
+    "The shared jdwlabs presets batch non-majors weekly and automerge them once required checks pass. The two rules below keep a human on the updates where a green build does not prove the bots can still reach the server."
+  ],
+  "extends": ["github>jdwlabs/.github", "github>jdwlabs/.github:automerge"],
+  "packageRules": [
+    {
+      "description": [
+        "gophertunnel carries the Bedrock packet schema the agent and the bots speak; an upgrade changes which server versions they can reach at all.",
+        "Reviewed alone, at any time rather than in the weekly batch, and never automerged: protocol-check opens this bump when production moves past what the library speaks."
+      ],
+      "matchPackageNames": ["github.com/sandertv/gophertunnel"],
+      "groupName": null,
+      "schedule": ["at any time"],
+      "automerge": false
+    },
+    {
+      "description": "The golang build image must not run ahead of the go directive in go.mod, so a major or minor bump is raised together with go.mod, by a human.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["golang"],
+      "matchUpdateTypes": ["major", "minor"],
+      "groupName": null,
+      "automerge": false
+    }
+  ],
+  "platformAutomerge": true
+}
