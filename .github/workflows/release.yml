@@ -1,0 +1,212 @@
+name: Release
+
+on:
+  push:
+    tags: ['*-v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Full release tag, e.g. agent-v0.24.0; it must already exist
+        required: true
+  # How semantic-release.yml publishes the tags it just pushed: a GITHUB_TOKEN
+  # tag push cannot fire the tag trigger above.
+  workflow_call:
+    inputs:
+      tag:
+        description: Full release tag, e.g. agent-v0.24.0
+        type: string
+        required: true
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything below is per component, and all of it comes from the tag: its
+  # prefix names the component, whose component.yaml supplies the image name,
+  # descriptions and Dockerfile; its semver is the image version. A tag that
+  # does not parse, or names no image component, stops here.
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.facts.outputs.tag }}
+      dir: ${{ steps.facts.outputs.dir }}
+      version: ${{ steps.facts.outputs.version }}
+      test: ${{ steps.facts.outputs.test }}
+      image: ${{ steps.facts.outputs.image }}
+      description: ${{ steps.facts.outputs.description }}
+      short_description: ${{ steps.facts.outputs.short_description }}
+    steps:
+      # A manual dispatch runs on the dispatching branch, so building its
+      # checkout would publish branch code under a release version. Checking
+      # out the tag makes a re-publish rebuild exactly what was released, and
+      # fails when no such tag exists.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - id: facts
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          facts="$(go run ./tools/components get -release-tag "$TAG")"
+          echo "$facts"
+          if ! grep -q '^image=' <<<"$facts"; then
+            echo "::error::$TAG releases no image"
+            exit 1
+          fi
+          { echo "tag=$TAG"; echo "$facts"; } >> "$GITHUB_OUTPUT"
+
+  # CI already passed on the commit semantic-release tagged, but a hand-pushed
+  # or dispatched tag skips that, so the component's own tests run again at
+  # exactly the tagged tree before anything is published.
+  verify:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: ${{ needs.resolve.outputs.test }}
+
+  publish:
+    needs: [resolve, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # metadata-action copies custom `labels` into neither manifest nor index
+      # annotations, so this one set feeds both inputs to keep them from
+      # drifting. Licenses is explicit because GitHub does not recognise
+      # PolyForm and would report NOASSERTION.
+      IMAGE_METADATA: |
+        org.opencontainers.image.title=${{ needs.resolve.outputs.image }}
+        org.opencontainers.image.description=${{ needs.resolve.outputs.description }}
+        org.opencontainers.image.vendor=jdwillmsen
+        org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+        org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/tree/main/${{ needs.resolve.outputs.dir }}#readme
+    outputs:
+      revision: ${{ steps.revision.outputs.value }}
+    steps:
+      - uses: docker/setup-buildx-action@v4.4.1
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+
+      - id: revision
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The version tag only, never `latest`: the chart pins a tag, and a
+      # moving one would reintroduce a silent-upgrade hazard on stateful,
+      # always-connected processes. The sha- tag names the exact source
+      # revision without implying an order.
+      - id: meta
+        uses: docker/metadata-action@v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ needs.resolve.outputs.image }}
+          tags: |
+            type=raw,value=${{ needs.resolve.outputs.version }}
+            type=raw,value=sha-${{ steps.revision.outputs.value }}
+          labels: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+          annotations: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+
+      # The deployment target is amd64-only Talos nodes, so a multi-arch build
+      # would cost CI time for a platform nothing pulls. VERSION is read by
+      # the components that stamp their binary; the others ignore it.
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: ${{ needs.resolve.outputs.dir }}/Dockerfile
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: VERSION=${{ needs.resolve.outputs.version }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=${{ needs.resolve.outputs.image }}
+          cache-to: type=gha,mode=max,scope=${{ needs.resolve.outputs.image }}
+          provenance: mode=max
+          sbom: true
+
+  # Docker Hub is a second public registry for the same image; the cluster
+  # keeps pulling from ghcr.io. It runs as its own job after the ghcr.io push
+  # so a missing credential, a revoked token, or a Docker Hub outage fails
+  # loudly here without ever blocking the primary publish. It is skipped until
+  # a human sets the DOCKERHUB_USERNAME repo variable and DOCKERHUB_TOKEN
+  # secret, because CI must not mint that credential itself.
+  mirror-dockerhub:
+    needs: [resolve, publish]
+    if: vars.DOCKERHUB_USERNAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # With one source and no --annotation or --platform, imagetools pushes
+      # the source index bytes unchanged, so the Docker Hub digest matches
+      # ghcr.io and the index annotations and attestation manifests come
+      # along. Passing --annotation here would rebuild the index, change the
+      # digest, and keep only the annotations given on the command line.
+      - env:
+          SOURCE: ghcr.io/${{ github.repository_owner }}/${{ needs.resolve.outputs.image }}:${{ needs.resolve.outputs.version }}
+          TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ needs.resolve.outputs.image }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          REVISION: ${{ needs.publish.outputs.revision }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$TARGET:$VERSION" \
+            --tag "$TARGET:sha-$REVISION" \
+            "$SOURCE"
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+
+      # Docker Hub has no equivalent of reading the description from image
+      # annotations, so the Overview page is pushed separately. That API only
+      # accepts a personal access token with Read, Write and Delete scope, so
+      # DOCKERHUB_TOKEN needs all three even though the image copy needs less.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/${{ needs.resolve.outputs.image }}
+          readme-filepath: ./${{ needs.resolve.outputs.dir }}/README.docker.md
+          short-description: ${{ needs.resolve.outputs.short_description }}
