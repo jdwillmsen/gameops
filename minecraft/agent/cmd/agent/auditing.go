@@ -4,10 +4,10 @@ import (
 	"context"
 	"sync"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/audit"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/pgerr"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/audit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/pgerr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // auditTrail is the command audit store as this binary uses it: the same

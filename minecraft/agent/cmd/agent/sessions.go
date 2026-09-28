@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 // sessionGate decides whether the live agent should be in the world. It is

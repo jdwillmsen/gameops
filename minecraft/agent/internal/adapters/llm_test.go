@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/tools"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/tools"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 func newTestClient(url string) *LLMClient {

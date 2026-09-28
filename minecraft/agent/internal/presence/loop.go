@@ -5,11 +5,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/pgerr"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/pgerr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 const (

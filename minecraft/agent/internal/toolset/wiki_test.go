@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/wiki"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/wiki"
 )
 
 type stubWiki struct {

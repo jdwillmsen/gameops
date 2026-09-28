@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/tools"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/tools"
 )
 
 func TestRefusalSentenceCarriesDeclinedActsOnly(t *testing.T) {

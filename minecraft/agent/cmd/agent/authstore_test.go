@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/config"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/mcauth"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
 )
 
 // sharedStore stands in for the database-backed store, which is the only

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 var t0 = time.Date(2026, 9, 23, 18, 0, 0, 0, time.UTC)

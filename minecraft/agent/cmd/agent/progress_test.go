@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/chat"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
 )
 
 func TestProgressHookWaitsThenSendsOnce(t *testing.T) {

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/knowledge"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/toolset"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/waypoints"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/wiki"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/knowledge"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/toolset"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/waypoints"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/wiki"
 )
 
 // The fixture world every case is asked in. Fixed rather than read from a

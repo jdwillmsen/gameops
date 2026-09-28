@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/df-mc/goleveldb/leveldb"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/census"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/census"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 )
 

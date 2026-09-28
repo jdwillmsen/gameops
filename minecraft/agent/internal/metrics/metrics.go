@@ -20,7 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/moderation"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/moderation"
 )
 
 // moderationRules and moderationActions are the schema's own sets, so the

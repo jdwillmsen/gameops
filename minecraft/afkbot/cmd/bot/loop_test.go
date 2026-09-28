@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-afk-bot/internal/config"
-	"github.com/jdwillmsen/minecraft-afk-bot/internal/logging"
-	"github.com/jdwillmsen/minecraft-afk-bot/internal/presence"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/presence"
 )
 
 // fakeGate admits once per value sent on allow, and parks the current

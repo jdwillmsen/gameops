@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 // ErrDisabled is every Store call with no database configured.

@@ -1,4 +1,4 @@
-// Forked from github.com/jdwillmsen/minecraft-server-agent/pkg/mcauth.
+// Forked from github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth.
 //
 // Upstream has since moved the token cache behind a Store so its warm standby
 // can read it. This bot runs one process per account and has no standby, so it

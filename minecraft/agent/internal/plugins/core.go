@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 )
 
 // Core provides command discovery (!help) and a server check (!ping).

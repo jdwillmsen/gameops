@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/wiki"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/wiki"
 )
 
 // Config is the agent's fully-parsed runtime configuration.

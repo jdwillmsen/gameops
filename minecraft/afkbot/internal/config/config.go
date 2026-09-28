@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
 // Bedrock's maximum tick-distance, and the largest radius measured as granted

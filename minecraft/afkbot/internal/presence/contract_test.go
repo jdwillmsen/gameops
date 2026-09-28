@@ -14,25 +14,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
 )
 
-const contractModule = "github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+const contractPackage = "github.com/jdwillmsen/gameops/internal/presenceapi"
 
-// goldenDir finds the agent's golden files inside the pinned module, so this
-// test reads the very bytes the agent's own contract test reads at that
-// version rather than a copy that could drift.
+// goldenDir finds the contract package's golden files, so this test reads the
+// very bytes the contract's own test reads rather than a copy that could
+// drift.
 func goldenDir(t *testing.T) string {
 	t.Helper()
-	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", contractModule).Output()
+	out, err := exec.Command("go", "list", "-f", "{{.Dir}}", contractPackage).Output()
 	if err != nil {
-		t.Fatalf("go list %s: %v", contractModule, err)
+		t.Fatalf("go list %s: %v", contractPackage, err)
 	}
-	dir := strings.TrimSpace(string(out))
-	if dir == "" {
-		t.Fatalf("%s is not downloaded; run go mod download", contractModule)
-	}
-	return filepath.Join(dir, "testdata")
+	return filepath.Join(strings.TrimSpace(string(out)), "testdata")
 }
 
 func golden(t *testing.T, name string) []byte {

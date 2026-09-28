@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/ratelimit"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/text"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/ratelimit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/text"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 const (

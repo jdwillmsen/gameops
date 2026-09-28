@@ -8,7 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/metrics/metricstest"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
 )
 
 // Every name here is a contract with dashboards and alerts built elsewhere

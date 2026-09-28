@@ -1,4 +1,4 @@
-// Copied from github.com/jdwillmsen/minecraft-server-agent/pkg/mcproto.
+// Copied from github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto.
 //
 // Copied rather than imported: importing would make the agent's dependency
 // floors this bot's, and put every agent release up for review here, to share

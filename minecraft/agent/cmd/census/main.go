@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/census"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/census"
 )
 
 func main() {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/plugin"
-	"github.com/jdwillmsen/minecraft-server-agent/internal/waypoints"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/waypoints"
 )
 
 // emptyWaypoints is an enabled store with nothing saved.

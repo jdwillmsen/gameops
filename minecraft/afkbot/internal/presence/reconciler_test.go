@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jdwillmsen/minecraft-afk-bot/internal/logging"
-	"github.com/jdwillmsen/minecraft-server-agent/presenceapi"
+	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
 )
 
 // fakeAgent serves the two bot routes for afk-bot-1 the way the contract

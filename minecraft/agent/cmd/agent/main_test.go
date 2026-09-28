@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/jdwillmsen/minecraft-server-agent/internal/config"
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
 
 func TestNextDelay_ResetsAfterAStableSession(t *testing.T) {
@@ -365,9 +365,9 @@ func TestNewWiki_EnabledReturnsAWorkingClient(t *testing.T) {
 
 func TestWikiUserAgentNamesARealBuildOnly(t *testing.T) {
 	for version, want := range map[string]string{
-		"v1.4.0":  "minecraft-server-agent/v1.4.0 (+https://github.com/jdwillmsen/minecraft-server-agent)",
-		"(devel)": "minecraft-server-agent (+https://github.com/jdwillmsen/minecraft-server-agent)",
-		"":        "minecraft-server-agent (+https://github.com/jdwillmsen/minecraft-server-agent)",
+		"v1.4.0":  "minecraft-server-agent/v1.4.0 (+https://github.com/jdwillmsen/gameops/minecraft/agent)",
+		"(devel)": "minecraft-server-agent (+https://github.com/jdwillmsen/gameops/minecraft/agent)",
+		"":        "minecraft-server-agent (+https://github.com/jdwillmsen/gameops/minecraft/agent)",
 	} {
 		if got := wikiUserAgent(version); got != want {
 			t.Errorf("wikiUserAgent(%q) = %q, want %q", version, got, want)

@@ -33,7 +33,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
-	"github.com/jdwillmsen/minecraft-server-agent/pkg/mcproto"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 )
 
 // Stage is how far a probe got. The values are ordered, so an alert can say
