@@ -48,9 +48,9 @@ docker buildx imagetools inspect jdwillmsen/minecraft-afk-bot:<version> --format
 The bot needs `MC_HOST`, `MC_USERNAME`, a writable `/data` volume for the auth
 cache, and a one-time device-code login by hand. Every variable, the log events
 and the first-run steps are documented on GitHub:
-<https://github.com/jdwillmsen/minecraft-afk-bot#readme>
+<https://github.com/jdwillmsen/gameops/tree/main/minecraft/afkbot#readme>
 
 ## Source and license
 
-Source: <https://github.com/jdwillmsen/minecraft-afk-bot>
+Source: <https://github.com/jdwillmsen/gameops/tree/main/minecraft/afkbot>
 License: [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)

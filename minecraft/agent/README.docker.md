@@ -37,9 +37,9 @@ an SBOM.
 
 Environment variables, the plugin list, the database schema and the release
 process are documented in the GitHub README:
-<https://github.com/jdwillmsen/minecraft-server-agent#readme>
+<https://github.com/jdwillmsen/gameops/tree/main/minecraft/agent#readme>
 
 ## Source and license
 
-Source: <https://github.com/jdwillmsen/minecraft-server-agent>
+Source: <https://github.com/jdwillmsen/gameops/tree/main/minecraft/agent>
 License: PolyForm Noncommercial 1.0.0

@@ -17,7 +17,7 @@ tool-calling LLM answer path, knowledge lookup, moderation audit.
 
 It also does **not** write to the server console directly. All server-voice
 output (`tellraw`, `say`, ...) goes through
-[`mc-console-bridge`](https://github.com/jdwillmsen/mc-console-bridge), a
+[`mc-console-bridge`](https://github.com/jdwillmsen/gameops/tree/main/minecraft/bridge), a
 separate sidecar living in the server pod. Splitting the two repos makes
 that boundary a repo boundary, not just a code boundary: this repo can carry
 an LLM and read-only tools; only the bridge can ever write to the console.
