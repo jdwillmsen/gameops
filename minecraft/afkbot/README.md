@@ -13,7 +13,7 @@ That is the whole job. It does not read chat, answer questions, run commands or
 persist anything — [`minecraft-server-agent`][agent] does those. The process the
 farms depend on is kept with as little in it as possible to go wrong.
 
-[agent]: https://github.com/jdwillmsen/minecraft-server-agent
+[agent]: https://github.com/jdwillmsen/gameops/tree/main/minecraft/agent
 
 ## Configuration
 

@@ -48,9 +48,9 @@ docker buildx imagetools inspect jdwillmsen/mc-console-bridge:<version> --format
 
 Environment variables, the HTTP API, the command allowlist and the console
 protocol are documented in the
-[GitHub README](https://github.com/jdwillmsen/mc-console-bridge#readme).
+[GitHub README](https://github.com/jdwillmsen/gameops/tree/main/minecraft/bridge#readme).
 
 ## Source and license
 
-Source: <https://github.com/jdwillmsen/mc-console-bridge>
+Source: <https://github.com/jdwillmsen/gameops/tree/main/minecraft/bridge>
 License: [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)
