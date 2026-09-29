@@ -341,6 +341,9 @@ func TestAFreshArrivalsBacklogSurvivesTheJoinMoment(t *testing.T) {
 			t.Errorf("the backlog was whispered %s after the arrival, inside the %s grace: that client is still loading", since, freshJoinGrace)
 		}
 
+		// Each row is written just after its whisper, so the last line
+		// arriving says nothing yet about the last row.
+		in.backlog.waitForRows(t, 2, "the backlog was whispered but not recorded")
 		rows := in.backlog.deliveryRows()
 		if len(rows) != 2 || rows[0].id != 2 || rows[1].id != 3 || rows[0].xuid != playerXUID {
 			t.Errorf("delivery rows = %+v, want one per announcement, both for the player", rows)
