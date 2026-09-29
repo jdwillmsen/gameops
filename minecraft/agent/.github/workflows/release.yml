@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version to publish, with or without a leading v
+        required: true
+  # How semantic-release.yml publishes the version it just tagged: its
+  # GITHUB_TOKEN tag push cannot fire the tag trigger above.
+  workflow_call:
+    inputs:
+      tag:
+        description: Version to publish, with or without a leading v
+        type: string
+        required: true
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_METADATA: |
+        org.opencontainers.image.title=minecraft-server-agent
+        org.opencontainers.image.description=Minecraft Bedrock server chat agent: tool-calling LLM assistant, welcomes, stats, knowledge lookup
+        org.opencontainers.image.vendor=jdwillmsen
+        org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+        org.opencontainers.image.documentation=https://github.com/jdwillmsen/minecraft-server-agent#readme
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: docker/setup-buildx-action@v4.4.1
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A tag of v0.1.0 publishes 0.1.0, never `latest` — the chart pins a tag,
+      # and a moving one would reintroduce a silent-upgrade hazard on a
+      # stateful, always-connected process.
+      - id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          raw="${TAG:-$GITHUB_REF_NAME}"
+          version="${raw#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::release version must be semver starting with a digit: $version"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      # A manual dispatch runs on the dispatching branch, so building its
+      # checkout would publish branch code under a release version. Checking
+      # out the tag makes a re-publish rebuild exactly what was released, and
+      # fails when no such tag exists.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/v${{ steps.version.outputs.value }}
+
+      - id: revision
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # metadata-action fills url, source, created and version itself; revision
+      # is overridden because its default is the dispatching commit. It builds
+      # labels and annotations from separate inputs, so the overrides are
+      # shared through env to keep the two from drifting.
+      # Licenses is explicit because GitHub does not recognise PolyForm and
+      # would report NOASSERTION. Index-level annotations are what ghcr.io
+      # reads for the package description and repository link.
+      - id: meta
+        uses: docker/metadata-action@v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/minecraft-server-agent
+          tags: type=raw,value=${{ steps.version.outputs.value }}
+          labels: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+          annotations: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+
+      # The deployment target is amd64-only Talos nodes, so a multi-arch build
+      # would cost CI time for a platform nothing pulls.
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  # Docker Hub is a second public registry for the same image; the cluster
+  # keeps pulling from ghcr.io. It runs as its own job after the ghcr.io push
+  # so a missing credential, a revoked token, or a Docker Hub outage fails
+  # loudly here without ever blocking the primary publish. It is skipped until
+  # a human sets the DOCKERHUB_USERNAME repo variable and DOCKERHUB_TOKEN
+  # secret, because CI must not mint that credential itself. The username is a
+  # variable, not a secret, because it is part of the image reference and a
+  # masked value would redact the ref from every log line.
+  mirror-dockerhub:
+    needs: publish
+    if: vars.DOCKERHUB_USERNAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/v${{ needs.publish.outputs.version }}
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # With one source and no --annotation or --platform, imagetools pushes
+      # the source index bytes unchanged, so the Docker Hub digest matches
+      # ghcr.io and the index annotations and attestation manifests come
+      # along. Passing --annotation here would rebuild the index, change the
+      # digest, and keep only the annotations given on the command line.
+      - env:
+          SOURCE: ghcr.io/${{ github.repository_owner }}/minecraft-server-agent:${{ needs.publish.outputs.version }}
+          TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/minecraft-server-agent:${{ needs.publish.outputs.version }}
+        run: docker buildx imagetools create --tag "$TARGET" "$SOURCE"
+
+      # Docker Hub has no equivalent of reading the description from image
+      # annotations, so the Overview page is pushed separately. That API only
+      # accepts a personal access token with Read, Write and Delete scope, so
+      # DOCKERHUB_TOKEN needs all three even though the image copy needs less.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/minecraft-server-agent
+          readme-filepath: ./README.docker.md
+          short-description: Minecraft Bedrock chat agent - tool-calling LLM assistant, welcomes, stats
