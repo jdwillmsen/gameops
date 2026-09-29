@@ -1,0 +1,183 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version to publish, with or without a leading v
+        required: true
+  # How semantic-release.yml publishes the version it just tagged: its
+  # GITHUB_TOKEN tag push cannot fire the tag trigger above.
+  workflow_call:
+    inputs:
+      tag:
+        description: Version to publish, with or without a leading v
+        type: string
+        required: true
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  # Shared by the OCI description label and the Docker Hub short description,
+  # which Docker Hub caps at 100 characters.
+  IMAGE_DESCRIPTION: Headless Minecraft Bedrock client that holds a player slot so mob farms keep ticking
+  # metadata-action copies custom `labels` into neither manifest nor index
+  # annotations, so this one set feeds both inputs to keep them from drifting.
+  IMAGE_METADATA: |
+    org.opencontainers.image.title=minecraft-afk-bot
+    org.opencontainers.image.vendor=jdwillmsen
+    org.opencontainers.image.licenses=PolyForm-Noncommercial-1.0.0
+    org.opencontainers.image.documentation=https://github.com/jdwillmsen/minecraft-afk-bot#readme
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      revision: ${{ steps.revision.outputs.value }}
+    steps:
+      - uses: docker/setup-buildx-action@v4.2.0
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The tag drives the image tag. A git tag of v0.1.0 publishes 0.1.0 —
+      # never `latest`, because the chart pins a tag and a moving one would
+      # reintroduce exactly the silent-upgrade hazard the server version pin
+      # exists to prevent. The dispatch input arrives through env rather than
+      # being expanded into the script, so its text is data and never shell,
+      # and the pattern keeps it to characters a registry tag accepts.
+      - id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          raw="${TAG:-$GITHUB_REF_NAME}"
+          version="${raw#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::release version must be semver starting with a digit: $version"
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      # A manual dispatch runs on the dispatching branch, so building its
+      # checkout would publish branch code under a release version. Checking
+      # out the tag makes a re-publish rebuild exactly what was released, and
+      # fails when no such tag exists.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/v${{ steps.version.outputs.value }}
+
+      - id: revision
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # latest=false is explicit so no future tag rule can let metadata-action
+      # add its automatic `latest` and break the rule above.
+      # url, source and created keep their defaults (the repository URL and
+      # the build time); licenses is set by hand because GitHub does not
+      # recognise PolyForm Noncommercial and would leave it empty.
+      - id: meta
+        uses: docker/metadata-action@v6.2.0
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=sha-${{ steps.revision.outputs.value }}
+          labels: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+          annotations: |
+            ${{ env.IMAGE_METADATA }}
+            org.opencontainers.image.description=${{ env.IMAGE_DESCRIPTION }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ steps.revision.outputs.value }}
+
+      # linux/amd64 only: every node in the target cluster is amd64, so an
+      # arm64 variant would add build time for an image nothing would pull.
+      - uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  # Docker Hub is a redundant copy; the cluster keeps pulling from ghcr.io.
+  # It runs as its own job after the ghcr.io push so a missing credential, a
+  # revoked token, or a Docker Hub outage fails loudly here without ever
+  # blocking the primary publish. It is skipped until a human sets the
+  # DOCKERHUB_USERNAME repo variable and DOCKERHUB_TOKEN secret, because CI
+  # must not mint that credential itself. The username is a variable, not a
+  # secret, because it is part of the image reference and a masked value
+  # would redact the ref from every log line.
+  mirror-dockerhub:
+    needs: publish
+    if: vars.DOCKERHUB_USERNAME != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # imagetools copies the index and every blob registry-to-registry, so the
+      # Docker Hub tags share the ghcr.io digest with no rebuild. Given one
+      # index source and no --annotation or --platform, buildx pushes the
+      # source index bytes unchanged, which is what keeps the index
+      # annotations and the provenance and SBOM attestation manifests intact.
+      # Passing --annotation here would make it rebuild the index and change
+      # the digest, so the annotations deliberately ride along with the copy.
+      - env:
+          SOURCE: ghcr.io/${{ github.repository_owner }}/minecraft-afk-bot:${{ needs.publish.outputs.version }}
+          TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/minecraft-afk-bot
+          VERSION: ${{ needs.publish.outputs.version }}
+          REVISION: ${{ needs.publish.outputs.revision }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$TARGET:$VERSION" \
+            --tag "$TARGET:sha-$REVISION" \
+            "$SOURCE"
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: refs/tags/v${{ needs.publish.outputs.version }}
+
+      # Updating the repository overview needs a Docker Hub PAT with Read,
+      # Write, Delete scope — more than the image push above requires — so a
+      # narrower DOCKERHUB_TOKEN would mirror the image and then fail here.
+      - uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/minecraft-afk-bot
+          short-description: ${{ env.IMAGE_DESCRIPTION }}
+          readme-filepath: ./README.docker.md
