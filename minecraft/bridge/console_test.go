@@ -479,3 +479,48 @@ func TestConsoleConnectAndRead_SendsDefaultOriginWhenUnconfigured(t *testing.T) 
 		t.Errorf("Origin = %q, want the default %q — this is the value an operator puts in WEBSOCKET_ALLOWED_ORIGINS", got, defaultConsoleOrigin)
 	}
 }
+
+// A snapshot makes the server print the world's whole file list on one line,
+// about 11 KB for 400 files, and the server replays its last 50 log lines to
+// every client that connects. A few snapshots therefore put the backfill past
+// the websocket library's 32 KB default read limit, after which the bridge
+// could never connect again. The same applies to one live frame once the
+// world has enough files.
+func TestConsoleConnectAndRead_SurvivesBackfillAndFramesFarPastTheDefaultReadLimit(t *testing.T) {
+	fileList := strings.Repeat("FWB/db/3372694.ldb:2119009, ", 400)
+	history := make([]string, 50)
+	for i := range history {
+		history[i] = fileList
+	}
+	addr, _ := startFakeConsole(t, func(ctx context.Context, conn *websocket.Conn, _ *http.Request) {
+		writeTestMsg(t, ctx, conn, wsMessage{Type: "logHistory", Lines: history})
+		writeTestMsg(t, ctx, conn, wsMessage{Type: "stdout", Data: strings.Repeat(fileList, 8) + "\n"})
+		<-ctx.Done()
+	})
+
+	c := NewConsole(addr, "pw", testOrigin, 2*time.Second, testLogger())
+	sub, unsub := c.subscribe()
+	defer unsub()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- c.connectAndRead(ctx) }()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case msg := <-sub:
+			if msg.Type == "stdout" {
+				if len(msg.Data) < 8*len(fileList) {
+					t.Fatalf("the live frame arrived cut to %d bytes", len(msg.Data))
+				}
+				return
+			}
+		case err := <-done:
+			t.Fatalf("the console connection ended: %v", err)
+		case <-deadline:
+			t.Fatal("the large frames never arrived")
+		}
+	}
+}

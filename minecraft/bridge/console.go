@@ -50,6 +50,17 @@ const (
 	// deadline a silent peer would neither connect nor redial.
 	firstFrameTimeout = 15 * time.Second
 
+	// maxConsoleMessage is the largest websocket message accepted from the
+	// console. The library's default, 32 KiB, is smaller than what this
+	// server sends: a `save query` prints the world's entire file list on
+	// one line (about 11 KB per 400 files), and the backfill sent on every
+	// connect replays the last 50 log lines in one message. Past the limit
+	// the read fails and the redial meets the same backfill, so the bridge
+	// would stay disconnected until the server restarted. 16 MiB leaves room
+	// for a world roughly ten times this size with every backfilled line a
+	// file list.
+	maxConsoleMessage = 16 << 20
+
 	// maxResidualLine bounds the partial-line buffer held between websocket
 	// frames. A console line longer than this is discarded rather than grown
 	// without limit, mirroring ParseEvents' scanner cap.
@@ -195,6 +206,7 @@ func (c *Console) connectAndRead(ctx context.Context) error {
 		return fmt.Errorf("dial: %w", err)
 	}
 	defer conn.CloseNow()
+	conn.SetReadLimit(maxConsoleMessage)
 
 	clear(c.residual)
 
