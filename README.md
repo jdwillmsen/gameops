@@ -10,6 +10,7 @@ load. One repo so a change that crosses components lands in one reviewed PR.
 | `minecraft/agent/` | Bedrock server chat agent, census, join probe |
 | `minecraft/bridge/` | Console bridge sidecar |
 | `minecraft/afkbot/` | AFK bots |
+| `minecraft/mcmap/` | Web map of the world, rendered from the live server's save |
 | `internal/` | Go code shared across games (`internal/presenceapi`: the actor-presence contract) |
 | `minecraft/internal/` | Go code shared across Minecraft components (created when first needed) |
 | `tools/components/` | Reads `component.yaml`; CI and releases use it |

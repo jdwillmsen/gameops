@@ -1,0 +1,78 @@
+:root {
+  color-scheme: dark;
+  --bg: #14161a;
+  --panel: #1d2026;
+  --line: #2e333c;
+  --text: #e6e8eb;
+  --dim: #9aa3ad;
+  --accent: #6ecf7a;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.foot {
+  justify-content: space-between;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+}
+
+h1 { margin: 0; font-size: 1rem; font-weight: 600; }
+
+.tabs { display: flex; gap: 0.25rem; }
+
+button, .tabs button, input[type="number"] {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.65rem;
+}
+
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--dim); }
+button:disabled { color: var(--dim); cursor: not-allowed; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.goto { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.goto label, .toggle { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
+input[type="number"] { width: 6.5rem; }
+
+#map { flex: 1; min-height: 0; background: #0b0c0e; }
+
+#coords { font-variant-numeric: tabular-nums; }
+#status { color: var(--dim); }
+#status.problem { color: #f0a35e; }
+
+/* Rendered one block to a pixel, the tiles are pixel art; smoothing them when
+   zoomed in past full scale only blurs it. */
+.leaflet-tile { image-rendering: pixelated; }
+.leaflet-container { background: #0b0c0e; font: inherit; }
+
+@media (max-width: 640px) {
+  .goto { margin-left: 0; }
+  input[type="number"] { width: 5rem; }
+}
