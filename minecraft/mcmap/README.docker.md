@@ -25,6 +25,7 @@ docker run -d --name minecraft-map \
   -e BRIDGE_URL=http://console-bridge:8766 \
   -e BRIDGE_TOKEN=<the bridge's token> \
   -e LEVEL_NAME=<world directory name> \
+  -e INTERNAL_TOKEN=<token the agent uses to report logins> \
   -v minecraft-map-data:/data \
   -p 8080:8080 \
   jdwillmsen/minecraft-map:<version>
@@ -43,7 +44,11 @@ to `unmined.net` once.
 
 ## Configuration
 
-`BRIDGE_URL`, `BRIDGE_TOKEN` and `LEVEL_NAME` are required. `REFRESH_INTERVAL`
+`BRIDGE_URL`, `BRIDGE_TOKEN` and `LEVEL_NAME` are required, and so is
+`INTERNAL_TOKEN` unless `AUTH_DISABLED=true`: the map is behind a login in
+which a player types a code from the page into game chat. Publish port 8080
+only; port 9090 carries metrics and the login claims API and is for the
+cluster. `REFRESH_INTERVAL`
 (default `15m`), `QUIET_UTC`, `RENDER_CHUNK_PROCESSORS` and the rest are in the
 [GitHub README](https://github.com/jdwillmsen/gameops/tree/main/minecraft/mcmap#readme).
 

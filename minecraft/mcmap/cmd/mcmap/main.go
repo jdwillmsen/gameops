@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
@@ -21,6 +22,11 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/web"
 )
+
+// A waiting login is a couple of hundred bytes, so this costs a few megabytes
+// at worst. It is sized so that pushing a real login out of the table takes
+// hundreds of requests a second for as long as the player is typing.
+const maxPendingLogins = 10_000
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -91,30 +97,55 @@ func run(logger *slog.Logger) error {
 		w.Run(ctx, cfg.Refresh)
 	}()
 
-	srv := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: (&server.Server{
-			Renderer: renderer,
-			MapsDir:  mapsDir,
-			World:    cfg.Level,
-			Status:   status,
-			Refresh:  cfg.Refresh,
-			Static:   web.FS,
-		}).Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+	app := &server.Server{
+		Renderer: renderer,
+		MapsDir:  mapsDir,
+		World:    cfg.Level,
+		Status:   status,
+		Refresh:  cfg.Refresh,
+		Static:   web.FS,
+		Log:      logger,
 	}
+	if cfg.Login {
+		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
+		if err != nil {
+			return err
+		}
+		revoked, err := auth.LoadRevocations(filepath.Join(cfg.DataDir, "auth", "revoked.json"))
+		if err != nil {
+			return err
+		}
+		app.Sessions = &auth.Sessions{Key: key, TTL: cfg.SessionTTL, Now: time.Now, Revoked: revoked}
+		app.Codes = &auth.Codes{TTL: 10 * time.Minute, Max: maxPendingLogins, Now: time.Now}
+		app.InternalToken = cfg.InternalToken
+	} else {
+		logger.Warn("running with no login: anyone who can reach this port sees the whole map")
+	}
+
+	serve := func(addr string, handler http.Handler) *http.Server {
+		return &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+	}
+	public, internal := serve(cfg.HTTPAddr, app.Handler()), serve(cfg.InternalAddr, app.InternalHandler())
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdown)
+		_ = public.Shutdown(shutdown)
+		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet))
-	err = srv.ListenAndServe()
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet))
+	errs := make(chan error, 2)
+	go func() { errs <- internal.ListenAndServe() }()
+	go func() { errs <- public.ListenAndServe() }()
+	err = <-errs
 	stop()
 	wg.Wait()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {

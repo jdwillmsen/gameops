@@ -14,7 +14,7 @@ func env(pairs ...string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
-var required = []string{"BRIDGE_URL", "http://bridge:8766", "BRIDGE_TOKEN", "tok", "LEVEL_NAME", "FWB"}
+var required = []string{"BRIDGE_URL", "http://bridge:8766", "BRIDGE_TOKEN", "tok", "LEVEL_NAME", "FWB", "INTERNAL_TOKEN", "internal-token-0123456789"}
 
 func with(extra ...string) func(string) string {
 	return env(append(append([]string{}, required...), extra...)...)
@@ -33,6 +33,29 @@ func TestLoad_Defaults(t *testing.T) {
 	if c.BridgeURL != "http://bridge:8766" || c.BridgeToken != "tok" || c.Level != "FWB" {
 		t.Errorf("required values = %+v", c)
 	}
+	if c.InternalAddr != ":9090" || !c.Login || c.InternalToken != "internal-token-0123456789" || c.SessionTTL != 7*24*time.Hour {
+		t.Errorf("login defaults = %+v", c)
+	}
+}
+
+// The map shows where every base is. Forgetting the login's settings must
+// stop the service, not serve the map to whoever finds it; running open has
+// to be asked for by name.
+func TestLoad_LoginIsRequiredUnlessTurnedOffExplicitly(t *testing.T) {
+	bare := []string{"BRIDGE_URL", "http://bridge:8766", "BRIDGE_TOKEN", "tok", "LEVEL_NAME", "FWB"}
+	if _, err := Load(env(bare...)); err == nil {
+		t.Error("started with no login and no explicit AUTH_DISABLED")
+	}
+	if _, err := Load(env(append(bare, "INTERNAL_TOKEN", "short")...)); err == nil {
+		t.Error("accepted a 5-character internal token")
+	}
+	c, err := Load(env(append(bare, "AUTH_DISABLED", "true")...))
+	if err != nil || c.Login {
+		t.Errorf("AUTH_DISABLED=true: %+v, %v", c, err)
+	}
+	if _, err := Load(env(append(bare, "AUTH_DISABLED", "yes please")...)); err == nil {
+		t.Error("accepted AUTH_DISABLED with a value that is not a boolean")
+	}
 }
 
 func TestLoad_Overrides(t *testing.T) {
@@ -49,12 +72,13 @@ func TestLoad_Overrides(t *testing.T) {
 
 func TestLoad_Rejects(t *testing.T) {
 	cases := map[string]func(string) string{
-		"no bridge url":           env("BRIDGE_TOKEN", "tok", "LEVEL_NAME", "FWB"),
-		"no bridge token":         env("BRIDGE_URL", "http://b", "LEVEL_NAME", "FWB"),
-		"no level name":           env("BRIDGE_URL", "http://b", "BRIDGE_TOKEN", "tok"),
-		"bridge url not http":     env("BRIDGE_URL", "bridge:8766", "BRIDGE_TOKEN", "tok", "LEVEL_NAME", "FWB"),
-		"level name with a slash": with("LEVEL_NAME", "../FWB"),
-		"refresh not a duration":  with("REFRESH_INTERVAL", "15"),
+		"no bridge url":              with("BRIDGE_URL", ""),
+		"no bridge token":            with("BRIDGE_TOKEN", ""),
+		"no level name":              with("LEVEL_NAME", ""),
+		"bridge url not http":        with("BRIDGE_URL", "bridge:8766"),
+		"session ttl not a duration": with("SESSION_TTL", "30d"),
+		"level name with a slash":    with("LEVEL_NAME", "../FWB"),
+		"refresh not a duration":     with("REFRESH_INTERVAL", "15"),
 		// Each cycle pauses world saving; a typo must not turn that into a
 		// loop that never lets the server write.
 		"refresh under a minute":        with("REFRESH_INTERVAL", "10s"),

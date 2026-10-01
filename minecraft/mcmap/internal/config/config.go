@@ -38,7 +38,19 @@ type Config struct {
 	UnminedSHA256   string
 	ChunkProcessors int
 	NetherTopY      int
+
+	// InternalAddr serves metrics and the agent's login claims. It is a
+	// separate listener so that publishing HTTPAddr cannot publish these.
+	InternalAddr string
+	// Login is whether the map is behind a login. It is on unless
+	// AUTH_DISABLED says otherwise by name.
+	Login         bool
+	InternalToken string
+	SessionTTL    time.Duration
 }
+
+// minTokenLength keeps a placeholder from standing in for a credential.
+const minTokenLength = 16
 
 // minRefresh keeps a mistyped interval from pausing world saving in a loop.
 const minRefresh = time.Minute
@@ -52,6 +64,8 @@ func Load(getenv func(string) string) (Config, error) {
 		Level:         getenv("LEVEL_NAME"),
 		UnminedURL:    or(getenv("UNMINED_URL"), DefaultUnminedURL),
 		UnminedSHA256: strings.ToLower(or(getenv("UNMINED_SHA256"), DefaultUnminedSHA256)),
+		InternalAddr:  or(getenv("INTERNAL_ADDR"), ":9090"),
+		InternalToken: getenv("INTERNAL_TOKEN"),
 	}
 	var errs []error
 	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
@@ -72,7 +86,20 @@ func Load(getenv func(string) string) (Config, error) {
 		fail("UNMINED_SHA256 must be 64 hex characters")
 	}
 
-	var err error
+	// The map shows where every base is, so the absence of a login is
+	// something to ask for, never something to fall into.
+	disabled, err := strconv.ParseBool(or(getenv("AUTH_DISABLED"), "false"))
+	if err != nil {
+		fail("AUTH_DISABLED must be true or false")
+	}
+	c.Login = !disabled
+	if c.Login && len(c.InternalToken) < minTokenLength {
+		fail("INTERNAL_TOKEN must be at least %d characters; set AUTH_DISABLED=true to run with no login", minTokenLength)
+	}
+	if c.SessionTTL, err = time.ParseDuration(or(getenv("SESSION_TTL"), "168h")); err != nil || c.SessionTTL <= 0 {
+		fail("SESSION_TTL must be a positive duration")
+	}
+
 	if c.Refresh, err = time.ParseDuration(or(getenv("REFRESH_INTERVAL"), "15m")); err != nil {
 		fail("REFRESH_INTERVAL: %v", err)
 	} else if c.Refresh < minRefresh {
