@@ -157,9 +157,7 @@ func TestStaticAndHealth(t *testing.T) {
 	if rec := get(t, s, "/healthz"); rec.Code != http.StatusOK {
 		t.Errorf("GET /healthz = %d", rec.Code)
 	}
-	if rec := get(t, s, "/metrics"); rec.Code != http.StatusOK {
-		t.Errorf("GET /metrics = %d", rec.Code)
-	}
+
 }
 
 // The page will be reachable from the internet. It loads nothing from

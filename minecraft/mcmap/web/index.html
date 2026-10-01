@@ -20,8 +20,23 @@
     </form>
     <label class="toggle"><input id="grid" type="checkbox"> Grid</label>
     <button id="copy" type="button">Copy link</button>
+    <span id="who" class="who" hidden></span>
+    <button id="logout" type="button" hidden>Log out</button>
   </header>
   <main id="map" aria-label="Map"></main>
+  <section id="login" class="login" aria-labelledby="login-title" hidden>
+    <div class="card">
+      <h2 id="login-title">Log in from the game</h2>
+      <p>This map is for players on the server. To show you are one:</p>
+      <ol>
+        <li>Join the server in Minecraft.</li>
+        <li>Open chat and type <code id="login-command">!map</code></li>
+        <li>Wait a moment. This page unlocks by itself.</li>
+      </ol>
+      <p id="login-note" class="note" role="status"></p>
+      <button id="login-new" type="button" hidden>Get a new code</button>
+    </div>
+  </section>
   <footer class="bar foot">
     <output id="coords" aria-live="off">X —, Z —</output>
     <span id="status" role="status"></span>

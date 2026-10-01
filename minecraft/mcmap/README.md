@@ -70,6 +70,59 @@ the normal interval. The page keeps serving the last good tiles throughout
 and says the refresh failed; the reason is in the log, not in the API, since
 it names internal addresses.
 
+## Login
+
+The map shows where every base is, so it sits behind a login that proves the
+visitor plays on the server.
+
+1. The page asks `POST /auth/start` and shows the six-character code it gets
+   back. The secret that will collect the login is set as an `HttpOnly`,
+   `SameSite=Strict` cookie that script cannot read.
+2. The player types `!map <code>` in game chat. The agent, which sees the
+   chat packet and so the sender's XUID, reports it to
+   `POST /internal/v1/claims`.
+3. The page, polling `GET /auth/status`, is handed a session cookie: the
+   XUID, the gamertag, when it was issued and an expiry, signed with a key
+   kept on the data volume. No session is stored; each one issued is logged
+   with the player it was issued to.
+
+Codes last ten minutes, are used once, and are drawn from 32 symbols with no
+`0`, `O`, `1` or `I`. An unknown, expired and already-used code all get the
+same answer. Only a player can be logged in: an XUID that is not a number,
+such as the console's, is refused.
+
+Anyone can ask for a code, so the table of waiting logins is bounded, at
+10,000. When it is full the oldest waiting login makes room for the new one;
+refusing instead would let one burst of requests lock every player out.
+Pushing out a code a player is still typing takes hundreds of requests a
+second, kept up. Nothing here limits requests per client: the service sees
+only the gateway's address.
+
+A session cannot be withdrawn by itself, but a player's can be withdrawn
+together. `POST /internal/v1/revocations` records the moment, on the data
+volume, and every session that player was issued up to then stops working.
+The agent calls it for whoever types `!map logout`, which is the way out for
+a player who typed a code off someone else's screen. Deleting `session.key`
+logs everyone out.
+
+Both cookies carry the `__Host-` prefix, so a browser accepts them only from
+this exact host over HTTPS and no other site under the same parent domain
+can plant one. Browsers treat `localhost` as secure, so a port-forward still
+works. A `POST` that another site started in the visitor's browser is
+refused with 403.
+
+The login is on unless `AUTH_DISABLED=true` says otherwise by name; with it
+on and no `INTERNAL_TOKEN` the service refuses to start. Other ways to log
+in can be added beside the code flow: anything that can establish an XUID
+ends in the same `Sessions.Issue`.
+
+Two listeners keep the internet away from what is not for it:
+
+- `HTTP_ADDR` is what a route may publish: the page, the login endpoints,
+  and the map API and tiles behind the session.
+- `INTERNAL_ADDR` is for the cluster only: `/metrics`, and the claims and
+  revocations the agent reports.
+
 ## Environment variables
 
 | Variable | Required | Default | Purpose |
@@ -77,7 +130,11 @@ it names internal addresses.
 | `BRIDGE_URL` | yes | | Console bridge base URL |
 | `BRIDGE_TOKEN` | yes | | The bridge's bearer token |
 | `LEVEL_NAME` | yes | | The world's directory name on the server |
-| `HTTP_ADDR` | no | `:8080` | Bind address |
+| `HTTP_ADDR` | no | `:8080` | Public listener: page, login, and the gated map API and tiles |
+| `INTERNAL_ADDR` | no | `:9090` | Cluster-only listener: metrics and the agent's login claims and revocations. Never route this publicly |
+| `INTERNAL_TOKEN` | unless `AUTH_DISABLED` | | Bearer token the agent presents to the internal API; at least 16 characters. Whoever holds it can log in as any player, so give it a secret of its own |
+| `AUTH_DISABLED` | no | `false` | `true` serves the map with no login. Only for a service nothing publishes |
+| `SESSION_TTL` | no | `168h` | How long a login lasts |
 | `DATA_DIR` | no | `/data` | Mirror, tiles and the installed renderer. Rebuildable, but the first render is slow, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
@@ -90,11 +147,21 @@ it names internal addresses.
 
 | Route | Purpose |
 |---|---|
-| `GET /` | The map page |
-| `GET /api/map` | World name, refresh interval, each dimension's extent and last render time, and `problem` (`snapshot` or `render`) while the last cycle failed |
-| `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
-| `GET /healthz` | Liveness |
+| `GET /` | The map page; public, and holds nothing about the world |
+| `GET /api/config` | Whether there is a login; public |
+| `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
+| `GET /api/me` | The logged-in player's gamertag |
+| `GET /api/map` | Session required. World name, refresh interval, each dimension's extent and last render time, and `problem` (`snapshot` or `render`) while the last cycle failed |
+| `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
+| `GET /healthz` | Liveness, on both listeners |
+
+On `INTERNAL_ADDR` only:
+
+| Route | Purpose |
+|---|---|
 | `GET /metrics` | Prometheus |
+| `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code. 204, or 404 for a code that is unknown, expired or used |
+| `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds. 204 |
 
 The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, so a link
 opens at the same place.

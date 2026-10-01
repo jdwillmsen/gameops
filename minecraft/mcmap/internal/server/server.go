@@ -5,6 +5,7 @@ package server
 import (
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,8 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 )
@@ -29,6 +29,16 @@ type Server struct {
 	// looking again is worth it.
 	Refresh time.Duration
 	Static  fs.FS
+
+	// Sessions and Codes are the login. With Sessions nil there is none and
+	// the map is open to whoever can reach it, which is only acceptable
+	// while nothing publishes it.
+	Sessions *auth.Sessions
+	Codes    *auth.Codes
+	// InternalToken is what the agent presents to report who typed a code.
+	InternalToken string
+	// Log records logins issued and revoked. Nil discards them.
+	Log *slog.Logger
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
@@ -80,12 +90,21 @@ func (f filesOnly) Open(name string) (fs.File, error) {
 	return file, nil
 }
 
+// Handler is everything a browser may reach. Where the world is, is behind
+// the login; the page itself is not, since it has to load to show the login
+// and holds nothing about the world.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.Handle("GET /metrics", promhttp.Handler())
-	mux.HandleFunc("GET /api/map", s.handleMap)
-	mux.HandleFunc("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.handleTile)
+	mux.HandleFunc("GET /api/config", s.handleConfig)
+	mux.Handle("GET /api/map", s.gated(s.handleMap))
+	mux.Handle("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleTile))
+	if s.Sessions != nil {
+		mux.Handle("GET /api/me", s.gated(s.handleMe))
+		mux.HandleFunc("POST /auth/start", s.handleStart)
+		mux.HandleFunc("GET /auth/status", s.handleStatus)
+		mux.HandleFunc("POST /auth/logout", s.handleLogout)
+	}
 	static := http.FileServerFS(filesOnly{s.Static})
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The page changes only with a release; embedded files carry no
@@ -93,7 +112,11 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "max-age=300")
 		static.ServeHTTP(w, r)
 	}))
-	return secured(mux)
+	// Refuses a state-changing request that another site started in the
+	// visitor's browser, which would otherwise be able to log them out or
+	// spend login codes in their name. Sites elsewhere under the same parent
+	// domain count as other sites.
+	return secured(http.NewCrossOriginProtection().Handler(mux))
 }
 
 // secured sets the headers every response carries. The page loads nothing
@@ -102,6 +125,8 @@ func secured(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		// Ignored over plain HTTP, so harmless on a local port-forward.
+		h.Set("Strict-Transport-Security", "max-age=31536000")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
@@ -183,7 +208,7 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 	f, err := os.Open(s.Renderer.TilePath(dir, info.Format, zoom, x, y))
 	if err != nil {
 		// Most of a sparse world's grid has no tile; that is not an error.
-		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Cache-Control", "private, max-age=60")
 		http.NotFound(w, r)
 		return
 	}
@@ -195,7 +220,8 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/"+info.Format)
 	// Short, because a tile changes whenever someone builds there; the
-	// Last-Modified below makes the recheck cost a 304.
-	w.Header().Set("Cache-Control", "max-age=60")
+	// Last-Modified below makes the recheck cost a 304. Private, because a
+	// tile is only for the logged-in browser that asked for it.
+	w.Header().Set("Cache-Control", "private, max-age=60")
 	http.ServeContent(w, r, "", stat.ModTime(), f)
 }

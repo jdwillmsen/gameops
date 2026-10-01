@@ -31,6 +31,12 @@
     goto: document.getElementById('goto'),
     gotoX: document.getElementById('goto-x'),
     gotoZ: document.getElementById('goto-z'),
+    who: document.getElementById('who'),
+    logout: document.getElementById('logout'),
+    login: document.getElementById('login'),
+    loginCommand: document.getElementById('login-command'),
+    loginNote: document.getElementById('login-note'),
+    loginNew: document.getElementById('login-new'),
   };
 
   // No cache-busting parameter: tiles are served with a short max-age and a
@@ -163,12 +169,100 @@
     }
   }
 
+  // --- login -----------------------------------------------------------
+  //
+  // The page shows a code; the player types it in game chat, which only
+  // someone on the server can do; the page then collects its session. The
+  // secret that collects it lives in a cookie this script cannot read.
+
+  let loginTimer = null;
+
+  function lock(locked) {
+    document.body.classList.toggle('locked', locked);
+    el.login.hidden = !locked;
+    // Leaflet measured the map while it was hidden.
+    if (!locked) map.invalidateSize();
+  }
+
+  function note(text, problem) {
+    el.loginNote.textContent = text;
+    el.loginNote.classList.toggle('problem', Boolean(problem));
+  }
+
+  async function startLogin() {
+    clearInterval(loginTimer);
+    lock(true);
+    el.loginNew.hidden = true;
+    let started;
+    try {
+      const res = await fetch('auth/start', { method: 'POST' });
+      if (!res.ok) throw new Error(String(res.status));
+      started = await res.json();
+    } catch {
+      note('Cannot reach the map service. Check your connection and try again.', true);
+      el.loginNew.hidden = false;
+      return;
+    }
+    el.loginCommand.textContent = `!map ${started.code}`;
+    note('Waiting for you to type the code in game…');
+    loginTimer = setInterval(pollLogin, 2000);
+  }
+
+  async function pollLogin() {
+    let state;
+    try {
+      const res = await fetch('auth/status', { cache: 'no-store' });
+      if (!res.ok) return;
+      ({ state } = await res.json());
+    } catch {
+      return; // a dropped request is not an answer; the next poll asks again
+    }
+    if (state === 'pending') return;
+    clearInterval(loginTimer);
+    if (state === 'ok') {
+      lock(false);
+      await load();
+      return;
+    }
+    el.loginCommand.textContent = '!map';
+    note('That code expired before it was used.', true);
+    el.loginNew.hidden = false;
+  }
+
+  el.loginNew.addEventListener('click', startLogin);
+  el.logout.addEventListener('click', async () => {
+    await fetch('auth/logout', { method: 'POST' });
+    location.reload();
+  });
+
+  async function identify() {
+    if (!loginEnabled || !el.who.hidden) return;
+    try {
+      const res = await fetch('api/me', { cache: 'no-store' });
+      if (!res.ok) return;
+      el.who.textContent = (await res.json()).gamertag;
+      el.who.hidden = false;
+      el.logout.hidden = false;
+    } catch { /* the name is decoration */ }
+  }
+
+  let loginEnabled = false;
+
   async function load() {
+    if (!el.login.hidden) return; // logged out; the login flow reloads when done
     let next;
     try {
       const res = await fetch('api/map', { cache: 'no-store' });
+      if (res.status === 401) {
+        // Not logged in, or the session ran out while the page was open.
+        el.who.hidden = true;
+        el.logout.hidden = true;
+        startLogin();
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
       next = await res.json();
+      identify();
     } catch {
       el.status.classList.add('problem');
       el.status.textContent = 'Cannot reach the map service. Retrying.';
@@ -245,7 +339,13 @@
     setTimeout(() => { el.copy.textContent = 'Copy link'; }, 2000);
   });
 
-  load();
+  (async () => {
+    try {
+      const cfg = await (await fetch('api/config', { cache: 'no-store' })).json();
+      loginEnabled = Boolean(cfg.login);
+    } catch { /* load() reports an unreachable service */ }
+    load();
+  })();
   setInterval(load, POLL_MS);
   setInterval(describe, 30_000);
 })();
