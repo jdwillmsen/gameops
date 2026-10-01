@@ -1,0 +1,99 @@
+// Package config reads the map service's settings from the environment.
+package config
+
+import (
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
+)
+
+// The renderer build this service was verified against. The address always
+// serves the newest dev build, so the digest is what actually pins it.
+const (
+	DefaultUnminedURL    = "https://unmined.net/download/unmined-cli-linux-x64-dev/"
+	DefaultUnminedSHA256 = "a47ec942a6d4a0f2e68323ed6c4da3221fe9d09353c2132188042776f96e47d7"
+)
+
+type Config struct {
+	HTTPAddr string
+	// DataDir holds the world mirror, the rendered tiles and the installed
+	// renderer; all of it can be rebuilt, but only slowly.
+	DataDir string
+
+	BridgeURL   string
+	BridgeToken string
+	// Level is the world's directory name on the server.
+	Level string
+
+	Refresh time.Duration
+	Quiet   schedule.Quiet
+
+	UnminedURL      string
+	UnminedSHA256   string
+	ChunkProcessors int
+	NetherTopY      int
+}
+
+// minRefresh keeps a mistyped interval from pausing world saving in a loop.
+const minRefresh = time.Minute
+
+func Load(getenv func(string) string) (Config, error) {
+	c := Config{
+		HTTPAddr:      or(getenv("HTTP_ADDR"), ":8080"),
+		DataDir:       or(getenv("DATA_DIR"), "/data"),
+		BridgeURL:     getenv("BRIDGE_URL"),
+		BridgeToken:   getenv("BRIDGE_TOKEN"),
+		Level:         getenv("LEVEL_NAME"),
+		UnminedURL:    or(getenv("UNMINED_URL"), DefaultUnminedURL),
+		UnminedSHA256: strings.ToLower(or(getenv("UNMINED_SHA256"), DefaultUnminedSHA256)),
+	}
+	var errs []error
+	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
+
+	if u, err := url.Parse(c.BridgeURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		fail("BRIDGE_URL must be an http(s) URL, got %q", c.BridgeURL)
+	}
+	if c.BridgeToken == "" {
+		fail("BRIDGE_TOKEN is required")
+	}
+	if c.Level == "" || strings.ContainsAny(c.Level, `/\`) || c.Level == "." || c.Level == ".." {
+		fail("LEVEL_NAME must be the world's directory name, got %q", c.Level)
+	}
+	if u, err := url.Parse(c.UnminedURL); err != nil || u.Scheme != "https" || u.Host == "" {
+		fail("UNMINED_URL must be an https URL, got %q", c.UnminedURL)
+	}
+	if raw, err := hex.DecodeString(c.UnminedSHA256); err != nil || len(raw) != 32 {
+		fail("UNMINED_SHA256 must be 64 hex characters")
+	}
+
+	var err error
+	if c.Refresh, err = time.ParseDuration(or(getenv("REFRESH_INTERVAL"), "15m")); err != nil {
+		fail("REFRESH_INTERVAL: %v", err)
+	} else if c.Refresh < minRefresh {
+		fail("REFRESH_INTERVAL must be at least %s, got %s", minRefresh, c.Refresh)
+	}
+	if c.Quiet, err = schedule.ParseQuiet(getenv("QUIET_UTC")); err != nil {
+		fail("QUIET_UTC: %v", err)
+	}
+	if c.ChunkProcessors, err = strconv.Atoi(or(getenv("RENDER_CHUNK_PROCESSORS"), "1")); err != nil || c.ChunkProcessors < 1 || c.ChunkProcessors > 64 {
+		fail("RENDER_CHUNK_PROCESSORS must be between 1 and 64")
+	}
+	// The nether is 128 blocks tall with bedrock at both ends.
+	if c.NetherTopY, err = strconv.Atoi(or(getenv("NETHER_TOP_Y"), "100")); err != nil || c.NetherTopY < 1 || c.NetherTopY > 127 {
+		fail("NETHER_TOP_Y must be between 1 and 127")
+	}
+	return c, errors.Join(errs...)
+}
+
+func or(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}

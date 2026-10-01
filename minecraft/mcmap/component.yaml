@@ -1,0 +1,14 @@
+name: mcmap
+kind: service
+language: go
+tasks:
+  build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/mcmap/...
+  test: go test -race ./minecraft/mcmap/...
+  lint: test -z "$(gofmt -l minecraft/mcmap)" && go vet ./minecraft/mcmap/...
+release:
+  tag: mcmap
+  artifacts: [image]
+  image:
+    name: minecraft-map
+    description: "Web map of a Minecraft Bedrock world, rendered from the live server's own save"
+    short_description: Web map of a Minecraft Bedrock world, rendered from the live server's own save

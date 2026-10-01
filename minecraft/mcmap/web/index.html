@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>World map</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <h1 id="world">World map</h1>
+    <nav id="dimensions" class="tabs" aria-label="Dimension"></nav>
+    <form id="goto" class="goto" autocomplete="off">
+      <label>X <input id="goto-x" name="x" type="number" step="1" inputmode="numeric" required></label>
+      <label>Z <input id="goto-z" name="z" type="number" step="1" inputmode="numeric" required></label>
+      <button type="submit">Go</button>
+    </form>
+    <label class="toggle"><input id="grid" type="checkbox"> Grid</label>
+    <button id="copy" type="button">Copy link</button>
+  </header>
+  <main id="map" aria-label="Map"></main>
+  <footer class="bar foot">
+    <output id="coords" aria-live="off">X —, Z —</output>
+    <span id="status" role="status"></span>
+  </footer>
+  <script src="lib/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

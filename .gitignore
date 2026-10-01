@@ -4,5 +4,8 @@
 *.log
 *.out
 node_modules
-# What `go build` writes when run inside a single-package component directory.
+# What `go build` writes for a single main package, in the directory it was
+# run from: inside the component, or at the repo root.
 /minecraft/bridge/mc-console-bridge
+/bridge
+/mcmap

@@ -1,0 +1,395 @@
+package render
+
+import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+type tarFile struct {
+	name string
+	body string
+	mode int64
+}
+
+func tgz(t *testing.T, files ...tarFile) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, f := range files {
+		if strings.HasSuffix(f.name, "/") {
+			_ = tw.WriteHeader(&tar.Header{Name: f.name, Typeflag: tar.TypeDir, Mode: 0o755})
+			continue
+		}
+		_ = tw.WriteHeader(&tar.Header{Name: f.name, Mode: f.mode, Size: int64(len(f.body))})
+		_, _ = tw.Write([]byte(f.body))
+	}
+	_ = tw.Close()
+	_ = gz.Close()
+	sum := sha256.Sum256(buf.Bytes())
+	return buf.Bytes(), hex.EncodeToString(sum[:])
+}
+
+func release(t *testing.T) ([]byte, string) {
+	return tgz(t,
+		tarFile{name: "unmined-cli_0.20.10-dev_linux-x64/"},
+		tarFile{name: "unmined-cli_0.20.10-dev_linux-x64/unmined-cli", body: "#!binary", mode: 0o755},
+		tarFile{name: "unmined-cli_0.20.10-dev_linux-x64/config/blocks.json", body: "{}", mode: 0o644},
+	)
+}
+
+func newUnmined(t *testing.T, archive []byte, sha string) (*Unmined, *atomic.Int64) {
+	t.Helper()
+	var downloads atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		downloads.Add(1)
+		_, _ = w.Write(archive)
+	}))
+	t.Cleanup(srv.Close)
+	return &Unmined{
+		Dir:    t.TempDir(),
+		URL:    srv.URL,
+		SHA256: sha,
+		HTTP:   srv.Client(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, &downloads
+}
+
+func TestEnsure_DownloadsVerifiesAndInstallsOnce(t *testing.T) {
+	archive, sha := release(t)
+	u, downloads := newUnmined(t, archive, sha)
+
+	bin, err := u.Ensure(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(bin)
+	if err != nil {
+		t.Fatalf("binary: %v", err)
+	}
+	if filepath.Base(bin) != "unmined-cli" || info.Mode()&0o100 == 0 {
+		t.Errorf("binary %s mode %v: want an executable unmined-cli", bin, info.Mode())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(bin), "config", "blocks.json")); err != nil {
+		t.Errorf("the files beside the binary were not installed: %v", err)
+	}
+
+	again, err := u.Ensure(context.Background())
+	if err != nil || again != bin {
+		t.Fatalf("second Ensure = %q, %v", again, err)
+	}
+	if n := downloads.Load(); n != 1 {
+		t.Errorf("downloaded %d times, want 1: an installed copy must be reused", n)
+	}
+}
+
+// The download address always serves the newest build, so the pin stops
+// matching the day a new one is published. That must be a clear refusal, and
+// must name the digest it saw so the pin can be reviewed and moved.
+func TestEnsure_WrongDigestInstallsNothingAndNamesWhatItGot(t *testing.T) {
+	archive, sha := release(t)
+	u, _ := newUnmined(t, archive, strings.Repeat("0", 64))
+
+	_, err := u.Ensure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), sha) {
+		t.Fatalf("err = %v, want one naming the digest served (%s)", err, sha)
+	}
+	entries, _ := os.ReadDir(u.Dir)
+	if len(entries) != 0 {
+		t.Errorf("%d entries left in the tools directory after a refused download", len(entries))
+	}
+}
+
+func TestEnsure_RejectsAnArchiveThatEscapesItsDirectory(t *testing.T) {
+	archive, sha := tgz(t,
+		tarFile{name: "pkg/unmined-cli", body: "#!binary", mode: 0o755},
+		tarFile{name: "pkg/../../escaped", body: "x", mode: 0o644},
+	)
+	u, _ := newUnmined(t, archive, sha)
+
+	if _, err := u.Ensure(context.Background()); err == nil {
+		t.Fatal("Ensure installed an archive with a path that climbs out")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(u.Dir), "escaped")); err == nil {
+		t.Error("a file was written outside the tools directory")
+	}
+}
+
+func TestEnsure_ArchiveWithoutTheBinaryIsRefused(t *testing.T) {
+	archive, sha := tgz(t, tarFile{name: "pkg/README.md", body: "hi", mode: 0o644})
+	u, _ := newUnmined(t, archive, sha)
+	if _, err := u.Ensure(context.Background()); err == nil {
+		t.Fatal("Ensure accepted an archive with no unmined-cli in it")
+	}
+}
+
+// fakeRun stands in for the binary: it records the invocation and writes
+// whatever output the test wants the render to have produced.
+type fakeRun struct {
+	args  []string
+	env   []string
+	tiles map[string]int // path under the output dir -> size in bytes
+	props bool
+	out   string
+	err   error
+}
+
+func (f *fakeRun) run(_ context.Context, _ string, args, env []string) ([]byte, error) {
+	f.args, f.env = args, env
+	var out string
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, "--output="); ok {
+			out = v
+		}
+	}
+	for rel, size := range f.tiles {
+		p := filepath.Join(out, filepath.FromSlash(rel))
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		_ = os.WriteFile(p, bytes.Repeat([]byte{1}, size), 0o644)
+	}
+	if f.props {
+		_ = os.WriteFile(filepath.Join(out, propertiesFile), []byte(sampleProperties), 0o644)
+	}
+	return []byte(f.out), f.err
+}
+
+const sampleProperties = `/* Autogenerated file, overwritten by uNmINeD on map generation. */
+var UnminedMapProperties = {
+    minZoom: -6,
+    maxZoom: 0,
+    defaultZoom: 0,
+    imageFormat: "webp",
+    minRegionX: -13,
+    minRegionZ: -43,
+    maxRegionX: 21,
+    maxRegionZ: 14,
+    worldName: "FWB",
+    markers: new Array(),
+    centerX: 0,
+    centerZ: 0
+}
+`
+
+func rendering(t *testing.T, f *fakeRun) (*Unmined, string) {
+	t.Helper()
+	archive, sha := release(t)
+	u, _ := newUnmined(t, archive, sha)
+	u.run = f.run
+	u.ChunkProcessors = 2
+	u.NetherTopY = 100
+	return u, t.TempDir()
+}
+
+func TestRender_AsksForWebPAndTheDimension(t *testing.T) {
+	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
+	u, out := rendering(t, f)
+
+	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"web", "render", "--world=/mirror/FWB", "--dimension=overworld", "--output=" + out, "--imageformat=webp", "--chunkprocessors=2"} {
+		if !slices.Contains(f.args, want) {
+			t.Errorf("args %v lack %q", f.args, want)
+		}
+	}
+	for _, a := range f.args {
+		if strings.HasPrefix(a, "--topY") {
+			t.Errorf("overworld was rendered with %s", a)
+		}
+	}
+	if !slices.Contains(f.env, "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1") {
+		t.Errorf("env %v lacks the setting the binary needs on an image without ICU", f.env)
+	}
+}
+
+// Without a ceiling the nether renders as its bedrock roof.
+func TestRender_NetherIsCutBelowItsRoof(t *testing.T) {
+	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
+	u, out := rendering(t, f)
+	if err := u.Render(context.Background(), "/mirror/FWB", "nether", out); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.args, "--topY=100") {
+		t.Errorf("args %v lack --topY=100", f.args)
+	}
+}
+
+// uNmINeD has exited "successfully" after writing only empty tiles. A map of
+// blank squares must be reported as a failed render, not served.
+func TestRender_RejectsOutputThatIsNotAMap(t *testing.T) {
+	cases := map[string]*fakeRun{
+		"no tiles at all":         {props: true},
+		"only empty tiles":        {tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 0, "tiles/zoom.0/0/0/tile.1.0.webp": 0}, props: true},
+		"tiles but no properties": {tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}},
+		"only zoomed-out tiles":   {tiles: map[string]int{"tiles/zoom.-1/0/0/tile.0.0.webp": 5000}, props: true},
+	}
+	for name, f := range cases {
+		t.Run(name, func(t *testing.T) {
+			u, out := rendering(t, f)
+			if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err == nil {
+				t.Fatal("Render accepted it")
+			}
+		})
+	}
+}
+
+func TestRender_FailureCarriesTheEndOfTheOutput(t *testing.T) {
+	f := &fakeRun{out: strings.Repeat("noise\n", 200) + "System.InvalidOperationException: GetJpegEncoder\n", err: errors.New("exit status 134")}
+	u, out := rendering(t, f)
+
+	err := u.Render(context.Background(), "/mirror/FWB", "overworld", out)
+	if err == nil || !strings.Contains(err.Error(), "GetJpegEncoder") || !strings.Contains(err.Error(), "exit status 134") {
+		t.Fatalf("err = %v, want the exit status and the last lines of output", err)
+	}
+	if strings.Count(err.Error(), "noise") > 40 {
+		t.Error("the error carries the whole output rather than its tail")
+	}
+}
+
+func TestRender_UnknownDimensionIsRefusedBeforeRunning(t *testing.T) {
+	f := &fakeRun{props: true}
+	u, out := rendering(t, f)
+	if err := u.Render(context.Background(), "/mirror/FWB", "aether", out); err == nil || f.args != nil {
+		t.Fatalf("err = %v, ran with %v", err, f.args)
+	}
+}
+
+func TestInfoAndTilePath(t *testing.T) {
+	out := t.TempDir()
+	if _, err := (&Unmined{}).Info(out); err == nil {
+		t.Error("Info of a directory never rendered into: want an error")
+	}
+	if err := os.WriteFile(filepath.Join(out, propertiesFile), []byte(sampleProperties), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := (&Unmined{}).Info(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Info{MinZoom: -6, MaxZoom: 0, MinRegionX: -13, MinRegionZ: -43, MaxRegionX: 21, MaxRegionZ: 14, Format: "webp"}
+	if info != want {
+		t.Errorf("info = %+v, want %+v", info, want)
+	}
+
+	// uNmINeD buckets tiles into directories of ten by floored division, so
+	// negative coordinates round away from zero.
+	cases := map[[3]int]string{
+		{0, 0, 0}:     "tiles/zoom.0/0/0/tile.0.0.webp",
+		{0, 37, -4}:   "tiles/zoom.0/3/-1/tile.37.-4.webp",
+		{-6, -1, -1}:  "tiles/zoom.-6/-1/-1/tile.-1.-1.webp",
+		{-2, -10, 10}: "tiles/zoom.-2/-1/1/tile.-10.10.webp",
+		{0, -11, 9}:   "tiles/zoom.0/-2/0/tile.-11.9.webp",
+	}
+	for c, rel := range cases {
+		if got := (&Unmined{}).TilePath(out, "webp", c[0], c[1], c[2]); got != filepath.Join(out, filepath.FromSlash(rel)) {
+			t.Errorf("TilePath%v = %s, want …/%s", c, got, rel)
+		}
+	}
+}
+
+func TestRenderedAt(t *testing.T) {
+	out := t.TempDir()
+	if _, ok := (&Unmined{}).RenderedAt(out); ok {
+		t.Error("a directory never rendered into reports a render time")
+	}
+	if err := os.WriteFile(filepath.Join(out, propertiesFile), []byte(sampleProperties), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	at, ok := (&Unmined{}).RenderedAt(out)
+	if !ok || at.IsZero() {
+		t.Errorf("RenderedAt = %v, %v", at, ok)
+	}
+}
+
+// The download address serves whatever build is newest. Once that stops
+// matching the pin, every cycle would otherwise fetch the whole archive
+// again only to refuse it.
+func TestEnsure_ARefusedDownloadIsNotRetriedStraightAway(t *testing.T) {
+	archive, _ := release(t)
+	u, downloads := newUnmined(t, archive, strings.Repeat("0", 64))
+
+	_, first := u.Ensure(context.Background())
+	_, second := u.Ensure(context.Background())
+	if first == nil || second == nil {
+		t.Fatal("a download with the wrong digest was accepted")
+	}
+	if n := downloads.Load(); n != 1 {
+		t.Errorf("downloaded %d times, want 1", n)
+	}
+	if !strings.Contains(second.Error(), "sha256") {
+		t.Errorf("the remembered refusal lost its reason: %v", second)
+	}
+}
+
+func TestEnsure_SweepsWhatAnInterruptedInstallLeftBehind(t *testing.T) {
+	archive, sha := release(t)
+	u, _ := newUnmined(t, archive, sha)
+	for _, name := range []string{"download-123.tar.gz", "install-456"} {
+		p := filepath.Join(u.Dir, name)
+		if strings.HasPrefix(name, "install-") {
+			_ = os.MkdirAll(filepath.Join(p, "config"), 0o755)
+		} else {
+			_ = os.WriteFile(p, []byte("partial"), 0o644)
+		}
+	}
+	if _, err := u.Ensure(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(u.Dir)
+	if len(entries) != 1 || entries[0].Name() != sha {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("tools directory holds %v, want only the installed build", names)
+	}
+}
+
+// Tiles from an earlier render are still on disk when a later one fails
+// quietly, so "a tile exists" proves nothing after the first render. The
+// render must have rewritten its properties file this time.
+func TestRender_StaleOutputFromAnEarlierRenderDoesNotPass(t *testing.T) {
+	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
+	u, out := rendering(t, f)
+	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(out, propertiesFile), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	quiet := &fakeRun{} // exits 0 and writes nothing
+	u.run = quiet.run
+	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err == nil {
+		t.Fatal("a render that wrote nothing passed on the strength of the previous render's files")
+	}
+}
+
+func TestTail_KeepsOnlyTheEndOfLongOutput(t *testing.T) {
+	var buf tailBuffer
+	buf.limit = 64
+	for i := 0; i < 1000; i++ {
+		_, _ = buf.Write([]byte("0123456789"))
+	}
+	_, _ = buf.Write([]byte("THE-END"))
+	if got := buf.String(); len(got) > 64 || !strings.HasSuffix(got, "THE-END") {
+		t.Errorf("kept %d bytes ending %q", len(got), got[max(0, len(got)-10):])
+	}
+}
