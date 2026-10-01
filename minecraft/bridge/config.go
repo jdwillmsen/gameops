@@ -40,9 +40,13 @@ type Config struct {
 	// command's output.
 	CommandTimeout time.Duration
 
-	// DataDir is where the server's permissions.json and allowlist.json live
-	// (the mounted /data volume).
+	// DataDir is the mounted /data volume: the server's permissions.json and
+	// allowlist.json, and the worlds directory snapshots are read from.
 	DataDir string
+
+	// SnapshotMaxHold caps how long one snapshot may keep world saving
+	// paused, however slow its caller is.
+	SnapshotMaxHold time.Duration
 
 	// Kickable is the set of gamertags POST /command may kick.
 	Kickable Kickable
@@ -110,6 +114,10 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	snapshotMaxHold, err := positiveMillisOr("SNAPSHOT_MAX_HOLD_MS", 5*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
 	consoleOrigin, err := originOr("CONSOLE_ORIGIN", defaultConsoleOrigin)
 	if err != nil {
 		return Config{}, err
@@ -127,6 +135,7 @@ func LoadConfig() (Config, error) {
 		ConsoleOrigin:   consoleOrigin,
 		CommandTimeout:  commandTimeout,
 		DataDir:         envOr("DATA_DIR", "/data"),
+		SnapshotMaxHold: snapshotMaxHold,
 		Kickable:        kickable,
 	}, nil
 }

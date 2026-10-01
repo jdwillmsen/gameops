@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -24,15 +25,25 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// The console outlives the signal: on shutdown a snapshot in flight still
+	// has to send its `save resume`, so the websocket is closed last.
+	consoleCtx, closeConsole := context.WithCancel(context.Background())
+	defer closeConsole()
+
 	console := NewConsole(cfg.ConsoleAddr, cfg.ConsolePassword, cfg.ConsoleOrigin, cfg.CommandTimeout, logger)
+	snapshots := newSnapshotter(console, filepath.Join(cfg.DataDir, "worlds"), cfg.SnapshotMaxHold, logger)
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		console.Run(ctx)
+		console.Run(consoleCtx)
+	}()
+	go func() {
+		defer wg.Done()
+		snapshots.Run(consoleCtx)
 	}()
 
-	srv := &server{cfg: cfg, console: console, logger: logger}
+	srv := &server{cfg: cfg, console: console, snapshots: snapshots, logger: logger}
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           newMux(srv),
@@ -42,17 +53,24 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		httpServer.Shutdown(shutdownCtx)
-	}()
-
 	logger.Info("starting", "http_addr", cfg.HTTPAddr, "console_addr", cfg.ConsoleAddr, "console_origin", cfg.ConsoleOrigin, "kickable_actors", cfg.Kickable.Len())
-	err = httpServer.ListenAndServe()
-	stop() // unblocks console.Run's ctx.Done() promptly if ListenAndServe returned on its own
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- httpServer.ListenAndServe() }()
+
+	select {
+	case <-ctx.Done():
+	case err = <-serveErr:
+	}
+
+	// In this order: end any snapshot and get its resume confirmed, let the
+	// other requests finish, and only then drop the console.
+	snapshots.Close()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	httpServer.Shutdown(shutdownCtx)
+	cancel()
+	closeConsole()
 	wg.Wait()
+
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("http server error", "error", err)
 		os.Exit(1)

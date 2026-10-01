@@ -93,7 +93,8 @@ genuine fault: an unreadable mount or unparseable contents.
 | `CONSOLE_ADDR` | no | `127.0.0.1:8765` | Server's websocket console address |
 | `CONSOLE_ORIGIN` | no | `mc-console-bridge://sidecar` | `Origin` sent on the console handshake; must appear verbatim in the server's `WEBSOCKET_ALLOWED_ORIGINS` when its origin check is enabled. Must be `scheme://host[:port]` — anything else fails startup |
 | `COMMAND_TIMEOUT_MS` | no | `2000` | Bounds the console write for one `/command`, and caps the window spent collecting that command's output. The HTTP response write deadline is derived from it |
-| `DATA_DIR` | no | `/data` | Mounted server data volume (read-only) |
+| `DATA_DIR` | no | `/data` | Mounted server data volume (read-only). `worlds/` under it is what `/snapshot` reads |
+| `SNAPSHOT_MAX_HOLD_MS` | no | `300000` | Longest one `/snapshot` may keep world saving paused, however slow its caller is |
 | `BRIDGE_KICKABLE` | no | empty | Comma-separated gamertags `kick` may name (the server's own actors). Empty refuses every kick. An entry containing `"`, `\` or a control character, or starting with `@`, fails startup |
 
 ## Server-side prerequisites
@@ -126,9 +127,67 @@ the contract this bridge depends on, not a second copy of the chart's config.
 | `GET /permissions` | bearer | Parsed `permissions.json` |
 | `GET /allowlist` | bearer | Parsed `allowlist.json` |
 | `GET /events?since=<id>` | bearer | Typed events (connect/disconnect/crash/content-error), fed from the same console websocket's stdout/stderr/logHistory broadcasts - no separate log-tailing. Events replayed from a logHistory backfill (sent on every connect/redial) carry `"backfill":true`; live stdout/stderr events omit the field, so a consumer can ignore replayed history instead of treating it as a fresh arrival |
+| `POST /snapshot` | bearer | `{"have": {"<world>/db/000123.ldb": <size>, ...}}` → a tar of the world as of one consistent save. See [Snapshots](#snapshots) |
 | `GET /healthz` | none | Liveness - process is up. Stays green while the console is down, since a restart cannot fix a server that has not opened its console yet |
 | `GET /readyz` | none | Readiness - 200 only while the console websocket is established, so a bridge whose console auth is rejected stops receiving traffic |
 | `GET /metrics` | none | Prometheus |
+
+## Snapshots
+
+`POST /snapshot` copies the world out of a running server without stopping
+it. The bridge pauses saving (`save hold`), waits for the server to report
+the save complete and list each file with its length (`save query`), streams
+the files cut to exactly those lengths, and resumes saving (`save resume`) on
+every path out, including a caller that disconnects or stalls.
+
+The response is a tar stream:
+
+1. `snapshot.json`: `{"files":[{"name","size"}]}`, every file in the save,
+   whether or not it is sent.
+2. The files the caller lacks. LevelDB `.ldb` tables never change once
+   written, so one named in `have` at the same size is skipped; every other
+   file is always sent. After the first call a snapshot moves megabytes, not
+   the whole world.
+3. `snapshot.ok`, empty, last. **A stream without it is not a snapshot** and
+   must be discarded: the status line is already sent when a copy fails
+   midway, so the marker is the only completion signal.
+
+| Status | Meaning |
+|---|---|
+| `409` | Another snapshot is running, or the server refused the pause (`The command is already running`) at any point during this one. The bridge then does not resume: something else believes the pause is its own, is still copying under it, and resumes when it is done |
+| `502` | Console not connected, or the server's file list could not be trusted |
+| `503` | An earlier snapshot's resume has not been confirmed yet, or the bridge is shutting down |
+| `504` | The server did not report the save complete in time |
+
+### The resume is owed until the server confirms it
+
+A world left paused keeps every change in memory. So from the moment a
+`save hold` may have reached the server, a resume is owed, and it stays owed
+until the server answers `Changes to the world are resumed.` or
+`A previous save has not been completed.` (what it says when nothing is
+paused, for instance after a restart). If the console connection drops first,
+the bridge retries every few seconds once it is back, and refuses new
+snapshots in the meantime. `mc_console_bridge_snapshot_resume_owed` is 1 for
+as long as that lasts; it should never stay 1 for more than a few seconds.
+
+Only whole lines in the server's own log format count as its answers. The
+console also carries script output and player names, and a line that merely
+contains the words is not the server speaking.
+
+The save commands run on a context of their own, not the request's: a
+console write on a cancelled context closes the websocket, and a caller going
+away is exactly when the resume has to get through. On shutdown the bridge
+ends any snapshot, waits for its resume, and only then closes the console.
+
+The save commands are deliberately not in the `/command` allowlist: a client
+that could pause saving without the bridge guaranteeing the resume could
+leave the world unsaved until the next restart.
+
+The bridge cannot see a pause taken through another channel, such as
+`send-command save hold` from `kubectl exec`. It refuses to start while one
+is active and backs off if one starts during a snapshot, but that job's copy
+is only safe if it does not overlap a snapshot at all, so callers keep clear
+of the times those jobs run.
 
 ## Build and test
 
