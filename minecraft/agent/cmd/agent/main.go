@@ -36,6 +36,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/httpapi"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/knowledge"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/mapclient"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/moderation"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
@@ -60,6 +61,11 @@ import (
 // greeting, to stay clear of the documented open upstream crash-on-join
 // defect on this server.
 const welcomeDelay = 5 * time.Second
+
+// mapClaimTimeout bounds one !map call to the map service. Inside the
+// dispatcher's own five seconds, so a slow map answers the player with an
+// error rather than with silence.
+const mapClaimTimeout = 3 * time.Second
 
 // announceDrainDelay is how long the announce drain waits after a join
 // before whispering a player their backlog. Past welcomeDelay so the
@@ -251,7 +257,11 @@ func main() {
 	playerStore = withPlayerEvents(playerStore, sources.NewEvents(ctx, deliverer, log))
 
 	registry := plugin.NewRegistry()
-	if err := registerPlugins(ctx, registry, deliverer, joins, cfg.ModerationTerms, log, presenceRT.plugin); err != nil {
+	extraPlugins := []plugin.Plugin{presenceRT.plugin}
+	if cfg.MapURL != "" {
+		extraPlugins = append(extraPlugins, plugins.NewMapLogin(mapclient.New(cfg.MapURL, cfg.MapToken, mapClaimTimeout), playerRoster, cfg.MapPublicURL))
+	}
+	if err := registerPlugins(ctx, registry, deliverer, joins, cfg.ModerationTerms, log, extraPlugins...); err != nil {
 		log.Error("plugin_register_failed", logging.Fields{"error": err.Error()})
 		os.Exit(1)
 	}

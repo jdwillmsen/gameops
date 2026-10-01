@@ -109,7 +109,8 @@ gophertunnel client --> chat.ParseTrigger --> plugin.Registry --> plugin.Voice (
   (`!players`, `!online`, `!version`, `!backup`), `welcome` (event-driven, no
   commands), `knowledge` (`!kb`), `waypoints` (`!wp`), `announce`
   (`!announce`, `!inbox`), `moderation` (event-driven over chat, plus
-  `!modlog`), `schedule` (`!schedule`)
+  `!modlog`), `schedule` (`!schedule`), `map` (`!map`, only when `MAP_URL`
+  is set)
 - `internal/sources` - the announcement sources nobody types: the player
   events read off the profile store's own writes, the watcher that polls
   the exporters for a version change or a stale backup, and the loop that
@@ -346,6 +347,9 @@ without that gauge beside them there is nothing on the graph to say so.
 | `WIKI_ALLOW_TEST_BASE_URL` | `false` | Lets `WIKI_BASE_URL` name a test server. For tests and local fakes only; never set in production |
 | `ANSWER_MAX_PER_MINUTE` | `4` | Max `@server` answers a single actor may trigger per rolling minute, tracked separately from `COMMAND_RATE_LIMIT_PER_MINUTE` since one LLM call costs far more than one console command |
 | `MC_MONITOR_URL` | *(empty)* | mc-monitor Prometheus endpoint behind `!online`; unset reports the command unconfigured rather than erroring |
+| `MAP_URL` | *(empty disables `!map`)* | The world map service's internal API (its `INTERNAL_ADDR` listener, e.g. `http://<release>-map:9090`), where `!map` reports who typed a login code |
+| `MAP_TOKEN` | *(required with `MAP_URL`)* | Bearer token for that API; the map's `INTERNAL_TOKEN`, at least 16 characters |
+| `MAP_PUBLIC_URL` | *(required with `MAP_URL`)* | The address players open in a browser, quoted in `!map` replies. A different listener from `MAP_URL` |
 | `BACKUP_EXPORTER_URL` | *(empty)* | Backup exporter's `/metrics.txt` behind `!backup`; unset reports the command unconfigured rather than erroring |
 | `MODERATION_TERMS` | *(empty disables the term rule)* | Comma-separated terms whose use in public chat is flagged, matched case-insensitively as whole words; blanks between commas are ignored. The flood and caps rules need no configuration |
 | `ANNOUNCE_API_TOKEN` | *(empty disables the API)* | Bearer token for `POST /announcements`. Optional: unset leaves the route unmounted, so it answers 404 like any path that was never there - a disabled API is indistinguishable from an absent one and is never open. Created by a human, never by an agent |
@@ -1199,6 +1203,38 @@ like any other. For the loop's own removals it holds `presence-loop`.
 
 `replicas: 0` in the chart remains the way to take a bot away for
 maintenance. For gameplay, park it.
+
+## Logging in to the world map
+
+`!map <code>` is how a player proves to the world map (`minecraft/mcmap`)
+that they are on this server. The map page shows a six-character code; the
+player types it in chat; the agent tells the map which XUID typed it, and
+that browser is logged in as them.
+
+The code travels from the browser to the game, not the other way, because a
+link in Bedrock chat cannot be clicked on a console or a phone. Typing in
+chat is something only a connected player can do, and the chat packet
+carries their XUID, so nothing else has to be trusted.
+
+| Command | Level | What it does |
+|---|---|---|
+| `!map` | visitor | Says where the map is and how to log in |
+| `!map <code>` | visitor | Logs in the browser showing that code as the player who typed it |
+| `!map logout` | visitor | Ends every map login held in the name of the player who typed it |
+
+A code is checked for shape here before the map is asked, so a typo is not
+spent as a guess against it. The map answers every bad code the same way
+(never issued, expired, already used), and `!map` passes that on as one
+reply. The usual per-player command rate limit applies.
+
+A code shown to a player by someone else would log that person's browser in
+under the player's name. The reply to a bare `!map` says to type only a code
+from a page they opened themselves, but a player talked into it never types
+a bare `!map`; the reply they do see, to the code itself, says to type
+`!map logout` if the screen was not theirs. That ends every map login in
+their name, wherever it is.
+
+The console can speak in chat but is not a player, and `!map` refuses it.
 
 ## Targeting a reply
 

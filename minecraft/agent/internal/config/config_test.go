@@ -516,3 +516,60 @@ func TestLoad_WikiEnabledParsesBooleans(t *testing.T) {
 		t.Error("WIKI_ENABLED=\"yes please\" loaded, want an error")
 	}
 }
+
+// The map login is off unless it is given an address, and half a
+// configuration is refused: a !map that exists but cannot reach the map, or
+// cannot tell a player where the map is, only produces confusing replies.
+func TestLoad_MapLogin(t *testing.T) {
+	clearEnv(t)
+	setRequired(t)
+	for _, k := range []string{"MAP_URL", "MAP_TOKEN", "MAP_PUBLIC_URL"} {
+		t.Setenv(k, "")
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MapURL != "" {
+		t.Errorf("MapURL = %q with nothing set, want the feature off", cfg.MapURL)
+	}
+
+	t.Setenv("MAP_URL", "http://map.example.internal:9090")
+	if _, err := Load(); err == nil {
+		t.Error("MAP_URL alone was accepted")
+	}
+	t.Setenv("MAP_TOKEN", "map-token-0123456789")
+	if _, err := Load(); err == nil {
+		t.Error("MAP_URL and MAP_TOKEN without MAP_PUBLIC_URL were accepted")
+	}
+	t.Setenv("MAP_PUBLIC_URL", "https://map.example")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MapURL != "http://map.example.internal:9090" || cfg.MapToken != "map-token-0123456789" || cfg.MapPublicURL != "https://map.example" {
+		t.Errorf("map config = %q %q %q", cfg.MapURL, cfg.MapToken, cfg.MapPublicURL)
+	}
+
+	t.Setenv("MAP_PUBLIC_URL", "map.example")
+	if _, err := Load(); err == nil {
+		t.Error("a MAP_PUBLIC_URL with no scheme was accepted; players are told to open it")
+	}
+	t.Setenv("MAP_PUBLIC_URL", "https://map.example")
+
+	// The map service refuses a token this short, so every !map would fail
+	// at the moment a player tried it; better that the agent says so now.
+	t.Setenv("MAP_TOKEN", "short")
+	if _, err := Load(); err == nil {
+		t.Error("a MAP_TOKEN the map service would refuse was accepted")
+	}
+	t.Setenv("MAP_TOKEN", "map-token-0123456789")
+
+	for _, bad := range []string{"map.example.internal:9090", "ftp://map.example.internal", "http://"} {
+		t.Setenv("MAP_URL", bad)
+		if _, err := Load(); err == nil {
+			t.Errorf("MAP_URL %q was accepted", bad)
+		}
+	}
+}
