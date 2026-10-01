@@ -76,6 +76,14 @@ type Config struct {
 	MCMonitorURL      string
 	BackupExporterURL string
 
+	// MapURL is the world map service's internal API, where !map reports
+	// who typed a login code. Empty turns !map off. MapToken authenticates
+	// that call; MapPublicURL is the address players are told to open, which
+	// is a different listener from MapURL and reachable from outside.
+	MapURL       string
+	MapToken     string
+	MapPublicURL string
+
 	// Postgres, for player profiles and playtime. An empty PGHost disables
 	// persistence entirely: the agent then greets players the way it did
 	// before Stage 3, which is a supported state rather than a degraded one.
@@ -193,6 +201,8 @@ type Config struct {
 // WikiProductionURL is the only wiki API the agent is meant to call. It is
 // the wiki client's own default, so the pin and the client cannot disagree.
 const WikiProductionURL = wiki.DefaultBaseURL
+
+const minMapTokenLength = 16
 
 // Load reads Config from the process environment.
 func Load() (Config, error) {
@@ -329,6 +339,23 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	mapURL := stringDefault("MAP_URL", "")
+	mapToken := stringDefault("MAP_TOKEN", "")
+	mapPublicURL := stringDefault("MAP_PUBLIC_URL", "")
+	if mapURL != "" {
+		if u, err := url.Parse(mapURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return Config{}, fmt.Errorf("MAP_URL must be the http(s) address of the map's internal API, got %q", mapURL)
+		}
+		// The map service refuses a shorter token, so every !map would fail
+		// when a player tried it; failing here says so at deploy time.
+		if len(mapToken) < minMapTokenLength {
+			return Config{}, fmt.Errorf("MAP_TOKEN must be at least %d characters when MAP_URL is set", minMapTokenLength)
+		}
+		if u, err := url.Parse(mapPublicURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return Config{}, fmt.Errorf("MAP_PUBLIC_URL must be the http(s) address players open when MAP_URL is set, got %q", mapPublicURL)
+		}
+	}
+
 	cfg := Config{
 		MCHost:                    host,
 		MCPort:                    port,
@@ -360,6 +387,9 @@ func Load() (Config, error) {
 		AnswerMaxPerMinute:        answerRateLimit,
 		MCMonitorURL:              stringDefault("MC_MONITOR_URL", ""),
 		BackupExporterURL:         stringDefault("BACKUP_EXPORTER_URL", ""),
+		MapURL:                    mapURL,
+		MapToken:                  mapToken,
+		MapPublicURL:              mapPublicURL,
 		CommandRateLimitPerMinute: commandRateLimit,
 		ConsoleBridgeURL:          bridgeURL,
 		ConsoleBridgeToken:        bridgeToken,
