@@ -1,0 +1,8 @@
+{
+  "name": "@semantic-release/npm",
+  "version": "13.1.1",
+  "description": "Empty stand-in for the npm publishing plugin, which this repo never loads; see ../../package.json overrides.",
+  "private": true,
+  "type": "module",
+  "main": "index.js"
+}
