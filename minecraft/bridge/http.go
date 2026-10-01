@@ -48,7 +48,9 @@ func init() {
 type server struct {
 	cfg     Config
 	console *Console
-	logger  *slog.Logger
+	// snapshots is nil when the bridge has no world directory to read.
+	snapshots *snapshotter
+	logger    *slog.Logger
 }
 
 func newMux(s *server) http.Handler {
@@ -61,6 +63,9 @@ func newMux(s *server) http.Handler {
 	mux.Handle("GET /permissions", s.authed(s.handlePermissions))
 	mux.Handle("GET /allowlist", s.authed(s.handleAllowlist))
 	mux.Handle("GET /events", s.authed(s.handleEvents))
+	if s.snapshots != nil {
+		mux.Handle("POST /snapshot", s.authed(s.handleSnapshot))
+	}
 
 	return mux
 }
