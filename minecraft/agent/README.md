@@ -1640,10 +1640,10 @@ minutes. Run it by hand before changing the model, the prompt or the LLM
 settings, and commit the report under `docs/eval/`. A change to the scorer
 gets a record there too, since it moves what every earlier number means:
 `docs/eval/2026-09-15-scoring-the-delivered-line.md` is the latest of those.
-`docs/eval/2026-09-18-release-date-versus-compatibility.md` is the most
-recent run, and carries its own before half rather than comparing against an
-older report. The scorer's own tests
-need no endpoint and run with `go test ./...`.
+Reports are named by date, so the most recent run is the last file there. A
+run carries its own same-day baseline rather than comparing against an older
+report, as `docs/eval/2026-09-18-release-date-versus-compatibility.md` first
+did. The scorer's own tests need no endpoint and run with `go test ./...`.
 
 ### Testing the store against a real database
 
