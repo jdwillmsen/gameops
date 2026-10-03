@@ -101,6 +101,10 @@ func (s *Server) InternalHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.Handle("GET /metrics", promhttp.Handler())
+	if s.Chunks != nil && s.InternalToken != "" {
+		mux.HandleFunc("GET /internal/v1/world", s.agentOnly(s.handleWorld))
+		mux.HandleFunc("POST /internal/v1/world/acknowledge", s.agentOnly(s.handleAcknowledge))
+	}
 	if s.Codes != nil && s.InternalToken != "" {
 		mux.HandleFunc("POST /internal/v1/claims", s.agentOnly(s.handleClaim))
 		if s.Sessions != nil && s.Sessions.Revoked != nil {

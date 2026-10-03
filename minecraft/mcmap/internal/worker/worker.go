@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
@@ -50,6 +51,11 @@ var (
 	}, []string{"dimension"})
 )
 
+// Census counts the chunks in a freshly mirrored world.
+type Census interface {
+	Take(ctx context.Context, dbDir string, at time.Time) (chunks.Report, error)
+}
+
 type Syncer interface {
 	Sync(ctx context.Context) (mirror.Stats, error)
 }
@@ -70,6 +76,8 @@ type Worker struct {
 	RenderTimeout time.Duration
 	Status        *Status
 	Logger        *slog.Logger
+	// Census, if set, counts the world's chunks after every snapshot.
+	Census Census
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -218,6 +226,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	metricSnapshotSeconds.Set(stats.Duration.Seconds())
 	w.Logger.Info("snapshot applied", "files", stats.Files, "fetched", stats.Fetched, "removed", stats.Removed, "bytes", stats.Bytes, "seconds", stats.Duration.Seconds())
 	w.Status.set(func(s *Status) { s.snapshotAt = now })
+	w.census(ctx, now)
 
 	problem := ""
 	for _, dimension := range render.Dimensions {
@@ -237,4 +246,32 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	}
 	w.Status.MarkProblem(problem)
 	return Applied
+}
+
+// census runs before the renders, which take minutes: a world losing chunks
+// is the one thing this service sees that cannot wait for them. Its failure
+// is logged and counted but stops nothing else.
+func (w *Worker) census(ctx context.Context, now time.Time) {
+	if w.Census == nil {
+		return
+	}
+	r, err := w.Census.Take(ctx, filepath.Join(w.MirrorDir, w.Level, "db"), now)
+	if err != nil {
+		w.Logger.Error("chunk census failed", "error", err)
+		return
+	}
+	if lost := r.TotalLost(); lost > 0 {
+		attrs := []any{"lost", lost, "missing_now", r.TotalMissing()}
+		for _, d := range chunks.Dimensions {
+			attrs = append(attrs, d.Name(), r.Lost[d])
+		}
+		// Block coordinates, which is what a player or the map shows.
+		if len(r.Sample) > 0 {
+			first := r.Sample[0]
+			attrs = append(attrs, "first_dimension", first.Dim.Name(), "block_x", first.X*16, "block_z", first.Z*16)
+		}
+		w.Logger.Error("world has lost chunks", attrs...)
+		return
+	}
+	w.Logger.Info("chunk census", "overworld", r.Present[chunks.Overworld], "nether", r.Present[chunks.Nether], "end", r.Present[chunks.End])
 }

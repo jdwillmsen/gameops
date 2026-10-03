@@ -93,8 +93,8 @@ func Load(getenv func(string) string) (Config, error) {
 		fail("AUTH_DISABLED must be true or false")
 	}
 	c.Login = !disabled
-	if c.Login && len(c.InternalToken) < minTokenLength {
-		fail("INTERNAL_TOKEN must be at least %d characters; set AUTH_DISABLED=true to run with no login", minTokenLength)
+	if (c.Login || c.InternalToken != "") && len(c.InternalToken) < minTokenLength {
+		fail("INTERNAL_TOKEN must be at least %d characters; set AUTH_DISABLED=true and leave it unset to run with no login", minTokenLength)
 	}
 	if c.SessionTTL, err = time.ParseDuration(or(getenv("SESSION_TTL"), "168h")); err != nil || c.SessionTTL <= 0 {
 		fail("SESSION_TTL must be a positive duration")

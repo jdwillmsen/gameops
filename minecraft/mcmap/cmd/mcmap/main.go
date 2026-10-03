@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
@@ -65,6 +66,15 @@ func run(logger *slog.Logger) error {
 		}
 	}
 
+	// A ledger that cannot be read stops the service rather than starting
+	// over: an empty one would take a damaged world as the new normal.
+	ledger, err := chunks.OpenLedger(filepath.Join(cfg.DataDir, "chunks", "seen.bin"))
+	if err != nil {
+		return err
+	}
+	census := &chunks.Census{WorkDir: filepath.Join(cfg.DataDir, "chunks"), Ledger: ledger}
+	census.Publish()
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -89,6 +99,7 @@ func run(logger *slog.Logger) error {
 		RenderTimeout: 3 * time.Hour,
 		Status:        status,
 		Logger:        logger,
+		Census:        census,
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -105,6 +116,10 @@ func run(logger *slog.Logger) error {
 		Refresh:  cfg.Refresh,
 		Static:   web.FS,
 		Log:      logger,
+		Chunks:   census,
+		// The agent's token guards the internal API whether or not the page
+		// has a login; with none configured those routes are not served.
+		InternalToken: cfg.InternalToken,
 	}
 	if cfg.Login {
 		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
@@ -117,7 +132,6 @@ func run(logger *slog.Logger) error {
 		}
 		app.Sessions = &auth.Sessions{Key: key, TTL: cfg.SessionTTL, Now: time.Now, Revoked: revoked}
 		app.Codes = &auth.Codes{TTL: 10 * time.Minute, Max: maxPendingLogins, Now: time.Now}
-		app.InternalToken = cfg.InternalToken
 	} else {
 		logger.Warn("running with no login: anyone who can reach this port sees the whole map")
 	}
