@@ -47,10 +47,11 @@ jobs:
       - id: check
         env:
           PRODUCTION_VERSION: ${{ inputs.production_version }}
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
         run: |
           go run ./minecraft/afkbot/cmd/protocolcheck \
-            -production-version "${{ inputs.production_version }}" \
-            -upstream-version "${{ steps.upstream.outputs.version }}"
+            -production-version "$PRODUCTION_VERSION" \
+            -upstream-version "$UPSTREAM_VERSION"
 
       # Opens the bump PR as RELEASE_PR_TOKEN, not the default GITHUB_TOKEN:
       # GitHub suppresses workflow runs triggered by the default token to

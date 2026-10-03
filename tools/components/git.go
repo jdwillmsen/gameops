@@ -26,10 +26,24 @@ func changedFiles(root, base, head string) ([]string, error) {
 	return gitLines(root, "diff", "--name-only", base+"..."+head)
 }
 
-// -m lists a merge commit's changes against each parent, and --root lets the
-// first commit report its files instead of nothing.
+// A merge commit is judged against its first parent only: listing it against
+// every parent would credit it with everything its other side already had.
+// --no-renames keeps a file moved out of a component counting for that
+// component, and show (unlike diff-tree) lets the first commit report its
+// files instead of nothing.
 func commitFiles(root, sha string) ([]string, error) {
-	return gitLines(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root", sha)
+	return gitLines(root, "show", "--first-parent", "--no-renames", "--name-only", "--format=", sha)
+}
+
+// commitExists reports whether sha names a commit this clone has, which a
+// force push's "before" SHA may not.
+func commitExists(root, sha string) bool {
+	if strings.HasPrefix(sha, "-") {
+		return false
+	}
+	cmd := exec.Command("git", "cat-file", "-e", sha+"^{commit}")
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
 
 func repoRoot() (string, error) {

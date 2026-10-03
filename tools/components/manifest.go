@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -61,6 +62,13 @@ func set(xs ...string) map[string]bool {
 		m[x] = true
 	}
 	return m
+}
+
+// oneLine reports whether v is safe as a $GITHUB_OUTPUT key=value line: a
+// line break would start a bogus key, and other control characters have no
+// business in a name or a command.
+func oneLine(v string) bool {
+	return !strings.ContainsFunc(v, func(r rune) bool { return unicode.IsControl(r) && r != '\t' })
 }
 
 func keys(m map[string]bool) string {
@@ -150,6 +158,9 @@ func Validate(root string, ms []Manifest) []error {
 		if m.Tasks.Test == "" {
 			bad(m, "tasks.test is required")
 		}
+		if !oneLine(m.Tasks.Test) {
+			bad(m, "tasks.test must be one line")
+		}
 		for _, d := range m.Depends {
 			if !strings.HasSuffix(d, "/") {
 				bad(m, "depends %q must end with / (directories only)", d)
@@ -195,10 +206,8 @@ func validateRelease(root string, m Manifest, tags map[string]string, bad func(M
 	if r.Image == nil {
 		return
 	}
-	// These values are written to $GITHUB_OUTPUT as key=value lines, where a
-	// newline would start a bogus key.
-	if strings.ContainsAny(r.Image.Name+r.Image.Description+r.Image.ShortDescription, "\r\n") {
-		bad(m, "release.image descriptions must be one line")
+	if !oneLine(r.Image.Name) || !oneLine(r.Image.Description) || !oneLine(r.Image.ShortDescription) {
+		bad(m, "release.image values must be one line")
 	}
 	if !namePattern.MatchString(r.Image.Name) {
 		bad(m, "release.image.name %q must match %s", r.Image.Name, namePattern)
