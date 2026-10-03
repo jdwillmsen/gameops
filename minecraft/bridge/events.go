@@ -114,6 +114,7 @@ func (l *EventLog) IngestBackfill(raw string, receivedAt time.Time) {
 }
 
 func (l *EventLog) ingest(raw string, receivedAt time.Time, backfill bool) {
+	noteCorruption(raw, receivedAt)
 	e, ok := parseLine(raw)
 	if !ok {
 		return

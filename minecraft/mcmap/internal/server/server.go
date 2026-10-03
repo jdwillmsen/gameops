@@ -37,6 +37,9 @@ type Server struct {
 	Codes    *auth.Codes
 	// InternalToken is what the agent presents to report who typed a code.
 	InternalToken string
+	// Chunks is the world's chunk census, which the agent reads to warn
+	// players while chunks are missing. Nil leaves those routes out.
+	Chunks ChunkCensus
 	// Log records logins issued and revoked. Nil discards them.
 	Log *slog.Logger
 

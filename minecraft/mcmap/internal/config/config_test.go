@@ -53,6 +53,11 @@ func TestLoad_LoginIsRequiredUnlessTurnedOffExplicitly(t *testing.T) {
 	if err != nil || c.Login {
 		t.Errorf("AUTH_DISABLED=true: %+v, %v", c, err)
 	}
+	// With no login the token still guards the internal API, which can clear
+	// the lost-chunks alert, so a short one is refused there too.
+	if _, err := Load(env(append(bare, "AUTH_DISABLED", "true", "INTERNAL_TOKEN", "short")...)); err == nil {
+		t.Error("accepted a short INTERNAL_TOKEN with the login off")
+	}
 	if _, err := Load(env(append(bare, "AUTH_DISABLED", "yes please")...)); err == nil {
 		t.Error("accepted AUTH_DISABLED with a value that is not a boolean")
 	}
