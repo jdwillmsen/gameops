@@ -70,6 +70,47 @@ the normal interval. The page keeps serving the last good tiles throughout
 and says the refresh failed; the reason is in the log, not in the API, since
 it names internal addresses.
 
+### Counting chunks
+
+A Bedrock world never deletes a chunk in normal play. One that disappears
+went with a LevelDB table file, which is what happens when the volume under
+the server is lost mid-write: on the next start the server prints
+`LevelDB ... status NOT OK(Corruption: N missing files ...). Trying repair.`
+and drops whatever it can no longer find.
+
+So after every snapshot, before rendering, the service counts the chunks in
+the mirror and compares them with every chunk it has ever seen. A chunk seen
+before and absent now is *missing*. Every chunk found missing is also
+*lost*, and stays lost until an operator accepts the world as it is: a lost
+chunk does not stay missing, because Bedrock generates it again from the
+seed as soon as a player comes near, with everything built on it gone. The
+places players visit most are the first to come back, so "missing" alone
+would clear itself exactly where the loss matters.
+
+`POST /internal/v1/world/acknowledge` with the `checkedAt` of the count being
+accepted clears what is lost and stops expecting the chunks still missing.
+It is for after a restore has been checked, or after a deliberate rollback,
+whose newer chunks are missing too. A count newer than the one named is
+refused, since it may hold losses nobody has looked at.
+
+The ledger (`chunks/seen.bin` on the data volume) holds what was seen, what
+is missing and what is lost, and is written before a count's result is
+used, so a restart neither forgets a loss nor takes the damage as the new
+normal; the lost-chunk gauges are published from it at startup, before the
+first count. A ledger that cannot be read stops the service rather than
+starting again from empty.
+
+A chunk that keeps some of its records and loses others still counts as
+present: the count sees whole chunks only. On 2026-10-02, 107 chunks lost
+part of their data that way. The console bridge's corruption signal is what
+covers that case.
+
+Even a read-only LevelDB open writes a `LOCK` file, and the mirror must hold
+only the server's files, so the count runs on hard links to them under
+`chunks/`. It takes about 12 seconds on the full world at a whole CPU and a
+few tens of megabytes. A count that fails is logged and counted and stops
+nothing else; the missing-chunk gauges keep their last value.
+
 ## Login
 
 The map shows where every base is, so it sits behind a login that proves the
@@ -162,6 +203,11 @@ On `INTERNAL_ADDR` only:
 | `GET /metrics` | Prometheus |
 | `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code. 204, or 404 for a code that is unknown, expired or used |
 | `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds. 204 |
+| `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count |
+| `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
+
+The internal API is served whenever `INTERNAL_TOKEN` is set, with or without
+the login.
 
 The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, so a link
 opens at the same place.
@@ -175,6 +221,10 @@ opens at the same place.
 | `mcmap_snapshot_bytes_total`, `mcmap_snapshot_duration_seconds` | Cost of mirroring |
 | `mcmap_render_last_success_timestamp_seconds{dimension}` | When each dimension's tiles were last current |
 | `mcmap_render_duration_seconds{dimension}`, `mcmap_render_failures_total{dimension}` | Cost and failures of rendering |
+| `mcmap_world_chunks{dimension}` | Chunks in the world at the last count |
+| `mcmap_world_chunks_missing{dimension}` | Chunks seen before and absent from the last count |
+| `mcmap_world_chunks_lost{dimension}` | Chunks found missing since the last acknowledgement, including any generated again since. Above zero means the world has lost data; only an acknowledgement clears it |
+| `mcmap_world_census_last_success_timestamp_seconds`, `mcmap_world_census_duration_seconds`, `mcmap_world_census_failures_total` | Whether the count is running |
 
 ## Build and test
 

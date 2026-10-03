@@ -1,15 +1,18 @@
 package worker
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
@@ -25,7 +28,25 @@ func (f *fakeSyncer) Sync(context.Context) (mirror.Stats, error) {
 	return mirror.Stats{Files: 3, Fetched: 1, Bytes: 42}, f.err
 }
 
+type fakeCensus struct {
+	dirs   []string
+	order  *[]string
+	err    error
+	report chunks.Report
+}
+
+func (f *fakeCensus) Take(_ context.Context, dbDir string, at time.Time) (chunks.Report, error) {
+	f.dirs = append(f.dirs, dbDir)
+	if f.order != nil {
+		*f.order = append(*f.order, "census")
+	}
+	r := f.report
+	r.At = at
+	return r, f.err
+}
+
 type fakeRenderer struct {
+	order      *[]string
 	rendered   []string
 	worlds     []string
 	outs       []string
@@ -41,6 +62,9 @@ func (f *fakeRenderer) Prepare(context.Context) error {
 
 func (f *fakeRenderer) Render(_ context.Context, world, dimension, out string) error {
 	f.rendered = append(f.rendered, dimension)
+	if f.order != nil {
+		*f.order = append(*f.order, dimension)
+	}
 	f.worlds = append(f.worlds, world)
 	f.outs = append(f.outs, out)
 	if dimension == f.failOn {
@@ -251,3 +275,64 @@ func TestCycle_RendererThatCannotRunMeansNoSnapshot(t *testing.T) {
 }
 
 func (f *fakeRenderer) RenderedAt(string) (time.Time, bool) { return time.Time{}, false }
+
+// The chunk count runs on every snapshot that lands and before the renders,
+// which take minutes: losing chunks is the one thing here that is urgent.
+func TestCycle_CountsChunksBeforeRendering(t *testing.T) {
+	var order []string
+	s, r, c := &fakeSyncer{}, &fakeRenderer{order: &order}, &fakeCensus{order: &order}
+	w := newWorker(s, r, "")
+	w.Census = c
+
+	w.Cycle(context.Background(), noon)
+
+	if !reflect.DeepEqual(order, []string{"census", "overworld", "nether", "end"}) {
+		t.Fatalf("order = %v", order)
+	}
+	if c.dirs[0] != filepath.Join("/data/mirror", "FWB", "db") {
+		t.Errorf("counted %q", c.dirs[0])
+	}
+}
+
+func TestCycle_ACensusThatFailsDoesNotStopTheMap(t *testing.T) {
+	s, r, c := &fakeSyncer{}, &fakeRenderer{}, &fakeCensus{err: errors.New("unreadable")}
+	w := newWorker(s, r, "")
+	w.Census = c
+	if got := w.Cycle(context.Background(), noon); got != Applied || len(r.rendered) != 3 {
+		t.Errorf("outcome %v, rendered %v", got, r.rendered)
+	}
+}
+
+func TestCycle_NoCensusWithoutAFreshSnapshot(t *testing.T) {
+	for name, s := range map[string]*fakeSyncer{
+		"busy":   {err: mirror.ErrBusy},
+		"failed": {err: errors.New("bridge down")},
+	} {
+		c := &fakeCensus{}
+		w := newWorker(s, &fakeRenderer{}, "")
+		w.Census = c
+		w.Cycle(context.Background(), noon)
+		if len(c.dirs) != 0 {
+			t.Errorf("%s: counted a mirror that did not change", name)
+		}
+	}
+}
+
+func TestCycle_LostChunksAreLoggedAsAnError(t *testing.T) {
+	var logged bytes.Buffer
+	c := &fakeCensus{report: chunks.Report{
+		Lost:   map[chunks.Dimension]int{chunks.Overworld: 2},
+		Sample: []chunks.Pos{{Dim: chunks.Overworld, X: 10, Z: -3}},
+	}}
+	w := newWorker(&fakeSyncer{}, &fakeRenderer{}, "")
+	w.Census = c
+	w.Logger = slog.New(slog.NewJSONHandler(&logged, nil))
+	w.Cycle(context.Background(), noon)
+
+	line := logged.String()
+	for _, want := range []string{`"level":"ERROR"`, `"msg":"world has lost chunks"`, `"lost":2`, `"block_x":160`, `"block_z":-48`} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log lacks %s:\n%s", want, line)
+		}
+	}
+}
