@@ -223,3 +223,69 @@ func TestIsPublicType(t *testing.T) {
 		}
 	}
 }
+
+// consoleSayPacket is the Text packet a live BDS 1.26.52.3 broadcasts for
+// `send-command say <message>`, captured from a server running the same
+// image and transport as production: an announcement carrying no XUID, the
+// literal source name "Server", and a message that repeats that name as a
+// bracketed prefix.
+func consoleSayPacket(message string) *packet.Text {
+	return &packet.Text{
+		TextType:   packet.TextTypeAnnouncement,
+		SourceName: ConsoleSourceName,
+		Message:    "[" + ConsoleSourceName + "] " + message,
+	}
+}
+
+func TestIdentity_ConsoleSayIsTheServerOrigin(t *testing.T) {
+	id, ok := Identity(consoleSayPacket("!announce !urgent test"))
+	if !ok {
+		t.Fatal("the shape a console say actually arrives in must resolve, or no console command can ever run")
+	}
+	if id != ServerOrigin {
+		t.Errorf("id = %q, want ServerOrigin", id)
+	}
+}
+
+func TestIdentity_APlayerCalledServerIsStillThemselves(t *testing.T) {
+	pk := &packet.Text{TextType: packet.TextTypeChat, SourceName: ConsoleSourceName, XUID: "2535400000000000"}
+	id, ok := Identity(pk)
+	if !ok {
+		t.Fatal("expected ok=true for a player carrying an XUID")
+	}
+	if id != "2535400000000000" {
+		t.Errorf("id = %q, want the player's own XUID, never the console sentinel", id)
+	}
+}
+
+func TestBody_UnwrapsTheConsolePrefixSoACommandParses(t *testing.T) {
+	got := Body(consoleSayPacket("!announce !urgent test"))
+	if got != "!announce !urgent test" {
+		t.Fatalf("Body = %q, want the console prefix stripped", got)
+	}
+	if ParseTrigger(got).Command != "announce" {
+		t.Errorf("ParseTrigger(%q) found no announce command", got)
+	}
+}
+
+func TestBody_LeavesAPlayerMessageUntouched(t *testing.T) {
+	// A player who types the console's own prefix must not have it stripped:
+	// the unwrap is what makes a console command parse, and a player able to
+	// trigger it could dress a line up as one.
+	pk := &packet.Text{
+		TextType:   packet.TextTypeChat,
+		SourceName: ConsoleSourceName,
+		XUID:       "2535400000000000",
+		Message:    "[" + ConsoleSourceName + "] !shutdown",
+	}
+	if got := Body(pk); got != pk.Message {
+		t.Errorf("Body = %q, want the message unmodified", got)
+	}
+}
+
+func TestBody_ConsoleMessageWithoutAPrefixIsLeftAlone(t *testing.T) {
+	pk := &packet.Text{TextType: packet.TextTypeAnnouncement, Message: "!ping"}
+	if got := Body(pk); got != "!ping" {
+		t.Errorf("Body = %q, want %q", got, "!ping")
+	}
+}

@@ -520,10 +520,24 @@ never as an error — the reconnect that follows is the measurement.
 
 Chat identity is always resolved from **XUID**, never the gamertag
 (`SourceName`) - a player can set an arbitrary display name, but not an
-arbitrary XUID. A message with both an empty XUID and an empty name is
-treated as console-originated (`send-command say ...`); a message with an
-empty XUID but a non-empty name is rejected outright rather than trusted,
-since accepting it would let a player impersonate the console.
+arbitrary XUID. The **empty XUID** is what marks a message as
+console-originated (`send-command say ...`), not the name beside it: the
+server stamps a connected player's chat with their XUID, so no line a player
+can send resolves to the console sentinel.
+
+A console `say` arrives as an announcement named `Server` whose message
+repeats that name as a `[Server] ` prefix, and the prefix is stripped before
+the line is read for a `!` command. An empty XUID under any _other_ name is
+still rejected outright rather than trusted - that is the shape an
+operator's in-game `/say` arrives in, and accepting it would grant the
+console's trust to a line identified only by a display name.
+
+Every public reply the agent makes leaves as a console `say` and is
+broadcast back to the agent's own connection in exactly that shape, so the
+voice that sent it is the only thing that can tell the two apart: a line
+`BridgeVoice.Say` just broadcast is dropped on arrival
+(`BridgeVoice.JustSaid`). Without that, a reply opening with `!` - something
+a model answer can easily do - would be dispatched as an operator command.
 
 ## Permission model
 

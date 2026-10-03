@@ -965,6 +965,22 @@ func handlePacket(ctx context.Context, pk packet.Packet, selfXUID string, siblin
 	}
 }
 
+// selfBroadcaster is a plugin.Voice that can recognise its own broadcast
+// coming back. Asked of the live voice rather than required of every Voice:
+// a stand-in that cannot reach a server has no echo to recognise, and the
+// one implementation that can is adapters.BridgeVoice.
+type selfBroadcaster interface {
+	JustSaid(line string) bool
+}
+
+func justBroadcast(pctx *plugin.Context, line string) bool {
+	if pctx == nil {
+		return false
+	}
+	voice, ok := pctx.Voice.(selfBroadcaster)
+	return ok && voice.JustSaid(line)
+}
+
 func handleText(ctx context.Context, text *packet.Text, selfXUID string, siblingXUIDs map[string]struct{}, log *logging.Logger, registry *plugin.Registry, pctx *plugin.Context, eventBus *bus.Bus, limiter *ratelimit.PerActor, permResolver *adapters.PermissionResolver, ans answering, playerRoster *roster.Roster, auditor audit.Store) {
 	if !chat.IsAnswerableType(text.TextType) {
 		return
@@ -978,11 +994,20 @@ func handleText(ctx context.Context, text *packet.Text, selfXUID string, sibling
 		return
 	}
 
-	trigger := chat.ParseTrigger(text.Message)
+	body := chat.Body(text)
+	// The other half of the self/sibling guard. A broadcast reply leaves as
+	// a console `say` and returns under the console's identity, not this
+	// agent's XUID, so IsSelfOrSibling cannot see it -- and a reply opening
+	// with CommandPrefix would then be dispatched as an operator command.
+	if id == chat.ServerOrigin && justBroadcast(pctx, body) {
+		return
+	}
+
+	trigger := chat.ParseTrigger(body)
 	eventBus.Publish(chat.MessageEvent{
 		ActorXUID: id,
 		Gamertag:  rosterName(playerRoster, id),
-		Message:   text.Message,
+		Message:   body,
 		Trigger:   trigger,
 		Public:    chat.IsPublicType(text.TextType),
 	})

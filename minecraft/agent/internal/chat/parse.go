@@ -11,9 +11,14 @@ import (
 )
 
 // ServerOrigin is the sentinel identity used for console-originated messages
-// (e.g. `send-command say ...`), which arrive with both SourceName and XUID
-// empty.
+// (e.g. `send-command say ...`), which arrive with no XUID.
 const ServerOrigin = "<server>"
+
+// ConsoleSourceName is the name Bedrock puts on the announcement it
+// broadcasts for a console `say`. It is the server's own fixed word for the
+// console, not its configured server-name, and the message repeats it as a
+// "[Server] " prefix.
+const ConsoleSourceName = "Server"
 
 // CommandPrefix marks a chat line as a bot command, e.g. "!help".
 const CommandPrefix = "!"
@@ -74,19 +79,40 @@ func IsPublicType(textType byte) bool {
 // identity because it is attacker-controlled (a player can set an arbitrary
 // display name).
 //
-// A console-originated message (send-command say/tellraw) carries both an
-// empty XUID and an empty SourceName; that combination resolves to
-// ServerOrigin. A message with an empty XUID but a non-empty SourceName is
-// unidentifiable and is rejected — trusting the name alone would let a
-// player impersonate the server sentinel.
+// A console-originated message carries no XUID. The empty XUID is what
+// carries the trust, not the name beside it: a connected player's chat is
+// stamped with their XUID by the server, so no line a player can send ever
+// reaches this branch. A console `say` arrives named ConsoleSourceName and
+// an unnamed server line arrives with no name at all; both resolve to
+// ServerOrigin.
+//
+// Any other name over an empty XUID stays rejected rather than trusted. An
+// operator's own `/say` reaches the agent under the operator's gamertag with
+// no XUID to bind it to, and granting the console sentinel to a line
+// identified only by a display name is the impersonation this guards.
 func Identity(pk *packet.Text) (id string, ok bool) {
 	if pk.XUID != "" {
 		return pk.XUID, true
 	}
-	if pk.SourceName == "" {
+	if pk.SourceName == "" || pk.SourceName == ConsoleSourceName {
 		return ServerOrigin, true
 	}
 	return "", false
+}
+
+// Body returns the line to read a trigger from.
+//
+// Bedrock broadcasts a console `say` as an announcement whose message
+// repeats the source name in brackets — `[Server] !announce ...` — so the
+// raw message never starts with CommandPrefix and no console command ever
+// matched. Only a server-generated line (no XUID) is unwrapped: a player
+// carries an XUID, so nobody can shed a bracketed prefix of their own
+// choosing and have the remainder dispatched.
+func Body(pk *packet.Text) string {
+	if pk.XUID != "" || pk.SourceName == "" {
+		return pk.Message
+	}
+	return strings.TrimPrefix(pk.Message, "["+pk.SourceName+"] ")
 }
 
 // IsSelfOrSibling reports whether id belongs to this bot or a sibling bot,
@@ -171,7 +197,9 @@ type MessageEvent struct {
 	// when the roster cannot name them. Never the packet's SourceName, which
 	// the sender controls.
 	Gamertag string
-	// Message is the original chat line, unmodified.
+	// Message is the chat line as Body returned it: unmodified for a player,
+	// and stripped of the console's bracketed prefix for a server line, so
+	// what a handler reads is what Trigger was classified from.
 	Message string
 	// Trigger is the classification ParseTrigger produced for Message.
 	Trigger Trigger

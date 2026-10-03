@@ -222,6 +222,24 @@ func TestChatCommandFlow(t *testing.T) {
 			want: []string{"tell " + playerXUID + ": pong"},
 		},
 		{
+			// The real shape, as captured off a live server: a named
+			// announcement whose body is prefixed. Both halves have to be
+			// handled or the command never runs.
+			name: "a console say command is answered to everyone",
+			pk:   consoleSayPacket("!ping"),
+			want: []string{"say: pong"},
+		},
+		{
+			name: "a console say is trusted at operator level",
+			pk:   consoleSayPacket("!shutdown"),
+			want: []string{"say: shutting down"},
+		},
+		{
+			name: "a console say that is not a command is left alone",
+			pk:   consoleSayPacket("restarting in five minutes"),
+			want: nil,
+		},
+		{
 			name: "console-originated command is answered to everyone",
 			pk:   chatPacket("", "", "!ping"),
 			want: []string{"say: pong"},
@@ -799,6 +817,20 @@ func answerMentionPacket(t *testing.T, pk *packet.Text, configure func(*plugin.C
 // whisperPacket is the same question arriving through /tell rather than open
 // chat. Bedrock delivers that as TextTypeWhisper, which only the sender and
 // the recipient see.
+// consoleSayPacket is the Text packet a live BDS 1.26.52.3 broadcasts for
+// `send-command say <message>`, captured from a server running the same
+// image and transport as production: an announcement carrying no XUID, the
+// console's own source name, and a message that repeats that name as a
+// bracketed prefix. The console origin was unreachable in production for as
+// long as the agent expected an unnamed packet here.
+func consoleSayPacket(message string) *packet.Text {
+	return &packet.Text{
+		TextType:   packet.TextTypeAnnouncement,
+		SourceName: chat.ConsoleSourceName,
+		Message:    "[" + chat.ConsoleSourceName + "] " + message,
+	}
+}
+
 func whisperPacket(xuid, sourceName, message string) *packet.Text {
 	return &packet.Text{
 		TextType:   packet.TextTypeWhisper,
@@ -1028,5 +1060,49 @@ func TestAFailedConsoleCommandIsAnsweredOnTheConsolePath(t *testing.T) {
 	out := voice.output()
 	if len(out) != 1 || !strings.HasPrefix(out[0], "say: ") || !strings.Contains(out[0], commandFailedReply) {
 		t.Errorf("output = %v, want one broadcast carrying %q", out, commandFailedReply)
+	}
+}
+
+// TestTheAgentsOwnBroadcastIsNeverRunAsAConsoleCommand covers the hazard
+// that comes with trusting the console: every public reply the agent makes
+// leaves as a console `say` and the server broadcasts it back under the
+// console's identity, which is now trusted at operator level. A reply
+// opening with "!" is one the model can write unprompted -- "!shutdown is
+// operator-only" is a perfectly ordinary thing to say -- and obeying it
+// would be the agent commanding itself as an operator.
+func TestTheAgentsOwnBroadcastIsNeverRunAsAConsoleCommand(t *testing.T) {
+	bridge := &consoleBridge{}
+	srv := bridge.start(t)
+
+	registry := plugin.NewRegistry()
+	if err := registry.Register(opOnlyPlugin{}); err != nil {
+		t.Fatalf("register opsonly: %v", err)
+	}
+	playerRoster := roster.New()
+	// Wired as main wires it: the one BridgeVoice every reply goes through.
+	voice := adapters.NewBridgeVoice(adapters.NewBridgeClient(srv.URL, "tok", time.Second), playerRoster)
+	pctx := &plugin.Context{Voice: voice, Directory: registry}
+
+	const reply = "!shutdown is operator-only, ask an admin"
+	if err := voice.Say(context.Background(), reply); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+
+	handlePacket(context.Background(), consoleSayPacket(reply), selfXUID, siblingBotXUIDs(), logging.New("info"),
+		registry, pctx, bus.New(), unlimitedRateLimit(), playerRoster, fakePermResolver(t, nil), testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
+
+	if ran := bridge.ran(); len(ran) != 1 {
+		t.Fatalf("bridge ran %v, want only the agent's own broadcast -- it obeyed its own reply as an operator", ran)
+	}
+
+	// The same line typed by an operator, which the agent never said, is
+	// still dispatched: the guard consumes one echo, it does not mute the
+	// console.
+	handlePacket(context.Background(), consoleSayPacket(reply), selfXUID, siblingBotXUIDs(), logging.New("info"),
+		registry, pctx, bus.New(), unlimitedRateLimit(), playerRoster, fakePermResolver(t, nil), testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
+
+	ran := bridge.ran()
+	if len(ran) != 2 || !strings.Contains(ran[1], "shutting down") {
+		t.Fatalf("bridge ran %v, want the operator's own command to have run", ran)
 	}
 }
