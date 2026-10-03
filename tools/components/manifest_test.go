@@ -73,7 +73,7 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 			Tasks:   Tasks{Build: "x", Test: "y"},
 			Release: &Release{Tag: "lib", Artifacts: []string{"image", "tarball"}}},
 		{Name: "lib", Kind: "service", Language: "go", Dir: "c/",
-			Tasks:   Tasks{Build: "x", Test: "y"},
+			Tasks:   Tasks{Build: "x", Test: "y\nz"},
 			Release: &Release{Tag: "lib", Image: &Image{Name: "c", Description: "two\nlines"}}},
 	}
 	errs := Validate(root, ms)
@@ -95,7 +95,8 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		`c/component.yaml: name "lib" already used by b/`,
 		`c/component.yaml: release.tag "lib" already used by b/`,
 		`c/component.yaml: release.image is set but release.artifacts has no image`,
-		`c/component.yaml: release.image descriptions must be one line`,
+		`c/component.yaml: tasks.test must be one line`,
+		`c/component.yaml: release.image values must be one line`,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing error %q in:\n%s", want, joined)
