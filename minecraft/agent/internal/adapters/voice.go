@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
@@ -60,12 +62,32 @@ type NameResolver interface {
 type BridgeVoice struct {
 	client *BridgeClient
 	names  NameResolver
+
+	mu   sync.Mutex
+	said []saidLine
+	now  func() time.Time
 }
+
+// saidLine is one broadcast awaiting its own echo.
+type saidLine struct {
+	line string
+	at   time.Time
+}
+
+// sayEchoWindow bounds how long a broadcast stays recognisable as this
+// agent's own. It has to outlive one console-to-chat round trip and nothing
+// else; a line still unmatched after this was never echoed back.
+const sayEchoWindow = 30 * time.Second
+
+// sayEchoMemory caps the unmatched broadcasts kept, so a run of lines that
+// never come back (a bridge that accepts commands the server drops) cannot
+// grow this without bound between expiries.
+const sayEchoMemory = 64
 
 // NewBridgeVoice builds a BridgeVoice. names resolves the gamertag a Tell
 // call's xuid should be targeted at.
 func NewBridgeVoice(client *BridgeClient, names NameResolver) *BridgeVoice {
-	return &BridgeVoice{client: client, names: names}
+	return &BridgeVoice{client: client, names: names, now: time.Now}
 }
 
 var _ plugin.Voice = (*BridgeVoice)(nil)
@@ -127,16 +149,71 @@ var sayLineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
 
 // Say broadcasts message to everyone via the console's own `say`, which is
 // the entire reason replies go through the bridge rather than a connected
-// player's own chat: the message carries no gamertag prefix at all. The
-// message is flattened to one line first; `say` with nothing left to
+// player's own chat: it carries the console's name rather than a player's.
+// The message is flattened to one line first; `say` with nothing left to
 // broadcast is an error rather than a silently discarded reply.
+//
+// The line is remembered before it is sent, not after: the server can echo
+// it back to the agent's own connection before this call returns, and an
+// echo that arrives before it is recognisable is one the agent may obey.
 func (v *BridgeVoice) Say(ctx context.Context, message string) error {
 	line := strings.TrimSpace(sayLineBreaks.Replace(message))
 	if line == "" {
 		return fmt.Errorf("bridge voice: say: message is empty after flattening line breaks, nothing to broadcast")
 	}
+	v.remember(line)
 	if _, err := v.client.runCommand(ctx, "say "+line); err != nil {
 		return fmt.Errorf("bridge voice: say: %w", err)
 	}
 	return nil
+}
+
+// JustSaid reports whether line is a broadcast this voice made, consuming
+// the record of it.
+//
+// Everything the agent says in public leaves as a console `say`, and the
+// server broadcasts that back to the agent's own connection in the very
+// shape an operator typing `say !announce ...` produces — no XUID and the
+// console's name. Nothing in the packet separates the two, so the voice that
+// said it is the only thing that can: without this, a reply of the agent's
+// own that happened to open with CommandPrefix would be dispatched as a
+// command at operator level.
+//
+// Consuming the record keeps one echo from vetoing the next: an operator who
+// types back exactly what the agent just said is answered, having only lost
+// the one occurrence the server already delivered.
+func (v *BridgeVoice) JustSaid(line string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.expire()
+	for i, s := range v.said {
+		if s.line == line {
+			v.said = append(v.said[:i], v.said[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func (v *BridgeVoice) remember(line string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.expire()
+	if len(v.said) >= sayEchoMemory {
+		v.said = v.said[1:]
+	}
+	v.said = append(v.said, saidLine{line: line, at: v.now()})
+}
+
+// expire drops records too old to still be awaiting an echo. Callers hold
+// v.mu.
+func (v *BridgeVoice) expire() {
+	cutoff := v.now().Add(-sayEchoWindow)
+	kept := v.said[:0]
+	for _, s := range v.said {
+		if s.at.After(cutoff) {
+			kept = append(kept, s)
+		}
+	}
+	v.said = kept
 }

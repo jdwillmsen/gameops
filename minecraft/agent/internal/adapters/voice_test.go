@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -211,5 +212,75 @@ func TestBridgeVoice_Tell_Timeout(t *testing.T) {
 	v := NewBridgeVoice(NewBridgeClient(srv.URL, "tok", 5*time.Millisecond), fakeNames{"111": "Steve"})
 	if err := v.Tell(context.Background(), "111", "hi"); err == nil {
 		t.Fatal("expected a timeout error")
+	}
+}
+
+// sayRecorder is a bridge that accepts every command and remembers nothing
+// else: these tests are about what the voice remembers, not what the server
+// does with it.
+func sayRecorder(t *testing.T) *BridgeVoice {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rule":"say"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return NewBridgeVoice(NewBridgeClient(srv.URL, "tok", time.Second), fakeNames{})
+}
+
+func TestBridgeVoice_JustSaid_RecognisesTheLineAsBroadcast(t *testing.T) {
+	voice := sayRecorder(t)
+	// Multi-line input is the normal case for a relayed console reply, and
+	// what comes back from the server is the flattened single line -- so
+	// that, not the caller's text, is what has to be recognised.
+	if err := voice.Say(context.Background(), "players online:\n Steve"); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	if voice.JustSaid("players online:\n Steve") {
+		t.Error("the caller's unflattened text never reaches chat and must not match")
+	}
+	if !voice.JustSaid("players online:  Steve") {
+		t.Fatal("the flattened line the server broadcast was not recognised as the agent's own")
+	}
+	if voice.JustSaid("players online:  Steve") {
+		t.Error("one broadcast is echoed once; a second match would mute an operator repeating it")
+	}
+}
+
+func TestBridgeVoice_JustSaid_IsFalseForALineItNeverSaid(t *testing.T) {
+	voice := sayRecorder(t)
+	if voice.JustSaid("!shutdown") {
+		t.Fatal("a voice that has said nothing must not claim an operator's command as its own")
+	}
+}
+
+func TestBridgeVoice_JustSaid_ForgetsLinesNoEchoCanStillBeComing(t *testing.T) {
+	voice := sayRecorder(t)
+	at := time.Now()
+	voice.now = func() time.Time { return at }
+	if err := voice.Say(context.Background(), "!shutdown is operator-only"); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	at = at.Add(sayEchoWindow + time.Second)
+	if voice.JustSaid("!shutdown is operator-only") {
+		t.Fatal("a line this old was never echoed; holding it would veto an operator typing the same thing")
+	}
+}
+
+func TestBridgeVoice_JustSaid_MemoryIsBounded(t *testing.T) {
+	voice := sayRecorder(t)
+	for i := 0; i < sayEchoMemory*3; i++ {
+		if err := voice.Say(context.Background(), fmt.Sprintf("line %d", i)); err != nil {
+			t.Fatalf("Say: %v", err)
+		}
+	}
+	voice.mu.Lock()
+	kept := len(voice.said)
+	voice.mu.Unlock()
+	if kept > sayEchoMemory {
+		t.Fatalf("remembered %d broadcasts, want at most %d", kept, sayEchoMemory)
+	}
+	if !voice.JustSaid(fmt.Sprintf("line %d", sayEchoMemory*3-1)) {
+		t.Error("the newest broadcast is the one an echo is still coming for and must be kept")
 	}
 }
