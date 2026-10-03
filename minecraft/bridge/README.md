@@ -132,6 +132,26 @@ the contract this bridge depends on, not a second copy of the chart's config.
 | `GET /readyz` | none | Readiness - 200 only while the console websocket is established, so a bridge whose console auth is rejected stops receiving traffic |
 | `GET /metrics` | none | Prometheus |
 
+## World corruption
+
+The server reports a damaged world in its log in one of two ways. At world
+open it prints `LevelDB <world>/db status NOT OK(...). Trying repair.` (on
+2026-10-02 the status was `Corruption: 25 missing files`), repairs the
+database by dropping what it cannot find, and starts as normal, so a clean
+start afterwards is not a healthy world. At run time it prints `Level
+corruption detected, disconnecting clients and shutting down server` and
+stops.
+
+Every console line the bridge receives, live or replayed from history, is
+checked for those two. `mc_console_bridge_world_corruption_detected` turns 1
+on the first and stays 1 for the life of this process. With it,
+`mc_console_bridge_world_corruption_lines_total` counts distinct lines, so
+the history mc-server-runner replays on every reconnect is not counted
+again, and `mc_console_bridge_world_corruption_last_seen_timestamp_seconds`
+is the time printed on the latest one. The match is
+anchored on the server's log-level tag, so nothing a player types can raise
+it. The world map's chunk count says how much was lost.
+
 ## Snapshots
 
 `POST /snapshot` copies the world out of a running server without stopping
