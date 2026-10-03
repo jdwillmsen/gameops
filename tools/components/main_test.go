@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -102,5 +103,124 @@ func TestCLIGetAndReleasable(t *testing.T) {
 	var out bytes.Buffer
 	if err := run(root, []string{"get", "-release-tag", "nobody-v1.0.0"}, nil, &out); err == nil {
 		t.Fatal("unknown tag prefix: want error")
+	}
+}
+
+// fixtureWith writes a component.yaml under rel in the fixture repo.
+func fixtureWith(t *testing.T, root, rel, yaml string) {
+	t.Helper()
+	writeFile(t, root, rel+"/component.yaml", yaml)
+}
+
+func TestCLIGetForReleasableWithoutImage(t *testing.T) {
+	root, _, _, _, _ := fixture(t)
+	fixtureWith(t, root, "minecraft/tool", `name: tool
+kind: cli
+language: go
+tasks: {build: b, test: go test ./minecraft/tool/...}
+release:
+  tag: tool
+  artifacts: [github-asset]
+`)
+	fixtureWith(t, root, "minecraft/bare", `name: bare
+kind: job
+language: go
+tasks: {build: b, test: t}
+release: {tag: bare}
+`)
+	for _, c := range []struct{ tag, dir string }{{"tool-v2.0.0", "minecraft/tool"}, {"bare-v2.0.0", "minecraft/bare"}} {
+		got := runCLI(t, root, "", "get", "-release-tag", c.tag)
+		for _, want := range []string{"dir=" + c.dir + "\n", "version=2.0.0\n", "image=\n", "description=\n", "short_description=\n"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: output missing %q:\n%s", c.tag, want, got)
+			}
+		}
+	}
+	got := runCLI(t, root, "", "get", "-release-tag", "agent-v1.2.3")
+	if !strings.Contains(got, "image=minecraft-server-agent\n") {
+		t.Errorf("image component lost its image:\n%s", got)
+	}
+}
+
+func TestCLIGetEmitsOnlyOneLinePerKey(t *testing.T) {
+	root, _, _, _, _ := fixture(t)
+	for _, bad := range []string{"go test ./a\n  && echo injected=1", "go test ./a\rb", "go test\x00x"} {
+		yaml := "name: tool\nkind: cli\nlanguage: go\ntasks:\n  build: b\n  test: " +
+			strconv.Quote(bad) + "\nrelease: {tag: tool}\n"
+		fixtureWith(t, root, "minecraft/tool", yaml)
+		var out bytes.Buffer
+		err := run(root, []string{"get", "-release-tag", "tool-v1.0.0"}, nil, &out)
+		if err == nil || !strings.Contains(err.Error(), "tasks.test must be one line") {
+			t.Errorf("test %q: want one-line error, got %v", bad, err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("test %q: emitted %q despite the error", bad, out.String())
+		}
+	}
+}
+
+func TestOneLine(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "go test ./...": true, "a\tb": true, "é ✓": true,
+		"a\nb": false, "a\rb": false, "a\x00b": false, "a\x1bb": false, "a\u0085b": false} {
+		if got := oneLine(v); got != want {
+			t.Errorf("oneLine(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestCLIAffectedRunsEverythingWhenBaseLeftHistory(t *testing.T) {
+	root, _, _, _, docs := fixture(t)
+	// A force push: the before-SHA is well formed but names a commit this
+	// clone never had.
+	missing := strings.Repeat("ab", 20)
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(runCLI(t, root, "", "affected", "-base", missing, "-head", docs)), &rows); err != nil || len(rows) != 2 {
+		t.Fatalf("missing base: want every component, got %v %v", rows, err)
+	}
+	for _, flagLike := range []string{"--output=/tmp/x", "-h"} {
+		if err := json.Unmarshal([]byte(runCLI(t, root, "", "affected", "-base="+flagLike, "-head", docs)), &rows); err != nil || len(rows) != 2 {
+			t.Fatalf("base %q: want every component, got %v %v", flagLike, rows, err)
+		}
+	}
+	// An existing base still narrows the plan, so the fallback is not just
+	// "always run everything".
+	if got := runCLI(t, root, "", "affected", "-base", docs+"~1", "-head", docs); got != "[]\n" {
+		t.Fatalf("known base: got %q, want []", got)
+	}
+}
+
+func TestCLIAffectedRunsEverythingWhenNoMergeBase(t *testing.T) {
+	root, _, _, _, docs := fixture(t)
+	git(t, root, "checkout", "-q", "--orphan", "unrelated")
+	writeFile(t, root, "other.txt", "x")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "unrelated")
+	unrelated := git(t, root, "rev-parse", "HEAD")
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(runCLI(t, root, "", "affected", "-base", docs, "-head", unrelated)), &rows); err != nil || len(rows) != 2 {
+		t.Fatalf("no merge base: want every component, got %v %v", rows, err)
+	}
+}
+
+func TestCLICommitsJudgesMergeAgainstFirstParent(t *testing.T) {
+	root, base, _, _, _ := fixture(t)
+	git(t, root, "checkout", "-q", "-b", "side", base)
+	writeFile(t, root, "minecraft/bridge/side.go", "side")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "side")
+	git(t, root, "checkout", "-q", "main")
+	// main's own agent change is the other side of the merge: the merge must
+	// not be credited to agent for it.
+	writeFile(t, root, "minecraft/agent/main.go", "agent")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "agent")
+	git(t, root, "merge", "--no-ff", "-qm", "merge side", "side")
+	merge := git(t, root, "rev-parse", "HEAD")
+
+	if got := runCLI(t, root, merge+"\n", "commits", "-component", "agent"); got != "" {
+		t.Errorf("agent: merge credited with its other parent's files: %q", got)
+	}
+	if got := runCLI(t, root, merge+"\n", "commits", "-component", "bridge"); got != merge+"\n" {
+		t.Errorf("bridge: merge brought bridge changes in, got %q", got)
 	}
 }

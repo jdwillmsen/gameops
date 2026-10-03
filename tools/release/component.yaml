@@ -3,4 +3,4 @@ kind: cli
 language: node
 tasks:
   build: npm ci --prefix tools/release --no-fund --no-audit
-  test: npm ci --prefix tools/release --no-fund --no-audit && tools/release/dry-run-test.sh && tools/release/release-all-test.sh && tools/release/stranded-tag-test.sh
+  test: npm ci --prefix tools/release --no-fund --no-audit && tools/release/dry-run-test.sh && tools/release/release-all-test.sh && tools/release/stranded-tag-test.sh && tools/release/existing-digest-test.sh

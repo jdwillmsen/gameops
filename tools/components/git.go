@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -26,10 +27,42 @@ func changedFiles(root, base, head string) ([]string, error) {
 	return gitLines(root, "diff", "--name-only", base+"..."+head)
 }
 
-// -m lists a merge commit's changes against each parent, and --root lets the
-// first commit report its files instead of nothing.
+// A merge commit is judged against its first parent only: listing it against
+// every parent would credit it with everything its other side already had.
+// --no-renames keeps a file moved out of a component counting for that
+// component, and show (unlike diff-tree) lets the first commit report its
+// files instead of nothing.
 func commitFiles(root, sha string) ([]string, error) {
-	return gitLines(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "-m", "--root", sha)
+	return gitLines(root, "show", "--first-parent", "--no-renames", "--name-only", "--format=", sha)
+}
+
+// commitExists reports whether sha names a commit this clone has, which a
+// force push's "before" SHA may not.
+func commitExists(root, sha string) bool {
+	if strings.HasPrefix(sha, "-") {
+		return false
+	}
+	cmd := exec.Command("git", "cat-file", "-e", sha+"^{commit}")
+	cmd.Dir = root
+	return cmd.Run() == nil
+}
+
+// hasMergeBase reports whether base and head share an ancestor. A shallow
+// clone or an unrelated history has none, and a three-dot diff then fails
+// outright. merge-base exits 1 for "no common ancestor"; any other failure is
+// a real error, so only that code reads as missing history.
+func hasMergeBase(root, base, head string) (bool, error) {
+	cmd := exec.Command("git", "merge-base", base, head)
+	cmd.Dir = root
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base %s %s: %w", base, head, err)
 }
 
 func repoRoot() (string, error) {
