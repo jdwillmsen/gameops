@@ -27,7 +27,9 @@ jobs:
   # Everything below is per component, and all of it comes from the tag: its
   # prefix names the component, whose component.yaml supplies the image name,
   # descriptions and Dockerfile; its semver is the image version. A tag that
-  # does not parse, or names no image component, stops here.
+  # does not parse, or names no releasable component, stops here. A component
+  # that ships no image resolves with an empty image, which skips every job
+  # below it.
   resolve:
     runs-on: ubuntu-latest
     outputs:
@@ -41,7 +43,7 @@ jobs:
     steps:
       # A manual dispatch runs on the dispatching branch, so building its
       # checkout would publish branch code under a release version. Checking
-      # out the tag makes a re-publish rebuild exactly what was released, and
+      # out the tag makes the publish job see exactly what was released, and
       # fails when no such tag exists.
       - uses: actions/checkout@v7.0.1
         with:
@@ -57,9 +59,8 @@ jobs:
           set -euo pipefail
           facts="$(go run ./tools/components get -release-tag "$TAG")"
           echo "$facts"
-          if ! grep -q '^image=' <<<"$facts"; then
-            echo "::error::$TAG releases no image"
-            exit 1
+          if grep -qx 'image=' <<<"$facts"; then
+            echo "::notice::$TAG releases no image; nothing to publish"
           fi
           { echo "tag=$TAG"; echo "$facts"; } >> "$GITHUB_OUTPUT"
 
@@ -68,6 +69,7 @@ jobs:
   # exactly the tagged tree before anything is published.
   verify:
     needs: resolve
+    if: needs.resolve.outputs.image != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -79,8 +81,15 @@ jobs:
           cache: true
       - run: ${{ needs.resolve.outputs.test }}
 
+  # An image that already exists is never rebuilt: a rebuild of the same source
+  # still gets a new digest, so re-dispatching for an existing tag would move
+  # it under every consumer. The build runs only when the version tag is
+  # absent from ghcr.io; otherwise the existing digest is reused, which is also
+  # what the Docker Hub mirror copies, so a re-run only ever fills in what is
+  # missing.
   publish:
     needs: [resolve, verify]
+    if: needs.resolve.outputs.image != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -98,6 +107,7 @@ jobs:
         org.opencontainers.image.documentation=https://github.com/${{ github.repository }}/tree/main/${{ needs.resolve.outputs.dir }}#readme
     outputs:
       revision: ${{ steps.revision.outputs.value }}
+      digest: ${{ steps.digest.outputs.value }}
     steps:
       - uses: docker/setup-buildx-action@v4.4.1
 
@@ -114,11 +124,30 @@ jobs:
       - id: revision
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # The script comes from the workflow's own commit, not the tag: a tag
+      # cut before the script existed must still be re-publishable.
+      - uses: actions/checkout@v7.0.1
+        with:
+          path: glue
+          sparse-checkout: tools/release/existing-digest.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - id: existing
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ needs.resolve.outputs.image }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          digest="$(glue/tools/release/existing-digest.sh "$IMAGE:$VERSION")"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       # The version tag only, never `latest`: the chart pins a tag, and a
       # moving one would reintroduce a silent-upgrade hazard on stateful,
       # always-connected processes. The sha- tag names the exact source
       # revision without implying an order.
       - id: meta
+        if: steps.existing.outputs.digest == ''
         uses: docker/metadata-action@v6.2.0
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
@@ -139,7 +168,9 @@ jobs:
       # The deployment target is amd64-only Talos nodes, so a multi-arch build
       # would cost CI time for a platform nothing pulls. VERSION is read by
       # the components that stamp their binary; the others ignore it.
-      - uses: docker/build-push-action@v7.4.0
+      - id: build
+        if: steps.existing.outputs.digest == ''
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: ${{ needs.resolve.outputs.dir }}/Dockerfile
@@ -153,6 +184,21 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ needs.resolve.outputs.image }}
           provenance: mode=max
           sbom: true
+
+      # Re-tagging by digest keeps the bytes, so a run that was interrupted
+      # after the version tag landed still gets its sha- tag without a rebuild.
+      - if: steps.existing.outputs.digest != ''
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ needs.resolve.outputs.image }}
+          DIGEST: ${{ steps.existing.outputs.digest }}
+          REVISION: ${{ steps.revision.outputs.value }}
+        run: docker buildx imagetools create --prefer-index=false --tag "$IMAGE:sha-$REVISION" "$IMAGE@$DIGEST"
+
+      - id: digest
+        env:
+          EXISTING: ${{ steps.existing.outputs.digest }}
+          BUILT: ${{ steps.build.outputs.digest }}
+        run: echo "value=${EXISTING:-$BUILT}" >> "$GITHUB_OUTPUT"
 
   # Docker Hub is a second public registry for the same image; the cluster
   # keeps pulling from ghcr.io. It runs as its own job after the ghcr.io push
@@ -179,18 +225,22 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # With one source and no --annotation or --platform, imagetools pushes
-      # the source index bytes unchanged, so the Docker Hub digest matches
+      # Copied by digest, never by tag, so what lands on Docker Hub is exactly
+      # what publish pushed or found, whatever the tag points at by now. With
+      # one source and no --annotation or --platform, imagetools pushes the
+      # source manifest bytes unchanged (--prefer-index=false stops a
+      # single-platform source being wrapped in a new index with another digest), so the Docker Hub digest matches
       # ghcr.io and the index annotations and attestation manifests come
       # along. Passing --annotation here would rebuild the index, change the
       # digest, and keep only the annotations given on the command line.
       - env:
-          SOURCE: ghcr.io/${{ github.repository_owner }}/${{ needs.resolve.outputs.image }}:${{ needs.resolve.outputs.version }}
+          SOURCE: ghcr.io/${{ github.repository_owner }}/${{ needs.resolve.outputs.image }}@${{ needs.publish.outputs.digest }}
           TARGET: docker.io/${{ vars.DOCKERHUB_USERNAME }}/${{ needs.resolve.outputs.image }}
           VERSION: ${{ needs.resolve.outputs.version }}
           REVISION: ${{ needs.publish.outputs.revision }}
         run: |
           docker buildx imagetools create \
+            --prefer-index=false \
             --tag "$TARGET:$VERSION" \
             --tag "$TARGET:sha-$REVISION" \
             "$SOURCE"

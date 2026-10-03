@@ -81,9 +81,22 @@ type matrixRow struct {
 
 func affectedCmd(root string, ms []Manifest, base, head string, stdout io.Writer) error {
 	selected := ms
-	// A push with no usable before-SHA (a new branch, a force push) has no
-	// diff to trust, so everything runs rather than nothing.
-	if strings.Trim(base, "0") != "" {
+	// A push with no usable before-SHA has no diff to trust, so everything
+	// runs rather than nothing. That covers a new branch (all-zero SHA) and a
+	// force push, whose before-SHA names a commit that left the history.
+	switch {
+	case strings.Trim(base, "0") == "":
+	case !commitExists(root, base):
+		fmt.Fprintf(os.Stderr, "components: base %s is not in this history; running every component\n", base)
+	default:
+		ok, err := hasMergeBase(root, base, head)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintf(os.Stderr, "components: base %s shares no history with %s; running every component\n", base, head)
+			break
+		}
 		paths, err := changedFiles(root, base, head)
 		if err != nil {
 			return err
@@ -144,12 +157,23 @@ func getCmd(ms []Manifest, tag string, stdout io.Writer) error {
 	if !ok {
 		return fmt.Errorf("no component releases under tag prefix %q", prefix)
 	}
+	// The image keys are always present, empty for a component that ships no
+	// image, so the workflow can branch on image being empty.
+	var img Image
+	if m.Release.Image != nil {
+		img = *m.Release.Image
+	}
 	kv := [][2]string{
 		{"name", m.Name}, {"dir", strings.TrimSuffix(m.Dir, "/")}, {"version", version}, {"test", m.Tasks.Test},
+		{"image", img.Name}, {"description", img.Description}, {"short_description", img.ShortDescription},
 	}
-	if img := m.Release.Image; img != nil {
-		kv = append(kv, [2]string{"image", img.Name}, [2]string{"description", img.Description},
-			[2]string{"short_description", img.ShortDescription})
+	// Checked here as well as in Validate because this output is the one that
+	// reaches $GITHUB_OUTPUT: a value with a line break would start a bogus
+	// key there.
+	for _, p := range kv {
+		if !oneLine(p[1]) {
+			return fmt.Errorf("%s of %s must be a single line", p[0], m.Name)
+		}
 	}
 	for _, p := range kv {
 		fmt.Fprintf(stdout, "%s=%s\n", p[0], p[1])
