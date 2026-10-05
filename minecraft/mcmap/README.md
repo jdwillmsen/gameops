@@ -257,6 +257,99 @@ by result and `mcmap_live_polls_total` here, then the bridge's
 log for `[Scripting]` lines. `mcmap_live_pack_interval_seconds` above one
 second is the pack slowing itself down to protect the server's tick rate.
 
+### Icons and heads
+
+A mob is drawn as its icon and a player as their skin's head, each inside a
+ring or border in its category's colour so the filters still read at a
+glance. A marker with no picture is the dot or arrow it was before.
+
+**Mob icons** are Mojang's own spawn-egg item textures. None of them is in
+this repository or in the image: the service fetches them at runtime from
+Mojang's public [bedrock-samples](https://github.com/Mojang/bedrock-samples)
+repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
+(about 50 KB of files).
+
+- **The pin** is `ICONS_REF`, by default the commit tagged `v1.26.50.4`,
+  the stable release nearest the game server's 1.26.5x. It is a commit so
+  that what is fetched cannot change unless the setting does. Move it when
+  a game update adds a mob: a mob the pin does not know is a dot.
+- **Which texture is which mob's** is read from the samples and never
+  guessed. `resource_pack/entity/*.json` holds each mob's client definition,
+  whose `spawn_egg.texture` (and sometimes `texture_index`) names an entry
+  in `resource_pack/textures/item_texture.json`, which names the file under
+  `resource_pack/textures/items/`. The names do not follow from the type:
+  `evocation_illager` uses `spawn_egg_evoker`, `zombie_pigman` uses
+  `spawn_egg_zombified_piglin`, and `villager` is index 14 of a shared list.
+  A mob with several definitions uses the one with the highest
+  `min_engine_version`, as the game does. At the default pin 92 types have
+  an icon. The 39 that do not are not mobs (boats, minecarts, armour
+  stands, projectiles) or have no egg.
+- **What is asked for**: one directory listing from `api.github.com`, then
+  the atlas, about 180 definitions and about 90 textures from
+  `raw.githubusercontent.com`, some 700 KB in all and a few seconds. No
+  redirect is followed, each file has a size limit and the whole fetch a
+  count, byte and time limit, and every texture must decode as a PNG of at
+  most 64 pixels a side, which is then encoded again; the downloaded bytes
+  are never served.
+- **It is fetched once.** A start that finds every file for the pin intact
+  on the volume asks the source for nothing. A changed pin, or a missing
+  or altered file, fetches the whole set again and removes the old one.
+
+**When the source cannot be reached**, is slow, is rate limited (the
+listing is rationed to 60 an hour per address without a token) or answers
+with anything unexpected, nothing else is affected. The fetch runs on its
+own, the listeners and the snapshot cycle never wait for it, and the page
+draws dots. It is tried again after a minute, then at doubling intervals up
+to an hour, and logged each time as `mob icons not fetched`.
+`mcmap_icons_mob_types` at zero is this state. `ICONS_ENABLED=false` asks
+for nothing at all.
+
+**Player heads** come from the game server, by way of the agent. The server
+sends every client each online player's skin; the agent crops the 8 by 8
+face, lays the hat layer over it, and reports the result with the player's
+XUID and gamertag to `PUT /internal/v1/heads`, under the same
+`INTERNAL_TOKEN` it logs players in with. A skin is something a player
+made, so the agent reads only the classic sizes (64x32, 64x64, 128x128,
+256x256) drawn on the standard player model, and this service decodes what
+the agent sends within limits (a square PNG of 8 to 32 pixels, at most
+8 KB) and encodes it again before serving it. A head that fails is dropped
+and counted in `mcmap_icons_player_heads_refused_total`; the player keeps
+their arrow. Skins made in the character creator (persona skins) are laid
+out for a model of their own and are skipped, so those players keep their
+arrow too.
+
+Heads are kept by XUID, in memory, for the players online now: each report
+replaces the last, and one not renewed for five minutes is dropped (the
+agent repeats it every minute, which is also what restores heads after
+this service restarts).
+
+**Matching a marker to a head.** The live record names a player by
+gamertag and a per-session id, never by XUID, so the page asks for a head
+by gamertag and this service answers from the agent's report, which pairs
+each gamertag with an XUID. A gamertag is answered only while exactly one
+online player holds it, compared without regard to case. If two do, or two
+markers in one frame carry the same gamertag, neither gets a head: a
+marker with no head is better than one with somebody else's. A changed
+gamertag arrives in the agent's next report, which replaces the old
+pairing, and the page makes the marker again under the new name. The
+session's own marker is found by XUID (`me` in `/api/icons`), so it stays
+highlighted through a change of gamertag.
+
+**Serving.** `/api/icons` lists what there is and is asked again every 30
+seconds, answering 304 when nothing changed. Each picture's address
+carries its version (`?v=`), and is served `private, max-age=31536000,
+immutable` at that version, so a browser fetches each once however many
+frames draw it, and a changed head or pin is a new address. The page's
+content security policy is unchanged: pictures are same-origin images.
+
+**In the browser** the pictures are decoded once into bitmaps, composed
+with their ring into a sprite per picture and colour, and stamped onto the
+live layer's one canvas with `drawImage`. Measured with 1,000 mobs and 5
+players in view at 1400 by 900 in headless Chromium, repainting the whole
+canvas every frame while panning: 16.7 ms frames with none over, before
+and after; one whole repaint, flushed, took a median 1.9 ms as dots and
+1.4 ms as icons.
+
 ## Markers
 
 Four more kinds of mark are drawn as rings, each with a filter the browser
@@ -387,7 +480,7 @@ Two listeners keep the internet away from what is not for it:
 | `INTERNAL_TOKEN` | unless `AUTH_DISABLED` | | Bearer token the agent presents to the internal API; at least 16 characters. Whoever holds it can log in as any player, so give it a secret of its own |
 | `AUTH_DISABLED` | no | `false` | `true` serves the map with no login. Only for a service nothing publishes |
 | `SESSION_TTL` | no | `168h` | How long a login lasts |
-| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles and the installed renderer. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
+| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
 | `RENDER_CHUNK_PROCESSORS` | no | `1` | Chunks rendered at once. More is faster and uses more CPU and memory |
@@ -401,6 +494,8 @@ Two listeners keep the internet away from what is not for it:
 | `LIVE_KEEPALIVE` | no | `15s` | Longest a live stream stays silent; `1s` to `20s`. The load balancer cuts a connection idle for 30 s |
 | `MARKERS_ENABLED` | no | `true` | `false` stops beds, containers and named mobs being read from each snapshot, and `/api/markers` is not served |
 | `AGENT_URL` | no | empty | The server agent's HTTP address, e.g. `http://<release>-server-agent:8080`, asked for the logged-in player's waypoints with `INTERNAL_TOKEN`. Empty leaves waypoints off the map. Needs the login |
+| `ICONS_ENABLED` | no | `true` | `false` draws every live marker as a dot or arrow: no mob icon is fetched, no head is accepted, and `/api/icons` is not served |
+| `ICONS_REF` | no | the commit tagged `v1.26.50.4` | Tag or commit of Mojang's `bedrock-samples` the mob icons are fetched at. A commit cannot move; a tag can |
 
 ## Endpoints
 
@@ -415,6 +510,9 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type) and `n` (a name, where there is one); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
 | `GET /api/waypoints` | Session required. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
+| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
+| `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
+| `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -426,6 +524,7 @@ On `INTERNAL_ADDR` only:
 | `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds. 204 |
 | `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
+| `PUT /internal/v1/heads` | Bearer `INTERNAL_TOKEN`. `{"players":[{"xuid","gamertag","head"}]}`: everyone online now, `head` a PNG in base64 or absent. Replaces the last report whole. 200 with `players` and how many heads were `refused`; 400 for more than 256 players, a body over 1 MB, or an entry that is not a player. Not served with `ICONS_ENABLED=false` |
 
 The internal API is served whenever `INTERNAL_TOKEN` is set, with or without
 the login.
@@ -463,6 +562,9 @@ opens at the same place.
 | `mcmap_markers{dimension,kind}` | Beds, containers and named mobs (`bed`, `container`, `mob`) read at the last scan and served |
 | `mcmap_markers_left_out{dimension,kind}` | Markers the last scan found beyond the limit for their kind |
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
+| `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
+| `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, `ok` or `failed`. None at all means they were read from the volume |
+| `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 
 ## Build and test
 
