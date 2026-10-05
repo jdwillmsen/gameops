@@ -313,6 +313,10 @@ func main() {
 	log.Info("announce_api", logging.Fields{"enabled": apiOn})
 	presenceOn := httpServer.MountPresence(presenceRT.api)
 	log.Info("presence_api", logging.Fields{"enabled": presenceOn, "actors": len(cfg.PresenceActors)})
+	// Only with a map configured: its token is what the route accepts, and
+	// config has checked that token only when MAP_URL is set.
+	waypointsOn := cfg.MapURL != "" && httpServer.MountWaypoints(cfg.MapToken, waypointStore, log)
+	log.Info("waypoints_api", logging.Fields{"enabled": waypointsOn})
 
 	tokenStore, err := openTokenStore(cfg, sharedTokens, log)
 	if err != nil {

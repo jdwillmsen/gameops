@@ -196,7 +196,9 @@ gophertunnel client --> chat.ParseTrigger --> plugin.Registry --> plugin.Voice (
 - `internal/httpapi` - `/healthz`, `/readyz` (the live agent's real Bedrock
   session state, or a standby's wait, which are the two ready answers; a pod
   still starting is the third role and is not ready), the role itself,
-  `/metrics`, and `POST /announcements` when `ANNOUNCE_API_TOKEN` is set
+  `/metrics`, `POST /announcements` when `ANNOUNCE_API_TOKEN` is set, and
+  `GET /v1/players/{xuid}/waypoints` for the world map when `MAP_URL` is
+  set
 - `internal/metrics` - every series the agent exports beyond the session
   gauge and reconnect counter; callers record through small functions and
   never touch a Prometheus type - see "Metrics" below
@@ -1337,6 +1339,36 @@ a bare `!map`; the reply they do see, to the code itself, says to type
 their name, wherever it is.
 
 The console can speak in chat but is not a player, and `!map` refuses it.
+
+### Waypoints on the map
+
+The map draws a logged-in player's own waypoints, and reads them from here:
+
+```sh
+curl -sS http://<release>-server-agent:8080/v1/players/<xuid>/waypoints \
+  -H "Authorization: Bearer $MAP_TOKEN"
+```
+
+```json
+{"waypoints":[{"name":"home","x":-12,"y":64,"z":300,"dimension":"overworld"}],"more":0}
+```
+
+The route is mounted on `HTTP_ADDR` when `MAP_URL` is set and there is a
+database, and every replica answers it. It accepts one credential, `MAP_TOKEN`:
+the map's own internal token, which the agent already holds to report logins.
+The map is the only other holder, so the token arriving here is the map
+asking, and no second secret exists for this. Whoever holds it can already
+log in to the map as any player, so being able to read any player's
+waypoints with it reaches nothing new.
+
+Whose waypoints are asked for is the map's decision, taken from the session
+of the browser it is answering and from nothing that browser sends. This is
+the only way waypoints leave the chat of the player who saved them, and a
+player never sees another's: see `minecraft/mcmap/README.md`.
+
+At most 500 waypoints are sent, with `more` counting the rest. An XUID that
+is not a number is a 400, a missing or wrong token a 401 before the path is
+read, and a database that cannot answer a 503.
 
 ## Warning joiners of a damaged world
 
