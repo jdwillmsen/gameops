@@ -423,7 +423,7 @@ without that gauge beside them there is nothing on the graph to say so.
 | `WIKI_ALLOW_TEST_BASE_URL` | `false` | Lets `WIKI_BASE_URL` name a test server. For tests and local fakes only; never set in production |
 | `ANSWER_MAX_PER_MINUTE` | `4` | Max `@server` answers a single actor may trigger per rolling minute, tracked separately from `COMMAND_RATE_LIMIT_PER_MINUTE` since one LLM call costs far more than one console command |
 | `MC_MONITOR_URL` | *(empty)* | mc-monitor Prometheus endpoint behind `!online`; unset reports the command unconfigured rather than erroring |
-| `MAP_URL` | *(empty disables `!map` and the world-damage notice)* | The world map service's internal API (its `INTERNAL_ADDR` listener, e.g. `http://<release>-map:9090`), where `!map` reports who typed a login code and where the agent reads the chunk count for "Warning joiners of a damaged world" |
+| `MAP_URL` | *(empty disables `!map`, the world-damage notice and player heads on the map)* | The world map service's internal API (its `INTERNAL_ADDR` listener, e.g. `http://<release>-map:9090`), where `!map` reports who typed a login code, where the agent reads the chunk count for "Warning joiners of a damaged world", and where it reports "Player heads for the map" |
 | `MAP_TOKEN` | *(required with `MAP_URL`)* | Bearer token for that API; the map's `INTERNAL_TOKEN`, at least 16 characters |
 | `MAP_PUBLIC_URL` | *(required with `MAP_URL`)* | The address players open in a browser, quoted in `!map` replies. A different listener from `MAP_URL` |
 | `BACKUP_EXPORTER_URL` | *(empty)* | Backup exporter's `/metrics.txt` behind `!backup`; unset reports the command unconfigured rather than erroring |
@@ -1447,6 +1447,34 @@ the start and end of an outage rather than once per poll.
 
 This needs a map that serves the world endpoints (`minecraft/mcmap`); against
 an older one every poll is refused, logged once, and no one is warned.
+
+## Player heads for the map
+
+The world map (`minecraft/mcmap`) draws each player's marker as the head of
+their skin. The game server sends every connected client each online
+player's skin, in the player list and again when a player changes skin, so
+the agent already has them. It crops the 8 by 8 face, lays the hat layer
+over it, and reports everyone online, each with XUID, gamertag and head as a
+small PNG, to `PUT /internal/v1/heads` on the map's internal listener, with
+the same `MAP_URL` and `MAP_TOKEN` that `!map` uses. Nothing new is
+configured, and an agent without `MAP_URL` reports nothing.
+
+A skin is another player's input. A head is taken only from an image of a
+classic skin size (64x32, 64x64, 128x128 or 256x256) whose byte length is
+exactly what that size implies, drawn on the standard player model
+(`geometry.humanoid`, `geometry.humanoid.custom*`, or none named). A skin
+built in the character creator (a persona skin) or made for another model
+puts the face somewhere this does not know, so it is skipped: that player is
+still reported, without a head, and the map draws its plain arrow. Every
+skin is logged once as `player_head` with its size, whether it is a persona
+skin, its model and, if it gave no head, why (`persona`, `geometry`,
+`image`).
+
+The whole list is sent again whenever it changes and every minute besides,
+which is what restores the heads after the map restarts. Only the process
+connected to the game reports: a standby sees no skins, and its empty list
+would wipe the live one's. When a session ends the map is told once that
+nobody is being watched.
 
 ## Targeting a reply
 

@@ -34,6 +34,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/bus"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/heads"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/httpapi"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/knowledge"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/mapclient"
@@ -272,7 +273,13 @@ func main() {
 	// A nil interface, not a nil *WorldDamage: the drain asks it nothing at
 	// all when there is no map to ask.
 	var joinNotice plugins.JoinNotice
+	// Nil with no map, which every use of it reads as nothing to do.
+	var headWatch *heads.Watch
 	if cfg.MapURL != "" {
+		// Started for the process, like the chunk count below, but silent
+		// outside a session: only the process in the game has heads to send.
+		headWatch = heads.New(mapclient.New(cfg.MapURL, cfg.MapToken, headsTimeout), log, heads.DefaultInterval)
+		go headWatch.Run(ctx)
 		extraPlugins = append(extraPlugins, plugins.NewMapLogin(mapclient.New(cfg.MapURL, cfg.MapToken, mapClaimTimeout), playerRoster, cfg.MapPublicURL))
 		damage := worlddamage.New(mapclient.New(cfg.MapURL, cfg.MapToken, worldDamageTimeout), log)
 		// Started for the process rather than as the live agent, like the
@@ -400,7 +407,7 @@ func main() {
 
 		runSessions(liveCtx, gate, presenceModes(sessionModes{
 			present: func(sessionCtx context.Context) {
-				runConnectLoop(sessionCtx, cfg, ts, log, registry, pctx, eventBus, limiter, httpServer, playerRoster, audience, siblings, permResolver, ans, playerStore, auditor, link, joins)
+				runConnectLoop(sessionCtx, cfg, ts, log, registry, pctx, eventBus, limiter, httpServer, playerRoster, audience, siblings, permResolver, ans, playerStore, auditor, link, headWatch, joins)
 			},
 			// Leaving on purpose owes what a recycle owes: everyone still
 			// here keeps the time they were watched for, instead of the
@@ -555,7 +562,7 @@ func connectionEnded(playerRoster *roster.Roster, joinClock *joinTimes) {
 
 // runConnectLoop owns the reconnect/backoff policy. Each iteration runs one
 // session to completion (or failure), then waits before trying again.
-func runConnectLoop(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger, registry *plugin.Registry, pctx *plugin.Context, eventBus *bus.Bus, limiter *ratelimit.PerActor, httpServer *httpapi.Server, playerRoster *roster.Roster, audience *deliveryAudience, siblingXUIDs map[string]struct{}, permResolver *adapters.PermissionResolver, ans answering, playerStore store.Store, auditor audit.Store, link *linkMeter, joinClock *joinTimes) {
+func runConnectLoop(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger, registry *plugin.Registry, pctx *plugin.Context, eventBus *bus.Bus, limiter *ratelimit.PerActor, httpServer *httpapi.Server, playerRoster *roster.Roster, audience *deliveryAudience, siblingXUIDs map[string]struct{}, permResolver *adapters.PermissionResolver, ans answering, playerStore store.Store, auditor audit.Store, link *linkMeter, headWatch *heads.Watch, joinClock *joinTimes) {
 	minDelay := time.Duration(cfg.ReconnectMinMs) * time.Millisecond
 	maxDelay := time.Duration(cfg.ReconnectMaxMs) * time.Millisecond
 	// authDelay does not enter the doubling ladder: nextDelay never sees it,
@@ -577,7 +584,7 @@ func runConnectLoop(ctx context.Context, cfg config.Config, ts oauth2.TokenSourc
 		firstAttempt = false
 
 		started := time.Now()
-		err := session(ctx, cfg, ts, log, registry, pctx, eventBus, limiter, httpServer, playerRoster, audience, siblingXUIDs, permResolver, ans, playerStore, auditor, link, joinClock)
+		err := session(ctx, cfg, ts, log, registry, pctx, eventBus, limiter, httpServer, playerRoster, audience, siblingXUIDs, permResolver, ans, playerStore, auditor, link, headWatch, joinClock)
 		lasted := time.Since(started)
 		httpServer.SetReady(false)
 		connectionEnded(playerRoster, joinClock)
@@ -759,7 +766,7 @@ func isAuthRejection(err error) bool {
 // clean disconnect and a non-nil error on anything else (including ctx
 // cancellation surfaced as a read error, which the caller ignores because
 // it checks ctx.Err() itself).
-func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger, registry *plugin.Registry, pctx *plugin.Context, eventBus *bus.Bus, limiter *ratelimit.PerActor, httpServer *httpapi.Server, playerRoster *roster.Roster, audience *deliveryAudience, siblingXUIDs map[string]struct{}, permResolver *adapters.PermissionResolver, ans answering, playerStore store.Store, auditor audit.Store, link *linkMeter, joinClock *joinTimes) error {
+func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log *logging.Logger, registry *plugin.Registry, pctx *plugin.Context, eventBus *bus.Bus, limiter *ratelimit.PerActor, httpServer *httpapi.Server, playerRoster *roster.Roster, audience *deliveryAudience, siblingXUIDs map[string]struct{}, permResolver *adapters.PermissionResolver, ans answering, playerStore store.Store, auditor audit.Store, link *linkMeter, headWatch *heads.Watch, joinClock *joinTimes) error {
 	// Without this the agent joins as a solid black silhouette under a
 	// SkinID regenerated every connect: Bedrock skins are uploaded by the
 	// client from its own installation, and a headless client has none, so
@@ -856,6 +863,8 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	// a closed connection.
 	link.beginSession(conn)
 	defer link.endSession()
+	headWatch.Begin()
+	defer headWatch.End()
 	// Runtime ID rather than XUID: the respawn exchange identifies the player
 	// by the id that is unique to this world session, not the account.
 	respawner := liveness.New(conn.GameData().EntityRuntimeID)
@@ -884,6 +893,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		handleLiveness(pk, respawner, conn, log, httpServer.SetReady)
 
 		handlePacket(ctx, pk, selfXUID, siblingXUIDs, log, registry, pctx, eventBus, limiter, playerRoster, permResolver, ans, playerStore, auditor, joinClock)
+		watchHeads(pk, headWatch)
 	}
 }
 

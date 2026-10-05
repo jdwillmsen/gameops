@@ -2,6 +2,7 @@ package mapclient
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -140,5 +141,74 @@ func TestClient_DoesNotFollowRedirects(t *testing.T) {
 	}
 	if elsewhere != 0 {
 		t.Errorf("%d requests followed the redirect", elsewhere)
+	}
+}
+
+func TestReportHeads_SendsEveryoneOnlineUnderTheSameToken(t *testing.T) {
+	var seen http.Request
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = *r
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		_, _ = w.Write([]byte(`{"players":2,"refused":0}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "internal-token", time.Second)
+
+	png := []byte("\x89PNG not really")
+	err := c.ReportHeads(context.Background(), []PlayerHead{
+		{XUID: "2535412345678901", Gamertag: "Steve Builds", Head: png},
+		{XUID: "2535400000000002", Gamertag: "Alex"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen.Method != http.MethodPut || seen.URL.Path != "/internal/v1/heads" {
+		t.Errorf("request = %s %s", seen.Method, seen.URL.Path)
+	}
+	if got := seen.Header.Get("Authorization"); got != "Bearer internal-token" {
+		t.Errorf("Authorization = %q", got)
+	}
+	var sent struct {
+		Players []map[string]string `json:"players"`
+	}
+	if err := json.Unmarshal([]byte(body), &sent); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent.Players) != 2 {
+		t.Fatalf("body = %s", body)
+	}
+	if got, _ := base64.StdEncoding.DecodeString(sent.Players[0]["head"]); string(got) != string(png) || sent.Players[0]["xuid"] != "2535412345678901" || sent.Players[0]["gamertag"] != "Steve Builds" {
+		t.Errorf("first player = %v", sent.Players[0])
+	}
+	if _, has := sent.Players[1]["head"]; has || len(sent.Players[1]) != 2 {
+		t.Errorf("a player with no head = %v", sent.Players[1])
+	}
+}
+
+// The map refuses a report with no list in it, and nobody online is a list.
+func TestReportHeads_NobodyOnlineIsAnEmptyListNotNull(t *testing.T) {
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+	}))
+	t.Cleanup(srv.Close)
+	if err := New(srv.URL, "internal-token", time.Second).ReportHeads(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if body != `{"players":[]}` {
+		t.Errorf("body = %s", body)
+	}
+}
+
+func TestReportHeads_FailureIsAnErrorThatNamesTheStatus(t *testing.T) {
+	var seen http.Request
+	var body string
+	c := server(t, http.StatusBadRequest, &seen, &body)
+	err := c.ReportHeads(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "400") {
+		t.Errorf("err = %v", err)
 	}
 }
