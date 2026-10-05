@@ -257,6 +257,71 @@ by result and `mcmap_live_polls_total` here, then the bridge's
 log for `[Scripting]` lines. `mcmap_live_pack_interval_seconds` above one
 second is the pack slowing itself down to protect the server's tick rate.
 
+## Markers
+
+Four more kinds of mark are drawn as rings, each with a filter the browser
+remembers:
+
+| Marker | From | Who sees it |
+|---|---|---|
+| Waypoints | The server agent, where players save them with `!waypoint` | Only the player they belong to |
+| Beds | The world | Every logged-in player |
+| Containers | The world | Every logged-in player |
+| Named mobs | The world | Every logged-in player |
+
+**From the world.** After the chunk count and the retained copy, and before
+the renders, each cycle reads the mirror once more, through hard links
+opened read-only as the count's are, and keeps:
+
+- *Beds*: `Bed` block entities. Both blocks of a bed are one, so two of the
+  same colour side by side are drawn as a single bed.
+- *Containers*: `Chest`, `Barrel` and `ShulkerBox` block entities that hold
+  at least one item and are not still waiting on their loot table. On the
+  FWB world that is 767 of 16,330: the rest are chests the world generator
+  placed and nobody has opened, or opened and emptied. A large chest is one
+  marker, which makes those 767 into 575. A container renamed on an anvil shows its name; what is inside is
+  not sent.
+- *Named mobs*: actors with a name tag, placed by the chunk whose actor list
+  names them. An actor no chunk lists is a leftover the game never loads
+  and is not drawn. A named mob that is also loaded is drawn twice, once
+  here where the snapshot had it and once by the live layer where it is.
+
+Where these are in the database: a chunk's block entities are NBT compounds
+one after another under `<x><z>[<dimension>]` + `0x31`, each with its own
+`id`, `x`, `y` and `z`; an actor is one compound under `actorprefix` + its
+eight-byte storage key, with `identifier`, `CustomName` and `Pos`; and a
+chunk's actor list is those storage keys end to end under `digp` + the chunk
+key, which is the only place an actor's dimension is written.
+
+The read is one pass over every key, about nine seconds at a whole CPU and
+66 MB on the FWB world (2.47 million keys, 153,000 chunks), found 1,493
+beds, 575 containers and 5 named mobs there, and leaves the mirror as it
+was. It is given up after two minutes, and a read that fails or is given up
+is logged and counted and stops nothing else: the page keeps the markers of
+the snapshot before. Until the first cycle after a start there are none.
+
+**Limits.** Per dimension, the 5,000 beds, 5,000 containers and 1,000 named
+mobs nearest the origin are kept and the rest counted; the filter says how
+many are not shown. A name is cut to 64 characters, loses the game's
+formatting codes, and is sent as text; the page builds every label from
+text and never from markup. One dimension's answer is at most 2 MB, and is
+cut further, and counted, if names alone would push it past that. A record
+that does not parse, or a block entity that claims a position outside the
+chunk holding it, is skipped and counted in the log.
+
+**Waypoints.** `GET /api/waypoints` asks the agent, at `AGENT_URL`, for the
+waypoints of the XUID in the session, and for nobody else's: the request
+carries nothing that could name another player. This service authenticates
+to the agent with `INTERNAL_TOKEN`, the secret the agent already presents
+here, so the two share one credential and no new one. The agent is asked
+when a browser asks, so a waypoint saved in chat is on the map at the next
+refresh; nothing is kept here. At most four requests to the agent are open
+at once, each for three seconds at most, and 500 waypoints are passed on.
+While the agent cannot be reached the filter stays and draws nothing.
+
+`MARKERS_ENABLED=false` skips the read and the route; without `AGENT_URL`
+there is no waypoint route and no waypoint filter.
+
 ## Login
 
 The map shows where every base is, so it sits behind a login that proves the
@@ -306,7 +371,7 @@ ends in the same `Sessions.Issue`.
 Two listeners keep the internet away from what is not for it:
 
 - `HTTP_ADDR` is what a route may publish: the page, the login endpoints,
-  and the map API, tiles and live stream behind the session.
+  and the map API, tiles, markers and live stream behind the session.
 - `INTERNAL_ADDR` is for the cluster only: `/metrics`, and the claims and
   revocations the agent reports.
 
@@ -334,6 +399,8 @@ Two listeners keep the internet away from what is not for it:
 | `LIVE_TTL` | no | `10s` | How old a position may be and still be drawn; `2s` to `10m` |
 | `LIVE_MAX_ENTITIES` | no | `1000` | Most players, and most mobs, sent to a browser per dimension; 1 to 10000. Lowering it eases the browser, not the game server: the pack's own cap is set where the pack is installed |
 | `LIVE_KEEPALIVE` | no | `15s` | Longest a live stream stays silent; `1s` to `20s`. The load balancer cuts a connection idle for 30 s |
+| `MARKERS_ENABLED` | no | `true` | `false` stops beds, containers and named mobs being read from each snapshot, and `/api/markers` is not served |
+| `AGENT_URL` | no | empty | The server agent's HTTP address, e.g. `http://<release>-server-agent:8080`, asked for the logged-in player's waypoints with `INTERNAL_TOKEN`. Empty leaves waypoints off the map. Needs the login |
 
 ## Endpoints
 
@@ -346,6 +413,8 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/map` | Session required. World name, refresh interval, each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
+| `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type) and `n` (a name, where there is one); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
+| `GET /api/waypoints` | Session required. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -391,6 +460,9 @@ opens at the same place.
 | `mcmap_live_pack_scan_seconds`, `mcmap_live_pack_interval_seconds` | What a sample costs the game server and how often the pack samples, by its own report |
 | `mcmap_live_subscribers`, `mcmap_live_streams_total{reason}` | Open streams, and ended ones by why: `client`, `limit`, `write`, `shutdown` |
 | `mcmap_live_fanout_dropped_total` | Frames replaced before a slow browser read them |
+| `mcmap_markers{dimension,kind}` | Beds, containers and named mobs (`bed`, `container`, `mob`) read at the last scan and served |
+| `mcmap_markers_left_out{dimension,kind}` | Markers the last scan found beyond the limit for their kind |
+| `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 
 ## Build and test
 

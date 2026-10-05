@@ -53,6 +53,12 @@ type Server struct {
 	// anything. It has to stay well under the shortest idle timeout between
 	// here and the browser, or a quiet stream is cut.
 	LiveKeepalive time.Duration
+	// Markers is what the world holds that is worth a mark: beds, containers
+	// and named mobs. Nil leaves them out.
+	Markers MarkerStore
+	// Waypoints reads the logged-in player's own waypoints. Nil leaves them
+	// out, as does having no login: without one there is nobody to be.
+	Waypoints WaypointSource
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
@@ -115,6 +121,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleTile))
 	if s.Live != nil {
 		mux.Handle("GET /api/live", s.gated(s.handleLive))
+	}
+	if s.Markers != nil {
+		mux.Handle("GET /api/markers", s.gated(s.handleMarkers))
+	}
+	if s.Waypoints != nil && s.Sessions != nil {
+		mux.Handle("GET /api/waypoints", s.gated(s.handleWaypoints))
 	}
 	if s.Sessions != nil {
 		mux.Handle("GET /api/me", s.gated(s.handleMe))
