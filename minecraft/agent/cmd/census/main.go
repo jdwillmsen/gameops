@@ -48,7 +48,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	referenceZ := fs.Float64("reference-z", census.DefaultReportOptions().Reference.Z, "z of the point animal herds are measured from; the default is FWB's base")
 	metricsFile := fs.String("metrics-file", "", "also write the counts here as a Prometheus text exposition payload; the report on stdout is unchanged either way")
 	list := fs.Bool("list", false, "print one JSON object per entity, after a header line, instead of the report")
-	types := fs.String("types", "", "with -list, comma-separated entity identifiers to keep, without the minecraft: prefix; empty keeps every entity")
+	types := fs.String("types", "", "with -list, comma-separated entity identifiers to keep, with or without the minecraft: prefix; empty keeps every entity")
 	if parseErr := fs.Parse(args); parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			// -h/-help is a request for usage, not a failure: it should
@@ -68,13 +68,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if !*list && *types != "" {
 		return errors.New("-types filters a listing; add -list, or drop -types for the report")
 	}
+	// A value that names nothing would otherwise filter nothing, and a
+	// caller that meant to narrow a listing would be handed the whole world.
+	wantedTypes := splitTypes(*types)
+	if *types != "" && len(wantedTypes) == 0 {
+		return fmt.Errorf("-types %q names no entity identifier; give at least one, or drop -types to list every entity", *types)
+	}
 
 	source, err := chooseSource(*worldDir, *backupDir, stderr)
 	if err != nil {
 		return err
 	}
 	if *list {
-		return listFrom(ctx, source, splitTypes(*types), stdout)
+		return listFrom(ctx, source, wantedTypes, stdout)
 	}
 	return reportFrom(ctx, source,
 		census.ReportOptions{

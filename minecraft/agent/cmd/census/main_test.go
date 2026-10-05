@@ -817,3 +817,41 @@ func TestRunRefusesTypesWithoutAListing(t *testing.T) {
 		t.Errorf("run wrote %q to stdout, want nothing", out.String())
 	}
 }
+
+func TestRunRefusesATypesFilterThatNamesNothing(t *testing.T) {
+	for _, value := range []string{",", "minecraft:", " "} {
+		t.Run(value, func(t *testing.T) {
+			dir := t.TempDir()
+			buildArchive(t, dir)
+
+			var out, errOut bytes.Buffer
+			if err := run(context.Background(), []string{"-backup-dir", dir, "-list", "-types", value}, &out, &errOut); err == nil {
+				t.Fatal("run listed the whole world for a filter that names no type")
+			}
+			if out.Len() != 0 {
+				t.Errorf("run wrote %q to stdout, want nothing", out.String())
+			}
+		})
+	}
+}
+
+func TestRunNamesATypeGivenTwiceOnceInTheHeader(t *testing.T) {
+	dir := t.TempDir()
+	buildArchive(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"-backup-dir", dir, "-list", "-types", "minecraft:zombie,zombie"}, &out, &errOut); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	var header census.ListingHeader
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatalf("header is not JSON: %v", err)
+	}
+	if len(header.Types) != 1 || header.Types[0] != "zombie" {
+		t.Errorf("header types = %v, want zombie once", header.Types)
+	}
+	if header.Entities != len(lines)-1 {
+		t.Errorf("header counts %d entities over %d lines", header.Entities, len(lines)-1)
+	}
+}

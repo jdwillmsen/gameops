@@ -2,6 +2,7 @@ package census
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,9 @@ func TestRenderListingKeepsOnlyTheRequestedTypes(t *testing.T) {
 	}
 	header, listed := listingLines(t, out)
 
+	if header.Unlocatable != 0 {
+		t.Errorf("header counts %d unlocatable entities in a world where every position is finite", header.Unlocatable)
+	}
 	if header.Entities != 2 || header.Orphaned != 7 || header.Source != KindSnapshot || header.WorldTakenAt != "2026-10-05T03:16:47Z" {
 		t.Errorf("header = %+v", header)
 	}
@@ -100,5 +104,64 @@ func TestRenderListingOmitsTheNameOfAnUnnamedEntity(t *testing.T) {
 	}
 	if _, present := raw["name"]; present {
 		t.Errorf("unnamed entity carries a name key: %v", raw)
+	}
+}
+
+// One corrupt position used to fail the encoding of the whole listing.
+func TestRenderListingCountsAnEntityWithNoFinitePositionInsteadOfListingIt(t *testing.T) {
+	entities := []Entity{
+		{Identifier: "zombie", Dimension: Overworld, X: math.NaN(), Y: 64, Z: 1, UniqueID: 1},
+		{Identifier: "zombie", Dimension: Overworld, X: 1, Y: math.Inf(1), Z: 1, UniqueID: 2},
+		{Identifier: "zombie", Dimension: Overworld, X: 1, Y: 64, Z: math.Inf(-1), UniqueID: 3},
+		{Identifier: "zombie", Dimension: Overworld, X: 4, Y: 64, Z: 4, UniqueID: 4},
+		{Identifier: "cow", Dimension: Overworld, X: math.NaN(), Y: 64, Z: 1, UniqueID: 5},
+	}
+	out, err := RenderListing(entities, ScanStats{}, time.Time{}, KindArchive, []string{"zombie"})
+	if err != nil {
+		t.Fatalf("RenderListing: %v", err)
+	}
+	header, listed := listingLines(t, out)
+
+	if header.Unlocatable != 3 {
+		t.Errorf("header counts %d unlocatable entities, want the 3 zombies and not the filtered-out cow", header.Unlocatable)
+	}
+	if header.Entities != 1 || len(listed) != 1 {
+		t.Fatalf("listed %d entities with a header claiming %d, want 1 and 1\n%s", len(listed), header.Entities, out)
+	}
+	if listed[0].X != 4 || listed[0].Z != 4 {
+		t.Errorf("listed %+v, want the zombie with a finite position", listed[0])
+	}
+}
+
+func TestRenderListingAlwaysCarriesTheUnlocatableCount(t *testing.T) {
+	out, err := RenderListing([]Entity{{Identifier: "zombie", Dimension: Overworld}}, ScanStats{}, time.Time{}, KindArchive, nil)
+	if err != nil {
+		t.Fatalf("RenderListing: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(strings.Split(out, "\n")[0]), &raw); err != nil {
+		t.Fatalf("header is not JSON: %v", err)
+	}
+	if count, present := raw["unlocatable"]; !present || count != float64(0) {
+		t.Errorf("header = %v, want an unlocatable key holding 0", raw)
+	}
+}
+
+func TestRenderListingNamesARepeatedTypeOnce(t *testing.T) {
+	entities := []Entity{
+		{Identifier: "zombie", Dimension: Overworld, UniqueID: 1},
+		{Identifier: "zombie", Dimension: Overworld, UniqueID: 2},
+		{Identifier: "cow", Dimension: Overworld},
+	}
+	out, err := RenderListing(entities, ScanStats{}, time.Time{}, KindArchive, []string{"zombie", "pillager", "zombie"})
+	if err != nil {
+		t.Fatalf("RenderListing: %v", err)
+	}
+	header, listed := listingLines(t, out)
+	if len(header.Types) != 2 || header.Types[0] != "pillager" || header.Types[1] != "zombie" {
+		t.Errorf("header types = %v, want each requested type once", header.Types)
+	}
+	if header.Entities != 2 || len(listed) != 2 {
+		t.Errorf("listed %d entities with a header claiming %d, want each zombie once", len(listed), header.Entities)
 	}
 }
