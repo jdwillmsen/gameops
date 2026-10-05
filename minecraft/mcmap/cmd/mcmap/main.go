@@ -18,6 +18,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
@@ -161,6 +162,14 @@ func run(logger *slog.Logger) error {
 	if cfg.AgentURL != "" {
 		app.Waypoints = markers.NewAgent(cfg.AgentURL, cfg.InternalToken)
 	}
+	source := &icons.Source{Ref: cfg.IconsRef, ListURL: icons.DefaultListURL, RawURL: icons.DefaultRawURL}
+	if mobs, heads := startIcons(ctx, cfg, source.Fetch, logger, &wg); mobs != nil {
+		app.MobIcons = mobs
+		// Heads reach here from the agent, which needs the token to speak.
+		if cfg.InternalToken != "" {
+			app.Heads = heads
+		}
+	}
 	if cfg.Login {
 		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
 		if err != nil {
@@ -200,7 +209,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "")
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()
@@ -229,4 +238,17 @@ func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *
 	}
 	wg.Go(func() { source.Run(ctx) })
 	return layer
+}
+
+// startIcons begins filling the mob icons, from the volume or from their
+// source, and returns at once with the set still empty: the fetch is on
+// its own goroutine, and neither the listeners nor the snapshot cycle wait
+// for it. With icons turned off it starts nothing and returns nil.
+func startIcons(ctx context.Context, cfg config.Config, fetch func(context.Context) (map[string][]byte, error), logger *slog.Logger, wg *sync.WaitGroup) (*icons.Mobs, *icons.Heads) {
+	if !cfg.Icons {
+		return nil, nil
+	}
+	mobs := &icons.Mobs{Dir: filepath.Join(cfg.DataDir, "icons"), Ref: cfg.IconsRef, Fetch: fetch, Logger: logger}
+	wg.Go(func() { mobs.Run(ctx) })
+	return mobs, &icons.Heads{}
 }
