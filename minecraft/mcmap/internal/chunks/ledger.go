@@ -61,6 +61,9 @@ func (r Report) TotalLost() int    { return total(r.Lost) }
 // moving can take the damage as the new normal.
 type Ledger struct {
 	path string
+	// flush puts a directory's entries on the disk. It is syncDir outside
+	// tests.
+	flush func(dir string) error
 
 	mu      sync.Mutex
 	seen    Set
@@ -77,7 +80,7 @@ var magic = []byte("MCMAPCK1")
 // OpenLedger reads the ledger at path. A missing file is an empty ledger; an
 // unreadable one is an error.
 func OpenLedger(path string) (*Ledger, error) {
-	l := &Ledger{path: path, seen: Set{}, missing: Set{}, lost: Set{}}
+	l := &Ledger{path: path, flush: syncDir, seen: Set{}, missing: Set{}, lost: Set{}}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return l, nil
@@ -180,7 +183,7 @@ func (l *Ledger) report() Report {
 }
 
 func (l *Ledger) commit(seen, missing, lost Set, at time.Time) error {
-	if err := save(l.path, seen, missing, lost, at); err != nil {
+	if err := save(l.path, l.flush, seen, missing, lost, at); err != nil {
 		return err
 	}
 	l.seen, l.missing, l.lost, l.at = seen, missing, lost, at
@@ -213,7 +216,7 @@ func sample(s Set) []Pos {
 // save writes the ledger whole or not at all: a torn file would be refused
 // at the next start, which is safe but stops the service until someone
 // deletes it.
-func save(path string, seen, missing, lost Set, at time.Time) error {
+func save(path string, flush func(dir string) error, seen, missing, lost Set, at time.Time) error {
 	buf := append([]byte{}, magic...)
 	buf = binary.LittleEndian.AppendUint64(buf, uint64(at.UnixNano()))
 	for _, s := range []Set{seen, missing, lost} {
@@ -244,5 +247,20 @@ func save(path string, seen, missing, lost Set, at time.Time) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// The rename is only an entry in the directory until the directory is
+	// flushed. A node that stopped before then would come back with the
+	// ledger before this one: an acknowledgement undone, or a chunk first
+	// seen in this count and lost in the same stop never reported.
+	return flush(dir)
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	return errors.Join(d.Sync(), d.Close())
 }
