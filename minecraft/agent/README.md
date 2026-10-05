@@ -291,7 +291,12 @@ Two things can put a live actor among them:
   record being written and their chunk's list. That is tens of records, and
   they are back in the next run.
 - A chunk list the scan could not read orphans every actor it named. The
-  report says how many lists that was, directly under the orphaned line.
+  report says how many lists that was, directly under the orphaned line, and
+  `mc_census_scan_skipped_chunk_lists` carries the same number. It is 0 on
+  FWB; a snapshot of a running server can tear one list, so a small value
+  does not fail the run, and a rise beside a step in
+  `mc_census_orphaned_records` says that step holds live actors, not only
+  leftovers.
 
 A run in which more than half the records are orphaned exits non-zero without
 a report. That is what a game release moving the chunk lists would look like,
@@ -327,6 +332,7 @@ graph outlives the sentence explaining it.
 | `mc_census_scan_records` | none | actor records read out of the world database |
 | `mc_census_scan_unusable_records` | none | records that did not decode into a usable entity |
 | `mc_census_orphaned_records` | none | actor records no chunk lists, which no other series counts |
+| `mc_census_scan_skipped_chunk_lists` | none | chunk actor lists the scan refused; each one orphans the live actors it named |
 
 Per-region series are deliberately absent. A world holds thousands of regions
 whose keys change every night, and that table belongs in the report; the count

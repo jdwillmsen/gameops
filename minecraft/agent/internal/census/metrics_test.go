@@ -250,3 +250,19 @@ func TestRenderMetricsExportsOrphanedRecordsEvenAtZero(t *testing.T) {
 		t.Errorf("mc_census_orphaned_records = %q, want 0 for a world with none", got)
 	}
 }
+
+// A refused chunk list orphans live actors, which the orphaned gauge cannot
+// tell from leftovers, so the lists are counted on their own and a zero has
+// to be a reading rather than a gap.
+func TestRenderMetricsExportsSkippedChunkListsEvenAtZero(t *testing.T) {
+	stats := ScanStats{Records: 10, Decoded: 6, Orphaned: 4, DigpSkippedKey: 3, DigpSkippedValue: 12}
+	c := Aggregate(nil, stats, scrapedAt, KindArchive)
+	if got := sampleValue(t, RenderMetrics(c, scrapedAt, DefaultMetricsOptions()), "mc_census_scan_skipped_chunk_lists"); got != "15" {
+		t.Errorf("mc_census_scan_skipped_chunk_lists = %q, want 15", got)
+	}
+
+	clean := Aggregate(nil, ScanStats{Records: 7, Decoded: 7}, scrapedAt, KindArchive)
+	if got := sampleValue(t, RenderMetrics(clean, scrapedAt, DefaultMetricsOptions()), "mc_census_scan_skipped_chunk_lists"); got != "0" {
+		t.Errorf("mc_census_scan_skipped_chunk_lists = %q, want 0 when every list was read", got)
+	}
+}

@@ -43,6 +43,12 @@ type ScanStats struct {
 	DigpSkippedValue int
 }
 
+// SkippedChunkLists is how many chunk actor lists the scan refused, for
+// either reason.
+func (s ScanStats) SkippedChunkLists() int {
+	return s.DigpSkippedKey + s.DigpSkippedValue
+}
+
 // MaxOrphanedRatio is how much of a world may be orphaned before the cause
 // stops being leftovers and starts being an index the scan cannot read.
 //
