@@ -101,6 +101,35 @@ input[type="number"] { width: 6.5rem; }
 .leaflet-tooltip.marker-name { border-color: #b48cf2; color: #b48cf2; }
 .leaflet-tooltip.marker-name::before, .leaflet-tooltip.marker-tip::before { display: none; }
 
+/* Structures. Known ones are solid and predicted ones hollow and dashed, in
+   the key and on the map alike: the difference between what the world
+   recorded and what the seed implies must not rest on colour, which is
+   already spent on the kind. */
+.dot.fortress { background: #e5534b; }
+.dot.monument { background: #5cc8f0; }
+.dot.outpost { background: #d9a441; }
+.dot.witch-hut { background: #b48ce0; }
+.key { width: 0.7rem; height: 0.7rem; }
+.key.recorded { background: var(--text); border: 1px solid #0b0c0e; border-radius: 2px; }
+.key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
+
+.structure span {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  font: 700 11px/1 system-ui, sans-serif;
+}
+.structure.recorded span { background: var(--kind); color: #0b0c0e; border: 1.5px solid #0b0c0e; border-radius: 3px; }
+.structure.predicted span {
+  background: rgba(11, 12, 14, 0.55);
+  color: var(--kind);
+  border: 1.5px dashed var(--kind);
+  border-radius: 50%;
+}
+/* Predicted where the world has already generated and recorded nothing. */
+.structure.predicted.doubted span { opacity: 0.55; text-decoration: line-through; }
+
 /* Fixed width, or the footer shifts with every digit of the age. */
 .live { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 6.5rem; }
 

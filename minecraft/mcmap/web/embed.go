@@ -4,5 +4,5 @@ package web
 
 import "embed"
 
-//go:embed index.html app.js live.js markers.js style.css lib
+//go:embed index.html app.js live.js markers.js structures.js style.css lib
 var FS embed.FS
