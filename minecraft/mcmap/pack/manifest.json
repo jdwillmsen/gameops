@@ -1,0 +1,25 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "mcmap live positions",
+    "description": "Reports player and mob positions to the server log for the web map. Read-only.",
+    "uuid": "dc4810d2-bfe2-4f23-b05b-ca86b34a158f",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 26, 0]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "language": "javascript",
+      "entry": "scripts/main.js",
+      "uuid": "28778864-3ebe-413f-9c50-f29630e8be3e",
+      "version": [1, 0, 0]
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.10.0"
+    }
+  ]
+}
