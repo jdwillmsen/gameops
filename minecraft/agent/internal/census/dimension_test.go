@@ -101,10 +101,10 @@ func TestAnUnrecognisedDimensionIsNotAMissingDigpRecord(t *testing.T) {
 }
 
 func TestAddDigpReportsWhyItSkippedARecord(t *testing.T) {
-	// A skipped digp record silently costs every actor in that chunk its
-	// dimension, and the report then files them as unknown. The caller has
-	// to be able to count the skips to tell that apart from a world that
-	// genuinely holds unplaceable actors.
+	// A skipped digp record leaves every actor that chunk listed unclaimed,
+	// and the scan then sets them aside as orphaned. The caller has to be
+	// able to count the skips to tell that apart from a world that holds
+	// leftovers.
 	ix := dimensionIndex{}
 
 	if got := ix.addDigp(digpKey(1, 2, nil), actorID(7)); got != digpOK {

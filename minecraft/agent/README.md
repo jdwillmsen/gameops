@@ -290,8 +290,9 @@ Two things can put a live actor among them:
 - A snapshot of a running server catches a few actors between their own
   record being written and their chunk's list. That is tens of records, and
   they are back in the next run.
-- A chunk list the scan could not read orphans every actor it named. The
-  report says how many lists that was, directly under the orphaned line, and
+- A chunk list the scan could not read orphans every live actor it named,
+  which may be some of the count above or none of it. The report says how
+  many lists that was, directly under the orphaned line, and
   `mc_census_scan_skipped_chunk_lists` carries the same number. It is 0 on
   FWB; a snapshot of a running server can tear one list, so a small value
   does not fail the run, and a rise beside a step in

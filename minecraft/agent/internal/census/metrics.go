@@ -112,9 +112,11 @@ func register(c Census, scrapedAt time.Time, opts MetricsOptions) *prometheus.Re
 		entities.WithLabelValues(d.String()).Set(float64(byDimension[d]))
 	}
 	for _, d := range []Dimension{UnknownDimension, UnrecognisedDimension} {
-		// The two diagnostic buckets are the opposite case: they mean the scan
-		// could not place an entity, so a permanent zero would be a series
-		// that exists only to say nothing is wrong.
+		// The two diagnostic buckets are the opposite case: unrecognised is a
+		// dimension this code does not know, and unknown reaches here only
+		// from a caller that built its entities without the scan. A permanent
+		// zero for either would be a series that exists only to say nothing
+		// is wrong.
 		if n, ok := byDimension[d]; ok {
 			entities.WithLabelValues(d.String()).Set(float64(n))
 		}

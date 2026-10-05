@@ -220,7 +220,7 @@ func TestRenderStatesOrphanedRecordsAndSkippedDigp(t *testing.T) {
 	if !strings.Contains(out, "12 bad value") || !strings.Contains(out, "3 bad key") {
 		t.Errorf("report does not state the chunk lists it could not read\n---\n%s", out)
 	}
-	if !strings.Contains(out, "\n  chunk actor lists unreadable: 3 bad key, 12 bad value; their actors are live and among the orphaned\n") {
+	if !strings.Contains(out, "\n  chunk actor lists unreadable: 3 bad key, 12 bad value; live actors they named may be among the orphaned\n") {
 		t.Errorf("report does not hang the unread chunk lists under the orphaned line\n---\n%s", out)
 	}
 }
