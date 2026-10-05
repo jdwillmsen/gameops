@@ -77,8 +77,15 @@ func RenderListing(entities []Entity, stats ScanStats, takenAt time.Time, source
 			return a.Z < b.Z
 		case a.Y != b.Y:
 			return a.Y < b.Y
-		default:
+		case a.UniqueID != b.UniqueID:
 			return a.UniqueID < b.UniqueID
+		// Two records can agree on all of that, a duplicated actor among
+		// them, and still print different lines. Every printed field is
+		// compared so that only identical lines are left unordered.
+		case a.Persistent != b.Persistent:
+			return !a.Persistent
+		default:
+			return a.CustomName < b.CustomName
 		}
 	})
 
