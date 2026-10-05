@@ -109,55 +109,71 @@ func (s *Sessions) Clear(w http.ResponseWriter) {
 
 // Verify returns who the request is logged in as, if anyone.
 func (s *Sessions) Verify(r *http.Request) (Identity, bool) {
+	c, ok := s.verify(r)
+	return c.Identity, ok
+}
+
+func (s *Sessions) verify(r *http.Request) (claims, bool) {
 	// A key that was never loaded would sign cookies anyone could make.
 	if len(s.Key) < keyBytes {
-		return Identity{}, false
+		return claims{}, false
 	}
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return Identity{}, false
+		return claims{}, false
 	}
 	payload, sig, ok := strings.Cut(cookie.Value, ".")
 	if !ok || payload == "" || !hmac.Equal([]byte(sig), []byte(s.sign(payload))) {
-		return Identity{}, false
+		return claims{}, false
 	}
 	raw, err := encoding.DecodeString(payload)
 	if err != nil {
-		return Identity{}, false
+		return claims{}, false
 	}
 	var c claims
 	if err := json.Unmarshal(raw, &c); err != nil || c.XUID == "" {
-		return Identity{}, false
+		return claims{}, false
 	}
 	// The cookie's own Max-Age is the browser's business; this is the check
 	// that counts.
 	if !s.Now().Before(time.Unix(c.Expires, 0)) {
-		return Identity{}, false
+		return claims{}, false
 	}
 	if s.Revoked != nil && s.Revoked.covers(c.XUID, c.IssuedMilli) {
-		return Identity{}, false
+		return claims{}, false
 	}
-	return c.Identity, true
+	return c, true
 }
 
 type contextKey struct{}
 
 // FromContext returns the identity Require attached to a request.
 func FromContext(ctx context.Context) (Identity, bool) {
-	id, ok := ctx.Value(contextKey{}).(Identity)
-	return id, ok
+	c, ok := ctx.Value(contextKey{}).(claims)
+	return c.Identity, ok
+}
+
+// ExpiryFromContext returns when the session Require let through runs out.
+// A response that outlasts the request it answers has to end by then: the
+// session is only checked when a request arrives.
+func ExpiryFromContext(ctx context.Context) (time.Time, bool) {
+	c, ok := ctx.Value(contextKey{}).(claims)
+	if !ok {
+		return time.Time{}, false
+	}
+	return time.Unix(c.Expires, 0), true
 }
 
 // Require lets a request through only with a valid session.
 func (s *Sessions) Require(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, ok := s.Verify(r)
+		c, ok := s.verify(r)
 		if !ok {
 			w.Header().Set("Cache-Control", "no-store")
 			http.Error(w, "login required", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, id)))
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, c)))
 	})
 }
 

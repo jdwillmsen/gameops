@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 )
@@ -45,6 +46,13 @@ type Server struct {
 	Generations Generations
 	// Log records logins issued and revoked. Nil discards them.
 	Log *slog.Logger
+	// Live is where players and mobs are right now. Nil leaves the live
+	// stream out altogether.
+	Live *live.Layer
+	// LiveKeepalive is how long a live stream may go without writing
+	// anything. It has to stay well under the shortest idle timeout between
+	// here and the browser, or a quiet stream is cut.
+	LiveKeepalive time.Duration
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
@@ -105,6 +113,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.Handle("GET /api/map", s.gated(s.handleMap))
 	mux.Handle("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleTile))
+	if s.Live != nil {
+		mux.Handle("GET /api/live", s.gated(s.handleLive))
+	}
 	if s.Sessions != nil {
 		mux.Handle("GET /api/me", s.gated(s.handleMe))
 		mux.HandleFunc("POST /auth/start", s.handleStart)
@@ -147,16 +158,19 @@ type dimensionJSON struct {
 }
 
 type mapJSON struct {
-	World          string          `json:"world"`
-	RefreshSeconds int             `json:"refreshSeconds"`
-	SnapshotAt     *time.Time      `json:"snapshotAt,omitempty"`
-	Problem        string          `json:"problem,omitempty"`
-	Dimensions     []dimensionJSON `json:"dimensions"`
+	World          string     `json:"world"`
+	RefreshSeconds int        `json:"refreshSeconds"`
+	SnapshotAt     *time.Time `json:"snapshotAt,omitempty"`
+	Problem        string     `json:"problem,omitempty"`
+	// Live tells the page whether there is a live stream to open. It is
+	// here, behind the session, and not in the public config.
+	Live       bool            `json:"live"`
+	Dimensions []dimensionJSON `json:"dimensions"`
 }
 
 func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
 	status := s.Status.Snapshot()
-	out := mapJSON{World: s.World, RefreshSeconds: int(s.Refresh.Seconds()), Problem: status.Problem}
+	out := mapJSON{World: s.World, RefreshSeconds: int(s.Refresh.Seconds()), Problem: status.Problem, Live: s.Live != nil}
 	if !status.SnapshotAt.IsZero() {
 		out.SnapshotAt = &status.SnapshotAt
 	}

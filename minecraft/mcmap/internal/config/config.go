@@ -47,6 +47,21 @@ type Config struct {
 	Login         bool
 	InternalToken string
 	SessionTTL    time.Duration
+
+	// Live is whether players and mobs are drawn on the map as they move.
+	// Off, nothing asks the bridge for them and the page is not offered a
+	// stream.
+	Live bool
+	// LivePollWait is how long the bridge may hold one request for records
+	// open.
+	LivePollWait time.Duration
+	// LiveTTL is how old a position may be and still be drawn.
+	LiveTTL time.Duration
+	// LiveKeepalive is the longest a live stream stays silent.
+	LiveKeepalive time.Duration
+	// LiveMaxEntities caps each of players and mobs, per dimension, in what
+	// is sent to a browser.
+	LiveMaxEntities int
 }
 
 // minTokenLength keeps a placeholder from standing in for a credential.
@@ -54,6 +69,22 @@ const minTokenLength = 16
 
 // minRefresh keeps a mistyped interval from pausing world saving in a loop.
 const minRefresh = time.Minute
+
+const (
+	// maxLivePollWait is the longest wait the bridge honours; it shortens a
+	// longer one without saying so.
+	maxLivePollWait = 25 * time.Second
+
+	// pathIdleTimeout is the shortest idle timeout between this service and
+	// a browser: the load balancer's. A stream silent for this long is cut.
+	pathIdleTimeout = 30 * time.Second
+	// maxLiveKeepalive leaves a third of that for a keepalive that is
+	// written late or delivered slowly. Reaching the timeout itself would
+	// drop every quiet stream, so the setting cannot be raised that far.
+	maxLiveKeepalive = pathIdleTimeout * 2 / 3
+
+	maxLiveEntities = 10_000
+)
 
 func Load(getenv func(string) string) (Config, error) {
 	c := Config{
@@ -114,6 +145,24 @@ func Load(getenv func(string) string) (Config, error) {
 	// The nether is 128 blocks tall with bedrock at both ends.
 	if c.NetherTopY, err = strconv.Atoi(or(getenv("NETHER_TOP_Y"), "100")); err != nil || c.NetherTopY < 1 || c.NetherTopY > 127 {
 		fail("NETHER_TOP_Y must be between 1 and 127")
+	}
+
+	if c.Live, err = strconv.ParseBool(or(getenv("LIVE_ENABLED"), "true")); err != nil {
+		fail("LIVE_ENABLED must be true or false")
+	}
+	if c.LivePollWait, err = time.ParseDuration(or(getenv("LIVE_POLL_WAIT"), "2s")); err != nil || c.LivePollWait < 100*time.Millisecond || c.LivePollWait > maxLivePollWait {
+		fail("LIVE_POLL_WAIT must be a duration between 100ms and %s", maxLivePollWait)
+	}
+	// The pack samples once a second, so a shorter life than that would
+	// blink every marker off between samples.
+	if c.LiveTTL, err = time.ParseDuration(or(getenv("LIVE_TTL"), "10s")); err != nil || c.LiveTTL < 2*time.Second || c.LiveTTL > 10*time.Minute {
+		fail("LIVE_TTL must be a duration between 2s and 10m")
+	}
+	if c.LiveKeepalive, err = time.ParseDuration(or(getenv("LIVE_KEEPALIVE"), "15s")); err != nil || c.LiveKeepalive < time.Second || c.LiveKeepalive > maxLiveKeepalive {
+		fail("LIVE_KEEPALIVE must be a duration between 1s and %s: connections idle for %s are cut on the way to the browser", maxLiveKeepalive, pathIdleTimeout)
+	}
+	if c.LiveMaxEntities, err = strconv.Atoi(or(getenv("LIVE_MAX_ENTITIES"), "1000")); err != nil || c.LiveMaxEntities < 1 || c.LiveMaxEntities > maxLiveEntities {
+		fail("LIVE_MAX_ENTITIES must be between 1 and %d", maxLiveEntities)
 	}
 	return c, errors.Join(errs...)
 }
