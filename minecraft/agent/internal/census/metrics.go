@@ -217,6 +217,12 @@ func register(c Census, scrapedAt time.Time, opts MetricsOptions) *prometheus.Re
 	gauge("mc_census_scan_unusable_records",
 		"Records that did not decode into a usable entity, for any reason.").
 		WithLabelValues().Set(float64(c.Stats.Unusable()))
+	// Always exported, zero included. These are in no other series, and a
+	// step in the entity counts needs something beside it to say whether
+	// the world changed or the leftovers did.
+	gauge("mc_census_orphaned_records",
+		"Actor records no chunk lists. The game does not load them and no other series counts them.").
+		WithLabelValues().Set(float64(c.Stats.Orphaned))
 
 	return reg
 }

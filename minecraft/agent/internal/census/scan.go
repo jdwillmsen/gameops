@@ -18,23 +18,43 @@ const actorPrefix = "actorprefix"
 // world it failed to read instead of quietly reporting a short count.
 type ScanStats struct {
 	Records            int    // actorprefix keys seen
-	Decoded            int    // records that became usable entities
+	Decoded            int    // records that became entities the scan returned
 	Unparsable         int    // records whose NBT would not decode
 	Unplaced           int    // records decoded but carrying no usable position
 	Unidentified       int    // records placed but naming no entity
 	FirstUnparsableErr string // first decode failure seen, or empty if none
 
-	// UnresolvedDimension counts entities the scan read but could not place
-	// in a dimension, because no chunk's digp record claims them. They are
-	// still returned: 106 such items were killed in game on 2026-09-18,
-	// which is what settles them as real rather than as stale records.
-	UnresolvedDimension int
+	// Orphaned counts records that decoded into a placed, named actor which
+	// no chunk's digp list claims. They are not returned. On FWB every
+	// chunk that exists where such a record says it stands carries an actor
+	// list that leaves it out, and force-loading those chunks changed none
+	// of the records, so the game does not load them and neither should a
+	// count of what lives in the world.
+	//
+	// A few are live: an actor saved in the moment between its own record
+	// and its chunk's list reads the same way. That is tens of records in a
+	// snapshot of a running server, against thousands of leftovers.
+	Orphaned int
 	// DigpSkippedKey and DigpSkippedValue count the chunk records the
-	// dimension index refused, which is the leading candidate cause of
-	// UnresolvedDimension: one skipped record takes every actor in its
-	// chunk with it.
+	// dimension index refused. One skipped record orphans every actor in
+	// its chunk, and those actors are live, so the two are reported
+	// together.
 	DigpSkippedKey   int
 	DigpSkippedValue int
+}
+
+// MaxOrphanedRatio is how much of a world may be orphaned before the cause
+// stops being leftovers and starts being an index the scan cannot read.
+//
+// FWB carries about 8% after two years. A release that moves the chunk actor
+// lists orphans every record at once, and a census that dropped them all
+// would print an empty world, so the line only has to fall between the two.
+const MaxOrphanedRatio = 0.5
+
+// MostlyOrphaned reports whether so few records are claimed by a chunk that
+// the rest cannot be a census.
+func (s ScanStats) MostlyOrphaned() bool {
+	return s.Records > 0 && float64(s.Orphaned) > MaxOrphanedRatio*float64(s.Records)
 }
 
 // MaxUnusableRatio is how much of a world may fail to yield an entity before
@@ -123,7 +143,8 @@ func Scan(ctx context.Context, dbPath string) ([]Entity, ScanStats, error) {
 		}
 		e.Dimension = index.lookup(k[len(actorPrefix):])
 		if e.Dimension == UnknownDimension {
-			stats.UnresolvedDimension++
+			stats.Orphaned++
+			return
 		}
 		stats.Decoded++
 		entities = append(entities, e)

@@ -231,6 +231,42 @@ func TestRunRefusesToReportAWorldWhoseRecordsNameNothing(t *testing.T) {
 	}
 }
 
+func TestRunRefusesToReportAWorldWhoseChunksListNoActors(t *testing.T) {
+	// What a moved chunk actor list looks like from here: every record
+	// decodes, places and names an entity, and none of them is claimed.
+	// Dropping them as orphaned would print an empty world and exit 0.
+	stage := t.TempDir()
+	if err := os.MkdirAll(worldDB(stage), 0o755); err != nil {
+		t.Fatalf("stage world: %v", err)
+	}
+	db, err := leveldb.OpenFile(worldDB(stage), nil)
+	if err != nil {
+		t.Fatalf("open world: %v", err)
+	}
+	id := make([]byte, 8)
+	binary.LittleEndian.PutUint64(id, 1)
+	if err := db.Put(append([]byte("actorprefix"), id...), zombieRecord(t), nil); err != nil {
+		t.Fatalf("put actor: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close world: %v", err)
+	}
+	dir := t.TempDir()
+	tarWorld(t, stage, dir)
+
+	var out, errOut bytes.Buffer
+	err = run(context.Background(), []string{"-backup-dir", dir}, &out, &errOut)
+	if err == nil {
+		t.Fatal("run returned nil error for a world where no chunk listed any actor")
+	}
+	if !strings.Contains(err.Error(), "orphaned") {
+		t.Errorf("error does not say the records were orphaned: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("run wrote %q to stdout, want no report at all", out.String())
+	}
+}
+
 func TestRunRemovesTheExtractionWhenItIsCancelled(t *testing.T) {
 	// The pod can be terminated part way through a multi-minute extraction,
 	// and what must not survive it is the ~570MB tree on the backup volume.

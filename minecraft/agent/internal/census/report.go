@@ -41,13 +41,17 @@ func Render(c Census, opts ReportOptions) string {
 	if c.Stats.FirstUnparsableErr != "" {
 		fmt.Fprintf(&b, "first decode failure: %s\n", c.Stats.FirstUnparsableErr)
 	}
-	// Stated only when it happened, and stated as a placement failure rather
-	// than as an absence: these entities exist, and the per-dimension
-	// sections below undercount by exactly this many.
-	if c.Stats.UnresolvedDimension > 0 {
-		fmt.Fprintf(&b, "dimension unresolved for %d entities; they are real and counted only under unknown\n",
-			c.Stats.UnresolvedDimension)
-		fmt.Fprintf(&b, "  chunk records skipped: %d bad key, %d bad value\n",
+	// The only place these appear: every section below leaves them out, and
+	// a reader comparing two reports needs to know the count moved because
+	// leftovers did, not because the world did.
+	if c.Stats.Orphaned > 0 {
+		fmt.Fprintf(&b, "orphaned records %d: saved actors no chunk lists, left out of every count below\n",
+			c.Stats.Orphaned)
+	}
+	// A chunk list the scan refused orphans actors the game still loads, so
+	// it is stated whether or not anything else was orphaned.
+	if c.Stats.DigpSkippedKey+c.Stats.DigpSkippedValue > 0 {
+		fmt.Fprintf(&b, "  chunk actor lists unreadable: %d bad key, %d bad value; their actors are live and among the orphaned\n",
 			c.Stats.DigpSkippedKey, c.Stats.DigpSkippedValue)
 	}
 	fmt.Fprintf(&b, "\n")

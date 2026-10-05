@@ -203,12 +203,11 @@ func TestScanStopsOnACancelledContext(t *testing.T) {
 	}
 }
 
-func TestScanCountsActorsWhoseDimensionWillNotResolve(t *testing.T) {
-	// An actor listed in no chunk's digp record still decodes into a real
-	// entity — 106 of them were killed in game on 2026-09-18 after the
-	// report had filed them under the unknown dimension. The scan keeps
-	// them and counts them, rather than dropping them or quietly passing
-	// them off as placed.
+func TestScanCountsOrphanedActorsWithoutReturningThem(t *testing.T) {
+	// An actor record that no chunk's digp list names is one the game no
+	// longer loads: the chunk it sits in says it holds something else, or
+	// nothing. The record still decodes, which is what made it look like an
+	// entity, so the scan has to count it somewhere other than the world.
 	path := writeFixtureWorld(t, []fixtureActor{
 		{ID: 1, NBT: map[string]any{"identifier": "minecraft:zombie", "Pos": pos(0, 64, 0)}},
 	})
@@ -235,13 +234,41 @@ func TestScanCountsActorsWhoseDimensionWillNotResolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if stats.UnresolvedDimension != 1 {
-		t.Errorf("UnresolvedDimension = %d, want 1", stats.UnresolvedDimension)
+	if stats.Orphaned != 1 {
+		t.Errorf("Orphaned = %d, want 1", stats.Orphaned)
 	}
-	if len(entities) != 2 {
-		t.Errorf("scan returned %d entities, want 2: an unplaceable actor is still an entity", len(entities))
+	if len(entities) != 1 || entities[0].Identifier != "zombie" {
+		t.Errorf("scan returned %+v, want only the zombie its chunk lists", entities)
+	}
+	if stats.Decoded != 1 {
+		t.Errorf("Decoded = %d, want 1: an orphaned record is not an entity", stats.Decoded)
+	}
+	if stats.Records != stats.Decoded+stats.Orphaned+stats.Unusable() {
+		t.Errorf("records %d do not add up to decoded %d + orphaned %d + unusable %d",
+			stats.Records, stats.Decoded, stats.Orphaned, stats.Unusable())
 	}
 	if stats.Unusable() != 0 {
-		t.Errorf("Unusable() = %d, want 0: an unresolved dimension is not a failed record", stats.Unusable())
+		t.Errorf("Unusable() = %d, want 0: an orphaned record decoded fine", stats.Unusable())
+	}
+}
+
+func TestMostlyOrphanedSeparatesLeftoversFromAnUnreadableIndex(t *testing.T) {
+	// A long-lived world carries some orphaned records; FWB held 1,913 in
+	// 22,497. A game release that moves the chunk actor lists orphans every
+	// record at once, and a census that dropped them all would print an
+	// empty world.
+	for _, tc := range []struct {
+		name  string
+		stats ScanStats
+		want  bool
+	}{
+		{"a long-lived world", ScanStats{Records: 22497, Decoded: 20584, Orphaned: 1913}, false},
+		{"no chunk lists anything", ScanStats{Records: 400, Orphaned: 400}, true},
+		{"just past half", ScanStats{Records: 100, Decoded: 49, Orphaned: 51}, true},
+		{"an empty world", ScanStats{}, false},
+	} {
+		if got := tc.stats.MostlyOrphaned(); got != tc.want {
+			t.Errorf("%s: MostlyOrphaned() = %t, want %t", tc.name, got, tc.want)
+		}
 	}
 }
