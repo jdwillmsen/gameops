@@ -75,7 +75,7 @@ One line per record, under 3,500 bytes of JSON so the 4 KB ceiling that makes th
 | Bridge long-poll wait | caller-supplied, capped at 25 s | Under the gateway's and the client's own timeouts |
 | mcmap state TTL | 10 s | Older than this, markers disappear (ticket DoD) |
 | SSE stream lifetime | `min(5 min, session expiry)` | Forces a re-verify of session and revocation on reconnect |
-| SSE heartbeat | comment line every 15 s | Keeps nginx's `proxy_read_timeout` from reaping an idle stream |
+| SSE heartbeat | comment line every 15 s | The tightest idle limit on the path is the load balancer in front of the gateway: HAProxy in TCP mode with `timeout client 30s` / `timeout server 30s`. The gateway's own nginx `proxy_read_timeout` is the 60 s default. 15 s is half the tighter one; it must stay under 30 s (see V1) |
 
 ### Latency budget for the <3 s metric
 
@@ -276,7 +276,7 @@ The five things most likely to be wrong, and the test that proves each.
 ## Task 8: mcmap — the SSE endpoint
 
 - [ ] `internal/server/live.go`: `GET /api/live?dimension=<id>`, registered as `mux.Handle("GET /api/live", s.gated(s.handleLive))` so the session check is the same one `/api/map` and `/tiles/...` get. An unknown dimension is a 400.
-- [ ] Headers: `Content-Type: text/event-stream`, `Cache-Control: no-store`, `Connection: keep-alive`, and **`X-Accel-Buffering: no`** — nginx buffers proxied responses by default and would hold frames until the buffer filled. The existing CSP (`default-src 'self'`) already permits a same-origin `EventSource`; no CSP change.
+- [ ] Headers: `Content-Type: text/event-stream`, `Cache-Control: no-store`, `Connection: keep-alive`, and **`X-Accel-Buffering: no`**. Measured on the gateway's own image and generated config (V1), small flushed events pass through at their original cadence with or without that header, so it is kept as a statement of intent that survives a future buffering policy, not as the thing that makes streaming work. The existing CSP (`default-src 'self'`) already permits a same-origin `EventSource`; no CSP change.
 - [ ] Extend the write deadline before every frame via `http.NewResponseController` and `Flush()` after each. The public `http.Server` has `WriteTimeout: 30s` and `IdleTimeout: 60s`; without this the stream dies at 30 s.
 - [ ] Send the current state immediately on connect, so a reload does not wait up to a second for the first frame.
 - [ ] Heartbeat a `: keepalive` comment every 15 s when no frame has gone out, so the gateway's read timeout never reaps a quiet stream.
@@ -381,9 +381,19 @@ Recorded from the human's answers; the task bodies above already reflect them.
 - **D3. The mob cap defaults to 1,000 per dimension, and mob markers are on by default for every visitor.** Why: the AFK bots' mob farm can hold far more than 400 mobs in loaded chunks, and the map is meant to show it rather than a truncated sample. The cap is a chart value (`PACK_MOB_CAP` for the pack, `map.live.maxEntities` for mcmap) so it can be lowered without a release. Cost: 2.5x the first draft's pack tick cost and browser marker count on a server already at 12–15 TPS, which is why the self-throttle (Task 5), the before/after TPS measurements (Tasks 5, 11, 12) and open question Q2 are load-bearing.
 - **D4. Every logged-in FWB player sees every player's live position, with no opt-out.** Why: it is the epic's access model, "anyone who plays on FWB", and needs no agent change in this ticket. If revisited: an opt-out would need an in-game agent command and so would queue behind JDWLABS-728.
 
+## Verified
+
+- **V1. Server-Sent Events pass through the ingress path unbuffered; the only requirement is traffic at least every 30 s.** Measured 2026-10-05, nothing changed in production.
+  - *Path:* browser → HAProxy VIP (TCP mode, TLS passed through) → `platform-gateway` (nginx-gateway-fabric 2.7.2, nginx 1.31.6, HTTP/2 to the client) → mcmap. The public hostname answers HTTP/2 from nginx with the wildcard certificate, which is what TCP passthrough looks like from outside.
+  - *Gateway config, read from a live data-plane pod (`nginx -T`):* no `proxy_buffering`, `proxy_read_timeout`, `proxy_ignore_headers` or `gzip` directive anywhere, so nginx defaults apply, and no ProxySettingsPolicy, ClientSettingsPolicy, UpstreamSettingsPolicy or snippets object exists in the cluster.
+  - *Buffering, measured on the same data-plane image with the map's generated location block and an upstream emitting one small event per second:* every event arrived within 10 ms of its send time, over HTTP/1.1 and HTTP/2, with and without `X-Accel-Buffering: no`, and for `text/plain` as well as `text/event-stream`. The header is not what makes it work here.
+  - *Idle limits, measured:* nginx cut a silent stream at 60.06 s (`upstream timed out`). HAProxy with the load balancer's own defaults cut a silent stream at 30.0 s, carried a 1 Hz stream for its full 45 s, and carried a stream with nothing but a 15 s keepalive comment for its full 60 s.
+  - *Consequences:* the plain-JSON polling fallback is not needed. The 15 s heartbeat is required, and the limit it answers to is HAProxy's 30 s, not nginx's 60 s. The heartbeat interval must never be raised to 30 s or beyond.
+  - *Not covered:* the HAProxy test ran the current LTS image (3.4.6) against the template's defaults, not the version on the load balancer host, and nothing was streamed through the production path itself, since that would need a route that is not in git. The first end-to-end confirmation is Task 12's recorded move.
+
 ## Open questions needing a human decision
 
-Q1. **Does the gateway pass SSE through unbuffered?** `X-Accel-Buffering: no` is the right header for nginx, but nginx-gateway-fabric's defaults for `proxy_read_timeout` and response buffering on an HTTPRoute have not been verified for this gateway. If the header is not honoured, this needs a gateway-level policy, which is platform configuration outside the tenant's ArgoCD project. **Decision needed:** who verifies and, if needed, who changes the gateway — and the fallback if it cannot be changed (the page polls `/api/live` as plain JSON at 1 Hz instead, which costs roughly a second of the budget).
+Q1. **Does the gateway pass SSE through unbuffered?** Resolved 2026-10-05 by measurement, no decision needed: it does, and no gateway policy or platform change is required. See V1. The number is kept so references to Q2–Q4 stay valid.
 
 Q2. **What TPS drop triggers a rollback, decided before the rollout?** This is more load-bearing since D3 raised the default cap to 1,000 mobs per dimension: a 1 Hz `getEntities()` across three dimensions at 2.5x the first draft's volume is a real cost on a server that already averages 12–15 TPS with its own alert tuned around that, and the self-throttle is a mitigation, not a guarantee. Task 12 treats a drop past this threshold as a rollback and Task 11 uses it as a stop condition, so both are undefined until it is set. **Decision needed:** the threshold as a number and a window (for example, X TPS below the same hours of the prior week, sustained for Y minutes), who makes the call, and whether lowering the cap counts as a response short of rollback.
 
