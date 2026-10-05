@@ -36,9 +36,8 @@ type ScanStats struct {
 	// snapshot of a running server, against thousands of leftovers.
 	Orphaned int
 	// DigpSkippedKey and DigpSkippedValue count the chunk records the
-	// dimension index refused. One skipped record orphans every actor in
-	// its chunk, and those actors are live, so the two are reported
-	// together.
+	// dimension index refused. One skipped record orphans every actor it
+	// named, and those actors are live, so the two are reported together.
 	DigpSkippedKey   int
 	DigpSkippedValue int
 }

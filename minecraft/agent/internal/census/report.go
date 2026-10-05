@@ -48,14 +48,16 @@ func Render(c Census, opts ReportOptions) string {
 		fmt.Fprintf(&b, "orphaned records %d: saved actors no chunk lists, left out of every count below\n",
 			c.Stats.Orphaned)
 	}
-	// A chunk list the scan refused orphans actors the game still loads, so
-	// it is stated whether or not anything else was orphaned. With nothing
-	// orphaned there is no line above to hang from and no actor to point
-	// at, so it stands alone and claims only what it knows.
+	// A chunk list the scan refused orphans whatever live actors it named,
+	// so it is stated whether or not anything else was orphaned. The two
+	// counts do not say how many of one came from the other - a refused list
+	// may have named nothing that survives - so the line claims only that
+	// some may have. With nothing orphaned there is no line above to hang
+	// from, and it stands alone.
 	switch {
 	case c.Stats.SkippedChunkLists() == 0:
 	case c.Stats.Orphaned > 0:
-		fmt.Fprintf(&b, "  chunk actor lists unreadable: %d bad key, %d bad value; their actors are live and among the orphaned\n",
+		fmt.Fprintf(&b, "  chunk actor lists unreadable: %d bad key, %d bad value; live actors they named may be among the orphaned\n",
 			c.Stats.DigpSkippedKey, c.Stats.DigpSkippedValue)
 	default:
 		fmt.Fprintf(&b, "chunk actor lists unreadable: %d bad key, %d bad value; no record was orphaned by them\n",

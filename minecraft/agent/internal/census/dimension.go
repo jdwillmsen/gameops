@@ -12,9 +12,9 @@ const digpPrefix = "digp"
 type dimensionIndex map[[8]byte]Dimension
 
 // digpSkip says whether a digp record was usable, and if not, which half of
-// it was not. Skipping one costs every actor in that chunk its dimension,
-// which the report can only distinguish from a genuinely unplaceable world
-// if the skips are counted.
+// it was not. Skipping one leaves every actor that chunk listed unclaimed,
+// and the scan sets those aside as orphaned, which only a count of the skips
+// can tell apart from leftovers.
 type digpSkip int
 
 const (
