@@ -272,6 +272,31 @@ Herds are located in the overworld only, because the reference point is an
 overworld position; a variant with animals elsewhere says how many were left
 out of its herds, so the count still agrees with the totals.
 
+### Orphaned records
+
+A world save holds one record per actor, and each chunk holds the list of
+actors that belong to it. A record that no chunk lists is orphaned: the game
+never loads it, so the census leaves it out of every count and states the
+number on its own line near the top of the report, and as
+`mc_census_orphaned_records`.
+
+On FWB that is about 1,900 records of 22,500. Every chunk that exists where
+one of them says it stands has an actor list that omits it, and force-loading
+those chunks leaves the records byte for byte as they were. What wrote them is
+not known; nearly all date from the world's early sessions.
+
+Two things can put a live actor among them:
+
+- A snapshot of a running server catches a few actors between their own
+  record being written and their chunk's list. That is tens of records, and
+  they are back in the next run.
+- A chunk list the scan could not read orphans every actor it named. The
+  report says how many lists that was, directly under the orphaned line.
+
+A run in which more than half the records are orphaned exits non-zero without
+a report. That is what a game release moving the chunk lists would look like,
+and dropping every actor would otherwise print an empty world.
+
 ### Census metrics
 
 `-metrics-file <path>` writes the same counts as a Prometheus text exposition
@@ -301,6 +326,7 @@ graph outlives the sentence explaining it.
 | `mc_census_world_from_snapshot` | none | 1 for a fresh snapshot, 0 for a backup archive |
 | `mc_census_scan_records` | none | actor records read out of the world database |
 | `mc_census_scan_unusable_records` | none | records that did not decode into a usable entity |
+| `mc_census_orphaned_records` | none | actor records no chunk lists, which no other series counts |
 
 Per-region series are deliberately absent. A world holds thousands of regions
 whose keys change every night, and that table belongs in the report; the count

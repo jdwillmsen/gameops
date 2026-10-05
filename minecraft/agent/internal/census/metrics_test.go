@@ -235,3 +235,18 @@ func TestRenderMetricsExportsClimateVariantsZeroFilled(t *testing.T) {
 		}
 	}
 }
+
+// Orphaned records are in no other series, so without their own gauge the
+// export could not tell a world that shed 1,900 entities from a census that
+// stopped counting 1,900 leftovers.
+func TestRenderMetricsExportsOrphanedRecordsEvenAtZero(t *testing.T) {
+	c := Aggregate(nil, ScanStats{Records: 10, Decoded: 7, Orphaned: 3}, scrapedAt, KindArchive)
+	if got := sampleValue(t, RenderMetrics(c, scrapedAt, DefaultMetricsOptions()), "mc_census_orphaned_records"); got != "3" {
+		t.Errorf("mc_census_orphaned_records = %q, want 3", got)
+	}
+
+	clean := Aggregate(nil, ScanStats{Records: 7, Decoded: 7}, scrapedAt, KindArchive)
+	if got := sampleValue(t, RenderMetrics(clean, scrapedAt, DefaultMetricsOptions()), "mc_census_orphaned_records"); got != "0" {
+		t.Errorf("mc_census_orphaned_records = %q, want 0 for a world with none", got)
+	}
+}

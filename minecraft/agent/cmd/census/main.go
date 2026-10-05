@@ -183,6 +183,14 @@ func reportFrom(ctx context.Context, source census.Source, opts census.ReportOpt
 		return fmt.Errorf("%w; first decode failure: %s", unusable, stats.FirstUnparsableErr)
 	}
 
+	// The same empty report by another road: every record decoded, and none
+	// was claimed by a chunk, so all of them were set aside as orphaned.
+	if stats.MostlyOrphaned() {
+		return fmt.Errorf("%s %s: %d of %d actor records are orphaned, listed by no chunk, over the %.0f%% limit; the chunk actor lists cannot have been read as the game wrote them (%d bad key, %d bad value)",
+			world.Kind, world.Archive, stats.Orphaned, stats.Records, census.MaxOrphanedRatio*100,
+			stats.DigpSkippedKey, stats.DigpSkippedValue)
+	}
+
 	aggregate := census.Aggregate(entities, stats, world.TakenAt, world.Kind)
 	if _, err := io.WriteString(stdout, census.Render(aggregate, opts)); err != nil {
 		return fmt.Errorf("write report: %w", err)

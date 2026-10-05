@@ -203,25 +203,32 @@ func TestRenderGivesConcentrationExtentNotJustItsCentre(t *testing.T) {
 	}
 }
 
-func TestRenderSurfacesUnresolvedDimensionsAndSkippedDigp(t *testing.T) {
-	// An entity whose dimension will not resolve is still a real entity: it
-	// was killed in game on 2026-09-18 after the report filed it as unknown.
-	// Reporting the count, and why the chunk records were skipped, is what
-	// separates "the census cannot place these" from "these do not exist".
+func TestRenderStatesOrphanedRecordsAndSkippedDigp(t *testing.T) {
+	// Orphaned records are left out of every section, so the header is the
+	// only place the report can say they exist. The skipped chunk lists go
+	// beside them because a list the scan could not read orphans every
+	// actor it named, and those ones are live.
 	c := sampleCensus()
-	c.Stats.UnresolvedDimension = 1897
+	c.Stats.Orphaned = 1897
 	c.Stats.DigpSkippedValue = 12
 	c.Stats.DigpSkippedKey = 3
 	out := Render(c, DefaultReportOptions())
 
-	if !strings.Contains(out, "1897") || !strings.Contains(out, "unresolved") {
-		t.Errorf("report does not state how many entities it could not place\n---\n%s", out)
+	if !strings.Contains(out, "orphaned records 1897") {
+		t.Errorf("report does not state how many records it left out as orphaned\n---\n%s", out)
 	}
-	if !strings.Contains(out, "12") || !strings.Contains(out, "skipped") {
-		t.Errorf("report does not state why chunk records were skipped\n---\n%s", out)
+	if !strings.Contains(out, "12 bad value") || !strings.Contains(out, "3 bad key") {
+		t.Errorf("report does not state the chunk lists it could not read\n---\n%s", out)
 	}
-	if !strings.Contains(out, "3") {
-		t.Errorf("report does not state the bad-key skips\n---\n%s", out)
+}
+
+func TestRenderOmitsTheSkippedLineWhenEveryChunkListWasRead(t *testing.T) {
+	c := sampleCensus()
+	c.Stats.Orphaned = 5
+	out := Render(c, DefaultReportOptions())
+
+	if strings.Contains(out, "bad key") {
+		t.Errorf("report blames unread chunk lists when none were skipped\n---\n%s", out)
 	}
 }
 

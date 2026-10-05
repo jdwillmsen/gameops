@@ -11,9 +11,10 @@ const (
 	Nether    Dimension = 1
 	End       Dimension = 2
 
-	// UnknownDimension covers actors whose owning chunk carried no digp
-	// record. They are real entities that cannot be placed, so they are
-	// counted separately rather than silently attributed to the overworld.
+	// UnknownDimension is where an actor stands until a chunk's digp list
+	// claims it. Scan counts the ones no chunk claims as orphaned and
+	// returns none of them, so it reaches a report only from a caller that
+	// built its entities some other way.
 	UnknownDimension Dimension = -1
 
 	// UnrecognisedDimension covers actors whose chunk named a dimension

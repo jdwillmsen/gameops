@@ -65,8 +65,8 @@ func knownDimension(raw int32) Dimension {
 	}
 }
 
-// lookup resolves an actor id. An actor whose chunk carried no digp record
-// resolves to UnknownDimension rather than defaulting to the overworld.
+// lookup resolves an actor id. An actor no digp list names resolves to
+// UnknownDimension rather than defaulting to the overworld.
 func (ix dimensionIndex) lookup(actorID []byte) Dimension {
 	if len(actorID) != 8 {
 		return UnknownDimension
