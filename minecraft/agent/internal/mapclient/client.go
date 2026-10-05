@@ -1,6 +1,6 @@
-// Package mapclient tells the world map service who typed a login code, and
-// who asked to be logged out of it, and reads back what it knows of the
-// world's health.
+// Package mapclient tells the world map service who typed a login code,
+// who asked to be logged out of it, and what each online player's head
+// looks like, and reads back what it knows of the world's health.
 package mapclient
 
 import (
@@ -118,6 +118,37 @@ func (c *Client) AcknowledgeWorld(ctx context.Context, checkedAt time.Time) erro
 		return ErrCountReplaced
 	}
 	return fmt.Errorf("map: acknowledge world: status %d: %s", status, detail)
+}
+
+// PlayerHead is one online player and the head cropped from their skin, as
+// a PNG. A player with no head is still named: the map matches markers to
+// heads by gamertag, and has to know every gamertag in use to tell when two
+// players share one.
+type PlayerHead struct {
+	XUID     string `json:"xuid"`
+	Gamertag string `json:"gamertag"`
+	Head     []byte `json:"head,omitempty"`
+}
+
+// ReportHeads tells the map who is online now and what their heads look
+// like. Each report replaces the last whole, so an empty one says nobody is
+// being watched.
+func (c *Client) ReportHeads(ctx context.Context, players []PlayerHead) error {
+	if players == nil {
+		players = []PlayerHead{}
+	}
+	body, err := json.Marshal(map[string][]PlayerHead{"players": players})
+	if err != nil {
+		return fmt.Errorf("map: report heads: %w", err)
+	}
+	status, reply, err := c.do(ctx, http.MethodPut, "/internal/v1/heads", body)
+	switch {
+	case err != nil:
+		return fmt.Errorf("map: report heads: %w", err)
+	case status == http.StatusOK:
+		return nil
+	}
+	return fmt.Errorf("map: report heads: status %d: %s", status, strings.TrimSpace(string(reply[:min(len(reply), 4<<10)])))
 }
 
 func (c *Client) post(ctx context.Context, path string, payload map[string]string) (status int, detail string, err error) {
