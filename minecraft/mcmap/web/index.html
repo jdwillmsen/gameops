@@ -33,6 +33,15 @@
       <button type="button" data-marker="containers" aria-pressed="true" hidden><i class="ring containers"></i>Containers <span class="count"></span></button>
       <button type="button" data-marker="mobs" aria-pressed="true" hidden><i class="ring mobs"></i>Named mobs <span class="count"></span></button>
     </nav>
+    <nav id="structure-filters" class="chips" aria-label="Structures" hidden>
+      <button type="button" data-structures="on" aria-pressed="true">Structures</button>
+      <button type="button" data-structures="recorded" aria-pressed="true"><i class="key recorded"></i>Known <span class="count"></span></button>
+      <button type="button" data-structures="predicted" aria-pressed="true"><i class="key predicted"></i>Predicted <span class="count"></span></button>
+      <button type="button" data-structures="fortress" aria-pressed="true"><i class="dot fortress"></i>Fortresses</button>
+      <button type="button" data-structures="monument" aria-pressed="true"><i class="dot monument"></i>Monuments</button>
+      <button type="button" data-structures="outpost" aria-pressed="true"><i class="dot outpost"></i>Outposts</button>
+      <button type="button" data-structures="witch_hut" aria-pressed="true"><i class="dot witch-hut"></i>Witch huts</button>
+    </nav>
     <button id="copy" type="button">Copy link</button>
     <span id="who" class="who" hidden></span>
     <button id="logout" type="button" hidden>Log out</button>
@@ -60,5 +69,6 @@
   <script src="app.js"></script>
   <script src="live.js"></script>
   <script src="markers.js"></script>
+  <script src="structures.js"></script>
 </body>
 </html>

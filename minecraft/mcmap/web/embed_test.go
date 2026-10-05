@@ -30,6 +30,10 @@ func TestEveryAssetThePageLoadsIsEmbedded(t *testing.T) {
 	if app < 0 || live < app {
 		t.Errorf("index.html must load live.js after app.js (found at %d and %d)", live, app)
 	}
+	// So is the structures layer.
+	if at := bytes.Index(page, []byte(`src="structures.js"`)); at < app {
+		t.Errorf("index.html must load structures.js after app.js (found at %d and %d)", at, app)
+	}
 	// Referenced from Leaflet's stylesheet rather than from the page.
 	for _, name := range []string{"lib/leaflet/images/layers.png", "lib/leaflet/LICENSE"} {
 		if _, err := fs.Stat(FS, name); err != nil {
