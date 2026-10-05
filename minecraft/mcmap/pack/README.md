@@ -4,8 +4,8 @@ A Bedrock behaviour pack that samples where players and mobs are and prints
 it to the server's console, one JSON record per line. The console bridge
 reads those lines and mcmap draws them on the map.
 
-It ships inside the mcmap image (`go:embed`, see `embed.go`). There is no
-separate artefact to download.
+It ships inside the mcmap image (`go:embed`, see `embed.go`) and is put into a
+world by `mcmap install-pack`. There is no separate artefact to download.
 
 ## What it must never do
 
@@ -18,6 +18,10 @@ achievements depend on that. So the pack is read-only by construction:
   subscribes to an event. With no event subscription there is nothing it
   could cancel. Its only registration is one `system.runInterval` timer.
 - It never prints a line the server would break: see the size cap below.
+
+`internal/pack/pack_test.go` holds the manifest to the first point and scans
+`scripts/main.js` for the calls behind the second. Neither test runs the
+script; what it does on a real server is measured, not unit-tested.
 
 ## Pack identity
 
@@ -137,8 +141,9 @@ Because a capped query cannot say how many it left out, `more` comes from a
 full count taken on the first sample that reaches the cap and every tenth
 after it, and is repeated unchanged in between.
 
-The cap is read from `scripts/config.js`, which is written when the pack is
-installed: a script cannot read the container's environment.
+The cap is read from `scripts/config.js`, which `install-pack` generates: a
+script cannot read the container's environment. A changed `PACK_MOB_CAP`
+therefore takes effect on the next server restart.
 
 ### The self-throttle
 
@@ -173,3 +178,47 @@ out. With the default `server.properties` it logs a script that is slow
 across several ticks (10 ms) or spikes in one (100 ms), and shuts the server
 down if a single tick's script time passes 10 s or script memory passes
 250 MB.
+
+## Installing and removing
+
+```
+DATA_DIR=/data LEVEL_NAME=FWB [PACK_MOB_CAP=1000] mcmap install-pack
+DATA_DIR=/data LEVEL_NAME=FWB mcmap uninstall-pack
+```
+
+The server image does not do this. Its entrypoint copies packs out of an
+`MC_PACK` archive into `behavior_packs/`, and writes a world's
+`world_behavior_packs.json` only when it is also creating that world from
+the archive; for a world that already exists nothing registers a pack. So the
+installer writes both halves itself:
+
+- `<DATA_DIR>/behavior_packs/mcmap-live/` with `manifest.json`,
+  `scripts/main.js` and the generated `scripts/config.js`, staged beside
+  `behavior_packs/` and renamed into place whole;
+- an entry in `<DATA_DIR>/worlds/<LEVEL_NAME>/world_behavior_packs.json`,
+  merged by `pack_id` with every other entry kept, replaced by one rename.
+  A world that has never had a pack has no such file; it is created.
+
+It runs before the server, as the same user. The server writes its files as
+uid 1000 and, on a volume with `fsGroup: 2000`, group 2000 through the
+set-group-ID bit on its directories, which are not group-writable. The
+installer therefore has to be uid 1000; the chart's pod security context
+(`runAsUser: 1000`, `runAsGroup: 3000`, `fsGroup: 2000`) gives it that
+without a `securityContext` of its own.
+
+**It fails open.** A missing world, an unwritable volume, a pack list that
+will not parse, a missing variable, a panic: each is logged and the exit
+status is 0, so the server starts without the pack. The one non-zero exit is
+an installed pack that was moved aside for its replacement and could be
+neither replaced nor put back. That can happen once: the retry finds nothing
+to move aside and installs or skips like any other run.
+
+Nothing the installer can leave behind stops the server either. Tried on
+1.26.52.3: a registered pack that is missing or has a truncated manifest is
+logged as `was not found and was ignored`; one without its script logs a
+`[Scripting]` error; a truncated or empty `world_behavior_packs.json` is
+read as no packs. The server started every time.
+
+**Removing the init step does not remove the pack.** The files and the
+registration live on the server's volume and stay there. To turn the pack
+off, run `uninstall-pack` in the init step's place and restart the server.

@@ -20,6 +20,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/pack"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
@@ -33,6 +34,12 @@ const maxPendingLogins = 10_000
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	// The pack steps run as an init container on the game server's pod.
+	// They are dispatched ahead of the service's configuration so that
+	// nothing the service needs can become something the server waits for.
+	if len(os.Args) > 1 && (os.Args[1] == "install-pack" || os.Args[1] == "uninstall-pack") {
+		os.Exit(pack.Run(os.Args[1], os.Getenv, logger))
+	}
 	if err := run(logger); err != nil {
 		logger.Error("exiting", "error", err)
 		os.Exit(1)
