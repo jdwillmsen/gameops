@@ -187,6 +187,76 @@ and promoting it onto the live world — is in the `minecraft-fwb` chart's
 README in `jdw-deployments`, which is also where the claim and the server
 live.
 
+## Live layer
+
+Players and mobs are drawn where they are now, and move within a few
+seconds of moving in game.
+
+```
+server + script pack   prints one record line a second per list
+console bridge         keeps the latest lines     GET /script (long poll)
+this service           latest whole list per dimension, in memory
+browser                GET /api/live (server-sent events), canvas markers
+```
+
+**Where the records come from.** A script pack on the server samples every
+player and mob in loaded chunks once a second and prints them to the
+console as lines of JSON after a `MCMAP1` sentinel. The console bridge
+keeps the newest of those lines in a ring of their own, and this service
+holds one request open against the bridge's `GET /script` at a time,
+which returns the moment a record arrives.
+
+**One record** is one list, or one part of it:
+
+```
+{"gen":417,"dim":"overworld","kind":"players","part":0,"parts":1,"more":0,
+ "items":[{"i":"-42949672","n":"Dotablaze","x":120,"y":64,"z":-310,"r":-37}]}
+```
+
+`gen` counts samples. `kind` is `players`, `mobs`, or `tick`, the
+heartbeat sent with every sample even on an empty server, so that silence
+means the pipeline broke and never that nobody is on. A list too long for
+one console line is split into `parts`; `more` is how many entities the
+pack left out at its cap. A record is refused if it has no generation, an
+unknown kind or dimension, a position that is not a finite number (a
+script writes `null` for one, which would otherwise be a marker at the
+origin), or is over 8 KB. A NUL byte, which the server puts at the start
+of the line after an over-long one, is removed and counted.
+
+**What is drawn.** A list replaces the one before it only when every part
+of it has arrived. If a part is lost, the last whole list stays until
+something whole replaces it or it is `LIVE_TTL` old, measured from when
+the bridge received it; then its markers go. A generation lower than the
+one before means the server restarted, and lists half built from the old
+process are dropped. Each of players and mobs is cut to
+`LIVE_MAX_ENTITIES` per dimension, and the page says how many are not
+shown.
+
+**The stream.** `GET /api/live?dimension=<id>` sends the current picture
+at once and a whole new one after each sample, so a frame a browser
+missed is never owed. A browser that stops reading has its unread frame
+replaced and holds nobody else up. A stream ends after five minutes or at
+its session's expiry, whichever is first, and the browser reconnects by
+itself: a session is only checked when a request arrives, so this is what
+makes a logout or an expiry stop a stream that is already open. At most
+256 streams are open at once; past that the answer is 503.
+
+A stream that is silent for 30 seconds is cut by the load balancer on the
+way to the browser, so one that has nothing to say writes a comment line
+every `LIVE_KEEPALIVE`. That setting cannot be raised past 20 seconds.
+
+**Turning it off.** `LIVE_ENABLED=false` starts nothing: no request to
+the bridge, no route, and the page does not show the filters. The live
+layer is also inert until the bridge serves `GET /script` and the pack is
+installed; until then the page says `live · no data`.
+
+**When the markers are stale or missing**, read `mcmap_live_frames_total`
+by result and `mcmap_live_polls_total` here, then the bridge's
+`mc_console_bridge_script_records_total` and
+`mc_console_bridge_script_last_record_timestamp_seconds`, then the server
+log for `[Scripting]` lines. `mcmap_live_pack_interval_seconds` above one
+second is the pack slowing itself down to protect the server's tick rate.
+
 ## Login
 
 The map shows where every base is, so it sits behind a login that proves the
@@ -236,7 +306,7 @@ ends in the same `Sessions.Issue`.
 Two listeners keep the internet away from what is not for it:
 
 - `HTTP_ADDR` is what a route may publish: the page, the login endpoints,
-  and the map API and tiles behind the session.
+  and the map API, tiles and live stream behind the session.
 - `INTERNAL_ADDR` is for the cluster only: `/metrics`, and the claims and
   revocations the agent reports.
 
@@ -259,6 +329,11 @@ Two listeners keep the internet away from what is not for it:
 | `NETHER_TOP_Y` | no | `100` | Highest nether layer drawn |
 | `UNMINED_URL` | no | the dev Linux x64 build | Where the renderer is downloaded from; must be https |
 | `UNMINED_SHA256` | no | the build this release was verified against | Digest the download must match |
+| `LIVE_ENABLED` | no | `true` | `false` turns the live layer off: nothing asks the bridge for records and `/api/live` is not served |
+| `LIVE_POLL_WAIT` | no | `2s` | How long the bridge may hold one request for records open; `100ms` to `25s`, the bridge's own limit |
+| `LIVE_TTL` | no | `10s` | How old a position may be and still be drawn; `2s` to `10m` |
+| `LIVE_MAX_ENTITIES` | no | `1000` | Most players, and most mobs, sent to a browser per dimension; 1 to 10000. Lowering it eases the browser, not the game server: the pack's own cap is set where the pack is installed |
+| `LIVE_KEEPALIVE` | no | `15s` | Longest a live stream stays silent; `1s` to `20s`. The load balancer cuts a connection idle for 30 s |
 
 ## Endpoints
 
@@ -268,8 +343,9 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag |
-| `GET /api/map` | Session required. World name, refresh interval, each dimension's extent and last render time, and `problem` (`snapshot` or `render`) while the last cycle failed |
+| `GET /api/map` | Session required. World name, refresh interval, each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
+| `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -306,6 +382,15 @@ opens at the same place.
 | `mcmap_generation_captures_total{outcome}` | Snapshots by what was done with them: `promoted`, `quarantined`, `skipped`, `failed` |
 | `mcmap_generation_damaged` | 1 while a snapshot that lost chunks is quarantined, which is also while nothing is being promoted |
 | `mcmap_generation_bytes{generation}` | World bytes `current`, `previous` and `damaged` each name. They are hard links, so this is not the space they add |
+| `mcmap_live_last_frame_timestamp_seconds` | When the bridge received the newest record accepted, heartbeats included. Old means the pipeline is broken, not that the server is empty |
+| `mcmap_live_frames_total{result}` | Records by outcome: `applied` (completed a list), `buffered`, `heartbeat`, `incomplete` (a list abandoned with parts missing), `dropped` (a repeat), `unparseable`; `nul_stripped` is counted in addition |
+| `mcmap_live_polls_total{result}` | Requests to the bridge: `ok`, `empty`, `gap` (records were lost, or the bridge restarted), `busy` (429), `failed` |
+| `mcmap_live_entities{dimension,kind}` | Entities in the last whole list |
+| `mcmap_live_frame_interval_seconds` | Histogram of the time between heartbeats |
+| `mcmap_live_log_lag_seconds`, `mcmap_live_ingest_lag_seconds`, `mcmap_live_fanout_seconds` | Histograms of each hop: pack to bridge (only for records carrying the pack's own time), bridge to this service, this service to a browser |
+| `mcmap_live_pack_scan_seconds`, `mcmap_live_pack_interval_seconds` | What a sample costs the game server and how often the pack samples, by its own report |
+| `mcmap_live_subscribers`, `mcmap_live_streams_total{reason}` | Open streams, and ended ones by why: `client`, `limit`, `write`, `shutdown` |
+| `mcmap_live_fanout_dropped_total` | Frames replaced before a slow browser read them |
 
 ## Build and test
 
