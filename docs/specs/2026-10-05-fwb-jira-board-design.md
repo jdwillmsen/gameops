@@ -54,8 +54,8 @@ every space created afterwards open again.
 - Members: all three players, as full members
 
 Team-managed keeps the work types and fields local to the space and allows up
-to 30 custom work types, each with its own workflow. It also allows exactly
-one board, which is all this needs.
+to 30 custom work types, each with its own workflow. It comes with a single
+board of its own, which is all this needs.
 
 Kanban over sprints: a hobby server has no steady capacity, so time boxes
 would only produce rollover.
@@ -149,7 +149,8 @@ Split by who can do each step.
 2. Create the space: team-managed, kanban, name "FWB Minecraft", key `FWB`.
 3. Configure work types, columns and fields as above, and enable the
    Releases feature, from a click-by-click checklist prepared alongside the
-   implementation plan.
+   implementation plan. Each work type carries its own workflow, so the
+   checklist gives all five types the same five statuses.
 4. Invite the other two players.
 
 **Agent**
@@ -172,6 +173,7 @@ Split by who can do each step.
   that label in the space's list view, which is where it will still be found
   once the board has cleared it.
 - The full list of done cards opens from the Done column.
+- A card of each type can be moved through all five columns.
 - Each of the three players can create a card and move it between columns.
 - Signed in as one of the two casual players, the main site's `JDWLABS` and
   `CAREER` spaces are not reachable. They hold no account on that site, so
