@@ -378,7 +378,7 @@ func TestRegisterPluginsIncludesExtraPlugins(t *testing.T) {
 	registry := plugin.NewRegistry()
 	reg, _ := presence.NewRegistry(nil, "agent")
 	extra := presence.NewChatPlugin(presence.NewService(reg, presence.Nop{}, audit.Nop{}, quiet()), roster.New(), presence.NewJoinLog())
-	if err := registerPlugins(t.Context(), registry, nil, newJoinTimes(), nil, quiet(), extra); err != nil {
+	if err := registerPlugins(t.Context(), registry, nil, newJoinTimes(), nil, nil, quiet(), extra); err != nil {
 		t.Fatalf("registerPlugins: %v", err)
 	}
 	for _, name := range []string{"presence", "park", "unpark", "leave"} {
