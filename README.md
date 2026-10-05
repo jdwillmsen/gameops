@@ -38,3 +38,4 @@ from the root: `go build ./minecraft/agent/...`.
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE.md)
+<!-- throwaway stacked PR probe -->
