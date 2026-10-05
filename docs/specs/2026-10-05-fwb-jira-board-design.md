@@ -26,8 +26,13 @@ The board lives on a new free site, `fwb-minecraft.atlassian.net`, not on
 The two casual players must not be able to see the `JDWLABS` or `CAREER`
 spaces. Jira's Free plan cannot restrict who sees a space: space permissions
 and roles are editable only from the Standard plan up. A separate site makes
-the isolation structural at no cost, and it means any credential later issued
-for in-game intake can reach FWB cards and nothing else.
+the isolation structural at no cost.
+
+The separate site does not by itself confine a credential. An Atlassian API
+token belongs to an account and works on every site that account can reach,
+so a token minted from the owner's account would open the main site too. Any
+credential issued for in-game intake therefore belongs to a dedicated account
+that is a member of this site only.
 
 What this costs:
 
@@ -85,8 +90,12 @@ the same workflow as any Build, so they are a Category value.
 
 No column limits. All five types share these columns.
 
-A card that will not happen is closed with a Won't Do resolution, not given
-its own column.
+A card that will not happen is moved to Done with the label `wont-do`, not
+given its own column. Team-managed spaces do not let anyone set a resolution
+by hand, and the automation that could set one draws on a small monthly
+allowance on the Free plan. The label keeps a rejected idea on record, so it
+is not proposed again from scratch, and a filter on it separates what was
+built from what was dropped.
 
 ### Fields
 
@@ -112,8 +121,10 @@ size or difficulty, biome, and a builder field separate from assignee.
 ### Phases
 
 The world is permanent, so there are no seasons. Named eras of the world
-("Nether hub era") are Jira versions on the space. None are created at
-launch; the first is added when the players name one.
+("Nether hub era") are Jira versions on the space. A team-managed space
+cannot create versions until its Releases feature is switched on, so setup
+enables it. No versions are created at launch; the first is added when the
+players name one.
 
 ### Starting content
 
@@ -133,8 +144,9 @@ Split by who can do each step.
 
 1. Create the site `fwb-minecraft.atlassian.net` on the Free plan.
 2. Create the space: team-managed, kanban, name "FWB Minecraft", key `FWB`.
-3. Configure work types, columns and fields as above, from a click-by-click
-   checklist prepared alongside the implementation plan.
+3. Configure work types, columns and fields as above, and enable the
+   Releases feature, from a click-by-click checklist prepared alongside the
+   implementation plan.
 4. Invite the other two players.
 
 **Agent**
@@ -152,6 +164,9 @@ Split by who can do each step.
 - The space has the five work types, five columns in order, and the Category
   and Location fields with the listed values.
 - A card of each type can be created with only a summary.
+- The Releases feature is on: the option to create a version is offered.
+- A card labelled `wont-do` and moved to Done is returned by a filter on
+  that label.
 - Each of the three players can create a card and move it between columns.
 - Signed in as one of the two casual players, the main site's `JDWLABS` and
   `CAREER` spaces are not reachable. They hold no account on that site, so
@@ -163,9 +178,10 @@ Each of these is a separate piece of work with its own design.
 
 - **In-game `!idea` command** that files an Idea card through the server
   agent. First follow-up after the board has had two weeks of use; filed as a
-  `JDWLABS` ticket then. Open questions it carries: how the agent holds a
-  Jira credential, spam and rate limits, and which player a card is
-  attributed to.
+  `JDWLABS` ticket then. It uses the dedicated account described above, and
+  that account's reach is checked against the main site before its token is
+  issued. Open questions it carries: how the agent holds the credential,
+  spam and rate limits, and which player a card is attributed to.
 - **Regrouping `JDWLABS`** into Platform, GameOps and Career spaces with a
   cross-space overview board for the owner.
 - **A digest** of board activity to the players' group chat.
