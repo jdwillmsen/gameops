@@ -329,9 +329,10 @@ keeps every entity when it is empty. A type given twice is filtered and echoed
 once, and a value that names no identifier at all, such as `,` or
 `minecraft:`, is an error and not a listing of everything.
 
-Lines are ordered by dimension, identifier, position and unique id, so the same
-world gives the same bytes and two listings can be compared with `diff`.
-Orphaned records are not listed; the header counts them.
+Lines are ordered by dimension, identifier, position (x, then z, then y) and
+unique id, with persistence and name settling any tie left, so the same world
+gives the same bytes and two listings can be compared with `diff`. Orphaned
+records are not listed; the header counts them.
 
 An entity saved at a position that is not a finite number has nowhere to be
 aimed at and cannot be written as JSON, so it is left out and counted in the
