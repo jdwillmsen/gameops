@@ -304,6 +304,35 @@ A run in which more than half the records are orphaned exits non-zero without
 a report. That is what a game release moving the chunk lists would look like,
 and dropping every actor would otherwise print an empty world.
 
+### Listing every entity
+
+The report answers "how many, and roughly where". A cleanup needs "which ones,
+and exactly where", so `-list` replaces the report with one JSON object per
+line:
+
+```sh
+census -world-dir /snapshot -backup-dir /backup -list -types zombie,pillager
+```
+
+```json
+{"world_taken_at":"2026-10-05T05:15:14Z","source":"snapshot","types":["pillager","zombie"],"entities":18,"orphaned":1913}
+{"identifier":"zombie","dimension":"overworld","x":-210.4736328125,"y":6,"z":223.99188232421875,"persistent":true}
+```
+
+The first line is a header. Its `entities` is the number of lines that follow,
+so a reader can tell a whole listing from a cut one, and `world_taken_at` and
+`source` are the same provenance the report prints. Each later line is one
+entity at its saved, unrounded position; `name` appears only on a name-tagged
+one. `-types` takes identifiers with or without the `minecraft:` prefix and
+keeps every entity when it is empty.
+
+Lines are ordered by dimension, identifier, position and unique id, so the same
+world gives the same bytes and two listings can be compared with `diff`.
+Orphaned records are not listed; the header counts them.
+
+A listing is refused for the same worlds a report is, and `-list` cannot be
+combined with `-metrics-file`: it publishes nothing.
+
 ### Census metrics
 
 `-metrics-file <path>` writes the same counts as a Prometheus text exposition

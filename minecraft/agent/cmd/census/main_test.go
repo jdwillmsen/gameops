@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -723,5 +724,96 @@ func TestRunMeasuresHerdsFromTheConfiguredReference(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("report is missing %q\n---\n%s", want, out.String())
 		}
+	}
+}
+
+func TestRunListsEntitiesAsJSONLinesInsteadOfTheReport(t *testing.T) {
+	dir := t.TempDir()
+	buildArchive(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"-backup-dir", dir, "-world-dir", "", "-list", "-types", "minecraft:zombie, cow"}, &out, &errOut); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("listing has %d lines, want a header and one zombie\n%s", len(lines), out.String())
+	}
+	var header census.ListingHeader
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatalf("header is not JSON: %v", err)
+	}
+	if header.Entities != 1 || header.Source != census.KindArchive || header.WorldTakenAt == "" {
+		t.Errorf("header = %+v, want one entity from a dated archive", header)
+	}
+	if len(header.Types) != 2 || header.Types[0] != "cow" || header.Types[1] != "zombie" {
+		t.Errorf("header types = %v, want the filter with the game's prefix removed", header.Types)
+	}
+	var zombie census.ListedEntity
+	if err := json.Unmarshal([]byte(lines[1]), &zombie); err != nil {
+		t.Fatalf("entity is not JSON: %v", err)
+	}
+	if zombie.Identifier != "zombie" || zombie.Dimension != "overworld" || zombie.X != 1 || zombie.Y != 64 || zombie.Z != 2 {
+		t.Errorf("entity = %+v, want the zombie where the world saved it", zombie)
+	}
+}
+
+func TestRunListsNothingForATypeTheWorldDoesNotHold(t *testing.T) {
+	dir := t.TempDir()
+	buildArchive(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"-backup-dir", dir, "-list", "-types", "pillager"}, &out, &errOut); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var header census.ListingHeader
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &header); err != nil {
+		t.Fatalf("an empty listing is not a single header line: %v\n%s", err, out.String())
+	}
+	if header.Entities != 0 {
+		t.Errorf("header counts %d entities, want 0", header.Entities)
+	}
+}
+
+func TestRunRefusesToListAWorldItCouldNotDecode(t *testing.T) {
+	dir := t.TempDir()
+	buildArchiveFromRecord(t, dir, []byte{0xff, 0xff, 0xff})
+
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"-backup-dir", dir, "-list"}, &out, &errOut); err == nil {
+		t.Fatal("run listed a world whose only record failed to decode")
+	}
+	if out.Len() != 0 {
+		t.Errorf("run wrote %q to stdout, want no listing at all", out.String())
+	}
+}
+
+func TestRunRefusesAListingWithAMetricsFile(t *testing.T) {
+	dir := t.TempDir()
+	buildArchive(t, dir)
+	metrics := filepath.Join(t.TempDir(), "metrics.txt")
+
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"-backup-dir", dir, "-list", "-metrics-file", metrics}, &out, &errOut); err == nil {
+		t.Fatal("run accepted -list with -metrics-file")
+	}
+	if _, err := os.Stat(metrics); !os.IsNotExist(err) {
+		t.Errorf("a refused run left a metrics file behind: %v", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("run wrote %q to stdout, want nothing", out.String())
+	}
+}
+
+func TestRunRefusesTypesWithoutAListing(t *testing.T) {
+	dir := t.TempDir()
+	buildArchive(t, dir)
+
+	var out, errOut bytes.Buffer
+	if err := run(context.Background(), []string{"-backup-dir", dir, "-types", "zombie"}, &out, &errOut); err == nil {
+		t.Fatal("run printed a report for a filter the report cannot apply")
+	}
+	if out.Len() != 0 {
+		t.Errorf("run wrote %q to stdout, want nothing", out.String())
 	}
 }
