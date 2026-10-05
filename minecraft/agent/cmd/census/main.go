@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,6 +47,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	referenceX := fs.Float64("reference-x", census.DefaultReportOptions().Reference.X, "x of the point animal herds are measured from; the default is FWB's base")
 	referenceZ := fs.Float64("reference-z", census.DefaultReportOptions().Reference.Z, "z of the point animal herds are measured from; the default is FWB's base")
 	metricsFile := fs.String("metrics-file", "", "also write the counts here as a Prometheus text exposition payload; the report on stdout is unchanged either way")
+	list := fs.Bool("list", false, "print one JSON object per entity, after a header line, instead of the report")
+	types := fs.String("types", "", "with -list, comma-separated entity identifiers to keep, without the minecraft: prefix; empty keeps every entity")
 	if parseErr := fs.Parse(args); parseErr != nil {
 		if errors.Is(parseErr, flag.ErrHelp) {
 			// -h/-help is a request for usage, not a failure: it should
@@ -57,9 +60,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("parse flags: %w", parseErr)
 	}
 
+	// Refused rather than ignored: a caller that asked for both and got one
+	// would find out from a dashboard that stopped moving.
+	if *list && *metricsFile != "" {
+		return errors.New("-list prints entities and publishes no metrics; run without -list to write -metrics-file")
+	}
+	if !*list && *types != "" {
+		return errors.New("-types filters a listing; add -list, or drop -types for the report")
+	}
+
 	source, err := chooseSource(*worldDir, *backupDir, stderr)
 	if err != nil {
 		return err
+	}
+	if *list {
+		return listFrom(ctx, source, splitTypes(*types), stdout)
 	}
 	return reportFrom(ctx, source,
 		census.ReportOptions{
@@ -136,9 +151,59 @@ func (c sourceChain) Open(ctx context.Context) (census.World, func() error, erro
 	return c.archive.Open(ctx)
 }
 
-// reportFrom takes the census from an opened source. Splitting it from flag
+// reportFrom prints the census from an opened source. Splitting it from flag
 // parsing is what lets a test supply a source whose cleanup fails.
-func reportFrom(ctx context.Context, source census.Source, opts census.ReportOptions, metricsPath string, stdout io.Writer) (err error) {
+func reportFrom(ctx context.Context, source census.Source, opts census.ReportOptions, metricsPath string, stdout io.Writer) error {
+	return scanFrom(ctx, source, func(world census.World, entities []census.Entity, stats census.ScanStats) error {
+		aggregate := census.Aggregate(entities, stats, world.TakenAt, world.Kind)
+		if _, err := io.WriteString(stdout, census.Render(aggregate, opts)); err != nil {
+			return fmt.Errorf("write report: %w", err)
+		}
+
+		// After the report, and only for a run that produced one. Every path
+		// that refuses to report also refuses to publish: a payload written
+		// from a world this command would not stand behind is worse than a
+		// gap in the series, because a graph cannot show the sentence
+		// explaining it.
+		if metricsPath != "" {
+			return census.WriteMetricsFile(metricsPath, aggregate, time.Now(),
+				census.MetricsOptions{TopTypes: opts.TopTypes})
+		}
+		return nil
+	})
+}
+
+// listFrom prints the per-entity listing from an opened source. It refuses
+// the same worlds the report does, for the same reason: a listing of a world
+// that did not read is a list of targets that are not there.
+func listFrom(ctx context.Context, source census.Source, types []string, stdout io.Writer) error {
+	return scanFrom(ctx, source, func(world census.World, entities []census.Entity, stats census.ScanStats) error {
+		listing, err := census.RenderListing(entities, stats, world.TakenAt, world.Kind, types)
+		if err != nil {
+			return err
+		}
+		if _, err := io.WriteString(stdout, listing); err != nil {
+			return fmt.Errorf("write listing: %w", err)
+		}
+		return nil
+	})
+}
+
+// splitTypes reads the -types value. A minecraft: prefix is accepted because
+// that is how the game and its commands spell an identifier.
+func splitTypes(value string) []string {
+	var types []string
+	for _, t := range strings.Split(value, ",") {
+		if t = strings.TrimPrefix(strings.TrimSpace(t), "minecraft:"); t != "" {
+			types = append(types, t)
+		}
+	}
+	return types
+}
+
+// scanFrom opens a source, scans it, and hands a world worth reporting to
+// use. Every refusal lives here so that no output mode can skip one.
+func scanFrom(ctx context.Context, source census.Source, use func(census.World, []census.Entity, census.ScanStats) error) (err error) {
 	world, cleanup, err := source.Open(ctx)
 	if err != nil {
 		return err
@@ -191,18 +256,5 @@ func reportFrom(ctx context.Context, source census.Source, opts census.ReportOpt
 			stats.DigpSkippedKey, stats.DigpSkippedValue)
 	}
 
-	aggregate := census.Aggregate(entities, stats, world.TakenAt, world.Kind)
-	if _, err := io.WriteString(stdout, census.Render(aggregate, opts)); err != nil {
-		return fmt.Errorf("write report: %w", err)
-	}
-
-	// After the report, and only for a run that produced one. Every path above
-	// that refuses to report also refuses to publish: a payload written from a
-	// world this command would not stand behind is worse than a gap in the
-	// series, because a graph cannot show the sentence explaining it.
-	if metricsPath != "" {
-		return census.WriteMetricsFile(metricsPath, aggregate, time.Now(),
-			census.MetricsOptions{TopTypes: opts.TopTypes})
-	}
-	return nil
+	return use(world, entities, stats)
 }
