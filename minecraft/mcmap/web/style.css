@@ -84,6 +84,23 @@ input[type="number"] { width: 6.5rem; }
 .dot.villager { background: #d9a441; }
 .dot.other { background: #9aa3ad; }
 
+/* Markers that stay put are rings, the live ones dots. */
+.ring { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 2px solid; background: #0b0c0e; }
+.ring.waypoints { border-color: #b48cf2; }
+.ring.beds { border-color: #f277b5; }
+.ring.containers { border-color: #f08a3c; }
+.ring.mobs { border-color: #4fd1c5; }
+
+.leaflet-tooltip.marker-name, .leaflet-tooltip.marker-tip {
+  background: rgba(20, 22, 26, 0.85);
+  border: 1px solid var(--line);
+  color: var(--text);
+  box-shadow: none;
+  padding: 0.05rem 0.4rem;
+}
+.leaflet-tooltip.marker-name { border-color: #b48cf2; color: #b48cf2; }
+.leaflet-tooltip.marker-name::before, .leaflet-tooltip.marker-tip::before { display: none; }
+
 /* Fixed width, or the footer shifts with every digit of the age. */
 .live { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 6.5rem; }
 

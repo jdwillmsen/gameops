@@ -16,6 +16,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
@@ -64,6 +65,11 @@ type Keeper interface {
 	Capture(ctx context.Context, src string, at time.Time, health generations.Health) (generations.Outcome, error)
 }
 
+// Marker reads what is worth a mark on the map out of the mirrored world.
+type Marker interface {
+	Extract(ctx context.Context, dbDir string, at time.Time) (markers.Stats, error)
+}
+
 type Syncer interface {
 	Sync(ctx context.Context) (mirror.Stats, error)
 }
@@ -90,6 +96,9 @@ type Worker struct {
 	// needs the Census: without a count nothing can say a snapshot is safe
 	// to make the restore point.
 	Keeper Keeper
+	// Markers, if set, reads the world's beds, containers and named mobs
+	// after every snapshot.
+	Markers Marker
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -240,6 +249,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	w.Status.set(func(s *Status) { s.snapshotAt = now })
 	report, counted := w.census(ctx, now)
 	w.keep(ctx, now, report, counted)
+	w.mark(ctx, now)
 
 	problem := ""
 	for _, dimension := range render.Dimensions {
@@ -316,4 +326,21 @@ func (w *Worker) keep(ctx context.Context, now time.Time, r chunks.Report, count
 		return
 	}
 	w.Logger.Info("snapshot retained", "outcome", string(outcome))
+}
+
+// mark reads the world's markers once the count and the retained copy are
+// done, so that neither of the two things that protect the world ever waits
+// on something that only decorates the map. It bounds its own time, and its
+// failure leaves the markers of the snapshot before on the page.
+func (w *Worker) mark(ctx context.Context, now time.Time) {
+	if w.Markers == nil {
+		return
+	}
+	started := time.Now()
+	stats, err := w.Markers.Extract(ctx, filepath.Join(w.MirrorDir, w.Level, "db"), now)
+	if err != nil {
+		w.Logger.Error("markers not read", "error", err)
+		return
+	}
+	w.Logger.Info("markers read", "beds", stats.Beds, "containers", stats.Containers, "mobs", stats.Mobs, "skipped", stats.Skipped, "seconds", time.Since(started).Seconds())
 }

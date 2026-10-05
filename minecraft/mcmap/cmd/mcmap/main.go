@@ -19,6 +19,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/pack"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
@@ -31,6 +32,11 @@ import (
 // at worst. It is sized so that pushing a real login out of the table takes
 // hundreds of requests a second for as long as the player is typing.
 const maxPendingLogins = 10_000
+
+// A marker scan of the full world takes about nine seconds at a whole CPU.
+// One still running after this is given up, so that the renders behind it
+// are never held for longer.
+const markerScanTimeout = 2 * time.Minute
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -120,6 +126,11 @@ func run(logger *slog.Logger) error {
 		Census:        census,
 		Keeper:        keeper,
 	}
+	var marked *markers.Store
+	if cfg.Markers {
+		marked = markers.NewStore()
+		w.Markers = &markers.Extractor{WorkDir: filepath.Join(cfg.DataDir, "markers"), Store: marked, Timeout: markerScanTimeout}
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -143,6 +154,12 @@ func run(logger *slog.Logger) error {
 		InternalToken: cfg.InternalToken,
 		Live:          layer,
 		LiveKeepalive: cfg.LiveKeepalive,
+	}
+	if marked != nil {
+		app.Markers = marked
+	}
+	if cfg.AgentURL != "" {
+		app.Waypoints = markers.NewAgent(cfg.AgentURL, cfg.InternalToken)
 	}
 	if cfg.Login {
 		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
@@ -183,7 +200,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "")
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()

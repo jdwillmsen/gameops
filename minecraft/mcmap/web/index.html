@@ -27,6 +27,12 @@
       <button type="button" data-live="villager" aria-pressed="true"><i class="dot villager"></i>Villagers <span class="count"></span></button>
       <button type="button" data-live="other" aria-pressed="true"><i class="dot other"></i>Other <span class="count"></span></button>
     </nav>
+    <nav id="marker-filters" class="chips" aria-label="Map markers" hidden>
+      <button type="button" data-marker="waypoints" aria-pressed="true" hidden><i class="ring waypoints"></i>Waypoints <span class="count"></span></button>
+      <button type="button" data-marker="beds" aria-pressed="true" hidden><i class="ring beds"></i>Beds <span class="count"></span></button>
+      <button type="button" data-marker="containers" aria-pressed="true" hidden><i class="ring containers"></i>Containers <span class="count"></span></button>
+      <button type="button" data-marker="mobs" aria-pressed="true" hidden><i class="ring mobs"></i>Named mobs <span class="count"></span></button>
+    </nav>
     <button id="copy" type="button">Copy link</button>
     <span id="who" class="who" hidden></span>
     <button id="logout" type="button" hidden>Log out</button>
@@ -53,5 +59,6 @@
   <script src="lib/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
   <script src="live.js"></script>
+  <script src="markers.js"></script>
 </body>
 </html>

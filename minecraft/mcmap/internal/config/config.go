@@ -62,6 +62,13 @@ type Config struct {
 	// LiveMaxEntities caps each of players and mobs, per dimension, in what
 	// is sent to a browser.
 	LiveMaxEntities int
+
+	// Markers is whether beds, containers and named mobs are read from each
+	// snapshot and drawn.
+	Markers bool
+	// AgentURL is the server agent, which holds each player's waypoints.
+	// Empty leaves waypoints off the map.
+	AgentURL string
 }
 
 // minTokenLength keeps a placeholder from standing in for a credential.
@@ -163,6 +170,20 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.LiveMaxEntities, err = strconv.Atoi(or(getenv("LIVE_MAX_ENTITIES"), "1000")); err != nil || c.LiveMaxEntities < 1 || c.LiveMaxEntities > maxLiveEntities {
 		fail("LIVE_MAX_ENTITIES must be between 1 and %d", maxLiveEntities)
+	}
+
+	if c.Markers, err = strconv.ParseBool(or(getenv("MARKERS_ENABLED"), "true")); err != nil {
+		fail("MARKERS_ENABLED must be true or false")
+	}
+	if c.AgentURL = getenv("AGENT_URL"); c.AgentURL != "" {
+		if u, err := url.Parse(c.AgentURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			fail("AGENT_URL must be the http(s) address of the server agent, got %q", c.AgentURL)
+		}
+		// The agent is asked with the internal token, and waypoints belong
+		// to whoever is logged in.
+		if !c.Login {
+			fail("AGENT_URL needs the login: without one there is no player to show waypoints to")
+		}
 	}
 	return c, errors.Join(errs...)
 }
