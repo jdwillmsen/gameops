@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
 )
 
 // fakeNames is a NameResolver over a fixed, in-test map.
@@ -282,5 +285,166 @@ func TestBridgeVoice_JustSaid_MemoryIsBounded(t *testing.T) {
 	}
 	if !voice.JustSaid(fmt.Sprintf("line %d", sayEchoMemory*3-1)) {
 		t.Error("the newest broadcast is the one an echo is still coming for and must be kept")
+	}
+}
+
+// sayCapture is a bridge that records every command it is handed, so a test
+// can assert on the line that actually left for the console rather than on
+// the text the caller passed in.
+func sayCapture(t *testing.T) (*BridgeVoice, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req commandRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		got = append(got, req.Command)
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(commandResponse{Rule: "say"})
+	}))
+	t.Cleanup(srv.Close)
+	voice := NewBridgeVoice(NewBridgeClient(srv.URL, "tok", time.Second), fakeNames{})
+	return voice, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), got...)
+	}
+}
+
+// TestBridgeVoice_Say_NeverBroadcastsACommandShapedLine is the invariant the
+// console origin's operator trust rests on. Everything the agent says in
+// public comes back to it under that trusted identity, so a reply the server
+// could echo as a command is one the agent can be made to run as an
+// operator. The line that leaves must not be able to parse as one, whatever
+// the echo guard does or does not remember.
+func TestBridgeVoice_Say_NeverBroadcastsACommandShapedLine(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		want    string
+	}{
+		{
+			name: "a reply opening with the command prefix",
+			// A model writes this unprompted; it is an ordinary thing to say.
+			message: "!shutdown is operator-only, ask an admin",
+			want:    "say - !shutdown is operator-only, ask an admin",
+		},
+		{
+			name: "a reply opening with a target selector",
+			// The server expands the selector, so the agent does not choose
+			// this line's first character -- with nobody online the echo
+			// opens with the command prefix instead.
+			message: "@a !shutdown is operator-only",
+			want:    "say - @a !shutdown is operator-only",
+		},
+		{
+			name:    "leading whitespace does not hide the prefix",
+			message: "   !shutdown is operator-only",
+			want:    "say - !shutdown is operator-only",
+		},
+		{
+			name: "a command named mid-sentence is left alone",
+			// The guard is about the leading character only: the agent has
+			// to be able to tell a player what to type.
+			message: "type !help for the command list",
+			want:    "say type !help for the command list",
+		},
+		{
+			name:    "the mention token mid-sentence is left alone",
+			message: "ask me with @server and I will answer",
+			want:    "say ask me with @server and I will answer",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			voice, sent := sayCapture(t)
+			if err := voice.Say(context.Background(), tc.message); err != nil {
+				t.Fatalf("Say: %v", err)
+			}
+			got := sent()
+			if len(got) != 1 || got[0] != tc.want {
+				t.Fatalf("broadcast %q, want %q", got, tc.want)
+			}
+			line := strings.TrimPrefix(got[0], "say ")
+			if strings.HasPrefix(strings.TrimSpace(line), chat.CommandPrefix) {
+				t.Fatalf("broadcast line %q parses as a command -- its echo is dispatched at operator level", line)
+			}
+		})
+	}
+}
+
+// TestBridgeVoice_JustSaid_SurvivesTheServerExpandingASelector covers the
+// rewriting that silently defeats comparing an echo against what was said.
+// `say` resolves target selectors server-side, so the line that comes back
+// is not the line that went out, and the record would sit unmatched while
+// the agent answered its own broadcast.
+func TestBridgeVoice_JustSaid_SurvivesTheServerExpandingASelector(t *testing.T) {
+	voice, sent := sayCapture(t)
+	if err := voice.Say(context.Background(), "online now: @a -- say hello"); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	if got := sent(); len(got) != 1 || got[0] != "say online now: @a -- say hello" {
+		t.Fatalf("broadcast %q, want the selector sent as written", got)
+	}
+	// What a server with two players online broadcasts for that line.
+	if !voice.JustSaid("online now: Steve, Alex -- say hello") {
+		t.Fatal("the expanded echo was not recognised as the agent's own broadcast")
+	}
+}
+
+// TestBridgeVoice_JustSaid_ExpandedMatchIsAnchored keeps the selector
+// tolerance from turning into a wildcard that mutes the console: the literal
+// text around the selector still has to match exactly.
+func TestBridgeVoice_JustSaid_ExpandedMatchIsAnchored(t *testing.T) {
+	voice, _ := sayCapture(t)
+	if err := voice.Say(context.Background(), "online now: @a -- say hello"); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	for _, line := range []string{
+		"online now: Steve -- say hello to everyone",
+		"players online now: Steve -- say hello",
+		"!shutdown",
+	} {
+		if voice.JustSaid(line) {
+			t.Errorf("JustSaid(%q) = true, want false -- an operator's own line must not match", line)
+		}
+	}
+}
+
+// TestBridgeVoice_Say_ForgetsALineTheBridgeRefused covers the two halves of
+// a failed broadcast. The bridge's allowlist answers a refusal before the
+// console is touched, so no echo is coming and holding the record would mute
+// an operator who later typed the same line. Anything else -- a timeout, a
+// 5xx -- leaves open that the command ran, and the record has to stand or
+// the agent ends up obeying its own reply.
+func TestBridgeVoice_Say_ForgetsALineTheBridgeRefused(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     int
+		wantRecord bool
+	}{
+		{name: "refused outright", status: http.StatusBadRequest, wantRecord: false},
+		{name: "may still have run", status: http.StatusInternalServerError, wantRecord: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte("nope"))
+			}))
+			defer srv.Close()
+
+			voice := NewBridgeVoice(NewBridgeClient(srv.URL, "tok", time.Second), fakeNames{})
+			const line = "restarting in five minutes"
+			if err := voice.Say(context.Background(), line); err == nil {
+				t.Fatal("Say = nil error, want the bridge's refusal to surface")
+			}
+			if got := voice.JustSaid(line); got != tc.wantRecord {
+				t.Errorf("JustSaid = %v, want %v", got, tc.wantRecord)
+			}
+		})
 	}
 }

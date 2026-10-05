@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1088,21 +1089,224 @@ func TestTheAgentsOwnBroadcastIsNeverRunAsAConsoleCommand(t *testing.T) {
 		t.Fatalf("Say: %v", err)
 	}
 
-	handlePacket(context.Background(), consoleSayPacket(reply), selfXUID, siblingBotXUIDs(), logging.New("info"),
+	// The echo is of what the voice put on the wire, not of the text it was
+	// handed: the line is made un-command-shaped before it leaves, so the
+	// two are no longer the same string.
+	broadcast := broadcastOf(t, bridge, 0)
+	handlePacket(context.Background(), consoleSayPacket(broadcast), selfXUID, siblingBotXUIDs(), logging.New("info"),
 		registry, pctx, bus.New(), unlimitedRateLimit(), playerRoster, fakePermResolver(t, nil), testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
 
 	if ran := bridge.ran(); len(ran) != 1 {
 		t.Fatalf("bridge ran %v, want only the agent's own broadcast -- it obeyed its own reply as an operator", ran)
 	}
 
-	// The same line typed by an operator, which the agent never said, is
-	// still dispatched: the guard consumes one echo, it does not mute the
-	// console.
-	handlePacket(context.Background(), consoleSayPacket(reply), selfXUID, siblingBotXUIDs(), logging.New("info"),
+	// Delivered a second time, with the one record already consumed, so
+	// nothing but the shape of the line is left to stop it. An operator
+	// repeating it verbatim lands here too, and is answered rather than
+	// muted: the command they typed is "- !shutdown", which is not one.
+	handlePacket(context.Background(), consoleSayPacket(broadcast), selfXUID, siblingBotXUIDs(), logging.New("info"),
 		registry, pctx, bus.New(), unlimitedRateLimit(), playerRoster, fakePermResolver(t, nil), testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
 
+	if ran := bridge.ran(); len(ran) != 1 {
+		t.Fatalf("bridge ran %v, want the echo still not dispatched once its record is gone", ran)
+	}
+}
+
+// echoVoice wires one agent process the way main does: a BridgeVoice over
+// the bridge, and the plugin context whose dispatch path a console line
+// reaches. Each call is an independent process as far as the echo cache is
+// concerned, which is what lets a restart and a sibling bot be expressed.
+func echoVoice(t *testing.T, srv *httptest.Server, registry *plugin.Registry) (*adapters.BridgeVoice, *plugin.Context) {
+	t.Helper()
+	playerRoster := roster.New()
+	voice := adapters.NewBridgeVoice(adapters.NewBridgeClient(srv.URL, "tok", time.Second), playerRoster)
+	return voice, &plugin.Context{Voice: voice, Directory: registry}
+}
+
+// deliverConsoleLine hands line to the packet path as the console
+// announcement the server broadcasts for a `say`, which is the shape every
+// public reply the agent makes comes back in.
+func deliverConsoleLine(t *testing.T, line string, registry *plugin.Registry, pctx *plugin.Context) {
+	t.Helper()
+	handlePacket(context.Background(), consoleSayPacket(line), selfXUID, siblingBotXUIDs(), logging.New("info"),
+		registry, pctx, bus.New(), unlimitedRateLimit(), roster.New(), fakePermResolver(t, nil), testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
+}
+
+// broadcastOf returns the message the agent actually put on the wire for the
+// nth command the bridge saw, so a test can echo back what the server would
+// have broadcast rather than the text the caller passed to Say.
+func broadcastOf(t *testing.T, bridge *consoleBridge, n int) string {
+	t.Helper()
 	ran := bridge.ran()
-	if len(ran) != 2 || !strings.Contains(ran[1], "shutting down") {
+	if n >= len(ran) {
+		t.Fatalf("bridge saw %d commands, want at least %d", len(ran), n+1)
+	}
+	if !strings.HasPrefix(ran[n], "say ") {
+		t.Fatalf("command %d = %q, want a broadcast", n, ran[n])
+	}
+	return strings.TrimPrefix(ran[n], "say ")
+}
+
+// assertNotDispatched fails if the operator-only command ran. opOnlyPlugin
+// answers "shutting down", and every answer goes back out over the bridge,
+// so the bridge is where obedience shows up.
+func assertNotDispatched(t *testing.T, bridge *consoleBridge) {
+	t.Helper()
+	for _, cmd := range bridge.ran() {
+		if strings.Contains(cmd, "shutting down") {
+			t.Fatalf("bridge ran %v -- the agent obeyed its own broadcast as an operator", bridge.ran())
+		}
+	}
+}
+
+// opReply is a reply a model writes unprompted when a visitor asks about an
+// operator command. It opens with CommandPrefix, so the console echo of it
+// is indistinguishable from an operator typing the command.
+const opReply = "!shutdown is operator-only, ask an admin"
+
+// floodBeyondEchoMemory is comfortably more broadcasts than BridgeVoice
+// keeps unmatched records for, so the first line's record is certain to have
+// been evicted by the end. Deliberately not the adapters constant: that is
+// unexported, and a test that tracked it would stop proving anything if the
+// cache grew.
+const floodBeyondEchoMemory = 256
+
+// TestAnEvictedBroadcastIsStillNotRunAsAConsoleCommand covers the first way
+// the echo cache fails open. It keeps a bounded number of unmatched records
+// and drops the oldest to make room, so a busy server evicts a record before
+// its echo arrives. The echo then matches nothing and is trusted at operator
+// level -- unless the line was never command-shaped to begin with.
+func TestAnEvictedBroadcastIsStillNotRunAsAConsoleCommand(t *testing.T) {
+	bridge := &consoleBridge{}
+	srv := bridge.start(t)
+	registry := plugin.NewRegistry()
+	if err := registry.Register(opOnlyPlugin{}); err != nil {
+		t.Fatalf("register opsonly: %v", err)
+	}
+	voice, pctx := echoVoice(t, srv, registry)
+
+	if err := voice.Say(context.Background(), opReply); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	broadcast := broadcastOf(t, bridge, 0)
+	for i := 0; i < floodBeyondEchoMemory; i++ {
+		if err := voice.Say(context.Background(), fmt.Sprintf("chatter %d", i)); err != nil {
+			t.Fatalf("Say: %v", err)
+		}
+	}
+	if voice.JustSaid(broadcast) {
+		t.Fatal("the record survived the flood; this test is no longer exercising eviction")
+	}
+
+	deliverConsoleLine(t, broadcast, registry, pctx)
+	assertNotDispatched(t, bridge)
+}
+
+// TestARewrittenEchoIsStillNotRunAsAConsoleCommand covers the second way the
+// cache fails open. `say` expands target selectors server-side, so the line
+// that comes back is not the line that went out and an exact-string record
+// never matches it. The agent's own mention token is @server, so a reply
+// carrying an @ is routine rather than exotic.
+func TestARewrittenEchoIsStillNotRunAsAConsoleCommand(t *testing.T) {
+	bridge := &consoleBridge{}
+	srv := bridge.start(t)
+	registry := plugin.NewRegistry()
+	if err := registry.Register(opOnlyPlugin{}); err != nil {
+		t.Fatalf("register opsonly: %v", err)
+	}
+	voice, pctx := echoVoice(t, srv, registry)
+
+	if err := voice.Say(context.Background(), "!shutdown is operator-only, ask @a"); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	broadcast := broadcastOf(t, bridge, 0)
+	if !strings.Contains(broadcast, "@a") {
+		t.Fatalf("broadcast %q, want the selector sent as written", broadcast)
+	}
+
+	// What the server broadcasts once the selector resolves to the players
+	// online, and then a rewriting no record could be matched against at
+	// all. Neither may be dispatched.
+	for _, echo := range []string{
+		strings.Replace(broadcast, "@a", "Steve and Alex", 1),
+		strings.Replace(broadcast, "@a", "Steve", 1) + " now",
+	} {
+		deliverConsoleLine(t, echo, registry, pctx)
+		assertNotDispatched(t, bridge)
+	}
+}
+
+// TestAnEchoArrivingAfterARestartIsStillNotRunAsAConsoleCommand covers the
+// third way the cache fails open: it is in-process memory, so an echo in
+// flight when the agent restarts reaches a voice that has no record of
+// anything. The line the old process put on the wire is what the new one
+// has to survive.
+func TestAnEchoArrivingAfterARestartIsStillNotRunAsAConsoleCommand(t *testing.T) {
+	bridge := &consoleBridge{}
+	srv := bridge.start(t)
+	registry := plugin.NewRegistry()
+	if err := registry.Register(opOnlyPlugin{}); err != nil {
+		t.Fatalf("register opsonly: %v", err)
+	}
+
+	before, _ := echoVoice(t, srv, registry)
+	if err := before.Say(context.Background(), opReply); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	broadcast := broadcastOf(t, bridge, 0)
+
+	// The restart: a brand-new voice and context, remembering nothing.
+	after, afterCtx := echoVoice(t, srv, registry)
+	if after.JustSaid(broadcast) {
+		t.Fatal("a fresh voice claimed a line it never said")
+	}
+
+	deliverConsoleLine(t, broadcast, registry, afterCtx)
+	assertNotDispatched(t, bridge)
+}
+
+// TestASiblingBroadcastIsStillNotRunAsAConsoleCommand covers the fourth way
+// the cache fails open: it only knows what this process said. A second agent
+// on the same server, or a human running `say` through the bridge, puts a
+// console line on the wire that this process has no record of. The invariant
+// holds anyway because it is enforced where the line is emitted, so every
+// speaker that goes through a BridgeVoice produces a line no echo can run.
+func TestASiblingBroadcastIsStillNotRunAsAConsoleCommand(t *testing.T) {
+	bridge := &consoleBridge{}
+	srv := bridge.start(t)
+	registry := plugin.NewRegistry()
+	if err := registry.Register(opOnlyPlugin{}); err != nil {
+		t.Fatalf("register opsonly: %v", err)
+	}
+
+	sibling, _ := echoVoice(t, srv, registry)
+	if err := sibling.Say(context.Background(), opReply); err != nil {
+		t.Fatalf("Say: %v", err)
+	}
+	broadcast := broadcastOf(t, bridge, 0)
+
+	_, pctx := echoVoice(t, srv, registry)
+	deliverConsoleLine(t, broadcast, registry, pctx)
+	assertNotDispatched(t, bridge)
+}
+
+// TestAnOperatorsConsoleCommandStillRuns is the other side of all four: the
+// point of trusting the console origin is that an operator can queue an
+// announcement from it. None of the emission-side neutralising may cost
+// them that -- a line the agent never said is still dispatched.
+func TestAnOperatorsConsoleCommandStillRuns(t *testing.T) {
+	bridge := &consoleBridge{}
+	srv := bridge.start(t)
+	registry := plugin.NewRegistry()
+	if err := registry.Register(opOnlyPlugin{}); err != nil {
+		t.Fatalf("register opsonly: %v", err)
+	}
+	_, pctx := echoVoice(t, srv, registry)
+
+	deliverConsoleLine(t, "!shutdown", registry, pctx)
+
+	ran := bridge.ran()
+	if len(ran) != 1 || !strings.Contains(ran[0], "shutting down") {
 		t.Fatalf("bridge ran %v, want the operator's own command to have run", ran)
 	}
 }
