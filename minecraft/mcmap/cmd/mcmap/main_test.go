@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -72,4 +73,60 @@ func TestLiveEnabledPollsTheBridgeUntilShutdown(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the source outlived the context it was started with")
 	}
+}
+
+// A source that never answers is an ordinary first start with no route out.
+// Starting the icons must cost the caller nothing: it gets an empty set at
+// once and the fetch goes on, or fails, behind it.
+func TestIconsNeverHoldUpTheStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	asked := make(chan struct{})
+	hung := func(ctx context.Context) (map[string][]byte, error) {
+		close(asked)
+		<-ctx.Done()
+		return nil, errors.New("never answered")
+	}
+	var wg sync.WaitGroup
+	returned := make(chan struct{})
+	var listed int
+	go func() {
+		mobs, heads := startIcons(ctx, config.Config{DataDir: t.TempDir(), Icons: true, IconsRef: "v9.9.9"}, hung, slog.New(slog.DiscardHandler), &wg)
+		if mobs == nil || heads == nil {
+			t.Error("nothing was started with icons on")
+		} else {
+			_, types := mobs.Listing()
+			listed = len(types)
+		}
+		close(returned)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("starting the icons waited for a source that never answers")
+	}
+	if listed != 0 {
+		t.Errorf("%d icons listed before any was fetched", listed)
+	}
+	<-asked
+	cancel()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the fetch outlived the context it was started with")
+	}
+}
+
+func TestIconsDisabledStartsNothing(t *testing.T) {
+	var wg sync.WaitGroup
+	fetch := func(context.Context) (map[string][]byte, error) {
+		t.Error("the icon source was asked with icons off")
+		return nil, errors.New("off")
+	}
+	if mobs, heads := startIcons(t.Context(), config.Config{DataDir: t.TempDir()}, fetch, slog.New(slog.DiscardHandler), &wg); mobs != nil || heads != nil {
+		t.Fatal("something was built with icons off")
+	}
+	wg.Wait()
 }

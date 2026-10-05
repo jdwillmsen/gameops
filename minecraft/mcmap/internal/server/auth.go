@@ -105,6 +105,9 @@ func (s *Server) InternalHandler() http.Handler {
 		mux.HandleFunc("GET /internal/v1/world", s.agentOnly(s.handleWorld))
 		mux.HandleFunc("POST /internal/v1/world/acknowledge", s.agentOnly(s.handleAcknowledge))
 	}
+	if s.Heads != nil && s.InternalToken != "" {
+		mux.HandleFunc("PUT /internal/v1/heads", s.agentOnly(s.handleHeads))
+	}
 	if s.Codes != nil && s.InternalToken != "" {
 		mux.HandleFunc("POST /internal/v1/claims", s.agentOnly(s.handleClaim))
 		if s.Sessions != nil && s.Sessions.Revoked != nil {

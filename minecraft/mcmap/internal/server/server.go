@@ -59,6 +59,10 @@ type Server struct {
 	// Waypoints reads the logged-in player's own waypoints. Nil leaves them
 	// out, as does having no login: without one there is nobody to be.
 	Waypoints WaypointSource
+	// MobIcons and Heads are the pictures the live layer draws in place of
+	// dots. With both nil the page is not offered any.
+	MobIcons MobIcons
+	Heads    PlayerHeads
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
@@ -127,6 +131,15 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Waypoints != nil && s.Sessions != nil {
 		mux.Handle("GET /api/waypoints", s.gated(s.handleWaypoints))
+	}
+	if s.MobIcons != nil || s.Heads != nil {
+		mux.Handle("GET /api/icons", s.gated(s.handleIcons))
+	}
+	if s.MobIcons != nil {
+		mux.Handle("GET /api/icons/mob/{type}", s.gated(s.handleMobIcon))
+	}
+	if s.Heads != nil {
+		mux.Handle("GET /api/icons/head", s.gated(s.handleHead))
 	}
 	if s.Sessions != nil {
 		mux.Handle("GET /api/me", s.gated(s.handleMe))

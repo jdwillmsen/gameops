@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,14 @@ const (
 	DefaultUnminedURL    = "https://unmined.net/download/unmined-cli-linux-x64-dev/"
 	DefaultUnminedSHA256 = "a47ec942a6d4a0f2e68323ed6c4da3221fe9d09353c2132188042776f96e47d7"
 )
+
+// The revision of Mojang's published samples the mob icons are read from:
+// the commit tagged v1.26.50.4, the release nearest the game server's own
+// 1.26.5x line. It is a commit, not the tag, because a tag can be moved and
+// what is fetched should not change unless this does.
+const DefaultIconsRef = "46ba6ea985fb5a92d79a9419198f10dda14c199d"
+
+var iconsRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 
 type Config struct {
 	HTTPAddr string
@@ -69,6 +78,13 @@ type Config struct {
 	// AgentURL is the server agent, which holds each player's waypoints.
 	// Empty leaves waypoints off the map.
 	AgentURL string
+
+	// Icons is whether live markers are drawn as mob icons and player
+	// heads. Off, nothing is fetched and the page draws dots.
+	Icons bool
+	// IconsRef is the tag or commit of the published samples the mob icons
+	// are fetched at.
+	IconsRef string
 }
 
 // minTokenLength keeps a placeholder from standing in for a credential.
@@ -184,6 +200,15 @@ func Load(getenv func(string) string) (Config, error) {
 		if !c.Login {
 			fail("AGENT_URL needs the login: without one there is no player to show waypoints to")
 		}
+	}
+
+	if c.Icons, err = strconv.ParseBool(or(getenv("ICONS_ENABLED"), "true")); err != nil {
+		fail("ICONS_ENABLED must be true or false")
+	}
+	// It becomes part of an address, so it is held to what a tag or a
+	// commit can be.
+	if c.IconsRef = or(getenv("ICONS_REF"), DefaultIconsRef); !iconsRef.MatchString(c.IconsRef) {
+		fail("ICONS_REF must be a tag or commit of the samples repository, got %q", c.IconsRef)
 	}
 	return c, errors.Join(errs...)
 }
