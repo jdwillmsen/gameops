@@ -54,7 +54,7 @@ every space created afterwards open again.
 - Members: all three players, as full members
 
 Team-managed keeps the work types and fields local to the space and allows up
-to 30 custom work types, each with its own workflow. It comes with a single
+to 30 work types in total, each with its own workflow. It comes with a single
 board of its own, which is all this needs.
 
 Kanban over sprints: a hobby server has no steady capacity, so time boxes
