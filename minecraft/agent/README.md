@@ -110,7 +110,8 @@ gophertunnel client --> chat.ParseTrigger --> plugin.Registry --> plugin.Voice (
   commands), `knowledge` (`!kb`), `waypoints` (`!wp`), `announce`
   (`!announce`, `!inbox`), `moderation` (event-driven over chat, plus
   `!modlog`), `schedule` (`!schedule`), `map` (`!map`, only when `MAP_URL`
-  is set)
+  is set), `worlddamage` (`!worlddamage` and the join notice, only when
+  `MAP_URL` is set)
 - `internal/sources` - the announcement sources nobody types: the player
   events read off the profile store's own writes, the watcher that polls
   the exporters for a version change or a stale backup, and the loop that
@@ -347,7 +348,7 @@ without that gauge beside them there is nothing on the graph to say so.
 | `WIKI_ALLOW_TEST_BASE_URL` | `false` | Lets `WIKI_BASE_URL` name a test server. For tests and local fakes only; never set in production |
 | `ANSWER_MAX_PER_MINUTE` | `4` | Max `@server` answers a single actor may trigger per rolling minute, tracked separately from `COMMAND_RATE_LIMIT_PER_MINUTE` since one LLM call costs far more than one console command |
 | `MC_MONITOR_URL` | *(empty)* | mc-monitor Prometheus endpoint behind `!online`; unset reports the command unconfigured rather than erroring |
-| `MAP_URL` | *(empty disables `!map`)* | The world map service's internal API (its `INTERNAL_ADDR` listener, e.g. `http://<release>-map:9090`), where `!map` reports who typed a login code |
+| `MAP_URL` | *(empty disables `!map` and the world-damage notice)* | The world map service's internal API (its `INTERNAL_ADDR` listener, e.g. `http://<release>-map:9090`), where `!map` reports who typed a login code and where the agent reads the chunk count for "Warning joiners of a damaged world" |
 | `MAP_TOKEN` | *(required with `MAP_URL`)* | Bearer token for that API; the map's `INTERNAL_TOKEN`, at least 16 characters |
 | `MAP_PUBLIC_URL` | *(required with `MAP_URL`)* | The address players open in a browser, quoted in `!map` replies. A different listener from `MAP_URL` |
 | `BACKUP_EXPORTER_URL` | *(empty)* | Backup exporter's `/metrics.txt` behind `!backup`; unset reports the command unconfigured rather than erroring |
@@ -375,7 +376,7 @@ breaking change.
 | `mc_agent_answer_duration_seconds` | histogram | `outcome` | per answer attempt that reached the model |
 | `mc_agent_tool_calls_total` | counter | `tool`, `outcome` | per tool invocation |
 | `mc_agent_wiki_requests_total` | counter | `outcome` | per `wiki_lookup` - lookups, not HTTP requests, since one lookup can make several; every outcome starts at zero |
-| `mc_agent_announce_deliveries_total` | counter | `delivery`, `outcome` | per send attempt |
+| `mc_agent_announce_deliveries_total` | counter | `delivery`, `outcome` | per send attempt; `delivery="world_notice"` is one line of the damaged-world warning |
 | `mc_agent_audit_write_failures_total` | counter | none | per dispatch the audit trail did not record |
 | `mc_agent_auth_rejections_total` | counter | none | per Xbox Live account rejection |
 | `mc_agent_deaths_total` | counter | none | per death the respawner handles |
@@ -407,8 +408,8 @@ invents reaches one unfiltered:
   questions are cut from it. Buckets 0.5-30s, matching the 30s answer budget
 - `tool` is a name from the tool registry, or `unregistered` for one the
   model made up; `outcome` is `ok` or `error`
-- `delivery` is `broadcast`, `whisper`, or `summary` (the drain's "more are
-  waiting" line); `outcome` is `sent` or `failed`
+- `delivery` is `broadcast`, `whisper`, `summary` (the drain's "more are
+  waiting" line), or `world_notice`; `outcome` is `sent` or `failed`
 - wiki `outcome`: `hit`, `miss` (no such page), `cached` (answered from the
   cache, hit or miss), `error` (the wiki failed or answered malformed; never
   cached), `limited` (the process-wide 60-per-minute budget was spent, or the
@@ -1263,6 +1264,84 @@ a bare `!map`; the reply they do see, to the code itself, says to type
 their name, wherever it is.
 
 The console can speak in chat but is not a player, and `!map` refuses it.
+
+## Warning joiners of a damaged world
+
+On 2026-10-02 the world lost 6,460 chunks, and two players joined it hours
+later with nothing to tell them; anything they built would have been rolled
+back by the restore. While the map (`minecraft/mcmap`) reports lost chunks, every player
+who joins is whispered a notice, so an operator can stop play before more is
+built on ground a restore may take back.
+
+The signal is `GET /internal/v1/world` on the map's internal listener, read
+with the same `MAP_URL` and `MAP_TOKEN` that `!map` uses; nothing new is
+configured, and an agent without `MAP_URL` neither polls nor warns. The
+condition is `lostTotal`, not `missingTotal`: Bedrock generates a lost chunk
+again as empty terrain when a player walks near, so `missing` falls back to
+zero on its own while the data is still gone for good.
+
+| Who | Hears |
+|---|---|
+| operator | the count, the split by dimension, when the map counted, the lowest lost chunks as block coordinates, and how to clear it |
+| everyone else | a plain warning that the world is damaged and a restore may roll back what they do, with no figures |
+
+The notice goes through the announcement drain's join path, so it shares its
+wait after a join, its concurrency cap and its dropping of a join whose
+connection has ended. It is whispered before the player's queued
+announcements, and it does not depend on them: it is sent with no database,
+and when the outbox refuses its own read. It is not an announcement and
+leaves no delivery row, because a player who joins an hour later is owed it
+as much as the first one was. A player who is already online when the agent
+connects is told too. Who counts as an operator is the same permission
+lookup the commands use; a lookup that fails resolves to visitor, so a
+failure withholds the figures rather than leaking them.
+
+| Command | Level | What it does |
+|---|---|---|
+| `!worlddamage` | operator | Says what is recorded, in the operator form above, or that nothing is |
+| `!worlddamage clear` | operator | Accepts the world as the held count found it and stops the notice at once |
+
+`clear` acknowledges the count the notices have been quoting, not whatever the
+map holds at that moment. If a newer count has replaced it, the map refuses
+(409) because that count may hold losses nobody has read; the reply says
+"Not cleared", names the newer figure, and the next `!worlddamage clear`
+accepts it. The console can run it too: `send-command say '!worlddamage
+clear'` arrives at operator level, and its reply is a public `say` like every
+console reply, so use it for `clear` and not for the bare status, which names
+coordinates. Every dispatch is already in the command
+audit trail, so the clear is recorded with who typed it, but a refusal is
+recorded as an `ok` dispatch like any other command that answers with a
+reason; the map logs the acknowledgement itself (`chunk loss acknowledged`)
+and is the record of what was actually forgotten.
+
+Acknowledging is for after a restore has been checked, or a deliberate
+rollback; it forgets the loss without repairing it.
+
+### What survives a restart
+
+The loss is recorded in the map's ledger on its own disk, written before a
+count is used, and an acknowledgement is recorded there too. The agent keeps
+no copy that could outlive or contradict it, so a restarted agent holds the
+condition after one read: the first poll runs at startup, and a join that
+arrives before it has finished makes the read itself. A cleared world stays
+cleared across a restart for the same reason.
+
+The agent has no table of its own for this on purpose: its schema lives in
+`jdwlabs/platform`, and a second record of the condition would be one more
+thing that could disagree with the ledger. The cost is that an agent
+restarted while the map is unreachable has nothing to warn with until the map
+answers. While it is merely unreachable after a successful read, the last
+known condition is kept, since a map that cannot be reached is not evidence
+the world was repaired.
+
+It is polled every minute (`worldDamagePoll` in `cmd/agent/main.go`); the map
+counts every snapshot, 15 minutes apart. Log events: `world_damage_recorded`
+and `world_damage_cleared` when the figure changes, `world_damage_acknowledged`
+for a clear, and `world_damage_poll_failed` / `world_damage_poll_recovered` at
+the start and end of an outage rather than once per poll.
+
+This needs a map that serves the world endpoints (`minecraft/mcmap`); against
+an older one every poll is refused, logged once, and no one is warned.
 
 ## Targeting a reply
 

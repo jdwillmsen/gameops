@@ -50,6 +50,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/toolset"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/waypoints"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/wiki"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/worlddamage"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/liveness"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
@@ -66,6 +67,16 @@ const welcomeDelay = 5 * time.Second
 // dispatcher's own five seconds, so a slow map answers the player with an
 // error rather than with silence.
 const mapClaimTimeout = 3 * time.Second
+
+// worldDamageTimeout bounds one call to the map's world endpoints. Shorter
+// than mapClaimTimeout because !worlddamage clear makes up to two inside the
+// same five seconds.
+const worldDamageTimeout = 2 * time.Second
+
+// worldDamagePoll is how often the agent reads the map's chunk count. The map
+// counts every snapshot, 15 minutes apart, so a read this often is never the
+// slow part of a joining player being warned.
+const worldDamagePoll = time.Minute
 
 // announceDrainDelay is how long the announce drain waits after a join
 // before whispering a player their backlog. Past welcomeDelay so the
@@ -258,10 +269,21 @@ func main() {
 
 	registry := plugin.NewRegistry()
 	extraPlugins := []plugin.Plugin{presenceRT.plugin}
+	// A nil interface, not a nil *WorldDamage: the drain asks it nothing at
+	// all when there is no map to ask.
+	var joinNotice plugins.JoinNotice
 	if cfg.MapURL != "" {
 		extraPlugins = append(extraPlugins, plugins.NewMapLogin(mapclient.New(cfg.MapURL, cfg.MapToken, mapClaimTimeout), playerRoster, cfg.MapPublicURL))
+		damage := worlddamage.New(mapclient.New(cfg.MapURL, cfg.MapToken, worldDamageTimeout), log)
+		// Started for the process rather than as the live agent, like the
+		// event dispatch below: it only reads, and a standby that takes over
+		// should already know.
+		go damage.Run(ctx, worldDamagePoll)
+		warning := plugins.NewWorldDamage(damage, permResolver.Resolve)
+		extraPlugins = append(extraPlugins, warning)
+		joinNotice = warning
 	}
-	if err := registerPlugins(ctx, registry, deliverer, joins, cfg.ModerationTerms, log, extraPlugins...); err != nil {
+	if err := registerPlugins(ctx, registry, deliverer, joins, joinNotice, cfg.ModerationTerms, log, extraPlugins...); err != nil {
 		log.Error("plugin_register_failed", logging.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
@@ -413,7 +435,7 @@ func main() {
 //
 // The error carries the plugin's own name, because "registration failed" on
 // its own does not say which one.
-func registerPlugins(ctx context.Context, registry *plugin.Registry, deliverer plugins.AnnounceDeliverer, conns plugins.Connections, moderationTerms []string, log *logging.Logger, extra ...plugin.Plugin) error {
+func registerPlugins(ctx context.Context, registry *plugin.Registry, deliverer plugins.AnnounceDeliverer, conns plugins.Connections, joinNotice plugins.JoinNotice, moderationTerms []string, log *logging.Logger, extra ...plugin.Plugin) error {
 	mod, err := plugins.NewModeration(ctx, moderationTerms, log)
 	if err != nil {
 		return fmt.Errorf("moderation: %w", err)
@@ -425,7 +447,7 @@ func registerPlugins(ctx context.Context, registry *plugin.Registry, deliverer p
 		plugins.NewWaypoints(),
 		plugins.NewWelcome(ctx, welcomeDelay, log, plugins.WithGreetConnections(conns)),
 		plugins.NewAnnounce(),
-		plugins.NewAnnounceDrain(ctx, deliverer, announceDrainDelay, log, plugins.WithConnections(conns)),
+		plugins.NewAnnounceDrain(ctx, deliverer, announceDrainDelay, log, plugins.WithConnections(conns), plugins.WithJoinNotice(joinNotice)),
 		mod,
 		plugins.NewSchedule(),
 	}, extra...) {

@@ -62,9 +62,11 @@ const (
 	// DeliverySummary is the drain's "more are waiting" line, counted apart
 	// from the announcements themselves because it is not one.
 	DeliverySummary Delivery = "summary"
+	// DeliveryWorldNotice is the damaged-world warning whispered at a join.
+	DeliveryWorldNotice Delivery = "world_notice"
 )
 
-var deliveries = []Delivery{DeliveryBroadcast, DeliveryWhisper, DeliverySummary}
+var deliveries = []Delivery{DeliveryBroadcast, DeliveryWhisper, DeliverySummary, DeliveryWorldNotice}
 
 const (
 	outcomeSent     = "sent"

@@ -24,6 +24,15 @@ type AnnounceDeliverer interface {
 	DrainForJoin(ctx context.Context, xuid string, now time.Time) (delivered, remaining int, err error)
 }
 
+// JoinNotice is something every arriving player is owed on top of their
+// backlog, for as long as it holds: unlike an announcement it is not
+// delivered once and recorded, since a joiner an hour later needs it as much
+// as the first one did.
+type JoinNotice interface {
+	// NoticeFor is the whispers xuid is owed now, in order, or none.
+	NoticeFor(ctx context.Context, xuid string) []string
+}
+
 // Connections reports which of the agent's connections is live, and when
 // the one live now ends. A drain waits before it delivers, and the
 // connection it was scheduled in can end inside that wait; the one that
@@ -119,6 +128,9 @@ type AnnounceDrain struct {
 	// occupy every slot while doing nothing and the rest would be shed --
 	// exactly the shape of a rejoin wave after a restart.
 	inFlight chan struct{}
+	// notice is whispered to each joiner before their backlog. Nil leaves
+	// the drain delivering announcements and nothing else.
+	notice JoinNotice
 }
 
 // DrainOption configures an AnnounceDrain at construction.
@@ -128,6 +140,14 @@ type DrainOption func(*AnnounceDrain)
 // scheduled in ends before its wait does.
 func WithConnections(c Connections) DrainOption {
 	return func(a *AnnounceDrain) { a.conns = c }
+}
+
+// WithJoinNotice makes a drain whisper n's lines to every player it drains
+// for. It shares the drain's wait, its concurrency cap and its abandonment
+// when the connection ends, which is what keeps a whisper from reaching a
+// client that is still loading.
+func WithJoinNotice(n JoinNotice) DrainOption {
+	return func(a *AnnounceDrain) { a.notice = n }
 }
 
 // WithJitter replaces the random spread between simultaneous drains, so a
@@ -208,7 +228,7 @@ func (a *AnnounceDrain) HandleEvent(ctx context.Context, pctx *plugin.Context, e
 	default:
 		return fmt.Errorf("announcedrain: unexpected event type %T for kind %s", ev, ev.Kind())
 	}
-	if a.deliverer == nil {
+	if a.deliverer == nil && a.notice == nil {
 		// Nothing to drain through. Whether the store behind a real
 		// deliverer persists anything is that deliverer's question to
 		// answer -- it reports zero drained and nothing owed for a
@@ -290,6 +310,13 @@ func (a *AnnounceDrain) drain(pctx *plugin.Context, voice plugin.Voice, xuid str
 		}()
 	}
 
+	// First, and whatever becomes of the backlog: a join the outbox cannot
+	// serve is no less owed the warning.
+	a.warn(connCtx, pctx, voice, xuid)
+	if a.deliverer == nil {
+		return
+	}
+
 	drainCtx, cancel := context.WithTimeout(connCtx, drainTimeout)
 	defer cancel()
 
@@ -337,6 +364,37 @@ func (a *AnnounceDrain) drain(pctx *plugin.Context, voice plugin.Voice, xuid str
 	metrics.AnnounceDelivery(metrics.DeliverySummary, err)
 	if err != nil {
 		a.log.Error("announce_drain_summary_failed", logging.Fields{"xuid": xuid, "error": err.Error()})
+	}
+}
+
+// warn whispers the join notice, stopping at the first line the bridge
+// refuses: the rest would go to the same dead path.
+func (a *AnnounceDrain) warn(connCtx context.Context, pctx *plugin.Context, voice plugin.Voice, xuid string) {
+	if a.notice == nil {
+		return
+	}
+	askCtx, cancel := context.WithTimeout(connCtx, plugin.DefaultDispatchTimeout)
+	lines := a.notice.NoticeFor(askCtx, xuid)
+	cancel()
+	if len(lines) == 0 || pctx.KnownOffline(xuid) {
+		return
+	}
+	if voice == nil {
+		a.log.Error("join_notice_undeliverable", logging.Fields{"xuid": xuid})
+		return
+	}
+	for _, line := range lines {
+		if connCtx.Err() != nil {
+			return
+		}
+		tellCtx, cancel := context.WithTimeout(connCtx, plugin.DefaultDispatchTimeout)
+		err := voice.Tell(tellCtx, xuid, line)
+		cancel()
+		metrics.AnnounceDelivery(metrics.DeliveryWorldNotice, err)
+		if err != nil {
+			a.log.Error("join_notice_failed", logging.Fields{"xuid": xuid, "error": err.Error()})
+			return
+		}
 	}
 }
 

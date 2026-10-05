@@ -878,3 +878,173 @@ func TestTrailerStillFollowsForAPlayerWhoIsStillOnline(t *testing.T) {
 		t.Error("no trailer for a player who is still online and still owed messages")
 	}
 }
+
+// fakeNotice is a JoinNotice with a fixed answer, recording who it was asked
+// about.
+type fakeNotice struct {
+	mu    sync.Mutex
+	lines []string
+	asked []string
+}
+
+var _ JoinNotice = (*fakeNotice)(nil)
+
+func (f *fakeNotice) NoticeFor(_ context.Context, xuid string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, xuid)
+	return f.lines
+}
+
+func (f *fakeNotice) askedAbout() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.asked...)
+}
+
+// tellsUntilQuiet collects whispers until none arrives for a short while.
+func tellsUntilQuiet(v *recordingTellVoice) []string {
+	var got []string
+	for {
+		select {
+		case m := <-v.told:
+			got = append(got, m)
+		case <-time.After(100 * time.Millisecond):
+			return got
+		}
+	}
+}
+
+func TestJoinNotice_IsWhisperedToTheJoiner(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"first line", "second line"}}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{}, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 2 || got[0] != "first line" || got[1] != "second line" {
+		t.Fatalf("whispers = %q, want both notice lines in order", got)
+	}
+	if asked := notice.askedAbout(); len(asked) != 1 || asked[0] != "xuid-1" {
+		t.Errorf("asked about %v, want just the joiner", asked)
+	}
+}
+
+// A player who was already here when the agent connected is told too: they
+// were not warned by anything else, and the world is no less damaged for
+// their having arrived first.
+func TestJoinNotice_ReachesAPlayerAlreadyOnline(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"warning"}}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{}, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, presentEvent("xuid-1", 1)); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 1 || got[0] != "warning" {
+		t.Fatalf("whispers = %q", got)
+	}
+}
+
+// The warning is the point of the join and the backlog is not: it goes first,
+// so a backlog of announcements, or a database that refuses them, cannot
+// push it out or stop it.
+func TestJoinNotice_PrecedesTheBacklogSummary(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"warning"}}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{delivered: 3, remaining: 2}, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	got := tellsUntilQuiet(voice)
+	if len(got) != 2 || got[0] != "warning" || !strings.Contains(got[1], "!inbox") {
+		t.Fatalf("whispers = %q, want the warning and then the inbox summary", got)
+	}
+}
+
+func TestJoinNotice_StillSentWhenTheOutboxFails(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"warning"}}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{err: errors.New("db unreachable")}, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 1 || got[0] != "warning" {
+		t.Fatalf("whispers = %q, want the warning despite the failed drain", got)
+	}
+}
+
+// An agent with no database has no outbox, and still has a damaged world to
+// warn about.
+func TestJoinNotice_SentWithoutAnOutbox(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"warning"}}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), nil, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 1 || got[0] != "warning" {
+		t.Fatalf("whispers = %q", got)
+	}
+}
+
+func TestJoinNotice_NothingToSayIsSilent(t *testing.T) {
+	notice := &fakeNotice{}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{}, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 0 {
+		t.Fatalf("whispers = %q, want silence", got)
+	}
+}
+
+func TestJoinNotice_NotSentOnceTheConnectionHasEnded(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"warning"}}
+	voice := newRecordingTellVoice()
+	conns := &fakeConnections{gen: 1}
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{}, 50*time.Millisecond, logging.New("error"),
+		WithJoinNotice(notice), WithConnections(conns), WithJitter(func(time.Duration) time.Duration { return 0 }))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEventAt("xuid-1", 1)); err != nil {
+		t.Fatal(err)
+	}
+	conns.end()
+	if got := tellsUntilQuiet(voice); len(got) != 0 {
+		t.Fatalf("whispers = %q, want none: the join belongs to a connection that is gone", got)
+	}
+}
+
+func TestJoinNotice_NotSentToAPlayerKnownToHaveLeft(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"warning"}}
+	voice := newRecordingTellVoice()
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{}, 0, logging.New("error"), WithJoinNotice(notice))
+	pctx := &plugin.Context{Voice: voice, Presence: drainPresence{online: map[string]bool{}}}
+
+	if err := d.HandleEvent(context.Background(), pctx, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 0 {
+		t.Fatalf("whispers = %q, want none for a player who has left", got)
+	}
+}
+
+func TestJoinNotice_ASendFailureIsLoggedNotFatal(t *testing.T) {
+	notice := &fakeNotice{lines: []string{"first", "second"}}
+	voice := newRecordingTellVoice()
+	voice.err = errors.New("bridge down")
+	d := NewAnnounceDrain(context.Background(), &fakeJoinDeliverer{}, 0, logging.New("error"), WithJoinNotice(notice))
+
+	if err := d.HandleEvent(context.Background(), &plugin.Context{Voice: voice}, joinEvent("xuid-1")); err != nil {
+		t.Fatal(err)
+	}
+	if got := tellsUntilQuiet(voice); len(got) != 1 {
+		t.Fatalf("whispers = %q, want the first attempt and no more once the bridge refused", got)
+	}
+}
