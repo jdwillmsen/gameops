@@ -209,7 +209,8 @@ gophertunnel client --> chat.ParseTrigger --> plugin.Registry --> plugin.Voice (
   depends on is a total order over ties, down to the cluster bounds, so the
   same world bytes always produce the same report. Two sources can supply
   the world, and the report always names which one it read - see "Where the
-  census reads its world" below
+  census reads its world" below. It also renders the per-entity listing -
+  see "Listing every entity" below
 - `cmd/census` - the binary; runs as a Kubernetes CronJob beside the server
   rather than inside the agent, since the scan is a batch job over hundreds
   of megabytes and the agent's own pod is the one answering players in chat
