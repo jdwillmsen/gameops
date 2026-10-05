@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
@@ -56,6 +57,13 @@ type Census interface {
 	Take(ctx context.Context, dbDir string, at time.Time) (chunks.Report, error)
 }
 
+// Keeper retains complete copies of the mirrored world, so that the mirror
+// being overwritten by a damaged snapshot is no longer the loss of the last
+// near-current copy of the world.
+type Keeper interface {
+	Capture(ctx context.Context, src string, at time.Time, health generations.Health) (generations.Outcome, error)
+}
+
 type Syncer interface {
 	Sync(ctx context.Context) (mirror.Stats, error)
 }
@@ -78,6 +86,10 @@ type Worker struct {
 	Logger        *slog.Logger
 	// Census, if set, counts the world's chunks after every snapshot.
 	Census Census
+	// Keeper, if set, retains the snapshots the Census found whole. It
+	// needs the Census: without a count nothing can say a snapshot is safe
+	// to make the restore point.
+	Keeper Keeper
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -226,7 +238,8 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	metricSnapshotSeconds.Set(stats.Duration.Seconds())
 	w.Logger.Info("snapshot applied", "files", stats.Files, "fetched", stats.Fetched, "removed", stats.Removed, "bytes", stats.Bytes, "seconds", stats.Duration.Seconds())
 	w.Status.set(func(s *Status) { s.snapshotAt = now })
-	w.census(ctx, now)
+	report, counted := w.census(ctx, now)
+	w.keep(ctx, now, report, counted)
 
 	problem := ""
 	for _, dimension := range render.Dimensions {
@@ -248,17 +261,18 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	return Applied
 }
 
-// census runs before the renders, which take minutes: a world losing chunks
-// is the one thing this service sees that cannot wait for them. Its failure
-// is logged and counted but stops nothing else.
-func (w *Worker) census(ctx context.Context, now time.Time) {
+// census runs before the renders, which take minutes: a world losing
+// chunks is the one thing this service sees that cannot wait for them. Its
+// failure is logged and counted but stops nothing else, and is reported
+// here because what it found decides whether the snapshot is retained.
+func (w *Worker) census(ctx context.Context, now time.Time) (chunks.Report, bool) {
 	if w.Census == nil {
-		return
+		return chunks.Report{}, false
 	}
 	r, err := w.Census.Take(ctx, filepath.Join(w.MirrorDir, w.Level, "db"), now)
 	if err != nil {
 		w.Logger.Error("chunk census failed", "error", err)
-		return
+		return chunks.Report{}, false
 	}
 	if lost := r.TotalLost(); lost > 0 {
 		attrs := []any{"lost", lost, "missing_now", r.TotalMissing()}
@@ -271,7 +285,35 @@ func (w *Worker) census(ctx context.Context, now time.Time) {
 			attrs = append(attrs, "first_dimension", first.Dim.Name(), "block_x", first.X*16, "block_z", first.Z*16)
 		}
 		w.Logger.Error("world has lost chunks", attrs...)
-		return
+		return r, true
 	}
 	w.Logger.Info("chunk census", "overworld", r.Present[chunks.Overworld], "nether", r.Present[chunks.Nether], "end", r.Present[chunks.End])
+	return r, true
+}
+
+// keep retains the snapshot just mirrored, before the renders, so the copy
+// is on the volume as early as it can be. A snapshot only becomes the
+// restore point once the census has proved it whole: a count that found
+// chunks lost, or one that could not run at all, is no basis for replacing
+// a world that was proved whole 15 minutes ago.
+func (w *Worker) keep(ctx context.Context, now time.Time, r chunks.Report, counted bool) {
+	if w.Keeper == nil {
+		return
+	}
+	if !counted {
+		w.Logger.Warn("snapshot not retained: nothing counted this world")
+		return
+	}
+	health := generations.Whole
+	if r.TotalLost() > 0 {
+		health = generations.Damaged
+	}
+	outcome, err := w.Keeper.Capture(ctx, w.MirrorDir, now, health)
+	if err != nil {
+		// The generations already held are untouched by a failure here, so
+		// the restore point is older than it could be, never absent.
+		w.Logger.Error("snapshot not retained", "error", err)
+		return
+	}
+	w.Logger.Info("snapshot retained", "outcome", string(outcome))
 }

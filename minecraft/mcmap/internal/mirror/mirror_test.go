@@ -282,3 +282,47 @@ func TestSync_ManifestWithoutAWorldDatabaseChangesNothing(t *testing.T) {
 		})
 	}
 }
+
+// The retained generations are hard links to the files here, so a file the
+// server has changed must arrive as a new one that replaces the old name,
+// never as a rewrite of the file a generation is still holding.
+func TestSync_ReplacesAChangedFileRatherThanRewritingIt(t *testing.T) {
+	changed := entry{level.name, "level-after"}
+	b := &fakeBridge{entries: []entry{
+		{"snapshot.json", manifest(table1, level, current)}, table1, level, current, {"snapshot.ok", ""},
+	}}
+	m := newMirror(t, b)
+	if _, err := m.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(m.local(level.name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A second copy of the world, as a generation holds it.
+	kept := filepath.Join(t.TempDir(), "kept")
+	if err := os.Link(m.local(level.name), kept); err != nil {
+		t.Fatal(err)
+	}
+
+	b.entries = []entry{
+		{"snapshot.json", manifest(table1, changed, current)}, changed, current, {"snapshot.ok", ""},
+	}
+	if _, err := m.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if tree(t, m.Root)[level.name] != changed.body {
+		t.Fatalf("the mirror did not take the new file: %v", tree(t, m.Root))
+	}
+	after, err := os.Stat(m.local(level.name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(before, after) {
+		t.Error("the mirror rewrote the file in place, which changes every generation holding it")
+	}
+	if body, err := os.ReadFile(kept); err != nil || string(body) != level.body {
+		t.Errorf("the copy taken before the change now reads %q (%v)", body, err)
+	}
+}

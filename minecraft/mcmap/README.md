@@ -111,6 +111,82 @@ only the server's files, so the count runs on hard links to them under
 few tens of megabytes. A count that fails is logged and counted and stops
 nothing else; the missing-chunk gauges keep their last value.
 
+### Keeping the world that was there before
+
+The mirror is overwritten by every snapshot, so until this existed it was
+also the fastest way to lose a world. On 2026-10-01 at 23:43:38 UTC the
+mirror held a complete, consistent copy of the world, taken 115 seconds
+before the node froze. The first snapshot after the server repaired its
+database, at 02:04:49, replaced it with the damaged one. A restore from
+that copy would have cost about two minutes of play; the nightly archive
+used instead cost about 42 hours.
+
+So the mirror is no longer the only copy. Under `DATA_DIR/generations`:
+
+```
+a/            one retained copy of the world
+b/            the other
+current ->    a symlink naming whichever of the two is the restore point
+damaged/      the first snapshot that was found to have lost chunks
+```
+
+Each cycle builds into the slot `current` does **not** name, and only then
+moves the symlink. The copy being overwritten is therefore always the older
+of the two, and the newest whole world is never the one at risk. After the
+switch, `current` is the snapshot just taken and the other slot is the one
+before it: at a fifteen-minute interval, a restore point from minutes ago
+and one from a quarter of an hour before that.
+
+A generation is **hard links** to the mirror's files, not a copy of them.
+LevelDB never rewrites a table once it is closed, and the mirror only ever
+creates a file, replaces it by rename, or unlinks it, so a link made now
+holds that file's content for as long as the link lives — pruning the
+mirror cannot reach it. Two generations and the mirror together cost one
+world plus what has changed between them: measured on a 763 MiB, 404-file
+world, three retained snapshots and the mirror came to 792 MiB in total,
+and a capture took 0.5 to 1.3 seconds. Copying instead would cost a second
+and a third full world on a volume sized for one, every cycle, for no extra
+safety, so a filesystem that cannot link is a refusal rather than a
+fallback.
+
+**What is promoted.** Only a snapshot the chunk count above proved whole.
+One that lost chunks is moved into `generations/damaged` instead and
+displaces neither generation — which is the whole point, since the damaged
+world is exactly what overwrote the good copy before. A count that could
+not run at all retains nothing: nothing has said the snapshot is safe to
+make the restore point. Only the *first* damaged snapshot is kept; every
+later one holds the same loss plus whatever the world did afterwards, and
+keeping them would fill the volume while nothing can be promoted. Promotion
+resumes once the loss is acknowledged, which is why the acknowledgement
+comes after the restore and not before it.
+
+**Interrupted part-way.** A capture is: link the world into `.building`,
+write its marker, flush; rename the slot being replaced to `.retired-<slot>`;
+rename `.building` into the slot; move the `current` symlink; remove the
+retired copy. The slot and the `current` link only ever change by a rename,
+and a `current` link that exists names a whole world before and after every
+step, renames and the rest alike, so a process killed anywhere in here leaves
+at least one complete generation and never a partial one presented as the
+restore point. A store whose `current` link has gone missing builds beside
+the generation it still holds rather than over it, and the link returns with
+the next promotion. A directory is a generation only if it holds its
+`generation.json` marker, which is written last; the next start discards
+`.building`, `.retired-*` and a half-made symlink. The files are flushed
+before anything names them, which also flushes the mirror's own writes:
+a copy still only in the page cache would be lost by exactly the event it
+exists for.
+
+**Running out of room** costs the copy being built and nothing else. The
+retained generations are never deleted to make space, the build gives back
+what it took, and the failure is logged and counted while the tiles and the
+count carry on. The restore point is then older than it could be, never
+absent.
+
+The restore procedure — copying a generation onto the restore scratch claim
+and promoting it onto the live world — is in the `minecraft-fwb` chart's
+README in `jdw-deployments`, which is also where the claim and the server
+live.
+
 ## Login
 
 The map shows where every base is, so it sits behind a login that proves the
@@ -176,7 +252,7 @@ Two listeners keep the internet away from what is not for it:
 | `INTERNAL_TOKEN` | unless `AUTH_DISABLED` | | Bearer token the agent presents to the internal API; at least 16 characters. Whoever holds it can log in as any player, so give it a secret of its own |
 | `AUTH_DISABLED` | no | `false` | `true` serves the map with no login. Only for a service nothing publishes |
 | `SESSION_TTL` | no | `168h` | How long a login lasts |
-| `DATA_DIR` | no | `/data` | Mirror, tiles and the installed renderer. Rebuildable, but the first render is slow, so keep it on a volume |
+| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles and the installed renderer. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
 | `RENDER_CHUNK_PROCESSORS` | no | `1` | Chunks rendered at once. More is faster and uses more CPU and memory |
@@ -203,7 +279,7 @@ On `INTERNAL_ADDR` only:
 | `GET /metrics` | Prometheus |
 | `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code. 204, or 404 for a code that is unknown, expired or used |
 | `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds. 204 |
-| `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count |
+| `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
 
 The internal API is served whenever `INTERNAL_TOKEN` is set, with or without
@@ -225,6 +301,11 @@ opens at the same place.
 | `mcmap_world_chunks_missing{dimension}` | Chunks seen before and absent from the last count |
 | `mcmap_world_chunks_lost{dimension}` | Chunks found missing since the last acknowledgement, including any generated again since. Above zero means the world has lost data; only an acknowledgement clears it |
 | `mcmap_world_census_last_success_timestamp_seconds`, `mcmap_world_census_duration_seconds`, `mcmap_world_census_failures_total` | Whether the count is running |
+| `mcmap_generations` | Complete world copies held, 0 to 2. Below 1 there is no near-current restore point |
+| `mcmap_generation_current_timestamp_seconds` | When the snapshot now serving as the restore point was taken; the distance from now is how far a restore would roll the world back |
+| `mcmap_generation_captures_total{outcome}` | Snapshots by what was done with them: `promoted`, `quarantined`, `skipped`, `failed` |
+| `mcmap_generation_damaged` | 1 while a snapshot that lost chunks is quarantined, which is also while nothing is being promoted |
+| `mcmap_generation_bytes{generation}` | World bytes `current`, `previous` and `damaged` each name. They are hard links, so this is not the space they add |
 
 ## Build and test
 

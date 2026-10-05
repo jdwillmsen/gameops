@@ -6,12 +6,20 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 )
 
 // ChunkCensus is the part of the chunk census the internal API exposes.
 type ChunkCensus interface {
 	Last() (chunks.Report, bool)
 	Acknowledge(checkedAt time.Time) error
+}
+
+// Generations is the part of the retained world copies the internal API
+// exposes, so that whoever is deciding on a restore can see how far back
+// each copy would take the world before they scale anything down.
+type Generations interface {
+	Look() generations.View
 }
 
 type blockPos struct {
@@ -29,6 +37,38 @@ type worldJSON struct {
 	Lost         map[string]int `json:"lost,omitempty"`
 	LostTotal    *int           `json:"lostTotal,omitempty"`
 	Sample       []blockPos     `json:"lostSample,omitempty"`
+	// Generations is independent of the count: copies are held, and worth
+	// reporting, before the first census of a fresh volume.
+	Generations *generationsJSON `json:"generations,omitempty"`
+}
+
+type generationJSON struct {
+	// Name is the directory under the data volume's generations directory,
+	// which is what a restore copies the world out of.
+	Name    string    `json:"name"`
+	TakenAt time.Time `json:"takenAt"`
+	Files   int       `json:"files"`
+	Bytes   int64     `json:"bytes"`
+}
+
+type generationsJSON struct {
+	Current  *generationJSON `json:"current,omitempty"`
+	Previous *generationJSON `json:"previous,omitempty"`
+	Damaged  *generationJSON `json:"damaged,omitempty"`
+}
+
+func (s *Server) generations() *generationsJSON {
+	if s.Generations == nil {
+		return nil
+	}
+	v := s.Generations.Look()
+	held := func(g *generations.Generation) *generationJSON {
+		if g == nil {
+			return nil
+		}
+		return &generationJSON{Name: g.Name, TakenAt: g.TakenAt, Files: g.Files, Bytes: g.Bytes}
+	}
+	return &generationsJSON{Current: held(v.Current), Previous: held(v.Previous), Damaged: held(v.Damaged)}
 }
 
 func byName(m map[chunks.Dimension]int) map[string]int {
@@ -40,9 +80,10 @@ func byName(m map[chunks.Dimension]int) map[string]int {
 }
 
 func (s *Server) handleWorld(w http.ResponseWriter, _ *http.Request) {
+	kept := s.generations()
 	r, ok := s.Chunks.Last()
 	if !ok {
-		writeJSON(w, http.StatusOK, worldJSON{})
+		writeJSON(w, http.StatusOK, worldJSON{Generations: kept})
 		return
 	}
 	missing, lost := r.TotalMissing(), r.TotalLost()
@@ -51,6 +92,7 @@ func (s *Server) handleWorld(w http.ResponseWriter, _ *http.Request) {
 		Chunks:  byName(r.Present),
 		Missing: byName(r.Missing), MissingTotal: &missing,
 		Lost: byName(r.Lost), LostTotal: &lost,
+		Generations: kept,
 	}
 	for _, p := range r.Sample {
 		out.Sample = append(out.Sample, blockPos{Dimension: p.Dim.Name(), X: int64(p.X) * 16, Z: int64(p.Z) * 16})

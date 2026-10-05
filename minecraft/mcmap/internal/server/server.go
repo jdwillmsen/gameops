@@ -40,6 +40,9 @@ type Server struct {
 	// Chunks is the world's chunk census, which the agent reads to warn
 	// players while chunks are missing. Nil leaves those routes out.
 	Chunks ChunkCensus
+	// Generations is the retained copies of the world. Nil leaves them out
+	// of the world report.
+	Generations Generations
 	// Log records logins issued and revoked. Nil discards them.
 	Log *slog.Logger
 
