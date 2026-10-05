@@ -315,7 +315,7 @@ census -world-dir /snapshot -backup-dir /backup -list -types zombie,pillager
 ```
 
 ```json
-{"world_taken_at":"2026-10-05T05:15:14Z","source":"snapshot","types":["pillager","zombie"],"entities":18,"orphaned":1913}
+{"world_taken_at":"2026-10-05T05:15:14Z","source":"snapshot","types":["pillager","zombie"],"entities":18,"orphaned":1913,"unlocatable":0}
 {"identifier":"zombie","dimension":"overworld","x":-210.4736328125,"y":6,"z":223.99188232421875,"persistent":true}
 ```
 
@@ -324,11 +324,19 @@ so a reader can tell a whole listing from a cut one, and `world_taken_at` and
 `source` are the same provenance the report prints. Each later line is one
 entity at its saved, unrounded position; `name` appears only on a name-tagged
 one. `-types` takes identifiers with or without the `minecraft:` prefix and
-keeps every entity when it is empty.
+keeps every entity when it is empty. A type given twice is filtered and echoed
+once, and a value that names no identifier at all, such as `,` or
+`minecraft:`, is an error and not a listing of everything.
 
 Lines are ordered by dimension, identifier, position and unique id, so the same
 world gives the same bytes and two listings can be compared with `diff`.
 Orphaned records are not listed; the header counts them.
+
+An entity saved at a position that is not a finite number has nowhere to be
+aimed at and cannot be written as JSON, so it is left out and counted in the
+header's `unlocatable`, which is always present and 0 for a healthy world.
+Only entities the `-types` filter keeps are counted, so `entities` still
+equals the number of lines that follow.
 
 A listing is refused for the same worlds a report is, and `-list` cannot be
 combined with `-metrics-file`: it publishes nothing.

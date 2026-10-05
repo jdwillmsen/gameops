@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 )
@@ -17,6 +18,9 @@ type ListingHeader struct {
 	Types        []string `json:"types,omitempty"`
 	Entities     int      `json:"entities"`
 	Orphaned     int      `json:"orphaned"`
+	// Unlocatable is never omitted: a reader that finds it absent is reading
+	// a listing from before the field existed, not a world with none.
+	Unlocatable int `json:"unlocatable"`
 }
 
 // ListedEntity is one entity in a listing. Coordinates are the saved ones,
@@ -37,16 +41,28 @@ type ListedEntity struct {
 //
 // The order is total, down to the unique id, so the same world bytes give the
 // same listing and two listings can be compared with diff.
+//
+// An entity saved at a position that is not a finite number is counted in the
+// header and not listed. JSON cannot carry such a coordinate, the order above
+// is not an order once NaN is compared, and a line without a position is no
+// use to a reader that came for one; failing instead would let one corrupt
+// mob withhold every other line.
 func RenderListing(entities []Entity, stats ScanStats, takenAt time.Time, sourceKind string, types []string) (string, error) {
 	wanted := map[string]bool{}
 	for _, t := range types {
 		wanted[t] = true
 	}
 	var kept []Entity
+	unlocatable := 0
 	for _, e := range entities {
-		if len(wanted) == 0 || wanted[e.Identifier] {
-			kept = append(kept, e)
+		if len(wanted) != 0 && !wanted[e.Identifier] {
+			continue
 		}
+		if !finite(e.X) || !finite(e.Y) || !finite(e.Z) {
+			unlocatable++
+			continue
+		}
+		kept = append(kept, e)
 	}
 	sort.Slice(kept, func(i, j int) bool {
 		a, b := kept[i], kept[j]
@@ -70,7 +86,10 @@ func RenderListing(entities []Entity, stats ScanStats, takenAt time.Time, source
 	if !takenAt.IsZero() {
 		taken = takenAt.UTC().Format(time.RFC3339)
 	}
-	sortedTypes := append([]string(nil), types...)
+	var sortedTypes []string
+	for t := range wanted {
+		sortedTypes = append(sortedTypes, t)
+	}
 	sort.Strings(sortedTypes)
 
 	var b bytes.Buffer
@@ -81,6 +100,7 @@ func RenderListing(entities []Entity, stats ScanStats, takenAt time.Time, source
 		Types:        sortedTypes,
 		Entities:     len(kept),
 		Orphaned:     stats.Orphaned,
+		Unlocatable:  unlocatable,
 	}); err != nil {
 		return "", fmt.Errorf("encode listing header: %w", err)
 	}
@@ -96,4 +116,8 @@ func RenderListing(entities []Entity, stats ScanStats, takenAt time.Time, source
 		}
 	}
 	return b.String(), nil
+}
+
+func finite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
