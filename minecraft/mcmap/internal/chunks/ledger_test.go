@@ -106,6 +106,40 @@ func TestLedger_AFailedWriteIsRetried(t *testing.T) {
 	}
 }
 
+// Replacing the ledger is a rename, and a rename the directory has not been
+// flushed for can be undone by the node stopping. So a count is not
+// recorded until the directory holding the new ledger is on the disk, and
+// one whose directory could not be flushed is not reported as recorded.
+func TestLedger_ACountIsNotRecordedUntilItsDirectoryIsFlushed(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "chunks")
+	path := filepath.Join(dir, "seen.bin")
+	l := openLedger(t, path)
+	mustObserve(t, l, set(a), t0)
+
+	var flushed []string
+	l.flush = func(d string) error {
+		flushed = append(flushed, d)
+		// By now the directory names the new ledger, or flushing it would
+		// make the old one durable instead.
+		if r, ok := openLedger(t, path).Last(); !ok || !r.At.Equal(t0.Add(time.Minute)) {
+			t.Errorf("the directory was flushed before the new ledger was in it: %+v", r)
+		}
+		return nil
+	}
+	mustObserve(t, l, set(a, b), t0.Add(time.Minute))
+	if len(flushed) != 1 || flushed[0] != dir {
+		t.Fatalf("flushed %v, want %s once", flushed, dir)
+	}
+
+	l.flush = func(string) error { return errors.New("input/output error") }
+	if _, err := l.Observe(set(a), t0.Add(2*time.Minute)); err == nil {
+		t.Fatal("a count whose ledger may not survive a stop reported success")
+	}
+	if err := l.Acknowledge(t0.Add(time.Minute)); err == nil {
+		t.Fatal("an acknowledgement that may not survive a stop reported success")
+	}
+}
+
 func TestLedger_AcknowledgingAcceptsTheWorldAsItIsNow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "seen.bin")
 	l := openLedger(t, path)
