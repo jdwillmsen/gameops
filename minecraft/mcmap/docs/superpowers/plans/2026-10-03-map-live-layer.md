@@ -391,12 +391,22 @@ Recorded from the human's answers; the task bodies above already reflect them.
   - *Consequences:* the plain-JSON polling fallback is not needed. The 15 s heartbeat is required, and the limit it answers to is HAProxy's 30 s, not nginx's 60 s. The heartbeat interval must never be raised to 30 s or beyond.
   - *Not covered:* the HAProxy test ran the current LTS image (3.4.6) against the template's defaults, not the version on the load balancer host, and nothing was streamed through the production path itself, since that would need a route that is not in git. The first end-to-end confirmation is Task 12's recorded move.
 
+## Assumptions taken to keep the work moving
+
+The owner asked for this to go to production before answering Q2 to Q4, so
+each was settled with the most conservative workable choice. They are
+assumptions, not decisions: overruling one is a value change, not a redesign.
+
+- **A1 (answers Q2). Roll back when the 30-minute average of `mc_agent_server_tps` sits more than 2.0 below the average for the same hours over the previous seven days.** Rolling back means removing the pack's init step and restarting, which is the kill switch. Lowering `PACK_MOB_CAP` is not a substitute, because the cap does not bound the scan.
+- **A2 (answers Q3). The restart that activates the pack rides the chart rollout that adds it,** announced by the existing PreSync hook's two-minute hold. No separate window.
+- **A3 (answers Q4). The bridge serves at most 4 concurrent `/script` waiters and answers 429 past that.** One is mcmap; the rest is headroom for a restart overlap and a debugging `curl`.
+
 ## Open questions needing a human decision
 
 Q1. **Does the gateway pass SSE through unbuffered?** Resolved 2026-10-05 by measurement, no decision needed: it does, and no gateway policy or platform change is required. See V1. The number is kept so references to Q2–Q4 stay valid.
 
-Q2. **What TPS drop triggers a rollback, decided before the rollout?** This is more load-bearing since D3 raised the default cap to 1,000 mobs per dimension: a 1 Hz `getEntities()` across three dimensions at 2.5x the first draft's volume is a real cost on a server that already averages 12–15 TPS with its own alert tuned around that, and the self-throttle is a mitigation, not a guarantee. Task 12 treats a drop past this threshold as a rollback and Task 11 uses it as a stop condition, so both are undefined until it is set. **Decision needed:** the threshold as a number and a window (for example, X TPS below the same hours of the prior week, sustained for Y minutes), who makes the call, and whether lowering the cap counts as a response short of rollback.
+Q2. *(settled for now by A1 above)* **What TPS drop triggers a rollback, decided before the rollout?** This is more load-bearing since D3 raised the default cap to 1,000 mobs per dimension: a 1 Hz `getEntities()` across three dimensions at 2.5x the first draft's volume is a real cost on a server that already averages 12–15 TPS with its own alert tuned around that, and the self-throttle is a mitigation, not a guarantee. Task 12 treats a drop past this threshold as a rollback and Task 11 uses it as a stop condition, so both are undefined until it is set. **Decision needed:** the threshold as a number and a window (for example, X TPS below the same hours of the prior week, sustained for Y minutes), who makes the call, and whether lowering the cap counts as a response short of rollback.
 
-Q3. **Does the restart that activates the pack get its own window?** The pack only takes effect on a server restart, and 727, 728 and 730 all have rollouts of their own in the same period. **Decision needed:** whether 695's restart rides along with one of theirs, or gets announced separately.
+Q3. *(settled for now by A2 above)* **Does the restart that activates the pack get its own window?** The pack only takes effect on a server restart, and 727, 728 and 730 all have rollouts of their own in the same period. **Decision needed:** whether 695's restart rides along with one of theirs, or gets announced separately.
 
-Q4. **Does the bridge need a second long-poll slot?** `GET /script` is a long-lived request on a sidecar whose `http.Server` has no connection cap. Today only mcmap calls it. **Decision needed:** whether to bound concurrent `/script` waiters (and refuse past the bound), or accept that the bearer token is the only control, as it is for every other bridge endpoint.
+Q4. *(settled for now by A3 above)* **Does the bridge need a second long-poll slot?** `GET /script` is a long-lived request on a sidecar whose `http.Server` has no connection cap. Today only mcmap calls it. **Decision needed:** whether to bound concurrent `/script` waiters (and refuse past the bound), or accept that the bearer token is the only control, as it is for every other bridge endpoint.
