@@ -80,6 +80,10 @@
   const grid = new Grid({ tileSize: TILE, zIndex: 5, minZoom: -12, maxZoom: 8 });
 
   const dimension = (id) => info && info.dimensions.find((d) => d.id === id);
+
+  // Tells the live layer, which is a file of its own, that what it should
+  // be showing may have changed: the dimension, the login, or the map data.
+  const announce = () => document.dispatchEvent(new CustomEvent('mcmap:view'));
   const version = (d) => (d.renderedAt ? Date.parse(d.renderedAt) : 0);
 
   function parseHash() {
@@ -129,6 +133,7 @@
     for (const b of el.tabs.children) b.setAttribute('aria-pressed', String(b.dataset.id === id));
     writeHash();
     describe();
+    announce();
   }
 
   function tabs() {
@@ -182,6 +187,7 @@
     el.login.hidden = !locked;
     // Leaflet measured the map while it was hidden.
     if (!locked) map.invalidateSize();
+    announce();
   }
 
   function note(text, problem) {
@@ -289,7 +295,16 @@
       }
     }
     describe();
+    announce();
   }
+
+  // What the live layer builds on. The map works the same without it.
+  window.mcmap = {
+    map,
+    dimension: () => current,
+    live: () => Boolean(info && info.live),
+    reload: load,
+  };
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 
