@@ -87,7 +87,7 @@ genuine fault: an unreadable mount or unparseable contents.
 
 | Var | Required | Default | Meaning |
 |---|---|---|---|
-| `BRIDGE_TOKEN` | yes | — | Bearer token required on every `/command`, `/permissions`, `/allowlist`, `/events` call |
+| `BRIDGE_TOKEN` | yes | — | Bearer token required on every `/command`, `/permissions`, `/allowlist`, `/events`, `/script`, `/snapshot` call |
 | `CONSOLE_PASSWORD` | yes | — | Must match the server's `WEBSOCKET_PASSWORD` |
 | `HTTP_ADDR` | no | `:8080` | Bridge's own HTTP bind address |
 | `CONSOLE_ADDR` | no | `127.0.0.1:8765` | Server's websocket console address |
@@ -127,6 +127,7 @@ the contract this bridge depends on, not a second copy of the chart's config.
 | `GET /permissions` | bearer | Parsed `permissions.json` |
 | `GET /allowlist` | bearer | Parsed `allowlist.json` |
 | `GET /events?since=<id>` | bearer | Typed events (connect/disconnect/crash/content-error), fed from the same console websocket's stdout/stderr/logHistory broadcasts - no separate log-tailing. Events replayed from a logHistory backfill (sent on every connect/redial) carry `"backfill":true`; live stdout/stderr events omit the field, so a consumer can ignore replayed history instead of treating it as a fresh arrival |
+| `GET /script?since=<id>&wait=<ms>` | bearer | The map script pack's latest records, as a long-poll: `{"records":[{"id","at","data"}],"gap":true}`. See [Script records](#script-records) |
 | `POST /snapshot` | bearer | `{"have": {"<world>/db/000123.ldb": <size>, ...}}` → a tar of the world as of one consistent save. See [Snapshots](#snapshots) |
 | `GET /healthz` | none | Liveness - process is up. Stays green while the console is down, since a restart cannot fix a server that has not opened its console yet |
 | `GET /readyz` | none | Readiness - 200 only while the console websocket is established, so a bridge whose console auth is rejected stops receiving traffic |
@@ -153,6 +154,76 @@ anchored on the server's log-level tag, so nothing a player types can raise
 it. The world map's chunk count says how many whole chunks went; it cannot
 see a chunk that lost only part of its data, which is why this signal
 stands on its own.
+
+## Script records
+
+The world map's script pack prints its samples to the server log, one JSON
+record per line, about once a second:
+
+```
+[2026-10-05 12:00:00:123 INFO] [Scripting] MCMAP1 {"gen":417,"kind":"players",...}
+```
+
+The bridge keeps the latest 256 of them and serves them from `GET /script`.
+A line counts only if it starts with the server's log prefix, then the
+`[Scripting]` tag, then `MCMAP1` and a space. Another pack's output, a later
+format (`MCMAP2`) and the same text further along a line are all ignored.
+What follows the sentinel is passed through as `data` without being read;
+`at` is when the bridge received the line.
+
+| Parameter | Meaning |
+|---|---|
+| `since` | The `id` of the last record the caller has. Only newer ones are returned. Absent or `0` returns everything retained |
+| `wait` | Milliseconds to hold the request open when nothing is newer than `since`. Absent or `0` answers at once. Anything over 25,000 is treated as 25,000 |
+
+The response is `{"records":[...]}`, oldest first, and `records` is an empty
+list, never absent, when the wait ends with nothing new. Each record is
+`{"id": <integer>, "at": "<RFC 3339 time>", "data": {<the record>}}`. A
+request answers as soon as one record is newer than `since`, so a reader
+that passes back the last `id` it saw gets each record once, as it arrives.
+
+`"gap":true` is added when records the caller had not seen are no longer
+held: either it fell more than 256 records behind, or its `since` is higher
+than any id this process has handed out, which means the bridge restarted
+and ids began again at 1. In both cases `records` holds everything retained
+and the reader carries on from the last `id` in it.
+
+| Status | Meaning |
+|---|---|
+| `400` | `since` or `wait` is not a non-negative integer |
+| `429` | Four requests are already waiting. Only a request that has to wait counts; one that can be answered at once is always served |
+
+Records replayed from history when the console reconnects are not stored:
+they are old samples, and the receive time is the only time the bridge can
+give them. Every live record line is counted once:
+
+| `mc_console_bridge_script_records_total{result}` | Meaning |
+|---|---|
+| `ok` | Stored as it came |
+| `nul_stripped` | Stored after a NUL byte was removed from the front of the line. The server puts one there after a line longer than 4 KB, so this counts records that were too long, one line late |
+| `oversize` | Dropped: more than 4,096 bytes after the sentinel |
+| `unparseable` | Dropped: not a JSON object |
+
+`mc_console_bridge_script_last_record_timestamp_seconds` is when the latest
+stored record was received. The pack prints a heartbeat record every sample
+even on an empty server, so this going stale means the pack or the console
+connection stopped, not that nobody is online.
+
+### Why this is not `/events`
+
+`/events` is the agent's roster feed: a 2,000-entry ring of joins, leaves,
+crashes and content errors, kept as long as possible so a slow poller
+misses none. Script records are the opposite kind of data. One sample is up
+to about 50 lines, every second, whether or not anyone is online, and each
+is worthless once the next sample exists. Through the event ring they would
+push every join out within the hour and ride along on every roster poll.
+So they have a short ring of their own, and a request that waits for the
+next record instead of a poll interval.
+
+A record line is also never matched against the event patterns. It carries
+names players choose, for themselves and for the mobs they name, and those
+patterns are not anchored to the start of a line: a mob named `fatal error`
+would otherwise be reported as a crash once a second.
 
 ## Snapshots
 
@@ -292,7 +363,8 @@ tag — never from a branch.
 Stage 0/1 scaffold: allowlist, permissions/allowlist parsing, console
 websocket client, and HTTP surface are implemented and tested. `/events` is
 wired end-to-end off the console websocket's own broadcasts (no separate
-log source), with a bounded in-memory buffer and ID-based paging. The
+log source), with a bounded in-memory buffer and ID-based paging; `/script`
+reads the same broadcasts into a ring of its own. The
 crash/content-log detection regexes in `events.go` are still best-effort -
 they haven't been validated against a real crash or content-log error, only
 against the documented connect/disconnect line shapes.
