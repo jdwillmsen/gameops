@@ -533,11 +533,25 @@ operator's in-game `/say` arrives in, and accepting it would grant the
 console's trust to a line identified only by a display name.
 
 Every public reply the agent makes leaves as a console `say` and is
-broadcast back to the agent's own connection in exactly that shape, so the
-voice that sent it is the only thing that can tell the two apart: a line
-`BridgeVoice.Say` just broadcast is dropped on arrival
-(`BridgeVoice.JustSaid`). Without that, a reply opening with `!` - something
-a model answer can easily do - would be dispatched as an operator command.
+broadcast back to the agent's own connection in exactly that shape, and
+nothing in the packet separates the two. A reply opening with `!` - something
+a model answer can easily do, and whose text a player's question influences -
+would otherwise be dispatched as an operator command.
+
+What prevents that is the shape of the line, not recognising it after the
+fact: `BridgeVoice.Say` prefixes any broadcast that would open with `!`, or
+with a target selector the server expands into the leading position, so no
+echo of the agent's own speech can parse as a command in the first place.
+Text later in the line is untouched, which is what keeps a reply naming
+`!help` or `@server` readable.
+
+`BridgeVoice.JustSaid` still drops a line the voice just broadcast, and is
+what stops the agent answering its own reply forever when an echo carries
+the mention token. It is deliberately not the privilege boundary: it is a
+bounded, in-process, per-line cache, so it fails open whenever a record was
+evicted or expired, the process restarted mid-flight, the server rewrote the
+text, or another speaker put the line on the wire. A miss there costs a
+self-answer that the per-actor rate limit bounds, not operator trust.
 
 ## Permission model
 

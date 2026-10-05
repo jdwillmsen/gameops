@@ -997,8 +997,12 @@ func handleText(ctx context.Context, text *packet.Text, selfXUID string, sibling
 	body := chat.Body(text)
 	// The other half of the self/sibling guard. A broadcast reply leaves as
 	// a console `say` and returns under the console's identity, not this
-	// agent's XUID, so IsSelfOrSibling cannot see it -- and a reply opening
-	// with CommandPrefix would then be dispatched as an operator command.
+	// agent's XUID, so IsSelfOrSibling cannot see it, and an echo carrying
+	// the mention token is a question the agent would answer forever.
+	// Dropping it here is what breaks that loop. It is not what keeps the
+	// echo from running as an operator command: the voice makes its own
+	// lines un-command-shaped before they leave, so this missing costs a
+	// self-answer rather than operator trust.
 	if id == chat.ServerOrigin && justBroadcast(pctx, body) {
 		return
 	}

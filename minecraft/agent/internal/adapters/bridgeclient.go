@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,6 +72,28 @@ func (c *BridgeClient) getPermissions(ctx context.Context) (map[string]string, e
 	return out, nil
 }
 
+// statusError is a non-2xx answer from the bridge, carrying the status so a
+// caller can tell a refusal apart from a failure that may still have reached
+// the console. The message is unchanged from the plain error it replaces.
+type statusError struct {
+	status int
+	err    error
+}
+
+func (e statusError) Error() string { return e.err.Error() }
+
+// refusedBeforeConsole reports whether err is the bridge declining a command
+// outright — a 4xx, which its allowlist answers with before the console is
+// touched. Anything else (a timeout, a transport failure, a 5xx) leaves open
+// that the command ran, and must not be treated as if it had not.
+func refusedBeforeConsole(err error) bool {
+	var se statusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	return se.status >= 400 && se.status < 500
+}
+
 // maxErrorBodyBytes caps how much of a non-2xx response body do() reads
 // into an error message, so a misbehaving bridge can't make a failure
 // message unboundedly large.
@@ -100,7 +123,10 @@ func (c *BridgeClient) do(ctx context.Context, method, path string, body io.Read
 
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		return fmt.Errorf("bridge: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg)))
+		return statusError{
+			status: resp.StatusCode,
+			err:    fmt.Errorf("bridge: %s %s: status %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg))),
+		}
 	}
 
 	if out == nil {

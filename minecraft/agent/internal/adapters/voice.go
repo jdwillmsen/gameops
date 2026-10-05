@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 )
@@ -68,10 +70,51 @@ type BridgeVoice struct {
 	now  func() time.Time
 }
 
-// saidLine is one broadcast awaiting its own echo.
+// saidLine is one broadcast awaiting its own echo. echo is set only when
+// line carries a target selector the server will have expanded by the time
+// it comes back, and then matches what the expansion can have produced.
 type saidLine struct {
 	line string
+	echo *regexp.Regexp
 	at   time.Time
+}
+
+// bareSelector matches a Bedrock target selector that occupies a whole
+// token, optionally with an argument block: the forms `say` expands
+// server-side. The trailing word boundary is what keeps @server -- the
+// agent's own mention token, and so a routine thing for a reply to contain
+// -- from being read as @s followed by "erver".
+var bareSelector = regexp.MustCompile(`@(?:initiator|a|e|p|r|s)(?:\[[^\]]*\])?\b`)
+
+// echoPattern returns a matcher for the line the server will broadcast for
+// line, or nil when the two are the same string.
+//
+// An expanded selector is the one rewriting that defeats comparing the echo
+// against what was said, so the literal text around each selector is matched
+// exactly and only the selector itself is left open. Anchored, so a shorter
+// or longer line cannot pass as this one.
+func echoPattern(line string) *regexp.Regexp {
+	spans := bareSelector.FindAllStringIndex(line, -1)
+	if spans == nil {
+		return nil
+	}
+	var pattern strings.Builder
+	pattern.WriteString(`\A`)
+	end := 0
+	for _, span := range spans {
+		pattern.WriteString(regexp.QuoteMeta(line[end:span[0]]))
+		pattern.WriteString(`.*`)
+		end = span[1]
+	}
+	pattern.WriteString(regexp.QuoteMeta(line[end:]))
+	pattern.WriteString(`\z`)
+	// Every variable part of the pattern went through QuoteMeta, so this
+	// cannot fail on the agent's own text.
+	re, err := regexp.Compile(pattern.String())
+	if err != nil {
+		return nil
+	}
+	return re
 }
 
 // sayEchoWindow bounds how long a broadcast stays recognisable as this
@@ -147,11 +190,44 @@ func (v *BridgeVoice) Tell(ctx context.Context, xuid, message string) error {
 // case, not an edge one.
 var sayLineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ")
 
+// sayNeutralPrefix opens a broadcast whose own first character would
+// otherwise decide how the echo of it is read. It is two visible ASCII
+// characters rather than a space because the agent's own parser trims
+// leading whitespace before looking for CommandPrefix: a space would be
+// stripped on the way back in and neutralise nothing. It reads as an aside
+// in chat and leaves the rest of the line byte-for-byte intact.
+const sayNeutralPrefix = "- "
+
+// commandShapedLead reports whether line opens with a character that lets
+// the echo of it be dispatched as a command.
+//
+// Two characters qualify. CommandPrefix is the obvious one: the echo of a
+// reply opening with it is indistinguishable from an operator typing the
+// same thing at the console, and is trusted at operator level. A target
+// selector is the subtle one -- the server expands `@a` and friends inside a
+// `say` message, so a line that *opens* with one has a first character
+// chosen by the expansion rather than by the agent, and `@a !op-only` comes
+// back as ` !op-only` once the selector resolves to nobody. A selector later
+// in the line cannot reach the front and is left alone, which is what keeps
+// a reply mentioning @server readable.
+func commandShapedLead(line string) bool {
+	return strings.HasPrefix(line, chat.CommandPrefix) || strings.HasPrefix(line, "@")
+}
+
 // Say broadcasts message to everyone via the console's own `say`, which is
 // the entire reason replies go through the bridge rather than a connected
 // player's own chat: it carries the console's name rather than a player's.
 // The message is flattened to one line first; `say` with nothing left to
 // broadcast is an error rather than a silently discarded reply.
+//
+// A line that would come back command-shaped is prefixed before it leaves,
+// so no echo of the agent's own speech can ever parse as a command. This is
+// the privilege boundary, not JustSaid below: the console origin is trusted
+// at operator level, and every way of recognising an echo after the fact
+// fails open somewhere -- an evicted or expired record, a line this process
+// never broadcast, a restart mid-flight, text the server rewrote. Refusing
+// the reply outright would be the other way to hold the invariant, at the
+// cost of dropping an answer a player asked for.
 //
 // The line is remembered before it is sent, not after: the server can echo
 // it back to the agent's own connection before this call returns, and an
@@ -161,8 +237,19 @@ func (v *BridgeVoice) Say(ctx context.Context, message string) error {
 	if line == "" {
 		return fmt.Errorf("bridge voice: say: message is empty after flattening line breaks, nothing to broadcast")
 	}
+	if commandShapedLead(line) {
+		line = sayNeutralPrefix + line
+	}
 	v.remember(line)
 	if _, err := v.client.runCommand(ctx, "say "+line); err != nil {
+		// A refused command never reached the console, so no echo is coming
+		// and the record would otherwise sit there swallowing an operator
+		// who happened to type the same line. Only an outright refusal is
+		// forgotten: a timeout or a 5xx may have run, and dropping the
+		// record on those is how the agent ends up obeying its own reply.
+		if refusedBeforeConsole(err) {
+			v.forget(line)
+		}
 		return fmt.Errorf("bridge voice: say: %w", err)
 	}
 	return nil
@@ -175,9 +262,14 @@ func (v *BridgeVoice) Say(ctx context.Context, message string) error {
 // server broadcasts that back to the agent's own connection in the very
 // shape an operator typing `say !announce ...` produces — no XUID and the
 // console's name. Nothing in the packet separates the two, so the voice that
-// said it is the only thing that can: without this, a reply of the agent's
-// own that happened to open with CommandPrefix would be dispatched as a
-// command at operator level.
+// said it is the only thing that can.
+//
+// What this is for is the reply loop: an echo carrying the mention token
+// would otherwise be a question the agent asks and answers forever. It is
+// deliberately not what stops an echo being run as a command — Say makes
+// the line un-command-shaped before it leaves, because every after-the-fact
+// match fails open somewhere and a privilege boundary cannot. A miss here
+// costs a self-answer the per-actor rate limit bounds, not operator trust.
 //
 // Consuming the record keeps one echo from vetoing the next: an operator who
 // types back exactly what the agent just said is answered, having only lost
@@ -186,8 +278,21 @@ func (v *BridgeVoice) JustSaid(line string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.expire()
+	return v.take(line)
+}
+
+// forget drops the record of line kept for an echo that is not coming.
+func (v *BridgeVoice) forget(line string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.take(line)
+}
+
+// take removes one record of line and reports whether there was one.
+// Callers hold v.mu.
+func (v *BridgeVoice) take(line string) bool {
 	for i, s := range v.said {
-		if s.line == line {
+		if s.line == line || (s.echo != nil && s.echo.MatchString(line)) {
 			v.said = append(v.said[:i], v.said[i+1:]...)
 			return true
 		}
@@ -202,7 +307,7 @@ func (v *BridgeVoice) remember(line string) {
 	if len(v.said) >= sayEchoMemory {
 		v.said = v.said[1:]
 	}
-	v.said = append(v.said, saidLine{line: line, at: v.now()})
+	v.said = append(v.said, saidLine{line: line, echo: echoPattern(line), at: v.now()})
 }
 
 // expire drops records too old to still be awaiting an echo. Callers hold
