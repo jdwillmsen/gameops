@@ -223,6 +223,12 @@ func register(c Census, scrapedAt time.Time, opts MetricsOptions) *prometheus.Re
 	gauge("mc_census_orphaned_records",
 		"Actor records no chunk lists. The game does not load them and no other series counts them.").
 		WithLabelValues().Set(float64(c.Stats.Orphaned))
+	// Always exported, zero included. A refused list hides live actors
+	// among the leftovers above, and a step in that gauge cannot say which
+	// of the two it was made of.
+	gauge("mc_census_scan_skipped_chunk_lists",
+		"Chunk actor lists the scan refused, for a bad key or a bad value. Each refused list orphans the live actors it named.").
+		WithLabelValues().Set(float64(c.Stats.SkippedChunkLists()))
 
 	return reg
 }

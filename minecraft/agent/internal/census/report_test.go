@@ -220,6 +220,25 @@ func TestRenderStatesOrphanedRecordsAndSkippedDigp(t *testing.T) {
 	if !strings.Contains(out, "12 bad value") || !strings.Contains(out, "3 bad key") {
 		t.Errorf("report does not state the chunk lists it could not read\n---\n%s", out)
 	}
+	if !strings.Contains(out, "\n  chunk actor lists unreadable: 3 bad key, 12 bad value; their actors are live and among the orphaned\n") {
+		t.Errorf("report does not hang the unread chunk lists under the orphaned line\n---\n%s", out)
+	}
+}
+
+func TestRenderStatesSkippedDigpOnItsOwnWhenNothingWasOrphaned(t *testing.T) {
+	// A refused list that named no surviving record orphans nothing, so
+	// there is no orphaned line to continue and no actor to call orphaned.
+	c := sampleCensus()
+	c.Stats.DigpSkippedKey = 2
+	c.Stats.DigpSkippedValue = 1
+	out := Render(c, DefaultReportOptions())
+
+	if !strings.Contains(out, "\nchunk actor lists unreadable: 2 bad key, 1 bad value") {
+		t.Errorf("report does not state the unread chunk lists as a line of their own\n---\n%s", out)
+	}
+	if strings.Contains(out, "orphaned records") || strings.Contains(out, "among the orphaned") {
+		t.Errorf("report speaks of orphaned actors when none were counted\n---\n%s", out)
+	}
 }
 
 func TestRenderOmitsTheSkippedLineWhenEveryChunkListWasRead(t *testing.T) {
