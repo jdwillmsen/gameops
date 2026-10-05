@@ -201,7 +201,7 @@ func listFrom(ctx context.Context, source census.Source, types []string, stdout 
 func splitTypes(value string) []string {
 	var types []string
 	for _, t := range strings.Split(value, ",") {
-		if t = strings.TrimPrefix(strings.TrimSpace(t), "minecraft:"); t != "" {
+		if t = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(t), "minecraft:")); t != "" {
 			types = append(types, t)
 		}
 	}

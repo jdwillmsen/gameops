@@ -819,7 +819,7 @@ func TestRunRefusesTypesWithoutAListing(t *testing.T) {
 }
 
 func TestRunRefusesATypesFilterThatNamesNothing(t *testing.T) {
-	for _, value := range []string{",", "minecraft:", " "} {
+	for _, value := range []string{",", "minecraft:", " ", "minecraft: "} {
 		t.Run(value, func(t *testing.T) {
 			dir := t.TempDir()
 			buildArchive(t, dir)

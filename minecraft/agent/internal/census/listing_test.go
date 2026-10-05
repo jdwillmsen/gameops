@@ -165,3 +165,25 @@ func TestRenderListingNamesARepeatedTypeOnce(t *testing.T) {
 		t.Errorf("listed %d entities with a header claiming %d, want each zombie once", len(listed), header.Entities)
 	}
 }
+
+// The unique id is not a key the save enforces, so two records can share it
+// and everything before it in the order while printing different lines.
+func TestRenderListingOrdersRecordsThatDifferOnlyInWhatTheyPrint(t *testing.T) {
+	plain := Entity{Identifier: "zombie", Dimension: Overworld, X: 1, Y: 64, Z: 1, UniqueID: 7}
+	kept := plain
+	kept.Persistent = true
+	named := kept
+	named.CustomName = "Bob"
+
+	first, err := RenderListing([]Entity{plain, kept, named}, ScanStats{}, time.Time{}, KindArchive, nil)
+	if err != nil {
+		t.Fatalf("RenderListing: %v", err)
+	}
+	second, err := RenderListing([]Entity{named, kept, plain}, ScanStats{}, time.Time{}, KindArchive, nil)
+	if err != nil {
+		t.Fatalf("RenderListing: %v", err)
+	}
+	if first != second {
+		t.Errorf("listing depends on input order\n--- first\n%s--- second\n%s", first, second)
+	}
+}
