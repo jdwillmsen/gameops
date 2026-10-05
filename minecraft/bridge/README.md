@@ -150,7 +150,9 @@ the history mc-server-runner replays on every reconnect is not counted
 again, and `mc_console_bridge_world_corruption_last_seen_timestamp_seconds`
 is the time printed on the latest one. The match is
 anchored on the server's log-level tag, so nothing a player types can raise
-it. The world map's chunk count says how much was lost.
+it. The world map's chunk count says how many whole chunks went; it cannot
+see a chunk that lost only part of its data, which is why this signal
+stands on its own.
 
 ## Snapshots
 
