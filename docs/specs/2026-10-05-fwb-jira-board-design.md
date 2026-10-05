@@ -14,7 +14,7 @@ tenant, alerts) keeps its existing tracker.
 
 Success looks like this: any of the three can add a card in a few seconds,
 the board shows at a glance what is in flight and what is stalled, and the
-Done column reads as a history of the world.
+list of finished cards reads as a history of the world.
 
 ## Decisions
 
@@ -85,8 +85,11 @@ the same workflow as any Build, so they are a Category value.
 - **In Progress**: someone is actively on it.
 - **On Hold**: started and paused. Long builds stall; this keeps In Progress
   honest without pretending the build is abandoned.
-- **Done**: finished. In a permanent world this never resets, so it doubles
-  as the record of what has been built.
+- **Done**: finished. The column shows recent finishes only: Jira clears a
+  card from a team-managed board 14 days after it lands here. Nothing is
+  deleted. The lasting record of what has been built is the full list of
+  done cards, reached from the column's "See all Done work items" link or
+  the space's list view, and in a permanent world that list never resets.
 
 No column limits. All five types share these columns.
 
@@ -166,7 +169,9 @@ Split by who can do each step.
 - A card of each type can be created with only a summary.
 - The Releases feature is on: the option to create a version is offered.
 - A card labelled `wont-do` and moved to Done is returned by a filter on
-  that label.
+  that label in the space's list view, which is where it will still be found
+  once the board has cleared it.
+- The full list of done cards opens from the Done column.
 - Each of the three players can create a card and move it between columns.
 - Signed in as one of the two casual players, the main site's `JDWLABS` and
   `CAREER` spaces are not reachable. They hold no account on that site, so
