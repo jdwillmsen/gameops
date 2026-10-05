@@ -19,6 +19,14 @@
       <button type="submit">Go</button>
     </form>
     <label class="toggle"><input id="grid" type="checkbox"> Grid</label>
+    <nav id="live-filters" class="chips" aria-label="Live markers" hidden>
+      <button type="button" data-live="on" aria-pressed="true">Live</button>
+      <button type="button" data-live="players" aria-pressed="true"><i class="dot players"></i>Players <span class="count"></span></button>
+      <button type="button" data-live="hostile" aria-pressed="true"><i class="dot hostile"></i>Hostile <span class="count"></span></button>
+      <button type="button" data-live="passive" aria-pressed="true"><i class="dot passive"></i>Passive <span class="count"></span></button>
+      <button type="button" data-live="villager" aria-pressed="true"><i class="dot villager"></i>Villagers <span class="count"></span></button>
+      <button type="button" data-live="other" aria-pressed="true"><i class="dot other"></i>Other <span class="count"></span></button>
+    </nav>
     <button id="copy" type="button">Copy link</button>
     <span id="who" class="who" hidden></span>
     <button id="logout" type="button" hidden>Log out</button>
@@ -39,9 +47,11 @@
   </section>
   <footer class="bar foot">
     <output id="coords" aria-live="off">X —, Z —</output>
+    <output id="live" class="live" aria-live="off" hidden></output>
     <span id="status" role="status"></span>
   </footer>
   <script src="lib/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
+  <script src="live.js"></script>
 </body>
 </html>

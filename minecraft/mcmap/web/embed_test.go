@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"io/fs"
 	"regexp"
 	"testing"
@@ -22,6 +23,12 @@ func TestEveryAssetThePageLoadsIsEmbedded(t *testing.T) {
 		if _, err := fs.Stat(FS, string(m[1])); err != nil {
 			t.Errorf("index.html loads %s, which is not embedded: %v", m[1], err)
 		}
+	}
+	// The live layer is a file of its own, so that the map works the same
+	// without it; the page has to ask for it, after the script it builds on.
+	app, live := bytes.Index(page, []byte(`src="app.js"`)), bytes.Index(page, []byte(`src="live.js"`))
+	if app < 0 || live < app {
+		t.Errorf("index.html must load live.js after app.js (found at %d and %d)", live, app)
 	}
 	// Referenced from Leaflet's stylesheet rather than from the page.
 	for _, name := range []string{"lib/leaflet/images/layers.png", "lib/leaflet/LICENSE"} {

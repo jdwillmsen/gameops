@@ -69,8 +69,36 @@ input[type="number"] { width: 6.5rem; }
 
 .who { color: var(--dim); }
 
+.chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.chips button { display: flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; }
+/* A filter that is off is dimmed rather than outlined, so the colour key
+   stays readable beside the ones that are on. */
+.chips button[aria-pressed="false"] { opacity: 0.5; }
+.chips .count { color: var(--dim); font-variant-numeric: tabular-nums; }
+.chips .count:empty { display: none; }
+
+.dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 1px solid #0b0c0e; }
+.dot.players { background: #ffffff; }
+.dot.hostile { background: #e5534b; }
+.dot.passive { background: #5cc8f0; }
+.dot.villager { background: #d9a441; }
+.dot.other { background: #9aa3ad; }
+
+/* Fixed width, or the footer shifts with every digit of the age. */
+.live { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 6.5rem; }
+
+.leaflet-tooltip.live-name, .leaflet-tooltip.live-tip {
+  background: rgba(20, 22, 26, 0.85);
+  border: 1px solid var(--line);
+  color: var(--text);
+  box-shadow: none;
+  padding: 0.05rem 0.4rem;
+}
+.leaflet-tooltip.live-name.me { border-color: var(--accent); color: var(--accent); }
+.leaflet-tooltip.live-name::before, .leaflet-tooltip.live-tip::before { display: none; }
+
 /* While logged out the map and its controls are not there to use. */
-.locked #map, .locked .tabs, .locked .goto, .locked .toggle, .locked #copy, .locked .foot { display: none; }
+.locked #map, .locked .tabs, .locked .goto, .locked .toggle, .locked .chips, .locked #copy, .locked .foot { display: none; }
 
 .login {
   flex: 1;
