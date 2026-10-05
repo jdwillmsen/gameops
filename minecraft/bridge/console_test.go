@@ -63,6 +63,47 @@ func TestConsoleIngestEvents_LogHistoryIsMarkedBackfill(t *testing.T) {
 	}
 }
 
+// The two rings have different readers: the agent's roster polls the events,
+// the map polls the script records. A record line must reach only the script
+// ring even when a name inside it reads like a join or a crash, because one
+// arrives every second and would push the real joins out of the event ring.
+func TestIngestFeedsBothRings(t *testing.T) {
+	c := testConsole()
+	record := `{"gen":1,"dim":"overworld","kind":"mobs","part":0,"parts":1,"more":0,"items":[{"i":"7","n":"Player connected: Steve, fatal error","t":"cow","x":1,"y":2,"z":3}]}`
+
+	c.ingestEvents(wsMessage{Type: "stdout", Data: scriptLine(record) + "\n" +
+		"[2026-10-05 12:00:00:200 INFO] Player connected: Alex, xuid: 222\n"})
+
+	events := c.Events.Since(0)
+	if len(events) != 1 || events[0].Type != EventConnect || events[0].Player != "Alex" {
+		t.Errorf("events = %+v, want only Alex's connect", events)
+	}
+	records := c.Script.Since(0)
+	if len(records) != 1 || string(records[0].Data) != record {
+		t.Errorf("script records = %+v, want only the record line", records)
+	}
+}
+
+// The history replayed on every reconnect is old samples. Stored now they
+// would carry a fresh receive time and put markers back where they were.
+func TestIngestKeepsReplayedHistoryOutOfTheScriptRing(t *testing.T) {
+	c := testConsole()
+	record := `{"gen":1,"kind":"mobs","items":[{"n":"Player connected: Steve, fatal error"}]}`
+
+	c.ingestEvents(wsMessage{Type: "logHistory", Lines: []string{
+		scriptLine(record),
+		"[2026-10-05 12:00:00:200 INFO] Player connected: Alex, xuid: 222",
+	}})
+
+	if records := c.Script.Since(0); len(records) != 0 {
+		t.Errorf("script records = %+v, want none from replayed history", records)
+	}
+	events := c.Events.Since(0)
+	if len(events) != 1 || events[0].Player != "Alex" || !events[0].Backfill {
+		t.Errorf("events = %+v, want only Alex's backfilled connect", events)
+	}
+}
+
 func TestConsoleIngestEvents_StdoutAndStderrResidualsAreIndependent(t *testing.T) {
 	c := testConsole()
 

@@ -77,9 +77,9 @@ type wsMessage struct {
 
 // Console maintains a reconnecting websocket connection to the bedrock
 // server's console and serializes commands through it. It also feeds
-// Events: mc-server-runner pushes every console stdout/stderr line and a
-// logHistory backfill over this same connection, so no separate log-tailing
-// mechanism is needed for GET /events.
+// Events and Script: mc-server-runner pushes every console stdout/stderr
+// line and a logHistory backfill over this same connection, so no separate
+// log-tailing mechanism is needed for either.
 type Console struct {
 	addr           string
 	password       string
@@ -113,6 +113,7 @@ type Console struct {
 	residual map[string]string
 
 	Events *EventLog
+	Script *ScriptLog
 }
 
 func NewConsole(addr, password, origin string, commandTimeout time.Duration, logger *slog.Logger) *Console {
@@ -129,6 +130,7 @@ func NewConsole(addr, password, origin string, commandTimeout time.Duration, log
 		subscribers:       make(map[chan wsMessage]struct{}),
 		residual:          make(map[string]string),
 		Events:            NewEventLog(),
+		Script:            NewScriptLog(),
 	}
 }
 
@@ -297,11 +299,22 @@ func (c *Console) keepalive(ctx context.Context, conn *websocket.Conn, onFailure
 // backfilled events also carry Backfill=true so a consumer can tell replayed
 // history from a live line instead of mistaking a months-old reconnect for
 // one happening now.
+//
+// The same lines feed Script, which keeps the map pack's records in a ring of
+// its own (see ScriptLog for why). A record line goes there and nowhere else:
+// it carries names players choose for themselves and their mobs, and the
+// event patterns are not anchored, so a mob called "fatal error" would
+// otherwise be a crash event once a second.
 func (c *Console) ingestEvents(msg wsMessage) {
 	now := time.Now()
 	switch msg.Type {
 	case "logHistory":
 		for _, line := range msg.Lines {
+			// Replayed records are dropped, not stored: they are old samples,
+			// and the only time there is to give them is this one.
+			if isScriptRecord(line) {
+				continue
+			}
 			c.Events.IngestBackfill(line, now)
 		}
 	case "stdout", "stderr":
@@ -318,6 +331,9 @@ func (c *Console) ingestEvents(msg wsMessage) {
 		c.residual[msg.Type] = buf[end+1:]
 		for _, line := range strings.Split(buf[:end], "\n") {
 			if line == "" {
+				continue
+			}
+			if c.Script.Ingest(line, now) {
 				continue
 			}
 			c.Events.Ingest(line, now)
