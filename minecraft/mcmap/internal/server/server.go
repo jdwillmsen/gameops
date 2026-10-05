@@ -63,6 +63,9 @@ type Server struct {
 	// dots. With both nil the page is not offered any.
 	MobIcons MobIcons
 	Heads    PlayerHeads
+	// Structures is the structures the world recorded and the ones its
+	// seed predicts. Nil leaves the route out.
+	Structures StructureSource
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
@@ -140,6 +143,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Heads != nil {
 		mux.Handle("GET /api/icons/head", s.gated(s.handleHead))
+	}
+	if s.Structures != nil {
+		mux.Handle("GET /api/structures", s.gated(s.handleStructures))
 	}
 	if s.Sessions != nil {
 		mux.Handle("GET /api/me", s.gated(s.handleMe))

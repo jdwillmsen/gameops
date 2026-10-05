@@ -85,6 +85,12 @@ type Config struct {
 	// IconsRef is the tag or commit of the published samples the mob icons
 	// are fetched at.
 	IconsRef string
+
+	// Structures is whether the world's structures are read and served.
+	Structures bool
+	// StructureSeed, when set, is the 32 bits structure placement is
+	// seeded with, for a world whose level.dat does not hold them.
+	StructureSeed *uint32
 }
 
 // minTokenLength keeps a placeholder from standing in for a credential.
@@ -209,6 +215,19 @@ func Load(getenv func(string) string) (Config, error) {
 	// commit can be.
 	if c.IconsRef = or(getenv("ICONS_REF"), DefaultIconsRef); !iconsRef.MatchString(c.IconsRef) {
 		fail("ICONS_REF must be a tag or commit of the samples repository, got %q", c.IconsRef)
+	}
+
+	if c.Structures, err = strconv.ParseBool(or(getenv("STRUCTURES_ENABLED"), "true")); err != nil {
+		fail("STRUCTURES_ENABLED must be true or false")
+	}
+	if raw := getenv("STRUCTURE_SEED"); raw != "" {
+		// The value is left out of the message: it is as good as the seed.
+		if seed, err := strconv.ParseUint(raw, 10, 32); err != nil {
+			fail("STRUCTURE_SEED must be a whole number from 0 to 4294967295")
+		} else {
+			seed32 := uint32(seed)
+			c.StructureSeed = &seed32
+		}
 	}
 	return c, errors.Join(errs...)
 }

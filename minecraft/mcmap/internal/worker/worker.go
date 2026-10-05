@@ -20,6 +20,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
 
 var (
@@ -70,6 +71,11 @@ type Marker interface {
 	Extract(ctx context.Context, dbDir string, at time.Time) (markers.Stats, error)
 }
 
+// Surveyor reads the structures of a freshly mirrored world.
+type Surveyor interface {
+	Take(ctx context.Context, worldDir string, at time.Time) (structures.Survey, error)
+}
+
 type Syncer interface {
 	Sync(ctx context.Context) (mirror.Stats, error)
 }
@@ -99,6 +105,10 @@ type Worker struct {
 	// Markers, if set, reads the world's beds, containers and named mobs
 	// after every snapshot.
 	Markers Marker
+	// Structures, if set, reads the world's structures after every
+	// snapshot. SurveyTimeout bounds one reading; zero means no bound.
+	Structures    Surveyor
+	SurveyTimeout time.Duration
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -268,6 +278,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 		w.Status.MarkRendered(dimension, now)
 	}
 	w.Status.MarkProblem(problem)
+	w.survey(ctx, now)
 	return Applied
 }
 
@@ -343,4 +354,34 @@ func (w *Worker) mark(ctx context.Context, now time.Time) {
 		return
 	}
 	w.Logger.Info("markers read", "beds", stats.Beds, "containers", stats.Containers, "mobs", stats.Mobs, "skipped", stats.Skipped, "seconds", time.Since(started).Seconds())
+}
+
+// survey runs last. Structures change only when new chunks are generated,
+// so the count, the retained copy and the tiles are all worth more sooner,
+// and a survey that fails or runs out of time costs none of them: the page
+// keeps the structures of the last one that worked.
+func (w *Worker) survey(ctx context.Context, now time.Time) {
+	if w.Structures == nil {
+		return
+	}
+	if w.SurveyTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, w.SurveyTimeout)
+		defer cancel()
+	}
+	started := time.Now()
+	s, err := w.Structures.Take(ctx, filepath.Join(w.MirrorDir, w.Level), now)
+	if err != nil {
+		w.Logger.Error("structure survey failed", "error", err)
+		return
+	}
+	recorded, predicted := 0, 0
+	for _, layer := range s.Layers {
+		recorded += len(layer.Recorded) + layer.RecordedMore
+		predicted += len(layer.Predicted) + layer.PredictedMore
+	}
+	w.Logger.Info("structures surveyed", "recorded", recorded, "predicted", predicted,
+		"seed", s.Check.State, "agree", s.Check.Agree, "disagree", s.Check.Disagree, "findings", s.Check.Total,
+		"areas", s.Areas, "malformed", s.Malformed, "unknown", s.Unknown, "over_limit", s.OverLimit,
+		"seconds", time.Since(started).Seconds())
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/pack"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/web"
 )
@@ -132,6 +133,21 @@ func run(logger *slog.Logger) error {
 		marked = markers.NewStore()
 		w.Markers = &markers.Extractor{WorkDir: filepath.Join(cfg.DataDir, "markers"), Store: marked, Timeout: markerScanTimeout}
 	}
+	// A directory of its own: the survey clears what a killed run left
+	// there, and the chunk count does the same in its own.
+	var surveyor *structures.Surveyor
+	if cfg.Structures {
+		surveyor = &structures.Surveyor{
+			WorkDir:       filepath.Join(cfg.DataDir, "structures"),
+			Predictors:    structures.Predictors,
+			StructureSeed: cfg.StructureSeed,
+			Logger:        logger,
+		}
+		w.Structures = surveyor
+		// A survey takes about ten seconds on the FWB world. One that has
+		// not finished in this long is stuck, and the next cycle is due.
+		w.SurveyTimeout = 5 * time.Minute
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -169,6 +185,9 @@ func run(logger *slog.Logger) error {
 		if cfg.InternalToken != "" {
 			app.Heads = heads
 		}
+	}
+	if surveyor != nil {
+		app.Structures = surveyor
 	}
 	if cfg.Login {
 		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
