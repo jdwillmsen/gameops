@@ -415,6 +415,81 @@ While the agent cannot be reached the filter stays and draws nothing.
 `MARKERS_ENABLED=false` skips the read and the route; without `AGENT_URL`
 there is no waypoint route and no waypoint filter.
 
+## Structures
+
+Two layers, drawn so that one cannot be taken for the other.
+
+**Known** structures are the ones this world has generated, read from its
+own save. For each chunk the server keeps the boxes in which a structure's
+own mobs spawn, as that chunk's record 57: a 32-bit count, then per box six
+32-bit block coordinates (minimum x, y, z, then maximum, inclusive) and one
+byte for the kind, all little-endian. The kinds are 1 nether fortress,
+2 witch hut, 3 ocean monument and 5 pillager outpost; nothing else leaves
+such a record, so villages, temples and the rest are not on this layer.
+A box is cut at the chunk's edge, so the boxes of a kind that touch are
+joined back into one structure (fortress boxes within 32 blocks, since a
+fortress is recorded room by room). A fortress only part generated shows as
+the parts there are.
+
+**Predicted** structures are worked out from the seed, and are mostly of
+use for chunks nobody has generated yet. A site in a generated chunk that
+the world recorded nothing at is still drawn, struck through, because that
+disagreement is the evidence about whether the seed can be trusted. The
+generator cuts the world into regions and gives each one
+site, at an offset drawn from a Mersenne Twister seeded with the region,
+a 32-bit structure seed and a number per kind. The structure seed is the low
+32 bits of the world seed unless `STRUCTURE_SEED` supplies another, which is
+what this world needs; see below. Each kind is a
+`Predictor` in `internal/structures`, so one can be corrected alone.
+
+Placement rules differ between game versions and are easy to get subtly
+wrong, so nothing is predicted on trust. Every survey sets the seed's sites
+beside what the world recorded:
+
+- Monuments, outposts and witch huts sit exactly on their sites. Once three
+  recorded ones do, and more agree than not, the seed is `verified` and
+  predictions are served. With fewer it is `unverified`; if they are
+  somewhere else it is `refuted`. Either way nothing is predicted, and the
+  page says why.
+- Each disagreement is logged once, when it appears, and counted in
+  `mcmap_structures_prediction_disagreements`: a recorded structure no site
+  explains, or a predicted fortress whose chunk is generated with nothing
+  recorded. The second kind is still drawn, struck through.
+
+Only fortresses are predicted. A fortress is built at its site whatever the
+biome. A monument, an outpost or a hut is only built where the biome suits,
+which nothing here can know for a chunk that does not exist yet: of the
+monument sites in generated chunks of the FWB world, one in twelve holds a
+monument. Their sites are used to check the seed and not shown.
+
+Checked against the FWB world on 2026-10-05 (game 1.26.52.3): all 11
+monuments, 7 outposts and the 1 witch hut are on their sites, and every
+recorded fortress has a fortress site within reach. One fortress site lies
+in generated chunks with no fortress recorded.
+
+**The seed.** `RandomSeed` and the world spawn are read from `level.dat` in
+the mirror, which is little-endian NBT behind an eight-byte header and is
+only ever opened for reading. The seed is never served or logged: with it,
+a seed map shows everything the world has yet to generate. The spawn is
+served with the overworld's structures.
+
+The low 32 bits of the FWB world's `RandomSeed` do **not** place its
+structures; another 32-bit value does, exactly. Why is not known.
+`STRUCTURE_SEED` supplies such a value, and is checked against the world in
+the same way before anything is predicted from it. Treat it as the seed.
+
+The survey runs last in each cycle, on hard links like the chunk count, and
+its failure costs nothing else. On the FWB world (2.47 million records,
+1,274 boxes) it takes 9 seconds and peaks at 45 MB. It keeps at most 200,000
+boxes and 2,000 structures of each layer per dimension, and says how many
+it left out.
+
+To check the rules again after a game update, against a copy of a world:
+
+```sh
+MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/structures/
+```
+
 ## Login
 
 The map shows where every base is, so it sits behind a login that proves the
@@ -496,6 +571,8 @@ Two listeners keep the internet away from what is not for it:
 | `AGENT_URL` | no | empty | The server agent's HTTP address, e.g. `http://<release>-server-agent:8080`, asked for the logged-in player's waypoints with `INTERNAL_TOKEN`. Empty leaves waypoints off the map. Needs the login |
 | `ICONS_ENABLED` | no | `true` | `false` draws every live marker as a dot or arrow: no mob icon is fetched, no head is accepted, and `/api/icons` is not served |
 | `ICONS_REF` | no | the commit tagged `v1.26.50.4` | Tag or commit of Mojang's `bedrock-samples` the mob icons are fetched at. A commit cannot move; a tag can |
+| `STRUCTURES_ENABLED` | no | `true` | `false` reads no structures and does not serve `/api/structures` |
+| `STRUCTURE_SEED` | no | the low 32 bits of the seed in `level.dat` | The 32 bits structure placement is seeded with, 0 to 4294967295, for a world whose `level.dat` does not hold them. As secret as the seed |
 
 ## Endpoints
 
@@ -513,6 +590,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
+| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -565,6 +643,11 @@ opens at the same place.
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
 | `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, `ok` or `failed`. None at all means they were read from the volume |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
+| `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind}` | Structures on each layer at the last survey |
+| `mcmap_structures_seed_verified` | 1 while recorded structures are where the seed puts them. 0 means nothing is being predicted |
+| `mcmap_structures_prediction_disagreements` | Places where the seed and the world's records disagree |
+| `mcmap_structures_areas_skipped{reason}` | Recorded boxes left out: `malformed`, `unknown` (a kind this version does not know), `limit` |
+| `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total` | Whether the survey is running |
 
 ## Build and test
 
