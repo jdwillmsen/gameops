@@ -39,8 +39,9 @@ type ListedEntity struct {
 // RenderListing writes one JSON object per line: a header, then every entity
 // whose identifier is in types, or every entity when types is empty.
 //
-// The order is total, down to the unique id, so the same world bytes give the
-// same listing and two listings can be compared with diff.
+// The order is total, down to the unique id and then every printed field, so
+// the same world bytes give the same listing and two listings can be compared
+// with diff.
 //
 // An entity saved at a position that is not a finite number is counted in the
 // header and not listed. JSON cannot carry such a coordinate, the order above
