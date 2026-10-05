@@ -59,6 +59,11 @@ type file struct {
 // cannot be completed changes nothing. Once one is complete its files are
 // moved in one by one, so a crash in the middle of that leaves a mix; the
 // next Sync repairs it, and nothing reads the mirror until a Sync succeeds.
+//
+// A file here is only ever created, replaced by rename, or unlinked, never
+// written in place. The retained generations hold hard links to these
+// files, so rewriting one would silently change every copy of the world
+// that was taken before it.
 func (m *Mirror) Sync(ctx context.Context) (Stats, error) {
 	started := time.Now()
 	staging := filepath.Join(m.Root, stagingDir)

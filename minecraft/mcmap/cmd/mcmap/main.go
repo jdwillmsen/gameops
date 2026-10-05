@@ -17,6 +17,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
@@ -75,6 +76,15 @@ func run(logger *slog.Logger) error {
 	census := &chunks.Census{WorkDir: filepath.Join(cfg.DataDir, "chunks"), Ledger: ledger}
 	census.Publish()
 
+	// Retained world copies, on the same volume as the mirror so that a
+	// generation is links to the mirror's files rather than a second copy
+	// of them. A store that cannot be opened stops the service: running on
+	// with no restore point is the state this exists to end.
+	keeper, err := generations.Open(filepath.Join(cfg.DataDir, "generations"), logger)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -100,6 +110,7 @@ func run(logger *slog.Logger) error {
 		Status:        status,
 		Logger:        logger,
 		Census:        census,
+		Keeper:        keeper,
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -109,14 +120,15 @@ func run(logger *slog.Logger) error {
 	}()
 
 	app := &server.Server{
-		Renderer: renderer,
-		MapsDir:  mapsDir,
-		World:    cfg.Level,
-		Status:   status,
-		Refresh:  cfg.Refresh,
-		Static:   web.FS,
-		Log:      logger,
-		Chunks:   census,
+		Renderer:    renderer,
+		MapsDir:     mapsDir,
+		World:       cfg.Level,
+		Status:      status,
+		Refresh:     cfg.Refresh,
+		Static:      web.FS,
+		Log:         logger,
+		Chunks:      census,
+		Generations: keeper,
 		// The agent's token guards the internal API whether or not the page
 		// has a login; with none configured those routes are not served.
 		InternalToken: cfg.InternalToken,

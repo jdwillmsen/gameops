@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
@@ -334,5 +335,102 @@ func TestCycle_LostChunksAreLoggedAsAnError(t *testing.T) {
 		if !strings.Contains(line, want) {
 			t.Errorf("log lacks %s:\n%s", want, line)
 		}
+	}
+}
+
+type fakeKeeper struct {
+	order   *[]string
+	srcs    []string
+	ats     []time.Time
+	healths []generations.Health
+	err     error
+	outcome generations.Outcome
+}
+
+func (f *fakeKeeper) Capture(_ context.Context, src string, at time.Time, h generations.Health) (generations.Outcome, error) {
+	if f.order != nil {
+		*f.order = append(*f.order, "keep")
+	}
+	f.srcs = append(f.srcs, src)
+	f.ats = append(f.ats, at)
+	f.healths = append(f.healths, h)
+	return f.outcome, f.err
+}
+
+// The copy is taken from the whole mirror, before the renders, which take
+// minutes the next node failure may not leave.
+func TestCycle_RetainsTheSnapshotAfterCountingItAndBeforeRendering(t *testing.T) {
+	var order []string
+	k := &fakeKeeper{order: &order, outcome: generations.Promoted}
+	w := newWorker(&fakeSyncer{}, &fakeRenderer{order: &order}, "")
+	w.Census, w.Keeper = &fakeCensus{order: &order}, k
+
+	w.Cycle(context.Background(), noon)
+
+	if !reflect.DeepEqual(order, []string{"census", "keep", "overworld", "nether", "end"}) {
+		t.Fatalf("order = %v", order)
+	}
+	if len(k.srcs) != 1 || k.srcs[0] != "/data/mirror" || !k.ats[0].Equal(noon) || k.healths[0] != generations.Whole {
+		t.Errorf("captured %v at %v as %v", k.srcs, k.ats, k.healths)
+	}
+}
+
+// Everything that could make a snapshot the wrong thing to promote. A
+// damaged one is still offered, so it can be held apart for whoever
+// measures the loss; one nothing counted is not offered at all.
+func TestCycle_OnlyACountedWholeSnapshotIsOfferedAsTheRestorePoint(t *testing.T) {
+	damaged := chunks.Report{Lost: map[chunks.Dimension]int{chunks.Overworld: 6460}}
+	for name, c := range map[string]struct {
+		census *fakeCensus
+		none   bool
+		want   []generations.Health
+	}{
+		"whole":         {census: &fakeCensus{}, want: []generations.Health{generations.Whole}},
+		"lost chunks":   {census: &fakeCensus{report: damaged}, want: []generations.Health{generations.Damaged}},
+		"census failed": {census: &fakeCensus{err: errors.New("unreadable")}, want: nil},
+		"no census":     {none: true, want: nil},
+	} {
+		k := &fakeKeeper{outcome: generations.Promoted}
+		w := newWorker(&fakeSyncer{}, &fakeRenderer{}, "")
+		w.Keeper = k
+		if !c.none {
+			w.Census = c.census
+		}
+		w.Cycle(context.Background(), noon)
+		if !reflect.DeepEqual(k.healths, c.want) {
+			t.Errorf("%s: offered %v, want %v", name, k.healths, c.want)
+		}
+	}
+}
+
+func TestCycle_NothingIsRetainedWithoutAFreshSnapshot(t *testing.T) {
+	for name, s := range map[string]*fakeSyncer{
+		"busy":   {err: mirror.ErrBusy},
+		"failed": {err: errors.New("bridge down")},
+	} {
+		k := &fakeKeeper{}
+		w := newWorker(s, &fakeRenderer{}, "")
+		w.Census, w.Keeper = &fakeCensus{}, k
+		w.Cycle(context.Background(), noon)
+		if len(k.srcs) != 0 {
+			t.Errorf("%s: retained a mirror that did not change", name)
+		}
+	}
+}
+
+// A volume that cannot take another copy costs the map its newest restore
+// point, not its tiles and not the copies it already holds.
+func TestCycle_AFailedCaptureIsLoggedAndStopsNothing(t *testing.T) {
+	var logged bytes.Buffer
+	k := &fakeKeeper{err: errors.New("no space left on device")}
+	w := newWorker(&fakeSyncer{}, &fakeRenderer{}, "")
+	w.Census, w.Keeper = &fakeCensus{}, k
+	w.Logger = slog.New(slog.NewJSONHandler(&logged, nil))
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Fatalf("outcome = %v", got)
+	}
+	if !strings.Contains(logged.String(), `"msg":"snapshot not retained"`) {
+		t.Errorf("log = %s", logged.String())
 	}
 }

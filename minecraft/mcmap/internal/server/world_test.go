@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 )
 
 type fakeChunks struct {
@@ -125,5 +126,62 @@ func TestWorld_AcknowledgingNeedsTheCountItAccepts(t *testing.T) {
 	}
 	if len(f.acknowledged) != 0 {
 		t.Errorf("acknowledged %v", f.acknowledged)
+	}
+}
+
+type fakeGenerations struct{ view generations.View }
+
+func (f *fakeGenerations) Look() generations.View { return f.view }
+
+// Whoever is weighing a restore needs to know how far back each copy would
+// take the world, and that is the one thing the metrics do not spell out
+// per copy. It is reported whether or not a count has run.
+func TestWorld_ReportsTheRetainedGenerations(t *testing.T) {
+	taken := time.Date(2026, 10, 1, 23, 43, 38, 0, time.UTC)
+	s := withLogin(t)
+	s.Chunks = damaged()
+	s.Generations = &fakeGenerations{view: generations.View{
+		Current:  &generations.Generation{Name: "a", Marker: generations.Marker{TakenAt: taken, Files: 412, Bytes: 780906719}},
+		Previous: &generations.Generation{Name: "b", Marker: generations.Marker{TakenAt: taken.Add(-15 * time.Minute), Files: 411}},
+		Damaged:  &generations.Generation{Name: "damaged", Marker: generations.Marker{TakenAt: taken.Add(2*time.Hour + 21*time.Minute), Files: 405}},
+	}}
+
+	var got struct {
+		Generations struct {
+			Current, Previous, Damaged struct {
+				Name    string    `json:"name"`
+				TakenAt time.Time `json:"takenAt"`
+				Files   int       `json:"files"`
+				Bytes   int64     `json:"bytes"`
+			}
+		} `json:"generations"`
+	}
+	rec := do(s.InternalHandler(), "GET", "/internal/v1/world", "", nil, "Authorization", "Bearer "+internalToken)
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Generations.Current.Name != "a" || !got.Generations.Current.TakenAt.Equal(taken) || got.Generations.Current.Bytes != 780906719 {
+		t.Errorf("current = %+v", got.Generations.Current)
+	}
+	if got.Generations.Previous.Files != 411 || got.Generations.Damaged.Name != "damaged" {
+		t.Errorf("previous %+v, damaged %+v", got.Generations.Previous, got.Generations.Damaged)
+	}
+
+	s.Chunks = &fakeChunks{}
+	rec = do(s.InternalHandler(), "GET", "/internal/v1/world", "", nil, "Authorization", "Bearer "+internalToken)
+	if !strings.Contains(rec.Body.String(), `"name":"a"`) || !strings.Contains(rec.Body.String(), `"checked":false`) {
+		t.Errorf("before the first count = %s", rec.Body)
+	}
+}
+
+// A fresh volume holds nothing yet, and says so by leaving them out rather
+// than reporting a copy that is not there.
+func TestWorld_NoGenerationsYetIsNotAnEmptyOne(t *testing.T) {
+	s := withLogin(t)
+	s.Chunks = &fakeChunks{}
+	s.Generations = &fakeGenerations{}
+	rec := do(s.InternalHandler(), "GET", "/internal/v1/world", "", nil, "Authorization", "Bearer "+internalToken)
+	if body := strings.TrimSpace(rec.Body.String()); body != `{"checked":false,"generations":{}}` {
+		t.Errorf("GET = %s", body)
 	}
 }
