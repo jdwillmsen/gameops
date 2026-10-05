@@ -1,4 +1,5 @@
-// Command census reads a Bedrock world save and prints a population report.
+// Command census reads a Bedrock world save and prints a population report,
+// or with -list one line per entity.
 //
 // It runs as a CronJob beside the server rather than inside the agent: the
 // scan is a batch job over hundreds of megabytes, and the agent's own pod is
@@ -35,8 +36,8 @@ func main() {
 }
 
 // run is the testable body. It writes nothing to stdout unless it produced a
-// whole report: a truncated report is worse than none, because it looks like
-// an answer.
+// whole report or listing: a truncated one is worse than none, because it
+// looks like an answer.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("census", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
