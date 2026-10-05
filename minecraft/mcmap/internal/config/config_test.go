@@ -63,6 +63,39 @@ func TestLoad_LoginIsRequiredUnlessTurnedOffExplicitly(t *testing.T) {
 	}
 }
 
+func TestLoad_Live(t *testing.T) {
+	c, err := Load(with())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Live || c.LivePollWait != 2*time.Second || c.LiveTTL != 10*time.Second || c.LiveKeepalive != 15*time.Second || c.LiveMaxEntities != 1000 {
+		t.Errorf("live defaults = %+v", c)
+	}
+	c, err = Load(with("LIVE_ENABLED", "false", "LIVE_POLL_WAIT", "25s", "LIVE_TTL", "30s", "LIVE_KEEPALIVE", "20s", "LIVE_MAX_ENTITIES", "250"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Live || c.LivePollWait != 25*time.Second || c.LiveTTL != 30*time.Second || c.LiveKeepalive != 20*time.Second || c.LiveMaxEntities != 250 {
+		t.Errorf("live overrides = %+v", c)
+	}
+}
+
+// The load balancer cuts a connection that is silent for 30 seconds. A
+// keepalive at or past that would drop every quiet stream, so it is not a
+// value the setting accepts.
+func TestLoad_LiveKeepaliveStaysUnderThePathsIdleTimeout(t *testing.T) {
+	for _, v := range []string{"21s", "29s", "30s", "31s", "1m", "0s", "-5s", "500ms", "15"} {
+		if _, err := Load(with("LIVE_KEEPALIVE", v)); err == nil {
+			t.Errorf("accepted LIVE_KEEPALIVE=%s", v)
+		}
+	}
+	for _, v := range []string{"1s", "15s", "20s"} {
+		if _, err := Load(with("LIVE_KEEPALIVE", v)); err != nil {
+			t.Errorf("LIVE_KEEPALIVE=%s: %v", v, err)
+		}
+	}
+}
+
 func TestLoad_Overrides(t *testing.T) {
 	c, err := Load(with("REFRESH_INTERVAL", "5m", "QUIET_UTC", "03:50-05:10,05:30-06:10", "RENDER_CHUNK_PROCESSORS", "4",
 		"NETHER_TOP_Y", "90", "UNMINED_SHA256", strings.Repeat("a", 64), "HTTP_ADDR", ":9000", "DATA_DIR", "/var/map"))
@@ -93,6 +126,20 @@ func TestLoad_Rejects(t *testing.T) {
 		"sha256 wrong length":           with("UNMINED_SHA256", "abc"),
 		"sha256 not hex":                with("UNMINED_SHA256", strings.Repeat("z", 64)),
 		"renderer url not https":        with("UNMINED_URL", "http://unmined.net/x"),
+		"live enabled not a boolean":    with("LIVE_ENABLED", "on please"),
+		"live poll wait not a duration": with("LIVE_POLL_WAIT", "2"),
+		"live poll wait zero":           with("LIVE_POLL_WAIT", "0s"),
+		"live poll wait past the cap":   with("LIVE_POLL_WAIT", "26s"),
+		"live ttl not a duration":       with("LIVE_TTL", "ten"),
+		"live ttl under a sample":       with("LIVE_TTL", "500ms"),
+		"live ttl absurd":               with("LIVE_TTL", "24h"),
+		"live max entities zero":        with("LIVE_MAX_ENTITIES", "0"),
+		"live max entities negative":    with("LIVE_MAX_ENTITIES", "-1"),
+		"live max entities not a count": with("LIVE_MAX_ENTITIES", "lots"),
+		"live max entities absurd":      with("LIVE_MAX_ENTITIES", "1000000"),
+		// A bad value is refused even with the layer off, so turning it on
+		// later is not where the typo is found.
+		"live off with a bad ttl": with("LIVE_ENABLED", "false", "LIVE_TTL", "ten"),
 	}
 	for name, getenv := range cases {
 		if _, err := Load(getenv); err == nil {

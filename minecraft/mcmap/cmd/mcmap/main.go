@@ -18,6 +18,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
@@ -118,6 +119,7 @@ func run(logger *slog.Logger) error {
 		defer wg.Done()
 		w.Run(ctx, cfg.Refresh)
 	}()
+	layer := startLive(ctx, cfg, logger, &wg)
 
 	app := &server.Server{
 		Renderer:    renderer,
@@ -132,6 +134,8 @@ func run(logger *slog.Logger) error {
 		// The agent's token guards the internal API whether or not the page
 		// has a login; with none configured those routes are not served.
 		InternalToken: cfg.InternalToken,
+		Live:          layer,
+		LiveKeepalive: cfg.LiveKeepalive,
 	}
 	if cfg.Login {
 		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
@@ -163,11 +167,16 @@ func run(logger *slog.Logger) error {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if layer != nil {
+			// Shutdown waits for open responses and a live stream is one
+			// that does not end by itself.
+			layer.Hub.Close()
+		}
 		_ = public.Shutdown(shutdown)
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet))
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()
@@ -178,4 +187,22 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	return nil
+}
+
+// startLive begins reading player and mob positions from the bridge. With
+// the layer turned off it starts nothing and returns nil, which is also what
+// keeps the stream's route from being served.
+func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *sync.WaitGroup) *live.Layer {
+	if !cfg.Live {
+		return nil
+	}
+	layer := live.New(cfg.LiveTTL, cfg.LiveMaxEntities, logger)
+	source := &live.Source{
+		Poller: live.NewBridge(cfg.BridgeURL, cfg.BridgeToken),
+		Layer:  layer,
+		Wait:   cfg.LivePollWait,
+		Logger: logger,
+	}
+	wg.Go(func() { source.Run(ctx) })
+	return layer
 }
