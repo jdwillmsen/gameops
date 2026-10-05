@@ -17,6 +17,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
 
 type fakeSyncer struct {
@@ -432,5 +433,76 @@ func TestCycle_AFailedCaptureIsLoggedAndStopsNothing(t *testing.T) {
 	}
 	if !strings.Contains(logged.String(), `"msg":"snapshot not retained"`) {
 		t.Errorf("log = %s", logged.String())
+	}
+}
+
+type fakeSurveyor struct {
+	order    *[]string
+	dirs     []string
+	err      error
+	deadline bool
+}
+
+func (f *fakeSurveyor) Take(ctx context.Context, worldDir string, _ time.Time) (structures.Survey, error) {
+	f.dirs = append(f.dirs, worldDir)
+	_, f.deadline = ctx.Deadline()
+	if f.order != nil {
+		*f.order = append(*f.order, "survey")
+	}
+	return structures.Survey{}, f.err
+}
+
+// Structures change only as chunks are generated; the count, the retained
+// copy and the tiles must not wait for them.
+func TestCycle_SurveysStructuresAfterEverythingElse(t *testing.T) {
+	var order []string
+	s, r := &fakeSyncer{}, &fakeRenderer{order: &order}
+	w := newWorker(s, r, "")
+	w.Census = &fakeCensus{order: &order}
+	survey := &fakeSurveyor{order: &order}
+	w.Structures = survey
+	w.SurveyTimeout = time.Minute
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Fatalf("outcome = %v", got)
+	}
+	if want := []string{"census", "overworld", "nether", "end", "survey"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+	if want := []string{filepath.Join("/data/mirror", "FWB")}; !reflect.DeepEqual(survey.dirs, want) {
+		t.Errorf("surveyed %v, want %v", survey.dirs, want)
+	}
+	if !survey.deadline {
+		t.Error("the survey ran with no time limit, so a stuck one would hold every later cycle")
+	}
+}
+
+func TestCycle_AFailedSurveyCostsNothingElse(t *testing.T) {
+	s, r := &fakeSyncer{}, &fakeRenderer{}
+	w := newWorker(s, r, "")
+	var log bytes.Buffer
+	w.Logger = slog.New(slog.NewTextHandler(&log, nil))
+	w.Structures = &fakeSurveyor{err: errors.New("world unreadable")}
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Errorf("outcome = %v, want applied", got)
+	}
+	if snap := w.Status.Snapshot(); snap.Problem != "" || !snap.RenderedAt["end"].Equal(noon) {
+		t.Errorf("status = %+v", snap)
+	}
+	if !strings.Contains(log.String(), "structure survey failed") {
+		t.Errorf("the failure was not logged:\n%s", log.String())
+	}
+}
+
+// A snapshot that did not happen leaves nothing new to survey.
+func TestCycle_NoSurveyWithoutASnapshot(t *testing.T) {
+	s, r := &fakeSyncer{err: mirror.ErrBusy}, &fakeRenderer{}
+	w := newWorker(s, r, "")
+	survey := &fakeSurveyor{}
+	w.Structures = survey
+	w.Cycle(context.Background(), noon)
+	if len(survey.dirs) != 0 {
+		t.Errorf("surveyed %v after a refused snapshot", survey.dirs)
 	}
 }

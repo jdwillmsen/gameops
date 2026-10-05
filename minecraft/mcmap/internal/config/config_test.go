@@ -147,3 +147,37 @@ func TestLoad_Rejects(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_Structures(t *testing.T) {
+	c, err := Load(with())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Structures || c.StructureSeed != nil {
+		t.Errorf("defaults: structures %v, seed %v", c.Structures, c.StructureSeed)
+	}
+	c, err = Load(with("STRUCTURES_ENABLED", "false", "STRUCTURE_SEED", "4294967295"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Structures || c.StructureSeed == nil || *c.StructureSeed != 4294967295 {
+		t.Errorf("overrides: structures %v, seed %v", c.Structures, c.StructureSeed)
+	}
+	// Zero is a seed, and must not be read as "none given".
+	if c, err = Load(with("STRUCTURE_SEED", "0")); err != nil || c.StructureSeed == nil || *c.StructureSeed != 0 {
+		t.Errorf("a seed of 0: %v, %v", c.StructureSeed, err)
+	}
+	for name, getenv := range map[string]func(string) string{
+		"enabled not a boolean": with("STRUCTURES_ENABLED", "maybe"),
+		"seed over 32 bits":     with("STRUCTURE_SEED", "4294967296"),
+		"seed negative":         with("STRUCTURE_SEED", "-5"),
+		"seed not a number":     with("STRUCTURE_SEED", "0x1234"),
+	} {
+		_, err := Load(getenv)
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		} else if strings.Contains(err.Error(), "4294967296") || strings.Contains(err.Error(), "0x1234") {
+			t.Errorf("%s: the refusal repeats the value: %v", name, err)
+		}
+	}
+}
