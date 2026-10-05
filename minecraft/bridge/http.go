@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -63,6 +64,7 @@ func newMux(s *server) http.Handler {
 	mux.Handle("GET /permissions", s.authed(s.handlePermissions))
 	mux.Handle("GET /allowlist", s.authed(s.handleAllowlist))
 	mux.Handle("GET /events", s.authed(s.handleEvents))
+	mux.Handle("GET /script", s.authed(s.handleScript))
 	if s.snapshots != nil {
 		mux.Handle("POST /snapshot", s.authed(s.handleSnapshot))
 	}
@@ -206,6 +208,73 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		since = parsed
 	}
 	writeJSONResponse(w, s.logger, s.console.Events.Since(since))
+}
+
+const (
+	// scriptMaxWait caps how long one GET /script may park, so a caller's
+	// own client timeout can be set above it once and stay right.
+	scriptMaxWait = 25 * time.Second
+
+	// scriptWriteGrace is what the response is given to reach the caller
+	// once the wait is over.
+	scriptWriteGrace = 5 * time.Second
+)
+
+type scriptResponse struct {
+	Records []ScriptRecord `json:"records"`
+	// Gap is set when records the caller had not seen are gone from the
+	// ring, so it can say it fell behind instead of silently skipping them.
+	Gap bool `json:"gap,omitempty"`
+}
+
+// parseScriptWait reads the wait parameter, in milliseconds. Absent or zero
+// means do not wait; anything over the cap is the cap, not an error, so a
+// caller need not know the cap to ask for the longest wait.
+func parseScriptWait(raw string) (time.Duration, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	ms, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || ms < 0 {
+		return 0, errors.New("wait must be a non-negative integer of milliseconds")
+	}
+	// Compared in milliseconds: a large enough count overflows a Duration.
+	if ms >= scriptMaxWait.Milliseconds() {
+		return scriptMaxWait, nil
+	}
+	return time.Duration(ms) * time.Millisecond, nil
+}
+
+func (s *server) handleScript(w http.ResponseWriter, r *http.Request) {
+	var since int64
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 0 {
+			http.Error(w, "since must be a non-negative integer record ID", http.StatusBadRequest)
+			return
+		}
+		since = parsed
+	}
+	wait, err := parseScriptWait(r.URL.Query().Get("wait"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// The server-wide write timeout is sized for a console command and is
+	// shorter than the longest wait.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(wait + scriptWriteGrace)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		s.logger.Warn("could not extend the script write deadline", "error", err)
+	}
+
+	records, gap, err := s.console.Script.Wait(r.Context(), since, wait)
+	if err != nil {
+		s.logger.Warn("script wait refused", "error", err)
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
+	writeJSONResponse(w, s.logger, scriptResponse{Records: records, Gap: gap})
 }
 
 func writeJSONResponse(w http.ResponseWriter, logger *slog.Logger, v any) {

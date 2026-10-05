@@ -62,9 +62,11 @@ func main() {
 	case err = <-serveErr:
 	}
 
-	// In this order: end any snapshot and get its resume confirmed, let the
-	// other requests finish, and only then drop the console.
+	// In this order: end any snapshot and get its resume confirmed, release
+	// the requests parked on script records, let the other requests finish,
+	// and only then drop the console.
 	snapshots.Close()
+	console.Script.Close()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	httpServer.Shutdown(shutdownCtx)
 	cancel()
