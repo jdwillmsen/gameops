@@ -66,9 +66,16 @@ type Server struct {
 	// Structures is the structures the world recorded and the ones its
 	// seed predicts. Nil leaves the route out.
 	Structures StructureSource
+	// Biomes is the biomes the world stored for its chunks. Nil leaves the
+	// overlay and its routes out; search then finds no biomes.
+	Biomes BiomeSource
+	// Trails is where players have recently been. Nil leaves the route out.
+	Trails TrailSource
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
+	// search holds what a search would otherwise decode again every time.
+	search searchCache
 }
 
 type cachedInfo struct {
@@ -147,6 +154,17 @@ func (s *Server) Handler() http.Handler {
 	if s.Structures != nil {
 		mux.Handle("GET /api/structures", s.gated(s.handleStructures))
 	}
+	if s.Biomes != nil {
+		mux.Handle("GET /api/biomes", s.gated(s.handleBiomes))
+		mux.Handle("GET /api/biomes/at", s.gated(s.handleBiomeAt))
+		mux.Handle("GET /api/biomes/nearest", s.gated(s.handleBiomeNearest))
+		mux.Handle("GET /api/biomes/region", s.gated(s.handleBiomeRegion))
+		mux.Handle("GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleBiomeTile))
+	}
+	if s.Trails != nil {
+		mux.Handle("GET /api/trails", s.gated(s.handleTrails))
+	}
+	mux.Handle("GET /api/search", s.gated(s.handleSearch))
 	if s.Sessions != nil {
 		mux.Handle("GET /api/me", s.gated(s.handleMe))
 		mux.HandleFunc("POST /auth/start", s.handleStart)
