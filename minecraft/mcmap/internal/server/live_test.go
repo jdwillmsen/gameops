@@ -366,3 +366,12 @@ func TestLiveStreamWithoutALogin(t *testing.T) {
 		t.Errorf("frame = %+v", f)
 	}
 }
+
+// liveMobs is one record putting a mob of each type given in a dimension.
+func liveMobs(now time.Time, dimension string, types ...string) live.RawRecord {
+	var items []string
+	for i, kind := range types {
+		items = append(items, fmt.Sprintf(`{"i":"m%d","x":%d,"y":64,"z":0,"t":%q}`, i, i, kind))
+	}
+	return live.RawRecord{At: now, Data: fmt.Sprintf(`{"gen":7,"dim":%q,"kind":"mobs","part":0,"parts":1,"more":0,"items":[%s]}`, dimension, strings.Join(items, ","))}
+}

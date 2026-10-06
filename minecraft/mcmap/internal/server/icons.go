@@ -19,6 +19,15 @@ type MobIcons interface {
 	Listing() (version string, types []string)
 }
 
+// MarkerArt is the pictures markers and structures are drawn with, and the
+// display names of everything the map shows. Like the mob icons it may
+// hold no picture at all; a name it always has, a tidied id if no other.
+type MarkerArt interface {
+	Picture(key string) (png []byte, ok bool)
+	Pictures() (version string, keys []string)
+	Names() *icons.Names
+}
+
 // PlayerHeads is the head of each player online now, as the agent reports
 // them.
 type PlayerHeads interface {
@@ -44,6 +53,18 @@ type iconsJSON struct {
 		Version string   `json:"version"`
 		Types   []string `json:"types"`
 	} `json:"mobs"`
+	// Pictures is the key of every marker and structure picture there is:
+	// bed/red, shulker/undyed, container/chest, structure/monument,
+	// marker/waypoint. A key not listed has no picture to ask for.
+	Pictures struct {
+		Version string   `json:"version"`
+		Keys    []string `json:"keys"`
+	} `json:"pictures"`
+	// Names is the version of the table /api/names serves, so the page
+	// asks for that again only when it has changed.
+	Names struct {
+		Version string `json:"version"`
+	} `json:"names"`
 	// Heads is the version of each head there is, by gamertag in lower
 	// case. A gamertag two online players share is not in it.
 	Heads map[string]string `json:"heads"`
@@ -53,16 +74,24 @@ type iconsJSON struct {
 	Me string `json:"me,omitempty"`
 }
 
-// handleIcons tells the page which markers have a picture: the mob types
-// with an icon, and the players with a head. It is asked again every so
-// often, so it carries a tag and answers an unchanged list with a 304.
+// handleIcons tells the page, in one answer, which markers have a picture
+// and whether the names have changed: the mob types with an icon, the
+// marker and structure pictures, the players with a head. It is asked
+// again every so often, so it carries a tag and answers an unchanged list
+// with a 304.
 func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 	out := iconsJSON{Heads: map[string]string{}}
-	out.Mobs.Types = []string{}
+	out.Mobs.Types, out.Pictures.Keys = []string{}, []string{}
 	if s.MobIcons != nil {
 		if version, types := s.MobIcons.Listing(); len(types) > 0 {
 			out.Mobs.Version, out.Mobs.Types = version, types
 		}
+	}
+	if s.Art != nil {
+		if version, keys := s.Art.Pictures(); len(keys) > 0 {
+			out.Pictures.Version, out.Pictures.Keys = version, keys
+		}
+		out.Names.Version, _ = s.names()
 	}
 	if s.Heads != nil {
 		id, _ := auth.FromContext(r.Context())
@@ -103,6 +132,18 @@ func (s *Server) handleMobIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version, _ := s.MobIcons.Listing()
+	servePNG(w, r, png, version)
+}
+
+// handlePicture serves one marker or structure picture by its key.
+func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
+	png, ok := s.Art.Picture(r.PathValue("group") + "/" + r.PathValue("name"))
+	if !ok {
+		w.Header().Set("Cache-Control", "no-store")
+		http.NotFound(w, r)
+		return
+	}
+	version, _ := s.Art.Pictures()
 	servePNG(w, r, png, version)
 }
 

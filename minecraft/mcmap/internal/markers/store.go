@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -35,6 +37,8 @@ type served struct {
 type Store struct {
 	mu   sync.RWMutex
 	docs map[string]served
+	// mobKinds is the type of every named mob served, each once.
+	mobKinds []string
 }
 
 // NewStore is a store that answers with no markers until a scan fills it.
@@ -50,16 +54,28 @@ func NewStore() *Store {
 // snapshot taken at at.
 func (s *Store) Set(at time.Time, w World) {
 	docs := map[string]served{}
+	kinds := map[string]struct{}{}
 	for _, d := range chunks.Dimensions {
 		doc := document{At: &at}
 		if l := w[d]; l != nil {
 			doc.Beds, doc.Containers, doc.Mobs, doc.More = l.Beds, l.Containers, l.Mobs, l.More
+			for _, m := range l.Mobs {
+				kinds[m.Kind] = struct{}{}
+			}
 		}
 		docs[d.Name()] = encode(doc)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.docs = docs
+	s.docs, s.mobKinds = docs, slices.Sorted(maps.Keys(kinds))
+}
+
+// MobKinds is the type of every named mob in the markers, each once, so
+// that whatever names them can be asked for each.
+func (s *Store) MobKinds() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.mobKinds
 }
 
 // Dimension is the named dimension's markers as JSON, with a tag that

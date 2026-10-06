@@ -63,6 +63,10 @@ type Server struct {
 	// dots. With both nil the page is not offered any.
 	MobIcons MobIcons
 	Heads    PlayerHeads
+	// Art is the pictures markers and structures are drawn with and the
+	// display names of what the map shows. Nil leaves both out, and the
+	// page keeps its rings, letters and ids.
+	Art MarkerArt
 	// Structures is the structures the world recorded and the ones its
 	// seed predicts. Nil leaves the route out.
 	Structures StructureSource
@@ -142,8 +146,12 @@ func (s *Server) Handler() http.Handler {
 	if s.Waypoints != nil && s.Sessions != nil {
 		mux.Handle("GET /api/waypoints", s.gated(s.handleWaypoints))
 	}
-	if s.MobIcons != nil || s.Heads != nil {
+	if s.MobIcons != nil || s.Heads != nil || s.Art != nil {
 		mux.Handle("GET /api/icons", s.gated(s.handleIcons))
+	}
+	if s.Art != nil {
+		mux.Handle("GET /api/icons/picture/{group}/{name}", s.gated(s.handlePicture))
+		mux.Handle("GET /api/names", s.gated(s.handleNames))
 	}
 	if s.MobIcons != nil {
 		mux.Handle("GET /api/icons/mob/{type}", s.gated(s.handleMobIcon))

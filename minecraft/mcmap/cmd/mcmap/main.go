@@ -196,7 +196,7 @@ func run(logger *slog.Logger) error {
 	}
 	source := &icons.Source{Ref: cfg.IconsRef, ListURL: icons.DefaultListURL, RawURL: icons.DefaultRawURL}
 	if mobs, heads := startIcons(ctx, cfg, source.Fetch, logger, &wg); mobs != nil {
-		app.MobIcons = mobs
+		app.MobIcons, app.Art = mobs, mobs
 		// Heads reach here from the agent, which needs the token to speak.
 		if cfg.InternalToken != "" {
 			app.Heads = heads
