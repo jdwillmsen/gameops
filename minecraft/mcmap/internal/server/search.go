@@ -15,6 +15,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
@@ -61,7 +62,12 @@ type searchHit struct {
 	Name string `json:"name"`
 	// Detail says more where the name does not: a biome's identifier, a
 	// structure's kind, a container's kind, a mob's type.
-	Detail    string `json:"detail,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// Colour, Trapped and Baby are a marker's own, passed on so that the
+	// page can call and draw a hit as it does the marker.
+	Colour    string `json:"colour,omitempty"`
+	Trapped   bool   `json:"trapped,omitempty"`
+	Baby      bool   `json:"baby,omitempty"`
 	Dimension string `json:"dimension"`
 	X         int32  `json:"x"`
 	// Y is left out for what has no height: a biome, the spawn of a world
@@ -93,7 +99,29 @@ var structureNames = map[structures.Kind]string{
 	structures.WitchHut: "Witch Hut",
 }
 
-var containerNames = map[string]string{"chest": "Chest", "barrel": "Barrel", "shulker": "Shulker Box"}
+// displayNames is the names the page shows, so that a search finds a thing
+// by what the page calls it. With no names to ask it is nil, which tidies
+// every id.
+func (s *Server) displayNames() *icons.Names {
+	if s.Art == nil {
+		return nil
+	}
+	return s.Art.Names()
+}
+
+// containerName is what a container marker is called: by its colour if it
+// is a shulker box, as trapped if it is that sort of chest.
+func containerName(names *icons.Names, m markers.Marker) string {
+	switch {
+	case m.Kind == "":
+		return "Container"
+	case m.Kind == "shulker":
+		return names.Shulker(m.Colour)
+	case m.Kind == "chest" && m.Trapped:
+		return names.Container("trapped_chest")
+	}
+	return names.Container(m.Kind)
+}
 
 // markerLists is one dimension's markers as the marker store serves them.
 type markerLists struct {
@@ -227,6 +255,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return slices.ContainsFunc(names, func(name string) bool { return strings.Contains(biomes.Fold(name), query) })
 	}
 
+	names := s.displayNames()
 	var hits []searchHit
 	add := func(h searchHit, d chunks.Dimension) {
 		h.Dimension = d.Name()
@@ -258,7 +287,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if s.Structures != nil {
 			if survey, ok := s.Structures.Last(); ok {
 				for _, st := range survey.Layers[d].Recorded {
-					if name := structureNames[st.Kind]; matches(name, string(st.Kind)) {
+					if name := structureNames[st.Kind]; matches(name, string(st.Kind), names.Structure(string(st.Kind))) {
 						add(searchHit{Kind: hitStructure, Name: name, Detail: string(st.Kind),
 							X: st.MinX + (st.MaxX-st.MinX)/2, Y: height(st.MinY), Z: st.MinZ + (st.MaxZ-st.MinZ)/2}, d)
 					}
@@ -274,20 +303,21 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.Markers != nil {
 			lists := s.search.markers(s.Markers, d.Name())
-			if matches("Bed") {
-				for _, m := range lists.Beds {
-					add(searchHit{Kind: hitBed, Name: "Bed", X: m.X, Y: height(m.Y), Z: m.Z}, d)
+			for _, m := range lists.Beds {
+				if name := names.Bed(m.Colour); matches(name) {
+					add(searchHit{Kind: hitBed, Name: name, Colour: m.Colour, X: m.X, Y: height(m.Y), Z: m.Z}, d)
 				}
 			}
 			for _, m := range lists.Containers {
-				kind := cmp.Or(containerNames[m.Kind], "Container")
+				kind := containerName(names, m)
 				if matches(m.Name, kind, m.Kind) {
-					add(searchHit{Kind: hitContainer, Name: cmp.Or(m.Name, kind), Detail: m.Kind, X: m.X, Y: height(m.Y), Z: m.Z}, d)
+					add(searchHit{Kind: hitContainer, Name: cmp.Or(m.Name, kind), Detail: m.Kind, Colour: m.Colour, Trapped: m.Trapped,
+						X: m.X, Y: height(m.Y), Z: m.Z}, d)
 				}
 			}
 			for _, m := range lists.Mobs {
-				if matches(m.Name, m.Kind) {
-					add(searchHit{Kind: hitMob, Name: m.Name, Detail: m.Kind, X: m.X, Y: height(m.Y), Z: m.Z}, d)
+				if matches(m.Name, m.Kind, names.Entity(m.Kind)) {
+					add(searchHit{Kind: hitMob, Name: m.Name, Detail: m.Kind, Baby: m.Baby, X: m.X, Y: height(m.Y), Z: m.Z}, d)
 				}
 			}
 		}

@@ -23,6 +23,9 @@ type searchAnswer struct {
 		Kind      string   `json:"kind"`
 		Name      string   `json:"name"`
 		Detail    string   `json:"detail"`
+		Colour    string   `json:"colour"`
+		Trapped   bool     `json:"trapped"`
+		Baby      bool     `json:"baby"`
 		Dimension string   `json:"dimension"`
 		X         int32    `json:"x"`
 		Y         *int32   `json:"y"`
@@ -102,6 +105,50 @@ func TestSearchFindsABiomeAStructureAndAMarkerByName(t *testing.T) {
 	}
 	if got := search(t, s, "zzz", me); got.Hits == nil || len(got.Hits) != 0 || got.More != 0 {
 		t.Errorf("nothing matching = %+v", got)
+	}
+}
+
+// The page calls a marker by the game's name for it, colour and all, and
+// draws it by its colour, so a search has to find it under that name and
+// pass on what the marker carried.
+func TestSearchFindsMarkersByWhatThePageCallsThemAndSaysWhatTheyAre(t *testing.T) {
+	s := withFetchedArt(t)
+	store := markers.NewStore()
+	store.Set(time.Now(), markers.World{chunks.Overworld: {
+		Beds: []markers.Marker{{X: 1, Y: 64, Z: 1, Colour: "red"}, {X: 2, Y: 64, Z: 2}},
+		Containers: []markers.Marker{
+			{X: 3, Y: 64, Z: 3, Kind: "chest", Trapped: true}, {X: 4, Y: 64, Z: 4, Kind: "chest"},
+			{X: 5, Y: 64, Z: 5, Kind: "shulker", Colour: "light_blue"}, {X: 6, Y: 64, Z: 6, Kind: "shulker", Colour: "undyed"},
+		},
+		Mobs: []markers.Marker{{X: 7, Y: 64, Z: 7, Kind: "villager_v2", Name: "Tesch", Baby: true}, {X: 8, Y: 64, Z: 8, Kind: "cow", Name: "Bess"}},
+	}})
+	s.Markers = store
+	me := session(s, steve)
+
+	if got := search(t, s, "red bed", me); len(got.Hits) != 1 || got.Hits[0].Name != "Red Bed" || got.Hits[0].Colour != "red" || got.Hits[0].X != 1 {
+		t.Errorf("red bed: %+v", got.Hits)
+	}
+	if got := search(t, s, "bed", me); describe(got) != "bed:Red Bed@overworld bed:Bed@overworld" || got.Hits[1].Colour != "" {
+		t.Errorf("bed: %s", describe(got))
+	}
+	if got := search(t, s, "trapped", me); len(got.Hits) != 1 || got.Hits[0].Name != "Trapped Chest" || got.Hits[0].Detail != "chest" || !got.Hits[0].Trapped {
+		t.Errorf("trapped: %+v", got.Hits)
+	}
+	// The language file's own word for a chest, which the id is not.
+	if got := search(t, s, "synthetic chest", me); len(got.Hits) != 1 || got.Hits[0].X != 4 || got.Hits[0].Trapped {
+		t.Errorf("synthetic chest: %+v", got.Hits)
+	}
+	if got := search(t, s, "light blue", me); len(got.Hits) != 1 || got.Hits[0].Name != "Light Blue Shulker Box" || got.Hits[0].Detail != "shulker" || got.Hits[0].Colour != "light_blue" {
+		t.Errorf("light blue: %+v", got.Hits)
+	}
+	if got := search(t, s, "shulker", me); describe(got) != "container:Light Blue Shulker Box@overworld container:Shulker Box@overworld" || got.Hits[1].Colour != "undyed" {
+		t.Errorf("shulker: %s", describe(got))
+	}
+	if got := search(t, s, "synthetic villager", me); len(got.Hits) != 1 || got.Hits[0].Name != "Tesch" || got.Hits[0].Detail != "villager_v2" || !got.Hits[0].Baby {
+		t.Errorf("a mob by the game's name for its type: %+v", got.Hits)
+	}
+	if got := search(t, s, "bess", me); len(got.Hits) != 1 || got.Hits[0].Baby {
+		t.Errorf("a grown mob: %+v", got.Hits)
 	}
 }
 
