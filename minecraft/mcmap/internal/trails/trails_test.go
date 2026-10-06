@@ -3,6 +3,8 @@ package trails
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -302,5 +304,68 @@ func TestRecordingAndReadingAtOnce(t *testing.T) {
 	wg.Wait()
 	if n := count(r.Trails("overworld", "", time.Time{}, start.Add(200*time.Second))); n != 200 {
 		t.Errorf("%d points held, want 4 players at their limit of 50", n)
+	}
+}
+
+// The expectation is worked out from what was recorded, not from the
+// recorder: x = 10*i, and a line breaks at each multiple of 1500 because
+// the player was not seen for a minute before it.
+func TestAReplyForALongTrailIsTheNewestPointsAndDoesNotCopyTheRest(t *testing.T) {
+	const held, line = 50_000, 1500
+	r := New(24*time.Hour, held)
+	at := func(i int) time.Time { return start.Add(time.Duration(i) * time.Second) }
+	for i := range held {
+		stamp := at(i)
+		if i%line == 0 {
+			stamp = stamp.Add(time.Duration(i/line) * time.Minute)
+		}
+		r.Record("overworld", stamp, []live.Entity{player("Dotablaze", float64(10*i), 0)})
+	}
+	end := at(held).Add(held / line * time.Minute)
+
+	// The expectation is built from what Record was given.
+	stamp := func(i int) int64 {
+		s := at(i)
+		if i%line == 0 {
+			s = s.Add(time.Duration(i/line) * time.Minute)
+		}
+		return s.Unix()
+	}
+	expect := func(first int) [][]Point {
+		var lines [][]Point
+		for i := first; i < held; i++ {
+			if i == first || i%line == 0 {
+				lines = append(lines, nil)
+			}
+			lines[len(lines)-1] = append(lines[len(lines)-1], Point{T: stamp(i), X: int32(10 * i), Y: 64, Z: 0})
+		}
+		return lines
+	}
+
+	for name, since := range map[string]time.Time{"all": {}, "since": at(5000)} {
+		first := held - MaxServed
+		matching := held
+		if !since.IsZero() {
+			matching = held - 5001
+		}
+		reply := r.Trails("overworld", "", since, end)
+		if reply.More != matching-MaxServed {
+			t.Errorf("%s: more = %d, want %d", name, reply.More, matching-MaxServed)
+		}
+		if got := only(t, reply).Segments; !reflect.DeepEqual(got, expect(first)) {
+			t.Errorf("%s: the segments differ: %d lines of %d points, want %d lines of %d points", name, len(got), count(reply), len(expect(first)), MaxServed)
+		}
+	}
+
+	// Serving 20,000 of 50,000 held points must cost about the 20,000, not
+	// a copy of everything that matched.
+	r.Trails("overworld", "", time.Time{}, end)
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	reply := r.Trails("overworld", "", time.Time{}, end)
+	runtime.ReadMemStats(&after)
+	served := count(reply)
+	if bytes := after.TotalAlloc - before.TotalAlloc; bytes > uint64(served)*24*3/2 {
+		t.Errorf("a reply of %d points allocated %d bytes, want under %d", served, bytes, uint64(served)*24*3/2)
 	}
 }
