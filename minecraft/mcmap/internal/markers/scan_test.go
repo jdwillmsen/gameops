@@ -125,7 +125,7 @@ func TestScan_FindsBedsContainersAndNamedMobsByDimension(t *testing.T) {
 	)
 
 	ow, nether, end := w[chunks.Overworld], w[chunks.Nether], w[chunks.End]
-	if want := []Marker{{X: 3, Y: 64, Z: 5}}; !reflect.DeepEqual(ow.Beds, want) {
+	if want := []Marker{{X: 3, Y: 64, Z: 5, Colour: "red"}}; !reflect.DeepEqual(ow.Beds, want) {
 		t.Errorf("overworld beds = %v, want one bed for its two halves: %v", ow.Beds, want)
 	}
 	if want := []Marker{{X: 8, Y: 70, Z: 9, Kind: "chest", Name: "Diamonds"}, {X: -2, Y: 60, Z: -20, Kind: "barrel"}}; !reflect.DeepEqual(ow.Containers, want) {
@@ -134,7 +134,7 @@ func TestScan_FindsBedsContainersAndNamedMobsByDimension(t *testing.T) {
 	if want := []Marker{{X: 173, Y: 66, Z: 263, Kind: "cat", Name: "OJ"}}; !reflect.DeepEqual(ow.Mobs, want) {
 		t.Errorf("overworld mobs = %v, want %v", ow.Mobs, want)
 	}
-	if want := []Marker{{X: 33, Y: 90, Z: 34}}; !reflect.DeepEqual(nether.Beds, want) {
+	if want := []Marker{{X: 33, Y: 90, Z: 34, Colour: "white"}}; !reflect.DeepEqual(nether.Beds, want) {
 		t.Errorf("nether beds = %v, want %v", nether.Beds, want)
 	}
 	if want := []Marker{{X: 40, Y: 33, Z: 41, Kind: "shulker"}}; !reflect.DeepEqual(nether.Containers, want) {
