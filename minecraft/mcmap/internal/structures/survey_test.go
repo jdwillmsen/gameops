@@ -134,6 +134,29 @@ func evidence(t *testing.T) *world {
 	return w
 }
 
+// evidenceArea is the window a survey of evidence looks in: its chunks and
+// the margin round them.
+var evidenceArea = Area{-64, -64, 127, 127}
+
+// fortressAt is a fragment of a fortress in its site's own chunk.
+func fortressAt(s Site) Box {
+	return Box{s.ChunkX*16 + 2, 48, s.ChunkZ*16 + 3, s.ChunkX*16 + 12, 57, s.ChunkZ*16 + 9}
+}
+
+// fortresses records one at each of the last three fortress sites beside
+// the world, which is what it takes for fortresses to be predicted, and
+// returns the sites it left alone.
+func (w *world) fortresses() (free []Site) {
+	sites, _ := fortress{}.Sites(testSeed, evidenceArea, 100)
+	if len(sites) < 7 {
+		w.t.Fatalf("only %d fortress sites to test with", len(sites))
+	}
+	for _, site := range sites[len(sites)-3:] {
+		w.structure(chunks.Nether, fortressByte, fortressAt(site))
+	}
+	return sites[:len(sites)-3]
+}
+
 func listing(t *testing.T, dir string) []string {
 	t.Helper()
 	var names []string
@@ -195,13 +218,11 @@ func TestTake_ReadsRecordedStructuresByDimension(t *testing.T) {
 }
 
 func TestTake_OffersPredictionsOnceTheSeedExplainsTheWorld(t *testing.T) {
-	sites, _ := fortress{}.Sites(testSeed, Area{-64, -64, 127, 127}, 100)
-	if len(sites) < 4 {
-		t.Fatalf("only %d fortress sites to test with", len(sites))
-	}
+	w := evidence(t)
+	sites := w.fortresses()
 	built, empty := sites[0], sites[1]
 	log := &bytes.Buffer{}
-	dir := evidence(t).
+	dir := w.
 		// One fortress the world already has, recorded near its site.
 		structure(chunks.Nether, fortressByte, Box{built.ChunkX*16 + 20, 48, built.ChunkZ*16 + 3, built.ChunkX*16 + 30, 57, built.ChunkZ*16 + 9}).
 		// And one site whose chunk is complete with nothing recorded.
@@ -247,9 +268,21 @@ func TestTake_OffersPredictionsOnceTheSeedExplainsTheWorld(t *testing.T) {
 		t.Errorf("the site in a complete chunk is missing from %+v", nether)
 	}
 	// Monument sites are where the generator tries; whether it builds
-	// depends on a biome nothing here can know, so none is offered.
-	if overworld := got.Layers[chunks.Overworld].Predicted; len(overworld) != 0 {
-		t.Errorf("overworld predictions = %+v, want none", overworld)
+	// depends on a biome nothing here knows, so each is a candidate. The
+	// world has recorded none of the other kinds to check their rules by.
+	overworld := got.Layers[chunks.Overworld].Predicted
+	if len(overworld) == 0 {
+		t.Error("no monument sites offered by a world that bears out three")
+	}
+	for _, p := range overworld {
+		if p.Kind != Monument || !p.Candidate || p.Generated {
+			t.Errorf("overworld prediction %+v, want a monument and a candidate", p)
+		}
+	}
+	for kind, want := range map[Kind]string{Fortress: SeedVerified, Monument: SeedVerified, Outpost: SeedUnverified, WitchHut: SeedUnverified} {
+		if got := got.Check.Kinds[kind].State; got != want {
+			t.Errorf("%s is %s, want %s", kind, got, want)
+		}
 	}
 
 	// The site that came to nothing is a finding, said once.
@@ -329,7 +362,7 @@ func TestTake_AFarOffChunkDoesNotMoveTheSearch(t *testing.T) {
 		// A monument out there is not at a site anyone looked for, and
 		// says nothing about the seed.
 		structure(chunks.Overworld, monumentByte, Box{-(1 << 25), 39, 1 << 25, -(1 << 25) + 15, 61, 1<<25 + 15})
-	near, _ := fortress{}.Sites(testSeed, Area{-64, -64, 127, 127}, 1000)
+	near := w.fortresses()
 
 	got, err := surveyor(t, nil).Take(context.Background(), w.write(), surveyedAt)
 	if err != nil {
@@ -354,6 +387,7 @@ func TestTake_AFarOffChunkDoesNotMoveTheSearch(t *testing.T) {
 
 func TestTake_UsesTheOperatorsSeedInPlaceOfLevelDat(t *testing.T) {
 	w := evidence(t)
+	w.fortresses()
 	wrong := levelSeed + 1
 	w.seed = &wrong
 	s := surveyor(t, nil)
@@ -413,7 +447,9 @@ func TestTake_CountsWhatItCannotReadAndKeepsTheRest(t *testing.T) {
 
 func TestTake_BoundsWhatItKeeps(t *testing.T) {
 	w := evidence(t)
-	// Ten fortress fragments, too far apart to be one.
+	w.fortresses()
+	// Ten fortress fragments, too far apart to be one, and outside the
+	// area the fortress rule is checked in.
 	for i := range int32(10) {
 		w.structure(chunks.Nether, fortressByte, Box{-4000 + i*64, 64, -4000, -3995 + i*64, 70, -3995})
 	}
@@ -426,8 +462,8 @@ func TestTake_BoundsWhatItKeeps(t *testing.T) {
 		t.Fatal(err)
 	}
 	nether := got.Layers[chunks.Nether]
-	if len(nether.Recorded) != 4 || nether.RecordedMore != 6 {
-		t.Errorf("recorded %d (+%d), want 4 (+6)", len(nether.Recorded), nether.RecordedMore)
+	if len(nether.Recorded) != 4 || nether.RecordedMore != 9 {
+		t.Errorf("recorded %d (+%d), want 4 (+9)", len(nether.Recorded), nether.RecordedMore)
 	}
 	if len(nether.Predicted) != 4 || nether.PredictedMore < 1 {
 		t.Errorf("predicted %d (+%d), want 4 and the rest counted", len(nether.Predicted), nether.PredictedMore)
@@ -443,8 +479,8 @@ func TestTake_BoundsWhatItKeeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Areas != 5 || got.OverLimit != 8 {
-		t.Errorf("areas %d, over limit %d; want 5 and 8", got.Areas, got.OverLimit)
+	if got.Areas != 5 || got.OverLimit != 11 {
+		t.Errorf("areas %d, over limit %d; want 5 and 11", got.Areas, got.OverLimit)
 	}
 }
 

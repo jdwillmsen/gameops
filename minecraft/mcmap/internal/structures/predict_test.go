@@ -113,3 +113,37 @@ func TestFloorDiv(t *testing.T) {
 		}
 	}
 }
+
+// A kind the biome decides must say no to most biomes, or the filter that
+// keeps its sites out of generated country filters nothing.
+func TestAllows(t *testing.T) {
+	const forest, river = 4, 7
+	for _, p := range Predictors {
+		if p.Certain() {
+			if !p.Allows(forest) {
+				t.Errorf("%s is built at every site and refuses a biome", p.Kind())
+			}
+			continue
+		}
+		if p.Allows(forest) || p.Allows(river) {
+			t.Errorf("%s allows a forest or a river", p.Kind())
+		}
+	}
+	for name, c := range map[string]struct {
+		p     Predictor
+		biome uint32
+		want  bool
+	}{
+		"monument in a deep ocean":      {monument{}, biomeDeepOcean, true},
+		"monument in a deep cold ocean": {monument{}, biomeDeepColdOcean, true},
+		"monument in a shallow ocean":   {monument{}, 0, false},
+		"outpost in a desert":           {outpost{}, biomeDesert, true},
+		"outpost in a swamp":            {outpost{}, biomeSwamp, false},
+		"hut in a swamp":                {witchHut{}, biomeSwamp, true},
+		"hut in a mangrove swamp":       {witchHut{}, 191, false},
+	} {
+		if got := c.p.Allows(c.biome); got != c.want {
+			t.Errorf("%s: Allows = %v, want %v", name, got, c.want)
+		}
+	}
+}

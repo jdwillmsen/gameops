@@ -36,6 +36,10 @@ type structuresJSON struct {
 	// structures.SeedVerified and its siblings. Only a verified seed
 	// predicts anything. The seed itself is never sent.
 	Prediction string `json:"prediction"`
+	// Kinds is, for each kind this dimension has a rule for, how that
+	// rule fared against the world's own structures of the kind. Only a
+	// verified kind is among the predictions.
+	Kinds map[structures.Kind]structures.KindCheck `json:"kinds"`
 	// Spawn is the world spawn, with the overworld only.
 	Spawn *spawnJSON `json:"spawn,omitempty"`
 }
@@ -56,6 +60,7 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		Recorded:   []structures.Structure{},
 		Predicted:  []structures.Prediction{},
 		Prediction: structures.SeedUnknown,
+		Kinds:      map[structures.Kind]structures.KindCheck{},
 	}
 	if survey, ok := s.Structures.Last(); ok {
 		layer := survey.Layers[dimension]
@@ -64,6 +69,11 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		// here because this is where a list becomes a response.
 		out.Recorded, out.RecordedMore = clamp(layer.Recorded, layer.RecordedMore)
 		out.Predicted, out.PredictedMore = clamp(layer.Predicted, layer.PredictedMore)
+		for _, p := range structures.Predictors {
+			if check, ok := survey.Check.Kinds[p.Kind()]; ok && p.Dimension() == dimension {
+				out.Kinds[p.Kind()] = check
+			}
+		}
 		if survey.HasLevel && dimension == chunks.Overworld {
 			out.Spawn = &spawnJSON{X: survey.Level.SpawnX, Z: survey.Level.SpawnZ}
 			if survey.Level.SpawnYKnown {
