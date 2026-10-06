@@ -33,6 +33,11 @@
   // asking whether the session is still good.
   const GIVE_UP_RETRY_MS = 5000;
   const READOUT_MS = 250;
+  // A player who leaves the picture is looked for in the other dimensions
+  // this many times, this far apart: the game takes a few seconds to put
+  // someone through a portal, and they are in no list meanwhile.
+  const SEEK_TRIES = 3;
+  const SEEK_RETRY_MS = 3000;
   // How often to ask which markers have a picture. A player who joins is
   // asked about sooner than this; see wanted().
   const ICONS_MS = 30_000;
@@ -50,6 +55,12 @@
   // How far past the head the pointer showing a player's heading reaches.
   const POINTER = 11;
   const INK = '#0b0c0e';
+  // The side of the card's picture, which is the largest sprite and its
+  // edge.
+  const PORTRAIT = 32;
+  // A finger is given this much around a marker to land on; a dot is too
+  // small to tap otherwise.
+  const TOUCH_TOLERANCE = 8;
 
   const CATEGORIES = {
     players: '#ffffff',
@@ -97,6 +108,23 @@
     frozenAge: document.getElementById('frozen-age'),
   };
 
+  const card = {
+    root: document.getElementById('inspect'),
+    picture: document.getElementById('inspect-picture'),
+    name: document.getElementById('inspect-name'),
+    kind: document.getElementById('inspect-kind'),
+    coords: document.getElementById('inspect-coords'),
+    x: document.getElementById('inspect-x'),
+    y: document.getElementById('inspect-y'),
+    z: document.getElementById('inspect-z'),
+    note: document.getElementById('inspect-note'),
+    what: document.getElementById('inspect-what'),
+    when: document.getElementById('inspect-when'),
+    follow: document.getElementById('inspect-follow'),
+    copy: document.getElementById('inspect-copy'),
+    close: document.getElementById('inspect-close'),
+  };
+
   const control = { paused: false, interval: INTERVALS[0] };
   try {
     const saved = JSON.parse(localStorage.getItem(CONTROL_KEY) || 'null');
@@ -120,7 +148,7 @@
   // SVG element, which is fine for a grid and not for a thousand mobs moving
   // every second. Only this layer is on the canvas: switching the whole map
   // over would change how everything else on it draws.
-  const renderer = L.canvas({ padding: 0.5 });
+  const renderer = L.canvas({ padding: 0.5, tolerance: matchMedia('(pointer: coarse)').matches ? TOUCH_TOLERANCE : 0 });
 
   // Leaflet's canvas draws at twice the size on a dense screen, so a
   // picture prepared for it is prepared at that size too.
@@ -258,7 +286,7 @@
   const playerLayer = L.featureGroup();
   mobLayer.bindTooltip((marker) => text(marker.options.label), { sticky: true, direction: 'top', className: 'live-tip' });
 
-  // key -> { marker, category, x, z, yaw, name, type, pic }, where pic is
+  // key -> { marker, category, x, y, z, yaw, name, type, pic }, where pic is
   // the address of the picture the marker is wearing, or null for none.
   const entities = new Map();
 
@@ -303,12 +331,24 @@
   let stale = true;
   let more = 0;
 
+  // The entity the card is about, or null while the card is shut:
+  // { key, category, name, type, x, y, z, dimension, seenAt, state, follow,
+  // went }. state is live while it is in the picture, waiting while there
+  // is no picture to say either way, lost once a frame of its dimension
+  // came without it, and away while the map shows another dimension. went
+  // is the dimension a lost player was found in, or null.
+  let picked = null;
+  let seeking = [];
+  let seekTimer = null;
+  let cardShape = '';
+
   const fmt = (n) => n.toLocaleString('en-US');
   const layerOf = (category) => (category === 'players' ? playerLayer : mobLayer);
 
+  const readable = (type) => (type || 'unknown').replace(/_/g, ' ');
+
   function mobLabel(e) {
-    const type = (e.t || 'unknown').replace(/_/g, ' ');
-    return e.n ? `${e.n} (${type})` : type;
+    return e.n ? `${e.n} (${readable(e.t)})` : readable(e.t);
   }
 
   // Fetches and decodes a picture once. The marker that wanted it is drawn
@@ -502,6 +542,7 @@
     more = 0;
     frameAt = null;
     count();
+    track(false);
   }
 
   function draw(frame) {
@@ -528,12 +569,14 @@
       }
       if (!held) {
         const pic = pictureOf(e, category);
-        held = { marker: make(e, category, pic), category, x: e.x, z: e.z, yaw: e.r, name: e.n, type: e.t, pic };
+        held = { marker: make(e, category, pic), category, x: e.x, y: e.y, z: e.z, yaw: e.r, name: e.n, type: e.t, pic };
         entities.set(key, held);
         if (shown(category)) layerOf(category).addLayer(held.marker);
         added = true;
         return;
       }
+      held.y = e.y;
+      held.name = e.n;
       if (held.x !== e.x || held.z !== e.z) {
         held.x = e.x;
         held.z = e.z;
@@ -557,6 +600,9 @@
     // top of a mob that arrived after them.
     if (added) playerLayer.eachLayer((marker) => marker.bringToFront());
     count();
+    // A stale frame is an empty one because nothing recent is known, which
+    // is not the same as the entity being gone.
+    track(!stale);
   }
 
   function count() {
@@ -660,6 +706,7 @@
     const want = here && !control.paused && !document.hidden ? here : null;
     if (!want) {
       close();
+      stopSeeking();
       // Paused, the last picture stays for as long as it is of the
       // dimension being looked at. Hidden or logged out, nothing stays.
       if (!(control.paused && here && here === pictured)) clear();
@@ -694,6 +741,7 @@
   }
 
   function readout() {
+    paintCard();
     const age = frameAt === null || stale ? null : Math.max(0, (Date.now() + clockOffset - frameAt) / 1000);
     let state;
     if (control.paused) {
@@ -748,6 +796,7 @@
       if (on) layerOf(category).addLayer(held.marker); else layerOf(category).removeLayer(held.marker);
     }
     if (on) playerLayer.eachLayer((marker) => marker.bringToFront());
+    ring();
   }
 
   // Puts the layer's rows in the panel while the service has a live layer
@@ -764,6 +813,251 @@
       rows[id] = app.layers.register({ group: 'live', id, label, order: (at + 1) * 10, swatch: `dot ${id}` });
       rows[id].onToggle((on) => toggle(id, on));
     });
+  }
+
+  // --- inspecting and following ------------------------------------------
+  //
+  // A click on a marker opens a card about that one entity. It is found
+  // again in each frame by the id the game gives it, which a player and a
+  // mob alike keep for as long as they exist, and never by where it is: an
+  // id missing from a whole frame is an entity no longer tracked, and the
+  // card says so rather than settle on whatever is nearest.
+
+  const INSPECTED = { color: '#ffffff', weight: 2, dashArray: '4 4' };
+  const FOLLOWED = { color: ME, weight: 3, dashArray: null };
+  const halo = L.circleMarker([0, 0], { renderer, interactive: false, fill: false, opacity: 1, ...INSPECTED });
+
+  const say = (node, s) => {
+    if (node.textContent !== s) node.textContent = s;
+  };
+  const labelOf = (dimension) => (app.label ? app.label(dimension) : dimension);
+  const tenths = (n) => n.toFixed(1);
+
+  // The marker as the map draws it, so that the card and the map plainly
+  // show the same thing.
+  function portrait(held) {
+    const ctx = card.picture.getContext('2d');
+    ctx.setTransform(DENSITY, 0, 0, DENSITY, 0, 0);
+    ctx.clearRect(0, 0, PORTRAIT, PORTRAIT);
+    const worn = held.marker.options.sprite;
+    if (worn) {
+      const side = worn.width / DENSITY;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(worn, (PORTRAIT - side) / 2, (PORTRAIT - side) / 2, side, side);
+      return;
+    }
+    ctx.beginPath();
+    ctx.arc(PORTRAIT / 2, PORTRAIT / 2, held.category === 'players' ? 8 : DOT_RADIUS * 2, 0, Math.PI * 2);
+    ctx.fillStyle = held.marker.options.fillColor;
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+  }
+
+  function ring() {
+    const held = picked && picked.state === 'live' ? entities.get(picked.key) : null;
+    if (!held) {
+      halo.remove();
+      return;
+    }
+    const r = held.marker.getRadius();
+    // A head is square, and its corners reach past its radius.
+    const reach = held.category === 'players' && held.marker.options.sprite ? r * Math.SQRT2 : r;
+    halo.setLatLng([held.z, held.x]);
+    halo.setRadius(Math.ceil(reach) + 4);
+    halo.setStyle(picked.follow ? FOLLOWED : INSPECTED);
+    if (!map.hasLayer(halo)) halo.addTo(map);
+    halo.bringToFront();
+  }
+
+  function centre() {
+    if (!picked || !picked.follow || picked.state !== 'live') return;
+    // Moving the view in the middle of a zoom cuts the zoom short. Its end
+    // comes back here. _animatingZoom is a Leaflet internal, like those
+    // above.
+    if (map._animatingZoom) return;
+    map.panTo([picked.z, picked.x], { animate: false });
+  }
+
+  function stopSeeking() {
+    clearTimeout(seekTimer);
+    for (const es of seeking) es.close();
+    seeking = [];
+  }
+
+  // A frame is one dimension's picture, so a player missing from it has
+  // either left the game or changed dimension, and only the other
+  // dimensions' pictures can say which. Each is asked for once, since a
+  // stream opens with the current picture, and shut on its first frame.
+  function seek(who, tries) {
+    stopSeeking();
+    if (picked !== who || who.state !== 'lost' || tries <= 0 || !app.dimensions) return;
+    for (const dimension of app.dimensions()) {
+      if (dimension === who.dimension) continue;
+      const es = new EventSource(`api/live?dimension=${encodeURIComponent(dimension)}`);
+      seeking.push(es);
+      es.onerror = () => es.close();
+      es.onmessage = (ev) => {
+        es.close();
+        let frame;
+        try { frame = JSON.parse(ev.data); } catch { return; }
+        if (picked !== who || who.state !== 'lost') return;
+        if (!(frame.players || []).some((e) => `p:${e.i}` === who.key)) return;
+        who.went = dimension;
+        stopSeeking();
+        paintCard();
+      };
+    }
+    seekTimer = setTimeout(() => seek(who, tries - 1), SEEK_RETRY_MS);
+  }
+
+  // Brings the card in line with the picture. whole says the picture is a
+  // frame that lists everything there is, so that an entity not in it is
+  // gone; a picture that was merely cleared says nothing about anyone.
+  function track(whole) {
+    if (!picked) return;
+    const held = entities.get(picked.key);
+    if (held) {
+      if (picked.state === 'lost') stopSeeking();
+      Object.assign(picked, {
+        state: 'live', went: null, dimension: pictured, seenAt: Date.now(),
+        category: held.category, name: held.name, type: held.type, x: held.x, y: held.y, z: held.z,
+      });
+      portrait(held);
+      centre();
+    } else if (app.dimension() !== picked.dimension) {
+      picked.state = 'away';
+      picked.follow = false;
+    } else if (!whole) {
+      if (picked.state !== 'lost') picked.state = 'waiting';
+    } else if (picked.state !== 'lost') {
+      picked.state = 'lost';
+      picked.follow = false;
+      if (picked.category === 'players') seek(picked, SEEK_TRIES);
+    }
+    ring();
+    paintCard();
+  }
+
+  function paintCard() {
+    if (!card.root) return;
+    card.root.hidden = picked === null;
+    document.body.classList.toggle('inspecting', picked !== null);
+    if (picked === null) return;
+    const player = picked.category === 'players';
+    // Always as text: a gamertag and a name tag are both a player's choice.
+    say(card.name, picked.name || (player ? 'Player' : readable(picked.type)));
+    const kind = player ? (isMe(picked.name) ? 'Player (you)' : 'Player') : readable(picked.type);
+    say(card.kind, `${kind} · ${labelOf(picked.dimension)}`);
+    say(card.x, tenths(picked.x));
+    say(card.y, tenths(picked.y));
+    say(card.z, tenths(picked.z));
+
+    const ago = span((Date.now() - picked.seenAt) / 1000);
+    let what = '';
+    let when = `Last seen ${ago} ago.`;
+    if (picked.state === 'lost') {
+      what = picked.went ? `Left for another dimension: ${labelOf(picked.went)}.` : 'No longer tracked.';
+    } else if (picked.state === 'away') {
+      what = `Not tracked: the map is on another dimension, ${labelOf(app.dimension())}.`;
+    } else if (picked.state === 'waiting') {
+      what = 'Waiting for live positions.';
+    } else if (control.paused) {
+      what = 'Paused.';
+      when = `Position is from ${ago} ago.`;
+    }
+    card.root.classList.toggle('adrift', what !== '');
+    card.note.hidden = what === '';
+    say(card.what, what);
+    say(card.when, what === '' ? '' : when);
+    card.follow.disabled = picked.state === 'lost' || picked.state === 'away';
+    card.follow.setAttribute('aria-pressed', String(picked.follow));
+    // The layer panel stops short of the card on a narrow screen, and the
+    // card is as tall as what it has to say.
+    if (what !== cardShape) {
+      cardShape = what;
+      document.body.style.setProperty('--inspect-height', `${card.root.offsetHeight}px`);
+    }
+  }
+
+  function pick(key) {
+    if (!card.root || !entities.has(key)) return;
+    stopSeeking();
+    picked = { key, follow: false, state: 'live', went: null, dimension: pictured };
+    cardShape = null;
+    track(false);
+  }
+
+  function shut() {
+    if (!picked) return;
+    const within = card.root.contains(document.activeElement);
+    picked = null;
+    stopSeeking();
+    ring();
+    paintCard();
+    // Focus left on a hidden button is focus lost to the keyboard.
+    if (within) map.getContainer().focus();
+  }
+
+  function unfollow() {
+    if (!picked || !picked.follow) return;
+    picked.follow = false;
+    ring();
+    paintCard();
+  }
+
+  // Leaflet does not report a click on a marker at the end of a drag that
+  // began on it, so this is only ever a click or a tap.
+  function onPick(e) {
+    for (const [key, held] of entities) {
+      if (held.marker !== e.layer) continue;
+      pick(key);
+      return;
+    }
+  }
+
+  async function copyPosition() {
+    if (!picked) return;
+    let said = 'Copied';
+    try {
+      await navigator.clipboard.writeText([picked.x, picked.y, picked.z].map(tenths).join(' '));
+    } catch {
+      // No clipboard to write to, as on a page not served securely. The
+      // numbers on the card are the same text, so they are selected and
+      // copied the old way, or left selected for the viewer to copy.
+      getSelection().selectAllChildren(card.coords);
+      let done = false;
+      try { done = document.execCommand('copy'); } catch { /* left selected */ }
+      if (!done) said = 'Selected: copy it';
+    }
+    card.copy.textContent = said;
+    setTimeout(() => { card.copy.textContent = 'Copy x y z'; }, 2000);
+  }
+
+  if (card.root) {
+    card.picture.width = card.picture.height = PORTRAIT * DENSITY;
+    mobLayer.on('click', onPick);
+    playerLayer.on('click', onPick);
+    card.close.addEventListener('click', shut);
+    card.copy.addEventListener('click', copyPosition);
+    card.follow.addEventListener('click', () => {
+      if (!picked) return;
+      picked.follow = !picked.follow;
+      centre();
+      ring();
+      paintCard();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') shut();
+    });
+    // The viewer taking the map somewhere else is the viewer no longer
+    // following. A zoom keeps the entity in the middle and is not that.
+    map.on('dragstart', unfollow);
+    map.on('keydown', (e) => {
+      if (e.originalEvent.key.startsWith('Arrow')) unfollow();
+    });
+    map.on('zoomend', centre);
   }
 
   el.pause.addEventListener('click', () => {

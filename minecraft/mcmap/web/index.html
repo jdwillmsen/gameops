@@ -41,6 +41,22 @@
       <div id="layers-body" hidden></div>
     </aside>
     <main id="map" aria-label="Map"></main>
+    <section id="inspect" class="inspect" aria-labelledby="inspect-name" hidden>
+      <div class="inspect-head">
+        <canvas id="inspect-picture" width="32" height="32" aria-hidden="true"></canvas>
+        <div class="inspect-title">
+          <h2 id="inspect-name"></h2>
+          <span id="inspect-kind"></span>
+        </div>
+        <button id="inspect-close" type="button">Close</button>
+      </div>
+      <output id="inspect-coords" class="inspect-coords" aria-live="off"><span id="inspect-x" data-axis="X"></span> <span id="inspect-y" data-axis="Y"></span> <span id="inspect-z" data-axis="Z"></span></output>
+      <p id="inspect-note" class="inspect-note" hidden><strong id="inspect-what" role="status"></strong> <span id="inspect-when"></span></p>
+      <div class="inspect-actions">
+        <button id="inspect-follow" type="button" aria-pressed="false">Follow</button>
+        <button id="inspect-copy" type="button">Copy x y z</button>
+      </div>
+    </section>
     <p id="frozen" class="frozen" hidden><strong id="frozen-what" role="status"></strong> <span id="frozen-age"></span></p>
   </div>
   <section id="login" class="login" aria-labelledby="login-title" hidden>

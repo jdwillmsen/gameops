@@ -396,6 +396,8 @@
   window.mcmap = {
     map,
     dimension: () => current,
+    dimensions: () => (info ? info.dimensions.map((d) => d.id) : []),
+    label: (id) => LABELS[id] || id,
     live: () => Boolean(info && info.live),
     // Never passes an argument on: load reads one as "only checking".
     reload: () => load(),
