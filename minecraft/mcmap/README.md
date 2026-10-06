@@ -246,7 +246,8 @@ way to the browser, so one that has nothing to say writes a comment line
 every `LIVE_KEEPALIVE`. That setting cannot be raised past 20 seconds.
 
 **Turning it off.** `LIVE_ENABLED=false` starts nothing: no request to
-the bridge, no route, and the page does not show the filters. The live
+the bridge, no route, and the page shows neither the layer's rows nor its
+pause and interval controls. The live
 layer is also inert until the bridge serves `GET /script` and the pack is
 installed; until then the page says `live · no data`.
 
@@ -352,8 +353,8 @@ and after; one whole repaint, flushed, took a median 1.9 ms as dots and
 
 ## Markers
 
-Four more kinds of mark are drawn as rings, each with a filter the browser
-remembers:
+Four more kinds of mark are drawn as rings, each with a row in the layer
+panel:
 
 | Marker | From | Who sees it |
 |---|---|---|
@@ -394,7 +395,7 @@ is logged and counted and stops nothing else: the page keeps the markers of
 the snapshot before. Until the first cycle after a start there are none.
 
 **Limits.** Per dimension, the 5,000 beds, 5,000 containers and 1,000 named
-mobs nearest the origin are kept and the rest counted; the filter says how
+mobs nearest the origin are kept and the rest counted; the layer's row says how
 many are not shown. A name is cut to 64 characters, loses the game's
 formatting codes, and is sent as text; the page builds every label from
 text and never from markup. One dimension's answer is at most 2 MB, and is
@@ -410,10 +411,10 @@ here, so the two share one credential and no new one. The agent is asked
 when a browser asks, so a waypoint saved in chat is on the map at the next
 refresh; nothing is kept here. At most four requests to the agent are open
 at once, each for three seconds at most, and 500 waypoints are passed on.
-While the agent cannot be reached the filter stays and draws nothing.
+While the agent cannot be reached the row stays and draws nothing.
 
 `MARKERS_ENABLED=false` skips the read and the route; without `AGENT_URL`
-there is no waypoint route and no waypoint filter.
+there is no waypoint route and no waypoint row.
 
 ## Structures
 
@@ -489,6 +490,74 @@ To check the rules again after a game update, against a copy of a world:
 ```sh
 MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/structures/
 ```
+
+## Page controls
+
+**The layer panel.** Every layer's switch is a row in one panel over the
+map, grouped as Live, Markers, Structures, Biomes and Overlays. A group
+appears once a layer registers a row in it, folds away, and has All and
+None. A row is a checkbox, a count, and where there is something to say a
+note under it, such as why nothing is predicted. The viewer's choices are
+kept in the browser under `mcmap.layers`, and which groups are folded under
+`mcmap.panel`. The filters the page had before the panel were kept under
+`mcmap.live`, `mcmap.markers` and `mcmap.structures`; a row with no choice
+saved yet takes the one saved there, so nobody's filters reset. The old
+single Structures switch, if it was off, carries over as Known and
+Predicted both off, and the old Live switch as paused.
+
+**Adding a layer.** A layer is a script of its own, loaded after
+`layers.js`, which registers its rows and never edits the panel:
+
+```js
+const row = window.mcmap.layers.register({
+  group: 'biomes',      // live, markers, structures, biomes, overlays, or a new id
+  id: 'plains',         // unique within the group; the choice is saved under it
+  label: 'Plains',
+  enabled: true,        // the choice until the viewer makes one; true if left out
+  order: 10,            // lower first; rows given none go last, as registered
+  groupLabel: 'Biomes', // the title of a group that is not one of the five
+  swatch: 'dot plains', // class of a colour key beside the label, styled in style.css
+});
+row.enabled;            // the saved choice, kept current
+row.setCount(1234);     // or null for none
+row.setNote('Not surveyed yet'); // or '' for none
+row.onToggle((on) => { /* draw or clear */ });
+row.setAvailable(false);         // greyed out, and skipped by All and None
+row.remove();
+```
+
+`onToggle` is called with the new value when the viewer changes the row,
+by its checkbox or by the group's All or None, and not when it is
+registered: read `enabled` once to begin with. Registering an id again
+replaces its row. A label, a note and a group's title are set as text,
+never parsed, so a name from the world is safe in any of them.
+`window.mcmap.layers.ready` is a promise that resolves, with the same
+object, once `register` exists; a script loaded after `layers.js` can call
+`register` at once, and one that might run before it waits on `ready`.
+Each of `live.js`, `markers.js` and `structures.js` is an example.
+
+**The refresh countdown.** The footer counts down to the next refresh of
+the terrain and the markers, from `snapshotAt` and `refreshSeconds` and the
+server's own clock as its `Date` header gives it. The service counts its
+interval from the end of a cycle, so a healthy refresh lands a little after
+zero; for the first 90 seconds past the time the page says `Refresh due
+now`, and asks every five seconds whether it has landed. Past that, which
+is what a quiet window or a failing cycle looks like, it says `Refresh
+overdue by` and counts up, asking every 20 seconds after the first two
+minutes. It starts again only when a new snapshot has been seen.
+
+**Live updates.** Beside the grid switch are Pause and an interval of 1,
+2, 5, 10 or 30 seconds, both kept in the browser under `mcmap.liveControl`.
+A slower interval keeps the stream open and draws the newest frame when one
+is due; the rest are dropped unread. Pausing closes the stream, so a paused
+tab is not among `mcmap_live_subscribers`, and leaves the last picture on
+the map under a notice saying it is paused and how old the positions are.
+Resuming opens the stream again. As before, the stream is also closed
+while the tab is hidden.
+
+Everything here is a native button, checkbox or select: each is reached
+with Tab, worked with Space or Enter (the arrow keys, for the interval),
+and outlined while it has the focus.
 
 ## Login
 
@@ -582,7 +651,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag |
-| `GET /api/map` | Session required. World name, refresh interval, each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
+| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type) and `n` (a name, where there is one); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
@@ -658,7 +727,9 @@ go test -race ./minecraft/mcmap/...
 docker build -f minecraft/mcmap/Dockerfile -t minecraft-map:dev .
 ```
 
-The page under `web/` is plain files with no build step; Leaflet is vendored
+The page under `web/` is plain files with no build step, and CI has no
+JavaScript runner: `web/*_test.go` holds what can be checked of the scripts
+as text, and the rest is checked in a browser. Leaflet is vendored
 in `web/lib/leaflet` with its licence.
 
 ## Releases
