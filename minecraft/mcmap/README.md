@@ -268,7 +268,8 @@ glance. A marker with no picture is the dot or arrow it was before.
 this repository or in the image: the service fetches them at runtime from
 Mojang's public [bedrock-samples](https://github.com/Mojang/bedrock-samples)
 repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
-(about 50 KB of files).
+(about 80 KB of files, with the marker pictures and names
+[fetched with them](#names-and-marker-pictures)).
 
 - **The pin** is `ICONS_REF`, by default the commit tagged `v1.26.50.4`,
   the stable release nearest the game server's 1.26.5x. It is a commit so
@@ -286,8 +287,9 @@ repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
   an icon. The 39 that do not are not mobs (boats, minecarts, armour
   stands, projectiles) or have no egg.
 - **What is asked for**: one directory listing from `api.github.com`, then
-  the atlas, about 180 definitions and about 90 textures from
-  `raw.githubusercontent.com`, some 700 KB in all and a few seconds. No
+  the atlas, about 180 definitions, about 90 spawn-egg textures, 42 marker
+  textures and the language file from `raw.githubusercontent.com`: 317
+  requests and 1.6 MB in all, in under ten seconds. No
   redirect is followed, each file has a size limit and the whole fetch a
   count, byte and time limit, and every texture must decode as a PNG of at
   most 64 pixels a side, which is then encoded again; the downloaded bytes
@@ -351,6 +353,93 @@ canvas every frame while panning: 16.7 ms frames with none over, before
 and after; one whole repaint, flushed, took a median 1.9 ms as dots and
 1.4 ms as icons.
 
+### Names and marker pictures
+
+The same fetch, at the same pin, reads two more things, so that the page
+can show everything by its proper name and its own picture. This service
+serves them; the page still draws rings, letters and ids until it is
+changed to ask.
+
+**Names** are from the game's own English language file,
+`resource_pack/texts/en_US.lang`. Its keys follow no single rule, and each
+form here was read from the file, not assumed:
+
+| What | Key | Example |
+|---|---|---|
+| A mob or other entity type | `entity.<type>.name`, the type exactly as the world reports it | `entity.villager_v2.name` is Villager, `entity.evocation_illager.name` is Evoker |
+| A container | `tile.chest.name`, `tile.trapped_chest.name`, `tile.barrel.name`, `tile.shulkerBox.name` | |
+| A bed of a colour | `item.bed.<colour>.name`, in camel case, light grey spelt `silver` | `item.bed.lightBlue.name`, `item.bed.silver.name` |
+| A shulker box of a colour | `tile.shulkerBox<Colour>.name`, likewise | `tile.shulkerBoxSilver.name` is Light Gray Shulker Box |
+| A structure | `feature.<kind>`, with no suffix; an outpost is `feature.pillager_outpost` | `feature.monument` is Ocean Monument |
+
+The file is text from outside that ends up in a browser. It may be at most
+4 MB and 100,000 lines (it is 0.8 MB and 13,340); only lines with one of
+those keys are kept, 193 of them, and at most 4,000; and a name is kept
+only if it is at most 64 characters of printable text, with no control
+character, no invisible or text-reordering character, no private-use glyph
+and no colour code. A name that fails is dropped, not repaired. The page
+must still write every name as text.
+
+Anything the file does not list is named by its id tidied into words:
+namespace and version suffix dropped, underscores to spaces, each word
+capitalised, so `zombie_villager_v2` would be Zombie Villager. No raw id is
+served as a name. At the default pin the gaps are:
+
+- **Witch hut**: the file has no `feature.` entry for it, so it is the
+  tidied Witch Hut.
+- **Biomes**: the file names no biome at all. `icons.BiomeName(id)` is
+  therefore always the tidied id, and an id the game has kept from an older
+  version reads as that older word (`hell`, not Nether Wastes).
+- Four entity types that are block renderers and never appear as mobs
+  (`bed`, `decorated_pot`, `skull`, `trial_spawner`).
+
+The table also names every mob type on the live layer and among the
+markers at the moment it is asked for, so that with the samples out of
+reach, when nothing else says which types exist, each one in view still
+has a tidied name.
+
+**Marker pictures** are 42 small PNGs, by key:
+
+| Key | Source under `resource_pack/textures/` | Why that one |
+|---|---|---|
+| `bed/<colour>` | `items/bed_<colour>`, taken from the atlas's `bed` list, whose order is the colour number the world stores | The bed item, one per colour |
+| `container/chest`, `container/trapped_chest` | `blocks/chest_front`, `blocks/trapped_chest_front` | A chest has no item texture: the game draws the block. Its front is the face with the latch |
+| `container/barrel` | `blocks/barrel_side` | Likewise; the side is the face with the hoops |
+| `shulker/<colour>`, `shulker/undyed` | `entity/shulker/shulker_<colour>`, composed | See below |
+| `marker/waypoint` | `items/compass_item` | A waypoint is a place to find your way back to |
+| `structure/fortress` | `items/netherbrick` | A fortress is built of nothing else |
+| `structure/monument` | `items/prismarine_shard` | Dropped only by the guardians of a monument, and unmistakably of the sea |
+| `structure/outpost` | `items/crossbow_standby` | The pillagers' weapon; their banner has no flat texture |
+| `structure/witch_hut` | `items/cauldron` | Every hut has one |
+| `structure/village` | `items/villagebell` | Every village's meeting point has one |
+
+A structure has no item of its own, so each is a vanilla item that could
+stand for nothing else on this map. Items are used rather than blocks
+because an item has a shape against a clear background, where a block face
+is a filled square like the chest's.
+
+A shulker box has neither an item texture nor a usable block face (its
+only one is the plain top). Its picture is made from the texture its model
+is wrapped in, which is the model's faces laid flat and not a picture of
+anything: the front of the base (16 by 8 of the 64-unit sheet, at 16, 44)
+is drawn at the bottom of a 16 by 16 icon and the front of the lid (16 by
+12, at 16, 16) over it from the top, the lid coming down over the base as
+it does in the game. A sheet must be square, a whole multiple of 64 and at
+most 256 a side.
+
+Light grey is `light_gray` in every key here and `silver` in the samples'
+file names and language keys.
+
+Each picture is asked for by a path known ahead, so the fetch still makes
+one listing request. Each is bounded, decoded and encoded again exactly as
+a mob icon is. Where the pin has no such file, or has one that is not a
+small PNG, that one picture is left out, logged under `missing`, and
+everything else is served; the same goes for the language file. Only a
+failure to reach the source fails the fetch, which is then tried again as
+above, and until it succeeds there are no pictures and every name is a
+tidied id. A volume filled by a version that fetched only mob icons is
+fetched again once.
+
 ## Markers
 
 Four more kinds of mark are drawn as rings, each with a row in the layer
@@ -368,16 +457,22 @@ the renders, each cycle reads the mirror once more, through hard links
 opened read-only as the count's are, and keeps:
 
 - *Beds*: `Bed` block entities. Both blocks of a bed are one, so two of the
-  same colour side by side are drawn as a single bed.
+  same colour side by side are drawn as a single bed. The record's `color`
+  is the dye number, 0 white to 15 black, and is served as the colour's
+  name.
 - *Containers*: `Chest`, `Barrel` and `ShulkerBox` block entities that hold
   at least one item and are not still waiting on their loot table. On the
   FWB world that is 767 of 16,330: the rest are chests the world generator
   placed and nobody has opened, or opened and emptied. A large chest is one
   marker, which makes those 767 into 575. A container renamed on an anvil shows its name; what is inside is
-  not sent.
+  not sent. A shulker box's record holds no colour, and a trapped chest's
+  is a chest's, so for each container kept the block's own name is looked
+  up in the chunk slice holding it (`<chunk key>` + `0x2f` + the slice's
+  height index): `red_shulker_box`, `undyed_shulker_box`, `trapped_chest`.
 - *Named mobs*: actors with a name tag, placed by the chunk whose actor list
   names them. An actor no chunk lists is a leftover the game never loads
-  and is not drawn. A named mob that is also loaded is drawn twice, once
+  and is not drawn. The record's `IsBaby` is served, so the page can tell
+  a named lamb from a named sheep. A named mob that is also loaded is drawn twice, once
   here where the snapshot had it and once by the live layer where it is.
 
 Where these are in the database: a chunk's block entities are NBT compounds
@@ -389,8 +484,9 @@ key, which is the only place an actor's dimension is written.
 
 The read is one pass over every key, about nine seconds at a whole CPU and
 66 MB on the FWB world (2.47 million keys, 153,000 chunks), found 1,493
-beds, 575 containers and 5 named mobs there, and leaves the mirror as it
-was. It is given up after two minutes, and a read that fails or is given up
+beds, 575 containers and 5 named mobs there (beds in 12 colours, 21
+shulker boxes of which 10 undyed, no trapped chest with anything in it,
+and two of the named mobs babies), and leaves the mirror as it was. It is given up after two minutes, and a read that fails or is given up
 is logged and counted and stops nothing else: the page keeps the markers of
 the snapshot before. Until the first cycle after a start there are none.
 
@@ -956,7 +1052,7 @@ Two listeners keep the internet away from what is not for it:
 | `INTERNAL_TOKEN` | unless `AUTH_DISABLED` | | Bearer token the agent presents to the internal API; at least 16 characters. Whoever holds it can log in as any player, so give it a secret of its own |
 | `AUTH_DISABLED` | no | `false` | `true` serves the map with no login. Only for a service nothing publishes |
 | `SESSION_TTL` | no | `168h` | How long a login lasts |
-| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
+| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
 | `RENDER_CHUNK_PROCESSORS` | no | `1` | Chunks rendered at once. More is faster and uses more CPU and memory |
@@ -970,8 +1066,8 @@ Two listeners keep the internet away from what is not for it:
 | `LIVE_KEEPALIVE` | no | `15s` | Longest a live stream stays silent; `1s` to `20s`. The load balancer cuts a connection idle for 30 s |
 | `MARKERS_ENABLED` | no | `true` | `false` stops beds, containers and named mobs being read from each snapshot, and `/api/markers` is not served |
 | `AGENT_URL` | no | empty | The server agent's HTTP address, e.g. `http://<release>-server-agent:8080`, asked for the logged-in player's waypoints with `INTERNAL_TOKEN`. Empty leaves waypoints off the map. Needs the login |
-| `ICONS_ENABLED` | no | `true` | `false` draws every live marker as a dot or arrow: no mob icon is fetched, no head is accepted, and `/api/icons` is not served |
-| `ICONS_REF` | no | the commit tagged `v1.26.50.4` | Tag or commit of Mojang's `bedrock-samples` the mob icons are fetched at. A commit cannot move; a tag can |
+| `ICONS_ENABLED` | no | `true` | `false` draws every live marker as a dot or arrow: no mob icon, marker picture or name is fetched, no head is accepted, and `/api/icons`, `/api/icons/picture/` and `/api/names` are not served |
+| `ICONS_REF` | no | the commit tagged `v1.26.50.4` | Tag or commit of Mojang's `bedrock-samples` the mob icons, marker pictures and names are fetched at. A commit cannot move; a tag can |
 | `STRUCTURES_ENABLED` | no | `true` | `false` reads no structures and does not serve `/api/structures` |
 | `STRUCTURE_SEED` | no | the low 32 bits of the seed in `level.dat` | The 32 bits structure placement is seeded with, 0 to 4294967295, for a world whose `level.dat` does not hold them. As secret as the seed |
 | `BIOMES_ENABLED` | no | `false` | `true` reads biomes and serves `/api/biomes` and its tiles; off, search finds no biomes |
@@ -990,10 +1086,12 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
-| `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type) and `n` (a name, where there is one); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
+| `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest) and `b` (true on a baby mob); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
 | `GET /api/waypoints` | Session required. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
-| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
+| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version` and the `keys` that have a picture, `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
+| `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The marker or structure picture with the key `{group}/{name}` as a PNG, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
+| `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
@@ -1053,7 +1151,9 @@ opens at the same place.
 | `mcmap_markers_left_out{dimension,kind}` | Markers the last scan found beyond the limit for their kind |
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
-| `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, `ok` or `failed`. None at all means they were read from the volume |
+| `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume |
+| `mcmap_icons_marker_pictures` | Marker and structure pictures held, 42 when whole. Zero means every marker is a ring and every structure a letter |
+| `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 | `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind}` | Structures on each layer at the last survey |
 | `mcmap_structures_seed_verified` | 1 while recorded structures are where the seed puts them. 0 means nothing is being predicted |
