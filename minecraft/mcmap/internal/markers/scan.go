@@ -72,6 +72,14 @@ type Marker struct {
 	// Name is text a player chose. It is cleaned and cut here, and is
 	// still theirs: nothing may treat it as markup.
 	Name string `json:"n,omitempty"`
+	// Colour is a bed's or a shulker box's: one of Colours, or Undyed for
+	// a shulker box nobody dyed. It is left out when the world does not
+	// say.
+	Colour string `json:"c,omitempty"`
+	// Trapped is set on a chest that is a trapped chest.
+	Trapped bool `json:"t,omitempty"`
+	// Baby is set on a named mob the world records as not grown.
+	Baby bool `json:"b,omitempty"`
 }
 
 // More is how many markers of each kind a dimension has beyond its limit.
@@ -165,6 +173,13 @@ func Scan(ctx context.Context, db *leveldb.DB) (World, Stats, error) {
 		l := &Layer{More: *s.more[d]}
 		l.Beds, l.More.Beds = keep(wholeBeds(s.beds[d]), MaxBeds, l.More.Beds)
 		l.Containers, l.More.Containers = keep(wholeContainers(s.containers[d]), MaxContainers, l.More.Containers)
+		// Only for the containers kept: each is a lookup of its own.
+		for i := range l.Containers {
+			if i%1024 == 0 && ctx.Err() != nil {
+				return nil, Stats{}, ctx.Err()
+			}
+			describe(db, d, &l.Containers[i])
+		}
 		l.Mobs, l.More.Mobs = keep(s.mobs[d], MaxMobs, l.More.Mobs)
 		world[d] = l
 		stats.Beds += len(l.Beds) + l.More.Beds
@@ -172,6 +187,23 @@ func Scan(ctx context.Context, db *leveldb.DB) (World, Stats, error) {
 		stats.Mobs += len(l.Mobs) + l.More.Mobs
 	}
 	return world, stats, nil
+}
+
+// describe adds what only a container's block says of it: whether a chest
+// is trapped, and which colour a shulker box is.
+func describe(db *leveldb.DB, dim chunks.Dimension, m *Marker) {
+	if m.Kind != "chest" && m.Kind != "shulker" {
+		return
+	}
+	block, ok := blockAt(db, dim, m.X, m.Y, m.Z)
+	if !ok {
+		return
+	}
+	if m.Kind == "chest" {
+		m.Trapped = block == "trapped_chest"
+		return
+	}
+	m.Colour = shulkerColour(block)
 }
 
 // keep sorts markers nearest the origin first, which is where a world's
@@ -209,6 +241,8 @@ func (s *scan) blockEntities(pos chunks.Pos, v []byte) {
 			items               int
 			unopened            bool
 		}
+		// A bed whose record holds no colour is not a white one.
+		e.color = -1
 		rest, err := fields(v, func(name []byte, tag byte, payload []byte) {
 			switch string(name) {
 			case "id":
@@ -308,7 +342,7 @@ func wholeBeds(halves []bed) []Marker {
 				break
 			}
 		}
-		out = append(out, Marker{X: h.x, Y: h.y, Z: h.z})
+		out = append(out, Marker{X: h.x, Y: h.y, Z: h.z, Colour: colourOf(h.color)})
 	}
 	return out
 }
@@ -342,6 +376,7 @@ func (s *scan) actor(k, v []byte) {
 		name, kind string
 		x, y, z    float64
 		placed     bool
+		baby       bool
 	)
 	if _, err := fields(v, func(tagName []byte, tag byte, payload []byte) {
 		switch string(tagName) {
@@ -351,6 +386,9 @@ func (s *scan) actor(k, v []byte) {
 			kind, _ = stringOf(tag, payload)
 		case "Pos":
 			x, y, z, placed = floatsOf(tag, payload)
+		case "IsBaby":
+			flag, _ := intOf(tag, payload)
+			baby = flag != 0
 		}
 	}); err != nil {
 		s.skipped++
@@ -371,7 +409,7 @@ func (s *scan) actor(k, v []byte) {
 	}
 	s.named[[8]byte(k[len(actorPrefix):])] = Marker{
 		X: int32(math.Floor(x)), Y: int32(math.Floor(y)), Z: int32(math.Floor(z)),
-		Kind: cleanKind(kind), Name: name,
+		Kind: cleanKind(kind), Name: name, Baby: baby,
 	}
 }
 
