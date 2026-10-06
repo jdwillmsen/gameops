@@ -21,6 +21,13 @@ const (
 	blocksPerSubChunk = 4096
 )
 
+// heights is the lowest and the highest block of each dimension.
+var heights = map[chunks.Dimension][2]int32{
+	chunks.Overworld: {-64, 319},
+	chunks.Nether:    {0, 127},
+	chunks.End:       {0, 255},
+}
+
 // Colours is the sixteen dye colours in the order the game numbers them,
 // which is the number a bed's record holds.
 var Colours = []string{
@@ -43,6 +50,13 @@ func colourOf(index int32) string {
 // reads it, has no name; the marker is then drawn without what the name
 // would have added.
 func blockAt(db *leveldb.DB, dim chunks.Dimension, x, y, z int32) (string, bool) {
+	// A slice's height index is one byte, so a height the dimension does
+	// not have would wrap round to a slice it does have, and name a block
+	// that has nothing to do with the record.
+	span, known := heights[dim]
+	if !known || y < span[0] || y > span[1] {
+		return "", false
+	}
 	key := append(chunks.RecordKey(chunks.Pos{Dim: dim, X: x >> 4, Z: z >> 4}, tagSubChunk), byte(int8(y>>4)))
 	sub, err := db.Get(key, nil)
 	if err != nil || len(sub) > maxRecord {
