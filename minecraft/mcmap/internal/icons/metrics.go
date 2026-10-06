@@ -14,11 +14,19 @@ const (
 var (
 	metricFetches = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_icons_fetches_total",
-		Help: "Attempts to fetch the mob icons from the published samples, by result. None at all means they were read from the volume.",
+		Help: "Attempts to fetch the mob icons, marker pictures and names from the published samples, by result. None at all means they were read from the volume.",
 	}, []string{"result"})
 	metricMobTypes = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_mob_types",
 		Help: "Mob types that have an icon. Zero means the page is drawing every mob as a dot.",
+	})
+	metricPictures = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mcmap_icons_marker_pictures",
+		Help: "Marker and structure pictures held. Zero means the page is drawing every marker as a ring and every structure as a letter.",
+	})
+	metricNames = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mcmap_icons_names",
+		Help: "Display names read from the language file. Zero means every name served is a tidied id.",
 	})
 	metricHeads = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_player_heads",

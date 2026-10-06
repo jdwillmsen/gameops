@@ -295,11 +295,12 @@ func startTrails(ctx context.Context, cfg config.Config, layer *live.Layer, wg *
 	return recorder
 }
 
-// startIcons begins filling the mob icons, from the volume or from their
-// source, and returns at once with the set still empty: the fetch is on
+// startIcons begins filling the mob icons, and the marker pictures and
+// names fetched with them, from the volume or from their source, and
+// returns at once with the set still empty: the fetch is on
 // its own goroutine, and neither the listeners nor the snapshot cycle wait
 // for it. With icons turned off it starts nothing and returns nil.
-func startIcons(ctx context.Context, cfg config.Config, fetch func(context.Context) (map[string][]byte, error), logger *slog.Logger, wg *sync.WaitGroup) (*icons.Mobs, *icons.Heads) {
+func startIcons(ctx context.Context, cfg config.Config, fetch func(context.Context) (icons.Set, error), logger *slog.Logger, wg *sync.WaitGroup) (*icons.Mobs, *icons.Heads) {
 	if !cfg.Icons {
 		return nil, nil
 	}

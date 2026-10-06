@@ -1,0 +1,325 @@
+package icons
+
+import (
+	"bytes"
+	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
+)
+
+var (
+	lidColour   = color.NRGBA{120, 40, 160, 255}
+	baseColour  = color.NRGBA{60, 20, 80, 255}
+	otherColour = color.NRGBA{255, 0, 255, 255}
+	clear       = color.NRGBA{}
+)
+
+// bedColour is the synthetic colour of the bed texture at an index of the
+// atlas's list, so a test can tell which one a colour was given.
+func bedColour(index int) color.NRGBA { return color.NRGBA{uint8(10 + 15*index), 90, 30, 255} }
+
+func bedTextures() string {
+	var paths []string
+	for _, colour := range markers.Colours {
+		paths = append(paths, fmt.Sprintf("%q", "textures/items/bed_"+legacyColour(colour)))
+	}
+	return strings.Join(paths, ", ")
+}
+
+// modelSheet is a synthetic stand-in for a shulker box's model texture:
+// the two faces the icon is made of in their own colours, every other part
+// of the sheet in a third, and one column of the lid's face left clear, as
+// the real lid is where the base shows through it.
+func modelSheet(t testing.TB, scale int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 64*scale, 64*scale))
+	fill := func(r image.Rectangle, c color.NRGBA) {
+		r = image.Rect(r.Min.X*scale, r.Min.Y*scale, r.Max.X*scale, r.Max.Y*scale)
+		draw.Draw(img, r, image.NewUniform(c), image.Point{}, draw.Src)
+	}
+	fill(image.Rect(0, 0, 64, 64), otherColour)
+	fill(image.Rect(16, 16, 32, 28), lidColour)
+	fill(image.Rect(16, 44, 32, 52), baseColour)
+	fill(image.Rect(19, 16, 20, 28), clear)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+const syntheticLang = `## A synthetic language file. Nothing here is the game's own text.
+entity.cow.name=Synthetic Cow
+entity.villager_v2.name=Synthetic Villager
+entity.evocation_illager.name=Synthetic Evoker
+entity.cow.hint=Not a name
+feature.fortress=Synthetic Fortress
+feature.pillager_outpost=Synthetic Outpost
+feature.village=Synthetic Village
+tile.chest.name=Synthetic Chest
+tile.trapped_chest.name=Synthetic Trapped Chest
+tile.barrel.name=Synthetic Barrel
+tile.bed.name=Synthetic Bed
+tile.shulkerBox.name=Synthetic Shulker Box
+tile.shulkerBoxSilver.name=Synthetic Light Gray Shulker Box
+tile.shulkerBoxLightBlue.name=Synthetic Light Blue Shulker Box
+item.bed.silver.name=Synthetic Light Gray Bed
+item.bed.lightBlue.name=Synthetic Light Blue Bed
+item.bed.red.name=Synthetic Red Bed	## a trailing comment
+menu.play=Play
+`
+
+// markerFiles is everything a fetch reads beyond the mob icons, all of it
+// synthetic.
+func markerFiles(t testing.TB) map[string][]byte {
+	t.Helper()
+	files := map[string][]byte{
+		"resource_pack/textures/blocks/chest_front.png":         picture(t, 16, 16, yellow),
+		"resource_pack/textures/blocks/trapped_chest_front.png": picture(t, 16, 16, red),
+		"resource_pack/textures/blocks/barrel_side.png":         picture(t, 16, 16, green),
+		"resource_pack/textures/items/compass_item.png":         picture(t, 16, 16, blue),
+		langPath: []byte(syntheticLang),
+	}
+	for index, colour := range markers.Colours {
+		files["resource_pack/textures/items/bed_"+legacyColour(colour)+".png"] = picture(t, 16, 16, bedColour(index))
+		files["resource_pack/textures/entity/shulker/shulker_"+legacyColour(colour)+".png"] = modelSheet(t, 1)
+	}
+	files["resource_pack/textures/entity/shulker/shulker_undyed.png"] = modelSheet(t, 1)
+	for _, path := range structureItems {
+		files["resource_pack/"+path+".png"] = picture(t, 16, 16, yellow)
+	}
+	return files
+}
+
+func pixel(t testing.TB, raw []byte, x, y int) color.NRGBA {
+	t.Helper()
+	img, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("not a PNG: %v", err)
+	}
+	return color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
+}
+
+// everyPicture is the key of each picture a whole fetch gives.
+func everyPicture() []string {
+	keys := []string{"container/chest", "container/trapped_chest", "container/barrel", "marker/waypoint", "shulker/undyed"}
+	for _, colour := range markers.Colours {
+		keys = append(keys, "bed/"+colour, "shulker/"+colour)
+	}
+	for _, kind := range StructureKinds {
+		keys = append(keys, "structure/"+kind)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+func TestFetchReadsAPictureForEveryMarkerAndStructure(t *testing.T) {
+	s := newSamples(t)
+	set, err := s.source().Fetch(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := keys(set.Pictures), everyPicture(); !slices.Equal(slices.Sorted(slices.Values(got)), want) {
+		t.Errorf("pictures = %v\nwant       %v", slices.Sorted(slices.Values(got)), want)
+	}
+	if len(set.Missing) != 0 {
+		t.Errorf("missing = %v, want nothing", set.Missing)
+	}
+	// A bed's colour is its place in the atlas's list, which is the number
+	// the world stores for it: red is 14 and light grey, spelt silver, 8.
+	for colour, index := range map[string]int{"white": 0, "light_gray": 8, "red": 14, "black": 15} {
+		if got := colourOf(t, set.Pictures["bed/"+colour]); got != bedColour(index) {
+			t.Errorf("bed/%s is the texture coloured %v, want the one at index %d", colour, got, index)
+		}
+	}
+	if got := colourOf(t, set.Pictures["container/trapped_chest"]); got != red {
+		t.Errorf("the trapped chest is %v, want its own front", got)
+	}
+	if len(set.Mobs) != 3 {
+		t.Errorf("mob icons = %v", keys(set.Mobs))
+	}
+}
+
+// The listing is rationed by address, and everything a fetch reads beyond
+// the mob icons is asked for by a path known ahead.
+func TestFetchAsksForOneListingOnly(t *testing.T) {
+	s := newSamples(t)
+	var listings, files int
+	inner := s.srv.Config.Handler
+	s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		if strings.HasPrefix(r.URL.Path, "/list/") {
+			listings++
+		} else {
+			files++
+		}
+		s.mu.Unlock()
+		inner.ServeHTTP(w, r)
+	})
+	if _, err := s.source().Fetch(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// The atlas, ten definitions and the three textures they name, then
+	// the pictures and the language file: one request each.
+	if want := 1 + 10 + 3 + len(everyPicture()) + 1; listings != 1 || files != want {
+		t.Errorf("%d listing requests and %d file requests, want 1 and %d", listings, files, want)
+	}
+}
+
+func TestShulkerIconIsTheBoxSeenFromTheSideNotItsModelTexture(t *testing.T) {
+	for _, scale := range []int{1, 2, 4} {
+		icon, err := shulkerIcon(modelSheet(t, scale))
+		if err != nil {
+			t.Fatalf("scale %d: %v", scale, err)
+		}
+		img, err := png.Decode(bytes.NewReader(icon))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := img.Bounds(); got != image.Rect(0, 0, 16*scale, 16*scale) {
+			t.Fatalf("scale %d: icon is %v, want %d a side", scale, got, 16*scale)
+		}
+		for name, at := range map[string]struct {
+			x, y int
+			want color.NRGBA
+		}{
+			"the lid at the top":                      {0, 0, lidColour},
+			"the lid where it comes over the base":    {0, 11, lidColour},
+			"the base below the lid":                  {0, 12, baseColour},
+			"the base at the bottom":                  {15, 15, baseColour},
+			"nothing above the base behind a gap":     {3, 0, clear},
+			"the base through a gap in the lid":       {3, 9, baseColour},
+			"the far edge of the lid":                 {15, 0, lidColour},
+			"the base under the last row of the lid ": {3, 11, baseColour},
+		} {
+			if got := pixel(t, icon, at.x*scale, at.y*scale); got != at.want {
+				t.Errorf("scale %d: %s is %v, want %v", scale, name, got, at.want)
+			}
+		}
+		for y := range 16 * scale {
+			for x := range 16 * scale {
+				if pixel(t, icon, x, y) == otherColour {
+					t.Fatalf("scale %d: the icon holds a part of the sheet that is neither face, at %d,%d", scale, x, y)
+				}
+			}
+		}
+	}
+}
+
+func TestShulkerIconRefusesWhatIsNotAModelTexture(t *testing.T) {
+	bomb := declaring(modelSheet(t, 1), 60000, 60000)
+	for name, raw := range map[string][]byte{
+		"rubbish":                                []byte("<html>rate limited</html>"),
+		"a flat item texture":                    picture(t, 16, 16, red),
+		"not square":                             picture(t, 64, 32, red),
+		"not a whole multiple of the model":      picture(t, 96, 96, red),
+		"larger than gives a small icon":         picture(t, maxSheetSide+64, maxSheetSide+64, red),
+		"a declared size the data does not back": bomb,
+		"empty":                                  {},
+	} {
+		if icon, err := shulkerIcon(raw); err == nil {
+			t.Errorf("%s gave an icon of %d bytes", name, len(icon))
+		}
+	}
+}
+
+func TestMarkerPicturesAreReencodedToo(t *testing.T) {
+	const smuggled = "<script>alert(1)</script>"
+	s := newSamples(t)
+	flat := withText(t, picture(t, 16, 16, yellow), smuggled)
+	sheet := withText(t, modelSheet(t, 1), smuggled)
+	s.set("resource_pack/textures/blocks/chest_front.png", flat)
+	s.set("resource_pack/textures/entity/shulker/shulker_red.png", sheet)
+	set, err := s.source().Fetch(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, original := range map[string][]byte{"container/chest": flat, "shulker/red": sheet} {
+		got := set.Pictures[key]
+		if len(got) == 0 || bytes.Contains(got, []byte(smuggled)) || bytes.Equal(got, original) {
+			t.Errorf("%s was kept as it came, text chunk and all", key)
+		}
+	}
+}
+
+// A pin can lack a file, or hold something that is not the picture it
+// should be. That costs the one picture and nothing else: the mob icons
+// and every other picture are still served, and the page keeps its ring
+// for the one that is not.
+func TestAMarkerPictureThePinDoesNotHoldIsLeftOutAlone(t *testing.T) {
+	var jpgLike = []byte("\xff\xd8\xff\xe0 not a png")
+	for name, harm := range map[string]func(*samples){
+		"absent":    func(s *samples) { delete(s.files, "resource_pack/textures/blocks/chest_front.png") },
+		"not a PNG": func(s *samples) { s.files["resource_pack/textures/blocks/chest_front.png"] = jpgLike },
+		"too large a side": func(s *samples) {
+			s.files["resource_pack/textures/blocks/chest_front.png"] = picture(t, maxIconSide+1, 16, red)
+		},
+		"over the byte limit": func(s *samples) {
+			s.files["resource_pack/textures/blocks/chest_front.png"] = append(picture(t, 16, 16, red), make([]byte, maxTextureBytes)...)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSamples(t)
+			s.mu.Lock()
+			harm(s)
+			s.mu.Unlock()
+			set, err := s.source().Fetch(t.Context())
+			if err != nil {
+				t.Fatalf("the fetch failed for one picture: %v", err)
+			}
+			if _, held := set.Pictures["container/chest"]; held {
+				t.Error("a picture was kept that the source did not give")
+			}
+			if !slices.Equal(set.Missing, []string{"container/chest"}) {
+				t.Errorf("missing = %v, want the one picture", set.Missing)
+			}
+			if len(set.Pictures) != len(everyPicture())-1 || len(set.Mobs) != 3 || len(set.Lang) == 0 {
+				t.Errorf("%d pictures, %d mob icons, %d names: the rest did not survive", len(set.Pictures), len(set.Mobs), len(set.Lang))
+			}
+		})
+	}
+}
+
+func TestABedTheAtlasDoesNotListIsLeftOut(t *testing.T) {
+	s := newSamples(t)
+	atlas := s.files["resource_pack/textures/item_texture.json"]
+	s.set("resource_pack/textures/item_texture.json", bytes.Replace(atlas, []byte(`"bed":`), []byte(`"cot":`), 1))
+	set, err := s.source().Fetch(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.Missing) != len(markers.Colours) || set.Missing[0] != "bed/black" {
+		t.Errorf("missing = %v, want every bed", set.Missing)
+	}
+	if _, held := set.Pictures["bed/red"]; held {
+		t.Error("a bed has a picture the atlas named no texture for")
+	}
+}
+
+// Unreachable is not the same as absent: the source may answer the next
+// time it is asked, so the whole fetch fails and is tried again, as it is
+// for a mob icon.
+func TestAMarkerPictureTheSourceFailsOnFailsTheFetch(t *testing.T) {
+	for _, path := range []string{"/textures/blocks/barrel_side.png", "/texts/en_US.lang"} {
+		s := newSamples(t)
+		inner := s.srv.Config.Handler
+		s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, path) {
+				http.Error(w, "rate limited", http.StatusTooManyRequests)
+				return
+			}
+			inner.ServeHTTP(w, r)
+		})
+		if set, err := s.source().Fetch(t.Context()); err == nil {
+			t.Errorf("a fetch that could not reach %s reported success with %d pictures", path, len(set.Pictures))
+		}
+	}
+}

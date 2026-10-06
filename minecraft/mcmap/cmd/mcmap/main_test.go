@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 )
 
 func liveConfig(t *testing.T, enabled bool) (config.Config, *atomic.Int32) {
@@ -82,10 +83,10 @@ func TestIconsNeverHoldUpTheStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	asked := make(chan struct{})
-	hung := func(ctx context.Context) (map[string][]byte, error) {
+	hung := func(ctx context.Context) (icons.Set, error) {
 		close(asked)
 		<-ctx.Done()
-		return nil, errors.New("never answered")
+		return icons.Set{}, errors.New("never answered")
 	}
 	var wg sync.WaitGroup
 	returned := make(chan struct{})
@@ -121,9 +122,9 @@ func TestIconsNeverHoldUpTheStart(t *testing.T) {
 
 func TestIconsDisabledStartsNothing(t *testing.T) {
 	var wg sync.WaitGroup
-	fetch := func(context.Context) (map[string][]byte, error) {
+	fetch := func(context.Context) (icons.Set, error) {
 		t.Error("the icon source was asked with icons off")
-		return nil, errors.New("off")
+		return icons.Set{}, errors.New("off")
 	}
 	if mobs, heads := startIcons(t.Context(), config.Config{DataDir: t.TempDir()}, fetch, slog.New(slog.DiscardHandler), &wg); mobs != nil || heads != nil {
 		t.Fatal("something was built with icons off")

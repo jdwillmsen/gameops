@@ -38,7 +38,7 @@ var (
 	blue = color.NRGBA{0, 0, 200, 255}
 )
 
-func mobIcons(t *testing.T, fetch func(context.Context) (map[string][]byte, error)) *icons.Mobs {
+func mobIcons(t *testing.T, fetch func(context.Context) (icons.Set, error)) *icons.Mobs {
 	t.Helper()
 	return &icons.Mobs{Dir: t.TempDir(), Ref: "v9.9.9", Logger: slog.New(slog.DiscardHandler), Fetch: fetch}
 }
@@ -46,8 +46,8 @@ func mobIcons(t *testing.T, fetch func(context.Context) (map[string][]byte, erro
 func withIcons(t *testing.T) *Server {
 	t.Helper()
 	s := withLive(t)
-	mobs := mobIcons(t, func(context.Context) (map[string][]byte, error) {
-		return map[string][]byte{"cow": picture(t, 16, red), "pig": picture(t, 16, blue)}, nil
+	mobs := mobIcons(t, func(context.Context) (icons.Set, error) {
+		return icons.Set{Mobs: map[string][]byte{"cow": picture(t, 16, red), "pig": picture(t, 16, blue)}}, nil
 	})
 	mobs.Run(t.Context())
 	s.MobIcons = mobs
@@ -156,13 +156,13 @@ func TestIcons_WithTheSourceUnreachableTheMapWorksAndListsNone(t *testing.T) {
 	s := withLive(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	asked := make(chan struct{}, 1)
-	mobs := mobIcons(t, func(ctx context.Context) (map[string][]byte, error) {
+	mobs := mobIcons(t, func(ctx context.Context) (icons.Set, error) {
 		select {
 		case asked <- struct{}{}:
 		default:
 		}
 		<-ctx.Done()
-		return nil, errors.New("dial tcp: i/o timeout")
+		return icons.Set{}, errors.New("dial tcp: i/o timeout")
 	})
 	done := make(chan struct{})
 	go func() { mobs.Run(ctx); close(done) }()

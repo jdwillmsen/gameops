@@ -11,6 +11,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,6 +81,7 @@ func newSamples(t *testing.T) *samples {
 	s := &samples{files: map[string][]byte{
 		"resource_pack/textures/item_texture.json": []byte(`// header comment
 {"texture_data": {
+  "bed": {"textures": [` + bedTextures() + `]},
   "spawn_egg": {"textures": ["textures/items/egg_chicken", "textures/items/egg_villager"]},
   "spawn_egg_cow": {"textures": "textures/items/spawn_eggs/spawn_egg_cow"},
   "spawn_egg_evoker": {"textures": "textures/items/spawn_eggs/spawn_egg_evoker"},
@@ -108,6 +110,7 @@ func newSamples(t *testing.T) *samples {
 		"resource_pack/textures/items/spawn_eggs/spawn_egg_cow.png":    picture(t, 16, 16, red),
 		"resource_pack/textures/items/spawn_eggs/spawn_egg_evoker.png": picture(t, 16, 16, blue),
 	}}
+	maps.Copy(s.files, markerFiles(t))
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.hits.Add(1)
 		s.mu.Lock()
@@ -158,8 +161,16 @@ func (s *samples) source() *Source {
 	return &Source{Ref: testRef, ListURL: s.srv.URL + "/list", RawURL: s.srv.URL + "/raw", HTTP: NewClient()}
 }
 
+// mobsOf is the mob icons of a fetch, which is all most of these tests
+// are about.
+func mobsOf(s *samples, t *testing.T) (map[string][]byte, error) {
+	t.Helper()
+	set, err := s.source().Fetch(t.Context())
+	return set.Mobs, err
+}
+
 func TestFetchTakesEachMobsTextureFromTheSamplesOwnData(t *testing.T) {
-	icons, err := newSamples(t).source().Fetch(t.Context())
+	icons, err := mobsOf(newSamples(t), t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +237,7 @@ func TestWhatIsServedIsAReencodingNotTheDownload(t *testing.T) {
 		t.Fatalf("the fixture is not a PNG a decoder accepts: %v", err)
 	}
 	s.set("resource_pack/textures/items/spawn_eggs/spawn_egg_cow.png", original)
-	icons, err := s.source().Fetch(t.Context())
+	icons, err := mobsOf(s, t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +265,7 @@ func TestFetchRefusesWhatIsNotASmallPNG(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := newSamples(t)
 			s.set("resource_pack/textures/items/spawn_eggs/spawn_egg_cow.png", body)
-			if icons, err := s.source().Fetch(t.Context()); err == nil {
+			if icons, err := mobsOf(s, t); err == nil {
 				t.Errorf("fetch kept %d icons with one texture being %s", len(icons), name)
 			}
 		})
