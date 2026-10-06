@@ -46,6 +46,8 @@
   let pending = null;
   // The one biome picked out, by the game's identifier, or null for all.
   let only = null;
+  // Whether the overlay was asked for before there was a row to switch.
+  let queued = false;
   let layer = null;
   // What the legend was last built from, so that an unchanged listing does
   // not rebuild what the viewer may be scrolling.
@@ -157,6 +159,8 @@
       row = null;
     } else if (!row) {
       row = app.layers.register({ group: 'biomes', id: 'overlay', label: 'Biome overlay', enabled: false, order: 10 });
+      if (queued) row.setEnabled(true);
+      queued = false;
       row.onToggle(() => {
         paint();
         // Switched on, the listing may be as old as the page.
@@ -249,6 +253,7 @@
       pending = null;
       clear();
       only = null;
+      queued = false;
       paint();
       return;
     }
@@ -318,9 +323,12 @@
   // whatever dimension the map is on by the time the listing arrives.
   app.biomes = {
     show(name) {
-      if (!row || typeof name !== 'string' || !name) return false;
+      if (available === false || typeof name !== 'string' || !name) return false;
       only = name;
-      row.setEnabled(true);
+      // A result chosen before the first listing has answered: the row is
+      // switched on when the answer makes it.
+      if (row) row.setEnabled(true);
+      else queued = true;
       paint();
       return true;
     },
