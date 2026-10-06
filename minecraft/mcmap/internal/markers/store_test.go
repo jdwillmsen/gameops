@@ -128,3 +128,17 @@ func TestExtractor_KeepsTheLastMarkersWhenAScanFails(t *testing.T) {
 		t.Errorf("beds = %v, want the one from the scan that worked", got.Beds)
 	}
 }
+
+func TestStore_ListsEachNamedMobsTypeOnce(t *testing.T) {
+	s := NewStore()
+	if kinds := s.MobKinds(); len(kinds) != 0 {
+		t.Errorf("mob kinds before any scan = %v", kinds)
+	}
+	s.Set(time.Now(), World{
+		chunks.Overworld: {Mobs: []Marker{{Kind: "sheep", Name: "jeb_"}, {Kind: "sheep", Name: "Dinnerbone"}, {Kind: "cat", Name: "OJ"}}},
+		chunks.End:       {Mobs: []Marker{{Kind: "happy_ghast", Name: "Casper"}}},
+	})
+	if got := strings.Join(s.MobKinds(), ","); got != "cat,happy_ghast,sheep" {
+		t.Errorf("mob kinds = %s", got)
+	}
+}
