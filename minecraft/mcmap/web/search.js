@@ -217,6 +217,11 @@
       reset();
       return;
     }
+    // The answer still on its way is to what was typed before, and would
+    // otherwise land in the pause before this is asked. What is listed
+    // stays until its replacement arrives, so the list does not blink.
+    if (request) request.abort();
+    request = null;
     timer = setTimeout(() => run(query), SETTLE_MS);
   });
 
