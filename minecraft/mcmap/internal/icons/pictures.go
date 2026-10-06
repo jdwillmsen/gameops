@@ -86,6 +86,19 @@ func pictures(items atlas) []markerPicture {
 	return out
 }
 
+// pictureKeys is the key of every marker picture there can be, whatever
+// the atlas lists.
+func pictureKeys() []string {
+	keys := []string{"container/chest", "container/trapped_chest", "container/barrel", "marker/waypoint", "shulker/" + markers.Undyed}
+	for _, colour := range markers.Colours {
+		keys = append(keys, "bed/"+colour, "shulker/"+colour)
+	}
+	for _, kind := range StructureKinds {
+		keys = append(keys, "structure/"+kind)
+	}
+	return keys
+}
+
 // A shulker box's texture is the faces of its model laid flat, 64 units a
 // side: the lid a box 16 wide, 12 tall and 16 deep with its faces laid out
 // from the corner, the base one 16 by 8 by 16 laid out from 28 units down.

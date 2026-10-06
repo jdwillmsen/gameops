@@ -92,7 +92,7 @@ func TestIconsNeverHoldUpTheStart(t *testing.T) {
 	returned := make(chan struct{})
 	var listed int
 	go func() {
-		mobs, heads := startIcons(ctx, config.Config{DataDir: t.TempDir(), Icons: true, IconsRef: "v9.9.9"}, hung, slog.New(slog.DiscardHandler), &wg)
+		mobs, heads := startIcons(ctx, config.Config{DataDir: t.TempDir(), Icons: true, IconsRef: "v9.9.9"}, hung, nil, slog.New(slog.DiscardHandler), &wg)
 		if mobs == nil || heads == nil {
 			t.Error("nothing was started with icons on")
 		} else {
@@ -126,7 +126,7 @@ func TestIconsDisabledStartsNothing(t *testing.T) {
 		t.Error("the icon source was asked with icons off")
 		return icons.Set{}, errors.New("off")
 	}
-	if mobs, heads := startIcons(t.Context(), config.Config{DataDir: t.TempDir()}, fetch, slog.New(slog.DiscardHandler), &wg); mobs != nil || heads != nil {
+	if mobs, heads := startIcons(t.Context(), config.Config{DataDir: t.TempDir()}, fetch, nil, slog.New(slog.DiscardHandler), &wg); mobs != nil || heads != nil {
 		t.Fatal("something was built with icons off")
 	}
 	wg.Wait()
