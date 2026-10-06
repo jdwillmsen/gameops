@@ -20,7 +20,7 @@ func TestTwister_MatchesTheReferenceGenerator(t *testing.T) {
 // separately, so they catch a slip in this one; what shows the rules are
 // the game's is the check against a real world's records on every survey,
 // which on 2026-10-05 (game 1.26.52.3) placed all 11 monuments, 7 outposts
-// and 1 witch hut the FWB world had recorded.
+// and 1 witch hut the FWB world had recorded, and 31 of its 70 villages.
 func TestSpread_SitesForAKnownSeed(t *testing.T) {
 	const seed = 20261005
 	regions := [][2]int32{{0, 0}, {-1, 0}, {3, -2}, {-7, -5}}
@@ -31,6 +31,7 @@ func TestSpread_SitesForAKnownSeed(t *testing.T) {
 		"fortress": {fortressSpread, []Site{{2, 12}, {-25, 15}, {91, -58}, {-195, -144}}},
 		"monument": {monumentSpread, []Site{{10, 14}, {-26, 19}, {105, -58}, {-207, -147}}},
 		"outpost":  {outpostSpread, []Site{{31, 21}, {-75, 33}, {251, -113}, {-552, -372}}},
+		"village":  {villageSpread, []Site{{12, 9}, {-18, 8}, {111, -48}, {-219, -156}}},
 		"hut":      {witchHutSpread, []Site{{18, 6}, {-10, 19}, {101, -49}, {-221, -140}}},
 	} {
 		for i, r := range regions {
@@ -96,6 +97,9 @@ func TestExplains(t *testing.T) {
 		"outpost a chunk away":           {outpost{}, Box{-144, 64, 96, -129, 85, 111}, false},
 		"hut inside the chunk":           {witchHut{}, Box{-160, 85, 96, -154, 91, 104}, true},
 		"hut in the next chunk":          {witchHut{}, Box{-144, 85, 96, -138, 91, 104}, false},
+		"village round the site":         {villageSite{}, Box{-190, 60, 70, -120, 80, 140}, true},
+		"village grown away, in reach":   {villageSite{}, Box{-136, 60, 70, -80, 80, 140}, true},
+		"village out of reach":           {villageSite{}, Box{-135, 60, 70, -80, 80, 140}, false},
 		"fortress around the site":       {fortress{}, Box{-250, 48, 20, -100, 80, 150}, true},
 		"fortress fragment within reach": {fortress{}, Box{-10, 48, 100, -5, 57, 104}, true},
 		"fortress out of reach":          {fortress{}, Box{20, 48, 100, 25, 57, 104}, false},
@@ -139,6 +143,8 @@ func TestAllows(t *testing.T) {
 		"monument in a shallow ocean":   {monument{}, 0, false},
 		"outpost in a desert":           {outpost{}, biomeDesert, true},
 		"outpost in a swamp":            {outpost{}, biomeSwamp, false},
+		"village in a savanna":          {villageSite{}, biomeSavanna, true},
+		"village in a grove":            {villageSite{}, biomeGrove, false},
 		"hut in a swamp":                {witchHut{}, biomeSwamp, true},
 		"hut in a mangrove swamp":       {witchHut{}, 191, false},
 	} {

@@ -279,7 +279,7 @@ func TestTake_OffersPredictionsOnceTheSeedExplainsTheWorld(t *testing.T) {
 			t.Errorf("overworld prediction %+v, want a monument and a candidate", p)
 		}
 	}
-	for kind, want := range map[Kind]string{Fortress: SeedVerified, Monument: SeedVerified, Outpost: SeedUnverified, WitchHut: SeedUnverified} {
+	for kind, want := range map[Kind]string{Fortress: SeedVerified, Monument: SeedVerified, Outpost: SeedUnverified, Village: SeedUnverified, WitchHut: SeedUnverified} {
 		if got := got.Check.Kinds[kind].State; got != want {
 			t.Errorf("%s is %s, want %s", kind, got, want)
 		}

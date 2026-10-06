@@ -45,7 +45,7 @@ type Predictor interface {
 
 // Predictors is every kind there is a predictor for. Each is served only
 // while the world's own records of that kind bear its rule out.
-var Predictors = []Predictor{fortress{}, monument{}, outpost{}, witchHut{}}
+var Predictors = []Predictor{fortress{}, monument{}, outpost{}, villageSite{}, witchHut{}}
 
 // The game's ids for the biomes a kind is only built in.
 const (
@@ -252,6 +252,45 @@ func (outpost) Explains(site Site, real Box) bool {
 }
 
 func (outpost) Centre(site Site) (int32, int32) { return site.ChunkX * 16, site.ChunkZ * 16 }
+
+// villageSite: the game keeps a record for a village it is running, whose box
+// grows and shrinks with the beds and bells its villagers claim, and makes
+// one for any bed a villager claims anywhere. So a generated village's box
+// is only somewhere about its site, a village players founded has no site
+// at all, and one nobody has been near has no record.
+type villageSite struct{}
+
+var (
+	villageSpread = spread{spacing: 34, separation: 8, salt: 10387312, triangular: true}
+	// Every biome a village on a site has been recorded in. The game's
+	// list has snowy taiga as well, where this world has three generated
+	// sites and no village.
+	villageBiomes = oneOf(biomePlains, biomeSunflowerPlains, biomeDesert, biomeSavanna, biomeTaiga, biomeSnowyPlains, biomeMeadow)
+)
+
+// villageReach is how far outside a village's recorded box, in blocks, the
+// middle of its site's chunk may be. A wrong seed's site is that near one
+// village in eleven.
+const villageReach = 16
+
+func (villageSite) Kind() Kind                  { return Village }
+func (villageSite) Dimension() chunks.Dimension { return chunks.Overworld }
+func (villageSite) Exact() bool                 { return false }
+func (villageSite) Certain() bool               { return false }
+func (villageSite) Allows(biome uint32) bool    { return villageBiomes[biome] }
+func (villageSite) Founded() bool               { return true }
+
+func (villageSite) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return villageSpread.sites(seed, area, limit, nil)
+}
+
+func (villageSite) Explains(site Site, real Box) bool {
+	x, z := site.ChunkX*16+8, site.ChunkZ*16+8
+	return x >= real.MinX-villageReach && x <= real.MaxX+villageReach &&
+		z >= real.MinZ-villageReach && z <= real.MaxZ+villageReach
+}
+
+func (villageSite) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
 
 // witchHut: the site is shared with desert and jungle temples and igloos,
 // and the biome picks which of them, if any, is built. A hut lies inside
