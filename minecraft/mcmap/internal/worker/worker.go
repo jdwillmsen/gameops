@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -53,6 +54,10 @@ var (
 		Name: "mcmap_render_failures_total",
 		Help: "Renders that failed, by dimension.",
 	}, []string{"dimension"})
+	metricBiomePanics = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_biomes_panics_total",
+		Help: "Biome readings that panicked and were abandoned; the rest of the cycle went on.",
+	})
 )
 
 // Census counts the chunks in a freshly mirrored world.
@@ -406,6 +411,14 @@ func (w *Worker) biomes(ctx context.Context, now time.Time, r chunks.Report, cou
 	if w.Biomes == nil {
 		return
 	}
+	// A reading walks files written by a game this code does not control;
+	// a panic here would otherwise end the server and every other pass.
+	defer func() {
+		if p := recover(); p != nil {
+			metricBiomePanics.Inc()
+			w.Logger.Error("biome reading panicked", "panic", p, "stack", string(debug.Stack()))
+		}
+	}()
 	total := -1
 	if counted {
 		total = 0

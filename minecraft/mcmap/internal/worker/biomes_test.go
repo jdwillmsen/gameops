@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
@@ -21,6 +23,7 @@ type fakeBiomes struct {
 	counts []int
 	stats  biomes.Stats
 	err    error
+	panics any
 }
 
 func (f *fakeBiomes) Extract(_ context.Context, dbDir string, _ time.Time, count int) (biomes.Stats, error) {
@@ -28,6 +31,9 @@ func (f *fakeBiomes) Extract(_ context.Context, dbDir string, _ time.Time, count
 	f.counts = append(f.counts, count)
 	if f.order != nil {
 		*f.order = append(*f.order, "biomes")
+	}
+	if f.panics != nil {
+		panic(f.panics)
 	}
 	return f.stats, f.err
 }
@@ -84,6 +90,30 @@ func TestCycle_ABiomeReadingThatFailsCostsNothingElse(t *testing.T) {
 	// With nothing to count the world, the reader is told so and reads it.
 	if !reflect.DeepEqual(read.counts, []int{-1}) {
 		t.Errorf("told of %v chunks, want -1", read.counts)
+	}
+}
+
+func TestCycle_ABiomeReadingThatPanicsCostsNothingElse(t *testing.T) {
+	var order []string
+	var log bytes.Buffer
+	s, r := &fakeSyncer{}, &fakeRenderer{order: &order}
+	w := newWorker(s, r, "")
+	w.Logger = slog.New(slog.NewTextHandler(&log, nil))
+	w.Structures = &fakeSurveyor{order: &order}
+	w.Biomes = &fakeBiomes{order: &order, panics: "index out of range"}
+	before := testutil.ToFloat64(metricBiomePanics)
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Fatalf("outcome = %v, want the cycle to count as applied", got)
+	}
+	if want := []string{"overworld", "nether", "end", "biomes", "survey"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+	if !strings.Contains(log.String(), "index out of range") || !strings.Contains(log.String(), "stack=") {
+		t.Errorf("the panic and its stack are not in the log: %s", log.String())
+	}
+	if got := testutil.ToFloat64(metricBiomePanics) - before; got != 1 {
+		t.Errorf("panics counted = %v, want 1", got)
 	}
 }
 
