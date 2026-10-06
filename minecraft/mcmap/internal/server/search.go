@@ -2,12 +2,14 @@ package server
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
@@ -22,6 +24,12 @@ const (
 	maxSearchHits     = 50
 	// maxSearchQuery is the longest text searched for, in characters.
 	maxSearchQuery = 64
+	// A player's waypoints are held for search this long, for at most
+	// searchWaypointPlayers players: typing a query is a search a keystroke,
+	// and each one would otherwise take one of the few agent calls that
+	// /api/waypoints shares.
+	searchWaypointTTL     = 30 * time.Second
+	searchWaypointPlayers = 64
 	// stretchesPerBiome is how many stretches of each matching biome go
 	// into a search: the nearest few, so that one common biome does not
 	// fill the answer.
@@ -100,6 +108,21 @@ type markerLists struct {
 type searchCache struct {
 	mu   sync.Mutex
 	held map[string]cachedMarkers
+	// waypoints is keyed by the session's XUID and nothing else, so one
+	// player's list is never an answer for another.
+	waypoints map[string]*cachedWaypoints
+}
+
+// cachedWaypoints is one player's list. fetch is held for the whole agent
+// call, so searches by the same player wait for it instead of each making
+// their own; list, stamp and fresh are guarded by searchCache.mu.
+type cachedWaypoints struct {
+	fetch sync.Mutex
+	list  []markers.Waypoint
+	// stamp is when the list was fetched, or when the entry was made while
+	// it has none yet.
+	stamp time.Time
+	fresh bool
 }
 
 type cachedMarkers struct {
@@ -126,6 +149,64 @@ func (c *searchCache) markers(store MarkerStore, dimension string) markerLists {
 	}
 	c.held[dimension] = cachedMarkers{etag, lists}
 	return lists
+}
+
+// playerWaypoints returns the waypoints of the player with this XUID, from
+// the agent at most once in searchWaypointTTL. A failure is returned and
+// not kept, so the next search asks again.
+func (c *searchCache) playerWaypoints(ctx context.Context, src WaypointSource, xuid string, now func() time.Time) ([]markers.Waypoint, error) {
+	c.mu.Lock()
+	e := c.waypoints[xuid]
+	if e == nil {
+		if c.waypoints == nil {
+			c.waypoints = map[string]*cachedWaypoints{}
+		}
+		if len(c.waypoints) >= searchWaypointPlayers {
+			c.evictWaypoints(now())
+		}
+		e = &cachedWaypoints{stamp: now()}
+		c.waypoints[xuid] = e
+	}
+	c.mu.Unlock()
+
+	// The cache-wide lock is not held across the agent call.
+	e.fetch.Lock()
+	defer e.fetch.Unlock()
+	c.mu.Lock()
+	if e.fresh && now().Sub(e.stamp) < searchWaypointTTL {
+		list := e.list
+		c.mu.Unlock()
+		return list, nil
+	}
+	c.mu.Unlock()
+	list, _, err := src.Waypoints(ctx, xuid)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	e.list, e.stamp, e.fresh = list, now(), true
+	c.mu.Unlock()
+	return list, nil
+}
+
+// evictWaypoints makes room for one more player: the expired go first, and
+// if every entry is still current, the oldest. The caller holds c.mu.
+func (c *searchCache) evictWaypoints(now time.Time) {
+	for k, e := range c.waypoints {
+		if e.fresh && now.Sub(e.stamp) >= searchWaypointTTL {
+			delete(c.waypoints, k)
+		}
+	}
+	if len(c.waypoints) < searchWaypointPlayers {
+		return
+	}
+	oldest, at := "", now.Add(time.Hour)
+	for k, e := range c.waypoints {
+		if e.stamp.Before(at) {
+			oldest, at = k, e.stamp
+		}
+	}
+	delete(c.waypoints, oldest)
 }
 
 // handleSearch looks one piece of text up in everything the map holds that
@@ -218,7 +299,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// name another player, and without a login there is nobody to be.
 	if id, ok := auth.FromContext(r.Context()); ok && s.Waypoints != nil && s.Sessions != nil {
 		out.Waypoints = waypointsSearched
-		list, _, err := s.Waypoints.Waypoints(r.Context(), id.XUID)
+		list, err := s.search.playerWaypoints(r.Context(), s.Waypoints, id.XUID, s.Sessions.Now)
 		if err != nil {
 			// A search is still worth its other answers.
 			out.Waypoints = waypointsUnavailable
