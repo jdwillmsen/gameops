@@ -105,14 +105,17 @@ directory.
 
 ## Shared packages are copied, not imported
 
-`internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcproto`
-and `internal/skin` are copies of the agent's `pkg/` packages, each carrying a
-header saying so. **Fix bugs upstream first, then port them here.**
+`internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcdial`,
+`internal/mcproto` and `internal/skin` are copies of the agent's `pkg/`
+packages, each carrying a header saying so. **Fix bugs upstream first, then
+port them here.**
 
 Originally the agent's module was private, so importing it would have put a
 credential in this bot's Docker build. It went public on 2026-09-16, and the
 decision was revisited on 2026-09-21 package by package rather than as a
-block. All five stay copies, for different reasons.
+block. All five stay copies, for different reasons. `mcdial` was added on
+2026-10-06, after that review, as a copy on the same terms as the four
+unchanged ones below.
 
 `presenceapi` is imported, not copied; the 2026-09-23 section above says why
 that reasoning does not carry over to it.

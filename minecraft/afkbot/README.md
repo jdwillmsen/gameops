@@ -62,7 +62,7 @@ One JSON line per event on stdout, errors on stderr:
 | `protocol_spoofed` | warn | Announcing the server's protocol number instead of the compiled-in one ([why][drift]) |
 | `reconnecting` | info | Backing off before the next attempt |
 | `session_ended` | info | Connection closed without an error |
-| `session_error` | error | Connection failed or dropped |
+| `session_error` | error | Connection failed or dropped. An error reading `connected, awaiting spawn` means the server answered and then did not place the bot in the world in time, which is not the same as a server that is down |
 | `session_parked` | info | The agent parked this bot; the session was closed and the loop is waiting |
 | `presence_enabled` | info | Parking is on; names the actor, URL, default and poll interval |
 | `presence_changed` | info | The desired state moved (`from`, `to`) |
@@ -93,8 +93,8 @@ docker build -t minecraft-afk-bot:dev .
 The image is distroless and runs as nonroot, so there is no shell in it —
 `kubectl exec` into a running bot will not work. Read the logs instead.
 
-`internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcproto`
-and `internal/skin` are copies of packages from [`minecraft-server-agent`][agent]'s
+`internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcdial`,
+`internal/mcproto` and `internal/skin` are copies of packages from [`minecraft-server-agent`][agent]'s
 `pkg/`, each carrying a header saying so. **Fix bugs upstream first, then port
 them here** ([why copied][copies]). `mcauth` is the exception: it is a fork, and
 upstream changes reach it only when they fix token handling both share.
