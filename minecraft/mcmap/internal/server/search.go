@@ -81,6 +81,7 @@ var structureNames = map[structures.Kind]string{
 	structures.Fortress: "Nether Fortress",
 	structures.Monument: "Ocean Monument",
 	structures.Outpost:  "Pillager Outpost",
+	structures.Village:  "Village",
 	structures.WitchHut: "Witch Hut",
 }
 
