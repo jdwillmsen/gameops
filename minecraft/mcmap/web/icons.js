@@ -249,6 +249,22 @@
     },
   });
 
+  // Pictures of versions nothing can ask for any more would otherwise pile
+  // up for as long as the page is open: a head has a new version with every
+  // change of skin. Those of a version still listed are kept, so nothing
+  // on the map is fetched and decoded a second time. Every address ends in
+  // its version.
+  function prune() {
+    const listed = new Set([listing.mobs.version, listing.pictures.version, ...Object.values(listing.heads)].map((v) => encodeURIComponent(v)));
+    const stale = (address) => !listed.has(address.slice(address.lastIndexOf('v=') + 2));
+    for (const address of [...bitmaps.keys()]) {
+      if (!stale(address)) continue;
+      bitmaps.delete(address);
+      failed.delete(address);
+    }
+    for (const key of [...sprites.keys()]) if (stale(key.slice(0, key.indexOf('|')))) sprites.delete(key);
+  }
+
   // Asks the server which pictures there are. Failing to find out changes
   // nothing: what was known stays, and what was plain stays plain.
   async function refresh() {
@@ -280,13 +296,7 @@
       heads: next.heads && typeof next.heads === 'object' ? next.heads : {},
       me: str(next.me),
     };
-    // Sprites of pictures nothing can ask for any more would otherwise
-    // pile up for as long as the page is open.
-    if (bitmaps.size > 1024) {
-      bitmaps.clear();
-      failed.clear();
-      sprites.clear();
-    }
+    if (bitmaps.size > 1024) prune();
     paint(document);
     tell('mcmap:icons', listing);
   }
