@@ -91,6 +91,16 @@ type Config struct {
 	// StructureSeed, when set, is the 32 bits structure placement is
 	// seeded with, for a world whose level.dat does not hold them.
 	StructureSeed *uint32
+
+	// Biomes is whether the world's biomes are read and served.
+	Biomes bool
+	// Trails is whether players' recent positions are kept and served. It
+	// needs the live layer, which is where the positions come from.
+	Trails bool
+	// TrailMaxAge is how long a trail point is kept, and TrailMaxPoints
+	// the most kept for one player.
+	TrailMaxAge    time.Duration
+	TrailMaxPoints int
 }
 
 // minTokenLength keeps a placeholder from standing in for a credential.
@@ -113,6 +123,9 @@ const (
 	maxLiveKeepalive = pathIdleTimeout * 2 / 3
 
 	maxLiveEntities = 10_000
+
+	maxTrailAge    = 7 * 24 * time.Hour
+	maxTrailPoints = 50_000
 )
 
 func Load(getenv func(string) string) (Config, error) {
@@ -228,6 +241,21 @@ func Load(getenv func(string) string) (Config, error) {
 			seed32 := uint32(seed)
 			c.StructureSeed = &seed32
 		}
+	}
+
+	if c.Biomes, err = strconv.ParseBool(or(getenv("BIOMES_ENABLED"), "true")); err != nil {
+		fail("BIOMES_ENABLED must be true or false")
+	}
+	if c.Trails, err = strconv.ParseBool(or(getenv("TRAILS_ENABLED"), "true")); err != nil {
+		fail("TRAILS_ENABLED must be true or false")
+	}
+	// Trails are held in memory for every player seen, so both limits have
+	// a ceiling: at the top of each, 64 players come to about 100 MB.
+	if c.TrailMaxAge, err = time.ParseDuration(or(getenv("TRAILS_MAX_AGE"), "24h")); err != nil || c.TrailMaxAge < time.Minute || c.TrailMaxAge > maxTrailAge {
+		fail("TRAILS_MAX_AGE must be a duration between 1m and %s", maxTrailAge)
+	}
+	if c.TrailMaxPoints, err = strconv.Atoi(or(getenv("TRAILS_MAX_POINTS"), "5000")); err != nil || c.TrailMaxPoints < 10 || c.TrailMaxPoints > maxTrailPoints {
+		fail("TRAILS_MAX_POINTS must be between 10 and %d", maxTrailPoints)
 	}
 	return c, errors.Join(errs...)
 }

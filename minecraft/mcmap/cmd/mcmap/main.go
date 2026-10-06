@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
@@ -26,6 +27,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/trails"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/web"
 )
@@ -39,6 +41,10 @@ const maxPendingLogins = 10_000
 // One still running after this is given up, so that the renders behind it
 // are never held for longer.
 const markerScanTimeout = 2 * time.Minute
+
+// Reading the full world's biomes takes about ten seconds at a whole CPU.
+// One still running after this is given up, and the last reading stands.
+const biomeReadTimeout = 2 * time.Minute
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -148,6 +154,16 @@ func run(logger *slog.Logger) error {
 		// not finished in this long is stuck, and the next cycle is due.
 		w.SurveyTimeout = 5 * time.Minute
 	}
+	// A directory of its own, as each reader of the world has. The last
+	// reading is kept there, so the overlay is served from the first
+	// request after a restart and not from the end of the first cycle.
+	var biomeStore *biomes.Store
+	if cfg.Biomes {
+		biomeStore = &biomes.Store{}
+		reader := &biomes.Extractor{WorkDir: filepath.Join(cfg.DataDir, "biomes"), Store: biomeStore, Timeout: biomeReadTimeout, Logger: logger}
+		reader.Load()
+		w.Biomes = reader
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -189,6 +205,12 @@ func run(logger *slog.Logger) error {
 	if surveyor != nil {
 		app.Structures = surveyor
 	}
+	if biomeStore != nil {
+		app.Biomes = biomeStore
+	}
+	if recorder := startTrails(ctx, cfg, layer, &wg); recorder != nil {
+		app.Trails = recorder
+	}
 	if cfg.Login {
 		key, err := auth.LoadKey(filepath.Join(cfg.DataDir, "auth", "session.key"))
 		if err != nil {
@@ -228,7 +250,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()
@@ -257,6 +279,20 @@ func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *
 	}
 	wg.Go(func() { source.Run(ctx) })
 	return layer
+}
+
+// startTrails begins keeping players' positions from the live layer. With
+// trails turned off, or no live layer to take positions from, it starts
+// nothing and returns nil, which is also what keeps the route from being
+// served.
+func startTrails(ctx context.Context, cfg config.Config, layer *live.Layer, wg *sync.WaitGroup) *trails.Recorder {
+	if !cfg.Trails || layer == nil {
+		return nil
+	}
+	recorder := trails.New(cfg.TrailMaxAge, cfg.TrailMaxPoints)
+	// The pack samples once a second, so asking more often finds nothing.
+	wg.Go(func() { recorder.Run(ctx, layer.Store, time.Second) })
+	return recorder
 }
 
 // startIcons begins filling the mob icons, from the volume or from their
