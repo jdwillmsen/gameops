@@ -14,7 +14,7 @@ const (
 var (
 	metricFetches = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_icons_fetches_total",
-		Help: "Attempts to fetch the mob icons, marker pictures and names from the published samples, by result. None at all means they were read from the volume.",
+		Help: "Attempts to fetch the mob icons, marker pictures and names from the published samples, by result. With icons on, none at all means they were read from the volume; with icons off nothing is ever fetched.",
 	}, []string{"result"})
 	metricMobTypes = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_mob_types",
@@ -22,11 +22,11 @@ var (
 	})
 	metricPictures = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_marker_pictures",
-		Help: "Marker and structure pictures held. Zero means the page is drawing every marker as a ring and every structure as a letter.",
+		Help: "Marker and structure pictures held. Zero means the page is drawing every marker as a ring and every structure as a letter, as it also does with icons off.",
 	})
 	metricNames = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_names",
-		Help: "Display names read from the language file. Zero means every name served is a tidied id.",
+		Help: "Display names read from the language file. Zero means every name served is a tidied id, or that icons are off and none is served.",
 	})
 	metricHeads = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_player_heads",
