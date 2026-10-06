@@ -294,6 +294,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .key { width: 0.7rem; height: 0.7rem; }
 .key.recorded { background: var(--text); border: 1px solid #0b0c0e; border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
+.key.candidate { border: 1.5px dotted var(--text); border-radius: 50%; opacity: 0.55; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
 .trail-window { display: flex; align-items: center; gap: 0.4rem; color: var(--dim); }
 .trail-window select { padding: 0.1rem 0.3rem; }
@@ -326,6 +327,11 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .structure.spawn span { width: 13px; height: 13px; margin: 4.5px; background: var(--text); border: 1.5px solid #0b0c0e; transform: rotate(45deg); }
 /* Predicted where the world has already generated and recorded nothing. */
 .structure.predicted.doubted span { opacity: 0.55; text-decoration: line-through; }
+/* Only possible: the terrain is not generated, and the biome will decide.
+   Fainter and dotted, and its picture faint with it, so that a map full of
+   them does not read as a map full of structures. */
+.structure.predicted.candidate span { border-style: dotted; opacity: 0.45; }
+.structure.predicted.candidate:hover span, .structure.predicted.candidate:focus span { opacity: 0.9; }
 
 /* Fixed width, or the footer shifts with every digit of the age. */
 .live { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 6.5rem; }

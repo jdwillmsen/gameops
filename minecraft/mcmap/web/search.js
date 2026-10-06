@@ -38,6 +38,11 @@
     waypoint: 'Waypoint',
   };
 
+  // What is said after a structure the world has not recorded: the seed
+  // puts one there, or puts a site there in terrain not generated yet,
+  // where the biome will decide.
+  const UNSURE = { predicted: 'predicted', candidate: 'possible site' };
+
   let timer = null;
   let request = null;
   // What the list shows: the hits, and which of them the keyboard is on.
@@ -71,7 +76,11 @@
     const detail = str(hit.detail);
     if (hit.kind === 'bed') return names.bed(hit.colour);
     if (hit.kind === 'mob') return names.mob(name, detail, hit.baby);
-    if (hit.kind === 'structure') return detail ? names.structure(detail) : name || KINDS.structure;
+    if (hit.kind === 'structure') {
+      const what = detail ? names.structure(detail) : name || KINDS.structure;
+      // One worked out from the seed is never listed as one the world has.
+      return Object.hasOwn(UNSURE, hit.certainty) ? `${what} (${UNSURE[hit.certainty]})` : what;
+    }
     if (hit.kind === 'container') {
       // One nobody named is sent under what it is.
       const what = names.holder(detail, hit.colour, hit.trapped);

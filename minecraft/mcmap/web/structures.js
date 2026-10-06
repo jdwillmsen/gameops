@@ -1,11 +1,13 @@
 'use strict';
 
-// Structures, as two layers that are never drawn alike. A recorded one is a
+// Structures, as layers that are never drawn alike. A recorded one is a
 // fact: the world's own save says it is there, and it is drawn solid, with
-// the box it occupies. A predicted one is a calculation from the seed for
-// chunks nobody has generated yet, and is drawn hollow and dashed. The
-// server keeps the seed and only predicts once the calculation has been
-// seen to agree with what the world recorded.
+// the box it occupies. A predicted one is a calculation from the seed, and
+// is drawn hollow and dashed. A possible one is fainter still: a place the
+// seed says the generator will try, in terrain nobody has generated, where
+// the biome will decide whether anything is built. The server keeps the
+// seed and only offers a kind once its calculation has been seen to agree
+// with what the world recorded of that kind.
 //
 // The world spawn comes with the overworld's structures and has a row of
 // its own: it is neither recorded as a structure nor predicted.
@@ -31,13 +33,14 @@
     witch_hut: { letter: 'H', color: '#b48ce0' },
     village: { letter: 'V', color: '#6bbf59' },
   };
-  // The rows in the panel: the two layers, then a filter per kind that
-  // applies to both. A kind's row is named by the game's word for it once
-  // that is known.
-  const SORTS = ['recorded', 'predicted'];
+  // The rows in the panel: the three layers, then a filter per kind that
+  // applies to all of them. A kind's row is named by the game's word for
+  // it once that is known.
+  const SORTS = ['recorded', 'predicted', 'candidate'];
   const ROWS = [
     ['recorded', 'Known', 'key recorded'],
     ['predicted', 'Predicted', 'key predicted'],
+    ['candidate', 'Possible', 'key candidate'],
     ['fortress', 'Fortresses', 'dot fortress'],
     ['monument', 'Monuments', 'dot monument'],
     ['outpost', 'Outposts', 'dot outpost'],
@@ -67,6 +70,35 @@
     refuted: 'Nothing is predicted: the structures this world recorded are not where its seed would put them.',
     unknown: 'Nothing is predicted: the world’s seed could not be read.',
   };
+
+  // What the Possible row says of itself when it has nothing else to say:
+  // the word alone does not tell a viewer how much to expect of one.
+  const WHAT_POSSIBLE = 'Where the seed puts a site in terrain not generated yet. The biome there decides whether one is built.';
+
+  // Why a kind is not predicted while the seed itself is trusted: each
+  // kind's rule is checked against the world's own structures of that kind.
+  const WHY_NOT_KIND = {
+    unverified: 'Not predicted: this world has recorded too few to check the rule by.',
+    refuted: 'Not predicted: the ones this world recorded are not where the rule puts them.',
+  };
+
+  // The game keeps a record of a village only once it has run it, so a
+  // site with none may still hold one. Every other kind is recorded with
+  // the chunk, and a finished site without one has none.
+  const RECORDED_LATE = new Set(['village']);
+
+  // What is said under a prediction's name and place.
+  function standing(p) {
+    if (p.candidate) {
+      return ['The seed puts a site here. Whether one is built depends on the biome, and this terrain is not generated yet.'];
+    }
+    if (p.generated && RECORDED_LATE.has(p.kind)) {
+      return ['This area is generated and its biome suits one, but the game has no record of one here.',
+        'It keeps a record only for a village a player has been near.'];
+    }
+    if (p.generated) return ['This area is already generated and the world recorded none here.'];
+    return ['Not generated yet: nobody has been here.'];
+  }
 
   // Each row's handle, while the service has structures; empty while it
   // does not.
@@ -115,7 +147,7 @@
   }
 
   // sort -> kind -> layer group. A filter is a group on or off the map.
-  const groups = { recorded: new Map(), predicted: new Map() };
+  const groups = { recorded: new Map(), predicted: new Map(), candidate: new Map() };
   const groupOf = (sort, kind) => {
     if (!groups[sort].has(kind)) groups[sort].set(kind, L.layerGroup());
     return groups[sort].get(kind);
@@ -136,10 +168,13 @@
   let pending = null;
   let available = true;
   let state = 'unknown';
-  let counts = { recorded: 0, predicted: 0 };
-  let more = { recorded: 0, predicted: 0 };
-  // How many of each kind the two layers hold between them.
+  const none = () => ({ recorded: 0, predicted: 0, candidate: 0 });
+  let counts = none();
+  let more = none();
+  // How many of each kind each layer holds, and how each kind's rule has
+  // fared against the world, for the kinds the server said so of.
   let kinds = {};
+  let checks = {};
 
   function clear() {
     for (const sort of Object.values(groups)) for (const group of sort.values()) group.clearLayers();
@@ -149,9 +184,10 @@
     held = null;
     surveyed = false;
     fetchedAt = 0;
-    counts = { recorded: 0, predicted: 0 };
-    more = { recorded: 0, predicted: 0 };
+    counts = none();
+    more = none();
     kinds = {};
+    checks = {};
   }
 
   function draw(dimension, data) {
@@ -182,14 +218,13 @@
       mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded'), label).addTo(group);
     }
     for (const p of predicted) {
-      const title = `${names.structure(p.kind)} · predicted from the seed`;
-      const label = p.generated
-        ? tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
-          'This area is already generated and the world recorded none here.')
-        : tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
-          'Not generated yet: nobody has been here.');
-      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, p.generated ? 'predicted doubted' : 'predicted'), label)
-        .addTo(groupOf('predicted', p.kind));
+      const sort = p.candidate ? 'candidate' : 'predicted';
+      const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : 'predicted from the seed'}`;
+      const label = tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`, ...standing(p));
+      // Struck through only where the world has been asked and said no.
+      const doubted = p.generated && !RECORDED_LATE.has(p.kind);
+      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, `predicted${p.candidate ? ' candidate' : ''}${doubted ? ' doubted' : ''}`), label)
+        .addTo(groupOf(sort, p.kind));
     }
     const spawn = data.spawn;
     if (spawn && Number.isFinite(spawn.x) && Number.isFinite(spawn.z)) {
@@ -199,10 +234,26 @@
       const drawn = L.divIcon({ html: document.createElement('span'), className: 'structure spawn', iconSize: [22, 22], iconAnchor: [11, 11] });
       mark([spawn.z + 0.5, spawn.x + 0.5], drawn, tip('World spawn', where)).addTo(spawnLayer);
     }
-    counts = { recorded: recorded.length, predicted: predicted.length };
-    more = { recorded: count(data.recordedMore), predicted: count(data.predictedMore) };
-    for (const s of [...recorded, ...predicted]) {
-      if (Object.hasOwn(KINDS, s.kind)) kinds[s.kind] = (kinds[s.kind] || 0) + 1;
+    const possible = predicted.filter((p) => p.candidate).length;
+    counts = { recorded: recorded.length, predicted: predicted.length - possible, candidate: possible };
+    // What the server left out of the seed's sites is not told apart. It
+    // keeps the predicted before the possible, so the possible are what
+    // was cut wherever there are any.
+    const cut = count(data.predictedMore);
+    more = { recorded: count(data.recordedMore), predicted: possible > 0 ? 0 : cut, candidate: possible > 0 ? cut : 0 };
+    const tally = (list, sort) => {
+      for (const s of list) {
+        if (!Object.hasOwn(KINDS, s.kind)) continue;
+        kinds[s.kind] = kinds[s.kind] || none();
+        kinds[s.kind][sort] += 1;
+      }
+    };
+    tally(recorded, 'recorded');
+    tally(predicted.filter((p) => !p.candidate), 'predicted');
+    tally(predicted.filter((p) => p.candidate), 'candidate');
+    const sent = data.kinds && typeof data.kinds === 'object' ? data.kinds : {};
+    for (const kind of Object.keys(KINDS)) {
+      if (Object.hasOwn(sent, kind) && sent[kind] && typeof sent[kind].state === 'string') checks[kind] = sent[kind].state;
     }
     apply();
   }
@@ -233,7 +284,10 @@
     }
     ROWS.forEach(([id, label, swatch], at) => {
       const picture = Object.hasOwn(KINDS, id) ? icons.picture(icons.keyOf('structure', { kind: id })) : null;
-      const row = app.layers.register({ group: 'structures', id, label, order: (at + 1) * 10, swatch, picture });
+      // The possible sites are the newest row. A viewer who had turned the
+      // predicted ones off has not asked for fainter ones.
+      const enabled = id !== 'candidate' || rows.get('predicted').enabled;
+      const row = app.layers.register({ group: 'structures', id, label, enabled, order: (at + 1) * 10, swatch, picture });
       row.onToggle(apply);
       rows.set(id, row);
     });
@@ -246,13 +300,22 @@
       const row = rows.get(sort);
       row.setCount(surveyed ? counts[sort] : null);
       const why = sort === 'predicted' && surveyed ? WHY_NOT[state] : '';
-      row.setNote(why || (more[sort] > 0 ? `Showing ${fmt(counts[sort])} of ${fmt(counts[sort] + more[sort])}` : ''));
+      const what = sort === 'candidate' && surveyed && state === 'verified' ? WHAT_POSSIBLE : '';
+      row.setNote(why || (more[sort] > 0 ? `Showing ${fmt(counts[sort])} of ${fmt(counts[sort] + more[sort])}` : what));
     }
-    // With neither layer on there is nothing for a kind to filter.
+    // With no layer on there is nothing for a kind to filter.
     const filtering = SORTS.some(on);
     for (const kind of Object.keys(KINDS)) {
+      const n = kinds[kind] || none();
       rows.get(kind).setLabel(names.plural(names.structure(kind)));
-      rows.get(kind).setCount(surveyed ? kinds[kind] || 0 : null);
+      rows.get(kind).setCount(surveyed ? n.recorded + n.predicted + n.candidate : null);
+      // A kind held back says why; one that is not says how its count is
+      // made up, wherever some of it is not known.
+      const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] : '';
+      const parts = n.predicted + n.candidate > 0
+        ? [`${fmt(n.recorded)} known`, ...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ')
+        : '';
+      rows.get(kind).setNote(why || parts);
       rows.get(kind).setAvailable(filtering);
     }
     // Greyed out in a dimension the spawn is not in.
