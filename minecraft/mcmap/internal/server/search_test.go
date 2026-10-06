@@ -12,6 +12,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
 
 type searchAnswer struct {
@@ -101,6 +102,19 @@ func TestSearchFindsABiomeAStructureAndAMarkerByName(t *testing.T) {
 	}
 }
 
+// A kind without a name would be listed as a hit with nothing to read, so a
+// kind added to the survey has to be named here before it can be found.
+func TestSearchNamesEveryKindOfStructure(t *testing.T) {
+	for _, kind := range structures.Kinds {
+		if structureNames[kind] == "" {
+			t.Errorf("%s has no name to be found by", kind)
+		}
+	}
+	if len(structureNames) != len(structures.Kinds) {
+		t.Errorf("%d names for %d kinds", len(structureNames), len(structures.Kinds))
+	}
+}
+
 // Nearest first within the dimension asked from; then the other dimensions,
 // which no distance is given for.
 func TestSearchListsNearestFirstAndOtherDimensionsAfter(t *testing.T) {
@@ -108,7 +122,7 @@ func TestSearchListsNearestFirstAndOtherDimensionsAfter(t *testing.T) {
 	got := search(t, s, "e", session(s, steve))
 	// Every kind of thing has an "e" in it somewhere.
 	want := "bed:Bed@overworld biome:Desert@overworld container:" + hostile + "@overworld waypoint:steve's base@overworld " +
-		"biome:Mushroom Fields@overworld structure:Ocean Monument@overworld " +
+		"structure:Village@overworld biome:Mushroom Fields@overworld structure:Village@overworld structure:Ocean Monument@overworld " +
 		"biome:Nether Wastes@nether bed:Bed@nether structure:Nether Fortress@nether"
 	if describe(got) != want {
 		t.Fatalf("got  %s\nwant %s", describe(got), want)
