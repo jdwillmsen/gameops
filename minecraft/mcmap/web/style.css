@@ -194,6 +194,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .dot.monument { background: #5cc8f0; }
 .dot.outpost { background: #d9a441; }
 .dot.witch-hut { background: #b48ce0; }
+.dot.village { background: #6bbf59; }
 .key { width: 0.7rem; height: 0.7rem; }
 .key.recorded { background: var(--text); border: 1px solid #0b0c0e; border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
