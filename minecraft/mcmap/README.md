@@ -377,8 +377,11 @@ The file is text from outside that ends up in a browser. It may be at most
 those keys are kept, 193 of them, and at most 4,000; and a name is kept
 only if it is at most 64 characters of printable text, with no control
 character, no invisible or text-reordering character, no private-use glyph
-and no colour code. A name that fails is dropped, not repaired. The page
-must still write every name as text.
+and no colour code. A name that fails is dropped, not repaired.
+
+**For the page:** every name is plain text and must be written as text
+(`textContent`, never markup). The filter above lets `<`, `>`, `&` and
+quotes through by design, since a name may hold them.
 
 Anything the file does not list is named by its id tidied into words:
 namespace and version suffix dropped, underscores to spaces, each word
@@ -1102,7 +1105,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version` and the `keys` that have a picture, `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The marker or structure picture with the key `{group}/{name}` as a PNG, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
-| `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
+| `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
