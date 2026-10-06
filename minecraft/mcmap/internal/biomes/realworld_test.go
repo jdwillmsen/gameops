@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,8 +22,12 @@ import (
 //
 //	MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/biomes/
 //
-// The places are the FWB world's own recorded structures: the generator
-// builds a monument only in deep ocean and a witch hut only in a swamp.
+// MCMAP_REAL_PLACES names a file of places in that world whose biome is not in
+// doubt, one to a line: what it is, the dimension, x, z, and the biome wanted
+// there (deep ocean for a monument, since the generator builds one nowhere
+// else; nothing, for a place that is only reported). The file is kept out of
+// the repository: where a world's structures are is enough to work out the
+// seed that placed them.
 func TestRealWorld(t *testing.T) {
 	world := os.Getenv("MCMAP_REAL_WORLD")
 	if world == "" {
@@ -87,22 +93,7 @@ func TestRealWorld(t *testing.T) {
 		}
 	}
 
-	type place struct {
-		what string
-		d    chunks.Dimension
-		x, z int32
-		want string
-	}
-	places := []place{
-		{"witch hut", chunks.Overworld, -1213, 1716, "swampland"},
-		{"the end's main island", chunks.End, 0, 0, "the_end"},
-	}
-	for _, m := range [][2]int32{{731, 603}, {2555, -293}, {-4917, 1787}, {-3493, 747}, {1643, 219}, {27, 5243}, {3739, -2437}, {-4581, 1627}, {651, 2347}, {2251, -320}, {2816, 251}} {
-		places = append(places, place{"monument", chunks.Overworld, m[0] + 28, m[1] + 28, "deep ocean"})
-	}
-	for _, f := range [][2]int32{{-452, -425}, {-721, -469}, {600, -1394}, {152, -368}, {174, -1181}} {
-		places = append(places, place{"fortress", chunks.Nether, f[0], f[1], "nether"})
-	}
+	places := realPlaces(t)
 	for _, p := range places {
 		got, ok := w.At(p.d, p.x, p.z)
 		agrees := ok && got.Name == p.want
@@ -113,16 +104,12 @@ func TestRealWorld(t *testing.T) {
 			agrees = ok && (got.ID == 8 || (got.ID >= 178 && got.ID <= 181))
 		}
 		t.Logf("%-22s %-9s %6d, %6d: %s", p.what, p.d.Name(), p.x, p.z, got.Name)
-		if !agrees {
+		if p.want != "" && !agrees {
 			t.Errorf("%s at %s %d, %d is in %q (found %v), want %s", p.what, p.d.Name(), p.x, p.z, got.Name, ok, p.want)
 		}
 		if back, _ := again.At(p.d, p.x, p.z); back != got {
 			t.Errorf("the saved world answers %q there", back.Name)
 		}
-	}
-	for _, o := range [][2]int32{{-775, 5688}, {2984, -3511}, {-968, 7032}, {-759, 1623}, {504, 4135}, {183, 6871}, {1543, 1607}} {
-		got, _ := w.At(chunks.Overworld, o[0], o[1])
-		t.Logf("%-22s %-9s %6d, %6d: %s", "outpost", "overworld", o[0], o[1], got.Name)
 	}
 	spawn, _ := w.At(chunks.Overworld, 0, 0)
 	t.Logf("the world spawn, 0, 0: %s", spawn.Name)
@@ -151,4 +138,45 @@ func TestRealWorld(t *testing.T) {
 			t.Logf("  %6d, %6d  %5.0f blocks away  %8d blocks in %5d chunks", h.X, h.Z, h.Distance, h.Region.Area, h.Region.Chunks)
 		}
 	}
+}
+
+type place struct {
+	what string
+	d    chunks.Dimension
+	x, z int32
+	want string
+}
+
+// realPlaces reads the places MCMAP_REAL_PLACES lists, or none if it names
+// no file.
+func realPlaces(t *testing.T) []place {
+	t.Helper()
+	name := os.Getenv("MCMAP_REAL_PLACES")
+	if name == "" {
+		t.Log("MCMAP_REAL_PLACES names no file, so no place is checked")
+		return nil
+	}
+	raw, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var places []place
+	for n, line := range strings.Split(string(raw), "\n") {
+		if line = strings.TrimSpace(line); line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// what;dimension;x;z;want
+		f := strings.Split(line, ";")
+		if len(f) != 5 {
+			t.Fatalf("%s:%d: want what;dimension;x;z;biome", name, n+1)
+		}
+		d := slices.IndexFunc(chunks.Dimensions, func(d chunks.Dimension) bool { return d.Name() == strings.TrimSpace(f[1]) })
+		x, errX := strconv.ParseInt(strings.TrimSpace(f[2]), 10, 32)
+		z, errZ := strconv.ParseInt(strings.TrimSpace(f[3]), 10, 32)
+		if d < 0 || errX != nil || errZ != nil {
+			t.Fatalf("%s:%d: not a dimension and two whole numbers", name, n+1)
+		}
+		places = append(places, place{strings.TrimSpace(f[0]), chunks.Dimensions[d], int32(x), int32(z), strings.TrimSpace(f[4])})
+	}
+	return places
 }
