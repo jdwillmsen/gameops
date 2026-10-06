@@ -269,6 +269,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .key { width: 0.7rem; height: 0.7rem; }
 .key.recorded { background: var(--text); border: 1px solid #0b0c0e; border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
+.key.slime { background: rgba(110, 207, 122, 0.3); border: 1px solid var(--accent); }
 
 .structure span {
   display: grid;

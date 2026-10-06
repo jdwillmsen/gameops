@@ -777,6 +777,14 @@ FWB world: of the nine chunks holding a slime below y 40 and outside a
 trial chamber, eight are slime chunks, where one in ten would be by
 chance. Slimes spawn in a slime chunk below y 40.
 
+**On the page.** Slime chunks is a row in the Overlays group, off until
+turned on, that shades and outlines them over the Overworld. It is drawn a
+tile at a time on a canvas, so only the chunks in view are ever worked out,
+and not at all from zoom -3 out, where a chunk is two pixels. In the other
+dimensions the row is greyed out. `web/slime.js` holds the function above
+letter for letter, which a test checks, and offers it as
+`window.mcmap.isSlimeChunk`.
+
 The world spawn is served with the overworld's structures.
 
 ## Trails
