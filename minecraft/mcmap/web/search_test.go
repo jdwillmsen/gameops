@@ -14,10 +14,15 @@ func TestSearchShowsEveryHitAsText(t *testing.T) {
 	loadedAfterThePanel(t, "search.js")
 	for _, need := range []string{
 		"node.textContent = s;",
-		"item.append(text('span', 'name', title), text('span', 'where', whereOf(hit)));",
+		"const name = text('span', 'name', title);",
+		"item.append(name, text('span', 'where', whereOf(hit)));",
+		// A picture is a canvas the shared script draws, put before the text.
+		"if (picture) name.prepend(picture);",
 		".bindTooltip(text('span', '', titleOf(hit)),",
 		// A hit whose name is its kind says so once.
-		"return same(kind, title) ? '' : kind;",
+		"return title.toLowerCase().includes(kind.toLowerCase()) ? '' : kind;",
+		// A named mob is titled as its marker is, baby and all.
+		"if (hit.kind === 'mob') return names.mob(name, detail, hit.baby);",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("search.js no longer has %s", need)

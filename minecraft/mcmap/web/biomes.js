@@ -61,10 +61,13 @@
 
   const on = () => row !== null && row.enabled;
   const str = (v) => (typeof v === 'string' ? v : '');
+  // A biome the server sent no label for is its identifier made into
+  // words, never the identifier itself.
+  const tidy = (id) => (app.names ? app.names.tidy(id) : id);
   const held = (name) => Boolean(listing) && listing.biomes.some((b) => b.name === name);
   const labelOf = (name) => {
     const found = listing ? listing.biomes.find((b) => b.name === name) : null;
-    return found ? found.label : name;
+    return found ? found.label : tidy(name);
   };
 
   function share(area, total) {
@@ -226,7 +229,7 @@
         version: str(data.version),
         biomes: (Array.isArray(data.biomes) ? data.biomes : [])
           .filter((b) => b && str(b.name) !== '')
-          .map((b) => ({ name: b.name, label: str(b.label) || b.name, color: str(b.color), area: Number.isFinite(b.area) ? b.area : 0 })),
+          .map((b) => ({ name: b.name, label: str(b.label) || tidy(b.name), color: str(b.color), area: Number.isFinite(b.area) ? b.area : 0 })),
         tiles: { minZoom: Number(tiles.minZoom), maxZoom: Number(tiles.maxZoom), size: Number(tiles.size) },
       };
       // Before the first reading, ask again soon rather than in a minute.
@@ -297,7 +300,7 @@
     }
     if (atRequest !== request || layer === null) return;
     atRequest = null;
-    const label = data && data.generated && data.biome ? str(data.biome.label) || str(data.biome.name) : '';
+    const label = data && data.generated && data.biome ? str(data.biome.label) || (str(data.biome.name) && tidy(data.biome.name)) : '';
     say(label ? `Biome: ${label}` : 'Biome: not generated here');
   }
 

@@ -9,8 +9,8 @@
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
   // after a release this can meet a map that cannot be sent anywhere yet.
-  if (!app || !app.go) return;
-  const { map } = app;
+  if (!app || !app.go || !app.icons || !app.names) return;
+  const { map, icons, names } = app;
 
   const el = {
     form: document.getElementById('search'),
@@ -62,21 +62,39 @@
   const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 
   // What a hit is listed as: the most particular thing known of it first,
-  // which is the name a player gave it, or failing that what sort of
-  // thing it is. The server sends a mob's type and a container's kind as
-  // the game's identifiers; a structure's says only what its name does.
+  // which is the name a player gave it, with what it is after, or failing
+  // that what it is alone. The server sends a mob's type, a container's
+  // kind and a structure's as the game's identifiers, and each is said by
+  // the game's own name for it, as everywhere else on the page.
   function titleOf(hit) {
     const name = str(hit.name);
-    const type = hit.kind === 'structure' ? '' : str(hit.detail).replace(/_/g, ' ');
-    if (!name) return type || KINDS[hit.kind] || 'Place';
-    return type && !same(type, name) ? `${name} (${type})` : name;
+    const detail = str(hit.detail);
+    if (hit.kind === 'bed') return names.bed(hit.colour);
+    if (hit.kind === 'mob') return names.mob(name, detail, hit.baby);
+    if (hit.kind === 'structure') return detail ? names.structure(detail) : name || KINDS.structure;
+    if (hit.kind === 'container') {
+      // One nobody named is sent under what it is.
+      const what = names.holder(detail, hit.colour, hit.trapped);
+      return name && !same(name, what) ? `${name} (${what})` : what;
+    }
+    // A biome answers to its older identifier as well, so that is said.
+    const also = hit.kind === 'biome' && detail ? names.tidy(detail) : '';
+    if (!name) return also || KINDS[hit.kind] || 'Place';
+    return also && !same(also, name) ? `${name} (${also})` : name;
   }
 
-  // The small label beside it, or none where it would only repeat the
-  // title: a bed is listed as "Bed", once.
+  // The small label beside it, or none where the title already says it: a
+  // bed is listed as "Red Bed", and not as a bed twice.
   function kindOf(hit, title) {
     const kind = KINDS[hit.kind] || 'Place';
-    return same(kind, title) ? '' : kind;
+    return title.toLowerCase().includes(kind.toLowerCase()) ? '' : kind;
+  }
+
+  const SORTS = new Set(['bed', 'container', 'mob', 'structure', 'waypoint']);
+  // The picture the map draws it with, for the kinds that have one.
+  function pictureOf(hit) {
+    if (!SORTS.has(hit.kind)) return null;
+    return icons.picture(icons.keyOf(hit.kind, { kind: str(hit.detail), colour: hit.colour, trapped: hit.trapped }));
   }
 
   function whereOf(hit) {
@@ -107,21 +125,26 @@
     el.list.children[at].scrollIntoView({ block: 'nearest' });
   }
 
+  function itemOf(hit, i) {
+    const item = document.createElement('li');
+    item.id = `search-hit-${i}`;
+    item.setAttribute('role', 'option');
+    const title = titleOf(hit);
+    const kind = kindOf(hit, title);
+    if (kind) item.append(text('span', 'kind', kind));
+    else item.className = 'plain';
+    const name = text('span', 'name', title);
+    const picture = pictureOf(hit);
+    if (picture) name.prepend(picture);
+    item.append(name, text('span', 'where', whereOf(hit)));
+    item.addEventListener('click', () => choose(i));
+    return item;
+  }
+
   function show(list, note, query) {
     hits = list;
     if (query !== undefined) shownFor = query;
-    el.list.replaceChildren(...list.map((hit, i) => {
-      const item = document.createElement('li');
-      item.id = `search-hit-${i}`;
-      item.setAttribute('role', 'option');
-      const title = titleOf(hit);
-      const kind = kindOf(hit, title);
-      if (kind) item.append(text('span', 'kind', kind));
-      else item.className = 'plain';
-      item.append(text('span', 'name', title), text('span', 'where', whereOf(hit)));
-      item.addEventListener('click', () => choose(i));
-      return item;
-    }));
+    el.list.replaceChildren(...list.map(itemOf));
     el.list.hidden = list.length === 0;
     el.note.textContent = note;
     el.note.hidden = note === '';
@@ -190,7 +213,7 @@
       zIndexOffset: 1000,
     }).bindTooltip(text('span', '', titleOf(hit)), { permanent: true, direction: 'top', offset: [0, -14], className: 'marker-tip' });
     layer.addTo(map);
-    found = { layer, dimension: hit.dimension };
+    found = { layer, hit, dimension: hit.dimension };
     foundTimer = setTimeout(unmark, FOUND_MS);
   }
 
@@ -261,6 +284,17 @@
 
   document.addEventListener('pointerdown', (e) => {
     if (!el.form.contains(e.target)) open(false);
+  });
+
+  // What is listed, and the mark on the place chosen, were titled with the
+  // names there were then.
+  document.addEventListener('mcmap:names', () => {
+    if (hits.length > 0) {
+      const at = active;
+      el.list.replaceChildren(...hits.map(itemOf));
+      mark(at);
+    }
+    if (found) found.layer.setTooltipContent(text('span', '', titleOf(found.hit)));
   });
 
   document.addEventListener('mcmap:view', () => {

@@ -7,42 +7,67 @@ import (
 	"testing"
 )
 
-// The live layer draws up to a thousand markers a second. Pictures on them
-// are stamped onto its one canvas from bitmaps decoded once; an element or
-// an image per marker would be a thousand of each, and a string handed to
-// the page as markup would be a gamertag a player chose.
-func TestLiveLayerDrawsPicturesOnItsCanvas(t *testing.T) {
-	js, err := fs.ReadFile(FS, "live.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, need := range []string{"createImageBitmap(", "ctx.drawImage(", "L.canvas("} {
-		if !bytes.Contains(js, []byte(need)) {
-			t.Errorf("live.js no longer uses %s", need)
+// The live layer draws up to a thousand markers a second, and the markers
+// that stay put are two thousand more on the same canvas. Pictures on them
+// are stamped there from bitmaps the shared script decodes once; an element
+// or an image per marker would be thousands of each, and a string handed
+// to the page as markup would be a gamertag a player chose.
+func TestMapPicturesAreDecodedOnceAndStampedOnTheCanvas(t *testing.T) {
+	icons, live, markers := read(t, "icons.js"), read(t, "live.js"), read(t, "markers.js")
+	for _, need := range []string{"createImageBitmap(", "ctx.drawImage(", "const Stamped = L.CircleMarker.extend(", "const bitmaps = new Map();", "const sprites = new Map();"} {
+		if !bytes.Contains(icons, []byte(need)) {
+			t.Errorf("icons.js no longer has %s", need)
 		}
 	}
-	for _, sink := range []string{
-		"L.marker(", "L.icon(", "L.divIcon", "new Image", "createElement('img')", "<img",
-		"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
-	} {
-		if bytes.Contains(js, []byte(sink)) {
-			t.Errorf("live.js uses %s", sink)
+	for _, need := range []string{"L.canvas(", "ctx.drawImage(", "const Mob = icons.Stamped;", "icons.mob(", "icons.sprite(pic, colour, HEAD_RADIUS, paintHead)", "app.liveRenderer = renderer;"} {
+		if !bytes.Contains(live, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
 		}
 	}
-	// Every picture is asked of this origin, by a relative address, which
-	// is all the page's content security policy allows.
-	addresses := regexp.MustCompile("fetch\\(([^)]*)\\)").FindAllSubmatch(js, -1)
-	if len(addresses) < 3 {
-		t.Fatalf("found %d fetches in live.js; the pattern no longer matches the script", len(addresses))
-	}
-	for _, a := range addresses {
-		if !regexp.MustCompile(`^('api/[a-z/]+'|address)(,|$)`).Match(a[1]) {
-			t.Errorf("live.js fetches %s, which is not one of its own API's addresses", a[1])
+	// The markers go on the live layer's canvas, where both can be hovered,
+	// each as one stamp of a sprite it shares with every other of its sort.
+	for _, need := range []string{"const renderer = app.liveRenderer ||", "const Pin = icons.Stamped.extend(", "icons.plate(", "icons.mob("} {
+		if !bytes.Contains(markers, []byte(need)) {
+			t.Errorf("markers.js no longer has %s", need)
 		}
 	}
-	built := regexp.MustCompile("return [^;]*`(api/icons/[^`]*)`").FindAllSubmatch(js, -1)
-	if len(built) != 2 {
-		t.Fatalf("found %d picture addresses in live.js, want the mob's and the head's", len(built))
+	for name, js := range map[string][]byte{"icons.js": icons, "live.js": live, "markers.js": markers} {
+		for _, sink := range []string{
+			"L.marker(", "L.icon(", "L.divIcon", "L.svg(", "new Image", "createElement('img')", "<img", "createImageBitmap(",
+			"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
+		} {
+			// Only the shared script decodes.
+			if sink == "createImageBitmap(" && name == "icons.js" {
+				continue
+			}
+			if bytes.Contains(js, []byte(sink)) {
+				t.Errorf("%s uses %s", name, sink)
+			}
+		}
+		// Every picture is asked of this origin, by a relative address,
+		// which is all the page's content security policy allows.
+		for _, a := range regexp.MustCompile("fetch\\(([^)]*)\\)").FindAllSubmatch(js, -1) {
+			if !regexp.MustCompile("^('api/[a-z/]+'|`api/markers\\?dimension=\\$\\{encodeURIComponent\\(dimension|address)(,|$)").Match(a[1]) {
+				t.Errorf("%s fetches %s, which is not one of its own API's addresses", name, a[1])
+			}
+		}
+	}
+	if n := len(regexp.MustCompile("fetch\\(").FindAll(icons, -1)); n != 2 {
+		t.Errorf("found %d fetches in icons.js, want the list and a picture", n)
+	}
+	address := regexp.MustCompile("`(api/icons/[^`]*)`")
+	if built := address.FindAllSubmatch(icons, -1); len(built) != 2 {
+		t.Errorf("found %d picture addresses in icons.js, want the mob's and the marker's", len(built))
+	}
+	if built := address.FindAllSubmatch(live, -1); len(built) != 1 {
+		t.Errorf("found %d picture addresses in live.js, want the head's", len(built))
+	}
+	// Only a picture the server lists is asked for, and a listed one that
+	// fails leaves whatever wanted it drawn as it was.
+	for _, need := range []string{"listing.mobs.types.has(type)", "listing.pictures.keys.has(key) && KEY.test(key)", "failed.set(address, Date.now());", "canvas.hidden = !drawn;"} {
+		if !bytes.Contains(icons, []byte(need)) {
+			t.Errorf("icons.js no longer has %s", need)
+		}
 	}
 }
 

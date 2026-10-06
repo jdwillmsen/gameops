@@ -13,23 +13,27 @@
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
   // after a release this can meet a page that has no panel yet.
-  if (!app || !app.layers || !app.layers.register) return;
-  const { map } = app;
+  if (!app || !app.layers || !app.layers.register || !app.icons || !app.names) return;
+  const { map, icons, names } = app;
 
   // Structures change only when chunks are generated, and the server looks
   // once per snapshot; asking more often than this finds nothing new.
   const REFRESH_MS = 5 * 60_000;
   const RETRY_MS = 30_000;
 
+  // What a kind is drawn in. Its name is the game's, asked for when it is
+  // said, and its picture the server's; the letter is what stands in the
+  // picture's place until there is one.
   const KINDS = {
-    fortress: { label: 'Fortress', letter: 'F', color: '#e5534b' },
-    monument: { label: 'Monument', letter: 'M', color: '#5cc8f0' },
-    outpost: { label: 'Outpost', letter: 'O', color: '#d9a441' },
-    witch_hut: { label: 'Witch hut', letter: 'H', color: '#b48ce0' },
-    village: { label: 'Village', letter: 'V', color: '#6bbf59' },
+    fortress: { letter: 'F', color: '#e5534b' },
+    monument: { letter: 'M', color: '#5cc8f0' },
+    outpost: { letter: 'O', color: '#d9a441' },
+    witch_hut: { letter: 'H', color: '#b48ce0' },
+    village: { letter: 'V', color: '#6bbf59' },
   };
   // The rows in the panel: the two layers, then a filter per kind that
-  // applies to both.
+  // applies to both. A kind's row is named by the game's word for it once
+  // that is known.
   const SORTS = ['recorded', 'predicted'];
   const ROWS = [
     ['recorded', 'Known', 'key recorded'],
@@ -41,7 +45,7 @@
     ['village', 'Villages', 'dot village'],
     ['spawn', 'World spawn', 'key spawn'],
   ];
-  const UNKNOWN = { label: 'Structure', letter: '?', color: '#9aa3ad' };
+  const UNKNOWN = { letter: '?', color: '#9aa3ad' };
 
   // What the world keeps about a village, for its tooltip. A village the
   // game has a record for but has not run yet has no counts, and saying so
@@ -49,11 +53,12 @@
   function villageLines(v) {
     if (!v) return [];
     if (!v.counted) return ['Not counted by the game yet'];
-    const n = (count, one, many) => `${fmt(count)} ${count === 1 ? one : many}`;
+    // A count the answer does not carry is left out, not shown as nothing.
+    const n = (count, one, many) => (Number.isFinite(count) ? [`${fmt(count)} ${count === 1 ? one : many}`] : []);
     return [
-      [n(v.villagers, 'villager', 'villagers'), n(v.golems, 'iron golem', 'iron golems'), n(v.cats, 'cat', 'cats')].join(', '),
-      [n(v.beds, 'bed', 'beds'), n(v.bells, 'bell', 'bells'), n(v.jobSites, 'job site', 'job sites')].join(', '),
-    ];
+      [...n(v.villagers, 'villager', 'villagers'), ...n(v.golems, 'iron golem', 'iron golems'), ...n(v.cats, 'cat', 'cats')].join(', '),
+      [...n(v.beds, 'bed', 'beds'), ...n(v.bells, 'bell', 'bells'), ...n(v.jobSites, 'job site', 'job sites')].join(', '),
+    ].filter(Boolean);
   }
 
   // Why the predicted layer is empty, for the states in which it always is.
@@ -69,6 +74,7 @@
   const on = (key) => rows.has(key) && rows.get(key).enabled;
 
   const fmt = (n) => n.toLocaleString('en-US');
+  const count = (n) => (Number.isFinite(n) && n > 0 ? n : 0);
 
   // Leaflet treats a string given to a tooltip as HTML. Nothing here comes
   // from a player, but an element holding text is the form that cannot be
@@ -90,7 +96,10 @@
       .bindTooltip(label, { direction: 'top', offset: [0, -8], className: 'live-tip' });
     marker.on('add', () => {
       const node = marker.getElement();
-      if (node) node.setAttribute('aria-label', [...label.children].map((row) => row.textContent).join('. '));
+      if (!node) return;
+      node.setAttribute('aria-label', [...label.children].map((row) => row.textContent).join('. '));
+      // A picture that arrived while this was off the map.
+      icons.paint(node);
     });
     return marker;
   }
@@ -98,9 +107,11 @@
   function icon(kind, sort) {
     const k = KINDS[kind] || UNKNOWN;
     const mark = document.createElement('span');
-    mark.textContent = k.letter;
     mark.style.setProperty('--kind', k.color);
-    return L.divIcon({ html: mark, className: `structure ${sort}`, iconSize: [18, 18], iconAnchor: [9, 9] });
+    const letter = document.createElement('b');
+    letter.textContent = k.letter;
+    mark.append(icons.picture(icons.keyOf('structure', { kind })), letter);
+    return L.divIcon({ html: mark, className: `structure ${sort}`, iconSize: [22, 22], iconAnchor: [11, 11] });
   }
 
   // sort -> kind -> layer group. A filter is a group on or off the map.
@@ -115,6 +126,9 @@
   let spawned = false;
 
   let shown = null; // the dimension the layers hold
+  // The answer the layers were drawn from, to draw them again when what
+  // things are called changes.
+  let held = null;
   // Whether the server has looked at this dimension yet. Until it has,
   // there is no count to give and no reason for an empty layer.
   let surveyed = false;
@@ -132,6 +146,7 @@
     spawnLayer.clearLayers();
     spawned = false;
     shown = null;
+    held = null;
     surveyed = false;
     fetchedAt = 0;
     counts = { recorded: 0, predicted: 0 };
@@ -142,16 +157,19 @@
   function draw(dimension, data) {
     clear();
     shown = dimension;
+    held = data;
     surveyed = true;
     fetchedAt = Date.now();
     state = data.prediction || 'unknown';
-    for (const s of data.recorded || []) {
+    const recorded = (data.recorded || []).filter((s) => s && [s.minX, s.maxX, s.minZ, s.maxZ].every(Number.isFinite));
+    const predicted = (data.predicted || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.z));
+    for (const s of recorded) {
       const k = KINDS[s.kind] || UNKNOWN;
       const group = groupOf('recorded', s.kind);
       const label = tip(
-        `${k.label} · recorded by the world`,
+        `${names.structure(s.kind)} · recorded by the world`,
         `X ${fmt(s.minX)} to ${fmt(s.maxX)}, Z ${fmt(s.minZ)} to ${fmt(s.maxZ)}`,
-        `Y ${fmt(s.minY)} to ${fmt(s.maxY)}`,
+        ...(Number.isFinite(s.minY) && Number.isFinite(s.maxY) ? [`Y ${fmt(s.minY)} to ${fmt(s.maxY)}`] : []),
         ...villageLines(s.village),
       );
       // The box is what the world recorded, to the block. A block's far
@@ -163,12 +181,12 @@
       // less than a pixel from far out.
       mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded'), label).addTo(group);
     }
-    for (const p of data.predicted || []) {
-      const k = KINDS[p.kind] || UNKNOWN;
+    for (const p of predicted) {
+      const title = `${names.structure(p.kind)} · predicted from the seed`;
       const label = p.generated
-        ? tip(`${k.label} · predicted from the seed`, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
+        ? tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
           'This area is already generated and the world recorded none here.')
-        : tip(`${k.label} · predicted from the seed`, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
+        : tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
           'Not generated yet: nobody has been here.');
       mark([p.z + 0.5, p.x + 0.5], icon(p.kind, p.generated ? 'predicted doubted' : 'predicted'), label)
         .addTo(groupOf('predicted', p.kind));
@@ -178,12 +196,12 @@
       spawned = true;
       // A world that has not resolved its spawn height sends none.
       const where = Number.isFinite(spawn.y) ? `X ${fmt(spawn.x)}, Y ${fmt(spawn.y)}, Z ${fmt(spawn.z)}` : `X ${fmt(spawn.x)}, Z ${fmt(spawn.z)}`;
-      const drawn = L.divIcon({ html: document.createElement('span'), className: 'structure spawn', iconSize: [18, 18], iconAnchor: [9, 9] });
+      const drawn = L.divIcon({ html: document.createElement('span'), className: 'structure spawn', iconSize: [22, 22], iconAnchor: [11, 11] });
       mark([spawn.z + 0.5, spawn.x + 0.5], drawn, tip('World spawn', where)).addTo(spawnLayer);
     }
-    counts = { recorded: (data.recorded || []).length, predicted: (data.predicted || []).length };
-    more = { recorded: data.recordedMore || 0, predicted: data.predictedMore || 0 };
-    for (const s of [...(data.recorded || []), ...(data.predicted || [])]) {
+    counts = { recorded: recorded.length, predicted: predicted.length };
+    more = { recorded: count(data.recordedMore), predicted: count(data.predictedMore) };
+    for (const s of [...recorded, ...predicted]) {
       if (Object.hasOwn(KINDS, s.kind)) kinds[s.kind] = (kinds[s.kind] || 0) + 1;
     }
     apply();
@@ -214,7 +232,8 @@
       return;
     }
     ROWS.forEach(([id, label, swatch], at) => {
-      const row = app.layers.register({ group: 'structures', id, label, order: (at + 1) * 10, swatch });
+      const picture = Object.hasOwn(KINDS, id) ? icons.picture(icons.keyOf('structure', { kind: id })) : null;
+      const row = app.layers.register({ group: 'structures', id, label, order: (at + 1) * 10, swatch, picture });
       row.onToggle(apply);
       rows.set(id, row);
     });
@@ -232,6 +251,7 @@
     // With neither layer on there is nothing for a kind to filter.
     const filtering = SORTS.some(on);
     for (const kind of Object.keys(KINDS)) {
+      rows.get(kind).setLabel(names.plural(names.structure(kind)));
       rows.get(kind).setCount(surveyed ? kinds[kind] || 0 : null);
       rows.get(kind).setAvailable(filtering);
     }
@@ -297,6 +317,16 @@
   }
 
   paint();
+  // Every tooltip was written with the names there were then.
+  document.addEventListener('mcmap:names', () => {
+    if (shown === null || held === null) {
+      paint();
+      return;
+    }
+    const at = fetchedAt;
+    draw(shown, held);
+    fetchedAt = at;
+  });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
   setInterval(sync, RETRY_MS);
