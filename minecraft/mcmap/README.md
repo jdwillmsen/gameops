@@ -825,10 +825,15 @@ Every logged-in player already sees where every other player is, live, so
 carries at most 20,000 points, each player's newest.
 
 **On the page.** Trails is a row in the Overlays group, off until turned
-on, with a choice of the last 1, 6 or 24 hours, sent as `since`. Each line
-is drawn in the colour the live layer draws that player in, which
-`live.js` offers as `window.mcmap.playerColour`, and hovering one names
-the player and the time it covers. The trails are asked for about once a
+on, with a choice of the last 1, 6 or 24 hours, sent as `since`. The
+viewer's own trail is the green the live layer draws them in, which
+`live.js` offers as `window.mcmap.playerColour`; every other player's is
+one of eight colours picked by their gamertag, or the next one free where
+two on the map pick the same. Under the row is each player with a trail
+and their colour, and choosing a name fits the map to that trail. The
+lines are drawn on the live layer's canvas behind its markers, so a marker
+is never crossed by its own trail and is still what a click on it reaches;
+hovering a line anywhere else names the player and the time it covers. The trails are asked for about once a
 minute and never more often; between answers the lines are carried forward
 from the live frames by the same rules the server records by, and the next
 answer replaces them. The row's switch is kept with the rest under

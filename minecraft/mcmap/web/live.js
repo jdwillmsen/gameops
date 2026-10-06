@@ -1089,6 +1089,10 @@
   });
 
   app.playerColour = playerColour;
+  app.isMe = isMe;
+  // For a layer that has to sit under these markers and still be hovered:
+  // only what is on the same canvas can be both.
+  app.liveRenderer = renderer;
 
   mobLayer.addTo(map);
   playerLayer.addTo(map);

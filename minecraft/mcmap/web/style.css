@@ -273,6 +273,10 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
 .trail-window { display: flex; align-items: center; gap: 0.4rem; color: var(--dim); }
 .trail-window select { padding: 0.1rem 0.3rem; }
+.trail-body { display: grid; gap: 0.3rem; }
+/* A trail's colour is its player's, so the swatch is the line, not a box. */
+.trail-players { list-style: none; margin: 0; padding: 0; max-height: 10rem; overflow-y: auto; }
+.trail-players i { width: 1rem; height: 0.3rem; border-radius: 1px; }
 .key.slime { background: rgba(110, 207, 122, 0.3); border: 1px solid var(--accent); }
 
 .structure span {
