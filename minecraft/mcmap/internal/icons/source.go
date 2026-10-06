@@ -14,9 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 )
 
 // Where the samples are published. The listing comes from the API host and
@@ -89,9 +88,12 @@ type Set struct {
 	Lang map[string]string
 	// Entities is every entity type the samples define.
 	Entities []string
-	// Missing is what the samples did not hold in a usable form at this
-	// pin: picture keys, and the language file by its path.
+	// Missing is every marker picture, by key, and the language file, by
+	// its path, that this set does not hold.
 	Missing []string
+	// Unreached is those of Missing the source could not be asked for
+	// this time, as opposed to asked and found not to hold.
+	Unreached []string
 }
 
 // budget is how much one fetch may still download.
@@ -212,8 +214,8 @@ func (a atlas) path(name string, index int) string {
 //
 // The mob icons come whole or the fetch fails. A marker picture or the
 // language file that the pin does not hold, or holds in a form this
-// refuses, is left out and named in Missing; only a failure to reach the
-// source at all fails the fetch for them.
+// refuses, is left out and named in Missing, to be asked for again later;
+// only a failure to reach the source at all fails the fetch for them.
 func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
@@ -305,27 +307,88 @@ func (s *Source) Fetch(ctx context.Context) (Set, error) {
 		}
 	}
 
-	var missing sync.Mutex
-	absent := func(what string) {
-		missing.Lock()
-		defer missing.Unlock()
-		out.Missing = append(out.Missing, what)
+	want := append(pictureKeys(), langPath)
+	extra := s.extras(ctx, want, items, total)
+	if len(extra.Unreached) > 0 {
+		return Set{}, fmt.Errorf("reading marker pictures and the language file: %d of %d could not be asked for", len(extra.Unreached), len(want))
 	}
-	wanted := pictures(items)
-	byKey := make(map[string]markerPicture, len(wanted))
-	keys := make([]string, 0, len(wanted))
-	for _, p := range wanted {
-		byKey[p.name] = p
-		keys = append(keys, p.name)
-	}
-	// Any bed the atlas does not list has no path to ask for.
-	for _, colour := range markers.Colours {
-		if _, listed := byKey["bed/"+colour]; !listed {
-			absent("bed/" + colour)
+	out.Pictures, out.Lang, out.Missing = extra.Pictures, extra.Lang, extra.Missing
+	return out, nil
+}
+
+// Fill asks again for what an earlier fetch left out, and for nothing else:
+// no listing, and the atlas only if a bed is among them, since that is
+// where a bed's path is written. It returns what it got, with what is
+// still left out in Missing.
+func (s *Source) Fill(ctx context.Context, missing []string) (Set, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+	total := &budget{left: maxTotalBytes}
+	var items atlas
+	if slices.ContainsFunc(missing, func(what string) bool { return strings.HasPrefix(what, "bed/") }) {
+		raw, err := s.get(ctx, s.raw(atlasPath), maxAtlasBytes, total)
+		switch {
+		case err == nil:
+			// An atlas that does not parse lists no bed, which leaves
+			// each bed out as it would any the atlas did not name.
+			_ = json.Unmarshal(stripComments(raw), &items)
+		case !errors.Is(err, errSettled):
+			return Set{Missing: missing, Unreached: missing}, nil
 		}
 	}
-	out.Pictures, err = each(ctx, keys, func(ctx context.Context, key string) ([]byte, error) {
-		p := byKey[key]
+	return s.extras(ctx, missing, items, total), ctx.Err()
+}
+
+// extras reads the marker pictures and the language file named in want.
+// Each comes out one of three ways: fetched; left out because the source
+// answered and did not have it in a usable form, which is in Missing; or
+// left out because the source could not be asked, which is in Missing and
+// in Unreached. Nothing here is an error, since none of it stops the map.
+func (s *Source) extras(ctx context.Context, want []string, items atlas, total *budget) Set {
+	out := Set{Pictures: map[string][]byte{}}
+	known := map[string]markerPicture{}
+	for _, p := range pictures(items) {
+		known[p.name] = p
+	}
+	var (
+		mu sync.Mutex
+		// down is set by the first request that gets no answer, so that
+		// a source that is out of reach is found so once and not once
+		// for every picture.
+		down atomic.Bool
+	)
+	settled := func(what string) {
+		mu.Lock()
+		defer mu.Unlock()
+		out.Missing = append(out.Missing, what)
+	}
+	unreached := func(what string) {
+		down.Store(true)
+		mu.Lock()
+		defer mu.Unlock()
+		out.Missing = append(out.Missing, what)
+		out.Unreached = append(out.Unreached, what)
+	}
+	var keys []string
+	wantLang := false
+	for _, what := range want {
+		switch _, picture := known[what]; {
+		case what == langPath:
+			wantLang = true
+		case picture:
+			keys = append(keys, what)
+		default:
+			// A bed the atlas does not list, which has no path to ask
+			// for, or a key that is no picture's.
+			settled(what)
+		}
+	}
+	got, err := each(ctx, keys, func(ctx context.Context, key string) ([]byte, error) {
+		if down.Load() {
+			unreached(key)
+			return nil, nil
+		}
+		p := known[key]
 		body, err := s.get(ctx, s.raw("resource_pack/"+p.path+".png"), maxTextureBytes, total)
 		if err == nil {
 			if p.sheet {
@@ -338,31 +401,45 @@ func (s *Source) Fetch(ctx context.Context) (Set, error) {
 				err = fmt.Errorf("%s: %w: %w", p.path, err, errSettled)
 			}
 		}
-		if errors.Is(err, errSettled) {
-			absent(key)
+		switch {
+		case errors.Is(err, errSettled):
+			settled(key)
+			return nil, nil
+		case err != nil:
+			unreached(key)
 			return nil, nil
 		}
-		return body, err
+		return body, nil
 	})
 	if err != nil {
-		return Set{}, fmt.Errorf("reading marker pictures: %w", err)
+		// Only the context ending stops the pictures part way.
+		return Set{Missing: want, Unreached: want}
 	}
-	maps.DeleteFunc(out.Pictures, func(_ string, body []byte) bool { return body == nil })
-
-	rawLang, err := s.get(ctx, s.raw(langPath), maxLangBytes, total)
-	if err == nil {
-		if out.Lang, err = parseLang(rawLang); err != nil {
-			err = fmt.Errorf("%w: %w", err, errSettled)
+	for key, body := range got {
+		if body != nil {
+			out.Pictures[key] = body
 		}
 	}
-	switch {
-	case errors.Is(err, errSettled):
-		absent(langPath)
-	case err != nil:
-		return Set{}, fmt.Errorf("reading the language file: %w", err)
+	if wantLang {
+		var raw []byte
+		err := errors.New("the source is out of reach")
+		if !down.Load() {
+			if raw, err = s.get(ctx, s.raw(langPath), maxLangBytes, total); err == nil {
+				if out.Lang, err = parseLang(raw); err != nil {
+					err = fmt.Errorf("%w: %w", err, errSettled)
+				}
+			}
+		}
+		switch {
+		case errors.Is(err, errSettled):
+			settled(langPath)
+		case err != nil:
+			unreached(langPath)
+		}
 	}
 	slices.Sort(out.Missing)
-	return out, nil
+	slices.Sort(out.Unreached)
+	return out
 }
 
 func (s *Source) list(ctx context.Context, total *budget) ([]string, error) {

@@ -195,7 +195,7 @@ func run(logger *slog.Logger) error {
 		app.Waypoints = markers.NewAgent(cfg.AgentURL, cfg.InternalToken)
 	}
 	source := &icons.Source{Ref: cfg.IconsRef, ListURL: icons.DefaultListURL, RawURL: icons.DefaultRawURL}
-	if mobs, heads := startIcons(ctx, cfg, source.Fetch, logger, &wg); mobs != nil {
+	if mobs, heads := startIcons(ctx, cfg, source.Fetch, source.Fill, logger, &wg); mobs != nil {
 		app.MobIcons, app.Art = mobs, mobs
 		// Heads reach here from the agent, which needs the token to speak.
 		if cfg.InternalToken != "" {
@@ -300,11 +300,11 @@ func startTrails(ctx context.Context, cfg config.Config, layer *live.Layer, wg *
 // returns at once with the set still empty: the fetch is on
 // its own goroutine, and neither the listeners nor the snapshot cycle wait
 // for it. With icons turned off it starts nothing and returns nil.
-func startIcons(ctx context.Context, cfg config.Config, fetch func(context.Context) (icons.Set, error), logger *slog.Logger, wg *sync.WaitGroup) (*icons.Mobs, *icons.Heads) {
+func startIcons(ctx context.Context, cfg config.Config, fetch func(context.Context) (icons.Set, error), fill func(context.Context, []string) (icons.Set, error), logger *slog.Logger, wg *sync.WaitGroup) (*icons.Mobs, *icons.Heads) {
 	if !cfg.Icons {
 		return nil, nil
 	}
-	mobs := &icons.Mobs{Dir: filepath.Join(cfg.DataDir, "icons"), Ref: cfg.IconsRef, Fetch: fetch, Logger: logger}
+	mobs := &icons.Mobs{Dir: filepath.Join(cfg.DataDir, "icons"), Ref: cfg.IconsRef, Fetch: fetch, Fill: fill, Logger: logger}
 	wg.Go(func() { mobs.Run(ctx) })
 	return mobs, &icons.Heads{}
 }

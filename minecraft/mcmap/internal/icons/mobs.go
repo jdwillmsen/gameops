@@ -29,6 +29,11 @@ const (
 	// address, and asking more often only spends the ration.
 	defaultRetryMin = time.Minute
 	defaultRetryMax = time.Hour
+
+	// How long to leave alone what the source answered that it does not
+	// hold. A wrong answer of that kind is rare and a pin's contents do
+	// not change, so asking is cheap but seldom worth it.
+	defaultRefillEvery = 24 * time.Hour
 )
 
 // Mobs holds the mob icons for one pinned revision and, fetched with them,
@@ -41,12 +46,18 @@ type Mobs struct {
 	Dir string
 	Ref string
 	// Fetch downloads everything; Source.Fetch outside tests.
-	Fetch  func(context.Context) (Set, error)
+	Fetch func(context.Context) (Set, error)
+	// Fill asks again for what a set is missing and nothing else;
+	// Source.Fill outside tests. Nil leaves a set as it was first fetched.
+	Fill   func(ctx context.Context, missing []string) (Set, error)
 	Logger *slog.Logger
 
 	// RetryMin and RetryMax bound the wait between failed fetches. Zero
 	// uses the defaults.
 	RetryMin, RetryMax time.Duration
+	// RefillEvery is the wait before asking again for what the source
+	// said it does not hold. Zero uses the default.
+	RefillEvery time.Duration
 
 	mu      sync.RWMutex
 	icons   map[string][]byte
@@ -81,31 +92,27 @@ func (m *Mobs) home() string {
 
 // Run fills the set and returns when it is full or ctx ends. What is on the
 // volume for this pin is used if every file of it is intact, so a restart
-// asks the source for nothing; otherwise the source is asked until it
-// answers, with a growing wait in between.
+// asks the source for nothing it holds; otherwise the source is asked
+// until it answers, with a growing wait in between. Whatever a set is
+// then missing is asked for again, by itself, for as long as it is.
 func (m *Mobs) Run(ctx context.Context) {
-	if set, err := m.load(); err == nil {
+	set, err := m.load()
+	if err == nil {
 		m.set(set)
 		m.Logger.Info("mob icons read from the volume", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+		// At once: what was missing when this last ran may only have
+		// been missing then.
+		m.refill(ctx, set, 0)
 		return
 	}
-	wait, ceiling := m.RetryMin, m.RetryMax
-	if wait <= 0 {
-		wait = defaultRetryMin
-	}
-	if ceiling <= 0 {
-		ceiling = defaultRetryMax
-	}
+	wait, ceiling := m.retries()
 	for {
 		set, err := m.Fetch(ctx)
 		if err == nil {
 			metricFetches.WithLabelValues(resultOK).Inc()
-			if err := m.store(set); err != nil {
-				// Still served from memory; the next start fetches again.
-				m.Logger.Warn("mob icons not kept on the volume", "error", err.Error())
-			}
-			m.set(set)
+			m.keep(set)
 			m.Logger.Info("mob icons fetched", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+			m.refill(ctx, set, m.refillEvery())
 			return
 		}
 		if ctx.Err() != nil {
@@ -119,6 +126,92 @@ func (m *Mobs) Run(ctx context.Context) {
 		case <-time.After(wait):
 		}
 		wait = min(wait*2, ceiling)
+	}
+}
+
+func (m *Mobs) retries() (first, ceiling time.Duration) {
+	first, ceiling = m.RetryMin, m.RetryMax
+	if first <= 0 {
+		first = defaultRetryMin
+	}
+	if ceiling <= 0 {
+		ceiling = defaultRetryMax
+	}
+	return first, ceiling
+}
+
+func (m *Mobs) refillEvery() time.Duration {
+	if m.RefillEvery <= 0 {
+		return defaultRefillEvery
+	}
+	return m.RefillEvery
+}
+
+// keep serves a set and writes it to the volume.
+func (m *Mobs) keep(set Set) {
+	if err := m.store(set); err != nil {
+		// Still served from memory; the next start fetches again.
+		m.Logger.Warn("mob icons not kept on the volume", "error", err.Error())
+	}
+	m.set(set)
+}
+
+// refill asks, after wait, for what a set is missing, and goes on asking
+// until nothing is. What the set holds is served throughout. One answer
+// that a file is absent, too large or not a picture is not taken as the
+// last word, since a source can give a wrong one: it is asked again every
+// so often. Being unable to ask at all is tried again sooner, with the
+// same growing wait as a first fetch.
+//
+// It is quiet about nothing having changed: a gap that stays a gap is
+// logged when it was first found and not once for every time it is asked
+// after, and a source that stays out of reach is logged once.
+func (m *Mobs) refill(ctx context.Context, set Set, wait time.Duration) {
+	if m.Fill == nil {
+		return
+	}
+	first, ceiling := m.retries()
+	backoff, failing := first, false
+	for len(set.Missing) > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		got, err := m.Fill(ctx, set.Missing)
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			got = Set{Missing: set.Missing, Unreached: set.Missing}
+		}
+		if len(got.Pictures) > 0 || len(got.Lang) > 0 {
+			// A new set, not the held one changed: that one is being
+			// read by whoever is serving from it.
+			next := set
+			next.Pictures = maps.Clone(set.Pictures)
+			if next.Pictures == nil {
+				next.Pictures = map[string][]byte{}
+			}
+			maps.Copy(next.Pictures, got.Pictures)
+			if len(got.Lang) > 0 {
+				next.Lang = got.Lang
+			}
+			next.Missing, next.Unreached = got.Missing, nil
+			set = next
+			m.keep(set)
+			m.Logger.Info("fetched what the mob icons were missing", "ref", m.Ref, "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+		}
+		if len(got.Unreached) == 0 {
+			metricFetches.WithLabelValues(resultOK).Inc()
+			wait, backoff, failing = m.refillEvery(), first, false
+			continue
+		}
+		metricFetches.WithLabelValues(resultFailed).Inc()
+		if !failing {
+			m.Logger.Warn("what the mob icons are missing could not be asked for; it is tried again", "ref", m.Ref, "missing", set.Missing)
+		}
+		wait, backoff, failing = backoff, min(backoff*2, ceiling), true
 	}
 }
 
