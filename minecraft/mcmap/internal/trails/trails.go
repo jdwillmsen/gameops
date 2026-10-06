@@ -314,23 +314,31 @@ func (r *Recorder) Trails(dimension, player string, since, now time.Time) Reply 
 	r.prune(now)
 	r.export(now)
 
+	// Counting first means only the points that are served are copied: at
+	// the top of the limits, holding every matching point of every player
+	// until it was trimmed cost on the order of 100 MB a request, with the
+	// recorder locked.
+	matching := func(p held) bool {
+		return int(p.dimension) == d && (since.IsZero() || p.T > since.Unix())
+	}
 	type picked struct {
-		name   string
-		points []held
+		name    string
+		points  []held
+		matched int
 	}
 	var found []picked
 	for k, t := range r.trails {
 		if player != "" && k != key(player) {
 			continue
 		}
-		var points []held
+		n := 0
 		for _, p := range t.points {
-			if int(p.dimension) == d && (since.IsZero() || p.T > since.Unix()) {
-				points = append(points, p)
+			if matching(p) {
+				n++
 			}
 		}
-		if len(points) > 0 {
-			found = append(found, picked{t.name, points})
+		if n > 0 {
+			found = append(found, picked{t.name, t.points, n})
 		}
 	}
 	slices.SortFunc(found, func(a, b picked) int { return cmp.Compare(key(a.name), key(b.name)) })
@@ -339,17 +347,29 @@ func (r *Recorder) Trails(dimension, player string, since, now time.Time) Reply 
 		share = max(MaxServed/len(found), 1)
 	}
 	for _, f := range found {
-		if over := len(f.points) - share; over > 0 {
-			reply.More += over
-			f.points = f.points[over:]
-		}
+		skip := max(f.matched-share, 0)
+		reply.More += skip
 		trail := Trail{Name: f.name}
-		for i, p := range f.points {
-			if i == 0 || p.begins {
-				trail.Segments = append(trail.Segments, nil)
+		// One block holds every point served for the player; each segment
+		// is a window onto it.
+		block := make([]Point, 0, f.matched-skip)
+		from := 0
+		for _, p := range f.points {
+			if !matching(p) {
+				continue
 			}
-			last := len(trail.Segments) - 1
-			trail.Segments[last] = append(trail.Segments[last], p.Point)
+			if skip > 0 {
+				skip--
+				continue
+			}
+			if p.begins && len(block) > from {
+				trail.Segments = append(trail.Segments, block[from:len(block):len(block)])
+				from = len(block)
+			}
+			block = append(block, p.Point)
+		}
+		if len(block) > from {
+			trail.Segments = append(trail.Segments, block[from:len(block):len(block)])
 		}
 		reply.Players = append(reply.Players, trail)
 	}
