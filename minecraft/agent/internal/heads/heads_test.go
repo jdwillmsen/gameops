@@ -472,7 +472,13 @@ func TestTheEndOfASessionIsReportedOnceAndThenNothing(t *testing.T) {
 	// The next session starts from nobody, not from who was here before.
 	w.Begin()
 	w.List([]Entry{{UUID: alexUUID, XUID: alexXUID, Name: "Alex", Skin: classic(blue)}})
-	if got := m.next(t); len(got) != 1 || got[alexXUID].Gamertag != "Alex" {
+	got := m.next(t)
+	// The interval can come round between the session beginning and its
+	// first list, and report that nobody is here yet.
+	if len(got) == 0 {
+		got = m.next(t)
+	}
+	if len(got) != 1 || got[alexXUID].Gamertag != "Alex" {
 		t.Errorf("the next session reported %v", got)
 	}
 }
