@@ -426,11 +426,68 @@ own mobs spawn, as that chunk's record 57: a 32-bit count, then per box six
 32-bit block coordinates (minimum x, y, z, then maximum, inclusive) and one
 byte for the kind, all little-endian. The kinds are 1 nether fortress,
 2 witch hut, 3 ocean monument and 5 pillager outpost; nothing else leaves
-such a record, so villages, temples and the rest are not on this layer.
+such a record. Villages are kept another way and are read too, as below;
+temples and the rest are recorded nowhere and are not on this layer.
 A box is cut at the chunk's edge, so the boxes of a kind that touch are
 joined back into one structure (fortress boxes within 32 blocks, since a
 fortress is recorded room by room). A fortress only part generated shows as
 the parts there are.
+
+**Villages** are a fifth known kind, `village`, read from the records the
+game keeps for each village it runs. They are outside any chunk, under
+`VILLAGE_<dimension>_<id>_` and one of five endings, each an unnamed NBT
+compound:
+
+| Record | Holds | Read |
+|---|---|---|
+| `INFO` | The village's box, `X0` `Y0` `Z0` to `X1` `Y1` `Z1`, and `Initialized` | Yes |
+| `DWELLERS` | `Dwellers`: four lists of `actors`; the first is villagers, the second iron golems, the fourth cats | Counts only |
+| `POI` | `POI`: per villager, the `instances` it has claimed, each a `Type` (0 bed, 1 bell, 2 job site) at `X` `Y` `Z` | Counts only |
+| `PLAYERS` | Each player's standing with the village | Never |
+| `RAID` | A raid in progress | Never |
+
+`<dimension>` is `Overworld`, `Nether` or `TheEnd`. Only `Overworld` has
+been seen in a real world; the other two are the names the game gives its
+own per-dimension records. A village under any other name, or under none
+as older versions of the game wrote it, is passed over, and counted by its
+`INFO` record. A village
+is drawn with the box the game recorded and carries how many villagers,
+golems and cats it lists and how many beds, bells and job sites its
+villagers have claimed, each block counted once. Nothing a player typed and
+nothing that names one is read.
+
+What counts as a village worth drawing:
+
+- One the game has counted (`Initialized` 1) with at least one villager.
+- One the game has made a record for and not yet run (`Initialized` 0).
+  Its box is a first guess, 64 blocks square, and its counts are sent as zero,
+  so it goes out as `counted: false`: not known, rather than none. Every
+  such record in the FWB world has villagers and beds inside its box.
+- Not one the game has counted and found no villager in. That is a record
+  still and no longer somewhere to go looking for a villager; it is
+  counted under `empty` and not drawn.
+
+A village's records that do not parse, hold no box, or hold one inside out,
+past the edge of the world or more than 1,024 blocks across, leave that
+village out and are counted.
+
+The layout above is what the game's level format documentation gives for
+the keys and tag names; what the lists and types mean was worked out from
+the FWB world on 2026-10-05 (game 1.26.52.3) by setting the records beside
+the actors and block entities in the same save. It has 70 villages, 55
+counted and 15 not, none empty or malformed. Of the 549 actors in the first
+list of the 55, 542 are villagers (the other seven have no actor record);
+all 42 found from the second are iron golems and all 159 from the fourth
+are cats. The third is empty in every one and is not read. Of 481 claimed
+blocks of type 0, 479 are bed block entities; all 35 of type 1 are bells;
+type 2 carries a profession's name. 512 of the 542 villagers stand inside
+their own village's box, and none is more than 15 blocks from where the
+village last saw it. Each of the 15 not yet counted has villagers and beds
+inside its box, 57 villagers between them.
+
+This layer is not every village. The same world has 97 villagers that
+stand in no village's box, in generated villages the game has made no
+record for, and those are not known here.
 
 **Predicted** structures are worked out from the seed, and are mostly of
 use for chunks nobody has generated yet. A site in a generated chunk that
@@ -484,6 +541,22 @@ its failure costs nothing else. On the FWB world (2.47 million records,
 1,274 boxes) it takes 9 seconds and peaks at 45 MB. It keeps at most 200,000
 boxes and 2,000 structures of each layer per dimension, and says how many
 it left out.
+
+The villages cost that survey nothing to speak of. Their records share a
+prefix, so they are read by seeking to it in the view the survey already
+has open, not by another pass: 281 records, 1.2 milliseconds on the FWB
+world. The read has ten seconds of its own. If it runs out of them or
+fails, the villages of the survey before stand, it is logged and counted in
+`mcmap_structures_village_read_failures_total`, and the rest of the survey
+is as fresh as it would have been; while that lasts,
+`mcmap_structures_villages_last_success_timestamp_seconds` falls behind the
+survey's. It reads at most 4,096 villages and counts the rest, no record
+over 1 MB or nested more than twelve deep, and holds every count to 10,000.
+A world with more than 65,536 keys under the prefix, sixteen for each
+village it would read where a village has five, is not read at all and is
+a failure like any other: stopping part way would show whichever villages
+sorted first as all there are. Villages share the 2,000 known structures a
+dimension is sent, after the other kinds, the most lived-in first.
 
 To check the rules again after a game update, against a copy of a world:
 
@@ -659,7 +732,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
-| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -717,6 +790,8 @@ opens at the same place.
 | `mcmap_structures_prediction_disagreements` | Places where the seed and the world's records disagree |
 | `mcmap_structures_areas_skipped{reason}` | Recorded boxes left out: `malformed`, `unknown` (a kind this version does not know), `limit` |
 | `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total` | Whether the survey is running |
+| `mcmap_structures_villages_skipped{reason}` | Villages left out: `empty` (counted by the game, no villagers), `malformed`, `unknown` (a key this version does not know), `limit` |
+| `mcmap_structures_village_read_duration_seconds`, `mcmap_structures_village_read_failures_total`, `mcmap_structures_villages_last_success_timestamp_seconds` | How long the village records took to read; surveys that could not read them and kept the villages of the one before; and the snapshot the villages being served came from |
 
 ## Build and test
 
