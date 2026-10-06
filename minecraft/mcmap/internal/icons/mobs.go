@@ -96,10 +96,17 @@ func (m *Mobs) home() string {
 // until it answers, with a growing wait in between. Whatever a set is
 // then missing is asked for again, by itself, for as long as it is.
 func (m *Mobs) Run(ctx context.Context) {
-	set, err := m.load()
+	set, earlier, err := m.load()
 	if err == nil {
-		m.set(set)
-		m.Logger.Info("mob icons read from the volume", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+		if earlier {
+			// Written again as this version writes it, so that what is
+			// fetched for it below has an index to be added to.
+			m.keep(set)
+			m.Logger.Info("mob icons on the volume are from before there were marker pictures and names; those are fetched now", "ref", m.Ref, "types", len(set.Mobs))
+		} else {
+			m.set(set)
+			m.Logger.Info("mob icons read from the volume", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+		}
 		// At once: what was missing when this last ran may only have
 		// been missing then.
 		m.refill(ctx, set, 0)
@@ -112,7 +119,11 @@ func (m *Mobs) Run(ctx context.Context) {
 			metricFetches.WithLabelValues(resultOK).Inc()
 			m.keep(set)
 			m.Logger.Info("mob icons fetched", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
-			m.refill(ctx, set, m.refillEvery())
+			again := m.refillEvery()
+			if len(set.Unreached) > 0 {
+				again = wait
+			}
+			m.refill(ctx, set, again)
 			return
 		}
 		if ctx.Err() != nil {
@@ -286,19 +297,33 @@ func (m *Mobs) Names() *Names {
 	return m.names
 }
 
-func (m *Mobs) load() (Set, error) {
+// load reads this pin's set from the volume. earlier reports one written
+// before there were marker pictures and names: its mob icons are as whole
+// as they ever were and are used as they are, with every picture and the
+// language file counted as missing, so that a version that wants more
+// than the volume holds never serves less than the last one did while it
+// waits for the source.
+func (m *Mobs) load() (set Set, earlier bool, err error) {
 	home := m.home()
 	raw, err := os.ReadFile(filepath.Join(home, indexFile))
 	if err != nil {
-		return Set{}, err
+		return Set{}, false, err
 	}
 	var idx index
 	if err := json.Unmarshal(raw, &idx); err != nil {
-		return Set{}, err
+		return Set{}, false, err
+	}
+	// That version wrote no format, and nothing but the icons.
+	if earlier = idx.Format == 0 && len(idx.Pictures) == 0 && len(idx.Lang) == 0 && len(idx.Entities) == 0; earlier {
+		idx.Format = indexFormat
+		idx.Missing = append(pictureKeys(), langPath)
+		slices.Sort(idx.Missing)
+		// The types with an icon are the ones it is known to define.
+		idx.Entities = slices.Sorted(maps.Keys(idx.Icons))
 	}
 	if idx.Format != indexFormat || idx.Ref != m.Ref || len(idx.Icons) == 0 || len(idx.Icons) > maxDefinitions ||
 		len(idx.Pictures) > maxPictures || len(idx.Lang) > maxLangNames || len(idx.Entities) > maxDefinitions || len(idx.Missing) > maxPictures+1 {
-		return Set{}, errors.New("the icon index is not for this pin")
+		return Set{}, false, errors.New("the icon index is not for this pin")
 	}
 	files := map[string][]byte{}
 	read := func(digest string) ([]byte, error) {
@@ -321,18 +346,18 @@ func (m *Mobs) load() (Set, error) {
 	out := Set{Mobs: make(map[string][]byte, len(idx.Icons)), Pictures: make(map[string][]byte, len(idx.Pictures)), Entities: idx.Entities, Missing: idx.Missing}
 	for kind, digest := range idx.Icons {
 		if !mobType.MatchString(kind) {
-			return Set{}, errors.New("the icon index is damaged")
+			return Set{}, false, errors.New("the icon index is damaged")
 		}
 		if out.Mobs[kind], err = read(digest); err != nil {
-			return Set{}, err
+			return Set{}, false, err
 		}
 	}
 	for key, digest := range idx.Pictures {
 		if !pictureKey.MatchString(key) {
-			return Set{}, errors.New("the icon index is damaged")
+			return Set{}, false, errors.New("the icon index is damaged")
 		}
 		if out.Pictures[key], err = read(digest); err != nil {
-			return Set{}, err
+			return Set{}, false, err
 		}
 	}
 	// The names are held to what the language file was, since they go to
@@ -340,14 +365,14 @@ func (m *Mobs) load() (Set, error) {
 	// place on the volume.
 	for key, name := range idx.Lang {
 		if clean, ok := cleanLangName(name); !ok || clean != name || !wantedLangKey(key) {
-			return Set{}, errors.New("the icon index is damaged")
+			return Set{}, false, errors.New("the icon index is damaged")
 		}
 	}
 	out.Lang = idx.Lang
 	if slices.ContainsFunc(idx.Entities, func(kind string) bool { return !mobType.MatchString(kind) }) {
-		return Set{}, errors.New("the icon index is damaged")
+		return Set{}, false, errors.New("the icon index is damaged")
 	}
-	return out, nil
+	return out, earlier, nil
 }
 
 func isDigest(s string) bool {

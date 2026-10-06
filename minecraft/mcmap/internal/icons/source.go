@@ -71,11 +71,11 @@ func NewClient() *http.Client {
 	}
 }
 
-// errSettled marks an answer that asking again would not change: the pin
-// has no such file, or has one too large to be what was asked for. The mob
-// icons treat it as any other failure. A marker picture or the language
-// file is left out for it instead, so that a pin lacking one of them still
-// yields everything else.
+// errSettled marks an answer from the source that it does not hold what
+// was asked for: the pin has no such file, or has one too large to be it.
+// It is told apart from getting no answer because the two are asked for
+// again on different schedules. The mob icons treat it as any other
+// failure.
 var errSettled = errors.New("the samples do not hold it at this pin")
 
 // Set is everything one fetch read.
@@ -213,9 +213,9 @@ func (a atlas) path(name string, index int) string {
 // in a shared list), so none of them is guessed.
 //
 // The mob icons come whole or the fetch fails. A marker picture or the
-// language file that the pin does not hold, or holds in a form this
-// refuses, is left out and named in Missing, to be asked for again later;
-// only a failure to reach the source at all fails the fetch for them.
+// language file never fails it: one the pin does not hold, or holds in a
+// form this refuses, or that the source could not be asked for, is left
+// out and named in Missing, to be asked for again later by Fill.
 func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
@@ -308,11 +308,10 @@ func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	}
 
 	want := append(pictureKeys(), langPath)
+	// Whatever becomes of these, the mob icons are already whole and are
+	// not thrown away for them.
 	extra := s.extras(ctx, want, items, total)
-	if len(extra.Unreached) > 0 {
-		return Set{}, fmt.Errorf("reading marker pictures and the language file: %d of %d could not be asked for", len(extra.Unreached), len(want))
-	}
-	out.Pictures, out.Lang, out.Missing = extra.Pictures, extra.Lang, extra.Missing
+	out.Pictures, out.Lang, out.Missing, out.Unreached = extra.Pictures, extra.Lang, extra.Missing, extra.Unreached
 	return out, nil
 }
 
