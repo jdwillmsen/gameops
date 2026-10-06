@@ -6,12 +6,29 @@
 // updates and one repaint. A mob is drawn as its icon and a player as their
 // head where the server has one to give, and as a dot or an arrow where it
 // does not.
+//
+// The viewer chooses how often the picture is redrawn, and may pause it.
+// A slower pace keeps the stream and draws the newest frame when one is
+// due; a pause closes the stream, so that a paused tab costs the server
+// nothing, and leaves the last picture on the map marked as frozen.
 (() => {
   const app = window.mcmap;
-  if (!app) return;
+  // The page and its scripts are cached apart for a few minutes, so just
+  // after a release this can meet a page that has no panel yet.
+  if (!app || !app.layers || !app.layers.register) return;
   const { map } = app;
 
-  const SETTINGS_KEY = 'mcmap.live';
+  const CONTROL_KEY = 'mcmap.liveControl';
+  // Where the layer's one on-and-off switch was kept before it could be
+  // paused.
+  const OLD_KEY = 'mcmap.live';
+  // Seconds between redraws that the viewer may choose from. The first is
+  // the server's own pace, and means every frame.
+  const INTERVALS = [1, 2, 5, 10, 30];
+  // Frames come about a second apart and never exactly, so one arriving
+  // this much before it is due is drawn, and a frame already held is kept
+  // this much past due in case a newer one is about to arrive.
+  const CADENCE_SLACK_MS = 150;
   // How long to leave it after the browser gives up on the stream before
   // asking whether the session is still good.
   const GIVE_UP_RETRY_MS = 5000;
@@ -62,17 +79,42 @@
     for (const id of ids.split(/\s+/)) categoryOf.set(id, category);
   }
 
-  const el = {
-    filters: document.getElementById('live-filters'),
-    readout: document.getElementById('live'),
-  };
-  const chips = new Map([...el.filters.querySelectorAll('button[data-live]')].map((b) => [b.dataset.live, b]));
+  const LAYERS = [
+    ['players', 'Players'],
+    ['hostile', 'Hostile'],
+    ['passive', 'Passive'],
+    ['villager', 'Villagers'],
+    ['other', 'Other'],
+  ];
 
-  const settings = { on: true, players: true, hostile: true, passive: true, villager: true, other: true };
+  const el = {
+    control: document.getElementById('live-control'),
+    pause: document.getElementById('live-pause'),
+    interval: document.getElementById('live-interval'),
+    readout: document.getElementById('live'),
+    frozen: document.getElementById('frozen'),
+    frozenWhat: document.getElementById('frozen-what'),
+    frozenAge: document.getElementById('frozen-age'),
+  };
+
+  const control = { paused: false, interval: INTERVALS[0] };
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    for (const key of Object.keys(settings)) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
+    const saved = JSON.parse(localStorage.getItem(CONTROL_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.paused === 'boolean') control.paused = saved.paused;
+      if (INTERVALS.includes(saved.interval)) control.interval = saved.interval;
+    } else {
+      // Whoever had the layer switched off still gets a page that opens
+      // no stream.
+      const old = JSON.parse(localStorage.getItem(OLD_KEY) || '{}');
+      control.paused = Boolean(old) && old.on === false;
+    }
   } catch { /* a browser that refuses storage still gets the defaults */ }
+
+  // The layer's rows in the panel, by category, while the service has a
+  // live layer at all; null while it does not.
+  let rows = null;
+  const shown = (category) => rows !== null && rows[category].enabled;
 
   // One canvas for every marker. Leaflet's default draws each as its own
   // SVG element, which is fine for a grid and not for a thousand mobs moving
@@ -243,7 +285,15 @@
   let me = null;
   let source = null;
   let streamDimension = null;
+  // The dimension the markers on the map are of, which outlives the stream
+  // when it is paused.
+  let pictured = null;
   let retryTimer = null;
+  // The newest frame not yet drawn, when the viewer's pace is slower than
+  // the server's, and when the last one was.
+  let latest = null;
+  let drawnAt = 0;
+  let cadenceTimer = null;
   // Server clock minus this one, taken from the first frame of a stream.
   let clockOffset = 0;
   let awaitingFirst = false;
@@ -359,7 +409,7 @@
     playerLayer.removeLayer(held.marker);
     held.pic = pic;
     held.marker = make({ n: held.name, x: held.x, z: held.z, r: held.yaw }, 'players', pic);
-    if (settings.players) playerLayer.addLayer(held.marker);
+    if (shown('players')) playerLayer.addLayer(held.marker);
   }
 
   // Brings every marker in line with the pictures there are now: called
@@ -480,7 +530,7 @@
         const pic = pictureOf(e, category);
         held = { marker: make(e, category, pic), category, x: e.x, z: e.z, yaw: e.r, name: e.n, type: e.t, pic };
         entities.set(key, held);
-        if (settings[category]) layerOf(category).addLayer(held.marker);
+        if (shown(category)) layerOf(category).addLayer(held.marker);
         added = true;
         return;
       }
@@ -511,10 +561,9 @@
 
   function count() {
     const totals = { players: 0, hostile: 0, passive: 0, villager: 0, other: 0 };
+    if (rows === null) return;
     for (const held of entities.values()) totals[held.category] += 1;
-    for (const [category, n] of Object.entries(totals)) {
-      chips.get(category).querySelector('.count').textContent = stale ? '' : fmt(n);
-    }
+    for (const [category, n] of Object.entries(totals)) rows[category].setCount(stale ? null : n);
   }
 
   function onFrame(frame) {
@@ -524,6 +573,27 @@
     }
     frameSeen = Date.now();
     if (Number.isFinite(frame.ttlSeconds) && frame.ttlSeconds > 0) ttlMs = frame.ttlSeconds * 1000;
+    // Every frame is the whole picture, so one that was never drawn is
+    // simply replaced.
+    latest = frame;
+    present();
+  }
+
+  // Draws the newest frame if one is due at the viewer's pace, and
+  // otherwise comes back when it is. At the server's own pace every frame
+  // is due.
+  function present() {
+    clearTimeout(cadenceTimer);
+    if (latest === null) return;
+    const due = control.interval > INTERVALS[0] ? drawnAt + control.interval * 1000 : 0;
+    const now = Date.now();
+    if (now < due - CADENCE_SLACK_MS) {
+      cadenceTimer = setTimeout(present, due + CADENCE_SLACK_MS - now);
+      return;
+    }
+    const frame = latest;
+    latest = null;
+    drawnAt = Date.now();
     stale = Boolean(frame.stale);
     more = frame.more || 0;
     frameAt = frame.at ? Date.parse(frame.at) : null;
@@ -533,8 +603,10 @@
 
   function close() {
     clearTimeout(retryTimer);
+    clearTimeout(cadenceTimer);
     clearInterval(picturesTimer);
     picturesTimer = null;
+    latest = null;
     if (source) source.close();
     source = null;
     streamDimension = null;
@@ -542,9 +614,16 @@
 
   function open(dimension) {
     close();
-    clear();
+    // Resuming, the frozen picture stays until the first frame replaces
+    // it; another dimension's is wrong here, not merely old.
+    if (dimension !== pictured) clear();
+    pictured = dimension;
     streamDimension = dimension;
     awaitingFirst = true;
+    drawnAt = 0;
+    // What is on the map is given its full time to be replaced before it
+    // is taken for abandoned.
+    frameSeen = Date.now();
     refreshPictures();
     picturesTimer = setInterval(refreshPictures, ICONS_MS);
     const es = new EventSource(`api/live?dimension=${encodeURIComponent(dimension)}`);
@@ -573,13 +652,17 @@
   // dimension's, and only while there is someone logged in and looking.
   function sync() {
     const available = app.live();
-    el.filters.hidden = !available;
+    panel(available);
+    el.control.hidden = !available;
     el.readout.hidden = !available;
     const locked = document.body.classList.contains('locked');
-    const want = available && settings.on && !locked && !document.hidden ? app.dimension() : null;
+    const here = available && !locked ? app.dimension() : null;
+    const want = here && !control.paused && !document.hidden ? here : null;
     if (!want) {
       close();
-      clear();
+      // Paused, the last picture stays for as long as it is of the
+      // dimension being looked at. Hidden or logged out, nothing stays.
+      if (!(control.paused && here && here === pictured)) clear();
     } else if (want !== streamDimension) {
       open(want);
       if (me === null && !locked) identify();
@@ -601,12 +684,22 @@
     for (const [key, held] of [...entities]) if (held.category === 'players') forget(key);
   }
 
+  // A length of time as it is said, to the second: how old a frozen
+  // picture is has to be readable at a glance.
+  function span(seconds) {
+    const s = Math.max(0, Math.floor(seconds));
+    if (s < 60) return `${s} s`;
+    if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
+    return `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  }
+
   function readout() {
+    const age = frameAt === null || stale ? null : Math.max(0, (Date.now() + clockOffset - frameAt) / 1000);
     let state;
-    if (!settings.on) {
-      state = 'off';
-    } else if (!source) {
+    if (control.paused) {
       state = 'paused';
+    } else if (!source) {
+      state = 'reconnecting';
     } else if (Date.now() - frameSeen > ttlMs && entities.size) {
       // Nothing has arrived for as long as a position is good for, so what
       // is on screen is no longer where anyone is.
@@ -614,51 +707,85 @@
       state = 'reconnecting';
     } else if (source.readyState !== EventSource.OPEN) {
       state = 'connecting';
-    } else if (stale || frameAt === null) {
+    } else if (age === null) {
       state = 'no data';
     } else {
-      const age = Math.max(0, (Date.now() + clockOffset - frameAt) / 1000);
       state = `${age.toFixed(1)} s`;
+      if (control.interval > INTERVALS[0]) state += ` · every ${control.interval} s`;
     }
     let line = `live · ${state}`;
     if (more > 0 && !stale) {
-      const shown = [...entities.values()].filter((held) => held.category !== 'players').length;
-      line += ` · showing ${fmt(shown)} of ${fmt(shown + more)} mobs`;
+      const drawn = [...entities.values()].filter((held) => held.category !== 'players').length;
+      line += ` · showing ${fmt(drawn)} of ${fmt(drawn + more)} mobs`;
     }
     el.readout.textContent = line;
+
+    // Said on the map itself as well: a paused picture looks exactly like
+    // a current one.
+    const frozen = control.paused && !el.readout.hidden;
+    el.frozen.hidden = !frozen;
+    if (!frozen) return;
+    const what = 'Live updates are paused.';
+    if (el.frozenWhat.textContent !== what) el.frozenWhat.textContent = what;
+    el.frozenAge.textContent = age !== null && entities.size
+      ? `Positions are from ${span(age)} ago.`
+      : 'No positions are shown.';
   }
 
-  function save() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* not kept, still applied */ }
+  function saveControl() {
+    try { localStorage.setItem(CONTROL_KEY, JSON.stringify(control)); } catch { /* not kept, still applied */ }
   }
 
-  function paint() {
-    for (const [key, chip] of chips) {
-      chip.setAttribute('aria-pressed', String(settings[key]));
-      if (key !== 'on') chip.disabled = !settings.on;
+  function paintControl() {
+    el.pause.textContent = control.paused ? 'Resume live' : 'Pause live';
+    el.pause.classList.toggle('paused', control.paused);
+    el.interval.value = String(control.interval);
+  }
+
+  function toggle(category, on) {
+    for (const held of entities.values()) {
+      if (held.category !== category) continue;
+      if (on) layerOf(category).addLayer(held.marker); else layerOf(category).removeLayer(held.marker);
     }
+    if (on) playerLayer.eachLayer((marker) => marker.bringToFront());
   }
 
-  for (const [key, chip] of chips) {
-    chip.addEventListener('click', () => {
-      settings[key] = !settings[key];
-      save();
-      paint();
-      if (key === 'on') {
-        sync();
-        return;
-      }
-      for (const held of entities.values()) {
-        if (held.category !== key) continue;
-        if (settings[key]) layerOf(key).addLayer(held.marker); else layerOf(key).removeLayer(held.marker);
-      }
-      if (settings[key]) playerLayer.eachLayer((marker) => marker.bringToFront());
+  // Puts the layer's rows in the panel while the service has a live layer
+  // and takes them out while it does not.
+  function panel(available) {
+    if (available === (rows !== null)) return;
+    if (!available) {
+      for (const row of Object.values(rows)) row.remove();
+      rows = null;
+      return;
+    }
+    rows = {};
+    LAYERS.forEach(([id, label], at) => {
+      rows[id] = app.layers.register({ group: 'live', id, label, order: (at + 1) * 10, swatch: `dot ${id}` });
+      rows[id].onToggle((on) => toggle(id, on));
     });
   }
 
+  el.pause.addEventListener('click', () => {
+    control.paused = !control.paused;
+    saveControl();
+    paintControl();
+    sync();
+  });
+
+  el.interval.addEventListener('change', () => {
+    const seconds = Number(el.interval.value);
+    if (!INTERVALS.includes(seconds)) return;
+    control.interval = seconds;
+    saveControl();
+    // A frame held for the old pace may be due at the new one.
+    present();
+    readout();
+  });
+
   mobLayer.addTo(map);
   playerLayer.addTo(map);
-  paint();
+  paintControl();
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
   setInterval(readout, READOUT_MS);

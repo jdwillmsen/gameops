@@ -8,10 +8,11 @@
 // seen to agree with what the world recorded.
 (() => {
   const app = window.mcmap;
-  if (!app) return;
+  // The page and its scripts are cached apart for a few minutes, so just
+  // after a release this can meet a page that has no panel yet.
+  if (!app || !app.layers || !app.layers.register) return;
   const { map } = app;
 
-  const SETTINGS_KEY = 'mcmap.structures';
   // Structures change only when chunks are generated, and the server looks
   // once per snapshot; asking more often than this finds nothing new.
   const REFRESH_MS = 5 * 60_000;
@@ -23,6 +24,17 @@
     outpost: { label: 'Outpost', letter: 'O', color: '#d9a441' },
     witch_hut: { label: 'Witch hut', letter: 'H', color: '#b48ce0' },
   };
+  // The rows in the panel: the two layers, then a filter per kind that
+  // applies to both.
+  const SORTS = ['recorded', 'predicted'];
+  const ROWS = [
+    ['recorded', 'Known', 'key recorded'],
+    ['predicted', 'Predicted', 'key predicted'],
+    ['fortress', 'Fortresses', 'dot fortress'],
+    ['monument', 'Monuments', 'dot monument'],
+    ['outpost', 'Outposts', 'dot outpost'],
+    ['witch_hut', 'Witch huts', 'dot witch-hut'],
+  ];
   const UNKNOWN = { label: 'Structure', letter: '?', color: '#9aa3ad' };
 
   // Why the predicted layer is empty, for the states in which it always is.
@@ -32,16 +44,10 @@
     unknown: 'Nothing is predicted: the world’s seed could not be read.',
   };
 
-  const el = { filters: document.getElementById('structure-filters') };
-  if (!el.filters) return;
-  const chips = new Map([...el.filters.querySelectorAll('button[data-structures]')].map((b) => [b.dataset.structures, b]));
-
-  const settings = { on: true, recorded: true, predicted: true };
-  for (const kind of Object.keys(KINDS)) settings[kind] = true;
-  try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    for (const key of Object.keys(settings)) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
-  } catch { /* a browser that refuses storage still gets the defaults */ }
+  // Each row's handle, while the service has structures; empty while it
+  // does not.
+  const rows = new Map();
+  const on = (key) => rows.has(key) && rows.get(key).enabled;
 
   const fmt = (n) => n.toLocaleString('en-US');
 
@@ -86,24 +92,32 @@
   };
 
   let shown = null; // the dimension the layers hold
+  // Whether the server has looked at this dimension yet. Until it has,
+  // there is no count to give and no reason for an empty layer.
+  let surveyed = false;
   let fetchedAt = 0;
   let pending = null;
   let available = true;
   let state = 'unknown';
   let counts = { recorded: 0, predicted: 0 };
   let more = { recorded: 0, predicted: 0 };
+  // How many of each kind the two layers hold between them.
+  let kinds = {};
 
   function clear() {
     for (const sort of Object.values(groups)) for (const group of sort.values()) group.clearLayers();
     shown = null;
+    surveyed = false;
     fetchedAt = 0;
     counts = { recorded: 0, predicted: 0 };
     more = { recorded: 0, predicted: 0 };
+    kinds = {};
   }
 
   function draw(dimension, data) {
     clear();
     shown = dimension;
+    surveyed = true;
     fetchedAt = Date.now();
     state = data.prediction || 'unknown';
     for (const s of data.recorded || []) {
@@ -135,6 +149,9 @@
     }
     counts = { recorded: (data.recorded || []).length, predicted: (data.predicted || []).length };
     more = { recorded: data.recordedMore || 0, predicted: data.predictedMore || 0 };
+    for (const s of [...(data.recorded || []), ...(data.predicted || [])]) {
+      if (Object.hasOwn(KINDS, s.kind)) kinds[s.kind] = (kinds[s.kind] || 0) + 1;
+    }
     apply();
   }
 
@@ -142,8 +159,8 @@
   function apply() {
     for (const [sort, kinds] of Object.entries(groups)) {
       for (const [kind, group] of kinds) {
-        const known = Object.hasOwn(settings, kind);
-        const want = settings.on && settings[sort] && (!known || settings[kind]);
+        // A kind with no row of its own has no filter to be hidden by.
+        const want = on(sort) && (!Object.hasOwn(KINDS, kind) || on(kind));
         if (want && !map.hasLayer(group)) group.addTo(map);
         if (!want && map.hasLayer(group)) map.removeLayer(group);
       }
@@ -151,21 +168,37 @@
     paint();
   }
 
+  // Puts the rows in the panel while the service has structures and
+  // takes them out while it does not.
+  function panel() {
+    if (available === rows.size > 0) return;
+    if (!available) {
+      for (const row of rows.values()) row.remove();
+      rows.clear();
+      return;
+    }
+    ROWS.forEach(([id, label, swatch], at) => {
+      const row = app.layers.register({ group: 'structures', id, label, order: (at + 1) * 10, swatch });
+      row.onToggle(apply);
+      rows.set(id, row);
+    });
+  }
+
   function paint() {
-    el.filters.hidden = !available;
-    for (const [key, chip] of chips) {
-      chip.setAttribute('aria-pressed', String(settings[key]));
-      if (key !== 'on') chip.disabled = !settings.on;
+    panel();
+    if (!available) return;
+    for (const sort of SORTS) {
+      const row = rows.get(sort);
+      row.setCount(surveyed ? counts[sort] : null);
+      const why = sort === 'predicted' && surveyed ? WHY_NOT[state] : '';
+      row.setNote(why || (more[sort] > 0 ? `Showing ${fmt(counts[sort])} of ${fmt(counts[sort] + more[sort])}` : ''));
     }
-    for (const sort of ['recorded', 'predicted']) {
-      const chip = chips.get(sort);
-      if (!chip) continue;
-      const shownCount = shown ? fmt(counts[sort]) + (more[sort] > 0 ? '+' : '') : '';
-      chip.querySelector('.count').textContent = shownCount;
-      chip.title = more[sort] > 0 ? `Showing ${fmt(counts[sort])} of ${fmt(counts[sort] + more[sort])}` : '';
+    // With neither layer on there is nothing for a kind to filter.
+    const filtering = SORTS.some(on);
+    for (const kind of Object.keys(KINDS)) {
+      rows.get(kind).setCount(surveyed ? kinds[kind] || 0 : null);
+      rows.get(kind).setAvailable(filtering);
     }
-    const predicted = chips.get('predicted');
-    if (predicted && shown && WHY_NOT[state]) predicted.title = WHY_NOT[state];
   }
 
   async function load(dimension) {
@@ -223,18 +256,6 @@
     } else if (Date.now() - fetchedAt > REFRESH_MS && !document.hidden) {
       load(dimension);
     }
-  }
-
-  function save() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* not kept, still applied */ }
-  }
-
-  for (const [key, chip] of chips) {
-    chip.addEventListener('click', () => {
-      settings[key] = !settings[key];
-      save();
-      apply();
-    });
   }
 
   paint();

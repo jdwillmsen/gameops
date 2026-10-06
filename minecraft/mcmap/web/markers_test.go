@@ -50,9 +50,4 @@ func TestMarkerLayerIsLoadedAfterTheMapItBuildsOn(t *testing.T) {
 	if app < 0 || markers < app {
 		t.Errorf("index.html must load markers.js after app.js (found at %d and %d)", markers, app)
 	}
-	for _, kind := range []string{"waypoints", "beds", "containers", "mobs"} {
-		if !bytes.Contains(page, []byte(`data-marker="`+kind+`"`)) {
-			t.Errorf("index.html has no filter for %s", kind)
-		}
-	}
 }
