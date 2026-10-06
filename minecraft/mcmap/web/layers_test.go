@@ -74,7 +74,7 @@ func TestLayerPanelCarriesOverTheOldFilters(t *testing.T) {
 	for script, ids := range map[string][]string{
 		"live.js":       {"players", "hostile", "passive", "villager", "other"},
 		"markers.js":    {"waypoints", "beds", "containers", "mobs"},
-		"structures.js": {"recorded", "predicted", "fortress", "monument", "outpost", "witch_hut"},
+		"structures.js": {"recorded", "predicted", "candidate", "fortress", "monument", "outpost", "witch_hut"},
 	} {
 		body := read(t, script)
 		if !bytes.Contains(body, []byte("app.layers.register({ group: '"+strings.TrimSuffix(script, ".js")+"', id")) {

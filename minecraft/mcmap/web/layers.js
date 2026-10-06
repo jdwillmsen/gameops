@@ -32,12 +32,12 @@
   // Where each layer's script kept its filters before there was a panel,
   // as { <id>: boolean }. A row with no choice saved here takes the one
   // saved there, so nobody's filters reset. The structures also had one
-  // switch for the lot, and a viewer who had that off gets the two layers
-  // it hid switched off.
+  // switch for the lot, and a viewer who had that off gets the layers it
+  // hid, and the one added to them since, switched off.
   const LEGACY = {
     live: { key: 'mcmap.live', master: [] },
     markers: { key: 'mcmap.markers', master: [] },
-    structures: { key: 'mcmap.structures', master: ['recorded', 'predicted'] },
+    structures: { key: 'mcmap.structures', master: ['recorded', 'predicted', 'candidate'] },
   };
 
   function read(key) {
