@@ -2,10 +2,12 @@ package icons
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,13 +28,13 @@ func TestMobsAreEmptyWhileTheSourceFailsAndFillWhenItAnswers(t *testing.T) {
 	var calls atomic.Int64
 	answer := make(chan struct{})
 	m := &Mobs{Dir: t.TempDir(), Ref: testRef, Logger: quiet(), RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond,
-		Fetch: func(context.Context) (map[string][]byte, error) {
+		Fetch: func(context.Context) (Set, error) {
 			calls.Add(1)
 			select {
 			case <-answer:
-				return map[string][]byte{"cow": picture(t, 16, 16, red)}, nil
+				return Set{Mobs: map[string][]byte{"cow": picture(t, 16, 16, red)}}, nil
 			default:
-				return nil, errors.New("503 Service Unavailable")
+				return Set{}, errors.New("503 Service Unavailable")
 			}
 		}}
 	done := make(chan struct{})
@@ -59,7 +61,7 @@ func TestMobsAreEmptyWhileTheSourceFailsAndFillWhenItAnswers(t *testing.T) {
 func TestMobsGiveUpWhenToldToStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	m := &Mobs{Dir: t.TempDir(), Ref: testRef, Logger: quiet(), RetryMin: time.Hour,
-		Fetch: func(context.Context) (map[string][]byte, error) { return nil, errors.New("unreachable") }}
+		Fetch: func(context.Context) (Set, error) { return Set{}, errors.New("unreachable") }}
 	done := make(chan struct{})
 	go func() { m.Run(ctx); close(done) }()
 	cancel()
@@ -72,8 +74,14 @@ func TestMobsGiveUpWhenToldToStop(t *testing.T) {
 
 func filled(t *testing.T, dir, ref string) *Mobs {
 	t.Helper()
-	m := &Mobs{Dir: dir, Ref: ref, Logger: quiet(), Fetch: func(context.Context) (map[string][]byte, error) {
-		return map[string][]byte{"cow": picture(t, 16, 16, red), "pig": picture(t, 16, 16, blue), "mooshroom": picture(t, 16, 16, red)}, nil
+	m := &Mobs{Dir: dir, Ref: ref, Logger: quiet(), Fetch: func(context.Context) (Set, error) {
+		return Set{
+			Mobs:     map[string][]byte{"cow": picture(t, 16, 16, red), "pig": picture(t, 16, 16, blue), "mooshroom": picture(t, 16, 16, red)},
+			Pictures: map[string][]byte{"container/chest": picture(t, 16, 16, yellow), "bed/red": picture(t, 16, 16, red)},
+			Lang:     map[string]string{"entity.cow.name": "Cow", "tile.chest.name": "Chest"},
+			Entities: []string{"cow", "pig", "villager_v2"},
+			Missing:  []string{"bed/blue"},
+		}, nil
 	}}
 	m.Run(t.Context())
 	return m
@@ -87,10 +95,10 @@ func TestMobsAreNotFetchedAgainWhileTheVolumeHoldsThisPin(t *testing.T) {
 	// failure and not a wait for the retry after it.
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: func(context.Context) (map[string][]byte, error) {
+	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: func(context.Context) (Set, error) {
 		t.Error("the source was asked again with the volume intact")
 		cancel()
-		return nil, errors.New("not expected")
+		return Set{}, errors.New("not expected")
 	}}
 	again.Run(ctx)
 	if t.Failed() {
@@ -143,9 +151,9 @@ func TestMobsAreFetchedAgainWhenTheVolumeIsDamagedOrThePinMoves(t *testing.T) {
 			dir := t.TempDir()
 			harm(t, filled(t, dir, testRef).home())
 			var fetched atomic.Int64
-			m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: func(context.Context) (map[string][]byte, error) {
+			m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: func(context.Context) (Set, error) {
 				fetched.Add(1)
-				return map[string][]byte{"cow": picture(t, 16, 16, green)}, nil
+				return Set{Mobs: map[string][]byte{"cow": picture(t, 16, 16, green)}}, nil
 			}}
 			m.Run(t.Context())
 			if fetched.Load() != 1 {
@@ -173,4 +181,109 @@ func TestMobsAreFetchedAgainWhenTheVolumeIsDamagedOrThePinMoves(t *testing.T) {
 			t.Errorf("%d directories left on the volume, want only the current pin's", len(left))
 		}
 	})
+}
+
+func TestPicturesAndNamesAreEmptyUntilFetchedAndKeptOnTheVolumeAfter(t *testing.T) {
+	never := &Mobs{Dir: t.TempDir(), Ref: testRef, Logger: quiet()}
+	if version, keys := never.Pictures(); version != "" || len(keys) != 0 {
+		t.Errorf("a set that was never fetched lists pictures %v at version %q", keys, version)
+	}
+	if _, ok := never.Picture("container/chest"); ok {
+		t.Error("a picture was served before any was fetched")
+	}
+	// Names are never absent: unfetched, they are tidied ids.
+	if got := never.Names().Entity("villager_v2"); got != "Villager" {
+		t.Errorf("before any fetch a villager is %q", got)
+	}
+
+	dir := t.TempDir()
+	first := filled(t, dir, testRef)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: func(context.Context) (Set, error) {
+		t.Error("the source was asked again with the volume intact")
+		cancel()
+		return Set{}, errors.New("not expected")
+	}}
+	again.Run(ctx)
+	if t.Failed() {
+		return
+	}
+	for _, m := range []*Mobs{first, again} {
+		version, keys := m.Pictures()
+		if version == "" || len(keys) != 2 || keys[0] != "bed/red" || keys[1] != "container/chest" {
+			t.Errorf("pictures listed as %v at version %q", keys, version)
+		}
+		raw, ok := m.Picture("container/chest")
+		if !ok || colourOf(t, raw) != yellow {
+			t.Errorf("the chest read back wrong (held: %v)", ok)
+		}
+		if _, ok := m.Picture("bed/blue"); ok {
+			t.Error("a picture the fetch reported missing is served")
+		}
+		names := m.Names()
+		if names.Entity("cow") != "Cow" || names.Container("chest") != "Chest" || names.Entity("villager_v2") != "Villager" {
+			t.Errorf("names read back as %q, %q, %q", names.Entity("cow"), names.Container("chest"), names.Entity("villager_v2"))
+		}
+		// A type the samples define is in the table whether or not the
+		// language file names it.
+		if got := names.Table(nil).Entities; got["villager_v2"] != "Villager" || got["pig"] != "Pig" || got["cow"] != "Cow" {
+			t.Errorf("table entities = %v", got)
+		}
+	}
+	v1, _ := first.Pictures()
+	v2, _ := again.Pictures()
+	moved, _ := filled(t, t.TempDir(), "v10.0.0").Pictures()
+	if v1 != v2 || moved == v1 {
+		t.Errorf("picture versions: %q, then %q from the volume, and %q at another pin", v1, v2, moved)
+	}
+}
+
+func TestTheVolumeIsNotTrustedForWhatAnEarlierVersionOrADamagedIndexLeft(t *testing.T) {
+	rewrite := func(edit func(idx *index)) func(t *testing.T, home string) {
+		return func(t *testing.T, home string) {
+			raw, err := os.ReadFile(filepath.Join(home, indexFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var idx index
+			if err := json.Unmarshal(raw, &idx); err != nil {
+				t.Fatal(err)
+			}
+			edit(&idx)
+			if raw, err = json.Marshal(idx); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, indexFile), raw, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for name, harm := range map[string]func(t *testing.T, home string){
+		// What a version that fetched only mob icons wrote: complete as
+		// far as it knew, and holding no pictures or names at all.
+		"an index from before pictures and names": rewrite(func(idx *index) { idx.Format, idx.Pictures, idx.Lang = 0, nil, nil }),
+		"a name that is markup for a terminal":    rewrite(func(idx *index) { idx.Lang["entity.cow.name"] = "Cow\x1b[31m" }),
+		"a name too long to be one":               rewrite(func(idx *index) { idx.Lang["entity.cow.name"] = strings.Repeat("x", MaxNameLength+1) }),
+		"a key the language file has no such":     rewrite(func(idx *index) { idx.Lang["gui.ok"] = "OK" }),
+		"a picture key that is a path":            rewrite(func(idx *index) { idx.Pictures["../../etc/passwd"] = idx.Pictures["bed/red"] }),
+		"an entity type that is not one":          rewrite(func(idx *index) { idx.Entities = append(idx.Entities, "<script>") }),
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			harm(t, filled(t, dir, testRef).home())
+			var fetched atomic.Int64
+			m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: func(context.Context) (Set, error) {
+				fetched.Add(1)
+				return Set{Mobs: map[string][]byte{"cow": picture(t, 16, 16, green)}, Pictures: map[string][]byte{"container/chest": picture(t, 16, 16, green)}}, nil
+			}}
+			m.Run(t.Context())
+			if fetched.Load() != 1 {
+				t.Fatalf("the source was asked %d times, want 1", fetched.Load())
+			}
+			if raw, ok := m.Picture("container/chest"); !ok || colourOf(t, raw) != green {
+				t.Error("the chest is not the refetched picture")
+			}
+		})
+	}
 }

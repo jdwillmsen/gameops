@@ -6,13 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 )
 
 // Where the samples are published. The listing comes from the API host and
@@ -26,9 +30,9 @@ const (
 )
 
 // Bounds on one fetch. The real set is about 180 definitions of 30 KB at
-// most and 130 textures under 2 KB each; these are several times that, and
-// are here so a source that has gone wrong costs a bounded amount of memory
-// and time whatever it sends.
+// most, 130 textures under 2 KB each and a language file of 0.8 MB; these
+// are several times that, and are here so a source that has gone wrong
+// costs a bounded amount of memory and time whatever it sends.
 const (
 	maxListBytes       = 2 << 20
 	maxAtlasBytes      = 1 << 20
@@ -47,7 +51,8 @@ const (
 	fetchWorkers   = 6
 )
 
-// Source reads the mob icons at one pinned revision of the samples.
+// Source reads the mob icons, the marker pictures and the display names at
+// one pinned revision of the samples.
 type Source struct {
 	// Ref is the tag or commit every request names.
 	Ref     string
@@ -65,6 +70,28 @@ func NewClient() *http.Client {
 		Timeout:       requestTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+// errSettled marks an answer that asking again would not change: the pin
+// has no such file, or has one too large to be what was asked for. The mob
+// icons treat it as any other failure. A marker picture or the language
+// file is left out for it instead, so that a pin lacking one of them still
+// yields everything else.
+var errSettled = errors.New("the samples do not hold it at this pin")
+
+// Set is everything one fetch read.
+type Set struct {
+	// Mobs is each mob type's icon, by type without the minecraft: prefix.
+	Mobs map[string][]byte
+	// Pictures is each marker and structure picture, by its key.
+	Pictures map[string][]byte
+	// Lang is the display names the language file gave, by its own keys.
+	Lang map[string]string
+	// Entities is every entity type the samples define.
+	Entities []string
+	// Missing is what the samples did not hold in a usable form at this
+	// pin: picture keys, and the language file by its path.
+	Missing []string
 }
 
 // budget is how much one fetch may still download.
@@ -97,6 +124,9 @@ func (s *Source) get(ctx context.Context, address string, limit int64, total *bu
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("%s: %s: %w", req.URL.Path, resp.Status, errSettled)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", req.URL.Path, resp.Status)
 	}
@@ -105,7 +135,7 @@ func (s *Source) get(ctx context.Context, address string, limit int64, total *bu
 		return nil, err
 	}
 	if int64(len(body)) > limit {
-		return nil, fmt.Errorf("%s: over the %d byte limit", req.URL.Path, limit)
+		return nil, fmt.Errorf("%s: over the %d byte limit: %w", req.URL.Path, limit, errSettled)
 	}
 	if !total.take(int64(len(body))) {
 		return nil, errors.New("the icon source sent more than a whole fetch is allowed")
@@ -173,35 +203,40 @@ func (a atlas) path(name string, index int) string {
 }
 
 // Fetch downloads the icon of every mob type the samples define one for,
-// keyed by type without the minecraft: prefix. Which texture belongs to
+// the marker pictures and the display names. Which texture belongs to
 // which mob is read from the samples themselves: each client entity
 // definition names its spawn egg's entry in the item texture atlas, and the
 // atlas names the file. The names do not follow from the type (an
 // evocation_illager's egg is the evoker's, and a villager's is one of sixty
 // in a shared list), so none of them is guessed.
-func (s *Source) Fetch(ctx context.Context) (map[string][]byte, error) {
+//
+// The mob icons come whole or the fetch fails. A marker picture or the
+// language file that the pin does not hold, or holds in a form this
+// refuses, is left out and named in Missing; only a failure to reach the
+// source at all fails the fetch for them.
+func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 	total := &budget{left: maxTotalBytes}
 
 	names, err := s.list(ctx, total)
 	if err != nil {
-		return nil, fmt.Errorf("listing entity definitions: %w", err)
+		return Set{}, fmt.Errorf("listing entity definitions: %w", err)
 	}
 	rawAtlas, err := s.get(ctx, s.raw(atlasPath), maxAtlasBytes, total)
 	if err != nil {
-		return nil, fmt.Errorf("reading the item texture atlas: %w", err)
+		return Set{}, fmt.Errorf("reading the item texture atlas: %w", err)
 	}
 	var items atlas
 	if err := json.Unmarshal(stripComments(rawAtlas), &items); err != nil {
-		return nil, fmt.Errorf("reading the item texture atlas: %w", err)
+		return Set{}, fmt.Errorf("reading the item texture atlas: %w", err)
 	}
 
 	bodies, err := each(ctx, names, func(ctx context.Context, name string) ([]byte, error) {
 		return s.get(ctx, s.raw(entityDir+"/"+name), maxDefinitionBytes, total)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reading entity definitions: %w", err)
+		return Set{}, fmt.Errorf("reading entity definitions: %w", err)
 	}
 
 	// A mob can have several definitions, one per engine version it changed
@@ -244,10 +279,10 @@ func (s *Source) Fetch(ctx context.Context) (map[string][]byte, error) {
 		kindsOf[c.texture] = append(kindsOf[c.texture], kind)
 	}
 	if len(textures) == 0 {
-		return nil, errors.New("no entity definition names a spawn egg texture; the samples are not laid out as expected")
+		return Set{}, errors.New("no entity definition names a spawn egg texture; the samples are not laid out as expected")
 	}
 	if len(textures) > maxTextures {
-		return nil, fmt.Errorf("the samples name %d spawn egg textures, over the limit of %d", len(textures), maxTextures)
+		return Set{}, fmt.Errorf("the samples name %d spawn egg textures, over the limit of %d", len(textures), maxTextures)
 	}
 	images, err := each(ctx, textures, func(ctx context.Context, path string) ([]byte, error) {
 		body, err := s.get(ctx, s.raw("resource_pack/"+path+".png"), maxTextureBytes, total)
@@ -261,14 +296,72 @@ func (s *Source) Fetch(ctx context.Context) (map[string][]byte, error) {
 		return clean, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reading spawn egg textures: %w", err)
+		return Set{}, fmt.Errorf("reading spawn egg textures: %w", err)
 	}
-	out := map[string][]byte{}
+	out := Set{Mobs: map[string][]byte{}, Entities: slices.Sorted(maps.Keys(chosen))}
 	for path, kinds := range kindsOf {
 		for _, kind := range kinds {
-			out[kind] = images[path]
+			out.Mobs[kind] = images[path]
 		}
 	}
+
+	var missing sync.Mutex
+	absent := func(what string) {
+		missing.Lock()
+		defer missing.Unlock()
+		out.Missing = append(out.Missing, what)
+	}
+	wanted := pictures(items)
+	byKey := make(map[string]markerPicture, len(wanted))
+	keys := make([]string, 0, len(wanted))
+	for _, p := range wanted {
+		byKey[p.name] = p
+		keys = append(keys, p.name)
+	}
+	// Any bed the atlas does not list has no path to ask for.
+	for _, colour := range markers.Colours {
+		if _, listed := byKey["bed/"+colour]; !listed {
+			absent("bed/" + colour)
+		}
+	}
+	out.Pictures, err = each(ctx, keys, func(ctx context.Context, key string) ([]byte, error) {
+		p := byKey[key]
+		body, err := s.get(ctx, s.raw("resource_pack/"+p.path+".png"), maxTextureBytes, total)
+		if err == nil {
+			if p.sheet {
+				body, err = shulkerIcon(body)
+			} else {
+				body, err = Clean(body, 1, maxIconSide, false)
+			}
+			// A file that is there and is not a small picture stays so.
+			if err != nil {
+				err = fmt.Errorf("%s: %w: %w", p.path, err, errSettled)
+			}
+		}
+		if errors.Is(err, errSettled) {
+			absent(key)
+			return nil, nil
+		}
+		return body, err
+	})
+	if err != nil {
+		return Set{}, fmt.Errorf("reading marker pictures: %w", err)
+	}
+	maps.DeleteFunc(out.Pictures, func(_ string, body []byte) bool { return body == nil })
+
+	rawLang, err := s.get(ctx, s.raw(langPath), maxLangBytes, total)
+	if err == nil {
+		if out.Lang, err = parseLang(rawLang); err != nil {
+			err = fmt.Errorf("%w: %w", err, errSettled)
+		}
+	}
+	switch {
+	case errors.Is(err, errSettled):
+		absent(langPath)
+	case err != nil:
+		return Set{}, fmt.Errorf("reading the language file: %w", err)
+	}
+	slices.Sort(out.Missing)
 	return out, nil
 }
 
