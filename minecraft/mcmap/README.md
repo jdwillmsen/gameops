@@ -564,6 +564,232 @@ To check the rules again after a game update, against a copy of a world:
 MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/structures/
 ```
 
+## Biomes
+
+The overlay shows the biomes the world has actually stored, chunk by
+chunk. Nothing is worked out from the seed, so there is nothing to draw
+where no chunk has been generated, and nothing that can be wrong where one
+has.
+
+**Where they are in the database.** A chunk's record 43 (`Data3D`, key
+`<x><z>[<dimension>]` + `0x2b`) is its heightmap followed by its biomes.
+
+- The heightmap is 256 little-endian 16-bit values, one per column at index
+  `z*16+x`: the height of the first air above the column's highest block,
+  counted from the bottom of the dimension. Over an ocean it is 127: the
+  water's surface is y 62 and the overworld starts at y -64.
+- The biomes are one palettised storage per 16 blocks of height, bottom
+  first: 24 in the overworld, 8 in the nether, 16 in the end. Each starts
+  with a byte whose top seven bits are the bits per entry. `0` is one biome
+  for all 4,096 blocks, and a 32-bit id follows. `127` is "the same as the
+  storage below", and nothing follows. Anything else is 4,096 indices
+  packed low bits first into 32-bit words, as many to a word as fit whole,
+  then a 32-bit palette length and that many 32-bit ids. An entry's index
+  is `x<<8 | z<<4 | y`.
+
+This was worked out from the Dragonfly server's reader of the same format
+and then checked against the FWB world: all 144,163 records parse to their
+last byte with exactly 24, 8 or 16 storages; neighbouring chunks' edges
+agree in this index order and not the transposed one (16,862 mismatched
+edge columns in 1.37 million against 251,230; heights differ by 0.9 a
+column against 5.0); and the deep dark is found only in the bottom nine
+storages.
+
+**What a chunk is reduced to.** One biome per block column: the biome of
+the column's highest block, which is what a player standing there sees and
+what a map looking down should show. A fixed height would not do: 53% of
+the overworld's columns change biome on the way down, to a cave biome or
+the deep dark, and the biome at y 64 differs from the surface's in 9% of
+them. It is kept per column and not per 4 by 4 cell because Bedrock's
+biome edges run block by block, through 8% of such cells; a recorded witch
+hut on the FWB world has the swamp's edge running under it. So the cave
+biomes appear only where they come to the surface, and searching for one
+finds those places and not the caves below.
+
+A chunk that is one biome throughout, as 72% are, is one byte; any other
+is 256. The whole FWB world is 11 MB on the volume and about 30 MB in
+memory with its search index.
+
+**Names.** The ids are named from the biome list in Mojang's
+`bedrock-samples` (`metadata/vanilladata_modules/mojang-biomes.json`) at the
+revision the mob icons are pinned to: 89 biomes. Bedrock's identifiers are
+older than the names the game shows (`mushroom_island` is Mushroom Fields,
+`hell` is Nether Wastes), so each has both, and either finds it. An id the
+list does not have is kept, drawn in a colour of its own and listed as
+`unknown_<id>`; it is counted in `mcmap_biomes_kinds{listed="unknown"}`,
+which is the sign that the list needs moving on after a game update.
+
+**The reading.** After the tiles and before the structure survey, each
+cycle reads every key once more, through hard links opened read-only as
+the other readers' are. On the FWB world that takes about ten seconds at a
+whole CPU, as long as each of the other three passes; jumping from one
+chunk's biome record to the next was measured and is no faster, because
+those records are themselves most of what there is to read: 412 MB once
+unpacked. So it is not
+done every cycle. Biomes only appear when chunks are generated, and the
+chunk count already says whether any were: while the count is what it was
+at the last reading, the world is not read, for up to an hour. (The hour is
+for the chunks, about 9,000 here, that are counted while they hold no
+biome record, and may be given one later without the count moving.) A reading is given up after two minutes; one that fails or is
+given up is logged and counted and stops nothing else, and the last good
+one goes on being served.
+
+The reading is saved to `DATA_DIR/biomes/biomes.bin`, written whole and
+then renamed, so a restart serves the overlay from its first request. A
+file that is damaged, or of another version, is logged and ignored.
+
+**Tiles.** `GET /api/biomes/tiles/<dimension>/<zoom>/<x>/<y>.png` is
+addressed exactly as the terrain tiles are, at every zoom from -12 to 4,
+so the page lays one over the other with the same options. A pixel is the
+biome of the column under its middle; ungenerated ground is transparent,
+and a tile with nothing in it is a 404. Tiles are drawn when asked for and
+not kept: one takes 0.3 to 2 ms from memory and is 2 to 7 KB. `biome=<name>`
+draws that biome in its colour and everything else as a translucent dark
+grey, which is how one biome is picked out. `GET /api/biomes` gives the
+colours for the legend and a `version`; a tile asked for with `v=<version>`
+is kept by the browser for good.
+
+**Finding one.** Chunks holding a biome that touch, or have one chunk
+between them, are one *stretch* of it: joined only edge to edge, a single
+island comes out as a dozen. `GET /api/biomes/nearest` gives the nearest
+stretches of a biome, each as the nearest column that really is that
+biome, with the stretch's area and box; `GET /api/biomes/region` gives the
+stretch a block belongs to as rows of chunks, for an outline.
+
+**Limits.** A million chunks; 250,000 of them kept column by column, past
+which a chunk is kept as its commonest biome; 254 different biomes a
+dimension, past which the rest share one colour; two million chunk-and-biome
+pairs indexed for search. Whatever a limit leaves out is counted in
+`mcmap_biomes_skipped`. A record that does not parse to its last byte is
+skipped and counted.
+
+**From Go.** `(*biomes.Store).At(dimension, x, z)` is the biome at a block
+as of the last completed reading, and false where no chunk has been
+generated. It is what anything else in the service asks.
+
+To check the reading against a copy of a world, and to measure it:
+
+```sh
+MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/biomes/
+```
+
+On the FWB world of 2026-10-05 all 11 ocean monuments stand in a deep
+ocean, the witch hut in a swamp, and the fortresses in nether biomes.
+
+## Search
+
+`GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>` looks the text up,
+without regard to case, in everything the map holds that has a name:
+biomes (by either name), recorded structures, the world spawn, beds,
+containers (by their name or kind), named mobs (by name or type), and the
+waypoints of the player asking. Hits in the dimension asked from come
+first, nearest first, each with its distance; hits in the other dimensions
+follow without one. An answer is at most 50 hits and says how many more
+there were. Of each matching biome only the three nearest stretches are
+offered, so that a common one does not fill the answer.
+
+Waypoints are searched for the player the session names and nobody else,
+by the same call to the agent that `/api/waypoints` makes. `waypoints` in
+the answer says whether they were: `searched`, `unavailable` while the
+agent cannot be read, or `off`.
+
+## Slime chunks
+
+On Bedrock a slime chunk follows from its chunk coordinates and nothing
+else: the same chunks in every world, whatever the seed. So nothing is
+served, and the page works them out. For chunk `cx`, `cz` (a block's
+coordinates divided by 16, rounded down):
+
+1. `seed = (cx * 0x1f1f1f1f) XOR cz`, in unsigned 32-bit arithmetic.
+2. Seed a Mersenne Twister (MT19937) with it and draw one 32-bit number.
+3. It is a slime chunk when that number is a multiple of 10.
+
+Only the first number is drawn, which needs the seeded state's words 0, 1
+and 397 and no more:
+
+```js
+function isSlimeChunk(cx, cz) {
+  const state = new Uint32Array(398);
+  state[0] = Math.imul(cx, 0x1f1f1f1f) ^ cz;
+  for (let i = 1; i < 398; i++) {
+    state[i] = Math.imul(1812433253, state[i - 1] ^ (state[i - 1] >>> 30)) + i;
+  }
+  const y = (state[0] & 0x80000000) | (state[1] & 0x7fffffff);
+  let v = state[397] ^ (y >>> 1) ^ (y & 1 ? 0x9908b0df : 0);
+  v ^= v >>> 11;
+  v ^= (v << 7) & 0x9d2c5680;
+  v ^= (v << 15) & 0xefc60000;
+  v ^= v >>> 18;
+  return (v >>> 0) % 10 === 0;
+}
+```
+
+`internal/slime` is the same in Go, with the vectors to check another
+implementation against. Chunks -1, 0 and 109, 3 are slime chunks; 0, 0 and
+110, 3 are not; 16,304 of the 160,000 chunks from -200 to 199 on both axes
+are; and the 16 by 16 chunks from -8 to 7, north at the top and west on the
+left, are:
+
+```
+...............#
+..#.............
+............#...
+........#.......
+#.............#.
+...............#
+.....#..##......
+#...##..........
+..#....#...#....
+...........#....
+....#...........
+.#..............
+#.......#.......
+..............#.
+.#......#.......
+............#...
+```
+
+The function is the one the game's own was found to be when it was taken
+apart, and the one Bedrock slime finders use. It was also set beside the
+FWB world: of the nine chunks holding a slime below y 40 and outside a
+trial chamber, eight are slime chunks, where one in ten would be by
+chance. Slimes spawn in a slime chunk below y 40.
+
+The world spawn is served with the overworld's structures.
+
+## Trails
+
+A trail is where a player has been: a point each time they have moved four
+blocks, taken from the live layer once a second. A new line starts where
+the player was not seen for 30 seconds, changed dimension, or moved more
+than 256 blocks between two samples, so a logout, a portal or a teleport
+is a gap and not a straight line across the map. Mobs are not recorded.
+
+Three limits are enforced, and published in `mcmap_trails_limit`:
+
+- **Age.** No point is older than `TRAILS_MAX_AGE` (24 hours). Old points
+  go every second, and again whenever trails are asked for.
+- **Count.** A player keeps at most `TRAILS_MAX_POINTS` points (5,000:
+  twenty kilometres at one point every four blocks); the oldest go first.
+- **Players.** At most 64 players have a trail. The live list is text the
+  game server's console wrote, so a 65th name pushes out the trail of
+  whoever was seen longest ago.
+
+At the defaults that is about 10 MB at most.
+`mcmap_trails_points_dropped_total{reason}` counts what each limit let go,
+and `mcmap_trails_oldest_point_age_seconds` staying under the age limit is
+the evidence that it holds.
+
+**Trails do not survive a restart.** They are in memory only, on purpose:
+they are the one thing the map holds about a person rather than the world,
+and on the volume they would be a record of who was where and when that
+outlives the process, beside the retained copies of the world. What a
+restart costs is lines the players redraw by playing.
+
+Every logged-in player already sees where every other player is, live, so
+`GET /api/trails` serves every player's trail on the same terms. An answer
+carries at most 20,000 points, each player's newest.
+
 ## Page controls
 
 **The layer panel.** Every layer's switch is a row in one panel over the
@@ -681,7 +907,8 @@ ends in the same `Sessions.Issue`.
 Two listeners keep the internet away from what is not for it:
 
 - `HTTP_ADDR` is what a route may publish: the page, the login endpoints,
-  and the map API, tiles, markers and live stream behind the session.
+  and the map API, tiles, markers, biomes, search, trails and live stream
+  behind the session.
 - `INTERNAL_ADDR` is for the cluster only: `/metrics`, and the claims and
   revocations the agent reports.
 
@@ -715,6 +942,10 @@ Two listeners keep the internet away from what is not for it:
 | `ICONS_REF` | no | the commit tagged `v1.26.50.4` | Tag or commit of Mojang's `bedrock-samples` the mob icons are fetched at. A commit cannot move; a tag can |
 | `STRUCTURES_ENABLED` | no | `true` | `false` reads no structures and does not serve `/api/structures` |
 | `STRUCTURE_SEED` | no | the low 32 bits of the seed in `level.dat` | The 32 bits structure placement is seeded with, 0 to 4294967295, for a world whose `level.dat` does not hold them. As secret as the seed |
+| `BIOMES_ENABLED` | no | `true` | `false` reads no biomes and does not serve `/api/biomes` or its tiles; search then finds no biomes |
+| `TRAILS_ENABLED` | no | `true` | `false` keeps no player positions and does not serve `/api/trails`. Trails also need `LIVE_ENABLED` |
+| `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h` |
+| `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player; 10 to 50000 |
 
 ## Endpoints
 
@@ -733,6 +964,13 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Not served with `BIOMES_ENABLED=false`, like the four below |
+| `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
+| `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
+| `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
+| `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
+| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>` | Session required. `hits`, each `kind` (`biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z` |
+| `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`. 400 for an unknown dimension. Not served with `TRAILS_ENABLED=false` or `LIVE_ENABLED=false` |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -792,6 +1030,16 @@ opens at the same place.
 | `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total` | Whether the survey is running |
 | `mcmap_structures_villages_skipped{reason}` | Villages left out: `empty` (counted by the game, no villagers), `malformed`, `unknown` (a key this version does not know), `limit` |
 | `mcmap_structures_village_read_duration_seconds`, `mcmap_structures_village_read_failures_total`, `mcmap_structures_villages_last_success_timestamp_seconds` | How long the village records took to read; surveys that could not read them and kept the villages of the one before; and the snapshot the villages being served came from |
+| `mcmap_biomes_chunks{dimension}` | Chunks whose biomes are held |
+| `mcmap_biomes_kinds{listed}` | Different biomes held, `known` to this version's list or `unknown`. Unknown above zero means the list is behind the game |
+| `mcmap_biomes_skipped{reason}` | What the last reading left out or cut down: `malformed`, `out_of_range`, `limit`, `coarsened`, `kinds`, `unindexed` |
+| `mcmap_biomes_readings_total{result}` | Cycles by what became of the biomes: `read`, `unchanged` (nothing was generated, so the world was not read), `failed` |
+| `mcmap_biomes_last_success_timestamp_seconds`, `mcmap_biomes_duration_seconds` | The snapshot the biomes served were read from, and how long that reading took |
+| `mcmap_biomes_save_failures_total` | Readings that could not be written to the volume |
+| `mcmap_trails_points`, `mcmap_trails_players` | Trail points held in memory, and players with a trail |
+| `mcmap_trails_limit{limit}` | The retention in force: `age_seconds`, `points_per_player`, `players` |
+| `mcmap_trails_oldest_point_age_seconds` | Age of the oldest trail point held. It stays under the age limit |
+| `mcmap_trails_points_dropped_total{reason}` | Trail points let go: `age`, `count`, `players` |
 
 ## Build and test
 
