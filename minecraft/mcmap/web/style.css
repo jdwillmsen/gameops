@@ -92,6 +92,7 @@ input[type="number"] { width: 6.5rem; }
 .search-panel li[aria-selected="true"] { border-color: var(--accent); }
 .search-panel .kind { color: var(--dim); font-size: 0.85em; align-self: center; }
 .search-panel .name { min-width: 0; overflow-wrap: anywhere; }
+.search-panel .plain .name { grid-column: 1 / -1; }
 .search-panel .where { grid-column: 1 / -1; color: var(--dim); font-size: 0.85em; font-variant-numeric: tabular-nums; }
 .search-note { margin: 0; padding: 0.4rem 0.65rem; color: var(--dim); }
 
