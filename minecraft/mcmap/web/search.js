@@ -31,7 +31,7 @@
   const KINDS = {
     biome: 'Biome',
     structure: 'Structure',
-    spawn: 'Spawn',
+    spawn: 'World spawn',
     bed: 'Bed',
     container: 'Container',
     mob: 'Named mob',
@@ -59,12 +59,24 @@
     return node;
   };
 
-  // What a hit is, beyond its name, in words: the server sends a mob's
-  // type and a container's kind as the game's identifiers.
-  function detailOf(hit) {
-    const detail = str(hit.detail).replace(/_/g, ' ');
-    if (!detail || hit.kind === 'structure') return '';
-    return detail.toLowerCase() === str(hit.name).toLowerCase() ? '' : detail;
+  const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+  // What a hit is listed as: the most particular thing known of it first,
+  // which is the name a player gave it, or failing that what sort of
+  // thing it is. The server sends a mob's type and a container's kind as
+  // the game's identifiers; a structure's says only what its name does.
+  function titleOf(hit) {
+    const name = str(hit.name);
+    const type = hit.kind === 'structure' ? '' : str(hit.detail).replace(/_/g, ' ');
+    if (!name) return type || KINDS[hit.kind] || 'Place';
+    return type && !same(type, name) ? `${name} (${type})` : name;
+  }
+
+  // The small label beside it, or none where it would only repeat the
+  // title: a bed is listed as "Bed", once.
+  function kindOf(hit, title) {
+    const kind = KINDS[hit.kind] || 'Place';
+    return same(kind, title) ? '' : kind;
   }
 
   function whereOf(hit) {
@@ -102,12 +114,11 @@
       const item = document.createElement('li');
       item.id = `search-hit-${i}`;
       item.setAttribute('role', 'option');
-      const detail = detailOf(hit);
-      item.append(
-        text('span', 'kind', KINDS[hit.kind] || 'Place'),
-        text('span', 'name', detail ? `${hit.name} (${detail})` : hit.name),
-        text('span', 'where', whereOf(hit)),
-      );
+      const title = titleOf(hit);
+      const kind = kindOf(hit, title);
+      if (kind) item.append(text('span', 'kind', kind));
+      else item.className = 'plain';
+      item.append(text('span', 'name', title), text('span', 'where', whereOf(hit)));
       item.addEventListener('click', () => choose(i));
       return item;
     }));
@@ -154,7 +165,7 @@
     if (request !== mine) return;
     request = null;
     const list = (Array.isArray(data.hits) ? data.hits : [])
-      .filter((h) => h && str(h.name) !== '' && str(h.dimension) !== '' && Number.isFinite(h.x) && Number.isFinite(h.z));
+      .filter((h) => h && str(h.dimension) !== '' && Number.isFinite(h.x) && Number.isFinite(h.z));
     const notes = [];
     if (list.length === 0) notes.push(`Nothing on the map is called “${query}”.`);
     if (data.more > 0) notes.push(`${fmt(data.more)} more not shown. Type more to narrow it down.`);
@@ -177,7 +188,7 @@
       interactive: false,
       keyboard: false,
       zIndexOffset: 1000,
-    }).bindTooltip(text('span', '', hit.name), { permanent: true, direction: 'top', offset: [0, -14], className: 'marker-tip' });
+    }).bindTooltip(text('span', '', titleOf(hit)), { permanent: true, direction: 'top', offset: [0, -14], className: 'marker-tip' });
     layer.addTo(map);
     found = { layer, dimension: hit.dimension };
     foundTimer = setTimeout(unmark, FOUND_MS);

@@ -14,8 +14,10 @@ func TestSearchShowsEveryHitAsText(t *testing.T) {
 	loadedAfterThePanel(t, "search.js")
 	for _, need := range []string{
 		"node.textContent = s;",
-		"text('span', 'name', detail ? `${hit.name} (${detail})` : hit.name),",
-		".bindTooltip(text('span', '', hit.name),",
+		"item.append(text('span', 'name', title), text('span', 'where', whereOf(hit)));",
+		".bindTooltip(text('span', '', titleOf(hit)),",
+		// A hit whose name is its kind says so once.
+		"return same(kind, title) ? '' : kind;",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("search.js no longer has %s", need)

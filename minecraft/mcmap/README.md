@@ -816,7 +816,10 @@ agent cannot be read, or `off`.
 **On the page.** One box in the bar. It asks 300 ms after the last
 keystroke, from the middle of the view, and gives up the request it has out
 when another replaces it. Each hit is listed as the server ordered them,
-with what it is, where, and how far, or which other dimension it is in.
+with what it is, where, and how far, or which other dimension it is in. A
+hit is titled by the name a player gave it, with its type after, or by its
+type alone; where that says the same as its kind, as for a bed, the kind
+is not said twice.
 The arrow keys move through the list, Enter chooses and Escape closes it.
 Choosing a hit takes the map there, changing dimension if it has to, and
 rings the spot for twenty seconds; a biome hit also turns the overlay on
