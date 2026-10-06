@@ -184,3 +184,28 @@ func TestScan_SaysWhichNamedMobsAreBabies(t *testing.T) {
 		t.Errorf("babies = %v, want %v", babies, want)
 	}
 }
+
+// A colour is a dye number. A record holding something else under that
+// name says nothing about the bed's colour, and must not be read as the
+// first of them.
+func TestScan_ABedWhoseColourIsNotANumberHasNone(t *testing.T) {
+	w, _ := scanOf(t, blockEntities(t, 0, 0, 0,
+		map[string]any{"id": "Bed", "x": int32(1), "y": int32(64), "z": int32(1), "color": "red"},
+		map[string]any{"id": "Bed", "x": int32(3), "y": int32(64), "z": int32(1), "color": float32(14)},
+		map[string]any{"id": "Bed", "x": int32(5), "y": int32(64), "z": int32(1), "color": int64(14)},
+		map[string]any{"id": "Bed", "x": int32(7), "y": int32(64), "z": int32(1), "color": []any{}},
+		map[string]any{"id": "Bed", "x": int32(9), "y": int32(64), "z": int32(1), "color": int32(-1)},
+		map[string]any{"id": "Bed", "x": int32(11), "y": int32(64), "z": int32(1), "color": int32(16)},
+		// Each width of whole number the game might write it at.
+		map[string]any{"id": "Bed", "x": int32(13), "y": int32(64), "z": int32(1), "color": int16(15)},
+		map[string]any{"id": "Bed", "x": int32(15), "y": int32(64), "z": int32(1), "color": int32(0)},
+	))
+	got := map[int32]string{}
+	for _, m := range w[chunks.Overworld].Beds {
+		got[m.X] = m.Colour
+	}
+	want := map[int32]string{1: "", 3: "", 5: "", 7: "", 9: "", 11: "", 13: "black", 15: "white"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("bed colours by x = %v, want %v", got, want)
+	}
+}
