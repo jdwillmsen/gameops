@@ -856,7 +856,10 @@
   }
 
   function ring() {
-    const held = picked && picked.state === 'live' ? entities.get(picked.key) : null;
+    const found = picked && picked.state === 'live' ? entities.get(picked.key) : null;
+    // A layer switched off takes its markers off the map, and a ring left
+    // behind would circle nothing. The card goes on reporting the entity.
+    const held = found && shown(found.category) ? found : null;
     if (!held) {
       halo.remove();
       return;
