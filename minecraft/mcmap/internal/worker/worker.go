@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
@@ -76,6 +77,12 @@ type Surveyor interface {
 	Take(ctx context.Context, worldDir string, at time.Time) (structures.Survey, error)
 }
 
+// BiomeReader reads the biomes of a freshly mirrored world. chunks is how
+// many chunks the count found in it, or -1 if nothing counted them.
+type BiomeReader interface {
+	Extract(ctx context.Context, dbDir string, at time.Time, chunks int) (biomes.Stats, error)
+}
+
 type Syncer interface {
 	Sync(ctx context.Context) (mirror.Stats, error)
 }
@@ -109,6 +116,9 @@ type Worker struct {
 	// snapshot. SurveyTimeout bounds one reading; zero means no bound.
 	Structures    Surveyor
 	SurveyTimeout time.Duration
+	// Biomes, if set, reads the world's biomes after every snapshot that
+	// has generated something new. It bounds its own time.
+	Biomes BiomeReader
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -278,6 +288,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 		w.Status.MarkRendered(dimension, now)
 	}
 	w.Status.MarkProblem(problem)
+	w.biomes(ctx, now, report, counted)
 	w.survey(ctx, now)
 	return Applied
 }
@@ -383,5 +394,37 @@ func (w *Worker) survey(ctx context.Context, now time.Time) {
 	w.Logger.Info("structures surveyed", "recorded", recorded, "predicted", predicted,
 		"seed", s.Check.State, "agree", s.Check.Agree, "disagree", s.Check.Disagree, "findings", s.Check.Total,
 		"areas", s.Areas, "malformed", s.Malformed, "unknown", s.Unknown, "over_limit", s.OverLimit,
+		"seconds", time.Since(started).Seconds())
+}
+
+// biomes runs after the count, the retained copy and the tiles, none of
+// which wait on an overlay, and before the survey, so that whatever the
+// survey works out can ask what biome a block is in as of this snapshot. A
+// reading that fails or runs out of time costs none of them: the page
+// keeps the biomes of the last one that worked.
+func (w *Worker) biomes(ctx context.Context, now time.Time, r chunks.Report, counted bool) {
+	if w.Biomes == nil {
+		return
+	}
+	total := -1
+	if counted {
+		total = 0
+		for _, n := range r.Present {
+			total += n
+		}
+	}
+	started := time.Now()
+	stats, err := w.Biomes.Extract(ctx, filepath.Join(w.MirrorDir, w.Level, "db"), now, total)
+	if err != nil {
+		w.Logger.Error("biomes not read", "error", err)
+		return
+	}
+	if stats.Unchanged {
+		w.Logger.Info("biomes unchanged: nothing generated since the last reading", "chunks", stats.Chunks)
+		return
+	}
+	w.Logger.Info("biomes read", "chunks", stats.Chunks, "kinds", stats.Kinds, "unknown", stats.Unknown,
+		"malformed", stats.Malformed, "out_of_range", stats.OutOfRange, "over_limit", stats.OverLimit,
+		"coarsened", stats.Coarsened, "kinds_left_out", stats.KindsLeftOut, "unindexed", stats.Unindexed,
 		"seconds", time.Since(started).Seconds())
 }
