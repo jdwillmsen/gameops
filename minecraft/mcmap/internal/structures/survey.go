@@ -52,6 +52,22 @@ var (
 		Name: "mcmap_structures_survey_failures_total",
 		Help: "Surveys that could not read the world.",
 	})
+	metricVillagesSkipped = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mcmap_structures_villages_skipped",
+		Help: "Villages left out of the last survey, by reason: empty (counted by the game, no villagers), malformed, unknown (a key this version does not know), or limit.",
+	}, []string{"reason"})
+	metricVillageSeconds = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mcmap_structures_village_read_duration_seconds",
+		Help: "How long the last successful read of the village records took.",
+	})
+	metricVillagesAt = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mcmap_structures_villages_last_success_timestamp_seconds",
+		Help: "The snapshot the villages being served were read from. It falls behind the survey's while the village records cannot be read.",
+	})
+	metricVillageFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_structures_village_read_failures_total",
+		Help: "Surveys that could not read the village records in time and kept the villages of the one before.",
+	})
 )
 
 // Bounds on one survey. The FWB world holds 1,274 areas in 27 structures;
@@ -80,6 +96,10 @@ const (
 	// every one of them, shown or not.
 	maxSites    = 20_000
 	maxFindings = 50
+	// villageTimeout is how long the village records may take to read.
+	// They are under one prefix and take milliseconds; this is what keeps
+	// a world that has made them enormous from holding up the cycle.
+	villageTimeout = 10 * time.Second
 )
 
 // How far a seed has been checked against the world.
@@ -142,6 +162,12 @@ type Survey struct {
 	HasStructureSeed bool
 	// Areas is how many recorded areas were read; the rest were left out.
 	Areas, Malformed, Unknown, OverLimit int
+	// Villages is what the village records came to.
+	Villages VillageStats
+
+	// Every village found, before any layer's limit, for the next survey
+	// to fall back on.
+	villages map[chunks.Dimension][]Structure
 }
 
 // Surveyor reads the world's structures once per snapshot and keeps the
@@ -156,10 +182,13 @@ type Surveyor struct {
 	// StructureSeed, when set, is used in place of the low half of the
 	// seed in level.dat. It is checked against the world the same way.
 	StructureSeed *uint32
-	Logger        *slog.Logger
+	// VillageTimeout bounds the read of the village records within a
+	// survey; zero means ten seconds.
+	VillageTimeout time.Duration
+	Logger         *slog.Logger
 
-	// Limits, for tests; zero means maxAreas and MaxPerLayer.
-	areaLimit, layerLimit int
+	// Limits, for tests; zero means maxAreas, MaxPerLayer and maxVillages.
+	areaLimit, layerLimit, villageLimit int
 
 	mu       sync.Mutex
 	last     Survey
@@ -192,6 +221,10 @@ func (s *Surveyor) Take(ctx context.Context, worldDir string, at time.Time) (Sur
 	s.mu.Unlock()
 
 	export(survey)
+	if v := survey.Villages; !v.Stale {
+		metricVillagesAt.Set(float64(at.Unix()))
+		s.Logger.Info("villages read", "found", v.Found, "empty", v.Empty, "malformed", v.Malformed, "unknown", v.Unknown, "over_limit", v.OverLimit)
+	}
 	metricSurveyAt.Set(float64(at.Unix()))
 	metricSurveySeconds.Set(time.Since(started).Seconds())
 	switch {
@@ -271,6 +304,9 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	for _, d := range chunks.Dimensions {
 		recorded[d] = assemble(pieces[d])
 	}
+	if survey.villages, survey.Villages, err = s.readVillages(ctx, db); err != nil {
+		return Survey{}, err
+	}
 
 	predicted := map[chunks.Dimension][]Prediction{}
 	more := map[chunks.Dimension]int{}
@@ -294,7 +330,9 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	}
 
 	for _, d := range chunks.Dimensions {
-		layer := Layer{Recorded: recorded[d]}
+		// Villages come after the structures the seed is checked against,
+		// and are the first to go where a layer is cut short.
+		layer := Layer{Recorded: append(slices.Clip(recorded[d]), survey.villages[d]...)}
 		if len(layer.Recorded) > layerLimit {
 			layer.RecordedMore = len(layer.Recorded) - layerLimit
 			layer.Recorded = layer.Recorded[:layerLimit]
@@ -307,6 +345,39 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		survey.Layers[d] = layer
 	}
 	return survey, nil
+}
+
+// readVillages reads the village records within their own time. Running out
+// of it, or failing to read them, is not the survey's failure: the villages
+// of the last survey stand, and everything else is as fresh as it would be.
+func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks.Dimension][]Structure, VillageStats, error) {
+	limit, timeout := s.villageLimit, s.VillageTimeout
+	if limit == 0 {
+		limit = maxVillages
+	}
+	if timeout == 0 {
+		timeout = villageTimeout
+	}
+	started := time.Now()
+	within, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	found, stats, err := readVillages(within, db, limit)
+	if err == nil {
+		metricVillageSeconds.Set(time.Since(started).Seconds())
+		return found, stats, nil
+	}
+	if ctx.Err() != nil {
+		// The survey itself was stopped, which is its failure to report.
+		return nil, VillageStats{}, ctx.Err()
+	}
+	metricVillageFailures.Inc()
+	s.mu.Lock()
+	last := s.last
+	s.mu.Unlock()
+	stats = last.Villages
+	stats.Stale = true
+	s.Logger.Error("villages not read; those of the last survey are kept", "error", err, "kept", stats.Found)
+	return last.villages, stats, nil
 }
 
 // seed is the 32 bits structure placement is seeded with. The game uses the
@@ -464,4 +535,8 @@ func export(survey Survey) {
 	metricSkipped.WithLabelValues("malformed").Set(float64(survey.Malformed))
 	metricSkipped.WithLabelValues("unknown").Set(float64(survey.Unknown))
 	metricSkipped.WithLabelValues("limit").Set(float64(survey.OverLimit))
+	metricVillagesSkipped.WithLabelValues("empty").Set(float64(survey.Villages.Empty))
+	metricVillagesSkipped.WithLabelValues("malformed").Set(float64(survey.Villages.Malformed))
+	metricVillagesSkipped.WithLabelValues("unknown").Set(float64(survey.Villages.Unknown))
+	metricVillagesSkipped.WithLabelValues("limit").Set(float64(survey.Villages.OverLimit))
 }
