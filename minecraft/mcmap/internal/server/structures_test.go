@@ -41,7 +41,12 @@ func surveyed() *fakeStructures {
 				PredictedMore: 3,
 			},
 		},
-		Check:            structures.Check{State: structures.SeedVerified, Agree: 19, Findings: []string{"fortress predicted at nether -600, -2808"}, Total: 1},
+		Check: structures.Check{State: structures.SeedVerified, Agree: 19, Findings: []string{"fortress predicted at nether -600, -2808"}, Total: 1,
+			Kinds: map[structures.Kind]structures.KindCheck{
+				structures.Fortress: {State: structures.SeedVerified, Agree: 11, Built: 8, Empty: 1, Findings: 1},
+				structures.Monument: {State: structures.SeedVerified, Agree: 11},
+				structures.WitchHut: {State: structures.SeedUnverified, Agree: 1},
+			}},
 		Level:            leveldat.Level{Seed: secretSeed, SpawnX: 40, SpawnZ: -72, SpawnY: 32767},
 		HasLevel:         true,
 		StructureSeed:    0x55667788,
@@ -56,7 +61,12 @@ type structuresResponse struct {
 	Predicted     []structures.Prediction `json:"predicted"`
 	PredictedMore int                     `json:"predictedMore"`
 	Prediction    string                  `json:"prediction"`
-	Spawn         *struct {
+	Kinds         map[structures.Kind]struct {
+		State    string `json:"state"`
+		Agree    int    `json:"agree"`
+		Disagree int    `json:"disagree"`
+	} `json:"kinds"`
+	Spawn *struct {
 		X, Z int32
 		Y    *int32
 	} `json:"spawn"`
@@ -119,6 +129,10 @@ func TestStructuresKeepRecordedAndPredictedApartByDimension(t *testing.T) {
 	if len(nether.Predicted) != 2 || nether.Predicted[0].X != 536 || nether.Predicted[0].Generated || !nether.Predicted[1].Generated {
 		t.Errorf("nether predicted = %+v", nether.Predicted)
 	}
+	// Each dimension says how its own kinds fared, and no other's.
+	if k := nether.Kinds[structures.Fortress]; len(nether.Kinds) != 1 || k.State != structures.SeedVerified || k.Agree != 11 {
+		t.Errorf("nether kinds = %+v", nether.Kinds)
+	}
 	// The spawn is the overworld's.
 	if nether.Spawn != nil {
 		t.Errorf("nether carries a spawn: %+v", nether.Spawn)
@@ -127,6 +141,9 @@ func TestStructuresKeepRecordedAndPredictedApartByDimension(t *testing.T) {
 	overworld, _ := structuresOf(t, s, "/api/structures?dimension=overworld")
 	if len(overworld.Recorded) != 3 || overworld.Recorded[0].Kind != structures.Monument || len(overworld.Predicted) != 0 {
 		t.Errorf("overworld = %+v", overworld)
+	}
+	if k := overworld.Kinds[structures.WitchHut]; len(overworld.Kinds) != 2 || k.State != structures.SeedUnverified || k.Agree != 1 {
+		t.Errorf("overworld kinds = %+v", overworld.Kinds)
 	}
 	// 32767 is what a world stores before it has worked the height out.
 	if overworld.Spawn == nil || overworld.Spawn.X != 40 || overworld.Spawn.Z != -72 || overworld.Spawn.Y != nil {

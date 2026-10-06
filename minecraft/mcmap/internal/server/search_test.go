@@ -23,6 +23,7 @@ type searchAnswer struct {
 		Kind      string   `json:"kind"`
 		Name      string   `json:"name"`
 		Detail    string   `json:"detail"`
+		Certainty string   `json:"certainty"`
 		Colour    string   `json:"colour"`
 		Trapped   bool     `json:"trapped"`
 		Baby      bool     `json:"baby"`
@@ -173,7 +174,7 @@ func TestSearchListsNearestFirstAndOtherDimensionsAfter(t *testing.T) {
 	// Every kind of thing has an "e" in it somewhere.
 	want := "bed:Bed@overworld biome:Desert@overworld container:" + hostile + "@overworld waypoint:steve's base@overworld " +
 		"structure:Village@overworld biome:Mushroom Fields@overworld structure:Village@overworld structure:Ocean Monument@overworld " +
-		"biome:Nether Wastes@nether bed:Bed@nether structure:Nether Fortress@nether"
+		"biome:Nether Wastes@nether bed:Bed@nether structure:Nether Fortress@nether structure:Nether Fortress@nether structure:Nether Fortress@nether"
 	if describe(got) != want {
 		t.Fatalf("got  %s\nwant %s", describe(got), want)
 	}
@@ -191,8 +192,49 @@ func TestSearchListsNearestFirstAndOtherDimensionsAfter(t *testing.T) {
 	}
 	// Asked from the nether, the nether's come first.
 	rec := do(s.Handler(), "GET", "/api/search?dimension=nether&x=0&z=0&q=fortress", "", []*http.Cookie{session(s, steve)})
-	if fromNether := decodeBody[searchAnswer](t, rec); len(fromNether.Hits) != 1 || fromNether.Hits[0].Distance == nil {
-		t.Errorf("from the nether: %+v", fromNether)
+	fromNether := decodeBody[searchAnswer](t, rec)
+	if len(fromNether.Hits) != 3 || fromNether.Hits[0].Distance == nil {
+		t.Fatalf("from the nether: %+v", fromNether)
+	}
+	// The one the world recorded, then the two the seed implies, each
+	// saying which it is.
+	if h := fromNether.Hits; h[0].Certainty != "" || h[0].Y == nil || h[1].Certainty != "predicted" || h[1].X != 536 || h[1].Y != nil || h[2].Certainty != "predicted" {
+		t.Errorf("from the nether: %+v", h)
+	}
+}
+
+// A kind has hundreds of sites, most of them places the generator will
+// only try. A search lists the nearest few, as what they are, and what the
+// world has recorded is not pushed off the list by them.
+func TestSearchListsTheNearestPredictionsAsPredictions(t *testing.T) {
+	s, _ := withEverything(t)
+	source := surveyed()
+	layer := source.survey.Layers[chunks.Overworld]
+	for i := range int32(40) {
+		layer.Predicted = append(layer.Predicted, structures.Prediction{Kind: structures.Monument, X: 100 + i*100, Z: 0, Candidate: i%2 == 1})
+	}
+	layer.Predicted = append(layer.Predicted, structures.Prediction{Kind: structures.Outpost, X: 90, Z: 0, Candidate: true})
+	source.survey.Layers[chunks.Overworld] = layer
+	s.Structures = source
+
+	got := search(t, s, "monument", session(s, steve))
+	if len(got.Hits) != predictedPerKind+1 || got.More != 0 {
+		t.Fatalf("monument: %d hits and %d more, want the %d nearest sites and the one recorded: %s", len(got.Hits), got.More, predictedPerKind, describe(got))
+	}
+	for i, h := range got.Hits[:predictedPerKind] {
+		want := "predicted"
+		if i%2 == 1 {
+			want = "candidate"
+		}
+		if h.X != int32(100+i*100) || h.Certainty != want || h.Kind != "structure" || h.Detail != "monument" || h.Y != nil {
+			t.Errorf("hit %d = %+v, want the site at %d as %s", i, h, 100+i*100, want)
+		}
+	}
+	if h := got.Hits[predictedPerKind]; h.Certainty != "" || h.X != 55 {
+		t.Errorf("the recorded monument = %+v", h)
+	}
+	if got := search(t, s, "pillager", session(s, steve)); len(got.Hits) != 1 || got.Hits[0].Certainty != "candidate" {
+		t.Errorf("pillager: %+v", got.Hits)
 	}
 }
 

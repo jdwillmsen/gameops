@@ -35,6 +35,11 @@ const (
 	// into a search: the nearest few, so that one common biome does not
 	// fill the answer.
 	stretchesPerBiome = 3
+	// predictedPerKind is how many predicted sites of each kind of
+	// structure go into a search from one dimension: the nearest few. A
+	// kind has hundreds, most of them places the generator will only try,
+	// and would otherwise push what the world has recorded off the list.
+	predictedPerKind = 5
 )
 
 // What a search hit is.
@@ -46,6 +51,15 @@ const (
 	hitContainer = "container"
 	hitMob       = "mob"
 	hitWaypoint  = "waypoint"
+)
+
+// How sure a structure hit is, where it is not one the world recorded.
+const (
+	// certaintyPredicted: the seed puts one here.
+	certaintyPredicted = "predicted"
+	// certaintyCandidate: the seed puts a site here, in terrain that is
+	// not generated, and the biome will decide.
+	certaintyCandidate = "candidate"
 )
 
 // Whether the player's waypoints were part of a search.
@@ -63,6 +77,10 @@ type searchHit struct {
 	// Detail says more where the name does not: a biome's identifier, a
 	// structure's kind, a container's kind, a mob's type.
 	Detail string `json:"detail,omitempty"`
+	// Certainty is left out for everything the world holds. A structure
+	// worked out from the seed carries predicted or candidate, so that
+	// the page never lists a calculation as a fact.
+	Certainty string `json:"certainty,omitempty"`
 	// Colour, Trapped and Baby are a marker's own, passed on so that the
 	// page can call and draw a hit as it does the marker.
 	Colour    string `json:"colour,omitempty"`
@@ -237,9 +255,28 @@ func (c *searchCache) evictWaypoints(now time.Time) {
 	delete(c.waypoints, oldest)
 }
 
+// nearestPredictions is the predictions of each kind nearest block x, z,
+// at most perKind of a kind, in the order they came.
+func nearestPredictions(all []structures.Prediction, x, z int32, perKind int) []structures.Prediction {
+	away := func(p structures.Prediction) float64 {
+		return math.Hypot(float64(p.X)-float64(x), float64(p.Z)-float64(z))
+	}
+	byKind := map[structures.Kind][]structures.Prediction{}
+	for _, p := range all {
+		byKind[p.Kind] = append(byKind[p.Kind], p)
+	}
+	var out []structures.Prediction
+	for _, kind := range structures.Kinds {
+		list := byKind[kind]
+		slices.SortStableFunc(list, func(a, b structures.Prediction) int { return cmp.Compare(away(a), away(b)) })
+		out = append(out, list[:min(len(list), perKind)]...)
+	}
+	return out
+}
+
 // handleSearch looks one piece of text up in everything the map holds that
-// has a name: biomes, recorded structures, the world spawn, beds,
-// containers, named mobs, and the waypoints of whoever is asking.
+// has a name: biomes, recorded and predicted structures, the world spawn,
+// beds, containers, named mobs, and the waypoints of whoever is asking.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := biomes.Fold(q.Get("q"))
@@ -290,6 +327,15 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 					if name := structureNames[st.Kind]; matches(name, string(st.Kind), names.Structure(string(st.Kind))) {
 						add(searchHit{Kind: hitStructure, Name: name, Detail: string(st.Kind),
 							X: st.MinX + (st.MaxX-st.MinX)/2, Y: height(st.MinY), Z: st.MinZ + (st.MaxZ-st.MinZ)/2}, d)
+					}
+				}
+				for _, p := range nearestPredictions(survey.Layers[d].Predicted, x, z, predictedPerKind) {
+					if name := structureNames[p.Kind]; matches(name, string(p.Kind), names.Structure(string(p.Kind))) {
+						certainty := certaintyPredicted
+						if p.Candidate {
+							certainty = certaintyCandidate
+						}
+						add(searchHit{Kind: hitStructure, Name: name, Detail: string(p.Kind), Certainty: certainty, X: p.X, Z: p.Z}, d)
 					}
 				}
 				if d == chunks.Overworld && survey.HasLevel && matches("World Spawn") {

@@ -1,9 +1,9 @@
 package structures
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -26,16 +26,20 @@ var (
 	}, []string{"dimension", "kind"})
 	metricPredicted = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mcmap_structures_predicted",
-		Help: "Structures predicted from the seed and offered to the page, by dimension and kind. Zero while the seed is not verified.",
-	}, []string{"dimension", "kind"})
+		Help: "Sites worked out from the seed and offered to the page, by dimension, kind and certainty: predicted, or candidate where the terrain is not generated and the biome will decide. Zero while the kind is not verified.",
+	}, []string{"dimension", "kind", "certainty"})
 	metricSeedVerified = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_structures_seed_verified",
-		Help: "1 while the structures the world recorded are where the seed says they would be, which is what lets predictions be shown.",
+		Help: "1 while the structures the world recorded are where the seed says they would be, without which no kind is predicted.",
 	})
-	metricDisagreements = promauto.NewGauge(prometheus.GaugeOpts{
+	metricKindVerified = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mcmap_structures_kind_verified",
+		Help: "1 while the seed is verified and the world's recorded structures of this kind are where the kind's own rule puts them, which is what lets the kind be predicted.",
+	}, []string{"kind"})
+	metricDisagreements = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mcmap_structures_prediction_disagreements",
-		Help: "Places where the seed and the world's records disagree: a recorded structure no site explains, or a site in a finished chunk with nothing recorded.",
-	})
+		Help: "Places where the seed and the world's records disagree, by kind: a recorded structure no site explains, or a site in a finished chunk that suits the kind with nothing recorded.",
+	}, []string{"kind"})
 	metricSkipped = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "mcmap_structures_areas_skipped",
 		Help: "Recorded areas left out of the last survey, by reason: malformed, unknown (a kind this version does not know), or limit.",
@@ -94,8 +98,18 @@ const (
 	// maxSites is how many sites of one kind are set beside the world. It
 	// is apart from the layer's bound because the seed is checked against
 	// every one of them, shown or not.
-	maxSites    = 20_000
-	maxFindings = 50
+	maxSites = 20_000
+	// MaxPerKind is the most predictions of one kind kept for a dimension,
+	// so that a kind with a site every 32 chunks cannot use up the layer
+	// before one with a site every 80 is reached. Past it the sites
+	// nearest the middle of the generated world are the ones kept.
+	MaxPerKind = 500
+	// foundedShare is the least of a founded kind's recorded structures,
+	// as one in this many, that have to be on a site. A wrong rule puts a
+	// site by one village in eleven; the FWB world's villages are on one
+	// four times in nine, the rest being players' own.
+	foundedShare = 5
+	maxFindings  = 50
 	// villageTimeout is how long the village records may take to read.
 	// They are under one prefix and take milliseconds; this is what keeps
 	// a world that has made them enormous from holding up the cycle.
@@ -116,15 +130,24 @@ const (
 	SeedUnknown = "unknown"
 )
 
-// Prediction is a structure the seed says the generator builds.
+// Prediction is a site the seed gives a kind of structure.
 type Prediction struct {
 	Kind Kind  `json:"kind"`
 	X    int32 `json:"x"`
 	Z    int32 `json:"z"`
-	// Generated is set where the site's chunk is already complete and the
-	// world recorded nothing there: the prediction and the world disagree.
+	// Generated is set where the site's chunk is already complete, in a
+	// biome the kind is built in, and the world recorded nothing there:
+	// the prediction and the world disagree.
 	Generated bool `json:"generated,omitempty"`
+	// Candidate is set for a kind the biome decides, where the site's
+	// chunk is not generated yet: the generator will try here, and
+	// nothing can say what it will find.
+	Candidate bool `json:"candidate,omitempty"`
 }
+
+// BiomeAt is the biome at the top of a block column as the world last
+// stored it, and false where it has stored none.
+type BiomeAt func(d chunks.Dimension, x, z int32) (id uint32, known bool)
 
 // Layer is one dimension's structures.
 type Layer struct {
@@ -134,9 +157,33 @@ type Layer struct {
 	PredictedMore int
 }
 
+// KindCheck is how one kind's rule fared against the world's records of
+// that kind.
+type KindCheck struct {
+	// State is the seed's while that is not verified, since no rule can
+	// be judged by a seed that is not known to be right. Under a verified
+	// seed it is the rule's own: verified, unverified with too few
+	// recorded to tell, or refuted.
+	State string `json:"state"`
+	// Agree and Disagree count the kind's recorded structures a site
+	// explains, and those none does.
+	Agree    int `json:"agree"`
+	Disagree int `json:"disagree"`
+	// Built and Empty count the sites in finished chunks whose biome
+	// suits the kind: those with a recorded structure, and those without.
+	// A site whose biome is not known is in neither.
+	Built int `json:"-"`
+	Empty int `json:"-"`
+	// Findings is how many of the check's disagreements are this kind's.
+	Findings int `json:"-"`
+}
+
 // Check is the result of comparing the seed's sites with the world.
 type Check struct {
+	// State is how far the seed itself has been checked.
 	State string
+	// Kinds is each predicted kind's own result.
+	Kinds map[Kind]KindCheck
 	// Agree and Disagree count recorded structures of the kinds whose
 	// placement is exact: those a site explains, and those none does.
 	Agree, Disagree int
@@ -182,6 +229,10 @@ type Surveyor struct {
 	// StructureSeed, when set, is used in place of the low half of the
 	// seed in level.dat. It is checked against the world the same way.
 	StructureSeed *uint32
+	// Biomes says what biome a generated block is in. Without it a site
+	// the biome decides is only ever a candidate, and is not shown at all
+	// in terrain that is generated.
+	Biomes BiomeAt
 	// VillageTimeout bounds the read of the village records within a
 	// survey; zero means ten seconds.
 	VillageTimeout time.Duration
@@ -194,8 +245,10 @@ type Surveyor struct {
 	last     Survey
 	surveyed bool
 	// What was last logged, so that a finding is reported when it appears
-	// and not again every cycle while it stands.
-	logged []string
+	// and not again every cycle while it stands, and a kind's standing
+	// when it changes.
+	logged   []string
+	standing map[Kind]string
 }
 
 // Last is the most recent survey, if there has been one.
@@ -218,6 +271,16 @@ func (s *Surveyor) Take(ctx context.Context, worldDir string, at time.Time) (Sur
 	s.last, s.surveyed = survey, true
 	changed := !slices.Equal(s.logged, survey.Check.Findings)
 	s.logged = survey.Check.Findings
+	var moved []Kind
+	for _, kind := range Kinds {
+		if k, checked := survey.Check.Kinds[kind]; checked && s.standing[kind] != k.State {
+			moved = append(moved, kind)
+		}
+	}
+	s.standing = map[Kind]string{}
+	for kind, k := range survey.Check.Kinds {
+		s.standing[kind] = k.State
+	}
 	s.mu.Unlock()
 
 	export(survey)
@@ -227,6 +290,17 @@ func (s *Surveyor) Take(ctx context.Context, worldDir string, at time.Time) (Sur
 	}
 	metricSurveyAt.Set(float64(at.Unix()))
 	metricSurveySeconds.Set(time.Since(started).Seconds())
+	for _, kind := range moved {
+		k := survey.Check.Kinds[kind]
+		log := s.Logger.Info
+		// The seed is right and this kind's own structures are not where
+		// its rule puts them: the rule is wrong for this game version.
+		if k.State == SeedRefuted && survey.Check.State == SeedVerified {
+			log = s.Logger.Warn
+		}
+		log("structure kind checked against the world's own; it is predicted only while verified",
+			"kind", string(kind), "state", k.State, "on_a_site", k.Agree, "on_none", k.Disagree)
+	}
 	switch {
 	case !changed:
 	case survey.Check.State == SeedRefuted:
@@ -273,10 +347,13 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		case TagFinalized:
 			e, seen := extents[pos.Dim]
 			if !seen {
-				e = &extent{Area: Area{pos.X, pos.Z, pos.X, pos.Z}}
+				e = newExtent(pos)
 				extents[pos.Dim] = e
 			}
 			e.add(pos)
+			if v := it.Value(); len(v) >= 4 && binary.LittleEndian.Uint32(v) == finalizedDone {
+				e.finish(pos)
+			}
 		case TagSpawnAreas:
 			found, unknown, malformed, err := decode(pos, it.Value())
 			if err != nil {
@@ -313,20 +390,13 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	seed, haveSeed := s.seed(worldDir, &survey)
 	survey.StructureSeed, survey.HasStructureSeed = seed, haveSeed
 	if haveSeed && len(s.Predictors) > 0 {
-		finished := func(p chunks.Pos) (bool, error) {
-			v, err := db.Get(chunks.RecordKey(p, TagFinalized), nil)
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return false, nil
-			}
-			if err != nil {
-				return false, err
-			}
-			return len(v) >= 4 && binary.LittleEndian.Uint32(v) == finalizedDone, nil
+		// A village is recorded apart from the rest and is checked like
+		// them: every one read, whatever the layer goes on to keep.
+		known := map[chunks.Dimension][]Structure{}
+		for _, d := range chunks.Dimensions {
+			known[d] = append(slices.Clip(recorded[d]), survey.villages[d]...)
 		}
-		var err error
-		if survey.Check, predicted, more, err = compare(s.Predictors, seed, layerLimit, recorded, extents, finished); err != nil {
-			return Survey{}, fmt.Errorf("read world: %w", err)
-		}
+		survey.Check, predicted, more = compare(s.Predictors, seed, layerLimit, known, extents, s.Biomes)
 	}
 
 	for _, d := range chunks.Dimensions {
@@ -337,8 +407,8 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 			layer.RecordedMore = len(layer.Recorded) - layerLimit
 			layer.Recorded = layer.Recorded[:layerLimit]
 		}
-		// A prediction is only offered while the seed it came from has
-		// been seen to put this world's own structures where they are.
+		// compare leaves out every kind the world does not bear out, and
+		// none is borne out under a seed that is not.
 		if survey.Check.State == SeedVerified {
 			layer.Predicted, layer.PredictedMore = predicted[d], more[d]
 		}
@@ -398,66 +468,140 @@ func (s *Surveyor) seed(worldDir string, survey *Survey) (uint32, bool) {
 }
 
 // extent is where a dimension's chunks are: the box around all of them,
-// and every chunk's position, which is eight bytes a chunk and is what the
-// middle of the world is taken from.
+// every chunk's position, which is what the middle of the world is taken
+// from, the finished ones among them, and the country they lie in. It
+// comes to sixteen bytes a chunk.
 type extent struct {
 	Area
 	xs, zs []int32
+	// done is the finished chunks, each as packed by chunkKey, in order
+	// once sorted is set.
+	done   []uint64
+	sorted bool
+	// cells is every square of cellChunks chunks a side with a chunk in
+	// it.
+	cells map[uint64]struct{}
+}
+
+// cellChunks is the side of the squares the generated country is kept as,
+// in chunks: coarse enough that a world is a few thousand of them.
+const cellChunks = 16
+
+func chunkKey(x, z int32) uint64 { return uint64(uint32(x))<<32 | uint64(uint32(z)) }
+
+func newExtent(p chunks.Pos) *extent {
+	return &extent{Area: Area{p.X, p.Z, p.X, p.Z}, cells: map[uint64]struct{}{}}
 }
 
 func (e *extent) add(p chunks.Pos) {
 	e.Area = Area{min(e.MinX, p.X), min(e.MinZ, p.Z), max(e.MaxX, p.X), max(e.MaxZ, p.Z)}
 	e.xs = append(e.xs, p.X)
 	e.zs = append(e.zs, p.Z)
+	e.cells[chunkKey(floorDiv(p.X, cellChunks), floorDiv(p.Z, cellChunks))] = struct{}{}
+}
+
+// finish marks a chunk the world has generated to the end.
+func (e *extent) finish(p chunks.Pos) {
+	e.done = append(e.done, chunkKey(p.X, p.Z))
+	e.sorted = false
+}
+
+func (e *extent) finished(x, z int32) bool {
+	if !e.sorted {
+		slices.Sort(e.done)
+		e.sorted = true
+	}
+	_, found := slices.BinarySearch(e.done, chunkKey(x, z))
+	return found
+}
+
+// near reports whether a chunk is within predictionMargin of one the world
+// holds, to the nearest cell: the country a player could walk into next.
+func (e *extent) near(x, z int32) bool {
+	const reach = predictionMargin / cellChunks
+	cx, cz := floorDiv(x, cellChunks), floorDiv(z, cellChunks)
+	for dx := int32(-reach); dx <= reach; dx++ {
+		for dz := int32(-reach); dz <= reach; dz++ {
+			if _, held := e.cells[chunkKey(cx+dx, cz+dz)]; held {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // window is the area structures are predicted and checked in: the extent
 // and a margin, kept within maxReach of the middle of the chunks. The
 // middle is the median on each axis, which no number of far-off chunks
 // short of half the world can move.
-func (e *extent) window() Area {
+func (e *extent) window() (area Area, midX, midZ int32) {
 	slices.Sort(e.xs)
 	slices.Sort(e.zs)
-	midX, midZ := e.xs[len(e.xs)/2], e.zs[len(e.zs)/2]
+	midX, midZ = e.xs[len(e.xs)/2], e.zs[len(e.zs)/2]
 	return Area{
 		max(e.MinX-predictionMargin, midX-maxReach), max(e.MinZ-predictionMargin, midZ-maxReach),
 		min(e.MaxX+predictionMargin, midX+maxReach), min(e.MaxZ+predictionMargin, midZ+maxReach),
-	}
+	}, midX, midZ
 }
 
 func (a Area) holds(b Box) bool {
 	return b.MinX>>4 >= a.MinX && b.MaxX>>4 <= a.MaxX && b.MinZ>>4 >= a.MinZ && b.MaxZ>>4 <= a.MaxZ
 }
 
-// compare sets each predictor's sites beside what the world recorded.
+// settle decides a kind's state from its own recorded structures, under a
+// seed in seedState.
+func (c *KindCheck) settle(seedState string, founded bool) {
+	borne := c.Agree > c.Disagree
+	if founded {
+		borne = c.Agree*foundedShare >= c.Agree+c.Disagree
+	}
+	switch {
+	case seedState != SeedVerified:
+		c.State = seedState
+	case c.Agree >= minEvidence && borne:
+		c.State = SeedVerified
+	case c.Agree+c.Disagree >= minEvidence && !borne:
+		c.State = SeedRefuted
+	default:
+		c.State = SeedUnverified
+	}
+}
+
+// compare sets each predictor's sites beside what the world recorded, and
+// returns the predictions of the kinds the world bears out.
 func compare(
 	predictors []Predictor,
 	seed uint32,
 	limit int,
 	recorded map[chunks.Dimension][]Structure,
 	extents map[chunks.Dimension]*extent,
-	finished func(chunks.Pos) (bool, error),
-) (Check, map[chunks.Dimension][]Prediction, map[chunks.Dimension]int, error) {
-	check := Check{}
-	predicted := map[chunks.Dimension][]Prediction{}
-	more := map[chunks.Dimension]int{}
-	find := func(format string, args ...any) {
-		check.Total++
-		if len(check.Findings) < maxFindings {
-			check.Findings = append(check.Findings, fmt.Sprintf(format, args...))
-		}
+	biomeAt BiomeAt,
+) (Check, map[chunks.Dimension][]Prediction, map[chunks.Dimension]int) {
+	check := Check{Kinds: map[Kind]KindCheck{}}
+	type result struct {
+		p     Predictor
+		found []Prediction
+		more  int
 	}
+	var results []result
 	for _, p := range predictors {
 		d := p.Dimension()
 		generated, ok := extents[d]
 		if !ok {
+			check.Kinds[p.Kind()] = KindCheck{}
 			continue
 		}
-		area := generated.window()
-		sites, left := p.Sites(seed, area, maxSites)
-		if p.Certain() {
-			more[d] += left
+		kind := KindCheck{}
+		find := func(format string, args ...any) {
+			check.Total++
+			kind.Findings++
+			if len(check.Findings) < maxFindings {
+				check.Findings = append(check.Findings, fmt.Sprintf(format, args...))
+			}
 		}
+		area, midX, midZ := generated.window()
+		sites, left := p.Sites(seed, area, maxSites)
+		res := result{p: p, more: left}
 
 		explained := map[int]bool{}
 		for _, site := range sites {
@@ -467,22 +611,52 @@ func compare(
 					explained[i], built = true, true
 				}
 			}
-			if built || !p.Certain() {
-				continue
+			done := generated.finished(site.ChunkX, site.ChunkZ)
+			// The middle of the chunk: an outpost's own corner of it has
+			// been seen in the biome next door.
+			biome, known := uint32(0), false
+			if biomeAt != nil && !p.Certain() {
+				biome, known = biomeAt(d, site.ChunkX*16+8, site.ChunkZ*16+8)
 			}
-			done, err := finished(chunks.Pos{Dim: d, X: site.ChunkX, Z: site.ChunkZ})
-			if err != nil {
-				return Check{}, nil, nil, err
+			suits := p.Certain() || (known && p.Allows(biome))
+			if built {
+				if done && suits {
+					kind.Built++
+				}
+				continue
 			}
 			x, z := p.Centre(site)
-			if done {
-				find("%s predicted at %s %d, %d: that chunk is generated and the world recorded none", p.Kind(), d.Name(), x, z)
-			}
-			if len(predicted[d]) >= limit {
-				more[d]++
+			prediction := Prediction{Kind: p.Kind(), X: x, Z: z}
+			switch {
+			case p.Certain():
+				prediction.Generated = done
+			case known && !suits:
 				continue
+			case !done:
+				// Only beside the world: its box takes in everything
+				// between its furthest corners, most of it nowhere near
+				// a chunk, and a site there is no use to anybody yet.
+				if !generated.near(site.ChunkX, site.ChunkZ) {
+					continue
+				}
+				prediction.Candidate = true
+			case !known:
+				// Generated, nothing recorded, and no biome to say
+				// whether anything was to be expected: most such sites
+				// are in the wrong one.
+				continue
+			default:
+				prediction.Generated = true
 			}
-			predicted[d] = append(predicted[d], Prediction{Kind: p.Kind(), X: x, Z: z, Generated: done})
+			if prediction.Generated {
+				kind.Empty++
+				// The game has no record of a village nobody has been
+				// near, so one missing from a site is not a finding.
+				if !p.Founded() {
+					find("%s predicted at %s %d, %d: that chunk is generated and the world recorded none", p.Kind(), d.Name(), x, z)
+				}
+			}
+			res.found = append(res.found, prediction)
 		}
 		for i, real := range recorded[d] {
 			// A structure outside the window had no site looked for, so it
@@ -490,16 +664,40 @@ func compare(
 			if real.Kind != p.Kind() || !area.holds(real.Box) {
 				continue
 			}
-			switch {
-			case explained[i] && p.Exact():
-				check.Agree++
-			case !explained[i]:
-				if p.Exact() {
-					check.Disagree++
-				}
+			if explained[i] {
+				kind.Agree++
+				continue
+			}
+			kind.Disagree++
+			if !p.Founded() {
 				find("%s recorded at %s %d, %d to %d, %d: the seed puts none there", real.Kind, d.Name(), real.MinX, real.MinZ, real.MaxX, real.MaxZ)
 			}
 		}
+		if p.Exact() {
+			check.Agree += kind.Agree
+			check.Disagree += kind.Disagree
+		}
+		if over := len(res.found) - min(limit, MaxPerKind); over > 0 {
+			// What the world can already be asked about goes before what
+			// it cannot.
+			rank := func(p Prediction) int {
+				if p.Candidate {
+					return 1
+				}
+				return 0
+			}
+			away := func(p Prediction) int64 {
+				dx, dz := int64(p.X>>4)-int64(midX), int64(p.Z>>4)-int64(midZ)
+				return dx*dx + dz*dz
+			}
+			slices.SortStableFunc(res.found, func(a, b Prediction) int {
+				return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(away(a), away(b)))
+			})
+			res.found = res.found[:len(res.found)-over]
+			res.more += over
+		}
+		check.Kinds[p.Kind()] = kind
+		results = append(results, res)
 	}
 	switch {
 	case check.Agree >= minEvidence && check.Agree > check.Disagree:
@@ -509,21 +707,53 @@ func compare(
 	default:
 		check.State = SeedUnverified
 	}
-	return check, predicted, more, nil
+
+	predicted := map[chunks.Dimension][]Prediction{}
+	more := map[chunks.Dimension]int{}
+	for _, res := range results {
+		kind := check.Kinds[res.p.Kind()]
+		kind.settle(check.State, res.p.Founded())
+		check.Kinds[res.p.Kind()] = kind
+		if kind.State != SeedVerified {
+			continue
+		}
+		d := res.p.Dimension()
+		room := max(limit-len(predicted[d]), 0)
+		if len(res.found) > room {
+			res.more += len(res.found) - room
+			res.found = res.found[:room]
+		}
+		predicted[d] = append(predicted[d], res.found...)
+		more[d] += res.more
+	}
+	// A kind whose dimension the world has no chunk of stands as the seed
+	// lets it.
+	for kind, k := range check.Kinds {
+		if k.State == "" {
+			k.settle(check.State, false)
+			check.Kinds[kind] = k
+		}
+	}
+	return check, predicted, more
 }
 
 func export(survey Survey) {
 	for _, d := range chunks.Dimensions {
-		recorded, predicted := map[Kind]int{}, map[Kind]int{}
+		recorded, predicted, candidates := map[Kind]int{}, map[Kind]int{}, map[Kind]int{}
 		for _, r := range survey.Layers[d].Recorded {
 			recorded[r.Kind]++
 		}
 		for _, p := range survey.Layers[d].Predicted {
-			predicted[p.Kind]++
+			if p.Candidate {
+				candidates[p.Kind]++
+			} else {
+				predicted[p.Kind]++
+			}
 		}
 		for _, kind := range Kinds {
 			metricRecorded.WithLabelValues(d.Name(), string(kind)).Set(float64(recorded[kind]))
-			metricPredicted.WithLabelValues(d.Name(), string(kind)).Set(float64(predicted[kind]))
+			metricPredicted.WithLabelValues(d.Name(), string(kind), "predicted").Set(float64(predicted[kind]))
+			metricPredicted.WithLabelValues(d.Name(), string(kind), "candidate").Set(float64(candidates[kind]))
 		}
 	}
 	verified := 0.0
@@ -531,7 +761,15 @@ func export(survey Survey) {
 		verified = 1
 	}
 	metricSeedVerified.Set(verified)
-	metricDisagreements.Set(float64(survey.Check.Total))
+	for _, kind := range Kinds {
+		k := survey.Check.Kinds[kind]
+		verified := 0.0
+		if k.State == SeedVerified {
+			verified = 1
+		}
+		metricKindVerified.WithLabelValues(string(kind)).Set(verified)
+		metricDisagreements.WithLabelValues(string(kind)).Set(float64(k.Findings))
+	}
 	metricSkipped.WithLabelValues("malformed").Set(float64(survey.Malformed))
 	metricSkipped.WithLabelValues("unknown").Set(float64(survey.Unknown))
 	metricSkipped.WithLabelValues("limit").Set(float64(survey.OverLimit))

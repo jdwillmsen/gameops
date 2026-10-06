@@ -164,6 +164,15 @@ func run(logger *slog.Logger) error {
 		reader.Load()
 		w.Biomes = reader
 	}
+	// The biomes are read before the survey in each cycle, so a site is
+	// judged by the biome of the snapshot it is in, or of the last one
+	// that was read if this one could not be.
+	if surveyor != nil && biomeStore != nil {
+		surveyor.Biomes = func(d chunks.Dimension, x, z int32) (uint32, bool) {
+			biome, ok := biomeStore.At(d, x, z)
+			return biome.ID, ok
+		}
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

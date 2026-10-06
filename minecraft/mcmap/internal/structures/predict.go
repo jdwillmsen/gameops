@@ -30,15 +30,53 @@ type Predictor interface {
 	Exact() bool
 	// Certain reports whether the generator builds at every site. Where it
 	// only builds if the biome suits, a site is a place it will try, and
-	// nothing here can say what the biome of an unvisited chunk will be.
+	// only a chunk that exists has a biome to ask about.
 	Certain() bool
+	// Allows reports whether the generator builds this kind at a site in
+	// the biome with this id.
+	Allows(biome uint32) bool
+	// Founded reports whether the world also records structures of this
+	// kind that the generator never placed, so that one with no site is
+	// nothing against the rule.
+	Founded() bool
 	// Centre is the block a site is drawn at.
 	Centre(site Site) (x, z int32)
 }
 
-// Predictors is every kind there is a predictor for. Only those that are
-// Certain reach the page; the others are what the seed is checked with.
+// Predictors is every kind there is a predictor for. Each is served only
+// while the world's own records of that kind bear its rule out.
 var Predictors = []Predictor{fortress{}, monument{}, outpost{}, witchHut{}}
+
+// The game's ids for the biomes a kind is only built in.
+const (
+	biomePlains          = 1
+	biomeDesert          = 2
+	biomeTaiga           = 5
+	biomeSwamp           = 6
+	biomeSnowyPlains     = 12
+	biomeDeepOcean       = 24
+	biomeSavanna         = 35
+	biomeDeepWarmOcean   = 41
+	biomeDeepLukewarm    = 43
+	biomeDeepColdOcean   = 45
+	biomeDeepFrozenOcean = 47
+	biomeSunflowerPlains = 129
+	biomeJaggedPeaks     = 182
+	biomeFrozenPeaks     = 183
+	biomeSnowySlopes     = 184
+	biomeGrove           = 185
+	biomeMeadow          = 186
+	biomeStonyPeaks      = 189
+	biomeCherryGrove     = 192
+)
+
+func oneOf(ids ...uint32) map[uint32]bool {
+	set := make(map[uint32]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
+}
 
 // spread is how the generator scatters a kind: the world is cut into
 // regions of spacing chunks a side, and each region gets one site, at an
@@ -131,6 +169,8 @@ func (fortress) Kind() Kind                  { return Fortress }
 func (fortress) Dimension() chunks.Dimension { return chunks.Nether }
 func (fortress) Exact() bool                 { return false }
 func (fortress) Certain() bool               { return true }
+func (fortress) Allows(uint32) bool          { return true }
+func (fortress) Founded() bool               { return false }
 
 func (fortress) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 	return fortressSpread.sites(seed, area, limit, func(rng *twister) bool { return rng.next()%6 < 2 })
@@ -150,15 +190,23 @@ func (fortress) Explains(site Site, real Box) bool {
 
 func (fortress) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
 
-// monument: 58 blocks square, centred on the middle of its site's chunk.
+// monument: 58 blocks square, centred on the middle of its site's chunk,
+// and only in a deep ocean. The game also wants water all round the site,
+// which is not asked here: where the country round a site is only part
+// generated there is nothing to ask it of.
 type monument struct{}
 
-var monumentSpread = spread{spacing: 32, separation: 5, salt: 10387313, triangular: true}
+var (
+	monumentSpread = spread{spacing: 32, separation: 5, salt: 10387313, triangular: true}
+	monumentBiomes = oneOf(biomeDeepOcean, biomeDeepWarmOcean, biomeDeepLukewarm, biomeDeepColdOcean, biomeDeepFrozenOcean)
+)
 
 func (monument) Kind() Kind                  { return Monument }
 func (monument) Dimension() chunks.Dimension { return chunks.Overworld }
 func (monument) Exact() bool                 { return true }
 func (monument) Certain() bool               { return false }
+func (monument) Allows(biome uint32) bool    { return monumentBiomes[biome] }
+func (monument) Founded() bool               { return false }
 
 func (monument) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 	return monumentSpread.sites(seed, area, limit, nil)
@@ -175,14 +223,24 @@ func (monument) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, si
 
 // outpost: the watchtower's area is 16 blocks square with one corner on the
 // site chunk's first block; which corner depends on the way it is turned.
+//
+// Its biomes are the game's list for it. The FWB world has outposts in
+// plains, snowy plains, desert and meadow, and no generated site in the
+// others.
 type outpost struct{}
 
-var outpostSpread = spread{spacing: 80, separation: 24, salt: 165745296, triangular: true}
+var (
+	outpostSpread = spread{spacing: 80, separation: 24, salt: 165745296, triangular: true}
+	outpostBiomes = oneOf(biomePlains, biomeSunflowerPlains, biomeDesert, biomeSavanna, biomeTaiga, biomeSnowyPlains,
+		biomeMeadow, biomeGrove, biomeSnowySlopes, biomeJaggedPeaks, biomeFrozenPeaks, biomeStonyPeaks, biomeCherryGrove)
+)
 
 func (outpost) Kind() Kind                  { return Outpost }
 func (outpost) Dimension() chunks.Dimension { return chunks.Overworld }
 func (outpost) Exact() bool                 { return true }
 func (outpost) Certain() bool               { return false }
+func (outpost) Allows(biome uint32) bool    { return outpostBiomes[biome] }
+func (outpost) Founded() bool               { return false }
 
 func (outpost) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 	return outpostSpread.sites(seed, area, limit, nil)
@@ -197,7 +255,7 @@ func (outpost) Centre(site Site) (int32, int32) { return site.ChunkX * 16, site.
 
 // witchHut: the site is shared with desert and jungle temples and igloos,
 // and the biome picks which of them, if any, is built. A hut lies inside
-// the site's chunk.
+// the site's chunk, in a swamp.
 type witchHut struct{}
 
 var witchHutSpread = spread{spacing: 32, separation: 8, salt: 14357617}
@@ -206,6 +264,8 @@ func (witchHut) Kind() Kind                  { return WitchHut }
 func (witchHut) Dimension() chunks.Dimension { return chunks.Overworld }
 func (witchHut) Exact() bool                 { return true }
 func (witchHut) Certain() bool               { return false }
+func (witchHut) Allows(biome uint32) bool    { return biome == biomeSwamp }
+func (witchHut) Founded() bool               { return false }
 
 func (witchHut) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 	return witchHutSpread.sites(seed, area, limit, nil)
