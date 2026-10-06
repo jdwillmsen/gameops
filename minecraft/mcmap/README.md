@@ -345,8 +345,9 @@ immutable` at that version, so a browser fetches each once however many
 frames draw it, and a changed head or pin is a new address. The page's
 content security policy is unchanged: pictures are same-origin images.
 
-**In the browser** the pictures are decoded once into bitmaps, composed
-with their ring into a sprite per picture and colour, and stamped onto the
+**In the browser** one script, `icons.js`, asks `/api/icons` and keeps the
+pictures for every layer: each is decoded once into a bitmap, composed
+with its ring into a sprite per picture and colour, and stamped onto the
 live layer's one canvas with `drawImage`. Measured with 1,000 mobs and 5
 players in view at 1400 by 900 in headless Chromium, repainting the whole
 canvas every frame while panning: 16.7 ms frames with none over, before
@@ -356,9 +357,28 @@ and after; one whole repaint, flushed, took a median 1.9 ms as dots and
 ### Names and marker pictures
 
 The same fetch, at the same pin, reads two more things, so that the page
-can show everything by its proper name and its own picture. This service
-serves them; the page still draws rings, letters and ids until it is
-changed to ask.
+can show everything by its proper name and its own picture.
+
+**On the page.** `names.js` fetches `/api/names` once, and again when the
+`names.version` in `/api/icons` is no longer the one it holds, and every
+name the page shows is looked up there: a live mob's tooltip and card, a
+marker's tooltip, the named mobs' list, a structure's row and tooltip, a
+search hit. Until the table arrives, and for an id it does not list, the
+page tidies the id by the same rule the server does, so `villager_v2` is
+Villager from the first frame and `evocation_illager` reads Evocation
+Illager for the moment before it becomes Evoker. When the table arrives
+or changes, what is on screen is retitled where it stands, an open
+tooltip and a listed search included. Nothing is shown as an identifier
+or left empty: a mob with no type is Mob, a container of no kind
+Container, a waypoint with no name Waypoint.
+
+`icons.js` likewise holds every picture. It asks for one only if its key
+is listed, draws it unsmoothed at 16 pixels, and tells the layers when one
+has decoded, so a picture the server gets later appears within the 30
+seconds between askings and with no reload. A key not listed, a picture
+that fails to load (asked for again after five minutes) and a browser
+that cannot decode one all leave the marker as it was drawn before there
+were pictures: a ring, a dot or a letter.
 
 **Names** are from the game's own English language file,
 `resource_pack/texts/en_US.lang`. Its keys follow no single rule, and each
@@ -456,8 +476,10 @@ pictures and every name is a tidied id.
 
 ## Markers
 
-Four more kinds of mark are drawn as rings, each with a row in the layer
-panel:
+Four more kinds of mark, each with a row in the layer panel. Each is drawn
+as its own picture on a square plate edged in the row's colour, where the
+live layer's markers are round, and as the ring it used to be while there
+is no picture for it:
 
 | Marker | From | Who sees it |
 |---|---|---|
@@ -504,6 +526,30 @@ and two of the named mobs babies), and leaves the mirror as it was. It is given 
 is logged and counted and stops nothing else: the page keeps the markers of
 the snapshot before. Until the first cycle after a start there are none.
 
+**On the page.** A bed is its colour's picture and says its colour (Red
+Bed); a container is a chest, a trapped chest, a barrel or a shulker box
+of its colour, and says which, after its name if it was given one; a
+waypoint is the compass. A bed whose colour the world does not say is
+drawn red and called Bed, and a shulker box likewise undyed. From further
+out than four blocks to the pixel beds and containers go back to their
+rings, since that many 20-pixel pictures at that scale are a heap in which
+none can be made out.
+
+A named mob is its type's icon, the one the live layer draws, in the row's
+colour, with its name on a label above it at every zoom; a baby is drawn
+smaller and called one. They are also listed under the Named mobs row,
+by name, with type and `baby`; choosing one takes the map there and rings
+it for twenty seconds. The label shows the first 24 characters of a long
+name and the tooltip and the list all of it.
+
+The markers are stamped onto the live layer's canvas from sprites made
+once per picture, so that they and the live markers can both be hovered
+and none is an element or a request of its own. Measured in headless
+Chromium at 1300 by 800 with 1,500 beds, 600 containers and 905 live mobs
+all in view, dragging the map: 244 frames, median 16.7 ms, longest
+16.8 ms, no long task; one whole repaint of the canvas, flushed, took a
+median 4.0 ms.
+
 **Limits.** Per dimension, the 5,000 beds, 5,000 containers and 1,000 named
 mobs nearest the origin are kept and the rest counted; the layer's row says how
 many are not shown. A name is cut to 64 characters, loses the game's
@@ -529,6 +575,14 @@ there is no waypoint route and no waypoint row.
 ## Structures
 
 Two layers, drawn so that one cannot be taken for the other.
+
+Each kind is drawn as [its picture](#names-and-marker-pictures) and called
+by the game's name for it, in its row (Ocean Monuments) and its tooltip. A
+known structure's picture sits on a solid square framed in the kind's
+colour, over the box the world recorded; a predicted one's in a hollow,
+dashed circle. Until a picture is there its place is taken by the kind's
+letter, as F, M, O, H or V. A kind this page has no row for is still
+named, by its id made into words.
 
 **Known** structures are the ones this world has generated, read from its
 own save. For each chunk the server keeps the boxes in which a structure's
@@ -802,7 +856,10 @@ ocean, the witch hut in a swamp, and the fortresses in nether biomes.
 without regard to case, in everything the map holds that has a name:
 biomes (by either name), recorded structures, the world spawn, beds,
 containers (by their name or kind), named mobs (by name or type), and the
-waypoints of the player asking. Hits in the dimension asked from come
+waypoints of the player asking. A marker and a structure are found by
+what the page calls them, the game's own names included: `red bed`,
+`trapped`, `light blue shulker`, `evoker`. A hit that is a marker carries
+the marker's `colour`, `trapped` and `baby`. Hits in the dimension asked from come
 first, nearest first, each with its distance; hits in the other dimensions
 follow without one. An answer is at most 50 hits and says how many more
 there were. Of each matching biome only the three nearest stretches are
@@ -817,9 +874,11 @@ agent cannot be read, or `off`.
 keystroke, from the middle of the view, and gives up the request it has out
 when another replaces it. Each hit is listed as the server ordered them,
 with what it is, where, and how far, or which other dimension it is in. A
-hit is titled by the name a player gave it, with its type after, or by its
-type alone; where that says the same as its kind, as for a bed, the kind
-is not said twice.
+hit is titled as its marker or structure is, by the game's names: the name
+a player gave it with what it is after, `Lamb Chop (Sheep, baby)`, or what
+it is alone, `Light Blue Shulker Box`, beside the picture the map draws it
+with. Where the title already says its kind, as Red Bed does, the kind is
+not said twice.
 The arrow keys move through the list, Enter chooses and Escape closes it.
 Choosing a hit takes the map there, changing dimension if it has to, and
 rings the spot for twenty seconds; a biome hit also turns the overlay on
@@ -976,10 +1035,12 @@ const row = window.mcmap.layers.register({
   order: 10,            // lower first; rows given none go last, as registered
   groupLabel: 'Biomes', // the title of a group that is not one of the five
   swatch: 'dot plains', // class of a colour key beside the label, styled in style.css
+  picture: node,        // an element shown in the key's place while it is not hidden
 });
 row.enabled;            // the saved choice, kept current
 row.setCount(1234);     // or null for none
 row.setNote('Not surveyed yet'); // or '' for none
+row.setLabel('Ocean Monuments'); // for a name that arrives late
 row.onToggle((on) => { /* draw or clear */ });
 row.setAvailable(false);         // greyed out, and skipped by All and None
 row.setEnabled(true);            // switch it as the viewer would; kept, and onToggle is told
@@ -1018,9 +1079,11 @@ while the tab is hidden.
 
 **Inspecting and following.** A click or a tap on a live mob or player
 opens a card in the bottom left corner of the map: its picture as the map
-draws it, its name tag or gamertag (or the type, for a mob with no name
-tag), its type, the dimension, and `x y z` to the tenth of a block, which
-is what the pack sends. The card is brought up to date with every frame
+draws it, its name tag or gamertag, its type by the game's name for it,
+the dimension, and `x y z` to the tenth of a block, which is what the pack
+sends. A mob with no name tag is titled by its type, which is then not
+said again under the title. The live record does not say whether a mob is
+a baby, so the card cannot. The card is brought up to date with every frame
 drawn. Copy puts `x y z` on the clipboard, and where there is no clipboard
 to write to selects the numbers instead. Close or Escape shuts the card. A
 drag that starts on a marker pans the map and opens nothing.
@@ -1165,7 +1228,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
-| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>` | Session required. `hits`, each `kind` (`biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z` |
+| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>` | Session required. `hits`, each `kind` (`biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z` |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /healthz` | Liveness, on both listeners |
 
