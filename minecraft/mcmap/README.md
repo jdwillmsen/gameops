@@ -432,13 +432,24 @@ file names and language keys.
 
 Each picture is asked for by a path known ahead, so the fetch still makes
 one listing request. Each is bounded, decoded and encoded again exactly as
-a mob icon is. Where the pin has no such file, or has one that is not a
-small PNG, that one picture is left out, logged under `missing`, and
-everything else is served; the same goes for the language file. Only a
-failure to reach the source fails the fetch, which is then tried again as
-above, and until it succeeds there are no pictures and every name is a
-tidied id. A volume filled by a version that fetched only mob icons is
-fetched again once.
+a mob icon is.
+
+None of this can cost the mob icons. Where a picture or the language file
+cannot be had, that one thing is left out, everything else is served, and
+it is asked for again by itself, with no listing request:
+
+- **The source answered that it does not hold it** (no such file at the
+  pin, or one that is too large or not a small PNG): asked again at each
+  start and once a day. It is logged under `missing` when found and not
+  again for every asking after.
+- **The source could not be asked** (no route, a 429 or a 5xx): asked again
+  after a minute, then at doubling intervals up to an hour, and logged
+  once.
+
+A volume filled by a version that fetched only mob icons keeps serving
+them: they are taken as they are, never fetched again, and the pictures
+and names are added to them as above. Until those arrive there are no
+pictures and every name is a tidied id.
 
 ## Markers
 

@@ -260,14 +260,11 @@ func TestTheVolumeIsNotTrustedForWhatAnEarlierVersionOrADamagedIndexLeft(t *test
 		}
 	}
 	for name, harm := range map[string]func(t *testing.T, home string){
-		// What a version that fetched only mob icons wrote: complete as
-		// far as it knew, and holding no pictures or names at all.
-		"an index from before pictures and names": rewrite(func(idx *index) { idx.Format, idx.Pictures, idx.Lang = 0, nil, nil }),
-		"a name that is markup for a terminal":    rewrite(func(idx *index) { idx.Lang["entity.cow.name"] = "Cow\x1b[31m" }),
-		"a name too long to be one":               rewrite(func(idx *index) { idx.Lang["entity.cow.name"] = strings.Repeat("x", MaxNameLength+1) }),
-		"a key the language file has no such":     rewrite(func(idx *index) { idx.Lang["gui.ok"] = "OK" }),
-		"a picture key that is a path":            rewrite(func(idx *index) { idx.Pictures["../../etc/passwd"] = idx.Pictures["bed/red"] }),
-		"an entity type that is not one":          rewrite(func(idx *index) { idx.Entities = append(idx.Entities, "<script>") }),
+		"a name that is markup for a terminal": rewrite(func(idx *index) { idx.Lang["entity.cow.name"] = "Cow\x1b[31m" }),
+		"a name too long to be one":            rewrite(func(idx *index) { idx.Lang["entity.cow.name"] = strings.Repeat("x", MaxNameLength+1) }),
+		"a key the language file has no such":  rewrite(func(idx *index) { idx.Lang["gui.ok"] = "OK" }),
+		"a picture key that is a path":         rewrite(func(idx *index) { idx.Pictures["../../etc/passwd"] = idx.Pictures["bed/red"] }),
+		"an entity type that is not one":       rewrite(func(idx *index) { idx.Entities = append(idx.Entities, "<script>") }),
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

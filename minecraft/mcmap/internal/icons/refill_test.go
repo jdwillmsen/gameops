@@ -2,9 +2,15 @@ package icons
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"image/color"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -273,5 +279,165 @@ func TestFillTellsWhatTheSourceDoesNotHoldFromWhatItCouldNotBeAskedFor(t *testin
 	// Found out of reach once, not once for each of forty-three files.
 	if n := requests.Load(); n > fetchWorkers {
 		t.Errorf("%d requests to a source that refused the first", n)
+	}
+}
+
+// earlierVolume writes a pin's mob icons the way the version before marker
+// pictures and names did: an index of a pin and its icons, and no more.
+func earlierVolume(t *testing.T, dir, ref string) {
+	t.Helper()
+	m := &Mobs{Dir: dir, Ref: ref}
+	home := m.home()
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	icons := map[string]string{}
+	for kind, body := range map[string][]byte{"cow": picture(t, 16, 16, red), "pig": picture(t, 16, 16, blue)} {
+		sum := sha256.Sum256(body)
+		icons[kind] = hex.EncodeToString(sum[:])
+		if err := os.WriteFile(filepath.Join(home, icons[kind]+".png"), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"ref": ref, "icons": icons})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, indexFile), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Rolling this version out must never take away what the last one was
+// serving. A volume it filled holds mob icons and nothing else; with the
+// source out of reach, or its listing rationed out, those are still drawn,
+// the page has no pictures and names by tidied ids, and when the source
+// answers everything else arrives without the icons being fetched again.
+func TestAnEarlierVersionsMobIconsAreServedUntilTheRestCanBeFetched(t *testing.T) {
+	dir := t.TempDir()
+	earlierVolume(t, dir, testRef)
+	s := newSamples(t)
+	var up atomic.Bool
+	var listings, definitions atomic.Int64
+	inner := s.srv.Config.Handler
+	s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/list/") {
+			listings.Add(1)
+		}
+		if strings.Contains(r.URL.Path, "/resource_pack/entity/") {
+			definitions.Add(1)
+		}
+		if !up.Load() {
+			http.Error(w, "API rate limit exceeded", http.StatusForbidden)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	source := s.source()
+	var fills atomic.Int64
+	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: source.Fetch, RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond,
+		Fill: func(ctx context.Context, missing []string) (Set, error) {
+			fills.Add(1)
+			return source.Fill(ctx, missing)
+		}}
+	done := make(chan struct{})
+	go func() { m.Run(t.Context()); close(done) }()
+
+	waitFor(t, "the source to be asked more than once", func() bool { return fills.Load() >= 3 })
+	for kind, want := range map[string]color.NRGBA{"cow": red, "pig": blue} {
+		if raw, ok := m.Icon(kind); !ok || colourOf(t, raw) != want {
+			t.Errorf("with the source out of reach the %s icon the volume held is not served", kind)
+		}
+	}
+	if version, types := m.Listing(); version == "" || len(types) != 2 {
+		t.Errorf("mob icons listed as %v at version %q", types, version)
+	}
+	if version, keys := m.Pictures(); version != "" || len(keys) != 0 {
+		t.Errorf("pictures listed with none fetched: %v at %q", keys, version)
+	}
+	if got := m.Names().Entity("villager_v2"); got != "Villager" {
+		t.Errorf("with no names fetched a villager is %q, want the tidied id", got)
+	}
+	if got := m.Names().Table(nil).Entities["cow"]; got != "Cow" {
+		t.Errorf("a type the volume has an icon for is named %q in the table", got)
+	}
+
+	up.Store(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the rest was never fetched after the source came back")
+	}
+	if _, keys := m.Pictures(); !slices.Equal(keys, everyPicture()) {
+		t.Errorf("pictures after the source came back = %v", keys)
+	}
+	if got := m.Names().Entity("villager_v2"); got != "Synthetic Villager" {
+		t.Errorf("after the source came back a villager is %q", got)
+	}
+	if raw, ok := m.Icon("pig"); !ok || colourOf(t, raw) != blue {
+		t.Error("the pig icon the volume held was lost when the rest arrived")
+	}
+	// The icons were whole already: neither the rationed listing nor a
+	// single definition was asked for, down or up.
+	if listings.Load() != 0 || definitions.Load() != 0 {
+		t.Errorf("%d listing and %d definition requests to add pictures and names to icons already held", listings.Load(), definitions.Load())
+	}
+
+	// And it is on the volume as this version writes it: nothing to ask.
+	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t), Fill: func(_ context.Context, missing []string) (Set, error) {
+		t.Errorf("asked again for %v", missing)
+		return Set{}, nil
+	}}
+	again.Run(t.Context())
+	if _, keys := again.Pictures(); len(keys) != len(everyPicture()) {
+		t.Errorf("%d pictures read back from the volume", len(keys))
+	}
+	if _, types := again.Listing(); len(types) != 2 {
+		t.Errorf("mob icons read back as %v", types)
+	}
+}
+
+// On a first start the same holds within one fetch: the icons it read are
+// served and kept though the pictures and the names could not be asked
+// for, and those follow on the short retry, not a day later.
+func TestMobIconsJustFetchedAreServedThoughTheRestCouldNotBeAskedFor(t *testing.T) {
+	s := newSamples(t)
+	var up atomic.Bool
+	inner := s.srv.Config.Handler
+	s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mine := strings.Contains(r.URL.Path, "/textures/blocks/") || strings.Contains(r.URL.Path, "/textures/entity/") || strings.Contains(r.URL.Path, "/texts/") ||
+			strings.Contains(r.URL.Path, "/items/bed_") || strings.Contains(r.URL.Path, "/items/compass") || strings.Contains(r.URL.Path, "/items/netherbrick")
+		if mine && !up.Load() {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	source := s.source()
+	dir := t.TempDir()
+	var fills atomic.Int64
+	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: source.Fetch, RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond,
+		Fill: func(ctx context.Context, missing []string) (Set, error) {
+			fills.Add(1)
+			return source.Fill(ctx, missing)
+		}}
+	done := make(chan struct{})
+	go func() { m.Run(t.Context()); close(done) }()
+	waitFor(t, "the rest to be asked for again", func() bool { return fills.Load() >= 2 })
+	if _, types := m.Listing(); len(types) != 3 {
+		t.Fatalf("mob icons = %v: the fetch that read them was thrown away for what it could not reach", types)
+	}
+	// Kept, too: a restart now would not need the listing again.
+	if kept, _, err := (&Mobs{Dir: dir, Ref: testRef}).load(); err != nil || len(kept.Mobs) != 3 || len(kept.Missing) == 0 {
+		t.Errorf("on the volume: %d mob icons, missing %v, %v", len(kept.Mobs), kept.Missing, err)
+	}
+	up.Store(true)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the rest was never fetched after the source came back")
+	}
+	if _, keys := m.Pictures(); !slices.Equal(keys, everyPicture()) {
+		t.Errorf("pictures after the source came back = %v", keys)
 	}
 }

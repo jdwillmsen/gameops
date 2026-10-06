@@ -304,11 +304,11 @@ func TestABedTheAtlasDoesNotListIsLeftOut(t *testing.T) {
 	}
 }
 
-// Unreachable is not the same as absent: the source may answer the next
-// time it is asked, so the whole fetch fails and is tried again, as it is
-// for a mob icon.
-func TestAMarkerPictureTheSourceFailsOnFailsTheFetch(t *testing.T) {
-	for _, path := range []string{"/textures/blocks/barrel_side.png", "/texts/en_US.lang"} {
+// Unreachable is not the same as absent, and neither is a reason to throw
+// away the mob icons the same fetch has just read: the fetch succeeds,
+// and what could not be asked for is named as that, to be tried again.
+func TestAPictureOrTheNamesTheSourceFailsOnDoesNotCostTheMobIcons(t *testing.T) {
+	for path, what := range map[string]string{"/textures/blocks/barrel_side.png": "container/barrel", "/texts/en_US.lang": langPath} {
 		s := newSamples(t)
 		inner := s.srv.Config.Handler
 		s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -318,8 +318,23 @@ func TestAMarkerPictureTheSourceFailsOnFailsTheFetch(t *testing.T) {
 			}
 			inner.ServeHTTP(w, r)
 		})
-		if set, err := s.source().Fetch(t.Context()); err == nil {
-			t.Errorf("a fetch that could not reach %s reported success with %d pictures", path, len(set.Pictures))
+		set, err := s.source().Fetch(t.Context())
+		if err != nil {
+			t.Fatalf("a fetch that could not reach %s failed whole: %v", path, err)
+		}
+		if len(set.Mobs) != 3 {
+			t.Errorf("%d mob icons kept when %s could not be reached, want all 3", len(set.Mobs), path)
+		}
+		if !slices.Contains(set.Unreached, what) || !slices.Contains(set.Missing, what) {
+			t.Errorf("%s is not named as unreached: missing %v, unreached %v", what, set.Missing, set.Unreached)
+		}
+		if _, held := set.Pictures[what]; held {
+			t.Errorf("%s is held without having been fetched", what)
+		}
+		for _, other := range set.Unreached {
+			if !slices.Contains(set.Missing, other) {
+				t.Errorf("%s is unreached and not missing", other)
+			}
 		}
 	}
 }
