@@ -169,7 +169,10 @@ Recorded as it was done, because two steps did not go as designed.
    status behind it, so renaming a status does not rename its column.
    Adding a column through the board creates its status in every work type's
    workflow, which is what keeps the five types on the same five statuses.
-4. **Players.** The owner invites the other two.
+4. **Players.** Inviting someone to the site is not enough. A new site
+   member could not see or create cards in the space until they were also
+   added to its Member role, so each invite is followed by that. Members
+   can create and move cards; only the owner administers the space.
 
 ## Verification
 
