@@ -285,6 +285,9 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   border: 1.5px dashed var(--kind);
   border-radius: 50%;
 }
+/* The world spawn is a diamond, which no kind of structure is. */
+.key.spawn { width: 0.6rem; height: 0.6rem; margin: 0 0.05rem; background: var(--text); border: 1px solid #0b0c0e; transform: rotate(45deg); }
+.structure.spawn span { width: 13px; height: 13px; margin: 2.5px; background: var(--text); border: 1.5px solid #0b0c0e; transform: rotate(45deg); }
 /* Predicted where the world has already generated and recorded nothing. */
 .structure.predicted.doubted span { opacity: 0.55; text-decoration: line-through; }
 
