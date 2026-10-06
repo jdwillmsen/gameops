@@ -1165,9 +1165,9 @@ opens at the same place.
 | `mcmap_markers_left_out{dimension,kind}` | Markers the last scan found beyond the limit for their kind |
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
-| `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume |
-| `mcmap_icons_marker_pictures` | Marker and structure pictures held, 42 when whole. Zero means every marker is a ring and every structure a letter |
-| `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id |
+| `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume, or that `ICONS_ENABLED=false` |
+| `mcmap_icons_marker_pictures` | Marker and structure pictures held, 42 when whole. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
+| `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 | `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind}` | Structures on each layer at the last survey |
 | `mcmap_structures_seed_verified` | 1 while recorded structures are where the seed puts them. 0 means nothing is being predicted |
