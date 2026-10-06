@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,8 +183,8 @@ func TestSearchFindsOnlyThePlayersOwnWaypoints(t *testing.T) {
 			t.Errorf("the agent was asked for %q", asked)
 		}
 	}
-	if n := len(waypoints.asked); n != 7 {
-		t.Errorf("the agent was asked %d times, want once a search", n)
+	if n := len(waypoints.asked); n != 2 {
+		t.Errorf("the agent was asked %d times, want once a player", n)
 	}
 }
 
@@ -257,5 +260,122 @@ func TestSearchBoundsItsAnswerAndItsQuestion(t *testing.T) {
 	}
 	if rec := do(s.Handler(), "GET", "/api/search?dimension=overworld&x=0&z=0&q="+strings.Repeat("a", 64), "", me); rec.Code != http.StatusOK {
 		t.Errorf("a query of 64 characters = %d, want 200", rec.Code)
+	}
+}
+
+// Typing a query is a search a keystroke, and the agent's calls are few
+// and shared with the waypoints list.
+func TestSearchAsksTheAgentOncePerPlayerInAHalfMinute(t *testing.T) {
+	s, waypoints := withEverything(t)
+	clock := time.Now()
+	s.Sessions.Now = func() time.Time { return clock }
+	me, her := session(s, steve), session(s, alex)
+
+	for _, query := range []string{"b", "ba", "bas", "base"} {
+		clock = clock.Add(5 * time.Second)
+		if got := search(t, s, query, me); got.Waypoints != "searched" {
+			t.Fatalf("%q: waypoints %q", query, got.Waypoints)
+		}
+	}
+	if !reflect.DeepEqual(waypoints.asked, []string{steve.XUID}) {
+		t.Errorf("after four searches the agent was asked %v", waypoints.asked)
+	}
+	if got := search(t, s, "vault", her); describe(got) != "waypoint:alex's vault@nether" {
+		t.Errorf("alex: %s", describe(got))
+	}
+	if got := search(t, s, "vault", me); describe(got) != "" {
+		t.Errorf("steve was shown %s", describe(got))
+	}
+	if got := search(t, s, "base", me); describe(got) != "waypoint:steve's base@overworld" {
+		t.Errorf("steve: %s", describe(got))
+	}
+	if !reflect.DeepEqual(waypoints.asked, []string{steve.XUID, alex.XUID}) {
+		t.Errorf("the agent was asked %v, want one call each", waypoints.asked)
+	}
+
+	clock = clock.Add(searchWaypointTTL)
+	search(t, s, "base", me)
+	if n := len(waypoints.asked); n != 3 {
+		t.Errorf("after the list expired the agent was asked %d times in all, want 3", n)
+	}
+}
+
+func TestSearchRetriesAfterTheAgentFailed(t *testing.T) {
+	s, waypoints := withEverything(t)
+	me := session(s, steve)
+	waypoints.err = errors.New("connection refused")
+	if got := search(t, s, "base", me); got.Waypoints != "unavailable" {
+		t.Fatalf("waypoints %q", got.Waypoints)
+	}
+	waypoints.mu.Lock()
+	waypoints.err = nil
+	waypoints.mu.Unlock()
+	if got := search(t, s, "base", me); got.Waypoints != "searched" || describe(got) != "waypoint:steve's base@overworld" {
+		t.Errorf("after the agent recovered: %s (%s)", describe(got), got.Waypoints)
+	}
+	if n := len(waypoints.asked); n != 2 {
+		t.Errorf("the agent was asked %d times, want a retry after the failure", n)
+	}
+}
+
+type slowWaypoints struct {
+	release chan struct{}
+	calls   int32
+	mu      sync.Mutex
+}
+
+func (f *slowWaypoints) Waypoints(context.Context, string) ([]markers.Waypoint, int, error) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	<-f.release
+	return []markers.Waypoint{{Name: "base", Dimension: "overworld"}}, 0, nil
+}
+
+func TestSearchSharesOneAgentCallBetweenConcurrentSearches(t *testing.T) {
+	s, _ := withEverything(t)
+	slow := &slowWaypoints{release: make(chan struct{})}
+	s.Waypoints = slow
+	me := session(s, steve)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() { defer wg.Done(); search(t, s, "base", me) }()
+	}
+	time.Sleep(50 * time.Millisecond)
+	close(slow.release)
+	wg.Wait()
+	if slow.calls != 1 {
+		t.Errorf("eight simultaneous searches made %d agent calls, want 1", slow.calls)
+	}
+}
+
+func TestSearchHoldsWaypointsForAFixedNumberOfPlayers(t *testing.T) {
+	var c searchCache
+	clock := time.Now()
+	now := func() time.Time { return clock }
+	src := &fakeWaypoints{by: map[string][]markers.Waypoint{}}
+	for i := range searchWaypointPlayers + 20 {
+		clock = clock.Add(time.Millisecond)
+		if _, err := c.playerWaypoints(context.Background(), src, fmt.Sprint(i), now); err != nil {
+			t.Fatal(err)
+		}
+		if len(c.waypoints) > searchWaypointPlayers {
+			t.Fatalf("%d players held", len(c.waypoints))
+		}
+	}
+	// The oldest went first; the newest is still held.
+	if _, ok := c.waypoints["0"]; ok {
+		t.Error("the oldest player is still held")
+	}
+	if _, ok := c.waypoints[fmt.Sprint(searchWaypointPlayers+19)]; !ok {
+		t.Error("the newest player was dropped")
+	}
+	clock = clock.Add(time.Hour)
+	if _, err := c.playerWaypoints(context.Background(), src, "new", now); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.waypoints) != 1 {
+		t.Errorf("%d players held after everyone expired, want 1", len(c.waypoints))
 	}
 }
