@@ -13,6 +13,7 @@
 // Bedrock client has rather than problems this agent has:
 //
 //   - mcauth   device-code login and token caching
+//   - mcdial   logging in without leaving a session behind on giving up
 //   - liveness respawn on death, and knowing whether the client is alive
 //   - logging  structured JSON logging
 //   - mcproto  staying connectable across protocol-number-only bumps
