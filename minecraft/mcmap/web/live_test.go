@@ -64,7 +64,12 @@ func TestMapPicturesAreDecodedOnceAndStampedOnTheCanvas(t *testing.T) {
 	}
 	// Only a picture the server lists is asked for, and a listed one that
 	// fails leaves whatever wanted it drawn as it was.
-	for _, need := range []string{"listing.mobs.types.has(type)", "listing.pictures.keys.has(key) && KEY.test(key)", "failed.set(address, Date.now());", "canvas.hidden = !drawn;"} {
+	// A full cache gives up only what no listed version can ask for, or
+	// everything on the map would be fetched and decoded again.
+	for _, need := range []string{
+		"listing.mobs.types.has(type)", "listing.pictures.keys.has(key) && KEY.test(key)", "failed.set(address, Date.now());", "canvas.hidden = !drawn;",
+		"if (bitmaps.size > 1024) prune();", "const stale = (address) => !listed.has(address.slice(address.lastIndexOf('v=') + 2));",
+	} {
 		if !bytes.Contains(icons, []byte(need)) {
 			t.Errorf("icons.js no longer has %s", need)
 		}
