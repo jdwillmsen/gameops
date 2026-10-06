@@ -649,6 +649,16 @@ grey, which is how one biome is picked out. `GET /api/biomes` gives the
 colours for the legend and a `version`; a tile asked for with `v=<version>`
 is kept by the browser for good.
 
+**On the page.** The Biomes group has one row, off until the viewer turns
+it on. On, it lays the tiles over the terrain and lists under the row the
+biomes the dimension holds, largest first, each with its colour and its
+share of the area. Choosing one asks for `biome=` tiles, so only it keeps
+its colour; choosing it again, or All biomes, goes back. Resting the
+pointer on the map, or clicking it, names the biome at that block in the
+footer. The listing is asked for again each minute while the overlay is on,
+and a new `version` redraws it. A service without biomes answers 404 to the
+listing, and the page then has no Biomes group at all.
+
 **Finding one.** Chunks holding a biome that touch, or have one chunk
 between them, are one *stretch* of it: joined only edge to edge, a single
 island comes out as a dozen. `GET /api/biomes/nearest` gives the nearest
@@ -822,6 +832,8 @@ row.setCount(1234);     // or null for none
 row.setNote('Not surveyed yet'); // or '' for none
 row.onToggle((on) => { /* draw or clear */ });
 row.setAvailable(false);         // greyed out, and skipped by All and None
+row.setEnabled(true);            // switch it as the viewer would; kept, and onToggle is told
+row.setBody(node);               // the layer's own controls under the row; null for none
 row.remove();
 ```
 
