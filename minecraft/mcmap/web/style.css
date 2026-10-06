@@ -229,6 +229,38 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .leaflet-tooltip.live-name.me { border-color: var(--accent); color: var(--accent); }
 .leaflet-tooltip.live-name::before, .leaflet-tooltip.live-tip::before { display: none; }
 
+/* The card about one mob or player. It sits under the layer panel in the
+   stack, so where the two meet the panel is never the one covered. */
+.inspect {
+  position: absolute;
+  left: 0.6rem;
+  bottom: 0.6rem;
+  z-index: 1090;
+  display: grid;
+  gap: 0.45rem;
+  width: 17rem;
+  max-width: calc(100% - 1.2rem);
+  padding: 0.5rem 0.6rem;
+  background: rgba(29, 32, 38, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.inspect.adrift { border-color: #f0a35e; }
+.inspect-head { display: flex; align-items: flex-start; gap: 0.5rem; }
+.inspect-head canvas { flex: none; width: 32px; height: 32px; }
+.inspect-title { flex: 1; min-width: 0; display: grid; }
+.inspect-title h2 { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
+.inspect-title span { color: var(--dim); }
+.inspect-head button { flex: none; background: none; color: var(--dim); padding: 0.15rem 0.45rem; }
+/* The letters are drawn, not written, so that selecting the numbers takes
+   exactly what the game's commands accept. */
+.inspect-coords { font-variant-numeric: tabular-nums; word-spacing: 0.5rem; user-select: all; }
+.inspect-coords span::before { content: attr(data-axis); margin-right: 0.3rem; color: var(--dim); }
+.inspect-note { margin: 0; color: #f0a35e; font-variant-numeric: tabular-nums; }
+.inspect-note strong { font-weight: 600; }
+.inspect-actions { display: flex; gap: 0.4rem; }
+.inspect-actions button { flex: 1; }
+
 /* While logged out the map and its controls are not there to use. */
 .locked .stage, .locked .tabs, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .foot { display: none; }
 
@@ -277,4 +309,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 @media (max-width: 640px) {
   .goto { margin-left: 0; }
   input[type="number"] { width: 5rem; }
+  .inspect { right: 0.6rem; width: auto; }
+  /* An open panel stops above the card instead of running over it. */
+  .inspecting .layers { max-height: calc(100% - 1.8rem - var(--inspect-height, 9rem)); }
 }

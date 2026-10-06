@@ -628,6 +628,38 @@ the map under a notice saying it is paused and how old the positions are.
 Resuming opens the stream again. As before, the stream is also closed
 while the tab is hidden.
 
+**Inspecting and following.** A click or a tap on a live mob or player
+opens a card in the bottom left corner of the map: its picture as the map
+draws it, its name tag or gamertag (or the type, for a mob with no name
+tag), its type, the dimension, and `x y z` to the tenth of a block, which
+is what the pack sends. The card is brought up to date with every frame
+drawn. Copy puts `x y z` on the clipboard, and where there is no clipboard
+to write to selects the numbers instead. Close or Escape shuts the card. A
+drag that starts on a marker pans the map and opens nothing.
+
+Follow keeps the map centred on the entity at the zoom the viewer has, and
+draws a solid ring round it; an entity that is only inspected has a dashed
+one. Dragging the map or panning it with the arrow keys turns Follow off
+and leaves the card open. Zooming does not.
+
+The card finds its entity again by the id each record carries (`i`), which
+the game gives a player and a mob alike and keeps for as long as they
+exist. It never matches by position. When a whole frame of the entity's
+dimension comes without that id (it died or despawned, its chunk unloaded,
+or it fell outside `LIVE_MAX_ENTITIES`), the card says it is no longer
+tracked, keeps the last coordinates with how long ago they were seen, and
+turns Follow off; if the same id comes back, the card picks it up again
+with Follow still off. A stream covers one dimension, so for a player the
+page then opens the other dimensions' streams, reads the first frame of
+each and shuts them, up to three times three seconds apart, and says which
+dimension the player is in if it finds them. Switching the map to another
+dimension turns Follow off and the card says it is not tracking. While
+live updates are paused the card says so and how old its position is, and
+resuming carries on with the same id.
+
+A marker is drawn on a canvas and cannot take the keyboard's focus, so
+opening the card needs a pointer; everything on the card is a button.
+
 Everything here is a native button, checkbox or select: each is reached
 with Tab, worked with Space or Enter (the arrow keys, for the interval),
 and outlined while it has the focus.

@@ -45,3 +45,33 @@ func TestLiveLayerDrawsPicturesOnItsCanvas(t *testing.T) {
 		t.Fatalf("found %d picture addresses in live.js, want the mob's and the head's", len(built))
 	}
 }
+
+// The card about one mob or player shows a gamertag or a name tag, which a
+// player chose, and finds its entity again by the id the game gave it. A
+// card that settled for the nearest marker would go on reporting some other
+// entity's position under the first one's name.
+func TestInspectCardSetsTextAndTracksById(t *testing.T) {
+	page, err := fs.ReadFile(FS, "index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"inspect", "inspect-picture", "inspect-name", "inspect-kind", "inspect-coords",
+		"inspect-x", "inspect-y", "inspect-z", "inspect-note", "inspect-follow", "inspect-copy", "inspect-close"} {
+		if !bytes.Contains(page, []byte(`id="`+id+`"`)) {
+			t.Errorf("index.html has no element with id %s", id)
+		}
+	}
+	js, err := fs.ReadFile(FS, "live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, need := range []string{
+		"if (node.textContent !== s) node.textContent = s;",
+		"const held = entities.get(picked.key);",
+		"map.on('dragstart', unfollow);",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
+		}
+	}
+}
