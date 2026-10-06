@@ -254,7 +254,11 @@ func (s *scan) blockEntities(pos chunks.Pos, v []byte) {
 			case "z":
 				e.z, e.hasZ = intOf(tag, payload)
 			case "color":
-				e.color, _ = intOf(tag, payload)
+				// Only a whole number is a colour. Anything else read as
+				// one would come out as nought, which is white.
+				if color, ok := intOf(tag, payload); ok {
+					e.color = color
+				}
 			case "pairx":
 				e.pairX, e.hasPairX = intOf(tag, payload)
 			case "pairz":
