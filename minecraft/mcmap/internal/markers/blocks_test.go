@@ -209,3 +209,88 @@ func TestScan_ABedWhoseColourIsNotANumberHasNone(t *testing.T) {
 		t.Errorf("bed colours by x = %v, want %v", got, want)
 	}
 }
+
+func shulkerAt(x, y, z int32) map[string]any {
+	return map[string]any{"id": "ShulkerBox", "x": x, "y": y, "z": z, "Items": stack}
+}
+
+// A record can claim any height. One the dimension does not have must not
+// be looked up: the slice's index is a single byte, so 4166 would read the
+// slice at 64 to 79 and take its colour from whatever block is there.
+func TestScan_DoesNotLookUpABlockAtAHeightTheDimensionLacks(t *testing.T) {
+	red := func(y int) []byte {
+		return slice(t, 9, placed{4, y, 1, "minecraft:red_shulker_box"}, placed{5, y, 1, "minecraft:trapped_chest"})
+	}
+	w, _ := scanOf(t,
+		blockEntities(t, 0, 0, 0,
+			shulkerAt(4, 4166, 1), chestAt(5, 4166, 1, nil),
+			shulkerAt(4, -4026, 1),
+			shulkerAt(4, 320, 1), shulkerAt(4, -65, 1),
+			// The top and the bottom of what there is are read.
+			shulkerAt(4, 319, 1), shulkerAt(4, -64, 1),
+		),
+		blockEntities(t, 1, 0, 0, shulkerAt(4, 128, 1), shulkerAt(4, 127, 1), shulkerAt(4, -1, 1)),
+		blockEntities(t, 2, 0, 0, shulkerAt(4, 256, 1), shulkerAt(4, 255, 1)),
+		// 4166 and -4026 both wrap to the slice at 64 to 79.
+		subChunk(0, 0, 0, 4, red(6)),
+		subChunk(0, 0, 0, 20, red(0)), subChunk(0, 0, 0, -5, red(15)),
+		subChunk(0, 0, 0, 19, red(15)), subChunk(0, 0, 0, -4, red(0)),
+		subChunk(1, 0, 0, 8, red(0)), subChunk(1, 0, 0, 7, red(15)), subChunk(1, 0, 0, -1, red(15)),
+		subChunk(2, 0, 0, 16, red(0)), subChunk(2, 0, 0, 15, red(15)),
+	)
+	for dim, want := range map[chunks.Dimension]map[int32]string{
+		chunks.Overworld: {4166: "", -4026: "", 320: "", -65: "", 319: "red", -64: "red"},
+		chunks.Nether:    {128: "", 127: "red", -1: ""},
+		chunks.End:       {256: "", 255: "red"},
+	} {
+		got := map[int32]string{}
+		for _, m := range w[dim].Containers {
+			if m.Kind == "shulker" {
+				got[m.Y] = m.Colour
+			}
+			if m.Trapped {
+				t.Errorf("%s: the chest at y=%d is trapped by a block it is not", dim.Name(), m.Y)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: shulker colours by height = %v, want %v", dim.Name(), got, want)
+		}
+	}
+}
+
+func TestScan_LooksUpBlocksInChunksWestAndNorthOfTheOrigin(t *testing.T) {
+	w, _ := scanOf(t,
+		blockEntities(t, 0, -1, -2, shulkerAt(-2, 70, -20), chestAt(-16, 70, -32, nil)),
+		blockEntities(t, 1, -3, 0, shulkerAt(-33, 5, 15)),
+		subChunk(0, -1, -2, 4, slice(t, 9, placed{14, 6, 12, "minecraft:lime_shulker_box"}, placed{0, 6, 0, "minecraft:trapped_chest"})),
+		// The same blocks where the positions would land if a sign were lost.
+		subChunk(0, 0, 1, 4, slice(t, 9, placed{2, 6, 4, "minecraft:red_shulker_box"})),
+		subChunk(1, -3, 0, 0, slice(t, 9, placed{15, 5, 15, "minecraft:cyan_shulker_box"})),
+	)
+	if want := []Marker{{X: -2, Y: 70, Z: -20, Kind: "shulker", Colour: "lime"}, {X: -16, Y: 70, Z: -32, Kind: "chest", Trapped: true}}; !reflect.DeepEqual(w[chunks.Overworld].Containers, want) {
+		t.Errorf("overworld = %+v, want %+v", w[chunks.Overworld].Containers, want)
+	}
+	if want := []Marker{{X: -33, Y: 5, Z: 15, Kind: "shulker", Colour: "cyan"}}; !reflect.DeepEqual(w[chunks.Nether].Containers, want) {
+		t.Errorf("nether = %+v, want %+v", w[chunks.Nether].Containers, want)
+	}
+}
+
+func TestScan_ReadsSlicesOfEveryPaletteWidth(t *testing.T) {
+	// Twenty kinds of block need five bits each, and five bits do not
+	// divide a word evenly; a real chunk near a base is like this.
+	blocks := []placed{{7, 3, 9, "minecraft:pink_shulker_box"}}
+	for i := range 20 {
+		blocks = append(blocks, placed{i % 16, 8 + i/16, 2, "minecraft:filler_" + string(rune('a'+i))})
+	}
+	w, _ := scanOf(t,
+		blockEntities(t, 0, 0, 0, shulkerAt(7, 3, 9), shulkerAt(2, 85, 2)),
+		subChunk(0, 0, 0, 0, slice(t, 9, blocks...)),
+		// A slice of one block throughout has no width, no indexes and no
+		// count: only the one name.
+		subChunk(0, 0, 0, 5, append([]byte{9, 1, 5, 0}, record(t, map[string]any{"name": "minecraft:undyed_shulker_box"})...)),
+	)
+	want := []Marker{{X: 2, Y: 85, Z: 2, Kind: "shulker", Colour: Undyed}, {X: 7, Y: 3, Z: 9, Kind: "shulker", Colour: "pink"}}
+	if !reflect.DeepEqual(w[chunks.Overworld].Containers, want) {
+		t.Errorf("containers = %+v, want %+v", w[chunks.Overworld].Containers, want)
+	}
+}
