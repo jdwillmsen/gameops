@@ -6,6 +6,9 @@
 // chunks nobody has generated yet, and is drawn hollow and dashed. The
 // server keeps the seed and only predicts once the calculation has been
 // seen to agree with what the world recorded.
+//
+// The world spawn comes with the overworld's structures and has a row of
+// its own: it is neither recorded as a structure nor predicted.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -36,6 +39,7 @@
     ['outpost', 'Outposts', 'dot outpost'],
     ['witch_hut', 'Witch huts', 'dot witch-hut'],
     ['village', 'Villages', 'dot village'],
+    ['spawn', 'World spawn', 'key spawn'],
   ];
   const UNKNOWN = { label: 'Structure', letter: '?', color: '#9aa3ad' };
 
@@ -81,8 +85,8 @@
 
   // A marker that can be reached with the keyboard, saying where it is to
   // whoever cannot see the tooltip that focus opens.
-  function mark(latlng, kind, sort, label) {
-    const marker = L.marker(latlng, { icon: icon(kind, sort) })
+  function mark(latlng, drawn, label) {
+    const marker = L.marker(latlng, { icon: drawn })
       .bindTooltip(label, { direction: 'top', offset: [0, -8], className: 'live-tip' });
     marker.on('add', () => {
       const node = marker.getElement();
@@ -106,6 +110,10 @@
     return groups[sort].get(kind);
   };
 
+  const spawnLayer = L.layerGroup();
+  // Whether the dimension shown has the world spawn in it.
+  let spawned = false;
+
   let shown = null; // the dimension the layers hold
   // Whether the server has looked at this dimension yet. Until it has,
   // there is no count to give and no reason for an empty layer.
@@ -121,6 +129,8 @@
 
   function clear() {
     for (const sort of Object.values(groups)) for (const group of sort.values()) group.clearLayers();
+    spawnLayer.clearLayers();
+    spawned = false;
     shown = null;
     surveyed = false;
     fetchedAt = 0;
@@ -151,7 +161,7 @@
       }).addTo(group);
       // And a mark that stays the same size, since a box 58 blocks wide is
       // less than a pixel from far out.
-      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], s.kind, 'recorded', label).addTo(group);
+      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded'), label).addTo(group);
     }
     for (const p of data.predicted || []) {
       const k = KINDS[p.kind] || UNKNOWN;
@@ -160,8 +170,16 @@
           'This area is already generated and the world recorded none here.')
         : tip(`${k.label} · predicted from the seed`, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`,
           'Not generated yet: nobody has been here.');
-      mark([p.z + 0.5, p.x + 0.5], p.kind, p.generated ? 'predicted doubted' : 'predicted', label)
+      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, p.generated ? 'predicted doubted' : 'predicted'), label)
         .addTo(groupOf('predicted', p.kind));
+    }
+    const spawn = data.spawn;
+    if (spawn && Number.isFinite(spawn.x) && Number.isFinite(spawn.z)) {
+      spawned = true;
+      // A world that has not resolved its spawn height sends none.
+      const where = Number.isFinite(spawn.y) ? `X ${fmt(spawn.x)}, Y ${fmt(spawn.y)}, Z ${fmt(spawn.z)}` : `X ${fmt(spawn.x)}, Z ${fmt(spawn.z)}`;
+      const drawn = L.divIcon({ html: document.createElement('span'), className: 'structure spawn', iconSize: [18, 18], iconAnchor: [9, 9] });
+      mark([spawn.z + 0.5, spawn.x + 0.5], drawn, tip('World spawn', where)).addTo(spawnLayer);
     }
     counts = { recorded: (data.recorded || []).length, predicted: (data.predicted || []).length };
     more = { recorded: data.recordedMore || 0, predicted: data.predictedMore || 0 };
@@ -181,6 +199,8 @@
         if (!want && map.hasLayer(group)) map.removeLayer(group);
       }
     }
+    if (on('spawn') && !map.hasLayer(spawnLayer)) spawnLayer.addTo(map);
+    if (!on('spawn') && map.hasLayer(spawnLayer)) map.removeLayer(spawnLayer);
     paint();
   }
 
@@ -215,6 +235,8 @@
       rows.get(kind).setCount(surveyed ? kinds[kind] || 0 : null);
       rows.get(kind).setAvailable(filtering);
     }
+    // Greyed out in a dimension the spawn is not in.
+    rows.get('spawn').setAvailable(!surveyed || spawned);
   }
 
   async function load(dimension) {

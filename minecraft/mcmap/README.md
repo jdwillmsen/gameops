@@ -785,7 +785,8 @@ dimensions the row is greyed out. `web/slime.js` holds the function above
 letter for letter, which a test checks, and offers it as
 `window.mcmap.isSlimeChunk`.
 
-The world spawn is served with the overworld's structures.
+The world spawn is served with the overworld's structures, and the page
+marks it with a diamond under a World spawn row in the Structures group.
 
 ## Trails
 
