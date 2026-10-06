@@ -93,8 +93,7 @@
       return ['The seed puts a site here. Whether one is built depends on the biome, and this terrain is not generated yet.'];
     }
     if (p.generated && RECORDED_LATE.has(p.kind)) {
-      return ['This area is generated and its biome suits one, but the game has no record of one here.',
-        'It keeps a record only for a village a player has been near.'];
+      return ['This area is generated and its biome suits one, but the game has no record of one here: it keeps one only for a village a player has been near.'];
     }
     if (p.generated) return ['This area is already generated and the world recorded none here.'];
     return ['Not generated yet: nobody has been here.'];

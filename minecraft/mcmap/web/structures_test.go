@@ -33,7 +33,7 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		"const sort = p.candidate ? 'candidate' : 'predicted';",
 		"p.candidate ? 'possible here' : 'predicted from the seed'",
 		"this terrain is not generated yet.",
-		"the game has no record of one here.",
+		"the game has no record of one here: it keeps one only for a village a player has been near.",
 		// Struck through only where the world would have recorded one.
 		"const doubted = p.generated && !RECORDED_LATE.has(p.kind);",
 		".addTo(groupOf(sort, p.kind));",

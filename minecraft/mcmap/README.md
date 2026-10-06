@@ -574,15 +574,25 @@ there is no waypoint route and no waypoint row.
 
 ## Structures
 
-Two layers, drawn so that one cannot be taken for the other.
+Three layers, drawn so that none can be taken for another: what the world
+has recorded, what the seed predicts, and where the seed says a structure
+is only possible.
 
 Each kind is drawn as [its picture](#names-and-marker-pictures) and called
 by the game's name for it, in its row (Ocean Monuments) and its tooltip. A
 known structure's picture sits on a solid square framed in the kind's
 colour, over the box the world recorded; a predicted one's in a hollow,
-dashed circle. Until a picture is there its place is taken by the kind's
+dashed circle; a possible one's in a dotted circle, faint until the pointer
+is on it. Until a picture is there its place is taken by the kind's
 letter, as F, M, O, H or V. A kind this page has no row for is still
 named, by its id made into words.
+
+The panel has a row for each layer, Known, Predicted and Possible, and one
+for each kind that filters all three. A kind's row counts everything of the
+kind and says under it how that is made up (11 known, 2 predicted, 498
+possible), or why the kind is not predicted. Possible starts as the
+viewer's Predicted row is set. Every tooltip says which of the three a mark
+is, and why.
 
 **Known** structures are the ones this world has generated, read from its
 own save. For each chunk the server keeps the boxes in which a structure's
@@ -653,41 +663,126 @@ This layer is not every village. The same world has 97 villagers that
 stand in no village's box, in generated villages the game has made no
 record for, and those are not known here.
 
-**Predicted** structures are worked out from the seed, and are mostly of
-use for chunks nobody has generated yet. A site in a generated chunk that
-the world recorded nothing at is still drawn, struck through, because that
-disagreement is the evidence about whether the seed can be trusted. The
-generator cuts the world into regions and gives each one
-site, at an offset drawn from a Mersenne Twister seeded with the region,
-a 32-bit structure seed and a number per kind. The structure seed is the low
-32 bits of the world seed unless `STRUCTURE_SEED` supplies another, which is
-what this world needs; see below. Each kind is a
-`Predictor` in `internal/structures`, so one can be corrected alone.
+**Predicted** structures are worked out from the seed. The generator cuts
+the world into regions, a grid per kind, and gives each region one site at
+an offset drawn from a Mersenne Twister seeded with the region, a 32-bit
+structure seed and a number per kind. The structure seed is the low 32 bits
+of the world seed unless `STRUCTURE_SEED` supplies another, which is what
+this world needs; see below. Each kind is a `Predictor` in
+`internal/structures`, so one can be corrected alone.
 
-Placement rules differ between game versions and are easy to get subtly
-wrong, so nothing is predicted on trust. Every survey sets the seed's sites
-beside what the world recorded:
+| Kind | Region, chunks | Offset below | Salt | Draws per axis | Built in |
+|---|---|---|---|---|---|
+| Nether fortress | 30 | 26 | 30084232 | 1, and a third draw picks fortress (2 in 6) or bastion | Any biome |
+| Ocean monument | 32 | 27 | 10387313 | 2, averaged | Deep oceans |
+| Pillager outpost | 80 | 56 | 165745296 | 2, averaged | Plains, sunflower plains, desert, savanna, taiga, snowy plains, meadow, grove, snowy slopes, cherry grove and the three peaks |
+| Village | 34 | 26 | 10387312 | 2, averaged | Plains, sunflower plains, desert, savanna, taiga, snowy plains, meadow |
+| Witch hut | 32 | 24 | 14357617 | 1 | Swamp |
 
-- Monuments, outposts and witch huts sit exactly on their sites. Once three
-  recorded ones do, and more agree than not, the seed is `verified` and
-  predictions are served. With fewer it is `unverified`; if they are
-  somewhere else it is `refuted`. Either way nothing is predicted, and the
-  page says why.
-- Each disagreement is logged once, when it appears, and counted in
-  `mcmap_structures_prediction_disagreements`: a recorded structure no site
-  explains, or a predicted fortress whose chunk is generated with nothing
-  recorded. The second kind is still drawn, struck through.
+A fortress is built at its site whatever the biome. Every other kind is
+only built where the biome suits, so a site is one of three things:
 
-Only fortresses are predicted. A fortress is built at its site whatever the
-biome. A monument, an outpost or a hut is only built where the biome suits,
-which nothing here can know for a chunk that does not exist yet: of the
-monument sites in generated chunks of the FWB world, one in twelve holds a
-monument. Their sites are used to check the seed and not shown.
+- **Possible** (`candidate`): the site's chunk is not generated. Nothing
+  knows what biome it will be, so this is where the generator will try and
+  no more. Of the monument sites in generated chunks of the FWB world, one
+  in twelve holds a monument. Only sites within about 64 chunks of a
+  generated one are kept: the country a player could walk into next.
+- **Predicted, and the world disagrees** (`generated`): the chunk is
+  finished, its biome suits the kind, and nothing is recorded there. It is
+  drawn struck through, logged once and counted in
+  `mcmap_structures_prediction_disagreements{kind}`. A village is the
+  exception, drawn plainly and not counted: the game has no record of a
+  village until a player has been near it, so such a site may well hold one.
+- **Dropped**: the chunk's biome is known and the kind is not built in it.
 
-Checked against the FWB world on 2026-10-05 (game 1.26.52.3): all 11
-monuments, 7 outposts and the 1 witch hut are on their sites, and every
-recorded fortress has a fortress site within reach. One fortress site lies
-in generated chunks with no fortress recorded.
+The biome is the one [read from the world](#biomes) at the middle of the
+site's chunk; an outpost's own corner of the chunk has been seen in the
+biome next door. With `BIOMES_ENABLED=false`, or for a chunk whose biomes
+were not read, there is no biome to ask: a site in an unfinished chunk is
+still possible, and one in a finished chunk with nothing recorded is not
+shown, since eleven in twelve of those are simply in the wrong biome.
+
+**Nothing is predicted on trust.** Placement rules differ between game
+versions and are easy to get subtly wrong, so every survey sets each kind's
+sites beside what the world recorded, twice over:
+
+- *The seed.* Monuments, outposts and witch huts sit exactly on their
+  sites. Once three recorded ones do, and more agree than not, the seed is
+  `verified`. With fewer it is `unverified`; if they are somewhere else it
+  is `refuted`. Either way no kind is predicted, and the page says why.
+- *Each kind.* Under a verified seed a kind is predicted only while its own
+  rule holds against the world's own structures of that kind: at least
+  three on a site, and more on one than not. A kind with fewer recorded is
+  `unverified` and one the world contradicts is `refuted`; neither is
+  predicted, the others are unaffected, and the kind's row on the page says
+  which. `/api/structures` carries each as `kinds`, and
+  `mcmap_structures_kind_verified{kind}` is 1 or 0. A world that has
+  recorded two fortresses is therefore shown no predicted fortress until it
+  records a third.
+- Villages are held to a different share, one recorded village in five on
+  a site, because the game's village records are not a record of what was
+  generated: a bed and a villager anywhere make a village, and its box
+  moves with the beds its villagers claim. A village counts as on a site
+  when the middle of the site's chunk is within 16 blocks of its box. A
+  village with no site, and a site with no village, are neither logged nor
+  counted as disagreements.
+- Each disagreement of the other kinds is logged once, when it appears: a
+  recorded structure no site explains, or a site in a finished chunk that
+  suits the kind with nothing recorded.
+
+**How each rule fared** against the FWB world on 2026-10-06 (game
+1.26.52.3, the snapshot of 2026-10-05), with the biomes read. "On a site"
+is the share of the world's recorded structures the rule explains;
+"sites built on" is the share of sites in finished chunks of a suitable
+biome that have a recorded structure.
+
+| Kind | Recorded on a site | Sites built on | Outcome |
+|---|---|---|---|
+| Nether fortress | 11 of 11 | 5 of 6 | Predicted |
+| Ocean monument | 11 of 11, exactly | 11 of 13 | Predicted |
+| Pillager outpost | 7 of 7, exactly | 7 of 10 | Predicted |
+| Village | 31 of 70 | 27 of 37 | Predicted |
+| Witch hut | 1 of 1, exactly | 1 of 1 | Not predicted: one is not three |
+
+What the numbers leave open, so that nobody has to find it out again:
+
+- *Monuments.* Both empty sites are at the edge of the generated world,
+  with half or more of the country round them not generated. The game also
+  wants water all round a monument, which cannot be asked there, so the
+  rule here stops at a deep ocean under the site.
+- *Outposts and villages do not share a grid* in this version. None of the
+  7 outposts is within 16 blocks of a village site, and all 7 are exactly
+  on the outposts' own. Whether a village near by keeps an outpost from
+  being built could not be settled: of the 3 empty outpost sites, 2 have a
+  village site within 4 chunks, and no built outpost has one nearer than 7,
+  which is two cases and not a rule. No such exclusion is applied.
+- *Villages.* A wrong seed puts a site by 6.5 of the 70 on average, and
+  the other grids tried do no better than that, at 2 to 10: regions of 27,
+  32 and 40 chunks as well as 34, 10 chunks kept clear between regions as
+  well as 8, and one draw per axis instead of two, in every combination.
+  Of the 39 villages on no site, 26 have been counted
+  by the game and 12 have a bell; they were not told apart from villages
+  players founded. The 10 suitable sites with no village recorded have, on
+  average, half the chunks round them not finished. Snowy taiga is on the
+  game's list of village biomes and left off this one: its three finished
+  sites hold no village, where three in four do elsewhere.
+- *Witch huts.* The rule puts the world's one hut in its site's chunk, at
+  odds of about one in six hundred for a wrong rule, and the one swamp site
+  in finished chunks is that hut. That is the same single piece of evidence
+  the seed check refuses to act on, so huts stay unpredicted on this world
+  and start being predicted, with no change here, once it has recorded
+  three. The same sites are the game's for desert and jungle temples and
+  igloos, which leave no record to check against and are not predicted.
+
+**Bounds.** Sites are looked for in the box round a dimension's chunks and
+64 chunks more, within 49,000 blocks of the middle of them. At most 20,000
+sites of a kind are set beside the world, and 500 predictions of a kind
+are kept for a dimension, those the world can already be asked about first
+and then the nearest the middle; 2,000 for the dimension between them.
+Whatever is left out is counted in `predictedMore`. On the FWB world the
+overworld is sent 1,121 sites, 15 of them predicted and the rest possible:
+500 each of monuments and villages, which is the bound, with 421 left out,
+and 121 outposts. The nether is sent 44 fortresses.
 
 **The seed.** `RandomSeed` and the world spawn are read from `level.dat` in
 the mirror, which is little-endian NBT behind an eight-byte header and is
@@ -702,7 +797,10 @@ the same way before anything is predicted from it. Treat it as the seed.
 
 The survey runs last in each cycle, on hard links like the chunk count, and
 its failure costs nothing else. On the FWB world (2.47 million records,
-1,274 boxes) it takes 9 seconds and peaks at 45 MB. It keeps at most 200,000
+1,274 boxes) it takes 9 seconds and peaks at 45 MB. Predicting four more
+kinds added nothing that could be measured to that: which chunks are
+finished is taken from the pass the survey already makes, at eight bytes a
+chunk, and a site costs a few hundred multiplications. It keeps at most 200,000
 boxes and 2,000 structures of each layer per dimension, and says how many
 it left out.
 
@@ -727,6 +825,13 @@ To check the rules again after a game update, against a copy of a world:
 ```sh
 MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/structures/
 ```
+
+It reads the biomes as the service does and prints, for each kind, the two
+shares in the table above and how many sites it would offer. With
+`MCMAP_STRUCTURE_SEED` set it uses that seed. It prints neither the seed
+nor where anything is predicted, since a few sites and the rule that made
+them are the seed; the recorded structures it does print are the world's
+own.
 
 ## Biomes
 
@@ -854,7 +959,7 @@ ocean, the witch hut in a swamp, and the fortresses in nether biomes.
 
 `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>` looks the text up,
 without regard to case, in everything the map holds that has a name:
-biomes (by either name), recorded structures, the world spawn, beds,
+biomes (by either name), recorded and predicted structures, the world spawn, beds,
 containers (by their name or kind), named mobs (by name or type), and the
 waypoints of the player asking. A marker and a structure are found by
 what the page calls them, the game's own names included: `red bed`,
@@ -863,7 +968,11 @@ the marker's `colour`, `trapped` and `baby`. Hits in the dimension asked from co
 first, nearest first, each with its distance; hits in the other dimensions
 follow without one. An answer is at most 50 hits and says how many more
 there were. Of each matching biome only the three nearest stretches are
-offered, so that a common one does not fill the answer.
+offered, so that a common one does not fill the answer. Of each kind of
+structure only the five nearest sites the seed gives are offered, each with
+`certainty`: `predicted`, or `candidate` for a site in terrain not
+generated yet. The page lists them as Ocean Monument (predicted) and Ocean
+Monument (possible site), never as a structure the world has.
 
 Waypoints are searched for the player the session names and nobody else,
 by the same call to the agent that `/api/waypoints` makes. `waypoints` in
@@ -1020,8 +1129,8 @@ kept in the browser under `mcmap.layers`, and which groups are folded under
 `mcmap.panel`. The filters the page had before the panel were kept under
 `mcmap.live`, `mcmap.markers` and `mcmap.structures`; a row with no choice
 saved yet takes the one saved there, so nobody's filters reset. The old
-single Structures switch, if it was off, carries over as Known and
-Predicted both off, and the old Live switch as paused.
+single Structures switch, if it was off, carries over as Known, Predicted
+and Possible all off, and the old Live switch as paused.
 
 **Adding a layer.** A layer is a script of its own, loaded after
 `layers.js`, which registers its rows and never edits the panel:
@@ -1222,7 +1331,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The marker or structure picture with the key `{group}/{name}` as a PNG, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
-| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, and `generated` where the chunk exists and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
@@ -1284,9 +1393,10 @@ opens at the same place.
 | `mcmap_icons_marker_pictures` | Marker and structure pictures held, 42 when whole. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
 | `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
-| `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind}` | Structures on each layer at the last survey |
+| `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind,certainty}` | Structures on each layer at the last survey; `certainty` is `predicted`, or `candidate` for a site in terrain not generated yet |
 | `mcmap_structures_seed_verified` | 1 while recorded structures are where the seed puts them. 0 means nothing is being predicted |
-| `mcmap_structures_prediction_disagreements` | Places where the seed and the world's records disagree |
+| `mcmap_structures_kind_verified{kind}` | 1 while the seed is verified and the kind's own recorded structures are where its rule puts them. 0 means that kind is not being predicted |
+| `mcmap_structures_prediction_disagreements{kind}` | Places where the seed and the world's records disagree |
 | `mcmap_structures_areas_skipped{reason}` | Recorded boxes left out: `malformed`, `unknown` (a kind this version does not know), `limit` |
 | `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total` | Whether the survey is running |
 | `mcmap_structures_villages_skipped{reason}` | Villages left out: `empty` (counted by the game, no villagers), `malformed`, `unknown` (a key this version does not know), `limit` |
