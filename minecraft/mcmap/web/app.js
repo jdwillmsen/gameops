@@ -98,6 +98,7 @@
   let dueSince = null;
   let current = null;
   let layer = null;
+  let extent = null;
   // Leaflet's grid layers default to zoom 0 and up; this map lives below it.
   const grid = new Grid({ tileSize: TILE, zIndex: 5, minZoom: -12, maxZoom: 8 });
 
@@ -133,6 +134,7 @@
       [d.minRegionZ * REGION, d.minRegionX * REGION],
       [(d.maxRegionZ + 1) * REGION, (d.maxRegionX + 1) * REGION],
     );
+    extent = bounds;
     layer = new Tiles('', {
       dimension: id,
       format: d.format,
@@ -401,6 +403,19 @@
     live: () => Boolean(info && info.live),
     // Never passes an argument on: load reads one as "only checking".
     reload: () => load(),
+    // The blocks the current dimension's terrain covers, or null with no
+    // dimension shown: where another tile layer has anything to lay over.
+    extent: () => extent,
+    // Takes the view to a block, in another dimension if need be, and says
+    // whether it could: a dimension not rendered yet cannot be shown.
+    go(id, x, z) {
+      const d = dimension(id);
+      if (!d || !d.rendered || !Number.isFinite(x) || !Number.isFinite(z)) return false;
+      const view = { x, z, zoom: Math.max(map.getZoom(), -1) };
+      if (id !== current) show(id, view);
+      else map.setView([view.z, view.x], view.zoom);
+      return true;
+    },
     layers,
   };
 

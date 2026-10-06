@@ -68,6 +68,7 @@ input[type="number"] { width: 6.5rem; }
 
 #coords { font-variant-numeric: tabular-nums; }
 #status { color: var(--dim); }
+.biome-at { color: var(--dim); }
 #status.problem { color: #f0a35e; }
 
 /* Fixed-width digits, or the footer shifts with every second counted. */
@@ -159,6 +160,26 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .layer .note:empty { display: none; }
 .layer.unavailable { opacity: 0.5; }
 .layer.unavailable label { cursor: not-allowed; }
+.layer .body { grid-column: 1 / -1; padding: 0.25rem 0 0.15rem 1.4rem; }
+
+/* The legend scrolls by itself: a dimension can hold dozens of biomes, and
+   the groups under it have to stay within reach. */
+.legend ul { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; }
+.legend button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.1rem 0.3rem;
+  text-align: left;
+  background: none;
+  border-color: transparent;
+}
+.legend i { flex: none; width: 0.8rem; height: 0.8rem; border: 1px solid #0b0c0e; border-radius: 2px; }
+/* Every colour at once, for the entry that is all of them. */
+.legend i.every { background: conic-gradient(#6bbf59, #d9a441, #5cc8f0, #b48ce0, #6bbf59); }
+.legend .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.legend .share { color: var(--dim); font-variant-numeric: tabular-nums; }
 
 .who { color: var(--dim); }
 

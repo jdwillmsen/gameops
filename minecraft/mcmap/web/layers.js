@@ -208,10 +208,12 @@
     note.id = `layers-note-${made}`;
     box.setAttribute('aria-describedby', note.id);
     const count = make('span', 'count');
+    const body = make('div', 'body');
+    body.hidden = true;
     name.append(box);
     if (typeof swatch === 'string' && swatch) name.append(make('i', swatch));
     name.append(make('span', 'name', String(label ?? id)));
-    item.append(name, count, note);
+    item.append(name, count, note, body);
 
     const row = {
       id,
@@ -242,6 +244,18 @@
       setCount(n) { put(count, Number.isFinite(n) ? n.toLocaleString('en-US') : ''); },
       setNote(text) { put(note, text ? String(text) : ''); },
       onToggle(fn) { if (typeof fn === 'function') row.listeners.push(fn); },
+      // Switches the row as the viewer would have, for a script that has
+      // been asked for what the layer shows: the choice is kept, and the
+      // listeners are told.
+      setEnabled(on) {
+        if (row.available && set(row, Boolean(on))) remember(group, id, row.on);
+      },
+      // A layer's own controls, such as a legend, shown under its row.
+      // The node is the script's to fill; null takes it away.
+      setBody(node) {
+        body.replaceChildren(...(node instanceof Node ? [node] : []));
+        body.hidden = !(node instanceof Node);
+      },
       setAvailable(available) {
         row.available = Boolean(available);
         box.disabled = !row.available;
