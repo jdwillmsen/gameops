@@ -821,6 +821,17 @@ Every logged-in player already sees where every other player is, live, so
 `GET /api/trails` serves every player's trail on the same terms. An answer
 carries at most 20,000 points, each player's newest.
 
+**On the page.** Trails is a row in the Overlays group, off until turned
+on, with a choice of the last 1, 6 or 24 hours, sent as `since`. Each line
+is drawn in the colour the live layer draws that player in, which
+`live.js` offers as `window.mcmap.playerColour`, and hovering one names
+the player and the time it covers. The trails are asked for about once a
+minute and never more often; between answers the lines are carried forward
+from the live frames by the same rules the server records by, and the next
+answer replaces them. The row's switch is kept with the rest under
+`mcmap.layers`, and the window under `mcmap.trails`. A service without
+trails answers 404 once, and the page then has no Trails row.
+
 ## Page controls
 
 **The layer panel.** Every layer's switch is a row in one panel over the

@@ -269,6 +269,9 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .key { width: 0.7rem; height: 0.7rem; }
 .key.recorded { background: var(--text); border: 1px solid #0b0c0e; border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
+.key.trail { height: 0; border-top: 3px solid var(--text); }
+.trail-window { display: flex; align-items: center; gap: 0.4rem; color: var(--dim); }
+.trail-window select { padding: 0.1rem 0.3rem; }
 .key.slime { background: rgba(110, 207, 122, 0.3); border: 1px solid var(--accent); }
 
 .structure span {

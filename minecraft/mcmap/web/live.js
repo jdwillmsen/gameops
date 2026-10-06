@@ -408,10 +408,14 @@
     return Boolean(mine) && fold(name) === mine;
   };
 
+  // The colour a player is drawn in, which is also the colour of anything
+  // else on the map that is theirs.
+  const playerColour = (name) => (isMe(name) ? ME : CATEGORIES.players);
+
   function make(e, category, pic) {
     if (category === 'players') {
       const mine = isMe(e.n);
-      const colour = mine ? ME : CATEGORIES.players;
+      const colour = playerColour(e.n);
       const worn = spriteOf(pic, colour, HEAD_RADIUS, paintHead);
       const marker = new Arrow([e.z, e.x], {
         renderer,
@@ -603,6 +607,10 @@
     // A stale frame is an empty one because nothing recent is known, which
     // is not the same as the entity being gone.
     track(!stale);
+    // Where the players are, for a layer that draws where they have been.
+    if (!stale) {
+      document.dispatchEvent(new CustomEvent('mcmap:players', { detail: { dimension: pictured, players: frame.players || [] } }));
+    }
   }
 
   function count() {
@@ -1079,6 +1087,8 @@
     present();
     readout();
   });
+
+  app.playerColour = playerColour;
 
   mobLayer.addTo(map);
   playerLayer.addTo(map);
