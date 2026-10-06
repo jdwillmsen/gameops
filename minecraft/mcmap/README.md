@@ -813,6 +813,18 @@ by the same call to the agent that `/api/waypoints` makes. `waypoints` in
 the answer says whether they were: `searched`, `unavailable` while the
 agent cannot be read, or `off`.
 
+**On the page.** One box in the bar. It asks 300 ms after the last
+keystroke, from the middle of the view, and gives up the request it has out
+when another replaces it. Each hit is listed as the server ordered them,
+with what it is, where, and how far, or which other dimension it is in.
+The arrow keys move through the list, Enter chooses and Escape closes it.
+Choosing a hit takes the map there, changing dimension if it has to, and
+rings the spot for twenty seconds; a biome hit also turns the overlay on
+with that biome picked out. The list says so in words when nothing matched,
+when there were more hits than shown, and when the waypoints could not be
+read. Under 900 pixels wide it opens under the bar and pushes the map down,
+so it never covers the layer panel or the card about a mob.
+
 ## Slime chunks
 
 On Bedrock a slime chunk follows from its chunk coordinates and nothing

@@ -42,7 +42,7 @@ h1 { margin: 0; font-size: 1rem; font-weight: 600; }
 
 .tabs { display: flex; gap: 0.25rem; }
 
-button, .tabs button, input[type="number"], select {
+button, .tabs button, input[type="number"], input[type="search"], select {
   font: inherit;
   color: var(--text);
   background: var(--bg);
@@ -60,6 +60,56 @@ button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
 .goto { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
 .goto label, .toggle { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
 input[type="number"] { width: 6.5rem; }
+
+/* The results hang from the box, over the map's left side: the layer panel
+   keeps the right, and the list stops short of the card about a mob. */
+.search { position: relative; }
+.search input { width: 15rem; max-width: 100%; }
+.search-panel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 1200;
+  width: 23rem;
+  max-height: calc(100vh - 9rem);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.inspecting .search-panel { max-height: calc(100vh - 10rem - var(--inspect-height, 9rem)); }
+.search-panel ul { list-style: none; margin: 0; padding: 0.2rem; }
+.search-panel li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 0.5rem;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.search-panel li:hover { border-color: var(--line); }
+.search-panel li[aria-selected="true"] { border-color: var(--accent); }
+.search-panel .kind { color: var(--dim); font-size: 0.85em; align-self: center; }
+.search-panel .name { min-width: 0; overflow-wrap: anywhere; }
+.search-panel .where { grid-column: 1 / -1; color: var(--dim); font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.search-note { margin: 0; padding: 0.4rem 0.65rem; color: var(--dim); }
+
+/* The place a search went to. The ring itself stays still, since Leaflet
+   places it by a transform that an animation of its own would distort; what
+   moves is a second ring spreading out from it. */
+.found { border: 3px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 2px #0b0c0e, inset 0 0 0 2px #0b0c0e; }
+.found::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+  animation: found 1.2s ease-out 4;
+}
+@keyframes found { from { transform: scale(1); opacity: 0.9; } to { transform: scale(2.8); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .found::after { animation: none; } }
 
 /* The map and what floats over it: the layer panel and the notice that
    the live picture is paused. */
@@ -283,7 +333,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .inspect-actions button { flex: 1; }
 
 /* While logged out the map and its controls are not there to use. */
-.locked .stage, .locked .tabs, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .foot { display: none; }
+.locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .foot { display: none; }
 
 .login {
   flex: 1;
@@ -326,6 +376,14 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
    zoomed in past full scale only blurs it. */
 .leaflet-tile { image-rendering: pixelated; }
 .leaflet-container { background: #0b0c0e; font: inherit; }
+
+/* Without room beside the layer panel, the results take theirs from the map
+   instead: they open under the bar and push the map down, covering nothing. */
+@media (max-width: 900px) {
+  .search { flex: 1 1 100%; order: 1; }
+  .search input { width: 100%; }
+  .search-panel, .inspecting .search-panel { position: static; width: auto; max-height: 40vh; margin-top: 0.4rem; }
+}
 
 @media (max-width: 640px) {
   .goto { margin-left: 0; }
