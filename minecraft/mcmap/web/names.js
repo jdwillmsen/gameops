@@ -116,6 +116,7 @@
     }
     pending = true;
     askedAt = Date.now();
+    const asked = current;
     try {
       // The browser keeps the last answer and asks whether it still
       // stands, so an unchanged table costs a 304.
@@ -131,6 +132,8 @@
       /* the tidied ids stand until the next try */
     } finally {
       pending = false;
+      // Another version was announced while this one was on its way.
+      if (current !== asked) sync();
     }
   }
 

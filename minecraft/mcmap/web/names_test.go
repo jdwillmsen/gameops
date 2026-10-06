@@ -15,6 +15,8 @@ func TestEveryNameOnThePageComesFromTheNamesScript(t *testing.T) {
 		"fetch('api/names', { cache: 'no-cache' })",
 		"document.dispatchEvent(new CustomEvent('mcmap:names'));",
 		"document.addEventListener('mcmap:icons',",
+		// A version announced while the table was on its way is asked for after.
+		"if (current !== asked) sync();",
 		"app.names = { entity, container, bed, shulker, structure, holder, kindOf, mob, plural,",
 		// A name is text of a bounded length whatever the answer holds.
 		"if (typeof name === 'string' && name.trim() !== '') next[group][id] = name.slice(0, MAX_LENGTH);",
