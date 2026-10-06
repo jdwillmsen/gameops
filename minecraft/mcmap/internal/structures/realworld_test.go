@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
 
@@ -51,10 +53,15 @@ func TestRealWorld(t *testing.T) {
 	for _, finding := range survey.Check.Findings {
 		t.Log("  finding: ", finding)
 	}
+	t.Logf("villages %+v, read in %.4f s", survey.Villages, testutil.ToFloat64(metricVillageSeconds))
 	for _, d := range chunks.Dimensions {
 		layer := survey.Layers[d]
 		t.Logf("%s: %d recorded (+%d), %d predicted (+%d)", d.Name(), len(layer.Recorded), layer.RecordedMore, len(layer.Predicted), layer.PredictedMore)
 		for _, r := range layer.Recorded {
+			if r.Village != nil {
+				t.Logf("  recorded %-9s %6d,%4d,%6d to %6d,%4d,%6d  %+v", r.Kind, r.MinX, r.MinY, r.MinZ, r.MaxX, r.MaxY, r.MaxZ, *r.Village)
+				continue
+			}
 			t.Logf("  recorded %-9s %6d,%4d,%6d to %6d,%4d,%6d  areas %d", r.Kind, r.MinX, r.MinY, r.MinZ, r.MaxX, r.MaxY, r.MaxZ, r.Areas)
 		}
 		for _, p := range layer.Predicted {

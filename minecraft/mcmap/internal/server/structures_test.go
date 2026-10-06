@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,7 +28,12 @@ func surveyed() *fakeStructures {
 		At: renderedAt,
 		Layers: map[chunks.Dimension]structures.Layer{
 			chunks.Overworld: {
-				Recorded: []structures.Structure{{Kind: structures.Monument, Box: structures.Box{MinX: 27, MinY: 39, MinZ: 5243, MaxX: 84, MaxY: 61, MaxZ: 5300}, Areas: 15}},
+				Recorded: []structures.Structure{
+					{Kind: structures.Monument, Box: structures.Box{MinX: 27, MinY: 39, MinZ: 5243, MaxX: 84, MaxY: 61, MaxZ: 5300}, Areas: 15},
+					{Kind: structures.Village, Box: structures.Box{MinX: -898, MinY: 55, MinZ: 1261, MaxX: -834, MaxY: 79, MaxZ: 1331},
+						Village: &structures.VillageFacts{Counted: true, Villagers: 12, Golems: 1, Cats: 3, Beds: 11, Bells: 1, JobSites: 4}},
+					{Kind: structures.Village, Box: structures.Box{MinX: 200, MinY: 60, MinZ: 200, MaxX: 264, MaxY: 84, MaxZ: 264}, Village: &structures.VillageFacts{}},
+				},
 			},
 			chunks.Nether: {
 				Recorded:      []structures.Structure{{Kind: structures.Fortress, Box: structures.Box{MinX: 74, MinY: 48, MinZ: -450, MaxX: 231, MaxY: 72, MaxZ: -286}, Areas: 165}},
@@ -80,12 +86,17 @@ func TestStructuresRequireASession(t *testing.T) {
 	h := s.Handler()
 	forged := &http.Cookie{Name: "__Host-mcmap_session", Value: "e30.nope"}
 	for name, cookies := range map[string][]*http.Cookie{"no session": nil, "a forged session": {forged}} {
-		rec := do(h, "GET", "/api/structures?dimension=nether", "", cookies)
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("with %s = %d, want 401", name, rec.Code)
-		}
-		if strings.Contains(rec.Body.String(), "fortress") {
-			t.Errorf("with %s the refusal names a structure: %s", name, rec.Body)
+		for _, dimension := range []string{"nether", "overworld"} {
+			rec := do(h, "GET", "/api/structures?dimension="+dimension, "", cookies)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("%s with %s = %d, want 401", dimension, name, rec.Code)
+			}
+			// A village is where somebody's villagers are.
+			for _, kind := range []string{"fortress", "monument", "village"} {
+				if strings.Contains(rec.Body.String(), kind) {
+					t.Errorf("%s with %s: the refusal names a %s: %s", dimension, name, kind, rec.Body)
+				}
+			}
 		}
 	}
 	got, _ := structuresOf(t, s, "/api/structures?dimension=nether", session(s, steve))
@@ -114,7 +125,7 @@ func TestStructuresKeepRecordedAndPredictedApartByDimension(t *testing.T) {
 	}
 
 	overworld, _ := structuresOf(t, s, "/api/structures?dimension=overworld")
-	if len(overworld.Recorded) != 1 || overworld.Recorded[0].Kind != structures.Monument || len(overworld.Predicted) != 0 {
+	if len(overworld.Recorded) != 3 || overworld.Recorded[0].Kind != structures.Monument || len(overworld.Predicted) != 0 {
 		t.Errorf("overworld = %+v", overworld)
 	}
 	// 32767 is what a world stores before it has worked the height out.
@@ -126,6 +137,52 @@ func TestStructuresKeepRecordedAndPredictedApartByDimension(t *testing.T) {
 	_, body := structuresOf(t, s, "/api/structures?dimension=end")
 	if !strings.Contains(body, `"recorded":[]`) || !strings.Contains(body, `"predicted":[]`) {
 		t.Errorf("end = %s", body)
+	}
+}
+
+// A village goes out as one more recorded structure: a kind and a box, which
+// is all the page needs to draw one, and beside them what the world counted
+// in it. Nothing a player typed and nothing that names one is in a village's
+// records as they are read, so nothing of the sort can be in the answer.
+func TestStructuresServeAVillageAsARecordedStructure(t *testing.T) {
+	s, _ := fixture(t)
+	s.Structures = surveyed()
+	rec := do(s.Handler(), "GET", "/api/structures?dimension=overworld", "", nil)
+	var got struct {
+		Recorded []map[string]json.RawMessage `json:"recorded"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Recorded) != 3 {
+		t.Fatalf("recorded = %s (%v)", rec.Body, err)
+	}
+	fields := func(m map[string]json.RawMessage) string {
+		names := make([]string, 0, len(m))
+		for name := range m {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		return strings.Join(names, " ")
+	}
+	// What the page reads of any recorded structure, and has since before
+	// there were villages.
+	if f := fields(got.Recorded[0]); f != "areas kind maxX maxY maxZ minX minY minZ" {
+		t.Errorf("a monument's fields = %s", f)
+	}
+	for i, want := range map[int]string{
+		1: `{"counted":true,"villagers":12,"golems":1,"cats":3,"beds":11,"bells":1,"jobSites":4}`,
+		// Not counted yet is said outright; the zeros alone would read
+		// as a village with nobody in it.
+		2: `{"counted":false,"villagers":0,"golems":0,"cats":0,"beds":0,"bells":0,"jobSites":0}`,
+	} {
+		village := got.Recorded[i]
+		if f := fields(village); f != "kind maxX maxY maxZ minX minY minZ village" {
+			t.Errorf("a village's fields = %s", f)
+		}
+		if string(village["kind"]) != `"village"` || string(village["village"]) != want {
+			t.Errorf("village %d = %s %s, want %s", i, village["kind"], village["village"], want)
+		}
+	}
+	if string(got.Recorded[1]["minX"]) != "-898" || string(got.Recorded[1]["maxZ"]) != "1331" {
+		t.Errorf("box = %v", got.Recorded[1])
 	}
 }
 
@@ -188,6 +245,24 @@ func TestStructuresBoundTheResponse(t *testing.T) {
 	}
 	if len(body) > 512<<10 {
 		t.Errorf("a full response is %d bytes", len(body))
+	}
+
+	// Villages are the largest thing on the layer, and a layer of nothing
+	// else, each with every number as long as it can be, is still bounded.
+	layer = structures.Layer{}
+	for range structures.MaxPerLayer + 500 {
+		layer.Recorded = append(layer.Recorded, structures.Structure{
+			Kind: structures.Village, Box: structures.Box{MinX: -31_999_000, MinY: -31_999_000, MinZ: -31_999_000, MaxX: -31_999_000, MaxY: -31_999_000, MaxZ: -31_999_000},
+			Village: &structures.VillageFacts{Counted: true, Villagers: 10_000, Golems: 10_000, Cats: 10_000, Beds: 10_000, Bells: 10_000, JobSites: 10_000},
+		})
+	}
+	source.survey.Layers[chunks.Overworld] = layer
+	got, body = structuresOf(t, s, "/api/structures?dimension=overworld")
+	if len(got.Recorded) != structures.MaxPerLayer || got.RecordedMore != 500 {
+		t.Errorf("villages %d (+%d), want %d (+500)", len(got.Recorded), got.RecordedMore, structures.MaxPerLayer)
+	}
+	if len(body) > 640<<10 {
+		t.Errorf("a full response of villages is %d bytes", len(body))
 	}
 }
 

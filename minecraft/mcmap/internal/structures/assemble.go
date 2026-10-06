@@ -7,8 +7,11 @@ import "slices"
 type Structure struct {
 	Kind Kind `json:"kind"`
 	Box
-	// Areas is how many recorded areas the box was put together from.
-	Areas int `json:"areas"`
+	// Areas is how many recorded areas the box was put together from; a
+	// village is not put together from any.
+	Areas int `json:"areas,omitempty"`
+	// Village is set for a village and nothing else.
+	Village *VillageFacts `json:"village,omitempty"`
 }
 
 // joinGap is how far apart, in blocks across the map, two areas of a kind

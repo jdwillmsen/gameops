@@ -26,7 +26,7 @@ const (
 )
 
 // Kinds in the order they are listed.
-var Kinds = []Kind{Fortress, Monument, Outpost, WitchHut}
+var Kinds = []Kind{Fortress, Monument, Outpost, Village, WitchHut}
 
 // The server keeps, for each chunk, the boxes inside which a structure's
 // own mobs spawn: record 57 of the chunk, "hardcoded spawn areas". The

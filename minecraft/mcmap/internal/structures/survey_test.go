@@ -166,11 +166,11 @@ func TestTake_ReadsRecordedStructuresByDimension(t *testing.T) {
 	if got.Areas != 9 || got.Malformed != 0 || got.Unknown != 0 || got.OverLimit != 0 {
 		t.Errorf("areas %d, malformed %d, unknown %d, over limit %d", got.Areas, got.Malformed, got.Unknown, got.OverLimit)
 	}
-	wantNether := []Structure{{Fortress, Box{112, 51, -1145, 127, 72, -1137}, 8}}
+	wantNether := []Structure{{Fortress, Box{112, 51, -1145, 127, 72, -1137}, 8, nil}}
 	if nether := got.Layers[chunks.Nether].Recorded; !slices.Equal(nether, wantNether) {
 		t.Errorf("nether = %+v, want %+v", nether, wantNether)
 	}
-	wantOverworld := []Structure{{WitchHut, Box{-1216, 85, 1712, -1210, 91, 1720}, 1}}
+	wantOverworld := []Structure{{WitchHut, Box{-1216, 85, 1712, -1210, 91, 1720}, 1, nil}}
 	if overworld := got.Layers[chunks.Overworld].Recorded; !slices.Equal(overworld, wantOverworld) {
 		t.Errorf("overworld = %+v, want %+v", overworld, wantOverworld)
 	}
@@ -403,7 +403,7 @@ func TestTake_CountsWhatItCannotReadAndKeepsTheRest(t *testing.T) {
 	if got.Areas != 1 || got.Malformed != 2 || got.Unknown != 1 {
 		t.Errorf("areas %d, malformed %d, unknown %d; want 1, 2, 1", got.Areas, got.Malformed, got.Unknown)
 	}
-	if want := []Structure{{Outpost, good, 1}}; !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
+	if want := []Structure{{Outpost, good, 1, nil}}; !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
 		t.Errorf("recorded = %+v, want %+v", got.Layers[chunks.Overworld].Recorded, want)
 	}
 	if n := len(got.Layers[chunks.Nether].Recorded); n != 0 {
