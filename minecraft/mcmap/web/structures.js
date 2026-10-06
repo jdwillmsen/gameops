@@ -23,6 +23,7 @@
     monument: { label: 'Monument', letter: 'M', color: '#5cc8f0' },
     outpost: { label: 'Outpost', letter: 'O', color: '#d9a441' },
     witch_hut: { label: 'Witch hut', letter: 'H', color: '#b48ce0' },
+    village: { label: 'Village', letter: 'V', color: '#6bbf59' },
   };
   // The rows in the panel: the two layers, then a filter per kind that
   // applies to both.
@@ -34,8 +35,22 @@
     ['monument', 'Monuments', 'dot monument'],
     ['outpost', 'Outposts', 'dot outpost'],
     ['witch_hut', 'Witch huts', 'dot witch-hut'],
+    ['village', 'Villages', 'dot village'],
   ];
   const UNKNOWN = { label: 'Structure', letter: '?', color: '#9aa3ad' };
+
+  // What the world keeps about a village, for its tooltip. A village the
+  // game has a record for but has not run yet has no counts, and saying so
+  // is more use than a row of zeroes.
+  function villageLines(v) {
+    if (!v) return [];
+    if (!v.counted) return ['Not counted by the game yet'];
+    const n = (count, one, many) => `${fmt(count)} ${count === 1 ? one : many}`;
+    return [
+      [n(v.villagers, 'villager', 'villagers'), n(v.golems, 'iron golem', 'iron golems'), n(v.cats, 'cat', 'cats')].join(', '),
+      [n(v.beds, 'bed', 'beds'), n(v.bells, 'bell', 'bells'), n(v.jobSites, 'job site', 'job sites')].join(', '),
+    ];
+  }
 
   // Why the predicted layer is empty, for the states in which it always is.
   const WHY_NOT = {
@@ -127,6 +142,7 @@
         `${k.label} · recorded by the world`,
         `X ${fmt(s.minX)} to ${fmt(s.maxX)}, Z ${fmt(s.minZ)} to ${fmt(s.maxZ)}`,
         `Y ${fmt(s.minY)} to ${fmt(s.maxY)}`,
+        ...villageLines(s.village),
       );
       // The box is what the world recorded, to the block. A block's far
       // edge is one past its coordinate.
