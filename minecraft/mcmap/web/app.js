@@ -5,6 +5,19 @@
   const REGION = 512;
   const TILE = 256;
   const POLL_MS = 60_000;
+  // Once a refresh is due the map is asked more often than that, so the
+  // countdown starts again within seconds of the snapshot landing: briskly
+  // at first, then slowly, since a quiet window can last an hour.
+  const DUE_POLL_MS = 5000;
+  const DUE_BRISK_MS = 2 * 60_000;
+  const DUE_SLOW_POLL_MS = 20_000;
+  // The service counts its interval from the end of a cycle, not the start,
+  // so a healthy refresh arrives a little after the countdown reaches zero.
+  // Only past this is it called overdue.
+  const DUE_GRACE_MS = 90_000;
+  // How long after a snapshot its tiles are still expected at any moment.
+  const DRAWING_MS = 5 * 60_000;
+  const COUNTDOWN_MS = 250;
   const LABELS = { overworld: 'Overworld', nether: 'Nether', end: 'The End' };
 
   // Leaflet's simple CRS has +Y pointing up; a Minecraft map has +Z pointing
@@ -26,6 +39,7 @@
     tabs: document.getElementById('dimensions'),
     coords: document.getElementById('coords'),
     status: document.getElementById('status'),
+    refresh: document.getElementById('refresh'),
     grid: document.getElementById('grid'),
     copy: document.getElementById('copy'),
     goto: document.getElementById('goto'),
@@ -74,6 +88,14 @@
   });
 
   let info = null;
+  // The last answer as it was sent, to tell an unchanged one cheaply.
+  let answer = '';
+  let askedAt = 0;
+  // The server's clock minus this one, so that a browser whose clock is
+  // wrong still counts down to the right moment.
+  let serverOffset = 0;
+  // When the countdown stopped having a time to count to; null while it has.
+  let dueSince = null;
   let current = null;
   let layer = null;
   // Leaflet's grid layers default to zoom 0 and up; this map lives below it.
@@ -166,12 +188,65 @@
     } else if (!d || !d.rendered) {
       el.status.textContent = 'The first render is still running. This page updates when it is done.';
     } else {
-      const every = Math.round(info.refreshSeconds / 60);
       const when = d.renderedAt ? `Updated ${ago(d.renderedAt)}` : 'Rendered before the last restart';
-      el.status.textContent = info.problem
-        ? `${when}. The last refresh failed, so this is the previous map.`
-        : `${when} · refreshes every ${every} min`;
+      el.status.textContent = info.problem ? `${when}. The last refresh failed, so this is the previous map.` : when;
     }
+  }
+
+  // --- refresh countdown -------------------------------------------------
+  //
+  // Counted from the snapshot the server last took and the interval it
+  // keeps. The server skips refreshes inside its quiet windows and backs
+  // off after a failure, and says neither in advance, so past the expected
+  // time this counts up and says overdue: it never sits at zero and never
+  // starts again until a new snapshot has actually been seen.
+
+  function clock(ms, round) {
+    const s = Math.max(0, round(ms / 1000));
+    const pad = (n) => String(n).padStart(2, '0');
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+  }
+
+  function countdown() {
+    const locked = !el.login.hidden;
+    el.refresh.hidden = locked || !info;
+    if (locked || !info) return;
+    const now = Date.now() + serverOffset;
+    const snapshot = info.snapshotAt ? Date.parse(info.snapshotAt) : NaN;
+    const every = info.refreshSeconds * 1000;
+    let text;
+    let overdue = false;
+    let ask = true;
+    if (!Number.isFinite(snapshot) || !(every > 0)) {
+      // A service that has just started has taken no snapshot yet.
+      text = 'Waiting for the first refresh';
+    } else {
+      const late = now - snapshot - every;
+      if (late < 0) {
+        // Never more than the interval, whatever the two clocks make of
+        // a snapshot taken this instant.
+        text = `Next refresh in ${clock(Math.min(-late, every), Math.ceil)}`;
+        // The tiles of a snapshot follow it by as long as they take to draw.
+        const d = dimension(current);
+        ask = Boolean(d && d.renderedAt) && Date.parse(d.renderedAt) < snapshot && now - snapshot < DRAWING_MS;
+        if (!ask) dueSince = null;
+      } else if (late < DUE_GRACE_MS && !info.problem) {
+        text = 'Refresh due now';
+      } else {
+        overdue = true;
+        text = `Refresh overdue by ${clock(late, Math.floor)} · ${info.problem ? 'retrying' : 'may be in a quiet window'}`;
+      }
+    }
+    if (el.refresh.textContent !== text) el.refresh.textContent = text;
+    el.refresh.classList.toggle('problem', overdue);
+    const hint = every > 0 ? `The map refreshes about every ${Math.round(every / 60_000)} min, except during the server's quiet windows` : '';
+    if (el.refresh.title !== hint) el.refresh.title = hint;
+    if (!ask || document.hidden) return;
+    if (dueSince === null) dueSince = Date.now();
+    const pace = Date.now() - dueSince < DUE_BRISK_MS ? DUE_POLL_MS : DUE_SLOW_POLL_MS;
+    if (Date.now() - askedAt >= pace) load(true);
   }
 
   // --- login -----------------------------------------------------------
@@ -254,9 +329,14 @@
 
   let loginEnabled = false;
 
-  async function load() {
+  // checking is true when the countdown is only asking whether the refresh
+  // has landed: an answer that says nothing new then changes nothing, so
+  // the layers that reload on every announcement are not made to.
+  async function load(checking) {
     if (!el.login.hidden) return; // logged out; the login flow reloads when done
+    askedAt = Date.now();
     let next;
+    let body;
     try {
       const res = await fetch('api/map', { cache: 'no-store' });
       if (res.status === 401) {
@@ -267,13 +347,20 @@
         return;
       }
       if (!res.ok) throw new Error(String(res.status));
-      next = await res.json();
+      body = await res.text();
+      next = JSON.parse(body);
+      // The header is cut to the whole second, so the server's clock is
+      // half a second past it on average.
+      const sent = Date.parse(res.headers.get('Date') || '');
+      if (Number.isFinite(sent)) serverOffset = sent + 500 - Date.now();
       identify();
     } catch {
       el.status.classList.add('problem');
       el.status.textContent = 'Cannot reach the map service. Retrying.';
       return;
     }
+    if (checking === true && body === answer) return;
+    answer = body;
     const before = current && dimension(current);
     info = next;
     el.world.textContent = `${info.world} map`;
@@ -295,15 +382,24 @@
       }
     }
     describe();
+    countdown();
     announce();
   }
 
-  // What the live layer builds on. The map works the same without it.
+  // What the layers build on. The map works the same without them. layers
+  // is filled in by the panel's own script; ready is here from the start so
+  // that a script which runs before the panel can wait for it.
+  const layers = {};
+  layers.ready = new Promise((resolve) => {
+    document.addEventListener('mcmap:layers', () => resolve(layers), { once: true });
+  });
   window.mcmap = {
     map,
     dimension: () => current,
     live: () => Boolean(info && info.live),
-    reload: load,
+    // Never passes an argument on: load reads one as "only checking".
+    reload: () => load(),
+    layers,
   };
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
@@ -361,6 +457,8 @@
     } catch { /* load() reports an unreachable service */ }
     load();
   })();
-  setInterval(load, POLL_MS);
+  setInterval(() => load(), POLL_MS);
   setInterval(describe, 30_000);
+  setInterval(countdown, COUNTDOWN_MS);
+  document.addEventListener('visibilitychange', countdown);
 })();

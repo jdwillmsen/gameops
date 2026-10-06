@@ -42,7 +42,7 @@ h1 { margin: 0; font-size: 1rem; font-weight: 600; }
 
 .tabs { display: flex; gap: 0.25rem; }
 
-button, .tabs button, input[type="number"] {
+button, .tabs button, input[type="number"], select {
   font: inherit;
   color: var(--text);
   background: var(--bg);
@@ -61,21 +61,106 @@ button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
 .goto label, .toggle { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
 input[type="number"] { width: 6.5rem; }
 
-#map { flex: 1; min-height: 0; background: #0b0c0e; }
+/* The map and what floats over it: the layer panel and the notice that
+   the live picture is paused. */
+.stage { position: relative; flex: 1; min-height: 0; display: flex; }
+#map { flex: 1; min-width: 0; background: #0b0c0e; }
 
 #coords { font-variant-numeric: tabular-nums; }
 #status { color: var(--dim); }
 #status.problem { color: #f0a35e; }
 
-.who { color: var(--dim); }
+/* Fixed-width digits, or the footer shifts with every second counted. */
+.refresh { color: var(--dim); font-variant-numeric: tabular-nums; }
+.refresh.problem { color: #f0a35e; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
-.chips button { display: flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.55rem; }
-/* A filter that is off is dimmed rather than outlined, so the colour key
-   stays readable beside the ones that are on. */
-.chips button[aria-pressed="false"] { opacity: 0.5; }
-.chips .count { color: var(--dim); font-variant-numeric: tabular-nums; }
-.chips .count:empty { display: none; }
+.live-control { display: flex; align-items: center; gap: 0.4rem; }
+.live-control label { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
+.live-control .paused { border-color: #f0a35e; color: #f0a35e; }
+select { padding: 0.3rem 0.4rem; cursor: pointer; }
+
+/* Above everything Leaflet draws, whose own controls stop at 1000. */
+.frozen {
+  position: absolute;
+  top: 0.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  margin: 0;
+  max-width: calc(100% - 7rem);
+  padding: 0.3rem 0.7rem;
+  background: rgba(29, 32, 38, 0.94);
+  border: 1px solid #f0a35e;
+  border-radius: 6px;
+  color: #f0a35e;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  pointer-events: none;
+}
+
+.layers {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  max-height: calc(100% - 1.2rem);
+}
+.layers.open { width: 16rem; max-width: calc(100% - 1.2rem); }
+#layers-toggle { background: var(--panel); }
+/* The arrows are drawn, not written: a character here would be read out
+   as part of the button's name. */
+#layers-toggle::after, .layer-group .fold::before {
+  content: "";
+  display: inline-block;
+  border: 0.3em solid transparent;
+  border-left-color: var(--dim);
+  border-right-width: 0;
+  vertical-align: middle;
+}
+#layers-toggle::after { margin-left: 0.5em; }
+#layers-toggle[aria-expanded="true"]::after, .layer-group .fold[aria-expanded="true"]::before {
+  border: 0.3em solid transparent;
+  border-top-color: var(--dim);
+  border-bottom-width: 0;
+}
+#layers-body {
+  align-self: stretch;
+  min-height: 0;
+  overflow-y: auto;
+  background: rgba(29, 32, 38, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.15rem 0.5rem;
+}
+.layer-group + .layer-group { border-top: 1px solid var(--line); }
+.layer-group-head { display: flex; align-items: center; gap: 0.25rem; padding: 0.3rem 0; }
+.layer-group .fold {
+  flex: 1;
+  text-align: left;
+  font-weight: 600;
+  background: none;
+  border-color: transparent;
+  padding: 0.15rem 0.2rem;
+}
+.layer-group .fold::before { margin-right: 0.45em; }
+.layer-group .mini { padding: 0.05rem 0.4rem; font-size: 0.85em; color: var(--dim); }
+.layer-group ul { list-style: none; margin: 0; padding: 0 0 0.35rem; }
+.layer { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 0.5rem; padding: 0.1rem 0.2rem; }
+.layer label { display: flex; align-items: center; gap: 0.4rem; min-width: 0; cursor: pointer; }
+.layer input { accent-color: var(--accent); margin: 0; width: 1rem; height: 1rem; flex: none; cursor: inherit; }
+.layer i { flex: none; }
+.layer .name { overflow-wrap: anywhere; }
+.layer .count { color: var(--dim); font-variant-numeric: tabular-nums; }
+.layer .note { grid-column: 1 / -1; color: var(--dim); font-size: 0.85em; padding-left: 1.4rem; overflow-wrap: anywhere; }
+.layer .note:empty { display: none; }
+.layer.unavailable { opacity: 0.5; }
+.layer.unavailable label { cursor: not-allowed; }
+
+.who { color: var(--dim); }
 
 .dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 1px solid #0b0c0e; }
 .dot.players { background: #ffffff; }
@@ -144,7 +229,7 @@ input[type="number"] { width: 6.5rem; }
 .leaflet-tooltip.live-name::before, .leaflet-tooltip.live-tip::before { display: none; }
 
 /* While logged out the map and its controls are not there to use. */
-.locked #map, .locked .tabs, .locked .goto, .locked .toggle, .locked .chips, .locked #copy, .locked .foot { display: none; }
+.locked .stage, .locked .tabs, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .foot { display: none; }
 
 .login {
   flex: 1;

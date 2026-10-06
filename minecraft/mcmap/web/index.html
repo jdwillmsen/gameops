@@ -19,34 +19,30 @@
       <button type="submit">Go</button>
     </form>
     <label class="toggle"><input id="grid" type="checkbox"> Grid</label>
-    <nav id="live-filters" class="chips" aria-label="Live markers" hidden>
-      <button type="button" data-live="on" aria-pressed="true">Live</button>
-      <button type="button" data-live="players" aria-pressed="true"><i class="dot players"></i>Players <span class="count"></span></button>
-      <button type="button" data-live="hostile" aria-pressed="true"><i class="dot hostile"></i>Hostile <span class="count"></span></button>
-      <button type="button" data-live="passive" aria-pressed="true"><i class="dot passive"></i>Passive <span class="count"></span></button>
-      <button type="button" data-live="villager" aria-pressed="true"><i class="dot villager"></i>Villagers <span class="count"></span></button>
-      <button type="button" data-live="other" aria-pressed="true"><i class="dot other"></i>Other <span class="count"></span></button>
-    </nav>
-    <nav id="marker-filters" class="chips" aria-label="Map markers" hidden>
-      <button type="button" data-marker="waypoints" aria-pressed="true" hidden><i class="ring waypoints"></i>Waypoints <span class="count"></span></button>
-      <button type="button" data-marker="beds" aria-pressed="true" hidden><i class="ring beds"></i>Beds <span class="count"></span></button>
-      <button type="button" data-marker="containers" aria-pressed="true" hidden><i class="ring containers"></i>Containers <span class="count"></span></button>
-      <button type="button" data-marker="mobs" aria-pressed="true" hidden><i class="ring mobs"></i>Named mobs <span class="count"></span></button>
-    </nav>
-    <nav id="structure-filters" class="chips" aria-label="Structures" hidden>
-      <button type="button" data-structures="on" aria-pressed="true">Structures</button>
-      <button type="button" data-structures="recorded" aria-pressed="true"><i class="key recorded"></i>Known <span class="count"></span></button>
-      <button type="button" data-structures="predicted" aria-pressed="true"><i class="key predicted"></i>Predicted <span class="count"></span></button>
-      <button type="button" data-structures="fortress" aria-pressed="true"><i class="dot fortress"></i>Fortresses</button>
-      <button type="button" data-structures="monument" aria-pressed="true"><i class="dot monument"></i>Monuments</button>
-      <button type="button" data-structures="outpost" aria-pressed="true"><i class="dot outpost"></i>Outposts</button>
-      <button type="button" data-structures="witch_hut" aria-pressed="true"><i class="dot witch-hut"></i>Witch huts</button>
-    </nav>
+    <div id="live-control" class="live-control" role="group" aria-label="Live updates" hidden>
+      <button id="live-pause" type="button">Pause live</button>
+      <label>every
+        <select id="live-interval">
+          <option value="1">1 s</option>
+          <option value="2">2 s</option>
+          <option value="5">5 s</option>
+          <option value="10">10 s</option>
+          <option value="30">30 s</option>
+        </select>
+      </label>
+    </div>
     <button id="copy" type="button">Copy link</button>
     <span id="who" class="who" hidden></span>
     <button id="logout" type="button" hidden>Log out</button>
   </header>
-  <main id="map" aria-label="Map"></main>
+  <div class="stage">
+    <aside id="layers" class="layers" aria-label="Layers" hidden>
+      <button id="layers-toggle" type="button" aria-expanded="false" aria-controls="layers-body">Layers</button>
+      <div id="layers-body" hidden></div>
+    </aside>
+    <main id="map" aria-label="Map"></main>
+    <p id="frozen" class="frozen" hidden><strong id="frozen-what" role="status"></strong> <span id="frozen-age"></span></p>
+  </div>
   <section id="login" class="login" aria-labelledby="login-title" hidden>
     <div class="card">
       <h2 id="login-title">Log in from the game</h2>
@@ -63,10 +59,12 @@
   <footer class="bar foot">
     <output id="coords" aria-live="off">X —, Z —</output>
     <output id="live" class="live" aria-live="off" hidden></output>
+    <output id="refresh" class="refresh" role="timer" aria-live="off" hidden></output>
     <span id="status" role="status"></span>
   </footer>
   <script src="lib/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
+  <script src="layers.js"></script>
   <script src="live.js"></script>
   <script src="markers.js"></script>
   <script src="structures.js"></script>

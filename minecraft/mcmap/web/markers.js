@@ -6,32 +6,27 @@
 // drawn as rings so that they are never mistaken for the live layer's dots.
 (() => {
   const app = window.mcmap;
-  if (!app) return;
+  // The page and its scripts are cached apart for a few minutes, so just
+  // after a release this can meet a page that has no panel yet.
+  if (!app || !app.layers || !app.layers.register) return;
   const { map } = app;
 
-  const SETTINGS_KEY = 'mcmap.markers';
   // Several things announce a change of view at once; one fetch answers
   // them all.
   const SETTLE_MS = 50;
 
   const KINDS = {
-    waypoints: { color: '#b48cf2', radius: 6 },
-    beds: { color: '#f277b5', radius: 4 },
-    containers: { color: '#f08a3c', radius: 4 },
-    mobs: { color: '#4fd1c5', radius: 5 },
+    waypoints: { label: 'Waypoints', color: '#b48cf2', radius: 6 },
+    beds: { label: 'Beds', color: '#f277b5', radius: 4 },
+    containers: { label: 'Containers', color: '#f08a3c', radius: 4 },
+    mobs: { label: 'Named mobs', color: '#4fd1c5', radius: 5 },
   };
   const WORLD_KINDS = ['beds', 'containers', 'mobs'];
   const CONTAINERS = { chest: 'Chest', barrel: 'Barrel', shulker: 'Shulker box' };
 
-  const el = { filters: document.getElementById('marker-filters') };
-  if (!el.filters) return;
-  const chips = new Map([...el.filters.querySelectorAll('button[data-marker]')].map((b) => [b.dataset.marker, b]));
-
-  const settings = { waypoints: true, beds: true, containers: true, mobs: true };
-  try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-    for (const key of Object.keys(settings)) if (typeof saved[key] === 'boolean') settings[key] = saved[key];
-  } catch { /* a browser that refuses storage still gets the defaults */ }
+  // Each kind's row in the panel, once the service is known to have that
+  // kind. One it does not have gets no row.
+  const rows = new Map();
 
   // A pane of their own, above the live layer's canvas. A canvas takes
   // every pointer event over the map, so anything drawn under one cannot be
@@ -114,20 +109,25 @@
   }
 
   function show(kind) {
-    if (settings[kind]) layers[kind].addTo(map); else map.removeLayer(layers[kind]);
+    if (rows.has(kind) && rows.get(kind).enabled) layers[kind].addTo(map); else map.removeLayer(layers[kind]);
   }
 
   function paint() {
     const has = { waypoints: available.waypoints, beds: available.world, containers: available.world, mobs: available.world };
-    let any = false;
-    for (const [kind, chip] of chips) {
-      chip.hidden = !has[kind];
-      any = any || Boolean(has[kind]);
-      chip.setAttribute('aria-pressed', String(settings[kind]));
-      chip.querySelector('.count').textContent = totals[kind] === null ? '' : fmt(totals[kind]);
-      chip.title = more[kind] > 0 ? `${fmt(more[kind])} more are not shown` : '';
-    }
-    el.filters.hidden = !any;
+    Object.keys(KINDS).forEach((kind, at) => {
+      if (!has[kind]) {
+        if (rows.has(kind)) rows.get(kind).remove();
+        rows.delete(kind);
+      } else if (!rows.has(kind)) {
+        const row = app.layers.register({ group: 'markers', id: kind, label: KINDS[kind].label, order: (at + 1) * 10, swatch: `ring ${kind}` });
+        row.onToggle(() => show(kind));
+        rows.set(kind, row);
+      }
+      show(kind);
+      if (!rows.has(kind)) return;
+      rows.get(kind).setCount(totals[kind]);
+      rows.get(kind).setNote(more[kind] > 0 ? `${fmt(more[kind])} more are not shown` : '');
+    });
   }
 
   function clear() {
@@ -223,20 +223,6 @@
   function sync() {
     clearTimeout(timer);
     timer = setTimeout(refresh, SETTLE_MS);
-  }
-
-  function save() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* not kept, still applied */ }
-  }
-
-  for (const [kind, chip] of chips) {
-    chip.addEventListener('click', () => {
-      settings[kind] = !settings[kind];
-      save();
-      show(kind);
-      paint();
-    });
-    show(kind);
   }
 
   paint();
