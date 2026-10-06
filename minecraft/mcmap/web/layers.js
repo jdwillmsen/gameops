@@ -190,8 +190,10 @@
   // one of the sections above, or a new one, titled by groupLabel. id is
   // unique within the group and is what the viewer's choice is saved
   // under; registering one again replaces the row. swatch is the class of
-  // the colour key drawn beside the label, for a layer that has one.
-  function register({ group, id, label, enabled = true, order, groupLabel, swatch } = {}) {
+  // the colour key drawn beside the label, for a layer that has one, and
+  // picture an element the script made to stand in the key's place for as
+  // long as it is showing.
+  function register({ group, id, label, enabled = true, order, groupLabel, swatch, picture } = {}) {
     if (typeof group !== 'string' || !group || typeof id !== 'string' || !id) {
       throw new TypeError('a layer needs a group and an id');
     }
@@ -211,8 +213,10 @@
     const body = make('div', 'body');
     body.hidden = true;
     name.append(box);
+    if (picture instanceof Node) name.append(picture);
     if (typeof swatch === 'string' && swatch) name.append(make('i', swatch));
-    name.append(make('span', 'name', String(label ?? id)));
+    const title = make('span', 'name', String(label ?? id));
+    name.append(title);
     item.append(name, count, note, body);
 
     const row = {
@@ -243,6 +247,8 @@
       get enabled() { return row.on; },
       setCount(n) { put(count, Number.isFinite(n) ? n.toLocaleString('en-US') : ''); },
       setNote(text) { put(note, text ? String(text) : ''); },
+      // For a layer whose name is the world's and may arrive late.
+      setLabel(text) { if (text) put(title, String(text)); },
       onToggle(fn) { if (typeof fn === 'function') row.listeners.push(fn); },
       // Switches the row as the viewer would have, for a script that has
       // been asked for what the layer shows: the choice is kept, and the

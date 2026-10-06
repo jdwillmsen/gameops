@@ -2,38 +2,56 @@
 
 // What stays where it is: the player's own waypoints, and the beds,
 // containers and named mobs read from the world at the last snapshot. They
-// change at most every few minutes, so they are fetched, not streamed, and
-// drawn as rings so that they are never mistaken for the live layer's dots.
+// change at most every few minutes, so they are fetched, not streamed. Each
+// is drawn as its own picture on a square plate, where the live layer's are
+// round, and as the ring it used to be while the server has no picture for
+// it. A named mob is its type's icon under its name, and is listed by name
+// under its row, since a name is what it is looked for by.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
   // after a release this can meet a page that has no panel yet.
-  if (!app || !app.layers || !app.layers.register) return;
-  const { map } = app;
+  if (!app || !app.layers || !app.layers.register || !app.icons || !app.names) return;
+  const { map, icons, names } = app;
 
   // Several things announce a change of view at once; one fetch answers
   // them all.
   const SETTLE_MS = 50;
+  // From further out than this a bed or a container is its ring: a
+  // village's worth of pictures twenty pixels wide, eight blocks to the
+  // pixel, is a heap in which none can be made out.
+  const PICTURE_ZOOM = -2;
+  // How long the ring stays on a named mob chosen from the list.
+  const CHOSEN_MS = 20_000;
+  // A name tag may be 64 characters; the label on the map shows this many
+  // and the tooltip and the list show them all.
+  const TAG_LENGTH = 24;
+  const TAG_HEIGHT = 18;
+  const TAG_GAP = 3;
+  const TAG_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+  const INK = '#0b0c0e';
+  const { DENSITY } = icons;
 
+  // picture is the one that stands for the whole row in the panel, where
+  // a single one can.
   const KINDS = {
-    waypoints: { label: 'Waypoints', color: '#b48cf2', radius: 6 },
-    beds: { label: 'Beds', color: '#f277b5', radius: 4 },
-    containers: { label: 'Containers', color: '#f08a3c', radius: 4 },
+    waypoints: { label: 'Waypoints', color: '#b48cf2', radius: 6, picture: 'marker/waypoint' },
+    beds: { label: 'Beds', color: '#f277b5', radius: 4, picture: 'bed/red' },
+    containers: { label: 'Containers', color: '#f08a3c', radius: 4, picture: 'container/chest' },
     mobs: { label: 'Named mobs', color: '#4fd1c5', radius: 5 },
   };
   const WORLD_KINDS = ['beds', 'containers', 'mobs'];
-  const CONTAINERS = { chest: 'Chest', barrel: 'Barrel', shulker: 'Shulker box' };
+  const BABY_RADIUS = 4;
 
   // Each kind's row in the panel, once the service is known to have that
   // kind. One it does not have gets no row.
   const rows = new Map();
 
-  // A pane of their own, above the live layer's canvas. A canvas takes
-  // every pointer event over the map, so anything drawn under one cannot be
-  // hovered; these are SVG, which takes them only on the shapes themselves,
-  // and so leaves the live markers beneath as reachable as before.
-  map.createPane('markers').style.zIndex = 450;
-  const renderer = L.svg({ pane: 'markers', padding: 0.5 });
+  // On the live layer's canvas. A canvas takes every pointer event over
+  // the map, so two of them cannot both be hovered; on the one, these and
+  // the live markers both can, and two thousand pictures are two thousand
+  // stamps, not two thousand elements.
+  const renderer = app.liveRenderer || L.canvas({ padding: 0.5 });
 
   // Names reach here from the game and from chat, where players choose
   // them, and Leaflet treats a string given to a tooltip as HTML. An
@@ -44,10 +62,88 @@
     return span;
   };
 
+  const fmt = (n) => n.toLocaleString('en-US');
+  const at = (m) => `${fmt(m.x)}, ${fmt(m.y)}, ${fmt(m.z)}`;
+  const str = (v) => (typeof v === 'string' ? v : '');
+
+  const SORTS = { waypoints: 'waypoint', beds: 'bed', containers: 'container', mobs: 'mob' };
+  const pictureOf = (kind, m) => icons.keyOf(SORTS[kind], { kind: m.k, colour: m.c, trapped: m.t });
+
+  // What a marker says of itself, without where it is.
+  function titleOf(kind, m) {
+    if (kind === 'beds') return names.bed(m.c);
+    if (kind === 'containers') {
+      const what = names.holder(m.k, m.c, m.t);
+      return str(m.n) ? `${str(m.n)} (${what})` : what;
+    }
+    if (kind === 'mobs') return names.mob(m.n, m.k, m.b);
+    return str(m.name) || 'Waypoint';
+  }
+
+  // Said when it is asked for, so that a name which arrives after the
+  // marker was drawn is the one shown.
+  function tip(marker) {
+    const { kind, data } = marker.options;
+    const box = text(`${titleOf(kind, data)} · ${at(data)}`);
+    box.prepend(icons.picture(pictureOf(kind, data)));
+    return box;
+  }
+
+  // A mob's name tag, drawn once to be stamped over its marker. Text put
+  // on a canvas is drawn and never parsed.
+  function tagOf(name) {
+    const letters = [...str(name)];
+    if (letters.length === 0) return null;
+    const said = letters.length > TAG_LENGTH ? `${letters.slice(0, TAG_LENGTH - 1).join('')}…` : letters.join('');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = TAG_FONT;
+    const width = Math.ceil(ctx.measureText(said).width) + 10;
+    canvas.width = width * DENSITY;
+    canvas.height = TAG_HEIGHT * DENSITY;
+    ctx.scale(DENSITY, DENSITY);
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(0.5, 0.5, width - 1, TAG_HEIGHT - 1, 3);
+    else ctx.rect(0.5, 0.5, width - 1, TAG_HEIGHT - 1);
+    ctx.fillStyle = 'rgba(20, 22, 26, 0.88)';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = KINDS.mobs.color;
+    ctx.stroke();
+    // Sizing the canvas reset the font.
+    ctx.font = TAG_FONT;
+    ctx.fillStyle = KINDS.mobs.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(said, width / 2, TAG_HEIGHT / 2 + 0.5);
+    return canvas;
+  }
+
+  // A marker with, for a named mob, its name over it. _renderer, _point,
+  // _pxBounds and _drawing are Leaflet internals, which is safe only
+  // because Leaflet is vendored at a fixed version.
+  const Pin = icons.Stamped.extend({
+    // The canvas only repaints inside the bounds a marker claims, and the
+    // name reaches past the radius.
+    _updateBounds() {
+      L.CircleMarker.prototype._updateBounds.call(this);
+      const tag = this.options.tag;
+      if (!tag) return;
+      const half = tag.width / DENSITY / 2 + 1;
+      this._pxBounds.extend(this._point.subtract([half, this._radius + TAG_GAP + TAG_HEIGHT + 1]));
+      this._pxBounds.extend(this._point.add([half, 0]));
+    },
+    _updatePath() {
+      icons.Stamped.prototype._updatePath.call(this);
+      const tag = this.options.tag;
+      if (tag && this._renderer._drawing && !this._empty()) icons.stamp(this, tag, this._radius + TAG_GAP + TAG_HEIGHT / 2);
+    },
+  });
+
   const layers = {};
   for (const kind of Object.keys(KINDS)) {
     layers[kind] = L.featureGroup();
-    layers[kind].bindTooltip((marker) => text(marker.options.label), { sticky: true, direction: 'top', className: 'marker-tip' });
+    layers[kind].bindTooltip((marker) => tip(marker), { sticky: true, direction: 'top', className: 'marker-tip' });
   }
 
   // Whether the service has each kind at all; null until it has answered.
@@ -59,78 +155,197 @@
   let waypoints = [];
   let timer = null;
   let asked = 0;
+  let near = false;
 
-  const fmt = (n) => n.toLocaleString('en-US');
-  const at = (m) => `${fmt(m.x)}, ${fmt(m.y)}, ${fmt(m.z)}`;
-  const str = (v) => (typeof v === 'string' ? v : '');
+  // The named mobs on the map, as { data, marker }, in the order listed.
+  let named = [];
+  // The one chosen from the list: { entry, ring, timer }, or null.
+  let chosen = null;
+  // What the list was last built from, so that an unchanged one is left
+  // alone under the viewer's pointer.
+  let rosterOf = '';
+  const roster = document.createElement('div');
+  roster.className = 'roster';
 
-  function label(kind, m) {
-    if (kind === 'beds') return `Bed · ${at(m)}`;
-    if (kind === 'containers') {
-      const what = CONTAINERS[m.k] || 'Container';
-      return str(m.n) ? `${str(m.n)} (${what.toLowerCase()}) · ${at(m)}` : `${what} · ${at(m)}`;
+  // Brings one marker in line with the pictures there are now and with
+  // how far out the map is.
+  function dress(marker) {
+    const { kind, data } = marker.options;
+    const style = KINDS[kind];
+    let worn = null;
+    let radius = style.radius;
+    if (kind === 'mobs') {
+      const baby = data.b === true;
+      worn = icons.mob(str(data.k), style.color, baby);
+      if (worn) radius = baby ? icons.BABY_RADIUS : icons.MOB_RADIUS;
+      else if (baby) radius = BABY_RADIUS;
+    } else if (near || kind === 'waypoints') {
+      worn = icons.plate(pictureOf(kind, data), style.color);
+      if (worn) radius = icons.PLATE_RADIUS;
     }
-    if (kind === 'mobs') return `${str(m.n)} (${str(m.k).replace(/_/g, ' ') || 'mob'}) · ${at(m)}`;
-    return `${str(m.name)} · ${at(m)}`;
+    if (worn === marker.options.sprite && radius === marker.getRadius()) return;
+    marker.options.sprite = worn;
+    marker.setRadius(radius);
   }
 
-  function ring(kind, m) {
+  function dressAll(kinds) {
+    for (const kind of kinds) layers[kind].eachLayer(dress);
+    halo();
+  }
+
+  function pin(kind, m) {
     const style = KINDS[kind];
     // The middle of the block, not its north-west corner.
-    return L.circleMarker([m.z + 0.5, m.x + 0.5], {
+    const marker = new Pin([m.z + 0.5, m.x + 0.5], {
       renderer,
-      pane: 'markers',
       radius: style.radius,
       color: style.color,
       weight: 2,
-      fillColor: '#0b0c0e',
+      fillColor: INK,
       fillOpacity: 0.75,
-      label: label(kind, m),
+      kind,
+      data: m,
+      sprite: null,
+      tag: kind === 'mobs' ? tagOf(m.n) : null,
     });
+    dress(marker);
+    return marker;
   }
 
   const placed = (m) => m && Number.isFinite(m.x) && Number.isFinite(m.y) && Number.isFinite(m.z);
 
   function fill(kind, list) {
     layers[kind].clearLayers();
-    let n = 0;
+    const made = [];
     for (const m of list) {
       if (!placed(m)) continue;
-      const marker = ring(kind, m);
+      const marker = pin(kind, m);
       if (kind === 'waypoints') {
         // A waypoint is the one marker a player put there by name, so the
         // name is always showing.
-        marker.bindTooltip(text(str(m.name)), { permanent: true, direction: 'right', offset: [8, 0], className: 'marker-name' });
+        marker.bindTooltip(text(str(m.name) || 'Waypoint'), { permanent: true, direction: 'right', offset: [icons.PLATE_RADIUS + 2, 0], className: 'marker-name' });
       }
       layers[kind].addLayer(marker);
-      n += 1;
+      made.push({ data: m, marker });
     }
-    totals[kind] = n;
+    totals[kind] = made.length;
+    if (kind !== 'mobs') return;
+    unchoose();
+    named = made.sort((a, b) => str(a.data.n).localeCompare(str(b.data.n)) || a.data.x - b.data.x || a.data.z - b.data.z);
   }
 
   function show(kind) {
-    if (rows.has(kind) && rows.get(kind).enabled) layers[kind].addTo(map); else map.removeLayer(layers[kind]);
+    const want = rows.has(kind) && rows.get(kind).enabled;
+    if (want === map.hasLayer(layers[kind])) return;
+    if (!want) {
+      map.removeLayer(layers[kind]);
+      if (kind === 'mobs') unchoose();
+      return;
+    }
+    layers[kind].addTo(map);
+  }
+
+  // --- the named mobs, by name ---------------------------------------------
+
+  function unchoose() {
+    if (!chosen) return;
+    clearTimeout(chosen.timer);
+    chosen.ring.remove();
+    chosen = null;
+    for (const button of roster.querySelectorAll('[aria-current]')) button.removeAttribute('aria-current');
+  }
+
+  // Keeps the ring round the chosen mob as large as what it circles.
+  function halo() {
+    if (chosen) chosen.ring.setRadius(chosen.entry.marker.getRadius() + 5);
+  }
+
+  function choose(entry, button) {
+    const dimension = app.dimension();
+    const { data } = entry;
+    // The middle of the block, not its north-west corner.
+    if (!dimension || !app.go(dimension, data.x + 0.5, data.z + 0.5)) return;
+    unchoose();
+    const ring = L.circleMarker(entry.marker.getLatLng(), { renderer, interactive: false, fill: false, color: '#ffffff', weight: 3, opacity: 1 });
+    ring.addTo(map);
+    chosen = { entry, ring, timer: setTimeout(unchoose, CHOSEN_MS) };
+    halo();
+    button.setAttribute('aria-current', 'true');
+  }
+
+  // The list under the row: every named mob in this dimension, by name,
+  // with what it is. All of it is set as text; a name tag is a player's
+  // choice.
+  function buildRoster() {
+    const key = `${drawn.dimension}|${drawn.etag}|${named.length}|${named.map((e) => names.kindOf(e.data.k, e.data.b)).join('|')}`;
+    if (key === rosterOf) return;
+    rosterOf = key;
+    const list = document.createElement('ul');
+    list.setAttribute('aria-label', 'Named mobs in this dimension, by name');
+    for (const entry of named) {
+      const { data } = entry;
+      const button = document.createElement('button');
+      button.type = 'button';
+      const swatch = document.createElement('i');
+      swatch.className = 'ring mobs';
+      const name = text(str(data.n) || names.entity(data.k));
+      name.className = 'name';
+      const what = text(names.kindOf(data.k, data.b));
+      what.className = 'what';
+      button.append(icons.picture(pictureOf('mobs', data)), swatch, name, what);
+      button.title = `${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;
+      if (chosen && chosen.entry === entry) button.setAttribute('aria-current', 'true');
+      button.addEventListener('click', () => choose(entry, button));
+      const item = document.createElement('li');
+      item.append(button);
+      list.append(item);
+    }
+    roster.replaceChildren(list);
+  }
+
+  // The canvas paints in the order markers were added, so a layer switched
+  // back on would cover the ones over it. What a player named goes over
+  // what the world merely holds, and what moves over what stays put.
+  function stack() {
+    for (const kind of ['waypoints', 'mobs']) {
+      if (map.hasLayer(layers[kind])) layers[kind].eachLayer((marker) => marker.bringToFront());
+    }
+    if (chosen) chosen.ring.bringToFront();
+    if (app.liveToFront) app.liveToFront();
   }
 
   function paint() {
     const has = { waypoints: available.waypoints, beds: available.world, containers: available.world, mobs: available.world };
+    let added = false;
     Object.keys(KINDS).forEach((kind, at) => {
       if (!has[kind]) {
         if (rows.has(kind)) rows.get(kind).remove();
         rows.delete(kind);
       } else if (!rows.has(kind)) {
-        const row = app.layers.register({ group: 'markers', id: kind, label: KINDS[kind].label, order: (at + 1) * 10, swatch: `ring ${kind}` });
-        row.onToggle(() => show(kind));
+        const picture = KINDS[kind].picture ? icons.picture(KINDS[kind].picture) : null;
+        const row = app.layers.register({ group: 'markers', id: kind, label: KINDS[kind].label, order: (at + 1) * 10, swatch: `ring ${kind}`, picture });
+        row.onToggle(paint);
         rows.set(kind, row);
       }
+      const was = map.hasLayer(layers[kind]);
       show(kind);
+      added = added || (!was && map.hasLayer(layers[kind]));
       if (!rows.has(kind)) return;
       rows.get(kind).setCount(totals[kind]);
       rows.get(kind).setNote(more[kind] > 0 ? `${fmt(more[kind])} more are not shown` : '');
     });
+    if (added) stack();
+    if (!rows.has('mobs')) return;
+    if (rows.get('mobs').enabled && named.length > 0) {
+      buildRoster();
+      rows.get('mobs').setBody(roster);
+    } else {
+      rows.get('mobs').setBody(null);
+    }
   }
 
   function clear() {
+    unchoose();
     for (const kind of Object.keys(KINDS)) {
       layers[kind].clearLayers();
       totals[kind] = null;
@@ -138,6 +353,7 @@
     }
     drawn = { dimension: null, etag: null };
     waypoints = [];
+    named = [];
     paint();
   }
 
@@ -152,25 +368,26 @@
       // stands, so an unchanged world costs a 304.
       res = await fetch(`api/markers?dimension=${encodeURIComponent(dimension)}`);
     } catch {
-      return; // what is drawn stays; the next announcement asks again
+      return false; // what is drawn stays; the next announcement asks again
     }
-    if (turn !== asked) return;
+    if (turn !== asked) return false;
     if (res.status === 404) {
       available.world = false;
-      return;
+      return false;
     }
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const etag = res.headers.get('ETag');
     let doc;
-    try { doc = await res.json(); } catch { return; }
-    if (turn !== asked) return;
+    try { doc = await res.json(); } catch { return false; }
+    if (turn !== asked) return false;
     available.world = true;
-    if (drawn.dimension === dimension && etag && drawn.etag === etag) return;
+    if (drawn.dimension === dimension && etag && drawn.etag === etag) return false;
     drawn = { dimension, etag };
     for (const kind of WORLD_KINDS) {
       fill(kind, Array.isArray(doc[kind]) ? doc[kind] : []);
       more[kind] = (doc.more && Number.isFinite(doc.more[kind])) ? doc.more[kind] : 0;
     }
+    return true;
   }
 
   async function loadWaypoints(dimension, turn) {
@@ -178,23 +395,24 @@
     try {
       res = await fetch('api/waypoints', { cache: 'no-store' });
     } catch {
-      return;
+      return false;
     }
-    if (turn !== asked) return;
+    if (turn !== asked) return false;
     if (res.status === 404) {
       available.waypoints = false;
-      return;
+      return false;
     }
     // Shown as a filter even while the agent cannot be reached: the layer
     // exists, it just has nothing to draw until the next try.
     available.waypoints = true;
-    if (!res.ok) return;
+    if (!res.ok) return false;
     let doc;
-    try { doc = await res.json(); } catch { return; }
-    if (turn !== asked) return;
+    try { doc = await res.json(); } catch { return false; }
+    if (turn !== asked) return false;
     waypoints = Array.isArray(doc.waypoints) ? doc.waypoints : [];
     more.waypoints = Number.isFinite(doc.more) ? doc.more : 0;
     drawWaypoints(dimension);
+    return true;
   }
 
   async function refresh() {
@@ -210,14 +428,18 @@
     if (drawn.dimension !== null && drawn.dimension !== dimension) {
       // Another dimension's markers are wrong here, not merely old.
       for (const kind of WORLD_KINDS) layers[kind].clearLayers();
+      unchoose();
+      named = [];
       drawn = { dimension: null, etag: null };
       drawWaypoints(dimension);
     }
     const jobs = [];
     if (available.world !== false) jobs.push(loadWorld(dimension, turn));
     if (available.waypoints !== false) jobs.push(loadWaypoints(dimension, turn));
-    await Promise.all(jobs);
-    if (turn === asked) paint();
+    const redrawn = await Promise.all(jobs);
+    if (turn !== asked) return;
+    paint();
+    if (redrawn.some(Boolean)) stack();
   }
 
   function sync() {
@@ -225,7 +447,25 @@
     timer = setTimeout(refresh, SETTLE_MS);
   }
 
+  function zoomed() {
+    const now = map.getZoom() >= PICTURE_ZOOM;
+    if (now === near) return;
+    near = now;
+    dressAll(['beds', 'containers']);
+  }
+
+  // A tooltip already open says the old name until it is told.
+  function renamed() {
+    for (const group of Object.values(layers)) if (group.isTooltipOpen()) group.getTooltip().update();
+    paint();
+  }
+
+  zoomed();
   paint();
+  map.on('zoomend', zoomed);
+  document.addEventListener('mcmap:icons', () => dressAll(Object.keys(KINDS)));
+  document.addEventListener('mcmap:pictures', () => dressAll(Object.keys(KINDS)));
+  document.addEventListener('mcmap:names', renamed);
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
   sync();

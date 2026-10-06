@@ -241,7 +241,31 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .dot.villager { background: #d9a441; }
 .dot.other { background: #9aa3ad; }
 
-/* Markers that stay put are rings, the live ones dots. */
+/* A picture from the game, where the page shows one outside the map's own
+   canvas. It is sixteen texture pixels and is never smoothed. While there
+   is none to show it is hidden, and the key that follows it stands in. */
+.picture { flex: none; width: 16px; height: 16px; image-rendering: pixelated; }
+.layer .picture:not([hidden]) + i, .roster .picture:not([hidden]) + i { display: none; }
+.search-panel .name .picture, .leaflet-tooltip .picture { margin-right: 0.35rem; vertical-align: -3px; }
+
+/* The named mobs, under their row. The list scrolls by itself, like the
+   biomes' legend. */
+.roster ul { list-style: none; margin: 0; padding: 0; max-height: 12rem; overflow-y: auto; }
+.roster button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.1rem 0.3rem;
+  text-align: left;
+  background: none;
+  border-color: transparent;
+}
+.roster button[aria-current="true"] { border-color: var(--accent); }
+.roster .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.roster .what { color: var(--dim); font-size: 0.85em; text-align: right; }
+
+/* Markers that stay put are keyed by a ring, the live ones by a dot. */
 .ring { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 2px solid; background: #0b0c0e; }
 .ring.waypoints { border-color: #b48cf2; }
 .ring.beds { border-color: #f277b5; }
@@ -282,11 +306,15 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .structure span {
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  font: 700 11px/1 system-ui, sans-serif;
+  width: 22px;
+  height: 22px;
+  font: 700 12px/1 system-ui, sans-serif;
 }
+/* The letter is what a kind is drawn as until its picture is there. */
+.structure .picture:not([hidden]) + b { display: none; }
 .structure.recorded span { background: var(--kind); color: #0b0c0e; border: 1.5px solid #0b0c0e; border-radius: 3px; }
+/* Dark behind the picture, so the kind's colour is a frame round it. */
+.structure.recorded .picture { background: rgba(11, 12, 14, 0.85); border-radius: 2px; }
 .structure.predicted span {
   background: rgba(11, 12, 14, 0.55);
   color: var(--kind);
@@ -295,7 +323,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 }
 /* The world spawn is a diamond, which no kind of structure is. */
 .key.spawn { width: 0.6rem; height: 0.6rem; margin: 0 0.05rem; background: var(--text); border: 1px solid #0b0c0e; transform: rotate(45deg); }
-.structure.spawn span { width: 13px; height: 13px; margin: 2.5px; background: var(--text); border: 1.5px solid #0b0c0e; transform: rotate(45deg); }
+.structure.spawn span { width: 13px; height: 13px; margin: 4.5px; background: var(--text); border: 1.5px solid #0b0c0e; transform: rotate(45deg); }
 /* Predicted where the world has already generated and recorded nothing. */
 .structure.predicted.doubted span { opacity: 0.55; text-decoration: line-through; }
 

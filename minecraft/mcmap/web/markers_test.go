@@ -29,7 +29,11 @@ func TestMarkerLayerNeverHandsTextOverAsMarkup(t *testing.T) {
 		}
 	}
 	content := regexp.MustCompile(`\b(bindTooltip|bindPopup|setTooltipContent|setPopupContent|setContent)\((.{0,24})`)
-	safe := regexp.MustCompile(`^(text\(|\(marker\) => text\()`)
+	safe := regexp.MustCompile(`^(text\(|\(marker\) => tip\(marker\))`)
+	// tip is text and a picture drawn on a canvas, and nothing else.
+	if !regexp.MustCompile(`function tip\(marker\) \{\s*const \{ kind, data \} = marker\.options;\s*const box = text\(.*\);\s*box\.prepend\(icons\.picture\(.*\)\);\s*return box;\s*\}`).Match(js) {
+		t.Fatal("markers.js no longer builds a marker's tooltip from text and a picture")
+	}
 	calls := content.FindAllSubmatch(js, -1)
 	if len(calls) < 2 {
 		t.Fatalf("found %d tooltip calls in markers.js; the pattern no longer matches the script", len(calls))
@@ -37,6 +41,27 @@ func TestMarkerLayerNeverHandsTextOverAsMarkup(t *testing.T) {
 	for _, c := range calls {
 		if !safe.Match(c[2]) {
 			t.Errorf("markers.js gives %s content that is not built by text(): %s", c[1], c[0])
+		}
+	}
+}
+
+// A named mob is looked for by its name, so the name is on the map and in
+// a list under the row, with what the mob is. The name is a player's: on
+// the map it is drawn on a canvas, and in the list set as text.
+func TestNamedMobsAreLabelledAndListedByName(t *testing.T) {
+	js := read(t, "markers.js")
+	for _, need := range []string{
+		"tag: kind === 'mobs' ? tagOf(m.n) : null,",
+		"ctx.fillText(said,",
+		"icons.mob(str(data.k), style.color, baby)",
+		"const name = text(str(data.n) || names.entity(data.k));",
+		"const what = text(names.kindOf(data.k, data.b));",
+		"button.addEventListener('click', () => choose(entry, button));",
+		"app.go(dimension, data.x + 0.5, data.z + 0.5)",
+		"rows.get('mobs').setBody(roster);",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("markers.js no longer has %s", need)
 		}
 	}
 }
