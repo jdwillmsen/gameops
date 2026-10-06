@@ -7,6 +7,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/heads"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 )
 
 // headsTimeout bounds one report of player heads to the map. Nothing waits
@@ -35,12 +36,41 @@ func watchHeads(pk packet.Packet, w *heads.Watch) {
 	}
 }
 
+// hairTint is the piece type a skin's hair colour is filed under.
+const hairTint = "persona_hair"
+
 func headSkin(s protocol.Skin) heads.Skin {
+	animations := make([]heads.Animation, len(s.Animations))
+	for i, a := range s.Animations {
+		animations[i] = heads.Animation{
+			Type:       a.AnimationType,
+			Expression: a.ExpressionType,
+			Width:      a.ImageWidth,
+			Height:     a.ImageHeight,
+			Frames:     a.FrameCount,
+			Bytes:      len(a.ImageData),
+		}
+	}
+	tints := skin.Tints{Skin: s.SkinColour}
+	made := heads.Made{ID: s.SkinID, Premium: s.PremiumSkin, Hashed: s.ProfileHash != ""}
+	for _, p := range s.PersonaPieces {
+		made.Pieces = append(made.Pieces, p.PieceType)
+	}
+	for _, t := range s.PieceTintColours {
+		made.Tinted = append(made.Tinted, t.PieceType)
+		if t.PieceType == hairTint {
+			tints.Hair = t.Colours[0]
+		}
+	}
 	return heads.Skin{
 		Width:         s.SkinImageWidth,
 		Height:        s.SkinImageHeight,
 		Data:          s.SkinData,
 		Persona:       s.PersonaSkin,
 		ResourcePatch: s.SkinResourcePatch,
+		Geometry:      s.SkinGeometry,
+		Animations:    animations,
+		Tints:         tints,
+		Made:          made,
 	}
 }

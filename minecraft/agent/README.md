@@ -1453,22 +1453,49 @@ an older one every poll is refused, logged once, and no one is warned.
 The world map (`minecraft/mcmap`) draws each player's marker as the head of
 their skin. The game server sends every connected client each online
 player's skin, in the player list and again when a player changes skin, so
-the agent already has them. It crops the 8 by 8 face, lays the hat layer
-over it, and reports everyone online, each with XUID, gamertag and head as a
+the agent already has them. It crops the face, lays the hat layer over it,
+and reports everyone online, each with XUID, gamertag and head as a
 small PNG, to `PUT /internal/v1/heads` on the map's internal listener, with
 the same `MAP_URL` and `MAP_TOKEN` that `!map` uses. Nothing new is
 configured, and an agent without `MAP_URL` reports nothing.
 
-A skin is another player's input. A head is taken only from an image of a
-classic skin size (64x32, 64x64, 128x128 or 256x256) whose byte length is
-exactly what that size implies, drawn on the standard player model
-(`geometry.humanoid`, `geometry.humanoid.custom*`, or none named). A skin
-built in the character creator (a persona skin) or made for another model
-puts the face somewhere this does not know, so it is skipped: that player is
-still reported, without a head, and the map draws its plain arrow. Every
-skin is logged once as `player_head` with its size, whether it is a persona
-skin, its model and, if it gave no head, why (`persona`, `geometry`,
-`image`).
+A skin is another player's input, and a head is taken from one in two ways.
+
+- **A classic skin**: an image of a classic size (64x32, 64x64, 128x128 or
+  256x256) whose byte length is exactly what that size implies, drawn on the
+  standard player model (`geometry.humanoid`, `geometry.humanoid.custom*`,
+  or none named). The face is where every classic skin keeps it.
+- **A skin for a model of its own** (a pack's custom model, or a skin built
+  in the character creator, a persona skin): the skin brings its geometry
+  with it, and the head is read from that. The patch names a model; in it
+  the head bone's largest cube is the head, and the cube's north face, from
+  either a box corner or a per-face rectangle, is scaled from the model's
+  declared texture size to the image. A cube of the same size on the `hat`
+  bone, or a second one on the head, is the layer over it. A face over 32
+  pixels a side is made smaller, which is the most the map takes.
+
+The geometry is read within limits: 1 MiB, 16 levels of nesting, 65,536
+arrays and objects, 16 models, 512 bones, 64 cubes on a bone, and every
+coordinate a whole number that lands inside the real image. A head that is
+turned, mirrored, not square, under 8 pixels, built of polygons rather than
+a cube, or drawn from another image than the skin's is not guessed at.
+
+No player is left without a head. One whose skin gave none is drawn as a
+generated badge: a small symmetric pattern worked out from their XUID, so
+it is the same in every session and differs between players, and is plainly
+not a face. For a persona skin whose skin colour reads as a skin tone, the
+badge is drawn in that colour on the hair colour.
+
+Every skin is logged once as `player_head` with its size, whether it is a
+persona skin, its model (identifiers cut out), which `head` it was given
+(`real`, `geometry` or `generated`) and, for a generated one, why the skin
+gave none in `skipped` (`persona` and `geometry` for a skin that brought no
+model, `image`, or the reason the model was refused, such as `head_empty`,
+`head_mesh` or `head_uv`). A skin that is not classic is also logged as
+`player_skin_model`: what its patch names, each model's declared texture
+size and what its head and hat bones hold, the size of each animation
+image, and the piece types and colours it gives. That line is how a layout
+this does not read yet gets to be known; it carries no pixels.
 
 The whole list is sent again whenever it changes and every minute besides,
 which is what restores the heads after the map restarts. Only the process

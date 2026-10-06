@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"image/color"
 	"image/png"
 	"testing"
 	"time"
@@ -90,4 +91,38 @@ func TestWatchHeads_FollowsThePlayerListAndSkinChanges(t *testing.T) {
 	// no watch at all.
 	watchHeads(&packet.Text{Message: "hello"}, w)
 	watchHeads(&packet.PlayerSkin{UUID: alex, Skin: wireSkin(1)}, nil)
+}
+
+// What a head, or the badge in place of one, is made from is carried over
+// from the packet; the pixels of the extra images and the identifiers of
+// the parts are not.
+func TestHeadSkin_CarriesTheModelTheColoursAndTheShapeOfTheRest(t *testing.T) {
+	wire := wireSkin(200)
+	wire.PersonaSkin, wire.PremiumSkin, wire.ProfileHash, wire.SkinID = true, true, "abc", "skin-id"
+	wire.SkinGeometry = []byte(`{"minecraft:geometry":[]}`)
+	wire.SkinColour = color.RGBA{224, 172, 105, 255}
+	wire.Animations = []protocol.SkinAnimation{{ImageWidth: 32, ImageHeight: 64, ImageData: make([]byte, 32*64*4), AnimationType: 1, FrameCount: 2, ExpressionType: 1}}
+	wire.PersonaPieces = []protocol.PersonaPiece{{PieceID: "piece", PieceType: protocol.PieceTypeHair}, {PieceType: protocol.PieceTypeEyes}}
+	wire.PieceTintColours = []protocol.PersonaPieceTintColour{
+		{PieceType: "persona_eyes", Colours: [4]color.RGBA{{1, 2, 3, 255}}},
+		{PieceType: "persona_hair", Colours: [4]color.RGBA{{40, 20, 90, 255}, {9, 9, 9, 255}}},
+	}
+
+	got := headSkin(wire)
+	if !got.Persona || string(got.Geometry) != string(wire.SkinGeometry) || got.Width != 64 || len(got.Data) != 64*64*4 {
+		t.Errorf("skin %dx%d, persona %v, geometry %q", got.Width, got.Height, got.Persona, got.Geometry)
+	}
+	if got.Tints.Skin != wire.SkinColour || got.Tints.Hair != (color.RGBA{40, 20, 90, 255}) {
+		t.Errorf("tints %+v", got.Tints)
+	}
+	if len(got.Animations) != 1 || got.Animations[0] != (heads.Animation{Type: 1, Expression: 1, Width: 32, Height: 64, Frames: 2, Bytes: 32 * 64 * 4}) {
+		t.Errorf("animations %+v", got.Animations)
+	}
+	made := got.Made
+	if made.ID != "skin-id" || !made.Premium || !made.Hashed || len(made.Pieces) != 2 || made.Pieces[0] != protocol.PieceTypeHair || len(made.Tinted) != 2 || made.Tinted[1] != "persona_hair" {
+		t.Errorf("made %+v", made)
+	}
+	if plain := headSkin(wireSkin(1)); plain.Persona || plain.Made.Hashed || plain.Tints.Hair != (color.RGBA{}) || len(plain.Animations) != 0 {
+		t.Errorf("a plain skin: %+v", plain.Made)
+	}
 }

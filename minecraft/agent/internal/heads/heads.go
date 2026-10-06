@@ -8,7 +8,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"image"
+	"image/color"
 	"image/png"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -34,9 +39,13 @@ const (
 
 	// maxPatch bounds the JSON naming a skin's geometry, which is a line.
 	maxPatch = 4 << 10
+
+	// maxListed is how many of a skin's animations, or of the models its
+	// patch names, one log line describes.
+	maxListed = 8
 )
 
-// Why a skin gave no head; logged with the skin's facts.
+// Why a skin gave no head of its own; logged with the skin's facts.
 const (
 	skipPersona  = "persona"
 	skipGeometry = "geometry"
@@ -54,6 +63,39 @@ type Skin struct {
 	Persona bool
 	// ResourcePatch is the JSON naming the model the skin is drawn on.
 	ResourcePatch []byte
+	// Geometry is the JSON of the models the skin brings with it. A skin
+	// drawn on one of the game's own models brings none.
+	Geometry []byte
+	// Animations are the other images the skin brings. No head is taken
+	// from one; they are described in the log beside the model.
+	Animations []Animation
+	// Tints are the colours a character-creator skin gives for its wearer.
+	Tints skin.Tints
+	// Made is the rest of what a character-creator skin says it is made
+	// of, for the log.
+	Made Made
+}
+
+// Made is what a skin says of how it was put together, without the
+// identifiers of the parts.
+type Made struct {
+	// ID is the skin's name for itself.
+	ID string
+	// Pieces are the types of the parts it is assembled from, and Tinted
+	// the types that come with colours.
+	Pieces []uint32
+	Tinted []string
+	// Premium is a skin bought from the marketplace. Hashed is one that
+	// carries the hash its appearance is filed under elsewhere.
+	Premium, Hashed bool
+}
+
+// Animation is one of a skin's extra images, without its pixels.
+type Animation struct {
+	Type, Expression uint32
+	Width, Height    uint32
+	Frames           float32
+	Bytes            int
 }
 
 // Entry is one line of a player-list packet.
@@ -179,23 +221,51 @@ func (w *Watch) Reskin(uuid string, s Skin) {
 	w.touch()
 }
 
-// head is the PNG of a skin's head, or nil for a skin there is no safe way
-// to take one from. Every outcome is logged with what the skin was, since
-// that record is the only way to learn what real clients send.
+// Which kind of head a player was reported with; logged as "head".
+const (
+	headReal      = "real"
+	headGeometry  = "geometry"
+	headGenerated = "generated"
+)
+
+// head is the PNG a player is drawn as: the head of their skin, or for a
+// skin there is no safe way to take one from, an avatar made from who they
+// are. Every outcome is logged with what the skin was, since that record
+// is the only way to learn what real clients send.
 func (w *Watch) head(xuid string, s Skin) []byte {
 	fields := logging.Fields{"xuid": xuid, "width": s.Width, "height": s.Height, "bytes": len(s.Data), "persona": s.Persona}
-	skip := func(why string) []byte {
-		fields["skipped"] = why
+	img, kind := w.face(xuid, s, fields)
+	if img == nil {
+		// Tints are only a character-creator skin's to give.
+		tints := skin.Tints{}
+		if s.Persona {
+			tints = s.Tints
+		}
+		img, fields["tinted"] = skin.Avatar(xuid, tints)
+		kind = headGenerated
+	}
+	fields["head"] = kind
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		fields["head"], fields["skipped"] = "", skipImage
 		w.log.Info("player_head", fields)
 		return nil
 	}
-	if s.Persona {
-		return skip(skipPersona)
+	w.log.Info("player_head", fields)
+	return buf.Bytes()
+}
+
+// face is the head of the skin itself and which way it was found, or nil
+// with the reason left in fields under "skipped".
+func (w *Watch) face(xuid string, s Skin, fields logging.Fields) (*image.NRGBA, string) {
+	skip := func(why string) (*image.NRGBA, string) {
+		fields["skipped"] = why
+		return nil, ""
 	}
-	geometry, known := modelOf(s.ResourcePatch)
-	fields["geometry"] = geometry
-	if !known {
-		return skip(skipGeometry)
+	geometry, standard := modelOf(s.ResourcePatch)
+	fields["geometry"] = skin.MaskName(geometry)
+	if s.Persona || !standard {
+		return w.modelled(xuid, s, geometry, fields, skip)
 	}
 	// The dimensions are checked against the sizes a skin can be before
 	// they are converted, so a claim of billions of pixels is never an int.
@@ -206,12 +276,128 @@ func (w *Watch) head(xuid string, s Skin) []byte {
 	if err != nil {
 		return skip(skipImage)
 	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
+	return img, headReal
+}
+
+// modelled is the head of a skin that is not a classic one, found where
+// the model the skin brought with it says the head is drawn from.
+//
+// What the skin brought is logged whether or not it gave a head: a layout
+// is only read once it has been seen, and this is where it is seen.
+func (w *Watch) modelled(xuid string, s Skin, name string, fields logging.Fields, skip func(string) (*image.NRGBA, string)) (*image.NRGBA, string) {
+	if skin.NoGeometry(s.Geometry) {
+		w.log.Info("player_skin_model", described(xuid, s, nil))
+		if s.Persona {
+			return skip(skipPersona)
+		}
+		return skip(skipGeometry)
+	}
+	g, err := skin.ParseGeometry(s.Geometry)
+	w.log.Info("player_skin_model", described(xuid, s, g))
+	reason := func(err error) string {
+		var why skin.GeometryError
+		if errors.As(err, &why) {
+			return string(why)
+		}
+		return skipImage
+	}
+	if err != nil {
+		return skip(reason(err))
+	}
+	// An unreadable patch names nothing, and a model with no name in the
+	// file is not the one it meant.
+	if name == "" {
+		return skip(skipGeometry)
+	}
+	if s.Width > 1024 || s.Height > 1024 {
 		return skip(skipImage)
 	}
-	w.log.Info("player_head", fields)
-	return buf.Bytes()
+	at, err := g.Head(name, int(s.Width), int(s.Height))
+	if err != nil {
+		return skip(reason(err))
+	}
+	img, err := skin.HeadAt(int(s.Width), int(s.Height), s.Data, at)
+	if err != nil {
+		return skip(reason(err))
+	}
+	fields["face"], fields["hat"] = at.Face.String(), at.Hat.String()
+	return img, headGeometry
+}
+
+// described is the shape of what a skin brought, as it is logged: which
+// models its patch names, what the geometry says of each one's head, the
+// size of each extra image, and what it says it is made of. Names are cut
+// to their kind, every list is cut to a length, and no pixel is included.
+func described(xuid string, s Skin, g *skin.Geometry) logging.Fields {
+	fields := logging.Fields{"xuid": xuid, "persona": s.Persona, "width": s.Width, "height": s.Height}
+	if g != nil {
+		fields["model"] = g.Facts()
+	}
+	if slots := slotsOf(s.ResourcePatch); len(slots) > 0 {
+		fields["slots"] = slots
+	}
+	type animation struct {
+		Type       uint32  `json:"type"`
+		Expression uint32  `json:"expression"`
+		Width      uint32  `json:"width"`
+		Height     uint32  `json:"height"`
+		Frames     float64 `json:"frames"`
+		Bytes      int     `json:"bytes"`
+	}
+	listed := make([]animation, 0, min(len(s.Animations), maxListed))
+	for _, a := range s.Animations[:cap(listed)] {
+		frames := float64(a.Frames)
+		// The count is a float on the wire, and one that is not a number
+		// cannot be written to the log.
+		if math.IsNaN(frames) || math.IsInf(frames, 0) {
+			frames = -1
+		}
+		listed = append(listed, animation{a.Type, a.Expression, a.Width, a.Height, frames, a.Bytes})
+	}
+	fields["animations"], fields["animation_count"] = listed, len(s.Animations)
+
+	tinted := make([]string, 0, min(len(s.Made.Tinted), maxListed))
+	for _, t := range s.Made.Tinted[:cap(tinted)] {
+		tinted = append(tinted, skin.MaskName(t))
+	}
+	fields["skin_id"], fields["premium"], fields["hashed"] = skin.MaskName(s.Made.ID), s.Made.Premium, s.Made.Hashed
+	fields["pieces"], fields["piece_count"] = s.Made.Pieces[:min(len(s.Made.Pieces), 4*maxListed)], len(s.Made.Pieces)
+	fields["tinted_pieces"], fields["skin_colour"], fields["hair_colour"] = tinted, hex(s.Tints.Skin), hex(s.Tints.Hair)
+	return fields
+}
+
+// hex writes a colour as the four channels it arrived in, alpha last.
+func hex(c color.RGBA) string {
+	return fmt.Sprintf("#%02x%02x%02x%02x", c.R, c.G, c.B, c.A)
+}
+
+// slotsOf lists what a patch names a model for, with the kind of model
+// each is: a character-creator skin names one for the body and others for
+// the parts it animates.
+func slotsOf(patch []byte) map[string]string {
+	if len(patch) > maxPatch {
+		return nil
+	}
+	var parsed struct {
+		Geometry map[string]json.RawMessage `json:"geometry"`
+	}
+	if err := json.Unmarshal(patch, &parsed); err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(parsed.Geometry))
+	for k := range parsed.Geometry {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	slots := map[string]string{}
+	for _, k := range keys[:min(len(keys), maxListed)] {
+		var name string
+		if json.Unmarshal(parsed.Geometry[k], &name) != nil {
+			name = "?"
+		}
+		slots[skin.MaskName(k)] = skin.MaskName(name)
+	}
+	return slots
 }
 
 // modelOf names the model a skin is drawn on and reports whether it is the
