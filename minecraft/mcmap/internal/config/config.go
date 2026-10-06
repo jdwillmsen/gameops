@@ -243,19 +243,26 @@ func Load(getenv func(string) string) (Config, error) {
 		}
 	}
 
-	if c.Biomes, err = strconv.ParseBool(or(getenv("BIOMES_ENABLED"), "true")); err != nil {
+	// Unlike the older features these start off: the biome pass costs about
+	// ten seconds of a CPU per reading, and an image update must not switch
+	// that on by itself.
+	if c.Biomes, err = strconv.ParseBool(or(getenv("BIOMES_ENABLED"), "false")); err != nil {
 		fail("BIOMES_ENABLED must be true or false")
 	}
-	if c.Trails, err = strconv.ParseBool(or(getenv("TRAILS_ENABLED"), "true")); err != nil {
+	if c.Trails, err = strconv.ParseBool(or(getenv("TRAILS_ENABLED"), "false")); err != nil {
 		fail("TRAILS_ENABLED must be true or false")
 	}
+	c.TrailMaxAge, c.TrailMaxPoints = 24*time.Hour, 5000
 	// Trails are held in memory for every player seen, so both limits have
-	// a ceiling: at the top of each, 64 players come to about 100 MB.
-	if c.TrailMaxAge, err = time.ParseDuration(or(getenv("TRAILS_MAX_AGE"), "24h")); err != nil || c.TrailMaxAge < time.Minute || c.TrailMaxAge > maxTrailAge {
-		fail("TRAILS_MAX_AGE must be a duration between 1m and %s", maxTrailAge)
-	}
-	if c.TrailMaxPoints, err = strconv.Atoi(or(getenv("TRAILS_MAX_POINTS"), "5000")); err != nil || c.TrailMaxPoints < 10 || c.TrailMaxPoints > maxTrailPoints {
-		fail("TRAILS_MAX_POINTS must be between 10 and %d", maxTrailPoints)
+	// a ceiling: at the top of each, 64 players come to about 100 MB. A
+	// disabled feature does not fail startup over its limits.
+	if c.Trails {
+		if c.TrailMaxAge, err = time.ParseDuration(or(getenv("TRAILS_MAX_AGE"), "24h")); err != nil || c.TrailMaxAge < time.Minute || c.TrailMaxAge > maxTrailAge {
+			fail("TRAILS_MAX_AGE must be a duration between 1m and %s", maxTrailAge)
+		}
+		if c.TrailMaxPoints, err = strconv.Atoi(or(getenv("TRAILS_MAX_POINTS"), "5000")); err != nil || c.TrailMaxPoints < 10 || c.TrailMaxPoints > maxTrailPoints {
+			fail("TRAILS_MAX_POINTS must be between 10 and %d", maxTrailPoints)
+		}
 	}
 	return c, errors.Join(errs...)
 }
