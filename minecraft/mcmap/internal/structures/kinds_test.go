@@ -231,6 +231,74 @@ func TestTake_TheBiomeDecidesWhatASiteIs(t *testing.T) {
 	}
 }
 
+// villageAt is a village's box as the game might have grown it round the
+// site it was generated at.
+func villageAt(s Site) Box {
+	return Box{s.ChunkX*16 - 30, 60, s.ChunkZ*16 - 20, s.ChunkX*16 + 40, 90, s.ChunkZ*16 + 50}
+}
+
+// Players found villages wherever they put a bed and a villager, so most
+// of a world's villages may have no site, and the rule is still borne out
+// by the ones that do. A site with no village on record is no finding
+// either: the game keeps no record of a village nobody has been near.
+func TestTake_VillagesPlayersFoundedAreNothingAgainstTheRule(t *testing.T) {
+	w := evidence(t)
+	sites, _ := villageSite{}.Sites(testSeed, evidenceArea, 100)
+	if len(sites) < 6 {
+		t.Fatalf("only %d village sites to test with", len(sites))
+	}
+	for _, site := range sites[:3] {
+		w.settled(4, villageAt(site))
+	}
+	unrecorded := sites[3]
+	w.generated(chunks.Overworld, unrecorded.ChunkX, unrecorded.ChunkZ)
+	founded := 0
+	for x := int32(-900); x < 1900 && founded < 9; x += 130 {
+		box := Box{x, 60, x, x + 40, 80, x + 40}
+		near := false
+		for _, site := range sites {
+			near = near || (villageSite{}).Explains(site, box)
+		}
+		if !near {
+			w.settled(2, box)
+			founded++
+		}
+	}
+	if founded != 9 {
+		t.Fatalf("found room for only %d founded villages", founded)
+	}
+	s := surveyor(t, nil)
+	s.Biomes = biomesOf(map[Site]uint32{unrecorded: biomePlains})
+	got, err := s.Take(context.Background(), w.write(), surveyedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := got.Check.Kinds[Village]
+	if k.State != SeedVerified || k.Agree != 3 || k.Disagree != 9 || k.Findings != 0 {
+		t.Errorf("village = %+v, want verified by 3 of 12 and no findings", k)
+	}
+	if got.Check.Agree != 3 || got.Check.Disagree != 0 {
+		t.Errorf("check = %+v: villages are no evidence about the seed", got.Check)
+	}
+	villages := map[Site]Prediction{}
+	for _, p := range got.Layers[chunks.Overworld].Predicted {
+		if p.Kind == Village {
+			villages[siteOf(p)] = p
+		}
+	}
+	for _, site := range sites[:3] {
+		if p, ok := villages[site]; ok {
+			t.Errorf("%+v is predicted where the world has a village", p)
+		}
+	}
+	if p, ok := villages[unrecorded]; !ok || !p.Generated {
+		t.Errorf("a finished site in plains with no village on record = %+v (offered %v), want it marked generated", p, ok)
+	}
+	if p, ok := villages[sites[4]]; !ok || !p.Candidate {
+		t.Errorf("a site in country not generated = %+v (offered %v), want a candidate", p, ok)
+	}
+}
+
 func TestKindCheck_Settle(t *testing.T) {
 	for name, c := range map[string]struct {
 		seed            string
