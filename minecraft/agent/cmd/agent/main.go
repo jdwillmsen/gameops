@@ -55,6 +55,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/liveness"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 )
@@ -100,6 +101,17 @@ const freshJoinGrace = announceDrainDelay - time.Second
 // (e.g. the documented upstream join crash) doesn't cause a reconnect
 // storm at full speed.
 const stableSessionThreshold = 60 * time.Second
+
+// connectTimeout bounds reaching the server at all. It is how long a server
+// that is down takes to be reported as a failed session.
+const connectTimeout = 30 * time.Second
+
+// spawnTimeout bounds the wait for the world once the server has answered.
+// Far longer than connectTimeout on purpose: a server that has just started
+// loads its world for the first player to log in, which took 22s the one
+// time it was measured, and giving up on a login the server goes on to
+// complete is worse than waiting for it.
+const spawnTimeout = 90 * time.Second
 
 // errSessionRecycled ends a session this process chose to end. It is not a
 // failure and must not be reported as one -- see SESSION_RECYCLE_MS.
@@ -798,9 +810,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		},
 	}
 
-	dialCtx, dialCancel := context.WithTimeout(ctx, 30*time.Second)
-	conn, err := dialer.DialContext(dialCtx, "raknet", addr)
-	dialCancel()
+	conn, err := mcdial.Dial(ctx, dialer, addr, connectTimeout, spawnTimeout)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
