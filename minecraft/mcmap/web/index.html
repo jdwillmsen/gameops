@@ -16,6 +16,7 @@
     <form id="search" class="search" role="search" autocomplete="off" hidden>
       <input id="search-box" name="q" type="search" maxlength="64" placeholder="Search the map" role="combobox"
         aria-label="Search players, biomes, structures, markers and your waypoints" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list">
+      <button id="search-clear" class="clear" type="button" aria-label="Clear the search" title="Clear the search (Esc)" hidden></button>
       <div id="search-panel" class="search-panel" hidden>
         <ul id="search-results" role="listbox" aria-label="Search results"></ul>
         <p id="search-note" class="search-note" role="status"></p>
@@ -25,6 +26,7 @@
       <label>X <input id="goto-x" name="x" type="number" step="1" inputmode="numeric" required></label>
       <label>Z <input id="goto-z" name="z" type="number" step="1" inputmode="numeric" required></label>
       <button type="submit">Go</button>
+      <button id="goto-clear" class="clear" type="button" aria-label="Clear the coordinates" title="Clear the coordinates and the mark Go left" hidden></button>
     </form>
     <label class="toggle"><input id="grid" type="checkbox"> Grid</label>
     <div id="live-control" class="live-control" role="group" aria-label="Live updates" hidden>

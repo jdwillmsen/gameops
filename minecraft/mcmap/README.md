@@ -1011,7 +1011,11 @@ a player gave it with what it is after, `Lamb Chop (Sheep, baby)`, or what
 it is alone, `Light Blue Shulker Box`, beside the picture the map draws it
 with. Where the title already says its kind, as Red Bed does, the kind is
 not said twice.
-The arrow keys move through the list, Enter chooses and Escape closes it.
+The arrow keys move through the list and Enter chooses. A clear button in
+the box, shown while there is something typed, empties it, shuts the list,
+takes the ring off the map and leaves the cursor in the box; Escape does the
+same, and a second Escape, with nothing left to clear, leaves the box for
+the map. Neither closes the card about a mob.
 Choosing a hit takes the map there, changing dimension if it has to, and
 rings the spot for twenty seconds; a biome hit also turns the overlay on
 with that biome picked out. A player or a named mob moves, so choosing one

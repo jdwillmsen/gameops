@@ -15,6 +15,7 @@
   const el = {
     form: document.getElementById('search'),
     box: document.getElementById('search-box'),
+    clear: document.getElementById('search-clear'),
     panel: document.getElementById('search-panel'),
     list: document.getElementById('search-results'),
     note: document.getElementById('search-note'),
@@ -221,6 +222,25 @@
     found = null;
   }
 
+  // Whether there is anything a clearing would take away.
+  const dirty = () => el.box.value !== '' || !el.panel.hidden || found !== null;
+
+  // Shown only while there is something typed: an empty box has nothing
+  // to clear, and a button that does nothing is one more stop for Tab.
+  function offer() {
+    if (el.clear) el.clear.hidden = el.box.value === '';
+  }
+
+  // Empties the box, shuts the list and takes the mark off the map, and
+  // leaves the cursor in the box, ready for the next search.
+  function clear() {
+    el.box.value = '';
+    reset();
+    unmark();
+    offer();
+    el.box.focus();
+  }
+
   // A ring on the place chosen, with its name, for long enough to see
   // where the map went.
   function point(hit) {
@@ -264,6 +284,7 @@
   }
 
   el.box.addEventListener('input', () => {
+    offer();
     clearTimeout(timer);
     const query = el.box.value.trim();
     if (query === '') {
@@ -284,12 +305,13 @@
 
   el.box.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (el.panel.hidden) return;
-      // Only the list is closed: the card about a mob stays open, and so
-      // does what was typed, which a search box would otherwise clear.
+      // The first press clears the search and stays in the box; with
+      // nothing left to clear the next one leaves it. Neither is also an
+      // Escape for the card about a mob, which stays open.
       e.stopPropagation();
       e.preventDefault();
-      open(false);
+      if (dirty()) clear();
+      else map.getContainer().focus();
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       if (hits.length === 0) return;
       e.preventDefault();
@@ -311,6 +333,14 @@
     }
     choose(Math.max(active, 0));
   });
+
+  if (el.clear) {
+    el.clear.addEventListener('click', clear);
+    // Pressing the button must not take the focus from the box first: on a
+    // phone that would put the keyboard away and bring it back.
+    el.clear.addEventListener('pointerdown', (e) => e.preventDefault());
+  }
+  offer();
 
   document.addEventListener('pointerdown', (e) => {
     if (!el.form.contains(e.target)) open(false);
@@ -335,6 +365,7 @@
       el.box.value = '';
       reset();
       unmark();
+      offer();
     } else if (found && found.dimension !== app.dimension()) {
       unmark();
     }

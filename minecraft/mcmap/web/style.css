@@ -58,13 +58,41 @@ button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .goto { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.goto .clear { position: relative; }
 .goto label, .toggle { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
 input[type="number"] { width: 6.5rem; }
 
 /* The results hang from the box, over the map's left side: the layer panel
    keeps the right, and the list stops short of the card about a mob. */
 .search { position: relative; }
-.search input { width: 15rem; max-width: 100%; }
+.search input { width: 15rem; max-width: 100%; padding-right: 2rem; }
+/* The page's own clear button takes the place of the browser's, which only
+   some browsers draw and which cannot take the mark off the map. */
+.search input::-webkit-search-cancel-button { display: none; }
+.search .clear { position: absolute; top: 0.2rem; right: 0.2rem; }
+/* A cross that is drawn, not written: a character would be read out as
+   part of the button's name. */
+.clear {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border-color: transparent;
+  background: none;
+  color: var(--dim);
+  flex: none;
+}
+.clear::before, .clear::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.75rem;
+  height: 2px;
+  background: currentColor;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.clear::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.clear:hover:not(:disabled) { color: var(--text); }
 .search-panel {
   position: absolute;
   top: calc(100% + 0.35rem);
