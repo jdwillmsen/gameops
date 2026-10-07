@@ -117,8 +117,9 @@ func TestScan_FindsBedsContainersAndNamedMobsByDimension(t *testing.T) {
 			map[string]any{"id": "ShulkerBox", "x": int32(40), "y": int32(33), "z": int32(41), "Items": stack},
 			bedAt(33, 90, 34, 0),
 		),
-		actor(t, 101, map[string]any{"identifier": "minecraft:cat", "CustomName": "OJ", "Pos": []any{float32(173.76), float32(66), float32(263.24)}}),
-		actor(t, 102, map[string]any{"identifier": "minecraft:strider", "CustomName": "Lava Lad", "Pos": []any{float32(-10.5), float32(31), float32(-0.5)}}),
+		actor(t, 101, map[string]any{"identifier": "minecraft:cat", "CustomName": "OJ", "UniqueID": int64(-4294967285), "Pos": []any{float32(173.76), float32(66), float32(263.24)}}),
+		// An id that is not the number the game writes is not passed on.
+		actor(t, 102, map[string]any{"identifier": "minecraft:strider", "CustomName": "Lava Lad", "UniqueID": "<b>7</b>", "Pos": []any{float32(-10.5), float32(31), float32(-0.5)}}),
 		actor(t, 103, map[string]any{"identifier": "minecraft:cow", "Pos": []any{float32(1), float32(2), float32(3)}}),
 		digp(0, 10, 16, 101, 103),
 		digp(1, -1, -1, 102),
@@ -131,7 +132,9 @@ func TestScan_FindsBedsContainersAndNamedMobsByDimension(t *testing.T) {
 	if want := []Marker{{X: 8, Y: 70, Z: 9, Kind: "chest", Name: "Diamonds"}, {X: -2, Y: 60, Z: -20, Kind: "barrel"}}; !reflect.DeepEqual(ow.Containers, want) {
 		t.Errorf("overworld containers = %v, want %v", ow.Containers, want)
 	}
-	if want := []Marker{{X: 173, Y: 66, Z: 263, Kind: "cat", Name: "OJ"}}; !reflect.DeepEqual(ow.Mobs, want) {
+	// The id is the one the live layer reports for the same animal, and is
+	// read from the record, not from the key it is stored under.
+	if want := []Marker{{X: 173, Y: 66, Z: 263, Kind: "cat", Name: "OJ", ID: "-4294967285"}}; !reflect.DeepEqual(ow.Mobs, want) {
 		t.Errorf("overworld mobs = %v, want %v", ow.Mobs, want)
 	}
 	if want := []Marker{{X: 33, Y: 90, Z: 34, Colour: "white"}}; !reflect.DeepEqual(nether.Beds, want) {
