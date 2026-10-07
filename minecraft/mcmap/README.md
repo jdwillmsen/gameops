@@ -539,9 +539,20 @@ none can be made out.
 A named mob is its type's icon, the one the live layer draws, in the row's
 colour, with its name on a label above it at every zoom; a baby is drawn
 smaller and called one. They are also listed under the Named mobs row,
-by name, with type and `baby`; choosing one takes the map there and rings
-it for twenty seconds. The label shows the first 24 characters of a long
-name and the tooltip and the list all of it.
+by name, with type and `baby`. The label shows the first 24 characters of a
+long name and the tooltip, the list and the card all of it.
+
+A named mob is one marker, whichever layer has it. While the mob is loaded
+the live layer draws it where it is, under the same label, and the mark the
+snapshot left steps aside; the two are known to be one animal by the id
+each carries (`i`), never by name or position. With the live layer's row
+for it switched off the snapshot's mark comes back, and with Named mobs off
+neither has a label. A click or a tap on the marker, on its label, or on
+its entry in the list opens the card described under Inspecting and
+following: on a loaded mob it tracks it live and Follow works; on one that
+is not loaded it shows where the snapshot left it, says that this is its
+last saved position and how old, and offers Go to. The list entry also
+takes the map there, and the entry the card is about is outlined.
 
 The markers are stamped onto the live layer's canvas from sprites made
 once per picture, so that they and the live markers can both be hovered
@@ -1241,8 +1252,13 @@ dimension turns Follow off and the card says it is not tracking. While
 live updates are paused the card says so and how old its position is, and
 resuming carries on with the same id.
 
+Go to centres the map once on whatever the card is about, at its last known
+position, without following it.
+
 A marker is drawn on a canvas and cannot take the keyboard's focus, so
-opening the card needs a pointer; everything on the card is a button.
+opening the card on one needs a pointer; a named mob's entry in the list
+under its row is a button that opens it too, and everything on the card is
+a button.
 
 Everything here is a native button, checkbox or select: each is reached
 with Tab, worked with Space or Enter (the arrow keys, for the interval),
