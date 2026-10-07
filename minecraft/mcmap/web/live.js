@@ -335,7 +335,10 @@
   // savedAt is when the snapshot that placed a named mob was taken, for one
   // chosen by its mark or from a list; wasLive is whether the card has
   // seen it in the picture since it opened. saved marks a named mob placed
-  // by the snapshot.
+  // by the snapshot. sought is when a search said it was live, for one
+  // chosen from a search: the server has every dimension's newest picture
+  // and this page only the last frame it drew, which is older while the
+  // page is paused or paced slowly.
   let picked = null;
   let seeking = [];
   let seekTimer = null;
@@ -1019,6 +1022,10 @@
   // as the mark the snapshot left.
   const savedOnly = () => picked !== null && picked.saved === true && !picked.wasLive && picked.state !== 'live';
 
+  // One a search found live that no frame drawn since the search has yet
+  // had the chance to show.
+  const soughtOnly = () => picked !== null && Number.isFinite(picked.sought) && !picked.wasLive && drawnAt <= picked.sought;
+
   function ring() {
     const found = picked && picked.state === 'live' ? entities.get(picked.key) : null;
     // A layer switched off takes its markers off the map, and a ring left
@@ -1111,6 +1118,11 @@
       // and where the snapshot left it is all that is known.
       picked.state = 'saved';
       picked.follow = false;
+    } else if (soughtOnly()) {
+      // The picture on the page is older than the search that found it,
+      // and says nothing of whether it is still there. Only a frame drawn
+      // since can say it has gone.
+      picked.state = 'waiting';
     } else if (picked.state !== 'lost') {
       picked.state = 'lost';
       picked.follow = false;
@@ -1160,6 +1172,9 @@
       // The snapshot's clock is the server's, which the page's own may
       // not agree with to the minute.
       when = Number.isFinite(picked.savedAt) ? `This is its last saved position, from ${age(picked.savedAt)}.` : 'This is its last saved position.';
+    } else if (soughtOnly() && picked.state === 'waiting') {
+      what = control.paused ? 'Live updates are paused, so this page has no picture of it yet.' : 'Waiting for the next live picture.';
+      when = `This position is as of the search, ${ago} ago.`;
     } else if (picked.state === 'lost') {
       what = picked.went ? `Left for another dimension: ${labelOf(picked.went)}.` : 'No longer tracked.';
     } else if (picked.state === 'away') {
@@ -1267,6 +1282,9 @@
       x: num(what.x), y: num(what.y), z: num(what.z),
       dimension,
     };
+    // Found live by a search just now, which knows more than the picture
+    // on this page may.
+    if (what.live === true) known.sought = Date.now();
     // A mob placed by the snapshot, which may not be where it is now.
     if (!player && what.saved === true) {
       known.saved = true;
