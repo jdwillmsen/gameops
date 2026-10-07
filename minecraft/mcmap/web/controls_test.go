@@ -99,3 +99,27 @@ func TestChunkFocusFloorsAndFallsBackToTheRegion(t *testing.T) {
 		t.Error("index.html must load chunk.js after slime.js")
 	}
 }
+
+// The command copied is the text the page shows, so the two cannot differ,
+// and "!map" with no code after it is never offered.
+func TestLoginCommandIsCopiedAsItIsShown(t *testing.T) {
+	js := read(t, "app.js")
+	for _, need := range []string{
+		"await navigator.clipboard.writeText(el.loginCommand.textContent);",
+		"getSelection().selectAllChildren(el.loginCommand);",
+		"if (!done) said = 'Selected: copy it';",
+		"el.loginCopied.textContent = said;",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("app.js no longer has %s", need)
+		}
+	}
+	if !regexp.MustCompile("el\\.loginCommand\\.textContent = `!map \\$\\{started\\.code\\}`;\\s*offerCopy\\(true\\);").Match(js) ||
+		!regexp.MustCompile(`el\.loginCommand\.textContent = '!map';\s*offerCopy\(false\);`).Match(js) {
+		t.Error("app.js no longer offers the copy only while there is a code")
+	}
+	page := read(t, "index.html")
+	if !regexp.MustCompile(`<button id="login-copy" type="button" hidden>`).Match(page) || !bytes.Contains(page, []byte(`id="login-copied" class="copied" role="status"`)) {
+		t.Error("index.html has no copy button, hidden until there is a code, with a status beside it")
+	}
+}
