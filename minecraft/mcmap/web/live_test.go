@@ -187,3 +187,28 @@ func TestEscapeInADialogIsTheDialogs(t *testing.T) {
 		t.Error("menu.js no longer counts an open dialog as somewhere shortcuts do not fire")
 	}
 }
+
+// The search asks the server, which has every dimension's newest picture.
+// The page has only the last frame it drew, older while it is paused or
+// paced slowly, so a player the search found is not called lost on that
+// frame's say-so: only a frame drawn since the search can say they left.
+func TestAHitFromTheSearchIsNotLostOnAnOlderFrame(t *testing.T) {
+	js := read(t, "live.js")
+	for _, need := range []string{
+		"if (what.live === true) known.sought = Date.now();",
+		"const soughtOnly = () => picked !== null && Number.isFinite(picked.sought) && !picked.wasLive && drawnAt <= picked.sought;",
+		"when = `This position is as of the search, ${ago} ago.`;",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
+		}
+	}
+	// Asked before the card would call it lost and go looking for it.
+	sought, lost := bytes.Index(js, []byte("} else if (soughtOnly()) {")), bytes.Index(js, []byte("if (picked.category === 'players') seek(picked, SEEK_TRIES);"))
+	if sought < 0 || lost < 0 || sought > lost {
+		t.Error("live.js no longer checks for a hit newer than the picture before calling an entity lost")
+	}
+	if !bytes.Contains(read(t, "search.js"), []byte("dimension: hit.dimension, live: hit.live === true,")) {
+		t.Error("search.js no longer tells the card that a hit's position is the live layer's")
+	}
+}
