@@ -204,8 +204,9 @@ func (c *contents) describe(ctx context.Context, d chunks.Dimension, list []Stru
 	}
 	out := make([]*Detail, len(list))
 	for i, s := range list {
-		// A hostile world can put everything it holds inside every box.
-		if i%16 == 0 && ctx.Err() != nil {
+		// A hostile world can put everything it holds inside every box,
+		// and going through one box is then all of it.
+		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		var inMobs []savedMob
@@ -213,16 +214,35 @@ func (c *contents) describe(ctx context.Context, d chunks.Dimension, list []Stru
 		inside := func(x, y, z int32) bool {
 			return x >= s.MinX && x <= s.MaxX && y >= s.MinY && y <= s.MaxY && z >= s.MinZ && z <= s.MaxZ
 		}
-		for cx := s.MinX >> cellShift; cx <= s.MaxX>>cellShift; cx++ {
-			for cz := s.MinZ >> cellShift; cz <= s.MaxZ>>cellShift; cz++ {
-				for _, at := range mobCells[chunkKey(cx, cz)] {
-					if m := mobs[at]; inside(m.x, m.y, m.z) {
-						inMobs = append(inMobs, m)
-					}
+		// A box is gone through by its squares only while that is the
+		// shorter way. Nothing bounds how far a fortress's rooms can be
+		// joined, and a box across a whole world is more squares than the
+		// world holds things.
+		across := int64(s.MaxX>>cellShift) - int64(s.MinX>>cellShift) + 1
+		down := int64(s.MaxZ>>cellShift) - int64(s.MinZ>>cellShift) + 1
+		if across*down > int64(len(mobs)+len(blocks)) {
+			for _, m := range mobs {
+				if inside(m.x, m.y, m.z) {
+					inMobs = append(inMobs, m)
 				}
-				for _, at := range blockCells[chunkKey(cx, cz)] {
-					if b := blocks[at]; inside(b.x, b.y, b.z) {
-						inBlocks = append(inBlocks, b)
+			}
+			for _, b := range blocks {
+				if inside(b.x, b.y, b.z) {
+					inBlocks = append(inBlocks, b)
+				}
+			}
+		} else {
+			for cx := s.MinX >> cellShift; cx <= s.MaxX>>cellShift; cx++ {
+				for cz := s.MinZ >> cellShift; cz <= s.MaxZ>>cellShift; cz++ {
+					for _, at := range mobCells[chunkKey(cx, cz)] {
+						if m := mobs[at]; inside(m.x, m.y, m.z) {
+							inMobs = append(inMobs, m)
+						}
+					}
+					for _, at := range blockCells[chunkKey(cx, cz)] {
+						if b := blocks[at]; inside(b.x, b.y, b.z) {
+							inBlocks = append(inBlocks, b)
+						}
 					}
 				}
 			}
@@ -312,8 +332,8 @@ func (c *contents) blocksIn(detail *Detail, in []savedBlock, left *allowance) {
 		trial bool
 	}
 	// A large chest is two block entities, each naming the other. It is
-	// counted once, at the half nearer the origin of the axes, and by the
-	// more telling of what its halves say: a lower state is the more so.
+	// counted once, as the half with the lower x or z, and by the more
+	// telling of what its halves say: a lower state is the more so.
 	halves := map[at]int{}
 	for i, b := range in {
 		if b.paired {

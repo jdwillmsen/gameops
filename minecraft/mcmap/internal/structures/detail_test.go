@@ -349,6 +349,47 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 	}
 }
 
+// Blocks laid in a line a few chunks apart join without end. What they
+// join into is no one structure's box, and is not drawn across the map.
+func TestDetail_ARunOfBlocksAcrossTheWorldIsNoStructure(t *testing.T) {
+	w := newWorld(t)
+	for x := int32(0); x <= maxLocatedSpan+160; x += 80 {
+		w.blockEntity(chunks.Overworld, "Vault", x, -20, x)
+	}
+	w.blockEntity(chunks.Overworld, "Vault", -4000, -20, 40).blockEntity(chunks.Overworld, "TrialSpawner", -4010, -20, 44)
+	got := take(t, surveyor(t, nil), w)
+	if want := []Structure{{Kind: TrialChamber, Box: Box{-4010, -20, 40, -4000, -20, 44}, Evidence: 2}}; !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
+		t.Errorf("found %+v, want only %+v", got.Layers[chunks.Overworld].Recorded, want)
+	}
+	if got.Contents.Skipped != 1 {
+		t.Errorf("skipped = %d, want the one run counted", got.Contents.Skipped)
+	}
+}
+
+// A box is gone through by its squares or by what the world holds,
+// whichever is fewer: a box across a whole world is found the same things
+// in, and does not cost a walk of every square of it.
+func TestDetail_ABoxAcrossAWorldCostsNoMoreThanWhatTheWorldHolds(t *testing.T) {
+	c := newContents()
+	c.blocks[chunks.Nether] = []savedBlock{{x: 5, y: 50, z: 5, sort: blockSpawner}, {x: maxCoordinate, y: 50, z: -maxCoordinate, sort: blockCauldron}, {x: 5, y: 500, z: 5, sort: blockBell}}
+	c.mobs[chunks.Nether] = []savedMob{{x: -maxCoordinate, y: 50, z: maxCoordinate}, {x: 5, y: -500, z: 5}}
+	wide := Box{-maxCoordinate, 0, -maxCoordinate, maxCoordinate, 127, maxCoordinate}
+	started := time.Now()
+	list, err := c.describe(t.Context(), chunks.Nether, []Structure{{Kind: Fortress, Box: wide}, {Kind: Fortress, Box: Box{0, 0, 0, 15, 127, 15}}}, nil, leveldat.Level{}, &allowance{names: 9, places: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > 5*time.Second {
+		t.Errorf("took %s", took)
+	}
+	if d := list[0]; d.MobsTotal != 1 || len(d.Spawners) != 1 || d.Blocks["cauldron"] != 1 || d.Blocks["bell"] != 0 {
+		t.Errorf("the wide box holds %+v", d)
+	}
+	if d := list[1]; d.MobsTotal != 0 || len(d.Spawners) != 1 || len(d.Blocks) != 0 {
+		t.Errorf("the small box holds %+v", d)
+	}
+}
+
 func TestDetail_BoundsWhatOneStructureAndOneSurveyList(t *testing.T) {
 	box := Box{0, 48, 0, 15, 72, 15}
 	w := newWorld(t).structure(chunks.Nether, 1, box).structure(chunks.Nether, 1, Box{320, 48, 320, 335, 72, 335})

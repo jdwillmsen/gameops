@@ -846,11 +846,14 @@ five hold a standing for somebody, twelve between them.
 The bounds: 200,000 mobs and 400,000 block entities a dimension, no record
 over 8 MB or nested more than 64 deep, 2,048 type names; and in an answer
 40 types of mob, 20 named mobs and 64 spawners a structure, with 5,000
-names and 20,000 spawner positions a survey. What is left out is counted
+names and 20,000 spawner positions a survey. A box is gone through by its
+64-block squares or by everything the dimension holds, whichever is
+fewer, so one joined across a whole world costs no more than the world
+holds. What is left out is counted
 (`mobKindsMore`, `namedMore`, `spawnersMore`, and
 `mcmap_structures_contents_skipped`). A record that does not parse is
 skipped and counted. Setting the contents inside the boxes has ten seconds
-of its own, checked every sixteen structures; if it runs out, the
+of its own, checked at each structure; if it runs out, the
 structures are served without details and
 `mcmap_structures_detail_failures_total` counts it.
 
@@ -865,6 +868,11 @@ pass and cost nothing more.
 |---|---|---|
 | `trial_chamber` | Trial spawners and vaults. Chunks holding either are joined where they are within five chunks of each other, which is well under what the generator keeps between two chambers | Around those blocks. The chamber's corridors run on past them |
 | `stronghold` | The silverfish spawner of its portal room, or the blocks of its end portal once lit, in the Overworld. Chunks holding either are joined where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
+
+A box more than 512 blocks across is no one structure's, whatever joined
+it: blocks laid in a line a few chunks apart join without end. It is left
+out and counted as skipped. The widest chamber in the FWB world is found
+across 214 blocks.
 
 Each carries `evidence`, how many such blocks it was found from, in place
 of `areas`. The page draws its box dashed and says in the sheet that the
