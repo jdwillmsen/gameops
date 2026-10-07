@@ -1077,17 +1077,40 @@ the player was not seen for 30 seconds, changed dimension, or moved more
 than 256 blocks between two samples, so a logout, a portal or a teleport
 is a gap and not a straight line across the map. Mobs are not recorded.
 
+Older points are kept at lower detail, so that a long retention fits in the
+point limit. A point is thinned out if it is closer to the point kept before
+it than its age allows: under an hour old, 4 blocks (full detail); an hour
+to a day, 16; past a day, 64. A point that starts a line, or is the last
+before a gap, a portal or a teleport, is never thinned, and none is moved,
+so the lines keep their starts and ends and never join across a gap. It is
+done for each player about once a minute of recorded time, in one pass over
+that player's points under the lock (about 30 microseconds for a trail of
+20,000 points, measured with `BenchmarkThin`). `GET /api/trails` states the
+steps in `thinning`, for the page to say what is drawn at lower detail.
+
 Three limits are enforced, and published in `mcmap_trails_limit`:
 
 - **Age.** No point is older than `TRAILS_MAX_AGE` (24 hours). Old points
   go every second, and again whenever trails are asked for.
 - **Count.** A player keeps at most `TRAILS_MAX_POINTS` points (5,000:
-  twenty kilometres at one point every four blocks); the oldest go first.
+  twenty kilometres at one point every four blocks). Points are thinned
+  first, and only a trail still over the limit loses its oldest.
 - **Players.** At most 64 players have a trail. The live list is text the
   game server's console wrote, so a 65th name pushes out the trail of
   whoever was seen longest ago.
 
-At the defaults that is about 10 MB at most.
+A held point is 32 bytes, and 34 measured over trails grown to the limit
+(`TestAHeldPointCostsAtMostThisManyBytes`), with the slack of the arrays
+they grew in. At the defaults, 64 players are at most about 11 MB.
+
+**What a week costs.** Set `TRAILS_MAX_AGE=168h` with `TRAILS_MAX_POINTS=20000`:
+64 players at the limit are 64 x 20,000 x 34 bytes, about 44 MB. A player
+sprinting in a straight line (5.6 blocks a second) leaves about 3,600 points
+in the last hour, 1,260 an hour in the 16-block tier and 315 an hour past a
+day, so 20,000 holds four hours of that every day for the week; walking
+about, or circling a base, thins much harder. Only a trail over the limit
+after thinning loses its oldest points, and `reason="count"` rising is the
+sign to raise it.
 `mcmap_trails_points_dropped_total{reason}` counts what each limit let go,
 and `mcmap_trails_oldest_point_age_seconds` staying under the age limit is
 the evidence that it holds.
@@ -1311,7 +1334,7 @@ Two listeners keep the internet away from what is not for it:
 | `BIOMES_ENABLED` | no | `false` | `true` reads biomes and serves `/api/biomes` and its tiles; off, search finds no biomes |
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |
-| `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player; 10 to 50000. Checked only with `TRAILS_ENABLED=true` |
+| `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
 
 ## Endpoints
 
@@ -1338,7 +1361,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>` | Session required. `hits`, each `kind` (`biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z` |
-| `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
+| `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -1410,7 +1433,7 @@ opens at the same place.
 | `mcmap_trails_points`, `mcmap_trails_players` | Trail points held in memory, and players with a trail |
 | `mcmap_trails_limit{limit}` | The retention in force: `age_seconds`, `points_per_player`, `players` |
 | `mcmap_trails_oldest_point_age_seconds` | Age of the oldest trail point held. It stays under the age limit |
-| `mcmap_trails_points_dropped_total{reason}` | Trail points let go: `age`, `count`, `players` |
+| `mcmap_trails_points_dropped_total{reason}` | Trail points let go: `age`, `thinned`, `count`, `players` |
 
 ## Build and test
 

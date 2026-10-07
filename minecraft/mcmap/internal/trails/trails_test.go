@@ -22,8 +22,13 @@ func player(name string, x, z float64) live.Entity {
 
 // walk records one player moving ten blocks east a second, from x at at.
 func walk(r *Recorder, name string, at time.Time, x float64, steps int) time.Time {
+	return walkBy(r, name, at, x, steps, 10)
+}
+
+// walkBy is walk at stride blocks a second.
+func walkBy(r *Recorder, name string, at time.Time, x float64, steps int, stride float64) time.Time {
 	for i := range steps {
-		r.Record("overworld", at.Add(time.Duration(i)*time.Second), []live.Entity{player(name, x+float64(i)*10, 0)})
+		r.Record("overworld", at.Add(time.Duration(i)*time.Second), []live.Entity{player(name, x+float64(i)*stride, 0)})
 	}
 	return at.Add(time.Duration(steps) * time.Second)
 }
@@ -207,7 +212,9 @@ func TestAnAnswerCarriesOnlySoManyPoints(t *testing.T) {
 	r := New(24*time.Hour, 10_000)
 	var end time.Time
 	for _, name := range []string{"a", "b", "c"} {
-		end = walk(r, name, start, 0, 10_000)
+		// Twenty blocks a second, so that no point is close enough to
+		// the one before to be thinned once it is an hour old.
+		end = walkBy(r, name, start, 0, 10_000, 20)
 	}
 	reply := r.Trails("overworld", "", time.Time{}, end)
 	if n := count(reply); n > MaxServed || n != 3*(MaxServed/3) {
@@ -218,8 +225,8 @@ func TestAnAnswerCarriesOnlySoManyPoints(t *testing.T) {
 	}
 	// Each player's newest are the ones kept.
 	for _, p := range reply.Players {
-		if last := p.Segments[len(p.Segments)-1]; last[len(last)-1].X != 99_990 {
-			t.Errorf("%s ends at x %d, want 99990", p.Name, last[len(last)-1].X)
+		if last := p.Segments[len(p.Segments)-1]; last[len(last)-1].X != 199_980 {
+			t.Errorf("%s ends at x %d, want 199980", p.Name, last[len(last)-1].X)
 		}
 	}
 }
@@ -308,7 +315,7 @@ func TestRecordingAndReadingAtOnce(t *testing.T) {
 }
 
 // The expectation is worked out from what was recorded, not from the
-// recorder: x = 10*i, and a line breaks at each multiple of 1500 because
+// recorder: x = 20*i, past the thinning step so that nothing is thinned, and a line breaks at each multiple of 1500 because
 // the player was not seen for a minute before it.
 func TestAReplyForALongTrailIsTheNewestPointsAndDoesNotCopyTheRest(t *testing.T) {
 	const held, line = 50_000, 1500
@@ -319,7 +326,7 @@ func TestAReplyForALongTrailIsTheNewestPointsAndDoesNotCopyTheRest(t *testing.T)
 		if i%line == 0 {
 			stamp = stamp.Add(time.Duration(i/line) * time.Minute)
 		}
-		r.Record("overworld", stamp, []live.Entity{player("Dotablaze", float64(10*i), 0)})
+		r.Record("overworld", stamp, []live.Entity{player("Dotablaze", float64(20*i), 0)})
 	}
 	end := at(held).Add(held / line * time.Minute)
 
@@ -337,7 +344,7 @@ func TestAReplyForALongTrailIsTheNewestPointsAndDoesNotCopyTheRest(t *testing.T)
 			if i == first || i%line == 0 {
 				lines = append(lines, nil)
 			}
-			lines[len(lines)-1] = append(lines[len(lines)-1], Point{T: stamp(i), X: int32(10 * i), Y: 64, Z: 0})
+			lines[len(lines)-1] = append(lines[len(lines)-1], Point{T: stamp(i), X: int32(20 * i), Y: 64, Z: 0})
 		}
 		return lines
 	}

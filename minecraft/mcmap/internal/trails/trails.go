@@ -46,7 +46,7 @@ var (
 	}, []string{"limit"})
 	metricDropped = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_trails_points_dropped_total",
-		Help: "Trail points let go, by the limit that let them go: age, count (a player's own limit), players (the oldest trail making room for a new player).",
+		Help: "Trail points let go, by the reason: age, thinned (old points that were too close to the one kept before them, so the line is the same at lower detail), count (a player's own limit, after thinning), players (the oldest trail making room for a new player).",
 	}, []string{"reason"})
 )
 
@@ -70,6 +70,20 @@ const (
 	// between.
 	breakAfter = 30 * time.Second
 	breakJump  = 256
+
+	// Older points are kept at lower detail, so that a long retention fits
+	// in the point limit: past midAge a point is only kept if it is at
+	// least midStep blocks from the one kept before it, past oldAge
+	// oldStep. Each is a multiple of minStep, so a coarser tier is always a
+	// subset of a finer one.
+	midAge  = time.Hour
+	midStep = 16
+	oldAge  = 24 * time.Hour
+	oldStep = 64
+	// thinEvery is how much recorded time passes between one trail's
+	// thinning passes. A pass reads the whole trail under the lock, so it
+	// is paid for by the points recorded since the last one, not by each.
+	thinEvery = time.Minute
 
 	// maxCoordinate is past the edge of any Bedrock world.
 	maxCoordinate = 32_000_000
@@ -97,6 +111,7 @@ type trail struct {
 	name   string
 	points []held
 	// Where and when the player was last seen, kept point or not.
+	thinnedAt time.Time
 	seenAt    time.Time
 	seenX     float64
 	seenZ     float64
@@ -189,7 +204,7 @@ func (r *Recorder) Record(dimension string, at time.Time, players []live.Entity)
 			if len(r.trails) >= MaxPlayers {
 				r.evict()
 			}
-			t = &trail{}
+			t = &trail{thinnedAt: at}
 			r.trails[k] = t
 		}
 		t.name = p.Name
@@ -207,8 +222,14 @@ func (r *Recorder) Record(dimension string, at time.Time, players []live.Entity)
 			}
 		}
 		t.points = append(t.points, point)
+		if at.Sub(t.thinnedAt) >= thinEvery {
+			thin(t, at)
+		}
 		if over := len(t.points) - r.MaxPoints; over > 0 {
-			t.points = slices.Delete(t.points, 0, over)
+			// Reslicing, not deleting: moving every point down for each
+			// one recorded at the limit cost the whole trail a point. The
+			// front of the array is let go when an append next grows it.
+			t.points = t.points[over:]
 			// What is now the oldest point no longer has the line that led
 			// to it.
 			t.points[0].begins = true
@@ -216,6 +237,52 @@ func (r *Recorder) Record(dimension string, at time.Time, players []live.Entity)
 		}
 	}
 	r.export(time.Time{})
+}
+
+// stepFor is the least distance a point of this age has to be from the one
+// kept before it.
+func stepFor(age time.Duration) int {
+	switch {
+	case age >= oldAge:
+		return oldStep
+	case age >= midAge:
+		return midStep
+	}
+	return minStep
+}
+
+// thin drops the old points a line does not need, at now: those closer to
+// the last point kept than their age allows. A point that begins a line, or
+// ends one, is never dropped, so lines neither merge nor reach across a
+// teleport or a portal, and no point is moved. Running it again at the
+// same time drops nothing more.
+func thin(t *trail, now time.Time) {
+	t.thinnedAt = now
+	points := t.points
+	fresh := now.Add(-midAge).Unix()
+	w, i := 0, 0
+	for ; i < len(points) && points[i].T <= fresh; i++ {
+		p := points[i]
+		if !p.begins && i+1 < len(points) && !points[i+1].begins && w > 0 {
+			step := int64(stepFor(now.Sub(time.Unix(p.T, 0))))
+			dx, dz := int64(p.X-points[w-1].X), int64(p.Z-points[w-1].Z)
+			if dx*dx+dz*dz < step*step {
+				continue
+			}
+		}
+		points[w] = p
+		w++
+	}
+	w += copy(points[w:], points[i:])
+	if dropped := len(points) - w; dropped > 0 {
+		metricDropped.WithLabelValues("thinned").Add(float64(dropped))
+	}
+	t.points = points[:w]
+	// A trail that shrinks keeps its array otherwise, and the memory is
+	// what thinning is for.
+	if cap(t.points) > 4096 && cap(t.points) > 2*len(t.points) {
+		t.points = slices.Clone(t.points)
+	}
 }
 
 // evict lets go of the trail whose player was seen longest ago.
@@ -298,12 +365,31 @@ type Reply struct {
 	// than the first, and no player has more than the second.
 	MaxAgeSeconds int `json:"maxAgeSeconds"`
 	MaxPoints     int `json:"maxPoints"`
+	// Thinning is the detail points are kept at, by age: a point older
+	// than OlderThanSeconds is only kept if it is StepBlocks from the one
+	// kept before it. The first entry, at 0, is the full detail. A line
+	// still starts and ends where it did, so a start or a gap is never lost.
+	Thinning []Detail `json:"thinning"`
+}
+
+// Detail is one step of the thinning.
+type Detail struct {
+	OlderThanSeconds int `json:"olderThanSeconds"`
+	StepBlocks       int `json:"stepBlocks"`
 }
 
 // Trails is every player's trail in a dimension as of now, or only the
 // named player's, and only the points after since if that is set.
 func (r *Recorder) Trails(dimension, player string, since, now time.Time) Reply {
-	reply := Reply{Players: []Trail{}, MaxAgeSeconds: int(r.MaxAge.Seconds()), MaxPoints: r.MaxPoints}
+	reply := Reply{Players: []Trail{}, MaxAgeSeconds: int(r.MaxAge.Seconds()), MaxPoints: r.MaxPoints, Thinning: []Detail{{0, minStep}}}
+	for _, d := range []struct {
+		after time.Duration
+		step  int
+	}{{midAge, midStep}, {oldAge, oldStep}} {
+		if d.after < r.MaxAge {
+			reply.Thinning = append(reply.Thinning, Detail{int(d.after.Seconds()), d.step})
+		}
+	}
 	d := slices.Index(render.Dimensions, dimension)
 	if d < 0 {
 		return reply
