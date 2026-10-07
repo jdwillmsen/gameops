@@ -1276,6 +1276,43 @@ ranges and how many of its 1,024 chunks are slime chunks, so that zooming
 out outlines one square and not a thousand. The Nether and the End get the
 same coordinates and are said to have no slime chunks.
 
+**Shortcuts.** The `?` button in the bar, and the `?` key, open a list of
+the keyboard shortcuts and of what the search box takes besides a name. It
+is the browser's own modal dialog: the focus is held inside it, Escape, its
+Close button and a click outside all shut it, and the focus goes back to
+where it was.
+
+| Key | Does |
+|---|---|
+| `/` | Puts the cursor in the search box |
+| `Esc` | Clears a search, then closes the card; in the search box a second press leaves it |
+| `G` | Grid and chunk focus on or off |
+| `L` | Layer panel open or shut |
+| `P` | Pause or resume live positions |
+| `F` | Follow, or stop following, what the card is about |
+| `1` `2` `3` | Overworld, Nether, The End |
+| `S` | Go to the world spawn |
+| `M` | Go to the logged-in player and open their card, while they are online |
+| `+` `-` | Zoom in and out (`=` zooms in too) |
+
+Each key works the control the page already has, as a click on it would,
+so a shortcut cannot do what the page does not offer; one that can do
+nothing just now says why in a line over the map. None fires while the
+focus is in a text box, a number box or a menu, while the list itself is
+open, with Ctrl, Alt or the command key held, or while logged out. They
+are single keys, which a screen reader's own single keys and speech input
+can collide with, so the list has a switch that turns them all off, kept
+under `mcmap.shortcuts`; Escape is not one of them. With the map itself
+focused, zooming and the arrow keys are Leaflet's, as before.
+
+**Shorthand in the search box.** `120 -340`, `120, -340` or `120 64 -340`
+is listed as those coordinates and goes to them; `chunk 7 -21` is that
+chunk, and choosing it goes there, pins it and turns the grid on; `spawn`
+is the world spawn alone; `me` is the logged-in player, while online; and
+`@name` looks among the players online and nothing else. Coordinates and a
+chunk are answered by the page; the other three ask `/api/search` for one
+`kind`. None of them is a command for the game, and the page writes none.
+
 **The footer.** Where the pointer is, and the biome there, are on the
 left. On the right is one group saying how current the map is, in two parts
 with a label each: `Live positions`, how old the picture of players and
