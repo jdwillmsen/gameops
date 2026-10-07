@@ -298,6 +298,10 @@ func TestSmallScreenLayoutIsOneConditionEverywhere(t *testing.T) {
 	if !bytes.Contains(read(t, "layers.js"), []byte("let open = !compact.matches && (typeof view.open === 'boolean' ? view.open : true);")) {
 		t.Error("layers.js no longer starts with the panel shut on a small screen")
 	}
+	// Nor is it left open over the map by a window that becomes small.
+	if !regexp.MustCompile(`compact\.addEventListener\('change', \(\) => \{\s*open = !compact\.matches && \(typeof view\.open === 'boolean' \? view\.open : true\);\s*paint\(\);`).Match(read(t, "layers.js")) {
+		t.Error("layers.js no longer shuts the panel when the layout becomes the small screen's")
+	}
 	page := read(t, "index.html")
 	for _, need := range []string{
 		`<button id="search-open" class="search-open compact-only" type="button" aria-label="Search the map" aria-expanded="false" aria-controls="search">`,

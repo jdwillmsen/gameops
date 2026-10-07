@@ -302,6 +302,14 @@
     paint();
   });
 
+  // A window made small with the panel open beside the map would find it
+  // lying over the map as a sheet, so it is shut on the way in, and put
+  // back as it was kept on the way out.
+  compact.addEventListener('change', () => {
+    open = !compact.matches && (typeof view.open === 'boolean' ? view.open : true);
+    paint();
+  });
+
   paint();
   app.layers.recall = recall;
   app.layers.retain = retain;
