@@ -128,7 +128,7 @@ func TestLoginCommandIsCopiedAsItIsShown(t *testing.T) {
 // is, with a slot of fixed width for every figure that counts.
 func TestFooterGroupsItsTimersUnderLabels(t *testing.T) {
 	page := read(t, "index.html")
-	if !regexp.MustCompile(`(?s)<div id="currency" class="currency" role="group" aria-label="How current the map is">.*<span class="stat-label">Live positions</span> <output id="live-age" class="slot".*<span class="stat-label">Terrain</span> <span id="status" class="slot" role="status"></span> <output id="refresh" class="refresh slot more" role="timer"`).Match(page) {
+	if !regexp.MustCompile(`(?s)<div id="currency" class="currency" role="group" aria-label="How current the map is">.*<span class="stat-label">Live positions</span> <output id="live-age" class="slot".*<span class="stat-label">Terrain</span> <span id="status" class="slot" role="status"></span> <output id="refresh" class="refresh slot then" role="timer"`).Match(page) {
 		t.Error("index.html no longer groups the live age and the terrain's refresh under their labels")
 	}
 	css := read(t, "style.css")
@@ -136,6 +136,11 @@ func TestFooterGroupsItsTimersUnderLabels(t *testing.T) {
 		if !bytes.Contains(css, []byte(need)) {
 			t.Errorf("style.css no longer has %s", need)
 		}
+	}
+	// The More sheet is put away by its class on a small screen, so nothing
+	// in the footer may share it, or it is put away with the sheet.
+	if regexp.MustCompile(`(?s)<footer.*class="[^"]*\bmore\b[^-"]*".*</footer>`).Match(page) {
+		t.Error("index.html gives something in the footer the More sheet's class")
 	}
 	live := read(t, "live.js")
 	for _, need := range []string{"say(el.age, state);", "say(el.more, extras.join(' · '));"} {
