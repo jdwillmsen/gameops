@@ -609,11 +609,18 @@ func FuzzVillageRecord(f *testing.F) {
 		}
 		f.Add(b)
 	}
+	f.Add(nbtRecord(nbtList("Players", nbtCompound(nbtLong("ID", -9001), nbtInt("S", 7)))))
+	f.Add(nbtRecord(nbtTag(tagCompound, "Raid", nbtCompound(nbtByte("GroupNum", 2), nbtByte("NumGroups", 7), nbtByte("NumRaiders", 5), nbtLong("GameTick", 3000)))))
 	f.Fuzz(func(t *testing.T, record []byte) {
-		for _, read := range []func(*village, []byte) error{(*village).info, (*village).dwellers, (*village).claims} {
+		for _, read := range []func(*village, []byte) error{(*village).info, (*village).dwellers, (*village).claims, (*village).players, (*village).raid} {
 			var v village
 			if err := read(&v, record); err != nil {
 				continue
+			}
+			if m := v.more; len(m.standings) > maxStandings || len(m.jobSites) > maxProfessions ||
+				max(len(m.dwellers[roleVillager]), len(m.dwellers[roleGolem]), len(m.dwellers[roleCat])) > maxDwellerIDs ||
+				(m.raid != nil && (min(m.raid.wave, m.raid.waves, m.raid.raiders) < 0 || max(m.raid.wave, m.raid.waves, m.raid.raiders) > 255)) {
+				t.Fatalf("read as %+v", m)
 			}
 			if c := v.facts; c.Villagers < 0 || c.Golems < 0 || c.Cats < 0 || c.Beds < 0 || c.Bells < 0 || c.JobSites < 0 ||
 				max(c.Villagers, c.Golems, c.Cats, c.Beds, c.Bells, c.JobSites) > maxCount {

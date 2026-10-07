@@ -1,6 +1,7 @@
 package structures
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -72,6 +73,22 @@ var (
 		Name: "mcmap_structures_village_read_failures_total",
 		Help: "Surveys that could not read the village records in time and kept the villages of the one before.",
 	})
+	metricContents = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mcmap_structures_contents",
+		Help: "Saved mobs and block entities the last survey kept to set inside structures, by sort: mob or block.",
+	}, []string{"sort"})
+	metricContentsSkipped = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mcmap_structures_contents_skipped",
+		Help: "What the last survey left out of what structures hold, by reason: malformed (an actor, block entity or village record that did not parse), limit (mobs and block entities past the bound).",
+	}, []string{"reason"})
+	metricDetailSeconds = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mcmap_structures_detail_duration_seconds",
+		Help: "How long the last survey took to set what the world holds inside its structures, after the pass that read it.",
+	})
+	metricDetailFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_structures_detail_failures_total",
+		Help: "Surveys that ran out of time setting what the world holds inside its structures, and were served without it.",
+	})
 )
 
 // Bounds on one survey. The FWB world holds 1,274 areas in 27 structures;
@@ -114,6 +131,9 @@ const (
 	// They are under one prefix and take milliseconds; this is what keeps
 	// a world that has made them enormous from holding up the cycle.
 	villageTimeout = 10 * time.Second
+	// detailTimeout is how long setting what the world holds inside its
+	// structures may take. It is a few milliseconds for a real world.
+	detailTimeout = 10 * time.Second
 )
 
 // How far a seed has been checked against the world.
@@ -151,8 +171,11 @@ type BiomeAt func(d chunks.Dimension, x, z int32) (id uint32, known bool)
 
 // Layer is one dimension's structures.
 type Layer struct {
-	Recorded      []Structure
-	RecordedMore  int
+	Recorded     []Structure
+	RecordedMore int
+	// Details is what the save holds inside each recorded structure, in
+	// the same order, or nil for a survey that could not work it out.
+	Details       []*Detail
 	Predicted     []Prediction
 	PredictedMore int
 }
@@ -211,10 +234,15 @@ type Survey struct {
 	Areas, Malformed, Unknown, OverLimit int
 	// Villages is what the village records came to.
 	Villages VillageStats
+	// Contents is what was read of what structures hold. Detailed is false
+	// for a survey that ran out of time setting it inside them.
+	Contents ContentStats
+	Detailed bool
 
 	// Every village found, before any layer's limit, for the next survey
-	// to fall back on.
-	villages map[chunks.Dimension][]Structure
+	// to fall back on, and what else each one's records held.
+	villages       map[chunks.Dimension][]Structure
+	villageRecords map[*VillageFacts]*villageRecords
 }
 
 // Surveyor reads the world's structures once per snapshot and keeps the
@@ -234,8 +262,10 @@ type Surveyor struct {
 	// in terrain that is generated.
 	Biomes BiomeAt
 	// VillageTimeout bounds the read of the village records within a
-	// survey; zero means ten seconds.
+	// survey; zero means ten seconds. DetailTimeout bounds setting what
+	// the world holds inside its structures, the same way.
 	VillageTimeout time.Duration
+	DetailTimeout  time.Duration
 	Logger         *slog.Logger
 
 	// Limits, for tests; zero means maxAreas, MaxPerLayer and maxVillages.
@@ -288,6 +318,8 @@ func (s *Surveyor) Take(ctx context.Context, worldDir string, at time.Time) (Sur
 		metricVillagesAt.Set(float64(at.Unix()))
 		s.Logger.Info("villages read", "found", v.Found, "empty", v.Empty, "malformed", v.Malformed, "unknown", v.Unknown, "over_limit", v.OverLimit)
 	}
+	s.Logger.Info("structure contents read", "mobs", survey.Contents.Mobs, "block_entities", survey.Contents.Blocks,
+		"skipped", survey.Contents.Skipped, "over_limit", survey.Contents.MobsOver+survey.Contents.BlocksOver, "detailed", survey.Detailed)
 	metricSurveyAt.Set(float64(at.Unix()))
 	metricSurveySeconds.Set(time.Since(started).Seconds())
 	for _, kind := range moved {
@@ -333,17 +365,32 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 
 	pieces := map[chunks.Dimension][]piece{}
 	extents := map[chunks.Dimension]*extent{}
+	held := newContents()
 	it := db.NewIterator(nil, nil)
 	defer it.Release()
 	for n := 0; it.Next(); n++ {
 		if n%65536 == 0 && ctx.Err() != nil {
 			return Survey{}, ctx.Err()
 		}
-		pos, tag, ok := chunks.RecordOf(it.Key())
+		key := it.Key()
+		switch {
+		case bytes.HasPrefix(key, actorPrefix):
+			held.actor(key, it.Value())
+			continue
+		case bytes.HasPrefix(key, digpPrefix):
+			held.place(key, it.Value())
+			continue
+		}
+		pos, tag, ok := chunks.RecordOf(key)
 		if !ok {
 			continue
 		}
 		switch tag {
+		case TagBlockEntities:
+			// The tag alone, or it would be a sub-chunk's key.
+			if len(key) == 9 || len(key) == 13 {
+				held.blockEntities(pos, it.Value())
+			}
 		case TagFinalized:
 			e, seen := extents[pos.Dim]
 			if !seen {
@@ -381,8 +428,12 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	for _, d := range chunks.Dimensions {
 		recorded[d] = assemble(pieces[d])
 	}
-	if survey.villages, survey.Villages, err = s.readVillages(ctx, db); err != nil {
+	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db); err != nil {
 		return Survey{}, err
+	}
+	survey.Contents = held.stats
+	for _, r := range survey.villageRecords {
+		survey.Contents.Skipped += r.skipped
 	}
 
 	predicted := map[chunks.Dimension][]Prediction{}
@@ -414,13 +465,45 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		}
 		survey.Layers[d] = layer
 	}
+	s.detail(ctx, &survey, held)
 	return survey, nil
+}
+
+// detail sets what the world holds inside each structure, within its own
+// time. Running out of it is not the survey's failure: the structures are
+// served as they are, without what is in them.
+func (s *Surveyor) detail(ctx context.Context, survey *Survey, held *contents) {
+	timeout := s.DetailTimeout
+	if timeout == 0 {
+		timeout = detailTimeout
+	}
+	started := time.Now()
+	within, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	left := &allowance{names: maxDetailNames, places: maxDetailPlaces}
+	details := map[chunks.Dimension][]*Detail{}
+	for _, d := range chunks.Dimensions {
+		list, err := held.describe(within, d, survey.Layers[d].Recorded, survey.villageRecords, survey.Level, left)
+		if err != nil {
+			metricDetailFailures.Inc()
+			s.Logger.Error("what the structures hold was not worked out; they are served without it", "error", err)
+			return
+		}
+		details[d] = list
+	}
+	for _, d := range chunks.Dimensions {
+		layer := survey.Layers[d]
+		layer.Details = details[d]
+		survey.Layers[d] = layer
+	}
+	survey.Detailed = true
+	metricDetailSeconds.Set(time.Since(started).Seconds())
 }
 
 // readVillages reads the village records within their own time. Running out
 // of it, or failing to read them, is not the survey's failure: the villages
 // of the last survey stand, and everything else is as fresh as it would be.
-func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks.Dimension][]Structure, VillageStats, error) {
+func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks.Dimension][]Structure, map[*VillageFacts]*villageRecords, VillageStats, error) {
 	limit, timeout := s.villageLimit, s.VillageTimeout
 	if limit == 0 {
 		limit = maxVillages
@@ -431,14 +514,14 @@ func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks
 	started := time.Now()
 	within, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	found, stats, err := readVillages(within, db, limit)
+	found, records, stats, err := readVillages(within, db, limit)
 	if err == nil {
 		metricVillageSeconds.Set(time.Since(started).Seconds())
-		return found, stats, nil
+		return found, records, stats, nil
 	}
 	if ctx.Err() != nil {
 		// The survey itself was stopped, which is its failure to report.
-		return nil, VillageStats{}, ctx.Err()
+		return nil, nil, VillageStats{}, ctx.Err()
 	}
 	metricVillageFailures.Inc()
 	s.mu.Lock()
@@ -447,7 +530,7 @@ func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks
 	stats = last.Villages
 	stats.Stale = true
 	s.Logger.Error("villages not read; those of the last survey are kept", "error", err, "kept", stats.Found)
-	return last.villages, stats, nil
+	return last.villages, last.villageRecords, stats, nil
 }
 
 // seed is the 32 bits structure placement is seeded with. The game uses the
@@ -777,4 +860,8 @@ func export(survey Survey) {
 	metricVillagesSkipped.WithLabelValues("malformed").Set(float64(survey.Villages.Malformed))
 	metricVillagesSkipped.WithLabelValues("unknown").Set(float64(survey.Villages.Unknown))
 	metricVillagesSkipped.WithLabelValues("limit").Set(float64(survey.Villages.OverLimit))
+	metricContents.WithLabelValues("mob").Set(float64(survey.Contents.Mobs))
+	metricContents.WithLabelValues("block").Set(float64(survey.Contents.Blocks))
+	metricContentsSkipped.WithLabelValues("malformed").Set(float64(survey.Contents.Skipped))
+	metricContentsSkipped.WithLabelValues("limit").Set(float64(survey.Contents.MobsOver + survey.Contents.BlocksOver))
 }

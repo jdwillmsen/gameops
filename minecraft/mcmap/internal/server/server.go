@@ -80,6 +80,9 @@ type Server struct {
 	infos map[string]cachedInfo
 	// search holds what a search would otherwise decode again every time.
 	search searchCache
+	// players is the UniqueID the world knows each session's player by,
+	// from when the live layer last showed them, by XUID.
+	players map[string]int64
 }
 
 type cachedInfo struct {
@@ -161,6 +164,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Structures != nil {
 		mux.Handle("GET /api/structures", s.gated(s.handleStructures))
+		mux.Handle("GET /api/structures/detail", s.gated(s.handleStructureDetail))
 	}
 	if s.Biomes != nil {
 		mux.Handle("GET /api/biomes", s.gated(s.handleBiomes))

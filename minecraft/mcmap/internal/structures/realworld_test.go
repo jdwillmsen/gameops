@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -90,4 +91,125 @@ func TestRealWorld(t *testing.T) {
 			t.Logf("  recorded %-9s %6d,%4d,%6d to %6d,%4d,%6d  areas %d", r.Kind, r.MinX, r.MinY, r.MinZ, r.MaxX, r.MaxY, r.MaxZ, r.Areas)
 		}
 	}
+}
+
+// What the save holds inside the real world's structures, as counts and
+// never as places or names:
+//
+//	MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorldDetails -v ./minecraft/mcmap/internal/structures/
+//
+// The survey is taken twice, with and without the part that reads what the
+// world holds, so that what that part costs is the difference.
+func TestRealWorldDetails(t *testing.T) {
+	world := os.Getenv("MCMAP_REAL_WORLD")
+	if world == "" {
+		t.Skip("MCMAP_REAL_WORLD names no world copy")
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := &Surveyor{WorkDir: t.TempDir(), Logger: quiet}
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	started := time.Now()
+	survey, err := s.Take(context.Background(), world, started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(started)
+	runtime.ReadMemStats(&after)
+	t.Logf("survey took %s, of which setting contents inside structures %.4f s; allocated %d MiB in total, heap in use after %d MiB",
+		took.Round(time.Millisecond), testutil.ToFloat64(metricDetailSeconds), (after.TotalAlloc-before.TotalAlloc)>>20, after.HeapInuse>>20)
+	t.Logf("contents %+v, detailed %v", survey.Contents, survey.Detailed)
+
+	type tally struct {
+		structures, withMobs, mobs, named        int
+		withSpawners, spawners                   int
+		withContainers, unopened, holding, empty int
+		blocks                                   map[string]int
+		elders                                   map[int]int
+		evidence                                 []int
+	}
+	var villages struct {
+		counted, withProfessions, villagers, professed, babies, missing int
+		jobSites, withTick, withRaid, standings, withStandings          int
+	}
+	kinds := map[Kind]*tally{}
+	for _, d := range chunks.Dimensions {
+		layer := survey.Layers[d]
+		for i, r := range layer.Recorded {
+			k := kinds[r.Kind]
+			if k == nil {
+				k = &tally{blocks: map[string]int{}, elders: map[int]int{}}
+				kinds[r.Kind] = k
+			}
+			k.structures++
+			if r.Evidence > 0 {
+				k.evidence = append(k.evidence, r.Evidence)
+			}
+			detail := layer.Details[i]
+			if detail.MobsTotal > 0 {
+				k.withMobs++
+			}
+			k.mobs += detail.MobsTotal
+			k.named += len(detail.Named) + detail.NamedMore
+			if n := len(detail.Spawners) + detail.SpawnersMore; n > 0 {
+				k.withSpawners++
+				k.spawners += n
+			}
+			for _, c := range detail.Containers {
+				k.unopened += c.Unopened
+				k.holding += c.Holding
+				k.empty += c.Empty
+			}
+			if len(detail.Containers) > 0 {
+				k.withContainers++
+			}
+			for name, n := range detail.Blocks {
+				k.blocks[name] += n
+			}
+			if detail.Elders != nil {
+				k.elders[*detail.Elders]++
+			}
+			if v := detail.Village; v != nil {
+				villages.counted++
+				professed := 0
+				for _, p := range v.Professions {
+					villages.villagers += p.Count
+					if p.Profession != "" {
+						professed += p.Count
+					}
+				}
+				villages.professed += professed
+				if professed > 0 {
+					villages.withProfessions++
+				}
+				villages.babies += v.Babies
+				villages.missing += v.Missing
+				for _, j := range v.JobSites {
+					villages.jobSites += j.Count
+				}
+				if v.IdleSeconds != nil {
+					villages.withTick++
+				}
+				if v.Raid != nil {
+					villages.withRaid++
+				}
+				villages.standings += v.Met
+				if v.Met > 0 {
+					villages.withStandings++
+				}
+			}
+		}
+	}
+	for _, kind := range Kinds {
+		k := kinds[kind]
+		if k == nil {
+			t.Logf("%-13s none", kind)
+			continue
+		}
+		slices.Sort(k.evidence)
+		t.Logf("%-13s %d: %d hold saved mobs (%d mobs, %d named); %d hold spawners (%d); %d hold containers (%d unopened, %d holding, %d empty); blocks %v; elders %v; evidence %v",
+			kind, k.structures, k.withMobs, k.mobs, k.named, k.withSpawners, k.spawners, k.withContainers, k.unopened, k.holding, k.empty, k.blocks, k.elders, k.evidence)
+	}
+	t.Logf("villages %+v", villages)
 }

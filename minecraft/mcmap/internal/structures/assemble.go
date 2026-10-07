@@ -12,6 +12,11 @@ type Structure struct {
 	Areas int `json:"areas,omitempty"`
 	// Village is set for a village and nothing else.
 	Village *VillageFacts `json:"village,omitempty"`
+	// Evidence is set for a kind the world keeps no record of, which is
+	// found by the block entities only that kind is generated with: it is
+	// how many of them there are. The box is then the box around those,
+	// and the structure itself reaches further than it.
+	Evidence int `json:"evidence,omitempty"`
 }
 
 // joinGap is how far apart, in blocks across the map, two areas of a kind

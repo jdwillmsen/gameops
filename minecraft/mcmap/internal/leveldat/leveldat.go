@@ -25,6 +25,11 @@ type Level struct {
 	// was never resolved stores a sentinel instead.
 	SpawnY      int32
 	SpawnYKnown bool
+	// Tick is the game tick the world was saved at, which is what the
+	// ticks its records carry are measured against; TickKnown is false for
+	// a file that holds none.
+	Tick      int64
+	TickKnown bool
 }
 
 const (
@@ -118,6 +123,12 @@ func Parse(data []byte) (Level, error) {
 				return Level{}, err
 			}
 			level.Seed, seen.seed = int64(v), true
+		case name == "currentTick" && kind == tagLong:
+			v, err := r.uint(8)
+			if err != nil {
+				return Level{}, err
+			}
+			level.Tick, level.TickKnown = int64(v), true
 		case name == "SpawnX" && kind == tagInt, name == "SpawnY" && kind == tagInt, name == "SpawnZ" && kind == tagInt:
 			v, err := r.uint(4)
 			if err != nil {

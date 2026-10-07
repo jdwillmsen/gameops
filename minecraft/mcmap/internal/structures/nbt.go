@@ -3,6 +3,7 @@ package structures
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 )
 
 // The tag types of the little-endian NBT a village's records are written in.
@@ -28,6 +29,12 @@ const (
 // given size can ask for.
 const maxDepth = 12
 
+// recordDepth is how deep an actor or a block entity may nest. A shulker
+// box inside a chest is about eight levels; past this a record is refused
+// rather than followed. These are measured once and only their own fields
+// are looked at, so depth costs them nothing but the recursion.
+const recordDepth = 64
+
 var errNBT = errors.New("record is not sound NBT")
 
 // This reader steps over a record in place and hands out the tags directly
@@ -44,7 +51,7 @@ func rootCompound(b []byte) ([]byte, error) {
 		return nil, errNBT
 	}
 	b = b[name:]
-	size, err := payloadSize(tagCompound, b, 1)
+	size, err := measure(tagCompound, b, 1, maxDepth)
 	if err != nil || size != len(b) {
 		// Bytes after the record's end mean it is not the record it was
 		// taken for, whatever its start looks like.
@@ -64,7 +71,7 @@ func eachField(b []byte, visit func(name []byte, tag byte, payload []byte) error
 		n := int(binary.LittleEndian.Uint16(b[1:3]))
 		name := b[3 : 3+n]
 		b = b[3+n:]
-		size, err := payloadSize(tag, b, 1)
+		size, err := measure(tag, b, 1, recordDepth)
 		if err != nil {
 			return err
 		}
@@ -91,7 +98,7 @@ func eachCompound(tag byte, payload []byte, visit func(compound []byte) error) (
 	}
 	b := payload[5:]
 	for range n {
-		size, err := payloadSize(tagCompound, b, 1)
+		size, err := measure(tagCompound, b, 1, recordDepth)
 		if err != nil {
 			return 0, err
 		}
@@ -105,10 +112,10 @@ func eachCompound(tag byte, payload []byte, visit func(compound []byte) error) (
 	return n, nil
 }
 
-// payloadSize is how many bytes the payload of a tag of this type takes at
-// the start of b.
-func payloadSize(tag byte, b []byte, depth int) (int, error) {
-	if depth > maxDepth {
+// measure is how many bytes the payload of a tag of this type takes at the
+// start of b, refusing one that nests deeper than limit.
+func measure(tag byte, b []byte, depth, limit int) (int, error) {
+	if depth > limit {
 		return 0, errNBT
 	}
 	size := 0
@@ -143,9 +150,9 @@ func payloadSize(tag byte, b []byte, depth int) (int, error) {
 		}
 		size = 4 + int(n*width)
 	case tagList:
-		return listSize(b, depth)
+		return listSize(b, depth, limit)
 	case tagCompound:
-		return compoundSize(b, depth)
+		return compoundSize(b, depth, limit)
 	default:
 		return 0, errNBT
 	}
@@ -155,7 +162,7 @@ func payloadSize(tag byte, b []byte, depth int) (int, error) {
 	return size, nil
 }
 
-func listSize(b []byte, depth int) (int, error) {
+func listSize(b []byte, depth, limit int) (int, error) {
 	if len(b) < 5 {
 		return 0, errNBT
 	}
@@ -184,7 +191,7 @@ func listSize(b []byte, depth int) (int, error) {
 	for range n {
 		// Every element type left takes at least a byte or is refused, so
 		// this ends within the record whatever count it claims.
-		size, err := payloadSize(elem, b[off:], depth+1)
+		size, err := measure(elem, b[off:], depth+1, limit)
 		if err != nil {
 			return 0, err
 		}
@@ -193,7 +200,7 @@ func listSize(b []byte, depth int) (int, error) {
 	return off, nil
 }
 
-func compoundSize(b []byte, depth int) (int, error) {
+func compoundSize(b []byte, depth, limit int) (int, error) {
 	off := 0
 	for {
 		if off >= len(b) {
@@ -211,7 +218,7 @@ func compoundSize(b []byte, depth int) (int, error) {
 		if off > len(b) {
 			return 0, errNBT
 		}
-		size, err := payloadSize(tag, b[off:], depth+1)
+		size, err := measure(tag, b[off:], depth+1, limit)
 		if err != nil {
 			return 0, err
 		}
@@ -226,4 +233,92 @@ func intOf(tag byte, payload []byte) (int32, bool) {
 		return 0, false
 	}
 	return int32(binary.LittleEndian.Uint32(payload)), true
+}
+
+// fieldsAt calls visit for each tag directly inside the named compound b
+// starts with, and returns what follows that compound: an actor's record is
+// one, and a chunk's block entities are several, one after another. The
+// compound is measured as it is walked, so visit has seen its first tags
+// before a later one is found to be damaged; a caller keeps nothing of a
+// compound this returns an error for.
+func fieldsAt(b []byte, visit func(name []byte, tag byte, payload []byte)) ([]byte, error) {
+	if len(b) < 3 || b[0] != tagCompound {
+		return nil, errNBT
+	}
+	off := 3 + int(binary.LittleEndian.Uint16(b[1:3]))
+	for {
+		if off >= len(b) {
+			return nil, errNBT
+		}
+		tag := b[off]
+		off++
+		if tag == tagEnd {
+			return b[off:], nil
+		}
+		if len(b)-off < 2 {
+			return nil, errNBT
+		}
+		n := int(binary.LittleEndian.Uint16(b[off:]))
+		off += 2
+		if len(b)-off < n {
+			return nil, errNBT
+		}
+		name := b[off : off+n]
+		off += n
+		size, err := measure(tag, b[off:], 1, recordDepth)
+		if err != nil {
+			return nil, err
+		}
+		visit(name, tag, b[off:off+size])
+		off += size
+	}
+}
+
+// wholeOf reads a whole number of any width.
+func wholeOf(tag byte, payload []byte) (int64, bool) {
+	switch tag {
+	case tagByte:
+		return int64(int8(payload[0])), true
+	case tagShort:
+		return int64(int16(binary.LittleEndian.Uint16(payload))), true
+	case tagInt:
+		return int64(int32(binary.LittleEndian.Uint32(payload))), true
+	case tagLong:
+		return int64(binary.LittleEndian.Uint64(payload)), true
+	}
+	return 0, false
+}
+
+func textOf(tag byte, payload []byte) (string, bool) {
+	if tag != tagString {
+		return "", false
+	}
+	return string(payload[2:]), true
+}
+
+// bytesOf is a string's text where it lies in its record, for a reader
+// that passes many strings and keeps few. It is good only as long as the
+// record is.
+func bytesOf(tag byte, payload []byte) ([]byte, bool) {
+	if tag != tagString {
+		return nil, false
+	}
+	return payload[2:], true
+}
+
+// placeOf reads a list of exactly three floats, which is how an actor's
+// position is stored, as the block it is in.
+func placeOf(tag byte, payload []byte) (x, y, z int32, ok bool) {
+	if tag != tagList || payload[0] != tagFloat || binary.LittleEndian.Uint32(payload[1:5]) != 3 {
+		return 0, 0, 0, false
+	}
+	var at [3]int32
+	for i := range at {
+		v := float64(math.Float32frombits(binary.LittleEndian.Uint32(payload[5+4*i:])))
+		if math.IsNaN(v) || math.Abs(v) > maxCoordinate {
+			return 0, 0, 0, false
+		}
+		at[i] = int32(math.Floor(v))
+	}
+	return at[0], at[1], at[2], true
 }
