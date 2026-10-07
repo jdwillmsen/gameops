@@ -58,7 +58,7 @@ func TestParse_RealLevelDat(t *testing.T) {
 		t.Fatal(err)
 	}
 	// This world never resolved its spawn height: it stores 32767.
-	want := Level{Seed: fixtureSeed, SpawnX: 0, SpawnZ: 0, SpawnY: 32767, SpawnYKnown: false}
+	want := Level{Seed: fixtureSeed, SpawnX: 0, SpawnZ: 0, SpawnY: 32767, SpawnYKnown: false, Tick: 562336543, TickKnown: true}
 	if got != want {
 		t.Errorf("Parse = %+v, want %+v", got, want)
 	}

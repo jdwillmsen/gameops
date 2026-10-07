@@ -160,8 +160,8 @@ func TestAssemble_JoinsAStructureCutAtChunkEdges(t *testing.T) {
 	}
 	got := assemble(pieces)
 	want := []Structure{
-		{Monument, Box{27, 39, 27, 47, 61, 47}, 4, nil},
-		{Monument, Box{512, 39, 512, 527, 61, 527}, 1, nil},
+		{Monument, Box{27, 39, 27, 47, 61, 47}, 4, nil, 0},
+		{Monument, Box{512, 39, 512, 527, 61, 527}, 1, nil, 0},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("assemble = %+v\nwant %+v", got, want)

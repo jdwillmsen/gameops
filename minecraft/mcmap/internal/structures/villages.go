@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
@@ -32,10 +33,23 @@ import (
 // list, POI, with a compound per villager, whose instances list has a
 // compound for each thing that villager has claimed: Type 0 a bed, 1 a
 // bell, 2 a job site, at X, Y, Z, or only Skip set where it has claimed
-// none.
+// none. A job site's Name is the profession it gives, and so which block it
+// is: a farmer's is a composter.
 //
-// PLAYERS and RAID are never read. PLAYERS is the only one that names
-// anybody, and nothing on the map needs it.
+// INFO also holds Tick, the game tick the village was last run at. An actor
+// in DWELLERS is an ID, the UniqueID of the mob's own record. PLAYERS holds
+// a list, Players, of an ID and S for each player the village has a
+// standing for: the player's own UniqueID, and a whole number that starts
+// at nought. RAID is there only for a village that has had a raid, and
+// holds a compound, Raid, with GroupNum and NumGroups for the wave reached
+// and how many there are, NumRaiders, and GameTick, when it was last run;
+// the game does not take the record away when the raid is over.
+//
+// PLAYERS is the only one that says anything of a player, and none of it
+// is in what every viewer is sent: a standing goes only to the player it
+// is of. PLAYERS and RAID decorate a village and never decide whether
+// there is one, so one that does not parse is counted and the village
+// stands.
 const Village Kind = "village"
 
 // VillageFacts is what a village's records say about it besides where it is.
@@ -97,6 +111,17 @@ const (
 	// maxCount is the most of anything one village is said to hold. A
 	// megabyte of record can claim a million villagers.
 	maxCount = 10_000
+	// maxDwellerIDs is how many of each sort of dweller are looked up in
+	// the mobs the save holds; the busiest village in the FWB world has 58
+	// villagers. The rest are counted as not looked up.
+	maxDwellerIDs = 512
+	// maxProfessions is how many different job sites a village is told
+	// apart by; the game has thirteen.
+	maxProfessions = 32
+	// maxStandings is how many players' standings are kept for a village.
+	maxStandings = 256
+	// ticksPerSecond is the game's own clock.
+	ticksPerSecond = 20
 )
 
 var villagePrefix = []byte("VILLAGE_")
@@ -138,6 +163,49 @@ type village struct {
 	hasBox  bool
 	facts   VillageFacts
 	damaged bool
+	more    villageRecords
+}
+
+// The lists of a DWELLERS record that are read, by where they are in it.
+const (
+	roleVillager = iota
+	roleGolem
+	roleCat
+	roles
+)
+
+// villageRecords is what a village's records hold that is not sent with
+// every village: it is set beside the mobs the save holds when one
+// village's details are put together.
+type villageRecords struct {
+	// dwellers is the UniqueID of each mob of each role, up to
+	// maxDwellerIDs; dwellersOver is how many more there were.
+	dwellers     [roles][]int64
+	dwellersOver int
+	// jobSites is the claimed job sites by the profession each gives.
+	jobSites []JobSites
+	// tick is the game tick the village was last run at.
+	tick    int64
+	hasTick bool
+	raid    *raidRecord
+	// standings is what the village thinks of each player it has met.
+	standings []Standing
+	// skipped is how many of the PLAYERS and RAID records did not parse.
+	skipped int
+}
+
+type raidRecord struct {
+	wave, waves, raiders int
+	tick                 int64
+	hasTick              bool
+}
+
+// JobSites is how many job sites of one profession a village's villagers
+// have claimed.
+type JobSites struct {
+	// Profession is the game's word: farmer, toolsmith.
+	Profession string `json:"profession"`
+	Count      int    `json:"count"`
 }
 
 var errVillageRecords = errors.New("more records under the village prefix than villages could account for")
@@ -147,8 +215,9 @@ var errVillageRecords = errors.New("more records under the village prefix than v
 // millions. A prefix holding far more keys than villages have is refused
 // whole: stopping part way would report whichever villages sorted first as
 // all there are.
-func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Dimension][]Structure, VillageStats, error) {
+func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Dimension][]Structure, map[*VillageFacts]*villageRecords, VillageStats, error) {
 	found := map[chunks.Dimension][]Structure{}
+	records := map[*VillageFacts]*villageRecords{}
 	var stats VillageStats
 	var (
 		current []byte
@@ -164,13 +233,14 @@ func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Di
 		case v.facts.Counted && v.facts.Villagers == 0:
 			stats.Empty++
 		default:
-			facts := v.facts
+			facts, more := v.facts, v.more
 			if !facts.Counted {
 				// Whatever an unrun village's lists hold, the game has
 				// not counted it, and a number here would say it had.
-				facts = VillageFacts{}
+				facts, more = VillageFacts{}, villageRecords{skipped: more.skipped}
 			}
 			found[v.dim] = append(found[v.dim], Structure{Kind: Village, Box: v.box, Village: &facts})
+			records[&facts] = &more
 			stats.Found++
 		}
 		v = nil
@@ -180,10 +250,10 @@ func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Di
 	defer it.Release()
 	for n := 0; it.Next(); n++ {
 		if n%64 == 0 && ctx.Err() != nil {
-			return nil, VillageStats{}, ctx.Err()
+			return nil, nil, VillageStats{}, ctx.Err()
 		}
 		if n >= keysPerVillage*limit {
-			return nil, VillageStats{}, errVillageRecords
+			return nil, nil, VillageStats{}, errVillageRecords
 		}
 		k := it.Key()
 		// Every village has one INFO record, so that is the one counted
@@ -196,7 +266,11 @@ func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Di
 			}
 			continue
 		}
-		var read func(*village, []byte) error
+		var (
+			read func(*village, []byte) error
+			// decorates is set for a record a village stands without.
+			decorates bool
+		)
 		switch string(part) {
 		case "INFO":
 			read = (*village).info
@@ -204,7 +278,10 @@ func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Di
 			read = (*village).dwellers
 		case "POI":
 			read = (*village).claims
-		case "PLAYERS", "RAID":
+		case "PLAYERS":
+			read, decorates = (*village).players, true
+		case "RAID":
+			read, decorates = (*village).raid, true
 		default:
 			// Not a record of any village, whatever its key looks like.
 			continue
@@ -228,29 +305,26 @@ func readVillages(ctx context.Context, db *leveldb.DB, limit int) (map[chunks.Di
 			}
 			continue
 		}
-		if read == nil {
-			continue
-		}
 		value := it.Value()
-		if len(value) > maxVillageRecord {
-			v.damaged = true
-			continue
-		}
-		if err := read(v, value); err != nil {
+		switch {
+		case len(value) <= maxVillageRecord && read(v, value) == nil:
+		case decorates:
+			v.more.skipped++
+		default:
 			v.damaged = true
 		}
 	}
 	finish()
 	if err := it.Error(); err != nil {
-		return nil, VillageStats{}, fmt.Errorf("read villages: %w", err)
+		return nil, nil, VillageStats{}, fmt.Errorf("read villages: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, VillageStats{}, err
+		return nil, nil, VillageStats{}, err
 	}
 	for _, list := range found {
 		slices.SortFunc(list, compareVillages)
 	}
-	return found, stats, nil
+	return found, records, stats, nil
 }
 
 // The most lived-in first, so that a list cut short keeps the villages a
@@ -297,6 +371,11 @@ func (v *village) info(record []byte) error {
 			}
 			v.facts.Counted = payload[0] != 0
 			return nil
+		case "Tick":
+			if tag == tagLong {
+				v.more.tick, v.more.hasTick = int64(binary.LittleEndian.Uint64(payload)), true
+			}
+			return nil
 		default:
 			return nil
 		}
@@ -341,17 +420,33 @@ func (v *village) dwellers(record []byte) error {
 				if string(name) != "actors" {
 					return nil
 				}
-				n, err := eachCompound(tag, payload, nil)
-				if err != nil {
+				// What the third list holds has not been seen.
+				kept, known := map[int]int{0: roleVillager, 1: roleGolem, 3: roleCat}[role]
+				n, err := eachCompound(tag, payload, func(actor []byte) error {
+					if !known {
+						return nil
+					}
+					return eachField(actor, func(name []byte, tag byte, payload []byte) error {
+						if string(name) != "ID" || tag != tagLong {
+							return nil
+						}
+						if len(v.more.dwellers[kept]) >= maxDwellerIDs {
+							v.more.dwellersOver++
+							return nil
+						}
+						v.more.dwellers[kept] = append(v.more.dwellers[kept], int64(binary.LittleEndian.Uint64(payload)))
+						return nil
+					})
+				})
+				if err != nil || !known {
 					return err
 				}
-				// What the third list holds has not been seen.
-				switch n = min(n, maxCount); role {
-				case 0:
+				switch n = min(n, maxCount); kept {
+				case roleVillager:
 					v.facts.Villagers = n
-				case 1:
+				case roleGolem:
 					v.facts.Golems = n
-				case 3:
+				case roleCat:
 					v.facts.Cats = n
 				}
 				return nil
@@ -388,6 +483,7 @@ func (v *village) claims(record []byte) error {
 						c    claim
 						has  [4]bool
 						skip bool
+						job  string
 					)
 					if err := eachField(instance, func(name []byte, tag byte, payload []byte) error {
 						switch string(name) {
@@ -401,6 +497,8 @@ func (v *village) claims(record []byte) error {
 							c.z, has[3] = intOf(tag, payload)
 						case "Skip":
 							skip = tag == tagByte && payload[0] != 0
+						case "Name":
+							job, _ = textOf(tag, payload)
 						}
 						return nil
 					}); err != nil {
@@ -422,6 +520,7 @@ func (v *village) claims(record []byte) error {
 						v.facts.Bells++
 					case 2:
 						v.facts.JobSites++
+						v.more.jobSite(job)
 					}
 					return nil
 				})
@@ -430,4 +529,107 @@ func (v *village) claims(record []byte) error {
 		})
 		return err
 	})
+}
+
+// jobSite counts one claimed job site under the profession it gives.
+func (r *villageRecords) jobSite(name string) {
+	profession := cleanID(name)
+	for i := range r.jobSites {
+		if r.jobSites[i].Profession == profession {
+			r.jobSites[i].Count++
+			return
+		}
+	}
+	if len(r.jobSites) >= maxProfessions {
+		return
+	}
+	r.jobSites = append(r.jobSites, JobSites{Profession: profession, Count: 1})
+}
+
+// players reads what the village thinks of each player it has met. Who a
+// number is of is the player's UniqueID, which is kept and never sent.
+func (v *village) players(record []byte) error {
+	b, err := rootCompound(record)
+	if err != nil {
+		return err
+	}
+	var found []Standing
+	if err := eachField(b, func(name []byte, tag byte, payload []byte) error {
+		if string(name) != "Players" {
+			return nil
+		}
+		_, err := eachCompound(tag, payload, func(player []byte) error {
+			var (
+				s            Standing
+				hasID, hasIt bool
+			)
+			if err := eachField(player, func(name []byte, tag byte, payload []byte) error {
+				switch string(name) {
+				case "ID":
+					if tag == tagLong {
+						s.Player, hasID = int64(binary.LittleEndian.Uint64(payload)), true
+					}
+				case "S":
+					s.Value, hasIt = intOf(tag, payload)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			if hasID && hasIt && len(found) < maxStandings {
+				found = append(found, s)
+			}
+			return nil
+		})
+		return err
+	}); err != nil {
+		return err
+	}
+	v.more.standings = found
+	return nil
+}
+
+// raid reads how far the village's raid got.
+func (v *village) raid(record []byte) error {
+	b, err := rootCompound(record)
+	if err != nil {
+		return err
+	}
+	var (
+		raid raidRecord
+		has  [3]bool
+	)
+	if err := eachField(b, func(name []byte, tag byte, payload []byte) error {
+		if string(name) != "Raid" || tag != tagCompound {
+			return nil
+		}
+		return eachField(payload, func(name []byte, tag byte, payload []byte) error {
+			count := func(i int, into *int) {
+				// Each is a byte in the game, read as it counts: unsigned.
+				if tag == tagByte {
+					*into, has[i] = int(payload[0]), true
+				}
+			}
+			switch string(name) {
+			case "GroupNum":
+				count(0, &raid.wave)
+			case "NumGroups":
+				count(1, &raid.waves)
+			case "NumRaiders":
+				count(2, &raid.raiders)
+			case "GameTick":
+				if tag == tagLong {
+					raid.tick, raid.hasTick = int64(binary.LittleEndian.Uint64(payload)), true
+				}
+			}
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+	if has != [3]bool{true, true, true} {
+		return errNBT
+	}
+	v.more.raid = &raid
+	return nil
 }
