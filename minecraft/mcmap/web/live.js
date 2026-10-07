@@ -283,7 +283,8 @@
   // dimension. went is the dimension a lost player was found in, or null.
   // savedAt is when the snapshot that placed a named mob was taken, for one
   // chosen by its mark or from a list; wasLive is whether the card has
-  // seen it in the picture since it opened.
+  // seen it in the picture since it opened. saved marks a named mob placed
+  // by the snapshot.
   let picked = null;
   let seeking = [];
   let seekTimer = null;
@@ -749,7 +750,7 @@
 
   // A named mob the card knows only from the snapshot, which is on the map
   // as the mark the snapshot left.
-  const savedOnly = () => picked !== null && Number.isFinite(picked.savedAt) && !picked.wasLive && picked.state !== 'live';
+  const savedOnly = () => picked !== null && picked.saved === true && !picked.wasLive && picked.state !== 'live';
 
   function ring() {
     const found = picked && picked.state === 'live' ? entities.get(picked.key) : null;
@@ -877,7 +878,7 @@
         : picked.state === 'away' ? `Not tracked: the map is on another dimension, ${labelOf(app.dimension())}.` : 'Waiting for live positions.';
       // The snapshot's clock is the server's, which the page's own may
       // not agree with to the minute.
-      when = `This is its last saved position, from ${age(picked.savedAt)}.`;
+      when = Number.isFinite(picked.savedAt) ? `This is its last saved position, from ${age(picked.savedAt)}.` : 'This is its last saved position.';
     } else if (picked.state === 'lost') {
       what = picked.went ? `Left for another dimension: ${labelOf(picked.went)}.` : 'No longer tracked.';
     } else if (picked.state === 'away') {
@@ -979,7 +980,11 @@
       x: num(what.x), y: num(what.y), z: num(what.z),
       dimension,
     };
-    if (!player && Number.isFinite(what.savedAt)) known.savedAt = what.savedAt;
+    // A mob placed by the snapshot, which may not be where it is now.
+    if (!player && what.saved === true) {
+      known.saved = true;
+      if (Number.isFinite(what.savedAt)) known.savedAt = what.savedAt;
+    }
     // With no id there is nothing to find it by in the picture, and the
     // key is one no entity has.
     const key = id ? `${player ? 'p' : 'm'}:${id}` : `s:${dimension}:${known.x}:${known.y}:${known.z}`;

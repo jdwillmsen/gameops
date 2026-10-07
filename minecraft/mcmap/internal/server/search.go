@@ -16,6 +16,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
@@ -51,7 +52,11 @@ const (
 	hitContainer = "container"
 	hitMob       = "mob"
 	hitWaypoint  = "waypoint"
+	hitPlayer    = "player"
 )
+
+// searchKinds is every kind a search may be kept to.
+var searchKinds = []string{hitBiome, hitStructure, hitSpawn, hitBed, hitContainer, hitMob, hitWaypoint, hitPlayer}
 
 // How sure a structure hit is, where it is not one the world recorded.
 const (
@@ -83,9 +88,17 @@ type searchHit struct {
 	Certainty string `json:"certainty,omitempty"`
 	// Colour, Trapped and Baby are a marker's own, passed on so that the
 	// page can call and draw a hit as it does the marker.
-	Colour    string `json:"colour,omitempty"`
-	Trapped   bool   `json:"trapped,omitempty"`
-	Baby      bool   `json:"baby,omitempty"`
+	Colour  string `json:"colour,omitempty"`
+	Trapped bool   `json:"trapped,omitempty"`
+	Baby    bool   `json:"baby,omitempty"`
+	// ID is the game's own id for a player or a mob, which is what the
+	// live layer tracks one by. A named mob read from a world that does
+	// not say has none.
+	ID string `json:"id,omitempty"`
+	// Live is set where the position is from the live layer, and so is
+	// where the player or mob is now. Without it a mob's position is where
+	// the last snapshot found it.
+	Live      bool   `json:"live,omitempty"`
 	Dimension string `json:"dimension"`
 	X         int32  `json:"x"`
 	// Y is left out for what has no height: a biome, the spawn of a world
@@ -98,6 +111,9 @@ type searchHit struct {
 
 	distance float64
 	order    int
+	// first puts a hit ahead of the places: someone who is online is
+	// looked for by name far more often than anything else that shares it.
+	first bool
 }
 
 type searchJSON struct {
@@ -275,8 +291,9 @@ func nearestPredictions(all []structures.Prediction, x, z int32, perKind int) []
 }
 
 // handleSearch looks one piece of text up in everything the map holds that
-// has a name: biomes, recorded and predicted structures, the world spawn,
-// beds, containers, named mobs, and the waypoints of whoever is asking.
+// has a name: the players online now, biomes, recorded and predicted
+// structures, the world spawn, beds, containers, named mobs, and the
+// waypoints of whoever is asking.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := biomes.Fold(q.Get("q"))
@@ -284,10 +301,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	x, okX := blockParam(q, "x")
 	z, okZ := blockParam(q, "z")
 	limit, okL := limitParam(q, defaultSearchHits, maxSearchHits)
-	if query == "" || utf8.RuneCountInString(query) > maxSearchQuery || !okD || !okX || !okZ || !okL {
-		http.Error(w, "a search needs q, of 1 to 64 characters, and the dimension, x and z to measure from", http.StatusBadRequest)
+	only := q.Get("kind")
+	if query == "" || utf8.RuneCountInString(query) > maxSearchQuery || !okD || !okX || !okZ || !okL ||
+		(only != "" && !slices.Contains(searchKinds, only)) {
+		http.Error(w, "a search needs q, of 1 to 64 characters, and the dimension, x and z to measure from; kind, if given, is one kind of hit", http.StatusBadRequest)
 		return
 	}
+	wants := func(kind string) bool { return only == "" || only == kind }
 	matches := func(names ...string) bool {
 		return slices.ContainsFunc(names, func(name string) bool { return strings.Contains(biomes.Fold(name), query) })
 	}
@@ -295,6 +315,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	names := s.displayNames()
 	var hits []searchHit
 	add := func(h searchHit, d chunks.Dimension) {
+		if !wants(h.Kind) {
+			return
+		}
 		h.Dimension = d.Name()
 		h.distance = math.Round(math.Hypot(float64(h.X)-float64(x), float64(h.Z)-float64(z)))
 		// The dimension asked from comes first, then the others in their
@@ -307,9 +330,29 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		hits = append(hits, h)
 	}
 	height := func(y int32) *int32 { return &y }
+	block := func(v float64) int32 { return int32(math.Floor(v)) }
 
+	now := time.Now()
 	for _, d := range chunks.Dimensions {
-		if s.Biomes != nil {
+		// Who is online and which mobs are loaded, from the same picture
+		// the page is streamed: nothing here that a session cannot already
+		// see, and no more of it than the live store's own cap.
+		loaded := map[string]live.Entity{}
+		if s.Live != nil && (wants(hitPlayer) || wants(hitMob)) {
+			frame := s.Live.Store.Snapshot(d.Name(), now)
+			for _, p := range frame.Players {
+				if matches(p.Name) {
+					add(searchHit{Kind: hitPlayer, Name: p.Name, ID: p.ID, Live: true, first: true,
+						X: block(p.X), Y: height(block(p.Y)), Z: block(p.Z)}, d)
+				}
+			}
+			for _, m := range frame.Mobs {
+				if m.Name != "" {
+					loaded[m.ID] = m
+				}
+			}
+		}
+		if s.Biomes != nil && wants(hitBiome) {
 			world := s.Biomes.World()
 			for _, p := range world.Present(d) {
 				if !p.Matches(query) {
@@ -321,7 +364,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if s.Structures != nil {
+		if s.Structures != nil && (wants(hitStructure) || wants(hitSpawn)) {
 			if survey, ok := s.Structures.Last(); ok {
 				for _, st := range survey.Layers[d].Recorded {
 					if name := structureNames[st.Kind]; matches(name, string(st.Kind), names.Structure(string(st.Kind))) {
@@ -362,9 +405,24 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			for _, m := range lists.Mobs {
-				if matches(m.Name, m.Kind, names.Entity(m.Kind)) {
-					add(searchHit{Kind: hitMob, Name: m.Name, Detail: m.Kind, Baby: m.Baby, X: m.X, Y: height(m.Y), Z: m.Z}, d)
+				if !matches(m.Name, m.Kind, names.Entity(m.Kind)) {
+					continue
 				}
+				h := searchHit{Kind: hitMob, Name: m.Name, Detail: m.Kind, Baby: m.Baby, ID: m.ID, X: m.X, Y: height(m.Y), Z: m.Z}
+				// The same animal by the game's id for it, never by its
+				// name or where it was: it is listed once, where it is now.
+				if at, ok := loaded[m.ID]; ok && m.ID != "" {
+					h.Live, h.X, h.Y, h.Z = true, block(at.X), height(block(at.Y)), block(at.Z)
+					delete(loaded, m.ID)
+				}
+				add(h, d)
+			}
+		}
+		// A mob named since the last snapshot is in no marker yet.
+		for _, m := range loaded {
+			if matches(m.Name, m.Type, names.Entity(m.Type)) {
+				add(searchHit{Kind: hitMob, Name: m.Name, Detail: m.Type, ID: m.ID, Live: true,
+					X: block(m.X), Y: height(block(m.Y)), Z: block(m.Z)}, d)
 			}
 		}
 	}
@@ -373,7 +431,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Whose waypoints are searched comes from the session and nowhere
 	// else, exactly as when they are listed: nothing in the request can
 	// name another player, and without a login there is nobody to be.
-	if id, ok := auth.FromContext(r.Context()); ok && s.Waypoints != nil && s.Sessions != nil {
+	if id, ok := auth.FromContext(r.Context()); ok && s.Waypoints != nil && s.Sessions != nil && wants(hitWaypoint) {
 		out.Waypoints = waypointsSearched
 		list, err := s.search.playerWaypoints(r.Context(), s.Waypoints, id.XUID, s.Sessions.Now)
 		if err != nil {
@@ -389,7 +447,14 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slices.SortStableFunc(hits, func(a, b searchHit) int {
-		return cmp.Or(cmp.Compare(a.order, b.order), cmp.Compare(a.distance, b.distance), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name))
+		rank := func(h searchHit) int {
+			if h.first {
+				return 0
+			}
+			return 1
+		}
+		return cmp.Or(cmp.Compare(rank(a), rank(b)), cmp.Compare(a.order, b.order), cmp.Compare(a.distance, b.distance),
+			cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name), cmp.Compare(a.ID, b.ID))
 	})
 	if len(hits) > limit {
 		out.More = len(hits) - limit

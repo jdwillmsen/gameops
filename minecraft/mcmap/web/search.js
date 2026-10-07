@@ -36,6 +36,7 @@
     container: 'Container',
     mob: 'Named mob',
     waypoint: 'Waypoint',
+    player: 'Player',
   };
 
   // What is said after a structure the world has not recorded: the seed
@@ -74,6 +75,8 @@
   function titleOf(hit) {
     const name = str(hit.name);
     const detail = str(hit.detail);
+    // A gamertag, which is the player's choice and is only ever text.
+    if (hit.kind === 'player') return name || KINDS.player;
     if (hit.kind === 'bed') return names.bed(hit.colour);
     if (hit.kind === 'mob') return names.mob(name, detail, hit.baby);
     if (hit.kind === 'structure') {
@@ -106,8 +109,15 @@
     return icons.picture(icons.keyOf(hit.kind, { kind: str(hit.detail), colour: hit.colour, trapped: hit.trapped }));
   }
 
+  // What a position is worth, for a hit that moves: where a player or a
+  // loaded mob is now, or where the last snapshot left a mob.
+  function standingOf(hit) {
+    if (hit.live === true) return 'live · ';
+    return hit.kind === 'mob' ? 'last saved · ' : '';
+  }
+
   function whereOf(hit) {
-    const at = Number.isFinite(hit.y) ? `${fmt(hit.x)}, ${fmt(hit.y)}, ${fmt(hit.z)}` : `${fmt(hit.x)}, ${fmt(hit.z)}`;
+    const at = standingOf(hit) + (Number.isFinite(hit.y) ? `${fmt(hit.x)}, ${fmt(hit.y)}, ${fmt(hit.z)}` : `${fmt(hit.x)}, ${fmt(hit.z)}`);
     // A distance is given only within the dimension asked from: no walk
     // leads to another.
     if (hit.dimension !== app.dimension()) return `${at} · in ${app.label(hit.dimension)}`;
@@ -235,7 +245,18 @@
       show(hits, `${app.label(hit.dimension)} has not been rendered yet, so the map cannot go there.`);
       return;
     }
-    point(hit);
+    // A player or a mob moves, so it is marked by the card that tracks it
+    // and not by a ring on where it was when the list was made.
+    if ((hit.kind === 'player' || hit.kind === 'mob') && app.inspect) {
+      unmark();
+      app.inspect.open({
+        kind: hit.kind, id: str(hit.id) || null, name: str(hit.name), type: str(hit.detail), baby: hit.baby === true,
+        x: hit.x + 0.5, y: hit.y, z: hit.z + 0.5, dimension: hit.dimension,
+        saved: hit.kind === 'mob' && hit.live !== true, savedAt: app.markers ? app.markers.savedAt() : null,
+      });
+    } else {
+      point(hit);
+    }
     // The stretch found is the one to look at, so the rest is dimmed.
     if (hit.kind === 'biome' && app.biomes) app.biomes.show(str(hit.detail));
     // The keyboard goes back to the map, and a phone puts its own away.
