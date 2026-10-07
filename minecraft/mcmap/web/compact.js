@@ -155,8 +155,12 @@
     map.invalidateSize();
   }
 
-  // With no search to open there is no button for it.
-  const sync = () => { el.searchOpen.hidden = el.search.hidden; };
+  // With no search to open there is no button for it, and logged out
+  // nothing is left open over the login.
+  const sync = () => {
+    el.searchOpen.hidden = el.search.hidden;
+    if (body.classList.contains('locked')) for (const part of Object.keys(PARTS)) set(part, false);
+  };
 
   media.addEventListener('change', relaid);
   document.addEventListener('mcmap:view', sync);

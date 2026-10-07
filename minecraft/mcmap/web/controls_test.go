@@ -228,15 +228,33 @@ func TestSmallScreenLayoutIsOneConditionEverywhere(t *testing.T) {
 		}
 	}
 	for _, need := range []string{
-		"html, body { height: 100dvh; }",
+		"html, body { height: 100vh; height: 100dvh; }",
 		"env(safe-area-inset-top)", "env(safe-area-inset-bottom)", "env(safe-area-inset-left)", "env(safe-area-inset-right)",
 		"min-height: 44px;",
 		"@media (prefers-reduced-motion: no-preference) {",
 		".more, .more-part { display: contents; }",
 		".searching .inspect, .more-shown .inspect, .currency-shown .inspect, .stage:has(.layers.open) .inspect { display: none; }",
+		// Logged out, More has nothing in it, and a part whose controls
+		// are all hidden goes with its title and its note.
+		".locked .more-open, .locked.more-shown .more { display: none; }",
+		".more-part:not(:has(> :not(.more-title):not(.more-note):not([hidden]))) { display: none; }",
 	} {
 		if !bytes.Contains(css, []byte(need)) {
 			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+	// A browser without dvh drops a declaration that uses it, so each one
+	// follows the same thing said in vh: a sheet with no limit cannot scroll.
+	lines := bytes.Split(css, []byte("\n"))
+	for i, line := range lines {
+		if !bytes.Contains(line, []byte("dvh")) {
+			continue
+		}
+		before := lines[max(i-1, 0)]
+		same := bytes.Contains(line, []byte("height: 100vh; height: 100dvh;")) ||
+			bytes.Equal(bytes.ReplaceAll(line, []byte("dvh"), []byte("vh")), before)
+		if !same {
+			t.Errorf("style.css line %d uses dvh with no vh declaration before it: %s", i+1, bytes.TrimSpace(line))
 		}
 	}
 	js := usesNoMarkupSink(t, "compact.js")
