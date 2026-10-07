@@ -441,3 +441,54 @@ func TestMobIconsJustFetchedAreServedThoughTheRestCouldNotBeAskedFor(t *testing.
 		t.Errorf("pictures after the source came back = %v", keys)
 	}
 }
+
+// A set kept by a version that marked fewer kinds of structure holds no
+// picture for the new ones and does not know it is missing them. They are
+// asked for by themselves, and what the volume holds goes on being served.
+func TestAKindOfStructureAddedSinceTheSetWasKeptHasItsPictureAskedFor(t *testing.T) {
+	dir := t.TempDir()
+	first := filled(t, dir, testRef)
+	home := first.home()
+	raw, err := os.ReadFile(filepath.Join(home, indexFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idx map[string]any
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		t.Fatal(err)
+	}
+	// As the version before wrote it: no word of which kinds it asked for.
+	delete(idx, "structures")
+	idx["missing"] = []string{}
+	raw, _ = json.Marshal(idx)
+	if err := os.WriteFile(filepath.Join(home, indexFile), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var asked [][]string
+	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t),
+		Fill: func(_ context.Context, missing []string) (Set, error) {
+			asked = append(asked, slices.Clone(missing))
+			return Set{Pictures: map[string][]byte{"structure/stronghold": picture(t, 16, 16, blue), "structure/trial_chamber": picture(t, 16, 16, blue)}}, nil
+		}}
+	m.Run(t.Context())
+	if len(asked) != 1 || !slices.Equal(asked[0], []string{"structure/stronghold", "structure/trial_chamber"}) {
+		t.Fatalf("asked for %v, want the two kinds added since, once", asked)
+	}
+	if _, ok := m.Picture("structure/stronghold"); !ok {
+		t.Error("the new kind's picture is not served after it was fetched")
+	}
+	if _, ok := m.Picture("container/chest"); !ok {
+		t.Error("a picture already held was lost in fetching the new kind's")
+	}
+	// Kept as this version writes it: the next start has nothing to ask.
+	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t),
+		Fill: func(_ context.Context, missing []string) (Set, error) {
+			t.Errorf("asked again for %v after it was fetched and kept", missing)
+			return Set{}, nil
+		}}
+	again.Run(t.Context())
+	if _, ok := again.Picture("structure/trial_chamber"); !ok {
+		t.Error("the picture fetched for the new kind was not kept on the volume")
+	}
+}

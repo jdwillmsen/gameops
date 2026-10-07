@@ -81,7 +81,14 @@ type index struct {
 	Lang     map[string]string `json:"lang"`
 	Entities []string          `json:"entities"`
 	Missing  []string          `json:"missing"`
+	// Structures is the kinds of structure whose pictures the source was
+	// asked for. An index without it was written when there were five.
+	Structures []string `json:"structures,omitempty"`
 }
+
+// firstStructureKinds is the kinds an index that names none was written
+// for.
+var firstStructureKinds = []string{"fortress", "monument", "outpost", "witch_hut", "village"}
 
 // home is the directory for this pin. The pin is hashed because it is a
 // setting and may hold characters a path should not.
@@ -369,6 +376,19 @@ func (m *Mobs) load() (set Set, earlier bool, err error) {
 		}
 	}
 	out.Lang = idx.Lang
+	// A version that marks a kind of structure the one that wrote the
+	// index did not, wants a picture the source was never asked for. It is
+	// missing like any other, and is asked for like any other.
+	asked := idx.Structures
+	if len(asked) == 0 {
+		asked = firstStructureKinds
+	}
+	for _, kind := range StructureKinds {
+		if key := "structure/" + kind; !slices.Contains(asked, kind) && !slices.Contains(out.Missing, key) {
+			out.Missing = append(slices.Clip(out.Missing), key)
+			slices.Sort(out.Missing)
+		}
+	}
 	if slices.ContainsFunc(idx.Entities, func(kind string) bool { return !mobType.MatchString(kind) }) {
 		return Set{}, false, errors.New("the icon index is damaged")
 	}
@@ -391,7 +411,7 @@ func (m *Mobs) store(set Set) error {
 		return err
 	}
 	defer os.RemoveAll(staging)
-	idx := index{Format: indexFormat, Ref: m.Ref, Icons: map[string]string{}, Pictures: map[string]string{}, Lang: set.Lang, Entities: set.Entities, Missing: set.Missing}
+	idx := index{Format: indexFormat, Ref: m.Ref, Icons: map[string]string{}, Pictures: map[string]string{}, Lang: set.Lang, Entities: set.Entities, Missing: set.Missing, Structures: StructureKinds}
 	for _, group := range []struct {
 		from map[string][]byte
 		to   map[string]string
