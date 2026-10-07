@@ -127,8 +127,8 @@
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !media.matches) return;
     // A box that takes a typed length has an Escape of its own, which
-    // puts its menu back.
-    if (e.target instanceof Element && e.target.closest('.duration input') !== null) return;
+    // puts its menu back, and so has a dialog.
+    if (e.target instanceof Element && e.target.closest('.duration input, dialog[open]') !== null) return;
     for (const part of ['more-shown', 'currency-shown']) {
       if (!shown(part)) continue;
       e.stopPropagation();

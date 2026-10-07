@@ -164,3 +164,23 @@ func TestFollowSaysWhenItIsFollowing(t *testing.T) {
 		t.Error("index.html no longer has the following status outside the card")
 	}
 }
+
+// Escape shuts one thing. Pressed in a dialog it is the dialog's, and must
+// not also shut the card under it and stop what the card is following.
+func TestEscapeInADialogIsTheDialogs(t *testing.T) {
+	for _, script := range []string{"live.js", "search.js", "compact.js", "menu.js"} {
+		js := read(t, script)
+		handlers := regexp.MustCompile(`(?s)document\.addEventListener\('keydown', \(e\) => \{.*?\n  \}(, true)?\);|(?s)document\.addEventListener\('keydown', \(e\) => \{.*?\n    \}\);`).FindAll(js, -1)
+		if len(handlers) == 0 {
+			t.Errorf("%s has no document-level key handler; the pattern no longer matches the script", script)
+		}
+		for _, h := range handlers {
+			if !bytes.Contains(h, []byte("dialog[open]")) && !bytes.Contains(h, []byte("typing(e.target)")) {
+				t.Errorf("%s has a document-level key handler that does not stand aside for an open dialog:\n%s", script, h)
+			}
+		}
+	}
+	if !bytes.Contains(read(t, "menu.js"), []byte("node.closest('dialog[open]') !== null")) {
+		t.Error("menu.js no longer counts an open dialog as somewhere shortcuts do not fire")
+	}
+}
