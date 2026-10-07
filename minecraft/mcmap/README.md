@@ -1038,7 +1038,9 @@ A player is listed ahead of everything else, with `id`, the id the live
 stream tracks them by, and `live: true`: the position is where they are
 now, to the block. A named mob carries its `id` where the snapshot gave it
 one; while the same mob is loaded it is listed once, at its live position
-with `live: true`, and otherwise where the snapshot left it. A mob named
+with `live: true`, under the name it has now and in the dimension it is in
+now, whatever the snapshot had of either, and otherwise where the snapshot
+left it. A mob named
 since the last snapshot is found from the live picture alone. `kind=<kind>`
 keeps an answer to one kind of hit, `kind=player` for the players. Nothing
 here is more than a session already sees on `/api/live`, and no more of it
