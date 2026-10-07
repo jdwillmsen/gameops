@@ -1188,6 +1188,28 @@ saved yet takes the one saved there, so nobody's filters reset. The old
 single Structures switch, if it was off, carries over as Known, Predicted
 and Possible all off, and the old Live switch as paused.
 
+**What the live rows hold.** Under each live row is a list that opens: By
+player under Players, By type under Hostile, Passive, Villagers and Other,
+each entry with its count, most first, by the game's name for the type.
+Each entry has a switch that hides or shows it and Only, which leaves it
+alone: Only on a type hides every other type of mob in all four rows, and
+Only on a player hides the other players; pressing it again lets the rest
+back. A row a filter has cut says `Showing 225 of 451: filtered by type`
+and has a Show all types (or players) button whether or not its list is
+open. A list of more than six has a box that narrows it by text. A
+player's name in the list is a button that goes to them and opens their
+card. The filters are kept with the panel's other choices, in
+`mcmap.layers` under `live#mobs` and `live#players`, as `{ only, hidden }`
+with at most 200 hidden. A frame pays two set lookups an entity for them:
+a marker is put on the canvas or left off when its entity first appears,
+and again only when a filter changes. Measured in headless Chromium at
+1300 by 800 with 905 live mobs, 1,500 beds and 600 containers in view,
+panning back and forth for four seconds: 241 frames with one type alone
+and 242 with none filtered, median 16.7 ms and 95th percentile 16.8 ms
+either way, no long task. An entity the card is about that a filter or a
+switched-off row hides is still tracked, and followed if it was; the card
+says it is hidden and why.
+
 **Adding a layer.** A layer is a script of its own, loaded after
 `layers.js`, which registers its rows and never edits the panel:
 
@@ -1212,6 +1234,13 @@ row.setEnabled(true);            // switch it as the viewer would; kept, and onT
 row.setBody(node);               // the layer's own controls under the row; null for none
 row.remove();
 ```
+
+A layer that keeps more than its switches, as the live layer keeps which
+types it shows, asks the panel to keep it beside them:
+`window.mcmap.layers.retain(group, name, value)` stores any JSON value in
+`mcmap.layers` under `<group>#<name>` (null removes it) and
+`recall(group, name)` reads it back, or null. What comes back is the
+viewer's storage and is checked by whoever reads it.
 
 `onToggle` is called with the new value when the viewer changes the row,
 by its checkbox or by the group's All or None, and not when it is

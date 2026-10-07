@@ -79,6 +79,23 @@
     return was;
   }
 
+  // What a layer keeps besides its switches, such as which kinds of a
+  // thing it shows: under "<group>#<name>", beside the switches, so that
+  // everything the viewer chose in the panel is in one place. The value is
+  // whatever the layer's script gave, and that script's to check when it
+  // reads it back: storage is the viewer's to edit.
+  function recall(group, name) {
+    const key = `${group}#${name}`;
+    return Object.hasOwn(choices, key) ? choices[key] : null;
+  }
+
+  function retain(group, name, value) {
+    const key = `${group}#${name}`;
+    if (value === null || value === undefined) delete choices[key];
+    else choices[key] = value;
+    write(CHOICES_KEY, choices);
+  }
+
   const view = read(PANEL_KEY);
   const folded = new Set(Array.isArray(view.folded) ? view.folded.filter((id) => typeof id === 'string') : []);
   // Open to begin with where there is room for it beside the map.
@@ -278,6 +295,8 @@
   });
 
   paint();
+  app.layers.recall = recall;
+  app.layers.retain = retain;
   app.layers.register = register;
   document.dispatchEvent(new CustomEvent('mcmap:layers'));
 })();

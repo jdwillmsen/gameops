@@ -154,6 +154,47 @@
   let rows = null;
   const shown = (category) => rows !== null && rows[category].enabled;
 
+  // --- which of them are drawn ---------------------------------------------
+  //
+  // Under each row is what it holds, by type, or by gamertag for the
+  // players, and each of those can be hidden or shown alone. There is one
+  // choice for the mobs, across their four rows, and one for the players:
+  // "only creepers" means the creepers and no other mob, whichever row the
+  // others are in. A choice is { only, hidden }: with only set, that one is
+  // drawn and nothing else; otherwise everything not in hidden is.
+  const FILTERS = ['mobs', 'players'];
+  // The most a choice keeps, so that what a viewer hid over a year of
+  // visits is still a few kilobytes in their browser.
+  const MAX_HIDDEN = 200;
+  const filters = {};
+  for (const domain of FILTERS) {
+    const kept = app.layers.recall ? app.layers.recall('live', domain) : null;
+    const text = (v) => typeof v === 'string' && v.length <= 64;
+    filters[domain] = {
+      only: kept && text(kept.only) ? kept.only : null,
+      hidden: new Set(kept && Array.isArray(kept.hidden) ? kept.hidden.filter(text).slice(0, MAX_HIDDEN) : []),
+    };
+  }
+  const domainOf = (category) => (category === 'players' ? 'players' : 'mobs');
+  const filtering = (domain) => filters[domain].only !== null || filters[domain].hidden.size > 0;
+  // What an entity is filtered by: a mob by its type, a player by their
+  // gamertag as the game compares it.
+  const sortOf = (category, name, type) => (category === 'players' ? (typeof name === 'string' ? name.toLowerCase() : '') : (typeof type === 'string' ? type : ''));
+  const passes = (category, sort) => {
+    const f = filters[domainOf(category)];
+    return f.only !== null ? f.only === sort : !f.hidden.has(sort);
+  };
+  // Whether an entity is on the map: its row is on and its kind is not
+  // filtered out. Two set lookups, which is all a frame of a thousand mobs
+  // pays for the filters.
+  const visible = (held) => shown(held.category) && passes(held.category, held.sort);
+
+  function keepFilter(domain) {
+    const f = filters[domain];
+    if (!app.layers.retain) return;
+    app.layers.retain('live', domain, filtering(domain) ? { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN) } : null);
+  }
+
   // One canvas for every marker. Leaflet's default draws each as its own
   // SVG element, which is fine for a grid and not for a thousand mobs moving
   // every second. Only this layer and those that ask for its renderer are
@@ -369,7 +410,7 @@
     playerLayer.removeLayer(held.marker);
     held.pic = pic;
     held.marker = make({ n: held.name, x: held.x, z: held.z, r: held.yaw }, 'players', pic);
-    if (shown('players')) playerLayer.addLayer(held.marker);
+    if (visible(held)) playerLayer.addLayer(held.marker);
   }
 
   // Brings every marker in line with the pictures there are now: called
@@ -461,9 +502,9 @@
       }
       if (!held) {
         const pic = category === 'players' ? headOf(e.n) : null;
-        held = { marker: make(e, category, pic), category, x: e.x, y: e.y, z: e.z, yaw: e.r, name: e.n, type: e.t, pic };
+        held = { marker: make(e, category, pic), category, sort: sortOf(category, e.n, e.t), x: e.x, y: e.y, z: e.z, yaw: e.r, name: e.n, type: e.t, pic };
         entities.set(key, held);
-        if (shown(category)) layerOf(category).addLayer(held.marker);
+        if (visible(held)) layerOf(category).addLayer(held.marker);
         added = true;
         return;
       }
@@ -507,10 +548,31 @@
   }
 
   function count() {
-    const totals = { players: 0, hostile: 0, passive: 0, villager: 0, other: 0 };
     if (rows === null) return;
-    for (const held of entities.values()) totals[held.category] += 1;
-    for (const [category, n] of Object.entries(totals)) rows[category].setCount(stale ? null : n);
+    // category -> sort -> { n, name }, where name is a player's gamertag
+    // as they write it.
+    const tally = {};
+    const totals = {};
+    const drawn = {};
+    for (const [id] of LAYERS) {
+      tally[id] = new Map();
+      totals[id] = 0;
+      drawn[id] = 0;
+    }
+    for (const held of entities.values()) {
+      totals[held.category] += 1;
+      if (passes(held.category, held.sort)) drawn[held.category] += 1;
+      const of = tally[held.category];
+      const entry = of.get(held.sort);
+      if (entry) entry.n += 1;
+      else of.set(held.sort, { n: 1, name: held.name });
+    }
+    for (const [category] of LAYERS) {
+      rows[category].setCount(stale ? null : totals[category]);
+      const cut = !stale && drawn[category] < totals[category];
+      rows[category].setNote(cut ? `Showing ${fmt(drawn[category])} of ${fmt(totals[category])}: filtered ${category === 'players' ? 'by player' : 'by type'}` : '');
+      breakdowns[category].show(stale ? new Map() : tally[category]);
+    }
   }
 
   function onFrame(frame) {
@@ -688,15 +750,200 @@
     el.pause.classList.toggle('paused', control.paused);
   }
 
-  function toggle(category, on) {
+  // Puts on the map exactly the markers that should be there now, after a
+  // row or a filter has changed. A frame never needs this: each entity is
+  // placed once, when it first appears.
+  function refilter() {
+    let added = false;
     for (const held of entities.values()) {
-      if (held.category !== category) continue;
-      if (on) layerOf(category).addLayer(held.marker); else layerOf(category).removeLayer(held.marker);
+      const layer = layerOf(held.category);
+      const want = visible(held);
+      if (want === layer.hasLayer(held.marker)) continue;
+      if (want) layer.addLayer(held.marker); else layer.removeLayer(held.marker);
+      added = added || want;
     }
-    if (on) playerLayer.eachLayer((marker) => marker.bringToFront());
+    if (added) playerLayer.eachLayer((marker) => marker.bringToFront());
+    count();
     ring();
+    paintCard();
     document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
+
+  function setFilter(domain, change) {
+    change(filters[domain]);
+    keepFilter(domain);
+    refilter();
+  }
+
+  // The list under one row: what it holds, most first, each with a switch
+  // and a way to see it alone. Built once and brought up to date in place,
+  // so that a count changing every second never rebuilds what the viewer
+  // is pointing at. Every name is set as text: a gamertag is a player's
+  // choice, and a type is the server's word.
+  function breakdown(category) {
+    const players = category === 'players';
+    const domain = domainOf(category);
+    const node = document.createElement('div');
+    node.className = 'breakdown';
+    const filtered = document.createElement('p');
+    filtered.className = 'filtered';
+    filtered.hidden = true;
+    const filteredWhat = document.createElement('span');
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'mini';
+    reset.textContent = players ? 'Show all players' : 'Show all types';
+    filtered.append(filteredWhat, reset);
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    const narrow = document.createElement('input');
+    narrow.type = 'search';
+    narrow.maxLength = 64;
+    narrow.placeholder = players ? 'Filter players' : 'Filter types';
+    narrow.setAttribute('aria-label', players ? 'Narrow the list of players' : `Narrow the list of ${category} types`);
+    const list = document.createElement('ul');
+    details.append(summary, narrow, list);
+    node.append(filtered, details);
+
+    const kept = app.layers.recall ? app.layers.recall('live', `${category}-open`) : null;
+    details.open = typeof kept === 'boolean' ? kept : players;
+    details.addEventListener('toggle', () => {
+      if (app.layers.retain) app.layers.retain('live', `${category}-open`, details.open);
+    });
+
+    // sort -> { item, box, name, count, label }
+    const items = new Map();
+    let order = '';
+    let last = new Map();
+
+    const titleOf = (sort, entry) => (players ? (entry && entry.name) || sort || 'Player' : names.entity(sort));
+
+    function narrowed() {
+      const want = narrow.value.trim().toLowerCase();
+      for (const it of items.values()) it.item.hidden = want !== '' && !it.label.toLowerCase().includes(want);
+    }
+
+    function entryFor(sort) {
+      const item = document.createElement('li');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.addEventListener('change', () => setFilter(domain, (f) => {
+        if (f.only !== null) {
+          // Leaving "only this" by a switch: everything else that is here
+          // stays hidden, and the switch does what it says.
+          for (const other of sortsHere(domain)) if (other !== f.only) f.hidden.add(other);
+          f.only = null;
+        }
+        if (box.checked) f.hidden.delete(sort); else f.hidden.add(sort);
+      }));
+      let name;
+      if (players) {
+        name = document.createElement('button');
+        name.type = 'button';
+        name.className = 'name who';
+        name.title = 'Go to this player';
+        name.addEventListener('click', () => {
+          for (const [key, held] of entities) {
+            if (held.category !== 'players' || held.sort !== sort) continue;
+            if (app.go) app.go(pictured, held.x, held.z);
+            pick(key);
+            return;
+          }
+        });
+      } else {
+        name = document.createElement('span');
+        name.className = 'name';
+      }
+      const tallied = document.createElement('span');
+      tallied.className = 'count';
+      const only = document.createElement('button');
+      only.type = 'button';
+      only.className = 'mini';
+      only.textContent = 'Only';
+      only.addEventListener('click', () => setFilter(domain, (f) => {
+        // Pressed on the one already alone, it lets the rest back.
+        const alone = f.only === sort;
+        f.hidden.clear();
+        f.only = alone ? null : sort;
+      }));
+      const label = document.createElement('label');
+      label.append(box, players ? '' : name);
+      item.append(label, ...(players ? [name] : []), tallied, only);
+      const it = { item, box, name, count: tallied, only, label: '' };
+      items.set(sort, it);
+      return it;
+    }
+
+    function show(tally) {
+      last = tally;
+      const f = filters[domain];
+      // What is alone is listed even while none of it is about, or there
+      // would be nothing to say what the map is waiting for.
+      const sorts = new Map(tally);
+      if (f.only !== null && !sorts.has(f.only) && (players || categoryOf.get(f.only) === category || (category === 'other' && !categoryOf.has(f.only)))) {
+        sorts.set(f.only, { n: 0, name: f.only });
+      }
+      for (const sort of [...items.keys()]) {
+        if (sorts.has(sort)) continue;
+        items.get(sort).item.remove();
+        items.delete(sort);
+      }
+      for (const [sort, entry] of sorts) {
+        const it = items.get(sort) || entryFor(sort);
+        const label = titleOf(sort, entry);
+        if (it.label !== label) {
+          it.label = label;
+          it.name.textContent = label;
+          it.box.setAttribute('aria-label', `Show ${label}`);
+          it.only.setAttribute('aria-label', `Show only ${label}`);
+        }
+        say(it.count, fmt(entry.n));
+        const on = passes(category, sort);
+        if (it.box.checked !== on) it.box.checked = on;
+        it.only.setAttribute('aria-pressed', String(f.only === sort));
+      }
+      // Most first. Left as it is while the viewer is in the list: a row
+      // that moves from under the pointer is a wrong click.
+      const wanted = [...sorts].sort((a, b) => b[1].n - a[1].n || titleOf(a[0], a[1]).localeCompare(titleOf(b[0], b[1]))).map(([sort]) => sort);
+      const key = wanted.join('\n');
+      const busy = list.matches(':hover') || list.contains(document.activeElement);
+      if (key !== order && (!busy || list.children.length !== wanted.length)) {
+        order = key;
+        for (const sort of wanted) list.append(items.get(sort).item);
+      }
+      narrowed();
+      say(summary, `${players ? 'By player' : 'By type'} (${fmt(sorts.size)})`);
+      narrow.hidden = sorts.size <= 6;
+      details.hidden = sorts.size === 0 || !shown(category);
+      const cut = filtering(domain) && shown(category);
+      filtered.hidden = !cut;
+      node.hidden = details.hidden && !cut;
+      if (cut) say(filteredWhat, f.only !== null ? `Only ${players ? (last.get(f.only) || {}).name || f.only : names.entity(f.only)} is shown. ` : `${fmt(f.hidden.size)} hidden. `);
+    }
+
+    narrow.addEventListener('input', narrowed);
+    // Not a search to submit, and not an Escape for the card.
+    narrow.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || narrow.value === '') return;
+      e.stopPropagation();
+      narrow.value = '';
+      narrowed();
+    });
+    reset.addEventListener('click', () => setFilter(domain, (f) => {
+      f.only = null;
+      f.hidden.clear();
+    }));
+    return { node, show, again: () => show(last) };
+  }
+
+  // Every sort of a domain that is in the picture now.
+  function sortsHere(domain) {
+    const out = new Set();
+    for (const held of entities.values()) if (domainOf(held.category) === domain) out.add(held.sort);
+    return out;
+  }
+
+  const breakdowns = {};
 
   // Puts the layer's rows in the panel while the service has a live layer
   // and takes them out while it does not.
@@ -710,7 +957,9 @@
     rows = {};
     LAYERS.forEach(([id, label], at) => {
       rows[id] = app.layers.register({ group: 'live', id, label, order: (at + 1) * 10, swatch: `dot ${id}` });
-      rows[id].onToggle((on) => toggle(id, on));
+      rows[id].onToggle(refilter);
+      if (!breakdowns[id]) breakdowns[id] = breakdown(id);
+      rows[id].setBody(breakdowns[id].node);
     });
   }
 
@@ -764,7 +1013,7 @@
     const found = picked && picked.state === 'live' ? entities.get(picked.key) : null;
     // A layer switched off takes its markers off the map, and a ring left
     // behind would circle nothing. The card goes on reporting the entity.
-    const held = found && shown(found.category) ? found : null;
+    const held = found && visible(found) ? found : null;
     if (!held) {
       if (savedOnly() && picked.dimension === app.dimension() && Number.isFinite(picked.x) && Number.isFinite(picked.z)) {
         halo.setLatLng([picked.z, picked.x]);
@@ -896,6 +1145,11 @@
     } else if (control.paused) {
       what = 'Paused.';
       when = `Position is from ${ago} ago.`;
+    } else if (picked.state === 'live' && entities.has(picked.key) && !visible(entities.get(picked.key))) {
+      // Still tracked, and still followed if it was: the card says why
+      // there is nothing on the map where it points.
+      what = shown(picked.category) ? `Hidden on the map by your ${picked.category === 'players' ? 'player' : 'type'} filter.` : 'Hidden on the map: its layer is switched off.';
+      when = picked.follow ? 'Still followed.' : 'Still tracked.';
     }
     card.root.classList.toggle('adrift', what !== '');
     card.note.hidden = what === '';
@@ -1124,6 +1378,7 @@
   document.addEventListener('mcmap:names', () => {
     if (mobLayer.isTooltipOpen()) mobLayer.getTooltip().update();
     paintCard();
+    for (const list of Object.values(breakdowns)) list.again();
   });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
