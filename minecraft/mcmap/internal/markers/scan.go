@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -80,6 +81,11 @@ type Marker struct {
 	Trapped bool `json:"t,omitempty"`
 	// Baby is set on a named mob the world records as not grown.
 	Baby bool `json:"b,omitempty"`
+	// ID is a named mob's own id, as the live layer reports the same mob
+	// while it is loaded, so that the two are known to be one animal
+	// without going by its name or where it stands. It is left out where
+	// the world does not say.
+	ID string `json:"i,omitempty"`
 }
 
 // More is how many markers of each kind a dimension has beyond its limit.
@@ -381,6 +387,7 @@ func (s *scan) actor(k, v []byte) {
 		x, y, z    float64
 		placed     bool
 		baby       bool
+		id         string
 	)
 	if _, err := fields(v, func(tagName []byte, tag byte, payload []byte) {
 		switch string(tagName) {
@@ -393,6 +400,12 @@ func (s *scan) actor(k, v []byte) {
 		case "IsBaby":
 			flag, _ := intOf(tag, payload)
 			baby = flag != 0
+		case "UniqueID":
+			// The game's scripts report an entity's id as this number
+			// written out, which is what the live layer passes on.
+			if tag == tagLong {
+				id = strconv.FormatInt(int64(binary.LittleEndian.Uint64(payload)), 10)
+			}
 		}
 	}); err != nil {
 		s.skipped++
@@ -413,7 +426,7 @@ func (s *scan) actor(k, v []byte) {
 	}
 	s.named[[8]byte(k[len(actorPrefix):])] = Marker{
 		X: int32(math.Floor(x)), Y: int32(math.Floor(y)), Z: int32(math.Floor(z)),
-		Kind: cleanKind(kind), Name: name, Baby: baby,
+		Kind: cleanKind(kind), Name: name, Baby: baby, ID: id,
 	}
 }
 
