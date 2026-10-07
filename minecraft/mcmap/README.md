@@ -287,8 +287,8 @@ repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
   an icon. The 39 that do not are not mobs (boats, minecarts, armour
   stands, projectiles) or have no egg.
 - **What is asked for**: one directory listing from `api.github.com`, then
-  the atlas, about 180 definitions, about 90 spawn-egg textures, 42 marker
-  textures and the language file from `raw.githubusercontent.com`: 317
+  the atlas, about 180 definitions, about 90 spawn-egg textures, 44 marker
+  textures and the language file from `raw.githubusercontent.com`: 319
   requests and 1.6 MB in all, in under ten seconds. No
   redirect is followed, each file has a size limit and the whole fetch a
   count, byte and time limit, and every texture must decode as a PNG of at
@@ -421,7 +421,7 @@ markers at the moment it is asked for, so that with the samples out of
 reach, when nothing else says which types exist, each one in view still
 has a tidied name.
 
-**Marker pictures** are 42 small PNGs, by key:
+**Marker pictures** are 44 small PNGs, by key:
 
 | Key | Source under `resource_pack/textures/` | Why that one |
 |---|---|---|
@@ -435,6 +435,8 @@ has a tidied name.
 | `structure/outpost` | `items/crossbow_standby` | The pillagers' weapon; their banner has no flat texture |
 | `structure/witch_hut` | `items/cauldron` | Every hut has one |
 | `structure/village` | `items/villagebell` | Every village's meeting point has one |
+| `structure/stronghold` | `items/ender_eye` | What finds one, and what lights its portal |
+| `structure/trial_chamber` | `items/trial_key` | What a chamber's vaults are opened with |
 
 A structure has no item of its own, so each is a vanilla item that could
 stand for nothing else on this map. Items are used rather than blocks
@@ -596,8 +598,11 @@ known structure's picture sits on a solid square framed in the kind's
 colour, over the box the world recorded; a predicted one's in a hollow,
 dashed circle; a possible one's in a dotted circle, faint until the pointer
 is on it. Until a picture is there its place is taken by the kind's
-letter, as F, M, O, H or V. A kind this page has no row for is still
-named, by its id made into words.
+letter, as F, M, O, H, V, S or T. A kind this page has no row for is still
+named, by its id made into words. A stronghold and a trial chamber are
+known another way, [by their blocks](#found-by-their-blocks): the box is
+dashed, and the tooltip says `found by its blocks` where another says
+`recorded by the world`.
 
 The panel has a row for each layer, Known, Predicted and Possible, and one
 for each kind that filters all three. A kind's row counts everything of the
@@ -625,6 +630,35 @@ counts, and `Click for details`. The sheet says:
 - for a village, every count the world keeps, or that the game has not
   counted it yet; for another kind, how many recorded spawn areas were
   joined into its box (`areas`);
+- for a recorded one, [what the save holds in it](#what-a-structure-holds),
+  asked of `/api/structures/detail` when the sheet opens and put in when
+  it comes, under a heading for what only its kind has and one for what
+  every kind has:
+  - a village: its grown villagers by profession and trade level, its
+    babies, the villagers it lists that the save holds no record of, how
+    many of its golems and cats the save still holds, its claimed job
+    sites by the block each is, how long before the snapshot the game last
+    ran it, how far its raid got if it has had one, how many players it
+    has met, and what it thinks of the player looking;
+  - a monument: how many of its three elder guardians, and how many
+    guardians, are in the save inside its box;
+  - an outpost: its pillagers and how many are captains, and the allays
+    and iron golems in its box;
+  - a witch hut: its witch, its cat and its cauldron;
+  - a fortress: its blazes, wither skeletons and blaze spawners;
+  - a stronghold: whether its end portal is lit, and its silverfish
+    spawner; a trial chamber: its trial spawners by mob and its vaults,
+    ominous ones apart;
+  - every kind: the saved mobs in its box by type, each with the game's
+    picture and name, the named ones by name, its spawners by mob and
+    where each is, and its containers by kind and by whether each is
+    unopened, has something in it or is empty;
+  - and how old that is: `as of the last snapshot, 4 min ago`.
+
+  A fact the save does not hold is said so (`Not recorded by the game`,
+  `None in the save`, `No raid record`), never shown as nought. A site the
+  seed gives has none of this, and the sheet says that only a kind and a
+  place can be said of it;
 - the biome at its middle, asked of `/api/biomes/at` while the service has
   biomes, and how many of its chunks are slime chunks, in the Overworld;
 - for a recorded one, what the map already holds inside its box, counted
@@ -646,12 +680,10 @@ keeps while the sheet is open and drops when it shuts. The sheet is the
 browser's modal dialog: the focus stays in it, Escape, Close and a click
 outside shut it, and the focus goes back to the mark.
 
-A village's records hold more than is served. `POI` lists where each
-villager's bed, bell and job site are, and which villager claimed which;
-`DWELLERS` lists the villagers, golems and cats by their actor ids, from
-which a villager's profession could be read out of its own actor record;
-`PLAYERS` is what the village thinks of each player and `RAID` a raid in
-progress. Only the counts are read today, and the last two not at all.
+A village's records still hold more than is served: where each claimed
+bed, bell and job site is and which villager claimed which, the box its
+raid is fought in, and three more ticks in `INFO` whose meaning was not
+worked out. Nothing is made of those.
 
 **Known** structures are the ones this world has generated, read from its
 own save. For each chunk the server keeps the boxes in which a structure's
@@ -659,8 +691,10 @@ own mobs spawn, as that chunk's record 57: a 32-bit count, then per box six
 32-bit block coordinates (minimum x, y, z, then maximum, inclusive) and one
 byte for the kind, all little-endian. The kinds are 1 nether fortress,
 2 witch hut, 3 ocean monument and 5 pillager outpost; nothing else leaves
-such a record. Villages are kept another way and are read too, as below;
-temples and the rest are recorded nowhere and are not on this layer.
+such a record. Villages are kept another way and are read too, as below,
+and strongholds and trial chambers are [found by their
+blocks](#found-by-their-blocks); temples and the rest are recorded nowhere
+and are not on this layer.
 A box is cut at the chunk's edge, so the boxes of a kind that touch are
 joined back into one structure (fortress boxes within 32 blocks, since a
 fortress is recorded room by room). A fortress only part generated shows as
@@ -673,11 +707,15 @@ compound:
 
 | Record | Holds | Read |
 |---|---|---|
-| `INFO` | The village's box, `X0` `Y0` `Z0` to `X1` `Y1` `Z1`, and `Initialized` | Yes |
-| `DWELLERS` | `Dwellers`: four lists of `actors`; the first is villagers, the second iron golems, the fourth cats | Counts only |
-| `POI` | `POI`: per villager, the `instances` it has claimed, each a `Type` (0 bed, 1 bell, 2 job site) at `X` `Y` `Z` | Counts only |
-| `PLAYERS` | Each player's standing with the village | Never |
-| `RAID` | A raid in progress | Never |
+| `INFO` | The village's box, `X0` `Y0` `Z0` to `X1` `Y1` `Z1`, `Initialized`, and `Tick`, the game tick it was last run at | Yes |
+| `DWELLERS` | `Dwellers`: four lists of `actors`; the first is villagers, the second iron golems, the fourth cats. Each actor is an `ID`, the `UniqueID` of the mob's own record | The counts, and up to 512 ids of each for the details |
+| `POI` | `POI`: per villager, the `instances` it has claimed, each a `Type` (0 bed, 1 bell, 2 job site) at `X` `Y` `Z`; a job site's `Name` is the profession it gives | The counts, and job sites by profession |
+| `PLAYERS` | `Players`: an `ID` and `S` for each player the village has met, the player's own `UniqueID` and the village's standing for them, a whole number that starts at nought | For the details; a standing is sent only to the player it is of |
+| `RAID` | `Raid`: `GroupNum` of `NumGroups` waves, `NumRaiders`, and `GameTick`. Only a village that has had a raid has one, and the game does not take it away when the raid is over | For the details |
+
+`PLAYERS` and `RAID` decorate a village and never decide whether there is
+one: one that does not parse is counted as skipped and the village stands
+without it.
 
 `<dimension>` is `Overworld`, `Nether` or `TheEnd`. Only `Overworld` has
 been seen in a real world; the other two are the names the game gives its
@@ -686,8 +724,8 @@ as older versions of the game wrote it, is passed over, and counted by its
 `INFO` record. A village
 is drawn with the box the game recorded and carries how many villagers,
 golems and cats it lists and how many beds, bells and job sites its
-villagers have claimed, each block counted once. Nothing a player typed and
-nothing that names one is read.
+villagers have claimed, each block counted once. Nothing in the list every
+viewer is sent names a player or says anything of one.
 
 What counts as a village worth drawing:
 
@@ -721,6 +759,132 @@ inside its box, 57 villagers between them.
 This layer is not every village. The same world has 97 villagers that
 stand in no village's box, in generated villages the game has made no
 record for, and those are not known here.
+
+### What a structure holds
+
+A structure's record says where it is. What is in it is in the records of
+the things themselves, and the survey reads those in the pass it already
+makes over every key, with no second pass:
+
+- **Saved mobs.** Every mob the game has saved is one record under
+  `actorprefix`, and a chunk's `digp` record lists which are in it, which
+  is the only place a mob's dimension is written. A record is a mob if it
+  has `HurtTime`, which no item, arrow or boat has; one without the word
+  is passed over unread. Kept of each: its type, the block it stands in,
+  whether it is a baby or a raid captain, its name tag, and for a villager
+  `PreferredProfession` and `TradeTier`. A mob no chunk lists, a dead one
+  and an armour stand are not counted.
+- **Block entities.** Each chunk's record `0x31` is its block entities one
+  after another. Kept: chests, barrels, shulker boxes, dispensers and
+  droppers, with whether each still carries the `LootTable` it was
+  generated with (the game rolls it and drops the tag the first time the
+  container is opened), has `Items` or has none; decorated pots that still
+  carry one; spawners and trial spawners with the mob each spawns; vaults,
+  and whether their loot table is the ominous one; cauldrons, bells and
+  end portal blocks. What a container holds is never read, and a loot
+  table's name is never sent: the answer says `unopened`, not what is
+  inside.
+
+Once the boxes are known, each mob and block entity is set inside the
+recorded structures whose box it is in, height included. That is what
+`/api/structures/detail` answers with. A village's own records add to it:
+each villager it lists is looked up by `UniqueID` among the saved mobs,
+which is where its profession and level come from, and a villager with no
+`PreferredProfession` is counted as having none, the unemployed and the
+nitwits together since the record does not tell them apart.
+
+All of it is as old as the snapshot, and the sheet says so. The game saves
+a mob with the chunk it stood in when that was last written, so a mob that
+has since moved, died or despawned is still counted until the next
+snapshot, and one that was not in a saved chunk is not counted at all.
+`None in the save` means that and no more.
+
+**A standing is the player's own.** What a village thinks of a player is
+in `PLAYERS` under the player's `UniqueID`, which is not their XUID. The
+session holds an XUID, as it does for waypoints, and nothing in a request
+can name another player. The two are joined where both are seen at once:
+the agent reports the gamertag each XUID is online under, and the live
+layer the id the game gives the player of that gamertag, which is the
+`UniqueID`. It is remembered until the service restarts, so a player need
+only have been in the game once since then. The answer carries `standing`
+with `state` `known` and the `value`, `none` where the village has never
+met the player, or `unknown` where the map cannot yet say which record is
+theirs; with no login it is always `unknown`. No other player's standing
+or id is in any answer: a village says only how many players it has met.
+What the number means beyond higher being better is the game's business,
+and the page says only that it starts at nought.
+
+What was looked for and is not there:
+
+- **A raid in progress.** The `RAID` record outlives the raid: the one in
+  the FWB world was last run hundreds of millions of ticks before its
+  village was. So the sheet says how far a raid got and how long ago, and
+  not that one is on.
+  `State` and `Status` in it were not worked out from one example.
+- **Hero of the Village** is an effect on a player, in the player's own
+  record, which the map does not read.
+- **A village's centre and radius.** `INFO` holds the box and nothing
+  else of its shape.
+- **Sponge rooms and a monument's gold core** are plain blocks. Finding
+  them means decoding the block palettes of every slice of every
+  monument, which is not cheap, so it is left out.
+- **Pillagers at an outpost.** None of the seven outposts in the FWB
+  world has a saved mob in its box: pillagers despawn, and the thirteen
+  allays the world holds are all somewhere else. The sheet has the rows
+  and says `None in the save`.
+
+Measured on the FWB world on 2026-10-07: 2,892 saved mobs and 45,557 block
+entities kept, none skipped. All 11 monuments hold saved mobs, 8 with
+three elder guardians, 1 with two and 2 with one. 4 of 11 fortress parts
+hold blaze spawners, 7 between them, and 5 hold chests, 9 of them
+unopened. 68 of 70 villages hold saved mobs and 57 hold containers, 113
+unopened. Of the 55 counted villages 40 have villagers with a profession:
+524 grown villagers found, 291 with one, 18 babies, 7 listed with no
+record; 315 job sites; every one has its last tick, one a raid record, and
+five hold a standing for somebody, twelve between them.
+
+The bounds: 200,000 mobs and 400,000 block entities a dimension, no record
+over 8 MB or nested more than 64 deep, 2,048 type names; and in an answer
+40 types of mob, 20 named mobs and 64 spawners a structure, with 5,000
+names and 20,000 spawner positions a survey. What is left out is counted
+(`mobKindsMore`, `namedMore`, `spawnersMore`, and
+`mcmap_structures_contents_skipped`). A record that does not parse is
+skipped and counted. Setting the contents inside the boxes has ten seconds
+of its own, checked every sixteen structures; if it runs out, the
+structures are served without details and
+`mcmap_structures_detail_failures_total` counts it.
+
+### Found by their blocks
+
+Two kinds the world keeps no record of are found all the same, without the
+seed, by block entities only they are generated with and that nobody in a
+survival world can pick up and put somewhere else. They come from the same
+pass and cost nothing more.
+
+| Kind | Found by | The box |
+|---|---|---|
+| `trial_chamber` | Trial spawners and vaults. Chunks holding either are joined where they are within five chunks of each other, which is well under what the generator keeps between two chambers | Around those blocks. The chamber's corridors run on past them |
+| `stronghold` | The silverfish spawner of its portal room, or the blocks of its end portal once lit, in the Overworld. Chunks holding either are joined where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
+
+Each carries `evidence`, how many such blocks it was found from, in place
+of `areas`. The page draws its box dashed and says in the sheet that the
+box is the box around those blocks and that the structure reaches further.
+Neither is predicted, and neither is checked against the seed. On the FWB
+world: 237 trial chambers, 198 of them from ten blocks or more and 39
+from fewer, and 4 strongholds, two by
+their spawner and two by a lit portal whose spawner is gone.
+
+Looked at and left out, since each fails on certainty or on what could be
+said of its extent:
+
+| Kind | Evidence there is | Why not |
+|---|---|---|
+| Mineshaft | Cave spider spawners (3,192) and loot minecarts | Certain, but a mineshaft with no spider corridor leaves nothing, the spawners say nothing of its extent, and there would be over a thousand marks. The spawners are in the details of whatever box they lie in |
+| Dungeon | Zombie, skeleton and spider spawners (5,278) | Certain and exact, but a room of one spawner is not a major structure, and five thousand of them would bury the layer |
+| Ancient city | Sculk shriekers, catalysts and sensors | Not certain: the deep dark generates the same blocks with no city, and a catalyst spreads more. Its chests name it only until opened |
+| Bastion | A magma cube spawner, in the treasure room | Only one bastion type in four has one; the other three leave nothing but loot tables that go when a chest is opened |
+| End city | Shulkers | A mob, not a block: it can be killed or carried off, so a cleared city vanishes and a shulker farm appears as one |
+| Ruined portal, shipwreck, temple, igloo | Loot tables on their chests | Gone the first time each chest is opened |
 
 **Predicted** structures are worked out from the seed. The generator cuts
 the world into regions, a grid per kind, and gives each region one site at
@@ -879,6 +1043,16 @@ a failure like any other: stopping part way would show whichever villages
 sorted first as all there are. Villages share the 2,000 known structures a
 dimension is sent, after the other kinds, the most lived-in first.
 
+Reading what the structures hold added nothing that could be measured to
+the survey's time: sixteen runs each way on one CPU against the FWB world
+came to 8.64 seconds with it and 8.79 without, the difference being less
+than the spread. It walks 35 MB of actor records and 19 MB of block
+entities in place, from the values the pass has in hand already, and
+allocates nothing for a record it does not keep; setting the contents
+inside 341 boxes takes 6 milliseconds. Peak memory for the survey alone
+went from about 60 MB to about 67 MB. In about one run in ten a single
+collection ran late and the peak was near 130 MB for a moment.
+
 To check the rules again after a game update, against a copy of a world:
 
 ```sh
@@ -890,7 +1064,8 @@ shares in the table above and how many sites it would offer. With
 `MCMAP_STRUCTURE_SEED` set it uses that seed. It prints neither the seed
 nor where anything is predicted, since a few sites and the rule that made
 them are the seed; the recorded structures it does print are the world's
-own.
+own. `-run RealWorldDetails` prints what the save holds in the structures
+instead, as counts for each kind and never a place or a name.
 
 ## Biomes
 
@@ -1872,7 +2047,8 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The marker or structure picture with the key `{group}/{name}` as a PNG, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
-| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel`, `shulker`, `dispenser`, `dropper` or `pot`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, those there are); `elders` for a monument; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
@@ -1931,7 +2107,7 @@ opens at the same place.
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
 | `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume, or that `ICONS_ENABLED=false` |
-| `mcmap_icons_marker_pictures` | Marker and structure pictures held, 42 when whole. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
+| `mcmap_icons_marker_pictures` | Marker and structure pictures held, 44 when whole. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
 | `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 | `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind,certainty}` | Structures on each layer at the last survey; `certainty` is `predicted`, or `candidate` for a site in terrain not generated yet |
@@ -1941,6 +2117,8 @@ opens at the same place.
 | `mcmap_structures_areas_skipped{reason}` | Recorded boxes left out: `malformed`, `unknown` (a kind this version does not know), `limit` |
 | `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total` | Whether the survey is running |
 | `mcmap_structures_villages_skipped{reason}` | Villages left out: `empty` (counted by the game, no villagers), `malformed`, `unknown` (a key this version does not know), `limit` |
+| `mcmap_structures_contents{sort}`, `mcmap_structures_contents_skipped{reason}` | Saved mobs and block entities the last survey kept to set inside structures, `sort` being `mob` or `block`; and what it left out: `malformed` (an actor, block entity, or a village's `PLAYERS` or `RAID` record that did not parse), `limit` |
+| `mcmap_structures_detail_duration_seconds`, `mcmap_structures_detail_failures_total` | How long setting those inside the structures took; surveys that ran out of time doing it and were served without details |
 | `mcmap_structures_village_read_duration_seconds`, `mcmap_structures_village_read_failures_total`, `mcmap_structures_villages_last_success_timestamp_seconds` | How long the village records took to read; surveys that could not read them and kept the villages of the one before; and the snapshot the villages being served came from |
 | `mcmap_biomes_chunks{dimension}` | Chunks whose biomes are held |
 | `mcmap_biomes_kinds{listed}` | Different biomes held, `known` to this version's list or `unknown`. Unknown above zero means the list is behind the game |
