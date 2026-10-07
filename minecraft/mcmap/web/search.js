@@ -204,37 +204,54 @@
 
   const myName = () => (app.myName ? app.myName() : '');
 
-  // What was typed, as { hits } for a place that needs no looking up,
-  // { note } for shorthand that cannot be answered, { query, kind } for a
-  // search kept to one kind, or null for an ordinary search.
+  // What shorthand was typed, or null for none. top is the places that need
+  // no looking up; ask is the one kind of thing to ask the server for, to
+  // be listed first; note is said under the list; none is said when ask
+  // finds nothing. only is set where the shorthand is the whole question,
+  // as @name is: everything else is also looked up as the name it may be,
+  // since a waypoint may be called Spawn farm and a container "12 34", and
+  // those are listed beneath.
   function shorthand(typed) {
     const dimension = app.dimension();
     const at = app.coordinates ? app.coordinates(typed) : null;
     if (at) {
       const hit = { kind: 'coordinates', dimension, x: Math.floor(at.x), z: Math.floor(at.z) };
       if (Number.isFinite(at.y)) hit.y = Math.floor(at.y);
-      return { hits: [hit] };
+      return { top: [hit] };
     }
     const chunk = /^chunk\s+([+-]?\d{1,7})[\s,]+([+-]?\d{1,7})$/i.exec(typed);
     if (chunk) {
       const cx = Number(chunk[1]);
       const cz = Number(chunk[2]);
       // Listed at its middle, which is where the map goes.
-      return { hits: [{ kind: 'chunk', dimension, cx, cz, x: cx * CHUNK + CHUNK / 2, z: cz * CHUNK + CHUNK / 2 }] };
+      return { top: [{ kind: 'chunk', dimension, cx, cz, x: cx * CHUNK + CHUNK / 2, z: cz * CHUNK + CHUNK / 2 }] };
     }
     if (/^chunk\b/i.test(typed)) return { note: 'For a chunk, type its two chunk coordinates: chunk 7 -21.' };
-    if (/^spawn$/i.test(typed)) return { query: 'world spawn', kind: 'spawn', none: 'This world’s spawn is not known yet.' };
+    if (/^spawn$/i.test(typed)) return { ask: { query: 'world spawn', kind: 'spawn' }, none: 'This world’s spawn is not known yet.' };
     if (/^me$/i.test(typed)) {
       const name = myName();
       if (!name) return { note: 'The map does not know which player you are, so it cannot find you.' };
-      return { query: name, kind: 'player', mine: true, none: 'You are not online in the game right now.' };
+      return { ask: { query: name, kind: 'player', mine: true }, none: 'You are not online in the game right now.' };
     }
     if (typed.startsWith('@')) {
       const name = typed.slice(1).trim();
-      if (name === '') return { note: 'Type a gamertag after the @ to look among the players online.' };
-      return { query: name, kind: 'player', none: `No player online is called “${name}”.` };
+      if (name === '') return { only: true, note: 'Type a gamertag after the @ to look among the players online.' };
+      return { only: true, ask: { query: name, kind: 'player' }, none: `No player online is called “${name}”.` };
     }
     return null;
+  }
+
+  // What tells one hit from another, so that the world spawn listed first
+  // for "spawn" is not listed again among everything called spawn.
+  const identity = (hit) => `${hit.kind}|${hit.dimension}|${hit.x}|${hit.z}|${str(hit.id)}`;
+
+  // The hits a shorthand asks the server for. "me" is the one player the
+  // session is, and nobody whose gamertag merely holds the same letters.
+  async function first(short, mine) {
+    if (!short || !short.ask) return [];
+    const answer = await ask(short.ask.query, short.ask.kind, mine);
+    if (!answer) return [];
+    return short.ask.mine ? answer.list.filter((h) => app.isMe && app.isMe(h.name)) : answer.list;
   }
 
   // Asks the server, for everything or for one kind, and gives back the
@@ -260,37 +277,35 @@
     if (request) request.abort();
     request = null;
     const short = shorthand(typed);
-    if (short && short.hits) {
-      show(short.hits, '', typed);
-      return;
-    }
-    if (short && short.note) {
+    if (short && short.only && !short.ask) {
       show([], short.note, typed);
       return;
     }
-    const query = short ? short.query : typed;
-    const dimension = app.dimension();
-    if (!dimension) return;
+    // A place that needs no looking up is listed at once, and the rest
+    // joins it when it arrives.
+    const top = short && short.top ? short.top : [];
+    if (top.length > 0) show(top, '', typed);
+    if (!app.dimension()) return;
     const mine = new AbortController();
     request = mine;
-    let answer;
-    try {
-      answer = await ask(query, short ? short.kind : '', mine);
-    } catch {
-      if (request !== mine) return; // superseded
-      request = null;
-      show([], 'The search could not be run. Try again in a moment.', typed);
-      return;
-    }
-    if (request !== mine || !answer) return;
+    // Each half is worth showing without the other.
+    const [asked, ordinary] = await Promise.allSettled([first(short, mine), short && short.only ? null : ask(typed, '', mine)]);
+    if (request !== mine) return; // superseded
     request = null;
-    const { data } = answer;
-    // "me" is the one player the session is, and nobody whose gamertag
-    // merely holds the same letters.
-    const list = short && short.mine ? answer.list.filter((h) => app.isMe && app.isMe(h.name)) : answer.list;
+    const found = [...top, ...(asked.status === 'fulfilled' ? asked.value : [])];
+    const listed = new Set(found.map(identity));
+    const rest = ordinary.status === 'fulfilled' && ordinary.value ? ordinary.value.list.filter((h) => !listed.has(identity(h))) : [];
+    const data = ordinary.status === 'fulfilled' && ordinary.value ? ordinary.value.data : {};
+    const list = [...found, ...rest];
     const notes = [];
-    if (list.length === 0) notes.push(short ? short.none : `Nothing on the map is called “${typed}”.`);
-    if (data.more > 0 && !(short && short.mine)) notes.push(`${fmt(data.more)} more not shown. Type more to narrow it down.`);
+    if (short && short.note) notes.push(short.note);
+    if (short && short.ask && asked.status === 'fulfilled' && asked.value.length === 0) notes.push(short.none);
+    if (asked.status === 'rejected' || ordinary.status === 'rejected') {
+      notes.push(list.length > 0 ? 'The rest of the search could not be run. Try again in a moment.' : 'The search could not be run. Try again in a moment.');
+    } else if (list.length === 0 && notes.length === 0) {
+      notes.push(`Nothing on the map is called “${typed}”.`);
+    }
+    if (data.more > 0) notes.push(`${fmt(data.more)} more not shown. Type more to narrow it down.`);
     if (data.waypoints === 'unavailable') notes.push('Your waypoints could not be searched just now.');
     show(list, notes.join(' '), typed);
   }
@@ -335,30 +350,28 @@
     foundTimer = setTimeout(unmark, FOUND_MS);
   }
 
-  function choose(at) {
-    const hit = hits[at];
-    if (!hit) return;
-    open(false);
+  // Takes the map to a hit and does whatever goes with its kind, and
+  // says whether it could: a dimension not rendered yet cannot be shown.
+  // It knows nothing of the list, so that a shortcut can go somewhere
+  // without the list being touched.
+  function visit(hit) {
     if (hit.kind === 'chunk' && app.chunk && hit.dimension === app.dimension()) {
       // The chunk's own script goes there, pins it and shows the grid.
       unmark();
       app.chunk.go(hit.cx, hit.cz);
       map.getContainer().focus();
-      return;
+      return true;
     }
     // The middle of the block, not its north-west corner.
     const middle = hit.kind === 'chunk' ? 0 : 0.5;
-    if (!app.go(hit.dimension, hit.x + middle, hit.z + middle)) {
-      show(hits, `${app.label(hit.dimension)} has not been rendered yet, so the map cannot go there.`);
-      return;
-    }
+    if (!app.go(hit.dimension, hit.x + middle, hit.z + middle)) return false;
     // A player or a mob moves, so it is marked by the card that tracks it
     // and not by a ring on where it was when the list was made.
     if ((hit.kind === 'player' || hit.kind === 'mob') && app.inspect) {
       unmark();
       app.inspect.open({
         kind: hit.kind, id: str(hit.id) || null, name: str(hit.name), type: str(hit.detail), baby: hit.baby === true,
-        x: hit.x + 0.5, y: hit.y, z: hit.z + 0.5, dimension: hit.dimension,
+        x: hit.x + 0.5, y: hit.y, z: hit.z + 0.5, dimension: hit.dimension, live: hit.live === true,
         saved: hit.kind === 'mob' && hit.live !== true, savedAt: app.markers ? app.markers.savedAt() : null,
       });
     } else {
@@ -366,13 +379,24 @@
     }
     // The stretch found is the one to look at, so the rest is dimmed.
     if (hit.kind === 'biome' && app.biomes) app.biomes.show(str(hit.detail));
+    // The keyboard goes back to the map, and a phone puts its own away,
+    // before anything opens over it.
+    map.getContainer().focus();
     // A structure is shown in full, as a click on its mark would show it.
     if (hit.kind === 'structure' && app.structures) {
       app.structures.show({ kind: str(hit.detail), recorded: !Object.hasOwn(UNSURE, hit.certainty), x: hit.x, z: hit.z, dimension: hit.dimension });
-      return;
     }
-    // The keyboard goes back to the map, and a phone puts its own away.
-    map.getContainer().focus();
+    return true;
+  }
+
+  const unrendered = (hit) => `${app.label(hit.dimension)} has not been rendered yet, so the map cannot go there.`;
+
+  function choose(at) {
+    const hit = hits[at];
+    if (!hit) return;
+    open(false);
+    // The list is put back as it was, every row still to be chosen.
+    if (!visit(hit)) show(hits, unrendered(hit));
   }
 
   el.box.addEventListener('input', () => {
@@ -464,25 +488,21 @@
     },
     async jump(what) {
       const short = shorthand(what);
-      if (!short || !short.query) {
+      if (!short || !short.ask) {
         if (short && short.note && app.tell) app.tell(short.note);
         return;
       }
-      const mine = new AbortController();
-      let answer = null;
-      try { answer = await ask(short.query, short.kind, mine); } catch { /* said below */ }
-      if (!answer) {
+      // A request and an answer of its own: what the box lists, and which
+      // of it the keyboard is on, are not this shortcut's to change.
+      let found = null;
+      try { found = await first(short, new AbortController()); } catch { /* said below */ }
+      if (found === null) {
         if (app.tell) app.tell('That could not be looked up just now. Try again in a moment.');
-        return;
-      }
-      const list = short.mine ? answer.list.filter((h) => app.isMe && app.isMe(h.name)) : answer.list;
-      if (list.length === 0) {
+      } else if (found.length === 0) {
         if (app.tell) app.tell(short.none);
-        return;
+      } else if (!visit(found[0]) && app.tell) {
+        app.tell(unrendered(found[0]));
       }
-      hits = list;
-      choose(0);
-      hits = [];
     },
   };
 

@@ -194,14 +194,36 @@ func TestSearchShorthandGoesToPlacesAndWritesNoCommands(t *testing.T) {
 	js := read(t, "search.js")
 	for _, need := range []string{
 		"const at = app.coordinates ? app.coordinates(typed) : null;",
-		"if (/^spawn$/i.test(typed)) return { query: 'world spawn', kind: 'spawn',",
-		"return { query: name, kind: 'player', mine: true,",
+		"if (/^spawn$/i.test(typed)) return { ask: { query: 'world spawn', kind: 'spawn' },",
+		"return { ask: { query: name, kind: 'player', mine: true },",
+		// Only @name is the whole question. Everything else typed is also
+		// looked up as the name it may be, and listed beneath.
+		"short && short.only ? null : ask(typed, '', mine)",
+		"const list = [...found, ...rest];",
 		"if (typed.startsWith('@')) {",
-		"const list = short && short.mine ? answer.list.filter((h) => app.isMe && app.isMe(h.name)) : answer.list;",
+		"return short.ask.mine ? answer.list.filter((h) => app.isMe && app.isMe(h.name)) : answer.list;",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("search.js no longer has %s", need)
 		}
+	}
+	// Shorthand that is the whole question is said so in one place only.
+	if n := bytes.Count(js, []byte("only: true")); n != 2 {
+		t.Errorf("search.js makes %d kinds of shorthand the whole question, want the two forms of @name", n)
+	}
+	// A shortcut goes to a place with a request and an answer of its own:
+	// the list in the box, and the rows in it, are not its to replace.
+	jump := regexp.MustCompile(`(?s)async jump\(what\) \{.*?\n    \},`).Find(js)
+	if jump == nil {
+		t.Fatal("search.js no longer has jump(); the pattern no longer matches the script")
+	}
+	for _, shared := range []string{"hits =", "show(", "choose(", "request ="} {
+		if bytes.Contains(jump, []byte(shared)) {
+			t.Errorf("search.js jump() uses %s, which is the result list's own state", shared)
+		}
+	}
+	if !regexp.MustCompile(`function choose\(at\) \{\s*const hit = hits\[at\];\s*if \(!hit\) return;\s*open\(false\);[^}]*if \(!visit\(hit\)\) show\(hits, unrendered\(hit\)\);\s*\}`).Match(js) {
+		t.Error("search.js no longer puts the list back, whole, when the map cannot go to the hit chosen")
 	}
 	for _, name := range []string{"search.js", "menu.js", "chunk.js", "live.js", "app.js", "index.html"} {
 		body := read(t, name)
