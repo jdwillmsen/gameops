@@ -1351,6 +1351,8 @@
 
   app.playerColour = playerColour;
   app.isMe = isMe;
+  // The session's own gamertag, in lower case, or '' while it is not known.
+  app.myName = () => listedAs || me || '';
   app.inspect = {
     open: inspect,
     shut,

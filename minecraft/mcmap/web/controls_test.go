@@ -144,3 +144,60 @@ func TestFooterGroupsItsTimersUnderLabels(t *testing.T) {
 		}
 	}
 }
+
+// A shortcut is a single key, so it must never fire from anything that
+// takes text, must leave the browser's and a screen reader's own keys
+// alone, and must be something the viewer can switch off.
+func TestShortcutsStayOutOfTheWayOfTyping(t *testing.T) {
+	js := usesNoMarkupSink(t, "menu.js")
+	for _, need := range []string{
+		"if (!enabled || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;",
+		"if (document.body.classList.contains('locked') || typing(e.target)) return;",
+		"node.matches('input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])') || node.closest('dialog[open]') !== null",
+		"if (!node || node.disabled || node.closest('[hidden]')) return false;",
+		"el.dialog.showModal();",
+		"if (e.target === el.dialog) el.dialog.close();",
+		"localStorage.setItem(KEY, JSON.stringify({ on: enabled }));",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("menu.js no longer has %s", need)
+		}
+	}
+	// Every key the script acts on is in the list the viewer is shown.
+	page := read(t, "index.html")
+	for _, key := range regexp.MustCompile(`(?m)^    '?([a-z0-9/?+-])'?: \(\) =>`).FindAllSubmatch(js, -1) {
+		shown := bytes.ToUpper(key[1])
+		if !bytes.Contains(page, append(append([]byte("<kbd>"), shown...), []byte("</kbd>")...)) {
+			t.Errorf("menu.js acts on %s, which the list in index.html does not show", key[1])
+		}
+	}
+	if !regexp.MustCompile(`<button id="help-open"[^>]*aria-haspopup="dialog"[^>]*aria-label="Keyboard shortcuts and search tips"`).Match(page) ||
+		!bytes.Contains(page, []byte(`<dialog id="help" class="sheet" aria-labelledby="help-title">`)) {
+		t.Error("index.html has no labelled button that opens the shortcuts dialog")
+	}
+}
+
+// What the search box takes besides a name goes to a place on the map and
+// nowhere else: nothing typed there becomes a command for the game.
+func TestSearchShorthandGoesToPlacesAndWritesNoCommands(t *testing.T) {
+	js := read(t, "search.js")
+	for _, need := range []string{
+		"const at = app.coordinates ? app.coordinates(typed) : null;",
+		"if (/^spawn$/i.test(typed)) return { query: 'world spawn', kind: 'spawn',",
+		"return { query: name, kind: 'player', mine: true,",
+		"if (typed.startsWith('@')) {",
+		"const list = short && short.mine ? answer.list.filter((h) => app.isMe && app.isMe(h.name)) : answer.list;",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("search.js no longer has %s", need)
+		}
+	}
+	for _, name := range []string{"search.js", "menu.js", "chunk.js", "live.js", "app.js", "index.html"} {
+		body := read(t, name)
+		for _, command := range []string{"/tp ", "/teleport", "/locate", "/give ", "/summon", "/gamemode"} {
+			if bytes.Contains(body, []byte(command)) {
+				t.Errorf("%s writes the game command %s", name, command)
+			}
+		}
+	}
+}

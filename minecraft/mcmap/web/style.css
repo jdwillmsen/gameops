@@ -487,8 +487,57 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .unseen { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .inspect-actions button { flex: 1; padding-inline: 0.4rem; white-space: nowrap; }
 
+/* A sheet over the page: the list of shortcuts, and any other view that
+   takes the page while it is open. The browser's own dialog keeps the
+   focus inside it, shuts on Escape and gives the focus back. */
+.sheet {
+  width: min(34rem, calc(100vw - 1rem));
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  padding: 0.9rem 1.1rem 1.1rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.sheet::backdrop { background: rgba(11, 12, 14, 0.6); }
+.sheet-head { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.5rem; }
+.sheet-head h2 { flex: 1; margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.sheet h3 { margin: 0.9rem 0 0.35rem; font-size: 0.95rem; color: var(--dim); font-weight: 600; }
+.keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 0.9rem; margin: 0; align-items: baseline; }
+.keys dt { white-space: nowrap; }
+.keys dd { margin: 0; }
+kbd, .keys code {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  font: 600 0.9em ui-monospace, "Cascadia Mono", Consolas, monospace;
+  text-align: center;
+}
+.help-open { font-weight: 700; min-width: 2rem; }
+/* A sentence over the map for a moment, where the notice of a pause is. */
+.said-over {
+  position: absolute;
+  top: 3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  margin: 0;
+  max-width: calc(100% - 2rem);
+  padding: 0.3rem 0.7rem;
+  background: rgba(29, 32, 38, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-align: center;
+  pointer-events: none;
+}
+
 /* While logged out the map and its controls are not there to use. */
-.locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .foot { display: none; }
+.locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .help-open, .locked .foot { display: none; }
 
 .login {
   flex: 1;

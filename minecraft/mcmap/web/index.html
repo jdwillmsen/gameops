@@ -34,6 +34,7 @@
       <span class="pace">every <span id="live-interval"></span></span>
     </div>
     <button id="copy" type="button">Copy link</button>
+    <button id="help-open" class="help-open" type="button" aria-haspopup="dialog" aria-label="Keyboard shortcuts and search tips" title="Keyboard shortcuts and search tips (?)">?</button>
     <span id="who" class="who" hidden></span>
     <button id="logout" type="button" hidden>Log out</button>
   </header>
@@ -73,6 +74,7 @@
       </form>
     </section>
     <span id="inspect-said" class="unseen" role="status"></span>
+    <p id="said" class="said-over" role="status" hidden></p>
     <p id="frozen" class="frozen" hidden><strong id="frozen-what" role="status"></strong> <span id="frozen-age"></span></p>
   </div>
   <section id="login" class="login" aria-labelledby="login-title" hidden>
@@ -90,6 +92,36 @@
       <button id="login-new" type="button" hidden>Get a new code</button>
     </div>
   </section>
+  <dialog id="help" class="sheet" aria-labelledby="help-title">
+    <div class="sheet-head">
+      <h2 id="help-title">Shortcuts and search tips</h2>
+      <button id="help-close" type="button">Close</button>
+    </div>
+    <label class="toggle"><input id="shortcuts-on" type="checkbox" checked> Single-key shortcuts on</label>
+    <h3>Keys</h3>
+    <dl class="keys">
+      <dt><kbd>/</kbd></dt><dd>Search the map</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Clear the search, then close the card; in the search box, a second press leaves it</dd>
+      <dt><kbd>G</kbd></dt><dd>Grid and chunk focus on or off</dd>
+      <dt><kbd>L</kbd></dt><dd>Layer panel open or shut</dd>
+      <dt><kbd>P</kbd></dt><dd>Pause or resume live positions</dd>
+      <dt><kbd>F</kbd></dt><dd>Follow, or stop following, what the card is about</dd>
+      <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt><dd>Overworld, Nether, The End</dd>
+      <dt><kbd>S</kbd></dt><dd>Go to the world spawn</dd>
+      <dt><kbd>M</kbd></dt><dd>Go to where I am, while I am online</dd>
+      <dt><kbd>+</kbd> <kbd>-</kbd></dt><dd>Zoom in and out</dd>
+      <dt><kbd>?</kbd></dt><dd>This list</dd>
+    </dl>
+    <p class="note">Shortcuts do nothing while you are typing in a box. Esc always works.</p>
+    <h3>In the search box</h3>
+    <dl class="keys">
+      <dt><code>120 -340</code></dt><dd>Go to X 120, Z -340. <code>120 64 -340</code> and <code>120, -340</code> work too</dd>
+      <dt><code>chunk 7 -21</code></dt><dd>Go to that chunk and pin it</dd>
+      <dt><code>spawn</code></dt><dd>The world spawn</dd>
+      <dt><code>me</code></dt><dd>Where I am, while I am online</dd>
+      <dt><code>@name</code></dt><dd>Players only, by gamertag</dd>
+    </dl>
+  </dialog>
   <footer class="bar foot">
     <div class="where">
       <output id="coords" aria-live="off">X —, Z —</output>
@@ -114,5 +146,6 @@
   <script src="chunk.js"></script>
   <script src="trails.js"></script>
   <script src="search.js"></script>
+  <script src="menu.js"></script>
 </body>
 </html>
