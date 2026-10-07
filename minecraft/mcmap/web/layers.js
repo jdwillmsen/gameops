@@ -98,10 +98,18 @@
 
   const view = read(PANEL_KEY);
   const folded = new Set(Array.isArray(view.folded) ? view.folded.filter((id) => typeof id === 'string') : []);
+  // On a small screen the panel is a sheet over the map, which opens when
+  // asked and is never found open on arriving: what was last chosen where
+  // there was room beside the map is kept for there, and not used or
+  // replaced here. The condition is the stylesheet's.
+  const compact = matchMedia('(max-width: 720px), (max-height: 480px)');
   // Open to begin with where there is room for it beside the map.
-  let open = typeof view.open === 'boolean' ? view.open : matchMedia('(min-width: 641px)').matches;
+  let open = !compact.matches && (typeof view.open === 'boolean' ? view.open : true);
 
-  const keep = () => write(PANEL_KEY, { open, folded: [...folded] });
+  const keep = () => {
+    if (!compact.matches) view.open = open;
+    write(PANEL_KEY, { open: view.open, folded: [...folded] });
+  };
 
   const groups = new Map();
   let made = 0;
