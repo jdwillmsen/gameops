@@ -45,6 +45,7 @@
     goto: document.getElementById('goto'),
     gotoX: document.getElementById('goto-x'),
     gotoZ: document.getElementById('goto-z'),
+    gotoClear: document.getElementById('goto-clear'),
     who: document.getElementById('who'),
     logout: document.getElementById('logout'),
     login: document.getElementById('login'),
@@ -395,6 +396,19 @@
   layers.ready = new Promise((resolve) => {
     document.addEventListener('mcmap:layers', () => resolve(layers), { once: true });
   });
+  // Coordinates as a player writes or copies them: "10 -20", "10, -20",
+  // "10 64 -20", with or without the axes' letters. Two numbers are x and
+  // z, three are x, y and z. Anything else is not coordinates.
+  const WORLD_EDGE = 30_000_000;
+  function coordinates(text) {
+    if (typeof text !== 'string' || text.length > 96) return null;
+    const parts = text.trim().split(/[\s,;]+/).map((p) => p.replace(/^[xyz][:=]?/i, '')).filter(Boolean);
+    if (parts.length < 2 || parts.length > 3 || !parts.every((p) => /^[+-]?\d+(\.\d+)?$/.test(p))) return null;
+    const n = parts.map(Number);
+    if (n.some((v) => Math.abs(v) > WORLD_EDGE)) return null;
+    return n.length === 3 ? { x: n[0], y: n[1], z: n[2] } : { x: n[0], z: n[1] };
+  }
+
   window.mcmap = {
     map,
     dimension: () => current,
@@ -416,6 +430,7 @@
       else map.setView([view.z, view.x], view.zoom);
       return true;
     },
+    coordinates,
     layers,
   };
 
@@ -449,11 +464,75 @@
     if (el.grid.checked) grid.addTo(map); else map.removeLayer(grid);
   });
 
+  // --- going to coordinates ------------------------------------------------
+  //
+  // Go takes the view to a block and leaves a mark on it, since a view
+  // that has moved does not say which of its blocks was asked for. Clear
+  // takes the numbers and the mark away together.
+
+  // { layer, dimension } for the mark Go left, or null.
+  let went = null;
+
+  function unmark() {
+    if (went) went.layer.remove();
+    went = null;
+  }
+
+  function offerClear() {
+    if (el.gotoClear) el.gotoClear.hidden = el.gotoX.value === '' && el.gotoZ.value === '' && went === null;
+  }
+
   el.goto.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (el.gotoX.value === '' || el.gotoZ.value === '') return;
     const x = Number(el.gotoX.value);
     const z = Number(el.gotoZ.value);
-    if (Number.isFinite(x) && Number.isFinite(z)) map.setView([z, x], Math.max(map.getZoom(), -1));
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !current) return;
+    unmark();
+    // The middle of the block, not its north-west corner.
+    const at = [Math.floor(z) + 0.5, Math.floor(x) + 0.5];
+    map.setView(at, Math.max(map.getZoom(), -1));
+    const label = document.createElement('span');
+    label.textContent = `X ${fmt(x)}, Z ${fmt(z)}`;
+    const layer = L.marker(at, {
+      icon: L.divIcon({ className: 'found', iconSize: [28, 28], iconAnchor: [14, 14] }),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1000,
+    }).bindTooltip(label, { permanent: true, direction: 'top', offset: [0, -14], className: 'marker-tip' });
+    layer.addTo(map);
+    went = { layer, dimension: current };
+    offerClear();
+  });
+
+  // A pair or a triple pasted into the first box is split between the two:
+  // the game, a chat message and this page's own card all give them whole.
+  el.gotoX.addEventListener('paste', (e) => {
+    const pasted = coordinates((e.clipboardData || window.clipboardData)?.getData('text') ?? '');
+    if (!pasted) return;
+    e.preventDefault();
+    el.gotoX.value = String(Math.floor(pasted.x));
+    el.gotoZ.value = String(Math.floor(pasted.z));
+    offerClear();
+    el.goto.querySelector('button[type="submit"]').focus();
+  });
+
+  for (const box of [el.gotoX, el.gotoZ]) box.addEventListener('input', offerClear);
+  if (el.gotoClear) {
+    el.gotoClear.addEventListener('click', () => {
+      el.gotoX.value = '';
+      el.gotoZ.value = '';
+      unmark();
+      offerClear();
+      el.gotoX.focus();
+    });
+  }
+  // The mark is of a block in one dimension, and of whoever asked for it.
+  document.addEventListener('mcmap:view', () => {
+    if (went && (went.dimension !== current || !el.login.hidden)) {
+      unmark();
+      offerClear();
+    }
   });
 
   el.copy.addEventListener('click', async () => {
