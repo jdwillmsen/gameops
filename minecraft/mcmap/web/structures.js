@@ -340,6 +340,7 @@
         available = false;
         clear();
         paint();
+        unwant('');
         return;
       }
       // Logged out: the map's own check shows the login, and the view is
@@ -357,9 +358,11 @@
         shown = dimension;
         fetchedAt = Date.now() - REFRESH_MS + RETRY_MS;
         paint();
+        unwant('The map has not read this world’s structures yet.');
       }
     } catch {
       fetchedAt = Date.now() - REFRESH_MS + RETRY_MS;
+      unwant('The structure’s details could not be fetched. Choose it again to try once more.');
     } finally {
       if (pending === dimension) pending = null;
     }
@@ -370,6 +373,8 @@
   function sync() {
     const locked = document.body.classList.contains('locked');
     const dimension = app.dimension();
+    // The map has left the dimension the one asked for is in.
+    if (wanted && (locked || dimension !== wanted.dimension)) unwant('');
     if (locked || !dimension || !available) {
       // An answer still on its way belongs to the view that asked for it.
       pending = null;
@@ -421,8 +426,13 @@
   // the dimension it is in; null while the sheet is shut.
   let open = null;
   // One asked for before its dimension's answer had come: by a search, or
-  // by an address that names it.
+  // by an address that names it. It is a request to open a sheet now, so
+  // it does not outlive the moment: it is dropped if the answer fails, if
+  // the map leaves its dimension, and after WANTED_MS whatever happens,
+  // or a sheet would open over whatever the viewer had moved on to.
   let wanted = null;
+  let wantedTimer = null;
+  const WANTED_MS = 8000;
   let biomeAsk = null;
   let saidTimer = null;
 
@@ -634,13 +644,31 @@
 
   // Opens one that was asked for by what it is and where, once the
   // dimension's structures are here to find it among.
+  function want(next) {
+    clearTimeout(wantedTimer);
+    wanted = next;
+    wantedTimer = setTimeout(() => unwant('The structure’s details could not be fetched in time. Choose it again to try once more.'), WANTED_MS);
+    wantedNow();
+  }
+
+  // Lets go of the one asked for, saying why if it was the viewer who
+  // asked and there is something to say.
+  function unwant(why) {
+    clearTimeout(wantedTimer);
+    const missed = wanted;
+    wanted = null;
+    if (missed && missed.said && why && app.tell) app.tell(why);
+  }
+
   function wantedNow() {
     if (!wanted || shown !== wanted.dimension || !held) return;
     const found = find(wanted);
-    const missed = wanted;
-    wanted = null;
-    if (found) detail(found);
-    else if (missed.said && app.tell) app.tell('That structure is not among the ones the map has now.');
+    if (found) {
+      unwant('');
+      detail(found);
+    } else {
+      unwant('That structure is not among the ones the map has now.');
+    }
   }
 
   function fromLink() {
@@ -648,8 +676,7 @@
     const m = /^structure~([a-z0-9_]{1,40})~([rp])~(-?\d{1,9})~(-?\d{1,9})$/.exec(app.link.get());
     if (!m) return;
     if (open && linkOf(open) === m[0]) return;
-    wanted = { kind: m[1], recorded: m[2] === 'r', x: Number(m[3]), z: Number(m[4]), dimension: app.dimension() };
-    wantedNow();
+    want({ kind: m[1], recorded: m[2] === 'r', x: Number(m[3]), z: Number(m[4]), dimension: app.dimension() });
   }
 
   async function copy(text, done) {
@@ -695,10 +722,9 @@
   // For the search: one chosen there is shown in full once the map is on
   // its dimension.
   app.structures = {
-    show(want) {
-      if (!sheet || !want || typeof want.kind !== 'string' || !Number.isFinite(want.x) || !Number.isFinite(want.z)) return;
-      wanted = { kind: want.kind, recorded: want.recorded === true, x: want.x, z: want.z, dimension: want.dimension, said: true };
-      wantedNow();
+    show(asked) {
+      if (!sheet || !asked || typeof asked.kind !== 'string' || !Number.isFinite(asked.x) || !Number.isFinite(asked.z)) return;
+      want({ kind: asked.kind, recorded: asked.recorded === true, x: asked.x, z: asked.z, dimension: asked.dimension, said: true });
     },
   };
 

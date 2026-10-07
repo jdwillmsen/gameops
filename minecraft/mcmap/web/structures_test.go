@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"regexp"
 	"testing"
 )
 
@@ -103,5 +104,26 @@ func TestStructureDetailsAreTextAndCanBeLinkedTo(t *testing.T) {
 		if !bytes.Contains(app, []byte(need)) {
 			t.Errorf("app.js no longer has %s", need)
 		}
+	}
+}
+
+// A structure asked for before its dimension has answered is a request to
+// open a sheet now. It is let go when the answer fails, when the map leaves
+// that dimension, and after a few seconds, so that no sheet opens later
+// over whatever the viewer has moved on to.
+func TestAStructureAskedForDoesNotOpenLater(t *testing.T) {
+	js := read(t, "structures.js")
+	for _, need := range []string{
+		"wantedTimer = setTimeout(() => unwant(",
+		"if (wanted && (locked || dimension !== wanted.dimension)) unwant('');",
+		"unwant('The structure’s details could not be fetched. Choose it again to try once more.');",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("structures.js no longer has %s", need)
+		}
+	}
+	// Nothing sets it but the one function that also starts its clock.
+	if n := len(regexp.MustCompile(`\bwanted = `).FindAll(js, -1)); n != 3 {
+		t.Errorf("structures.js assigns wanted in %d places, want its declaration, want() and unwant()", n)
 	}
 }
