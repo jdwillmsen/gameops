@@ -138,3 +138,29 @@ func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
 		}
 	}
 }
+
+// Follow is turned off by more than its own button, so what the button
+// says and what a screen reader is told both come from the one place the
+// card is painted, whichever way the state changed.
+func TestFollowSaysWhenItIsFollowing(t *testing.T) {
+	js := read(t, "live.js")
+	for _, need := range []string{
+		"card.follow.setAttribute('aria-pressed', String(picked.follow));",
+		"say(card.follow, picked.follow ? 'Following' : 'Follow');",
+		"if (card.said) card.said.textContent = now !== null ? `Following ${now}.` : `No longer following ${following}.`;",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
+		}
+	}
+	if !regexp.MustCompile(`function paintCard\(\) \{\s*if \(!card\.root\) return;\s*announce\(\);`).Match(js) {
+		t.Error("live.js no longer announces a change of following wherever the card is painted")
+	}
+	// Outside the card, which is hidden when it closes, and a hidden
+	// region says nothing.
+	page := read(t, "index.html")
+	said, card := bytes.Index(page, []byte(`id="inspect-said" class="unseen" role="status"`)), bytes.Index(page, []byte(`<section id="inspect"`))
+	if said < 0 || card < 0 || said < card+bytes.Index(page[card:], []byte("</section>")) {
+		t.Error("index.html no longer has the following status outside the card")
+	}
+}

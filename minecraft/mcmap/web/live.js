@@ -129,6 +129,7 @@
     when: document.getElementById('inspect-when'),
     follow: document.getElementById('inspect-follow'),
     go: document.getElementById('inspect-go'),
+    said: document.getElementById('inspect-said'),
     copy: document.getElementById('inspect-copy'),
     close: document.getElementById('inspect-close'),
   };
@@ -1110,8 +1111,22 @@
     paintCard();
   }
 
+  // Whom the card last said it was following, or null: Follow is turned
+  // off by a drag, by the entity going, and by a change of dimension as
+  // well as by its button, and each is a change someone not looking at the
+  // button has to be told of.
+  let following = null;
+
+  function announce() {
+    const now = picked && picked.follow ? (typeof picked.name === 'string' && picked.name) || names.entity(picked.type) : null;
+    if (now === following) return;
+    if (card.said) card.said.textContent = now !== null ? `Following ${now}.` : `No longer following ${following}.`;
+    following = now;
+  }
+
   function paintCard() {
     if (!card.root) return;
+    announce();
     card.root.hidden = picked === null;
     document.body.classList.toggle('inspecting', picked !== null);
     if (picked === null) return;
@@ -1158,6 +1173,7 @@
     card.follow.disabled = picked.state !== 'live' && picked.state !== 'waiting';
     if (card.go) card.go.disabled = !Number.isFinite(picked.x) || !Number.isFinite(picked.z);
     card.follow.setAttribute('aria-pressed', String(picked.follow));
+    say(card.follow, picked.follow ? 'Following' : 'Follow');
     // The layer panel stops short of the card on a narrow screen, and the
     // card is as tall as what it has to say.
     if (`${what}|${when.length}` !== cardShape) {

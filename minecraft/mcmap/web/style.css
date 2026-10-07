@@ -470,6 +470,11 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .inspect-note { margin: 0; color: #f0a35e; font-variant-numeric: tabular-nums; }
 .inspect-note strong { font-weight: 600; }
 .inspect-actions { display: flex; gap: 0.4rem; }
+/* Following is a state the map is in, so its button is filled, not merely
+   outlined like a choice among equals. */
+#inspect-follow[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #0b0c0e; font-weight: 600; }
+/* For a screen reader only: said, and not shown. */
+.unseen { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .inspect-actions button { flex: 1; padding-inline: 0.4rem; white-space: nowrap; }
 
 /* While logged out the map and its controls are not there to use. */
