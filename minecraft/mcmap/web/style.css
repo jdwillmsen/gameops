@@ -56,6 +56,8 @@
   --kind-outpost: #d9a441;
   --kind-witch-hut: #b48ce0;
   --kind-village: #6bbf59;
+  --kind-stronghold: #58c4a4;
+  --kind-trial-chamber: #e08a4a;
 
   --grid-origin: rgba(110, 207, 122, 0.9);
   --grid-region: rgba(255, 255, 255, 0.45);
@@ -531,6 +533,8 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .dot.outpost { background: var(--kind-outpost); }
 .dot.witch-hut { background: var(--kind-witch-hut); }
 .dot.village { background: var(--kind-village); }
+.dot.stronghold { background: var(--kind-stronghold); }
+.dot.trial-chamber { background: var(--kind-trial-chamber); }
 .key { width: 0.7rem; height: 0.7rem; }
 .key.recorded { background: var(--text); border: 1px solid var(--edge); border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
@@ -671,6 +675,13 @@ kbd, .keys code {
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .people { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .people .mini { padding: 0.05rem 0.45rem; }
+/* Counted things in a structure's sheet, each with the game's picture of it
+   where there is one: side by side, or a line each where each is a sentence. */
+.tally { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; margin: 0; padding: 0; list-style: none; }
+.tally.lines { display: grid; gap: 0.2rem; }
+.tally li { display: flex; align-items: baseline; gap: 0.3rem; min-width: 0; }
+.tally .picture { align-self: center; }
+.tally span { min-width: 0; overflow-wrap: anywhere; }
 .sheet .note { margin: 0.5rem 0 0; min-height: 0; font-size: 0.9em; }
 .sheet-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
 .structure { cursor: pointer; }
