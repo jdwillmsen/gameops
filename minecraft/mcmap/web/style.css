@@ -519,6 +519,18 @@ kbd, .keys code {
   text-align: center;
 }
 .help-open { font-weight: 700; min-width: 2rem; }
+.sheet-picture { flex: none; margin-top: 0.15rem; }
+.sheet-picture .picture { width: 24px; height: 24px; }
+.standing p { margin: 0 0 0.35rem; color: var(--dim); }
+.standing p:first-child { color: var(--text); }
+.facts { display: grid; grid-template-columns: minmax(7rem, max-content) 1fr; gap: 0.25rem 0.9rem; margin: 0; font-variant-numeric: tabular-nums; }
+.facts dt { color: var(--dim); }
+.facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.people { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.people .mini { padding: 0.05rem 0.45rem; }
+.sheet .note { margin: 0.5rem 0 0; min-height: 0; font-size: 0.9em; }
+.sheet-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
+.structure { cursor: pointer; }
 /* A sentence over the map for a moment, where the notice of a pause is. */
 .said-over {
   position: absolute;

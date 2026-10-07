@@ -604,7 +604,50 @@ for each kind that filters all three. A kind's row counts everything of the
 kind and says under it how that is made up (11 known, 2 predicted, 498
 possible), or why the kind is not predicted. Possible starts as the
 viewer's Predicted row is set. Every tooltip says which of the three a mark
-is, and why.
+is, and the details say why.
+
+**Details.** A click or a tap on a structure's mark, Enter on it while it
+has the focus, or choosing a structure in the search, opens a sheet over
+the page with everything the page knows of it, each as a labelled line of
+text. The tooltip is left short: what it is, a village's first line of
+counts, and `Click for details`. The sheet says:
+
+- its kind and picture, and whether it is recorded, predicted or only a
+  possible site, with a sentence saying what that means; for a site the
+  seed gives, also whether the terrain there is generated and how the
+  kind's rule fared against this world (`agree` and `disagree` from
+  `kinds`);
+- its dimension and its centre; for a recorded one the blocks it covers on
+  each axis with their length, and its chunks; for a predicted one the
+  block and chunk the seed puts it at, since it has no box;
+- how far and which way it is from the middle of the map and, while the
+  logged-in player is in the live picture, from them;
+- for a village, every count the world keeps, or that the game has not
+  counted it yet; for another kind, how many recorded spawn areas were
+  joined into its box (`areas`);
+- the biome at its middle, asked of `/api/biomes/at` while the service has
+  biomes, and how many of its chunks are slime chunks, in the Overworld;
+- for a recorded one, what the map already holds inside its box, counted
+  in the browser from the layers loaded: beds by colour, containers by
+  kind, named mobs by name, and the players and mobs in the last live
+  frame. A named mob and a player are buttons that close the sheet and
+  open the card about them. The sheet says that this is only what the map
+  was sent.
+
+Go to fits a recorded structure's box in the view, or centres on a
+predicted site; Copy coordinates copies the centre; Copy link copies an
+address that reopens the sheet. The address names an open sheet in a fifth
+part after the view, `structure~<kind>~<r or p>~<x>~<z>`, which the page
+keeps while the sheet is open and drops when it shuts. The sheet is the
+browser's modal dialog: the focus stays in it, Escape, Close and a click
+outside shut it, and the focus goes back to the mark.
+
+A village's records hold more than is served. `POI` lists where each
+villager's bed, bell and job site are, and which villager claimed which;
+`DWELLERS` lists the villagers, golems and cats by their actor ids, from
+which a villager's profession could be read out of its own actor record;
+`PLAYERS` is what the village thinks of each player and `RAID` a raid in
+progress. Only the counts are read today, and the last two not at all.
 
 **Known** structures are the ones this world has generated, read from its
 own save. For each chunk the server keeps the boxes in which a structure's

@@ -1369,6 +1369,32 @@
       const held = entities.get(`m:${id}`);
       return held && !stale ? { x: held.x, y: held.y, z: held.z } : null;
     },
+    // Who and what the live picture has inside a box of blocks now: each
+    // player with a way to open their card, and the mobs counted by type.
+    // Null while there is no picture to count from.
+    within(box) {
+      if (stale || frameAt === null) return null;
+      const players = [];
+      const mobs = new Map();
+      for (const [key, held] of entities) {
+        const x = Math.floor(held.x);
+        const z = Math.floor(held.z);
+        if (x < box.minX || x > box.maxX || z < box.minZ || z > box.maxZ) continue;
+        if (held.category === 'players') {
+          players.push({ name: held.name || 'Player', open: () => pick(key) });
+        } else {
+          const title = names.entity(held.type);
+          mobs.set(title, (mobs.get(title) || 0) + 1);
+        }
+      }
+      return { players, mobs };
+    },
+    // Where the session's own player is, while they are in the picture.
+    me() {
+      if (stale) return null;
+      for (const held of entities.values()) if (held.category === 'players' && isMe(held.name)) return { x: held.x, z: held.z };
+      return null;
+    },
     // Whether named mobs wear their names.
     labels(on) {
       if (tagging === Boolean(on)) return;

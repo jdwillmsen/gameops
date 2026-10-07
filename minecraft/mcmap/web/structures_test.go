@@ -64,3 +64,44 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		}
 	}
 }
+
+// The details of a structure say only what the server sent and what the
+// loaded layers hold, each as text, and name it in the address by its
+// kind and middle so that a link can open it again.
+func TestStructureDetailsAreTextAndCanBeLinkedTo(t *testing.T) {
+	js := usesNoMarkupSink(t, "structures.js")
+	for _, need := range []string{
+		"if (subject) marker.on('click', () => detail(subject));",
+		"if (value instanceof Node) dd.append(value); else dd.textContent = String(value);",
+		"return `structure~${kindOf(subject)}~${subject.recorded ? 'r' : 'p'}~${at.x}~${at.z}`;",
+		"const m = /^structure~([a-z0-9_]{1,40})~([rp])~(-?\\d{1,9})~(-?\\d{1,9})$/.exec(app.link.get());",
+		"if (!view.dialog.open) view.dialog.showModal();",
+		"if (e.target === view.dialog) view.dialog.close();",
+		"['Counts', 'Not counted by the game yet:",
+		"const kept = app.markers ? app.markers.within(s) : null;",
+		"const live = app.inspect ? app.inspect.within(s) : null;",
+		"`api/biomes/at?dimension=${encodeURIComponent(shown)}&x=${at.x}&z=${at.z}`",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("structures.js no longer has %s", need)
+		}
+	}
+	page := read(t, "index.html")
+	for _, id := range []string{"structure", "structure-picture", "structure-title", "structure-standing", "structure-body", "structure-go", "structure-copy", "structure-link", "structure-said", "structure-close"} {
+		if !bytes.Contains(page, []byte(`id="`+id+`"`)) {
+			t.Errorf("index.html has no element with id %s", id)
+		}
+	}
+	// The address keeps a fifth part through every rewrite, and takes
+	// nothing there that is not a short plain token.
+	app := read(t, "app.js")
+	for _, need := range []string{
+		"const EXTRA = /^[a-z0-9_~.-]{1,96}$/;",
+		"${map.getZoom()}${extra ? `/${extra}` : ''}`;",
+		"document.dispatchEvent(new CustomEvent('mcmap:link'));",
+	} {
+		if !bytes.Contains(app, []byte(need)) {
+			t.Errorf("app.js no longer has %s", need)
+		}
+	}
+}
