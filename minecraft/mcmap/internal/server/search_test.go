@@ -589,3 +589,31 @@ func TestSearchFindsALoadedMobByTheNameItHasNow(t *testing.T) {
 		t.Errorf("cat: %+v", got.Hits)
 	}
 }
+
+// A named mob led through a portal since the snapshot is loaded in a
+// dimension its marker is not in. It is still one animal, listed once,
+// where it is now.
+func TestSearchListsAMobThatChangedDimensionOnce(t *testing.T) {
+	s := withLogin(t)
+	store := markers.NewStore()
+	store.Set(time.Now(), markers.World{
+		chunks.Overworld: {Mobs: []markers.Marker{{X: 10, Y: 64, Z: 10, Kind: "strider", Name: "Ember", ID: "-31"}}},
+		chunks.End:       {Mobs: []markers.Marker{{X: 1, Y: 60, Z: 1, Kind: "cat", Name: "Ember Two", ID: "-32"}}},
+	})
+	s.Markers = store
+	s.Live = live.New(10*time.Second, 1000, nil)
+	online(s, 1, "nether", ``, `{"i":"-31","t":"strider","n":"Ember","x":3.5,"y":40,"z":-2.5}`)
+	online(s, 1, "overworld", ``, `{"i":"-32","t":"cat","n":"Ember Two","x":80.5,"y":64,"z":80.5}`)
+
+	got := search(t, s, "ember", session(s, steve))
+	var said []string
+	for _, h := range got.Hits {
+		said = append(said, fmt.Sprintf("%s %q %s %d,%d live=%v dist=%v", h.ID, h.Name, h.Dimension, h.X, h.Z, h.Live, h.Distance != nil))
+	}
+	// The one now in the dimension asked from comes first, with a distance;
+	// neither is listed where the snapshot had it.
+	want := []string{`-32 "Ember Two" overworld 80,80 live=true dist=true`, `-31 "Ember" nether 3,-3 live=true dist=false`}
+	if !reflect.DeepEqual(said, want) {
+		t.Errorf("ember:\n got %q\nwant %q", said, want)
+	}
+}

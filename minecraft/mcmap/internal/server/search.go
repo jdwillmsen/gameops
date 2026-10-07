@@ -332,13 +332,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	height := func(y int32) *int32 { return &y }
 	block := func(v float64) int32 { return int32(math.Floor(v)) }
 
-	now := time.Now()
-	for _, d := range chunks.Dimensions {
-		// Who is online and which mobs are loaded, from the same picture
-		// the page is streamed: nothing here that a session cannot already
-		// see, and no more of it than the live store's own cap.
-		loaded := map[string]live.Entity{}
-		if s.Live != nil && (wants(hitPlayer) || wants(hitMob)) {
+	// Who is online and which named mobs are loaded, from the same pictures
+	// the page is streamed: nothing here that a session cannot already see,
+	// and no more of it than the live store's own cap. Every dimension's is
+	// read before any marker is looked at, since a mob led through a portal
+	// since the snapshot is loaded in a dimension its marker is not in.
+	type loadedMob struct {
+		live.Entity
+		in chunks.Dimension
+	}
+	loaded := map[string]loadedMob{}
+	if s.Live != nil && (wants(hitPlayer) || wants(hitMob)) {
+		now := time.Now()
+		for _, d := range chunks.Dimensions {
 			frame := s.Live.Store.Snapshot(d.Name(), now)
 			for _, p := range frame.Players {
 				if matches(p.Name) {
@@ -348,10 +354,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, m := range frame.Mobs {
 				if m.Name != "" {
-					loaded[m.ID] = m
+					loaded[m.ID] = loadedMob{m, d}
 				}
 			}
 		}
+	}
+	for _, d := range chunks.Dimensions {
 		if s.Biomes != nil && wants(hitBiome) {
 			world := s.Biomes.World()
 			for _, p := range world.Present(d) {
@@ -407,9 +415,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			for _, m := range lists.Mobs {
 				// The same animal by the game's id for it, never by its
 				// name or where it was. While it is loaded it is found by
-				// the name it has now and listed once, where it is now: one
-				// renamed since the snapshot does not answer to its old name
-				// with its new position.
+				// the name it has now and listed once, where it is now,
+				// in whichever dimension that is: one renamed since the
+				// snapshot does not answer to its old name with its new
+				// position, and one that has changed dimension is not also
+				// listed where it was.
 				at, isLoaded := loaded[m.ID]
 				isLoaded = isLoaded && m.ID != ""
 				name := m.Name
@@ -420,19 +430,20 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				h := searchHit{Kind: hitMob, Name: name, Detail: m.Kind, Baby: m.Baby, ID: m.ID, X: m.X, Y: height(m.Y), Z: m.Z}
+				in := d
 				if isLoaded {
-					h.Live, h.X, h.Y, h.Z = true, block(at.X), height(block(at.Y)), block(at.Z)
+					h.Live, h.X, h.Y, h.Z, in = true, block(at.X), height(block(at.Y)), block(at.Z), at.in
 					delete(loaded, m.ID)
 				}
-				add(h, d)
+				add(h, in)
 			}
 		}
-		// A mob named since the last snapshot is in no marker yet.
-		for _, m := range loaded {
-			if matches(m.Name, m.Type, names.Entity(m.Type)) {
-				add(searchHit{Kind: hitMob, Name: m.Name, Detail: m.Type, ID: m.ID, Live: true,
-					X: block(m.X), Y: height(block(m.Y)), Z: block(m.Z)}, d)
-			}
+	}
+	// A mob named since the last snapshot is in no marker yet.
+	for _, m := range loaded {
+		if matches(m.Name, m.Type, names.Entity(m.Type)) {
+			add(searchHit{Kind: hitMob, Name: m.Name, Detail: m.Type, ID: m.ID, Live: true,
+				X: block(m.X), Y: height(block(m.Y)), Z: block(m.Z)}, m.in)
 		}
 	}
 
