@@ -69,6 +69,9 @@
     other: '#9aa3ad',
   };
   const ME = '#6ecf7a';
+  // What a name tag is written in, on a mob that is loaded and on the mark
+  // the snapshot left of one that is not.
+  const NAMED = '#4fd1c5';
 
   // Type ids as the server reports them, without the minecraft: prefix.
   // Anything not listed is "other", which is where a mob added by a later
@@ -120,6 +123,7 @@
     what: document.getElementById('inspect-what'),
     when: document.getElementById('inspect-when'),
     follow: document.getElementById('inspect-follow'),
+    go: document.getElementById('inspect-go'),
     copy: document.getElementById('inspect-copy'),
     close: document.getElementById('inspect-close'),
   };
@@ -163,8 +167,12 @@
   }
 
   // A mob is its icon in a ring, or, with no icon to draw, the dot it has
-  // always been.
-  const Mob = icons.Stamped;
+  // always been, under its name where someone gave it one.
+  const Mob = icons.Tagged;
+  // Whether a named mob's name is written over it, which is the viewer's
+  // choice of the named mobs' own row.
+  let tagging = true;
+  const tagOf = (name) => (tagging && name ? icons.tag(name, NAMED) : null);
 
   // A player's marker points the way they face. Leaflet's canvas has no
   // such shape, so this draws into the renderer's own context, the way its
@@ -267,11 +275,15 @@
   let more = 0;
 
   // The entity the card is about, or null while the card is shut:
-  // { key, category, name, type, x, y, z, dimension, seenAt, state, follow,
-  // went }. state is live while it is in the picture, waiting while there
-  // is no picture to say either way, lost once a frame of its dimension
-  // came without it, and away while the map shows another dimension. went
-  // is the dimension a lost player was found in, or null.
+  // { key, category, name, type, baby, x, y, z, dimension, seenAt, state,
+  // follow, went, savedAt, wasLive }. state is live while it is in the
+  // picture, waiting while there is no picture to say either way, lost
+  // once a frame of its dimension came without it, saved for a named mob
+  // known only from the snapshot, and away while the map shows another
+  // dimension. went is the dimension a lost player was found in, or null.
+  // savedAt is when the snapshot that placed a named mob was taken, for one
+  // chosen by its mark or from a list; wasLive is whether the card has
+  // seen it in the picture since it opened.
   let picked = null;
   let seeking = [];
   let seekTimer = null;
@@ -340,6 +352,7 @@
       name: e.n,
       type: e.t,
       sprite: worn,
+      tag: tagOf(e.n),
     });
   }
 
@@ -413,6 +426,7 @@
     frameAt = null;
     count();
     track(false);
+    document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
 
   function draw(frame) {
@@ -458,8 +472,10 @@
           held.marker.options.yaw = e.r;
           held.marker.redraw();
         }
-      } else {
+      } else if (held.marker.options.name !== e.n) {
         held.marker.options.name = e.n;
+        held.marker.options.tag = tagOf(e.n);
+        held.marker.redraw();
       }
     };
     for (const e of frame.players || []) place(e, 'players', 'p:');
@@ -477,6 +493,9 @@
     if (!stale) {
       document.dispatchEvent(new CustomEvent('mcmap:players', { detail: { dimension: pictured, players: frame.players || [] } }));
     }
+    // And which mobs are loaded, for the layer that marks where the
+    // snapshot left them.
+    document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
 
   function count() {
@@ -667,6 +686,7 @@
     }
     if (on) playerLayer.eachLayer((marker) => marker.bringToFront());
     ring();
+    document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
 
   // Puts the layer's rows in the panel while the service has a live layer
@@ -710,7 +730,8 @@
     const ctx = card.picture.getContext('2d');
     ctx.setTransform(DENSITY, 0, 0, DENSITY, 0, 0);
     ctx.clearRect(0, 0, PORTRAIT, PORTRAIT);
-    const worn = held.marker.options.sprite;
+    // With no marker in the picture, what the marker would be.
+    const worn = held.marker ? held.marker.options.sprite : (held.category === 'players' ? null : icons.mob(held.type, CATEGORIES[held.category], held.baby === true));
     if (worn) {
       const side = worn.width / DENSITY;
       ctx.imageSmoothingEnabled = false;
@@ -719,12 +740,16 @@
     }
     ctx.beginPath();
     ctx.arc(PORTRAIT / 2, PORTRAIT / 2, held.category === 'players' ? 8 : DOT_RADIUS * 2, 0, Math.PI * 2);
-    ctx.fillStyle = held.marker.options.fillColor;
+    ctx.fillStyle = held.marker ? held.marker.options.fillColor : (held.category === 'players' ? playerColour(held.name) : CATEGORIES[held.category]);
     ctx.fill();
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = INK;
     ctx.stroke();
   }
+
+  // A named mob the card knows only from the snapshot, which is on the map
+  // as the mark the snapshot left.
+  const savedOnly = () => picked !== null && Number.isFinite(picked.savedAt) && !picked.wasLive && picked.state !== 'live';
 
   function ring() {
     const found = picked && picked.state === 'live' ? entities.get(picked.key) : null;
@@ -732,6 +757,14 @@
     // behind would circle nothing. The card goes on reporting the entity.
     const held = found && shown(found.category) ? found : null;
     if (!held) {
+      if (savedOnly() && picked.dimension === app.dimension() && Number.isFinite(picked.x) && Number.isFinite(picked.z)) {
+        halo.setLatLng([picked.z, picked.x]);
+        halo.setRadius(MOB_RADIUS + 5);
+        halo.setStyle(INSPECTED);
+        if (!map.hasLayer(halo)) halo.addTo(map);
+        halo.bringToFront();
+        return;
+      }
       halo.remove();
       return;
     }
@@ -795,7 +828,7 @@
     if (held) {
       if (picked.state === 'lost') stopSeeking();
       Object.assign(picked, {
-        state: 'live', went: null, dimension: pictured, seenAt: Date.now(),
+        state: 'live', went: null, dimension: pictured, seenAt: Date.now(), wasLive: true,
         category: held.category, name: held.name, type: held.type, x: held.x, y: held.y, z: held.z,
       });
       portrait(held);
@@ -804,7 +837,12 @@
       picked.state = 'away';
       picked.follow = false;
     } else if (!whole) {
-      if (picked.state !== 'lost') picked.state = 'waiting';
+      if (picked.state !== 'lost' && picked.state !== 'saved') picked.state = 'waiting';
+    } else if (savedOnly()) {
+      // Not in a whole picture of its dimension: its chunk is not loaded,
+      // and where the snapshot left it is all that is known.
+      picked.state = 'saved';
+      picked.follow = false;
     } else if (picked.state !== 'lost') {
       picked.state = 'lost';
       picked.follow = false;
@@ -820,7 +858,7 @@
     document.body.classList.toggle('inspecting', picked !== null);
     if (picked === null) return;
     const player = picked.category === 'players';
-    const kind = player ? (isMe(picked.name) ? 'Player (you)' : 'Player') : names.entity(picked.type);
+    const kind = player ? (isMe(picked.name) ? 'Player (you)' : 'Player') : names.kindOf(picked.type, picked.baby);
     // Always as text: a gamertag and a name tag are both a player's choice.
     const title = (typeof picked.name === 'string' && picked.name) || kind;
     say(card.name, title);
@@ -834,7 +872,13 @@
     const ago = span((Date.now() - picked.seenAt) / 1000);
     let what = '';
     let when = `Last seen ${ago} ago.`;
-    if (picked.state === 'lost') {
+    if (savedOnly()) {
+      what = picked.state === 'saved' ? 'Not loaded right now.'
+        : picked.state === 'away' ? `Not tracked: the map is on another dimension, ${labelOf(app.dimension())}.` : 'Waiting for live positions.';
+      // The snapshot's clock is the server's, which the page's own may
+      // not agree with to the minute.
+      when = `This is its last saved position, from ${age(picked.savedAt)}.`;
+    } else if (picked.state === 'lost') {
       what = picked.went ? `Left for another dimension: ${labelOf(picked.went)}.` : 'No longer tracked.';
     } else if (picked.state === 'away') {
       what = `Not tracked: the map is on another dimension, ${labelOf(app.dimension())}.`;
@@ -848,22 +892,42 @@
     card.note.hidden = what === '';
     say(card.what, what);
     say(card.when, what === '' ? '' : when);
-    card.follow.disabled = picked.state === 'lost' || picked.state === 'away';
+    card.follow.disabled = picked.state !== 'live' && picked.state !== 'waiting';
+    if (card.go) card.go.disabled = !Number.isFinite(picked.x) || !Number.isFinite(picked.z);
     card.follow.setAttribute('aria-pressed', String(picked.follow));
     // The layer panel stops short of the card on a narrow screen, and the
     // card is as tall as what it has to say.
-    if (what !== cardShape) {
-      cardShape = what;
+    if (`${what}|${when.length}` !== cardShape) {
+      cardShape = `${what}|${when.length}`;
       document.body.style.setProperty('--inspect-height', `${card.root.offsetHeight}px`);
     }
   }
 
-  function pick(key) {
-    if (!card.root || !entities.has(key)) return;
+  // How long ago a snapshot was, to the minute, which is all a snapshot
+  // taken every few minutes is good to.
+  function age(at) {
+    const minutes = Math.max(0, Math.round((Date.now() + clockOffset - at) / 60_000));
+    if (minutes < 1) return 'under a minute ago';
+    if (minutes < 120) return `${minutes} min ago`;
+    return `${Math.round(minutes / 60)} h ago`;
+  }
+
+  const told = () => document.dispatchEvent(new CustomEvent('mcmap:inspect', { detail: { key: picked ? picked.key : null } }));
+
+  // Opens the card on one entity. known is what is said of it until the
+  // picture has it, for one chosen from a list or by the mark the snapshot
+  // left, and is not needed for one chosen in the picture.
+  function pick(key, known) {
+    if (!card.root || (!entities.has(key) && !known)) return false;
     stopSeeking();
-    picked = { key, follow: false, state: 'live', went: null, dimension: pictured };
+    picked = { key, follow: false, state: 'waiting', went: null, dimension: pictured, seenAt: Date.now(), wasLive: false, ...known };
     cardShape = null;
-    track(false);
+    if (!entities.has(key)) portrait(picked);
+    // A picture of this dimension that is on the map is all there is: an
+    // entity not in it is not loaded.
+    track(!stale && frameAt !== null && pictured === app.dimension());
+    told();
+    return true;
   }
 
   function shut() {
@@ -873,6 +937,7 @@
     stopSeeking();
     ring();
     paintCard();
+    told();
     // Focus left on a hidden button is focus lost to the keyboard.
     if (within) map.getContainer().focus();
   }
@@ -887,11 +952,43 @@
   // Leaflet does not report a click on a marker at the end of a drag that
   // began on it, so this is only ever a click or a tap.
   function onPick(e) {
+    // The click was the marker's, and is not also one on the map under it.
+    L.DomEvent.stopPropagation(e);
     for (const [key, held] of entities) {
       if (held.marker !== e.layer) continue;
       pick(key);
       return;
     }
+  }
+
+  // What another script may know of an entity before the picture has it.
+  // Every field is checked: a hit from the search and a mark from the
+  // snapshot are both answers from the server.
+  function inspect(what) {
+    if (!what || typeof what !== 'object') return false;
+    const player = what.kind === 'player';
+    const id = typeof what.id === 'string' && what.id !== '' && what.id.length <= 64 ? what.id : null;
+    const num = (v) => (Number.isFinite(v) ? v : NaN);
+    const dimension = typeof what.dimension === 'string' ? what.dimension : app.dimension();
+    const type = typeof what.type === 'string' ? what.type : '';
+    const known = {
+      category: player ? 'players' : categoryOf.get(type) || 'other',
+      name: typeof what.name === 'string' ? what.name : '',
+      type,
+      baby: what.baby === true,
+      x: num(what.x), y: num(what.y), z: num(what.z),
+      dimension,
+    };
+    if (!player && Number.isFinite(what.savedAt)) known.savedAt = what.savedAt;
+    // With no id there is nothing to find it by in the picture, and the
+    // key is one no entity has.
+    const key = id ? `${player ? 'p' : 'm'}:${id}` : `s:${dimension}:${known.x}:${known.y}:${known.z}`;
+    return pick(key, known);
+  }
+
+  function goTo() {
+    if (!picked || !Number.isFinite(picked.x) || !Number.isFinite(picked.z)) return;
+    if (app.go) app.go(picked.dimension, picked.x, picked.z);
   }
 
   async function copyPosition() {
@@ -918,6 +1015,7 @@
     playerLayer.on('click', onPick);
     card.close.addEventListener('click', shut);
     card.copy.addEventListener('click', copyPosition);
+    if (card.go) card.go.addEventListener('click', goTo);
     card.follow.addEventListener('click', () => {
       if (!picked) return;
       picked.follow = !picked.follow;
@@ -956,6 +1054,33 @@
 
   app.playerColour = playerColour;
   app.isMe = isMe;
+  app.inspect = {
+    open: inspect,
+    shut,
+    // The key of the entity the card is about, or null.
+    key: () => (picked ? picked.key : null),
+    // Whether the mob with this id is on the map as a live marker now, so
+    // that the mark the snapshot left of it can step aside.
+    drawn(id) {
+      const held = entities.get(`m:${id}`);
+      return Boolean(held) && !stale && mobLayer.hasLayer(held.marker);
+    },
+    // Where the mob with this id is, while it is in the picture.
+    where(id) {
+      const held = entities.get(`m:${id}`);
+      return held && !stale ? { x: held.x, y: held.y, z: held.z } : null;
+    },
+    // Whether named mobs wear their names.
+    labels(on) {
+      if (tagging === Boolean(on)) return;
+      tagging = Boolean(on);
+      for (const held of entities.values()) {
+        if (held.category === 'players' || !held.name) continue;
+        held.marker.options.tag = tagOf(held.name);
+        held.marker.redraw();
+      }
+    },
+  };
   // For a layer that has to sit under these markers and still be hovered:
   // only what is on the same canvas can be both.
   app.liveRenderer = renderer;

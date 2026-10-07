@@ -6,7 +6,9 @@
 // is drawn as its own picture on a square plate, where the live layer's are
 // round, and as the ring it used to be while the server has no picture for
 // it. A named mob is its type's icon under its name, and is listed by name
-// under its row, since a name is what it is looked for by.
+// under its row, since a name is what it is looked for by. While the same
+// mob is loaded the live layer draws it where it is, under the same name,
+// and the mark the snapshot left steps aside: one animal, one marker.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -21,14 +23,6 @@
   // village's worth of pictures twenty pixels wide, eight blocks to the
   // pixel, is a heap in which none can be made out.
   const PICTURE_ZOOM = -2;
-  // How long the ring stays on a named mob chosen from the list.
-  const CHOSEN_MS = 20_000;
-  // A name tag may be 64 characters; the label on the map shows this many
-  // and the tooltip and the list show them all.
-  const TAG_LENGTH = 24;
-  const TAG_HEIGHT = 18;
-  const TAG_GAP = 3;
-  const TAG_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
   const INK = '#0b0c0e';
   const { DENSITY } = icons;
 
@@ -89,56 +83,8 @@
     return box;
   }
 
-  // A mob's name tag, drawn once to be stamped over its marker. Text put
-  // on a canvas is drawn and never parsed.
-  function tagOf(name) {
-    const letters = [...str(name)];
-    if (letters.length === 0) return null;
-    const said = letters.length > TAG_LENGTH ? `${letters.slice(0, TAG_LENGTH - 1).join('')}…` : letters.join('');
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    ctx.font = TAG_FONT;
-    const width = Math.ceil(ctx.measureText(said).width) + 10;
-    canvas.width = width * DENSITY;
-    canvas.height = TAG_HEIGHT * DENSITY;
-    ctx.scale(DENSITY, DENSITY);
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0.5, 0.5, width - 1, TAG_HEIGHT - 1, 3);
-    else ctx.rect(0.5, 0.5, width - 1, TAG_HEIGHT - 1);
-    ctx.fillStyle = 'rgba(20, 22, 26, 0.88)';
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = KINDS.mobs.color;
-    ctx.stroke();
-    // Sizing the canvas reset the font.
-    ctx.font = TAG_FONT;
-    ctx.fillStyle = KINDS.mobs.color;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(said, width / 2, TAG_HEIGHT / 2 + 0.5);
-    return canvas;
-  }
-
-  // A marker with, for a named mob, its name over it. _renderer, _point,
-  // _pxBounds and _drawing are Leaflet internals, which is safe only
-  // because Leaflet is vendored at a fixed version.
-  const Pin = icons.Stamped.extend({
-    // The canvas only repaints inside the bounds a marker claims, and the
-    // name reaches past the radius.
-    _updateBounds() {
-      L.CircleMarker.prototype._updateBounds.call(this);
-      const tag = this.options.tag;
-      if (!tag) return;
-      const half = tag.width / DENSITY / 2 + 1;
-      this._pxBounds.extend(this._point.subtract([half, this._radius + TAG_GAP + TAG_HEIGHT + 1]));
-      this._pxBounds.extend(this._point.add([half, 0]));
-    },
-    _updatePath() {
-      icons.Stamped.prototype._updatePath.call(this);
-      const tag = this.options.tag;
-      if (tag && this._renderer._drawing && !this._empty()) icons.stamp(this, tag, this._radius + TAG_GAP + TAG_HEIGHT / 2);
-    },
-  });
+  // A marker with, for a named mob, its name over it.
+  const Pin = icons.Tagged;
 
   const layers = {};
   for (const kind of Object.keys(KINDS)) {
@@ -157,10 +103,12 @@
   let asked = 0;
   let near = false;
 
-  // The named mobs on the map, as { data, marker }, in the order listed.
+  // The named mobs of this dimension, as { data, marker }, in the order
+  // listed.
   let named = [];
-  // The one chosen from the list: { entry, ring, timer }, or null.
-  let chosen = null;
+  // When the snapshot the world's markers were read from was taken, in
+  // milliseconds, or null where the answer did not say.
+  let snapshotAt = null;
   // What the list was last built from, so that an unchanged one is left
   // alone under the viewer's pointer.
   let rosterOf = '';
@@ -189,8 +137,11 @@
   }
 
   function dressAll(kinds) {
-    for (const kind of kinds) layers[kind].eachLayer(dress);
-    halo();
+    for (const kind of kinds) {
+      // A mark that has stepped aside is dressed too, for when it is back.
+      if (kind === 'mobs') named.forEach((entry) => dress(entry.marker));
+      else layers[kind].eachLayer(dress);
+    }
   }
 
   function pin(kind, m) {
@@ -206,7 +157,7 @@
       kind,
       data: m,
       sprite: null,
-      tag: kind === 'mobs' ? tagOf(m.n) : null,
+      tag: kind === 'mobs' ? icons.tag(m.n, style.color) : null,
     });
     dress(marker);
     return marker;
@@ -230,7 +181,6 @@
     }
     totals[kind] = made.length;
     if (kind !== 'mobs') return;
-    unchoose();
     named = made.sort((a, b) => str(a.data.n).localeCompare(str(b.data.n)) || a.data.x - b.data.x || a.data.z - b.data.z);
   }
 
@@ -239,7 +189,6 @@
     if (want === map.hasLayer(layers[kind])) return;
     if (!want) {
       map.removeLayer(layers[kind]);
-      if (kind === 'mobs') unchoose();
       return;
     }
     layers[kind].addTo(map);
@@ -247,30 +196,55 @@
 
   // --- the named mobs, by name ---------------------------------------------
 
-  function unchoose() {
-    if (!chosen) return;
-    clearTimeout(chosen.timer);
-    chosen.ring.remove();
-    chosen = null;
-    for (const button of roster.querySelectorAll('[aria-current]')) button.removeAttribute('aria-current');
-  }
+  const inspect = () => app.inspect || null;
+  // The id the live layer would know this mob by, where the snapshot gave
+  // one.
+  const idOf = (data) => (typeof data.i === 'string' && data.i !== '' ? data.i : null);
+  // What the card is opened under for it, which is how the list knows
+  // which of its entries the card is about.
+  const keyOf = (data) => (idOf(data) ? `m:${idOf(data)}` : `s:${drawn.dimension}:${data.x + 0.5}:${data.y}:${data.z + 0.5}`);
 
-  // Keeps the ring round the chosen mob as large as what it circles.
-  function halo() {
-    if (chosen) chosen.ring.setRadius(chosen.entry.marker.getRadius() + 5);
-  }
-
-  function choose(entry, button) {
-    const dimension = app.dimension();
+  // Opens the card about a named mob: live where the live layer has it,
+  // and otherwise where the snapshot left it, said as that.
+  function examine(entry, go) {
+    const card = inspect();
     const { data } = entry;
+    const dimension = drawn.dimension || app.dimension();
+    const id = idOf(data);
+    const now = card && id ? card.where(id) : null;
     // The middle of the block, not its north-west corner.
-    if (!dimension || !app.go(dimension, data.x + 0.5, data.z + 0.5)) return;
-    unchoose();
-    const ring = L.circleMarker(entry.marker.getLatLng(), { renderer, interactive: false, fill: false, color: '#ffffff', weight: 3, opacity: 1 });
-    ring.addTo(map);
-    chosen = { entry, ring, timer: setTimeout(unchoose, CHOSEN_MS) };
-    halo();
-    button.setAttribute('aria-current', 'true');
+    const at = now || { x: data.x + 0.5, y: data.y, z: data.z + 0.5 };
+    if (go && dimension) app.go(dimension, at.x, at.z);
+    if (!card) return;
+    card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, savedAt: snapshotAt ?? undefined });
+  }
+
+  // Takes the mark of a mob the live layer is drawing off the map, and
+  // puts back the mark of one it no longer is. The name stays on the map
+  // either way: the live marker wears it.
+  function aside() {
+    const card = inspect();
+    if (!card) return;
+    let back = false;
+    for (const entry of named) {
+      const id = idOf(entry.data);
+      if (!id) continue;
+      const live = card.drawn(id);
+      if (live === !layers.mobs.hasLayer(entry.marker)) continue;
+      if (live) layers.mobs.removeLayer(entry.marker);
+      else layers.mobs.addLayer(entry.marker);
+      back = back || !live;
+    }
+    // A mark put back was added last, and would paint over what moves.
+    if (back && map.hasLayer(layers.mobs)) stack();
+  }
+
+  function current() {
+    const key = inspect() ? inspect().key() : null;
+    for (const button of roster.querySelectorAll('button')) {
+      if (key !== null && button.dataset.key === key) button.setAttribute('aria-current', 'true');
+      else button.removeAttribute('aria-current');
+    }
   }
 
   // The list under the row: every named mob in this dimension, by name,
@@ -294,13 +268,14 @@
       what.className = 'what';
       button.append(icons.picture(pictureOf('mobs', data)), swatch, name, what);
       button.title = `${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;
-      if (chosen && chosen.entry === entry) button.setAttribute('aria-current', 'true');
-      button.addEventListener('click', () => choose(entry, button));
+      button.dataset.key = keyOf(data);
+      button.addEventListener('click', () => examine(entry, true));
       const item = document.createElement('li');
       item.append(button);
       list.append(item);
     }
     roster.replaceChildren(list);
+    current();
   }
 
   // The canvas paints in the order markers were added, so a layer switched
@@ -310,7 +285,6 @@
     for (const kind of ['waypoints', 'mobs']) {
       if (map.hasLayer(layers[kind])) layers[kind].eachLayer((marker) => marker.bringToFront());
     }
-    if (chosen) chosen.ring.bringToFront();
     if (app.liveToFront) app.liveToFront();
   }
 
@@ -335,6 +309,8 @@
       rows.get(kind).setNote(more[kind] > 0 ? `${fmt(more[kind])} more are not shown` : '');
     });
     if (added) stack();
+    // With the named mobs off, a loaded one goes without its name too.
+    if (inspect()) inspect().labels(!rows.has('mobs') || rows.get('mobs').enabled);
     if (!rows.has('mobs')) return;
     if (rows.get('mobs').enabled && named.length > 0) {
       buildRoster();
@@ -345,7 +321,6 @@
   }
 
   function clear() {
-    unchoose();
     for (const kind of Object.keys(KINDS)) {
       layers[kind].clearLayers();
       totals[kind] = null;
@@ -354,6 +329,7 @@
     drawn = { dimension: null, etag: null };
     waypoints = [];
     named = [];
+    snapshotAt = null;
     paint();
   }
 
@@ -383,6 +359,8 @@
     available.world = true;
     if (drawn.dimension === dimension && etag && drawn.etag === etag) return false;
     drawn = { dimension, etag };
+    const at = Date.parse(doc.at);
+    snapshotAt = Number.isFinite(at) ? at : null;
     for (const kind of WORLD_KINDS) {
       fill(kind, Array.isArray(doc[kind]) ? doc[kind] : []);
       more[kind] = (doc.more && Number.isFinite(doc.more[kind])) ? doc.more[kind] : 0;
@@ -428,7 +406,6 @@
     if (drawn.dimension !== null && drawn.dimension !== dimension) {
       // Another dimension's markers are wrong here, not merely old.
       for (const kind of WORLD_KINDS) layers[kind].clearLayers();
-      unchoose();
       named = [];
       drawn = { dimension: null, etag: null };
       drawWaypoints(dimension);
@@ -439,7 +416,10 @@
     const redrawn = await Promise.all(jobs);
     if (turn !== asked) return;
     paint();
-    if (redrawn.some(Boolean)) stack();
+    if (redrawn.some(Boolean)) {
+      aside();
+      stack();
+    }
   }
 
   function sync() {
@@ -460,12 +440,22 @@
     paint();
   }
 
+  // A click or a tap on a named mob's mark, or on its name, is a question
+  // about that mob, and is not also a click on the map under it.
+  layers.mobs.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    const entry = named.find((other) => other.marker === e.layer);
+    if (entry) examine(entry, false);
+  });
+
   zoomed();
   paint();
   map.on('zoomend', zoomed);
   document.addEventListener('mcmap:icons', () => dressAll(Object.keys(KINDS)));
   document.addEventListener('mcmap:pictures', () => dressAll(Object.keys(KINDS)));
   document.addEventListener('mcmap:names', renamed);
+  document.addEventListener('mcmap:live', aside);
+  document.addEventListener('mcmap:inspect', current);
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
   sync();

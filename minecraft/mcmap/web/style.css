@@ -355,7 +355,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   z-index: 1090;
   display: grid;
   gap: 0.45rem;
-  width: 17rem;
+  width: 18.5rem;
   max-width: calc(100% - 1.2rem);
   padding: 0.5rem 0.6rem;
   background: rgba(29, 32, 38, 0.94);
@@ -376,7 +376,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .inspect-note { margin: 0; color: #f0a35e; font-variant-numeric: tabular-nums; }
 .inspect-note strong { font-weight: 600; }
 .inspect-actions { display: flex; gap: 0.4rem; }
-.inspect-actions button { flex: 1; }
+.inspect-actions button { flex: 1; padding-inline: 0.4rem; white-space: nowrap; }
 
 /* While logged out the map and its controls are not there to use. */
 .locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .foot { display: none; }

@@ -19,14 +19,14 @@ func TestMapPicturesAreDecodedOnceAndStampedOnTheCanvas(t *testing.T) {
 			t.Errorf("icons.js no longer has %s", need)
 		}
 	}
-	for _, need := range []string{"L.canvas(", "ctx.drawImage(", "const Mob = icons.Stamped;", "icons.mob(", "icons.sprite(pic, colour, HEAD_RADIUS, paintHead)", "app.liveRenderer = renderer;"} {
+	for _, need := range []string{"L.canvas(", "ctx.drawImage(", "const Mob = icons.Tagged;", "icons.mob(", "icons.sprite(pic, colour, HEAD_RADIUS, paintHead)", "app.liveRenderer = renderer;"} {
 		if !bytes.Contains(live, []byte(need)) {
 			t.Errorf("live.js no longer has %s", need)
 		}
 	}
 	// The markers go on the live layer's canvas, where both can be hovered,
 	// each as one stamp of a sprite it shares with every other of its sort.
-	for _, need := range []string{"const renderer = app.liveRenderer ||", "const Pin = icons.Stamped.extend(", "icons.plate(", "icons.mob("} {
+	for _, need := range []string{"const renderer = app.liveRenderer ||", "const Pin = icons.Tagged;", "icons.plate(", "icons.mob("} {
 		if !bytes.Contains(markers, []byte(need)) {
 			t.Errorf("markers.js no longer has %s", need)
 		}

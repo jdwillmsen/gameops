@@ -249,6 +249,79 @@
     },
   });
 
+  // A name tag may be 64 characters; the label on the map shows this many
+  // and the tooltip, the list and the card show them all.
+  const TAG_LENGTH = 24;
+  const TAG_HEIGHT = 18;
+  const TAG_GAP = 3;
+  const TAG_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+  // name + colour -> the label, drawn once however many frames stamp it.
+  const tags = new Map();
+
+  // A mob's name tag, drawn once to be stamped over its marker. Text put
+  // on a canvas is drawn and never parsed.
+  function tag(name, colour) {
+    const letters = [...str(name)];
+    if (letters.length === 0) return null;
+    const key = `${colour}|${str(name)}`;
+    if (tags.has(key)) return tags.get(key);
+    const said = letters.length > TAG_LENGTH ? `${letters.slice(0, TAG_LENGTH - 1).join('')}…` : letters.join('');
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.font = TAG_FONT;
+    const width = Math.ceil(ctx.measureText(said).width) + 10;
+    canvas.width = width * DENSITY;
+    canvas.height = TAG_HEIGHT * DENSITY;
+    ctx.scale(DENSITY, DENSITY);
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(0.5, 0.5, width - 1, TAG_HEIGHT - 1, 3);
+    else ctx.rect(0.5, 0.5, width - 1, TAG_HEIGHT - 1);
+    ctx.fillStyle = 'rgba(20, 22, 26, 0.88)';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = colour;
+    ctx.stroke();
+    // Sizing the canvas reset the font.
+    ctx.font = TAG_FONT;
+    ctx.fillStyle = colour;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(said, width / 2, TAG_HEIGHT / 2 + 0.5);
+    // Names are players' to choose, so there is no end of them.
+    if (tags.size > 2048) tags.clear();
+    tags.set(key, canvas);
+    return canvas;
+  }
+
+  // A marker with, where it has one, a name over it. The name is part of
+  // the marker to the pointer as it is to the eye: a click on the label is
+  // a click on what it labels.
+  const Tagged = Stamped.extend({
+    // The canvas only repaints inside the bounds a marker claims, and the
+    // name reaches past the radius.
+    _updateBounds() {
+      L.CircleMarker.prototype._updateBounds.call(this);
+      const worn = this.options.tag;
+      if (!worn) return;
+      const half = worn.width / DENSITY / 2 + 1;
+      this._pxBounds.extend(this._point.subtract([half, this._radius + TAG_GAP + TAG_HEIGHT + 1]));
+      this._pxBounds.extend(this._point.add([half, 0]));
+    },
+    _updatePath() {
+      Stamped.prototype._updatePath.call(this);
+      const worn = this.options.tag;
+      if (worn && this._renderer._drawing && !this._empty()) stamp(this, worn, this._radius + TAG_GAP + TAG_HEIGHT / 2);
+    },
+    _containsPoint(p) {
+      if (L.CircleMarker.prototype._containsPoint.call(this, p)) return true;
+      const worn = this.options.tag;
+      if (!worn) return false;
+      const reach = this._clickTolerance();
+      const top = this._point.y - this._radius - TAG_GAP - TAG_HEIGHT;
+      return Math.abs(p.x - this._point.x) <= worn.width / DENSITY / 2 + reach && p.y >= top - reach && p.y <= top + TAG_HEIGHT + TAG_GAP + reach;
+    },
+  });
+
   // Pictures of versions nothing can ask for any more would otherwise pile
   // up for as long as the page is open: a head has a new version with every
   // change of skin. Those of a version still listed are kept, so nothing
@@ -332,6 +405,8 @@
     paint,
     stamp,
     Stamped,
+    tag,
+    Tagged,
   };
 
   document.addEventListener('mcmap:view', sync);
