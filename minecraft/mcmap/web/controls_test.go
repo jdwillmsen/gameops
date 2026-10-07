@@ -158,7 +158,9 @@ func TestShortcutsStayOutOfTheWayOfTyping(t *testing.T) {
 	for _, need := range []string{
 		"if (!enabled || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;",
 		"if (document.body.classList.contains('locked') || typing(e.target)) return;",
-		"node.matches('input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])') || node.closest('dialog[open]') !== null",
+		"(node.matches('input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])') && !node.matches(NOT_TEXT)) || node.closest('dialog[open]') !== null",
+		// A switch takes no text, so the focus resting on one silences nothing.
+		"const NOT_TEXT = 'input[type=\"checkbox\"], input[type=\"radio\"],",
 		"if (!node || node.disabled || node.closest('[hidden]')) return false;",
 		"el.dialog.showModal();",
 		"if (e.target === el.dialog) el.dialog.close();",
@@ -167,6 +169,10 @@ func TestShortcutsStayOutOfTheWayOfTyping(t *testing.T) {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("menu.js no longer has %s", need)
 		}
+	}
+	// Space and Enter are a focused switch's and a focused button's own.
+	if regexp.MustCompile(`(?m)^    ('?[ ]'?|Enter|' '): \(\) =>`).Match(js) {
+		t.Error("menu.js makes a shortcut of Space or Enter")
 	}
 	// Every key the script acts on is in the list the viewer is shown.
 	page := read(t, "index.html")
