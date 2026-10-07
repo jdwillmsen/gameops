@@ -1261,6 +1261,21 @@ changed by clearing. Pasting `x z`, `x, z` or `x y z` into X, with or
 without the axes' letters, fills X and Z from it (`y` is not needed by a
 map) and moves to Go.
 
+**Chunk focus.** With Grid on, the chunk under the pointer is outlined and
+a box under the zoom buttons says which it is, by its chunk coordinates,
+the blocks it covers, and in the Overworld whether it is a slime chunk
+(`chunk.js`, by the same function the slime layer uses). The chunk of
+block -1 is chunk -1: every coordinate is floored, never truncated. A click
+or a tap pins the chunk: its outline turns green and stays through panning
+and zooming, the box goes on describing it while the pointer is elsewhere,
+and Unpin or a second click on it lets it go. Chunk X, Z and Go in the box
+take the map to a chunk by its own coordinates and pin it. A pin belongs to
+the dimension it was made in. From further out than four pixels to a chunk
+the focus is the region instead, 32 chunks square, with its chunk and block
+ranges and how many of its 1,024 chunks are slime chunks, so that zooming
+out outlines one square and not a thousand. The Nether and the End get the
+same coordinates and are said to have no slime chunks.
+
 **The refresh countdown.** The footer counts down to the next refresh of
 the terrain and the markers, from `snapshotAt` and `refreshSeconds` and the
 server's own clock as its `Date` header gives it. The service counts its

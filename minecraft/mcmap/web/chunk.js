@@ -1,0 +1,201 @@
+'use strict';
+
+// The chunk under the pointer, while the grid is on: which chunk it is,
+// the blocks it covers and whether slimes spawn in it, with an outline on
+// the map. A click pins one, so that it can be read off and found again
+// after panning, and a chunk can be gone to by its own coordinates. From
+// too far out to tell one chunk from the next, the same is said of the
+// region, the 32 chunks square the grid falls back to.
+(() => {
+  const app = window.mcmap;
+  if (!app || !app.map) return;
+  const { map } = app;
+
+  const el = {
+    grid: document.getElementById('grid'),
+    box: document.getElementById('chunk'),
+    title: document.getElementById('chunk-title'),
+    state: document.getElementById('chunk-state'),
+    blocks: document.getElementById('chunk-blocks'),
+    slime: document.getElementById('chunk-slime'),
+    pointer: document.getElementById('chunk-pointer'),
+    form: document.getElementById('chunk-go'),
+    x: document.getElementById('chunk-x'),
+    z: document.getElementById('chunk-z'),
+    unpin: document.getElementById('chunk-unpin'),
+  };
+  if (Object.values(el).some((node) => !node)) return;
+
+  const CHUNK = 16;
+  const REGION = 32;
+  // A chunk narrower than this many pixels cannot be pointed at, and its
+  // outline would be a dot.
+  const MIN_PIXELS = 4;
+  // No closer than this is needed to see a chunk whole.
+  const GO_ZOOM = 1;
+  // Past the edge of any Bedrock world, in chunks.
+  const WORLD_EDGE = 2_000_000;
+
+  const fmt = (n) => n.toLocaleString('en-US');
+  const say = (node, text) => {
+    if (node.textContent !== text) node.textContent = text;
+  };
+
+  // A cell is a chunk or a region: { unit, x, z }, in its own coordinates.
+  // Math.floor, so that the chunk west of the origin is -1 and not 0.
+  const sizeOf = (unit) => (unit === 'region' ? CHUNK * REGION : CHUNK);
+  const unitNow = () => (CHUNK * 2 ** map.getZoom() >= MIN_PIXELS ? 'chunk' : 'region');
+  const cellAt = (latlng, unit) => ({ unit, x: Math.floor(latlng.lng / sizeOf(unit)), z: Math.floor(latlng.lat / sizeOf(unit)) });
+  const same = (a, b) => Boolean(a) && Boolean(b) && a.unit === b.unit && a.x === b.x && a.z === b.z;
+  const boundsOf = (cell) => {
+    const size = sizeOf(cell.unit);
+    return [[cell.z * size, cell.x * size], [(cell.z + 1) * size, (cell.x + 1) * size]];
+  };
+
+  const outline = (style) => L.rectangle([[0, 0], [CHUNK, CHUNK]], { interactive: false, ...style });
+  const hoverBox = outline({ color: '#ffffff', weight: 1, fillColor: '#ffffff', fillOpacity: 0.14 });
+  const pinBox = outline({ color: '#6ecf7a', weight: 2.5, fillColor: '#6ecf7a', fillOpacity: 0.1 });
+
+  let hovered = null;
+  let pinned = null;
+  // The dimension a pin belongs to: chunk 3, -2 of the Nether is not the
+  // chunk 3, -2 that was pinned in the Overworld.
+  let pinnedIn = null;
+
+  const on = () => el.grid.checked && !document.body.classList.contains('locked') && Boolean(app.dimension());
+
+  function slimeOf(cell) {
+    const dimension = app.dimension();
+    if (dimension !== 'overworld') return `No slime chunks in ${app.label(dimension)}.`;
+    if (!app.isSlimeChunk) return '';
+    if (cell.unit === 'chunk') return app.isSlimeChunk(cell.x, cell.z) ? 'Slime chunk.' : 'Not a slime chunk.';
+    let n = 0;
+    for (let dz = 0; dz < REGION; dz++) {
+      for (let dx = 0; dx < REGION; dx++) if (app.isSlimeChunk(cell.x * REGION + dx, cell.z * REGION + dz)) n += 1;
+    }
+    return `${fmt(n)} of its ${fmt(REGION * REGION)} chunks are slime chunks.`;
+  }
+
+  const titleOf = (cell) => `${cell.unit === 'region' ? 'Region' : 'Chunk'} ${fmt(cell.x)}, ${fmt(cell.z)}`;
+
+  function rangeOf(cell) {
+    const size = sizeOf(cell.unit);
+    const blocks = `Blocks X ${fmt(cell.x * size)} to ${fmt(cell.x * size + size - 1)}, Z ${fmt(cell.z * size)} to ${fmt(cell.z * size + size - 1)}`;
+    if (cell.unit === 'chunk') return blocks;
+    return `Chunks X ${fmt(cell.x * REGION)} to ${fmt(cell.x * REGION + REGION - 1)}, Z ${fmt(cell.z * REGION)} to ${fmt(cell.z * REGION + REGION - 1)}. ${blocks}`;
+  }
+
+  // What the slime line was last worked out for: a region's is a thousand
+  // chunks' worth, and the pointer moves many times within one cell.
+  let slimeFor = '';
+
+  function paint() {
+    const showing = on();
+    el.box.hidden = !showing;
+    document.body.classList.toggle('chunking', showing);
+    if (!showing) {
+      hoverBox.remove();
+      pinBox.remove();
+      return;
+    }
+    if (pinned) {
+      pinBox.setBounds(boundsOf(pinned));
+      if (!map.hasLayer(pinBox)) pinBox.addTo(map);
+    } else {
+      pinBox.remove();
+    }
+    if (hovered && !same(hovered, pinned)) {
+      hoverBox.setBounds(boundsOf(hovered));
+      if (!map.hasLayer(hoverBox)) hoverBox.addTo(map);
+    } else {
+      hoverBox.remove();
+    }
+    const shown = pinned || hovered;
+    el.unpin.hidden = !pinned;
+    if (!shown) {
+      say(el.title, 'No chunk chosen');
+      say(el.state, '');
+      say(el.blocks, matchMedia('(hover: none)').matches ? 'Tap the map to pin a chunk.' : 'Point at the map, or click it to pin a chunk.');
+      say(el.slime, '');
+      say(el.pointer, '');
+      slimeFor = '';
+      return;
+    }
+    say(el.title, titleOf(shown));
+    say(el.state, pinned ? 'pinned' : 'under the pointer');
+    say(el.blocks, `${rangeOf(shown)}.`);
+    const key = `${app.dimension()}|${shown.unit}|${shown.x}|${shown.z}`;
+    if (key !== slimeFor) {
+      slimeFor = key;
+      say(el.slime, slimeOf(shown));
+    }
+    say(el.pointer, pinned && hovered && !same(hovered, pinned) ? `Pointer: ${titleOf(hovered).toLowerCase()}.` : '');
+  }
+
+  function pin(cell) {
+    pinned = cell;
+    pinnedIn = cell ? app.dimension() : null;
+    paint();
+  }
+
+  // Takes the map to a chunk by its own coordinates and pins it, with the
+  // grid switched on, since that is what shows it.
+  function go(cx, cz) {
+    if (!Number.isInteger(cx) || !Number.isInteger(cz) || Math.abs(cx) > WORLD_EDGE || Math.abs(cz) > WORLD_EDGE) return false;
+    const dimension = app.dimension();
+    if (!dimension) return false;
+    if (!el.grid.checked) {
+      el.grid.checked = true;
+      el.grid.dispatchEvent(new Event('change'));
+    }
+    const cell = { unit: 'chunk', x: cx, z: cz };
+    map.setView([(cz + 0.5) * CHUNK, (cx + 0.5) * CHUNK], Math.max(map.getZoom(), GO_ZOOM));
+    pin(cell);
+    return true;
+  }
+
+  map.on('mousemove', (e) => {
+    if (!on()) return;
+    const cell = cellAt(e.latlng, unitNow());
+    if (same(cell, hovered)) return;
+    hovered = cell;
+    paint();
+  });
+  map.on('mouseout', () => {
+    if (!hovered) return;
+    hovered = null;
+    if (on()) paint();
+  });
+  // A click on a marker is the marker's and does not reach here; a click
+  // on the pinned cell lets it go.
+  map.on('click', (e) => {
+    if (!on()) return;
+    const cell = cellAt(e.latlng, unitNow());
+    pin(same(cell, pinned) ? null : cell);
+  });
+  // A hovered cell is of the unit the zoom had then.
+  map.on('zoomend', () => {
+    hovered = null;
+    if (on()) paint();
+  });
+
+  el.form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (el.x.value === '' || el.z.value === '') return;
+    go(Number(el.x.value), Number(el.z.value));
+  });
+  el.unpin.addEventListener('click', () => pin(null));
+  el.grid.addEventListener('change', paint);
+  document.addEventListener('mcmap:view', () => {
+    if (pinned && pinnedIn !== app.dimension()) {
+      pinned = null;
+      pinnedIn = null;
+    }
+    hovered = null;
+    slimeFor = '';
+    paint();
+  });
+
+  app.chunk = { go, pinned: () => pinned };
+  paint();
+})();
