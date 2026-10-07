@@ -23,6 +23,12 @@ const (
 	TrialChamber Kind = "trial_chamber"
 )
 
+// maxLocatedSpan is the widest box a located structure is drawn with. The
+// widest chamber in the FWB world is found across 214 blocks. Blocks laid
+// in a line join without end, and a box that wide is no one structure's:
+// it is left out and counted.
+const maxLocatedSpan = 512
+
 // located is how one kind is found.
 type located struct {
 	kind Kind
@@ -103,6 +109,10 @@ func (c *contents) locate() []Structure {
 		}
 		at := len(out)
 		for _, s := range joined {
+			if s.MaxX-s.MinX > maxLocatedSpan || s.MaxZ-s.MinZ > maxLocatedSpan {
+				c.stats.Skipped++
+				continue
+			}
 			out = append(out, *s)
 		}
 		// The most certain first, so that a list cut short keeps them;
