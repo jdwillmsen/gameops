@@ -1224,8 +1224,8 @@ is never crossed by its own trail and is still what a click on it reaches;
 hovering a line anywhere else names the player and the time it covers. The trails are asked for about once a
 minute and never more often; between answers the lines are carried forward
 from the live frames by the same rules the server records by, and the next
-answer replaces them. The row's switch is kept with the rest under
-`mcmap.layers`, and the window under `mcmap.trails`. A service without
+answer replaces them. The row's switch and the window are kept with
+everything else the page keeps (see Page controls). A service without
 trails answers 404 once, and the page then has no Trails row.
 
 ## Page controls
@@ -1235,12 +1235,9 @@ map, grouped as Live, Markers, Structures, Biomes and Overlays. A group
 appears once a layer registers a row in it, folds away, and has All and
 None. A row is a checkbox, a count, and where there is something to say a
 note under it, such as why nothing is predicted. The viewer's choices are
-kept in the browser under `mcmap.layers`, and which groups are folded under
-`mcmap.panel`. The filters the page had before the panel were kept under
-`mcmap.live`, `mcmap.markers` and `mcmap.structures`; a row with no choice
-saved yet takes the one saved there, so nobody's filters reset. The old
-single Structures switch, if it was off, carries over as Known, Predicted
-and Possible all off, and the old Live switch as paused.
+kept in the browser, in the `layers` part of the page's one record, and
+which groups are folded in its `panel` part (see What the page keeps,
+below).
 
 **What the live rows hold.** Under each live row is a list that opens: By
 player under Players, By type under Hostile, Passive, Villagers and Other,
@@ -1252,9 +1249,9 @@ back. A row a filter has cut says `Showing 225 of 451: filtered by type`
 and has a Show all types (or players) button whether or not its list is
 open. A list of more than six has a box that narrows it by text. A
 player's name in the list is a button that goes to them and opens their
-card. The filters are kept with the panel's other choices, in
-`mcmap.layers` under `live#mobs` and `live#players`, as `{ only, hidden }`
-with at most 200 hidden. A frame pays two set lookups an entity for them:
+card. The filters are kept with the panel's other choices, under
+`live#mobs` and `live#players`, as `{ only, hidden }` with at most 200
+hidden. A frame pays two set lookups an entity for them:
 a marker is put on the canvas or left off when its entity first appears,
 and again only when a filter changes. Measured in headless Chromium at
 1300 by 800 with 905 live mobs, 1,500 beds and 600 containers in view,
@@ -1291,9 +1288,11 @@ row.remove();
 
 A layer that keeps more than its switches, as the live layer keeps which
 types it shows, asks the panel to keep it beside them:
-`window.mcmap.layers.retain(group, name, value)` stores any JSON value in
-`mcmap.layers` under `<group>#<name>` (null removes it) and
-`recall(group, name)` reads it back, or null. What comes back is the
+`window.mcmap.layers.retain(group, name, value)` stores a small JSON value
+beside the switches under `<group>#<name>` (null removes it) and
+`recall(group, name)` reads it back, or null. Small is three levels of
+plain values, strings of up to 64 characters and lists of up to 200;
+anything else is dropped when it is read back. What comes back is the
 viewer's storage and is checked by whoever reads it.
 
 `onToggle` is called with the new value when the viewer changes the row,
@@ -1391,6 +1390,7 @@ where it was.
 | `P` | Pause or resume live positions |
 | `F` | Follow, or stop following, what the card is about |
 | `1` `2` `3` | Overworld, Nether, The End |
+| `V` | Opens the list of views; in it, `1` to `9` switches to the view with that number |
 | `S` | Go to the world spawn |
 | `M` | Go to the logged-in player and open their card, while they are online |
 | `+` `-` | Zoom in and out (`=` zooms in too) |
@@ -1403,7 +1403,7 @@ takes no text, and does not silence them), while the list itself is
 open, with Ctrl, Alt or the command key held, or while logged out. They
 are single keys, which a screen reader's own single keys and speech input
 can collide with, so the list has a switch that turns them all off, kept
-under `mcmap.shortcuts`; Escape is not one of them. With the map itself
+with the page's other settings; Escape is not one of them. With the map itself
 focused, zooming and the arrow keys are Leaflet's, as before.
 
 **Shorthand in the search box.** `120 -340`, `120, -340` or `120 64 -340`
@@ -1440,7 +1440,7 @@ overdue by` and counts up, asking every 20 seconds after the first two
 minutes. It starts again only when a new snapshot has been seen.
 
 **Live updates.** Beside the grid switch are Pause and an interval, both
-kept in the browser under `mcmap.liveControl`. The interval is chosen from
+kept in the browser. The interval is chosen from
 a menu (1, 2, 5, 10 or 30 seconds, 1 or 5 minutes) or, under Other, typed:
 a number with `s`, `m`, `h` or `d`, whole or not, alone or joined, such as
 `5`, `90s`, `1.5m`, `1m30s`, `2h` or `1d`; a bare number is seconds. What
@@ -1507,6 +1507,221 @@ a button.
 Everything here is a native button, checkbox or select: each is reached
 with Tab, worked with Space or Enter (the arrow keys, for the interval),
 and outlined while it has the focus.
+
+**What the page keeps.** Everything the viewer chooses is kept in the
+browser and nowhere else, as one record under `mcmap.settings`, written and
+read by `settings.js` alone; no other script touches the browser's storage.
+The record has a version (`v: 1`) and these parts:
+
+| Part | Holds |
+|---|---|
+| `layers` | Each row's switch as `"<group>/<id>": true`, and what a layer keeps beside them as `"<group>#<name>"` |
+| `panel` | Whether the layer panel is open, and which groups are folded |
+| `live` | `paused`, and `interval` in seconds |
+| `trails` | The window, as `seconds` |
+| `shortcuts` | Whether the single-key shortcuts are on |
+| `grid` | Whether the grid is on |
+| `biome` | The one biome picked out, or null |
+| `look` | The appearance settings |
+| `views` | The saved views, their order, which are hidden, and which the page opens with |
+
+Every part is read against a closed description: a value of the wrong type
+is put back to its default, a number out of range is brought to the nearer
+bound, and a key nobody described is dropped. The record may come to
+200,000 characters; a change that would take it past that is refused whole
+and said. A browser that refuses storage, or has no room left, gets a page
+that works the same on what it holds in memory, and the Views and
+Appearance sheets say that nothing will outlast the visit. A record
+written by a later version of the page is read for what this one knows and
+left as it is. A second tab's write is taken in, so that two tabs do not
+undo each other.
+
+Before there was one record, each script kept its own key, and they are
+carried over the first time the record is made:
+
+| Old key | Held | Becomes |
+|---|---|---|
+| `mcmap.layers` | The panel's switches and filters | `layers`, as it was |
+| `mcmap.panel` | `{ open, folded }` | `panel` |
+| `mcmap.liveControl` | `{ paused, interval }` | `live` |
+| `mcmap.trails` | `{ seconds }`, or `{ hours }` before that | `trails`, in seconds |
+| `mcmap.shortcuts` | `{ on }` | `shortcuts` |
+| `mcmap.live` | The filters before the panel, and one Live switch | A row's switch where `layers` has none; the switch off becomes `live.paused` |
+| `mcmap.markers` | The filters before the panel | A row's switch where `layers` has none |
+| `mcmap.structures` | The filters before the panel, and one Structures switch | A row's switch where `layers` has none; the switch off becomes Known, Predicted and Possible off |
+
+None of the old keys is ever removed, and the first five are still written
+in the form they always had whenever their part changes: the page and its
+scripts are cached apart for five minutes, and a script from before reads
+only those. A script that meets a page from before `settings.js` works
+from its defaults and keeps nothing for those minutes. The grid and the
+biome picked out were not kept before and are now.
+
+**Views.** A view is a named snapshot of what the map shows and how: every
+row's switch, the mob and player filters, the biome picked out, the trails'
+window, the grid, the live interval, and, each by a checkbox when it is
+saved, the place (dimension, centre, zoom and a pinned chunk) and the
+appearance settings. Views is a button in the bar, and in More on a small
+screen; it opens a sheet that lists them. Choosing one, or pressing its
+number, switches to it and shuts the sheet; a line over the map says which,
+and what of it could not be done. Under Edit a view can be renamed, updated
+to what the map shows now, moved up or down, marked as what the page opens
+with, copied as a link, and deleted, with Undo offered until something else
+is done. Three views come with the page and are not kept in the record:
+Everything (players, mobs, markers, structures and trails), Exploring
+(players, waypoints, structures, biomes and the world spawn, with no mobs)
+and Base (players, named mobs, beds, containers and waypoints). They cannot be
+renamed or deleted, and can be hidden and shown again. The page keeps up to
+50 views, each with a name of up to 40 characters, with no control
+characters and none of the marks that turn the direction of writing round.
+
+Switching happens in one turn of the page: the record is changed once,
+every row is switched before any layer is told, and a layer that listens
+with one function for all its rows redraws once. Measured in headless
+Chromium with 907 live mobs and 2,100 markers in view, at 1300 by 800 and
+at 360 by 740, over 56 switches: one between the built-in views holds the
+page for 3 to 7 ms and the next frame is drawn 15 to 32 ms after the
+press; one that also changes the theme and the marker size holds it for
+13 to 19 ms. No switch made a long task. The view the page opens with is put into the
+record by `settings.js` in the head, before any other script has read its
+part, so nothing is drawn one way and then another; a place named in the
+address wins over the view's own. A view may name a layer the page no
+longer has or the server does not offer, a type of mob nobody has heard
+of, a biome the dimension does not hold or a dimension that is not
+rendered: the rest of it is applied, and the line over the map says what
+was left out. A row that is only greyed out for now, as Slime chunks is in
+the Nether, is switched all the same.
+
+**A view in a link or a file.** Copy link to this view makes an address
+with one more part than the page's own: `#<dimension>/<x>/<z>/<zoom>/<what
+is open>/<view>`. An address without the sixth part reads exactly as it
+did, and a page from before views reads one with it as far as it
+understands. A view saved with its place puts that place in the first
+parts; one saved without says `-/0/0/0`, which is no dimension, so whoever
+opens it stays where their own page would start. The view is `v1.` and a
+small JSON object in the URL-safe base64 alphabet: `n` the name, `l` one
+character a known layer (`1` on, `0` off, `-` not said), `x` any other
+layer, `m` the mob filter, `b` the biome, `t` the trails' window, `i` the
+interval, `g` the grid, `p` and `q` the place and its pin, `a` the
+appearance settings in a fixed order. The two fixed lists only ever grow at
+the end. Which players a view hides is never put in a link. The part may be
+1,800 characters; a view of every layer with a filter, its place and its
+appearance is 375, and one too long to fit is not cut short but said, with the
+file offered instead.
+
+A link is read before any of it is used: its length, its alphabet, that
+it is UTF-8 and JSON, that it has no key outside the closed set, and then,
+as a view, against the same description the record is, strictly, so that
+one wrong value refuses the whole. A refusal is a sentence of the page's
+own, with nothing from the link in it. A link that is read is only an
+offer: the sheet opens with the view set apart at the top, under its name
+as text, with Show it, Save as and Dismiss. Showing it changes what the
+map shows and nothing that is kept beyond that; saving it adds a view and
+replaces none; and the offer is gone on a reload.
+
+Export to a file writes the whole record as `mcmap-settings.json`. Import
+reads a file of up to 300,000 bytes by the same strict description, says
+what it will do, and waits to be told: the file's views are added to the
+viewer's own, never in the place of one, and its other parts take the
+place of theirs, on the page at once.
+
+**Appearance.** Appearance is beside Views. Each setting marks its default,
+and Reset to defaults puts them all back.
+
+| Setting | Values (default first) |
+|---|---|
+| Theme | Dark, light, high contrast, or the same as the system |
+| Marker size | Normal, small, large |
+| Label size | Normal, small, large |
+| Names of named mobs, of players, of waypoints | Always shown, under the pointer, never; each separately |
+| Mobs and players | Pictures, or plain dots |
+| Beds, containers and waypoints | Pictures, or plain rings |
+| Biome tint, trails, slime chunks | 60%, 100% and 100%, each from 10% to 100% |
+| Panels | Comfortable, compact |
+| Motion | The same as the system, reduced, full |
+| Coordinates | Blocks, or blocks and the chunk |
+
+Every colour on the page is a custom property named once for each theme at
+the top of `style.css`, and what is drawn on a canvas reads the same names
+through `settings.colour(name)`. The terrain is the same in every theme,
+so a marker keeps a dark outline and a dark backing behind its picture in
+all of them; a theme changes the page, its panels, and the plates that
+labels are written on. A change of theme, size or label size composes the
+sprites and name tags anew from the pictures already decoded and restyles
+the markers in place; nothing is fetched again. A larger marker is the
+next whole number of screen pixels to a texture pixel (twice the size, or
+one and a half times on a dense screen), so pixel art is never blended on
+the way up; a smaller one is the 12 pixels a baby has always been drawn
+at, and is blended as a baby is. Reduced motion stills the page's own
+animations and the map's zoom, pan and fade. Compact panels leave a
+finger's 44 pixels alone on a small screen.
+
+The light and the high-contrast themes are held to 4.5 to one for text and
+3 to one for the edge of a control or a marker, over the lightest and the
+darkest terrain where it is drawn on the map, by a test over the
+stylesheet's own values. Measured on the page as drawn, over 1,768 pieces
+of text in eight states of the page at two widths: the lowest text is 6.81
+to one in the light theme and 8.22 in high contrast, the lowest name tag
+6.95 and 12.04, and the lowest edge 3.80 and 8.28. The dark theme is the
+page as it was, and was not changed to meet them.
+
+**Settings that follow a player (a design, not built).** Everything above
+stays in one browser. This is how it would follow a player to another.
+
+*What is stored, and where.* One JSON document a player, on the map's
+volume at `settings/<xuid>.json`, written to a temporary file and renamed.
+It holds the parts of the record that are the player's and not the
+device's: `views` (without the hidden players of each view, which are
+other people's gamertags) and `look`, with a revision number and the time
+of the write. The layer switches as they stand, the panel, the pause and
+the grid stay with the device; a view is how they travel. The server reads
+the document against the same closed description the page uses, kept as
+one set of test vectors that both the Go and the page's checks must pass.
+
+*Limits.* 64 KiB a document, 50 views, names of 40 characters, one write
+every five seconds a session and 2,000 documents in all, the least
+recently written going first: 128 MB at the very worst and a few kilobytes
+a player in practice.
+
+*Endpoints.* All behind the session, with the XUID taken from it and never
+from the request, `Cache-Control: no-store`, and the cross-origin
+protection the page's other writes have.
+
+| Request | Answers |
+|---|---|
+| `GET /api/settings` | `200` with `{ rev, updatedAt, views, look }` and `ETag: "<rev>"`, `304`, or `204` for a player with none |
+| `PUT /api/settings` with `If-Match: "<rev>"` | `200 { rev }`; `412` with the document as it stands; `413` too large; `422` not valid; `429` too soon |
+| `DELETE /api/settings` | `204`, and the document is gone |
+
+*Two devices.* The page pulls on load and pushes two seconds after a
+change. A push made against an old revision is refused with what the
+server has, and the page merges and pushes once more: views by id, each
+with the time it was last changed, the later one kept and the other saved
+beside it as "<name> (other device)" if both changed; a deleted view kept
+as a tombstone for 30 days so that it is not brought back; `look` whole,
+by the later change; the order the server's, with views only this device
+has at the end.
+
+*Privacy.* No endpoint takes an XUID or a gamertag, so no player can ask
+for another's. The document is not logged, only its size, and is not in
+any metric. Delete removes it at once.
+
+*Logged out.* A map with no login, or a page that is logged out, works
+from the browser's record exactly as it does now. On logging in: with
+nothing on the server, the page asks once whether these settings should
+follow the player; with a document there and a browser at its defaults,
+the document is taken; with both, they are merged as above. Logging out
+leaves the browser's record as it is, marked with whose it was, and a
+different player logging in is offered it as an import, not given it.
+
+*Cost.* One conditional GET a page load and one small PUT a change; about
+300 lines of Go with its tests, and as much again in the page.
+
+*What to build first.* (1) The store, GET and PUT with the revision, the
+limits and the checks. (2) In the page, pull on load and push after a
+change, with a refused push answered by a choice of "use the other
+device's" or "keep this one's" and no merging. (3) Merging by view, with
+tombstones. (4) DELETE, and a switch to keep this device out of it.
 
 ## Login
 
