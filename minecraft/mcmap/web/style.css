@@ -621,7 +621,7 @@ kbd, .keys code {
 .more-title, .more-note, .more-word { display: none; }
 
 @media (max-width: 720px), (max-height: 480px) {
-  html, body { height: 100dvh; }
+  html, body { height: 100vh; height: 100dvh; }
   .compact-only { display: inline-flex; align-items: center; justify-content: center; }
   .compact-only[hidden] { display: none; }
 
@@ -671,6 +671,7 @@ kbd, .keys code {
     left: 0;
     right: 0;
     width: auto;
+    max-height: min(60vh, calc(100vh - 7rem));
     max-height: min(60dvh, calc(100dvh - 7rem));
     margin: 0;
     border-width: 0 0 1px;
@@ -678,8 +679,11 @@ kbd, .keys code {
   }
   .search-panel li { min-height: 44px; align-content: center; }
 
-  /* More: everything else the bar holds, in parts with a title each. */
+  /* More: everything else the bar holds, in parts with a title each.
+     Logged out there is nothing in it to use, so there is no button for
+     it and no sheet of bare titles. */
   .more { display: none; }
+  .locked .more-open, .locked.more-shown .more { display: none; }
   .more-shown .more {
     display: grid;
     gap: 0.9rem;
@@ -688,7 +692,10 @@ kbd, .keys code {
     left: 0;
     right: 0;
     z-index: 1250;
-    max-height: calc(100dvh - 100% - 3.5rem);
+    /* The first is for a browser without the dynamic viewport's units,
+       which would otherwise have no limit at all and a sheet too tall to
+       scroll. */
+    max-height: min(80vh, calc(100vh - 7rem));
     max-height: min(80dvh, calc(100dvh - 7rem));
     overflow-y: auto;
     padding: 0.75rem max(0.75rem, env(safe-area-inset-right)) 0.9rem max(0.75rem, env(safe-area-inset-left));
@@ -787,7 +794,11 @@ kbd, .keys code {
   /* Each part on a line of its own here, so no dot is needed to part them. */
   .stat .then:not(:empty):not([hidden])::before { content: none; }
 
-  .sheet { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .sheet {
+    width: calc(100vw - 1rem);
+    max-height: calc(100vh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
   .facts { grid-template-columns: minmax(5.5rem, 40%) 1fr; }
 }
 
@@ -806,7 +817,14 @@ kbd, .keys code {
   #layers-body { top: 0; left: auto; bottom: 0; width: min(22rem, 55%); max-height: none; border-width: 0 0 0 1px; border-radius: 12px 0 0 12px; padding-top: 3.4rem; }
   /* More likewise keeps to the right, so that there is map beside it to
      touch. */
-  .more-shown .more { left: auto; width: min(24rem, 60%); max-height: calc(100dvh - 100%); border-left: 1px solid var(--line); border-radius: 0 0 0 10px; }
+  .more-shown .more {
+    left: auto;
+    width: min(24rem, 60%);
+    max-height: calc(100vh - 3.6rem - env(safe-area-inset-top));
+    max-height: calc(100dvh - 3.6rem - env(safe-area-inset-top));
+    border-left: 1px solid var(--line);
+    border-radius: 0 0 0 10px;
+  }
   .layers.open #layers-toggle { z-index: 1; }
   .inspect { right: auto; width: 18.5rem; max-width: calc(100% - 1rem); }
   .stage:has(.layers.open) .inspect { display: grid; max-width: calc(45% - 1rem); }
