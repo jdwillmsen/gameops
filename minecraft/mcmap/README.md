@@ -1321,7 +1321,12 @@ drag that starts on a marker pans the map and opens nothing.
 Follow keeps the map centred on the entity at the zoom the viewer has, and
 draws a solid ring round it; an entity that is only inspected has a dashed
 one. Dragging the map or panning it with the arrow keys turns Follow off
-and leaves the card open. Zooming does not.
+and leaves the card open. Zooming does not. While it is on, the button reads
+Following and is filled, and is still the pressed toggle it was to a
+screen reader; pressing it again stops. Whatever turns it off, the button,
+a drag, an arrow key, the entity going, another dimension or the card
+closing, the button goes back to Follow and a status line that is read out
+and not shown says `Following <name>.` or `No longer following <name>.`
 
 The card finds its entity again by the id each record carries (`i`), which
 the game gives a player and a mob alike and keeps for as long as they
