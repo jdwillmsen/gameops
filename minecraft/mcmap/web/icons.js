@@ -29,7 +29,34 @@
   const BABY_ICON = 12;
   const BABY_RADIUS = 8;
   const PLATE_RADIUS = 10;
-  const BACKING = 'rgba(11, 12, 14, 0.8)';
+  // The viewer may have every marker smaller or larger. Larger is the next
+  // whole number of screen pixels to a texture pixel, which on a dense
+  // screen is one and a half times the size and on any other twice: pixel
+  // art is only ever enlarged whole. Smaller is the size a baby has always
+  // been drawn at, and is blended the way a baby is, since a picture
+  // cannot be made smaller than it was drawn without losing pixels. A
+  // head is 8 texture pixels a side, so each of its sizes is whole.
+  const BIG = DENSITY === 2 ? 24 : 32;
+  const SIZES = {
+    small: { icon: BABY_ICON, mob: 9, babyIcon: 8, baby: 6, plate: 8, head: 16, headRadius: 10, scale: 0.8 },
+    normal: { icon: ICON, mob: MOB_RADIUS, babyIcon: BABY_ICON, baby: BABY_RADIUS, plate: PLATE_RADIUS, head: 24, headRadius: 15, scale: 1 },
+    large: { icon: BIG, mob: BIG / 2 + 3, babyIcon: ICON, baby: MOB_RADIUS, plate: BIG / 2 + 2, head: 32, headRadius: 19, scale: 1.4 },
+  };
+  // A name tag's letters and the plate behind them, by the label size
+  // chosen.
+  const TAGS = {
+    small: { font: 11, height: 16 },
+    normal: { font: 12, height: 18 },
+    large: { font: 15, height: 23 },
+  };
+  // What the viewer has chosen for how the map looks, where the page keeps
+  // such a thing; a page from before it did draws everything as it was.
+  const settings = app.settings || null;
+  const look = () => (settings ? settings.look() : {});
+  const colour = (name, fallback) => (settings && settings.colour(name)) || fallback;
+  const sizes = () => SIZES[look().size] || SIZES.normal;
+  // A theme made for contrast draws every outline heavier.
+  const heavy = () => (look().theme === 'contrast' ? 1 : 0);
   const KEY = /^[a-z0-9_]+\/[a-z0-9_]+$/;
 
   const decodes = typeof createImageBitmap === 'function';
@@ -121,7 +148,7 @@
     let made = sprites.get(key);
     if (!made) {
       made = document.createElement('canvas');
-      made.width = made.height = radius * 2 * DENSITY;
+      made.width = made.height = Math.round(radius * 2 * DENSITY);
       const ctx = made.getContext('2d');
       ctx.scale(DENSITY, DENSITY);
       // Pixel art scaled by a whole number stays as its author drew it.
@@ -132,42 +159,53 @@
     return made;
   }
 
-  const ringed = (radius, icon) => (colour) => (ctx, drawn) => {
+  // The backing is dark in every theme: the pictures were drawn to be
+  // seen on the game's own dark slots.
+  const backing = () => colour('marker-backing', 'rgba(11, 12, 14, 0.8)');
+  const ringed = (baby) => (ring) => (ctx, drawn) => {
+    const size = sizes();
+    const radius = baby ? size.baby : size.mob;
+    const icon = baby ? size.babyIcon : size.icon;
     ctx.beginPath();
     ctx.arc(radius, radius, radius - 1, 0, Math.PI * 2);
-    ctx.fillStyle = BACKING;
+    ctx.fillStyle = backing();
     ctx.fill();
     // Made smaller than it was drawn, it reads better blended than with
     // pixels dropped.
-    ctx.imageSmoothingEnabled = icon * DENSITY < drawn.width && icon !== ICON;
+    ctx.imageSmoothingEnabled = icon * DENSITY < drawn.width && icon < ICON;
     ctx.drawImage(drawn, radius - icon / 2, radius - icon / 2, icon, icon);
     // The ring is what the filters are read by, so it goes on last and
     // nothing in the icon can cover it.
-    ctx.lineWidth = 1.75;
-    ctx.strokeStyle = colour;
+    ctx.lineWidth = 1.75 + heavy();
+    ctx.strokeStyle = ring;
     ctx.stroke();
   };
-  const paintMob = ringed(MOB_RADIUS, ICON);
-  const paintBaby = ringed(BABY_RADIUS, BABY_ICON);
+  const paintMob = ringed(false);
+  const paintBaby = ringed(true);
 
-  const paintPlate = (colour) => (ctx, drawn) => {
-    const side = PLATE_RADIUS * 2;
+  const paintPlate = (ring) => (ctx, drawn) => {
+    const size = sizes();
+    const side = size.plate * 2;
     ctx.beginPath();
     if (ctx.roundRect) ctx.roundRect(1, 1, side - 2, side - 2, 3);
     else ctx.rect(1, 1, side - 2, side - 2);
-    ctx.fillStyle = BACKING;
+    ctx.fillStyle = backing();
     ctx.fill();
-    ctx.drawImage(drawn, PLATE_RADIUS - ICON / 2, PLATE_RADIUS - ICON / 2, ICON, ICON);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = colour;
+    ctx.imageSmoothingEnabled = size.icon * DENSITY < drawn.width && size.icon < ICON;
+    ctx.drawImage(drawn, size.plate - size.icon / 2, size.plate - size.icon / 2, size.icon, size.icon);
+    ctx.lineWidth = 1.5 + heavy();
+    ctx.strokeStyle = ring;
     ctx.stroke();
   };
 
   // Where a picture is asked for, or null for one the server has not
   // listed: only what it lists is ever requested.
-  const mobAddress = (type) => (listing.mobs.types.has(type)
+  // Nor is one the viewer has chosen plain dots in place of: a mob's by
+  // one choice, and a bed's, a container's and a waypoint's by another. A
+  // structure's is neither's.
+  const mobAddress = (type) => (listing.mobs.types.has(type) && look().picturesLive !== false
     ? `api/icons/mob/${encodeURIComponent(type)}?v=${encodeURIComponent(listing.mobs.version)}` : null);
-  const pictureAddress = (key) => (listing.pictures.keys.has(key) && KEY.test(key)
+  const pictureAddress = (key) => (listing.pictures.keys.has(key) && KEY.test(key) && (look().picturesMarkers !== false || key.startsWith('structure/'))
     ? `api/icons/picture/${key}?v=${encodeURIComponent(listing.pictures.version)}` : null);
   // Either sort by one key: a mob's icon is mob/<type>.
   const addressOf = (key) => (str(key).startsWith('mob/') ? mobAddress(key.slice(4)) : pictureAddress(str(key)));
@@ -187,9 +225,9 @@
     return `container/${kind === 'chest' && trapped === true ? 'trapped_chest' : str(kind)}`;
   }
 
-  const mob = (type, colour, baby = false) => sprite(
-    mobAddress(type), colour, baby ? BABY_RADIUS : MOB_RADIUS, baby ? paintBaby : paintMob, baby ? 'baby' : '');
-  const plate = (key, colour) => sprite(pictureAddress(key), colour, PLATE_RADIUS, paintPlate, 'plate');
+  const mob = (type, ring, baby = false) => sprite(
+    mobAddress(type), ring, baby ? sizes().baby : sizes().mob, baby ? paintBaby : paintMob, baby ? 'baby' : '');
+  const plate = (key, ring) => sprite(pictureAddress(key), ring, sizes().plate, paintPlate, 'plate');
 
   // Draws a picture into an element of the page, and says whether there
   // was one to draw. Without one the element is hidden, and whatever
@@ -252,41 +290,44 @@
   // A name tag may be 64 characters; the label on the map shows this many
   // and the tooltip, the list and the card show them all.
   const TAG_LENGTH = 24;
-  const TAG_HEIGHT = 18;
   const TAG_GAP = 3;
-  const TAG_FONT = '600 12px system-ui, -apple-system, "Segoe UI", sans-serif';
+  const tagSize = () => TAGS[look().text] || TAGS.normal;
   // name + colour -> the label, drawn once however many frames stamp it.
   const tags = new Map();
 
   // A mob's name tag, drawn once to be stamped over its marker. Text put
   // on a canvas is drawn and never parsed.
-  function tag(name, colour) {
+  function tag(name, ink) {
     const letters = [...str(name)];
     if (letters.length === 0) return null;
-    const key = `${colour}|${str(name)}`;
+    const { font, height } = tagSize();
+    const face = `600 ${font}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    const key = `${ink}|${str(name)}`;
     if (tags.has(key)) return tags.get(key);
     const said = letters.length > TAG_LENGTH ? `${letters.slice(0, TAG_LENGTH - 1).join('')}…` : letters.join('');
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    ctx.font = TAG_FONT;
+    ctx.font = face;
     const width = Math.ceil(ctx.measureText(said).width) + 10;
     canvas.width = width * DENSITY;
-    canvas.height = TAG_HEIGHT * DENSITY;
+    canvas.height = height * DENSITY;
     ctx.scale(DENSITY, DENSITY);
     ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(0.5, 0.5, width - 1, TAG_HEIGHT - 1, 3);
-    else ctx.rect(0.5, 0.5, width - 1, TAG_HEIGHT - 1);
-    ctx.fillStyle = 'rgba(20, 22, 26, 0.88)';
+    if (ctx.roundRect) ctx.roundRect(0.5, 0.5, width - 1, height - 1, 3);
+    else ctx.rect(0.5, 0.5, width - 1, height - 1);
+    // The plate is the theme's, as a tooltip's is, and the letters the
+    // colour the caller reads on it.
+    ctx.fillStyle = colour('label-plate', 'rgba(20, 22, 26, 0.88)');
     ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = colour;
+    ctx.lineWidth = 1 + heavy();
+    ctx.strokeStyle = ink;
     ctx.stroke();
     // Sizing the canvas reset the font.
-    ctx.font = TAG_FONT;
-    ctx.fillStyle = colour;
+    ctx.font = face;
+    ctx.fillStyle = ink;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(said, width / 2, TAG_HEIGHT / 2 + 0.5);
+    ctx.fillText(said, width / 2, height / 2 + 0.5);
     // Names are players' to choose, so there is no end of them.
     if (tags.size > 2048) tags.clear();
     tags.set(key, canvas);
@@ -304,21 +345,22 @@
       const worn = this.options.tag;
       if (!worn) return;
       const half = worn.width / DENSITY / 2 + 1;
-      this._pxBounds.extend(this._point.subtract([half, this._radius + TAG_GAP + TAG_HEIGHT + 1]));
+      this._pxBounds.extend(this._point.subtract([half, this._radius + TAG_GAP + worn.height / DENSITY + 1]));
       this._pxBounds.extend(this._point.add([half, 0]));
     },
     _updatePath() {
       Stamped.prototype._updatePath.call(this);
       const worn = this.options.tag;
-      if (worn && this._renderer._drawing && !this._empty()) stamp(this, worn, this._radius + TAG_GAP + TAG_HEIGHT / 2);
+      if (worn && this._renderer._drawing && !this._empty()) stamp(this, worn, this._radius + TAG_GAP + worn.height / DENSITY / 2);
     },
     _containsPoint(p) {
       if (L.CircleMarker.prototype._containsPoint.call(this, p)) return true;
       const worn = this.options.tag;
       if (!worn) return false;
       const reach = this._clickTolerance();
-      const top = this._point.y - this._radius - TAG_GAP - TAG_HEIGHT;
-      return Math.abs(p.x - this._point.x) <= worn.width / DENSITY / 2 + reach && p.y >= top - reach && p.y <= top + TAG_HEIGHT + TAG_GAP + reach;
+      const tall = worn.height / DENSITY;
+      const top = this._point.y - this._radius - TAG_GAP - tall;
+      return Math.abs(p.x - this._point.x) <= worn.width / DENSITY / 2 + reach && p.y >= top - reach && p.y <= top + tall + TAG_GAP + reach;
     },
   });
 
@@ -391,6 +433,9 @@
     MOB_RADIUS,
     BABY_RADIUS,
     PLATE_RADIUS,
+    // The same, and a head's and a dot's, at the size the viewer has
+    // chosen: asked for when used, since the choice may change.
+    sizes,
     // Whether this browser can draw a picture at all.
     decodes,
     listing: () => listing,
@@ -408,6 +453,24 @@
     tag,
     Tagged,
   };
+
+  // A sprite and a name tag are composed in the theme's colours at the
+  // size chosen, so a change to either makes them all anew; the pictures
+  // they are composed from are kept, and nothing is fetched again. The
+  // layers that wear them hear the same change after this has, and dress
+  // their markers from what is made here then.
+  const composedAs = () => {
+    const { theme, size, text, picturesLive, picturesMarkers } = look();
+    return [theme, size, text, picturesLive, picturesMarkers].join('|');
+  };
+  let composed = composedAs();
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look') || composed === composedAs()) return;
+    composed = composedAs();
+    sprites.clear();
+    tags.clear();
+    paint(document);
+  });
 
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);

@@ -19,6 +19,13 @@
   const DRAWING_MS = 5 * 60_000;
   const COUNTDOWN_MS = 250;
   const LABELS = { overworld: 'Overworld', nether: 'Nether', end: 'The End' };
+  // What the viewer keeps, where the page has a script for it. The page
+  // and its scripts are cached apart for a few minutes, so just after a
+  // release this can be a page from before there was one: everything then
+  // works as it would with nothing kept.
+  const settings = (window.mcmap && window.mcmap.settings) || null;
+  const look = () => (settings ? settings.look() : {});
+  const colour = (name, fallback) => (settings && settings.colour(name)) || fallback;
 
   // Leaflet's simple CRS has +Y pointing up; a Minecraft map has +Z pointing
   // down. With this transformation lat is Z and lng is X, in blocks, and
@@ -78,8 +85,8 @@
       const ctx = canvas.getContext('2d');
       const line = (block, vertical) => {
         const p = Math.round((block - (vertical ? x0 : z0)) * scale) + 0.5;
-        ctx.strokeStyle = block === 0 ? 'rgba(110,207,122,0.9)'
-          : block % REGION === 0 ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.18)';
+        ctx.strokeStyle = block === 0 ? colour('grid-origin', 'rgba(110,207,122,0.9)')
+          : block % REGION === 0 ? colour('grid-region', 'rgba(255,255,255,0.45)') : colour('grid-line', 'rgba(255,255,255,0.18)');
         ctx.beginPath();
         if (vertical) { ctx.moveTo(p, 0); ctx.lineTo(p, TILE); } else { ctx.moveTo(0, p); ctx.lineTo(TILE, p); }
         ctx.stroke();
@@ -125,7 +132,7 @@
   function parseHash() {
     const [id, x, z, zoom] = location.hash.slice(1).split('/');
     const n = [x, z, zoom].map(Number);
-    if (!LABELS[id] || n.some((v) => !Number.isFinite(v))) return null;
+    if (!Object.hasOwn(LABELS, id) || n.some((v) => !Number.isFinite(v))) return null;
     return { id, x: n[0], z: n[1], zoom: n[2] };
   }
 
@@ -417,7 +424,10 @@
     tabs();
 
     if (!current) {
-      const want = parseHash();
+      // An address that names a place is where the page opens; failing
+      // that, the place the viewer's default view was saved with.
+      const kept = settings ? settings.place() : null;
+      const want = parseHash() || (kept && { id: kept.d, x: kept.x, z: kept.z, zoom: kept.zoom });
       const first = info.dimensions.find((d) => d.rendered);
       if (want && dimension(want.id) && dimension(want.id).rendered) show(want.id, want);
       else if (first) show(first.id);
@@ -455,11 +465,11 @@
     return n.length === 3 ? { x: n[0], y: n[1], z: n[2] } : { x: n[0], z: n[1] };
   }
 
-  window.mcmap = {
+  window.mcmap = Object.assign(window.mcmap || {}, {
     map,
     dimension: () => current,
     dimensions: () => (info ? info.dimensions.map((d) => d.id) : []),
-    label: (id) => LABELS[id] || id,
+    label: (id) => (Object.hasOwn(LABELS, id) ? LABELS[id] : id),
     live: () => Boolean(info && info.live),
     // Never passes an argument on: load reads one as "only checking".
     reload: () => load(),
@@ -491,8 +501,25 @@
         return location.href;
       },
     },
+    // Where the map is, and a way to put it somewhere exactly, zoom and
+    // all, for a view that was saved with its place.
+    place: {
+      get() {
+        if (!current) return null;
+        const c = map.getCenter();
+        return { d: current, x: Math.round(c.lng), z: Math.round(c.lat), zoom: map.getZoom() };
+      },
+      set(at) {
+        const d = at && dimension(at.d);
+        if (!d || !d.rendered || ![at.x, at.z, at.zoom].every(Number.isFinite)) return false;
+        const view = { x: at.x, z: at.z, zoom: at.zoom };
+        if (at.d !== current) show(at.d, view);
+        else map.setView([view.z, view.x], view.zoom, { animate: false });
+        return true;
+      },
+    },
     layers,
-  };
+  });
   extra = extraOf(location.hash);
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
@@ -501,6 +528,7 @@
     const x = Math.floor(latlng.lng);
     const z = Math.floor(latlng.lat);
     let text = `X ${fmt(x)}, Z ${fmt(z)}`;
+    if (look().coords === 'chunks') text += `  ·  chunk ${fmt(x / 16)}, ${fmt(z / 16)}`;
     // Nether travel is the one conversion players do in their heads.
     if (current === 'overworld') text += `  ·  nether ${fmt(x / 8)}, ${fmt(z / 8)}`;
     if (current === 'nether') text += `  ·  overworld ${fmt(x * 8)}, ${fmt(z * 8)}`;
@@ -528,6 +556,38 @@
 
   el.grid.addEventListener('change', () => {
     if (el.grid.checked) grid.addTo(map); else map.removeLayer(grid);
+    if (settings) settings.set('grid', { on: el.grid.checked });
+  });
+  if (settings && settings.get('grid').on) {
+    el.grid.checked = true;
+    grid.addTo(map);
+  }
+
+  // Whoever has asked for less motion gets a map that goes where it is
+  // sent without sliding or fading there. Leaflet takes its animation
+  // options once, when the map is made, so these are its own fields:
+  // _zoomAnimated and _fadeAnimated are internals, which is safe only
+  // because Leaflet is vendored at a fixed version.
+  const animated = { zoom: map._zoomAnimated, fade: map._fadeAnimated, inertia: map.options.inertia };
+  const panBy = map.panBy;
+  map.panBy = (offset, options) => panBy.call(map, offset, look().motion === 'reduce' ? { ...options, animate: false } : options);
+  function motion() {
+    const still = look().motion === 'reduce';
+    map._zoomAnimated = animated.zoom && !still;
+    map._fadeAnimated = animated.fade && !still;
+    map.options.inertia = animated.inertia && !still;
+  }
+  motion();
+
+  // What the page looks like has changed: the grid is drawn in the
+  // theme's lines, and the footer says coordinates the way now chosen.
+  let drawnAs = JSON.stringify(look());
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look') || drawnAs === JSON.stringify(look())) return;
+    drawnAs = JSON.stringify(look());
+    motion();
+    if (map.hasLayer(grid)) grid.redraw();
+    if (matchMedia('(hover: none)').matches && current) point(map.getCenter());
   });
 
   // --- going to coordinates ------------------------------------------------

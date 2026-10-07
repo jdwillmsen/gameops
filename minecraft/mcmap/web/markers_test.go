@@ -31,7 +31,7 @@ func TestMarkerLayerNeverHandsTextOverAsMarkup(t *testing.T) {
 	content := regexp.MustCompile(`\b(bindTooltip|bindPopup|setTooltipContent|setPopupContent|setContent)\((.{0,24})`)
 	safe := regexp.MustCompile(`^(text\(|\(marker\) => tip\(marker\))`)
 	// tip is text and a picture drawn on a canvas, and nothing else.
-	if !regexp.MustCompile(`function tip\(marker\) \{\s*const \{ kind, data \} = marker\.options;\s*const box = text\(.*\);\s*box\.prepend\(icons\.picture\(.*\)\);\s*return box;\s*\}`).Match(js) {
+	if !regexp.MustCompile(`function tip\(marker\) \{\s*const \{ kind, data \} = marker\.options;[^}]*?const box = text\(.*\);\s*box\.prepend\(icons\.picture\(.*\)\);\s*return box;\s*\}`).Match(js) {
 		t.Fatal("markers.js no longer builds a marker's tooltip from text and a picture")
 	}
 	calls := content.FindAllSubmatch(js, -1)
@@ -51,7 +51,7 @@ func TestMarkerLayerNeverHandsTextOverAsMarkup(t *testing.T) {
 func TestNamedMobsAreLabelledAndListedByName(t *testing.T) {
 	js := read(t, "markers.js")
 	for _, need := range []string{
-		"tag: kind === 'mobs' ? icons.tag(m.n, style.color) : null,",
+		"tag: kind === 'mobs' ? tagOf(m.n) : null,",
 		"icons.mob(str(data.k), style.color, baby)",
 		"const name = text(str(data.n) || names.entity(data.k));",
 		"const what = text(names.kindOf(data.k, data.b));",

@@ -18,6 +18,14 @@
   const MIN_ZOOM = -2;
   // Below this many pixels a chunk has no room for an outline inside it.
   const OUTLINED_FROM = 8;
+  // The theme's colours for them, and how much of their usual strength
+  // the viewer has them drawn at, where the page keeps such choices.
+  const settings = app.settings || null;
+  const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
+  const strength = () => {
+    const chosen = settings ? settings.look().opacitySlime : NaN;
+    return Number.isFinite(chosen) ? chosen / 100 : 1;
+  };
 
   // The game seeds a Mersenne Twister with the chunk's coordinates and
   // takes its first number, which is made from words 0, 1 and 397 of the
@@ -47,8 +55,8 @@
       const x0 = c.x * TILE;
       const z0 = c.y * TILE;
       const ctx = canvas.getContext('2d');
-      ctx.fillStyle = side >= OUTLINED_FROM ? 'rgba(110, 207, 122, 0.22)' : 'rgba(110, 207, 122, 0.5)';
-      ctx.strokeStyle = 'rgba(110, 207, 122, 0.95)';
+      ctx.fillStyle = side >= OUTLINED_FROM ? themed('slime-fill', 'rgba(110, 207, 122, 0.22)') : themed('slime-far', 'rgba(110, 207, 122, 0.5)');
+      ctx.strokeStyle = themed('slime-line', 'rgba(110, 207, 122, 0.95)');
       for (let cz = Math.floor(z0 / side); cz * side < z0 + TILE; cz++) {
         for (let cx = Math.floor(x0 / side); cx * side < x0 + TILE; cx++) {
           if (!isSlimeChunk(cx, cz)) continue;
@@ -63,7 +71,7 @@
   });
 
   // Over the terrain and the biomes, under the grid.
-  const layer = new Slime({ tileSize: TILE, minZoom: MIN_ZOOM, maxZoom: 8, zIndex: 4 });
+  const layer = new Slime({ tileSize: TILE, minZoom: MIN_ZOOM, maxZoom: 8, zIndex: 4, opacity: strength() });
   const row = app.layers.register({ group: 'overlays', id: 'slime', label: 'Slime chunks', enabled: false, order: 10, swatch: 'key slime' });
 
   function sync() {
@@ -85,6 +93,15 @@
   // For anything else that wants to know, and for checking this against
   // the vectors the service's own implementation is tested with.
   app.isSlimeChunk = isSlimeChunk;
+
+  let theme = settings ? settings.look().theme : '';
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look')) return;
+    layer.setOpacity(strength());
+    if (theme === settings.look().theme) return;
+    theme = settings.look().theme;
+    if (map.hasLayer(layer)) layer.redraw();
+  });
 
   row.onToggle(sync);
   map.on('zoomend', sync);

@@ -20,10 +20,11 @@
   if (!app.duration) return;
   const { map, icons, names, duration } = app;
 
-  const CONTROL_KEY = 'mcmap.liveControl';
-  // Where the layer's one on-and-off switch was kept before it could be
-  // paused.
-  const OLD_KEY = 'mcmap.live';
+  // The pace and the pause are kept in the page's one record, where the
+  // page has one; without it they last for the visit.
+  const settings = app.settings || null;
+  const look = () => (settings ? settings.look() : {});
+  const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
   // Seconds between redraws that the viewer is offered; any other length
   // between the two bounds may be typed. The shortest is the server's own
   // pace, and means every frame.
@@ -53,12 +54,12 @@
   // whole multiple, so it is never blurred, and is larger than a mob's
   // icon by design: players are what the map is looked at for.
   const DOT_RADIUS = 3.5;
-  const { MOB_RADIUS, DENSITY } = icons;
-  const HEAD = 24;
-  const HEAD_RADIUS = 15;
+  const { DENSITY } = icons;
+  // The sizes the viewer has chosen: a mob's ring, a head and its backing,
+  // and a dot. Asked for when used, since the viewer may change them.
+  const sizes = () => (icons.sizes ? icons.sizes() : { mob: icons.MOB_RADIUS, head: 24, headRadius: 15, scale: 1 });
   // How far past the head the pointer showing a player's heading reaches.
   const POINTER = 11;
-  const INK = '#0b0c0e';
   // The side of the card's picture, which is the largest sprite and its
   // edge.
   const PORTRAIT = 32;
@@ -66,17 +67,29 @@
   // small to tap otherwise.
   const TOUCH_TOLERANCE = 8;
 
-  const CATEGORIES = {
-    players: '#ffffff',
-    hostile: '#e5534b',
-    passive: '#5cc8f0',
-    villager: '#d9a441',
-    other: '#9aa3ad',
-  };
-  const ME = '#6ecf7a';
-  // What a name tag is written in, on a mob that is loaded and on the mark
-  // the snapshot left of one that is not.
-  const NAMED = '#4fd1c5';
+  // The colours are the theme's, by the names the stylesheet gives them,
+  // so that a row's key in the panel and its markers on the map are one
+  // colour; the values here are what they were before there were themes.
+  // INK is the outline every marker is drawn with, and NAMED what a name
+  // tag is written in, on a mob that is loaded and on the mark the
+  // snapshot left of one that is not.
+  const CATEGORIES = {};
+  let ME;
+  let INK;
+  let NAMED;
+  function palette() {
+    Object.assign(CATEGORIES, {
+      players: themed('live-players', '#ffffff'),
+      hostile: themed('live-hostile', '#e5534b'),
+      passive: themed('live-passive', '#5cc8f0'),
+      villager: themed('live-villager', '#d9a441'),
+      other: themed('live-other', '#9aa3ad'),
+    });
+    ME = themed('live-me', '#6ecf7a');
+    INK = themed('marker-ink', '#0b0c0e');
+    NAMED = themed('named', '#4fd1c5');
+  }
+  palette();
 
   // Type ids as the server reports them, without the minecraft: prefix.
   // Anything not listed is "other", which is where a mob added by a later
@@ -137,20 +150,14 @@
   };
 
   const control = { paused: false, interval: MIN_INTERVAL };
-  try {
-    const saved = JSON.parse(localStorage.getItem(CONTROL_KEY) || 'null');
-    if (saved && typeof saved === 'object') {
-      if (typeof saved.paused === 'boolean') control.paused = saved.paused;
-      // Any length that was ever kept is still one: the menu's entries
-      // have changed and may again.
-      if (Number.isFinite(saved.interval)) control.interval = Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, Math.round(saved.interval)));
-    } else {
-      // Whoever had the layer switched off still gets a page that opens
-      // no stream.
-      const old = JSON.parse(localStorage.getItem(OLD_KEY) || '{}');
-      control.paused = Boolean(old) && old.on === false;
-    }
-  } catch { /* a browser that refuses storage still gets the defaults */ }
+  // Any length that was ever kept is still one: the menu's entries have
+  // changed and may again.
+  const paceOf = (kept) => (Number.isFinite(kept) ? Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, Math.round(kept))) : MIN_INTERVAL);
+  if (settings) {
+    const saved = settings.get('live');
+    control.paused = saved.paused === true;
+    control.interval = paceOf(saved.interval);
+  }
 
   // The layer's rows in the panel, by category, while the service has a
   // live layer at all; null while it does not.
@@ -170,14 +177,15 @@
   // visits is still a few kilobytes in their browser.
   const MAX_HIDDEN = 200;
   const filters = {};
-  for (const domain of FILTERS) {
+  function recallFilter(domain) {
     const kept = app.layers.recall ? app.layers.recall('live', domain) : null;
     const text = (v) => typeof v === 'string' && v.length <= 64;
-    filters[domain] = {
+    return {
       only: kept && text(kept.only) ? kept.only : null,
       hidden: new Set(kept && Array.isArray(kept.hidden) ? kept.hidden.filter(text).slice(0, MAX_HIDDEN) : []),
     };
   }
+  for (const domain of FILTERS) filters[domain] = recallFilter(domain);
   const domainOf = (category) => (category === 'players' ? 'players' : 'mobs');
   const filtering = (domain) => filters[domain].only !== null || filters[domain].hidden.size > 0;
   // What an entity is filtered by: a mob by its type, a player by their
@@ -206,24 +214,28 @@
   const renderer = L.canvas({ padding: 0.5, tolerance: matchMedia('(pointer: coarse)').matches ? TOUCH_TOLERANCE : 0 });
 
   // A head on its backing, bordered in the player's colour.
-  function paintHead(colour) {
+  function paintHead(border) {
     return (ctx, bitmap) => {
-      const c = HEAD_RADIUS;
+      const { head, headRadius: c } = sizes();
       ctx.fillStyle = INK;
       ctx.fillRect(0, 0, c * 2, c * 2);
-      ctx.fillStyle = colour;
+      ctx.fillStyle = border;
       ctx.fillRect(1, 1, c * 2 - 2, c * 2 - 2);
-      ctx.drawImage(bitmap, c - HEAD / 2, c - HEAD / 2, HEAD, HEAD);
+      ctx.drawImage(bitmap, c - head / 2, c - head / 2, head, head);
     };
   }
 
   // A mob is its icon in a ring, or, with no icon to draw, the dot it has
   // always been, under its name where someone gave it one.
   const Mob = icons.Tagged;
-  // Whether a named mob's name is written over it, which is the viewer's
-  // choice of the named mobs' own row.
+  // Whether a named mob's name is written over it: while the named mobs'
+  // own row is on, and the viewer has names always showing and not only
+  // under the pointer, or never.
   let tagging = true;
-  const tagOf = (name) => (tagging && name ? icons.tag(name, NAMED) : null);
+  const naming = (what) => look()[what] || 'always';
+  const tagOf = (name) => (tagging && name && naming('labelMobs') === 'always' ? icons.tag(name, themed('named-text', NAMED)) : null);
+  // Every outline is heavier in a theme made for contrast.
+  const heavy = () => (look().theme === 'contrast' ? 1 : 0);
 
   // A player's marker points the way they face. Leaflet's canvas has no
   // such shape, so this draws into the renderer's own context, the way its
@@ -292,7 +304,7 @@
   const playerLayer = L.featureGroup();
   // Said when it is asked for, so that a name which arrives later is the
   // one shown.
-  mobLayer.bindTooltip((marker) => text(names.mob(marker.options.name, marker.options.type)), { sticky: true, direction: 'top', className: 'live-tip' });
+  mobLayer.bindTooltip((marker) => text(names.mob(naming('labelMobs') === 'never' ? '' : marker.options.name, marker.options.type)), { sticky: true, direction: 'top', className: 'live-tip' });
 
   // key -> { marker, category, x, y, z, yaw, name, type, pic }, where pic is
   // the address of the head a player's marker is wearing, or null for none.
@@ -377,31 +389,37 @@
     if (category === 'players') {
       const mine = isMe(e.n);
       const colour = playerColour(e.n);
-      const worn = icons.sprite(pic, colour, HEAD_RADIUS, paintHead);
+      const size = sizes();
+      const worn = look().picturesLive === false ? null : icons.sprite(pic, colour, size.headRadius, paintHead);
+      const radius = worn ? size.headRadius : (mine ? 10 : 8) * size.scale;
       const marker = new Arrow([e.z, e.x], {
         renderer,
-        radius: worn ? HEAD_RADIUS : (mine ? 10 : 8),
+        radius,
         yaw: e.r,
         color: INK,
-        weight: 1.5,
+        weight: 1.5 + heavy(),
         fillColor: colour,
         fillOpacity: 1,
         sprite: worn,
       });
-      marker.bindTooltip(text(e.n || 'Player'), {
-        permanent: true,
-        direction: 'top',
-        offset: [0, worn ? -HEAD_RADIUS : -8],
-        className: mine ? 'live-name me' : 'live-name',
-      });
+      // A gamertag over the marker always, only under the pointer, or not
+      // at all, as the viewer has it.
+      if (naming('labelPlayers') !== 'never') {
+        marker.bindTooltip(text(e.n || 'Player'), {
+          permanent: naming('labelPlayers') === 'always',
+          direction: 'top',
+          offset: [0, -radius],
+          className: mine ? 'live-name me' : 'live-name',
+        });
+      }
       return marker;
     }
     const worn = icons.mob(e.t, CATEGORIES[category]);
     return new Mob([e.z, e.x], {
       renderer,
-      radius: worn ? MOB_RADIUS : DOT_RADIUS,
+      radius: worn ? sizes().mob : DOT_RADIUS * sizes().scale,
       color: INK,
-      weight: 1,
+      weight: 1 + heavy(),
       fillColor: CATEGORIES[category],
       fillOpacity: 1,
       name: e.n,
@@ -427,14 +445,40 @@
         // A player's label sits above whatever the marker is, so the
         // marker is made again, in place; there are few of them.
         const pic = headOf(held.name);
-        if (pic !== held.pic || (pic && !held.marker.options.sprite && icons.bitmap(pic))) remake(held, pic);
+        if (pic !== held.pic || (pic && !held.marker.options.sprite && look().picturesLive !== false && icons.bitmap(pic))) remake(held, pic);
         continue;
       }
       const worn = icons.mob(held.type, CATEGORIES[held.category]);
       if (worn === held.marker.options.sprite) continue;
       held.marker.options.sprite = worn;
-      held.marker.setRadius(worn ? MOB_RADIUS : DOT_RADIUS);
+      held.marker.setRadius(worn ? sizes().mob : DOT_RADIUS * sizes().scale);
     }
+  }
+
+  // The viewer has changed how the map looks: every marker is given the
+  // theme's colours, the size chosen and its name or none, in place. No
+  // marker is made again but a player's, whose label is part of it, and
+  // nothing is asked of the server.
+  function restyle() {
+    palette();
+    for (const held of entities.values()) {
+      if (held.category === 'players') {
+        remake(held, held.pic);
+        continue;
+      }
+      const o = held.marker.options;
+      o.color = INK;
+      o.weight = 1 + heavy();
+      o.fillColor = CATEGORIES[held.category];
+      o.tag = tagOf(held.name);
+      o.sprite = icons.mob(held.type, CATEGORIES[held.category]);
+      held.marker.setRadius(o.sprite ? sizes().mob : DOT_RADIUS * sizes().scale);
+    }
+    INSPECTED.color = themed('live-players', '#ffffff');
+    FOLLOWED.color = ME;
+    ring();
+    if (picked) portrait(entities.get(picked.key) || picked);
+    document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
 
   // The list of pictures has changed: a head or an icon has come or gone,
@@ -751,7 +795,7 @@
   }
 
   function saveControl() {
-    try { localStorage.setItem(CONTROL_KEY, JSON.stringify(control)); } catch { /* not kept, still applied */ }
+    if (settings) settings.set('live', control);
   }
 
   function paintControl() {
@@ -763,6 +807,7 @@
   // row or a filter has changed. A frame never needs this: each entity is
   // placed once, when it first appears.
   function refilter() {
+    unsettled = false;
     let added = false;
     for (const held of entities.values()) {
       const layer = layerOf(held.category);
@@ -777,6 +822,44 @@
     paintCard();
     document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
+
+  // A saved view has changed what is kept: the filters and the pace are
+  // read again. The markers are not gone through here, since the same
+  // view may be about to switch the rows as well; settle does that once,
+  // if nothing else has by then.
+  let unsettled = false;
+  function adopt() {
+    for (const domain of FILTERS) {
+      const next = recallFilter(domain);
+      const was = filters[domain];
+      if (next.only === was.only && next.hidden.size === was.hidden.size && [...next.hidden].every((sort) => was.hidden.has(sort))) continue;
+      filters[domain] = next;
+      unsettled = true;
+    }
+    if (!settings) return;
+    const kept = settings.get('live');
+    if (paceOf(kept.interval) !== control.interval) {
+      control.interval = paceOf(kept.interval);
+      pace.set(control.interval);
+      // A frame held for the old pace may be due at the new one.
+      present();
+      readout();
+    }
+    if (kept.paused !== control.paused) {
+      control.paused = kept.paused;
+      paintControl();
+      sync();
+    }
+  }
+
+  function settle() {
+    if (unsettled) refilter();
+  }
+
+  // Whether a type of mob is one this page has any reason to know: the
+  // game's own, one the server has a picture for, or one on the map now.
+  // A view saved long ago may name one that is none of these.
+  const knows = (type) => categoryOf.has(type) || icons.listing().mobs.types.has(type) || sortsHere('mobs').has(type);
 
   function setFilter(domain, change) {
     change(filters[domain]);
@@ -984,7 +1067,7 @@
   // id missing from a whole frame is an entity no longer tracked, and the
   // card says so rather than settle on whatever is nearest.
 
-  const INSPECTED = { color: '#ffffff', weight: 2, dashArray: '4 4' };
+  const INSPECTED = { color: CATEGORIES.players, weight: 2, dashArray: '4 4' };
   const FOLLOWED = { color: ME, weight: 3, dashArray: null };
   const halo = L.circleMarker([0, 0], { renderer, interactive: false, fill: false, opacity: 1, ...INSPECTED });
 
@@ -1004,8 +1087,9 @@
     // With no marker in the picture, what the marker would be.
     const worn = held.marker ? held.marker.options.sprite : (held.category === 'players' ? null : icons.mob(held.type, CATEGORIES[held.category], held.baby === true));
     if (worn) {
-      const side = worn.width / DENSITY;
-      ctx.imageSmoothingEnabled = false;
+      // At the largest size a marker is wider than the card's picture.
+      const side = Math.min(PORTRAIT, worn.width / DENSITY);
+      ctx.imageSmoothingEnabled = side < worn.width / DENSITY;
       ctx.drawImage(worn, (PORTRAIT - side) / 2, (PORTRAIT - side) / 2, side, side);
       return;
     }
@@ -1034,7 +1118,7 @@
     if (!held) {
       if (savedOnly() && picked.dimension === app.dimension() && Number.isFinite(picked.x) && Number.isFinite(picked.z)) {
         halo.setLatLng([picked.z, picked.x]);
-        halo.setRadius(MOB_RADIUS + 5);
+        halo.setRadius(sizes().mob + 5);
         halo.setStyle(INSPECTED);
         if (!map.hasLayer(halo)) halo.addTo(map);
         halo.bringToFront();
@@ -1430,6 +1514,11 @@
         held.marker.redraw();
       }
     },
+    // For a saved view: what is kept is read again, and the map brought
+    // in line with it once.
+    adopt,
+    settle,
+    knows,
   };
   // For a layer that has to sit under these markers and still be hovered:
   // only what is on the same canvas can be both.
@@ -1453,6 +1542,16 @@
     if (mobLayer.isTooltipOpen()) mobLayer.getTooltip().update();
     paintCard();
     for (const list of Object.values(breakdowns)) list.again();
+  });
+  const styledAs = () => {
+    const { theme, size, text, labelMobs, labelPlayers, picturesLive } = look();
+    return [theme, size, text, labelMobs, labelPlayers, picturesLive].join('|');
+  };
+  let styled = styledAs();
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look') || styled === styledAs()) return;
+    styled = styledAs();
+    restyle();
   });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);

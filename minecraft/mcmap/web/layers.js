@@ -15,9 +15,6 @@
   };
   if (!el.panel || !el.toggle || !el.body) return;
 
-  const CHOICES_KEY = 'mcmap.layers';
-  const PANEL_KEY = 'mcmap.panel';
-
   // The sections there is a place for, in the order they are shown. A
   // section appears once it has a row. Any other group is shown after
   // these, in the order it was first used.
@@ -29,54 +26,30 @@
     ['overlays', 'Overlays'],
   ];
 
-  // Where each layer's script kept its filters before there was a panel,
-  // as { <id>: boolean }. A row with no choice saved here takes the one
-  // saved there, so nobody's filters reset. The structures also had one
-  // switch for the lot, and a viewer who had that off gets the layers it
-  // hid, and the one added to them since, switched off.
-  const LEGACY = {
-    live: { key: 'mcmap.live', master: [] },
-    markers: { key: 'mcmap.markers', master: [] },
-    structures: { key: 'mcmap.structures', master: ['recorded', 'predicted', 'candidate'] },
-  };
-
-  function read(key) {
-    try {
-      const value = JSON.parse(localStorage.getItem(key) || '{}');
-      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    } catch {
-      return {}; // a browser that refuses storage still gets the defaults
-    }
-  }
-
-  function write(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not kept, still applied */ }
-  }
-
-  const flag = (from, key) => (Object.hasOwn(from, key) && typeof from[key] === 'boolean' ? from[key] : null);
+  // The viewer's choices are kept by the page's one record of them, in
+  // its "layers" part, and which groups are folded in its "panel" part.
+  // The page and its scripts are cached apart for a few minutes, so just
+  // after a release this can meet a page with no such record: the panel
+  // then works from each layer's own default and keeps nothing.
+  const settings = app.settings || null;
+  const unkept = {};
+  const kept = () => (settings ? settings.get('layers') : unkept);
 
   // Choices are kept flat, as "<group>/<id>", so that no id a script picks
   // can be mistaken for a property every object has.
-  const choices = read(CHOICES_KEY);
-  const legacy = new Map();
-
-  function remember(group, id, on) {
-    choices[`${group}/${id}`] = on;
-    write(CHOICES_KEY, choices);
+  function remember(changes) {
+    const choices = kept();
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === null || value === undefined) delete choices[key];
+      else choices[key] = value;
+    }
+    if (settings) settings.set('layers', choices);
   }
 
   function choice(group, id, fallback) {
-    const kept = flag(choices, `${group}/${id}`);
-    if (kept !== null) return kept;
-    if (!Object.hasOwn(LEGACY, group)) return fallback;
-    if (!legacy.has(group)) legacy.set(group, read(LEGACY[group].key));
-    const old = legacy.get(group);
-    const was = flag(old, 'on') === false && LEGACY[group].master.includes(id) ? false : flag(old, id);
-    if (was === null) return fallback;
-    // Kept under the new key from here on, so the old one need never be
-    // read for this row again.
-    remember(group, id, was);
-    return was;
+    const choices = kept();
+    const key = `${group}/${id}`;
+    return Object.hasOwn(choices, key) && typeof choices[key] === 'boolean' ? choices[key] : fallback;
   }
 
   // What a layer keeps besides its switches, such as which kinds of a
@@ -85,18 +58,14 @@
   // whatever the layer's script gave, and that script's to check when it
   // reads it back: storage is the viewer's to edit.
   function recall(group, name) {
+    const choices = kept();
     const key = `${group}#${name}`;
     return Object.hasOwn(choices, key) ? choices[key] : null;
   }
 
-  function retain(group, name, value) {
-    const key = `${group}#${name}`;
-    if (value === null || value === undefined) delete choices[key];
-    else choices[key] = value;
-    write(CHOICES_KEY, choices);
-  }
+  const retain = (group, name, value) => remember({ [`${group}#${name}`]: value });
 
-  const view = read(PANEL_KEY);
+  const view = settings ? settings.get('panel') : {};
   const folded = new Set(Array.isArray(view.folded) ? view.folded.filter((id) => typeof id === 'string') : []);
   // On a small screen the panel is a sheet over the map, which opens when
   // asked and is never found open on arriving: what was last chosen where
@@ -108,7 +77,7 @@
 
   const keep = () => {
     if (!compact.matches) view.open = open;
-    write(PANEL_KEY, { open: view.open, folded: [...folded] });
+    if (settings) settings.set('panel', { ...(typeof view.open === 'boolean' ? { open: view.open } : {}), folded: [...folded] });
   };
 
   const groups = new Map();
@@ -153,15 +122,48 @@
   }
 
   function setAll(g, on) {
-    let changed = false;
+    const changes = {};
     for (const row of [...g.rows]) {
-      if (!row.available) continue;
-      if (set(row, on)) {
-        choices[`${g.id}/${row.id}`] = on;
-        changed = true;
+      if (row.available && set(row, on)) changes[`${g.id}/${row.id}`] = on;
+    }
+    if (Object.keys(changes).length > 0) remember(changes);
+  }
+
+  // Every row's switch as it stands, by the key its choice is kept under.
+  function states() {
+    const out = {};
+    for (const g of groups.values()) for (const row of g.rows) out[`${g.id}/${row.id}`] = row.on;
+    return out;
+  }
+
+  // Brings every row in line with the choices as they are now kept, for
+  // when something other than a switch has changed them, as a saved view
+  // does. Every row is switched before any layer is told, and a layer
+  // that listens with one function for all its rows is told once, so the
+  // map goes from the one picture to the other with nothing drawn between.
+  // wanted is the keys a view named, and what comes back is those of them
+  // there is no row for here: a layer that has gone, or one this server
+  // does not offer. A row that is only greyed out for now is switched all
+  // the same, for when it is not.
+  function adopt(wanted = []) {
+    const choices = kept();
+    const told = new Map();
+    const found = new Set();
+    for (const g of groups.values()) {
+      for (const row of g.rows) {
+        const key = `${g.id}/${row.id}`;
+        found.add(key);
+        const on = typeof choices[key] === 'boolean' ? choices[key] : row.on;
+        if (row.on === on) continue;
+        row.on = on;
+        row.box.checked = on;
+        for (const fn of row.listeners) told.set(fn, on);
       }
     }
-    if (changed) write(CHOICES_KEY, choices);
+    for (const [fn, on] of told) {
+      try { fn(on); } catch (err) { console.error(err); }
+    }
+    return wanted.filter((key) => !found.has(key));
   }
 
   function groupOf(id, label) {
@@ -256,7 +258,7 @@
     };
     box.checked = row.on;
     box.addEventListener('change', () => {
-      if (set(row, box.checked)) remember(group, id, row.on);
+      if (set(row, box.checked)) remember({ [`${group}/${id}`]: row.on });
     });
 
     // Lower orders first; rows given none go last, as they were registered.
@@ -279,7 +281,7 @@
       // been asked for what the layer shows: the choice is kept, and the
       // listeners are told.
       setEnabled(on) {
-        if (row.available && set(row, Boolean(on))) remember(group, id, row.on);
+        if (row.available && set(row, Boolean(on))) remember({ [`${group}/${id}`]: row.on });
       },
       // A layer's own controls, such as a legend, shown under its row.
       // The node is the script's to fill; null takes it away.
@@ -313,6 +315,8 @@
   paint();
   app.layers.recall = recall;
   app.layers.retain = retain;
+  app.layers.states = states;
+  app.layers.adopt = adopt;
   app.layers.register = register;
   document.dispatchEvent(new CustomEvent('mcmap:layers'));
 })();

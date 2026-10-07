@@ -14,7 +14,10 @@
   if (!app || !app.layers || !app.layers.register || !app.duration) return;
   const { map, duration } = app;
 
-  const WINDOW_KEY = 'mcmap.trails';
+  // The window is kept in the page's one record, where the page has one;
+  // without it the choice lasts for the visit.
+  const settings = app.settings || null;
+  const look = () => (settings ? settings.look() : {});
   // How much trail the viewer is offered, in seconds; any other length may
   // be typed, down to a minute and up to what the server keeps. It keeps a
   // day unless it is set otherwise, and says how long in every answer.
@@ -31,7 +34,12 @@
   const STEP_BLOCKS = 4;
   const BREAK_BLOCKS = 256;
   const BREAK_MS = 30_000;
-  const INK = '#0b0c0e';
+  // The line under each trail, in the theme's outline, and how much of
+  // their usual strength the viewer has the trails drawn at.
+  const ink = () => (settings && settings.colour('marker-ink')) || '#0b0c0e';
+  const strength = () => (Number.isFinite(look().opacityTrails) ? look().opacityTrails / 100 : 1);
+  const CASING_OPACITY = 0.6;
+  const LINE_OPACITY = 0.95;
   // What the other players' trails are drawn in: far apart from each
   // other, and from the green that is the viewer's own, and light enough
   // to read over dark ground with the dark line under each for light. A
@@ -69,13 +77,8 @@
   };
   lines.bindTooltip((line) => text(labelOf(line)), { sticky: true, direction: 'top', className: 'live-tip' });
 
-  let seconds = WINDOWS[0];
-  try {
-    const saved = JSON.parse(localStorage.getItem(WINDOW_KEY) || 'null');
-    // Kept as hours while the choice was one of three.
-    const kept = saved && Number.isFinite(saved.seconds) ? saved.seconds : saved && Number.isFinite(saved.hours) ? saved.hours * 3600 : NaN;
-    if (Number.isFinite(kept)) seconds = Math.min(MAX_UNKNOWN, Math.max(MIN_WINDOW, Math.round(kept)));
-  } catch { /* a browser that refuses storage still gets the default */ }
+  const windowOf = (kept) => (Number.isFinite(kept) ? Math.min(MAX_UNKNOWN, Math.max(MIN_WINDOW, Math.round(kept))) : WINDOWS[0]);
+  let seconds = settings ? windowOf(settings.get('trails').seconds) : WINDOWS[0];
   // How long the server keeps a trail, once an answer has said.
   let retention = 0;
 
@@ -114,7 +117,7 @@
     value: seconds,
     onChange(length) {
       seconds = length;
-      try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ seconds })); } catch { /* not kept, still applied */ }
+      if (settings) settings.set('trails', { seconds });
       sync();
     },
   });
@@ -154,8 +157,8 @@
   // being the wider of the two it is the one the pointer is tested
   // against.
   function begin(trail, t, x, z) {
-    const casing = L.polyline([place(x, z)], { ...drawing, color: INK, weight: 5.5, opacity: 0.6, interactive: Boolean(shared), name: trail.name, from: t, to: t });
-    const line = L.polyline([place(x, z)], { ...drawing, color: trail.colour, weight: 2.5, opacity: 0.95, interactive: false });
+    const casing = L.polyline([place(x, z)], { ...drawing, color: ink(), weight: 5.5, opacity: CASING_OPACITY * strength(), interactive: Boolean(shared), name: trail.name, from: t, to: t });
+    const line = L.polyline([place(x, z)], { ...drawing, color: trail.colour, weight: 2.5, opacity: LINE_OPACITY * strength(), interactive: false, over: true });
     lines.addLayer(casing);
     lines.addLayer(line);
     // Behind every marker already on the canvas; one added later is drawn
@@ -370,6 +373,31 @@
       load(dimension);
     }
   }
+
+  // For a saved view: the window kept is read again, and the lines asked
+  // for anew if it is another.
+  app.trails = {
+    adopt() {
+      if (!settings) return;
+      const kept = windowOf(settings.get('trails').seconds);
+      if (kept === seconds) return;
+      seconds = kept;
+      chosen.set(kept);
+      sync();
+    },
+  };
+
+  // The lines there are, drawn at the strength now chosen and over the
+  // theme's outline. Nothing is asked of the server for it.
+  const styledAs = () => `${look().theme}|${look().opacityTrails}`;
+  let styled = styledAs();
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look') || styled === styledAs()) return;
+    styled = styledAs();
+    lines.eachLayer((line) => {
+      line.setStyle(line.options.over ? { opacity: LINE_OPACITY * strength() } : { color: ink(), opacity: CASING_OPACITY * strength() });
+    });
+  });
 
   document.addEventListener('mcmap:players', follow);
   document.addEventListener('mcmap:view', sync);

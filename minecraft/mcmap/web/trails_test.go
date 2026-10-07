@@ -78,11 +78,8 @@ func TestTrailsAskNoMoreOftenThanEveryHalfMinute(t *testing.T) {
 	if got := bytes.Count(js, []byte("fetch(")); got != 1 {
 		t.Errorf("trails.js has %d fetches, want the one that is held to the interval", got)
 	}
-	keys := regexp.MustCompile(`'mcmap\.[a-zA-Z]+'`).FindAll(js, -1)
-	if len(keys) != 1 || string(keys[0]) != "'mcmap.trails'" {
-		t.Errorf("trails.js keeps %s in the browser, want only the window under 'mcmap.trails'", keys)
-	}
-	if !bytes.Contains(js, []byte("JSON.stringify({ seconds })")) {
-		t.Error("trails.js keeps more than the window under its key")
+	// The window is all it keeps, and it keeps it in the page's one record.
+	if keys := regexp.MustCompile(`settings\.set\(([^)]*)\)`).FindAllSubmatch(js, -1); len(keys) != 1 || string(keys[0][1]) != "'trails', { seconds }" {
+		t.Errorf("trails.js keeps %q, want only the window, as settings.set('trails', { seconds })", keys)
 	}
 }
