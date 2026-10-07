@@ -110,6 +110,8 @@
     pause: document.getElementById('live-pause'),
     interval: document.getElementById('live-interval'),
     readout: document.getElementById('live'),
+    age: document.getElementById('live-age'),
+    more: document.getElementById('live-more'),
     frozen: document.getElementById('frozen'),
     frozenWhat: document.getElementById('frozen-what'),
     frozenAge: document.getElementById('frozen-age'),
@@ -703,7 +705,10 @@
   function readout() {
     paintCard();
     const age = frameAt === null || stale ? null : Math.max(0, (Date.now() + clockOffset - frameAt) / 1000);
+    // What the footer says of the live picture: how old it is, or why
+    // there is none, and after it whatever qualifies that.
     let state;
+    const extras = [];
     if (control.paused) {
       state = 'paused';
     } else if (!source) {
@@ -720,15 +725,15 @@
     } else {
       // To the tenth while that means something, and in words once the
       // picture is as old as a slow pace lets it get.
-      state = age < 60 ? `${age.toFixed(1)} s` : span(age);
-      if (control.interval > MIN_INTERVAL) state += ` · every ${duration.words(control.interval)}`;
+      state = `${age < 60 ? `${age.toFixed(1)} s` : span(age)} old`;
+      if (control.interval > MIN_INTERVAL) extras.push(`every ${duration.words(control.interval)}`);
     }
-    let line = `live · ${state}`;
     if (more > 0 && !stale) {
       const drawn = [...entities.values()].filter((held) => held.category !== 'players').length;
-      line += ` · showing ${fmt(drawn)} of ${fmt(drawn + more)} mobs`;
+      extras.push(`showing ${fmt(drawn)} of ${fmt(drawn + more)} mobs`);
     }
-    el.readout.textContent = line;
+    say(el.age, state);
+    say(el.more, extras.join(' · '));
 
     // Said on the map itself as well: a paused picture looks exactly like
     // a current one.

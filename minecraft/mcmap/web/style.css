@@ -146,13 +146,25 @@ input[type="number"] { width: 6.5rem; }
 #map { flex: 1; min-width: 0; background: #0b0c0e; }
 
 #coords { font-variant-numeric: tabular-nums; }
-#status { color: var(--dim); }
 .biome-at { color: var(--dim); }
-#status.problem { color: #f0a35e; }
+.where { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.15rem 1rem; min-width: 0; }
 
-/* Fixed-width digits, or the footer shifts with every second counted. */
-.refresh { color: var(--dim); font-variant-numeric: tabular-nums; }
-.refresh.problem { color: #f0a35e; }
+/* How current the map is, as one group at the end of the footer: the live
+   positions and the terrain each under a label saying which it is, parted
+   by a rule, and the parts of each by a dot. Every figure has digits of
+   one width and a slot wide enough for its longest ordinary value, so
+   nothing in the footer moves as the seconds count. */
+.currency { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end; gap: 0.15rem 0; color: var(--dim); font-variant-numeric: tabular-nums; }
+.stat { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.4rem; padding: 0 0.9rem; }
+.stat + .stat { border-left: 1px solid var(--line); }
+.stat:last-child { padding-right: 0; }
+.stat-label { color: var(--text); font-size: 0.85em; font-weight: 600; letter-spacing: 0.02em; }
+.stat .slot { display: inline-block; }
+#live-age { min-width: 5.6em; }
+#status { min-width: 9.2em; }
+.refresh { min-width: 11.3em; }
+.stat .more:not(:empty):not([hidden])::before { content: "·"; margin-right: 0.4rem; }
+#status.problem, .refresh.problem { color: #f0a35e; }
 
 .live-control { display: flex; align-items: center; gap: 0.4rem; }
 .live-control .pace { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
@@ -427,8 +439,6 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .structure.predicted.candidate span { border-style: dotted; opacity: 0.45; }
 .structure.predicted.candidate:hover span, .structure.predicted.candidate:focus span { opacity: 0.9; }
 
-/* Fixed width, or the footer shifts with every digit of the age. */
-.live { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 6.5rem; }
 
 .leaflet-tooltip.live-name, .leaflet-tooltip.live-tip {
   background: rgba(20, 22, 26, 0.85);
@@ -534,6 +544,10 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 }
 
 @media (max-width: 640px) {
+  /* One timer to a line, each under its label, from the left. */
+  .currency { flex: 1 1 100%; flex-direction: column; align-items: flex-start; }
+  .stat { padding: 0; }
+  .stat + .stat { border-left: 0; }
   .goto { margin-left: 0; }
   input[type="number"] { width: 5rem; }
   .inspect { right: 0.6rem; width: auto; }
