@@ -191,10 +191,10 @@
     if (!info) {
       el.status.textContent = '';
     } else if (!d || !d.rendered) {
-      el.status.textContent = 'The first render is still running. This page updates when it is done.';
+      el.status.textContent = 'the first render is still running; this page updates when it is done';
     } else {
-      const when = d.renderedAt ? `Updated ${ago(d.renderedAt)}` : 'Rendered before the last restart';
-      el.status.textContent = info.problem ? `${when}. The last refresh failed, so this is the previous map.` : when;
+      const when = d.renderedAt ? `updated ${ago(d.renderedAt)}` : 'rendered before the last restart';
+      el.status.textContent = info.problem ? `${when}; the last refresh failed, so this is the previous map` : when;
     }
   }
 
@@ -226,22 +226,22 @@
     let ask = true;
     if (!Number.isFinite(snapshot) || !(every > 0)) {
       // A service that has just started has taken no snapshot yet.
-      text = 'Waiting for the first refresh';
+      text = 'waiting for the first refresh';
     } else {
       const late = now - snapshot - every;
       if (late < 0) {
         // Never more than the interval, whatever the two clocks make of
         // a snapshot taken this instant.
-        text = `Next refresh in ${clock(Math.min(-late, every), Math.ceil)}`;
+        text = `next refresh in ${clock(Math.min(-late, every), Math.ceil)}`;
         // The tiles of a snapshot follow it by as long as they take to draw.
         const d = dimension(current);
         ask = Boolean(d && d.renderedAt) && Date.parse(d.renderedAt) < snapshot && now - snapshot < DRAWING_MS;
         if (!ask) dueSince = null;
       } else if (late < DUE_GRACE_MS && !info.problem) {
-        text = 'Refresh due now';
+        text = 'refresh due now';
       } else {
         overdue = true;
-        text = `Refresh overdue by ${clock(late, Math.floor)} · ${info.problem ? 'retrying' : 'may be in a quiet window'}`;
+        text = `refresh overdue by ${clock(late, Math.floor)}, ${info.problem ? 'retrying' : 'may be in a quiet window'}`;
       }
     }
     if (el.refresh.textContent !== text) el.refresh.textContent = text;
@@ -395,7 +395,7 @@
       identify();
     } catch {
       el.status.classList.add('problem');
-      el.status.textContent = 'Cannot reach the map service. Retrying.';
+      el.status.textContent = 'cannot reach the map service; retrying';
       return;
     }
     if (checking === true && body === answer) return;

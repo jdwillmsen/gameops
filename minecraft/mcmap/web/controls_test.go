@@ -123,3 +123,24 @@ func TestLoginCommandIsCopiedAsItIsShown(t *testing.T) {
 		t.Error("index.html has no copy button, hidden until there is a code, with a status beside it")
 	}
 }
+
+// The footer's timers are one group, each under a label that says which it
+// is, with a slot of fixed width for every figure that counts.
+func TestFooterGroupsItsTimersUnderLabels(t *testing.T) {
+	page := read(t, "index.html")
+	if !regexp.MustCompile(`(?s)<div id="currency" class="currency" role="group" aria-label="How current the map is">.*<span class="stat-label">Live positions</span> <output id="live-age" class="slot".*<span class="stat-label">Terrain</span> <span id="status" class="slot" role="status"></span> <output id="refresh" class="refresh slot more" role="timer"`).Match(page) {
+		t.Error("index.html no longer groups the live age and the terrain's refresh under their labels")
+	}
+	css := read(t, "style.css")
+	for _, need := range []string{"#live-age { min-width:", "#status { min-width:", ".refresh { min-width:", ".currency {", "font-variant-numeric: tabular-nums;"} {
+		if !bytes.Contains(css, []byte(need)) {
+			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+	live := read(t, "live.js")
+	for _, need := range []string{"say(el.age, state);", "say(el.more, extras.join(' · '));"} {
+		if !bytes.Contains(live, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
+		}
+	}
+}

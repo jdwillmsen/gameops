@@ -91,11 +91,14 @@
     </div>
   </section>
   <footer class="bar foot">
-    <output id="coords" aria-live="off">X —, Z —</output>
-    <output id="biome" class="biome-at" aria-live="off" hidden></output>
-    <output id="live" class="live" aria-live="off" hidden></output>
-    <output id="refresh" class="refresh" role="timer" aria-live="off" hidden></output>
-    <span id="status" role="status"></span>
+    <div class="where">
+      <output id="coords" aria-live="off">X —, Z —</output>
+      <output id="biome" class="biome-at" aria-live="off" hidden></output>
+    </div>
+    <div id="currency" class="currency" role="group" aria-label="How current the map is">
+      <span id="live" class="stat live" hidden><span class="stat-label">Live positions</span> <output id="live-age" class="slot" aria-live="off"></output> <span id="live-more" class="more"></span></span>
+      <span class="stat terrain"><span class="stat-label">Terrain</span> <span id="status" class="slot" role="status"></span> <output id="refresh" class="refresh slot more" role="timer" aria-live="off" hidden></output></span>
+    </div>
   </footer>
   <script src="lib/leaflet/leaflet.js"></script>
   <script src="app.js"></script>

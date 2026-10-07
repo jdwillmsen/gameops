@@ -1276,13 +1276,24 @@ ranges and how many of its 1,024 chunks are slime chunks, so that zooming
 out outlines one square and not a thousand. The Nether and the End get the
 same coordinates and are said to have no slime chunks.
 
+**The footer.** Where the pointer is, and the biome there, are on the
+left. On the right is one group saying how current the map is, in two parts
+with a label each: `Live positions`, how old the picture of players and
+mobs is (or `paused`, `connecting`, `reconnecting`, `no data`), then the
+interval if it is slower than the server's and how many mobs are shown if
+some were left out; and `Terrain`, when the tiles were last updated and the
+countdown below. The parts of each are separated by a dot and the two by a
+rule. Every figure is set in digits of one width in a slot as wide as its
+longest ordinary value, so nothing in the footer moves as the seconds
+count. Under 640 pixels each part takes a line of its own.
+
 **The refresh countdown.** The footer counts down to the next refresh of
 the terrain and the markers, from `snapshotAt` and `refreshSeconds` and the
 server's own clock as its `Date` header gives it. The service counts its
 interval from the end of a cycle, so a healthy refresh lands a little after
-zero; for the first 90 seconds past the time the page says `Refresh due
+zero; for the first 90 seconds past the time the page says `refresh due
 now`, and asks every five seconds whether it has landed. Past that, which
-is what a quiet window or a failing cycle looks like, it says `Refresh
+is what a quiet window or a failing cycle looks like, it says `refresh
 overdue by` and counts up, asking every 20 seconds after the first two
 minutes. It starts again only when a new snapshot has been seen.
 
