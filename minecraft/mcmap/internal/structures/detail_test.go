@@ -303,6 +303,52 @@ func TestDetail_AVillageStandsWithoutTheRecordsThatDecorateIt(t *testing.T) {
 	}
 }
 
+func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
+	w := newWorld(t).
+		blockEntity(chunks.Overworld, "TrialSpawner", 100, -20, 100, nbtTag(tagCompound, "spawn_data", nbtCompound(nbtString("TypeId", "minecraft:breeze")))).
+		blockEntity(chunks.Overworld, "TrialSpawner", 130, -24, 108).
+		blockEntity(chunks.Overworld, "Vault", 150, -22, 140, nbtTag(tagCompound, "config", nbtCompound(nbtString("loot_table", "loot_tables/chests/made_up_ominous.json")))).
+		blockEntity(chunks.Overworld, "Vault", 151, -22, 140, nbtTag(tagCompound, "config", nbtCompound(nbtString("loot_table", "loot_tables/chests/made_up.json")))).
+		blockEntity(chunks.Overworld, "DecoratedPot", 120, -22, 105, nbtString("LootTable", "loot_tables/pots/made_up.json")).
+		blockEntity(chunks.Overworld, "DecoratedPot", 121, -22, 105).
+		// Too far off to be the same chamber.
+		blockEntity(chunks.Overworld, "Vault", 900, -22, 900).
+		blockEntity(chunks.Overworld, "MobSpawner", 2000, 30, 2000, nbtString("EntityIdentifier", "minecraft:silverfish")).
+		blockEntity(chunks.Overworld, "EndPortal", 2004, 30, 2001).
+		blockEntity(chunks.Overworld, "EndPortal", 2005, 30, 2001).
+		// A dungeon's spawner is no stronghold's, and the End's own portal
+		// is in every End.
+		blockEntity(chunks.Overworld, "MobSpawner", 3000, 30, 3000, nbtString("EntityIdentifier", "minecraft:zombie")).
+		blockEntity(chunks.End, "EndPortal", 0, 60, 0).
+		blockEntity(chunks.End, "TrialSpawner", 0, 60, 4)
+	got := take(t, surveyor(t, nil), w)
+
+	if n := len(got.Layers[chunks.End].Recorded); n != 0 {
+		t.Errorf("%d structures found in the End, want none", n)
+	}
+	want := []Structure{
+		{Kind: Stronghold, Box: Box{2000, 30, 2000, 2005, 30, 2001}, Evidence: 3},
+		{Kind: TrialChamber, Box: Box{100, -24, 100, 151, -20, 140}, Evidence: 4},
+		{Kind: TrialChamber, Box: Box{900, -22, 900, 900, -22, 900}, Evidence: 1},
+	}
+	if !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
+		t.Fatalf("found %+v\nwant  %+v", got.Layers[chunks.Overworld].Recorded, want)
+	}
+	chamber := got.Layers[chunks.Overworld].Details[1]
+	if want := []SpawnerCount{{Mob: "breeze", Count: 1, Trial: true}, {Mob: "unknown", Count: 1, Trial: true}}; !slices.Equal(chamber.SpawnerCounts, want) {
+		t.Errorf("chamber spawners = %+v, want %+v", chamber.SpawnerCounts, want)
+	}
+	if chamber.Blocks["vault"] != 1 || chamber.Blocks["ominous_vault"] != 1 {
+		t.Errorf("chamber blocks = %v, want a vault and an ominous one", chamber.Blocks)
+	}
+	if want := []ContainerCount{{Kind: "pot", Unopened: 1}}; !slices.Equal(chamber.Containers, want) {
+		t.Errorf("chamber containers = %+v, want %+v", chamber.Containers, want)
+	}
+	if hold := got.Layers[chunks.Overworld].Details[0]; hold.Blocks["end_portal"] != 2 || len(hold.Spawners) != 1 {
+		t.Errorf("stronghold = %+v, want two portal blocks and its spawner", hold)
+	}
+}
+
 func TestDetail_BoundsWhatOneStructureAndOneSurveyList(t *testing.T) {
 	box := Box{0, 48, 0, 15, 72, 15}
 	w := newWorld(t).structure(chunks.Nether, 1, box).structure(chunks.Nether, 1, Box{320, 48, 320, 335, 72, 335})
@@ -409,6 +455,7 @@ func TestDetail_NoDamageToARecordPanics(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+		c.locate()
 	}
 }
 
@@ -477,6 +524,7 @@ func FuzzContents(f *testing.F) {
 				t.Fatalf("kept a mob as %+v", m)
 			}
 		}
+		c.locate()
 		if _, err := c.describe(t.Context(), chunks.Overworld, []Structure{{Kind: Monument, Box: Box{-64, -64, -64, 64, 320, 64}}}, nil, leveldat.Level{}, &allowance{names: 9, places: 9}); err != nil {
 			t.Fatal(err)
 		}

@@ -126,11 +126,13 @@ type searchJSON struct {
 }
 
 var structureNames = map[structures.Kind]string{
-	structures.Fortress: "Nether Fortress",
-	structures.Monument: "Ocean Monument",
-	structures.Outpost:  "Pillager Outpost",
-	structures.Village:  "Village",
-	structures.WitchHut: "Witch Hut",
+	structures.Fortress:     "Nether Fortress",
+	structures.Monument:     "Ocean Monument",
+	structures.Outpost:      "Pillager Outpost",
+	structures.Village:      "Village",
+	structures.WitchHut:     "Witch Hut",
+	structures.Stronghold:   "Stronghold",
+	structures.TrialChamber: "Trial Chamber",
 }
 
 // displayNames is the names the page shows, so that a search finds a thing

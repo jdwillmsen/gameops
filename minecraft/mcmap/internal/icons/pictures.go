@@ -25,25 +25,27 @@ var (
 	// trapped_chest for a chest marked t.
 	ContainerKinds = []string{"chest", "trapped_chest", "barrel", "shulker"}
 	// StructureKinds is every kind of structure the map marks.
-	StructureKinds = []string{"fortress", "monument", "outpost", "witch_hut", "village"}
+	StructureKinds = []string{"fortress", "monument", "outpost", "witch_hut", "village", "stronghold", "trial_chamber"}
 )
 
 // A picture's key is its group and its name within it: bed/red,
 // shulker/undyed, container/chest, structure/monument, marker/waypoint.
 var pictureKey = regexp.MustCompile(`^[a-z]{1,16}/[a-z0-9_]{1,32}$`)
 
-// maxPictures is more than the 43 there are, and bounds what an index on
+// maxPictures is more than the 45 there are, and bounds what an index on
 // the volume can make a start read.
 const maxPictures = 200
 
 // A structure has no item of its own, so each is drawn as one that could
 // be nothing else's: the README says why each was chosen.
 var structureItems = map[string]string{
-	"fortress":  "textures/items/netherbrick",
-	"monument":  "textures/items/prismarine_shard",
-	"outpost":   "textures/items/crossbow_standby",
-	"witch_hut": "textures/items/cauldron",
-	"village":   "textures/items/villagebell",
+	"fortress":      "textures/items/netherbrick",
+	"monument":      "textures/items/prismarine_shard",
+	"outpost":       "textures/items/crossbow_standby",
+	"witch_hut":     "textures/items/cauldron",
+	"village":       "textures/items/villagebell",
+	"stronghold":    "textures/items/ender_eye",
+	"trial_chamber": "textures/items/trial_key",
 }
 
 // markerPicture is one marker picture and where in the samples it comes from.

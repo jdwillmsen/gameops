@@ -431,6 +431,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db); err != nil {
 		return Survey{}, err
 	}
+	found := held.locate()
 	survey.Contents = held.stats
 	for _, r := range survey.villageRecords {
 		survey.Contents.Skipped += r.skipped
@@ -452,8 +453,13 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 
 	for _, d := range chunks.Dimensions {
 		// Villages come after the structures the seed is checked against,
-		// and are the first to go where a layer is cut short.
+		// and the ones found by their blocks after those, so that what
+		// the world records least of is the first to go where a layer is
+		// cut short.
 		layer := Layer{Recorded: append(slices.Clip(recorded[d]), survey.villages[d]...)}
+		if d == chunks.Overworld {
+			layer.Recorded = append(layer.Recorded, found...)
+		}
 		if len(layer.Recorded) > layerLimit {
 			layer.RecordedMore = len(layer.Recorded) - layerLimit
 			layer.Recorded = layer.Recorded[:layerLimit]
