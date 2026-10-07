@@ -78,9 +78,13 @@
   }
 
   // Typing is typing: nothing here fires from a box, a menu or anything
-  // else that takes text, or while a dialog has the page.
+  // else that takes text, or while a dialog has the page. A checkbox or a
+  // button takes no text: with the focus left on the grid's switch or a
+  // layer's, the shortcuts still work, and Space and Enter, which are not
+  // among them, still press it.
+  const NOT_TEXT = 'input[type="checkbox"], input[type="radio"], input[type="button"], input[type="submit"], input[type="reset"], input[type="range"], input[type="color"], input[type="file"], input[type="image"]';
   const typing = (node) => node instanceof Element
-    && (node.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') || node.closest('dialog[open]') !== null);
+    && ((node.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !node.matches(NOT_TEXT)) || node.closest('dialog[open]') !== null);
 
   document.addEventListener('keydown', (e) => {
     if (!enabled || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
