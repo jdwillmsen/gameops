@@ -1,3 +1,12 @@
+/* Every colour on the page is named here, once for each theme, and used
+   by its name everywhere below; what is drawn on a canvas reads the same
+   names. The first set is the page as it has always looked, and is what a
+   page with no theme chosen gets.
+
+   The terrain under the map is the same in every theme, so what is drawn
+   over it keeps a dark outline and a dark backing behind its picture in
+   all of them: a theme changes the page, its panels, and the plates that
+   labels are written on. */
 :root {
   color-scheme: dark;
   --bg: #14161a;
@@ -6,8 +15,130 @@
   --text: #e6e8eb;
   --dim: #9aa3ad;
   --accent: #6ecf7a;
+  --on-accent: #0b0c0e;
+  --warn: #f0a35e;
+  /* A panel that floats over the map, and what dims the page under a
+     sheet. */
+  --float: rgba(29, 32, 38, 0.94);
+  --scrim: rgba(11, 12, 14, 0.6);
+  --map-bg: #0b0c0e;
+  /* The hairline round a colour key. */
+  --edge: #0b0c0e;
+  --focus: 2px;
+
+  /* On the map: the outline of every marker, what a picture stands on,
+     the plate a label is written on, and a mark that is plain white. */
+  --marker-ink: #0b0c0e;
+  --marker-backing: rgba(11, 12, 14, 0.8);
+  --marker-backing-thin: rgba(11, 12, 14, 0.55);
+  --marker-fill: #ffffff;
+  --label-plate: rgba(20, 22, 26, 0.88);
+  --label-size: 1em;
+
+  --live-players: #ffffff;
+  --live-hostile: #e5534b;
+  --live-passive: #5cc8f0;
+  --live-villager: #d9a441;
+  --live-other: #9aa3ad;
+  --live-me: #6ecf7a;
+  --marker-waypoints: #b48cf2;
+  --marker-beds: #f277b5;
+  --marker-containers: #f08a3c;
+  --marker-mobs: #4fd1c5;
+  /* A name tag's ring, and the colour its letters are read in on the
+     label's plate, which is not the same colour on a light plate. */
+  --named: #4fd1c5;
+  --named-text: #4fd1c5;
+  --waypoint-text: #b48cf2;
+  --me-text: #6ecf7a;
+  --kind-fortress: #e5534b;
+  --kind-monument: #5cc8f0;
+  --kind-outpost: #d9a441;
+  --kind-witch-hut: #b48ce0;
+  --kind-village: #6bbf59;
+
+  --grid-origin: rgba(110, 207, 122, 0.9);
+  --grid-region: rgba(255, 255, 255, 0.45);
+  --grid-line: rgba(255, 255, 255, 0.18);
+  --slime-fill: rgba(110, 207, 122, 0.22);
+  --slime-far: rgba(110, 207, 122, 0.5);
+  --slime-line: rgba(110, 207, 122, 0.95);
+  --chunk-hover: #ffffff;
+  --chunk-pin: #6ecf7a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+
+/* Light. Text and the edges of controls are dark enough on its panels to
+   be read by the usual measure, four and a half to one for text and three
+   to one for an edge. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f3f5;
+  --panel: #ffffff;
+  --line: #747c86;
+  --text: #1b1f24;
+  --dim: #4c555f;
+  --accent: #0f5c26;
+  --on-accent: #ffffff;
+  --warn: #8f3a00;
+  --float: rgba(255, 255, 255, 0.97);
+  --scrim: rgba(27, 31, 36, 0.45);
+  --map-bg: #d9dee4;
+  --edge: #1b1f24;
+  /* Nearly solid, so that a ring still stands off its backing by three to
+     one where the terrain under it is snow. */
+  --marker-backing: rgba(11, 12, 14, 0.9);
+  --label-plate: rgba(255, 255, 255, 0.95);
+  --named-text: #0a5d54;
+  --waypoint-text: #5a2cb0;
+  --me-text: #0f5c26;
+}
+
+/* High contrast: black and white, with nothing translucent and every edge
+   as strong as the text. */
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #000000;
+  --line: #ffffff;
+  --text: #ffffff;
+  --dim: #e4e4e4;
+  --accent: #ffe14d;
+  --on-accent: #000000;
+  --warn: #ffb347;
+  --float: #000000;
+  --scrim: rgba(0, 0, 0, 0.8);
+  --map-bg: #000000;
+  --edge: #ffffff;
+  --focus: 3px;
+  --marker-ink: #000000;
+  --marker-backing: #000000;
+  --marker-backing-thin: #000000;
+  --label-plate: #000000;
+  --live-hostile: #ff7a72;
+  --live-passive: #7fdcff;
+  --live-villager: #ffd24d;
+  --live-other: #d6d6d6;
+  --live-me: #6dff8b;
+  --marker-waypoints: #d2b8ff;
+  --marker-beds: #ff9fcd;
+  --marker-containers: #ffab61;
+  --marker-mobs: #66f2e2;
+  --named: #66f2e2;
+  --named-text: #66f2e2;
+  --waypoint-text: #d2b8ff;
+  --me-text: #6dff8b;
+  --grid-origin: #6dff8b;
+  --grid-region: rgba(255, 255, 255, 0.8);
+  --grid-line: rgba(255, 255, 255, 0.4);
+  --slime-fill: rgba(109, 255, 139, 0.3);
+  --slime-far: rgba(109, 255, 139, 0.65);
+  --slime-line: #6dff8b;
+  --chunk-pin: #6dff8b;
+}
+
+:root[data-text="small"] { --label-size: 0.85em; }
+:root[data-text="large"] { --label-size: 1.25em; }
 
 * { box-sizing: border-box; }
 
@@ -42,7 +173,7 @@ h1 { margin: 0; font-size: 1rem; font-weight: 600; }
 
 .tabs { display: flex; gap: 0.25rem; }
 
-button, .tabs button, input[type="number"], input[type="search"], select {
+button, .tabs button, input[type="number"], input[type="search"], input[type="text"], select {
   font: inherit;
   color: var(--text);
   background: var(--bg);
@@ -55,7 +186,7 @@ button { cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--dim); }
 button:disabled { color: var(--dim); cursor: not-allowed; }
 button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+:focus-visible { outline: var(--focus) solid var(--accent); outline-offset: 1px; }
 
 .goto { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
 .goto .clear { position: relative; }
@@ -127,23 +258,26 @@ input[type="number"] { width: 6.5rem; }
 /* The place a search went to. The ring itself stays still, since Leaflet
    places it by a transform that an animation of its own would distort; what
    moves is a second ring spreading out from it. */
-.found { border: 3px solid var(--accent); border-radius: 50%; box-shadow: 0 0 0 2px #0b0c0e, inset 0 0 0 2px #0b0c0e; }
+.found { border: 3px solid var(--live-me); border-radius: 50%; box-shadow: 0 0 0 2px var(--marker-ink), inset 0 0 0 2px var(--marker-ink); }
 .found::after {
   content: "";
   position: absolute;
   inset: -3px;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--live-me);
   border-radius: 50%;
   opacity: 0;
   animation: found 1.2s ease-out 4;
 }
 @keyframes found { from { transform: scale(1); opacity: 0.9; } to { transform: scale(2.8); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .found::after { animation: none; } }
+/* Less motion is the viewer's choice where the page has been told it, and
+   the system's where it has not. */
+:root[data-motion="reduce"] .found::after { animation: none; }
+@media (prefers-reduced-motion: reduce) { :root:not([data-motion]) .found::after { animation: none; } }
 
 /* The map and what floats over it: the layer panel and the notice that
    the live picture is paused. */
 .stage { position: relative; flex: 1; min-height: 0; display: flex; }
-#map { flex: 1; min-width: 0; background: #0b0c0e; }
+#map { flex: 1; min-width: 0; background: var(--map-bg); }
 
 #coords { font-variant-numeric: tabular-nums; }
 .biome-at { color: var(--dim); }
@@ -164,7 +298,7 @@ input[type="number"] { width: 6.5rem; }
 #status { min-width: 9.2em; }
 .refresh { min-width: 11.3em; }
 .stat .then:not(:empty):not([hidden])::before { content: "·"; margin-right: 0.4rem; }
-#status.problem, .refresh.problem { color: #f0a35e; }
+#status.problem, .refresh.problem { color: var(--warn); }
 
 .live-control { display: flex; align-items: center; gap: 0.4rem; }
 .live-control .pace { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
@@ -187,8 +321,8 @@ input[type="number"] { width: 6.5rem; }
 }
 .duration .said.end { left: auto; right: 0; }
 .duration .said:empty { display: none; }
-.duration .said.problem { border-color: #f0a35e; color: #f0a35e; }
-.live-control .paused { border-color: #f0a35e; color: #f0a35e; }
+.duration .said.problem { border-color: var(--warn); color: var(--warn); }
+.live-control .paused { border-color: var(--warn); color: var(--warn); }
 select { padding: 0.3rem 0.4rem; cursor: pointer; }
 
 /* Above everything Leaflet draws, whose own controls stop at 1000. */
@@ -201,10 +335,10 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   margin: 0;
   max-width: calc(100% - 7rem);
   padding: 0.3rem 0.7rem;
-  background: rgba(29, 32, 38, 0.94);
-  border: 1px solid #f0a35e;
+  background: var(--float);
+  border: 1px solid var(--warn);
   border-radius: 6px;
-  color: #f0a35e;
+  color: var(--warn);
   font-variant-numeric: tabular-nums;
   text-align: center;
   pointer-events: none;
@@ -222,7 +356,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   width: 17rem;
   max-width: calc(100% - 1.2rem);
   padding: 0.4rem 0.6rem;
-  background: rgba(29, 32, 38, 0.94);
+  background: var(--float);
   border: 1px solid var(--line);
   border-radius: 8px;
   font-variant-numeric: tabular-nums;
@@ -270,7 +404,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   align-self: stretch;
   min-height: 0;
   overflow-y: auto;
-  background: rgba(29, 32, 38, 0.94);
+  background: var(--float);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.15rem 0.5rem;
@@ -313,7 +447,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .breakdown .mini { padding: 0.05rem 0.4rem; font-size: 0.85em; color: var(--dim); flex: none; }
 .breakdown .mini[aria-pressed="true"] { color: var(--accent); }
 .breakdown input[type="search"] { width: 100%; margin-top: 0.2rem; padding: 0.1rem 0.4rem; font-size: 0.9em; }
-.breakdown .filtered { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.2rem; color: #f0a35e; font-size: 0.85em; }
+.breakdown .filtered { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.2rem; color: var(--warn); font-size: 0.85em; }
 .breakdown .filtered span { flex: 1; }
 .layer .body:has(> .breakdown[hidden]) { display: none; }
 
@@ -330,20 +464,20 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   background: none;
   border-color: transparent;
 }
-.legend i { flex: none; width: 0.8rem; height: 0.8rem; border: 1px solid #0b0c0e; border-radius: 2px; }
+.legend i { flex: none; width: 0.8rem; height: 0.8rem; border: 1px solid var(--edge); border-radius: 2px; }
 /* Every colour at once, for the entry that is all of them. */
-.legend i.every { background: conic-gradient(#6bbf59, #d9a441, #5cc8f0, #b48ce0, #6bbf59); }
+.legend i.every { background: conic-gradient(var(--kind-village), var(--kind-outpost), var(--kind-monument), var(--kind-witch-hut), var(--kind-village)); }
 .legend .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .legend .share { color: var(--dim); font-variant-numeric: tabular-nums; }
 
 .who { color: var(--dim); }
 
-.dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 1px solid #0b0c0e; }
-.dot.players { background: #ffffff; }
-.dot.hostile { background: #e5534b; }
-.dot.passive { background: #5cc8f0; }
-.dot.villager { background: #d9a441; }
-.dot.other { background: #9aa3ad; }
+.dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 1px solid var(--edge); }
+.dot.players { background: var(--live-players); }
+.dot.hostile { background: var(--live-hostile); }
+.dot.passive { background: var(--live-passive); }
+.dot.villager { background: var(--live-villager); }
+.dot.other { background: var(--live-other); }
 
 /* A picture from the game, where the page shows one outside the map's own
    canvas. It is sixteen texture pixels and is never smoothed. While there
@@ -370,33 +504,33 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .roster .what { color: var(--dim); font-size: 0.85em; text-align: right; }
 
 /* Markers that stay put are keyed by a ring, the live ones by a dot. */
-.ring { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 2px solid; background: #0b0c0e; }
-.ring.waypoints { border-color: #b48cf2; }
-.ring.beds { border-color: #f277b5; }
-.ring.containers { border-color: #f08a3c; }
-.ring.mobs { border-color: #4fd1c5; }
+.ring { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 2px solid; background: var(--marker-ink); }
+.ring.waypoints { border-color: var(--marker-waypoints); }
+.ring.beds { border-color: var(--marker-beds); }
+.ring.containers { border-color: var(--marker-containers); }
+.ring.mobs { border-color: var(--marker-mobs); }
 
 .leaflet-tooltip.marker-name, .leaflet-tooltip.marker-tip {
-  background: rgba(20, 22, 26, 0.85);
+  background: var(--label-plate);
   border: 1px solid var(--line);
   color: var(--text);
   box-shadow: none;
   padding: 0.05rem 0.4rem;
 }
-.leaflet-tooltip.marker-name { border-color: #b48cf2; color: #b48cf2; }
+.leaflet-tooltip.marker-name { border-color: var(--waypoint-text); color: var(--waypoint-text); }
 .leaflet-tooltip.marker-name::before, .leaflet-tooltip.marker-tip::before { display: none; }
 
 /* Structures. Known ones are solid and predicted ones hollow and dashed, in
    the key and on the map alike: the difference between what the world
    recorded and what the seed implies must not rest on colour, which is
    already spent on the kind. */
-.dot.fortress { background: #e5534b; }
-.dot.monument { background: #5cc8f0; }
-.dot.outpost { background: #d9a441; }
-.dot.witch-hut { background: #b48ce0; }
-.dot.village { background: #6bbf59; }
+.dot.fortress { background: var(--kind-fortress); }
+.dot.monument { background: var(--kind-monument); }
+.dot.outpost { background: var(--kind-outpost); }
+.dot.witch-hut { background: var(--kind-witch-hut); }
+.dot.village { background: var(--kind-village); }
 .key { width: 0.7rem; height: 0.7rem; }
-.key.recorded { background: var(--text); border: 1px solid #0b0c0e; border-radius: 2px; }
+.key.recorded { background: var(--text); border: 1px solid var(--edge); border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
 .key.candidate { border: 1.5px dotted var(--text); border-radius: 50%; opacity: 0.55; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
@@ -410,7 +544,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 /* A trail's colour is its player's, so the swatch is the line, not a box. */
 .trail-players { list-style: none; margin: 0; padding: 0; max-height: 10rem; overflow-y: auto; }
 .trail-players i { width: 1rem; height: 0.3rem; border-radius: 1px; }
-.key.slime { background: rgba(110, 207, 122, 0.3); border: 1px solid var(--accent); }
+.key.slime { background: var(--slime-far); border: 1px solid var(--slime-line); }
 
 .structure span {
   display: grid;
@@ -421,18 +555,18 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 }
 /* The letter is what a kind is drawn as until its picture is there. */
 .structure .picture:not([hidden]) + b { display: none; }
-.structure.recorded span { background: var(--kind); color: #0b0c0e; border: 1.5px solid #0b0c0e; border-radius: 3px; }
+.structure.recorded span { background: var(--kind); color: var(--marker-ink); border: 1.5px solid var(--marker-ink); border-radius: 3px; }
 /* Dark behind the picture, so the kind's colour is a frame round it. */
-.structure.recorded .picture { background: rgba(11, 12, 14, 0.85); border-radius: 2px; }
+.structure.recorded .picture { background: var(--marker-backing); border-radius: 2px; }
 .structure.predicted span {
-  background: rgba(11, 12, 14, 0.55);
+  background: var(--marker-backing-thin);
   color: var(--kind);
   border: 1.5px dashed var(--kind);
   border-radius: 50%;
 }
 /* The world spawn is a diamond, which no kind of structure is. */
-.key.spawn { width: 0.6rem; height: 0.6rem; margin: 0 0.05rem; background: var(--text); border: 1px solid #0b0c0e; transform: rotate(45deg); }
-.structure.spawn span { width: 13px; height: 13px; margin: 4.5px; background: var(--text); border: 1.5px solid #0b0c0e; transform: rotate(45deg); }
+.key.spawn { width: 0.6rem; height: 0.6rem; margin: 0 0.05rem; background: var(--marker-fill); border: 1px solid var(--marker-ink); transform: rotate(45deg); }
+.structure.spawn span { width: 13px; height: 13px; margin: 4.5px; background: var(--marker-fill); border: 1.5px solid var(--marker-ink); transform: rotate(45deg); }
 /* Predicted where the world has already generated and recorded nothing. */
 .structure.predicted.doubted span { opacity: 0.55; text-decoration: line-through; }
 /* Only possible: the terrain is not generated, and the biome will decide.
@@ -443,13 +577,13 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 
 
 .leaflet-tooltip.live-name, .leaflet-tooltip.live-tip {
-  background: rgba(20, 22, 26, 0.85);
+  background: var(--label-plate);
   border: 1px solid var(--line);
   color: var(--text);
   box-shadow: none;
   padding: 0.05rem 0.4rem;
 }
-.leaflet-tooltip.live-name.me { border-color: var(--accent); color: var(--accent); }
+.leaflet-tooltip.live-name.me { border-color: var(--me-text); color: var(--me-text); }
 .leaflet-tooltip.live-name::before, .leaflet-tooltip.live-tip::before { display: none; }
 
 /* The card about one mob or player. It sits under the layer panel in the
@@ -464,11 +598,11 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   width: 18.5rem;
   max-width: calc(100% - 1.2rem);
   padding: 0.5rem 0.6rem;
-  background: rgba(29, 32, 38, 0.94);
+  background: var(--float);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
-.inspect.adrift { border-color: #f0a35e; }
+.inspect.adrift { border-color: var(--warn); }
 .inspect-head { display: flex; align-items: flex-start; gap: 0.5rem; }
 .inspect-head canvas { flex: none; width: 32px; height: 32px; }
 .inspect-title { flex: 1; min-width: 0; display: grid; }
@@ -479,12 +613,12 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
    exactly what the game's commands accept. */
 .inspect-coords { font-variant-numeric: tabular-nums; word-spacing: 0.5rem; user-select: all; }
 .inspect-coords span::before { content: attr(data-axis); margin-right: 0.3rem; color: var(--dim); }
-.inspect-note { margin: 0; color: #f0a35e; font-variant-numeric: tabular-nums; }
+.inspect-note { margin: 0; color: var(--warn); font-variant-numeric: tabular-nums; }
 .inspect-note strong { font-weight: 600; }
 .inspect-actions { display: flex; gap: 0.4rem; }
 /* Following is a state the map is in, so its button is filled, not merely
    outlined like a choice among equals. */
-#inspect-follow[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #0b0c0e; font-weight: 600; }
+#inspect-follow[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 /* For a screen reader only: said, and not shown. */
 .unseen { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .inspect-actions button { flex: 1; padding-inline: 0.4rem; white-space: nowrap; }
@@ -503,7 +637,9 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   border: 1px solid var(--line);
   border-radius: 10px;
 }
-.sheet::backdrop { background: rgba(11, 12, 14, 0.6); }
+/* A backdrop does not take the page's colours in every browser, so the
+   colour it had before there were themes is given first. */
+.sheet::backdrop { background: rgba(11, 12, 14, 0.6); background: var(--scrim, rgba(11, 12, 14, 0.6)); }
 .sheet-head { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.5rem; }
 .sheet-head h2 { flex: 1; margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 .sheet h3 { margin: 0.9rem 0 0.35rem; font-size: 0.95rem; color: var(--dim); font-weight: 600; }
@@ -543,15 +679,83 @@ kbd, .keys code {
   margin: 0;
   max-width: calc(100% - 2rem);
   padding: 0.3rem 0.7rem;
-  background: rgba(29, 32, 38, 0.94);
+  background: var(--float);
   border: 1px solid var(--line);
   border-radius: 6px;
   text-align: center;
   pointer-events: none;
 }
 
+/* The list of views. A view is one wide button to switch to it, with its
+   number, and beside it what opens the rest of what can be done with it. */
+.views-list { list-style: none; margin: 0.25rem 0 0; padding: 0; display: grid; gap: 0.3rem; }
+.view { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0.3rem 0.4rem; }
+.view[aria-current="true"] .view-pick { border-color: var(--accent); }
+.view-pick { display: flex; align-items: center; gap: 0.6rem; min-width: 0; text-align: left; }
+.view-title { display: grid; min-width: 0; }
+.view .name { overflow-wrap: anywhere; }
+.view .what { color: var(--dim); font-size: 0.85em; }
+.view .mini, .views-said .mini { padding: 0.15rem 0.5rem; font-size: 0.9em; }
+.view-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 0 0.3rem 0.2rem; }
+.view-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; flex: 1 1 100%; }
+.view-rename label, .views-save label { color: var(--dim); display: flex; align-items: center; gap: 0.4rem; }
+.view-rename input, .views-save input[type="text"] { flex: 1; min-width: 8rem; }
+.views-save { display: grid; gap: 0.35rem; justify-items: start; }
+.views-save label:first-of-type { justify-self: stretch; }
+.views-save h3 { margin-bottom: 0; }
+.views-said:has(span:empty):has(button[hidden]) { display: none; }
+.sheet .toggle input { accent-color: var(--accent); flex: none; }
+/* What a link or a file has brought, set apart until it is taken or sent
+   away. */
+.offer { margin: 0.5rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--accent); border-radius: 8px; }
+.offer h3 { margin-top: 0; }
+.offer p { margin: 0.2rem 0; overflow-wrap: anywhere; }
+#views-offer-what { display: block; color: var(--dim); }
+.offer .sheet-actions { margin-top: 0.5rem; }
+
+/* The appearance settings: a name and its control to a line. The sheet
+   keeps to one side and leaves the page undimmed, so that a choice is
+   seen on the map and in the layer panel as it is made. */
+.looks { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 1.2fr); align-items: center; gap: 0.35rem 0.8rem; }
+.looks label { color: var(--dim); }
+.looks select { width: 100%; }
+.looks .range { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.looks input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.looks output { color: var(--dim); font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sheet.aside {
+  width: min(27rem, calc(100vw - 1rem));
+  margin: 3.6rem auto auto 0.6rem;
+  max-height: calc(100vh - 6.5rem);
+  max-height: calc(100dvh - 6.5rem);
+}
+.sheet.aside::backdrop { background: transparent; }
+
+/* Labels on the map, at the size the viewer has chosen. */
+.leaflet-tooltip { font-size: var(--label-size); }
+
+/* A theme made for contrast has no shadow to tell a control from the map
+   by, so the map's own buttons take the page's colours and edges. */
+:root[data-theme="contrast"] .leaflet-bar { border: 2px solid var(--line); }
+:root[data-theme="contrast"] .leaflet-bar a { background: var(--panel); color: var(--text); border-bottom-color: var(--line); }
+:root[data-theme="contrast"] .leaflet-bar a.leaflet-disabled { color: var(--dim); }
+:root[data-theme="contrast"] button, :root[data-theme="contrast"] select, :root[data-theme="contrast"] input { border-width: 2px; }
+
+/* Compact panels: the same controls with less air round them, for a
+   screen with a pointer. A finger's 44 pixels, further down, are kept
+   whichever is chosen. */
+:root[data-density="compact"] body { font-size: 13px; }
+:root[data-density="compact"] .bar { gap: 0.3rem 0.7rem; padding: 0.3rem 0.6rem; }
+:root[data-density="compact"] :is(button, .tabs button, input[type="number"], input[type="search"], input[type="text"], select) { padding: 0.15rem 0.5rem; }
+:root[data-density="compact"] .layer-group-head { padding: 0.1rem 0; }
+:root[data-density="compact"] .layer-group ul { padding-bottom: 0.15rem; }
+:root[data-density="compact"] .layer { padding: 0 0.2rem; }
+:root[data-density="compact"] .layers.open { width: 14.5rem; }
+:root[data-density="compact"] :is(.inspect, .chunk) { gap: 0.25rem; padding: 0.3rem 0.5rem; }
+:root[data-density="compact"] .sheet { padding: 0.6rem 0.8rem 0.8rem; }
+:root[data-density="compact"] .sheet h3 { margin-top: 0.6rem; }
+
 /* While logged out the map and its controls are not there to use. */
-.locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .help-open, .locked .foot { display: none; }
+.locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .help-open, .locked #views-open, .locked #appearance-open, .locked .foot { display: none; }
 
 .login {
   flex: 1;
@@ -589,14 +793,14 @@ kbd, .keys code {
 .copied { margin-left: 0.4rem; color: var(--accent); }
 
 .note { color: var(--dim); min-height: 1.5em; }
-.note.problem { color: #f0a35e; }
+.note.problem { color: var(--warn); }
 
 [hidden] { display: none !important; }
 
 /* Rendered one block to a pixel, the tiles are pixel art; smoothing them when
    zoomed in past full scale only blurs it. */
 .leaflet-tile { image-rendering: pixelated; }
-.leaflet-container { background: #0b0c0e; font: inherit; }
+.leaflet-container { background: var(--map-bg); font: inherit; }
 
 /* Without room beside the layer panel, the results take theirs from the map
    instead: they open under the bar and push the map down, covering nothing. */
@@ -772,7 +976,7 @@ kbd, .keys code {
   .currency-open { flex: none; gap: 0.4rem; background: none; border-color: transparent; color: var(--dim); font-variant-numeric: tabular-nums; }
   #currency-brief { min-width: 3.2em; text-align: left; }
   .pulse { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--accent); }
-  .currency-open.problem .pulse { background: #f0a35e; }
+  .currency-open.problem .pulse { background: var(--warn); }
   .currency { display: none; }
   .currency-shown .currency {
     display: flex;
@@ -800,6 +1004,20 @@ kbd, .keys code {
     max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
   .facts { grid-template-columns: minmax(5.5rem, 40%) 1fr; }
+  /* The appearance settings come up from the bottom and leave the top of
+     the map in sight. */
+  .sheet.aside {
+    width: 100vw;
+    max-width: 100vw;
+    margin: auto 0 0;
+    max-height: 58vh;
+    max-height: 58dvh;
+    border-width: 1px 0 0;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom));
+  }
+  .looks { grid-template-columns: minmax(6.5rem, 2fr) minmax(0, 3fr); }
+  .view-pick { min-height: 44px; }
 }
 
 /* The narrowest phones: three dimensions' names, a search and More in 320
@@ -834,9 +1052,12 @@ kbd, .keys code {
 
 /* Sheets arrive rather than appear, for whoever has not asked for less
    motion. */
+@media (max-width: 720px), (max-height: 480px) {
+  :root[data-motion="full"] :is(.more-shown .more, .currency-shown .currency, .layers.open #layers-body) { animation: arrive 140ms ease-out; }
+}
 @media (prefers-reduced-motion: no-preference) {
   @media (max-width: 720px), (max-height: 480px) {
-    .more-shown .more, .currency-shown .currency, .layers.open #layers-body { animation: arrive 140ms ease-out; }
+    :root:not([data-motion]) :is(.more-shown .more, .currency-shown .currency, .layers.open #layers-body) { animation: arrive 140ms ease-out; }
   }
 }
 @keyframes arrive { from { opacity: 0; } to { opacity: 1; } }
