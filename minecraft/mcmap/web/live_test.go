@@ -105,3 +105,36 @@ func TestInspectCardSetsTextAndTracksById(t *testing.T) {
 		}
 	}
 }
+
+// Under each live row is what it holds, by type or by gamertag. A gamertag
+// is a player's choice and a type the server's word, so each is set as
+// text; and a frame of a thousand mobs must not pay for the filters more
+// than a lookup each.
+func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
+	js := read(t, "live.js")
+	for _, need := range []string{
+		"return f.only !== null ? f.only === sort : !f.hidden.has(sort);",
+		"const visible = (held) => shown(held.category) && passes(held.category, held.sort);",
+		"if (visible(held)) layerOf(category).addLayer(held.marker);",
+		"it.name.textContent = label;",
+		"app.layers.retain('live', domain, filtering(domain) ? { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN) } : null);",
+		"const busy = list.matches(':hover') || list.contains(document.activeElement);",
+		"Hidden on the map by your ${picked.category === 'players' ? 'player' : 'type'} filter.",
+		"rows[id].setBody(breakdowns[id].node);",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
+		}
+	}
+	// The markers are placed when an entity appears and when a filter
+	// changes, never looked over again for every frame.
+	if n := len(regexp.MustCompile(`\brefilter\b`).FindAll(js, -1)); n != 3 {
+		t.Errorf("live.js names refilter in %d places, want its definition, a row's switch and a filter's change", n)
+	}
+	panel := read(t, "layers.js")
+	for _, need := range []string{"app.layers.recall = recall;", "app.layers.retain = retain;", "return Object.hasOwn(choices, key) ? choices[key] : null;"} {
+		if !bytes.Contains(panel, []byte(need)) {
+			t.Errorf("layers.js no longer has %s", need)
+		}
+	}
+}

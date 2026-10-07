@@ -261,6 +261,23 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .layer.unavailable label { cursor: not-allowed; }
 .layer .body { grid-column: 1 / -1; padding: 0.25rem 0 0.15rem 1.4rem; }
 
+/* What a live row holds, by type or by player. It scrolls by itself, like
+   the other lists in the panel. */
+.breakdown summary { cursor: pointer; color: var(--dim); font-size: 0.85em; }
+.breakdown ul { list-style: none; margin: 0.15rem 0 0; padding: 0; max-height: 11rem; overflow-y: auto; }
+.breakdown li { display: flex; align-items: center; gap: 0.4rem; padding: 0.05rem 0.1rem; }
+.breakdown li label { flex: 1; min-width: 0; }
+.breakdown li label:has(+ .who) { flex: none; }
+.breakdown .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.breakdown .who { text-align: left; background: none; border-color: transparent; padding: 0 0.2rem; }
+.breakdown .count { color: var(--dim); font-variant-numeric: tabular-nums; }
+.breakdown .mini { padding: 0.05rem 0.4rem; font-size: 0.85em; color: var(--dim); flex: none; }
+.breakdown .mini[aria-pressed="true"] { color: var(--accent); }
+.breakdown input[type="search"] { width: 100%; margin-top: 0.2rem; padding: 0.1rem 0.4rem; font-size: 0.9em; }
+.breakdown .filtered { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.2rem; color: #f0a35e; font-size: 0.85em; }
+.breakdown .filtered span { flex: 1; }
+.layer .body:has(> .breakdown[hidden]) { display: none; }
+
 /* The legend scrolls by itself: a dimension can hold dozens of biomes, and
    the groups under it have to stay within reach. */
 .legend ul { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; }
