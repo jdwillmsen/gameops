@@ -119,6 +119,9 @@ func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
 		"it.name.textContent = label;",
 		"app.layers.retain('live', domain, filtering(domain) ? { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN) } : null);",
 		"const busy = list.matches(':hover') || list.contains(document.activeElement);",
+		// A new row is listed whoever is pointing; only the order waits.
+		"for (const sort of wanted) if (items.get(sort).item.parentNode !== list) list.append(items.get(sort).item);",
+		"if (key !== order && !busy) {",
 		"Hidden on the map by your ${picked.category === 'players' ? 'player' : 'type'} filter.",
 		"rows[id].setBody(breakdowns[id].node);",
 	} {

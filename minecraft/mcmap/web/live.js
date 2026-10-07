@@ -913,7 +913,11 @@
       const wanted = [...sorts].sort((a, b) => b[1].n - a[1].n || titleOf(a[0], a[1]).localeCompare(titleOf(b[0], b[1]))).map(([sort]) => sort);
       const key = wanted.join('\n');
       const busy = list.matches(':hover') || list.contains(document.activeElement);
-      if (key !== order && (!busy || list.children.length !== wanted.length)) {
+      // A row that is new goes in at the end at once, whoever is pointing:
+      // nothing moves for it, and a type that has just arrived is not left
+      // out until the pointer goes. Only putting them in order waits.
+      for (const sort of wanted) if (items.get(sort).item.parentNode !== list) list.append(items.get(sort).item);
+      if (key !== order && !busy) {
         order = key;
         for (const sort of wanted) list.append(items.get(sort).item);
       }
