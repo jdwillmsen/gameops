@@ -405,13 +405,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			for _, m := range lists.Mobs {
-				if !matches(m.Name, m.Kind, names.Entity(m.Kind)) {
+				// The same animal by the game's id for it, never by its
+				// name or where it was. While it is loaded it is found by
+				// the name it has now and listed once, where it is now: one
+				// renamed since the snapshot does not answer to its old name
+				// with its new position.
+				at, isLoaded := loaded[m.ID]
+				isLoaded = isLoaded && m.ID != ""
+				name := m.Name
+				if isLoaded {
+					name = at.Name
+				}
+				if !matches(name, m.Kind, names.Entity(m.Kind)) {
 					continue
 				}
-				h := searchHit{Kind: hitMob, Name: m.Name, Detail: m.Kind, Baby: m.Baby, ID: m.ID, X: m.X, Y: height(m.Y), Z: m.Z}
-				// The same animal by the game's id for it, never by its
-				// name or where it was: it is listed once, where it is now.
-				if at, ok := loaded[m.ID]; ok && m.ID != "" {
+				h := searchHit{Kind: hitMob, Name: name, Detail: m.Kind, Baby: m.Baby, ID: m.ID, X: m.X, Y: height(m.Y), Z: m.Z}
+				if isLoaded {
 					h.Live, h.X, h.Y, h.Z = true, block(at.X), height(block(at.Y)), block(at.Z)
 					delete(loaded, m.ID)
 				}
