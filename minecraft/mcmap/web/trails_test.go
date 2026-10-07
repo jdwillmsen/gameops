@@ -82,7 +82,7 @@ func TestTrailsAskNoMoreOftenThanEveryHalfMinute(t *testing.T) {
 	if len(keys) != 1 || string(keys[0]) != "'mcmap.trails'" {
 		t.Errorf("trails.js keeps %s in the browser, want only the window under 'mcmap.trails'", keys)
 	}
-	if !bytes.Contains(js, []byte("JSON.stringify({ hours })")) {
+	if !bytes.Contains(js, []byte("JSON.stringify({ seconds })")) {
 		t.Error("trails.js keeps more than the window under its key")
 	}
 }

@@ -155,7 +155,27 @@ input[type="number"] { width: 6.5rem; }
 .refresh.problem { color: #f0a35e; }
 
 .live-control { display: flex; align-items: center; gap: 0.4rem; }
-.live-control label { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
+.live-control .pace { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
+/* A length of time chosen from a menu or typed. What was understood, or
+   why it was not, is said under the box without moving what is beside it. */
+.duration { position: relative; display: inline-flex; align-items: center; }
+.duration input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.3rem 0.4rem; width: 8.5rem; }
+.duration .said {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 1250;
+  width: max-content;
+  max-width: min(18rem, 80vw);
+  padding: 0.25rem 0.5rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+}
+.duration .said.end { left: auto; right: 0; }
+.duration .said:empty { display: none; }
+.duration .said.problem { border-color: #f0a35e; color: #f0a35e; }
 .live-control .paused { border-color: #f0a35e; color: #f0a35e; }
 select { padding: 0.3rem 0.4rem; cursor: pointer; }
 
@@ -325,7 +345,11 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .key.candidate { border: 1.5px dotted var(--text); border-radius: 50%; opacity: 0.55; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
 .trail-window { display: flex; align-items: center; gap: 0.4rem; color: var(--dim); }
-.trail-window select { padding: 0.1rem 0.3rem; }
+.trail-window select, .trail-window input { padding: 0.1rem 0.3rem; }
+/* Inside the panel there is no room to hang it, so it takes a line. */
+.trail-window { flex-wrap: wrap; }
+.trail-window .duration { flex-wrap: wrap; gap: 0.3rem; }
+.trail-window .duration .said { position: static; max-width: 100%; }
 .trail-body { display: grid; gap: 0.3rem; }
 /* A trail's colour is its player's, so the swatch is the line, not a box. */
 .trail-players { list-style: none; margin: 0; padding: 0; max-height: 10rem; overflow-y: auto; }

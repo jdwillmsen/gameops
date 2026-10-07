@@ -4,5 +4,5 @@ package web
 
 import "embed"
 
-//go:embed index.html app.js names.js icons.js layers.js live.js markers.js structures.js biomes.js search.js slime.js trails.js style.css lib
+//go:embed index.html app.js duration.js names.js icons.js layers.js live.js markers.js structures.js biomes.js search.js slime.js trails.js style.css lib
 var FS embed.FS

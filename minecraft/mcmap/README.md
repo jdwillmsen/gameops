@@ -1157,7 +1157,9 @@ Every logged-in player already sees where every other player is, live, so
 carries at most 20,000 points, each player's newest.
 
 **On the page.** Trails is a row in the Overlays group, off until turned
-on, with a choice of the last 1, 6 or 24 hours, sent as `since`. The
+on, with a choice of the last 1, 6 or 24 hours or, under Other, a length typed
+as the live interval's is (a bare number is hours), from a minute up to
+what the server keeps, sent as `since`. The
 viewer's own trail is the green the live layer draws them in, which
 `live.js` offers as `window.mcmap.playerColour`; every other player's is
 one of eight colours picked by their gamertag, or the next one free where
@@ -1240,8 +1242,20 @@ is what a quiet window or a failing cycle looks like, it says `Refresh
 overdue by` and counts up, asking every 20 seconds after the first two
 minutes. It starts again only when a new snapshot has been seen.
 
-**Live updates.** Beside the grid switch are Pause and an interval of 1,
-2, 5, 10 or 30 seconds, both kept in the browser under `mcmap.liveControl`.
+**Live updates.** Beside the grid switch are Pause and an interval, both
+kept in the browser under `mcmap.liveControl`. The interval is chosen from
+a menu (1, 2, 5, 10 or 30 seconds, 1 or 5 minutes) or, under Other, typed:
+a number with `s`, `m`, `h` or `d`, whole or not, alone or joined, such as
+`5`, `90s`, `1.5m`, `1m30s`, `2h` or `1d`; a bare number is seconds. What
+was understood is said in words under the box as it is typed (`every 1 min
+30 s`) and Enter applies it. Something that is not a length, a negative
+one, or a number with no unit in a joined form is refused with a sentence
+saying why, and nothing changes. The shortest is 1 second, the server's own
+pace, and the longest a day; a length outside those is brought to the
+nearer one and the page says so. A length typed is added to the menu, kept,
+and said in the footer in the same words; a pace kept by an earlier version
+of the page is still used. The terrain's own refresh is the server's cycle
+(`REFRESH_INTERVAL`) and is not something the page can set.
 A slower interval keeps the stream open and draws the newest frame when one
 is due; the rest are dropped unread. Pausing closes the stream, so a paused
 tab is not among `mcmap_live_subscribers`, and leaves the last picture on

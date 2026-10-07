@@ -11,13 +11,18 @@
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
   // after a release this can meet a page that has no panel yet.
-  if (!app || !app.layers || !app.layers.register) return;
-  const { map } = app;
+  if (!app || !app.layers || !app.layers.register || !app.duration) return;
+  const { map, duration } = app;
 
   const WINDOW_KEY = 'mcmap.trails';
-  // Hours of trail the viewer may ask for. The server keeps a day unless
-  // it is set to keep less, and says how long in every answer.
-  const WINDOWS = [1, 6, 24];
+  // How much trail the viewer is offered, in seconds; any other length may
+  // be typed, down to a minute and up to what the server keeps. It keeps a
+  // day unless it is set otherwise, and says how long in every answer.
+  const WINDOWS = [3600, 6 * 3600, 24 * 3600];
+  const MIN_WINDOW = 60;
+  // The longest that may be asked for before the server has said what it
+  // keeps.
+  const MAX_UNKNOWN = 7 * 86_400;
   const REFRESH_MS = 60_000;
   const CHECK_MS = 30_000;
   // The server's rules for a trail, for carrying one forward between
@@ -57,16 +62,20 @@
   const lines = L.featureGroup();
   lines.bindTooltip((line) => text(line.options.label), { sticky: true, direction: 'top', className: 'live-tip' });
 
-  let hours = WINDOWS[0];
+  let seconds = WINDOWS[0];
   try {
     const saved = JSON.parse(localStorage.getItem(WINDOW_KEY) || 'null');
-    if (saved && WINDOWS.includes(saved.hours)) hours = saved.hours;
+    // Kept as hours while the choice was one of three.
+    const kept = saved && Number.isFinite(saved.seconds) ? saved.seconds : saved && Number.isFinite(saved.hours) ? saved.hours * 3600 : NaN;
+    if (Number.isFinite(kept)) seconds = Math.min(MAX_UNKNOWN, Math.max(MIN_WINDOW, Math.round(kept)));
   } catch { /* a browser that refuses storage still gets the default */ }
+  // How long the server keeps a trail, once an answer has said.
+  let retention = 0;
 
   // Whether the service keeps trails at all; null until it has answered.
   let available = null;
   let row = null;
-  // What the lines on the map are of, as "<dimension>|<hours>", or null.
+  // What the lines on the map are of, as "<dimension>|<seconds>", or null.
   let drawn = null;
   let fetchedAt = 0;
   let pending = null;
@@ -84,17 +93,25 @@
   const players = document.createElement('ul');
   players.className = 'legend trail-players';
   players.setAttribute('aria-label', 'Players with a trail here. Choose one to see the whole of it.');
-  const picker = document.createElement('label');
+  const picker = document.createElement('span');
   picker.className = 'trail-window';
-  const select = document.createElement('select');
-  for (const h of WINDOWS) {
-    const option = document.createElement('option');
-    option.value = String(h);
-    option.textContent = `${h} h`;
-    select.append(option);
-  }
-  select.value = String(hours);
-  picker.append('Last ', select);
+  const span = (length) => (length >= 3600 ? `${Math.round(length / 3600)} h` : `${Math.max(1, Math.round(length / 60))} min`);
+  const chosen = duration.picker({
+    name: 'How much trail to show',
+    presets: WINDOWS,
+    unit: 'h',
+    min: MIN_WINDOW,
+    max: () => (retention > 0 ? retention : MAX_UNKNOWN),
+    maxWhy: ', which is all the server keeps',
+    say: (length) => `the last ${length}`,
+    value: seconds,
+    onChange(length) {
+      seconds = length;
+      try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ seconds })); } catch { /* not kept, still applied */ }
+      sync();
+    },
+  });
+  picker.append('Last ', chosen.node);
   body.append(picker, players);
 
   const on = () => row !== null && row.enabled;
@@ -223,7 +240,7 @@
   // guess at what the server recorded, good until its next answer.
   function follow(e) {
     const frame = e.detail;
-    if (!on() || !frame || drawn !== `${frame.dimension}|${hours}` || !Array.isArray(frame.players)) return;
+    if (!on() || !frame || drawn !== `${frame.dimension}|${seconds}` || !Array.isArray(frame.players)) return;
     const now = Date.now();
     for (const p of frame.players) {
       if (!p || typeof p.n !== 'string' || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
@@ -243,11 +260,6 @@
     }
     row.setCount(trails.size);
     list();
-  }
-
-  function span(seconds) {
-    const h = seconds / 3600;
-    return h >= 1 ? `${Math.round(h)} h` : `${Math.max(1, Math.round(seconds / 60))} min`;
   }
 
   function paint() {
@@ -277,7 +289,7 @@
     }
     row.setCount(showing ? trails.size : null);
     const notes = [];
-    if (showing && limits.maxAgeSeconds > 0 && limits.maxAgeSeconds < hours * 3600) notes.push(`The server keeps ${span(limits.maxAgeSeconds)} of trail.`);
+    if (showing && limits.maxAgeSeconds > 0 && limits.maxAgeSeconds < seconds) notes.push(`The server keeps ${span(limits.maxAgeSeconds)} of trail.`);
     if (showing && limits.more > 0) notes.push('Only the newest part of each trail is shown.');
     row.setNote(notes.join(' '));
   }
@@ -286,10 +298,10 @@
   // any to ask for: a moment's worth is the smallest answer there is.
   async function load(dimension) {
     const wanted = on();
-    const key = `${dimension}|${wanted ? hours : 0}`;
+    const key = `${dimension}|${wanted ? seconds : 0}`;
     if (pending === key) return;
     pending = key;
-    const since = Math.floor(Date.now() / 1000) - (wanted ? hours * 3600 : 0);
+    const since = Math.floor(Date.now() / 1000) - (wanted ? seconds : 0);
     try {
       const res = await fetch(`api/trails?dimension=${encodeURIComponent(dimension)}&since=${since}`, { cache: 'no-store' });
       if (pending !== key) return; // the view moved on while this was out
@@ -307,6 +319,7 @@
       const data = await res.json();
       if (pending !== key) return;
       available = true;
+      if (Number.isFinite(data.maxAgeSeconds) && data.maxAgeSeconds > 0) retention = data.maxAgeSeconds;
       if (wanted && on()) draw(key, data);
       paint();
     } catch {
@@ -343,7 +356,7 @@
       paint();
       return;
     }
-    if (drawn !== `${dimension}|${hours}`) {
+    if (drawn !== `${dimension}|${seconds}`) {
       clear();
       paint();
       load(dimension);
@@ -351,14 +364,6 @@
       load(dimension);
     }
   }
-
-  select.addEventListener('change', () => {
-    const chosen = Number(select.value);
-    if (!WINDOWS.includes(chosen)) return;
-    hours = chosen;
-    try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ hours })); } catch { /* not kept, still applied */ }
-    sync();
-  });
 
   document.addEventListener('mcmap:players', follow);
   document.addEventListener('mcmap:view', sync);
