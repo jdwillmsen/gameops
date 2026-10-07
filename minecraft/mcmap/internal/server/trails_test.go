@@ -19,6 +19,10 @@ type trailsAnswer struct {
 	More          int `json:"more"`
 	MaxAgeSeconds int `json:"maxAgeSeconds"`
 	MaxPoints     int `json:"maxPoints"`
+	Thinning      []struct {
+		OlderThanSeconds int `json:"olderThanSeconds"`
+		StepBlocks       int `json:"stepBlocks"`
+	} `json:"thinning"`
 }
 
 func withTrails(t *testing.T) (*Server, time.Time) {
@@ -48,6 +52,9 @@ func TestTrailsServeEachPlayersLinesInADimension(t *testing.T) {
 	}
 	if got.MaxAgeSeconds != 3600 || got.MaxPoints != 500 || got.More != 0 || len(got.Players) != 2 {
 		t.Fatalf("answer = %+v", got)
+	}
+	if len(got.Thinning) != 1 || got.Thinning[0].OlderThanSeconds != 0 || got.Thinning[0].StepBlocks != 4 {
+		t.Errorf("thinning = %+v, want only full detail, as nothing is held past an hour", got.Thinning)
 	}
 	first := got.Players[0]
 	if first.Name != "Dotablaze" || len(first.Segments) != 1 || len(first.Segments[0]) != 6 {
