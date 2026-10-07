@@ -558,3 +558,34 @@ func TestSearchResolvesANamedMobToWhereItIsNow(t *testing.T) {
 		t.Errorf("biscuit:\n got %q\nwant %q", said, want)
 	}
 }
+
+// A mob renamed since the snapshot is, while it is loaded, the animal it is
+// now: found by its new name, once, and not by the old one with the new
+// position under it.
+func TestSearchFindsALoadedMobByTheNameItHasNow(t *testing.T) {
+	s := withLogin(t)
+	store := markers.NewStore()
+	store.Set(time.Now(), markers.World{chunks.Overworld: {Mobs: []markers.Marker{
+		{X: 10, Y: 64, Z: 10, Kind: "cat", Name: "Biscuit", ID: "-21", Baby: true},
+	}}})
+	s.Markers = store
+	s.Live = live.New(10*time.Second, 1000, nil)
+	online(s, 1, "overworld", ``, `{"i":"-21","t":"cat","n":"Crumpet","x":-40.5,"y":70,"z":41.5}`)
+	me := session(s, steve)
+
+	if got := search(t, s, "biscuit", me); len(got.Hits) != 0 {
+		t.Errorf("the old name found %+v", got.Hits)
+	}
+	got := search(t, s, "crumpet", me)
+	if len(got.Hits) != 1 {
+		t.Fatalf("the new name found %d hits: %+v", len(got.Hits), got.Hits)
+	}
+	// What only the snapshot knows of it is kept.
+	if h := got.Hits[0]; h.Name != "Crumpet" || h.ID != "-21" || !h.Live || !h.Baby || h.X != -41 || h.Z != 41 {
+		t.Errorf("crumpet = %+v", h)
+	}
+	// By its type it is still one hit, under the name it has now.
+	if got := search(t, s, "cat", me); len(got.Hits) != 1 || got.Hits[0].Name != "Crumpet" {
+		t.Errorf("cat: %+v", got.Hits)
+	}
+}
