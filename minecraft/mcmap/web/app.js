@@ -112,6 +112,16 @@
   const announce = () => document.dispatchEvent(new CustomEvent('mcmap:view'));
   const version = (d) => (d.renderedAt ? Date.parse(d.renderedAt) : 0);
 
+  // What the address carries after the view: one more part, which names
+  // something open over the map, such as a structure's details. It is kept
+  // through every rewrite of the address until whatever set it clears it.
+  const EXTRA = /^[a-z0-9_~.-]{1,96}$/;
+  let extra = '';
+  const extraOf = (hash) => {
+    const part = hash.slice(1).split('/')[4] || '';
+    return EXTRA.test(part) ? part : '';
+  };
+
   function parseHash() {
     const [id, x, z, zoom] = location.hash.slice(1).split('/');
     const n = [x, z, zoom].map(Number);
@@ -122,7 +132,7 @@
   function writeHash() {
     if (!current) return;
     const c = map.getCenter();
-    const hash = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${map.getZoom()}`;
+    const hash = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${map.getZoom()}${extra ? `/${extra}` : ''}`;
     // replaceState so panning does not fill the back button with positions.
     if (hash !== location.hash) history.replaceState(null, '', hash);
   }
@@ -467,8 +477,23 @@
       return true;
     },
     coordinates,
+    // The part of the address that names what is open over the map: read
+    // by whoever can open it, and set or cleared by them as it opens and
+    // shuts. href is the whole address as it would be copied.
+    link: {
+      get: () => extra,
+      set(part) {
+        extra = typeof part === 'string' && EXTRA.test(part) ? part : '';
+        writeHash();
+      },
+      href() {
+        writeHash();
+        return location.href;
+      },
+    },
     layers,
   };
+  extra = extraOf(location.hash);
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 
@@ -492,6 +517,11 @@
   addEventListener('hashchange', () => {
     const want = parseHash();
     if (!want) return;
+    const named = extraOf(location.hash);
+    if (named !== extra) {
+      extra = named;
+      document.dispatchEvent(new CustomEvent('mcmap:link'));
+    }
     if (want.id !== current) show(want.id, want);
     else map.setView([want.z, want.x], want.zoom);
   });

@@ -50,6 +50,8 @@
   ];
   const UNKNOWN = { letter: '?', color: '#9aa3ad' };
 
+  const DETAILS_HINT = 'Click for details';
+
   // What the world keeps about a village, for its tooltip. A village the
   // game has a record for but has not run yet has no counts, and saying so
   // is more use than a row of zeroes.
@@ -122,9 +124,12 @@
 
   // A marker that can be reached with the keyboard, saying where it is to
   // whoever cannot see the tooltip that focus opens.
-  function mark(latlng, drawn, label) {
+  function mark(latlng, drawn, label, subject) {
     const marker = L.marker(latlng, { icon: drawn })
       .bindTooltip(label, { direction: 'top', offset: [0, -8], className: 'live-tip' });
+    // A click, a tap, or Enter on the focused mark opens everything that
+    // is known of it; the tooltip only says what it is.
+    if (subject) marker.on('click', () => detail(subject));
     marker.on('add', () => {
       const node = marker.getElement();
       if (!node) return;
@@ -174,6 +179,8 @@
   // fared against the world, for the kinds the server said so of.
   let kinds = {};
   let checks = {};
+  // And how many of the world's own each rule agreed and disagreed with.
+  let rules = {};
 
   function clear() {
     for (const sort of Object.values(groups)) for (const group of sort.values()) group.clearLayers();
@@ -187,6 +194,7 @@
     more = none();
     kinds = {};
     checks = {};
+    rules = {};
   }
 
   function draw(dimension, data) {
@@ -201,12 +209,7 @@
     for (const s of recorded) {
       const k = KINDS[s.kind] || UNKNOWN;
       const group = groupOf('recorded', s.kind);
-      const label = tip(
-        `${names.structure(s.kind)} · recorded by the world`,
-        `X ${fmt(s.minX)} to ${fmt(s.maxX)}, Z ${fmt(s.minZ)} to ${fmt(s.maxZ)}`,
-        ...(Number.isFinite(s.minY) && Number.isFinite(s.maxY) ? [`Y ${fmt(s.minY)} to ${fmt(s.maxY)}`] : []),
-        ...villageLines(s.village),
-      );
+      const label = tip(`${names.structure(s.kind)} · recorded by the world`, ...villageLines(s.village).slice(0, 1), DETAILS_HINT);
       // The box is what the world recorded, to the block. A block's far
       // edge is one past its coordinate.
       L.rectangle([[s.minZ, s.minX], [s.maxZ + 1, s.maxX + 1]], {
@@ -214,15 +217,15 @@
       }).addTo(group);
       // And a mark that stays the same size, since a box 58 blocks wide is
       // less than a pixel from far out.
-      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded'), label).addTo(group);
+      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded'), label, { recorded: s }).addTo(group);
     }
     for (const p of predicted) {
       const sort = p.candidate ? 'candidate' : 'predicted';
       const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : 'predicted from the seed'}`;
-      const label = tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`, ...standing(p));
+      const label = tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`, DETAILS_HINT);
       // Struck through only where the world has been asked and said no.
       const doubted = p.generated && !RECORDED_LATE.has(p.kind);
-      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, `predicted${p.candidate ? ' candidate' : ''}${doubted ? ' doubted' : ''}`), label)
+      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, `predicted${p.candidate ? ' candidate' : ''}${doubted ? ' doubted' : ''}`), label, { predicted: p })
         .addTo(groupOf(sort, p.kind));
     }
     const spawn = data.spawn;
@@ -252,9 +255,14 @@
     tally(predicted.filter((p) => p.candidate), 'candidate');
     const sent = data.kinds && typeof data.kinds === 'object' ? data.kinds : {};
     for (const kind of Object.keys(KINDS)) {
-      if (Object.hasOwn(sent, kind) && sent[kind] && typeof sent[kind].state === 'string') checks[kind] = sent[kind].state;
+      if (Object.hasOwn(sent, kind) && sent[kind] && typeof sent[kind].state === 'string') {
+        checks[kind] = sent[kind].state;
+        rules[kind] = { agree: count(sent[kind].agree), disagree: count(sent[kind].disagree) };
+      }
     }
     apply();
+    if (wanted === null) fromLink();
+    wantedNow();
   }
 
   // Puts each group on the map or takes it off, by the filters.
@@ -378,6 +386,322 @@
     }
   }
 
+  // --- everything known of one structure --------------------------------
+  //
+  // A click on a structure opens a sheet over the page that says all the
+  // page can honestly say of it: what the server sent, and what the layers
+  // already loaded hold inside it. Nothing in it is worked out from
+  // anything the page was not given, and every value is set as text.
+
+  const view = {
+    dialog: document.getElementById('structure'),
+    picture: document.getElementById('structure-picture'),
+    title: document.getElementById('structure-title'),
+    standing: document.getElementById('structure-standing'),
+    body: document.getElementById('structure-body'),
+    go: document.getElementById('structure-go'),
+    copy: document.getElementById('structure-copy'),
+    link: document.getElementById('structure-link'),
+    said: document.getElementById('structure-said'),
+    close: document.getElementById('structure-close'),
+  };
+  const sheet = Object.values(view).every(Boolean) && typeof view.dialog.showModal === 'function';
+
+  const CHUNK = 16;
+  // A box of more chunks than this is not gone through for slime chunks.
+  const MAX_SLIME_CHUNKS = 4096;
+  const WHAT = {
+    recorded: 'Recorded: the world’s own save says this structure is here, and this is the box it occupies.',
+    predicted: 'Predicted: worked out from the world’s seed, not read from the world. Nothing has recorded one here.',
+    candidate: 'Possible site: the seed puts a site here, in terrain nobody has generated. The biome there will decide whether anything is built.',
+  };
+  const COMPASS = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
+
+  // The one the sheet is about, as { recorded } or { predicted }, with
+  // the dimension it is in; null while the sheet is shut.
+  let open = null;
+  // One asked for before its dimension's answer had come: by a search, or
+  // by an address that names it.
+  let wanted = null;
+  let biomeAsk = null;
+  let saidTimer = null;
+
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  // Where a structure is taken to be: the middle of a recorded one's box,
+  // as the search gives it, and the block a predicted one is put at.
+  const middle = (subject) => {
+    const s = subject.recorded;
+    if (!s) return { x: subject.predicted.x, z: subject.predicted.z };
+    const at = { x: s.minX + Math.floor((s.maxX - s.minX) / 2), z: s.minZ + Math.floor((s.maxZ - s.minZ) / 2) };
+    if (Number.isFinite(s.minY) && Number.isFinite(s.maxY)) at.y = s.minY + Math.floor((s.maxY - s.minY) / 2);
+    return at;
+  };
+  const kindOf = (subject) => (subject.recorded || subject.predicted).kind;
+  const sortOf = (subject) => (subject.recorded ? 'recorded' : subject.predicted.candidate ? 'candidate' : 'predicted');
+  const said = (at) => (Number.isFinite(at.y) ? `${at.x} ${at.y} ${at.z}` : `${at.x} ${at.z}`);
+  // How the address names it: its kind, whether the world recorded it, and
+  // its middle. Tildes, since a coordinate may begin with a minus.
+  const linkOf = (subject) => {
+    const at = middle(subject);
+    return `structure~${kindOf(subject)}~${subject.recorded ? 'r' : 'p'}~${at.x}~${at.z}`;
+  };
+
+  function find(want) {
+    if (!held || !want) return null;
+    for (const s of held.recorded || []) {
+      if (!want.recorded || !s || s.kind !== want.kind || ![s.minX, s.maxX, s.minZ, s.maxZ].every(Number.isFinite)) continue;
+      const at = middle({ recorded: s });
+      if (at.x === want.x && at.z === want.z) return { recorded: s };
+    }
+    for (const p of held.predicted || []) {
+      if (!want.recorded && p && p.kind === want.kind && p.x === want.x && p.z === want.z) return { predicted: p };
+    }
+    return null;
+  }
+
+  function away(from, to) {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const blocks = Math.round(Math.hypot(dx, dz));
+    if (blocks === 0) return 'here';
+    // South is down the map and east to the right, as an angle from east
+    // turning clockwise.
+    const way = COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8];
+    return `${fmt(blocks)} ${blocks === 1 ? 'block' : 'blocks'} ${way}`;
+  }
+
+  // A list of facts: each a label and what is said of it, which is text
+  // or an element this script built.
+  function facts(heading, rows) {
+    const kept = rows.filter((row) => row && row[1] !== null && row[1] !== undefined && row[1] !== '');
+    if (kept.length === 0) return [];
+    const list = el('dl', 'facts');
+    for (const [label, value] of kept) {
+      const dd = el('dd');
+      if (value instanceof Node) dd.append(value); else dd.textContent = String(value);
+      list.append(el('dt', '', label), dd);
+    }
+    return [el('h3', '', heading), list];
+  }
+
+  const tallied = (counts) => [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([what, n]) => `${what} ${fmt(n)}`).join(', ');
+
+  // Buttons that shut the sheet and open the card about one player or mob.
+  function people(list) {
+    const row = el('span', 'people');
+    for (const who of list) {
+      const button = el('button', 'mini', who.what ? `${who.name} (${who.what})` : who.name);
+      button.type = 'button';
+      button.addEventListener('click', () => {
+        view.dialog.close();
+        who.open();
+      });
+      row.append(button);
+    }
+    return row;
+  }
+
+  function slime(box) {
+    if (shown !== 'overworld' || !app.isSlimeChunk) return null;
+    const x0 = Math.floor(box.minX / CHUNK);
+    const x1 = Math.floor(box.maxX / CHUNK);
+    const z0 = Math.floor(box.minZ / CHUNK);
+    const z1 = Math.floor(box.maxZ / CHUNK);
+    const total = (x1 - x0 + 1) * (z1 - z0 + 1);
+    if (total > MAX_SLIME_CHUNKS) return null;
+    let n = 0;
+    for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) if (app.isSlimeChunk(cx, cz)) n += 1;
+    if (total === 1) return n === 1 ? 'Its chunk is a slime chunk' : 'Its chunk is not a slime chunk';
+    return `${fmt(n)} of its ${fmt(total)} chunks`;
+  }
+
+  function fill(subject) {
+    const kind = kindOf(subject);
+    const sort = sortOf(subject);
+    const at = middle(subject);
+    const s = subject.recorded;
+    const p = subject.predicted;
+    view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind })));
+    view.title.textContent = names.structure(kind);
+    const lines = [WHAT[sort]];
+    if (p) {
+      lines.push(...standing(p));
+      const rule = rules[kind];
+      if (rule) {
+        lines.push(`Its rule was checked against this world’s own ${names.plural(names.structure(kind)).toLowerCase()}: ${fmt(rule.agree)} recorded where it puts one, ${fmt(rule.disagree)} not.`);
+      }
+    }
+    view.standing.replaceChildren(...lines.map((line) => el('p', '', line)));
+
+    const out = [];
+    const range = (lo, hi) => `${fmt(lo)} to ${fmt(hi)} (${fmt(hi - lo + 1)} ${hi - lo === 0 ? 'block' : 'blocks'})`;
+    const chunks = (lo, hi) => (Math.floor(lo / CHUNK) === Math.floor(hi / CHUNK) ? fmt(Math.floor(lo / CHUNK)) : `${fmt(Math.floor(lo / CHUNK))} to ${fmt(Math.floor(hi / CHUNK))}`);
+    const height = s && Number.isFinite(s.minY) && Number.isFinite(s.maxY);
+    out.push(...facts('Where', [
+      ['Dimension', app.label(shown)],
+      [s ? 'Centre' : 'Around', Number.isFinite(at.y) ? `X ${fmt(at.x)}, Y ${fmt(at.y)}, Z ${fmt(at.z)}` : `X ${fmt(at.x)}, Z ${fmt(at.z)}`],
+      s && ['Blocks X', range(s.minX, s.maxX)],
+      height && ['Blocks Y', range(s.minY, s.maxY)],
+      s && ['Blocks Z', range(s.minZ, s.maxZ)],
+      s ? ['Chunks', `X ${chunks(s.minX, s.maxX)}, Z ${chunks(s.minZ, s.maxZ)}`] : ['Chunk', `${fmt(Math.floor(at.x / CHUNK))}, ${fmt(Math.floor(at.z / CHUNK))}`],
+      ['From the middle of the map', away({ x: Math.floor(map.getCenter().lng), z: Math.floor(map.getCenter().lat) }, at)],
+      app.inspect && app.inspect.me() ? ['From you', away({ x: Math.floor(app.inspect.me().x), z: Math.floor(app.inspect.me().z) }, at)] : null,
+    ]));
+
+    if (s && s.village) {
+      const v = s.village;
+      const n = (value) => (Number.isFinite(value) ? fmt(value) : null);
+      out.push(...facts('What the game counts in it', v.counted ? [
+        ['Villagers', n(v.villagers)], ['Iron golems', n(v.golems)], ['Cats', n(v.cats)],
+        ['Beds claimed', n(v.beds)], ['Bells claimed', n(v.bells)], ['Job sites claimed', n(v.jobSites)],
+      ] : [['Counts', 'Not counted by the game yet: it has a record of this village and has not run it, so its box is a first guess.']]));
+    } else if (s && Number.isFinite(s.areas) && s.areas > 0) {
+      out.push(...facts('What the world recorded', [['Spawn areas', `${fmt(s.areas)}, joined into this one box`]]));
+    }
+
+    const land = [];
+    if (app.biomes) {
+      const biome = el('span', '', 'Looking…');
+      land.push(['Biome at its middle', biome]);
+      askBiome(at, biome);
+    }
+    const box = s || { minX: at.x, maxX: at.x, minZ: at.z, maxZ: at.z };
+    land.push(['Slime chunks', slime(box)]);
+    out.push(...facts('The land', land));
+
+    if (s) {
+      const kept = app.markers ? app.markers.within(s) : null;
+      const live = app.inspect ? app.inspect.within(s) : null;
+      const inside = [];
+      if (kept) {
+        inside.push(['Beds', kept.beds.size > 0 ? tallied(kept.beds) : 'None']);
+        inside.push(['Containers', kept.containers.size > 0 ? tallied(kept.containers) : 'None']);
+        inside.push(['Named mobs', kept.mobs.length > 0 ? people(kept.mobs) : 'None']);
+      }
+      if (live) {
+        inside.push(['Players here now', live.players.length > 0 ? people(live.players) : 'None']);
+        inside.push(['Mobs here now', live.mobs.size > 0 ? tallied(live.mobs) : 'None']);
+      }
+      const parts = facts('On the map inside its box', inside);
+      if (parts.length > 0) {
+        out.push(...parts, el('p', 'note', 'Counted from the layers loaded now: beds, containers and named mobs as of the last snapshot, players and mobs as of the last live frame, and only those the map was sent.'));
+      }
+    }
+    view.body.replaceChildren(...out);
+  }
+
+  // The biome is the one thing asked of the server for the sheet, and the
+  // answer is for the sheet that asked.
+  async function askBiome(at, into) {
+    if (biomeAsk) biomeAsk.abort();
+    const mine = new AbortController();
+    biomeAsk = mine;
+    let text = 'Not known';
+    try {
+      const res = await fetch(`api/biomes/at?dimension=${encodeURIComponent(shown)}&x=${at.x}&z=${at.z}`, { cache: 'no-store', signal: mine.signal });
+      if (res.ok) {
+        const data = await res.json();
+        const biome = data && data.generated && data.biome ? data.biome : null;
+        text = biome ? (typeof biome.label === 'string' && biome.label) || names.tidy(biome.name) : 'Not generated here';
+      }
+    } catch {
+      if (biomeAsk !== mine) return;
+    }
+    if (biomeAsk === mine) into.textContent = text;
+  }
+
+  function note(text) {
+    clearTimeout(saidTimer);
+    view.said.textContent = text;
+    if (text !== '') saidTimer = setTimeout(() => note(''), 4000);
+  }
+
+  function detail(subject) {
+    if (!sheet || shown === null) return;
+    open = subject;
+    note('');
+    fill(subject);
+    if (app.link) app.link.set(linkOf(subject));
+    if (!view.dialog.open) view.dialog.showModal();
+    view.dialog.scrollTop = 0;
+  }
+
+  // Opens one that was asked for by what it is and where, once the
+  // dimension's structures are here to find it among.
+  function wantedNow() {
+    if (!wanted || shown !== wanted.dimension || !held) return;
+    const found = find(wanted);
+    const missed = wanted;
+    wanted = null;
+    if (found) detail(found);
+    else if (missed.said && app.tell) app.tell('That structure is not among the ones the map has now.');
+  }
+
+  function fromLink() {
+    if (!sheet || !app.link) return;
+    const m = /^structure~([a-z0-9_]{1,40})~([rp])~(-?\d{1,9})~(-?\d{1,9})$/.exec(app.link.get());
+    if (!m) return;
+    if (open && linkOf(open) === m[0]) return;
+    wanted = { kind: m[1], recorded: m[2] === 'r', x: Number(m[3]), z: Number(m[4]), dimension: app.dimension() };
+    wantedNow();
+  }
+
+  async function copy(text, done) {
+    let result = done;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      result = `Copy it from here: ${text}`;
+    }
+    note(result);
+  }
+
+  if (sheet) {
+    view.close.addEventListener('click', () => view.dialog.close());
+    // A click on the backdrop is a click on the dialog itself, outside
+    // everything in it.
+    view.dialog.addEventListener('click', (e) => {
+      if (e.target === view.dialog) view.dialog.close();
+    });
+    view.dialog.addEventListener('close', () => {
+      open = null;
+      if (biomeAsk) biomeAsk.abort();
+      biomeAsk = null;
+      if (app.link && app.link.get().startsWith('structure~')) app.link.set('');
+    });
+    view.go.addEventListener('click', () => {
+      if (!open) return;
+      const subject = open;
+      view.dialog.close();
+      const s = subject.recorded;
+      if (s) map.fitBounds([[s.minZ, s.minX], [s.maxZ + 1, s.maxX + 1]], { padding: [60, 60], maxZoom: 2 });
+      else app.go(shown, subject.predicted.x + 0.5, subject.predicted.z + 0.5);
+    });
+    view.copy.addEventListener('click', () => {
+      if (open) copy(said(middle(open)), 'Coordinates copied');
+    });
+    view.link.addEventListener('click', () => {
+      if (open && app.link) copy(app.link.href(), 'Link copied');
+    });
+    document.addEventListener('mcmap:link', fromLink);
+  }
+
+  // For the search: one chosen there is shown in full once the map is on
+  // its dimension.
+  app.structures = {
+    show(want) {
+      if (!sheet || !want || typeof want.kind !== 'string' || !Number.isFinite(want.x) || !Number.isFinite(want.z)) return;
+      wanted = { kind: want.kind, recorded: want.recorded === true, x: want.x, z: want.z, dimension: want.dimension, said: true };
+      wantedNow();
+    },
+  };
+
   paint();
   // Every tooltip was written with the names there were then.
   document.addEventListener('mcmap:names', () => {
@@ -386,8 +710,15 @@
       return;
     }
     const at = fetchedAt;
+    const was = open ? { kind: kindOf(open), recorded: Boolean(open.recorded), ...middle(open) } : null;
     draw(shown, held);
     fetchedAt = at;
+    // The sheet is about an entry of the answer that was just drawn again.
+    const again = was && view.dialog.open ? find(was) : null;
+    if (again) {
+      open = again;
+      fill(again);
+    }
   });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);

@@ -366,6 +366,11 @@
     }
     // The stretch found is the one to look at, so the rest is dimmed.
     if (hit.kind === 'biome' && app.biomes) app.biomes.show(str(hit.detail));
+    // A structure is shown in full, as a click on its mark would show it.
+    if (hit.kind === 'structure' && app.structures) {
+      app.structures.show({ kind: str(hit.detail), recorded: !Object.hasOwn(UNSURE, hit.certainty), x: hit.x, z: hit.z, dimension: hit.dimension });
+      return;
+    }
     // The keyboard goes back to the map, and a phone puts its own away.
     map.getContainer().focus();
   }

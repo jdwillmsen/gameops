@@ -122,6 +122,21 @@
       <dt><code>@name</code></dt><dd>Players only, by gamertag</dd>
     </dl>
   </dialog>
+  <dialog id="structure" class="sheet" aria-labelledby="structure-title">
+    <div class="sheet-head">
+      <span id="structure-picture" class="sheet-picture" aria-hidden="true"></span>
+      <h2 id="structure-title"></h2>
+      <button id="structure-close" type="button">Close</button>
+    </div>
+    <div id="structure-standing" class="standing"></div>
+    <div id="structure-body"></div>
+    <div class="sheet-actions">
+      <button id="structure-go" type="button">Go to</button>
+      <button id="structure-copy" type="button">Copy coordinates</button>
+      <button id="structure-link" type="button">Copy link</button>
+    </div>
+    <p id="structure-said" class="note" role="status"></p>
+  </dialog>
   <footer class="bar foot">
     <div class="where">
       <output id="coords" aria-live="off">X —, Z —</output>

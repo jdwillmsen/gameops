@@ -448,8 +448,40 @@
     if (entry) examine(entry, false);
   });
 
-  // For whoever else opens the card on a mob the snapshot placed.
-  app.markers = { savedAt: () => snapshotAt };
+  // Whether a marker's block is inside a box of blocks, edges included.
+  const inside = (box, d) => d.x >= box.minX && d.x <= box.maxX && d.z >= box.minZ && d.z <= box.maxZ
+    && (!Number.isFinite(box.minY) || !Number.isFinite(box.maxY) || (d.y >= box.minY && d.y <= box.maxY));
+
+  app.markers = {
+    // For whoever else opens the card on a mob the snapshot placed.
+    savedAt: () => snapshotAt,
+    // What the snapshot's markers hold inside a box, from what is already
+    // loaded for this dimension: beds and containers counted by what they
+    // are called, and each named mob with a way to open its card. Null
+    // while there are no markers to count.
+    within(box) {
+      if (drawn.dimension === null) return null;
+      const tally = (kind) => {
+        const counts = new Map();
+        layers[kind].eachLayer((marker) => {
+          const { data } = marker.options;
+          if (!inside(box, data)) return;
+          const title = kind === 'beds' ? names.bed(data.c) : names.holder(data.k, data.c, data.t);
+          counts.set(title, (counts.get(title) || 0) + 1);
+        });
+        return counts;
+      };
+      return {
+        beds: tally('beds'),
+        containers: tally('containers'),
+        mobs: named.filter((entry) => inside(box, entry.data)).map((entry) => ({
+          name: str(entry.data.n) || names.entity(entry.data.k),
+          what: names.kindOf(entry.data.k, entry.data.b),
+          open: () => examine(entry, true),
+        })),
+      };
+    },
+  };
 
   zoomed();
   paint();
