@@ -78,7 +78,7 @@ func TestChunkFocusFloorsAndFallsBackToTheRegion(t *testing.T) {
 		"const unitNow = () => (CHUNK * 2 ** map.getZoom() >= MIN_PIXELS ? 'chunk' : 'region');",
 		"if (dimension !== 'overworld') return `No slime chunks in ${app.label(dimension)}.`;",
 		"if (pinned && pinnedIn !== app.dimension()) {",
-		"app.chunk = { go, pinned: () => pinned };",
+		"pinned: () => pinned,",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("chunk.js no longer has %s", need)
@@ -164,7 +164,7 @@ func TestShortcutsStayOutOfTheWayOfTyping(t *testing.T) {
 		"if (!node || node.disabled || node.closest('[hidden]')) return false;",
 		"el.dialog.showModal();",
 		"if (e.target === el.dialog) el.dialog.close();",
-		"localStorage.setItem(KEY, JSON.stringify({ on: enabled }));",
+		"if (settings) settings.set('shortcuts', { on: enabled });",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("menu.js no longer has %s", need)

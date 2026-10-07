@@ -18,7 +18,15 @@
   const RETRY_MS = 30_000;
   // How long the pointer rests before the biome under it is asked for.
   const AT_SETTLE_MS = 150;
+  // How much of the terrain the tint covers unless the viewer has chosen,
+  // which the page's one record of their choices says where it has one.
   const OPACITY = 0.6;
+  const settings = app.settings || null;
+  const opacity = () => {
+    const chosen = settings ? settings.look().opacityBiomes : NaN;
+    return Number.isFinite(chosen) ? chosen / 100 : OPACITY;
+  };
+  const NAME = /^[a-z0-9_.:-]{1,64}$/;
   // The terrain is cut at one block to a pixel at most, and so is this: a
   // finer tile would say nothing more and cost eight times the requests.
   const FINEST_ZOOM = 0;
@@ -45,7 +53,11 @@
   let fetchedAt = 0;
   let pending = null;
   // The one biome picked out, by the game's identifier, or null for all.
-  let only = null;
+  // It is kept, so that a saved view can bring it back.
+  let only = settings ? settings.get('biome').only : null;
+  const keep = () => {
+    if (settings && settings.get('biome').only !== only) settings.set('biome', { only: only !== null && NAME.test(only) ? only : null });
+  };
   // Whether the overlay was asked for before there was a row to switch.
   let queued = false;
   let layer = null;
@@ -144,7 +156,7 @@
         bounds: app.extent ? app.extent() || undefined : undefined,
         noWrap: true,
         keepBuffer: 2,
-        opacity: OPACITY,
+        opacity: opacity(),
         // Over the terrain and under the grid.
         zIndex: 2,
       }).addTo(map);
@@ -193,6 +205,7 @@
   // Picks one biome out, or with null goes back to all of them.
   function pick(name) {
     only = name;
+    keep();
     paint();
   }
 
@@ -237,6 +250,7 @@
       // A biome picked out that this dimension does not hold would dim
       // the whole of it.
       if (only !== null && !held(only)) only = null;
+      keep();
       paint();
     } catch {
       fetchedAt = Date.now() - REFRESH_MS + RETRY_MS;
@@ -255,13 +269,16 @@
       // An answer still on its way belongs to the view that asked for it.
       pending = null;
       clear();
-      only = null;
+      // Logged out, nothing is left picked out. With no dimension yet the
+      // page is only starting, and the biome kept from last time stands.
+      if (locked) only = null;
       queued = false;
       paint();
       return;
     }
     if (!listing || listing.dimension !== dimension) {
       if (listing) only = null;
+      keep();
       clear();
       paint();
       load(dimension);
@@ -328,6 +345,7 @@
     show(name) {
       if (available === false || typeof name !== 'string' || !name) return false;
       only = name;
+      keep();
       // A result chosen before the first listing has answered: the row is
       // switched on when the answer makes it.
       if (row) row.setEnabled(true);
@@ -337,6 +355,21 @@
     },
   };
 
+  // For a saved view: the biome kept as picked out is read again. Whether
+  // this dimension holds it is known only once its listing has come.
+  app.biomes.adopt = () => {
+    if (!settings) return true;
+    const kept = settings.get('biome').only;
+    const missing = kept !== null && listing !== null && !held(kept);
+    only = missing ? null : kept;
+    keep();
+    paint();
+    return !missing;
+  };
+
+  document.addEventListener('mcmap:settings', (e) => {
+    if (layer && e.detail && e.detail.sections.includes('look')) layer.setOpacity(opacity());
+  });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
   setInterval(sync, RETRY_MS);

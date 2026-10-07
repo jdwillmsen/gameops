@@ -19,7 +19,7 @@ func TestMapPicturesAreDecodedOnceAndStampedOnTheCanvas(t *testing.T) {
 			t.Errorf("icons.js no longer has %s", need)
 		}
 	}
-	for _, need := range []string{"L.canvas(", "ctx.drawImage(", "const Mob = icons.Tagged;", "icons.mob(", "icons.sprite(pic, colour, HEAD_RADIUS, paintHead)", "app.liveRenderer = renderer;"} {
+	for _, need := range []string{"L.canvas(", "ctx.drawImage(", "const Mob = icons.Tagged;", "icons.mob(", "icons.sprite(pic, colour, size.headRadius, paintHead)", "app.liveRenderer = renderer;"} {
 		if !bytes.Contains(live, []byte(need)) {
 			t.Errorf("live.js no longer has %s", need)
 		}
@@ -131,8 +131,8 @@ func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
 	}
 	// The markers are placed when an entity appears and when a filter
 	// changes, never looked over again for every frame.
-	if n := len(regexp.MustCompile(`\brefilter\b`).FindAll(js, -1)); n != 3 {
-		t.Errorf("live.js names refilter in %d places, want its definition, a row's switch and a filter's change", n)
+	if n := len(regexp.MustCompile(`\brefilter\b`).FindAll(js, -1)); n != 4 {
+		t.Errorf("live.js names refilter in %d places, want its definition, a row's switch, a filter's change and a saved view's", n)
 	}
 	panel := read(t, "layers.js")
 	for _, need := range []string{"app.layers.recall = recall;", "app.layers.retain = retain;", "return Object.hasOwn(choices, key) ? choices[key] : null;"} {

@@ -61,14 +61,19 @@ func TestLayerPanelKeepsItsRegistrationInterface(t *testing.T) {
 	}
 }
 
-// The filters each layer kept under a key of its own are read once more by
-// the panel, so that nobody's choices reset.
+// The filters each layer kept under a key of its own are read once more,
+// by the script that keeps everything now, so that nobody's choices reset.
 func TestLayerPanelCarriesOverTheOldFilters(t *testing.T) {
-	js := read(t, "layers.js")
+	js := read(t, "settings.js")
 	for _, key := range []string{"'mcmap.live'", "'mcmap.markers'", "'mcmap.structures'"} {
 		if !bytes.Contains(js, []byte(key)) {
-			t.Errorf("layers.js no longer reads the choices saved under %s", key)
+			t.Errorf("settings.js no longer reads the choices saved under %s", key)
 		}
+	}
+	// The one Structures switch hid these three, and still does for whoever
+	// had it off.
+	if !bytes.Contains(js, []byte("structures: { key: 'mcmap.structures', master: ['recorded', 'predicted', 'candidate'] },")) {
+		t.Error("settings.js no longer carries the old Structures switch over to the layers it hid")
 	}
 	// The ids those choices were saved under are the ids the rows register.
 	for script, ids := range map[string][]string{
@@ -86,8 +91,8 @@ func TestLayerPanelCarriesOverTheOldFilters(t *testing.T) {
 			}
 		}
 	}
-	if !bytes.Contains(read(t, "live.js"), []byte("const OLD_KEY = 'mcmap.live';")) {
-		t.Error("live.js no longer reads the old Live switch, which now means paused")
+	if !bytes.Contains(js, []byte("raw.live = live || { paused: Boolean(older) && older.on === false };")) {
+		t.Error("settings.js no longer reads the old Live switch, which now means paused")
 	}
 }
 
@@ -139,7 +144,7 @@ func TestLiveIntervalsOfferedAreTheOnesAccepted(t *testing.T) {
 		"const MIN_INTERVAL = 1;",
 		"const MAX_INTERVAL = 86_400;",
 		"presets: INTERVALS,",
-		"if (Number.isFinite(saved.interval)) control.interval = Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, Math.round(saved.interval)));",
+		"const paceOf = (kept) => (Number.isFinite(kept) ? Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, Math.round(kept))) : MIN_INTERVAL);",
 		"el.interval.replaceChildren(pace.node);",
 	} {
 		if !bytes.Contains(js, []byte(need)) {

@@ -23,17 +23,35 @@
   // village's worth of pictures twenty pixels wide, eight blocks to the
   // pixel, is a heap in which none can be made out.
   const PICTURE_ZOOM = -2;
-  const INK = '#0b0c0e';
   const { DENSITY } = icons;
+  // What the viewer has chosen for how the map looks, where the page keeps
+  // such a thing.
+  const settings = app.settings || null;
+  const look = () => (settings ? settings.look() : {});
+  const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
+  const sizes = () => (icons.sizes ? icons.sizes() : { mob: icons.MOB_RADIUS, baby: icons.BABY_RADIUS, plate: icons.PLATE_RADIUS, scale: 1 });
+  const naming = (what) => look()[what] || 'always';
 
   // picture is the one that stands for the whole row in the panel, where
-  // a single one can.
+  // a single one can. A kind's colour is the theme's, by the name the
+  // stylesheet gives it, and so is the dark every ring is filled with and
+  // the colour a name is written in; what is here is what they were
+  // before there were themes.
   const KINDS = {
     waypoints: { label: 'Waypoints', color: '#b48cf2', radius: 6, picture: 'marker/waypoint' },
     beds: { label: 'Beds', color: '#f277b5', radius: 4, picture: 'bed/red' },
     containers: { label: 'Containers', color: '#f08a3c', radius: 4, picture: 'container/chest' },
     mobs: { label: 'Named mobs', color: '#4fd1c5', radius: 5 },
   };
+  let INK;
+  let NAMED;
+  function palette() {
+    for (const kind of Object.keys(KINDS)) KINDS[kind].color = themed(`marker-${kind}`, KINDS[kind].color);
+    INK = themed('marker-ink', '#0b0c0e');
+    NAMED = themed('named-text', KINDS.mobs.color);
+  }
+  palette();
+  const tagOf = (name) => (naming('labelMobs') === 'always' ? icons.tag(name, NAMED) : null);
   const WORLD_KINDS = ['beds', 'containers', 'mobs'];
   const BABY_RADIUS = 4;
 
@@ -78,7 +96,11 @@
   // marker was drawn is the one shown.
   function tip(marker) {
     const { kind, data } = marker.options;
-    const box = text(`${titleOf(kind, data)} · ${at(data)}`);
+    // With names never shown, a named mob and a waypoint are said by what
+    // they are.
+    const quiet = (kind === 'mobs' && naming('labelMobs') === 'never') || (kind === 'waypoints' && naming('labelWaypoints') === 'never');
+    const title = !quiet ? titleOf(kind, data) : kind === 'mobs' ? names.kindOf(data.k, data.b) : 'Waypoint';
+    const box = text(`${title} · ${at(data)}`);
     box.prepend(icons.picture(pictureOf(kind, data)));
     return box;
   }
@@ -120,16 +142,17 @@
   function dress(marker) {
     const { kind, data } = marker.options;
     const style = KINDS[kind];
+    const size = sizes();
     let worn = null;
-    let radius = style.radius;
+    let radius = style.radius * size.scale;
     if (kind === 'mobs') {
       const baby = data.b === true;
       worn = icons.mob(str(data.k), style.color, baby);
-      if (worn) radius = baby ? icons.BABY_RADIUS : icons.MOB_RADIUS;
-      else if (baby) radius = BABY_RADIUS;
+      if (worn) radius = baby ? size.baby : size.mob;
+      else if (baby) radius = BABY_RADIUS * size.scale;
     } else if (near || kind === 'waypoints') {
       worn = icons.plate(pictureOf(kind, data), style.color);
-      if (worn) radius = icons.PLATE_RADIUS;
+      if (worn) radius = size.plate;
     }
     if (worn === marker.options.sprite && radius === marker.getRadius()) return;
     marker.options.sprite = worn;
@@ -151,13 +174,13 @@
       renderer,
       radius: style.radius,
       color: style.color,
-      weight: 2,
+      weight: look().theme === 'contrast' ? 3 : 2,
       fillColor: INK,
       fillOpacity: 0.75,
       kind,
       data: m,
       sprite: null,
-      tag: kind === 'mobs' ? icons.tag(m.n, style.color) : null,
+      tag: kind === 'mobs' ? tagOf(m.n) : null,
     });
     dress(marker);
     return marker;
@@ -171,10 +194,11 @@
     for (const m of list) {
       if (!placed(m)) continue;
       const marker = pin(kind, m);
-      if (kind === 'waypoints') {
+      if (kind === 'waypoints' && naming('labelWaypoints') === 'always') {
         // A waypoint is the one marker a player put there by name, so the
-        // name is always showing.
-        marker.bindTooltip(text(str(m.name) || 'Waypoint'), { permanent: true, direction: 'right', offset: [icons.PLATE_RADIUS + 2, 0], className: 'marker-name' });
+        // name is always showing unless the viewer has it otherwise; the
+        // layer's own tooltip says it under the pointer either way.
+        marker.bindTooltip(text(str(m.name) || 'Waypoint'), { permanent: true, direction: 'right', offset: [sizes().plate + 2, 0], className: 'marker-name' });
       }
       layers[kind].addLayer(marker);
       made.push({ data: m, marker });
@@ -427,6 +451,29 @@
     timer = setTimeout(refresh, SETTLE_MS);
   }
 
+  // The viewer has changed how the map looks: every mark is given the
+  // theme's colours, the size chosen and its name or none, in place, from
+  // what was already fetched.
+  function restyle() {
+    palette();
+    for (const kind of Object.keys(KINDS)) {
+      const marks = kind === 'mobs' ? named.map((entry) => entry.marker) : layers[kind].getLayers();
+      for (const marker of marks) {
+        const o = marker.options;
+        o.color = KINDS[kind].color;
+        o.weight = look().theme === 'contrast' ? 3 : 2;
+        o.fillColor = INK;
+        if (kind === 'mobs') o.tag = tagOf(o.data.n);
+        // Dressing redraws a mark only if its picture or size changed.
+        dress(marker);
+        marker.redraw();
+      }
+    }
+    // A waypoint's name is a label of its own, there or not.
+    drawWaypoints(drawn.dimension || app.dimension());
+    if (map.hasLayer(layers.waypoints)) stack();
+  }
+
   function zoomed() {
     const now = map.getZoom() >= PICTURE_ZOOM;
     if (now === near) return;
@@ -491,6 +538,16 @@
   document.addEventListener('mcmap:names', renamed);
   document.addEventListener('mcmap:live', aside);
   document.addEventListener('mcmap:inspect', current);
+  const styledAs = () => {
+    const { theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers } = look();
+    return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers].join('|');
+  };
+  let styled = styledAs();
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look') || styled === styledAs()) return;
+    styled = styledAs();
+    restyle();
+  });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
   sync();

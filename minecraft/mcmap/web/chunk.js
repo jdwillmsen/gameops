@@ -53,8 +53,13 @@
   };
 
   const outline = (style) => L.rectangle([[0, 0], [CHUNK, CHUNK]], { interactive: false, ...style });
-  const hoverBox = outline({ color: '#ffffff', weight: 1, fillColor: '#ffffff', fillOpacity: 0.14 });
-  const pinBox = outline({ color: '#6ecf7a', weight: 2.5, fillColor: '#6ecf7a', fillOpacity: 0.1 });
+  // The theme's colours for the two outlines, where the page has themes.
+  const settings = app.settings || null;
+  const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
+  const hoverStyle = () => ({ color: themed('chunk-hover', '#ffffff'), fillColor: themed('chunk-hover', '#ffffff') });
+  const pinStyle = () => ({ color: themed('chunk-pin', '#6ecf7a'), fillColor: themed('chunk-pin', '#6ecf7a') });
+  const hoverBox = outline({ weight: 1, fillOpacity: 0.14, ...hoverStyle() });
+  const pinBox = outline({ weight: 2.5, fillOpacity: 0.1, ...pinStyle() });
 
   let hovered = null;
   let pinned = null;
@@ -196,6 +201,22 @@
     paint();
   });
 
-  app.chunk = { go, pinned: () => pinned };
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!e.detail || !e.detail.sections.includes('look')) return;
+    hoverBox.setStyle(hoverStyle());
+    pinBox.setStyle(pinStyle());
+  });
+
+  app.chunk = {
+    go,
+    pinned: () => pinned,
+    // Pins a chunk or a region where the map already is, or with null lets
+    // the pin go, for a saved view that was saved with one.
+    pin(cell) {
+      const fine = cell && (cell.unit === 'chunk' || cell.unit === 'region') && Number.isInteger(cell.x) && Number.isInteger(cell.z)
+        && Math.abs(cell.x) <= WORLD_EDGE && Math.abs(cell.z) <= WORLD_EDGE;
+      pin(fine ? { unit: cell.unit, x: cell.x, z: cell.z } : null);
+    },
+  };
   paint();
 })();
