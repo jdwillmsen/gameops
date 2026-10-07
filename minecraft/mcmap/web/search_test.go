@@ -28,6 +28,18 @@ func TestSearchShowsEveryHitAsText(t *testing.T) {
 			t.Errorf("search.js no longer has %s", need)
 		}
 	}
+	// A player and a named mob move, so choosing one opens the card that
+	// tracks it by the game's id, with the gamertag passed on as it came.
+	for _, need := range []string{
+		"if (hit.kind === 'player') return name || KINDS.player;",
+		"if ((hit.kind === 'player' || hit.kind === 'mob') && app.inspect) {",
+		"kind: hit.kind, id: str(hit.id) || null, name: str(hit.name), type: str(hit.detail), baby: hit.baby === true,",
+		"saved: hit.kind === 'mob' && hit.live !== true,",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("search.js no longer has %s", need)
+		}
+	}
 	// A divIcon given no html draws none; given a string, it parses it.
 	if regexp.MustCompile(`divIcon\([^)]*html`).Match(js) {
 		t.Error("search.js gives a marker's icon html")

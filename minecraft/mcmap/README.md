@@ -970,8 +970,9 @@ ocean, the witch hut in a swamp, and the fortresses in nether biomes.
 ## Search
 
 `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>` looks the text up,
-without regard to case, in everything the map holds that has a name:
-biomes (by either name), recorded and predicted structures, the world spawn, beds,
+without regard to case, in everything the map holds that has a name: the
+players online now (by gamertag, in every dimension, from the live layer's
+own picture), biomes (by either name), recorded and predicted structures, the world spawn, beds,
 containers (by their name or kind), named mobs (by name or type), and the
 waypoints of the player asking. A marker and a structure are found by
 what the page calls them, the game's own names included: `red bed`,
@@ -985,6 +986,16 @@ structure only the five nearest sites the seed gives are offered, each with
 `certainty`: `predicted`, or `candidate` for a site in terrain not
 generated yet. The page lists them as Ocean Monument (predicted) and Ocean
 Monument (possible site), never as a structure the world has.
+
+A player is listed ahead of everything else, with `id`, the id the live
+stream tracks them by, and `live: true`: the position is where they are
+now, to the block. A named mob carries its `id` where the snapshot gave it
+one; while the same mob is loaded it is listed once, at its live position
+with `live: true`, and otherwise where the snapshot left it. A mob named
+since the last snapshot is found from the live picture alone. `kind=<kind>`
+keeps an answer to one kind of hit, `kind=player` for the players. Nothing
+here is more than a session already sees on `/api/live`, and no more of it
+than `LIVE_MAX_ENTITIES` a dimension.
 
 Waypoints are searched for the player the session names and nobody else,
 by the same call to the agent that `/api/waypoints` makes. `waypoints` in
@@ -1003,7 +1014,11 @@ not said twice.
 The arrow keys move through the list, Enter chooses and Escape closes it.
 Choosing a hit takes the map there, changing dimension if it has to, and
 rings the spot for twenty seconds; a biome hit also turns the overlay on
-with that biome picked out. The list says so in words when nothing matched,
+with that biome picked out. A player or a named mob moves, so choosing one
+opens the card about it instead of ringing where it was: a player and a
+loaded mob are tracked live and can be followed, and a mob that is not
+loaded is shown at its last saved position, said as that. A hit says
+`live` or `last saved` before its position. The list says so in words when nothing matched,
 when there were more hits than shown, and when the waypoints could not be
 read. Under 900 pixels wide it opens under the bar and pushes the map down,
 so it never covers the layer panel or the card about a mob.
@@ -1377,7 +1392,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
-| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>` | Session required. `hits`, each `kind` (`biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z` |
+| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /healthz` | Liveness, on both listeners |
 

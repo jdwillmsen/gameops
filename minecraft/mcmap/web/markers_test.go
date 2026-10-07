@@ -79,7 +79,7 @@ func TestNamedMobIsOneMarkerAndOpensTheCard(t *testing.T) {
 		"const live = card.drawn(id);",
 		"if (live) layers.mobs.removeLayer(entry.marker);",
 		"layers.mobs.on('click', (e) => {",
-		"card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, savedAt: snapshotAt ?? undefined });",
+		"card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });",
 		"document.addEventListener('mcmap:live', aside);",
 	} {
 		if !bytes.Contains(markers, []byte(need)) {

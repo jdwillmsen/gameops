@@ -216,7 +216,7 @@
     const at = now || { x: data.x + 0.5, y: data.y, z: data.z + 0.5 };
     if (go && dimension) app.go(dimension, at.x, at.z);
     if (!card) return;
-    card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, savedAt: snapshotAt ?? undefined });
+    card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });
   }
 
   // Takes the mark of a mob the live layer is drawing off the map, and
@@ -447,6 +447,9 @@
     const entry = named.find((other) => other.marker === e.layer);
     if (entry) examine(entry, false);
   });
+
+  // For whoever else opens the card on a mob the snapshot placed.
+  app.markers = { savedAt: () => snapshotAt };
 
   zoomed();
   paint();

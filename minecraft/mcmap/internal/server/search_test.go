@@ -14,6 +14,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
@@ -27,6 +28,8 @@ type searchAnswer struct {
 		Colour    string   `json:"colour"`
 		Trapped   bool     `json:"trapped"`
 		Baby      bool     `json:"baby"`
+		ID        string   `json:"id"`
+		Live      bool     `json:"live"`
 		Dimension string   `json:"dimension"`
 		X         int32    `json:"x"`
 		Y         *int32   `json:"y"`
@@ -466,5 +469,92 @@ func TestSearchHoldsWaypointsForAFixedNumberOfPlayers(t *testing.T) {
 	}
 	if len(c.waypoints) != 1 {
 		t.Errorf("%d players held after everyone expired, want 1", len(c.waypoints))
+	}
+}
+
+// online puts players and mobs in the live picture of one dimension.
+func online(s *Server, gen int, dimension string, players, mobs string) {
+	now := time.Now()
+	for kind, items := range map[string]string{"players": players, "mobs": mobs} {
+		s.Live.Ingest(live.RawRecord{At: now, Data: fmt.Sprintf(`{"gen":%d,"dim":%q,"kind":%q,"part":0,"parts":1,"more":0,"items":[%s]}`,
+			gen, dimension, kind, items)}, now)
+	}
+}
+
+// A player is looked for by gamertag wherever they are: the live store has
+// every dimension's picture, and the page only the one it is showing.
+func TestSearchFindsThePlayersOnlineNowInAnyDimension(t *testing.T) {
+	s, _ := withEverything(t)
+	s.Live = live.New(10*time.Second, 1000, nil)
+	online(s, 1, "overworld", `{"i":"-11","n":"Steve Builds","x":100.5,"y":64,"z":-200.5,"r":0}`, ``)
+	online(s, 1, "nether", `{"i":"-12","n":"Alex Digs","x":-3.2,"y":40.9,"z":7.9,"r":0},{"i":"-13","n":`+fmt.Sprintf("%q", hostile)+`,"x":1,"y":2,"z":3}`, ``)
+	me := session(s, steve)
+
+	got := search(t, s, "alex", me)
+	if len(got.Hits) == 0 {
+		t.Fatal("alex: nothing found")
+	}
+	// Ahead of the waypoint that shares the name, and at the block the
+	// player is standing in.
+	if h := got.Hits[0]; h.Kind != "player" || h.Name != "Alex Digs" || h.ID != "-12" || !h.Live || h.Dimension != "nether" ||
+		h.X != -4 || h.Y == nil || *h.Y != 40 || h.Z != 7 || h.Distance != nil {
+		t.Errorf("alex = %+v", h)
+	}
+	if got := search(t, s, "steve", me); len(got.Hits) < 2 || got.Hits[0].Kind != "player" || got.Hits[0].Distance == nil || got.Hits[1].Kind != "waypoint" {
+		t.Errorf("steve: %s", describe(got))
+	}
+	// A gamertag is a player's choice and is passed on as it is, as text.
+	if got := search(t, s, "onerror", me); len(got.Hits) == 0 || got.Hits[0].Kind != "player" || got.Hits[0].Name != hostile {
+		t.Errorf("a hostile gamertag: %+v", got.Hits)
+	}
+	// Kept to players, nothing else that shares the name is listed.
+	rec := do(s.Handler(), "GET", "/api/search?dimension=overworld&x=0&z=0&kind=player&q=steve", "", []*http.Cookie{me})
+	if only := decodeBody[searchAnswer](t, rec); describe(only) != "player:Steve Builds@overworld" {
+		t.Errorf("kind=player: %s", describe(only))
+	}
+	if rec := do(s.Handler(), "GET", "/api/search?dimension=overworld&x=0&z=0&kind=seed&q=steve", "", []*http.Cookie{me}); rec.Code != http.StatusBadRequest {
+		t.Errorf("an unknown kind = %d, want 400", rec.Code)
+	}
+	// Nobody is told who is online without a session.
+	if rec := do(s.Handler(), "GET", "/api/search?dimension=overworld&x=0&z=0&q=alex", "", nil); rec.Code != http.StatusUnauthorized || strings.Contains(rec.Body.String(), "Alex") {
+		t.Errorf("without a session = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A position the live layer no longer vouches for is not where anyone is.
+func TestSearchFindsNoPlayerInAStalePicture(t *testing.T) {
+	s, _ := withEverything(t)
+	s.Live = live.New(time.Nanosecond, 1000, nil)
+	online(s, 1, "overworld", `{"i":"-11","n":"Steve Builds","x":1,"y":2,"z":3}`, ``)
+	time.Sleep(time.Millisecond)
+	if got := search(t, s, "steve builds", session(s, steve)); len(got.Hits) != 0 {
+		t.Errorf("found %s in a picture that has aged out", describe(got))
+	}
+}
+
+// A named mob is the same animal in the snapshot and in the live picture by
+// the game's id for it, and by nothing else.
+func TestSearchResolvesANamedMobToWhereItIsNow(t *testing.T) {
+	s := withLogin(t)
+	store := markers.NewStore()
+	store.Set(time.Now(), markers.World{chunks.Overworld: {Mobs: []markers.Marker{
+		{X: 10, Y: 64, Z: 10, Kind: "cat", Name: "Biscuit", ID: "-21"},
+		{X: 20, Y: 64, Z: 20, Kind: "cat", Name: "Biscuit", ID: "-22"},
+		{X: 30, Y: 64, Z: 30, Kind: "cat", Name: "Biscuit"},
+	}}})
+	s.Markers = store
+	s.Live = live.New(10*time.Second, 1000, nil)
+	// One of the three is loaded and has wandered; a fourth was named
+	// since the snapshot; an unnamed cat is nobody's to find.
+	online(s, 1, "overworld", ``, `{"i":"-22","t":"cat","n":"Biscuit","x":-40.5,"y":70,"z":41.5},{"i":"-23","t":"cat","n":"Biscuit Two","x":5,"y":64,"z":5},{"i":"-24","t":"cat","x":6,"y":64,"z":6}`)
+
+	got := search(t, s, "biscuit", session(s, steve))
+	var said []string
+	for _, h := range got.Hits {
+		said = append(said, fmt.Sprintf("%s %q %d,%d live=%v", h.ID, h.Name, h.X, h.Z, h.Live))
+	}
+	want := []string{`-23 "Biscuit Two" 5,5 live=true`, `-21 "Biscuit" 10,10 live=false`, ` "Biscuit" 30,30 live=false`, `-22 "Biscuit" -41,41 live=true`}
+	if !reflect.DeepEqual(said, want) {
+		t.Errorf("biscuit:\n got %q\nwant %q", said, want)
 	}
 }
