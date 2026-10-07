@@ -1311,13 +1311,59 @@ the blocks it covers, and in the Overworld whether it is a slime chunk
 block -1 is chunk -1: every coordinate is floored, never truncated. A click
 or a tap pins the chunk: its outline turns green and stays through panning
 and zooming, the box goes on describing it while the pointer is elsewhere,
-and Unpin or a second click on it lets it go. Chunk X, Z and Go in the box
-take the map to a chunk by its own coordinates and pin it. A pin belongs to
+and Unpin or a second click on it lets it go. Under Go to a chunk in the
+box, Chunk X, Z and Go take the map to a chunk by its own coordinates and
+pin it. A pin belongs to
 the dimension it was made in. From further out than four pixels to a chunk
 the focus is the region instead, 32 chunks square, with its chunk and block
 ranges and how many of its 1,024 chunks are slime chunks, so that zooming
 out outlines one square and not a thousand. The Nether and the End get the
 same coordinates and are said to have no slime chunks.
+
+**Small screens.** Narrower than 720 pixels, or shorter than 480, the page
+is laid out to give the map the screen. Those are where the layout breaks,
+not the size of any device: under 720 the footer starts to wrap and the
+bar's controls are about to take a fourth row, and in a window under 480
+high two rows of bar leave less than two thirds of it to the map. There:
+
+- the bar is one row: the dimensions, a button that opens the search over
+  the bar with its results hanging under it, and More;
+- More holds everything else the bar has, in titled parts: go to
+  coordinates, the grid, the live pause and interval, copy link and the
+  shortcuts list, and who is logged in. It is a sheet under the bar, or
+  down the right-hand side when the window is wider than it is tall;
+- the layer panel's button stays in the corner of the map and the panel
+  comes up from the bottom over the whole width, or down the right-hand
+  side in a wide short window, scrolling by itself. It is never found
+  open on arriving: the choice made where the panel sits beside the map
+  is kept for there;
+- the footer is one line: where the middle of the map is, and one reading
+  of how old the live positions are (or when the terrain was updated, on a
+  map with no live layer), which opens both timers over the footer;
+- the chunk focus sits between the zoom buttons and Layers.
+
+Only one of them is open at a time. Opening the search, More, the layer
+panel or the timers shuts the other three; the card about a mob or player
+is tucked away while any of them is open and is back, about the same
+thing, when it shuts (in a wide short window it stays beside the panel);
+choosing something that opens the card shuts whatever was open; and a
+structure's details or the shortcuts list, which take the whole page, shut
+all four. Each is shut by its own button, by Escape, and by a touch
+outside it, so the map is always one touch away. Nothing of this is kept:
+the page opens with everything shut.
+
+Everything that is pressed is at least 44 pixels each way, the zoom
+buttons included. The page is as tall as the visible part of the window
+(`100dvh`), so a browser's own bars never cover the footer, and keeps
+clear of a notch and a home indicator by `env(safe-area-inset-*)`. Sheets
+fade in over a seventh of a second unless the viewer has asked for less
+motion. Wider and taller than that, nothing here applies and the layout is
+the one described above.
+
+Measured in headless Chromium with touch, everything shut, the map's share
+of the viewport went from 41.1% to 82.7% at 320 by 568, from 58.5% to
+86.8% at 360 by 740, from 72.7% to 89.1% at 414 by 896, and from 51.4% to
+72.8% at 740 by 360.
 
 **Shortcuts.** The `?` button in the bar, and the `?` key, open a list of
 the keyboard shortcuts and of what the search box takes besides a name. It
@@ -1365,7 +1411,7 @@ some were left out; and `Terrain`, when the tiles were last updated and the
 countdown below. The parts of each are separated by a dot and the two by a
 rule. Every figure is set in digits of one width in a slot as wide as its
 longest ordinary value, so nothing in the footer moves as the seconds
-count. Under 640 pixels each part takes a line of its own.
+count. On a small screen the group is behind one short reading, as below.
 
 **The refresh countdown.** The footer counts down to the next refresh of
 the terrain and the markers, from `snapshotAt` and `refreshSeconds` and the

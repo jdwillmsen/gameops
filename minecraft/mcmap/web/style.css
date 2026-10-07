@@ -231,6 +231,8 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .chunk p:empty { display: none; }
 .chunk-state, .chunk-pointer { color: var(--dim); }
 .chunk form { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.25rem; }
+.chunk-jump summary { cursor: pointer; color: var(--dim); }
+.chunk > button { justify-self: start; }
 .chunk label { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
 .chunk input[type="number"] { width: 4.2rem; padding: 0.15rem 0.35rem; }
 .chunk button { padding: 0.15rem 0.5rem; }
@@ -604,14 +606,219 @@ kbd, .keys code {
   .search-panel, .inspecting .search-panel { position: static; width: auto; max-height: 40vh; margin-top: 0.4rem; }
 }
 
-@media (max-width: 640px) {
-  /* One timer to a line, each under its label, from the left. */
-  .currency { flex: 1 1 100%; flex-direction: column; align-items: flex-start; }
+/* --- small screens ------------------------------------------------------
+   Narrower than 720 pixels the bar's controls no longer fit in two rows,
+   and under 480 pixels of height two rows of bar leave no room for a map:
+   a phone held either way. There the map is given the screen. The bar is
+   one row, of the dimensions, a button that opens the search over it, and
+   More, which holds everything else the bar has; the layer panel is a
+   sheet from the bottom, or from the side when the screen is wider than it
+   is tall; the footer is one line. Whatever is opened shuts the rest, and
+   the card about a mob is tucked away under any of them. Everything
+   pressed is at least 44 pixels across and down. */
+.compact-only { display: none; }
+.more, .more-part { display: contents; }
+.more-title, .more-note, .more-word { display: none; }
+
+@media (max-width: 720px), (max-height: 480px) {
+  html, body { height: 100dvh; }
+  .compact-only { display: inline-flex; align-items: center; justify-content: center; }
+  .compact-only[hidden] { display: none; }
+
+  button, select, input[type="number"], input[type="search"], .duration input { min-height: 44px; }
+  button, select { min-width: 44px; }
+  .toggle { min-height: 44px; }
+  .toggle input, .layer input { width: 1.25rem; height: 1.25rem; }
+
+  header.bar {
+    position: relative;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    padding: calc(0.25rem + env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right)) 0.25rem max(0.5rem, env(safe-area-inset-left));
+  }
+  h1 { display: none; }
+  /* The dimensions keep their names, and scroll within the bar if three
+     of them are wider than it. */
+  .tabs { flex: 1; min-width: 0; gap: 0.15rem; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: none; padding-inline: 0.4rem; }
+
+  /* A magnifying glass that is drawn, not written. */
+  .search-open { flex: none; position: relative; }
+  .search-open::before { content: ""; width: 0.8rem; height: 0.8rem; border: 2px solid currentColor; border-radius: 50%; transform: translate(-0.1rem, -0.1rem); }
+  .search-open::after { content: ""; position: absolute; top: 58%; left: 58%; width: 0.5rem; height: 2px; background: currentColor; transform: rotate(45deg); transform-origin: left center; }
+  .more-open { flex: none; }
+
+  /* The search, once asked for, takes the whole bar, and its results hang
+     under it over the map. */
+  .search { display: none; }
+  .searching .search {
+    display: flex;
+    position: absolute;
+    inset: 0;
+    z-index: 1300;
+    align-items: center;
+    gap: 0.35rem;
+    order: 0;
+    padding: calc(0.25rem + env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right)) 0.25rem max(0.5rem, env(safe-area-inset-left));
+    background: var(--panel);
+  }
+  .searching .search input { flex: 1; width: auto; min-width: 0; padding-right: 0.65rem; }
+  .search .clear { position: relative; top: auto; right: auto; width: 44px; height: 44px; }
+  .search-panel, .inspecting .search-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: min(60dvh, calc(100dvh - 7rem));
+    margin: 0;
+    border-width: 0 0 1px;
+    border-radius: 0 0 10px 10px;
+  }
+  .search-panel li { min-height: 44px; align-content: center; }
+
+  /* More: everything else the bar holds, in parts with a title each. */
+  .more { display: none; }
+  .more-shown .more {
+    display: grid;
+    gap: 0.9rem;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1250;
+    max-height: calc(100dvh - 100% - 3.5rem);
+    max-height: min(80dvh, calc(100dvh - 7rem));
+    overflow-y: auto;
+    padding: 0.75rem max(0.75rem, env(safe-area-inset-right)) 0.9rem max(0.75rem, env(safe-area-inset-left));
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0 0 10px 10px;
+  }
+  .more-part { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+  /* A part with nothing in it but its title, as the live controls are on a
+     map with no live layer, is not shown. */
+  .more-part:not(:has(> :not(.more-title):not(.more-note):not([hidden]))) { display: none; }
+  .more-title { display: block; flex: 1 1 100%; margin: 0; font-size: 0.85em; font-weight: 600; color: var(--dim); }
+  .more-note { display: block; flex: 1 1 100%; margin: 0; color: var(--dim); font-size: 0.9em; }
+  .more-word { display: inline; font-weight: 400; }
+  .goto { margin-left: 0; flex: 1 1 100%; }
+  .goto label { flex: 1; }
+  .goto input[type="number"] { width: 100%; min-width: 3.5rem; }
+  .goto .clear { width: 44px; height: 44px; }
+  .live-control { flex-wrap: wrap; }
+  .duration .said, .duration .said.end { position: static; flex: 1 1 100%; max-width: 100%; }
+  .duration { flex-wrap: wrap; gap: 0.3rem; }
+
+  /* The map's own buttons, at a size a thumb finds. */
+  .leaflet-touch .leaflet-bar a, .leaflet-bar a { width: 44px; height: 44px; line-height: 44px; }
+
+  /* The layer panel: its button stays in the corner of the map, and the
+     panel itself comes up from the bottom over the whole width. */
+  .layers { inset: 0; max-height: none; display: block; pointer-events: none; }
+  .layers.open { width: auto; max-width: none; }
+  .layers > * { pointer-events: auto; }
+  #layers-toggle { position: absolute; top: 0.5rem; right: max(0.5rem, env(safe-area-inset-right)); }
+  #layers-body {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 62%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.25rem max(0.6rem, env(safe-area-inset-right)) 0.5rem max(0.6rem, env(safe-area-inset-left));
+    background: var(--panel);
+    border-width: 1px 0 0;
+    border-radius: 12px 12px 0 0;
+  }
+  .layer, .layer-group .fold, .breakdown li, .roster button, .legend button { min-height: 44px; }
+  .layer label { min-height: 44px; }
+  .breakdown summary, .chunk-jump summary { padding: 1rem 0; }
+  /* A player's switch stands alone beside their name. */
+  .breakdown li label:has(+ .who) { min-width: 44px; justify-content: center; }
+  .layer-group .mini, .breakdown .mini { padding: 0.05rem 0.6rem; }
+
+  /* The card spans the bottom, and goes while a sheet or the search is
+     open: it is back, about the same thing, when they shut. */
+  .inspect { left: 0.5rem; right: 0.5rem; bottom: 0.5rem; width: auto; max-width: none; }
+  .searching .inspect, .more-shown .inspect, .currency-shown .inspect, .stage:has(.layers.open) .inspect { display: none; }
+
+  /* The chunk under the pointer, between the zoom buttons and Layers. */
+  .chunk { top: 0.5rem; left: 4.1rem; right: 6.6rem; width: auto; max-width: none; padding: 0.3rem 0.5rem; font-size: 0.9em; }
+  .stage:has(.layers.open) .chunk { display: none; }
+  .frozen, .said-over { top: 6.6rem; max-width: calc(100% - 1.5rem); }
+
+  /* The footer: where the middle of the map is, and one short reading of
+     how current it is, which opens the two timers over the footer. */
+  .foot {
+    position: relative;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    padding: 0 max(0.25rem, env(safe-area-inset-right)) env(safe-area-inset-bottom) max(0.75rem, env(safe-area-inset-left));
+  }
+  .where { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+  .where output { overflow: hidden; text-overflow: ellipsis; }
+  #coords { flex: 0 1 auto; }
+  .biome-at { flex: 1 10 0; }
+  .currency-open { flex: none; gap: 0.4rem; background: none; border-color: transparent; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #currency-brief { min-width: 3.2em; text-align: left; }
+  .pulse { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--accent); }
+  .currency-open.problem .pulse { background: #f0a35e; }
+  .currency { display: none; }
+  .currency-shown .currency {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    z-index: 1200;
+    padding: 0.6rem max(0.75rem, env(safe-area-inset-right)) 0.6rem max(0.75rem, env(safe-area-inset-left));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 10px 10px 0 0;
+  }
   .stat { padding: 0; }
   .stat + .stat { border-left: 0; }
-  .goto { margin-left: 0; }
-  input[type="number"] { width: 5rem; }
-  .inspect { right: 0.6rem; width: auto; }
-  /* An open panel stops above the card instead of running over it. */
-  .inspecting .layers { max-height: calc(100% - 1.8rem - var(--inspect-height, 9rem)); }
+  /* Each part on a line of its own here, so no dot is needed to part them. */
+  .stat .more:not(:empty):not([hidden])::before { content: none; }
+
+  .sheet { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .facts { grid-template-columns: minmax(5.5rem, 40%) 1fr; }
 }
+
+/* The narrowest phones: three dimensions' names, a search and More in 320
+   pixels, with nothing cut off. */
+@media (max-width: 350px) {
+  .tabs button { padding-inline: 0.2rem; font-size: 0.93em; }
+  header.bar { gap: 0.25rem; }
+  .more-open { padding-inline: 0.45rem; }
+}
+
+/* Wider than it is tall, as a phone on its side: the panel is a drawer
+   down the right, which leaves the map its width, and the card keeps to
+   the left. */
+@media (max-height: 480px) and (min-width: 560px) {
+  #layers-body { top: 0; left: auto; bottom: 0; width: min(22rem, 55%); max-height: none; border-width: 0 0 0 1px; border-radius: 12px 0 0 12px; padding-top: 3.4rem; }
+  /* More likewise keeps to the right, so that there is map beside it to
+     touch. */
+  .more-shown .more { left: auto; width: min(24rem, 60%); max-height: calc(100dvh - 100%); border-left: 1px solid var(--line); border-radius: 0 0 0 10px; }
+  .layers.open #layers-toggle { z-index: 1; }
+  .inspect { right: auto; width: 18.5rem; max-width: calc(100% - 1rem); }
+  .stage:has(.layers.open) .inspect { display: grid; max-width: calc(45% - 1rem); }
+  .frozen, .said-over { top: 0.5rem; max-width: calc(100% - 14rem); }
+  .chunking .frozen, .chunking .said-over { top: auto; bottom: 0.5rem; }
+}
+
+/* Sheets arrive rather than appear, for whoever has not asked for less
+   motion. */
+@media (prefers-reduced-motion: no-preference) {
+  @media (max-width: 720px), (max-height: 480px) {
+    .more-shown .more, .currency-shown .currency, .layers.open #layers-body { animation: arrive 140ms ease-out; }
+  }
+}
+@keyframes arrive { from { opacity: 0; } to { opacity: 1; } }

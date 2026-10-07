@@ -13,7 +13,9 @@
   <header class="bar">
     <h1 id="world">World map</h1>
     <nav id="dimensions" class="tabs" aria-label="Dimension"></nav>
+    <button id="search-open" class="search-open compact-only" type="button" aria-label="Search the map" aria-expanded="false" aria-controls="search"></button>
     <form id="search" class="search" role="search" autocomplete="off" hidden>
+      <button id="search-close" class="search-close compact-only" type="button">Back</button>
       <input id="search-box" name="q" type="search" maxlength="64" placeholder="Search the map" role="combobox"
         aria-label="Search players, biomes, structures, markers and your waypoints" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list">
       <button id="search-clear" class="clear" type="button" aria-label="Clear the search" title="Clear the search (Esc)" hidden></button>
@@ -22,21 +24,40 @@
         <p id="search-note" class="search-note" role="status"></p>
       </div>
     </form>
+    <button id="more-open" class="more-open compact-only" type="button" aria-expanded="false" aria-controls="more">More</button>
+    <div id="more" class="more">
+    <div class="more-part">
+    <h2 class="more-title">Go to coordinates</h2>
     <form id="goto" class="goto" autocomplete="off">
       <label>X <input id="goto-x" name="x" type="number" step="1" inputmode="numeric" required></label>
       <label>Z <input id="goto-z" name="z" type="number" step="1" inputmode="numeric" required></label>
       <button type="submit">Go</button>
       <button id="goto-clear" class="clear" type="button" aria-label="Clear the coordinates" title="Clear the coordinates and the mark Go left" hidden></button>
     </form>
+    </div>
+    <div class="more-part">
+    <h2 class="more-title">Grid and chunks</h2>
     <label class="toggle"><input id="grid" type="checkbox"> Grid</label>
+    <p class="more-note">With the grid on, tap the map to pin a chunk and read its coordinates.</p>
+    </div>
+    <div class="more-part">
+    <h2 class="more-title">Live positions</h2>
     <div id="live-control" class="live-control" role="group" aria-label="Live updates" hidden>
       <button id="live-pause" type="button">Pause live</button>
       <span class="pace">every <span id="live-interval"></span></span>
     </div>
+    </div>
+    <div class="more-part">
+    <h2 class="more-title">Link and help</h2>
     <button id="copy" type="button">Copy link</button>
-    <button id="help-open" class="help-open" type="button" aria-haspopup="dialog" aria-label="Keyboard shortcuts and search tips" title="Keyboard shortcuts and search tips (?)">?</button>
+    <button id="help-open" class="help-open" type="button" aria-haspopup="dialog" aria-label="Keyboard shortcuts and search tips" title="Keyboard shortcuts and search tips (?)">?<span class="more-word"> Shortcuts and search tips</span></button>
+    </div>
+    <div class="more-part">
+    <h2 class="more-title">Logged in as</h2>
     <span id="who" class="who" hidden></span>
     <button id="logout" type="button" hidden>Log out</button>
+    </div>
+    </div>
   </header>
   <div class="stage">
     <aside id="layers" class="layers" aria-label="Layers" hidden>
@@ -66,12 +87,15 @@
       <p id="chunk-blocks"></p>
       <p id="chunk-slime"></p>
       <p id="chunk-pointer" class="chunk-pointer"></p>
-      <form id="chunk-go" autocomplete="off">
-        <label>Chunk X <input id="chunk-x" name="cx" type="number" step="1" required></label>
-        <label>Z <input id="chunk-z" name="cz" type="number" step="1" required></label>
-        <button type="submit">Go</button>
-        <button id="chunk-unpin" type="button" hidden>Unpin</button>
-      </form>
+      <button id="chunk-unpin" type="button" hidden>Unpin</button>
+      <details class="chunk-jump">
+        <summary>Go to a chunk</summary>
+        <form id="chunk-go" autocomplete="off">
+          <label>Chunk X <input id="chunk-x" name="cx" type="number" step="1" required></label>
+          <label>Z <input id="chunk-z" name="cz" type="number" step="1" required></label>
+          <button type="submit">Go</button>
+        </form>
+      </details>
     </section>
     <span id="inspect-said" class="unseen" role="status"></span>
     <p id="said" class="said-over" role="status" hidden></p>
@@ -142,6 +166,7 @@
       <output id="coords" aria-live="off">X —, Z —</output>
       <output id="biome" class="biome-at" aria-live="off" hidden></output>
     </div>
+    <button id="currency-open" class="currency-open compact-only" type="button" aria-expanded="false" aria-controls="currency" aria-label="How current the map is"><i class="pulse" aria-hidden="true"></i><span id="currency-brief"></span></button>
     <div id="currency" class="currency" role="group" aria-label="How current the map is">
       <span id="live" class="stat live" hidden><span class="stat-label">Live positions</span> <output id="live-age" class="slot" aria-live="off"></output> <span id="live-more" class="more"></span></span>
       <span class="stat terrain"><span class="stat-label">Terrain</span> <span id="status" class="slot" role="status"></span> <output id="refresh" class="refresh slot more" role="timer" aria-live="off" hidden></output></span>
@@ -162,5 +187,6 @@
   <script src="trails.js"></script>
   <script src="search.js"></script>
   <script src="menu.js"></script>
+  <script src="compact.js"></script>
 </body>
 </html>

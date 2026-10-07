@@ -201,3 +201,61 @@ func TestSearchShorthandGoesToPlacesAndWritesNoCommands(t *testing.T) {
 		}
 	}
 }
+
+// The small-screen layout is one condition, written in three places that
+// have to agree: the stylesheet that lays the page out, the script that
+// keeps track of what is open, and the panel that must not arrive open.
+func TestSmallScreenLayoutIsOneConditionEverywhere(t *testing.T) {
+	const condition = "(max-width: 720px), (max-height: 480px)"
+	css := read(t, "style.css")
+	if !bytes.Contains(css, []byte("@media "+condition+" {")) {
+		t.Errorf("style.css no longer lays out small screens under %s", condition)
+	}
+	for _, script := range []string{"compact.js", "layers.js"} {
+		if !bytes.Contains(read(t, script), []byte("'"+condition+"'")) {
+			t.Errorf("%s no longer uses the stylesheet's condition, %s", script, condition)
+		}
+	}
+	for _, need := range []string{
+		"html, body { height: 100dvh; }",
+		"env(safe-area-inset-top)", "env(safe-area-inset-bottom)", "env(safe-area-inset-left)", "env(safe-area-inset-right)",
+		"min-height: 44px;",
+		"@media (prefers-reduced-motion: no-preference) {",
+		".more, .more-part { display: contents; }",
+		".searching .inspect, .more-shown .inspect, .currency-shown .inspect, .stage:has(.layers.open) .inspect { display: none; }",
+	} {
+		if !bytes.Contains(css, []byte(need)) {
+			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+	js := usesNoMarkupSink(t, "compact.js")
+	for _, need := range []string{
+		"for (const other of Object.keys(PARTS)) if (other !== part) set(other, false);",
+		"if (part !== 'panel') shutPanel();",
+		"PARTS[part].setAttribute('aria-expanded', String(on));",
+		"document.addEventListener('pointerdown', (e) => {",
+		"media.addEventListener('change', relaid);",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("compact.js no longer has %s", need)
+		}
+	}
+	// Nothing it opens is kept for the next visit.
+	if bytes.Contains(js, []byte("localStorage")) {
+		t.Error("compact.js keeps something in the browser; what is open on a small screen is not a choice to keep")
+	}
+	if !bytes.Contains(read(t, "layers.js"), []byte("let open = !compact.matches && (typeof view.open === 'boolean' ? view.open : true);")) {
+		t.Error("layers.js no longer starts with the panel shut on a small screen")
+	}
+	page := read(t, "index.html")
+	for _, need := range []string{
+		`<button id="search-open" class="search-open compact-only" type="button" aria-label="Search the map" aria-expanded="false" aria-controls="search">`,
+		`<button id="more-open" class="more-open compact-only" type="button" aria-expanded="false" aria-controls="more">`,
+		`<button id="currency-open" class="currency-open compact-only" type="button" aria-expanded="false" aria-controls="currency"`,
+		`<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">`,
+	} {
+		if !bytes.Contains(page, []byte(need)) {
+			t.Errorf("index.html no longer has %s", need)
+		}
+	}
+}

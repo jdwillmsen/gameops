@@ -457,6 +457,8 @@
   app.search = {
     focus() {
       if (el.form.hidden) return;
+      // On a small screen the box is put away until it is asked for.
+      document.dispatchEvent(new CustomEvent('mcmap:searching'));
       el.box.focus();
       el.box.select();
     },
