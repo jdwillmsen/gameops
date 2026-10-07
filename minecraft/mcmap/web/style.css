@@ -163,7 +163,7 @@ input[type="number"] { width: 6.5rem; }
 #live-age { min-width: 5.6em; }
 #status { min-width: 9.2em; }
 .refresh { min-width: 11.3em; }
-.stat .more:not(:empty):not([hidden])::before { content: "·"; margin-right: 0.4rem; }
+.stat .then:not(:empty):not([hidden])::before { content: "·"; margin-right: 0.4rem; }
 #status.problem, .refresh.problem { color: #f0a35e; }
 
 .live-control { display: flex; align-items: center; gap: 0.4rem; }
@@ -785,7 +785,7 @@ kbd, .keys code {
   .stat { padding: 0; }
   .stat + .stat { border-left: 0; }
   /* Each part on a line of its own here, so no dot is needed to part them. */
-  .stat .more:not(:empty):not([hidden])::before { content: none; }
+  .stat .then:not(:empty):not([hidden])::before { content: none; }
 
   .sheet { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
   .facts { grid-template-columns: minmax(5.5rem, 40%) 1fr; }
