@@ -89,3 +89,25 @@ func TestSearchWaitsAndAbortsWhatItSupersedes(t *testing.T) {
 		t.Error("search.js keeps something in the browser; a search is not a choice to keep")
 	}
 }
+
+// Clearing a search is one press that leaves the viewer where they were:
+// in the box, with nothing of the last search on the page or the map.
+func TestSearchClearsInOnePressAndKeepsTheCursor(t *testing.T) {
+	js := read(t, "search.js")
+	if !regexp.MustCompile(`function clear\(\) \{\s*el\.box\.value = '';\s*reset\(\);\s*unmark\(\);\s*offer\(\);\s*el\.box\.focus\(\);\s*\}`).Match(js) {
+		t.Error("search.js no longer clears the box, the list and the mark and then focuses the box")
+	}
+	for _, need := range []string{
+		"if (dirty()) clear();",
+		"else map.getContainer().focus();",
+		"el.clear.addEventListener('click', clear);",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("search.js no longer has %s", need)
+		}
+	}
+	// A button with no text is named for whoever cannot see the cross.
+	if !regexp.MustCompile(`<button id="search-clear"[^>]*type="button"[^>]*aria-label="Clear the search"`).Match(read(t, "index.html")) {
+		t.Error("index.html has no labelled button to clear the search")
+	}
+}
