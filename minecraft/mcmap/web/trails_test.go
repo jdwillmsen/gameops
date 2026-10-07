@@ -15,7 +15,7 @@ func TestTrailsAreColouredByPlayerAndNamedAsText(t *testing.T) {
 	loadedAfterThePanel(t, "trails.js")
 	for _, need := range []string{
 		"span.textContent = s;",
-		"lines.bindTooltip((line) => text(line.options.label),",
+		"lines.bindTooltip((line) => text(labelOf(line)),",
 		"if (app.isMe && app.playerColour && app.isMe(name)) return app.playerColour(name);",
 		"const first = hash(name) % PALETTE.length;",
 		"name.textContent = trail.name;",

@@ -60,7 +60,14 @@
   };
 
   const lines = L.featureGroup();
-  lines.bindTooltip((line) => text(line.options.label), { sticky: true, direction: 'top', className: 'live-tip' });
+  // Whose line it is and the times it runs between, written when it is
+  // asked for: a time of day is slow to write, and a day of walking is
+  // thousands of points, each of which moves the line's end.
+  const labelOf = (line) => {
+    const { name, from, to } = line.options;
+    return `${name} · ${clock(from) === clock(to) ? clock(to) : `${clock(from)} to ${clock(to)}`}`;
+  };
+  lines.bindTooltip((line) => text(labelOf(line)), { sticky: true, direction: 'top', className: 'live-tip' });
 
   let seconds = WINDOWS[0];
   try {
@@ -81,9 +88,9 @@
   let pending = null;
   let limits = { more: 0, maxAgeSeconds: 0 };
   let bodyShown = false;
-  // gamertag in lower case -> { name, colour, all, line, casing, from,
-  // last, seenAt }: all is every line of theirs, and line and casing the
-  // pair still growing.
+  // gamertag in lower case -> { name, colour, all, line, casing, last,
+  // seenAt }: all is every line of theirs, and line and casing the pair
+  // still growing.
   const trails = new Map();
   // What the list of players was last built from.
   let listed = '';
@@ -147,7 +154,7 @@
   // being the wider of the two it is the one the pointer is tested
   // against.
   function begin(trail, t, x, z) {
-    const casing = L.polyline([place(x, z)], { ...drawing, color: INK, weight: 5.5, opacity: 0.6, interactive: Boolean(shared), label: '' });
+    const casing = L.polyline([place(x, z)], { ...drawing, color: INK, weight: 5.5, opacity: 0.6, interactive: Boolean(shared), name: trail.name, from: t, to: t });
     const line = L.polyline([place(x, z)], { ...drawing, color: trail.colour, weight: 2.5, opacity: 0.95, interactive: false });
     lines.addLayer(casing);
     lines.addLayer(line);
@@ -157,7 +164,7 @@
       line.bringToBack();
       casing.bringToBack();
     }
-    Object.assign(trail, { casing, line, from: t, last: { x, z } });
+    Object.assign(trail, { casing, line, last: { x, z } });
     trail.all.push(casing);
     extend(trail, t, x, z, false);
   }
@@ -168,8 +175,7 @@
       trail.line.addLatLng(place(x, z));
       trail.last = { x, z };
     }
-    const span = clock(trail.from) === clock(t) ? clock(t) : `${clock(trail.from)} to ${clock(t)}`;
-    trail.casing.options.label = `${trail.name} · ${span}`;
+    trail.casing.options.to = t;
   }
 
   // The players the lines belong to, each with their colour, as buttons
