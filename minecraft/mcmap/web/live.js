@@ -1312,7 +1312,10 @@
       paintCard();
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') shut();
+      // An Escape pressed in a dialog is the dialog's: it shuts that, and
+      // the card under it, and whatever it is following, stay.
+      if (e.key !== 'Escape' || (e.target instanceof Element && e.target.closest('dialog[open]') !== null)) return;
+      shut();
     });
     // The viewer taking the map somewhere else is the viewer no longer
     // following. A zoom keeps the entity in the middle and is not that.
