@@ -198,6 +198,31 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   pointer-events: none;
 }
 
+/* What the grid's chunk focus says, under the zoom buttons: the one corner
+   of the map nothing else uses. Its numbers do not shift as they change. */
+.chunk {
+  position: absolute;
+  top: 5.6rem;
+  left: 0.6rem;
+  z-index: 1080;
+  display: grid;
+  gap: 0.15rem;
+  width: 17rem;
+  max-width: calc(100% - 1.2rem);
+  padding: 0.4rem 0.6rem;
+  background: rgba(29, 32, 38, 0.94);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.chunk p { margin: 0; overflow-wrap: anywhere; }
+.chunk p:empty { display: none; }
+.chunk-state, .chunk-pointer { color: var(--dim); }
+.chunk form { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.25rem; }
+.chunk label { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
+.chunk input[type="number"] { width: 4.2rem; padding: 0.15rem 0.35rem; }
+.chunk button { padding: 0.15rem 0.5rem; }
+
 .layers {
   position: absolute;
   top: 0.6rem;

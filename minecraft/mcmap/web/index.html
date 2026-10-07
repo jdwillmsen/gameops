@@ -60,6 +60,18 @@
         <button id="inspect-copy" type="button">Copy x y z</button>
       </div>
     </section>
+    <section id="chunk" class="chunk" aria-label="Chunk focus" hidden>
+      <p><strong id="chunk-title"></strong> <span id="chunk-state" class="chunk-state"></span></p>
+      <p id="chunk-blocks"></p>
+      <p id="chunk-slime"></p>
+      <p id="chunk-pointer" class="chunk-pointer"></p>
+      <form id="chunk-go" autocomplete="off">
+        <label>Chunk X <input id="chunk-x" name="cx" type="number" step="1" required></label>
+        <label>Z <input id="chunk-z" name="cz" type="number" step="1" required></label>
+        <button type="submit">Go</button>
+        <button id="chunk-unpin" type="button" hidden>Unpin</button>
+      </form>
+    </section>
     <p id="frozen" class="frozen" hidden><strong id="frozen-what" role="status"></strong> <span id="frozen-age"></span></p>
   </div>
   <section id="login" class="login" aria-labelledby="login-title" hidden>
@@ -93,6 +105,7 @@
   <script src="structures.js"></script>
   <script src="biomes.js"></script>
   <script src="slime.js"></script>
+  <script src="chunk.js"></script>
   <script src="trails.js"></script>
   <script src="search.js"></script>
 </body>

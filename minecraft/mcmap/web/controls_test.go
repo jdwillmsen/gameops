@@ -67,3 +67,35 @@ func TestTypedLengthsAreSaidBackAndBounded(t *testing.T) {
 		t.Error("trails.js no longer bounds its window by the server's retention")
 	}
 }
+
+// A chunk's coordinates are its blocks' divided by sixteen and rounded
+// down. Truncating instead puts block -1 in chunk 0, which is the chunk on
+// the other side of the axis.
+func TestChunkFocusFloorsAndFallsBackToTheRegion(t *testing.T) {
+	js := usesNoMarkupSink(t, "chunk.js")
+	for _, need := range []string{
+		"const cellAt = (latlng, unit) => ({ unit, x: Math.floor(latlng.lng / sizeOf(unit)), z: Math.floor(latlng.lat / sizeOf(unit)) });",
+		"const unitNow = () => (CHUNK * 2 ** map.getZoom() >= MIN_PIXELS ? 'chunk' : 'region');",
+		"if (dimension !== 'overworld') return `No slime chunks in ${app.label(dimension)}.`;",
+		"if (pinned && pinnedIn !== app.dimension()) {",
+		"app.chunk = { go, pinned: () => pinned };",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("chunk.js no longer has %s", need)
+		}
+	}
+	if bytes.Contains(js, []byte("Math.trunc")) || bytes.Contains(js, []byte(">> 4")) || bytes.Contains(js, []byte("| 0")) {
+		t.Error("chunk.js works out a chunk by something other than Math.floor")
+	}
+	page := read(t, "index.html")
+	for _, id := range []string{"chunk", "chunk-title", "chunk-state", "chunk-blocks", "chunk-slime", "chunk-pointer", "chunk-go", "chunk-x", "chunk-z", "chunk-unpin"} {
+		if !bytes.Contains(page, []byte(`id="`+id+`"`)) {
+			t.Errorf("index.html has no element with id %s", id)
+		}
+	}
+	// It asks the slime layer's own function, which is the one tested
+	// against the service's.
+	if at := func(name string) int { return bytes.Index(page, []byte(`src="`+name+`"`)) }; at("chunk.js") < at("slime.js") {
+		t.Error("index.html must load chunk.js after slime.js")
+	}
+}
