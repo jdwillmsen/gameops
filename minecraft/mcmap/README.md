@@ -1221,6 +1221,15 @@ object, once `register` exists; a script loaded after `layers.js` can call
 `register` at once, and one that might run before it waits on `ready`.
 Each of `live.js`, `markers.js` and `structures.js` is an example.
 
+**Going to coordinates.** X, Z and Go take the view to a block and ring
+it, labelled with its coordinates, until it is cleared or the map changes
+dimension. A clear button beside Go, shown while there is a number or a
+ring to clear, empties both boxes, removes the ring and puts the cursor
+back in X; the address in the bar is the view's, as ever, and is not
+changed by clearing. Pasting `x z`, `x, z` or `x y z` into X, with or
+without the axes' letters, fills X and Z from it (`y` is not needed by a
+map) and moves to Go.
+
 **The refresh countdown.** The footer counts down to the next refresh of
 the terrain and the markers, from `snapshotAt` and `refreshSeconds` and the
 server's own clock as its `Date` header gives it. The service counts its
