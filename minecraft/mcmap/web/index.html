@@ -49,7 +49,8 @@
     </div>
     </div>
     <div class="more-part">
-    <h2 class="more-title">Appearance</h2>
+    <h2 class="more-title">Views and appearance</h2>
+    <button id="views-open" type="button" aria-haspopup="dialog" title="Saved views (V)" hidden>Views</button>
     <button id="appearance-open" type="button" aria-haspopup="dialog" hidden>Appearance</button>
     </div>
     <div class="more-part">
@@ -136,6 +137,7 @@
       <dt><kbd>P</kbd></dt><dd>Pause or resume live positions</dd>
       <dt><kbd>F</kbd></dt><dd>Follow, or stop following, what the card is about</dd>
       <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt><dd>Overworld, Nether, The End</dd>
+      <dt><kbd>V</kbd></dt><dd>Saved views; in the list, <kbd>1</kbd> to <kbd>9</kbd> switches to that view</dd>
       <dt><kbd>S</kbd></dt><dd>Go to the world spawn</dd>
       <dt><kbd>M</kbd></dt><dd>Go to where I am, while I am online</dd>
       <dt><kbd>+</kbd> <kbd>-</kbd></dt><dd>Zoom in and out</dd>
@@ -165,6 +167,49 @@
       <button id="structure-link" type="button">Copy link</button>
     </div>
     <p id="structure-said" class="note" role="status"></p>
+  </dialog>
+  <dialog id="views" class="sheet" aria-labelledby="views-title">
+    <div class="sheet-head">
+      <h2 id="views-title">Views</h2>
+      <button id="views-close" type="button">Close</button>
+    </div>
+    <p id="views-kept" class="note problem" hidden></p>
+    <section id="views-offer" class="offer" aria-labelledby="views-offer-title" hidden>
+      <h3 id="views-offer-title">A view from a link</h3>
+      <p><strong id="views-offer-name"></strong> <span id="views-offer-what"></span></p>
+      <p class="note">It is not saved, and none of your views is changed by it. Showing it replaces what the map shows now.</p>
+      <div class="sheet-actions">
+        <button id="views-offer-show" type="button">Show it</button>
+        <button id="views-offer-save" type="button">Save as…</button>
+        <button id="views-offer-drop" type="button">Dismiss</button>
+      </div>
+    </section>
+    <ol id="views-list" class="views-list" aria-label="Views. A number key switches to the view with that number."></ol>
+    <p id="views-said" class="note views-said"><span id="views-said-text" role="status"></span> <button id="views-undo" class="mini" type="button" hidden>Undo</button></p>
+    <form id="views-save" class="views-save" autocomplete="off">
+      <h3 id="views-save-title">Save what the map shows now</h3>
+      <label>Name <input id="views-name" name="name" type="text" maxlength="40" required></label>
+      <label class="toggle"><input id="views-place" type="checkbox"> With this place: the dimension, the position and the zoom</label>
+      <label class="toggle"><input id="views-look" type="checkbox"> With the appearance settings</label>
+      <button type="submit">Save view</button>
+    </form>
+    <div id="views-hidden" hidden>
+      <h3>Hidden built-in views</h3>
+      <ul id="views-hidden-list" class="views-list"></ul>
+    </div>
+    <h3>All views and settings</h3>
+    <div class="sheet-actions">
+      <button id="views-export" type="button">Export to a file</button>
+      <button id="views-import" type="button">Import from a file</button>
+      <input id="views-file" type="file" accept="application/json,.json" aria-label="A file of views and settings to import" hidden>
+    </div>
+    <div id="views-incoming" class="offer" hidden>
+      <p id="views-incoming-what"></p>
+      <div class="sheet-actions">
+        <button id="views-incoming-take" type="button">Import</button>
+        <button id="views-incoming-drop" type="button">Cancel</button>
+      </div>
+    </div>
   </dialog>
   <dialog id="appearance" class="sheet aside" aria-labelledby="appearance-title">
     <div class="sheet-head">
@@ -285,6 +330,7 @@
   <script src="search.js"></script>
   <script src="menu.js"></script>
   <script src="appearance.js"></script>
+  <script src="views.js"></script>
   <script src="compact.js"></script>
 </body>
 </html>

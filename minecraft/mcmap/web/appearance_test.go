@@ -226,6 +226,7 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 		}
 	}
 	page := read(t, "index.html")
+	views := read(t, "views.js")
 	for name, value := range defaults {
 		control := regexp.MustCompile(`(?s)<(select|input)[^>]*data-look="` + name + `"[^>]*>(.*?)(</select>|</span>)`).FindSubmatch(page)
 		if control == nil {
@@ -237,6 +238,9 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 		}
 		if !regexp.MustCompile(`\b` + name + `: `).Match(regexp.MustCompile(`(?s)const LOOK = \{.*?\n  \};`).Find(settings)) {
 			t.Errorf("settings.js has a default for %s and no description of what it may be", name)
+		}
+		if !bytes.Contains(views, []byte("'"+name+"'")) {
+			t.Errorf("views.js leaves %s out of a link's appearance", name)
 		}
 	}
 	for _, theme := range []string{"system", "dark", "light", "contrast"} {

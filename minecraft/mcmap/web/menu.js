@@ -60,6 +60,8 @@
     l: () => press('layers-toggle'),
     p: () => press('live-pause') || tell('This map has no live positions to pause.'),
     f: () => press('inspect-follow') || tell('Nothing is being inspected to follow: choose a player or a mob first.'),
+    // The list of views, where a number then picks one.
+    v: () => press('views-open'),
     1: () => dimension(0),
     2: () => dimension(1),
     3: () => dimension(2),
