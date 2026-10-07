@@ -16,15 +16,20 @@
   // The page and its scripts are cached apart for a few minutes, so just
   // after a release this can meet a page that has no panel yet.
   if (!app || !app.layers || !app.layers.register || !app.icons || !app.names) return;
-  const { map, icons, names } = app;
+  // Likewise a page from before the pace could be typed.
+  if (!app.duration) return;
+  const { map, icons, names, duration } = app;
 
   const CONTROL_KEY = 'mcmap.liveControl';
   // Where the layer's one on-and-off switch was kept before it could be
   // paused.
   const OLD_KEY = 'mcmap.live';
-  // Seconds between redraws that the viewer may choose from. The first is
-  // the server's own pace, and means every frame.
-  const INTERVALS = [1, 2, 5, 10, 30];
+  // Seconds between redraws that the viewer is offered; any other length
+  // between the two bounds may be typed. The shortest is the server's own
+  // pace, and means every frame.
+  const INTERVALS = [1, 2, 5, 10, 30, 60, 300];
+  const MIN_INTERVAL = 1;
+  const MAX_INTERVAL = 86_400;
   // Frames come about a second apart and never exactly, so one arriving
   // this much before it is due is drawn, and a frame already held is kept
   // this much past due in case a newer one is about to arrive.
@@ -128,12 +133,14 @@
     close: document.getElementById('inspect-close'),
   };
 
-  const control = { paused: false, interval: INTERVALS[0] };
+  const control = { paused: false, interval: MIN_INTERVAL };
   try {
     const saved = JSON.parse(localStorage.getItem(CONTROL_KEY) || 'null');
     if (saved && typeof saved === 'object') {
       if (typeof saved.paused === 'boolean') control.paused = saved.paused;
-      if (INTERVALS.includes(saved.interval)) control.interval = saved.interval;
+      // Any length that was ever kept is still one: the menu's entries
+      // have changed and may again.
+      if (Number.isFinite(saved.interval)) control.interval = Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, Math.round(saved.interval)));
     } else {
       // Whoever had the layer switched off still gets a page that opens
       // no stream.
@@ -525,7 +532,7 @@
   function present() {
     clearTimeout(cadenceTimer);
     if (latest === null) return;
-    const due = control.interval > INTERVALS[0] ? drawnAt + control.interval * 1000 : 0;
+    const due = control.interval > MIN_INTERVAL ? drawnAt + control.interval * 1000 : 0;
     const now = Date.now();
     if (now < due - CADENCE_SLACK_MS) {
       cadenceTimer = setTimeout(present, due + CADENCE_SLACK_MS - now);
@@ -648,8 +655,10 @@
     } else if (age === null) {
       state = 'no data';
     } else {
-      state = `${age.toFixed(1)} s`;
-      if (control.interval > INTERVALS[0]) state += ` · every ${control.interval} s`;
+      // To the tenth while that means something, and in words once the
+      // picture is as old as a slow pace lets it get.
+      state = age < 60 ? `${age.toFixed(1)} s` : span(age);
+      if (control.interval > MIN_INTERVAL) state += ` · every ${duration.words(control.interval)}`;
     }
     let line = `live · ${state}`;
     if (more > 0 && !stale) {
@@ -677,7 +686,6 @@
   function paintControl() {
     el.pause.textContent = control.paused ? 'Resume live' : 'Pause live';
     el.pause.classList.toggle('paused', control.paused);
-    el.interval.value = String(control.interval);
   }
 
   function toggle(category, on) {
@@ -1047,15 +1055,24 @@
     sync();
   });
 
-  el.interval.addEventListener('change', () => {
-    const seconds = Number(el.interval.value);
-    if (!INTERVALS.includes(seconds)) return;
-    control.interval = seconds;
-    saveControl();
-    // A frame held for the old pace may be due at the new one.
-    present();
-    readout();
+  const pace = duration.picker({
+    name: 'Redraw live positions every',
+    presets: INTERVALS,
+    unit: 's',
+    min: MIN_INTERVAL,
+    max: MAX_INTERVAL,
+    minWhy: ', the server\'s own pace',
+    say: (length) => `every ${length}`,
+    value: control.interval,
+    onChange(seconds) {
+      control.interval = seconds;
+      saveControl();
+      // A frame held for the old pace may be due at the new one.
+      present();
+      readout();
+    },
   });
+  el.interval.replaceChildren(pace.node);
 
   app.playerColour = playerColour;
   app.isMe = isMe;

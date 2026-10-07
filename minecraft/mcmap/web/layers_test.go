@@ -123,25 +123,31 @@ func TestPageHasOnePanelAndNoFilterRows(t *testing.T) {
 	}
 }
 
-// The intervals offered in the page are the ones the live layer accepts.
+// The pace is chosen from a menu the live layer builds from its own list,
+// or typed, between bounds it states: the shortest is the server's own
+// pace, and whatever was kept before the menu changed is still a pace.
 func TestLiveIntervalsOfferedAreTheOnesAccepted(t *testing.T) {
 	js := read(t, "live.js")
 	m := regexp.MustCompile(`const INTERVALS = \[([0-9, ]+)\];`).FindSubmatch(js)
 	if m == nil {
 		t.Fatal("live.js no longer lists its intervals")
 	}
-	if string(m[1]) != "1, 2, 5, 10, 30" {
-		t.Errorf("live.js accepts intervals %s, want 1, 2, 5, 10, 30", m[1])
+	if string(m[1]) != "1, 2, 5, 10, 30, 60, 300" {
+		t.Errorf("live.js offers intervals %s, want 1, 2, 5, 10, 30, 60, 300", m[1])
 	}
-	var offered []string
-	for _, o := range regexp.MustCompile(`<option value="(\d+)">(\d+) s</option>`).FindAllSubmatch(read(t, "index.html"), -1) {
-		if string(o[1]) != string(o[2]) {
-			t.Errorf("the option for %s s is labelled %s s", o[1], o[2])
+	for _, need := range []string{
+		"const MIN_INTERVAL = 1;",
+		"const MAX_INTERVAL = 86_400;",
+		"presets: INTERVALS,",
+		"if (Number.isFinite(saved.interval)) control.interval = Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, Math.round(saved.interval)));",
+		"el.interval.replaceChildren(pace.node);",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("live.js no longer has %s", need)
 		}
-		offered = append(offered, string(o[1]))
 	}
-	if got := strings.Join(offered, ", "); got != string(m[1]) {
-		t.Errorf("index.html offers intervals %s, live.js accepts %s", got, m[1])
+	if !bytes.Contains(read(t, "index.html"), []byte(`<span id="live-interval"></span>`)) {
+		t.Error("index.html has no place for the live layer's pace")
 	}
 	// Pausing has to close the stream, not merely stop drawing it.
 	if !regexp.MustCompile(`const want = here && !control\.paused && !document\.hidden \? here : null;\s*if \(!want\) \{\s*close\(\);`).Match(js) {
