@@ -32,6 +32,8 @@
     outpost: { letter: 'O', color: '#d9a441' },
     witch_hut: { letter: 'H', color: '#b48ce0' },
     village: { letter: 'V', color: '#6bbf59' },
+    stronghold: { letter: 'S', color: '#58c4a4' },
+    trial_chamber: { letter: 'T', color: '#e08a4a' },
   };
   // The rows in the panel: the three layers, then a filter per kind that
   // applies to all of them. A kind's row is named by the game's word for
@@ -46,11 +48,17 @@
     ['outpost', 'Outposts', 'dot outpost'],
     ['witch_hut', 'Witch huts', 'dot witch-hut'],
     ['village', 'Villages', 'dot village'],
+    ['stronghold', 'Strongholds', 'dot stronghold'],
+    ['trial_chamber', 'Trial chambers', 'dot trial-chamber'],
     ['spawn', 'World spawn', 'key spawn'],
   ];
   const UNKNOWN = { letter: '?', color: '#9aa3ad' };
 
   const DETAILS_HINT = 'Click for details';
+
+  // A kind the world keeps no record of is found by the blocks only it is
+  // generated with, and says how many: its box is the box around those.
+  const found = (s) => Number.isFinite(s.evidence) && s.evidence > 0;
 
   // What the world keeps about a village, for its tooltip. A village the
   // game has a record for but has not run yet has no counts, and saying so
@@ -209,11 +217,12 @@
     for (const s of recorded) {
       const k = KINDS[s.kind] || UNKNOWN;
       const group = groupOf('recorded', s.kind);
-      const label = tip(`${names.structure(s.kind)} · recorded by the world`, ...villageLines(s.village).slice(0, 1), DETAILS_HINT);
+      const label = tip(`${names.structure(s.kind)} · ${found(s) ? 'found by its blocks' : 'recorded by the world'}`, ...villageLines(s.village).slice(0, 1), DETAILS_HINT);
       // The box is what the world recorded, to the block. A block's far
-      // edge is one past its coordinate.
+      // edge is one past its coordinate. One round the blocks a kind was
+      // found by is dashed: the structure is there, and its edge is not.
       L.rectangle([[s.minZ, s.minX], [s.maxZ + 1, s.maxX + 1]], {
-        color: k.color, weight: 2, fillColor: k.color, fillOpacity: 0.18, interactive: false,
+        color: k.color, weight: 2, fillColor: k.color, fillOpacity: found(s) ? 0.08 : 0.18, dashArray: found(s) ? '5 5' : null, interactive: false,
       }).addTo(group);
       // And a mark that stays the same size, since a box 58 blocks wide is
       // less than a pixel from far out.
@@ -417,6 +426,7 @@
   const MAX_SLIME_CHUNKS = 4096;
   const WHAT = {
     recorded: 'Recorded: the world’s own save says this structure is here, and this is the box it occupies.',
+    found: 'Found: the world keeps no record of this kind, but its save holds blocks only this kind is generated with. The box is the box around those blocks; the structure itself reaches further.',
     predicted: 'Predicted: worked out from the world’s seed, not read from the world. Nothing has recorded one here.',
     candidate: 'Possible site: the seed puts a site here, in terrain nobody has generated. The biome there will decide whether anything is built.',
   };
@@ -539,7 +549,7 @@
     const p = subject.predicted;
     view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind })));
     view.title.textContent = names.structure(kind);
-    const lines = [WHAT[sort]];
+    const lines = [s && found(s) ? WHAT.found : WHAT[sort]];
     if (p) {
       lines.push(...standing(p));
       const rule = rules[kind];
@@ -573,6 +583,17 @@
       ] : [['Counts', 'Not counted by the game yet: it has a record of this village and has not run it, so its box is a first guess.']]));
     } else if (s && Number.isFinite(s.areas) && s.areas > 0) {
       out.push(...facts('What the world recorded', [['Spawn areas', `${fmt(s.areas)}, joined into this one box`]]));
+    } else if (s && found(s)) {
+      out.push(...facts('What it was found by', [['Blocks', `${fmt(s.evidence)} ${FOUND_BY[kind] || 'blocks only this kind has'}`]]));
+    }
+    if (s) {
+      // What the save holds in it is asked for, and is put here when it
+      // comes: the rest of the sheet does not wait for it.
+      const held = el('div', 'held');
+      out.push(held);
+      askDetail(subject, held);
+    } else {
+      out.push(el('p', 'note', 'Only a kind and a place can be said of a site the seed gives. The save holds nothing of it to count until the world generates it.'));
     }
 
     const land = [];
@@ -606,8 +627,254 @@
     view.body.replaceChildren(...out);
   }
 
-  // The biome is the one thing asked of the server for the sheet, and the
-  // answer is for the sheet that asked.
+  // --- what the save holds in one structure ------------------------------
+  //
+  // Asked of the server one structure at a time, when its sheet opens. Every
+  // value is checked for what it should be and set as text: a name tag is a
+  // player's, and a count from a damaged world is whatever it says.
+
+  const FOUND_BY = { trial_chamber: 'trial spawners and vaults', stronghold: 'of its portal room: the silverfish spawner, or the end portal once lit' };
+  const LEVELS = ['novice', 'apprentice', 'journeyman', 'expert', 'master'];
+  // The block that gives each profession, which is what a job site of it
+  // is. The village's record names the profession.
+  const WORKSTATIONS = {
+    armorer: 'Blast furnace', butcher: 'Smoker', cartographer: 'Cartography table', cleric: 'Brewing stand', farmer: 'Composter',
+    fisherman: 'Barrel', fletcher: 'Fletching table', leatherworker: 'Cauldron', librarian: 'Lectern', mason: 'Stonecutter',
+    shepherd: 'Loom', toolsmith: 'Smithing table', weaponsmith: 'Grindstone',
+  };
+  const NOT_RECORDED = 'Not recorded by the game';
+  const NONE_SAVED = 'None in the save';
+  // How many spawners a sheet gives the place of.
+  const MAX_PLACES = 12;
+  const DETAIL_FRESH_MS = 60_000;
+
+  const text = (v) => (typeof v === 'string' ? v : '');
+  const listOf = (v) => (Array.isArray(v) ? v.filter((item) => item && typeof item === 'object') : []);
+  const some = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
+
+  // A length of time to the unit worth saying it in.
+  function about(seconds) {
+    if (seconds < 90) return 'under 2 min';
+    if (seconds < 2 * 3600) return `${fmt(Math.round(seconds / 60))} min`;
+    if (seconds < 2 * 86_400) return `${fmt(Math.round(seconds / 3600))} h`;
+    return `${fmt(Math.round(seconds / 86_400))} days`;
+  }
+
+  // Counted things, each with its picture where the game has one. In
+  // lines where each is a sentence of its own.
+  function tally(rows, lines) {
+    const list = el('ul', lines ? 'tally lines' : 'tally');
+    for (const row of rows) {
+      const item = el('li');
+      if (row.picture) item.append(icons.picture(row.picture));
+      item.append(el('span', '', row.text));
+      list.append(item);
+    }
+    return list;
+  }
+
+  const mobPicture = (kind) => (/^[a-z0-9_]{1,64}$/.test(kind) ? `mob/${kind}` : '');
+
+  function standingOf(standing) {
+    const state = standing && typeof standing === 'object' ? text(standing.state) : '';
+    if (state === 'known' && Number.isFinite(standing.value)) {
+      return `${standing.value > 0 ? '+' : ''}${fmt(standing.value)}. The game’s own number for what this village thinks of you: it starts at 0, rises as you trade here and falls when you hurt a villager.`;
+    }
+    if (state === 'none') return 'None: this village has no record of you.';
+    return 'Not known. The map learns which of the world’s players you are by seeing you in the game, and has not since it last started.';
+  }
+
+  function villageParts(s, v, standing) {
+    const out = [];
+    const professions = listOf(v.professions).filter((p) => count(p.count) > 0).map((p) => {
+      const name = text(p.profession);
+      const levels = Array.isArray(p.levels) ? LEVELS.map((level, i) => [level, count(p.levels[i])]).filter(([, n]) => n > 0) : [];
+      const at = levels.length > 0 ? `: ${levels.map(([level, n]) => `${fmt(n)} ${level}`).join(', ')}` : '';
+      return { text: name ? `${names.tidy(name)} ${fmt(p.count)}${at}` : `No profession ${fmt(p.count)} (unemployed or nitwit: the record does not say which)` };
+    });
+    const listed = (n, of) => (Number.isFinite(of) && of !== n ? `${fmt(n)} in the save, of the ${fmt(of)} it lists` : `${fmt(n)} in the save`);
+    out.push(...facts('Its villagers, from their own records', [
+      ['By profession', professions.length > 0 ? tally(professions, true) : 'No grown villager of it is in the save'],
+      ['Babies', count(v.babies) > 0 ? fmt(v.babies) : 'None'],
+      count(v.missing) > 0 ? ['Not in the save', `${fmt(v.missing)} it lists, with no record of their own`] : null,
+      count(v.notLookedUp) > 0 ? ['Not looked up', `${fmt(v.notLookedUp)} more than the map looks up`] : null,
+      ['Iron golems', listed(count(v.golems), s.village.golems)],
+      ['Cats', listed(count(v.cats), s.village.cats)],
+    ]));
+    const sites = listOf(v.jobSites).filter((j) => count(j.count) > 0).map((j) => {
+      const name = text(j.profession);
+      const block = Object.hasOwn(WORKSTATIONS, name) ? WORKSTATIONS[name] : '';
+      return { text: block ? `${block} (${names.tidy(name).toLowerCase()}) ${fmt(j.count)}` : `${names.tidy(name)} ${fmt(j.count)}` };
+    });
+    out.push(...facts('Its job sites', [['Claimed, by block', sites.length > 0 ? tally(sites) : 'None claimed']]));
+    const raid = v.raid && typeof v.raid === 'object' ? v.raid : null;
+    const raided = raid
+      ? `Wave ${fmt(count(raid.wave))} of ${fmt(count(raid.waves))}, ${some(count(raid.raiders), 'raider', 'raiders')} listed${Number.isFinite(raid.idleSeconds) ? `, last run ${about(raid.idleSeconds)} of game time before the snapshot` : ''}. The game keeps this after a raid is over, so it is how far one got and not that one is on.`
+      : 'No raid record';
+    out.push(...facts('What the game keeps of it', [
+      ['Last run by the game', Number.isFinite(v.idleSeconds) ? `${about(v.idleSeconds)} of game time before the snapshot` : NOT_RECORDED],
+      ['Raid', raided],
+      ['Your standing', standingOf(standing)],
+      ['Players it has met', fmt(count(v.met))],
+    ]));
+    return out;
+  }
+
+  // What is said of one kind that is not said of every kind.
+  function kindParts(s, d, mobs, standing) {
+    const of = (type) => count((mobs.find((m) => m.kind === type) || {}).count);
+    const saved = (n) => (n > 0 ? `${fmt(n)} in the save` : NONE_SAVED);
+    const blocks = d.blocks && typeof d.blocks === 'object' ? d.blocks : {};
+    const block = (name) => (Object.hasOwn(blocks, name) ? count(blocks[name]) : 0);
+    const spawners = listOf(d.spawnerCounts);
+    const spawning = (type, trial) => spawners.filter((c) => c.mob === type && Boolean(c.trial) === trial).reduce((n, c) => n + count(c.count), 0);
+    switch (s.kind) {
+      case 'village':
+        return d.village && typeof d.village === 'object' && s.village ? villageParts(s, d.village, standing) : [];
+      case 'monument': {
+        const elders = Number.isFinite(d.elders) ? count(d.elders) : null;
+        const said = elders === null ? NOT_RECORDED
+          : elders === 0 ? 'None in the save inside its box. A monument is generated with three.'
+            : elders <= 3 ? `${fmt(elders)} of the three a monument is generated with ${elders === 1 ? 'is' : 'are'} in the save inside its box`
+              : `${fmt(elders)} in the save`;
+        return facts('Its guardians', [['Elder guardians', said], ['Guardians', saved(of('guardian'))]]);
+      }
+      case 'outpost': {
+        const captains = count((mobs.find((m) => m.kind === 'pillager') || {}).captains);
+        return [...facts('Its pillagers', [
+          ['Pillagers', of('pillager') > 0 ? `${saved(of('pillager'))}${captains > 0 ? `, ${fmt(captains)} of them ${captains === 1 ? 'a captain' : 'captains'}` : ''}` : NONE_SAVED],
+          ['Allays', saved(of('allay'))],
+          ['Iron golems', saved(of('iron_golem'))],
+        ]), el('p', 'note', 'The game saves a mob with the chunk it stood in. Pillagers that had wandered off, or were not there when the chunk was last saved, are not in its box to count.')];
+      }
+      case 'witch_hut':
+        return facts('Its witch', [['Witch', saved(of('witch'))], ['Cat', saved(of('cat'))], ['Cauldron', block('cauldron') > 0 ? 'There' : 'None in the save']]);
+      case 'fortress':
+        return facts('Its mobs and spawners', [
+          ['Blazes', saved(of('blaze'))],
+          ['Wither skeletons', saved(of('wither_skeleton'))],
+          ['Blaze spawners', spawning('blaze', false) > 0 ? `${fmt(spawning('blaze', false))}, listed below` : 'None in the save: none generated in the part recorded, or broken'],
+        ]);
+      case 'stronghold': {
+        const portal = block('end_portal');
+        return facts('Its portal room', [
+          ['End portal', portal >= 9 ? 'Lit: its nine portal blocks are in the save' : portal > 0 ? `${some(portal, 'portal block', 'portal blocks')} in the save` : 'Not lit when the world was saved'],
+          ['Silverfish spawner', spawning('silverfish', false) > 0 ? 'There, listed below' : 'None in the save: broken since the room was found'],
+        ]);
+      }
+      case 'trial_chamber': {
+        const trials = spawners.filter((c) => c.trial === true && count(c.count) > 0)
+          .map((c) => ({ picture: mobPicture(text(c.mob)), text: `${text(c.mob) === 'unknown' ? 'Not set' : names.entity(text(c.mob))} ${fmt(c.count)}` }));
+        return facts('Its trials', [
+          ['Trial spawners', trials.length > 0 ? tally(trials) : 'None in the save'],
+          ['Vaults', `${fmt(block('vault'))}, and ${fmt(block('ominous_vault'))} ominous`],
+        ]);
+      }
+      default:
+        return [];
+    }
+  }
+
+  // Everything the answer holds, as the parts of the sheet it becomes.
+  function savedParts(s, data) {
+    const d = data && data.detail && typeof data.detail === 'object' ? data.detail : null;
+    if (!d) return [el('h3', '', 'In the save inside its box'), el('p', 'note', 'What the save holds here could not be worked out at the last snapshot.')];
+    const mobs = listOf(d.mobs).filter((m) => typeof m.kind === 'string' && count(m.count) > 0);
+    const out = kindParts(s, d, mobs, data.standing);
+
+    const counted = mobs.map((m) => ({
+      picture: mobPicture(m.kind),
+      text: `${names.entity(m.kind)} ${fmt(m.count)}${count(m.babies) > 0 ? ` (${fmt(m.babies)} young)` : ''}`,
+    }));
+    if (count(d.mobKindsMore) > 0) counted.push({ text: `and ${some(d.mobKindsMore, 'more type', 'more types')}` });
+    const named = listOf(d.named).filter((m) => text(m.name) !== '').map((m) => {
+      const job = text(m.profession) ? `, ${names.tidy(m.profession).toLowerCase()}${Number.isFinite(m.level) && LEVELS[m.level - 1] ? `, ${LEVELS[m.level - 1]}` : ''}` : '';
+      return { picture: mobPicture(text(m.kind)), text: `${m.name} (${names.kindOf(text(m.kind), m.baby === true)}${job})` };
+    });
+    if (count(d.namedMore) > 0) named.push({ text: `and ${fmt(d.namedMore)} more` });
+
+    const spawners = listOf(d.spawnerCounts).filter((c) => count(c.count) > 0).map((c) => ({
+      picture: mobPicture(text(c.mob)),
+      text: `${text(c.mob) === 'unknown' ? 'Not set' : names.entity(text(c.mob))}${c.trial === true ? ' (trial)' : ''} ${fmt(c.count)}`,
+    }));
+    const placed = listOf(d.spawners).filter((p) => [p.x, p.y, p.z].every(Number.isFinite));
+    const places = placed.slice(0, MAX_PLACES).map((p) => ({
+      text: `X ${fmt(p.x)}, Y ${fmt(p.y)}, Z ${fmt(p.z)} · ${text(p.mob) === 'unknown' ? 'not set' : names.entity(text(p.mob))}${p.trial === true ? ' (trial)' : ''}`,
+    }));
+    const unplaced = placed.length - places.length + count(d.spawnersMore);
+    if (unplaced > 0) places.push({ text: `and ${fmt(unplaced)} more` });
+
+    const containers = listOf(d.containers).map((c) => {
+      const parts = [
+        count(c.unopened) > 0 ? `${fmt(c.unopened)} unopened` : '',
+        count(c.holding) > 0 ? `${fmt(c.holding)} with something in ${c.holding === 1 ? 'it' : 'them'}` : '',
+        count(c.empty) > 0 ? `${fmt(c.empty)} empty` : '',
+      ].filter(Boolean);
+      const kind = text(c.kind);
+      const name = kind === 'pot' ? 'Decorated pot' : names.container(kind);
+      return parts.length > 0 ? { picture: `container/${kind}`, text: `${name}: ${parts.join(', ')}` } : null;
+    }).filter(Boolean);
+
+    out.push(...facts('In the save inside its box', [
+      ['Mobs', counted.length > 0 ? tally(counted) : NONE_SAVED],
+      named.length > 0 ? ['Named', tally(named, true)] : null,
+      ['Spawners', spawners.length > 0 ? tally(spawners) : NONE_SAVED],
+      places.length > 0 ? ['Where they are', tally(places, true)] : null,
+      ['Containers', containers.length > 0 ? tally(containers, true) : NONE_SAVED],
+    ]));
+    if (containers.length > 0) {
+      out.push(el('p', 'note', 'Unopened: the game rolls a container’s loot the first time it is opened, and has not for these. One with something in it, or empty, was opened or was put there by a player; its record does not say which. What a container holds is not read.'));
+    }
+    const at = Date.parse(text(data.at));
+    const ago = Number.isFinite(at) ? Math.max(0, Math.round((Date.now() - at) / 60_000)) : null;
+    const when = ago === null ? '' : ago < 1 ? ', under a minute ago' : ago < 120 ? `, ${fmt(ago)} min ago` : `, ${fmt(Math.round(ago / 60))} h ago`;
+    out.push(el('p', 'note', `Read from the world’s save as of the last snapshot${when}. The game saves a mob with its chunk, so one that has since moved, died or despawned is still counted until the next.`));
+    return out;
+  }
+
+  // The last answer, kept for a moment: the sheet is filled again whenever
+  // the names change, and that is not a reason to ask again.
+  let detailHeld = null;
+  let detailAsk = null;
+
+  async function askDetail(subject, into) {
+    if (detailAsk) detailAsk.abort();
+    detailAsk = null;
+    const key = `${shown}~${linkOf(subject)}`;
+    const show = (data) => {
+      into.replaceChildren(...savedParts(subject.recorded, data));
+      icons.paint(into);
+    };
+    if (detailHeld && detailHeld.key === key && Date.now() - detailHeld.at < DETAIL_FRESH_MS) {
+      show(detailHeld.data);
+      return;
+    }
+    const mine = new AbortController();
+    detailAsk = mine;
+    into.replaceChildren(el('h3', '', 'In the save inside its box'), el('p', 'note', 'Reading what the save holds here…'));
+    const at = middle(subject);
+    let said = 'What the save holds here could not be fetched. Open it again to try once more.';
+    try {
+      const res = await fetch(`api/structures/detail?dimension=${encodeURIComponent(shown)}&kind=${encodeURIComponent(subject.recorded.kind)}&x=${at.x}&z=${at.z}`, { cache: 'no-store', signal: mine.signal });
+      if (detailAsk !== mine) return;
+      if (res.ok) {
+        const data = await res.json();
+        if (detailAsk !== mine) return;
+        detailHeld = { key, at: Date.now(), data };
+        show(data);
+        return;
+      }
+      // A server from before this was asked for, or a structure that has
+      // gone since the list was fetched.
+      if (res.status === 404) said = 'The map has nothing more on this one: it is not among the structures of the last snapshot.';
+    } catch {
+      if (detailAsk !== mine) return;
+    }
+    into.replaceChildren(el('h3', '', 'In the save inside its box'), el('p', 'note', said));
+  }
+
+  // The biome is the one other thing asked of the server for the sheet,
+  // and the answer is for the sheet that asked.
   async function askBiome(at, into) {
     if (biomeAsk) biomeAsk.abort();
     const mine = new AbortController();
@@ -700,6 +967,8 @@
       open = null;
       if (biomeAsk) biomeAsk.abort();
       biomeAsk = null;
+      if (detailAsk) detailAsk.abort();
+      detailAsk = null;
       if (app.link && app.link.get().startsWith('structure~')) app.link.set('');
     });
     view.go.addEventListener('click', () => {
@@ -745,6 +1014,10 @@
       open = again;
       fill(again);
     }
+  });
+  // A picture that arrived while the sheet was open.
+  document.addEventListener('mcmap:pictures', () => {
+    if (sheet && view.dialog.open) icons.paint(view.body);
   });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
