@@ -636,7 +636,11 @@ counts, and `Click for details`. The sheet says:
 
 Go to fits a recorded structure's box in the view, or centres on a
 predicted site; Copy coordinates copies the centre; Copy link copies an
-address that reopens the sheet. The address names an open sheet in a fifth
+address that reopens the sheet. One chosen in the search before its
+dimension's structures have arrived opens when they do, within eight
+seconds; if they fail to arrive, or the map is taken to another dimension
+first, it is dropped and the page says so, rather than open later over
+something else. The address names an open sheet in a fifth
 part after the view, `structure~<kind>~<r or p>~<x>~<z>`, which the page
 keeps while the sheet is open and drops when it shuts. The sheet is the
 browser's modal dialog: the focus stays in it, Escape, Close and a click
@@ -1064,7 +1068,12 @@ rings the spot for twenty seconds; a biome hit also turns the overlay on
 with that biome picked out. A player or a named mob moves, so choosing one
 opens the card about it instead of ringing where it was: a player and a
 loaded mob are tracked live and can be followed, and a mob that is not
-loaded is shown at its last saved position, said as that. A hit says
+loaded is shown at its last saved position, said as that. The search asks
+the server, which has every dimension's newest picture; the page has only
+the last frame it drew, which is older while it is paused or paced slowly.
+So a player the search found who is not in that frame is shown where the
+search put them, with `This position is as of the search`, and is called
+no longer tracked only once a frame drawn since the search lacks them. A hit says
 `live` or `last saved` before its position. The list says so in words when nothing matched,
 when there were more hits than shown, and when the waypoints could not be
 read. Under 900 pixels wide it opens under the bar and pushes the map down,
@@ -1387,7 +1396,8 @@ where it was.
 Each key works the control the page already has, as a click on it would,
 so a shortcut cannot do what the page does not offer; one that can do
 nothing just now says why in a line over the map. None fires while the
-focus is in a text box, a number box or a menu, while the list itself is
+focus is in a text box, a number box or a menu (a checkbox or a button
+takes no text, and does not silence them), while the list itself is
 open, with Ctrl, Alt or the command key held, or while logged out. They
 are single keys, which a screen reader's own single keys and speech input
 can collide with, so the list has a switch that turns them all off, kept
@@ -1397,10 +1407,14 @@ focused, zooming and the arrow keys are Leaflet's, as before.
 **Shorthand in the search box.** `120 -340`, `120, -340` or `120 64 -340`
 is listed as those coordinates and goes to them; `chunk 7 -21` is that
 chunk, and choosing it goes there, pins it and turns the grid on; `spawn`
-is the world spawn alone; `me` is the logged-in player, while online; and
-`@name` looks among the players online and nothing else. Coordinates and a
-chunk are answered by the page; the other three ask `/api/search` for one
-`kind`. None of them is a command for the game, and the page writes none.
+lists the world spawn first; `me` lists the logged-in player first, while
+online; and `@name` looks among the players online and nothing else. Only
+`@name` is the whole question: whatever else was typed is also looked up as
+the name it may be, and those hits are listed beneath, so a container
+called Spawn farm is still found by `spawn`. Coordinates and a chunk are
+answered by the page; the other three ask `/api/search` for one `kind`.
+The `S` and `M` keys ask for themselves and leave the box's list as it
+was. None of them is a command for the game, and the page writes none.
 
 **The footer.** Where the pointer is, and the biome there, are on the
 left. On the right is one group saying how current the map is, in two parts
