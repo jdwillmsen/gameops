@@ -507,6 +507,9 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   user-select: all;
 }
 
+.card li button { margin-left: 0.4rem; }
+.copied { margin-left: 0.4rem; color: var(--accent); }
+
 .note { color: var(--dim); min-height: 1.5em; }
 .note.problem { color: #f0a35e; }
 

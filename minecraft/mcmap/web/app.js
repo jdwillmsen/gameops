@@ -50,6 +50,8 @@
     logout: document.getElementById('logout'),
     login: document.getElementById('login'),
     loginCommand: document.getElementById('login-command'),
+    loginCopy: document.getElementById('login-copy'),
+    loginCopied: document.getElementById('login-copied'),
     loginNote: document.getElementById('login-note'),
     loginNew: document.getElementById('login-new'),
   };
@@ -277,6 +279,7 @@
     clearInterval(loginTimer);
     lock(true);
     el.loginNew.hidden = true;
+    offerCopy(false);
     let started;
     try {
       const res = await fetch('auth/start', { method: 'POST' });
@@ -288,6 +291,7 @@
       return;
     }
     el.loginCommand.textContent = `!map ${started.code}`;
+    offerCopy(true);
     note('Waiting for you to type the code in game…');
     loginTimer = setInterval(pollLogin, 2000);
   }
@@ -309,10 +313,42 @@
       return;
     }
     el.loginCommand.textContent = '!map';
+    offerCopy(false);
     note('That code expired before it was used.', true);
     el.loginNew.hidden = false;
   }
 
+  // Offered only while there is a whole command to copy: "!map" alone is
+  // not one the game accepts.
+  let copiedTimer = null;
+  function offerCopy(on) {
+    if (!el.loginCopy) return;
+    el.loginCopy.hidden = !on;
+    clearTimeout(copiedTimer);
+    el.loginCopied.textContent = '';
+  }
+
+  // Copies the command exactly as the page shows it, which is exactly as
+  // it has to be typed.
+  async function copyCommand() {
+    let said = 'Copied';
+    try {
+      await navigator.clipboard.writeText(el.loginCommand.textContent);
+    } catch {
+      // No clipboard to write to, as on a page not served securely. The
+      // command on the page is the same text, so it is selected and
+      // copied the old way, or left selected for the viewer to copy.
+      getSelection().selectAllChildren(el.loginCommand);
+      let done = false;
+      try { done = document.execCommand('copy'); } catch { /* left selected */ }
+      if (!done) said = 'Selected: copy it';
+    }
+    el.loginCopied.textContent = said;
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => { el.loginCopied.textContent = ''; }, 4000);
+  }
+
+  if (el.loginCopy) el.loginCopy.addEventListener('click', copyCommand);
   el.loginNew.addEventListener('click', startLogin);
   el.logout.addEventListener('click', async () => {
     await fetch('auth/logout', { method: 'POST' });

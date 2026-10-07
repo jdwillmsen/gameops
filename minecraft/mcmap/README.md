@@ -1358,6 +1358,10 @@ visitor plays on the server.
 1. The page asks `POST /auth/start` and shows the six-character code it gets
    back. The secret that will collect the login is set as an `HttpOnly`,
    `SameSite=Strict` cookie that script cannot read.
+   Beside the command is Copy command, which puts the whole of it on the
+   clipboard as it has to be typed, `!map` and the code, and says Copied;
+   where there is no clipboard to write to the command is selected
+   instead and the page says so. It is offered only while there is a code.
 2. The player types `!map <code>` in game chat. The agent, which sees the
    chat packet and so the sender's XUID, reports it to
    `POST /internal/v1/claims`.
