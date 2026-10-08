@@ -617,3 +617,31 @@ func TestSearchListsAMobThatChangedDimensionOnce(t *testing.T) {
 		t.Errorf("ember:\n got %q\nwant %q", said, want)
 	}
 }
+
+// A stronghold is found by a search only for a viewer who has asked to be
+// shown strongholds: a name typed into a box is not that.
+func TestSearchListsAStrongholdOnlyWhenAskedTo(t *testing.T) {
+	s, _ := withEverything(t)
+	source := surveyed()
+	layer := source.survey.Layers[chunks.Overworld]
+	layer.Recorded = append(layer.Recorded,
+		structures.Structure{Kind: structures.Stronghold, Box: structures.Box{MinX: 900, MinY: 30, MinZ: -700, MaxX: 902, MaxY: 30, MaxZ: -698}, Evidence: 9},
+		structures.Structure{Kind: structures.TrialChamber, Box: structures.Box{MinX: 1200, MinY: -30, MinZ: 300, MaxX: 1280, MaxY: -10, MaxZ: 380}, Evidence: 30})
+	source.survey.Layers[chunks.Overworld] = layer
+	s.Structures = source
+	c := session(s, steve)
+	for _, q := range []string{"stronghold", "strong", "o"} {
+		for _, h := range search(t, s, q, c).Hits {
+			if h.Detail == "stronghold" {
+				t.Errorf("%q found a stronghold nobody asked to be shown: %+v", q, h)
+			}
+		}
+	}
+	if got := search(t, s, "trial", c); len(got.Hits) != 1 || got.Hits[0].Detail != "trial_chamber" {
+		t.Errorf("trial: %s", describe(got))
+	}
+	got := decodeBody[searchAnswer](t, do(s.Handler(), "GET", "/api/search?q=stronghold&dimension=overworld&x=0&z=0&strongholds=1", "", []*http.Cookie{c}))
+	if len(got.Hits) != 1 || got.Hits[0].Detail != "stronghold" || got.Hits[0].X != 901 {
+		t.Errorf("asked to be shown: %s", describe(got))
+	}
+}

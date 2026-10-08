@@ -304,6 +304,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	z, okZ := blockParam(q, "z")
 	limit, okL := limitParam(q, defaultSearchHits, maxSearchHits)
 	only := q.Get("kind")
+	strongholds := q.Get("strongholds") == "1"
 	if query == "" || utf8.RuneCountInString(query) > maxSearchQuery || !okD || !okX || !okZ || !okL ||
 		(only != "" && !slices.Contains(searchKinds, only)) {
 		http.Error(w, "a search needs q, of 1 to 64 characters, and the dimension, x and z to measure from; kind, if given, is one kind of hit", http.StatusBadRequest)
@@ -377,6 +378,12 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if s.Structures != nil && (wants(hitStructure) || wants(hitSpawn)) {
 			if survey, ok := s.Structures.Last(); ok {
 				for _, st := range survey.Layers[d].Recorded {
+					// Where a stronghold is, is the one thing on this map
+					// a player sets out to find for themselves. It is
+					// listed only for a viewer who has turned its row on.
+					if st.Kind == structures.Stronghold && !strongholds {
+						continue
+					}
 					if name := structureNames[st.Kind]; matches(name, string(st.Kind), names.Structure(string(st.Kind))) {
 						add(searchHit{Kind: hitStructure, Name: name, Detail: string(st.Kind),
 							X: st.MinX + (st.MaxX-st.MinX)/2, Y: height(st.MinY), Z: st.MinZ + (st.MaxZ-st.MinZ)/2}, d)

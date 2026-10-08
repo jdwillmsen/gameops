@@ -262,7 +262,9 @@
     if (!dimension) return null;
     const c = map.getCenter();
     const address = `api/search?q=${encodeURIComponent(query)}&dimension=${encodeURIComponent(dimension)}`
-      + `&x=${Math.floor(c.lng)}&z=${Math.floor(c.lat)}&limit=${LIMIT}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
+      + `&x=${Math.floor(c.lng)}&z=${Math.floor(c.lat)}&limit=${LIMIT}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`
+      // Strongholds are listed only for a viewer who has their row on.
+      + (app.structures && app.structures.shows && app.structures.shows('stronghold') ? '&strongholds=1' : '');
     const res = await fetch(address, { cache: 'no-store', signal: mine.signal });
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();

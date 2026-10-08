@@ -44,6 +44,10 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		"const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] : '';",
 		// Off for a viewer who turned the predicted ones off.
 		"const enabled = id !== 'candidate' || rows.get('predicted').enabled;",
+		// Off for everybody until they ask: a stronghold is for finding.
+		"const OPT_IN = new Set(['stronghold']);",
+		"enabled: enabled && !OPT_IN.has(id)",
+		"shows: (kind) => on('recorded') && on(kind),",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("structures.js no longer has %s", need)
@@ -57,6 +61,8 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 	}
 	search := usesNoMarkupSink(t, "search.js")
 	for _, need := range []string{
+		// And listed by a search only for a viewer with that row on.
+		"app.structures.shows('stronghold') ? '&strongholds=1' : ''",
 		"const UNSURE = { predicted: 'predicted', candidate: 'possible site' };",
 		"return Object.hasOwn(UNSURE, hit.certainty) ? `${what} (${UNSURE[hit.certainty]})` : what;",
 	} {
