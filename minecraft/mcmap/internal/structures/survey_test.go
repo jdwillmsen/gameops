@@ -172,11 +172,11 @@ func listing(t *testing.T, dir string) []string {
 
 func TestTake_ReadsRecordedStructuresByDimension(t *testing.T) {
 	dir := newWorld(t).
-		put(realFortressChunk, TagSpawnAreas, unhex(t, realFortressRecord)).
-		put(realHutChunk, TagSpawnAreas, unhex(t, realHutRecord)).
+		put(fortressChunk, TagSpawnAreas, fortressRecord).
+		put(hutChunk, TagSpawnAreas, hutRecord).
 		// Records that are not spawn areas, and one that only looks like a
 		// chunk's.
-		put(realHutChunk, 0x2c, []byte{41}).
+		put(hutChunk, 0x2c, []byte{41}).
 		put(chunks.Pos{Dim: chunks.End, X: 1, Z: 1}, 0x2f, []byte("subchunk")).
 		write()
 	before := listing(t, dir)
@@ -189,11 +189,11 @@ func TestTake_ReadsRecordedStructuresByDimension(t *testing.T) {
 	if got.Areas != 9 || got.Malformed != 0 || got.Unknown != 0 || got.OverLimit != 0 {
 		t.Errorf("areas %d, malformed %d, unknown %d, over limit %d", got.Areas, got.Malformed, got.Unknown, got.OverLimit)
 	}
-	wantNether := []Structure{{Fortress, Box{112, 51, -1145, 127, 72, -1137}, 8, nil, 0}}
+	wantNether := []Structure{{Kind: Fortress, Box: fortressBox, Areas: 8}}
 	if nether := got.Layers[chunks.Nether].Recorded; !slices.Equal(nether, wantNether) {
 		t.Errorf("nether = %+v, want %+v", nether, wantNether)
 	}
-	wantOverworld := []Structure{{WitchHut, Box{-1216, 85, 1712, -1210, 91, 1720}, 1, nil, 0}}
+	wantOverworld := []Structure{{Kind: WitchHut, Box: hutBox, Areas: 1}}
 	if overworld := got.Layers[chunks.Overworld].Recorded; !slices.Equal(overworld, wantOverworld) {
 		t.Errorf("overworld = %+v, want %+v", overworld, wantOverworld)
 	}
@@ -424,10 +424,10 @@ func TestTake_WithoutLevelDatStillReadsWhatIsRecorded(t *testing.T) {
 
 func TestTake_CountsWhatItCannotReadAndKeepsTheRest(t *testing.T) {
 	good := Box{160, 64, 160, 175, 85, 175}
-	whole := unhex(t, realFortressRecord)
+	whole := fortressRecord
 	dir := newWorld(t).
 		structure(chunks.Overworld, outpostByte, good).
-		put(realFortressChunk, TagSpawnAreas, whole[:len(whole)-3]).
+		put(fortressChunk, TagSpawnAreas, whole[:len(whole)-3]).
 		put(chunks.Pos{X: 20, Z: 20}, TagSpawnAreas, record(Box{320, 64, 320, 335, 85, 335}, byte(9), Box{335, 64, 320, 320, 85, 335}, outpostByte)).
 		write()
 	got, err := surveyor(t, nil).Take(context.Background(), dir, surveyedAt)
@@ -437,7 +437,7 @@ func TestTake_CountsWhatItCannotReadAndKeepsTheRest(t *testing.T) {
 	if got.Areas != 1 || got.Malformed != 2 || got.Unknown != 1 {
 		t.Errorf("areas %d, malformed %d, unknown %d; want 1, 2, 1", got.Areas, got.Malformed, got.Unknown)
 	}
-	if want := []Structure{{Outpost, good, 1, nil, 0}}; !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
+	if want := []Structure{{Kind: Outpost, Box: good, Areas: 1}}; !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
 		t.Errorf("recorded = %+v, want %+v", got.Layers[chunks.Overworld].Recorded, want)
 	}
 	if n := len(got.Layers[chunks.Nether].Recorded); n != 0 {

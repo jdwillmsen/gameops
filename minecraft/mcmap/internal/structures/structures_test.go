@@ -2,43 +2,42 @@ package structures
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"reflect"
 	"testing"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
 
-// Two records exactly as the FWB world held them on 2026-10-05 (game
-// 1.26.52.3): the eight fortress areas of nether chunk 7, -72, and the one
-// witch hut of overworld chunk -76, 107. Only these two structures are
-// quoted: every recorded position narrows down the seed that produced it.
-const (
-	realFortressRecord = "08000000" +
-		"7d000000330000008ffbffff7f000000390000008ffbffff01" +
-		"70000000420000008cfbffff72000000480000008ffbffff01" +
-		"73000000420000008cfbffff77000000480000008ffbffff01" +
-		"7d000000330000008afbffff7f000000390000008efbffff01" +
-		"78000000420000008cfbffff7c000000480000008ffbffff01" +
-		"780000004200000087fbffff7c000000480000008bfbffff01" +
-		"7d0000004200000087fbffff7f000000480000008bfbffff01" +
-		"7d000000420000008cfbffff7f000000480000008ffbffff01"
-	realHutRecord = "0100000040fbffff55000000b006000046fbffff5b000000b806000002"
-)
-
+// Every position in this package's tests is made up. Where a structure is
+// follows from the seed, so a real structure's box, a real chunk's number
+// or a record cut from a real world is a clue to the seed of the world it
+// came from, and a public repository is no place for one. A fixture is
+// built here, by the helpers below, in the layout the game writes (game
+// 1.26.52.3), with small round numbers that stand nowhere near anything.
+//
+// The two records most tests start from: the eight areas a fortress has in
+// one nether chunk, and the one area of a witch hut.
 var (
-	realFortressChunk = chunks.Pos{Dim: chunks.Nether, X: 7, Z: -72}
-	realHutChunk      = chunks.Pos{Dim: chunks.Overworld, X: -76, Z: 107}
-)
+	fortressChunk = chunks.Pos{Dim: chunks.Nether, X: 2, Z: -3}
+	hutChunk      = chunks.Pos{Dim: chunks.Overworld, X: -4, Z: 5}
 
-func unhex(t *testing.T, s string) []byte {
-	t.Helper()
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		t.Fatal(err)
+	fortressAreas = []Box{
+		{40, 50, -48, 44, 54, -45}, {32, 60, -40, 35, 66, -36}, {36, 60, -40, 39, 66, -36}, {44, 50, -44, 47, 54, -41},
+		{40, 60, -40, 43, 66, -36}, {40, 60, -47, 43, 66, -42}, {45, 60, -47, 47, 66, -42}, {45, 60, -40, 47, 66, -36},
 	}
-	return b
-}
+	// fortressBox is the one box those areas join into.
+	fortressBox = Box{32, 50, -48, 47, 66, -36}
+	hutBox      = Box{-64, 70, 80, -57, 75, 86}
+
+	fortressRecord = func() []byte {
+		var areas []any
+		for _, box := range fortressAreas {
+			areas = append(areas, box, fortressByte)
+		}
+		return record(areas...)
+	}()
+	hutRecord = record(hutBox, hutByte)
+)
 
 // record builds a spawn area record from boxes and kind bytes.
 func record(areas ...any) []byte {
@@ -60,23 +59,22 @@ const (
 	outpostByte  byte = 5
 )
 
-func TestDecode_RealRecords(t *testing.T) {
-	got, unknown, malformed, err := decode(realFortressChunk, unhex(t, realFortressRecord))
+func TestDecode_ReadsRecordsAsTheGameWritesThem(t *testing.T) {
+	got, unknown, malformed, err := decode(fortressChunk, fortressRecord)
 	if err != nil || unknown != 0 || malformed != 0 {
 		t.Fatalf("fortress record: unknown %d, malformed %d, err %v", unknown, malformed, err)
 	}
-	if len(got) != 8 {
-		t.Fatalf("fortress record gave %d areas, want 8", len(got))
+	if len(got) != len(fortressAreas) {
+		t.Fatalf("fortress record gave %d areas, want %d", len(got), len(fortressAreas))
 	}
-	if want := (piece{Fortress, Box{125, 51, -1137, 127, 57, -1137}}); got[0] != want {
-		t.Errorf("first area = %+v, want %+v", got[0], want)
-	}
-	if want := (piece{Fortress, Box{125, 66, -1140, 127, 72, -1137}}); got[7] != want {
-		t.Errorf("last area = %+v, want %+v", got[7], want)
+	for i, want := range fortressAreas {
+		if got[i] != (piece{Fortress, want}) {
+			t.Errorf("area %d = %+v, want %+v", i, got[i], want)
+		}
 	}
 
-	got, _, _, err = decode(realHutChunk, unhex(t, realHutRecord))
-	if want := []piece{{WitchHut, Box{-1216, 85, 1712, -1210, 91, 1720}}}; err != nil || !reflect.DeepEqual(got, want) {
+	got, _, _, err = decode(hutChunk, hutRecord)
+	if want := []piece{{WitchHut, hutBox}}; err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("hut record = %+v, %v; want %+v", got, err, want)
 	}
 }
@@ -100,7 +98,7 @@ func TestDecode_KnowsEveryKindTheGameRecords(t *testing.T) {
 // A record whose length and count disagree gives no way to find its areas,
 // so nothing is taken from it.
 func TestDecode_RefusesARecordThatIsNotWhole(t *testing.T) {
-	whole := unhex(t, realFortressRecord)
+	whole := fortressRecord
 	huge := binary.LittleEndian.AppendUint32(nil, maxAreasPerRecord+1)
 	huge = append(huge, make([]byte, (maxAreasPerRecord+1)*areaSize)...)
 	for name, value := range map[string][]byte{
@@ -112,11 +110,11 @@ func TestDecode_RefusesARecordThatIsNotWhole(t *testing.T) {
 		"count of -1":      {0xff, 0xff, 0xff, 0xff},
 		"over the bound":   huge,
 	} {
-		if got, _, _, err := decode(realFortressChunk, value); err == nil {
+		if got, _, _, err := decode(fortressChunk, value); err == nil {
 			t.Errorf("%s: decoded %d areas, want a refusal", name, len(got))
 		}
 	}
-	if got, _, _, err := decode(realFortressChunk, []byte{0, 0, 0, 0}); err != nil || len(got) != 0 {
+	if got, _, _, err := decode(fortressChunk, []byte{0, 0, 0, 0}); err != nil || len(got) != 0 {
 		t.Errorf("a record of no areas: %d areas, %v", len(got), err)
 	}
 }
@@ -149,19 +147,19 @@ func TestDecode_LeavesOutAnAreaItCannotPlace(t *testing.T) {
 }
 
 func TestAssemble_JoinsAStructureCutAtChunkEdges(t *testing.T) {
-	// A monument's footprint, 27 to 84 on both axes, as four chunks of it
+	// The corner of a monument's footprint as the four chunks it lies in
 	// would record it, and a second monument well away.
 	pieces := []piece{
-		{Monument, Box{27, 39, 27, 31, 61, 31}},
-		{Monument, Box{32, 39, 27, 47, 61, 31}},
-		{Monument, Box{27, 39, 32, 31, 61, 47}},
-		{Monument, Box{32, 39, 32, 47, 61, 47}},
-		{Monument, Box{512, 39, 512, 527, 61, 527}},
+		{Monument, Box{75, 39, 107, 79, 61, 111}},
+		{Monument, Box{80, 39, 107, 95, 61, 111}},
+		{Monument, Box{75, 39, 112, 79, 61, 127}},
+		{Monument, Box{80, 39, 112, 95, 61, 127}},
+		{Monument, Box{800, 39, 640, 815, 61, 655}},
 	}
 	got := assemble(pieces)
 	want := []Structure{
-		{Monument, Box{27, 39, 27, 47, 61, 47}, 4, nil, 0},
-		{Monument, Box{512, 39, 512, 527, 61, 527}, 1, nil, 0},
+		{Kind: Monument, Box: Box{75, 39, 107, 95, 61, 127}, Areas: 4},
+		{Kind: Monument, Box: Box{800, 39, 640, 815, 61, 655}, Areas: 1},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("assemble = %+v\nwant %+v", got, want)
