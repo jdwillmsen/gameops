@@ -62,13 +62,15 @@
   }
 
   for (const node of controls) {
+    const sliding = node.type === 'range';
     // A slider is followed as it is dragged, so its effect is seen on the
-    // map under it.
-    node.addEventListener(node.type === 'range' ? 'input' : 'change', () => {
-      settings.set('look', { ...settings.get('look'), [node.dataset.look]: read(node) });
+    // map under it, and is written once, when it is let go.
+    node.addEventListener(sliding ? 'input' : 'change', () => {
+      settings.set('look', { ...settings.get('look'), [node.dataset.look]: read(node) }, sliding);
       el.said.textContent = '';
       show();
     });
+    if (sliding) node.addEventListener('change', () => settings.settled());
   }
 
   el.reset.addEventListener('click', () => {

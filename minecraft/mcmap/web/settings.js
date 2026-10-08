@@ -506,22 +506,35 @@
 
   // Puts a changed record in place of the one there is, and says whether
   // it could: one too large to keep is refused whole, and nothing changes.
-  function commit(next, quiet) {
+  // later is for a value still being chosen, as a slider's is while it is
+  // dragged: it is on the page at once and written when settled is called,
+  // or with the next change that is written.
+  let unwritten = false;
+  function commit(next, quiet, later) {
     if (JSON.stringify(next).length > MAX_CHARS) return false;
     const changed = Object.keys(SECTIONS).filter((section) => JSON.stringify(next[section]) !== JSON.stringify(state[section]));
     if (changed.length === 0) return true;
     state = next;
-    write();
+    unwritten = later === true;
+    if (!unwritten) write();
     if (changed.includes('look')) paint();
     if (!quiet) tell(changed);
     return true;
   }
 
+  function settled() {
+    if (!unwritten) return;
+    unwritten = false;
+    write();
+  }
+  // A page that is closed mid-drag still keeps where the slider was.
+  addEventListener('pagehide', settled);
+
   const copy = (v) => JSON.parse(JSON.stringify(v));
 
-  function set(section, value) {
+  function set(section, value, later) {
     if (!Object.hasOwn(SECTIONS, section)) return false;
-    return commit({ ...state, [section]: whole(section, value) });
+    return commit({ ...state, [section]: whole(section, value) }, false, later);
   }
 
   // Makes the record say what a view says, all at once. What the view does
@@ -633,6 +646,7 @@
     // A part of the record, as a copy that is the caller's to change.
     get: (section) => (Object.hasOwn(SECTIONS, section) ? copy(state[section]) : null),
     set,
+    settled,
     adopt,
     fits,
     // A hold on what is kept, for a preview, and letting go of it.
