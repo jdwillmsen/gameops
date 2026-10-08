@@ -526,7 +526,13 @@
       out.p = [view.place.d, view.place.x, view.place.z, view.place.zoom];
       if (view.place.pin) out.q = [view.place.pin.u, view.place.pin.x, view.place.pin.z];
     }
-    if (view.look) out.a = LOOKS.map((key) => view.look[key]);
+    // Each appearance setting the view has, under its place in the list: a
+    // view may have only some of them, and one it lacks is left out.
+    const look = {};
+    LOOKS.forEach((key, at) => {
+      if (view.look && view.look[key] !== undefined) look[at] = view.look[key];
+    });
+    if (Object.keys(look).length > 0) out.a = look;
     return `v1.${b64.to(JSON.stringify(out))}`;
   }
 
@@ -576,8 +582,12 @@
       }
     } else if (raw.q !== undefined) return bad;
     if (raw.a !== undefined) {
-      if (!Array.isArray(raw.a) || raw.a.length > LOOKS.length) return bad;
-      view.look = Object.fromEntries(raw.a.map((value, at) => [LOOKS[at], value]));
+      if (raw.a === null || typeof raw.a !== 'object' || Array.isArray(raw.a)) return bad;
+      view.look = {};
+      for (const [at, value] of Object.entries(raw.a)) {
+        if (!/^(0|[1-9]\d?)$/.test(at) || Number(at) >= LOOKS.length) return bad;
+        view.look[LOOKS[Number(at)]] = value;
+      }
     }
     const read = settings.check.view(view);
     return read ? { view: read } : bad;

@@ -64,6 +64,10 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		"return hash.slice(1).split('/')[5] || '';",
 		// Too long to be a link is said, not cut short.
 		"if (part.length > MAX_LINK) return null;",
+		// A view with only some of the appearance settings sends only
+		// those, and is read back as it was sent.
+		"if (view.look && view.look[key] !== undefined) look[at] = view.look[key];",
+		"if (!/^(0|[1-9]\\d?)$/.test(at) || Number(at) >= LOOKS.length) return bad;",
 		// Gamertags are not the viewer's to hand round.
 		"if (view.mobs) out.m = { o: view.mobs.only, h: view.mobs.hidden };",
 	} {
