@@ -71,14 +71,17 @@
     }
     return out;
   };
-  // An object whose keys are not known ahead, only their form. No form
-  // here matches a name every object already has.
+  // An object whose keys are not known ahead, only their form. A name
+  // every object already has, such as constructor or __proto__, is never
+  // one of them whatever the form allows, and what is built has no such
+  // names of its own to be mistaken for a key.
+  const inherited = (name) => name in Object.prototype;
   const record = (key, kind, max) => (v, strict) => {
     if (!plain(v)) return BAD;
-    const out = {};
+    const out = Object.create(null);
     let n = 0;
     for (const name of Object.keys(v)) {
-      const kept = n < max && key.test(name) ? kind(v[name], strict, name) : BAD;
+      const kept = n < max && key.test(name) && !inherited(name) ? kind(v[name], strict, name) : BAD;
       if (kept !== BAD) {
         out[name] = kept;
         n += 1;
@@ -99,18 +102,23 @@
 
   // A name the viewer typed, or one that came in a link. It is only ever
   // shown as text; what is refused here is what would make that text lie
-  // about itself: control characters, and the marks that turn the
-  // direction of the writing round.
-  const UNSAFE = '\\p{Cc}\\p{Cs}\\p{Co}\\p{Zl}\\p{Zp}\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff';
+  // about itself: control characters, characters that take no room and
+  // the marks that turn the direction of the writing round, which are
+  // all of the format class, and a pile of accents on one letter, which
+  // is drawn over the lines above and below it.
+  const UNSAFE = '\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Zl}\\p{Zp}';
   const HAS_UNSAFE = new RegExp(`[${UNSAFE}]`, 'u');
   const ALL_UNSAFE = new RegExp(`[${UNSAFE}]`, 'gu');
+  const MARKS = 3;
+  const PILED = new RegExp(`\\p{M}{${MARKS + 1},}`, 'u');
+  const ALL_PILED = new RegExp(`(\\p{M}{${MARKS}})\\p{M}+`, 'gu');
   function name(v, strict) {
     if (typeof v !== 'string' || v.length > NAME_LENGTH * 8) return BAD;
     let said = v.normalize('NFC');
     if (strict) {
-      if (HAS_UNSAFE.test(said) || said !== said.trim()) return BAD;
+      if (HAS_UNSAFE.test(said) || PILED.test(said) || said !== said.trim()) return BAD;
     } else {
-      said = said.replace(ALL_UNSAFE, ' ').replace(/\s+/gu, ' ').trim();
+      said = said.replace(ALL_UNSAFE, '').replace(ALL_PILED, '$1').replace(/\s+/gu, ' ').trim();
     }
     const letters = [...said];
     if (letters.length === 0 || (strict && letters.length > NAME_LENGTH)) return BAD;
@@ -439,9 +447,20 @@
   // record is brought up to date, so that its next write does not undo
   // the other's. What is on this tab's screen stays as it is.
   addEventListener('storage', (e) => {
-    if (e.storageArea !== store || e.key !== KEY) return;
+    if (e.storageArea !== store || e.key !== KEY || kept === 'large') return;
     const raw = stored(KEY);
-    if (raw) state = wholeRecord(raw);
+    if (!raw) return;
+    // The other tab's write went in, so there is room again; unless it is
+    // a later version's, which this one must not write over.
+    kept = Number.isInteger(raw.v) && raw.v > VERSION ? 'newer' : 'yes';
+    const looked = JSON.stringify(state.look);
+    state = wholeRecord(raw);
+    for (const section of Object.keys(OLD)) written[section] = JSON.stringify(state[section]);
+    // The look is the one part taken up at once: left for later, this
+    // tab's next unrelated change would bring the other's theme with it.
+    if (looked === JSON.stringify(state.look)) return;
+    paint();
+    tell(['look']);
   });
 
   const tell = (sections) => document.dispatchEvent(new CustomEvent('mcmap:settings', { detail: { sections } }));
@@ -513,8 +532,11 @@
   }
 
   let colours = new Map();
+  // The look as it was last put on the page, to tell a change by.
+  let painted = '';
   function paint() {
     const look = resolved();
+    painted = JSON.stringify(look);
     const root = document.documentElement;
     root.dataset.theme = look.theme;
     root.dataset.density = look.density;
@@ -532,9 +554,9 @@
 
   for (const query of Object.values(media)) {
     query.addEventListener('change', () => {
-      const was = JSON.stringify(resolved());
+      const was = painted;
       paint();
-      if (state.look.theme === 'system' || state.look.motion === 'system' || was !== JSON.stringify(resolved())) tell(['look']);
+      if (painted !== was) tell(['look']);
     });
   }
 
