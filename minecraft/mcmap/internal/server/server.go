@@ -81,8 +81,11 @@ type Server struct {
 	// search holds what a search would otherwise decode again every time.
 	search searchCache
 	// players is the UniqueID the world knows each session's player by,
-	// from when the live layer last showed them, by XUID.
-	players map[string]int64
+	// by XUID, and playersWorld the world those ids are of. clock, for
+	// tests, is what the memory's age is told by.
+	players      map[string]knownPlayer
+	playersWorld worldMark
+	clock        func() time.Time
 }
 
 type cachedInfo struct {

@@ -681,7 +681,8 @@
       return `${standing.value > 0 ? '+' : ''}${fmt(standing.value)}. The game’s own number for what this village thinks of you: it starts at 0, rises as you trade here and falls when you hurt a villager.`;
     }
     if (state === 'none') return 'None: this village has no record of you.';
-    return 'Not known. The map learns which of the world’s players you are by seeing you in the game, and has not since it last started.';
+    if (state === 'pending') return 'Not yet. The map has seen you in the game only since its last snapshot, and says which record is yours from a snapshot taken after it saw you. Look again after the next one.';
+    return 'Not known. The map learns which of the world’s players you are by seeing you in the game, and has not in the last half hour.';
   }
 
   function villageParts(s, v, standing) {
