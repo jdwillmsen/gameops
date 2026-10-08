@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
@@ -441,6 +443,8 @@ type fakeSurveyor struct {
 	dirs     []string
 	err      error
 	deadline bool
+	// panics, if set, is what a survey panics with, once.
+	panics any
 }
 
 func (f *fakeSurveyor) Take(ctx context.Context, worldDir string, _ time.Time) (structures.Survey, error) {
@@ -449,7 +453,44 @@ func (f *fakeSurveyor) Take(ctx context.Context, worldDir string, _ time.Time) (
 	if f.order != nil {
 		*f.order = append(*f.order, "survey")
 	}
+	if p := f.panics; p != nil {
+		f.panics = nil
+		panic(p)
+	}
 	return structures.Survey{}, f.err
+}
+
+// A survey parses records a game wrote. One that panics over a record is
+// that survey's loss: the cycle is still applied, the service is still up
+// for the next one, and the panic is logged with its stack and counted.
+func TestCycle_ASurveyThatPanicsCostsNothingElse(t *testing.T) {
+	var order []string
+	var log bytes.Buffer
+	w := newWorker(&fakeSyncer{}, &fakeRenderer{order: &order}, "")
+	w.Logger = slog.New(slog.NewTextHandler(&log, nil))
+	survey := &fakeSurveyor{order: &order, panics: "slice bounds out of range"}
+	w.Structures = survey
+	before := testutil.ToFloat64(metricSurveyPanics)
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Fatalf("outcome = %v, want the cycle to count as applied", got)
+	}
+	if want := []string{"overworld", "nether", "end", "survey"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+	if !strings.Contains(log.String(), "slice bounds out of range") || !strings.Contains(log.String(), "stack=") {
+		t.Errorf("the panic and its stack are not in the log: %s", log.String())
+	}
+	if got := testutil.ToFloat64(metricSurveyPanics) - before; got != 1 {
+		t.Errorf("panics counted = %v, want 1", got)
+	}
+	if w.Status.Snapshot().Problem != "" {
+		t.Errorf("the page is told of a problem: %q", w.Status.Snapshot().Problem)
+	}
+	// And the next cycle surveys again.
+	if got := w.Cycle(context.Background(), noon.Add(15*time.Minute)); got != Applied || len(survey.dirs) != 2 {
+		t.Errorf("after the panic: outcome %v and %d surveys, want another survey", got, len(survey.dirs))
+	}
 }
 
 // Structures change only as chunks are generated; the count, the retained
