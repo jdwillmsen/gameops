@@ -20,7 +20,7 @@
   const OUTLINED_FROM = 8;
   // The theme's colours for them, and how much of their usual strength
   // the viewer has them drawn at, where the page keeps such choices.
-  const settings = app.settings || null;
+  const settings = window.mcmapSettings || null;
   const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
   const strength = () => {
     const chosen = settings ? settings.look().opacitySlime : NaN;

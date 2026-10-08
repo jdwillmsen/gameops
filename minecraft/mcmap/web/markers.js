@@ -26,7 +26,7 @@
   const { DENSITY } = icons;
   // What the viewer has chosen for how the map looks, where the page keeps
   // such a thing.
-  const settings = app.settings || null;
+  const settings = window.mcmapSettings || null;
   const look = () => (settings ? settings.look() : {});
   const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
   const sizes = () => (icons.sizes ? icons.sizes() : { mob: icons.MOB_RADIUS, baby: icons.BABY_RADIUS, plate: icons.PLATE_RADIUS, scale: 1 });

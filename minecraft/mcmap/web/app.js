@@ -23,7 +23,7 @@
   // and its scripts are cached apart for a few minutes, so just after a
   // release this can be a page from before there was one: everything then
   // works as it would with nothing kept.
-  const settings = (window.mcmap && window.mcmap.settings) || null;
+  const settings = window.mcmapSettings || null;
   const look = () => (settings ? settings.look() : {});
   const colour = (name, fallback) => (settings && settings.colour(name)) || fallback;
 
@@ -465,7 +465,7 @@
     return n.length === 3 ? { x: n[0], y: n[1], z: n[2] } : { x: n[0], z: n[1] };
   }
 
-  window.mcmap = Object.assign(window.mcmap || {}, {
+  window.mcmap = {
     map,
     dimension: () => current,
     dimensions: () => (info ? info.dimensions.map((d) => d.id) : []),
@@ -519,7 +519,7 @@
       },
     },
     layers,
-  });
+  };
   extra = extraOf(location.hash);
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');

@@ -20,12 +20,23 @@
   };
   if (!el.open || !el.dialog || !el.close || !el.on || typeof el.dialog.showModal !== 'function') return;
 
-  // The switch is kept in the page's one record, where the page has one.
-  const settings = app.settings || null;
+  // The switch is kept in the page's one record. A page from before the
+  // script that keeps it has none, and the switch is then read from and
+  // written to the key it always had.
+  const settings = window.mcmapSettings || null;
+  const KEY = 'mcmap.shortcuts';
   // How long a sentence about a shortcut that could not be done stays up.
   const SAID_MS = 5000;
 
-  let enabled = settings ? settings.get('shortcuts').on !== false : true;
+  let enabled = true;
+  if (settings) {
+    enabled = settings.get('shortcuts').on !== false;
+  } else {
+    try {
+      const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (saved && typeof saved.on === 'boolean') enabled = saved.on;
+    } catch { /* a browser that refuses storage still gets the default */ }
+  }
   el.on.checked = enabled;
 
   // A sentence over the map for a moment: why a shortcut did nothing.
@@ -108,6 +119,7 @@
   el.on.addEventListener('change', () => {
     enabled = el.on.checked;
     if (settings) settings.set('shortcuts', { on: enabled });
+    else try { localStorage.setItem(KEY, JSON.stringify({ on: enabled })); } catch { /* not kept, still applied */ }
   });
 
   // The switch as it is kept may be changed from elsewhere, as by a file

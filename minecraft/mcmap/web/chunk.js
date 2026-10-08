@@ -54,7 +54,7 @@
 
   const outline = (style) => L.rectangle([[0, 0], [CHUNK, CHUNK]], { interactive: false, ...style });
   // The theme's colours for the two outlines, where the page has themes.
-  const settings = app.settings || null;
+  const settings = window.mcmapSettings || null;
   const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
   const hoverStyle = () => ({ color: themed('chunk-hover', '#ffffff'), fillColor: themed('chunk-hover', '#ffffff') });
   const pinStyle = () => ({ color: themed('chunk-pin', '#6ecf7a'), fillColor: themed('chunk-pin', '#6ecf7a') });

@@ -21,7 +21,7 @@
   // How much of the terrain the tint covers unless the viewer has chosen,
   // which the page's one record of their choices says where it has one.
   const OPACITY = 0.6;
-  const settings = app.settings || null;
+  const settings = window.mcmapSettings || null;
   const opacity = () => {
     const chosen = settings ? settings.look().opacityBiomes : NaN;
     return Number.isFinite(chosen) ? chosen / 100 : OPACITY;

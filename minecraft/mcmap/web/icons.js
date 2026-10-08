@@ -51,7 +51,7 @@
   };
   // What the viewer has chosen for how the map looks, where the page keeps
   // such a thing; a page from before it did draws everything as it was.
-  const settings = app.settings || null;
+  const settings = window.mcmapSettings || null;
   const look = () => (settings ? settings.look() : {});
   const colour = (name, fallback) => (settings && settings.colour(name)) || fallback;
   const sizes = () => SIZES[look().size] || SIZES.normal;

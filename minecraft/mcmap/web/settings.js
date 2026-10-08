@@ -197,6 +197,11 @@
     if (Array.isArray(v)) return list((item, s) => small(item, s, depth + 1), MAX_HIDDEN)(v, strict);
     return record(/^[a-zA-Z0-9_-]{1,32}$/, (item, s) => small(item, s, depth + 1), 16)(v, strict);
   }
+  // What each old key held when this script last looked, as a short
+  // number made from its text. A script from before writes only the old
+  // key, and a key that no longer matches its number is one such a script
+  // has changed since.
+  const STAMP = int(0, 0xffffffff);
   const SECTIONS = {
     // "<group>/<id>" is a row's switch, and "<group>#<name>" whatever else
     // its layer keeps.
@@ -215,7 +220,9 @@
       hidden: list(oneOf(...BUILT_IN), BUILT_IN.length),
       active: orNull(ID),
     }),
+    old: shape({ layers: STAMP, panel: STAMP, live: STAMP, trails: STAMP, shortcuts: STAMP }),
   };
+  const PORTABLE = Object.fromEntries(Object.entries(SECTIONS).filter(([section]) => section !== 'old'));
   const DEFAULTS = {
     layers: () => ({}),
     panel: () => ({ folded: [] }),
@@ -226,6 +233,7 @@
     biome: () => ({ only: null }),
     look: () => ({ ...LOOK_DEFAULTS }),
     views: () => ({ list: [], order: [...BUILT_IN], start: null, hidden: [], active: null }),
+    old: () => ({}),
   };
 
   // The views that come with the page. They are not kept in the record, so
@@ -346,30 +354,84 @@
     return raw;
   }
 
+  // FNV-1a over the text of an old key, or 0 for a key that is not there.
+  function stamp(key) {
+    let text = null;
+    try { text = store ? store.getItem(key) : null; } catch { /* as if absent */ }
+    if (text === null) return 0;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+    return (h >>> 0) || 1;
+  }
+
+  // One old key's part of the record, as carriedOver reads it.
+  const fromOld = {
+    layers: () => stored(OLD.layers),
+    panel: () => stored(OLD.panel),
+    live: () => stored(OLD.live),
+    trails: () => {
+      const trails = stored(OLD.trails);
+      return trails && { seconds: Number.isFinite(trails.seconds) ? trails.seconds : trails.hours * 3600 };
+    },
+    shortcuts: () => stored(OLD.shortcuts),
+  };
+
   let state;
   const written = {};
   {
-    const raw = stored(KEY);
-    if (raw && Number.isInteger(raw.v) && raw.v > VERSION) kept = 'newer';
+    let raw = stored(KEY);
+    let text = null;
+    try { text = store ? store.getItem(KEY) : null; } catch { /* as if absent */ }
+    if (text !== null && text.length > MAX_CHARS) {
+      // Larger than the page ever writes: not the page's own doing. It is
+      // left exactly as it is, and the page works from its defaults.
+      kept = 'large';
+      raw = {};
+    } else if (raw && Number.isInteger(raw.v) && raw.v > VERSION) {
+      kept = 'newer';
+    }
+    const fresh = !raw;
     state = wholeRecord(raw || carriedOver());
+    let changed = fresh;
+    if (kept === 'yes') {
+      // The page and its scripts are cached apart, so for a few minutes
+      // after a release a script from before may be the one writing. It
+      // writes the old key alone: where an old key is not as this script
+      // last saw it, what it holds now is the newer choice, and is taken.
+      for (const section of Object.keys(OLD)) {
+        const now = stamp(OLD[section]);
+        if (!fresh && now !== 0 && now !== (state.old[section] || 0)) {
+          const theirs = fromOld[section]();
+          if (theirs) state[section] = whole(section, theirs);
+        }
+        changed = changed || state.old[section] !== now;
+        state.old[section] = now;
+      }
+    }
     for (const section of Object.keys(OLD)) written[section] = JSON.stringify(state[section]);
-    if (!raw) write();
+    if (changed) write();
   }
 
+  // Writes the record, and each old key whose part has changed in the form
+  // that key always had. The old keys go first and are then read back, so
+  // that the record says what each one really holds: if one could not be
+  // written, its old value is not later mistaken for a newer choice.
   function write() {
-    if (!store || kept === 'newer') return;
+    if (!store || kept === 'newer' || kept === 'large') return;
+    for (const [section, key] of Object.entries(OLD)) {
+      const now = JSON.stringify(state[section]);
+      if (now === written[section]) continue;
+      try {
+        store.setItem(key, now);
+        written[section] = now;
+      } catch { /* tried again with the next write */ }
+      state.old[section] = stamp(key);
+    }
     try {
       store.setItem(KEY, JSON.stringify(state));
       kept = 'yes';
     } catch {
       kept = 'full';
-      return;
-    }
-    for (const [section, key] of Object.entries(OLD)) {
-      const now = JSON.stringify(state[section]);
-      if (now === written[section]) continue;
-      written[section] = now;
-      try { store.setItem(key, now); } catch { /* the record itself was kept */ }
     }
   }
 
@@ -489,8 +551,10 @@
   }
   paint();
 
-  window.mcmap = window.mcmap || {};
-  window.mcmap.settings = {
+  // Under a name of its own, and not on the page's object: the script that
+  // makes that object may be one from before this, which would put its own
+  // in the place of whatever was there.
+  window.mcmapSettings = {
     VERSION,
     MAX_VIEWS,
     NAME_LENGTH,
@@ -524,12 +588,17 @@
       },
       record: (v) => {
         if (!plain(v) || v.v !== VERSION) return null;
-        const read = shape({ v: int(VERSION, VERSION), ...SECTIONS })(v, true);
+        const read = shape({ v: int(VERSION, VERSION), ...PORTABLE })(v, true);
         return read === BAD ? null : wholeRecord(read);
       },
     },
     // The whole record, for a file, and a whole record put in its place.
-    all: () => copy(state),
-    replace: (next) => commit(wholeRecord(next)),
+    // What it says of the old keys is this browser's own business, and
+    // stays out of the one and is kept through the other.
+    all: () => {
+      const { old, ...rest } = copy(state);
+      return rest;
+    },
+    replace: (next) => commit({ ...wholeRecord(next), old: state.old }),
   };
 })();

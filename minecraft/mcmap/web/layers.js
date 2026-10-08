@@ -29,10 +29,38 @@
   // The viewer's choices are kept by the page's one record of them, in
   // its "layers" part, and which groups are folded in its "panel" part.
   // The page and its scripts are cached apart for a few minutes, so just
-  // after a release this can meet a page with no such record: the panel
-  // then works from each layer's own default and keeps nothing.
-  const settings = app.settings || null;
-  const unkept = {};
+  // after a release this can meet a page from before the script that
+  // keeps the record. The panel then reads and writes the keys it always
+  // had, exactly as it did, so that nobody's choices reset for those
+  // minutes; the record takes up whatever is written there when it is next
+  // loaded.
+  const settings = window.mcmapSettings || null;
+  const CHOICES_KEY = 'mcmap.layers';
+  const PANEL_KEY = 'mcmap.panel';
+  // Where each layer's script kept its filters before there was a panel,
+  // as { <id>: boolean }, with one switch for all the structures. The
+  // record carries these over itself; without it they are read here.
+  const LEGACY = {
+    live: { key: 'mcmap.live', master: [] },
+    markers: { key: 'mcmap.markers', master: [] },
+    structures: { key: 'mcmap.structures', master: ['recorded', 'predicted', 'candidate'] },
+  };
+
+  function readOld(key) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) || '{}');
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch {
+      return {}; // a browser that refuses storage still gets the defaults
+    }
+  }
+
+  function writeOld(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* not kept, still applied */ }
+  }
+
+  const unkept = settings ? null : readOld(CHOICES_KEY);
+  const legacy = new Map();
   const kept = () => (settings ? settings.get('layers') : unkept);
 
   // Choices are kept flat, as "<group>/<id>", so that no id a script picks
@@ -44,12 +72,21 @@
       else choices[key] = value;
     }
     if (settings) settings.set('layers', choices);
+    else writeOld(CHOICES_KEY, choices);
   }
 
+  const flag = (from, key) => (Object.hasOwn(from, key) && typeof from[key] === 'boolean' ? from[key] : null);
+
   function choice(group, id, fallback) {
-    const choices = kept();
-    const key = `${group}/${id}`;
-    return Object.hasOwn(choices, key) && typeof choices[key] === 'boolean' ? choices[key] : fallback;
+    const was = flag(kept(), `${group}/${id}`);
+    if (was !== null) return was;
+    if (settings || !Object.hasOwn(LEGACY, group)) return fallback;
+    if (!legacy.has(group)) legacy.set(group, readOld(LEGACY[group].key));
+    const old = legacy.get(group);
+    const before = flag(old, 'on') === false && LEGACY[group].master.includes(id) ? false : flag(old, id);
+    if (before === null) return fallback;
+    remember({ [`${group}/${id}`]: before });
+    return before;
   }
 
   // What a layer keeps besides its switches, such as which kinds of a
@@ -65,7 +102,7 @@
 
   const retain = (group, name, value) => remember({ [`${group}#${name}`]: value });
 
-  const view = settings ? settings.get('panel') : {};
+  const view = settings ? settings.get('panel') : readOld(PANEL_KEY);
   const folded = new Set(Array.isArray(view.folded) ? view.folded.filter((id) => typeof id === 'string') : []);
   // On a small screen the panel is a sheet over the map, which opens when
   // asked and is never found open on arriving: what was last chosen where
@@ -78,6 +115,7 @@
   const keep = () => {
     if (!compact.matches) view.open = open;
     if (settings) settings.set('panel', { ...(typeof view.open === 'boolean' ? { open: view.open } : {}), folded: [...folded] });
+    else writeOld(PANEL_KEY, { open: view.open, folded: [...folded] });
   };
 
   const groups = new Map();

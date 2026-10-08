@@ -14,9 +14,11 @@
   if (!app || !app.layers || !app.layers.register || !app.duration) return;
   const { map, duration } = app;
 
-  // The window is kept in the page's one record, where the page has one;
-  // without it the choice lasts for the visit.
-  const settings = app.settings || null;
+  // The window is kept in the page's one record. A page from before the
+  // script that keeps it has none, and the window is then read from and
+  // written to the key it always had.
+  const settings = window.mcmapSettings || null;
+  const WINDOW_KEY = 'mcmap.trails';
   const look = () => (settings ? settings.look() : {});
   // How much trail the viewer is offered, in seconds; any other length may
   // be typed, down to a minute and up to what the server keeps. It keeps a
@@ -78,7 +80,17 @@
   lines.bindTooltip((line) => text(labelOf(line)), { sticky: true, direction: 'top', className: 'live-tip' });
 
   const windowOf = (kept) => (Number.isFinite(kept) ? Math.min(MAX_UNKNOWN, Math.max(MIN_WINDOW, Math.round(kept))) : WINDOWS[0]);
-  let seconds = settings ? windowOf(settings.get('trails').seconds) : WINDOWS[0];
+  let seconds = WINDOWS[0];
+  if (settings) {
+    seconds = windowOf(settings.get('trails').seconds);
+  } else {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WINDOW_KEY) || 'null');
+      // Kept as hours while the choice was one of three.
+      const kept = saved && Number.isFinite(saved.seconds) ? saved.seconds : saved && Number.isFinite(saved.hours) ? saved.hours * 3600 : NaN;
+      seconds = windowOf(kept);
+    } catch { /* a browser that refuses storage still gets the default */ }
+  }
   // How long the server keeps a trail, once an answer has said.
   let retention = 0;
 
@@ -118,6 +130,7 @@
     onChange(length) {
       seconds = length;
       if (settings) settings.set('trails', { seconds });
+      else try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ seconds })); } catch { /* not kept, still applied */ }
       sync();
     },
   });
