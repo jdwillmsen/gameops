@@ -762,7 +762,7 @@
         const portal = block('end_portal');
         return facts('Its portal room', [
           ['End portal', portal >= 9 ? 'Lit: its nine portal blocks are in the save' : portal > 0 ? `${some(portal, 'portal block', 'portal blocks')} in the save` : 'Not lit when the world was saved'],
-          ['Silverfish spawner', spawning('silverfish', false) > 0 ? 'There, listed below' : 'None in the save: broken since the room was found'],
+          ['Silverfish spawner', spawning('silverfish', false) > 0 ? 'In the save' : 'None in the save: broken, or never saved'],
         ]);
       }
       case 'trial_chamber': {
@@ -784,6 +784,20 @@
     if (!d) return [el('h3', '', 'In the save inside its box'), el('p', 'note', 'What the save holds here could not be worked out at the last snapshot.')];
     const mobs = listOf(d.mobs).filter((m) => typeof m.kind === 'string' && count(m.count) > 0);
     const out = kindParts(s, d, mobs, data.standing);
+    const at = Date.parse(text(data.at));
+    const ago = Number.isFinite(at) ? Math.max(0, Math.round((Date.now() - at) / 60_000)) : null;
+    const when = ago === null ? '' : ago < 1 ? ', under a minute ago' : ago < 120 ? `, ${fmt(ago)} min ago` : `, ${fmt(Math.round(ago / 60))} h ago`;
+    const read = `Read from the world’s save as of the last snapshot${when}.`;
+    // Too little of it is known to say where to look for what it holds,
+    // and a count of none would say it holds nothing.
+    if (d.uncounted === true) {
+      out.push(el('p', 'note', `What else it holds is not counted: only this one room of it was found, and the rest could be anywhere round it. ${read}`));
+      return out;
+    }
+    // A kind found by its blocks is counted a stated way past them.
+    const reach = count(d.reach);
+    const where = reach > 0 ? `within ${fmt(reach)} blocks of what it was found by` : 'inside its box';
+    const none = reach > 0 ? `None in the save ${where}` : NONE_SAVED;
 
     const counted = mobs.map((m) => ({
       picture: mobPicture(m.kind),
@@ -822,12 +836,12 @@
     const held = d.blocks && typeof d.blocks === 'object' ? d.blocks : {};
     const blocks = (name) => (Object.hasOwn(held, name) ? count(held[name]) : 0);
 
-    out.push(...facts('In the save inside its box', [
-      ['Mobs', counted.length > 0 ? tally(counted) : NONE_SAVED],
+    out.push(...facts(`In the save ${where}`, [
+      ['Mobs', counted.length > 0 ? tally(counted) : none],
       named.length > 0 ? ['Named', tally(named, true)] : null,
-      ['Spawners', spawners.length > 0 ? tally(spawners) : NONE_SAVED],
+      ['Spawners', spawners.length > 0 ? tally(spawners) : none],
       places.length > 0 ? ['Where they are', tally(places, true)] : null,
-      ['Containers', containers.length > 0 ? tally(containers, true) : NONE_SAVED],
+      ['Containers', containers.length > 0 ? tally(containers, true) : none],
       blocks('unbroken_pot') > 0 ? ['Decorated pots', `${fmt(blocks('unbroken_pot'))} unbroken, as the world generated ${blocks('unbroken_pot') === 1 ? 'it' : 'them'}`] : null,
       blocks('dispenser') > 0 ? ['Dispensers', fmt(blocks('dispenser'))] : null,
       blocks('dropper') > 0 ? ['Droppers', fmt(blocks('dropper'))] : null,
@@ -835,10 +849,7 @@
     if (unopened) {
       out.push(el('p', 'note', 'Not yet opened: the game fills a generated chest or barrel the first time it is opened, and has not filled these. What a container holds is not read.'));
     }
-    const at = Date.parse(text(data.at));
-    const ago = Number.isFinite(at) ? Math.max(0, Math.round((Date.now() - at) / 60_000)) : null;
-    const when = ago === null ? '' : ago < 1 ? ', under a minute ago' : ago < 120 ? `, ${fmt(ago)} min ago` : `, ${fmt(Math.round(ago / 60))} h ago`;
-    out.push(el('p', 'note', `Read from the world’s save as of the last snapshot${when}. The game saves a mob with its chunk, so one that has since moved, died or despawned is still counted until the next.`));
+    out.push(el('p', 'note', `${read} The game saves a mob with its chunk, so one that has since moved, died or despawned is still counted until the next.`));
     return out;
   }
 
