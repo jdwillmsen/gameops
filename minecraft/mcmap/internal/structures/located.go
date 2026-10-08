@@ -2,6 +2,7 @@ package structures
 
 import (
 	"cmp"
+	"context"
 	"slices"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
@@ -80,10 +81,15 @@ var locatedKinds = []located{
 	}},
 }
 
+// locateCheck is how many blocks or chunks are gone through between looks
+// at whether there is still time.
+const locateCheck = 8192
+
 // locate finds the structures of the located kinds. Both are the
 // overworld's: the End has portal blocks of its own, in the fountain every
-// End has.
-func (c *contents) locate() []Structure {
+// End has. The work is a few map lookups for each block the world holds,
+// and it stops when ctx does.
+func (c *contents) locate(ctx context.Context) ([]Structure, error) {
 	var out []Structure
 	for _, k := range locatedKinds {
 		// The blocks are joined by the chunk they are in, so that the work
@@ -94,7 +100,10 @@ func (c *contents) locate() []Structure {
 		}
 		byChunk := map[uint64]*found{}
 		var order []uint64
-		for _, b := range c.blocks[chunks.Overworld] {
+		for i, b := range c.blocks[chunks.Overworld] {
+			if i%locateCheck == 0 && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if !k.is(b, c.types.names[b.mob]) {
 				continue
 			}
@@ -126,7 +135,10 @@ func (c *contents) locate() []Structure {
 			return chunkKey(floorDiv(x+k.back, k.grid), floorDiv(z+k.back, k.grid))
 		}
 		first := map[uint64]uint64{}
-		for _, key := range order {
+		for i, key := range order {
+			if i%locateCheck == 0 && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if k.grid > 0 {
 				sq := square(key)
 				if other, seen := first[sq]; seen {
@@ -170,5 +182,5 @@ func (c *contents) locate() []Structure {
 			return cmp.Or(cmp.Compare(b.Evidence, a.Evidence), cmp.Compare(a.MinX, b.MinX), cmp.Compare(a.MinZ, b.MinZ), cmp.Compare(a.MinY, b.MinY))
 		})
 	}
-	return out
+	return out, ctx.Err()
 }

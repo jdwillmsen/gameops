@@ -1,6 +1,7 @@
 package structures
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"math"
@@ -402,7 +403,7 @@ func TestDetail_AChambersBlocksAreJoinedByTheGeneratorsGrid(t *testing.T) {
 			x, z := at(chunk[0], chunk[1])
 			c0.blocks[chunks.Overworld] = append(c0.blocks[chunks.Overworld], savedBlock{x: x, y: -20, z: z, sort: blockVault})
 		}
-		if got := c0.locate(); len(got) != c.want {
+		if got := locateAll(t, c0); len(got) != c.want {
 			t.Errorf("%s: %d chambers %+v, want %d", name, len(got), got, c.want)
 		}
 	}
@@ -419,7 +420,7 @@ func TestDetail_AChamberFoundByLittleIsSaidToBeThereInPart(t *testing.T) {
 		c.blocks[chunks.Overworld] = append(c.blocks[chunks.Overworld], savedBlock{x: 2000 + i, y: -20, z: 40, sort: blockVault})
 	}
 	c.blocks[chunks.Overworld] = append(c.blocks[chunks.Overworld], savedBlock{x: 4000, y: 30, z: 40, sort: blockPortal})
-	got := c.locate()
+	got := locateAll(t, c)
 	if len(got) != 3 || got[0].Kind != Stronghold || got[0].Partial ||
 		got[1].Evidence != wholeChamber || got[1].Partial || got[2].Evidence != wholeChamber-1 || !got[2].Partial {
 		t.Errorf("found %+v, want a stronghold, a whole chamber and one in part", got)
@@ -521,6 +522,58 @@ func TestDetail_BoundsWhatOneStructureAndOneSurveyList(t *testing.T) {
 	}
 }
 
+func locateAll(t testing.TB, c *contents) []Structure {
+	t.Helper()
+	found, err := c.locate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
+}
+
+// Finding structures by their blocks is a few lookups a block. At the most
+// blocks a dimension is kept, every one of them a kind's own and each in a
+// chunk of its own, it is still done in well under the time it is given,
+// and it stops when it is told to.
+func TestDetail_FindingStructuresAtTheBoundsIsQuickAndCanBeStopped(t *testing.T) {
+	c := newContents()
+	for i := range int32(maxSavedBlocks) {
+		sort := blockVault
+		if i%2 == 1 {
+			sort = blockPortal
+		}
+		// A square of chunks 640 a side, one block in each.
+		c.blocks[chunks.Overworld] = append(c.blocks[chunks.Overworld], savedBlock{x: i % 640 * 16, y: 30, z: i / 640 * 16, sort: sort})
+	}
+	started := time.Now()
+	found := locateAll(t, c)
+	took := time.Since(started)
+	t.Logf("%d blocks in %d chunks located as %d structures in %s", maxSavedBlocks, maxSavedBlocks, len(found), took.Round(time.Millisecond))
+	if took > detailTimeout/2 {
+		t.Errorf("took %s of the %s there is", took, detailTimeout)
+	}
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got, err := c.locate(stopped); err == nil || got != nil {
+		t.Errorf("locate with no time left = %d structures, %v", len(got), err)
+	}
+}
+
+// Running out of time finding them costs the survey only them.
+func TestTake_ThatCannotFindStructuresInTimeServesTheRest(t *testing.T) {
+	w := newWorld(t).structure(chunks.Nether, fortressByte, Box{0, 48, 0, 15, 72, 15}).
+		blockEntity(chunks.Overworld, "Vault", 40, -20, 40)
+	s := surveyor(t, nil)
+	if got := take(t, s, w); len(got.Layers[chunks.Overworld].Recorded) != 1 {
+		t.Fatalf("with time: %+v", got.Layers[chunks.Overworld].Recorded)
+	}
+	s.DetailTimeout = time.Nanosecond
+	got := take(t, s, w)
+	if len(got.Layers[chunks.Overworld].Recorded) != 0 || len(got.Layers[chunks.Nether].Recorded) != 1 {
+		t.Errorf("without: overworld %+v, nether %+v; want the fortress and no chamber", got.Layers[chunks.Overworld].Recorded, got.Layers[chunks.Nether].Recorded)
+	}
+}
+
 func TestDetail_ThatRunsOutOfTimeLeavesTheStructuresWithoutIt(t *testing.T) {
 	w := newWorld(t).structure(chunks.Nether, 1, Box{0, 48, 0, 15, 72, 15})
 	s := surveyor(t, nil)
@@ -581,7 +634,7 @@ func TestDetail_NoDamageToARecordPanics(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		c.locate()
+		locateAll(t, c)
 	}
 }
 
@@ -650,7 +703,7 @@ func FuzzContents(f *testing.F) {
 				t.Fatalf("kept a mob as %+v", m)
 			}
 		}
-		c.locate()
+		locateAll(t, c)
 		if _, err := c.describe(t.Context(), chunks.Overworld, []Structure{{Kind: Monument, Box: Box{-64, -64, -64, 64, 320, 64}}}, nil, leveldat.Level{}, &allowance{names: 9, places: 9}); err != nil {
 			t.Fatal(err)
 		}
