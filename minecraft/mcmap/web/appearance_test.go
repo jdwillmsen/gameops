@@ -259,6 +259,14 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 			t.Errorf("appearance.js no longer has %s", need)
 		}
 	}
+	// A slider is on the page as it is dragged and written once it is let
+	// go, not at every step of the way.
+	if !bytes.Contains(js, []byte("settings.set('look', { ...settings.get('look'), [node.dataset.look]: read(node) }, sliding);")) || !bytes.Contains(js, []byte("if (sliding) node.addEventListener('change', () => settings.settled());")) {
+		t.Error("appearance.js writes a slider's value at every step, or never")
+	}
+	if !regexp.MustCompile(`unwritten = later === true;\s*if \(!unwritten\) write\(\);`).Match(read(t, "settings.js")) {
+		t.Error("settings.js no longer holds back the write of a value still being chosen")
+	}
 	if !bytes.Contains(page, []byte(`<button id="appearance-reset" type="button">Reset to defaults</button>`)) {
 		t.Error("index.html has no button to put the appearance back to its defaults")
 	}
