@@ -1144,7 +1144,7 @@ came to 8.64 seconds with it and 8.79 without, the difference being less
 than the spread. It walks 35 MB of actor records and 19 MB of block
 entities in place, from the values the pass has in hand already, and
 allocates nothing for a record it does not keep; setting the contents
-inside 341 boxes takes 6 milliseconds. Peak memory for the survey alone
+inside 323 boxes takes 6 milliseconds. Peak memory for the survey alone
 went from about 60 MB to about 67 MB. In about one run in ten a single
 collection ran late and the peak was near 130 MB for a moment.
 
