@@ -217,7 +217,7 @@
     for (const s of recorded) {
       const k = KINDS[s.kind] || UNKNOWN;
       const group = groupOf('recorded', s.kind);
-      const label = tip(`${names.structure(s.kind)} · ${found(s) ? 'found by its blocks' : 'recorded by the world'}`, ...villageLines(s.village).slice(0, 1), DETAILS_HINT);
+      const label = tip(`${names.structure(s.kind)} · ${found(s) ? (s.partial === true ? 'found by its blocks, in part' : 'found by its blocks') : 'recorded by the world'}`, ...villageLines(s.village).slice(0, 1), DETAILS_HINT);
       // The box is what the world recorded, to the block. A block's far
       // edge is one past its coordinate. One round the blocks a kind was
       // found by is dashed: the structure is there, and its edge is not.
@@ -427,6 +427,7 @@
   const WHAT = {
     recorded: 'Recorded: the world’s own save says this structure is here, and this is the box it occupies.',
     found: 'Found: the world keeps no record of this kind, but its save holds blocks only this kind is generated with. The box is the box around those blocks; the structure itself reaches further.',
+    partial: 'Partly generated, most likely: it was found by fewer blocks than a finished one ever is, so the rest of it is in chunks the world has not generated yet.',
     predicted: 'Predicted: worked out from the world’s seed, not read from the world. Nothing has recorded one here.',
     candidate: 'Possible site: the seed puts a site here, in terrain nobody has generated. The biome there will decide whether anything is built.',
   };
@@ -550,6 +551,7 @@
     view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind })));
     view.title.textContent = names.structure(kind);
     const lines = [s && found(s) ? WHAT.found : WHAT[sort]];
+    if (s && found(s) && s.partial === true) lines.push(WHAT.partial);
     if (p) {
       lines.push(...standing(p));
       const rule = rules[kind];

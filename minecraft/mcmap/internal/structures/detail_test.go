@@ -331,8 +331,8 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 	}
 	want := []Structure{
 		{Kind: Stronghold, Box: Box{2000, 30, 2000, 2005, 30, 2001}, Evidence: 3},
-		{Kind: TrialChamber, Box: Box{100, -24, 100, 151, -20, 140}, Evidence: 4},
-		{Kind: TrialChamber, Box: Box{900, -22, 900, 900, -22, 900}, Evidence: 1},
+		{Kind: TrialChamber, Box: Box{100, -24, 100, 151, -20, 140}, Evidence: 4, Partial: true},
+		{Kind: TrialChamber, Box: Box{900, -22, 900, 900, -22, 900}, Evidence: 1, Partial: true},
 	}
 	if !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
 		t.Fatalf("found %+v\nwant  %+v", got.Layers[chunks.Overworld].Recorded, want)
@@ -354,20 +354,78 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 	}
 }
 
-// Blocks laid in a line a few chunks apart join without end. What they
-// join into is no one structure's box, and is not drawn across the map.
+// Which chamber a block is part of is the square of the generator's grid
+// it lies in, with the squares moved back to take in what reaches before
+// them. These are the edges of that: the first and last chunk of a square
+// on each side, in chunks from the square's own first.
+func TestDetail_AChambersBlocksAreJoinedByTheGeneratorsGrid(t *testing.T) {
+	at := func(chunkX, chunkZ int32) (x, z int32) { return chunkX*16 + 3, chunkZ*16 + 9 }
+	for name, c := range map[string]struct {
+		chunks [][2]int32
+		want   int
+	}{
+		// Far apart, with nothing generated between: one chamber, which a
+		// join by nearness would have cut in two.
+		"the two ends of a square":         {[][2]int32{{-chamberReach, -chamberReach}, {chamberGrid - chamberReach - 1, chamberGrid - chamberReach - 1}}, 1},
+		"a corridor of ungenerated chunks": {[][2]int32{{0, 0}, {12, 0}, {0, 25}}, 1},
+		// Next to each other, and two chambers all the same.
+		"either side of an edge, going east":  {[][2]int32{{chamberGrid - chamberReach - 1, 4}, {chamberGrid - chamberReach, 4}}, 2},
+		"either side of an edge, going south": {[][2]int32{{4, chamberGrid - chamberReach - 1}, {4, chamberGrid - chamberReach}}, 2},
+		"either side of the edge before":      {[][2]int32{{-chamberReach, 4}, {-chamberReach - 1, 4}}, 2},
+		"across a corner":                     {[][2]int32{{-chamberReach - 1, -chamberReach - 1}, {-chamberReach, -chamberReach}}, 2},
+		"a square on each side of the origin": {[][2]int32{{-2 * chamberGrid, 3}, {-chamberGrid, 3}, {0, 3}, {chamberGrid, 3}}, 4},
+	} {
+		c0 := newContents()
+		for _, chunk := range c.chunks {
+			x, z := at(chunk[0], chunk[1])
+			c0.blocks[chunks.Overworld] = append(c0.blocks[chunks.Overworld], savedBlock{x: x, y: -20, z: z, sort: blockVault})
+		}
+		if got := c0.locate(); len(got) != c.want {
+			t.Errorf("%s: %d chambers %+v, want %d", name, len(got), got, c.want)
+		}
+	}
+}
+
+// A chamber found by fewer blocks than a finished one ever is, is said to
+// be there in part, and one found by enough is not.
+func TestDetail_AChamberFoundByLittleIsSaidToBeThereInPart(t *testing.T) {
+	c := newContents()
+	for i := range int32(wholeChamber - 1) {
+		c.blocks[chunks.Overworld] = append(c.blocks[chunks.Overworld], savedBlock{x: 40 + i, y: -20, z: 40, sort: blockTrialSpawner})
+	}
+	for i := range int32(wholeChamber) {
+		c.blocks[chunks.Overworld] = append(c.blocks[chunks.Overworld], savedBlock{x: 2000 + i, y: -20, z: 40, sort: blockVault})
+	}
+	c.blocks[chunks.Overworld] = append(c.blocks[chunks.Overworld], savedBlock{x: 4000, y: 30, z: 40, sort: blockPortal})
+	got := c.locate()
+	if len(got) != 3 || got[0].Kind != Stronghold || got[0].Partial ||
+		got[1].Evidence != wholeChamber || got[1].Partial || got[2].Evidence != wholeChamber-1 || !got[2].Partial {
+		t.Errorf("found %+v, want a stronghold, a whole chamber and one in part", got)
+	}
+}
+
+// Blocks laid in a line join without end where nearness is what joins
+// them. What they join into is no one structure's box, and is not drawn
+// across the map. A chamber's cannot: its grid holds it to one square.
 func TestDetail_ARunOfBlocksAcrossTheWorldIsNoStructure(t *testing.T) {
 	w := newWorld(t)
-	for x := int32(0); x <= maxLocatedSpan+160; x += 80 {
-		w.blockEntity(chunks.Overworld, "Vault", x, -20, x)
+	for x := int32(0); x <= maxLocatedSpan+64; x += 16 {
+		w.blockEntity(chunks.Overworld, "EndPortal", x, 30, 8)
+		w.blockEntity(chunks.Overworld, "Vault", x*4, -20, 4000)
 	}
-	w.blockEntity(chunks.Overworld, "Vault", -4000, -20, 40).blockEntity(chunks.Overworld, "TrialSpawner", -4010, -20, 44)
+	w.blockEntity(chunks.Overworld, "EndPortal", -4000, 30, 40).blockEntity(chunks.Overworld, "EndPortal", -4001, 30, 40)
 	got := take(t, surveyor(t, nil), w)
-	if want := []Structure{{Kind: TrialChamber, Box: Box{-4010, -20, 40, -4000, -20, 44}, Evidence: 2}}; !slices.Equal(got.Layers[chunks.Overworld].Recorded, want) {
-		t.Errorf("found %+v, want only %+v", got.Layers[chunks.Overworld].Recorded, want)
+	found := got.Layers[chunks.Overworld].Recorded
+	if len(found) == 0 || found[0] != (Structure{Kind: Stronghold, Box: Box{-4001, 30, 40, -4000, 30, 40}, Evidence: 2}) {
+		t.Errorf("found %+v, want the one portal first", found)
+	}
+	for _, s := range found {
+		if s.MaxX-s.MinX > maxLocatedSpan || (s.Kind == Stronghold && s.MinX >= 0) {
+			t.Errorf("found %+v, which is a run of blocks and no structure", s)
+		}
 	}
 	if got.Contents.Skipped != 1 {
-		t.Errorf("skipped = %d, want the one run counted", got.Contents.Skipped)
+		t.Errorf("skipped = %d, want the one run of portal blocks counted", got.Contents.Skipped)
 	}
 }
 

@@ -17,6 +17,10 @@ type Structure struct {
 	// how many of them there are. The box is then the box around those,
 	// and the structure itself reaches further than it.
 	Evidence int `json:"evidence,omitempty"`
+	// Partial is set for one found by less than a finished structure of
+	// its kind ever is: the rest of it is most likely in chunks the world
+	// has not generated yet.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // joinGap is how far apart, in blocks across the map, two areas of a kind

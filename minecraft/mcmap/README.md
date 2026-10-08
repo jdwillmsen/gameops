@@ -889,23 +889,44 @@ seed, by block entities only they are generated with and that nobody in a
 survival world can pick up and put somewhere else. They come from the same
 pass and cost nothing more.
 
-| Kind | Found by | The box |
-|---|---|---|
-| `trial_chamber` | Trial spawners and vaults. Chunks holding either are joined where they are within five chunks of each other, which is well under what the generator keeps between two chambers | Around those blocks. The chamber's corridors run on past them |
-| `stronghold` | The silverfish spawner of its portal room, or the blocks of its end portal once lit, in the Overworld. Chunks holding either are joined where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
+| Kind | Found by | Joined | The box |
+|---|---|---|---|
+| `trial_chamber` | Trial spawners and vaults | By the generator's grid: every block in one square of it is one chamber | Around those blocks. The chamber's corridors run on past them |
+| `stronghold` | The silverfish spawner of its portal room, or the blocks of its end portal once lit, in the Overworld | Chunks holding either, where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
 
-A box more than 512 blocks across is no one structure's, whatever joined
-it: blocks laid in a line a few chunks apart join without end. It is left
-out and counted as skipped. The widest chamber in the FWB world is found
-across 214 blocks.
+**A chamber's grid.** The generator cuts the world into squares of 34
+chunks and gives each at most one trial chamber, which starts in the first
+22 chunks of its square and reaches a few chunks either way. Its blocks
+therefore lie from five chunks before the square to 26 into it, and the
+two chunks after that hold no chamber's. All 6,282 trial spawners and
+vaults in the FWB world bear this out: not one is in those two chunks, on
+either axis. So the chamber a block belongs to is the square it is in,
+with the squares moved seven chunks back, and that needs no seed. Parts
+of one chamber cut apart by chunks the world has not generated are one
+chamber, which joining by nearness got wrong eighteen times in this
+world, and two chambers side by side are never one. `-run
+RealWorldDetails` is how to check it again after a game update: a chamber
+found by a handful of blocks next to another is the sign the grid has
+moved.
+
+**In part.** A chamber found by fewer than 20 blocks carries `partial`,
+and the sheet says it is most likely only partly generated. The FWB
+world's chambers fall in two groups with nothing between: 164 found by 21
+to 73 blocks, and 55 by fewer than 20, every one of those at the edge of
+what the world has generated. A stronghold is never marked so: one room
+is all that is ever found of it.
+
+A box wider than one square of that grid, 544 blocks, is no one
+structure's, whatever joined it: portal blocks laid in a line join without
+end. It is left out and counted as skipped. The widest chamber in the FWB
+world is found across 214 blocks.
 
 Each carries `evidence`, how many such blocks it was found from, in place
 of `areas`. The page draws its box dashed and says in the sheet that the
 box is the box around those blocks and that the structure reaches further.
 Neither is predicted, and neither is checked against the seed. On the FWB
-world: 237 trial chambers, 198 of them from ten blocks or more and 39
-from fewer, and 4 strongholds, two by
-their spawner and two by a lit portal whose spawner is gone.
+world: 219 trial chambers and 4 strongholds, two by their spawner and two
+by a lit portal whose spawner is gone.
 
 Looked at and left out, since each fails on certainty or on what could be
 said of its extent:
@@ -2083,7 +2104,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The marker or structure picture with the key `{group}/{name}` as a PNG, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
-| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by, and `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `dispenser`, `dropper` and `unbroken_pot`, those there are); `elders` for a monument; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |

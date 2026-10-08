@@ -130,6 +130,7 @@ func TestRealWorldDetails(t *testing.T) {
 		containers map[string][3]int
 		elders     map[int]int
 		evidence   []int
+		partial    int
 	}
 	var villages struct {
 		counted, withProfessions, villagers, professed, babies, missing int
@@ -147,6 +148,9 @@ func TestRealWorldDetails(t *testing.T) {
 			k.structures++
 			if r.Evidence > 0 {
 				k.evidence = append(k.evidence, r.Evidence)
+			}
+			if r.Partial {
+				k.partial++
 			}
 			detail := layer.Details[i]
 			if detail.MobsTotal > 0 {
@@ -212,8 +216,8 @@ func TestRealWorldDetails(t *testing.T) {
 			continue
 		}
 		slices.Sort(k.evidence)
-		t.Logf("%-13s %d: %d hold saved mobs (%d mobs, %d named); %d hold spawners (%d); %d hold containers (%d unopened, %d holding, %d empty: %v); blocks %v; elders %v; evidence %v",
-			kind, k.structures, k.withMobs, k.mobs, k.named, k.withSpawners, k.spawners, k.withContainers, k.unopened, k.holding, k.empty, k.containers, k.blocks, k.elders, k.evidence)
+		t.Logf("%-13s %d: %d hold saved mobs (%d mobs, %d named); %d hold spawners (%d); %d hold containers (%d unopened, %d holding, %d empty: %v); blocks %v; elders %v; %d in part; evidence %v",
+			kind, k.structures, k.withMobs, k.mobs, k.named, k.withSpawners, k.spawners, k.withContainers, k.unopened, k.holding, k.empty, k.containers, k.blocks, k.elders, k.partial, k.evidence)
 	}
 	t.Logf("villages %+v", villages)
 }
