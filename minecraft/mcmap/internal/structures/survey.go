@@ -87,7 +87,7 @@ var (
 	})
 	metricDetailFailures = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mcmap_structures_detail_failures_total",
-		Help: "Surveys that ran out of time setting what the world holds inside its structures, and were served without it.",
+		Help: "Times a survey ran out of time finding the structures known by their blocks, or setting what the world holds inside its structures, and was served without that.",
 	})
 )
 
@@ -431,7 +431,10 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db); err != nil {
 		return Survey{}, err
 	}
-	found := held.locate()
+	found, err := s.locate(ctx, held)
+	if err != nil {
+		return Survey{}, err
+	}
 	survey.Contents = held.stats
 	for _, r := range survey.villageRecords {
 		survey.Contents.Skipped += r.skipped
@@ -473,6 +476,29 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	}
 	s.detail(ctx, &survey, held)
 	return survey, nil
+}
+
+// locate finds the kinds that are found by their blocks, within the time
+// the details have. Running out of it is not the survey's failure: the
+// kinds the world records are served without them.
+func (s *Surveyor) locate(ctx context.Context, held *contents) ([]Structure, error) {
+	timeout := s.DetailTimeout
+	if timeout == 0 {
+		timeout = detailTimeout
+	}
+	within, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	found, err := held.locate(within)
+	switch {
+	case err == nil:
+		return found, nil
+	case ctx.Err() != nil:
+		// The survey itself was stopped, which is its failure to report.
+		return nil, ctx.Err()
+	}
+	metricDetailFailures.Inc()
+	s.Logger.Error("the structures found by their blocks were not worked out; the rest are served without them", "error", err)
+	return nil, nil
 }
 
 // detail sets what the world holds inside each structure, within its own

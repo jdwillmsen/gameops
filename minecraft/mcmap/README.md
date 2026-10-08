@@ -935,6 +935,12 @@ structure's, whatever joined it: portal blocks laid in a line join without
 end. It is left out and counted as skipped. The widest chamber in the FWB
 world is found across 214 blocks.
 
+Finding them is a few lookups for each block kept, and shares the ten
+seconds the details have. At the bound, 400,000 blocks of a kind's own
+each in a chunk of its own, it takes 0.16 seconds; if it ever ran out of
+time, the kinds the world records would be served without these, and
+`mcmap_structures_detail_failures_total` would count it.
+
 Each carries `evidence`, how many such blocks it was found from, in place
 of `areas`. The page draws its box dashed and says in the sheet that the
 box is the box around those blocks and that the structure reaches further.
@@ -2189,7 +2195,7 @@ opens at the same place.
 | `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total`, `mcmap_structures_survey_panics_total` | Whether the survey is running. A panic is a survey abandoned over a record it could not get through: the structures of the last one that worked are still served, and it is logged with its stack |
 | `mcmap_structures_villages_skipped{reason}` | Villages left out: `empty` (counted by the game, no villagers), `malformed`, `unknown` (a key this version does not know), `limit` |
 | `mcmap_structures_contents{sort}`, `mcmap_structures_contents_skipped{reason}` | Saved mobs and block entities the last survey kept to set inside structures, `sort` being `mob` or `block`; and what it left out: `malformed` (an actor, block entity, or a village's `PLAYERS` or `RAID` record that did not parse), `limit` |
-| `mcmap_structures_detail_duration_seconds`, `mcmap_structures_detail_failures_total` | How long setting those inside the structures took; surveys that ran out of time doing it and were served without details |
+| `mcmap_structures_detail_duration_seconds`, `mcmap_structures_detail_failures_total` | How long setting those inside the structures took; and times a survey ran out of time doing it, or finding the structures known by their blocks, and was served without that |
 | `mcmap_structures_village_read_duration_seconds`, `mcmap_structures_village_read_failures_total`, `mcmap_structures_villages_last_success_timestamp_seconds` | How long the village records took to read; surveys that could not read them and kept the villages of the one before; and the snapshot the villages being served came from |
 | `mcmap_biomes_chunks{dimension}` | Chunks whose biomes are held |
 | `mcmap_biomes_kinds{listed}` | Different biomes held, `known` to this version's list or `unknown`. Unknown above zero means the list is behind the game |
