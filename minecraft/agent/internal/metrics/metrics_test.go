@@ -28,6 +28,9 @@ func TestEverySeriesIsExportedUnderItsAgreedName(t *testing.T) {
 		"mc_agent_announce_deliveries_total",
 		"mc_agent_audit_write_failures_total",
 		"mc_agent_auth_rejections_total",
+		"mc_agent_auth_abuse_hold",
+		"mc_agent_auth_sign_in_required",
+		"mc_agent_auth_sign_in_rejections_total",
 		"mc_agent_deaths_total",
 		"mc_agent_moderation_flags_total",
 		"mc_agent_server_tps",
@@ -62,7 +65,14 @@ func TestKnownLabelCombinationsStartAtZero(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"mc_agent_audit_write_failures_total", "mc_agent_auth_rejections_total", "mc_agent_deaths_total"} {
+	for _, name := range []string{
+		"mc_agent_audit_write_failures_total",
+		"mc_agent_auth_rejections_total",
+		"mc_agent_auth_abuse_hold",
+		"mc_agent_auth_sign_in_required",
+		"mc_agent_auth_sign_in_rejections_total",
+		"mc_agent_deaths_total",
+	} {
 		if !metricstest.Exists(t, name) {
 			t.Errorf("%s is not exported from startup", name)
 		}

@@ -114,7 +114,30 @@ var (
 
 	authRejectionsTotal = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mc_agent_auth_rejections_total",
-		Help: "Times Xbox Live rejected the account itself rather than the connection failing.",
+		Help: "Refreshes of the stored token that Xbox Live refused.",
+	})
+
+	// A state rather than a count, because the question an alert asks is
+	// whether somebody still has to act, and a counter cannot say the wait
+	// is over.
+	authSignInRequired = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mc_agent_auth_sign_in_required",
+		Help: "1 while the live agent is asking for a device-code login, pauses between codes included; 0 on a standby, and under an abuse hold when there is a stored token to retry instead.",
+	})
+
+	// What the gauge above cannot say: under a hold it can read 0 with the
+	// agent still out of the game, and this is the series that explains why.
+	authAbuseHold = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mc_agent_auth_abuse_hold",
+		Help: "1 on the live agent from Microsoft answering with an abuse-mode hold until it issues a token or has not mentioned the hold for the cooldown; 0 on a standby.",
+	})
+
+	// Separate from authRejectionsTotal: that one counts a stored token
+	// being refused, which a sign-in may cure, and this one counts the
+	// sign-in itself being refused, which nothing this agent does can.
+	authSignInRejectionsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mc_agent_auth_sign_in_rejections_total",
+		Help: "Completed device-code logins that Microsoft refused to issue a token for.",
 	})
 
 	// Counted when a flag is written, not when a rule fires, so this agrees
@@ -255,8 +278,21 @@ func AnnounceDelivery(d Delivery, err error) {
 // AuditWriteFailure counts one dispatch the audit trail did not record.
 func AuditWriteFailure() { auditWriteFailuresTotal.Inc() }
 
-// AuthRejection counts one Xbox Live rejection of the account.
+// AuthRejection counts one refresh of the stored token that Xbox Live
+// refused.
 func AuthRejection() { authRejectionsTotal.Inc() }
+
+// AuthAbuseHold records whether Microsoft's last answer was an abuse-mode
+// hold.
+func AuthAbuseHold(held bool) { authAbuseHold.Set(boolValue(held)) }
+
+// AuthSignInRequired records whether the live agent is asking for a
+// device-code login.
+func AuthSignInRequired(required bool) { authSignInRequired.Set(boolValue(required)) }
+
+// AuthSignInRejection counts one completed device-code login Microsoft
+// refused.
+func AuthSignInRejection() { authSignInRejectionsTotal.Inc() }
 
 // Death counts one death the respawner handled.
 func Death() { deathsTotal.Inc() }

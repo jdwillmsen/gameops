@@ -394,7 +394,7 @@ without that gauge beside them there is nothing on the graph to say so.
 | `MC_PORT` | `19132` | Bedrock server port |
 | `RECONNECT_MIN_MS` | `5000` | Initial reconnect backoff |
 | `RECONNECT_MAX_MS` | `300000` | Reconnect backoff ceiling |
-| `AUTH_RETRY_DELAY_MS` | `900000` | Flat wait before retrying after Xbox Live rejects the account itself (e.g. `invalid_grant`), instead of the reconnect ladder above |
+| `AUTH_RETRY_DELAY_MS` | `900000` | Flat wait before retrying after Xbox Live refuses the stored token (`invalid_grant`), instead of the reconnect ladder above. Refused device-code logins are paced off it too - see "When the stored token is refused" |
 | `SESSION_RECYCLE_MS` | `0` (off) | Drop and re-establish the Bedrock session this often, so that a real account joining is something measured rather than assumed — see "Proving the server can still be joined". Must be zero or at least ten times `RECONNECT_MAX_MS` |
 | `HTTP_ADDR` | `:8080` | `/healthz` + `/readyz` + `/metrics` listen address |
 | `AUTH_CACHE_DIR` | `/data/auth` | File token cache, one file per `MC_USERNAME`. Used on its own when `PG_HOST` is unset, and read-through only when it is - see "Where the token is cached" |
@@ -453,7 +453,10 @@ breaking change.
 | `mc_agent_wiki_requests_total` | counter | `outcome` | per `wiki_lookup` - lookups, not HTTP requests, since one lookup can make several; every outcome starts at zero |
 | `mc_agent_announce_deliveries_total` | counter | `delivery`, `outcome` | per send attempt; `delivery="world_notice"` is one line of the damaged-world warning |
 | `mc_agent_audit_write_failures_total` | counter | none | per dispatch the audit trail did not record |
-| `mc_agent_auth_rejections_total` | counter | none | per Xbox Live account rejection |
+| `mc_agent_auth_rejections_total` | counter | none | per refresh of the stored token that Xbox Live refused, counted where it happens - so it keeps moving while a sign-in is on offer beside the token |
+| `mc_agent_auth_sign_in_required` | gauge | none | `1` on the live agent from the first device code it prints - store empty, or stored token refused - until it has a token to use, pauses between codes included. `0` otherwise: always on a standby (cleared as the turn ends), and under an abuse hold when there is a stored token to retry instead |
+| `mc_agent_auth_sign_in_rejections_total` | counter | none | per device-code login a person completed and Microsoft refused at the poll; a code Microsoft would not issue is not counted |
+| `mc_agent_auth_abuse_hold` | gauge | none | `1` on the live agent from Microsoft answering a refresh or a sign-in with an abuse-mode hold, until it issues the agent a token or has not mentioned the hold for 24 times `AUTH_RETRY_DELAY_MS`. `0` otherwise, and always on a standby |
 | `mc_agent_deaths_total` | counter | none | per death the respawner handles |
 | `mc_agent_moderation_flags_total` | counter | `rule`, `action` | per flag written to the moderation record; every pair starts at zero |
 | `mc_agent_server_tps` | gauge | none | per successful TPS measurement, background or `!ping` |
@@ -1639,8 +1642,9 @@ can see.
 
 ## First-run login
 
-The device-code login runs in exactly one case: the store holds no token for
-`MC_USERNAME` yet. The agent then prints a Microsoft device-code login URL
+The device-code login runs when the store holds no token for `MC_USERNAME`
+yet, and - beside a token that is kept - when Microsoft has refused the stored
+one repeatedly (next section). The agent then prints a Microsoft device-code login URL
 and code to stdout - in a container, that means the pod logs. Complete the
 login once; the resulting token is written to whichever store was chosen
 above and refreshed automatically on subsequent runs.
@@ -1667,11 +1671,120 @@ a container would otherwise block on a device code nobody is watching for:
   database problem. The file fallback answers if it can, and startup fails if
   it cannot: an unreadable store is never downgraded to an empty one on the
   way through the fallback.
-- **Expired or revoked refresh token** - the store is read once more first, in
+- **Refresh token Microsoft refuses** - the store is read once more first, in
   case what this process holds has been superseded by what the live agent
-  wrote; if that is no better, it surfaces as a dial failure and the connect
-  loop retries with backoff indefinitely, and no login prompt is ever printed.
-  Recover the same way: delete the stored token and restart.
+  wrote. If the store agrees, see the next section.
+
+## When the stored token is refused
+
+Microsoft refuses with `invalid_grant` for more than one reason, and the agent
+tells them apart by the wording, because they call for opposite responses:
+
+| `refusal` | Wording | Response |
+|---|---|---|
+| `interaction_required` | "user interaction is required" | a person has to do something - counts towards a sign-in prompt |
+| `abuse_hold` | "abuse mode" | a hold on the account - never prompts, waits the floor, and is remembered |
+| `unrecognised` | anything else | treated like a hold for that attempt, and the text is logged; a reworded or localised message fails towards doing less |
+
+Every wait below is `AUTH_RETRY_DELAY_MS` ("the floor", 15 minutes by default)
+or a multiple or fraction of it, before the connect loop's 50-100% jitter.
+
+**A refused refresh** waits the floor. The connect loop logs `auth_rejected`;
+the token source logs `auth_refresh_rejected` with `refusal`, `consecutive`,
+`store_confirmed`, `abuse_hold`, `token_origin` (`store`, `refresh` or
+`sign_in` - whether Microsoft issued this token to this very process) and
+`token_held_ms`, and counts it on `mc_agent_auth_rejections_total`. A refresh
+that failed without being refused is `auth_refresh_failed`.
+
+**After three consecutive `interaction_required` refusals** of a token the
+store confirms is current, the live agent logs `auth_sign_in_required`, sets
+`mc_agent_auth_sign_in_required` to 1 and prints a device code
+(`auth_device_code_login` with `reason="stored_token_refused"`; a first-run
+login has `reason="no_stored_token"` and sets the same gauge). Refusals the
+store cannot confirm, and refusals of any other kind, do not count, and any
+other kind starts the count again.
+
+The refused token is **not** removed. It stays in the store and in the
+process, and is refreshed no more often than half the floor - the shortest the
+floor is ever jittered down to - so offering a sign-in never puts it in front
+of Microsoft more often than retrying it alone did. `auth_rejected` stops
+appearing at this point, because the refused refresh is followed by the prompt
+instead of being returned to the connect loop; the counter and
+`auth_refresh_rejected` do not stop.
+
+What happens to a code printed beside a stored token:
+
+| Outcome | Event | Next code |
+|---|---|---|
+| sign-in works | `auth_sign_in_completed` | none - the token replaces the refused one through the ordinary write and the gauge returns to 0 |
+| nobody answers, or the code could not be requested | `auth_sign_in_failed` | after a sixth of the floor, doubling for each one in a row up to four floors: 2.5, 5, 10, 20, 40 and then 60 minutes at the default |
+| completed, refused as `interaction_required`, first in a row | `auth_sign_in_rejected` | after a sixth of the floor (75-150s at the default, after jitter) |
+| completed, refused again - the second in a row and every one after | `auth_sign_in_rejected` | after the full floor |
+| completed, refused as `abuse_hold` or `unrecognised` | `auth_sign_in_rejected` | after the full floor; under `abuse_hold` there is no next code - see below |
+| Microsoft refuses to issue a code at all | `auth_sign_in_failed` | after the full floor |
+
+Every `auth_sign_in_rejected` carries `refusal` and `consecutive` and moves
+`mc_agent_auth_sign_in_rejections_total`. The run of refusals is ended only by
+Microsoft issuing a token - a code that expires in between does not reset it.
+The run of unanswered codes is ended by anybody answering one, whatever
+Microsoft then says.
+
+A refused sign-in means the account, not the token: no credential the agent
+could hold would do better. If the refusal was something that lifts by itself,
+the kept token refreshes again and the agent rejoins with nobody signing in.
+
+**Unanswered codes are backed off** because a code is polled every few seconds
+for the quarter of an hour it lasts, and codes printed back to back for a
+prompt nobody is reading come to about 96 a day. Backed off there are at most
+a few dozen, and a person arriving late finds one within the hour. With no
+stored token - the first-run path - nothing changes: the next code follows on
+the ordinary reconnect ladder, as it always did. There is no way to ask a running agent for a code sooner. Deleting
+the pod does **not** produce one promptly either: the new pod starts its count
+again and prints a code after three refused refreshes, which is two floors.
+The one prompt route is to delete the stored token and then the pod, which
+takes the first-run path and prints a code at start-up.
+
+**An abuse hold is remembered.** Under one the two doors disagree - the
+sign-in is refused as `abuse_hold` while the refresh beside it goes on being
+refused as `interaction_required` - so the hold is not re-read from each
+answer. From the first `abuse_hold` answer, to a refresh or to a sign-in,
+`mc_agent_auth_abuse_hold` is 1, no refusal counts towards a prompt and no
+code is printed beside a stored token, until one of:
+
+- Microsoft issues the agent a token (a refresh that works, or a sign-in);
+- the hold has gone unmentioned for 24 floors - six hours at the default -
+  after which refusals count again and the third prints a code. Without this
+  a hold that lifted over a token that stayed dead would leave the agent out
+  of the game until its pod was deleted;
+- the process restarts, which forgets it.
+
+A token merely read back from the store ends nothing: it is not evidence until
+Microsoft has honoured it.
+
+### Two things this does that the previous behaviour did not
+
+Both are deliberate, and both are attempts on an account Microsoft has just
+refused, so they are stated here rather than left to be found:
+
+- **One quick retry after a refused sign-in.** The first refused sign-in is
+  followed by a new code after 75-150 seconds, where everything before waited
+  the 7.5-15 minute floor. A person who answers promptly can therefore make up
+  to three attempts in two to three minutes - the refresh that offered the
+  sign-in, the sign-in, and the retry - before the floor applies. It is there
+  for whoever has just changed something on the account.
+- **An abuse hold with no stored token still prints a code once per floor.**
+  There is nothing else to try, so the first-run path keeps asking at the
+  rate it always did, with both gauges at 1. Each code is an attempt only if a
+  person answers it.
+
+### What cured it once
+
+On 2026-10-08 the stored token was refused as `interaction_required`, and so
+was every device-code sign-in after it, each one completed in the browser to
+Microsoft's own "you're signed in" page. The next sign-in after two-step
+verification was enabled on the Microsoft account succeeded. Why Microsoft
+required it is unknown; if a completed sign-in is refused with this wording,
+look at the account's security settings before trying another code.
 
 ## Handing over to a standby
 

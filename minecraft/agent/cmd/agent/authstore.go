@@ -84,10 +84,21 @@ func openTokenStore(cfg config.Config, shared mcauth.Store, log *logging.Logger)
 // the live agent stored, not by rotating anything of its own.
 type tokenLiveGate struct {
 	live atomic.Bool
+	// onClose runs as the claim is given up. Nothing asks a standby for a
+	// token, so anything the token source was reporting about the login has
+	// to be withdrawn here or it stands for as long as the process stands by.
+	// Set once, before the first turn.
+	onClose func()
 }
 
-func (g *tokenLiveGate) open()  { g.live.Store(true) }
-func (g *tokenLiveGate) close() { g.live.Store(false) }
+func (g *tokenLiveGate) open() { g.live.Store(true) }
+
+func (g *tokenLiveGate) close() {
+	g.live.Store(false)
+	if g.onClose != nil {
+		g.onClose()
+	}
+}
 
 func (g *tokenLiveGate) isOpen() bool { return g.live.Load() }
 

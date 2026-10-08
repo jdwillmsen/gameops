@@ -13,6 +13,8 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/metrics/metricstest"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
 )
@@ -328,3 +330,64 @@ func (corruptStore) Load(context.Context) (*oauth2.Token, error) {
 }
 
 func (corruptStore) Save(context.Context, *oauth2.Token) error { return nil }
+
+// Nothing asks a standby for a token, so whatever the token source was
+// reporting about the login is only withdrawn if giving up the claim says so.
+func TestTokenLiveGate_ClosingTellsTheTokenSourceToStandDown(t *testing.T) {
+	var g tokenLiveGate
+	stoodDown := 0
+	g.onClose = func() {
+		if g.isOpen() {
+			t.Error("stood down while the gate still read open")
+		}
+		stoodDown++
+	}
+
+	g.open()
+	if stoodDown != 0 {
+		t.Fatalf("stood down %d times on opening", stoodDown)
+	}
+	g.close()
+	if stoodDown != 1 {
+		t.Errorf("stood down %d times on closing, want 1", stoodDown)
+	}
+}
+
+// The same thing end to end, through the real token source and the real
+// gauges: a process demoted between two codes, with no further Token call.
+func TestEndingATurn_WithdrawsTheSignInAndHoldGauges(t *testing.T) {
+	// A context that is already over makes the real device-code request fail
+	// before it reaches the network, which is all this needs: a login that
+	// came to nothing while the process was live.
+	over, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	gate := &tokenLiveGate{}
+	ts, err := mcauth.TokenSource(over, &sharedStore{}, io.Discard,
+		mcauth.WithLiveGate(gate.isOpen),
+		mcauth.WithHooks(mcauth.Hooks{
+			SignInRequired: metrics.AuthSignInRequired,
+			AbuseHold:      metrics.AuthAbuseHold,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("TokenSource: %v", err)
+	}
+	gate.onClose = func() { mcauth.StandDown(ts) }
+
+	_, endTurn := beginTurn(t.Context(), gate)
+	if _, err := ts.Token(); !mcauth.IsSignIn(err) {
+		t.Fatalf("Token = %v, want a failed sign-in", err)
+	}
+	if got := metricstest.Value(t, "mc_agent_auth_sign_in_required"); got != 1 {
+		t.Fatalf("sign-in required = %v while live and prompting, want 1", got)
+	}
+
+	endTurn()
+	if got := metricstest.Value(t, "mc_agent_auth_sign_in_required"); got != 0 {
+		t.Errorf("sign-in required = %v on a standby, want 0", got)
+	}
+	if got := metricstest.Value(t, "mc_agent_auth_abuse_hold"); got != 0 {
+		t.Errorf("abuse hold = %v on a standby, want 0", got)
+	}
+}
