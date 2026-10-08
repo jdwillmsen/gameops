@@ -155,9 +155,19 @@ func TestViewsComeBuiltInAndSwitchAtAStroke(t *testing.T) {
 			t.Errorf("settings.js no longer has a built-in view with %s", name)
 		}
 	}
-	// The default view is in the record before any script reads its part.
-	if !regexp.MustCompile(`const first = state\.views\.start \? find\(state\.views\.start\) : null;\s*if \(first\) \{\s*adopt\(first, true\);`).Match(settings) {
-		t.Error("settings.js no longer applies the default view before the page's scripts start")
+	// The default view is in the record before any script reads its part,
+	// without its appearance: a theme chosen in Appearance is not undone by
+	// the next load.
+	if !regexp.MustCompile(`const first = state\.views\.start \? find\(state\.views\.start\) : null;\s*if \(first\) \{\s*const \{ look, \.\.\.shown \} = first;\s*adopt\(shown, true\);`).Match(settings) {
+		t.Error("settings.js no longer applies the default view, less its appearance, before the page's scripts start")
+	}
+	// And the page says so where the view is marked and where it is saved.
+	if !bytes.Contains(read(t, "views.js"), []byte("The appearance stays as you last set it.")) || !bytes.Contains(read(t, "index.html"), []byte("A view the page opens with never changes the appearance.")) {
+		t.Error("the page no longer says that a view it opens with leaves the appearance alone")
+	}
+	// Its pin is put on as the map shows, and not over the viewer's own.
+	if !bytes.Contains(read(t, "views.js"), []byte("if (pin && there && app.chunk && app.chunk.pin && !app.chunk.pinned()) app.chunk.pin(")) {
+		t.Error("views.js may pin the default view's chunk over one the viewer has pinned since")
 	}
 	js := read(t, "views.js")
 	for _, need := range []string{
