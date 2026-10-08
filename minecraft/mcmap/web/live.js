@@ -20,9 +20,14 @@
   if (!app.duration) return;
   const { map, icons, names, duration } = app;
 
-  // The pace and the pause are kept in the page's one record, where the
-  // page has one; without it they last for the visit.
-  const settings = app.settings || null;
+  // The pace and the pause are kept in the page's one record. A page from
+  // before the script that keeps it has none, and they are then read from
+  // and written to the key they always had, exactly as they were.
+  const settings = window.mcmapSettings || null;
+  const CONTROL_KEY = 'mcmap.liveControl';
+  // Where the layer's one on-and-off switch was kept before it could be
+  // paused.
+  const OLD_KEY = 'mcmap.live';
   const look = () => (settings ? settings.look() : {});
   const themed = (name, fallback) => (settings && settings.colour(name)) || fallback;
   // Seconds between redraws that the viewer is offered; any other length
@@ -157,6 +162,19 @@
     const saved = settings.get('live');
     control.paused = saved.paused === true;
     control.interval = paceOf(saved.interval);
+  } else {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CONTROL_KEY) || 'null');
+      if (saved && typeof saved === 'object') {
+        if (typeof saved.paused === 'boolean') control.paused = saved.paused;
+        control.interval = paceOf(saved.interval);
+      } else {
+        // Whoever had the layer switched off still gets a page that opens
+        // no stream.
+        const old = JSON.parse(localStorage.getItem(OLD_KEY) || '{}');
+        control.paused = Boolean(old) && old.on === false;
+      }
+    } catch { /* a browser that refuses storage still gets the defaults */ }
   }
 
   // The layer's rows in the panel, by category, while the service has a
@@ -795,7 +813,11 @@
   }
 
   function saveControl() {
-    if (settings) settings.set('live', control);
+    if (settings) {
+      settings.set('live', control);
+      return;
+    }
+    try { localStorage.setItem(CONTROL_KEY, JSON.stringify(control)); } catch { /* not kept, still applied */ }
   }
 
   function paintControl() {

@@ -7,9 +7,8 @@
 // nothing of how a theme or a size is drawn. Each control marks which of
 // its values is the default, and one button puts them all back.
 (() => {
-  const app = window.mcmap;
-  if (!app || !app.settings) return;
-  const { settings } = app;
+  const settings = window.mcmapSettings;
+  if (!settings) return;
 
   const el = {
     open: document.getElementById('appearance-open'),

@@ -16,8 +16,8 @@
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
   // after a release this can meet scripts from before there were views.
-  if (!app || !app.map || !app.settings || !app.place || !app.layers || !app.layers.adopt) return;
-  const { settings } = app;
+  const settings = window.mcmapSettings;
+  if (!app || !app.map || !settings || !app.place || !app.layers || !app.layers.adopt) return;
 
   const el = {
     open: document.getElementById('views-open'),
