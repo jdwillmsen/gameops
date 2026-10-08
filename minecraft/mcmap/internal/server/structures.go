@@ -109,6 +109,10 @@ const (
 	// standingUnknown: the village has standings, and nothing says which
 	// of the world's players the session is.
 	standingUnknown = "unknown"
+	// standingPending: the session's player has been seen in the game, but
+	// only since the snapshot the standings were read from. Which record
+	// is theirs is not said until a snapshot taken after they were seen.
+	standingPending = "pending"
 )
 
 type standingJSON struct {
@@ -128,9 +132,40 @@ type structureDetailJSON struct {
 	Standing *standingJSON `json:"standing,omitempty"`
 }
 
-// maxKnownPlayers bounds how many players' ids are remembered. A server
-// holds a few dozen players; past this the memory is started again.
-const maxKnownPlayers = 4096
+const (
+	// maxKnownPlayers bounds how many players' ids are remembered. A
+	// server holds a few dozen players; past this the memory is started
+	// again.
+	maxKnownPlayers = 4096
+	// playerMemory is how long a player's id is believed after the live
+	// layer last showed them under their gamertag.
+	playerMemory = 30 * time.Minute
+)
+
+// knownPlayer is the id the world knows one session's player by, and when
+// the live layer first and last bore that out.
+type knownPlayer struct {
+	id          int64
+	first, last time.Time
+}
+
+// worldMark is what tells one world from another, and a world from an
+// earlier copy of itself: an id means something in one world only.
+type worldMark struct {
+	known bool
+	seed  int64
+	tick  int64
+}
+
+func markOf(survey structures.Survey) worldMark {
+	return worldMark{known: survey.HasLevel, seed: survey.Level.Seed, tick: survey.Level.Tick}
+}
+
+// follows reports whether m is the same world as before, no earlier in
+// its own time. A world that cannot be told is taken for another.
+func (m worldMark) follows(before worldMark) bool {
+	return m.known && before.known && m.seed == before.seed && m.tick >= before.tick
+}
 
 // handleStructureDetail serves what the save holds inside one recorded
 // structure, named the way the page's address names it: by its kind and
@@ -167,7 +202,7 @@ func (s *Server) handleStructureDetail(w http.ResponseWriter, r *http.Request) {
 			out.Detail = layer.Details[i]
 		}
 		if out.Detail != nil && out.Detail.Village != nil {
-			out.Standing = s.standing(r, out.Detail.Village)
+			out.Standing = s.standing(r, out.Detail.Village, survey)
 		}
 		writeJSON(w, http.StatusOK, out)
 		return
@@ -178,13 +213,13 @@ func (s *Server) handleStructureDetail(w http.ResponseWriter, r *http.Request) {
 // standing is what a village thinks of the player asking. Who that is
 // comes from the session and nowhere else: nothing in the request can name
 // another player, and no other player's standing is in the answer.
-func (s *Server) standing(r *http.Request, v *structures.VillageDetail) *standingJSON {
+func (s *Server) standing(r *http.Request, v *structures.VillageDetail, survey structures.Survey) *standingJSON {
 	if v.Met == 0 {
 		return &standingJSON{State: standingNone}
 	}
-	player, ok := s.playerID(r)
-	if !ok {
-		return &standingJSON{State: standingUnknown}
+	player, state := s.playerID(r, survey)
+	if state != standingKnown {
+		return &standingJSON{State: state}
 	}
 	value, met := v.Standing(player)
 	if !met {
@@ -193,45 +228,92 @@ func (s *Server) standing(r *http.Request, v *structures.VillageDetail) *standin
 	return &standingJSON{State: standingKnown, Value: &value}
 }
 
-// playerID is the UniqueID the world's own records know the session's
-// player by. The session holds an XUID and the world's records do not, so
-// the two are joined where both are seen at once: the agent reports the
-// gamertag each XUID is online under, and the live layer the id the game
-// gives the player of that gamertag. It is remembered from then on, so a
-// player need only have been in the game once since this service started.
-func (s *Server) playerID(r *http.Request) (int64, bool) {
-	id, ok := auth.FromContext(r.Context())
-	if !ok || !auth.IsXUID(id.XUID) {
+// now is the clock the memory of players is kept by.
+func (s *Server) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
+// seenLive is the id the game gives the session's player, if the live
+// layer shows them now. The session holds an XUID and the world's records
+// do not, so the two are joined where both are seen at once: the agent
+// reports the gamertag each XUID is online under, and the live layer the
+// id of the player of that gamertag.
+func (s *Server) seenLive(xuid string) (int64, bool) {
+	if s.Heads == nil || s.Live == nil {
 		return 0, false
 	}
-	if s.Heads != nil && s.Live != nil {
-		if _, self := s.Heads.Listing(id.XUID); self != "" {
-			var found []int64
-			now := time.Now()
-			for _, dimension := range render.Dimensions {
-				for _, p := range s.Live.Store.Snapshot(dimension, now).Players {
-					if icons.Fold(p.Name) != self {
-						continue
-					}
-					if n, err := strconv.ParseInt(p.ID, 10, 64); err == nil {
-						found = append(found, n)
-					}
-				}
+	_, self := s.Heads.Listing(xuid)
+	if self == "" {
+		return 0, false
+	}
+	var found []int64
+	now := time.Now()
+	for _, dimension := range render.Dimensions {
+		for _, p := range s.Live.Store.Snapshot(dimension, now).Players {
+			if icons.Fold(p.Name) != self {
+				continue
 			}
-			// Two players under one name cannot be told apart by it.
-			if len(found) == 1 {
-				s.mu.Lock()
-				if s.players == nil || len(s.players) >= maxKnownPlayers {
-					s.players = map[string]int64{}
-				}
-				s.players[id.XUID] = found[0]
-				s.mu.Unlock()
-				return found[0], true
+			if n, err := strconv.ParseInt(p.ID, 10, 64); err == nil {
+				found = append(found, n)
 			}
 		}
 	}
+	// Two players under one name cannot be told apart by it.
+	if len(found) != 1 {
+		return 0, false
+	}
+	return found[0], true
+}
+
+// playerID is the UniqueID the world's records know the session's player
+// by, with standingKnown; or why it cannot be said.
+//
+// An id is one world's. It is remembered only while the surveys go on
+// being of the same world and no earlier in it, so a world put in place of
+// another, or put back to an earlier copy, starts the memory again: the
+// same id may be another player's there. It is believed for playerMemory
+// after the live layer last bore it out. And it is used only against a
+// snapshot taken after it was first borne out, since a snapshot from
+// before may be of the world before this one, which nothing can tell until
+// the next snapshot is read.
+func (s *Server) playerID(r *http.Request, survey structures.Survey) (int64, string) {
+	id, ok := auth.FromContext(r.Context())
+	if !ok || !auth.IsXUID(id.XUID) {
+		return 0, standingUnknown
+	}
+	live, seen := s.seenLive(id.XUID)
+	now, world := s.now(), markOf(survey)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	player, known := s.players[id.XUID]
-	return player, known
+	if !world.follows(s.playersWorld) || len(s.players) >= maxKnownPlayers {
+		s.players = nil
+	}
+	s.playersWorld = world
+	known, remembered := s.players[id.XUID]
+	if remembered && now.Sub(known.last) > playerMemory {
+		delete(s.players, id.XUID)
+		remembered = false
+	}
+	if seen {
+		if !remembered || known.id != live {
+			known = knownPlayer{id: live, first: now}
+		}
+		known.last = now
+		if s.players == nil {
+			s.players = map[string]knownPlayer{}
+		}
+		s.players[id.XUID] = known
+		remembered = true
+	}
+	switch {
+	case !remembered:
+		return 0, standingUnknown
+	case known.first.After(survey.At):
+		return 0, standingPending
+	}
+	return known.id, standingKnown
 }

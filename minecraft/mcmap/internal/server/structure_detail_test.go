@@ -165,12 +165,29 @@ func TestStructureDetail_IsOfOneTheListHolds(t *testing.T) {
 	}
 }
 
+// seenAt sets the clock the server remembers players by.
+func seenAt(s *Server, at time.Time) {
+	s.clock = func() time.Time { return at }
+}
+
+// stateOf is how the village's standing for a player is answered.
+func stateOf(t *testing.T, s *Server, id auth.Identity) string {
+	t.Helper()
+	got, body := detailOf(t, s, villageDetailPath, session(s, id))
+	if got.Standing == nil || (got.Standing.Value != nil) != (got.Standing.State == "known") {
+		t.Fatalf("standing = %s", body)
+	}
+	return got.Standing.State
+}
+
 // What a village thinks of a player is that player's to see and nobody
 // else's. Whose it is comes from the session: nothing a request says can
 // name another player.
 func TestStructureDetail_AStandingGoesOnlyToThePlayerItIsOf(t *testing.T) {
 	s := withIcons(t)
 	s.Structures = detailed()
+	// Both were in the game before the snapshot the standings are from.
+	seenAt(s, renderedAt.Add(-time.Minute))
 	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld, alex: alexInWorld})
 
 	for id, want := range map[auth.Identity]int32{steve: steveStanding, alex: alexStanding} {
@@ -203,39 +220,32 @@ func TestStructureDetail_AStandingIsNotGuessedAt(t *testing.T) {
 	stranger := auth.Identity{XUID: "2535400000000003", Gamertag: "Made Up Stranger"}
 	s := withIcons(t)
 	s.Structures = detailed()
-	state := func(id auth.Identity) string {
-		t.Helper()
-		got, body := detailOf(t, s, villageDetailPath, session(s, id))
-		if got.Standing == nil || (got.Standing.Value != nil) != (got.Standing.State == "known") {
-			t.Fatalf("standing = %s", body)
-		}
-		return got.Standing.State
-	}
+	seenAt(s, renderedAt.Add(-time.Minute))
 	// Nobody has been seen in the game: nothing says which record is whose.
-	if got := state(steve); got != "unknown" {
+	if got := stateOf(t, s, steve); got != "unknown" {
 		t.Errorf("before anybody is online: %q, want unknown", got)
 	}
 	// Two players under one name cannot be told apart by it.
 	twin := auth.Identity{XUID: alex.XUID, Gamertag: steve.Gamertag}
 	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld, twin: alexInWorld})
-	if got := state(steve); got != "unknown" {
+	if got := stateOf(t, s, steve); got != "unknown" {
 		t.Errorf("with a namesake online: %q, want unknown", got)
 	}
 	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld, stranger: -4294967399})
-	if got := state(steve); got != "known" {
+	if got := stateOf(t, s, steve); got != "known" {
 		t.Errorf("online: %q, want known", got)
 	}
 	// One the village has never met has no standing there, which is not
 	// the same as one of nought.
-	if got := state(stranger); got != "none" {
+	if got := stateOf(t, s, stranger); got != "none" {
 		t.Errorf("a player the village never met: %q, want none", got)
 	}
-	// Somebody who is not in the game now is still who they were.
+	// Somebody who has just left the game is still who they were.
 	inGame(t, s, map[auth.Identity]int64{stranger: -4294967399})
-	if got := state(steve); got != "known" {
+	if got := stateOf(t, s, steve); got != "known" {
 		t.Errorf("after leaving the game: %q, want known", got)
 	}
-	if got := state(alex); got != "unknown" {
+	if got := stateOf(t, s, alex); got != "unknown" {
 		t.Errorf("never seen in the game: %q, want unknown", got)
 	}
 	// Without a login there is nobody to be.
@@ -245,5 +255,103 @@ func TestStructureDetail_AStandingIsNotGuessedAt(t *testing.T) {
 	var got detailResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || got.Standing == nil || got.Standing.State != "unknown" {
 		t.Errorf("with no login: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// Who a player is in the world is believed only for a while after the game
+// last showed them, and again for as long as it goes on showing them.
+func TestStructureDetail_APlayersIDIsForgottenUnlessTheGameGoesOnShowingThem(t *testing.T) {
+	s := withIcons(t)
+	s.Structures = detailed()
+	seen := renderedAt.Add(-2 * time.Hour)
+	seenAt(s, seen)
+	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld})
+	if got := stateOf(t, s, steve); got != "known" {
+		t.Fatalf("seen in the game: %q, want known", got)
+	}
+	// Out of the game from here on.
+	inGame(t, s, nil)
+	seenAt(s, seen.Add(playerMemory))
+	if got := stateOf(t, s, steve); got != "known" {
+		t.Errorf("at the end of the memory: %q, want known", got)
+	}
+	seenAt(s, seen.Add(playerMemory+time.Second))
+	if got := stateOf(t, s, steve); got != "unknown" {
+		t.Errorf("past the memory: %q, want unknown", got)
+	}
+	// Asking again does not bring it back, and nor does the clock going
+	// back: it was forgotten, not hidden.
+	seenAt(s, seen)
+	if got := stateOf(t, s, steve); got != "unknown" {
+		t.Errorf("once forgotten: %q, want unknown", got)
+	}
+
+	// Seen again and again, the memory runs from the last time.
+	seenAt(s, seen)
+	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld})
+	stateOf(t, s, steve)
+	seenAt(s, seen.Add(playerMemory-time.Minute))
+	stateOf(t, s, steve)
+	inGame(t, s, nil)
+	seenAt(s, seen.Add(2*playerMemory-2*time.Minute))
+	if got := stateOf(t, s, steve); got != "known" {
+		t.Errorf("within the memory of the last time seen: %q, want known", got)
+	}
+}
+
+// An id is one world's. In a world put in place of another, or put back to
+// an earlier copy of itself, the same id may be somebody else's.
+func TestStructureDetail_APlayersIDIsForgottenWhenTheWorldIsAnother(t *testing.T) {
+	for name, change := range map[string]func(*structures.Survey){
+		"another seed":             func(v *structures.Survey) { v.Level.Seed++ },
+		"an earlier copy":          func(v *structures.Survey) { v.Level.Tick-- },
+		"a level that is not read": func(v *structures.Survey) { v.HasLevel = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := withIcons(t)
+			source := detailed()
+			source.survey.Level.Tick, source.survey.Level.TickKnown = 5000, true
+			s.Structures = source
+			seenAt(s, renderedAt.Add(-time.Minute))
+			inGame(t, s, map[auth.Identity]int64{steve: steveInWorld})
+			if got := stateOf(t, s, steve); got != "known" {
+				t.Fatalf("seen in the game: %q, want known", got)
+			}
+			inGame(t, s, nil)
+			// The same world a snapshot later keeps what it knows.
+			source.survey.Level.Tick += 18_000
+			if got := stateOf(t, s, steve); got != "known" {
+				t.Fatalf("a snapshot later: %q, want known", got)
+			}
+			change(&source.survey)
+			if got := stateOf(t, s, steve); got != "unknown" {
+				t.Errorf("in another world: %q, want unknown", got)
+			}
+		})
+	}
+}
+
+// A snapshot from before a player was first seen may be of the world
+// before this one, and nothing can tell until the next is read. Their
+// standing waits for a snapshot taken after they were seen.
+func TestStructureDetail_AStandingWaitsForASnapshotTakenAfterThePlayerWasSeen(t *testing.T) {
+	s := withIcons(t)
+	source := detailed()
+	s.Structures = source
+	seenAt(s, renderedAt.Add(time.Minute))
+	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld})
+	got, body := detailOf(t, s, villageDetailPath, session(s, steve))
+	if got.Standing == nil || got.Standing.State != "pending" || got.Standing.Value != nil || strings.Contains(body, fmt.Sprint(steveStanding)) {
+		t.Fatalf("seen only since the snapshot: %s, want pending and no value", body)
+	}
+	source.survey.At = renderedAt.Add(15 * time.Minute)
+	seenAt(s, renderedAt.Add(16*time.Minute))
+	if got := stateOf(t, s, steve); got != "known" {
+		t.Errorf("after the next snapshot: %q, want known", got)
+	}
+	// A player the game shows under another id is somebody new to it.
+	inGame(t, s, map[auth.Identity]int64{steve: alexInWorld})
+	if got := stateOf(t, s, steve); got != "pending" {
+		t.Errorf("shown under another id: %q, want pending", got)
 	}
 }
