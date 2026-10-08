@@ -56,7 +56,8 @@
     if (kept !== 'yes') {
       el.kept.textContent = kept === 'full'
         ? 'This browser has no room left to keep settings, so these last until the page is closed.'
-        : 'This browser is not keeping settings, so these last until the page is closed.';
+        : kept === 'large' ? 'What this browser keeps for the map is larger than the page ever writes and was left alone, so these last until the page is closed.'
+          : 'This browser is not keeping settings, so these last until the page is closed.';
     }
   }
 

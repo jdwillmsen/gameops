@@ -190,3 +190,34 @@ func TestTheGridAndTheBiomePickedOutSurviveAPageStart(t *testing.T) {
 		t.Error("app.js no longer keeps the grid's switch and puts it back")
 	}
 }
+
+// A key is the viewer's to write, or a stranger's, and must never be a
+// name every object already has; a record larger than the page writes is
+// not the page's, and is neither used nor written over; and another tab's
+// change of theme is on this one at once, not at its next unrelated write.
+func TestTheRecordIsNotFooledByItsOwnStorage(t *testing.T) {
+	js := read(t, "settings.js")
+	for _, need := range []string{
+		"const inherited = (name) => name in Object.prototype;",
+		"const out = Object.create(null);",
+		"const kept = n < max && key.test(name) && !inherited(name) ? kind(v[name], strict, name) : BAD;",
+		"if (text !== null && text.length > MAX_CHARS) {",
+		"kept = 'large';\n      raw = {};",
+		"if (e.storageArea !== store || e.key !== KEY || kept === 'large') return;",
+		"kept = Number.isInteger(raw.v) && raw.v > VERSION ? 'newer' : 'yes';",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("settings.js no longer has %s", need)
+		}
+	}
+	if !regexp.MustCompile(`if \(looked === JSON\.stringify\(state\.look\)\) return;\s*paint\(\);\s*tell\(\['look'\]\);`).Match(js) {
+		t.Error("settings.js no longer puts another tab's look on this one when it arrives")
+	}
+	// The system changing its mind is told by what was on the page before.
+	if !regexp.MustCompile(`const was = painted;\s*paint\(\);\s*if \(painted !== was\) tell\(\['look'\]\);`).Match(js) {
+		t.Error("settings.js no longer compares the look with what was painted before the system changed")
+	}
+	if !bytes.Contains(read(t, "views.js"), []byte("let pending = settings.kept() === 'large' ?")) {
+		t.Error("views.js no longer says once that an oversized record was left alone")
+	}
+}

@@ -75,6 +75,14 @@
   const MAX_FILE = 300_000;
   const FILE_NAME = 'mcmap-settings.json';
 
+  // Why nothing is being kept, for the states in which nothing is.
+  const UNKEPT = {
+    no: 'This browser is not keeping settings',
+    full: 'This browser has no room left to keep anything',
+    newer: 'What this browser keeps for the map was written by a later version of the page, and is left as it is',
+    large: 'What this browser keeps for the map is larger than the page ever writes, so it was left alone and the page is on its defaults',
+  };
+
   const make = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -93,7 +101,7 @@
   // The view last deleted, for as long as it can be put back.
   let undone = null;
   // Something to say as soon as there is a map to say it over.
-  let pending = '';
+  let pending = settings.kept() === 'large' ? `${UNKEPT.large}. Nothing new will be kept until the site’s data is cleared.` : '';
   let showingOffered = false;
   // Whether the list has been opened on the offered view yet.
   let announced = true;
@@ -368,11 +376,7 @@
 
     const kept = settings.kept();
     el.kept.hidden = kept === 'yes';
-    if (kept !== 'yes') {
-      el.kept.textContent = kept === 'full'
-        ? 'This browser has no room left to keep anything, so views saved now last until the page is closed. Export them to a file to keep them.'
-        : 'This browser is not keeping settings, so views saved here last until the page is closed. Export them to a file to keep them.';
-    }
+    if (kept !== 'yes') el.kept.textContent = `${UNKEPT[kept] || UNKEPT.no}, so views saved here last until the page is closed. Export them to a file to keep them.`;
 
     if (refocus) {
       const node = [...el.dialog.querySelectorAll('[data-act]')].find((other) => other.dataset.id === refocus.id && other.dataset.act === refocus.act && !other.disabled && !other.closest('[hidden]'))
@@ -609,7 +613,7 @@
     if (part === '') return;
     const read = unpack(part);
     if (read.error) {
-      pending = `That link had a view in it that was left out, because ${read.error}.`;
+      pending = `${pending} That link had a view in it that was left out, because ${read.error}.`.trim();
     } else {
       offered = read.view;
       delete offered.id;

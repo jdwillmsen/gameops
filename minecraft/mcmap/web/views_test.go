@@ -28,9 +28,14 @@ func TestViewsShowEveryNameAsTextAndUseNoneAsAnythingElse(t *testing.T) {
 	// What is refused in a name is what would make its text lie.
 	settings := read(t, "settings.js")
 	for _, need := range []string{
-		`const UNSAFE = '\\p{Cc}\\p{Cs}\\p{Co}\\p{Zl}\\p{Zp}\\u061c\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff';`,
+		// Control characters, and the format class: what takes no room, and
+		// what turns the direction of the writing round.
+		`const UNSAFE = '\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Zl}\\p{Zp}';`,
 		"const NAME_LENGTH = 40;",
-		"if (HAS_UNSAFE.test(said) || said !== said.trim()) return BAD;",
+		// And no more than three accents piled on one letter.
+		"const MARKS = 3;",
+		"if (HAS_UNSAFE.test(said) || PILED.test(said) || said !== said.trim()) return BAD;",
+		"said = said.replace(ALL_UNSAFE, '').replace(ALL_PILED, '$1').replace(/\\s+/gu, ' ').trim();",
 		"if (letters.length === 0 || (strict && letters.length > NAME_LENGTH)) return BAD;",
 	} {
 		if !bytes.Contains(settings, []byte(need)) {
