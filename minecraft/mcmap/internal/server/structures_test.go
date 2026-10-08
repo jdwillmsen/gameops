@@ -23,25 +23,28 @@ func (f *fakeStructures) Last() (structures.Survey, bool) { return f.survey, f.s
 // response is recognisable.
 const secretSeed = int64(0x1122334455667788)
 
+// surveyed is a survey of a world that is nobody's. Every box and site in
+// it is made up: where a real structure stands follows from its world's
+// seed, so no real one's position belongs in a test.
 func surveyed() *fakeStructures {
 	return &fakeStructures{surveyed: true, survey: structures.Survey{
 		At: renderedAt,
 		Layers: map[chunks.Dimension]structures.Layer{
 			chunks.Overworld: {
 				Recorded: []structures.Structure{
-					{Kind: structures.Monument, Box: structures.Box{MinX: 27, MinY: 39, MinZ: 5243, MaxX: 84, MaxY: 61, MaxZ: 5300}, Areas: 15},
-					{Kind: structures.Village, Box: structures.Box{MinX: -898, MinY: 55, MinZ: 1261, MaxX: -834, MaxY: 79, MaxZ: 1331},
+					{Kind: structures.Monument, Box: structures.Box{MinX: 4000, MinY: 39, MinZ: 6000, MaxX: 4047, MaxY: 61, MaxZ: 6047}, Areas: 15},
+					{Kind: structures.Village, Box: structures.Box{MinX: -2600, MinY: 60, MinZ: 1800, MaxX: -2550, MaxY: 80, MaxZ: 1860},
 						Village: &structures.VillageFacts{Counted: true, Villagers: 12, Golems: 1, Cats: 3, Beds: 11, Bells: 1, JobSites: 4}},
-					{Kind: structures.Village, Box: structures.Box{MinX: 200, MinY: 60, MinZ: 200, MaxX: 264, MaxY: 84, MaxZ: 264}, Village: &structures.VillageFacts{}},
+					{Kind: structures.Village, Box: structures.Box{MinX: 640, MinY: 60, MinZ: -800, MaxX: 704, MaxY: 84, MaxZ: -736}, Village: &structures.VillageFacts{}},
 				},
 			},
 			chunks.Nether: {
-				Recorded:      []structures.Structure{{Kind: structures.Fortress, Box: structures.Box{MinX: 74, MinY: 48, MinZ: -450, MaxX: 231, MaxY: 72, MaxZ: -286}, Areas: 165}},
-				Predicted:     []structures.Prediction{{Kind: structures.Fortress, X: 536, Z: 216}, {Kind: structures.Fortress, X: -600, Z: -2808, Generated: true}},
+				Recorded:      []structures.Structure{{Kind: structures.Fortress, Box: structures.Box{MinX: 40, MinY: 50, MinZ: -200, MaxX: 120, MaxY: 70, MaxZ: -130}, Areas: 165}},
+				Predicted:     []structures.Prediction{{Kind: structures.Fortress, X: 640, Z: 320}, {Kind: structures.Fortress, X: -480, Z: -960, Generated: true}},
 				PredictedMore: 3,
 			},
 		},
-		Check: structures.Check{State: structures.SeedVerified, Agree: 19, Findings: []string{"fortress predicted at nether -600, -2808"}, Total: 1,
+		Check: structures.Check{State: structures.SeedVerified, Agree: 19, Findings: []string{"fortress predicted at nether -480, -960"}, Total: 1,
 			Kinds: map[structures.Kind]structures.KindCheck{
 				structures.Fortress: {State: structures.SeedVerified, Agree: 11, Built: 8, Empty: 1, Findings: 1},
 				structures.Monument: {State: structures.SeedVerified, Agree: 11},
@@ -123,10 +126,10 @@ func TestStructuresKeepRecordedAndPredictedApartByDimension(t *testing.T) {
 	if !nether.Surveyed || nether.Prediction != structures.SeedVerified || nether.PredictedMore != 3 {
 		t.Errorf("nether = %+v", nether)
 	}
-	if len(nether.Recorded) != 1 || nether.Recorded[0].Kind != structures.Fortress || nether.Recorded[0].MaxX != 231 || nether.Recorded[0].Areas != 165 {
+	if len(nether.Recorded) != 1 || nether.Recorded[0].Kind != structures.Fortress || nether.Recorded[0].MaxX != 120 || nether.Recorded[0].Areas != 165 {
 		t.Errorf("nether recorded = %+v", nether.Recorded)
 	}
-	if len(nether.Predicted) != 2 || nether.Predicted[0].X != 536 || nether.Predicted[0].Generated || !nether.Predicted[1].Generated {
+	if len(nether.Predicted) != 2 || nether.Predicted[0].X != 640 || nether.Predicted[0].Generated || !nether.Predicted[1].Generated {
 		t.Errorf("nether predicted = %+v", nether.Predicted)
 	}
 	// Each dimension says how its own kinds fared, and no other's.
@@ -198,7 +201,7 @@ func TestStructuresServeAVillageAsARecordedStructure(t *testing.T) {
 			t.Errorf("village %d = %s %s, want %s", i, village["kind"], village["village"], want)
 		}
 	}
-	if string(got.Recorded[1]["minX"]) != "-898" || string(got.Recorded[1]["maxZ"]) != "1331" {
+	if string(got.Recorded[1]["minX"]) != "-2600" || string(got.Recorded[1]["maxZ"]) != "1860" {
 		t.Errorf("box = %v", got.Recorded[1])
 	}
 }
@@ -210,7 +213,7 @@ func TestStructuresNeverCarryTheSeed(t *testing.T) {
 	s.Structures = surveyed()
 	for _, d := range []string{"overworld", "nether", "end"} {
 		_, body := structuresOf(t, s, "/api/structures?dimension="+d)
-		for _, spelling := range []string{"1234605616436508552", "1432778632", "11223344", "55667788", "eed", "finding", "-600, -2808"} {
+		for _, spelling := range []string{"1234605616436508552", "1432778632", "11223344", "55667788", "eed", "finding", "-480, -960"} {
 			if strings.Contains(strings.ToLower(body), spelling) {
 				t.Errorf("%s: the response contains %q: %s", d, spelling, body)
 			}

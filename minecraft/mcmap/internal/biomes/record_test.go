@@ -168,22 +168,23 @@ func fixture(t *testing.T, name string) []byte {
 }
 
 // Records cut from the FWB world as it was on 2026-10-05, each from a
-// chunk whose biome is not in doubt.
+// chunk whose biome is not in doubt. A file is named for the biome it shows
+// and not for the chunk it was cut from: where a structure stands follows
+// from the seed, so the chunk of a real one is not something to publish.
+// The records hold biomes and heights and no position.
 func TestSurfaceOfRealRecords(t *testing.T) {
-	// An ocean monument, recorded at x 27 to 84, z 5243 to 5300, stands
-	// in deep ocean: chunk 3, 329.
-	for i, id := range surfaceOf(t, fixture(t, "overworld_3_329.data3d")) {
+	// A chunk of an ocean monument stands in deep ocean.
+	for i, id := range surfaceOf(t, fixture(t, "deep_ocean.data3d")) {
 		if id != 24 {
 			t.Fatalf("monument chunk, column %d = %s, want deep_ocean", i, Lookup(id).Name)
 		}
 	}
-	// A witch hut, recorded at x -1216 to -1210, z 1712 to 1720, stands
-	// in a swamp: chunk -76, 107, whose corner is the hut's. The swamp's
-	// edge runs under the hut, block by block, so it is the middle of the
-	// hut and most of the chunk that are swamp, not every column.
-	hut := surfaceOf(t, fixture(t, "overworld_-76_107.data3d"))
+	// A witch hut stands in a swamp. The swamp's edge runs under this one,
+	// block by block, so it is the middle of the hut and most of the chunk
+	// that are swamp, not every column.
+	hut := surfaceOf(t, fixture(t, "swamp_edge.data3d"))
 	if id := hut[4*16+3]; id != 6 {
-		t.Errorf("witch hut, x -1213 z 1716 = %s, want swampland", Lookup(id).Name)
+		t.Errorf("the middle of the witch hut = %s, want swampland", Lookup(id).Name)
 	}
 	swamp := 0
 	for _, id := range hut {
@@ -194,13 +195,13 @@ func TestSurfaceOfRealRecords(t *testing.T) {
 	if swamp <= Columns/2 {
 		t.Errorf("%d of the witch hut chunk's columns are swampland, want most", swamp)
 	}
-	// A fortress, at x 74 to 231, z -450 to -286: chunk 5, -28.
-	for i, id := range surfaceOf(t, fixture(t, "nether_5_-28.data3d")) {
+	// A chunk of a fortress.
+	for i, id := range surfaceOf(t, fixture(t, "nether.data3d")) {
 		if id != 8 && (id < 178 || id > 181) {
 			t.Fatalf("nether chunk, column %d = %s, which is no nether biome", i, Lookup(id).Name)
 		}
 	}
-	for i, id := range surfaceOf(t, fixture(t, "end_0_0.data3d")) {
+	for i, id := range surfaceOf(t, fixture(t, "the_end.data3d")) {
 		if id != 9 {
 			t.Fatalf("end chunk, column %d = %s, want the_end", i, Lookup(id).Name)
 		}
@@ -209,7 +210,7 @@ func TestSurfaceOfRealRecords(t *testing.T) {
 
 // Whatever a record is cut down to, reading it ends in an answer.
 func TestSurfaceOfATruncatedRecordNeverPanics(t *testing.T) {
-	for _, name := range []string{"overworld_-76_107.data3d", "nether_5_-28.data3d"} {
+	for _, name := range []string{"swamp_edge.data3d", "nether.data3d"} {
 		whole := fixture(t, name)
 		for n := range whole {
 			var out [Columns]uint32

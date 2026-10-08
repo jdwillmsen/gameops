@@ -87,7 +87,7 @@ func TestSearchFindsABiomeAStructureAndAMarkerByName(t *testing.T) {
 		t.Fatalf("monument: %s", describe(monument))
 	}
 	// The middle of the recorded box, at its floor.
-	if h := monument.Hits[0]; h.Kind != "structure" || h.Name != "Ocean Monument" || h.Detail != "monument" || h.X != 55 || h.Z != 5271 || h.Y == nil || *h.Y != 39 {
+	if h := monument.Hits[0]; h.Kind != "structure" || h.Name != "Ocean Monument" || h.Detail != "monument" || h.X != 4023 || h.Z != 6023 || h.Y == nil || *h.Y != 39 {
 		t.Errorf("monument = %+v", h)
 	}
 
@@ -201,7 +201,7 @@ func TestSearchListsNearestFirstAndOtherDimensionsAfter(t *testing.T) {
 	}
 	// The one the world recorded, then the two the seed implies, each
 	// saying which it is.
-	if h := fromNether.Hits; h[0].Certainty != "" || h[0].Y == nil || h[1].Certainty != "predicted" || h[1].X != 536 || h[1].Y != nil || h[2].Certainty != "predicted" {
+	if h := fromNether.Hits; h[0].Certainty != "" || h[0].Y == nil || h[1].Certainty != "predicted" || h[1].X != 640 || h[1].Y != nil || h[2].Certainty != "predicted" {
 		t.Errorf("from the nether: %+v", h)
 	}
 }
@@ -233,7 +233,7 @@ func TestSearchListsTheNearestPredictionsAsPredictions(t *testing.T) {
 			t.Errorf("hit %d = %+v, want the site at %d as %s", i, h, 100+i*100, want)
 		}
 	}
-	if h := got.Hits[predictedPerKind]; h.Certainty != "" || h.X != 55 {
+	if h := got.Hits[predictedPerKind]; h.Certainty != "" || h.X != 4023 {
 		t.Errorf("the recorded monument = %+v", h)
 	}
 	if got := search(t, s, "pillager", session(s, steve)); len(got.Hits) != 1 || got.Hits[0].Certainty != "candidate" {

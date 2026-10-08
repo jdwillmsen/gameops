@@ -21,7 +21,7 @@ const (
 	alexInWorld, alexStanding   = int64(-4294967302), int32(-17)
 )
 
-const villageDetailPath = "/api/structures/detail?dimension=overworld&kind=village&x=-866&z=1296"
+const villageDetailPath = "/api/structures/detail?dimension=overworld&kind=village&x=-2575&z=1830"
 
 // detailed is the survey of surveyed with what the save holds in each of
 // the overworld's structures.
@@ -115,8 +115,8 @@ func TestStructureDetail_NeedsASession(t *testing.T) {
 func TestStructureDetail_SaysWhatTheSaveHoldsInOneStructure(t *testing.T) {
 	s := withIcons(t)
 	s.Structures = detailed()
-	got, body := detailOf(t, s, "/api/structures/detail?dimension=overworld&kind=monument&x=55&z=5271", session(s, steve))
-	if got.Kind != "monument" || got.MinX == nil || *got.MinX != 27 || got.At == nil || !got.At.Equal(renderedAt) {
+	got, body := detailOf(t, s, "/api/structures/detail?dimension=overworld&kind=monument&x=4023&z=6023", session(s, steve))
+	if got.Kind != "monument" || got.MinX == nil || *got.MinX != 4000 || got.At == nil || !got.At.Equal(renderedAt) {
 		t.Errorf("answer = %s", body)
 	}
 	if got.Detail == nil || got.Detail.MobsTotal != 5 || got.Detail.Elders == nil || *got.Detail.Elders != 2 || got.Standing != nil {
@@ -139,13 +139,13 @@ func TestStructureDetail_IsOfOneTheListHolds(t *testing.T) {
 	s.Structures = detailed()
 	c := []*http.Cookie{session(s, steve)}
 	for path, want := range map[string]int{
-		"/api/structures/detail?dimension=overworld&kind=monument&x=55&z=5272":       http.StatusNotFound,
-		"/api/structures/detail?dimension=overworld&kind=fortress&x=55&z=5271":       http.StatusNotFound,
-		"/api/structures/detail?dimension=nether&kind=monument&x=55&z=5271":          http.StatusNotFound,
-		"/api/structures/detail?dimension=moon&kind=monument&x=55&z=5271":            http.StatusBadRequest,
+		"/api/structures/detail?dimension=overworld&kind=monument&x=4023&z=6024":     http.StatusNotFound,
+		"/api/structures/detail?dimension=overworld&kind=fortress&x=4023&z=6023":     http.StatusNotFound,
+		"/api/structures/detail?dimension=nether&kind=monument&x=4023&z=6023":        http.StatusNotFound,
+		"/api/structures/detail?dimension=moon&kind=monument&x=4023&z=6023":          http.StatusBadRequest,
 		"/api/structures/detail?dimension=overworld&kind=monument&x=55":              http.StatusBadRequest,
 		"/api/structures/detail?dimension=overworld&kind=monument&x=5e1&z=1":         http.StatusBadRequest,
-		"/api/structures/detail?dimension=overworld&x=55&z=5271":                     http.StatusBadRequest,
+		"/api/structures/detail?dimension=overworld&x=4023&z=6023":                   http.StatusBadRequest,
 		"/api/structures/detail?dimension=overworld&kind=monument&x=99999999999&z=1": http.StatusBadRequest,
 	} {
 		if rec := do(s.Handler(), "GET", path, "", c); rec.Code != want {

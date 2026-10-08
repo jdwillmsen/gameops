@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -16,25 +16,84 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
 
-// The records of two villages, as game version 1.26.52 wrote them in the FWB
-// world; the PLAYERS records are left behind. The first is a generated
-// village down to its last villager, with a golem, three cats, one claimed
-// bed and its bell. The second is one the game has made a record for and
-// never run.
-const (
-	realVillageInfo     = "0a0000040600424454696d654a36511f00000000040600474454696d652adc521f00000000010b00496e697469616c697a6564010405004d5469636bce3e471f0000000004060050445469636bbf10511f0000000003030052583000000000030300525831010000000303005259300000000003030052593101000000030300525a3000000000030300525a31010000000404005469636bb70e511f0000000001070056657273696f6e0103020058307efcffff0302005831befcffff03020059303700000003020059314f0000000302005a30ed0400000302005a313305000000"
-	realVillageDwellers = "0a00000908004477656c6c6572730a040000000906006163746f72730a0100000004020049444d510000d0ffffff0402005453840e511f00000000090e006c6173745f73617665645f706f730303000000affcffff410000000e05000000000906006163746f72730a01000000040200494439510000d0ffffff0402005453a90e511f00000000090e006c6173745f73617665645f706f730303000000b9fcffff40000000fb04000000000906006163746f72730000000000000906006163746f72730a0300000004020049443d510000d0ffffff0402005453b70e511f00000000090e006c6173745f73617665645f706f73030300000097fcffff46000000230500000004020049443a510000d0ffffff04020054538d0e511f00000000090e006c6173745f73617665645f706f730303000000a8fcffff43000000e50400000004020049443e510000d0ffffff0402005453940e511f00000000090e006c6173745f73617665645f706f73030300000092fcffff4700000001050000000000"
-	realVillagePOI      = "0a0000090300504f490a01000000040a0056696c6c6167657249444d510000d0ffffff090900696e7374616e6365730a0300000004080043617061636974790100000000000000080900496e69744576656e7400000804004e616d65080076696c6c61676572040a004f776e6572436f756e7401000000000000000506005261646975730000403f010400536b697000080a00536f756e644576656e740900756e646566696e6564030400547970650000000001070055736541414242010406005765696768740100000000000000030100589efcffff03010059430000000301005a130500000004080043617061636974791400000000000000080900496e69744576656e7400000804004e616d65080076696c6c61676572040a004f776e6572436f756e7401000000000000000506005261646975730000e040010400536b697000080a00536f756e644576656e740900756e646566696e656403040054797065010000000107005573654141424200040600576569676874010000000000000003010058a5fcffff03010059470000000301005aed04000000010400536b697001000000"
-
-	realNewVillageInfo     = "0a0000040600424454696d650000000000000000040600474454696d650000000000000000010b00496e697469616c697a6564000405004d5469636b000000000000000004060050445469636b000000000000000003030052583000000000030300525831010000000303005259300000000003030052593101000000030300525a3000000000030300525a31010000000404005469636b000000000000000001070056657273696f6e010302005830b2efffff0302005831f2efffff03020059303700000003020059314f0000000302005a30990d00000302005a31d90d000000"
-	realNewVillageDwellers = "0a00000908004477656c6c6572730a040000000906006163746f72730000000000000906006163746f72730000000000000906006163746f72730000000000000906006163746f727300000000000000"
-	realNewVillagePOI      = "0a0000090300504f49000000000000"
-)
-
+// The records of two villages, with every tag game version 1.26.52 writes
+// in each and in the order it writes them. The first is a generated village
+// down to its last villager, with a golem, three cats, one claimed bed and
+// its bell. The second is one the game has made a record for and never run.
+// Every value in them is made up: see the note in structures_test.go.
 var (
-	realVillageBox    = Box{-898, 55, 1261, -834, 79, 1331}
-	realNewVillageBox = Box{-4174, 55, 3481, -4110, 79, 3545}
+	livedVillageBox = Box{96, 60, -176, 150, 78, -112}
+	newVillageBox   = Box{320, 58, 400, 384, 82, 464}
+
+	livedVillageInfo     = gameInfo(livedVillageBox, 1, 4_000_000)
+	livedVillageDwellers = nbtRecord(nbtList("Dwellers",
+		gameDwellers(4_000_000, dweller{-101, 110, 64, -150}),
+		gameDwellers(4_000_000, dweller{-102, 120, 63, -140}),
+		gameDwellers(4_000_000),
+		gameDwellers(4_000_000, dweller{-103, 100, 66, -120}, dweller{-104, 112, 65, -170}, dweller{-105, 98, 67, -160}),
+	))
+	livedVillagePOI = nbtRecord(nbtList("POI", nbtCompound(
+		nbtLong("VillagerID", -101),
+		nbtList("instances",
+			gameClaim(0, "villager", 0.75, 1, 104, 64, -148),
+			gameClaim(1, "villager", 7, 20, 111, 66, -176),
+			nbtCompound(nbtByte("Skip", 1)),
+		),
+	)))
+
+	newVillageInfo     = gameInfo(newVillageBox, 0, 0)
+	newVillageDwellers = nbtRecord(nbtList("Dwellers", gameDwellers(0), gameDwellers(0), gameDwellers(0), gameDwellers(0)))
+	newVillagePOI      = nbtRecord(nbtList("POI"))
 )
+
+type dweller struct {
+	id      int64
+	x, y, z int32
+}
+
+// gameInfo is an INFO record as the game writes one: its timers, the flag,
+// the box its raid is fought in, the tick it was last run at, and its own
+// box. A village never run has every timer at nought.
+func gameInfo(box Box, counted byte, tick int64) []byte {
+	after := func(ticks int64) int64 {
+		if tick == 0 {
+			return 0
+		}
+		return tick + ticks
+	}
+	return nbtRecord(
+		nbtLong("BDTime", after(8_000)), nbtLong("GDTime", after(100_000)), nbtByte("Initialized", counted),
+		nbtLong("MTick", 0), nbtLong("PDTick", after(300)),
+		nbtInt("RX0", 0), nbtInt("RX1", 1), nbtInt("RY0", 0), nbtInt("RY1", 1), nbtInt("RZ0", 0), nbtInt("RZ1", 1),
+		nbtLong("Tick", tick), nbtByte("Version", 1),
+		nbtInt("X0", box.MinX), nbtInt("X1", box.MaxX), nbtInt("Y0", box.MinY), nbtInt("Y1", box.MaxY), nbtInt("Z0", box.MinZ), nbtInt("Z1", box.MaxZ),
+	)
+}
+
+// gameDwellers is one of the four lists of a DWELLERS record: each mob's
+// id, when the village last saw it and where.
+func gameDwellers(tick int64, mobs ...dweller) []byte {
+	actors := make([][]byte, len(mobs))
+	for i, m := range mobs {
+		at := binary.LittleEndian.AppendUint32([]byte{tagInt}, 3)
+		for _, v := range []int32{m.x, m.y, m.z} {
+			at = binary.LittleEndian.AppendUint32(at, uint32(v))
+		}
+		actors[i] = nbtCompound(nbtLong("ID", m.id), nbtLong("TS", tick-int64(i)*20), nbtTag(tagList, "last_saved_pos", at))
+	}
+	return nbtCompound(nbtList("actors", actors...))
+}
+
+// gameClaim is one claimed block of a POI record, with every tag the game
+// writes for one.
+func gameClaim(kind int32, name string, radius float32, capacity int64, x, y, z int32) []byte {
+	return nbtCompound(
+		nbtLong("Capacity", capacity), nbtString("InitEvent", ""), nbtString("Name", name), nbtLong("OwnerCount", 1),
+		nbtTag(tagFloat, "Radius", binary.LittleEndian.AppendUint32(nil, math.Float32bits(radius))),
+		nbtByte("Skip", 0), nbtString("SoundEvent", "undefined"), nbtInt("Type", kind), nbtByte("UseAABB", byte(1-kind)), nbtLong("Weight", 1),
+		nbtInt("X", x), nbtInt("Y", y), nbtInt("Z", z),
+	)
+}
 
 // NBT, built the way the game writes it.
 
@@ -147,10 +206,10 @@ func take(t *testing.T, s *Surveyor, w *world) Survey {
 	return got
 }
 
-func TestVillages_RealRecords(t *testing.T) {
+func TestVillages_ReadsRecordsAsTheGameWritesThem(t *testing.T) {
 	w := newWorld(t).
-		village("Overworld", testVillageID, unhex(t, realVillageInfo), unhex(t, realVillageDwellers), unhex(t, realVillagePOI)).
-		village("Overworld", "238407a1-d860-4020-80a6-578192adfcbb", unhex(t, realNewVillageInfo), unhex(t, realNewVillageDwellers), unhex(t, realNewVillagePOI)).
+		village("Overworld", testVillageID, livedVillageInfo, livedVillageDwellers, livedVillagePOI).
+		village("Overworld", "238407a1-d860-4020-80a6-578192adfcbb", newVillageInfo, newVillageDwellers, newVillagePOI).
 		// The records that are never read are there all the same, and
 		// could hold anything.
 		raw("VILLAGE_Overworld_"+testVillageID+"_PLAYERS", []byte("not NBT at all")).
@@ -165,15 +224,15 @@ func TestVillages_RealRecords(t *testing.T) {
 		t.Fatalf("villages = %+v, want two", villages)
 	}
 	lived, fresh := villages[0], villages[1]
-	if lived.Box != realVillageBox || lived.Areas != 0 {
-		t.Errorf("box = %+v (areas %d), want %+v", lived.Box, lived.Areas, realVillageBox)
+	if lived.Box != livedVillageBox || lived.Areas != 0 {
+		t.Errorf("box = %+v (areas %d), want %+v", lived.Box, lived.Areas, livedVillageBox)
 	}
 	if want := (VillageFacts{Counted: true, Villagers: 1, Golems: 1, Cats: 3, Beds: 1, Bells: 1}); *lived.Village != want {
 		t.Errorf("facts = %+v, want %+v", *lived.Village, want)
 	}
 	// One the game has not run is still where a village is, and says
 	// nothing has been counted rather than that nothing is there.
-	if fresh.Box != realNewVillageBox || *fresh.Village != (VillageFacts{}) {
+	if fresh.Box != newVillageBox || *fresh.Village != (VillageFacts{}) {
 		t.Errorf("uncounted village = %+v %+v", fresh.Box, *fresh.Village)
 	}
 	for _, d := range []chunks.Dimension{chunks.Nether, chunks.End} {
@@ -248,7 +307,7 @@ func TestVillages_LeaveOutTheOnesWithNobodyInThem(t *testing.T) {
 	w := newWorld(t).
 		village("Overworld", "0000", infoRecord(box, 1), dwellersRecord(0, 1, 0, 2), poiRecord()).
 		village("Overworld", "0001", infoRecord(box, 1), nil, nil).
-		village("Overworld", "0002", infoRecord(Box{200, 60, 200, 264, 84, 264}, 0), dwellersRecord(0, 0, 0, 0), poiRecord())
+		village("Overworld", "0002", infoRecord(Box{640, 60, -800, 704, 84, -736}, 0), dwellersRecord(0, 0, 0, 0), poiRecord())
 	got := take(t, surveyor(t, nil), w)
 	if want := (VillageStats{Found: 1, Empty: 2}); got.Villages != want {
 		t.Errorf("stats = %+v, want %+v", got.Villages, want)
@@ -311,8 +370,8 @@ func TestVillages_LeaveOutWhatCannotBeRead(t *testing.T) {
 }
 
 // What a record is nested with is walked once per level, so the depth is
-// what bounds the work. A real record is five deep, and is read by the
-// tests of real records; this is where the bound falls.
+// what bounds the work. A record as the game writes one is five deep, and
+// is read by the tests of those; this is where the bound falls.
 func TestVillages_ARecordIsReadToTheDepthLimitAndNoDeeper(t *testing.T) {
 	deep := nbtCompound()
 	for range maxDepth - 2 {
@@ -563,18 +622,18 @@ func TestVillageKey(t *testing.T) {
 }
 
 // The reader indexes into a record it has measured. Whatever is done to a
-// real record, the measuring has to be what refuses it: nothing here may
+// record, the measuring has to be what refuses it: nothing here may
 // panic, and nothing may come out with a count below none.
-func TestVillages_NoDamageToARealRecordPanics(t *testing.T) {
+func TestVillages_NoDamageToARecordPanics(t *testing.T) {
 	for name, c := range map[string]struct {
-		record string
+		record []byte
 		read   func(*village, []byte) error
 	}{
-		"INFO":     {realVillageInfo, (*village).info},
-		"DWELLERS": {realVillageDwellers, (*village).dwellers},
-		"POI":      {realVillagePOI, (*village).claims},
+		"INFO":     {livedVillageInfo, (*village).info},
+		"DWELLERS": {livedVillageDwellers, (*village).dwellers},
+		"POI":      {livedVillagePOI, (*village).claims},
 	} {
-		whole := unhex(t, c.record)
+		whole := c.record
 		try := func(damaged []byte) {
 			var v village
 			if err := c.read(&v, damaged); err != nil {
@@ -602,12 +661,8 @@ func TestVillages_NoDamageToARealRecordPanics(t *testing.T) {
 }
 
 func FuzzVillageRecord(f *testing.F) {
-	for _, record := range []string{realVillageInfo, realVillageDwellers, realVillagePOI, realNewVillageInfo, realNewVillageDwellers, realNewVillagePOI} {
-		b, err := hex.DecodeString(record)
-		if err != nil {
-			f.Fatal(err)
-		}
-		f.Add(b)
+	for _, record := range [][]byte{livedVillageInfo, livedVillageDwellers, livedVillagePOI, newVillageInfo, newVillageDwellers, newVillagePOI} {
+		f.Add(record)
 	}
 	f.Add(nbtRecord(nbtList("Players", nbtCompound(nbtLong("ID", -9001), nbtInt("S", 7)))))
 	f.Add(nbtRecord(nbtTag(tagCompound, "Raid", nbtCompound(nbtByte("GroupNum", 2), nbtByte("NumGroups", 7), nbtByte("NumRaiders", 5), nbtLong("GameTick", 3000)))))
