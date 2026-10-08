@@ -1536,6 +1536,23 @@
         held.marker.redraw();
       }
     },
+    // The key of the entity being followed, or null.
+    following: () => (picked && picked.follow ? picked.key : null),
+    // Turns Follow on or off as its button would, for something that is
+    // about to take the map elsewhere or has put it back, and gives back
+    // the name of whoever was being followed until then, or ''.
+    follow(on) {
+      if (!picked) return '';
+      const was = picked.follow ? (typeof picked.name === 'string' && picked.name) || names.entity(picked.type) : '';
+      const can = picked.state === 'live' || picked.state === 'waiting';
+      if (picked.follow !== Boolean(on) && (!on || can)) {
+        picked.follow = Boolean(on);
+        centre();
+        ring();
+        paintCard();
+      }
+      return was;
+    },
     // For a saved view: what is kept is read again, and the map brought
     // in line with it once.
     adopt,

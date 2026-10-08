@@ -713,6 +713,12 @@ kbd, .keys code {
 #views-offer-what { display: block; color: var(--dim); }
 .offer .sheet-actions { margin-top: 0.5rem; }
 
+/* The bar that says a link's view is only being previewed. It has a row
+   of its own between the bar and the map, so it covers nothing. */
+.preview { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.6rem; padding: 0.35rem 0.75rem; background: var(--panel); border-bottom: 2px solid var(--accent); }
+.preview p { flex: 1 1 14rem; margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.locked .preview { display: none; }
+
 /* The appearance settings: a name and its control to a line. The sheet
    keeps to one side and leaves the page undimmed, so that a choice is
    seen on the map and in the layer panel as it is made. */

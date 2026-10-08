@@ -49,6 +49,10 @@
     incomingDrop: document.getElementById('views-incoming-drop'),
     grid: document.getElementById('grid'),
     more: document.getElementById('more-open'),
+    preview: document.getElementById('preview'),
+    previewName: document.getElementById('preview-name'),
+    previewKeep: document.getElementById('preview-keep'),
+    previewBack: document.getElementById('preview-back'),
   };
   if (Object.values(el).some((node) => !node) || typeof el.dialog.showModal !== 'function') return;
 
@@ -102,7 +106,10 @@
   let undone = null;
   // Something to say as soon as there is a map to say it over.
   let pending = settings.kept() === 'large' ? `${UNKEPT.large}. Nothing new will be kept until the site’s data is cleared.` : '';
-  let showingOffered = false;
+  // What the map was showing when a preview of a link's view began: where
+  // it was, what was pinned and who was followed. Null while there is no
+  // preview.
+  let before = null;
   // Whether the list has been opened on the offered view yet.
   let announced = true;
 
@@ -155,7 +162,9 @@
   // done, in words: a view may be older than the page, or from a server
   // that offers more than this one does. Everything here happens in one
   // turn of the page, so nothing is drawn half-way between two views.
-  function apply(view) {
+  // temporary is for a view that is only being previewed: what is kept is
+  // held as it is first, and nothing done here is written.
+  function apply(view, temporary) {
     const skipped = [];
     const next = { ...view };
     const knows = app.inspect && app.inspect.knows ? app.inspect.knows : null;
@@ -167,12 +176,26 @@
         skipped.push(`${plural(gone.length, 'type of mob', 'types of mob')} this map does not know (${gone.slice(0, 3).join(', ')}${gone.length > 3 ? ', …' : ''})`);
       }
     }
+    // Asked before anything is touched: a view the record has no room for
+    // is refused whole, with the map where it was.
+    if (!settings.fits(next)) return null;
+    if (temporary) settings.hold();
     // The place first: another dimension starts every layer afresh, and
-    // what the view says of them is then applied to that.
+    // what the view says of them is then applied to that. Whoever is being
+    // followed is let go of before the map is moved, or the next frame
+    // would bring it straight back to them; a view with no place of its
+    // own leaves Follow as it is.
+    let unfollowed = '';
     if (next.place) {
-      if (!app.place.set(next.place)) skipped.push(`its place, since ${dimensionName(next.place.d)} is not there to show`);
+      const follow = app.inspect && app.inspect.follow ? app.inspect.follow : null;
+      unfollowed = follow ? follow(false) : '';
+      if (!app.place.set(next.place)) {
+        skipped.push(`its place, since ${dimensionName(next.place.d)} is not there to show`);
+        if (unfollowed !== '') follow(true);
+        unfollowed = '';
+      }
     }
-    if (!settings.adopt(next)) return null;
+    settings.adopt(next);
     const { held, missing } = redraw(Object.keys(next.layers));
     if (next.place && next.place.pin && app.chunk && app.chunk.pin && app.place.get() && app.place.get().d === next.place.d) {
       app.chunk.pin({ unit: next.place.pin.u, x: next.place.pin.x, z: next.place.pin.z });
@@ -182,22 +205,91 @@
       const names = missing.map((key) => LABELS.get(key) || key);
       skipped.push(`${plural(missing.length, 'layer', 'layers')} this map does not have (${names.slice(0, 4).join(', ')}${names.length > 4 ? ', …' : ''})`);
     }
-    return skipped;
+    return { skipped, unfollowed };
   }
 
   const tell = (text) => {
     if (app.tell) app.tell(text);
   };
 
-  function switchTo(view, temporary) {
-    const skipped = apply(view);
-    if (skipped === null) {
-      say('That view could not be shown: it would make what the page keeps too large.');
+  // What is said over the map of a view just shown: what of it was left
+  // out, and that Follow is off if its place turned it off.
+  const outcome = (verb, view, { skipped, unfollowed }) => `${verb} “${view.name}”${skipped.length > 0 ? `, without ${skipped.join('; ')}` : ''}.${unfollowed !== '' ? ` No longer following ${unfollowed}: the view has a place of its own.` : ''}`;
+  const TOO_LARGE = 'That view could not be shown: it would make what the page keeps too large.';
+
+  function switchTo(view) {
+    if (!settings.fits(view)) {
+      say(TOO_LARGE);
       return;
     }
-    showingOffered = temporary === true;
+    // Chosen while a link's view is being previewed: the preview is let go
+    // of without the map being drawn as it was only to be changed again.
+    if (before) leave(true);
+    const done = apply(view);
+    if (done === null) {
+      say(TOO_LARGE);
+      return;
+    }
     if (el.dialog.open) el.dialog.close();
-    tell(skipped.length > 0 ? `Showing “${view.name}”, without ${skipped.join('; ')}.` : `Showing “${view.name}”.`);
+    tell(outcome('Showing', view, done));
+  }
+
+  // --- previewing a view from a link -------------------------------------------
+  //
+  // A link's view is shown without being kept. The record is held as it
+  // was, so nothing the preview changes is written and a reload is the
+  // viewer's own setup again; a bar over the map says so for as long as
+  // it lasts, with a way to keep the view and a way back.
+
+  function preview(view) {
+    if (!settings.fits(view)) {
+      say(TOO_LARGE);
+      return;
+    }
+    if (!before) {
+      const centre = app.map.getCenter();
+      before = {
+        d: app.dimension(),
+        x: centre.lng,
+        z: centre.lat,
+        zoom: app.map.getZoom(),
+        pin: app.chunk ? app.chunk.pinned() : null,
+        follow: app.inspect && app.inspect.following ? app.inspect.following() : null,
+      };
+    }
+    el.previewName.textContent = view.name;
+    el.preview.hidden = false;
+    // The bar takes its room from the map.
+    app.map.invalidateSize();
+    const done = apply(view, true);
+    if (el.dialog.open) el.dialog.close();
+    tell(outcome('Previewing', view, done));
+    el.previewBack.focus();
+  }
+
+  // Ends a preview and puts back exactly what was there: what is kept,
+  // the place to the fraction of a block, the pin, and who was followed.
+  // quiet is for when another view is about to be shown in its place.
+  function leave(quiet) {
+    const was = before;
+    if (!was) return;
+    before = null;
+    const within = el.preview.contains(document.activeElement);
+    el.preview.hidden = true;
+    app.map.invalidateSize();
+    if (quiet) {
+      settings.release();
+      return;
+    }
+    // The place while the record is still held: another dimension lets go
+    // of the biome picked out, and that must not be what is kept.
+    if (was.d) app.place.set({ d: was.d, x: was.x, z: was.z, zoom: was.zoom });
+    settings.release();
+    redraw([]);
+    if (app.chunk && app.chunk.pin) app.chunk.pin(was.pin);
+    if (was.follow && app.inspect && app.inspect.key() === was.follow) app.inspect.follow(true);
+    tell('The map is as it was before the shared view.');
+    if (within) app.map.getContainer().focus();
   }
 
   // --- the viewer's list ------------------------------------------------------
@@ -244,7 +336,7 @@
   function row(view, n, views, shown) {
     const builtIn = settings.BUILT_IN.includes(view.id);
     const item = make('li', 'view');
-    const current = views.active === view.id && !showingOffered;
+    const current = views.active === view.id;
     if (current) item.setAttribute('aria-current', 'true');
 
     const pick = make('button', 'view-pick');
@@ -431,7 +523,6 @@
     const was = views.list[at];
     views.list[at] = { ...capture(Boolean(was.place), Boolean(was.look)), id, name: was.name };
     views.active = id;
-    showingOffered = false;
     keep(views, `“${was.name}” now holds what the map shows.`);
   }
 
@@ -629,9 +720,10 @@
     if (read.error) {
       pending = `${pending} That link had a view in it that was left out, because ${read.error}.`.trim();
     } else {
+      // A second link while the first one's view is being previewed.
+      leave(false);
       offered = read.view;
       delete offered.id;
-      showingOffered = false;
       announced = false;
     }
     arrive();
@@ -738,11 +830,12 @@
     const { record, fresh } = incoming;
     incoming = null;
     el.incoming.hidden = true;
+    // A file's settings are for keeping, not for a preview to be let go of.
+    leave(true);
     if (!settings.replace(record)) {
       say('That file holds more than the page keeps: nothing was imported.');
       return;
     }
-    showingOffered = false;
     redraw([]);
     say(`Imported: ${plural(fresh.length, 'view', 'views')} added, and the file’s settings are now yours.`);
     refocus = { id: '', act: 'import' };
@@ -778,7 +871,9 @@
   el.dialog.addEventListener('close', () => {
     incoming = null;
     el.incoming.hidden = true;
-    if (el.open.offsetParent === null) el.more.focus();
+    // While a preview is showing, its bar is where the next thing to do is.
+    if (before) el.previewBack.focus();
+    else if (el.open.offsetParent === null) el.more.focus();
   });
   // A number picks the view with that number, as the list shows them,
   // except while a name is being typed.
@@ -799,12 +894,18 @@
     if (naming) {
       offered = null;
       naming = false;
+      // Kept while it was being previewed: the preview ends and the view
+      // just saved is shown in its place, this time for keeps.
+      if (before) {
+        el.name.value = '';
+        switchTo(settings.view(id));
+        return;
+      }
     } else {
       const views = settings.get('views');
       views.active = id;
       settings.set('views', views);
     }
-    showingOffered = false;
     el.name.value = '';
     refocus = { id, act: 'pick' };
     render();
@@ -817,20 +918,27 @@
   el.importAll.dataset.id = '';
 
   el.offerShow.addEventListener('click', () => {
-    if (offered) switchTo(offered, true);
+    if (offered) preview(offered);
   });
-  el.offerSave.addEventListener('click', () => {
+  // Naming the offered view, from the offer or from the bar of a preview.
+  function saveAs() {
     if (!offered) return;
+    if (!el.dialog.open) show();
     naming = true;
     el.name.value = offered.name;
     render();
     el.name.focus();
     el.name.select();
+  }
+  el.previewKeep.addEventListener('click', saveAs);
+  el.previewBack.addEventListener('click', () => leave(false));
+  el.offerSave.addEventListener('click', () => {
+    saveAs();
   });
   el.offerDrop.addEventListener('click', () => {
+    leave(false);
     offered = null;
     naming = false;
-    showingOffered = false;
     say('The view from the link is dismissed.');
     refocus = { id: '', act: 'none' };
     render();

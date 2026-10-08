@@ -65,6 +65,11 @@
     </div>
     </div>
   </header>
+  <div id="preview" class="preview" role="region" aria-label="Preview of a shared view" hidden>
+    <p><strong>Previewing a shared view:</strong> <span id="preview-name"></span>. Nothing is kept unless you keep it.</p>
+    <button id="preview-keep" type="button">Keep it…</button>
+    <button id="preview-back" type="button">Go back</button>
+  </div>
   <div class="stage">
     <aside id="layers" class="layers" aria-label="Layers" hidden>
       <button id="layers-toggle" type="button" aria-expanded="false" aria-controls="layers-body">Layers</button>
@@ -177,9 +182,9 @@
     <section id="views-offer" class="offer" aria-labelledby="views-offer-title" hidden>
       <h3 id="views-offer-title">A view from a link</h3>
       <p><strong id="views-offer-name"></strong> <span id="views-offer-what"></span></p>
-      <p class="note">It is not saved, and none of your views is changed by it. Showing it replaces what the map shows now.</p>
+      <p class="note">It is not saved, and none of your views is changed by it. Previewing it shows it on the map and keeps nothing: Go back puts the map as it was, and so does loading the page again.</p>
       <div class="sheet-actions">
-        <button id="views-offer-show" type="button">Show it</button>
+        <button id="views-offer-show" type="button">Preview it</button>
         <button id="views-offer-save" type="button">Save as…</button>
         <button id="views-offer-drop" type="button">Dismiss</button>
       </div>
