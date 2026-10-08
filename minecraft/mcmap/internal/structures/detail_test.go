@@ -311,6 +311,9 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 		blockEntity(chunks.Overworld, "Vault", 151, -22, 140, nbtTag(tagCompound, "config", nbtCompound(nbtString("loot_table", "loot_tables/chests/made_up.json")))).
 		blockEntity(chunks.Overworld, "DecoratedPot", 120, -22, 105, nbtString("LootTable", "loot_tables/pots/made_up.json")).
 		blockEntity(chunks.Overworld, "DecoratedPot", 121, -22, 105).
+		blockEntity(chunks.Overworld, "Dispenser", 122, -22, 105, nbtString("LootTable", "loot_tables/dispensers/made_up.json")).
+		blockEntity(chunks.Overworld, "Dispenser", 123, -22, 105, items(2)).
+		blockEntity(chunks.Overworld, "Dropper", 124, -22, 105, items(0)).
 		// Too far off to be the same chamber.
 		blockEntity(chunks.Overworld, "Vault", 900, -22, 900).
 		blockEntity(chunks.Overworld, "MobSpawner", 2000, 30, 2000, nbtString("EntityIdentifier", "minecraft:silverfish")).
@@ -341,8 +344,10 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 	if chamber.Blocks["vault"] != 1 || chamber.Blocks["ominous_vault"] != 1 {
 		t.Errorf("chamber blocks = %v, want a vault and an ominous one", chamber.Blocks)
 	}
-	if want := []ContainerCount{{Kind: "pot", Unopened: 1}}; !slices.Equal(chamber.Containers, want) {
-		t.Errorf("chamber containers = %+v, want %+v", chamber.Containers, want)
+	// A pot is a pot and a dispenser a dispenser: neither is a container
+	// somebody has or has not opened.
+	if len(chamber.Containers) != 0 || chamber.Blocks["unbroken_pot"] != 1 || chamber.Blocks["dispenser"] != 2 || chamber.Blocks["dropper"] != 1 {
+		t.Errorf("chamber containers = %+v, blocks %v; want no containers, one unbroken pot, two dispensers and a dropper", chamber.Containers, chamber.Blocks)
 	}
 	if hold := got.Layers[chunks.Overworld].Details[0]; hold.Blocks["end_portal"] != 2 || len(hold.Spawners) != 1 {
 		t.Errorf("stronghold = %+v, want two portal blocks and its spawner", hold)

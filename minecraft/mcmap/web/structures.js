@@ -807,14 +807,18 @@
 
     const containers = listOf(d.containers).map((c) => {
       const parts = [
-        count(c.unopened) > 0 ? `${fmt(c.unopened)} unopened` : '',
+        count(c.unopened) > 0 ? `${fmt(c.unopened)} not yet opened` : '',
         count(c.holding) > 0 ? `${fmt(c.holding)} with something in ${c.holding === 1 ? 'it' : 'them'}` : '',
         count(c.empty) > 0 ? `${fmt(c.empty)} empty` : '',
       ].filter(Boolean);
       const kind = text(c.kind);
-      const name = kind === 'pot' ? 'Decorated pot' : names.container(kind);
-      return parts.length > 0 ? { picture: `container/${kind}`, text: `${name}: ${parts.join(', ')}` } : null;
+      return parts.length > 0 ? { picture: `container/${kind}`, text: `${names.container(kind)}: ${parts.join(', ')}` } : null;
     }).filter(Boolean);
+    const unopened = listOf(d.containers).some((c) => count(c.unopened) > 0);
+    // A pot and a dispenser hold things too, and are not something a
+    // player has or has not opened: each is counted as the block it is.
+    const held = d.blocks && typeof d.blocks === 'object' ? d.blocks : {};
+    const blocks = (name) => (Object.hasOwn(held, name) ? count(held[name]) : 0);
 
     out.push(...facts('In the save inside its box', [
       ['Mobs', counted.length > 0 ? tally(counted) : NONE_SAVED],
@@ -822,9 +826,12 @@
       ['Spawners', spawners.length > 0 ? tally(spawners) : NONE_SAVED],
       places.length > 0 ? ['Where they are', tally(places, true)] : null,
       ['Containers', containers.length > 0 ? tally(containers, true) : NONE_SAVED],
+      blocks('unbroken_pot') > 0 ? ['Decorated pots', `${fmt(blocks('unbroken_pot'))} unbroken, as the world generated ${blocks('unbroken_pot') === 1 ? 'it' : 'them'}`] : null,
+      blocks('dispenser') > 0 ? ['Dispensers', fmt(blocks('dispenser'))] : null,
+      blocks('dropper') > 0 ? ['Droppers', fmt(blocks('dropper'))] : null,
     ]));
-    if (containers.length > 0) {
-      out.push(el('p', 'note', 'Unopened: the game rolls a container’s loot the first time it is opened, and has not for these. One with something in it, or empty, was opened or was put there by a player; its record does not say which. What a container holds is not read.'));
+    if (unopened) {
+      out.push(el('p', 'note', 'Not yet opened: the game fills a generated chest or barrel the first time it is opened, and has not filled these. What a container holds is not read.'));
     }
     const at = Date.parse(text(data.at));
     const ago = Number.isFinite(at) ? Math.max(0, Math.round((Date.now() - at) / 60_000)) : null;

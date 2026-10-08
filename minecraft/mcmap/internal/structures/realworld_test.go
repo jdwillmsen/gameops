@@ -126,8 +126,10 @@ func TestRealWorldDetails(t *testing.T) {
 		withSpawners, spawners                   int
 		withContainers, unopened, holding, empty int
 		blocks                                   map[string]int
-		elders                                   map[int]int
-		evidence                                 []int
+		// containers is each kind's unopened, holding and empty.
+		containers map[string][3]int
+		elders     map[int]int
+		evidence   []int
 	}
 	var villages struct {
 		counted, withProfessions, villagers, professed, babies, missing int
@@ -139,7 +141,7 @@ func TestRealWorldDetails(t *testing.T) {
 		for i, r := range layer.Recorded {
 			k := kinds[r.Kind]
 			if k == nil {
-				k = &tally{blocks: map[string]int{}, elders: map[int]int{}}
+				k = &tally{blocks: map[string]int{}, elders: map[int]int{}, containers: map[string][3]int{}}
 				kinds[r.Kind] = k
 			}
 			k.structures++
@@ -160,6 +162,8 @@ func TestRealWorldDetails(t *testing.T) {
 				k.unopened += c.Unopened
 				k.holding += c.Holding
 				k.empty += c.Empty
+				by := k.containers[c.Kind]
+				k.containers[c.Kind] = [3]int{by[0] + c.Unopened, by[1] + c.Holding, by[2] + c.Empty}
 			}
 			if len(detail.Containers) > 0 {
 				k.withContainers++
@@ -208,8 +212,8 @@ func TestRealWorldDetails(t *testing.T) {
 			continue
 		}
 		slices.Sort(k.evidence)
-		t.Logf("%-13s %d: %d hold saved mobs (%d mobs, %d named); %d hold spawners (%d); %d hold containers (%d unopened, %d holding, %d empty); blocks %v; elders %v; evidence %v",
-			kind, k.structures, k.withMobs, k.mobs, k.named, k.withSpawners, k.spawners, k.withContainers, k.unopened, k.holding, k.empty, k.blocks, k.elders, k.evidence)
+		t.Logf("%-13s %d: %d hold saved mobs (%d mobs, %d named); %d hold spawners (%d); %d hold containers (%d unopened, %d holding, %d empty: %v); blocks %v; elders %v; evidence %v",
+			kind, k.structures, k.withMobs, k.mobs, k.named, k.withSpawners, k.spawners, k.withContainers, k.unopened, k.holding, k.empty, k.containers, k.blocks, k.elders, k.evidence)
 	}
 	t.Logf("villages %+v", villages)
 }

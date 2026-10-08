@@ -74,13 +74,12 @@ type Spawner struct {
 // ContainerCount is the containers of one kind in a structure, by what
 // their records say is in them. What that is, is never read.
 type ContainerCount struct {
-	// Kind is chest, barrel, shulker, dispenser, dropper or pot.
+	// Kind is chest, barrel or shulker.
 	Kind string `json:"kind"`
 	// Unopened still carry the loot table they were generated with: the
 	// game rolls it the first time one is opened, so nothing has been.
 	Unopened int `json:"unopened"`
-	// Holding have something in them and Empty nothing. Either was opened
-	// once, or was put there by a player; the record does not say which.
+	// Holding have something in them, and Empty nothing.
 	Holding int `json:"holding"`
 	Empty   int `json:"empty"`
 }
@@ -103,8 +102,9 @@ type Detail struct {
 	SpawnersMore  int              `json:"spawnersMore,omitempty"`
 	Containers    []ContainerCount `json:"containers"`
 	// Blocks counts the other block entities that say something of a
-	// structure: cauldron, bell, vault, ominous_vault, end_portal. One
-	// with none is left out.
+	// structure: cauldron, bell, vault, ominous_vault, end_portal,
+	// dispenser, dropper, and unbroken_pot for a decorated pot the
+	// generator placed that nobody has broken. One with none is left out.
 	Blocks map[string]int `json:"blocks,omitempty"`
 	// Elders is, for a monument, how many elder guardians the save holds
 	// in it. One is generated with three and the game never adds another.
@@ -385,6 +385,12 @@ func (c *contents) blocksIn(detail *Detail, in []savedBlock, left *allowance) {
 			others["bell"]++
 		case blockPortal:
 			others["end_portal"]++
+		case blockDispenser:
+			others["dispenser"]++
+		case blockDropper:
+			others["dropper"]++
+		case blockPot:
+			others["unbroken_pot"]++
 		default:
 			n, seen := containers[b.sort]
 			if !seen {

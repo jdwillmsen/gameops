@@ -651,8 +651,9 @@ counts, and `Click for details`. The sheet says:
     ominous ones apart;
   - every kind: the saved mobs in its box by type, each with the game's
     picture and name, the named ones by name, its spawners by mob and
-    where each is, and its containers by kind and by whether each is
-    unopened, has something in it or is empty;
+    where each is, its chests, barrels and shulker boxes by whether each
+    is not yet opened, has something in it or is empty, and its unbroken
+    decorated pots, dispensers and droppers, each as a count of its own;
   - and how old that is: `as of the last snapshot, 4 min ago`.
 
   A fact the save does not hold is said so (`Not recorded by the game`,
@@ -775,15 +776,23 @@ makes over every key, with no second pass:
   `PreferredProfession` and `TradeTier`. A mob no chunk lists, a dead one
   and an armour stand are not counted.
 - **Block entities.** Each chunk's record `0x31` is its block entities one
-  after another. Kept: chests, barrels, shulker boxes, dispensers and
-  droppers, with whether each still carries the `LootTable` it was
-  generated with (the game rolls it and drops the tag the first time the
-  container is opened), has `Items` or has none; decorated pots that still
-  carry one; spawners and trial spawners with the mob each spawns; vaults,
-  and whether their loot table is the ominous one; cauldrons, bells and
-  end portal blocks. What a container holds is never read, and a loot
-  table's name is never sent: the answer says `unopened`, not what is
-  inside.
+  after another. Kept: chests, barrels and shulker boxes, with whether
+  each still carries the `LootTable` it was generated with (the game
+  rolls it and drops the tag the first time the container is opened), has
+  `Items` or has none; spawners and trial spawners with the mob each
+  spawns; vaults, and whether their loot table is the ominous one;
+  cauldrons, bells and end portal blocks. What a container holds is never
+  read, and a loot table's name is never sent: the answer says
+  `unopened`, not what is inside.
+
+  A decorated pot, a dispenser and a dropper hold things as well, and are
+  not lumped with those. A pot the generator placed carries a loot table
+  until it is broken, so it is counted as an unbroken pot and a pot
+  without one is not counted; nobody opens a pot. A dispenser's or a
+  dropper's load says nothing of who has been by, so each is a plain
+  count. In a trial chamber these are most of what carries a loot table:
+  the FWB world's chambers hold 7,203 unbroken pots and 4,394 dispensers
+  beside 683 chests and 1,204 barrels not yet opened.
 
 Once the boxes are known, each mob and block entity is set inside the
 recorded structures whose box it is in, height included. That is what
@@ -851,9 +860,10 @@ What was looked for and is not there:
 Measured on the FWB world on 2026-10-07: 2,892 saved mobs and 45,557 block
 entities kept, none skipped. All 11 monuments hold saved mobs, 8 with
 three elder guardians, 1 with two and 2 with one. 4 of 11 fortress parts
-hold blaze spawners, 7 between them, and 5 hold chests, 9 of them
-unopened. 68 of 70 villages hold saved mobs and 57 hold containers, 113
-unopened. Of the 55 counted villages 40 have villagers with a profession:
+hold blaze spawners, 7 between them, and 5 hold chests, 9 of them not yet
+opened. 68 of 70 villages hold saved mobs and 57 hold containers: 113
+chests not yet opened, 198 chests, 2 barrels and 10 shulker boxes with
+something in them, 43 chests and 27 barrels empty. Of the 55 counted villages 40 have villagers with a profession:
 524 grown villagers found, 291 with one, 18 babies, 7 listed with no
 record; 315 job sites; every one has its last tick, one a raid record, and
 five hold a standing for somebody, twelve between them.
@@ -2074,7 +2084,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
-| `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel`, `shulker`, `dispenser`, `dropper` or `pot`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, those there are); `elders` for a monument; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `dispenser`, `dropper` and `unbroken_pot`, those there are); `elders` for a monument; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
