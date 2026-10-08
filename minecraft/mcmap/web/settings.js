@@ -562,12 +562,15 @@
 
   // The view marked as the default is what the page opens on. It is put
   // into the record before any other script has read its part, so nothing
-  // is drawn one way and then another.
+  // is drawn one way and then another. What it puts back is what is shown;
+  // how the page looks is always as the viewer last set it, and a view's
+  // own appearance comes with it only when the viewer switches to it.
   let place = null;
   {
     const first = state.views.start ? find(state.views.start) : null;
     if (first) {
-      adopt(first, true);
+      const { look, ...shown } = first;
+      adopt(shown, true);
       place = first.place || null;
     }
   }

@@ -259,6 +259,10 @@
     if (views.start === view.id) notes.push('opens with the page');
     if (current) notes.push('showing now');
     title.append(make('span', 'what', notes.join(' · ')));
+    // Said where it is marked, since it undoes what the viewer changes.
+    if (views.start === view.id) {
+      title.append(make('span', 'what', `Every load puts back its layers, filters and overlays${view.place ? ', and its place' : ''}. The appearance stays as you last set it.`));
+    }
     pick.append(title);
     pick.addEventListener('click', () => switchTo(view));
 
@@ -448,7 +452,7 @@
     const on = views.start !== id;
     views.start = on ? id : null;
     const view = settings.view(id);
-    keep(views, on ? `“${view.name}” is what the page will open with.` : 'The page will open as it was left.');
+    keep(views, on ? `“${view.name}” is what the page will open with: its layers, filters and overlays${view.place ? ', and its place,' : ''} are put back on every load. The appearance is not.` : 'The page will open as it was left.');
   }
 
   function hide(id, on) {
@@ -845,9 +849,6 @@
     const have = app.layers.states ? app.layers.states() : {};
     const missing = Object.keys(view.layers).filter((key) => !Object.hasOwn(have, key)).map((key) => LABELS.get(key) || key);
     if (missing.length > 0) tell(`“${view.name}” opened without ${plural(missing.length, 'layer', 'layers')} this map does not have (${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ', …' : ''}).`);
-    if (view.place && view.place.pin && app.chunk && app.chunk.pin && app.place.get() && app.place.get().d === view.place.d) {
-      app.chunk.pin({ unit: view.place.pin.u, x: view.place.pin.x, z: view.place.pin.z });
-    }
   }
   let waiting = opened !== null;
 
@@ -856,6 +857,14 @@
     if (waiting && app.dimension() && !document.body.classList.contains('locked')) {
       waiting = false;
       setTimeout(settled, SETTLE_MS);
+      // The chunk it was saved with is pinned as the map first shows, and
+      // never over one the viewer has pinned in the meantime.
+      const view = settings.view(opened);
+      const pin = view && view.place ? view.place.pin : null;
+      const at = app.place.get();
+      // Nor where an address took the map somewhere else.
+      const there = at && at.d === view.place.d && at.x === view.place.x && at.z === view.place.z;
+      if (pin && there && app.chunk && app.chunk.pin && !app.chunk.pinned()) app.chunk.pin({ unit: pin.u, x: pin.x, z: pin.z });
     }
   });
   addEventListener('hashchange', (e) => offerFrom(e.newURL));
