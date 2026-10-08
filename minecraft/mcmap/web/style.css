@@ -86,8 +86,10 @@
   --map-bg: #d9dee4;
   --edge: #1b1f24;
   /* Nearly solid, so that a ring still stands off its backing by three to
-     one where the terrain under it is snow. */
+     one where the terrain under it is snow, and the letter of a predicted
+     structure can be read on its own. */
   --marker-backing: rgba(11, 12, 14, 0.9);
+  --marker-backing-thin: rgba(11, 12, 14, 0.95);
   --label-plate: rgba(255, 255, 255, 0.95);
   --named-text: #0a5d54;
   --waypoint-text: #5a2cb0;
@@ -543,7 +545,10 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .trail-body { display: grid; gap: 0.3rem; }
 /* A trail's colour is its player's, so the swatch is the line, not a box. */
 .trail-players { list-style: none; margin: 0; padding: 0; max-height: 10rem; overflow-y: auto; }
-.trail-players i { width: 1rem; height: 0.3rem; border-radius: 1px; }
+/* Drawn as the trail is drawn on the map, a light line on its dark
+   casing: the colours are made to be read on the dark, and half of them
+   could not be told from a light panel. */
+.trail-players i { width: 1.2rem; height: 0.55rem; border: 2px solid var(--marker-ink); border-radius: 1px; }
 .key.slime { background: var(--slime-far); border: 1px solid var(--slime-line); }
 
 .structure span {
