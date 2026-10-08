@@ -908,6 +908,24 @@ pass and cost nothing more.
 | `trial_chamber` | Trial spawners and vaults | By the generator's grid: every block in one square of it is one chamber | Around those blocks. The chamber's corridors run on past them |
 | `stronghold` | The silverfish spawner of its portal room, or the blocks of its end portal once lit, in the Overworld | Chunks holding either, where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
 
+**A stronghold is for finding.** This is a survival world with no cheats,
+and where the stronghold is, is the one thing on this map a player sets out
+to find for themselves; one in chunks somebody else generated is found
+here without anybody having walked into it. So it is held back further
+than any other kind:
+
+- its row in the layer panel is off until the viewer turns it on, and
+  says so under it;
+- a search does not list one unless the page says the viewer has that row
+  on (`strongholds=1`), whatever is typed;
+- its details say whether the portal is lit and whether the silverfish
+  spawner is still there, and not where the spawner stands.
+
+Trial chambers are on from the start, like every recorded kind.
+`/api/structures` still carries strongholds to a logged-in browser, since
+the row has to be able to draw them: this keeps one from being stumbled
+on, and is not a lock.
+
 **A chamber's grid.** The generator cuts the world into squares of 34
 chunks and gives each at most one trial chamber, which starts in the first
 22 chunks of its square and reaches a few chunks either way. Its blocks
@@ -2131,7 +2149,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
-| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
+| `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `strongholds=1` lists strongholds among the structures, which are otherwise left out. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /healthz` | Liveness, on both listeners |
 

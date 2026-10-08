@@ -53,6 +53,8 @@
     ['spawn', 'World spawn', 'key spawn'],
   ];
   const UNKNOWN = { letter: '?', color: '#9aa3ad' };
+  // Kinds drawn and searched for only once the viewer has asked.
+  const OPT_IN = new Set(['stronghold']);
 
   const DETAILS_HINT = 'Click for details';
 
@@ -301,9 +303,11 @@
     ROWS.forEach(([id, label, swatch], at) => {
       const picture = Object.hasOwn(KINDS, id) ? icons.picture(icons.keyOf('structure', { kind: id })) : null;
       // The possible sites are the newest row. A viewer who had turned the
-      // predicted ones off has not asked for fainter ones.
+      // predicted ones off has not asked for fainter ones. And where a
+      // stronghold is, is the one thing here a player sets out to find for
+      // themselves: its row is off until the viewer turns it on.
       const enabled = id !== 'candidate' || rows.get('predicted').enabled;
-      const row = app.layers.register({ group: 'structures', id, label, enabled, order: (at + 1) * 10, swatch, picture });
+      const row = app.layers.register({ group: 'structures', id, label, enabled: enabled && !OPT_IN.has(id), order: (at + 1) * 10, swatch, picture });
       row.onToggle(apply);
       rows.set(id, row);
     });
@@ -331,7 +335,8 @@
       const parts = n.predicted + n.candidate > 0
         ? [`${fmt(n.recorded)} known`, ...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ')
         : '';
-      rows.get(kind).setNote(why || parts);
+      const asked = OPT_IN.has(kind) && !rows.get(kind).enabled ? 'Off until you turn it on, and left out of the search: this one is a thing to find for yourself.' : '';
+      rows.get(kind).setNote(why || asked || parts);
       rows.get(kind).setAvailable(filtering);
     }
     // Greyed out in a dimension the spawn is not in.
@@ -1012,6 +1017,8 @@
   // For the search: one chosen there is shown in full once the map is on
   // its dimension.
   app.structures = {
+    // Whether the viewer has a kind's known structures on the map.
+    shows: (kind) => on('recorded') && on(kind),
     show(asked) {
       if (!sheet || !asked || typeof asked.kind !== 'string' || !Number.isFinite(asked.x) || !Number.isFinite(asked.z)) return;
       want({ kind: asked.kind, recorded: asked.recorded === true, x: asked.x, z: asked.z, dimension: asked.dimension, said: true });
