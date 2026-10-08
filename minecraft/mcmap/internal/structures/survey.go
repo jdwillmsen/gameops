@@ -428,7 +428,11 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	for _, d := range chunks.Dimensions {
 		recorded[d] = assemble(pieces[d])
 	}
-	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db); err != nil {
+	// The level is read before the villages: it is what says whether the
+	// villages of the survey before are this world's to fall back on.
+	seed, haveSeed := s.seed(worldDir, &survey)
+	survey.StructureSeed, survey.HasStructureSeed = seed, haveSeed
+	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db, survey); err != nil {
 		return Survey{}, err
 	}
 	found, err := s.locate(ctx, held)
@@ -442,8 +446,6 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 
 	predicted := map[chunks.Dimension][]Prediction{}
 	more := map[chunks.Dimension]int{}
-	seed, haveSeed := s.seed(worldDir, &survey)
-	survey.StructureSeed, survey.HasStructureSeed = seed, haveSeed
 	if haveSeed && len(s.Predictors) > 0 {
 		// A village is recorded apart from the rest and is checked like
 		// them: every one read, whatever the layer goes on to keep.
@@ -535,7 +537,7 @@ func (s *Surveyor) detail(ctx context.Context, survey *Survey, held *contents) {
 // readVillages reads the village records within their own time. Running out
 // of it, or failing to read them, is not the survey's failure: the villages
 // of the last survey stand, and everything else is as fresh as it would be.
-func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks.Dimension][]Structure, map[*VillageFacts]*villageRecords, VillageStats, error) {
+func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB, now Survey) (map[chunks.Dimension][]Structure, map[*VillageFacts]*villageRecords, VillageStats, error) {
 	limit, timeout := s.villageLimit, s.VillageTimeout
 	if limit == 0 {
 		limit = maxVillages
@@ -559,10 +561,28 @@ func (s *Surveyor) readVillages(ctx context.Context, db *leveldb.DB) (map[chunks
 	s.mu.Lock()
 	last := s.last
 	s.mu.Unlock()
+	// The last survey's villages stand only for the world they were read
+	// from. In another world, or an earlier copy of this one, they are
+	// villages that are not there, with villagers nobody has.
+	if !sameWorld(last, now) {
+		s.Logger.Error("villages not read, and those of the last survey are another world's; none are served", "error", err)
+		return nil, nil, VillageStats{Stale: true}, nil
+	}
 	stats = last.Villages
 	stats.Stale = true
 	s.Logger.Error("villages not read; those of the last survey are kept", "error", err, "kept", stats.Found)
 	return last.villages, last.villageRecords, stats, nil
+}
+
+// sameWorld reports whether a survey is of the world the one before was
+// of, and no earlier in it: the same seed, and a game tick that has not
+// gone back where both hold one. A level that could not be read is no
+// world to be the same as.
+func sameWorld(before, now Survey) bool {
+	if !before.HasLevel || !now.HasLevel || before.Level.Seed != now.Level.Seed {
+		return false
+	}
+	return !before.Level.TickKnown || !now.Level.TickKnown || now.Level.Tick >= before.Level.Tick
 }
 
 // seed is the 32 bits structure placement is seeded with. The game uses the

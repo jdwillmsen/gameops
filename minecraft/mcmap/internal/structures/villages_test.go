@@ -14,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/leveldat"
 )
 
 // The records of two villages, with every tag game version 1.26.52 writes
@@ -586,6 +587,64 @@ func TestVillages_ThatCannotBeReadInTimeKeepTheLastOnes(t *testing.T) {
 
 // With no survey before, a read that fails leaves no villages and still a
 // survey.
+// The villages of the survey before are fallen back on only in the world
+// they were read from. In a world with another seed, or with no level to
+// tell by, they are villages that are not there.
+func TestVillages_ThatCannotBeReadAreNotKeptFromAnotherWorld(t *testing.T) {
+	for name, change := range map[string]func(*world){
+		"another seed":      func(w *world) { other := levelSeed + 1<<40; w.seed = &other },
+		"no level to go by": func(w *world) { w.seed = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var log bytes.Buffer
+			s := surveyor(t, &log)
+			s.Predictors = nil
+			box := Box{0, 60, 0, 64, 84, 64}
+			if first := take(t, s, newWorld(t).settled(6, box)); len(villagesOf(first.Layers[chunks.Overworld])) != 1 {
+				t.Fatalf("first survey = %+v", first.Villages)
+			}
+			s.VillageTimeout = -time.Second
+			// The same world an hour on keeps them.
+			if same := take(t, s, newWorld(t).settled(6, box)); len(villagesOf(same.Layers[chunks.Overworld])) != 1 || !same.Villages.Stale {
+				t.Fatalf("in the same world: %+v", same.Villages)
+			}
+			w := newWorld(t).settled(6, box)
+			change(w)
+			got := take(t, s, w)
+			if want := (VillageStats{Stale: true}); got.Villages != want || len(got.Layers[chunks.Overworld].Recorded) != 0 {
+				t.Errorf("stats = %+v with %d recorded, want %+v and none", got.Villages, len(got.Layers[chunks.Overworld].Recorded), want)
+			}
+			if !strings.Contains(log.String(), "another world's") {
+				t.Errorf("nothing logged of why:\n%s", log.String())
+			}
+		})
+	}
+}
+
+// A world put back to an earlier copy of itself has gone back in its own
+// time, which its game tick says.
+func TestSameWorld(t *testing.T) {
+	at := func(seed, tick int64, known bool) Survey {
+		return Survey{HasLevel: true, Level: leveldat.Level{Seed: seed, Tick: tick, TickKnown: known}}
+	}
+	for name, c := range map[string]struct {
+		before, now Survey
+		want        bool
+	}{
+		"a snapshot later":        {at(7, 100, true), at(7, 400, true), true},
+		"the same snapshot again": {at(7, 100, true), at(7, 100, true), true},
+		"an earlier copy":         {at(7, 400, true), at(7, 399, true), false},
+		"another seed":            {at(7, 100, true), at(8, 400, true), false},
+		"no tick to go by":        {at(7, 0, false), at(7, 0, false), true},
+		"no level before":         {Survey{}, at(7, 100, true), false},
+		"no level now":            {at(7, 100, true), Survey{}, false},
+	} {
+		if got := sameWorld(c.before, c.now); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
+		}
+	}
+}
+
 func TestVillages_ThatCannotBeReadTheFirstTimeAreNone(t *testing.T) {
 	s := surveyor(t, nil)
 	s.VillageTimeout = -time.Second

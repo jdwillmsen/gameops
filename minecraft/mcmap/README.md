@@ -1126,7 +1126,10 @@ The villages cost that survey nothing to speak of. Their records share a
 prefix, so they are read by seeking to it in the view the survey already
 has open, not by another pass: 281 records, 1.2 milliseconds on the FWB
 world. The read has ten seconds of its own. If it runs out of them or
-fails, the villages of the survey before stand, it is logged and counted in
+fails, the villages of the survey before stand, so long as that survey was
+of this world and no later in it (the same seed, and a game tick that has
+not gone back); in another world they would be villages that are not
+there, and none are served. Either way it is logged and counted in
 `mcmap_structures_village_read_failures_total`, and the rest of the survey
 is as fresh as it would have been; while that lasts,
 `mcmap_structures_villages_last_success_timestamp_seconds` falls behind the
