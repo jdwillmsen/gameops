@@ -501,7 +501,8 @@
     if (view.trails !== undefined) next.trails.seconds = view.trails;
     if (view.interval !== undefined) next.live.interval = view.interval;
     if (view.grid !== undefined) next.grid.on = view.grid;
-    if (view.look) next.look = { ...LOOK_DEFAULTS, ...view.look };
+    // A view may speak of only some of how the page looks.
+    if (view.look) next.look = { ...next.look, ...view.look };
     next.views.active = view.id || null;
     for (const section of Object.keys(SECTIONS)) next[section] = whole(section, next[section]);
     return commit(next, quiet);
