@@ -319,6 +319,15 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 		blockEntity(chunks.Overworld, "MobSpawner", 2000, 30, 2000, nbtString("EntityIdentifier", "minecraft:silverfish")).
 		blockEntity(chunks.Overworld, "EndPortal", 2004, 30, 2001).
 		blockEntity(chunks.Overworld, "EndPortal", 2005, 30, 2001).
+		// Beside the portal room, and so not counted as in it: a chest and
+		// a mob's spawner say nothing of the stronghold.
+		blockEntity(chunks.Overworld, "Chest", 2003, 30, 2001, items(2)).
+		// A room past the chamber's last spawner is the chamber's still,
+		// as far as the stated reach and no further.
+		blockEntity(chunks.Overworld, "Chest", 151+chamberSurround, -22, 140, items(1)).
+		blockEntity(chunks.Overworld, "Chest", 100, -20+chamberSurround/2, 100-chamberSurround, items(0)).
+		blockEntity(chunks.Overworld, "Chest", 152+chamberSurround, -22, 140, items(1)).
+		blockEntity(chunks.Overworld, "Chest", 100, -19+chamberSurround/2, 100, items(1)).
 		// A dungeon's spawner is no stronghold's, and the End's own portal
 		// is in every End.
 		blockEntity(chunks.Overworld, "MobSpawner", 3000, 30, 3000, nbtString("EntityIdentifier", "minecraft:zombie")).
@@ -346,11 +355,24 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 	}
 	// A pot is a pot and a dispenser a dispenser: neither is a container
 	// somebody has or has not opened.
-	if len(chamber.Containers) != 0 || chamber.Blocks["unbroken_pot"] != 1 || chamber.Blocks["dispenser"] != 2 || chamber.Blocks["dropper"] != 1 {
+	if want := []ContainerCount{{Kind: "chest", Holding: 1, Empty: 1}}; !slices.Equal(chamber.Containers, want) {
+		t.Errorf("chamber containers = %+v, want the two within its reach: %+v", chamber.Containers, want)
+	}
+	if chamber.Blocks["unbroken_pot"] != 1 || chamber.Blocks["dispenser"] != 2 || chamber.Blocks["dropper"] != 1 {
 		t.Errorf("chamber containers = %+v, blocks %v; want no containers, one unbroken pot, two dispensers and a dropper", chamber.Containers, chamber.Blocks)
 	}
-	if hold := got.Layers[chunks.Overworld].Details[0]; hold.Blocks["end_portal"] != 2 || len(hold.Spawners) != 1 {
-		t.Errorf("stronghold = %+v, want two portal blocks and its spawner", hold)
+	// Of a stronghold only what it was found by is said, and not to the
+	// block: one room of it is known, and nothing of where the rest is.
+	hold := got.Layers[chunks.Overworld].Details[0]
+	if want := []SpawnerCount{{Mob: "silverfish", Count: 1}}; !hold.Uncounted || hold.Blocks["end_portal"] != 2 || !slices.Equal(hold.SpawnerCounts, want) ||
+		len(hold.Spawners) != 0 || hold.MobsTotal != 0 || len(hold.Containers) != 0 || len(hold.Blocks) != 1 {
+		t.Errorf("stronghold = %+v, want it uncounted, with two portal blocks and a silverfish spawner", hold)
+	}
+	if sent, _ := json.Marshal(hold); strings.Contains(string(sent), "2000") {
+		t.Errorf("the stronghold's detail says where its spawner is: %s", sent)
+	}
+	if chamber.Reach != chamberSurround || chamber.Uncounted || hold.Reach != 0 {
+		t.Errorf("reach = %d and %d, want the chamber's contents counted %d blocks past its box", chamber.Reach, hold.Reach, chamberSurround)
 	}
 }
 

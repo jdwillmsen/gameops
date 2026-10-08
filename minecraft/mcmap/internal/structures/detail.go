@@ -25,6 +25,12 @@ const (
 	// survey lists.
 	maxDetailNames  = 5_000
 	maxDetailPlaces = 20_000
+	// chamberSurround is how far past the blocks a trial chamber was found
+	// by its contents are counted, in blocks each way and half as far up
+	// and down. Its rooms and corridors run on past its last spawner, and
+	// a count held to the box round its spawners would say a chamber has
+	// no chests where it has them one room on.
+	chamberSurround = 24
 	// cellShift makes the squares mobs and block entities are sorted
 	// into, 64 blocks a side, so that a structure looks only at what is
 	// near it.
@@ -88,6 +94,17 @@ type ContainerCount struct {
 // mobs it has saved there, and the block entities that say something of
 // the place. It is as old as the snapshot it was read from.
 type Detail struct {
+	// Reach is set for a kind found by its blocks whose contents are
+	// counted past the box round them: it is how many blocks past, each
+	// way, and half as many up and down. Everything below is then of that
+	// wider box.
+	Reach int `json:"reach,omitempty"`
+	// Uncounted is set where what the structure holds was not counted at
+	// all, because too little of it is known to say where to look: a
+	// stronghold is found by one room. Mobs, Named, Spawners and
+	// Containers are then empty for that reason, and not because there
+	// is nothing there.
+	Uncounted bool `json:"uncounted,omitempty"`
 	// MobsTotal is every saved mob in the box. Mobs is them by type, the
 	// most first, and MobKindsMore how many types were left out of it.
 	MobsTotal    int        `json:"mobsTotal"`
@@ -211,6 +228,13 @@ func (c *contents) describe(ctx context.Context, d chunks.Dimension, list []Stru
 		}
 		var inMobs []savedMob
 		var inBlocks []savedBlock
+		// The box counted in is the structure's own, or for a chamber the
+		// box round what it was found by and a stated way past it.
+		reach := int32(0)
+		if s.Kind == TrialChamber {
+			reach = chamberSurround
+		}
+		s.Box = Box{s.MinX - reach, s.MinY - reach/2, s.MinZ - reach, s.MaxX + reach, s.MaxY + reach/2, s.MaxZ + reach}
 		inside := func(x, y, z int32) bool {
 			return x >= s.MinX && x <= s.MaxX && y >= s.MinY && y <= s.MaxY && z >= s.MinZ && z <= s.MaxZ
 		}
@@ -247,7 +271,22 @@ func (c *contents) describe(ctx context.Context, d chunks.Dimension, list []Stru
 				}
 			}
 		}
-		detail := &Detail{}
+		detail := &Detail{Reach: int(reach)}
+		if s.Kind == Stronghold {
+			// Only what it was found by is said of it. The rest of a
+			// stronghold could be anywhere round its portal room, and
+			// where exactly that room's spawner stands is for whoever
+			// walks in to find.
+			c.blocksIn(detail, inBlocks, &allowance{})
+			out[i] = &Detail{
+				Uncounted: true, Mobs: []MobCount{}, Named: []NamedMob{}, Spawners: []Spawner{}, Containers: []ContainerCount{},
+				SpawnerCounts: slices.DeleteFunc(detail.SpawnerCounts, func(n SpawnerCount) bool { return n.Mob != "silverfish" || n.Trial }),
+			}
+			if n := detail.Blocks["end_portal"]; n > 0 {
+				out[i].Blocks = map[string]int{"end_portal": n}
+			}
+			continue
+		}
 		c.mobsIn(detail, inMobs, left)
 		c.blocksIn(detail, inBlocks, left)
 		if s.Kind == Monument {
