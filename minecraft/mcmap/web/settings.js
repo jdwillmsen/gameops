@@ -321,6 +321,8 @@
   // page, which this one reads what it can of and leaves as it is.
   let kept = 'yes';
   let store = null;
+  // The record as it was when a preview began, while one is showing.
+  let held = null;
   try {
     store = window.localStorage;
     store.getItem(KEY);
@@ -426,8 +428,9 @@
   // written, its old value is not later mistaken for a newer choice.
   function write() {
     if (!store || kept === 'newer' || kept === 'large') return;
+    const out = lasting();
     for (const [section, key] of Object.entries(OLD)) {
-      const now = JSON.stringify(state[section]);
+      const now = JSON.stringify(out[section]);
       if (now === written[section]) continue;
       try {
         store.setItem(key, now);
@@ -436,11 +439,41 @@
       state.old[section] = stamp(key);
     }
     try {
-      store.setItem(KEY, JSON.stringify(state));
+      store.setItem(KEY, JSON.stringify({ ...out, old: state.old }));
       kept = 'yes';
     } catch {
       kept = 'full';
     }
+  }
+
+  // --- a preview ---------------------------------------------------------------
+  //
+  // A view that came in a link is shown before it is kept. While the
+  // record is held, everything the page does is done to what is in memory
+  // and what is written stays the record as it was when the hold began:
+  // a reload, or letting go, is the viewer's own setup again. The list of
+  // views alone is written through a hold, since saving, renaming or
+  // deleting one is not part of what is being previewed.
+  // The record as it is kept, which while one is held is not the record
+  // the page is showing.
+  function lasting() {
+    return held ? { ...held, views: { ...state.views, active: held.views.active } } : state;
+  }
+
+  function hold() {
+    if (!held) held = copy(state);
+  }
+
+  // Lets go of a hold and puts the page's record back as it was kept.
+  function release() {
+    if (!held) return false;
+    const back = lasting();
+    held = null;
+    const changed = Object.keys(SECTIONS).filter((section) => JSON.stringify(back[section]) !== JSON.stringify(state[section]));
+    state = { ...back, old: state.old };
+    if (changed.includes('look')) paint();
+    if (changed.length > 0) tell(changed);
+    return true;
   }
 
   // Another tab of the same page has written: what this one holds of the
@@ -453,9 +486,15 @@
     // The other tab's write went in, so there is room again; unless it is
     // a later version's, which this one must not write over.
     kept = Number.isInteger(raw.v) && raw.v > VERSION ? 'newer' : 'yes';
+    for (const section of Object.keys(OLD)) written[section] = JSON.stringify(wholeRecord(raw)[section]);
+    // While a preview is showing, the other tab's write is what there is
+    // to go back to, and what is on this tab stays the preview.
+    if (held) {
+      held = wholeRecord(raw);
+      return;
+    }
     const looked = JSON.stringify(state.look);
     state = wholeRecord(raw);
-    for (const section of Object.keys(OLD)) written[section] = JSON.stringify(state[section]);
     // The look is the one part taken up at once: left for later, this
     // tab's next unrelated change would bring the other's theme with it.
     if (looked === JSON.stringify(state.look)) return;
@@ -488,7 +527,7 @@
   // Makes the record say what a view says, all at once. What the view does
   // not speak of is left as it is. place is not part of the record: the
   // map is taken there by whoever asked.
-  function adopt(view, quiet) {
+  function adopted(view) {
     const next = copy(state);
     Object.assign(next.layers, view.layers);
     for (const domain of ['mobs', 'players']) {
@@ -505,8 +544,13 @@
     if (view.look) next.look = { ...next.look, ...view.look };
     next.views.active = view.id || null;
     for (const section of Object.keys(SECTIONS)) next[section] = whole(section, next[section]);
-    return commit(next, quiet);
+    return next;
   }
+
+  const adopt = (view, quiet) => commit(adopted(view), quiet);
+  // Whether a view could be adopted, asked before anything else is done
+  // for it: one that would make the record too large is refused whole.
+  const fits = (view) => JSON.stringify(adopted(view)).length <= MAX_CHARS;
 
   const find = (id) => (Object.hasOwn(BUILT, id) ? BUILT[id] : state.views.list.find((view) => view.id === id) || null);
 
@@ -590,6 +634,11 @@
     get: (section) => (Object.hasOwn(SECTIONS, section) ? copy(state[section]) : null),
     set,
     adopt,
+    fits,
+    // A hold on what is kept, for a preview, and letting go of it.
+    hold,
+    release,
+    held: () => held !== null,
     // A view by its id, built in or saved, or null.
     view: (id) => {
       const found = find(id);
@@ -622,7 +671,7 @@
     // What it says of the old keys is this browser's own business, and
     // stays out of the one and is kept through the other.
     all: () => {
-      const { old, ...rest } = copy(state);
+      const { old, ...rest } = copy(lasting());
       return rest;
     },
     replace: (next) => commit({ ...wholeRecord(next), old: state.old }),

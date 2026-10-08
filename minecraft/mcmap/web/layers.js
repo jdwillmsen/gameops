@@ -191,7 +191,8 @@
       for (const row of g.rows) {
         const key = `${g.id}/${row.id}`;
         found.add(key);
-        const on = typeof choices[key] === 'boolean' ? choices[key] : row.on;
+        // With no choice kept for it, a row is as its layer first had it.
+        const on = typeof choices[key] === 'boolean' ? choices[key] : row.first;
         if (row.on === on) continue;
         row.on = on;
         row.box.checked = on;
@@ -289,6 +290,7 @@
       order: Number.isFinite(order) ? order : Infinity,
       seq: made,
       on: choice(group, id, Boolean(enabled)),
+      first: Boolean(enabled),
       available: true,
       listeners: [],
       item,

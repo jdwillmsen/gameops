@@ -130,7 +130,11 @@
   };
 
   function parseHash() {
-    const [id, x, z, zoom] = location.hash.slice(1).split('/');
+    const [id, x, z, zoom, , view] = location.hash.slice(1).split('/');
+    // An address with a sixth part carries a saved view, which is only
+    // ever an offer: its place comes with it if the viewer takes it up,
+    // and until then the address moves the map nowhere.
+    if (view) return null;
     const n = [x, z, zoom].map(Number);
     if (!Object.hasOwn(LABELS, id) || n.some((v) => !Number.isFinite(v))) return null;
     return { id, x: n[0], z: n[1], zoom: n[2] };
@@ -562,6 +566,13 @@
     el.grid.checked = true;
     grid.addTo(map);
   }
+
+  // The map's room changes without the window's doing so: the bar wraps
+  // to a second row when the live controls arrive, and a bar comes and
+  // goes above the map while a shared view is previewed. Leaflet measures
+  // only when the window is resized, and a map that has the wrong size
+  // has the wrong centre.
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => map.invalidateSize()).observe(map.getContainer());
 
   // Whoever has asked for less motion gets a map that goes where it is
   // sent without sliding or fading there. Leaflet takes its animation

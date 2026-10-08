@@ -85,11 +85,52 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 	// Opening a link holds its view to one side; only a press shows it,
 	// and saving it adds a view and replaces none.
 	offer := regexp.MustCompile(`(?s)function offerFrom\(address\) \{.*?\n  \}`).Find(js)
-	if offer == nil || bytes.Contains(offer, []byte("apply(")) || bytes.Contains(offer, []byte("settings.set(")) || bytes.Contains(offer, []byte("switchTo(")) {
+	if offer == nil || bytes.Contains(offer, []byte("apply(")) || bytes.Contains(offer, []byte("settings.set(")) || bytes.Contains(offer, []byte("switchTo(")) || bytes.Contains(offer, []byte("preview(")) {
 		t.Error("views.js applies or saves a link's view as it is opened")
 	}
-	if !regexp.MustCompile(`el\.offerShow\.addEventListener\('click', \(\) => \{\s*if \(offered\) switchTo\(offered, true\);`).Match(js) {
+	if !regexp.MustCompile(`el\.offerShow\.addEventListener\('click', \(\) => \{\s*if \(offered\) preview\(offered\);`).Match(js) {
 		t.Error("views.js no longer shows a link's view only when asked")
+	}
+	// And showing it is a preview: what is kept is held as it was before
+	// anything is touched, so nothing the preview changes is written, and
+	// going back puts the place back before it lets go.
+	shown := regexp.MustCompile(`(?s)function preview\(view\) \{.*?\n  \}`).Find(js)
+	if shown == nil || !bytes.Contains(shown, []byte("apply(view, true)")) || bytes.Contains(shown, []byte("settings.adopt(")) || bytes.Contains(shown, []byte("settings.set(")) {
+		t.Error("views.js no longer shows a link's view as a preview")
+	}
+	if !regexp.MustCompile(`if \(!settings\.fits\(next\)\) return null;\s*if \(temporary\) settings\.hold\(\);`).Match(js) {
+		t.Error("views.js no longer holds what is kept before a preview touches anything")
+	}
+	if !regexp.MustCompile(`if \(was\.d\) app\.place\.set\(\{ d: was\.d, x: was\.x, z: was\.z, zoom: was\.zoom \}\);\s*settings\.release\(\);\s*redraw\(\[\]\);`).Match(js) {
+		t.Error("views.js no longer puts the place back before it lets go of a preview")
+	}
+	settings := read(t, "settings.js")
+	for _, need := range []string{
+		"return held ? { ...held, views: { ...state.views, active: held.views.active } } : state;",
+		"const out = lasting();",
+		"store.setItem(KEY, JSON.stringify({ ...out, old: state.old }));",
+	} {
+		if !bytes.Contains(settings, []byte(need)) {
+			t.Errorf("settings.js no longer has %s", need)
+		}
+	}
+	page := read(t, "index.html")
+	for _, need := range []string{`<div id="preview" class="preview" role="region"`, `<button id="preview-keep" type="button">`, `<button id="preview-back" type="button">Go back</button>`} {
+		if !bytes.Contains(page, []byte(need)) {
+			t.Errorf("index.html no longer has %s", need)
+		}
+	}
+	// The bar is a row of its own above the map, so it covers nothing.
+	if bytes.Index(page, []byte(`<div id="preview"`)) > bytes.Index(page, []byte(`<div class="stage">`)) || bytes.Index(page, []byte(`<div id="preview"`)) < bytes.Index(page, []byte("</header>")) {
+		t.Error("index.html no longer has the preview's bar between the header and the map")
+	}
+	// A view with a place lets go of whoever is followed before it moves
+	// the map, and one the record has no room for moves nothing.
+	if !regexp.MustCompile(`unfollowed = follow \? follow\(false\) : '';\s*if \(!app\.place\.set\(next\.place\)\) \{`).Match(js) {
+		t.Error("views.js no longer turns Follow off before it takes the map to a view's place")
+	}
+	if bytes.Index(js, []byte("if (!settings.fits(next)) return null;")) > bytes.Index(js, []byte("if (!app.place.set(next.place)) {")) {
+		t.Error("views.js moves the map before it knows the view can be adopted")
 	}
 	if !bytes.Contains(js, []byte("views.list.push({ ...view, id, name: clean });")) {
 		t.Error("views.js no longer saves a view as a new one")
@@ -109,6 +150,16 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 	}
 	if !bytes.Contains(js, []byte("const LOOKS = ['theme', 'size', 'text', 'labelMobs', 'labelPlayers', 'labelWaypoints', 'picturesLive', 'picturesMarkers',\n    'opacityBiomes', 'opacityTrails', 'opacitySlime', 'density', 'motion', 'coords'")) {
 		t.Error("views.js lists the appearance settings a link speaks of in another order; add new ones at the end only")
+	}
+	// An address that carries a view takes the map nowhere by being
+	// opened: the view's place comes with the view, if it is taken up.
+	if !regexp.MustCompile(`const \[id, x, z, zoom, , view\] = location\.hash\.slice\(1\)\.split\('/'\);[^;]*?if \(view\) return null;`).Match(read(t, "app.js")) {
+		t.Error("app.js moves the map to the place in an address that carries a view")
+	}
+	// A row nobody has made a choice for goes back to how its layer first
+	// had it when a preview ends, since nothing kept says otherwise.
+	if !bytes.Contains(read(t, "layers.js"), []byte("const on = typeof choices[key] === 'boolean' ? choices[key] : row.first;")) {
+		t.Error("layers.js no longer puts a row with no choice kept back to its layer's own default")
 	}
 	// The map's own script reads an address that names no dimension as no
 	// place at all, which is what a view saved without one sends.
