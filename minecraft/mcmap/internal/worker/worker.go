@@ -58,6 +58,10 @@ var (
 		Name: "mcmap_biomes_panics_total",
 		Help: "Biome readings that panicked and were abandoned; the rest of the cycle went on.",
 	})
+	metricSurveyPanics = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_structures_survey_panics_total",
+		Help: "Structure surveys that panicked and were abandoned; the structures of the last survey that worked are still served.",
+	})
 )
 
 // Census counts the chunks in a freshly mirrored world.
@@ -380,6 +384,16 @@ func (w *Worker) survey(ctx context.Context, now time.Time) {
 	if w.Structures == nil {
 		return
 	}
+	// A survey reads every actor and block entity a game this code does
+	// not control has written, over a hundred thousand records a cycle. A
+	// panic over one of them would otherwise end the server, and end it
+	// again on every start for as long as the record is there.
+	defer func() {
+		if p := recover(); p != nil {
+			metricSurveyPanics.Inc()
+			w.Logger.Error("structure survey panicked; the structures of the last one that worked are kept", "panic", p, "stack", string(debug.Stack()))
+		}
+	}()
 	if w.SurveyTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, w.SurveyTimeout)

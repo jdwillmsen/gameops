@@ -1027,7 +1027,10 @@ structures; another 32-bit value does, exactly. Why is not known.
 the same way before anything is predicted from it. Treat it as the seed.
 
 The survey runs last in each cycle, on hard links like the chunk count, and
-its failure costs nothing else. On the FWB world (2.47 million records,
+its failure costs nothing else. That includes a panic: it parses over a
+hundred thousand records the game wrote, so one it cannot get through is
+caught, logged with its stack and counted, and the cycle and the service
+go on with the structures of the last survey that worked. On the FWB world (2.47 million records,
 1,274 boxes) it takes 9 seconds and peaks at 45 MB. Predicting four more
 kinds added nothing that could be measured to that: which chunks are
 finished is taken from the pass the survey already makes, at eight bytes a
@@ -2123,7 +2126,7 @@ opens at the same place.
 | `mcmap_structures_kind_verified{kind}` | 1 while the seed is verified and the kind's own recorded structures are where its rule puts them. 0 means that kind is not being predicted |
 | `mcmap_structures_prediction_disagreements{kind}` | Places where the seed and the world's records disagree |
 | `mcmap_structures_areas_skipped{reason}` | Recorded boxes left out: `malformed`, `unknown` (a kind this version does not know), `limit` |
-| `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total` | Whether the survey is running |
+| `mcmap_structures_survey_last_success_timestamp_seconds`, `mcmap_structures_survey_duration_seconds`, `mcmap_structures_survey_failures_total`, `mcmap_structures_survey_panics_total` | Whether the survey is running. A panic is a survey abandoned over a record it could not get through: the structures of the last one that worked are still served, and it is logged with its stack |
 | `mcmap_structures_villages_skipped{reason}` | Villages left out: `empty` (counted by the game, no villagers), `malformed`, `unknown` (a key this version does not know), `limit` |
 | `mcmap_structures_contents{sort}`, `mcmap_structures_contents_skipped{reason}` | Saved mobs and block entities the last survey kept to set inside structures, `sort` being `mob` or `block`; and what it left out: `malformed` (an actor, block entity, or a village's `PLAYERS` or `RAID` record that did not parse), `limit` |
 | `mcmap_structures_detail_duration_seconds`, `mcmap_structures_detail_failures_total` | How long setting those inside the structures took; surveys that ran out of time doing it and were served without details |

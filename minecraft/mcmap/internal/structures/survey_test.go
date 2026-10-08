@@ -514,3 +514,31 @@ func TestTake_AFailureKeepsTheLastSurvey(t *testing.T) {
 		t.Error("a cancelled survey reported success")
 	}
 }
+
+// A survey that panics part way is caught by whoever runs it. What it must
+// not do is take the last survey with it, or leave the surveyor unable to
+// take another.
+func TestTake_APanicKeepsTheLastSurveyAndTheSurveyorUsable(t *testing.T) {
+	s := surveyor(t, nil)
+	w := evidence(t)
+	first := take(t, s, w)
+	s.Biomes = func(chunks.Dimension, int32, int32) (uint32, bool) { panic("made up") }
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the survey did not panic, so this test shows nothing")
+			}
+		}()
+		_, _ = s.Take(context.Background(), w.write(), surveyedAt.Add(time.Hour))
+	}()
+	if last, ok := s.Last(); !ok || !last.At.Equal(first.At) {
+		t.Errorf("after a panic the last survey is of %v (%v), want the one before it", last.At, ok)
+	}
+	if left, _ := os.ReadDir(s.WorkDir); len(left) != 0 {
+		t.Errorf("the survey that panicked left %d entries in its work directory", len(left))
+	}
+	s.Biomes = nil
+	if again := take(t, s, w); !again.At.Equal(surveyedAt) {
+		t.Errorf("the next survey = %v", again.At)
+	}
+}
