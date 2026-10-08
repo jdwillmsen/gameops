@@ -14,6 +14,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
 )
 
 func TestNextDelay_ResetsAfterAStableSession(t *testing.T) {
@@ -165,6 +166,71 @@ func TestIsAuthRejection_StringFallbackCatchesAnUntypedInvalidGrant(t *testing.T
 	err := fmt.Errorf("dial: login to xbox live: %w", errors.New(`oauth2: "invalid_grant" "User account is found to be in service abuse mode."`))
 	if !isAuthRejection(err) {
 		t.Errorf("isAuthRejection(%v) = false, want true", err)
+	}
+}
+
+// refusedSignIn is the error a refused device-code login surfaced as, layer
+// for layer.
+func refusedSignIn(pace mcauth.SignInPace) error {
+	refusal := &oauth2.RetrieveError{
+		ErrorCode:        "invalid_grant",
+		ErrorDescription: "The user could not be authenticated or user interaction is required. The user must sign in again and if needed grant the client application access to the requested scope.",
+	}
+	return throughTheDialer(&mcauth.SignInError{Err: fmt.Errorf("poll device token: %w", refusal), Pace: pace})
+}
+
+func throughTheDialer(signIn *mcauth.SignInError) error {
+	return fmt.Errorf("dial: %w", &net.OpError{Op: "dial", Net: "minecraft",
+		Err: fmt.Errorf("login to xbox live: request XSTS token: authorize: xal/sisu: request access token for authorization: %w", signIn)})
+}
+
+// Answering a code takes a person longer than the minute that resets the
+// ladder, and a code nobody answers lasts a quarter of an hour, so either
+// left to the ladder is followed by a new prompt within seconds. The token
+// source knows how long each should wait; this loop has to ask it, leave its
+// own ladder where it was, and not call the result a refused refresh.
+func TestReconnectDelay_ASignInThatCameToNothingIsPacedByTheTokenSource(t *testing.T) {
+	const min, max, authDelay = 5 * time.Second, 5 * time.Minute, 15 * time.Minute
+	const ladder = 40 * time.Second
+
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"the first refusal", refusedSignIn(mcauth.SignInRetrySoon)},
+		{"a run of refusals", refusedSignIn(mcauth.SignInRetryFloor)},
+		{"a refusal recognised only by its text", errors.New(refusedSignIn(mcauth.SignInRetrySoon).Error())},
+		{"a third code nobody answered", throughTheDialer(&mcauth.SignInError{Err: context.DeadlineExceeded, Pace: mcauth.SignInRetryBackoff, Unanswered: 3})},
+	}
+	for _, tc := range cases {
+		want, paced := mcauth.SignInWait(tc.err, authDelay)
+		if !paced || want < time.Minute {
+			t.Fatalf("%s: SignInWait = %v, %v; want a real pause", tc.name, want, paced)
+		}
+		wait, next, rejected := reconnectDelay(tc.err, 16*time.Minute, ladder, min, max, authDelay)
+		if wait != want {
+			t.Errorf("%s: wait = %v, want the token source's %v", tc.name, wait, want)
+		}
+		if next != ladder {
+			t.Errorf("%s: ladder moved to %v, want it left at %v", tc.name, next, ladder)
+		}
+		if rejected {
+			t.Errorf("%s: reported as a refused refresh", tc.name)
+		}
+		if isAuthRejection(tc.err) {
+			t.Errorf("%s: isAuthRejection = true, want a sign-in kept apart from a refused refresh", tc.name)
+		}
+	}
+}
+
+// With no token stored there is nothing to try but the prompt, so a code
+// nobody answered is followed by the next on the ordinary ladder, as it
+// always was.
+func TestReconnectDelay_AnUnansweredFirstRunCodeIsRepromptedOnTheLadder(t *testing.T) {
+	err := throughTheDialer(&mcauth.SignInError{Err: context.DeadlineExceeded})
+	wait, _, rejected := reconnectDelay(err, 15*time.Minute, 40*time.Second, 5*time.Second, 5*time.Minute, 15*time.Minute)
+	if rejected || wait != 5*time.Second {
+		t.Errorf("reconnectDelay = %v, rejected=%v; want the ladder's 5s and no rejection", wait, rejected)
 	}
 }
 

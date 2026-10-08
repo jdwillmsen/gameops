@@ -251,17 +251,15 @@ func TestEveryAnsweredMentionOutcomeIsCounted(t *testing.T) {
 	}
 }
 
-func TestAnAuthRejectionIsCounted(t *testing.T) {
+// The connect loop only sees a refused refresh when the token source returns
+// it, and once a sign-in is on offer it does not: counting here as well would
+// double the ones it sees and still miss the rest.
+func TestAnAuthRejectionIsCountedByTheTokenSourceNotTheConnectLoop(t *testing.T) {
 	const name = "mc_agent_auth_rejections_total"
 	if got := metricstest.Delta(t, func() {
 		reportSessionEnd(quietLog, "agent", abuseModeRejectionError(), true, time.Second, time.Minute)
-	}, name); got != 1 {
-		t.Errorf("auth rejections moved by %v, want 1", got)
-	}
-	if got := metricstest.Delta(t, func() {
-		reportSessionEnd(quietLog, "agent", errors.New("dial: connection refused"), false, time.Second, time.Minute)
 	}, name); got != 0 {
-		t.Errorf("an ordinary session error moved auth rejections by %v, want 0", got)
+		t.Errorf("reporting a rejected session moved auth rejections by %v, want 0", got)
 	}
 }
 
