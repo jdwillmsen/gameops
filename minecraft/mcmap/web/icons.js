@@ -200,12 +200,12 @@
 
   // Where a picture is asked for, or null for one the server has not
   // listed: only what it lists is ever requested.
-  // Nor is one the viewer has chosen plain dots in place of: a mob's by
-  // one choice, and a bed's, a container's and a waypoint's by another. A
-  // structure's is neither's.
+  // Nor is one the viewer has chosen plain marks in place of: a mob's by
+  // one choice, and a bed's, a container's, a waypoint's and a structure's
+  // by another.
   const mobAddress = (type) => (listing.mobs.types.has(type) && look().picturesLive !== false
     ? `api/icons/mob/${encodeURIComponent(type)}?v=${encodeURIComponent(listing.mobs.version)}` : null);
-  const pictureAddress = (key) => (listing.pictures.keys.has(key) && KEY.test(key) && (look().picturesMarkers !== false || key.startsWith('structure/'))
+  const pictureAddress = (key) => (listing.pictures.keys.has(key) && KEY.test(key) && look().picturesMarkers !== false
     ? `api/icons/picture/${key}?v=${encodeURIComponent(listing.pictures.version)}` : null);
   // Either sort by one key: a mob's icon is mob/<type>.
   const addressOf = (key) => (str(key).startsWith('mob/') ? mobAddress(key.slice(4)) : pictureAddress(str(key)));

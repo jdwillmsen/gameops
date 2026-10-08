@@ -86,6 +86,7 @@ func contrast(a, b rgba) float64 {
 func TestLightAndHighContrastThemesMeetTheContrastTheyAreFor(t *testing.T) {
 	css := read(t, "style.css")
 	terrain := []rgba{{0, 0, 0, 1}, {255, 255, 255, 1}}
+	kinds := []string{"kind-fortress", "kind-monument", "kind-outpost", "kind-witch-hut", "kind-village"}
 	rings := []string{"live-players", "live-hostile", "live-passive", "live-villager", "live-other", "live-me",
 		"marker-waypoints", "marker-beds", "marker-containers", "marker-mobs", "named"}
 	for _, theme := range []string{"light", "contrast"} {
@@ -123,9 +124,25 @@ func TestLightAndHighContrastThemesMeetTheContrastTheyAreFor(t *testing.T) {
 			for _, ring := range rings {
 				check("edge", ring+" on a marker's backing", contrast(get(ring), backing), 3)
 			}
+			// The letter a predicted structure is drawn as, in its kind's
+			// colour on the thinner backing.
+			thin := get("marker-backing-thin").over(under)
+			for _, kind := range kinds {
+				check("text", kind+" on a predicted structure's backing", contrast(get(kind), thin), 4.5)
+			}
 		}
 		for _, ring := range rings {
 			check("edge", ring+" against a marker's outline", contrast(get(ring), get("marker-ink")), 3)
+		}
+		// And the letter of a recorded one, in the outline's colour on its
+		// kind's.
+		for _, kind := range kinds {
+			check("text", "a recorded structure's letter on "+kind, contrast(get("marker-ink"), get(kind)), 4.5)
+		}
+		// A colour key in the panel is told from the panel by its colour or
+		// by the edge drawn round it, whichever stands off further.
+		for _, key := range append(append([]string{}, rings[:9]...), kinds...) {
+			check("edge", "the key for "+key+" in the panel", math.Max(contrast(get(key), get("panel")), contrast(get(key), get("edge"))), 3)
 		}
 		for _, bg := range []string{"bg", "panel"} {
 			check("edge", "line on "+bg, contrast(get("line"), get(bg)), 3)
@@ -269,6 +286,29 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	}
 	if !bytes.Contains(page, []byte(`<button id="appearance-reset" type="button">Reset to defaults</button>`)) {
 		t.Error("index.html has no button to put the appearance back to its defaults")
+	}
+	// A structure's mark is drawn in a colour its own script holds, and
+	// its key in the panel in the stylesheet's: they are one colour, so
+	// that what is measured of the one is true of the other.
+	themed := themeColours(t, read(t, "style.css"), "")
+	table := regexp.MustCompile(`(\w+): \{ letter: '\w', color: '(#[0-9a-f]{6})' \}`).FindAllSubmatch(read(t, "structures.js"), -1)
+	if len(table) < 5 {
+		t.Fatalf("read %d kinds of structure from structures.js; the pattern no longer matches", len(table))
+	}
+	for _, m := range table {
+		name := "kind-" + strings.ReplaceAll(string(m[1]), "_", "-")
+		if css, ok := themed[name]; ok && css != string(m[2]) {
+			t.Errorf("structures.js draws %s in %s and style.css keys it in %s", m[1], m[2], css)
+		}
+	}
+	// A structure's picture goes with the other markers' when the viewer
+	// has plain marks, and its letter stands in for it.
+	if bytes.Contains(read(t, "icons.js"), []byte("startsWith('structure/')")) || !bytes.Contains(read(t, "icons.js"), []byte("&& KEY.test(key) && look().picturesMarkers !== false")) {
+		t.Error("icons.js no longer leaves a structure's picture out when the viewer has plain marks")
+	}
+	// A trail's key is its line on the line's own dark casing.
+	if !bytes.Contains(read(t, "style.css"), []byte(".trail-players i { width: 1.2rem; height: 0.55rem; border: 2px solid var(--marker-ink); border-radius: 1px; }")) {
+		t.Error("style.css no longer draws a trail's key on its casing")
 	}
 	// Pixel art is only ever enlarged by a whole number of screen pixels.
 	icons := read(t, "icons.js")
