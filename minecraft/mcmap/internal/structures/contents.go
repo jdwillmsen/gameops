@@ -76,14 +76,15 @@ var blockSorts = map[string]blockSort{
 	"Cauldron": blockCauldron, "Bell": blockBell, "EndPortal": blockPortal,
 }
 
-// containerKinds is what a container is called in an answer, in the order
-// they are listed.
+// containerKinds is the containers a player opens, by what each is called
+// in an answer and in the order they are listed. A dispenser, a dropper and
+// a pot hold things too, and are counted as the blocks they are: nobody
+// opens a pot, and a dispenser's load says nothing of who has been by.
 var containerKinds = []struct {
 	sort blockSort
 	kind string
 }{
 	{blockChest, "chest"}, {blockBarrel, "barrel"}, {blockShulker, "shulker"},
-	{blockDispenser, "dispenser"}, {blockDropper, "dropper"}, {blockPot, "pot"},
 }
 
 // What a container's record says of what is in it.
@@ -406,14 +407,16 @@ func (c *contents) blockEntities(pos chunks.Pos, v []byte) {
 		}
 		b.sort = sort
 		switch sort {
-		case blockChest, blockBarrel, blockShulker, blockDispenser, blockDropper, blockPot:
+		case blockPot:
+			// A pot the generator placed carries a loot table until it is
+			// broken. One without is a player's, or shards put back.
+			if !hasLoot || len(loot) == 0 {
+				continue
+			}
+		case blockChest, blockBarrel, blockShulker:
 			switch {
 			case hasLoot && len(loot) > 0:
 				b.state = holdsLoot
-			case sort == blockPot:
-				// A pot without a loot table is a player's, or a broken
-				// one's shards put back: not a container to count.
-				continue
 			case items > 0:
 				b.state = holdsItems
 			default:
