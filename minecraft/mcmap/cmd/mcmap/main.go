@@ -147,7 +147,13 @@ func run(logger *slog.Logger) error {
 			WorkDir:       filepath.Join(cfg.DataDir, "structures"),
 			Predictors:    structures.Predictors,
 			StructureSeed: cfg.StructureSeed,
+			Background:    ctx,
 			Logger:        logger,
+		}
+		// Beside the survey's directory and not in it: the survey clears
+		// its own, and this has to outlast a restart.
+		if cfg.StructureSeedSearch {
+			surveyor.SeedFile = filepath.Join(cfg.DataDir, "structure-seed.json")
 		}
 		w.Structures = surveyor
 		// A survey takes about ten seconds on the FWB world. One that has

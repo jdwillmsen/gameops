@@ -257,6 +257,13 @@ type Surveyor struct {
 	// StructureSeed, when set, is used in place of the low half of the
 	// seed in level.dat. It is checked against the world the same way.
 	StructureSeed *uint32
+	// SeedFile is where a seed worked out from the world's own records is
+	// kept. Set, and a seed the world refutes is searched for instead of
+	// being left as it is; an operator's seed is never second-guessed.
+	SeedFile string
+	// Background is what cancels a search, which outlives the survey that
+	// started it; nil and nothing does.
+	Background context.Context
 	// Biomes says what biome a generated block is in. Without it a site
 	// the biome decides is only ever a candidate, and is not shown at all
 	// in terrain that is generated.
@@ -279,6 +286,14 @@ type Surveyor struct {
 	// when it changes.
 	logged   []string
 	standing map[Kind]string
+	// The search for a seed: the one it found, the records last searched
+	// so that they are not searched twice, and whether SeedFile was read.
+	found     *uint32
+	searched  uint64
+	searching bool
+	restored  bool
+	// search stands in for Solve in tests.
+	search func(context.Context, []Evidence, int) (uint32, int, error)
 }
 
 // Last is the most recent survey, if there has been one.
@@ -338,7 +353,7 @@ func (s *Surveyor) Take(ctx context.Context, worldDir string, at time.Time) (Sur
 	case survey.Check.State == SeedRefuted:
 		// Every recorded structure is a finding then, and one line says
 		// what all of them mean.
-		s.Logger.Warn("the seed does not put this world's recorded structures where they are, so nothing is predicted; if the world generates from another seed, STRUCTURE_SEED supplies it",
+		s.Logger.Warn("the seed does not put this world's recorded structures where they are, so nothing is predicted; if the world generates from another seed it is worked out from those structures unless that is switched off, and STRUCTURE_SEED supplies it otherwise",
 			"agree", survey.Check.Agree, "disagree", survey.Check.Disagree)
 	default:
 		for _, finding := range survey.Check.Findings {
@@ -454,6 +469,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 			known[d] = append(slices.Clip(recorded[d]), survey.villages[d]...)
 		}
 		survey.Check, predicted, more = compare(s.Predictors, seed, layerLimit, known, extents, s.Biomes)
+		s.reconsider(survey.Check, known)
 	}
 
 	for _, d := range chunks.Dimensions {
@@ -587,7 +603,8 @@ func sameWorld(before, now Survey) bool {
 
 // seed is the 32 bits structure placement is seeded with. The game uses the
 // low half of the world seed, which is what this takes from level.dat
-// unless the operator has supplied another.
+// unless the operator has supplied another or a search has found the ones
+// the world's records answer to.
 func (s *Surveyor) seed(worldDir string, survey *Survey) (uint32, bool) {
 	level, err := leveldat.Read(filepath.Join(worldDir, "level.dat"))
 	if err != nil {
@@ -598,6 +615,11 @@ func (s *Surveyor) seed(worldDir string, survey *Survey) (uint32, bool) {
 	}
 	if s.StructureSeed != nil {
 		return *s.StructureSeed, true
+	}
+	if s.SeedFile != "" {
+		if seed, ok := s.worked(); ok {
+			return seed, true
+		}
 	}
 	return uint32(level.Seed), err == nil
 }
