@@ -355,6 +355,39 @@ test('an id that has been in none of its lists for a month is dropped, and one t
   assert.equal(kept.missing, undefined);
 });
 
+test('the list always has one stop for the Tab key, on a line that is showing', async () => {
+  const p = await load();
+  const showing = (check) => check.offsetParent !== null;
+  assert.equal(p.stops().length, 1);
+  // Narrowed to what is under another section than the one the stop was on.
+  await p.search('bed');
+  assert.equal(p.stops().length, 1, 'one stop while the search hides the first section');
+  assert.ok(showing(p.stops()[0]), 'and it is on a line that is showing');
+  await p.search('nothing is called this');
+  assert.equal(p.tree.querySelectorAll('.check').filter(showing).length, 0);
+  await p.search('');
+  assert.equal(p.stops().length, 1);
+  assert.ok(showing(p.stops()[0]));
+  // A group put away takes the stop off the item it was on.
+  await p.open('Mobs', 'Passive');
+  p.part(['Mobs', 'Passive', 'Cow'], 'check').focus();
+  await p.tick();
+  assert.equal(p.stops()[0], p.part(['Mobs', 'Passive', 'Cow'], 'check'));
+  await p.press(['Mobs', 'Passive'], 'twist');
+  assert.equal(p.stops().length, 1);
+  assert.ok(showing(p.stops()[0]));
+  // A line that goes while it has the focus hands both to the line it was under.
+  await p.open('Mobs', 'Passive');
+  p.part(['Mobs', 'Passive', 'Cow'], 'check').focus();
+  p.rows['live/passive'].setItems([{ id: 'cat', label: 'Cat' }]);
+  await p.tick();
+  assert.equal(p.doc.activeElement, p.part(['Mobs', 'Passive'], 'check'));
+  assert.equal(p.stops().length, 1);
+  assert.equal(p.stops()[0], p.part(['Mobs', 'Passive'], 'check'));
+  // Never on a line that cannot be pressed while another can.
+  assert.notEqual(p.stops()[0].getAttribute('aria-disabled'), 'true');
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {
