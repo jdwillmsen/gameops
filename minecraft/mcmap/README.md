@@ -260,9 +260,9 @@ second is the pack slowing itself down to protect the server's tick rate.
 
 ### Icons and heads
 
-A mob is drawn as its icon and a player as their skin's head, each inside a
-ring or border in its category's colour so the filters still read at a
-glance. A marker with no picture is the dot or arrow it was before.
+A mob is drawn as its face, or its spawn egg, and a player as their skin's
+head, each inside a ring or border in its category's colour so the filters
+still read at a glance. A marker with no picture is the dot or arrow it was before.
 
 **Mob icons** are Mojang's own spawn-egg item textures. None of them is in
 this repository or in the image: the service fetches them at runtime from
@@ -355,12 +355,86 @@ content security policy is unchanged: pictures are same-origin images.
 
 **In the browser** one script, `icons.js`, asks `/api/icons` and keeps the
 pictures for every layer: each is decoded once into a bitmap, composed
-with its ring into a sprite per picture and colour, and stamped onto the
-live layer's one canvas with `drawImage`. Measured with 1,000 mobs and 5
-players in view at 1400 by 900 in headless Chromium, repainting the whole
-canvas every frame while panning: 16.7 ms frames with none over, before
-and after; one whole repaint, flushed, took a median 1.9 ms as dots and
-1.4 ms as icons.
+into a sprite per picture, colour and shape, and stamped onto the live
+layer's one canvas with `drawImage`.
+
+#### One registry, three styles, and size apart
+
+`icons.js` holds one registry of everything the map draws a picture for,
+by key: `mob/<type>`, `villager/<profession>`, `bed/<colour>`,
+`shulker/<colour>`, `container/<kind>`, `structure/<kind>`,
+`marker/waypoint`. A key has the renditions the server lists for it (a
+mob's face and its egg; anything else's flat picture and its block), and
+which is drawn is decided there and nowhere else, so the map, the layer
+panel, the inspect card, a structure's sheet and a search result show the
+same picture. It is on `window.mcmap.icons.registry` for any script that
+draws: `renditions(key)`, `chosen(key)`, `marker(key, colour, { baby })`
+for the map's own sprite, `picture(key)` for an element, `tier()`, and
+`STATES`.
+
+| Marker style | A mob | A bed or container | A structure |
+|---|---|---|---|
+| Dots | Its dot, as before there were pictures | Its ring | Its letter |
+| Pictures on plates (the default) | Its face, or its egg, on a round plate | Its flat picture on a square plate | Its picture on a square plate |
+| Large pictures | Its face, larger, with no plate | The block drawn from three sides | Its picture, twice the size, framed |
+
+A plate is, from the outside in, a dark casing a pixel wide, a ring two
+wide in the layer's colour, a dark backing and the picture, which is kept
+inside the ring so that nothing in it covers the colour the filters are
+read by. Round is what moves and square is what stays put. A picture with
+no plate is cased round its own outline, in the layer's colour and then
+in the dark, so a chest is a chest's shape and still reads on snow.
+
+**Mob picture** chooses between a mob's face and its spawn egg. A mob
+with no face (20 of 92 at the default pin) is its egg under either, and
+one with a face and no egg its face.
+
+**Size is chosen apart from style**: the box a picture is drawn in is 12,
+16, 24 or 32 pixels on a plate (32 and 48 for the two larger on a screen
+that is not dense, as before) and 24, 32, 48 or 64 with no plate. Within
+its box a picture is enlarged by the most whole screen pixels to each of
+its own that fit, so a face 8 pixels a side fills a 16 pixel box at 2 and
+one 6 a side stands 12 in it; nothing is ever drawn at a pixel and a
+half. One larger than its box is blended down. A block is already drawn
+on the slant, so where a whole number would leave it under three quarters
+of its box it is stretched to it, unblended.
+
+**How far out the map is decides what is drawn at all**, whatever the
+style. Zoom 0 is a block to the pixel.
+
+| Zoom | Mobs | Beds and containers | Names over markers |
+|---|---|---|---|
+| -3 and further out | Dots | Rings | None |
+| -2 | Dots | Pictures | None |
+| -1 | Pictures | Pictures | None |
+| 0 and closer | Pictures | Pictures | Drawn |
+
+Mobs are where players are, so their plates heap up sooner than those of
+beds and chests, which are spread over the world. Players and waypoints
+are few and are what the map is looked at for, and keep their heads,
+pictures and names from however far out. The layers are told when a tier
+is crossed and not at every step.
+
+**States are written down once**, in the registry: the marker under the
+pointer is ringed two pixels out, the inspected one four, and a mark that
+is only a record of where something was (a named mob the live layer is
+not drawing) is at 55% in a broken ring. That last is laid over whatever
+the style draws, so a saved mark is told from a live one in all three.
+
+A sprite is composed once per picture, colour and shape at the screen's
+density and kept until the theme, style, size or mob picture changes;
+drawing a marker is one `drawImage`. With 900 mobs and 2,100 markers in
+view at 1300 by 800 in headless Chromium, panning held 16.7 ms frames in
+every style, with one repaint a median 2.6 ms as dots and 3.7 ms as
+plates or large pictures.
+
+**What was kept before.** There used to be two switches, pictures or
+plain, one for mobs and players and one for everything placed. A record,
+a saved view or a link from then is read as dots where the mobs were
+plain and as plates otherwise, and the switches are not kept. For the few
+minutes a page and its scripts can be of different versions, a newer
+script on older settings draws as the two switches say, and an older
+script on newer settings is told pictures or plain from the style.
 
 ### Names and marker pictures
 
@@ -2279,11 +2353,11 @@ and Reset to defaults puts them all back.
 | Setting | Values (default first) |
 |---|---|
 | Theme | Dark, light, high contrast, or the same as the system |
-| Marker size | Normal, small, large |
+| Marker style | Pictures on plates, dots, large pictures |
+| Mob picture | Faces, spawn eggs |
+| Marker size | Normal, small, large, extra large |
 | Label size | Normal, small, large |
 | Names of named mobs, of players, of waypoints | Always shown, under the pointer, never; each separately |
-| Mobs and players | Pictures, or plain dots |
-| Beds, containers, waypoints and structures | Pictures, or plain rings and letters |
 | Biome tint, trails, slime chunks | 60%, 100% and 100%, each from 10% to 100% |
 | Density | Comfortable, compact, spacious |
 | Motion | The same as the system, reduced, full |
