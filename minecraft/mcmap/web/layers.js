@@ -15,17 +15,6 @@
   };
   if (!el.panel || !el.toggle || !el.body) return;
 
-  // The sections there is a place for, in the order they are shown. A
-  // section appears once it has a row. Any other group is shown after
-  // these, in the order it was first used.
-  const GROUPS = [
-    ['live', 'Live'],
-    ['markers', 'Markers'],
-    ['structures', 'Structures'],
-    ['biomes', 'Biomes'],
-    ['overlays', 'Overlays'],
-  ];
-
   // The viewer's choices are kept by the page's one record of them, in
   // its "layers" part, and which groups are folded in its "panel" part.
   // The page and its scripts are cached apart for a few minutes, so just
@@ -118,7 +107,39 @@
     else writeOld(PANEL_KEY, { open: view.open, folded: [...folded] });
   };
 
-  const groups = new Map();
+  // --- what is in the panel ----------------------------------------------------
+  //
+  // Three depths and no more: a section, the layers in it, and what each
+  // layer is made of. A layer's script says what it has as plain data, a
+  // row for the layer and a list of items under it, and every line at
+  // every depth is drawn by the one function below: nothing here knows a
+  // mob from a biome. A section whose one layer is the whole of it, as
+  // the biomes' overlay is, is headed by that layer's own line.
+
+  // The sections there is a place for, in the order they are shown. A
+  // section appears once it has a row. A layer that names none goes in the
+  // section called what its group is, and any other after these, in the
+  // order it was first used.
+  const SECTIONS = [
+    ['players', 'Players'],
+    ['mobs', 'Mobs'],
+    ['live', 'Live'],
+    ['markers', 'Markers'],
+    ['structures', 'Structures'],
+    ['biomes', 'Biomes'],
+    ['trails', 'Trails'],
+    ['overlays', 'Overlays'],
+  ];
+  // The most items a layer lists before it is asked for the rest, and the
+  // most a choice keeps, so that what a viewer hid over a year of visits
+  // is still a few kilobytes in their browser.
+  const LIST_CAP = 40;
+  const MAX_HIDDEN = 200;
+  const TYPEAHEAD_MS = 600;
+  const COLOUR = /^#[0-9a-f]{6}$/i;
+
+  const sections = new Map();
+  const facets = new Map();
   let made = 0;
 
   const make = (tag, className, text) => {
@@ -129,18 +150,28 @@
     if (text !== undefined) node.textContent = text;
     return node;
   };
+  const fmt = (n) => n.toLocaleString('en-US');
+  const text = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64;
+  const call = (fn, ...args) => {
+    // One layer failing to redraw must not leave the rest unswitched.
+    try { return fn(...args); } catch (err) { console.error(err); return undefined; }
+  };
 
   // A drawing, not a character: a character would be read out as part of
   // whatever it is on. Each is one path on a square of sixteen.
   const GLYPHS = {
-    layers: 'M8 2l6 3-6 3-6-3zM2 8l6 3 6-3M2 11l6 3 6-3',
     more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
     shut: 'M6 3l5 5-5 5',
+    twist: 'M6 4l4 4-4 4',
+    search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM11 11l3 3',
     close: 'M4 4l8 8M12 4l-8 8',
+    players: 'M8 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3 14c0-2.8 2.2-4.5 5-4.5s5 1.7 5 4.5',
+    mobs: 'M3 3h10v10H3zM5.5 6h1.5v1.5H5.5zM9 6h1.5v1.5H9zM7 9.5h2V12H7z',
     live: 'M2 8h3l2-4 3 8 2-4h2',
     markers: 'M8 14s4-4.2 4-7.5a4 4 0 0 0-8 0C4 9.8 8 14 8 14zM8 8a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
     structures: 'M3 14V7l5-4 5 4v7zM6.5 14v-4h3v4',
     biomes: 'M8 14V9M8 9C5 9 3.5 7 3.5 5S5.5 2 8 2s4.5 1 4.5 3S11 9 8 9z',
+    trails: 'M3 13c0-4 4-2.5 5-5s4-1.5 5-5M3 13h.01M13 3h.01',
     overlays: 'M3 3h10v10H3zM3 8h10M8 3v10',
     other: 'M3 4h10M3 8h10M3 12h10',
   };
@@ -168,6 +199,1012 @@
     }
     return node;
   };
+
+  // --- which items are shown ---------------------------------------------------
+  //
+  // What a layer is made of can each be hidden or shown alone, and the
+  // choice is kept as what differs from everything showing: { only,
+  // hidden, shown }. With only set, that one is drawn and nothing else,
+  // and hidden is kept as it was underneath, which is what letting go of
+  // "only" goes back to. shown is for the few items that are off until
+  // asked for. One choice may be shared by several layers, as the types
+  // of mob are across their four rows: "only creepers" is no other mob,
+  // whichever row the others are in. It is kept beside the switches as
+  // "<group>#<name>", in the form the live layer always kept its own.
+  function readFacet(f) {
+    const kept = recall(f.group, f.name);
+    const was = kept !== null && typeof kept === 'object' && !Array.isArray(kept) ? kept : {};
+    const list = (v) => new Set(Array.isArray(v) ? v.filter(text).slice(0, MAX_HIDDEN) : []);
+    const next = { only: text(was.only) ? was.only : null, hidden: list(was.hidden), shown: list(was.shown) };
+    const same = next.only === f.only && next.hidden.size === f.hidden.size && next.shown.size === f.shown.size
+      && [...next.hidden].every((id) => f.hidden.has(id)) && [...next.shown].every((id) => f.shown.has(id));
+    Object.assign(f, next);
+    return !same;
+  }
+
+  const plain = (f) => f.only === null && f.hidden.size === 0 && f.shown.size === 0;
+  const stateOf = (f) => ({ only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...(f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {}) });
+
+  function facetOf(group, name, { off = [] } = {}) {
+    const key = `${group}#${name}`;
+    let f = facets.get(key);
+    if (!f) {
+      f = { key, group, name, only: null, hidden: new Set(), shown: new Set(), off: new Set(), rows: new Set(), listeners: [] };
+      readFacet(f);
+      f.shows = (id) => (f.only !== null ? f.only === id : !f.hidden.has(id) && (!f.off.has(id) || f.shown.has(id)));
+      // What a layer's script holds of it: enough to ask and to be told.
+      f.handle = {
+        shows: f.shows,
+        get only() { return f.only; },
+        filtering: () => !plain(f),
+        state: () => stateOf(f),
+        onChange(fn) { if (typeof fn === 'function') f.listeners.push(fn); },
+        // Shows one item and nothing else, as its "Only" would.
+        solo(id) { changeFacet(f, () => { f.only = text(id) ? id : null; }); },
+      };
+      facets.set(key, f);
+    }
+    for (const id of off) if (text(id)) f.off.add(id);
+    return f;
+  }
+
+  // Every item a choice is over, in whichever row it is listed.
+  const known = (f) => [...f.rows].flatMap((row) => row.list.map((item) => item.id));
+
+  function showItem(f, id, on) {
+    if (f.off.has(id)) {
+      if (on) f.shown.add(id); else f.shown.delete(id);
+      f.hidden.delete(id);
+    } else if (on) f.hidden.delete(id); else f.hidden.add(id);
+  }
+
+  function changeFacet(f, change) {
+    const before = JSON.stringify(stateOf(f));
+    change();
+    if (JSON.stringify(stateOf(f)) === before) return;
+    retain(f.group, f.name, plain(f) ? null : stateOf(f));
+    for (const fn of f.listeners) call(fn);
+    schedule();
+  }
+
+  // Leaving "only this" by a switch: everything else that is here stays
+  // hidden, and the switch does what it says.
+  function leaveOnly(f) {
+    if (f.only === null) return;
+    for (const id of known(f)) if (id !== f.only) showItem(f, id, false);
+    showItem(f, f.only, true);
+    f.only = null;
+  }
+
+  // --- rows ----------------------------------------------------------------------
+
+  function set(row, on) {
+    if (row.on === on) return false;
+    row.on = on;
+    for (const fn of row.listeners) call(fn, on);
+    schedule();
+    return true;
+  }
+
+  const switchRow = (row, on) => {
+    if (row.available && set(row, on)) remember({ [row.key]: row.on });
+  };
+
+  function switchRows(rows, on) {
+    const changes = {};
+    for (const row of [...rows]) if (row.available && set(row, on)) changes[row.key] = on;
+    if (Object.keys(changes).length > 0) remember(changes);
+  }
+
+  // Every row's switch as it stands, by the key its choice is kept under.
+  function states() {
+    const out = {};
+    for (const section of sections.values()) for (const row of section.rows) out[row.key] = row.on;
+    return out;
+  }
+
+  // Every choice over items as it stands, by the key it is kept under: for
+  // a saved view, which has to say "everything" as well as what is hidden.
+  function items() {
+    const out = {};
+    for (const f of facets.values()) out[f.key] = stateOf(f);
+    return out;
+  }
+
+  // Brings every row and every choice over items in line with what is now
+  // kept, for when something other than a switch has changed them, as a
+  // saved view does. Everything is switched before any layer is told, and
+  // a layer that listens with one function for all its rows is told once,
+  // so the map goes from the one picture to the other with nothing drawn
+  // between. wanted is the keys a view named, and what comes back is those
+  // of them there is no row for here: a layer that has gone, or one this
+  // server does not offer. A row that is only greyed out for now is
+  // switched all the same, for when it is not.
+  function adopt(wanted = []) {
+    const choices = kept();
+    const told = new Map();
+    const found = new Set();
+    for (const section of sections.values()) {
+      for (const row of section.rows) {
+        found.add(row.key);
+        // With no choice kept for it, a row is as its layer first had it.
+        const on = typeof choices[row.key] === 'boolean' ? choices[row.key] : row.first;
+        if (row.on === on) continue;
+        row.on = on;
+        for (const fn of row.listeners) told.set(fn, on);
+      }
+    }
+    for (const f of facets.values()) {
+      if (!readFacet(f)) continue;
+      // A function that also listens to a row is told what the row said.
+      for (const fn of f.listeners) if (!told.has(fn)) told.set(fn, undefined);
+    }
+    readSolo();
+    for (const [fn, on] of told) call(fn, on);
+    schedule();
+    return wanted.filter((key) => !found.has(key));
+  }
+
+  function sectionOf(id, label) {
+    let section = sections.get(id);
+    if (section) return section;
+    const at = SECTIONS.findIndex(([name]) => name === id);
+    made += 1;
+    section = { kind: 'section', path: `s:${id}`, id, label: at >= 0 ? SECTIONS[at][1] : String(label || id), rank: at >= 0 ? at : SECTIONS.length + made, rows: [], dom: null };
+    sections.set(id, section);
+    return section;
+  }
+
+  function drop(row) {
+    const at = row.section.rows.indexOf(row);
+    if (at < 0) return;
+    row.section.rows.splice(at, 1);
+    if (row.facet) row.facet.rows.delete(row);
+    row.listeners.length = 0;
+    schedule();
+  }
+
+  // Adds a layer's row and returns the handle its script keeps. group and
+  // id are what the viewer's choice is saved under, and registering the
+  // pair again replaces the row. section is where it is shown, which is
+  // the group unless it says otherwise, and whole makes the row the
+  // section's own heading. swatch is the class of the colour key drawn
+  // beside the label and picture the game's picture of it, by its key or
+  // as an element the script made. facet names the choice its items are
+  // shown by, which several rows may share, and actions what can be done
+  // with the row or one item of it: zoom(id) and go(id), with no id for
+  // the row itself.
+  function register({ group, id, label, enabled = true, order, groupLabel, swatch, picture, section, whole, facet, actions } = {}) {
+    if (typeof group !== 'string' || !group || typeof id !== 'string' || !id) {
+      throw new TypeError('a layer needs a group and an id');
+    }
+    const key = `${group}/${id}`;
+    for (const other of sections.values()) {
+      const again = other.rows.find((row) => row.key === key);
+      if (again) drop(again);
+    }
+    const home = sectionOf(typeof section === 'string' && section ? section : group, groupLabel);
+    made += 1;
+    const row = {
+      kind: 'row',
+      path: `r:${key}`,
+      group,
+      id,
+      key,
+      section: home,
+      whole: whole === true,
+      label: String(label ?? id),
+      order: Number.isFinite(order) ? order : Infinity,
+      seq: made,
+      on: choice(group, id, Boolean(enabled)),
+      first: Boolean(enabled),
+      available: true,
+      listeners: [],
+      count: null,
+      note: '',
+      swatch: typeof swatch === 'string' ? swatch : '',
+      picture: picture instanceof Node || typeof picture === 'string' ? picture : null,
+      facet: typeof facet === 'string' && facet ? facetOf(group, facet) : null,
+      actions: actions && typeof actions === 'object' ? actions : {},
+      items: new Map(),
+      list: [],
+      control: null,
+      body: null,
+      all: false,
+      dom: null,
+    };
+    if (row.facet) row.facet.rows.add(row);
+    // Lower orders first; rows given none go last, as they were registered.
+    const next = home.rows.find((other) => row.order < other.order);
+    home.rows.splice(next ? home.rows.indexOf(next) : home.rows.length, 0, row);
+    schedule();
+
+    return {
+      get enabled() { return row.on; },
+      // Counts arrive once a second from the live layer; the panel is
+      // drawn again at most once for all that changed in a turn, and
+      // writes only what differs.
+      setCount(n) {
+        const count = Number.isFinite(n) ? n : null;
+        if (row.count === count) return;
+        row.count = count;
+        schedule();
+      },
+      setNote(said) {
+        const note = said ? String(said) : '';
+        if (row.note === note) return;
+        row.note = note;
+        schedule();
+      },
+      // For a layer whose name is the world's and may arrive late.
+      setLabel(said) {
+        if (!said || row.label === String(said)) return;
+        row.label = String(said);
+        schedule();
+      },
+      onToggle(fn) { if (typeof fn === 'function') row.listeners.push(fn); },
+      // Switches the row as the viewer would have, for a script that has
+      // been asked for what the layer shows: the choice is kept, and the
+      // listeners are told.
+      setEnabled(on) { switchRow(row, Boolean(on)); },
+      setAvailable(available) {
+        if (row.available === Boolean(available)) return;
+        row.available = Boolean(available);
+        schedule();
+      },
+      // What the layer is made of, as a list in the order to show it.
+      // Each is { id, label } with whichever of these it has: picture, a
+      // picture's key or an element; swatch, a colour key's class; colour,
+      // as #rrggbb, with shape 'line' for one drawn as a line; count;
+      // detail, a few words beside the name; note, a line under it; off,
+      // for an item that is hidden until asked for; disabled; and go or
+      // zoom set to false where the row's action does not apply to it.
+      // The list is diffed against the last one, so one given every
+      // second costs what changed in it.
+      setItems(list) {
+        const seen = new Set();
+        row.list = [];
+        for (const given of Array.isArray(list) ? list : []) {
+          if (!given || !text(given.id) || seen.has(given.id)) continue;
+          seen.add(given.id);
+          let item = row.items.get(given.id);
+          if (!item) {
+            item = { kind: 'item', path: `i:${key}:${given.id}`, id: given.id, row, dom: null };
+            row.items.set(given.id, item);
+          }
+          item.label = String(given.label ?? given.id);
+          item.picture = given.picture instanceof Node || typeof given.picture === 'string' ? given.picture : null;
+          item.swatch = typeof given.swatch === 'string' ? given.swatch : '';
+          item.colour = typeof given.colour === 'string' && COLOUR.test(given.colour) ? given.colour : '';
+          item.shape = given.shape === 'line' ? 'line' : '';
+          item.count = Number.isFinite(given.count) ? given.count : null;
+          item.detail = given.detail ? String(given.detail) : '';
+          item.note = given.note ? String(given.note) : '';
+          item.disabled = given.disabled === true;
+          item.go = given.go !== false;
+          item.zoom = given.zoom !== false;
+          if (given.off === true && row.facet) row.facet.off.add(given.id);
+          row.list.push(item);
+        }
+        for (const id of [...row.items.keys()]) if (!seen.has(id)) row.items.delete(id);
+        schedule();
+      },
+      // Whether one of its items is on the map: the row is on and the
+      // item is not hidden. Two set lookups.
+      shows: (item) => row.on && (!row.facet || row.facet.shows(item)),
+      // A choice among a few values, drawn under the row as buttons side
+      // by side: { label, options: [{ value, label, disabled, title }],
+      // value, onChange(value) }, and custom for a value that is typed:
+      // { label, title, hint, placeholder, say(value), settle(typed) }
+      // where settle gives { value, said, problem }. null takes it away.
+      setControl(spec) {
+        row.control = spec && typeof spec === 'object' && Array.isArray(spec.options) ? spec : null;
+        schedule();
+      },
+      // For a script from before items: its own controls, shown under its
+      // row as it built them. The node is the script's to fill; null
+      // takes it away.
+      setBody(node) {
+        row.body = node instanceof Node ? node : null;
+        schedule();
+      },
+      remove() { drop(row); },
+    };
+  }
+
+  // --- "only", and the way back ---------------------------------------------------
+  //
+  // Showing one row alone switches the others in its section off and
+  // remembers which of them were on; showing one section alone does the
+  // same over the whole panel. "Show all again" puts those back. It is
+  // offered for as long as the one is still alone: once the viewer has
+  // switched something else themselves there is nothing to go back to.
+  let solo = {};
+  function readSolo() {
+    const kept = recall('panel', 'only');
+    solo = {};
+    if (kept === null || typeof kept !== 'object' || Array.isArray(kept)) return;
+    for (const [scope, was] of Object.entries(kept)) {
+      if (was && typeof was === 'object' && text(was.key) && Array.isArray(was.was)) solo[scope] = { key: was.key, was: was.was.filter(text).slice(0, MAX_HIDDEN) };
+    }
+  }
+  readSolo();
+  const keepSolo = () => retain('panel', 'only', Object.keys(solo).length > 0 ? solo : null);
+
+  const rowsIn = (scope) => (scope === 'all' ? [...sections.values()].flatMap((section) => section.rows) : sections.get(scope) ? sections.get(scope).rows : []);
+  // Whether what was shown alone still is.
+  function alone(scope) {
+    const kept = solo[scope];
+    if (!kept) return false;
+    const mine = (row) => (scope === 'all' ? row.section.id === kept.key : row.key === kept.key);
+    const rows = rowsIn(scope);
+    return rows.some((row) => mine(row) && row.on) && rows.every((row) => mine(row) || !row.on);
+  }
+
+  function only(scope, key) {
+    const rows = rowsIn(scope);
+    const mine = (row) => (scope === 'all' ? row.section.id === key : row.key === key);
+    const was = alone(scope) ? solo[scope].was : rows.filter((row) => row.on).map((row) => row.key);
+    solo[scope] = { key, was: was.slice(0, MAX_HIDDEN) };
+    keepSolo();
+    switchRows(rows.filter((row) => !mine(row)), false);
+    // A section none of which was on is shown whole.
+    const own = rows.filter(mine);
+    if (!own.some((row) => row.on)) switchRows(own, true);
+    schedule();
+  }
+
+  function restore(scope) {
+    const kept = solo[scope];
+    if (!kept) return;
+    delete solo[scope];
+    keepSolo();
+    switchRows(rowsIn(scope).filter((row) => kept.was.includes(row.key)), true);
+    schedule();
+  }
+
+  // Everything as each layer first had it, and every item showing.
+  function reset() {
+    solo = {};
+    keepSolo();
+    const changes = {};
+    for (const section of sections.values()) {
+      for (const row of section.rows) {
+        set(row, row.first);
+        // With no choice kept for it, a row is as its layer first had it.
+        changes[row.key] = null;
+      }
+    }
+    remember(changes);
+    for (const f of facets.values()) {
+      changeFacet(f, () => {
+        f.only = null;
+        f.hidden.clear();
+        f.shown.clear();
+      });
+    }
+    schedule();
+  }
+
+  const changed = () => Object.keys(solo).length > 0 || [...facets.values()].some((f) => !plain(f))
+    || [...sections.values()].some((section) => section.rows.some((row) => row.on !== row.first));
+
+  // --- one line -------------------------------------------------------------------
+  //
+  // A line is a twist that opens what is under it, a checkbox that may be
+  // half on, a picture or a colour key, a name, a count, "Only", and a
+  // button for the rest of what can be done. A section, a layer and an
+  // item are all this line; they differ in which of its parts they use.
+  // These are a list of checkboxes that open, not a tree widget: every
+  // control in a line is what a screen reader already knows it to be, and
+  // the arrow keys are added on top for whoever has the focus in it.
+
+  const nodes = new WeakMap();
+  // The line the arrow keys are on, which is the one stop the Tab key
+  // makes in the list.
+  let current = '';
+  let query = '';
+
+  function line(node, depth) {
+    made += 1;
+    const li = make('li', `node d${depth}`);
+    const row = make('div', 'row');
+    const twist = button('twist', '', 'twist');
+    twist.removeAttribute('title');
+    twist.tabIndex = -1;
+    const check = make('button', 'check');
+    check.type = 'button';
+    check.setAttribute('role', 'checkbox');
+    const pic = make('span', 'pic');
+    const name = make('span', 'name');
+    name.id = `layers-name-${made}`;
+    const detail = make('span', 'detail');
+    detail.id = `layers-detail-${made}`;
+    const count = make('span', 'count');
+    count.id = `layers-count-${made}`;
+    const onlyButton = button('only', 'Only');
+    onlyButton.tabIndex = -1;
+    const more = button('icon more', 'More', 'more');
+    more.removeAttribute('title');
+    more.setAttribute('aria-haspopup', 'menu');
+    more.setAttribute('aria-expanded', 'false');
+    const note = make('p', 'note');
+    note.id = `layers-note-${made}`;
+    const extra = make('div', 'extra');
+    const kids = make('ul', 'kids');
+    kids.id = `layers-kids-${made}`;
+    kids.setAttribute('role', 'group');
+    kids.setAttribute('aria-labelledby', name.id);
+    twist.setAttribute('aria-controls', kids.id);
+    twist.setAttribute('aria-labelledby', name.id);
+    check.setAttribute('aria-labelledby', name.id);
+    check.setAttribute('aria-describedby', `${detail.id} ${count.id} ${note.id}`);
+    row.append(twist, check, pic, name, detail, count, onlyButton, more);
+    li.append(row, note, extra, kids);
+    nodes.set(li, node);
+    return { li, row, twist, check, pic, name, detail, count, only: onlyButton, more, note, extra, kids, was: {} };
+  }
+
+  // Writes one thing about a line only if it is not what was written last.
+  function put(dom, what, value, write) {
+    if (dom.was[what] === value) return;
+    dom.was[what] = value;
+    write(value);
+  }
+
+  // A name with the part of it that was searched for marked.
+  function named(dom, label) {
+    put(dom, 'name', `${label}\n${query}`, () => {
+      const at = query === '' ? -1 : label.toLowerCase().indexOf(query);
+      if (at < 0) {
+        dom.name.textContent = label;
+        return;
+      }
+      dom.name.replaceChildren(label.slice(0, at), make('mark', '', label.slice(at, at + query.length)), label.slice(at + query.length));
+    });
+  }
+
+  function pictured(dom, { picture, swatch, colour, shape, drawn }) {
+    put(dom, 'pic', picture instanceof Node ? picture : `${picture || ''}|${swatch}|${colour}|${shape}|${drawn || ''}`, () => {
+      const parts = [];
+      if (drawn) parts.push(glyph(drawn));
+      if (picture instanceof Node) parts.push(picture);
+      else if (typeof picture === 'string' && picture && app.icons && app.icons.picture) parts.push(app.icons.picture(picture));
+      if (swatch || colour) {
+        const key = make('i', colour ? `swatch ${shape}` : swatch);
+        // Only in the one form a colour is ever given in.
+        if (colour) key.style.backgroundColor = colour;
+        parts.push(key);
+      }
+      dom.pic.replaceChildren(...parts);
+      dom.pic.hidden = parts.length === 0;
+    });
+  }
+
+  // What a line shows, common to all three sorts of it.
+  function show(dom, { label, state, disabled, masked, twisted, open, detail, count, note, soloed, menu: hasMenu }) {
+    named(dom, label);
+    put(dom, 'state', state, (v) => dom.check.setAttribute('aria-checked', v));
+    put(dom, 'disabled', disabled, (v) => {
+      if (v) dom.check.setAttribute('aria-disabled', 'true'); else dom.check.removeAttribute('aria-disabled');
+      dom.li.classList.toggle('unavailable', v);
+    });
+    put(dom, 'masked', masked, (v) => dom.li.classList.toggle('masked', v));
+    put(dom, 'twisted', twisted, (v) => {
+      dom.twist.hidden = !v;
+      dom.li.classList.toggle('leaf', !v);
+    });
+    put(dom, 'open', twisted && open, (v) => {
+      dom.twist.setAttribute('aria-expanded', String(v));
+      dom.kids.hidden = !v;
+      dom.extra.hidden = !v;
+    });
+    put(dom, 'detail', detail || '', (v) => { dom.detail.textContent = v; });
+    put(dom, 'count', count || '', (v) => { dom.count.textContent = v; });
+    put(dom, 'note', note || '', (v) => { dom.note.textContent = v; });
+    put(dom, 'solo', soloed, (v) => {
+      dom.only.setAttribute('aria-pressed', String(v));
+      dom.li.classList.toggle('alone', v);
+    });
+    put(dom, 'said', label, (v) => {
+      dom.only.setAttribute('aria-label', `Only ${v}`);
+      dom.more.setAttribute('aria-label', `More for ${v}`);
+    });
+    put(dom, 'menu', hasMenu !== false, (v) => { dom.more.hidden = !v; dom.only.hidden = !v; });
+    const stop = dom.li === currentLine();
+    put(dom, 'stop', stop, (v) => {
+      dom.check.tabIndex = v ? 0 : -1;
+      dom.more.tabIndex = v ? 0 : -1;
+    });
+  }
+
+  let currentNode = null;
+  const currentLine = () => (currentNode && currentNode.dom ? currentNode.dom.li : null);
+
+  // Puts a list's lines in the page in the order wanted, moving only what
+  // is out of place. While the viewer is pointing at the list or has the
+  // focus in it, nothing in it moves: a line that is new goes on the end,
+  // and is put in its place once they have gone.
+  function arrange(list, wanted) {
+    const want = new Set(wanted);
+    for (const child of [...list.children]) {
+      if (want.has(child)) continue;
+      if (child.contains(document.activeElement)) refocus = list.closest('.node');
+      child.remove();
+    }
+    const busy = list.children.length > 0 && (list.matches(':hover') || list.contains(document.activeElement));
+    if (busy) {
+      for (const node of wanted) if (node.parentNode !== list) list.append(node);
+      return;
+    }
+    wanted.forEach((node, i) => {
+      if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null);
+    });
+  }
+  let refocus = null;
+
+  // --- the search ---------------------------------------------------------------
+  //
+  // Typing in the panel's box narrows the panel to the lines whose names
+  // hold what was typed, and opens whatever a match is under. It changes
+  // nothing on the map and nothing that is kept: clearing the box puts
+  // the panel as it was.
+  const hit = (label) => query !== '' && label.toLowerCase().includes(query);
+
+  // --- drawing the panel ----------------------------------------------------------
+
+  // The one section the live layers had is two now.
+  if (folded.delete('live')) for (const id of ['players', 'mobs']) folded.add(id);
+  // Which layers are open to their items, which none is until asked.
+  const opened = new Set((() => {
+    const was = recall('panel', 'open');
+    return Array.isArray(was) ? was.filter(text) : [];
+  })());
+
+  const weight = (item) => (item.count === null ? 1 : item.count);
+  const itemOn = (row, item) => row.on && (!row.facet || row.facet.shows(item.id));
+  // A row is on, off, or on with some of what it is made of hidden.
+  function rowState(row) {
+    if (!row.on) return 'false';
+    return row.facet && (row.facet.only !== null && !row.list.some((item) => item.id === row.facet.only) || row.list.some((item) => !row.facet.shows(item.id))) ? 'mixed' : 'true';
+  }
+
+  function countOf(row) {
+    if (row.count === null) return '';
+    if (!row.on || !row.facet || row.list.length === 0) return fmt(row.count);
+    let hidden = 0;
+    for (const item of row.list) if (!row.facet.shows(item.id)) hidden += weight(item);
+    return hidden > 0 ? `${fmt(Math.max(0, row.count - hidden))} / ${fmt(row.count)}` : fmt(row.count);
+  }
+
+  // The lines for a row's items, as many as are to be shown.
+  function itemLines(row, depth, shownAll, tally) {
+    const f = row.facet;
+    const listed = query === '' || shownAll ? row.list : row.list.filter((item) => hit(item.label));
+    const some = row.all ? listed : listed.slice(0, LIST_CAP);
+    const lines = [];
+    for (const item of some) {
+      if (!item.dom) item.dom = line(item, depth);
+      const on = itemOn(row, item);
+      pictured(item.dom, item);
+      show(item.dom, {
+        label: item.label,
+        state: String(on),
+        disabled: item.disabled || !row.available || !f,
+        masked: !row.on,
+        twisted: false,
+        detail: item.detail,
+        count: item.count === null ? '' : fmt(item.count),
+        note: item.note,
+        soloed: Boolean(f) && row.on && f.only === item.id,
+        menu: Boolean(f),
+      });
+      lines.push(item.dom.li);
+    }
+    // A line that is no longer listed is let go of. A set, since a list
+    // shown whole is gone through with every frame.
+    const drawn = new Set(some);
+    for (const item of row.list) if (item.dom && !drawn.has(item)) item.dom = null;
+    if (listed.length > some.length) {
+      if (!row.rest) {
+        row.rest = make('li', `node d${depth} rest`);
+        const all = button('link', '');
+        all.addEventListener('click', () => {
+          row.all = true;
+          schedule();
+        });
+        row.rest.append(all);
+      }
+      const said = `Show all ${fmt(listed.length)}`;
+      if (row.rest.firstChild.textContent !== said) row.rest.firstChild.textContent = said;
+      lines.push(row.rest);
+    }
+    return lines;
+  }
+
+  // What stands between a row and its items: its choice among a few
+  // values, and whatever a script from before items built for itself.
+  function extras(row, dom) {
+    put(dom, 'control', row.control !== null, (has) => {
+      if (dom.control) dom.control.node.remove();
+      dom.control = has ? control(row.control) : null;
+      if (dom.control) dom.extra.prepend(dom.control.node);
+    });
+    if (dom.control) dom.control.paint(row.control);
+  }
+
+  function paintRow(row, tally) {
+    const whole = row.whole;
+    if (!row.dom) row.dom = whole ? row.section.dom : line(row, 2);
+    const dom = row.dom;
+    const matched = hit(row.section.label) || hit(row.label);
+    const within = query !== '' && row.list.some((item) => hit(item.label));
+    const twisted = row.list.length > 0 || row.control !== null;
+    const open = whole ? (query === '' ? !folded.has(row.section.id) : true) : (query === '' ? opened.has(row.key) : within || (matched && opened.has(row.key)));
+    const state = rowState(row);
+    const leaves = row.on && row.facet && row.list.length > 0 ? row.list : null;
+    tally.all += leaves ? leaves.length : 1;
+    tally.on += leaves ? leaves.filter((item) => row.facet.shows(item.id)).length : (row.on ? 1 : 0);
+    tally.rows += 1;
+    tally.rowsOn += state === 'false' ? 0 : 1;
+    tally.mixed = tally.mixed || state === 'mixed';
+    if (!whole) pictured(dom, row);
+    else pictured(dom, { drawn: row.section.id, swatch: '', colour: '', shape: '' });
+    show(dom, {
+      label: whole ? row.section.label : row.label,
+      state,
+      disabled: !row.available,
+      masked: false,
+      twisted: whole ? true : twisted,
+      open,
+      count: countOf(row),
+      note: row.note,
+      soloed: whole ? alone('all') && solo.all.key === row.section.id : alone(row.section.id) && solo[row.section.id].key === row.key,
+    });
+    put(dom, 'body', row.body, (node) => {
+      if (dom.legacy) dom.legacy.remove();
+      dom.legacy = node ? make('div', 'legacy') : null;
+      if (dom.legacy) {
+        dom.legacy.append(node);
+        dom.note.after(dom.legacy);
+      }
+    });
+    extras(row, dom);
+    const visible = query === '' || matched || within;
+    if (!whole) {
+      arrange(dom.kids, open ? itemLines(row, 3, matched, tally) : []);
+      if (!open) for (const item of row.list) item.dom = null;
+    }
+    return visible;
+  }
+
+  function paintSection(section, tally) {
+    if (!section.dom) section.dom = line(section, 1);
+    const dom = section.dom;
+    const whole = section.rows.find((row) => row.whole) || null;
+    const mine = { all: 0, on: 0, rows: 0, rowsOn: 0, mixed: false };
+    const lines = [];
+    let visible = hit(section.label);
+    for (const row of section.rows) {
+      const seen = paintRow(row, mine);
+      visible = visible || seen;
+      if (row === whole) continue;
+      if (seen) lines.push(row.dom.li);
+    }
+    if (whole) {
+      if (dom.was.open) lines.unshift(...itemLines(whole, 2, hit(section.label) || hit(whole.label), mine));
+      else for (const item of whole.list) item.dom = null;
+    } else {
+      const open = query === '' ? !folded.has(section.id) : true;
+      pictured(dom, { drawn: section.id, swatch: '', colour: '', shape: '' });
+      show(dom, {
+        label: section.label,
+        state: mine.rowsOn === 0 ? 'false' : mine.rowsOn === mine.rows && !mine.mixed ? 'true' : 'mixed',
+        disabled: false,
+        masked: false,
+        twisted: true,
+        open,
+        count: `${mine.rowsOn}/${mine.rows}`,
+        note: '',
+        soloed: alone('all') && solo.all.key === section.id,
+      });
+    }
+    arrange(dom.kids, dom.was.open ? lines : []);
+    put(dom, 'seen', query === '' || visible, (v) => { dom.li.hidden = !v; });
+    section.tally = mine;
+    tally.all += mine.all;
+    tally.on += mine.on;
+    tally.seen = tally.seen || query === '' || visible;
+  }
+
+  let queued = false;
+  // Everything that changes in one turn of the page is drawn once, after
+  // it: a frame of the live layer changes five rows and sixty items, and
+  // is one pass here.
+  function schedule() {
+    if (queued) return;
+    queued = true;
+    Promise.resolve().then(render);
+  }
+
+  function render() {
+    queued = false;
+    // An "only" the viewer has since switched their way out of is let go.
+    let let_go = false;
+    for (const scope of Object.keys(solo)) {
+      if (alone(scope)) continue;
+      delete solo[scope];
+      let_go = true;
+    }
+    if (let_go) keepSolo();
+    const shown = [...sections.values()].filter((section) => section.rows.length > 0).sort((a, b) => a.rank - b.rank);
+    // The line the keys are on has gone, or none has been yet.
+    if (!currentNode || !currentNode.dom || !currentNode.dom.li.isConnected) currentNode = shown[0] || null;
+    const tally = { all: 0, on: 0, seen: false };
+    for (const section of sections.values()) {
+      if (section.rows.length > 0) continue;
+      if (section.dom) section.dom.li.remove();
+    }
+    for (const section of shown) paintSection(section, tally);
+    arrange(tree, shown.map((section) => section.dom.li));
+    if (currentNode && (!currentNode.dom || !currentNode.dom.li.isConnected)) moveStop(shown[0] || null);
+    if (refocus) {
+      const node = nodes.get(refocus);
+      refocus = null;
+      if (node) focusOn(node);
+    }
+    const said = tally.on < tally.all ? `${fmt(tally.on)} of ${fmt(tally.all)} shown` : `All ${fmt(tally.all)} shown`;
+    if (statusText.textContent !== said) statusText.textContent = said;
+    resetButton.hidden = !changed();
+    // Marked while it is the viewer's doing, and not for what is off until
+    // asked for.
+    status.classList.toggle('cut', tally.on < tally.all && changed());
+    none.hidden = query === '' || tally.seen;
+    if (!none.hidden) none.textContent = 'No layer has that in its name.';
+    el.panel.hidden = shown.length === 0;
+    paintRail(shown);
+  }
+
+  // The stop the Tab key makes is moved by writing the two lines it moves
+  // between, and nothing else.
+  function moveStop(node) {
+    const was = currentNode;
+    currentNode = node;
+    for (const other of [was, node]) {
+      if (!other || !other.dom) continue;
+      const stop = other === node;
+      put(other.dom, 'stop', stop, (v) => {
+        other.dom.check.tabIndex = v ? 0 : -1;
+        other.dom.more.tabIndex = v ? 0 : -1;
+      });
+    }
+  }
+
+  function focusOn(node) {
+    if (!node || !node.dom) return;
+    moveStop(node);
+    node.dom.check.focus();
+  }
+
+  // --- what a line does ----------------------------------------------------------
+
+  const wholeOf = (section) => section.rows.find((row) => row.whole) || null;
+
+  function toggle(node) {
+    if (node.kind === 'section') {
+      const whole = wholeOf(node);
+      if (whole) switchRow(whole, !whole.on);
+      else switchRows(node.rows, !node.rows.every((row) => row.on || !row.available));
+    } else if (node.kind === 'row') {
+      switchRow(node, !node.on);
+    } else {
+      const { row } = node;
+      const f = row.facet;
+      if (!f || node.disabled || !row.available) return;
+      if (!row.on) {
+        // Under a layer that is off, an item switched on is that item
+        // and no other of the layer's: the layer comes on with it alone.
+        changeFacet(f, () => {
+          if (f.only !== null && f.only !== node.id) leaveOnly(f);
+          for (const other of row.list) showItem(f, other.id, other === node);
+        });
+        switchRow(row, true);
+        return;
+      }
+      changeFacet(f, () => {
+        const on = f.shows(node.id);
+        leaveOnly(f);
+        showItem(f, node.id, !on);
+      });
+    }
+  }
+
+  const expandable = (node) => node.kind === 'section' || (node.kind === 'row' && (node.whole || node.list.length > 0 || node.control !== null));
+
+  function twist(node, to) {
+    if (!expandable(node)) return;
+    const section = node.kind === 'section' ? node : node.whole ? node.section : null;
+    if (section) {
+      const shut = to === undefined ? !folded.has(section.id) : !to;
+      if (shut) folded.add(section.id); else folded.delete(section.id);
+      keep();
+    } else {
+      const open = to === undefined ? !opened.has(node.key) : to;
+      if (open) opened.add(node.key); else opened.delete(node.key);
+      // Seen whole the first time it is opened after being put away.
+      if (!open) node.all = false;
+      keepOpened();
+    }
+    schedule();
+  }
+  const keepOpened = () => retain('panel', 'open', opened.size > 0 ? [...opened].slice(0, MAX_HIDDEN) : null);
+  const isOpen = (node) => Boolean(node.dom) && node.dom.was.open === true;
+
+  function foldAll(shut) {
+    for (const section of sections.values()) {
+      if (shut) folded.add(section.id); else folded.delete(section.id);
+      for (const row of section.rows) {
+        if (row.whole || row.list.length === 0) continue;
+        if (shut) opened.delete(row.key); else opened.add(row.key);
+      }
+    }
+    keep();
+    keepOpened();
+    schedule();
+  }
+
+  function onlyThis(node) {
+    if (node.kind === 'item') {
+      const f = node.row.facet;
+      if (!f) return;
+      // Pressed on the one already alone, it lets the rest back.
+      changeFacet(f, () => { f.only = f.only === node.id ? null : node.id; });
+      if (!node.row.on) switchRow(node.row, true);
+      return;
+    }
+    const scope = node.kind === 'section' || node.whole ? 'all' : node.section.id;
+    const key = scope === 'all' ? (node.kind === 'section' ? node.id : node.section.id) : node.key;
+    if (alone(scope) && solo[scope].key === key) restore(scope);
+    else only(scope, key);
+  }
+
+  // Every item of a row showing, or the row and all of it off.
+  function showAll(row, on) {
+    if (!on) {
+      switchRow(row, false);
+      return;
+    }
+    const f = row.facet;
+    if (f) {
+      changeFacet(f, () => {
+        f.only = null;
+        for (const item of row.list) showItem(f, item.id, true);
+      });
+    }
+    switchRow(row, true);
+  }
+
+  const act = (row, what, id) => {
+    if (typeof row.actions[what] === 'function') call(row.actions[what], id);
+  };
+
+  function entriesFor(node) {
+    const entries = [];
+    if (node.kind === 'item') {
+      const { row } = node;
+      const f = row.facet;
+      entries.push({ label: f.only === node.id && row.on ? 'Show all again' : 'Only this', act: () => onlyThis(node) });
+      entries.push({ label: 'Show all in group', act: () => showAll(row, true) }, { label: 'Hide all in group', act: () => showAll(row, false) });
+      if (typeof row.actions.zoom === 'function' && node.zoom) entries.push(null, { label: 'Zoom to', act: () => act(row, 'zoom', node.id) });
+      if (typeof row.actions.go === 'function' && node.go) entries.push(null, { label: 'Go to', act: () => act(row, 'go', node.id) });
+      return entries;
+    }
+    const section = node.kind === 'section' ? node : node.section;
+    const whole = node.kind === 'section' ? wholeOf(node) : node.whole ? node : null;
+    const row = node.kind === 'row' ? node : whole;
+    const scope = node.kind === 'section' || whole ? 'all' : section.id;
+    const key = scope === 'all' ? section.id : node.key;
+    const is = alone(scope) && solo[scope].key === key;
+    entries.push({ label: is ? 'Show all again' : scope === 'all' ? 'Only this section' : 'Only this', act: () => onlyThis(node) });
+    if (row && (whole || row.list.length > 0)) {
+      entries.push({ label: 'Show all in group', act: () => showAll(row, true) }, { label: 'Hide all in group', act: () => showAll(row, false) });
+    } else {
+      entries.push({ label: 'Show all in group', act: () => switchRows(section.rows, true) }, { label: 'Hide all in group', act: () => switchRows(section.rows, false) });
+    }
+    if (row && typeof row.actions.zoom === 'function') entries.push(null, { label: 'Zoom to', act: () => act(row, 'zoom') });
+    return entries;
+  }
+
+  // Enter does what a line is for: opens what is under it, goes to the
+  // one thing it stands for, or failing both switches it.
+  function activate(node) {
+    if (expandable(node)) twist(node);
+    else if (node.kind === 'item' && typeof node.row.actions.go === 'function' && node.go) act(node.row, 'go', node.id);
+    else if (node.kind === 'item' && typeof node.row.actions.zoom === 'function' && node.zoom) act(node.row, 'zoom', node.id);
+    else toggle(node);
+  }
+
+  const nodeAt = (target) => {
+    const li = target instanceof Element ? target.closest('.node') : null;
+    return li ? nodes.get(li) || null : null;
+  };
+
+  // --- a choice among a few values --------------------------------------------------
+  //
+  // Buttons side by side, one of them on, with a last one for a value
+  // that is typed: that opens a small box of its own to type in, at the
+  // panel's full width, and never a box in the row.
+  function control(first) {
+    const node = make('div', 'control');
+    const group = make('div', 'segmented');
+    group.setAttribute('role', 'radiogroup');
+    node.append(group);
+    let spec = first;
+    let built = '';
+    let custom = null;
+    let chosenAt = null;
+
+    const choose = (value) => {
+      if (typeof spec.onChange === 'function') call(spec.onChange, value);
+      schedule();
+    };
+
+    function paint(now) {
+      spec = now;
+      const sign = JSON.stringify([spec.label, spec.options.map((o) => [o.value, o.label, o.disabled === true, o.title || '']), Boolean(spec.custom)]);
+      if (sign !== built) {
+        built = sign;
+        group.setAttribute('aria-label', String(spec.label || ''));
+        const within = group.contains(document.activeElement);
+        group.replaceChildren(...spec.options.map((option) => {
+          const choice = button('segment', String(option.label));
+          choice.setAttribute('role', 'radio');
+          choice.disabled = option.disabled === true;
+          if (option.title) choice.title = String(option.title);
+          choice.addEventListener('click', () => choose(option.value));
+          return choice;
+        }));
+        custom = null;
+        if (spec.custom) {
+          custom = button('segment custom', '');
+          custom.setAttribute('aria-haspopup', 'dialog');
+          custom.setAttribute('aria-expanded', 'false');
+          custom.addEventListener('click', () => typed(custom, spec, choose));
+          group.append(custom);
+        }
+        if (within) group.querySelector('button:not(:disabled)').focus();
+        chosenAt = null;
+      }
+      const at = spec.options.findIndex((option) => option.value === spec.value);
+      // Asked for with every frame of the live layer, and written only
+      // when the choice has changed.
+      if (at === chosenAt) return;
+      chosenAt = at;
+      [...group.children].forEach((choice, i) => {
+        if (choice === custom) return;
+        choice.setAttribute('aria-checked', String(i === at));
+        choice.tabIndex = i === at || (at < 0 && i === 0) ? 0 : -1;
+      });
+      if (custom) {
+        const said = at < 0 && typeof spec.custom.say === 'function' ? `${spec.custom.label}: ${spec.custom.say(spec.value)}` : `${spec.custom.label}…`;
+        if (custom.textContent !== said) custom.textContent = said;
+        custom.classList.toggle('on', at < 0);
+      }
+    }
+
+    // The arrow keys move among the choices, as among radio buttons.
+    group.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+      const choices = [...group.querySelectorAll('button:not(:disabled)')];
+      const at = choices.indexOf(document.activeElement);
+      if (at < 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const by = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1;
+      choices[(at + by + choices.length) % choices.length].focus();
+    });
+    return { node, paint };
+  }
 
   // --- the shell ---------------------------------------------------------------
   //
@@ -216,9 +1253,39 @@
   head.append(title, menuButton, shutButton);
   const grab = button('panel-grab', 'Layers sheet');
   grab.textContent = '';
+
+  const finder = make('div', 'panel-search');
+  const box = make('input');
+  box.type = 'search';
+  box.id = 'layers-search';
+  box.maxLength = 64;
+  box.autocomplete = 'off';
+  box.spellcheck = false;
+  box.placeholder = 'Find a layer';
+  box.setAttribute('aria-label', 'Find a layer in the panel by its name. This does not change what the map shows.');
+  const clear = button('clear', '');
+  clear.setAttribute('aria-label', 'Clear the box');
+  clear.title = 'Clear the box (Esc)';
+  clear.hidden = true;
+  finder.append(glyph('search'), box, clear);
+
+  const status = make('p', 'panel-status');
+  const statusText = make('span');
+  statusText.setAttribute('role', 'status');
+  const resetButton = button('link', 'Reset');
+  resetButton.title = 'Put every layer back to how the page first has it';
+  resetButton.hidden = true;
+  status.append(statusText, resetButton);
+
   const scroll = make('div', 'panel-scroll');
-  scroll.id = 'layers-list';
-  el.body.append(grab, head, scroll);
+  const tree = make('ul', 'tree');
+  tree.id = 'layers-list';
+  tree.setAttribute('aria-labelledby', title.id);
+  const none = make('p', 'panel-none');
+  none.setAttribute('role', 'status');
+  none.hidden = true;
+  scroll.append(tree, none);
+  el.body.append(grab, head, finder, status, scroll);
   const rail = make('nav', 'panel-rail');
   rail.setAttribute('aria-label', 'Layer sections');
   const sizer = make('div', 'panel-sizer');
@@ -270,64 +1337,85 @@
     rail.hidden = now === 'sheeted' || open;
     const small = now === 'sheeted';
     const said = small ? 'Close the layers' : 'Collapse the layer panel to a rail (L)';
-    shutButton.setAttribute('aria-label', said);
-    shutButton.title = said;
+    if (shutButton.title !== said) {
+      shutButton.setAttribute('aria-label', said);
+      shutButton.title = said;
+      shutButton.replaceChildren(glyph(small ? 'close' : 'shut'));
+    }
     const height = { peek: 'short', half: 'half height', full: 'full height' }[shell.detent];
     grab.setAttribute('aria-label', `Layers sheet, ${height}. Press to change its height, or use the arrow keys.`);
   }
 
   // The sections on the rail: a button each, which opens the panel at
   // that section, marked where the section has something hidden.
-  function paintRail() {
-    const wanted = [...groups.values()].filter((g) => g.rows.length > 0).sort((a, b) => a.rank - b.rank);
-    for (const g of wanted) {
-      if (!g.railed) {
-        g.railed = button('icon', g.title, g.id);
-        g.railed.append(make('i', 'badge'));
-        g.railed.addEventListener('click', () => {
+  function paintRail(shown) {
+    for (const section of shown) {
+      if (!section.railed) {
+        section.railed = button('icon', section.label, section.id);
+        section.railed.append(make('i', 'badge'));
+        section.railed.addEventListener('click', () => {
           setOpen(true);
-          g.section.scrollIntoView({ block: 'start' });
-          g.fold.focus();
+          folded.delete(section.id);
+          keep();
+          render();
+          section.dom.li.scrollIntoView({ block: 'start' });
+          focusOn(section);
         });
       }
-      const on = g.rows.filter((row) => row.on).length;
-      const state = on === g.rows.length ? 'all' : on === 0 ? 'none' : 'some';
-      const said = `${g.title}: ${state === 'all' ? 'all shown' : state === 'none' ? 'all hidden' : `${on} of ${g.rows.length} shown`}`;
-      if (g.railed.dataset.state !== state) g.railed.dataset.state = state;
-      if (g.railed.title !== said) {
-        g.railed.title = said;
-        g.railed.setAttribute('aria-label', said);
+      const { on, all } = section.tally;
+      const state = on === all ? 'all' : on === 0 ? 'none' : 'some';
+      const said = `${section.label}: ${state === 'all' ? 'all shown' : state === 'none' ? 'all hidden' : `${fmt(on)} of ${fmt(all)} shown`}`;
+      if (section.railed.dataset.state !== state) section.railed.dataset.state = state;
+      if (section.railed.title !== said) {
+        section.railed.title = said;
+        section.railed.setAttribute('aria-label', said);
       }
     }
-    const order = wanted.map((g) => g.railed);
+    const order = shown.map((section) => section.railed);
     if (order.length !== rail.children.length || order.some((node, i) => rail.children[i] !== node)) rail.replaceChildren(...order);
   }
 
-  // --- a menu -------------------------------------------------------------------
+  // --- what hangs from a button ---------------------------------------------------
   //
   // One menu, opened under whichever button asked for it. entries are
-  // { label, checked, disabled, act } or null for a rule between them;
-  // checked makes one a choice among several. It shuts on a choice, on
-  // Escape, and on a press outside it, and gives the focus back.
+  // { label, checked, disabled, act }, a string for a title, or null for
+  // a rule between them; checked makes one a choice among several. It
+  // shuts on a choice, on Escape, and on a press outside it, and gives
+  // the focus back.
   const menu = make('div', 'panel-popup menu');
   menu.setAttribute('role', 'menu');
   menu.hidden = true;
-  el.panel.append(menu);
-  let menuFor = null;
+  const popover = make('div', 'panel-popup popover');
+  popover.setAttribute('role', 'dialog');
+  popover.hidden = true;
+  el.panel.append(menu, popover);
+  let hungFrom = null;
 
-  function shutMenu(refocus) {
-    if (menuFor === null) return;
-    const anchor = menuFor;
-    menuFor = null;
-    menu.hidden = true;
-    menu.replaceChildren();
+  function shutPopup(back) {
+    if (hungFrom === null) return;
+    const anchor = hungFrom;
+    hungFrom = null;
+    for (const popup of [menu, popover]) {
+      popup.hidden = true;
+      popup.replaceChildren();
+    }
     anchor.setAttribute('aria-expanded', 'false');
-    if (refocus) anchor.focus();
+    if (back && anchor.isConnected) anchor.focus();
+  }
+
+  // Under the button and inside the window, whichever edge it is near.
+  function hang(popup, anchor) {
+    hungFrom = anchor;
+    popup.hidden = false;
+    anchor.setAttribute('aria-expanded', 'true');
+    const at = anchor.getBoundingClientRect();
+    const size = popup.getBoundingClientRect();
+    popup.style.left = `${Math.max(8, Math.min(innerWidth - size.width - 8, at.right - size.width))}px`;
+    popup.style.top = `${at.bottom + size.height + 8 > innerHeight ? Math.max(8, at.top - size.height - 4) : at.bottom + 4}px`;
   }
 
   function openMenu(anchor, label, entries) {
-    shutMenu(false);
-    menuFor = anchor;
+    shutPopup(false);
     menu.setAttribute('aria-label', label);
     for (const entry of entries) {
       if (entry === null) {
@@ -339,49 +1427,109 @@
         continue;
       }
       const item = button('menu-item', entry.label);
-      const choice = typeof entry.checked === 'boolean';
-      item.setAttribute('role', choice ? 'menuitemradio' : 'menuitem');
-      if (choice) item.setAttribute('aria-checked', String(entry.checked));
+      const chosen = typeof entry.checked === 'boolean';
+      item.setAttribute('role', chosen ? 'menuitemradio' : 'menuitem');
+      if (chosen) item.setAttribute('aria-checked', String(entry.checked));
       item.disabled = entry.disabled === true;
       item.tabIndex = -1;
       item.addEventListener('click', () => {
-        shutMenu(true);
+        shutPopup(true);
         entry.act();
       });
       menu.append(item);
     }
-    menu.hidden = false;
-    anchor.setAttribute('aria-expanded', 'true');
-    // Under the button and inside the window, whichever edge it is near.
-    const at = anchor.getBoundingClientRect();
-    const box = menu.getBoundingClientRect();
-    menu.style.left = `${Math.max(8, Math.min(innerWidth - box.width - 8, at.right - box.width))}px`;
-    menu.style.top = `${at.bottom + box.height + 8 > innerHeight ? Math.max(8, at.top - box.height - 4) : at.bottom + 4}px`;
+    hang(menu, anchor);
     const first = menu.querySelector('button:not(:disabled)');
     if (first) first.focus();
   }
 
   menu.addEventListener('keydown', (e) => {
-    const items = [...menu.querySelectorAll('button:not(:disabled)')];
-    const at = items.indexOf(document.activeElement);
+    const entries = [...menu.querySelectorAll('button:not(:disabled)')];
+    const at = entries.indexOf(document.activeElement);
     let to = null;
-    if (e.key === 'ArrowDown') to = items[(at + 1) % items.length];
-    else if (e.key === 'ArrowUp') to = items[(at - 1 + items.length) % items.length];
-    else if (e.key === 'Home') to = items[0];
-    else if (e.key === 'End') to = items[items.length - 1];
+    if (e.key === 'ArrowDown') to = entries[(at + 1) % entries.length];
+    else if (e.key === 'ArrowUp') to = entries[(at - 1 + entries.length) % entries.length];
+    else if (e.key === 'Home') to = entries[0];
+    else if (e.key === 'End') to = entries[entries.length - 1];
     else if (e.key === 'Escape' || e.key === 'Tab') {
       // Not also an Escape for the card or the sheet under the menu.
       e.stopPropagation();
       if (e.key === 'Escape') e.preventDefault();
-      shutMenu(true);
+      shutPopup(true);
       return;
     } else return;
     e.preventDefault();
     if (to) to.focus();
   });
   document.addEventListener('pointerdown', (e) => {
-    if (menuFor !== null && e.target instanceof Node && !menu.contains(e.target) && !menuFor.contains(e.target)) shutMenu(false);
+    if (hungFrom !== null && e.target instanceof Node && !menu.contains(e.target) && !popover.contains(e.target) && !hungFrom.contains(e.target)) shutPopup(false);
   }, true);
+
+  // The box a value is typed in. What was understood of it, or why it was
+  // not, is said under the box as it is typed, and nothing is used until
+  // it is applied.
+  function typed(anchor, spec, choose) {
+    if (hungFrom === anchor) {
+      shutPopup(true);
+      return;
+    }
+    shutPopup(false);
+    made += 1;
+    const { custom } = spec;
+    popover.setAttribute('aria-label', String(custom.title || custom.label));
+    const label = make('label', '', String(custom.title || custom.label));
+    const field = make('input');
+    field.type = 'text';
+    field.id = `layers-typed-${made}`;
+    field.maxLength = 32;
+    field.autocomplete = 'off';
+    field.spellcheck = false;
+    if (custom.placeholder) field.placeholder = String(custom.placeholder);
+    label.htmlFor = field.id;
+    const said = make('p', 'said', String(custom.hint || ''));
+    said.id = `layers-said-${made}`;
+    said.setAttribute('role', 'status');
+    field.setAttribute('aria-describedby', said.id);
+    const apply = button('', 'Apply');
+    const cancel = button('', 'Cancel');
+    const ends = make('div', 'popover-ends');
+    ends.append(apply, cancel);
+    popover.append(label, field, said, ends);
+    const read = () => (field.value.trim() === '' ? { value: null, said: String(custom.hint || ''), problem: true, empty: true } : call(custom.settle, field.value) || { value: null, said: '', problem: true });
+    const tell = () => {
+      const got = read();
+      said.textContent = got.said;
+      said.classList.toggle('problem', got.problem && !got.empty);
+      apply.disabled = got.problem;
+    };
+    const take = () => {
+      const got = read();
+      if (got.problem) {
+        tell();
+        return;
+      }
+      shutPopup(true);
+      choose(got.value);
+    };
+    field.addEventListener('input', tell);
+    field.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      take();
+    });
+    apply.addEventListener('click', take);
+    cancel.addEventListener('click', () => shutPopup(true));
+    tell();
+    hang(popover, anchor);
+    field.focus();
+  }
+  popover.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    // Not also an Escape for the card or the sheet under the box.
+    e.stopPropagation();
+    e.preventDefault();
+    shutPopup(true);
+  });
 
   const DENSITIES = [['Compact', 'compact'], ['Comfortable', 'comfortable'], ['Spacious', 'spacious']];
   function panelMenu() {
@@ -405,28 +1553,22 @@
       entries.push(null);
     }
     entries.push({ label: 'Expand all', act: () => foldAll(false) }, { label: 'Collapse all', act: () => foldAll(true) });
+    entries.push(null, { label: 'Reset layers to defaults', disabled: !changed(), act: reset });
     return entries;
   }
 
   function paint() {
-    let any = false;
-    for (const g of groups.values()) {
-      g.section.hidden = g.rows.length === 0;
-      any = any || g.rows.length > 0;
-    }
-    el.panel.hidden = !any;
     el.panel.classList.toggle('open', open);
     el.body.hidden = !open;
     el.toggle.setAttribute('aria-expanded', String(open));
     paintShell();
-    paintRail();
   }
 
   // Opens or shuts the panel: to its rail beside the map, and away
   // altogether on a small screen. What was chosen beside the map is kept.
   function setOpen(on) {
     if (open === on) return;
-    shutMenu(false);
+    shutPopup(false);
     const within = el.panel.contains(document.activeElement);
     open = on;
     keep();
@@ -436,217 +1578,126 @@
     if ((within || (on && compact.matches)) && !el.body.contains(document.activeElement)) (on ? shutButton : el.toggle).focus();
   }
 
-  function foldAll(shut) {
-    for (const g of groups.values()) {
-      if (shut) folded.add(g.id); else folded.delete(g.id);
-      fold(g);
-    }
-    keep();
-  }
-
-  function fold(g) {
-    const shut = folded.has(g.id);
-    g.list.hidden = shut;
-    g.fold.setAttribute('aria-expanded', String(!shut));
-  }
-
-  function set(row, on) {
-    if (row.on === on) return false;
-    row.on = on;
-    row.box.checked = on;
-    for (const fn of row.listeners) {
-      // One layer failing to redraw must not leave the rest unswitched.
-      try { fn(on); } catch (err) { console.error(err); }
-    }
-    paintRail();
-    return true;
-  }
-
-  function setAll(g, on) {
-    const changes = {};
-    for (const row of [...g.rows]) {
-      if (row.available && set(row, on)) changes[`${g.id}/${row.id}`] = on;
-    }
-    if (Object.keys(changes).length > 0) remember(changes);
-  }
-
-  // Every row's switch as it stands, by the key its choice is kept under.
-  function states() {
-    const out = {};
-    for (const g of groups.values()) for (const row of g.rows) out[`${g.id}/${row.id}`] = row.on;
-    return out;
-  }
-
-  // Brings every row in line with the choices as they are now kept, for
-  // when something other than a switch has changed them, as a saved view
-  // does. Every row is switched before any layer is told, and a layer
-  // that listens with one function for all its rows is told once, so the
-  // map goes from the one picture to the other with nothing drawn between.
-  // wanted is the keys a view named, and what comes back is those of them
-  // there is no row for here: a layer that has gone, or one this server
-  // does not offer. A row that is only greyed out for now is switched all
-  // the same, for when it is not.
-  function adopt(wanted = []) {
-    const choices = kept();
-    const told = new Map();
-    const found = new Set();
-    for (const g of groups.values()) {
-      for (const row of g.rows) {
-        const key = `${g.id}/${row.id}`;
-        found.add(key);
-        // With no choice kept for it, a row is as its layer first had it.
-        const on = typeof choices[key] === 'boolean' ? choices[key] : row.first;
-        if (row.on === on) continue;
-        row.on = on;
-        row.box.checked = on;
-        for (const fn of row.listeners) told.set(fn, on);
-      }
-    }
-    for (const [fn, on] of told) {
-      try { fn(on); } catch (err) { console.error(err); }
-    }
-    paintRail();
-    return wanted.filter((key) => !found.has(key));
-  }
-
-  function groupOf(id, label) {
-    let g = groups.get(id);
-    if (g) return g;
-    const known = GROUPS.findIndex(([name]) => name === id);
-    const title = known >= 0 ? GROUPS[known][1] : String(label || id);
-    made += 1;
-    const section = make('section', 'layer-group');
-    const head = make('div', 'layer-group-head');
-    const list = make('ul');
-    list.id = `layers-list-${made}`;
-    const foldButton = make('button', 'fold', title);
-    foldButton.type = 'button';
-    foldButton.setAttribute('aria-controls', list.id);
-    const all = make('button', 'mini', 'All');
-    all.type = 'button';
-    all.setAttribute('aria-label', `All: show every ${title} layer`);
-    const none = make('button', 'mini', 'None');
-    none.type = 'button';
-    none.setAttribute('aria-label', `None: hide every ${title} layer`);
-    head.append(foldButton, all, none);
-    section.append(head, list);
-
-    g = { id, title, rank: known >= 0 ? known : GROUPS.length + made, section, list, fold: foldButton, rows: [] };
-    foldButton.addEventListener('click', () => {
-      if (!folded.delete(id)) folded.add(id);
-      keep();
-      fold(g);
-    });
-    all.addEventListener('click', () => setAll(g, true));
-    none.addEventListener('click', () => setAll(g, false));
-    fold(g);
-
-    const next = [...groups.values()].filter((other) => other.rank > g.rank).sort((a, b) => a.rank - b.rank)[0];
-    scroll.insertBefore(section, next ? next.section : null);
-    groups.set(id, g);
-    return g;
-  }
-
-  function drop(g, row) {
-    const at = g.rows.indexOf(row);
-    if (at < 0) return;
-    g.rows.splice(at, 1);
-    row.item.remove();
-    row.listeners.length = 0;
-    paint();
-  }
-
-  // Adds a layer's row and returns the handle its script keeps. group is
-  // one of the sections above, or a new one, titled by groupLabel. id is
-  // unique within the group and is what the viewer's choice is saved
-  // under; registering one again replaces the row. swatch is the class of
-  // the colour key drawn beside the label, for a layer that has one, and
-  // picture an element the script made to stand in the key's place for as
-  // long as it is showing.
-  function register({ group, id, label, enabled = true, order, groupLabel, swatch, picture } = {}) {
-    if (typeof group !== 'string' || !group || typeof id !== 'string' || !id) {
-      throw new TypeError('a layer needs a group and an id');
-    }
-    const g = groupOf(group, groupLabel);
-    const again = g.rows.find((other) => other.id === id);
-    if (again) drop(g, again);
-
-    made += 1;
-    const item = make('li', 'layer');
-    const name = make('label');
-    const box = make('input');
-    box.type = 'checkbox';
-    const note = make('span', 'note');
-    note.id = `layers-note-${made}`;
-    box.setAttribute('aria-describedby', note.id);
-    const count = make('span', 'count');
-    const body = make('div', 'body');
-    body.hidden = true;
-    name.append(box);
-    if (picture instanceof Node) name.append(picture);
-    if (typeof swatch === 'string' && swatch) name.append(make('i', swatch));
-    const title = make('span', 'name', String(label ?? id));
-    name.append(title);
-    item.append(name, count, note, body);
-
-    const row = {
-      id,
-      order: Number.isFinite(order) ? order : Infinity,
-      seq: made,
-      on: choice(group, id, Boolean(enabled)),
-      first: Boolean(enabled),
-      available: true,
-      listeners: [],
-      item,
-      box,
-    };
-    box.checked = row.on;
-    box.addEventListener('change', () => {
-      if (set(row, box.checked)) remember({ [`${group}/${id}`]: row.on });
-    });
-
-    // Lower orders first; rows given none go last, as they were registered.
-    const next = g.rows.find((other) => row.order < other.order);
-    g.rows.splice(next ? g.rows.indexOf(next) : g.rows.length, 0, row);
-    g.list.insertBefore(item, next ? next.item : null);
-    paint();
-
-    // Counts arrive once a second from the live layer, so a value that has
-    // not changed is not written again.
-    const put = (node, value) => { if (node.textContent !== value) node.textContent = value; };
-    return {
-      get enabled() { return row.on; },
-      setCount(n) { put(count, Number.isFinite(n) ? n.toLocaleString('en-US') : ''); },
-      setNote(text) { put(note, text ? String(text) : ''); },
-      // For a layer whose name is the world's and may arrive late.
-      setLabel(text) { if (text) put(title, String(text)); },
-      onToggle(fn) { if (typeof fn === 'function') row.listeners.push(fn); },
-      // Switches the row as the viewer would have, for a script that has
-      // been asked for what the layer shows: the choice is kept, and the
-      // listeners are told.
-      setEnabled(on) {
-        if (row.available && set(row, Boolean(on))) remember({ [`${group}/${id}`]: row.on });
-      },
-      // A layer's own controls, such as a legend, shown under its row.
-      // The node is the script's to fill; null takes it away.
-      setBody(node) {
-        body.replaceChildren(...(node instanceof Node ? [node] : []));
-        body.hidden = !(node instanceof Node);
-      },
-      setAvailable(available) {
-        row.available = Boolean(available);
-        box.disabled = !row.available;
-        item.classList.toggle('unavailable', !row.available);
-      },
-      remove() { drop(g, row); },
-    };
-  }
-
   el.toggle.addEventListener('click', () => setOpen(!open));
   shutButton.addEventListener('click', () => setOpen(false));
   menuButton.addEventListener('click', () => {
-    if (menuFor === menuButton) shutMenu(true);
+    if (hungFrom === menuButton) shutPopup(true);
     else openMenu(menuButton, 'Panel options', panelMenu());
+  });
+  resetButton.addEventListener('click', () => {
+    reset();
+    box.focus();
+  });
+
+  // --- the list's own pointer and keys ----------------------------------------------
+
+  tree.addEventListener('click', (e) => {
+    const node = nodeAt(e.target);
+    if (!node || !node.dom || !(e.target instanceof Element)) return;
+    const { dom } = node;
+    if (!dom.row.contains(e.target)) return;
+    moveStop(node);
+    if (e.target.closest('.twist')) twist(node);
+    else if (e.target.closest('.check')) {
+      if (dom.check.getAttribute('aria-disabled') !== 'true') toggle(node);
+    } else if (e.target.closest('.only')) onlyThis(node);
+    else if (e.target.closest('.more')) {
+      if (hungFrom === dom.more) shutPopup(true);
+      else openMenu(dom.more, `More for ${dom.was.said}`, entriesFor(node));
+    } else if (expandable(node)) twist(node);
+    else if (dom.check.getAttribute('aria-disabled') !== 'true') toggle(node);
+  });
+  tree.addEventListener('focusin', (e) => {
+    const node = nodeAt(e.target);
+    if (node && e.target instanceof Element && e.target.closest('.row')) moveStop(node);
+  });
+
+  // The lines there are to move among: every one that is showing.
+  const stops = () => [...tree.querySelectorAll('.check')].filter((check) => check.offsetParent !== null);
+  let typedSoFar = '';
+  let typedAt = 0;
+
+  tree.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || !(e.target instanceof Element) || !e.target.closest('.row')) return;
+    const node = nodeAt(e.target);
+    if (!node || !node.dom) return;
+    const all = stops();
+    const at = all.indexOf(node.dom.check);
+    const to = (check) => {
+      const next = check ? nodeAt(check) : null;
+      if (next) focusOn(next);
+    };
+    if (e.key === 'ArrowDown') to(all[at + 1]);
+    else if (e.key === 'ArrowUp') to(all[at - 1]);
+    else if (e.key === 'Home') to(all[0]);
+    else if (e.key === 'End') to(all[all.length - 1]);
+    else if (e.key === 'ArrowRight') {
+      if (!expandable(node)) return;
+      if (!isOpen(node)) twist(node, true);
+      else to(all[at + 1]);
+    } else if (e.key === 'ArrowLeft') {
+      if (expandable(node) && isOpen(node)) twist(node, false);
+      else {
+        const up = node.dom.li.parentElement.closest('.node');
+        if (up) focusOn(nodes.get(up));
+      }
+    } else if (e.key === 'Enter') {
+      // On the line's own checkbox it does what the line is for; on
+      // another of its buttons it presses that.
+      if (!e.target.closest('.check')) return;
+      activate(node);
+    } else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      if (node.dom.more.hidden) return;
+      openMenu(node.dom.more, `More for ${node.dom.was.said}`, entriesFor(node));
+    } else if (/^[\p{L}\p{N}]$/u.test(e.key)) {
+      // A letter goes to the next line that begins with what has been
+      // typed. One that begins no line is left to be the page's
+      // single-key shortcut it would be anywhere else.
+      const now = Date.now();
+      const letter = e.key.toLowerCase();
+      // The same letter again is the next line that begins with it.
+      const again = typedSoFar !== '' && [...typedSoFar].every((other) => other === letter);
+      typedSoFar = now - typedAt > TYPEAHEAD_MS || again ? letter : typedSoFar + letter;
+      typedAt = now;
+      const begins = (check) => (nodeAt(check).dom.was.said || '').toLowerCase().startsWith(typedSoFar);
+      const from = typedSoFar.length === 1 ? at + 1 : at;
+      const found = [...all.slice(from), ...all.slice(0, from)].find(begins);
+      if (!found) {
+        typedSoFar = '';
+        return;
+      }
+      to(found);
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  box.addEventListener('input', () => {
+    query = box.value.trim().toLowerCase();
+    clear.hidden = box.value === '';
+    render();
+    scroll.scrollTop = 0;
+  });
+  const unsearch = () => {
+    box.value = '';
+    query = '';
+    clear.hidden = true;
+    render();
+    box.focus();
+  };
+  clear.addEventListener('click', unsearch);
+  box.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && box.value !== '') {
+      // Not also an Escape for the card or the sheet.
+      e.stopPropagation();
+      e.preventDefault();
+      unsearch();
+    } else if (e.key === 'ArrowDown') {
+      const [first] = stops();
+      if (!first) return;
+      e.preventDefault();
+      focusOn(nodeAt(first));
+    }
   });
 
   // The panel's edge is dragged, or moved by the arrow keys while it has
@@ -698,6 +1749,7 @@
     else setDetent(DETENTS[Math.min(DETENTS.length - 1, at)]);
   };
   let pulling = null;
+  let pulledAt = 0;
   grab.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     grab.setPointerCapture(e.pointerId);
@@ -719,10 +1771,10 @@
     el.body.style.height = '';
     el.panel.classList.remove('sizing');
     const full = stage.clientHeight;
-    const stops = { peek: grab.offsetHeight + head.offsetHeight, half: full / 2, full };
-    let best = { name: null, far: height < stops.peek / 2 ? 0 : Infinity };
+    const heights = { peek: grab.offsetHeight + head.offsetHeight, half: full / 2, full };
+    let best = { name: null, far: height < heights.peek / 2 ? 0 : Infinity };
     for (const name of DETENTS) {
-      const far = Math.abs(stops[name] - height);
+      const far = Math.abs(heights[name] - height);
       if (far < best.far) best = { name, far };
     }
     if (best.name === null) {
@@ -731,12 +1783,13 @@
     } else {
       setDetent(best.name);
     }
+    pulledAt = Date.now();
   };
   grab.addEventListener('pointerup', released);
   grab.addEventListener('pointercancel', released);
   grab.addEventListener('click', () => {
     // The click that ends a drag is not a press.
-    if (el.body.style.height !== '') return;
+    if (Date.now() - pulledAt < 400) return;
     setDetent(DETENTS[(DETENTS.indexOf(shell.detent) + 1) % DETENTS.length]);
   });
   grab.addEventListener('keydown', (e) => {
@@ -744,6 +1797,7 @@
     e.preventDefault();
     taller(e.key === 'ArrowUp' ? 1 : -1);
   });
+
   // A window made small with the panel open beside the map would find it
   // lying over the map as a sheet, so it is shut on the way in, and put
   // back as it was kept on the way out.
@@ -759,10 +1813,14 @@
   });
 
   paint();
+  render();
   app.layers.recall = recall;
   app.layers.retain = retain;
   app.layers.states = states;
+  app.layers.items = items;
   app.layers.adopt = adopt;
+  app.layers.reset = reset;
+  app.layers.facet = (group, name, options) => facetOf(String(group), String(name), options).handle;
   app.layers.register = register;
   document.dispatchEvent(new CustomEvent('mcmap:layers'));
 })();

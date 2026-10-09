@@ -58,13 +58,29 @@ func TestTypedLengthsAreSaidBackAndBounded(t *testing.T) {
 		if at("duration.js") < 0 || at(user) < at("duration.js") {
 			t.Errorf("index.html must load %s after duration.js", user)
 		}
-		if !bytes.Contains(read(t, user), []byte("duration.picker({")) {
-			t.Errorf("%s no longer chooses its length with the shared picker", user)
+	}
+	if !bytes.Contains(read(t, "live.js"), []byte("duration.picker({")) {
+		t.Error("live.js no longer chooses its length with the shared picker")
+	}
+	// The trails' window is one of four lengths or a typed one, read by
+	// the same rules and said back the same way, in a box of its own and
+	// never in a row of the panel. It is bounded by what the server says
+	// it keeps, and a length past that is not offered.
+	trails := read(t, "trails.js")
+	for _, need := range []string{
+		"const WINDOWS = [3600, 6 * 3600, 24 * 3600, 7 * 86_400];",
+		"const WINDOW_NAMES = ['1 h', '6 h', '24 h', '7 d'];",
+		"const longest = () => (retention > 0 ? retention : MAX_UNKNOWN);",
+		"const read = duration.settle(typed, bounds());",
+		"disabled: length > longest() && length !== seconds,",
+		"if (row.setControl) row.setControl(windowed());",
+	} {
+		if !bytes.Contains(trails, []byte(need)) {
+			t.Errorf("trails.js no longer has %s", need)
 		}
 	}
-	// The trails' window is bounded by what the server says it keeps.
-	if !bytes.Contains(read(t, "trails.js"), []byte("max: () => (retention > 0 ? retention : MAX_UNKNOWN),")) {
-		t.Error("trails.js no longer bounds its window by the server's retention")
+	if bytes.Contains(trails, []byte("createElement('input')")) || bytes.Contains(trails, []byte("createElement('select')")) {
+		t.Error("trails.js builds a box of its own; the panel draws its choice")
 	}
 }
 

@@ -152,6 +152,61 @@ func TestLightAndHighContrastThemesMeetTheContrastTheyAreFor(t *testing.T) {
 	}
 }
 
+// The layer panel is in every theme, the dark one included: its text is
+// held to four and a half to one against the panel and against the ground
+// a line takes under the pointer, and what marks out a control there, a
+// checkbox's edge, the ring of the focus, a box's edge, to three to one.
+func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
+	css := read(t, "style.css")
+	for _, theme := range []string{"", "light", "contrast"} {
+		c := themeColours(t, css, theme)
+		name := theme
+		if name == "" {
+			name = "dark"
+		}
+		get := func(colour string) rgba { return colourOf(t, c[colour]) }
+		text, edge := math.Inf(1), math.Inf(1)
+		for _, bg := range []string{"panel", "bg"} {
+			// A name, a count or a note, the match in a search, what is
+			// hidden, and the tick on a checkbox that is on.
+			for _, fg := range []string{"text", "dim", "accent", "warn"} {
+				got := contrast(get(fg), get(bg))
+				text = math.Min(text, got)
+				if got < 4.5 {
+					t.Errorf("%s theme: %s on %s is %.2f to one, want at least 4.5", name, fg, bg, got)
+				}
+			}
+			// A checkbox's edge and a box's, and the ring of the focus and a
+			// checkbox that is on.
+			for _, fg := range []string{"dim", "accent"} {
+				got := contrast(get(fg), get(bg))
+				edge = math.Min(edge, got)
+				if got < 3 {
+					t.Errorf("%s theme: an edge in %s on %s is %.2f to one, want at least 3", name, fg, bg, got)
+				}
+			}
+		}
+		if got := contrast(get("on-accent"), get("accent")); got < 4.5 {
+			t.Errorf("%s theme: on-accent on accent is %.2f to one, want at least 4.5", name, got)
+		} else {
+			text = math.Min(text, got)
+		}
+		t.Logf("%s theme: the panel's lowest text %.2f, lowest edge %.2f", name, text, edge)
+	}
+	// And those are the colours the panel's own controls are drawn in.
+	for _, need := range []string{
+		"border: 2px solid var(--dim);",
+		".panel-search input, .popover input, .popover button, .row .only { border-color: var(--dim); }",
+		":focus-visible { outline: var(--focus) solid var(--accent); outline-offset: 1px; }",
+		".row mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; }",
+		".segment[aria-checked=\"true\"], .segment.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }",
+	} {
+		if !bytes.Contains(css, []byte(need)) {
+			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+}
+
 // A colour written into a rule does not follow the theme. Each has a name
 // in the blocks at the top, and every rule and every canvas uses the name.
 func TestEveryColourOnThePageIsOneOfTheThemes(t *testing.T) {
@@ -307,7 +362,7 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 		t.Error("icons.js no longer leaves a structure's picture out when the viewer has plain marks")
 	}
 	// A trail's key is its line on the line's own dark casing.
-	if !bytes.Contains(read(t, "style.css"), []byte(".trail-players i { width: 1.2rem; height: 0.55rem; border: 2px solid var(--marker-ink); border-radius: 1px; }")) {
+	if !bytes.Contains(read(t, "style.css"), []byte(".swatch.line { width: 100%; height: 0.55rem; border: 2px solid var(--marker-ink); border-radius: 1px; }")) || !bytes.Contains(read(t, "trails.js"), []byte("colour: trail.colour, shape: 'line' }")) {
 		t.Error("style.css no longer draws a trail's key on its casing")
 	}
 	// Pixel art is only ever enlarged by a whole number of screen pixels.

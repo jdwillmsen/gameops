@@ -174,15 +174,16 @@ func TestAPageFromBeforeTheRecordKeepsItsChoicesInTheOldKeys(t *testing.T) {
 func TestTheGridAndTheBiomePickedOutSurviveAPageStart(t *testing.T) {
 	biomes := read(t, "biomes.js")
 	for _, need := range []string{
-		"let only = settings ? settings.get('biome').only : null;",
-		"if (locked) only = null;",
-		"if (settings && settings.get('biome').only !== only) settings.set('biome', { only: only !== null && NAME.test(only) ? only : null });",
+		"let lone = settings ? settings.get('biome').only : null;",
+		"if (locked && choice.only !== null) choice.solo(null);",
+		"const only = choice.only !== null && NAME.test(choice.only) ? choice.only : null;",
+		"if (settings && settings.get('biome').only !== only) settings.set('biome', { only });",
 	} {
 		if !bytes.Contains(biomes, []byte(need)) {
 			t.Errorf("biomes.js no longer has %s", need)
 		}
 	}
-	if regexp.MustCompile(`clear\(\);\s*only = null;\s*queued = false;`).Match(biomes) {
+	if regexp.MustCompile(`clear\(\);\s*(only = null|choice\.solo\(null\));\s*queued = false;`).Match(biomes) {
 		t.Error("biomes.js lets go of the biome kept from last time while the page is still starting")
 	}
 	app := read(t, "app.js")

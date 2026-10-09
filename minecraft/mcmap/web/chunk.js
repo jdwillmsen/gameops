@@ -67,7 +67,22 @@
   // chunk 3, -2 that was pinned in the Overworld.
   let pinnedIn = null;
 
-  const on = () => el.grid.checked && !document.body.classList.contains('locked') && Boolean(app.dimension());
+  // The grid and the chunk focus each have a row among the panel's
+  // overlays. The grid's is the switch in the bar by another door, and the
+  // two are kept as one; the focus is on whenever the grid is unless its
+  // own row is off. A page with no panel has the switch in the bar alone.
+  const rows = { grid: null, focus: null };
+  if (app.layers && app.layers.register) {
+    rows.grid = app.layers.register({ group: 'overlays', id: 'grid', label: 'Grid', enabled: false, order: 30, swatch: 'key grid' });
+    rows.focus = app.layers.register({ group: 'overlays', id: 'chunk', label: 'Chunk focus', enabled: true, order: 35, swatch: 'key chunk' });
+    rows.grid.setEnabled(el.grid.checked);
+    rows.grid.onToggle((want) => {
+      if (el.grid.checked !== want) el.grid.click();
+    });
+    el.grid.addEventListener('change', () => rows.grid.setEnabled(el.grid.checked));
+  }
+
+  const on = () => el.grid.checked && (!rows.focus || rows.focus.enabled) && !document.body.classList.contains('locked') && Boolean(app.dimension());
 
   function slimeOf(cell) {
     const dimension = app.dimension();
@@ -95,6 +110,10 @@
   let slimeFor = '';
 
   function paint() {
+    if (rows.focus) {
+      rows.focus.setAvailable(el.grid.checked);
+      rows.focus.setNote(el.grid.checked ? '' : 'Shown while the grid is on.');
+    }
     const showing = on();
     el.box.hidden = !showing;
     document.body.classList.toggle('chunking', showing);
@@ -153,6 +172,7 @@
       el.grid.checked = true;
       el.grid.dispatchEvent(new Event('change'));
     }
+    if (rows.focus) rows.focus.setEnabled(true);
     const cell = { unit: 'chunk', x: cx, z: cz };
     map.setView([(cz + 0.5) * CHUNK, (cx + 0.5) * CHUNK], Math.max(map.getZoom(), GO_ZOOM));
     pin(cell);
@@ -206,6 +226,8 @@
     hoverBox.setStyle(hoverStyle());
     pinBox.setStyle(pinStyle());
   });
+
+  if (rows.focus) rows.focus.onToggle(paint);
 
   app.chunk = {
     go,

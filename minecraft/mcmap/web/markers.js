@@ -12,6 +12,10 @@
 // mark is of where the mob was saved, which may be a quarter of an hour
 // and a long walk ago, so it is drawn faded in a broken ring and says how
 // old it is: it must never pass for the marker of a mob that is there.
+//
+// Each kind's row in the panel lists what it is made of, and each of
+// those can be hidden: the containers by what they are, the beds by
+// their colour, and every named mob and every waypoint by itself.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -83,6 +87,18 @@
   // Each kind's row in the panel, once the service is known to have that
   // kind. One it does not have gets no row.
   const rows = new Map();
+  // Which of a kind's items are shown, which the panel keeps. A panel from
+  // before it listed any shows them all.
+  const choices = {};
+  for (const kind of Object.keys(KINDS)) {
+    choices[kind] = app.layers.facet ? app.layers.facet('markers', kind) : { shows: () => true, onChange() {} };
+  }
+  // The colour a bed's line in the panel is keyed by: the game's dyes.
+  const DYES = {
+    white: '#f9fffe', orange: '#f9801d', magenta: '#c74ebd', light_blue: '#3ab3da', yellow: '#fed83d', lime: '#80c71f',
+    pink: '#f38baa', gray: '#474f52', light_gray: '#9d9d97', cyan: '#169c9c', purple: '#8932b8', blue: '#3c44aa',
+    brown: '#835432', green: '#5e7c16', red: '#b02e26', black: '#1d1d21',
+  };
 
   // On the live layer's canvas. A canvas takes every pointer event over
   // the map, so two of them cannot both be hovered; on the one, these and
@@ -105,6 +121,21 @@
 
   const SORTS = { waypoints: 'waypoint', beds: 'bed', containers: 'container', mobs: 'mob' };
   const pictureOf = (kind, m) => icons.keyOf(SORTS[kind], { kind: m.k, colour: m.c, trapped: m.t });
+
+  // The item of its row a marker belongs to: a container's by what it is,
+  // a shulker box's by its colour as well, a bed's by its colour, and a
+  // named mob or a waypoint by itself. Never a name: a name is a player's
+  // to choose, and this is kept.
+  const spot = (m) => `${m.x},${m.y},${m.z}`;
+  function itemOf(kind, m) {
+    if (kind === 'beds') return str(m.c) || 'red';
+    if (kind === 'containers') {
+      if (m.k === 'shulker') return `shulker-${str(m.c) || 'undyed'}`;
+      return m.k === 'chest' && m.t === true ? 'trapped_chest' : str(m.k) || 'unknown';
+    }
+    if (kind === 'mobs') return typeof m.i === 'string' && m.i !== '' && m.i.length < 60 ? `id:${m.i}` : spot(m);
+    return spot(m);
+  }
 
   // What a marker says of itself, without where it is.
   function titleOf(kind, m) {
@@ -185,18 +216,13 @@
   let asked = 0;
   let near = false;
 
-  // The named mobs of this dimension, as { data, marker }, in the order
-  // listed.
-  let named = [];
+  // Every mark made for this dimension, as { data, marker, item }, by
+  // kind, whether or not it is on the map; the named mobs in the order
+  // listed, each with the mob it is in the live picture, or null.
+  const held = { waypoints: [], beds: [], containers: [], mobs: [] };
   // When the snapshot the world's markers were read from was taken, in
   // milliseconds, or null where the answer did not say.
   let snapshotAt = null;
-  // What the list was last built from, so that an unchanged one is left
-  // alone under the viewer's pointer.
-  let rosterOf = '';
-  const roster = document.createElement('div');
-  roster.className = 'roster';
-
   // Brings one marker in line with the pictures there are now and with
   // how far out the map is.
   function dress(marker) {
@@ -221,9 +247,8 @@
 
   function dressAll(kinds) {
     for (const kind of kinds) {
-      // A mark that has stepped aside is dressed too, for when it is back.
-      if (kind === 'mobs') named.forEach((entry) => dress(entry.marker));
-      else layers[kind].eachLayer(dress);
+      // A mark that is off the map is dressed too, for when it is back.
+      held[kind].forEach((entry) => dress(entry.marker));
     }
   }
 
@@ -262,12 +287,29 @@
         // layer's own tooltip says it under the pointer either way.
         marker.bindTooltip(text(str(m.name) || 'Waypoint'), { permanent: true, direction: 'right', offset: [sizes().plate + 2, 0], className: 'marker-name' });
       }
-      layers[kind].addLayer(marker);
-      made.push({ data: m, marker, live: null });
+      made.push({ data: m, marker, item: itemOf(kind, m), live: null });
     }
     totals[kind] = made.length;
-    if (kind !== 'mobs') return;
-    named = made.sort((a, b) => str(a.data.n).localeCompare(str(b.data.n)) || a.data.x - b.data.x || a.data.z - b.data.z);
+    held[kind] = kind === 'mobs' ? made.sort((a, b) => str(a.data.n).localeCompare(str(b.data.n)) || a.data.x - b.data.x || a.data.z - b.data.z) : made;
+    if (kind === 'mobs') pair();
+    place(kind);
+  }
+
+  // Puts on the map exactly the marks of a kind that should be there:
+  // those whose item is not hidden, less any mob the live layer is drawing
+  // where it is now, whose name stays on the map on the live marker.
+  function place(kind) {
+    const card = kind === 'mobs' ? inspect() : null;
+    const group = layers[kind];
+    let back = false;
+    for (const entry of held[kind]) {
+      const want = choices[kind].shows(entry.item) && !(card && entry.live !== null && card.drawn(entry.live.id));
+      if (want === group.hasLayer(entry.marker)) continue;
+      if (want) group.addLayer(entry.marker); else group.removeLayer(entry.marker);
+      back = back || want;
+    }
+    // A mark put back was added last, and would paint over what moves.
+    if (back && map.hasLayer(group)) stack();
   }
 
   function show(kind) {
@@ -289,13 +331,6 @@
   // The id the live layer has the entry's mob under now, or null while it
   // is not in the picture.
   const liveOf = (entry) => (entry.live ? entry.live.id : null);
-  // What the card is opened under for it, which is how the list knows
-  // which of its entries the card is about.
-  const keyOf = (entry) => {
-    const { data } = entry;
-    const id = liveOf(entry) || idOf(data);
-    return id ? `m:${id}` : `s:${drawn.dimension}:${data.x + 0.5}:${data.y}:${data.z + 0.5}`;
-  };
 
   const sameAs = (name, type) => `${str(type)}\u0000${str(name)}`;
 
@@ -314,10 +349,10 @@
       for (const item of list) counts.set(of(item), (counts.get(of(item)) || 0) + 1);
       return counts;
     };
-    const saved = tally(named, (entry) => sameAs(entry.data.n, entry.data.k));
+    const saved = tally(held.mobs, (entry) => sameAs(entry.data.n, entry.data.k));
     const there = tally(loaded, (mob) => sameAs(mob.name, mob.type));
-    const claimed = new Set(named.map((entry) => idOf(entry.data)));
-    for (const entry of named) {
+    const claimed = new Set(held.mobs.map((entry) => idOf(entry.data)));
+    for (const entry of held.mobs) {
       const id = idOf(entry.data);
       if (id) {
         // The id is enough: a loaded mob the game reports without its
@@ -350,80 +385,66 @@
   // may not be the one it was saved under.
   const nameOf = (entry) => (entry.live && str(entry.live.name)) || str(entry.data.n);
 
-  // Brings a mob's entry in the list in line with whether it is loaded.
-  function listed(entry) {
-    if (!entry.button) return;
-    const { data } = entry;
-    const name = nameOf(entry) || names.entity(data.k);
-    if (entry.label.textContent !== name) entry.label.textContent = name;
-    const title = entry.live ? 'Loaded now' : `Last saved position: ${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;
-    if (entry.button.title !== title) entry.button.title = title;
-    const key = keyOf(entry);
-    if (entry.button.dataset.key === key) return;
-    entry.button.dataset.key = key;
-    // The card may be about this one, under the key it has now.
-    current();
+  // --- what each row is made of ----------------------------------------------
+  //
+  // Said to the panel as plain lists, which it draws. Every name goes as
+  // text: a name tag and a waypoint's name are players' to choose.
+
+  const HOLDERS = ['chest', 'trapped_chest', 'barrel'];
+  function listOf(kind) {
+    if (kind === 'beds' || kind === 'containers') {
+      const tally = new Map();
+      for (const { data, item } of held[kind]) {
+        const entry = tally.get(item);
+        if (entry) entry.count += 1;
+        else tally.set(item, { id: item, count: 1, data });
+      }
+      const items = [...tally.values()].map(({ id, count, data }) => (kind === 'beds'
+        ? { id, count, label: names.bed(data.c), colour: DYES[id] || '', swatch: 'ring beds' }
+        : { id, count, label: names.holder(data.k, data.c, data.t), picture: pictureOf(kind, data), swatch: 'ring containers' }));
+      const rank = (item) => (HOLDERS.includes(item.id) ? HOLDERS.indexOf(item.id) : item.id.startsWith('shulker-') ? HOLDERS.length : HOLDERS.length + 1);
+      return items.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
+    }
+    if (kind === 'mobs') {
+      return held.mobs.map((entry) => {
+        const { data, item } = entry;
+        const loaded = entry.live !== null;
+        return {
+          id: item,
+          label: nameOf(entry) || names.entity(data.k),
+          picture: pictureOf('mobs', data),
+          swatch: 'ring mobs',
+          detail: `${names.kindOf(data.k, data.b)} · ${loaded ? 'loaded' : 'saved'}`,
+        };
+      });
+    }
+    return held.waypoints
+      .map(({ data, item }) => ({ id: item, label: str(data.name) || 'Waypoint', picture: 'marker/waypoint', swatch: 'ring waypoints' }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }
 
-  // Takes the mark of a mob the live layer is drawing off the map, and
-  // puts back the mark of one it no longer is. The name stays on the map
-  // either way: the live marker wears it.
-  function aside() {
-    const card = inspect();
-    if (!card) return;
+  // Takes the map to every mark of a kind, or to those of one item of it.
+  function zoomTo(kind, item) {
+    const bounds = L.latLngBounds([]);
+    for (const entry of held[kind]) if (item === undefined || entry.item === item) bounds.extend(entry.marker.getLatLng());
+    // No closer than one block to a pixel.
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 0 });
+  }
+
+  // Goes to one named mob, opening its card, or to one waypoint.
+  function goTo(kind, item) {
+    const entry = held[kind].find((other) => other.item === item);
+    if (!entry) return;
+    if (kind === 'mobs') examine(entry, true);
+    else app.go(drawn.dimension || app.dimension(), entry.data.x + 0.5, entry.data.z + 0.5);
+  }
+
+  const aside = () => {
     pair();
-    let back = false;
-    for (const entry of named) {
-      listed(entry);
-      const live = entry.live !== null && card.drawn(entry.live.id);
-      if (live === !layers.mobs.hasLayer(entry.marker)) continue;
-      if (live) layers.mobs.removeLayer(entry.marker);
-      else layers.mobs.addLayer(entry.marker);
-      back = back || !live;
-    }
-    // A mark put back was added last, and would paint over what moves.
-    if (back && map.hasLayer(layers.mobs)) stack();
-  }
-
-  function current() {
-    const key = inspect() ? inspect().key() : null;
-    for (const button of roster.querySelectorAll('button')) {
-      if (key !== null && button.dataset.key === key) button.setAttribute('aria-current', 'true');
-      else button.removeAttribute('aria-current');
-    }
-  }
-
-  // The list under the row: every named mob in this dimension, by name,
-  // with what it is. All of it is set as text; a name tag is a player's
-  // choice.
-  function buildRoster() {
-    const key = `${drawn.dimension}|${drawn.etag}|${named.length}|${named.map((e) => names.kindOf(e.data.k, e.data.b)).join('|')}`;
-    if (key === rosterOf) return;
-    rosterOf = key;
-    const list = document.createElement('ul');
-    list.setAttribute('aria-label', 'Named mobs in this dimension, by name');
-    for (const entry of named) {
-      const { data } = entry;
-      const button = document.createElement('button');
-      button.type = 'button';
-      const swatch = document.createElement('i');
-      swatch.className = 'ring mobs';
-      const name = text(str(data.n) || names.entity(data.k));
-      name.className = 'name';
-      const what = text(names.kindOf(data.k, data.b));
-      what.className = 'what';
-      button.append(icons.picture(pictureOf('mobs', data)), swatch, name, what);
-      entry.button = button;
-      entry.label = name;
-      listed(entry);
-      button.addEventListener('click', () => examine(entry, true));
-      const item = document.createElement('li');
-      item.append(button);
-      list.append(item);
-    }
-    roster.replaceChildren(list);
-    current();
-  }
+    place('mobs');
+    // Loaded or only saved is said on each one's line.
+    if (rows.has('mobs') && rows.get('mobs').setItems) rows.get('mobs').setItems(listOf('mobs'));
+  };
 
   // The canvas paints in the order markers were added, so a layer switched
   // back on would cover the ones over it. What a player named goes over
@@ -444,7 +465,11 @@
         rows.delete(kind);
       } else if (!rows.has(kind)) {
         const picture = KINDS[kind].picture ? icons.picture(KINDS[kind].picture) : null;
-        const row = app.layers.register({ group: 'markers', id: kind, label: KINDS[kind].label, order: (at + 1) * 10, swatch: `ring ${kind}`, picture });
+        const single = kind === 'mobs' || kind === 'waypoints';
+        const row = app.layers.register({ group: 'markers', id: kind, label: KINDS[kind].label, order: (at + 1) * 10, swatch: `ring ${kind}`, picture,
+          facet: kind,
+          actions: { zoom: (item) => zoomTo(kind, item), ...(single ? { go: (item) => goTo(kind, item) } : {}) },
+        });
         row.onToggle(paint);
         rows.set(kind, row);
       }
@@ -454,30 +479,22 @@
       if (!rows.has(kind)) return;
       rows.get(kind).setCount(totals[kind]);
       rows.get(kind).setNote(more[kind] > 0 ? `${fmt(more[kind])} more are not shown` : '');
+      if (rows.get(kind).setItems) rows.get(kind).setItems(listOf(kind));
     });
     if (added) stack();
     // With the named mobs off, a loaded one goes without its name too.
     if (inspect()) inspect().labels(!rows.has('mobs') || rows.get('mobs').enabled);
-    if (!rows.has('mobs')) return;
-    if (rows.get('mobs').enabled && named.length > 0) {
-      buildRoster();
-      rows.get('mobs').setBody(roster);
-    } else {
-      rows.get('mobs').setBody(null);
-    }
   }
 
   function clear() {
     for (const kind of Object.keys(KINDS)) {
       layers[kind].clearLayers();
+      held[kind] = [];
       totals[kind] = null;
       more[kind] = 0;
     }
     drawn = { dimension: null, etag: null };
     waypoints = [];
-    named = [];
-    // The list's buttons belong to the entries they were built from.
-    rosterOf = '';
     snapshotAt = null;
     paint();
   }
@@ -554,9 +571,10 @@
     const turn = asked += 1;
     if (drawn.dimension !== null && drawn.dimension !== dimension) {
       // Another dimension's markers are wrong here, not merely old.
-      for (const kind of WORLD_KINDS) layers[kind].clearLayers();
-      named = [];
-      rosterOf = '';
+      for (const kind of WORLD_KINDS) {
+        layers[kind].clearLayers();
+        held[kind] = [];
+      }
       drawn = { dimension: null, etag: null };
       drawWaypoints(dimension);
     }
@@ -583,8 +601,7 @@
   function restyle() {
     palette();
     for (const kind of Object.keys(KINDS)) {
-      const marks = kind === 'mobs' ? named.map((entry) => entry.marker) : layers[kind].getLayers();
-      for (const marker of marks) {
+      for (const { marker } of held[kind]) {
         const o = marker.options;
         o.color = KINDS[kind].color;
         o.weight = look().theme === 'contrast' ? 3 : 2;
@@ -617,7 +634,7 @@
   // about that mob, and is not also a click on the map under it.
   layers.mobs.on('click', (e) => {
     L.DomEvent.stopPropagation(e);
-    const entry = named.find((other) => other.marker === e.layer);
+    const entry = held.mobs.find((other) => other.marker === e.layer);
     if (entry) examine(entry, false);
   });
 
@@ -636,18 +653,17 @@
       if (drawn.dimension === null) return null;
       const tally = (kind) => {
         const counts = new Map();
-        layers[kind].eachLayer((marker) => {
-          const { data } = marker.options;
-          if (!inside(box, data)) return;
+        for (const { data } of held[kind]) {
+          if (!inside(box, data)) continue;
           const title = kind === 'beds' ? names.bed(data.c) : names.holder(data.k, data.c, data.t);
           counts.set(title, (counts.get(title) || 0) + 1);
-        });
+        }
         return counts;
       };
       return {
         beds: tally('beds'),
         containers: tally('containers'),
-        mobs: named.filter((entry) => inside(box, entry.data)).map((entry) => ({
+        mobs: held.mobs.filter((entry) => inside(box, entry.data)).map((entry) => ({
           name: str(entry.data.n) || names.entity(entry.data.k),
           what: names.kindOf(entry.data.k, entry.data.b),
           open: () => examine(entry, true),
@@ -663,7 +679,7 @@
   document.addEventListener('mcmap:pictures', () => dressAll(Object.keys(KINDS)));
   document.addEventListener('mcmap:names', renamed);
   document.addEventListener('mcmap:live', aside);
-  document.addEventListener('mcmap:inspect', current);
+  for (const kind of Object.keys(KINDS)) choices[kind].onChange(() => place(kind));
   const styledAs = () => {
     const { theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers } = look();
     return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers].join('|');

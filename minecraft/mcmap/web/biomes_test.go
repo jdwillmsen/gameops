@@ -39,8 +39,15 @@ func TestBiomeOverlayAsksForTilesAsTheTerrainDoes(t *testing.T) {
 	js := usesNoMarkupSink(t, "biomes.js")
 	loadedAfterThePanel(t, "biomes.js")
 	for _, need := range []string{
-		"`api/biomes/tiles/${o.dimension}/${c.z}/${c.x}/${c.y}.png?${only}v=${encodeURIComponent(o.version)}`",
-		"`biome=${encodeURIComponent(o.only)}&`",
+		"`api/biomes/tiles/${o.dimension}/${c.z}/${c.x}/${c.y}.png?${o.pick}v=${encodeURIComponent(o.version)}`",
+		"`biome=${encodeURIComponent(choice.only)}&`",
+		// Several at once: whichever list is the shorter, in one order, and
+		// never more names than the server takes.
+		"const [how, list] = drawn.length > 0 && drawn.length < hidden.length ? ['biomes', drawn] : ['except', hidden];",
+		"return `${how}=${list.sort().map(encodeURIComponent).join(',')}&`;",
+		"const MAX_NAMED = 128;",
+		"if (list.length > MAX_NAMED) {",
+		"whole: true, facet: 'items' });",
 		"tileSize: listing.tiles.size,",
 		"app.layers.register({ group: 'biomes', id: 'overlay', label: 'Biome overlay', enabled: false,",
 		// A service without biomes answers 404, and the row goes.
@@ -67,7 +74,7 @@ func TestBiomeOverlayAsksForTilesAsTheTerrainDoes(t *testing.T) {
 // What the later layers are written against, beyond the first interface.
 func TestLayerPanelLetsAScriptSwitchARowAndShowControlsUnderIt(t *testing.T) {
 	js := read(t, "layers.js")
-	for _, need := range []string{"setEnabled(on)", "setBody(node)", "remember({ [`${group}/${id}`]: row.on })"} {
+	for _, need := range []string{"setEnabled(on)", "setBody(node)", "if (row.available && set(row, on)) remember({ [row.key]: row.on });"} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("layers.js no longer has %s", need)
 		}

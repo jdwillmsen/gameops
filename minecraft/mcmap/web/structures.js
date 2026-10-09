@@ -9,8 +9,11 @@
 // seed and only offers a kind once its calculation has been seen to agree
 // with what the world recorded of that kind.
 //
-// The world spawn comes with the overworld's structures and has a row of
-// its own: it is neither recorded as a structure nor predicted.
+// In the panel each of the three is a row, and under it every kind of
+// structure it holds is an item that can be hidden there alone: the known
+// villages and the predicted ones are two switches. The world spawn comes
+// with the overworld's structures and has a row of its own among the
+// overlays: it is neither recorded as a structure nor predicted.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -35,26 +38,28 @@
     stronghold: { letter: 'S', color: '#58c4a4' },
     trial_chamber: { letter: 'T', color: '#e08a4a' },
   };
-  // The rows in the panel: the three layers, then a filter per kind that
-  // applies to all of them. A kind's row is named by the game's word for
-  // it once that is known.
+  // The rows in the panel: the three layers, each listing its kinds, and
+  // the world spawn. A kind is named by the game's word for it once that
+  // is known.
   const SORTS = ['recorded', 'predicted', 'candidate'];
   const ROWS = [
     ['recorded', 'Known', 'key recorded'],
     ['predicted', 'Predicted', 'key predicted'],
     ['candidate', 'Possible', 'key candidate'],
-    ['fortress', 'Fortresses', 'dot fortress'],
-    ['monument', 'Monuments', 'dot monument'],
-    ['outpost', 'Outposts', 'dot outpost'],
-    ['witch_hut', 'Witch huts', 'dot witch-hut'],
-    ['village', 'Villages', 'dot village'],
-    ['stronghold', 'Strongholds', 'dot stronghold'],
-    ['trial_chamber', 'Trial chambers', 'dot trial-chamber'],
     ['spawn', 'World spawn', 'key spawn'],
   ];
   const UNKNOWN = { letter: '?', color: '#9aa3ad' };
   // Kinds drawn and searched for only once the viewer has asked.
   const OPT_IN = new Set(['stronghold']);
+  const ASK = 'Off until you turn it on, and left out of the search: this one is a thing to find for yourself.';
+  // Which kinds each layer shows, which the panel keeps. A panel from
+  // before it listed any shows every kind but those that are asked for.
+  const choices = {};
+  for (const sort of ['recorded', 'predicted', 'candidate']) {
+    choices[sort] = app.layers.facet ? app.layers.facet('structures', sort, { off: [...OPT_IN] }) : { shows: (kind) => !OPT_IN.has(kind), onChange() {} };
+  }
+  // A kind with no item of its own has nothing to be hidden by.
+  const kindOn = (sort, kind) => !Object.hasOwn(KINDS, kind) || choices[sort].shows(kind);
 
   const DETAILS_HINT = 'Click for details';
 
@@ -188,6 +193,9 @@
   // How many of each kind each layer holds, and how each kind's rule has
   // fared against the world, for the kinds the server said so of.
   let kinds = {};
+  // The kinds the world keeps no record of, and which were found by their
+  // blocks.
+  let foundKinds = new Set();
   let checks = {};
   // And how many of the world's own each rule agreed and disagreed with.
   let rules = {};
@@ -203,6 +211,7 @@
     counts = none();
     more = none();
     kinds = {};
+    foundKinds = new Set();
     checks = {};
     rules = {};
   }
@@ -262,6 +271,7 @@
       }
     };
     tally(recorded, 'recorded');
+    foundKinds = new Set(recorded.filter(found).map((s) => s.kind));
     tally(predicted.filter((p) => !p.candidate), 'predicted');
     tally(predicted.filter((p) => p.candidate), 'candidate');
     const sent = data.kinds && typeof data.kinds === 'object' ? data.kinds : {};
@@ -280,8 +290,7 @@
   function apply() {
     for (const [sort, kinds] of Object.entries(groups)) {
       for (const [kind, group] of kinds) {
-        // A kind with no row of its own has no filter to be hidden by.
-        const want = on(sort) && (!Object.hasOwn(KINDS, kind) || on(kind));
+        const want = on(sort) && kindOn(sort, kind);
         if (want && !map.hasLayer(group)) group.addTo(map);
         if (!want && map.hasLayer(group)) map.removeLayer(group);
       }
@@ -301,16 +310,58 @@
       return;
     }
     ROWS.forEach(([id, label, swatch], at) => {
-      const picture = Object.hasOwn(KINDS, id) ? icons.picture(icons.keyOf('structure', { kind: id })) : null;
       // The possible sites are the newest row. A viewer who had turned the
-      // predicted ones off has not asked for fainter ones. And where a
-      // stronghold is, is the one thing here a player sets out to find for
-      // themselves: its row is off until the viewer turns it on.
+      // predicted ones off has not asked for fainter ones.
       const enabled = id !== 'candidate' || rows.get('predicted').enabled;
-      const row = app.layers.register({ group: 'structures', id, label, enabled: enabled && !OPT_IN.has(id), order: (at + 1) * 10, swatch, picture });
+      const row = app.layers.register({ group: 'structures', id, label, enabled, swatch,
+        // The spawn is shown among the overlays, and kept where it was.
+        ...(id === 'spawn' ? { order: 40, section: 'overlays', actions: { zoom: toSpawn } } : { order: (at + 1) * 10, facet: id, actions: { zoom: (kind) => zoomTo(id, kind) } }),
+      });
       row.onToggle(apply);
       rows.set(id, row);
     });
+  }
+
+  // Takes the map to everything one layer holds, or to one kind of it.
+  function zoomTo(sort, kind) {
+    const bounds = L.latLngBounds([]);
+    for (const [held, group] of groups[sort]) {
+      if (kind !== undefined && held !== kind) continue;
+      group.eachLayer((layer) => bounds.extend(layer.getBounds ? layer.getBounds() : layer.getLatLng()));
+    }
+    // No closer than one block to a pixel.
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 0 });
+  }
+
+  function toSpawn() {
+    const spawn = held && held.spawn;
+    if (spawn && Number.isFinite(spawn.x) && Number.isFinite(spawn.z)) app.go(shown, spawn.x + 0.5, spawn.z + 0.5);
+  }
+
+  // What one layer is made of, for the panel: each kind it holds, with the
+  // game's picture of it and how many. A kind that is asked for is listed
+  // among the known ones whether or not any is, so that it can be; and a
+  // kind held back from prediction is listed there to say why.
+  function kindsOf(sort) {
+    const items = [];
+    for (const kind of Object.keys(KINDS)) {
+      const n = (kinds[kind] || none())[sort];
+      const asked = OPT_IN.has(kind);
+      const why = sort === 'predicted' && surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';
+      if (n === 0 && !(asked && sort === 'recorded') && why === '') continue;
+      items.push({
+        id: kind,
+        label: names.plural(names.structure(kind)),
+        picture: icons.keyOf('structure', { kind }),
+        swatch: `dot ${kind.split('_').join('-')}`,
+        count: surveyed ? n : null,
+        detail: sort === 'recorded' && foundKinds.has(kind) ? 'found by blocks' : '',
+        note: why || (asked && !choices[sort].shows(kind) && sort === 'recorded' ? ASK : ''),
+        off: asked,
+        disabled: why !== '' && n === 0,
+      });
+    }
+    return items;
   }
 
   function paint() {
@@ -322,22 +373,7 @@
       const why = sort === 'predicted' && surveyed ? WHY_NOT[state] : '';
       const what = sort === 'candidate' && surveyed && state === 'verified' ? WHAT_POSSIBLE : '';
       row.setNote(why || (more[sort] > 0 ? `Showing ${fmt(counts[sort])} of ${fmt(counts[sort] + more[sort])}` : what));
-    }
-    // With no layer on there is nothing for a kind to filter.
-    const filtering = SORTS.some(on);
-    for (const kind of Object.keys(KINDS)) {
-      const n = kinds[kind] || none();
-      rows.get(kind).setLabel(names.plural(names.structure(kind)));
-      rows.get(kind).setCount(surveyed ? n.recorded + n.predicted + n.candidate : null);
-      // A kind held back says why; one that is not says how its count is
-      // made up, wherever some of it is not known.
-      const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] : '';
-      const parts = n.predicted + n.candidate > 0
-        ? [`${fmt(n.recorded)} known`, ...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ')
-        : '';
-      const asked = OPT_IN.has(kind) && !rows.get(kind).enabled ? 'Off until you turn it on, and left out of the search: this one is a thing to find for yourself.' : '';
-      rows.get(kind).setNote(why || asked || parts);
-      rows.get(kind).setAvailable(filtering);
+      if (row.setItems) row.setItems(kindsOf(sort));
     }
     // Greyed out in a dimension the spawn is not in.
     rows.get('spawn').setAvailable(!surveyed || spawned);
@@ -1030,9 +1066,11 @@
 
   // For the search: one chosen there is shown in full once the map is on
   // its dimension.
+  for (const choice of Object.values(choices)) choice.onChange(apply);
+
   app.structures = {
     // Whether the viewer has a kind's known structures on the map.
-    shows: (kind) => on('recorded') && on(kind),
+    shows: (kind) => on('recorded') && kindOn('recorded', kind),
     show(asked) {
       if (!sheet || !asked || typeof asked.kind !== 'string' || !Number.isFinite(asked.x) || !Number.isFinite(asked.z)) return;
       want({ kind: asked.kind, recorded: asked.recorded === true, x: asked.x, z: asked.z, dimension: asked.dimension, said: true });

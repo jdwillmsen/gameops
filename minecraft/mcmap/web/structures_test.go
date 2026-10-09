@@ -38,16 +38,21 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		// Struck through only where the world would have recorded one.
 		"const doubted = p.generated && !RECORDED_LATE.has(p.kind);",
 		".addTo(groupOf(sort, p.kind));",
-		// The counts in a kind's row, and why it has no predictions.
-		"`${fmt(n.predicted)} predicted`",
-		"`${fmt(n.candidate)} possible`",
-		"const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] : '';",
+		// Each layer lists its own kinds with how many it holds, and the
+		// predicted one says why a kind has none.
+		"const n = (kinds[kind] || none())[sort];",
+		"const why = sort === 'predicted' && surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';",
+		"detail: sort === 'recorded' && foundKinds.has(kind) ? 'found by blocks' : '',",
+		"if (row.setItems) row.setItems(kindsOf(sort));",
 		// Off for a viewer who turned the predicted ones off.
 		"const enabled = id !== 'candidate' || rows.get('predicted').enabled;",
 		// Off for everybody until they ask: a stronghold is for finding.
 		"const OPT_IN = new Set(['stronghold']);",
-		"enabled: enabled && !OPT_IN.has(id)",
-		"shows: (kind) => on('recorded') && on(kind),",
+		"app.layers.facet('structures', sort, { off: [...OPT_IN] })",
+		"off: asked,",
+		// And for a panel from before it listed kinds.
+		"{ shows: (kind) => !OPT_IN.has(kind), onChange() {} };",
+		"shows: (kind) => on('recorded') && kindOn('recorded', kind),",
 		// One player's answer is not kept for the next to log in.
 		"forgetDetail();\n      if (sheet && view.dialog.open) view.dialog.close();",
 	} {

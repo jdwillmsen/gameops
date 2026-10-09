@@ -184,45 +184,31 @@
 
   // --- which of them are drawn ---------------------------------------------
   //
-  // Under each row is what it holds, by type, or by gamertag for the
-  // players, and each of those can be hidden or shown alone. There is one
-  // choice for the mobs, across their four rows, and one for the players:
-  // "only creepers" means the creepers and no other mob, whichever row the
-  // others are in. A choice is { only, hidden }: with only set, that one is
-  // drawn and nothing else; otherwise everything not in hidden is.
-  const FILTERS = ['mobs', 'players'];
-  // The most a choice keeps, so that what a viewer hid over a year of
-  // visits is still a few kilobytes in their browser.
-  const MAX_HIDDEN = 200;
-  const filters = {};
-  function recallFilter(domain) {
-    const kept = app.layers.recall ? app.layers.recall('live', domain) : null;
+  // Under the players' row is each player, and under each of the mobs'
+  // rows each type it holds, and each of those can be hidden or shown
+  // alone. There is one choice for the mobs, across their four rows, and
+  // one for the players: "only creepers" means the creepers and no other
+  // mob, whichever row the others are in. The panel keeps both and says
+  // which of them are shown. A panel from before it did keeps the same
+  // choices under the same names, which are then read once and followed.
+  function choiceOf(name) {
+    if (app.layers.facet) return app.layers.facet('live', name);
+    const kept = app.layers.recall ? app.layers.recall('live', name) : null;
     const text = (v) => typeof v === 'string' && v.length <= 64;
-    return {
-      only: kept && text(kept.only) ? kept.only : null,
-      hidden: new Set(kept && Array.isArray(kept.hidden) ? kept.hidden.filter(text).slice(0, MAX_HIDDEN) : []),
-    };
+    const only = kept && text(kept.only) ? kept.only : null;
+    const hidden = new Set(kept && Array.isArray(kept.hidden) ? kept.hidden.filter(text) : []);
+    return { only, shows: (sort) => (only !== null ? only === sort : !hidden.has(sort)), onChange() {} };
   }
-  for (const domain of FILTERS) filters[domain] = recallFilter(domain);
+  const choices = { mobs: choiceOf('mobs'), players: choiceOf('players') };
   const domainOf = (category) => (category === 'players' ? 'players' : 'mobs');
-  const filtering = (domain) => filters[domain].only !== null || filters[domain].hidden.size > 0;
   // What an entity is filtered by: a mob by its type, a player by their
   // gamertag as the game compares it.
   const sortOf = (category, name, type) => (category === 'players' ? (typeof name === 'string' ? name.toLowerCase() : '') : (typeof type === 'string' ? type : ''));
-  const passes = (category, sort) => {
-    const f = filters[domainOf(category)];
-    return f.only !== null ? f.only === sort : !f.hidden.has(sort);
-  };
+  const passes = (category, sort) => choices[domainOf(category)].shows(sort);
   // Whether an entity is on the map: its row is on and its kind is not
   // filtered out. Two set lookups, which is all a frame of a thousand mobs
   // pays for the filters.
   const visible = (held) => shown(held.category) && passes(held.category, held.sort);
-
-  function keepFilter(domain) {
-    const f = filters[domain];
-    if (!app.layers.retain) return;
-    app.layers.retain('live', domain, filtering(domain) ? { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN) } : null);
-  }
 
   // One canvas for every marker. Leaflet's default draws each as its own
   // SVG element, which is fine for a grid and not for a thousand mobs moving
@@ -615,31 +601,93 @@
     document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
 
+  // A player's head for their line in the panel, drawn once the picture
+  // of it has arrived; until then it is hidden and their dot stands in.
+  const faces = new Map();
+  function face(name) {
+    const address = headOf(name);
+    if (!address) return null;
+    let canvas = faces.get(address);
+    if (!canvas) {
+      if (faces.size > 256) faces.clear();
+      canvas = document.createElement('canvas');
+      canvas.className = 'picture';
+      canvas.width = canvas.height = 16 * DENSITY;
+      canvas.setAttribute('aria-hidden', 'true');
+      canvas.hidden = true;
+      faces.set(address, canvas);
+    }
+    if (canvas.hidden) {
+      const drawn = look().picturesLive === false ? null : icons.bitmap(address);
+      if (drawn) {
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(drawn, 0, 0, canvas.width, canvas.height);
+        canvas.hidden = false;
+      }
+    }
+    return canvas;
+  }
+
+  // Tells the panel what each row holds: how many, and each player or
+  // each type of mob as an item of its row, by name. The panel draws only
+  // what has changed, so this is said with every frame. Every name goes
+  // as text: a gamertag is a player's choice, and a type the server's word.
   function count() {
     if (rows === null) return;
     // category -> sort -> { n, name }, where name is a player's gamertag
     // as they write it.
     const tally = {};
     const totals = {};
-    const drawn = {};
     for (const [id] of LAYERS) {
       tally[id] = new Map();
       totals[id] = 0;
-      drawn[id] = 0;
     }
     for (const held of entities.values()) {
       totals[held.category] += 1;
-      if (passes(held.category, held.sort)) drawn[held.category] += 1;
       const of = tally[held.category];
       const entry = of.get(held.sort);
       if (entry) entry.n += 1;
       else of.set(held.sort, { n: 1, name: held.name });
     }
+    // What is shown alone is listed even while none of it is about, or
+    // there would be nothing to say what the map is waiting for.
+    const alone = choices.mobs.only;
+    if (!stale && alone !== null && typeof alone === 'string') {
+      const home = categoryOf.get(alone) || 'other';
+      if (!tally[home].has(alone)) tally[home].set(alone, { n: 0 });
+    }
     for (const [category] of LAYERS) {
-      rows[category].setCount(stale ? null : totals[category]);
-      const cut = !stale && drawn[category] < totals[category];
-      rows[category].setNote(cut ? `Showing ${fmt(drawn[category])} of ${fmt(totals[category])}: filtered ${category === 'players' ? 'by player' : 'by type'}` : '');
-      breakdowns[category].show(stale ? new Map() : tally[category]);
+      const row = rows[category];
+      row.setCount(stale ? null : totals[category]);
+      if (!row.setItems) continue;
+      const listed = stale ? [] : [...tally[category]];
+      const items = category === 'players'
+        ? listed.map(([sort, entry]) => ({ id: sort, label: entry.name || sort || 'Player', picture: face(entry.name), swatch: 'dot players', detail: isMe(entry.name) ? 'you' : '', zoom: false }))
+        : listed.map(([sort, entry]) => ({ id: sort, label: names.entity(sort), picture: `mob/${sort}`, swatch: `dot ${category}`, count: entry.n }));
+      // By name, so that a line stays where it is while its count moves.
+      row.setItems(items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })));
+    }
+  }
+
+  // Takes the map to everything of one row, or of one type in it, that is
+  // in the picture now.
+  function zoomTo(category, sort) {
+    const bounds = L.latLngBounds([]);
+    for (const held of entities.values()) {
+      if (held.category === category && (sort === undefined || held.sort === sort)) bounds.extend([held.z, held.x]);
+    }
+    // No closer than one block to a pixel: one mob would otherwise fill
+    // the screen with the block it stands on.
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 0 });
+  }
+
+  function goToPlayer(sort) {
+    for (const [key, held] of entities) {
+      if (held.category !== 'players' || held.sort !== sort) continue;
+      if (app.go) app.go(pictured, held.x, held.z);
+      pick(key);
+      return;
     }
   }
 
@@ -829,7 +877,6 @@
   // row or a filter has changed. A frame never needs this: each entity is
   // placed once, when it first appears.
   function refilter() {
-    unsettled = false;
     let added = false;
     for (const held of entities.values()) {
       const layer = layerOf(held.category);
@@ -845,19 +892,10 @@
     document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
 
-  // A saved view has changed what is kept: the filters and the pace are
-  // read again. The markers are not gone through here, since the same
-  // view may be about to switch the rows as well; settle does that once,
-  // if nothing else has by then.
-  let unsettled = false;
+  // A saved view has changed what is kept: the pace is read again. Which
+  // rows and which of their items are shown is the panel's to read, and it
+  // tells this layer once when any of that has changed.
   function adopt() {
-    for (const domain of FILTERS) {
-      const next = recallFilter(domain);
-      const was = filters[domain];
-      if (next.only === was.only && next.hidden.size === was.hidden.size && [...next.hidden].every((sort) => was.hidden.has(sort))) continue;
-      filters[domain] = next;
-      unsettled = true;
-    }
     if (!settings) return;
     const kept = settings.get('live');
     if (paceOf(kept.interval) !== control.interval) {
@@ -874,185 +912,10 @@
     }
   }
 
-  function settle() {
-    if (unsettled) refilter();
-  }
-
   // Whether a type of mob is one this page has any reason to know: the
   // game's own, one the server has a picture for, or one on the map now.
   // A view saved long ago may name one that is none of these.
   const knows = (type) => categoryOf.has(type) || icons.listing().mobs.types.has(type) || sortsHere('mobs').has(type);
-
-  function setFilter(domain, change) {
-    change(filters[domain]);
-    keepFilter(domain);
-    refilter();
-  }
-
-  // The list under one row: what it holds, most first, each with a switch
-  // and a way to see it alone. Built once and brought up to date in place,
-  // so that a count changing every second never rebuilds what the viewer
-  // is pointing at. Every name is set as text: a gamertag is a player's
-  // choice, and a type is the server's word.
-  function breakdown(category) {
-    const players = category === 'players';
-    const domain = domainOf(category);
-    const node = document.createElement('div');
-    node.className = 'breakdown';
-    const filtered = document.createElement('p');
-    filtered.className = 'filtered';
-    filtered.hidden = true;
-    const filteredWhat = document.createElement('span');
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'mini';
-    reset.textContent = players ? 'Show all players' : 'Show all types';
-    filtered.append(filteredWhat, reset);
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-    const narrow = document.createElement('input');
-    narrow.type = 'search';
-    narrow.maxLength = 64;
-    narrow.placeholder = players ? 'Filter players' : 'Filter types';
-    narrow.setAttribute('aria-label', players ? 'Narrow the list of players' : `Narrow the list of ${category} types`);
-    const list = document.createElement('ul');
-    details.append(summary, narrow, list);
-    node.append(filtered, details);
-
-    const kept = app.layers.recall ? app.layers.recall('live', `${category}-open`) : null;
-    details.open = typeof kept === 'boolean' ? kept : players;
-    details.addEventListener('toggle', () => {
-      if (app.layers.retain) app.layers.retain('live', `${category}-open`, details.open);
-    });
-
-    // sort -> { item, box, name, count, label }
-    const items = new Map();
-    let order = '';
-    let last = new Map();
-
-    const titleOf = (sort, entry) => (players ? (entry && entry.name) || sort || 'Player' : names.entity(sort));
-
-    function narrowed() {
-      const want = narrow.value.trim().toLowerCase();
-      for (const it of items.values()) it.item.hidden = want !== '' && !it.label.toLowerCase().includes(want);
-    }
-
-    function entryFor(sort) {
-      const item = document.createElement('li');
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.addEventListener('change', () => setFilter(domain, (f) => {
-        if (f.only !== null) {
-          // Leaving "only this" by a switch: everything else that is here
-          // stays hidden, and the switch does what it says.
-          for (const other of sortsHere(domain)) if (other !== f.only) f.hidden.add(other);
-          f.only = null;
-        }
-        if (box.checked) f.hidden.delete(sort); else f.hidden.add(sort);
-      }));
-      let name;
-      if (players) {
-        name = document.createElement('button');
-        name.type = 'button';
-        name.className = 'name who';
-        name.title = 'Go to this player';
-        name.addEventListener('click', () => {
-          for (const [key, held] of entities) {
-            if (held.category !== 'players' || held.sort !== sort) continue;
-            if (app.go) app.go(pictured, held.x, held.z);
-            pick(key);
-            return;
-          }
-        });
-      } else {
-        name = document.createElement('span');
-        name.className = 'name';
-      }
-      const tallied = document.createElement('span');
-      tallied.className = 'count';
-      const only = document.createElement('button');
-      only.type = 'button';
-      only.className = 'mini';
-      only.textContent = 'Only';
-      only.addEventListener('click', () => setFilter(domain, (f) => {
-        // Pressed on the one already alone, it lets the rest back.
-        const alone = f.only === sort;
-        f.hidden.clear();
-        f.only = alone ? null : sort;
-      }));
-      const label = document.createElement('label');
-      label.append(box, players ? '' : name);
-      item.append(label, ...(players ? [name] : []), tallied, only);
-      const it = { item, box, name, count: tallied, only, label: '' };
-      items.set(sort, it);
-      return it;
-    }
-
-    function show(tally) {
-      last = tally;
-      const f = filters[domain];
-      // What is alone is listed even while none of it is about, or there
-      // would be nothing to say what the map is waiting for.
-      const sorts = new Map(tally);
-      if (f.only !== null && !sorts.has(f.only) && (players || categoryOf.get(f.only) === category || (category === 'other' && !categoryOf.has(f.only)))) {
-        sorts.set(f.only, { n: 0, name: f.only });
-      }
-      for (const sort of [...items.keys()]) {
-        if (sorts.has(sort)) continue;
-        items.get(sort).item.remove();
-        items.delete(sort);
-      }
-      for (const [sort, entry] of sorts) {
-        const it = items.get(sort) || entryFor(sort);
-        const label = titleOf(sort, entry);
-        if (it.label !== label) {
-          it.label = label;
-          it.name.textContent = label;
-          it.box.setAttribute('aria-label', `Show ${label}`);
-          it.only.setAttribute('aria-label', `Show only ${label}`);
-        }
-        say(it.count, fmt(entry.n));
-        const on = passes(category, sort);
-        if (it.box.checked !== on) it.box.checked = on;
-        it.only.setAttribute('aria-pressed', String(f.only === sort));
-      }
-      // Most first. Left as it is while the viewer is in the list: a row
-      // that moves from under the pointer is a wrong click.
-      const wanted = [...sorts].sort((a, b) => b[1].n - a[1].n || titleOf(a[0], a[1]).localeCompare(titleOf(b[0], b[1]))).map(([sort]) => sort);
-      const key = wanted.join('\n');
-      const busy = list.matches(':hover') || list.contains(document.activeElement);
-      // A row that is new goes in at the end at once, whoever is pointing:
-      // nothing moves for it, and a type that has just arrived is not left
-      // out until the pointer goes. Only putting them in order waits.
-      for (const sort of wanted) if (items.get(sort).item.parentNode !== list) list.append(items.get(sort).item);
-      if (key !== order && !busy) {
-        order = key;
-        for (const sort of wanted) list.append(items.get(sort).item);
-      }
-      narrowed();
-      say(summary, `${players ? 'By player' : 'By type'} (${fmt(sorts.size)})`);
-      narrow.hidden = sorts.size <= 6;
-      details.hidden = sorts.size === 0 || !shown(category);
-      const cut = filtering(domain) && shown(category);
-      filtered.hidden = !cut;
-      node.hidden = details.hidden && !cut;
-      if (cut) say(filteredWhat, f.only !== null ? `Only ${players ? (last.get(f.only) || {}).name || f.only : names.entity(f.only)} is shown. ` : `${fmt(f.hidden.size)} hidden. `);
-    }
-
-    narrow.addEventListener('input', narrowed);
-    // Not a search to submit, and not an Escape for the card.
-    narrow.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || narrow.value === '') return;
-      e.stopPropagation();
-      narrow.value = '';
-      narrowed();
-    });
-    reset.addEventListener('click', () => setFilter(domain, (f) => {
-      f.only = null;
-      f.hidden.clear();
-    }));
-    return { node, show, again: () => show(last) };
-  }
 
   // Every sort of a domain that is in the picture now.
   function sortsHere(domain) {
@@ -1061,10 +924,10 @@
     return out;
   }
 
-  const breakdowns = {};
-
   // Puts the layer's rows in the panel while the service has a live layer
-  // and takes them out while it does not.
+  // and takes them out while it does not: the players as a section of
+  // their own, each of them an item of it, and the mobs as a section of
+  // four rows with each type an item of its row.
   function panel(available) {
     if (available === (rows !== null)) return;
     if (!available) {
@@ -1074,10 +937,14 @@
     }
     rows = {};
     LAYERS.forEach(([id, label], at) => {
-      rows[id] = app.layers.register({ group: 'live', id, label, order: (at + 1) * 10, swatch: `dot ${id}` });
+      const players = id === 'players';
+      rows[id] = app.layers.register({ group: 'live', id, label, order: (at + 1) * 10, swatch: `dot ${id}`,
+        section: players ? 'players' : 'mobs',
+        whole: players,
+        facet: domainOf(id),
+        actions: { zoom: (sort) => zoomTo(id, sort), ...(players ? { go: goToPlayer } : {}) },
+      });
       rows[id].onToggle(refilter);
-      if (!breakdowns[id]) breakdowns[id] = breakdown(id);
-      rows[id].setBody(breakdowns[id].node);
     });
   }
 
@@ -1568,7 +1435,6 @@
     // For a saved view: what is kept is read again, and the map brought
     // in line with it once.
     adopt,
-    settle,
     knows,
   };
   // For a layer that has to sit under these markers and still be hovered:
@@ -1587,12 +1453,17 @@
   playerLayer.addTo(map);
   paintControl();
   document.addEventListener('mcmap:icons', relist);
-  document.addEventListener('mcmap:pictures', dress);
+  document.addEventListener('mcmap:pictures', () => {
+    dress();
+    // A head that has arrived is drawn on its player's line.
+    count();
+  });
+  for (const choice of Object.values(choices)) choice.onChange(refilter);
   // A tooltip already open says the old name until it is told.
   document.addEventListener('mcmap:names', () => {
     if (mobLayer.isTooltipOpen()) mobLayer.getTooltip().update();
     paintCard();
-    for (const list of Object.values(breakdowns)) list.again();
+    count();
   });
   const styledAs = () => {
     const { theme, size, text, labelMobs, labelPlayers, picturesLive } = look();

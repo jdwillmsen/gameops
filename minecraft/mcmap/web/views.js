@@ -66,7 +66,19 @@
     ['structures/fortress', 'Fortresses'], ['structures/monument', 'Monuments'], ['structures/outpost', 'Outposts'],
     ['structures/witch_hut', 'Witch huts'], ['structures/village', 'Villages'], ['structures/spawn', 'World spawn'],
     ['biomes/overlay', 'Biome overlay'], ['overlays/slime', 'Slime chunks'], ['overlays/trails', 'Trails'],
+    ['overlays/grid', 'Grid'], ['overlays/chunk', 'Chunk focus'],
   ];
+  // The switches a kind of structure had before each layer listed its
+  // kinds. A view saved then names them, and what they said is put on the
+  // lists by the script that keeps the record: they are not layers this
+  // map lacks.
+  const RETIRED = new Set(settings.RETIRED || []);
+  // The choices over what a layer is made of that a link carries, by
+  // their place in this list, which is only ever added to at the end.
+  // Each is over things the game names. Which players, named mobs and
+  // waypoints are hidden is left out: those are not the viewer's to hand
+  // round in a link.
+  const SHARED = ['structures#recorded', 'structures#predicted', 'structures#candidate', 'markers#containers', 'markers#beds', 'biomes#items'];
   const KEYS = KNOWN.map(([key]) => key);
   const LABELS = new Map(KNOWN);
   // The appearance settings in the order a link lists them, likewise only
@@ -119,7 +131,7 @@
   function capture(withPlace, withLook) {
     const kept = settings.get('layers');
     const layers = {};
-    for (const [key, on] of Object.entries(kept)) if (key.includes('/') && typeof on === 'boolean') layers[key] = on;
+    for (const [key, on] of Object.entries(kept)) if (key.includes('/') && typeof on === 'boolean' && !RETIRED.has(key)) layers[key] = on;
     Object.assign(layers, app.layers.states ? app.layers.states() : {});
     const filter = (domain) => {
       const f = kept[`live#${domain}`];
@@ -134,6 +146,9 @@
       interval: settings.get('live').interval,
       grid: el.grid.checked,
     };
+    // Which of what each layer is made of are shown, every choice there
+    // is: a view says "all of it" as well as what is hidden.
+    if (app.layers.items) view.items = app.layers.items();
     const at = withPlace ? app.place.get() : null;
     if (at) {
       view.place = at;
@@ -196,7 +211,7 @@
       }
     }
     settings.adopt(next);
-    const { held, missing } = redraw(Object.keys(next.layers));
+    const { held, missing } = redraw(Object.keys(next.layers).filter((key) => !RETIRED.has(key)));
     if (next.place && next.place.pin && app.chunk && app.chunk.pin && app.place.get() && app.place.get().d === next.place.d) {
       app.chunk.pin({ unit: next.place.pin.u, x: next.place.pin.x, z: next.place.pin.z });
     }
@@ -609,6 +624,15 @@
     // Which players are hidden is left out: a gamertag is not the
     // viewer's to hand round in a link.
     if (view.mobs) out.m = { o: view.mobs.only, h: view.mobs.hidden };
+    if (view.items) {
+      // Each choice that is not "all of it", under its place in the list.
+      // That the view has choices at all is said even when none is.
+      out.y = {};
+      SHARED.forEach((key, at) => {
+        const f = view.items[key];
+        if (f && (f.only !== null || f.hidden.length > 0 || (f.shown && f.shown.length > 0))) out.y[at] = { o: f.only, h: f.hidden, ...(f.shown ? { s: f.shown } : {}) };
+      });
+    }
     if (view.biome !== undefined) out.b = view.biome;
     if (view.trails !== undefined) out.t = view.trails;
     if (view.interval !== undefined) out.i = view.interval;
@@ -639,7 +663,7 @@
     let raw;
     try { raw = JSON.parse(b64.from(part.slice(3))); } catch { return bad; }
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return bad;
-    const allowed = ['n', 'l', 'x', 'm', 'b', 't', 'i', 'g', 'p', 'q', 'a'];
+    const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'a'];
     if (Object.keys(raw).some((key) => !allowed.includes(key))) return bad;
     if (typeof raw.l !== 'string' || !/^[01-]{0,64}$/.test(raw.l)) return bad;
     const view = { name: raw.n, layers: {} };
@@ -656,6 +680,17 @@
     if (raw.m !== undefined) {
       if (raw.m === null || typeof raw.m !== 'object' || Array.isArray(raw.m) || Object.keys(raw.m).some((key) => key !== 'o' && key !== 'h')) return bad;
       view.mobs = { only: raw.m.o, hidden: raw.m.h };
+    }
+    if (raw.y !== undefined) {
+      if (raw.y === null || typeof raw.y !== 'object' || Array.isArray(raw.y)) return bad;
+      // Every choice a link can carry is in the view, so that one it does
+      // not speak of is "all of it" and not whatever the viewer had.
+      view.items = Object.fromEntries(SHARED.map((key) => [key, { only: null, hidden: [] }]));
+      for (const [at, f] of Object.entries(raw.y)) {
+        if (!/^(0|[1-9]\d?)$/.test(at) || Number(at) >= SHARED.length) return bad;
+        if (f === null || typeof f !== 'object' || Array.isArray(f) || Object.keys(f).some((key) => !['o', 'h', 's'].includes(key))) return bad;
+        view.items[SHARED[Number(at)]] = { only: f.o, hidden: f.h, ...(f.s !== undefined ? { shown: f.s } : {}) };
+      }
     }
     if (raw.b !== undefined) view.biome = raw.b;
     if (raw.t !== undefined) view.trails = raw.t;
@@ -965,7 +1000,7 @@
     opened = null;
     if (!view || document.body.classList.contains('locked')) return;
     const have = app.layers.states ? app.layers.states() : {};
-    const missing = Object.keys(view.layers).filter((key) => !Object.hasOwn(have, key)).map((key) => LABELS.get(key) || key);
+    const missing = Object.keys(view.layers).filter((key) => !Object.hasOwn(have, key) && !RETIRED.has(key)).map((key) => LABELS.get(key) || key);
     if (missing.length > 0) tell(`“${view.name}” opened without ${plural(missing.length, 'layer', 'layers')} this map does not have (${missing.slice(0, 4).join(', ')}${missing.length > 4 ? ', …' : ''}).`);
   }
   let waiting = opened !== null;
