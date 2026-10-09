@@ -34,6 +34,9 @@ const (
 	// hold. A wrong answer of that kind is rare and a pin's contents do
 	// not change, so asking is cheap but seldom worth it.
 	defaultRefillEvery = 24 * time.Hour
+
+	// maxRejection is the longest reason kept for a picture not made.
+	maxRejection = 300
 )
 
 // Mobs holds the mob icons for one pinned revision and, fetched with them,
@@ -49,7 +52,8 @@ type Mobs struct {
 	Fetch func(context.Context) (Set, error)
 	// Fill asks again for what a set is missing and nothing else;
 	// Source.Fill outside tests. Nil leaves a set as it was first fetched.
-	Fill   func(ctx context.Context, missing []string) (Set, error)
+	// recipes is how each picture made here is made, as far as is known.
+	Fill   func(ctx context.Context, missing []string, recipes map[string]Recipe) (Set, error)
 	Logger *slog.Logger
 
 	// RetryMin and RetryMax bound the wait between failed fetches. Zero
@@ -68,6 +72,7 @@ type Mobs struct {
 	pictureKeys    []string
 	pictureVersion string
 	names          *Names
+	rejected       map[string]string
 }
 
 type index struct {
@@ -84,6 +89,12 @@ type index struct {
 	// Structures is the kinds of structure whose pictures the source was
 	// asked for. An index without it was written when there were five.
 	Structures []string `json:"structures,omitempty"`
+	// Recipes and Rejected are of the pictures made here, and Art the
+	// revision of the making they came from. An index without them was
+	// written before any picture was made.
+	Recipes  map[string]Recipe `json:"recipes,omitempty"`
+	Rejected map[string]string `json:"rejected,omitempty"`
+	Art      int               `json:"art,omitempty"`
 }
 
 // firstStructureKinds is the kinds an index that names none was written
@@ -125,7 +136,7 @@ func (m *Mobs) Run(ctx context.Context) {
 		if err == nil {
 			metricFetches.WithLabelValues(resultOK).Inc()
 			m.keep(set)
-			m.Logger.Info("mob icons fetched", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+			m.Logger.Info("mob icons fetched", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "not_made", len(set.Rejected), "missing", set.Missing)
 			again := m.refillEvery()
 			if len(set.Unreached) > 0 {
 				again = wait
@@ -196,14 +207,14 @@ func (m *Mobs) refill(ctx context.Context, set Set, wait time.Duration) {
 			return
 		case <-time.After(wait):
 		}
-		got, err := m.Fill(ctx, set.Missing)
+		got, err := m.Fill(ctx, set.Missing, set.Recipes)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
 			got = Set{Missing: set.Missing, Unreached: set.Missing}
 		}
-		if len(got.Pictures) > 0 || len(got.Lang) > 0 {
+		if len(got.Pictures) > 0 || len(got.Lang) > 0 || len(got.Rejected) > 0 || got.Replanned {
 			// A new set, not the held one changed: that one is being
 			// read by whoever is serving from it.
 			next := set
@@ -212,13 +223,27 @@ func (m *Mobs) refill(ctx context.Context, set Set, wait time.Duration) {
 				next.Pictures = map[string][]byte{}
 			}
 			maps.Copy(next.Pictures, got.Pictures)
+			if got.Replanned {
+				next.Recipes, next.Rejected = got.Recipes, got.Rejected
+			} else if len(got.Rejected) > 0 {
+				next.Rejected = maps.Clone(set.Rejected)
+				if next.Rejected == nil {
+					next.Rejected = map[string]string{}
+				}
+				maps.Copy(next.Rejected, got.Rejected)
+			}
+			// One made under an earlier revision and not wanted under
+			// this is not left standing.
+			for key := range got.Rejected {
+				delete(next.Pictures, key)
+			}
 			if len(got.Lang) > 0 {
 				next.Lang = got.Lang
 			}
 			next.Missing, next.Unreached = got.Missing, nil
 			set = next
 			m.keep(set)
-			m.Logger.Info("fetched what the mob icons were missing", "ref", m.Ref, "pictures", len(set.Pictures), "names", len(set.Lang), "missing", set.Missing)
+			m.Logger.Info("fetched what the mob icons were missing", "ref", m.Ref, "pictures", len(set.Pictures), "names", len(set.Lang), "not_made", len(set.Rejected), "missing", set.Missing)
 		}
 		if len(got.Unreached) == 0 {
 			metricFetches.WithLabelValues(resultOK).Inc()
@@ -253,6 +278,7 @@ func (m *Mobs) set(set Set) {
 	m.icons, m.types, m.version = set.Mobs, types, version
 	m.pictures, m.pictureKeys, m.pictureVersion = set.Pictures, pictureKeys, pictureVersion
 	m.names = names
+	m.rejected = set.Rejected
 	m.mu.Unlock()
 	metricMobTypes.Set(float64(len(types)))
 	metricPictures.Set(float64(len(pictureKeys)))
@@ -296,6 +322,15 @@ func (m *Mobs) Pictures() (version string, keys []string) {
 	return m.pictureVersion, m.pictureKeys
 }
 
+// Rejected is every picture that could have been made from the models and
+// was not, by key, with why. The page draws each as it would with no such
+// picture: a mob as its spawn egg.
+func (m *Mobs) Rejected() map[string]string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.rejected
+}
+
 // Names is the display names. Before the set has filled, and for as long
 // as the language file is out of reach, they are tidied ids.
 func (m *Mobs) Names() *Names {
@@ -329,7 +364,8 @@ func (m *Mobs) load() (set Set, earlier bool, err error) {
 		idx.Entities = slices.Sorted(maps.Keys(idx.Icons))
 	}
 	if idx.Format != indexFormat || idx.Ref != m.Ref || len(idx.Icons) == 0 || len(idx.Icons) > maxDefinitions ||
-		len(idx.Pictures) > maxPictures || len(idx.Lang) > maxLangNames || len(idx.Entities) > maxDefinitions || len(idx.Missing) > maxPictures+1 {
+		len(idx.Pictures) > maxPictures || len(idx.Lang) > maxLangNames || len(idx.Entities) > maxDefinitions || len(idx.Missing) > maxPictures+2 ||
+		len(idx.Recipes) > maxRecipes || len(idx.Rejected) > maxRecipes {
 		return Set{}, false, errors.New("the icon index is not for this pin")
 	}
 	files := map[string][]byte{}
@@ -392,6 +428,25 @@ func (m *Mobs) load() (set Set, earlier bool, err error) {
 	if slices.ContainsFunc(idx.Entities, func(kind string) bool { return !mobType.MatchString(kind) }) {
 		return Set{}, false, errors.New("the icon index is damaged")
 	}
+	for key, recipe := range idx.Recipes {
+		if !pictureKey.MatchString(key) || recipe.check() != nil {
+			return Set{}, false, errors.New("the icon index is damaged")
+		}
+	}
+	for key, why := range idx.Rejected {
+		if !pictureKey.MatchString(key) || len(why) > maxRejection {
+			return Set{}, false, errors.New("the icon index is damaged")
+		}
+	}
+	// What was made under another revision, or before anything was, is
+	// served as it is and made again: the recipes are worked out afresh,
+	// so none of the old ones is kept to make a picture the old way.
+	if idx.Art == ArtRevision {
+		out.Recipes, out.Rejected = idx.Recipes, idx.Rejected
+	} else if !slices.Contains(out.Missing, artPlan) {
+		out.Missing = append(slices.Clip(out.Missing), artPlan)
+		slices.Sort(out.Missing)
+	}
 	return out, earlier, nil
 }
 
@@ -411,7 +466,7 @@ func (m *Mobs) store(set Set) error {
 		return err
 	}
 	defer os.RemoveAll(staging)
-	idx := index{Format: indexFormat, Ref: m.Ref, Icons: map[string]string{}, Pictures: map[string]string{}, Lang: set.Lang, Entities: set.Entities, Missing: set.Missing, Structures: StructureKinds}
+	idx := index{Format: indexFormat, Ref: m.Ref, Icons: map[string]string{}, Pictures: map[string]string{}, Lang: set.Lang, Entities: set.Entities, Missing: set.Missing, Structures: StructureKinds, Recipes: set.Recipes, Rejected: set.Rejected, Art: ArtRevision}
 	for _, group := range []struct {
 		from map[string][]byte
 		to   map[string]string
@@ -423,6 +478,12 @@ func (m *Mobs) store(set Set) error {
 			if err := os.WriteFile(filepath.Join(staging, digest+".png"), body, 0o644); err != nil {
 				return err
 			}
+		}
+	}
+	if len(idx.Rejected) > 0 {
+		idx.Rejected = maps.Clone(idx.Rejected)
+		for key, why := range idx.Rejected {
+			idx.Rejected[key] = why[:min(len(why), maxRejection)]
 		}
 	}
 	raw, err := json.Marshal(idx)

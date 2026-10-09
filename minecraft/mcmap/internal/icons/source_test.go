@@ -58,10 +58,13 @@ var (
 type samples struct {
 	mu    sync.Mutex
 	files map[string][]byte
-	// listed overrides the listing built from files.
+	// listed overrides the listing built from files, with definitions
+	// by these names and nothing else.
 	listed []string
-	hits   atomic.Int64
-	srv    *httptest.Server
+	// truncated is what the listing says of itself.
+	truncated bool
+	hits      atomic.Int64
+	srv       *httptest.Server
 }
 
 func entity(identifier, minEngine, egg string) []byte {
@@ -115,28 +118,27 @@ func newSamples(t *testing.T) *samples {
 		s.hits.Add(1)
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if r.URL.Path == "/list/resource_pack/entity" {
-			if r.URL.Query().Get("ref") != testRef {
+		if tree, ok := strings.CutPrefix(r.URL.Path, "/list/"); ok {
+			if tree != testRef+":resource_pack" || r.URL.Query().Get("recursive") != "1" {
 				http.Error(w, "No commit found for the ref", http.StatusNotFound)
 				return
 			}
 			type entry struct {
-				Name string `json:"name"`
+				Path string `json:"path"`
 				Type string `json:"type"`
 			}
-			out := []entry{{Name: "a_directory", Type: "dir"}}
-			names := s.listed
-			if names == nil {
+			out := []entry{{Path: "entity", Type: "tree"}}
+			if s.listed == nil {
 				for path := range s.files {
-					if name, ok := strings.CutPrefix(path, "resource_pack/entity/"); ok {
-						names = append(names, name)
+					if under, ok := strings.CutPrefix(path, "resource_pack/"); ok {
+						out = append(out, entry{Path: under, Type: "blob"})
 					}
 				}
 			}
-			for _, name := range names {
-				out = append(out, entry{Name: name, Type: "file"})
+			for _, name := range s.listed {
+				out = append(out, entry{Path: "entity/" + name, Type: "blob"})
 			}
-			_ = json.NewEncoder(w).Encode(out)
+			_ = json.NewEncoder(w).Encode(map[string]any{"tree": out, "truncated": s.truncated})
 			return
 		}
 		path, ok := strings.CutPrefix(r.URL.Path, "/raw/"+testRef+"/")

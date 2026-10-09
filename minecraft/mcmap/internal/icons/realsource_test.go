@@ -1,7 +1,9 @@
 package icons
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"net/http"
@@ -12,8 +14,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 )
 
 type counting struct {
@@ -45,14 +45,17 @@ func (c *counting) RoundTrip(r *http.Request) (*http.Response, error) {
 	return resp, err
 }
 
-// Run against the published samples to see what a pin really gives: which
-// names and pictures there are, what is missing, and what one fetch costs.
-// It makes one listing request of the sixty an address is allowed an hour.
+// Run against the published samples to see what a pin really gives and
+// what one fetch costs. It prints counts and nothing of the samples'
+// own, and makes one listing request of the sixty an address is allowed
+// an hour.
 //
 //	MCMAP_REAL_SOURCE=<tag or commit> go test -run RealSource -v ./minecraft/mcmap/internal/icons/
 //
 // MCMAP_REAL_SOURCE_OUT, if set, is a directory the pictures are written
-// to, for looking at. It must not be inside the repository.
+// to, for looking at, with why each one not made was not. It must not be
+// inside the repository. MCMAP_REAL_SOURCE_LIST and MCMAP_REAL_SOURCE_RAW
+// point it at a copy of the samples kept somewhere else.
 func TestRealSource(t *testing.T) {
 	ref := os.Getenv("MCMAP_REAL_SOURCE")
 	if ref == "" {
@@ -61,7 +64,7 @@ func TestRealSource(t *testing.T) {
 	client := NewClient()
 	count := &counting{inner: http.DefaultTransport}
 	client.Transport = count
-	source := &Source{Ref: ref, ListURL: DefaultListURL, RawURL: DefaultRawURL, HTTP: client}
+	source := &Source{Ref: ref, ListURL: cmp.Or(os.Getenv("MCMAP_REAL_SOURCE_LIST"), DefaultListURL), RawURL: cmp.Or(os.Getenv("MCMAP_REAL_SOURCE_RAW"), DefaultRawURL), HTTP: client}
 	started := time.Now()
 	set, err := source.Fetch(t.Context())
 	if err != nil {
@@ -82,58 +85,45 @@ func TestRealSource(t *testing.T) {
 	})
 	t.Logf("on the volume: %d files, %d bytes", files, size)
 
-	names := m.Names()
-	t.Logf("%d mob icons, %d pictures, %d names from the language file, %d entity types defined", len(set.Mobs), len(set.Pictures), len(set.Lang), len(set.Entities))
+	groups := map[string]int{}
+	for key := range set.Pictures {
+		group, _, _ := strings.Cut(key, "/")
+		groups[group]++
+	}
+	t.Logf("%d mob icons, %d names from the language file, %d entity types defined, %d recipes", len(set.Mobs), len(set.Lang), len(set.Entities), len(set.Recipes))
+	t.Logf("pictures by group: %v", groups)
 	t.Logf("missing: %v", set.Missing)
-	var unnamed, unpictured []string
-	for _, kind := range set.Entities {
-		if _, ok := set.Lang["entity."+kind+".name"]; !ok {
-			unnamed = append(unnamed, kind+"="+names.Entity(kind))
-		}
-		if _, ok := set.Mobs[kind]; !ok {
-			unpictured = append(unpictured, kind)
+	var faceless []string
+	for key := range set.Rejected {
+		if kind, ok := strings.CutPrefix(key, "face/"); ok {
+			faceless = append(faceless, kind)
 		}
 	}
-	t.Logf("entity types with a tidied name only (%d): %v", len(unnamed), unnamed)
-	t.Logf("entity types with no icon (%d): %v", len(unpictured), unpictured)
-
-	table := names.Table(nil)
-	row := func(group, id, name, langKey, picture string) {
-		_, real := set.Lang[langKey]
-		_, drawn := set.Pictures[picture]
-		t.Logf("  %-10s %-14s %-28q from the file: %-5v picture %-26s %v", group, id, name, real, picture, drawn)
+	slices.Sort(faceless)
+	t.Logf("not made (%d), of which mobs left as their spawn egg (%d): %v", len(set.Rejected), len(faceless), faceless)
+	if len(set.Missing) > 0 {
+		t.Errorf("the pin left %d things out", len(set.Missing))
 	}
-	for _, kind := range ContainerKinds {
-		key := map[string]string{"chest": "tile.chest.name", "trapped_chest": "tile.trapped_chest.name", "barrel": "tile.barrel.name", "shulker": "tile.shulkerBox.name"}[kind]
-		picture := "container/" + kind
-		if kind == "shulker" {
-			picture = "shulker/" + markers.Undyed
+	for _, key := range everyPicture() {
+		if _, ok := set.Pictures[key]; !ok {
+			t.Errorf("no picture for %s", key)
 		}
-		row("container", kind, table.Containers[kind], key, picture)
-	}
-	for _, colour := range markers.Colours {
-		row("bed", colour, table.Beds[colour], "item.bed."+camel(legacyColour(colour), false)+".name", "bed/"+colour)
-	}
-	for _, colour := range markers.Colours {
-		row("shulker", colour, table.Shulkers[colour], "tile.shulkerBox"+camel(legacyColour(colour), true)+".name", "shulker/"+colour)
-	}
-	for _, kind := range StructureKinds {
-		feature := kind
-		if other, ok := featureOf[kind]; ok {
-			feature = other
-		}
-		row("structure", kind, table.Structures[kind], "feature."+feature, "structure/"+kind)
-	}
-	row("marker", "waypoint", "", "", "marker/waypoint")
-	if strings.Join(slices.Sorted(slices.Values(keys(set.Pictures))), ",") != strings.Join(everyPicture(), ",") {
-		t.Errorf("pictures = %v", slices.Sorted(slices.Values(keys(set.Pictures))))
 	}
 
 	if out := os.Getenv("MCMAP_REAL_SOURCE_OUT"); out != "" {
 		for key, body := range set.Pictures {
-			if err := os.WriteFile(filepath.Join(out, strings.ReplaceAll(key, "/", "_")+".png"), body, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(out, strings.ReplaceAll(key, "/", "__")+".png"), body, 0o644); err != nil {
 				t.Fatal(err)
 			}
+		}
+		for kind, body := range set.Mobs {
+			if err := os.WriteFile(filepath.Join(out, "egg__"+kind+".png"), body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		why, _ := json.MarshalIndent(set.Rejected, "", " ")
+		if err := os.WriteFile(filepath.Join(out, "rejected.json"), why, 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

@@ -312,3 +312,58 @@ func TestIcons_LeaveTheContentSecurityPolicyAsItWas(t *testing.T) {
 		}
 	}
 }
+
+// The pictures made from the models are listed and served the way the
+// pictures before them were: more keys in the same list, under the same
+// version, at the same route. A page from before they existed reads the
+// answer as it always did and asks for none of them.
+func TestIcons_MadePicturesAreMoreKeysInTheSameAnswer(t *testing.T) {
+	s := withLive(t)
+	mobs := mobIcons(t, func(context.Context) (icons.Set, error) {
+		return icons.Set{
+			Mobs: map[string][]byte{"cow": picture(t, 16, red)},
+			Pictures: map[string][]byte{
+				"container/chest": picture(t, 16, red), "structure/village": picture(t, 8, blue),
+				"face/cow": picture(t, 8, blue), "block/chest": picture(t, 32, red), "villager/farmer": picture(t, 8, red),
+			},
+		}, nil
+	})
+	mobs.Run(t.Context())
+	s.MobIcons, s.Art, s.Heads = mobs, mobs, &icons.Heads{}
+	c := []*http.Cookie{session(s, alex)}
+	h := s.Handler()
+
+	rec := do(h, "GET", "/api/icons", "", c)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	// Exactly the fields there were: nothing a page already out there
+	// reads has moved or changed its type.
+	if len(raw) != 4 || raw["mobs"] == nil || raw["pictures"] == nil || raw["names"] == nil || raw["heads"] == nil {
+		t.Errorf("/api/icons has the fields %v", rec.Body)
+	}
+	list := listing(t, s, c[0])
+	if strings.Join(list.Mobs.Types, ",") != "cow" || list.Mobs.Version == "" {
+		t.Errorf("mobs listed as %+v", list.Mobs)
+	}
+	if got := strings.Join(list.Pictures.Keys, ","); got != "block/chest,container/chest,face/cow,structure/village,villager/farmer" || list.Pictures.Version == "" {
+		t.Errorf("pictures listed as %q at %q", got, list.Pictures.Version)
+	}
+	for _, key := range []string{"face/cow", "block/chest", "villager/farmer", "container/chest"} {
+		path := "/api/icons/picture/" + key + "?v="
+		rec := do(h, "GET", path+list.Pictures.Version, "", c)
+		if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/png" || rec.Header().Get("Cache-Control") != cacheForGood {
+			t.Errorf("GET %s = %d %s %q", path, rec.Code, rec.Header().Get("Content-Type"), rec.Header().Get("Cache-Control"))
+		}
+		if rec := do(h, "GET", path+"stale", "", c); rec.Header().Get("Cache-Control") != cacheChecked {
+			t.Errorf("GET %s under another version may be kept: %q", path, rec.Header().Get("Cache-Control"))
+		}
+		if rec := do(h, "GET", path+list.Pictures.Version, "", nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("GET %s with no session = %d", path, rec.Code)
+		}
+	}
+	if rec := do(h, "GET", "/api/icons/picture/face/pig", "", c); rec.Code != http.StatusNotFound || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("a face there is none of = %d %q", rec.Code, rec.Header().Get("Cache-Control"))
+	}
+}

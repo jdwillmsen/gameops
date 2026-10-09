@@ -21,25 +21,29 @@ import (
 // Where the samples are published. The listing comes from the API host and
 // every file from the raw host; nothing is asked of anywhere else.
 const (
-	DefaultListURL = "https://api.github.com/repos/Mojang/bedrock-samples/contents"
+	DefaultListURL = "https://api.github.com/repos/Mojang/bedrock-samples/git/trees"
 	DefaultRawURL  = "https://raw.githubusercontent.com/Mojang/bedrock-samples"
 
+	packDir   = "resource_pack"
 	entityDir = "resource_pack/entity"
 	atlasPath = "resource_pack/textures/item_texture.json"
 )
 
-// Bounds on one fetch. The real set is about 180 definitions of 30 KB at
-// most, 130 textures under 2 KB each and a language file of 0.8 MB; these
-// are several times that, and are here so a source that has gone wrong
-// costs a bounded amount of memory and time whatever it sends.
+// Bounds on one fetch. The real set is a listing of 5.5 MB, about 180
+// definitions of 30 KB at most, 370 models and render controllers of 13 KB
+// at most, 330 textures of which the spawn eggs are under 2 KB each and
+// the largest model's is 41 KB, and a language file of 0.8 MB; these are
+// several times that, and are here so a source that has gone wrong costs a
+// bounded amount of memory and time whatever it sends.
 const (
-	maxListBytes       = 2 << 20
+	maxListBytes       = 16 << 20
+	maxListEntries     = 100_000
 	maxAtlasBytes      = 1 << 20
 	maxDefinitionBytes = 256 << 10
 	maxTextureBytes    = 64 << 10
 	maxDefinitions     = 600
 	maxTextures        = 400
-	maxTotalBytes      = 16 << 20
+	maxTotalBytes      = 40 << 20
 
 	// A spawn-egg texture is 16 pixels a side. Larger is allowed for, since
 	// a resource pack may be drawn at a higher resolution, but not much.
@@ -94,6 +98,16 @@ type Set struct {
 	// Unreached is those of Missing the source could not be asked for
 	// this time, as opposed to asked and found not to hold.
 	Unreached []string
+	// Recipes is how each picture made here, and not served as it came,
+	// is made, by the picture's key.
+	Recipes map[string]Recipe
+	// Rejected is every such picture that was not made though the source
+	// answered, by key, with why: a mob with no head to take a face from,
+	// a face that came out blank.
+	Rejected map[string]string
+	// Replanned marks a set whose Recipes and Rejected were worked out
+	// afresh and are the whole of them, not an addition.
+	Replanned bool
 }
 
 // budget is how much one fetch may still download.
@@ -166,6 +180,7 @@ type definition struct {
 				Texture string `json:"texture"`
 				Index   int    `json:"texture_index"`
 			} `json:"spawn_egg"`
+			appearance
 		} `json:"description"`
 	} `json:"minecraft:client_entity"`
 }
@@ -180,6 +195,11 @@ type atlas struct {
 // path is the texture an atlas entry names at index, or "" if there is no
 // such entry or it is not a path this service would ask for.
 func (a atlas) path(name string, index int) string {
+	return a.pathIn(name, index, texturePath)
+}
+
+// pathIn is path for an atlas whose textures are kept somewhere else.
+func (a atlas) pathIn(name string, index int, allowed *regexp.Regexp) string {
 	entry, ok := a.Textures[name]
 	if !ok {
 		return ""
@@ -198,7 +218,7 @@ func (a atlas) path(name string, index int) string {
 	default:
 		return ""
 	}
-	if !texturePath.MatchString(one) {
+	if !allowed.MatchString(one) {
 		return ""
 	}
 	return one
@@ -221,9 +241,9 @@ func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	defer cancel()
 	total := &budget{left: maxTotalBytes}
 
-	names, err := s.list(ctx, total)
+	ls, err := s.list(ctx, total)
 	if err != nil {
-		return Set{}, fmt.Errorf("listing entity definitions: %w", err)
+		return Set{}, fmt.Errorf("listing the samples: %w", err)
 	}
 	rawAtlas, err := s.get(ctx, s.raw(atlasPath), maxAtlasBytes, total)
 	if err != nil {
@@ -233,40 +253,9 @@ func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	if err := json.Unmarshal(stripComments(rawAtlas), &items); err != nil {
 		return Set{}, fmt.Errorf("reading the item texture atlas: %w", err)
 	}
-
-	bodies, err := each(ctx, names, func(ctx context.Context, name string) ([]byte, error) {
-		return s.get(ctx, s.raw(entityDir+"/"+name), maxDefinitionBytes, total)
-	})
+	chosen, err := s.definitions(ctx, ls.definitions, items, total)
 	if err != nil {
-		return Set{}, fmt.Errorf("reading entity definitions: %w", err)
-	}
-
-	// A mob can have several definitions, one per engine version it changed
-	// in; the game uses the newest, and so does this.
-	type choice struct {
-		version []int
-		texture string
-	}
-	chosen := map[string]choice{}
-	for _, name := range names {
-		var def definition
-		if json.Unmarshal(stripComments(bodies[name]), &def) != nil {
-			continue
-		}
-		d := def.Entity.Description
-		kind, ok := strings.CutPrefix(d.Identifier, "minecraft:")
-		if !ok || !mobType.MatchString(kind) {
-			continue
-		}
-		version := engineVersion(d.MinEngine)
-		if held, seen := chosen[kind]; seen && !newer(version, held.version) {
-			continue
-		}
-		texture := ""
-		if d.SpawnEgg != nil {
-			texture = items.path(d.SpawnEgg.Texture, d.SpawnEgg.Index)
-		}
-		chosen[kind] = choice{version, texture}
+		return Set{}, err
 	}
 
 	kindsOf := map[string][]string{}
@@ -312,30 +301,120 @@ func (s *Source) Fetch(ctx context.Context) (Set, error) {
 	// not thrown away for them.
 	extra := s.extras(ctx, want, items, total)
 	out.Pictures, out.Lang, out.Missing, out.Unreached = extra.Pictures, extra.Lang, extra.Missing, extra.Unreached
+	looks := map[string]mobLook{}
+	for kind, c := range chosen {
+		looks[kind] = c.look
+	}
+	out.add(s.art(ctx, ls, looks, items, total))
 	return out, nil
+}
+
+// add puts what another part of a fetch read into the set.
+func (set *Set) add(more Set) {
+	if set.Pictures == nil {
+		set.Pictures = map[string][]byte{}
+	}
+	maps.Copy(set.Pictures, more.Pictures)
+	set.Missing = append(set.Missing, more.Missing...)
+	set.Unreached = append(set.Unreached, more.Unreached...)
+	slices.Sort(set.Missing)
+	slices.Sort(set.Unreached)
+	if more.Recipes != nil {
+		set.Recipes = more.Recipes
+	}
+	if more.Rejected != nil {
+		set.Rejected = more.Rejected
+	}
+	set.Replanned = set.Replanned || more.Replanned
+}
+
+// choice is the definition of a mob type that the game uses: the newest of
+// however many the samples hold.
+type choice struct {
+	version []int
+	// texture is its spawn egg's, or empty for one with none this would
+	// ask for.
+	texture string
+	look    mobLook
+}
+
+// definitions reads every client entity definition listed and keeps, for
+// each type, the newest. It comes whole or fails.
+func (s *Source) definitions(ctx context.Context, names []string, items atlas, total *budget) (map[string]choice, error) {
+	bodies, err := each(ctx, names, func(ctx context.Context, name string) ([]byte, error) {
+		return s.get(ctx, s.raw(entityDir+"/"+name), maxDefinitionBytes, total)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reading entity definitions: %w", err)
+	}
+	// A mob can have several definitions, one per engine version it changed
+	// in; the game uses the newest, and so does this.
+	chosen := map[string]choice{}
+	for _, name := range names {
+		var def definition
+		if !jsonWithin(bodies[name], maxJSONDepth) || json.Unmarshal(stripComments(bodies[name]), &def) != nil {
+			continue
+		}
+		d := def.Entity.Description
+		kind, ok := strings.CutPrefix(d.Identifier, "minecraft:")
+		if !ok || !mobType.MatchString(kind) {
+			continue
+		}
+		version := engineVersion(d.MinEngine)
+		if held, seen := chosen[kind]; seen && !newer(version, held.version) {
+			continue
+		}
+		texture := ""
+		if d.SpawnEgg != nil {
+			texture = items.path(d.SpawnEgg.Texture, d.SpawnEgg.Index)
+		}
+		chosen[kind] = choice{version, texture, mobLook{appearance: d.appearance, egg: d.SpawnEgg != nil}}
+	}
+	return chosen, nil
 }
 
 // Fill asks again for what an earlier fetch left out, and for nothing else:
 // no listing, and the atlas only if a bed is among them, since that is
-// where a bed's path is written. It returns what it got, with what is
-// still left out in Missing.
-func (s *Source) Fill(ctx context.Context, missing []string) (Set, error) {
+// where a bed's path is written. A picture made from a recipe is made again
+// from the recipe held for it, which asks only for its textures; only where
+// the recipes themselves are missing are the models read again, and the
+// listing with them. It returns what it got, with what is still left out in
+// Missing.
+func (s *Source) Fill(ctx context.Context, missing []string, recipes map[string]Recipe) (Set, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 	total := &budget{left: maxTotalBytes}
-	var items atlas
-	if slices.ContainsFunc(missing, func(what string) bool { return strings.HasPrefix(what, "bed/") }) {
-		raw, err := s.get(ctx, s.raw(atlasPath), maxAtlasBytes, total)
-		switch {
-		case err == nil:
-			// An atlas that does not parse lists no bed, which leaves
-			// each bed out as it would any the atlas did not name.
-			_ = json.Unmarshal(stripComments(raw), &items)
-		case !errors.Is(err, errSettled):
+	plain, made := split(missing)
+	var out Set
+	if len(plain) > 0 {
+		var items atlas
+		reached := true
+		if slices.ContainsFunc(plain, func(what string) bool { return strings.HasPrefix(what, "bed/") }) {
+			raw, err := s.get(ctx, s.raw(atlasPath), maxAtlasBytes, total)
+			switch {
+			case err == nil:
+				// An atlas that does not parse lists no bed, which leaves
+				// each bed out as it would any the atlas did not name.
+				_ = json.Unmarshal(stripComments(raw), &items)
+			case !errors.Is(err, errSettled):
+				reached = false
+			}
+		}
+		if !reached {
 			return Set{Missing: missing, Unreached: missing}, nil
 		}
+		out = s.extras(ctx, plain, items, total)
 	}
-	return s.extras(ctx, missing, items, total), ctx.Err()
+	switch {
+	case len(made) == 0:
+	case len(plain) > 0 && len(out.Unreached) == len(plain):
+		// The source is out of reach, and the rationed listing is not
+		// spent on finding that out again.
+		out.add(Set{Missing: made, Unreached: made})
+	default:
+		out.add(s.remake(ctx, made, recipes, total))
+	}
+	return out, ctx.Err()
 }
 
 // extras reads the marker pictures and the language file named in want.
@@ -441,32 +520,80 @@ func (s *Source) extras(ctx context.Context, want []string, items atlas, total *
 	return out
 }
 
-func (s *Source) list(ctx context.Context, total *budget) ([]string, error) {
-	address := strings.TrimRight(s.ListURL, "/") + "/" + entityDir + "?ref=" + url.QueryEscape(s.Ref)
+// listing is the files of the samples this reads whole directories of:
+// the name of each entity definition, and the path under resource_pack of
+// each model and render controller.
+type listing struct {
+	definitions, models, controllers []string
+	// tga is the textures, by path without an extension, kept as a TGA
+	// with no PNG beside it.
+	tga map[string]bool
+}
+
+// list asks, in the one request to the rationed host, for every file under
+// resource_pack. Three directories are wanted and the host lists one
+// directory to a request, or a whole tree; the tree is twenty times the
+// size and a third of the requests.
+func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
+	address := strings.TrimRight(s.ListURL, "/") + "/" + url.PathEscape(s.Ref) + "%3A" + packDir + "?recursive=1"
 	body, err := s.get(ctx, address, maxListBytes, total)
 	if err != nil {
-		return nil, err
+		return listing{}, err
 	}
-	var entries []struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+	var tree struct {
+		Entries []struct {
+			Path string `json:"path"`
+			Type string `json:"type"`
+		} `json:"tree"`
+		Truncated bool `json:"truncated"`
 	}
-	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return listing{}, err
 	}
-	var names []string
-	for _, e := range entries {
-		if e.Type == "file" && definitionName.MatchString(e.Name) {
-			names = append(names, e.Name)
+	// A listing cut short would leave mobs out without a word.
+	if tree.Truncated || len(tree.Entries) > maxListEntries {
+		return listing{}, errors.New("the listing is too long to have come whole")
+	}
+	out := listing{tga: map[string]bool{}}
+	png := map[string]bool{}
+	for _, e := range tree.Entries {
+		if e.Type != "blob" {
+			continue
+		}
+		if texture, ok := strings.CutSuffix(e.Path, ".png"); ok {
+			png[texture] = true
+		} else if texture, ok := strings.CutSuffix(e.Path, tgaSuffix); ok && strings.HasPrefix(texture, "textures/entity/") {
+			out.tga[texture] = true
+		}
+		dir, name := "", e.Path
+		if i := strings.LastIndexByte(e.Path, '/'); i >= 0 {
+			dir, name = e.Path[:i+1], e.Path[i+1:]
+		}
+		if !definitionName.MatchString(name) {
+			continue
+		}
+		switch {
+		case dir == "entity/":
+			out.definitions = append(out.definitions, name)
+		case dir == modelDir || e.Path == legacyModels:
+			out.models = append(out.models, e.Path)
+		case dir == controllerDir:
+			out.controllers = append(out.controllers, e.Path)
 		}
 	}
-	if len(names) == 0 {
-		return nil, errors.New("the listing holds no definitions")
+	if len(out.definitions) == 0 {
+		return listing{}, errors.New("the listing holds no definitions")
 	}
-	if len(names) > maxDefinitions {
-		return nil, fmt.Errorf("the listing holds %d definitions, over the limit of %d", len(names), maxDefinitions)
+	if len(out.definitions) > maxDefinitions {
+		return listing{}, fmt.Errorf("the listing holds %d definitions, over the limit of %d", len(out.definitions), maxDefinitions)
 	}
-	return names, nil
+	maps.DeleteFunc(out.tga, func(texture string, _ bool) bool { return png[texture] })
+	// Too many of either is a listing of something else; the faces go
+	// without and the icons are not held up for them.
+	if len(out.models) > maxModelFiles || len(out.controllers) > maxControllerFiles {
+		out.models, out.controllers = nil, nil
+	}
+	return out, nil
 }
 
 // each runs get for every key, a few at a time, and stops at the first

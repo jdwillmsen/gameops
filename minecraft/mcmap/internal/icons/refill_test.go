@@ -64,7 +64,7 @@ func TestWhatASetIsMissingIsAskedForAgainOnStartAndNothingElse(t *testing.T) {
 
 	var asked [][]string
 	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t),
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			asked = append(asked, slices.Clone(missing))
 			return Set{Pictures: map[string][]byte{"bed/blue": picture(t, 16, 16, blue)}, Lang: map[string]string{"entity.pig.name": "Pig From The File"}}, nil
 		}}
@@ -90,7 +90,7 @@ func TestWhatASetIsMissingIsAskedForAgainOnStartAndNothingElse(t *testing.T) {
 
 	// It was kept: the next start has nothing to ask for.
 	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t),
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			t.Errorf("asked again for %v after it was fetched and kept", missing)
 			return Set{}, nil
 		}}
@@ -111,7 +111,7 @@ func TestAGapThatStaysAGapIsAskedAgainSlowlyAndWithoutALogLineEachTime(t *testin
 	log := &heard{}
 	ctx, cancel := context.WithCancel(t.Context())
 	m := &Mobs{Dir: dir, Ref: testRef, Logger: slog.New(log), Fetch: neverFetch(t), RefillEvery: time.Millisecond, RetryMin: time.Hour,
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			calls.Add(1)
 			return Set{Missing: missing}, nil
 		}}
@@ -157,7 +157,7 @@ func TestWhatCouldNotBeAskedForIsTriedAgainSoonAndLoggedOnce(t *testing.T) {
 		// A day between askings of a settled gap: only the short retry
 		// can get this test to its end.
 		RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond,
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			switch n := calls.Add(1); {
 			case n <= 3:
 				return Set{Missing: missing, Unreached: missing}, nil
@@ -186,7 +186,7 @@ func TestASetFetchedWholeIsNotAskedForAnythingMore(t *testing.T) {
 		Fetch: func(context.Context) (Set, error) {
 			return Set{Mobs: map[string][]byte{"cow": picture(t, 16, 16, red)}}, nil
 		},
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			t.Errorf("asked for %v with nothing missing", missing)
 			return Set{}, nil
 		}}
@@ -209,7 +209,7 @@ func recorded(s *samples) *[]string {
 func TestFillAsksTheSourceOnlyForWhatIsMissing(t *testing.T) {
 	s := newSamples(t)
 	asked := recorded(s)
-	got, err := s.source().Fill(t.Context(), []string{"container/chest", "shulker/red", langPath})
+	got, err := s.source().Fill(t.Context(), []string{"container/chest", "shulker/red", langPath}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestFillAsksTheSourceOnlyForWhatIsMissing(t *testing.T) {
 
 	// A bed's path is in the atlas and nowhere else.
 	*asked = nil
-	got, err = s.source().Fill(t.Context(), []string{"bed/red"})
+	got, err = s.source().Fill(t.Context(), []string{"bed/red"}, nil)
 	if err != nil || len(*asked) != 2 || !strings.HasSuffix((*asked)[0], "/item_texture.json") || !strings.HasSuffix((*asked)[1], "/textures/items/bed_red.png") {
 		t.Errorf("for a bed, asked for %v (%v)", *asked, err)
 	}
@@ -245,7 +245,7 @@ func TestFillTellsWhatTheSourceDoesNotHoldFromWhatItCouldNotBeAskedFor(t *testin
 	s.files["resource_pack/textures/blocks/barrel_side.png"] = []byte("<html>not a picture</html>")
 	s.mu.Unlock()
 	asked := recorded(s)
-	got, err := s.source().Fill(t.Context(), []string{"container/chest", "container/barrel", "marker/waypoint", "no/such_picture", "../../etc/passwd"})
+	got, err := s.source().Fill(t.Context(), []string{"container/chest", "container/barrel", "marker/waypoint", "no/such_picture", "../../etc/passwd"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestFillTellsWhatTheSourceDoesNotHoldFromWhatItCouldNotBeAskedFor(t *testin
 	})
 	missing := append(pictureKeys(), langPath)
 	slices.Sort(missing)
-	got, err = down.source().Fill(t.Context(), missing)
+	got, err = down.source().Fill(t.Context(), missing, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,9 +336,9 @@ func TestAnEarlierVersionsMobIconsAreServedUntilTheRestCanBeFetched(t *testing.T
 	source := s.source()
 	var fills atomic.Int64
 	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: source.Fetch, RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond,
-		Fill: func(ctx context.Context, missing []string) (Set, error) {
+		Fill: func(ctx context.Context, missing []string, recipes map[string]Recipe) (Set, error) {
 			fills.Add(1)
-			return source.Fill(ctx, missing)
+			return source.Fill(ctx, missing, recipes)
 		}}
 	done := make(chan struct{})
 	go func() { m.Run(t.Context()); close(done) }()
@@ -377,14 +377,17 @@ func TestAnEarlierVersionsMobIconsAreServedUntilTheRestCanBeFetched(t *testing.T
 	if raw, ok := m.Icon("pig"); !ok || colourOf(t, raw) != blue {
 		t.Error("the pig icon the volume held was lost when the rest arrived")
 	}
-	// The icons were whole already: neither the rationed listing nor a
-	// single definition was asked for, down or up.
-	if listings.Load() != 0 || definitions.Load() != 0 {
-		t.Errorf("%d listing and %d definition requests to add pictures and names to icons already held", listings.Load(), definitions.Load())
+	// The icons were whole already and were not fetched again. The
+	// rationed listing was asked for once, when the source had come back,
+	// and the definitions read once with it: the pictures made from the
+	// models cannot be worked out without them. Neither was asked for
+	// while the source was out of reach, however many times it was tried.
+	if listings.Load() != 1 || definitions.Load() != 10 {
+		t.Errorf("%d listing and %d definition requests to add pictures and names to icons already held, want 1 and 10", listings.Load(), definitions.Load())
 	}
 
 	// And it is on the volume as this version writes it: nothing to ask.
-	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t), Fill: func(_ context.Context, missing []string) (Set, error) {
+	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t), Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 		t.Errorf("asked again for %v", missing)
 		return Set{}, nil
 	}}
@@ -417,9 +420,9 @@ func TestMobIconsJustFetchedAreServedThoughTheRestCouldNotBeAskedFor(t *testing.
 	dir := t.TempDir()
 	var fills atomic.Int64
 	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: source.Fetch, RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond,
-		Fill: func(ctx context.Context, missing []string) (Set, error) {
+		Fill: func(ctx context.Context, missing []string, recipes map[string]Recipe) (Set, error) {
 			fills.Add(1)
-			return source.Fill(ctx, missing)
+			return source.Fill(ctx, missing, recipes)
 		}}
 	done := make(chan struct{})
 	go func() { m.Run(t.Context()); close(done) }()
@@ -467,7 +470,7 @@ func TestAKindOfStructureAddedSinceTheSetWasKeptHasItsPictureAskedFor(t *testing
 
 	var asked [][]string
 	m := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t),
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			asked = append(asked, slices.Clone(missing))
 			return Set{Pictures: map[string][]byte{"structure/stronghold": picture(t, 16, 16, blue), "structure/trial_chamber": picture(t, 16, 16, blue)}}, nil
 		}}
@@ -483,7 +486,7 @@ func TestAKindOfStructureAddedSinceTheSetWasKeptHasItsPictureAskedFor(t *testing
 	}
 	// Kept as this version writes it: the next start has nothing to ask.
 	again := &Mobs{Dir: dir, Ref: testRef, Logger: quiet(), Fetch: neverFetch(t),
-		Fill: func(_ context.Context, missing []string) (Set, error) {
+		Fill: func(_ context.Context, missing []string, _ map[string]Recipe) (Set, error) {
 			t.Errorf("asked again for %v after it was fetched and kept", missing)
 			return Set{}, nil
 		}}

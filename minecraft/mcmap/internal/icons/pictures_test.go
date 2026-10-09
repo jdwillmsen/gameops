@@ -77,6 +77,26 @@ item.bed.red.name=Synthetic Red Bed	## a trailing comment
 menu.play=Play
 `
 
+// syntheticTerrain names a block's sides the way the terrain atlas does:
+// one path, or a list of them of which the first is the block at rest.
+const syntheticTerrain = `// header comment
+{"texture_data": {
+  "chest_inventory_top": {"textures": ["textures/blocks/chest_top"]},
+  "chest_inventory_side": {"textures": ["textures/blocks/chest_side"]},
+  "chest_inventory_front": {"textures": ["textures/blocks/chest_front"]},
+  "trapped_chest_inventory_front": {"textures": ["textures/blocks/trapped_chest_front"]},
+  "ender_chest_inventory_top": {"textures": ["textures/blocks/ender_chest_top"]},
+  "ender_chest_inventory_side": {"textures": ["textures/blocks/ender_chest_side"]},
+  "ender_chest_inventory_front": {"textures": ["textures/blocks/ender_chest_front"]},
+  "barrel_top": {"textures": ["textures/blocks/barrel_top", "textures/blocks/barrel_top_open"]},
+  "barrel_side": {"textures": ["textures/blocks/barrel_side", "textures/blocks/barrel_side"]},
+  "mob_spawner": {"textures": "textures/blocks/mob_spawner"},
+  "vault_top": {"textures": ["textures/blocks/vault_top"]},
+  "vault_front": {"textures": ["textures/blocks/vault_front_off", "textures/blocks/vault_front_on"]},
+  "vault_side": {"textures": ["textures/blocks/vault_side_off"]},
+  "bell_carried": {"textures": "textures/items/villagebell"}
+}}`
+
 // markerFiles is everything a fetch reads beyond the mob icons, all of it
 // synthetic.
 func markerFiles(t testing.TB) map[string][]byte {
@@ -95,6 +115,15 @@ func markerFiles(t testing.TB) map[string][]byte {
 	files["resource_pack/textures/entity/shulker/shulker_undyed.png"] = modelSheet(t, 1)
 	for _, path := range structureItems {
 		files["resource_pack/"+path+".png"] = picture(t, 16, 16, yellow)
+	}
+	// What the blocks are drawn from: the atlas that names each side's
+	// texture, those textures, and a bed's model texture in each colour.
+	files[terrainPath] = []byte(syntheticTerrain)
+	for _, name := range []string{"chest_top", "chest_side", "ender_chest_top", "ender_chest_side", "ender_chest_front", "barrel_top", "mob_spawner", "vault_top", "vault_front_off", "vault_side_off"} {
+		files["resource_pack/textures/blocks/"+name+".png"] = picture(t, 16, 16, green)
+	}
+	for _, colour := range markers.Colours {
+		files["resource_pack/textures/entity/bed/"+legacyColour(colour)+".png"] = picture(t, 64, 64, yellow)
 	}
 	return files
 }
@@ -117,6 +146,7 @@ func everyPicture() []string {
 	for _, kind := range StructureKinds {
 		keys = append(keys, "structure/"+kind)
 	}
+	keys = append(keys, blockKeys()...)
 	slices.Sort(keys)
 	return keys
 }
@@ -167,9 +197,13 @@ func TestFetchAsksForOneListingOnly(t *testing.T) {
 	if _, err := s.source().Fetch(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	// The atlas, ten definitions and the three textures they name, then
-	// the pictures and the language file: one request each.
-	if want := 1 + 10 + 3 + len(everyPicture()) + 1; listings != 1 || files != want {
+	// The atlas, ten definitions and the three textures they name, the
+	// pictures served as they come and the language file, then the
+	// terrain atlas and each texture a made picture is made from: one
+	// request each, and no model, since the listing names none.
+	plain := len(pictureKeys())
+	made := len(structureItems) + 13 + 17 + 16
+	if want := 1 + 10 + 3 + plain + 1 + 1 + made; listings != 1 || files != want {
 		t.Errorf("%d listing requests and %d file requests, want 1 and %d", listings, files, want)
 	}
 }
@@ -257,13 +291,13 @@ func TestMarkerPicturesAreReencodedToo(t *testing.T) {
 func TestAMarkerPictureThePinDoesNotHoldIsLeftOutAlone(t *testing.T) {
 	var jpgLike = []byte("\xff\xd8\xff\xe0 not a png")
 	for name, harm := range map[string]func(*samples){
-		"absent":    func(s *samples) { delete(s.files, "resource_pack/textures/blocks/chest_front.png") },
-		"not a PNG": func(s *samples) { s.files["resource_pack/textures/blocks/chest_front.png"] = jpgLike },
+		"absent":    func(s *samples) { delete(s.files, "resource_pack/textures/items/compass_item.png") },
+		"not a PNG": func(s *samples) { s.files["resource_pack/textures/items/compass_item.png"] = jpgLike },
 		"too large a side": func(s *samples) {
-			s.files["resource_pack/textures/blocks/chest_front.png"] = picture(t, maxIconSide+1, 16, red)
+			s.files["resource_pack/textures/items/compass_item.png"] = picture(t, maxIconSide+1, 16, red)
 		},
 		"over the byte limit": func(s *samples) {
-			s.files["resource_pack/textures/blocks/chest_front.png"] = append(picture(t, 16, 16, red), make([]byte, maxTextureBytes)...)
+			s.files["resource_pack/textures/items/compass_item.png"] = append(picture(t, 16, 16, red), make([]byte, maxTextureBytes)...)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -275,10 +309,10 @@ func TestAMarkerPictureThePinDoesNotHoldIsLeftOutAlone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the fetch failed for one picture: %v", err)
 			}
-			if _, held := set.Pictures["container/chest"]; held {
+			if _, held := set.Pictures["marker/waypoint"]; held {
 				t.Error("a picture was kept that the source did not give")
 			}
-			if !slices.Equal(set.Missing, []string{"container/chest"}) {
+			if !slices.Equal(set.Missing, []string{"marker/waypoint"}) {
 				t.Errorf("missing = %v, want the one picture", set.Missing)
 			}
 			if len(set.Pictures) != len(everyPicture())-1 || len(set.Mobs) != 3 || len(set.Lang) == 0 {
