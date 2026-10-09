@@ -581,7 +581,9 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 /* One line, used at every depth: what opens it, its checkbox, its picture
    or colour key, its name, its count, "Only", and the button for the rest.
    A section, a layer and an item differ only in how far in they stand, by
-   one indent each, and in the weight of the name. */
+   one indent each, and in the weight of the name. Every line has the room
+   of what opens it whether or not it has anything to open, so a line's
+   checkbox is always one indent to the right of the checkbox it is under. */
 .tree, .kids { list-style: none; margin: 0; padding: 0; }
 .tree { padding-bottom: var(--group-gap); }
 .d1 { --inset: var(--row-pad); }
@@ -613,6 +615,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .twist::before { content: ""; position: absolute; inset: calc((20px - var(--hit)) / 2) -4px; }
 .twist .glyph { width: 12px; height: 12px; stroke-width: 2; }
 .twist[aria-expanded="true"] .glyph { transform: rotate(90deg); }
+.leaf > .row > .twist { visibility: hidden; }
 /* A checkbox drawn by the page, so that it is the scale's size, takes the
    theme's colours, and can be half on. Its edge is the dim text's colour,
    which stands off a panel by more than three to one in every theme. */
@@ -674,12 +677,12 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   .row:hover > .only { visibility: visible; }
 }
 .row .more { color: var(--dim); }
-.node > .note { margin: 0; min-height: 0; padding: 0 var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + var(--check) + var(--row-gap)); font-size: var(--caption); line-height: var(--caption-lh); overflow-wrap: anywhere; }
-.node:not(.leaf) > .note { padding-left: calc(var(--inset) + 20px + var(--check) + var(--row-gap) * 2); }
+/* A line's note starts where its picture does, past its checkbox. */
+.node > .note { margin: 0; min-height: 0; padding: 0 var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + 20px + var(--check) + var(--row-gap) * 2); font-size: var(--caption); line-height: var(--caption-lh); overflow-wrap: anywhere; }
 .node > .note:empty { display: none; }
-.extra { padding: calc(var(--row-gap) / 2) var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + var(--indent)); }
+.extra { padding: calc(var(--row-gap) / 2) var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + var(--indent) + 20px + var(--row-gap)); }
 .extra:empty { display: none; }
-.rest { padding: 0 var(--row-pad) 0 var(--inset); }
+.rest { padding: 0 var(--row-pad) 0 calc(var(--inset) + 20px + var(--row-gap)); }
 button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none; border: 0; color: var(--accent); text-decoration: underline; font-size: var(--caption); line-height: var(--caption-lh); }
 /* The panel's own search, on a line of its own at the panel's full
    width, and under it how much of everything is showing. */
