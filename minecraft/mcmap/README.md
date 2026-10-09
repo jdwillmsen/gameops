@@ -931,8 +931,8 @@ to find for themselves; one in chunks somebody else generated is found
 here without anybody having walked into it. So it is held back further
 than any other kind:
 
-- its item under each of the Structures layers is off until the viewer
-  turns it on, and the one under Known says so;
+- its item among the kinds of structure is off until the viewer turns it
+  on, and says so;
 - a search does not list one unless the page says the viewer has that row
   on (`strongholds=1`), whatever is typed;
 - its details say whether the portal is lit and whether the silverfish
@@ -1290,8 +1290,9 @@ grey, which is how one biome is picked out. `biomes=<name>,<name>` draws
 the biomes named and nothing else, and `except=<name>,<name>` everything
 but them; what is left out is left clear, as ungenerated ground is. A
 tile is asked for in one of the three ways at a time, every name must be
-a biome the game has, and a list holds at most 128: anything else is a
-400. The tile's `ETag` names the set in one order, so the same biomes are
+a biome the game has or one this dimension holds, and a list holds at
+most 128 biomes, each counted once, in at most 8,320 characters:
+anything else is a 400. The tile's `ETag` names the set in one order, so the same biomes are
 the same tile however they were written. `GET /api/biomes` gives the
 colours for the panel and a `version`; a tile asked for with `v=<version>`
 is kept by the browser for good.
@@ -1567,7 +1568,7 @@ and what each layer is made of.
 | Players | (the section is the layer) | Each player, with their head; Go to opens their card |
 | Mobs | Hostile, Passive, Villagers, Other | Each type of mob there now, with its icon and count |
 | Markers | Beds, Containers, Named mobs, Waypoints | Beds by colour; containers by what they are, shulker boxes by colour; each named mob, with its type, whether a baby, and whether it is loaded or only saved; each waypoint |
-| Structures | Known, Predicted, Possible | Each kind the layer holds, with its picture and count; Known says which were found by their blocks. Strongholds are off until asked for |
+| Structures | Known, Predicted, Possible, under the heading How sure | Every kind once, as a list over those three switches, each with its picture, how many are known, and under it how many more are predicted or possible. A mark is on the map when its kind and its certainty are both on. Strongholds are off until asked for |
 | Biomes | (the section is the overlay) | Each biome of the dimension, with its colour and share |
 | Trails | (the section is the layer) | Each player's trail, in its colour, under the choice of how far back |
 | Overlays | Slime chunks, Grid, Chunk focus, World spawn | none |
@@ -1577,15 +1578,26 @@ opens it, a checkbox, a picture or a colour key, a name, a count, and a
 button for the rest of what can be done with it. A checkbox is half on
 when some of what is under it is hidden, and a count is then
 `shown / all`. Switching a layer off leaves its items' own choices as
-they were, so switching it on again brings the same selection back. The
-button at the end of a line opens a menu: Only this (and, once it is the
-one alone, Show all again, which puts back what was on), Show all in
-group, Hide all in group, Zoom to where the line has an extent, and Go to
-for a player, a named mob or a waypoint. Under a mouse, Only also appears
-on the line itself. Only on an item shows that one and nothing else its
-choice covers, so Only on a type of mob hides every other type in all
-four rows; on a layer it hides the section's other layers; on a section,
-every other section.
+they were, so switching it on again brings the same selection back, and
+so does ticking one of its items while it is off, with that item shown
+as well. A section's own checkbox does the same over its layers: with
+any of them on it switches the section off and remembers which were on,
+and the next press puts those back. An item or a row that is off as the
+page first has it, as strongholds are, is the baseline: it makes nothing
+read as half on or as hidden until the viewer has changed something, and
+Reset returns to it. The button at the end of a line opens a menu: Only
+this (and, once it is the one alone, Back to before, which puts every
+row or item exactly as it was, on or off), Show all in group, Hide all
+in group, Zoom to where the line has an extent, and Go to for a player,
+a named mob or a waypoint. Under a mouse, Only also appears on the line
+itself. Only on an item shows that one and nothing else its choice
+covers, so Only on a type of mob hides every other type in all four
+rows and Only on a kind of structure is that kind however sure the map
+is of it; on a layer it hides the section's other layers; on a section,
+every other section. What was shown alone is still alone, with its way
+back, after a reload, and the way back is let go of only when the viewer
+switches one of those rows themselves or a saved view puts them another
+way.
 
 Above the list is a box that narrows the panel to the lines whose names
 hold what is typed, opens whatever a match is under and marks the match.
@@ -1624,8 +1636,14 @@ with a handle: pressing the handle goes to the next of three heights
 (the title alone, half, all of the map), the arrow keys on it do the
 same, and dragging it follows the finger and settles at the nearest, or
 shuts the sheet if let go below the shortest. Below its full height the
-map above the sheet is still the map. In a wide short window the sheet
-is a drawer down the right instead.
+map above the sheet is still the map; at its full height what it covers
+is inert until it is lower. In a wide short window the sheet is a drawer
+down the right instead. A drag of the edge or of the handle is drawn
+once a frame however fast the pointer moves, and ends when the pointer
+is let go, cancelled or taken, or the window is no longer in front: with
+900 mobs and 2,100 markers on the map and five moves to a frame, a frame
+of a drag of the edge took 28 ms at the median and the page was laid out
+117 times in 60 frames.
 
 **Density.** The page is sized by one scale of named lengths in the
 stylesheet, which the panel, the bar, the cards and the sheets all use.
@@ -1650,12 +1668,22 @@ art is not enlarged by a fraction.
 
 **Which items are shown, and how that is kept.** A layer's items are
 shown by a choice the panel keeps beside the switches, as what differs
-from everything showing: `{ only, hidden, shown }` under
-`<group>#<name>`, where `only` is the one shown alone, `hidden` those
-switched off (at most 200) and `shown` the few that are off until asked
-for and have been. `hidden` is left as it was under an `only`, which is
-what Show all again goes back to. One choice may cover several layers,
-as `live#mobs` covers the four rows of mobs. A frame of the live layer
+from everything showing, under `<group>#<name>`. It has two forms. As
+`{ only, hidden, shown }` everything is drawn but what is in `hidden`,
+and `shown` is the few that are off until asked for and have been; an
+item that turns up later is drawn. As `{ mode: "just", just }` nothing
+is drawn but what is in `just`, and an item that turns up later is not:
+this is what leaving Only by ticking a second item comes to, and what a
+list of hides is turned into once it passes 200 and the list of what is
+shown is the shorter. Which form it is changes only when the viewer
+changes the choice, never because a list grew. `only` is the one shown
+alone, with the rest of the choice left as it was underneath, which is
+what Back to before returns to. A list holds at most 200 ids; where
+neither form fits in that, the row says that only the first 200 will be
+as they are next time. An id that has been in none of its lists for
+thirty days is dropped, and one that comes back before then is not. One
+choice may cover several layers, as `live#mobs` covers the four rows of
+mobs. A frame of the live layer
 pays two set lookups an entity for it: a marker is put on the canvas or
 left off when its entity first appears, and again only when a row or a
 choice changes. The panel is drawn at most once for everything that
@@ -1689,6 +1717,8 @@ const row = window.mcmap.layers.register({
   swatch: 'ring beds',  // class of a colour key beside the label, styled in style.css
   picture: 'bed/red',   // the game's picture, by its key or as an element
   facet: 'beds',        // names the choice its items are shown by; rows may share one
+  bare: false,          // true for a list with no switch: its items stand under the section
+  heading: '',          // a word or two written over this row and those after it
   actions: { zoom: (item) => {}, go: (item) => {} }, // item is left out for the row itself
 });
 row.enabled;            // the saved choice, kept current
@@ -1696,7 +1726,7 @@ row.setCount(1234);     // or null for none
 row.setNote('Not surveyed yet'); // or '' for none
 row.setLabel('Ocean Monuments'); // for a name that arrives late
 row.onToggle((on) => { /* draw or clear */ });
-row.setAvailable(false);         // greyed out, and skipped by a section's checkbox
+row.setAvailable(false);         // greyed out, and not switched by its own checkbox
 row.setEnabled(true);            // switch it as the viewer would; kept, and onToggle is told
 row.setItems([                   // what the layer is made of, in the order to show it
   { id: 'red', label: 'Red Bed', colour: '#b02e26', count: 93 },
@@ -1945,7 +1975,11 @@ and outlined while it has the focus.
 **What the page keeps.** Everything the viewer chooses is kept in the
 browser and nowhere else, as one record under `mcmap.settings`, written and
 read by `settings.js` alone, which the other scripts reach as
-`window.mcmapSettings`. The record has a version (`v: 1`) and these parts:
+`window.mcmapSettings`. The record has a version (`v: 2`; it went from 1
+when a saved view began to keep which of a layer's items are shown, so
+that a tab of the page from before, which reads a later record and
+writes nothing over it, cannot take them out again; a record or an
+exported file of version 1 is read and brought up) and these parts:
 
 | Part | Holds |
 |---|---|
@@ -2399,9 +2433,15 @@ go test -race ./minecraft/mcmap/...
 docker build -f minecraft/mcmap/Dockerfile -t minecraft-map:dev .
 ```
 
-The page under `web/` is plain files with no build step, and CI has no
-JavaScript runner: `web/*_test.go` holds what can be checked of the scripts
-as text, and the rest is checked in a browser. Leaflet is vendored
+The page under `web/` is plain files with no build step and no packages.
+`web/*_test.go` holds what can be checked of the scripts as text. What
+the layer panel does is also checked by doing it:
+`web/testdata/panel.test.cjs` loads `settings.js` and `layers.js` into a
+page made of plain objects (`web/testdata/dom.cjs`), registers rows as
+the layers do, presses lines and reloads, with nothing but node's own
+modules. `go test ./web/` runs it where there is a `node` and skips it
+where there is none; by hand it is `node web/testdata/panel.test.cjs`.
+The rest is checked in a browser. Leaflet is vendored
 in `web/lib/leaflet` with its licence.
 
 ## Releases
