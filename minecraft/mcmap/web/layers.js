@@ -286,13 +286,27 @@
     return true;
   }
 
-  const switchRow = (row, on) => {
-    if (row.available && set(row, on)) remember({ [row.key]: row.on });
-  };
-
+  // Switches rows as the viewer does, by a checkbox or a menu, or as a
+  // layer's script does on their behalf. A row that is greyed out is left
+  // as it is. Whatever was shown alone no longer is once one of its rows
+  // has been switched this way, so the way back from it is let go of.
   function switchRows(rows, on) {
     const changes = {};
-    for (const row of [...rows]) if (row.available && set(row, on)) changes[row.key] = on;
+    for (const row of [...rows]) {
+      if (!row.available || !set(row, on)) continue;
+      changes[row.key] = on;
+      forget(row.section.id, 'all');
+    }
+    if (Object.keys(changes).length > 0) remember(changes);
+  }
+  const switchRow = (row, on) => switchRows([row], on);
+
+  // Puts each row where it is wanted whether or not it is greyed out just
+  // now, as a saved view does: for showing one thing alone and for going
+  // back from that, neither of which a greyed row may be left out of.
+  function place(rows, wanted) {
+    const changes = {};
+    for (const row of [...rows]) if (set(row, wanted(row))) changes[row.key] = row.on;
     if (Object.keys(changes).length > 0) remember(changes);
   }
 
@@ -334,12 +348,15 @@
         for (const fn of row.listeners) told.set(fn, on);
       }
     }
+    // What was shown alone is as the record now has it, unless the rows
+    // have just been put some other way: then there is no going back.
+    readSolo();
+    if (told.size > 0) forget(...Object.keys(solo));
     for (const f of facets.values()) {
       if (!readFacet(f)) continue;
       // A function that also listens to a row is told what the row said.
       for (const fn of f.listeners) if (!told.has(fn)) told.set(fn, undefined);
     }
-    readSolo();
     for (const [fn, on] of told) call(fn, on);
     schedule();
     return wanted.filter((key) => !found.has(key));
@@ -515,10 +532,12 @@
   // --- "only", and the way back ---------------------------------------------------
   //
   // Showing one row alone switches the others in its section off and
-  // remembers which of them were on; showing one section alone does the
-  // same over the whole panel. "Show all again" puts those back. It is
-  // offered for as long as the one is still alone: once the viewer has
-  // switched something else themselves there is nothing to go back to.
+  // remembers exactly which of them were on; showing one section alone
+  // does the same over the whole panel. "Back to before" puts every row
+  // of them as it was, on or off. What is remembered is kept, so the way
+  // back is still there after a reload, and it is let go of only when the
+  // viewer switches one of those rows themselves, never by looking at
+  // which rows there are: they arrive one script at a time.
   let solo = {};
   function readSolo() {
     const kept = recall('panel', 'only');
@@ -530,36 +549,36 @@
   }
   readSolo();
   const keepSolo = () => retain('panel', 'only', Object.keys(solo).length > 0 ? solo : null);
+  function forget(...scopes) {
+    const had = scopes.filter((scope) => Object.hasOwn(solo, scope));
+    if (had.length === 0) return;
+    for (const scope of had) delete solo[scope];
+    keepSolo();
+  }
 
   const rowsIn = (scope) => (scope === 'all' ? [...sections.values()].flatMap((section) => section.rows) : sections.get(scope) ? sections.get(scope).rows : []);
-  // Whether what was shown alone still is.
-  function alone(scope) {
-    const kept = solo[scope];
-    if (!kept) return false;
-    const mine = (row) => (scope === 'all' ? row.section.id === kept.key : row.key === kept.key);
-    const rows = rowsIn(scope);
-    return rows.some((row) => mine(row) && row.on) && rows.every((row) => mine(row) || !row.on);
-  }
+  // Whether this is what is shown alone in its scope.
+  const alone = (scope, key) => Object.hasOwn(solo, scope) && solo[scope].key === key;
 
   function only(scope, key) {
     const rows = rowsIn(scope);
     const mine = (row) => (scope === 'all' ? row.section.id === key : row.key === key);
-    const was = alone(scope) ? solo[scope].was : rows.filter((row) => row.on).map((row) => row.key);
+    // From one alone to another, what is gone back to is still what was
+    // there before the first.
+    const was = Object.hasOwn(solo, scope) ? solo[scope].was : rows.filter((row) => row.on).map((row) => row.key);
+    // A section none of which was on is shown whole.
+    const whole = !rows.some((row) => mine(row) && row.on);
+    place(rows, (row) => (mine(row) ? whole || row.on : false));
     solo[scope] = { key, was: was.slice(0, MAX_HIDDEN) };
     keepSolo();
-    switchRows(rows.filter((row) => !mine(row)), false);
-    // A section none of which was on is shown whole.
-    const own = rows.filter(mine);
-    if (!own.some((row) => row.on)) switchRows(own, true);
     schedule();
   }
 
   function restore(scope) {
-    const kept = solo[scope];
-    if (!kept) return;
-    delete solo[scope];
-    keepSolo();
-    switchRows(rowsIn(scope).filter((row) => kept.was.includes(row.key)), true);
+    if (!Object.hasOwn(solo, scope)) return;
+    const { was } = solo[scope];
+    place(rowsIn(scope), (row) => was.includes(row.key));
+    forget(scope);
     schedule();
   }
 
@@ -859,7 +878,7 @@
       open,
       count: countOf(row),
       note: row.note,
-      soloed: whole ? alone('all') && solo.all.key === row.section.id : alone(row.section.id) && solo[row.section.id].key === row.key,
+      soloed: whole ? alone('all', row.section.id) : alone(row.section.id, row.key),
     });
     put(dom, 'body', row.body, (node) => {
       if (dom.legacy) dom.legacy.remove();
@@ -906,7 +925,7 @@
         open,
         count: `${mine.rowsOn}/${mine.rows}`,
         note: '',
-        soloed: alone('all') && solo.all.key === section.id,
+        soloed: alone('all', section.id),
       });
     }
     arrange(dom.kids, dom.was.open ? lines : []);
@@ -929,14 +948,6 @@
 
   function render() {
     queued = false;
-    // An "only" the viewer has since switched their way out of is let go.
-    let let_go = false;
-    for (const scope of Object.keys(solo)) {
-      if (alone(scope)) continue;
-      delete solo[scope];
-      let_go = true;
-    }
-    if (let_go) keepSolo();
     const shown = [...sections.values()].filter((section) => section.rows.length > 0).sort((a, b) => a.rank - b.rank);
     // The line the keys are on has gone, or none has been yet.
     if (!currentNode || !currentNode.dom || !currentNode.dom.li.isConnected) currentNode = shown[0] || null;
@@ -1064,7 +1075,7 @@
     }
     const scope = node.kind === 'section' || node.whole ? 'all' : node.section.id;
     const key = scope === 'all' ? (node.kind === 'section' ? node.id : node.section.id) : node.key;
-    if (alone(scope) && solo[scope].key === key) restore(scope);
+    if (alone(scope, key)) restore(scope);
     else only(scope, key);
   }
 
@@ -1093,7 +1104,7 @@
     if (node.kind === 'item') {
       const { row } = node;
       const f = row.facet;
-      entries.push({ label: f.only === node.id && row.on ? 'Show all again' : 'Only this', act: () => onlyThis(node) });
+      entries.push({ label: f.only === node.id && row.on ? 'Back to before' : 'Only this', act: () => onlyThis(node) });
       entries.push({ label: 'Show all in group', act: () => showAll(row, true) }, { label: 'Hide all in group', act: () => showAll(row, false) });
       if (typeof row.actions.zoom === 'function' && node.zoom) entries.push(null, { label: 'Zoom to', act: () => act(row, 'zoom', node.id) });
       if (typeof row.actions.go === 'function' && node.go) entries.push(null, { label: 'Go to', act: () => act(row, 'go', node.id) });
@@ -1104,8 +1115,7 @@
     const row = node.kind === 'row' ? node : whole;
     const scope = node.kind === 'section' || whole ? 'all' : section.id;
     const key = scope === 'all' ? section.id : node.key;
-    const is = alone(scope) && solo[scope].key === key;
-    entries.push({ label: is ? 'Show all again' : scope === 'all' ? 'Only this section' : 'Only this', act: () => onlyThis(node) });
+    entries.push({ label: alone(scope, key) ? 'Back to before' : scope === 'all' ? 'Only this section' : 'Only this', act: () => onlyThis(node) });
     if (row && (whole || row.list.length > 0)) {
       entries.push({ label: 'Show all in group', act: () => showAll(row, true) }, { label: 'Hide all in group', act: () => showAll(row, false) });
     } else {
