@@ -13,7 +13,12 @@
 // the page from its first frame.
 (() => {
   const KEY = 'mcmap.settings';
-  const VERSION = 1;
+  // The record's version. It went to 2 when a saved view began to keep
+  // which of a layer's items are shown: the script from before reads a
+  // record of a later version and writes nothing over it, so a tab left
+  // open across that release cannot take those choices back out. A record
+  // of version 1, kept or in a file, is read and brought up to this one.
+  const VERSION = 2;
   // The most the record may come to, in characters. Fifty views with every
   // layer named and long filters come to a fraction of this; anything
   // near it is not the page's own doing.
@@ -457,7 +462,7 @@
       kept = 'newer';
     }
     const fresh = !raw;
-    const unbrought = !fresh && !(plain(raw.layers) && raw.layers[BROUGHT] === 1);
+    const unbrought = !fresh && (raw.v !== VERSION || !(plain(raw.layers) && raw.layers[BROUGHT] === 1));
     state = wholeRecord(raw || carriedOver());
     let changed = fresh || unbrought;
     if (kept === 'yes') {
@@ -748,8 +753,10 @@
         return read === BAD ? null : read;
       },
       record: (v) => {
-        if (!plain(v) || v.v !== VERSION) return null;
-        const read = shape({ v: int(VERSION, VERSION), ...PORTABLE })(v, true);
+        if (!plain(v)) return null;
+        // A file from this version or the one before, which is brought
+        // up to this one as a kept record of it is.
+        const read = shape({ v: int(1, VERSION), ...PORTABLE })(v, true);
         return read === BAD ? null : wholeRecord(read);
       },
     },
