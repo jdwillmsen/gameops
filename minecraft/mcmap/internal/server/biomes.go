@@ -4,6 +4,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,10 @@ const (
 	// whole ocean is a few thousand; past this the page has the region's
 	// box and the tiles to go by.
 	maxRegionRects = 4096
+	// maxTileBiomes is the most biomes one tile may be asked for by name,
+	// to draw or to leave out. The game has under a hundred, and the page
+	// names whichever of the two lists is the shorter.
+	maxTileBiomes = 128
 )
 
 func dimensionNamed(name string) (chunks.Dimension, bool) {
@@ -121,15 +126,10 @@ func (s *Server) handleBiomeTile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	var only *uint32
-	picked := "all"
-	if name := q.Get("biome"); name != "" {
-		id, ok := biomes.Resolve(name)
-		if !ok {
-			http.Error(w, "unknown biome", http.StatusBadRequest)
-			return
-		}
-		only, picked = &id, strconv.FormatUint(uint64(id), 10)
+	pick, picked, ok := tilePick(q)
+	if !ok {
+		http.Error(w, "a tile's biomes are asked for by biome, biomes or except: one of them, each name a biome, and no more than "+strconv.Itoa(maxTileBiomes), http.StatusBadRequest)
+		return
 	}
 
 	h := w.Header()
@@ -154,7 +154,7 @@ func (s *Server) handleBiomeTile(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	data, ok := world.Tile(d, zoom, x, y, only)
+	data, ok := world.TilePicked(d, zoom, x, y, pick)
 	if !ok {
 		// Most of a sparse world's grid has no tile; that is not an error.
 		// It may have one after the next reading, so this is not kept long.
@@ -165,6 +165,56 @@ func (s *Server) handleBiomeTile(w http.ResponseWriter, r *http.Request) {
 	}
 	h.Set("Content-Type", "image/png")
 	_, _ = w.Write(data)
+}
+
+// tilePick reads which biomes a tile is to be drawn with: biome for one
+// picked out against the rest, biomes for a list drawn and nothing else,
+// except for a list left out. picked names the pick in the tile's tag,
+// the same for the same biomes in whatever order and spelling they came.
+func tilePick(q url.Values) (pick biomes.Pick, picked string, ok bool) {
+	given := 0
+	for _, name := range []string{"biome", "biomes", "except"} {
+		if q.Has(name) {
+			given++
+		}
+	}
+	switch {
+	case given == 0:
+		return biomes.Pick{}, "all", true
+	case given > 1:
+		return biomes.Pick{}, "", false
+	case q.Has("biome"):
+		id, found := biomes.Resolve(q.Get("biome"))
+		if !found {
+			// An empty name is how the page has always asked for all.
+			return biomes.Pick{}, "all", q.Get("biome") == ""
+		}
+		return biomes.Pick{Only: &id}, strconv.FormatUint(uint64(id), 10), true
+	}
+	mode, raw := "of", q.Get("biomes")
+	if q.Has("except") {
+		mode, raw = "but", q.Get("except")
+	}
+	names := strings.Split(raw, ",")
+	if raw == "" || len(names) > maxTileBiomes {
+		return biomes.Pick{}, "", false
+	}
+	ids := make([]uint32, 0, len(names))
+	for _, name := range names {
+		id, found := biomes.Resolve(name)
+		if !found {
+			return biomes.Pick{}, "", false
+		}
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	tag := make([]string, len(ids))
+	for i, id := range ids {
+		tag[i] = strconv.FormatUint(uint64(id), 36)
+	}
+	return biomes.Pick{IDs: ids, Except: mode == "but"}, mode + "." + strings.Join(tag, "."), true
 }
 
 type biomeAtJSON struct {
