@@ -141,7 +141,7 @@ func TestNamedMobMarkIsDrawnAndSaidAsASavedPosition(t *testing.T) {
 // since the snapshot is listed under the name it has now.
 func TestNamedMobIsPairedByIdAndByNameOnlyWithoutOne(t *testing.T) {
 	markers, live := read(t, "markers.js"), read(t, "live.js")
-	if !regexp.MustCompile(`if \(id\) \{\s*entry\.live = byId\.get\(id\) \|\| null;\s*continue;\s*\}`).Match(markers) {
+	if !regexp.MustCompile(`if \(id\) \{\s*(//.*\s*)*entry\.live = byId\.get\(id\) \|\| \(card && card\.where\(id\) \? \{ id, name: '', type: str\(entry\.data\.k\) \} : null\);\s*continue;\s*\}`).Match(markers) {
 		t.Error("markers.js no longer goes by the id alone where the snapshot has one")
 	}
 	for _, need := range []string{
