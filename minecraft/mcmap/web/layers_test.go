@@ -282,7 +282,7 @@ func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
 		}
 	}
 	for script, facet := range map[string]string{
-		"live.js": "app.layers.facet('live', name)", "markers.js": "app.layers.facet('markers', kind)", "structures.js": "app.layers.facet('structures', sort,",
+		"live.js": "app.layers.facet('live', name)", "markers.js": "app.layers.facet('markers', kind)", "structures.js": "app.layers.facet('structures', 'kinds',",
 		"biomes.js": "app.layers.facet('biomes', 'items')", "trails.js": "app.layers.facet('overlays', 'trails')",
 	} {
 		body := read(t, script)
@@ -290,7 +290,7 @@ func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
 		if !bytes.Contains(body, []byte("app.layers.facet ? "+facet)) && !bytes.Contains(body, []byte("if (app.layers.facet) return "+facet)) {
 			t.Errorf("%s no longer asks the panel which of its items are shown, or no longer allows for a panel that cannot say", script)
 		}
-		if !bytes.Contains(body, []byte(".setItems)")) {
+		if !bytes.Contains(body, []byte(".setItems)")) && !bytes.Contains(body, []byte("if (app.layers.facet) kindList = app.layers.register(")) {
 			t.Errorf("%s gives its items to a panel without asking whether it takes them", script)
 		}
 	}
@@ -364,7 +364,7 @@ func TestLayerPanelKeepsOnlyWhatDiffersAndDrawsOnlyWhatChanged(t *testing.T) {
 	settings := read(t, "settings.js")
 	for _, need := range []string{
 		"items: record(CHOICE, chosen, 32),",
-		"const CHOICES = [...STRUCTURE_SORTS.map((sort) => `structures#${sort}`), 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];",
+		"const CHOICES = ['structures#kinds', 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];",
 		// A record and a view from before the lists are brought to them.
 		"if (layers[BROUGHT] === 1) return record;",
 		"const kinds = fromKindSwitches(view.layers);",
@@ -379,7 +379,7 @@ func TestLayerPanelKeepsOnlyWhatDiffersAndDrawsOnlyWhatChanged(t *testing.T) {
 	for _, need := range []string{
 		"if (app.layers.items) view.items = app.layers.items();",
 		// Game-named choices only: no gamertag, name tag or waypoint.
-		"const SHARED = ['structures#recorded', 'structures#predicted', 'structures#candidate', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs'];",
+		"const SHARED = ['structures#kinds', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs'];",
 		"redraw(Object.keys(next.layers).filter((key) => !RETIRED.has(key)));",
 	} {
 		if !bytes.Contains(views, []byte(need)) {

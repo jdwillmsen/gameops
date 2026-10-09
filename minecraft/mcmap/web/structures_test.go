@@ -38,21 +38,26 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		// Struck through only where the world would have recorded one.
 		"const doubted = p.generated && !RECORDED_LATE.has(p.kind);",
 		".addTo(groupOf(sort, p.kind));",
-		// Each layer lists its own kinds with how many it holds, and the
-		// predicted one says why a kind has none.
-		"const n = (kinds[kind] || none())[sort];",
-		"const why = sort === 'predicted' && surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';",
-		"detail: sort === 'recorded' && foundKinds.has(kind) ? 'found by blocks' : '',",
-		"if (row.setItems) row.setItems(kindsOf(sort));",
+		// Each kind is listed once, with how many are known and under it
+		// how many more are predicted or possible, and why none is.
+		"count: surveyed ? n.recorded : null,",
+		"const more = [...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ');",
+		"const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';",
+		"if (kindList) kindList.setItems(kindsNow());",
+		// A mark is on the map when its kind and its certainty both are,
+		// so one kind alone is that kind however sure the map is of it.
+		"const want = on(sort) && kindOn(kind);",
+		"bare: true, facet: 'kinds',",
+		"heading: 'How sure',",
 		// Off for a viewer who turned the predicted ones off.
 		"const enabled = id !== 'candidate' || rows.get('predicted').enabled;",
 		// Off for everybody until they ask: a stronghold is for finding.
 		"const OPT_IN = new Set(['stronghold']);",
-		"app.layers.facet('structures', sort, { off: [...OPT_IN] })",
+		"app.layers.facet('structures', 'kinds', { off: [...OPT_IN] })",
 		"off: asked,",
 		// And for a panel from before it listed kinds.
 		"{ shows: (kind) => !OPT_IN.has(kind), onChange() {} };",
-		"shows: (kind) => on('recorded') && kindOn('recorded', kind),",
+		"shows: (kind) => on('recorded') && kindOn(kind),",
 		// One player's answer is not kept for the next to log in.
 		"forgetDetail();\n      if (sheet && view.dialog.open) view.dialog.close();",
 	} {

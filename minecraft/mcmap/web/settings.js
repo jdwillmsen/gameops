@@ -188,11 +188,9 @@
   // The choices there are, by the key each is kept under beside the
   // switches. The two of the live layer are older than the rest and have
   // a place of their own in a view.
-  const STRUCTURE_SORTS = ['recorded', 'predicted', 'candidate'];
-  const CHOICES = [...STRUCTURE_SORTS.map((sort) => `structures#${sort}`), 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];
-  // The kinds of structure that each had a switch over all three layers
-  // before each layer listed its own, and the ones among them that are
-  // off until asked for.
+  const CHOICES = ['structures#kinds', 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];
+  // The kinds of structure that each had a switch before the kinds were
+  // a list, and the ones among them that are off until asked for.
   const KIND_SWITCHES = ['fortress', 'monument', 'outpost', 'witch_hut', 'village', 'stronghold', 'trial_chamber'];
   const ASKED_FOR = ['stronghold'];
 
@@ -337,10 +335,10 @@
     return section === 'views' ? tidy(out) : out;
   }
 
-  // What the switches over a kind of structure come to now that each of
-  // the three layers lists its kinds: a kind that was off is hidden in all
-  // three, and one that is off until asked for and was on is shown in all
-  // three. Null where they say nothing but the defaults.
+  // What the switches over a kind of structure come to now that the kinds
+  // are a list: a kind that was off is hidden, and one that is off until
+  // asked for and was on is shown. Null where they say nothing but the
+  // defaults.
   function fromKindSwitches(layers) {
     const hidden = KIND_SWITCHES.filter((kind) => !ASKED_FOR.includes(kind) && layers[`structures/${kind}`] === false);
     const shown = ASKED_FOR.filter((kind) => layers[`structures/${kind}`] === true);
@@ -348,8 +346,8 @@
   }
 
   // A record from before the panel listed what each layer is made of is
-  // brought to how that is kept now, once, and marked as brought: the one
-  // switch per kind of structure becomes each layer's own list, and the
+  // brought to how that is kept now, once, and marked as brought: the
+  // switch each kind of structure had becomes the list of kinds, and the
   // one biome picked out becomes the biomes'. The old switches are left
   // where they are, for a script from before to go on reading.
   const BROUGHT = 'panel#items';
@@ -357,9 +355,7 @@
     const { layers } = record;
     if (layers[BROUGHT] === 1) return record;
     const kinds = fromKindSwitches(layers);
-    for (const sort of STRUCTURE_SORTS) {
-      if (kinds && !Object.hasOwn(layers, `structures#${sort}`)) layers[`structures#${sort}`] = { ...kinds };
-    }
+    if (kinds && !Object.hasOwn(layers, 'structures#kinds')) layers['structures#kinds'] = kinds;
     if (record.biome.only !== null && !Object.hasOwn(layers, 'biomes#items')) layers['biomes#items'] = { only: record.biome.only, hidden: [] };
     layers[BROUGHT] = 1;
     return record;
@@ -620,7 +616,7 @@
       // said, and that is what it puts back.
       for (const key of CHOICES) delete next.layers[key];
       const kinds = fromKindSwitches(view.layers);
-      for (const sort of STRUCTURE_SORTS) choose(`structures#${sort}`, kinds);
+      choose('structures#kinds', kinds);
       if (view.biome !== undefined) choose('biomes#items', view.biome === null ? null : { only: view.biome, hidden: [] });
     }
     if (view.trails !== undefined) next.trails.seconds = view.trails;
