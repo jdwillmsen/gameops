@@ -68,6 +68,31 @@
   --chunk-hover: #ffffff;
   --chunk-pin: #6ecf7a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* One scale for everything the page puts a control on: how tall a row is,
+     how much air is round it, and how large its text, its checkbox and its
+     picture are. The stylesheet below uses these by name and never a size
+     of its own, so the panel, the sheets and the cards change together.
+     The first set is "comfortable", which is what a page with no density
+     chosen gets. --hit is the least any one control is across and down. */
+  --row-h: 32px;
+  --row-pad: 12px;
+  --row-gap: 8px;
+  --group-gap: 8px;
+  --indent: 20px;
+  --body: 14px;
+  --body-lh: 20px;
+  --caption: 12px;
+  --caption-lh: 16px;
+  --check: 18px;
+  --icon: 20px;
+  --hit: 28px;
+  --head-h: 36px;
+  --field-h: 36px;
+  --control-h: 32px;
+  --card-pad: 12px;
+  --sheet-pad: 16px;
+  --panel-default: 340px;
 }
 
 /* Light. Text and the edges of controls are dark enough on its panels to
@@ -144,6 +169,66 @@
 :root[data-text="small"] { --label-size: 0.85em; }
 :root[data-text="large"] { --label-size: 1.25em; }
 
+/* The same scale with less air, and with more. */
+:root[data-density="compact"] {
+  --row-h: 24px;
+  --row-pad: 8px;
+  --row-gap: 4px;
+  --group-gap: 4px;
+  --indent: 16px;
+  --check: 16px;
+  --icon: 16px;
+  --hit: 24px;
+  --head-h: 28px;
+  --field-h: 28px;
+  --control-h: 24px;
+  --card-pad: 8px;
+  --sheet-pad: 12px;
+  --panel-default: 280px;
+}
+:root[data-density="spacious"] {
+  --row-h: 40px;
+  --group-gap: 12px;
+  --indent: 24px;
+  --body: 16px;
+  --body-lh: 24px;
+  --caption: 14px;
+  --caption-lh: 20px;
+  --check: 20px;
+  --icon: 24px;
+  --hit: 32px;
+  --head-h: 44px;
+  --field-h: 44px;
+  --control-h: 40px;
+  --card-pad: 16px;
+  --sheet-pad: 20px;
+  --panel-default: 400px;
+}
+/* Under a finger, or on a screen the size of a phone's, the scale is its
+   own and not one of the three shrunk: larger text, and nothing pressed
+   that is under 44 pixels. It is kept whichever density is chosen. */
+@media (pointer: coarse), (max-width: 720px), (max-height: 480px) {
+  :root, :root[data-density] {
+    --row-h: 44px;
+    --row-pad: 16px;
+    --row-gap: 12px;
+    --group-gap: 12px;
+    --indent: 20px;
+    --body: 16px;
+    --body-lh: 22px;
+    --caption: 14px;
+    --caption-lh: 20px;
+    --check: 22px;
+    --icon: 24px;
+    --hit: 44px;
+    --head-h: 48px;
+    --field-h: 44px;
+    --control-h: 44px;
+    --card-pad: 12px;
+    --sheet-pad: 16px;
+  }
+}
+
 * { box-sizing: border-box; }
 
 html, body { height: 100%; margin: 0; }
@@ -153,15 +238,16 @@ body {
   flex-direction: column;
   background: var(--bg);
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--body);
+  line-height: var(--body-lh);
 }
 
 .bar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  padding: 0.5rem 0.75rem;
+  gap: var(--row-gap) calc(var(--row-gap) * 2);
+  padding: var(--row-gap) var(--row-pad);
   background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
@@ -170,7 +256,7 @@ body {
   justify-content: space-between;
   border-top: 1px solid var(--line);
   border-bottom: 0;
-  padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--row-gap) + env(safe-area-inset-bottom));
 }
 
 h1 { margin: 0; font-size: 1rem; font-weight: 600; }
@@ -183,7 +269,8 @@ button, .tabs button, input[type="number"], input[type="search"], input[type="te
   background: var(--bg);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 0.3rem 0.65rem;
+  min-height: var(--control-h);
+  padding: 0 var(--row-pad);
 }
 
 button { cursor: pointer; }
@@ -204,12 +291,13 @@ input[type="number"] { width: 6.5rem; }
 /* The page's own clear button takes the place of the browser's, which only
    some browsers draw and which cannot take the mark off the map. */
 .search input::-webkit-search-cancel-button { display: none; }
-.search .clear { position: absolute; top: 0.2rem; right: 0.2rem; }
+.search .clear { position: absolute; top: calc((var(--control-h) - var(--hit)) / 2); right: calc((var(--control-h) - var(--hit)) / 2); }
 /* A cross that is drawn, not written: a character would be read out as
    part of the button's name. */
 .clear {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--hit);
+  height: var(--hit);
+  min-height: 0;
   padding: 0;
   border-color: transparent;
   background: none;
@@ -245,18 +333,20 @@ input[type="number"] { width: 6.5rem; }
 .search-panel li {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 0 0.5rem;
-  padding: 0.3rem 0.45rem;
+  gap: 0 var(--row-gap);
+  min-height: var(--row-h);
+  align-content: center;
+  padding: calc(var(--row-gap) / 2) var(--row-gap);
   border: 1px solid transparent;
   border-radius: 6px;
   cursor: pointer;
 }
 .search-panel li:hover { border-color: var(--line); }
 .search-panel li[aria-selected="true"] { border-color: var(--accent); }
-.search-panel .kind { color: var(--dim); font-size: 0.85em; align-self: center; }
+.search-panel .kind { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); align-self: center; }
 .search-panel .name { min-width: 0; overflow-wrap: anywhere; }
 .search-panel .plain .name { grid-column: 1 / -1; }
-.search-panel .where { grid-column: 1 / -1; color: var(--dim); font-size: 0.85em; font-variant-numeric: tabular-nums; }
+.search-panel .where { grid-column: 1 / -1; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); font-variant-numeric: tabular-nums; }
 .search-note { margin: 0; padding: 0.4rem 0.65rem; color: var(--dim); }
 
 /* The place a search went to. The ring itself stays still, since Leaflet
@@ -296,7 +386,7 @@ input[type="number"] { width: 6.5rem; }
 .stat { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.4rem; padding: 0 0.9rem; }
 .stat + .stat { border-left: 1px solid var(--line); }
 .stat:last-child { padding-right: 0; }
-.stat-label { color: var(--text); font-size: 0.85em; font-weight: 600; letter-spacing: 0.02em; }
+.stat-label { color: var(--text); font-size: var(--caption); line-height: var(--caption-lh); font-weight: 600; letter-spacing: 0.02em; }
 .stat .slot { display: inline-block; }
 #live-age { min-width: 5.6em; }
 #status { min-width: 9.2em; }
@@ -309,7 +399,7 @@ input[type="number"] { width: 6.5rem; }
 /* A length of time chosen from a menu or typed. What was understood, or
    why it was not, is said under the box without moving what is beside it. */
 .duration { position: relative; display: inline-flex; align-items: center; }
-.duration input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0.3rem 0.4rem; width: 8.5rem; }
+.duration input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; min-height: var(--control-h); padding: 0 var(--row-gap); width: 8.5rem; }
 .duration .said {
   position: absolute;
   top: calc(100% + 0.35rem);
@@ -327,7 +417,7 @@ input[type="number"] { width: 6.5rem; }
 .duration .said:empty { display: none; }
 .duration .said.problem { border-color: var(--warn); color: var(--warn); }
 .live-control .paused { border-color: var(--warn); color: var(--warn); }
-select { padding: 0.3rem 0.4rem; cursor: pointer; }
+select { padding: 0 var(--row-gap); cursor: pointer; }
 
 /* Above everything Leaflet draws, whose own controls stop at 1000. */
 .frozen {
@@ -359,7 +449,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   gap: 0.15rem;
   width: 17rem;
   max-width: calc(100% - 1.2rem);
-  padding: 0.4rem 0.6rem;
+  padding: var(--row-gap) var(--card-pad);
   background: var(--float);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -372,8 +462,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .chunk-jump summary { cursor: pointer; color: var(--dim); }
 .chunk > button { justify-self: start; }
 .chunk label { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
-.chunk input[type="number"] { width: 4.2rem; padding: 0.15rem 0.35rem; }
-.chunk button { padding: 0.15rem 0.5rem; }
+.chunk input[type="number"] { width: 4.2rem; padding: 0 var(--row-gap); }
 
 .layers {
   position: absolute;
@@ -386,7 +475,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   gap: 0.3rem;
   max-height: calc(100% - 1.2rem);
 }
-.layers.open { width: 16rem; max-width: calc(100% - 1.2rem); }
+.layers.open { width: var(--panel-default); max-width: calc(100% - 1.2rem); }
 #layers-toggle { background: var(--panel); }
 /* The arrows are drawn, not written: a character here would be read out
    as part of the button's name. */
@@ -411,47 +500,48 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   background: var(--float);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 0.15rem 0.5rem;
+  padding: 0 var(--row-pad);
 }
 .layer-group + .layer-group { border-top: 1px solid var(--line); }
-.layer-group-head { display: flex; align-items: center; gap: 0.25rem; padding: 0.3rem 0; }
+.layer-group-head { display: flex; align-items: center; gap: var(--row-gap); min-height: var(--head-h); }
 .layer-group .fold {
   flex: 1;
   text-align: left;
   font-weight: 600;
   background: none;
   border-color: transparent;
-  padding: 0.15rem 0.2rem;
+  min-height: var(--head-h);
+  padding: 0;
 }
 .layer-group .fold::before { margin-right: 0.45em; }
-.layer-group .mini { padding: 0.05rem 0.4rem; font-size: 0.85em; color: var(--dim); }
-.layer-group ul { list-style: none; margin: 0; padding: 0 0 0.35rem; }
-.layer { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 0.5rem; padding: 0.1rem 0.2rem; }
-.layer label { display: flex; align-items: center; gap: 0.4rem; min-width: 0; cursor: pointer; }
-.layer input { accent-color: var(--accent); margin: 0; width: 1rem; height: 1rem; flex: none; cursor: inherit; }
+.layer-group .mini { color: var(--dim); }
+.layer-group ul { list-style: none; margin: 0; padding: 0 0 var(--group-gap); }
+.layer { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: var(--row-gap); min-height: var(--row-h); }
+.layer label { display: flex; align-items: center; gap: var(--row-gap); min-width: 0; min-height: var(--row-h); cursor: pointer; }
+.layer input { accent-color: var(--accent); margin: 0; width: var(--check); height: var(--check); flex: none; cursor: inherit; }
 .layer i { flex: none; }
 .layer .name { overflow-wrap: anywhere; }
 .layer .count { color: var(--dim); font-variant-numeric: tabular-nums; }
-.layer .note { grid-column: 1 / -1; color: var(--dim); font-size: 0.85em; padding-left: 1.4rem; overflow-wrap: anywhere; }
+.layer .note { grid-column: 1 / -1; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); padding-left: calc(var(--check) + var(--row-gap)); overflow-wrap: anywhere; }
 .layer .note:empty { display: none; }
 .layer.unavailable { opacity: 0.5; }
 .layer.unavailable label { cursor: not-allowed; }
-.layer .body { grid-column: 1 / -1; padding: 0.25rem 0 0.15rem 1.4rem; }
+.layer .body { grid-column: 1 / -1; padding: 0 0 calc(var(--row-gap) / 2) calc(var(--check) + var(--row-gap)); }
 
 /* What a live row holds, by type or by player. It scrolls by itself, like
    the other lists in the panel. */
-.breakdown summary { cursor: pointer; color: var(--dim); font-size: 0.85em; }
+.breakdown summary { cursor: pointer; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); min-height: var(--hit); align-content: center; }
 .breakdown ul { list-style: none; margin: 0.15rem 0 0; padding: 0; max-height: 11rem; overflow-y: auto; }
-.breakdown li { display: flex; align-items: center; gap: 0.4rem; padding: 0.05rem 0.1rem; }
+.breakdown li { display: flex; align-items: center; gap: var(--row-gap); min-height: var(--row-h); }
 .breakdown li label { flex: 1; min-width: 0; }
 .breakdown li label:has(+ .who) { flex: none; }
 .breakdown .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .breakdown .who { text-align: left; background: none; border-color: transparent; padding: 0 0.2rem; }
 .breakdown .count { color: var(--dim); font-variant-numeric: tabular-nums; }
-.breakdown .mini { padding: 0.05rem 0.4rem; font-size: 0.85em; color: var(--dim); flex: none; }
+.breakdown .mini { color: var(--dim); flex: none; }
 .breakdown .mini[aria-pressed="true"] { color: var(--accent); }
-.breakdown input[type="search"] { width: 100%; margin-top: 0.2rem; padding: 0.1rem 0.4rem; font-size: 0.9em; }
-.breakdown .filtered { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.2rem; color: var(--warn); font-size: 0.85em; }
+.breakdown input[type="search"] { width: 100%; margin-top: calc(var(--row-gap) / 2); }
+.breakdown .filtered { display: flex; align-items: center; gap: var(--row-gap); margin: 0 0 calc(var(--row-gap) / 2); color: var(--warn); font-size: var(--caption); line-height: var(--caption-lh); }
 .breakdown .filtered span { flex: 1; }
 .layer .body:has(> .breakdown[hidden]) { display: none; }
 
@@ -461,9 +551,10 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .legend button {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--row-gap);
   width: 100%;
-  padding: 0.1rem 0.3rem;
+  min-height: var(--row-h);
+  padding: 0 calc(var(--row-gap) / 2);
   text-align: left;
   background: none;
   border-color: transparent;
@@ -496,16 +587,17 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .roster button {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--row-gap);
   width: 100%;
-  padding: 0.1rem 0.3rem;
+  min-height: var(--row-h);
+  padding: 0 calc(var(--row-gap) / 2);
   text-align: left;
   background: none;
   border-color: transparent;
 }
 .roster button[aria-current="true"] { border-color: var(--accent); }
 .roster .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.roster .what { color: var(--dim); font-size: 0.85em; text-align: right; }
+.roster .what { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); text-align: right; }
 
 /* Markers that stay put are keyed by a ring, the live ones by a dot. */
 .ring { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 2px solid; background: var(--marker-ink); }
@@ -541,7 +633,6 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .key.candidate { border: 1.5px dotted var(--text); border-radius: 50%; opacity: 0.55; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
 .trail-window { display: flex; align-items: center; gap: 0.4rem; color: var(--dim); }
-.trail-window select, .trail-window input { padding: 0.1rem 0.3rem; }
 /* Inside the panel there is no room to hang it, so it takes a line. */
 .trail-window { flex-wrap: wrap; }
 .trail-window .duration { flex-wrap: wrap; gap: 0.3rem; }
@@ -606,7 +697,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   gap: 0.45rem;
   width: 18.5rem;
   max-width: calc(100% - 1.2rem);
-  padding: 0.5rem 0.6rem;
+  padding: var(--card-pad);
   background: var(--float);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -617,7 +708,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .inspect-title { flex: 1; min-width: 0; display: grid; }
 .inspect-title h2 { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
 .inspect-title span { color: var(--dim); }
-.inspect-head button { flex: none; background: none; color: var(--dim); padding: 0.15rem 0.45rem; }
+.inspect-head button { flex: none; background: none; color: var(--dim); min-height: var(--hit); padding: 0 var(--row-gap); }
 /* The letters are drawn, not written, so that selecting the numbers takes
    exactly what the game's commands accept. */
 .inspect-coords { font-variant-numeric: tabular-nums; word-spacing: 0.5rem; user-select: all; }
@@ -640,7 +731,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
   max-height: calc(100vh - 2rem);
   max-height: calc(100dvh - 2rem);
   overflow-y: auto;
-  padding: 0.9rem 1.1rem 1.1rem;
+  padding: var(--sheet-pad);
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
@@ -651,7 +742,7 @@ select { padding: 0.3rem 0.4rem; cursor: pointer; }
 .sheet::backdrop { background: rgba(11, 12, 14, 0.6); background: var(--scrim, rgba(11, 12, 14, 0.6)); }
 .sheet-head { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.5rem; }
 .sheet-head h2 { flex: 1; margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
-.sheet h3 { margin: 0.9rem 0 0.35rem; font-size: 0.95rem; color: var(--dim); font-weight: 600; }
+.sheet h3 { margin: var(--sheet-pad) 0 var(--row-gap); font-size: var(--body); color: var(--dim); font-weight: 600; }
 .keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 0.9rem; margin: 0; align-items: baseline; }
 .keys dt { white-space: nowrap; }
 .keys dd { margin: 0; }
@@ -674,7 +765,6 @@ kbd, .keys code {
 .facts dt { color: var(--dim); }
 .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .people { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-.people .mini { padding: 0.05rem 0.45rem; }
 /* Counted things in a structure's sheet, each with the game's picture of it
    where there is one: side by side, or a line each where each is a sentence. */
 .tally { display: flex; flex-wrap: wrap; gap: 0.2rem 0.9rem; margin: 0; padding: 0; list-style: none; }
@@ -682,7 +772,7 @@ kbd, .keys code {
 .tally li { display: flex; align-items: baseline; gap: 0.3rem; min-width: 0; }
 .tally .picture { align-self: center; }
 .tally span { min-width: 0; overflow-wrap: anywhere; }
-.sheet .note { margin: 0.5rem 0 0; min-height: 0; font-size: 0.9em; }
+.sheet .note { margin: 0.5rem 0 0; min-height: 0; font-size: var(--caption); line-height: var(--caption-lh); }
 .sheet-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
 .structure { cursor: pointer; }
 /* A sentence over the map for a moment, where the notice of a pause is. */
@@ -707,11 +797,11 @@ kbd, .keys code {
 .views-list { list-style: none; margin: 0.25rem 0 0; padding: 0; display: grid; gap: 0.3rem; }
 .view { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 0.3rem 0.4rem; }
 .view[aria-current="true"] .view-pick { border-color: var(--accent); }
-.view-pick { display: flex; align-items: center; gap: 0.6rem; min-width: 0; text-align: left; }
+.view-pick { display: flex; align-items: center; gap: var(--row-gap); min-width: 0; min-height: var(--row-h); padding-block: calc(var(--row-gap) / 2); text-align: left; }
 .view-title { display: grid; min-width: 0; }
 .view .name { overflow-wrap: anywhere; }
-.view .what { color: var(--dim); font-size: 0.85em; }
-.view .mini, .views-said .mini { padding: 0.15rem 0.5rem; font-size: 0.9em; }
+.view .what { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
+.mini { min-height: var(--hit); padding: 0 var(--row-gap); font-size: var(--caption); line-height: var(--caption-lh); }
 .view-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 0.3rem; padding: 0 0 0.3rem 0.2rem; }
 .view-rename { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; flex: 1 1 100%; }
 .view-rename label, .views-save label { color: var(--dim); display: flex; align-items: center; gap: 0.4rem; }
@@ -738,12 +828,12 @@ kbd, .keys code {
 /* The appearance settings: a name and its control to a line. The sheet
    keeps to one side and leaves the page undimmed, so that a choice is
    seen on the map and in the layer panel as it is made. */
-.looks { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 1.2fr); align-items: center; gap: 0.35rem 0.8rem; }
+.looks { display: grid; grid-template-columns: minmax(8rem, 1fr) minmax(0, 1.2fr); align-items: center; gap: var(--row-gap) var(--row-pad); }
 .looks label { color: var(--dim); }
 .looks select { width: 100%; }
 .looks .range { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
 .looks input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
-.looks output { color: var(--dim); font-size: 0.85em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.looks output { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sheet.aside {
   width: min(27rem, calc(100vw - 1rem));
   margin: 3.6rem auto auto 0.6rem;
@@ -761,20 +851,6 @@ kbd, .keys code {
 :root[data-theme="contrast"] .leaflet-bar a { background: var(--panel); color: var(--text); border-bottom-color: var(--line); }
 :root[data-theme="contrast"] .leaflet-bar a.leaflet-disabled { color: var(--dim); }
 :root[data-theme="contrast"] button, :root[data-theme="contrast"] select, :root[data-theme="contrast"] input { border-width: 2px; }
-
-/* Compact panels: the same controls with less air round them, for a
-   screen with a pointer. A finger's 44 pixels, further down, are kept
-   whichever is chosen. */
-:root[data-density="compact"] body { font-size: 13px; }
-:root[data-density="compact"] .bar { gap: 0.3rem 0.7rem; padding: 0.3rem 0.6rem; }
-:root[data-density="compact"] :is(button, .tabs button, input[type="number"], input[type="search"], input[type="text"], select) { padding: 0.15rem 0.5rem; }
-:root[data-density="compact"] .layer-group-head { padding: 0.1rem 0; }
-:root[data-density="compact"] .layer-group ul { padding-bottom: 0.15rem; }
-:root[data-density="compact"] .layer { padding: 0 0.2rem; }
-:root[data-density="compact"] .layers.open { width: 14.5rem; }
-:root[data-density="compact"] :is(.inspect, .chunk) { gap: 0.25rem; padding: 0.3rem 0.5rem; }
-:root[data-density="compact"] .sheet { padding: 0.6rem 0.8rem 0.8rem; }
-:root[data-density="compact"] .sheet h3 { margin-top: 0.6rem; }
 
 /* While logged out the map and its controls are not there to use. */
 .locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .help-open, .locked #views-open, .locked #appearance-open, .locked .foot { display: none; }
@@ -851,10 +927,9 @@ kbd, .keys code {
   .compact-only { display: inline-flex; align-items: center; justify-content: center; }
   .compact-only[hidden] { display: none; }
 
-  button, select, input[type="number"], input[type="search"], .duration input { min-height: 44px; }
   button, select { min-width: 44px; }
   .toggle { min-height: 44px; }
-  .toggle input, .layer input { width: 1.25rem; height: 1.25rem; }
+  .toggle input { width: var(--check); height: var(--check); }
 
   header.bar {
     position: relative;
@@ -867,7 +942,10 @@ kbd, .keys code {
      of them are wider than it. */
   .tabs { flex: 1; min-width: 0; gap: 0.15rem; overflow-x: auto; scrollbar-width: none; }
   .tabs::-webkit-scrollbar { display: none; }
-  .tabs button { flex: none; padding-inline: 0.4rem; }
+  /* Three names, a search and More in one row: the names are written at
+     the caption's size, which under a finger is still fourteen pixels. */
+  .tabs button { flex: none; padding-inline: 0.4rem; font-size: var(--caption); }
+  .more-open { padding-inline: 0.6rem; font-size: var(--caption); }
 
   /* A magnifying glass that is drawn, not written. */
   .search-open { flex: none; position: relative; }
@@ -890,7 +968,7 @@ kbd, .keys code {
     background: var(--panel);
   }
   .searching .search input { flex: 1; width: auto; min-width: 0; padding-right: 0.65rem; }
-  .search .clear { position: relative; top: auto; right: auto; width: 44px; height: 44px; }
+  .search .clear { position: relative; top: auto; right: auto; }
   .search-panel, .inspecting .search-panel {
     position: absolute;
     top: 100%;
@@ -903,7 +981,6 @@ kbd, .keys code {
     border-width: 0 0 1px;
     border-radius: 0 0 10px 10px;
   }
-  .search-panel li { min-height: 44px; align-content: center; }
 
   /* More: everything else the bar holds, in parts with a title each.
      Logged out there is nothing in it to use, so there is no button for
@@ -939,7 +1016,6 @@ kbd, .keys code {
   .goto { margin-left: 0; flex: 1 1 100%; }
   .goto label { flex: 1; }
   .goto input[type="number"] { width: 100%; min-width: 3.5rem; }
-  .goto .clear { width: 44px; height: 44px; }
   .live-control { flex-wrap: wrap; }
   .duration .said, .duration .said.end { position: static; flex: 1 1 100%; max-width: 100%; }
   .duration { flex-wrap: wrap; gap: 0.3rem; }
@@ -966,12 +1042,9 @@ kbd, .keys code {
     border-width: 1px 0 0;
     border-radius: 12px 12px 0 0;
   }
-  .layer, .layer-group .fold, .breakdown li, .roster button, .legend button { min-height: 44px; }
-  .layer label { min-height: 44px; }
-  .breakdown summary, .chunk-jump summary { padding: 1rem 0; }
+  .chunk-jump summary { padding: 1rem 0; }
   /* A player's switch stands alone beside their name. */
   .breakdown li label:has(+ .who) { min-width: 44px; justify-content: center; }
-  .layer-group .mini, .breakdown .mini { padding: 0.05rem 0.6rem; }
 
   /* The card spans the bottom, and goes while a sheet or the search is
      open: it is back, about the same thing, when they shut. */
@@ -1039,13 +1112,12 @@ kbd, .keys code {
     padding-bottom: calc(1.1rem + env(safe-area-inset-bottom));
   }
   .looks { grid-template-columns: minmax(6.5rem, 2fr) minmax(0, 3fr); }
-  .view-pick { min-height: 44px; }
 }
 
 /* The narrowest phones: three dimensions' names, a search and More in 320
    pixels, with nothing cut off. */
 @media (max-width: 350px) {
-  .tabs button { padding-inline: 0.2rem; font-size: 0.93em; }
+  .tabs button { padding-inline: 0.2rem; font-size: 13px; }
   header.bar { gap: 0.25rem; }
   .more-open { padding-inline: 0.45rem; }
 }
