@@ -296,6 +296,7 @@
       if (!row.available || !set(row, on)) continue;
       changes[row.key] = on;
       forget(row.section.id, 'all');
+      unrest(row.section.id);
     }
     if (Object.keys(changes).length > 0) remember(changes);
   }
@@ -549,6 +550,11 @@
   }
   readSolo();
   const keepSolo = () => retain('panel', 'only', Object.keys(solo).length > 0 ? solo : null);
+  function unrest(id) {
+    if (!Object.hasOwn(rested, id)) return;
+    delete rested[id];
+    keepRested();
+  }
   function forget(...scopes) {
     const had = scopes.filter((scope) => Object.hasOwn(solo, scope));
     if (had.length === 0) return;
@@ -586,6 +592,8 @@
   function reset() {
     solo = {};
     keepSolo();
+    rested = {};
+    keepRested();
     const changes = {};
     for (const section of sections.values()) {
       for (const row of section.rows) {
@@ -782,17 +790,22 @@
 
   const weight = (item) => (item.count === null ? 1 : item.count);
   const itemOn = (row, item) => row.on && (!row.facet || row.facet.shows(item.id));
+  // An item that is off until asked for and has not been asked for is as
+  // the page first has it: it is not shown, and it is not something the
+  // viewer has hidden. It makes nothing read as filtered.
+  const standing = (f, id) => f.only === null && f.off.has(id) && !f.shown.has(id) && !f.hidden.has(id);
+  const hiddenIn = (row, item) => !row.facet.shows(item.id) && !standing(row.facet, item.id);
   // A row is on, off, or on with some of what it is made of hidden.
   function rowState(row) {
     if (!row.on) return 'false';
-    return row.facet && (row.facet.only !== null && !row.list.some((item) => item.id === row.facet.only) || row.list.some((item) => !row.facet.shows(item.id))) ? 'mixed' : 'true';
+    return row.facet && (row.facet.only !== null && !row.list.some((item) => item.id === row.facet.only) || row.list.some((item) => hiddenIn(row, item))) ? 'mixed' : 'true';
   }
 
   function countOf(row) {
     if (row.count === null) return '';
     if (!row.on || !row.facet || row.list.length === 0) return fmt(row.count);
     let hidden = 0;
-    for (const item of row.list) if (!row.facet.shows(item.id)) hidden += weight(item);
+    for (const item of row.list) if (hiddenIn(row, item)) hidden += weight(item);
     return hidden > 0 ? `${fmt(Math.max(0, row.count - hidden))} / ${fmt(row.count)}` : fmt(row.count);
   }
 
@@ -861,9 +874,17 @@
     const twisted = row.list.length > 0 || row.control !== null;
     const open = whole ? (query === '' ? !folded.has(row.section.id) : true) : (query === '' ? opened.has(row.key) : within || (matched && opened.has(row.key)));
     const state = rowState(row);
-    const leaves = row.on && row.facet && row.list.length > 0 ? row.list : null;
-    tally.all += leaves ? leaves.length : 1;
-    tally.on += leaves ? leaves.filter((item) => row.facet.shows(item.id)).length : (row.on ? 1 : 0);
+    // What there is to show, and how much of it is: every item of a row
+    // that is on, and a row that is off as one. What is off as the page
+    // first has it, a row or an item, is not counted as hidden.
+    const leaves = row.on && row.facet && row.list.length > 0 ? row.list.filter((item) => !standing(row.facet, item.id)) : null;
+    if (leaves) {
+      tally.all += leaves.length;
+      tally.on += leaves.filter((item) => row.facet.shows(item.id)).length;
+    } else if (row.on || row.first) {
+      tally.all += 1;
+      tally.on += row.on ? 1 : 0;
+    }
     tally.rows += 1;
     tally.rowsOn += state === 'false' ? 0 : 1;
     tally.mixed = tally.mixed || state === 'mixed';
@@ -1005,7 +1026,7 @@
     if (node.kind === 'section') {
       const whole = wholeOf(node);
       if (whole) switchRow(whole, !whole.on);
-      else switchRows(node.rows, !node.rows.every((row) => row.on || !row.available));
+      else rest(node);
     } else if (node.kind === 'row') {
       switchRow(node, !node.on);
     } else {
@@ -1013,11 +1034,11 @@
       const f = row.facet;
       if (!f || node.disabled || !row.available) return;
       if (!row.on) {
-        // Under a layer that is off, an item switched on is that item
-        // and no other of the layer's: the layer comes on with it alone.
+        // Under a layer that is off, an item switched on brings the layer
+        // on as it was last chosen, with this item shown as well.
         changeFacet(f, () => {
           if (f.only !== null && f.only !== node.id) leaveOnly(f);
-          for (const other of row.list) showItem(f, other.id, other === node);
+          showItem(f, node.id, true);
         });
         switchRow(row, true);
         return;
@@ -1028,6 +1049,34 @@
         showItem(f, node.id, !on);
       });
     }
+  }
+
+  // A section's own checkbox, where it is not one layer's: with anything
+  // in it on, it switches the section off and remembers which rows were
+  // on; with nothing on, it puts those back, or everything if there is
+  // nothing remembered. A section that is partly on is never switched
+  // wholly on by one press: that would lose what was chosen in it.
+  let rested = (() => {
+    const kept = recall('panel', 'rest');
+    const out = {};
+    if (kept === null || typeof kept !== 'object' || Array.isArray(kept)) return out;
+    for (const [id, was] of Object.entries(kept)) if (Array.isArray(was)) out[id] = was.filter(text).slice(0, MAX_HIDDEN);
+    return out;
+  })();
+  const keepRested = () => retain('panel', 'rest', Object.keys(rested).length > 0 ? rested : null);
+  function rest(section) {
+    const on = section.rows.filter((row) => row.on);
+    if (on.length > 0) {
+      place(section.rows, () => false);
+      rested[section.id] = on.map((row) => row.key);
+    } else {
+      const was = Object.hasOwn(rested, section.id) ? rested[section.id].filter((key) => section.rows.some((row) => row.key === key)) : [];
+      place(section.rows, (row) => was.length === 0 || was.includes(row.key));
+      delete rested[section.id];
+    }
+    forget(section.id, 'all');
+    keepRested();
+    schedule();
   }
 
   const expandable = (node) => node.kind === 'section' || (node.kind === 'row' && (node.whole || node.list.length > 0 || node.control !== null));
@@ -1372,8 +1421,8 @@
           focusOn(section);
         });
       }
-      const { on, all } = section.tally;
-      const state = on === all ? 'all' : on === 0 ? 'none' : 'some';
+      const { on, all, rowsOn } = section.tally;
+      const state = rowsOn === 0 ? 'none' : on === all ? 'all' : 'some';
       const said = `${section.label}: ${state === 'all' ? 'all shown' : state === 'none' ? 'all hidden' : `${fmt(on)} of ${fmt(all)} shown`}`;
       if (section.railed.dataset.state !== state) section.railed.dataset.state = state;
       if (section.railed.title !== said) {

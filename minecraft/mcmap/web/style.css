@@ -519,7 +519,6 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .panel-rail button.icon[data-state="none"] { color: var(--dim); }
 .panel-rail .badge { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; border-radius: 50%; }
 .panel-rail [data-state="some"] .badge { background: var(--accent); border: 1px solid var(--panel); }
-.panel-rail [data-state="none"] .badge { border: 2px solid var(--dim); background: var(--panel); }
 .panel {
   align-self: stretch;
   flex: 1;
