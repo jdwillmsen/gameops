@@ -243,7 +243,7 @@ func TestViewsComeBuiltInAndSwitchAtAStroke(t *testing.T) {
 		}
 	}
 	panel := read(t, "layers.js")
-	if !regexp.MustCompile(`row\.on = on;\s*for \(const fn of row\.listeners\) told\.set\(fn, on\);\s*\}\s*\}\s*for \(const f of facets\.values\(\)\) \{\s*if \(!readFacet\(f\)\) continue;[^}]*for \(const fn of f\.listeners\) if \(!told\.has\(fn\)\) told\.set\(fn, undefined\);\s*\}\s*readSolo\(\);\s*for \(const \[fn, on\] of told\) call\(fn, on\);`).Match(panel) {
+	if !regexp.MustCompile(`row\.on = on;\s*for \(const fn of row\.listeners\) told\.set\(fn, on\);\s*\}\s*\}\s*[^}]*readSolo\(\);\s*if \(told\.size > 0\) forget\(\.\.\.Object\.keys\(solo\)\);\s*for \(const f of facets\.values\(\)\) \{\s*if \(!readFacet\(f\)\) continue;[^}]*for \(const fn of f\.listeners\) if \(!told\.has\(fn\)\) told\.set\(fn, undefined\);\s*\}\s*for \(const \[fn, on\] of told\) call\(fn, on\);`).Match(panel) {
 		t.Error("layers.js no longer switches every row before it tells any layer, each layer once")
 	}
 	if !bytes.Contains(panel, []byte("return wanted.filter((key) => !found.has(key));")) {

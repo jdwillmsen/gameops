@@ -74,7 +74,7 @@ func TestBiomeOverlayAsksForTilesAsTheTerrainDoes(t *testing.T) {
 // What the later layers are written against, beyond the first interface.
 func TestLayerPanelLetsAScriptSwitchARowAndShowControlsUnderIt(t *testing.T) {
 	js := read(t, "layers.js")
-	for _, need := range []string{"setEnabled(on)", "setBody(node)", "if (row.available && set(row, on)) remember({ [row.key]: row.on });"} {
+	for _, need := range []string{"setEnabled(on)", "setBody(node)", "if (!row.available || !set(row, on)) continue;"} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("layers.js no longer has %s", need)
 		}

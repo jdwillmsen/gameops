@@ -241,7 +241,7 @@ func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
 		"else if (e.key === 'ArrowRight') {", "} else if (e.key === 'ArrowLeft') {", "} else if (e.key === 'Enter') {",
 		"} else if (/^[\\p{L}\\p{N}]$/u.test(e.key)) {",
 		// What the button at the end of a line offers.
-		"'Show all again'", "'Only this'", "'Show all in group'", "'Hide all in group'", "'Zoom to'", "'Go to'",
+		"'Back to before'", "'Only this'", "'Show all in group'", "'Hide all in group'", "'Zoom to'", "'Go to'",
 		// What is hidden is said where a shut or scrolled panel still shows it.
 		"`${fmt(tally.on)} of ${fmt(tally.all)} shown`",
 		"statusText.setAttribute('role', 'status');",
