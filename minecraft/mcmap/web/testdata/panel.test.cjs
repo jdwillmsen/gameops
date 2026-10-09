@@ -388,6 +388,39 @@ test('the list always has one stop for the Tab key, on a line that is showing', 
   assert.notEqual(p.stops()[0].getAttribute('aria-disabled'), 'true');
 });
 
+test('a list with no switch of its own stands under its section, beside switches that are about something else', async () => {
+  const p = await load();
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, [
+    { id: 'village', label: 'Villages', count: 3 }, { id: 'monument', label: 'Monuments', count: 2 }, { id: 'stronghold', label: 'Strongholds', count: 1, off: true },
+  ]);
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure', order: 10 });
+  p.add({ group: 'structures', id: 'predicted', label: 'Predicted', heading: 'How sure', order: 20 });
+  await p.tick();
+  const lines = p.li('Structures').children.find((child) => child.classList.contains('kids')).children.map((child) => child.textContent.replace(/Only$/, ''));
+  assert.deepEqual(lines.map((line) => line.replace(/\d+$/, '')), ['Villages', 'Monuments', 'Strongholds', 'How sure', 'Known', 'Predicted']);
+  assert.equal(p.layers.states()['structures/kinds'], undefined, 'the list is not a switch, and is not kept as one');
+  assert.equal(p.state('Structures'), 'true');
+  // Only on a kind is that kind and no other, whatever the switches under it say.
+  await p.press(['Structures', 'Villages'], 'only');
+  assert.equal(kinds.shows('village'), true);
+  assert.equal(kinds.shows('monument'), false);
+  assert.equal(p.state('Structures'), 'mixed');
+  assert.equal(p.state('Structures', 'Known'), 'true');
+  assert.equal(p.entries('Structures', 'Villages')[0], 'Back to before');
+  assert.ok(!p.entries('Structures', 'Villages').includes('Hide all in group'));
+  await p.press(['Structures', 'Villages'], 'only');
+  assert.equal(kinds.shows('monument'), true);
+  assert.equal(kinds.shows('stronghold'), false);
+  assert.equal(p.state('Structures'), 'true');
+  // The section's own checkbox switches the certainties and leaves the kinds as chosen.
+  await p.press(['Structures', 'Monuments']);
+  await p.press(['Structures']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), []);
+  await p.press(['Structures']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), ['structures/predicted', 'structures/recorded']);
+  assert.equal(kinds.shows('monument'), false);
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {

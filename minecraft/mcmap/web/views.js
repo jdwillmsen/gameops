@@ -78,7 +78,7 @@
   // Each is over things the game names. Which players, named mobs and
   // waypoints are hidden is left out: those are not the viewer's to hand
   // round in a link.
-  const SHARED = ['structures#recorded', 'structures#predicted', 'structures#candidate', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs'];
+  const SHARED = ['structures#kinds', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs'];
   const KEYS = KNOWN.map(([key]) => key);
   const LABELS = new Map(KNOWN);
   // The appearance settings in the order a link lists them, likewise only

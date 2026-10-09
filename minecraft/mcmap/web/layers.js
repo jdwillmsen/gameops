@@ -475,15 +475,16 @@
     if (section) return section;
     const at = SECTIONS.findIndex(([name]) => name === id);
     made += 1;
-    section = { kind: 'section', path: `s:${id}`, id, label: at >= 0 ? SECTIONS[at][1] : String(label || id), rank: at >= 0 ? at : SECTIONS.length + made, rows: [], dom: null };
+    section = { kind: 'section', bare: null, path: `s:${id}`, id, label: at >= 0 ? SECTIONS[at][1] : String(label || id), rank: at >= 0 ? at : SECTIONS.length + made, rows: [], dom: null };
     sections.set(id, section);
     return section;
   }
 
   function drop(row) {
     const at = row.section.rows.indexOf(row);
-    if (at < 0) return;
-    row.section.rows.splice(at, 1);
+    if (row.section.bare === row) row.section.bare = null;
+    else if (at < 0) return;
+    else row.section.rows.splice(at, 1);
     if (row.facet) row.facet.rows.delete(row);
     row.listeners.length = 0;
     schedule();
@@ -498,14 +499,18 @@
   // as an element the script made. facet names the choice its items are
   // shown by, which several rows may share, and actions what can be done
   // with the row or one item of it: zoom(id) and go(id), with no id for
-  // the row itself.
-  function register({ group, id, label, enabled = true, order, groupLabel, swatch, picture, section, whole, facet, actions } = {}) {
+  // the row itself. bare makes it no row at all but a list: its items
+  // stand directly under the section, with no switch of their own over
+  // them, for a section whose switches are about something else. heading
+  // is a word or two written over the row, to set it and the rows after
+  // it apart from what is above them.
+  function register({ group, id, label, enabled = true, order, groupLabel, swatch, picture, section, whole, facet, actions, bare, heading } = {}) {
     if (typeof group !== 'string' || !group || typeof id !== 'string' || !id) {
       throw new TypeError('a layer needs a group and an id');
     }
     const key = `${group}/${id}`;
     for (const other of sections.values()) {
-      const again = other.rows.find((row) => row.key === key);
+      const again = other.bare && other.bare.key === key ? other.bare : other.rows.find((row) => row.key === key);
       if (again) drop(again);
     }
     const home = sectionOf(typeof section === 'string' && section ? section : group, groupLabel);
@@ -521,8 +526,11 @@
       label: String(label ?? id),
       order: Number.isFinite(order) ? order : Infinity,
       seq: made,
-      on: choice(group, id, Boolean(enabled)),
-      first: Boolean(enabled),
+      bare: bare === true,
+      heading: typeof heading === 'string' ? heading : '',
+      // A list has no switch to keep: it is as on as its section is.
+      on: bare === true || choice(group, id, Boolean(enabled)),
+      first: bare === true || Boolean(enabled),
       available: true,
       listeners: [],
       count: null,
@@ -539,9 +547,13 @@
       dom: null,
     };
     if (row.facet) row.facet.rows.add(row);
-    // Lower orders first; rows given none go last, as they were registered.
-    const next = home.rows.find((other) => row.order < other.order);
-    home.rows.splice(next ? home.rows.indexOf(next) : home.rows.length, 0, row);
+    if (row.bare) {
+      home.bare = row;
+    } else {
+      // Lower orders first; rows given none go last, as they were registered.
+      const next = home.rows.find((other) => row.order < other.order);
+      home.rows.splice(next ? home.rows.indexOf(next) : home.rows.length, 0, row);
+    }
     schedule();
 
     return {
@@ -940,7 +952,7 @@
         label: item.label,
         state: String(on),
         disabled: item.disabled || !row.available || !f,
-        masked: !row.on,
+        masked: !row.on || row.masked === true,
         twisted: false,
         detail: item.detail,
         count: item.count === null ? '' : fmt(item.count),
@@ -1042,11 +1054,32 @@
     const mine = { all: 0, on: 0, rows: 0, rowsOn: 0, mixed: false };
     const lines = [];
     let visible = hit(section.label);
+    let headed = '';
     for (const row of section.rows) {
       const seen = paintRow(row, mine);
       visible = visible || seen;
-      if (row === whole) continue;
-      if (seen) lines.push(row.dom.li);
+      if (row === whole || !seen) continue;
+      if (row.heading !== '' && row.heading !== headed) {
+        headed = row.heading;
+        if (!section.headings) section.headings = new Map();
+        if (!section.headings.has(headed)) section.headings.set(headed, make('li', 'subhead', headed));
+        lines.push(section.headings.get(headed));
+      }
+      lines.push(row.dom.li);
+    }
+    // A list with no switch of its own: its items stand first under the
+    // section, counted and searched as any layer's are.
+    const { bare } = section;
+    if (bare) {
+      const within = query !== '' && bare.list.some((item) => hit(item.label));
+      visible = visible || within;
+      const listed = bare.list.filter((item) => !standing(bare.facet, item.id));
+      if (mine.rowsOn > 0) {
+        mine.all += listed.length;
+        mine.on += listed.filter((item) => bare.facet.shows(item.id)).length;
+      }
+      mine.mixed = mine.mixed || bare.facet.only !== null || bare.list.some((item) => hiddenIn(bare, item));
+      bare.masked = mine.rowsOn === 0;
     }
     if (whole) {
       if (dom.was.open) lines.unshift(...itemLines(whole, 2, hit(section.label) || hit(whole.label), mine));
@@ -1065,6 +1098,10 @@
         note: '',
         soloed: alone('all', section.id),
       });
+    }
+    if (bare) {
+      if (dom.was.open) lines.unshift(...itemLines(bare, 2, hit(section.label), mine));
+      else for (const item of bare.list) item.dom = null;
     }
     arrange(dom.kids, dom.was.open ? lines : []);
     put(dom, 'seen', query === '' || visible, (v) => { dom.li.hidden = !v; });
@@ -1086,10 +1123,10 @@
 
   function render() {
     queued = false;
-    const shown = [...sections.values()].filter((section) => section.rows.length > 0).sort((a, b) => a.rank - b.rank);
+    const shown = [...sections.values()].filter((section) => section.rows.length > 0 || section.bare).sort((a, b) => a.rank - b.rank);
     const tally = { all: 0, on: 0, seen: false };
     for (const section of sections.values()) {
-      if (section.rows.length > 0) continue;
+      if (section.rows.length > 0 || section.bare) continue;
       if (section.dom) section.dom.li.remove();
     }
     for (const section of shown) paintSection(section, tally);
@@ -1285,7 +1322,9 @@
       const { row } = node;
       const f = row.facet;
       entries.push({ label: f.only === node.id && row.on ? 'Back to before' : 'Only this', act: () => onlyThis(node) });
-      entries.push({ label: 'Show all in group', act: () => showAll(row, true) }, { label: 'Hide all in group', act: () => showAll(row, false) });
+      entries.push({ label: 'Show all in group', act: () => showAll(row, true) });
+      // A list with no switch over it is hidden by its section's.
+      if (!row.bare) entries.push({ label: 'Hide all in group', act: () => showAll(row, false) });
       if (typeof row.actions.zoom === 'function' && node.zoom) entries.push(null, { label: 'Zoom to', act: () => act(row, 'zoom', node.id) });
       if (typeof row.actions.go === 'function' && node.go) entries.push(null, { label: 'Go to', act: () => act(row, 'go', node.id) });
       return entries;
