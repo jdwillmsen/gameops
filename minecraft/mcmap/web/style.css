@@ -1013,6 +1013,8 @@ kbd, .keys code {
 .copied { margin-left: 0.4rem; color: var(--accent); }
 
 .note { color: var(--dim); min-height: 1.5em; }
+/* What the game's publisher asks every site about the game to say. */
+.legal { margin: var(--sheet-pad) 0 0; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
 .note.problem { color: var(--warn); }
 
 [hidden] { display: none !important; }
