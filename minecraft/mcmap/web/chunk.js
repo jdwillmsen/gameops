@@ -74,7 +74,7 @@
   const rows = { grid: null, focus: null };
   if (app.layers && app.layers.register) {
     rows.grid = app.layers.register({ group: 'overlays', id: 'grid', label: 'Grid', enabled: false, order: 30, swatch: 'key grid' });
-    rows.focus = app.layers.register({ group: 'overlays', id: 'chunk', label: 'Chunk focus', enabled: true, order: 35, swatch: 'key chunk' });
+    rows.focus = app.layers.register({ group: 'overlays', id: 'chunk', label: 'Chunk focus', enabled: true, order: 35, swatch: 'key focus' });
     rows.grid.setEnabled(el.grid.checked);
     rows.grid.onToggle((want) => {
       if (el.grid.checked !== want) el.grid.click();
