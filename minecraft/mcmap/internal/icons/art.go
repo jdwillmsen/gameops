@@ -263,8 +263,15 @@ func (s *Source) make(ctx context.Context, recipes map[string]Recipe, keys []str
 				continue
 			}
 		}
-		if r.Else != "" && textures[r.Else] != nil {
-			if out.Pictures[key], err = encode(textures[r.Else]); err == nil {
+		if plain := textures[r.Else]; r.Else != "" && plain != nil && plain.Rect.Dx() <= maxIconSide && plain.Rect.Dy() <= maxIconSide {
+			if out.Pictures[key], err = encode(plain); err == nil {
+				// It stands in until the picture itself can be made: one
+				// that was not made only because a texture was out of
+				// reach is asked for again.
+				if slices.ContainsFunc(r.textures(), away) {
+					out.Missing = append(out.Missing, key)
+					out.Unreached = append(out.Unreached, key)
+				}
 				continue
 			}
 		}
