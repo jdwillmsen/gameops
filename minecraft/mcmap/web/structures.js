@@ -391,8 +391,12 @@
     if (wanted && (locked || dimension !== wanted.dimension)) unwant('');
     // What a structure holds is asked for as one player, and says what a
     // village thinks of them. It is not kept past their session, for
-    // whoever logs in next on this page.
-    if (locked) forgetDetail();
+    // whoever logs in next on this page, and nor is a sheet left open
+    // showing it.
+    if (locked) {
+      forgetDetail();
+      if (sheet && view.dialog.open) view.dialog.close();
+    }
     if (locked || !dimension || !available) {
       // An answer still on its way belongs to the view that asked for it.
       pending = null;
