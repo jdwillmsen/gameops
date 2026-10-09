@@ -22,7 +22,7 @@ var (
 	})
 	metricPictures = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_marker_pictures",
-		Help: "Marker and structure pictures held. Zero means the page is drawing every marker as a ring and every structure as a letter, as it also does with icons off.",
+		Help: "Marker, structure, face and block pictures held. Zero means the page is drawing every marker as a ring and every structure as a letter, as it also does with icons off.",
 	})
 	metricNames = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_names",

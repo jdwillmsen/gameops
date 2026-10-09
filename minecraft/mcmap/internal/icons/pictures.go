@@ -32,12 +32,13 @@ var (
 // shulker/undyed, container/chest, structure/monument, marker/waypoint.
 var pictureKey = regexp.MustCompile(`^[a-z]{1,16}/[a-z0-9_]{1,32}$`)
 
-// maxPictures is more than the 45 there are, and bounds what an index on
+// maxPictures is more than the 250 or so there are, and bounds what an index on
 // the volume can make a start read.
-const maxPictures = 200
+const maxPictures = 800
 
-// A structure has no item of its own, so each is drawn as one that could
-// be nothing else's: the README says why each was chosen.
+// A structure has no item of its own. Each is drawn as the face of the mob
+// met there where there is one, and failing that as an item that could be
+// nothing else's: the README says why each was chosen.
 var structureItems = map[string]string{
 	"fortress":      "textures/items/netherbrick",
 	"monument":      "textures/items/prismarine_shard",
@@ -59,7 +60,7 @@ type markerPicture struct {
 	sheet bool
 }
 
-// pictures is every marker and structure picture and its source. Each is
+// pictures is every marker picture served as it came, and its source. Each is
 // asked for by a path known ahead: none of these is listed anywhere the
 // way a mob's spawn egg is, except a bed's, which the atlas lists by
 // colour.
@@ -82,21 +83,16 @@ func pictures(items atlas) []markerPicture {
 		out = append(out, markerPicture{name: "shulker/" + colour, path: "textures/entity/shulker/shulker_" + legacyColour(colour), sheet: true})
 	}
 	out = append(out, markerPicture{name: "shulker/" + markers.Undyed, path: "textures/entity/shulker/shulker_" + markers.Undyed, sheet: true})
-	for _, kind := range StructureKinds {
-		out = append(out, markerPicture{name: "structure/" + kind, path: structureItems[kind]})
-	}
 	return out
 }
 
-// pictureKeys is the key of every marker picture there can be, whatever
-// the atlas lists.
+// pictureKeys is the key of every marker picture served as it came,
+// whatever the atlas lists. A structure's is made from a recipe, with the
+// faces and the blocks.
 func pictureKeys() []string {
 	keys := []string{"container/chest", "container/trapped_chest", "container/barrel", "marker/waypoint", "shulker/" + markers.Undyed}
 	for _, colour := range markers.Colours {
 		keys = append(keys, "bed/"+colour, "shulker/"+colour)
-	}
-	for _, kind := range StructureKinds {
-		keys = append(keys, "structure/"+kind)
 	}
 	return keys
 }
