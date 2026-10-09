@@ -111,24 +111,24 @@
   for (const dialog of document.querySelectorAll('dialog')) watcher.observe(dialog, { attributes: true, attributeFilter: ['open'] });
 
   // A touch outside what is open shuts it. The button that opened it is
-  // not outside: its own click decides.
+  // not outside: its own click decides. The layer panel is not shut this
+  // way: below its full height the map over it is there to be used.
   document.addEventListener('pointerdown', (e) => {
     if (!media.matches || !(e.target instanceof Node)) return;
     const within = (...nodes) => nodes.some((node) => node.contains(e.target));
     if (shown('more-shown') && !within(el.more, el.moreOpen)) set('more-shown', false);
     if (shown('currency-shown') && !within(el.currency, el.currencyOpen)) set('currency-shown', false);
     if (shown('searching') && !within(el.search, el.searchOpen)) set('searching', false);
-    if (panelOpen() && !within(el.layers)) shutPanel();
   });
 
-  // Escape shuts More or the timers and gives the focus back to the
-  // button; heard on the way down, so that it is not also an Escape for
-  // the card. The search box has its own.
+  // Escape shuts More, the timers or the layer panel and gives the focus
+  // back to the button; heard on the way down, so that it is not also an
+  // Escape for the card. The search box has its own.
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || !media.matches) return;
     // A box that takes a typed length has an Escape of its own, which
-    // puts its menu back, and so has a dialog.
-    if (e.target instanceof Element && e.target.closest('.duration input, dialog[open]') !== null) return;
+    // puts its menu back, and so have a dialog and a menu in the panel.
+    if (e.target instanceof Element && e.target.closest('.duration input, dialog[open], .panel-popup') !== null) return;
     for (const part of ['more-shown', 'currency-shown']) {
       if (!shown(part)) continue;
       e.stopPropagation();
@@ -136,6 +136,11 @@
       PARTS[part].focus();
       return;
     }
+    // A box in the panel with something typed in it is cleared first.
+    if (!panelOpen() || (e.target instanceof HTMLInputElement && e.target.value !== '')) return;
+    e.stopPropagation();
+    shutPanel();
+    el.layersToggle.focus();
   }, true);
 
   // The footer's one reading: how old the live picture is, or failing a

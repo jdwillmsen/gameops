@@ -173,7 +173,7 @@ func TestEveryColourOnThePageIsOneOfTheThemes(t *testing.T) {
 	defined := themeColours(t, css, "")
 	for _, m := range regexp.MustCompile(`var\(--([a-z-]+)`).FindAllSubmatch(css, -1) {
 		name := string(m[1])
-		if _, ok := defined[name]; !ok && name != "kind" && name != "inspect-height" {
+		if _, ok := defined[name]; !ok && name != "kind" && name != "inspect-height" && name != "rail" && name != "w" {
 			t.Errorf("style.css uses --%s, which no theme defines", name)
 		}
 	}

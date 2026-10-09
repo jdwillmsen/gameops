@@ -159,3 +159,61 @@ func TestLiveIntervalsOfferedAreTheOnesAccepted(t *testing.T) {
 		t.Error("live.js no longer closes the stream while paused or hidden")
 	}
 }
+
+// The panel's shell: beside the map where there is room for both, sized by
+// its edge between two bounds, put away to a rail, and on a small screen a
+// sheet that stops at three heights. Dragging is never the only way: the
+// edge takes the arrow keys and the menu has three widths.
+func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
+	js := read(t, "layers.js")
+	for _, need := range []string{
+		"const DOCKED = '(min-width: 960px)';",
+		"const MIN_WIDTH = 240;", "const MAX_WIDTH = 480;", "const MAX_SHARE = 0.45;",
+		"const WIDTHS = [['Small', 280], ['Medium', 340], ['Large', 400]];",
+		"const DETENTS = ['peek', 'half', 'full'];",
+		"sizer.setAttribute('role', 'separator');", "sizer.setAttribute('aria-orientation', 'vertical');",
+		"sizer.setAttribute('aria-controls', el.body.id);", "sizer.tabIndex = 0;",
+		"sizer.setAttribute('aria-valuemin', String(MIN_WIDTH));", "sizer.setAttribute('aria-valuemax', String(widest()));",
+		"sizer.setAttribute('aria-valuenow', String(width));",
+		"if (e.key === 'ArrowLeft') to = width + STEP;", "else if (e.key === 'Home') to = MIN_WIDTH;", "else if (e.key === 'End') to = widest();",
+		"sizer.addEventListener('dblclick', () => setWidth(null, true));",
+		"sizer.setPointerCapture(e.pointerId);", "grab.setPointerCapture(e.pointerId);",
+		// The width is kept where a record-keeping script from before the
+		// panel had one will not drop it.
+		"retain('panel', 'shell', {",
+		"menu.setAttribute('role', 'menu');", "item.setAttribute('role', choice ? 'menuitemradio' : 'menuitem');",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("layers.js no longer has %s", need)
+		}
+	}
+	css := read(t, "style.css")
+	for _, need := range []string{
+		"--w: clamp(240px, var(--panel-width), min(480px, 45vw));",
+		"--rail: 40px;",
+		".layers.open.docked { width: var(--w); }",
+		".detent-peek .panel { height: calc(var(--head-h) + 28px); }",
+		".detent-full .panel { height: 100%; border-radius: 0; }",
+		// The sheet takes the touches that land on it and no others.
+		"pointer-events: none;", ".layers > * { pointer-events: auto; }",
+		`:root[data-motion="full"] .layers:not(.sizing) .panel { transition: height 160ms ease-out; }`,
+		`:root:not([data-motion]) .layers:not(.sizing) .panel { transition: height 160ms ease-out; }`,
+		".panel-scroll { padding-bottom: env(safe-area-inset-bottom); }",
+	} {
+		if !bytes.Contains(css, []byte(need)) {
+			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+	// The map is beside the panel, not under it: both are in the stage's
+	// one row, and the map's script hears of its new size by itself.
+	if !bytes.Contains(css, []byte(".stage { position: relative; flex: 1; min-height: 0; display: flex; }")) || !bytes.Contains(css, []byte("#map { flex: 1; min-width: 0;")) {
+		t.Error("style.css no longer lays the map and the panel out in one row")
+	}
+	if !bytes.Contains(read(t, "app.js"), []byte("new ResizeObserver(() => map.invalidateSize()).observe(map.getContainer())")) {
+		t.Error("app.js no longer tells the map when its box changes size")
+	}
+	// A touch on the map does not put the sheet away.
+	if bytes.Contains(read(t, "compact.js"), []byte("if (panelOpen() && !within(el.layers)) shutPanel();")) {
+		t.Error("compact.js shuts the layer panel on a touch outside it; below full height the map is there to be used")
+	}
+}

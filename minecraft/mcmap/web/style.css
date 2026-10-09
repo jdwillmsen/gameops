@@ -93,6 +93,10 @@
   --card-pad: 12px;
   --sheet-pad: 16px;
   --panel-default: 340px;
+  /* Set by the panel's script: the width chosen for it, and how much of
+     the stage it takes from the map. */
+  --panel-width: var(--panel-default);
+  --dock: 0px;
 }
 
 /* Light. Text and the edges of controls are dark enough on its panels to
@@ -423,11 +427,11 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
 .frozen {
   position: absolute;
   top: 0.6rem;
-  left: 50%;
+  left: calc(50% - var(--dock) / 2);
   transform: translateX(-50%);
   z-index: 1100;
   margin: 0;
-  max-width: calc(100% - 7rem);
+  max-width: calc(100% - var(--dock) - 7rem);
   padding: 0.3rem 0.7rem;
   background: var(--float);
   border: 1px solid var(--warn);
@@ -464,44 +468,106 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
 .chunk label { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
 .chunk input[type="number"] { width: 4.2rem; padding: 0 var(--row-gap); }
 
+/* The layer panel. Beside the map where there is room, and the map is
+   then as wide as what is left; its rail alone beside the map where there
+   is less, with the panel over the map's edge while it is open. The width
+   is the viewer's, between 240 and 480 pixels and never more than 45
+   hundredths of the window. */
 .layers {
-  position: absolute;
-  top: 0.6rem;
-  right: 0.6rem;
+  --rail: 40px;
+  --w: clamp(240px, var(--panel-width), min(480px, 45vw));
+  position: relative;
+  order: 2;
+  flex: none;
   z-index: 1100;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 0.3rem;
-  max-height: calc(100% - 1.2rem);
+  align-items: center;
+  width: var(--rail);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
 }
-.layers.open { width: var(--panel-default); max-width: calc(100% - 1.2rem); }
-#layers-toggle { background: var(--panel); }
-/* The arrows are drawn, not written: a character here would be read out
-   as part of the button's name. */
-#layers-toggle::after, .layer-group .fold::before {
-  content: "";
-  display: inline-block;
-  border: 0.3em solid transparent;
-  border-left-color: var(--dim);
-  border-right-width: 0;
-  vertical-align: middle;
-}
-#layers-toggle::after { margin-left: 0.5em; }
-#layers-toggle[aria-expanded="true"]::after, .layer-group .fold[aria-expanded="true"]::before {
-  border: 0.3em solid transparent;
-  border-top-color: var(--dim);
-  border-bottom-width: 0;
-}
-#layers-body {
-  align-self: stretch;
+.layers.open.docked { width: var(--w); }
+.layers.open #layers-toggle { display: none; }
+.glyph { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.glyph.heavy { stroke-width: 2.5; }
+button.icon { display: inline-grid; place-items: center; flex: none; width: var(--hit); min-width: var(--hit); height: var(--hit); min-height: 0; padding: 0; background: none; border-color: transparent; color: var(--dim); }
+button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var(--text); border-color: var(--line); }
+/* The rail: the panel's button over a button for each section. */
+#layers-toggle, .panel-rail button.icon { width: var(--rail); height: var(--rail); border-radius: 0; }
+#layers-toggle {
+  flex: none;
   min-height: 0;
-  overflow-y: auto;
-  background: var(--float);
+  padding: 0;
+  overflow: hidden;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: transparent;
+  font-size: 0;
+  /* The three sheets of the panel's own mark, drawn and not written. */
+  background-image: linear-gradient(var(--text), var(--text)), linear-gradient(var(--text), var(--text)), linear-gradient(var(--text), var(--text));
+  background-size: 16px 2px;
+  background-position: center 14px, center 19px, center 24px;
+  background-repeat: no-repeat;
+}
+.panel-rail { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.panel-rail button.icon { position: relative; color: var(--text); }
+.panel-rail .glyph { width: 20px; height: 20px; }
+.panel-rail button.icon[data-state="none"] { color: var(--dim); }
+.panel-rail .badge { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; border-radius: 50%; }
+.panel-rail [data-state="some"] .badge { background: var(--accent); border: 1px solid var(--panel); }
+.panel-rail [data-state="none"] .badge { border: 2px solid var(--dim); background: var(--panel); }
+.panel {
+  align-self: stretch;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.layers.floating .panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--w);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+.panel-head { display: flex; align-items: center; gap: calc(var(--row-gap) / 2); min-height: var(--head-h); padding: calc(var(--row-gap) / 2) var(--row-gap) calc(var(--row-gap) / 2) var(--row-pad); border-bottom: 1px solid var(--line); }
+.panel-title { flex: 1; margin: 0; font-size: var(--body); font-weight: 600; }
+.panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--row-pad); }
+.panel-grab { display: none; }
+/* The edge that is dragged: twelve pixels to see and twenty-four to
+   catch, with a line down it while it is pointed at, held or focused. */
+.panel-sizer { position: absolute; top: 0; bottom: 0; right: calc(var(--w) - 6px); width: 12px; z-index: 1; cursor: col-resize; touch-action: none; }
+.panel-sizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: -6px; right: -6px; }
+.panel-sizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: transparent; }
+.panel-sizer:hover::after, .panel-sizer:focus-visible::after, .sizing .panel-sizer::after { background: var(--accent); }
+.panel-sizer:focus-visible { outline-offset: -2px; }
+.sizing, .sizing * { user-select: none; }
+/* What hangs from a button in the panel: a menu, or a box to type in. */
+.panel-popup {
+  position: fixed;
+  z-index: 1400;
+  min-width: 11rem;
+  max-width: min(20rem, calc(100vw - 16px));
+  padding: calc(var(--row-gap) / 2);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 0 var(--row-pad);
 }
+.menu hr { margin: calc(var(--row-gap) / 2) 0; border: 0; border-top: 1px solid var(--line); }
+.menu-title { margin: 0; padding: calc(var(--row-gap) / 2) var(--row-gap); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); font-weight: 600; }
+.menu-item { display: flex; align-items: center; gap: var(--row-gap); width: 100%; min-height: var(--row-h); padding: 0 var(--row-gap); text-align: left; background: none; border-color: transparent; }
+.menu-item:hover:not(:disabled), .menu-item:focus-visible { border-color: var(--line); background: var(--bg); }
+.menu-item[role="menuitemradio"]::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--dim); }
+.menu-item[aria-checked="true"]::before { background: var(--accent); border-color: var(--accent); }
+
+/* The arrows are drawn, not written: a character here would be read out
+   as part of the button's name. */
+.layer-group .fold::before { content: ""; display: inline-block; margin-right: 0.45em; border: 0.3em solid transparent; border-left-color: var(--dim); border-right-width: 0; vertical-align: middle; }
+.layer-group .fold[aria-expanded="true"]::before { border: 0.3em solid transparent; border-top-color: var(--dim); border-bottom-width: 0; }
 .layer-group + .layer-group { border-top: 1px solid var(--line); }
 .layer-group-head { display: flex; align-items: center; gap: var(--row-gap); min-height: var(--head-h); }
 .layer-group .fold {
@@ -779,7 +845,7 @@ kbd, .keys code {
 .said-over {
   position: absolute;
   top: 3rem;
-  left: 50%;
+  left: calc(50% - var(--dock) / 2);
   transform: translateX(-50%);
   z-index: 1100;
   margin: 0;
@@ -1024,27 +1090,77 @@ kbd, .keys code {
   .leaflet-touch .leaflet-bar a, .leaflet-bar a { width: 44px; height: 44px; line-height: 44px; }
 
   /* The layer panel: its button stays in the corner of the map, and the
-     panel itself comes up from the bottom over the whole width. */
-  .layers { inset: 0; max-height: none; display: block; pointer-events: none; }
-  .layers.open { width: auto; max-width: none; }
-  .layers > * { pointer-events: auto; }
-  #layers-toggle { position: absolute; top: 0.5rem; right: max(0.5rem, env(safe-area-inset-right)); }
-  #layers-body {
+     panel itself is a sheet from the bottom over the whole width, at one
+     of three heights. Below the tallest the map over it is still the
+     map: the sheet takes the touches that land on it and no others. */
+  .layers, .layers.open.docked {
     position: absolute;
+    inset: 0;
+    width: auto;
+    display: block;
+    background: none;
+    border: 0;
+    pointer-events: none;
+  }
+  .layers > * { pointer-events: auto; }
+  #layers-toggle, .layers.open #layers-toggle {
+    display: inline-flex;
+    align-items: center;
+    position: absolute;
+    top: 0.5rem;
+    right: max(0.5rem, env(safe-area-inset-right));
+    width: auto;
+    height: auto;
+    min-height: 44px;
+    padding: 0 var(--row-pad);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: inherit;
+    background-image: none;
+  }
+  .layers.open #layers-toggle { display: none; }
+  .panel, .layers.floating .panel {
+    position: absolute;
+    top: auto;
     left: 0;
     right: 0;
     bottom: 0;
-    max-height: 62%;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 0.25rem max(0.6rem, env(safe-area-inset-right)) 0.5rem max(0.6rem, env(safe-area-inset-left));
+    width: auto;
+    height: 50%;
+    max-height: 100%;
+    padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
     background: var(--panel);
-    border-width: 1px 0 0;
+    border: 0;
+    border-top: 1px solid var(--line);
     border-radius: 12px 12px 0 0;
   }
-  .chunk-jump summary { padding: 1rem 0; }
-  /* A player's switch stands alone beside their name. */
-  .breakdown li label:has(+ .who) { min-width: 44px; justify-content: center; }
+  .detent-peek .panel { height: calc(var(--head-h) + 28px); }
+  .detent-full .panel { height: 100%; border-radius: 0; }
+  .panel-scroll { padding-bottom: env(safe-area-inset-bottom); }
+  /* The handle: a bar to see, and the strip across the sheet to press,
+     which reaches above the sheet to make its 44 pixels. */
+  .panel-grab {
+    display: block;
+    position: relative;
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    height: 28px;
+    min-height: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    border-radius: 12px 12px 0 0;
+    cursor: ns-resize;
+    touch-action: none;
+  }
+  .panel-grab::before { content: ""; position: absolute; left: 0; right: 0; top: -16px; height: 44px; }
+  .panel-grab::after { content: ""; position: absolute; top: 11px; left: calc(50% - 20px); width: 40px; height: 5px; border-radius: 3px; background: var(--dim); }
+  .panel-popup { overflow-y: auto; }
+  .panel-popup { max-height: 70vh; }
+  .panel-popup { max-height: 70dvh; }
 
   /* The card spans the bottom, and goes while a sheet or the search is
      open: it is back, about the same thing, when they shut. */
@@ -1054,7 +1170,7 @@ kbd, .keys code {
   /* The chunk under the pointer, between the zoom buttons and Layers. */
   .chunk { top: 0.5rem; left: 4.1rem; right: 6.6rem; width: auto; max-width: none; padding: 0.3rem 0.5rem; font-size: 0.9em; }
   .stage:has(.layers.open) .chunk { display: none; }
-  .frozen, .said-over { top: 6.6rem; max-width: calc(100% - 1.5rem); }
+  .frozen, .said-over { top: 6.6rem; left: 50%; max-width: calc(100% - 1.5rem); }
 
   /* The footer: where the middle of the map is, and one short reading of
      how current it is, which opens the two timers over the footer. */
@@ -1126,7 +1242,8 @@ kbd, .keys code {
    down the right, which leaves the map its width, and the card keeps to
    the left. */
 @media (max-height: 480px) and (min-width: 560px) {
-  #layers-body { top: 0; left: auto; bottom: 0; width: min(22rem, 55%); max-height: none; border-width: 0 0 0 1px; border-radius: 12px 0 0 12px; padding-top: 3.4rem; }
+  .panel, .layers.floating .panel, .detent-peek .panel, .detent-full .panel { top: 0; left: auto; width: min(22rem, 55%); height: auto; border-top: 0; border-left: 1px solid var(--line); border-radius: 12px 0 0 12px; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 0; }
+  .panel-grab { display: none; }
   /* More likewise keeps to the right, so that there is map beside it to
      touch. */
   .more-shown .more {
@@ -1137,7 +1254,6 @@ kbd, .keys code {
     border-left: 1px solid var(--line);
     border-radius: 0 0 0 10px;
   }
-  .layers.open #layers-toggle { z-index: 1; }
   .inspect { right: auto; width: 18.5rem; max-width: calc(100% - 1rem); }
   .stage:has(.layers.open) .inspect { display: grid; max-width: calc(45% - 1rem); }
   .frozen, .said-over { top: 0.5rem; max-width: calc(100% - 14rem); }
@@ -1148,10 +1264,12 @@ kbd, .keys code {
    motion. */
 @media (max-width: 720px), (max-height: 480px) {
   :root[data-motion="full"] :is(.more-shown .more, .currency-shown .currency, .layers.open #layers-body) { animation: arrive 140ms ease-out; }
+  :root[data-motion="full"] .layers:not(.sizing) .panel { transition: height 160ms ease-out; }
 }
 @media (prefers-reduced-motion: no-preference) {
   @media (max-width: 720px), (max-height: 480px) {
     :root:not([data-motion]) :is(.more-shown .more, .currency-shown .currency, .layers.open #layers-body) { animation: arrive 140ms ease-out; }
+    :root:not([data-motion]) .layers:not(.sizing) .panel { transition: height 160ms ease-out; }
   }
 }
 @keyframes arrive { from { opacity: 0; } to { opacity: 1; } }
