@@ -174,14 +174,16 @@
   // Which of what a layer is made of are shown, as the panel keeps it:
   // what differs from everything showing. only is the one shown alone,
   // hidden those switched off, and shown those that are off until asked
-  // for and have been. An item is known by an id of the game's or the
-  // server's, or a gamertag; none is ever used as anything but a key.
+  // for and have been; or, with mode "just", just is all that is shown.
+  // An item is known by an id of the game's or the server's, or a
+  // gamertag; none is ever used as anything but a key.
   const chosen = (v, strict) => {
-    const kept = shape({ only: orNull(TAG), hidden: list(TAG, MAX_HIDDEN), shown: list(TAG, MAX_HIDDEN) })(v, strict);
-    if (kept === BAD) return BAD;
+    const kept = shape({ only: orNull(TAG), hidden: list(TAG, MAX_HIDDEN), shown: list(TAG, MAX_HIDDEN), mode: oneOf('just'), just: list(TAG, MAX_HIDDEN) })(v, strict);
+    if (kept === BAD || (strict && (kept.mode === 'just') !== Array.isArray(kept.just))) return BAD;
+    if (kept.mode === 'just' && kept.just) return { only: kept.only ?? null, hidden: [], mode: 'just', just: kept.just };
     return { only: kept.only ?? null, hidden: kept.hidden || [], ...(kept.shown && kept.shown.length > 0 ? { shown: kept.shown } : {}) };
   };
-  const unchosen = (f) => !f || (f.only === null && f.hidden.length === 0 && !(f.shown && f.shown.length > 0));
+  const unchosen = (f) => !f || (f.only === null && f.mode !== 'just' && f.hidden.length === 0 && !(f.shown && f.shown.length > 0));
   const CHOICE = /^[a-z0-9_-]{1,32}#[a-z0-9_-]{1,48}$/;
   // The choices there are, by the key each is kept under beside the
   // switches. The two of the live layer are older than the rest and have
