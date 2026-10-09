@@ -7,6 +7,8 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -504,7 +506,11 @@ func TestBiomeTilesDrawAChosenSetOfBiomes(t *testing.T) {
 
 	// Every name is one the game has, there are no more of them than the
 	// limit, and a tile is asked for in one way at a time.
-	most := strings.Repeat("desert,", maxTileBiomes-1) + "plains"
+	// A biome named twice is one biome, so a list is as long as the biomes
+	// in it; it is refused for the length it arrives at before it is taken
+	// apart; and a number is a name only for a biome this dimension holds.
+	twice := strings.Repeat("desert,", maxTileBiomes) + "plains"
+	long := strings.Repeat("desert,", maxTileBiomeNames/7+1) + "plains"
 	for query, want := range map[string]int{
 		"?biomes=":                     http.StatusBadRequest,
 		"?except=":                     http.StatusBadRequest,
@@ -514,13 +520,44 @@ func TestBiomeTilesDrawAChosenSetOfBiomes(t *testing.T) {
 		"?biomes=desert&except=plains": http.StatusBadRequest,
 		"?biome=desert&biomes=plains":  http.StatusBadRequest,
 		"?biome=desert&except=plains":  http.StatusBadRequest,
-		"?biomes=" + most:              http.StatusOK,
-		"?biomes=" + most + ",desert":  http.StatusBadRequest,
-		"?except=" + most + ",desert":  http.StatusBadRequest,
+		"?biomes=" + twice:             http.StatusOK,
+		"?except=" + twice:             http.StatusOK,
+		"?biomes=" + long:              http.StatusBadRequest,
+		"?except=" + long:              http.StatusBadRequest,
+		"?biomes=desert,4000000":       http.StatusBadRequest,
+		"?except=unknown_4000000":      http.StatusBadRequest,
+		"?biomes=1,2":                  http.StatusOK,
 		"?biome=":                      http.StatusOK,
 	} {
 		if rec := get(t, s, tile+query); rec.Code != want {
 			t.Errorf("GET %.40s = %d, want %d", query, rec.Code, want)
+		}
+	}
+	// The limit is on how many biomes, counted once each.
+	numbered := func(n int) url.Values {
+		names := make([]string, n)
+		for i := range names {
+			names[i] = strconv.Itoa(i + 1)
+		}
+		return url.Values{"biomes": {strings.Join(names, ",")}}
+	}
+	all := func(uint32) bool { return true }
+	if _, _, ok := tilePick(numbered(maxTileBiomes), all); !ok {
+		t.Errorf("a list of %d biomes is refused", maxTileBiomes)
+	}
+	if _, _, ok := tilePick(numbered(maxTileBiomes+1), all); ok {
+		t.Errorf("a list of %d biomes is taken", maxTileBiomes+1)
+	}
+	// A biome the game's table lacks is taken where the world holds it,
+	// and nowhere else.
+	const odd = 4_000_000
+	for _, c := range []struct {
+		held bool
+		want bool
+	}{{true, true}, {false, false}} {
+		pick, _, ok := tilePick(url.Values{"except": {"unknown_" + strconv.Itoa(odd)}}, func(id uint32) bool { return c.held && id == odd })
+		if ok != c.want || (ok && (len(pick.IDs) != 1 || pick.IDs[0] != odd || !pick.Except)) {
+			t.Errorf("a biome the game has no name for, held by the world %v: taken %v as %+v", c.held, ok, pick)
 		}
 	}
 
