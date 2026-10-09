@@ -175,6 +175,95 @@ test('switching a row oneself lets go of the way back, and a second Only keeps t
   assert.equal(p.part(['Markers', 'Beds'], 'only').getAttribute('aria-pressed'), 'false');
 });
 
+test('a section that is partly on is switched off by its checkbox, and comes back as it was', async () => {
+  const p = await load();
+  await p.press(['Markers', 'Containers']);
+  assert.equal(p.state('Markers'), 'mixed');
+  await p.press(['Markers']);
+  assert.equal(p.state('Markers'), 'false');
+  assert.deepEqual(p.on().filter((key) => key.startsWith('markers/')), []);
+  // And that is what a reload finds, with the way back.
+  const q = await load(p.storage);
+  assert.equal(q.state('Markers'), 'false');
+  await q.press(['Markers']);
+  assert.deepEqual(q.on().filter((key) => key.startsWith('markers/')), ['markers/beds', 'markers/waypoints']);
+  assert.equal(q.state('Markers'), 'mixed');
+  // A section wholly on goes off and comes back wholly on.
+  await q.press(['Mobs']);
+  assert.equal(q.state('Mobs'), 'false');
+  await q.press(['Mobs']);
+  assert.equal(q.state('Mobs'), 'true');
+  // With every row switched off by hand there is nothing remembered, and
+  // the checkbox shows everything.
+  await q.press(['Mobs', 'Hostile']);
+  await q.press(['Mobs', 'Passive']);
+  await q.press(['Mobs']);
+  assert.equal(q.state('Mobs'), 'true');
+});
+
+test('an item that is off until asked for filters nothing until the viewer changes something', async () => {
+  const p = await load();
+  const kinds = [{ id: 'village', label: 'Villages', count: 3 }, { id: 'stronghold', label: 'Strongholds', count: 1, off: true }];
+  const row = p.add({ group: 'structures', id: 'recorded', label: 'Known', facet: 'kinds' }, kinds);
+  row.setCount(4);
+  await p.tick();
+  await p.open('Structures', 'Known');
+  assert.equal(p.state('Structures', 'Known', 'Strongholds'), 'false');
+  assert.equal(row.shows('stronghold'), false);
+  assert.equal(p.state('Structures', 'Known'), 'true', 'the layer is not half on for it');
+  assert.equal(p.state('Structures'), 'true');
+  assert.equal(p.part(['Structures', 'Known'], 'count').textContent, '4');
+  assert.match(p.status(), /^All \d+ shown/);
+  const reset = p.doc.getElementById('layers-body').querySelector('.panel-status').querySelector('button');
+  assert.equal(reset.hidden, true, 'there is nothing to reset');
+  const railed = p.panel.querySelector('.panel-rail').children.find((button) => button.title.startsWith('Structures'));
+  assert.equal(railed.dataset.state, 'all');
+  // Asked for, it is shown; hidden again, it is back at how the page first has it.
+  await p.press(['Structures', 'Known', 'Strongholds']);
+  assert.equal(row.shows('stronghold'), true);
+  assert.equal(reset.hidden, false);
+  await p.press(['Structures', 'Known', 'Strongholds']);
+  assert.equal(reset.hidden, true);
+  assert.equal(p.settings.get('layers')['structures#kinds'], undefined, 'nothing is kept for a choice that is the default');
+  // Something of the viewer's own doing does read as filtered, and Reset undoes exactly that.
+  await p.press(['Structures', 'Known', 'Villages']);
+  assert.equal(p.state('Structures', 'Known'), 'mixed');
+  assert.match(p.status(), /^\d+ of \d+ shown/);
+  assert.equal(railed.dataset.state, 'some');
+  reset.click();
+  await p.tick();
+  assert.equal(p.state('Structures', 'Known'), 'true');
+  assert.equal(row.shows('stronghold'), false);
+  assert.match(p.status(), /^All \d+ shown/);
+});
+
+test('rows that are off as the page first has them do not read as hidden', async () => {
+  const p = await load();
+  assert.match(p.status(), /^All \d+ shown/);
+  await p.press(['Overlays', 'Slime chunks']);
+  assert.match(p.status(), /^All \d+ shown/);
+  await p.press(['Markers', 'Beds']);
+  assert.match(p.status(), /^\d+ of \d+ shown/);
+});
+
+test('an item ticked under a layer that is off brings the layer on as it was chosen, with that item', async () => {
+  const p = await load();
+  await p.open('Mobs', 'Passive');
+  await p.press(['Mobs', 'Passive', 'Cow']);
+  await p.press(['Mobs', 'Passive']);
+  assert.equal(p.state('Mobs', 'Passive', 'Cat'), 'false', 'under a layer that is off, nothing reads as shown');
+  await p.press(['Mobs', 'Passive', 'Cow']);
+  assert.equal(p.state('Mobs', 'Passive'), 'true');
+  for (const id of ['cat', 'cow', 'wolf']) assert.equal(p.rows['live/passive'].shows(id), true, `${id} is shown`);
+  // An item that was hidden and is not the one ticked stays hidden.
+  await p.press(['Mobs', 'Passive', 'Wolf']);
+  await p.press(['Mobs', 'Passive']);
+  await p.press(['Mobs', 'Passive', 'Cat']);
+  assert.equal(p.rows['live/passive'].shows('wolf'), false);
+  assert.equal(p.rows['live/passive'].shows('cat'), true);
+  assert.equal(p.rows['live/passive'].shows('cow'), true);
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {
