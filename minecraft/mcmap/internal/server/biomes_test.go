@@ -470,3 +470,83 @@ func TestBiomeRegionGivesTheExtentOfTheStretchABlockIsIn(t *testing.T) {
 		t.Errorf("without z = %d, want 400", rec.Code)
 	}
 }
+
+// Several biomes may be chosen at once: a list to draw, with nothing else
+// drawn, or a list to leave out. What is left out is left clear, as
+// ungenerated ground is, where one biome picked out dims the rest.
+func TestBiomeTilesDrawAChosenSetOfBiomes(t *testing.T) {
+	s := withBiomes(t)
+	var (
+		plains = color.NRGBA{0x8D, 0xB3, 0x60, 0xFF}
+		desert = color.NRGBA{0xFA, 0x94, 0x18, 0xFF}
+		clear  = color.NRGBA{}
+	)
+	const tile = "/api/biomes/tiles/overworld/0/0/0.png"
+	for query, want := range map[string][2]color.NRGBA{
+		"?biomes=desert":          {clear, desert},
+		"?biomes=plains":          {plains, clear},
+		"?biomes=desert,plains":   {plains, desert},
+		"?biomes=Desert,desert":   {clear, desert},
+		"?except=desert":          {plains, clear},
+		"?except=plains,desert":   {clear, clear},
+		"?except=mushroom_island": {plains, desert},
+		"?biomes=mushroom_island": {clear, clear},
+	} {
+		rec := get(t, s, tile+query)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s = %d", query, rec.Code)
+			continue
+		}
+		if got := [2]color.NRGBA{tilePixel(t, rec, 2, 5), tilePixel(t, rec, 20, 5)}; got != want {
+			t.Errorf("%s draws the plains and the desert as %v, want %v", query, got, want)
+		}
+	}
+
+	// Every name is one the game has, there are no more of them than the
+	// limit, and a tile is asked for in one way at a time.
+	most := strings.Repeat("desert,", maxTileBiomes-1) + "plains"
+	for query, want := range map[string]int{
+		"?biomes=":                     http.StatusBadRequest,
+		"?except=":                     http.StatusBadRequest,
+		"?biomes=desert,narnia":        http.StatusBadRequest,
+		"?except=narnia":               http.StatusBadRequest,
+		"?biomes=desert,":              http.StatusBadRequest,
+		"?biomes=desert&except=plains": http.StatusBadRequest,
+		"?biome=desert&biomes=plains":  http.StatusBadRequest,
+		"?biome=desert&except=plains":  http.StatusBadRequest,
+		"?biomes=" + most:              http.StatusOK,
+		"?biomes=" + most + ",desert":  http.StatusBadRequest,
+		"?except=" + most + ",desert":  http.StatusBadRequest,
+		"?biome=":                      http.StatusOK,
+	} {
+		if rec := get(t, s, tile+query); rec.Code != want {
+			t.Errorf("GET %.40s = %d, want %d", query, rec.Code, want)
+		}
+	}
+
+	// The tag names the set, so one set's tile is never kept as another's;
+	// and the same set is the same tile however it was written.
+	tag := func(query string) string { return get(t, s, tile+query).Header().Get("ETag") }
+	if a, b := tag("?biomes=desert,plains"), tag("?biomes=Plains,desert,plains"); a == "" || a != b {
+		t.Errorf("one set of biomes has two tags: %q and %q", a, b)
+	}
+	seen := map[string]string{}
+	for _, query := range []string{"", "?biome=desert", "?biomes=desert", "?except=desert", "?biomes=desert,plains", "?except=desert,plains", "?biomes=plains"} {
+		got := tag(query)
+		if other, dup := seen[got]; dup || got == "" {
+			t.Errorf("%q carries the tag of %q: %s", query, other, got)
+		}
+		seen[got] = query
+	}
+	version := decodeBody[biomesListing](t, get(t, s, "/api/biomes?dimension=overworld")).Version
+	if cc := get(t, s, tile+"?except=desert&v="+version).Header().Get("Cache-Control"); cc != "private, max-age=31536000, immutable" {
+		t.Errorf("a set's tile asked for by its version: Cache-Control %q", cc)
+	}
+	req := httptest.NewRequest("GET", tile+"?biomes=desert", nil)
+	req.Header.Set("If-None-Match", tag("?biomes=desert"))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Errorf("a set's tile asked for again by its tag = %d, want 304", rec.Code)
+	}
+}

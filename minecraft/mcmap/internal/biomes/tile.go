@@ -17,6 +17,40 @@ const TileSize = 256
 // dark enough to push the terrain under it back, clear enough to read it.
 var dimmed = color.NRGBA{A: 150}
 
+// Pick says which biomes a tile is drawn with. The zero value is all of
+// them.
+type Pick struct {
+	// Only keeps one biome its colour and dims every other: one picked out
+	// against the rest.
+	Only *uint32
+	// IDs are the biomes drawn, and nothing else is; or with Except, the
+	// biomes left out, which are left clear as ungenerated ground is.
+	IDs    []uint32
+	Except bool
+}
+
+// colour is what a biome is drawn in under the pick.
+func (p Pick) colour(id uint32) color.Color {
+	if p.Only != nil {
+		if *p.Only != id {
+			return dimmed
+		}
+	} else if len(p.IDs) > 0 || p.Except {
+		listed := false
+		for _, other := range p.IDs {
+			if other == id {
+				listed = true
+				break
+			}
+		}
+		if listed == p.Except {
+			return color.NRGBA{}
+		}
+	}
+	rgb := rgbOf(id)
+	return color.NRGBA{R: uint8(rgb >> 16), G: uint8(rgb >> 8), B: uint8(rgb), A: 255}
+}
+
 // Tile draws the biomes of one map tile as a PNG, addressed exactly as the
 // terrain tiles are: at zoom 0 a pixel is a block and tile x, y starts at
 // block x*256, z y*256; each zoom below doubles the blocks to a pixel, and
@@ -26,6 +60,14 @@ var dimmed = color.NRGBA{A: 150}
 // With only set, that biome keeps its colour and every other is dimmed.
 // A tile with no generated chunk in it has no picture, and ok is false.
 func (w *World) Tile(d chunks.Dimension, zoom, tx, ty int, only *uint32) (data []byte, ok bool) {
+	return w.TilePicked(d, zoom, tx, ty, Pick{Only: only})
+}
+
+// TilePicked is Tile with any pick of biomes. A tile whose chunks hold
+// only biomes the pick leaves out is still a picture, a clear one: the
+// ground there is generated, and saying so keeps the page from asking
+// again as it would for a tile that is not there.
+func (w *World) TilePicked(d chunks.Dimension, zoom, tx, ty int, pick Pick) (data []byte, ok bool) {
 	l := w.layer(d)
 	if l == nil || len(l.cells) == 0 {
 		return nil, false
@@ -34,12 +76,7 @@ func (w *World) Tile(d chunks.Dimension, zoom, tx, ty int, only *uint32) (data [
 	palette := make(color.Palette, 1, len(l.ids)+1)
 	palette[0] = color.NRGBA{}
 	for _, id := range l.ids {
-		c := color.Color(dimmed)
-		if only == nil || *only == id {
-			rgb := rgbOf(id)
-			c = color.NRGBA{R: uint8(rgb >> 16), G: uint8(rgb >> 8), B: uint8(rgb), A: 255}
-		}
-		palette = append(palette, c)
+		palette = append(palette, pick.colour(id))
 	}
 	img := image.NewPaletted(image.Rect(0, 0, TileSize, TileSize), palette)
 
