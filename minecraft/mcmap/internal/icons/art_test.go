@@ -816,3 +816,114 @@ func TestAnIndexWithARecipeOutOfBoundsIsNotTrusted(t *testing.T) {
 		}
 	}
 }
+
+func faceOfModel(t *testing.T, file string, v view) (Recipe, error) {
+	t.Helper()
+	for _, m := range modelsOf(t, file) {
+		if v.bones == nil {
+			v.bones = defaultBones
+		}
+		return faceRecipe([]drawn{{model: m, textures: []string{"textures/entity/x"}, hides: v.hides}}, v)
+	}
+	t.Fatal("the model did not parse")
+	return Recipe{}, nil
+}
+
+func TestTheHeadIsFoundWhereAModelPutsIt(t *testing.T) {
+	plain := view{cube: -1}
+	// A flat sheet larger than the head is a frill, not the head.
+	r, err := faceOfModel(t, `{"geometry.a": {"bones": [{"name": "head", "cubes": [
+		{"origin": [-8, 0, 0], "size": [16, 14, 0], "uv": [30, 30]},
+		{"origin": [-3, 0, -3], "size": [6, 8, 6], "uv": [0, 0]}]}]}}`, plain)
+	if err != nil || r.Main[2] != 6 || r.Main[3] != 8 {
+		t.Errorf("with a sheet beside it the head is %v %v, want the box", r.Main, err)
+	}
+	// An empty bone called head, with the box on a bone hung off it.
+	r, err = faceOfModel(t, `{"geometry.b": {"bones": [{"name": "head"}, {"name": "body", "cubes": [{"origin": [0, 0, 0], "size": [9, 9, 9], "uv": [0, 20]}]},
+		{"name": "look_at", "parent": "head", "cubes": [{"origin": [-2, 5, -2], "size": [5, 5, 5], "uv": [0, 0]}]}]}}`, plain)
+	if err != nil || r.Layers[0].Src != [4]int{5, 5, 5, 5} {
+		t.Errorf("with the box hung off an empty head the face is %+v %v", r.Layers, err)
+	}
+	// A head set at an angle is still the same rectangle of its texture;
+	// an ear set far off square is left out, and one only just off is not.
+	r, err = faceOfModel(t, `{"geometry.c": {"bones": [{"name": "head", "cubes": [{"origin": [-3, 0, -3], "size": [6, 6, 6], "uv": [0, 0], "rotation": [50, 0, 0]}]},
+		{"name": "far", "parent": "head", "rotation": [0, 0, 40], "cubes": [{"origin": [-3, 6, -3], "size": [2, 2, 2], "uv": [30, 0]}]},
+		{"name": "near", "parent": "head", "rotation": [0, 0, 5], "cubes": [{"origin": [1, 6, -3], "size": [2, 2, 2], "uv": [40, 0]}]}]}}`, plain)
+	if err != nil || len(r.Layers) != 2 || r.H != 8 {
+		t.Errorf("a tilted head with two ears gave %d layers, %d tall, %v", len(r.Layers), r.H, err)
+	}
+	// What the controller leaves undrawn is left out.
+	saddled := `{"geometry.d": {"bones": [{"name": "head", "cubes": [{"origin": [-4, 0, -4], "size": [8, 8, 8], "uv": [0, 0]}]},
+		{"name": "Bridle", "parent": "head", "cubes": [{"origin": [-4, 0, -5], "size": [8, 8, 1], "uv": [0, 40]}]}]}}`
+	if r, _ := faceOfModel(t, saddled, plain); len(r.Layers) != 2 {
+		t.Fatalf("with nothing hidden the bridle is not drawn: %d layers", len(r.Layers))
+	}
+	var c controller
+	if err := json.Unmarshal([]byte(`{"part_visibility": [{"*": true}, {"Bri*": "query.is_saddled"}, {"head": false}, {"head": true}]}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.hides("Bridle") || c.hides("head") || c.hides("body") {
+		t.Error("a controller's word on which bones are drawn was read wrong")
+	}
+	if r, _ := faceOfModel(t, saddled, view{cube: -1, hides: c.hides}); len(r.Layers) != 1 {
+		t.Errorf("a bone the controller hides was drawn: %d layers", len(r.Layers))
+	}
+}
+
+func TestEveryFaceFitsTheSameBoxOrIsNoFace(t *testing.T) {
+	// Horns that make a face wider than the box are dropped for the head
+	// alone; with them it would be drawn smaller than every other.
+	horned := `{"geometry.h": {"bones": [{"name": "head", "cubes": [{"origin": [-7, 0, -4], "size": [14, 12, 8], "uv": [0, 0]},
+		{"origin": [-13, 4, -4], "size": [6, 3, 2], "uv": [0, 30]}, {"origin": [7, 4, -4], "size": [6, 3, 2], "uv": [0, 30]}]}]}}`
+	r, err := faceOfModel(t, horned, view{cube: -1})
+	if err != nil || r.W != 14 || len(r.Layers) != 1 {
+		t.Errorf("a horned head came out %dx%d in %d layers %v, want the head alone", r.W, r.H, len(r.Layers), err)
+	}
+	// A head and neck in one box, cut to the head.
+	r, err = faceOfModel(t, `{"geometry.n": {"bones": [{"name": "head", "cubes": [{"origin": [-4, 0, -3], "size": [8, 18, 6], "uv": [0, 14]}]}]}}`, view{cube: -1, top: 8})
+	if err != nil || r.H != 8 || r.Layers[0].Src != [4]int{6, 20, 8, 8} {
+		t.Errorf("a neck cut to its head came out %+v %v", r.Layers, err)
+	}
+	// A strip is no face, however it is enlarged.
+	for name, size := range map[string]string{"seven by three": "[7, 3, 5]", "three by ten": "[3, 10, 3]"} {
+		if _, err := faceOfModel(t, `{"geometry.s": {"bones": [{"name": "head", "cubes": [{"origin": [0, 0, 0], "size": `+size+`, "uv": [0, 0]}]}]}}`, view{cube: -1}); err == nil {
+			t.Errorf("a head %s was taken for a face", name)
+		}
+	}
+	// Bones named for it are drawn though they do not hang off the head.
+	r, err = faceOfModel(t, `{"geometry.f": {"bones": [{"name": "head", "cubes": [{"origin": [-3, 3, -4], "size": [7, 3, 9], "uv": [0, 13]}]},
+		{"name": "eye", "cubes": [{"origin": [-3, 6, -3], "size": [3, 2, 3], "uv": [0, 0]}]}]}}`, view{cube: -1, with: []string{"eye"}, reach: 3})
+	if err != nil || r.H != 5 || len(r.Layers) != 2 {
+		t.Errorf("a head with its eyes on another bone came out %dx%d %v", r.W, r.H, err)
+	}
+}
+
+func TestABellIsDrawnAtTheSizeOfABlock(t *testing.T) {
+	var terrain atlas
+	if err := json.Unmarshal(stripComments([]byte(syntheticTerrain)), &terrain); err != nil {
+		t.Fatal(err)
+	}
+	recipes, _ := plan(library{}, nil, atlas{}, terrain)
+	bell, ok := recipes["block/bell"]
+	if !ok {
+		t.Fatal("no bell")
+	}
+	item := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for y := 4; y < 12; y++ {
+		for x := 5; x < 11; x++ {
+			item.SetNRGBA(x, y, color.NRGBA{uint8(200 + x), uint8(150 + 6*y), 40, 255})
+		}
+	}
+	img, err := bell.render(map[string]*image.NRGBA{"textures/items/villagebell": item})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chest := isometric(painted(16, 16), painted(16, 16), painted(16, 16), 16, 16, 16)
+	if img.Rect != chest.Rect {
+		t.Errorf("the bell is %v and a chest %v: it is a different size of picture", img.Rect, chest.Rect)
+	}
+	// Each of its pixels is two by two of the picture's, and none blended.
+	if img.NRGBAAt(10, 8) != item.NRGBAAt(5, 4) || img.NRGBAAt(11, 9) != item.NRGBAAt(5, 4) || img.NRGBAAt(12, 8) != item.NRGBAAt(6, 4) {
+		t.Error("the bell is not its item at two pixels to one")
+	}
+}

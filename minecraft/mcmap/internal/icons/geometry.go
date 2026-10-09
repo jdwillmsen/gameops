@@ -90,13 +90,23 @@ type model struct {
 	bones      []bone
 }
 
+// squareWithin is how far, in degrees, a box may be turned and still be
+// drawn as if it were square on: an ear set at a slight angle.
+const squareWithin = 15
+
 func turned(rotation []float64) bool {
 	for _, r := range rotation {
-		if r != 0 {
+		if math.Abs(r) > squareWithin {
 			return true
 		}
 	}
 	return false
+}
+
+// solid reports whether a box has some thickness every way. One that has
+// none is a flat sheet: a fin, a frill, a branch.
+func (c cube) solid() bool {
+	return c.Size[0] >= 1 && c.Size[1] >= 1 && c.Size[2] >= 1
 }
 
 func inRange(values ...float64) bool {
@@ -375,7 +385,7 @@ type placed struct {
 // bottom.
 func place(c cube, boneMirror bool, boneInflate float64, face string) (placed, bool) {
 	src, ok := faceRect(c, boneMirror, face)
-	if !ok || turned(c.Rotation) {
+	if !ok {
 		return placed{}, false
 	}
 	inflate := boneInflate

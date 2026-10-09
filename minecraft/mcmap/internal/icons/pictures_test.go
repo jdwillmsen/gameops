@@ -116,6 +116,8 @@ func markerFiles(t testing.TB) map[string][]byte {
 	for _, path := range structureItems {
 		files["resource_pack/"+path+".png"] = picture(t, 16, 16, yellow)
 	}
+	// A bell is drawn from its item, which must look like something.
+	files["resource_pack/textures/items/villagebell.png"] = asPNG(t, painted(16, 16))
 	// What the blocks are drawn from: the atlas that names each side's
 	// texture, those textures, and a bed's model texture in each colour.
 	files[terrainPath] = []byte(syntheticTerrain)

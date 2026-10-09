@@ -160,11 +160,16 @@ func (s *Source) get(ctx context.Context, address string, limit int64, total *bu
 }
 
 func (s *Source) raw(path string) string {
-	return strings.TrimRight(s.RawURL, "/") + "/" + url.PathEscape(s.Ref) + "/" + path
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.TrimRight(s.RawURL, "/") + "/" + url.PathEscape(s.Ref) + "/" + strings.Join(parts, "/")
 }
 
 var (
-	definitionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.json$`)
+	// One of the samples' own files has a space before its extension.
+	definitionName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._ -]{0,120}\.json$`)
 	texturePath    = regexp.MustCompile(`^textures/items/[a-z0-9_]+(/[a-z0-9_]+)*$`)
 	mobType        = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 )

@@ -268,7 +268,7 @@ still read at a glance. A marker with no picture is the dot or arrow it was befo
 this repository or in the image: the service fetches them at runtime from
 Mojang's public [bedrock-samples](https://github.com/Mojang/bedrock-samples)
 repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
-(249 files and 234 KB, with the marker pictures, the names and the
+(252 files and 229 KB, with the marker pictures, the names and the
 [pictures made from the game's models](#faces-blocks-and-structure-pictures)
 that are fetched with them).
 
@@ -291,7 +291,7 @@ that are fetched with them).
   `raw.githubusercontent.com` the two atlases, 180 definitions, 193 model
   files and 173 render controllers, about 90 spawn-egg textures, 37 marker
   textures, about 150 textures the made pictures are made from, and the
-  language file: 834 requests and 7.7 MB in all, in 16 seconds, measured at
+  language file: 839 requests and 7.7 MB in all, in 13 to 16 seconds, measured at
   the default pin. Before faces and blocks were made it was 319 requests
   and 1.6 MB in under ten seconds. Most of the growth is the listing:
   three directories are wanted, the API lists one directory to a request,
@@ -386,7 +386,7 @@ no plate is cased round its own outline, in the layer's colour and then
 in the dark, so a chest is a chest's shape and still reads on snow.
 
 **Mob picture** chooses between a mob's face and its spawn egg. A mob
-with no face (20 of 92 at the default pin) is its egg under either, and
+with no face (17 of 92 at the default pin) is its egg under either, and
 one with a face and no egg its face.
 
 **Size is chosen apart from style**: the box a picture is drawn in is 12,
@@ -554,13 +554,13 @@ own from the game's models, at the fetch and from the same pin:
 
 | Key | What it is | Made from |
 |---|---|---|
-| `face/<type>` | A mob's face, 72 of the 92 mob types at the default pin | Its model and its texture |
+| `face/<type>` | A mob's face, 75 of the 92 mob types at the default pin | Its model and its texture |
 | `villager/<profession>` | A villager's face in each of 14 professions, as a structure's sheet lists them | The same, with the profession's texture laid over the skin |
 | `structure/<kind>` | The face of the mob that stands for the structure | That mob's face, or the item above |
 | `block/chest`, `trapped_chest`, `ender_chest`, `barrel`, `spawner`, `vault` | The block seen from above and to one side | The three textures the terrain atlas names for its top, front and side |
 | `block/shulker_<colour>`, `block/shulker_undyed` | Likewise | The lid and base of the texture its model is wrapped in |
 | `block/bed_<colour>` | Likewise, 16 by 6 by 32 | The two slabs of the texture its model is wrapped in |
-| `block/bell` | The bell as the game shows it in the hand | `items/villagebell`, which the atlas names as `bell_carried`. A bell is no box, and its three sides drawn as one are three bells adrift |
+| `block/bell` | The bell as the game shows it in the hand, at two pixels to each of its own so that it is the size a block's picture is | `items/villagebell`, which the atlas names as `bell_carried`. A bell is no box, and its three sides drawn as one are three bells adrift |
 
 **A face** is worked out the way the game would draw the mob, and nothing
 about any mob is guessed:
@@ -575,30 +575,42 @@ about any mob is guessed:
    in either of their two layouts, with what it inherits put under it
    (`geometry.zombie.husk:geometry.zombie`).
 3. The head is the bone called `head`, or failing that one of a few other
-   spellings, or the body. Its largest box is the face, and the front of
-   that box is found on the texture the way a box unfolds: for a box of
+   spellings, or the body; where that bone is empty, the box is looked for
+   on the bones hung off it. Its largest box with some thickness is the
+   face (a flat sheet is a frill or a branch), and the front of that box
+   is found on the texture the way a box unfolds: for a box of
    whole-number size `x, y, z` wrapped from `u, v`, the rectangle at
    `u+z, v+z` of `x` by `y`; or where the box says so face by face, the
-   rectangle it gives. A mirrored box is drawn turned left to right.
+   rectangle it gives. A mirrored box is drawn turned left to right. A
+   head set at an angle is still that rectangle.
 4. Every other box on the head and on the bones that hang off it is drawn
    in its place, nearest last: a snout, horns, a hat, a villager's nose.
-   A box turned out of square is left out, since its face is no rectangle
-   of the texture; so is a bone the model never draws, and anything
-   further from the head than half its size. Each controller's textures
-   are laid over the last, which is how a stray gets its clothes and a
-   villager its profession.
+   A box turned more than 15 degrees out of square is left out, since its
+   face is no rectangle of the texture; so is a bone the model never
+   draws, one the controller's `part_visibility` hides on a default mob
+   (a horse's saddle and bridle), and anything further from the head than
+   half its size. Each controller's textures are laid over the last,
+   which is how a stray gets its clothes and a villager its profession.
 5. The result comes out square, one pixel to each pixel of the texture and
    never blended, with the head in the middle of whatever room its shape
    leaves. It is not enlarged here: the page enlarges it by a whole number
    of screen pixels, which a size fixed on the server could not suit.
 
-A face that comes out blank, nearly all one colour, or from a head under
-three pixels across is rejected, and the mob keeps its spawn egg. So does
-any mob the table of overrides says to leave alone. That table
-(`internal/icons/overrides.go`) is data, one line a mob with its reason,
-for the mobs whose face is not the front of a box called head. At the
-default pin 58 faces are made with no override, 14 with one, and 20 mobs
-keep their egg:
+**Every face is made for the same box.** The page fits a face into a
+square box (16 pixels at the usual size): the most whole screen pixels to
+each of its own that fit, centred, the rest left clear; one larger than
+the box is blended down to it. So that this gives faces of a like size,
+a face whose ears or horns make it wider or taller than 16 is made again
+as the head alone; one under 4 pixels along its shorter side, or more
+than two and a half times as long as it is tall, is a strip that would
+be a speck, and is not made.
+
+A face that comes out blank, nearly all one colour, or such a strip is
+rejected, and the mob keeps its spawn egg. So does any mob the table of
+overrides says to leave alone. That table (`internal/icons/overrides.go`)
+is data, one line a mob with its reason, for the mobs whose face is not
+the front of a box called head. At the default pin 51 faces are made with
+no override, 24 with one, and 17 mobs keep their egg:
 
 | Mobs | What is done | Why |
 |---|---|---|
@@ -608,14 +620,27 @@ keep their egg:
 | wither | Its usual skin, its middle head | Its controller picks the pale skin of one just summoned |
 | shulker | The shell | Its head is seen only when it opens |
 | creeper | Without its second controller | That one draws the charge of a creeper struck by lightning |
-| hoglin, zoglin | The top of the head's box | The head hangs down |
+| copper golem | Its own model and texture | The first of its controllers draws the flower it sometimes holds |
 | guardian, elder guardian | Without the spikes | They would leave the eye a speck among them |
 | pufferfish | Its largest form | The smallest is three pixels across |
-| horse, donkey, mule, skeleton horse, zombie horse | Spawn egg | A narrow box with the eyes on its sides: a post from the front, a bar from the side |
-| cod, salmon, tropical fish, silverfish, endermite, tadpole | Spawn egg | A fish is its side, which is a line at a marker's size; the tropical fish's colours are laid on by the game |
-| armadillo, goat | Spawn egg | The head is set at an angle |
-| parrot, bat | Spawn egg | A head two and four pixels wide |
-| allay, creaking, dolphin, frog, turtle | Spawn egg | The face is see-through, lit from another texture, a blank, or has its eyes on another bone or on the sides |
+| llama, trader llama | The top 8 of the head's box | Head and neck are one box 18 tall |
+| camel, camel husk | The third box of the head bone | The two larger are its neck |
+| ravager | The top 16 of its head, alone | The head is 16 by 20 with the jaw |
+| frog | The lip with the two eyes above it | The eyes are on a bone of their own |
+| bat | The head with its ears | The head alone is four pixels wide |
+| dolphin, turtle | The head from the side | The front is a blank; the eye and the beak are on the side |
+| nautilus, zombie nautilus | The shell from the side | It is a spiral only from there |
+| horse, donkey, mule, skeleton horse, zombie horse | Spawn egg | A horse is known in profile, and its profile is its neck, a bone set 30 degrees off square that a flat view cannot draw; the head alone is a bar with an eye |
+| hoglin, zoglin | Spawn egg | The head is a long box hung at a slant: its front is a brow six pixels tall, and its top is not a face |
+| sniffer | Spawn egg | Its face is behind a beak that fills the front of its head |
+| phantom, armadillo | Spawn egg | A head seven pixels by three, and three by five |
+| parrot, tadpole | Spawn egg | Two and three pixels wide |
+| cod, salmon, tropical fish, silverfish, endermite | Spawn egg | A fish is its side, which is a line at a marker's size; the tropical fish's colours are laid on by the game; the two arthropods are rows of segments with no face |
+
+Goat, allay and creaking need no override: a goat's head is set at an
+angle, an allay's hangs off an empty bone, and a creaking's largest
+"box" is a flat sheet of branches, all of which the steps above allow
+for.
 
 Some of the model textures are TGA files, which Go's standard
 library does not read, so the service has a reader of its own for the
@@ -2622,7 +2647,7 @@ opens at the same place.
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
 | `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume, or that `ICONS_ENABLED=false` |
-| `mcmap_icons_marker_pictures` | Marker, structure, face and block pictures held, 170 when whole at the default pin. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
+| `mcmap_icons_marker_pictures` | Marker, structure, face and block pictures held, 173 when whole at the default pin. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
 | `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 | `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind,certainty}` | Structures on each layer at the last survey; `certainty` is `predicted`, or `candidate` for a site in terrain not generated yet |
