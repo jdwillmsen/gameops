@@ -9,6 +9,8 @@
 const assert = require('node:assert/strict');
 const { page } = require('./dom.cjs');
 
+// What the page hands back is made in the page, so it is compared as written out.
+const same = (got, want) => assert.equal(JSON.stringify(got), JSON.stringify(want));
 const tick = () => new Promise((done) => setTimeout(done, 0));
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
@@ -262,6 +264,95 @@ test('an item ticked under a layer that is off brings the layer on as it was cho
   assert.equal(p.rows['live/passive'].shows('wolf'), false);
   assert.equal(p.rows['live/passive'].shows('cat'), true);
   assert.equal(p.rows['live/passive'].shows('cow'), true);
+});
+
+const many = (n) => Array.from({ length: n }, (_, i) => ({ id: `w${i}`, label: `Waypoint ${String(i).padStart(3, '0')}` }));
+
+test('"only this, and that one too" over hundreds of items is kept as the two, and is the two after a reload', async () => {
+  const waypoints = many(260);
+  const p = await load(new Map(), { waypoints });
+  await p.open('Markers', 'Waypoints');
+  await p.press(['Markers', 'Waypoints', 'Waypoint 003'], 'only');
+  await p.press(['Markers', 'Waypoints', 'Waypoint 007']);
+  const kept = p.settings.get('layers')['markers#waypoints'];
+  same(kept, { only: null, hidden: [], mode: 'just', just: ['w3', 'w7'] });
+  const q = await load(p.storage, { waypoints });
+  const shown = waypoints.filter((w) => q.rows['markers/waypoints'].shows(w.id)).map((w) => w.id);
+  assert.deepEqual(shown, ['w3', 'w7']);
+  // A third is added to the list, and one of them taken off it.
+  await q.open('Markers', 'Waypoints');
+  await q.press(['Markers', 'Waypoints', 'Waypoint 001']);
+  await q.press(['Markers', 'Waypoints', 'Waypoint 003']);
+  same(q.settings.get('layers')['markers#waypoints'].just.sort(), ['w1', 'w7']);
+  // Showing them all again is "everything", and nothing is kept for it.
+  await q.menu(['Markers', 'Waypoints'], 'Show all in group');
+  assert.equal(q.settings.get('layers')['markers#waypoints'], undefined);
+});
+
+test('more hides than are kept turn into the shorter list of what is shown, and none is dropped', async () => {
+  const waypoints = many(260);
+  const p = await load(new Map(), { waypoints });
+  const handle = p.layers.facet('markers', 'waypoints');
+  // Hidden one at a time, as their checkboxes would: 210 of the 260.
+  await p.open('Markers', 'Waypoints');
+  await p.part(['Markers', 'Waypoints'], 'more').click();
+  for (let i = 0; i < 210; i++) {
+    // The list shows forty until asked for the rest.
+    const rest = p.li('Markers', 'Waypoints').querySelectorAll('.rest')[0];
+    if (rest) { rest.querySelector('button').click(); await p.tick(); }
+    await p.press(['Markers', 'Waypoints', `Waypoint ${String(i).padStart(3, '0')}`]);
+  }
+  const kept = p.settings.get('layers')['markers#waypoints'];
+  assert.equal(kept.mode, 'just');
+  assert.equal(kept.just.length, 50);
+  assert.equal(handle.shows('w209'), false);
+  assert.equal(handle.shows('w210'), true);
+  const q = await load(p.storage, { waypoints });
+  assert.equal(waypoints.filter((w) => q.rows['markers/waypoints'].shows(w.id)).length, 50);
+  assert.equal(q.rows['markers/waypoints'].shows('w209'), false);
+  assert.equal(q.li('Markers', 'Waypoints').querySelectorAll('.note')[0].textContent, '');
+});
+
+test('where neither list is short enough to keep, the panel says what will not be kept', async () => {
+  const waypoints = many(500);
+  const p = await load(new Map(), { waypoints });
+  await p.open('Markers', 'Waypoints');
+  p.li('Markers', 'Waypoints').querySelectorAll('.rest')[0].querySelector('button').click();
+  await p.tick();
+  for (let i = 0; i < 250; i++) await p.press(['Markers', 'Waypoints', `Waypoint ${String(i).padStart(3, '0')}`]);
+  const note = p.li('Markers', 'Waypoints').children.find((child) => child.classList.contains('note')).textContent;
+  assert.match(note, /^More of these are chosen one by one than are kept: the first 200/);
+  // On this page all 250 are hidden; what is kept is the first 200, the same every time.
+  assert.equal(p.rows['markers/waypoints'].shows('w249'), false);
+  const kept = p.settings.get('layers')['markers#waypoints'];
+  assert.equal(kept.hidden.length, 200);
+  assert.equal(kept.hidden[0], 'w0');
+  assert.equal(kept.hidden[199], 'w199');
+});
+
+test('an id that has been in none of its lists for a month is dropped, and one that comes back is not', async () => {
+  const p = await load();
+  await p.open('Markers', 'Waypoints');
+  await p.press(['Markers', 'Waypoints', 'Home']);
+  // The waypoint called Mine is hidden too, and then deleted in the game.
+  await p.press(['Markers', 'Waypoints', 'Mine']);
+  const only = [{ id: 'home', label: 'Home' }];
+  const q = await load(p.storage, { waypoints: only });
+  await q.tick(); await new Promise((done) => setTimeout(done, 30));
+  let kept = q.settings.get('layers')['markers#waypoints'];
+  same(kept.hidden.sort(), ['home', 'mine']);
+  same(kept.missing, ['mine']);
+  // Ten days on it is still kept, and if it is back by then it is off the note.
+  const back = await load(new Map(q.storage), { days: 10 });
+  await new Promise((done) => setTimeout(done, 30));
+  assert.equal(back.settings.get('layers')['markers#waypoints'].missing, undefined);
+  assert.equal(back.rows['markers/waypoints'].shows('mine'), false);
+  // Still gone a month after it was first missed: dropped, and the other kept.
+  const r = await load(q.storage, { waypoints: only, days: 31 });
+  await new Promise((done) => setTimeout(done, 30));
+  kept = r.settings.get('layers')['markers#waypoints'];
+  same(kept.hidden, ['home']);
+  assert.equal(kept.missing, undefined);
 });
 
 async function main() {

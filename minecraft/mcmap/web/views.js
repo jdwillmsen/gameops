@@ -78,7 +78,7 @@
   // Each is over things the game names. Which players, named mobs and
   // waypoints are hidden is left out: those are not the viewer's to hand
   // round in a link.
-  const SHARED = ['structures#recorded', 'structures#predicted', 'structures#candidate', 'markers#containers', 'markers#beds', 'biomes#items'];
+  const SHARED = ['structures#recorded', 'structures#predicted', 'structures#candidate', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs'];
   const KEYS = KNOWN.map(([key]) => key);
   const LABELS = new Map(KNOWN);
   // The appearance settings in the order a link lists them, likewise only
@@ -630,7 +630,7 @@
       out.y = {};
       SHARED.forEach((key, at) => {
         const f = view.items[key];
-        if (f && (f.only !== null || f.hidden.length > 0 || (f.shown && f.shown.length > 0))) out.y[at] = { o: f.only, h: f.hidden, ...(f.shown ? { s: f.shown } : {}) };
+        if (f && (f.only !== null || f.mode === 'just' || f.hidden.length > 0 || (f.shown && f.shown.length > 0))) out.y[at] = { o: f.only, h: f.hidden, ...(f.shown ? { s: f.shown } : {}), ...(f.mode === 'just' ? { j: f.just } : {}) };
       });
     }
     if (view.biome !== undefined) out.b = view.biome;
@@ -688,8 +688,8 @@
       view.items = Object.fromEntries(SHARED.map((key) => [key, { only: null, hidden: [] }]));
       for (const [at, f] of Object.entries(raw.y)) {
         if (!/^(0|[1-9]\d?)$/.test(at) || Number(at) >= SHARED.length) return bad;
-        if (f === null || typeof f !== 'object' || Array.isArray(f) || Object.keys(f).some((key) => !['o', 'h', 's'].includes(key))) return bad;
-        view.items[SHARED[Number(at)]] = { only: f.o, hidden: f.h, ...(f.s !== undefined ? { shown: f.s } : {}) };
+        if (f === null || typeof f !== 'object' || Array.isArray(f) || Object.keys(f).some((key) => !['o', 'h', 's', 'j'].includes(key))) return bad;
+        view.items[SHARED[Number(at)]] = { only: f.o, hidden: f.h, ...(f.s !== undefined ? { shown: f.s } : {}), ...(f.j !== undefined ? { mode: 'just', just: f.j } : {}) };
       }
     }
     if (raw.b !== undefined) view.biome = raw.b;

@@ -185,7 +185,9 @@ class Element {
 
 // A page as it is sent, as far as the two scripts look at it, with what
 // the browser keeps given from outside so that one load can follow another.
-function page(storage, { compact = false, files = ['settings.js', 'layers.js'] } = {}) {
+function page(storage, { compact = false, files = ['settings.js', 'layers.js'], days = 0 } = {}) {
+  // The day it is, for what is only done after some have passed.
+  const clock = class extends Date { static now() { return Date.now() + days * 86_400_000; } };
   const doc = { listeners: new Map(), activeElement: null };
   doc.createElement = (tag) => new Element(doc, tag);
   doc.createElementNS = (ns, tag) => new Element(doc, tag);
@@ -225,9 +227,10 @@ function page(storage, { compact = false, files = ['settings.js', 'layers.js'] }
     innerWidth: 1440,
     innerHeight: 900,
     console,
-    setTimeout,
+    // Nothing here is worth waiting for: a wait of seconds is a moment.
+    setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms || 0, 5)),
     clearTimeout,
-    Date,
+    Date: clock,
     Node: Element,
     Element,
     HTMLInputElement: class {},

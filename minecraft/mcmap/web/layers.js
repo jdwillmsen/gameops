@@ -203,35 +203,71 @@
   // --- which items are shown ---------------------------------------------------
   //
   // What a layer is made of can each be hidden or shown alone, and the
-  // choice is kept as what differs from everything showing: { only,
-  // hidden, shown }. With only set, that one is drawn and nothing else,
-  // and hidden is kept as it was underneath, which is what letting go of
-  // "only" goes back to. shown is for the few items that are off until
-  // asked for. One choice may be shared by several layers, as the types
-  // of mob are across their four rows: "only creepers" is no other mob,
-  // whichever row the others are in. It is kept beside the switches as
-  // "<group>#<name>", in the form the live layer always kept its own.
+  // choice is kept as what differs from everything showing. It is in one
+  // of two forms. As { only, hidden, shown } everything is drawn but what
+  // is in hidden, and shown is for the few items that are off until asked
+  // for; an item that turns up later is drawn. As { mode: 'just', just }
+  // nothing is drawn but what is in just, and an item that turns up later
+  // is not: this is what "only this, and that one too" comes to, and what
+  // a long list of hides is turned into when the other list is the
+  // shorter one to keep. With only set, that one is drawn and nothing
+  // else, and the rest of the choice is kept as it was underneath, which
+  // is what going back from "only" returns to. One choice may be shared
+  // by several layers, as the types of mob are across their four rows:
+  // "only creepers" is no other mob, whichever row the others are in. It
+  // is kept beside the switches as "<group>#<name>"; the first form is the
+  // one the live layer always kept its own in.
+  //
+  // An item that has gone for good, a player who left or a waypoint that
+  // was deleted, would otherwise be kept for ever. Each choice notes which
+  // of its ids were nowhere in its lists, and when; an id that is still
+  // nowhere a month later is dropped. One that comes back in between is
+  // taken off the note.
+  const DAY_MS = 86_400_000;
+  const GRACE_DAYS = 30;
+  // How long after a choice's lists first fill it is looked over, so that
+  // a list still arriving is not taken for a short one.
+  const LOOK_OVER_MS = 10_000;
+  const sameSet = (a, b) => (a === null || b === null ? a === b : a.size === b.size && [...a].every((id) => b.has(id)));
+
   function readFacet(f) {
     const kept = recall(f.group, f.name);
     const was = kept !== null && typeof kept === 'object' && !Array.isArray(kept) ? kept : {};
     const list = (v) => new Set(Array.isArray(v) ? v.filter(text).slice(0, MAX_HIDDEN) : []);
-    const next = { only: text(was.only) ? was.only : null, hidden: list(was.hidden), shown: list(was.shown) };
-    const same = next.only === f.only && next.hidden.size === f.hidden.size && next.shown.size === f.shown.size
-      && [...next.hidden].every((id) => f.hidden.has(id)) && [...next.shown].every((id) => f.shown.has(id));
-    Object.assign(f, next);
+    const next = {
+      only: text(was.only) ? was.only : null,
+      hidden: list(was.hidden),
+      shown: list(was.shown),
+      just: was.mode === 'just' ? list(was.just) : null,
+      missing: list(was.missing),
+      checked: Number.isFinite(was.checked) ? was.checked : null,
+    };
+    const same = next.only === f.only && sameSet(next.hidden, f.hidden) && sameSet(next.shown, f.shown) && sameSet(next.just, f.just);
+    Object.assign(f, next, { over: false });
     return !same;
   }
 
-  const plain = (f) => f.only === null && f.hidden.size === 0 && f.shown.size === 0;
-  const stateOf = (f) => ({ only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...(f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {}) });
+  const plain = (f) => f.only === null && f.just === null && f.hidden.size === 0 && f.shown.size === 0;
+  // The choice as it is kept and as a saved view carries it. Past the
+  // most that is kept the list is cut at the end, so what is kept is the
+  // same from one write to the next, and the panel says that it was cut.
+  const stateOf = (f) => (f.just !== null
+    ? { only: f.only, hidden: [], mode: 'just', just: [...f.just].slice(0, MAX_HIDDEN) }
+    : { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...(f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {}) });
+  // And with the note of what has gone, which is this browser's own.
+  const keptOf = (f) => (plain(f) ? null : { ...stateOf(f), ...(f.missing.size > 0 && f.checked !== null ? { missing: [...f.missing].slice(0, MAX_HIDDEN), checked: f.checked } : {}) });
 
   function facetOf(group, name, { off = [] } = {}) {
     const key = `${group}#${name}`;
     let f = facets.get(key);
     if (!f) {
-      f = { key, group, name, only: null, hidden: new Set(), shown: new Set(), off: new Set(), rows: new Set(), listeners: [] };
+      f = { key, group, name, only: null, hidden: new Set(), shown: new Set(), just: null, missing: new Set(), checked: null, over: false, off: new Set(), rows: new Set(), listeners: [], looked: false };
       readFacet(f);
-      f.shows = (id) => (f.only !== null ? f.only === id : !f.hidden.has(id) && (!f.off.has(id) || f.shown.has(id)));
+      f.shows = (id) => {
+        if (f.only !== null) return f.only === id;
+        if (f.just !== null) return f.just.has(id);
+        return !f.hidden.has(id) && (!f.off.has(id) || f.shown.has(id));
+      };
       // What a layer's script holds of it: enough to ask and to be told.
       f.handle = {
         shows: f.shows,
@@ -252,28 +288,99 @@
   const known = (f) => [...f.rows].flatMap((row) => row.list.map((item) => item.id));
 
   function showItem(f, id, on) {
-    if (f.off.has(id)) {
+    if (f.just !== null) {
+      if (on) f.just.add(id); else f.just.delete(id);
+    } else if (f.off.has(id)) {
       if (on) f.shown.add(id); else f.shown.delete(id);
       f.hidden.delete(id);
     } else if (on) f.hidden.delete(id); else f.hidden.add(id);
   }
 
+  // Brings a choice to the form that says the same in fewer ids, where
+  // one form has run past the most that is kept; and to "everything" once
+  // nothing listed is left out. Only when the viewer changes the choice:
+  // the two forms differ in what becomes of an item that turns up later,
+  // and that must not change under them because a list grew.
+  function settle(f) {
+    const all = known(f);
+    if (f.just !== null) {
+      if (all.length > 0 && all.every((id) => f.just.has(id))) {
+        f.shown = new Set(all.filter((id) => f.off.has(id)));
+        f.hidden = new Set();
+        f.just = null;
+      } else if (f.just.size > MAX_HIDDEN) {
+        const out = all.filter((id) => !f.just.has(id));
+        if (out.length <= MAX_HIDDEN) {
+          f.hidden = new Set(out.filter((id) => !f.off.has(id)));
+          f.shown = new Set(all.filter((id) => f.off.has(id) && f.just.has(id)));
+          f.just = null;
+        }
+      }
+    } else if (f.hidden.size > MAX_HIDDEN) {
+      const drawn = all.filter((id) => f.shows(id));
+      if (drawn.length < f.hidden.size) {
+        f.just = new Set(drawn);
+        f.hidden = new Set();
+        f.shown = new Set();
+      }
+    }
+    f.over = (f.just !== null ? f.just.size : Math.max(f.hidden.size, f.shown.size)) > MAX_HIDDEN;
+  }
+
+  // The whole of a choice as it is on this page, which past the most that
+  // is kept is more than is written.
+  const entire = (f) => JSON.stringify([f.only, [...f.hidden], [...f.shown], f.just === null ? null : [...f.just]]);
+
   function changeFacet(f, change) {
-    const before = JSON.stringify(stateOf(f));
+    const before = entire(f);
     change();
-    if (JSON.stringify(stateOf(f)) === before) return;
-    retain(f.group, f.name, plain(f) ? null : stateOf(f));
+    settle(f);
+    if (entire(f) === before) return;
+    retain(f.group, f.name, keptOf(f));
     for (const fn of f.listeners) call(fn);
     schedule();
   }
 
-  // Leaving "only this" by a switch: everything else that is here stays
-  // hidden, and the switch does what it says.
+  // Leaving "only this" by a switch: it is still that one and nothing
+  // else, now as a list that the switch can add to.
   function leaveOnly(f) {
     if (f.only === null) return;
-    for (const id of known(f)) if (id !== f.only) showItem(f, id, false);
-    showItem(f, f.only, true);
+    f.just = new Set([f.only]);
+    f.hidden = new Set();
+    f.shown = new Set();
     f.only = null;
+  }
+
+  // Looks a choice over for ids that are in none of its lists any more.
+  // Asked once a load, a while after its lists have something in them.
+  function lookOver(f) {
+    const all = new Set(known(f));
+    if (all.size === 0 || plain(f)) return;
+    const chosen = f.just !== null ? [...f.just] : [...f.hidden, ...f.shown];
+    const gone = new Set(chosen.filter((id) => !all.has(id)));
+    const today = Math.floor(Date.now() / DAY_MS);
+    const was = JSON.stringify(keptOf(f));
+    if (f.checked === null || f.missing.size === 0) {
+      f.missing = gone;
+      f.checked = today;
+    } else if (today - f.checked >= GRACE_DAYS) {
+      for (const id of f.missing) {
+        if (!gone.has(id)) continue;
+        for (const set of [f.hidden, f.shown, f.just]) if (set !== null) set.delete(id);
+        gone.delete(id);
+      }
+      // "Just these" with none of them left would hide whatever came next.
+      if (f.just !== null && f.just.size === 0) f.just = null;
+      if (f.only !== null && f.missing.has(f.only) && !all.has(f.only)) f.only = null;
+      f.missing = gone;
+      f.checked = today;
+    } else {
+      for (const id of [...f.missing]) if (!gone.has(id)) f.missing.delete(id);
+    }
+    if (JSON.stringify(keptOf(f)) === was) return;
+    retain(f.group, f.name, keptOf(f));
+    for (const fn of f.listeners) call(fn);
+    schedule();
   }
 
   // --- rows ----------------------------------------------------------------------
@@ -505,6 +612,11 @@
           row.list.push(item);
         }
         for (const id of [...row.items.keys()]) if (!seen.has(id)) row.items.delete(id);
+        const f = row.facet;
+        if (f && !f.looked && row.list.length > 0) {
+          f.looked = true;
+          setTimeout(() => lookOver(f), LOOK_OVER_MS);
+        }
         schedule();
       },
       // Whether one of its items is on the map: the row is on and the
@@ -606,6 +718,7 @@
     for (const f of facets.values()) {
       changeFacet(f, () => {
         f.only = null;
+        f.just = null;
         f.hidden.clear();
         f.shown.clear();
       });
@@ -788,12 +901,13 @@
     return Array.isArray(was) ? was.filter(text) : [];
   })());
 
+  const OVER = `More of these are chosen one by one than are kept: the first ${MAX_HIDDEN} will be as they are next time, the rest shown or hidden as they were at first. Only, or switching the whole group, keeps any number.`;
   const weight = (item) => (item.count === null ? 1 : item.count);
   const itemOn = (row, item) => row.on && (!row.facet || row.facet.shows(item.id));
   // An item that is off until asked for and has not been asked for is as
   // the page first has it: it is not shown, and it is not something the
   // viewer has hidden. It makes nothing read as filtered.
-  const standing = (f, id) => f.only === null && f.off.has(id) && !f.shown.has(id) && !f.hidden.has(id);
+  const standing = (f, id) => f.only === null && f.just === null && f.off.has(id) && !f.shown.has(id) && !f.hidden.has(id);
   const hiddenIn = (row, item) => !row.facet.shows(item.id) && !standing(row.facet, item.id);
   // A row is on, off, or on with some of what it is made of hidden.
   function rowState(row) {
@@ -898,7 +1012,7 @@
       twisted: whole ? true : twisted,
       open,
       count: countOf(row),
-      note: row.note,
+      note: row.facet && row.facet.over ? `${row.note ? `${row.note} ` : ''}${OVER}` : row.note,
       soloed: whole ? alone('all', row.section.id) : alone(row.section.id, row.key),
     });
     put(dom, 'body', row.body, (node) => {
