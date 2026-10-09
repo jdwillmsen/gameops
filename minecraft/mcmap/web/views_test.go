@@ -189,7 +189,7 @@ func TestSettingsFilesAreReadStrictlyAndReplaceNoView(t *testing.T) {
 		}
 	}
 	settings := read(t, "settings.js")
-	if !bytes.Contains(settings, []byte("const read = shape({ v: int(VERSION, VERSION), ...PORTABLE })(v, true);")) {
+	if !bytes.Contains(settings, []byte("const read = shape({ v: int(1, VERSION), ...PORTABLE })(v, true);")) {
 		t.Error("settings.js no longer reads a whole record strictly")
 	}
 	// Nothing is taken from a file until the viewer has said so.

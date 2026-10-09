@@ -38,7 +38,7 @@ func TestOnlyTheSettingsScriptTouchesTheBrowsersStorage(t *testing.T) {
 	js := usesNoMarkupSink(t, "settings.js")
 	for _, need := range []string{
 		"const KEY = 'mcmap.settings';",
-		"const VERSION = 1;",
+		"const VERSION = 2;",
 		"const MAX_CHARS = 200_000;",
 		// A record too large is refused whole, and one from a later
 		// version of the page is read and left as it is.
