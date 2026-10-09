@@ -1292,7 +1292,8 @@ types it shows, asks the panel to keep it beside them:
 beside the switches under `<group>#<name>` (null removes it) and
 `recall(group, name)` reads it back, or null. Small is three levels of
 plain values, strings of up to 64 characters and lists of up to 200;
-anything else is dropped when it is read back. What comes back is the
+anything else is dropped when it is read back, and so is a key that is a
+name every object has, such as `constructor`. What comes back is the
 viewer's storage and is checked by whoever reads it.
 
 `onToggle` is called with the new value when the viewer changes the row,
@@ -1510,8 +1511,8 @@ and outlined while it has the focus.
 
 **What the page keeps.** Everything the viewer chooses is kept in the
 browser and nowhere else, as one record under `mcmap.settings`, written and
-read by `settings.js` alone; no other script touches the browser's storage.
-The record has a version (`v: 1`) and these parts:
+read by `settings.js` alone, which the other scripts reach as
+`window.mcmapSettings`. The record has a version (`v: 1`) and these parts:
 
 | Part | Holds |
 |---|---|
@@ -1524,17 +1525,20 @@ The record has a version (`v: 1`) and these parts:
 | `biome` | The one biome picked out, or null |
 | `look` | The appearance settings |
 | `views` | The saved views, their order, which are hidden, and which the page opens with |
+| `old` | A stamp of each old key as it was last seen, to tell when a script from before has written one |
 
 Every part is read against a closed description: a value of the wrong type
 is put back to its default, a number out of range is brought to the nearer
 bound, and a key nobody described is dropped. The record may come to
 200,000 characters; a change that would take it past that is refused whole
-and said. A browser that refuses storage, or has no room left, gets a page
-that works the same on what it holds in memory, and the Views and
+and said, and a record found larger than that, which the page never
+writes, is left exactly as it is while the page works from its defaults
+and says so. A browser that refuses storage, or has no room left, gets a
+page that works the same on what it holds in memory, and the Views and
 Appearance sheets say that nothing will outlast the visit. A record
 written by a later version of the page is read for what this one knows and
-left as it is. A second tab's write is taken in, so that two tabs do not
-undo each other.
+left as it is. A second tab's write is taken in, and its theme is on this
+tab at once, so that two tabs do not undo each other.
 
 Before there was one record, each script kept its own key, and they are
 carried over the first time the record is made:
@@ -1552,10 +1556,23 @@ carried over the first time the record is made:
 
 None of the old keys is ever removed, and the first five are still written
 in the form they always had whenever their part changes: the page and its
-scripts are cached apart for five minutes, and a script from before reads
-only those. A script that meets a page from before `settings.js` works
-from its defaults and keeps nothing for those minutes. The grid and the
-biome picked out were not kept before and are now.
+scripts are cached apart for five minutes, and for that long after a
+release a page may have scripts of two ages. Three things keep the
+viewer's choices through it. The record is under a name of its own and
+not on `window.mcmap`, which an `app.js` from before replaces. A script
+that still finds no record, on a page from before `settings.js`, reads
+and writes the key it always had, exactly as it did. And since a script
+from before writes only the old key, the record keeps a stamp of each old
+key as it last saw it and, on load, takes the value of any that has
+changed since; the old keys are written before the record and read back,
+so one that could not be written is not later taken for a newer choice.
+Checked in a browser with the old page and the old `app.js` from the
+release before, in all four mixes with the new ones: the layers, the
+pause (no stream opened), the pace, the shortcuts switch, the folded
+groups and the trails' window are as they were kept, a choice made in any
+mix outlasts a reload of it, and is in the record once every script is
+new. A load that changes nothing writes nothing. The grid and the biome
+picked out were not kept before and are now.
 
 **Views.** A view is a named snapshot of what the map shows and how: every
 row's switch, the mob and player filters, the biome picked out, the trails'
@@ -1573,19 +1590,30 @@ Everything (players, mobs, markers, structures and trails), Exploring
 and Base (players, named mobs, beds, containers and waypoints). They cannot be
 renamed or deleted, and can be hidden and shown again. The page keeps up to
 50 views, each with a name of up to 40 characters, with no control
-characters and none of the marks that turn the direction of writing round.
+characters, none that take no room or turn the direction of writing
+round, and no more than three accents piled on one letter.
 
 Switching happens in one turn of the page: the record is changed once,
 every row is switched before any layer is told, and a layer that listens
 with one function for all its rows redraws once. Measured in headless
 Chromium with 907 live mobs and 2,100 markers in view, at 1300 by 800 and
 at 360 by 740, over 56 switches: one between the built-in views holds the
-page for 3 to 7 ms and the next frame is drawn 15 to 32 ms after the
+page for 3 to 7 ms and the next frame is drawn 14 to 32 ms after the
 press; one that also changes the theme and the marker size holds it for
-13 to 19 ms. No switch made a long task. The view the page opens with is put into the
-record by `settings.js` in the head, before any other script has read its
-part, so nothing is drawn one way and then another; a place named in the
-address wins over the view's own. A view may name a layer the page no
+13 to 19 ms, with the next frame within 41 ms. No switch made a long
+task. A view with a place turns Follow off before it
+moves the map, and the line over the map says so; one without leaves
+Follow alone. A view the record has no room for is refused before anything
+is moved.
+
+The view marked as what the page opens with is put into the record by
+`settings.js` in the head, before any other script has read its part, so
+nothing is drawn one way and then another; a place named in the address
+wins over the view's own. Every load puts back its layers, filters,
+overlays and place, and never its appearance: how the page looks is
+always as the viewer last set it, and a view's own appearance comes with
+it only when the viewer switches to it. The list says so under the marked
+view, and the save form beside the checkbox. A view may name a layer the page no
 longer has or the server does not offer, a type of mob nobody has heard
 of, a biome the dimension does not hold or a dimension that is not
 rendered: the rest of it is applied, and the line over the map says what
@@ -1603,10 +1631,10 @@ small JSON object in the URL-safe base64 alphabet: `n` the name, `l` one
 character a known layer (`1` on, `0` off, `-` not said), `x` any other
 layer, `m` the mob filter, `b` the biome, `t` the trails' window, `i` the
 interval, `g` the grid, `p` and `q` the place and its pin, `a` the
-appearance settings in a fixed order. The two fixed lists only ever grow at
-the end. Which players a view hides is never put in a link. The part may be
+appearance settings the view has, each under its number in a fixed list.
+The two fixed lists only ever grow at the end. Which players a view hides is never put in a link. The part may be
 1,800 characters; a view of every layer with a filter, its place and its
-appearance is 375, and one too long to fit is not cut short but said, with the
+appearance is 455, and one too long to fit is not cut short but said, with the
 file offered instead.
 
 A link is read before any of it is used: its length, its alphabet, that
@@ -1614,10 +1642,15 @@ it is UTF-8 and JSON, that it has no key outside the closed set, and then,
 as a view, against the same description the record is, strictly, so that
 one wrong value refuses the whole. A refusal is a sentence of the page's
 own, with nothing from the link in it. A link that is read is only an
-offer: the sheet opens with the view set apart at the top, under its name
-as text, with Show it, Save as and Dismiss. Showing it changes what the
-map shows and nothing that is kept beyond that; saving it adds a view and
-replaces none; and the offer is gone on a reload.
+offer: the address moves the map nowhere, and the sheet opens with the
+view set apart at the top, under its name as text, with Preview it, Save
+as and Dismiss. A preview is held in memory: what is kept is held as it
+was before anything is touched, nothing the preview or the viewer changes
+meanwhile is written, and a bar between the header and the map says a
+shared view is being previewed. Keep it saves it as a new view and shows
+that for keeps; Go back puts back what was there, every layer, the theme,
+the place, the pinned chunk and whoever was followed; and a reload is the
+viewer's own setup. Saving adds a view and replaces none.
 
 Export to a file writes the whole record as `mcmap-settings.json`. Import
 reads a file of up to 300,000 bytes by the same strict description, says
@@ -1635,7 +1668,7 @@ and Reset to defaults puts them all back.
 | Label size | Normal, small, large |
 | Names of named mobs, of players, of waypoints | Always shown, under the pointer, never; each separately |
 | Mobs and players | Pictures, or plain dots |
-| Beds, containers and waypoints | Pictures, or plain rings |
+| Beds, containers, waypoints and structures | Pictures, or plain rings and letters |
 | Biome tint, trails, slime chunks | 60%, 100% and 100%, each from 10% to 100% |
 | Panels | Comfortable, compact |
 | Motion | The same as the system, reduced, full |
@@ -1654,16 +1687,21 @@ one and a half times on a dense screen), so pixel art is never blended on
 the way up; a smaller one is the 12 pixels a baby has always been drawn
 at, and is blended as a baby is. Reduced motion stills the page's own
 animations and the map's zoom, pan and fade. Compact panels leave a
-finger's 44 pixels alone on a small screen.
+finger's 44 pixels alone on a small screen. A slider is on the map as it
+is dragged and written once, when it is let go.
 
 The light and the high-contrast themes are held to 4.5 to one for text and
 3 to one for the edge of a control or a marker, over the lightest and the
 darkest terrain where it is drawn on the map, by a test over the
-stylesheet's own values. Measured on the page as drawn, over 1,768 pieces
+stylesheet's own values. Measured on the page as drawn, over 1,770 pieces
 of text in eight states of the page at two widths: the lowest text is 6.81
 to one in the light theme and 8.22 in high contrast, the lowest name tag
-6.95 and 12.04, and the lowest edge 3.80 and 8.28. The dark theme is the
-page as it was, and was not changed to meet them.
+6.95 and 12.04, and the lowest edge 3.80 and 8.28. The letter a structure
+is drawn as while it has no picture is at 5.28 and 5.67 on a recorded one
+and 4.79 and 5.67 on a predicted one, over snow; a trail's key, which is
+its line on the line's own dark casing, is at 6.46 and 6.94 against the
+casing. The dark theme is the page as it was, and was not changed to meet
+them: there a predicted structure's letter over snow is still at 1.17.
 
 **Settings that follow a player (a design, not built).** Everything above
 stays in one browser. This is how it would follow a player to another.
