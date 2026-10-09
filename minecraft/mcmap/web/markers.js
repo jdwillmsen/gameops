@@ -320,7 +320,9 @@
     for (const entry of named) {
       const id = idOf(entry.data);
       if (id) {
-        entry.live = byId.get(id) || null;
+        // The id is enough: a loaded mob the game reports without its
+        // name is still that mob, under the name it was saved with.
+        entry.live = byId.get(id) || (card && card.where(id) ? { id, name: '', type: str(entry.data.k) } : null);
         continue;
       }
       const same = sameAs(entry.data.n, entry.data.k);
