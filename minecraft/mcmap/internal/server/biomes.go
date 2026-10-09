@@ -33,6 +33,10 @@ const (
 	// to draw or to leave out. The game has under a hundred, and the page
 	// names whichever of the two lists is the shorter.
 	maxTileBiomes = 128
+	// maxTileBiomeNames is the longest such a list may be as it arrives,
+	// which is looked at before anything is made of it: every name at its
+	// longest, and the commas between them.
+	maxTileBiomeNames = maxTileBiomes * 65
 )
 
 func dimensionNamed(name string) (chunks.Dimension, bool) {
@@ -126,7 +130,17 @@ func (s *Server) handleBiomeTile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	pick, picked, ok := tilePick(q)
+	// A biome may be named in a list if the game has it, or if this
+	// dimension of the world does: a world may hold one the game's table
+	// lacks, and the page lists it by the name it is given here.
+	held := func(id uint32) bool {
+		world := s.Biomes.World()
+		if world == nil {
+			return false
+		}
+		return slices.ContainsFunc(world.Present(d), func(p biomes.Presence) bool { return p.ID == id })
+	}
+	pick, picked, ok := tilePick(q, held)
 	if !ok {
 		http.Error(w, "a tile's biomes are asked for by biome, biomes or except: one of them, each name a biome, and no more than "+strconv.Itoa(maxTileBiomes), http.StatusBadRequest)
 		return
@@ -171,7 +185,10 @@ func (s *Server) handleBiomeTile(w http.ResponseWriter, r *http.Request) {
 // picked out against the rest, biomes for a list drawn and nothing else,
 // except for a list left out. picked names the pick in the tile's tag,
 // the same for the same biomes in whatever order and spelling they came.
-func tilePick(q url.Values) (pick biomes.Pick, picked string, ok bool) {
+// A list is refused for its length before it is taken apart, a biome
+// named twice in it is one biome, and each must be one the game has or
+// that held says the world does: a number alone is not a name.
+func tilePick(q url.Values, held func(uint32) bool) (pick biomes.Pick, picked string, ok bool) {
 	given := 0
 	for _, name := range []string{"biome", "biomes", "except"} {
 		if q.Has(name) {
@@ -195,19 +212,22 @@ func tilePick(q url.Values) (pick biomes.Pick, picked string, ok bool) {
 	if q.Has("except") {
 		mode, raw = "but", q.Get("except")
 	}
-	names := strings.Split(raw, ",")
-	if raw == "" || len(names) > maxTileBiomes {
+	if raw == "" || len(raw) > maxTileBiomeNames {
 		return biomes.Pick{}, "", false
 	}
-	ids := make([]uint32, 0, len(names))
-	for _, name := range names {
+	ids := make([]uint32, 0, maxTileBiomes)
+	for name := range strings.SplitSeq(raw, ",") {
 		id, found := biomes.Resolve(name)
-		if !found {
+		if !found || (!biomes.Lookup(id).Known && !held(id)) {
 			return biomes.Pick{}, "", false
 		}
-		if !slices.Contains(ids, id) {
-			ids = append(ids, id)
+		if slices.Contains(ids, id) {
+			continue
 		}
+		if len(ids) == maxTileBiomes {
+			return biomes.Pick{}, "", false
+		}
+		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 	tag := make([]string, len(ids))
