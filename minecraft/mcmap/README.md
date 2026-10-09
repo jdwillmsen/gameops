@@ -1107,8 +1107,31 @@ served with the overworld's structures.
 
 The low 32 bits of the FWB world's `RandomSeed` do **not** place its
 structures; another 32-bit value does, exactly. Why is not known.
-`STRUCTURE_SEED` supplies such a value, and is checked against the world in
-the same way before anything is predicted from it. Treat it as the seed.
+
+**Working the seed out.** When the seed in hand is refuted, the service
+finds the one the world's records answer to by trying all 2^32 of them. A
+recorded monument, outpost or witch hut says which offsets its region's
+site can have had; one of them, the record a chance seed is least likely
+to explain, is tested against every seeding of the generator, and the few
+million seedings that pass are set against the rest. The seed that
+explains that record and at least two more, and more than any other does,
+is the answer. It is used from the next survey and checked there like any
+other, so a wrong answer is a quiet layer and not a wrong one.
+
+The search is one goroutine: about fifty minutes of one CPU, and longer
+under a CPU limit below that. Nothing is predicted meanwhile and nothing
+else waits for it. Its outcome is kept in `structure-seed.json` in
+`DATA_DIR`, readable by the service alone, beside a mirror that holds
+`level.dat` already: a restart reads it instead of searching, and a search
+that found nothing is not run again until the world records another such
+structure. A search cut short by a restart starts over. The seed it finds
+is never served or logged. `STRUCTURE_SEED_SEARCH=false` switches it off.
+
+`STRUCTURE_SEED` supplies the value by hand instead, and is checked against
+the world in the same way before anything is predicted from it. A whole
+world seed is accepted and cut to its low 32 bits, as the game cuts it. A
+seed given this way is never searched past, so one the world refutes stays
+refuted until it is taken away. Treat it as the seed.
 
 The survey runs last in each cycle, on hard links like the chunk count, and
 its failure costs nothing else. That includes a panic: it parses over a
@@ -2121,7 +2144,8 @@ Two listeners keep the internet away from what is not for it:
 | `ICONS_ENABLED` | no | `true` | `false` draws every live marker as a dot or arrow: no mob icon, marker picture or name is fetched, no head is accepted, and `/api/icons`, `/api/icons/picture/` and `/api/names` are not served |
 | `ICONS_REF` | no | the commit tagged `v1.26.50.4` | Tag or commit of Mojang's `bedrock-samples` the mob icons, marker pictures and names are fetched at. A commit cannot move; a tag can |
 | `STRUCTURES_ENABLED` | no | `true` | `false` reads no structures and does not serve `/api/structures` |
-| `STRUCTURE_SEED` | no | the low 32 bits of the seed in `level.dat` | The 32 bits structure placement is seeded with, 0 to 4294967295, for a world whose `level.dat` does not hold them. As secret as the seed |
+| `STRUCTURE_SEED` | no | the low 32 bits of the seed in `level.dat`, or what the search found | The 32 bits structure placement is seeded with, or a whole world seed whose low 32 bits are taken, for a world whose `level.dat` does not hold them. As secret as the seed. Switches the search off |
+| `STRUCTURE_SEED_SEARCH` | no | `true` | `false` leaves a seed the world's records refute as it is, instead of working the right one out from them |
 | `BIOMES_ENABLED` | no | `false` | `true` reads biomes and serves `/api/biomes` and its tiles; off, search finds no biomes |
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |

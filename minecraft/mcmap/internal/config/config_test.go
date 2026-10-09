@@ -153,30 +153,42 @@ func TestLoad_Structures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Structures || c.StructureSeed != nil {
-		t.Errorf("defaults: structures %v, seed %v", c.Structures, c.StructureSeed)
+	if !c.Structures || c.StructureSeed != nil || !c.StructureSeedSearch {
+		t.Errorf("defaults: structures %v, seed %v, search %v", c.Structures, c.StructureSeed, c.StructureSeedSearch)
 	}
-	c, err = Load(with("STRUCTURES_ENABLED", "false", "STRUCTURE_SEED", "4294967295"))
+	c, err = Load(with("STRUCTURES_ENABLED", "false", "STRUCTURE_SEED", "4294967295", "STRUCTURE_SEED_SEARCH", "false"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Structures || c.StructureSeed == nil || *c.StructureSeed != 4294967295 {
+	if c.Structures || c.StructureSeed == nil || *c.StructureSeed != 4294967295 || c.StructureSeedSearch {
 		t.Errorf("overrides: structures %v, seed %v", c.Structures, c.StructureSeed)
 	}
 	// Zero is a seed, and must not be read as "none given".
 	if c, err = Load(with("STRUCTURE_SEED", "0")); err != nil || c.StructureSeed == nil || *c.StructureSeed != 0 {
 		t.Errorf("a seed of 0: %v, %v", c.StructureSeed, err)
 	}
+	// A whole world seed is cut to the half the game places structures by,
+	// and a newline from the file it was read out of is not part of it.
+	for raw, want := range map[string]uint32{
+		"4294967296":            0,
+		"3000000000000000001\n": 3000000000000000001 & 0xffffffff,
+		"-5":                    0xfffffffb,
+		" 7 ":                   7,
+	} {
+		if c, err = Load(with("STRUCTURE_SEED", raw)); err != nil || c.StructureSeed == nil || *c.StructureSeed != want {
+			t.Errorf("a world seed: %v, %v, want %d", c.StructureSeed, err, want)
+		}
+	}
 	for name, getenv := range map[string]func(string) string{
 		"enabled not a boolean": with("STRUCTURES_ENABLED", "maybe"),
-		"seed over 32 bits":     with("STRUCTURE_SEED", "4294967296"),
-		"seed negative":         with("STRUCTURE_SEED", "-5"),
+		"search not a boolean":  with("STRUCTURE_SEED_SEARCH", "maybe"),
+		"seed over 64 bits":     with("STRUCTURE_SEED", "9223372036854775808"),
 		"seed not a number":     with("STRUCTURE_SEED", "0x1234"),
 	} {
 		_, err := Load(getenv)
 		if err == nil {
 			t.Errorf("%s: accepted", name)
-		} else if strings.Contains(err.Error(), "4294967296") || strings.Contains(err.Error(), "0x1234") {
+		} else if strings.Contains(err.Error(), "9223372036854775808") || strings.Contains(err.Error(), "0x1234") {
 			t.Errorf("%s: the refusal repeats the value: %v", name, err)
 		}
 	}

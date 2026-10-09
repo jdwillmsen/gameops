@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -89,8 +90,12 @@ type Config struct {
 	// Structures is whether the world's structures are read and served.
 	Structures bool
 	// StructureSeed, when set, is the 32 bits structure placement is
-	// seeded with, for a world whose level.dat does not hold them.
+	// seeded with, for a world whose level.dat does not hold them. A whole
+	// world seed given for it has been cut to its low 32 bits.
 	StructureSeed *uint32
+	// StructureSeedSearch is whether a seed the world's records refute is
+	// worked out from those records, which is about an hour of one CPU.
+	StructureSeedSearch bool
 
 	// Biomes is whether the world's biomes are read and served.
 	Biomes bool
@@ -233,12 +238,19 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.Structures, err = strconv.ParseBool(or(getenv("STRUCTURES_ENABLED"), "true")); err != nil {
 		fail("STRUCTURES_ENABLED must be true or false")
 	}
-	if raw := getenv("STRUCTURE_SEED"); raw != "" {
-		// The value is left out of the message: it is as good as the seed.
-		if seed, err := strconv.ParseUint(raw, 10, 32); err != nil {
-			fail("STRUCTURE_SEED must be a whole number from 0 to 4294967295")
+	if c.StructureSeedSearch, err = strconv.ParseBool(or(getenv("STRUCTURE_SEED_SEARCH"), "true")); err != nil {
+		fail("STRUCTURE_SEED_SEARCH must be true or false")
+	}
+	if raw := strings.TrimSpace(getenv("STRUCTURE_SEED")); raw != "" {
+		// A whole world seed is taken as the game takes it, by its low 32
+		// bits, so the number the server prints can be given as it is. The
+		// value is left out of the message: it is as good as the seed.
+		if seed, err := strconv.ParseInt(raw, 10, 64); err != nil {
+			fail("STRUCTURE_SEED must be a whole number: a world seed, or the 32 bits of one from 0 to 4294967295")
 		} else {
-			seed32 := uint32(seed)
+			// The low four bytes, taken as bytes so that cutting the seed
+			// down reads as meant and not as a conversion left unchecked.
+			seed32 := binary.LittleEndian.Uint32(binary.LittleEndian.AppendUint64(nil, uint64(seed)))
 			c.StructureSeed = &seed32
 		}
 	}
