@@ -49,7 +49,7 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		"enabled: enabled && !OPT_IN.has(id)",
 		"shows: (kind) => on('recorded') && on(kind),",
 		// One player's answer is not kept for the next to log in.
-		"if (locked) forgetDetail();",
+		"forgetDetail();\n      if (sheet && view.dialog.open) view.dialog.close();",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("structures.js no longer has %s", need)
