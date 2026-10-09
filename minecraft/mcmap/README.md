@@ -791,8 +791,8 @@ makes over every key, with no second pass:
   without one is not counted; nobody opens a pot. A dispenser's or a
   dropper's load says nothing of who has been by, so each is a plain
   count. In a trial chamber these are most of what carries a loot table:
-  the FWB world's chambers hold 7,203 unbroken pots and 4,394 dispensers
-  beside 683 chests and 1,204 barrels not yet opened.
+  the FWB world's 219 chambers hold 7,264 unbroken pots and 4,500
+  dispensers beside 747 chests and 1,210 barrels not yet opened.
 
 Once the boxes are known, each mob and block entity is set inside the
 recorded structures whose box it is in, height included. The two kinds
