@@ -178,6 +178,13 @@ func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
 		"if (e.key === 'ArrowLeft') to = width + STEP;", "else if (e.key === 'Home') to = MIN_WIDTH;", "else if (e.key === 'End') to = widest();",
 		"sizer.addEventListener('dblclick', () => setWidth(null, true));",
 		"sizer.setPointerCapture(e.pointerId);", "grab.setPointerCapture(e.pointerId);",
+		// A drag is drawn once a frame and ends however the pointer is lost.
+		"dragging.frame = requestAnimationFrame(() => {", "pulling.frame = requestAnimationFrame(() => {",
+		"for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) sizer.addEventListener(end, dropped);",
+		"for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) grab.addEventListener(end, released);",
+		"addEventListener('blur', () => {",
+		// What a full sheet covers is out of reach until it is lower.
+		"const covered = now === 'sheeted' && open && shell.detent === 'full';", "under.inert = covered;",
 		// The width is kept where a record-keeping script from before the
 		// panel had one will not drop it.
 		"retain('panel', 'shell', {",
@@ -191,6 +198,8 @@ func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
 	for _, need := range []string{
 		"--w: clamp(240px, var(--panel-width), min(480px, 45vw));",
 		"--rail: 40px;",
+		".layers { --rail: 44px; }",
+		"max-width: calc(100% - var(--dock) - 2rem);",
 		".layers.open.docked { width: var(--w); }",
 		".detent-peek .panel { height: calc(var(--head-h) + 28px); }",
 		".detent-full .panel { height: 100%; border-radius: 0; }",
@@ -209,8 +218,8 @@ func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
 	if !bytes.Contains(css, []byte(".stage { position: relative; flex: 1; min-height: 0; display: flex; }")) || !bytes.Contains(css, []byte("#map { flex: 1; min-width: 0;")) {
 		t.Error("style.css no longer lays the map and the panel out in one row")
 	}
-	if !bytes.Contains(read(t, "app.js"), []byte("new ResizeObserver(() => map.invalidateSize()).observe(map.getContainer())")) {
-		t.Error("app.js no longer tells the map when its box changes size")
+	if !regexp.MustCompile(`new ResizeObserver\(\(\) => \{\s*if \(resized !== 0\) return;\s*resized = requestAnimationFrame\(\(\) => \{\s*resized = 0;\s*map\.invalidateSize\(\);`).Match(read(t, "app.js")) {
+		t.Error("app.js no longer tells the map when its box changes size, once a frame")
 	}
 	// A touch on the map does not put the sheet away.
 	if bytes.Contains(read(t, "compact.js"), []byte("if (panelOpen() && !within(el.layers)) shutPanel();")) {
@@ -231,7 +240,9 @@ func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
 		"check.setAttribute('role', 'checkbox');",
 		"put(dom, 'state', state, (v) => dom.check.setAttribute('aria-checked', v));",
 		"? 'mixed' : 'true';",
-		"kids.setAttribute('role', 'group');",
+		"kids.setAttribute('role', 'list');",
+		// A menu holds groups, items and rules, and nothing else.
+		"into.setAttribute('role', 'group');", "words.setAttribute('aria-hidden', 'true');",
 		"twist.setAttribute('aria-controls', kids.id);",
 		"check.setAttribute('aria-labelledby', name.id);",
 		"more.setAttribute('aria-haspopup', 'menu');",

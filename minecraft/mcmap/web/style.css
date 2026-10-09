@@ -490,6 +490,11 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
   border-left: 1px solid var(--line);
 }
 .layers.open.docked { width: var(--w); }
+/* Under a finger on a screen with room for the panel beside the map, the
+   rail's buttons are the size a finger needs. */
+@media (pointer: coarse) {
+  .layers { --rail: 44px; }
+}
 .layers.open #layers-toggle { display: none; }
 .glyph { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .glyph.heavy { stroke-width: 2.5; }
@@ -911,7 +916,7 @@ kbd, .keys code {
   transform: translateX(-50%);
   z-index: 1100;
   margin: 0;
-  max-width: calc(100% - 2rem);
+  max-width: calc(100% - var(--dock) - 2rem);
   padding: 0.3rem 0.7rem;
   background: var(--float);
   border: 1px solid var(--line);
