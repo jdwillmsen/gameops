@@ -45,18 +45,25 @@ func TestMarkerLayerNeverHandsTextOverAsMarkup(t *testing.T) {
 	}
 }
 
-// A named mob is looked for by its name, so the name is on the map and in
-// a list under the row, with what the mob is. The name is a player's: on
-// the map it is drawn on a canvas, and in the list set as text.
+// A named mob is looked for by its name, so the name is on the map and
+// each is an item of its row, with what the mob is and whether it is
+// loaded. The name is a player's: on the map it is drawn on a canvas, and
+// to the panel it goes as a label, which the panel sets as text.
 func TestNamedMobsAreLabelledAndListedByName(t *testing.T) {
 	js := read(t, "markers.js")
 	for _, need := range []string{
 		"tag: kind === 'mobs' ? tagOf(m.n) : null,",
 		"icons.mob(str(data.k), style.color, baby)",
-		"const name = text(str(data.n) || names.entity(data.k));",
-		"const what = text(names.kindOf(data.k, data.b));",
-		"button.addEventListener('click', () => examine(entry, true));",
-		"rows.get('mobs').setBody(roster);",
+		"label: nameOf(entry) || names.entity(data.k),",
+		"detail: `${names.kindOf(data.k, data.b)} · ${loaded ? 'loaded' : 'saved'}`,",
+		"if (kind === 'mobs') examine(entry, true);",
+		// Never kept under its name, which is a player's to choose.
+		"if (kind === 'mobs') return typeof m.i === 'string' && m.i !== '' && m.i.length < 60 ? `id:${m.i}` : spot(m);",
+		// The containers by what they are and the beds by their colour.
+		"if (m.k === 'shulker') return `shulker-${str(m.c) || 'undyed'}`;",
+		"if (kind === 'beds') return str(m.c) || 'red';",
+		"? { id, count, label: names.bed(data.c), colour: DYES[id] || '', swatch: 'ring beds' }",
+		"if (rows.get(kind).setItems) rows.get(kind).setItems(listOf(kind));",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("markers.js no longer has %s", need)
@@ -76,8 +83,8 @@ func TestNamedMobIsOneMarkerAndOpensTheCard(t *testing.T) {
 	markers, live, icons := read(t, "markers.js"), read(t, "live.js"), read(t, "icons.js")
 	for _, need := range []string{
 		"const idOf = (data) => (typeof data.i === 'string' && data.i !== '' ? data.i : null);",
-		"const live = entry.live !== null && card.drawn(entry.live.id);",
-		"if (live) layers.mobs.removeLayer(entry.marker);",
+		"const want = choices[kind].shows(entry.item) && !(card && entry.live !== null && card.drawn(entry.live.id));",
+		"if (want) group.addLayer(entry.marker); else group.removeLayer(entry.marker);",
 		"layers.mobs.on('click', (e) => {",
 		"card.open({ kind: 'mob', id, name: nameOf(entry), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });",
 		"document.addEventListener('mcmap:live', aside);",
@@ -121,7 +128,7 @@ func TestNamedMobMarkIsDrawnAndSaidAsASavedPosition(t *testing.T) {
 		"ctx.setLineDash(SAVED_DASH);",
 		"return snapshotAt !== null && card && card.age ? `saved ${card.age(snapshotAt)}` : 'last saved position';",
 		"const box = text(kind === 'mobs' ? `${title} · ${savedSaid()} · ${at(data)}` : `${title} · ${at(data)}`);",
-		"const title = entry.live ? 'Loaded now' : `Last saved position: ${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;",
+		"const loaded = entry.live !== null;",
 	} {
 		if !bytes.Contains(markers, []byte(need)) {
 			t.Errorf("markers.js no longer has %s", need)
@@ -148,8 +155,10 @@ func TestNamedMobIsPairedByIdAndByNameOnlyWithoutOne(t *testing.T) {
 		"const guess = saved.get(same) === 1 && there.get(same) === 1 ? loaded.find((mob) => sameAs(mob.name, mob.type) === same) : null;",
 		"entry.live = guess && !claimed.has(guess.id) ? guess : null;",
 		"const nameOf = (entry) => (entry.live && str(entry.live.name)) || str(entry.data.n);",
-		"if (entry.label.textContent !== name) entry.label.textContent = name;",
-		"pair();\n    let back = false;",
+		// Listed under the name it has now, and paired again with every
+		// frame before its mark is put on the map or taken off.
+		"label: nameOf(entry) || names.entity(data.k),",
+		"pair();\n    place('mobs');",
 	} {
 		if !bytes.Contains(markers, []byte(need)) {
 			t.Errorf("markers.js no longer has %s", need)

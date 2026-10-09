@@ -57,7 +57,7 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		"if (part.length > MAX_LINK) return { error: 'it was longer than a link’s view may be' };",
 		"if (!/^v1\\.[A-Za-z0-9_-]+$/.test(part)) return bad;",
 		"new TextDecoder('utf-8', { fatal: true })",
-		"const allowed = ['n', 'l', 'x', 'm', 'b', 't', 'i', 'g', 'p', 'q', 'a'];",
+		"const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'a'];",
 		"if (Object.keys(raw).some((key) => !allowed.includes(key))) return bad;",
 		"const read = settings.check.view(view);",
 		// The sixth part, so the five an older link has read as before.
@@ -158,7 +158,7 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 	}
 	// A row nobody has made a choice for goes back to how its layer first
 	// had it when a preview ends, since nothing kept says otherwise.
-	if !bytes.Contains(read(t, "layers.js"), []byte("const on = typeof choices[key] === 'boolean' ? choices[key] : row.first;")) {
+	if !bytes.Contains(read(t, "layers.js"), []byte("const on = typeof choices[row.key] === 'boolean' ? choices[row.key] : row.first;")) {
 		t.Error("layers.js no longer puts a row with no choice kept back to its layer's own default")
 	}
 	// The map's own script reads an address that names no dimension as no
@@ -243,7 +243,7 @@ func TestViewsComeBuiltInAndSwitchAtAStroke(t *testing.T) {
 		}
 	}
 	panel := read(t, "layers.js")
-	if !regexp.MustCompile(`row\.on = on;\s*row\.box\.checked = on;\s*for \(const fn of row\.listeners\) told\.set\(fn, on\);\s*\}\s*\}\s*for \(const \[fn, on\] of told\) \{`).Match(panel) {
+	if !regexp.MustCompile(`row\.on = on;\s*for \(const fn of row\.listeners\) told\.set\(fn, on\);\s*\}\s*\}\s*for \(const f of facets\.values\(\)\) \{\s*if \(!readFacet\(f\)\) continue;[^}]*for \(const fn of f\.listeners\) if \(!told\.has\(fn\)\) told\.set\(fn, undefined\);\s*\}\s*readSolo\(\);\s*for \(const \[fn, on\] of told\) call\(fn, on\);`).Match(panel) {
 		t.Error("layers.js no longer switches every row before it tells any layer, each layer once")
 	}
 	if !bytes.Contains(panel, []byte("return wanted.filter((key) => !found.has(key));")) {

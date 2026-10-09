@@ -97,6 +97,8 @@
      the stage it takes from the map. */
   --panel-width: var(--panel-default);
   --dock: 0px;
+  /* How far in a line of the panel starts, which goes with its depth. */
+  --inset: var(--row-pad);
 }
 
 /* Light. Text and the edges of controls are dark enough on its panels to
@@ -524,6 +526,11 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   min-height: 0;
   display: flex;
   flex-direction: column;
+  background: var(--panel);
+  /* Painted apart from the map. Without this the browser paints the
+     panel again with every frame the map moves, pictures and all, which
+     doubles what a pan costs; its own ground keeps its letters sharp. */
+  will-change: transform;
 }
 .layers.floating .panel {
   position: absolute;
@@ -536,7 +543,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 }
 .panel-head { display: flex; align-items: center; gap: calc(var(--row-gap) / 2); min-height: var(--head-h); padding: calc(var(--row-gap) / 2) var(--row-gap) calc(var(--row-gap) / 2) var(--row-pad); border-bottom: 1px solid var(--line); }
 .panel-title { flex: 1; margin: 0; font-size: var(--body); font-weight: 600; }
-.panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--row-pad); }
+.panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .panel-grab { display: none; }
 /* The edge that is dragged: twelve pixels to see and twenty-four to
    catch, with a line down it while it is pointed at, held or focused. */
@@ -564,72 +571,150 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .menu-item[role="menuitemradio"]::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--dim); }
 .menu-item[aria-checked="true"]::before { background: var(--accent); border-color: var(--accent); }
 
-/* The arrows are drawn, not written: a character here would be read out
-   as part of the button's name. */
-.layer-group .fold::before { content: ""; display: inline-block; margin-right: 0.45em; border: 0.3em solid transparent; border-left-color: var(--dim); border-right-width: 0; vertical-align: middle; }
-.layer-group .fold[aria-expanded="true"]::before { border: 0.3em solid transparent; border-top-color: var(--dim); border-bottom-width: 0; }
-.layer-group + .layer-group { border-top: 1px solid var(--line); }
-.layer-group-head { display: flex; align-items: center; gap: var(--row-gap); min-height: var(--head-h); }
-.layer-group .fold {
-  flex: 1;
-  text-align: left;
-  font-weight: 600;
-  background: none;
-  border-color: transparent;
-  min-height: var(--head-h);
-  padding: 0;
-}
-.layer-group .fold::before { margin-right: 0.45em; }
-.layer-group .mini { color: var(--dim); }
-.layer-group ul { list-style: none; margin: 0; padding: 0 0 var(--group-gap); }
-.layer { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: var(--row-gap); min-height: var(--row-h); }
-.layer label { display: flex; align-items: center; gap: var(--row-gap); min-width: 0; min-height: var(--row-h); cursor: pointer; }
-.layer input { accent-color: var(--accent); margin: 0; width: var(--check); height: var(--check); flex: none; cursor: inherit; }
-.layer i { flex: none; }
-.layer .name { overflow-wrap: anywhere; }
-.layer .count { color: var(--dim); font-variant-numeric: tabular-nums; }
-.layer .note { grid-column: 1 / -1; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); padding-left: calc(var(--check) + var(--row-gap)); overflow-wrap: anywhere; }
-.layer .note:empty { display: none; }
-.layer.unavailable { opacity: 0.5; }
-.layer.unavailable label { cursor: not-allowed; }
-.layer .body { grid-column: 1 / -1; padding: 0 0 calc(var(--row-gap) / 2) calc(var(--check) + var(--row-gap)); }
+/* The panel's script from before this stylesheet, for the minutes the two
+   can be cached apart: its box as it was, over the corner of the map. */
+.layers:not(.shell) { position: absolute; top: 0.6rem; right: 0.6rem; width: 17rem; max-width: calc(100% - 1.2rem); max-height: calc(100% - 1.2rem); overflow-y: auto; align-items: stretch; padding: var(--row-gap); border: 1px solid var(--line); border-radius: 8px; pointer-events: auto; }
+.layers:not(.shell) #layers-toggle { display: block; position: static; width: auto; height: auto; min-height: var(--control-h); background-image: none; border: 0; color: var(--text); font-size: inherit; }
+.layers:not(.shell) ul { list-style: none; margin: 0; padding: 0; }
+.layers:not(.shell) :is(li, label, .layer-group-head) { display: flex; flex-wrap: wrap; align-items: center; gap: var(--row-gap); }
+.layers:not(.shell) .note { flex: 1 1 100%; min-height: 0; font-size: var(--caption); line-height: var(--caption-lh); }
 
-/* What a live row holds, by type or by player. It scrolls by itself, like
-   the other lists in the panel. */
-.breakdown summary { cursor: pointer; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); min-height: var(--hit); align-content: center; }
-.breakdown ul { list-style: none; margin: 0.15rem 0 0; padding: 0; max-height: 11rem; overflow-y: auto; }
-.breakdown li { display: flex; align-items: center; gap: var(--row-gap); min-height: var(--row-h); }
-.breakdown li label { flex: 1; min-width: 0; }
-.breakdown li label:has(+ .who) { flex: none; }
-.breakdown .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.breakdown .who { text-align: left; background: none; border-color: transparent; padding: 0 0.2rem; }
-.breakdown .count { color: var(--dim); font-variant-numeric: tabular-nums; }
-.breakdown .mini { color: var(--dim); flex: none; }
-.breakdown .mini[aria-pressed="true"] { color: var(--accent); }
-.breakdown input[type="search"] { width: 100%; margin-top: calc(var(--row-gap) / 2); }
-.breakdown .filtered { display: flex; align-items: center; gap: var(--row-gap); margin: 0 0 calc(var(--row-gap) / 2); color: var(--warn); font-size: var(--caption); line-height: var(--caption-lh); }
-.breakdown .filtered span { flex: 1; }
-.layer .body:has(> .breakdown[hidden]) { display: none; }
-
-/* The legend scrolls by itself: a dimension can hold dozens of biomes, and
-   the groups under it have to stay within reach. */
-.legend ul { list-style: none; margin: 0; padding: 0; max-height: 14rem; overflow-y: auto; }
-.legend button {
+/* One line, used at every depth: what opens it, its checkbox, its picture
+   or colour key, its name, its count, "Only", and the button for the rest.
+   A section, a layer and an item differ only in how far in they stand, by
+   one indent each, and in the weight of the name. */
+.tree, .kids { list-style: none; margin: 0; padding: 0; }
+.tree { padding-bottom: var(--group-gap); }
+.d1 { --inset: var(--row-pad); }
+.d2 { --inset: calc(var(--row-pad) + var(--indent)); }
+.d3 { --inset: calc(var(--row-pad) + var(--indent) * 2); }
+.d1 + .d1 { margin-top: calc(var(--group-gap) / 2); padding-top: calc(var(--group-gap) / 2); border-top: 1px solid var(--line); }
+.row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--row-gap);
-  width: 100%;
   min-height: var(--row-h);
-  padding: 0 calc(var(--row-gap) / 2);
-  text-align: left;
-  background: none;
-  border-color: transparent;
+  padding: 0 var(--row-gap) 0 var(--inset);
+  cursor: pointer;
 }
-.legend i { flex: none; width: 0.8rem; height: 0.8rem; border: 1px solid var(--edge); border-radius: 2px; }
-/* Every colour at once, for the entry that is all of them. */
-.legend i.every { background: conic-gradient(var(--kind-village), var(--kind-outpost), var(--kind-monument), var(--kind-witch-hut), var(--kind-village)); }
-.legend .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.legend .share { color: var(--dim); font-variant-numeric: tabular-nums; }
+.d1 > .row { min-height: var(--head-h); }
+.row:hover, .row:focus-within { background: var(--bg); }
+.row .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.d1 > .row .name, .node:not(.leaf) > .row .name { font-weight: 600; }
+.row mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; }
+.row .detail, .row .count { flex: none; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
+.row .detail { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row .detail:empty, .row .count:empty { display: none; }
+/* What opens a line: narrow to see, and as wide to press as the scale
+   says anything pressed is, except under a finger, where the name beside
+   it opens the line as well and the checkbox keeps the room. */
+.twist { position: relative; flex: none; width: 20px; min-width: 0; height: 20px; min-height: 0; padding: 0; background: none; border: 0; color: var(--dim); }
+.twist::before { content: ""; position: absolute; inset: calc((20px - var(--hit)) / 2) -4px; }
+.twist .glyph { width: 12px; height: 12px; stroke-width: 2; }
+.twist[aria-expanded="true"] .glyph { transform: rotate(90deg); }
+/* A checkbox drawn by the page, so that it is the scale's size, takes the
+   theme's colours, and can be half on. Its edge is the dim text's colour,
+   which stands off a panel by more than three to one in every theme. */
+.check {
+  position: relative;
+  flex: none;
+  width: var(--check);
+  min-width: 0;
+  height: var(--check);
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 2px solid var(--dim);
+  border-radius: 4px;
+}
+.check::before { content: ""; position: absolute; inset: calc((var(--check) - var(--hit)) / 2 - 2px); }
+.check:hover:not(:disabled) { border-color: var(--text); }
+.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--accent); border-color: var(--accent); }
+.check[aria-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 28%;
+  top: 8%;
+  width: 30%;
+  height: 58%;
+  border: solid var(--on-accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.check[aria-checked="mixed"]::after { content: ""; position: absolute; left: 18%; right: 18%; top: calc(50% - 1px); height: 2px; background: var(--on-accent); }
+.check:focus-visible { outline-offset: 2px; }
+.unavailable > .row { cursor: not-allowed; }
+.unavailable > .row > :is(.check, .pic, .name, .detail, .count), .masked > .row > :is(.pic, .name, .detail, .count) { opacity: 0.55; }
+.pic { display: inline-grid; place-items: center; flex: none; width: var(--icon); height: var(--icon); }
+.pic .glyph { width: 16px; height: 16px; color: var(--dim); }
+.pic .picture:not([hidden]) + i { display: none; }
+.swatch { width: 75%; height: 75%; border: 1px solid var(--edge); border-radius: 3px; }
+/* Drawn as a trail is drawn on the map, a light line on its dark casing:
+   the colours are made to be read on the dark, and half of them could not
+   be told from a light panel. */
+.swatch.line { width: 100%; height: 0.55rem; border: 2px solid var(--marker-ink); border-radius: 1px; }
+/* "Only" lies over the count while the line is pointed at or has the
+   focus, and stays for as long as its line is the one alone. */
+.row .only {
+  position: absolute;
+  right: calc(var(--hit) + var(--row-gap) * 2);
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 0;
+  min-height: var(--hit);
+  padding: 0 var(--row-gap);
+  font-size: var(--caption);
+  line-height: var(--caption-lh);
+  background: var(--panel);
+  visibility: hidden;
+}
+.alone > .row .only { visibility: visible; border-color: var(--accent); color: var(--accent); }
+@media (hover: hover) {
+  .row:hover > .only { visibility: visible; }
+}
+.row .more { color: var(--dim); }
+.node > .note { margin: 0; min-height: 0; padding: 0 var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + var(--check) + var(--row-gap)); font-size: var(--caption); line-height: var(--caption-lh); overflow-wrap: anywhere; }
+.node:not(.leaf) > .note { padding-left: calc(var(--inset) + 20px + var(--check) + var(--row-gap) * 2); }
+.node > .note:empty { display: none; }
+.extra { padding: calc(var(--row-gap) / 2) var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + var(--indent)); }
+.extra:empty { display: none; }
+.rest { padding: 0 var(--row-pad) 0 var(--inset); }
+button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none; border: 0; color: var(--accent); text-decoration: underline; font-size: var(--caption); line-height: var(--caption-lh); }
+/* The panel's own search, on a line of its own at the panel's full
+   width, and under it how much of everything is showing. */
+.panel-search { position: relative; padding: var(--row-gap) var(--row-pad) calc(var(--row-gap) / 2); }
+.panel-search input { width: 100%; min-height: var(--field-h); padding: 0 var(--field-h) 0 calc(var(--row-gap) * 2 + 16px); }
+.panel-search input::-webkit-search-cancel-button { display: none; }
+/* The panel's own boxes and buttons are edged in the dim text's colour,
+   which stands off a panel by three to one in the dark theme too. */
+.panel-search input, .popover input, .popover button, .row .only { border-color: var(--dim); }
+.panel-search .glyph { position: absolute; left: calc(var(--row-pad) + var(--row-gap)); top: calc(var(--row-gap) + (var(--field-h) - 16px) / 2); color: var(--dim); pointer-events: none; }
+.panel-search .clear { position: absolute; right: calc(var(--row-pad) + (var(--field-h) - var(--hit)) / 2); top: calc(var(--row-gap) + (var(--field-h) - var(--hit)) / 2); }
+.panel-status { display: flex; align-items: center; justify-content: space-between; gap: var(--row-gap); margin: 0; min-height: var(--hit); padding: 0 var(--row-pad); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); border-bottom: 1px solid var(--line); }
+.panel-status.cut { color: var(--warn); }
+.panel-none { margin: 0; padding: var(--row-gap) var(--row-pad); color: var(--dim); }
+/* A choice among a few values, as buttons side by side with one of them
+   on, and the box that hangs from the last for a value that is typed. */
+.segmented { display: flex; flex-wrap: wrap; gap: calc(var(--row-gap) / 2) 0; }
+.segment { flex: 1 0 auto; min-width: 0; margin-left: -1px; padding: 0 var(--row-gap); border-color: var(--dim); border-radius: 0; }
+.segment:first-child { margin-left: 0; border-radius: 6px 0 0 6px; }
+.segment:last-child { border-radius: 0 6px 6px 0; }
+.segment[aria-checked="true"], .segment.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.segment:focus-visible { position: relative; z-index: 1; }
+.popover { display: grid; gap: var(--row-gap); width: min(20rem, calc(100vw - 16px)); padding: var(--row-pad); }
+.popover label { font-weight: 600; }
+.popover input { width: 100%; min-height: var(--field-h); }
+.popover .said { margin: 0; min-height: var(--caption-lh); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
+.popover .said.problem { color: var(--warn); }
+.popover-ends { display: flex; justify-content: flex-end; gap: var(--row-gap); }
+/* What a layer's script from before items built for itself, shown under
+   its row as it comes. */
+.legacy { padding: 0 var(--row-pad) calc(var(--row-gap) / 2) calc(var(--inset) + var(--indent)); }
+.legacy ul { list-style: none; margin: 0; padding: 0; max-height: 12rem; overflow-y: auto; }
+.legacy li { display: flex; align-items: center; gap: var(--row-gap); min-height: var(--row-h); }
+.legacy li button { display: flex; align-items: center; gap: var(--row-gap); flex: 1; min-width: 0; text-align: left; background: none; border-color: transparent; }
 
 .who { color: var(--dim); }
 
@@ -644,26 +729,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
    canvas. It is sixteen texture pixels and is never smoothed. While there
    is none to show it is hidden, and the key that follows it stands in. */
 .picture { flex: none; width: 16px; height: 16px; image-rendering: pixelated; }
-.layer .picture:not([hidden]) + i, .roster .picture:not([hidden]) + i { display: none; }
 .search-panel .name .picture, .leaflet-tooltip .picture { margin-right: 0.35rem; vertical-align: -3px; }
-
-/* The named mobs, under their row. The list scrolls by itself, like the
-   biomes' legend. */
-.roster ul { list-style: none; margin: 0; padding: 0; max-height: 12rem; overflow-y: auto; }
-.roster button {
-  display: flex;
-  align-items: center;
-  gap: var(--row-gap);
-  width: 100%;
-  min-height: var(--row-h);
-  padding: 0 calc(var(--row-gap) / 2);
-  text-align: left;
-  background: none;
-  border-color: transparent;
-}
-.roster button[aria-current="true"] { border-color: var(--accent); }
-.roster .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.roster .what { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); text-align: right; }
 
 /* Markers that stay put are keyed by a ring, the live ones by a dot. */
 .ring { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: 2px solid; background: var(--marker-ink); }
@@ -698,18 +764,8 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }
 .key.candidate { border: 1.5px dotted var(--text); border-radius: 50%; opacity: 0.55; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
-.trail-window { display: flex; align-items: center; gap: 0.4rem; color: var(--dim); }
-/* Inside the panel there is no room to hang it, so it takes a line. */
-.trail-window { flex-wrap: wrap; }
-.trail-window .duration { flex-wrap: wrap; gap: 0.3rem; }
-.trail-window .duration .said { position: static; max-width: 100%; }
-.trail-body { display: grid; gap: 0.3rem; }
-/* A trail's colour is its player's, so the swatch is the line, not a box. */
-.trail-players { list-style: none; margin: 0; padding: 0; max-height: 10rem; overflow-y: auto; }
-/* Drawn as the trail is drawn on the map, a light line on its dark
-   casing: the colours are made to be read on the dark, and half of them
-   could not be told from a light panel. */
-.trail-players i { width: 1.2rem; height: 0.55rem; border: 2px solid var(--marker-ink); border-radius: 1px; }
+.key.grid { border: 1px solid var(--text); background: linear-gradient(var(--text), var(--text)) center / 1px 100% no-repeat, linear-gradient(var(--text), var(--text)) center / 100% 1px no-repeat; }
+.key.chunk { border: 2px solid var(--chunk-pin); }
 .key.slime { background: var(--slime-far); border: 1px solid var(--slime-line); }
 
 .structure span {

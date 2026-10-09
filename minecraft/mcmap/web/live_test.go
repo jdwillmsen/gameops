@@ -106,33 +106,42 @@ func TestInspectCardSetsTextAndTracksById(t *testing.T) {
 	}
 }
 
-// Under each live row is what it holds, by type or by gamertag. A gamertag
-// is a player's choice and a type the server's word, so each is set as
-// text; and a frame of a thousand mobs must not pay for the filters more
-// than a lookup each.
+// Under each live row is what it holds, each player and each type of mob
+// an item of its row. The live layer says what there is as plain data and
+// the panel draws it: a gamertag is a player's choice and a type the
+// server's word, and neither is made into an element here. A frame of a
+// thousand mobs must not pay for the choices more than a lookup each.
 func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
 	js := read(t, "live.js")
 	for _, need := range []string{
-		"return f.only !== null ? f.only === sort : !f.hidden.has(sort);",
+		"if (app.layers.facet) return app.layers.facet('live', name);",
+		// A panel from before it kept the choices: read once and followed.
+		"return { only, shows: (sort) => (only !== null ? only === sort : !hidden.has(sort)), onChange() {} };",
+		"const passes = (category, sort) => choices[domainOf(category)].shows(sort);",
 		"const visible = (held) => shown(held.category) && passes(held.category, held.sort);",
 		"if (visible(held)) layerOf(category).addLayer(held.marker);",
-		"it.name.textContent = label;",
-		"app.layers.retain('live', domain, filtering(domain) ? { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN) } : null);",
-		"const busy = list.matches(':hover') || list.contains(document.activeElement);",
-		// A new row is listed whoever is pointing; only the order waits.
-		"for (const sort of wanted) if (items.get(sort).item.parentNode !== list) list.append(items.get(sort).item);",
-		"if (key !== order && !busy) {",
+		"listed.map(([sort, entry]) => ({ id: sort, label: names.entity(sort), picture: `mob/${sort}`, swatch: `dot ${category}`, count: entry.n }));",
+		"picture: face(entry.name), swatch: 'dot players'",
+		// By name, so that a line stays put while its count moves.
+		"row.setItems(items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })));",
+		"section: players ? 'players' : 'mobs',",
+		"facet: domainOf(id),",
 		"Hidden on the map by your ${picked.category === 'players' ? 'player' : 'type'} filter.",
-		"rows[id].setBody(breakdowns[id].node);",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("live.js no longer has %s", need)
 		}
 	}
-	// The markers are placed when an entity appears and when a filter
-	// changes, never looked over again for every frame.
-	if n := len(regexp.MustCompile(`\brefilter\b`).FindAll(js, -1)); n != 4 {
-		t.Errorf("live.js names refilter in %d places, want its definition, a row's switch, a filter's change and a saved view's", n)
+	// The panel draws every line; the live layer builds none of its own.
+	for _, gone := range []string{"createElement('li')", "createElement('details')", "createElement('input')", "setBody("} {
+		if bytes.Contains(js, []byte(gone)) {
+			t.Errorf("live.js builds part of the panel itself: %s", gone)
+		}
+	}
+	// The markers are placed when an entity appears and when a row or a
+	// choice changes, never looked over again for every frame.
+	if n := len(regexp.MustCompile(`\brefilter\b`).FindAll(js, -1)); n != 3 {
+		t.Errorf("live.js names refilter in %d places, want its definition, a row's switch and a choice's change", n)
 	}
 	panel := read(t, "layers.js")
 	for _, need := range []string{"app.layers.recall = recall;", "app.layers.retain = retain;", "return Object.hasOwn(choices, key) ? choices[key] : null;"} {

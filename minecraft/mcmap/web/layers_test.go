@@ -41,7 +41,7 @@ func TestLayerPanelKeepsItsRegistrationInterface(t *testing.T) {
 	js := read(t, "layers.js")
 	for _, need := range []string{
 		"function register({ group, id, label, enabled = true, order, groupLabel",
-		"get enabled()", "setCount(n)", "setNote(text)", "onToggle(fn)", "setAvailable(available)", "remove()",
+		"get enabled()", "setCount(n)", "setNote(said)", "onToggle(fn)", "setAvailable(available)", "remove()",
 		"app.layers.register = register;", "new CustomEvent('mcmap:layers')",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
@@ -181,7 +181,7 @@ func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
 		// The width is kept where a record-keeping script from before the
 		// panel had one will not drop it.
 		"retain('panel', 'shell', {",
-		"menu.setAttribute('role', 'menu');", "item.setAttribute('role', choice ? 'menuitemradio' : 'menuitem');",
+		"menu.setAttribute('role', 'menu');", "item.setAttribute('role', chosen ? 'menuitemradio' : 'menuitem');",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("layers.js no longer has %s", need)
@@ -215,5 +215,168 @@ func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
 	// A touch on the map does not put the sheet away.
 	if bytes.Contains(read(t, "compact.js"), []byte("if (panelOpen() && !within(el.layers)) shutPanel();")) {
 		t.Error("compact.js shuts the layer panel on a touch outside it; below full height the map is there to be used")
+	}
+}
+
+// Every line of the panel, a section's, a layer's or an item's, is made by
+// one function and has the same parts. The lines are a list of checkboxes
+// that open, each control what a screen reader already knows it to be, and
+// not a tree widget; a checkbox says "mixed" when some of what is under it
+// is hidden. No layer's script builds any of the panel itself.
+func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
+	js := read(t, "layers.js")
+	for _, need := range []string{
+		"function line(node, depth) {",
+		"row.append(twist, check, pic, name, detail, count, onlyButton, more);",
+		"check.setAttribute('role', 'checkbox');",
+		"put(dom, 'state', state, (v) => dom.check.setAttribute('aria-checked', v));",
+		"? 'mixed' : 'true';",
+		"kids.setAttribute('role', 'group');",
+		"twist.setAttribute('aria-controls', kids.id);",
+		"check.setAttribute('aria-labelledby', name.id);",
+		"more.setAttribute('aria-haspopup', 'menu');",
+		// One stop for the Tab key, moved by the arrow keys.
+		"dom.check.tabIndex = v ? 0 : -1;",
+		"if (e.key === 'ArrowDown') to(all[at + 1]);", "else if (e.key === 'Home') to(all[0]);", "else if (e.key === 'End') to(all[all.length - 1]);",
+		"else if (e.key === 'ArrowRight') {", "} else if (e.key === 'ArrowLeft') {", "} else if (e.key === 'Enter') {",
+		"} else if (/^[\\p{L}\\p{N}]$/u.test(e.key)) {",
+		// What the button at the end of a line offers.
+		"'Show all again'", "'Only this'", "'Show all in group'", "'Hide all in group'", "'Zoom to'", "'Go to'",
+		// What is hidden is said where a shut or scrolled panel still shows it.
+		"`${fmt(tally.on)} of ${fmt(tally.all)} shown`",
+		"statusText.setAttribute('role', 'status');",
+		"resetButton.hidden = !changed();",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("layers.js no longer has %s", need)
+		}
+	}
+	for _, gone := range []string{"'role', 'tree'", "treeitem", "aria-selected", "type = 'checkbox'"} {
+		if bytes.Contains(js, []byte(gone)) {
+			t.Errorf("layers.js has %s; its lines are checkboxes that open, drawn by the page", gone)
+		}
+	}
+	// Three depths and no more: a section, a layer, an item.
+	for _, m := range regexp.MustCompile(`\bline\((\w+), (\w+)\)`).FindAllSubmatch(js, -1) {
+		if d := string(m[2]); d != "1" && d != "2" && d != "depth" {
+			t.Errorf("layers.js makes a line at depth %s", d)
+		}
+	}
+	for _, m := range regexp.MustCompile(`itemLines\(\w+, (\d)`).FindAllSubmatch(js, -1) {
+		if d := string(m[1]); d != "2" && d != "3" {
+			t.Errorf("layers.js lists items at depth %s", d)
+		}
+	}
+	for _, section := range []string{"players", "mobs", "markers", "structures", "biomes", "trails", "overlays"} {
+		if !bytes.Contains(js, []byte("['"+section+"', '")) {
+			t.Errorf("layers.js has no section for %s", section)
+		}
+	}
+	for _, script := range []string{"live.js", "markers.js", "structures.js", "biomes.js", "trails.js", "slime.js", "chunk.js"} {
+		body := read(t, script)
+		if bytes.Contains(body, []byte("setBody(")) {
+			t.Errorf("%s still builds controls of its own under its row", script)
+		}
+		if !bytes.Contains(body, []byte("app.layers.register({ group: '")) {
+			t.Errorf("%s no longer registers a row with the panel", script)
+		}
+	}
+	for script, facet := range map[string]string{
+		"live.js": "app.layers.facet('live', name)", "markers.js": "app.layers.facet('markers', kind)", "structures.js": "app.layers.facet('structures', sort,",
+		"biomes.js": "app.layers.facet('biomes', 'items')", "trails.js": "app.layers.facet('overlays', 'trails')",
+	} {
+		body := read(t, script)
+		// With a panel from before it listed items, each still draws.
+		if !bytes.Contains(body, []byte("app.layers.facet ? "+facet)) && !bytes.Contains(body, []byte("if (app.layers.facet) return "+facet)) {
+			t.Errorf("%s no longer asks the panel which of its items are shown, or no longer allows for a panel that cannot say", script)
+		}
+		if !bytes.Contains(body, []byte(".setItems)")) {
+			t.Errorf("%s gives its items to a panel without asking whether it takes them", script)
+		}
+	}
+	// And the list of keys says how the list is worked from the keyboard.
+	help := regexp.MustCompile(`(?s)<dialog id="help".*?</dialog>`).Find(read(t, "index.html"))
+	for _, key := range []string{"<h3>In the layer panel</h3>", "<kbd>Space</kbd></dt><dd>Show or hide the line</dd>", "<dt>A letter</dt>"} {
+		if !bytes.Contains(help, []byte(key)) {
+			t.Errorf("the help no longer has %s", key)
+		}
+	}
+	css := read(t, "style.css")
+	for _, need := range []string{
+		"min-height: var(--row-h);", ".d1 > .row { min-height: var(--head-h); }",
+		".d2 { --inset: calc(var(--row-pad) + var(--indent)); }", ".d3 { --inset: calc(var(--row-pad) + var(--indent) * 2); }",
+		`.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--accent); border-color: var(--accent); }`,
+		"border: 2px solid var(--dim);",
+		".check::before { content: \"\"; position: absolute; inset: calc((var(--check) - var(--hit)) / 2 - 2px); }",
+		".row:hover > .only { visibility: visible; }",
+		// The panel is painted apart from the map, or a pan costs twice.
+		"will-change: transform;",
+	} {
+		if !bytes.Contains(css, []byte(need)) {
+			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+}
+
+// Which items are shown is kept as what differs from everything showing,
+// in the form the live layer always kept its own, so that hundreds of
+// items cost a record nothing until some are hidden. A long list is not
+// all put in the page, nothing is drawn more than once a turn, and the
+// panel's search changes nothing that is kept or shown.
+func TestLayerPanelKeepsOnlyWhatDiffersAndDrawsOnlyWhatChanged(t *testing.T) {
+	js := read(t, "layers.js")
+	for _, need := range []string{
+		"retain(f.group, f.name, plain(f) ? null : stateOf(f));",
+		"const stateOf = (f) => ({ only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...(f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {}) });",
+		"f.shows = (id) => (f.only !== null ? f.only === id : !f.hidden.has(id) && (!f.off.has(id) || f.shown.has(id)));",
+		"const MAX_HIDDEN = 200;", "const LIST_CAP = 40;",
+		"const some = row.all ? listed : listed.slice(0, LIST_CAP);",
+		"Promise.resolve().then(render);",
+		"if (dom.was[what] === value) return;",
+		// Nothing moves under the pointer or the focus.
+		"const busy = list.children.length > 0 && (list.matches(':hover') || list.contains(document.activeElement));",
+		"if (at === chosenAt) return;",
+		"changes[row.key] = null;",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("layers.js no longer has %s", need)
+		}
+	}
+	search := regexp.MustCompile(`(?s)box\.addEventListener\('input', \(\) => \{.*?\n  \}\);`).Find(js)
+	unsearch := regexp.MustCompile(`(?s)const unsearch = \(\) => \{.*?\n  \};`).Find(js)
+	if search == nil || unsearch == nil {
+		t.Fatal("layers.js no longer has its search where this test looks for it")
+	}
+	for _, body := range [][]byte{search, unsearch} {
+		for _, write := range []string{"remember(", "retain(", "keep(", "switchRow", "changeFacet", "twist("} {
+			if bytes.Contains(body, []byte(write)) {
+				t.Errorf("the panel's search calls %s; it narrows the panel and changes nothing else", write)
+			}
+		}
+	}
+	settings := read(t, "settings.js")
+	for _, need := range []string{
+		"items: record(CHOICE, chosen, 32),",
+		"const CHOICES = [...STRUCTURE_SORTS.map((sort) => `structures#${sort}`), 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];",
+		// A record and a view from before the lists are brought to them.
+		"if (layers[BROUGHT] === 1) return record;",
+		"const kinds = fromKindSwitches(view.layers);",
+		"if (view.biome !== undefined) choose('biomes#items', view.biome === null ? null : { only: view.biome, hidden: [] });",
+		"RETIRED: KIND_SWITCHES.map((kind) => `structures/${kind}`),",
+	} {
+		if !bytes.Contains(settings, []byte(need)) {
+			t.Errorf("settings.js no longer has %s", need)
+		}
+	}
+	views := read(t, "views.js")
+	for _, need := range []string{
+		"if (app.layers.items) view.items = app.layers.items();",
+		// Game-named choices only: no gamertag, name tag or waypoint.
+		"const SHARED = ['structures#recorded', 'structures#predicted', 'structures#candidate', 'markers#containers', 'markers#beds', 'biomes#items'];",
+		"redraw(Object.keys(next.layers).filter((key) => !RETIRED.has(key)));",
+	} {
+		if !bytes.Contains(views, []byte(need)) {
+			t.Errorf("views.js no longer has %s", need)
+		}
 	}
 }

@@ -18,7 +18,10 @@ func TestTrailsAreColouredByPlayerAndNamedAsText(t *testing.T) {
 		"lines.bindTooltip((line) => text(labelOf(line)),",
 		"if (app.isMe && app.playerColour && app.isMe(name)) return app.playerColour(name);",
 		"const first = hash(name) % PALETTE.length;",
-		"name.textContent = trail.name;",
+		".map(([key, trail]) => ({ id: key, label: trail.name, colour: trail.colour, shape: 'line' }));",
+		// Each player's lines are on the map or off it by their own item.
+		"if (choice.shows(trail.name.toLowerCase())) {",
+		"if (want) lines.addLayer(line); else lines.removeLayer(line);",
 		// Under the markers and still hovered: only on their canvas.
 		"const shared = app.liveRenderer || null;",
 		"casing.bringToBack();",

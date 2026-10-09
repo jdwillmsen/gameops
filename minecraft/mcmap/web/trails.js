@@ -7,6 +7,10 @@
 // answers the lines are carried forward from the live frames the page is
 // already getting, by the server's own rules, and the next answer replaces
 // whatever was drawn that way.
+//
+// In the panel the trails are a section of their own: each player's trail
+// an item that can be hidden, keyed by the colour it is drawn in, under a
+// choice of how far back the trails go.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -23,7 +27,8 @@
   // How much trail the viewer is offered, in seconds; any other length may
   // be typed, down to a minute and up to what the server keeps. It keeps a
   // day unless it is set otherwise, and says how long in every answer.
-  const WINDOWS = [3600, 6 * 3600, 24 * 3600];
+  const WINDOWS = [3600, 6 * 3600, 24 * 3600, 7 * 86_400];
+  const WINDOW_NAMES = ['1 h', '6 h', '24 h', '7 d'];
   const MIN_WINDOW = 60;
   // The longest that may be asked for before the server has said what it
   // keeps.
@@ -102,40 +107,51 @@
   let fetchedAt = 0;
   let pending = null;
   let limits = { more: 0, maxAgeSeconds: 0 };
-  let bodyShown = false;
-  // gamertag in lower case -> { name, colour, all, line, casing, last,
-  // seenAt }: all is every line of theirs, and line and casing the pair
-  // still growing.
+  // Whose trails are shown, which the panel keeps. A panel from before it
+  // listed them shows them all.
+  const choice = app.layers.facet ? app.layers.facet('overlays', 'trails') : { shows: () => true, onChange() {} };
+  // gamertag in lower case -> { name, colour, all, every, line, casing,
+  // last, seenAt }: all is every dark line of theirs, every is those and
+  // the coloured ones over them, and line and casing the pair still
+  // growing.
   const trails = new Map();
-  // What the list of players was last built from.
-  let listed = '';
-
-  const body = document.createElement('div');
-  body.className = 'trail-body';
-  const players = document.createElement('ul');
-  players.className = 'legend trail-players';
-  players.setAttribute('aria-label', 'Players with a trail here. Choose one to see the whole of it.');
-  const picker = document.createElement('span');
-  picker.className = 'trail-window';
   const span = (length) => (length >= 3600 ? `${Math.round(length / 3600)} h` : `${Math.max(1, Math.round(length / 60))} min`);
-  const chosen = duration.picker({
-    name: 'How much trail to show',
-    presets: WINDOWS,
-    unit: 'h',
-    min: MIN_WINDOW,
-    max: () => (retention > 0 ? retention : MAX_UNKNOWN),
-    maxWhy: ', which is all the server keeps',
-    say: (length) => `the last ${length}`,
+  const longest = () => (retention > 0 ? retention : MAX_UNKNOWN);
+  const bounds = () => ({ unit: 'h', min: MIN_WINDOW, max: longest(), maxWhy: ', which is all the server keeps', say: (length) => `the last ${length}` });
+
+  function choose(length) {
+    if (!Number.isFinite(length) || length === seconds) return;
+    seconds = length;
+    if (settings) settings.set('trails', { seconds });
+    else try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ seconds })); } catch { /* not kept, still applied */ }
+    sync();
+  }
+
+  // How far back the trails go, for the panel to draw as a choice among
+  // four lengths, with any other typed in a box of its own. A length the
+  // server does not keep is not offered.
+  const windowed = () => ({
+    label: 'How much trail to show',
+    options: WINDOWS.map((length, i) => ({
+      value: length,
+      label: WINDOW_NAMES[i],
+      disabled: length > longest() && length !== seconds,
+      title: length > longest() ? `The server keeps ${span(retention)} of trail.` : `The last ${duration.words(length)}`,
+    })),
     value: seconds,
-    onChange(length) {
-      seconds = length;
-      if (settings) settings.set('trails', { seconds });
-      else try { localStorage.setItem(WINDOW_KEY, JSON.stringify({ seconds })); } catch { /* not kept, still applied */ }
-      sync();
+    onChange: choose,
+    custom: {
+      label: 'Custom',
+      title: 'How much trail to show',
+      hint: 'Type a length with m, h or d, such as 90m, 2h or 1d.',
+      placeholder: '90m, 2h, 1d',
+      say: (length) => duration.words(length),
+      settle(typed) {
+        const read = duration.settle(typed, bounds());
+        return { value: read.seconds, said: read.said, problem: read.problem };
+      },
     },
   });
-  picker.append('Last ', chosen.node);
-  body.append(picker, players);
 
   const on = () => row !== null && row.enabled;
   const clock = (seconds) => new Date(seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -172,16 +188,19 @@
   function begin(trail, t, x, z) {
     const casing = L.polyline([place(x, z)], { ...drawing, color: ink(), weight: 5.5, opacity: CASING_OPACITY * strength(), interactive: Boolean(shared), name: trail.name, from: t, to: t });
     const line = L.polyline([place(x, z)], { ...drawing, color: trail.colour, weight: 2.5, opacity: LINE_OPACITY * strength(), interactive: false, over: true });
-    lines.addLayer(casing);
-    lines.addLayer(line);
-    // Behind every marker already on the canvas; one added later is drawn
-    // over these as it is.
-    if (shared && map.hasLayer(lines)) {
-      line.bringToBack();
-      casing.bringToBack();
+    if (choice.shows(trail.name.toLowerCase())) {
+      lines.addLayer(casing);
+      lines.addLayer(line);
+      // Behind every marker already on the canvas; one added later is drawn
+      // over these as it is.
+      if (shared && map.hasLayer(lines)) {
+        line.bringToBack();
+        casing.bringToBack();
+      }
     }
     Object.assign(trail, { casing, line, last: { x, z } });
     trail.all.push(casing);
+    trail.every.push(casing, line);
     extend(trail, t, x, z, false);
   }
 
@@ -194,38 +213,38 @@
     trail.casing.options.to = t;
   }
 
-  // The players the lines belong to, each with their colour, as buttons
-  // that take the map to the whole of that player's trail. A gamertag is a
-  // player's choice and is set as text.
-  function list() {
-    const sorted = [...trails.values()].filter((trail) => trail.all.length > 0)
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-    const key = sorted.map((trail) => `${trail.name}\n${trail.colour}`).join('\n');
-    if (key === listed) return;
-    listed = key;
-    players.replaceChildren(...sorted.map((trail) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.title = 'Show the whole trail';
-      const swatch = document.createElement('i');
-      swatch.style.backgroundColor = trail.colour;
-      const name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = trail.name;
-      button.append(swatch, name);
-      button.addEventListener('click', () => {
-        const held = trails.get(trail.name.toLowerCase());
-        if (!held) return;
-        const bounds = L.latLngBounds([]);
-        for (const line of held.all) bounds.extend(line.getBounds());
-        // No closer than one block to a pixel: a trail of a few steps
-        // would otherwise fill the screen with four blocks.
-        if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 0 });
-      });
-      const item = document.createElement('li');
-      item.append(button);
-      return item;
-    }));
+  // Puts on the map exactly the lines of the players whose trails are
+  // shown, each dark line under its coloured one.
+  function showChosen() {
+    for (const [key, trail] of trails) {
+      const want = choice.shows(key);
+      for (const line of trail.every) {
+        if (want === lines.hasLayer(line)) continue;
+        if (want) lines.addLayer(line); else lines.removeLayer(line);
+      }
+    }
+    // Last first, so that they end up in the order they were made.
+    if (shared && map.hasLayer(lines)) lines.getLayers().reverse().forEach((line) => line.bringToBack());
+  }
+
+  // The players the lines belong to, for the panel: each an item keyed by
+  // the colour of their trail. A gamertag is a player's choice and goes
+  // as text.
+  const listed = () => [...trails]
+    .filter(([, trail]) => trail.all.length > 0)
+    .sort((a, b) => a[1].name.localeCompare(b[1].name, undefined, { sensitivity: 'base' }))
+    .map(([key, trail]) => ({ id: key, label: trail.name, colour: trail.colour, shape: 'line' }));
+
+  // Takes the map to the whole of one player's trail, or of everyone's.
+  function zoomTo(key) {
+    const box = L.latLngBounds([]);
+    for (const [name, trail] of trails) {
+      if (key !== undefined && name !== key) continue;
+      for (const line of trail.all) box.extend(line.getBounds());
+    }
+    // No closer than one block to a pixel: a trail of a few steps would
+    // otherwise fill the screen with four blocks.
+    if (box.isValid()) map.fitBounds(box, { padding: [40, 40], maxZoom: 0 });
   }
 
   function clear() {
@@ -247,7 +266,7 @@
       .filter((player) => player && typeof player.name === 'string' && Array.isArray(player.segments))
       .sort((a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1));
     for (const player of served) {
-      const trail = { name: player.name, colour: colourOf(player.name), all: [], seenAt: 0 };
+      const trail = { name: player.name, colour: colourOf(player.name), all: [], every: [], seenAt: 0 };
       for (const segment of player.segments) {
         const points = (Array.isArray(segment) ? segment : []).filter((p) => Array.isArray(p) && [p[0], p[1], p[3]].every(Number.isFinite));
         if (points.length === 0) continue;
@@ -271,7 +290,7 @@
       const z = Math.floor(p.z);
       let trail = trails.get(key);
       if (!trail) {
-        trail = { name: p.n, colour: colourOf(p.n), all: [], seenAt: 0 };
+        trail = { name: p.n, colour: colourOf(p.n), all: [], every: [], seenAt: 0 };
         trails.set(key, trail);
       }
       const moved = trail.last ? Math.hypot(x - trail.last.x, z - trail.last.z) : Infinity;
@@ -281,16 +300,17 @@
       trail.seenAt = now;
     }
     row.setCount(trails.size);
-    list();
+    if (row.setItems) row.setItems(listed());
   }
 
   function paint() {
     if (available !== true) {
       if (row) row.remove();
       row = null;
-      bodyShown = false;
     } else if (!row) {
-      row = app.layers.register({ group: 'overlays', id: 'trails', label: 'Trails', enabled: false, order: 20, swatch: 'key trail' });
+      row = app.layers.register({ group: 'overlays', id: 'trails', label: 'Trails', enabled: false, order: 20, swatch: 'key trail',
+        section: 'trails', whole: true, facet: 'trails', actions: { zoom: zoomTo },
+      });
       row.onToggle(sync);
     }
     const showing = on() && drawn !== null;
@@ -302,13 +322,8 @@
     }
     if (!showing && map.hasLayer(lines)) map.removeLayer(lines);
     if (!row) return;
-    list();
-    // Only when it changes: putting the window's menu back in the page
-    // would shut it under the viewer's hand.
-    if (on() !== bodyShown) {
-      bodyShown = on();
-      row.setBody(bodyShown ? body : null);
-    }
+    if (row.setItems) row.setItems(listed());
+    if (row.setControl) row.setControl(windowed());
     row.setCount(showing ? trails.size : null);
     const notes = [];
     if (showing && limits.maxAgeSeconds > 0 && limits.maxAgeSeconds < seconds) notes.push(`The server keeps ${span(limits.maxAgeSeconds)} of trail.`);
@@ -395,7 +410,6 @@
       const kept = windowOf(settings.get('trails').seconds);
       if (kept === seconds) return;
       seconds = kept;
-      chosen.set(kept);
       sync();
     },
   };
@@ -412,6 +426,7 @@
     });
   });
 
+  choice.onChange(showChosen);
   document.addEventListener('mcmap:players', follow);
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);

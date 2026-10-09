@@ -3,8 +3,10 @@
 // The world's biomes, as a tint over the terrain. The server cuts the
 // overlay into tiles addressed exactly as the terrain's are, so the two are
 // laid one over the other by the same Leaflet machinery and line up to the
-// block. The legend lists what the current dimension holds, and choosing
-// one entry asks for tiles in which only that biome keeps its colour.
+// block. The panel lists what the current dimension holds, each biome an
+// item under the overlay's own switch. Hiding some asks for tiles drawn
+// without them, and showing one alone for tiles in which only that biome
+// keeps its colour and the rest are dimmed.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -39,8 +41,7 @@
   const Tiles = L.TileLayer.extend({
     getTileUrl(c) {
       const o = this.options;
-      const only = o.only ? `biome=${encodeURIComponent(o.only)}&` : '';
-      return `api/biomes/tiles/${o.dimension}/${c.z}/${c.x}/${c.y}.png?${only}v=${encodeURIComponent(o.version)}`;
+      return `api/biomes/tiles/${o.dimension}/${c.z}/${c.x}/${c.y}.png?${o.pick}v=${encodeURIComponent(o.version)}`;
     },
   });
 
@@ -52,20 +53,30 @@
   let listing = null;
   let fetchedAt = 0;
   let pending = null;
-  // The one biome picked out, by the game's identifier, or null for all.
-  // It is kept, so that a saved view can bring it back.
-  let only = settings ? settings.get('biome').only : null;
-  const keep = () => {
-    if (settings && settings.get('biome').only !== only) settings.set('biome', { only: only !== null && NAME.test(only) ? only : null });
+  // Which biomes are drawn, which the panel keeps: any of them hidden, or
+  // one shown alone. A panel from before it listed them keeps only the
+  // one picked out, in the place that always had, and that is followed.
+  let lone = settings ? settings.get('biome').only : null;
+  const choice = app.layers.facet ? app.layers.facet('biomes', 'items') : {
+    get only() { return lone; },
+    shows: (name) => lone === null || lone === name,
+    solo(name) { lone = name; },
+    onChange() {},
   };
+  // The one picked out is also kept where it always was, for a saved view
+  // to carry and for a script from before the list to read.
+  const keep = () => {
+    const only = choice.only !== null && NAME.test(choice.only) ? choice.only : null;
+    if (settings && settings.get('biome').only !== only) settings.set('biome', { only });
+  };
+  // The most biomes a tile is asked for by name, which is the server's
+  // limit; the game has fewer than this in all.
+  const MAX_NAMED = 128;
   // Whether the overlay was asked for before there was a row to switch.
   let queued = false;
   let layer = null;
-  // What the legend was last built from, so that an unchanged listing does
-  // not rebuild what the viewer may be scrolling.
-  let legendOf = '';
-  const legend = document.createElement('div');
-  legend.className = 'legend';
+  // Whether more biomes are hidden than a tile can be asked to leave out.
+  let unpicked = false;
 
   let atTimer = null;
   let atRequest = null;
@@ -88,41 +99,23 @@
     return percent < 1 ? '<1%' : `${Math.round(percent)}%`;
   }
 
-  // An entry of the legend. The name is the server's and is set as text;
-  // the colour is taken only in the one form the server gives it.
-  function entry(label, colour, detail, pressed, choose) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.setAttribute('aria-pressed', String(pressed));
-    const swatch = document.createElement('i');
-    if (COLOUR.test(colour)) swatch.style.backgroundColor = colour;
-    else swatch.className = 'every';
-    const name = document.createElement('span');
-    name.className = 'name';
-    name.textContent = label;
-    const size = document.createElement('span');
-    size.className = 'share';
-    size.textContent = detail;
-    button.append(swatch, name, size);
-    button.addEventListener('click', choose);
-    const item = document.createElement('li');
-    item.append(button);
-    return item;
-  }
-
-  function buildLegend() {
-    const key = `${listing.dimension}|${listing.version}|${only || ''}`;
-    if (key === legendOf) return;
-    legendOf = key;
-    const total = listing.biomes.reduce((sum, b) => sum + b.area, 0);
-    const list = document.createElement('ul');
-    list.setAttribute('aria-label', 'Biomes in this dimension, largest first');
-    list.append(entry('All biomes', '', '', only === null, () => pick(null)));
-    for (const b of listing.biomes) {
-      // Choosing the one already picked out is the way back as well.
-      list.append(entry(b.label, b.color, share(b.area, total), only === b.name, () => pick(only === b.name ? null : b.name)));
+  // How the tiles are asked for, as the part of their address that says
+  // which biomes: nothing for all of them, one picked out against the rest,
+  // or whichever is the shorter of the list to draw and the list to leave
+  // out, in one order so that the same choice is the same address.
+  function pickOf() {
+    unpicked = false;
+    if (choice.only !== null) return `biome=${encodeURIComponent(choice.only)}&`;
+    const names = listing.biomes.map((b) => b.name).filter((name) => NAME.test(name));
+    const hidden = names.filter((name) => !choice.shows(name));
+    if (hidden.length === 0) return '';
+    const drawn = names.filter((name) => choice.shows(name));
+    const [how, list] = drawn.length > 0 && drawn.length < hidden.length ? ['biomes', drawn] : ['except', hidden];
+    if (list.length > MAX_NAMED) {
+      unpicked = true;
+      return '';
     }
-    legend.replaceChildren(list);
+    return `${how}=${list.sort().map(encodeURIComponent).join(',')}&`;
   }
 
   function drawable() {
@@ -147,7 +140,7 @@
       layer = new Tiles('', {
         dimension: listing.dimension,
         version: listing.version,
-        only,
+        pick: pickOf(),
         tileSize: listing.tiles.size,
         minNativeZoom: listing.tiles.minZoom,
         maxNativeZoom: Math.min(listing.tiles.maxZoom, FINEST_ZOOM),
@@ -162,9 +155,10 @@
       }).addTo(map);
       return;
     }
-    if (layer.options.version === listing.version && layer.options.only === only) return;
+    const pick = pickOf();
+    if (layer.options.version === listing.version && layer.options.pick === pick) return;
     layer.options.version = listing.version;
-    layer.options.only = only;
+    layer.options.pick = pick;
     layer.redraw();
   }
 
@@ -173,7 +167,7 @@
       if (row) row.remove();
       row = null;
     } else if (!row) {
-      row = app.layers.register({ group: 'biomes', id: 'overlay', label: 'Biome overlay', enabled: false, order: 10 });
+      row = app.layers.register({ group: 'biomes', id: 'overlay', label: 'Biome overlay', enabled: false, order: 10, whole: true, facet: 'items' });
       if (queued) row.setEnabled(true);
       queued = false;
       row.onToggle(() => {
@@ -192,19 +186,20 @@
     let note = '';
     if (listing !== null && !listing.extracted) note = 'The biomes have not been read yet.';
     else if (known && listing.biomes.length === 0) note = 'The world holds no biomes for this dimension.';
-    else if (on() && only !== null) note = `Showing only ${labelOf(only)}.`;
+    else if (on() && unpicked) note = 'More biomes are hidden than the overlay can leave out at once, so all of them are drawn.';
+    else if (on() && choice.only !== null) note = `Showing only ${labelOf(choice.only)}: the rest are dimmed.`;
     row.setNote(note);
-    if (on() && known && listing.biomes.length > 0) {
-      buildLegend();
-      row.setBody(legend);
-    } else {
-      row.setBody(null);
-    }
+    if (!row.setItems) return;
+    // Each biome this dimension holds, largest first, as the server lists
+    // them. A name is the server's and goes as text; a colour is taken
+    // only in the one form the server gives it.
+    const total = known ? listing.biomes.reduce((sum, b) => sum + b.area, 0) : 0;
+    row.setItems(known ? listing.biomes.map((b) => ({ id: b.name, label: b.label, colour: COLOUR.test(b.color) ? b.color : '', swatch: 'key recorded', detail: share(b.area, total) })) : []);
   }
 
   // Picks one biome out, or with null goes back to all of them.
   function pick(name) {
-    only = name;
+    choice.solo(name);
     keep();
     paint();
   }
@@ -212,7 +207,6 @@
   function clear() {
     listing = null;
     fetchedAt = 0;
-    legendOf = '';
   }
 
   async function load(dimension) {
@@ -249,9 +243,8 @@
       fetchedAt = listing.extracted ? Date.now() : Date.now() - REFRESH_MS + RETRY_MS;
       // A biome picked out that this dimension does not hold would dim
       // the whole of it.
-      if (only !== null && !held(only)) only = null;
-      keep();
-      paint();
+      if (choice.only !== null && !held(choice.only)) pick(null);
+      else paint();
     } catch {
       fetchedAt = Date.now() - REFRESH_MS + RETRY_MS;
     } finally {
@@ -271,14 +264,13 @@
       clear();
       // Logged out, nothing is left picked out. With no dimension yet the
       // page is only starting, and the biome kept from last time stands.
-      if (locked) only = null;
+      if (locked && choice.only !== null) choice.solo(null);
       queued = false;
       paint();
       return;
     }
     if (!listing || listing.dimension !== dimension) {
-      if (listing) only = null;
-      keep();
+      if (listing && choice.only !== null) pick(null);
       clear();
       paint();
       load(dimension);
@@ -344,28 +336,43 @@
   app.biomes = {
     show(name) {
       if (available === false || typeof name !== 'string' || !name) return false;
-      only = name;
-      keep();
       // A result chosen before the first listing has answered: the row is
       // switched on when the answer makes it.
       if (row) row.setEnabled(true);
       else queued = true;
-      paint();
+      pick(name);
       return true;
     },
   };
 
-  // For a saved view: the biome kept as picked out is read again. Whether
-  // this dimension holds it is known only once its listing has come.
+  // For a saved view, before the panel reads what is now kept: a biome
+  // kept as picked out that this dimension does not hold would dim the
+  // whole of it, so it is let go of, and that is said. Whether this
+  // dimension holds it is known only once its listing has come.
   app.biomes.adopt = () => {
     if (!settings) return true;
-    const kept = settings.get('biome').only;
-    const missing = kept !== null && listing !== null && !held(kept);
-    only = missing ? null : kept;
+    if (!app.layers.facet) {
+      lone = settings.get('biome').only;
+      const missing = lone !== null && listing !== null && !held(lone);
+      if (missing) lone = null;
+      keep();
+      paint();
+      return !missing;
+    }
+    const kept = app.layers.recall('biomes', 'items');
+    const only = kept && typeof kept.only === 'string' ? kept.only : null;
+    if (only === null || listing === null || held(only)) return true;
+    app.layers.retain('biomes', 'items', { ...kept, only: null });
+    settings.set('biome', { only: null });
+    return false;
+  };
+
+  choice.onChange(() => {
     keep();
     paint();
-    return !missing;
-  };
+  });
+  // One picked out by a script from before the list, since this last ran.
+  if (app.layers.facet && lone !== choice.only && (lone === null || NAME.test(lone))) choice.solo(lone);
 
   document.addEventListener('mcmap:settings', (e) => {
     if (layer && e.detail && e.detail.sections.includes('look')) layer.setOpacity(opacity());

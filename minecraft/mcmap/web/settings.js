@@ -171,6 +171,29 @@
     return kept === BAD ? BAD : { only: kept.only ?? null, hidden: kept.hidden || [] };
   };
 
+  // Which of what a layer is made of are shown, as the panel keeps it:
+  // what differs from everything showing. only is the one shown alone,
+  // hidden those switched off, and shown those that are off until asked
+  // for and have been. An item is known by an id of the game's or the
+  // server's, or a gamertag; none is ever used as anything but a key.
+  const chosen = (v, strict) => {
+    const kept = shape({ only: orNull(TAG), hidden: list(TAG, MAX_HIDDEN), shown: list(TAG, MAX_HIDDEN) })(v, strict);
+    if (kept === BAD) return BAD;
+    return { only: kept.only ?? null, hidden: kept.hidden || [], ...(kept.shown && kept.shown.length > 0 ? { shown: kept.shown } : {}) };
+  };
+  const unchosen = (f) => !f || (f.only === null && f.hidden.length === 0 && !(f.shown && f.shown.length > 0));
+  const CHOICE = /^[a-z0-9_-]{1,32}#[a-z0-9_-]{1,48}$/;
+  // The choices there are, by the key each is kept under beside the
+  // switches. The two of the live layer are older than the rest and have
+  // a place of their own in a view.
+  const STRUCTURE_SORTS = ['recorded', 'predicted', 'candidate'];
+  const CHOICES = [...STRUCTURE_SORTS.map((sort) => `structures#${sort}`), 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];
+  // The kinds of structure that each had a switch over all three layers
+  // before each layer listed its own, and the ones among them that are
+  // off until asked for.
+  const KIND_SWITCHES = ['fortress', 'monument', 'outpost', 'witch_hut', 'village', 'stronghold', 'trial_chamber'];
+  const ASKED_FOR = ['stronghold'];
+
   const LAYER = /^[a-z0-9_-]{1,32}\/[a-z0-9_-]{1,48}$/;
   const ID = text(24, /^[a-z0-9]+$/);
   const BUILT_IN = ['everything', 'exploring', 'base'];
@@ -180,6 +203,7 @@
     layers: record(LAYER, bool, 64),
     mobs: filter(TYPE),
     players: filter(TAG),
+    items: record(CHOICE, chosen, 32),
     biome: orNull(text(64, /^[a-z0-9_.:-]+$/)),
     trails: int(60, 7 * 86_400),
     interval: int(1, 86_400),
@@ -251,21 +275,27 @@
   const MOBS = ['hostile', 'passive', 'villager', 'other'];
   const MARKERS = ['waypoints', 'beds', 'containers', 'mobs'];
   const SORTS = ['recorded', 'predicted', 'candidate'];
-  const KINDS = ['fortress', 'monument', 'outpost', 'witch_hut', 'village'];
-  const unfiltered = () => ({ mobs: { only: null, hidden: [] }, players: { only: null, hidden: [] }, biome: null });
+  // Every item of every layer showing: no type of mob, no player, no kind
+  // of structure, container or bed and no biome is hidden.
+  const unfiltered = () => ({
+    mobs: { only: null, hidden: [] },
+    players: { only: null, hidden: [] },
+    biome: null,
+    items: Object.fromEntries(CHOICES.map((key) => [key, { only: null, hidden: [] }])),
+  });
   const BUILT = {
     everything: {
       id: 'everything',
       name: 'Everything',
       says: 'Players, mobs, markers, structures and trails',
-      layers: { ...rows('live', ['players', ...MOBS], []), ...rows('markers', MARKERS, []), ...rows('structures', [...SORTS, ...KINDS, 'spawn'], []), ...rows('biomes', [], ['overlay']), ...rows('overlays', ['trails'], ['slime']) },
+      layers: { ...rows('live', ['players', ...MOBS], []), ...rows('markers', MARKERS, []), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('biomes', [], ['overlay']), ...rows('overlays', ['trails'], ['slime']) },
       ...unfiltered(),
     },
     exploring: {
       id: 'exploring',
       name: 'Exploring',
       says: 'Terrain, structures, biomes and the world spawn; no mobs',
-      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', ['waypoints'], ['beds', 'containers', 'mobs']), ...rows('structures', [...SORTS, ...KINDS, 'spawn'], []), ...rows('biomes', ['overlay'], []), ...rows('overlays', [], ['trails', 'slime']) },
+      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', ['waypoints'], ['beds', 'containers', 'mobs']), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('biomes', ['overlay'], []), ...rows('overlays', [], ['trails', 'slime']) },
       ...unfiltered(),
     },
     base: {
@@ -305,10 +335,38 @@
     return section === 'views' ? tidy(out) : out;
   }
 
+  // What the switches over a kind of structure come to now that each of
+  // the three layers lists its kinds: a kind that was off is hidden in all
+  // three, and one that is off until asked for and was on is shown in all
+  // three. Null where they say nothing but the defaults.
+  function fromKindSwitches(layers) {
+    const hidden = KIND_SWITCHES.filter((kind) => !ASKED_FOR.includes(kind) && layers[`structures/${kind}`] === false);
+    const shown = ASKED_FOR.filter((kind) => layers[`structures/${kind}`] === true);
+    return hidden.length + shown.length === 0 ? null : { only: null, hidden, ...(shown.length > 0 ? { shown } : {}) };
+  }
+
+  // A record from before the panel listed what each layer is made of is
+  // brought to how that is kept now, once, and marked as brought: the one
+  // switch per kind of structure becomes each layer's own list, and the
+  // one biome picked out becomes the biomes'. The old switches are left
+  // where they are, for a script from before to go on reading.
+  const BROUGHT = 'panel#items';
+  function brought(record) {
+    const { layers } = record;
+    if (layers[BROUGHT] === 1) return record;
+    const kinds = fromKindSwitches(layers);
+    for (const sort of STRUCTURE_SORTS) {
+      if (kinds && !Object.hasOwn(layers, `structures#${sort}`)) layers[`structures#${sort}`] = { ...kinds };
+    }
+    if (record.biome.only !== null && !Object.hasOwn(layers, 'biomes#items')) layers['biomes#items'] = { only: record.biome.only, hidden: [] };
+    layers[BROUGHT] = 1;
+    return record;
+  }
+
   function wholeRecord(raw) {
     const out = { v: VERSION };
     for (const section of Object.keys(SECTIONS)) out[section] = whole(section, plain(raw) ? raw[section] : undefined);
-    return out;
+    return brought(out);
   }
 
   // --- the browser's storage ------------------------------------------------
@@ -401,8 +459,9 @@
       kept = 'newer';
     }
     const fresh = !raw;
+    const unbrought = !fresh && !(plain(raw.layers) && raw.layers[BROUGHT] === 1);
     state = wholeRecord(raw || carriedOver());
-    let changed = fresh;
+    let changed = fresh || unbrought;
     if (kept === 'yes') {
       // The page and its scripts are cached apart, so for a few minutes
       // after a release a script from before may be the one writing. It
@@ -543,13 +602,25 @@
   function adopted(view) {
     const next = copy(state);
     Object.assign(next.layers, view.layers);
-    for (const domain of ['mobs', 'players']) {
-      const f = view[domain];
-      if (!f) continue;
-      if (f.only === null && f.hidden.length === 0) delete next.layers[`live#${domain}`];
-      else next.layers[`live#${domain}`] = copy(f);
-    }
+    const choose = (key, f) => {
+      if (unchosen(f)) delete next.layers[key];
+      else next.layers[key] = copy(f);
+    };
+    for (const domain of ['mobs', 'players']) if (view[domain]) choose(`live#${domain}`, view[domain]);
     if (view.biome !== undefined) next.biome.only = view.biome;
+    if (view.items) {
+      for (const [key, f] of Object.entries(view.items)) choose(key, f);
+      const biomes = view.items['biomes#items'];
+      if (biomes) next.biome.only = biomes.only;
+    } else {
+      // A view from before each layer listed what it is made of showed
+      // all of every layer but what its own switches and its one biome
+      // said, and that is what it puts back.
+      for (const key of CHOICES) delete next.layers[key];
+      const kinds = fromKindSwitches(view.layers);
+      for (const sort of STRUCTURE_SORTS) choose(`structures#${sort}`, kinds);
+      if (view.biome !== undefined) choose('biomes#items', view.biome === null ? null : { only: view.biome, hidden: [] });
+    }
     if (view.trails !== undefined) next.trails.seconds = view.trails;
     if (view.interval !== undefined) next.live.interval = view.interval;
     if (view.grid !== undefined) next.grid.on = view.grid;
@@ -643,6 +714,9 @@
     NAME_LENGTH,
     LOOK_DEFAULTS,
     BUILT_IN,
+    // The switches a kind of structure had before each layer listed its
+    // kinds, which a view saved then may still name.
+    RETIRED: KIND_SWITCHES.map((kind) => `structures/${kind}`),
     // A part of the record, as a copy that is the caller's to change.
     get: (section) => (Object.hasOwn(SECTIONS, section) ? copy(state[section]) : null),
     set,
