@@ -268,8 +268,9 @@ glance. A marker with no picture is the dot or arrow it was before.
 this repository or in the image: the service fetches them at runtime from
 Mojang's public [bedrock-samples](https://github.com/Mojang/bedrock-samples)
 repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
-(about 80 KB of files, with the marker pictures and names
-[fetched with them](#names-and-marker-pictures)).
+(249 files and 234 KB, with the marker pictures, the names and the
+[pictures made from the game's models](#faces-blocks-and-structure-pictures)
+that are fetched with them).
 
 - **The pin** is `ICONS_REF`, by default the commit tagged `v1.26.50.4`,
   the stable release nearest the game server's 1.26.5x. It is a commit so
@@ -286,12 +287,19 @@ repository, at one pinned revision, and keeps them under `DATA_DIR/icons`
   `min_engine_version`, as the game does. At the default pin 92 types have
   an icon. The 39 that do not are not mobs (boats, minecarts, armour
   stands, projectiles) or have no egg.
-- **What is asked for**: one directory listing from `api.github.com`, then
-  the atlas, about 180 definitions, about 90 spawn-egg textures, 44 marker
-  textures and the language file from `raw.githubusercontent.com`: 319
-  requests and 1.6 MB in all, in under ten seconds. No
-  redirect is followed, each file has a size limit and the whole fetch a
-  count, byte and time limit, and every texture must decode as a PNG of at
+- **What is asked for**: one listing from `api.github.com`, then from
+  `raw.githubusercontent.com` the two atlases, 180 definitions, 193 model
+  files and 173 render controllers, about 90 spawn-egg textures, 37 marker
+  textures, about 150 textures the made pictures are made from, and the
+  language file: 834 requests and 7.7 MB in all, in 16 seconds, measured at
+  the default pin. Before faces and blocks were made it was 319 requests
+  and 1.6 MB in under ten seconds. Most of the growth is the listing:
+  three directories are wanted, the API lists one directory to a request,
+  and the one request that lists more is the whole of `resource_pack`, 5.5
+  MB of it, which is chosen over three requests because it is the listing
+  that is rationed, sixty an hour to an address. No redirect is followed,
+  each file has a size limit and the whole fetch a count, byte and time
+  limit, and every picture served as it came must decode as a PNG of at
   most 64 pixels a side, which is then encoded again; the downloaded bytes
   are never served.
 - **It is fetched once.** A start that finds every file for the pin intact
@@ -421,7 +429,9 @@ markers at the moment it is asked for, so that with the samples out of
 reach, when nothing else says which types exist, each one in view still
 has a tidied name.
 
-**Marker pictures** are 44 small PNGs, by key:
+**Marker pictures** served as they came are 37 small PNGs, by key, and a
+structure's is one of the [made pictures](#faces-blocks-and-structure-pictures)
+with the item named here to fall back on:
 
 | Key | Source under `resource_pack/textures/` | Why that one |
 |---|---|---|
@@ -430,18 +440,23 @@ has a tidied name.
 | `container/barrel` | `blocks/barrel_side` | Likewise; the side is the face with the hoops |
 | `shulker/<colour>`, `shulker/undyed` | `entity/shulker/shulker_<colour>`, composed | See below |
 | `marker/waypoint` | `items/compass_item` | A waypoint is a place to find your way back to |
-| `structure/fortress` | `items/netherbrick` | A fortress is built of nothing else |
-| `structure/monument` | `items/prismarine_shard` | Dropped only by the guardians of a monument, and unmistakably of the sea |
-| `structure/outpost` | `items/crossbow_standby` | The pillagers' weapon; their banner has no flat texture |
-| `structure/witch_hut` | `items/cauldron` | Every hut has one |
-| `structure/village` | `items/villagebell` | Every village's meeting point has one |
-| `structure/stronghold` | `items/ender_eye` | What finds one, and what lights its portal |
-| `structure/trial_chamber` | `items/trial_key` | What a chamber's vaults are opened with |
+| `structure/fortress` | a blaze's face, or `items/netherbrick` | The mob met there and nowhere else; a fortress is built of nothing but the brick |
+| `structure/monument` | an elder guardian's face, or `items/prismarine_shard` | Each monument has three; the shard is dropped only by its guardians |
+| `structure/outpost` | a pillager's face, or `items/crossbow_standby` | Who holds it, or their weapon |
+| `structure/witch_hut` | a witch's face, or `items/cauldron` | Who lives in it; every hut has a cauldron |
+| `structure/village` | a villager's face, or `items/villagebell` | Who lives in it; every village's meeting point has a bell |
+| `structure/stronghold` | `items/ender_eye` | What finds one, and what lights its portal. No mob is a stronghold's own |
+| `structure/trial_chamber` | a breeze's face, or `items/trial_key` | The mob met there and nowhere else; the key opens its vaults |
 
-A structure has no item of its own, so each is a vanilla item that could
-stand for nothing else on this map. Items are used rather than blocks
-because an item has a shape against a clear background, where a block face
-is a filled square like the chest's.
+A structure has no item of its own, so each is the face of the mob a
+player meets there, which is the convention seed maps follow, and failing
+that a vanilla item that could stand for nothing else on this map. The
+face is our own crop of Mojang's texture at the pin, made as every mob's
+is, and never another site's drawing. The samples also hold the game's
+own map markers for a village, a swamp hut and a trial chamber
+(`textures/map/`); they are 8 pixels a side with a black outline drawn in,
+half the detail of a face, and read as three small houses, so none is
+used.
 
 A shulker box has neither an item texture nor a usable block face (its
 only one is the plain top). Its picture is made from the texture its model
@@ -455,13 +470,120 @@ most 256 a side.
 Light grey is `light_gray` in every key here and `silver` in the samples'
 file names and language keys.
 
-Each picture is asked for by a path known ahead, so the fetch still makes
-one listing request. Each is bounded, decoded and encoded again exactly as
-a mob icon is.
+Each of these is asked for by a path known ahead. Each is bounded, decoded
+and encoded again exactly as a mob icon is.
+
+#### Faces, blocks and structure pictures
+
+Beside the textures served as they came, the service makes pictures of its
+own from the game's models, at the fetch and from the same pin:
+
+| Key | What it is | Made from |
+|---|---|---|
+| `face/<type>` | A mob's face, 72 of the 92 mob types at the default pin | Its model and its texture |
+| `villager/<profession>` | A villager's face in each of 14 professions, as a structure's sheet lists them | The same, with the profession's texture laid over the skin |
+| `structure/<kind>` | The face of the mob that stands for the structure | That mob's face, or the item above |
+| `block/chest`, `trapped_chest`, `ender_chest`, `barrel`, `spawner`, `vault` | The block seen from above and to one side | The three textures the terrain atlas names for its top, front and side |
+| `block/shulker_<colour>`, `block/shulker_undyed` | Likewise | The lid and base of the texture its model is wrapped in |
+| `block/bed_<colour>` | Likewise, 16 by 6 by 32 | The two slabs of the texture its model is wrapped in |
+| `block/bell` | The bell as the game shows it in the hand | `items/villagebell`, which the atlas names as `bell_carried`. A bell is no box, and its three sides drawn as one are three bells adrift |
+
+**A face** is worked out the way the game would draw the mob, and nothing
+about any mob is guessed:
+
+1. The mob's client definition names its models, its textures and its
+   render controllers. Each controller is an expression over what the mob
+   is at that moment (`query.is_baby ? Geometry.baby : Array.geos[v.index]`),
+   and is evaluated for a grown mob of the default variant: every query and
+   variable nought. A controller listed with a condition is used only if
+   the condition holds of such a mob.
+2. The model is read from `models/entity/*.json` and `models/mobs.json`,
+   in either of their two layouts, with what it inherits put under it
+   (`geometry.zombie.husk:geometry.zombie`).
+3. The head is the bone called `head`, or failing that one of a few other
+   spellings, or the body. Its largest box is the face, and the front of
+   that box is found on the texture the way a box unfolds: for a box of
+   whole-number size `x, y, z` wrapped from `u, v`, the rectangle at
+   `u+z, v+z` of `x` by `y`; or where the box says so face by face, the
+   rectangle it gives. A mirrored box is drawn turned left to right.
+4. Every other box on the head and on the bones that hang off it is drawn
+   in its place, nearest last: a snout, horns, a hat, a villager's nose.
+   A box turned out of square is left out, since its face is no rectangle
+   of the texture; so is a bone the model never draws, and anything
+   further from the head than half its size. Each controller's textures
+   are laid over the last, which is how a stray gets its clothes and a
+   villager its profession.
+5. The result comes out square, one pixel to each pixel of the texture and
+   never blended, with the head in the middle of whatever room its shape
+   leaves. It is not enlarged here: the page enlarges it by a whole number
+   of screen pixels, which a size fixed on the server could not suit.
+
+A face that comes out blank, nearly all one colour, or from a head under
+three pixels across is rejected, and the mob keeps its spawn egg. So does
+any mob the table of overrides says to leave alone. That table
+(`internal/icons/overrides.go`) is data, one line a mob with its reason,
+for the mobs whose face is not the front of a box called head. At the
+default pin 58 faces are made with no override, 14 with one, and 20 mobs
+keep their egg:
+
+| Mobs | What is done | Why |
+|---|---|---|
+| ghast, happy ghast | The body alone | No head; the body is the face, and the tentacles hang far below |
+| slime, magma cube, sulfur cube | The core, the eight slices, the cube | No head |
+| sheep | The sheared model with the woolly one over it | The head is two boxes in two models: the bare face, and the wool round it |
+| wither | Its usual skin, its middle head | Its controller picks the pale skin of one just summoned |
+| shulker | The shell | Its head is seen only when it opens |
+| creeper | Without its second controller | That one draws the charge of a creeper struck by lightning |
+| hoglin, zoglin | The top of the head's box | The head hangs down |
+| guardian, elder guardian | Without the spikes | They would leave the eye a speck among them |
+| pufferfish | Its largest form | The smallest is three pixels across |
+| horse, donkey, mule, skeleton horse, zombie horse | Spawn egg | A narrow box with the eyes on its sides: a post from the front, a bar from the side |
+| cod, salmon, tropical fish, silverfish, endermite, tadpole | Spawn egg | A fish is its side, which is a line at a marker's size; the tropical fish's colours are laid on by the game |
+| armadillo, goat | Spawn egg | The head is set at an angle |
+| parrot, bat | Spawn egg | A head two and four pixels wide |
+| allay, creaking, dolphin, frog, turtle | Spawn egg | The face is see-through, lit from another texture, a blank, or has its eyes on another bone or on the sides |
+
+Some of the model textures are TGA files, which Go's standard
+library does not read, so the service has a reader of its own for the
+plain and run-length-encoded true-colour kinds the samples use. The fourth
+channel of such a file is whatever its material makes of it (which parts
+glow, which take a dye), so a mob's own skin is drawn solid.
+
+**A block** is drawn two pixels across to one down, each side's pixels
+moved and none blended, with the top at 98% brightness, the left side at
+80% and the right at 60.8%, which is how the Minecraft Wiki's block
+renders are lit. A 16 pixel block comes out 32 by 32. The flat pictures
+above are kept, and are what the page draws where a block's is not there.
+
+**What the map knows of a mob** decides which variants are made. A live
+mob is a type and a name and nothing more, and a named mob's mark adds
+only whether it is a baby, so a sheep is white, a cat the first of its
+coats and a cow the temperate one: the game's default for each. A
+structure's sheet does say each villager's profession, so those 14 are
+made. A baby is its grown face drawn smaller.
+
+**Everything read is held to bounds before it is used.** A model file is
+at most 256 KB and 24 levels deep, a model 512 bones and 4,096 boxes, and
+every number in it within 1,024 of nought; a controller's expression at
+most 1,024 characters and 24 levels; a texture at most 512 KB and 1,024
+pixels a side, checked from its header before a pixel is decoded, and a
+whole multiple, at most 4, of the size its model says; a rectangle that
+does not lie inside its texture is refused. There are at most 600 model
+files, 600 controller files and 600 textures to a fetch, and 40 MB in
+all. One mob's model or texture being wrong costs that mob its face and
+nothing else.
+
+**Each is kept with its recipe**: which rectangles of which textures go
+where. The recipes are in the index on the volume, so a picture whose
+texture could not be fetched is made later from the texture alone.
 
 None of this can cost the mob icons. Where a picture or the language file
 cannot be had, that one thing is left out, everything else is served, and
-it is asked for again by itself, with no listing request:
+it is asked for again by itself, with no listing request. The one
+exception is a model or controller file that could not be fetched: no
+recipe is worked out from half the models, so every made picture waits,
+and the next asking reads the listing, the definitions and the models
+again, but only once the rest of the source has answered.
 
 - **The source answered that it does not hold it** (no such file at the
   pin, or one that is too large or not a small PNG): asked again at each
@@ -474,7 +596,33 @@ it is asked for again by itself, with no listing request:
 A volume filled by a version that fetched only mob icons keeps serving
 them: they are taken as they are, never fetched again, and the pictures
 and names are added to them as above. Until those arrive there are no
-pictures and every name is a tidied id.
+pictures and every name is a tidied id. Likewise a volume filled before
+any picture was made, or under another revision of the making
+(`icons.ArtRevision`, raised when the same samples would give different
+pictures), keeps serving everything it holds, a structure's old item
+included, while the made pictures are made and put beside or over them.
+
+#### Where the pictures come from, and what is done with them
+
+This is the posture the service takes, not legal advice. Mojang's samples
+carry no open licence: "(c) Mojang AB. All rights reserved", subject to
+the Minecraft EULA, which lets a tool be built round the game and does not
+let Mojang's content be handed on. So:
+
+- **Nothing of Mojang's is in this repository or in the image**: no
+  texture, no model, no crop of one. That includes the tests, which paint
+  their own textures and write their own models in code.
+- **Everything is fetched at runtime** from Mojang's public repository by
+  the instance that will use it, at a pin its operator chose, and kept
+  only on that instance's volume.
+- **A crop or a render is treated exactly as the texture it came from.**
+  A mob's face cut from its texture and a chest drawn from its three sides
+  are still Mojang's, so they are made on the instance, kept on the same
+  volume, and never committed or published.
+- **They are served only to logged-in players**: `/api/icons` and every
+  picture under it need a session, are `Cache-Control: private`, and are
+  not served at all with `ICONS_ENABLED=false`, which draws the whole map
+  in dots, rings and letters of its own.
 
 ## Markers
 
@@ -2335,9 +2483,9 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
 | `GET /api/waypoints` | Session required. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
-| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version` and the `keys` that have a picture, `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
+| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version` and the `keys` that have a picture (the groups `bed`, `container`, `shulker`, `marker` and `structure`, and since faces and blocks were made `face`, `villager` and `block` in the same list under the same version, so a page from before them reads the answer as it always did), `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
-| `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The marker or structure picture with the key `{group}/{name}` as a PNG, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
+| `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The picture with the key `{group}/{name}` as a PNG, whichever group it is of, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by, and `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
@@ -2400,7 +2548,7 @@ opens at the same place.
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
 | `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume, or that `ICONS_ENABLED=false` |
-| `mcmap_icons_marker_pictures` | Marker and structure pictures held, 44 when whole. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
+| `mcmap_icons_marker_pictures` | Marker, structure, face and block pictures held, 170 when whole at the default pin. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
 | `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 | `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind,certainty}` | Structures on each layer at the last survey; `certainty` is `predicted`, or `candidate` for a site in terrain not generated yet |
