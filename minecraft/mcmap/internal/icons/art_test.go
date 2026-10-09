@@ -684,6 +684,52 @@ func TestAFaceWhoseTextureCouldNotBeFetchedIsMadeLaterFromItsRecipeAlone(t *test
 	}
 }
 
+// A structure whose mob's texture could not be fetched is drawn as its item
+// meanwhile, and is still asked for, so that the item is not what it stays.
+func TestAStructureDrawnAsItsItemForWantOfATextureIsAskedForAgain(t *testing.T) {
+	s := newSamples(t)
+	withMobs(t, s)
+	var up atomic.Bool
+	inner := s.srv.Config.Handler
+	s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/textures/entity/blaze.png") && !up.Load() {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	// One at a time, so that the item is fetched before the source is
+	// found to be out of reach, whichever is asked for first.
+	var set Set
+	for range 20 {
+		var err error
+		if set, err = s.source().Fetch(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if _, drawn := set.Pictures["structure/fortress"]; drawn {
+			break
+		}
+	}
+	item, drawn := set.Pictures["structure/fortress"]
+	if !drawn {
+		t.Skip("the item was never fetched before the source was found out of reach")
+	}
+	if colourOf(t, item) != yellow {
+		t.Error("the fortress is not drawn as its item while its mob's texture is out of reach")
+	}
+	if !slices.Contains(set.Missing, "structure/fortress") || !slices.Contains(set.Unreached, "structure/fortress") {
+		t.Fatalf("missing %v: the fortress would stay its item for good", set.Missing)
+	}
+	up.Store(true)
+	got, err := s.source().Fill(t.Context(), set.Missing, set.Recipes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got.Pictures["structure/fortress"], got.Pictures["face/blaze"]) || len(got.Pictures["face/blaze"]) == 0 || len(got.Missing) != 0 {
+		t.Errorf("after the source came back the fortress is not its mob's face: missing %v", got.Missing)
+	}
+}
+
 func TestWhenAModelCannotBeReadNoFaceIsMadeAndAllAreAskedForAgain(t *testing.T) {
 	s := newSamples(t)
 	withMobs(t, s)
