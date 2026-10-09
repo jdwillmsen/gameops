@@ -563,13 +563,15 @@ layer's row or type filter for it is switched off, when the game's cap on
 reported mobs left it out, and while there is no recent live picture. A mob
 that died after the snapshot keeps its saved mark until the next one. The
 row's count is of the mobs the snapshot holds, each once, loaded or not,
-and the list says of each whether it is loaded now, under the name it has
-now. With Named mobs off neither marker has a label. A click or a tap on the marker, on its label, or on
-its entry in the list opens the card described under Inspecting and
+and each is an item under the row that says whether it is loaded or only
+saved, under the name it has now, and can be hidden by itself. With Named
+mobs off neither marker has a label. A click or a tap on the marker or on
+its label, or Go to on its item (Enter, with the focus on it), opens the
+card described under Inspecting and
 following: on a loaded mob it tracks it live and Follow works; on one that
 is not loaded it shows where the snapshot left it, says that this is its
-last saved position and how old, and offers Go to. The list entry also
-takes the map there, and the entry the card is about is outlined.
+last saved position and how old, and offers Go to. Go to on the item also
+takes the map there.
 
 The markers are stamped onto the live layer's canvas from sprites made
 once per picture, so that they and the live markers can both be hovered
@@ -929,8 +931,8 @@ to find for themselves; one in chunks somebody else generated is found
 here without anybody having walked into it. So it is held back further
 than any other kind:
 
-- its row in the layer panel is off until the viewer turns it on, and
-  says so under it;
+- its item under each of the Structures layers is off until the viewer
+  turns it on, and the one under Known says so;
 - a search does not list one unless the page says the viewer has that row
   on (`strongholds=1`), whatever is typed;
 - its details say whether the portal is lit and whether the silverfish
@@ -1284,19 +1286,30 @@ biome of the column under its middle; ungenerated ground is transparent,
 and a tile with nothing in it is a 404. Tiles are drawn when asked for and
 not kept: one takes 0.3 to 2 ms from memory and is 2 to 7 KB. `biome=<name>`
 draws that biome in its colour and everything else as a translucent dark
-grey, which is how one biome is picked out. `GET /api/biomes` gives the
-colours for the legend and a `version`; a tile asked for with `v=<version>`
+grey, which is how one biome is picked out. `biomes=<name>,<name>` draws
+the biomes named and nothing else, and `except=<name>,<name>` everything
+but them; what is left out is left clear, as ungenerated ground is. A
+tile is asked for in one of the three ways at a time, every name must be
+a biome the game has, and a list holds at most 128: anything else is a
+400. The tile's `ETag` names the set in one order, so the same biomes are
+the same tile however they were written. `GET /api/biomes` gives the
+colours for the panel and a `version`; a tile asked for with `v=<version>`
 is kept by the browser for good.
 
-**On the page.** The Biomes group has one row, off until the viewer turns
-it on. On, it lays the tiles over the terrain and lists under the row the
-biomes the dimension holds, largest first, each with its colour and its
-share of the area. Choosing one asks for `biome=` tiles, so only it keeps
-its colour; choosing it again, or All biomes, goes back. Resting the
+**On the page.** Biomes is a section of the layer panel whose own switch
+is the overlay, off until the viewer turns it on. On, it lays the tiles
+over the terrain, and under it is every biome the dimension holds,
+largest first, each an item with its colour and its share of the area.
+Hiding some draws the rest: the page asks for whichever is the shorter
+of the list to draw (`biomes=`) and the list to leave out (`except=`),
+in one order, so several biomes are shown at once and the same choice is
+the same address. Only on a biome asks for `biome=` tiles instead, which
+keep it its colour and dim the rest; pressing it again goes back to what
+was hidden before. Resting the
 pointer on the map, or clicking it, names the biome at that block in the
 footer. The listing is asked for again each minute while the overlay is on,
 and a new `version` redraws it. A service without biomes answers 404 to the
-listing, and the page then has no Biomes group at all.
+listing, and the page then has no Biomes section at all.
 
 **Finding one.** Chunks holding a biome that touch, or have one chunk
 between them, are one *stretch* of it: joined only edge to edge, a single
@@ -1521,15 +1534,19 @@ Every logged-in player already sees where every other player is, live, so
 `GET /api/trails` serves every player's trail on the same terms. An answer
 carries at most 20,000 points, each player's newest.
 
-**On the page.** Trails is a row in the Overlays group, off until turned
-on, with a choice of the last 1, 6 or 24 hours or, under Other, a length typed
-as the live interval's is (a bare number is hours), from a minute up to
-what the server keeps, sent as `since`. The
+**On the page.** Trails is a section of the layer panel, off until turned
+on. Under it is how far back the trails go, as four buttons side by side
+(1 h, 6 h, 24 h, 7 d) and Custom, which opens a small box to type any
+other length in as the live interval's is typed (a bare number is hours),
+from a minute up to what the server keeps; a length the server does not
+keep is not offered. It is sent as `since`. Each player with a trail is
+an item under that, keyed by the colour of their line, which can be
+hidden by itself and has Zoom to. The
 viewer's own trail is the green the live layer draws them in, which
 `live.js` offers as `window.mcmap.playerColour`; every other player's is
 one of eight colours picked by their gamertag, or the next one free where
-two on the map pick the same. Under the row is each player with a trail
-and their colour, and choosing a name fits the map to that trail. The
+two on the map pick the same. Zoom to on a player's item fits the map to
+that trail. The
 lines are drawn on the live layer's canvas behind its markers, so a marker
 is never crossed by its own trail and is still what a click on it reaches;
 hovering a line anywhere else names the player and the time it covers. The trails are asked for about once a
@@ -1541,61 +1558,163 @@ trails answers 404 once, and the page then has no Trails row.
 
 ## Page controls
 
-**The layer panel.** Every layer's switch is a row in one panel over the
-map, grouped as Live, Markers, Structures, Biomes and Overlays. A group
-appears once a layer registers a row in it, folds away, and has All and
-None. A row is a checkbox, a count, and where there is something to say a
-note under it, such as why nothing is predicted. The viewer's choices are
-kept in the browser, in the `layers` part of the page's one record, and
-which groups are folded in its `panel` part (see What the page keeps,
-below).
+**The layer panel.** Everything the map can show is in one panel beside
+the map, as a list three deep and no deeper: a section, the layers in it,
+and what each layer is made of.
 
-**What the live rows hold.** Under each live row is a list that opens: By
-player under Players, By type under Hostile, Passive, Villagers and Other,
-each entry with its count, most first, by the game's name for the type.
-Each entry has a switch that hides or shows it and Only, which leaves it
-alone: Only on a type hides every other type of mob in all four rows, and
-Only on a player hides the other players; pressing it again lets the rest
-back. A row a filter has cut says `Showing 225 of 451: filtered by type`
-and has a Show all types (or players) button whether or not its list is
-open. A list of more than six has a box that narrows it by text. A
-player's name in the list is a button that goes to them and opens their
-card. The filters are kept with the panel's other choices, under
-`live#mobs` and `live#players`, as `{ only, hidden }` with at most 200
-hidden. A frame pays two set lookups an entity for them:
-a marker is put on the canvas or left off when its entity first appears,
-and again only when a filter changes. Measured in headless Chromium at
-1300 by 800 with 905 live mobs, 1,500 beds and 600 containers in view,
-panning back and forth for four seconds: 241 frames with one type alone
-and 242 with none filtered, median 16.7 ms and 95th percentile 16.8 ms
-either way, no long task. An entity the card is about that a filter or a
-switched-off row hides is still tracked, and followed if it was; the card
-says it is hidden and why.
+| Section | Layers | Items of each |
+|---|---|---|
+| Players | (the section is the layer) | Each player, with their head; Go to opens their card |
+| Mobs | Hostile, Passive, Villagers, Other | Each type of mob there now, with its icon and count |
+| Markers | Beds, Containers, Named mobs, Waypoints | Beds by colour; containers by what they are, shulker boxes by colour; each named mob, with its type, whether a baby, and whether it is loaded or only saved; each waypoint |
+| Structures | Known, Predicted, Possible | Each kind the layer holds, with its picture and count; Known says which were found by their blocks. Strongholds are off until asked for |
+| Biomes | (the section is the overlay) | Each biome of the dimension, with its colour and share |
+| Trails | (the section is the layer) | Each player's trail, in its colour, under the choice of how far back |
+| Overlays | Slime chunks, Grid, Chunk focus, World spawn | none |
+
+Every line at every depth is the same line, drawn by one function: what
+opens it, a checkbox, a picture or a colour key, a name, a count, and a
+button for the rest of what can be done with it. A checkbox is half on
+when some of what is under it is hidden, and a count is then
+`shown / all`. Switching a layer off leaves its items' own choices as
+they were, so switching it on again brings the same selection back. The
+button at the end of a line opens a menu: Only this (and, once it is the
+one alone, Show all again, which puts back what was on), Show all in
+group, Hide all in group, Zoom to where the line has an extent, and Go to
+for a player, a named mob or a waypoint. Under a mouse, Only also appears
+on the line itself. Only on an item shows that one and nothing else its
+choice covers, so Only on a type of mob hides every other type in all
+four rows; on a layer it hides the section's other layers; on a section,
+every other section.
+
+Above the list is a box that narrows the panel to the lines whose names
+hold what is typed, opens whatever a match is under and marks the match.
+It changes nothing on the map and nothing that is kept. Under it one line
+says how much of everything is shown, `41 of 72 shown`, with Reset
+whenever anything differs from how the page first has it, so a panel that
+is scrolled or put away still says that something is hidden. The panel's
+own menu has three widths, the three densities, Expand all, Collapse all
+and Reset layers to defaults.
+
+The lines are a list of checkboxes that open, not a tree widget: each
+control is what a screen reader already knows it to be (a button that
+says whether it is expanded, a checkbox that may say mixed, a menu
+button), and a layer's items are a named group. The Tab key stops once in
+the list; from there the arrow keys move between lines, Right and Left
+open and close a line or go to the one it is under, Home and End go to
+the first and last, Space switches a line, Enter opens a group or goes to
+a player, a named mob or a waypoint, Shift and F10 open the line's menu,
+and a letter goes to the next line that begins with it.
+
+**The panel's shell.** With 960 pixels or more across, the panel is docked
+on the right and the map is as wide as what is left: it is resized, not
+covered. It opens 340 pixels wide (280 on the compact density, 400 on the
+spacious) and its inner edge is a separator: dragged, or with the focus
+on it moved 16 pixels by the Left and Right arrows, to its narrowest and
+widest by Home and End, and put back to the usual width by a
+double-click. The width is between 240 and 480 pixels and never more
+than 45 hundredths of the window, and is kept. The three widths in the
+panel's menu are the way that needs no dragging. Collapsed, by its
+button, by Enter on the edge or by `L`, the panel is a rail 40 pixels
+wide with a button for each section, which opens the panel at that
+section and is marked where the section has something hidden. Between
+721 and 959 pixels only the rail takes room, and the open panel lies over
+the map's edge. On a small screen the panel is a sheet from the bottom
+with a handle: pressing the handle goes to the next of three heights
+(the title alone, half, all of the map), the arrow keys on it do the
+same, and dragging it follows the finger and settles at the nearest, or
+shuts the sheet if let go below the shortest. Below its full height the
+map above the sheet is still the map. In a wide short window the sheet
+is a drawer down the right instead.
+
+**Density.** The page is sized by one scale of named lengths in the
+stylesheet, which the panel, the bar, the cards and the sheets all use.
+
+| | Compact | Comfortable | Spacious | Under a finger |
+|---|---|---|---|---|
+| Row | 24 | 32 | 40 | 44 |
+| Section heading | 28 | 36 | 44 | 48 |
+| Padding at a row's ends | 8 | 12 | 12 | 16 |
+| Gap between a row's parts | 4 | 8 | 8 | 12 |
+| Indent a level | 16 | 20 | 24 | 20 |
+| Text | 14 on 20 | 14 on 20 | 16 on 24 | 16 on 22 |
+| Counts and notes | 12 on 16 | 12 on 16 | 14 on 20 | 14 on 20 |
+| Checkbox | 16 | 18 | 20 | 22 |
+| Picture or colour key | 16 | 20 | 24 | 24 |
+| Least anything pressed | 24 | 28 | 32 | 44 |
+
+The last column is used wherever the pointer is a finger or the screen is
+a phone's, whichever density is chosen. A picture from the game is drawn
+at 16 pixels in every density, in a box the size the scale gives: pixel
+art is not enlarged by a fraction.
+
+**Which items are shown, and how that is kept.** A layer's items are
+shown by a choice the panel keeps beside the switches, as what differs
+from everything showing: `{ only, hidden, shown }` under
+`<group>#<name>`, where `only` is the one shown alone, `hidden` those
+switched off (at most 200) and `shown` the few that are off until asked
+for and have been. `hidden` is left as it was under an `only`, which is
+what Show all again goes back to. One choice may cover several layers,
+as `live#mobs` covers the four rows of mobs. A frame of the live layer
+pays two set lookups an entity for it: a marker is put on the canvas or
+left off when its entity first appears, and again only when a row or a
+choice changes. The panel is drawn at most once for everything that
+changes in a turn of the page and writes only what differs; a list of
+more than 40 items shows 40 and a line that asks for the rest; and while
+the pointer or the focus is in a list nothing in it moves. Measured in
+headless Chromium at 1440 by 900 with 900 live mobs of 60 types, 1,500
+beds, 600 containers, 232 known structures and 210 biomes, every group of
+mobs open: ten seconds of live frames wrote to the panel four times and
+left no long task; a pan took the two frames it was measured over (33.3
+ms median, 36.6 worst of 30); switching between the built-in views took
+5 to 11 ms of script and 36 to 51 ms to the frame that showed it; and
+hiding one type, one colour of bed or one kind of container took 1 to 2
+ms of script and was on the next frame. An entity the card is about that
+a hidden item or a switched-off row hides is still tracked, and followed
+if it was; the card says it is hidden and why.
 
 **Adding a layer.** A layer is a script of its own, loaded after
 `layers.js`, which registers its rows and never edits the panel:
 
 ```js
 const row = window.mcmap.layers.register({
-  group: 'biomes',      // live, markers, structures, biomes, overlays, or a new id
-  id: 'plains',         // unique within the group; the choice is saved under it
-  label: 'Plains',
+  group: 'markers',     // with id, what the viewer's choice is saved under
+  id: 'beds',
+  label: 'Beds',
   enabled: true,        // the choice until the viewer makes one; true if left out
   order: 10,            // lower first; rows given none go last, as registered
-  groupLabel: 'Biomes', // the title of a group that is not one of the five
-  swatch: 'dot plains', // class of a colour key beside the label, styled in style.css
-  picture: node,        // an element shown in the key's place while it is not hidden
+  section: 'markers',   // where it is shown; the group, if left out
+  whole: false,         // true for a layer that is its section's own heading
+  groupLabel: 'Markers', // the title of a section that is not one of the page's
+  swatch: 'ring beds',  // class of a colour key beside the label, styled in style.css
+  picture: 'bed/red',   // the game's picture, by its key or as an element
+  facet: 'beds',        // names the choice its items are shown by; rows may share one
+  actions: { zoom: (item) => {}, go: (item) => {} }, // item is left out for the row itself
 });
 row.enabled;            // the saved choice, kept current
 row.setCount(1234);     // or null for none
 row.setNote('Not surveyed yet'); // or '' for none
 row.setLabel('Ocean Monuments'); // for a name that arrives late
 row.onToggle((on) => { /* draw or clear */ });
-row.setAvailable(false);         // greyed out, and skipped by All and None
+row.setAvailable(false);         // greyed out, and skipped by a section's checkbox
 row.setEnabled(true);            // switch it as the viewer would; kept, and onToggle is told
-row.setBody(node);               // the layer's own controls under the row; null for none
+row.setItems([                   // what the layer is made of, in the order to show it
+  { id: 'red', label: 'Red Bed', colour: '#b02e26', count: 93 },
+  // also: picture, swatch, shape: 'line', detail, note, off, disabled, go: false, zoom: false
+]);
+row.shows('red');                // whether that item is on the map: two set lookups
+row.setControl({ label, options: [{ value, label }], value, onChange, custom }); // a choice among a few values
 row.remove();
+
+const choice = window.mcmap.layers.facet('markers', 'beds'); // the same choice, without a row
+choice.shows('red'); choice.only; choice.solo('red'); choice.onChange(() => { /* redraw */ });
 ```
+
+A layer says what it has as plain data and builds none of the panel: the
+list given to `setItems` is diffed against the last one, so giving it
+again every second costs what changed in it. `setBody(node)`, by which a
+script from before items put controls of its own under its row, still
+works and is no longer used by any script here.
 
 A layer that keeps more than its switches, as the live layer keeps which
 types it shows, asks the panel to keep it beside them:
@@ -1608,10 +1727,11 @@ name every object has, such as `constructor`. What comes back is the
 viewer's storage and is checked by whoever reads it.
 
 `onToggle` is called with the new value when the viewer changes the row,
-by its checkbox or by the group's All or None, and not when it is
+by its checkbox, its section's or a menu, and not when it is
 registered: read `enabled` once to begin with. Registering an id again
 replaces its row. A label, a note and a group's title are set as text,
-never parsed, so a name from the world is safe in any of them.
+never parsed, and so are an item's label, detail and note, so a name from
+the world is safe in any of them.
 `window.mcmap.layers.ready` is a promise that resolves, with the same
 object, once `register` exists; a script loaded after `layers.js` can call
 `register` at once, and one that might run before it waits on `ready`.
@@ -1655,10 +1775,10 @@ high two rows of bar leave less than two thirds of it to the map. There:
   shortcuts list, and who is logged in. It is a sheet under the bar, or
   down the right-hand side when the window is wider than it is tall;
 - the layer panel's button stays in the corner of the map and the panel
-  comes up from the bottom over the whole width, or down the right-hand
-  side in a wide short window, scrolling by itself. It is never found
-  open on arriving: the choice made where the panel sits beside the map
-  is kept for there;
+  comes up from the bottom over the whole width as a sheet with three
+  heights, or down the right-hand side in a wide short window, scrolling
+  by itself. It is never found open on arriving: the choice made where
+  the panel sits beside the map is kept for there;
 - the footer is one line: where the middle of the map is, and one reading
   of how old the live positions are (or when the terrain was updated, on a
   map with no live layer), which opens both timers over the footer;
@@ -1670,9 +1790,11 @@ is tucked away while any of them is open and is back, about the same
 thing, when it shuts (in a wide short window it stays beside the panel);
 choosing something that opens the card shuts whatever was open; and a
 structure's details or the shortcuts list, which take the whole page, shut
-all four. Each is shut by its own button, by Escape, and by a touch
-outside it, so the map is always one touch away. Nothing of this is kept:
-the page opens with everything shut.
+all four. Each is shut by its own button, by Escape, and, all but the
+layer panel, by a touch outside it: the map above the panel's sheet is
+there to be used, and a touch on it is a touch on the map. Nothing of
+this is kept but the height the sheet was last at: the page opens with
+everything shut.
 
 Everything that is pressed is at least 44 pixels each way, the zoom
 buttons included. The page is as tall as the visible part of the window
@@ -1698,7 +1820,7 @@ where it was.
 | `/` | Puts the cursor in the search box |
 | `Esc` | Clears a search, then closes the card; in the search box a second press leaves it |
 | `G` | Grid and chunk focus on or off |
-| `L` | Layer panel open or shut |
+| `L` | Layer panel open, or put away to its rail |
 | `P` | Pause or resume live positions |
 | `F` | Follow, or stop following, what the card is about |
 | `1` `2` `3` | Overworld, Nether, The End |
@@ -1812,9 +1934,9 @@ Go to centres the map once on whatever the card is about, at its last known
 position, without following it.
 
 A marker is drawn on a canvas and cannot take the keyboard's focus, so
-opening the card on one needs a pointer; a named mob's entry in the list
-under its row is a button that opens it too, and everything on the card is
-a button.
+opening the card on one needs a pointer; a player's and a named mob's
+item in the layer panel opens it from the keyboard too, and everything on
+the card is a button.
 
 Everything here is a native button, checkbox or select: each is reached
 with Tab, worked with Space or Enter (the arrow keys, for the interval),
@@ -1827,8 +1949,8 @@ read by `settings.js` alone, which the other scripts reach as
 
 | Part | Holds |
 |---|---|
-| `layers` | Each row's switch as `"<group>/<id>": true`, and what a layer keeps beside them as `"<group>#<name>"` |
-| `panel` | Whether the layer panel is open, and which groups are folded |
+| `layers` | Each row's switch as `"<group>/<id>": true`, and what is kept beside them as `"<group>#<name>"`: which of a layer's items are shown, and under `panel#…` the panel's width and sheet height, which layers are open to their items, and what an Only is to go back to |
+| `panel` | Whether the layer panel is open, and which sections are folded |
 | `live` | `paused`, and `interval` in seconds |
 | `trails` | The window, as `seconds` |
 | `shortcuts` | Whether the single-key shortcuts are on |
@@ -1981,7 +2103,7 @@ and Reset to defaults puts them all back.
 | Mobs and players | Pictures, or plain dots |
 | Beds, containers, waypoints and structures | Pictures, or plain rings and letters |
 | Biome tint, trails, slime chunks | 60%, 100% and 100%, each from 10% to 100% |
-| Panels | Comfortable, compact |
+| Density | Comfortable, compact, spacious |
 | Motion | The same as the system, reduced, full |
 | Coordinates | Blocks, or blocks and the chunk |
 
@@ -1997,8 +2119,8 @@ next whole number of screen pixels to a texture pixel (twice the size, or
 one and a half times on a dense screen), so pixel art is never blended on
 the way up; a smaller one is the 12 pixels a baby has always been drawn
 at, and is blended as a baby is. Reduced motion stills the page's own
-animations and the map's zoom, pan and fade. Compact panels leave a
-finger's 44 pixels alone on a small screen. A slider is on the map as it
+animations and the map's zoom, pan and fade. No density changes a
+finger's 44 pixels on a small screen or under a coarse pointer. A slider is on the map as it
 is dragged and written once, when it is let go.
 
 The light and the high-contrast themes are held to 4.5 to one for text and
@@ -2187,7 +2309,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/structures?dimension=<id>` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by, and `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `surveyed`, `at`, and with the overworld `spawn`. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `reach`, for a trial chamber, how many blocks past its box the rest was counted in; `uncounted`, for a stronghold, where nothing but what it was found by is said and the lists are empty for that reason; `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `dispenser`, `dropper` and `unbroken_pot`, those there are); `elders` for a monument; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
-| `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
+| `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest; `biomes=<name>,…` draws only those and `except=<name>,…` all but those, one of the three at a time and at most 128 names. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
