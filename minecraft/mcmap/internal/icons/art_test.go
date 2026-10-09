@@ -426,7 +426,9 @@ func TestAControllerIsAskedWhatAGrownDefaultMobWears(t *testing.T) {
 			t.Errorf("%s = %q %v, want %s", expression, name, ok, want)
 		}
 	}
-	for _, expression := range []string{"", "1 + 2", "Array.absent[0]", "Texture.a ? ", "((((", strings.Repeat("(", maxExpressionDepth*2) + "Texture.a" + strings.Repeat(")", maxExpressionDepth*2), strings.Repeat("Texture.a || ", 200) + "Texture.a"} {
+	// A product that overflows is no index, and is refused, not used.
+	huge := strings.Repeat("9", 300)
+	for _, expression := range []string{"", "1 + 2", "Array.absent[0]", "Array.skins[" + huge + " * " + huge + "]", "Array.skins[0 / 0 - " + huge + " * " + huge + " + " + huge + " * " + huge + "]", "Texture.a ? ", "((((", strings.Repeat("(", maxExpressionDepth*2) + "Texture.a" + strings.Repeat(")", maxExpressionDepth*2), strings.Repeat("Texture.a || ", 200) + "Texture.a"} {
 		if name, ok := varied.pick(expression); ok {
 			t.Errorf("%.40q came to %q", expression, name)
 		}

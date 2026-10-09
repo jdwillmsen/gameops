@@ -332,6 +332,12 @@ func (p *expr) named() value {
 		if p.err != nil || len(list) == 0 {
 			return value{}
 		}
+		// Sums of numbers that are each within range can still run off
+		// the end of them, and what is left is no place in a list.
+		if math.IsNaN(index.num) || math.IsInf(index.num, 0) {
+			p.err = fmt.Errorf("an array is indexed by what is not a number")
+			return value{}
+		}
 		// The game counts round an array from either end.
 		i := int(math.Mod(math.Trunc(index.num), float64(len(list))))
 		if i < 0 {

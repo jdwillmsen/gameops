@@ -335,6 +335,7 @@
     ? `api/icons/picture/${key}?v=${encodeURIComponent(listing.pictures.version)}` : null);
   const egg = (type) => (listing.mobs.types.has(type)
     ? `api/icons/mob/${encodeURIComponent(type)}?v=${encodeURIComponent(listing.mobs.version)}` : null);
+  const WAYPOINT = 'marker/waypoint';
   // The villager whose professions have faces of their own.
   const VILLAGER = 'villager_v2';
   // The block a marker's flat picture is one side of.
@@ -379,7 +380,7 @@
   // back to, and a shulker box likewise the undyed one. A villager whose
   // profession is known is drawn in it.
   function keyOf(sort, { kind, colour, trapped, profession } = {}) {
-    if (sort === 'waypoint') return 'marker/waypoint';
+    if (sort === 'waypoint') return WAYPOINT;
     if (sort === 'bed') return `bed/${str(colour) || 'red'}`;
     if (sort === 'mob') return kind === VILLAGER && /^[a-z_]{1,32}$/.test(str(profession)) ? `villager/${profession}` : `mob/${str(kind)}`;
     if (sort === 'structure') return `structure/${str(kind)}`;
@@ -417,7 +418,7 @@
   const mob = (type, ring, baby = false) => marker(`mob/${str(type)}`, ring, { baby });
   // A waypoint is a place put there by name to be found again, and there
   // are few: it keeps its picture from however far out.
-  const plate = (key, ring) => marker(key, ring, { always: key === 'marker/waypoint' });
+  const plate = (of, ring) => marker(of, ring, { always: of === WAYPOINT });
 
   // Draws a picture into an element of the page, and says whether there
   // was one to draw. Without one the element is hidden, and whatever
