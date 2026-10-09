@@ -547,9 +547,24 @@ long name and the tooltip, the list and the card all of it.
 A named mob is one marker, whichever layer has it. While the mob is loaded
 the live layer draws it where it is, under the same label, and the mark the
 snapshot left steps aside; the two are known to be one animal by the id
-each carries (`i`), never by name or position. With the live layer's row
-for it switched off the snapshot's mark comes back, and with Named mobs off
-neither has a label. A click or a tap on the marker, on its label, or on
+each carries (`i`), never by position. Where the snapshot has an id nothing
+else is asked, so a loaded mob of the same name under another id is another
+animal and both are shown. Only a mob the world saved without an id is
+looked for by name and type, and only while exactly one is saved and
+exactly one is loaded under them; two that share a name are never taken
+for each other.
+
+The snapshot's mark is a saved position, not a mob that is there: it is as
+old as the snapshot, and the mob may have walked off, been renamed or died
+since. So it is drawn faded, in a broken ring, where a live marker is
+solid, and its tooltip says `saved 4 min ago`. It is what is on the map
+when the mob is not loaded, when it is in another dimension, when the live
+layer's row or type filter for it is switched off, when the game's cap on
+reported mobs left it out, and while there is no recent live picture. A mob
+that died after the snapshot keeps its saved mark until the next one. The
+row's count is of the mobs the snapshot holds, each once, loaded or not,
+and the list says of each whether it is loaded now, under the name it has
+now. With Named mobs off neither marker has a label. A click or a tap on the marker, on its label, or on
 its entry in the list opens the card described under Inspecting and
 following: on a loaded mob it tracks it live and Follow works; on one that
 is not loaded it shows where the snapshot left it, says that this is its

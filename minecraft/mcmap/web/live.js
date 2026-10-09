@@ -1495,6 +1495,18 @@
       const held = entities.get(`m:${id}`);
       return Boolean(held) && !stale && mobLayer.hasLayer(held.marker);
     },
+    // The mobs in the picture that have a name, as { id, name, type }, for
+    // the layer that has to find the snapshot's among them.
+    named() {
+      const out = [];
+      if (stale) return out;
+      for (const [key, held] of entities) {
+        if (held.category !== 'players' && held.name) out.push({ id: key.slice(2), name: held.name, type: held.type });
+      }
+      return out;
+    },
+    // How long ago a snapshot was, by the server's clock.
+    age,
     // Where the mob with this id is, while it is in the picture.
     where(id) {
       const held = entities.get(`m:${id}`);
