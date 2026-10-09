@@ -140,7 +140,7 @@
     opacityBiomes: int(10, 100),
     opacityTrails: int(10, 100),
     opacitySlime: int(10, 100),
-    density: oneOf('comfortable', 'compact'),
+    density: oneOf('compact', 'comfortable', 'spacious'),
     motion: oneOf('system', 'reduce', 'full'),
     coords: oneOf('blocks', 'chunks'),
   };

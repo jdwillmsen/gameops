@@ -321,7 +321,6 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	for _, need := range []string{
 		`:root[data-motion="reduce"] .found::after { animation: none; }`,
 		`@media (prefers-reduced-motion: reduce) { :root:not([data-motion]) .found::after { animation: none; } }`,
-		`:root[data-density="compact"] body { font-size: 13px; }`,
 		`.leaflet-tooltip { font-size: var(--label-size); }`,
 	} {
 		if !bytes.Contains(css, []byte(need)) {
@@ -330,5 +329,93 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	}
 	if !strings.Contains(string(read(t, "app.js")), "map._zoomAnimated = animated.zoom && !still;") {
 		t.Error("app.js no longer stills the map's own animations for whoever asked for less motion")
+	}
+}
+
+// The page is sized by one scale of named lengths, in three densities and
+// one for a finger. A row is 24, 32 or 40 pixels tall, and 44 under a
+// finger whichever was chosen; nothing pressed is under 24, and text is
+// never under 12.
+func TestTheDensityScaleIsOneSetOfNamedLengths(t *testing.T) {
+	css := read(t, "style.css")
+	px := func(block []byte, name string) int {
+		m := regexp.MustCompile(`--` + name + `: (\d+)px;`).FindSubmatch(block)
+		if m == nil {
+			return -1
+		}
+		n, _ := strconv.Atoi(string(m[1]))
+		return n
+	}
+	block := func(selector string) []byte {
+		m := regexp.MustCompile(`(?s)\n\s*` + regexp.QuoteMeta(selector) + ` \{(.*?)\n\s*\}`).FindSubmatch(css)
+		if m == nil {
+			t.Fatalf("style.css has no block for %s", selector)
+		}
+		return m[1]
+	}
+	first := block(":root")
+	names := []string{"row-h", "row-pad", "row-gap", "group-gap", "indent", "body", "body-lh", "caption", "caption-lh", "check", "icon", "hit", "head-h", "field-h", "control-h"}
+	for _, name := range names {
+		if px(first, name) < 0 {
+			t.Errorf("the first theme does not give --%s a length", name)
+		}
+	}
+	touch := regexp.MustCompile(`(?s)@media \(pointer: coarse\), \(max-width: 720px\), \(max-height: 480px\) \{\s*:root, :root\[data-density\] \{(.*?)\}`).FindSubmatch(css)
+	if touch == nil {
+		t.Fatal("style.css no longer has a scale of its own for a finger, kept whichever density is chosen")
+	}
+	scales := map[string][]byte{"comfortable": first, "compact": block(`:root[data-density="compact"]`), "spacious": block(`:root[data-density="spacious"]`), "touch": touch[1]}
+	want := map[string]map[string]int{
+		"comfortable": {"row-h": 32, "row-pad": 12, "row-gap": 8, "indent": 20, "body": 14, "body-lh": 20, "caption": 12, "caption-lh": 16, "check": 18, "icon": 20, "hit": 28, "head-h": 36},
+		"compact":     {"row-h": 24, "row-pad": 8, "row-gap": 4, "indent": 16, "check": 16, "icon": 16, "hit": 24, "head-h": 28},
+		"spacious":    {"row-h": 40, "indent": 24, "body": 16, "body-lh": 24, "caption": 14, "caption-lh": 20, "check": 20, "icon": 24, "hit": 32, "head-h": 44},
+		"touch":       {"row-h": 44, "row-pad": 16, "row-gap": 12, "body": 16, "body-lh": 22, "caption": 14, "check": 22, "icon": 24, "hit": 44, "head-h": 48, "control-h": 44, "field-h": 44},
+	}
+	for density, lengths := range want {
+		for name, n := range lengths {
+			if got := px(scales[density], name); got != n {
+				t.Errorf("%s: --%s is %d pixels, want %d", density, name, got, n)
+			}
+		}
+	}
+	// A length a density does not set is the first set's, so the floors are
+	// checked over what each comes to.
+	for density, own := range scales {
+		at := func(name string) int {
+			if n := px(own, name); n >= 0 {
+				return n
+			}
+			return px(first, name)
+		}
+		if at("hit") < 24 || at("row-h") < 24 {
+			t.Errorf("%s: something pressed is under 24 pixels", density)
+		}
+		if at("caption") < 12 {
+			t.Errorf("%s: text is under 12 pixels", density)
+		}
+		if at("row-h") < at("body-lh") || at("hit") < at("check") {
+			t.Errorf("%s: a row is shorter than its text, or a checkbox larger than what is pressed for it", density)
+		}
+	}
+	for _, need := range []string{
+		"font-size: var(--body);", "line-height: var(--body-lh);", "min-height: var(--control-h);",
+	} {
+		if !bytes.Contains(css, []byte(need)) {
+			t.Errorf("style.css no longer has %s", need)
+		}
+	}
+	// A size written into a rule would not follow the density.
+	if m := regexp.MustCompile(`font-size: 0\.\d+r?em`).FindAll(css[bytes.Index(css, []byte(`:root[data-text="small"]`)):], -1); len(m) > 4 {
+		t.Errorf("style.css sizes text by %d fractions of its own; captions are --caption", len(m))
+	}
+	settings := read(t, "settings.js")
+	if !bytes.Contains(settings, []byte("density: oneOf('compact', 'comfortable', 'spacious'),")) || !bytes.Contains(settings, []byte("density: 'comfortable',")) {
+		t.Error("settings.js no longer offers the three densities, with comfortable the default")
+	}
+	page := read(t, "index.html")
+	for _, density := range []string{"compact", "comfortable", "spacious"} {
+		if !bytes.Contains(page, []byte(`<option value="`+density+`">`)) {
+			t.Errorf("index.html does not offer the %s density", density)
+		}
 	}
 }
