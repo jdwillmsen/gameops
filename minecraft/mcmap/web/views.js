@@ -977,11 +977,13 @@
       setTimeout(settled, SETTLE_MS);
       // The chunk it was saved with is pinned as the map first shows, and
       // never over one the viewer has pinned in the meantime.
+      // A view that comes with the page has no place, and so no pin.
       const view = settings.view(opened);
-      const pin = view && view.place ? view.place.pin : null;
+      const where = view && view.place ? view.place : null;
+      const pin = where ? where.pin : null;
       const at = app.place.get();
       // Nor where an address took the map somewhere else.
-      const there = at && at.d === view.place.d && at.x === view.place.x && at.z === view.place.z;
+      const there = Boolean(where) && Boolean(at) && at.d === where.d && at.x === where.x && at.z === where.z;
       if (pin && there && app.chunk && app.chunk.pin && !app.chunk.pinned()) app.chunk.pin({ unit: pin.u, x: pin.x, z: pin.z });
     }
   });

@@ -139,10 +139,10 @@ func TestLightAndHighContrastThemesMeetTheContrastTheyAreFor(t *testing.T) {
 		for _, kind := range kinds {
 			check("text", "a recorded structure's letter on "+kind, contrast(get("marker-ink"), get(kind)), 4.5)
 		}
-		// A colour key in the panel is told from the panel by its colour or
-		// by the edge drawn round it, whichever stands off further.
+		// A colour key in the panel is told from the panel by its own
+		// colour, or by the edge drawn round it standing off the panel.
 		for _, key := range append(append([]string{}, rings[:9]...), kinds...) {
-			check("edge", "the key for "+key+" in the panel", math.Max(contrast(get(key), get("panel")), contrast(get(key), get("edge"))), 3)
+			check("edge", "the key for "+key+" in the panel", math.Max(contrast(get(key), get("panel")), contrast(get("edge"), get("panel"))), 3)
 		}
 		for _, bg := range []string{"bg", "panel"} {
 			check("edge", "line on "+bg, contrast(get("line"), get(bg)), 3)

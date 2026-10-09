@@ -220,6 +220,10 @@ func TestViewsComeBuiltInAndSwitchAtAStroke(t *testing.T) {
 	if !bytes.Contains(read(t, "views.js"), []byte("The appearance stays as you last set it.")) || !bytes.Contains(read(t, "index.html"), []byte("A view the page opens with never changes the appearance.")) {
 		t.Error("the page no longer says that a view it opens with leaves the appearance alone")
 	}
+	// A view that comes with the page has no place to be asked about.
+	if !bytes.Contains(read(t, "views.js"), []byte("const where = view && view.place ? view.place : null;")) || bytes.Contains(read(t, "views.js"), []byte("at.d === view.place.d")) {
+		t.Error("views.js asks a view with no place where its place is")
+	}
 	// Its pin is put on as the map shows, and not over the viewer's own.
 	if !bytes.Contains(read(t, "views.js"), []byte("if (pin && there && app.chunk && app.chunk.pin && !app.chunk.pinned()) app.chunk.pin(")) {
 		t.Error("views.js may pin the default view's chunk over one the viewer has pinned since")
