@@ -389,6 +389,10 @@
     const dimension = app.dimension();
     // The map has left the dimension the one asked for is in.
     if (wanted && (locked || dimension !== wanted.dimension)) unwant('');
+    // What a structure holds is asked for as one player, and says what a
+    // village thinks of them. It is not kept past their session, for
+    // whoever logs in next on this page.
+    if (locked) forgetDetail();
     if (locked || !dimension || !available) {
       // An answer still on its way belongs to the view that asked for it.
       pending = null;
@@ -862,6 +866,12 @@
   // the names change, and that is not a reason to ask again.
   let detailHeld = null;
   let detailAsk = null;
+
+  function forgetDetail() {
+    detailHeld = null;
+    if (detailAsk) detailAsk.abort();
+    detailAsk = null;
+  }
 
   async function askDetail(subject, into) {
     if (detailAsk) detailAsk.abort();
