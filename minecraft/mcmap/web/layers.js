@@ -785,7 +785,9 @@
     const extra = make('div', 'extra');
     const kids = make('ul', 'kids');
     kids.id = `layers-kids-${made}`;
-    kids.setAttribute('role', 'group');
+    // Said to be a list, since a list drawn without its bullets is not
+    // taken for one by every browser; and named for the line it is under.
+    kids.setAttribute('role', 'list');
     kids.setAttribute('aria-labelledby', name.id);
     twist.setAttribute('aria-controls', kids.id);
     twist.setAttribute('aria-labelledby', name.id);
@@ -1532,7 +1534,18 @@
   const widest = () => Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(innerWidth * MAX_SHARE)));
   // The width the stylesheet gives a panel nobody has sized, which goes
   // with the density.
-  const usual = () => parseInt(getComputedStyle(el.panel).getPropertyValue('--panel-default'), 10) || 340;
+  // Both are the stylesheet's, and are asked for once and again only when
+  // the density or the window changes: asking lays the page out, which a
+  // drag of the panel's edge must not do with every move.
+  let measured = null;
+  const sizes = () => {
+    if (measured === null) {
+      const style = getComputedStyle(el.panel);
+      measured = { usual: parseInt(style.getPropertyValue('--panel-default'), 10) || 340, rail: parseInt(style.getPropertyValue('--rail'), 10) || 40 };
+    }
+    return measured;
+  };
+  const usual = () => sizes().usual;
   const widthNow = () => Math.min(widest(), Math.max(MIN_WIDTH, shell.width === null ? usual() : shell.width));
 
   function setWidth(px, lasting) {
@@ -1555,9 +1568,19 @@
     const width = widthNow();
     // The stylesheet has no way to ask for a size, so this hands it one.
     el.panel.style.setProperty('--panel-width', `${width}px`);
-    // What the panel takes from the map's width, for what is centred over
-    // the map and not over the stage.
-    stage.style.setProperty('--dock', now === 'sheeted' ? '0px' : `${el.panel.offsetWidth}px`);
+    // What the panel takes of the map's width or lies over, for what is
+    // centred over the map that can be seen and not over the stage.
+    stage.style.setProperty('--dock', now === 'sheeted' ? '0px' : `${open ? width : sizes().rail}px`);
+    // At its full height the sheet covers the map and whatever else the
+    // stage holds, which is then out of reach of the keyboard and of a
+    // screen reader as it is of a finger, and is given back when the
+    // sheet is lower or gone.
+    const covered = now === 'sheeted' && open && shell.detent === 'full';
+    for (const under of stage.children) {
+      if (under === el.panel || (!covered && under.dataset.covered !== 'yes')) continue;
+      under.inert = covered;
+      if (covered) under.dataset.covered = 'yes'; else delete under.dataset.covered;
+    }
     sizer.hidden = now === 'sheeted' || !open;
     sizer.setAttribute('aria-valuemin', String(MIN_WIDTH));
     sizer.setAttribute('aria-valuemax', String(widest()));
@@ -1646,13 +1669,23 @@
   function openMenu(anchor, label, entries) {
     shutPopup(false);
     menu.setAttribute('aria-label', label);
+    let into = menu;
     for (const entry of entries) {
       if (entry === null) {
         menu.append(make('hr'));
+        into = menu;
         continue;
       }
+      // A title heads a group of the entries after it, which is named by
+      // it; the words themselves are only for the eye.
       if (typeof entry === 'string') {
-        menu.append(make('p', 'menu-title', entry));
+        into = make('div', 'menu-group');
+        into.setAttribute('role', 'group');
+        into.setAttribute('aria-label', entry);
+        const words = make('p', 'menu-title', entry);
+        words.setAttribute('aria-hidden', 'true');
+        into.append(words);
+        menu.append(into);
         continue;
       }
       const item = button('menu-item', entry.label);
@@ -1665,7 +1698,7 @@
         shutPopup(true);
         entry.act();
       });
-      menu.append(item);
+      into.append(item);
     }
     hang(menu, anchor);
     const first = menu.querySelector('button:not(:disabled)');
@@ -1773,11 +1806,7 @@
       entries.push('Density');
       const now = settings.get('look').density;
       for (const [label, density] of DENSITIES) {
-        entries.push({ label, checked: now === density, act: () => {
-          settings.set('look', { ...settings.get('look'), density });
-          // The usual width goes with the density.
-          paintShell();
-        } });
+        entries.push({ label, checked: now === density, act: () => settings.set('look', { ...settings.get('look'), density }) });
       }
       entries.push(null);
     }
@@ -1932,26 +1961,37 @@
   // The panel's edge is dragged, or moved by the arrow keys while it has
   // the focus; the menu's three widths are the way that needs neither. The
   // panel is on the right, so its edge moving left is the panel growing.
+  // However fast the pointer moves, the panel is sized once a frame, and a
+  // drag ends however the pointer is lost: let go, taken by the browser,
+  // or with the window no longer the one in front.
   let dragging = null;
   sizer.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     sizer.focus();
     sizer.setPointerCapture(e.pointerId);
-    dragging = { id: e.pointerId, right: el.panel.getBoundingClientRect().right };
+    dragging = { id: e.pointerId, right: el.panel.getBoundingClientRect().right, x: e.clientX, frame: 0 };
     el.panel.classList.add('sizing');
   });
   sizer.addEventListener('pointermove', (e) => {
-    if (dragging && e.pointerId === dragging.id) setWidth(dragging.right - e.clientX, false);
+    if (!dragging || e.pointerId !== dragging.id) return;
+    dragging.x = e.clientX;
+    if (dragging.frame !== 0) return;
+    dragging.frame = requestAnimationFrame(() => {
+      if (!dragging) return;
+      dragging.frame = 0;
+      setWidth(dragging.right - dragging.x, false);
+    });
   });
   const dropped = (e) => {
-    if (!dragging || e.pointerId !== dragging.id) return;
+    if (!dragging || (e && e.pointerId !== undefined && e.pointerId !== dragging.id)) return;
+    cancelAnimationFrame(dragging.frame);
+    setWidth(dragging.right - dragging.x, false);
     dragging = null;
     el.panel.classList.remove('sizing');
     keepShell();
   };
-  sizer.addEventListener('pointerup', dropped);
-  sizer.addEventListener('pointercancel', dropped);
+  for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) sizer.addEventListener(end, dropped);
   sizer.addEventListener('dblclick', () => setWidth(null, true));
   sizer.addEventListener('keydown', (e) => {
     const width = widthNow();
@@ -1982,21 +2022,29 @@
   grab.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     grab.setPointerCapture(e.pointerId);
-    pulling = { id: e.pointerId, y: e.clientY, from: el.body.getBoundingClientRect().height, moved: false };
+    pulling = { id: e.pointerId, y: e.clientY, now: e.clientY, from: el.body.getBoundingClientRect().height, moved: false, frame: 0 };
   });
   grab.addEventListener('pointermove', (e) => {
     if (!pulling || e.pointerId !== pulling.id) return;
     if (!pulling.moved && Math.abs(e.clientY - pulling.y) < 6) return;
     pulling.moved = true;
-    el.panel.classList.add('sizing');
-    el.body.style.height = `${Math.max(0, pulling.from + pulling.y - e.clientY)}px`;
+    pulling.now = e.clientY;
+    if (pulling.frame) return;
+    pulling.frame = requestAnimationFrame(() => {
+      if (!pulling) return;
+      pulling.frame = 0;
+      el.panel.classList.add('sizing');
+      el.body.style.height = `${Math.max(0, pulling.from + pulling.y - pulling.now)}px`;
+    });
   });
   const released = (e) => {
-    if (!pulling || e.pointerId !== pulling.id) return;
-    const { moved } = pulling;
+    if (!pulling || (e && e.pointerId !== undefined && e.pointerId !== pulling.id)) return;
+    const { moved, from, y, now, frame } = pulling;
     pulling = null;
+    cancelAnimationFrame(frame);
     if (!moved) return;
-    const height = el.body.getBoundingClientRect().height;
+    // Where the last move left it, which the frame may not have drawn.
+    const height = Math.max(0, from + y - now);
     el.body.style.height = '';
     el.panel.classList.remove('sizing');
     const full = stage.clientHeight;
@@ -2014,8 +2062,11 @@
     }
     pulledAt = Date.now();
   };
-  grab.addEventListener('pointerup', released);
-  grab.addEventListener('pointercancel', released);
+  for (const end of ['pointerup', 'pointercancel', 'lostpointercapture']) grab.addEventListener(end, released);
+  addEventListener('blur', () => {
+    dropped();
+    released();
+  });
   grab.addEventListener('click', () => {
     // The click that ends a drag is not a press.
     if (Date.now() - pulledAt < 400) return;
@@ -2036,9 +2087,13 @@
   });
   roomy.addEventListener('change', paint);
   // The most the panel may take goes with the window.
-  addEventListener('resize', paintShell);
+  const remeasured = () => {
+    measured = null;
+    paintShell();
+  };
+  addEventListener('resize', remeasured);
   document.addEventListener('mcmap:settings', (e) => {
-    if (e.detail && e.detail.sections.includes('look')) paintShell();
+    if (e.detail && e.detail.sections.includes('look')) remeasured();
   });
 
   paint();

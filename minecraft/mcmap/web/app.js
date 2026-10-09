@@ -572,7 +572,19 @@
   // goes above the map while a shared view is previewed. Leaflet measures
   // only when the window is resized, and a map that has the wrong size
   // has the wrong centre.
-  if (typeof ResizeObserver === 'function') new ResizeObserver(() => map.invalidateSize()).observe(map.getContainer());
+  // At most once a frame: the map's box changes with every move of a drag
+  // of the layer panel's edge, and each time the map is told it lays out
+  // and draws again.
+  let resized = 0;
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => {
+      if (resized !== 0) return;
+      resized = requestAnimationFrame(() => {
+        resized = 0;
+        map.invalidateSize();
+      });
+    }).observe(map.getContainer());
+  }
 
   // Whoever has asked for less motion gets a map that goes where it is
   // sent without sliding or fading there. Leaflet takes its animation
