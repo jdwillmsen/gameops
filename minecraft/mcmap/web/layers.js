@@ -830,8 +830,11 @@
       dom.li.classList.toggle('unavailable', v);
     });
     put(dom, 'masked', masked, (v) => dom.li.classList.toggle('masked', v));
+    // A line with nothing under it keeps the room of what would open it,
+    // so that its checkbox stands one step in from the checkbox of the
+    // line it is under, and not level with that line's own opener.
     put(dom, 'twisted', twisted, (v) => {
-      dom.twist.hidden = !v;
+      dom.twist.disabled = !v;
       dom.li.classList.toggle('leaf', !v);
     });
     put(dom, 'open', twisted && open, (v) => {

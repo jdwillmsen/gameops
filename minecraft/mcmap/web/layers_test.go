@@ -309,6 +309,9 @@ func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
 		"border: 2px solid var(--dim);",
 		".check::before { content: \"\"; position: absolute; inset: calc((var(--check) - var(--hit)) / 2 - 2px); }",
 		".row:hover > .only { visibility: visible; }",
+		// A line with nothing to open keeps the room of what would open it,
+		// so nesting reads the right way round.
+		".leaf > .row > .twist { visibility: hidden; }",
 		// The panel is painted apart from the map, or a pan costs twice.
 		"will-change: transform;",
 	} {
