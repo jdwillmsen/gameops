@@ -8,7 +8,10 @@
 // it. A named mob is its type's icon under its name, and is listed by name
 // under its row, since a name is what it is looked for by. While the same
 // mob is loaded the live layer draws it where it is, under the same name,
-// and the mark the snapshot left steps aside: one animal, one marker.
+// and the mark the snapshot left steps aside: one animal, one marker. The
+// mark is of where the mob was saved, which may be a quarter of an hour
+// and a long walk ago, so it is drawn faded in a broken ring and says how
+// old it is: it must never pass for the marker of a mob that is there.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -51,7 +54,29 @@
     NAMED = themed('named-text', KINDS.mobs.color);
   }
   palette();
-  const tagOf = (name) => (naming('labelMobs') === 'always' ? icons.tag(name, NAMED) : null);
+  // What a saved position is drawn at, of the full strength a live marker
+  // has, and the ring broken around it.
+  const SAVED_ALPHA = 0.55;
+  const SAVED_DASH = [3, 3];
+  const SAVED_RING = 3;
+  // picture -> the same picture faded. The pictures are made once and
+  // kept by whoever made them, so each is faded once.
+  const faded = new WeakMap();
+  function fade(worn) {
+    if (!worn) return null;
+    let pale = faded.get(worn);
+    if (!pale) {
+      pale = document.createElement('canvas');
+      pale.width = worn.width;
+      pale.height = worn.height;
+      const ctx = pale.getContext('2d');
+      ctx.globalAlpha = SAVED_ALPHA;
+      ctx.drawImage(worn, 0, 0);
+      faded.set(worn, pale);
+    }
+    return pale;
+  }
+  const tagOf = (name) => (naming('labelMobs') === 'always' ? fade(icons.tag(name, NAMED)) : null);
   const WORLD_KINDS = ['beds', 'containers', 'mobs'];
   const BABY_RADIUS = 4;
 
@@ -92,6 +117,13 @@
     return str(m.name) || 'Waypoint';
   }
 
+  // How old a named mob's mark is, as its tooltip says it. The live layer
+  // tells the age, since it knows how far this clock is from the server's.
+  function savedSaid() {
+    const card = inspect();
+    return snapshotAt !== null && card && card.age ? `saved ${card.age(snapshotAt)}` : 'last saved position';
+  }
+
   // Said when it is asked for, so that a name which arrives after the
   // marker was drawn is the one shown.
   function tip(marker) {
@@ -100,13 +132,41 @@
     // they are.
     const quiet = (kind === 'mobs' && naming('labelMobs') === 'never') || (kind === 'waypoints' && naming('labelWaypoints') === 'never');
     const title = !quiet ? titleOf(kind, data) : kind === 'mobs' ? names.kindOf(data.k, data.b) : 'Waypoint';
-    const box = text(`${title} · ${at(data)}`);
+    const box = text(kind === 'mobs' ? `${title} · ${savedSaid()} · ${at(data)}` : `${title} · ${at(data)}`);
     box.prepend(icons.picture(pictureOf(kind, data)));
     return box;
   }
 
   // A marker with, for a named mob, its name over it.
   const Pin = icons.Tagged;
+
+  // A named mob's mark: a saved position, in a broken ring. _renderer,
+  // _ctx, _point, _radius and _drawing are Leaflet internals, which is
+  // safe only because Leaflet is vendored at a fixed version.
+  const Saved = Pin.extend({
+    // The canvas only repaints inside the bounds a marker claims.
+    _updateBounds() {
+      Pin.prototype._updateBounds.call(this);
+      const reach = this._radius + SAVED_RING + 2;
+      this._pxBounds.extend(this._point.subtract([reach, reach]));
+      this._pxBounds.extend(this._point.add([reach, reach]));
+    },
+    _updatePath() {
+      Pin.prototype._updatePath.call(this);
+      // Without a picture it is a circle, which Leaflet breaks itself.
+      if (!this.options.sprite || !this._renderer._drawing || this._empty()) return;
+      const ctx = this._renderer._ctx;
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(this._point.x, this._point.y, this._radius + SAVED_RING, 0, Math.PI * 2);
+      ctx.setLineDash(SAVED_DASH);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = this.options.color;
+      ctx.stroke();
+      ctx.restore();
+    },
+  });
 
   const layers = {};
   for (const kind of Object.keys(KINDS)) {
@@ -147,7 +207,7 @@
     let radius = style.radius * size.scale;
     if (kind === 'mobs') {
       const baby = data.b === true;
-      worn = icons.mob(str(data.k), style.color, baby);
+      worn = fade(icons.mob(str(data.k), style.color, baby));
       if (worn) radius = baby ? size.baby : size.mob;
       else if (baby) radius = BABY_RADIUS * size.scale;
     } else if (near || kind === 'waypoints') {
@@ -170,13 +230,15 @@
   function pin(kind, m) {
     const style = KINDS[kind];
     // The middle of the block, not its north-west corner.
-    const marker = new Pin([m.z + 0.5, m.x + 0.5], {
+    const saved = kind === 'mobs';
+    const marker = new (saved ? Saved : Pin)([m.z + 0.5, m.x + 0.5], {
       renderer,
       radius: style.radius,
       color: style.color,
       weight: look().theme === 'contrast' ? 3 : 2,
       fillColor: INK,
-      fillOpacity: 0.75,
+      fillOpacity: saved ? 0.4 : 0.75,
+      ...(saved ? { saved: true, opacity: SAVED_ALPHA, dashArray: SAVED_DASH.join(' ') } : {}),
       kind,
       data: m,
       sprite: null,
@@ -201,7 +263,7 @@
         marker.bindTooltip(text(str(m.name) || 'Waypoint'), { permanent: true, direction: 'right', offset: [sizes().plate + 2, 0], className: 'marker-name' });
       }
       layers[kind].addLayer(marker);
-      made.push({ data: m, marker });
+      made.push({ data: m, marker, live: null });
     }
     totals[kind] = made.length;
     if (kind !== 'mobs') return;
@@ -224,9 +286,48 @@
   // The id the live layer would know this mob by, where the snapshot gave
   // one.
   const idOf = (data) => (typeof data.i === 'string' && data.i !== '' ? data.i : null);
+  // The id the live layer has the entry's mob under now, or null while it
+  // is not in the picture.
+  const liveOf = (entry) => (entry.live ? entry.live.id : null);
   // What the card is opened under for it, which is how the list knows
   // which of its entries the card is about.
-  const keyOf = (data) => (idOf(data) ? `m:${idOf(data)}` : `s:${drawn.dimension}:${data.x + 0.5}:${data.y}:${data.z + 0.5}`);
+  const keyOf = (entry) => {
+    const { data } = entry;
+    const id = liveOf(entry) || idOf(data);
+    return id ? `m:${id}` : `s:${drawn.dimension}:${data.x + 0.5}:${data.y}:${data.z + 0.5}`;
+  };
+
+  const sameAs = (name, type) => `${str(type)}\u0000${str(name)}`;
+
+  // Finds each of the snapshot's mobs in the live picture. The game's id
+  // says which it is, and where the snapshot has one nothing else is
+  // asked: a loaded mob of the same name under another id is another
+  // animal. Only a mob the world gave no id is looked for by its name and
+  // type, a guess, and one taken only while it cannot be wrong about
+  // which: one mob of that name and type saved, and one loaded.
+  function pair() {
+    const card = inspect();
+    const loaded = card && card.named ? card.named() : [];
+    const byId = new Map(loaded.map((mob) => [mob.id, mob]));
+    const tally = (list, of) => {
+      const counts = new Map();
+      for (const item of list) counts.set(of(item), (counts.get(of(item)) || 0) + 1);
+      return counts;
+    };
+    const saved = tally(named, (entry) => sameAs(entry.data.n, entry.data.k));
+    const there = tally(loaded, (mob) => sameAs(mob.name, mob.type));
+    const claimed = new Set(named.map((entry) => idOf(entry.data)));
+    for (const entry of named) {
+      const id = idOf(entry.data);
+      if (id) {
+        entry.live = byId.get(id) || null;
+        continue;
+      }
+      const same = sameAs(entry.data.n, entry.data.k);
+      const guess = saved.get(same) === 1 && there.get(same) === 1 ? loaded.find((mob) => sameAs(mob.name, mob.type) === same) : null;
+      entry.live = guess && !claimed.has(guess.id) ? guess : null;
+    }
+  }
 
   // Opens the card about a named mob: live where the live layer has it,
   // and otherwise where the snapshot left it, said as that.
@@ -234,13 +335,32 @@
     const card = inspect();
     const { data } = entry;
     const dimension = drawn.dimension || app.dimension();
-    const id = idOf(data);
+    const id = liveOf(entry) || idOf(data);
     const now = card && id ? card.where(id) : null;
     // The middle of the block, not its north-west corner.
     const at = now || { x: data.x + 0.5, y: data.y, z: data.z + 0.5 };
     if (go && dimension) app.go(dimension, at.x, at.z);
     if (!card) return;
-    card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });
+    card.open({ kind: 'mob', id, name: nameOf(entry), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });
+  }
+
+  // The name a mob goes by: the one it has now while it is loaded, which
+  // may not be the one it was saved under.
+  const nameOf = (entry) => (entry.live && str(entry.live.name)) || str(entry.data.n);
+
+  // Brings a mob's entry in the list in line with whether it is loaded.
+  function listed(entry) {
+    if (!entry.button) return;
+    const { data } = entry;
+    const name = nameOf(entry) || names.entity(data.k);
+    if (entry.label.textContent !== name) entry.label.textContent = name;
+    const title = entry.live ? 'Loaded now' : `Last saved position: ${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;
+    if (entry.button.title !== title) entry.button.title = title;
+    const key = keyOf(entry);
+    if (entry.button.dataset.key === key) return;
+    entry.button.dataset.key = key;
+    // The card may be about this one, under the key it has now.
+    current();
   }
 
   // Takes the mark of a mob the live layer is drawing off the map, and
@@ -249,11 +369,11 @@
   function aside() {
     const card = inspect();
     if (!card) return;
+    pair();
     let back = false;
     for (const entry of named) {
-      const id = idOf(entry.data);
-      if (!id) continue;
-      const live = card.drawn(id);
+      listed(entry);
+      const live = entry.live !== null && card.drawn(entry.live.id);
       if (live === !layers.mobs.hasLayer(entry.marker)) continue;
       if (live) layers.mobs.removeLayer(entry.marker);
       else layers.mobs.addLayer(entry.marker);
@@ -291,8 +411,9 @@
       const what = text(names.kindOf(data.k, data.b));
       what.className = 'what';
       button.append(icons.picture(pictureOf('mobs', data)), swatch, name, what);
-      button.title = `${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;
-      button.dataset.key = keyOf(data);
+      entry.button = button;
+      entry.label = name;
+      listed(entry);
       button.addEventListener('click', () => examine(entry, true));
       const item = document.createElement('li');
       item.append(button);
@@ -353,6 +474,8 @@
     drawn = { dimension: null, etag: null };
     waypoints = [];
     named = [];
+    // The list's buttons belong to the entries they were built from.
+    rosterOf = '';
     snapshotAt = null;
     paint();
   }
@@ -431,6 +554,7 @@
       // Another dimension's markers are wrong here, not merely old.
       for (const kind of WORLD_KINDS) layers[kind].clearLayers();
       named = [];
+      rosterOf = '';
       drawn = { dimension: null, etag: null };
       drawWaypoints(dimension);
     }

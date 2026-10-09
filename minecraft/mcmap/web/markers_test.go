@@ -76,10 +76,10 @@ func TestNamedMobIsOneMarkerAndOpensTheCard(t *testing.T) {
 	markers, live, icons := read(t, "markers.js"), read(t, "live.js"), read(t, "icons.js")
 	for _, need := range []string{
 		"const idOf = (data) => (typeof data.i === 'string' && data.i !== '' ? data.i : null);",
-		"const live = card.drawn(id);",
+		"const live = entry.live !== null && card.drawn(entry.live.id);",
 		"if (live) layers.mobs.removeLayer(entry.marker);",
 		"layers.mobs.on('click', (e) => {",
-		"card.open({ kind: 'mob', id, name: str(data.n), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });",
+		"card.open({ kind: 'mob', id, name: nameOf(entry), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });",
 		"document.addEventListener('mcmap:live', aside);",
 	} {
 		if !bytes.Contains(markers, []byte(need)) {
@@ -102,6 +102,66 @@ func TestNamedMobIsOneMarkerAndOpensTheCard(t *testing.T) {
 	}
 	if !bytes.Contains(read(t, "index.html"), []byte(`id="inspect-go"`)) {
 		t.Error("index.html has no button to go to the inspected entity")
+	}
+}
+
+// The snapshot's mark of a named mob is where it was saved, up to a
+// snapshot's interval ago, and is on the map only while the live layer is
+// not drawing the mob: because it is not loaded, or its row or type is
+// switched off, or it has died since. Drawn like a live marker it reads as
+// a second, stuck one, so it is faded, in a broken ring, and its tooltip
+// says how old it is.
+func TestNamedMobMarkIsDrawnAndSaidAsASavedPosition(t *testing.T) {
+	markers, live := read(t, "markers.js"), read(t, "live.js")
+	for _, need := range []string{
+		"const marker = new (saved ? Saved : Pin)([m.z + 0.5, m.x + 0.5], {",
+		"...(saved ? { saved: true, opacity: SAVED_ALPHA, dashArray: SAVED_DASH.join(' ') } : {}),",
+		"worn = fade(icons.mob(str(data.k), style.color, baby));",
+		"const tagOf = (name) => (naming('labelMobs') === 'always' ? fade(icons.tag(name, NAMED)) : null);",
+		"ctx.setLineDash(SAVED_DASH);",
+		"return snapshotAt !== null && card && card.age ? `saved ${card.age(snapshotAt)}` : 'last saved position';",
+		"const box = text(kind === 'mobs' ? `${title} · ${savedSaid()} · ${at(data)}` : `${title} · ${at(data)}`);",
+		"const title = entry.live ? 'Loaded now' : `Last saved position: ${fmt(data.x)}, ${fmt(data.y)}, ${fmt(data.z)}`;",
+	} {
+		if !bytes.Contains(markers, []byte(need)) {
+			t.Errorf("markers.js no longer has %s", need)
+		}
+	}
+	if !regexp.MustCompile(`(?m)^    // How long ago a snapshot was, by the server's clock\.\n    age,$`).Match(live) {
+		t.Error("live.js no longer tells the marker layer how old a snapshot is")
+	}
+}
+
+// Which loaded mob a saved one is goes by the game's id wherever the
+// snapshot has one, and then by nothing else: a loaded mob of the same name
+// under another id is another animal, and hiding the saved mark for it
+// would lose one. A mob saved without an id is found by name and type, and
+// only while exactly one is saved and exactly one is loaded under them, so
+// that two sharing a name are never taken for each other. A mob renamed
+// since the snapshot is listed under the name it has now.
+func TestNamedMobIsPairedByIdAndByNameOnlyWithoutOne(t *testing.T) {
+	markers, live := read(t, "markers.js"), read(t, "live.js")
+	if !regexp.MustCompile(`if \(id\) \{\s*entry\.live = byId\.get\(id\) \|\| null;\s*continue;\s*\}`).Match(markers) {
+		t.Error("markers.js no longer goes by the id alone where the snapshot has one")
+	}
+	for _, need := range []string{
+		"const guess = saved.get(same) === 1 && there.get(same) === 1 ? loaded.find((mob) => sameAs(mob.name, mob.type) === same) : null;",
+		"entry.live = guess && !claimed.has(guess.id) ? guess : null;",
+		"const nameOf = (entry) => (entry.live && str(entry.live.name)) || str(entry.data.n);",
+		"if (entry.label.textContent !== name) entry.label.textContent = name;",
+		"pair();\n    let back = false;",
+	} {
+		if !bytes.Contains(markers, []byte(need)) {
+			t.Errorf("markers.js no longer has %s", need)
+		}
+	}
+	if !bytes.Contains(live, []byte("if (held.category !== 'players' && held.name) out.push({ id: key.slice(2), name: held.name, type: held.type });")) {
+		t.Error("live.js no longer lists the named mobs in the picture")
+	}
+	// A count of marks would say two for one animal; the row counts what
+	// the snapshot holds, each once.
+	if !bytes.Contains(markers, []byte("totals[kind] = made.length;")) {
+		t.Error("markers.js no longer counts the named mobs the snapshot holds")
 	}
 }
 
