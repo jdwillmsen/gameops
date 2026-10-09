@@ -1084,8 +1084,6 @@
   function render() {
     queued = false;
     const shown = [...sections.values()].filter((section) => section.rows.length > 0).sort((a, b) => a.rank - b.rank);
-    // The line the keys are on has gone, or none has been yet.
-    if (!currentNode || !currentNode.dom || !currentNode.dom.li.isConnected) currentNode = shown[0] || null;
     const tally = { all: 0, on: 0, seen: false };
     for (const section of sections.values()) {
       if (section.rows.length > 0) continue;
@@ -1093,7 +1091,14 @@
     }
     for (const section of shown) paintSection(section, tally);
     arrange(tree, shown.map((section) => section.dom.li));
-    if (currentNode && (!currentNode.dom || !currentNode.dom.li.isConnected)) moveStop(shown[0] || null);
+    // The one stop the Tab key makes is always on a line that is showing
+    // and can be pressed: the line it was on may have gone, been put away
+    // with its group, or been narrowed out by the search.
+    if (!stoppable(currentNode)) {
+      const showing = [...tree.querySelectorAll('.check')].filter(listed);
+      const first = showing.find((check) => check.getAttribute('aria-disabled') !== 'true') || showing[0];
+      moveStop(first ? nodeAt(first) : null);
+    }
     if (refocus) {
       const node = nodes.get(refocus);
       refocus = null;
@@ -1113,6 +1118,15 @@
 
   // The stop the Tab key makes is moved by writing the two lines it moves
   // between, and nothing else.
+  // Whether a part of a line is showing in the list, whatever the panel
+  // itself is doing: put away to its rail, it still has its one stop.
+  const listed = (part) => {
+    const within = part.closest('[hidden]');
+    return within === null || !tree.contains(within);
+  };
+  const stoppable = (node) => Boolean(node) && Boolean(node.dom) && node.dom.li.isConnected && listed(node.dom.li)
+    && node.dom.check.getAttribute('aria-disabled') !== 'true';
+
   function moveStop(node) {
     const was = currentNode;
     currentNode = node;
