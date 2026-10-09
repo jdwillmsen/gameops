@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,7 +30,11 @@ var controllerID = regexp.MustCompile(`^controller\.render\.[A-Za-z0-9_.-]{1,96}
 type controller struct {
 	Geometry string   `json:"geometry"`
 	Textures []string `json:"textures"`
-	Arrays   struct {
+	// Visibility is which bones are drawn, as rules read in order: each
+	// names bones, with * for any run of letters, and says yes, no or an
+	// expression. A horse's saddle is drawn only on a saddled one.
+	Visibility []map[string]json.RawMessage `json:"part_visibility"`
+	Arrays     struct {
 		Textures   map[string][]string `json:"textures"`
 		Geometries map[string][]string `json:"geometries"`
 	} `json:"arrays"`
@@ -61,6 +66,29 @@ func parseControllers(raw []byte) (map[string]controller, error) {
 		out[id] = c
 	}
 	return out, nil
+}
+
+// hides reports whether the controller leaves a bone undrawn on a grown
+// mob of the default variant. The last rule that names the bone decides.
+func (c controller) hides(bone string) bool {
+	shown := true
+	for _, rule := range c.Visibility[:min(len(c.Visibility), maxArrayEntries)] {
+		for pattern, raw := range rule {
+			if ok, err := path.Match(pattern, bone); err != nil || !ok {
+				continue
+			}
+			var flag bool
+			var expression string
+			switch {
+			case json.Unmarshal(raw, &flag) == nil:
+				shown = flag
+			case json.Unmarshal(raw, &expression) == nil:
+				v, err := c.evaluate(expression, 0)
+				shown = err == nil && v.truthy()
+			}
+		}
+	}
+	return !shown
 }
 
 // array is the list an Array.<name> names, whichever of the two kinds it

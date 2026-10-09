@@ -183,10 +183,13 @@ func plan(lib library, looks map[string]mobLook, items, terrain atlas) (recipes 
 		recipes["structure/"+kind] = recipe
 	}
 	// A bell is no box: its sides are a bell with air round it, and three
-	// of them drawn as a block are three bells adrift. The picture the
-	// game shows for one in the hand is used as it is.
+	// of them drawn as a block are three bells adrift. It is the picture
+	// the game shows for one in the hand, at two pixels to each of its
+	// own, which is the size a block's picture comes out.
 	if path := terrain.pathIn("bell_carried", 0, modelTexture); path != "" {
-		recipes["block/bell"] = Recipe{Flat: path}
+		side := 2 * boxSide
+		recipes["block/bell"] = Recipe{W: side, H: side, Main: [4]int{0, 0, side, side}, Sparse: true,
+			Layers: []Layer{{Texture: path, Units: [2]int{boxSide, boxSide}, Src: [4]int{0, 0, boxSide, boxSide}, Dst: [4]int{0, 0, side, side}, Skin: true}}}
 	}
 	for key, block := range blocks(terrain) {
 		if err := block.check(); err != nil {

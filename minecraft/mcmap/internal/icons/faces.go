@@ -29,6 +29,11 @@ const (
 	// horns, and minFaceUnits the narrowest box that can be one.
 	maxFaceUnits = 48
 	minFaceUnits = 3
+	// faceBox is the side of the box the page fits every face into, in
+	// the model's units, and minFaceShort the least a face may measure
+	// along its shorter side once everything on it is drawn.
+	faceBox      = 16
+	minFaceShort = 4
 	maxRecipes   = 600
 )
 
@@ -79,6 +84,9 @@ type Recipe struct {
 	Main   [4]int  `json:"m,omitempty"`
 	Layers []Layer `json:"l,omitempty"`
 	Block  *Block  `json:"b,omitempty"`
+	// Sparse marks a picture that is rightly mostly air: an item drawn
+	// small in its square.
+	Sparse bool `json:"q,omitempty"`
 	// Flat is a texture that is the picture as it is.
 	Flat string `json:"p,omitempty"`
 	// Else is a texture to use whole if the picture cannot be made.
@@ -196,6 +204,13 @@ type view struct {
 	// reach is how far from the head, in the model's units, a box may lie
 	// and still be drawn. Zero is half the head's own size.
 	reach int
+	// top keeps only that many units of the head's box from its top, for
+	// a head and neck that are one box.
+	top int
+	// with names bones drawn though they do not hang off the head.
+	with []string
+	// hides says which bones the mob's render controller leaves undrawn.
+	hides func(bone string) bool
 }
 
 // The bones a face is looked for in when nothing says otherwise. Most
@@ -235,9 +250,38 @@ func (m model) under(root int) []int {
 // left out too: a pair of antlers would leave the face a speck between
 // them.
 func (m model) seen(v view) (faces []placed, main placed, err error) {
+	face := v.face
+	if face == "" {
+		face = faceNorth
+	}
+	// The largest face of a box with some thickness is the head.
+	largest := func(b bone) (at, area int) {
+		at = -1
+		for pass := 0; pass < 2 && at < 0; pass++ {
+			for i, c := range b.Cubes {
+				if p, ok := place(c, b.Mirror, b.Inflate, face); ok && p.w*p.h > area && (pass == 1 || c.solid()) {
+					at, area = i, p.w*p.h
+				}
+			}
+		}
+		return at, area
+	}
 	root := -1
 	for _, name := range v.bones {
-		if root = m.bone(name); root >= 0 && len(m.bones[root].Cubes) > 0 {
+		if root = m.bone(name); root < 0 {
+			continue
+		}
+		// Some models hang the head's box off an empty bone called head,
+		// and that box is looked for among what hangs off it.
+		if len(m.bones[root].Cubes) == 0 {
+			from, best := root, 0
+			for _, i := range m.under(from) {
+				if _, area := largest(m.bones[i]); area > best {
+					root, best = i, area
+				}
+			}
+		}
+		if len(m.bones[root].Cubes) > 0 {
 			break
 		}
 		root = -1
@@ -245,26 +289,22 @@ func (m model) seen(v view) (faces []placed, main placed, err error) {
 	if root < 0 {
 		return nil, placed{}, errors.New("the model has no head")
 	}
-	face := v.face
-	if face == "" {
-		face = faceNorth
-	}
 	head := m.bones[root]
 	at := v.cube
 	if at < 0 {
-		area := 0
-		for i, c := range head.Cubes {
-			if p, ok := place(c, head.Mirror, head.Inflate, face); ok && p.w*p.h > area {
-				at, area = i, p.w*p.h
-			}
-		}
+		at, _ = largest(head)
 	}
 	if at < 0 || at >= len(head.Cubes) {
 		return nil, placed{}, errors.New("the head has no box with a face")
 	}
+	// The head's own box may be set at an angle: its face is still the
+	// same rectangle of the texture.
 	main, ok := place(head.Cubes[at], head.Mirror, head.Inflate, face)
 	if !ok {
 		return nil, placed{}, errors.New("the head's box has no face on that side")
+	}
+	if v.top > 0 && main.h > v.top {
+		main.h, main.src.H = v.top, v.top
 	}
 	// A box that names each face's place on the texture may be any size
 	// beside it: a ghast is 72 units across and 16 pixels. The view is
@@ -288,17 +328,23 @@ func (m model) seen(v view) (faces []placed, main placed, err error) {
 		return faces, main, nil
 	}
 	for i, c := range head.Cubes {
-		if p, ok := place(c, head.Mirror, head.Inflate, face); ok && i != at && near(fit(p), main, v.reach) {
+		if p, ok := place(c, head.Mirror, head.Inflate, face); ok && i != at && !turned(c.Rotation) && near(fit(p), main, v.reach) {
 			faces = append(faces, fit(p))
 		}
 	}
-	for _, i := range m.under(root) {
+	others := m.under(root)
+	for _, name := range v.with {
+		if i := m.bone(name); i >= 0 && i != root && !slices.Contains(others, i) {
+			others = append(others, i)
+		}
+	}
+	for _, i := range others {
 		b := m.bones[i]
-		if b.NeverRender || turned(b.Rotation) || slices.Contains(v.skip, b.Name) {
+		if b.NeverRender || turned(b.Rotation) || slices.Contains(v.skip, b.Name) || (v.hides != nil && v.hides(b.Name)) {
 			continue
 		}
 		for _, c := range b.Cubes {
-			if p, ok := place(c, b.Mirror, b.Inflate, face); ok && near(fit(p), main, v.reach) {
+			if p, ok := place(c, b.Mirror, b.Inflate, face); ok && !turned(c.Rotation) && near(fit(p), main, v.reach) {
 				faces = append(faces, fit(p))
 			}
 		}
@@ -317,10 +363,12 @@ func near(p, main placed, reach int) bool {
 	return p.x >= main.x-reachX && p.y >= main.y-reachY && p.x+p.w <= main.x+main.w+reachX && p.y+p.h <= main.y+main.h+reachY
 }
 
-// drawn is one model and the textures laid over it, in order.
+// drawn is one model and the textures laid over it, in order, with the
+// bones its controller leaves undrawn.
 type drawn struct {
 	model    model
 	textures []string
+	hides    func(bone string) bool
 }
 
 // faceRecipe is the recipe for a face seen in the first of the models that
@@ -341,6 +389,7 @@ func faceRecipe(parts []drawn, v view) (Recipe, error) {
 		first = errors.New("nothing is drawn")
 	)
 	for _, part := range parts {
+		v.hides = part.hides
 		faces, head, err := part.model.seen(v)
 		if err != nil {
 			if !found {
@@ -378,6 +427,17 @@ func faceRecipe(parts []drawn, v view) (Recipe, error) {
 		right, bottom = max(right, p.x+p.w), max(bottom, p.y+p.h)
 	}
 	out := Recipe{W: right - left, H: bottom - top, Main: [4]int{main.x - left, main.y - top, main.w, main.h}}
+	// A face is shown in a box 16 pixels a side. One that its ears and
+	// horns make larger than that is drawn as the head alone, so that it
+	// is not made smaller than the rest to fit.
+	if max(out.W, out.H) > faceBox && !v.alone && v.reach == 0 {
+		v.alone = true
+		return faceRecipe(parts, v)
+	}
+	// And one that is a sliver, or a strip, is no face at any size.
+	if short, long := min(out.W, out.H), max(out.W, out.H); short < minFaceShort || long*2 > short*5 {
+		return Recipe{}, fmt.Errorf("the face is %dx%d, a strip that would be a speck at a marker's size", out.W, out.H)
+	}
 	for _, p := range all {
 		out.Layers = append(out.Layers, Layer{
 			Texture: p.texture, Units: p.units, Skin: p.skin, Flip: p.src.Flip,
@@ -494,6 +554,9 @@ func (lib library) parts(a appearance, o override) ([]drawn, error) {
 			}
 		}
 		part := drawn{model: m}
+		if known {
+			part.hides = c.hides
+		}
 		for _, expression := range c.Textures {
 			if key, ok := c.pick(expression); ok {
 				if path := texture(key); path != "" {
@@ -528,7 +591,7 @@ func (lib library) face(a appearance, o override) (Recipe, error) {
 	if err != nil {
 		return Recipe{}, err
 	}
-	v := view{bones: defaultBones, cube: -1, face: o.face, alone: o.alone, skip: o.skip, reach: o.reach}
+	v := view{bones: defaultBones, cube: -1, face: o.face, alone: o.alone, skip: o.skip, reach: o.reach, top: o.top, with: o.with}
 	if o.bone != "" {
 		v.bones = []string{o.bone}
 	}
@@ -721,7 +784,11 @@ func (r Recipe) render(textures map[string]*image.NRGBA) (*image.NRGBA, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !plausible(img, main) {
+	if r.Sparse {
+		if !covered(img, main, 8) {
+			return nil, errImplausible
+		}
+	} else if !plausible(img, main) {
 		// A texture that says it is wholly see-through where the head is,
 		// is drawn by a material that pays the channel no heed.
 		if img, err = compose(r.Layers, r.W, r.H, scale, textures, base, true); err != nil {

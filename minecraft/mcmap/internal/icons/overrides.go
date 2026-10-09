@@ -29,6 +29,10 @@ type override struct {
 	// reach is how far from the head a box may lie and still be drawn,
 	// where the half of the head's size that is usual is not enough.
 	reach int
+	// top keeps only that many units of the head's box from its top, and
+	// with draws bones that do not hang off the head.
+	top  int
+	with []string
 	// over is further models of the definition laid over the first, each
 	// with its textures.
 	over []overlay
@@ -48,41 +52,65 @@ type overlay struct {
 // overrides is by mob type. It is data and not code so that what was
 // decided for each mob, and why, can be read in one place.
 var overrides = map[string]override{
-	"ghast":          {why: "it has no head: its body is its face, and its tentacles hang far below", alone: true},
-	"happy_ghast":    {why: "its body is its face, and the first texture its controller lists is its young's", textures: []string{"happy_ghast"}, alone: true},
-	"slime":          {why: "it has no head: the face is on the core its jelly surrounds", bone: "cube"},
-	"magma_cube":     {why: "it has no head: its face is the fronts of the eight slices it is cut into", bone: "insideCube"},
-	"sulfur_cube":    {why: "it has no head: the cube is all there is", bone: "sulfur_cube", alone: true},
-	"silverfish":     {why: "a row of segments with no face; from the side it is a grey sliver too long to read at a marker's size", egg: true},
-	"endermite":      {why: "a row of segments with no face, and all of one purple", egg: true},
-	"cod":            {why: "a fish is known by its side, which is 17 pixels long and 4 tall: a line at a marker's size", egg: true},
-	"salmon":         {why: "as the cod, and 25 pixels long", egg: true},
-	"tropicalfish":   {why: "its colours are laid on by the game, so its texture is a grey fish", egg: true},
-	"creaking":       {why: "its face is black but for eyes the game lights from another texture", egg: true},
-	"dolphin":        {why: "its front is a pale blank; it is known by its beak, from the side", egg: true},
-	"frog":           {why: "its head is a flat lip, and its eyes are on another bone above it", egg: true},
-	"allay":          {why: "its head's texture is drawn by a see-through material and comes out in pieces", egg: true},
-	"bat":            {why: "its head is four pixels wide", egg: true},
-	"turtle":         {why: "its eyes are on the sides of its head: the front is a plain green square", egg: true},
-	"pufferfish":     {why: "its smallest form is three pixels across; the largest is the one that looks like a pufferfish", geometry: "large", textures: []string{"default"}, bone: "body", alone: true},
-	"horse":          {why: "its head is a narrow box with its eyes on the sides: from the front it is a post, and from the side a bar with an eye", egg: true},
-	"donkey":         {why: "as the horse", egg: true},
-	"mule":           {why: "as the horse", egg: true},
-	"skeleton_horse": {why: "as the horse", egg: true},
-	"zombie_horse":   {why: "as the horse", egg: true},
-	"sheep":          {why: "its head is two boxes, the bare face and the wool round it, in two models", geometry: "sheared", textures: []string{"default"}, over: []overlay{{"default", []string{"default"}}}},
-	"wither":         {why: "its controller picks the pale skin of one just summoned, and others draw the armour it wears only when half dead", textures: []string{"default"}, bone: "head1"},
-	"shulker":        {why: "it is known by its shell; the head inside is seen only when it opens", textures: []string{"undyed"}, bone: "base", reach: 8, skip: []string{"head"}},
-	"creeper":        {why: "its second controller draws the charge only a struck one carries", drop: []string{"controller.render.creeper_armor"}},
-	"hoglin":         {why: "its head hangs down, so the face is the top of the box", face: faceUp},
-	"zoglin":         {why: "as the hoglin", face: faceUp},
-	"guardian":       {why: "its spikes would leave the eye a speck among them", skip: spikes},
-	"elder_guardian": {why: "as the guardian", skip: spikes},
-	"armadillo":      {why: "its head is three pixels wide and set at an angle", egg: true},
-	"goat":           {why: "its head is set at an angle, so its front is no rectangle of the texture", egg: true},
-	"parrot":         {why: "its head is two pixels wide", egg: true},
-	"tadpole":        {why: "it is three pixels wide", egg: true},
+	"copper_golem":    {why: "the first of its controllers draws the flower it sometimes holds, on a model with no face", textures: []string{"default"}},
+	"nautilus":        nautilusFace,
+	"zombie_nautilus": nautilusFace,
+	"sniffer":         {why: "its face is behind a beak that fills the front of its head", egg: true},
+	"hoglin":          {why: "its head is a long box hung at a slant: the front of it is a brow six pixels tall and the top is not a face", egg: true},
+	"zoglin":          {why: "as the hoglin", egg: true},
+	"horse":           horseFace,
+	"donkey":          horseFace,
+	"mule":            horseFace,
+	"skeleton_horse":  horseFace,
+	"zombie_horse":    horseFace,
+	"llama":           llamaFace,
+	"trader_llama":    llamaFace,
+	"camel":           camelFace,
+	"camel_husk":      camelFace,
+	"ravager":         {why: "its head is 16 by 20 with the jaw: the top 16 are the face, the size of the box every face is shown in", top: 16, alone: true},
+	"frog":            {why: "its head is a flat lip, and its eyes are two boxes on a bone of their own above it", bone: "head", cube: box(1), with: []string{"right_eye", "left_eye"}, reach: 3},
+	"bat":             {why: "its head is four pixels wide; with its ears, which are taller than the head, it is a bat", bone: "Head", reach: 5},
+	"dolphin":         {why: "its front is a pale blank; from the side it has its eye and its beak", face: faceEast, reach: 4},
+	"turtle":          {why: "its eyes are on the sides of its head", face: faceEast},
+	"phantom":         {why: "its head is a strip seven pixels by three", egg: true},
+	"ghast":           {why: "it has no head: its body is its face, and its tentacles hang far below", alone: true},
+	"happy_ghast":     {why: "its body is its face, and the first texture its controller lists is its young's", textures: []string{"happy_ghast"}, alone: true},
+	"slime":           {why: "it has no head: the face is on the core its jelly surrounds", bone: "cube"},
+	"magma_cube":      {why: "it has no head: its face is the fronts of the eight slices it is cut into", bone: "insideCube"},
+	"sulfur_cube":     {why: "it has no head: the cube is all there is", bone: "sulfur_cube", alone: true},
+	"silverfish":      {why: "a row of segments with no face; from the side it is a grey sliver too long to read at a marker's size", egg: true},
+	"endermite":       {why: "a row of segments with no face, and all of one purple", egg: true},
+	"cod":             {why: "a fish is known by its side, which is 17 pixels long and 4 tall: a line at a marker's size", egg: true},
+	"salmon":          {why: "as the cod, and 25 pixels long", egg: true},
+	"tropicalfish":    {why: "its colours are laid on by the game, so its texture is a grey fish", egg: true},
+	"pufferfish":      {why: "its smallest form is three pixels across; the largest is the one that looks like a pufferfish", geometry: "large", textures: []string{"default"}, bone: "body", alone: true},
+	"sheep":           {why: "its head is two boxes, the bare face and the wool round it, in two models", geometry: "sheared", textures: []string{"default"}, over: []overlay{{"default", []string{"default"}}}},
+	"wither":          {why: "its controller picks the pale skin of one just summoned, and others draw the armour it wears only when half dead", textures: []string{"default"}, bone: "head1"},
+	"shulker":         {why: "it is known by its shell; the head inside is seen only when it opens", textures: []string{"undyed"}, bone: "base", reach: 8, skip: []string{"head"}},
+	"creeper":         {why: "its second controller draws the charge only a struck one carries", drop: []string{"controller.render.creeper_armor"}},
+	"guardian":        {why: "its spikes would leave the eye a speck among them", skip: spikes},
+	"elder_guardian":  {why: "as the guardian", skip: spikes},
+	"parrot":          {why: "its head is two pixels wide", egg: true},
+	"tadpole":         {why: "it is three pixels wide", egg: true},
 }
+
+func box(n int) *int { return &n }
+
+// A horse is known in profile, and its profile is its neck: a bone the
+// model sets 30 degrees off square, which a flat view cannot draw. What is
+// left is the head alone, a bar with an eye from the side and a post from
+// the front.
+var horseFace = override{why: "its profile is made by a neck set at a slant, which cannot be drawn flat; the head alone is a bar with an eye", egg: true}
+
+// A nautilus is its shell, which is a spiral only from the side.
+var nautilusFace = override{why: "it is known by the spiral of its shell, which is seen from the side", bone: "head", face: faceEast, reach: 10}
+
+// A llama's head and neck are one box 18 tall, with the muzzle and the ears
+// set on its top 8.
+var llamaFace = override{why: "its head and neck are one box: the top of it is the head", bone: "head", cube: box(1), top: 8, reach: 4}
+
+// A camel's head bone holds its neck in two boxes and then the head.
+var camelFace = override{why: "the largest boxes of its head bone are its neck", bone: "head", cube: box(2)}
 
 // spikes is the twelve spikes of a guardian, which hang off its head.
 var spikes = []string{"spikepart0", "spikepart1", "spikepart2", "spikepart3", "spikepart4", "spikepart5", "spikepart6", "spikepart7", "spikepart8", "spikepart9", "spikepart10", "spikepart11", "tailpart0"}
