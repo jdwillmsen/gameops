@@ -765,7 +765,7 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .key.candidate { border: 1.5px dotted var(--text); border-radius: 50%; opacity: 0.55; }
 .key.trail { height: 0; border-top: 3px solid var(--text); }
 .key.grid { border: 1px solid var(--text); background: linear-gradient(var(--text), var(--text)) center / 1px 100% no-repeat, linear-gradient(var(--text), var(--text)) center / 100% 1px no-repeat; }
-.key.chunk { border: 2px solid var(--chunk-pin); }
+.key.focus { border: 2px solid var(--chunk-pin); }
 .key.slime { background: var(--slime-far); border: 1px solid var(--slime-line); }
 
 .structure span {
@@ -1197,11 +1197,22 @@ kbd, .keys code {
   .detent-peek .panel { height: calc(var(--head-h) + 28px); }
   .detent-full .panel { height: 100%; border-radius: 0; }
   .panel-scroll { padding-bottom: env(safe-area-inset-bottom); }
+  /* A sheet at half height on a small phone is a few rows tall, so the
+     whole of it scrolls and not the list alone: the handle, the title and
+     the line that says how much is shown stay, and the search goes up
+     with the list. */
+  .panel, .layers.floating .panel { overflow-y: auto; overscroll-behavior: contain; }
+  .detent-peek .panel { overflow: hidden; }
+  .panel-scroll { flex: none; overflow: visible; }
+  .panel-grab, .panel-head, .panel-status { position: sticky; z-index: 2; background: var(--panel); }
+  .panel-grab { top: 0; z-index: 3; }
+  .panel-head { top: 28px; }
+  .panel-status { top: calc(28px + var(--head-h)); min-height: 28px; }
   /* The handle: a bar to see, and the strip across the sheet to press,
-     which reaches above the sheet to make its 44 pixels. */
+     which reaches down over the title, clear of the buttons beside it,
+     to make its 44 pixels. */
   .panel-grab {
     display: block;
-    position: relative;
     flex: none;
     width: 100%;
     min-width: 0;
@@ -1214,7 +1225,7 @@ kbd, .keys code {
     cursor: ns-resize;
     touch-action: none;
   }
-  .panel-grab::before { content: ""; position: absolute; left: 0; right: 0; top: -16px; height: 44px; }
+  .panel-grab::before { content: ""; position: absolute; left: 0; right: 7rem; top: 0; height: 44px; }
   .panel-grab::after { content: ""; position: absolute; top: 11px; left: calc(50% - 20px); width: 40px; height: 5px; border-radius: 3px; background: var(--dim); }
   .panel-popup { overflow-y: auto; }
   .panel-popup { max-height: 70vh; }
@@ -1302,6 +1313,11 @@ kbd, .keys code {
 @media (max-height: 480px) and (min-width: 560px) {
   .panel, .layers.floating .panel, .detent-peek .panel, .detent-full .panel { top: 0; left: auto; width: min(22rem, 55%); height: auto; border-top: 0; border-left: 1px solid var(--line); border-radius: 12px 0 0 12px; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 0; }
   .panel-grab { display: none; }
+  /* The drawer has no heights, so the shortest of them does not stop it
+     scrolling here. */
+  .detent-peek .panel { overflow-y: auto; }
+  .panel-head { top: 0; }
+  .panel-status { top: var(--head-h); }
   /* More likewise keeps to the right, so that there is map beside it to
      touch. */
   .more-shown .more {
