@@ -358,7 +358,7 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	}
 	// A structure's picture goes with the other markers' when the viewer
 	// has plain marks, and its letter stands in for it.
-	if bytes.Contains(read(t, "icons.js"), []byte("startsWith('structure/')")) || !bytes.Contains(read(t, "icons.js"), []byte("&& KEY.test(key) && look().picturesMarkers !== false")) {
+	if bytes.Contains(read(t, "icons.js"), []byte("startsWith('structure/')")) || !bytes.Contains(read(t, "icons.js"), []byte("if (style === 'dots') return null;\n    const has = renditions(key);")) {
 		t.Error("icons.js no longer leaves a structure's picture out when the viewer has plain marks")
 	}
 	// A trail's key is its line on the line's own dark casing.
@@ -367,7 +367,8 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	}
 	// Pixel art is only ever enlarged by a whole number of screen pixels.
 	icons := read(t, "icons.js")
-	if !bytes.Contains(icons, []byte("const BIG = DENSITY === 2 ? 24 : 32;")) || !bytes.Contains(icons, []byte("ctx.imageSmoothingEnabled = icon * DENSITY < drawn.width && icon < ICON;")) {
+	if !bytes.Contains(icons, []byte("const BIG = DENSITY === 2 ? 24 : 32;")) || !bytes.Contains(icons, []byte("const whole = Math.floor(target / native);")) ||
+		!bytes.Contains(icons, []byte("return { side: target, smooth: target < native };")) {
 		t.Error("icons.js no longer enlarges a picture whole, or blends one it enlarges")
 	}
 	// Less motion is the viewer's choice where one is made, and the

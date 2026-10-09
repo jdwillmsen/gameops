@@ -84,7 +84,7 @@
   // The appearance settings in the order a link lists them, likewise only
   // ever added to at the end.
   const LOOKS = ['theme', 'size', 'text', 'labelMobs', 'labelPlayers', 'labelWaypoints', 'picturesLive', 'picturesMarkers',
-    'opacityBiomes', 'opacityTrails', 'opacitySlime', 'density', 'motion', 'coords'];
+    'opacityBiomes', 'opacityTrails', 'opacitySlime', 'density', 'motion', 'coords', 'style', 'mobPicture'];
   // The most a link's view may come to, in characters: short enough to
   // paste into a chat, and far more than any view of this page's needs.
   const MAX_LINK = 1800;

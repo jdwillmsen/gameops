@@ -133,13 +133,15 @@
   const MODE = oneOf('always', 'hover', 'never');
   const LOOK = {
     theme: oneOf('system', 'dark', 'light', 'contrast'),
-    size: oneOf('small', 'normal', 'large'),
+    size: oneOf('small', 'normal', 'large', 'xlarge'),
     text: oneOf('small', 'normal', 'large'),
     labelMobs: MODE,
     labelPlayers: MODE,
     labelWaypoints: MODE,
-    picturesLive: bool,
-    picturesMarkers: bool,
+    // How a marker is drawn, and which picture a mob's is. The size above
+    // is a choice apart from both.
+    style: oneOf('dots', 'plates', 'large'),
+    mobPicture: oneOf('faces', 'eggs'),
     // Percent. The biomes' is how much of the terrain the tint covers; the
     // other two are of how they have always been drawn.
     opacityBiomes: int(10, 100),
@@ -156,8 +158,8 @@
     labelMobs: 'always',
     labelPlayers: 'always',
     labelWaypoints: 'always',
-    picturesLive: true,
-    picturesMarkers: true,
+    style: 'plates',
+    mobPicture: 'faces',
     opacityBiomes: 60,
     opacityTrails: 100,
     opacitySlime: 100,
@@ -165,6 +167,25 @@
     motion: 'system',
     coords: 'blocks',
   });
+
+  // Before there was a choice of three styles there were two switches,
+  // pictures or plain marks, one for mobs and players and one for
+  // everything placed. A record, a saved view or a link from then still
+  // says so, and is read as the style nearest what it asked for: plain
+  // dots where the mobs, which are most of what is on the map, were
+  // plain, and pictures on plates otherwise. The switches themselves are
+  // not kept.
+  const LEGACY_LOOK = { picturesLive: bool, picturesMarkers: bool };
+  const lookAsWritten = shape({ ...LOOK, ...LEGACY_LOOK });
+  function lookOf(v, strict) {
+    const kept = lookAsWritten(v, strict);
+    if (kept === BAD) return BAD;
+    const { picturesLive, picturesMarkers, ...out } = kept;
+    if (out.style === undefined && (picturesLive !== undefined || picturesMarkers !== undefined)) {
+      out.style = picturesLive === false ? 'dots' : 'plates';
+    }
+    return out;
+  }
 
   const MAX_HIDDEN = 200;
   // A mob's type as the server reports it, and a gamertag as the game
@@ -220,7 +241,7 @@
       zoom: int(-12, 8),
       pin: shape({ u: oneOf('chunk', 'region'), x: int(-2_000_000, 2_000_000), z: int(-2_000_000, 2_000_000) }, ['u', 'x', 'z']),
     }, ['d', 'x', 'z', 'zoom']),
-    look: shape(LOOK),
+    look: lookOf,
   };
   const VIEW = shape(VIEW_FIELDS, ['name', 'layers']);
 
@@ -249,7 +270,7 @@
     shortcuts: shape({ on: bool }),
     grid: shape({ on: bool }),
     biome: shape({ only: orNull(text(64, /^[a-z0-9_.:-]+$/)) }),
-    look: shape(LOOK),
+    look: lookOf,
     views: shape({
       list: list(VIEW, MAX_VIEWS),
       order: list(ID, MAX_VIEWS + BUILT_IN.length),
@@ -660,6 +681,9 @@
     const look = { ...state.look };
     if (look.theme === 'system') look.theme = media.contrast.matches ? 'contrast' : media.light.matches ? 'light' : 'dark';
     if (look.motion === 'system') look.motion = media.still.matches ? 'reduce' : 'full';
+    // The page and its scripts are cached apart for a few minutes, and a
+    // script from before the styles asks only whether pictures are on.
+    look.picturesLive = look.picturesMarkers = look.style !== 'dots';
     return look;
   }
 

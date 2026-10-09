@@ -808,6 +808,34 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .structure.predicted.candidate span { border-style: dotted; opacity: 0.45; }
 .structure.predicted.candidate:hover span, .structure.predicted.candidate:focus span { opacity: 0.9; }
 
+/* A structure's mark is an element, not a stroke on the map's canvas, so
+   the size and the style chosen for markers reach it from here. Its box on
+   the map stays where it is and the mark is centred on it, whatever its
+   size. A picture is enlarged by whole pixels only: the larger sizes are
+   32 and 48 on an ordinary screen and 24 and 32 on a dense one, as the
+   canvas's are. Made smaller, it is blended, since it cannot be made
+   smaller without losing pixels. */
+.structure:not(.spawn) span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+:root[data-marker-size="small"] .structure:not(.spawn) span { width: 18px; height: 18px; font-size: 10px; }
+:root[data-marker-size="small"] .structure .picture { width: 12px; height: 12px; image-rendering: auto; }
+:root[data-marker-size="large"] .structure:not(.spawn) span { width: 38px; height: 38px; font-size: 18px; }
+:root[data-marker-size="large"] .structure .picture { width: 32px; height: 32px; }
+:root[data-marker-size="xlarge"] .structure:not(.spawn) span { width: 54px; height: 54px; font-size: 24px; }
+:root[data-marker-size="xlarge"] .structure .picture { width: 48px; height: 48px; }
+@media (min-resolution: 1.5dppx) {
+  :root[data-marker-size="large"] .structure:not(.spawn) span { width: 30px; height: 30px; font-size: 15px; }
+  :root[data-marker-size="large"] .structure .picture { width: 24px; height: 24px; }
+  :root[data-marker-size="xlarge"] .structure:not(.spawn) span { width: 38px; height: 38px; font-size: 18px; }
+  :root[data-marker-size="xlarge"] .structure .picture { width: 32px; height: 32px; }
+}
+/* Large pictures have no plate: the picture is the mark, twice the size,
+   framed in the kind's colour inside a dark casing as a marker's is. */
+:root[data-markers="large"] .structure.recorded span:has(.picture:not([hidden])) { width: auto; height: auto; background: none; border: 0; }
+:root[data-markers="large"] .structure.recorded .picture { width: 32px; height: 32px; border-radius: 0; box-shadow: 0 0 0 2px var(--kind), 0 0 0 3px var(--marker-ink); }
+:root[data-markers="large"][data-marker-size="small"] .structure.recorded .picture { width: 24px; height: 24px; image-rendering: pixelated; }
+:root[data-markers="large"][data-marker-size="large"] .structure.recorded .picture { width: 48px; height: 48px; }
+:root[data-markers="large"][data-marker-size="xlarge"] .structure.recorded .picture { width: 64px; height: 64px; }
+
 
 .leaflet-tooltip.live-name, .leaflet-tooltip.live-tip {
   background: var(--label-plate);

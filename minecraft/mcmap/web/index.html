@@ -246,11 +246,23 @@
     </div>
     <h3>Markers and labels</h3>
     <div class="looks">
+      <label for="look-style">Marker style</label>
+      <select id="look-style" data-look="style">
+        <option value="dots">Dots</option>
+        <option value="plates">Pictures on plates</option>
+        <option value="large">Large pictures</option>
+      </select>
+      <label for="look-mob-picture">Mob picture</label>
+      <select id="look-mob-picture" data-look="mobPicture">
+        <option value="faces">Faces</option>
+        <option value="eggs">Spawn eggs</option>
+      </select>
       <label for="look-size">Marker size</label>
       <select id="look-size" data-look="size">
         <option value="small">Small</option>
         <option value="normal">Normal</option>
         <option value="large">Large</option>
+        <option value="xlarge">Extra large</option>
       </select>
       <label for="look-text">Label size</label>
       <select id="look-text" data-look="text">
@@ -275,16 +287,6 @@
         <option value="always">Always shown</option>
         <option value="hover">Under the pointer</option>
         <option value="never">Never</option>
-      </select>
-      <label for="look-pictures-live">Mobs and players</label>
-      <select id="look-pictures-live" data-look="picturesLive">
-        <option value="true">Pictures</option>
-        <option value="false">Plain dots</option>
-      </select>
-      <label for="look-pictures-markers">Beds, containers, waypoints and structures</label>
-      <select id="look-pictures-markers" data-look="picturesMarkers">
-        <option value="true">Pictures</option>
-        <option value="false">Plain rings and letters</option>
       </select>
     </div>
     <h3>Overlays</h3>
