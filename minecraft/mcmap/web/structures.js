@@ -733,7 +733,8 @@
     return list;
   }
 
-  const mobPicture = (kind) => (/^[a-z0-9_]{1,64}$/.test(kind) ? `mob/${kind}` : '');
+  // A villager whose profession the record gives is drawn in it.
+  const mobPicture = (kind, profession) => (/^[a-z0-9_]{1,64}$/.test(kind) ? icons.keyOf('mob', { kind, profession }) : '');
 
   function standingOf(standing) {
     const state = standing && typeof standing === 'object' ? text(standing.state) : '';
@@ -751,7 +752,10 @@
       const name = text(p.profession);
       const levels = Array.isArray(p.levels) ? LEVELS.map((level, i) => [level, count(p.levels[i])]).filter(([, n]) => n > 0) : [];
       const at = levels.length > 0 ? `: ${levels.map(([level, n]) => `${fmt(n)} ${level}`).join(', ')}` : '';
-      return { text: name ? `${names.tidy(name)} ${fmt(p.count)}${at}` : `No profession ${fmt(p.count)} (unemployed or nitwit: the record does not say which)` };
+      return {
+        picture: mobPicture('villager_v2', name),
+        text: name ? `${names.tidy(name)} ${fmt(p.count)}${at}` : `No profession ${fmt(p.count)} (unemployed or nitwit: the record does not say which)`,
+      };
     });
     const listed = (n, of) => (Number.isFinite(of) && of !== n ? `${fmt(n)} in the save, of the ${fmt(of)} it lists` : `${fmt(n)} in the save`);
     out.push(...facts('Its villagers, from their own records', [
@@ -864,7 +868,7 @@
     if (count(d.mobKindsMore) > 0) counted.push({ text: `and ${some(d.mobKindsMore, 'more type', 'more types')}` });
     const named = listOf(d.named).filter((m) => text(m.name) !== '').map((m) => {
       const job = text(m.profession) ? `, ${names.tidy(m.profession).toLowerCase()}${Number.isFinite(m.level) && LEVELS[m.level - 1] ? `, ${LEVELS[m.level - 1]}` : ''}` : '';
-      return { picture: mobPicture(text(m.kind)), text: `${m.name} (${names.kindOf(text(m.kind), m.baby === true)}${job})` };
+      return { picture: mobPicture(text(m.kind), text(m.profession)), text: `${m.name} (${names.kindOf(text(m.kind), m.baby === true)}${job})` };
     });
     if (count(d.namedMore) > 0) named.push({ text: `and ${fmt(d.namedMore)} more` });
 

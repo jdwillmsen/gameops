@@ -29,7 +29,7 @@
   // From further out than this a bed or a container is its ring: a
   // village's worth of pictures twenty pixels wide, eight blocks to the
   // pixel, is a heap in which none can be made out.
-  const PICTURE_ZOOM = -2;
+  const PICTURE_ZOOM = icons.registry ? icons.registry.PICTURES_FROM.markers : -2;
   const { DENSITY } = icons;
   // What the viewer has chosen for how the map looks, where the page keeps
   // such a thing.
@@ -60,8 +60,9 @@
   palette();
   // What a saved position is drawn at, of the full strength a live marker
   // has, and the ring broken around it.
-  const SAVED_ALPHA = 0.55;
-  const SAVED_DASH = [3, 3];
+  const DIMMED = (icons.states && icons.states.dimmed) || { alpha: 0.55, dash: [3, 3] };
+  const SAVED_ALPHA = DIMMED.alpha;
+  const SAVED_DASH = DIMMED.dash;
   const SAVED_RING = 3;
   // picture -> the same picture faded. The pictures are made once and
   // kept by whoever made them, so each is faded once.
@@ -682,7 +683,7 @@
   for (const kind of Object.keys(KINDS)) choices[kind].onChange(() => place(kind));
   const styledAs = () => {
     const { theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers } = look();
-    return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers].join('|');
+    return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers, icons.composedAs ? icons.composedAs() : ''].join('|');
   };
   let styled = styledAs();
   document.addEventListener('mcmap:settings', (e) => {

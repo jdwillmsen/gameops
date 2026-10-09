@@ -63,6 +63,9 @@
   // The sizes the viewer has chosen: a mob's ring, a head and its backing,
   // and a dot. Asked for when used, since the viewer may change them.
   const sizes = () => (icons.sizes ? icons.sizes() : { mob: icons.MOB_RADIUS, head: 24, headRadius: 15, scale: 1 });
+  // How far outside a marker the ring round the inspected one is drawn,
+  // which is the same for every layer's markers.
+  const SELECTED_GAP = (icons.states && icons.states.selected.gap) || 4;
   // How far past the head the pointer showing a player's heading reaches.
   const POINTER = 11;
   // The side of the card's picture, which is the largest sprite and its
@@ -1007,7 +1010,7 @@
     if (!held) {
       if (savedOnly() && picked.dimension === app.dimension() && Number.isFinite(picked.x) && Number.isFinite(picked.z)) {
         halo.setLatLng([picked.z, picked.x]);
-        halo.setRadius(sizes().mob + 5);
+        halo.setRadius(sizes().mob + SELECTED_GAP + 1);
         halo.setStyle(INSPECTED);
         if (!map.hasLayer(halo)) halo.addTo(map);
         halo.bringToFront();
@@ -1020,7 +1023,7 @@
     // A head is square, and its corners reach past its radius.
     const reach = held.category === 'players' && held.marker.options.sprite ? r * Math.SQRT2 : r;
     halo.setLatLng([held.z, held.x]);
-    halo.setRadius(Math.ceil(reach) + 4);
+    halo.setRadius(Math.ceil(reach) + SELECTED_GAP);
     halo.setStyle(picked.follow ? FOLLOWED : INSPECTED);
     if (!map.hasLayer(halo)) halo.addTo(map);
     halo.bringToFront();
@@ -1467,7 +1470,7 @@
   });
   const styledAs = () => {
     const { theme, size, text, labelMobs, labelPlayers, picturesLive } = look();
-    return [theme, size, text, labelMobs, labelPlayers, picturesLive].join('|');
+    return [theme, size, text, labelMobs, labelPlayers, picturesLive, icons.composedAs ? icons.composedAs() : ''].join('|');
   };
   let styled = styledAs();
   document.addEventListener('mcmap:settings', (e) => {
