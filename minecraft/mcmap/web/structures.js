@@ -105,7 +105,7 @@
   const kindOn = (kind) => !known(kind) || choice.shows(kind);
 
   // A name that is already more than one of its thing is left as it is.
-  const many = (name) => (/(ruins|chambers)$/i.test(name) ? name : names.plural(name));
+  const many = (name) => (/(ruins|chambers|treasure)$/i.test(name) ? name : names.plural(name));
 
   const DETAILS_HINT = 'Click for details';
 
