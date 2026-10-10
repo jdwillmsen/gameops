@@ -44,6 +44,11 @@ type structuresJSON struct {
 	// rule fared against the world's own structures of the kind. Only a
 	// verified kind is among the predictions.
 	Kinds map[structures.Kind]structures.KindCheck `json:"kinds"`
+	// Catalog is every kind the map can show, in whichever dimension, with
+	// where each can be and whether it is off until asked for. It is what
+	// a page lists a dimension's kinds from, and is the same in every
+	// answer.
+	Catalog []structures.Info `json:"catalog"`
 	// Spawn is the world spawn, with the overworld only.
 	Spawn *spawnJSON `json:"spawn,omitempty"`
 }
@@ -65,6 +70,7 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		Predicted:  []structures.Prediction{},
 		Prediction: structures.SeedUnknown,
 		Kinds:      map[structures.Kind]structures.KindCheck{},
+		Catalog:    structures.Catalog,
 	}
 	if survey, ok := s.Structures.Last(); ok {
 		layer := survey.Layers[dimension]

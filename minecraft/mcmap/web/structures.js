@@ -51,14 +51,43 @@
     ['spawn', 'World spawn', 'key spawn'],
   ];
   const UNKNOWN = { letter: '?', color: '#9aa3ad' };
-  // Kinds drawn and searched for only once the viewer has asked.
+  // Kinds drawn and searched for only once the viewer has asked. The
+  // server says which they are; this is the one a server from before it
+  // said so has.
   const OPT_IN = new Set(['stronghold']);
   const ASK = 'Off until you turn it on, and left out of the search: this one is a thing to find for yourself.';
   // Which kinds are shown, which the panel keeps. A panel from before it
   // listed any shows every kind but those that are asked for.
   const choice = app.layers.facet ? app.layers.facet('structures', 'kinds', { off: [...OPT_IN] }) : { shows: (kind) => !OPT_IN.has(kind), onChange() {} };
+
+  // Every kind the server can show, by its id: the dimensions each can be
+  // in, and whether it is off until asked for. Null until an answer has
+  // carried it, and for a server from before it did, whose kinds are the
+  // ones above and are listed in every dimension.
+  let catalog = null;
+  const DIMENSION = /^[a-z_]{1,16}$/;
+  const KIND = /^[a-z0-9_]{1,40}$/;
+  function learn(sent) {
+    if (!Array.isArray(sent)) return;
+    const next = new Map();
+    for (const k of sent.slice(0, 200)) {
+      if (!k || typeof k.kind !== 'string' || !KIND.test(k.kind) || next.has(k.kind)) continue;
+      const dimensions = Array.isArray(k.dimensions) ? k.dimensions.filter((d) => typeof d === 'string' && DIMENSION.test(d)).slice(0, 8) : [];
+      next.set(k.kind, { dimensions, asked: k.asked === true, quiet: k.quiet === true });
+      if (k.asked === true) OPT_IN.add(k.kind);
+    }
+    if (next.size === 0) return;
+    catalog = next;
+    // A kind that is off until asked for is so from before it is listed,
+    // or a mark of it would be on the map until its row was drawn.
+    if (app.layers.facet) app.layers.facet('structures', 'kinds', { off: [...OPT_IN] });
+  }
+  const known = (kind) => Object.hasOwn(KINDS, kind) || (catalog !== null && catalog.has(kind));
+  // The kinds a dimension is listed with, in the server's order: only
+  // those the game can generate there.
+  const kindsIn = (dimension) => (catalog === null ? Object.keys(KINDS) : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));
   // A kind with no item of its own has nothing to be hidden by.
-  const kindOn = (kind) => !Object.hasOwn(KINDS, kind) || choice.shows(kind);
+  const kindOn = (kind) => !known(kind) || choice.shows(kind);
 
   const DETAILS_HINT = 'Click for details';
 
@@ -102,13 +131,15 @@
   // site with none may still hold one. Every other kind is recorded with
   // the chunk, and a finished site without one has none.
   const RECORDED_LATE = new Set(['village']);
+  // The server says which kinds are so, once it has said anything of them.
+  const quiet = (kind) => (catalog !== null && catalog.has(kind) ? catalog.get(kind).quiet : RECORDED_LATE.has(kind));
 
   // What is said under a prediction's name and place.
   function standing(p) {
     if (p.candidate) {
       return ['The seed puts a site here. Whether one is built depends on the biome, and this terrain is not generated yet.'];
     }
-    if (p.generated && RECORDED_LATE.has(p.kind)) {
+    if (p.generated && quiet(p.kind)) {
       return ['This area is generated and its biome suits one, but the game has no record of one here: it keeps one only for a village a player has been near.'];
     }
     if (p.generated) return ['This area is already generated and the world recorded none here.'];
@@ -223,6 +254,7 @@
     surveyed = true;
     fetchedAt = Date.now();
     state = data.prediction || 'unknown';
+    learn(data.catalog);
     const recorded = (data.recorded || []).filter((s) => s && [s.minX, s.maxX, s.minZ, s.maxZ].every(Number.isFinite));
     const predicted = (data.predicted || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.z));
     for (const s of recorded) {
@@ -244,7 +276,7 @@
       const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : 'predicted from the seed'}`;
       const label = tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`, DETAILS_HINT);
       // Struck through only where the world has been asked and said no.
-      const doubted = p.generated && !RECORDED_LATE.has(p.kind);
+      const doubted = p.generated && !quiet(p.kind);
       mark([p.z + 0.5, p.x + 0.5], icon(p.kind, `predicted${p.candidate ? ' candidate' : ''}${doubted ? ' doubted' : ''}`), label, { predicted: p })
         .addTo(groupOf(sort, p.kind));
     }
@@ -265,7 +297,7 @@
     more = { recorded: count(data.recordedMore), predicted: possible > 0 ? 0 : cut, candidate: possible > 0 ? cut : 0 };
     const tally = (list, sort) => {
       for (const s of list) {
-        if (!Object.hasOwn(KINDS, s.kind)) continue;
+        if (!known(s.kind)) continue;
         kinds[s.kind] = kinds[s.kind] || none();
         kinds[s.kind][sort] += 1;
       }
@@ -275,7 +307,7 @@
     tally(predicted.filter((p) => !p.candidate), 'predicted');
     tally(predicted.filter((p) => p.candidate), 'candidate');
     const sent = data.kinds && typeof data.kinds === 'object' ? data.kinds : {};
-    for (const kind of Object.keys(KINDS)) {
+    for (const kind of kindsIn(dimension)) {
       if (Object.hasOwn(sent, kind) && sent[kind] && typeof sent[kind].state === 'string') {
         checks[kind] = sent[kind].state;
         rules[kind] = { agree: count(sent[kind].agree), disagree: count(sent[kind].disagree) };
@@ -349,12 +381,17 @@
 
   // The kinds there are, for the panel: each once, with the game's
   // picture of it, how many the world is known to hold, and beside that
-  // how many more are predicted or possible. A kind that is asked for is
-  // listed whether or not any is known, so that it can be; and a kind held
-  // back from prediction says why.
+  // how many more are predicted or possible. Only the kinds the dimension
+  // on screen can hold are listed, with that dimension's counts: a kind
+  // of another dimension keeps the choice made of it there, and is
+  // neither a row here nor something hidden here. A kind that is asked
+  // for is listed whether or not any is known, so that it can be; and a
+  // kind held back from prediction says why.
   function kindsNow() {
     const items = [];
-    for (const kind of Object.keys(KINDS)) {
+    // Before any answer there is no dimension to list the kinds of.
+    const dimension = shown === null ? app.dimension() : shown;
+    for (const kind of kindsIn(dimension)) {
       const n = kinds[kind] || none();
       const asked = OPT_IN.has(kind);
       const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';
@@ -383,7 +420,12 @@
       const what = sort === 'candidate' && surveyed && state === 'verified' ? WHAT_POSSIBLE : '';
       row.setNote(why || (more[sort] > 0 ? `Showing ${fmt(counts[sort])} of ${fmt(counts[sort] + more[sort])}` : what));
     }
-    if (kindList) kindList.setItems(kindsNow());
+    if (kindList) {
+      kindList.setItems(kindsNow());
+      // The kinds of the other dimensions are not gone for not being
+      // listed here, and a choice made of one is not to be forgotten.
+      if (kindList.setElsewhere && catalog !== null) kindList.setElsewhere([...catalog.keys()]);
+    }
     // Greyed out in a dimension the spawn is not in.
     rows.get('spawn').setAvailable(!surveyed || spawned);
   }
@@ -392,7 +434,9 @@
     if (pending === dimension) return;
     pending = dimension;
     try {
-      const res = await fetch(`api/structures?dimension=${encodeURIComponent(dimension)}`, { cache: 'no-store' });
+      // kinds=all says this page lists what the server tells it to, so
+      // that it may be sent kinds a page from before could not put away.
+      const res = await fetch(`api/structures?dimension=${encodeURIComponent(dimension)}&kinds=all`, { cache: 'no-store' });
       if (pending !== dimension) return; // the view moved on while this was out
       if (res.status === 404) {
         // The service is running without structures.
@@ -1084,6 +1128,9 @@
   app.structures = {
     // Whether the viewer has a kind's known structures on the map.
     shows: (kind) => on('recorded') && kindOn(kind),
+    // The kinds that are off until asked for which the viewer has on, in
+    // whichever dimension: what a search may list of them.
+    asked: () => (on('recorded') ? [...OPT_IN].filter((kind) => choice.shows(kind)) : []),
     show(asked) {
       if (!sheet || !asked || typeof asked.kind !== 'string' || !Number.isFinite(asked.x) || !Number.isFinite(asked.z)) return;
       want({ kind: asked.kind, recorded: asked.recorded === true, x: asked.x, z: asked.z, dimension: asked.dimension, said: true });

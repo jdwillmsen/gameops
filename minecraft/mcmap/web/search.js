@@ -263,8 +263,11 @@
     const c = map.getCenter();
     const address = `api/search?q=${encodeURIComponent(query)}&dimension=${encodeURIComponent(dimension)}`
       + `&x=${Math.floor(c.lng)}&z=${Math.floor(c.lat)}&limit=${LIMIT}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`
-      // Strongholds are listed only for a viewer who has their row on.
-      + (app.structures && app.structures.shows && app.structures.shows('stronghold') ? '&strongholds=1' : '');
+      // A kind that is off until asked for is listed only for a viewer
+      // who has its row on. A server from before there was more than one
+      // such kind is told of the stronghold alone.
+      + (app.structures && app.structures.shows && app.structures.shows('stronghold') ? '&strongholds=1' : '')
+      + (app.structures && app.structures.asked && app.structures.asked().length > 0 ? `&asked=${encodeURIComponent(app.structures.asked().join(','))}` : '');
     const res = await fetch(address, { cache: 'no-store', signal: mine.signal });
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();

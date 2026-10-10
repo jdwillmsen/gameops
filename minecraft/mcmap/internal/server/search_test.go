@@ -644,4 +644,12 @@ func TestSearchListsAStrongholdOnlyWhenAskedTo(t *testing.T) {
 	if len(got.Hits) != 1 || got.Hits[0].Detail != "stronghold" || got.Hits[0].X != 901 {
 		t.Errorf("asked to be shown: %s", describe(got))
 	}
+	// A page that lists the kinds it has on says so of each by name, and
+	// a name that is no kind's shows nothing more.
+	for asked, want := range map[string]int{"stronghold": 1, "village,stronghold": 1, "fortress": 0, "strongholds": 0, "": 0} {
+		got := decodeBody[searchAnswer](t, do(s.Handler(), "GET", "/api/search?q=stronghold&dimension=overworld&x=0&z=0&asked="+asked, "", []*http.Cookie{c}))
+		if len(got.Hits) != want {
+			t.Errorf("asked=%q: %s, want %d", asked, describe(got), want)
+		}
+	}
 }

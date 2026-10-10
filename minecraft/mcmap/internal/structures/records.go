@@ -25,9 +25,6 @@ const (
 	Outpost  Kind = "outpost"
 )
 
-// Kinds in the order they are listed.
-var Kinds = []Kind{Fortress, Monument, Outpost, Village, WitchHut, Stronghold, TrialChamber}
-
 // The server keeps, for each chunk, the boxes inside which a structure's
 // own mobs spawn: record 57 of the chunk, "hardcoded spawn areas". The
 // record is a 32-bit count followed by that many areas, each six 32-bit

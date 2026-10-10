@@ -135,6 +135,8 @@
   // is still a few kilobytes in their browser.
   const LIST_CAP = 40;
   const MAX_HIDDEN = 200;
+  // The most ids a row may say it lists at other times.
+  const MAX_ELSEWHERE = 400;
   const TYPEAHEAD_MS = 600;
   const COLOUR = /^#[0-9a-f]{6}$/i;
 
@@ -352,9 +354,11 @@
   }
 
   // Looks a choice over for ids that are in none of its lists any more.
-  // Asked once a load, a while after its lists have something in them.
+  // Asked once a load, a while after its lists have something in them. An
+  // id a row says is listed somewhere else, as a kind of structure is in
+  // another dimension, has not gone.
   function lookOver(f) {
-    const all = new Set(known(f));
+    const all = new Set([...known(f), ...[...f.rows].flatMap((row) => row.elsewhere)]);
     if (all.size === 0 || plain(f)) return;
     const chosen = f.just !== null ? [...f.just] : [...f.hidden, ...f.shown];
     const gone = new Set(chosen.filter((id) => !all.has(id)));
@@ -541,6 +545,7 @@
       actions: actions && typeof actions === 'object' ? actions : {},
       items: new Map(),
       list: [],
+      elsewhere: [],
       control: null,
       body: null,
       all: false,
@@ -630,6 +635,11 @@
           setTimeout(() => lookOver(f), LOOK_OVER_MS);
         }
         schedule();
+      },
+      // The ids this row lists at other times and not now: a choice made
+      // of one is kept though it is in no list on this page.
+      setElsewhere(ids) {
+        row.elsewhere = Array.isArray(ids) ? ids.filter(text).slice(0, MAX_ELSEWHERE) : [];
       },
       // Whether one of its items is on the map: the row is on and the
       // item is not hidden. Two set lookups.
