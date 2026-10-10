@@ -76,21 +76,27 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 	if survey, ok := s.Structures.Last(); ok {
 		layer := survey.Layers[dimension]
 		out.Surveyed, out.At, out.Prediction = true, &survey.At, survey.Check.State
+		// A page from before the catalog has no row to put a later kind
+		// away with, and would draw every one of them, the ones that are
+		// off until asked for among them. It is sent the kinds it knows,
+		// and those are picked out before the bound is applied, so that a
+		// later kind takes none of the room there is for them.
+		recorded, predicted := layer.Recorded, layer.Predicted
+		every := r.URL.Query().Get("kinds") == "all"
+		if !every {
+			recorded = slices.DeleteFunc(slices.Clone(recorded), func(st structures.Structure) bool { return !firstKinds[st.Kind] })
+			predicted = slices.DeleteFunc(slices.Clone(predicted), func(p structures.Prediction) bool { return !firstKinds[p.Kind] })
+		}
 		// The survey keeps to this bound already. It is applied again
 		// here because this is where a list becomes a response.
-		out.Recorded, out.RecordedMore = clamp(layer.Recorded, layer.RecordedMore)
-		out.Predicted, out.PredictedMore = clamp(layer.Predicted, layer.PredictedMore)
+		out.Recorded, out.RecordedMore = clamp(recorded, layer.RecordedMore)
+		out.Predicted, out.PredictedMore = clamp(predicted, layer.PredictedMore)
 		for _, p := range structures.Predictors {
 			if check, ok := survey.Check.Kinds[structures.Rule{Kind: p.Kind(), Dimension: dimension}]; ok && p.Dimension() == dimension {
 				out.Kinds[p.Kind()] = check
 			}
 		}
-		// A page from before the catalog has no row to put a later kind
-		// away with, and would draw every one of them, the ones that are
-		// off until asked for among them. It is sent the kinds it knows.
-		if r.URL.Query().Get("kinds") != "all" {
-			out.Recorded = slices.DeleteFunc(slices.Clone(out.Recorded), func(st structures.Structure) bool { return !firstKinds[st.Kind] })
-			out.Predicted = slices.DeleteFunc(slices.Clone(out.Predicted), func(p structures.Prediction) bool { return !firstKinds[p.Kind] })
+		if !every {
 			for kind := range out.Kinds {
 				if !firstKinds[kind] {
 					delete(out.Kinds, kind)

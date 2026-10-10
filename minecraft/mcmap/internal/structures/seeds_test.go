@@ -211,6 +211,13 @@ func TestTake_SetsARuleAsideForTheSeedWhoseChunksContradictIt(t *testing.T) {
 	if k.State != SeedVerified || k.Agree != 6 || k.Disagree != 4 || k.SetAside != 1 {
 		t.Fatalf("monuments = %+v, want verified by the newer chunks with the older seed set aside", k)
 	}
+	// What an older game did otherwise says nothing of whether the seeds
+	// are right: the three monuments the newer seed explains are what the
+	// seed is believed by, and the seven of the seed set aside are not
+	// counted for it or against it.
+	if got.Check.State != SeedVerified || got.Check.Agree != 3 || got.Check.Disagree != 0 {
+		t.Errorf("the seeds are %s by %d agreeing and %d not, want verified by the three the seed set aside has no part in", got.Check.State, got.Check.Agree, got.Check.Disagree)
+	}
 	candidates := 0
 	for _, p := range got.Layers[chunks.Overworld].Predicted {
 		if siteOf(p) == bare {

@@ -344,6 +344,24 @@ func TestStructuresKeepLaterKindsFromAPageThatCannotPutThemAway(t *testing.T) {
 	if len(all.Recorded) != 5 || len(all.Predicted) != 2 || all.Kinds[structures.Igloo].Agree != 8 || !strings.Contains(body, `"variant":"taiga"`) {
 		t.Errorf("a page that asked for every kind was sent %s", body)
 	}
+	// The kinds it knows are picked out before the bound is applied: later
+	// kinds that fill the layer take none of the room there is for them.
+	crowded := source.survey.Layers[chunks.Overworld]
+	crowded.Recorded, crowded.Predicted = nil, nil
+	for i := range int32(structures.MaxPerLayer) {
+		crowded.Recorded = append(crowded.Recorded, structures.Structure{Kind: structures.BuriedTreasure, Box: structures.Box{MinX: i, MaxX: i}, Evidence: 1})
+		crowded.Predicted = append(crowded.Predicted, structures.Prediction{Kind: structures.TrialChamber, X: i})
+	}
+	crowded.Recorded = append(crowded.Recorded, structures.Structure{Kind: structures.Monument, Box: structures.Box{MinX: 4000, MinY: 39, MinZ: 6000, MaxX: 4047, MaxY: 61, MaxZ: 6047}, Areas: 15})
+	crowded.Predicted = append(crowded.Predicted, structures.Prediction{Kind: structures.Monument, X: 7000, Z: 80, Candidate: true})
+	source.survey.Layers[chunks.Overworld] = crowded
+	// A trial chamber is a kind the older page knows, so its sites stand
+	// and the one past the bound is counted.
+	if old, _ := structuresOf(t, s, "/api/structures?dimension=overworld"); len(old.Recorded) != 1 || old.Recorded[0].Kind != structures.Monument || old.RecordedMore != 0 ||
+		len(old.Predicted) != structures.MaxPerLayer || old.PredictedMore != 1 {
+		t.Errorf("behind a full layer of later kinds, an older page was sent %d known (+%d) and %d sites (+%d)", len(old.Recorded), old.RecordedMore, len(old.Predicted), old.PredictedMore)
+	}
+	source.survey.Layers[chunks.Overworld] = layer
 	// And its details are there for the page that lists it.
 	if rec := do(s.Handler(), "GET", "/api/structures/detail?dimension=overworld&kind=igloo&x=99&z=163", "", nil); rec.Code != http.StatusOK {
 		t.Errorf("the igloo's details = %d", rec.Code)
