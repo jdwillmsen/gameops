@@ -49,6 +49,12 @@ var Catalog = []Info{
 	info(Igloo, false, true, chunks.Overworld),
 	info(TrailRuins, false, false, chunks.Overworld),
 	info(AbandonedCamp, false, false, chunks.Overworld),
+	info(RuinedPortal, false, true, chunks.Overworld, chunks.Nether),
+	info(Bastion, false, true, chunks.Nether),
+	// An end city is where the elytra are, and is gone looking for.
+	info(EndCity, true, true, chunks.End),
+	info(EndGateway, false, false, chunks.End),
+	info(ExitPortal, false, false, chunks.End),
 }
 
 // Kinds in the order they are listed.

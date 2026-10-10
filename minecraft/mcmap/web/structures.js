@@ -551,6 +551,7 @@
     recorded: 'Recorded: the world’s own save says this structure is here, and this is the box it occupies.',
     found: 'Found: the world keeps no record of this kind, but its save holds blocks only this kind is generated with. The box is the box around those blocks; the structure itself reaches further.',
     partial: 'Partly generated, most likely: it was found by fewer blocks than a finished one ever is, so the rest of it is in chunks the world has not generated yet.',
+    fades: 'It is known by what nobody has yet opened or taken. Once the last of that is gone the map no longer finds it, though it stands where it stood.',
     predicted: 'Predicted: worked out from the world’s seed, not read from the world. Nothing has recorded one here.',
     candidate: 'Possible site: the seed puts a site here, in terrain nobody has generated. The biome there will decide whether anything is built.',
   };
@@ -675,6 +676,7 @@
     view.title.textContent = names.structure(kind);
     const lines = [s && found(s) ? WHAT.found : WHAT[sort]];
     if (s && found(s) && s.partial === true) lines.push(WHAT.partial);
+    if (s && found(s) && quiet(kind)) lines.push(WHAT.fades);
     if (p) {
       lines.push(...standing(p));
       const rule = rules[kind];
@@ -713,7 +715,7 @@
         typeof s.variant === 'string' && KIND.test(s.variant) ? ['Built for', names.tidy(s.variant)] : null,
       ]));
     } else if (s && found(s)) {
-      out.push(...facts('What it was found by', [['Blocks', `${fmt(s.evidence)} ${FOUND_BY[kind] || 'blocks only this kind has'}`]]));
+      out.push(...facts('What it was found by', [['Found by', `${fmt(s.evidence)} ${Object.hasOwn(FOUND_BY, kind) ? FOUND_BY[kind] : 'blocks only this kind has'}`]]));
     }
     if (s) {
       // What the save holds in it is asked for, and is put here when it
@@ -762,7 +764,16 @@
   // value is checked for what it should be and set as text: a name tag is a
   // player's, and a count from a damaged world is whatever it says.
 
-  const FOUND_BY = { trial_chamber: 'trial spawners and vaults', stronghold: 'of its portal room: the silverfish spawner, or the end portal once lit' };
+  const FOUND_BY = {
+    trial_chamber: 'trial spawners and vaults',
+    stronghold: 'of its portal room: the silverfish spawner, or the end portal once lit',
+    end_city: 'in all: chests nobody has opened, shulkers, and the dragon head and framed elytra of its ship',
+    bastion: 'in all: chests nobody has opened, and the magma cube spawner of a treasure room',
+    ruined_portal: 'in all: chests nobody has opened',
+    end_gateway: 'gateway blocks, which nothing breaks',
+    exit_portal: 'portal blocks',
+  };
+  const BASTIONS = { treasure: 'Treasure room', stables: 'Hoglin stables', bridge: 'Bridge' };
   const LEVELS = ['novice', 'apprentice', 'journeyman', 'expert', 'master'];
   // The block that gives each profession, which is what a job site of it
   // is. The village's record names the profession.
@@ -904,6 +915,28 @@
           ['Vaults', `${fmt(block('vault'))}, and ${fmt(block('ominous_vault'))} ominous`],
         ]);
       }
+      case 'end_city': {
+        const head = block('dragon_head') > 0;
+        const elytra = block('elytra') > 0;
+        const ship = head && elytra ? 'Found: its dragon head and the elytra in their frame are in the save'
+          : head ? 'Found by its dragon head. The elytra are not in a frame in the save'
+            : elytra ? 'Found by the elytra in their frame' : 'No sign of one in the save. A city with no ship has none, and so has one whose head and elytra are taken';
+        return facts('Its shulkers and its ship', [['Shulkers', saved(of('shulker'))], ['Ship', ship]]);
+      }
+      case 'bastion': {
+        const sort = text(d.bastion);
+        return facts('Its piglins', [
+          ['Which bastion', Object.hasOwn(BASTIONS, sort) ? BASTIONS[sort] : 'Not said by what is left: housing units, or one whose telling chests are opened'],
+          ['Piglin brutes', saved(of('piglin_brute'))],
+          ['Piglins', saved(of('piglin'))],
+          ['Hoglins', saved(of('hoglin'))],
+          ['Magma cube spawner', spawning('magma_cube', false) > 0 ? 'In the save: the treasure room’s' : NONE_SAVED],
+        ]);
+      }
+      case 'exit_portal': {
+        const portal = block('end_portal');
+        return facts('Its portal', [['Portal', portal >= 20 ? 'Lit: the dragon has been killed' : `${some(portal, 'portal block', 'portal blocks')} in the save`]]);
+      }
       default:
         return [];
     }
@@ -974,6 +1007,7 @@
       places.length > 0 ? ['Where they are', tally(places, true)] : null,
       ['Containers', containers.length > 0 ? tally(containers, true) : none],
       blocks('unbroken_pot') > 0 ? ['Decorated pots', `${fmt(blocks('unbroken_pot'))} unbroken, as the world generated ${blocks('unbroken_pot') === 1 ? 'it' : 'them'}`] : null,
+      blocks('unbrushed') > 0 ? ['Suspicious sand and gravel', `${fmt(blocks('unbrushed'))} not yet brushed`] : null,
       blocks('dispenser') > 0 ? ['Dispensers', fmt(blocks('dispenser'))] : null,
       blocks('dropper') > 0 ? ['Droppers', fmt(blocks('dropper'))] : null,
     ]));

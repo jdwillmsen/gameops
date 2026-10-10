@@ -66,6 +66,13 @@ const (
 	blockCauldron
 	blockBell
 	blockPortal
+	// Suspicious sand or gravel nobody has brushed, a dragon's head, an
+	// item frame holding elytra, and an end gateway: each says something
+	// of the structure it is in and is kept for nothing else.
+	blockBrushable
+	blockDragonHead
+	blockElytra
+	blockGateway
 )
 
 // The block entity ids kept, by what they are kept as.
@@ -74,7 +81,73 @@ var blockSorts = map[string]blockSort{
 	"Dispenser": blockDispenser, "Dropper": blockDropper, "DecoratedPot": blockPot,
 	"MobSpawner": blockSpawner, "TrialSpawner": blockTrialSpawner, "Vault": blockVault,
 	"Cauldron": blockCauldron, "Bell": blockBell, "EndPortal": blockPortal,
+	"BrushableBlock": blockBrushable, "Skull": blockDragonHead, "ItemFrame": blockElytra, "GlowItemFrame": blockElytra,
+	"EndGateway": blockGateway,
 }
+
+// origin is the kind of structure a block was generated as part of, where
+// its loot table says. The game names a structure's loot after it, and
+// drops the name the first time the chest is opened or the sand brushed,
+// so a block that still carries one is where the generator put it and has
+// not been touched.
+type origin uint8
+
+const (
+	originEndCity origin = iota + 1
+	originBastion
+	originBastionTreasure
+	originBastionStables
+	originBastionBridge
+	originRuinedPortal
+	originShipwreck
+	originOceanRuins
+	originBuriedTreasure
+	originAncientCity
+	originMansion
+	originDesertPyramid
+	originJungleTemple
+	originIgloo
+	originTrailRuins
+)
+
+// lootOrigins is the part of a loot table's path that names each origin.
+// The first that is found in a path is the block's, so a bastion's
+// treasure room is asked about before a bastion.
+var lootOrigins = []struct {
+	part []byte
+	of   origin
+}{
+	{[]byte("chests/end_city"), originEndCity},
+	{[]byte("chests/bastion_treasure"), originBastionTreasure},
+	{[]byte("chests/bastion_hoglin_stable"), originBastionStables},
+	{[]byte("chests/bastion_bridge"), originBastionBridge},
+	{[]byte("chests/bastion_"), originBastion},
+	{[]byte("chests/ruined_portal"), originRuinedPortal},
+	{[]byte("chests/shipwreck"), originShipwreck},
+	{[]byte("chests/underwater_ruin"), originOceanRuins},
+	{[]byte("ocean_ruins_brushable"), originOceanRuins},
+	{[]byte("chests/buriedtreasure"), originBuriedTreasure},
+	{[]byte("chests/ancient_city"), originAncientCity},
+	{[]byte("chests/woodland_mansion"), originMansion},
+	{[]byte("chests/desert_pyramid"), originDesertPyramid},
+	{[]byte("desert_pyramid_brushable"), originDesertPyramid},
+	{[]byte("chests/jungle_temple"), originJungleTemple},
+	{[]byte("chests/dispenser_trap"), originJungleTemple},
+	{[]byte("chests/igloo_chest"), originIgloo},
+	{[]byte("trail_ruins_brushable"), originTrailRuins},
+}
+
+func originOf(loot []byte) origin {
+	for _, o := range lootOrigins {
+		if bytes.Contains(loot, o.part) {
+			return o.of
+		}
+	}
+	return 0
+}
+
+// dragonHead is the game's number for a dragon's head among its skulls.
+const dragonHead = 5
 
 // containerKinds is the containers a player opens, by what each is called
 // in an answer and in the order they are listed. A dispenser, a dropper and
@@ -114,6 +187,9 @@ type savedBlock struct {
 	sort    blockSort
 	// state is a container's holds value, and for a vault 1 if ominous.
 	state uint8
+	// origin is the structure the block's loot table names, if it still
+	// carries one.
+	origin origin
 	// mob indexes the type a spawner spawns.
 	mob uint16
 	// paired is set on half of a large chest, with where the other half is.
@@ -342,7 +418,8 @@ func (c *contents) blockEntities(pos chunks.Pos, v []byte) {
 			id, mob, loot             []byte
 			hasX, hasY, hasZ, hasLoot bool
 			hasPairX, hasPairZ        bool
-			items                     int64
+			items, skull              int64
+			elytra                    bool
 		)
 		rest, err := fieldsAt(v, func(field []byte, tag byte, payload []byte) {
 			switch string(field) {
@@ -366,6 +443,18 @@ func (c *contents) blockEntities(pos chunks.Pos, v []byte) {
 				loot, hasLoot = bytesOf(tag, payload)
 			case "EntityIdentifier":
 				mob, _ = bytesOf(tag, payload)
+			case "SkullType":
+				skull, _ = wholeOf(tag, payload)
+			case "Item":
+				// What an item frame holds.
+				if tag == tagCompound {
+					_ = eachField(payload, func(field []byte, tag byte, payload []byte) error {
+						if name, ok := bytesOf(tag, payload); ok && string(field) == "Name" {
+							elytra = string(name) == "minecraft:elytra"
+						}
+						return nil
+					})
+				}
 			case "spawn_data":
 				// A trial spawner's mob, one level down.
 				if tag == tagCompound {
@@ -406,7 +495,22 @@ func (c *contents) blockEntities(pos chunks.Pos, v []byte) {
 			continue
 		}
 		b.sort = sort
+		b.origin = originOf(loot)
 		switch sort {
+		case blockBrushable:
+			// One that has been brushed, or that a player made, says
+			// nothing of any structure.
+			if b.origin == 0 {
+				continue
+			}
+		case blockDragonHead:
+			if skull != dragonHead {
+				continue
+			}
+		case blockElytra:
+			if !elytra {
+				continue
+			}
 		case blockPot:
 			// A pot the generator placed carries a loot table until it is
 			// broken. One without is a player's, or shards put back.

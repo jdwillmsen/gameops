@@ -139,6 +139,11 @@ var structureNames = map[structures.Kind]string{
 	structures.Igloo:         "Igloo",
 	structures.TrailRuins:    "Trail Ruins",
 	structures.AbandonedCamp: "Abandoned Camp",
+	structures.RuinedPortal:  "Ruined Portal",
+	structures.Bastion:       "Bastion Remnant",
+	structures.EndCity:       "End City",
+	structures.EndGateway:    "End Gateway",
+	structures.ExitPortal:    "Exit Portal",
 }
 
 // displayNames is the names the page shows, so that a search finds a thing

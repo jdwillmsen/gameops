@@ -8,13 +8,19 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
 
-// Two kinds have no record of their own and are found all the same, with
-// no seed, by block entities only they are generated with and that nobody
-// in a survival world can pick up and put somewhere else:
+// Most kinds have no record of their own and are found all the same, with
+// no seed, by what only they are generated with:
 //
-//   - a trial chamber, by its trial spawners and vaults;
-//   - a stronghold, by the silverfish spawner of its portal room, or the
-//     blocks of its end portal once that is lit.
+//   - a trial chamber, by its trial spawners and vaults, and a stronghold,
+//     by the silverfish spawner of its portal room or the blocks of its end
+//     portal once that is lit: blocks nobody in a survival world can pick
+//     up and put somewhere else;
+//   - an end gateway and the End's exit portal, by blocks nothing breaks;
+//   - an end city, a bastion and a ruined portal, by the chests, barrels
+//     and suspicious blocks that still carry the loot table the generator
+//     gave them. The game drops the table the first time one is opened or
+//     brushed, so a block that has one has not been touched, and one of
+//     these kinds is found for as long as one such block is left in it.
 //
 // What is found is where those blocks are. The box is the box around them,
 // which is less than the structure: a chamber's corridors run on past its
@@ -22,6 +28,11 @@ import (
 const (
 	Stronghold   Kind = "stronghold"
 	TrialChamber Kind = "trial_chamber"
+	EndCity      Kind = "end_city"
+	EndGateway   Kind = "end_gateway"
+	ExitPortal   Kind = "exit_portal"
+	Bastion      Kind = "bastion"
+	RuinedPortal Kind = "ruined_portal"
 )
 
 // maxLocatedSpan is the widest box a located structure is drawn with: one
@@ -57,6 +68,7 @@ const (
 // located is how one kind is found.
 type located struct {
 	kind Kind
+	in   chunks.Dimension
 	// grid, if set, is the side in chunks of the squares that each hold
 	// one structure of the kind, and back how far they are moved back.
 	// Chunks holding the kind's blocks are then one structure where they
@@ -69,29 +81,82 @@ type located struct {
 	// whole is the least evidence a finished structure of the kind is
 	// found by, where that is known; one found by less is Partial.
 	whole int
-	is    func(b savedBlock, mob string) bool
+	// surround is how far past the box round what it was found by a
+	// structure's contents are counted, in blocks each way and half as far
+	// up and down.
+	surround int32
+	is       func(b savedBlock, mob string) bool
+	// mob, if set, is a mob the kind is also found by: one that is
+	// generated with it, does not despawn and does not wander.
+	mob string
 }
 
+func from(origins ...origin) func(savedBlock, string) bool {
+	return func(b savedBlock, _ string) bool { return slices.Contains(origins, b.origin) }
+}
+
+// An end city's sites are a grid like a chamber's: squares of cityGrid
+// chunks, a city starting in the first nine of its square and reaching no
+// more than six chunks back from its start and five on. Every chest,
+// shulker, head and frame of the FWB world's 21 cities is in the square of
+// its own city, with the squares moved cityReach back; moved a chunk less
+// or two more, one city is found as two.
+const (
+	cityGrid  = 20
+	cityReach = 6
+)
+
 var locatedKinds = []located{
-	{kind: Stronghold, join: 1, is: func(b savedBlock, mob string) bool {
+	{kind: Stronghold, in: chunks.Overworld, join: 1, is: func(b savedBlock, mob string) bool {
 		return b.sort == blockPortal || (b.sort == blockSpawner && mob == "silverfish")
 	}},
-	{kind: TrialChamber, grid: chamberGrid, back: chamberReach, whole: wholeChamber, is: func(b savedBlock, _ string) bool {
+	{kind: TrialChamber, in: chunks.Overworld, grid: chamberGrid, back: chamberReach, whole: wholeChamber, surround: chamberSurround, is: func(b savedBlock, _ string) bool {
 		return b.sort == blockTrialSpawner || b.sort == blockVault
 	}},
+	// A shulker is a mob, and one carried off and kept elsewhere in the End
+	// would read as a city found in part. It is counted because a city
+	// whose chests are all opened is otherwise not found at all, and its
+	// shulkers are what is left to go there for.
+	{kind: EndCity, in: chunks.End, grid: cityGrid, back: cityReach, surround: 32, mob: "shulker", is: func(b savedBlock, _ string) bool {
+		return b.origin == originEndCity || b.sort == blockDragonHead || b.sort == blockElytra
+	}},
+	{kind: EndGateway, in: chunks.End, is: func(b savedBlock, _ string) bool { return b.sort == blockGateway }},
+	// The End's own portal blocks are the fountain every End has.
+	{kind: ExitPortal, in: chunks.End, join: 1, is: func(b savedBlock, _ string) bool { return b.sort == blockPortal }},
+	// A bastion's neighbours are never nearer than four chunks, and its
+	// chests are all over it.
+	{kind: Bastion, in: chunks.Nether, join: 3, surround: 32, is: func(b savedBlock, mob string) bool {
+		return slices.Contains([]origin{originBastion, originBastionTreasure, originBastionStables, originBastionBridge}, b.origin) ||
+			(b.sort == blockSpawner && mob == "magma_cube")
+	}},
+	{kind: RuinedPortal, in: chunks.Overworld, surround: 8, is: from(originRuinedPortal)},
+	{kind: RuinedPortal, in: chunks.Nether, surround: 8, is: from(originRuinedPortal)},
+}
+
+// surroundOf is how far past the blocks a kind was found by its contents
+// are counted.
+func surroundOf(kind Kind) int32 {
+	for _, k := range locatedKinds {
+		if k.kind == kind {
+			return k.surround
+		}
+	}
+	return 0
 }
 
 // locateCheck is how many blocks or chunks are gone through between looks
 // at whether there is still time.
 const locateCheck = 8192
 
-// locate finds the structures of the located kinds. Both are the
-// overworld's: the End has portal blocks of its own, in the fountain every
-// End has. The work is a few map lookups for each block the world holds,
-// and it stops when ctx does.
-func (c *contents) locate(ctx context.Context) ([]Structure, error) {
+// locate finds the structures of the located kinds in one dimension. The
+// work is a few map lookups for each block the dimension holds, and it
+// stops when ctx does.
+func (c *contents) locate(ctx context.Context, d chunks.Dimension) ([]Structure, error) {
 	var out []Structure
 	for _, k := range locatedKinds {
+		if k.in != d {
+			continue
+		}
 		// The blocks are joined by the chunk they are in, so that the work
 		// is a few lookups a chunk however many blocks one chunk holds.
 		type found struct {
@@ -100,21 +165,33 @@ func (c *contents) locate(ctx context.Context) ([]Structure, error) {
 		}
 		byChunk := map[uint64]*found{}
 		var order []uint64
-		for i, b := range c.blocks[chunks.Overworld] {
-			if i%locateCheck == 0 && ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			if !k.is(b, c.types.names[b.mob]) {
-				continue
-			}
-			key, at := chunkKey(b.x>>4, b.z>>4), Box{b.x, b.y, b.z, b.x, b.y, b.z}
+		hold := func(x, y, z int32) {
+			key, at := chunkKey(x>>4, z>>4), Box{x, y, z, x, y, z}
 			f, seen := byChunk[key]
 			if !seen {
 				byChunk[key] = &found{at, 1}
 				order = append(order, key)
-				continue
+				return
 			}
 			f.box, f.n = f.box.union(at), f.n+1
+		}
+		for i, b := range c.blocks[d] {
+			if i%locateCheck == 0 && ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if k.is(b, c.types.names[b.mob]) {
+				hold(b.x, b.y, b.z)
+			}
+		}
+		if k.mob != "" {
+			for i, m := range c.mobs[d] {
+				if i%locateCheck == 0 && ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				if c.types.names[m.kind] == k.mob {
+					hold(m.x, m.y, m.z)
+				}
+			}
 		}
 		// root is the structure a chunk's blocks are part of: the square
 		// it is in, or the chunks it has been joined to.
