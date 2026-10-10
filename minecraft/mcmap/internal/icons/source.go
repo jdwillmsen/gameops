@@ -82,6 +82,12 @@ type Source struct {
 	// over does not spend the listing's ration. Empty keeps no such
 	// record, and nothing is held back.
 	State string
+
+	// listed is the last listing this run was given, and listedAt the pin
+	// it was of.
+	mu       sync.Mutex
+	listed   listing
+	listedAt string
 }
 
 // NewClient is the client the samples are fetched with. Neither host
@@ -591,6 +597,16 @@ var errListingTooLong = errors.New("the listing of the samples is too long to co
 func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
 	gate := s.readGate()
 	if wait := time.Until(gate.Next); wait > 0 {
+		// The listing this run was already given costs no request to use
+		// again: a fetch that got it and then failed on a file is tried
+		// again in a minute with it, and not held up for the listing's
+		// sake. A restart has none, and waits.
+		s.mu.Lock()
+		held, ref := s.listed, s.listedAt
+		s.mu.Unlock()
+		if ref == s.Ref && len(held.definitions) > 0 {
+			return held, nil
+		}
 		return listing{}, fmt.Errorf("the listing was asked for a short while ago and is not asked for again for %s", wait.Round(time.Second))
 	}
 	var (
@@ -609,6 +625,11 @@ func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
 		}
 	}
 	s.writeGate(gate.after(time.Now(), headers, err))
+	if err == nil {
+		s.mu.Lock()
+		s.listed, s.listedAt = out, s.Ref
+		s.mu.Unlock()
+	}
 	return out, err
 }
 

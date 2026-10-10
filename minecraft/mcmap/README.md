@@ -717,8 +717,10 @@ hour:
 - **Each asking is written to the volume** (`DATA_DIR/icons/listing.json`)
   with when the next may be made: ten minutes after an answer; after a
   failure one minute, then doubling to an hour, or when the host's own
-  `X-RateLimit-Reset` or `Retry-After` says, up to two hours. A start
-  that comes before then does not ask, so a service restarting every few
+  `X-RateLimit-Reset` or `Retry-After` says, up to two hours. A fetch
+  that was given its listing and then failed on a file uses that listing
+  again when it is retried a minute later, at no request. A start
+  that comes before then has none and does not ask, so a service restarting every few
   seconds makes at most 7 listing requests in an hour, where it could
   have made one at every start.
 
