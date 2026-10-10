@@ -422,7 +422,9 @@ not drawing) is at 55% in a broken ring. That last is laid over whatever
 the style draws, so a saved mark is told from a live one in all three.
 
 A sprite is composed once per picture, colour and shape at the screen's
-density and kept until the theme, style, size or mob picture changes;
+density and kept until the theme, style, size or mob picture changes, or
+the screen's density does (a window moved to another screen, a page
+zoomed), when the canvas is told and everything is composed again;
 drawing a marker is one `drawImage`. With 900 mobs and 2,100 markers in
 view at 1300 by 800 in headless Chromium, panning held 16.7 ms frames in
 every style, with one repaint a median 2.6 ms as dots and 3.7 ms as
@@ -662,15 +664,63 @@ structure's sheet does say each villager's profession, so those 14 are
 made. A baby is its grown face drawn smaller.
 
 **Everything read is held to bounds before it is used.** A model file is
-at most 256 KB and 24 levels deep, a model 512 bones and 4,096 boxes, and
-every number in it within 1,024 of nought; a controller's expression at
-most 1,024 characters and 24 levels; a texture at most 512 KB and 1,024
-pixels a side, checked from its header before a pixel is decoded, and a
-whole multiple, at most 4, of the size its model says; a rectangle that
-does not lie inside its texture is refused. There are at most 600 model
-files, 600 controller files and 600 textures to a fetch, and 40 MB in
-all. One mob's model or texture being wrong costs that mob its face and
-nothing else.
+at most 256 KB and 24 levels deep, a model 512 bones and 1,024 boxes, and
+every number in it within 1,024 of nought. A definition is drawn by its
+first 16 render controllers, and a face is at most 64 layers, counted as
+they are gathered. A texture is at most 512 KB and 512 pixels a side,
+checked from its header before a pixel is decoded, and a whole multiple,
+at most 4, of the size its model says; a rectangle that does not lie
+inside its texture is refused. There are at most 600 model files, 600
+controller files and 600 textures to a fetch, and 40 MB in all.
+
+A render controller's expressions are a small language, and an expression
+can name an array whose entries are expressions that name arrays. So the
+reading of them is counted: an expression is at most 1,024 characters,
+24 levels and 4,000 steps, a file 64 controllers of 64 arrays and
+200,000 steps in all, and each entry of an array is worked out once
+however often it is named. A file that runs past any of these is given
+up on, its mobs fall back to what their definitions call default, and it
+is not read again. Without the count a controller file of 4 KB took 15
+seconds to read and one of 6 KB would have taken days; with it each takes
+under a millisecond.
+
+Textures are decoded one picture at a time and let go once those held
+come to a million pixels, and a fetch decodes at most 32 million in all,
+so what is held is a few megabytes however many textures the pin has.
+One real fetch at the default pin holds 14.5 MB of heap at its most.
+
+One mob's model or texture being wrong costs that mob its face and
+nothing else, and that holds for a fault in this service's own reading of
+them too: one is caught, counted in `mcmap_icons_faults_total` and logged
+in a single line saying which picture it cost. A fault in the making as a
+whole leaves every made picture unmade, the icons and the rest as they
+were, and is not tried again until the pin changes.
+
+**The listing, and what happens when it cannot be had.** Everything
+starts from a listing, and the host rations those by address, sixty an
+hour:
+
+- The whole of `resource_pack` is asked for in one request, with two
+  minutes to arrive where a file has fifteen seconds. GitHub's
+  [documentation](https://docs.github.com/en/rest/git/trees) cuts such a
+  tree short at 100,000 entries or 7 MB; at the default pin it is 18,714
+  entries and 5.5 MB, so there is room for five times the files but only
+  a quarter more bytes.
+- **If a later pin's tree is cut short**, the entity definitions alone
+  are listed, as they were before any picture was made from a model
+  (that listing is one directory, 180 files of the 1,000 it allows). The
+  spawn eggs, the names, the pictures served as they come, the blocks and
+  the structures' items are fetched as ever. Only the faces go without:
+  every mob is its egg, the log says once `mob faces are not made at this
+  pin`, with why, and nothing is asked for again on that account. The
+  page works as it does with **Mob picture** set to spawn eggs.
+- **Each asking is written to the volume** (`DATA_DIR/icons/listing.json`)
+  with when the next may be made: ten minutes after an answer; after a
+  failure one minute, then doubling to an hour, or when the host's own
+  `X-RateLimit-Reset` or `Retry-After` says, up to two hours. A start
+  that comes before then does not ask, so a service restarting every few
+  seconds makes at most 7 listing requests in an hour, where it could
+  have made one at every start.
 
 **Each is kept with its recipe**: which rectangles of which textures go
 where. The recipes are in the index on the volume, so a picture whose
@@ -700,6 +750,20 @@ any picture was made, or under another revision of the making
 (`icons.ArtRevision`, raised when the same samples would give different
 pictures), keeps serving everything it holds, a structure's old item
 included, while the made pictures are made and put beside or over them.
+
+**Rolling back to the release before made pictures.** The index on the
+volume has the same format, with fields that release does not read. It
+reads an index of up to 200 pictures; at the default pin there are 173,
+so it takes the volume as it is, serves every picture in it (a structure
+keeps the face it was given; the faces and blocks are simply never asked
+for by its page) and fetches nothing. At a pin with more than 200 it
+would refuse the index, fetch its own smaller set over it, and a later
+roll forward would find no made pictures and make them again, serving
+what is there meanwhile. Neither direction loses a picture that the
+running release draws. A set over the limits this release reads back
+(800 pictures, 600 recipes) is never written, since it would be refused
+and fetched again at every start; it is served from memory and said in
+the log.
 
 #### Where the pictures come from, and what is done with them
 
@@ -2649,6 +2713,7 @@ opens at the same place.
 | `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume, or that `ICONS_ENABLED=false` |
 | `mcmap_icons_marker_pictures` | Marker, structure, face and block pictures held, 173 when whole at the default pin. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
 | `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
+| `mcmap_icons_faults_total` | Faults caught while making a picture from the samples' models. Each cost one picture, or all the made ones, and is one line in the log; none stopped the map |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |
 | `mcmap_structures_recorded{dimension,kind}`, `mcmap_structures_predicted{dimension,kind,certainty}` | Structures on each layer at the last survey; `certainty` is `predicted`, or `candidate` for a site in terrain not generated yet |
 | `mcmap_structures_seed_verified` | 1 while recorded structures are where the seed puts them. 0 means nothing is being predicted |

@@ -20,7 +20,7 @@ const (
 	maxModels      = 2000
 	maxModelBones  = 512
 	maxBoneCubes   = 256
-	maxModelCubes  = 4096
+	maxModelCubes  = 1024
 	maxJSONDepth   = 24
 	maxInheritance = 8
 	// maxModelUnit is the furthest from the origin, and the largest, a box

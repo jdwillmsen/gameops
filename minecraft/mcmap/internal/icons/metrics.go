@@ -28,6 +28,10 @@ var (
 		Name: "mcmap_icons_names",
 		Help: "Display names read from the language file. Zero means every name served is a tidied id, or that icons are off and none is served.",
 	})
+	metricFaults = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_icons_faults_total",
+		Help: "Faults caught while making a picture from the samples' models. Each cost one picture, or all the made ones, and is in the log; none stopped the map.",
+	})
 	metricHeads = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_icons_player_heads",
 		Help: "Online players the agent has reported a head for.",

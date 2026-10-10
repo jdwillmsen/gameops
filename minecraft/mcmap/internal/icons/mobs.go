@@ -12,12 +12,18 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
 	indexFile = "index.json"
+	// ListingState is the file, beside the pins' directories, that the
+	// source keeps its record of the last listing in.
+	ListingState = "listing.json"
 	// indexFormat is raised when a fetch starts reading something more, so
 	// that a volume filled by a version that read less is fetched again
 	// and not taken as complete.
@@ -132,10 +138,14 @@ func (m *Mobs) Run(ctx context.Context) {
 	}
 	wait, ceiling := m.retries()
 	for {
-		set, err := m.Fetch(ctx)
+		set, err := m.fetch(ctx)
 		if err == nil {
 			metricFetches.WithLabelValues(resultOK).Inc()
 			m.keep(set)
+			if why := set.Rejected[artPlan]; why != "" {
+				// Said once: nothing will change it but another pin.
+				m.Logger.Warn("mob faces are not made at this pin; mobs are drawn as their spawn eggs", "ref", m.Ref, "why", why)
+			}
 			m.Logger.Info("mob icons fetched", "ref", m.Ref, "types", len(set.Mobs), "pictures", len(set.Pictures), "names", len(set.Lang), "not_made", len(set.Rejected), "missing", set.Missing)
 			again := m.refillEvery()
 			if len(set.Unreached) > 0 {
@@ -176,8 +186,39 @@ func (m *Mobs) refillEvery() time.Duration {
 	return m.RefillEvery
 }
 
+// fetch and fill are Fetch and Fill with a fault in either taken as its
+// failing: what is held goes on being served, and it is tried again as
+// anything else that failed is.
+func (m *Mobs) fetch(ctx context.Context) (set Set, err error) {
+	defer func() {
+		if fault := recover(); fault != nil {
+			metricFaults.Inc()
+			set, err = Set{}, fmt.Errorf("the fetch stopped on a fault: %s", tidyReason(fmt.Sprint(fault)))
+		}
+	}()
+	return m.Fetch(ctx)
+}
+
+func (m *Mobs) fill(ctx context.Context, held Set) (set Set, err error) {
+	defer func() {
+		if fault := recover(); fault != nil {
+			metricFaults.Inc()
+			m.Logger.Error("asking for what the mob icons are missing stopped on a fault; what is held is still served", "fault", tidyReason(fmt.Sprint(fault)))
+			set, err = Set{}, errors.New("a fault")
+		}
+	}()
+	return m.Fill(ctx, held.Missing, held.Recipes)
+}
+
 // keep serves a set and writes it to the volume.
 func (m *Mobs) keep(set Set) {
+	if len(set.Rejected) > 0 {
+		tidied := make(map[string]string, len(set.Rejected))
+		for _, key := range slices.Sorted(maps.Keys(set.Rejected))[:min(len(set.Rejected), maxRecipes)] {
+			tidied[key] = tidyReason(set.Rejected[key])
+		}
+		set.Rejected = tidied
+	}
 	if err := m.store(set); err != nil {
 		// Still served from memory; the next start fetches again.
 		m.Logger.Warn("mob icons not kept on the volume", "error", err.Error())
@@ -207,7 +248,7 @@ func (m *Mobs) refill(ctx context.Context, set Set, wait time.Duration) {
 			return
 		case <-time.After(wait):
 		}
-		got, err := m.Fill(ctx, set.Missing, set.Recipes)
+		got, err := m.fill(ctx, set)
 		if ctx.Err() != nil {
 			return
 		}
@@ -256,6 +297,24 @@ func (m *Mobs) refill(ctx context.Context, set Set, wait time.Duration) {
 		}
 		wait, backoff, failing = backoff, min(backoff*2, ceiling), true
 	}
+}
+
+// tidyReason is why a picture was not made, fit to keep and to log: one
+// line of printable text no longer than maxRejection, cut between
+// characters and not through one. A reason can carry a name out of a file
+// that came from outside.
+func tidyReason(why string) string {
+	var b strings.Builder
+	for _, r := range strings.ToValidUTF8(why, "?") {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Co, unicode.Zl, unicode.Zp) {
+			r = ' '
+		}
+		if b.Len()+utf8.RuneLen(r) > maxRejection {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // versionOf changes when the pin or any picture in the set does.
@@ -480,11 +539,11 @@ func (m *Mobs) store(set Set) error {
 			}
 		}
 	}
-	if len(idx.Rejected) > 0 {
-		idx.Rejected = maps.Clone(idx.Rejected)
-		for key, why := range idx.Rejected {
-			idx.Rejected[key] = why[:min(len(why), maxRejection)]
-		}
+	// What load would refuse is not written: a set over a limit would be
+	// kept, refused at the next start and fetched again, every start.
+	if len(set.Mobs) > maxDefinitions || len(set.Pictures) > maxPictures || len(set.Recipes) > maxRecipes || len(set.Rejected) > maxRecipes ||
+		len(set.Missing) > maxPictures+2 || len(set.Entities) > maxDefinitions || len(set.Lang) > maxLangNames {
+		return fmt.Errorf("the set is over the limits an index is read back within: %d pictures, %d recipes, %d not made", len(set.Pictures), len(set.Recipes), len(set.Rejected))
 	}
 	raw, err := json.Marshal(idx)
 	if err != nil {
@@ -502,7 +561,7 @@ func (m *Mobs) store(set Set) error {
 	}
 	others, _ := os.ReadDir(m.Dir)
 	for _, other := range others {
-		if other.Name() != filepath.Base(home) {
+		if other.Name() != filepath.Base(home) && other.Name() != ListingState {
 			_ = os.RemoveAll(filepath.Join(m.Dir, other.Name()))
 		}
 	}

@@ -495,3 +495,6 @@ func TestAKindOfStructureAddedSinceTheSetWasKeptHasItsPictureAskedFor(t *testing
 		t.Error("the picture fetched for the new kind was not kept on the volume")
 	}
 }
+
+// slogOf is a logger whose lines a test can count.
+func slogOf(h *heard) *slog.Logger { return slog.New(h) }

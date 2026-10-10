@@ -209,7 +209,8 @@ func run(logger *slog.Logger) error {
 	if cfg.AgentURL != "" {
 		app.Waypoints = markers.NewAgent(cfg.AgentURL, cfg.InternalToken)
 	}
-	source := &icons.Source{Ref: cfg.IconsRef, ListURL: icons.DefaultListURL, RawURL: icons.DefaultRawURL}
+	source := &icons.Source{Ref: cfg.IconsRef, ListURL: icons.DefaultListURL, RawURL: icons.DefaultRawURL, Logger: logger,
+		DirURL: icons.DefaultDirURL, State: filepath.Join(cfg.DataDir, "icons", icons.ListingState)}
 	if mobs, heads := startIcons(ctx, cfg, source.Fetch, source.Fill, logger, &wg); mobs != nil {
 		app.MobIcons, app.Art = mobs, mobs
 		// Heads reach here from the agent, which needs the token to speak.
