@@ -87,10 +87,12 @@ type dense interface {
 // Predictors is every kind there is a predictor for. Each is served only
 // while the world's own records of that kind bear its rule out.
 var Predictors = []Predictor{fortress{}, monument{}, outpost{}, villageSite{}, witchHut{}, desertPyramid{}, jungleTemple{}, igloo{},
-	bastion{}, endCity{}, ruinedPortal{chunks.Overworld}, ruinedPortal{chunks.Nether}}
+	bastion{}, endCity{}, ruinedPortal{chunks.Overworld}, ruinedPortal{chunks.Nether},
+	mansion{}, trialChamber{}, trailRuins{}, oceanRuins{}, buriedTreasure{}}
 
 // The game's ids for the biomes a kind is only built in.
 const (
+	biomeOcean           = 0
 	biomePlains          = 1
 	biomeDesert          = 2
 	biomeTaiga           = 5
@@ -100,14 +102,28 @@ const (
 	biomeJungle          = 21
 	biomeJungleHills     = 22
 	biomeTheEnd          = 9
+	biomeLegacyFrozen    = 10
+	biomeMushroomShore   = 15
+	biomeBeach           = 16
 	biomeDeepOcean       = 24
+	biomeStonyShore      = 25
+	biomeSnowyBeach      = 26
+	biomeDarkForest      = 29
 	biomeSnowyTaiga      = 30
+	biomeOldPineTaiga    = 32
 	biomeSavanna         = 35
+	biomeWarmOcean       = 40
 	biomeDeepWarmOcean   = 41
+	biomeLukewarmOcean   = 42
 	biomeDeepLukewarm    = 43
+	biomeColdOcean       = 44
 	biomeDeepColdOcean   = 45
+	biomeFrozenOcean     = 46
 	biomeDeepFrozenOcean = 47
 	biomeSunflowerPlains = 129
+	biomeOldBirchForest  = 155
+	biomeDarkForestHills = 157
+	biomeOldSpruceTaiga  = 160
 	biomeBasaltDeltas    = 181
 	biomeJaggedPeaks     = 182
 	biomeFrozenPeaks     = 183
@@ -116,6 +132,7 @@ const (
 	biomeMeadow          = 186
 	biomeStonyPeaks      = 189
 	biomeCherryGrove     = 192
+	biomePaleGarden      = 193
 )
 
 func oneOf(ids ...uint32) map[uint32]bool {
@@ -559,3 +576,234 @@ func (p ruinedPortal) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 
 func (ruinedPortal) Explains(site Site, real Box) bool { return near(site, real, portalReach) }
 func (ruinedPortal) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// mansion: a woodland mansion is built on the middle of its site's chunk,
+// in a dark forest or a pale garden. Its regions are the outpost's size,
+// and it is rare enough that a world may hold none: the rule is then
+// checked against where the world's woodland explorer maps point, which
+// is the game's own working out of the same thing.
+type mansion struct{}
+
+var (
+	mansionSpread = spread{spacing: 80, separation: 20, salt: 10387319, triangular: true}
+	mansionBiomes = oneOf(biomeDarkForest, biomeDarkForestHills, biomePaleGarden)
+)
+
+// mansionReach is how far from the middle of its site's chunk a mansion's
+// chests may be, in blocks: it is some 60 blocks across.
+const mansionReach = 64
+
+func (mansion) Kind() Kind                  { return Mansion }
+func (mansion) Dimension() chunks.Dimension { return chunks.Overworld }
+func (mansion) Exact() bool                 { return false }
+func (mansion) Certain() bool               { return false }
+func (mansion) Allows(biome uint32) bool    { return mansionBiomes[biome] }
+func (mansion) Founded() bool               { return false }
+func (mansion) Traits() Traits              { return Traits{Quiet: true} }
+
+func (mansion) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return mansionSpread.sites(seed, area, limit, nil)
+}
+
+func (mansion) Explains(site Site, real Box) bool { return near(site, real, mansionReach) }
+func (mansion) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// The kinds the game builds from data files are not placed as the older
+// ones are. Their regions are the same squares, but the offset is drawn
+// from Java's generator, a 48-bit one, seeded with the region, a number
+// per kind and all 64 bits of the world seed: the game places these where
+// Java Edition does. Under the older kinds' generator neither a trial
+// chamber nor a trail ruin is at a site more often than a wrong seed puts
+// one there.
+type javaSpread struct {
+	spacing, separation int32
+	salt                int64
+}
+
+const (
+	javaRegionX    = 341873128712
+	javaRegionZ    = 132897987541
+	javaMultiplier = 0x5DEECE66D
+	javaMask       = 1<<48 - 1
+)
+
+// javaRandom is java.util.Random.
+type javaRandom struct{ state uint64 }
+
+func (r *javaRandom) next(bits uint) int32 {
+	r.state = (r.state*javaMultiplier + 0xB) & javaMask
+	return int32(int64(r.state) >> (48 - bits))
+}
+
+// below is nextInt(bound), for a bound above nought.
+func (r *javaRandom) below(bound int32) int32 {
+	if bound&-bound == bound {
+		return int32((int64(bound) * int64(r.next(31))) >> 31)
+	}
+	for {
+		bits := r.next(31)
+		if value := bits % bound; bits-value+(bound-1) >= 0 {
+			return value
+		}
+	}
+}
+
+func (s javaSpread) site(seed int64, regionX, regionZ int32) Site {
+	rng := javaRandom{(uint64(int64(regionX)*javaRegionX+int64(regionZ)*javaRegionZ+seed+s.salt) ^ javaMultiplier) & javaMask}
+	// x is drawn before z.
+	x := rng.below(s.spacing - s.separation)
+	z := rng.below(s.spacing - s.separation)
+	return Site{regionX*s.spacing + x, regionZ*s.spacing + z}
+}
+
+func (s javaSpread) sites(seed int64, area Area, limit int) (sites []Site, more int) {
+	walked := 0
+	for rx := floorDiv(area.MinX, s.spacing); rx <= floorDiv(area.MaxX, s.spacing); rx++ {
+		for rz := floorDiv(area.MinZ, s.spacing); rz <= floorDiv(area.MaxZ, s.spacing); rz++ {
+			if walked++; walked > maxRegions {
+				return sites, more
+			}
+			site := s.site(seed, rx, rz)
+			if site.ChunkX < area.MinX || site.ChunkX > area.MaxX || site.ChunkZ < area.MinZ || site.ChunkZ > area.MaxZ {
+				continue
+			}
+			if len(sites) >= limit {
+				more++
+				continue
+			}
+			sites = append(sites, site)
+		}
+	}
+	return sites, more
+}
+
+// trialChamber: one to a square of the grid its blocks are joined by,
+// whatever the biome above. A chamber's spawners cannot be taken away, so
+// a finished site with none has no chamber: a chunk generated before the
+// game had chambers, or the deep dark, which has none. Such a site is not
+// offered. Nine sites in ten in chunks the current game generated hold
+// one.
+type trialChamber struct{}
+
+var chamberSpread = javaSpread{spacing: chamberGrid, separation: 12, salt: 94251327}
+
+// chamberNear is how far from the middle of its site's chunk the nearest
+// of a chamber's spawners and vaults may be, in blocks.
+const chamberNear = 32
+
+func (trialChamber) Kind() Kind                  { return TrialChamber }
+func (trialChamber) Dimension() chunks.Dimension { return chunks.Overworld }
+func (trialChamber) Exact() bool                 { return false }
+func (trialChamber) Certain() bool               { return true }
+func (trialChamber) Allows(uint32) bool          { return true }
+func (trialChamber) Founded() bool               { return false }
+func (trialChamber) Traits() Traits              { return Traits{Quiet: true, DropEmpty: true} }
+
+// The low half of the seed is not enough to place one.
+func (trialChamber) Sites(uint32, Area, int) ([]Site, int) { return nil, 0 }
+
+func (trialChamber) WholeSites(seed int64, area Area, limit int) ([]Site, int) {
+	return chamberSpread.sites(seed, area, limit)
+}
+
+func (trialChamber) Explains(site Site, real Box) bool { return near(site, real, chamberNear) }
+func (trialChamber) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// trailRuins: in the taigas, the old growth birch forest and the jungle.
+// The current game places them so; the chunks of the FWB world's older
+// seed hold ruins the rule does not explain, and it is set aside there.
+type trailRuins struct{}
+
+var (
+	trailSpread = javaSpread{spacing: 34, separation: 8, salt: 83469867}
+	trailBiomes = oneOf(biomeTaiga, biomeSnowyTaiga, biomeOldPineTaiga, biomeOldSpruceTaiga, biomeOldBirchForest, biomeJungle)
+)
+
+// trailReach is how far from the middle of its site's chunk a ruin's
+// recorded box, or what it was found by, may be, in blocks.
+const trailReach = 32
+
+func (trailRuins) Kind() Kind                  { return TrailRuins }
+func (trailRuins) Dimension() chunks.Dimension { return chunks.Overworld }
+func (trailRuins) Exact() bool                 { return false }
+func (trailRuins) Certain() bool               { return false }
+func (trailRuins) Allows(biome uint32) bool    { return trailBiomes[biome] }
+func (trailRuins) Founded() bool               { return false }
+func (trailRuins) Traits() Traits              { return Traits{Quiet: true, FinishedOnly: true} }
+
+func (trailRuins) Sites(uint32, Area, int) ([]Site, int) { return nil, 0 }
+
+func (trailRuins) WholeSites(seed int64, area Area, limit int) ([]Site, int) {
+	return trailSpread.sites(seed, area, limit)
+}
+
+func (trailRuins) Explains(site Site, real Box) bool { return near(site, real, trailReach) }
+func (trailRuins) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// oceanRuins: a cluster of ruins round the middle of its site's chunk, in
+// any ocean, known by its chests and by the suspicious sand and gravel
+// nobody has brushed. Nearly every finished site in an ocean holds one.
+// It is slight and common, and is offered only in finished chunks.
+type oceanRuins struct{}
+
+var (
+	ruinsSpread = spread{spacing: 20, separation: 8, salt: 14357621}
+	oceanBiomes = oneOf(biomeOcean, biomeLegacyFrozen, biomeDeepOcean, biomeWarmOcean, biomeDeepWarmOcean, biomeLukewarmOcean, biomeDeepLukewarm,
+		biomeColdOcean, biomeDeepColdOcean, biomeFrozenOcean, biomeDeepFrozenOcean)
+)
+
+// ruinsReach is how far from the middle of its site's chunk the nearest
+// of a ruin's chests and suspicious blocks has been found: 8 blocks in
+// the FWB world.
+const ruinsReach = 24
+
+func (oceanRuins) Kind() Kind                  { return OceanRuins }
+func (oceanRuins) Dimension() chunks.Dimension { return chunks.Overworld }
+func (oceanRuins) Exact() bool                 { return false }
+func (oceanRuins) Certain() bool               { return false }
+func (oceanRuins) Allows(biome uint32) bool    { return oceanBiomes[biome] }
+func (oceanRuins) Founded() bool               { return false }
+func (oceanRuins) Traits() Traits              { return Traits{Quiet: true, FinishedOnly: true} }
+
+func (oceanRuins) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return ruinsSpread.sites(seed, area, limit, nil)
+}
+
+func (oceanRuins) Explains(site Site, real Box) bool { return near(site, real, ruinsReach) }
+func (oceanRuins) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// buriedTreasure: one chest, on block 8, 8 of its site's chunk, under a
+// beach. A site is one chunk in sixteen, so before the biome is known it
+// says next to nothing: it is asked for only in the regions the world has
+// chunks in, and offered only in finished chunks.
+type buriedTreasure struct{}
+
+var (
+	treasureSpread = spread{spacing: 4, separation: 2, salt: 16842397, triangular: true}
+	treasureBiomes = oneOf(biomeBeach, biomeSnowyBeach, biomeStonyShore, biomeMushroomShore)
+)
+
+func (buriedTreasure) Kind() Kind                  { return BuriedTreasure }
+func (buriedTreasure) Dimension() chunks.Dimension { return chunks.Overworld }
+func (buriedTreasure) Exact() bool                 { return false }
+func (buriedTreasure) Certain() bool               { return false }
+func (buriedTreasure) Allows(biome uint32) bool    { return treasureBiomes[biome] }
+func (buriedTreasure) Founded() bool               { return false }
+func (buriedTreasure) Traits() Traits              { return Traits{Quiet: true, FinishedOnly: true} }
+func (buriedTreasure) Region() int32               { return treasureSpread.spacing }
+
+func (buriedTreasure) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return treasureSpread.sites(seed, area, limit, nil)
+}
+
+func (buriedTreasure) SiteIn(seed uint32, regionX, regionZ int32) Site {
+	site, _ := treasureSpread.site(seed, regionX, regionZ)
+	return site
+}
+
+func (buriedTreasure) Explains(site Site, real Box) bool {
+	x, z := site.ChunkX*16, site.ChunkZ*16
+	return real.within(x, z, x+15, z+15)
+}
+
+func (buriedTreasure) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }

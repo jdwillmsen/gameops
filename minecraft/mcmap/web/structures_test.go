@@ -32,7 +32,10 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 	for _, need := range []string{
 		"['candidate', 'Possible', 'key candidate'],",
 		"const sort = p.candidate ? 'candidate' : 'predicted';",
-		"p.candidate ? 'possible here' : 'predicted from the seed'",
+		"p.candidate ? 'possible here' : p.mapped === true ? 'where an explorer map of this world points' : 'predicted from the seed'",
+		// What the game's own map points at is said to be that.
+		"if (p.mapped === true) {",
+		"One of this world’s own explorer maps points here:",
 		"this terrain is not generated yet.",
 		"the game has no record of one here: it keeps one only for a village a player has been near.",
 		// And for a kind an opened chest stops saying anything of.
@@ -200,6 +203,8 @@ func TestKindsFoundByTheirLootSayWhatTheyAreKnownBy(t *testing.T) {
 		"['Which bastion', Object.hasOwn(BASTIONS, sort) ? BASTIONS[sort] : 'Not said by what is left: housing units, or one whose telling chests are opened'],",
 		"['Piglin brutes', saved(of('piglin_brute'))],",
 		"portal >= 20 ? 'Lit: the dragon has been killed'",
+		"['Evokers', of('evocation_illager') > 0 ? `${fmt(of('evocation_illager'))} in the save, each of which carries a totem` : NONE_SAVED],",
+		"blocks('unbrushed') > 0 ? ['Suspicious sand and gravel', `${fmt(blocks('unbrushed'))} not yet brushed`] : null,",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("structures.js no longer has %s", need)

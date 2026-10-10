@@ -527,6 +527,21 @@ with the item named here to fall back on:
 | `structure/village` | a villager's face, or `items/villagebell` | Who lives in it; every village's meeting point has a bell |
 | `structure/stronghold` | `items/ender_eye` | What finds one, and what lights its portal. No mob is a stronghold's own |
 | `structure/trial_chamber` | a breeze's face, or `items/trial_key` | The mob met there and nowhere else; the key opens its vaults |
+| `structure/desert_pyramid` | `blocks/sandstone_carved` | The carved face only a pyramid's sandstone has |
+| `structure/jungle_temple` | `blocks/cobblestone_mossy` | What a temple is built of |
+| `structure/igloo` | `items/snowball` | What an igloo is made of |
+| `structure/trail_ruins` | `items/brush` | What its buried blocks are brushed with |
+| `structure/abandoned_camp` | `items/campfire` | Every camp has one, unlit |
+| `structure/end_city` | a shulker's face, or `items/elytra` | The mob met there and nowhere else; what a city's ship is gone to for |
+| `structure/end_gateway` | `items/ender_pearl` | What goes through one |
+| `structure/exit_portal` | `blocks/dragon_egg` | What is left on it when the dragon is dead |
+| `structure/bastion` | a piglin brute's face, or `blocks/gilded_blackstone` | The mob met there and nowhere else; the block only a bastion has |
+| `structure/ruined_portal` | `blocks/crying_obsidian` | The block a ruined portal's frame is broken with |
+| `structure/mansion` | an evoker's face, or `items/totem` | Who holds it; what its evokers carry |
+| `structure/ancient_city` | a warden's face, or `items/echo_shard` | What wakes there; the shard only its chests hold |
+| `structure/shipwreck` | `items/boat_oak` | A boat |
+| `structure/ocean_ruins` | a drowned's face, or `items/nautilus` | Who walks them |
+| `structure/buried_treasure` | `items/heartofthesea_closed` | What every one of them holds |
 
 A structure has no item of its own, so each is the face of the mob a
 player meets there, which is the convention seed maps follow, and failing
@@ -1200,53 +1215,53 @@ blocks nobody has opened, and a loot table names its structure exactly.
 **Abandoned camps** are what the game calls its campsites: a wool tent,
 an unlit campfire and chests or barrels, in eighteen surface biomes,
 added to Bedrock in 1.26.40 and to this world when it was updated. Each
-is recorded in record 119 under its biome's name, 42 of them in 14
+is recorded in record 119 under its biome's name, 42 of them in 13
 variants here. Nothing else was added to Bedrock between 1.21.0 and
 1.26.50 but trial chambers; sulfur caves and fallen trees are terrain.
 
-**Each structure.** "On a site" is the share of the world's evidence of
-the kind that a site of the rule explains; "sites holding one" is the
-share of the rule's sites, in finished chunks of a biome that suits,
-that hold evidence. Both are over chunks whose seed is known, with each
-site worked out from its own chunk's seed. A wrong seed's score is in
-brackets where it is not nought.
+**Each structure.** "On a site" is the share of the world's own of the
+kind, recorded or found, that a site of the rule explains; "sites holding
+one" is the share of the rule's sites, in finished chunks of a biome that
+suits, that hold one. Both are as the survey itself counts them, over
+chunks that name their seed, with each site worked out from its own
+chunk's seed.
 
-| Structure | In | The save holds | Rule (region, offset below, draws) | On a site | Sites holding one | Spoiler | Verdict | Shown |
-|---|---|---|---|---|---|---|---|---|
-| Village, zombie village, biome variants | Overworld | Village records, once a player has been near | 34, 26, two averaged | 31 of 70 | 27 of 37 | Low | Recorded and predicted | Yes |
-| Pillager outpost | Overworld | Records 57 and 119 | 80, 56, two averaged | 7 of 7 in record 57 | 17 of 17 | Low | Recorded and predicted | Yes |
-| Ocean monument | Overworld | Records 57 and 119 | 32, 27, two averaged | 11 of 11 in record 57 | 11 of 13 | Low | Recorded and predicted | Yes |
-| Swamp hut | Overworld | Records 57 and 119 | 32, 24, one | 2 of 2 | 2 of 2 | Low | Recorded; predicted once three are | Yes |
-| Desert pyramid | Overworld | Record 119; chests and suspicious sand until opened | The hut's grid, in desert | 6 of 6 | 6 of 6 | Medium | Recorded, found by blocks, predicted | Where recorded |
-| Jungle temple | Overworld | Record 119; chests and trap dispensers | The hut's grid, in jungle | 5 of 5 | 5 of 9 | Medium | Recorded, found by blocks, predicted | Where recorded; predicted in finished chunks |
-| Igloo, with or without basement | Overworld | Record 119; the basement's chest | The hut's grid, in snowy plains, snowy taiga and slopes | 9 of 11 | 9 of 11 | Low | Recorded, found by blocks, predicted | Where recorded; predicted in finished chunks |
-| Abandoned camp | Overworld | Record 119, by biome | The wiki gives a 37-chunk grid; no number for it is published | Not checked | Not checked | Low | Recorded | Yes |
-| Trail ruins | Overworld | Record 119; suspicious gravel until brushed | 34, 26, one, by Java's generator and the whole seed | 13 of 16 in new chunks, 6 of 24 in old | 13 of 58, any biome | Low | Recorded, found by blocks | Where recorded |
-| Trial chambers | Overworld | Record 119; trial spawners and vaults | 34, 22, one, by Java's generator and the whole seed | 102 of 161 groups in new chunks (6) | 102 of 108 in new chunks; 21 of 63 in chunks older than the structure | Low | Found by blocks; can be predicted in new terrain | By blocks |
-| Woodland mansion | Overworld | Chests until opened; explorer maps | 80, 60, two averaged, in dark forest and pale garden | 3 of 3 map targets | None of 19 finished sites is in its biome | High | Mapped; predicted while three maps agree | No |
-| Ancient city | Overworld | Chests until opened; sculk, which the deep dark has without a city | 24, 16, one: no better than a wrong seed (11 of 21 against 7) | - | - | High | Found by its chests; not predicted | No |
-| Stronghold | Overworld | Portal blocks, the portal room's spawner | Not tried | - | - | Highest | Found by blocks, off until asked for | Yes |
-| Buried treasure | Overworld | The chest, at block 8, 8 of its chunk, until opened; treasure maps | 4, 2, two averaged, on beaches | 407 of 446 (152) | 406 of 461 | High | Found by blocks, predicted in finished chunks only | No |
-| Shipwreck | Overworld | Chests until opened | 24, 20, one, in oceans and on beaches | 29 of 37 | 29 of 75 | Medium | Found by blocks; possible sites only | No |
-| Ocean ruins, warm and cold | Overworld | Chests, suspicious sand and gravel | 20, 12, one, in oceans | 139 of 144 (6) | 139 of 144 | Low | Found by blocks, predicted | No |
-| Ruined portal | Overworld | The chest until opened | 40, 25, one | 144 of 144 | 83 of 101 | Low | Found by blocks, predicted in finished chunks | Yes |
-| Mineshaft, and the badlands one | Overworld | Cave spider spawners (3,192), chest minecarts (6,319) | Per chunk, not a grid; not tried | - | - | Low | Left out: about 640, and one with no spider corridor leaves nothing | No |
-| Dungeon | Overworld | Its spawner and chests (4,910 rooms) | None: scattered | - | - | Low | Left out: thousands | No |
-| Desert well | Overworld | Suspicious sand until brushed (14) | None: scattered | - | - | Low | Could be found by blocks; left out as too slight | No |
-| Fossil, amethyst geode | Overworld | Nothing but plain blocks | None: scattered | - | - | Low | Cannot be shown without reading every block | No |
-| Nether fortress | Nether | Records 57 and 119 | 30, 26, one, and a third draw: 2 in 6 | 11 of 11 in record 57 | 6 of 6 | Low | Recorded and predicted | Yes |
-| Bastion remnant | Nether | Chests until opened, a magma cube spawner in one type of four | The fortress's grid: the other 4 in 6, not in basalt deltas | 17 of 19 | 14 of 15; none of 4 in basalt deltas | Medium | Found by blocks, predicted | Yes |
-| Ruined portal | Nether | The chest until opened | 25, 15, one | 37 of 37 | 34 of 41 | Low | Found by blocks, predicted in finished chunks | Yes |
-| Nether fossil | Nether | Nothing but plain blocks | None | - | - | Low | Cannot be shown | No |
-| End city, with or without ship | The End | Chests until opened, shulkers, the ship's dragon head and framed elytra | 20, 9, two averaged | 19 of 19 | 20 of 23 | High | Found by blocks, predicted; off until asked for | Yes |
-| End gateway | The End | Its block, which nothing breaks | None: made by the dragon's death and by use | - | - | Low | Found by blocks | Yes |
-| Exit portal | The End | Its portal blocks once lit; the End's own record | Fixed at the middle | - | - | None | Found by blocks | Yes |
-| Obsidian pillars | The End | Nothing | Fixed: the same ten in every world | - | - | None | Not shown: the render already draws them | No |
+| Structure | In | The save holds | Rule (region, offset below, draws) | On a site | Sites holding one | Spoiler | Shown as |
+|---|---|---|---|---|---|---|---|
+| Village, zombie village, biome variants | Overworld | Village records, once a player has been near | 34, 26, two averaged | 56 of 67 | 48 of 57 | Low | Recorded (70) and predicted |
+| Pillager outpost | Overworld | Records 57 and 119 | 80, 56, two averaged | 19 of 21 | 17 of 17 | Low | Recorded (22) and predicted |
+| Ocean monument | Overworld | Records 57 and 119 | 32, 27, two averaged | 15 of 16 | 15 of 16 | Low | Recorded (20) and predicted |
+| Swamp hut | Overworld | Records 57 and 119 | 32, 24, one | 2 of 2 | 2 of 2 | Low | Recorded (3); predicted once three are on a site |
+| Desert pyramid | Overworld | Record 119; chests and suspicious sand until touched | The hut's sites, in desert | 6 of 6 | 6 of 6 | Medium | Recorded (3), found by its loot (4), predicted in finished chunks |
+| Jungle temple | Overworld | Record 119; chests and trap dispensers | The hut's sites, in jungle | 5 of 5 | 5 of 9 | Medium | Recorded (4), found (2), predicted in finished chunks |
+| Igloo, with or without basement | Overworld | Record 119; the basement's chest | The hut's sites, in snowy plains, snowy taiga and slopes | 11 of 11 | 9 of 11 | Low | Recorded (9), found (3), predicted in finished chunks |
+| Abandoned camp | Overworld | Record 119, by biome | The wiki gives a 37-chunk grid; no number for it is published | Not checked | Not checked | Low | Recorded (42), with the biome each was built for |
+| Trail ruins | Overworld | Record 119; suspicious gravel until brushed | 34, 26, one, by Java's generator and the whole seed | 22 of 37; 6 of 24 in the older seed's chunks, where it is set aside | 11 of 16 | Low | Recorded (26), found (17), predicted in finished chunks |
+| Trial chambers | Overworld | Record 119; trial spawners and vaults | 34, 22, one, by Java's generator and the whole seed | 133 of 149 | 123 of 171; nine in ten in chunks the current game made | Low | Found by blocks (219); predicted where not generated |
+| Woodland mansion | Overworld | Chests until opened; explorer maps | 80, 60, two averaged, in dark forest and pale garden | 3 of 3 map targets | None of the finished sites is in its biome | High | None built; one mapped and 119 possible sites, off until asked for |
+| Ancient city | Overworld | Chests until opened; sculk, which the deep dark has without a city | 24, 16, one: not told from chance | 15 of 19 within 64 blocks, where chance is about half | 12 of 205 | High | Found by its chests (20), off until asked for; not predicted |
+| Stronghold | Overworld | Portal blocks, the portal room's spawner | Not tried | - | - | Highest | Found by blocks (4), off until asked for |
+| Buried treasure | Overworld | The chest, at block 8, 8 of its chunk, until opened; treasure maps | 4, 2, two averaged, on beaches | 446 of 446 | 444 of 501 | High | Found by its chest (525), predicted in finished chunks (57), off until asked for |
+| Shipwreck | Overworld | Chests until opened | 24, 20, one, in oceans and on beaches | 37 of 37 | 29 of 75 | Medium | Found by its chests (45); not predicted |
+| Ocean ruins, warm and cold | Overworld | Chests, suspicious sand and gravel | 20, 12, one, in oceans | 140 of 142 | 137 of 144 | Low | Found by its loot (169), predicted in finished chunks |
+| Ruined portal | Overworld | The chest until opened | 40, 25, one | 144 of 144 | 83 of 101 | Low | Found by its chest (177), predicted in finished chunks |
+| Mineshaft, and the badlands one | Overworld | Cave spider spawners (3,192), chest minecarts (6,319) | Per chunk, not a grid; not tried | - | - | Low | Left out: about 640, and one with no spider corridor leaves nothing |
+| Dungeon | Overworld | Its spawner and chests (4,910 rooms) | None: scattered | - | - | Low | Left out: thousands |
+| Desert well | Overworld | Suspicious sand until brushed (14) | None: scattered | - | - | Low | Left out as too slight; it could be found by its sand |
+| Fossil, amethyst geode | Overworld | Nothing but plain blocks | None: scattered | - | - | Low | Cannot be shown without reading every block |
+| Nether fortress | Nether | Records 57 and 119 | 30, 26, one, and a third draw: 2 in 6 | 11 of 14 | 6 of 6 | Low | Recorded (18 parts) and predicted |
+| Bastion remnant | Nether | Chests until opened, a magma cube spawner in one type of four | The fortress's sites: the other 4 in 6, not in basalt deltas | 17 of 19 | 14 of 15; none of 4 in basalt deltas | Medium | Found by its loot (21), predicted |
+| Ruined portal | Nether | The chest until opened | 25, 15, one | 37 of 37 | 34 of 41 | Low | Found by its chest (42), predicted in finished chunks |
+| Nether fossil | Nether | Nothing but plain blocks | None | - | - | Low | Cannot be shown |
+| End city, with or without ship | The End | Chests until opened, shulkers, the ship's dragon head and framed elytra | 20, 9, two averaged | 19 of 19 | 20 of 23 | High | Found by what is left in it (21), predicted, off until asked for |
+| End gateway | The End | Its block, which nothing breaks | None: made by the dragon's death and by use | - | - | Low | Found by its block (9) |
+| Exit portal | The End | Its portal blocks once lit; the End's own record | Fixed at the middle | - | - | None | Found by its blocks |
+| Obsidian pillars | The End | Nothing | Fixed: the same ten in every world | - | - | None | Not shown: the render already draws them |
 
 What the figures leave open:
 
-- *The seed of a chunk with no record 63* is not known. Evidence there is
-  shown and counted on neither side of any rule.
+- *The seed of a chunk with no record 63* is not known. What is in one is
+  shown, and counted on neither side of any rule.
 - *A structure is of the seed of its own chunks, not of the chunk it
   starts in.* A first reading of the ruined portals had 62 chests of 143
   at no site. Each was at a site whose own chunk is not in the save at
@@ -1256,14 +1271,22 @@ What the figures leave open:
   with all 64 bits of the world seed, where every older kind uses the
   game's own generator and the low 32: under the old rule neither scores
   above a wrong seed. Chunks older than a structure hold none of it,
-  which is all the old chunks' lower shares say.
-- *Ancient cities* are at no site of the published rule under either
-  generator. They are known by their chests only: 385 not yet opened, in
-  about 21 cities.
-- *Shipwrecks* are where the rule says, and three sites in five in
-  finished water hold no unopened chest. Nothing tells a wreck that was
-  looted from one that was never built, so a finished site with none is
-  not shown.
+  which is all the old chunks' lower shares say of trial chambers; the
+  older trail ruins were placed some other way, which was not found.
+- *Abandoned camps* are placed the same way, the wiki says, on a grid of
+  37 chunks, and the number that seeds it is published nowhere. They are
+  recorded, every one, and not predicted.
+- *Ancient cities.* A city is some 200 blocks across and known by chests
+  all over it, so a site of nearly any rule is within reach of one about
+  half the time, and the published rule's 15 of 19 does not settle it.
+  What does settle the use of it is the other share: 12 finished sites in
+  205 hold a city, because a city needs the deep dark, which is a biome
+  under the ground that the map's biomes do not show. A site would be
+  wrong nineteen times in twenty. Cities are known by their chests only:
+  385 not yet opened, in 20 cities.
+- *Shipwrecks* are where the rule says, every one, and three sites in
+  five in finished water hold no unopened chest. Nothing tells a wreck
+  that was looted from one that was never built, so a site is not shown.
 - *Bastions and fortresses* share their sites. No bastion's chest is at a
   fortress's site, and none of the four bastion sites in basalt deltas
   holds any.
@@ -1435,6 +1458,12 @@ and cost nothing more. There are two sorts of thing to go by:
 | `exit_portal` | The End | The portal blocks of the fountain, once the dragon is dead | Where they touch | Around them |
 | `bastion` | Nether | Chests nobody has opened, and the magma cube spawner of a treasure room | Chunks holding either, up to three apart | Around those; contents are counted 32 blocks past it |
 | `ruined_portal` | Overworld, Nether | Its chest, while nobody has opened it | Each its own | The chest; contents are counted 8 blocks past it |
+| `mansion` | Overworld | Chests nobody has opened | Chunks up to four apart | Around those; 16 blocks past |
+| `ancient_city` | Overworld | Chests nobody has opened | Chunks up to six apart | Around those; 32 blocks past |
+| `shipwreck` | Overworld | Chests nobody has opened | Chunks up to two apart | Around those; 8 blocks past |
+| `ocean_ruins` | Overworld | Chests nobody has opened, and suspicious sand and gravel nobody has brushed | Chunks up to two apart | Around those; 8 blocks past |
+| `buried_treasure` | Overworld | Its chest, while nobody has opened it | Each its own | The chest |
+| `desert_pyramid`, `jungle_temple`, `igloo`, `trail_ruins` | Overworld | Their chests, the temple's trap dispensers, and suspicious sand and gravel, where the world has no record of the structure | Chunks touching, and for the ruins up to three apart | Around those |
 
 A shulker is a mob, and is counted for an end city all the same: a city
 whose chests are all opened is otherwise not found at all, and its
@@ -1464,6 +1493,9 @@ one click, and left out of every search until then.
 |---|---|
 | Stronghold | The way to the End, which a player sets out to find |
 | End city | Where the elytra and the shulkers are |
+| Woodland mansion | Rare, far off, and gone to for its totems; the game sells a map to it |
+| Ancient city | The deep dark's own prize, found by going down and looking |
+| Buried treasure | Nothing but a chest, and a mark on the map is the whole of finding it |
 
 Fortresses, bastions, monuments and the rest are on from the start: they
 are large, seen from far off, and what is in them is fought for and not
@@ -1549,6 +1581,21 @@ every chunk](#the-seed-of-each-chunk). Each kind is a `Predictor` in
 | Bastion remnant | The fortress's sites | | | The fortress's third draw: the other 4 in 6 | Any Nether biome but basalt deltas |
 | End city | 20 | 9 | 10387313 | 2, averaged | The End, on the outer islands |
 | Ruined portal | 40, and 25 in the Nether | 25, and 15 | 40552231 | 1 | Any biome |
+| Woodland mansion | 80 | 60 | 10387319 | 2, averaged | Dark forest, dark forest hills, pale garden |
+| Ocean ruins | 20 | 12 | 14357621 | 1 | Any ocean |
+| Buried treasure | 4 | 2 | 16842397 | 2, averaged | Beach, snowy beach, stony shore, mushroom field shore |
+| Trial chambers | 34 | 22 | 94251327 | 1, by Java's generator | Any biome |
+| Trail ruins | 34 | 26 | 83469867 | 1, by Java's generator | Taiga, snowy taiga, the old growth taigas, old growth birch forest, jungle |
+
+**Java's generator.** The two kinds the game builds from data files are
+not placed as the older ones are. Their regions are the same squares, and
+the offset is drawn from `java.util.Random`, a 48-bit generator, seeded
+with the region, the kind's number and all 64 bits of the world seed: the
+game places these where Java Edition does. Under the Mersenne Twister and
+the low 32 bits neither is at a site more often than a wrong seed puts one
+there. They are worked out only from a seed all of which is known: each
+chunk's own, and `level.dat`'s; not from `STRUCTURE_SEED` or a seed the
+search found, which are 32 bits.
 
 A fortress is built at its site whatever the biome. Every other kind is
 only built where the biome suits, so a site is one of three things:
@@ -1615,13 +1662,18 @@ chunks of a suitable biome that have a recorded structure.
 | Pillager outpost | 22 | 19 of 21, exactly | 17 of 17 | Predicted |
 | Village | 70 | 56 of 67 | 48 of 57 | Predicted |
 | Witch hut | 3 | 2 of 2, exactly | 2 of 2 | Not predicted: two are not three |
-| Desert pyramid | 3 | 2 of 2, exactly | 2 of 6 | Not predicted: two are not three |
-| Jungle temple | 4 | 3 of 3, exactly | 3 of 9 | Predicted, in finished chunks |
-| Igloo | 9 | 8 of 8, exactly | 8 of 11 | Predicted, in finished chunks |
+| Desert pyramid | 3, and 4 found | 6 of 6, exactly | 6 of 6 | Predicted, in finished chunks; none is left to predict |
+| Jungle temple | 4, and 2 found | 5 of 5, exactly | 5 of 9 | Predicted, in finished chunks |
+| Igloo | 9, and 3 found | 11 of 11, exactly | 9 of 11 | Predicted, in finished chunks |
 | Bastion remnant | 21 found | 17 of 19 | 14 of 15 | Predicted |
 | End city | 21 found | 19 of 19 | 20 of 23 | Predicted |
 | Ruined portal, overworld | 177 found | 144 of 144 | 83 of 101 | Predicted, in finished chunks |
 | Ruined portal, Nether | 42 found | 37 of 37 | 34 of 41 | Predicted, in finished chunks |
+| Woodland mansion | None; 3 map targets | 3 of 3 | No finished site is in its biome | Predicted |
+| Trial chambers | 219 found | 133 of 149 | 123 of 171 | Predicted where not generated |
+| Trail ruins | 26, and 17 found | 22 of 37 | 11 of 16 | Predicted, in finished chunks of the current seed |
+| Ocean ruins | 169 found | 140 of 142 | 137 of 144 | Predicted, in finished chunks |
+| Buried treasure | 525 found | 446 of 446 | 444 of 501 | Predicted, in finished chunks |
 
 Under the one seed the map used before, the same world gave 31 villages
 of 70 on a site and 27 sites of 37 built on. The structures on no site
@@ -1657,6 +1709,44 @@ What the numbers leave open, so that nobody has to find it out again:
 - *Ruined portals.* Every chest in a chunk that names its seed is at a
   site. One site in five in a finished chunk has no unopened chest, which
   is a portal somebody has been to as easily as one that is not there.
+- *Woodland mansions.* This world has built none: no finished site is in
+  a dark forest. The rule is checked against the game instead. A woodland
+  explorer map holds the block the game itself worked a mansion out to be
+  at, generated or not, and each of the three places this world's maps
+  point to is a site of one of its two seeds, where no site of a wrong
+  seed is. Two of the three were worked out from the older seed, in
+  country the world will now generate from the newer one, and no mansion
+  will be built there: a map is evidence for the rule and is not shown as
+  a mansion. The third is a site of the current seed, and is on the map
+  as `mapped`, which is more than a possible site and less than a
+  mansion: the game has said it will build one there. Every other mansion
+  site near the generated world is a possible one, 119 of them, of which
+  the biome will allow few.
+- *Trial chambers.* A chamber's spawners cannot be taken away, so a
+  finished site with none has no chamber and is not offered: 48 such
+  sites are in chunks generated before the game had chambers. In chunks
+  the current game generated, nine sites in ten hold one. A chamber is
+  built whatever the biome above it, so a site in country not generated
+  is predicted and not merely possible; the deep dark, which has none,
+  is the exception nothing here can see.
+- *Trail ruins.* The current game's ruins are where the rule says. The 24
+  in the chunks of the older seed are not, 6 of them on a site: an older
+  game placed them another way. The rule is set aside for that seed,
+  nothing is predicted in its chunks, and the kind stands by the rest.
+- *Ocean ruins and buried treasure* are where their rules say almost
+  without exception, and are slight and many. Each is offered only in a
+  finished chunk of a biome that suits, where a site with nothing found
+  is most likely one somebody has emptied. A treasure's sites are one
+  chunk in sixteen, so they are asked for only in the regions the world
+  has chunks in.
+- *Shipwrecks* have a rule that puts every wreck found at a site (24
+  chunks to a region, an offset below 20, one draw, the number
+  165745295), and three finished sites in five in water hold no unopened
+  chest. A site says too little to be worth a mark, so shipwrecks are
+  found by their chests and not predicted.
+- *Ancient cities* are found by their chests and not predicted: the rule
+  published for them is not told from chance by this world, and a city
+  needs a biome the map cannot see.
 - *Monuments.* Both empty sites are at the edge of the generated world,
   with half or more of the country round them not generated. The game also
   wants water all round a monument, which cannot be asked there, so the
@@ -1677,13 +1767,12 @@ What the numbers leave open, so that nobody has to find it out again:
   average, half the chunks round them not finished. Snowy taiga is on the
   game's list of village biomes and left off this one: its three finished
   sites hold no village, where three in four do elsewhere.
-- *Witch huts.* The rule puts the world's one hut in its site's chunk, at
-  odds of about one in six hundred for a wrong rule, and the one swamp site
-  in finished chunks is that hut. That is the same single piece of evidence
-  the seed check refuses to act on, so huts stay unpredicted on this world
-  and start being predicted, with no change here, once it has recorded
-  three. The same sites are the game's for desert and jungle temples and
-  igloos, which leave no record to check against and are not predicted.
+- *Witch huts.* The world holds three, one of them in a chunk that names
+  no seed. The rule puts the other two in their sites' chunks, at odds of
+  about one in six hundred each for a wrong rule, and the two swamp sites
+  in finished chunks are those huts. Two is fewer than the check acts on,
+  so huts stay unpredicted on this world and start being predicted, with
+  no change here, once it has a third.
 
 **Bounds.** Sites are looked for in the box round a dimension's chunks and
 64 chunks more, within 49,000 blocks of the middle of them. At most 20,000
@@ -1691,9 +1780,11 @@ sites of a kind are set beside the world, and 500 predictions of a kind
 are kept for a dimension, those the world can already be asked about first
 and then the nearest the middle; 2,000 for the dimension between them.
 Whatever is left out is counted in `predictedMore`. On the FWB world the
-overworld is sent 1,121 sites, 15 of them predicted and the rest possible:
-500 each of monuments and villages, which is the bound, with 421 left out,
-and 121 outposts. The nether is sent 44 fortresses.
+overworld is sent 1,384 known structures and 1,830 sites: 500 each of
+monuments, villages and trial chambers, which is the bound, 121 outposts,
+120 mansions and 89 of the kinds offered only in finished chunks, with
+1,739 left out. The Nether is sent 81 known and 119 sites, and the End 31
+known and 441.
 
 **The seed.** `RandomSeed` and the world spawn are read from `level.dat` in
 the mirror, which is little-endian NBT behind an eight-byte header and is
@@ -1773,10 +1864,16 @@ its failure costs nothing else. That includes a panic: it parses over a
 hundred thousand records the game wrote, so one it cannot get through is
 caught, logged with its stack and counted, and the cycle and the service
 go on with the structures of the last survey that worked. On the FWB world (2.47 million records,
-1,274 boxes) it takes 9 seconds and peaks at 45 MB. Predicting four more
-kinds added nothing that could be measured to that: which chunks are
-finished is taken from the pass the survey already makes, at eight bytes a
-chunk, and a site costs a few hundred multiplications. It keeps at most 200,000
+1,274 boxes) it took 9 seconds and peaked at 45 MB when it read four
+kinds. Reading every kind there is now costs half a second more: measured
+on one CPU on 2026-10-10, three runs each way, the survey went from a
+median of 9.2 seconds to 9.8, and the process, with the biomes it reads
+first, from a peak of 126 MB to 135. The new kinds are found in the pass
+the survey already makes: record 119 and record 63 are two more records
+of chunks it is passing, the loot table of a chest is read from the block
+entity already in hand, a map is skipped by its length but for its dozen
+tags, and which seed each chunk is of is a map of nine bytes a chunk. A
+site costs a few hundred multiplications. It keeps at most 200,000
 boxes and 2,000 structures of each layer per dimension, and says how many
 it left out.
 
@@ -2958,8 +3055,8 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The picture with the key `{group}/{name}` as a PNG, whichever group it is of, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
-| `GET /api/structures?dimension=<id>&kinds=all` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`, or for a `stronghold` or `trial_chamber` with `evidence`, how many blocks it was found by, and `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, or `generated` where the chunk is finished, suits the kind and the world recorded none), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `catalog` (every kind the map can show, in any dimension: its `kind`, the `dimensions` the game generates it in, `asked` where it is off until the viewer turns it on, and `quiet` where a finished site with none may hold one all the same), `surveyed`, `at`, and with the overworld `spawn`. Without `kinds=all` the answer holds only the seven kinds there were before `catalog`, for a page that could not put a later one away. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
-| `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `reach`, for a trial chamber, how many blocks past its box the rest was counted in; `uncounted`, for a stronghold, where nothing but what it was found by is said and the lists are empty for that reason; `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `dispenser`, `dropper` and `unbroken_pot`, those there are); `elders` for a monument; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures?dimension=<id>&kinds=all` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, how many recorded boxes it was joined from, and for an abandoned camp `variant`, the biome it was built for; or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`; or for a kind found by its blocks with `evidence`, how many blocks and mobs it was found by, and for a trial chamber `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, `generated` where the chunk is finished, suits the kind and the world holds none, or `mapped` where one of the world's explorer maps points at a site in country not generated), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `catalog` (every kind the map can show, in any dimension: its `kind`, the `dimensions` the game generates it in, `asked` where it is off until the viewer turns it on, and `quiet` where a finished site with none may hold one all the same), `surveyed`, `at`, and with the overworld `spawn`. Without `kinds=all` the answer holds only the seven kinds there were before `catalog`, for a page that could not put a later one away. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `reach`, for a kind found by its blocks, how many blocks past the box round those the rest was counted in; `uncounted`, for a stronghold, where nothing but what it was found by is said and the lists are empty for that reason; `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `end_gateway`, `dispenser`, `dropper`, `unbroken_pot`, `unbrushed` for suspicious sand and gravel nobody has brushed, and `dragon_head` and `elytra` for an end ship's, those there are); `elders` for a monument; `bastion` for a bastion whose blocks still say which it is, `treasure`, `stables` or `bridge`; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest; `biomes=<name>,…` draws only those and `except=<name>,…` all but those, one of the three at a time and at most 128 names. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
