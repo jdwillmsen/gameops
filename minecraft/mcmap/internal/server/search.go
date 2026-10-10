@@ -304,7 +304,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	z, okZ := blockParam(q, "z")
 	limit, okL := limitParam(q, defaultSearchHits, maxSearchHits)
 	only := q.Get("kind")
-	strongholds := q.Get("strongholds") == "1"
+	// The kinds that are off until asked for, which this viewer has on. A
+	// page from before there was more than one such kind says so of the
+	// stronghold alone.
+	asked := map[structures.Kind]bool{structures.Stronghold: q.Get("strongholds") == "1"}
+	for i, kind := range strings.Split(q.Get("asked"), ",") {
+		if i >= len(structures.Catalog) {
+			break
+		}
+		asked[structures.Kind(kind)] = true
+	}
+	// A kind that gives away a goal is listed only for a viewer who has
+	// turned its row on, whatever is typed.
+	held := func(kind structures.Kind) bool {
+		k, known := structures.InfoOf(kind)
+		return known && k.Asked && !asked[kind]
+	}
 	if query == "" || utf8.RuneCountInString(query) > maxSearchQuery || !okD || !okX || !okZ || !okL ||
 		(only != "" && !slices.Contains(searchKinds, only)) {
 		http.Error(w, "a search needs q, of 1 to 64 characters, and the dimension, x and z to measure from; kind, if given, is one kind of hit", http.StatusBadRequest)
@@ -378,10 +393,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if s.Structures != nil && (wants(hitStructure) || wants(hitSpawn)) {
 			if survey, ok := s.Structures.Last(); ok {
 				for _, st := range survey.Layers[d].Recorded {
-					// Where a stronghold is, is the one thing on this map
-					// a player sets out to find for themselves. It is
-					// listed only for a viewer who has turned its row on.
-					if st.Kind == structures.Stronghold && !strongholds {
+					if held(st.Kind) {
 						continue
 					}
 					if name := structureNames[st.Kind]; matches(name, string(st.Kind), names.Structure(string(st.Kind))) {
@@ -390,6 +402,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				for _, p := range nearestPredictions(survey.Layers[d].Predicted, x, z, predictedPerKind) {
+					if held(p.Kind) {
+						continue
+					}
 					if name := structureNames[p.Kind]; matches(name, string(p.Kind), names.Structure(string(p.Kind))) {
 						certainty := certaintyPredicted
 						if p.Candidate {

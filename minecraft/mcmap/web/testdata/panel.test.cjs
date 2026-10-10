@@ -355,6 +355,130 @@ test('an id that has been in none of its lists for a month is dropped, and one t
   assert.equal(kept.missing, undefined);
 });
 
+// The structures' kinds are listed by dimension: the script sets the list
+// again with the kinds the dimension on screen can hold, over one choice.
+const OVERWORLD_KINDS = [{ id: 'village', label: 'Villages', count: 3 }, { id: 'monument', label: 'Ocean Monuments', count: 2 },
+  { id: 'ruined_portal', label: 'Ruined Portals', count: 9 }, { id: 'stronghold', label: 'Strongholds', count: 1, off: true }];
+const NETHER_KINDS = [{ id: 'fortress', label: 'Nether Fortresses', count: 4 }, { id: 'ruined_portal', label: 'Ruined Portals', count: 2 }];
+const END_KINDS = [{ id: 'end_city', label: 'End Cities', count: 5, off: true }, { id: 'end_gateway', label: 'End Gateways', count: 1 }];
+const EVERY_KIND = [...OVERWORLD_KINDS, ...NETHER_KINDS, ...END_KINDS].map((kind) => kind.id);
+const kindLines = (p) => {
+  const kids = p.li('Structures').children.find((child) => child.classList.contains('kids'));
+  return kids.children.filter((child) => child.classList.contains('node') && child.querySelector('.count')).map((child) => child.querySelector('.name').textContent);
+};
+
+test('a dimension lists only the kinds it can hold, with its own counts, and a kind in two is in both', async () => {
+  const p = await load();
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure' });
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, OVERWORLD_KINDS);
+  kinds.setElsewhere(EVERY_KIND);
+  await p.tick();
+  for (const name of ['Villages', 'Ocean Monuments', 'Ruined Portals', 'Strongholds']) assert.ok(p.li('Structures', name), name);
+  assert.equal(p.part(['Structures', 'Ruined Portals'], 'count').textContent, '9');
+  assert.throws(() => p.li('Structures', 'Nether Fortresses'), /there is no line/);
+  assert.throws(() => p.li('Structures', 'End Cities'), /there is no line/);
+  // The Nether: the fortress, and the portals with the count they have there.
+  kinds.setItems(NETHER_KINDS);
+  await p.tick();
+  assert.equal(p.part(['Structures', 'Ruined Portals'], 'count').textContent, '2');
+  assert.ok(p.li('Structures', 'Nether Fortresses'));
+  for (const name of ['Villages', 'Ocean Monuments', 'Strongholds', 'End Cities']) assert.throws(() => p.li('Structures', name), /there is no line/, name);
+  // The End: its own two, and none of the others'.
+  kinds.setItems(END_KINDS);
+  await p.tick();
+  assert.equal(p.part(['Structures', 'End Gateways'], 'count').textContent, '1');
+  for (const name of ['Villages', 'Ruined Portals', 'Nether Fortresses']) assert.throws(() => p.li('Structures', name), /there is no line/, name);
+});
+
+test('a kind keeps its choice across dimensions, and one that is not listed here is not counted as hidden', async () => {
+  const p = await load();
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure' });
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, OVERWORLD_KINDS);
+  kinds.setElsewhere(EVERY_KIND);
+  await p.tick();
+  assert.match(p.status(), /^All \d+ shown/);
+  // Hidden in the overworld: villages, and the portals, which the Nether has too.
+  await p.press(['Structures', 'Villages']);
+  await p.press(['Structures', 'Ruined Portals']);
+  assert.equal(kinds.shows('village'), false);
+  assert.match(p.status(), /^\d+ of \d+ shown/);
+  const [, on, all] = /^(\d+) of (\d+) shown/.exec(p.status()).map(Number);
+  assert.equal(all - on, 2);
+  // In the End neither is a line, and nothing reads as hidden there.
+  kinds.setItems(END_KINDS);
+  await p.tick();
+  assert.match(p.status(), /^All \d+ shown/, 'kinds of another dimension are not hidden here');
+  assert.equal(p.state('Structures'), 'true');
+  assert.equal(kinds.shows('end_city'), false, 'off until asked for');
+  await p.press(['Structures', 'End Cities']);
+  assert.equal(kinds.shows('end_city'), true);
+  // The Nether has the portals, still hidden, and its fortress as it ever was.
+  kinds.setItems(NETHER_KINDS);
+  await p.tick();
+  assert.equal(p.state('Structures', 'Ruined Portals'), 'false');
+  assert.equal(p.state('Structures', 'Nether Fortresses'), 'true');
+  assert.match(p.status(), /^\d+ of \d+ shown/);
+  // And back in the overworld, and after a reload, each is as it was left.
+  kinds.setItems(OVERWORLD_KINDS);
+  await p.tick();
+  assert.equal(p.state('Structures', 'Villages'), 'false');
+  assert.equal(p.state('Structures', 'Ocean Monuments'), 'true');
+  const q = await load(p.storage);
+  const again = q.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, END_KINDS);
+  await q.tick();
+  assert.equal(again.shows('end_city'), true);
+  assert.equal(again.shows('village'), false);
+  // Reset puts every kind back, the ones not on screen with the rest.
+  q.doc.getElementById('layers-body').querySelector('.panel-status').querySelector('button').click();
+  await q.tick();
+  assert.equal(again.shows('village'), true);
+  assert.equal(again.shows('end_city'), false);
+});
+
+test('a kind of another dimension is not dropped as gone, though it is in no list for a month', async () => {
+  const p = await load();
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, END_KINDS);
+  await p.tick();
+  await p.press(['Structures', 'End Gateways']);
+  // A month in the overworld, where a gateway is never listed.
+  const stay = async (storage, days, elsewhere) => {
+    const q = await load(storage, { days });
+    const row = q.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, OVERWORLD_KINDS);
+    if (elsewhere) row.setElsewhere(EVERY_KIND);
+    await q.tick(); await new Promise((done) => setTimeout(done, 30));
+    return q;
+  };
+  let q = await stay(new Map(p.storage), 0, true);
+  q = await stay(q.storage, 31, true);
+  same(q.settings.get('layers')['structures#kinds'].hidden, ['end_gateway']);
+  assert.equal(q.settings.get('layers')['structures#kinds'].missing, undefined);
+  // Said of nowhere, it is an id that has gone, and goes.
+  q = await stay(new Map(p.storage), 0, false);
+  q = await stay(q.storage, 31, false);
+  assert.equal(q.settings.get('layers')['structures#kinds'], undefined);
+});
+
+test('a saved view naming kinds this dimension has none of shows no line for them and hides nothing of it', async () => {
+  const p = await load();
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure' });
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, OVERWORLD_KINDS);
+  kinds.setElsewhere(EVERY_KIND);
+  await p.tick();
+  // As a saved view puts it: the End's cities shown, its gateways and a kind no server has hidden.
+  p.settings.set('layers', { ...p.settings.get('layers'), 'structures#kinds': { only: null, hidden: ['end_gateway', 'kind_of_a_later_version'], shown: ['end_city'] } });
+  same(p.layers.adopt(['structures/recorded']), []);
+  await p.tick();
+  same(kindLines(p).filter((name) => name !== 'Known').sort(), ['Ocean Monuments', 'Ruined Portals', 'Strongholds', 'Villages']);
+  assert.match(p.status(), /^All \d+ shown/);
+  assert.equal(p.state('Structures'), 'true');
+  assert.equal(kinds.shows('village'), true);
+  // And in the End the view is what it says.
+  kinds.setItems(END_KINDS);
+  await p.tick();
+  assert.equal(p.state('Structures', 'End Cities'), 'true');
+  assert.equal(p.state('Structures', 'End Gateways'), 'false');
+});
+
 test('the list always has one stop for the Tab key, on a line that is showing', async () => {
   const p = await load();
   const showing = (check) => check.offsetParent !== null;

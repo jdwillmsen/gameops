@@ -69,6 +69,12 @@ type structuresResponse struct {
 		Agree    int    `json:"agree"`
 		Disagree int    `json:"disagree"`
 	} `json:"kinds"`
+	Catalog []struct {
+		Kind       structures.Kind `json:"kind"`
+		Dimensions []string        `json:"dimensions"`
+		Asked      bool            `json:"asked"`
+		Quiet      bool            `json:"quiet"`
+	} `json:"catalog"`
 	Spawn *struct {
 		X, Z int32
 		Y    *int32
@@ -154,9 +160,31 @@ func TestStructuresKeepRecordedAndPredictedApartByDimension(t *testing.T) {
 	}
 
 	// A dimension with nothing in it is empty lists, not nulls.
-	_, body := structuresOf(t, s, "/api/structures?dimension=end")
+	end, body := structuresOf(t, s, "/api/structures?dimension=end")
 	if !strings.Contains(body, `"recorded":[]`) || !strings.Contains(body, `"predicted":[]`) {
 		t.Errorf("end = %s", body)
+	}
+
+	// Every answer says where each kind can be, whichever dimension was
+	// asked for, so a page can list a dimension's kinds before any is
+	// found and keep the others' out of the list.
+	in := map[structures.Kind][]string{}
+	for _, k := range end.Catalog {
+		in[k.Kind] = k.Dimensions
+		if (k.Kind == structures.Stronghold && !k.Asked) || (k.Kind == structures.Village && !k.Quiet) || (k.Kind == structures.Monument && (k.Asked || k.Quiet)) {
+			t.Errorf("catalog entry %+v", k)
+		}
+	}
+	if len(end.Catalog) != len(structures.Kinds) || len(end.Catalog) != len(nether.Catalog) || len(end.Catalog) != len(overworld.Catalog) {
+		t.Errorf("catalog lists %d kinds of %d", len(end.Catalog), len(structures.Kinds))
+	}
+	if !slices.Equal(in[structures.Fortress], []string{"nether"}) || !slices.Equal(in[structures.Monument], []string{"overworld"}) {
+		t.Errorf("catalog puts kinds in %v", in)
+	}
+	for kind, dimensions := range in {
+		if len(dimensions) == 0 {
+			t.Errorf("%s is listed in no dimension", kind)
+		}
 	}
 }
 

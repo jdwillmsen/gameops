@@ -36,14 +36,17 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		"this terrain is not generated yet.",
 		"the game has no record of one here: it keeps one only for a village a player has been near.",
 		// Struck through only where the world would have recorded one.
-		"const doubted = p.generated && !RECORDED_LATE.has(p.kind);",
+		"const doubted = p.generated && !quiet(p.kind);",
+		// Which kinds are so is the server's to say, and the village's for
+		// a server that does not.
+		"const quiet = (kind) => (catalog !== null && catalog.has(kind) ? catalog.get(kind).quiet : RECORDED_LATE.has(kind));",
 		".addTo(groupOf(sort, p.kind));",
 		// Each kind is listed once, with how many are known and under it
 		// how many more are predicted or possible, and why none is.
 		"count: surveyed ? n.recorded : null,",
 		"const more = [...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ');",
 		"const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';",
-		"if (kindList) kindList.setItems(kindsNow());",
+		"kindList.setItems(kindsNow());",
 		// A mark is on the map when its kind and its certainty both are,
 		// so one kind alone is that kind however sure the map is of it.
 		"const want = on(sort) && kindOn(kind);",
@@ -58,6 +61,7 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		// And for a panel from before it listed kinds.
 		"{ shows: (kind) => !OPT_IN.has(kind), onChange() {} };",
 		"shows: (kind) => on('recorded') && kindOn(kind),",
+		"asked: () => (on('recorded') ? [...OPT_IN].filter((kind) => choice.shows(kind)) : []),",
 		// One player's answer is not kept for the next to log in.
 		"forgetDetail();\n      if (sheet && view.dialog.open) view.dialog.close();",
 	} {
@@ -75,6 +79,7 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 	for _, need := range []string{
 		// And listed by a search only for a viewer with that row on.
 		"app.structures.shows('stronghold') ? '&strongholds=1' : ''",
+		"app.structures.asked().length > 0 ? `&asked=${encodeURIComponent(app.structures.asked().join(','))}` : ''",
 		"const UNSURE = { predicted: 'predicted', candidate: 'possible site' };",
 		"return Object.hasOwn(UNSURE, hit.certainty) ? `${what} (${UNSURE[hit.certainty]})` : what;",
 	} {
@@ -143,5 +148,38 @@ func TestAStructureAskedForDoesNotOpenLater(t *testing.T) {
 	// Nothing sets it but the one function that also starts its clock.
 	if n := len(regexp.MustCompile(`\bwanted = `).FindAll(js, -1)); n != 3 {
 		t.Errorf("structures.js assigns wanted in %d places, want its declaration, want() and unwant()", n)
+	}
+}
+
+// The kinds listed are the ones the dimension on screen can hold, as the
+// server says and not as this script supposes: a kind of another dimension
+// is no row here, and its choice is kept for when it is one.
+func TestKindsAreListedByTheDimensionTheServerPutsThemIn(t *testing.T) {
+	js := usesNoMarkupSink(t, "structures.js")
+	for _, need := range []string{
+		"learn(data.catalog);",
+		"next.set(k.kind, { dimensions, asked: k.asked === true, quiet: k.quiet === true });",
+		// Off until asked for from before its row is drawn.
+		"if (k.asked === true) OPT_IN.add(k.kind);",
+		"if (app.layers.facet) app.layers.facet('structures', 'kinds', { off: [...OPT_IN] });",
+		// Every kind in every dimension for a server that says nothing.
+		"const kindsIn = (dimension) => (catalog === null ? Object.keys(KINDS) : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));",
+		"for (const kind of kindsIn(dimension)) {",
+		"if (kindList.setElsewhere && catalog !== null) kindList.setElsewhere([...catalog.keys()]);",
+		// And the server is told this page lists what it is told to.
+		"`api/structures?dimension=${encodeURIComponent(dimension)}&kinds=all`",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("structures.js no longer has %s", need)
+		}
+	}
+	layers := read(t, "layers.js")
+	for _, need := range []string{
+		"const all = new Set([...known(f), ...[...f.rows].flatMap((row) => row.elsewhere)]);",
+		"row.elsewhere = Array.isArray(ids) ? ids.filter(text).slice(0, MAX_ELSEWHERE) : [];",
+	} {
+		if !bytes.Contains(layers, []byte(need)) {
+			t.Errorf("layers.js no longer has %s", need)
+		}
 	}
 }
