@@ -119,6 +119,10 @@
   // the live markers both can, and two thousand pictures are two thousand
   // stamps, not two thousand elements.
   const renderer = app.liveRenderer || L.canvas({ padding: 0.5 });
+  // The broken ring keeps its size through a zoom as the picture in it
+  // does, where the script that draws the pictures can say how.
+  const steady = icons.steady || ((layer, draw) => draw());
+  if (!app.liveRenderer && icons.steadies) icons.steadies(renderer);
 
   // Names reach here from the game and from chat, where players choose
   // them, and Leaflet treats a string given to a tooltip as HTML. An
@@ -201,15 +205,17 @@
       // Without a picture it is a circle, which Leaflet breaks itself.
       if (!this.options.sprite || !this._renderer._drawing || this._empty()) return;
       const ctx = this._renderer._ctx;
-      ctx.save();
-      ctx.globalAlpha = 1;
-      ctx.beginPath();
-      ctx.arc(this._point.x, this._point.y, this._radius + SAVED_RING, 0, Math.PI * 2);
-      ctx.setLineDash(SAVED_DASH);
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = this.options.color;
-      ctx.stroke();
-      ctx.restore();
+      steady(this, () => {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(this._point.x, this._point.y, this._radius + SAVED_RING, 0, Math.PI * 2);
+        ctx.setLineDash(SAVED_DASH);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = this.options.color;
+        ctx.stroke();
+        ctx.restore();
+      });
     },
   });
 

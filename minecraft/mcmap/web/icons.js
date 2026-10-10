@@ -497,8 +497,90 @@
     const h = worn.height / DENSITY;
     // Leaflet leaves the last shape's opacity set on the context.
     ctx.globalAlpha = 1;
-    ctx.drawImage(worn, Math.round(p.x - w / 2), Math.round(p.y - h / 2 - lift), w, h);
+    const k = layer._renderer._steady || 1;
+    if (k === 1) {
+      ctx.drawImage(worn, Math.round(p.x - w / 2), Math.round(p.y - h / 2 - lift), w, h);
+      return;
+    }
+    // On a stretched canvas, at the size that comes out as its own: see
+    // steady().
+    ctx.drawImage(worn, p.x - (w / 2) * k, p.y - (h / 2 + lift) * k, w * k, h * k);
   }
+
+  // While a zoom is animated, and through a pinch, Leaflet does not draw
+  // the canvas again: it stretches the one it has, and everything on it
+  // swells or shrinks until the zoom is over, where a marker that is an
+  // element of the page only moves. So for as long as a canvas is
+  // stretched it is drawn again each frame, with every marker made
+  // smaller or larger about its own point by as much as the canvas is
+  // stretched the other way, and what is on the screen stays the size
+  // the viewer chose. _steady is this script's own field on Leaflet's
+  // renderer: how much a marker is to be drawn at, 1 when at rest.
+  function steady(layer, draw) {
+    const k = layer._renderer._steady;
+    if (!k || k === 1) {
+      draw();
+      return;
+    }
+    const ctx = layer._renderer._ctx;
+    const p = layer._point;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.scale(k, k);
+    ctx.translate(-p.x, -p.y);
+    // What is drawn inside is drawn as at rest, the context doing the rest.
+    layer._renderer._steady = 1;
+    try {
+      draw();
+    } finally {
+      layer._renderer._steady = k;
+      ctx.restore();
+    }
+  }
+
+  // How far a canvas is stretched now, which only the browser knows part
+  // way through an animation it is running.
+  function stretch(canvas) {
+    if (typeof DOMMatrixReadOnly !== 'function') return 1;
+    const said = getComputedStyle(canvas).transform;
+    const a = said && said !== 'none' ? new DOMMatrixReadOnly(said).a : 1;
+    return Number.isFinite(a) && a > 0 ? a : 1;
+  }
+
+  const steadied = new Set();
+  let steadying = 0;
+  function steadyAll() {
+    steadying = 0;
+    let stretched = false;
+    for (const renderer of steadied) {
+      if (!renderer._map || !renderer._container) continue;
+      const by = stretch(renderer._container);
+      // Within a thousandth is at rest: the browser's arithmetic is not exact.
+      const k = Math.abs(by - 1) < 0.001 ? 1 : 1 / by;
+      if (k !== 1) stretched = true;
+      if (k === (renderer._steady || 1)) continue;
+      renderer._steady = k;
+      // The whole of it: _redrawBounds and _redraw are Leaflet internals,
+      // like those below.
+      renderer._redrawBounds = null;
+      renderer._redraw();
+    }
+    if (stretched || app.map._animatingZoom) steadying = requestAnimationFrame(steadyAll);
+  }
+  // A layer's canvas whose markers are drawn through steady().
+  function steadies(renderer) {
+    steadied.add(renderer);
+  }
+  const steadyFrom = () => {
+    if (steadying === 0 && steadied.size > 0) steadying = requestAnimationFrame(steadyAll);
+  };
+  // zoomanim starts an animated zoom and zoom is every step of a pinch.
+  app.map.on('zoomanim zoom', steadyFrom);
+  // The end of a zoom draws every canvas afresh, unstretched, before the
+  // next frame would have said so.
+  app.map.on('zoomend', () => {
+    for (const renderer of steadied) renderer._steady = 1;
+  });
 
   // The ring round a marker in one of its states: light on dark, so it
   // shows on any terrain.
@@ -548,9 +630,12 @@
       this._pxBounds.extend(this._point.add([this._radius + HOVER_REACH, this._radius + HOVER_REACH]));
     },
     _updatePath() {
-      if (!this.options.sprite) L.CircleMarker.prototype._updatePath.call(this);
-      else if (this._renderer._drawing && !this._empty()) stamp(this, this.options.sprite);
-      if (this._hovered && this._renderer._drawing && !this._empty()) halo(this._renderer._ctx, this._point.x, this._point.y, this._radius, 'hovered');
+      if (!this._renderer._drawing || this._empty()) return;
+      // A picture is one stamp, which sizes itself; a circle and a ring
+      // are Leaflet's and this script's strokes, sized by the context.
+      if (this.options.sprite) stamp(this, this.options.sprite);
+      else steady(this, () => L.CircleMarker.prototype._updatePath.call(this));
+      if (this._hovered) steady(this, () => halo(this._renderer._ctx, this._point.x, this._point.y, this._radius, 'hovered'));
     },
   });
 
@@ -759,6 +844,8 @@
     picture,
     paint,
     stamp,
+    steady,
+    steadies,
     Stamped,
     tag,
     Tagged,
