@@ -947,12 +947,14 @@ by the game's name for it, in its row (Ocean Monuments) and its tooltip. A
 known structure's picture sits on a solid square framed in the kind's
 colour, over the box the world recorded; a predicted one's in a hollow,
 dashed circle; a possible one's in a dotted circle, faint until the pointer
-is on it. Until a picture is there its place is taken by the kind's
-letter, as F, M, O, H, V, S or T. A kind this page has no row for is still
-named, by its id made into words. A stronghold and a trial chamber are
-known another way, [by their blocks](#found-by-their-blocks): the box is
-dashed, and the tooltip says `found by its blocks` where another says
-`recorded by the world`.
+is on it. Until a picture is there its place is taken by a letter of the
+kind's own, as F for a fortress or M for a monument. A kind this page has
+no letter for is still named, by its id made into words, and listed if
+the server lists it. Most kinds are known another way, [by their
+blocks](#found-by-their-blocks): the box is dashed, and the tooltip says
+`found by its blocks` where another says `recorded by the world`. A site
+one of the world's own explorer maps points at says so in place of
+`predicted from the seed`.
 
 The panel has a row for each layer, Known, Predicted and Possible, and one
 for each kind that filters all three. A kind's row counts everything of the
