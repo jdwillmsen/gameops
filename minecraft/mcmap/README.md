@@ -974,8 +974,9 @@ gets the seven kinds there were then, in every dimension, as it always
 did. A kind's switch is one choice wherever it is listed. Hiding the
 villages, going to the End and coming back leaves them hidden; a kind
 that is no row here is not counted among what is hidden here, so the
-panel's "N of M shown" and its Reset are about the lines on screen; a
-saved view or a link that names a kind this dimension has none of shows
+panel's "N of M shown" is about the lines on screen, while its Reset
+puts every kind back as it first was, those of the other dimensions with
+the rest; a saved view or a link that names a kind this dimension has none of shows
 no line for it and is as it says once the map is somewhere that has one;
 and a choice made of a kind that is only ever listed in another dimension
 is kept, where an id in no list for a month would otherwise be dropped as
@@ -1825,7 +1826,11 @@ version's seed disagreeing with the rule. Each seed's chunks are judged
 apart: where three or more structures of a kind are in the chunks of one
 seed and the rule is not borne out by them, the rule is set aside for
 that seed, nothing is predicted in its chunks, and the kind stands or
-falls by the rest. `mcmap_structures_generation_seeds` is how many seeds
+falls by the rest. Where the rest bears the rule out, the chunks of the
+seed set aside are not counted against the seeds either: what an older
+game did otherwise says nothing of whether they are right. A kind
+contradicted wherever it can be judged still puts the seed in doubt.
+`mcmap_structures_generation_seeds` is how many seeds
 the world's chunks name, and `mcmap_structures_chunks_without_seed` how
 many chunks name none: 2 and 4,619 here. The dictionary is at most 32 MB
 and 65,536 entries, and at most eight seeds are told apart; one that

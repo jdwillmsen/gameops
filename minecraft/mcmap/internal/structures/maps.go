@@ -100,12 +100,12 @@ func (c *contents) point(t target) {
 	if _, held := c.targets[t]; held {
 		return
 	}
-	if len(c.targets) >= maxMapTargets {
-		c.stats.TargetsOver++
-		return
-	}
 	if t.site.ChunkX < -maxCoordinate/16 || t.site.ChunkX > maxCoordinate/16 || t.site.ChunkZ < -maxCoordinate/16 || t.site.ChunkZ > maxCoordinate/16 {
 		c.stats.Skipped++
+		return
+	}
+	if len(c.targets) >= maxMapTargets {
+		c.stats.TargetsOver++
 		return
 	}
 	c.targets[t] = struct{}{}

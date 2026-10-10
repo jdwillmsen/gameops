@@ -476,6 +476,9 @@
       const data = await res.json();
       if (pending !== dimension) return;
       available = true;
+      // Which kinds a dimension has is true before any survey has found
+      // one, and is what the list is drawn from meanwhile.
+      learn(data.catalog);
       if (data.surveyed) {
         draw(dimension, data);
       } else {

@@ -1178,7 +1178,18 @@ func compare(
 			}
 			res.found = kept
 		}
-		if p.Exact() {
+		switch {
+		case !p.Exact():
+		case kind.SetAside > 0 && kind.borneAgree >= minEvidence:
+			// The rule is borne out by the chunks of one seed and
+			// contradicted by those of another: a game placed the kind
+			// another way then, which says nothing of whether the seeds
+			// are right.
+			check.Agree += kind.borneAgree
+			check.Disagree += kind.borneDisagree
+		default:
+			// Contradicted wherever it can be judged, it is the seed that
+			// is in doubt.
 			check.Agree += kind.Agree
 			check.Disagree += kind.Disagree
 		}

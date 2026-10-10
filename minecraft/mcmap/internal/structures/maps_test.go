@@ -87,8 +87,7 @@ func TestMaps_KeepOnlySoManyPlaces(t *testing.T) {
 // three: the rule is checked by them, and the one still to be built is on
 // the map as more than a possible site.
 func TestTake_ChecksTheMansionRuleByTheWorldsOwnMaps(t *testing.T) {
-	w, _, newer := twoSeeds(t)
-	_ = newer
+	w, _, _ := twoSeeds(t)
 	for i, region := range [][2]int32{{2, 2}, {3, 2}, {2, 3}} {
 		site, _ := mansionSpread.site(testSeed, region[0], region[1])
 		w.records[fmt.Sprintf("map_%d", i)] = mapRecord(0, mark(markMansion, site.ChunkX*16+8, site.ChunkZ*16+8))
