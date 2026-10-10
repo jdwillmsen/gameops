@@ -220,6 +220,11 @@
   // on the canvas: switching the whole map over would change how everything
   // else on it draws.
   const renderer = L.canvas({ padding: 0.5, tolerance: matchMedia('(pointer: coarse)').matches ? TOUCH_TOLERANCE : 0 });
+  // Leaflet stretches the canvas as one picture while a zoom is animated,
+  // and a marker on it would swell and shrink with it; drawn through
+  // this, it keeps its size as a marker that is an element does.
+  const steady = icons.steady || ((layer, draw) => draw());
+  if (icons.steadies) icons.steadies(renderer);
 
   // A head on its backing, bordered in the player's colour.
   function paintHead(border) {
@@ -257,8 +262,11 @@
       this._pxBounds = L.bounds(this._point.subtract([reach, reach]), this._point.add([reach, reach]));
     },
     _updatePath() {
+      if (!this._renderer._drawing || this._empty()) return;
+      steady(this, () => this._arrow());
+    },
+    _arrow() {
       const r = this._renderer;
-      if (!r._drawing || this._empty()) return;
       const ctx = r._ctx;
       const p = this._point;
       const size = this._radius;
@@ -972,7 +980,12 @@
 
   const INSPECTED = { color: CATEGORIES.players, weight: 2, dashArray: '4 4' };
   const FOLLOWED = { color: ME, weight: 3, dashArray: null };
-  const halo = L.circleMarker([0, 0], { renderer, interactive: false, fill: false, opacity: 1, ...INSPECTED });
+  const Ring = L.CircleMarker.extend({
+    _updatePath() {
+      steady(this, () => L.CircleMarker.prototype._updatePath.call(this));
+    },
+  });
+  const halo = new Ring([0, 0], { renderer, interactive: false, fill: false, opacity: 1, ...INSPECTED });
 
   const say = (node, s) => {
     if (node.textContent !== s) node.textContent = s;

@@ -29,6 +29,18 @@ function asked(style, size, dpr, zoom) {
   return { mob: style === 'dots' || zoom < -1 ? null : sides.mob, chest: style === 'dots' || zoom < -2 ? null : sides.chest };
 }
 
+// A marker of the script's own class, on a canvas stretched as Leaflet
+// stretches it part way through a zoom, drawn as Leaflet would draw it.
+function drawn(s, Class, sprite, stretch, options = {}) {
+  const renderer = s.L.canvas({});
+  renderer._drawing = true;
+  renderer._steady = 1 / stretch;
+  const marker = new Class([0, 0], { renderer, radius: 12, sprite, ...options });
+  marker._point = s.L.point(300, 200);
+  marker._updatePath();
+  return renderer._ctx;
+}
+
 test('a picture is the size chosen in every style, at every size, density and zoom', async () => {
   for (const dpr of DENSITIES) {
     for (const style of STYLES) {
@@ -53,6 +65,79 @@ test('a picture is the size chosen in every style, at every size, density and zo
       }
     }
   }
+});
+
+test('through a zoom a marker stays the size it was, however far the canvas is stretched', async () => {
+  for (const dpr of [1, 2]) {
+    for (const style of STYLES) {
+      for (const size of SIZES) {
+        const s = await stage({ dpr, look: { style, size } });
+        s.icons.mob('cow', '#f00');
+        await s.settle();
+        const sprite = s.icons.mob('cow', '#f00');
+        const density = s.icons.density();
+        // A canvas of twice the pixels is under a transform of two, as Leaflet puts it.
+        for (const stretch of [1, 2 ** 0.37, 2, 4, 8, 0.5, 0.25]) {
+          const at = `${style} ${size} at density ${dpr}, stretched ${stretch}`;
+          for (const Class of [s.icons.Stamped, s.icons.Tagged]) {
+            const ctx = drawn(s, Class, sprite, stretch);
+            if (sprite) {
+              assert.equal(ctx.drawn.length, 1, at);
+              const [d] = ctx.drawn;
+              near(d.w * stretch, sprite.width / density, `width on the screen, ${at}`);
+              near(d.x + d.w / 2, 300, `still about its own point, ${at}`);
+              near(d.y + d.h / 2, 200, `still about its own point, ${at}`);
+            } else {
+              assert.equal(ctx.arcs.length, 1, at);
+              near(ctx.arcs[0].r * stretch, 12, `a dot's radius on the screen, ${at}`);
+              near(ctx.arcs[0].x, 300, `a dot about its own point, ${at}`);
+            }
+          }
+        }
+      }
+    }
+  }
+});
+
+test('a name over a marker keeps its size and its distance through a zoom', async () => {
+  const s = await stage({ look: { style: 'plates' } });
+  s.icons.mob('cow', '#f00');
+  await s.settle();
+  const sprite = s.icons.mob('cow', '#f00');
+  const tag = s.icons.tag('Daisy', '#fff');
+  for (const stretch of [1, 2, 0.5]) {
+    const ctx = drawn(s, s.icons.Tagged, sprite, stretch, { tag });
+    assert.equal(ctx.drawn.length, 2);
+    const [picture, name] = ctx.drawn;
+    near(name.w * stretch, tag.width, `the name's width, stretched ${stretch}`);
+    near((picture.y + picture.h / 2 - (name.y + name.h / 2)) * stretch, 12 + 3 + tag.height / 2, `how far over the marker, stretched ${stretch}`);
+  }
+});
+
+test('a stretched canvas is drawn again each frame, and once more at rest when the zoom ends', async () => {
+  const s = await stage({});
+  const renderer = s.L.canvas({});
+  s.icons.steadies(renderer);
+  s.map._animatingZoom = true;
+  s.map.fire('zoomanim');
+  for (const by of [1.2, 1.7, 2]) {
+    s.stretched.set(renderer._container, by);
+    const before = renderer.redraws;
+    s.frame();
+    near(renderer._steady, 1 / by, `stretched ${by}`);
+    assert.equal(renderer.redraws, before + 1);
+  }
+  // The same stretch a second frame running is nothing to draw again.
+  const settled = renderer.redraws;
+  s.frame();
+  assert.equal(renderer.redraws, settled);
+  s.map._animatingZoom = false;
+  s.map.fire('zoomend');
+  assert.equal(renderer._steady, 1);
+  s.stretched.delete(renderer._container);
+  s.frame();
+  s.frame();
+  assert.equal(renderer._steady, 1);
 });
 
 // --- the middle of the map that can be seen ---------------------------------

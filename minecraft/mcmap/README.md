@@ -914,6 +914,18 @@ all in view, dragging the map: 244 frames, median 16.7 ms, longest
 16.8 ms, no long task; one whole repaint of the canvas, flushed, took a
 median 4.0 ms.
 
+Leaflet does not draw a canvas again while a zoom is animated, or through
+a pinch: it stretches the one it has, so everything on it would swell to
+twice or four times its size and drop back when the zoom ended, while a
+structure's mark, which is an element, only moved. For as long as the
+canvas is stretched it is drawn again each frame instead, every marker
+smaller or larger about its own point by as much as the canvas is
+stretched the other way, so a picture, a dot, a ring and a name are on
+the screen at the size chosen all the way through. With the same 3,017
+markers on the canvas, zooming in and out by the wheel: 253 frames,
+median 16.7 ms, longest 16.8 ms, no long task; with large pictures at
+the largest size, a median 16.7 ms and one frame of 50 ms.
+
 **Limits.** Per dimension, the 5,000 beds, 5,000 containers and 1,000 named
 mobs nearest the origin are kept and the rest counted; the layer's row says how
 many are not shown. A name is cut to 64 characters, loses the game's
