@@ -589,6 +589,45 @@ func TestTheListingIsNotAskedForAgainBeforeItsTurnAcrossRestarts(t *testing.T) {
 	}
 }
 
+// A fetch that was given its listing and then failed on a file is tried
+// again a minute later, and must not then be refused for having listed so
+// lately: the listing it was given is used again, at no request.
+func TestAFetchThatFailedAfterItsListingIsTriedAgainWithTheSameListing(t *testing.T) {
+	s := newSamples(t)
+	var listings atomic.Int64
+	var up atomic.Bool
+	inner := s.srv.Config.Handler
+	s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/list/") {
+			listings.Add(1)
+		}
+		if strings.HasSuffix(r.URL.Path, "/resource_pack/entity/cow.entity.json") && !up.Load() {
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	})
+	source := s.source()
+	source.State = filepath.Join(t.TempDir(), ListingState)
+	if _, err := source.Fetch(t.Context()); err == nil {
+		t.Fatal("the fetch did not fail; the test proves nothing")
+	}
+	up.Store(true)
+	set, err := source.Fetch(t.Context())
+	if err != nil || len(set.Mobs) != 3 {
+		t.Fatalf("the fetch tried again was refused or came short: %v", err)
+	}
+	if listings.Load() != 1 {
+		t.Errorf("%d listings for a fetch and its retry, want the one", listings.Load())
+	}
+	// A restart has no listing to use again, and waits its turn.
+	restarted := s.source()
+	restarted.State = source.State
+	if _, err := restarted.Fetch(t.Context()); err == nil || listings.Load() != 1 {
+		t.Errorf("after a restart: %v, %d listings", err, listings.Load())
+	}
+}
+
 func TestTheWaitAfterAListingGrowsAndIsBounded(t *testing.T) {
 	now := time.Now()
 	failed := errors.New("no route")
