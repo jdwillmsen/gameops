@@ -28,7 +28,7 @@ func TestEveryNameOnThePageComesFromTheNamesScript(t *testing.T) {
 	uses := map[string][]string{
 		"live.js":       {"names.mob(naming('labelMobs') === 'never' ? '' : marker.options.name, marker.options.type)", "names.kindOf(picked.type, picked.baby)", "document.addEventListener('mcmap:names',"},
 		"markers.js":    {"names.bed(m.c)", "names.holder(m.k, m.c, m.t)", "names.mob(m.n, m.k, m.b)", "document.addEventListener('mcmap:names',"},
-		"structures.js": {"names.structure(s.kind)", "names.structure(p.kind)", "names.plural(names.structure(kind))", "document.addEventListener('mcmap:names',"},
+		"structures.js": {"names.structure(s.kind)", "names.structure(p.kind)", "many(names.structure(kind))", "document.addEventListener('mcmap:names',"},
 		"search.js":     {"names.bed(hit.colour)", "names.holder(detail, hit.colour, hit.trapped)", "names.structure(detail)", "document.addEventListener('mcmap:names',"},
 	}
 	// The ways a script has made words of an id by itself.

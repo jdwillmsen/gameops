@@ -75,25 +75,25 @@ func TestTake_AKindTheWorldContradictsIsWithheldAlone(t *testing.T) {
 	if n := strings.Count(log.String(), "kind=monument state=verified"); n != 1 {
 		t.Errorf("the monument rule's standing was logged %d times, want once", n)
 	}
-	if k := got.Check.Kinds[Fortress]; k.State != SeedRefuted || k.Agree != 3 || k.Disagree != 4 || k.Findings != 4 {
+	if k := got.Check.Kinds[Rule{Fortress, chunks.Nether}]; k.State != SeedRefuted || k.Agree != 3 || k.Disagree != 4 || k.Findings != 4 {
 		t.Errorf("fortress = %+v, want refuted with 3 explained, 4 not", k)
 	}
 	if n := len(got.Layers[chunks.Nether].Predicted); n != 0 {
 		t.Errorf("%d fortresses predicted by a rule the world contradicts", n)
 	}
-	if k := got.Check.Kinds[Monument]; k.State != SeedVerified {
+	if k := got.Check.Kinds[Rule{Monument, chunks.Overworld}]; k.State != SeedVerified {
 		t.Errorf("monument = %+v, want verified", k)
 	}
 	if len(got.Layers[chunks.Overworld].Predicted) == 0 {
 		t.Error("monuments are withheld because fortresses are")
 	}
-	if v := testutil.ToFloat64(metricKindVerified.WithLabelValues(string(Fortress))); v != 0 {
+	if v := testutil.ToFloat64(metricKindVerified.WithLabelValues("nether", string(Fortress))); v != 0 {
 		t.Errorf("mcmap_structures_kind_verified{fortress} = %v, want 0", v)
 	}
-	if v := testutil.ToFloat64(metricKindVerified.WithLabelValues(string(Monument))); v != 1 {
+	if v := testutil.ToFloat64(metricKindVerified.WithLabelValues("overworld", string(Monument))); v != 1 {
 		t.Errorf("mcmap_structures_kind_verified{monument} = %v, want 1", v)
 	}
-	if v := testutil.ToFloat64(metricDisagreements.WithLabelValues(string(Fortress))); v != 4 {
+	if v := testutil.ToFloat64(metricDisagreements.WithLabelValues("nether", string(Fortress))); v != 4 {
 		t.Errorf("mcmap_structures_prediction_disagreements{fortress} = %v, want 4", v)
 	}
 	if v := testutil.ToFloat64(metricSeedVerified); v != 1 {
@@ -186,7 +186,7 @@ func TestTake_TheBiomeDecidesWhatASiteIs(t *testing.T) {
 	if beside == 0 {
 		t.Error("no site beside the world to test with")
 	}
-	k := got.Check.Kinds[Monument]
+	k := got.Check.Kinds[Rule{Monument, chunks.Overworld}]
 	if k.Built != 3 || k.Empty != 1 || k.Findings != 1 {
 		t.Errorf("monument = %+v, want 3 built, 1 empty and that one a finding", k)
 	}
@@ -273,7 +273,7 @@ func TestTake_VillagesPlayersFoundedAreNothingAgainstTheRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := got.Check.Kinds[Village]
+	k := got.Check.Kinds[Rule{Village, chunks.Overworld}]
 	if k.State != SeedVerified || k.Agree != 3 || k.Disagree != 9 || k.Findings != 0 {
 		t.Errorf("village = %+v, want verified by 3 of 12 and no findings", k)
 	}
@@ -320,9 +320,24 @@ func TestKindCheck_Settle(t *testing.T) {
 		"a refuted seed refutes every kind":     {SeedRefuted, false, 9, 0, SeedRefuted},
 		"an unread seed leaves every kind open": {SeedUnknown, true, 9, 0, SeedUnknown},
 	} {
-		k := KindCheck{Agree: c.agree, Disagree: c.disagree}
+		k := KindCheck{Agree: c.agree, Disagree: c.disagree, borneAgree: c.agree, borneDisagree: c.disagree}
 		if k.settle(c.seed, c.founded); k.State != c.want {
 			t.Errorf("%s: %s, want %s", name, k.State, c.want)
+		}
+	}
+	// A rule is judged by the chunks of the seeds it has not been set
+	// aside for: those of a game version that placed the kind another way
+	// neither refute it elsewhere nor are counted for it.
+	for name, c := range map[string]struct {
+		k    KindCheck
+		want string
+	}{
+		"borne out where it is still used": {KindCheck{Agree: 9, Disagree: 20, SetAside: 1, borneAgree: 6, borneDisagree: 2}, SeedVerified},
+		"too few where it is still used":   {KindCheck{Agree: 5, Disagree: 20, SetAside: 1, borneAgree: 2}, SeedUnverified},
+		"set aside for every seed":         {KindCheck{Agree: 3, Disagree: 20, SetAside: 2}, SeedRefuted},
+	} {
+		if c.k.settle(SeedVerified, false); c.k.State != c.want {
+			t.Errorf("%s: %s, want %s", name, c.k.State, c.want)
 		}
 	}
 }
@@ -338,6 +353,7 @@ func TestCompare_BoundsEachKindAndKeepsTheNearest(t *testing.T) {
 			e.add(chunks.Pos{X: x, Z: z})
 		}
 	}
+	e.single = true
 	extents := map[chunks.Dimension]*extent{chunks.Overworld: e}
 	var recorded []Structure
 	for _, region := range [][2]int32{{0, 0}, {1, 0}, {0, 1}} {
@@ -346,7 +362,7 @@ func TestCompare_BoundsEachKindAndKeepsTheNearest(t *testing.T) {
 		o, _ := outpostSpread.site(testSeed, region[0], region[1])
 		recorded = append(recorded, Structure{Kind: Outpost, Box: Box{o.ChunkX * 16, 64, o.ChunkZ * 16, o.ChunkX*16 + 15, 85, o.ChunkZ*16 + 15}})
 	}
-	check, predicted, more := compare([]Predictor{monument{}, outpost{}}, testSeed, MaxPerLayer,
+	check, predicted, more := compare([]Predictor{monument{}, outpost{}}, []worldSeed{{whole: int64(testSeed), narrow: true}}, 0, MaxPerLayer,
 		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, extents, nil)
 	if check.State != SeedVerified {
 		t.Fatalf("check = %+v", check)

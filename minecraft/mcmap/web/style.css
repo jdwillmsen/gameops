@@ -58,6 +58,21 @@
   --kind-village: #6bbf59;
   --kind-stronghold: #58c4a4;
   --kind-trial-chamber: #e08a4a;
+  --kind-desert-pyramid: #d8c47a;
+  --kind-jungle-temple: #7fa860;
+  --kind-igloo: #a9d4e6;
+  --kind-trail-ruins: #b08968;
+  --kind-abandoned-camp: #e4a05c;
+  --kind-end-city: #c58fd0;
+  --kind-end-gateway: #7c6fd6;
+  --kind-exit-portal: #8f8aa6;
+  --kind-bastion: #c9a227;
+  --kind-ruined-portal: #9a5fd0;
+  --kind-mansion: #8a6a4a;
+  --kind-ancient-city: #2fa3a3;
+  --kind-shipwreck: #a7794f;
+  --kind-ocean-ruins: #4f9fb8;
+  --kind-buried-treasure: #e0c040;
 
   --grid-origin: rgba(110, 207, 122, 0.9);
   --grid-region: rgba(255, 255, 255, 0.45);
@@ -773,6 +788,21 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .dot.village { background: var(--kind-village); }
 .dot.stronghold { background: var(--kind-stronghold); }
 .dot.trial-chamber { background: var(--kind-trial-chamber); }
+.dot.desert-pyramid { background: var(--kind-desert-pyramid); }
+.dot.jungle-temple { background: var(--kind-jungle-temple); }
+.dot.igloo { background: var(--kind-igloo); }
+.dot.trail-ruins { background: var(--kind-trail-ruins); }
+.dot.abandoned-camp { background: var(--kind-abandoned-camp); }
+.dot.end-city { background: var(--kind-end-city); }
+.dot.end-gateway { background: var(--kind-end-gateway); }
+.dot.exit-portal { background: var(--kind-exit-portal); }
+.dot.bastion { background: var(--kind-bastion); }
+.dot.ruined-portal { background: var(--kind-ruined-portal); }
+.dot.mansion { background: var(--kind-mansion); }
+.dot.ancient-city { background: var(--kind-ancient-city); }
+.dot.shipwreck { background: var(--kind-shipwreck); }
+.dot.ocean-ruins { background: var(--kind-ocean-ruins); }
+.dot.buried-treasure { background: var(--kind-buried-treasure); }
 .key { width: 0.7rem; height: 0.7rem; }
 .key.recorded { background: var(--text); border: 1px solid var(--edge); border-radius: 2px; }
 .key.predicted { border: 1.5px dashed var(--text); border-radius: 50%; }

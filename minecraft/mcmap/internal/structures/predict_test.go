@@ -2,7 +2,10 @@ package structures
 
 import (
 	"reflect"
+	"slices"
 	"testing"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
 
 // The reference outputs of MT19937 seeded with 5489, from its authors.
@@ -95,6 +98,16 @@ func TestExplains(t *testing.T) {
 		"outpost at the first block":     {outpost{}, Box{-160, 64, 96, -145, 85, 111}, true},
 		"outpost turned to end there":    {outpost{}, Box{-175, 64, 81, -160, 85, 96}, true},
 		"outpost a chunk away":           {outpost{}, Box{-144, 64, 96, -129, 85, 111}, false},
+		"outpost with its tents":         {outpost{}, Box{-203, 64, 81, -145, 85, 150}, true},
+		"outpost's tents past any reach": {outpost{}, Box{-260, 64, 81, -145, 85, 150}, false},
+		"pyramid from the first block":   {desertPyramid{}, Box{-160, 62, 96, -140, 76, 116}, true},
+		"pyramid known by its chests":    {desertPyramid{}, Box{-151, 51, 105, -149, 51, 107}, true},
+		"pyramid a chunk over":           {desertPyramid{}, Box{-144, 62, 96, -124, 76, 116}, false},
+		"temple inside the chunk":        {jungleTemple{}, Box{-160, 64, 96, -149, 73, 110}, true},
+		"temple in the next chunk":       {jungleTemple{}, Box{-144, 64, 96, -133, 73, 110}, false},
+		"igloo inside the chunk":         {igloo{}, Box{-160, 69, 96, -154, 73, 103}, true},
+		"igloo known by its basement":    {igloo{}, Box{-164, 40, 100, -164, 40, 100}, true},
+		"igloo two chunks over":          {igloo{}, Box{-128, 69, 96, -122, 73, 103}, false},
 		"hut inside the chunk":           {witchHut{}, Box{-160, 85, 96, -154, 91, 104}, true},
 		"hut in the next chunk":          {witchHut{}, Box{-144, 85, 96, -138, 91, 104}, false},
 		"village round the site":         {villageSite{}, Box{-190, 60, 70, -120, 80, 140}, true},
@@ -147,9 +160,59 @@ func TestAllows(t *testing.T) {
 		"village in a grove":            {villageSite{}, biomeGrove, false},
 		"hut in a swamp":                {witchHut{}, biomeSwamp, true},
 		"hut in a mangrove swamp":       {witchHut{}, 191, false},
+		"pyramid in a desert":           {desertPyramid{}, biomeDesert, true},
+		"pyramid in a swamp":            {desertPyramid{}, biomeSwamp, false},
+		"temple in a jungle":            {jungleTemple{}, biomeJungle, true},
+		"temple in a desert":            {jungleTemple{}, biomeDesert, false},
+		"igloo in snowy taiga":          {igloo{}, biomeSnowyTaiga, true},
+		"igloo in plain taiga":          {igloo{}, biomeTaiga, false},
 	} {
 		if got := c.p.Allows(c.biome); got != c.want {
 			t.Errorf("%s: Allows = %v, want %v", name, got, c.want)
 		}
+	}
+}
+
+// Four kinds share the witch hut's sites, and the biome under a site says
+// which is built there. Until a chunk is finished nothing says which, so a
+// site in country not generated is offered as one of them and not as all.
+func TestKindsThatShareSitesAreOfferedOnlyWhereTheBiomeIsKnown(t *testing.T) {
+	for _, p := range []Predictor{desertPyramid{}, jungleTemple{}, igloo{}} {
+		if got := traitsOf(p); !got.FinishedOnly || !got.Quiet {
+			t.Errorf("%s: %+v, want offered in finished chunks only, and an empty site no finding", p.Kind(), got)
+		}
+		hut, _ := witchHut{}.Sites(7, Area{-200, -200, 200, 200}, 1000)
+		own, _ := p.Sites(7, Area{-200, -200, 200, 200}, 1000)
+		if len(own) == 0 || !slices.Equal(hut, own) {
+			t.Errorf("%s: %d sites, not the witch hut's %d", p.Kind(), len(own), len(hut))
+		}
+	}
+	if got := traitsOf(monument{}); got != (Traits{}) {
+		t.Errorf("a monument, which is recorded where it is built, has %+v", got)
+	}
+	// Three pyramids on their sites bear the rule out. A finished desert
+	// site with none is offered, plainly; one not generated is not.
+	e := newExtent(chunks.Pos{})
+	e.single = true
+	sites, _ := desertPyramid{}.Sites(7, Area{-200, -200, 200, 200}, 1000)
+	var recorded []Structure
+	for _, site := range sites[:3] {
+		e.add(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		e.finish(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		recorded = append(recorded, Structure{Kind: DesertPyramid, Box: Box{site.ChunkX * 16, 62, site.ChunkZ * 16, site.ChunkX*16 + 20, 76, site.ChunkZ*16 + 20}})
+	}
+	bare := sites[3]
+	e.add(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
+	e.finish(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
+	check, predicted, _ := compare([]Predictor{desertPyramid{}}, []worldSeed{{whole: 7, narrow: true}}, 0, MaxPerLayer,
+		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, map[chunks.Dimension]*extent{chunks.Overworld: e},
+		func(chunks.Dimension, int32, int32) (uint32, bool) { return biomeDesert, true })
+	k := check.Kinds[Rule{DesertPyramid, chunks.Overworld}]
+	if k.State != SeedVerified || k.Agree != 3 || k.Empty != 1 || k.Findings != 0 || check.Total != 0 {
+		t.Fatalf("pyramids = %+v with %d findings, want verified and the empty site no finding", k, check.Total)
+	}
+	got := predicted[chunks.Overworld]
+	if len(got) != 1 || siteOf(got[0]) != bare || !got[0].Generated || got[0].Candidate {
+		t.Errorf("predicted %+v, want the one finished site with none and no site in country not generated", got)
 	}
 }

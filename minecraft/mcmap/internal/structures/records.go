@@ -74,6 +74,8 @@ func (b Box) within(minX, minZ, maxX, maxZ int32) bool {
 type piece struct {
 	kind Kind
 	box  Box
+	// variant is which of several a kind that comes in several is.
+	variant string
 }
 
 var errRecord = errors.New("spawn area record is not a count followed by that many areas")
@@ -103,7 +105,7 @@ func decode(at chunks.Pos, value []byte) (pieces []piece, unknown, malformed int
 			!box.within(at.X*16, at.Z*16, at.X*16+15, at.Z*16+15):
 			malformed++
 		default:
-			pieces = append(pieces, piece{kind, box})
+			pieces = append(pieces, piece{kind: kind, box: box})
 		}
 	}
 	return pieces, unknown, malformed, nil

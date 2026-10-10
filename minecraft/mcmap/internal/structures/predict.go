@@ -43,9 +43,50 @@ type Predictor interface {
 	Centre(site Site) (x, z int32)
 }
 
+// Traits is what else is true of how a kind is known, for the kinds it is
+// true of.
+type Traits struct {
+	// Quiet is set where nothing the kind is known by is sure to be there:
+	// a chest somebody has opened no longer says what it was. A finished
+	// site with nothing found is then no disagreement with the world.
+	Quiet bool
+	// DropEmpty is set where a finished site with nothing found is not
+	// offered at all, because such a site is empty more often than not.
+	DropEmpty bool
+	// FinishedOnly is set for a kind that is offered only in finished
+	// chunks, where the world can be asked: one with a site every few
+	// chunks, or one that shares its sites with other kinds, so that
+	// before the biome is known each site would be a mark for every one
+	// of them.
+	FinishedOnly bool
+}
+
+// A predictor that says more of its kind than every kind has to.
+type traited interface{ Traits() Traits }
+
+func traitsOf(p Predictor) Traits {
+	if t, ok := p.(traited); ok {
+		return t.Traits()
+	}
+	return Traits{}
+}
+
+// whole is a kind the game places with all 64 bits of the world seed,
+// which Sites, taking the low half, is then never asked for.
+type whole interface {
+	WholeSites(seed int64, area Area, limit int) (sites []Site, more int)
+}
+
+// dense is a kind whose sites are asked for a region at a time.
+type dense interface {
+	// Region is the side of its regions, in chunks.
+	Region() int32
+	SiteIn(seed uint32, regionX, regionZ int32) Site
+}
+
 // Predictors is every kind there is a predictor for. Each is served only
 // while the world's own records of that kind bear its rule out.
-var Predictors = []Predictor{fortress{}, monument{}, outpost{}, villageSite{}, witchHut{}}
+var Predictors = []Predictor{fortress{}, monument{}, outpost{}, villageSite{}, witchHut{}, desertPyramid{}, jungleTemple{}, igloo{}}
 
 // The game's ids for the biomes a kind is only built in.
 const (
@@ -54,7 +95,11 @@ const (
 	biomeTaiga           = 5
 	biomeSwamp           = 6
 	biomeSnowyPlains     = 12
+	biomeDesertHills     = 17
+	biomeJungle          = 21
+	biomeJungleHills     = 22
 	biomeDeepOcean       = 24
+	biomeSnowyTaiga      = 30
 	biomeSavanna         = 35
 	biomeDeepWarmOcean   = 41
 	biomeDeepLukewarm    = 43
@@ -223,6 +268,8 @@ func (monument) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, si
 
 // outpost: the watchtower's area is 16 blocks square with one corner on the
 // site chunk's first block; which corner depends on the way it is turned.
+// The tents and cages round it are recorded too by a newer game, as far as
+// outpostReach from that block.
 //
 // Its biomes are the game's list for it. The FWB world has outposts in
 // plains, snowy plains, desert and meadow, and no generated site in the
@@ -246,9 +293,14 @@ func (outpost) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 	return outpostSpread.sites(seed, area, limit, nil)
 }
 
+// outpostReach is how far from the tower's corner an outpost's recorded
+// boxes have been found, in blocks: 58 in the FWB world. A wrong seed's
+// site is inside one outpost's box in a hundred.
+const outpostReach = 80
+
 func (outpost) Explains(site Site, real Box) bool {
 	x, z := site.ChunkX*16, site.ChunkZ*16
-	return real.within(x-15, z-15, x+15, z+15) && real.MinX <= x && real.MaxX >= x && real.MinZ <= z && real.MaxZ >= z
+	return real.within(x-outpostReach, z-outpostReach, x+outpostReach, z+outpostReach) && real.MinX <= x && real.MaxX >= x && real.MinZ <= z && real.MaxZ >= z
 }
 
 func (outpost) Centre(site Site) (int32, int32) { return site.ChunkX * 16, site.ChunkZ * 16 }
@@ -316,3 +368,87 @@ func (witchHut) Explains(site Site, real Box) bool {
 }
 
 func (witchHut) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// The witch hut's sites are also those of desert pyramids, jungle temples
+// and igloos: the biome under a site says which of the four is built, and
+// each is built from the first block of the site's chunk.
+
+// desertPyramid: 21 blocks square, so it runs into the chunks beyond.
+type desertPyramid struct{}
+
+func (desertPyramid) Kind() Kind                  { return DesertPyramid }
+func (desertPyramid) Dimension() chunks.Dimension { return chunks.Overworld }
+func (desertPyramid) Exact() bool                 { return true }
+func (desertPyramid) Certain() bool               { return false }
+func (desertPyramid) Allows(biome uint32) bool {
+	return biome == biomeDesert || biome == biomeDesertHills
+}
+func (desertPyramid) Founded() bool  { return false }
+func (desertPyramid) Traits() Traits { return Traits{Quiet: true, FinishedOnly: true} }
+
+func (desertPyramid) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return witchHutSpread.sites(seed, area, limit, nil)
+}
+
+func (desertPyramid) Explains(site Site, real Box) bool {
+	x, z := site.ChunkX*16, site.ChunkZ*16
+	return real.within(x, z, x+20, z+20)
+}
+
+func (desertPyramid) Centre(site Site) (int32, int32) {
+	return site.ChunkX*16 + 10, site.ChunkZ*16 + 10
+}
+
+// jungleTemple: 12 blocks by 15, inside the site's chunk.
+type jungleTemple struct{}
+
+func (jungleTemple) Kind() Kind                  { return JungleTemple }
+func (jungleTemple) Dimension() chunks.Dimension { return chunks.Overworld }
+func (jungleTemple) Exact() bool                 { return true }
+func (jungleTemple) Certain() bool               { return false }
+func (jungleTemple) Allows(biome uint32) bool {
+	return biome == biomeJungle || biome == biomeJungleHills
+}
+func (jungleTemple) Founded() bool  { return false }
+func (jungleTemple) Traits() Traits { return Traits{Quiet: true, FinishedOnly: true} }
+
+func (jungleTemple) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return witchHutSpread.sites(seed, area, limit, nil)
+}
+
+func (jungleTemple) Explains(site Site, real Box) bool {
+	x, z := site.ChunkX*16, site.ChunkZ*16
+	return real.within(x, z, x+15, z+15)
+}
+
+func (jungleTemple) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// igloo: 7 blocks by 8 inside the site's chunk. One in two has a basement
+// under it, which is where its chest is and which reaches a little past
+// the chunk.
+type igloo struct{}
+
+var iglooBiomes = oneOf(biomeSnowyPlains, biomeSnowyTaiga, biomeSnowySlopes)
+
+// iglooReach is how far outside the site's chunk an igloo's basement has
+// been found, in blocks.
+const iglooReach = 8
+
+func (igloo) Kind() Kind                  { return Igloo }
+func (igloo) Dimension() chunks.Dimension { return chunks.Overworld }
+func (igloo) Exact() bool                 { return true }
+func (igloo) Certain() bool               { return false }
+func (igloo) Allows(biome uint32) bool    { return iglooBiomes[biome] }
+func (igloo) Founded() bool               { return false }
+func (igloo) Traits() Traits              { return Traits{Quiet: true, FinishedOnly: true} }
+
+func (igloo) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return witchHutSpread.sites(seed, area, limit, nil)
+}
+
+func (igloo) Explains(site Site, real Box) bool {
+	x, z := site.ChunkX*16, site.ChunkZ*16
+	return real.within(x-iglooReach, z-iglooReach, x+15+iglooReach, z+15+iglooReach)
+}
+
+func (igloo) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 4, site.ChunkZ*16 + 4 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -80,8 +81,20 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		out.Recorded, out.RecordedMore = clamp(layer.Recorded, layer.RecordedMore)
 		out.Predicted, out.PredictedMore = clamp(layer.Predicted, layer.PredictedMore)
 		for _, p := range structures.Predictors {
-			if check, ok := survey.Check.Kinds[p.Kind()]; ok && p.Dimension() == dimension {
+			if check, ok := survey.Check.Kinds[structures.Rule{Kind: p.Kind(), Dimension: dimension}]; ok && p.Dimension() == dimension {
 				out.Kinds[p.Kind()] = check
+			}
+		}
+		// A page from before the catalog has no row to put a later kind
+		// away with, and would draw every one of them, the ones that are
+		// off until asked for among them. It is sent the kinds it knows.
+		if r.URL.Query().Get("kinds") != "all" {
+			out.Recorded = slices.DeleteFunc(slices.Clone(out.Recorded), func(st structures.Structure) bool { return !firstKinds[st.Kind] })
+			out.Predicted = slices.DeleteFunc(slices.Clone(out.Predicted), func(p structures.Prediction) bool { return !firstKinds[p.Kind] })
+			for kind := range out.Kinds {
+				if !firstKinds[kind] {
+					delete(out.Kinds, kind)
+				}
 			}
 		}
 		if survey.HasLevel && dimension == chunks.Overworld {
@@ -92,6 +105,12 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// firstKinds is the kinds a page from before the catalog knows.
+var firstKinds = map[structures.Kind]bool{
+	structures.Fortress: true, structures.Monument: true, structures.Outpost: true, structures.Village: true,
+	structures.WitchHut: true, structures.Stronghold: true, structures.TrialChamber: true,
 }
 
 func clamp[T any](list []T, more int) ([]T, int) {

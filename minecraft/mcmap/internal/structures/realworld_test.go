@@ -69,26 +69,53 @@ func TestRealWorld(t *testing.T) {
 	t.Logf("level.dat read: %v, spawn %d, %d (height known: %v)", survey.HasLevel, survey.Level.SpawnX, survey.Level.SpawnZ, survey.Level.SpawnYKnown)
 	t.Logf("seed %s: %d recorded structures agree, %d disagree, %d findings", survey.Check.State, survey.Check.Agree, survey.Check.Disagree, survey.Check.Total)
 	for _, p := range Predictors {
-		k := survey.Check.Kinds[p.Kind()]
+		k := survey.Check.Kinds[Rule{p.Kind(), p.Dimension()}]
 		offered := map[bool]int{}
 		for _, site := range survey.Layers[p.Dimension()].Predicted {
 			if site.Kind == p.Kind() {
 				offered[site.Candidate]++
 			}
 		}
-		t.Logf("  %-9s %-10s %d of %d recorded are on a site; %d of %d finished sites that suit it hold one; %d predicted and %d candidates offered, %d findings",
-			p.Kind(), k.State, k.Agree, k.Agree+k.Disagree, k.Built, k.Built+k.Empty, offered[false], offered[true], k.Findings)
+		t.Logf("  %-16s %-9s %-10s %d of %d are on a site; %d of %d finished sites that suit it hold one; %d predicted and %d candidates offered, %d findings, %d seeds set aside",
+			p.Kind(), p.Dimension().Name(), k.State, k.Agree, k.Agree+k.Disagree, k.Built, k.Built+k.Empty, offered[false], offered[true], k.Findings, k.SetAside)
 	}
 	t.Logf("villages %+v, read in %.4f s", survey.Villages, testutil.ToFloat64(metricVillageSeconds))
+	t.Logf("the world's chunks name %d seeds; %d chunks name none", survey.Seeds, survey.Seedless)
+	// How many of each kind, and never where: a recorded structure's place
+	// and the rule that put it there are the seed.
 	for _, d := range chunks.Dimensions {
 		layer := survey.Layers[d]
 		t.Logf("%s: %d recorded (+%d), %d predicted (+%d)", d.Name(), len(layer.Recorded), layer.RecordedMore, len(layer.Predicted), layer.PredictedMore)
-		for _, r := range layer.Recorded {
-			if r.Village != nil {
-				t.Logf("  recorded %-9s %6d,%4d,%6d to %6d,%4d,%6d  %+v", r.Kind, r.MinX, r.MinY, r.MinZ, r.MaxX, r.MaxY, r.MaxZ, *r.Village)
-				continue
+		type tally struct{ recorded, found, partial, predicted, candidates int }
+		by := map[Kind]*tally{}
+		of := func(kind Kind) *tally {
+			if by[kind] == nil {
+				by[kind] = &tally{}
 			}
-			t.Logf("  recorded %-9s %6d,%4d,%6d to %6d,%4d,%6d  areas %d", r.Kind, r.MinX, r.MinY, r.MinZ, r.MaxX, r.MaxY, r.MaxZ, r.Areas)
+			return by[kind]
+		}
+		for _, r := range layer.Recorded {
+			k := of(r.Kind)
+			if r.Evidence > 0 {
+				k.found++
+			} else {
+				k.recorded++
+			}
+			if r.Partial {
+				k.partial++
+			}
+		}
+		for _, p := range layer.Predicted {
+			if p.Candidate {
+				of(p.Kind).candidates++
+			} else {
+				of(p.Kind).predicted++
+			}
+		}
+		for _, kind := range Kinds {
+			if k := by[kind]; k != nil {
+				t.Logf("  %-16s %4d recorded, %4d found by blocks (%d in part), %4d predicted, %4d possible", kind, k.recorded, k.found, k.partial, k.predicted, k.candidates)
+			}
 		}
 	}
 }
