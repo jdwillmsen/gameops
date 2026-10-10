@@ -154,6 +154,9 @@
 
   // What is said under a prediction's name and place.
   function standing(p) {
+    if (p.mapped === true) {
+      return ['One of this world’s own explorer maps points here: the game itself has worked out that one will be built here, in terrain nobody has generated yet. Nothing is built, and nobody need have been there.'];
+    }
     if (p.candidate) {
       return ['The seed puts a site here. Whether one is built depends on the biome, and this terrain is not generated yet.'];
     }
@@ -294,7 +297,7 @@
     }
     for (const p of predicted) {
       const sort = p.candidate ? 'candidate' : 'predicted';
-      const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : 'predicted from the seed'}`;
+      const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : p.mapped === true ? 'where an explorer map of this world points' : 'predicted from the seed'}`;
       const label = tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`, DETAILS_HINT);
       // Struck through only where the world has been asked and said no.
       const doubted = p.generated && !quiet(p.kind);
@@ -772,6 +775,15 @@
     ruined_portal: 'in all: chests nobody has opened',
     end_gateway: 'gateway blocks, which nothing breaks',
     exit_portal: 'portal blocks',
+    mansion: 'in all: chests nobody has opened',
+    ancient_city: 'in all: chests nobody has opened',
+    shipwreck: 'in all: chests nobody has opened',
+    buried_treasure: 'in all: its chest, which nobody has opened',
+    ocean_ruins: 'in all: chests nobody has opened, and suspicious sand and gravel nobody has brushed',
+    desert_pyramid: 'in all: chests nobody has opened, and suspicious sand nobody has brushed',
+    jungle_temple: 'in all: chests nobody has opened, and the dispensers of its traps',
+    igloo: 'in all: the chest of its basement, which nobody has opened',
+    trail_ruins: 'in all: suspicious gravel nobody has brushed',
   };
   const BASTIONS = { treasure: 'Treasure room', stables: 'Hoglin stables', bridge: 'Bridge' };
   const LEVELS = ['novice', 'apprentice', 'journeyman', 'expert', 'master'];
@@ -933,6 +945,12 @@
           ['Magma cube spawner', spawning('magma_cube', false) > 0 ? 'In the save: the treasure room’s' : NONE_SAVED],
         ]);
       }
+      case 'mansion':
+        return facts('Its illagers', [
+          ['Evokers', of('evocation_illager') > 0 ? `${fmt(of('evocation_illager'))} in the save, each of which carries a totem` : NONE_SAVED],
+          ['Vindicators', saved(of('vindicator'))],
+          ['Allays', saved(of('allay'))],
+        ]);
       case 'exit_portal': {
         const portal = block('end_portal');
         return facts('Its portal', [['Portal', portal >= 20 ? 'Lit: the dragon has been killed' : `${some(portal, 'portal block', 'portal blocks')} in the save`]]);

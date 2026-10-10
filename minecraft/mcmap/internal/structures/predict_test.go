@@ -55,9 +55,21 @@ func TestFortress_ListsOnlyTheRegionsThatGetAFortress(t *testing.T) {
 	}
 }
 
+// sited asks a kind for its sites whichever way it is seeded: one the game
+// places with the whole seed is given a whole seed made from the half.
+type sited struct{ Predictor }
+
+func (s sited) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	if w, ok := s.Predictor.(whole); ok {
+		return w.WholeSites(int64(seed)<<32|int64(seed), area, limit)
+	}
+	return s.Predictor.Sites(seed, area, limit)
+}
+
 func TestSites_StayInsideTheAreaAndTheLimit(t *testing.T) {
 	area := Area{-500, -300, 700, 900}
 	for _, p := range Predictors {
+		p := sited{p}
 		all, more := p.Sites(7, area, 1_000_000)
 		if more != 0 || len(all) == 0 {
 			t.Fatalf("%s: %d sites, %d left out", p.Kind(), len(all), more)
@@ -108,6 +120,15 @@ func TestExplains(t *testing.T) {
 		"city short of the site":          {endCity{}, Box{-240, 70, 100, -177, 120, 180}, false},
 		"portal's chest by the site":      {ruinedPortal{chunks.Overworld}, Box{-140, 64, 120, -140, 64, 120}, true},
 		"portal's chest out of reach":     {ruinedPortal{chunks.Overworld}, Box{-127, 64, 120, -127, 64, 120}, false},
+		"mansion's chests round the site": {mansion{}, Box{-200, 64, 80, -120, 90, 150}, true},
+		"mansion out of reach":            {mansion{}, Box{-87, 64, 104, -80, 70, 110}, false},
+		"chamber's spawners by the site":  {trialChamber{}, Box{-120, -30, 60, -40, -10, 90}, true},
+		"chamber short of the site":       {trialChamber{}, Box{-119, -30, 60, -40, -10, 90}, false},
+		"trail ruins on the site":         {trailRuins{}, Box{-170, 60, 90, -150, 80, 110}, true},
+		"ocean ruin by the site":          {oceanRuins{}, Box{-130, 40, 100, -128, 44, 104}, true},
+		"ocean ruin out of reach":         {oceanRuins{}, Box{-127, 40, 100, -120, 44, 104}, false},
+		"treasure in the site's chunk":    {buriedTreasure{}, Box{-152, 60, 104, -152, 60, 104}, true},
+		"treasure in the chunk beside":    {buriedTreasure{}, Box{-136, 60, 104, -136, 60, 104}, false},
 		"pyramid from the first block":    {desertPyramid{}, Box{-160, 62, 96, -140, 76, 116}, true},
 		"pyramid known by its chests":     {desertPyramid{}, Box{-151, 51, 105, -149, 51, 107}, true},
 		"pyramid a chunk over":            {desertPyramid{}, Box{-144, 62, 96, -124, 76, 116}, false},
@@ -184,6 +205,17 @@ func TestAllows(t *testing.T) {
 		"bastion in basalt deltas":      {bastion{}, biomeBasaltDeltas, false},
 		"city in the End":               {endCity{}, biomeTheEnd, true},
 		"portal anywhere":               {ruinedPortal{chunks.Nether}, biomeBasaltDeltas, true},
+		"mansion in a dark forest":      {mansion{}, biomeDarkForest, true},
+		"mansion in a pale garden":      {mansion{}, biomePaleGarden, true},
+		"mansion in a birch forest":     {mansion{}, 27, false},
+		"ruins in a warm ocean":         {oceanRuins{}, biomeWarmOcean, true},
+		"ruins on a beach":              {oceanRuins{}, biomeBeach, false},
+		"treasure under a beach":        {buriedTreasure{}, biomeBeach, true},
+		"treasure under a stony shore":  {buriedTreasure{}, biomeStonyShore, true},
+		"treasure under an ocean":       {buriedTreasure{}, biomeDeepOcean, false},
+		"trail ruins in a taiga":        {trailRuins{}, biomeTaiga, true},
+		"trail ruins in a desert":       {trailRuins{}, biomeDesert, false},
+		"chamber under anything":        {trialChamber{}, biomeDesert, true},
 		"pyramid in a desert":           {desertPyramid{}, biomeDesert, true},
 		"pyramid in a swamp":            {desertPyramid{}, biomeSwamp, false},
 		"temple in a jungle":            {jungleTemple{}, biomeJungle, true},
@@ -229,7 +261,7 @@ func TestKindsThatShareSitesAreOfferedOnlyWhereTheBiomeIsKnown(t *testing.T) {
 	e.add(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
 	e.finish(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
 	check, predicted, _ := compare([]Predictor{desertPyramid{}}, []worldSeed{{whole: 7, narrow: true}}, 0, MaxPerLayer,
-		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, map[chunks.Dimension]*extent{chunks.Overworld: e},
+		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, nil, map[chunks.Dimension]*extent{chunks.Overworld: e},
 		func(chunks.Dimension, int32, int32) (uint32, bool) { return biomeDesert, true })
 	k := check.Kinds[Rule{DesertPyramid, chunks.Overworld}]
 	if k.State != SeedVerified || k.Agree != 3 || k.Empty != 1 || k.Findings != 0 || check.Total != 0 {
@@ -290,7 +322,7 @@ func TestRuinedPortalsHaveARuleInEachDimension(t *testing.T) {
 		recorded[chunks.Overworld] = append(recorded[chunks.Overworld], Structure{Kind: Monument, Box: monumentAt(m)})
 	}
 	check, predicted, _ := compare([]Predictor{monument{}, ruinedPortal{chunks.Overworld}, ruinedPortal{chunks.Nether}},
-		[]worldSeed{{whole: 7, narrow: true}}, 0, MaxPerLayer, recorded, extents, nil)
+		[]worldSeed{{whole: 7, narrow: true}}, 0, MaxPerLayer, recorded, nil, extents, nil)
 	here, there := check.Kinds[Rule{RuinedPortal, chunks.Overworld}], check.Kinds[Rule{RuinedPortal, chunks.Nether}]
 	if here.State != SeedVerified || here.Agree != 3 || here.Disagree != 0 {
 		t.Errorf("the overworld's rule = %+v, want borne out by its three", here)
@@ -310,5 +342,225 @@ func TestRuinedPortalsHaveARuleInEachDimension(t *testing.T) {
 	}
 	if got := predicted[chunks.Nether]; len(got) != 0 {
 		t.Errorf("the Nether is predicted %+v by a rule its portals refute", got)
+	}
+}
+
+// The kinds the game builds from data files are placed with Java's
+// generator. These are the first numbers java.util.Random gives for a
+// seed of nought, which every Java programmer's copy gives too.
+func TestJavaRandom_IsJavasGenerator(t *testing.T) {
+	start := func(seed int64) *javaRandom { return &javaRandom{(uint64(seed) ^ javaMultiplier) & javaMask} }
+	rng := start(0)
+	if a, b := rng.next(32), rng.next(32); a != -1155484576 || b != -723955400 {
+		t.Errorf("the first two numbers are %d and %d", a, b)
+	}
+	for bound, want := range map[int32][]int32{100: {60, 48, 29, 47, 15, 53, 91, 61, 19, 54}, 10: {0, 8, 9, 7, 5, 3, 1, 1, 9, 4}} {
+		rng := start(0)
+		for i, w := range want {
+			if got := rng.below(bound); got != w {
+				t.Fatalf("below(%d) number %d = %d, want %d", bound, i, got, w)
+			}
+		}
+	}
+	// A bound that is a power of two is drawn another way.
+	rng = start(42)
+	for i, w := range []int32{11, 0, 10, 0, 4, 15} {
+		if got := rng.below(16); got != w {
+			t.Fatalf("below(16) number %d = %d, want %d", i, got, w)
+		}
+	}
+}
+
+// A kind placed with the whole seed is at a different site for every high
+// half, and is asked for nothing where only the low half is known.
+func TestKindsOfTheWholeSeedNeedAllOfIt(t *testing.T) {
+	area := Area{-200, -200, 200, 200}
+	for _, p := range []Predictor{trialChamber{}, trailRuins{}} {
+		w, ok := p.(whole)
+		if !ok {
+			t.Fatalf("%s is not placed with the whole seed", p.Kind())
+		}
+		one, _ := w.WholeSites(5<<32|77, area, 1000)
+		other, _ := w.WholeSites(6<<32|77, area, 1000)
+		if len(one) == 0 || slices.Equal(one, other) {
+			t.Errorf("%s: %d sites, the same whatever the high half of the seed", p.Kind(), len(one))
+		}
+		if sites, _ := p.Sites(77, area, 1000); len(sites) != 0 {
+			t.Errorf("%s gives %d sites for half a seed", p.Kind(), len(sites))
+		}
+		if _, _, ok := sitesOf(p, worldSeed{whole: 77, narrow: true}, area, nil); ok {
+			t.Errorf("%s is worked out from a seed of which only half is known", p.Kind())
+		}
+		for _, site := range one {
+			rx, rz := floorDiv(site.ChunkX, 34), floorDiv(site.ChunkZ, 34)
+			if ox, oz := site.ChunkX-rx*34, site.ChunkZ-rz*34; ox >= 26 || oz >= 26 {
+				t.Fatalf("%s: a site %d, %d into its region", p.Kind(), ox, oz)
+			}
+		}
+	}
+}
+
+// believed is three monuments on their sites in finished chunks of the
+// world's seed numbered at, about region rx, rz: what a seed is believed
+// by before any kind's rule is judged.
+func believed(e *extent, seed uint32, at int8, rx, rz int32) []Structure {
+	var out []Structure
+	for _, region := range [][2]int32{{rx, rz}, {rx + 1, rz}, {rx, rz + 1}} {
+		m, _ := monumentSpread.site(seed, region[0], region[1])
+		e.add(chunks.Pos{X: m.ChunkX, Z: m.ChunkZ})
+		e.finish(chunks.Pos{X: m.ChunkX, Z: m.ChunkZ})
+		e.born(chunks.Pos{X: m.ChunkX, Z: m.ChunkZ}, at)
+		out = append(out, Structure{Kind: Monument, Box: monumentAt(m)})
+	}
+	return out
+}
+
+// A trial chamber's spawners cannot be taken away: a finished chunk with
+// none has no chamber, and is not offered as though it might.
+func TestAChamberIsNotOfferedWhereTheWorldShowsNone(t *testing.T) {
+	const seed = int64(9)<<32 | 1234
+	e := newExtent(chunks.Pos{})
+	e.single = true
+	sites, _ := trialChamber{}.WholeSites(seed, Area{-300, -300, 300, 300}, 1000)
+	recorded := believed(e, 1234, 0, 0, 0)
+	for _, site := range sites[:3] {
+		e.add(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		e.finish(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		recorded = append(recorded, Structure{Kind: TrialChamber, Box: Box{site.ChunkX*16 + 20, -30, site.ChunkZ * 16, site.ChunkX*16 + 60, -10, site.ChunkZ*16 + 40}, Evidence: 30})
+	}
+	bare := sites[3]
+	e.add(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
+	e.finish(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
+	check, predicted, _ := compare([]Predictor{monument{}, trialChamber{}}, []worldSeed{{whole: seed}}, 0, MaxPerLayer,
+		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, nil, map[chunks.Dimension]*extent{chunks.Overworld: e}, nil)
+	k := check.Kinds[Rule{TrialChamber, chunks.Overworld}]
+	if k.State != SeedVerified || k.Agree != 3 || k.Built != 3 || k.Empty != 1 || check.Total != 0 {
+		t.Fatalf("chambers = %+v with %d findings", k, check.Total)
+	}
+	ahead := 0
+	for _, p := range predicted[chunks.Overworld] {
+		if p.Kind != TrialChamber {
+			continue
+		}
+		if siteOf(p) == bare || p.Generated {
+			t.Errorf("a chamber is offered in a finished chunk that shows none: %+v", p)
+		}
+		if p.Candidate {
+			t.Errorf("a chamber, which is built whatever the biome, is offered as only possible: %+v", p)
+		}
+		ahead++
+	}
+	if ahead == 0 {
+		t.Error("no chamber is predicted in country not generated")
+	}
+}
+
+// A buried treasure's sites are one chunk in sixteen. They are asked for
+// only where the world has chunks, and offered only in a finished chunk
+// under a beach.
+func TestTreasureIsOfferedOnlyUnderAFinishedBeach(t *testing.T) {
+	if got := traitsOf(buriedTreasure{}); !got.FinishedOnly || !got.Quiet {
+		t.Fatalf("treasure: %+v", got)
+	}
+	// Country far from anything else the world holds, so that a walk over
+	// the whole area it spans would be cut short before it got here.
+	e := newExtent(chunks.Pos{X: 4000, Z: 4000})
+	e.single = true
+	recorded := believed(e, 7, 0, 130, 130)
+	var bare Site
+	for rx := int32(1000); rx < 1003; rx++ {
+		site := buriedTreasure{}.SiteIn(7, rx, 1000)
+		e.add(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		e.finish(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		recorded = append(recorded, Structure{Kind: BuriedTreasure, Box: Box{site.ChunkX*16 + 8, 58, site.ChunkZ*16 + 8, site.ChunkX*16 + 8, 58, site.ChunkZ*16 + 8}, Evidence: 1})
+		bare = buriedTreasure{}.SiteIn(7, rx, 1001)
+	}
+	e.add(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
+	e.finish(chunks.Pos{X: bare.ChunkX, Z: bare.ChunkZ})
+	sites, _, ok := sitesOf(buriedTreasure{}, worldSeed{whole: 7}, e.Area, e)
+	if !ok || len(sites) == 0 || len(sites) > len(e.seed) {
+		t.Fatalf("%d sites asked for over %d chunks, want one for each region with a chunk in it", len(sites), len(e.seed))
+	}
+	beach := func(chunks.Dimension, int32, int32) (uint32, bool) { return biomeBeach, true }
+	check, predicted, _ := compare([]Predictor{monument{}, buriedTreasure{}}, []worldSeed{{whole: 7}}, 0, MaxPerLayer,
+		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, nil, map[chunks.Dimension]*extent{chunks.Overworld: e}, beach)
+	k := check.Kinds[Rule{BuriedTreasure, chunks.Overworld}]
+	if k.State != SeedVerified || k.Agree != 3 || k.Empty != 1 {
+		t.Fatalf("treasure = %+v", k)
+	}
+	var offered []Prediction
+	for _, p := range predicted[chunks.Overworld] {
+		if p.Kind == BuriedTreasure {
+			offered = append(offered, p)
+		}
+	}
+	if len(offered) != 1 || siteOf(offered[0]) != bare || !offered[0].Generated {
+		t.Errorf("treasure offered at %+v, want only the finished beach site with no chest", offered)
+	}
+}
+
+// The game's own explorer maps say where it worked a mansion out to be,
+// built or not. Each is the game agreeing with the rule or showing it
+// wrong, and is all there is to check the rule by in a world with no
+// mansion in it.
+func TestARuleIsCheckedAgainstWhereTheGamesOwnMapsPoint(t *testing.T) {
+	const older, current = 555, 7
+	e := newExtent(chunks.Pos{})
+	recorded := believed(e, current, 1, 0, 0)
+	seeds := []worldSeed{{whole: older}, {whole: current}}
+	site := func(seed uint32, rx, rz int32) Site {
+		s, _ := mansionSpread.site(seed, rx, rz)
+		return s
+	}
+	ahead := site(current, 2, 2)
+	targets := map[target]struct{}{
+		// Two the older seed put there, which the world will never build
+		// now, and one the current seed will.
+		{Mansion, chunks.Overworld, site(older, 3, 3)}: {},
+		{Mansion, chunks.Overworld, site(older, 4, 3)}: {},
+		{Mansion, chunks.Overworld, ahead}:             {},
+		// Another kind's and another dimension's say nothing of this rule.
+		{Monument, chunks.Overworld, Site{900, 900}}: {},
+		{Mansion, chunks.Nether, Site{901, 901}}:     {},
+	}
+	run := func(targets map[target]struct{}) (KindCheck, []Prediction) {
+		check, predicted, _ := compare([]Predictor{monument{}, mansion{}}, seeds, 1, MaxPerLayer,
+			map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, targets, map[chunks.Dimension]*extent{chunks.Overworld: e}, nil)
+		var mansions []Prediction
+		for _, p := range predicted[chunks.Overworld] {
+			if p.Kind == Mansion {
+				mansions = append(mansions, p)
+			}
+		}
+		return check.Kinds[Rule{Mansion, chunks.Overworld}], mansions
+	}
+	k, offered := run(targets)
+	if k.State != SeedVerified || k.Agree != 3 || k.Disagree != 0 {
+		t.Fatalf("mansions = %+v, want the rule borne out by the three maps", k)
+	}
+	var mapped []Prediction
+	for _, p := range offered {
+		if p.Mapped {
+			mapped = append(mapped, p)
+		}
+		if s := siteOf(p); s == site(older, 3, 3) || s == site(older, 4, 3) {
+			t.Errorf("a mansion the older seed put there is offered in country the current seed will make: %+v", p)
+		}
+	}
+	if len(mapped) != 1 || siteOf(mapped[0]) != ahead || mapped[0].Candidate {
+		t.Errorf("mapped %+v, want the one the current seed will build, and as more than a possible site", mapped)
+	}
+	// With no map, nothing says the rule is right, and nothing is offered.
+	if k, offered := run(nil); k.State != SeedUnverified || len(offered) != 0 {
+		t.Errorf("with no maps: %+v and %d offered", k, len(offered))
+	}
+	// Maps that point where the rule puts nothing show it wrong.
+	wrong := map[target]struct{}{}
+	for i := int32(0); i < 3; i++ {
+		s := site(current, i, 5)
+		wrong[target{Mansion, chunks.Overworld, Site{s.ChunkX + 1, s.ChunkZ}}] = struct{}{}
+	}
+	if k, offered := run(wrong); k.State != SeedRefuted || k.Disagree != 3 || len(offered) != 0 {
+		t.Errorf("with maps the rule does not explain: %+v and %d offered", k, len(offered))
 	}
 }

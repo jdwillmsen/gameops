@@ -363,7 +363,7 @@ func TestCompare_BoundsEachKindAndKeepsTheNearest(t *testing.T) {
 		recorded = append(recorded, Structure{Kind: Outpost, Box: Box{o.ChunkX * 16, 64, o.ChunkZ * 16, o.ChunkX*16 + 15, 85, o.ChunkZ*16 + 15}})
 	}
 	check, predicted, more := compare([]Predictor{monument{}, outpost{}}, []worldSeed{{whole: int64(testSeed), narrow: true}}, 0, MaxPerLayer,
-		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, extents, nil)
+		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, nil, extents, nil)
 	if check.State != SeedVerified {
 		t.Fatalf("check = %+v", check)
 	}

@@ -136,8 +136,8 @@ func TestTake_WorksASiteOutFromTheSeedOfItsOwnChunk(t *testing.T) {
 	// A chunk that names no seed says nothing either way, of the site in
 	// it or of the monument recorded in it.
 	silent, _ := monumentSpread.site(testSeed, 2, 1)
-	w.seeded(chunks.Overworld, silent.ChunkX, silent.ChunkZ, silentHash).structure(chunks.Overworld, monumentByte, Box{silent.ChunkX*16 + 400, 39, silent.ChunkZ * 16, silent.ChunkX*16 + 415, 61, silent.ChunkZ*16 + 15})
-	w.seeded(chunks.Overworld, silent.ChunkX+25, silent.ChunkZ, silentHash)
+	w.seeded(chunks.Overworld, silent.ChunkX, silent.ChunkZ, silentHash)
+	w.seeded(chunks.Overworld, silent.ChunkX+25, silent.ChunkZ, silentHash).structure(chunks.Overworld, monumentByte, monumentAt(Site{silent.ChunkX + 25, silent.ChunkZ}))
 
 	s := surveyor(t, nil)
 	s.Biomes = func(chunks.Dimension, int32, int32) (uint32, bool) { return biomeDeepOcean, true }

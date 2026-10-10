@@ -474,12 +474,85 @@ func TestDetail_FindsTheEndsAndTheNethersKindsByWhatIsLeftInThem(t *testing.T) {
 	}
 }
 
+// The overworld's kinds that leave no record are found the same way, each
+// by the loot only it is generated with.
+func TestDetail_FindsTheOverworldsKindsByWhatIsLeftInThem(t *testing.T) {
+	chest := func(name string) []byte { return nbtString("LootTable", "loot_tables/chests/"+name+".json") }
+	sand := func(name string) []byte {
+		return nbtString("LootTable", "loot_tables/entities/"+name+"_brushable_block.json")
+	}
+	w := newWorld(t).
+		// An ancient city: chests five chunks apart are one city still.
+		blockEntity(chunks.Overworld, "Chest", 1000, -40, 1000, chest("ancient_city")).
+		blockEntity(chunks.Overworld, "Chest", 1080, -44, 1010, chest("ancient_city_ice_box")).
+		// A mansion, a shipwreck by two of its three chests, and a ruin by
+		// a chest and by sand nobody has brushed.
+		blockEntity(chunks.Overworld, "Chest", -3000, 70, 500, chest("woodland_mansion")).
+		blockEntity(chunks.Overworld, "Chest", 2000, 50, -2000, chest("shipwrecksupply")).
+		blockEntity(chunks.Overworld, "Chest", 2006, 50, -2000, chest("shipwrecktreasure")).
+		blockEntity(chunks.Overworld, "Chest", 4000, 40, 4000, chest("underwater_ruin_big")).
+		blockEntity(chunks.Overworld, "BrushableBlock", 4010, 39, 4020, sand("warm_ocean_ruins")).
+		// Sand that has been brushed, or that a player put down, says nothing.
+		blockEntity(chunks.Overworld, "BrushableBlock", 4500, 39, 4500).
+		blockEntity(chunks.Overworld, "BrushableBlock", 4600, 39, 4500, nbtString("LootTable", "loot_tables/entities/made_up.json")).
+		// Two buried treasures in neighbouring chunks are two.
+		blockEntity(chunks.Overworld, "Chest", 5000+8, 60, 5000-8, chest("buriedtreasure")).
+		blockEntity(chunks.Overworld, "Chest", 5000+24, 60, 5000-8, chest("buriedtreasure")).
+		// A pyramid an older game left no record of, by its chests and its
+		// sand; and a jungle temple by a chest and a trap.
+		blockEntity(chunks.Overworld, "Chest", 6000+9, 52, 6000+10, chest("desert_pyramid")).
+		blockEntity(chunks.Overworld, "BrushableBlock", 6000+11, 50, 6000+10, sand("desert_pyramid")).
+		blockEntity(chunks.Overworld, "Chest", 7000+3, 60, 7000+8, chest("jungle_temple")).
+		blockEntity(chunks.Overworld, "Dispenser", 7000+5, 61, 7000+2, chest("dispenser_trap")).
+		blockEntity(chunks.Overworld, "BrushableBlock", 8000, 60, 8000, sand("trail_ruins")).
+		// An igloo's chest under an igloo the world has recorded is that
+		// igloo, and one under nothing recorded is an igloo found.
+		blockEntity(chunks.Overworld, "Chest", 9600+2, 40, 9600+3, chest("igloo_chest")).
+		blockEntity(chunks.Overworld, "Chest", 9920+2, 40, 9920+3, chest("igloo_chest")).
+		put(chunks.Pos{Dim: chunks.Overworld, X: 600, Z: 600}, TagVolumes, volumes(volumeEntry{name: "minecraft:igloo", box: Box{9600, 69, 9600, 9606, 73, 9607}, scattered: true}))
+	got := take(t, surveyor(t, nil), w)
+
+	count := map[Kind]int{}
+	evidence := map[Kind]int{}
+	for _, r := range got.Layers[chunks.Overworld].Recorded {
+		count[r.Kind]++
+		evidence[r.Kind] += r.Evidence
+	}
+	for kind, want := range map[Kind][2]int{
+		AncientCity: {1, 2}, Mansion: {1, 1}, Shipwreck: {1, 2}, OceanRuins: {1, 2}, BuriedTreasure: {2, 2},
+		DesertPyramid: {1, 2}, JungleTemple: {1, 2}, TrailRuins: {1, 1},
+		// One recorded, which has no evidence to its name, and one found.
+		Igloo: {2, 1},
+	} {
+		if count[kind] != want[0] || evidence[kind] != want[1] {
+			t.Errorf("%s: %d found by %d blocks, want %d by %d", kind, count[kind], evidence[kind], want[0], want[1])
+		}
+	}
+	// What a kind found by its loot holds says how much of it is left, and
+	// never what a chest holds.
+	_, ruin := detailOf(t, got, chunks.Overworld, OceanRuins)
+	if ruin.Reach != 8 || ruin.Blocks["unbrushed"] != 1 || len(ruin.Containers) != 1 || ruin.Containers[0].Unopened != 1 {
+		t.Errorf("ruin = %+v", ruin)
+	}
+	for _, d := range chunks.Dimensions {
+		for _, detail := range got.Layers[d].Details {
+			if sent, _ := json.Marshal(detail); strings.Contains(string(sent), "loot") {
+				t.Fatalf("a structure's details name a loot table: %s", sent)
+			}
+		}
+	}
+	sent, _ := json.Marshal(got.Layers[chunks.Overworld].Recorded)
+	if strings.Contains(string(sent), "loot") || strings.Contains(string(sent), "treasure.json") {
+		t.Errorf("the list names a loot table: %s", sent)
+	}
+}
+
 // What a structure a newer game recorded is also found by is the same
 // structure, and is left to its record.
 func TestDetail_AStructureTheWorldRecordedIsNotAlsoFoundByItsBlocks(t *testing.T) {
 	found := []Structure{
 		{Kind: RuinedPortal, Box: Box{100, 64, 100, 100, 64, 100}, Evidence: 1},
-		{Kind: Bastion, Box: Box{100, 64, 100, 140, 70, 140}, Evidence: 4},
+		{Kind: Bastion, Box: Box{100, 64, 100, 139, 70, 141}, Evidence: 4},
 		{Kind: RuinedPortal, Box: Box{100 + 21 + recordedPad, 64, 100, 100 + 21 + recordedPad, 64, 100}, Evidence: 1},
 	}
 	recorded := []Structure{{Kind: RuinedPortal, Box: Box{90, 60, 90, 120, 80, 110}, Areas: 2}}

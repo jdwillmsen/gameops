@@ -262,6 +262,9 @@ type ContentStats struct {
 	// Skipped counts records that could not be read or made no sense;
 	// MobsOver and BlocksOver those past the bounds.
 	Skipped, MobsOver, BlocksOver int
+	// Targets is how many places the world's explorer maps point to, of
+	// the kinds they are read for, and TargetsOver those past the bound.
+	Targets, TargetsOver int
 }
 
 // contents is every saved mob and every block entity worth keeping.
@@ -273,7 +276,9 @@ type contents struct {
 	// byID is where each mob is, by the id the village records know it by.
 	byID   map[int64]mobAt
 	blocks map[chunks.Dimension][]savedBlock
-	stats  ContentStats
+	// targets is where the world's explorer maps point.
+	targets map[target]struct{}
+	stats   ContentStats
 }
 
 type placing struct {
@@ -294,6 +299,7 @@ func newContents() *contents {
 		mobs:     map[chunks.Dimension][]savedMob{},
 		byID:     map[int64]mobAt{},
 		blocks:   map[chunks.Dimension][]savedBlock{},
+		targets:  map[target]struct{}{},
 	}
 }
 

@@ -172,6 +172,10 @@ type Prediction struct {
 	// chunk is not generated yet: the generator will try here, and
 	// nothing can say what it will find.
 	Candidate bool `json:"candidate,omitempty"`
+	// Mapped is set where one of the world's own explorer maps points at
+	// the site, in country not generated yet: the game has worked out
+	// that one will be built here, which is more than a possible site.
+	Mapped bool `json:"mapped,omitempty"`
 }
 
 // BiomeAt is the biome at the top of a block column as the world last
@@ -435,6 +439,9 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		case bytes.HasPrefix(key, digpPrefix):
 			held.place(key, it.Value())
 			continue
+		case bytes.HasPrefix(key, mapPrefix):
+			held.mapRecord(it.Value())
+			continue
 		}
 		pos, tag, ok := chunks.RecordOf(key)
 		if !ok {
@@ -527,6 +534,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		return Survey{}, err
 	}
 	survey.Contents = held.stats
+	survey.Contents.Targets = len(held.targets)
 	for _, r := range survey.villageRecords {
 		survey.Contents.Skipped += r.skipped
 	}
@@ -540,7 +548,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		for _, d := range chunks.Dimensions {
 			known[d] = append(append(slices.Clip(recorded[d]), survey.villages[d]...), found[d]...)
 		}
-		survey.Check, predicted, more = compare(s.Predictors, seeds, current, layerLimit, known, extents, s.Biomes)
+		survey.Check, predicted, more = compare(s.Predictors, seeds, current, layerLimit, known, held.targets, extents, s.Biomes)
 		// Only a seed that was this service's own to choose is searched
 		// past: the world's word for its chunks is not.
 		if searched {
@@ -913,6 +921,14 @@ func sitesOf(p Predictor, seed worldSeed, area Area, generated *extent) (sites [
 		}
 		sites, more = p.WholeSites(seed.whole, area, maxSites)
 	case dense:
+		if generated == nil {
+			// One chunk is asked about: its region's site, if it is that.
+			site := p.SiteIn(uint32(seed.whole), floorDiv(area.MinX, p.Region()), floorDiv(area.MinZ, p.Region()))
+			if site.ChunkX >= area.MinX && site.ChunkX <= area.MaxX && site.ChunkZ >= area.MinZ && site.ChunkZ <= area.MaxZ {
+				sites = append(sites, site)
+			}
+			break
+		}
 		regions := map[uint64]struct{}{}
 		for key := range generated.seed {
 			x, z := int32(key>>32), int32(uint32(key))
@@ -942,6 +958,7 @@ func compare(
 	current int,
 	limit int,
 	recorded map[chunks.Dimension][]Structure,
+	targets map[target]struct{},
 	extents map[chunks.Dimension]*extent,
 	biomeAt BiomeAt,
 ) (Check, map[chunks.Dimension][]Prediction, map[chunks.Dimension]int) {
@@ -996,6 +1013,28 @@ func compare(
 		}
 		type tally struct{ agree, disagree int }
 		bySeed := make([]tally, len(seeds))
+		// Where the game's own maps say one of the kind is: each either
+		// is a site of one of the world's seeds, which is the game agreeing
+		// with the rule, or is not, which is the rule being wrong. One that
+		// is a site of the seed new chunks come from is still to be built.
+		mapped := map[Site]bool{}
+		for t := range targets {
+			if t.kind != p.Kind() || t.dim != d {
+				continue
+			}
+			agreed := false
+			for at, seed := range seeds {
+				sites, _, ok := sitesOf(p, seed, Area{t.site.ChunkX, t.site.ChunkZ, t.site.ChunkX, t.site.ChunkZ}, nil)
+				if ok && len(sites) == 1 && !agreed {
+					agreed = true
+					bySeed[at].agree++
+					mapped[t.site] = mapped[t.site] || at == current
+				}
+			}
+			if !agreed && len(seeds) > 0 {
+				bySeed[max(current, 0)].disagree++
+			}
+		}
 		// Which seed each prediction is of, beside it.
 		var of []int
 		explained := map[int]bool{}
@@ -1079,6 +1118,24 @@ func compare(
 				res.found = append(res.found, prediction)
 				of = append(of, at)
 			}
+		}
+		// One the game's own map points at, in country not generated, needs
+		// no biome asked of it, and is offered however far off it is: the
+		// game has asked, and a map is for going a long way by.
+		for _, site := range slices.SortedFunc(maps.Keys(mapped), func(a, b Site) int {
+			return cmp.Or(cmp.Compare(a.ChunkX, b.ChunkX), cmp.Compare(a.ChunkZ, b.ChunkZ))
+		}) {
+			if !mapped[site] || generated.holds(site.ChunkX, site.ChunkZ) {
+				continue
+			}
+			x, z := p.Centre(site)
+			at := slices.IndexFunc(res.found, func(p Prediction) bool { return p.X == x && p.Z == z })
+			if at < 0 {
+				res.found = append(res.found, Prediction{Kind: p.Kind(), X: x, Z: z})
+				of = append(of, current)
+				at = len(res.found) - 1
+			}
+			res.found[at].Candidate, res.found[at].Mapped = false, true
 		}
 		for _, i := range own {
 			real := recorded[d][i]

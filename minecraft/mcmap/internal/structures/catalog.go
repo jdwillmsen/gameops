@@ -47,9 +47,16 @@ var Catalog = []Info{
 	info(DesertPyramid, false, true, chunks.Overworld),
 	info(JungleTemple, false, true, chunks.Overworld),
 	info(Igloo, false, true, chunks.Overworld),
-	info(TrailRuins, false, false, chunks.Overworld),
+	info(TrailRuins, false, true, chunks.Overworld),
 	info(AbandonedCamp, false, false, chunks.Overworld),
+	info(Shipwreck, false, true, chunks.Overworld),
+	info(OceanRuins, false, true, chunks.Overworld),
 	info(RuinedPortal, false, true, chunks.Overworld, chunks.Nether),
+	// A mansion and an ancient city are gone to for what is in them, and
+	// a buried treasure is nothing but what is in it.
+	info(Mansion, true, true, chunks.Overworld),
+	info(AncientCity, true, true, chunks.Overworld),
+	info(BuriedTreasure, true, true, chunks.Overworld),
 	info(Bastion, false, true, chunks.Nether),
 	// An end city is where the elytra are, and is gone looking for.
 	info(EndCity, true, true, chunks.End),

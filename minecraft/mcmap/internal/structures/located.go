@@ -33,6 +33,12 @@ const (
 	ExitPortal   Kind = "exit_portal"
 	Bastion      Kind = "bastion"
 	RuinedPortal Kind = "ruined_portal"
+
+	Mansion        Kind = "mansion"
+	AncientCity    Kind = "ancient_city"
+	Shipwreck      Kind = "shipwreck"
+	OceanRuins     Kind = "ocean_ruins"
+	BuriedTreasure Kind = "buried_treasure"
 )
 
 // maxLocatedSpan is the widest box a located structure is drawn with: one
@@ -131,6 +137,22 @@ var locatedKinds = []located{
 	}},
 	{kind: RuinedPortal, in: chunks.Overworld, surround: 8, is: from(originRuinedPortal)},
 	{kind: RuinedPortal, in: chunks.Nether, surround: 8, is: from(originRuinedPortal)},
+	// A mansion and an ancient city are each hundreds of blocks across
+	// with chests all through them; the next of either is a region away.
+	{kind: Mansion, in: chunks.Overworld, join: 4, surround: 16, is: from(originMansion)},
+	{kind: AncientCity, in: chunks.Overworld, join: 6, surround: 32, is: from(originAncientCity)},
+	{kind: Shipwreck, in: chunks.Overworld, join: 2, surround: 8, is: from(originShipwreck)},
+	// A ruin is a cluster of small buildings, known by their chests and
+	// by the suspicious sand and gravel nobody has brushed.
+	{kind: OceanRuins, in: chunks.Overworld, join: 2, surround: 8, is: from(originOceanRuins)},
+	{kind: BuriedTreasure, in: chunks.Overworld, is: from(originBuriedTreasure)},
+	// The kinds a newer game records, where an older one left only what
+	// is in them. One found here that the world has also recorded is left
+	// to its record.
+	{kind: DesertPyramid, in: chunks.Overworld, join: 1, surround: 8, is: from(originDesertPyramid)},
+	{kind: JungleTemple, in: chunks.Overworld, join: 1, surround: 8, is: from(originJungleTemple)},
+	{kind: Igloo, in: chunks.Overworld, join: 1, surround: 8, is: from(originIgloo)},
+	{kind: TrailRuins, in: chunks.Overworld, join: 3, surround: 16, is: from(originTrailRuins)},
 }
 
 // surroundOf is how far past the blocks a kind was found by its contents
