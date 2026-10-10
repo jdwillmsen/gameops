@@ -394,10 +394,14 @@ one with a face and no egg its face.
 that is not dense, as before) and 24, 32, 48 or 64 with no plate. Within
 its box a picture is enlarged by the most whole screen pixels to each of
 its own that fit, so a face 8 pixels a side fills a 16 pixel box at 2 and
-one 6 a side stands 12 in it; nothing is ever drawn at a pixel and a
-half. One larger than its box is blended down. A block is already drawn
-on the slant, so where a whole number would leave it under three quarters
-of its box it is stretched to it, unblended.
+one 6 a side stands 12 in it. Where a whole number would leave a picture
+under three quarters of its box (a face 10 or 11 pixels a side in a box
+of 16 on a screen that is not dense) it is stretched to the box,
+unblended, so that no picture is markedly smaller than the next; its
+pixels are then one or two screen pixels wide and never blurred. One
+larger than its box is blended down. On the page itself, in a panel's
+row or a search result, a block is drawn only where it fits its 16 pixel
+box whole, which is on a dense screen; elsewhere its flat picture is.
 
 **How far out the map is decides what is drawn at all**, whatever the
 style. Zoom 0 is a block to the pixel.
@@ -600,8 +604,9 @@ about any mob is guessed:
 
 **Every face is made for the same box.** The page fits a face into a
 square box (16 pixels at the usual size): the most whole screen pixels to
-each of its own that fit, centred, the rest left clear; one larger than
-the box is blended down to it. So that this gives faces of a like size,
+each of its own that fit, or the box itself where that would leave it
+under three quarters of it, centred, the rest left clear; one larger
+than the box is blended down to it. So that this gives faces of a like size,
 a face whose ears or horns make it wider or taller than 16 is made again
 as the head alone; one under 4 pixels along its shorter side, or more
 than two and a half times as long as it is tall, is a strip that would
