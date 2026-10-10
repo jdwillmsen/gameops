@@ -118,6 +118,22 @@ func newSamples(t *testing.T) *samples {
 		s.hits.Add(1)
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		// The narrower listing: one directory's files, as the host's other
+		// endpoint gives them.
+		if r.URL.Path == "/dir/resource_pack/entity" {
+			type entry struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			}
+			out := []entry{{Name: "a_directory", Type: "dir"}}
+			for path := range s.files {
+				if name, ok := strings.CutPrefix(path, "resource_pack/entity/"); ok {
+					out = append(out, entry{Name: name, Type: "file"})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+			return
+		}
 		if tree, ok := strings.CutPrefix(r.URL.Path, "/list/"); ok {
 			if tree != testRef+":resource_pack" || r.URL.Query().Get("recursive") != "1" {
 				http.Error(w, "No commit found for the ref", http.StatusNotFound)

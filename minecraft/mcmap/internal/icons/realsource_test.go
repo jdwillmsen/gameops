@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -65,11 +66,33 @@ func TestRealSource(t *testing.T) {
 	count := &counting{inner: http.DefaultTransport}
 	client.Transport = count
 	source := &Source{Ref: ref, ListURL: cmp.Or(os.Getenv("MCMAP_REAL_SOURCE_LIST"), DefaultListURL), RawURL: cmp.Or(os.Getenv("MCMAP_REAL_SOURCE_RAW"), DefaultRawURL), HTTP: client}
+	// The most the heap holds at any moment of the fetch, sampled.
+	var peak atomic.Uint64
+	stop := make(chan struct{})
+	var before runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	go func() {
+		for {
+			var now runtime.MemStats
+			runtime.ReadMemStats(&now)
+			if now.HeapInuse > peak.Load() {
+				peak.Store(now.HeapInuse)
+			}
+			select {
+			case <-stop:
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}()
 	started := time.Now()
 	set, err := source.Fetch(t.Context())
+	close(stop)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("heap in use: %d KB before, %d KB at most during the fetch", before.HeapInuse>>10, peak.Load()>>10)
 	t.Logf("fetched in %s: %d requests (%d to the listing API), %d bytes", time.Since(started).Round(time.Millisecond), count.requests.Load(), count.listings.Load(), count.bytes.Load())
 
 	dir := t.TempDir()

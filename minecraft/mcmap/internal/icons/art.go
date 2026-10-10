@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"log/slog"
 	"maps"
 	"slices"
 	"sync"
@@ -90,7 +91,25 @@ func (s *Source) soft(ctx context.Context, paths []string, limit int64, total *b
 // model or controller file the source could not be asked for leaves every
 // recipe unmade, with artPlan among the missing, since a face worked out
 // from half the models may be the wrong one.
-func (s *Source) art(ctx context.Context, ls listing, looks map[string]mobLook, items atlas, total *budget) Set {
+func (s *Source) art(ctx context.Context, ls listing, looks map[string]mobLook, items atlas, total *budget) (out Set) {
+	// Whatever goes wrong in here, the icons already read are kept and
+	// what the volume holds goes on being served: the pictures made here
+	// are left unmade, and are not asked for again until the pin or this
+	// code changes, since the same files would go wrong the same way.
+	if !s.guarded("every picture made from the models", func() { out = s.planned(ctx, ls, looks, items, total) }) {
+		return Set{Rejected: map[string]string{artPlan: "making the pictures stopped on a fault; the log has it"}}
+	}
+	return out
+}
+
+// faultIn is set by tests to go wrong at a named step, which nothing in
+// the samples is known to make this code do.
+var faultIn func(step string)
+
+func (s *Source) planned(ctx context.Context, ls listing, looks map[string]mobLook, items atlas, total *budget) Set {
+	if faultIn != nil {
+		faultIn(artPlan)
+	}
 	unplanned := Set{Missing: []string{artPlan}, Unreached: []string{artPlan}}
 	files, unreached := s.soft(ctx, slices.Concat(ls.models, ls.controllers), maxModelBytes, total)
 	if len(unreached) > 0 {
@@ -119,7 +138,7 @@ func (s *Source) art(ctx context.Context, ls listing, looks map[string]mobLook, 
 		}
 	}
 	for _, path := range ls.controllers {
-		controllers, err := parseControllers(files[path])
+		controllers, err := parseControllers(ctx, files[path])
 		if err != nil {
 			continue
 		}
@@ -130,7 +149,10 @@ func (s *Source) art(ctx context.Context, ls listing, looks map[string]mobLook, 
 		}
 	}
 	lib.tga = ls.tga
-	recipes, rejected := plan(lib, looks, items, terrain)
+	recipes, rejected := plan(ctx, lib, looks, items, terrain, s.guarded)
+	if ls.partial != "" {
+		rejected[artPlan] = ls.partial
+	}
 	out := s.make(ctx, recipes, slices.Sorted(maps.Keys(recipes)), total)
 	out.Recipes, out.Replanned = recipes, true
 	maps.Copy(out.Rejected, rejected)
@@ -139,9 +161,33 @@ func (s *Source) art(ctx context.Context, ls listing, looks map[string]mobLook, 
 
 // plan is the recipe for every picture made here that one can be worked
 // out for, and for each that one cannot, why not.
-func plan(lib library, looks map[string]mobLook, items, terrain atlas) (recipes map[string]Recipe, rejected map[string]string) {
+func plan(ctx context.Context, lib library, looks map[string]mobLook, items, terrain atlas, guard func(what string, do func()) bool) (recipes map[string]Recipe, rejected map[string]string) {
 	recipes, rejected = map[string]Recipe{}, map[string]string{}
+	if guard == nil {
+		guard = func(_ string, do func()) bool { do(); return true }
+	}
+	face := func(kind string, look appearance, o override) (recipe Recipe, err error) {
+		// One mob's files going wrong costs that mob its face.
+		if !guard("the face of "+kind, func() {
+			if faultIn != nil {
+				faultIn("face/" + kind)
+			}
+			recipe, err = lib.face(look, o)
+		}) {
+			return Recipe{}, errors.New("working out the face stopped on a fault; the log has it")
+		}
+		return recipe, err
+	}
 	for _, kind := range slices.Sorted(maps.Keys(looks)) {
+		if ctx.Err() != nil {
+			break
+		}
+		// The made pictures that are not faces number under a hundred,
+		// and are left room.
+		if len(recipes) >= maxRecipes-100 {
+			rejected[faceKey(kind)] = fmt.Sprintf("over the limit of %d made pictures", maxRecipes)
+			continue
+		}
 		look := looks[kind]
 		o, special := overrides[kind]
 		if !look.egg && !special {
@@ -152,7 +198,7 @@ func plan(lib library, looks map[string]mobLook, items, terrain atlas) (recipes 
 			rejected[key] = "kept as its spawn egg: " + o.why
 			continue
 		}
-		recipe, err := lib.face(look.appearance, o)
+		recipe, err := face(kind, look.appearance, o)
 		if err != nil {
 			rejected[key] = err.Error()
 			continue
@@ -167,7 +213,7 @@ func plan(lib library, looks map[string]mobLook, items, terrain atlas) (recipes 
 			if _, held := look.Textures[texture]; !held {
 				continue
 			}
-			if recipe, err := lib.face(look.appearance, worn); err == nil {
+			if recipe, err := face(kind, look.appearance, worn); err == nil {
 				recipes["villager/"+profession] = recipe
 			}
 		}
@@ -233,22 +279,12 @@ func (s *Source) make(ctx context.Context, recipes map[string]Recipe, keys []str
 	for i, path := range paths {
 		files[i] = fileOf(path)
 	}
-	bodies, unreached := s.soft(ctx, files, maxModelTextureBytes, total)
-	textures := map[string]*image.NRGBA{}
-	// Why a texture that was fetched is not held: it is not a picture
-	// within bounds.
-	refused := map[string]error{}
+	fetched, unreached := s.soft(ctx, files, maxModelTextureBytes, total)
+	store := &textureStore{bodies: map[string][]byte{}, held: map[string]*image.NRGBA{}, refused: map[string]error{}}
 	for _, path := range paths {
-		body, got := bodies[fileOf(path)]
-		if !got {
-			continue
+		if body, got := fetched[fileOf(path)]; got {
+			store.bodies[path] = body
 		}
-		tex, err := decodeTexture(path, body)
-		if err != nil {
-			refused[path] = err
-			continue
-		}
-		textures[path] = tex
 	}
 	away := func(path string) bool { return path != "" && slices.Contains(unreached, fileOf(path)) }
 	for _, key := range keys {
@@ -257,7 +293,19 @@ func (s *Source) make(ctx context.Context, recipes map[string]Recipe, keys []str
 			out.Missing = append(out.Missing, key)
 			continue
 		}
-		img, err := r.render(textures)
+		textures := store.of(append(r.textures(), r.Else))
+		var img *image.NRGBA
+		var err error
+		// One picture going wrong costs that picture.
+		if !s.guarded("the picture "+key, func() {
+			if faultIn != nil {
+				faultIn("picture/" + key)
+			}
+			img, err = r.render(textures)
+		}) {
+			out.Rejected[key] = "making it stopped on a fault; the log has it"
+			continue
+		}
 		if err == nil {
 			if out.Pictures[key], err = encode(img); err == nil {
 				continue
@@ -280,7 +328,7 @@ func (s *Source) make(ctx context.Context, recipes map[string]Recipe, keys []str
 		case slices.ContainsFunc(needs, away):
 			out.Missing = append(out.Missing, key)
 			out.Unreached = append(out.Unreached, key)
-		case slices.ContainsFunc(r.needs(), func(path string) bool { return textures[path] == nil && refused[path] == nil }):
+		case slices.ContainsFunc(r.needs(), func(path string) bool { return !store.has(path) }):
 			out.Missing = append(out.Missing, key)
 		default:
 			out.Rejected[key] = err.Error()
@@ -420,4 +468,24 @@ func (s *Source) remake(ctx context.Context, missing []string, recipes map[strin
 		looks[kind] = c.look
 	}
 	return s.art(ctx, ls, looks, items, total)
+}
+
+// guarded runs do and reports whether it ran to its end. A fault in it is
+// counted and logged in one line, with what was being made and no more: the
+// models and textures come from outside, and one of them that this code
+// reads wrongly must not take the map down with it, nor fill the log.
+func (s *Source) guarded(what string, do func()) (ok bool) {
+	defer func() {
+		if fault := recover(); fault != nil {
+			metricFaults.Inc()
+			logger := s.Logger
+			if logger == nil {
+				logger = slog.Default()
+			}
+			logger.Error("a picture could not be made; the map goes on without it", "what", what, "fault", tidyReason(fmt.Sprint(fault)))
+			ok = false
+		}
+	}()
+	do()
+	return true
 }

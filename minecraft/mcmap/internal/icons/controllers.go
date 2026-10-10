@@ -1,7 +1,9 @@
 package icons
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"path"
@@ -19,7 +21,58 @@ const (
 	maxExpression      = 1024
 	maxExpressionDepth = 24
 	maxArrayEntries    = 256
+	// maxArrays is how many arrays a controller may define, and
+	// maxFileControllers how many controllers one file may hold.
+	maxArrays          = 64
+	maxFileControllers = 64
+	// How much work reading may take, in steps: one for every operand and
+	// every operator. The real expressions take under fifty and a real
+	// file under two thousand; an expression can name an array whose
+	// entries are expressions naming arrays, and without a count of the
+	// work, and a memory of what each entry came to, a file of a few
+	// kilobytes takes days to read.
+	maxExpressionSteps = 4_000
+	maxFileSteps       = 200_000
 )
+
+// errSpent is why an expression was not read to its end.
+var errSpent = errors.New("a render controller took more work to read than any is allowed")
+
+// effort is the work the controllers of one file have left to be read
+// with, and what has been worked out of them already.
+type effort struct {
+	ctx context.Context
+	// file is the steps left for the whole file, and expression those left
+	// for the expression being read from its start.
+	file, expression int
+	// spent is set once either runs out or the context ends. Nothing more
+	// is read from the file after that: its mobs fall back to what their
+	// definitions call default.
+	spent bool
+	// entries is what each entry of an array came to, read once however
+	// many times it is named, and reading marks the ones being read now,
+	// which an entry that names itself would otherwise read for ever.
+	entries map[string]value
+	reading map[string]bool
+}
+
+func newEffort(ctx context.Context) *effort {
+	return &effort{ctx: ctx, file: maxFileSteps, entries: map[string]value{}, reading: map[string]bool{}}
+}
+
+// step spends one step and reports whether there was one to spend.
+func (e *effort) step() bool {
+	if e.spent {
+		return false
+	}
+	e.file--
+	e.expression--
+	// The context is asked every so often and not at every step.
+	if e.file <= 0 || e.expression <= 0 || (e.file%256 == 0 && e.ctx.Err() != nil) {
+		e.spent = true
+	}
+	return !e.spent
+}
 
 var controllerID = regexp.MustCompile(`^controller\.render\.[A-Za-z0-9_.-]{1,96}$`)
 
@@ -34,14 +87,20 @@ type controller struct {
 	// names bones, with * for any run of letters, and says yes, no or an
 	// expression. A horse's saddle is drawn only on a saddled one.
 	Visibility []map[string]json.RawMessage `json:"part_visibility"`
-	Arrays     struct {
+
+	// id is the controller's name, which tells its arrays from those of
+	// the same name in another controller of the file, and work is shared
+	// by every controller of one file.
+	id     string
+	work   *effort
+	Arrays struct {
 		Textures   map[string][]string `json:"textures"`
 		Geometries map[string][]string `json:"geometries"`
 	} `json:"arrays"`
 }
 
 // parseControllers reads every controller in one file, by name.
-func parseControllers(raw []byte) (map[string]controller, error) {
+func parseControllers(ctx context.Context, raw []byte) (map[string]controller, error) {
 	if len(raw) > maxControllerBytes {
 		return nil, fmt.Errorf("the controller file is %d bytes, over the limit of %d", len(raw), maxControllerBytes)
 	}
@@ -55,14 +114,20 @@ func parseControllers(raw []byte) (map[string]controller, error) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return nil, err
 	}
+	if len(file.Controllers) > maxFileControllers {
+		return nil, fmt.Errorf("the controller file holds %d controllers, over the limit of %d", len(file.Controllers), maxFileControllers)
+	}
 	out := map[string]controller{}
+	work := newEffort(ctx)
 	for id, body := range file.Controllers {
 		var c controller
 		// One controller in a shape this does not read is left out, and
 		// the mobs that use it fall back to their own default.
-		if !controllerID.MatchString(id) || json.Unmarshal(body, &c) != nil || len(c.Textures) > maxArrayEntries {
+		if !controllerID.MatchString(id) || json.Unmarshal(body, &c) != nil || len(c.Textures) > maxArrayEntries ||
+			len(c.Arrays.Textures)+len(c.Arrays.Geometries) > maxArrays || len(c.Visibility) > maxArrayEntries {
 			continue
 		}
+		c.id, c.work = id, work
 		out[id] = c
 	}
 	return out, nil
@@ -71,6 +136,9 @@ func parseControllers(raw []byte) (map[string]controller, error) {
 // hides reports whether the controller leaves a bone undrawn on a grown
 // mob of the default variant. The last rule that names the bone decides.
 func (c controller) hides(bone string) bool {
+	if c.work != nil && c.work.spent {
+		return false
+	}
 	shown := true
 	for _, rule := range c.Visibility[:min(len(c.Visibility), maxArrayEntries)] {
 		for pattern, raw := range rule {
@@ -139,6 +207,18 @@ func (v value) truthy() bool { return v.ref != "" || v.text != "" || v.num != 0 
 func (c controller) evaluate(expression string, depth int) (value, error) {
 	if len(expression) > maxExpression || depth > maxExpressionDepth {
 		return value{}, fmt.Errorf("an expression is too long or too deep")
+	}
+	// A controller made by hand, and a condition that is no controller's,
+	// has an allowance of its own.
+	if c.work == nil {
+		c.work = newEffort(context.Background())
+	}
+	if depth == 0 {
+		c.work.expression = maxExpressionSteps
+	}
+	if c.work.spent || c.work.ctx.Err() != nil {
+		c.work.spent = true
+		return value{}, errSpent
 	}
 	p := &expr{in: expression, of: c, depth: depth}
 	v := p.ternary()
@@ -283,6 +363,12 @@ func (p *expr) unary() value {
 
 func (p *expr) primary() value {
 	p.space()
+	if !p.of.work.step() {
+		if p.err == nil {
+			p.err = errSpent
+		}
+		return value{}
+	}
 	if p.at >= len(p.in) {
 		p.err = fmt.Errorf("an expression ends early")
 		return value{}
@@ -371,10 +457,24 @@ func (p *expr) named() value {
 		if i < 0 {
 			i += len(list)
 		}
+		// Each entry is read once: an expression may name the same one
+		// eighty times, and its entries theirs.
+		work, entry := p.of.work, p.of.id+"\x00"+strings.ToLower(name)+"\x00"+strconv.Itoa(i)
+		if v, read := work.entries[entry]; read {
+			return v
+		}
+		if work.reading[entry] {
+			p.err = fmt.Errorf("an array's entry names itself")
+			return value{}
+		}
+		work.reading[entry] = true
 		v, err := p.of.evaluate(list[i], p.depth+1)
+		delete(work.reading, entry)
 		if err != nil {
 			p.err = err
+			return value{}
 		}
+		work.entries[entry] = v
 		return v
 	}
 	// A query, a variable or a function: nought, which is what each is

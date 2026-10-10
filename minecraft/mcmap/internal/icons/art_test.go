@@ -14,8 +14,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // painted is a synthetic texture in which every pixel says where it is:
@@ -400,7 +402,7 @@ const syntheticControllers = `{"format_version": "1.8.0", "render_controllers": 
 }}`
 
 func TestAControllerIsAskedWhatAGrownDefaultMobWears(t *testing.T) {
-	controllers, err := parseControllers([]byte(syntheticControllers))
+	controllers, err := parseControllers(t.Context(), []byte(syntheticControllers))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +445,7 @@ func TestAnOverrideIsAppliedInPlaceOfWhatTheModelWouldGive(t *testing.T) {
 	models := modelsOf(t, `{"geometry.blob": {"texturewidth": 64, "textureheight": 32, "bones": [
 		{"name": "head", "cubes": [{"origin": [-2, 8, -2], "size": [4, 4, 4], "uv": [0, 0]}]},
 		{"name": "cube", "cubes": [{"origin": [-3, 1, -3], "size": [6, 6, 6], "uv": [0, 16]}]}]}}`)
-	controllers, _ := parseControllers([]byte(syntheticControllers))
+	controllers, _ := parseControllers(t.Context(), []byte(syntheticControllers))
 	lib := library{models: models, controllers: controllers}
 	look := appearance{Textures: map[string]string{"default": "textures/entity/blob"}, Geometry: map[string]string{"default": "geometry.blob"},
 		Controllers: []json.RawMessage{json.RawMessage(`"controller.render.plain"`)}}
@@ -462,7 +464,7 @@ func TestAnOverrideIsAppliedInPlaceOfWhatTheModelWouldGive(t *testing.T) {
 	// And through the table itself: a slime's face is on its core, and a
 	// parrot keeps its egg, whatever its model would have given.
 	looks := map[string]mobLook{"slime": {appearance: look, egg: true}, "parrot": {appearance: look, egg: true}, "boat": {appearance: look}}
-	recipes, rejected := plan(lib, looks, atlas{}, atlas{})
+	recipes, rejected := plan(t.Context(), lib, looks, atlas{}, atlas{}, nil)
 	if got := recipes["face/slime"]; len(got.Layers) == 0 || got.Layers[0].Src != [4]int{6, 22, 6, 6} {
 		t.Errorf("the slime's override was not applied: %+v", got)
 	}
@@ -690,43 +692,47 @@ func TestAStructureDrawnAsItsItemForWantOfATextureIsAskedForAgain(t *testing.T) 
 	s := newSamples(t)
 	withMobs(t, s)
 	var up atomic.Bool
+	// The mob's texture fails only once the item has been served, so that
+	// the item is held whichever of the two was asked for first.
+	served := make(chan struct{})
+	var once sync.Once
 	inner := s.srv.Config.Handler
 	s.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/textures/entity/blaze.png") && !up.Load() {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/textures/entity/blaze.png") && !up.Load():
+			select {
+			case <-served:
+			case <-time.After(5 * time.Second):
+			}
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
+		case strings.HasSuffix(r.URL.Path, "/textures/items/netherbrick.png"):
+			defer once.Do(func() { close(served) })
 		}
 		inner.ServeHTTP(w, r)
 	})
-	// One at a time, so that the item is fetched before the source is
-	// found to be out of reach, whichever is asked for first.
-	var set Set
-	for range 20 {
-		var err error
-		if set, err = s.source().Fetch(t.Context()); err != nil {
-			t.Fatal(err)
-		}
-		if _, drawn := set.Pictures["structure/fortress"]; drawn {
-			break
-		}
-	}
-	item, drawn := set.Pictures["structure/fortress"]
-	if !drawn {
-		t.Skip("the item was never fetched before the source was found out of reach")
-	}
-	if colourOf(t, item) != yellow {
-		t.Error("the fortress is not drawn as its item while its mob's texture is out of reach")
+	item := Recipe{Flat: "textures/items/netherbrick"}
+	recipes := map[string]Recipe{"structure/fortress": walker(t)}
+	faced := recipes["structure/fortress"]
+	faced.Layers = []Layer{faced.Layers[0]}
+	faced.Layers[0].Texture = "textures/entity/blaze"
+	faced.Else = item.Flat
+	recipes["structure/fortress"] = faced
+	set := s.source().make(t.Context(), recipes, []string{"structure/fortress"}, &budget{left: maxTotalBytes})
+	drawn, ok := set.Pictures["structure/fortress"]
+	if !ok || colourOf(t, drawn) != yellow {
+		t.Fatalf("the fortress is not drawn as its item while its mob's texture is out of reach: missing %v, rejected %v", set.Missing, set.Rejected)
 	}
 	if !slices.Contains(set.Missing, "structure/fortress") || !slices.Contains(set.Unreached, "structure/fortress") {
 		t.Fatalf("missing %v: the fortress would stay its item for good", set.Missing)
 	}
 	up.Store(true)
-	got, err := s.source().Fill(t.Context(), set.Missing, set.Recipes)
+	got, err := s.source().Fill(t.Context(), set.Missing, recipes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got.Pictures["structure/fortress"], got.Pictures["face/blaze"]) || len(got.Pictures["face/blaze"]) == 0 || len(got.Missing) != 0 {
-		t.Errorf("after the source came back the fortress is not its mob's face: missing %v", got.Missing)
+	if raw := got.Pictures["structure/fortress"]; len(raw) == 0 || len(got.Missing) != 0 || colourOf(t, raw) == yellow {
+		t.Errorf("after the source came back the fortress is still its item: missing %v", got.Missing)
 	}
 }
 
@@ -949,7 +955,7 @@ func TestABellIsDrawnAtTheSizeOfABlock(t *testing.T) {
 	if err := json.Unmarshal(stripComments([]byte(syntheticTerrain)), &terrain); err != nil {
 		t.Fatal(err)
 	}
-	recipes, _ := plan(library{}, nil, atlas{}, terrain)
+	recipes, _ := plan(t.Context(), library{}, nil, atlas{}, terrain, nil)
 	bell, ok := recipes["block/bell"]
 	if !ok {
 		t.Fatal("no bell")

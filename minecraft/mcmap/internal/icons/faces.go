@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -20,7 +21,16 @@ import (
 // at a higher resolution is allowed for, but not much.
 const (
 	maxModelTextureBytes = 512 << 10
-	maxModelTextureSide  = 1024
+	maxModelTextureSide  = 512
+	// maxHeldPixels is how many decoded pixels are kept between one
+	// picture and the next, and maxFetchPixels how many one fetch may
+	// decode in all. The real set decodes about two million; a texture is
+	// four bytes a pixel once decoded, however few it was to download.
+	maxHeldPixels  = 1 << 20
+	maxFetchPixels = 32 << 20
+	// maxDefinitionControllers is how many render controllers one mob's
+	// definition may list: the most any real one has is seven.
+	maxDefinitionControllers = 16
 	// maxTextureScale is how many pixels a texture may have to each unit
 	// its model counts it in.
 	maxTextureScale = 4
@@ -36,6 +46,58 @@ const (
 	minFaceShort = 4
 	maxRecipes   = 600
 )
+
+// textureStore is the textures one making of pictures draws from. It keeps
+// each as it was downloaded and decodes one only when a picture needs it,
+// letting go of those the last picture needed once they come to more than
+// maxHeldPixels: six hundred textures decoded and held together could be
+// gigabytes inside a byte budget of megabytes.
+type textureStore struct {
+	bodies  map[string][]byte
+	held    map[string]*image.NRGBA
+	refused map[string]error
+	// pixels is those held now, and decoded all those decoded so far.
+	pixels, decoded int
+}
+
+var errTooManyPixels = errors.New("the fetch has decoded as many pixels as one is allowed")
+
+// has reports whether a texture was downloaded.
+func (ts *textureStore) has(path string) bool {
+	_, ok := ts.bodies[path]
+	return ok
+}
+
+// of is the store's held textures once those named are among them, as far
+// as each could be decoded; why one could not is in refused.
+func (ts *textureStore) of(paths []string) map[string]*image.NRGBA {
+	if ts.pixels > maxHeldPixels {
+		for path, tex := range ts.held {
+			if !slices.Contains(paths, path) {
+				ts.pixels -= tex.Rect.Dx() * tex.Rect.Dy()
+				delete(ts.held, path)
+			}
+		}
+	}
+	for _, path := range paths {
+		body, got := ts.bodies[path]
+		if !got || ts.held[path] != nil || ts.refused[path] != nil {
+			continue
+		}
+		if ts.decoded >= maxFetchPixels {
+			ts.refused[path] = errTooManyPixels
+			continue
+		}
+		tex, err := decodeTexture(path, body)
+		if err != nil {
+			ts.refused[path] = err
+			continue
+		}
+		size := tex.Rect.Dx() * tex.Rect.Dy()
+		ts.held[path], ts.pixels, ts.decoded = tex, ts.pixels+size, ts.decoded+size
+	}
+	return ts.held
+}
 
 // modelTexture is a path this service will ask for a model's texture at.
 var modelTexture = regexp.MustCompile(`^textures/(entity|blocks|items|map)/[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+){0,3}(\.tga)?$`)
@@ -406,17 +468,21 @@ func faceRecipe(parts []drawn, v view) (Recipe, error) {
 				continue
 			}
 			for _, p := range faces {
-				if near(p, main, v.reach) {
-					all = append(all, layered{p, texture, [2]int{part.model.texW, part.model.texH}, skin})
+				if !near(p, main, v.reach) {
+					continue
 				}
+				// Counted as they are gathered: a definition can name one
+				// controller ten thousand times over a model of a
+				// thousand boxes.
+				if len(all) >= maxLayers {
+					return Recipe{}, fmt.Errorf("the face is over %d layers", maxLayers)
+				}
+				all = append(all, layered{p, texture, [2]int{part.model.texW, part.model.texH}, skin})
 			}
 		}
 	}
 	if !found || len(all) == 0 {
 		return Recipe{}, first
-	}
-	if len(all) > maxLayers {
-		return Recipe{}, fmt.Errorf("the face is %d layers, over the limit of %d", len(all), maxLayers)
 	}
 	// The nearest last, whichever model it is of: the wool of a sheep's
 	// head is a box set back from its face, not a layer over it.
@@ -460,21 +526,21 @@ type appearance struct {
 // condition holds of such a mob.
 func (a appearance) controllers() []string {
 	var out []string
-	for _, raw := range a.Controllers {
+	for _, raw := range a.Controllers[:min(len(a.Controllers), maxDefinitionControllers)] {
 		var name string
 		var gated map[string]string
 		switch {
 		case json.Unmarshal(raw, &name) == nil:
 			out = append(out, name)
-		case json.Unmarshal(raw, &gated) == nil:
-			for id, condition := range gated {
-				if holds(condition) {
+		case json.Unmarshal(raw, &gated) == nil && len(gated) <= maxDefinitionControllers:
+			for _, id := range slices.Sorted(maps.Keys(gated)) {
+				if holds(gated[id]) {
 					out = append(out, id)
 				}
 			}
 		}
 	}
-	return out
+	return out[:min(len(out), maxDefinitionControllers)]
 }
 
 // library is every model and controller the samples hold.

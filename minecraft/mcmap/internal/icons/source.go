@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -23,6 +26,7 @@ import (
 const (
 	DefaultListURL = "https://api.github.com/repos/Mojang/bedrock-samples/git/trees"
 	DefaultRawURL  = "https://raw.githubusercontent.com/Mojang/bedrock-samples"
+	DefaultDirURL  = "https://api.github.com/repos/Mojang/bedrock-samples/contents"
 
 	packDir   = "resource_pack"
 	entityDir = "resource_pack/entity"
@@ -50,8 +54,11 @@ const (
 	maxIconSide = 64
 
 	requestTimeout = 15 * time.Second
-	fetchTimeout   = 3 * time.Minute
-	fetchWorkers   = 6
+	// The listing is some three hundred times the size of anything else
+	// asked for, and is given that much longer to arrive.
+	listTimeout  = 2 * time.Minute
+	fetchTimeout = 3 * time.Minute
+	fetchWorkers = 6
 )
 
 // Source reads the mob icons, the marker pictures and the display names at
@@ -63,6 +70,18 @@ type Source struct {
 	RawURL  string
 	// HTTP is replaced in tests. Nil is a client that follows no redirect.
 	HTTP *http.Client
+	// Logger is where a fault in making a picture is said. Nil is the
+	// default logger.
+	Logger *slog.Logger
+	// DirURL lists one directory to a request, and is what the entity
+	// definitions are listed with when the whole tree cannot come whole.
+	// Empty is no such fallback.
+	DirURL string
+	// State is a file on the volume that holds when the listing was last
+	// asked for and how that went, so that a service restarting over and
+	// over does not spend the listing's ration. Empty keeps no such
+	// record, and nothing is held back.
+	State string
 }
 
 // NewClient is the client the samples are fetched with. Neither host
@@ -127,36 +146,49 @@ func (b *budget) take(n int64) bool {
 }
 
 func (s *Source) get(ctx context.Context, address string, limit int64, total *budget) ([]byte, error) {
+	body, _, err := s.ask(ctx, s.client(), address, limit, total)
+	return body, err
+}
+
+func (s *Source) client() *http.Client {
+	if s.HTTP != nil {
+		return s.HTTP
+	}
+	return NewClient()
+}
+
+// errTooLarge marks an answer longer than this would read.
+var errTooLarge = errors.New("more than is read")
+
+// ask is get with the client to ask with, and gives back the headers of
+// whatever answer came, which say when a rationed host may be asked again.
+func (s *Source) ask(ctx context.Context, client *http.Client, address string, limit int64, total *budget) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		return nil, err
-	}
-	client := s.HTTP
-	if client == nil {
-		client = NewClient()
+		return nil, nil, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("%s: %s: %w", req.URL.Path, resp.Status, errSettled)
+		return nil, resp.Header, fmt.Errorf("%s: %s: %w", req.URL.Path, resp.Status, errSettled)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", req.URL.Path, resp.Status)
+		return nil, resp.Header, fmt.Errorf("%s: %s", req.URL.Path, resp.Status)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, err
+		return nil, resp.Header, err
 	}
 	if int64(len(body)) > limit {
-		return nil, fmt.Errorf("%s: over the %d byte limit: %w", req.URL.Path, limit, errSettled)
+		return nil, resp.Header, fmt.Errorf("%s: over the %d byte limit: %w: %w", req.URL.Path, limit, errTooLarge, errSettled)
 	}
 	if !total.take(int64(len(body))) {
-		return nil, errors.New("the icon source sent more than a whole fetch is allowed")
+		return nil, resp.Header, errors.New("the icon source sent more than a whole fetch is allowed")
 	}
-	return body, nil
+	return body, resp.Header, nil
 }
 
 func (s *Source) raw(path string) string {
@@ -357,7 +389,10 @@ func (s *Source) definitions(ctx context.Context, names []string, items atlas, t
 	chosen := map[string]choice{}
 	for _, name := range names {
 		var def definition
-		if !jsonWithin(bodies[name], maxJSONDepth) || json.Unmarshal(stripComments(bodies[name]), &def) != nil {
+		// Comments first: a quote inside one would hide whatever nesting
+		// follows it from the count.
+		plain := stripComments(bodies[name])
+		if !jsonWithin(plain, maxJSONDepth) || json.Unmarshal(plain, &def) != nil {
 			continue
 		}
 		d := def.Entity.Description
@@ -530,20 +565,169 @@ func (s *Source) extras(ctx context.Context, want []string, items atlas, total *
 // each model and render controller.
 type listing struct {
 	definitions, models, controllers []string
+	// partial is why the models and controllers are not listed, where
+	// only the definitions could be: no face can be worked out then.
+	partial string
 	// tga is the textures, by path without an extension, kept as a TGA
 	// with no PNG beside it.
 	tga map[string]bool
 }
 
-// list asks, in the one request to the rationed host, for every file under
-// resource_pack. Three directories are wanted and the host lists one
-// directory to a request, or a whole tree; the tree is twenty times the
-// size and a third of the requests.
+// errListingTooLong marks a listing of the whole tree that cannot come
+// whole at this pin, however often it is asked for: the host cuts a tree
+// short at 100,000 entries or 7 MB, and the one at the default pin is
+// 18,714 entries and 5.5 MB.
+var errListingTooLong = errors.New("the listing of the samples is too long to come whole")
+
+// list is the files of the samples that whole directories are read of. It
+// asks for the whole of resource_pack in one request, and where that
+// cannot come whole, for the entity definitions alone, as it did before
+// any picture was made from a model: the icons, the names and the pictures
+// served as they come need nothing more, and only the faces go without.
+//
+// The host rations listings by address, sixty an hour, so each asking and
+// how it went is written to the volume, and it is not asked again, by this
+// run or by the next after a restart, before its turn.
 func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
-	address := strings.TrimRight(s.ListURL, "/") + "/" + url.PathEscape(s.Ref) + "%3A" + packDir + "?recursive=1"
-	body, err := s.get(ctx, address, maxListBytes, total)
+	gate := s.readGate()
+	if wait := time.Until(gate.Next); wait > 0 {
+		return listing{}, fmt.Errorf("the listing was asked for a short while ago and is not asked for again for %s", wait.Round(time.Second))
+	}
+	var (
+		out     listing
+		headers http.Header
+		err     error
+	)
+	if gate.Narrow != s.Ref {
+		if out, headers, err = s.wide(ctx, total); errors.Is(err, errListingTooLong) && s.DirURL != "" {
+			gate.Narrow = s.Ref
+		}
+	}
+	if gate.Narrow == s.Ref {
+		if out, headers, err = s.narrow(ctx, total); err == nil {
+			out.partial = errListingTooLong.Error() + " at this pin; faces are not made until the pin changes"
+		}
+	}
+	s.writeGate(gate.after(time.Now(), headers, err))
+	return out, err
+}
+
+// How long the listing is left alone after it was asked for: after an
+// answer, long enough that a service restarting every few seconds asks six
+// times an hour and not six hundred; after a failure, a minute, then
+// doubling to an hour. The host's own word for when it may be asked again
+// is kept to where it is longer, up to maxListingWait.
+const (
+	listingGap     = 10 * time.Minute
+	maxListingWait = 2 * time.Hour
+)
+
+// listingGate is what is kept of the last asking.
+type listingGate struct {
+	Next     time.Time `json:"next"`
+	Failures int       `json:"failures,omitempty"`
+	// Narrow is the pin whose whole tree is known not to come whole.
+	Narrow string `json:"narrow,omitempty"`
+}
+
+func (g listingGate) after(now time.Time, headers http.Header, err error) listingGate {
+	if err == nil {
+		g.Failures, g.Next = 0, now.Add(listingGap)
+		return g
+	}
+	g.Failures = min(g.Failures+1, 16)
+	g.Next = now.Add(min(defaultRetryMin<<(g.Failures-1), defaultRetryMax))
+	// The host says when a ration that is spent is given again, as a time
+	// or as a number of seconds.
+	var told time.Time
+	if headers.Get("X-RateLimit-Remaining") == "0" {
+		if at, err := strconv.ParseInt(headers.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			told = time.Unix(at, 0)
+		}
+	}
+	if seconds, err := strconv.Atoi(headers.Get("Retry-After")); err == nil && seconds > 0 {
+		told = now.Add(time.Duration(min(seconds, int(maxListingWait/time.Second))) * time.Second)
+	}
+	if told.After(g.Next) {
+		g.Next = told
+	}
+	if latest := now.Add(maxListingWait); g.Next.After(latest) {
+		g.Next = latest
+	}
+	return g
+}
+
+func (s *Source) readGate() listingGate {
+	var g listingGate
+	if s.State == "" {
+		return g
+	}
+	if raw, err := os.ReadFile(s.State); err == nil && len(raw) < 4096 {
+		_ = json.Unmarshal(raw, &g)
+	}
+	// A record from a clock that was wrong does not hold things up for
+	// longer than any real one could.
+	if latest := time.Now().Add(maxListingWait); g.Next.After(latest) {
+		g.Next = latest
+	}
+	return g
+}
+
+func (s *Source) writeGate(g listingGate) {
+	if s.State == "" {
+		return
+	}
+	raw, _ := json.Marshal(g)
+	if err := os.MkdirAll(filepath.Dir(s.State), 0o755); err == nil {
+		// Not kept is asked sooner, which is the state before this was
+		// kept at all.
+		_ = os.WriteFile(s.State, raw, 0o644)
+	}
+}
+
+// narrow lists the entity definitions and nothing else, in one request.
+func (s *Source) narrow(ctx context.Context, total *budget) (listing, http.Header, error) {
+	address := strings.TrimRight(s.DirURL, "/") + "/" + entityDir + "?ref=" + url.QueryEscape(s.Ref)
+	body, headers, err := s.ask(ctx, s.client(), address, maxListBytes, total)
 	if err != nil {
-		return listing{}, err
+		return listing{}, headers, err
+	}
+	var entries []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return listing{}, headers, err
+	}
+	var out listing
+	for _, e := range entries {
+		if e.Type == "file" && definitionName.MatchString(e.Name) {
+			out.definitions = append(out.definitions, e.Name)
+		}
+	}
+	if len(out.definitions) == 0 {
+		return listing{}, headers, errors.New("the listing holds no definitions")
+	}
+	if len(out.definitions) > maxDefinitions {
+		return listing{}, headers, fmt.Errorf("the listing holds %d definitions, over the limit of %d", len(out.definitions), maxDefinitions)
+	}
+	return out, headers, nil
+}
+
+// wide asks, in one request, for every file under resource_pack. Three
+// directories are wanted and the host lists one directory to a request,
+// or a whole tree; the tree is twenty times the size and a third of the
+// requests.
+func (s *Source) wide(ctx context.Context, total *budget) (listing, http.Header, error) {
+	address := strings.TrimRight(s.ListURL, "/") + "/" + url.PathEscape(s.Ref) + "%3A" + packDir + "?recursive=1"
+	client := *s.client()
+	client.Timeout = listTimeout
+	body, headers, err := s.ask(ctx, &client, address, maxListBytes, total)
+	if errors.Is(err, errTooLarge) {
+		return listing{}, headers, fmt.Errorf("%w: %w", errListingTooLong, err)
+	}
+	if err != nil {
+		return listing{}, headers, err
 	}
 	var tree struct {
 		Entries []struct {
@@ -553,11 +737,11 @@ func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
 		Truncated bool `json:"truncated"`
 	}
 	if err := json.Unmarshal(body, &tree); err != nil {
-		return listing{}, err
+		return listing{}, headers, err
 	}
 	// A listing cut short would leave mobs out without a word.
 	if tree.Truncated || len(tree.Entries) > maxListEntries {
-		return listing{}, errors.New("the listing is too long to have come whole")
+		return listing{}, headers, errListingTooLong
 	}
 	out := listing{tga: map[string]bool{}}
 	png := map[string]bool{}
@@ -587,10 +771,10 @@ func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
 		}
 	}
 	if len(out.definitions) == 0 {
-		return listing{}, errors.New("the listing holds no definitions")
+		return listing{}, headers, errors.New("the listing holds no definitions")
 	}
 	if len(out.definitions) > maxDefinitions {
-		return listing{}, fmt.Errorf("the listing holds %d definitions, over the limit of %d", len(out.definitions), maxDefinitions)
+		return listing{}, headers, fmt.Errorf("the listing holds %d definitions, over the limit of %d", len(out.definitions), maxDefinitions)
 	}
 	maps.DeleteFunc(out.tga, func(texture string, _ bool) bool { return png[texture] })
 	// Too many of either is a listing of something else; the faces go
@@ -598,7 +782,7 @@ func (s *Source) list(ctx context.Context, total *budget) (listing, error) {
 	if len(out.models) > maxModelFiles || len(out.controllers) > maxControllerFiles {
 		out.models, out.controllers = nil, nil
 	}
-	return out, nil
+	return out, headers, nil
 }
 
 // each runs get for every key, a few at a time, and stops at the first
