@@ -81,6 +81,20 @@
     return pale;
   }
   const tagOf = (name) => (naming('labelMobs') === 'always' ? fade(icons.tag(name, NAMED)) : null);
+  // A saved mob's picture for the panel, one element a mob for as long
+  // as its picture is the same one, so that a list built again finds it
+  // unchanged and draws nothing.
+  const savedPictures = new Map();
+  function savedPicture(item, key) {
+    let made = savedPictures.get(item);
+    if (!made || made.dataset.picture !== key) {
+      if (savedPictures.size > 512) savedPictures.clear();
+      made = icons.picture(key);
+      made.classList.add('saved');
+      savedPictures.set(item, made);
+    }
+    return made;
+  }
   const WORLD_KINDS = ['beds', 'containers', 'mobs'];
   const BABY_RADIUS = 4;
 
@@ -412,7 +426,9 @@
         return {
           id: item,
           label: nameOf(entry) || names.entity(data.k),
-          picture: pictureOf('mobs', data),
+          // A mob the live layer is not drawing is in the panel as it is
+          // on the map: its picture faded, in a broken ring.
+          picture: loaded ? pictureOf('mobs', data) : savedPicture(item, pictureOf('mobs', data)),
           swatch: 'ring mobs',
           detail: `${names.kindOf(data.k, data.b)} · ${loaded ? 'loaded' : 'saved'}`,
         };

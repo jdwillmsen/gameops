@@ -659,6 +659,9 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .pic { display: inline-grid; place-items: center; flex: none; width: var(--icon); height: var(--icon); }
 .pic .glyph { width: 16px; height: 16px; color: var(--dim); }
 .pic .picture:not([hidden]) + i { display: none; }
+/* A named mob known only from the last snapshot, as its mark on the map
+   is: faded, in a broken ring of the layer's colour. */
+.pic .picture.saved { opacity: 0.55; outline: 1.5px dashed var(--marker-mobs); outline-offset: 1px; border-radius: 50%; }
 .swatch { width: 75%; height: 75%; border: 1px solid var(--edge); border-radius: 3px; }
 /* Drawn as a trail is drawn on the map, a light line on its dark casing:
    the colours are made to be read on the dark, and half of them could not

@@ -178,3 +178,22 @@ func TestADensityChangeRecomposesAndTheStylesheetAgreesWithTheCanvas(t *testing.
 		}
 	}
 }
+
+// The panel's rows show a saved mob as the map does, and a block only
+// where it fits a row whole.
+func TestThePanelsRowsShowWhatTheMapShows(t *testing.T) {
+	markers, css, icons := read(t, "markers.js"), read(t, "style.css"), read(t, "icons.js")
+	if !bytes.Contains(markers, []byte("picture: loaded ? pictureOf('mobs', data) : savedPicture(item, pictureOf('mobs', data)),")) || !bytes.Contains(markers, []byte("made.classList.add('saved');")) {
+		t.Error("markers.js no longer hands the panel a saved mob's picture marked as saved")
+	}
+	if !bytes.Contains(css, []byte(".pic .picture.saved { opacity: 0.55; outline: 1.5px dashed var(--marker-mobs);")) {
+		t.Error("style.css no longer fades a saved mob's picture in a row and rings it")
+	}
+	if !bytes.Contains(icons, []byte("if (drawn && Math.max(drawn.width, drawn.height) > ICON * DENSITY) {\n      const flat = renditions(canvas.dataset.picture).flat;")) {
+		t.Error("icons.js draws a block in a row it does not fit, blurred")
+	}
+	// The panel asks the registry's own function for a row's picture.
+	if !bytes.Contains(read(t, "layers.js"), []byte("app.icons.picture(picture)")) || !bytes.Contains(icons, []byte("    picture,\n    paint,")) {
+		t.Error("the panel's rows no longer take their pictures from the icon registry")
+	}
+}

@@ -230,23 +230,24 @@
 
   // How large a picture is drawn in a box, in screen pixels along its
   // longer side: the most whole screen pixels to each of its own that
-  // fit, or, for one larger than its box, the box, blended, since a
-  // picture cannot be made smaller without losing pixels. A block is
-  // already drawn on the slant and has no grid to keep, so where a whole
-  // number would leave it well short of its box it is stretched to it,
-  // unblended.
-  function fit(native, box, slanted = false) {
+  // fit. Where that would leave it under three quarters of its box (a
+  // face ten pixels a side in a box of sixteen) it is stretched to the
+  // box, unblended, so that every picture is much the same size beside
+  // the next; a pixel of it is then one or two screen pixels and never a
+  // blur. One larger than its box is the box, blended, since a picture
+  // cannot be made smaller without losing pixels.
+  function fit(native, box) {
     const target = box * DENSITY;
     const whole = Math.floor(target / native);
-    if (whole >= 1 && (!slanted || whole * native >= 0.75 * target)) return { side: whole * native, smooth: false };
+    if (whole >= 1 && whole * native >= 0.75 * target) return { side: whole * native, smooth: false };
     return { side: target, smooth: target < native };
   }
 
   // Draws a picture in the middle of a square of screen pixels, on whole
   // pixels, at the size fit gives it.
-  function centred(ctx, drawn, side, box, slanted) {
+  function centred(ctx, drawn, side, box) {
     const longer = Math.max(drawn.width, drawn.height);
-    const { side: across, smooth } = fit(longer, box, slanted);
+    const { side: across, smooth } = fit(longer, box);
     const w = Math.max(1, Math.round((drawn.width * across) / longer));
     const h = Math.max(1, Math.round((drawn.height * across) / longer));
     ctx.imageSmoothingEnabled = smooth;
@@ -284,7 +285,7 @@
     ctx.fill();
     ctx.save();
     ctx.clip();
-    centred(ctx, drawn, side, box, false);
+    centred(ctx, drawn, side, box);
     ctx.restore();
     return made;
   }
@@ -292,12 +293,12 @@
   // A picture with no plate: the picture itself, larger, cased round its
   // own outline in the layer's colour and then in the dark, so that a
   // chest is a chest's shape and still reads on grass and on snow.
-  function bare(drawn, ring, box, slanted) {
+  function bare(drawn, ring, box) {
     const edge = RING + heavy() + CASING;
     const side = (box + 2 * edge) * DENSITY;
     const picture = document.createElement('canvas');
     picture.width = picture.height = side;
-    centred(picture.getContext('2d'), drawn, side, box, slanted);
+    centred(picture.getContext('2d'), drawn, side, box);
     // The picture's shape filled with one colour, to be stamped round it.
     const tinted = (fill) => {
       const flat = document.createElement('canvas');
@@ -411,7 +412,7 @@
     let made = sprites.get(held);
     if (!made) {
       made = style === 'large'
-        ? bare(drawn, ring, (baby ? BARE_BABY : BARE)[size], from.includes('/block/'))
+        ? bare(drawn, ring, (baby ? BARE_BABY : BARE)[size])
         : plated(drawn, ring, boxes()[size][baby ? 'babyIcon' : 'icon'], alive);
       sprites.set(held, made);
     }
@@ -427,8 +428,19 @@
   // was one to draw. Without one the element is hidden, and whatever
   // stands beside it as the fallback shows.
   function fill(canvas) {
-    const from = addressOf(canvas.dataset.picture);
-    const drawn = bitmap(from);
+    let from = addressOf(canvas.dataset.picture);
+    let drawn = bitmap(from);
+    // A block is drawn on the page only where it fits its box whole. In
+    // a row 16 pixels tall on an ordinary screen it would be halved and
+    // blurred, and the flat picture of the same thing is used, which is
+    // drawn at that size.
+    if (drawn && Math.max(drawn.width, drawn.height) > ICON * DENSITY) {
+      const flat = renditions(canvas.dataset.picture).flat;
+      if (flat && flat !== from) {
+        from = flat;
+        drawn = bitmap(flat);
+      }
+    }
     canvas.hidden = !drawn;
     // Made for another density, it is made again for this one.
     if (canvas.width !== ICON * DENSITY) {
@@ -438,7 +450,7 @@
     if (!drawn || canvas.dataset.drawn === from) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    centred(ctx, drawn, canvas.width, canvas.width / DENSITY, from.includes('/block/'));
+    centred(ctx, drawn, canvas.width, canvas.width / DENSITY);
     canvas.dataset.drawn = from;
   }
 
@@ -452,13 +464,27 @@
     canvas.dataset.picture = str(key);
     canvas.setAttribute('aria-hidden', 'true');
     fill(canvas);
+    // One made before its picture has arrived may not be on the page yet
+    // when it does, and would be passed over there: it is remembered
+    // until it has been drawn.
+    if (canvas.hidden) {
+      if (waiting.size > 2048) waiting.clear();
+      waiting.add(canvas);
+    }
     return canvas;
   }
+
+  // Pictures for the page that were made with nothing yet to draw.
+  const waiting = new Set();
 
   // Brings every picture under an element in line with what there is now.
   function paint(root) {
     if (!root) return;
     for (const canvas of root.querySelectorAll('canvas[data-picture]')) fill(canvas);
+    for (const canvas of waiting) {
+      fill(canvas);
+      if (!canvas.hidden) waiting.delete(canvas);
+    }
   }
 
   // Draws a marker's picture where Leaflet would have drawn its circle.
