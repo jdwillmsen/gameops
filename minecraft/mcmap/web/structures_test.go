@@ -185,3 +185,24 @@ func TestKindsAreListedByTheDimensionTheServerPutsThemIn(t *testing.T) {
 		}
 	}
 }
+
+// A kind known by what nobody has yet opened says so, and says of an end
+// city and a bastion what the save holds that only they have, as text.
+func TestKindsFoundByTheirLootSayWhatTheyAreKnownBy(t *testing.T) {
+	js := usesNoMarkupSink(t, "structures.js")
+	for _, need := range []string{
+		"if (s && found(s) && quiet(kind)) lines.push(WHAT.fades);",
+		"Once the last of that is gone the map no longer finds it, though it stands where it stood.",
+		"['Found by', `${fmt(s.evidence)} ${Object.hasOwn(FOUND_BY, kind) ? FOUND_BY[kind] : 'blocks only this kind has'}`]",
+		"end_city: 'in all: chests nobody has opened, shulkers, and the dragon head and framed elytra of its ship',",
+		"return facts('Its shulkers and its ship', [['Shulkers', saved(of('shulker'))], ['Ship', ship]]);",
+		// Which bastion is one of three words the page knows, or is not said.
+		"['Which bastion', Object.hasOwn(BASTIONS, sort) ? BASTIONS[sort] : 'Not said by what is left: housing units, or one whose telling chests are opened'],",
+		"['Piglin brutes', saved(of('piglin_brute'))],",
+		"portal >= 20 ? 'Lit: the dragon has been killed'",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("structures.js no longer has %s", need)
+		}
+	}
+}

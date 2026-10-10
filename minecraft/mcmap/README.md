@@ -1229,27 +1229,29 @@ brackets where it is not nought.
 | Buried treasure | Overworld | The chest, at block 8, 8 of its chunk, until opened; treasure maps | 4, 2, two averaged, on beaches | 407 of 446 (152) | 406 of 461 | High | Found by blocks, predicted in finished chunks only | No |
 | Shipwreck | Overworld | Chests until opened | 24, 20, one, in oceans and on beaches | 29 of 37 | 29 of 75 | Medium | Found by blocks; possible sites only | No |
 | Ocean ruins, warm and cold | Overworld | Chests, suspicious sand and gravel | 20, 12, one, in oceans | 139 of 144 (6) | 139 of 144 | Low | Found by blocks, predicted | No |
-| Ruined portal | Overworld | The chest until opened | 40, 25, one | 81 of 143 | 81 of 101 | Low | Found by blocks, predicted; 62 are placed by a rule not found | No |
+| Ruined portal | Overworld | The chest until opened | 40, 25, one | 144 of 144 | 83 of 101 | Low | Found by blocks, predicted in finished chunks | Yes |
 | Mineshaft, and the badlands one | Overworld | Cave spider spawners (3,192), chest minecarts (6,319) | Per chunk, not a grid; not tried | - | - | Low | Left out: about 640, and one with no spider corridor leaves nothing | No |
 | Dungeon | Overworld | Its spawner and chests (4,910 rooms) | None: scattered | - | - | Low | Left out: thousands | No |
 | Desert well | Overworld | Suspicious sand until brushed (14) | None: scattered | - | - | Low | Could be found by blocks; left out as too slight | No |
 | Fossil, amethyst geode | Overworld | Nothing but plain blocks | None: scattered | - | - | Low | Cannot be shown without reading every block | No |
 | Nether fortress | Nether | Records 57 and 119 | 30, 26, one, and a third draw: 2 in 6 | 11 of 11 in record 57 | 6 of 6 | Low | Recorded and predicted | Yes |
-| Bastion remnant | Nether | Chests until opened, a magma cube spawner in one type of four | The fortress's grid: the other 4 in 6, not in basalt deltas | 15 of 22 groups (1) | 15 of 15; none of 4 in basalt deltas | Medium | Found by blocks, predicted | No |
-| Ruined portal | Nether | The chest until opened | 25, 15, one | 33 of 37 (1) | 33 of 41 | Low | Found by blocks, predicted | No |
+| Bastion remnant | Nether | Chests until opened, a magma cube spawner in one type of four | The fortress's grid: the other 4 in 6, not in basalt deltas | 17 of 19 | 14 of 15; none of 4 in basalt deltas | Medium | Found by blocks, predicted | Yes |
+| Ruined portal | Nether | The chest until opened | 25, 15, one | 37 of 37 | 34 of 41 | Low | Found by blocks, predicted in finished chunks | Yes |
 | Nether fossil | Nether | Nothing but plain blocks | None | - | - | Low | Cannot be shown | No |
-| End city, with or without ship | The End | Chests until opened, shulkers, the ship's dragon head and framed elytra | 20, 9, two averaged | 20 of 20 | 20 of 23 | High | Found by blocks, predicted | No |
-| End gateway | The End | Its block, which nothing breaks | None: made by the dragon's death and by use | - | - | Low | Found by blocks | No |
-| Exit portal | The End | Its portal blocks once lit; the End's own record | Fixed at the middle | - | - | None | Found by blocks | No |
+| End city, with or without ship | The End | Chests until opened, shulkers, the ship's dragon head and framed elytra | 20, 9, two averaged | 19 of 19 | 20 of 23 | High | Found by blocks, predicted; off until asked for | Yes |
+| End gateway | The End | Its block, which nothing breaks | None: made by the dragon's death and by use | - | - | Low | Found by blocks | Yes |
+| Exit portal | The End | Its portal blocks once lit; the End's own record | Fixed at the middle | - | - | None | Found by blocks | Yes |
 | Obsidian pillars | The End | Nothing | Fixed: the same ten in every world | - | - | None | Not shown: the render already draws them | No |
 
 What the figures leave open:
 
 - *The seed of a chunk with no record 63* is not known. Evidence there is
   shown and counted on neither side of any rule.
-- *Ruined portals in the overworld* follow the rule above four times in
-  five where it gives a site, and yet 62 chests of 143 are at no site.
-  Something else places those. They are still found by their chests.
+- *A structure is of the seed of its own chunks, not of the chunk it
+  starts in.* A first reading of the ruined portals had 62 chests of 143
+  at no site. Each was at a site whose own chunk is not in the save at
+  all: the portal stands in the chunk next to it. Set beside the sites of
+  its own chunks' seed, wherever those sites fall, every chest is at one.
 - *Trial chambers and trail ruins* are placed by Java's generator, seeded
   with all 64 bits of the world seed, where every older kind uses the
   game's own generator and the low 32: under the old rule neither scores
@@ -1262,8 +1264,8 @@ What the figures leave open:
   finished water hold no unopened chest. Nothing tells a wreck that was
   looted from one that was never built, so a finished site with none is
   not shown.
-- *Bastions and fortresses* share their sites. No bastion's evidence is at
-  a fortress's site, and none of the four bastion sites in basalt deltas
+- *Bastions and fortresses* share their sites. No bastion's chest is at a
+  fortress's site, and none of the four bastion sites in basalt deltas
   holds any.
 - *Woodland mansions.* None is generated in this world. The rule is
   borne out by the game itself: each of the three places its explorer
@@ -1406,21 +1408,69 @@ structures are served without details and
 
 ### Found by their blocks
 
-Two kinds the world keeps no record of are found all the same, without the
-seed, by block entities only they are generated with and that nobody in a
-survival world can pick up and put somewhere else. They come from the same
-pass and cost nothing more.
+Kinds the world keeps no record of are found all the same, without the
+seed, by what only they are generated with. They come from the same pass
+and cost nothing more. There are two sorts of thing to go by:
 
-| Kind | Found by | Joined | The box |
-|---|---|---|---|
-| `trial_chamber` | Trial spawners and vaults | By the generator's grid: every block in one square of it is one chamber | Around those blocks. The chamber's corridors run on past them |
-| `stronghold` | The silverfish spawner of its portal room, or the blocks of its end portal once lit, in the Overworld | Chunks holding either, where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
+- *Blocks nobody can move.* Trial spawners, vaults, a spawner, portal and
+  gateway blocks: nobody in a survival world can pick one up and put it
+  somewhere else, so where one is, its structure is.
+- *Loot nobody has touched.* The game gives each chest, barrel and
+  suspicious block of a structure a loot table named after that structure,
+  and drops the name the first time the chest is opened or the block
+  brushed. One that still carries it is where the generator put it and has
+  not been touched. Such a kind is found for as long as one such block is
+  left in it; when the last is opened the map stops finding it, though it
+  stands where it stood. The sheet says so, and the kind is `quiet` in the
+  catalog: a finished site of its rule with nothing found is offered as a
+  site and is not the world saying there is nothing there. Which loot
+  table a block carries is never sent, and nor is anything a chest holds.
 
-**A stronghold is for finding.** This is a survival world with no cheats,
-and where the stronghold is, is the one thing on this map a player sets out
-to find for themselves; one in chunks somebody else generated is found
-here without anybody having walked into it. So it is held back further
-than any other kind:
+| Kind | In | Found by | Joined | The box |
+|---|---|---|---|---|
+| `trial_chamber` | Overworld | Trial spawners and vaults | By the generator's grid: every block in one square of it is one chamber | Around those blocks. The chamber's corridors run on past them |
+| `stronghold` | Overworld | The silverfish spawner of its portal room, or the blocks of its end portal once lit | Chunks holding either, where they touch | Around those blocks: one room of a structure hundreds of blocks across. A stronghold whose spawner is broken and whose portal is not lit is not found |
+| `end_city` | The End | Chests nobody has opened, shulkers, and the dragon head and framed elytra of its ship | By the generator's grid of 20 chunks, moved six back | Around those. Its contents are counted 32 blocks past it |
+| `end_gateway` | The End | Its gateway block | Each its own | The block |
+| `exit_portal` | The End | The portal blocks of the fountain, once the dragon is dead | Where they touch | Around them |
+| `bastion` | Nether | Chests nobody has opened, and the magma cube spawner of a treasure room | Chunks holding either, up to three apart | Around those; contents are counted 32 blocks past it |
+| `ruined_portal` | Overworld, Nether | Its chest, while nobody has opened it | Each its own | The chest; contents are counted 8 blocks past it |
+
+A shulker is a mob, and is counted for an end city all the same: a city
+whose chests are all opened is otherwise not found at all, and its
+shulkers are what is left to go there for. One carried off and kept
+elsewhere in the End would read as a city found by one shulker.
+
+**In the save of each.** An end city's sheet says how many shulkers the
+save holds in it and whether its ship's dragon head and the elytra in
+their frame are there, which is also how a ship is known at all: a city
+with no ship and one stripped of both look the same. A bastion's says
+which of the four it is where its blocks still say (a treasure room by
+its chests or its spawner, the stables and the bridge by chests of their
+own; the housing units have none that say), and its piglin brutes,
+piglins and hoglins. The exit portal's says whether it is lit.
+
+One the world has also recorded, as a newer game records an igloo an
+older one left only a chest of, is left to its record: what is found
+within 16 blocks of a recorded structure of the same kind is that
+structure.
+
+**Some kinds are for finding.** This is a survival world with no cheats.
+A kind that is a goal in itself, or that is gone to for what is in it, is
+`asked` in the catalog: off until the viewer turns its row on, which is
+one click, and left out of every search until then.
+
+| Kind | Why it is off until asked for |
+|---|---|
+| Stronghold | The way to the End, which a player sets out to find |
+| End city | Where the elytra and the shulkers are |
+
+Fortresses, bastions, monuments and the rest are on from the start: they
+are large, seen from far off, and what is in them is fought for and not
+found. Where the stronghold is, is the one thing on this map a player
+sets out to find for themselves; one in chunks somebody else generated is
+found here without anybody having walked into it. So it is held back
+further than any other kind:
 
 - its item among the kinds of structure is off until the viewer turns it
   on, and says so;
@@ -1496,6 +1546,9 @@ every chunk](#the-seed-of-each-chunk). Each kind is a `Predictor` in
 | Desert pyramid | The witch hut's sites | | | | Desert, desert hills |
 | Jungle temple | The witch hut's sites | | | | Jungle, jungle hills |
 | Igloo | The witch hut's sites | | | | Snowy plains, snowy taiga, snowy slopes |
+| Bastion remnant | The fortress's sites | | | The fortress's third draw: the other 4 in 6 | Any Nether biome but basalt deltas |
+| End city | 20 | 9 | 10387313 | 2, averaged | The End, on the outer islands |
+| Ruined portal | 40, and 25 in the Nether | 25, and 15 | 40552231 | 1 | Any biome |
 
 A fortress is built at its site whatever the biome. Every other kind is
 only built where the biome suits, so a site is one of three things:
@@ -1565,6 +1618,10 @@ chunks of a suitable biome that have a recorded structure.
 | Desert pyramid | 3 | 2 of 2, exactly | 2 of 6 | Not predicted: two are not three |
 | Jungle temple | 4 | 3 of 3, exactly | 3 of 9 | Predicted, in finished chunks |
 | Igloo | 9 | 8 of 8, exactly | 8 of 11 | Predicted, in finished chunks |
+| Bastion remnant | 21 found | 17 of 19 | 14 of 15 | Predicted |
+| End city | 21 found | 19 of 19 | 20 of 23 | Predicted |
+| Ruined portal, overworld | 177 found | 144 of 144 | 83 of 101 | Predicted, in finished chunks |
+| Ruined portal, Nether | 42 found | 37 of 37 | 34 of 41 | Predicted, in finished chunks |
 
 Under the one seed the map used before, the same world gave 31 villages
 of 70 on a site and 27 sites of 37 built on. The structures on no site
@@ -1581,8 +1638,25 @@ with none is offered plainly and is not counted as a disagreement: the
 older half of this world was generated by a game that kept no record of
 these kinds, so a site there with nothing recorded may well hold one.
 
+The kinds found by their blocks are set beside their rules the same way,
+what was found standing in for what was recorded. A bastion counts as on
+a site when the middle of the site's chunk is within 64 blocks of the box
+round its chests, an end city within 24 and a ruined portal's chest
+within 24. A portal is slight and common, so it is offered only in
+finished chunks, as the pyramids are; bastions and end cities are offered
+in country not generated as well, an end city as a possible site, since
+it is built only where the outer islands give it ground.
+
 What the numbers leave open, so that nobody has to find it out again:
 
+- *Bastions.* The two on no site are each a chest or two at the edge of
+  what is generated. The one finished site with none has no unopened
+  chest within reach; none of the four sites in basalt deltas has any.
+- *End cities.* The three finished sites with nothing found are where the
+  rule puts a city and the land, most likely, does not hold one up.
+- *Ruined portals.* Every chest in a chunk that names its seed is at a
+  site. One site in five in a finished chunk has no unopened chest, which
+  is a portal somebody has been to as easily as one that is not there.
 - *Monuments.* Both empty sites are at the edge of the generated world,
   with half or more of the country round them not generated. The game also
   wants water all round a monument, which cannot be asked there, so the

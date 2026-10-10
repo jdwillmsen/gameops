@@ -644,6 +644,19 @@ func TestSearchListsAStrongholdOnlyWhenAskedTo(t *testing.T) {
 	if len(got.Hits) != 1 || got.Hits[0].Detail != "stronghold" || got.Hits[0].X != 901 {
 		t.Errorf("asked to be shown: %s", describe(got))
 	}
+	// An end city is gone looking for too, in its own dimension, and is
+	// found from any once its row is on, with the dimension it is in.
+	end := source.survey.Layers[chunks.End]
+	end.Recorded = append(end.Recorded, structures.Structure{Kind: structures.EndCity, Box: structures.Box{MinX: 4000, MinY: 70, MinZ: -900, MaxX: 4060, MaxY: 120, MaxZ: -860}, Evidence: 12})
+	end.Predicted = append(end.Predicted, structures.Prediction{Kind: structures.EndCity, X: 6408, Z: 328, Candidate: true})
+	source.survey.Layers[chunks.End] = end
+	if got := search(t, s, "end city", c); len(got.Hits) != 0 {
+		t.Errorf("an end city nobody asked to be shown: %s", describe(got))
+	}
+	cities := decodeBody[searchAnswer](t, do(s.Handler(), "GET", "/api/search?q=end+city&dimension=overworld&x=0&z=0&asked=end_city", "", []*http.Cookie{c}))
+	if len(cities.Hits) != 2 || cities.Hits[0].Dimension != "end" || cities.Hits[0].Detail != "end_city" || cities.Hits[0].Distance != nil || cities.Hits[1].Certainty != "candidate" {
+		t.Errorf("end cities asked for from the overworld: %s", describe(cities))
+	}
 	// A page that lists the kinds it has on says so of each by name, and
 	// a name that is no kind's shows nothing more.
 	for asked, want := range map[string]int{"stronghold": 1, "village,stronghold": 1, "fortress": 0, "strongholds": 0, "": 0} {

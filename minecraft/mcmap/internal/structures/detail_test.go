@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -336,8 +337,10 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 		blockEntity(chunks.End, "TrialSpawner", 0, 60, 4)
 	got := take(t, surveyor(t, nil), w)
 
-	if n := len(got.Layers[chunks.End].Recorded); n != 0 {
-		t.Errorf("%d structures found in the End, want none", n)
+	// The End's portal is its exit portal, and is no stronghold; a trial
+	// spawner there is no chamber.
+	if end := got.Layers[chunks.End].Recorded; len(end) != 1 || end[0].Kind != ExitPortal {
+		t.Errorf("found in the End: %+v, want its exit portal and nothing else", end)
 	}
 	want := []Structure{
 		{Kind: Stronghold, Box: Box{2000, 30, 2000, 2005, 30, 2001}, Evidence: 3},
@@ -381,6 +384,114 @@ func TestDetail_FindsTrialChambersAndStrongholdsByTheirBlocks(t *testing.T) {
 // it lies in, with the squares moved back to take in what reaches before
 // them. These are the edges of that: the first and last chunk of a square
 // on each side, in chunks from the square's own first.
+// A chest that still carries the loot table it was generated with has not
+// been opened, and the table names the structure it was generated in.
+func TestDetail_FindsTheEndsAndTheNethersKindsByWhatIsLeftInThem(t *testing.T) {
+	loot := func(name string) []byte { return nbtString("LootTable", "loot_tables/chests/"+name+".json") }
+	w := newWorld(t).
+		// An end city: two chests nobody has opened, its ship's dragon head
+		// and the elytra in their frame, and three shulkers, one of them a
+		// way off but in the city's square of the grid.
+		blockEntity(chunks.End, "Chest", 1000, 80, 2000, loot("end_city_treasure")).
+		blockEntity(chunks.End, "Chest", 1030, 96, 2010, loot("end_city_treasure")).
+		blockEntity(chunks.End, "Skull", 1060, 110, 2040, nbtTag(tagByte, "SkullType", []byte{dragonHead})).
+		blockEntity(chunks.End, "ItemFrame", 1062, 108, 2040, nbtTag(tagCompound, "Item", nbtCompound(nbtString("Name", "minecraft:elytra")))).
+		// A chest somebody has opened, a skull that is no dragon's and a
+		// frame holding something else are in it and are not what it is
+		// found by.
+		blockEntity(chunks.End, "Chest", 1001, 80, 2000, items(3)).
+		blockEntity(chunks.End, "Skull", 1002, 80, 2000, nbtTag(tagByte, "SkullType", []byte{1})).
+		blockEntity(chunks.End, "ItemFrame", 1003, 80, 2000, nbtTag(tagCompound, "Item", nbtCompound(nbtString("Name", "minecraft:paper")))).
+		// A gateway, which nothing breaks, and the exit portal's blocks.
+		blockEntity(chunks.End, "EndGateway", 3000, 75, -40).
+		blockEntity(chunks.End, "EndPortal", 0, 62, 1).
+		blockEntity(chunks.End, "EndPortal", 1, 62, 0).
+		// A bastion: the treasure room's chest and spawner, and the chests
+		// that any bastion has, three chunks off.
+		blockEntity(chunks.Nether, "Chest", 500, 40, 500, loot("bastion_treasure")).
+		blockEntity(chunks.Nether, "MobSpawner", 502, 36, 500, nbtString("EntityIdentifier", "minecraft:magma_cube")).
+		blockEntity(chunks.Nether, "Chest", 540, 60, 530, loot("bastion_other")).
+		// Another, too far off to be the same one, known by its stables.
+		blockEntity(chunks.Nether, "Chest", 900, 50, 500, loot("bastion_hoglin_stable")).
+		// A blaze spawner is a fortress's, and a fortress's chest no bastion's.
+		blockEntity(chunks.Nether, "MobSpawner", 700, 60, 700, nbtString("EntityIdentifier", "minecraft:blaze")).
+		blockEntity(chunks.Nether, "Chest", 702, 60, 700, loot("nether_bridge")).
+		// A ruined portal in each of two dimensions, by its one chest.
+		blockEntity(chunks.Nether, "Chest", -300, 70, 80, loot("ruined_portal")).
+		blockEntity(chunks.Overworld, "Chest", -2400, 64, 640, loot("ruined_portal")).
+		// And one whose chest has been opened, which is no longer found.
+		blockEntity(chunks.Overworld, "Chest", -2500, 64, 640, items(1))
+	for _, at := range [][3]float32{{1010.5, 82, 2004.5}, {1011.5, 82, 2004.5}, {1100.5, 120, 2060.5}} {
+		w.mob(chunks.End, "shulker", at[0], at[1], at[2])
+	}
+	w.mob(chunks.Nether, "piglin_brute", 505.5, 40, 501.5)
+	w.mob(chunks.Nether, "piglin", 506.5, 40, 501.5)
+	got := take(t, surveyor(t, nil), w)
+
+	want := map[chunks.Dimension][]Structure{
+		chunks.End: {
+			{Kind: EndCity, Box: Box{1000, 80, 2000, 1100, 120, 2060}, Evidence: 7},
+			{Kind: EndGateway, Box: Box{3000, 75, -40, 3000, 75, -40}, Evidence: 1},
+			{Kind: ExitPortal, Box: Box{0, 62, 0, 1, 62, 1}, Evidence: 2},
+		},
+		chunks.Nether: {
+			{Kind: Bastion, Box: Box{500, 36, 500, 540, 60, 530}, Evidence: 3},
+			{Kind: Bastion, Box: Box{900, 50, 500, 900, 50, 500}, Evidence: 1},
+			{Kind: RuinedPortal, Box: Box{-300, 70, 80, -300, 70, 80}, Evidence: 1},
+		},
+		chunks.Overworld: {{Kind: RuinedPortal, Box: Box{-2400, 64, 640, -2400, 64, 640}, Evidence: 1}},
+	}
+	for d, list := range want {
+		if !reflect.DeepEqual(got.Layers[d].Recorded, list) {
+			t.Errorf("%s:\n got %+v\nwant %+v", d.Name(), got.Layers[d].Recorded, list)
+		}
+	}
+	// A city says how many shulkers are left in it, and whether its ship's
+	// head and elytra are; what a chest holds is never said, only that
+	// two of the three have not been opened.
+	_, city := detailOf(t, got, chunks.End, EndCity)
+	if city.Reach != 32 || city.MobsTotal != 3 || city.Mobs[0] != (MobCount{Kind: "shulker", Count: 3}) || city.Blocks["dragon_head"] != 1 || city.Blocks["elytra"] != 1 ||
+		len(city.Containers) != 1 || city.Containers[0] != (ContainerCount{Kind: "chest", Unopened: 2, Holding: 1}) {
+		t.Errorf("city = %+v", city)
+	}
+	sent, _ := json.Marshal(city)
+	if strings.Contains(string(sent), "end_city_treasure") || strings.Contains(string(sent), "loot") {
+		t.Errorf("a city's details name a loot table: %s", sent)
+	}
+	// A bastion says which of the four it is, where its blocks still do.
+	bastions := map[string]int{}
+	for i, r := range got.Layers[chunks.Nether].Recorded {
+		if r.Kind == Bastion {
+			d := got.Layers[chunks.Nether].Details[i]
+			bastions[d.Bastion]++
+			if d.Bastion == "treasure" && (d.MobsTotal != 2 || len(d.SpawnerCounts) != 1 || d.SpawnerCounts[0].Mob != "magma_cube") {
+				t.Errorf("the treasure bastion = %+v", d)
+			}
+		}
+	}
+	if bastions["treasure"] != 1 || bastions["stables"] != 1 {
+		t.Errorf("bastions by kind = %v, want one with a treasure room and one with stables", bastions)
+	}
+}
+
+// What a structure a newer game recorded is also found by is the same
+// structure, and is left to its record.
+func TestDetail_AStructureTheWorldRecordedIsNotAlsoFoundByItsBlocks(t *testing.T) {
+	found := []Structure{
+		{Kind: RuinedPortal, Box: Box{100, 64, 100, 100, 64, 100}, Evidence: 1},
+		{Kind: Bastion, Box: Box{100, 64, 100, 140, 70, 140}, Evidence: 4},
+		{Kind: RuinedPortal, Box: Box{100 + 21 + recordedPad, 64, 100, 100 + 21 + recordedPad, 64, 100}, Evidence: 1},
+	}
+	recorded := []Structure{{Kind: RuinedPortal, Box: Box{90, 60, 90, 120, 80, 110}, Areas: 2}}
+	got := unrecorded(slices.Clone(found), recorded)
+	if len(got) != 2 || got[0].Kind != Bastion || got[1].MinX != found[2].MinX {
+		t.Errorf("kept %+v, want the bastion, which is another kind, and the portal past the recorded one's reach", got)
+	}
+	if got := unrecorded(slices.Clone(found), nil); len(got) != 3 {
+		t.Errorf("with nothing recorded, kept %d of 3", len(got))
+	}
+}
+
 func TestDetail_AChambersBlocksAreJoinedByTheGeneratorsGrid(t *testing.T) {
 	at := func(chunkX, chunkZ int32) (x, z int32) { return chunkX*16 + 3, chunkZ*16 + 9 }
 	for name, c := range map[string]struct {
@@ -524,7 +635,7 @@ func TestDetail_BoundsWhatOneStructureAndOneSurveyList(t *testing.T) {
 
 func locateAll(t testing.TB, c *contents) []Structure {
 	t.Helper()
-	found, err := c.locate(context.Background())
+	found, err := c.locate(context.Background(), chunks.Overworld)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +665,7 @@ func TestDetail_FindingStructuresAtTheBoundsIsQuickAndCanBeStopped(t *testing.T)
 	}
 	stopped, cancel := context.WithCancel(context.Background())
 	cancel()
-	if got, err := c.locate(stopped); err == nil || got != nil {
+	if got, err := c.locate(stopped, chunks.Overworld); err == nil || got != nil {
 		t.Errorf("locate with no time left = %d structures, %v", len(got), err)
 	}
 }

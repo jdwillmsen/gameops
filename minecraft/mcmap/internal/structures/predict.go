@@ -86,7 +86,8 @@ type dense interface {
 
 // Predictors is every kind there is a predictor for. Each is served only
 // while the world's own records of that kind bear its rule out.
-var Predictors = []Predictor{fortress{}, monument{}, outpost{}, villageSite{}, witchHut{}, desertPyramid{}, jungleTemple{}, igloo{}}
+var Predictors = []Predictor{fortress{}, monument{}, outpost{}, villageSite{}, witchHut{}, desertPyramid{}, jungleTemple{}, igloo{},
+	bastion{}, endCity{}, ruinedPortal{chunks.Overworld}, ruinedPortal{chunks.Nether}}
 
 // The game's ids for the biomes a kind is only built in.
 const (
@@ -98,6 +99,7 @@ const (
 	biomeDesertHills     = 17
 	biomeJungle          = 21
 	biomeJungleHills     = 22
+	biomeTheEnd          = 9
 	biomeDeepOcean       = 24
 	biomeSnowyTaiga      = 30
 	biomeSavanna         = 35
@@ -106,6 +108,7 @@ const (
 	biomeDeepColdOcean   = 45
 	biomeDeepFrozenOcean = 47
 	biomeSunflowerPlains = 129
+	biomeBasaltDeltas    = 181
 	biomeJaggedPeaks     = 182
 	biomeFrozenPeaks     = 183
 	biomeSnowySlopes     = 184
@@ -452,3 +455,107 @@ func (igloo) Explains(site Site, real Box) bool {
 }
 
 func (igloo) Centre(site Site) (int32, int32) { return site.ChunkX*16 + 4, site.ChunkZ*16 + 4 }
+
+// bastion: the nether's regions are the fortress's, and the draw that
+// gives a region no fortress gives it a bastion, four times in six. One is
+// not built in basalt deltas. It is known by its chests, which are found
+// within bastionReach of the middle of its site's chunk.
+type bastion struct{}
+
+// bastionReach is how far from the middle of its site's chunk a bastion's
+// chests have been found, in blocks: 32 in the FWB world, and looking
+// half as far again finds no more. A wrong seed's site is that near one
+// bastion in sixteen.
+const bastionReach = 64
+
+func (bastion) Kind() Kind                  { return Bastion }
+func (bastion) Dimension() chunks.Dimension { return chunks.Nether }
+func (bastion) Exact() bool                 { return false }
+func (bastion) Certain() bool               { return false }
+func (bastion) Allows(biome uint32) bool    { return biome != biomeBasaltDeltas }
+func (bastion) Founded() bool               { return false }
+func (bastion) Traits() Traits              { return Traits{Quiet: true} }
+
+func (bastion) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return fortressSpread.sites(seed, area, limit, func(rng *twister) bool { return rng.next()%6 >= 2 })
+}
+
+// near reports whether the middle of a site's chunk is within reach blocks
+// of a box, across the map.
+func near(site Site, real Box, reach int32) bool {
+	x, z := site.ChunkX*16+8, site.ChunkZ*16+8
+	return x >= real.MinX-reach && x <= real.MaxX+reach && z >= real.MinZ-reach && z <= real.MaxZ+reach
+}
+
+func (bastion) Explains(site Site, real Box) bool { return near(site, real, bastionReach) }
+func (bastion) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// endCity: the tower a city grows from stands on the middle of its site's
+// chunk, and only where the End's outer islands give it ground to stand
+// on, which nothing here can ask until the chunk is generated. Every city
+// found in the FWB world has a chest or a shulker within four blocks of
+// that middle.
+type endCity struct{}
+
+var endCitySpread = spread{spacing: 20, separation: 11, salt: 10387313, triangular: true}
+
+// cityNear is how far from the middle of its site's chunk the nearest of a
+// city's chests and shulkers may be.
+const cityNear = 24
+
+func (endCity) Kind() Kind                  { return EndCity }
+func (endCity) Dimension() chunks.Dimension { return chunks.End }
+func (endCity) Exact() bool                 { return false }
+func (endCity) Certain() bool               { return false }
+func (endCity) Allows(biome uint32) bool    { return biome == biomeTheEnd }
+func (endCity) Founded() bool               { return false }
+func (endCity) Traits() Traits              { return Traits{Quiet: true} }
+
+func (endCity) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return endCitySpread.sites(seed, area, limit, nil)
+}
+
+func (endCity) Explains(site Site, real Box) bool { return near(site, real, cityNear) }
+func (endCity) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }
+
+// ruinedPortal: one rule in the overworld and another, with smaller
+// regions, in the Nether. A portal is built whatever the biome, and is
+// known by its one chest, which is within portalReach of the middle of its
+// site's chunk. Four sites in five in finished chunks hold such a chest;
+// in the overworld as many portals again are at no site, placed by a rule
+// that was not found, and those are known by their chests alone.
+type ruinedPortal struct{ in chunks.Dimension }
+
+var (
+	portalSpread       = spread{spacing: 40, separation: 15, salt: 40552231}
+	netherPortalSpread = spread{spacing: 25, separation: 10, salt: 40552231}
+)
+
+// portalReach is how far from the middle of its site's chunk a portal's
+// chest has been found, in blocks: 24 in the FWB world.
+const portalReach = 24
+
+func (p ruinedPortal) Kind() Kind                  { return RuinedPortal }
+func (p ruinedPortal) Dimension() chunks.Dimension { return p.in }
+func (ruinedPortal) Exact() bool                   { return false }
+func (ruinedPortal) Certain() bool                 { return true }
+func (ruinedPortal) Allows(uint32) bool            { return true }
+func (ruinedPortal) Founded() bool                 { return false }
+
+// A portal is slight and common: it is offered where the world can be
+// asked, and not as hundreds of marks over country nobody has seen.
+func (ruinedPortal) Traits() Traits { return Traits{Quiet: true, FinishedOnly: true} }
+
+func (p ruinedPortal) spread() spread {
+	if p.in == chunks.Nether {
+		return netherPortalSpread
+	}
+	return portalSpread
+}
+
+func (p ruinedPortal) Sites(seed uint32, area Area, limit int) ([]Site, int) {
+	return p.spread().sites(seed, area, limit, nil)
+}
+
+func (ruinedPortal) Explains(site Site, real Box) bool { return near(site, real, portalReach) }
+func (ruinedPortal) Centre(site Site) (int32, int32)   { return site.ChunkX*16 + 8, site.ChunkZ*16 + 8 }

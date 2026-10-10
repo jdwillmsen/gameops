@@ -522,7 +522,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db, survey); err != nil {
 		return Survey{}, err
 	}
-	found, err := s.locate(ctx, held)
+	found, err := s.locate(ctx, held, recorded)
 	if err != nil {
 		return Survey{}, err
 	}
@@ -538,7 +538,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		// them: every one read, whatever the layer goes on to keep.
 		known := map[chunks.Dimension][]Structure{}
 		for _, d := range chunks.Dimensions {
-			known[d] = append(slices.Clip(recorded[d]), survey.villages[d]...)
+			known[d] = append(append(slices.Clip(recorded[d]), survey.villages[d]...), found[d]...)
 		}
 		survey.Check, predicted, more = compare(s.Predictors, seeds, current, layerLimit, known, extents, s.Biomes)
 		// Only a seed that was this service's own to choose is searched
@@ -553,10 +553,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		// and the ones found by their blocks after those, so that what
 		// the world records least of is the first to go where a layer is
 		// cut short.
-		layer := Layer{Recorded: append(slices.Clip(recorded[d]), survey.villages[d]...)}
-		if d == chunks.Overworld {
-			layer.Recorded = append(layer.Recorded, found...)
-		}
+		layer := Layer{Recorded: append(append(slices.Clip(recorded[d]), survey.villages[d]...), found[d]...)}
 		if len(layer.Recorded) > layerLimit {
 			layer.RecordedMore = len(layer.Recorded) - layerLimit
 			layer.Recorded = layer.Recorded[:layerLimit]
@@ -572,27 +569,56 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	return survey, nil
 }
 
-// locate finds the kinds that are found by their blocks, within the time
-// the details have. Running out of it is not the survey's failure: the
-// kinds the world records are served without them.
-func (s *Surveyor) locate(ctx context.Context, held *contents) ([]Structure, error) {
+// locate finds the kinds that are found by their blocks, in each dimension,
+// within the time the details have. Running out of it is not the survey's
+// failure: the kinds the world records are served without them. One the
+// world has also recorded, as a newer game records an igloo an older one
+// left only a chest of, is left to its record.
+func (s *Surveyor) locate(ctx context.Context, held *contents, recorded map[chunks.Dimension][]Structure) (map[chunks.Dimension][]Structure, error) {
 	timeout := s.DetailTimeout
 	if timeout == 0 {
 		timeout = detailTimeout
 	}
 	within, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	found, err := held.locate(within)
-	switch {
-	case err == nil:
-		return found, nil
-	case ctx.Err() != nil:
-		// The survey itself was stopped, which is its failure to report.
-		return nil, ctx.Err()
+	out := map[chunks.Dimension][]Structure{}
+	for _, d := range chunks.Dimensions {
+		found, err := held.locate(within, d)
+		switch {
+		case err == nil:
+			out[d] = unrecorded(found, recorded[d])
+			continue
+		case ctx.Err() != nil:
+			// The survey itself was stopped, which is its failure to report.
+			return nil, ctx.Err()
+		}
+		metricDetailFailures.Inc()
+		s.Logger.Error("the structures found by their blocks were not worked out; the rest are served without them", "error", err)
+		return nil, nil
 	}
-	metricDetailFailures.Inc()
-	s.Logger.Error("the structures found by their blocks were not worked out; the rest are served without them", "error", err)
-	return nil, nil
+	return out, nil
+}
+
+// recordedPad is how far outside a recorded structure's box, in blocks
+// across the map, what a structure of its kind was found by may lie and
+// still be that structure: an igloo's basement runs out from under it.
+const recordedPad = 16
+
+// unrecorded is the found structures that no recorded one of the same kind
+// is.
+func unrecorded(found, recorded []Structure) []Structure {
+	if len(recorded) == 0 {
+		return found
+	}
+	byKind := map[Kind][]Box{}
+	for _, r := range recorded {
+		byKind[r.Kind] = append(byKind[r.Kind], r.Box)
+	}
+	return slices.DeleteFunc(found, func(f Structure) bool {
+		return slices.ContainsFunc(byKind[f.Kind], func(b Box) bool {
+			return f.MinX <= b.MaxX+recordedPad && f.MaxX >= b.MinX-recordedPad && f.MinZ <= b.MaxZ+recordedPad && f.MaxZ >= b.MinZ-recordedPad
+		})
+	})
 }
 
 // detail sets what the world holds inside each structure, within its own

@@ -120,9 +120,17 @@ type Detail struct {
 	Containers    []ContainerCount `json:"containers"`
 	// Blocks counts the other block entities that say something of a
 	// structure: cauldron, bell, vault, ominous_vault, end_portal,
-	// dispenser, dropper, and unbroken_pot for a decorated pot the
-	// generator placed that nobody has broken. One with none is left out.
+	// end_gateway, dispenser, dropper, unbroken_pot for a decorated pot the
+	// generator placed that nobody has broken, unbrushed for suspicious
+	// sand or gravel nobody has brushed, and dragon_head and elytra for an
+	// end ship's head and the elytra in its frame. One with none is left
+	// out.
 	Blocks map[string]int `json:"blocks,omitempty"`
+	// Bastion is, for a bastion remnant, which of the four it is where its
+	// blocks still say: treasure, stables or bridge. One whose telling
+	// chests are all opened, and the fourth kind, which has none, say
+	// nothing.
+	Bastion string `json:"bastion,omitempty"`
 	// Elders is, for a monument, how many elder guardians the save holds
 	// in it. One is generated with three and the game never adds another.
 	Elders *int `json:"elders,omitempty"`
@@ -231,8 +239,8 @@ func (c *contents) describe(ctx context.Context, d chunks.Dimension, list []Stru
 		// The box counted in is the structure's own, or for a chamber the
 		// box round what it was found by and a stated way past it.
 		reach := int32(0)
-		if s.Kind == TrialChamber {
-			reach = chamberSurround
+		if s.Evidence > 0 {
+			reach = surroundOf(s.Kind)
 		}
 		s.Box = Box{s.MinX - reach, s.MinY - reach/2, s.MinZ - reach, s.MaxX + reach, s.MaxY + reach/2, s.MaxZ + reach}
 		inside := func(x, y, z int32) bool {
@@ -297,6 +305,9 @@ func (c *contents) describe(ctx context.Context, d chunks.Dimension, list []Stru
 				}
 			}
 			detail.Elders = &n
+		}
+		if s.Kind == Bastion {
+			detail.Bastion = c.bastionOf(inBlocks)
 		}
 		if s.Village != nil && s.Village.Counted {
 			if r := records[s.Village]; r != nil {
@@ -430,6 +441,14 @@ func (c *contents) blocksIn(detail *Detail, in []savedBlock, left *allowance) {
 			others["dropper"]++
 		case blockPot:
 			others["unbroken_pot"]++
+		case blockBrushable:
+			others["unbrushed"]++
+		case blockDragonHead:
+			others["dragon_head"]++
+		case blockElytra:
+			others["elytra"]++
+		case blockGateway:
+			others["end_gateway"]++
 		default:
 			n, seen := containers[b.sort]
 			if !seen {
@@ -546,4 +565,27 @@ func (c *contents) village(r *villageRecords, level leveldat.Level) *VillageDeta
 		return cmp.Or(cmp.Compare(b.Count, a.Count), cmp.Compare(a.Profession, b.Profession))
 	})
 	return v
+}
+
+// bastionOf is which bastion a bastion is, from the blocks only one of
+// them is generated with. A treasure room has its own chests and the one
+// spawner any bastion has; the stables and the bridge have chests of
+// their own; the housing units have none that say so.
+func (c *contents) bastionOf(in []savedBlock) string {
+	found := map[origin]bool{}
+	for _, b := range in {
+		found[b.origin] = true
+		if b.sort == blockSpawner && c.types.names[b.mob] == "magma_cube" {
+			found[originBastionTreasure] = true
+		}
+	}
+	switch {
+	case found[originBastionTreasure]:
+		return "treasure"
+	case found[originBastionStables]:
+		return "stables"
+	case found[originBastionBridge]:
+		return "bridge"
+	}
+	return ""
 }
