@@ -795,6 +795,9 @@
     }, { once: true });
   }
   watchDensity();
+  // Not every browser tells a query of the change, and every one that
+  // changes the density changes the page's size in its own pixels.
+  window.addEventListener('resize', rescale);
 
   // Coming closer or going further out changes what is drawn only where
   // it crosses from dots to pictures or from pictures to names, and the

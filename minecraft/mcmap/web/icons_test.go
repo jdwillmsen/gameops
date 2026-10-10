@@ -160,6 +160,7 @@ func TestADensityChangeRecomposesAndTheStylesheetAgreesWithTheCanvas(t *testing.
 		"let DENSITY = L.Browser.retina ? 2 : 1;",
 		"matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)",
 		"L.Browser.retina = dense;\n    DENSITY = dense ? 2 : 1;",
+		"window.addEventListener('resize', rescale);",
 		"root.toggleAttribute('data-dense', DENSITY === 2);",
 		"return [theme, size, text, style, mobPicture, picturesLive, picturesMarkers, DENSITY].join('|');",
 		"if (canvas.width !== ICON * DENSITY) {",
