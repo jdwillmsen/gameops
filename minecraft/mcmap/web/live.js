@@ -616,10 +616,14 @@
       if (faces.size > 256) faces.clear();
       canvas = document.createElement('canvas');
       canvas.className = 'picture';
-      canvas.width = canvas.height = 16 * DENSITY;
       canvas.setAttribute('aria-hidden', 'true');
       canvas.hidden = true;
       faces.set(address, canvas);
+    }
+    // Made for another density, it is made again for this one.
+    if (canvas.width !== 16 * density()) {
+      canvas.width = canvas.height = 16 * density();
+      canvas.hidden = true;
     }
     if (canvas.hidden) {
       const drawn = look().picturesLive === false ? null : icons.bitmap(address);
@@ -714,6 +718,12 @@
   function present() {
     clearTimeout(cadenceTimer);
     if (latest === null) return;
+    // Through a pinch the canvas is still of the zoom the pinch began at,
+    // stretched, while the map is already of another: a marker moved now
+    // would be placed by the one and painted on the other, somewhere else.
+    // The end of the zoom comes back here. _zoom is a Leaflet internal,
+    // like those above.
+    if (renderer._zoom !== undefined && renderer._zoom !== map.getZoom()) return;
     const due = control.interval > MIN_INTERVAL ? drawnAt + control.interval * 1000 : 0;
     const now = Date.now();
     if (now < due - CADENCE_SLACK_MS) {
@@ -1032,14 +1042,51 @@
     halo.bringToFront();
   }
 
+  // Whoever is followed while they are in the picture, as the place the
+  // map is kept on, or null.
+  const followed = () => (picked && picked.follow && picked.state === 'live' ? [picked.z, picked.x] : null);
+  // The centre that puts a place in the middle of the map that can be
+  // seen, which is not the middle of its box while the panel, the sheet
+  // or the card lies over a part of it.
+  const aim = (place, zoom) => (app.room ? app.room.aim(place, zoom) : place);
+
   function centre() {
-    if (!picked || !picked.follow || picked.state !== 'live') return;
+    const place = followed();
     // Moving the view in the middle of a zoom cuts the zoom short. Its end
     // comes back here. _animatingZoom is a Leaflet internal, like those
     // above.
-    if (map._animatingZoom) return;
-    map.panTo([picked.z, picked.x], { animate: false });
+    if (!place || map._animatingZoom) return;
+    map.panTo(aim(place), { animate: false });
   }
+
+  // A zoom is about the pointer, or about the middle of the map's box,
+  // and either takes whoever is followed away from where they are kept
+  // until the zoom is over and the map is brought back. While someone is
+  // followed every zoom is about them instead, and they stay put. Leaflet
+  // has no option for it, so these are its own two ways in, replaced on
+  // this map alone; _limitZoom is an internal, like those above.
+  const zoomAround = map.setZoomAround;
+  const setZoom = map.setZoom;
+  const about = (zoom, options) => {
+    const place = followed();
+    if (!place) return false;
+    const to = map._limitZoom(zoom);
+    map.setView(aim(place, to), to, { zoom: options });
+    return true;
+  };
+  map.setZoomAround = (at, zoom, options) => (about(zoom, options) ? map : zoomAround.call(map, at, zoom, options));
+  map.setZoom = (zoom, options) => (about(zoom, options) ? map : setZoom.call(map, zoom, options));
+  // A pinch has no such way in: it moves the map itself with every step
+  // of the fingers, about the point between them, and comes to rest on
+  // the centre it last worked out. Each step is put about whoever is
+  // followed, and the centre it will rest on with it. _move, touchZoom
+  // and its _center are internals, like those above.
+  const move = map._move;
+  map._move = (centre, zoom, data, quiet) => {
+    const place = data && data.pinch ? followed() : null;
+    if (place && map.touchZoom) map.touchZoom._center = aim(place, map._limitZoom(zoom));
+    return move.call(map, place ? aim(place, zoom) : centre, zoom, data, quiet);
+  };
 
   function stopSeeking() {
     clearTimeout(seekTimer);
@@ -1086,6 +1133,9 @@
         category: held.category, name: held.name, type: held.type, x: held.x, y: held.y, z: held.z,
       });
       portrait(held);
+      // The ring first: moving the map paints the canvas at once, and the
+      // ring would be painted where the entity was.
+      ring();
       centre();
     } else if (app.dimension() !== picked.dimension) {
       picked.state = 'away';
@@ -1325,6 +1375,17 @@
       if (e.originalEvent.key.startsWith('Arrow')) unfollow();
     });
     map.on('zoomend', centre);
+    // The room to see the map in has changed, and its middle with it.
+    // Leaflet is told of a change to the map's box in the frame after it
+    // happens, and for that frame the middle it knows is not the middle
+    // there is; while someone is kept there it is told at once.
+    if (app.room) {
+      app.room.watch(() => {
+        if (!followed()) return;
+        map.invalidateSize();
+        centre();
+      });
+    }
   }
 
   el.pause.addEventListener('click', () => {
@@ -1483,6 +1544,8 @@
   });
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);
+  // After the canvas has been drawn for the zoom the map came to rest at.
+  map.on('zoomend', () => setTimeout(present, 0));
   setInterval(readout, READOUT_MS);
   sync();
 })();

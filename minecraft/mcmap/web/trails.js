@@ -198,7 +198,7 @@
         casing.bringToBack();
       }
     }
-    Object.assign(trail, { casing, line, last: { x, z } });
+    Object.assign(trail, { casing, line, last: { x, z }, tipped: false });
     trail.all.push(casing);
     trail.every.push(casing, line);
     extend(trail, t, x, z, false);
@@ -206,11 +206,29 @@
 
   function extend(trail, t, x, z, add = true) {
     if (add) {
+      untip(trail);
       trail.casing.addLatLng(place(x, z));
       trail.line.addLatLng(place(x, z));
       trail.last = { x, z };
     }
     trail.casing.options.to = t;
+  }
+
+  // A line is of the blocks a player has been in, a few apart, so it would
+  // stop short of the marker of someone still walking it. Its last point
+  // while they are in the live picture is where they are, exactly, and is
+  // replaced by the block once they have gone far enough for one.
+  function tip(trail, x, z) {
+    untip(trail);
+    trail.casing.addLatLng([z, x]);
+    trail.line.addLatLng([z, x]);
+    trail.tipped = true;
+  }
+
+  function untip(trail) {
+    if (!trail.tipped) return;
+    for (const line of [trail.casing, trail.line]) line.setLatLngs(line.getLatLngs().slice(0, -1));
+    trail.tipped = false;
   }
 
   // Puts on the map exactly the lines of the players whose trails are
@@ -297,6 +315,7 @@
       const away = trail.seenAt > 0 && now - trail.seenAt > BREAK_MS;
       if (away || moved > BREAK_BLOCKS) begin(trail, now / 1000, x, z);
       else if (moved >= STEP_BLOCKS) extend(trail, now / 1000, x, z);
+      tip(trail, p.x, p.z);
       trail.seenAt = now;
     }
     row.setCount(trails.size);

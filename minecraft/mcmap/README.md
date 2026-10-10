@@ -2730,10 +2730,22 @@ drawn. Copy puts `x y z` on the clipboard, and where there is no clipboard
 to write to selects the numbers instead. Close or Escape shuts the card. A
 drag that starts on a marker pans the map and opens nothing.
 
-Follow keeps the map centred on the entity at the zoom the viewer has, and
-draws a solid ring round it; an entity that is only inspected has a dashed
-one. Dragging the map or panning it with the arrow keys turns Follow off
-and leaves the card open. Zooming does not. While it is on, the button reads
+Follow keeps the entity in the middle of the map that can be seen, at the
+zoom the viewer has, and draws a solid ring round it; an entity that is
+only inspected has a dashed one. The map that can be seen is its box less
+a band for whatever lies across the middle of it: the panel where it
+floats over the map's edge, the sheet at the height it stands at, the
+card where it runs across the foot of a phone. A card in a corner, clear
+of the middle, takes nothing, and neither does a sheet at its full
+height, which leaves no map to find a middle in (`room.js`). The map is
+brought back in the frame any of those changes. Dragging the map or
+panning it with the arrow keys turns Follow off and leaves the card open.
+Zooming does not, and is about the entity while it is followed, so the
+wheel, a double click, a pinch, the buttons and the keys all leave it
+where it is and not where the pointer was. Only the map's own bounds keep
+it from the middle, at an edge of the world. A player's trail ends at
+their marker while they are in the live picture, not at the last block
+recorded. While it is on, the button reads
 Following and is filled, and is still the pressed toggle it was to a
 screen reader; pressing it again stops. Whatever turns it off, the button,
 a drag, an arrow key, the entity going, another dimension or the card
