@@ -50,7 +50,7 @@ func TestOneRegistryChoosesEveryPictureAndIsOfferedToThePage(t *testing.T) {
 // number of screen pixels whatever either is.
 func TestStyleAndSizeAreChosenApartAndPixelsStayWhole(t *testing.T) {
 	icons := read(t, "icons.js")
-	if !regexp.MustCompile(`const BOXES = \{\s*small: [^\n]+\n\s*normal: [^\n]+\n\s*large: [^\n]+\n\s*xlarge: [^\n]+\n\s*\};`).Match(icons) {
+	if !regexp.MustCompile(`const boxes = \(\) => \(\{\s*small: [^\n]+\n\s*normal: [^\n]+\n\s*large: [^\n]+\n\s*xlarge: [^\n]+\n\s*\}\);`).Match(icons) {
 		t.Error("icons.js no longer has the four sizes of box")
 	}
 	if !bytes.Contains(icons, []byte("const BARE = { small: 24, normal: 32, large: 48, xlarge: 64 };")) {
@@ -149,5 +149,31 @@ func TestZoomTiersAndMarkerStatesAreDefinedOnce(t *testing.T) {
 	// style: the fading and the ring are laid over whatever is drawn.
 	if !bytes.Contains(markers, []byte("worn = fade(icons.mob(str(data.k), style.color, baby));")) || !bytes.Contains(markers, []byte("ctx.setLineDash(SAVED_DASH);")) {
 		t.Error("markers.js no longer draws a saved mark apart from a live one")
+	}
+}
+
+// The screen's density is not fixed for the visit, and the stylesheet's
+// sizes for a structure's mark are the canvas's, not a guess of its own.
+func TestADensityChangeRecomposesAndTheStylesheetAgreesWithTheCanvas(t *testing.T) {
+	icons, css := read(t, "icons.js"), read(t, "style.css")
+	for _, need := range []string{
+		"let DENSITY = L.Browser.retina ? 2 : 1;",
+		"matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)",
+		"L.Browser.retina = dense;\n    DENSITY = dense ? 2 : 1;",
+		"root.toggleAttribute('data-dense', DENSITY === 2);",
+		"return [theme, size, text, style, mobPicture, picturesLive, picturesMarkers, DENSITY].join('|');",
+		"if (canvas.width !== ICON * DENSITY) {",
+	} {
+		if !bytes.Contains(icons, []byte(need)) {
+			t.Errorf("icons.js no longer has %q", need)
+		}
+	}
+	if bytes.Contains(css, []byte("min-resolution")) || !bytes.Contains(css, []byte(`:root[data-dense][data-marker-size="large"] .structure .picture { width: 24px; height: 24px; }`)) {
+		t.Error("style.css decides for itself whether the screen is dense")
+	}
+	for _, script := range []string{"live.js", "markers.js"} {
+		if bytes.Contains(read(t, script), []byte("const { DENSITY } = icons;")) {
+			t.Errorf("%s takes the density once, at load", script)
+		}
 	}
 }

@@ -30,7 +30,6 @@
   // village's worth of pictures twenty pixels wide, eight blocks to the
   // pixel, is a heap in which none can be made out.
   const PICTURE_ZOOM = icons.registry ? icons.registry.PICTURES_FROM.markers : -2;
-  const { DENSITY } = icons;
   // What the viewer has chosen for how the map looks, where the page keeps
   // such a thing.
   const settings = window.mcmapSettings || null;
