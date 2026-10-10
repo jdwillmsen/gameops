@@ -21,16 +21,23 @@ type Structure struct {
 	// its kind ever is: the rest of it is most likely in chunks the world
 	// has not generated yet.
 	Partial bool `json:"partial,omitempty"`
+	// Variant is which of several the structure is, for a kind the world
+	// records by variant: the biome an abandoned camp was built for.
+	Variant string `json:"variant,omitempty"`
 }
 
 // joinGap is how far apart, in blocks across the map, two areas of a kind
-// may be and still be the same structure. A monument, an outpost or a hut
+// may be and still be the same structure. A monument, a hut or a pyramid
 // is cut only by chunk edges, so its parts touch. A fortress is corridors
 // and rooms recorded one by one with open ground between them, and its
-// neighbours are never nearer than four chunks.
+// neighbours are never nearer than four chunks. An outpost's tents and
+// cages stand apart from its tower, and the next outpost is 24 chunks off.
 func joinGap(kind Kind) int32 {
-	if kind == Fortress {
+	switch kind {
+	case Fortress:
 		return 32
+	case Outpost:
+		return 48
 	}
 	return 0
 }
@@ -84,11 +91,15 @@ func assemble(pieces []piece) []Structure {
 		root := find(i)
 		s, ok := joined[root]
 		if !ok {
-			joined[root] = &Structure{Kind: p.kind, Box: p.box, Areas: 1}
+			joined[root] = &Structure{Kind: p.kind, Box: p.box, Areas: 1, Variant: p.variant}
 			continue
 		}
 		s.Box = s.Box.union(p.box)
 		s.Areas++
+		// The same every time, whichever piece was come to first.
+		if p.variant != "" && (s.Variant == "" || p.variant < s.Variant) {
+			s.Variant = p.variant
+		}
 	}
 	out := make([]Structure, 0, len(joined))
 	for _, s := range joined {

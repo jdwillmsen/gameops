@@ -239,7 +239,7 @@ func (n *Names) Shulker(colour string) string {
 
 // featureOf is the language file's word for a structure kind where it is
 // not the kind itself. It has none for a witch hut.
-var featureOf = map[string]string{"outpost": "pillager_outpost"}
+var featureOf = map[string]string{"outpost": "pillager_outpost", "bastion": "bastion_remnant", "ocean_ruins": "ruins"}
 
 // Structure is the name of a kind of structure.
 func (n *Names) Structure(kind string) string {

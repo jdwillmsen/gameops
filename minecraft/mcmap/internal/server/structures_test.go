@@ -45,10 +45,10 @@ func surveyed() *fakeStructures {
 			},
 		},
 		Check: structures.Check{State: structures.SeedVerified, Agree: 19, Findings: []string{"fortress predicted at nether -480, -960"}, Total: 1,
-			Kinds: map[structures.Kind]structures.KindCheck{
-				structures.Fortress: {State: structures.SeedVerified, Agree: 11, Built: 8, Empty: 1, Findings: 1},
-				structures.Monument: {State: structures.SeedVerified, Agree: 11},
-				structures.WitchHut: {State: structures.SeedUnverified, Agree: 1},
+			Kinds: map[structures.Rule]structures.KindCheck{
+				{Kind: structures.Fortress, Dimension: chunks.Nether}:    {State: structures.SeedVerified, Agree: 11, Built: 8, Empty: 1, Findings: 1},
+				{Kind: structures.Monument, Dimension: chunks.Overworld}: {State: structures.SeedVerified, Agree: 11},
+				{Kind: structures.WitchHut, Dimension: chunks.Overworld}: {State: structures.SeedUnverified, Agree: 1},
 			}},
 		Level:            leveldat.Level{Seed: secretSeed, SpawnX: 40, SpawnZ: -72, SpawnY: 32767},
 		HasLevel:         true,
@@ -311,6 +311,42 @@ func TestStructuresBoundTheResponse(t *testing.T) {
 	}
 	if len(body) > 640<<10 {
 		t.Errorf("a full response of villages is %d bytes", len(body))
+	}
+}
+
+// A page from before the catalog lists the seven kinds it was written
+// with and draws any other with nothing to put it away by, the kinds that
+// are off until asked for among them. It is sent the kinds it knows.
+func TestStructuresKeepLaterKindsFromAPageThatCannotPutThemAway(t *testing.T) {
+	s, _ := fixture(t)
+	source := surveyed()
+	layer := source.survey.Layers[chunks.Overworld]
+	layer.Recorded = append(layer.Recorded,
+		structures.Structure{Kind: structures.Igloo, Box: structures.Box{MinX: 96, MinY: 69, MinZ: 160, MaxX: 102, MaxY: 73, MaxZ: 167}, Areas: 1},
+		structures.Structure{Kind: structures.AbandonedCamp, Box: structures.Box{MinX: -300, MinY: 70, MinZ: 40, MaxX: -291, MaxY: 78, MaxZ: 50}, Areas: 2, Variant: "taiga"})
+	layer.Predicted = append(layer.Predicted, structures.Prediction{Kind: structures.Igloo, X: 900, Z: -340, Generated: true}, structures.Prediction{Kind: structures.Monument, X: 7000, Z: 80, Candidate: true})
+	source.survey.Layers[chunks.Overworld] = layer
+	source.survey.Check.Kinds[structures.Rule{Kind: structures.Igloo, Dimension: chunks.Overworld}] = structures.KindCheck{State: structures.SeedVerified, Agree: 8}
+	s.Structures = source
+
+	old, body := structuresOf(t, s, "/api/structures?dimension=overworld")
+	if len(old.Recorded) != 3 || len(old.Predicted) != 1 || old.Predicted[0].Kind != structures.Monument || strings.Contains(body, `"kind":"igloo","min`) || strings.Contains(body, "taiga") {
+		t.Errorf("a page that did not ask for every kind was sent %s", body)
+	}
+	if _, sent := old.Kinds[structures.Igloo]; sent {
+		t.Errorf("and how a kind it has no row for fared: %+v", old.Kinds)
+	}
+	// It is still told what there is, which costs it nothing.
+	if len(old.Catalog) != len(structures.Kinds) {
+		t.Errorf("catalog of %d kinds", len(old.Catalog))
+	}
+	all, body := structuresOf(t, s, "/api/structures?dimension=overworld&kinds=all")
+	if len(all.Recorded) != 5 || len(all.Predicted) != 2 || all.Kinds[structures.Igloo].Agree != 8 || !strings.Contains(body, `"variant":"taiga"`) {
+		t.Errorf("a page that asked for every kind was sent %s", body)
+	}
+	// And its details are there for the page that lists it.
+	if rec := do(s.Handler(), "GET", "/api/structures/detail?dimension=overworld&kind=igloo&x=99&z=163", "", nil); rec.Code != http.StatusOK {
+		t.Errorf("the igloo's details = %d", rec.Code)
 	}
 }
 

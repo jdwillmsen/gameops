@@ -280,7 +280,11 @@ func TestTake_OffersPredictionsOnceTheSeedExplainsTheWorld(t *testing.T) {
 		}
 	}
 	for kind, want := range map[Kind]string{Fortress: SeedVerified, Monument: SeedVerified, Outpost: SeedUnverified, Village: SeedUnverified, WitchHut: SeedUnverified} {
-		if got := got.Check.Kinds[kind].State; got != want {
+		at := chunks.Overworld
+		if kind == Fortress {
+			at = chunks.Nether
+		}
+		if got := got.Check.Kinds[Rule{kind, at}].State; got != want {
 			t.Errorf("%s is %s, want %s", kind, got, want)
 		}
 	}

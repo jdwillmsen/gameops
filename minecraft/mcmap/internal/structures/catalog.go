@@ -44,6 +44,11 @@ var Catalog = []Info{
 	// out to find for themselves.
 	info(Stronghold, true, false, chunks.Overworld),
 	info(TrialChamber, false, false, chunks.Overworld),
+	info(DesertPyramid, false, true, chunks.Overworld),
+	info(JungleTemple, false, true, chunks.Overworld),
+	info(Igloo, false, true, chunks.Overworld),
+	info(TrailRuins, false, false, chunks.Overworld),
+	info(AbandonedCamp, false, false, chunks.Overworld),
 }
 
 // Kinds in the order they are listed.

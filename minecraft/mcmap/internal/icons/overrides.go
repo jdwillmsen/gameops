@@ -140,4 +140,9 @@ var structureFaces = map[string]string{
 	"witch_hut":     "witch",
 	"village":       villagerKind,
 	"trial_chamber": "breeze",
+	"end_city":      "shulker",
+	"bastion":       "piglin_brute",
+	"mansion":       "evocation_illager",
+	"ancient_city":  "warden",
+	"ocean_ruins":   "drowned",
 }

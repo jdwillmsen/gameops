@@ -39,6 +39,21 @@
     village: { letter: 'V', color: '#6bbf59' },
     stronghold: { letter: 'S', color: '#58c4a4' },
     trial_chamber: { letter: 'T', color: '#e08a4a' },
+    desert_pyramid: { letter: 'D', color: '#d8c47a' },
+    jungle_temple: { letter: 'J', color: '#7fa860' },
+    igloo: { letter: 'I', color: '#a9d4e6' },
+    trail_ruins: { letter: 'R', color: '#b08968' },
+    abandoned_camp: { letter: 'C', color: '#e4a05c' },
+    end_city: { letter: 'E', color: '#c58fd0' },
+    end_gateway: { letter: 'G', color: '#7c6fd6' },
+    exit_portal: { letter: 'X', color: '#8f8aa6' },
+    bastion: { letter: 'B', color: '#c9a227' },
+    ruined_portal: { letter: 'P', color: '#9a5fd0' },
+    mansion: { letter: 'W', color: '#8a6a4a' },
+    ancient_city: { letter: 'A', color: '#2fa3a3' },
+    shipwreck: { letter: 'K', color: '#a7794f' },
+    ocean_ruins: { letter: 'U', color: '#4f9fb8' },
+    buried_treasure: { letter: 'Y', color: '#e0c040' },
   };
   // The rows in the panel: the three certainties and the world spawn.
   // The kinds are a list over them, each named by the game's word for it
@@ -88,6 +103,9 @@
   const kindsIn = (dimension) => (catalog === null ? Object.keys(KINDS) : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));
   // A kind with no item of its own has nothing to be hidden by.
   const kindOn = (kind) => !known(kind) || choice.shows(kind);
+
+  // A name that is already more than one of its thing is left as it is.
+  const many = (name) => (/(ruins|chambers)$/i.test(name) ? name : names.plural(name));
 
   const DETAILS_HINT = 'Click for details';
 
@@ -139,8 +157,11 @@
     if (p.candidate) {
       return ['The seed puts a site here. Whether one is built depends on the biome, and this terrain is not generated yet.'];
     }
-    if (p.generated && quiet(p.kind)) {
+    if (p.generated && p.kind === 'village') {
       return ['This area is generated and its biome suits one, but the game has no record of one here: it keeps one only for a village a player has been near.'];
+    }
+    if (p.generated && quiet(p.kind)) {
+      return ['This area is generated and suits one, and nothing the save holds says one is here. That is not the world saying there is none: an older version of the game kept no record of this kind, and a chest that has been opened no longer says what it was.'];
     }
     if (p.generated) return ['This area is already generated and the world recorded none here.'];
     return ['Not generated yet: nobody has been here.'];
@@ -399,7 +420,7 @@
       const more = [...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ');
       items.push({
         id: kind,
-        label: names.plural(names.structure(kind)),
+        label: many(names.structure(kind)),
         picture: icons.keyOf('structure', { kind }),
         swatch: `dot ${kind.split('_').join('-')}`,
         count: surveyed ? n.recorded : null,
@@ -658,7 +679,7 @@
       lines.push(...standing(p));
       const rule = rules[kind];
       if (rule) {
-        lines.push(`Its rule was checked against this world’s own ${names.plural(names.structure(kind)).toLowerCase()}: ${fmt(rule.agree)} recorded where it puts one, ${fmt(rule.disagree)} not.`);
+        lines.push(`Its rule was checked against this world’s own ${many(names.structure(kind)).toLowerCase()}: ${fmt(rule.agree)} where it puts one, ${fmt(rule.disagree)} not.`);
       }
     }
     view.standing.replaceChildren(...lines.map((line) => el('p', '', line)));
@@ -686,7 +707,11 @@
         ['Beds claimed', n(v.beds)], ['Bells claimed', n(v.bells)], ['Job sites claimed', n(v.jobSites)],
       ] : [['Counts', 'Not counted by the game yet: it has a record of this village and has not run it, so its box is a first guess.']]));
     } else if (s && Number.isFinite(s.areas) && s.areas > 0) {
-      out.push(...facts('What the world recorded', [['Spawn areas', `${fmt(s.areas)}, joined into this one box`]]));
+      out.push(...facts('What the world recorded', [
+        ['Boxes', `${fmt(s.areas)}, joined into this one box`],
+        // The biome an abandoned camp was built for, as the record names it.
+        typeof s.variant === 'string' && KIND.test(s.variant) ? ['Built for', names.tidy(s.variant)] : null,
+      ]));
     } else if (s && found(s)) {
       out.push(...facts('What it was found by', [['Blocks', `${fmt(s.evidence)} ${FOUND_BY[kind] || 'blocks only this kind has'}`]]));
     }

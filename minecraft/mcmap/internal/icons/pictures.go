@@ -25,7 +25,10 @@ var (
 	// trapped_chest for a chest marked t.
 	ContainerKinds = []string{"chest", "trapped_chest", "barrel", "shulker"}
 	// StructureKinds is every kind of structure the map marks.
-	StructureKinds = []string{"fortress", "monument", "outpost", "witch_hut", "village", "stronghold", "trial_chamber"}
+	StructureKinds = []string{"fortress", "monument", "outpost", "witch_hut", "village", "stronghold", "trial_chamber",
+		"desert_pyramid", "jungle_temple", "igloo", "trail_ruins", "abandoned_camp",
+		"end_city", "end_gateway", "exit_portal", "bastion", "ruined_portal",
+		"mansion", "ancient_city", "shipwreck", "ocean_ruins", "buried_treasure"}
 )
 
 // A picture's key is its group and its name within it: bed/red,
@@ -47,6 +50,24 @@ var structureItems = map[string]string{
 	"village":       "textures/items/villagebell",
 	"stronghold":    "textures/items/ender_eye",
 	"trial_chamber": "textures/items/trial_key",
+	// The carved face only a desert pyramid's sandstone has, and the stone
+	// a jungle temple is built of.
+	"desert_pyramid": "textures/blocks/sandstone_carved",
+	"jungle_temple":  "textures/blocks/cobblestone_mossy",
+	"igloo":          "textures/items/snowball",
+	"trail_ruins":    "textures/items/brush",
+	"abandoned_camp": "textures/items/campfire",
+	// What each is gone to for, or is made of and nothing else is.
+	"end_city":        "textures/items/elytra",
+	"end_gateway":     "textures/items/ender_pearl",
+	"exit_portal":     "textures/blocks/dragon_egg",
+	"bastion":         "textures/blocks/gilded_blackstone",
+	"ruined_portal":   "textures/blocks/crying_obsidian",
+	"mansion":         "textures/items/totem",
+	"ancient_city":    "textures/items/echo_shard",
+	"shipwreck":       "textures/items/boat_oak",
+	"ocean_ruins":     "textures/items/nautilus",
+	"buried_treasure": "textures/items/heartofthesea_closed",
 }
 
 // markerPicture is one marker picture and where in the samples it comes from.

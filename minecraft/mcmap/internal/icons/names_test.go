@@ -179,7 +179,7 @@ func TestNoRawIDIsEverServedAsAName(t *testing.T) {
 		if got := slices.Sorted(maps.Keys(table.Containers)); !slices.Equal(got, []string{"barrel", "chest", "shulker", "trapped_chest"}) {
 			t.Errorf("%s: containers named are %v", name, got)
 		}
-		if got := slices.Sorted(maps.Keys(table.Structures)); !slices.Equal(got, []string{"fortress", "monument", "outpost", "stronghold", "trial_chamber", "village", "witch_hut"}) {
+		if got := slices.Sorted(maps.Keys(table.Structures)); !slices.Equal(got, slices.Sorted(slices.Values(StructureKinds))) {
 			t.Errorf("%s: structures named are %v", name, got)
 		}
 	}

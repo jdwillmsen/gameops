@@ -475,8 +475,15 @@ func TestAKindOfStructureAddedSinceTheSetWasKeptHasItsPictureAskedFor(t *testing
 			return Set{Pictures: map[string][]byte{"structure/stronghold": picture(t, 16, 16, blue), "structure/trial_chamber": picture(t, 16, 16, blue)}}, nil
 		}}
 	m.Run(t.Context())
-	if len(asked) != 1 || !slices.Equal(asked[0], []string{"structure/stronghold", "structure/trial_chamber"}) {
-		t.Fatalf("asked for %v, want the two kinds added since, once", asked)
+	var since []string
+	for _, kind := range StructureKinds {
+		if !slices.Contains(firstStructureKinds, kind) {
+			since = append(since, "structure/"+kind)
+		}
+	}
+	slices.Sort(since)
+	if len(asked) != 1 || !slices.Equal(asked[0], since) || !slices.Contains(since, "structure/stronghold") || !slices.Contains(since, "structure/end_city") {
+		t.Fatalf("asked for %v, want the kinds added since, once", asked)
 	}
 	if _, ok := m.Picture("structure/stronghold"); !ok {
 		t.Error("the new kind's picture is not served after it was fetched")
