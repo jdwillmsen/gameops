@@ -18,7 +18,9 @@
   const RETRY_FAILED_MS = 5 * 60_000;
   // Leaflet's canvas draws at twice the size on a dense screen, so a
   // picture prepared for it is prepared at that size too.
-  const DENSITY = L.Browser.retina ? 2 : 1;
+  // It is not fixed for the visit: a window dragged to another screen, or
+  // a page zoomed, changes it, and everything prepared is prepared again.
+  let DENSITY = L.Browser.retina ? 2 : 1;
 
   // Sizes in CSS pixels. A marker's picture is drawn into a box, and how
   // large the box is is the viewer's choice of size and nothing else; what
@@ -35,16 +37,17 @@
   // on any other twice. Smaller is 12, which blends an egg, since a
   // picture cannot be made smaller than it was drawn without losing
   // pixels, and draws a face at one screen pixel to each of its own.
-  const BIG = DENSITY === 2 ? 24 : 32;
-  const HUGE = DENSITY === 2 ? 32 : 48;
+  const big = () => (DENSITY === 2 ? 24 : 32);
+  const huge = () => (DENSITY === 2 ? 32 : 48);
   // The box by size: a grown mob's or a marker's, a baby's, a player's
   // head, and how far a plain dot or ring is scaled.
-  const BOXES = {
+  const SIZES = ['small', 'normal', 'large', 'xlarge'];
+  const boxes = () => ({
     small: { icon: 12, babyIcon: 8, head: 16, scale: 0.8 },
     normal: { icon: ICON, babyIcon: 12, head: 24, scale: 1 },
-    large: { icon: BIG, babyIcon: ICON, head: 32, scale: 1.4 },
-    xlarge: { icon: HUGE, babyIcon: BIG, head: 48, scale: 1.8 },
-  };
+    large: { icon: big(), babyIcon: ICON, head: 32, scale: 1.4 },
+    xlarge: { icon: huge(), babyIcon: big(), head: 48, scale: 1.8 },
+  });
   // With no plate the picture is the whole marker, so its box is larger:
   // a 32 pixel block one to one at the usual size, and a face at 4.
   const BARE = { small: 24, normal: 32, large: 48, xlarge: 64 };
@@ -93,7 +96,7 @@
     if (STYLES.includes(chosen)) return chosen;
     return look()[domain === 'live' ? 'picturesLive' : 'picturesMarkers'] === false ? 'dots' : 'plates';
   }
-  const sizeOf = () => (Object.hasOwn(BOXES, look().size) ? look().size : 'normal');
+  const sizeOf = () => (SIZES.includes(look().size) ? look().size : 'normal');
   // Whether a mob is drawn as its face where it has one, or as its egg.
   const faces = () => look().mobPicture !== 'eggs';
   // How far out the map is: pictures and names, pictures, or neither.
@@ -105,7 +108,7 @@
   // The sizes a layer needs to know a marker's reach by, at the size and
   // in the style chosen: asked for when used, since either may change.
   function sizes() {
-    const box = BOXES[sizeOf()];
+    const box = boxes()[sizeOf()];
     const bare = styleOf('live') === 'large';
     const size = sizeOf();
     return {
@@ -409,7 +412,7 @@
     if (!made) {
       made = style === 'large'
         ? bare(drawn, ring, (baby ? BARE_BABY : BARE)[size], from.includes('/block/'))
-        : plated(drawn, ring, BOXES[size][baby ? 'babyIcon' : 'icon'], alive);
+        : plated(drawn, ring, boxes()[size][baby ? 'babyIcon' : 'icon'], alive);
       sprites.set(held, made);
     }
     return made;
@@ -427,6 +430,11 @@
     const from = addressOf(canvas.dataset.picture);
     const drawn = bitmap(from);
     canvas.hidden = !drawn;
+    // Made for another density, it is made again for this one.
+    if (canvas.width !== ICON * DENSITY) {
+      canvas.width = canvas.height = ICON * DENSITY;
+      delete canvas.dataset.drawn;
+    }
     if (!drawn || canvas.dataset.drawn === from) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -671,6 +679,9 @@
     const root = document.documentElement;
     root.dataset.markers = styleOf('markers');
     root.dataset.markerSize = sizeOf();
+    // Which of the two sets of sizes the canvas is using, so that the
+    // stylesheet's are the same ones and not its own guess at the screen.
+    root.toggleAttribute('data-dense', DENSITY === 2);
   }
   dressPage();
 
@@ -678,7 +689,7 @@
   // draws, by key.
   const registry = {
     STYLES,
-    SIZES: Object.keys(BOXES),
+    SIZES,
     STATES,
     PICTURES_FROM,
     LABELS_FROM,
@@ -699,7 +710,10 @@
   };
 
   app.icons = {
-    DENSITY,
+    get DENSITY() {
+      return DENSITY;
+    },
+    density: () => DENSITY,
     MOB_RADIUS,
     BABY_RADIUS,
     PLATE_RADIUS,
@@ -738,7 +752,7 @@
   // and dress their markers from what is made here then.
   const composedAs = () => {
     const { theme, size, text, style, mobPicture, picturesLive, picturesMarkers } = look();
-    return [theme, size, text, style, mobPicture, picturesLive, picturesMarkers].join('|');
+    return [theme, size, text, style, mobPicture, picturesLive, picturesMarkers, DENSITY].join('|');
   };
   let composed = composedAs();
   document.addEventListener('mcmap:settings', (e) => {
@@ -749,6 +763,38 @@
     paint(document);
     dressPage();
   });
+
+  // The screen's density changes when the window is moved to another
+  // screen or the page is zoomed. Leaflet decides once, at load, whether
+  // its canvas is drawn at twice the size; it is told again here, and
+  // everything composed for the old density is composed for the new
+  // through the same door a change of size comes in by. A query matches
+  // one density, so each change is listened for afresh.
+  function rescale() {
+    const dense = window.devicePixelRatio > 1;
+    if (dense === (DENSITY === 2)) return;
+    L.Browser.retina = dense;
+    DENSITY = dense ? 2 : 1;
+    document.dispatchEvent(new CustomEvent('mcmap:settings', { detail: { sections: ['look'] } }));
+    const told = new Set();
+    app.map.eachLayer((layer) => {
+      const renderer = layer._renderer;
+      if (!renderer || told.has(renderer) || typeof renderer._update !== 'function') return;
+      told.add(renderer);
+      renderer._update();
+    });
+    tell('mcmap:pictures');
+  }
+  function watchDensity() {
+    if (typeof matchMedia !== 'function') return;
+    const query = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    if (!query.addEventListener) return;
+    query.addEventListener('change', () => {
+      rescale();
+      watchDensity();
+    }, { once: true });
+  }
+  watchDensity();
 
   // Coming closer or going further out changes what is drawn only where
   // it crosses from dots to pictures or from pictures to names, and the

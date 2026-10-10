@@ -59,7 +59,8 @@
   // whole multiple, so it is never blurred, and is larger than a mob's
   // icon by design: players are what the map is looked at for.
   const DOT_RADIUS = 3.5;
-  const { DENSITY } = icons;
+  // Asked for when used: the screen's density can change during a visit.
+  const density = () => (icons.density ? icons.density() : icons.DENSITY);
   // The sizes the viewer has chosen: a mob's ring, a head and its backing,
   // and a dot. Asked for when used, since the viewer may change them.
   const sizes = () => (icons.sizes ? icons.sizes() : { mob: icons.MOB_RADIUS, head: 24, headRadius: 15, scale: 1 });
@@ -974,6 +975,8 @@
   // show the same thing.
   function portrait(held) {
     const ctx = card.picture.getContext('2d');
+    const DENSITY = density();
+    if (card.picture.width !== PORTRAIT * DENSITY) card.picture.width = card.picture.height = PORTRAIT * DENSITY;
     ctx.setTransform(DENSITY, 0, 0, DENSITY, 0, 0);
     ctx.clearRect(0, 0, PORTRAIT, PORTRAIT);
     // With no marker in the picture, what the marker would be.
@@ -1296,7 +1299,7 @@
   }
 
   if (card.root) {
-    card.picture.width = card.picture.height = PORTRAIT * DENSITY;
+    card.picture.width = card.picture.height = PORTRAIT * density();
     mobLayer.on('click', onPick);
     playerLayer.on('click', onPick);
     card.close.addEventListener('click', shut);

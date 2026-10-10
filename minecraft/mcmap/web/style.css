@@ -812,8 +812,9 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
    the size and the style chosen for markers reach it from here. Its box on
    the map stays where it is and the mark is centred on it, whatever its
    size. A picture is enlarged by whole pixels only: the larger sizes are
-   32 and 48 on an ordinary screen and 24 and 32 on a dense one, as the
-   canvas's are. Made smaller, it is blended, since it cannot be made
+   32 and 48 on an ordinary screen and 24 and 32 on a dense one, and which
+   of the two the screen is, is the canvas's own word (data-dense), so the
+   two cannot disagree. Made smaller, it is blended, since it cannot be made
    smaller without losing pixels. */
 .structure:not(.spawn) span { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 :root[data-marker-size="small"] .structure:not(.spawn) span { width: 18px; height: 18px; font-size: 10px; }
@@ -822,12 +823,10 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 :root[data-marker-size="large"] .structure .picture { width: 32px; height: 32px; }
 :root[data-marker-size="xlarge"] .structure:not(.spawn) span { width: 54px; height: 54px; font-size: 24px; }
 :root[data-marker-size="xlarge"] .structure .picture { width: 48px; height: 48px; }
-@media (min-resolution: 1.5dppx) {
-  :root[data-marker-size="large"] .structure:not(.spawn) span { width: 30px; height: 30px; font-size: 15px; }
-  :root[data-marker-size="large"] .structure .picture { width: 24px; height: 24px; }
-  :root[data-marker-size="xlarge"] .structure:not(.spawn) span { width: 38px; height: 38px; font-size: 18px; }
-  :root[data-marker-size="xlarge"] .structure .picture { width: 32px; height: 32px; }
-}
+:root[data-dense][data-marker-size="large"] .structure:not(.spawn) span { width: 30px; height: 30px; font-size: 15px; }
+:root[data-dense][data-marker-size="large"] .structure .picture { width: 24px; height: 24px; }
+:root[data-dense][data-marker-size="xlarge"] .structure:not(.spawn) span { width: 38px; height: 38px; font-size: 18px; }
+:root[data-dense][data-marker-size="xlarge"] .structure .picture { width: 32px; height: 32px; }
 /* Large pictures have no plate: the picture is the mark, twice the size,
    framed in the kind's colour inside a dark casing as a marker's is. */
 :root[data-markers="large"] .structure.recorded span:has(.picture:not([hidden])) { width: auto; height: auto; background: none; border: 0; }
