@@ -367,3 +367,27 @@ func TestIcons_MadePicturesAreMoreKeysInTheSameAnswer(t *testing.T) {
 		t.Errorf("a face there is none of = %d %q", rec.Code, rec.Header().Get("Cache-Control"))
 	}
 }
+
+// art is a MarkerArt of two made-up pictures, one of them a face.
+type art struct{ heads map[string][4]int }
+
+func (a art) Picture(string) ([]byte, bool) { return nil, false }
+func (a art) Pictures() (string, []string)  { return "p1", []string{"container/chest", "face/cow"} }
+func (a art) Names() *icons.Names           { return nil }
+
+type artWithHeads struct{ art }
+
+func (a artWithHeads) Heads() map[string][4]int { return a.heads }
+
+func TestIcons_SayWhereAFacesHeadIsWhenTheArtDoes(t *testing.T) {
+	s := withIcons(t)
+	c := session(s, alex)
+	s.Art = art{}
+	if got := listing(t, s, c).Pictures; got.Boxes != nil || len(got.Keys) != 2 {
+		t.Errorf("art that says nothing of heads is listed as %+v", got)
+	}
+	s.Art = artWithHeads{art{heads: map[string][4]int{"face/cow": {1, 0, 8, 8}}}}
+	if got := listing(t, s, c).Pictures.Boxes; len(got) != 1 || got["face/cow"] != [4]int{1, 0, 8, 8} {
+		t.Errorf("heads listed as %v", got)
+	}
+}

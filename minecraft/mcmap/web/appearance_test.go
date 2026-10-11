@@ -367,8 +367,8 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	}
 	// Pixel art is only ever enlarged by a whole number of screen pixels.
 	icons := read(t, "icons.js")
-	if !bytes.Contains(icons, []byte("const big = () => (DENSITY === 2 ? 24 : 32);")) || !bytes.Contains(icons, []byte("if (whole >= 1 && whole * native >= 0.75 * target) return { side: whole * native, smooth: false };")) ||
-		!bytes.Contains(icons, []byte("return { side: target, smooth: target < native };")) {
+	if !bytes.Contains(icons, []byte("const big = () => (DENSITY === 2 ? 24 : 32);")) || !bytes.Contains(icons, []byte("if (whole >= 1 && whole * native >= 0.75 * target) return { per: whole, smooth: false };")) ||
+		!bytes.Contains(icons, []byte("return { per: target / native, smooth: target < native };")) {
 		t.Error("icons.js no longer enlarges a picture whole, or blends one it enlarges")
 	}
 	// Less motion is the viewer's choice where one is made, and the

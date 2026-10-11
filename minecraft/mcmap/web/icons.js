@@ -124,7 +124,7 @@
   const KEY = /^[a-z0-9_]+\/[a-z0-9_]+$/;
 
   const decodes = typeof createImageBitmap === 'function';
-  const nothing = () => ({ mobs: { version: '', types: new Set() }, pictures: { version: '', keys: new Set() }, names: '', heads: {}, me: '' });
+  const nothing = () => ({ mobs: { version: '', types: new Set() }, pictures: { version: '', keys: new Set(), boxes: {} }, names: '', heads: {}, me: '' });
 
   // What the server last said there is. Empty is the state before the
   // answer, the state when the server has none to offer, and the state
@@ -228,37 +228,116 @@
   const backing = () => colour('marker-backing', 'rgba(11, 12, 14, 0.8)');
   const casing = () => colour('marker-ink', '#0b0c0e');
 
-  // How large a picture is drawn in a box, in screen pixels along its
-  // longer side: the most whole screen pixels to each of its own that
-  // fit. Where that would leave it under three quarters of its box (a
-  // face ten pixels a side in a box of sixteen) it is stretched to the
-  // box, unblended, so that every picture is much the same size beside
-  // the next; a pixel of it is then one or two screen pixels and never a
-  // blur. One larger than its box is the box, blended, since a picture
-  // cannot be made smaller without losing pixels.
-  function fit(native, box) {
+  // How many screen pixels each pixel of a picture is drawn as in a box,
+  // by its longer side: the most whole ones that fit. Where that would
+  // leave it under three quarters of its box, a face may be the next
+  // whole number up if that is no more than a third over (a head ten
+  // pixels tall at two to the pixel in a box of sixteen): a plate has
+  // that much room round its box, and a face a little cropped is still
+  // the face, where one stretched by one and a half has pixels of two
+  // widths. Anything else, and a face that fits neither way, is
+  // stretched to the box, unblended, so that every picture is much the
+  // same size beside the next. One larger than its box is the box,
+  // blended, since a picture cannot be made smaller without losing
+  // pixels.
+  const SPILL = 4 / 3;
+  function fit(native, box, face) {
     const target = box * DENSITY;
     const whole = Math.floor(target / native);
-    if (whole >= 1 && whole * native >= 0.75 * target) return { side: whole * native, smooth: false };
-    return { side: target, smooth: target < native };
+    if (whole >= 1 && whole * native >= 0.75 * target) return { per: whole, smooth: false };
+    if (face && (whole + 1) * native <= SPILL * target) return { per: whole + 1, smooth: false };
+    return { per: target / native, smooth: target < native };
   }
 
-  // Draws a picture in the middle of a square of screen pixels, on whole
-  // pixels, at the size fit gives it.
-  function centred(ctx, drawn, side, box) {
-    const longer = Math.max(drawn.width, drawn.height);
-    const { side: across, smooth } = fit(longer, box);
-    const w = Math.max(1, Math.round((drawn.width * across) / longer));
-    const h = Math.max(1, Math.round((drawn.height * across) / longer));
+  // The part of a picture that is not empty, as { x, y, w, h } in its
+  // own pixels: a face is made square, with nothing where its width or
+  // height left room. Found once a picture, and the whole of it where
+  // the browser will not say.
+  const inked = new WeakMap();
+  function inkOf(drawn) {
+    if (inked.has(drawn)) return inked.get(drawn);
+    let ink = { x: 0, y: 0, w: drawn.width, h: drawn.height };
+    try {
+      const scratch = document.createElement('canvas');
+      scratch.width = drawn.width;
+      scratch.height = drawn.height;
+      const ctx = scratch.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(drawn, 0, 0);
+      const { data } = ctx.getImageData(0, 0, drawn.width, drawn.height);
+      let left = drawn.width;
+      let top = drawn.height;
+      let right = -1;
+      let bottom = -1;
+      for (let at = 3; at < data.length; at += 4) {
+        if (data[at] === 0) continue;
+        const x = ((at - 3) / 4) % drawn.width;
+        const y = Math.floor((at - 3) / 4 / drawn.width);
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y);
+      }
+      if (right >= 0) ink = { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+    } catch { /* drawn by its whole box */ }
+    inked.set(drawn, ink);
+    return ink;
+  }
+
+  // Where the head is in the picture at an address, for a picture that is
+  // a face and a server that says: { x, y, w, h } in the picture's own
+  // pixels, or null. A face is as wide as its horns, its hat and its nose
+  // make it, and it is the head that has to sit in the middle of a plate
+  // and be the size of the head beside it. A head that is half or less
+  // of what is drawn is not what the picture is of, a bat being mostly
+  // wings and a shulker as much lid as head, and that one is drawn by
+  // the whole of it.
+  function headOf(address, drawn) {
+    const named = /^api\/icons\/picture\/([a-z0-9_]+\/[a-z0-9_]+)\?/.exec(str(address));
+    const box = named && Object.hasOwn(listing.pictures.boxes, named[1]) ? listing.pictures.boxes[named[1]] : null;
+    if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => Number.isInteger(n) && n >= 0)) return null;
+    const [x, y, w, h] = box;
+    if (w < 1 || h < 1 || x + w > drawn.width || y + h > drawn.height) return null;
+    const ink = inkOf(drawn);
+    if (w * h * 2 <= ink.w * ink.h) return null;
+    return { x, y, w, h };
+  }
+
+  // Draws a picture in a square of screen pixels, on whole pixels, at
+  // the size fit gives it. One with no head is in the middle. A face has
+  // the middle of its head on the middle of the square, so that every
+  // face sits the same on its plate whatever reaches out of it; but one
+  // all of which fits its box, across or down, is kept wholly inside it
+  // that way, as near to that as it can be: a fox keeps its ears, and a
+  // shulker, whose head is the lower half of it, is not slid out of its
+  // box to centre that half. cut says the square has a rim that hides
+  // what a face spills over its box, as a plate's ring does; where there
+  // is none the whole of a face is sized to its box, and nothing of it
+  // is lost.
+  function centred(ctx, drawn, side, box, head = null, cut = true) {
+    const of = head || { x: 0, y: 0, w: drawn.width, h: drawn.height };
+    const ink = head ? inkOf(drawn) : of;
+    const by = head && !cut ? ink : of;
+    const { per, smooth } = fit(Math.max(by.w, by.h), box, head !== null && cut);
+    const room = box * DENSITY;
+    const edge = (side - room) / 2;
+    const place = (length, from, span, inkFrom, inkSpan) => {
+      const at = Math.round(side / 2 - (from + span / 2) * per);
+      if (inkSpan * per > room) return [at, Math.max(1, Math.round(length * per))];
+      const least = Math.ceil(edge - inkFrom * per);
+      const most = Math.floor(side - edge - (inkFrom + inkSpan) * per);
+      return [Math.min(Math.max(at, least), Math.max(least, most)), Math.max(1, Math.round(length * per))];
+    };
+    const [x, w] = place(drawn.width, of.x, of.w, ink.x, ink.w);
+    const [y, h] = place(drawn.height, of.y, of.h, ink.y, ink.h);
     ctx.imageSmoothingEnabled = smooth;
-    ctx.drawImage(drawn, Math.round((side - w) / 2), Math.round((side - h) / 2), w, h);
+    ctx.drawImage(drawn, x, y, w, h);
   }
 
   // A picture on a plate: round for what moves and square for what stays
   // put. From the outside in, the dark casing, the ring in the layer's
   // colour, the dark backing, and the picture kept inside the ring, so
   // that nothing in it can cover the colour the filters are read by.
-  function plated(drawn, ring, box, round) {
+  function plated(drawn, ring, box, round, head) {
     const made = document.createElement('canvas');
     const side = (box + 2 * PLATE_PAD - (round ? 0 : 2)) * DENSITY;
     made.width = made.height = side;
@@ -285,7 +364,7 @@
     ctx.fill();
     ctx.save();
     ctx.clip();
-    centred(ctx, drawn, side, box);
+    centred(ctx, drawn, side, box, head);
     ctx.restore();
     return made;
   }
@@ -293,12 +372,12 @@
   // A picture with no plate: the picture itself, larger, cased round its
   // own outline in the layer's colour and then in the dark, so that a
   // chest is a chest's shape and still reads on grass and on snow.
-  function bare(drawn, ring, box) {
+  function bare(drawn, ring, box, head) {
     const edge = RING + heavy() + CASING;
     const side = (box + 2 * edge) * DENSITY;
     const picture = document.createElement('canvas');
     picture.width = picture.height = side;
-    centred(picture.getContext('2d'), drawn, side, box);
+    centred(picture.getContext('2d'), drawn, side, box, head, false);
     // The picture's shape filled with one colour, to be stamped round it.
     const tinted = (fill) => {
       const flat = document.createElement('canvas');
@@ -411,9 +490,10 @@
     const held = `${from}|${ring}|${shape}`;
     let made = sprites.get(held);
     if (!made) {
+      const head = headOf(from, drawn);
       made = style === 'large'
-        ? bare(drawn, ring, (baby ? BARE_BABY : BARE)[size])
-        : plated(drawn, ring, boxes()[size][baby ? 'babyIcon' : 'icon'], alive);
+        ? bare(drawn, ring, (baby ? BARE_BABY : BARE)[size], head)
+        : plated(drawn, ring, boxes()[size][baby ? 'babyIcon' : 'icon'], alive, head);
       sprites.set(held, made);
     }
     return made;
@@ -447,11 +527,14 @@
       canvas.width = canvas.height = ICON * DENSITY;
       delete canvas.dataset.drawn;
     }
-    if (!drawn || canvas.dataset.drawn === from) return;
+    // Drawn again if the server has since said where its head is.
+    const head = drawn ? headOf(from, drawn) : null;
+    const as = head ? `${from}|${head.x},${head.y},${head.w},${head.h}` : from;
+    if (!drawn || canvas.dataset.drawn === as) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    centred(ctx, drawn, canvas.width, canvas.width / DENSITY);
-    canvas.dataset.drawn = from;
+    centred(ctx, drawn, canvas.width, canvas.width / DENSITY, head);
+    canvas.dataset.drawn = as;
   }
 
   // A picture for the page itself, outside the map: a panel row, a search
@@ -760,9 +843,13 @@
     answer = body;
     const mobs = next.mobs || {};
     const pictures = next.pictures || {};
+    const boxes = pictures.boxes && typeof pictures.boxes === 'object' ? pictures.boxes : {};
+    // A marker composed before the server said where its picture's head
+    // is, is composed again now that it has.
+    if (JSON.stringify(boxes) !== JSON.stringify(listing.pictures.boxes)) sprites.clear();
     listing = {
       mobs: { version: str(mobs.version), types: new Set(Array.isArray(mobs.types) ? mobs.types : []) },
-      pictures: { version: str(pictures.version), keys: new Set(Array.isArray(pictures.keys) ? pictures.keys : []) },
+      pictures: { version: str(pictures.version), keys: new Set(Array.isArray(pictures.keys) ? pictures.keys : []), boxes },
       names: str(next.names && next.names.version),
       heads: next.heads && typeof next.heads === 'object' ? next.heads : {},
       me: str(next.me),

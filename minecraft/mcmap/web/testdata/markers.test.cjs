@@ -140,6 +140,71 @@ test('a stretched canvas is drawn again each frame, and once more at rest when t
   assert.equal(renderer._steady, 1);
 });
 
+// --- a face on its plate ------------------------------------------------------
+
+// The villager's picture as the server makes it: a head 8 by 10 with a row
+// of nose under it, squared to 11 with the odd column on the right. The
+// fox's head is the lower six rows of its eight, under its ears, and the
+// shulker's the lower half of it.
+const HEADS = { 'face/villager_v2': [1, 0, 8, 10], 'face/fox': [0, 2, 8, 6], 'face/shulker': [0, 8, 16, 8] };
+
+// Where a mob's picture was drawn on its marker, in the marker's pixels.
+async function composed(s, type) {
+  s.icons.mob(type, '#f00');
+  await s.settle();
+  const sprite = s.icons.mob(type, '#f00');
+  const drawn = sprite.getContext('2d').drawn.filter((d) => !('getContext' in d.image));
+  assert.equal(drawn.length, 1, `${type} is one picture on its marker`);
+  return { sprite, at: drawn[0], per: drawn[0].w / drawn[0].image.width };
+}
+
+test('a face sits on its plate by its head, at a whole number of pixels to the pixel', async () => {
+  for (const dpr of DENSITIES) {
+    for (const size of SIZES) {
+      const s = await stage({ dpr, look: { style: 'plates', size }, boxes: HEADS });
+      const at = `${size} at density ${dpr}`;
+      const { sprite, at: d, per } = await composed(s, 'villager_v2');
+      assert.ok(Number.isInteger(per) && per >= 1, `a villager is ${per} to the pixel, ${at}`);
+      near(d.x + (1 + 4) * per, sprite.width / 2, `the villager's head across, ${at}`);
+      near(d.y + 5 * per, sprite.height / 2, `the villager's head down, ${at}`);
+      // Much the size of its box: never under three quarters of it, never over by more than a third.
+      const room = { small: 12, normal: 16, large: dpr > 1 ? 24 : 32, xlarge: dpr > 1 ? 32 : 48 }[size] * s.icons.density();
+      assert.ok(10 * per >= 0.75 * room && 10 * per <= (4 / 3) * room, `the villager's head is ${10 * per} in a box of ${room}, ${at}`);
+      // A fox that fits its box whole keeps its ears, over a head a pixel low; one that does not is by its head.
+      const fox = await composed(s, 'fox');
+      near(fox.at.y + (8 * fox.per <= room ? 4 : 5) * fox.per, sprite.height / 2, `a fox, ${at}`);
+      // Half of a shulker is lid, and it is drawn by the whole of it.
+      const shulker = await composed(s, 'shulker');
+      near(shulker.at.y + 8 * shulker.per, sprite.height / 2, `a shulker by the whole of it, ${at}`);
+    }
+  }
+});
+
+test('with no plate to hide what spills, the whole of a face is in its box and its head as near the middle as that leaves', async () => {
+  for (const dpr of [1, 2]) {
+    for (const size of SIZES) {
+      const s = await stage({ dpr, look: { style: 'large', size }, boxes: HEADS });
+      const room = { small: 24, normal: 32, large: 48, xlarge: 64 }[size] * s.icons.density();
+      s.icons.mob('villager_v2', '#f00');
+      await s.settle();
+      const sprite = s.icons.mob('villager_v2', '#f00');
+      // Composed on a canvas of its own first, and that is where the picture is placed.
+      const placed = s.made.flatMap((canvas) => canvas.getContext('2d').drawn).filter((d) => d.image.width === 11 && !('getContext' in d.image)).at(-1);
+      const edge = (sprite.width - room) / 2;
+      assert.ok(placed.x >= edge - 0.01 && placed.x + placed.w <= sprite.width - edge + 0.01, `across, ${size} at density ${dpr}`);
+      assert.ok(placed.y >= edge - 0.01 && placed.y + placed.h <= sprite.height - edge + 0.01, `down, ${size} at density ${dpr}`);
+    }
+  }
+});
+
+test('a server that says nothing of heads has its faces drawn by the whole picture, as before', async () => {
+  const s = await stage({ look: { style: 'plates', size: 'normal' } });
+  const { sprite, at: d } = await composed(s, 'villager_v2');
+  near(d.x + d.w / 2, sprite.width / 2, 'across');
+  near(d.y + d.h / 2, sprite.height / 2, 'down');
+  near(d.w, 16, 'stretched to its box');
+});
+
 // --- the middle of the map that can be seen ---------------------------------
 
 const BOX = { left: 0, top: 0, right: 1000, bottom: 600 };
