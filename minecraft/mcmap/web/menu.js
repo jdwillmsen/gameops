@@ -78,6 +78,8 @@
     3: () => dimension(2),
     s: () => app.search && app.search.jump('spawn'),
     m: () => app.search && app.search.jump('me'),
+    // The next group of markers, with its members listed to choose from.
+    n: () => (app.groups && app.groups.next && app.groups.next()) || tell('Nothing on the map is grouped just now.'),
     '+': () => map.zoomIn(),
     '=': () => map.zoomIn(),
     '-': () => map.zoomOut(),
