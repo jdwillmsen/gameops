@@ -599,7 +599,11 @@ func (mansion) Exact() bool                 { return false }
 func (mansion) Certain() bool               { return false }
 func (mansion) Allows(biome uint32) bool    { return mansionBiomes[biome] }
 func (mansion) Founded() bool               { return false }
-func (mansion) Traits() Traits              { return Traits{Quiet: true} }
+
+// A site is offered where a map points or a finished chunk shows a dark
+// forest, and nowhere else: of the sites in country not generated the
+// biome will allow one in twenty.
+func (mansion) Traits() Traits { return Traits{Quiet: true, FinishedOnly: true} }
 
 func (mansion) Sites(seed uint32, area Area, limit int) ([]Site, int) {
 	return mansionSpread.sites(seed, area, limit, nil)

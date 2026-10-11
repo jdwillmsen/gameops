@@ -42,13 +42,14 @@ func (c *contents) mapRecord(v []byte) {
 		return
 	}
 	var (
-		dim   int64
-		marks []byte
+		dim    int64
+		marks  []byte
+		hasDim bool
 	)
 	if _, err := fieldsAt(v, func(field []byte, tag byte, payload []byte) {
 		switch string(field) {
 		case "dimension":
-			dim, _ = wholeOf(tag, payload)
+			dim, hasDim = wholeOf(tag, payload)
 		case "decorations":
 			if tag == tagList {
 				marks = payload
@@ -62,7 +63,15 @@ func (c *contents) mapRecord(v []byte) {
 	// picture is skipped over by its length, so such a map costs the dozen
 	// tags it has.
 	d := chunks.Dimension(dim)
-	if marks == nil || dim < 0 || dim > int64(chunks.End) {
+	if marks == nil {
+		return
+	}
+	// A map that does not say which dimension it is of is not taken for
+	// the overworld's: where it points is then somewhere in none.
+	if !hasDim || dim < 0 || dim > int64(chunks.End) {
+		if len(marks) >= 5 && marks[0] == tagCompound {
+			c.stats.Skipped++
+		}
 		return
 	}
 	if _, err := eachCompound(tagList, marks, func(mark []byte) error {

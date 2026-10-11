@@ -181,7 +181,10 @@ func TestAssemble_KeepsApartWhatIsNotOneStructure(t *testing.T) {
 		"the next outpost":  {[]piece{{kind: Outpost, box: Box{0, 64, 0, 15, 85, 15}}, {kind: Outpost, box: Box{65, 64, 0, 79, 85, 15}}}, 2},
 		// Fortress rooms are recorded with ground between them.
 		"fortress rooms near": {[]piece{{kind: Fortress, box: Box{0, 48, 0, 4, 57, 4}}, {kind: Fortress, box: Box{37, 48, 0, 41, 57, 4}}}, 1},
-		"fortress rooms far":  {[]piece{{kind: Fortress, box: Box{0, 48, 0, 4, 57, 4}}, {kind: Fortress, box: Box{38, 48, 0, 42, 57, 4}}}, 2},
+		// Parts of one fortress with the country between them not
+		// generated are one fortress, as far as its corridors run.
+		"fortress parts apart": {[]piece{{kind: Fortress, box: Box{0, 48, 0, 4, 57, 4}}, {kind: Fortress, box: Box{5 + fortressJoin, 48, 0, 9 + fortressJoin, 57, 4}}}, 1},
+		"fortress rooms far":   {[]piece{{kind: Fortress, box: Box{0, 48, 0, 4, 57, 4}}, {kind: Fortress, box: Box{6 + fortressJoin, 48, 0, 10 + fortressJoin, 57, 4}}}, 2},
 		// Joined through a third that reaches both.
 		"a chain": {[]piece{{kind: Fortress, box: Box{0, 48, 0, 4, 57, 4}}, {kind: Fortress, box: Box{60, 48, 0, 64, 57, 4}}, {kind: Fortress, box: Box{30, 48, 0, 34, 57, 4}}}, 1},
 		// Diagonal neighbours touch at a corner.

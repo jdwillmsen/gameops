@@ -556,12 +556,28 @@ func TestDetail_AStructureTheWorldRecordedIsNotAlsoFoundByItsBlocks(t *testing.T
 		{Kind: RuinedPortal, Box: Box{100 + 21 + recordedPad, 64, 100, 100 + 21 + recordedPad, 64, 100}, Evidence: 1},
 	}
 	recorded := []Structure{{Kind: RuinedPortal, Box: Box{90, 60, 90, 120, 80, 110}, Areas: 2}}
-	got := unrecorded(slices.Clone(found), recorded)
-	if len(got) != 2 || got[0].Kind != Bastion || got[1].MinX != found[2].MinX {
-		t.Errorf("kept %+v, want the bastion, which is another kind, and the portal past the recorded one's reach", got)
+	got, err := unrecorded(t.Context(), slices.Clone(found), recorded)
+	if err != nil || len(got) != 2 || got[0].Kind != Bastion || got[1].MinX != found[2].MinX {
+		t.Errorf("kept %+v (%v), want the bastion, which is another kind, and the portal past the recorded one's reach", got, err)
 	}
-	if got := unrecorded(slices.Clone(found), nil); len(got) != 3 {
+	if got, _ := unrecorded(t.Context(), slices.Clone(found), nil); len(got) != 3 {
 		t.Errorf("with nothing recorded, kept %d of 3", len(got))
+	}
+	// A temple's traps are found some way from the box the game recorded
+	// for it, and are that temple still: one structure is one mark.
+	temple := []Structure{{Kind: JungleTemple, Box: Box{0, 64, 0, 11, 73, 14}, Areas: 1}}
+	for gap, kept := range map[int32]int{17: 0, 60: 0, recordedPad + 1: 1} {
+		trap := []Structure{{Kind: JungleTemple, Box: Box{11 + gap, 60, 4, 11 + gap, 60, 4}, Evidence: 1}}
+		if got, _ := unrecorded(t.Context(), trap, temple); len(got) != kept {
+			t.Errorf("a trap %d blocks from a recorded temple: %d kept as a temple of its own, want %d", gap, len(got), kept)
+		}
+	}
+	// A hostile world can make this every found one against every
+	// recorded one; it stops when its time does.
+	stopped, cancel := context.WithCancel(t.Context())
+	cancel()
+	if got, err := unrecorded(stopped, slices.Clone(found), recorded); err == nil || got != nil {
+		t.Errorf("with no time left: %+v, %v", got, err)
 	}
 }
 

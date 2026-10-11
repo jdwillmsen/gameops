@@ -337,7 +337,9 @@ func TestRuinedPortalsHaveARuleInEachDimension(t *testing.T) {
 		t.Errorf("%d findings: %v", check.Total, check.Findings)
 	}
 	portals := slices.DeleteFunc(slices.Clone(predicted[chunks.Overworld]), func(p Prediction) bool { return p.Kind != RuinedPortal })
-	if len(portals) != 1 || !portals[0].Generated || portals[0].Candidate {
+	// And it is said to be a site with nothing found at it, which is not
+	// the same as a portal being there.
+	if len(portals) != 1 || !portals[0].Generated || !portals[0].Vacant || portals[0].Candidate {
 		t.Errorf("overworld portals predicted %+v, want the one finished site with no chest", portals)
 	}
 	if got := predicted[chunks.Nether]; len(got) != 0 {
@@ -550,6 +552,11 @@ func TestARuleIsCheckedAgainstWhereTheGamesOwnMapsPoint(t *testing.T) {
 	if len(mapped) != 1 || siteOf(mapped[0]) != ahead || mapped[0].Candidate {
 		t.Errorf("mapped %+v, want the one the current seed will build, and as more than a possible site", mapped)
 	}
+	// Nothing else is offered: of the sites in country not generated the
+	// biome will allow few, and three maps do not make a hundred marks.
+	if len(offered) != 1 {
+		t.Errorf("%d mansion sites offered, want the mapped one alone: %+v", len(offered), offered)
+	}
 	// With no map, nothing says the rule is right, and nothing is offered.
 	if k, offered := run(nil); k.State != SeedUnverified || len(offered) != 0 {
 		t.Errorf("with no maps: %+v and %d offered", k, len(offered))
@@ -562,5 +569,52 @@ func TestARuleIsCheckedAgainstWhereTheGamesOwnMapsPoint(t *testing.T) {
 	}
 	if k, offered := run(wrong); k.State != SeedRefuted || k.Disagree != 3 || len(offered) != 0 {
 		t.Errorf("with maps the rule does not explain: %+v and %d offered", k, len(offered))
+	}
+}
+
+// A site beside a structure of its kind that the world already holds is
+// that structure: a village's box moves off its site with its beds, and a
+// second mark beside the first says there are two.
+func TestASiteBesideAKnownStructureOfItsKindIsNotOfferedAsAnother(t *testing.T) {
+	e := newExtent(chunks.Pos{})
+	e.single = true
+	recorded := believed(e, 7, 0, 0, 0)
+	sites, _ := villageSite{}.Sites(7, Area{-100, -100, 100, 100}, 100)
+	var on []Site
+	for _, site := range sites[:3] {
+		e.add(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		e.finish(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		recorded = append(recorded, Structure{Kind: Village, Box: villageAt(site)})
+		on = append(on, site)
+	}
+	// Two more villages, grown away from their sites: one just past what
+	// the rule calls on the site and near enough to be the same village,
+	// one too far off to be.
+	beside, apart := sites[3], sites[4]
+	for site, gap := range map[Site]int32{beside: villageReach + 8, apart: knownNear + 8} {
+		e.add(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		e.finish(chunks.Pos{X: site.ChunkX, Z: site.ChunkZ})
+		x, z := site.ChunkX*16+8+gap, site.ChunkZ*16+8
+		recorded = append(recorded, Structure{Kind: Village, Box: Box{x, 60, z - 12, x + 30, 84, z + 12}})
+	}
+	_, predicted, _ := compare([]Predictor{monument{}, villageSite{}}, []worldSeed{{whole: 7}}, 0, MaxPerLayer,
+		map[chunks.Dimension][]Structure{chunks.Overworld: recorded}, nil, map[chunks.Dimension]*extent{chunks.Overworld: e},
+		func(chunks.Dimension, int32, int32) (uint32, bool) { return biomePlains, true })
+	offered := map[Site]Prediction{}
+	for _, p := range predicted[chunks.Overworld] {
+		if p.Kind == Village {
+			offered[siteOf(p)] = p
+		}
+	}
+	if p, there := offered[beside]; there {
+		t.Errorf("a site %d blocks from a village the world holds is offered as another: %+v", villageReach+8, p)
+	}
+	if p, there := offered[apart]; !there || !p.Generated || !p.Vacant {
+		t.Errorf("a site %d blocks from the nearest village = %+v (offered %v), want a site with nothing found", knownNear+8, p, there)
+	}
+	for _, site := range on {
+		if _, there := offered[site]; there {
+			t.Errorf("a site with its village on it is offered: %+v", site)
+		}
 	}
 }

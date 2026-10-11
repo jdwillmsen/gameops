@@ -136,6 +136,10 @@ const (
 	// four times in nine, the rest being players' own.
 	foundedShare = 5
 	maxFindings  = 50
+	// knownNear is how near a site may be to a structure of its kind the
+	// world already holds, in blocks across the map, and be taken for
+	// that structure and not offered beside it.
+	knownNear = 48
 	// villageTimeout is how long the village records may take to read.
 	// They are under one prefix and take milliseconds; this is what keeps
 	// a world that has made them enormous from holding up the cycle.
@@ -172,6 +176,12 @@ type Prediction struct {
 	// chunk is not generated yet: the generator will try here, and
 	// nothing can say what it will find.
 	Candidate bool `json:"candidate,omitempty"`
+	// Vacant is set with Generated for a kind that can stand where the
+	// save shows no sign of it: one known by loot that is taken, or by a
+	// record the game makes late. The site is where the rule puts one and
+	// nothing is found there now, which is one that has been emptied, or
+	// one that was never built, and nothing says which.
+	Vacant bool `json:"vacant,omitempty"`
 	// Mapped is set where one of the world's own explorer maps points at
 	// the site, in country not generated yet: the game has worked out
 	// that one will be built here, which is more than a possible site.
@@ -261,8 +271,10 @@ type Survey struct {
 	HasStructureSeed bool
 	// Seeds is how many seeds the world's chunks say they were generated
 	// from, or nought for a world that does not say; Seedless is the
-	// chunks of such a world that name none.
-	Seeds, Seedless int
+	// chunks of such a world that name none; SeedsOver is the dictionary
+	// entries naming a seed past the most that are told apart, whose
+	// chunks are among the seedless.
+	Seeds, Seedless, SeedsOver int
 	// Areas is how many recorded areas were read; the rest were left out.
 	Areas, Malformed, Unknown, OverLimit int
 	// Villages is what the village records came to.
@@ -301,6 +313,10 @@ type Surveyor struct {
 	// the biome decides is only ever a candidate, and is not shown at all
 	// in terrain that is generated.
 	Biomes BiomeAt
+	// Withheld is the kinds the owner keeps off the map altogether. None
+	// of one is recorded, found or predicted, so nothing downstream of a
+	// survey has one to give away.
+	Withheld []Kind
 	// VillageTimeout bounds the read of the village records within a
 	// survey; zero means ten seconds. DetailTimeout bounds setting what
 	// the world holds inside its structures, the same way.
@@ -422,9 +438,19 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 		}
 	}
 
+	withheld := map[Kind]bool{}
+	for _, kind := range s.Withheld {
+		withheld[kind] = true
+	}
+	if book != nil && book.over > 0 {
+		survey.SeedsOver = book.over
+		s.Logger.Warn("the world's chunks name more seeds than are told apart; the chunks of the rest are taken to name none, and no site is worked out for them", "kept", len(book.seeds), "entries_over", book.over)
+	}
+
 	pieces := map[chunks.Dimension][]piece{}
 	extents := map[chunks.Dimension]*extent{}
 	held := newContents()
+	held.withheld = withheld
 	it := db.NewIterator(nil, nil)
 	defer it.Release()
 	for n := 0; it.Next(); n++ {
@@ -510,8 +536,9 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 
 	recorded := map[chunks.Dimension][]Structure{}
 	for _, d := range chunks.Dimensions {
-		recorded[d] = assemble(pieces[d])
+		recorded[d] = assemble(slices.DeleteFunc(pieces[d], func(p piece) bool { return withheld[p.kind] }))
 	}
+	predictors := slices.DeleteFunc(slices.Clone(s.Predictors), func(p Predictor) bool { return withheld[p.Kind()] })
 	// The level is read before the villages: it is what says whether the
 	// villages of the survey before are this world's to fall back on.
 	seeds, current, searched := s.seeds(worldDir, &survey, book)
@@ -541,14 +568,14 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 
 	predicted := map[chunks.Dimension][]Prediction{}
 	more := map[chunks.Dimension]int{}
-	if len(seeds) > 0 && len(s.Predictors) > 0 {
+	if len(seeds) > 0 && len(predictors) > 0 {
 		// A village is recorded apart from the rest and is checked like
 		// them: every one read, whatever the layer goes on to keep.
 		known := map[chunks.Dimension][]Structure{}
 		for _, d := range chunks.Dimensions {
 			known[d] = append(append(slices.Clip(recorded[d]), survey.villages[d]...), found[d]...)
 		}
-		survey.Check, predicted, more = compare(s.Predictors, seeds, current, layerLimit, known, held.targets, extents, s.Biomes)
+		survey.Check, predicted, more = compare(predictors, seeds, current, layerLimit, known, held.targets, extents, s.Biomes)
 		// Only a seed that was this service's own to choose is searched
 		// past: the world's word for its chunks is not.
 		if searched {
@@ -592,9 +619,12 @@ func (s *Surveyor) locate(ctx context.Context, held *contents, recorded map[chun
 	out := map[chunks.Dimension][]Structure{}
 	for _, d := range chunks.Dimensions {
 		found, err := held.locate(within, d)
+		if err == nil {
+			found, err = unrecorded(within, found, recorded[d])
+		}
 		switch {
 		case err == nil:
-			out[d] = unrecorded(found, recorded[d])
+			out[d] = found
 			continue
 		case ctx.Err() != nil:
 			// The survey itself was stopped, which is its failure to report.
@@ -609,24 +639,39 @@ func (s *Surveyor) locate(ctx context.Context, held *contents, recorded map[chun
 
 // recordedPad is how far outside a recorded structure's box, in blocks
 // across the map, what a structure of its kind was found by may lie and
-// still be that structure: an igloo's basement runs out from under it.
-const recordedPad = 16
+// still be that structure. An igloo's basement runs out from under it, a
+// temple's traps are found beside the box the game recorded for it, and
+// the next structure of any of these kinds is hundreds of blocks off: the
+// FWB world's nearest pair of the two is 17 blocks apart and its next 600.
+const recordedPad = 64
+
+// near reports whether two boxes are within pad blocks of each other
+// across the map.
+func (b Box) near(o Box, pad int32) bool {
+	return b.MinX <= o.MaxX+pad && b.MaxX >= o.MinX-pad && b.MinZ <= o.MaxZ+pad && b.MaxZ >= o.MinZ-pad
+}
 
 // unrecorded is the found structures that no recorded one of the same kind
-// is.
-func unrecorded(found, recorded []Structure) []Structure {
+// is. A hostile world can make it every found one against every recorded
+// one, so it looks at the time it has.
+func unrecorded(ctx context.Context, found, recorded []Structure) ([]Structure, error) {
 	if len(recorded) == 0 {
-		return found
+		return found, nil
 	}
 	byKind := map[Kind][]Box{}
 	for _, r := range recorded {
 		byKind[r.Kind] = append(byKind[r.Kind], r.Box)
 	}
-	return slices.DeleteFunc(found, func(f Structure) bool {
-		return slices.ContainsFunc(byKind[f.Kind], func(b Box) bool {
-			return f.MinX <= b.MaxX+recordedPad && f.MaxX >= b.MinX-recordedPad && f.MinZ <= b.MaxZ+recordedPad && f.MaxZ >= b.MinZ-recordedPad
-		})
-	})
+	kept := found[:0:0]
+	for i, f := range found {
+		if i%256 == 0 && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !slices.ContainsFunc(byKind[f.Kind], func(b Box) bool { return f.Box.near(b, recordedPad) }) {
+			kept = append(kept, f)
+		}
+	}
+	return kept, nil
 }
 
 // detail sets what the world holds inside each structure, within its own
@@ -1077,6 +1122,16 @@ func compare(
 					continue
 				}
 				x, z := p.Centre(site)
+				// A site beside one of the kind the world already holds is
+				// that one: a village's box has moved off its site, a
+				// chamber's spawners stop short of it. Not so for a kind
+				// with a site every few chunks, whose next one is that
+				// near and is known by the very chunk it is in.
+				if _, close := p.(dense); !close {
+					if at := (Box{MinX: x, MinZ: z, MaxX: x, MaxZ: z}); slices.ContainsFunc(own, func(i int) bool { return at.near(recorded[d][i].Box, knownNear) }) {
+						continue
+					}
+				}
 				prediction := Prediction{Kind: p.Kind(), X: x, Z: z}
 				switch {
 				case p.Certain():
@@ -1114,6 +1169,7 @@ func compare(
 					if !p.Founded() && !traits.Quiet {
 						find("%s predicted at %s %d, %d: that chunk is generated and the world recorded none", p.Kind(), d.Name(), x, z)
 					}
+					prediction.Vacant = p.Founded() || traits.Quiet
 				}
 				res.found = append(res.found, prediction)
 				of = append(of, at)

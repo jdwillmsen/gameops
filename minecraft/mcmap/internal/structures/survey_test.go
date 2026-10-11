@@ -455,7 +455,7 @@ func TestTake_BoundsWhatItKeeps(t *testing.T) {
 	// Ten fortress fragments, too far apart to be one, and outside the
 	// area the fortress rule is checked in.
 	for i := range int32(10) {
-		w.structure(chunks.Nether, fortressByte, Box{-4000 + i*64, 64, -4000, -3995 + i*64, 70, -3995})
+		w.structure(chunks.Nether, fortressByte, Box{-4000 + i*160, 64, -4000, -3995 + i*160, 70, -3995})
 	}
 	dir := w.write()
 
