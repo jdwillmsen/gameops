@@ -342,10 +342,10 @@ func TestLayerPanelKeepsOnlyWhatDiffersAndDrawsOnlyWhatChanged(t *testing.T) {
 	for _, need := range []string{
 		"retain(f.group, f.name, keptOf(f));",
 		"const keptOf = (f) => (plain(f) ? null : {",
-		"? { only: f.only, hidden: [], mode: 'just', just: [...f.just].slice(0, MAX_HIDDEN) }",
-		": { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...(f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {}) });",
+		"? { only: f.only, hidden: [], mode: 'just', just: [...f.just].slice(0, MAX_HIDDEN), ...asked(f) }",
+		": { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...asked(f) });",
 		"if (f.just !== null) return f.just.has(id);",
-		"return !f.hidden.has(id) && (!f.off.has(id) || f.shown.has(id));",
+		"if (f.off.has(id) && !f.shown.has(id)) return false;",
 		"const GRACE_DAYS = 30;",
 		"const MAX_HIDDEN = 200;", "const LIST_CAP = 40;",
 		"const some = row.all ? listed : listed.slice(0, LIST_CAP);",
