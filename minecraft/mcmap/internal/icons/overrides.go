@@ -129,20 +129,3 @@ const (
 	villagerKind      = "villager_v2"
 	villagerUnskilled = "unskilled"
 )
-
-// structureFaces is the mob whose face stands for a kind of structure: the
-// one a player meets there and nowhere else. A kind not listed, or whose
-// mob has no face, keeps the item it has always been drawn as.
-var structureFaces = map[string]string{
-	"fortress":      "blaze",
-	"monument":      "elder_guardian",
-	"outpost":       "pillager",
-	"witch_hut":     "witch",
-	"village":       villagerKind,
-	"trial_chamber": "breeze",
-	"end_city":      "shulker",
-	"bastion":       "piglin_brute",
-	"mansion":       "evocation_illager",
-	"ancient_city":  "warden",
-	"ocean_ruins":   "drowned",
-}

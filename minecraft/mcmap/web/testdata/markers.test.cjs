@@ -205,6 +205,19 @@ test('a server that says nothing of heads has its faces drawn by the whole pictu
   near(d.w, 16, 'stretched to its box');
 });
 
+test('a village wears the mark of its biome where the server has it, and the plains one where not', async () => {
+  const s = await stage({});
+  const key = (of) => s.icons.keyOf('structure', of);
+  assert.equal(key({ kind: 'village' }), 'structure/village');
+  assert.equal(key({ kind: 'village', biome: 'desert' }), 'structure/village_desert');
+  assert.equal(key({ kind: 'village', biome: 'desert_hills' }), 'structure/village_desert');
+  assert.equal(key({ kind: 'village', biome: 'plains' }), 'structure/village');
+  // The stage's server lists no savanna mark.
+  assert.equal(key({ kind: 'village', biome: 'savanna' }), 'structure/village');
+  assert.equal(key({ kind: 'outpost', biome: 'desert' }), 'structure/outpost');
+  assert.equal(key({ kind: 'village', biome: '<img src=x>' }), 'structure/village');
+});
+
 // --- the middle of the map that can be seen ---------------------------------
 
 const BOX = { left: 0, top: 0, right: 1000, bottom: 600 };

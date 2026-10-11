@@ -33,7 +33,7 @@ const (
 	// differently from the same samples: a face chosen otherwise, a kind
 	// of picture added. A volume written under another has its made
 	// pictures served as they are until they have been made again.
-	ArtRevision = 1
+	ArtRevision = 2
 )
 
 // mobLook is a mob type's client definition as far as drawing its face
@@ -218,16 +218,7 @@ func plan(ctx context.Context, lib library, looks map[string]mobLook, items, ter
 			}
 		}
 	}
-	for _, kind := range StructureKinds {
-		item := structureItems[kind]
-		recipe, faced := recipes[faceKey(structureFaces[kind])]
-		if !faced {
-			recipe = Recipe{Flat: item}
-		} else {
-			recipe.Else = item
-		}
-		recipes["structure/"+kind] = recipe
-	}
+	maps.Copy(recipes, structureRecipes(recipes))
 	// A bell is no box: its sides are a bell with air round it, and three
 	// of them drawn as a block are three bells adrift. It is the picture
 	// the game shows for one in the hand, at two pixels to each of its

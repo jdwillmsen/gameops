@@ -461,12 +461,30 @@
   // a container's kind, a mob's type or a structure's kind. A bed whose
   // colour the world does not say is the red one the game itself falls
   // back to, and a shulker box likewise the undyed one. A villager whose
-  // profession is known is drawn in it.
-  function keyOf(sort, { kind, colour, trapped, profession } = {}) {
+  // profession is known is drawn in it, and a village whose biome is
+  // known as the game marks one there.
+  // The game builds a village in the manner of the biome it stands in,
+  // and has a mark for each of the five: which one a biome's villages
+  // wear, by the biome's id, or '' for the plains one every other does.
+  function villageIn(biome) {
+    const name = str(biome);
+    if (name.startsWith('desert')) return 'desert';
+    if (name.startsWith('savanna')) return 'savanna';
+    if (name === 'ice_plains' || name === 'snowy_plains') return 'snowy';
+    if (name.includes('taiga')) return 'taiga';
+    return '';
+  }
+
+  function keyOf(sort, { kind, colour, trapped, profession, biome } = {}) {
     if (sort === 'waypoint') return WAYPOINT;
     if (sort === 'bed') return `bed/${str(colour) || 'red'}`;
     if (sort === 'mob') return kind === VILLAGER && /^[a-z_]{1,32}$/.test(str(profession)) ? `villager/${profession}` : `mob/${str(kind)}`;
-    if (sort === 'structure') return `structure/${str(kind)}`;
+    if (sort === 'structure') {
+      // Its mark for the biome, where the caller knows the biome and the
+      // server has that mark.
+      const worn = kind === 'village' ? villageIn(biome) : '';
+      return worn !== '' && listing.pictures.keys.has(`structure/village_${worn}`) ? `structure/village_${worn}` : `structure/${str(kind)}`;
+    }
     if (sort !== 'container') return '';
     if (kind === 'shulker') return `shulker/${str(colour) || 'undyed'}`;
     return `container/${kind === 'chest' && trapped === true ? 'trapped_chest' : str(kind)}`;

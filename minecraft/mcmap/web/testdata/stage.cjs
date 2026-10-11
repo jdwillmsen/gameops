@@ -156,7 +156,7 @@ function leaflet(win) {
 }
 
 // The pictures a server would list, and how large each is.
-const SIDES = { 'face/villager_v2': [11, 11], 'face/fox': [8, 8], 'face/shulker': [16, 16], 'face/cow': [8, 8], 'face/zombie': [8, 8], 'container/chest': [16, 16], 'block/chest': [32, 32], 'structure/village': [16, 16], 'marker/waypoint': [16, 16] };
+const SIDES = { 'face/villager_v2': [11, 11], 'face/fox': [8, 8], 'face/shulker': [16, 16], 'face/cow': [8, 8], 'face/zombie': [8, 8], 'container/chest': [16, 16], 'block/chest': [32, 32], 'structure/village': [8, 8], 'structure/village_desert': [8, 8], 'marker/waypoint': [16, 16] };
 
 // A page with the scripts run on it. dpr is the screen's density, heads
 // the players the server has a head for, and boxes what getBoundingClientRect

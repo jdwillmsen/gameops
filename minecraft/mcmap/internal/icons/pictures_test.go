@@ -113,8 +113,14 @@ func markerFiles(t testing.TB) map[string][]byte {
 		files["resource_pack/textures/entity/shulker/shulker_"+legacyColour(colour)+".png"] = modelSheet(t, 1)
 	}
 	files["resource_pack/textures/entity/shulker/shulker_undyed.png"] = modelSheet(t, 1)
-	for _, path := range structureItems {
-		files["resource_pack/"+path+".png"] = picture(t, 16, 16, yellow)
+	for kind, art := range structureArts {
+		files["resource_pack/"+art.item+".png"] = picture(t, 16, 16, yellow)
+		if art.icon != "" {
+			files["resource_pack/"+art.icon+".png"] = picture(t, 8, 8, green)
+		}
+		for _, variant := range art.variants {
+			files["resource_pack/textures/map/"+kind+"_"+variant+".png"] = picture(t, 8, 8, blue)
+		}
 	}
 	// A bell is drawn from its item, which must look like something.
 	files["resource_pack/textures/items/villagebell.png"] = asPNG(t, painted(16, 16))
@@ -147,6 +153,9 @@ func everyPicture() []string {
 	}
 	for _, kind := range StructureKinds {
 		keys = append(keys, "structure/"+kind)
+		for _, variant := range structureArts[kind].variants {
+			keys = append(keys, "structure/"+kind+"_"+variant)
+		}
 	}
 	keys = append(keys, blockKeys()...)
 	slices.Sort(keys)
@@ -204,7 +213,8 @@ func TestFetchAsksForOneListingOnly(t *testing.T) {
 	// terrain atlas and each texture a made picture is made from: one
 	// request each, and no model, since the listing names none.
 	plain := len(pictureKeys())
-	made := len(structureItems) + 13 + 17 + 16
+	// A village's mark and its four by biome are fetched beside its item.
+	made := len(structureArts) + 5 + 13 + 17 + 16
 	if want := 1 + 10 + 3 + plain + 1 + 1 + made; listings != 1 || files != want {
 		t.Errorf("%d listing requests and %d file requests, want 1 and %d", listings, files, want)
 	}
@@ -372,5 +382,40 @@ func TestAPictureOrTheNamesTheSourceFailsOnDoesNotCostTheMobIcons(t *testing.T) 
 				t.Errorf("%s is unreached and not missing", other)
 			}
 		}
+	}
+}
+
+// A village is the game's own mark for one, and a kind with none is its
+// mob's face or its item: which of the three is one line of the table.
+func TestAStructureIsDrawnAsTheFirstOfItsMarkItsMobsFaceAndItsItem(t *testing.T) {
+	face := Recipe{W: 8, H: 8, Main: [4]int{0, 0, 8, 8}, Layers: []Layer{{Texture: "textures/entity/made_up", Src: [4]int{0, 0, 8, 8}, Dst: [4]int{0, 0, 8, 8}}}}
+	got := structureRecipes(map[string]Recipe{"face/blaze": face, "face/villager_v2": face})
+	if r := got["structure/village"]; r.Flat != "textures/map/village_plains" || r.Else != "textures/items/villagebell" || len(r.Layers) != 0 {
+		t.Errorf("a village is drawn by %+v, not as the map's own mark with its bell to fall back on", r)
+	}
+	for _, biome := range []string{"desert", "savanna", "snowy", "taiga"} {
+		if r := got["structure/village_"+biome]; r.Flat != "textures/map/village_"+biome || r.Else != "textures/map/village_plains" {
+			t.Errorf("a %s village is drawn by %+v", biome, r)
+		}
+	}
+	if r := got["structure/fortress"]; len(r.Layers) != 1 || r.Else != "textures/items/netherbrick" {
+		t.Errorf("a fortress is drawn by %+v, not as its mob's face with its item to fall back on", r)
+	}
+	// No face was made for a pillager, and a stronghold has no mob.
+	for kind, item := range map[string]string{"outpost": "textures/items/crossbow_standby", "stronghold": "textures/items/ender_eye"} {
+		if r := got["structure/"+kind]; r.Flat != item || r.Else != "" {
+			t.Errorf("%s is drawn by %+v, not as its item", kind, r)
+		}
+	}
+	for _, kind := range StructureKinds {
+		if _, listed := structureArts[kind]; !listed {
+			t.Errorf("%s has no line in the table", kind)
+		}
+		if err := got["structure/"+kind].check(); err != nil {
+			t.Errorf("%s: %v", kind, err)
+		}
+	}
+	if len(got) != len(StructureKinds)+4 {
+		t.Errorf("%d recipes for %d kinds and a village's four other marks", len(got), len(StructureKinds))
 	}
 }

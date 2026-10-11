@@ -89,30 +89,32 @@ func TestHeads_AreOfThePicturesThatAreFaces(t *testing.T) {
 	m.set(Set{
 		Pictures: map[string][]byte{
 			"face/" + villagerKind: blank(t, 11),
-			// The village drawn as its mob's face, and the outpost as the item standing in for one.
-			"structure/village": blank(t, 11),
-			"structure/outpost": blank(t, 16),
-			"face/pillager":     blank(t, 11),
-			"container/chest":   blank(t, 16),
-			"face/damaged":      []byte("not a picture"),
+			// One structure drawn as its mob's face, and one as the item standing in for a face.
+			"structure/outpost":   blank(t, 11),
+			"structure/witch_hut": blank(t, 16),
+			"face/pillager":       blank(t, 11),
+			"face/witch":          blank(t, 11),
+			"container/chest":     blank(t, 16),
+			"face/damaged":        []byte("not a picture"),
 		},
 		Recipes: map[string]Recipe{
 			"face/" + villagerKind: face,
-			"structure/village":    stood,
 			"structure/outpost":    stood,
+			"structure/witch_hut":  stood,
 			"face/pillager":        face,
+			"face/witch":           face,
 			"face/damaged":         face,
 			"face/unmade":          face,
 		},
 	})
 	got := m.Heads()
 	want := [4]int{1, 0, 8, 10}
-	for _, key := range []string{"face/" + villagerKind, "structure/village", "face/pillager"} {
+	for _, key := range []string{"face/" + villagerKind, "structure/outpost", "face/pillager", "face/witch"} {
 		if got[key] != want {
 			t.Errorf("%s: head %v, want %v", key, got[key], want)
 		}
 	}
-	if len(got) != 3 {
+	if len(got) != 4 {
 		t.Errorf("heads of %v; an item, a picture standing in, one unmade and one unreadable have none", got)
 	}
 }
