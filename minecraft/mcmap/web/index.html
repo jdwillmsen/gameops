@@ -146,7 +146,9 @@
       <dt><kbd>V</kbd></dt><dd>Saved views; in the list, <kbd>1</kbd> to <kbd>9</kbd> switches to that view</dd>
       <dt><kbd>S</kbd></dt><dd>Go to the world spawn</dd>
       <dt><kbd>M</kbd></dt><dd>Go to where I am, while I am online</dd>
-      <dt><kbd>+</kbd> <kbd>-</kbd></dt><dd>Zoom in and out</dd>
+      <dt><kbd>+</kbd> <kbd>-</kbd></dt><dd>Zoom in and out, a level at a time</dd>
+      <dt><kbd>W</kbd></dt><dd>Zoom out to the whole world</dd>
+      <dt><kbd>B</kbd></dt><dd>Zoom in to block detail: 64 pixels to a block</dd>
       <dt><kbd>?</kbd></dt><dd>This list</dd>
     </dl>
     <p class="note">Shortcuts do nothing while you are typing in a box. Esc always works.</p>
@@ -328,6 +330,34 @@
       <output id="coords" aria-live="off">X —, Z —</output>
       <output id="biome" class="biome-at" aria-live="off" hidden></output>
     </div>
+    <button id="zoom-open" class="zoom-open" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="zoom-pop" aria-label="Zoom. Open the zoom controls">
+      <span class="zoom-word"><span class="zoom-long">Zoom</span><span class="zoom-short">Z</span></span><output id="zoom-level" aria-live="off"></output><span class="zoom-detail"><span class="zoom-dot" aria-hidden="true">·</span><output id="zoom-scale" aria-live="off"></output><span class="zoom-wide"><span class="zoom-dot" aria-hidden="true">·</span><output id="zoom-across" aria-live="off"></output></span></span>
+    </button>
+    <div id="zoom-pop" class="zoom-pop" role="dialog" aria-modal="false" aria-labelledby="zoom-title" hidden>
+      <div class="zoom-head">
+        <h2 id="zoom-title">Zoom</h2>
+        <button id="zoom-close" type="button">Close</button>
+      </div>
+      <p id="zoom-says" class="zoom-says"></p>
+      <div class="zoom-slider">
+        <button id="zoom-out" type="button" aria-label="Zoom out one level">−</button>
+        <input id="zoom-range" type="range" min="-6" max="7" step="0.01" aria-label="Zoom level">
+        <button id="zoom-in" type="button" aria-label="Zoom in one level">+</button>
+      </div>
+      <div id="zoom-stops" class="zoom-stops" role="group" aria-label="Zoom to">
+        <button type="button" data-stop="world">Whole world</button>
+        <button type="button" data-stop="region">Region</button>
+        <button type="button" data-stop="chunk">Chunk</button>
+        <button type="button" data-stop="block">Block detail</button>
+        <button type="button" data-stop="actual">100%: 1 block = 1 px</button>
+      </div>
+      <form id="zoom-form" class="zoom-form" autocomplete="off">
+        <label for="zoom-field">Type a zoom or scale</label>
+        <input id="zoom-field" name="zoom" type="text" inputmode="decimal" maxlength="40" placeholder="3.5, 200%, 8 px">
+        <button type="submit">Go</button>
+      </form>
+      <p id="zoom-field-said" class="note" role="status"></p>
+    </div>
     <button id="currency-open" class="currency-open compact-only" type="button" aria-expanded="false" aria-controls="currency" aria-label="How current the map is"><i class="pulse" aria-hidden="true"></i><span id="currency-brief"></span></button>
     <div id="currency" class="currency" role="group" aria-label="How current the map is">
       <span id="live" class="stat live" hidden><span class="stat-label">Live positions</span> <output id="live-age" class="slot" aria-live="off"></output> <span id="live-more" class="then"></span></span>
@@ -336,6 +366,7 @@
   </footer>
   <script src="lib/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
+  <script src="zoom.js"></script>
   <script src="duration.js"></script>
   <script src="names.js"></script>
   <script src="icons.js"></script>

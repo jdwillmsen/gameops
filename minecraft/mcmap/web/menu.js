@@ -81,6 +81,8 @@
     '+': () => map.zoomIn(),
     '=': () => map.zoomIn(),
     '-': () => map.zoomOut(),
+    w: () => app.zoom && app.zoom.world(),
+    b: () => app.zoom && app.zoom.block(),
   };
 
   function show() {
