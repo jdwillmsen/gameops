@@ -140,6 +140,23 @@ test('a stretched canvas is drawn again each frame, and once more at rest when t
   assert.equal(renderer._steady, 1);
 });
 
+test('through a pinch the canvas is drawn for each step as it is taken, by how far the map has zoomed', async () => {
+  const s = await stage({});
+  const renderer = s.L.canvas({});
+  s.icons.steadies(renderer);
+  for (const zoom of [0.3, 0.9, 1.6, -0.7]) {
+    s.map.zoom = zoom;
+    const before = renderer.redraws;
+    s.map.fire('zoom');
+    near(renderer._steady, 1 / 2 ** zoom, `at zoom ${zoom}`);
+    assert.equal(renderer.redraws, before + 1, 'in the step, not a frame after it');
+  }
+  s.map.zoom = 1;
+  renderer._zoom = 1;
+  s.map.fire('zoomend');
+  assert.equal(renderer._steady, 1);
+});
+
 // --- a face on its plate ------------------------------------------------------
 
 // The villager's picture as the server makes it: a head 8 by 10 with a row

@@ -639,11 +639,15 @@
     }
   }
 
-  // How far a canvas is stretched now, which only the browser knows part
-  // way through an animation it is running.
-  function stretch(canvas) {
+  // How far a canvas is stretched now. Part way through an animation the
+  // browser is running only the browser knows. Through a pinch nothing
+  // is animated: the canvas is stretched by as much as the map's zoom
+  // has left the one it was drawn at, which is known before the canvas
+  // has been told. _zoom is a Leaflet internal, like those below.
+  function stretch(renderer) {
+    if (!app.map._animatingZoom) return Number.isFinite(renderer._zoom) ? app.map.getZoomScale(app.map.getZoom(), renderer._zoom) : 1;
     if (typeof DOMMatrixReadOnly !== 'function') return 1;
-    const said = getComputedStyle(canvas).transform;
+    const said = getComputedStyle(renderer._container).transform;
     const a = said && said !== 'none' ? new DOMMatrixReadOnly(said).a : 1;
     return Number.isFinite(a) && a > 0 ? a : 1;
   }
@@ -655,7 +659,7 @@
     let stretched = false;
     for (const renderer of steadied) {
       if (!renderer._map || !renderer._container) continue;
-      const by = stretch(renderer._container);
+      const by = stretch(renderer);
       // Within a thousandth is at rest: the browser's arithmetic is not exact.
       const k = Math.abs(by - 1) < 0.001 ? 1 : 1 / by;
       if (k !== 1) stretched = true;
@@ -675,8 +679,15 @@
   const steadyFrom = () => {
     if (steadying === 0 && steadied.size > 0) steadying = requestAnimationFrame(steadyAll);
   };
-  // zoomanim starts an animated zoom and zoom is every step of a pinch.
-  app.map.on('zoomanim zoom', steadyFrom);
+  // zoomanim starts an animated zoom, which is followed frame by frame.
+  // zoom is every step of a pinch, and each is drawn for as it is taken,
+  // so that the canvas is never a frame behind the fingers.
+  app.map.on('zoomanim', steadyFrom);
+  app.map.on('zoom', () => {
+    if (steadied.size === 0 || app.map._animatingZoom) return;
+    cancelAnimationFrame(steadying);
+    steadyAll();
+  });
   // The end of a zoom draws every canvas afresh, unstretched, before the
   // next frame would have said so.
   app.map.on('zoomend', () => {
