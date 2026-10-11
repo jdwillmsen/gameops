@@ -283,6 +283,8 @@ const cow = (x, z) => ({ i: '50', t: 'cow', x, y: 64, z });
 // A page following one entity, which is in the frame already drawn.
 async function following(key, options = {}) {
   const s = await stage(options);
+  // Every frame of a follow check comes through the pipeline, as it does in service.
+  s.send = (world) => s.sample(world);
   await s.send({ players: [steve(10, 20)], mobs: [cow(-30, 5)] });
   assert.ok(s.app.inspect.open({ kind: key === 'p:1' ? 'player' : 'mob', id: key.slice(2), type: 'cow', name: key === 'p:1' ? 'Steve' : '', x: 0, y: 64, z: 0 }), 'the card opens');
   s.doc.getElementById('inspect-follow').click();
@@ -366,6 +368,133 @@ test('a frame that comes while the canvas is of another zoom waits for the zoom 
   s.map.fire('zoomend');
   await s.settle();
   assert.deepEqual(marker().getLatLng(), { lat: 90, lng: 90 }, 'and is once the zoom is over');
+});
+
+const marks = (s) => [...s.map.layers].flatMap((layer) => (layer.getLayers ? layer.getLayers() : []));
+
+// --- following through what the pipeline does to a mob --------------------------
+
+// A herd round a player, and one mob of it that is followed.
+const herdOf = (n) => Array.from({ length: n }, (_, i) => ({ i: String(1000 + i), t: i % 3 ? 'zombie' : 'villager_v2', x: (i % 20) * 6 - 60, y: 64, z: Math.floor(i / 20) * 6 - 30 }));
+const followed = (x, z) => ({ i: '77', t: 'zombie', x, y: 64, z });
+async function followingInAHerd(options = {}) {
+  const s = await stage({ heads: { steve: 'h1' }, ...options });
+  const world = (x, z, player = steve(0, 0)) => ({ players: [player], mobs: [...herdOf(120), followed(x, z)] });
+  await s.sample(world(5, 5));
+  assert.ok(s.app.inspect.open({ kind: 'mob', id: '77', type: 'zombie', x: 5, y: 64, z: 5 }));
+  s.doc.getElementById('inspect-follow').click();
+  const button = s.doc.getElementById('inspect-follow');
+  const centred = (x, z, what) => { const at = s.map.onScreen([z, x]); near(at.x, 500, `${what}: across`); near(at.y, 300, `${what}: down`); };
+  return { s, world, button, centred, what: () => s.doc.getElementById('inspect-what').textContent };
+}
+
+test('a generation comes as several lines, and a frame is a whole list or the one before', async () => {
+  const { s, world } = await followingInAHerd();
+  assert.ok(s.pipe.parts >= 5, `${s.pipe.parts} lines to the generation`);
+  const mobs = () => marks(s).filter((m) => m.options.type).length;
+  assert.equal(mobs(), 121);
+  // A line of the mob list lost: the list before stands, whole.
+  s.pipe.loses = (line) => line.kind === 'mobs' && line.part === 1;
+  await s.sample(world(9, 9));
+  assert.equal(mobs(), 121, 'no part of a list is drawn without the rest');
+  s.pipe.loses = () => false;
+});
+
+test('a followed mob left out of a sample is still followed, and the map takes up with it again', async () => {
+  const { s, world, button, centred, what } = await followingInAHerd();
+  await s.sample(world(8, 6));
+  centred(8, 6, 'followed');
+  // Unloaded as it was read, or past the cap for a sample: not in the list.
+  s.pipe.skips = (mob, gen) => mob.i === '77' && gen % 3 === 0;
+  let missed = 0;
+  for (let n = 0; n < 12; n += 1) {
+    const [x, z] = [10 + n * 2, 6 + n];
+    await s.sample(world(x, z), n % 4 === 0 ? 2000 : 1000);
+    assert.equal(button.textContent, 'Following', `sample ${n}`);
+    assert.equal(button.getAttribute('aria-pressed'), 'true');
+    assert.equal(s.app.inspect.following(), 'm:77');
+    if (s.pipe.gen % 3 === 0) {
+      missed += 1;
+      assert.equal(what(), 'Not in the live list just now.');
+      assert.equal(button.disabled, false, 'and can still be let go of');
+    } else {
+      assert.equal(what(), '');
+      centred(x, z, `back in sample ${n}`);
+    }
+  }
+  assert.ok(missed >= 3);
+});
+
+test('a followed mob the cap leaves out while a player walks off is followed again when it is back inside', async () => {
+  const { s, world, button, centred } = await followingInAHerd();
+  s.pipe.cap = 40;
+  // The first player walks away, so the forty nearest them are others, then comes back.
+  for (const [n, px] of [0, 400, 400, 400, 0, 0].entries()) {
+    await s.sample(world(5 + n, 5, steve(px, 0)));
+    assert.equal(button.textContent, 'Following', `with the player at ${px}`);
+    assert.equal(marks(s).some((m) => m.options.type === 'zombie' && m.getLatLng().lng === 5 + n), px === 0, `on the map with the player at ${px}`);
+    if (px === 0) centred(5 + n, 5, `with the player at ${px}`);
+  }
+});
+
+test('a followed mob lost to a missing line stays where it was drawn and is followed on', async () => {
+  const { s, world, button, centred } = await followingInAHerd();
+  s.pipe.loses = (line, gen) => line.kind === 'mobs' && line.part === 2 && gen % 2 === 0;
+  for (let n = 0; n < 6; n += 1) {
+    await s.sample(world(5 + n * 3, 5));
+    assert.equal(button.textContent, 'Following');
+    // Centred on wherever the last whole list had it.
+    if (s.pipe.gen % 2 === 1) centred(5 + n * 3, 5, `sample ${n}`);
+  }
+});
+
+test('a mob gone for longer than it is given is let go of, and the card says so', async () => {
+  const { s, world, button, what } = await followingInAHerd();
+  s.pipe.skips = (mob) => mob.i === '77';
+  for (let n = 0; n < 14; n += 1) {
+    await s.sample(world(5, 5));
+    assert.equal(button.textContent, 'Following', `${n + 1} s without it`);
+  }
+  await s.sample(world(5, 5), 2000);
+  assert.equal(button.textContent, 'Follow');
+  assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.equal(s.app.inspect.following(), null);
+  assert.equal(what(), 'No longer tracked.');
+  assert.equal(s.doc.getElementById('inspect-said').textContent, 'No longer following Zombie.');
+  // Back after that, it is tracked again and not followed: the viewer was told it was let go.
+  s.pipe.skips = () => false;
+  await s.sample(world(50, 50));
+  assert.equal(what(), '');
+  assert.equal(button.textContent, 'Follow');
+});
+
+test('a player is given a few seconds and no more, and a drag still lets go at once', async () => {
+  const s = await stage({ heads: { steve: 'h1' } });
+  await s.sample({ players: [steve(1, 1)], mobs: [] });
+  assert.ok(s.app.inspect.open({ kind: 'player', id: '1', name: 'Steve', x: 1, y: 64, z: 1 }));
+  const button = s.doc.getElementById('inspect-follow');
+  button.click();
+  for (let n = 0; n < 3; n += 1) {
+    await s.sample({ players: [], mobs: [] });
+    assert.equal(button.textContent, 'Following', `${n + 1} s without them`);
+  }
+  await s.sample({ players: [steve(4, 4)], mobs: [] });
+  near(s.map.onScreen([4, 4]).x, 500, 'followed again');
+  s.map.fire('dragstart');
+  assert.equal(button.textContent, 'Follow');
+  button.click();
+  for (let n = 0; n < 5; n += 1) await s.sample({ players: [], mobs: [] });
+  assert.equal(button.textContent, 'Follow', 'gone past four seconds');
+});
+
+test('with ?debug=1 the card says what it knows of its entity, and without it has no such line', async () => {
+  const plain = await followingInAHerd();
+  assert.equal(plain.s.doc.getElementById('inspect').children.filter((node) => node.classList.contains('inspect-debug')).length, 0);
+  const { s, world } = await followingInAHerd({ search: '?debug=1' });
+  s.pipe.skips = (mob, gen) => mob.i === '77' && gen % 2 === 0;
+  for (let n = 0; n < 4; n += 1) await s.sample(world(5, 5));
+  const line = s.doc.getElementById('inspect').children.find((node) => node.classList.contains('inspect-debug')).textContent;
+  assert.match(line, /^m:77 · (live|missing) · last update [0-9.]+ s ago · in 3 of the last 5 frames · follow on: its button$/);
 });
 
 async function main() {

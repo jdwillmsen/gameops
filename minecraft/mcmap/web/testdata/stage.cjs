@@ -162,7 +162,7 @@ const SIDES = { 'face/villager_v2': [11, 11], 'face/fox': [8, 8], 'face/shulker'
 // A page with the scripts run on it. dpr is the screen's density, heads
 // the players the server has a head for, and boxes what getBoundingClientRect
 // answers for the map and for what lies over it.
-async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, files = ['names.js', 'duration.js', 'icons.js', 'layers.js', 'room.js', 'live.js'], storage = new Map() } = {}) {
+async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, search = '', files = ['names.js', 'duration.js', 'icons.js', 'layers.js', 'room.js', 'live.js'], storage = new Map() } = {}) {
   if (Object.keys(look).length > 0) storage.set('mcmap.settings', JSON.stringify({ v: 1, look }));
   const p = page(storage, { files: ['settings.js'] });
   const { win, doc } = p;
@@ -202,6 +202,7 @@ async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, fi
   const sources = [];
   Object.assign(win, {
     devicePixelRatio: dpr,
+    location: { search },
     performance: { now: () => Date.now() },
     navigator: {},
     setInterval: () => 0,
@@ -236,6 +237,40 @@ async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, fi
   Object.assign(win.mcmap, { map, dimension: () => 'overworld', dimensions: () => ['overworld'], live: () => true, reload() {}, label: (id) => id });
   for (const file of files) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), win, { filename: file });
 
+  // The page's clock, which a check moves on by hand.
+  let ahead = 0;
+  win.Date.now = () => Date.now() + ahead;
+
+  // The pipeline a sample goes through before it is a frame, as far as it
+  // decides what a frame holds: the pack keeps the mobs nearest the first
+  // player up to its cap and leaves out one that unloads as it is read;
+  // each list is printed as lines of a few dozen items; a list is put
+  // together only when every line of it has come, so one that lost a line
+  // is not drawn and the list before it stands until it is too old to.
+  const PART = 40;
+  const TTL_MS = 10_000;
+  const pipe = { cap: 0, skips: () => false, loses: () => false, gen: 0, lists: { players: null, mobs: null }, parts: 0 };
+  function frameOf({ players = [], mobs = [] }) {
+    pipe.gen += 1;
+    const first = players[0];
+    let listed = mobs.filter((mob) => !pipe.skips(mob, pipe.gen));
+    if (pipe.cap > 0 && listed.length > pipe.cap) {
+      const far = (mob) => (first ? Math.hypot(mob.x - first.x, mob.z - first.z) : Math.hypot(mob.x, mob.z));
+      listed = [...listed].sort((a, b) => far(a) - far(b)).slice(0, pipe.cap);
+    }
+    const now = win.Date.now();
+    pipe.parts = 0;
+    for (const [kind, items] of [['players', players], ['mobs', listed]]) {
+      const lines = [];
+      for (let at = 0; at < Math.max(1, items.length); at += PART) lines.push({ gen: pipe.gen, kind, part: lines.length, items: items.slice(at, at + PART) });
+      pipe.parts += lines.length;
+      const arrived = lines.filter((line) => !pipe.loses(line, pipe.gen));
+      if (arrived.length === lines.length) pipe.lists[kind] = { at: now, items: arrived.flatMap((line) => line.items) };
+    }
+    const fresh = (list) => (list && now - list.at < TTL_MS ? list.items : null);
+    const [p, m] = [fresh(pipe.lists.players), fresh(pipe.lists.mobs)];
+    return { players: p || [], mobs: m || [], stale: p === null && m === null };
+  }
   const tick = () => new Promise((done) => setTimeout(done, 0));
   // Runs what was asked for the next frame, and whatever that asks for in turn up to a point.
   const frame = () => { for (const fn of frames.splice(0)) fn(); };
@@ -249,6 +284,18 @@ async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, fi
     app: win.mcmap,
     icons: win.mcmap.icons,
     settings: win.mcmapSettings,
+    // How the pipeline between the game and the page is set to misbehave.
+    pipe,
+    advance(ms) { ahead += ms; },
+    // One sample of the game taken every milliseconds after the last, put
+    // through the pipeline, and whatever frame comes of it sent.
+    sample: async (world, every = 1000) => {
+      ahead += every;
+      const frame = frameOf(world);
+      const es = sources.filter((source) => source.readyState === 1 && source.onmessage).at(-1);
+      es.onmessage({ data: JSON.stringify({ serverNow: new Date(win.Date.now()).toISOString(), at: new Date(win.Date.now()).toISOString(), ttlSeconds: 10, ...frame }) });
+      await settle();
+    },
     // The stream the live layer has open, and a frame sent down it.
     send: async (frameOf) => {
       const es = sources.filter((s) => s.readyState === 1 && s.onmessage).at(-1);

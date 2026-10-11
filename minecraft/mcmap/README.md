@@ -2789,6 +2789,23 @@ a drag, an arrow key, the entity going, another dimension or the card
 closing, the button goes back to Follow and a status line that is read out
 and not shown says `Following <name>.` or `No longer following <name>.`
 
+One sample in which a followed mob is not listed is not the mob gone. The
+pack lists the mobs nearest the first player of a dimension, up to its
+cap, so one at the edge of that drops out as the player moves and is back
+when they return; it leaves out a mob that unloads between being listed
+and being read; and a list of which a line was lost is not drawn at all.
+The card used to call the entity lost on the first frame without it and
+turn Follow off for good, so the map stopped where it was while the mob,
+back a second later, walked away. Now an entity missing from the picture
+is *missing* for up to 15 seconds for a mob and 4 for a player, who is
+never capped: the card says `Not in the live list just now`, Follow stays
+on with its button reading Following, and the map takes up with the
+entity in the frame it is back. Only past that is it lost and let go of,
+which the card and the status line say. A visit made with `?debug=1` in
+the address has one more line in the card: the entity's id and state, how
+long since its last update, how many of the last 60 frames listed it, and
+why Follow last changed.
+
 The card finds its entity again by the id each record carries (`i`), which
 the game gives a player and a mob alike and keeps for as long as they
 exist. It never matches by position. When a whole frame of the entity's
