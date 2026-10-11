@@ -57,8 +57,8 @@ func TestStyleAndSizeAreChosenApartAndPixelsStayWhole(t *testing.T) {
 		t.Error("icons.js no longer sizes a picture with no plate by the size chosen")
 	}
 	// Nothing drawn on the map is blended but a picture made smaller.
-	if n := bytes.Count(icons, []byte("imageSmoothingEnabled = ")); n != 2 || !bytes.Contains(icons, []byte("ctx.imageSmoothingEnabled = smooth;")) {
-		t.Errorf("icons.js sets smoothing in %d places; it is set where a picture is fitted and where a head is composed", n)
+	if n := bytes.Count(icons, []byte("imageSmoothingEnabled = ")); n != 3 || !bytes.Contains(icons, []byte("ctx.imageSmoothingEnabled = smooth;")) {
+		t.Errorf("icons.js sets smoothing in %d places; it is set where a picture is fitted, where a head is composed, and where a marker is stamped on a canvas stretched by a zoom", n)
 	}
 	// A sprite is composed once and kept until the look changes.
 	if !bytes.Contains(icons, []byte("let made = sprites.get(held);\n    if (!made) {")) {

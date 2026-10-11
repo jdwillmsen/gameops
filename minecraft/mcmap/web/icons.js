@@ -604,7 +604,9 @@
       return;
     }
     // On a stretched canvas, at the size that comes out as its own: see
-    // steady().
+    // steady(). Unblended: it is one frame of a picture in motion, drawn
+    // with every other marker on the map, and blending is the slow part.
+    ctx.imageSmoothingEnabled = false;
     ctx.drawImage(worn, p.x - (w / 2) * k, p.y - (h / 2 + lift) * k, w * k, h * k);
   }
 

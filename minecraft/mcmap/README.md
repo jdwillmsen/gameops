@@ -945,9 +945,11 @@ canvas is stretched it is drawn again each frame instead, every marker
 smaller or larger about its own point by as much as the canvas is
 stretched the other way, so a picture, a dot, a ring and a name are on
 the screen at the size chosen all the way through. With the same 3,017
-markers on the canvas, zooming in and out by the wheel: 253 frames,
+markers on the canvas, zooming in and out by the wheel: 252 frames,
 median 16.7 ms, longest 16.8 ms, no long task; with large pictures at
-the largest size, a median 16.7 ms and one frame of 50 ms.
+the largest size, a median 16.7 ms and a longest 33.4 ms. A marker is
+stamped unblended while the canvas is stretched, which is what keeps
+those frames short: blended, the same zooms had frames of 100 ms.
 
 **Limits.** Per dimension, the 5,000 beds, 5,000 containers and 1,000 named
 mobs nearest the origin are kept and the rest counted; the layer's row says how
