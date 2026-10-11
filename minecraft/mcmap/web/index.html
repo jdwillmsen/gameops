@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="lib/leaflet/leaflet.css">
   <link rel="stylesheet" href="style.css">
   <script src="settings.js"></script>
+  <script src="diag.js"></script>
 </head>
 <body>
   <header class="bar">
@@ -111,6 +112,32 @@
     <span id="inspect-said" class="unseen" role="status"></span>
     <p id="said" class="said-over" role="status" hidden></p>
     <p id="frozen" class="frozen" hidden><strong id="frozen-what" role="status"></strong> <span id="frozen-age"></span></p>
+    <section id="debug" class="debug" role="region" aria-labelledby="debug-title" hidden>
+      <div class="debug-head">
+        <h2 id="debug-title">Debug</h2>
+        <button id="debug-fold" type="button" aria-expanded="true" aria-controls="debug-body">Fold</button>
+        <button id="debug-close" type="button">Close</button>
+      </div>
+      <div id="debug-body" class="debug-body">
+        <div id="debug-rows"></div>
+        <fieldset class="debug-aids">
+          <legend>Show on the map</legend>
+          <label class="toggle"><input type="checkbox" data-aid="tiles"> Tile edges</label>
+          <label class="toggle"><input type="checkbox" data-aid="lines"> Chunk and region lines</label>
+          <label class="toggle"><input type="checkbox" data-aid="hits"> Marker hit areas and anchors</label>
+          <label class="toggle"><input type="checkbox" data-aid="room"> Visible area and follow target</label>
+        </fieldset>
+        <div id="debug-report" class="debug-report" hidden>
+          <div class="sheet-actions">
+            <button id="debug-copy" type="button">Copy diagnostics</button>
+            <button id="debug-download" type="button">Download</button>
+            <button id="debug-record" type="button">Record 10 seconds</button>
+          </div>
+          <label class="toggle"><input id="debug-position" type="checkbox"> Include my position</label>
+          <p id="debug-said" class="note" role="status"></p>
+        </div>
+      </div>
+    </section>
   </div>
   <section id="login" class="login" aria-labelledby="login-title" hidden>
     <div class="card">
@@ -149,6 +176,7 @@
       <dt><kbd>+</kbd> <kbd>-</kbd></dt><dd>Zoom in and out, a level at a time</dd>
       <dt><kbd>W</kbd></dt><dd>Zoom out to the whole world</dd>
       <dt><kbd>B</kbd></dt><dd>Zoom in to block detail: 64 pixels to a block</dd>
+      <dt><kbd>D</kbd></dt><dd>The debug panel on or off</dd>
       <dt><kbd>?</kbd></dt><dd>This list</dd>
     </dl>
     <p class="note">Shortcuts do nothing while you are typing in a box. Esc always works.</p>
@@ -170,6 +198,18 @@
       <dt><code>me</code></dt><dd>Where I am, while I am online</dd>
       <dt><code>@name</code></dt><dd>Players only, by gamertag</dd>
     </dl>
+    <h3>Troubleshooting</h3>
+    <label class="toggle"><input id="debug-on" type="checkbox"> Debug panel: live zoom, stream and drawing figures over the map (<kbd>D</kbd>)</label>
+    <label class="toggle"><input id="debug-report-on" type="checkbox"> Diagnostics report: copy or save what is needed to look into a bug</label>
+    <p class="note">A link with <code>?debug=1</code> or <code>?diagnostics=1</code> turns these on, and <code>=0</code> off; the choice is kept with the page's other settings.</p>
+    <div id="debug-help-report" hidden>
+      <div class="sheet-actions">
+        <button id="debug-help-copy" type="button">Copy diagnostics</button>
+        <button id="debug-help-download" type="button">Download</button>
+      </div>
+      <label class="toggle"><input id="debug-help-position" type="checkbox"> Include my position</label>
+      <p class="note">The report is made on this page and goes nowhere unless you paste or send it. It holds your browser and screen, the page's and the server's versions, the layers and settings, the zoom, how the live stream and each request have been going, and the last events and errors. Gamertags, the names of views, waypoints and name tags are replaced by how many there were. Where you are, where the map is looking and the places saved in your views are left out unless you tick Include my position. It is not remembered after the page closes.</p>
+    </div>
     <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
   </dialog>
   <dialog id="structure" class="sheet" aria-labelledby="structure-title">
@@ -384,5 +424,6 @@
   <script src="appearance.js"></script>
   <script src="views.js"></script>
   <script src="compact.js"></script>
+  <script src="debug.js"></script>
 </body>
 </html>
