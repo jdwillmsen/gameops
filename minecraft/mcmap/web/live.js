@@ -49,6 +49,14 @@
   // someone through a portal, and they are in no list meanwhile.
   const SEEK_TRIES = 3;
   const SEEK_RETRY_MS = 3000;
+  // How long an entity may be missing from the picture before the card
+  // says it is gone and lets go of it. One sample in which a mob is not
+  // listed is not the mob gone: the pack lists the mobs nearest one
+  // player up to a cap, skips one that unloads as it is being read, and
+  // a list of which a line was lost is not drawn at all. A mob gets
+  // several samples at the pack's slowest; a player is never capped, and
+  // one who has changed dimension should be looked for soon.
+  const ABSENT_MS = { players: 4000, mobs: 15_000 };
   // Which markers have a picture is asked every so often by the script
   // that keeps the pictures. A player who joins is asked about sooner
   // than that, but no sooner than this after the last asking; see
@@ -356,8 +364,10 @@
   // The entity the card is about, or null while the card is shut:
   // { key, category, name, type, baby, x, y, z, dimension, seenAt, state,
   // follow, went, savedAt, wasLive }. state is live while it is in the
-  // picture, waiting while there is no picture to say either way, lost
-  // once a frame of its dimension came without it, saved for a named mob
+  // picture, waiting while there is no picture to say either way, missing
+  // while frames of its dimension have come without it for less than
+  // ABSENT_MS, during which Follow stays on and takes up again the moment
+  // it is back, lost once they have for longer, saved for a named mob
   // known only from the snapshot, and away while the map shows another
   // dimension. went is the dimension a lost player was found in, or null.
   // savedAt is when the snapshot that placed a named mob was taken, for one
@@ -990,6 +1000,15 @@
   const say = (node, s) => {
     if (node.textContent !== s) node.textContent = s;
   };
+  // For whoever is asked to say what a card that will not follow is doing:
+  // with ?debug=1 in the address the card has one more line, of what it
+  // knows of its entity. Nothing is there without it.
+  let debugLine = null;
+  if (card.root && /[?&]debug=1(&|$)/.test(location.search)) {
+    debugLine = document.createElement('p');
+    debugLine.className = 'inspect-debug';
+    card.root.append(debugLine);
+  }
   const labelOf = (dimension) => (app.label ? app.label(dimension) : dimension);
   // A record that came without a coordinate still has a card to fill.
   const tenths = (n) => (Number.isFinite(n) ? n.toFixed(1) : '—');
@@ -1139,6 +1158,10 @@
   function track(whole) {
     if (!picked) return;
     const held = entities.get(picked.key);
+    if (whole || held) {
+      picked.frames.push(Boolean(held));
+      if (picked.frames.length > 60) picked.frames.shift();
+    }
     if (held) {
       if (picked.state === 'lost') stopSeeking();
       Object.assign(picked, {
@@ -1152,26 +1175,38 @@
       centre();
     } else if (app.dimension() !== picked.dimension) {
       picked.state = 'away';
-      picked.follow = false;
+      letGo('the map went to another dimension');
     } else if (!whole) {
       if (picked.state !== 'lost' && picked.state !== 'saved') picked.state = 'waiting';
     } else if (savedOnly()) {
       // Not in a whole picture of its dimension: its chunk is not loaded,
       // and where the snapshot left it is all that is known.
       picked.state = 'saved';
-      picked.follow = false;
+      letGo('it is not loaded');
     } else if (soughtOnly()) {
       // The picture on the page is older than the search that found it,
       // and says nothing of whether it is still there. Only a frame drawn
       // since can say it has gone.
       picked.state = 'waiting';
-    } else if (picked.state !== 'lost') {
+    } else if (picked.state === 'live') {
+      // Not in this frame, which may be this frame's doing and not its
+      // own: it is given time to be back before anything is let go of.
+      picked.state = 'missing';
+      picked.missingSince = Date.now();
+    } else if (picked.state !== 'lost' && (picked.state !== 'missing' || Date.now() - picked.missingSince >= ABSENT_MS[picked.category === 'players' ? 'players' : 'mobs'])) {
       picked.state = 'lost';
-      picked.follow = false;
+      letGo('it was gone from the live list too long');
       if (picked.category === 'players') seek(picked, SEEK_TRIES);
     }
     ring();
     paintCard();
+  }
+
+  // Turns Follow off for a reason that is not the viewer's own doing, and
+  // keeps the reason for whoever is asked why.
+  function letGo(why) {
+    if (picked.follow) picked.why = `off: ${why}`;
+    picked.follow = false;
   }
 
   // Whom the card last said it was following, or null: Follow is turned
@@ -1217,6 +1252,9 @@
     } else if (soughtOnly() && picked.state === 'waiting') {
       what = control.paused ? 'Live updates are paused, so this page has no picture of it yet.' : 'Waiting for the next live picture.';
       when = `This position is as of the search, ${ago} ago.`;
+    } else if (picked.state === 'missing') {
+      what = 'Not in the live list just now.';
+      when = picked.follow ? `Last seen ${ago} ago. Following again as soon as it is back.` : `Last seen ${ago} ago.`;
     } else if (picked.state === 'lost') {
       what = picked.went ? `Left for another dimension: ${labelOf(picked.went)}.` : 'No longer tracked.';
     } else if (picked.state === 'away') {
@@ -1232,11 +1270,15 @@
       what = shown(picked.category) ? `Hidden on the map by your ${picked.category === 'players' ? 'player' : 'type'} filter.` : 'Hidden on the map: its layer is switched off.';
       when = picked.follow ? 'Still followed.' : 'Still tracked.';
     }
+    if (debugLine) {
+      const seen = picked.frames.filter(Boolean).length;
+      debugLine.textContent = `${picked.key} · ${picked.state} · last update ${((Date.now() - picked.seenAt) / 1000).toFixed(1)} s ago · in ${seen} of the last ${picked.frames.length} frames · follow ${picked.why}`;
+    }
     card.root.classList.toggle('adrift', what !== '');
     card.note.hidden = what === '';
     say(card.what, what);
     say(card.when, what === '' ? '' : when);
-    card.follow.disabled = picked.state !== 'live' && picked.state !== 'waiting';
+    card.follow.disabled = picked.state !== 'live' && picked.state !== 'waiting' && picked.state !== 'missing';
     if (card.go) card.go.disabled = !Number.isFinite(picked.x) || !Number.isFinite(picked.z);
     card.follow.setAttribute('aria-pressed', String(picked.follow));
     say(card.follow, picked.follow ? 'Following' : 'Follow');
@@ -1265,7 +1307,7 @@
   function pick(key, known) {
     if (!card.root || (!entities.has(key) && !known)) return false;
     stopSeeking();
-    picked = { key, follow: false, state: 'waiting', went: null, dimension: pictured, seenAt: Date.now(), wasLive: false, ...known };
+    picked = { key, follow: false, state: 'waiting', went: null, dimension: pictured, seenAt: Date.now(), wasLive: false, frames: [], why: 'off: not asked for', ...known };
     cardShape = null;
     if (!entities.has(key)) portrait(picked);
     // A picture of this dimension that is on the map is all there is: an
@@ -1290,6 +1332,7 @@
   function unfollow() {
     if (!picked || !picked.follow) return;
     picked.follow = false;
+    picked.why = 'off: the map was moved by hand';
     ring();
     paintCard();
   }
@@ -1371,6 +1414,7 @@
     card.follow.addEventListener('click', () => {
       if (!picked) return;
       picked.follow = !picked.follow;
+      picked.why = `${picked.follow ? 'on' : 'off'}: its button`;
       centre();
       ring();
       paintCard();
@@ -1503,9 +1547,10 @@
     follow(on) {
       if (!picked) return '';
       const was = picked.follow ? (typeof picked.name === 'string' && picked.name) || names.entity(picked.type) : '';
-      const can = picked.state === 'live' || picked.state === 'waiting';
+      const can = picked.state === 'live' || picked.state === 'waiting' || picked.state === 'missing';
       if (picked.follow !== Boolean(on) && (!on || can)) {
         picked.follow = Boolean(on);
+        picked.why = `${on ? 'on' : 'off'}: a view, or another script`;
         centre();
         ring();
         paintCard();

@@ -900,6 +900,8 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
   border-radius: 8px;
 }
 .inspect.adrift { border-color: var(--warn); }
+/* What the card knows of its entity, for a visit made with ?debug=1. */
+.inspect-debug { margin: 0; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); overflow-wrap: anywhere; }
 .inspect-head { display: flex; align-items: flex-start; gap: 0.5rem; }
 .inspect-head canvas { flex: none; width: 32px; height: 32px; }
 .inspect-title { flex: 1; min-width: 0; display: grid; }
