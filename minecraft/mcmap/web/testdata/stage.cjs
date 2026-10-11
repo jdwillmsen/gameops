@@ -29,6 +29,15 @@ function context(canvas) {
     drawImage(image, x, y, w = image.width, h = image.height) {
       ctx.drawn.push({ image, x: t.a * x + t.e, y: t.d * y + t.f, w: t.a * w, h: t.d * h });
     },
+    // The pixels of what was last drawn here whole: see-through outside the
+    // part of it a made-up picture says is drawn, which is all a script asks.
+    getImageData(x, y, w, h) {
+      const image = ctx.drawn.at(-1).image;
+      const ink = image.ink || [0, 0, image.width, image.height];
+      const data = new Uint8ClampedArray(w * h * 4);
+      for (let row = ink[1]; row < ink[1] + ink[3]; row += 1) for (let col = ink[0]; col < ink[0] + ink[2]; col += 1) data[(row * w + col) * 4 + 3] = 255;
+      return { data };
+    },
     arc(x, y, r) { ctx.arcs.push({ x: t.a * x + t.e, y: t.d * y + t.f, r: t.a * r }); },
     measureText: (text) => ({ width: String(text).length * 7 }),
   };
@@ -159,6 +168,11 @@ function leaflet(win) {
 // The pictures a server would list, and how large each is.
 const SIDES = { 'face/villager_v2': [11, 11], 'face/fox': [8, 8], 'face/shulker': [16, 16], 'face/cow': [8, 8], 'face/zombie': [8, 8], 'container/chest': [16, 16], 'block/chest': [32, 32], 'structure/village': [8, 8], 'structure/village_desert': [8, 8], 'marker/waypoint': [16, 16] };
 
+// The part of a picture that is drawn, where that is not all of it: a
+// villager's head and nose, 8 by 11, in a square of 11 with the odd
+// columns of room one to the left and two to the right.
+const INK = { 'face/villager_v2': [1, 0, 8, 11] };
+
 // A page with the scripts run on it. dpr is the screen's density, heads
 // the players the server has a head for, and boxes what getBoundingClientRect
 // answers for the map and for what lies over it.
@@ -210,7 +224,7 @@ async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, se
     createImageBitmap: async (blob) => {
       const key = Object.keys(SIDES).find((k) => blob.includes(`/${k}?`));
       const [width, height] = key ? SIDES[key] : [8, 8];
-      return { width, height };
+      return { width, height, ...(INK[key] ? { ink: INK[key] } : {}) };
     },
     fetch: async (address) => {
       if (address === 'api/icons') {

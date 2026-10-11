@@ -2,8 +2,13 @@ package icons
 
 import (
 	"bytes"
+	"encoding/json"
 	"image"
 	"image/png"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -116,5 +121,51 @@ func TestHeads_AreOfThePicturesThatAreFaces(t *testing.T) {
 	}
 	if len(got) != 4 {
 		t.Errorf("heads of %v; an item, a picture standing in, one unmade and one unreadable have none", got)
+	}
+}
+
+// A release that raises the art revision finds a volume made under the one
+// before. Its pictures are served as they are until they have been made
+// again, which wants the source, and may be a long time: all that while
+// their heads are where the recipes that made them put them.
+func TestHeads_AreStillKnownOfPicturesMadeUnderAnEarlierRevision(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.DiscardHandler)
+	face := faced(8, 11, [4]int{0, 0, 8, 10})
+	first := &Mobs{Dir: dir, Ref: "v9.9.9", Logger: logger}
+	first.keep(Set{
+		Mobs:     map[string][]byte{"cow": blank(t, 16)},
+		Pictures: map[string][]byte{"face/" + villagerKind: blank(t, 11)},
+		Recipes:  map[string]Recipe{"face/" + villagerKind: face},
+	})
+	path := filepath.Join(first.home(), indexFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idx map[string]any
+	if err := json.Unmarshal(raw, &idx); err != nil {
+		t.Fatal(err)
+	}
+	idx["art"] = ArtRevision + 100
+	if raw, err = json.Marshal(idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	later := &Mobs{Dir: dir, Ref: "v9.9.9", Logger: logger}
+	later.Run(t.Context())
+	if _, held := later.Picture("face/" + villagerKind); !held {
+		t.Fatal("the picture made under the other revision is not served")
+	}
+	if got := later.Heads()["face/"+villagerKind]; got != [4]int{1, 0, 8, 10} {
+		t.Errorf("head %v of a picture made under another revision, want [1 0 8 10]", got)
+	}
+	// None of them is a recipe to make a picture from again.
+	set, _, err := later.load()
+	if err != nil || set.Recipes != nil || !slices.Contains(set.Missing, artPlan) {
+		t.Errorf("recipes %v, missing %v, error %v: the pictures are to be planned afresh", set.Recipes, set.Missing, err)
 	}
 }

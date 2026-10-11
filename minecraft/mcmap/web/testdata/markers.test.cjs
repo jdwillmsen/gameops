@@ -208,18 +208,34 @@ test('with no plate to hide what spills, the whole of a face is in its box and i
       // Composed on a canvas of its own first, and that is where the picture is placed.
       const placed = s.made.flatMap((canvas) => canvas.getContext('2d').drawn).filter((d) => d.image.width === 11 && !('getContext' in d.image)).at(-1);
       const edge = (sprite.width - room) / 2;
-      assert.ok(placed.x >= edge - 0.01 && placed.x + placed.w <= sprite.width - edge + 0.01, `across, ${size} at density ${dpr}`);
+      // What is drawn of it: eight columns, one in from the left of its square.
+      const per = placed.w / 11;
+      assert.ok(placed.x + per >= edge - 0.01 && placed.x + 9 * per <= sprite.width - edge + 0.01, `across, ${size} at density ${dpr}`);
       assert.ok(placed.y >= edge - 0.01 && placed.y + placed.h <= sprite.height - edge + 0.01, `down, ${size} at density ${dpr}`);
     }
   }
 });
 
-test('a server that says nothing of heads has its faces drawn by the whole picture, as before', async () => {
-  const s = await stage({ look: { style: 'plates', size: 'normal' } });
-  const { sprite, at: d } = await composed(s, 'villager_v2');
-  near(d.x + d.w / 2, sprite.width / 2, 'across');
-  near(d.y + d.h / 2, sprite.height / 2, 'down');
-  near(d.w, 16, 'stretched to its box');
+test('a face the server says nothing of is set by what is drawn of it, not by its square', async () => {
+  for (const dpr of DENSITIES) {
+    for (const [style, size] of [['plates', 'normal'], ['plates', 'xlarge'], ['large', 'normal']]) {
+      const s = await stage({ dpr, look: { style, size } });
+      s.icons.mob('villager_v2', '#f00');
+      await s.settle();
+      const sprite = s.icons.mob('villager_v2', '#f00');
+      const d = s.made.flatMap((canvas) => canvas.getContext('2d').drawn).filter((at) => at.image.width === 11 && at.w > 11 && !('getContext' in at.image)).at(-1);
+      const per = d.w / 11;
+      const at = `${style} ${size} at density ${dpr}`;
+      // The head's eight columns start one in: their middle is on the plate's, to half a screen pixel.
+      assert.ok(Math.abs(d.x + 5 * per - sprite.width / 2) <= 0.5, `across, ${at}: ${d.x + 5 * per - sprite.width / 2}`);
+      // Sized as it was before any server said where heads are: nothing spills.
+      assert.ok(11 * per <= { normal: style === 'large' ? 32 : 16, xlarge: dpr > 1 ? 32 : 48 }[size] * s.icons.density() + 0.01, `in its box, ${at}`);
+    }
+  }
+  // A picture that is all drawn, and one that is no face, are set as they were.
+  const s = await stage({});
+  const zombie = await composed(s, 'zombie');
+  near(zombie.at.x + zombie.at.w / 2, zombie.sprite.width / 2, 'a head that fills its picture');
 });
 
 test('a village wears the mark of its biome where the server has it, and the plains one where not', async () => {

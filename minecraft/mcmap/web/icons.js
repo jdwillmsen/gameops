@@ -294,10 +294,18 @@
   function headOf(address, drawn) {
     const named = /^api\/icons\/picture\/([a-z0-9_]+\/[a-z0-9_]+)\?/.exec(str(address));
     const box = named && Object.hasOwn(listing.pictures.boxes, named[1]) ? listing.pictures.boxes[named[1]] : null;
-    if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => Number.isInteger(n) && n >= 0)) return null;
+    const ink = inkOf(drawn);
+    if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => Number.isInteger(n) && n >= 0)) {
+      // A face the server says nothing of, as one does that has not yet
+      // made its pictures again after a release: what is drawn of it
+      // stands for its head. A face is made square with the odd column
+      // of room on one side, and set by the whole of its square it is
+      // that much off the middle; set by what is drawn it is at most a
+      // row of nose out.
+      return named && /^(face|villager)\//.test(named[1]) && (ink.w < drawn.width || ink.h < drawn.height) ? { ...ink, guessed: true } : null;
+    }
     const [x, y, w, h] = box;
     if (w < 1 || h < 1 || x + w > drawn.width || y + h > drawn.height) return null;
-    const ink = inkOf(drawn);
     if (w * h * 2 <= ink.w * ink.h) return null;
     return { x, y, w, h };
   }
@@ -317,7 +325,7 @@
     const of = head || { x: 0, y: 0, w: drawn.width, h: drawn.height };
     const ink = head ? inkOf(drawn) : of;
     const by = head && !cut ? ink : of;
-    const { per, smooth } = fit(Math.max(by.w, by.h), box, head !== null && cut);
+    const { per, smooth } = fit(Math.max(by.w, by.h), box, head !== null && cut && !head.guessed);
     const room = box * DENSITY;
     const edge = (side - room) / 2;
     const place = (length, from, span, inkFrom, inkSpan) => {
@@ -547,7 +555,7 @@
     }
     // Drawn again if the server has since said where its head is.
     const head = drawn ? headOf(from, drawn) : null;
-    const as = head ? `${from}|${head.x},${head.y},${head.w},${head.h}` : from;
+    const as = head ? `${from}|${head.x},${head.y},${head.w},${head.h}${head.guessed ? '?' : ''}` : from;
     if (!drawn || canvas.dataset.drawn === as) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
