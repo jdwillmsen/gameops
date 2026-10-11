@@ -173,6 +173,7 @@
       <dt><kbd>V</kbd></dt><dd>Saved views; in the list, <kbd>1</kbd> to <kbd>9</kbd> switches to that view</dd>
       <dt><kbd>S</kbd></dt><dd>Go to the world spawn</dd>
       <dt><kbd>M</kbd></dt><dd>Go to where I am, while I am online</dd>
+      <dt><kbd>N</kbd></dt><dd>The next group of markers, listed to choose from</dd>
       <dt><kbd>+</kbd> <kbd>-</kbd></dt><dd>Zoom in and out, a level at a time</dd>
       <dt><kbd>W</kbd></dt><dd>Zoom out to the whole world</dd>
       <dt><kbd>B</kbd></dt><dd>Zoom in to block detail: 64 pixels to a block</dd>
@@ -306,6 +307,11 @@
         <option value="large">Large</option>
         <option value="xlarge">Extra large</option>
       </select>
+      <label for="look-group">Group markers when zoomed out</label>
+      <select id="look-group" data-look="group">
+        <option value="on">On</option>
+        <option value="off">Off</option>
+      </select>
       <label for="look-text">Label size</label>
       <select id="look-text" data-look="text">
         <option value="small">Small</option>
@@ -412,6 +418,7 @@
   <script src="icons.js"></script>
   <script src="layers.js"></script>
   <script src="room.js"></script>
+  <script src="groups.js"></script>
   <script src="live.js"></script>
   <script src="markers.js"></script>
   <script src="structures.js"></script>

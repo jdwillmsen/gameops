@@ -318,11 +318,71 @@
   // Puts on the map exactly the marks of a kind that should be there:
   // those whose item is not hidden, less any mob the live layer is drawing
   // where it is now, whose name stays on the map on the live marker.
+  // --- groups ----------------------------------------------------------------
+  //
+  // From far out, where the viewer has it so, the beds and the containers
+  // that fall in one square of the screen are drawn as one mark with
+  // whatever else is in it. That mark is the live layer's to draw: these
+  // are offered to it, and it says which of them it has taken. A waypoint
+  // and a named mob's mark are each somebody's, and are never offered.
+
+  const GROUPED = ['beds', 'containers'];
+  const sorts = { beds: new Map(), containers: new Map() };
+  if (app.groups && app.groups.offer) {
+    for (const kind of GROUPED) {
+      app.groups.offer(kind, {
+        label: KINDS[kind].label,
+        colour: () => KINDS[kind].color,
+        // What a sort of bed or container is called, by one of that sort.
+        title: (sort) => {
+          const like = sorts[kind].get(sort);
+          if (!like) return names.tidy(sort);
+          return kind === 'beds' ? names.bed(like.c) : names.holder(like.k, like.c, like.t);
+        },
+        items() {
+          const out = [];
+          if (!map.hasLayer(layers[kind])) return out;
+          for (const entry of held[kind]) {
+            if (!choices[kind].shows(entry.item)) continue;
+            sorts[kind].set(entry.item, entry.data);
+            out.push({ id: entry, x: entry.data.x + 0.5, z: entry.data.z + 0.5, family: kind, type: entry.item });
+          }
+          return out;
+        },
+        apply(taken) {
+          let any = false;
+          for (const entry of held[kind]) {
+            const now = taken.has(entry);
+            any = any || now !== (entry.grouped === true);
+            entry.grouped = now;
+          }
+          if (any) seat(kind);
+        },
+      });
+    }
+  }
+  const regrouped = (kind) => {
+    if (GROUPED.includes(kind) && app.groups && app.groups.changed) app.groups.changed();
+  };
+
+  // Puts on the map exactly the marks of a kind that should be there, and
+  // tells whoever draws the groups that what there is to group may have
+  // changed.
   function place(kind) {
+    seat(kind);
+    regrouped(kind);
+  }
+
+  function seat(kind) {
     const card = kind === 'mobs' ? inspect() : null;
     const group = layers[kind];
     let back = false;
     for (const entry of held[kind]) {
+      // One of several is off the map, and its group's mark is on it.
+      if (entry.grouped === true) {
+        group.removeLayer(entry.marker);
+        continue;
+      }
       const want = choices[kind].shows(entry.item) && !(card && entry.live !== null && card.drawn(entry.live.id));
       if (want === group.hasLayer(entry.marker)) continue;
       if (want) group.addLayer(entry.marker); else group.removeLayer(entry.marker);
@@ -337,9 +397,11 @@
     if (want === map.hasLayer(layers[kind])) return;
     if (!want) {
       map.removeLayer(layers[kind]);
+      regrouped(kind);
       return;
     }
     layers[kind].addTo(map);
+    regrouped(kind);
   }
 
   // --- the named mobs, by name ---------------------------------------------
@@ -512,6 +574,7 @@
     for (const kind of Object.keys(KINDS)) {
       layers[kind].clearLayers();
       held[kind] = [];
+      regrouped(kind);
       totals[kind] = null;
       more[kind] = 0;
     }
@@ -596,6 +659,7 @@
       for (const kind of WORLD_KINDS) {
         layers[kind].clearLayers();
         held[kind] = [];
+        regrouped(kind);
       }
       drawn = { dimension: null, etag: null };
       drawWaypoints(dimension);
@@ -703,8 +767,8 @@
   document.addEventListener('mcmap:live', aside);
   for (const kind of Object.keys(KINDS)) choices[kind].onChange(() => place(kind));
   const styledAs = () => {
-    const { theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers } = look();
-    return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers, icons.composedAs ? icons.composedAs() : ''].join('|');
+    const { theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers, group } = look();
+    return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers, group, icons.composedAs ? icons.composedAs() : ''].join('|');
   };
   let styled = styledAs();
   document.addEventListener('mcmap:settings', (e) => {
