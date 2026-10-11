@@ -294,13 +294,19 @@ func TestTake_OffersPredictionsOnceTheSeedExplainsTheWorld(t *testing.T) {
 	if got.Check.Total != 1 || len(got.Check.Findings) != 1 || !strings.Contains(got.Check.Findings[0], finding) {
 		t.Errorf("findings = %v (total %d)", got.Check.Findings, got.Check.Total)
 	}
-	if n := strings.Count(log.String(), finding); n != 1 {
-		t.Errorf("the finding was logged %d times, want 1:\n%s", n, log)
+	// The log says there is one and of what kind, and not where: where
+	// enough structures are is as good as the seed that placed them.
+	said := "structure prediction disagrees with the world"
+	if n := strings.Count(log.String(), said); n != 1 || !strings.Contains(log.String(), "kind=fortress dimension=nether findings=1") {
+		t.Errorf("the finding was logged %d times, want once by its kind:\n%s", n, log)
+	}
+	if strings.Contains(log.String(), finding) || strings.Contains(log.String(), got.Check.Findings[0]) {
+		t.Errorf("the log says where the finding is:\n%s", log)
 	}
 	if _, err := s.Take(context.Background(), dir, surveyedAt.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(log.String(), finding); n != 1 {
+	if n := strings.Count(log.String(), said); n != 1 {
 		t.Errorf("an unchanged finding was logged again (%d times)", n)
 	}
 	if strings.Contains(log.String(), "20261005") || strings.Contains(log.String(), "seed=") {

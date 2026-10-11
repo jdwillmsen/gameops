@@ -1760,9 +1760,11 @@ sites beside what the world recorded, twice over:
   when the middle of the site's chunk is within 16 blocks of its box. A
   village with no site, and a site with no village, are neither logged nor
   counted as disagreements.
-- Each disagreement of the other kinds is logged once, when it appears: a
-  recorded structure no site explains, or a site in a finished chunk that
-  suits the kind with nothing recorded.
+- A disagreement of the other kinds is a recorded structure no site
+  explains, or a site in a finished chunk that suits the kind with nothing
+  recorded. When the set of them changes, the log says how many each kind
+  has in each dimension and not where they are: where enough structures
+  are is enough to work out the seed that placed them.
 
 **How each rule fared** against the FWB world on 2026-10-10 (game
 1.26.52.3, the snapshot of 2026-10-05), with the biomes read and each
