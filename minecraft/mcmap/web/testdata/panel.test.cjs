@@ -435,6 +435,70 @@ test('a kind keeps its choice across dimensions, and one that is not listed here
   assert.equal(again.shows('end_city'), false);
 });
 
+test('what is chosen of a kind in one dimension is not undone by ticking everything in another', async () => {
+  const p = await load();
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure' });
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, OVERWORLD_KINDS);
+  kinds.setElsewhere(EVERY_KIND);
+  await p.tick();
+  // Only the villages, and then the strongholds as well.
+  await p.press(['Structures', 'Villages'], 'only');
+  await p.press(['Structures', 'Strongholds']);
+  same(OVERWORLD_KINDS.map((kind) => kinds.shows(kind.id)), [true, false, false, true]);
+  // In the End, both of its kinds are ticked: everything listed there is on.
+  kinds.setItems(END_KINDS);
+  await p.tick();
+  assert.equal(kinds.shows('end_gateway'), false, 'nothing but the two was left on');
+  await p.press(['Structures', 'End Cities']);
+  await p.press(['Structures', 'End Gateways']);
+  same(END_KINDS.map((kind) => kinds.shows(kind.id)), [true, true]);
+  // Back in the overworld the monuments and the portals are still off,
+  // and the strongholds still on.
+  kinds.setItems(OVERWORLD_KINDS);
+  await p.tick();
+  same(OVERWORLD_KINDS.map((kind) => kinds.shows(kind.id)), [true, false, false, true]);
+  assert.equal(p.state('Structures', 'Ocean Monuments'), 'false');
+  assert.equal(p.state('Structures', 'Strongholds'), 'true');
+  // And after a reload, in either dimension.
+  const q = await load(p.storage);
+  const again = q.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, OVERWORLD_KINDS);
+  again.setElsewhere(EVERY_KIND);
+  await q.tick();
+  same(EVERY_KIND.filter((id, at) => EVERY_KIND.indexOf(id) === at).map((id) => [id, again.shows(id)]).filter(([, on]) => on).map(([id]) => id).sort(), ['end_city', 'end_gateway', 'stronghold', 'village']);
+});
+
+test('a kind that is off until asked for is shown only by being asked for, whatever a view or a link says of it', async () => {
+  const p = await load();
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, [...OVERWORLD_KINDS, ...END_KINDS]);
+  await p.tick();
+  const adopt = async (choice) => {
+    p.settings.set('layers', { ...p.settings.get('layers'), 'structures#kinds': choice });
+    p.layers.adopt([]);
+    await p.tick();
+  };
+  // As a link puts them: "only this", and "just these", of kinds its recipient has not asked for.
+  await adopt({ only: 'end_city', hidden: [] });
+  assert.equal(kinds.shows('end_city'), false, 'shown alone by a view');
+  assert.equal(kinds.shows('village'), false);
+  await adopt({ only: null, hidden: [], mode: 'just', just: ['stronghold', 'end_city', 'village'] });
+  same(['stronghold', 'end_city', 'village', 'monument'].map((id) => kinds.shows(id)), [false, false, true, false]);
+  // The viewer's own asking is what shows one, and it is kept with the rest.
+  await adopt({ only: null, hidden: [], mode: 'just', just: ['stronghold', 'village'], shown: ['stronghold'] });
+  same(['stronghold', 'end_city', 'village'].map((id) => kinds.shows(id)), [true, false, true]);
+  await adopt({ only: null, hidden: [] });
+  // Shown alone by the viewer it is asked for, and is off again when the rest are let back.
+  await p.press(['Structures', 'End Cities'], 'only');
+  same(['end_city', 'village'].map((id) => kinds.shows(id)), [true, false]);
+  await p.press(['Structures', 'End Cities'], 'only');
+  same(['end_city', 'village'].map((id) => kinds.shows(id)), [false, true]);
+  assert.equal(p.settings.get('layers')['structures#kinds'], undefined, 'nothing is kept of a choice that is as it first was');
+  // Shown alone and then added to, it stays asked for.
+  await p.press(['Structures', 'End Cities'], 'only');
+  await p.press(['Structures', 'Villages']);
+  same(['end_city', 'village', 'monument'].map((id) => kinds.shows(id)), [true, true, false]);
+  same(p.settings.get('layers')['structures#kinds'].shown, ['end_city']);
+});
+
 test('a kind of another dimension is not dropped as gone, though it is in no list for a month', async () => {
   const p = await load();
   const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, END_KINDS);

@@ -689,7 +689,12 @@
       for (const [at, f] of Object.entries(raw.y)) {
         if (!/^(0|[1-9]\d?)$/.test(at) || Number(at) >= SHARED.length) return bad;
         if (f === null || typeof f !== 'object' || Array.isArray(f) || Object.keys(f).some((key) => !['o', 'h', 's', 'j'].includes(key))) return bad;
-        view.items[SHARED[Number(at)]] = { only: f.o, hidden: f.h, ...(f.s !== undefined ? { shown: f.s } : {}), ...(f.j !== undefined ? { mode: 'just', just: f.j } : {}) };
+        // What is off until asked for is asked for by the viewer and by
+        // nobody else: a link says what its sender had on, and that is
+        // not a reason to show its recipient a thing they have not asked
+        // to see. The list is checked like the rest and then left out.
+        if (f.s !== undefined && (!Array.isArray(f.s) || f.s.some((id) => typeof id !== 'string'))) return bad;
+        view.items[SHARED[Number(at)]] = { only: f.o, hidden: f.h, ...(f.j !== undefined ? { mode: 'just', just: f.j } : {}) };
       }
     }
     if (raw.b !== undefined) view.biome = raw.b;

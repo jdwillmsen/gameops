@@ -288,3 +288,21 @@ func TestViewsComeBuiltInAndSwitchAtAStroke(t *testing.T) {
 		t.Error("index.html must load compact.js after views.js, so that it knows of every dialog")
 	}
 }
+
+// What is off until asked for is asked for by the viewer and by nobody
+// else: a link's list of what its sender had asked for is checked and then
+// left out of the view it becomes.
+func TestALinkSwitchesNothingOnThatIsOffUntilAskedFor(t *testing.T) {
+	js := read(t, "views.js")
+	for _, need := range []string{
+		"if (f.s !== undefined && (!Array.isArray(f.s) || f.s.some((id) => typeof id !== 'string'))) return bad;",
+		"view.items[SHARED[Number(at)]] = { only: f.o, hidden: f.h, ...(f.j !== undefined ? { mode: 'just', just: f.j } : {}) };",
+	} {
+		if !bytes.Contains(js, []byte(need)) {
+			t.Errorf("views.js no longer has %s", need)
+		}
+	}
+	if bytes.Contains(js, []byte("shown: f.s")) {
+		t.Error("views.js takes what a link's sender had asked for into the view")
+	}
+}

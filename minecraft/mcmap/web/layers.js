@@ -253,9 +253,10 @@
   // The choice as it is kept and as a saved view carries it. Past the
   // most that is kept the list is cut at the end, so what is kept is the
   // same from one write to the next, and the panel says that it was cut.
+  const asked = (f) => (f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {});
   const stateOf = (f) => (f.just !== null
-    ? { only: f.only, hidden: [], mode: 'just', just: [...f.just].slice(0, MAX_HIDDEN) }
-    : { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...(f.shown.size > 0 ? { shown: [...f.shown].slice(0, MAX_HIDDEN) } : {}) });
+    ? { only: f.only, hidden: [], mode: 'just', just: [...f.just].slice(0, MAX_HIDDEN), ...asked(f) }
+    : { only: f.only, hidden: [...f.hidden].slice(0, MAX_HIDDEN), ...asked(f) });
   // And with the note of what has gone, which is this browser's own.
   const keptOf = (f) => (plain(f) ? null : { ...stateOf(f), ...(f.missing.size > 0 && f.checked !== null ? { missing: [...f.missing].slice(0, MAX_HIDDEN), checked: f.checked } : {}) });
 
@@ -265,10 +266,15 @@
     if (!f) {
       f = { key, group, name, only: null, hidden: new Set(), shown: new Set(), just: null, missing: new Set(), checked: null, over: false, off: new Set(), rows: new Set(), listeners: [], looked: false };
       readFacet(f);
+      // An item that is off until asked for is shown only while it is
+      // among the ones asked for, whatever else the choice says: "only
+      // this" and "just these" can come from a saved view or a link, and
+      // asking is the viewer's own to do.
       f.shows = (id) => {
+        if (f.off.has(id) && !f.shown.has(id)) return false;
         if (f.only !== null) return f.only === id;
         if (f.just !== null) return f.just.has(id);
-        return !f.hidden.has(id) && (!f.off.has(id) || f.shown.has(id));
+        return !f.hidden.has(id);
       };
       // What a layer's script holds of it: enough to ask and to be told.
       f.handle = {
@@ -278,7 +284,7 @@
         state: () => stateOf(f),
         onChange(fn) { if (typeof fn === 'function') f.listeners.push(fn); },
         // Shows one item and nothing else, as its "Only" would.
-        solo(id) { changeFacet(f, () => { f.only = text(id) ? id : null; }); },
+        solo(id) { changeFacet(f, () => { showAlone(f, text(id) ? id : null); }); },
       };
       facets.set(key, f);
     }
@@ -288,14 +294,35 @@
 
   // Every item a choice is over, in whichever row it is listed.
   const known = (f) => [...f.rows].flatMap((row) => row.list.map((item) => item.id));
+  // And every item it is over anywhere: those a row lists at other times
+  // with those it lists now. A choice is settled over all of them, or
+  // what was chosen of a kind in one dimension would be undone by
+  // ticking everything in another.
+  const everywhere = (f) => [...new Set([...known(f), ...[...f.rows].flatMap((row) => row.elsewhere)])];
 
   function showItem(f, id, on) {
-    if (f.just !== null) {
-      if (on) f.just.add(id); else f.just.delete(id);
-    } else if (f.off.has(id)) {
+    if (f.off.has(id)) {
       if (on) f.shown.add(id); else f.shown.delete(id);
       f.hidden.delete(id);
-    } else if (on) f.hidden.delete(id); else f.hidden.add(id);
+    }
+    if (f.just !== null) {
+      if (on) f.just.add(id); else f.just.delete(id);
+    } else if (!f.off.has(id)) {
+      if (on) f.hidden.delete(id); else f.hidden.add(id);
+    }
+  }
+
+  // Shows one item and nothing else, or lets the rest back. One that is
+  // off until asked for is asked for by being shown alone, and is as it
+  // was again when the rest are let back.
+  function showAlone(f, id) {
+    if (f.lent !== undefined && f.lent !== id) f.shown.delete(f.lent);
+    f.lent = undefined;
+    if (id !== null && f.off.has(id) && !f.shown.has(id)) {
+      f.shown.add(id);
+      f.lent = id;
+    }
+    f.only = id;
   }
 
   // Brings a choice to the form that says the same in fewer ids, where
@@ -304,26 +331,25 @@
   // the two forms differ in what becomes of an item that turns up later,
   // and that must not change under them because a list grew.
   function settle(f) {
-    const all = known(f);
+    // What is off until asked for is kept apart, in what is asked for,
+    // and is neither hidden nor left out by any form of the rest.
+    const all = everywhere(f).filter((id) => !f.off.has(id));
     if (f.just !== null) {
       if (all.length > 0 && all.every((id) => f.just.has(id))) {
-        f.shown = new Set(all.filter((id) => f.off.has(id)));
         f.hidden = new Set();
         f.just = null;
       } else if (f.just.size > MAX_HIDDEN) {
         const out = all.filter((id) => !f.just.has(id));
         if (out.length <= MAX_HIDDEN) {
-          f.hidden = new Set(out.filter((id) => !f.off.has(id)));
-          f.shown = new Set(all.filter((id) => f.off.has(id) && f.just.has(id)));
+          f.hidden = new Set(out);
           f.just = null;
         }
       }
     } else if (f.hidden.size > MAX_HIDDEN) {
-      const drawn = all.filter((id) => f.shows(id));
+      const drawn = all.filter((id) => !f.hidden.has(id));
       if (drawn.length < f.hidden.size) {
         f.just = new Set(drawn);
         f.hidden = new Set();
-        f.shown = new Set();
       }
     }
     f.over = (f.just !== null ? f.just.size : Math.max(f.hidden.size, f.shown.size)) > MAX_HIDDEN;
@@ -349,7 +375,8 @@
     if (f.only === null) return;
     f.just = new Set([f.only]);
     f.hidden = new Set();
-    f.shown = new Set();
+    // Shown alone and then added to, it stays asked for.
+    f.lent = undefined;
     f.only = null;
   }
 
@@ -934,7 +961,7 @@
   // An item that is off until asked for and has not been asked for is as
   // the page first has it: it is not shown, and it is not something the
   // viewer has hidden. It makes nothing read as filtered.
-  const standing = (f, id) => f.only === null && f.just === null && f.off.has(id) && !f.shown.has(id) && !f.hidden.has(id);
+  const standing = (f, id) => f.off.has(id) && !f.shown.has(id);
   const hiddenIn = (row, item) => !row.facet.shows(item.id) && !standing(row.facet, item.id);
   // A row is on, off, or on with some of what it is made of hidden.
   function rowState(row) {
@@ -1298,7 +1325,7 @@
       const f = node.row.facet;
       if (!f) return;
       // Pressed on the one already alone, it lets the rest back.
-      changeFacet(f, () => { f.only = f.only === node.id ? null : node.id; });
+      changeFacet(f, () => { showAlone(f, f.only === node.id ? null : node.id); });
       if (!node.row.on) switchRow(node.row, true);
       return;
     }
