@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
@@ -69,6 +70,12 @@ type Config struct {
 	Login         bool
 	InternalToken string
 	SessionTTL    time.Duration
+	// ServiceSecret is what an automated check exchanges for a short
+	// read-only session of its own. Empty, which is the default, there is
+	// no such session and no way to ask for one.
+	ServiceSecret string
+	// ServiceSessionTTL is how long one of those sessions lasts.
+	ServiceSessionTTL time.Duration
 
 	// Live is whether players and mobs are drawn on the map as they move.
 	// Off, nothing asks the bridge for them and the page is not offered a
@@ -191,6 +198,26 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.SessionTTL, err = time.ParseDuration(or(getenv("SESSION_TTL"), "168h")); err != nil || c.SessionTTL <= 0 {
 		fail("SESSION_TTL must be a positive duration")
+	}
+
+	// Off unless a secret is given. The messages name the variable and
+	// never the value.
+	c.ServiceSessionTTL = 10 * time.Minute
+	if c.ServiceSecret = getenv("SERVICE_SESSION_SECRET"); c.ServiceSecret != "" {
+		if len(c.ServiceSecret) < auth.MinServiceSecret {
+			fail("SERVICE_SESSION_SECRET must be at least %d characters; leave it unset to have no service sessions", auth.MinServiceSecret)
+		}
+		// Each of the other two can do more than look: one logs in as any
+		// player, the other speaks to the game server's console.
+		if c.ServiceSecret == c.InternalToken || c.ServiceSecret == c.BridgeToken {
+			fail("SERVICE_SESSION_SECRET must be a secret of its own, not INTERNAL_TOKEN or BRIDGE_TOKEN")
+		}
+		if !c.Login {
+			fail("SERVICE_SESSION_SECRET needs the login: with AUTH_DISABLED=true there is no session to issue")
+		}
+		if c.ServiceSessionTTL, err = time.ParseDuration(or(getenv("SERVICE_SESSION_TTL"), "10m")); err != nil || c.ServiceSessionTTL < auth.MinServiceTTL || c.ServiceSessionTTL > auth.MaxServiceTTL {
+			fail("SERVICE_SESSION_TTL must be a duration between %s and %s", auth.MinServiceTTL, auth.MaxServiceTTL)
+		}
 	}
 
 	if c.Refresh, err = time.ParseDuration(or(getenv("REFRESH_INTERVAL"), "15m")); err != nil {

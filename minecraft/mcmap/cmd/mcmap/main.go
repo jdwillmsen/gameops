@@ -240,6 +240,12 @@ func run(logger *slog.Logger) error {
 		}
 		app.Sessions = &auth.Sessions{Key: key, TTL: cfg.SessionTTL, Now: time.Now, Revoked: revoked}
 		app.Codes = &auth.Codes{TTL: 10 * time.Minute, Max: maxPendingLogins, Now: time.Now}
+		if cfg.ServiceSecret != "" {
+			app.Sessions.ServiceKey = auth.ServiceKey(key, cfg.ServiceSecret)
+			app.Sessions.ServiceTTL = cfg.ServiceSessionTTL
+			app.Sessions.ServiceSeen = server.CountServiceRequest
+			app.Service = auth.NewExchange(cfg.ServiceSecret, time.Now)
+		}
 	} else {
 		logger.Warn("running with no login: anyone who can reach this port sees the whole map")
 	}
@@ -268,7 +274,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "service_sessions", cfg.ServiceSecret != "")
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()

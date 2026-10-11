@@ -39,6 +39,9 @@ type Server struct {
 	Codes    *auth.Codes
 	// InternalToken is what the agent presents to report who typed a code.
 	InternalToken string
+	// Service judges the secret an automated check exchanges for a session
+	// of its own. Nil, there is no such exchange.
+	Service *auth.Exchange
 	// Chunks is the world's chunk census, which the agent reads to warn
 	// players while chunks are missing. Nil leaves those routes out.
 	Chunks ChunkCensus
@@ -147,51 +150,57 @@ func (f filesOnly) Open(name string) (fs.File, error) {
 // Handler is everything a browser may reach. Where the world is, is behind
 // the login; the page itself is not, since it has to load to show the login
 // and holds nothing about the world.
+//
+// Every route is behind one of two gates, or is public. shown is what all
+// players are shown alike, which a service session may read as well; gated
+// is a player's alone. A route that is one player's own, or that will ever
+// change anything, goes behind gated: service_test.go fails on a route it
+// has not been told the gate of.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.Handle("GET /api/map", s.gated(s.handleMap))
-	mux.Handle("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleTile))
+	mux.Handle("GET /api/map", s.shown(s.handleMap))
+	mux.Handle("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.shown(s.handleTile))
 	if s.Live != nil {
-		mux.Handle("GET /api/live", s.gated(s.handleLive))
+		mux.Handle("GET /api/live", s.shown(s.handleLive))
 	}
 	if s.Markers != nil {
-		mux.Handle("GET /api/markers", s.gated(s.handleMarkers))
+		mux.Handle("GET /api/markers", s.shown(s.handleMarkers))
 	}
 	if s.Waypoints != nil && s.Sessions != nil {
 		mux.Handle("GET /api/waypoints", s.gated(s.handleWaypoints))
 	}
 	if s.MobIcons != nil || s.Heads != nil || s.Art != nil {
-		mux.Handle("GET /api/icons", s.gated(s.handleIcons))
+		mux.Handle("GET /api/icons", s.shown(s.handleIcons))
 	}
 	if s.Art != nil {
-		mux.Handle("GET /api/icons/picture/{group}/{name}", s.gated(s.handlePicture))
-		mux.Handle("GET /api/names", s.gated(s.handleNames))
+		mux.Handle("GET /api/icons/picture/{group}/{name}", s.shown(s.handlePicture))
+		mux.Handle("GET /api/names", s.shown(s.handleNames))
 	}
 	if s.MobIcons != nil {
-		mux.Handle("GET /api/icons/mob/{type}", s.gated(s.handleMobIcon))
+		mux.Handle("GET /api/icons/mob/{type}", s.shown(s.handleMobIcon))
 	}
 	if s.Heads != nil {
-		mux.Handle("GET /api/icons/head", s.gated(s.handleHead))
+		mux.Handle("GET /api/icons/head", s.shown(s.handleHead))
 	}
 	if s.Structures != nil {
-		mux.Handle("GET /api/structures", s.gated(s.handleStructures))
-		mux.Handle("GET /api/structures/detail", s.gated(s.handleStructureDetail))
+		mux.Handle("GET /api/structures", s.shown(s.handleStructures))
+		mux.Handle("GET /api/structures/detail", s.shown(s.handleStructureDetail))
 	}
 	if s.Biomes != nil {
-		mux.Handle("GET /api/biomes", s.gated(s.handleBiomes))
-		mux.Handle("GET /api/biomes/at", s.gated(s.handleBiomeAt))
-		mux.Handle("GET /api/biomes/nearest", s.gated(s.handleBiomeNearest))
-		mux.Handle("GET /api/biomes/region", s.gated(s.handleBiomeRegion))
-		mux.Handle("GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleBiomeTile))
+		mux.Handle("GET /api/biomes", s.shown(s.handleBiomes))
+		mux.Handle("GET /api/biomes/at", s.shown(s.handleBiomeAt))
+		mux.Handle("GET /api/biomes/nearest", s.shown(s.handleBiomeNearest))
+		mux.Handle("GET /api/biomes/region", s.shown(s.handleBiomeRegion))
+		mux.Handle("GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.shown(s.handleBiomeTile))
 	}
 	if s.Trails != nil {
-		mux.Handle("GET /api/trails", s.gated(s.handleTrails))
+		mux.Handle("GET /api/trails", s.shown(s.handleTrails))
 	}
-	mux.Handle("GET /api/search", s.gated(s.handleSearch))
+	mux.Handle("GET /api/search", s.shown(s.handleSearch))
 	if s.Sessions != nil {
-		mux.Handle("GET /api/me", s.gated(s.handleMe))
+		mux.Handle("GET /api/me", s.shown(s.handleMe))
 		mux.HandleFunc("POST /auth/start", s.handleStart)
 		mux.HandleFunc("GET /auth/status", s.handleStatus)
 		mux.HandleFunc("POST /auth/logout", s.handleLogout)

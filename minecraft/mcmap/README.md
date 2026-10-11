@@ -3127,8 +3127,86 @@ Two listeners keep the internet away from what is not for it:
 - `HTTP_ADDR` is what a route may publish: the page, the login endpoints,
   and the map API, tiles, markers, biomes, search, trails and live stream
   behind the session.
-- `INTERNAL_ADDR` is for the cluster only: `/metrics`, and the claims and
-  revocations the agent reports.
+- `INTERNAL_ADDR` is for the cluster only: `/metrics`, the claims and
+  revocations the agent reports, and the exchange below.
+
+## Service sessions
+
+The login above needs a player in the game, so nothing automated can ever
+hold a session through it, and every check of the page has run against a
+made-up world. A service session is a second way to be let in, for checks
+and for nothing else. It is off unless `SERVICE_SESSION_SECRET` is set.
+
+**Who it is.** Nobody in the game. The session carries no XUID and goes by
+`service:e2e`, a name no gamertag can be: the game allows no colon in one,
+and a claim under a name starting `service:` is refused anyway. It is
+marked in the cookie, said by `/api/me`, written on every log line about
+it and counted apart in the metrics.
+
+**How one is had.** `POST /internal/v1/service-sessions` with the secret as
+a bearer token answers with a session cookie. The secret is compared in
+constant time, by digest, so not even its length is learnt. A request with
+anything in its query string is refused before it is read, so a secret put
+in an address by mistake does not work and is not kept working.
+
+**Where the exchange is, and why only there.** On `INTERNAL_ADDR`, never on
+`HTTP_ADDR`, and there is no setting that moves it. On the public listener
+it would be a second login for the whole internet to guess at, guarded by
+one string; on the internal one the secret is of no use to anyone who
+cannot already reach into the cluster. A check run from outside the
+cluster does not need the public listener to take it either: it reaches the
+internal one through a port-forward, which the cluster's own access rules
+decide, and that is a stronger condition than anything a header could add.
+Such an exchange arrives from the loopback address and is counted as
+`source="loopback"`, so every run from outside shows.
+
+**What it may see.** What every logged-in player is shown alike: the map
+and its tiles, the live stream, markers, structures and their detail,
+biomes, trails, search, names and icons. Each of those routes is registered
+behind `shown` in `internal/server/server.go`. Everything else behind the
+login is behind `gated`, which is a player's alone and answers a service
+session with 403; today that is `/api/waypoints`. Where a shown route says
+something of the player asking, a service session's answer leaves it out:
+no `me` in `/api/icons`, no `standing` in a village's detail, no waypoints
+in a search.
+
+**What it may do.** Read. Any request that is not a `GET` or `HEAD` is
+refused with 403 before it reaches a handler, whichever route it is for.
+The session holds no role and there is nowhere in it to put one. The rule
+for whatever comes later, roles and the resetting of chunks included: a
+route that is one player's own, or that asks for, approves or carries out
+anything, goes behind `gated`. `gated` is the gate with the short name and
+`service_test.go` reads the routes out of `server.go` and fails on one it
+has not been told the gate of, so leaving a new route open to a service
+session takes a deliberate line in a test.
+
+**How long.** `SERVICE_SESSION_TTL`, ten minutes unless set and never more
+than thirty. There is no renewal: another session takes the secret again.
+A live stream opened with one ends when it does.
+
+**Taking it back.** Service sessions are signed with a key derived from
+the session key and the secret, not with the session key itself. Changing
+the secret therefore ends every service session issued under the old one,
+unsetting it ends them all, and neither kind of cookie can be passed off
+as the other: which key signed a cookie decides what it is, and a cookie
+whose contents disagree with its key is refused. A build from before
+service sessions refuses the cookie too, since it names no XUID.
+
+**Against being a way round the login.** Five exchanges are allowed at
+once and one a minute after, the right secret included. Five wrong secrets
+lock the exchange for five minutes, during which nothing presented is
+compared at all; one more wrong one after that locks it again. The budget
+and the lock are for all callers together, because the internal listener
+sees cluster addresses, which are cheap to change. That lets anything that
+can reach the internal port stop the checks for a while, which costs a
+failing check and an alert, and never lets it in. Every attempt, either
+way, is one log line (`map service session issued` or `refused`, with the
+result, the source and the caller's address and user agent, and never what
+was presented) and one count in `mcmap_service_exchanges_total`. A wrong
+secret is never presented by anything that holds the right one, so
+`result="denied"` above zero is worth an alert by itself, as is
+`source="other"`, which is an address that should not be able to reach the
+listener.
 
 ## Environment variables
 
@@ -3142,6 +3220,8 @@ Two listeners keep the internet away from what is not for it:
 | `INTERNAL_TOKEN` | unless `AUTH_DISABLED` | | Bearer token the agent presents to the internal API; at least 16 characters. Whoever holds it can log in as any player, so give it a secret of its own |
 | `AUTH_DISABLED` | no | `false` | `true` serves the map with no login. Only for a service nothing publishes |
 | `SESSION_TTL` | no | `168h` | How long a login lasts |
+| `SERVICE_SESSION_SECRET` | no | empty | What an automated check exchanges for a service session; at least 32 characters, and not `INTERNAL_TOKEN` or `BRIDGE_TOKEN`. Empty, there are no service sessions and no exchange to ask. Changing it ends every service session issued under the old one. Needs the login. See [Service sessions](#service-sessions) |
+| `SERVICE_SESSION_TTL` | no | `10m` | How long a service session lasts; `1m` to `30m`. Read only with `SERVICE_SESSION_SECRET` |
 | `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
@@ -3174,12 +3254,12 @@ Two listeners keep the internet away from what is not for it:
 | `GET /` | The map page; public, and holds nothing about the world |
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
-| `GET /api/me` | The logged-in player's gamertag |
+| `GET /api/me` | The logged-in player's gamertag. For a service session, `service:e2e` and `service: true` |
 | `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
-| `GET /api/waypoints` | Session required. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
+| `GET /api/waypoints` | A player's session required; 403 for a service session. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
 | `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version`, the `keys` that have a picture and `boxes`, the head of each that is a face as `[x, y, width, height]` in the picture's own pixels (the groups `bed`, `container`, `shulker`, `marker` and `structure`, and since faces and blocks were made `face`, `villager` and `block` in the same list under the same version, so a page from before them reads the answer as it always did), `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The picture with the key `{group}/{name}` as a PNG, whichever group it is of, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
@@ -3206,9 +3286,16 @@ On `INTERNAL_ADDR` only:
 | `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
 | `PUT /internal/v1/heads` | Bearer `INTERNAL_TOKEN`. `{"players":[{"xuid","gamertag","head"}]}`: everyone online now, `head` a PNG in base64 or absent. Replaces the last report whole. 200 with `players` and how many heads were `refused`; 400 for more than 256 players, a body over 1 MB, or an entry that is not a player. Not served with `ICONS_ENABLED=false` |
+| `POST /internal/v1/service-sessions` | Bearer `SERVICE_SESSION_SECRET`, in the header and nowhere else: 400 for a request with anything in its query. 200 with `identity`, `expiresAt` and `ttlSeconds`, and the session as a `Set-Cookie` with the attributes a player's has. 401 for a wrong secret; 429 with `Retry-After` past five exchanges and one a minute, or for five minutes after five wrong secrets. Not served without `SERVICE_SESSION_SECRET` |
 
 The internal API is served whenever `INTERNAL_TOKEN` is set, with or without
 the login.
+
+"Session required" is a player's session or a service session, which reads
+every route marked so alike, with what is the asking player's own left out:
+no `me` in `/api/icons`, no `standing` in a village's detail, and no
+waypoints in a search, which says `off`. A service session gets 403 from
+anything else behind a login, and from any request that is not a `GET`.
 
 The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, so a link
 opens at the same place.
@@ -3270,6 +3357,8 @@ opens at the same place.
 | `mcmap_trails_limit{limit}` | The retention in force: `age_seconds`, `points_per_player`, `players` |
 | `mcmap_trails_oldest_point_age_seconds` | Age of the oldest trail point held. It stays under the age limit |
 | `mcmap_trails_points_dropped_total{reason}` | Trail points let go: `age`, `thinned`, `count`, `players` |
+| `mcmap_service_exchanges_total{result,source}` | Attempts to exchange the checks' secret for a service session: `ok`, `denied` (a wrong secret), `limited`, `locked` (after repeated wrong ones), `malformed`; from a `private` address inside the cluster, `loopback` (a port-forward) or `other`. Present, at zero, only with `SERVICE_SESSION_SECRET` |
+| `mcmap_service_requests_total{result}` | Requests made with a service session: `allowed`, or `forbidden` for a route that is a player's own or a request that is not a read |
 
 ## Build and test
 

@@ -493,7 +493,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Whose waypoints are searched comes from the session and nowhere
 	// else, exactly as when they are listed: nothing in the request can
 	// name another player, and without a login there is nobody to be.
-	if id, ok := auth.FromContext(r.Context()); ok && s.Waypoints != nil && s.Sessions != nil && wants(hitWaypoint) {
+	// A service session has no waypoints to search and is told there are
+	// none, as with no login.
+	if id, ok := auth.FromContext(r.Context()); ok && !auth.IsService(r.Context()) && s.Waypoints != nil && s.Sessions != nil && wants(hitWaypoint) {
 		out.Waypoints = waypointsSearched
 		list, err := s.search.playerWaypoints(r.Context(), s.Waypoints, id.XUID, s.Sessions.Now)
 		if err != nil {

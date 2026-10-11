@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -15,11 +18,22 @@ import (
 
 const pendingCookie = auth.PendingCookie
 
+// gated is a player's session and nobody else's.
 func (s *Server) gated(h http.HandlerFunc) http.Handler {
 	if s.Sessions == nil {
 		return h
 	}
 	return s.Sessions.Require(h)
+}
+
+// shown is what every logged-in player sees alike, which the session of an
+// automated check may read too. What such a handler says about the player
+// asking, it must leave out for a session that is no player's.
+func (s *Server) shown(h http.HandlerFunc) http.Handler {
+	if s.Sessions == nil {
+		return h
+	}
+	return s.Sessions.RequireViewer(h)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -37,7 +51,13 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	id, _ := auth.FromContext(r.Context())
-	writeJSON(w, http.StatusOK, map[string]string{"gamertag": id.Gamertag})
+	out := map[string]any{"gamertag": id.Gamertag}
+	// Said outright, so that nothing has to tell a check from a player by
+	// the shape of a name.
+	if auth.IsService(r.Context()) {
+		out["service"] = true
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleStart gives the browser a code to show. The secret that later
@@ -114,7 +134,81 @@ func (s *Server) InternalHandler() http.Handler {
 			mux.HandleFunc("POST /internal/v1/revocations", s.agentOnly(s.handleRevoke))
 		}
 	}
+	// Here and never on the public listener: the secret is then of no use
+	// to anyone who cannot already reach into the cluster, and a guess from
+	// the internet has nowhere to be sent.
+	if s.Service != nil && s.Sessions != nil && len(s.Sessions.ServiceKey) > 0 {
+		declareServiceMetrics()
+		mux.HandleFunc("POST /internal/v1/service-sessions", s.handleServiceSession)
+	}
 	return mux
+}
+
+// Where an exchange came from, as far as an address can say; the label
+// values of the exchange metric. A scheduled check inside the cluster is
+// private. Loopback is a port-forward, which is a person or an agent
+// running the checks from outside. Anything else should not be able to
+// reach this listener at all.
+const (
+	sourceLoopback = "loopback"
+	sourcePrivate  = "private"
+	sourceOther    = "other"
+)
+
+func exchangeSource(remote string) string {
+	host, _, err := net.SplitHostPort(remote)
+	if err != nil {
+		host = remote
+	}
+	switch ip := net.ParseIP(host); {
+	case ip == nil:
+		return sourceOther
+	case ip.IsLoopback():
+		return sourceLoopback
+	case ip.IsPrivate():
+		return sourcePrivate
+	}
+	return sourceOther
+}
+
+type serviceSessionJSON struct {
+	Identity   string    `json:"identity"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	TTLSeconds int       `json:"ttlSeconds"`
+}
+
+// handleServiceSession exchanges the checks' secret for a session. Every
+// attempt is one log line and one count, whichever way it went: sessions
+// are not stored, so these are the only record that one was asked for.
+// What was presented is in neither.
+func (s *Server) handleServiceSession(w http.ResponseWriter, r *http.Request) {
+	source := exchangeSource(r.RemoteAddr)
+	refuse := func(result string, status int) {
+		metricServiceExchanges.WithLabelValues(result, source).Inc()
+		s.log().Warn("map service session refused", "result", result, "source", source, "remote", r.RemoteAddr, "user_agent", r.UserAgent())
+		w.Header().Set("Cache-Control", "no-store")
+		http.Error(w, http.StatusText(status), status)
+	}
+	// A secret in an address ends up in logs along the way, so a request
+	// that carries anything there is turned away before it is read.
+	if r.URL.RawQuery != "" {
+		refuse(exchangeMalformed, http.StatusBadRequest)
+		return
+	}
+	presented, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	switch result := s.Service.Attempt(presented); result {
+	case auth.ExchangeOK:
+		expires := s.Sessions.IssueService(w)
+		metricServiceExchanges.WithLabelValues(result, source).Inc()
+		s.log().Info("map service session issued", "identity", auth.ServiceName, "source", source, "remote", r.RemoteAddr, "user_agent", r.UserAgent(), "expires", expires.UTC().Format(time.RFC3339))
+		writeJSON(w, http.StatusOK, serviceSessionJSON{Identity: auth.ServiceName, ExpiresAt: expires.UTC(), TTLSeconds: int(s.Sessions.ServiceTTL.Seconds())})
+	case auth.ExchangeDenied:
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		refuse(result, http.StatusUnauthorized)
+	default:
+		w.Header().Set("Retry-After", strconv.Itoa(int(s.Service.RetryAfter().Seconds())+1))
+		refuse(result, http.StatusTooManyRequests)
+	}
 }
 
 type claimRequest struct {

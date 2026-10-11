@@ -111,6 +111,11 @@ func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 	if s.Heads != nil {
 		id, _ := auth.FromContext(r.Context())
 		out.Heads, out.Me = s.Heads.Listing(id.XUID)
+		// A service session is nobody in the game. Its empty XUID names
+		// no player today; this is so that it never comes to.
+		if auth.IsService(r.Context()) {
+			out.Me = ""
+		}
 	}
 	body, _ := json.Marshal(out)
 	sum := sha256.Sum256(body)
