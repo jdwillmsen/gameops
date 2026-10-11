@@ -1,9 +1,12 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
 
 func env(pairs ...string) func(string) string {
@@ -190,6 +193,28 @@ func TestLoad_Structures(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		} else if strings.Contains(err.Error(), "9223372036854775808") || strings.Contains(err.Error(), "0x1234") {
 			t.Errorf("%s: the refusal repeats the value: %v", name, err)
+		}
+	}
+}
+
+// Which kinds of structure are kept off the map is the owner's to say, by
+// the kinds' own names; a name that is no kind's stops the service, since
+// the kind meant would otherwise be shown.
+func TestLoad_StructuresWithheld(t *testing.T) {
+	for value, want := range map[string][]structures.Kind{
+		"":                              {structures.BuriedTreasure},
+		"none":                          nil,
+		"buried_treasure, ancient_city": {structures.BuriedTreasure, structures.AncientCity},
+		"mansion mansion":               {structures.Mansion},
+	} {
+		c, err := Load(with("STRUCTURES_WITHHELD", value))
+		if err != nil || !slices.Equal(c.StructuresWithheld, want) {
+			t.Errorf("STRUCTURES_WITHHELD=%q withholds %v (%v), want %v", value, c.StructuresWithheld, err, want)
+		}
+	}
+	for _, value := range []string{"buried_treasures", "treasure", "none,mansion", "Mansion"} {
+		if c, err := Load(with("STRUCTURES_WITHHELD", value)); err == nil {
+			t.Errorf("STRUCTURES_WITHHELD=%q was taken to mean %v", value, c.StructuresWithheld)
 		}
 	}
 }

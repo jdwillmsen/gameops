@@ -334,7 +334,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// turned its row on, whatever is typed.
 	held := func(kind structures.Kind) bool {
 		k, known := structures.InfoOf(kind)
-		return known && k.Asked && !asked[kind]
+		return s.holds(kind) || (known && k.Asked && !asked[kind])
 	}
 	if query == "" || utf8.RuneCountInString(query) > maxSearchQuery || !okD || !okX || !okZ || !okL ||
 		(only != "" && !slices.Contains(searchKinds, only)) {
@@ -418,7 +418,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				for _, p := range nearestPredictions(survey.Layers[d].Predicted, x, z, predictedPerKind) {
-					if held(p.Kind) {
+					// A site with nothing found at it now is not somewhere
+					// to send anybody.
+					if held(p.Kind) || p.Vacant {
 						continue
 					}
 					if name := structureNames[p.Kind]; matches(name, string(p.Kind), names.Structure(string(p.Kind))) {

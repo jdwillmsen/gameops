@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/leveldat"
@@ -87,8 +88,8 @@ func structuresOf(t *testing.T, s *Server, path string, cookies ...*http.Cookie)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body)
 	}
-	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
-		t.Errorf("Cache-Control = %q, want no-store", cc)
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" || rec.Header().Get("ETag") == "" {
+		t.Errorf("Cache-Control = %q with tag %q, want a private copy checked against its tag", cc, rec.Header().Get("ETag"))
 	}
 	var got structuresResponse
 	body := rec.Body.String()
@@ -355,6 +356,7 @@ func TestStructuresKeepLaterKindsFromAPageThatCannotPutThemAway(t *testing.T) {
 	crowded.Recorded = append(crowded.Recorded, structures.Structure{Kind: structures.Monument, Box: structures.Box{MinX: 4000, MinY: 39, MinZ: 6000, MaxX: 4047, MaxY: 61, MaxZ: 6047}, Areas: 15})
 	crowded.Predicted = append(crowded.Predicted, structures.Prediction{Kind: structures.Monument, X: 7000, Z: 80, Candidate: true})
 	source.survey.Layers[chunks.Overworld] = crowded
+	source.survey.At = source.survey.At.Add(time.Minute)
 	// A trial chamber is a kind the older page knows, so its sites stand
 	// and the one past the bound is counted.
 	if old, _ := structuresOf(t, s, "/api/structures?dimension=overworld"); len(old.Recorded) != 1 || old.Recorded[0].Kind != structures.Monument || old.RecordedMore != 0 ||
@@ -362,9 +364,123 @@ func TestStructuresKeepLaterKindsFromAPageThatCannotPutThemAway(t *testing.T) {
 		t.Errorf("behind a full layer of later kinds, an older page was sent %d known (+%d) and %d sites (+%d)", len(old.Recorded), old.RecordedMore, len(old.Predicted), old.PredictedMore)
 	}
 	source.survey.Layers[chunks.Overworld] = layer
+	source.survey.At = source.survey.At.Add(time.Minute)
 	// And its details are there for the page that lists it.
 	if rec := do(s.Handler(), "GET", "/api/structures/detail?dimension=overworld&kind=igloo&x=99&z=163", "", nil); rec.Code != http.StatusOK {
 		t.Errorf("the igloo's details = %d", rec.Code)
+	}
+}
+
+// The answer is the same bytes until the next survey: it is written out
+// once, and a browser that holds it is told so and sent nothing.
+func TestStructuresAreWrittenOutOnceASurveyAndCheckedByTheirTag(t *testing.T) {
+	s, _ := fixture(t)
+	source := surveyed()
+	s.Structures = source
+	h := s.Handler()
+	first := do(h, "GET", "/api/structures?dimension=overworld&kinds=all", "", nil)
+	tag := first.Header().Get("ETag")
+	again := do(h, "GET", "/api/structures?dimension=overworld&kinds=all", "", nil)
+	if first.Code != http.StatusOK || tag == "" || again.Header().Get("ETag") != tag || again.Body.String() != first.Body.String() {
+		t.Fatalf("two asks of one survey: %d %q and %d %q", first.Code, tag, again.Code, again.Header().Get("ETag"))
+	}
+	if &first.Body.Bytes()[0] == &again.Body.Bytes()[0] {
+		t.Fatal("the recorder shares its bytes; the test proves nothing")
+	}
+	s.mu.Lock()
+	kept := len(s.listed.held)
+	s.mu.Unlock()
+	if kept != 1 {
+		t.Errorf("%d answers kept after two asks for the same one", kept)
+	}
+	if held := do(h, "GET", "/api/structures?dimension=overworld&kinds=all", "", nil, "If-None-Match", tag); held.Code != http.StatusNotModified || held.Body.Len() != 0 {
+		t.Errorf("a browser holding the answer was sent %d and %d bytes", held.Code, held.Body.Len())
+	}
+	// Another dimension is another answer.
+	if other := do(h, "GET", "/api/structures?dimension=nether&kinds=all", "", nil, "If-None-Match", tag); other.Code != http.StatusOK {
+		t.Errorf("the Nether with the overworld's tag = %d", other.Code)
+	}
+	// The next survey is another answer, and the old one is let go of.
+	layer := source.survey.Layers[chunks.Overworld]
+	layer.Recorded = append(slices.Clone(layer.Recorded), structures.Structure{Kind: structures.Igloo, Box: structures.Box{MinX: 96, MinY: 69, MinZ: 160, MaxX: 102, MaxY: 73, MaxZ: 167}, Areas: 1})
+	source.survey.Layers = map[chunks.Dimension]structures.Layer{chunks.Overworld: layer}
+	source.survey.At = source.survey.At.Add(15 * time.Minute)
+	next := do(h, "GET", "/api/structures?dimension=overworld&kinds=all", "", nil, "If-None-Match", tag)
+	if next.Code != http.StatusOK || next.Header().Get("ETag") == tag || !strings.Contains(next.Body.String(), `"kind":"igloo"`) {
+		t.Errorf("after the next survey: %d, tag %q", next.Code, next.Header().Get("ETag"))
+	}
+	s.mu.Lock()
+	kept = len(s.listed.held)
+	s.mu.Unlock()
+	if kept != 1 {
+		t.Errorf("%d answers kept, want only the new survey's", kept)
+	}
+}
+
+// A kind the owner withholds is the server's to keep back, whatever a
+// request says: it is in no list, count, catalog, search or answer about a
+// structure, for any session.
+func TestStructuresWithholdAKindFromEveryAnswer(t *testing.T) {
+	s, _ := withEverything(t)
+	source := surveyed()
+	layer := source.survey.Layers[chunks.Overworld]
+	treasure := structures.Structure{Kind: structures.BuriedTreasure, Box: structures.Box{MinX: 808, MinY: 58, MinZ: -392, MaxX: 808, MaxY: 58, MaxZ: -392}, Evidence: 1}
+	layer.Recorded = append(layer.Recorded, treasure, structures.Structure{Kind: structures.AncientCity, Box: structures.Box{MinX: 2000, MinY: -50, MinZ: 2000, MaxX: 2100, MaxY: -30, MaxZ: 2100}, Evidence: 9})
+	layer.Predicted = append(layer.Predicted, structures.Prediction{Kind: structures.BuriedTreasure, X: 1208, Z: 88, Generated: true, Vacant: true})
+	source.survey.Layers[chunks.Overworld] = layer
+	source.survey.Check.Kinds[structures.Rule{Kind: structures.BuriedTreasure, Dimension: chunks.Overworld}] = structures.KindCheck{State: structures.SeedVerified, Agree: 40}
+	s.Structures = source
+	c := session(s, steve)
+	asks := func() (list structuresResponse, body string, found int, detail int) {
+		list, body = structuresOf(t, s, "/api/structures?dimension=overworld&kinds=all", c)
+		hits := decodeBody[searchAnswer](t, do(s.Handler(), "GET", "/api/search?q=treasure&dimension=overworld&x=0&z=0&asked=buried_treasure", "", []*http.Cookie{c}))
+		rec := do(s.Handler(), "GET", "/api/structures/detail?dimension=overworld&kind=buried_treasure&x=808&z=-392", "", []*http.Cookie{c})
+		return list, body, len(hits.Hits), rec.Code
+	}
+	// Not withheld, and asked for: all of it is there.
+	if _, body, found, detail := asks(); !strings.Contains(body, `"kind":"buried_treasure"`) || found != 1 || detail != http.StatusOK {
+		t.Fatalf("with nothing withheld: found %d, detail %d, body %s", found, detail, body)
+	}
+	s.Withheld = []structures.Kind{structures.BuriedTreasure}
+	s.mu.Lock()
+	s.listed = structureCache{}
+	s.mu.Unlock()
+	list, body, found, detail := asks()
+	if strings.Contains(body, "buried_treasure") || found != 0 || detail != http.StatusNotFound {
+		t.Errorf("withheld: found %d, detail %d, body names it: %v", found, detail, strings.Contains(body, "buried_treasure"))
+	}
+	if len(list.Catalog) != len(structures.Kinds)-1 {
+		t.Errorf("catalog lists %d kinds of %d with one withheld", len(list.Catalog), len(structures.Kinds))
+	}
+	if _, judged := list.Kinds[structures.BuriedTreasure]; judged {
+		t.Error("how the withheld kind's rule fared is sent")
+	}
+	// A kind that is only off until asked for is still there to be asked for.
+	if !strings.Contains(body, `"kind":"ancient_city"`) {
+		t.Error("a kind that is off until asked for was withheld with it")
+	}
+}
+
+// A site with nothing found at it is not somewhere a search sends anybody.
+func TestSearchLeavesOutSitesWithNothingFound(t *testing.T) {
+	s, _ := withEverything(t)
+	source := surveyed()
+	layer := source.survey.Layers[chunks.Overworld]
+	layer.Predicted = append(layer.Predicted, structures.Prediction{Kind: structures.Village, X: 5000, Z: 5000, Generated: true, Vacant: true}, structures.Prediction{Kind: structures.Village, X: 6000, Z: 6000, Candidate: true})
+	source.survey.Layers[chunks.Overworld] = layer
+	s.Structures = source
+	got := search(t, s, "village", session(s, steve))
+	for _, h := range got.Hits {
+		if h.X == 5000 {
+			t.Errorf("a site with nothing found is a hit: %+v", h)
+		}
+	}
+	possible := false
+	for _, h := range got.Hits {
+		possible = possible || (h.X == 6000 && h.Certainty == "candidate")
+	}
+	if !possible {
+		t.Errorf("the possible site is not a hit: %s", describe(got))
 	}
 }
 

@@ -147,6 +147,7 @@ func run(logger *slog.Logger) error {
 			WorkDir:       filepath.Join(cfg.DataDir, "structures"),
 			Predictors:    structures.Predictors,
 			StructureSeed: cfg.StructureSeed,
+			Withheld:      cfg.StructuresWithheld,
 			Background:    ctx,
 			Logger:        logger,
 		}
@@ -220,6 +221,7 @@ func run(logger *slog.Logger) error {
 	}
 	if surveyor != nil {
 		app.Structures = surveyor
+		app.Withheld = cfg.StructuresWithheld
 	}
 	if biomeStore != nil {
 		app.Biomes = biomeStore

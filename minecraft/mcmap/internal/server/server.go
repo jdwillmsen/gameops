@@ -18,6 +18,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 )
 
@@ -70,6 +71,12 @@ type Server struct {
 	// Structures is the structures the world recorded and the ones its
 	// seed predicts. Nil leaves the route out.
 	Structures StructureSource
+	// Withheld is the kinds of structure the owner keeps off the map
+	// altogether. One is in no list, count, catalog, search or answer
+	// about a structure, whatever a request says: it is this server's
+	// rule, where a kind that is only off until asked for is the page's
+	// courtesy.
+	Withheld []structures.Kind
 	// Biomes is the biomes the world stored for its chunks. Nil leaves the
 	// overlay and its routes out; search then finds no biomes.
 	Biomes BiomeSource
@@ -80,6 +87,9 @@ type Server struct {
 	infos map[string]cachedInfo
 	// search holds what a search would otherwise decode again every time.
 	search searchCache
+	// listed is the answers about a survey's structures as they were last
+	// written out, which is the same bytes until the next survey.
+	listed structureCache
 	// players is the UniqueID the world knows each session's player by,
 	// by XUID, and playersWorld the world those ids are of. clock, for
 	// tests, is what the memory's age is told by.
