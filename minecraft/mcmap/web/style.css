@@ -839,6 +839,10 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
    Fainter and dotted, and its picture faint with it, so that a map full of
    them does not read as a map full of structures. */
 .structure.predicted.candidate span { border-style: dotted; opacity: 0.45; }
+/* A site with nothing found at it is fainter than a possible one, and
+   crossed: it is where one would be, and the save shows none. */
+.structure.predicted.vacant span { border-style: dotted; opacity: 0.3; filter: grayscale(1); }
+.structure.predicted.vacant:hover span, .structure.predicted.vacant:focus span { opacity: 0.85; }
 .structure.predicted.candidate:hover span, .structure.predicted.candidate:focus span { opacity: 0.9; }
 
 /* A structure's mark is an element, not a stroke on the map's canvas, so
