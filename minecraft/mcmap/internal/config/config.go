@@ -8,15 +8,27 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
 
 // The renderer build this service was verified against. The address always
 // serves the newest dev build, so the digest is what actually pins it.
+// DefaultStructuresWithheld is the kinds of structure kept off the map
+// unless the owner says otherwise. A buried treasure is nothing but a chest
+// under a beach: where each one is, is a treasure map of the whole world.
+const (
+	DefaultStructuresWithheld = "buried_treasure"
+	// withholdNothing is what STRUCTURES_WITHHELD is set to for every kind
+	// to be on the map; left empty it is the default.
+	withholdNothing = "none"
+)
+
 const (
 	DefaultUnminedURL    = "https://unmined.net/download/unmined-cli-linux-x64-dev/"
 	DefaultUnminedSHA256 = "a47ec942a6d4a0f2e68323ed6c4da3221fe9d09353c2132188042776f96e47d7"
@@ -89,6 +101,9 @@ type Config struct {
 
 	// Structures is whether the world's structures are read and served.
 	Structures bool
+	// StructuresWithheld is the kinds of structure kept off the map
+	// altogether, for everybody.
+	StructuresWithheld []structures.Kind
 	// StructureSeed, when set, is the 32 bits structure placement is
 	// seeded with, for a world whose level.dat does not hold them. A whole
 	// world seed given for it has been cut to its low 32 bits.
@@ -237,6 +252,20 @@ func Load(getenv func(string) string) (Config, error) {
 
 	if c.Structures, err = strconv.ParseBool(or(getenv("STRUCTURES_ENABLED"), "true")); err != nil {
 		fail("STRUCTURES_ENABLED must be true or false")
+	}
+	withheld := or(strings.TrimSpace(getenv("STRUCTURES_WITHHELD")), DefaultStructuresWithheld)
+	if withheld == withholdNothing {
+		withheld = ""
+	}
+	for _, name := range strings.FieldsFunc(withheld, func(r rune) bool { return r == ',' || r == ' ' }) {
+		kind := structures.Kind(name)
+		if _, known := structures.InfoOf(kind); !known {
+			fail("STRUCTURES_WITHHELD names %q, which is no kind of structure the map shows", name)
+			continue
+		}
+		if !slices.Contains(c.StructuresWithheld, kind) {
+			c.StructuresWithheld = append(c.StructuresWithheld, kind)
+		}
 	}
 	if c.StructureSeedSearch, err = strconv.ParseBool(or(getenv("STRUCTURE_SEED_SEARCH"), "true")); err != nil {
 		fail("STRUCTURE_SEED_SEARCH must be true or false")

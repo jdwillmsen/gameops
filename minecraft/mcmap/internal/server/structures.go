@@ -1,6 +1,9 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -54,7 +57,41 @@ type structuresJSON struct {
 	Spawn *spawnJSON `json:"spawn,omitempty"`
 }
 
+// structureCache is the answers about one survey, written out once each.
+// The overworld's is a quarter of a megabyte and is asked for by every
+// page every five minutes; between surveys it does not change.
+type structureCache struct {
+	at   time.Time
+	held map[structureAsk]structureAnswer
+}
+
+type structureAsk struct {
+	dimension chunks.Dimension
+	every     bool
+}
+
+type structureAnswer struct {
+	body []byte
+	etag string
+}
+
+// holds reports whether the owner keeps a kind off the map.
+func (s *Server) holds(kind structures.Kind) bool { return slices.Contains(s.Withheld, kind) }
+
+// catalog is every kind the map can show to anybody.
+func (s *Server) catalog() []structures.Info {
+	out := make([]structures.Info, 0, len(structures.Catalog))
+	for _, k := range structures.Catalog {
+		if !s.holds(k.Kind) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // handleStructures serves one dimension's structures from the last survey.
+// The answer is the same for every session until the next survey, so the
+// browser keeps its copy and asks only whether it is still current.
 func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 	var dimension chunks.Dimension = -1
 	for _, d := range chunks.Dimensions {
@@ -66,41 +103,76 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown dimension", http.StatusBadRequest)
 		return
 	}
+	ask := structureAsk{dimension, r.URL.Query().Get("kinds") == "all"}
+	survey, surveyed := s.Structures.Last()
+	s.mu.Lock()
+	if !surveyed || !s.listed.at.Equal(survey.At) || s.listed.held == nil {
+		s.listed = structureCache{at: survey.At, held: map[structureAsk]structureAnswer{}}
+	}
+	answer, written := s.listed.held[ask]
+	s.mu.Unlock()
+	if !written {
+		body, err := json.Marshal(s.structuresOf(survey, surveyed, ask))
+		if err != nil {
+			http.Error(w, "the structures could not be written out", http.StatusInternalServerError)
+			return
+		}
+		sum := sha256.Sum256(body)
+		answer = structureAnswer{body, `"` + hex.EncodeToString(sum[:12]) + `"`}
+		// Nothing is kept of a world not surveyed yet: the next ask may
+		// be after the first survey, which is another answer.
+		if surveyed {
+			s.mu.Lock()
+			if s.listed.at.Equal(survey.At) {
+				s.listed.held[ask] = answer
+			}
+			s.mu.Unlock()
+		}
+	}
+	h := w.Header()
+	// Private, because it is only for the logged-in browser that asked;
+	// no-cache, so that every use of the copy is checked against the tag.
+	h.Set("Cache-Control", "private, no-cache")
+	h.Set("ETag", answer.etag)
+	if r.Header.Get("If-None-Match") == answer.etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.Set("Content-Type", "application/json")
+	_, _ = w.Write(answer.body)
+}
+
+// structuresOf is the answer about one dimension of a survey.
+func (s *Server) structuresOf(survey structures.Survey, surveyed bool, ask structureAsk) structuresJSON {
+	dimension, every := ask.dimension, ask.every
 	out := structuresJSON{
 		Recorded:   []structures.Structure{},
 		Predicted:  []structures.Prediction{},
 		Prediction: structures.SeedUnknown,
 		Kinds:      map[structures.Kind]structures.KindCheck{},
-		Catalog:    structures.Catalog,
+		Catalog:    s.catalog(),
 	}
-	if survey, ok := s.Structures.Last(); ok {
+	if surveyed {
 		layer := survey.Layers[dimension]
 		out.Surveyed, out.At, out.Prediction = true, &survey.At, survey.Check.State
 		// A page from before the catalog has no row to put a later kind
 		// away with, and would draw every one of them, the ones that are
 		// off until asked for among them. It is sent the kinds it knows,
 		// and those are picked out before the bound is applied, so that a
-		// later kind takes none of the room there is for them.
-		recorded, predicted := layer.Recorded, layer.Predicted
-		every := r.URL.Query().Get("kinds") == "all"
-		if !every {
-			recorded = slices.DeleteFunc(slices.Clone(recorded), func(st structures.Structure) bool { return !firstKinds[st.Kind] })
-			predicted = slices.DeleteFunc(slices.Clone(predicted), func(p structures.Prediction) bool { return !firstKinds[p.Kind] })
-		}
+		// later kind takes none of the room there is for them. A kind the
+		// owner withholds is sent to nobody; the survey leaves it out
+		// already, and it is left out again here, where a list becomes an
+		// answer.
+		sent := func(kind structures.Kind) bool { return !s.holds(kind) && (every || firstKinds[kind]) }
+		recorded := slices.DeleteFunc(slices.Clone(layer.Recorded), func(st structures.Structure) bool { return !sent(st.Kind) })
+		predicted := slices.DeleteFunc(slices.Clone(layer.Predicted), func(p structures.Prediction) bool { return !sent(p.Kind) })
 		// The survey keeps to this bound already. It is applied again
 		// here because this is where a list becomes a response.
 		out.Recorded, out.RecordedMore = clamp(recorded, layer.RecordedMore)
 		out.Predicted, out.PredictedMore = clamp(predicted, layer.PredictedMore)
 		for _, p := range structures.Predictors {
-			if check, ok := survey.Check.Kinds[structures.Rule{Kind: p.Kind(), Dimension: dimension}]; ok && p.Dimension() == dimension {
+			if check, ok := survey.Check.Kinds[structures.Rule{Kind: p.Kind(), Dimension: dimension}]; ok && p.Dimension() == dimension && sent(p.Kind()) {
 				out.Kinds[p.Kind()] = check
-			}
-		}
-		if !every {
-			for kind := range out.Kinds {
-				if !firstKinds[kind] {
-					delete(out.Kinds, kind)
-				}
 			}
 		}
 		if survey.HasLevel && dimension == chunks.Overworld {
@@ -110,7 +182,7 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 // firstKinds is the kinds a page from before the catalog knows.
@@ -225,7 +297,7 @@ func (s *Server) handleStructureDetail(w http.ResponseWriter, r *http.Request) {
 	recorded, _ := clamp(layer.Recorded, 0)
 	for i, st := range recorded {
 		midX, midZ := st.MinX+(st.MaxX-st.MinX)/2, st.MinZ+(st.MaxZ-st.MinZ)/2
-		if string(st.Kind) != q.Get("kind") || int64(midX) != x || int64(midZ) != z {
+		if string(st.Kind) != q.Get("kind") || int64(midX) != x || int64(midZ) != z || s.holds(st.Kind) {
 			continue
 		}
 		out := structureDetailJSON{At: survey.At, Structure: st}
