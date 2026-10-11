@@ -420,8 +420,19 @@ a head that is half or less of what is drawn (a bat's between its wings,
 a shulker's under its lid) is not what the picture is of, and that one
 is drawn by the whole of it. Every picture on the page is drawn by the
 one routine, so the map, a row of the panel, the card, a search result
-and a structure's sheet agree. A server from before it said where heads
-are has its faces drawn by the whole picture, as they were. On the page itself, in a panel's
+and a structure's sheet agree.
+
+Where the heads are comes from the recipes the pictures were made by,
+and a release that raises the art revision serves the volume's pictures
+as they are until they have been made again, which wants the source and
+can be a long while. The recipes they were made by are read with them
+and say where their heads are all that time; before, such a service
+said nothing, and every face went back to being set by its square: a
+villager's head 0.7 to 3 device pixels left of its plate's middle, by
+size and the screen's density. A page told nothing of a face (by a
+service older still) sets it by what is drawn of it and not by its
+square, which leaves a head at most a row of nose out and within 0.7 of
+a device pixel across. On the page itself, in a panel's
 row or a search result, a block is drawn only where it fits its 16 pixel
 box whole, which is on a dense screen; elsewhere its flat picture is.
 

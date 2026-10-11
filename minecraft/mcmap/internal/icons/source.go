@@ -133,6 +133,11 @@ type Set struct {
 	// Replanned marks a set whose Recipes and Rejected were worked out
 	// afresh and are the whole of them, not an addition.
 	Replanned bool
+	// made is how the pictures of a set read from the volume were made,
+	// where that was under another revision of the making: no picture is
+	// made from these again, but each says where the head is in the face
+	// it made, for as long as that face is the one served.
+	made map[string]Recipe
 }
 
 // budget is how much one fetch may still download.

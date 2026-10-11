@@ -339,7 +339,15 @@ func (m *Mobs) set(set Set) {
 	m.mu.Lock()
 	m.icons, m.types, m.version = set.Mobs, types, version
 	m.pictures, m.pictureKeys, m.pictureVersion = set.Pictures, pictureKeys, pictureVersion
-	m.heads = headBoxes(set.Pictures, set.Recipes)
+	// Until the pictures have been made again under this revision, they
+	// are the ones the earlier recipes made, and their heads are where
+	// those put them: a page told nothing would set every face by the
+	// whole of its picture, off the middle of its plate.
+	recipes := set.Recipes
+	if recipes == nil {
+		recipes = set.made
+	}
+	m.heads = headBoxes(set.Pictures, recipes)
 	m.names = names
 	m.rejected = set.Rejected
 	m.mu.Unlock()
@@ -545,9 +553,12 @@ func (m *Mobs) load() (set Set, earlier bool, err error) {
 	// so none of the old ones is kept to make a picture the old way.
 	if idx.Art == ArtRevision {
 		out.Recipes, out.Rejected = idx.Recipes, idx.Rejected
-	} else if !slices.Contains(out.Missing, artPlan) {
-		out.Missing = append(slices.Clip(out.Missing), artPlan)
-		slices.Sort(out.Missing)
+	} else {
+		out.made = idx.Recipes
+		if !slices.Contains(out.Missing, artPlan) {
+			out.Missing = append(slices.Clip(out.Missing), artPlan)
+			slices.Sort(out.Missing)
+		}
 	}
 	return out, earlier, nil
 }
