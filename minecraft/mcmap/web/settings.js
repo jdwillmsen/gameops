@@ -278,6 +278,9 @@
     trails: shape({ seconds: int(60, 7 * 86_400) }),
     shortcuts: shape({ on: bool }),
     grid: shape({ on: bool }),
+    // The troubleshooting tools: the debug panel, the report's controls,
+    // and which visual aids the panel has on.
+    debug: shape({ on: bool, report: bool, aids: shape({ tiles: bool, lines: bool, hits: bool, room: bool }) }),
     biome: shape({ only: orNull(text(64, /^[a-z0-9_.:-]+$/)) }),
     look: lookOf,
     views: shape({
@@ -297,6 +300,7 @@
     trails: () => ({ seconds: 3600 }),
     shortcuts: () => ({ on: true }),
     grid: () => ({ on: false }),
+    debug: () => ({ on: false, report: false, aids: { tiles: false, lines: false, hits: false, room: false } }),
     biome: () => ({ only: null }),
     look: () => ({ ...LOOK_DEFAULTS }),
     views: () => ({ list: [], order: [...BUILT_IN], start: null, hidden: [], active: null }),
@@ -478,6 +482,8 @@
   };
 
   let state;
+  // How the record was found at the start, for the troubleshooting report.
+  let opened = null;
   const written = {};
   {
     let raw = stored(KEY);
@@ -492,6 +498,7 @@
       kept = 'newer';
     }
     const fresh = !raw;
+    opened = { from: fresh || !Number.isInteger(raw.v) ? null : raw.v, to: VERSION };
     const unbrought = !fresh && (raw.v !== VERSION || !(plain(raw.layers) && raw.layers[BROUGHT] === 1));
     state = wholeRecord(raw || carriedOver());
     let changed = fresh || unbrought;
@@ -772,6 +779,9 @@
     // script to start from.
     place: () => place,
     kept: () => kept,
+    // How the record was found when the page began, and how large it is.
+    opened: () => opened,
+    size: () => JSON.stringify(lasting()).length,
     look: resolved,
     colour,
     // For what comes from outside: a view, a name, or a whole record from

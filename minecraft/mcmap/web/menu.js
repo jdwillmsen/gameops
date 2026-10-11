@@ -83,6 +83,7 @@
     '-': () => map.zoomOut(),
     w: () => app.zoom && app.zoom.world(),
     b: () => app.zoom && app.zoom.block(),
+    d: () => app.debug && app.debug.toggle(),
   };
 
   function show() {

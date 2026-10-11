@@ -2479,6 +2479,41 @@ a percentage or a scale. An address carries the zoom to two decimals
 (`#overworld/0/0/3.25`); an address or a saved view with a whole zoom
 reads as it always did.
 
+**Troubleshooting.** Two switches in the shortcuts list (and `?debug=1`
+or `?diagnostics=1` on the address, `=0` to turn them off, kept with the
+page's other settings; `D` toggles the first) turn on tools for finding a
+bug. The debug panel is a small region over a corner of the map, updated
+four times a second and doing nothing at all while it is off. It shows the
+exact zoom and scale, the centre, bounds and the pointer's block, chunk and
+region (and the other dimension's block), the device pixel ratio and the
+sprite density, the window, the map and the visible area the follow code
+keeps its target in, the marker settings, each tile layer's native range,
+the tile zoom in use and how many tiles are held, loading and failed, the
+live stream (connected, last frame, frames a minute, entities in the frame
+against marks drawn and held back by the server, reconnects), how old the
+snapshots last seen were, the frame time over the last second, long tasks,
+whether the scripts loaded are the ones the server has now (a page and its
+scripts are cached apart, and a mixture is named), the settings record's
+version and size, and the last errors. It can also draw tile edges with
+their `z/x/y`, chunk and region lines, marker hit areas and anchors, and
+the visible area with the follow target.
+
+The diagnostics tools add Copy diagnostics, Download and Record 10 seconds.
+The report is one JSON text made on the page: everything the panel shows,
+the browser and operating system, input and motion preferences, viewport
+and pixel ratio, the link, the settings, layer and tile counts, what the
+server says of itself (`GET /api/diagnostics`), the last failures of each
+kind of request (status and time, no bodies) and the last 200 events
+(zoom, dimension, follow, reconnects, errors, long tasks, settings
+migrations) kept in memory and never sent anywhere. Gamertags, view names
+and the names of waypoints and name tags are replaced by how many there
+were, and the link, the map's centre and bounds, the pointer and the places
+saved in views are left out unless Include my position is ticked, which is
+asked again each time. The recording samples every frame for ten seconds:
+the zoom, how far the map moved from where it began, the followed marker's
+drawn position against its true one and a marker's size on the screen, and
+is added to the next report with a summary.
+
 **The layer panel.** Everything the map can show is in one panel beside
 the map, as a list three deep and no deeper: a section, the layers in it,
 and what each layer is made of.
@@ -2777,6 +2812,7 @@ where it was.
 | `V` | Opens the list of views; in it, `1` to `9` switches to the view with that number |
 | `S` | Go to the world spawn |
 | `M` | Go to the logged-in player and open their card, while they are online |
+| `D` | The debug panel on or off |
 | `+` `-` | Zoom in and out a level at a time (`=` zooms in too) |
 | `W` | Zoom out to the whole world |
 | `B` | Zoom in to block detail, 64 pixels to a block |
@@ -3654,6 +3690,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
 | `GET /api/structures?dimension=<id>&kinds=all` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, how many recorded boxes it was joined from, and for an abandoned camp `variant`, the biome it was built for; or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`; or for a kind found by its blocks with `evidence`, how many blocks and mobs it was found by, and for a trial chamber `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, `generated` where the chunk is finished, suits the kind and the world holds none, with `vacant` beside it for a kind that can stand where the save shows no sign of it, or `mapped` where one of the world's explorer maps points at a site in country not generated), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `catalog` (every kind the map can show, in any dimension: its `kind`, the `dimensions` the game generates it in, `asked` where it is off until the viewer turns it on, and `quiet` where a finished site with none may hold one all the same), `surveyed`, `at`, and with the overworld `spawn`. Without `kinds=all` the answer holds only the seven kinds there were before `catalog`, for a page that could not put a later one away. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `reach`, for a kind found by its blocks, how many blocks past the box round those the rest was counted in; `uncounted`, for a stronghold, where nothing but what it was found by is said and the lists are empty for that reason; `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `end_gateway`, `dispenser`, `dropper`, `unbroken_pot`, `unbrushed` for suspicious sand and gravel nobody has brushed, and `dragon_head` and `elytra` for an end ship's, those there are); `elders` for a monument; `bastion` for a bastion whose blocks still say which it is, `treasure`, `stables` or `bridge`; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/diagnostics` | Session required. What the troubleshooting report asks the server: `build`, `go`, `now`, `role` (`player` with a login, `open` without), `features` (which of login, live, markers, waypoints, icons, structures, biomes and trails are on), `refreshSeconds`, `snapshotAt`, `renderedAt` by dimension, `failing`, and `assets`: an FNV-1a fingerprint of each of the page's own files (at most 64), for the page to tell which scripts it loaded are older than the page. Nothing about a player, no error text and no secret. |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest; `biomes=<name>,…` draws only those and `except=<name>,…` all but those, one of the three at a time and at most 128 names. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
