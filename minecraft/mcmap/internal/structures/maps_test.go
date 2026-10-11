@@ -39,8 +39,8 @@ func TestMaps_KeepWhereAWoodlandExplorerMapPoints(t *testing.T) {
 	c.mapRecord(mapRecord(7, mark(markMansion, 96, 96)))
 	c.mapRecord(mapRecord(0))
 	want := target{Mansion, chunks.Overworld, Site{250, -144}}
-	if got := targetsOf(c); len(got) != 1 || c.stats.Skipped != 0 {
-		t.Fatalf("targets %+v with %d skipped, want the one mansion", got, c.stats.Skipped)
+	if got := targetsOf(c); len(got) != 1 || c.stats.Skipped != 1 {
+		t.Fatalf("targets %+v with %d skipped, want the one mansion, and the map of no dimension counted", got, c.stats.Skipped)
 	}
 	if _, held := c.targets[want]; !held {
 		t.Errorf("targets %+v, want %+v", c.targets, want)
@@ -70,6 +70,21 @@ func TestMaps_ADamagedMapIsSkippedAndCounted(t *testing.T) {
 	c.mapRecord(mapRecord(0, mark(markMansion, 2_000_000_000, 0)))
 	if len(c.targets) != 0 || c.stats.Skipped != 1 {
 		t.Errorf("a map pointing past the edge of the world: %+v, %d skipped", c.targets, c.stats.Skipped)
+	}
+}
+
+// A map that does not say which dimension it is of is not taken for the
+// overworld's.
+func TestMaps_AMapOfNoDimensionPointsNowhere(t *testing.T) {
+	c := newContents()
+	c.mapRecord(nbtRecord(nbtList("decorations", mark(markMansion, 4008, -2296)), nbtLong("mapId", 77)))
+	if len(c.targets) != 0 || c.stats.Skipped != 1 {
+		t.Errorf("a map with no dimension: %+v, %d skipped; want nowhere, and counted", c.targets, c.stats.Skipped)
+	}
+	// One a player drew, with no marks, is nothing to count.
+	c.mapRecord(nbtRecord(nbtList("decorations"), nbtLong("mapId", 78)))
+	if c.stats.Skipped != 1 {
+		t.Errorf("a blank map with no dimension was counted: %d", c.stats.Skipped)
 	}
 }
 

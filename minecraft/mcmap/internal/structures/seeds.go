@@ -49,7 +49,8 @@ type worldSeed struct {
 type seedBook struct {
 	seeds  []int64
 	byHash map[uint64]int8
-	// over is how many entries name a seed past maxSeeds.
+	// over is how many entries name a seed past maxSeeds. Their chunks
+	// are ones whose seed is not known.
 	over int
 }
 

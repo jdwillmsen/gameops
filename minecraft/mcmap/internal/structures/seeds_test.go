@@ -1,8 +1,10 @@
 package structures
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
@@ -258,5 +260,61 @@ func TestTake_AWorldWhoseDictionaryIsDamagedIsAllOfOneSeed(t *testing.T) {
 	}
 	if k := got.Check.Kinds[Rule{Monument, chunks.Overworld}]; k.Agree != 3 || k.Disagree != 3 || got.Seeds != 0 || got.Malformed != 1 {
 		t.Errorf("monuments = %+v under %d seeds with %d malformed", k, got.Seeds, got.Malformed)
+	}
+}
+
+// A world of more seeds than are told apart says so, since the chunks of
+// the rest are then treated as naming none.
+func TestTake_SaysWhenTheWorldNamesMoreSeedsThanAreToldApart(t *testing.T) {
+	w := newWorld(t)
+	var entries []seedEntry
+	for i := range maxSeeds + 2 {
+		entries = append(entries, seedEntry{uint64(100 + i), ptr(int64(i + 1))})
+		w.seeded(chunks.Overworld, int32(i), 0, uint64(100+i))
+	}
+	w.records[dictionaryKey] = dictionary(entries...)
+	log := &bytes.Buffer{}
+	got, err := surveyor(t, log).Take(context.Background(), w.write(), surveyedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SeedsOver != 2 || got.Seedless != 2 || !strings.Contains(log.String(), "more seeds than are told apart") || !strings.Contains(log.String(), "entries_over=2") {
+		t.Errorf("%d entries over and %d chunks naming none; log:\n%s", got.SeedsOver, got.Seedless, log)
+	}
+}
+
+// A kind the owner withholds is not recorded, found or predicted, so that
+// nothing downstream of a survey has one to give away.
+func TestTake_LeavesOutEveryKindTheOwnerWithholds(t *testing.T) {
+	build := func() *world {
+		w, _, _ := twoSeeds(t)
+		w.blockEntity(chunks.Overworld, "Chest", 5000+8, 60, 5000-8, nbtString("LootTable", "loot_tables/chests/buriedtreasure.json"))
+		w.put(chunks.Pos{Dim: chunks.Overworld, X: 600, Z: 600}, TagVolumes, volumes(volumeEntry{name: "minecraft:igloo", box: Box{9600, 69, 9600, 9606, 73, 9607}, scattered: true}))
+		return w
+	}
+	kinds := func(got Survey) map[Kind]int {
+		out := map[Kind]int{}
+		for _, r := range got.Layers[chunks.Overworld].Recorded {
+			out[r.Kind]++
+		}
+		for _, p := range got.Layers[chunks.Overworld].Predicted {
+			out[p.Kind]++
+		}
+		return out
+	}
+	open := take(t, surveyor(t, nil), build())
+	if got := kinds(open); got[BuriedTreasure] != 1 || got[Igloo] != 1 || got[Monument] == 0 {
+		t.Fatalf("with nothing withheld: %v", got)
+	}
+	s := surveyor(t, nil)
+	s.Withheld = []Kind{BuriedTreasure, Igloo, Monument}
+	held := take(t, s, build())
+	if got := kinds(held); got[BuriedTreasure] != 0 || got[Igloo] != 0 || got[Monument] != 0 {
+		t.Errorf("withheld kinds are in the survey: %v", got)
+	}
+	for _, kind := range s.Withheld {
+		if k, judged := held.Check.Kinds[Rule{kind, chunks.Overworld}]; judged {
+			t.Errorf("%s is withheld and its rule was worked out all the same: %+v", kind, k)
+		}
 	}
 }

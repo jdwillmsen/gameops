@@ -278,7 +278,9 @@ type contents struct {
 	blocks map[chunks.Dimension][]savedBlock
 	// targets is where the world's explorer maps point.
 	targets map[target]struct{}
-	stats   ContentStats
+	// withheld is the kinds that are not looked for.
+	withheld map[Kind]bool
+	stats    ContentStats
 }
 
 type placing struct {

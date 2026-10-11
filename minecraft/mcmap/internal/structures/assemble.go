@@ -32,10 +32,17 @@ type Structure struct {
 // and rooms recorded one by one with open ground between them, and its
 // neighbours are never nearer than four chunks. An outpost's tents and
 // cages stand apart from its tower, and the next outpost is 24 chunks off.
+//
+// A fortress the world has only part generated is recorded as parts with
+// the country between them missing. Parts within fortressJoin blocks are
+// one fortress: its corridors run that far between rooms, and the next
+// fortress's site is a region away.
+const fortressJoin = 96
+
 func joinGap(kind Kind) int32 {
 	switch kind {
 	case Fortress:
-		return 32
+		return fortressJoin
 	case Outpost:
 		return 48
 	}

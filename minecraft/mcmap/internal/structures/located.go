@@ -176,7 +176,7 @@ const locateCheck = 8192
 func (c *contents) locate(ctx context.Context, d chunks.Dimension) ([]Structure, error) {
 	var out []Structure
 	for _, k := range locatedKinds {
-		if k.in != d {
+		if k.in != d || c.withheld[k.kind] {
 			continue
 		}
 		// The blocks are joined by the chunk they are in, so that the work

@@ -86,7 +86,7 @@ func TestRealWorld(t *testing.T) {
 	for _, d := range chunks.Dimensions {
 		layer := survey.Layers[d]
 		t.Logf("%s: %d recorded (+%d), %d predicted (+%d)", d.Name(), len(layer.Recorded), layer.RecordedMore, len(layer.Predicted), layer.PredictedMore)
-		type tally struct{ recorded, found, partial, predicted, candidates int }
+		type tally struct{ recorded, found, partial, predicted, vacant, mapped, candidates int }
 		by := map[Kind]*tally{}
 		of := func(kind Kind) *tally {
 			if by[kind] == nil {
@@ -106,15 +106,21 @@ func TestRealWorld(t *testing.T) {
 			}
 		}
 		for _, p := range layer.Predicted {
-			if p.Candidate {
+			switch {
+			case p.Candidate:
 				of(p.Kind).candidates++
-			} else {
+			case p.Vacant:
+				of(p.Kind).vacant++
+			case p.Mapped:
+				of(p.Kind).mapped++
+			default:
 				of(p.Kind).predicted++
 			}
 		}
 		for _, kind := range Kinds {
 			if k := by[kind]; k != nil {
-				t.Logf("  %-16s %4d recorded, %4d found by blocks (%d in part), %4d predicted, %4d possible", kind, k.recorded, k.found, k.partial, k.predicted, k.candidates)
+				t.Logf("  %-16s %4d recorded, %4d found by blocks (%d in part), %4d predicted, %4d mapped, %4d possible, %4d sites with nothing found",
+					kind, k.recorded, k.found, k.partial, k.predicted, k.mapped, k.candidates, k.vacant)
 			}
 		}
 	}
