@@ -252,8 +252,11 @@ async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, se
   for (const file of files) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), win, { filename: file });
 
   // The page's clock, which a check moves on by hand.
+  // It stands still otherwise, so that what a check finds does not turn
+  // on how long the check took to run.
+  const began = Date.now();
   let ahead = 0;
-  win.Date.now = () => Date.now() + ahead;
+  win.Date.now = () => began + ahead;
 
   // The pipeline a sample goes through before it is a frame, as far as it
   // decides what a frame holds: the pack keeps the mobs nearest the first

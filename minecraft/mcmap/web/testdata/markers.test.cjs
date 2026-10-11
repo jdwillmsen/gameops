@@ -464,6 +464,32 @@ test('a followed mob lost to a missing line stays where it was drawn and is foll
   }
 });
 
+test('a picture that says nothing, while a followed mob is missing or after, neither lets go of it nor starts its time afresh', async () => {
+  const { s, world, button, centred } = await followingInAHerd();
+  const nothing = async () => { s.advance(1000); await s.send({ stale: true }); };
+  s.pipe.skips = (mob) => mob.i === '77';
+  await s.sample(world(5, 5));
+  // The stream stalls and what is drawn is cleared, then frames come again without it.
+  await nothing();
+  for (let n = 0; n < 5; n += 1) {
+    await s.sample(world(5, 5));
+    assert.equal(button.textContent, 'Following', `${n + 3} s without it`);
+  }
+  s.pipe.skips = () => false;
+  await s.sample(world(30, 12));
+  centred(30, 12, 'back');
+  // Cleared while it was in the picture, and not in the first frame after: still given its time.
+  await nothing();
+  s.pipe.skips = (mob) => mob.i === '77';
+  await s.sample(world(30, 12));
+  assert.equal(button.textContent, 'Following');
+  // But the time it has been missing is counted through a picture that says nothing.
+  for (let n = 0; n < 7; n += 1) await s.sample(world(30, 12));
+  await nothing();
+  for (let n = 0; n < 8; n += 1) await s.sample(world(30, 12));
+  assert.equal(button.textContent, 'Follow', 'seventeen seconds gone');
+});
+
 test('a mob gone for longer than it is given is let go of, and the card says so', async () => {
   const { s, world, button, what } = await followingInAHerd();
   s.pipe.skips = (mob) => mob.i === '77';
