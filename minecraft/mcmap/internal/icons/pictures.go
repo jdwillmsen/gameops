@@ -39,35 +39,77 @@ var pictureKey = regexp.MustCompile(`^[a-z]{1,16}/[a-z0-9_]{1,32}$`)
 // the volume can make a start read.
 const maxPictures = 800
 
-// A structure has no item of its own. Each is drawn as the face of the mob
-// met there where there is one, and failing that as an item that could be
-// nothing else's: the README says why each was chosen.
-var structureItems = map[string]string{
-	"fortress":      "textures/items/netherbrick",
-	"monument":      "textures/items/prismarine_shard",
-	"outpost":       "textures/items/crossbow_standby",
-	"witch_hut":     "textures/items/cauldron",
-	"village":       "textures/items/villagebell",
-	"stronghold":    "textures/items/ender_eye",
-	"trial_chamber": "textures/items/trial_key",
+// structureArt is what one kind of structure is drawn as. The first of
+// these the samples hold is its picture: the game's own mark for the kind
+// on an explorer's map, the face of the mob met there and nowhere else,
+// and an item that could be nothing else's. The README says why each was
+// chosen.
+type structureArt struct {
+	// icon is under resource_pack/textures/map, a mark 8 pixels a side
+	// with its own dark outline.
+	icon string
+	// face is a mob's type.
+	face string
+	// item is under resource_pack, and is what a kind with neither is.
+	item string
+	// variants are the kind's other marks, by the word the map has for
+	// where one stands: a village's by the biome it is built in. Each is
+	// structure/<kind>_<variant>, beside structure/<kind>.
+	variants []string
+}
+
+// structureArts is every kind of structure's picture, a line a kind. A
+// kind added to StructureKinds is given its line here and nothing else.
+var structureArts = map[string]structureArt{
+	"fortress":      {face: "blaze", item: "textures/items/netherbrick"},
+	"monument":      {face: "elder_guardian", item: "textures/items/prismarine_shard"},
+	"outpost":       {face: "pillager", item: "textures/items/crossbow_standby"},
+	"witch_hut":     {face: "witch", item: "textures/items/cauldron"},
+	"village":       {icon: "textures/map/village_plains", item: "textures/items/villagebell", variants: []string{"desert", "savanna", "snowy", "taiga"}},
+	"stronghold":    {item: "textures/items/ender_eye"},
+	"trial_chamber": {face: "breeze", item: "textures/items/trial_key"},
 	// The carved face only a desert pyramid's sandstone has, and the stone
 	// a jungle temple is built of.
-	"desert_pyramid": "textures/blocks/sandstone_carved",
-	"jungle_temple":  "textures/blocks/cobblestone_mossy",
-	"igloo":          "textures/items/snowball",
-	"trail_ruins":    "textures/items/brush",
-	"abandoned_camp": "textures/items/campfire",
+	"desert_pyramid": {item: "textures/blocks/sandstone_carved"},
+	"jungle_temple":  {item: "textures/blocks/cobblestone_mossy"},
+	"igloo":          {item: "textures/items/snowball"},
+	"trail_ruins":    {item: "textures/items/brush"},
+	"abandoned_camp": {item: "textures/items/campfire"},
 	// What each is gone to for, or is made of and nothing else is.
-	"end_city":        "textures/items/elytra",
-	"end_gateway":     "textures/items/ender_pearl",
-	"exit_portal":     "textures/blocks/dragon_egg",
-	"bastion":         "textures/blocks/gilded_blackstone",
-	"ruined_portal":   "textures/blocks/crying_obsidian",
-	"mansion":         "textures/items/totem",
-	"ancient_city":    "textures/items/echo_shard",
-	"shipwreck":       "textures/items/boat_oak",
-	"ocean_ruins":     "textures/items/nautilus",
-	"buried_treasure": "textures/items/heartofthesea_closed",
+	"end_city":        {face: "shulker", item: "textures/items/elytra"},
+	"end_gateway":     {item: "textures/items/ender_pearl"},
+	"exit_portal":     {item: "textures/blocks/dragon_egg"},
+	"bastion":         {face: "piglin_brute", item: "textures/blocks/gilded_blackstone"},
+	"ruined_portal":   {item: "textures/blocks/crying_obsidian"},
+	"mansion":         {face: "evocation_illager", item: "textures/items/totem"},
+	"ancient_city":    {face: "warden", item: "textures/items/echo_shard"},
+	"shipwreck":       {item: "textures/items/boat_oak"},
+	"ocean_ruins":     {face: "drowned", item: "textures/items/nautilus"},
+	"buried_treasure": {item: "textures/items/heartofthesea_closed"},
+}
+
+// structureRecipes is the recipe for every structure's picture, given the
+// faces there are recipes for.
+func structureRecipes(faces map[string]Recipe) map[string]Recipe {
+	out := map[string]Recipe{}
+	for _, kind := range StructureKinds {
+		art := structureArts[kind]
+		recipe, faced := faces[faceKey(art.face)]
+		switch {
+		case art.icon != "":
+			recipe = Recipe{Flat: art.icon, Else: art.item}
+		case art.face != "" && faced:
+			recipe.Else = art.item
+		default:
+			recipe = Recipe{Flat: art.item}
+		}
+		out["structure/"+kind] = recipe
+		// A variant the samples do not hold is the kind's own mark.
+		for _, variant := range art.variants {
+			out["structure/"+kind+"_"+variant] = Recipe{Flat: "textures/map/" + kind + "_" + variant, Else: art.icon}
+		}
+	}
+	return out
 }
 
 // markerPicture is one marker picture and where in the samples it comes from.

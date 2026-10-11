@@ -546,7 +546,8 @@ with the item named here to fall back on:
 | `structure/monument` | an elder guardian's face, or `items/prismarine_shard` | Each monument has three; the shard is dropped only by its guardians |
 | `structure/outpost` | a pillager's face, or `items/crossbow_standby` | Who holds it, or their weapon |
 | `structure/witch_hut` | a witch's face, or `items/cauldron` | Who lives in it; every hut has a cauldron |
-| `structure/village` | a villager's face, or `items/villagebell` | Who lives in it; every village's meeting point has a bell |
+| `structure/village` | `map/village_plains`, or `items/villagebell` | The game's own mark for a village on an explorer's map: a house, 8 pixels a side with its own outline, drawn at a whole number of screen pixels to the pixel. A villager's face stood for it before, which read as a villager. Which of its mark, its mob's face and its item a kind is drawn as is one line of `structureArts` in `internal/icons/pictures.go` |
+| `structure/village_desert`, `_savanna`, `_snowy`, `_taiga` | `map/village_<biome>`, or the plains one | The game's marks for a village built in each of those biomes. A structure's sheet wears the one for the biome at its middle once that is known; a mark on the map is the plains one, since the survey does not yet say what biome a village stands in |
 | `structure/stronghold` | `items/ender_eye` | What finds one, and what lights its portal. No mob is a stronghold's own |
 | `structure/trial_chamber` | a breeze's face, or `items/trial_key` | The mob met there and nowhere else; the key opens its vaults |
 | `structure/desert_pyramid` | `blocks/sandstone_carved` | The carved face only a pyramid's sandstone has |

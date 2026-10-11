@@ -400,7 +400,7 @@ func headBoxes(pictures map[string][]byte, recipes map[string]Recipe) map[string
 		// in while the face cannot be made, and only the bytes say which.
 		if recipe.Else != "" {
 			kind := strings.TrimPrefix(key, "structure/")
-			if face, made := pictures[faceKey(structureFaces[kind])]; !made || !bytes.Equal(raw, face) {
+			if face, made := pictures[faceKey(structureArts[kind].face)]; !made || !bytes.Equal(raw, face) {
 				continue
 			}
 		}

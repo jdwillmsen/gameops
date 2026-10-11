@@ -756,7 +756,9 @@
     if (app.biomes) {
       const biome = el('span', '', 'Looking…');
       land.push(['Biome at its middle', biome]);
-      askBiome(at, biome);
+      // The sheet's picture is the kind's mark for that biome, where the
+      // game has one: a village's.
+      askBiome(at, biome, (name) => view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind, biome: name }))));
     }
     const box = s || { minX: at.x, maxX: at.x, minZ: at.z, maxZ: at.z };
     land.push(['Slime chunks', slime(box)]);
@@ -1107,7 +1109,8 @@
 
   // The biome is the one other thing asked of the server for the sheet,
   // and the answer is for the sheet that asked.
-  async function askBiome(at, into) {
+  // seen is told the biome's id, where there is one to tell.
+  async function askBiome(at, into, seen) {
     if (biomeAsk) biomeAsk.abort();
     const mine = new AbortController();
     biomeAsk = mine;
@@ -1118,6 +1121,7 @@
         const data = await res.json();
         const biome = data && data.generated && data.biome ? data.biome : null;
         text = biome ? (typeof biome.label === 'string' && biome.label) || names.tidy(biome.name) : 'Not generated here';
+        if (biome && biomeAsk === mine && seen) seen(biome.name);
       }
     } catch {
       if (biomeAsk !== mine) return;
