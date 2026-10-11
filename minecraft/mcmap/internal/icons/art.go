@@ -33,7 +33,7 @@ const (
 	// differently from the same samples: a face chosen otherwise, a kind
 	// of picture added. A volume written under another has its made
 	// pictures served as they are until they have been made again.
-	ArtRevision = 2
+	ArtRevision = 3
 )
 
 // mobLook is a mob type's client definition as far as drawing its face
