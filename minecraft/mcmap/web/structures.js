@@ -97,15 +97,24 @@
     // or a mark of it would be on the map until its row was drawn.
     if (app.layers.facet) app.layers.facet('structures', 'kinds', { off: [...OPT_IN] });
   }
-  const known = (kind) => Object.hasOwn(KINDS, kind) || (catalog !== null && catalog.has(kind));
+  // The kinds there were before the server said which there are: what a
+  // server from then is sent, and what it is listed with.
+  const FIRST = ['fortress', 'monument', 'outpost', 'witch_hut', 'village', 'stronghold', 'trial_chamber'];
+  const known = (kind) => (catalog === null ? FIRST.includes(kind) : catalog.has(kind));
   // The kinds a dimension is listed with, in the server's order: only
   // those the game can generate there.
-  const kindsIn = (dimension) => (catalog === null ? Object.keys(KINDS) : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));
-  // A kind with no item of its own has nothing to be hidden by.
-  const kindOn = (kind) => !known(kind) || choice.shows(kind);
+  const kindsIn = (dimension) => (catalog === null ? FIRST : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));
+  // A kind a server from before the catalog sends, and that this page has
+  // no item for, has nothing to be hidden by. A server that says which
+  // kinds there are sends no other, and one that is not among them is
+  // not drawn.
+  const kindOn = (kind) => (catalog === null ? !known(kind) || choice.shows(kind) : known(kind) && choice.shows(kind));
 
   // A name that is already more than one of its thing is left as it is.
   const many = (name) => (/(ruins|chambers|treasure)$/i.test(name) ? name : names.plural(name));
+
+  // What a count is a count of, where that is not plain.
+  const COUNTED = { fortress: 'Parts within 96 blocks of each other are counted as one fortress' };
 
   const DETAILS_HINT = 'Click for details';
 
@@ -160,11 +169,11 @@
     if (p.candidate) {
       return ['The seed puts a site here. Whether one is built depends on the biome, and this terrain is not generated yet.'];
     }
-    if (p.generated && p.kind === 'village') {
+    if (vacant(p) && p.kind === 'village') {
       return ['This area is generated and its biome suits one, but the game has no record of one here: it keeps one only for a village a player has been near.'];
     }
-    if (p.generated && quiet(p.kind)) {
-      return ['This area is generated and suits one, and nothing the save holds says one is here. That is not the world saying there is none: an older version of the game kept no record of this kind, and a chest that has been opened no longer says what it was.'];
+    if (vacant(p)) {
+      return ['This area is generated and suits one, and the save shows no sign of one. Either one stood here and what it was known by has been opened, brushed or taken, or none was ever built: nothing says which, and it is not a thing to set out for.'];
     }
     if (p.generated) return ['This area is already generated and the world recorded none here.'];
     return ['Not generated yet: nobody has been here.'];
@@ -242,7 +251,12 @@
   let pending = null;
   let available = true;
   let state = 'unknown';
-  const none = () => ({ recorded: 0, predicted: 0, candidate: 0 });
+  const none = () => ({ recorded: 0, predicted: 0, candidate: 0, vacant: 0 });
+  // A site in generated terrain where the save shows no sign of a kind
+  // that can be emptied or was never recorded: the server says so, and a
+  // server from before it did means the same by a finished site of such a
+  // kind.
+  const vacant = (p) => !p.candidate && (p.vacant === true || (p.generated === true && quiet(p.kind)));
   let counts = none();
   let more = none();
   // How many of each kind each layer holds, and how each kind's rule has
@@ -297,11 +311,11 @@
     }
     for (const p of predicted) {
       const sort = p.candidate ? 'candidate' : 'predicted';
-      const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : p.mapped === true ? 'where an explorer map of this world points' : 'predicted from the seed'}`;
+      const title = `${names.structure(p.kind)} · ${p.candidate ? 'possible here' : p.mapped === true ? 'where an explorer map of this world points' : vacant(p) ? 'a site with nothing found at it now' : 'predicted from the seed'}`;
       const label = tip(title, `around X ${fmt(p.x)}, Z ${fmt(p.z)}`, DETAILS_HINT);
       // Struck through only where the world has been asked and said no.
       const doubted = p.generated && !quiet(p.kind);
-      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, `predicted${p.candidate ? ' candidate' : ''}${doubted ? ' doubted' : ''}`), label, { predicted: p })
+      mark([p.z + 0.5, p.x + 0.5], icon(p.kind, `predicted${p.candidate ? ' candidate' : ''}${doubted ? ' doubted' : ''}${vacant(p) ? ' vacant' : ''}`), label, { predicted: p })
         .addTo(groupOf(sort, p.kind));
     }
     const spawn = data.spawn;
@@ -328,7 +342,8 @@
     };
     tally(recorded, 'recorded');
     foundKinds = new Set(recorded.filter(found).map((s) => s.kind));
-    tally(predicted.filter((p) => !p.candidate), 'predicted');
+    tally(predicted.filter((p) => !p.candidate && !vacant(p)), 'predicted');
+    tally(predicted.filter(vacant), 'vacant');
     tally(predicted.filter((p) => p.candidate), 'candidate');
     const sent = data.kinds && typeof data.kinds === 'object' ? data.kinds : {};
     for (const kind of kindsIn(dimension)) {
@@ -419,15 +434,16 @@
       const n = kinds[kind] || none();
       const asked = OPT_IN.has(kind);
       const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';
-      if (n.recorded + n.predicted + n.candidate === 0 && !asked && why === '') continue;
-      const more = [...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ');
+      if (n.recorded + n.predicted + n.candidate + n.vacant === 0 && !asked && why === '') continue;
+      const more = [...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : []),
+        ...(n.vacant > 0 ? [`${fmt(n.vacant)} ${n.vacant === 1 ? 'site' : 'sites'} with nothing found`] : [])].join(', ');
       items.push({
         id: kind,
         label: many(names.structure(kind)),
         picture: icons.keyOf('structure', { kind }),
         swatch: `dot ${kind.split('_').join('-')}`,
         count: surveyed ? n.recorded : null,
-        note: [more, foundKinds.has(kind) ? 'Found by their blocks' : '', why || (asked && !choice.shows(kind) ? ASK : '')].filter(Boolean).join('. '),
+        note: [more, n.recorded > 0 && Object.hasOwn(COUNTED, kind) ? COUNTED[kind] : '', foundKinds.has(kind) ? 'Found by their blocks' : '', why || (asked && !choice.shows(kind) ? ASK : '')].filter(Boolean).join('. '),
         off: asked,
       });
     }
@@ -559,6 +575,7 @@
     partial: 'Partly generated, most likely: it was found by fewer blocks than a finished one ever is, so the rest of it is in chunks the world has not generated yet.',
     fades: 'It is known by what nobody has yet opened or taken. Once the last of that is gone the map no longer finds it, though it stands where it stood.',
     predicted: 'Predicted: worked out from the world’s seed, not read from the world. Nothing has recorded one here.',
+    vacant: 'Nothing found here now: the world’s seed puts a site here, the terrain is generated, and the save holds no sign of one.',
     candidate: 'Possible site: the seed puts a site here, in terrain nobody has generated. The biome there will decide whether anything is built.',
   };
   const COMPASS = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
@@ -680,7 +697,7 @@
     const p = subject.predicted;
     view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind })));
     view.title.textContent = names.structure(kind);
-    const lines = [s && found(s) ? WHAT.found : WHAT[sort]];
+    const lines = [s && found(s) ? WHAT.found : p && vacant(p) ? WHAT.vacant : WHAT[sort]];
     if (s && found(s) && s.partial === true) lines.push(WHAT.partial);
     if (s && found(s) && quiet(kind)) lines.push(WHAT.fades);
     if (p) {
@@ -730,7 +747,9 @@
       out.push(held);
       askDetail(subject, held);
     } else {
-      out.push(el('p', 'note', 'Only a kind and a place can be said of a site the seed gives. The save holds nothing of it to count until the world generates it.'));
+      out.push(el('p', 'note', vacant(p)
+        ? 'Only a kind and a place can be said of a site the seed gives, and the save holds nothing at this one to count.'
+        : 'Only a kind and a place can be said of a site the seed gives. The save holds nothing of it to count until the world generates it.'));
     }
 
     const land = [];

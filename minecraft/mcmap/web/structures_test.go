@@ -32,14 +32,14 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 	for _, need := range []string{
 		"['candidate', 'Possible', 'key candidate'],",
 		"const sort = p.candidate ? 'candidate' : 'predicted';",
-		"p.candidate ? 'possible here' : p.mapped === true ? 'where an explorer map of this world points' : 'predicted from the seed'",
+		"p.candidate ? 'possible here' : p.mapped === true ? 'where an explorer map of this world points' : vacant(p) ? 'a site with nothing found at it now' : 'predicted from the seed'",
 		// What the game's own map points at is said to be that.
 		"if (p.mapped === true) {",
 		"One of this world’s own explorer maps points here:",
 		"this terrain is not generated yet.",
 		"the game has no record of one here: it keeps one only for a village a player has been near.",
 		// And for a kind an opened chest stops saying anything of.
-		"That is not the world saying there is none:",
+		"nothing says which, and it is not a thing to set out for.",
 		// Struck through only where the world would have recorded one.
 		"const doubted = p.generated && !quiet(p.kind);",
 		// Which kinds are so is the server's to say, and the village's for
@@ -49,7 +49,7 @@ func TestPredictionsAreToldFromPossibleSites(t *testing.T) {
 		// Each kind is listed once, with how many are known and under it
 		// how many more are predicted or possible, and why none is.
 		"count: surveyed ? n.recorded : null,",
-		"const more = [...(n.predicted > 0 ? [`${fmt(n.predicted)} predicted`] : []), ...(n.candidate > 0 ? [`${fmt(n.candidate)} possible`] : [])].join(', ');",
+		"...(n.vacant > 0 ? [`${fmt(n.vacant)} ${n.vacant === 1 ? 'site' : 'sites'} with nothing found`] : [])].join(', ');",
 		"const why = surveyed && state === 'verified' ? WHY_NOT_KIND[checks[kind]] || '' : '';",
 		"kindList.setItems(kindsNow());",
 		// A mark is on the map when its kind and its certainty both are,
@@ -168,7 +168,7 @@ func TestKindsAreListedByTheDimensionTheServerPutsThemIn(t *testing.T) {
 		"if (k.asked === true) OPT_IN.add(k.kind);",
 		"if (app.layers.facet) app.layers.facet('structures', 'kinds', { off: [...OPT_IN] });",
 		// Every kind in every dimension for a server that says nothing.
-		"const kindsIn = (dimension) => (catalog === null ? Object.keys(KINDS) : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));",
+		"const kindsIn = (dimension) => (catalog === null ? FIRST : [...catalog].filter(([, k]) => k.dimensions.includes(dimension)).map(([kind]) => kind));",
 		"for (const kind of kindsIn(dimension)) {",
 		"if (kindList.setElsewhere && catalog !== null) kindList.setElsewhere([...catalog.keys()]);",
 		// And the server is told this page lists what it is told to.

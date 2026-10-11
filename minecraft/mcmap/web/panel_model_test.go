@@ -13,6 +13,25 @@ import (
 // kept, and what a reload brings back are then checked as they are, which
 // reading the source cannot do. It needs a node to run in and nothing
 // else, and is skipped where there is none.
+// The structures' script is run the same way, beside the panel's, against
+// a map that remembers what is put on it and a server that answers as the
+// tests say: which kinds a dimension lists, what is drawn and what is not.
+func TestStructuresScriptDoesWhatItSaysWhenRun(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("no node on this machine to run the structures' script with")
+	}
+	out, err := exec.Command(node, "testdata/structures.test.cjs").CombinedOutput()
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if !strings.HasPrefix(line, "ok ") {
+			t.Log(line)
+		}
+	}
+	if err != nil {
+		t.Errorf("the structures' script did not do what is asked of it: %v", err)
+	}
+}
+
 func TestLayerPanelDoesWhatItSaysWhenRun(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
