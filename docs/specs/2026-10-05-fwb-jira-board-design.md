@@ -1,7 +1,7 @@
 # FWB Minecraft Jira board: design
 
 Date: 2026-10-05
-Status: awaiting review
+Status: built 2026-10-06; player invites and their checks outstanding
 
 ## Purpose
 
@@ -70,8 +70,8 @@ would only produce rollover.
 | Idea    | Anything not yet agreed                                 | Glass dome over the bay    |
 | Problem | Something broken or annoying in-game                    | Villagers escaping the hall|
 
-Goal is the space's Epic type, renamed. If Jira does not allow renaming it,
-it stays "Epic" and is used the same way.
+Goal is the space's Epic type, renamed. Jira's built-in Subtask type is
+also present; it cannot be removed and is not part of the design.
 
 Farms, nether hubs, redstone and storage are not separate types. They follow
 the same workflow as any Build, so they are a Category value.
@@ -141,29 +141,47 @@ card. The FWB card stays open until the players see the result in-game.
 
 ## Setup
 
-Split by who can do each step.
+Recorded as it was done, because two steps did not go as designed.
 
-**Owner, in the browser**
+1. **Site.** `fwb-minecraft.atlassian.net`, created by the owner in their
+   own browser. Atlassian's signup scores the browser with a bot check and
+   rejects an automated one, so this step cannot be scripted. A new site
+   starts on a Premium trial, not on Free.
+2. **Space.** Signup creates a first space unasked, named "My Kanban Space"
+   with key `KAN`. It was empty and team-managed, so it was renamed to
+   "FWB Minecraft" / `FWB` in place. Its board keeps the label "KAN board",
+   which shows only in the browser tab title. Atlassian's sample space was
+   deleted.
+3. **Configuration.** What the REST API could and could not do in a
+   team-managed space:
 
-1. Create the site `fwb-minecraft.atlassian.net` on the Free plan.
-2. Create the space: team-managed, kanban, name "FWB Minecraft", key `FWB`.
-3. Configure work types, columns and fields as above, and enable the
-   Releases feature, from a click-by-click checklist prepared alongside the
-   implementation plan. Each work type carries its own workflow, so the
-   checklist gives all five types the same five statuses.
-4. Invite the other two players.
+   | Change                               | REST API | Done through      |
+   |--------------------------------------|----------|-------------------|
+   | Rename the space and its key         | Yes      | API               |
+   | Rename an existing status            | Yes      | API               |
+   | Enable the Releases feature          | Yes      | API               |
+   | Rename a work type                   | No       | Space settings    |
+   | Create a field, add it to a type     | No       | Space settings    |
+   | Rename, add or reorder board columns | No       | Board, Configure columns |
 
-**Agent**
-
-1. Before the owner starts step 3, test whether the Jira REST API can create
-   work types, fields or columns in a team-managed space. Research found no
-   public endpoint for this and could not read the API reference in full, so
-   it is unconfirmed either way. Whatever the API can do is scripted;
-   whatever it cannot stays on the checklist.
-2. Once the Atlassian connector is authorised for the new site, read back
-   the space configuration and compare it with this spec.
+   The API refuses to rename a work type because the type belongs to the
+   space, not the site. A board column has its own name, separate from the
+   status behind it, so renaming a status does not rename its column.
+   Adding a column through the board creates its status in every work type's
+   workflow, which is what keeps the five types on the same five statuses.
+4. **Players.** Inviting someone to the site is not enough. A new site
+   member could not see or create cards in the space until they were also
+   added to its Member role, so each invite is followed by that. Members
+   can create and move cards; only the owner administers the space.
 
 ## Verification
+
+Checked on 2026-10-06 by creating one card of each type with only a summary,
+moving it through every column and deleting it: the first six items below
+hold, except the two about the done list, which were not exercised. Those
+test cards used the numbers 1 to 5, so the first real card is `FWB-6`. The
+last two items wait on the invites. Also outstanding: confirm the site drops
+to the Free plan when the Premium trial ends.
 
 - The space has the five work types, five columns in order, and the Category
   and Location fields with the listed values.
