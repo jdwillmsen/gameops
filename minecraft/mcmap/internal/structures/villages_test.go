@@ -748,3 +748,44 @@ func FuzzVillageRecord(f *testing.F) {
 		}
 	})
 }
+
+func TestAVillageIsOfTheBiomeAtItsMiddle(t *testing.T) {
+	for biome, want := range map[uint32]string{biomeDesert: "desert", biomeDesertHills: "desert", biomeSavanna: "savanna", biomeSnowyPlains: "snowy", biomeTaiga: "taiga", biomeSnowyTaiga: "taiga", biomePlains: "", biomeMeadow: "", 9999: ""} {
+		if got := villageVariant(biome); got != want {
+			t.Errorf("a village in biome %d is %q, want %q", biome, got, want)
+		}
+	}
+	facts := &VillageFacts{}
+	before := map[chunks.Dimension][]Structure{chunks.Overworld: {
+		{Kind: Village, Box: Box{MinX: 100, MaxX: 140, MinZ: -60, MaxZ: -20}, Village: facts},
+		{Kind: Village, Box: Box{MinX: 900, MaxX: 940, MinZ: 0, MaxZ: 40}, Variant: "stale"},
+		{Kind: Village, Box: Box{MinX: -500, MaxX: -460, MinZ: 0, MaxZ: 40}},
+	}}
+	asked := [][2]int32{}
+	got := inBiomes(before, func(_ chunks.Dimension, x, z int32) (uint32, bool) {
+		asked = append(asked, [2]int32{x, z})
+		switch {
+		case x == 120:
+			return biomeDesert, true
+		case x == 920:
+			return biomePlains, true
+		}
+		return 0, false
+	})[chunks.Overworld]
+	if got[0].Variant != "desert" || got[1].Variant != "" || got[2].Variant != "" {
+		t.Errorf("variants %q, %q, %q; want desert, none for plains, none where the biome is not known", got[0].Variant, got[1].Variant, got[2].Variant)
+	}
+	if asked[0] != [2]int32{120, -40} {
+		t.Errorf("asked at %v, not at the middle of the box", asked[0])
+	}
+	if got[0].Village != facts {
+		t.Error("a village's facts are another's after its biome was set")
+	}
+	// The villages given may be the ones being served, and are left as they were.
+	if before[chunks.Overworld][0].Variant != "" || before[chunks.Overworld][1].Variant != "stale" {
+		t.Error("the villages given were written to")
+	}
+	if same := inBiomes(before, nil); len(same[chunks.Overworld]) != 3 || same[chunks.Overworld][1].Variant != "stale" {
+		t.Error("with no biomes to ask, the villages are not as they were")
+	}
+}

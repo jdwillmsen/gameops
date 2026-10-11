@@ -633,3 +633,43 @@ func (v *village) raid(record []byte) error {
 	v.more.raid = &raid
 	return nil
 }
+
+// villageVariant is which of the game's five manners of village is built
+// in a biome, by the word its mark on an explorer's map is filed under,
+// and empty for the plains one every other biome's is.
+func villageVariant(biome uint32) string {
+	switch biome {
+	case biomeDesert, biomeDesertHills:
+		return "desert"
+	case biomeSavanna:
+		return "savanna"
+	case biomeSnowyPlains:
+		return "snowy"
+	case biomeTaiga, biomeSnowyTaiga:
+		return "taiga"
+	}
+	return ""
+}
+
+// inBiomes is the villages with each one's manner set from the biome at
+// the middle of its box, where that is known. The villages given may be
+// those of the survey before, which is being served, so they are copied
+// and not written to.
+func inBiomes(villages map[chunks.Dimension][]Structure, biomeAt BiomeAt) map[chunks.Dimension][]Structure {
+	if biomeAt == nil {
+		return villages
+	}
+	out := make(map[chunks.Dimension][]Structure, len(villages))
+	for d, list := range villages {
+		set := make([]Structure, len(list))
+		for i, v := range list {
+			set[i] = v
+			set[i].Variant = ""
+			if biome, known := biomeAt(d, (v.MinX+v.MaxX)/2, (v.MinZ+v.MaxZ)/2); known {
+				set[i].Variant = villageVariant(biome)
+			}
+		}
+		out[d] = set
+	}
+	return out
+}
