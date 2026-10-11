@@ -1177,7 +1177,10 @@
       picked.state = 'away';
       letGo('the map went to another dimension');
     } else if (!whole) {
-      if (picked.state !== 'lost' && picked.state !== 'saved') picked.state = 'waiting';
+      // One already missing goes on being missing, with the time it has
+      // been: a picture that says nothing does not start it afresh, nor
+      // end it.
+      if (picked.state !== 'lost' && picked.state !== 'saved' && picked.state !== 'missing') picked.state = 'waiting';
     } else if (savedOnly()) {
       // Not in a whole picture of its dimension: its chunk is not loaded,
       // and where the snapshot left it is all that is known.
@@ -1188,7 +1191,7 @@
       // and says nothing of whether it is still there. Only a frame drawn
       // since can say it has gone.
       picked.state = 'waiting';
-    } else if (picked.state === 'live') {
+    } else if (picked.state === 'live' || (picked.state === 'waiting' && picked.wasLive)) {
       // Not in this frame, which may be this frame's doing and not its
       // own: it is given time to be back before anything is let go of.
       picked.state = 'missing';
