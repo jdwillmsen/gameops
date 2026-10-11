@@ -126,7 +126,7 @@ func TestStructureDetailsAreTextAndCanBeLinkedTo(t *testing.T) {
 	app := read(t, "app.js")
 	for _, need := range []string{
 		"const EXTRA = /^[a-z0-9_~.-]{1,96}$/;",
-		"${map.getZoom()}${extra ? `/${extra}` : ''}`;",
+		"${tidy(map.getZoom())}${extra ? `/${extra}` : ''}`;",
 		"document.dispatchEvent(new CustomEvent('mcmap:link'));",
 	} {
 		if !bytes.Contains(app, []byte(need)) {

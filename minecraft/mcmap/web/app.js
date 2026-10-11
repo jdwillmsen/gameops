@@ -32,14 +32,36 @@
   // zoom 0 is one block per pixel, which is exactly how the tiles are cut.
   const crs = L.extend({}, L.CRS.Simple, { transformation: new L.Transformation(1, 0, 1, 0) });
 
+  // One block is 2^zoom screen pixels. 7 is 128: a single block fills a
+  // third of a phone's width and about a seventh of a desktop's height,
+  // enough to count the blocks of a build or place a marker on one. The
+  // terrain's own tiles stop at a block to the pixel, so everything past
+  // that is the same tiles enlarged.
+  const MAX_ZOOM = 7;
+  const MIN_ZOOM = -6;
+  // Hundredths of a level are well under a pixel at any scale the map
+  // has, and keep an address short.
+  const tidy = (zoom) => Math.round(zoom * 100) / 100;
+
+  // Zoom is any fraction, so that a pinch, a trackpad and the wheel rest
+  // where they were left. The wheel is zoom.js's own: Leaflet's drops a
+  // wheel turn that comes while its last zoom is still animating, and
+  // zooms in whole levels however little was scrolled.
   const map = L.map('map', {
     crs,
     attributionControl: false,
-    zoomSnap: 1,
-    minZoom: -6,
-    maxZoom: 3,
+    zoomSnap: 0,
+    zoomDelta: 1,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
+    scrollWheelZoom: false,
     maxBoundsViscosity: 0.8,
   });
+
+  // Over the terrain, the biome tint and the slime chunks, which are in the
+  // tile pane at 200, and under everything drawn as a shape or a marker.
+  map.createPane('grid').style.zIndex = 250;
+  map.getPane('grid').style.pointerEvents = 'none';
 
   const el = {
     world: document.getElementById('world'),
@@ -72,28 +94,91 @@
     },
   });
 
-  const Grid = L.GridLayer.extend({
-    createTile(c) {
-      const canvas = L.DomUtil.create('canvas', 'leaflet-tile');
-      canvas.width = canvas.height = TILE;
-      const scale = 2 ** c.z;
-      const span = TILE / scale;
-      const x0 = c.x * span;
-      const z0 = c.y * span;
-      // The finest spacing that still leaves lines far enough apart to read.
-      const step = [16, 128, REGION, 2048, 8192].find((s) => s * scale >= 32) || 32768;
-      const ctx = canvas.getContext('2d');
-      const line = (block, vertical) => {
-        const p = Math.round((block - (vertical ? x0 : z0)) * scale) + 0.5;
+  // The grid is one canvas the size of the view and drawn again whenever
+  // the view moves or zooms, and not a layer of tiles: tiles are cut at
+  // whole zoom levels and stretched in between, which blurs a one pixel
+  // line and makes it a pixel and a half. Here a line is a pixel at every
+  // zoom, and a block that is large enough has lines of its own.
+  // _initContainer, _update and the rest are the Renderer's own hooks,
+  // which is safe only because Leaflet is vendored at a fixed version.
+  const BLOCK_LINES_FROM = 12;
+  const LINE_GAP = 32;
+  const Grid = L.Renderer.extend({
+    options: { padding: 0.5, pane: 'grid' },
+    _initContainer() {
+      this._container = document.createElement('canvas');
+      this._ctx = this._container.getContext('2d');
+      this._container.setAttribute('aria-hidden', 'true');
+    },
+    _destroyContainer() {
+      L.DomUtil.remove(this._container);
+      delete this._container;
+      delete this._ctx;
+    },
+    // Lines at this spacing, in blocks, are far enough apart to read.
+    spacing(scale) {
+      if (scale >= BLOCK_LINES_FROM) return 1;
+      return [16, 128, REGION, 2048, 8192].find((s) => s * scale >= LINE_GAP) || 32768;
+    },
+    _update() {
+      L.Renderer.prototype._update.call(this);
+      const b = this._bounds;
+      const size = b.getSize();
+      const ratio = window.devicePixelRatio || 1;
+      const canvas = this._container;
+      L.DomUtil.setPosition(canvas, b.min);
+      if (canvas.width !== Math.round(size.x * ratio) || canvas.height !== Math.round(size.y * ratio)) {
+        canvas.width = Math.round(size.x * ratio);
+        canvas.height = Math.round(size.y * ratio);
+      }
+      canvas.style.width = `${size.x}px`;
+      canvas.style.height = `${size.y}px`;
+      this._draw(ratio);
+    },
+    _draw(ratio) {
+      const ctx = this._ctx;
+      const b = this._bounds;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, b.getSize().x, b.getSize().y);
+      const scale = 2 ** this._map.getZoom();
+      const step = this.spacing(scale);
+      const nw = this._map.layerPointToLatLng(b.min);
+      const se = this._map.layerPointToLatLng(b.max);
+      // A line is on the device pixel nearest its block's edge.
+      const at = (px) => (Math.round(px * ratio) + 0.5) / ratio;
+      const draw = (block, vertical) => {
+        const to = this._map.latLngToLayerPoint(vertical ? [0, block] : [block, 0]);
+        const p = at(vertical ? to.x - b.min.x : to.y - b.min.y);
+        const chunk = block % 16 === 0;
+        ctx.globalAlpha = step === 1 && !chunk ? 0.5 : 1;
         ctx.strokeStyle = block === 0 ? colour('grid-origin', 'rgba(110,207,122,0.9)')
           : block % REGION === 0 ? colour('grid-region', 'rgba(255,255,255,0.45)') : colour('grid-line', 'rgba(255,255,255,0.18)');
+        // A dark line beside the light one, so that it reads on pale
+        // terrain as well as dark.
+        const dark = ctx.globalAlpha * 0.35;
+        const w = b.getSize().x;
+        const h = b.getSize().y;
+        ctx.save();
+        ctx.globalAlpha = dark;
+        ctx.strokeStyle = '#000';
         ctx.beginPath();
-        if (vertical) { ctx.moveTo(p, 0); ctx.lineTo(p, TILE); } else { ctx.moveTo(0, p); ctx.lineTo(TILE, p); }
+        if (vertical) { ctx.moveTo(p + 1 / ratio, 0); ctx.lineTo(p + 1 / ratio, h); } else { ctx.moveTo(0, p + 1 / ratio); ctx.lineTo(w, p + 1 / ratio); }
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
+        if (vertical) { ctx.moveTo(p, 0); ctx.lineTo(p, h); } else { ctx.moveTo(0, p); ctx.lineTo(w, p); }
         ctx.stroke();
       };
-      for (let b = Math.ceil(x0 / step) * step; b < x0 + span; b += step) line(b, true);
-      for (let b = Math.ceil(z0 / step) * step; b < z0 + span; b += step) line(b, false);
-      return canvas;
+      for (let v = Math.ceil(nw.lng / step) * step; v < se.lng; v += step) draw(v, true);
+      for (let h = Math.ceil(nw.lat / step) * step; h < se.lat; h += step) draw(h, false);
+      ctx.globalAlpha = 1;
+    },
+    // A zoom that is being driven by hand, a step at a time, is drawn at
+    // each step; the browser's own stretching of the last drawing is for
+    // the animated kind only.
+    _onZoom() {
+      if (this._map._animatingZoom) return;
+      this._update();
     },
   });
 
@@ -109,8 +194,7 @@
   let current = null;
   let layer = null;
   let extent = null;
-  // Leaflet's grid layers default to zoom 0 and up; this map lives below it.
-  const grid = new Grid({ tileSize: TILE, zIndex: 5, minZoom: -12, maxZoom: 8 });
+  const grid = new Grid();
 
   const dimension = (id) => info && info.dimensions.find((d) => d.id === id);
 
@@ -143,10 +227,24 @@
   function writeHash() {
     if (!current) return;
     const c = map.getCenter();
-    const hash = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${map.getZoom()}${extra ? `/${extra}` : ''}`;
+    const hash = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${tidy(map.getZoom())}${extra ? `/${extra}` : ''}`;
     // replaceState so panning does not fill the back button with positions.
     if (hash !== location.hash) history.replaceState(null, '', hash);
   }
+
+  // The coarsest zoom the map goes to: the one the renderer cut tiles
+  // for, or further out if the whole world still does not fit the window
+  // then, as on a tall narrow phone. Worked out from the box and not asked
+  // of Leaflet, whose answer is held to the limit it is being set.
+  let wholeWorld = MIN_ZOOM;
+  const fitZoom = (bounds, size) => Math.log2(Math.min(size.x / (bounds.getEast() - bounds.getWest()), size.y / (bounds.getNorth() - bounds.getSouth())));
+  function limits() {
+    if (!extent) return;
+    const fit = fitZoom(extent, map.getSize());
+    const floor = Number.isFinite(fit) ? Math.min(wholeWorld, Math.floor(fit * 100) / 100) : wholeWorld;
+    map.setMinZoom(Math.max(MIN_ZOOM, floor));
+  }
+  map.on('resize', limits);
 
   function show(id, view) {
     const d = dimension(id);
@@ -165,14 +263,17 @@
       tileSize: TILE,
       minNativeZoom: d.minZoom,
       maxNativeZoom: d.maxZoom,
-      minZoom: d.minZoom,
-      maxZoom: 3,
+      // Tiles are enlarged past the finest the server has, and shrunk
+      // below the coarsest, which is what lets the zoom be any fraction.
+      minZoom: -12,
+      maxZoom: MAX_ZOOM,
       bounds,
       noWrap: true,
       keepBuffer: 2,
     }).addTo(map);
-    map.setMinZoom(d.minZoom);
     map.setMaxBounds(bounds.pad(0.25));
+    wholeWorld = d.minZoom;
+    limits();
 
     if (view) map.setView([view.z, view.x], view.zoom);
     else if (bounds.contains([0, 0])) map.setView([0, 0], Math.max(d.minZoom, -2));
@@ -491,6 +592,9 @@
       return true;
     },
     coordinates,
+    // The zoom at which a box of blocks just fits the map as it is now.
+    fitZoom: (bounds) => fitZoom(bounds, map.getSize()),
+    limits: () => ({ min: map.getMinZoom(), max: MAX_ZOOM }),
     // The part of the address that names what is open over the map: read
     // by whoever can open it, and set or cleared by them as it opens and
     // shuts. href is the whole address as it would be copied.
@@ -511,7 +615,7 @@
       get() {
         if (!current) return null;
         const c = map.getCenter();
-        return { d: current, x: Math.round(c.lng), z: Math.round(c.lat), zoom: map.getZoom() };
+        return { d: current, x: Math.round(c.lng), z: Math.round(c.lat), zoom: tidy(map.getZoom()) };
       },
       set(at) {
         const d = at && dimension(at.d);
@@ -528,10 +632,16 @@
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 
+  // From this many pixels to a block the position under the pointer is
+  // told to a tenth of a block as well: one pixel is then well under one.
+  const TENTHS_FROM = 16;
+  const tenth = (n) => (Math.floor(n * 10) / 10).toLocaleString('en-US', { minimumFractionDigits: 1 });
+
   function point(latlng) {
     const x = Math.floor(latlng.lng);
     const z = Math.floor(latlng.lat);
     let text = `X ${fmt(x)}, Z ${fmt(z)}`;
+    if (2 ** map.getZoom() >= TENTHS_FROM) text += ` (${tenth(latlng.lng)}, ${tenth(latlng.lat)})`;
     if (look().coords === 'chunks') text += `  ·  chunk ${fmt(x / 16)}, ${fmt(z / 16)}`;
     // Nether travel is the one conversion players do in their heads.
     if (current === 'overworld') text += `  ·  nether ${fmt(x / 8)}, ${fmt(z / 8)}`;

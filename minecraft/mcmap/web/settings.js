@@ -63,6 +63,15 @@
     if (strict) return Number.isInteger(v) && v >= min && v <= max ? v : BAD;
     return Math.min(max, Math.max(min, Math.round(v)));
   };
+  // A number to a few decimal places, as a zoom is: it was a whole number
+  // until the map could rest between levels, and a record or a link from
+  // then is still read as one.
+  const fixed = (min, max, places) => (v, strict) => {
+    if (!Number.isFinite(v)) return BAD;
+    if (strict && (v < min || v > max)) return BAD;
+    const to = 10 ** places;
+    return Math.round(Math.min(max, Math.max(min, v)) * to) / to;
+  };
   const oneOf = (...known) => (v) => (known.includes(v) ? v : BAD);
   const text = (max, pattern) => (v) => (typeof v === 'string' && v.length > 0 && v.length <= max && pattern.test(v) ? v : BAD);
   const orNull = (kind) => (v, strict) => (v === null ? null : kind(v, strict));
@@ -238,7 +247,7 @@
       d: text(16, /^[a-z_]+$/),
       x: int(-WORLD_EDGE, WORLD_EDGE),
       z: int(-WORLD_EDGE, WORLD_EDGE),
-      zoom: int(-12, 8),
+      zoom: fixed(-12, 8, 2),
       pin: shape({ u: oneOf('chunk', 'region'), x: int(-2_000_000, 2_000_000), z: int(-2_000_000, 2_000_000) }, ['u', 'x', 'z']),
     }, ['d', 'x', 'z', 'zoom']),
     look: lookOf,

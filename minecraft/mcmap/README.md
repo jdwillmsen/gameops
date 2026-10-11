@@ -2455,6 +2455,30 @@ History cannot be rebuilt, unlike the tiles and the mirror beside it, so
 
 ## Page controls
 
+**Zoom.** One block is 2^zoom screen pixels: zoom 0 is a block to the
+pixel, and the map goes from there out to the whole world and in to zoom
+7, which is 128 pixels to a block. The terrain tiles stop at the finest
+the renderer cut; past that, and below the coarsest, the same tiles (and
+the biome overlay's) are enlarged or shrunk with nearest-neighbour
+scaling, so a block is a hard-edged square at any zoom. The zoom is any
+fraction: the wheel, a trackpad and a pinch rest where they are left.
+A turn of a mouse wheel is half a level, a trackpad's scroll adds up from
+its small steps, and a pinch on a trackpad (Ctrl and scroll) is finer
+still; the map eases toward where it is told, about the pointer. The `+`
+and `-` buttons and keys move a level, to the next whole one from between
+two. The grid is drawn for the view at each zoom, a pixel wide, with a
+line for every block from 12 pixels to a block; from 16 the pointer's
+position is told to a tenth of a block as well. The farthest out is as far
+as the whole world fits the window, which on a narrow phone is further
+than the renderer's own coarsest. In the footer, the zoom shows the
+level, what a block comes to in pixels (`1 block = 8 px`, or
+`1 px = 4 blocks`) and how many blocks the window is across; on a phone
+it is the level alone. It opens a panel with a slider, stops (whole
+world, region, chunk, block detail, 100%) and a box that takes a level,
+a percentage or a scale. An address carries the zoom to two decimals
+(`#overworld/0/0/3.25`); an address or a saved view with a whole zoom
+reads as it always did.
+
 **The layer panel.** Everything the map can show is in one panel beside
 the map, as a list three deep and no deeper: a section, the layers in it,
 and what each layer is made of.
@@ -2753,7 +2777,9 @@ where it was.
 | `V` | Opens the list of views; in it, `1` to `9` switches to the view with that number |
 | `S` | Go to the world spawn |
 | `M` | Go to the logged-in player and open their card, while they are online |
-| `+` `-` | Zoom in and out (`=` zooms in too) |
+| `+` `-` | Zoom in and out a level at a time (`=` zooms in too) |
+| `W` | Zoom out to the whole world |
+| `B` | Zoom in to block detail, 64 pixels to a block |
 
 Each key works the control the page already has, as a click on it would,
 so a shortcut cannot do what the page does not offer; one that can do
@@ -3660,8 +3686,8 @@ no `me` in `/api/icons`, no `standing` in a village's detail, and no
 waypoints in a search, which says `off`. A service session gets 403 from
 anything else behind a login, and from any request that is not a `GET`.
 
-The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, so a link
-opens at the same place.
+The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, with the
+zoom to two decimals, so a link opens at the same place.
 
 ## Metrics
 
