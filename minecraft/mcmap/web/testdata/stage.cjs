@@ -83,6 +83,7 @@ function leaflet(win) {
     addTo(map) { map.layers.add(this); this._map = map; return this; }
     remove() { if (this._map) this._map.layers.delete(this); this._map = null; return this; }
     bringToFront() { return this; }
+    bringToBack() { return this; }
     onAdd() {}
     onRemove() {}
     _empty() { return false; }
@@ -109,6 +110,7 @@ function leaflet(win) {
     constructor() {
       super();
       this.layers = new Set();
+      this.renderers = [];
       this.zoom = 0;
       this.centre = latLng(0, 0);
       this.options = { maxBounds: null };
@@ -126,6 +128,7 @@ function leaflet(win) {
     setView(at, zoom) { this.centre = latLng(at); this.zoom = zoom; this.went.push({ how: 'setView', centre: this.centre, zoom }); return this; }
     setZoom(zoom) { this.zoom = zoom; this.went.push({ how: 'setZoom', zoom }); return this; }
     setZoomAround(at, zoom) { this.zoom = zoom; this.went.push({ how: 'setZoomAround', at, zoom }); return this; }
+    fitBounds(bounds, options) { this.went.push({ how: 'fitBounds', bounds: bounds.held, options }); return this; }
     invalidateSize() { this.sized = (this.sized || 0) + 1; return this; }
     hasLayer(layer) { return this.layers.has(layer); }
     eachLayer(fn) { [...this.layers].forEach(fn); return this; }
@@ -145,10 +148,12 @@ function leaflet(win) {
     featureGroup: () => new Group(),
     canvas: (options) => {
       const container = win.document.createElement('canvas');
-      return { options, _container: container, _ctx: container.getContext('2d'), _drawing: false, _map: map, _zoom: map.zoom, redraws: 0, _redraw() { this.redraws += 1; } };
+      const renderer = { options, _container: container, _ctx: container.getContext('2d'), _drawing: false, _map: map, _zoom: map.zoom, redraws: 0, _redraw() { this.redraws += 1; } };
+      map.renderers.push(renderer);
+      return renderer;
     },
     latLng,
-    latLngBounds: () => ({ extend() {}, isValid: () => false }),
+    latLngBounds: () => { const held = []; return { held, extend(at) { held.push(latLng(at)); }, isValid: () => held.length > 0 }; },
     point,
     bounds: () => ({ extend() {} }),
     DomEvent: { stopPropagation() {} },
@@ -162,7 +167,7 @@ const SIDES = { 'face/villager_v2': [11, 11], 'face/fox': [8, 8], 'face/shulker'
 // A page with the scripts run on it. dpr is the screen's density, heads
 // the players the server has a head for, and boxes what getBoundingClientRect
 // answers for the map and for what lies over it.
-async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, files = ['names.js', 'duration.js', 'icons.js', 'layers.js', 'room.js', 'live.js'], storage = new Map() } = {}) {
+async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, files = ['names.js', 'duration.js', 'groups.js', 'icons.js', 'layers.js', 'room.js', 'live.js'], storage = new Map() } = {}) {
   if (Object.keys(look).length > 0) storage.set('mcmap.settings', JSON.stringify({ v: 1, look }));
   const p = page(storage, { files: ['settings.js'] });
   const { win, doc } = p;
@@ -249,6 +254,13 @@ async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, fi
     app: win.mcmap,
     icons: win.mcmap.icons,
     settings: win.mcmapSettings,
+    // The map come to rest at a zoom, every canvas drawn for it.
+    zoomTo: async (zoom) => {
+      map.zoom = zoom;
+      for (const renderer of map.renderers) renderer._zoom = zoom;
+      map.fire('zoomend');
+      await settle();
+    },
     // The stream the live layer has open, and a frame sent down it.
     send: async (frameOf) => {
       const es = sources.filter((s) => s.readyState === 1 && s.onmessage).at(-1);

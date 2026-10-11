@@ -362,10 +362,14 @@
     ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = backing();
     ctx.fill();
-    ctx.save();
-    ctx.clip();
-    centred(ctx, drawn, side, box, head);
-    ctx.restore();
+    // With no picture it is the plate alone, which a group of several
+    // things is drawn on.
+    if (drawn) {
+      ctx.save();
+      ctx.clip();
+      centred(ctx, drawn, side, box, head);
+      ctx.restore();
+    }
     return made;
   }
 
@@ -514,6 +518,69 @@
         : plated(drawn, ring, boxes()[size][baby ? 'babyIcon' : 'icon'], alive, head);
       sprites.set(held, made);
     }
+    return made;
+  }
+
+  // Whether markers are drawn as one where they heap up, from far out:
+  // the viewer's choice, on unless they have it off. A page whose record
+  // is from before there was the choice has it on.
+  const grouping = () => Boolean(app.groups) && look().group !== 'off';
+
+  // The mark that stands for every marker in one square of the map: a
+  // ring in the colours of the families it holds, each an arc as long
+  // as its share, round how many there are of them all. parts is
+  // [colour, count] for each family, most first. It is the same mark in
+  // every style, a little smaller where the viewer has plain marks,
+  // since what it has to say is a number and whose; cased in the dark as
+  // a plate is, so that it reads on any terrain. reach is its radius,
+  // for the layer that places it.
+  const heaps = new Map();
+  function group(parts, count) {
+    if (!app.groups) return null;
+    const text = app.groups.said(count);
+    const plain = styleOf('live') === 'dots';
+    const wide = app.groups.widthOf(count) - (plain ? 4 : 0);
+    // Shares are drawn to the twenty-fourth: a mob more or less in a
+    // crowd is no change to see, and each mark made is kept.
+    const shares = parts.map(([paint, n]) => [paint, Math.max(1, Math.round((n / count) * 24))]);
+    const held = `${shares.join(';')}|${text}|${wide}`;
+    if (heaps.has(held)) return heaps.get(held);
+    const made = document.createElement('canvas');
+    const side = wide * DENSITY;
+    made.width = made.height = side;
+    const ctx = made.getContext('2d');
+    const mid = side / 2;
+    const band = (4 + heavy()) * DENSITY;
+    ctx.beginPath();
+    ctx.arc(mid, mid, mid, 0, Math.PI * 2);
+    ctx.fillStyle = casing();
+    ctx.fill();
+    const whole = shares.reduce((sum, [, share]) => sum + share, 0);
+    // From the top, clockwise, the largest family first.
+    let from = -Math.PI / 2;
+    for (const [paint, share] of shares) {
+      const to = from + (share / whole) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(mid, mid);
+      ctx.arc(mid, mid, mid - CASING * DENSITY, from, to);
+      ctx.closePath();
+      ctx.fillStyle = paint;
+      ctx.fill();
+      from = to;
+    }
+    ctx.beginPath();
+    ctx.arc(mid, mid, mid - CASING * DENSITY - band, 0, Math.PI * 2);
+    ctx.fillStyle = casing();
+    ctx.fill();
+    ctx.font = `700 ${(text.length > 2 ? (plain ? 9 : 10) : 11) * DENSITY}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = colour('live-players', '#ffffff');
+    ctx.fillText(text, mid, mid + DENSITY / 2);
+    made.reach = wide / 2;
+    // A count is one of thousands, and a mob wandering changes it.
+    if (heaps.size > 1024) heaps.clear();
+    heaps.set(held, made);
     return made;
   }
 
@@ -877,7 +944,10 @@
     const boxes = pictures.boxes && typeof pictures.boxes === 'object' ? pictures.boxes : {};
     // A marker composed before the server said where its picture's head
     // is, is composed again now that it has.
-    if (JSON.stringify(boxes) !== JSON.stringify(listing.pictures.boxes)) sprites.clear();
+    if (JSON.stringify(boxes) !== JSON.stringify(listing.pictures.boxes)) {
+      sprites.clear();
+      heaps.clear();
+    }
     listing = {
       mobs: { version: str(mobs.version), types: new Set(Array.isArray(mobs.types) ? mobs.types : []) },
       pictures: { version: str(pictures.version), keys: new Set(Array.isArray(pictures.keys) ? pictures.keys : []), boxes },
@@ -959,6 +1029,8 @@
     sprite,
     mob,
     plate,
+    group,
+    grouping,
     picture,
     paint,
     stamp,
@@ -992,6 +1064,7 @@
     sprites.clear();
     tags.clear();
     paint(document);
+    heaps.clear();
     dressPage();
   });
 

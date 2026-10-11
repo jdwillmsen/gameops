@@ -900,6 +900,30 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
   border-radius: 8px;
 }
 .inspect.adrift { border-color: var(--warn); }
+
+/* The members of a group of markers, to choose one from. It sits over the
+   map's top corner, clear of the card at its foot. */
+.heap-list {
+  position: absolute;
+  left: 0.6rem;
+  top: 5.2rem;
+  z-index: 1090;
+  display: grid;
+  gap: 0.35rem;
+  width: 16rem;
+  max-width: calc(100% - 1.2rem);
+  max-height: calc(100% - 6rem);
+  padding: var(--card-pad);
+  background: var(--float);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.heap-list[hidden] { display: none; }
+.heap-head { display: flex; align-items: center; gap: 0.5rem; }
+.heap-head h2 { flex: 1; margin: 0; font-size: 1rem; font-weight: 600; }
+.heap-body { display: grid; gap: 0.25rem; overflow-y: auto; }
+.heap-body h3 { margin: 0.3rem 0 0; font-size: var(--caption); color: var(--dim); font-weight: 600; }
+.heap-body button { min-height: var(--hit); text-align: left; }
 .inspect-head { display: flex; align-items: flex-start; gap: 0.5rem; }
 .inspect-head canvas { flex: none; width: 32px; height: 32px; }
 .inspect-title { flex: 1; min-width: 0; display: grid; }

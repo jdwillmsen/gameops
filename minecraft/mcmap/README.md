@@ -400,6 +400,48 @@ that no picture is markedly smaller than the next; its pixels are then
 one or two screen pixels wide and never blurred. One larger than its box
 is blended down.
 
+**Markers that heap up are grouped from far out**, where the viewer has
+it so (Appearance, "Group markers when zoomed out", on unless switched
+off, kept with the other appearance settings and carried by a saved view
+that has them). From a block to two pixels outwards, whatever falls in
+one square of the screen is one mark: mobs of every row, beds and
+containers together. A mark a family was tried first, and put several
+marks on one spot with their counts across each other. A player, a named
+mob, a waypoint, a structure, a saved position and whoever the card is
+about are each somebody: they are never one of several, and are drawn
+over the groups' marks. Whatever a filter hides is not counted.
+
+A square is 48 CSS pixels a side, and is a square of the world at that
+zoom and not of the screen, so panning regroups nothing and a group is
+the same from one frame to the next; a mob within 15% of a square's side
+past its edge stays in the group it was in, so one pacing over an edge
+does not make two marks blink. The mark stands in the middle of its
+square, not of its members, and is 26, 32 or 38 pixels across for up to
+24, up to 199 and more, so that two squares side by side always have ten
+pixels or more between their marks. It is a ring in the colours of the
+families it holds, each an arc as long as its share, largest first from
+the top, round the count of them all, cased in the dark as a plate is;
+the same mark in every style, four pixels narrower with plain marks.
+Under the pointer it lists each family with its count and each type
+under it. A click or a tap takes the map to its members, no closer than
+a block to the pixel, where nothing is grouped; where that would not
+part them, because they stand within 16 blocks of each other, it lists
+them instead, by family and type with counts, and one chosen from the
+list has its card opened (a mob) or is gone to (a bed or a container).
+`N` lists the next group from the middle of the map outwards, with the
+focus in the list, so a group is reached and worked without a pointer;
+Escape shuts it. The panel's counts are of things and not of marks, and
+do not change. The far tiers still apply to what is left by itself.
+
+The sorting is `groups.js`, with nothing of the page in it; the live
+layer draws every mark, and the markers' layer offers it its beds and
+containers and is told which were taken. Until a script that draws has
+said so nothing is taken off the map, so a page whose scripts are of two
+ages draws every marker as before. Measured in headless Chromium at 1300
+by 800 with 900 mobs and 2,100 markers on the map, three steps out, over
+five seconds of live frames: 3,017 marks with it off and 21 with it on,
+a median frame of 16.7 ms and no long task either way, in each style.
+
 **A face is sized and placed by its head**, not by the whole of its
 picture. A face is as wide and as tall as its horns, its hat and its nose
 make it: a villager's is its head, 8 by 10, over one row of nose, and
@@ -2689,6 +2731,7 @@ where it was.
 | `V` | Opens the list of views; in it, `1` to `9` switches to the view with that number |
 | `S` | Go to the world spawn |
 | `M` | Go to the logged-in player and open their card, while they are online |
+| `N` | Lists the next group of markers, from the middle of the map outwards, to choose one from |
 | `+` `-` | Zoom in and out (`=` zooms in too) |
 
 Each key works the control the page already has, as a click on it would,
