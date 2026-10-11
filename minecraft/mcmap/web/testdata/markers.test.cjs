@@ -233,6 +233,11 @@ test('a village wears the mark of its biome where the server has it, and the pla
   assert.equal(key({ kind: 'village', biome: 'savanna' }), 'structure/village');
   assert.equal(key({ kind: 'outpost', biome: 'desert' }), 'structure/outpost');
   assert.equal(key({ kind: 'village', biome: '<img src=x>' }), 'structure/village');
+  // What the survey says of a village comes before what is asked of the biome.
+  assert.equal(key({ kind: 'village', variant: 'desert', biome: 'plains' }), 'structure/village_desert');
+  assert.equal(key({ kind: 'village', variant: 'savanna' }), 'structure/village');
+  assert.equal(key({ kind: 'village', variant: '../x' }), 'structure/village');
+  assert.equal(key({ kind: 'abandoned_camp', variant: 'desert' }), 'structure/abandoned_camp');
 });
 
 // --- the middle of the map that can be seen ---------------------------------

@@ -587,23 +587,23 @@ with the item named here to fall back on:
 | `structure/fortress` | a blaze's face, or `items/netherbrick` | The mob met there and nowhere else; a fortress is built of nothing but the brick |
 | `structure/monument` | an elder guardian's face, or `items/prismarine_shard` | Each monument has three; the shard is dropped only by its guardians |
 | `structure/outpost` | a pillager's face, or `items/crossbow_standby` | Who holds it, or their weapon |
-| `structure/witch_hut` | a witch's face, or `items/cauldron` | Who lives in it; every hut has a cauldron |
+| `structure/witch_hut` | `map/swamp_hut`, or `items/cauldron` | The game's own mark for a hut on an explorer's map. A witch's face, sized by its head, loses its hat and reads as a villager |
 | `structure/village` | `map/village_plains`, or `items/villagebell` | The game's own mark for a village on an explorer's map: a house, 8 pixels a side with its own outline, drawn at a whole number of screen pixels to the pixel. A villager's face stood for it before, which read as a villager. Which of its mark, its mob's face and its item a kind is drawn as is one line of `structureArts` in `internal/icons/pictures.go` |
-| `structure/village_desert`, `_savanna`, `_snowy`, `_taiga` | `map/village_<biome>`, or the plains one | The game's marks for a village built in each of those biomes. A structure's sheet wears the one for the biome at its middle once that is known; a mark on the map is the plains one, since the survey does not yet say what biome a village stands in |
+| `structure/village_desert`, `_savanna`, `_snowy`, `_taiga` | `map/village_<biome>`, or the plains one | The game's marks for a village built in each of those biomes. A structure's sheet wears the one for the biome at its middle once that is known; a mark on the map wears the one the survey says, which it sets from the biome at the middle of the village's box (`variant` on a recorded village, absent for plains and where the biome is not known), and a sheet falls back on asking the biome itself |
 | `structure/stronghold` | `items/ender_eye` | What finds one, and what lights its portal. No mob is a stronghold's own |
-| `structure/trial_chamber` | a breeze's face, or `items/trial_key` | The mob met there and nowhere else; the key opens its vaults |
-| `structure/desert_pyramid` | `blocks/sandstone_carved` | The carved face only a pyramid's sandstone has |
-| `structure/jungle_temple` | `blocks/cobblestone_mossy` | What a temple is built of |
+| `structure/trial_chamber` | `map/trial_chambers`, or `items/trial_key` | The game's own mark for a chamber; the key opens its vaults |
+| `structure/desert_pyramid` | `map/desert_pyramid`, or `blocks/sandstone_carved` | The game's own mark for a pyramid; carved sandstone alone is a pale square |
+| `structure/jungle_temple` | `map/jungle_temple`, or `blocks/cobblestone_mossy` | The game's own mark for a temple; mossy cobble alone is speckle |
 | `structure/igloo` | `items/snowball` | What an igloo is made of |
 | `structure/trail_ruins` | `items/brush` | What its buried blocks are brushed with |
 | `structure/abandoned_camp` | `items/campfire` | Every camp has one, unlit |
-| `structure/end_city` | a shulker's face, or `items/elytra` | The mob met there and nowhere else; what a city's ship is gone to for |
+| `structure/end_city` | `items/elytra` | What a city's ship is gone to for. A shulker's face is a square of one colour |
 | `structure/end_gateway` | `items/ender_pearl` | What goes through one |
-| `structure/exit_portal` | `blocks/dragon_egg` | What is left on it when the dragon is dead |
+| `structure/exit_portal` | `items/end_crystal` | What is set round the portal to bring the dragon back. The egg's side is black on a dark plate |
 | `structure/bastion` | a piglin brute's face, or `blocks/gilded_blackstone` | The mob met there and nowhere else; the block only a bastion has |
 | `structure/ruined_portal` | `blocks/crying_obsidian` | The block a ruined portal's frame is broken with |
-| `structure/mansion` | an evoker's face, or `items/totem` | Who holds it; what its evokers carry |
-| `structure/ancient_city` | a warden's face, or `items/echo_shard` | What wakes there; the shard only its chests hold |
+| `structure/mansion` | the mansion cut from `map/map_icons`, or `items/totem` | The game's own mark for a mansion, from the sheet its older marks are kept on. An evoker's face is an outpost's pillager over again |
+| `structure/ancient_city` | `map/ancient_city`, or `items/echo_shard` | The game's own mark for a city. A warden's face is dark on a dark plate |
 | `structure/shipwreck` | `items/boat_oak` | A boat |
 | `structure/ocean_ruins` | a drowned's face, or `items/nautilus` | Who walks them |
 | `structure/buried_treasure` | `items/heartofthesea_closed` | What every one of them holds |

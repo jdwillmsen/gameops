@@ -479,14 +479,16 @@
     return '';
   }
 
-  function keyOf(sort, { kind, colour, trapped, profession, biome } = {}) {
+  function keyOf(sort, { kind, colour, trapped, profession, biome, variant } = {}) {
     if (sort === 'waypoint') return WAYPOINT;
     if (sort === 'bed') return `bed/${str(colour) || 'red'}`;
     if (sort === 'mob') return kind === VILLAGER && /^[a-z_]{1,32}$/.test(str(profession)) ? `villager/${profession}` : `mob/${str(kind)}`;
     if (sort === 'structure') {
-      // Its mark for the biome, where the caller knows the biome and the
-      // server has that mark.
-      const worn = kind === 'village' ? villageIn(biome) : '';
+      // Its mark for the biome, where the caller knows the biome, or the
+      // survey has said which the village is, and the server has that
+      // mark.
+      const said = /^(desert|savanna|snowy|taiga)$/.test(str(variant)) ? variant : '';
+      const worn = kind === 'village' ? said || villageIn(biome) : '';
       return worn !== '' && listing.pictures.keys.has(`structure/village_${worn}`) ? `structure/village_${worn}` : `structure/${str(kind)}`;
     }
     if (sort !== 'container') return '';

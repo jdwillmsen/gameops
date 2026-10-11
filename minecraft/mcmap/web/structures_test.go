@@ -16,7 +16,7 @@ func TestWorldSpawnIsDrawnFromTheStructuresAnswer(t *testing.T) {
 		"tip('World spawn', where)",
 		"rows.get('spawn').setAvailable(!surveyed || spawned);",
 		// A kind is its picture, with the letter behind it until there is one.
-		"mark.append(icons.picture(icons.keyOf('structure', { kind })), letter);",
+		"mark.append(icons.picture(icons.keyOf('structure', { kind, variant })), letter);",
 	} {
 		if !bytes.Contains(js, []byte(need)) {
 			t.Errorf("structures.js no longer has %s", need)
