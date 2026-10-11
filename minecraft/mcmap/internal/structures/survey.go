@@ -406,8 +406,16 @@ func (s *Surveyor) Take(ctx context.Context, worldDir string, at time.Time) (Sur
 		s.Logger.Warn("the seed does not put this world's recorded structures where they are, so nothing is predicted; if the world generates from another seed it is worked out from those structures unless that is switched off, and STRUCTURE_SEED supplies it otherwise",
 			"agree", survey.Check.Agree, "disagree", survey.Check.Disagree)
 	default:
-		for _, finding := range survey.Check.Findings {
-			s.Logger.Warn("structure prediction disagrees with the world", "finding", finding)
+		// A finding says where a structure is, and where enough of them
+		// are is enough to work out the seed that placed them. The log
+		// says how many there are of each kind; the findings themselves
+		// stay in the survey, behind the session.
+		for _, p := range s.Predictors {
+			rule := Rule{p.Kind(), p.Dimension()}
+			if k := survey.Check.Kinds[rule]; k.Findings > 0 {
+				s.Logger.Warn("structure prediction disagrees with the world",
+					"kind", string(rule.Kind), "dimension", rule.Dimension.Name(), "findings", k.Findings)
+			}
 		}
 	}
 	return survey, nil
