@@ -52,6 +52,10 @@ type structureArt struct {
 	face string
 	// item is under resource_pack, and is what a kind with neither is.
 	item string
+	// cut is the part of icon that is the mark, as x, y, width and height,
+	// where icon is a sheet of several: the marks the game had before it
+	// gave each a file of its own.
+	cut [4]int
 	// variants are the kind's other marks, by the word the map has for
 	// where one stands: a village's by the biome it is built in. Each is
 	// structure/<kind>_<variant>, beside structure/<kind>.
@@ -64,29 +68,37 @@ var structureArts = map[string]structureArt{
 	"fortress":      {face: "blaze", item: "textures/items/netherbrick"},
 	"monument":      {face: "elder_guardian", item: "textures/items/prismarine_shard"},
 	"outpost":       {face: "pillager", item: "textures/items/crossbow_standby"},
-	"witch_hut":     {face: "witch", item: "textures/items/cauldron"},
+	"witch_hut":     {icon: "textures/map/swamp_hut", item: "textures/items/cauldron"},
 	"village":       {icon: "textures/map/village_plains", item: "textures/items/villagebell", variants: []string{"desert", "savanna", "snowy", "taiga"}},
 	"stronghold":    {item: "textures/items/ender_eye"},
-	"trial_chamber": {face: "breeze", item: "textures/items/trial_key"},
+	"trial_chamber": {icon: "textures/map/trial_chambers", item: "textures/items/trial_key"},
 	// The carved face only a desert pyramid's sandstone has, and the stone
 	// a jungle temple is built of.
-	"desert_pyramid": {item: "textures/blocks/sandstone_carved"},
-	"jungle_temple":  {item: "textures/blocks/cobblestone_mossy"},
+	"desert_pyramid": {icon: "textures/map/desert_pyramid", item: "textures/blocks/sandstone_carved"},
+	"jungle_temple":  {icon: "textures/map/jungle_temple", item: "textures/blocks/cobblestone_mossy"},
 	"igloo":          {item: "textures/items/snowball"},
 	"trail_ruins":    {item: "textures/items/brush"},
 	"abandoned_camp": {item: "textures/items/campfire"},
 	// What each is gone to for, or is made of and nothing else is.
-	"end_city":        {face: "shulker", item: "textures/items/elytra"},
-	"end_gateway":     {item: "textures/items/ender_pearl"},
-	"exit_portal":     {item: "textures/blocks/dragon_egg"},
-	"bastion":         {face: "piglin_brute", item: "textures/blocks/gilded_blackstone"},
-	"ruined_portal":   {item: "textures/blocks/crying_obsidian"},
-	"mansion":         {face: "evocation_illager", item: "textures/items/totem"},
-	"ancient_city":    {face: "warden", item: "textures/items/echo_shard"},
+	// A shulker's face is a square of one colour, and says nothing.
+	"end_city":    {item: "textures/items/elytra"},
+	"end_gateway": {item: "textures/items/ender_pearl"},
+	// The egg's side is black on black; the crystals are set round the
+	// portal to bring the dragon back.
+	"exit_portal":   {item: "textures/items/end_crystal"},
+	"bastion":       {face: "piglin_brute", item: "textures/blocks/gilded_blackstone"},
+	"ruined_portal": {item: "textures/blocks/crying_obsidian"},
+	// An evoker's face is an outpost's pillager over again.
+	"mansion":         {icon: "textures/map/map_icons", cut: [4]int{32, 48, 16, 16}, item: "textures/items/totem"},
+	"ancient_city":    {icon: "textures/map/ancient_city", item: "textures/items/echo_shard"},
 	"shipwreck":       {item: "textures/items/boat_oak"},
 	"ocean_ruins":     {face: "drowned", item: "textures/items/nautilus"},
 	"buried_treasure": {item: "textures/items/heartofthesea_closed"},
 }
+
+// mapSheet is the side of the sheet of map marks, in the units a cut of it
+// is counted in.
+const mapSheet = 64
 
 // structureRecipes is the recipe for every structure's picture, given the
 // faces there are recipes for.
@@ -96,6 +108,11 @@ func structureRecipes(faces map[string]Recipe) map[string]Recipe {
 		art := structureArts[kind]
 		recipe, faced := faces[faceKey(art.face)]
 		switch {
+		case art.icon != "" && art.cut != [4]int{}:
+			// One mark out of the sheet, as it is, in a square of its own.
+			w, h := art.cut[2], art.cut[3]
+			recipe = Recipe{W: w, H: h, Main: [4]int{0, 0, w, h}, Sparse: true, Else: art.item,
+				Layers: []Layer{{Texture: art.icon, Units: [2]int{mapSheet, mapSheet}, Src: art.cut, Dst: [4]int{0, 0, w, h}, Skin: true}}}
 		case art.icon != "":
 			recipe = Recipe{Flat: art.icon, Else: art.item}
 		case art.face != "" && faced:
