@@ -156,19 +156,21 @@ function leaflet(win) {
 }
 
 // The pictures a server would list, and how large each is.
-const SIDES = { 'face/villager_v2': [8, 10], 'face/cow': [8, 8], 'face/zombie': [8, 8], 'container/chest': [16, 16], 'block/chest': [32, 32], 'structure/village': [16, 16], 'marker/waypoint': [16, 16] };
+const SIDES = { 'face/villager_v2': [11, 11], 'face/fox': [8, 8], 'face/shulker': [16, 16], 'face/cow': [8, 8], 'face/zombie': [8, 8], 'container/chest': [16, 16], 'block/chest': [32, 32], 'structure/village': [16, 16], 'marker/waypoint': [16, 16] };
 
 // A page with the scripts run on it. dpr is the screen's density, heads
 // the players the server has a head for, and boxes what getBoundingClientRect
 // answers for the map and for what lies over it.
-async function stage({ dpr = 1, look = {}, heads = {}, files = ['names.js', 'duration.js', 'icons.js', 'layers.js', 'room.js', 'live.js'], storage = new Map() } = {}) {
+async function stage({ dpr = 1, look = {}, heads = {}, boxes: headBoxes = {}, files = ['names.js', 'duration.js', 'icons.js', 'layers.js', 'room.js', 'live.js'], storage = new Map() } = {}) {
   if (Object.keys(look).length > 0) storage.set('mcmap.settings', JSON.stringify({ v: 1, look }));
   const p = page(storage, { files: ['settings.js'] });
   const { win, doc } = p;
   const made = doc.createElement;
+  const canvases = [];
   doc.createElement = (tag) => {
     const node = made(tag);
     if (tag === 'canvas') {
+      canvases.push(node);
       node.width = 0;
       node.height = 0;
       const ctx = context(node);
@@ -210,7 +212,7 @@ async function stage({ dpr = 1, look = {}, heads = {}, files = ['names.js', 'dur
     },
     fetch: async (address) => {
       if (address === 'api/icons') {
-        return { ok: true, status: 200, text: async () => JSON.stringify({ mobs: { version: 'm1', types: ['cow', 'zombie', 'villager_v2'] }, pictures: { version: 'p1', keys: Object.keys(SIDES) }, names: { version: '' }, heads, me: '' }) };
+        return { ok: true, status: 200, text: async () => JSON.stringify({ mobs: { version: 'm1', types: ['cow', 'zombie', 'villager_v2', 'fox', 'shulker'] }, pictures: { version: 'p1', keys: Object.keys(SIDES), boxes: headBoxes }, names: { version: '' }, heads, me: '' }) };
       }
       if (address.startsWith('api/icons/')) return { ok: true, status: 200, blob: async () => address };
       return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
@@ -241,6 +243,8 @@ async function stage({ dpr = 1, look = {}, heads = {}, files = ['names.js', 'dur
   await settle();
   return {
     win, doc, map, L, boxes, stretched, frame, settle, tick,
+    // Every canvas a script has made, in the order made.
+    made: canvases,
     app: win.mcmap,
     icons: win.mcmap.icons,
     settings: win.mcmapSettings,

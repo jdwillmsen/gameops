@@ -395,11 +395,33 @@ that is not dense, as before) and 24, 32, 48 or 64 with no plate. Within
 its box a picture is enlarged by the most whole screen pixels to each of
 its own that fit, so a face 8 pixels a side fills a 16 pixel box at 2 and
 one 6 a side stands 12 in it. Where a whole number would leave a picture
-under three quarters of its box (a face 10 or 11 pixels a side in a box
-of 16 on a screen that is not dense) it is stretched to the box,
-unblended, so that no picture is markedly smaller than the next; its
-pixels are then one or two screen pixels wide and never blurred. One
-larger than its box is blended down. On the page itself, in a panel's
+under three quarters of its box it is stretched to the box, unblended, so
+that no picture is markedly smaller than the next; its pixels are then
+one or two screen pixels wide and never blurred. One larger than its box
+is blended down.
+
+**A face is sized and placed by its head**, not by the whole of its
+picture. A face is as wide and as tall as its horns, its hat and its nose
+make it: a villager's is its head, 8 by 10, over one row of nose, and
+squared to 11 it had its head half a pixel left of the middle and half a
+pixel high, which on a plate came out as much as 2 pixels off, at one and
+a half screen pixels to the pixel. The server says where the head is in
+each face (`boxes` in `/api/icons`), and the page puts the middle of the
+head on the middle of the plate, on whole pixels, at a whole number of
+screen pixels to the pixel chosen by the head's longer side. On a plate
+that number may take the head up to a third over its box where the next
+one down would leave it under three quarters, since the ring hides what
+spills and a head a little cropped is still the head: a villager is at
+2 to the pixel in a 16 pixel box, as wide as the zombie beside it. With
+no plate nothing may spill, so there the whole face is sized to its box
+as before. A face all of which fits its box is kept wholly inside it, as
+near the middle by its head as that leaves, so a fox keeps its ears; and
+a head that is half or less of what is drawn (a bat's between its wings,
+a shulker's under its lid) is not what the picture is of, and that one
+is drawn by the whole of it. Every picture on the page is drawn by the
+one routine, so the map, a row of the panel, the card, a search result
+and a structure's sheet agree. A server from before it said where heads
+are has its faces drawn by the whole picture, as they were. On the page itself, in a panel's
 row or a search result, a block is drawn only where it fits its 16 pixel
 box whole, which is on a dense screen; elsewhere its flat picture is.
 
@@ -3155,7 +3177,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
 | `GET /api/waypoints` | Session required. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
-| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version` and the `keys` that have a picture (the groups `bed`, `container`, `shulker`, `marker` and `structure`, and since faces and blocks were made `face`, `villager` and `block` in the same list under the same version, so a page from before them reads the answer as it always did), `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
+| `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version`, the `keys` that have a picture and `boxes`, the head of each that is a face as `[x, y, width, height]` in the picture's own pixels (the groups `bed`, `container`, `shulker`, `marker` and `structure`, and since faces and blocks were made `face`, `villager` and `block` in the same list under the same version, so a page from before them reads the answer as it always did), `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The picture with the key `{group}/{name}` as a PNG, whichever group it is of, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |

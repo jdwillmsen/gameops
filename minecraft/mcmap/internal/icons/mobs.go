@@ -1,12 +1,14 @@
 package icons
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"log/slog"
 	"maps"
 	"os"
@@ -77,6 +79,7 @@ type Mobs struct {
 	pictures       map[string][]byte
 	pictureKeys    []string
 	pictureVersion string
+	heads          map[string][4]int
 	names          *Names
 	rejected       map[string]string
 }
@@ -336,6 +339,7 @@ func (m *Mobs) set(set Set) {
 	m.mu.Lock()
 	m.icons, m.types, m.version = set.Mobs, types, version
 	m.pictures, m.pictureKeys, m.pictureVersion = set.Pictures, pictureKeys, pictureVersion
+	m.heads = headBoxes(set.Pictures, set.Recipes)
 	m.names = names
 	m.rejected = set.Rejected
 	m.mu.Unlock()
@@ -379,6 +383,45 @@ func (m *Mobs) Pictures() (version string, keys []string) {
 		return "", nil
 	}
 	return m.pictureVersion, m.pictureKeys
+}
+
+// headBoxes is where the head is in each picture that is a face, by the
+// picture's key. A page centres a face on its plate by the head, and
+// sizes it by the head, so that a villager's nose or a witch's hat does
+// not push the face off the middle or make it smaller than the next.
+func headBoxes(pictures map[string][]byte, recipes map[string]Recipe) map[string][4]int {
+	out := map[string][4]int{}
+	for key, recipe := range recipes {
+		raw, held := pictures[key]
+		if !held {
+			continue
+		}
+		// A structure's picture is its mob's face, or the item that stands
+		// in while the face cannot be made, and only the bytes say which.
+		if recipe.Else != "" {
+			kind := strings.TrimPrefix(key, "structure/")
+			if face, made := pictures[faceKey(structureFaces[kind])]; !made || !bytes.Equal(raw, face) {
+				continue
+			}
+		}
+		cfg, err := png.DecodeConfig(bytes.NewReader(raw))
+		if err != nil || cfg.Width != cfg.Height {
+			continue
+		}
+		if box, ok := recipe.head(cfg.Width); ok {
+			out[key] = box
+		}
+	}
+	return out
+}
+
+// Heads is where the head is in each picture that is a face, by the
+// picture's key, as x, y, width and height in the picture's own pixels.
+// The caller must not change it.
+func (m *Mobs) Heads() map[string][4]int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.heads
 }
 
 // Rejected is every picture that could have been made from the models and

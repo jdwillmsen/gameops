@@ -873,6 +873,26 @@ func (r Recipe) render(textures map[string]*image.NRGBA) (*image.NRGBA, error) {
 	return square, nil
 }
 
+// head is where the head itself is in a face made by this recipe, as x, y,
+// width and height in the pixels of a picture side pixels square: the
+// part of it that is the mob's face, as against the horns, the hat or the
+// nose that reach out of it. It is false for a recipe that makes no face,
+// and for a picture that is not this recipe's making.
+func (r Recipe) head(side int) (box [4]int, ok bool) {
+	if len(r.Layers) == 0 || r.Block != nil || r.Flat != "" || r.Sparse || r.check() != nil {
+		return box, false
+	}
+	long := max(r.W, r.H)
+	if side < long || side%long != 0 {
+		return box, false
+	}
+	scale := side / long
+	// As render squares it: in the middle of whatever room is left, the
+	// odd pixel to the right and below.
+	dx, dy := (side-r.W*scale)/2, (side-r.H*scale)/2
+	return [4]int{dx + r.Main[0]*scale, dy + r.Main[1]*scale, r.Main[2] * scale, r.Main[3] * scale}, true
+}
+
 func encode(img *image.NRGBA) ([]byte, error) {
 	var out bytes.Buffer
 	if err := png.Encode(&out, img); err != nil {

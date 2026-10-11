@@ -28,6 +28,15 @@ type MarkerArt interface {
 	Names() *icons.Names
 }
 
+// FaceHeads is said by a MarkerArt that knows where the head is in each
+// picture that is a mob's face: x, y, width and height in the picture's
+// own pixels, by the picture's key. One that does not say leaves the page
+// to centre and size a face by the whole of its picture, as it did before
+// any said.
+type FaceHeads interface {
+	Heads() map[string][4]int
+}
+
 // PlayerHeads is the head of each player online now, as the agent reports
 // them.
 type PlayerHeads interface {
@@ -59,6 +68,9 @@ type iconsJSON struct {
 	Pictures struct {
 		Version string   `json:"version"`
 		Keys    []string `json:"keys"`
+		// Boxes is where the head is in each picture that is a face, as
+		// x, y, width and height in the picture's own pixels.
+		Boxes map[string][4]int `json:"boxes,omitempty"`
 	} `json:"pictures"`
 	// Names is the version of the table /api/names serves, so the page
 	// asks for that again only when it has changed.
@@ -90,6 +102,9 @@ func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 	if s.Art != nil {
 		if version, keys := s.Art.Pictures(); len(keys) > 0 {
 			out.Pictures.Version, out.Pictures.Keys = version, keys
+			if faces, says := s.Art.(FaceHeads); says {
+				out.Pictures.Boxes = faces.Heads()
+			}
 		}
 		out.Names.Version, _ = s.names()
 	}
