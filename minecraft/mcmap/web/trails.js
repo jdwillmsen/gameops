@@ -424,6 +424,10 @@
   // For a saved view: the window kept is read again, and the lines asked
   // for anew if it is another.
   app.trails = {
+    // Puts every line back under what has since been added to the canvas.
+    back() {
+      if (shared && map.hasLayer(lines)) lines.getLayers().reverse().forEach((line) => line.bringToBack());
+    },
     adopt() {
       if (!settings) return;
       const kept = windowOf(settings.get('trails').seconds);

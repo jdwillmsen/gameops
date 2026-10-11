@@ -142,6 +142,8 @@
     // is a choice apart from both.
     style: oneOf('dots', 'plates', 'large'),
     mobPicture: oneOf('faces', 'eggs'),
+    // Whether markers that heap up from far out are drawn as one.
+    group: oneOf('on', 'off'),
     // Percent. The biomes' is how much of the terrain the tint covers; the
     // other two are of how they have always been drawn.
     opacityBiomes: int(10, 100),
@@ -160,6 +162,7 @@
     labelWaypoints: 'always',
     style: 'plates',
     mobPicture: 'faces',
+    group: 'on',
     opacityBiomes: 60,
     opacityTrails: 100,
     opacitySlime: 100,

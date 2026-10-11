@@ -233,6 +233,11 @@ test('a village wears the mark of its biome where the server has it, and the pla
   assert.equal(key({ kind: 'village', biome: 'savanna' }), 'structure/village');
   assert.equal(key({ kind: 'outpost', biome: 'desert' }), 'structure/outpost');
   assert.equal(key({ kind: 'village', biome: '<img src=x>' }), 'structure/village');
+  // What the survey says of a village comes before what is asked of the biome.
+  assert.equal(key({ kind: 'village', variant: 'desert', biome: 'plains' }), 'structure/village_desert');
+  assert.equal(key({ kind: 'village', variant: 'savanna' }), 'structure/village');
+  assert.equal(key({ kind: 'village', variant: '../x' }), 'structure/village');
+  assert.equal(key({ kind: 'abandoned_camp', variant: 'desert' }), 'structure/abandoned_camp');
 });
 
 // --- the middle of the map that can be seen ---------------------------------
@@ -366,6 +371,202 @@ test('a frame that comes while the canvas is of another zoom waits for the zoom 
   s.map.fire('zoomend');
   await s.settle();
   assert.deepEqual(marker().getLatLng(), { lat: 90, lng: 90 }, 'and is once the zoom is over');
+});
+
+// --- groups -------------------------------------------------------------------
+
+// A crowd of one family in a patch of the world, each with an id.
+const crowd = (n, family, type, x0, z0, spread = 30) => Array.from({ length: n }, (_, i) => ({ id: `${family}${type}${i}`, x: x0 + ((i * 37) % spread), z: z0 + ((i * 61) % spread), family, type }));
+
+test('whatever heaps up in a square is one group, and every item is counted once', async () => {
+  const s = await stage({});
+  const { cluster, active } = s.app.groups;
+  const items = [...crowd(40, 'hostile', 'zombie', 0, 0), ...crowd(25, 'passive', 'cow', 0, 0), ...crowd(3, 'hostile', 'creeper', 0, 0), ...crowd(9, 'beds', 'red', 0, 0),
+    { id: 'far', x: 5000, z: 5000, family: 'hostile', type: 'zombie' }, { id: 'named', x: 3, z: 3, family: 'passive', type: 'cow', alone: true },
+    { id: 'nowhere', x: NaN, z: 0, family: 'passive', type: 'cow' }];
+  for (const zoom of [-1, -2, -3, -6]) {
+    assert.ok(active(zoom));
+    const { groups, single } = cluster(items, zoom, null);
+    const counted = groups.reduce((n, g) => n + g.members.length, 0) + single.length;
+    assert.equal(counted, items.length, `every item once at zoom ${zoom}`);
+    assert.equal(new Set(groups.map((g) => g.key)).size, groups.length, 'one mark to a square');
+    const side = 48 / 2 ** zoom;
+    for (const g of groups) {
+      assert.ok(g.members.length >= 2, 'one is never a group');
+      assert.ok(!g.members.some((m) => m.alone), 'whoever is somebody is never one of several');
+      assert.equal(g.families.reduce((n, [, of]) => n + of, 0), g.members.length, 'its families add up to it');
+      assert.equal(g.types.reduce((n, [, , of]) => n + of, 0), g.members.length, 'its types add up to it');
+      // In the middle of its square, so no two marks are nearer than a square apart.
+      near(((g.x / side) % 1 + 1) % 1, 0.5, 'across its square');
+      near(((g.z / side) % 1 + 1) % 1, 0.5, 'down its square');
+    }
+    for (const a of groups) for (const b of groups) if (a !== b) assert.ok(Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z)) >= side - 0.001, 'two marks a square apart or more');
+    const ids = single.map((m) => m.id);
+    for (const id of ['far', 'named', 'nowhere']) assert.ok(ids.includes(id), `${id} is drawn by itself at zoom ${zoom}`);
+  }
+  // From three steps out the whole patch is one square, and one mark, whatever is in it.
+  const far = cluster(items, -3, null).groups;
+  assert.equal(far.length, 1);
+  assert.equal(far[0].members.length, 77);
+  assert.equal(JSON.stringify(far[0].families), JSON.stringify([['hostile', 43], ['passive', 25], ['beds', 9]]));
+  assert.equal(JSON.stringify(far[0].types), JSON.stringify([['hostile', 'zombie', 40], ['passive', 'cow', 25], ['beds', 'red', 9], ['hostile', 'creeper', 3]]));
+  // The widest mark leaves room between it and the next square's.
+  for (const n of [2, 24, 25, 199, 200, 5000]) assert.ok(s.app.groups.widthOf(n) <= 48 - 10, `a mark of ${n} is ${s.app.groups.widthOf(n)} wide`);
+  // Whether coming closer would part them.
+  assert.equal(s.app.groups.together(crowd(5, 'hostile', 'zombie', 0, 0, 10)), true);
+  assert.equal(s.app.groups.together(crowd(5, 'hostile', 'zombie', 0, 0, 30)), false);
+});
+
+test('from a block to the pixel inwards nothing is grouped', async () => {
+  const s = await stage({});
+  const items = crowd(50, 'hostile', 'zombie', 0, 0, 5);
+  for (const zoom of [0, 1, 3]) {
+    const { groups, single } = s.app.groups.cluster(items, zoom, null);
+    assert.equal(groups.length, 0);
+    assert.equal(single.length, 50);
+  }
+});
+
+test('a mob that wanders over the edge of its square stays in its group', async () => {
+  const s = await stage({});
+  const { cluster } = s.app.groups;
+  // At zoom -1 a square is 96 blocks: one mob near its edge, the rest well inside.
+  const herd = crowd(6, 'passive', 'cow', 20, 20, 10);
+  const walker = { id: 'walker', x: 94, z: 30, family: 'passive', type: 'cow' };
+  let was = null;
+  const sizes = [];
+  for (const x of [94, 97, 95, 99, 93, 101, 96, 98]) {
+    walker.x = x;
+    const { groups, memory } = cluster([...herd, walker], -1, was);
+    was = memory;
+    sizes.push(groups.length === 1 ? groups[0].members.length : -1);
+  }
+  assert.equal(JSON.stringify(sizes), JSON.stringify([7, 7, 7, 7, 7, 7, 7, 7]), 'the group does not blink as it steps back and forth');
+  // Well past the edge it has left, and is by itself in the next square.
+  walker.x = 130;
+  const gone = cluster([...herd, walker], -1, was);
+  assert.equal(gone.groups[0].members.length, 6);
+  assert.ok(gone.single.some((m) => m.id === 'walker'));
+  // The same items sorted twice come out the same.
+  assert.equal(JSON.stringify(cluster(herd, -2, null).groups.map((g) => [g.key, g.x, g.z])), JSON.stringify(cluster([...herd].reverse(), -2, null).groups.map((g) => [g.key, g.x, g.z])));
+  // Memory of another zoom is of other squares, and is not used.
+  assert.equal(cluster([...herd, walker], -2, was).groups.length, 1);
+});
+
+const zombie = (i, x, z, n) => ({ i: String(i), t: 'zombie', x, y: 64, z, ...(n ? { n } : {}) });
+const marks = (s) => [...s.map.layers].flatMap((layer) => (layer.getLayers ? layer.getLayers() : []));
+
+test('on the map a heap is one mark, and players, named mobs and the inspected one are their own', async () => {
+  const s = await stage({ look: { group: 'on' } });
+  await s.zoomTo(-2);
+  const mobs = [...Array.from({ length: 12 }, (_, i) => zombie(100 + i, 10 + i, 10 + (i % 3))), zombie(200, 12, 12, 'Bob'), { i: '50', t: 'cow', x: 11, y: 64, z: 11 }, { i: '51', t: 'cow', x: 13, y: 64, z: 12 }];
+  await s.send({ players: [steve(11, 11)], mobs });
+  const heap = () => marks(s).filter((m) => m.options.heap);
+  const own = () => marks(s).filter((m) => !m.options.heap);
+  assert.equal(heap().length, 1, 'the zombies and the cows together');
+  assert.equal(heap()[0].options.heap.members.length, 14);
+  assert.equal(JSON.stringify(heap()[0].options.heap.families), JSON.stringify([['hostile', 12], ['passive', 2]]));
+  assert.equal(own().length, 2, 'the player and the named mob');
+  assert.ok(own().some((m) => m.options.name === 'Bob'));
+  // The one the card is about is drawn by itself.
+  assert.ok(s.app.inspect.open({ kind: 'mob', id: '105', type: 'zombie', x: 15, y: 64, z: 12 }));
+  assert.equal(heap()[0].options.heap.members.length, 13);
+  assert.equal(own().length, 3);
+  s.app.inspect.shut();
+  assert.equal(heap()[0].options.heap.members.length, 14);
+  // Coming closer dissolves it, and going out again makes it.
+  await s.zoomTo(0);
+  assert.equal(heap().length, 0);
+  assert.equal(own().length, 16);
+  await s.zoomTo(-2);
+  assert.equal(heap().length, 1);
+});
+
+const clickOn = (s, marker) => s.map.layers.forEach((layer) => { if (layer.getLayers && layer.getLayers().includes(marker)) layer.fire('click', { layer: marker }); });
+const titleOf = (list) => list.children[0].children[0].textContent;
+const listOf = (s) => s.doc.getElementById('map').parentNode.children.find((node) => node.classList.contains('heap-list'));
+
+test('a click on a group goes to its members, or lists them where coming closer would not part them', async () => {
+  const s = await stage({});
+  await s.zoomTo(-2);
+  // Spread over a hundred blocks, and a knot within a few.
+  await s.send({ players: [], mobs: [...Array.from({ length: 6 }, (_, i) => zombie(100 + i, 10 + i * 20, 10)), ...Array.from({ length: 5 }, (_, i) => zombie(300 + i, 400 + i, 400)), { i: '350', t: 'creeper', x: 401, y: 64, z: 402 }] });
+  const heaps = marks(s).filter((m) => m.options.heap);
+  assert.equal(heaps.length, 2);
+  const wide = heaps.find((m) => m.options.heap.members.length === 6 && m.options.heap.members[0].x < 200);
+  const knot = heaps.find((m) => m !== wide);
+  clickOn(s, wide);
+  const went = s.map.went.at(-1);
+  assert.equal(went.how, 'fitBounds');
+  assert.equal(went.bounds.length, 6);
+  assert.equal(went.options.maxZoom, 0, 'no closer than where nothing is grouped');
+  assert.equal(listOf(s).hidden, true);
+  clickOn(s, knot);
+  const list = listOf(s);
+  assert.equal(list.hidden, false, 'the knot is listed');
+  const buttons = list.querySelectorAll('button').map((b) => b.textContent);
+  assert.equal(JSON.stringify(buttons), JSON.stringify(['Close', 'Zoom to these', '5 × Zombie', '1 × Creeper']));
+  // One chosen from the list is the one the card is about, and is drawn by itself.
+  list.querySelectorAll('button').find((b) => b.textContent === '1 × Creeper').click();
+  assert.equal(s.app.inspect.key(), 'm:350');
+  assert.equal(list.hidden, true);
+  assert.equal(marks(s).filter((m) => m.options.heap).find((m) => m.options.heap.key === knot.options.heap.key).options.heap.members.length, 5);
+});
+
+test('from the keyboard each group in turn is listed, nearest the middle first', async () => {
+  const s = await stage({});
+  assert.equal(s.app.groups.next(), false, 'nothing is grouped yet');
+  await s.zoomTo(-2);
+  await s.send({ players: [], mobs: [...Array.from({ length: 3 }, (_, i) => zombie(100 + i, 20 + i, 20)), ...Array.from({ length: 4 }, (_, i) => zombie(300 + i, 900 + i, 900))] });
+  const list = listOf(s);
+  assert.equal(s.app.groups.next(), true);
+  assert.equal(list.hidden, false);
+  assert.equal(titleOf(list), 'Group of 3');
+  assert.equal(s.doc.activeElement.textContent, 'Zoom to these', 'the focus is in the list');
+  assert.equal(s.app.groups.next(), true);
+  assert.equal(titleOf(list), 'Group of 4');
+  assert.equal(s.app.groups.next(), true);
+  assert.equal(titleOf(list), 'Group of 3', 'and round again');
+  list.dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(list.hidden, true);
+});
+
+test('what another layer offers is grouped with the mobs, and told which of it was taken', async () => {
+  const s = await stage({});
+  await s.zoomTo(-2);
+  const beds = Array.from({ length: 5 }, (_, i) => ({ id: { bed: i }, x: 12 + i, z: 14, family: 'beds', type: 'red' }));
+  const lone = { id: { bed: 'far' }, x: 3000, z: 3000, family: 'beds', type: 'blue' };
+  let taken = null;
+  s.app.groups.offer('beds', { label: 'Beds', colour: () => '#f277b5', title: (sort) => `${sort} bed`, items: () => [...beds, lone], apply: (set) => { taken = set; } });
+  await s.send({ players: [], mobs: Array.from({ length: 3 }, (_, i) => zombie(100 + i, 10 + i, 10)) });
+  const heaps = marks(s).filter((m) => m.options.heap);
+  assert.equal(heaps.length, 1, 'one mark for the mobs and the beds of a square');
+  assert.equal(JSON.stringify(heaps[0].options.heap.families), JSON.stringify([['beds', 5], ['hostile', 3]]));
+  assert.ok(beds.every((bed) => taken.has(bed.id)), 'the beds in it are taken off the map');
+  assert.ok(!taken.has(lone.id), 'and the one by itself is not');
+  // With grouping off nothing is taken.
+  s.settings.set('look', { ...s.settings.get('look'), group: 'off' });
+  await s.settle();
+  assert.equal(marks(s).filter((m) => m.options.heap).length, 0);
+  assert.equal(taken.size, 0);
+});
+
+test('with grouping off, or a type filtered, nothing hidden is counted in a group', async () => {
+  const off = await stage({ look: { group: 'off' } });
+  await off.zoomTo(-2);
+  await off.send({ players: [], mobs: Array.from({ length: 6 }, (_, i) => zombie(100 + i, 10 + i, 10)) });
+  assert.equal(marks(off).filter((m) => m.options.heap).length, 0);
+  assert.equal(marks(off).length, 6);
+  const s = await stage({});
+  await s.zoomTo(-2);
+  await s.send({ players: [], mobs: [...Array.from({ length: 6 }, (_, i) => zombie(100 + i, 10 + i, 10)), ...Array.from({ length: 4 }, (_, i) => ({ i: String(300 + i), t: 'creeper', x: 12 + i, y: 64, z: 11 }))] });
+  const heap = () => marks(s).find((m) => m.options.heap);
+  assert.equal(heap().options.heap.members.length, 10);
+  // The zombies shown alone in the panel: the group is the zombies.
+  s.win.mcmap.layers.facet('live', 'mobs').solo('zombie');
+  await s.settle();
+  assert.equal(heap().options.heap.members.length, 6);
+  assert.ok(heap().options.heap.members.every((m) => m.type === 'zombie'));
 });
 
 async function main() {

@@ -288,8 +288,8 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	for _, m := range regexp.MustCompile(`(\w+): '?([\w]+)'?,`).FindAllSubmatch(block[1], -1) {
 		defaults[string(m[1])] = string(m[2])
 	}
-	if len(defaults) != 14 {
-		t.Fatalf("read %d appearance settings from settings.js, want 14", len(defaults))
+	if len(defaults) != 15 {
+		t.Fatalf("read %d appearance settings from settings.js, want 15", len(defaults))
 	}
 	// The page opens as it always has until the viewer chooses otherwise.
 	for name, want := range map[string]string{"theme": "dark", "size": "normal", "opacityBiomes": "60", "motion": "system", "labelPlayers": "always"} {

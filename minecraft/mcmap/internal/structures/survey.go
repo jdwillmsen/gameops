@@ -556,6 +556,7 @@ func (s *Surveyor) take(ctx context.Context, worldDir string, at time.Time) (Sur
 	if survey.villages, survey.villageRecords, survey.Villages, err = s.readVillages(ctx, db, survey); err != nil {
 		return Survey{}, err
 	}
+	survey.villages = inBiomes(survey.villages, s.Biomes)
 	found, err := s.locate(ctx, held, recorded)
 	if err != nil {
 		return Survey{}, err

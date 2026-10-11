@@ -219,13 +219,15 @@
     return marker;
   }
 
-  function icon(kind, sort) {
+  // variant is which of several the structure is, where the survey says:
+  // the biome a village is built for, which the game has a mark apiece for.
+  function icon(kind, sort, variant) {
     const k = KINDS[kind] || UNKNOWN;
     const mark = document.createElement('span');
     mark.style.setProperty('--kind', k.color);
     const letter = document.createElement('b');
     letter.textContent = k.letter;
-    mark.append(icons.picture(icons.keyOf('structure', { kind })), letter);
+    mark.append(icons.picture(icons.keyOf('structure', { kind, variant })), letter);
     return L.divIcon({ html: mark, className: `structure ${sort}`, iconSize: [22, 22], iconAnchor: [11, 11] });
   }
 
@@ -307,7 +309,7 @@
       }).addTo(group);
       // And a mark that stays the same size, since a box 58 blocks wide is
       // less than a pixel from far out.
-      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded'), label, { recorded: s }).addTo(group);
+      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded', s.variant), label, { recorded: s }).addTo(group);
     }
     for (const p of predicted) {
       const sort = p.candidate ? 'candidate' : 'predicted';
@@ -695,7 +697,7 @@
     const at = middle(subject);
     const s = subject.recorded;
     const p = subject.predicted;
-    view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind })));
+    view.picture.replaceChildren(icons.picture(icons.keyOf('structure', { kind, variant: s ? s.variant : undefined })));
     view.title.textContent = names.structure(kind);
     const lines = [s && found(s) ? WHAT.found : p && vacant(p) ? WHAT.vacant : WHAT[sort]];
     if (s && found(s) && s.partial === true) lines.push(WHAT.partial);

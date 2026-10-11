@@ -148,7 +148,7 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 	}, "\n"))) {
 		t.Error("views.js lists the layers a link speaks of in another order; add new ones at the end only")
 	}
-	if !bytes.Contains(js, []byte("const LOOKS = ['theme', 'size', 'text', 'labelMobs', 'labelPlayers', 'labelWaypoints', 'picturesLive', 'picturesMarkers',\n    'opacityBiomes', 'opacityTrails', 'opacitySlime', 'density', 'motion', 'coords', 'style', 'mobPicture'];")) {
+	if !bytes.Contains(js, []byte("const LOOKS = ['theme', 'size', 'text', 'labelMobs', 'labelPlayers', 'labelWaypoints', 'picturesLive', 'picturesMarkers',\n    'opacityBiomes', 'opacityTrails', 'opacitySlime', 'density', 'motion', 'coords', 'style', 'mobPicture',\n    'group'];")) {
 		t.Error("views.js lists the appearance settings a link speaks of in another order; add new ones at the end only")
 	}
 	// An address that carries a view takes the map nowhere by being

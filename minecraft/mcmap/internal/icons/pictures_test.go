@@ -116,7 +116,12 @@ func markerFiles(t testing.TB) map[string][]byte {
 	for kind, art := range structureArts {
 		files["resource_pack/"+art.item+".png"] = picture(t, 16, 16, yellow)
 		if art.icon != "" {
-			files["resource_pack/"+art.icon+".png"] = picture(t, 8, 8, green)
+			// A sheet of marks is 64 a side, and a mark of its own 8.
+			side := 8
+			if art.cut != [4]int{} {
+				side = mapSheet
+			}
+			files["resource_pack/"+art.icon+".png"] = picture(t, side, side, green)
 		}
 		for _, variant := range art.variants {
 			files["resource_pack/textures/map/"+kind+"_"+variant+".png"] = picture(t, 8, 8, blue)
@@ -213,8 +218,14 @@ func TestFetchAsksForOneListingOnly(t *testing.T) {
 	// terrain atlas and each texture a made picture is made from: one
 	// request each, and no model, since the listing names none.
 	plain := len(pictureKeys())
-	// A village's mark and its four by biome are fetched beside its item.
-	made := len(structureArts) + 5 + 13 + 17 + 16
+	// A kind's mark, and each of its others, is fetched beside its item.
+	marks := 0
+	for _, art := range structureArts {
+		if art.icon != "" {
+			marks += 1 + len(art.variants)
+		}
+	}
+	made := len(structureArts) + marks + 13 + 17 + 16
 	if want := 1 + 10 + 3 + plain + 1 + 1 + made; listings != 1 || files != want {
 		t.Errorf("%d listing requests and %d file requests, want 1 and %d", listings, files, want)
 	}
@@ -400,6 +411,18 @@ func TestAStructureIsDrawnAsTheFirstOfItsMarkItsMobsFaceAndItsItem(t *testing.T)
 	}
 	if r := got["structure/fortress"]; len(r.Layers) != 1 || r.Else != "textures/items/netherbrick" {
 		t.Errorf("a fortress is drawn by %+v, not as its mob's face with its item to fall back on", r)
+	}
+	// A mansion's mark is one of a sheet of them.
+	if r := got["structure/mansion"]; len(r.Layers) != 1 || r.Layers[0].Texture != "textures/map/map_icons" || r.Layers[0].Src != [4]int{32, 48, 16, 16} || !r.Sparse || r.Else != "textures/items/totem" {
+		t.Errorf("a mansion is drawn by %+v, not as its mark cut from the sheet", r)
+	}
+	if _, head := got["structure/mansion"].head(16); head {
+		t.Error("a mark cut from the sheet is taken for a face with a head")
+	}
+	for kind, mark := range map[string]string{"witch_hut": "swamp_hut", "trial_chamber": "trial_chambers", "desert_pyramid": "desert_pyramid", "jungle_temple": "jungle_temple", "ancient_city": "ancient_city"} {
+		if r := got["structure/"+kind]; r.Flat != "textures/map/"+mark || r.Else == "" {
+			t.Errorf("%s is drawn by %+v, not as the map's mark for it", kind, r)
+		}
 	}
 	// No face was made for a pillager, and a stronghold has no mob.
 	for kind, item := range map[string]string{"outpost": "textures/items/crossbow_standby", "stronghold": "textures/items/ender_eye"} {

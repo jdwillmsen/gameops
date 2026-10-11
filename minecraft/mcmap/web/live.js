@@ -492,6 +492,10 @@
     }
     INSPECTED.color = themed('live-players', '#ffffff');
     FOLLOWED.color = ME;
+    // Every group's mark is made again in what is now chosen.
+    for (const marker of heaps.values()) heapLayer.removeLayer(marker);
+    heaps.clear();
+    regroup();
     ring();
     if (picked) portrait(entities.get(picked.key) || picked);
     document.dispatchEvent(new CustomEvent('mcmap:live'));
@@ -532,6 +536,236 @@
     entities.delete(key);
   }
 
+  // --- groups ----------------------------------------------------------------
+  //
+  // From far out, where the viewer has it so, whatever falls in one
+  // square of the screen is one mark that says how many there are and of
+  // which families: the mobs here, and the marks any other layer offers.
+  // A player is never one of several, nor a mob somebody named, nor the
+  // one the card is about: each of those is somebody.
+
+  const heapLayer = L.featureGroup();
+  // A group's key -> its mark, and what the sorting remembers.
+  const heaps = new Map();
+  let heapMemory = null;
+  const familyColour = (family) => {
+    if (Object.hasOwn(CATEGORIES, family)) return CATEGORIES[family];
+    const source = app.groups.sources.get(family);
+    return (source && source.colour()) || CATEGORIES.other;
+  };
+  const familyName = (family) => {
+    const row = LAYERS.find(([id]) => id === family);
+    if (row) return row[1];
+    const source = app.groups.sources.get(family);
+    return source ? source.label : family;
+  };
+  const memberName = (family, type) => {
+    const source = app.groups.sources.get(family);
+    return source ? source.title(type) : names.entity(type);
+  };
+
+  // What a group holds, as lines of text: each family and how many, and
+  // under it each type, most first.
+  function heapLines(group, most) {
+    const lines = [];
+    for (const [family, n] of group.families) {
+      lines.push({ text: `${fmt(n)} ${familyName(family)}`, family: true });
+      for (const [of, type, count] of group.types) if (of === family) lines.push({ text: `${fmt(count)} × ${memberName(family, type)}`, of, type });
+    }
+    const types = lines.filter((line) => !line.family);
+    if (types.length <= most) return lines;
+    // Past what there is room for, the families alone.
+    return [...lines.filter((line) => line.family), { text: `in ${fmt(types.length)} types`, family: true }];
+  }
+
+  function heapTip(marker) {
+    const box = document.createElement('div');
+    for (const line of heapLines(marker.options.heap, 8)) {
+      const row = document.createElement('div');
+      row.textContent = line.text;
+      box.append(row);
+    }
+    return box;
+  }
+  heapLayer.bindTooltip(heapTip, { sticky: true, direction: 'top', className: 'live-tip' });
+
+  // Brings the marks on the map in line with how everything now groups:
+  // what is in a group is off the map and its group's mark on it.
+  function regroup() {
+    if (!app.groups || !app.groups.drawnBy || !icons.group) return;
+    const zoom = map.getZoom();
+    const on = icons.grouping() && app.groups.active(zoom);
+    const items = [];
+    if (on && !stale) {
+      for (const [key, held] of entities) {
+        if (held.category === 'players' || !visible(held)) continue;
+        items.push({ id: key, x: held.x, z: held.z, family: held.category, type: held.type, alone: Boolean(held.name) || (picked !== null && picked.key === key) });
+      }
+    }
+    if (on) for (const source of app.groups.sources.values()) for (const item of source.items()) items.push(item);
+    const { groups, memory } = app.groups.cluster(items, zoom, heapMemory);
+    heapMemory = memory;
+    const within = new Set();
+    const kept = new Set();
+    let added = false;
+    for (const g of groups) {
+      kept.add(g.key);
+      for (const m of g.members) within.add(m.id);
+      const worn = icons.group(g.families.map(([family, n]) => [familyColour(family), n]), g.members.length);
+      let marker = heaps.get(g.key);
+      if (!marker) {
+        marker = new Mob([g.z, g.x], { renderer, radius: worn.reach, color: INK, weight: 1, fillColor: INK, fillOpacity: 1, sprite: worn, heap: g });
+        heaps.set(g.key, marker);
+        heapLayer.addLayer(marker);
+        // Under everything that is somebody or something by itself.
+        marker.bringToBack();
+        added = true;
+        continue;
+      }
+      marker.options.heap = g;
+      // The same square by number is another place at another zoom.
+      const at = marker.getLatLng();
+      if (at.lat !== g.z || at.lng !== g.x) marker.setLatLng([g.z, g.x]);
+      if (marker.options.sprite !== worn) {
+        marker.options.sprite = worn;
+        marker.setRadius(worn.reach);
+      }
+    }
+    for (const [key, marker] of heaps) {
+      if (kept.has(key)) continue;
+      heapLayer.removeLayer(marker);
+      heaps.delete(key);
+    }
+    for (const [key, held] of entities) {
+      if (held.category === 'players') continue;
+      held.grouped = within.has(key);
+      const want = visible(held) && !held.grouped;
+      if (want === mobLayer.hasLayer(held.marker)) continue;
+      if (want) mobLayer.addLayer(held.marker); else mobLayer.removeLayer(held.marker);
+    }
+    for (const source of app.groups.sources.values()) source.apply(within);
+    // A line of where someone has been stays under the marks.
+    if (added && app.trails && app.trails.back) app.trails.back();
+    if (listed && !heaps.has(listed)) shutList();
+  }
+
+  // --- a group's members, to choose one from ------------------------------------
+  //
+  // A click or a tap on a group's mark takes the map to its members, and
+  // no closer than a block to the pixel, where nothing is grouped. Where
+  // that would not part them, since they stand within a few blocks of
+  // each other, and when a group is reached from the keyboard, its
+  // members are listed instead, and one can be chosen from the list.
+
+  const list = document.createElement('section');
+  list.className = 'heap-list';
+  list.hidden = true;
+  list.setAttribute('aria-label', 'Group of markers');
+  const listTitle = document.createElement('h2');
+  const listShut = document.createElement('button');
+  listShut.type = 'button';
+  listShut.textContent = 'Close';
+  const listHead = document.createElement('div');
+  listHead.className = 'heap-head';
+  listHead.append(listTitle, listShut);
+  const listBody = document.createElement('div');
+  listBody.className = 'heap-body';
+  list.append(listHead, listBody);
+  (map.getContainer().parentNode || document.body).append(list);
+  // The key of the group the list is of, or null while it is shut.
+  let listed = null;
+
+  function shutList() {
+    if (listed === null) return;
+    const marker = heaps.get(listed);
+    if (marker) {
+      marker._hovered = false;
+      marker.redraw();
+    }
+    const within = list.contains(document.activeElement);
+    listed = null;
+    list.hidden = true;
+    if (within) map.getContainer().focus();
+  }
+
+  function fit(group) {
+    const bounds = L.latLngBounds([]);
+    for (const m of group.members) bounds.extend([m.z, m.x]);
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 0 });
+  }
+
+  // One of a group chosen: a mob's card is opened on it, which draws it
+  // by itself, and anything else is gone to.
+  function choose(group, family, type) {
+    const member = group.members.find((m) => m.family === family && m.type === type);
+    shutList();
+    if (!member) return;
+    if (typeof member.id === 'string' && entities.has(member.id)) pick(member.id);
+    else map.setView([member.z, member.x], 0);
+  }
+
+  function openList(key) {
+    const marker = heaps.get(key);
+    if (!marker) return false;
+    shutList();
+    const group = marker.options.heap;
+    listed = key;
+    marker._hovered = true;
+    marker.redraw();
+    listTitle.textContent = `Group of ${fmt(group.members.length)}`;
+    const rows = [];
+    const zoom = document.createElement('button');
+    zoom.type = 'button';
+    zoom.textContent = 'Zoom to these';
+    zoom.addEventListener('click', () => {
+      shutList();
+      fit(group);
+    });
+    rows.push(zoom);
+    for (const line of heapLines(group, 40)) {
+      if (line.family || line.type === undefined) {
+        const head = document.createElement('h3');
+        head.textContent = line.text;
+        rows.push(head);
+        continue;
+      }
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.textContent = line.text;
+      row.addEventListener('click', () => choose(group, line.of, line.type));
+      rows.push(row);
+    }
+    listBody.replaceChildren(...rows);
+    list.hidden = false;
+    zoom.focus();
+    return true;
+  }
+  listShut.addEventListener('click', shutList);
+  list.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    shutList();
+  });
+
+  heapLayer.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    const group = e.layer.options.heap;
+    if (app.groups.together(group.members)) openList(group.key);
+    else fit(group);
+  });
+
+  // For the keyboard: the next group from the middle of the map outwards,
+  // its members listed. False where nothing is grouped.
+  function nextGroup() {
+    if (heaps.size === 0) return false;
+    const middle = map.getCenter();
+    const order = [...heaps.values()]
+      .map((marker) => [Math.hypot(marker.getLatLng().lat - middle.lat, marker.getLatLng().lng - middle.lng), marker.options.heap.key])
+      .sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+      .map(([, key]) => key);
+    return openList(order[(order.indexOf(listed) + 1) % order.length]);
+  }
+
   function clear() {
     mobLayer.clearLayers();
     playerLayer.clearLayers();
@@ -540,6 +774,7 @@
     more = 0;
     frameAt = null;
     count();
+    regroup();
     track(false);
     document.dispatchEvent(new CustomEvent('mcmap:live'));
   }
@@ -601,6 +836,7 @@
     // top of a mob that arrived after them.
     if (added) playerLayer.eachLayer((marker) => marker.bringToFront());
     count();
+    regroup();
     // A stale frame is an empty one because nothing recent is known, which
     // is not the same as the entity being gone.
     track(!stale);
@@ -902,13 +1138,14 @@
     let added = false;
     for (const held of entities.values()) {
       const layer = layerOf(held.category);
-      const want = visible(held);
+      const want = visible(held) && held.grouped !== true;
       if (want === layer.hasLayer(held.marker)) continue;
       if (want) layer.addLayer(held.marker); else layer.removeLayer(held.marker);
       added = added || want;
     }
     if (added) playerLayer.eachLayer((marker) => marker.bringToFront());
     count();
+    regroup();
     ring();
     paintCard();
     document.dispatchEvent(new CustomEvent('mcmap:live'));
@@ -1257,7 +1494,12 @@
     return `${Math.round(minutes / 60)} h ago`;
   }
 
-  const told = () => document.dispatchEvent(new CustomEvent('mcmap:inspect', { detail: { key: picked ? picked.key : null } }));
+  // Whoever the card is about is drawn by themselves, and whoever it has
+  // let go of may be one of several again.
+  const told = () => {
+    regroup();
+    document.dispatchEvent(new CustomEvent('mcmap:inspect', { detail: { key: picked ? picked.key : null } }));
+  };
 
   // Opens the card on one entity. known is what is said of it until the
   // picture has it, for one chosen from a list or by the mark the snapshot
@@ -1529,12 +1771,21 @@
     if (map.hasLayer(halo)) halo.bringToFront();
   };
 
+  heapLayer.addTo(map);
   mobLayer.addTo(map);
   playerLayer.addTo(map);
+  // How far out the map is decides whether anything is grouped, and how.
+  map.on('zoomend', regroup);
+  if (app.groups && app.groups.drawnBy) {
+    app.groups.drawnBy(regroup);
+    app.groups.next = nextGroup;
+    regroup();
+  }
   paintControl();
   document.addEventListener('mcmap:icons', relist);
   document.addEventListener('mcmap:pictures', () => {
     dress();
+    regroup();
     // A head that has arrived is drawn on its player's line.
     count();
   });
@@ -1546,8 +1797,8 @@
     count();
   });
   const styledAs = () => {
-    const { theme, size, text, labelMobs, labelPlayers, picturesLive } = look();
-    return [theme, size, text, labelMobs, labelPlayers, picturesLive, icons.composedAs ? icons.composedAs() : ''].join('|');
+    const { theme, size, text, labelMobs, labelPlayers, picturesLive, group } = look();
+    return [theme, size, text, labelMobs, labelPlayers, picturesLive, group, icons.composedAs ? icons.composedAs() : ''].join('|');
   };
   let styled = styledAs();
   document.addEventListener('mcmap:settings', (e) => {
