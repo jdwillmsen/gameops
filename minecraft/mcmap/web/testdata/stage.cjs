@@ -120,6 +120,7 @@ function leaflet(win) {
     getContainer() { return win.document.getElementById('map'); }
     project(at, zoom = this.zoom) { const p = latLng(at); return point(p.lng * 2 ** zoom, p.lat * 2 ** zoom); }
     unproject(p, zoom = this.zoom) { return latLng(p.y / 2 ** zoom, p.x / 2 ** zoom); }
+    getZoomScale(to, from) { return 2 ** (to - from); }
     _limitZoom(zoom) { return Math.max(-6, Math.min(3, zoom)); }
     panTo(at) { this.centre = latLng(at); this.went.push({ how: 'panTo', centre: this.centre, zoom: this.zoom }); return this; }
     setView(at, zoom) { this.centre = latLng(at); this.zoom = zoom; this.went.push({ how: 'setView', centre: this.centre, zoom }); return this; }
