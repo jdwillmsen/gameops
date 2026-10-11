@@ -81,6 +81,7 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /auth/status":                                 {"gatePublic", "/auth/status"},
 	"public POST /auth/logout":                                {"gatePublic", ""},
 	"public GET /api/map":                                     {"gateViewer", "/api/map"},
+	"public GET /api/diagnostics":                             {"gateViewer", "/api/diagnostics"},
 	"public GET /tiles/{dimension}/{zoom}/{x}/{y}":            {"gateViewer", "/tiles/overworld/0/37/-4.webp"},
 	"public GET /api/live":                                    {"gateViewer", ""},
 	"public GET /api/markers":                                 {"gateViewer", "/api/markers?dimension=overworld"},

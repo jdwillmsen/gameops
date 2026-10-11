@@ -92,6 +92,10 @@ type Server struct {
 	// limitedLog spaces out the log lines of exchanges refused unjudged.
 	limitedLog sparse
 
+	// assetsOnce and assetPrints are the fingerprints of the page's files.
+	assetsOnce  sync.Once
+	assetPrints map[string]string
+
 	mu    sync.Mutex
 	infos map[string]cachedInfo
 	// search holds what a search would otherwise decode again every time.
@@ -211,6 +215,7 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, gatePublic, "GET /healthz", healthy)
 	s.route(mux, gatePublic, "GET /api/config", s.handleConfig)
 	s.route(mux, gateViewer, "GET /api/map", s.handleMap)
+	s.route(mux, gateViewer, "GET /api/diagnostics", s.handleDiagnostics)
 	s.route(mux, gateViewer, "GET /tiles/{dimension}/{zoom}/{x}/{y}", s.handleTile)
 	if s.Live != nil {
 		s.route(mux, gateViewer, "GET /api/live", s.handleLive)
