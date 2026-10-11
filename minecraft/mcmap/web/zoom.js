@@ -113,9 +113,9 @@
   // How long the map takes to catch up with where it has been told to go,
   // as the time to cover most of the distance, and how long a gesture is
   // taken to go on for after its last event.
-  const CHASE_MS = 70;
+  const CHASE_MS = 55;
   const GLIDE_MS = 110;
-  const QUIET_MS = 140;
+  const QUIET_MS = 100;
   // A pointer that has moved this far since the wheel last turned is
   // pointing at something else, and the zoom is about that.
   const RE_ANCHOR_PX = 4;
@@ -174,13 +174,16 @@
     if (frame === 0) frame = requestAnimationFrame(step);
   }
 
-  // Another way of moving the map takes over: a drag, or a zoom of
-  // Leaflet's own.
-  function letGo() {
+  // Another way of moving the map takes over: a drag, a view set outright,
+  // or a zoom of Leaflet's own. The zoom that was begun is ended, so that
+  // the layers that were stretched through it are drawn again; a zoom of
+  // Leaflet's own ends itself.
+  function letGo(e) {
     if (!run) return;
     run = null;
     cancelAnimationFrame(frame);
     frame = 0;
+    if (e.type !== 'zoomanim') map._moveEnd(true);
   }
   map.on('dragstart zoomanim viewreset', letGo);
 
