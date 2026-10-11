@@ -1478,7 +1478,7 @@ kbd, .keys code {
   max-height: 60%;
   display: flex;
   flex-direction: column;
-  background: var(--float);
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 8px;
