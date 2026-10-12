@@ -328,7 +328,8 @@
         under = old;
         swap = setTimeout(settle, SWAP_MS);
       }
-      if (layer.isLoading()) layer.once('load', settle);
+      const mine = layer;
+      if (mine.isLoading()) mine.once('load', () => { if (layer === mine) settle(); });
       else settle();
     }
 

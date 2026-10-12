@@ -209,6 +209,23 @@ test('a second day chosen before the first has come takes the first away, and le
   assert.deepEqual(p.terrain(), [second]);
 });
 
+test('a day whose tiles come late, under a day chosen after it, stays until that day has come', async () => {
+  const p = await load('#overworld/100/200/-1');
+  const [today] = p.terrain();
+  today.arrive();
+  p.app.past.set(THEN);
+  const first = p.terrain().at(-1);
+  // The page's waits are cut to a moment by dom.cjs.
+  await new Promise((done) => setTimeout(done, 30));
+  assert.deepEqual(p.terrain(), [first]);
+  p.app.past.set(LATER);
+  const second = p.terrain().at(-1);
+  first.arrive();
+  assert.equal(p.map.hasLayer(first), true, 'the picture under the day still coming must not go as it becomes whole');
+  second.arrive();
+  assert.deepEqual(p.terrain(), [second]);
+});
+
 test('another dimension shown while a day is still coming is shown alone', async () => {
   const p = await load('#overworld/100/200/-1');
   p.terrain()[0].arrive();
