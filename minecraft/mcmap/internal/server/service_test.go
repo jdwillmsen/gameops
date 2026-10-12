@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,160 +69,265 @@ func serviceSession(t *testing.T, s *Server) *http.Cookie {
 	return c
 }
 
-// Every route of both listeners: the gate it is behind, and for the public
-// listener's an address that reaches its handler. A new route has to be
-// added here, with its gate thought about, before this file passes.
+// Every route of both listeners, by listener and pattern: the gate it is
+// behind, and for the public listener's an address that reaches its
+// handler. A new route has to be added here, with its gate thought about,
+// before this file passes.
 var routes = map[string]struct{ gate, path string }{
-	"GET /healthz":                          {"gatePublic", "/healthz"},
-	"GET /api/config":                       {"gatePublic", "/api/config"},
-	"GET /":                                 {"gatePublic", "/"},
-	"POST /auth/start":                      {"gatePublic", ""},
-	"GET /auth/status":                      {"gatePublic", "/auth/status"},
-	"POST /auth/logout":                     {"gatePublic", ""},
-	"GET /api/map":                          {"gateViewer", "/api/map"},
-	"GET /tiles/{dimension}/{zoom}/{x}/{y}": {"gateViewer", "/tiles/overworld/0/37/-4.webp"},
-	"GET /api/live":                         {"gateViewer", ""},
-	"GET /api/markers":                      {"gateViewer", "/api/markers?dimension=overworld"},
-	"GET /api/icons":                        {"gateViewer", "/api/icons"},
-	"GET /api/icons/picture/{group}/{name}": {"gateViewer", "/api/icons/picture/container/chest"},
-	"GET /api/names":                        {"gateViewer", "/api/names"},
-	"GET /api/icons/mob/{type}":             {"gateViewer", "/api/icons/mob/cow"},
-	"GET /api/icons/head":                   {"gateViewer", "/api/icons/head?name=nobody"},
-	"GET /api/structures":                   {"gateViewer", "/api/structures?dimension=overworld"},
-	"GET /api/structures/detail":            {"gateViewer", villageDetailPath},
-	"GET /api/biomes":                       {"gateViewer", "/api/biomes?dimension=overworld"},
-	"GET /api/biomes/at":                    {"gateViewer", "/api/biomes/at?dimension=overworld&x=0&z=0"},
-	"GET /api/biomes/nearest":               {"gateViewer", "/api/biomes/nearest?dimension=overworld&biome=plains&x=0&z=0"},
-	"GET /api/biomes/region":                {"gateViewer", "/api/biomes/region?dimension=overworld&x=0&z=0"},
-	"GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}": {"gateViewer", "/api/biomes/tiles/overworld/0/0/0.png"},
-	"GET /api/trails": {"gateViewer", "/api/trails?dimension=overworld"},
+	"public GET /healthz":                                     {"gatePublic", "/healthz"},
+	"public GET /api/config":                                  {"gatePublic", "/api/config"},
+	"public GET /":                                            {"gatePublic", "/"},
+	"public POST /auth/start":                                 {"gatePublic", ""},
+	"public GET /auth/status":                                 {"gatePublic", "/auth/status"},
+	"public POST /auth/logout":                                {"gatePublic", ""},
+	"public GET /api/map":                                     {"gateViewer", "/api/map"},
+	"public GET /tiles/{dimension}/{zoom}/{x}/{y}":            {"gateViewer", "/tiles/overworld/0/37/-4.webp"},
+	"public GET /api/live":                                    {"gateViewer", ""},
+	"public GET /api/markers":                                 {"gateViewer", "/api/markers?dimension=overworld"},
+	"public GET /api/icons":                                   {"gateViewer", "/api/icons"},
+	"public GET /api/icons/picture/{group}/{name}":            {"gateViewer", "/api/icons/picture/container/chest"},
+	"public GET /api/names":                                   {"gateViewer", "/api/names"},
+	"public GET /api/icons/mob/{type}":                        {"gateViewer", "/api/icons/mob/cow"},
+	"public GET /api/icons/head":                              {"gateViewer", "/api/icons/head?name=nobody"},
+	"public GET /api/structures":                              {"gateViewer", "/api/structures?dimension=overworld"},
+	"public GET /api/structures/detail":                       {"gateViewer", villageDetailPath},
+	"public GET /api/biomes":                                  {"gateViewer", "/api/biomes?dimension=overworld"},
+	"public GET /api/biomes/at":                               {"gateViewer", "/api/biomes/at?dimension=overworld&x=0&z=0"},
+	"public GET /api/biomes/nearest":                          {"gateViewer", "/api/biomes/nearest?dimension=overworld&biome=plains&x=0&z=0"},
+	"public GET /api/biomes/region":                           {"gateViewer", "/api/biomes/region?dimension=overworld&x=0&z=0"},
+	"public GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}": {"gateViewer", "/api/biomes/tiles/overworld/0/0/0.png"},
+	"public GET /api/trails":                                  {"gateViewer", "/api/trails?dimension=overworld"},
 	// The map as it was on each day, which is every player's to look at.
-	"GET /api/history": {"gateViewer", ""},
-	"GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {"gateViewer", ""},
-	"GET /api/search":    {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
-	"GET /api/me":        {"gateViewer", "/api/me"},
-	"GET /api/waypoints": {"gatePlayer", "/api/waypoints"},
-	// The internal listener's.
-	"GET /metrics":                        {"gatePublic", ""},
-	"GET /internal/v1/world":              {"gateAgent", ""},
-	"POST /internal/v1/world/acknowledge": {"gateAgent", ""},
-	"PUT /internal/v1/heads":              {"gateAgent", ""},
-	"POST /internal/v1/claims":            {"gateAgent", ""},
-	"POST /internal/v1/revocations":       {"gateAgent", ""},
-	"POST /internal/v1/service-sessions":  {"gateExchange", ""},
+	"public GET /api/history": {"gateViewer", ""},
+	"public GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {"gateViewer", ""},
+	"public GET /api/search":    {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
+	"public GET /api/me":        {"gateViewer", "/api/me"},
+	"public GET /api/waypoints": {"gatePlayer", "/api/waypoints"},
+	// The internal listener's. Its liveness route is the public one's twin.
+	"internal GET /healthz":                        {"gatePublic", ""},
+	"internal GET /metrics":                        {"gatePublic", ""},
+	"internal GET /internal/v1/world":              {"gateAgent", ""},
+	"internal POST /internal/v1/world/acknowledge": {"gateAgent", ""},
+	"internal PUT /internal/v1/heads":              {"gateAgent", ""},
+	"internal POST /internal/v1/claims":            {"gateAgent", ""},
+	"internal POST /internal/v1/revocations":       {"gateAgent", ""},
+	"internal POST /internal/v1/service-sessions":  {"gateExchange", ""},
 }
 
-// routesInSource reads every route this package registers, and the gate
-// each is behind, out of every file of it that is not a test: a mux does
-// not list its own. It fails on a handler given to a mux anywhere but in
-// route, which is how a route would get past this file.
-func routesInSource(t *testing.T) map[string]string {
-	t.Helper()
-	files, err := filepath.Glob("*.go")
+// The two functions that may make a mux, and the listener each makes it for.
+var listeners = map[string]string{"Handler": "public", "InternalHandler": "internal"}
+
+// routesIn reads every route registered by the Go files of dir that are not
+// tests, with the gate each is behind, keyed by listener and pattern: a mux
+// does not list its own. Everything that could put a handler on a mux some
+// other way is a problem it reports: a registration made directly, held as
+// a method value or made in a package-level variable, a route registered
+// outside the two functions that build a listener, and a mux made anywhere
+// else. server is whether dir is this package, which may have routes; any
+// other may have none of this at all.
+func routesIn(dir string, server bool) (found map[string]string, problems []string, err error) {
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, err
 	}
-	found := map[string]string{}
+	found = map[string]string{}
 	set := token.NewFileSet()
+	problem := func(at token.Pos, format string, args ...any) {
+		problems = append(problems, fmt.Sprintf("%s: %s", set.Position(at), fmt.Sprintf(format, args...)))
+	}
 	for _, name := range files {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		file, err := parser.ParseFile(set, name, nil, 0)
 		if err != nil {
-			t.Fatal(err)
+			return nil, nil, err
 		}
+		// Every declaration, not only functions: a variable's initialiser
+		// runs too. within is the function a node is in, or "" for none.
 		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
+			within := ""
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				within = fn.Name.Name
 			}
-			ast.Inspect(fn.Body, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				at := set.Position(call.Pos())
-				switch sel.Sel.Name {
-				case "Handle", "HandleFunc":
-					// Whatever it is called on: a mux by another name
-					// is still a mux.
-					if fn.Name.Name != "route" {
-						t.Errorf("%s: %s registers a handler with %s directly; every route goes through route, with its gate", at, fn.Name.Name, sel.Sel.Name)
+			ast.Inspect(decl, func(n ast.Node) bool {
+				switch node := n.(type) {
+				case *ast.SelectorExpr:
+					switch node.Sel.Name {
+					// Wherever it appears and whatever it is on: called,
+					// or only named to be called later, on a mux by any
+					// name or on the default one.
+					case "Handle", "HandleFunc":
+						if !server || within != "route" {
+							problem(node.Pos(), "a handler is registered with %s directly; every route goes through route, with its gate", node.Sel.Name)
+						}
+					case "NewServeMux", "DefaultServeMux":
+						if !server || listeners[within] == "" {
+							problem(node.Pos(), "a mux is made or used outside the two functions that build a listener")
+						}
 					}
-				case "route":
-					if len(call.Args) != 4 {
-						t.Errorf("%s: route called with %d arguments", at, len(call.Args))
+				case *ast.CallExpr:
+					sel, ok := node.Fun.(*ast.SelectorExpr)
+					if !ok || sel.Sel.Name != "route" {
 						return true
 					}
-					behind, isName := call.Args[1].(*ast.Ident)
-					pattern, isLiteral := call.Args[2].(*ast.BasicLit)
+					listener := listeners[within]
+					if !server || listener == "" {
+						problem(node.Pos(), "a route is registered outside the two functions that build a listener")
+						return true
+					}
+					if len(node.Args) != 4 {
+						problem(node.Pos(), "route called with %d arguments", len(node.Args))
+						return true
+					}
+					behind, isName := node.Args[1].(*ast.Ident)
+					pattern, isLiteral := node.Args[2].(*ast.BasicLit)
 					if !isName || !isLiteral || !strings.HasPrefix(behind.Name, "gate") {
-						t.Errorf("%s: a route's gate and pattern are written out where it is registered, not worked out", at)
+						problem(node.Pos(), "a route's gate and pattern are written out where it is registered, not worked out")
 						return true
 					}
 					text, _ := strconv.Unquote(pattern.Value)
-					if was, twice := found[text]; twice && was != behind.Name {
-						t.Errorf("%s: %s is registered behind %s and behind %s", at, text, was, behind.Name)
+					key := listener + " " + text
+					if was, twice := found[key]; twice && was != behind.Name {
+						problem(node.Pos(), "%s is registered behind %s and behind %s", key, was, behind.Name)
 					}
-					found[text] = behind.Name
+					found[key] = behind.Name
 				}
 				return true
 			})
 		}
 	}
-	if len(found) < 20 {
-		t.Fatalf("only %d routes found in the package's source", len(found))
-	}
-	return found
+	return found, problems, nil
 }
 
 func TestService_EveryRouteHasAGateThatWasChosenForIt(t *testing.T) {
-	found := routesInSource(t)
-	for pattern, gate := range found {
-		want, listed := routes[pattern]
+	found, problems, err := routesIn(".", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range problems {
+		t.Error(problem)
+	}
+	if len(found) < 30 {
+		t.Fatalf("only %d routes found in the package's source", len(found))
+	}
+	for key, gate := range found {
+		want, listed := routes[key]
 		switch {
 		case !listed:
-			t.Errorf("%s is not in this test's list. Decide whether a service session may read it (gateViewer) or not (gatePlayer), which it may not if it is one player's own or changes anything, and add it", pattern)
+			t.Errorf("%s is not in this test's list. Decide whether a service session may read it (gateViewer) or not (gatePlayer), which it may not if it is one player's own or changes anything, and add it", key)
 		case want.gate != gate:
-			t.Errorf("%s is behind %s in the source and %s here", pattern, gate, want.gate)
+			t.Errorf("%s is behind %s in the source and %s here", key, gate, want.gate)
 		}
+		listener, pattern, _ := strings.Cut(key, " ")
 		// The invariant the roles to come lean on: nothing that is not a
 		// plain read is ever open to a service session.
 		if gate == "gateViewer" && !strings.HasPrefix(pattern, "GET ") {
-			t.Errorf("%s is shown to a service session and is not a GET", pattern)
+			t.Errorf("%s is shown to a service session and is not a GET", key)
+		}
+		// And each kind of gate belongs to one listener.
+		if (gate == "gateViewer" || gate == "gatePlayer") != (listener == "public") && gate != "gatePublic" {
+			t.Errorf("%s is behind %s, which is not a gate of the %s listener", key, gate, listener)
 		}
 	}
-	for pattern := range routes {
-		if _, ok := found[pattern]; !ok {
-			t.Errorf("%s is listed here and is not a route any more", pattern)
+	for key := range routes {
+		if _, ok := found[key]; !ok {
+			t.Errorf("%s is listed here and is not a route any more", key)
+		}
+	}
+	// What starts the service gives each handler to a listener and wraps
+	// neither in a mux of its own, where a route would be out of sight of
+	// all of the above.
+	for _, dir := range []string{"../../cmd/mcmap", "../../e2e/harness"} {
+		routed, problems, err := routesIn(dir, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, problem := range problems {
+			t.Error(problem)
+		}
+		if len(routed) != 0 {
+			t.Errorf("%s registers routes of its own: %v", dir, routed)
 		}
 	}
 }
 
-// The reader above has to see what it is there to catch.
+// The reader has to see what it is there to catch, so it is run, the same
+// function, over source that does each thing it must not miss.
 func TestService_ARouteRegisteredAnotherWayIsSeen(t *testing.T) {
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, "elsewhere.go", `package server
-func (s *Server) more(m *http.ServeMux) { m.HandleFunc("POST /api/reset", s.handleMe); s.side.Handle("GET /x", nil) }`, 0)
+	for name, source := range map[string]struct {
+		code   string
+		server bool
+		want   string
+	}{
+		"called on a mux in a helper":       {"func (s *Server) more(m *http.ServeMux) { m.HandleFunc(\"POST /api/reset\", s.handleMe) }", true, "registered with HandleFunc directly"},
+		"called on a mux by another name":   {"func (s *Server) more() { s.side.Handle(\"GET /x\", nil) }", true, "registered with Handle directly"},
+		"held as a method value":            {"func (s *Server) more(m *http.ServeMux) { add := m.HandleFunc; add(\"POST /api/reset\", s.handleMe) }", true, "registered with HandleFunc directly"},
+		"in a package-level variable":       {"var _ = func() bool { http.HandleFunc(\"/api/reset\", nil); return true }()", true, "registered with HandleFunc directly"},
+		"on the default mux":                {"func init() { http.Handle(\"/x\", nil) }", true, "registered with Handle directly"},
+		"through route, outside a listener": {"func (s *Server) more(m *http.ServeMux) { s.route(m, gateViewer, \"POST /api/reset\", s.handleMe) }", true, "outside the two functions"},
+		"with a gate that is worked out":    {"func (s *Server) Handler() { s.route(m, pick(), \"GET /x\", s.handleMe) }", true, "written out"},
+		"with a pattern that is worked out": {"func (s *Server) Handler() { s.route(m, gateViewer, prefix+\"/x\", s.handleMe) }", true, "written out"},
+		"a mux made in a helper":            {"func wrap(h http.Handler) http.Handler { m := http.NewServeMux(); return m }", true, "a mux is made"},
+		"a mux wrapped round it at start":   {"func main() { m := http.NewServeMux(); m.Handle(\"/\", app.Handler()) }", false, "a mux is made"},
+		"a handler registered at start":     {"func main() { http.HandleFunc(\"/debug\", nil) }", false, "registered with HandleFunc directly"},
+		"a route registered at start":       {"func main() { app.route(nil, gatePublic, \"GET /x\", nil) }", false, "outside the two functions"},
+		"twice behind two gates":            {"func (s *Server) Handler() { s.route(m, gateViewer, \"GET /x\", nil); s.route(m, gatePlayer, \"GET /x\", nil) }", true, "registered behind"},
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "elsewhere.go"), []byte("package server\n"+source.code+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, problems, err := routesIn(dir, source.server)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, source.want) }) {
+			t.Errorf("%s was not seen: %v", name, problems)
+		}
+	}
+	// And what is allowed is not complained of.
+	dir := t.TempDir()
+	fine := "package server\nfunc (s *Server) Handler() { m := http.NewServeMux(); s.route(m, gateViewer, \"GET /x\", s.h) }\nfunc (s *Server) route(m *http.ServeMux, g gate, p string, h http.HandlerFunc) { m.Handle(p, h) }\n"
+	if err := os.WriteFile(filepath.Join(dir, "fine.go"), []byte(fine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	found, problems, err := routesIn(dir, true)
+	if err != nil || len(problems) != 0 || found["public GET /x"] != "gateViewer" {
+		t.Errorf("a route registered properly gave %v, %v, %v", found, problems, err)
+	}
+}
+
+// What is on the internal listener is not on the public one, asked for
+// there with everything that would open it where it lives.
+func TestService_NothingOfTheInternalListenerAnswersOnThePublicOne(t *testing.T) {
+	s, _, _ := withService(t)
+	s.Chunks, s.Generations = damaged(), &fakeGenerations{}
+	public := s.Handler()
+	found, _, err := routesIn(".", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := 0
-	ast.Inspect(file, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "Handle" || sel.Sel.Name == "HandleFunc") {
-				seen++
+	asked := 0
+	for key := range found {
+		listener, pattern, _ := strings.Cut(key, " ")
+		method, path, _ := strings.Cut(pattern, " ")
+		if listener != "internal" || path == "/healthz" {
+			continue
+		}
+		asked++
+		for _, secret := range []string{internalToken, serviceSecret} {
+			rec := do(public, method, path, `{}`, []*http.Cookie{session(s, steve)}, "Authorization", "Bearer "+secret, "Sec-Fetch-Site", "same-origin")
+			if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s %s on the public listener = %d, want 404 or 405", method, path, rec.Code)
+			}
+			if len(rec.Result().Cookies()) != 0 {
+				t.Errorf("%s %s on the public listener set a cookie", method, path)
 			}
 		}
-		return true
-	})
-	if seen != 2 {
-		t.Errorf("the reader's test for a direct registration saw %d of 2", seen)
+	}
+	if asked < 7 {
+		t.Errorf("only %d internal routes were asked for on the public listener", asked)
 	}
 }
 
@@ -598,6 +706,20 @@ func TestService_AStormOfWrongSecretsNeitherLocksOutTheRightOneNorFloodsTheLog(t
 	held := serviceSession(t, s)
 	if code := do(s.Handler(), "GET", "/api/map", "", []*http.Cookie{held}).Code; code != http.StatusOK {
 		t.Errorf("the session issued through the storm = %d", code)
+	}
+}
+
+func TestService_TheSecretIsTakenAsABearerTokenAndNoOtherWay(t *testing.T) {
+	s, _, _ := withService(t)
+	// The secret itself, not as a bearer token: a value in the wrong place
+	// is a wrong value.
+	for _, header := range []string{serviceSecret, "Basic " + serviceSecret, "bearer" + serviceSecret, "Token " + serviceSecret} {
+		if rec := do(s.InternalHandler(), "POST", "/internal/v1/service-sessions", "", nil, "Authorization", header); rec.Code == http.StatusOK || cookie(rec, "__Host-mcmap_session") != nil {
+			t.Errorf("the secret presented without the Bearer scheme was answered %d", rec.Code)
+		}
+	}
+	if rec := exchange(s, serviceSecret); rec.Code != http.StatusOK {
+		t.Errorf("the secret as a bearer token = %d", rec.Code)
 	}
 }
 

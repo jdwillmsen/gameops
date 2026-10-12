@@ -196,7 +196,13 @@ func (s *Server) handleServiceSession(w http.ResponseWriter, r *http.Request) {
 		refuse(exchangeMalformed, http.StatusBadRequest)
 		return
 	}
-	presented, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	// As a bearer token and no other way. A header that is not one is a
+	// wrong secret whatever it holds, the secret itself included: without
+	// the scheme it is a value some other part of a client put there.
+	presented, bearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !bearer {
+		presented = ""
+	}
 	switch result := s.Service.Attempt(presented); result {
 	case auth.ExchangeOK:
 		expires := s.Sessions.IssueService(w)
