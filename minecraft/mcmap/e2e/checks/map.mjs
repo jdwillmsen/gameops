@@ -322,8 +322,9 @@ export async function themes({ page }) {
 
 // On a phone the panel is a sheet from the bottom edge, as wide as the
 // screen, that changes height when its handle is pressed.
-export async function phoneSheet({ browser, cfg, watch }) {
+export async function phoneSheet({ browser, cfg, watch, closers = [] }) {
   const ctx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie, viewport: { width: 390, height: 780 }, dpr: 2, touch: true });
+  closers.push(() => ctx.close());
   try {
     const page = await openMap(ctx, cfg);
     const state = () => page.evaluate(() => {

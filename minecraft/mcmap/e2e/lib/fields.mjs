@@ -89,6 +89,8 @@ export const SENTENCES = [
   "the layer sheet is not across the bottom of the screen",
   "pressing the sheet's handle did not change its height",
   "the map drew no terrain on a phone",
+  "the map could not be reached",
+  "the map did not answer a browser with no session at all",
   "the check did not finish in its time",
   "the check itself broke",
   "the map did not load with a session, so nothing on it was checked",

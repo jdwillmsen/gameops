@@ -16,6 +16,24 @@ export class Fail extends Error {
 // a mob loaded says so and is counted apart from both passing and failing.
 export const skip = (reason, measures = {}) => ({ skip: reason, measures });
 
+// Runs a check with a limit on its time. One that passes the limit is not
+// left running behind the checks after it, pressing things on a page they
+// are using: stop is called, which closes whatever the check was working
+// on, and the check is waited for until that has ended it. A promise the
+// check left unanswered is answered here, so it is nobody's unhandled
+// rejection later.
+export async function within(fn, seconds, stop, graceMs = 10_000) {
+  const work = Promise.resolve().then(fn);
+  const settled = work.then(() => {}, () => {});
+  let timer;
+  const late = await Promise.race([settled.then(() => false), new Promise((resolve) => { timer = setTimeout(() => resolve(true), seconds * 1000); })]);
+  clearTimeout(timer);
+  if (!late) return work;
+  await Promise.resolve().then(stop).catch(() => {});
+  await Promise.race([settled, sleep(graceMs)]);
+  throw new Fail('the check did not finish in its time', { limit_seconds: seconds });
+}
+
 export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 // Until fn answers something truthy, or null when it never does.
