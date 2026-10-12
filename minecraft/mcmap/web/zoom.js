@@ -188,7 +188,14 @@
     } else {
       // The block that was under the anchor stays under it.
       const half = map.getSize().divideBy(2);
-      centre = L.latLng(anchoredCentre(run.about, run.at, half, zoom));
+      const raw = anchoredCentre(run.about, run.at, half, zoom);
+      // A pointer or a map with no size to speak of has no centre to give;
+      // the zoom ends where it is and the map is left as it was.
+      if (!Number.isFinite(raw.lat) || !Number.isFinite(raw.lng) || !Number.isFinite(zoom)) {
+        finish();
+        return;
+      }
+      centre = L.latLng(raw);
     }
     map._move(centre, zoom, { pinch: true, round: false });
     if (zoom === run.target && now >= run.until) finish();
@@ -196,7 +203,7 @@
   }
 
   function begin(target, how) {
-    if (!map._loaded) return;
+    if (!map._loaded || !Number.isFinite(target)) return;
     const goal = limit(target);
     if (!run) {
       if (map._animatingZoom) map._onZoomTransitionEnd();
@@ -248,6 +255,7 @@
     if (levels === 0 || !map._loaded) return;
     const box = map.getContainer().getBoundingClientRect();
     const where = L.point(e.clientX - box.left, e.clientY - box.top);
+    if (!Number.isFinite(where.x) || !Number.isFinite(where.y)) return;
     const going = run && !run.centre && run.at && where.distanceTo(run.at) <= RE_ANCHOR_PX;
     const at = going ? run.at : where;
     begin(heading() + levels, {
