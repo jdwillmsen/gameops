@@ -80,7 +80,7 @@ test('a refusal says its status and never what was presented', async () => {
     [async () => answer(429), /answered 429/],
     [async () => answer(200, { cookies: [] }), /0 cookies/],
     [async () => answer(200, { cookies: [GOOD, GOOD] }), /2 cookies/],
-    [async () => answer(200, { identity: 'Steve' }), /not the service identity/],
+    [async () => answer(200, { identity: 'MadeupPlayer' }), /not the service identity/],
     [async () => answer(200, { cookies: [GOOD.replace('; Secure', '')] }), /Secure/],
     [async () => { throw Object.assign(new TypeError(`fetch failed for Bearer ${SECRET}`), { cause: { code: 'ECONNREFUSED' } }); }, /ECONNREFUSED/],
   ];
