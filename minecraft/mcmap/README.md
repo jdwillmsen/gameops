@@ -3242,8 +3242,9 @@ Such an exchange arrives from the loopback address and is counted as
 `source="loopback"`, so every run from outside shows.
 
 **What it may see.** What every logged-in player is shown alike: the map
-and its tiles, the live stream, markers, structures and their detail,
-biomes, trails, search, names and icons. Every route is registered through
+and its tiles, the map as it was on each day kept, the live stream,
+markers, structures and their detail, biomes, trails, search, names and
+icons. Every route is registered through
 one function, `route` in `internal/server/server.go`, which is given the
 route's gate: `gateViewer` for those, `gatePlayer` for what is a player's
 alone, which answers a service session with 403 and today is
@@ -3500,7 +3501,10 @@ memory and to no terminal, opens a `kubectl port-forward` to the internal
 listener for the exchange alone, closes it, and drives the browser against
 the public address like any other run. Both are reads of the cluster;
 nothing in it is changed. There is no way to hand the runner the secret
-directly, on purpose.
+directly, on purpose. It sends the secret in the clear only to this machine,
+which is the port-forward, or to a Service inside the cluster, which is how
+the internal listener is spoken to by everything; to any other address it
+insists on https.
 
 ### Who has to approve what
 
