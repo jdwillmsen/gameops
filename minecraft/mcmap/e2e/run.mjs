@@ -81,6 +81,15 @@ function configure(argv) {
   if (!/^https:\/\/[^/]+$/.test(publicUrl)) throw new Error('--public-url must be the https address of the map, with no path');
   // An address of any other kind is a file or a command to something.
   if (get('internal-url') !== undefined && !/^https?:\/\/[^/\s]+\/?$/.test(String(get('internal-url')))) throw new Error('--internal-url must be the http or https address of the map\'s internal listener, with no path');
+  // The secret goes to this address in a header. In the clear is how the
+  // internal listener is spoken to inside the cluster, by everything that
+  // speaks to it, and over a port-forward to this machine; to anywhere
+  // else it is not sent unless the connection is encrypted.
+  if (get('internal-url') !== undefined) {
+    const internal = new URL(String(get('internal-url')));
+    const near = ['127.0.0.1', 'localhost', '[::1]'].includes(internal.hostname) || !internal.hostname.includes('.') || /\.svc(\.cluster\.local)?$/.test(internal.hostname);
+    if (internal.protocol !== 'https:' && !near) throw new Error('--internal-url may be plain http only for this machine or a Service inside the cluster; anywhere else it must be https');
+  }
   const local = ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(publicUrl).hostname);
   const external = Boolean(values['secret-from-kube'] || values['port-forward']);
   const cfg = {
