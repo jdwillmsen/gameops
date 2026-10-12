@@ -18,6 +18,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
@@ -92,6 +93,12 @@ type BiomeReader interface {
 	Extract(ctx context.Context, dbDir string, at time.Time, chunks int) (biomes.Stats, error)
 }
 
+// Historian keeps the map as it is drawn, once a day. It is offered every
+// cycle's map and is the one that knows whether the day is already held.
+type Historian interface {
+	Capture(ctx context.Context, at time.Time) (history.Result, error)
+}
+
 type Syncer interface {
 	Sync(ctx context.Context) (mirror.Stats, error)
 }
@@ -128,6 +135,9 @@ type Worker struct {
 	// Biomes, if set, reads the world's biomes after every snapshot that
 	// has generated something new. It bounds its own time.
 	Biomes BiomeReader
+	// History, if set, is offered the map after every cycle in which all
+	// of it was drawn.
+	History Historian
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -297,6 +307,9 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 		w.Status.MarkRendered(dimension, now)
 	}
 	w.Status.MarkProblem(problem)
+	if problem == "" {
+		w.remember(ctx, now)
+	}
 	w.biomes(ctx, now, report, counted)
 	w.survey(ctx, now)
 	return Applied
@@ -374,6 +387,26 @@ func (w *Worker) mark(ctx context.Context, now time.Time) {
 		return
 	}
 	w.Logger.Info("markers read", "beds", stats.Beds, "containers", stats.Containers, "mobs", stats.Mobs, "skipped", stats.Skipped, "seconds", time.Since(started).Seconds())
+}
+
+// remember offers the map just drawn to the history, straight after the
+// renders and from this goroutine, so that no tile is being rewritten while
+// it is read. A day that could not be kept is logged and counted and costs
+// nothing else: the next cycle offers the map again.
+func (w *Worker) remember(ctx context.Context, now time.Time) {
+	if w.History == nil {
+		return
+	}
+	started := time.Now()
+	r, err := w.History.Capture(ctx, now)
+	if err != nil {
+		w.Logger.Error("map history not kept", "error", err)
+		return
+	}
+	if r.Skipped {
+		return
+	}
+	w.Logger.Info("map history kept", "day", r.Day, "tiles", r.Tiles, "changed", r.Changed, "new_bytes", r.NewBytes, "seconds", time.Since(started).Seconds())
 }
 
 // survey runs last. Structures change only when new chunks are generated,

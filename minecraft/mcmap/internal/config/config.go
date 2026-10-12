@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -121,6 +122,11 @@ type Config struct {
 	// the most kept for one player.
 	TrailMaxAge    time.Duration
 	TrailMaxPoints int
+
+	// History is whether the map is kept as it was on each day, and
+	// HistoryDir where. Unlike the rest of DataDir it cannot be rebuilt.
+	History    bool
+	HistoryDir string
 }
 
 // minTokenLength keeps a placeholder from standing in for a credential.
@@ -304,6 +310,15 @@ func Load(getenv func(string) string) (Config, error) {
 		if c.TrailMaxPoints, err = strconv.Atoi(or(getenv("TRAILS_MAX_POINTS"), "5000")); err != nil || c.TrailMaxPoints < 10 || c.TrailMaxPoints > maxTrailPoints {
 			fail("TRAILS_MAX_POINTS must be between 10 and %d", maxTrailPoints)
 		}
+	}
+
+	// Off until asked for, as the other later features are: it writes to
+	// the volume every day and never deletes.
+	if c.History, err = strconv.ParseBool(or(getenv("HISTORY_ENABLED"), "false")); err != nil {
+		fail("HISTORY_ENABLED must be true or false")
+	}
+	if c.HistoryDir = or(getenv("HISTORY_DIR"), filepath.Join(c.DataDir, "history")); c.History && !filepath.IsAbs(c.HistoryDir) {
+		fail("HISTORY_DIR must be an absolute path, got %q", c.HistoryDir)
 	}
 	return c, errors.Join(errs...)
 }

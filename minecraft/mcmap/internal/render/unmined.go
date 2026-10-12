@@ -398,6 +398,46 @@ func (u *Unmined) TilePath(out, format string, zoom, x, y int) string {
 		fmt.Sprintf("tile.%d.%d.%s", x, y, format))
 }
 
+// Tile is one tile's address: zoom 0 is one block per pixel.
+type Tile struct {
+	Zoom, X, Y int
+}
+
+// Tiles calls yield with every tile under out and the file it is in. A file
+// that is not a tile in the given format is passed over, and a dimension
+// nothing has been generated in has no tiles and is not an error.
+func (u *Unmined) Tiles(out, format string, yield func(Tile, string) error) error {
+	root := filepath.Join(out, "tiles")
+	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		level, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
+		number, isLevel := strings.CutPrefix(level, "zoom.")
+		zoom, err := strconv.Atoi(number)
+		if !isLevel || err != nil {
+			return nil
+		}
+		parts := strings.Split(d.Name(), ".")
+		if len(parts) != 4 || parts[0] != "tile" || parts[3] != format {
+			return nil
+		}
+		x, errX := strconv.Atoi(parts[1])
+		y, errY := strconv.Atoi(parts[2])
+		if errX != nil || errY != nil {
+			return nil
+		}
+		return yield(Tile{Zoom: zoom, X: x, Y: y}, p)
+	})
+}
+
 func floorDiv(a, b int) int {
 	q := a / b
 	if a%b != 0 && (a < 0) != (b < 0) {

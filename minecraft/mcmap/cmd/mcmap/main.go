@@ -19,6 +19,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
@@ -180,6 +181,18 @@ func run(logger *slog.Logger) error {
 			return biome.ID, ok
 		}
 	}
+	// A history that cannot be opened stops the service, as the other
+	// things that cannot be rebuilt do: running on would quietly keep no
+	// days, and a day not kept cannot be kept later.
+	var past *history.Store
+	if cfg.History {
+		if past, err = history.Open(cfg.HistoryDir, logger); err != nil {
+			return err
+		}
+		past.MapsDir, past.Source = mapsDir, renderer
+		past.Renderer = history.Stamp{SHA256: cfg.UnminedSHA256, NetherTopY: cfg.NetherTopY}
+		w.History = past
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -226,6 +239,9 @@ func run(logger *slog.Logger) error {
 	if biomeStore != nil {
 		app.Biomes = biomeStore
 	}
+	if past != nil {
+		app.History = past
+	}
 	if recorder := startTrails(ctx, cfg, layer, &wg); recorder != nil {
 		app.Trails = recorder
 	}
@@ -268,7 +284,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "history", cfg.History)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()

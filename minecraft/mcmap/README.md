@@ -2402,6 +2402,56 @@ answer replaces them. The row's switch and the window are kept with
 everything else the page keeps (see Page controls). A service without
 trails answers 404 once, and the page then has no Trails row.
 
+## History
+
+With `HISTORY_ENABLED=true` the map is kept as it was on each day, so a
+place can be looked at over time. The page does not show it yet; this is
+the store and the routes a timeline will be drawn from, switched on first
+because a day not kept cannot be kept later.
+
+What is kept is the rendered tiles and not the world. A tile is an image,
+and showing it again needs nothing of the game's version, the save format
+or the renderer that drew it. The world would also cost far more: one
+fifteen-minute snapshot fetches 300 to 400 MB of an 819 MB world, because
+compaction rewrites that much, so a day of hard links shares almost nothing
+with the day before and each kept day would be close to a whole world.
+
+```
+HISTORY_DIR/
+  blobs/ab/abcdef…          one tile's bytes, named by their SHA-256
+  days/2026-10-12.json.gz   which blob is at each tile address that day
+```
+
+**A day.** At the end of the first cycle of each UTC day in which all three
+dimensions were drawn, every tile is hashed, the ones not already held are
+copied in, and the day's manifest is written. A tile nobody built on is the
+same bytes as yesterday and costs nothing; one that changed costs itself
+and the coarser tiles above it. A cycle with a failed render keeps nothing,
+since a day made of two dimensions from now and one from earlier is a
+picture of no moment the world was in, and the next cycle is offered
+instead. Later cycles of a day that is held are passed over: the first
+capture of a day is the day.
+
+**Interrupted part-way.** A blob is flushed before it has its name and the
+manifest is written after every blob it names, so a day exists whole or not
+at all. A capture that was killed, or ran out of room, has added no day;
+the tiles it did copy are found already held by the next attempt.
+
+**Nothing is deleted.** There is no retention yet, deliberately: what a day
+costs on a real world is what `mcmap_history_capture_bytes` is for, and a
+thinning rule is better chosen from that than guessed. The worst a day can
+cost is every tile again. A volume that fills costs the days that did not
+fit and nothing else.
+
+**When the renderer changes.** A new renderer build, or a different
+`NETHER_TOP_Y`, can shift colours across the whole map, which stores every
+tile again once and reads as though the world changed everywhere. Each day
+records both, and `GET /api/history` marks a day drawn differently from the
+one before it with `rendererChanged`.
+
+History cannot be rebuilt, unlike the tiles and the mirror beside it, so
+`HISTORY_DIR` belongs on storage that is kept.
+
 ## Page controls
 
 **The layer panel.** Everything the map can show is in one panel beside
@@ -3195,6 +3245,8 @@ Two listeners keep the internet away from what is not for it:
 | `BIOMES_ENABLED` | no | `false` | `true` reads biomes and serves `/api/biomes` and its tiles; off, search finds no biomes |
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |
+| `HISTORY_ENABLED` | no | `false` | `true` keeps the map as it was on each day and serves `/api/history` and its tiles |
+| `HISTORY_DIR` | no | `DATA_DIR/history` | Where the days are kept; an absolute path. It cannot be rebuilt and only grows, so give it storage that is kept. Checked only with `HISTORY_ENABLED=true` |
 | `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
 
 ## Endpoints
@@ -3205,7 +3257,7 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag |
-| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
+| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time, `live` (whether there is a live stream to open), `history` (whether earlier days are kept), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
@@ -3224,6 +3276,8 @@ Two listeners keep the internet away from what is not for it:
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
+| `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, and `changed`, how many of them differ from the day before. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the one below; `GET /api/map` says which in `history` |
+| `GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One tile as it was on that day, addressed as the terrain's. Kept for good by the browser, since a day's tile never changes. 404 for a day not held or a tile the map did not have that day, 400 for a bad address |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -3300,6 +3354,11 @@ opens at the same place.
 | `mcmap_trails_limit{limit}` | The retention in force: `age_seconds`, `points_per_player`, `players` |
 | `mcmap_trails_oldest_point_age_seconds` | Age of the oldest trail point held. It stays under the age limit |
 | `mcmap_trails_points_dropped_total{reason}` | Trail points let go: `age`, `thinned`, `count`, `players` |
+| `mcmap_history_captures_total{result}` | Days of the map offered for keeping: `captured` or `failed`. A day already held is not counted |
+| `mcmap_history_last_success_timestamp_seconds` | The snapshot the newest day was drawn from. More than a day and a cycle old means days are being missed |
+| `mcmap_history_days`, `mcmap_history_bytes` | Days held, and the bytes of tiles held for all of them, each distinct tile counted once |
+| `mcmap_history_capture_bytes` | Bytes the last day captured added: what a day of history costs |
+| `mcmap_history_capture_tiles`, `mcmap_history_capture_tiles_changed`, `mcmap_history_capture_duration_seconds` | Tiles in the last day captured, how many of them differ from the day before, and how long keeping it took |
 
 ## Build and test
 
