@@ -124,7 +124,7 @@ type Config struct {
 	TrailMaxPoints int
 
 	// History is whether the map is kept as it was on each day, and
-	// HistoryDir where. Unlike the rest of DataDir it cannot be rebuilt.
+	// HistoryDir where. Unlike the tiles and the mirror it cannot be rebuilt.
 	History    bool
 	HistoryDir string
 }

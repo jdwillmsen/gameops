@@ -3223,7 +3223,7 @@ Two listeners keep the internet away from what is not for it:
 | `INTERNAL_TOKEN` | unless `AUTH_DISABLED` | | Bearer token the agent presents to the internal API; at least 16 characters. Whoever holds it can log in as any player, so give it a secret of its own |
 | `AUTH_DISABLED` | no | `false` | `true` serves the map with no login. Only for a service nothing publishes |
 | `SESSION_TTL` | no | `168h` | How long a login lasts |
-| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies are the one thing here that cannot be rebuilt, so keep it on a volume |
+| `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies cannot be rebuilt, and neither can the history kept here unless `HISTORY_DIR` puts it elsewhere, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
 | `RENDER_CHUNK_PROCESSORS` | no | `1` | Chunks rendered at once. More is faster and uses more CPU and memory |
@@ -3246,9 +3246,9 @@ Two listeners keep the internet away from what is not for it:
 | `BIOMES_ENABLED` | no | `false` | `true` reads biomes and serves `/api/biomes` and its tiles; off, search finds no biomes |
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |
+| `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
 | `HISTORY_ENABLED` | no | `false` | `true` keeps the map as it was on each day and serves `/api/history` and its tiles |
 | `HISTORY_DIR` | no | `DATA_DIR/history` | Where the days are kept; an absolute path. It cannot be rebuilt and only grows, so give it storage that is kept. Checked only with `HISTORY_ENABLED=true` |
-| `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
 
 ## Endpoints
 
