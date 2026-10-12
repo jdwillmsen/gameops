@@ -61,7 +61,8 @@ changes, so the browser keeps it for good.
 
 **Nothing is deleted.** There is no retention in this version. History
 cannot be rebuilt, the numbers that would size a thinning rule do not exist
-yet, and a full volume costs only the capture that did not fit.
+yet, and on a claim of its own a full volume costs only the capture that
+did not fit.
 
 ## Versions
 
