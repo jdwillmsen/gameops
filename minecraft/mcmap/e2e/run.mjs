@@ -2,7 +2,6 @@
 // Runs the browser checks against a map: the local harness, or a live one
 // with a service session. See "Browser checks" in ../README.md.
 
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -10,19 +9,19 @@ import { chromium } from 'playwright-core';
 
 import { Watch, openContext, openMap } from './lib/browser.mjs';
 import { Fail } from './lib/check.mjs';
+import { CHECKS as LISTED, DENSITIES } from './lib/fields.mjs';
 import { FAIL, PASS, Report, SKIP } from './lib/report.mjs';
-import { exchange, portForward, redact } from './lib/session.mjs';
+import { Evidence, prune } from './lib/evidence.mjs';
+import { ExchangeError, exchange, portForward } from './lib/session.mjs';
 import * as access from './checks/access.mjs';
 import * as map from './checks/map.mjs';
 import * as live from './checks/live.mjs';
 
 const VERSION = process.env.MCMAP_E2E_VERSION || JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
-// Every check, in the order they run. The two that the rest stand on are
-// run whatever --only says.
-const CHECKS = ['login-screen', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
-  'layer-panel', 'toggles', 'search', 'structure-sheet', 'saved-views', 'themes', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
-  'page-errors', 'read-only'];
+// Every check a run may be asked for by name. The two that the rest stand
+// on are run whatever --only says.
+const CHECKS = LISTED.filter((name) => name !== 'run');
 const NEEDED = ['exchange', 'map-loads'];
 
 const OPTIONS = {
@@ -35,6 +34,8 @@ const OPTIONS = {
   'insecure-local-tls': { type: 'boolean' },
   'metrics-file': { type: 'string', env: 'MCMAP_E2E_METRICS_FILE' },
   'evidence-dir': { type: 'string', env: 'MCMAP_E2E_EVIDENCE_DIR' },
+  'evidence-pages': { type: 'boolean', env: 'MCMAP_E2E_EVIDENCE_PAGES' },
+  'evidence-max-mb': { type: 'string', env: 'MCMAP_E2E_EVIDENCE_MAX_MB', default: '20' },
   'evidence-keep': { type: 'string', env: 'MCMAP_E2E_EVIDENCE_KEEP', default: '5' },
   'evidence-days': { type: 'string', env: 'MCMAP_E2E_EVIDENCE_DAYS', default: '7' },
   'stream-seconds': { type: 'string', env: 'MCMAP_E2E_STREAM_SECONDS', default: '125' },
@@ -55,11 +56,13 @@ const USAGE = `usage: node run.mjs --public-url <https://map> --internal-url <ht
 
   --insecure-local-tls     accept the harness's own certificate; refused for any address but this machine's
   --metrics-file <path>    write the run as Prometheus text
-  --evidence-dir <path>    on a failed check, keep a screenshot, a trace and the page's own errors here.
-                           They show the live map. Off unless given; never a directory that is committed or uploaded
+  --evidence-dir <path>    on a failed check, keep a screenshot of the page here. Off unless given.
+                           A screenshot shows the live map: never a directory that is committed or uploaded
+  --evidence-pages         with it, also keep the page's HTML and the text of what went wrong. More of the
+                           map than a picture; never the session cookie, and no request or response
   --only a,b               run only these checks
   durations and budgets: --stream-seconds --stream-gap-seconds --follow-mob-seconds --follow-player-seconds
-                         --follow-tolerance-px --api-budget-ms --evidence-keep --evidence-days
+                         --follow-tolerance-px --api-budget-ms --evidence-keep --evidence-days --evidence-max-mb
   Each option but the two kube ones may be set as MCMAP_E2E_<NAME> instead.
 
   exit 0: every check passed or had nothing to look at; 1: a check failed; 2: the run itself could not be made
@@ -89,6 +92,8 @@ function configure(argv) {
     mode: local ? 'local' : external ? 'external' : 'cluster',
     metricsFile: get('metrics-file'),
     evidenceDir: get('evidence-dir'),
+    evidencePages: values['evidence-pages'] === true || process.env.MCMAP_E2E_EVIDENCE_PAGES === 'true',
+    evidenceMaxBytes: number('evidence-max-mb', 1, 200) * 1024 * 1024,
     evidenceKeep: number('evidence-keep', 1, 50),
     evidenceDays: number('evidence-days', 1, 30),
     streamSeconds: number('stream-seconds', 10, 280),
@@ -97,7 +102,7 @@ function configure(argv) {
     followPlayerSeconds: number('follow-player-seconds', 5, 180),
     followTolerancePx: number('follow-tolerance-px', 1, 50),
     apiBudgetMs: number('api-budget-ms', 100, 30_000),
-    faceDensities: [1, 1.25, 1.5, 2],
+    faceDensities: DENSITIES,
     only: get('only') ? String(get('only')).split(',').map((name) => name.trim()).filter(Boolean) : null,
   };
   // A name that is no check's would run nothing and report a clean run.
@@ -106,28 +111,15 @@ function configure(argv) {
   if (Boolean(cfg.secretFile) === Boolean(cfg.secretRef)) throw new Error('give the secret one way: --secret-file, or --secret-from-kube');
   if (Boolean(cfg.internalUrl) === Boolean(cfg.forward)) throw new Error('give the internal listener one way: --internal-url, or --port-forward');
   // A run from outside the cluster against a live map is the owner's to
-  // allow each time. Who allowed it is asked for and sent with the
-  // exchange, where the map logs it; that is a record, not a lock.
-  if (external && !/^[a-z0-9][a-z0-9._-]{1,31}$/i.test(cfg.approvedBy || '')) throw new Error('a run from outside the cluster needs --approved-by <who allowed it>');
+  // allow, each run. Who allowed it and when is asked for and sent with
+  // the exchange, where the map writes it on its audit line. It is a
+  // record and not a lock: nothing here can check it.
+  if (external && !/^[A-Za-z0-9][A-Za-z0-9._@:+-]{2,63}$/.test(cfg.approvedBy || '')) throw new Error('a run from outside the cluster needs --approved-by <who allowed this run and when>, as one word, such as jake@2026-10-12T14:05Z');
+  if (cfg.evidencePages && !cfg.evidenceDir) throw new Error('--evidence-pages needs --evidence-dir');
   // Said in every request, so that the map's logs and the gateway's can
   // tell a check from a visitor.
   cfg.agent = `mcmap-e2e/${VERSION} (service:e2e; ${cfg.mode}${external ? `; approved-by ${cfg.approvedBy}` : ''})`;
   return cfg;
-}
-
-// Evidence shows the live map, so only so much of it is kept and only for
-// so long: the newest few failed runs, and none older than the limit.
-async function prune(dir, keep, days) {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  const runs = [];
-  for (const name of await readdir(dir)) {
-    if (!/^run-\d{8}T\d{6}Z$/.test(name)) continue;
-    runs.push({ name, at: (await stat(path.join(dir, name))).mtimeMs });
-  }
-  runs.sort((a, b) => b.at - a.at);
-  const oldest = Date.now() - days * 86_400_000;
-  // One fewer than the limit, to make room for this run's.
-  for (const [n, run] of runs.entries()) if (n >= keep - 1 || run.at < oldest) await rm(path.join(dir, run.name), { recursive: true, force: true });
 }
 
 async function main() {
@@ -142,46 +134,75 @@ async function main() {
 
   const report = new Report({ mode: cfg.mode, version: VERSION });
   const watch = new Watch();
-  const runDir = cfg.evidenceDir ? path.join(cfg.evidenceDir, `run-${new Date().toISOString().replace(/[-:]|\.\d+/g, '')}`) : null;
-  if (cfg.evidenceDir) await prune(cfg.evidenceDir, cfg.evidenceKeep, cfg.evidenceDays);
-  report.log('start', { mode: cfg.mode, version: VERSION, evidence: Boolean(runDir) });
+  const evidence = new Evidence(cfg.evidenceDir ? path.join(cfg.evidenceDir, `run-${new Date().toISOString().replace(/[-:]|\.\d+/g, '')}`) : null, { pages: cfg.evidencePages, maxBytes: cfg.evidenceMaxBytes });
+  // Before anything else, so that a run killed at any point after this has
+  // already said that it began and has not finished. Whatever the last run
+  // left standing is replaced here, not at the end.
+  await report.writeMetrics(cfg.metricsFile);
 
   let browser;
   let forwarded;
-  const kept = [];
-  // One check: its verdict, how long it took, and what it measured. What
-  // went wrong in full goes to the evidence directory when there is one,
-  // and to the log only as the check's own words.
-  const run = async (name, fn, { page = null, ctx = null, seconds = 120 } = {}) => {
+  let broke = false;
+  // The verdict is given once, whatever ended the run: its last check, a
+  // fault, or a signal from whatever is killing it.
+  // Whoever asks second waits for the first: a signal that arrives while
+  // the verdict is being written must not end the process under it.
+  let closing = null;
+  const close = () => {
+    closing ??= (async () => {
+      report.finish();
+      await report.writeMetrics(cfg.metricsFile);
+      report.summary({ evidence_files: evidence.files, evidence_errors: evidence.errors });
+    })();
+    return closing;
+  };
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.once(signal, async () => {
+      broke = true;
+      report.record('run', FAIL, Date.now() - report.started, 'the run was stopped before it finished');
+      await close();
+      if (browser) await browser.close().catch(() => {});
+      process.exit(2);
+    });
+  }
+
+  // Said only once a signal would be answered: whoever waits for this
+  // line may stop the run the moment they read it.
+  report.log('start', { evidence: Boolean(cfg.evidenceDir) });
+
+  // One check: its verdict, how long it took, and what it measured. The
+  // run's metrics are written again before any evidence is, so that
+  // evidence which cannot be written costs nothing but itself.
+  const run = async (name, fn, { page = null, seconds = 120 } = {}) => {
     if (!CHECKS.includes(name)) throw new Error(`${name} is not in the list of checks`);
     if (cfg.only && !cfg.only.includes(name) && !NEEDED.includes(name)) return null;
     const began = Date.now();
-    if (runDir && ctx) await ctx.tracing.startChunk({ name }).catch(() => {});
     let timer;
     let result;
+    let failure = null;
     try {
-      const got = await Promise.race([fn(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Fail(`not finished in ${seconds} s`)), seconds * 1000); })]) || {};
-      result = got.skip ? report.record(name, SKIP, Date.now() - began, got.skip, got.measures) : report.record(name, PASS, Date.now() - began, got.detail || '', got.measures);
+      const got = await Promise.race([fn(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Fail('the check did not finish in its time', { limit_seconds: seconds })), seconds * 1000); })]) || {};
+      result = got.skip ? report.record(name, SKIP, Date.now() - began, got.skip, got.measures) : report.record(name, PASS, Date.now() - began, '', got.measures);
     } catch (err) {
-      const known = err instanceof Fail;
-      result = report.record(name, FAIL, Date.now() - began, known ? err.message : `the check itself broke: ${err.name}`, known ? err.measures : {});
-      kept.push({ check: name, error: redact(String(err.stack || err)) });
-      if (runDir) {
-        await mkdir(runDir, { recursive: true, mode: 0o700 });
-        if (page && !page.isClosed()) await page.screenshot({ path: path.join(runDir, `${name}.png`) }).catch(() => {});
-        if (ctx) await ctx.tracing.stopChunk({ path: path.join(runDir, `${name}-trace.zip`) }).catch(() => {});
-      }
+      failure = err;
+      const known = err instanceof Fail || err instanceof ExchangeError;
+      result = report.record(name, FAIL, Date.now() - began, known ? (err.reason || err.message) : 'the check itself broke', err instanceof Fail ? err.measures : (err.status ? { status: err.status } : {}));
     } finally {
       clearTimeout(timer);
-      if (runDir && ctx && result.status !== FAIL) await ctx.tracing.stopChunk().catch(() => {});
     }
+    await report.writeMetrics(cfg.metricsFile);
+    if (failure) await evidence.of(name, page, failure);
     return result;
   };
 
   try {
+    if (cfg.evidenceDir) await prune(cfg.evidenceDir, cfg.evidenceKeep, cfg.evidenceDays).catch(() => { evidence.errors += 1; });
     // A container gives /dev/shm 64 MB, which a page of canvases outgrows;
     // the browser is told to use its temporary directory instead.
-    browser = await chromium.launch({ executablePath: process.env.MCMAP_E2E_CHROMIUM || undefined, args: ['--disable-dev-shm-usage'] });
+    browser = await chromium.launch({ executablePath: process.env.MCMAP_E2E_CHROMIUM || undefined, args: ['--disable-dev-shm-usage'],
+      // A signal is this runner's to answer, with its verdict; left to the
+      // library the process would end before it had given one.
+      handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
     // The browser's own, with who this is on the end of it.
     const blank = await browser.newContext();
     const plain = await (await blank.newPage()).evaluate(() => navigator.userAgent);
@@ -190,7 +211,7 @@ async function main() {
 
     await run('login-screen', () => access.loginScreen({ browser, cfg, watch }));
 
-    const held = await run('exchange', async () => {
+    await run('exchange', async () => {
       if (cfg.forward) {
         forwarded = await portForward(cfg.forward);
         cfg.internalUrl = forwarded.url;
@@ -204,7 +225,6 @@ async function main() {
 
     if (cfg.session) {
       const ctx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie });
-      if (runDir) await ctx.tracing.start({ snapshots: true, screenshots: false });
       const t = { browser, ctx, cfg, watch, report };
       // The watcher is opened first and then left alone: it is the
       // stream that page holds that the last check asks about.
@@ -213,10 +233,10 @@ async function main() {
         t.watcher = await openMap(ctx, cfg);
         t.page = await openMap(ctx, cfg);
         return { measures: { load_ms: Math.round((Date.now() - began) / 2) } };
-      }, { ctx, seconds: 90 });
+      }, { seconds: 90 });
       if (loaded && loaded.status !== PASS) throw new Fail('the map did not load with a session, so nothing on it was checked');
       const { page, watcher } = t;
-      const on = { page, ctx };
+      const on = { page };
       await run('session', () => access.session(t), on);
       await run('scope', () => access.scope(t), on);
       await run('headers', () => access.headers(t), on);
@@ -235,45 +255,38 @@ async function main() {
       await run('follow-mob', () => live.followMob(t), { ...on, seconds: cfg.followMobSeconds + 60 });
       await run('faces', () => live.faces(t), { seconds: 180 });
       await run('phone-sheet', () => map.phoneSheet(t));
-      await run('live-stream', () => live.liveStream(t), { page: watcher, ctx, seconds: cfg.streamSeconds + 90 });
-      if (runDir) await ctx.tracing.stop().catch(() => {});
+      await run('live-stream', () => live.liveStream(t), { page: watcher, seconds: cfg.streamSeconds + 90 });
       await ctx.close();
-    } else if (held) {
-      report.log('stopped', { why: 'no session, so nothing behind the login was checked' });
+    } else {
+      report.log('stopped', { reason: 'no_session_so_nothing_behind_the_login_was_checked' });
     }
 
     // Over the whole run, in every page it opened.
     await run('page-errors', async () => {
-      const counts = watch.counts();
-      const measures = { page_errors: counts.page_errors, failed_responses: counts.failed_responses, failed_requests: counts.failed_requests };
-      if (counts.page_errors > 0) throw new Fail(`the page's scripts threw: ${[...new Set(watch.errors)].slice(0, 5).join(', ')}`, measures);
-      if (counts.failed_responses > 0) throw new Fail(`refused or broken answers: ${[...watch.responses.keys()].slice(0, 5).join(', ')}`, measures);
-      if (counts.failed_requests > 0) throw new Fail(`requests that never got an answer: ${[...watch.failures.keys()].slice(0, 5).join(', ')}`, measures);
+      const { writes, ...measures } = watch.counts();
+      if (measures.page_errors > 0) throw new Fail("the page's scripts threw an error", measures);
+      if (measures.failed_responses > 0) throw new Fail('an answer was refused or broken that should not have been', measures);
+      if (measures.failed_requests > 0) throw new Fail('a request never got an answer', measures);
       return { measures };
     });
     await run('read-only', async () => {
-      if (watch.writes.length > 0) throw new Fail(`the page tried to write, and was stopped: ${[...new Set(watch.writes)].slice(0, 5).join(', ')}`, { writes: watch.writes.length });
+      if (watch.writes.length > 0) throw new Fail('the page tried to write, and was stopped', { writes: watch.writes.length });
       return { measures: { writes: 0 } };
     });
   } catch (err) {
-    if (err instanceof Fail) report.log('stopped', { why: err.message });
+    if (err instanceof Fail) report.log('stopped', { reason: report.reason(err.message) });
     else {
-      report.record('run', FAIL, Date.now() - report.started, `the run itself broke: ${err.name}`);
-      kept.push({ check: 'run', error: redact(String(err.stack || err)) });
+      broke = true;
+      report.record('run', FAIL, Date.now() - report.started, 'the run itself broke');
+      await evidence.of('run', null, err);
     }
   } finally {
     if (forwarded) forwarded.close();
     if (browser) await browser.close().catch(() => {});
+    if (evidence.pages && report.failed > 0) await evidence.put('seen.json', JSON.stringify(watch.raw, null, 1));
+    await close();
   }
-
-  if (runDir && (kept.length > 0 || watch.raw.length > 0) && report.failed > 0) {
-    await mkdir(runDir, { recursive: true, mode: 0o700 });
-    await writeFile(path.join(runDir, 'failures.json'), redact(JSON.stringify({ failed: kept, seen: watch.raw }, null, 1)), { mode: 0o600 });
-  }
-  report.summary();
-  if (cfg.metricsFile) await report.writeMetrics(cfg.metricsFile);
-  if (report.results.some((r) => r.check === 'run')) return 2;
-  return report.failed > 0 ? 1 : 0;
+  return broke ? 2 : report.failed > 0 ? 1 : 0;
 }
 
 process.exitCode = await main();

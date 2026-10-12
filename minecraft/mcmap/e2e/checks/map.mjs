@@ -172,17 +172,18 @@ export async function toggles({ page }) {
   await goToSomething(page);
   await sleep(800);
   const measures = { toggled: 0, nothing_to_toggle: 0 };
-  const quiet = [];
-  for (const [name, group, pick] of [
-    ['mob_type', 'Mobs', '(r) => r.depth >= 2 && r.count > 0 && r.on && !r.off'],
-    ['structure_kind', 'Structures', '(r) => r.depth === 2 && r.count > 0 && r.on && !r.off'],
+  for (const [row, name, group, pick] of [
+    [1, 'mob_type', 'Mobs', '(r) => r.depth >= 2 && r.count > 0 && r.on && !r.off'],
+    [2, 'structure_kind', 'Structures', '(r) => r.depth === 2 && r.count > 0 && r.on && !r.off'],
   ]) {
     const got = await toggleRow(page, group, pick);
-    if (got === null) { measures.nothing_to_toggle += 1; quiet.push(name); continue; }
-    if (!got.off) throw new Fail(`pressing a row of ${name} did not switch it off`, measures);
+    if (got === null) { measures.nothing_to_toggle += 1; continue; }
+    // Which row: 1 a type of mob, 2 a kind of structure.
+    measures.row = row;
+    if (!got.off) throw new Fail('pressing a row of the panel did not switch it off', measures);
     measures[`${name}_removed`] = got.before - got.during;
-    if (got.during >= got.before) throw new Fail(`switching off a ${name} removed nothing from the map`, measures);
-    if (got.after <= got.during) throw new Fail(`switching a ${name} back on drew nothing`, measures);
+    if (got.during >= got.before) throw new Fail('switching a row off removed nothing from the map', measures);
+    if (got.after <= got.during) throw new Fail('switching a row back on drew nothing', measures);
     measures.toggled += 1;
   }
   // The overlay is tiles: on, they are asked for; with one biome picked
@@ -209,7 +210,7 @@ export async function toggles({ page }) {
     await wait(500);
     return { whole, plain, alone, left: was ? -1 : tiles().length };
   })()`);
-  if (biome === null) { measures.nothing_to_toggle += 1; quiet.push('biome'); } else {
+  if (biome === null) { measures.nothing_to_toggle += 1; } else {
     measures.biome_tiles = biome.whole;
     if (biome.whole === 0) throw new Fail('switching the biome overlay on drew no tiles', measures);
     if (biome.alone <= biome.plain) throw new Fail('picking out one biome did not change the overlay', measures);
@@ -217,7 +218,8 @@ export async function toggles({ page }) {
     measures.toggled += 1;
   }
   if (measures.toggled === 0) return skip('no mobs, structures or biomes here to switch', measures);
-  return { measures, detail: quiet.length > 0 ? `nothing to switch for: ${quiet.join(', ')}` : '' };
+  delete measures.row;
+  return { measures };
 }
 
 // A search for something this world has finds it. What is searched for is
@@ -232,7 +234,7 @@ export async function search({ page }) {
   const ms = Date.now() - began;
   await page.locator('#search-box').fill('');
   await page.keyboard.press('Escape');
-  if (!hits) throw new Fail('a search for something the world holds found nothing', { ms });
+  if (!hits) throw new Fail('a search for something the world holds found nothing', { answer_ms: ms });
   return { measures: { hits, answer_ms: ms } };
 }
 
@@ -254,7 +256,7 @@ export async function structureSheet({ page }) {
   });
   if (!asked.served) return skip('structures are not served');
   if (asked.none) return skip('this dimension has no recorded structure');
-  if (asked.status !== 200) throw new Fail(`the detail of a listed structure answered ${asked.status}`);
+  if (asked.status !== 200) throw new Fail('the detail of a listed structure was not given', { status: asked.status });
   if (asked.standing) throw new Fail('a structure\'s detail gave a service session a standing');
   const began = Date.now();
   const open = await until(() => page.evaluate(() => document.getElementById('structure').open && document.getElementById('structure-title').textContent.trim().length > 0 && document.getElementById('structure-body').children.length > 0));

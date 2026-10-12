@@ -1,6 +1,7 @@
 // A browser context as every check gets one: watched, and unable to write.
 
 import { readFile } from 'node:fs/promises';
+import { SCRIPTS, slug } from './fields.mjs';
 
 const probe = await readFile(new URL('./probe.js', import.meta.url), 'utf8');
 
@@ -29,11 +30,12 @@ const EXPECTED = new Map([
   ['/api/waypoints', [403, 404]],
 ]);
 
-// Where in the page's scripts an error was thrown: the file and line, which
-// say what broke without repeating anything the page was showing.
+// Where in the page's scripts an error was thrown: which of the page's own
+// files, and the line. A file that is not one of them is "elsewhere".
 function whereOf(stack) {
   const at = /([a-z0-9_.-]+\.js):(\d+):\d+/i.exec(String(stack));
-  return at ? `${at[1]}:${at[2]}` : 'unknown';
+  const script = at && SCRIPTS.includes(at[1]) ? at[1] : null;
+  return { script, line: at && script ? Number(at[2]) : 0 };
 }
 
 export class Watch {
@@ -51,9 +53,18 @@ export class Watch {
     map.set(key, (map.get(key) || 0) + 1);
   }
 
+  // Numbers only: how many of each, in which of the page's scripts, and
+  // the worst status seen.
   counts() {
     const sum = (map) => [...map.values()].reduce((a, b) => a + b, 0);
-    return { page_errors: this.errors.length, failed_responses: sum(this.responses), failed_requests: sum(this.failures), writes: this.writes.length };
+    const out = { page_errors: this.errors.length, failed_responses: sum(this.responses), failed_requests: sum(this.failures), writes: this.writes.length };
+    for (const { script, line } of this.errors) {
+      const name = script ? `errors_in_${slug(script)}` : 'errors_elsewhere';
+      out[name] = (out[name] || 0) + 1;
+      if (script && !out.first_error_line) out.first_error_line = line;
+    }
+    if (this.worstStatus) out.worst_status = this.worstStatus;
+    return out;
   }
 }
 
@@ -108,6 +119,7 @@ export async function openContext(browser, { cfg, watch, cookie = null, viewport
       const route = routeOf(response.url());
       if ((allowed.get(route) || []).includes(status)) return;
       watch.bump(watch.responses, `${status} ${route}`);
+      watch.worstStatus = Math.max(watch.worstStatus || 0, status);
       watch.raw.push({ kind: 'response', status, url: response.url() });
     });
     page.on('requestfailed', (request) => {

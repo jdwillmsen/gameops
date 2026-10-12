@@ -3375,7 +3375,8 @@ compose a marker for every face the server lists, records where the page
 put the picture, and works out from the head box the server gives, or from
 what is drawn where it gives none, how far the head is from the middle. It
 reports the worst for each face in `mcmap_e2e_face_offset_pixels{face}` and,
-across only and signed, in `mcmap_e2e_face_offset_x_pixels{face}`, and how
+across only and signed, in `mcmap_e2e_face_offset_x_pixels{face}`, both
+also written as a `gauge` line of the run's log, and how
 far what is drawn sits off as `worst_ink_pixels_at_<ratio>`. It fails only
 where a head is off the middle with room to be on it: a face all of which
 fits its box is kept inside it, and that may hold its head to one side.
@@ -3394,46 +3395,93 @@ Every request says who it is: the browser's user agent ends
 
 ### What a run says, and what it keeps
 
-The map shows where people live, so what a run writes is held to a rule:
-logs and metrics carry a check's name, its verdict, its time and numbers,
-and nothing read off the page.
+The map shows where people live, so what a run writes is held to a rule
+that is in how the reporter is made and not in what it is trusted to do:
+**a result has no field for words.** A log line and a metric hold a
+check's name, a verdict, a reason and numbers under names, and each of
+those is an entry of a closed list in `e2e/lib/fields.mjs` or it is not
+written.
 
-- A log line is JSON whose only words are the suite's own. Each is passed
-  through a scrubber that takes out addresses, anything quoted, and any run
-  of digits long enough to be a coordinate or an id.
-- An address is only ever written as its route: `/api/structures/detail`,
-  `/tiles`, never its query, where coordinates and gamertags travel.
-- A script error is written as its file and line.
-- Metric labels are check names, measure names and picture keys such as
-  `face/villager_v2`, which are the game's own ids. A player's head is
-  keyed by gamertag and is never a label.
+- A reason is one of the sentences listed there, written as its name:
+  `the_live_stream_was_cut_and_had_to_reconnect`. A check gives its reason
+  word for word; a test reads every check's source and fails on a reason
+  that is not in the list or is put together from pieces.
+- A number is written under one of the listed names, and anything else
+  is dropped.
+- What is dropped is counted in `mcmap_e2e_dropped_fields`, and the
+  suite's own run fails if that is above zero, so a check that tries to
+  say something off the page is caught where it is written.
+- A script error is a count for each of the page's own scripts and a line
+  number. A failed request is a count and the worst status.
+- The one label that comes from the server is a face's picture key, such
+  as `face/villager_v2`, which is the game's own id for a mob and is held
+  to that shape. A player's head is keyed by gamertag and is never a
+  label.
 - The secret and the session cookie are held in one module, which hands
-  neither out and removes both from anything about to be written.
+  neither out.
 
-Screenshots and traces are different: they are pictures of the live map,
-with real coordinates and gamertags, and a trace holds the requests made,
-the session cookie among them. None is made unless `--evidence-dir` is
-given. With it, a failed check leaves a screenshot, a trace of that check
-and the full text of what went wrong in a directory per run, readable only
-by the runner's user; the newest five failed runs are kept and none older
-than seven days. By the time anyone opens a trace the session in it has
-ended, and it could only ever read. Evidence stays where it was written, in
-the cluster or on the operator's machine. It is never committed, attached
-to a pull request or a ticket, or uploaded by CI, whose world is made up
-and which is given no evidence directory at all.
+An earlier form of this passed text through a scrubber, which took out
+addresses and long numbers and could not know a name from any other word
+or a small coordinate from a small count. There is no scrubber now because
+there is nothing to scrub.
+
+**A run always says how it went.** The run's metrics are written when it
+begins, saying it has begun and not finished, so the verdict of the run
+before never stands in for this one's; again after every check, before
+any evidence of that check; and at the end, by whichever of the last
+check, a fault or a signal ends it. `mcmap_e2e_run_finished` is 0 for a
+run still going or killed outright, `mcmap_e2e_run_success` is 1 only for
+one that finished with nothing failed, and `mcmap_e2e_run_failed` is 1
+from the first failed check. A volume that cannot be written costs the
+file and nothing else: the verdict is still the last line of the log and
+the exit status, 0 for nothing failed, 1 for a failed check, 2 for a run
+that broke or was stopped.
+
+**Evidence is off unless asked for, and is a picture.** With
+`--evidence-dir`, a failed check leaves a screenshot of the page in a
+directory per run. With `--evidence-pages` as well, it also leaves the
+page's HTML and the text of what went wrong. Nothing else is ever kept:
+no browser trace, no request, no response, no header. The session cookie
+is in none of it. A screenshot cannot hold it, and text is written with
+the secret and the session taken out and is not written at all if either
+is somehow still in it. A run's evidence is capped, at 20 MB unless set;
+a file that would pass the cap, or that the volume will not take, is
+skipped and counted, and never fails the run. The newest five failed runs
+are kept and none older than seven days.
+
+A screenshot is still a picture of the live map, with real coordinates
+and gamertags. It stays where it was written, in the cluster or on the
+operator's machine. It is never committed, attached to a pull request or
+a ticket, or uploaded by CI, whose world is made up and which is given no
+evidence directory at all.
 
 ### Where it runs
 
 **In the cluster, on a schedule.** The image
 `ghcr.io/jdwillmsen/minecraft-map-checks` is Microsoft's Playwright image,
-pinned by digest, with this directory in it, and runs as a user that is not
-root on a read-only root filesystem with `/tmp` as its only scratch. It
-needs no access to the cluster's API: the secret is a file mounted into it,
-the internal listener is an address, and its results are a file,
-`--metrics-file`, in Prometheus's text format. One CPU and 1 GiB are enough
-for a run. The chart that deploys the map carries the schedule, the
-network policy, where results and evidence go, and the alerts for checks
-failing and for checks not having run.
+pinned by digest, with this directory in it. It runs as that image's own
+unprivileged user, `pwuser`, uid 1001; uid 1000 there is `ubuntu`, the
+distribution's default login, which is not the user the image means a
+browser to run as, and the build fails if the name and the number part.
+The root filesystem is read-only with `/tmp` as its only scratch. It needs
+no access to the cluster's API: the secret is a file mounted into it, the
+internal listener is an address, and its results are its log, its exit
+status and, where asked, a file. One CPU and 1 GiB are enough for a run.
+
+Chromium runs without its own sandbox. Playwright starts it that way
+unless told otherwise, and in a container it has to: the sandbox is built
+from user namespaces, which an unprivileged container is not allowed to
+make, and granting that would take away more than the sandbox gives. So
+what contains the browser is the container and the cluster round it, and
+each part of that is the deploying chart's to provide: a user that is not
+root, no added capabilities, no privilege escalation, the default seccomp
+profile, a read-only root, no service account token, limits on CPU,
+memory and scratch, and a network policy that lets it reach the map and
+nothing else. The last is only real where the cluster enforces network
+policy, which the chart makes its operator say. What the browser loads is
+the map's own page, from the map's own origin, under a content security
+policy that allows nothing from anywhere else; that is the reason the
+exposure is small, and the containment is for the day it is not.
 
 **From a developer's or an agent's machine, before and after a rollout.**
 The secret must not pass through a shell, where it would be printed, or
@@ -3444,7 +3492,7 @@ the runner takes it itself:
 node run.mjs --public-url https://<the map's address> \
   --secret-from-kube <namespace>/<secret>/<key> \
   --port-forward <namespace>/<map service>:<internal port> \
-  --approved-by <who allowed this run>
+  --approved-by <who approved this run>@<when>
 ```
 
 It runs `kubectl get secret` as a child whose output goes to the runner's
@@ -3454,17 +3502,27 @@ the public address like any other run. Both are reads of the cluster;
 nothing in it is changed. There is no way to hand the runner the secret
 directly, on purpose.
 
-**This mode needs the owner's explicit approval before it is first used
-against production, and that approval is the owner's to give each time it
-is asked, not something to assume.** It reads a credential from the
-cluster with whatever access the person or agent running it holds, and it
-looks at the live map from a machine outside the cluster.
-`--approved-by` is required and is sent with the exchange, where the map
-logs it beside `source="loopback"`; that makes a run visible afterwards
-and does nothing to prevent one. Evidence from such a run is on that
-machine and is that person's to delete. It has been built and is run in CI
-against the harness with a stand-in for `kubectl`; it has not been run
-against a live map.
+### Who has to approve what
+
+Two separate approvals, both the owner's, neither implied by the other.
+
+1. **Enabling the scheduled checks.** The owner approves turning them on
+   in the deploying chart, once, by merging the change that does.
+2. **Every run from a developer's or an agent's machine against
+   production.** Each one, each time, before it starts. An approval for
+   one run is not an approval for the next, and having been approved
+   before is not a reason to assume it. An agent does not start one on
+   its own judgment.
+
+`--approved-by` is required for such a run and says who approved it and
+when, as one word: `jake@2026-10-12T14:05Z`. It is free text that nothing
+can check. It is sent with the exchange, and the map writes it on the
+audit line for that session beside `source="loopback"`, so every such run
+is on record with the approval it claimed. That makes a run visible
+afterwards and does nothing to prevent one. Evidence from such a run is on
+that machine and is that person's to delete. This path has been built and
+is run in CI against the harness with a stand-in for `kubectl`; it has
+not been run against a live map.
 
 ### The harness
 
