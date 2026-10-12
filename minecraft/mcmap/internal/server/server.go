@@ -82,6 +82,9 @@ type Server struct {
 	Biomes BiomeSource
 	// Trails is where players have recently been. Nil leaves the route out.
 	Trails TrailSource
+	// History is the map as it was on each day kept. Nil leaves its routes
+	// out.
+	History HistorySource
 
 	mu    sync.Mutex
 	infos map[string]cachedInfo
@@ -189,6 +192,10 @@ func (s *Server) Handler() http.Handler {
 	if s.Trails != nil {
 		mux.Handle("GET /api/trails", s.gated(s.handleTrails))
 	}
+	if s.History != nil {
+		mux.Handle("GET /api/history", s.gated(s.handleHistory))
+		mux.Handle("GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}", s.gated(s.handleHistoryTile))
+	}
 	mux.Handle("GET /api/search", s.gated(s.handleSearch))
 	if s.Sessions != nil {
 		mux.Handle("GET /api/me", s.gated(s.handleMe))
@@ -238,13 +245,15 @@ type mapJSON struct {
 	Problem        string     `json:"problem,omitempty"`
 	// Live tells the page whether there is a live stream to open. It is
 	// here, behind the session, and not in the public config.
-	Live       bool            `json:"live"`
+	Live bool `json:"live"`
+	// History tells it whether there are earlier days to ask for.
+	History    bool            `json:"history"`
 	Dimensions []dimensionJSON `json:"dimensions"`
 }
 
 func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
 	status := s.Status.Snapshot()
-	out := mapJSON{World: s.World, RefreshSeconds: int(s.Refresh.Seconds()), Problem: status.Problem, Live: s.Live != nil}
+	out := mapJSON{World: s.World, RefreshSeconds: int(s.Refresh.Seconds()), Problem: status.Problem, Live: s.Live != nil, History: s.History != nil}
 	if !status.SnapshotAt.IsZero() {
 		out.SnapshotAt = &status.SnapshotAt
 	}
@@ -272,12 +281,9 @@ const (
 	maxTileZoom       = 4
 )
 
-func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
-	dimension := r.PathValue("dimension")
-	if !slices.Contains(render.Dimensions, dimension) {
-		http.NotFound(w, r)
-		return
-	}
+// tileAddress reads the zoom, x and y of a tile route, and the extension
+// the y carries.
+func tileAddress(r *http.Request) (tile render.Tile, ext string, ok bool) {
 	zoom, errZ := strconv.Atoi(r.PathValue("zoom"))
 	x, errX := strconv.Atoi(r.PathValue("x"))
 	name, ext, _ := strings.Cut(r.PathValue("y"), ".")
@@ -285,6 +291,19 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 	if errZ != nil || errX != nil || errY != nil ||
 		zoom < minTileZoom || zoom > maxTileZoom ||
 		x < -maxTileCoordinate || x > maxTileCoordinate || y < -maxTileCoordinate || y > maxTileCoordinate {
+		return render.Tile{}, "", false
+	}
+	return render.Tile{Zoom: zoom, X: x, Y: y}, ext, true
+}
+
+func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
+	dimension := r.PathValue("dimension")
+	if !slices.Contains(render.Dimensions, dimension) {
+		http.NotFound(w, r)
+		return
+	}
+	tile, ext, ok := tileAddress(r)
+	if !ok {
 		http.Error(w, "bad tile address", http.StatusBadRequest)
 		return
 	}
@@ -299,7 +318,7 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad tile address", http.StatusBadRequest)
 		return
 	}
-	f, err := os.Open(s.Renderer.TilePath(dir, info.Format, zoom, x, y))
+	f, err := os.Open(s.Renderer.TilePath(dir, info.Format, tile.Zoom, tile.X, tile.Y))
 	if err != nil {
 		// Most of a sparse world's grid has no tile; that is not an error.
 		w.Header().Set("Cache-Control", "private, max-age=60")
