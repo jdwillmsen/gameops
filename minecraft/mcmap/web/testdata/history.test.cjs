@@ -131,14 +131,15 @@ test('closing the control puts the map back as it is', async () => {
   assert.equal(p.doc.body.classList.contains('past'), false);
 });
 
-test('a day drawn by a different renderer says its differences are not all the world\'s', async () => {
+test('a day says only its terrain is of the day, and one drawn by a different renderer says that as well', async () => {
   const p = await load();
   await p.press('open');
   await p.slide(2);
   assert.match(p.part('note').textContent, /renderer/);
+  for (const still of [/Players/, /markers/, /structures/, /biomes/, /as they are now/]) assert.match(p.part('note').textContent, still);
   await p.slide(1);
   assert.doesNotMatch(p.part('note').textContent, /renderer/);
-  assert.match(p.part('note').textContent, /as they are now/);
+  for (const still of [/Players/, /markers/, /structures/, /biomes/, /as they are now/]) assert.match(p.part('note').textContent, still);
 });
 
 test('play runs from the day shown to now and stops there', async () => {

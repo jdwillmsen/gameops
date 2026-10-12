@@ -90,10 +90,8 @@
     range.setAttribute('aria-valuetext', shown.textContent);
     if (!past) {
       note.textContent = days.length === 0 ? '' : `${days.length} ${days.length === 1 ? 'day' : 'days'} kept, from ${name(days[0].day)}.`;
-    } else if (days[at].rendererChanged) {
-      note.textContent = 'Drawn by a different renderer than the day before, so not every difference from it is the world\'s.';
     } else {
-      note.textContent = 'The terrain is of this day. Players, markers and structures are as they are now.';
+      note.textContent = `The terrain is of this day. Players, markers, structures and biomes are as they are now.${days[at].rendererChanged ? ' It was drawn by a different renderer than the day before, so not every difference from it is the world\'s.' : ''}`;
     }
     document.body.classList.toggle('past', past);
   }
