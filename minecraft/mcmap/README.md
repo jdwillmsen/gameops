@@ -3243,23 +3243,32 @@ Such an exchange arrives from the loopback address and is counted as
 
 **What it may see.** What every logged-in player is shown alike: the map
 and its tiles, the live stream, markers, structures and their detail,
-biomes, trails, search, names and icons. Each of those routes is registered
-behind `shown` in `internal/server/server.go`. Everything else behind the
-login is behind `gated`, which is a player's alone and answers a service
-session with 403; today that is `/api/waypoints`. Where a shown route says
-something of the player asking, a service session's answer leaves it out:
-no `me` in `/api/icons`, no `standing` in a village's detail, no waypoints
-in a search.
+biomes, trails, search, names and icons. Every route is registered through
+one function, `route` in `internal/server/server.go`, which is given the
+route's gate: `gateViewer` for those, `gatePlayer` for what is a player's
+alone, which answers a service session with 403 and today is
+`/api/waypoints`. Where a viewer's route says something of the player
+asking, a service session's answer leaves it out: no `me` in `/api/icons`,
+no `standing` in a village's detail, no waypoints in a search.
 
 **What it may do.** Read. Any request that is not a `GET` or `HEAD` is
 refused with 403 before it reaches a handler, whichever route it is for.
-The session holds no role and there is nowhere in it to put one. The rule
-for whatever comes later, roles and the resetting of chunks included: a
-route that is one player's own, or that asks for, approves or carries out
-anything, goes behind `gated`. `gated` is the gate with the short name and
-`service_test.go` reads the routes out of `server.go` and fails on one it
-has not been told the gate of, so leaving a new route open to a service
-session takes a deliberate line in a test.
+
+**The invariant, for roles and for whatever else comes.** A service
+session is not a player, and that is so by how the code is made and not by
+each handler checking. `auth.FromContext`, the one way a handler learns
+which player is asking, answers that there is none for a service session;
+`auth.ViewerFromContext` gives the handlers of shared data a name to show
+and nothing to look anyone up by. So a role, like a waypoint or a
+standing, is found by a player's XUID or not at all, and a service session
+has no XUID to find one by: it holds no role, can be given none, and can
+neither ask for, approve nor carry out anything. Whatever is kept by XUID
+refuses a key that is not one. A route that is one player's own or that
+changes anything is `gatePlayer`. `service_test.go` holds all of this in
+place: it reads every file of the server package and fails on a route
+registered anywhere but through `route` or behind a gate it was not told
+of, and it asks every route as a service session and fails if anything
+kept or looked up by who is asking was touched.
 
 **How long.** `SERVICE_SESSION_TTL`, ten minutes unless set and never more
 than thirty. There is no renewal: another session takes the secret again.
@@ -3273,21 +3282,22 @@ as the other: which key signed a cookie decides what it is, and a cookie
 whose contents disagree with its key is refused. A build from before
 service sessions refuses the cookie too, since it names no XUID.
 
-**Against being a way round the login.** Five exchanges are allowed at
-once and one a minute after, the right secret included. Five wrong secrets
-lock the exchange for five minutes, during which nothing presented is
-compared at all; one more wrong one after that locks it again. The budget
-and the lock are for all callers together, because the internal listener
-sees cluster addresses, which are cheap to change. That lets anything that
-can reach the internal port stop the checks for a while, which costs a
-failing check and an alert, and never lets it in. Every attempt, either
-way, is one log line (`map service session issued` or `refused`, with the
-result, the source and the caller's address and user agent, and never what
-was presented) and one count in `mcmap_service_exchanges_total`. A wrong
-secret is never presented by anything that holds the right one, so
-`result="denied"` above zero is worth an alert by itself, as is
-`source="other"`, which is an address that should not be able to reach the
-listener.
+**Against being a way round the login.** The secret is 48 generated
+characters, which no rate of guessing finds, so nothing here locks. The
+right secret is always honoured, whatever else is being sent: the internal
+listener can be reached by every workload in the cluster, and a lock or a
+budget the right secret had to wait behind would let any of them stop the
+checks for good with a wrong request every few minutes. What is bounded is
+wrong secrets. Five are judged at once and one a minute after, each
+answered 401; past that a wrong one is turned away with 429, still counted,
+and written to the log once a minute, so that a flood of them is a number
+and cannot bury the lines that matter. Every attempt is one count in
+`mcmap_service_exchanges_total`, and every one judged is one log line
+(`map service session issued` or `refused`, with the result, the source and
+the caller's address and user agent, and never what was presented). A
+wrong secret is never presented by anything that holds the right one, so
+any result but `ok` is worth an alert by itself, as is `source="other"`,
+which is an address that should not be able to reach the listener.
 
 ## Browser checks
 
@@ -3577,7 +3587,7 @@ On `INTERNAL_ADDR` only:
 | `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
 | `PUT /internal/v1/heads` | Bearer `INTERNAL_TOKEN`. `{"players":[{"xuid","gamertag","head"}]}`: everyone online now, `head` a PNG in base64 or absent. Replaces the last report whole. 200 with `players` and how many heads were `refused`; 400 for more than 256 players, a body over 1 MB, or an entry that is not a player. Not served with `ICONS_ENABLED=false` |
-| `POST /internal/v1/service-sessions` | Bearer `SERVICE_SESSION_SECRET`, in the header and nowhere else: 400 for a request with anything in its query. 200 with `identity`, `expiresAt` and `ttlSeconds`, and the session as a `Set-Cookie` with the attributes a player's has. 401 for a wrong secret; 429 with `Retry-After` past five exchanges and one a minute, or for five minutes after five wrong secrets. Not served without `SERVICE_SESSION_SECRET` |
+| `POST /internal/v1/service-sessions` | Bearer `SERVICE_SESSION_SECRET`, in the header and nowhere else: 400 for a request with anything in its query. 200 with `identity`, `expiresAt` and `ttlSeconds`, and the session as a `Set-Cookie` with the attributes a player's has. 401 for a wrong secret; 429 with `Retry-After` for a wrong one past five at once and one a minute. The right secret is never refused. Not served without `SERVICE_SESSION_SECRET` |
 
 The internal API is served whenever `INTERNAL_TOKEN` is set, with or without
 the login.
@@ -3653,7 +3663,7 @@ opens at the same place.
 | `mcmap_history_days`, `mcmap_history_bytes` | Days held, and the bytes of tiles held for all of them, each distinct tile counted once |
 | `mcmap_history_capture_bytes` | Bytes the last day captured added: what a day of history costs |
 | `mcmap_history_capture_tiles`, `mcmap_history_capture_tiles_changed`, `mcmap_history_capture_duration_seconds` | Tiles in the last day captured, how many of them differ from the day before, and how long keeping it took |
-| `mcmap_service_exchanges_total{result,source}` | Attempts to exchange the checks' secret for a service session: `ok`, `denied` (a wrong secret), `limited`, `locked` (after repeated wrong ones), `malformed`; from a `private` address inside the cluster, `loopback` (a port-forward) or `other`. Present, at zero, only with `SERVICE_SESSION_SECRET` |
+| `mcmap_service_exchanges_total{result,source}` | Attempts to exchange the checks' secret for a service session: `ok`, `denied` (a wrong secret), `limited` (a wrong one past the few judged each minute), `malformed`; from a `private` address inside the cluster, `loopback` (a port-forward) or `other`. Present, at zero, only with `SERVICE_SESSION_SECRET` |
 | `mcmap_service_requests_total{result}` | Requests made with a service session: `allowed`, or `forbidden` for a route that is a player's own or a request that is not a read |
 
 ## Build and test

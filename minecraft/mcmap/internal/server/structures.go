@@ -306,7 +306,7 @@ func (s *Server) handleStructureDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		// A standing is one player's. A service session is no player,
 		// so its answer has none, not even one that says it is unknown.
-		if out.Detail != nil && out.Detail.Village != nil && !auth.IsService(r.Context()) {
+		if _, player := auth.FromContext(r.Context()); out.Detail != nil && out.Detail.Village != nil && (player || s.Sessions == nil) {
 			out.Standing = s.standing(r, out.Detail.Village, survey)
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -386,7 +386,7 @@ func (s *Server) seenLive(xuid string) (int64, bool) {
 // the next snapshot is read.
 func (s *Server) playerID(r *http.Request, survey structures.Survey) (int64, string) {
 	id, ok := auth.FromContext(r.Context())
-	if !ok || auth.IsService(r.Context()) || !auth.IsXUID(id.XUID) {
+	if !ok {
 		return 0, standingUnknown
 	}
 	live, seen := s.seenLive(id.XUID)

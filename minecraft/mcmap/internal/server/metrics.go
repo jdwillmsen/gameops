@@ -20,7 +20,7 @@ const (
 var (
 	metricServiceExchanges = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_service_exchanges_total",
-		Help: "Attempts to exchange the checks' secret for a service session, by result (ok, denied for a wrong secret, limited, locked after repeated wrong ones, malformed) and by where the request came from (private for an address inside the cluster, loopback for a port-forward, other for anything else).",
+		Help: "Attempts to exchange the checks' secret for a service session, by result (ok, denied for a wrong secret, limited for a wrong one past the few judged each minute, malformed) and by where the request came from (private for an address inside the cluster, loopback for a port-forward, other for anything else).",
 	}, []string{"result", "source"})
 	metricServiceRequests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_service_requests_total",
@@ -33,7 +33,7 @@ var (
 // reads is therefore at zero from the moment the exchange is served.
 func declareServiceMetrics() {
 	for _, source := range []string{sourcePrivate, sourceLoopback, sourceOther} {
-		for _, result := range []string{auth.ExchangeOK, auth.ExchangeDenied, auth.ExchangeLimited, auth.ExchangeLocked, exchangeMalformed} {
+		for _, result := range []string{auth.ExchangeOK, auth.ExchangeDenied, auth.ExchangeLimited, exchangeMalformed} {
 			metricServiceExchanges.WithLabelValues(result, source)
 		}
 	}

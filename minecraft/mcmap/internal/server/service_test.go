@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -65,90 +66,114 @@ func serviceSession(t *testing.T, s *Server) *http.Cookie {
 	return c
 }
 
-// How a route is gated. public needs no session; shown is every player's
-// and a service session's to read; gated is a player's alone.
-const (
-	routePublic = "public"
-	routeShown  = "shown"
-	routeGated  = "gated"
-)
-
-// Every route of the public listener: its gate, and an address that
-// reaches its handler. A new route has to be added here, with its gate
-// thought about, before this file passes.
+// Every route of both listeners: the gate it is behind, and for the public
+// listener's an address that reaches its handler. A new route has to be
+// added here, with its gate thought about, before this file passes.
 var routes = map[string]struct{ gate, path string }{
-	"GET /healthz":                          {routePublic, "/healthz"},
-	"GET /api/config":                       {routePublic, "/api/config"},
-	"GET /":                                 {routePublic, "/"},
-	"POST /auth/start":                      {routePublic, ""},
-	"GET /auth/status":                      {routePublic, "/auth/status"},
-	"POST /auth/logout":                     {routePublic, ""},
-	"GET /api/map":                          {routeShown, "/api/map"},
-	"GET /tiles/{dimension}/{zoom}/{x}/{y}": {routeShown, "/tiles/overworld/0/37/-4.webp"},
-	"GET /api/live":                         {routeShown, ""},
-	"GET /api/markers":                      {routeShown, "/api/markers?dimension=overworld"},
-	"GET /api/icons":                        {routeShown, "/api/icons"},
-	"GET /api/icons/picture/{group}/{name}": {routeShown, "/api/icons/picture/container/chest"},
-	"GET /api/names":                        {routeShown, "/api/names"},
-	"GET /api/icons/mob/{type}":             {routeShown, "/api/icons/mob/cow"},
-	"GET /api/icons/head":                   {routeShown, "/api/icons/head?name=nobody"},
-	"GET /api/structures":                   {routeShown, "/api/structures?dimension=overworld"},
-	"GET /api/structures/detail":            {routeShown, villageDetailPath},
-	"GET /api/biomes":                       {routeShown, "/api/biomes?dimension=overworld"},
-	"GET /api/biomes/at":                    {routeShown, "/api/biomes/at?dimension=overworld&x=0&z=0"},
-	"GET /api/biomes/nearest":               {routeShown, "/api/biomes/nearest?dimension=overworld&biome=plains&x=0&z=0"},
-	"GET /api/biomes/region":                {routeShown, "/api/biomes/region?dimension=overworld&x=0&z=0"},
-	"GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}": {routeShown, "/api/biomes/tiles/overworld/0/0/0.png"},
-	"GET /api/trails": {routeShown, "/api/trails?dimension=overworld"},
+	"GET /healthz":                          {"gatePublic", "/healthz"},
+	"GET /api/config":                       {"gatePublic", "/api/config"},
+	"GET /":                                 {"gatePublic", "/"},
+	"POST /auth/start":                      {"gatePublic", ""},
+	"GET /auth/status":                      {"gatePublic", "/auth/status"},
+	"POST /auth/logout":                     {"gatePublic", ""},
+	"GET /api/map":                          {"gateViewer", "/api/map"},
+	"GET /tiles/{dimension}/{zoom}/{x}/{y}": {"gateViewer", "/tiles/overworld/0/37/-4.webp"},
+	"GET /api/live":                         {"gateViewer", ""},
+	"GET /api/markers":                      {"gateViewer", "/api/markers?dimension=overworld"},
+	"GET /api/icons":                        {"gateViewer", "/api/icons"},
+	"GET /api/icons/picture/{group}/{name}": {"gateViewer", "/api/icons/picture/container/chest"},
+	"GET /api/names":                        {"gateViewer", "/api/names"},
+	"GET /api/icons/mob/{type}":             {"gateViewer", "/api/icons/mob/cow"},
+	"GET /api/icons/head":                   {"gateViewer", "/api/icons/head?name=nobody"},
+	"GET /api/structures":                   {"gateViewer", "/api/structures?dimension=overworld"},
+	"GET /api/structures/detail":            {"gateViewer", villageDetailPath},
+	"GET /api/biomes":                       {"gateViewer", "/api/biomes?dimension=overworld"},
+	"GET /api/biomes/at":                    {"gateViewer", "/api/biomes/at?dimension=overworld&x=0&z=0"},
+	"GET /api/biomes/nearest":               {"gateViewer", "/api/biomes/nearest?dimension=overworld&biome=plains&x=0&z=0"},
+	"GET /api/biomes/region":                {"gateViewer", "/api/biomes/region?dimension=overworld&x=0&z=0"},
+	"GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}": {"gateViewer", "/api/biomes/tiles/overworld/0/0/0.png"},
+	"GET /api/trails": {"gateViewer", "/api/trails?dimension=overworld"},
 	// The map as it was on each day, which is every player's to look at.
-	"GET /api/history": {routeShown, ""},
-	"GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {routeShown, ""},
-	"GET /api/search":    {routeShown, "/api/search?dimension=overworld&x=0&z=0&q=a"},
-	"GET /api/me":        {routeShown, "/api/me"},
-	"GET /api/waypoints": {routeGated, "/api/waypoints"},
+	"GET /api/history": {"gateViewer", ""},
+	"GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {"gateViewer", ""},
+	"GET /api/search":    {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
+	"GET /api/me":        {"gateViewer", "/api/me"},
+	"GET /api/waypoints": {"gatePlayer", "/api/waypoints"},
+	// The internal listener's.
+	"GET /metrics":                        {"gatePublic", ""},
+	"GET /internal/v1/world":              {"gateAgent", ""},
+	"POST /internal/v1/world/acknowledge": {"gateAgent", ""},
+	"PUT /internal/v1/heads":              {"gateAgent", ""},
+	"POST /internal/v1/claims":            {"gateAgent", ""},
+	"POST /internal/v1/revocations":       {"gateAgent", ""},
+	"POST /internal/v1/service-sessions":  {"gateExchange", ""},
 }
 
-// routesInSource reads the public handler's routes, and the gate each is
-// registered behind, out of the source: a mux does not list its own.
+// routesInSource reads every route this package registers, and the gate
+// each is behind, out of every file of it that is not a test: a mux does
+// not list its own. It fails on a handler given to a mux anywhere but in
+// route, which is how a route would get past this file.
 func routesInSource(t *testing.T) map[string]string {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "server.go", nil, 0)
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := map[string]string{}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "Handler" {
+	set := token.NewFileSet()
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) != 2 {
-				return true
+		file, err := parser.ParseFile(set, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
 			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || (sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc") {
-				return true
-			}
-			lit, ok := call.Args[0].(*ast.BasicLit)
-			if !ok {
-				t.Errorf("a route is registered under something other than a literal pattern")
-				return true
-			}
-			pattern, _ := strconv.Unquote(lit.Value)
-			gate := routePublic
-			if wrap, ok := call.Args[1].(*ast.CallExpr); ok {
-				if by, ok := wrap.Fun.(*ast.SelectorExpr); ok && (by.Sel.Name == routeShown || by.Sel.Name == routeGated) {
-					gate = by.Sel.Name
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
 				}
-			}
-			found[pattern] = gate
-			return true
-		})
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				at := set.Position(call.Pos())
+				switch sel.Sel.Name {
+				case "Handle", "HandleFunc":
+					// Whatever it is called on: a mux by another name
+					// is still a mux.
+					if fn.Name.Name != "route" {
+						t.Errorf("%s: %s registers a handler with %s directly; every route goes through route, with its gate", at, fn.Name.Name, sel.Sel.Name)
+					}
+				case "route":
+					if len(call.Args) != 4 {
+						t.Errorf("%s: route called with %d arguments", at, len(call.Args))
+						return true
+					}
+					behind, isName := call.Args[1].(*ast.Ident)
+					pattern, isLiteral := call.Args[2].(*ast.BasicLit)
+					if !isName || !isLiteral || !strings.HasPrefix(behind.Name, "gate") {
+						t.Errorf("%s: a route's gate and pattern are written out where it is registered, not worked out", at)
+						return true
+					}
+					text, _ := strconv.Unquote(pattern.Value)
+					if was, twice := found[text]; twice && was != behind.Name {
+						t.Errorf("%s: %s is registered behind %s and behind %s", at, text, was, behind.Name)
+					}
+					found[text] = behind.Name
+				}
+				return true
+			})
+		}
 	}
-	if len(found) == 0 {
-		t.Fatal("no routes found in server.go")
+	if len(found) < 20 {
+		t.Fatalf("only %d routes found in the package's source", len(found))
 	}
 	return found
 }
@@ -159,13 +184,13 @@ func TestService_EveryRouteHasAGateThatWasChosenForIt(t *testing.T) {
 		want, listed := routes[pattern]
 		switch {
 		case !listed:
-			t.Errorf("%s is not in this test's list. Decide whether a service session may read it (shown) or not (gated), which it may not if it is one player's own or changes anything, and add it", pattern)
+			t.Errorf("%s is not in this test's list. Decide whether a service session may read it (gateViewer) or not (gatePlayer), which it may not if it is one player's own or changes anything, and add it", pattern)
 		case want.gate != gate:
-			t.Errorf("%s is behind %s in server.go and %s here", pattern, gate, want.gate)
+			t.Errorf("%s is behind %s in the source and %s here", pattern, gate, want.gate)
 		}
 		// The invariant the roles to come lean on: nothing that is not a
 		// plain read is ever open to a service session.
-		if gate == routeShown && !strings.HasPrefix(pattern, "GET ") {
+		if gate == "gateViewer" && !strings.HasPrefix(pattern, "GET ") {
 			t.Errorf("%s is shown to a service session and is not a GET", pattern)
 		}
 	}
@@ -176,6 +201,28 @@ func TestService_EveryRouteHasAGateThatWasChosenForIt(t *testing.T) {
 	}
 }
 
+// The reader above has to see what it is there to catch.
+func TestService_ARouteRegisteredAnotherWayIsSeen(t *testing.T) {
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "elsewhere.go", `package server
+func (s *Server) more(m *http.ServeMux) { m.HandleFunc("POST /api/reset", s.handleMe); s.side.Handle("GET /x", nil) }`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "Handle" || sel.Sel.Name == "HandleFunc") {
+				seen++
+			}
+		}
+		return true
+	})
+	if seen != 2 {
+		t.Errorf("the reader's test for a direct registration saw %d of 2", seen)
+	}
+}
+
 func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 	s, waypoints, _ := withService(t)
 	h := s.Handler()
@@ -183,7 +230,7 @@ func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 	allowed, forbidden := testutil.ToFloat64(metricServiceRequests.WithLabelValues(serviceAllowed)), testutil.ToFloat64(metricServiceRequests.WithLabelValues(serviceForbidden))
 	var wantAllowed, wantForbidden float64
 	for pattern, route := range routes {
-		if route.path == "" {
+		if route.path == "" || route.gate == "gateAgent" || route.gate == "gateExchange" {
 			continue
 		}
 		asService := do(h, "GET", route.path, "", []*http.Cookie{service})
@@ -193,12 +240,12 @@ func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 			t.Errorf("%s as a player = %d", pattern, asPlayer.Code)
 		}
 		switch route.gate {
-		case routeGated:
+		case "gatePlayer":
 			wantForbidden++
 			if asService.Code != http.StatusForbidden {
 				t.Errorf("%s as a service session = %d, want 403", pattern, asService.Code)
 			}
-		case routeShown:
+		case "gateViewer":
 			wantAllowed++
 			if asService.Code != asPlayer.Code {
 				t.Errorf("%s as a service session = %d, as a player %d", pattern, asService.Code, asPlayer.Code)
@@ -270,6 +317,66 @@ func TestService_NothingOfAPlayersOwnIsInWhatASessionIsShown(t *testing.T) {
 	}
 }
 
+// recordingHeads notes every XUID anyone is looked up by.
+type recordingHeads struct {
+	PlayerHeads
+	asked *[]string
+}
+
+func (h recordingHeads) Listing(xuid string) (map[string]string, string) {
+	*h.asked = append(*h.asked, xuid)
+	return h.PlayerHeads.Listing(xuid)
+}
+
+// A service session is no player by how the answer is made, not by each
+// handler remembering: asked as one on every route there is, nothing that
+// is kept or looked up by who is asking is touched, with any key at all.
+func TestService_NoCodePathTreatsASessionAsAPlayer(t *testing.T) {
+	s, waypoints, _ := withService(t)
+	inGame(t, s, map[auth.Identity]int64{steve: steveInWorld})
+	var asked []string
+	s.Heads = recordingHeads{s.Heads, &asked}
+	waypoints.asked = nil
+	service := serviceSession(t, s)
+	h := s.Handler()
+	for pattern, route := range routes {
+		if route.path == "" {
+			continue
+		}
+		for _, path := range []string{route.path, strings.Replace(route.path, "q=a", "q=base", 1)} {
+			if rec := do(h, "GET", path, "", []*http.Cookie{service}); rec.Code >= 500 {
+				t.Errorf("%s as a service session = %d", pattern, rec.Code)
+			}
+		}
+	}
+	if len(asked) != 0 {
+		t.Errorf("a service session had the heads looked up by %q", asked)
+	}
+	if len(waypoints.asked) != 0 {
+		t.Errorf("a service session had waypoints asked for by %q", waypoints.asked)
+	}
+	s.mu.Lock()
+	known := len(s.players)
+	s.mu.Unlock()
+	if known != 0 {
+		t.Errorf("a service session is remembered among %d players of the world", known)
+	}
+	s.search.mu.Lock()
+	cached := len(s.search.waypoints)
+	s.search.mu.Unlock()
+	if cached != 0 {
+		t.Errorf("a service session has %d entries in the waypoint cache", cached)
+	}
+	// And should a handler ever ask for one by no XUID, there is nothing
+	// kept under it to hand back.
+	if list, err := s.search.playerWaypoints(t.Context(), s.Waypoints, "", time.Now); err == nil || list != nil || len(waypoints.asked) != 0 {
+		t.Errorf("waypoints were read for no XUID: %v, %v", list, err)
+	}
+	if _, self := s.Heads.Listing(""); self != "" {
+		t.Errorf("no XUID is listed as %q", self)
+	}
+}
+
 // The invariant for the roles to come: a service session cannot do
 // anything but read, on any route, and cannot be turned into a player's.
 func TestService_ASessionOnlyEverReads(t *testing.T) {
@@ -277,7 +384,7 @@ func TestService_ASessionOnlyEverReads(t *testing.T) {
 	h := s.Handler()
 	service := serviceSession(t, s)
 	for pattern, route := range routes {
-		if route.path == "" || route.gate == routePublic {
+		if route.path == "" || (route.gate != "gateViewer" && route.gate != "gatePlayer") {
 			continue
 		}
 		for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
@@ -465,19 +572,32 @@ func TestService_WhatACallerSaysOfItselfCannotForgeALogLine(t *testing.T) {
 	}
 }
 
-func TestService_WrongSecretsLockTheExchange(t *testing.T) {
-	s, _, _ := withService(t)
-	for range 5 {
-		if rec := exchange(s, "wrong"); rec.Code != http.StatusUnauthorized {
-			t.Fatalf("a wrong secret = %d, want 401", rec.Code)
-		}
+// Anything in the cluster can reach the exchange. A flood of wrong secrets
+// is turned away, counted, written down only so often, and does not keep
+// out the caller that holds the right one.
+func TestService_AStormOfWrongSecretsNeitherLocksOutTheRightOneNorFloodsTheLog(t *testing.T) {
+	s, _, log := withService(t)
+	limited := testutil.ToFloat64(metricServiceExchanges.WithLabelValues(auth.ExchangeLimited, sourceOther))
+	codes := map[int]int{}
+	for range 200 {
+		codes[exchange(s, "wrong").Code]++
 	}
-	rec := exchange(s, serviceSecret)
-	if rec.Code != http.StatusTooManyRequests || cookie(rec, "__Host-mcmap_session") != nil {
-		t.Errorf("the right secret after five wrong ones = %d, want 429 and no session", rec.Code)
+	if codes[http.StatusUnauthorized] != 5 || codes[http.StatusTooManyRequests] != 195 {
+		t.Errorf("200 wrong secrets were answered %v, want 5 judged wrong and the rest turned away", codes)
 	}
-	if wait, err := strconv.Atoi(rec.Header().Get("Retry-After")); err != nil || wait < 200 || wait > 301 {
-		t.Errorf("Retry-After = %q, want about five minutes", rec.Header().Get("Retry-After"))
+	rec := exchange(s, "wrong")
+	if wait, err := strconv.Atoi(rec.Header().Get("Retry-After")); err != nil || wait < 1 || wait > 61 {
+		t.Errorf("Retry-After = %q, want within a minute", rec.Header().Get("Retry-After"))
+	}
+	if got := testutil.ToFloat64(metricServiceExchanges.WithLabelValues(auth.ExchangeLimited, sourceOther)) - limited; got != 196 {
+		t.Errorf("%v refusals past the budget were counted, want every one of 196", got)
+	}
+	if lines := strings.Count(log.String(), "map service session refused"); lines != 6 {
+		t.Errorf("%d refusals were logged, want the 5 judged and one for the flood", lines)
+	}
+	held := serviceSession(t, s)
+	if code := do(s.Handler(), "GET", "/api/map", "", []*http.Cookie{held}).Code; code != http.StatusOK {
+		t.Errorf("the session issued through the storm = %d", code)
 	}
 }
 

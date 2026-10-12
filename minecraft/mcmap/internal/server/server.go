@@ -89,6 +89,9 @@ type Server struct {
 	// out.
 	History HistorySource
 
+	// limitedLog spaces out the log lines of exchanges refused unjudged.
+	limitedLog sparse
+
 	mu    sync.Mutex
 	infos map[string]cachedInfo
 	// search holds what a search would otherwise decode again every time.
@@ -134,6 +137,52 @@ func (s *Server) info(dimension string) (render.Info, bool) {
 	return info, true
 }
 
+// gate is who a route is open to. Every route has one, said where the route
+// is registered, and route is the only place a handler is given to a mux:
+// service_test.go reads every file of this package and fails on a route
+// registered any other way, or behind a gate it was not told of.
+type gate int
+
+const (
+	// gatePublic needs nothing: the page, the login, liveness.
+	gatePublic gate = iota + 1
+	// gatePlayer is a player's session and nobody else's. It is the gate
+	// for anything that is one player's own and for anything that asks
+	// for, approves or carries out a change, now or later: a service
+	// session is refused here, so it can be given no part in either.
+	gatePlayer
+	// gateViewer is what every logged-in player is shown alike, which a
+	// service session may read as well. Only ever a GET.
+	gateViewer
+	// gateAgent is the agent, by the internal token.
+	gateAgent
+	// gateExchange is the checks' exchange, which judges the secret it is
+	// presented with itself.
+	gateExchange
+)
+
+func (s *Server) route(mux *http.ServeMux, behind gate, pattern string, h http.HandlerFunc) {
+	var handler http.Handler = h
+	switch behind {
+	case gatePublic, gateExchange:
+	case gatePlayer:
+		if s.Sessions != nil {
+			handler = s.Sessions.Require(h)
+		}
+	case gateViewer:
+		if s.Sessions != nil {
+			handler = s.Sessions.RequireViewer(h)
+		}
+	case gateAgent:
+		handler = s.agentOnly(h)
+	default:
+		panic("route " + pattern + " was given no gate")
+	}
+	mux.Handle(pattern, handler)
+}
+
+func healthy(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
+
 // filesOnly hides directories from the static file server, which would
 // otherwise answer a directory path with a listing of it.
 type filesOnly struct{ fs.FS }
@@ -154,71 +203,69 @@ func (f filesOnly) Open(name string) (fs.File, error) {
 // the login; the page itself is not, since it has to load to show the login
 // and holds nothing about the world.
 //
-// Every route is behind one of two gates, or is public. shown is what all
-// players are shown alike, which a service session may read as well; gated
-// is a player's alone. A route that is one player's own, or that will ever
-// change anything, goes behind gated: service_test.go fails on a route it
-// has not been told the gate of.
+// Every route is registered through route, which is given the gate it is
+// behind: see gate. A route that is one player's own, or that will ever
+// change anything, is gatePlayer.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("GET /api/config", s.handleConfig)
-	mux.Handle("GET /api/map", s.shown(s.handleMap))
-	mux.Handle("GET /tiles/{dimension}/{zoom}/{x}/{y}", s.shown(s.handleTile))
+	s.route(mux, gatePublic, "GET /healthz", healthy)
+	s.route(mux, gatePublic, "GET /api/config", s.handleConfig)
+	s.route(mux, gateViewer, "GET /api/map", s.handleMap)
+	s.route(mux, gateViewer, "GET /tiles/{dimension}/{zoom}/{x}/{y}", s.handleTile)
 	if s.Live != nil {
-		mux.Handle("GET /api/live", s.shown(s.handleLive))
+		s.route(mux, gateViewer, "GET /api/live", s.handleLive)
 	}
 	if s.Markers != nil {
-		mux.Handle("GET /api/markers", s.shown(s.handleMarkers))
+		s.route(mux, gateViewer, "GET /api/markers", s.handleMarkers)
 	}
 	if s.Waypoints != nil && s.Sessions != nil {
-		mux.Handle("GET /api/waypoints", s.gated(s.handleWaypoints))
+		s.route(mux, gatePlayer, "GET /api/waypoints", s.handleWaypoints)
 	}
 	if s.MobIcons != nil || s.Heads != nil || s.Art != nil {
-		mux.Handle("GET /api/icons", s.shown(s.handleIcons))
+		s.route(mux, gateViewer, "GET /api/icons", s.handleIcons)
 	}
 	if s.Art != nil {
-		mux.Handle("GET /api/icons/picture/{group}/{name}", s.shown(s.handlePicture))
-		mux.Handle("GET /api/names", s.shown(s.handleNames))
+		s.route(mux, gateViewer, "GET /api/icons/picture/{group}/{name}", s.handlePicture)
+		s.route(mux, gateViewer, "GET /api/names", s.handleNames)
 	}
 	if s.MobIcons != nil {
-		mux.Handle("GET /api/icons/mob/{type}", s.shown(s.handleMobIcon))
+		s.route(mux, gateViewer, "GET /api/icons/mob/{type}", s.handleMobIcon)
 	}
 	if s.Heads != nil {
-		mux.Handle("GET /api/icons/head", s.shown(s.handleHead))
+		s.route(mux, gateViewer, "GET /api/icons/head", s.handleHead)
 	}
 	if s.Structures != nil {
-		mux.Handle("GET /api/structures", s.shown(s.handleStructures))
-		mux.Handle("GET /api/structures/detail", s.shown(s.handleStructureDetail))
+		s.route(mux, gateViewer, "GET /api/structures", s.handleStructures)
+		s.route(mux, gateViewer, "GET /api/structures/detail", s.handleStructureDetail)
 	}
 	if s.Biomes != nil {
-		mux.Handle("GET /api/biomes", s.shown(s.handleBiomes))
-		mux.Handle("GET /api/biomes/at", s.shown(s.handleBiomeAt))
-		mux.Handle("GET /api/biomes/nearest", s.shown(s.handleBiomeNearest))
-		mux.Handle("GET /api/biomes/region", s.shown(s.handleBiomeRegion))
-		mux.Handle("GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.shown(s.handleBiomeTile))
+		s.route(mux, gateViewer, "GET /api/biomes", s.handleBiomes)
+		s.route(mux, gateViewer, "GET /api/biomes/at", s.handleBiomeAt)
+		s.route(mux, gateViewer, "GET /api/biomes/nearest", s.handleBiomeNearest)
+		s.route(mux, gateViewer, "GET /api/biomes/region", s.handleBiomeRegion)
+		s.route(mux, gateViewer, "GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.handleBiomeTile)
 	}
 	if s.Trails != nil {
-		mux.Handle("GET /api/trails", s.shown(s.handleTrails))
+		s.route(mux, gateViewer, "GET /api/trails", s.handleTrails)
 	}
 	if s.History != nil {
-		mux.Handle("GET /api/history", s.shown(s.handleHistory))
-		mux.Handle("GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}", s.shown(s.handleHistoryTile))
+		s.route(mux, gateViewer, "GET /api/history", s.handleHistory)
+		s.route(mux, gateViewer, "GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}", s.handleHistoryTile)
 	}
-	mux.Handle("GET /api/search", s.shown(s.handleSearch))
+	s.route(mux, gateViewer, "GET /api/search", s.handleSearch)
 	if s.Sessions != nil {
-		mux.Handle("GET /api/me", s.shown(s.handleMe))
-		mux.HandleFunc("POST /auth/start", s.handleStart)
-		mux.HandleFunc("GET /auth/status", s.handleStatus)
-		mux.HandleFunc("POST /auth/logout", s.handleLogout)
+		s.route(mux, gateViewer, "GET /api/me", s.handleMe)
+		s.route(mux, gatePublic, "POST /auth/start", s.handleStart)
+		s.route(mux, gatePublic, "GET /auth/status", s.handleStatus)
+		s.route(mux, gatePublic, "POST /auth/logout", s.handleLogout)
 	}
 	static := http.FileServerFS(filesOnly{s.Static})
-	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	s.route(mux, gatePublic, "GET /", func(w http.ResponseWriter, r *http.Request) {
 		// The page changes only with a release; embedded files carry no
 		// modification time to revalidate against.
 		w.Header().Set("Cache-Control", "max-age=300")
 		static.ServeHTTP(w, r)
-	}))
+	})
 	// Refuses a state-changing request that another site started in the
 	// visitor's browser, which would otherwise be able to log them out or
 	// spend login codes in their name. Sites elsewhere under the same parent
@@ -344,4 +391,20 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 	// tile is only for the logged-in browser that asked for it.
 	w.Header().Set("Cache-Control", "private, max-age=60")
 	http.ServeContent(w, r, "", stat.ModTime(), f)
+}
+
+// sparse lets something happen at most once a minute.
+type sparse struct {
+	mu   sync.Mutex
+	last time.Time
+}
+
+func (s *sparse) Allow(now time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.last.IsZero() && now.Sub(s.last) < time.Minute {
+		return false
+	}
+	s.last = now
+	return true
 }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -59,8 +60,8 @@ func TestService_ASessionReadsWhatIsShownAndNothingElse(t *testing.T) {
 	cookie := issueService(t, s)
 
 	status, id, service := through(s.RequireViewer, "GET", cookie)
-	if status != http.StatusOK || !service || id.XUID != "" || id.Gamertag != ServiceName {
-		t.Errorf("viewer gate = %d as %+v service=%v, want 200 as %q with no XUID", status, id, service, ServiceName)
+	if status != http.StatusOK || !service || id != (Identity{}) {
+		t.Errorf("viewer gate = %d as the player %+v service=%v, want 200 as no player at all", status, id, service)
 	}
 	if status, _, _ := through(s.Require, "GET", cookie); status != http.StatusForbidden {
 		t.Errorf("player gate = %d, want 403", status)
@@ -205,66 +206,91 @@ func TestExchange_OnlyTheSecretEarnsASession(t *testing.T) {
 	}
 }
 
-func TestExchange_WrongSecretsLockItForEverybody(t *testing.T) {
+// Anything in the cluster can reach the exchange. Nothing it sends may keep
+// out the caller that holds the secret.
+func TestExchange_TheSecretIsHonouredThroughAStormOfWrongOnes(t *testing.T) {
 	c := &clock{t: time.Unix(1_800_000_000, 0)}
 	e := NewExchange(serviceSecret, c.now)
-	for i := range exchangeMaxFailures {
+	for round := range 50 {
+		for range 100 {
+			e.Attempt("wrong")
+		}
+		if got := e.Attempt(serviceSecret); got != ExchangeOK {
+			t.Fatalf("round %d: the secret among wrong ones = %s, want ok", round, got)
+		}
+		c.t = c.t.Add(time.Second)
+	}
+	// And as often as it is asked: the checks' own exchanges are not
+	// counted against anything.
+	for i := range 100 {
+		if got := e.Attempt(serviceSecret); got != ExchangeOK {
+			t.Fatalf("exchange %d in a row = %s, want ok", i+1, got)
+		}
+	}
+}
+
+func TestExchange_WrongSecretsAreJudgedOnlySoOften(t *testing.T) {
+	c := &clock{t: time.Unix(1_800_000_000, 0)}
+	e := NewExchange(serviceSecret, c.now)
+	for i := range exchangeBurst {
 		if got := e.Attempt("wrong"); got != ExchangeDenied {
 			t.Fatalf("wrong secret %d = %s, want denied", i+1, got)
 		}
 	}
-	// Locked: not even the right secret is looked at.
-	if got := e.Attempt(serviceSecret); got != ExchangeLocked {
-		t.Errorf("the secret while locked = %s, want locked", got)
-	}
-	if wait := e.RetryAfter(); wait != exchangeLockout {
-		t.Errorf("RetryAfter = %s, want %s", wait, exchangeLockout)
-	}
-	c.t = c.t.Add(exchangeLockout - time.Second)
-	if got := e.Attempt(serviceSecret); got != ExchangeLocked {
-		t.Errorf("a second before the lock lifts = %s, want locked", got)
-	}
-	c.t = c.t.Add(time.Second)
-	// One more wrong one is enough to lock it again.
-	if got := e.Attempt("wrong"); got != ExchangeDenied {
-		t.Errorf("a wrong secret after the lock = %s, want denied", got)
-	}
-	if got := e.Attempt(serviceSecret); got != ExchangeLocked {
-		t.Errorf("the secret after that = %s, want locked again", got)
-	}
-	c.t = c.t.Add(exchangeLockout)
-	if got := e.Attempt(serviceSecret); got != ExchangeOK {
-		t.Errorf("the secret once the second lock lifted = %s, want ok", got)
-	}
-	// A success forgives what came before it.
-	for i := range exchangeMaxFailures - 1 {
-		c.t = c.t.Add(exchangeRefill)
-		if got := e.Attempt("wrong"); got != ExchangeDenied {
-			t.Fatalf("wrong secret %d after a success = %s, want denied", i+1, got)
+	for i := range 20 {
+		if got := e.Attempt("wrong"); got != ExchangeLimited {
+			t.Fatalf("wrong secret %d past the budget = %s, want limited", i+1, got)
 		}
 	}
+	if wait := e.RetryAfter(); wait <= 0 || wait > exchangeRefill {
+		t.Errorf("RetryAfter = %s, want within a refill", wait)
+	}
 	c.t = c.t.Add(exchangeRefill)
+	if got := e.Attempt("wrong"); got != ExchangeDenied {
+		t.Errorf("after one refill = %s, want denied", got)
+	}
+	if got := e.Attempt("wrong"); got != ExchangeLimited {
+		t.Errorf("straight after = %s, want limited", got)
+	}
+	// The secret gives the wrong ones their budget back: whatever was
+	// guessing, the holder of the secret has since been and gone.
 	if got := e.Attempt(serviceSecret); got != ExchangeOK {
-		t.Errorf("the secret after four wrong ones = %s, want ok", got)
+		t.Fatalf("the secret = %s, want ok", got)
+	}
+	if got := e.Attempt("wrong"); got != ExchangeDenied {
+		t.Errorf("a wrong secret after the right one = %s, want denied", got)
 	}
 }
 
-func TestExchange_EvenTheSecretIsRateLimited(t *testing.T) {
+// The player accessor is how anything keyed by who is asking is reached, so
+// it has to answer that a service session is nobody. The viewer accessor
+// gives a name to show and nothing to look up by.
+func TestService_ThePlayerAccessorDoesNotKnowASession(t *testing.T) {
 	c := &clock{t: time.Unix(1_800_000_000, 0)}
-	e := NewExchange(serviceSecret, c.now)
-	for i := range exchangeBurst {
-		if got := e.Attempt(serviceSecret); got != ExchangeOK {
-			t.Fatalf("exchange %d = %s, want ok", i+1, got)
+	s := withService(t, c)
+	steve := Identity{XUID: "2535400000000001", Gamertag: "Steve"}
+	for name, cookie := range map[string]*http.Cookie{"service": issueService(t, s), "player": issue(t, s, steve)} {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.AddCookie(cookie)
+		var player Identity
+		var isPlayer, isViewer bool
+		var viewer Viewer
+		s.RequireViewer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			player, isPlayer = FromContext(r.Context())
+			viewer, isViewer = ViewerFromContext(r.Context())
+		})).ServeHTTP(httptest.NewRecorder(), req)
+		if name == "service" {
+			if isPlayer || player != (Identity{}) {
+				t.Errorf("FromContext took a service session for the player %+v", player)
+			}
+			if !isViewer || viewer != (Viewer{Name: ServiceName, Service: true}) {
+				t.Errorf("ViewerFromContext = %+v, %v", viewer, isViewer)
+			}
+		} else if !isPlayer || player != steve || !isViewer || viewer != (Viewer{Name: "Steve"}) {
+			t.Errorf("a player: FromContext = %+v, %v; ViewerFromContext = %+v, %v", player, isPlayer, viewer, isViewer)
 		}
 	}
-	if got := e.Attempt(serviceSecret); got != ExchangeLimited {
-		t.Errorf("one past the burst = %s, want limited", got)
-	}
-	c.t = c.t.Add(exchangeRefill)
-	if got := e.Attempt(serviceSecret); got != ExchangeOK {
-		t.Errorf("after one refill = %s, want ok", got)
-	}
-	if got := e.Attempt(serviceSecret); got != ExchangeLimited {
-		t.Errorf("straight after = %s, want limited", got)
+	if _, ok := FromContext(context.Background()); ok {
+		t.Error("FromContext found a player in a context with no session")
 	}
 }

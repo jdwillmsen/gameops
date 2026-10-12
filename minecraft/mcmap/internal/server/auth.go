@@ -18,24 +18,6 @@ import (
 
 const pendingCookie = auth.PendingCookie
 
-// gated is a player's session and nobody else's.
-func (s *Server) gated(h http.HandlerFunc) http.Handler {
-	if s.Sessions == nil {
-		return h
-	}
-	return s.Sessions.Require(h)
-}
-
-// shown is what every logged-in player sees alike, which the session of an
-// automated check may read too. What such a handler says about the player
-// asking, it must leave out for a session that is no player's.
-func (s *Server) shown(h http.HandlerFunc) http.Handler {
-	if s.Sessions == nil {
-		return h
-	}
-	return s.Sessions.RequireViewer(h)
-}
-
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -50,11 +32,11 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.FromContext(r.Context())
-	out := map[string]any{"gamertag": id.Gamertag}
+	viewer, _ := auth.ViewerFromContext(r.Context())
+	out := map[string]any{"gamertag": viewer.Name}
 	// Said outright, so that nothing has to tell a check from a player by
 	// the shape of a name.
-	if auth.IsService(r.Context()) {
+	if viewer.Service {
 		out["service"] = true
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -119,19 +101,19 @@ func (s *Server) log() *slog.Logger {
 // own port so that a route publishing the page cannot publish these with it.
 func (s *Server) InternalHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.Handle("GET /metrics", promhttp.Handler())
+	s.route(mux, gatePublic, "GET /healthz", healthy)
+	s.route(mux, gatePublic, "GET /metrics", promhttp.Handler().ServeHTTP)
 	if s.Chunks != nil && s.InternalToken != "" {
-		mux.HandleFunc("GET /internal/v1/world", s.agentOnly(s.handleWorld))
-		mux.HandleFunc("POST /internal/v1/world/acknowledge", s.agentOnly(s.handleAcknowledge))
+		s.route(mux, gateAgent, "GET /internal/v1/world", s.handleWorld)
+		s.route(mux, gateAgent, "POST /internal/v1/world/acknowledge", s.handleAcknowledge)
 	}
 	if s.Heads != nil && s.InternalToken != "" {
-		mux.HandleFunc("PUT /internal/v1/heads", s.agentOnly(s.handleHeads))
+		s.route(mux, gateAgent, "PUT /internal/v1/heads", s.handleHeads)
 	}
 	if s.Codes != nil && s.InternalToken != "" {
-		mux.HandleFunc("POST /internal/v1/claims", s.agentOnly(s.handleClaim))
+		s.route(mux, gateAgent, "POST /internal/v1/claims", s.handleClaim)
 		if s.Sessions != nil && s.Sessions.Revoked != nil {
-			mux.HandleFunc("POST /internal/v1/revocations", s.agentOnly(s.handleRevoke))
+			s.route(mux, gateAgent, "POST /internal/v1/revocations", s.handleRevoke)
 		}
 	}
 	// Here and never on the public listener: the secret is then of no use
@@ -139,7 +121,7 @@ func (s *Server) InternalHandler() http.Handler {
 	// the internet has nowhere to be sent.
 	if s.Service != nil && s.Sessions != nil && len(s.Sessions.ServiceKey) > 0 {
 		declareServiceMetrics()
-		mux.HandleFunc("POST /internal/v1/service-sessions", s.handleServiceSession)
+		s.route(mux, gateExchange, "POST /internal/v1/service-sessions", s.handleServiceSession)
 	}
 	return mux
 }
@@ -198,9 +180,15 @@ func (s *Server) handleServiceSession(w http.ResponseWriter, r *http.Request) {
 	agent := said(r.UserAgent())
 	refuse := func(result string, status int) {
 		metricServiceExchanges.WithLabelValues(result, source).Inc()
-		s.log().Warn("map service session refused", "result", result, "source", source, "remote", r.RemoteAddr, "user_agent", agent)
 		w.Header().Set("Cache-Control", "no-store")
-		http.Error(w, http.StatusText(status), status)
+		defer http.Error(w, http.StatusText(status), status)
+		// Past the budget every refusal is still counted, and one a
+		// minute is written down: a flood of them must not be able to
+		// bury the lines that matter under its own.
+		if result == auth.ExchangeLimited && !s.limitedLog.Allow(s.now()) {
+			return
+		}
+		s.log().Warn("map service session refused", "result", result, "source", source, "remote", r.RemoteAddr, "user_agent", agent)
 	}
 	// A secret in an address ends up in logs along the way, so a request
 	// that carries anything there is turned away before it is read.
