@@ -2462,15 +2462,19 @@ the renderer cut; past that, and below the coarsest, the same tiles (and
 the biome overlay's) are enlarged or shrunk with nearest-neighbour
 scaling, so a block is a hard-edged square at any zoom. The zoom is any
 fraction: the wheel, a trackpad and a pinch rest where they are left.
-A turn of a mouse wheel is half a level, a trackpad's scroll adds up from
-its small steps, and a pinch on a trackpad (Ctrl and scroll) is finer
-still; the map eases toward where it is told, about the pointer. The `+`
+A turn of a mouse wheel (100 pixels, or three lines as Firefox sends it) is
+half a level, a trackpad's scroll adds up from its small steps in pixels,
+and a pinch on a trackpad as Chrome and Firefox send it (scrolling with
+Ctrl held) is finer still; Safari's pinch arrives as a gesture with a
+scale and is followed as such. The map eases toward where it is told,
+about the pointer, or about whoever is followed while Follow is on. The `+`
 and `-` buttons and keys move a level, to the next whole one from between
 two. The grid is drawn for the view at each zoom, a pixel wide, with a
 line for every block from 12 pixels to a block; from 16 the pointer's
 position is told to a tenth of a block as well. The farthest out is as far
-as the whole world fits the window, which on a narrow phone is further
-than the renderer's own coarsest. In the footer, the zoom shows the
+as the whole world fits the window with a margin, which for a world tens of
+thousands of blocks across or on a narrow phone is further than the
+renderer's own coarsest. In the footer, the zoom shows the
 level, what a block comes to in pixels (`1 block = 8 px`, or
 `1 px = 4 blocks`) and how many blocks the window is across; on a phone
 it is the level alone. It opens a panel with a slider, stops (whole
