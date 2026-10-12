@@ -29,6 +29,11 @@ type Manifest struct {
 	// Dir is repo-relative with a trailing slash, so a prefix match on
 	// minecraft/agent/ can never also match a sibling minecraft/agent2/.
 	Dir string `yaml:"-"`
+	// Inner is the directories of the components that live inside this
+	// one's. What is in them is theirs: a component nested in another has
+	// its own tests and its own releases, and a change to it alone is not
+	// a change to the one around it.
+	Inner []string `yaml:"-"`
 }
 
 type Tasks struct {
@@ -108,7 +113,20 @@ func Load(root string) ([]Manifest, error) {
 		return nil, err
 	}
 	sort.Slice(ms, func(i, j int) bool { return ms[i].Name < ms[j].Name })
+	nest(ms)
 	return ms, nil
+}
+
+// nest tells each component which others are inside its directory.
+func nest(ms []Manifest) {
+	for i := range ms {
+		ms[i].Inner = nil
+		for _, other := range ms {
+			if other.Dir != ms[i].Dir && strings.HasPrefix(other.Dir, ms[i].Dir) {
+				ms[i].Inner = append(ms[i].Inner, other.Dir)
+			}
+		}
+	}
 }
 
 func parse(path string) (Manifest, error) {

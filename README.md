@@ -26,7 +26,9 @@ Each component's own README covers what it does and how to run it.
 3. `go run ./tools/components validate`.
 
 CI runs a component's `lint`, `test` and `build` when its directory, a
-`depends` path or its language's root toolchain files change. A merge to
+`depends` path or its language's root toolchain files change. A component
+whose directory is inside another's owns what is in it: a change there is
+its own and not the outer component's. A merge to
 `main` releases it (tag `<release.tag>-v<semver>`) when a commit touching it
 is a `feat`, `fix`, `perf`, `build` or `chore(deps)`.
 

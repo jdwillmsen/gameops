@@ -39,7 +39,7 @@ func affects(m Manifest, paths []string, mode Mode) bool {
 	}
 	for _, p := range paths {
 		for _, pre := range prefixes {
-			if strings.HasPrefix(p, pre) {
+			if strings.HasPrefix(p, pre) && !(pre == m.Dir && within(p, m.Inner)) {
 				return true
 			}
 		}
@@ -47,6 +47,15 @@ func affects(m Manifest, paths []string, mode Mode) bool {
 			if p == f {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func within(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		if strings.HasPrefix(path, dir) {
+			return true
 		}
 	}
 	return false
