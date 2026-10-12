@@ -325,9 +325,10 @@
     // goes at once, its requests with it, and what was under it stays for
     // what is left of its wait.
     if (stays) {
-      if (under) {
+      if (under && old.isLoading()) {
         map.removeLayer(old);
       } else {
+        settle();
         under = old;
         swap = setTimeout(settle, SWAP_MS);
       }
