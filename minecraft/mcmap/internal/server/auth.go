@@ -171,6 +171,18 @@ func exchangeSource(remote string) string {
 	return sourceOther
 }
 
+// said is something a caller sent, made fit to be one field of one log
+// line: no line breaks, and no longer than a user agent has any need to be.
+// Whoever asks for a session chooses these words, and the record of who
+// asked must not be theirs to write.
+func said(text string) string {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\n", " "), "\r", " ")
+	if len(text) > 200 {
+		text = text[:200]
+	}
+	return strings.ToValidUTF8(text, "?")
+}
+
 type serviceSessionJSON struct {
 	Identity   string    `json:"identity"`
 	ExpiresAt  time.Time `json:"expiresAt"`
@@ -183,9 +195,10 @@ type serviceSessionJSON struct {
 // What was presented is in neither.
 func (s *Server) handleServiceSession(w http.ResponseWriter, r *http.Request) {
 	source := exchangeSource(r.RemoteAddr)
+	agent := said(r.UserAgent())
 	refuse := func(result string, status int) {
 		metricServiceExchanges.WithLabelValues(result, source).Inc()
-		s.log().Warn("map service session refused", "result", result, "source", source, "remote", r.RemoteAddr, "user_agent", r.UserAgent())
+		s.log().Warn("map service session refused", "result", result, "source", source, "remote", r.RemoteAddr, "user_agent", agent)
 		w.Header().Set("Cache-Control", "no-store")
 		http.Error(w, http.StatusText(status), status)
 	}
@@ -200,7 +213,7 @@ func (s *Server) handleServiceSession(w http.ResponseWriter, r *http.Request) {
 	case auth.ExchangeOK:
 		expires := s.Sessions.IssueService(w)
 		metricServiceExchanges.WithLabelValues(result, source).Inc()
-		s.log().Info("map service session issued", "identity", auth.ServiceName, "source", source, "remote", r.RemoteAddr, "user_agent", r.UserAgent(), "expires", expires.UTC().Format(time.RFC3339))
+		s.log().Info("map service session issued", "identity", auth.ServiceName, "source", source, "remote", r.RemoteAddr, "user_agent", agent, "expires", expires.UTC().Format(time.RFC3339))
 		writeJSON(w, http.StatusOK, serviceSessionJSON{Identity: auth.ServiceName, ExpiresAt: expires.UTC(), TTLSeconds: int(s.Sessions.ServiceTTL.Seconds())})
 	case auth.ExchangeDenied:
 		w.Header().Set("WWW-Authenticate", "Bearer")
