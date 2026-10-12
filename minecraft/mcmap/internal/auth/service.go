@@ -63,51 +63,53 @@ const (
 	ExchangeOK      = "ok"
 	ExchangeDenied  = "denied"
 	ExchangeLimited = "limited"
-	ExchangeLocked  = "locked"
 )
 
 const (
-	// A run of the checks is one exchange, and they run a few times an
-	// hour, so this is generous to them and useless to a guesser.
+	// How many wrong secrets are answered as wrong at once, and how often
+	// one more is. Past that a wrong one is turned away unjudged.
 	exchangeBurst  = 5
 	exchangeRefill = time.Minute
-	// Nothing that holds the secret ever presents a wrong one, so a run
-	// of wrong ones is somebody guessing or a broken rollout, and neither
-	// is helped by being answered quickly.
-	exchangeMaxFailures = 5
-	exchangeLockout     = 5 * time.Minute
 )
 
-// Exchange decides whether a presented secret earns a service session. It
-// counts every attempt against one budget and locks after repeated wrong
-// ones, for everybody: the listener it sits on sees cluster addresses that
-// are cheap to change, so a budget per caller would be no budget.
+// Exchange decides whether a presented secret earns a service session.
+//
+// The right secret is always honoured. Nothing a caller without it does can
+// hold up a caller with it: the internal listener is reachable by every
+// workload in the cluster, and a budget or a lock that the right secret had
+// to wait behind would let any of them stop the checks for good with one
+// wrong request every few minutes. The secret is 48 generated characters,
+// which no rate of guessing finds, so it needs no lock to keep it.
+//
+// What is bounded is wrong secrets: how many are judged and written down
+// as such in a minute, so that a flood of them is a count and not a log.
 type Exchange struct {
 	// want is the secret's digest. Comparing digests keeps the comparison
 	// constant-time whatever length is presented.
 	want [sha256.Size]byte
 	now  func() time.Time
 
-	mu          sync.Mutex
-	tokens      float64
-	refilled    time.Time
-	failures    int
-	lockedUntil time.Time
+	mu       sync.Mutex
+	tokens   float64
+	refilled time.Time
 }
 
 func NewExchange(secret string, now func() time.Time) *Exchange {
 	return &Exchange{want: sha256.Sum256([]byte(secret)), now: now, tokens: exchangeBurst, refilled: now()}
 }
 
-// Attempt judges one presented secret. While locked nothing is compared at
-// all, so a guess made then learns nothing, not even at the rate allowed.
+// Attempt judges one presented secret.
 func (e *Exchange) Attempt(presented string) string {
 	got := sha256.Sum256([]byte(presented))
+	right := subtle.ConstantTimeCompare(got[:], e.want[:]) == 1
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := e.now()
-	if now.Before(e.lockedUntil) {
-		return ExchangeLocked
+	if right {
+		// Whoever holds the secret has shown that the wrong ones before
+		// were not theirs to answer for.
+		e.tokens, e.refilled = exchangeBurst, now
+		return ExchangeOK
 	}
 	e.tokens = min(exchangeBurst, e.tokens+now.Sub(e.refilled).Seconds()/exchangeRefill.Seconds())
 	e.refilled = now
@@ -115,25 +117,12 @@ func (e *Exchange) Attempt(presented string) string {
 		return ExchangeLimited
 	}
 	e.tokens--
-	if subtle.ConstantTimeCompare(got[:], e.want[:]) == 1 {
-		e.failures = 0
-		return ExchangeOK
-	}
-	e.failures++
-	if e.failures >= exchangeMaxFailures {
-		e.lockedUntil = now.Add(exchangeLockout)
-		// One more wrong secret after the lock lifts locks it again.
-		e.failures = exchangeMaxFailures - 1
-	}
 	return ExchangeDenied
 }
 
-// RetryAfter is how long a refused caller should wait before trying again.
+// RetryAfter is how long until another wrong secret would be judged.
 func (e *Exchange) RetryAfter() time.Duration {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if wait := e.lockedUntil.Sub(e.now()); wait > 0 {
-		return wait
-	}
-	return exchangeRefill
+	return max(time.Second, time.Duration((1-e.tokens)*float64(exchangeRefill))-e.now().Sub(e.refilled))
 }

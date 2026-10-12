@@ -464,7 +464,7 @@ func TestSearchHoldsWaypointsForAFixedNumberOfPlayers(t *testing.T) {
 		t.Error("the newest player was dropped")
 	}
 	clock = clock.Add(time.Hour)
-	if _, err := c.playerWaypoints(context.Background(), src, "new", now); err != nil {
+	if _, err := c.playerWaypoints(context.Background(), src, "999999", now); err != nil {
 		t.Fatal(err)
 	}
 	if len(c.waypoints) != 1 {

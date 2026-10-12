@@ -199,10 +199,35 @@ func (s *Sessions) verify(r *http.Request) (claims, bool) {
 
 type contextKey struct{}
 
-// FromContext returns the identity Require attached to a request.
+// FromContext returns the player a request is logged in as. It answers
+// false for a service session, which is no player: whatever is keyed by
+// who is asking, a role, a waypoint, a standing, a setting, is reached
+// through here, and so is out of a service session's reach by how the
+// answer is made and not by anyone remembering to check.
 func FromContext(ctx context.Context) (Identity, bool) {
 	c, ok := ctx.Value(contextKey{}).(claims)
-	return c.Identity, ok
+	if !ok || c.Service || !IsXUID(c.XUID) {
+		return Identity{}, false
+	}
+	return c.Identity, true
+}
+
+// Viewer is whoever a session lets look at the map: a player, or a service
+// session. It has a name to show and nothing to look anyone up by.
+type Viewer struct {
+	Name    string
+	Service bool
+}
+
+// ViewerFromContext returns who is looking, player or service session. It
+// is for the handlers of what everyone is shown alike, and gives them
+// nothing that could key a lookup.
+func ViewerFromContext(ctx context.Context) (Viewer, bool) {
+	c, ok := ctx.Value(contextKey{}).(claims)
+	if !ok {
+		return Viewer{}, false
+	}
+	return Viewer{Name: c.Gamertag, Service: c.Service}, true
 }
 
 // IsService reports whether the session Require let through is an automated

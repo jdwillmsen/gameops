@@ -42,6 +42,8 @@ type FaceHeads interface {
 type PlayerHeads interface {
 	Replace(reports []icons.Report) (refused int, err error)
 	ByGamertag(gamertag string) (icons.Head, bool)
+	// Heads is the listing with nobody singled out.
+	Heads() map[string]string
 	Listing(xuid string) (versions map[string]string, self string)
 }
 
@@ -109,12 +111,12 @@ func (s *Server) handleIcons(w http.ResponseWriter, r *http.Request) {
 		out.Names.Version, _ = s.names()
 	}
 	if s.Heads != nil {
-		id, _ := auth.FromContext(r.Context())
-		out.Heads, out.Me = s.Heads.Listing(id.XUID)
-		// A service session is nobody in the game. Its empty XUID names
-		// no player today; this is so that it never comes to.
-		if auth.IsService(r.Context()) {
-			out.Me = ""
+		// Which head is the asker's own is a player's to be told. Anyone
+		// else gets the heads everyone sees and no "me".
+		if id, player := auth.FromContext(r.Context()); player {
+			out.Heads, out.Me = s.Heads.Listing(id.XUID)
+		} else {
+			out.Heads = s.Heads.Heads()
 		}
 	}
 	body, _ := json.Marshal(out)

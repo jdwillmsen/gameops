@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"slices"
@@ -231,10 +232,16 @@ func (c *searchCache) markers(store MarkerStore, dimension string) markerLists {
 	return lists
 }
 
+var errNotAPlayer = errors.New("waypoints are a player's, and this is not one")
+
 // playerWaypoints returns the waypoints of the player with this XUID, from
 // the agent at most once in searchWaypointTTL. A failure is returned and
 // not kept, so the next search asks again.
 func (c *searchCache) playerWaypoints(ctx context.Context, src WaypointSource, xuid string, now func() time.Time) ([]markers.Waypoint, error) {
+	// Kept by XUID, so only ever for something that is one.
+	if !auth.IsXUID(xuid) {
+		return nil, errNotAPlayer
+	}
 	c.mu.Lock()
 	e := c.waypoints[xuid]
 	if e == nil {
@@ -493,9 +500,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// Whose waypoints are searched comes from the session and nowhere
 	// else, exactly as when they are listed: nothing in the request can
 	// name another player, and without a login there is nobody to be.
-	// A service session has no waypoints to search and is told there are
-	// none, as with no login.
-	if id, ok := auth.FromContext(r.Context()); ok && !auth.IsService(r.Context()) && s.Waypoints != nil && s.Sessions != nil && wants(hitWaypoint) {
+	// A service session is no player, has no waypoints to search and is
+	// told there are none, as with no login.
+	if id, ok := auth.FromContext(r.Context()); ok && s.Waypoints != nil && s.Sessions != nil && wants(hitWaypoint) {
 		out.Waypoints = waypointsSearched
 		list, err := s.search.playerWaypoints(r.Context(), s.Waypoints, id.XUID, s.Sessions.Now)
 		if err != nil {

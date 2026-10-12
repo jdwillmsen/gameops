@@ -167,16 +167,31 @@ func (h *Heads) ByGamertag(gamertag string) (Head, bool) {
 // gamertag, and the gamertag the player with this XUID is online under
 // now, which is empty if they are not or share it.
 func (h *Heads) Listing(xuid string) (versions map[string]string, self string) {
+	versions = h.Heads()
+	// Nobody is looked up by no XUID.
+	if xuid == "" {
+		return versions, ""
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	versions = map[string]string{}
 	if !h.fresh() {
 		return versions, ""
+	}
+	return versions, h.nameOf[xuid]
+}
+
+// Heads is each head's version by gamertag, with nobody singled out.
+func (h *Heads) Heads() map[string]string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	versions := map[string]string{}
+	if !h.fresh() {
+		return versions
 	}
 	for name, holder := range h.xuidOf {
 		if head, ok := h.byXUID[holder]; ok {
 			versions[name] = head.Version
 		}
 	}
-	return versions, h.nameOf[xuid]
+	return versions
 }
