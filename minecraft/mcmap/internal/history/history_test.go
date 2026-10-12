@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 )
 
@@ -212,6 +214,23 @@ func TestDaysAreListedOldestFirstAndSurviveARestart(t *testing.T) {
 	}
 	if got, want := s.Bytes(), int64(len("a hut")+len("a castle")); got != want {
 		t.Fatalf("held bytes after reopening = %d, want %d", got, want)
+	}
+}
+
+// The gauge is the alert on missed days, so a restart on a day already held
+// must leave it at that day and not at whatever the process last saw.
+func TestARestartSaysWhenTheNewestDayHeldWasTaken(t *testing.T) {
+	w := newWorld(t)
+	w.draw("overworld", home, "a hut")
+	dir := t.TempDir()
+	s := open(t, dir, w)
+	capture(t, s, day1)
+	capture(t, s, day1.Add(24*time.Hour))
+	capture(t, open(t, t.TempDir(), w), day1.Add(72*time.Hour))
+
+	open(t, dir, w)
+	if got, want := testutil.ToFloat64(metricCapturedAt), float64(day1.Add(24*time.Hour).Unix()); got != want {
+		t.Fatalf("last success after reopening = %v, want %v", got, want)
 	}
 }
 

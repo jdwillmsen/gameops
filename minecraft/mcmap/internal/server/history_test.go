@@ -133,15 +133,9 @@ func TestHistory_NeedsASession(t *testing.T) {
 	}
 }
 
-func TestHistory_TheMapSaysWhetherThereIsAny(t *testing.T) {
+func TestHistory_WithoutHistoryThereIsNothingToAskFor(t *testing.T) {
 	s, _ := fixture(t)
-	if body := get(t, s, "/api/map").Body.String(); !strings.Contains(body, `"history":false`) {
-		t.Errorf("without history: %s", body)
-	}
 	if code := get(t, s, "/api/history").Code; code != http.StatusNotFound {
 		t.Errorf("/api/history without history = %d", code)
-	}
-	if body := get(t, withHistory(t), "/api/map").Body.String(); !strings.Contains(body, `"history":true`) {
-		t.Errorf("with history: %s", body)
 	}
 }

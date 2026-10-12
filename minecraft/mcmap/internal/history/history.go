@@ -292,6 +292,15 @@ func (s *Store) publish() {
 	defer s.mu.Unlock()
 	metricDays.Set(float64(len(s.days)))
 	metricBytes.Set(float64(s.bytes))
+	var newest Day
+	for _, d := range s.days {
+		if d.Day > newest.Day {
+			newest = d
+		}
+	}
+	if newest.Day != "" {
+		metricCapturedAt.Set(float64(newest.TakenAt.Unix()))
+	}
 }
 
 // manifestOf returns a held day's manifest. s.mu is held by the caller.
@@ -382,7 +391,6 @@ func (s *Store) Capture(ctx context.Context, at time.Time) (Result, error) {
 		return Result{}, fmt.Errorf("keeping the map of %s: %w", day, err)
 	}
 	metricCaptures.WithLabelValues("captured").Inc()
-	metricCapturedAt.Set(float64(at.Unix()))
 	metricCaptureSeconds.Set(time.Since(started).Seconds())
 	metricCaptureTiles.Set(float64(result.Tiles))
 	metricCaptureChanged.Set(float64(result.Changed))
@@ -428,6 +436,9 @@ func (s *Store) capture(ctx context.Context, day string, at time.Time) (Result, 
 		result.Changed += dim.Changed
 		m.Dimensions[id] = dim
 	}
+	if err := s.syncBlobs(m); err != nil {
+		return result, err
+	}
 	if err := writeManifest(filepath.Join(s.dir, daysDir), m); err != nil {
 		return result, err
 	}
@@ -435,6 +446,25 @@ func (s *Store) capture(ctx context.Context, day string, at time.Time) (Result, 
 	s.days[day] = summary(&m)
 	s.mu.Unlock()
 	return result, nil
+}
+
+// syncBlobs flushes the name of every blob m names, and not only of the ones
+// this capture copied in: a blob found already held may be what a capture
+// that stopped part-way left, named and never flushed.
+func (s *Store) syncBlobs(m manifest) error {
+	blobs := filepath.Join(s.dir, blobsDir)
+	shards := map[string]bool{}
+	for _, dim := range m.Dimensions {
+		for _, hash := range dim.Tiles {
+			shards[hash[:2]] = true
+		}
+	}
+	for shard := range shards {
+		if err := syncDir(filepath.Join(blobs, shard)); err != nil {
+			return err
+		}
+	}
+	return syncDir(blobs)
 }
 
 // keep makes sure the store holds the tile at path, and returns the name it
@@ -461,8 +491,8 @@ func (s *Store) keep(path string) (hash string, added int64, err error) {
 		return "", 0, err
 	}
 
-	// Flushed before it has its name: a manifest must never name a blob
-	// that a power cut could still take.
+	// Flushed before it has its name, and the name before the manifest: a
+	// manifest must never name a blob that a power cut could still take.
 	tmp, err := os.CreateTemp(filepath.Join(s.dir, blobsDir), tempPrefix+"*")
 	if err != nil {
 		return "", 0, err
