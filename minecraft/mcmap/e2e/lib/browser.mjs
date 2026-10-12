@@ -1,6 +1,7 @@
 // A browser context as every check gets one: watched, and unable to write.
 
 import { readFile } from 'node:fs/promises';
+import { Fail } from './check.mjs';
 import { SCRIPTS, slug } from './fields.mjs';
 
 const probe = await readFile(new URL('./probe.js', import.meta.url), 'utf8');
@@ -138,7 +139,12 @@ export async function openContext(browser, { cfg, watch, cookie = null, viewport
 // The map page, loaded and showing a dimension.
 export async function openMap(ctx, cfg, hash = '') {
   const page = await ctx.newPage();
-  await page.goto(`${cfg.publicUrl}/${hash}`, { waitUntil: 'domcontentloaded' });
+  try {
+    await page.goto(`${cfg.publicUrl}/${hash}`, { waitUntil: 'domcontentloaded' });
+  } catch {
+    await page.close().catch(() => {});
+    throw new Fail('the map could not be reached');
+  }
   await page.waitForFunction(() => window.mcmap && window.mcmap.icons && window.mcmap.dimension && window.mcmap.dimension() && document.getElementById('login').hidden, null, { timeout: 30_000 });
   return page;
 }

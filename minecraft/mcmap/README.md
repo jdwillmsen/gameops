@@ -3515,7 +3515,7 @@ Two separate approvals, both the owner's, neither implied by the other.
    its own judgment.
 
 `--approved-by` is required for such a run and says who approved it and
-when, as one word: `jake@2026-10-12T14:05Z`. It is free text that nothing
+when, as one word: `owner@2026-01-01T00:00Z`. It is free text that nothing
 can check. It is sent with the exchange, and the map writes it on the
 audit line for that session beside `source="loopback"`, so every such run
 is on record with the approval it claimed. That makes a run visible

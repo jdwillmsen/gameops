@@ -10,18 +10,32 @@ const STUB_CODE = 'E2ECHK';
 // shows the login. The page asks for a code as soon as it is refused, and
 // a code is a row in the server's table of waiting logins, so that one
 // request is answered here in the browser and never sent.
-export async function loginScreen({ browser, cfg, watch }) {
+export async function loginScreen({ browser, cfg, watch, closers = [] }) {
   const ctx = await openContext(browser, {
     cfg, watch,
     stubs: { 'POST /auth/start': { code: STUB_CODE, expiresIn: 600 }, 'GET /auth/status': { state: 'pending' } },
     expected: [['/api/map', 401]],
   });
+  closers.push(() => ctx.close());
   try {
     const page = await ctx.newPage();
     const refused = page.waitForResponse((res) => routeOf(res.url()) === '/api/map', { timeout: 20_000 });
+    // Waited for from before the page is asked for, so that it cannot be
+    // missed, and answered here if the page never comes: a promise nobody
+    // is waiting on when it fails takes the whole run down with it.
+    refused.catch(() => {});
     const began = Date.now();
-    await page.goto(`${cfg.publicUrl}/`, { waitUntil: 'domcontentloaded' });
-    const status = (await refused).status();
+    try {
+      await page.goto(`${cfg.publicUrl}/`, { waitUntil: 'domcontentloaded' });
+    } catch {
+      throw new Fail('the map could not be reached');
+    }
+    let status;
+    try {
+      status = (await refused).status();
+    } catch {
+      throw new Fail('the map did not answer a browser with no session at all');
+    }
     if (status !== 401) throw new Fail('the map did not answer 401 to a browser with no session', { status });
     await page.waitForFunction(() => !document.getElementById('login').hidden, null, { timeout: 10_000 });
     const shown = await page.evaluate(() => ({

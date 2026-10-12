@@ -54,7 +54,10 @@ export class Report {
     return UNLISTED;
   }
 
-  log(event, fields = {}) {
+  // Private: the one way a line is written, reached only through the
+  // methods below, each of which decides what goes in it. A check holds a
+  // report and cannot hand this anything.
+  #log(event, fields = {}) {
     if (!EVENTS.has(event)) { this.dropped += 1; return; }
     const line = { time: new Date(this.now()).toISOString(), event, mode: this.mode, version: this.version };
     for (const [key, value] of Object.entries(fields)) {
@@ -71,6 +74,16 @@ export class Report {
     this.write(JSON.stringify(line));
   }
 
+  // That the run has begun, and whether it will keep evidence.
+  begin(evidence) {
+    this.#log('start', { evidence: evidence === true });
+  }
+
+  // That the rest of the run was not made, and why, as one of the catalogue.
+  stopped(sentence) {
+    this.#log('stopped', { reason: this.reason(sentence) });
+  }
+
   record(check, status, ms, reason = '', measures = {}) {
     const result = {
       check: CHECKS.includes(check) ? check : UNLISTED, status: VERDICTS.includes(status) ? status : FAIL,
@@ -78,7 +91,7 @@ export class Report {
     };
     if (result.check === UNLISTED) this.dropped += 1;
     this.results.push(result);
-    this.log('check', result);
+    this.#log('check', result);
     return result;
   }
 
@@ -96,7 +109,7 @@ export class Report {
     this.gauges.set(name, kept);
     // In the log as well: where a run's metrics are not collected, the
     // log is where these numbers are read.
-    this.log('gauge', { gauge: name, values: Object.fromEntries(kept.map(([key, n]) => [key, Math.round(n * 1000) / 1000])) });
+    this.#log('gauge', { gauge: name, values: Object.fromEntries(kept.map(([key, n]) => [key, Math.round(n * 1000) / 1000])) });
   }
 
   get failed() {
@@ -156,11 +169,11 @@ export class Report {
     return this.writing;
   }
 
-  summary(extra = {}) {
+  summary({ evidence_files = 0, evidence_errors = 0 } = {}) {
     const count = (status) => this.results.filter((r) => r.status === status).length;
-    this.log('run', {
+    this.#log('run', {
       passed: count(PASS), failed: count(FAIL), skipped: count(SKIP), seconds: ((this.finished ?? this.now()) - this.started) / 1000,
-      finished: this.finished !== null, success: this.finished !== null && this.failed === 0, dropped_fields: this.dropped, ...extra,
+      finished: this.finished !== null, success: this.finished !== null && this.failed === 0, dropped_fields: this.dropped, evidence_files, evidence_errors,
     });
   }
 }

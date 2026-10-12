@@ -28,23 +28,33 @@ test('there is no field a word off the page can be written in', () => {
   report.record('follow-mob', FAIL, 1234.6, SAID, { worst_pixels: 5.5, [SAID]: 1, where: 5, players: SAID, nested: { x: 1 }, nan: Number.NaN });
   report.record(SAID, PASS, 10);
   report.record('search', SAID, 10, '', {});
-  report.log('check', { check: SAID, status: SAID, reason: SAID, name: SAID, detail: SAID, why: SAID, ms: SAID, list: [SAID], gauge: SAID });
-  report.log(SAID, { ms: 1 });
+  report.stopped(SAID);
+  report.begin(SAID);
   report.gauge('mcmap_e2e_face_offset_pixels', { 'face/villager_v2': 1.5, [SAID]: 2, 'face/Madeup': 3, 'head/madeup': 4, 'x"y': 5 });
   report.gauge('mcmap_e2e_api_seconds', { map: 0.1, [SAID]: 1 });
   report.gauge(SAID, { map: 1 });
   report.finish();
-  report.summary({ note: SAID });
+  report.summary({ note: SAID, evidence_files: SAID });
   const all = lines.join('\n') + report.metrics();
   for (const part of PRIVATE) assert.ok(!all.includes(part), `${JSON.stringify(part)} is in the output:\n${all}`);
   assert.deepEqual(JSON.parse(lines[0]), { time: '2027-01-15T08:00:00.000Z', event: 'check', mode: 'local', version: '1.2.3', check: 'follow-mob', status: 'fail', ms: 1235, reason: 'unlisted', measures: { worst_pixels: 5.5 } });
   assert.equal(JSON.parse(lines[1]).check, 'unlisted');
   assert.equal(JSON.parse(lines[2]).status, 'fail', 'a verdict that is not one is a failure, not a pass');
   // Each of those was counted, so a suite that tries it cannot pass quietly.
-  assert.ok(report.dropped >= 15, `only ${report.dropped} counted as dropped`);
+  assert.ok(report.dropped >= 12, `only ${report.dropped} counted as dropped`);
   assert.match(report.metrics(), /^mcmap_e2e_dropped_fields \d\d$/m);
   // Every line of the metrics is a comment or a sample Prometheus will take.
   for (const line of report.metrics().trim().split('\n')) assert.match(line, /^(# (HELP|TYPE) [a-z_0-9]+ .+|[a-z_0-9]+(\{[a-z_]+="[A-Za-z0-9_/.+-]*"(,[a-z_]+="[A-Za-z0-9_/.+-]*")*\})? -?[0-9.]+)$/);
+});
+
+// A check is handed the report. The one method that writes whatever it is
+// given is not there for it to call.
+test('a check cannot reach the line writer', () => {
+  const { report, lines } = fresh();
+  assert.equal(report.log, undefined);
+  assert.equal(report['#log'], undefined);
+  for (const name of Object.getOwnPropertyNames(Object.getPrototypeOf(report))) assert.ok(['constructor', 'measures', 'reason', 'begin', 'stopped', 'record', 'gauge', 'failed', 'finish', 'metrics', 'writeMetrics', 'summary'].includes(name), `${name} is a new way to write that this test has not been told of`);
+  assert.equal(lines.length, 0);
 });
 
 test('a reason is one of the catalogue, written as its name', () => {

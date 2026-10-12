@@ -8,7 +8,7 @@ import { parseArgs } from 'node:util';
 import { chromium } from 'playwright-core';
 
 import { Watch, openContext, openMap } from './lib/browser.mjs';
-import { Fail } from './lib/check.mjs';
+import { Fail, within } from './lib/check.mjs';
 import { CHECKS as LISTED, DENSITIES } from './lib/fields.mjs';
 import { FAIL, PASS, Report, SKIP } from './lib/report.mjs';
 import { Evidence, prune } from './lib/evidence.mjs';
@@ -79,6 +79,8 @@ function configure(argv) {
   };
   const publicUrl = String(get('public-url') || '').replace(/\/+$/, '');
   if (!/^https:\/\/[^/]+$/.test(publicUrl)) throw new Error('--public-url must be the https address of the map, with no path');
+  // An address of any other kind is a file or a command to something.
+  if (get('internal-url') !== undefined && !/^https?:\/\/[^/\s]+\/?$/.test(String(get('internal-url')))) throw new Error('--internal-url must be the http or https address of the map\'s internal listener, with no path');
   const local = ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(publicUrl).hostname);
   const external = Boolean(values['secret-from-kube'] || values['port-forward']);
   const cfg = {
@@ -114,7 +116,7 @@ function configure(argv) {
   // allow, each run. Who allowed it and when is asked for and sent with
   // the exchange, where the map writes it on its audit line. It is a
   // record and not a lock: nothing here can check it.
-  if (external && !/^[A-Za-z0-9][A-Za-z0-9._@:+-]{2,63}$/.test(cfg.approvedBy || '')) throw new Error('a run from outside the cluster needs --approved-by <who allowed this run and when>, as one word, such as jake@2026-10-12T14:05Z');
+  if (external && !/^[A-Za-z0-9][A-Za-z0-9._@:+-]{2,63}$/.test(cfg.approvedBy || '')) throw new Error('a run from outside the cluster needs --approved-by <who allowed this run and when>, as one word, such as owner@2026-01-01T00:00Z');
   if (cfg.evidencePages && !cfg.evidenceDir) throw new Error('--evidence-pages needs --evidence-dir');
   // Said in every request, so that the map's logs and the gateway's can
   // tell a check from a visitor.
@@ -166,32 +168,60 @@ async function main() {
     });
   }
 
+  // A fault nothing caught: a promise left unanswered, an error thrown
+  // where no check was waiting. It ends the run with a verdict like any
+  // other, through the same reporter, and none of what it said is written:
+  // an error's text can hold an address, and an address holds a place.
+  let failing = false;
+  const fatal = async () => {
+    if (failing) return;
+    failing = true;
+    broke = true;
+    report.record('run', FAIL, Date.now() - report.started, 'the run itself broke');
+    await close();
+    if (browser) await browser.close().catch(() => {});
+    process.exit(2);
+  };
+  process.on('unhandledRejection', fatal);
+  process.on('uncaughtException', fatal);
+
   // Said only once a signal would be answered: whoever waits for this
   // line may stop the run the moment they read it.
-  report.log('start', { evidence: Boolean(cfg.evidenceDir) });
+  report.begin(Boolean(cfg.evidenceDir));
 
   // One check: its verdict, how long it took, and what it measured. The
   // run's metrics are written again before any evidence is, so that
   // evidence which cannot be written costs nothing but itself.
-  const run = async (name, fn, { page = null, seconds = 120 } = {}) => {
+  // t is what every check is handed. closers is whatever the check now
+  // running has opened for itself, to be shut if it has to be stopped.
+  const t = { cfg, watch, report, closers: [] };
+  // on names the shared page a check works on, 'page' or 'watcher'.
+  const run = async (name, fn, { on = null, seconds = 120 } = {}) => {
     if (!CHECKS.includes(name)) throw new Error(`${name} is not in the list of checks`);
     if (cfg.only && !cfg.only.includes(name) && !NEEDED.includes(name)) return null;
     const began = Date.now();
-    let timer;
+    t.closers = [];
+    // A check past its time is stopped before the next begins: what it
+    // opened is closed, and the page it shared with the others is closed
+    // under it and opened again for them.
+    const stop = async () => {
+      await Promise.allSettled(t.closers.map((shut) => shut()));
+      if (!on || !t[on]) return;
+      await t[on].close().catch(() => {});
+      t[on] = on === 'page' ? await openMap(t.ctx, cfg).catch(() => null) : null;
+    };
     let result;
     let failure = null;
     try {
-      const got = await Promise.race([fn(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Fail('the check did not finish in its time', { limit_seconds: seconds })), seconds * 1000); })]) || {};
+      const got = await within(fn, seconds, stop) || {};
       result = got.skip ? report.record(name, SKIP, Date.now() - began, got.skip, got.measures) : report.record(name, PASS, Date.now() - began, '', got.measures);
     } catch (err) {
       failure = err;
       const known = err instanceof Fail || err instanceof ExchangeError;
       result = report.record(name, FAIL, Date.now() - began, known ? (err.reason || err.message) : 'the check itself broke', err instanceof Fail ? err.measures : (err.status ? { status: err.status } : {}));
-    } finally {
-      clearTimeout(timer);
     }
     await report.writeMetrics(cfg.metricsFile);
-    if (failure) await evidence.of(name, page, failure);
+    if (failure) await evidence.of(name, on ? t[on] : null, failure);
     return result;
   };
 
@@ -209,7 +239,8 @@ async function main() {
     await blank.close();
     cfg.userAgent = `${plain} ${cfg.agent}`;
 
-    await run('login-screen', () => access.loginScreen({ browser, cfg, watch }));
+    t.browser = browser;
+    await run('login-screen', () => access.loginScreen(t));
 
     await run('exchange', async () => {
       if (cfg.forward) {
@@ -225,7 +256,7 @@ async function main() {
 
     if (cfg.session) {
       const ctx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie });
-      const t = { browser, ctx, cfg, watch, report };
+      t.ctx = ctx;
       // The watcher is opened first and then left alone: it is the
       // stream that page holds that the last check asks about.
       const loaded = await run('map-loads', async () => {
@@ -235,30 +266,35 @@ async function main() {
         return { measures: { load_ms: Math.round((Date.now() - began) / 2) } };
       }, { seconds: 90 });
       if (loaded && loaded.status !== PASS) throw new Fail('the map did not load with a session, so nothing on it was checked');
-      const { page, watcher } = t;
-      const on = { page };
-      await run('session', () => access.session(t), on);
-      await run('scope', () => access.scope(t), on);
-      await run('headers', () => access.headers(t), on);
-      await run('scripts', () => access.scripts(t), on);
-      await run('api-budget', () => access.apiBudget(t), on);
-      await run('dimensions', () => map.dimensions(t), on);
-      await run('player-heads', () => live.playerHeads(t), on);
-      await run('zoom-sizes', () => map.zoomSizes(t), on);
-      await run('layer-panel', () => map.layerPanel(t), on);
-      await run('toggles', () => map.toggles(t), on);
-      await run('search', () => map.search(t), on);
-      await run('structure-sheet', () => map.structureSheet(t), on);
-      await run('saved-views', () => map.savedViews(t), on);
-      await run('themes', () => map.themes(t), on);
-      await run('follow-player', () => live.followPlayer(t), { ...on, seconds: cfg.followPlayerSeconds + 60 });
-      await run('follow-mob', () => live.followMob(t), { ...on, seconds: cfg.followMobSeconds + 60 });
+      const on = { on: 'page' };
+      // Each takes the page as it is when its turn comes: a check that was
+      // stopped leaves the next a new one.
+      const needs = (fn) => () => {
+        if (!t.page) throw new Fail('the map did not load with a session, so nothing on it was checked');
+        return fn(t);
+      };
+      await run('session', needs(access.session), on);
+      await run('scope', needs(access.scope), on);
+      await run('headers', needs(access.headers), on);
+      await run('scripts', needs(access.scripts), on);
+      await run('api-budget', needs(access.apiBudget), on);
+      await run('dimensions', needs(map.dimensions), on);
+      await run('player-heads', needs(live.playerHeads), on);
+      await run('zoom-sizes', needs(map.zoomSizes), on);
+      await run('layer-panel', needs(map.layerPanel), on);
+      await run('toggles', needs(map.toggles), on);
+      await run('search', needs(map.search), on);
+      await run('structure-sheet', needs(map.structureSheet), on);
+      await run('saved-views', needs(map.savedViews), on);
+      await run('themes', needs(map.themes), on);
+      await run('follow-player', needs(live.followPlayer), { ...on, seconds: cfg.followPlayerSeconds + 60 });
+      await run('follow-mob', needs(live.followMob), { ...on, seconds: cfg.followMobSeconds + 60 });
       await run('faces', () => live.faces(t), { seconds: 180 });
       await run('phone-sheet', () => map.phoneSheet(t));
-      await run('live-stream', () => live.liveStream(t), { page: watcher, seconds: cfg.streamSeconds + 90 });
+      await run('live-stream', () => live.liveStream(t), { on: 'watcher', seconds: cfg.streamSeconds + 90 });
       await ctx.close();
     } else {
-      report.log('stopped', { reason: 'no_session_so_nothing_behind_the_login_was_checked' });
+      report.stopped('no session, so nothing behind the login was checked');
     }
 
     // Over the whole run, in every page it opened.
@@ -274,7 +310,7 @@ async function main() {
       return { measures: { writes: 0 } };
     });
   } catch (err) {
-    if (err instanceof Fail) report.log('stopped', { reason: report.reason(err.message) });
+    if (err instanceof Fail) report.stopped(err.message);
     else {
       broke = true;
       report.record('run', FAIL, Date.now() - report.started, 'the run itself broke');

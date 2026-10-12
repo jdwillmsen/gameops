@@ -275,13 +275,14 @@ const measureFaces = async () => {
 // every screen density. Run against the real page with the pictures and
 // head boxes the real server gives, this reports how far off each face is
 // and which is worst, whether or not anything fails.
-export async function faces({ browser, cfg, watch, report }) {
+export async function faces({ browser, cfg, watch, report, closers = [] }) {
   const measures = { faces: 0, off_centre: 0 };
   const worst = {};
   const worstX = {};
   const wrong = new Set();
   for (const dpr of cfg.faceDensities) {
     const ctx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie, dpr });
+    closers.push(() => ctx.close());
     try {
       const page = await openMap(ctx, cfg);
       const got = await page.evaluate(measureFaces);
