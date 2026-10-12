@@ -171,7 +171,7 @@ func TestScan_SaysWhichNamedMobsAreBabies(t *testing.T) {
 	at := []any{float32(1), float32(64), float32(1)}
 	w, _ := scanOf(t,
 		actor(t, 1, map[string]any{"identifier": "minecraft:sheep", "CustomName": "jeb_", "Pos": at, "IsBaby": uint8(1), "Age": int32(-24000)}),
-		actor(t, 2, map[string]any{"identifier": "minecraft:cat", "CustomName": "OJ", "Pos": at, "IsBaby": uint8(0)}),
+		actor(t, 2, map[string]any{"identifier": "minecraft:cat", "CustomName": "Tango", "Pos": at, "IsBaby": uint8(0)}),
 		// Not every actor's record says either way.
 		actor(t, 3, map[string]any{"identifier": "minecraft:armor_stand", "CustomName": "Stan", "Pos": at}),
 		digp(0, 0, 0, 1, 2, 3),
@@ -180,7 +180,7 @@ func TestScan_SaysWhichNamedMobsAreBabies(t *testing.T) {
 	for _, m := range w[chunks.Overworld].Mobs {
 		babies[m.Name] = m.Baby
 	}
-	if want := map[string]bool{"jeb_": true, "OJ": false, "Stan": false}; !reflect.DeepEqual(babies, want) {
+	if want := map[string]bool{"jeb_": true, "Tango": false, "Stan": false}; !reflect.DeepEqual(babies, want) {
 		t.Errorf("babies = %v, want %v", babies, want)
 	}
 }

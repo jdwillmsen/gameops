@@ -43,7 +43,7 @@ func withMarkers(t *testing.T) (*Server, *fakeWaypoints) {
 		chunks.Overworld: {
 			Beds:       []markers.Marker{{X: 3, Y: 64, Z: 5}},
 			Containers: []markers.Marker{{X: 8, Y: 70, Z: 9, Kind: "chest", Name: hostile}},
-			Mobs:       []markers.Marker{{X: 173, Y: 66, Z: 263, Kind: "cat", Name: "OJ"}},
+			Mobs:       []markers.Marker{{X: 12, Y: 64, Z: -34, Kind: "cat", Name: "Tango"}},
 		},
 		chunks.Nether: {Beds: []markers.Marker{{X: -1, Y: 2, Z: -3}}},
 	})
@@ -91,7 +91,7 @@ func TestMarkers_ServeOneDimensionToAnyLoggedInPlayer(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &got); rec.Code != http.StatusOK || err != nil {
 			t.Fatalf("%s: %d %v", id.Gamertag, rec.Code, err)
 		}
-		if len(got.Beds) != 1 || got.Beds[0].X != 3 || len(got.Containers) != 1 || len(got.Mobs) != 1 || got.Mobs[0].Name != "OJ" || got.At.IsZero() {
+		if len(got.Beds) != 1 || got.Beds[0].X != 3 || len(got.Containers) != 1 || len(got.Mobs) != 1 || got.Mobs[0].Name != "Tango" || got.At.IsZero() {
 			t.Errorf("%s: overworld = %+v", id.Gamertag, got)
 		}
 	}

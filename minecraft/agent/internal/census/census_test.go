@@ -68,7 +68,7 @@ func TestAggregateRanksRegionsWorstFirst(t *testing.T) {
 
 func TestAggregateCollectsNamedAndPersistentEntities(t *testing.T) {
 	c := Aggregate([]Entity{
-		{Identifier: "cat", Dimension: Overworld, X: 1, Y: 2, Z: 3, CustomName: "OJ", Persistent: true},
+		{Identifier: "cat", Dimension: Overworld, X: 1, Y: 2, Z: 3, CustomName: "Tango", Persistent: true},
 		{Identifier: "piglin_brute", Dimension: Nether, Persistent: true},
 		{Identifier: "zombie", Dimension: Overworld},
 	}, ScanStats{}, time.Unix(0, 0), "archive")
@@ -76,8 +76,8 @@ func TestAggregateCollectsNamedAndPersistentEntities(t *testing.T) {
 	if len(c.Named) != 1 {
 		t.Fatalf("got %d named entities, want 1", len(c.Named))
 	}
-	if c.Named[0].Name != "OJ" || c.Named[0].Identifier != "cat" || c.Named[0].X != 1 {
-		t.Errorf("named = %+v, want OJ the cat at x=1", c.Named[0])
+	if c.Named[0].Name != "Tango" || c.Named[0].Identifier != "cat" || c.Named[0].X != 1 {
+		t.Errorf("named = %+v, want Tango the cat at x=1", c.Named[0])
 	}
 	if c.PersistentByIdentifier["piglin_brute"] != 1 || c.PersistentByIdentifier["cat"] != 1 {
 		t.Errorf("persistent counts = %v, want one brute and one cat", c.PersistentByIdentifier)

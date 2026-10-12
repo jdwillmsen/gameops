@@ -12,7 +12,7 @@ func sampleCensus() Census {
 		{Identifier: "zombie", Dimension: Overworld, X: 0, Y: 64, Z: 0},
 		{Identifier: "zombie", Dimension: Overworld, X: 1, Y: 64, Z: 0},
 		{Identifier: "piglin_brute", Dimension: Nether, X: 600, Y: 40, Z: 10, Persistent: true},
-		{Identifier: "cat", Dimension: Overworld, X: 173, Y: 66, Z: 263, CustomName: "OJ", Persistent: true},
+		{Identifier: "cat", Dimension: Overworld, X: 12, Y: 64, Z: -34, CustomName: "Tango", Persistent: true},
 	}, ScanStats{Records: 4, Decoded: 4}, time.Date(2026, 9, 13, 20, 31, 0, 0, time.UTC), "archive")
 }
 
@@ -37,7 +37,7 @@ func TestRenderShowsTotalsPerDimension(t *testing.T) {
 
 func TestRenderNamesTaggedMobsAndTheirCost(t *testing.T) {
 	out := Render(sampleCensus(), DefaultReportOptions())
-	if !strings.Contains(out, "OJ") || !strings.Contains(out, "cat") {
+	if !strings.Contains(out, "Tango") || !strings.Contains(out, "cat") {
 		t.Error("report does not list the name-tagged cat")
 	}
 }

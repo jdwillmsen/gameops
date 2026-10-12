@@ -92,7 +92,7 @@ func TestStore_CutsAnAnswerThatWouldBeTooLarge(t *testing.T) {
 func TestExtractor_FillsTheStoreAndLeavesTheWorldAlone(t *testing.T) {
 	db := world(t,
 		blockEntities(t, 0, 0, 0, bedAt(1, 64, 1, 0), chestAt(2, 64, 2, nil)),
-		actor(t, 9, map[string]any{"identifier": "minecraft:cat", "CustomName": "OJ", "Pos": []any{float32(1), float32(2), float32(3)}}),
+		actor(t, 9, map[string]any{"identifier": "minecraft:cat", "CustomName": "Tango", "Pos": []any{float32(1), float32(2), float32(3)}}),
 		digp(0, 0, 0, 9),
 	)
 	e := &Extractor{WorkDir: t.TempDir(), Store: NewStore(), Timeout: time.Minute}
@@ -135,7 +135,7 @@ func TestStore_ListsEachNamedMobsTypeOnce(t *testing.T) {
 		t.Errorf("mob kinds before any scan = %v", kinds)
 	}
 	s.Set(time.Now(), World{
-		chunks.Overworld: {Mobs: []Marker{{Kind: "sheep", Name: "jeb_"}, {Kind: "sheep", Name: "Dinnerbone"}, {Kind: "cat", Name: "OJ"}}},
+		chunks.Overworld: {Mobs: []Marker{{Kind: "sheep", Name: "jeb_"}, {Kind: "sheep", Name: "Dinnerbone"}, {Kind: "cat", Name: "Tango"}}},
 		chunks.End:       {Mobs: []Marker{{Kind: "happy_ghast", Name: "Casper"}}},
 	})
 	if got := strings.Join(s.MobKinds(), ","); got != "cat,happy_ghast,sheep" {
