@@ -408,6 +408,10 @@ input[type="number"] { width: 6.5rem; }
 .zoom-open output { color: var(--text); }
 .zoom-open .zoom-detail output { color: var(--dim); }
 .zoom-short { display: none; }
+/* Fixed widths, so that the figures changing through a zoom never change the footer's height, which would resize the map in the middle of it. */
+#zoom-level { min-width: 4ch; text-align: left; }
+#zoom-scale { min-width: 19ch; text-align: left; }
+#zoom-across { min-width: 23ch; text-align: left; }
 @media (max-width: 1500px) { .zoom-wide { display: none; } }
 .zoom-pop {
   position: absolute;
