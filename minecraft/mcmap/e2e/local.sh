@@ -37,6 +37,7 @@ for _ in $(seq 1 100); do
   kill -0 "$harness_pid" 2>/dev/null || { cat "$work/harness.log" >&2; exit 2; }
   sleep 0.1
 done
+grep -q '"harness listening"' "$work/harness.log" || { echo "the harness did not start listening" >&2; cat "$work/harness.log" >&2; exit 2; }
 
 status=0
 node "$here/run.mjs" --public-url "https://127.0.0.1:$port" --internal-url "http://127.0.0.1:$((port + 1000))" \

@@ -22,6 +22,9 @@ ENV MCMAP_E2E_VERSION=${VERSION} \
     HOME=/tmp \
     NODE_ENV=production
 
+# Said outright: this runs once and ends, and its exit status is its health.
+HEALTHCHECK NONE
+
 # By number: the base image's pwuser, and a number is what a cluster that
 # insists on a non-root user can check without reading the image.
 USER 1000:1000
