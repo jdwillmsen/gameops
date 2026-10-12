@@ -41,7 +41,13 @@ grep -q '"harness listening"' "$work/harness.log" || { echo "the harness did not
 
 status=0
 node "$here/run.mjs" --public-url "https://127.0.0.1:$port" --internal-url "http://127.0.0.1:$((port + 1000))" \
-  --secret-file "$work/secret" --insecure-local-tls "$@" || status=$?
+  --secret-file "$work/secret" --insecure-local-tls --metrics-file "$work/metrics.prom" "$@" | tee "$work/run.log" || status=$?
+
+# What the run wrote of itself: that it finished, and that no check tried to
+# report anything outside the lists of what may be reported.
+grep -qx 'mcmap_e2e_run_finished 1' "$work/metrics.prom" || { echo "the run's metrics do not say it finished" >&2; status=2; }
+grep -qx 'mcmap_e2e_dropped_fields 0' "$work/metrics.prom" || { echo "a check reported something that is in no list of what may be reported" >&2; status=2; }
+if grep -q '"reason":"unlisted"' "$work/run.log"; then echo "a check gave a reason that is not in the catalogue" >&2; status=2; fi
 
 # The way a run from outside a cluster takes the secret and reaches the
 # exchange, with a stand-in for kubectl: it answers the two things the

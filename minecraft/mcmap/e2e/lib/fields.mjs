@@ -1,0 +1,155 @@
+// The closed sets everything a run writes is drawn from. A log line or a
+// metric holds a check's name, a verdict, a reason, and numbers under
+// names, and each of those is one of the entries here or it is not written.
+// Nothing read off the page can be among them, so nothing read off the page
+// can leave in a log: there is no field for it to be in.
+
+export const CHECKS = ['login-screen', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
+  'layer-panel', 'toggles', 'search', 'structure-sheet', 'saved-views', 'themes', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
+  'page-errors', 'read-only', 'run'];
+
+// Every reason a check can fail or be skipped for, as the sentence a
+// person reads. What is written is the sentence with its spaces made
+// underscores; a reason that is not one of these is written as `unlisted`.
+export const SENTENCES = [
+  "the map did not answer 401 to a browser with no session",
+  "the login is shown without the code to type",
+  "the page drew tiles for a browser with no session",
+  "the browser does not hold exactly one session cookie",
+  "the session cookie in the browser is weaker than a player's",
+  "the session is not the service identity",
+  "the page does not say the session is the service identity",
+  "script on the page can read the session cookie",
+  "waypoints did not refuse a service session",
+  "the icon list names a player as the service session",
+  "a search for a service session went through a player's waypoints",
+  "a security header did not arrive as the server sets it",
+  "the page names fewer files than it is made of",
+  "a file the page names is not served as what it is",
+  "the same file was served as two different ones",
+  "a part of the page was never made by its script",
+  "the page's files may be kept longer than an hour",
+  "an answer the page is built from was not given",
+  "an answer the page is built from was slower than the budget",
+  "the live layer is switched off",
+  "the page opened no live stream",
+  "the live stream was cut and had to reconnect",
+  "the live stream did not stay open",
+  "the live stream sent no frame at all",
+  "the live stream went quiet for longer than a few samples",
+  "nobody is online in this dimension",
+  "players are online and none has a head listed",
+  "a head is listed and no player is drawn with one",
+  "whoever was here has gone",
+  "the card would not open on a live entity",
+  "what was followed left the world",
+  "Follow went off by itself",
+  "the Follow button did not say what Follow was",
+  "nothing marked what was followed, so there was nothing to measure",
+  "what was followed was not kept in the middle of the map",
+  "the middle of the map was not where what was followed is",
+  "the server lists no faces",
+  "a face is off the middle of its plate with room to be on it",
+  "no mob is loaded in this dimension",
+  "a dimension tab did not change the dimension",
+  "a rendered dimension drew no terrain",
+  "no dimension is rendered",
+  "nothing in this dimension is drawn as a picture",
+  "no marker picture was painted at any zoom",
+  "a marker was painted at a size it was not made at",
+  "the layer panel did not open",
+  "the layer panel has no handle to size it by",
+  "sizing the layer panel did not change its width",
+  "the layer panel did not fold",
+  "the map did not take the room a folded panel left",
+  "the layer panel did not open again",
+  "pressing a row of the panel did not switch it off",
+  "switching a row off removed nothing from the map",
+  "switching a row back on drew nothing",
+  "switching the biome overlay on drew no tiles",
+  "picking out one biome did not change the overlay",
+  "switching the biome overlay off left its tiles on the map",
+  "no mobs, structures or biomes here to switch",
+  "no biome or structure here to search for",
+  "a search for something the world holds found nothing",
+  "structures are not served",
+  "this dimension has no recorded structure",
+  "the detail of a listed structure was not given",
+  "a structure's detail gave a service session a standing",
+  "the structure sheet did not open with anything in it",
+  "the structure sheet did not close",
+  "the built-in views are hidden in this browser",
+  "the view with everything in it shows no mobs",
+  "the view with no mobs left mobs switched on",
+  "going back to the view with everything did not bring the mobs back",
+  "choosing a theme did not apply it",
+  "two themes are drawn in the same colours",
+  "the map was not drawn under a theme",
+  "the layer sheet did not open on a phone",
+  "the layer sheet is not across the bottom of the screen",
+  "pressing the sheet's handle did not change its height",
+  "the map drew no terrain on a phone",
+  "the check did not finish in its time",
+  "the check itself broke",
+  "the map did not load with a session, so nothing on it was checked",
+  "the page's scripts threw an error",
+  "an answer was refused or broken that should not have been",
+  "a request never got an answer",
+  "the page tried to write, and was stopped",
+  "the run was stopped before it finished",
+  "the run itself broke",
+  "no session, so nothing behind the login was checked",
+  "the exchange could not be reached",
+  "the exchange refused the secret",
+  "the exchange answered with something that is not a service session",
+  "the secret could not be read",
+];
+
+export const slug = (sentence) => String(sentence).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sentence]));
+
+// The page's own scripts, by which a script error is placed.
+export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js',
+  'slime.js', 'chunk.js', 'trails.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'leaflet.js'];
+
+export const DENSITIES = [1, 1.25, 1.5, 2];
+const density = (dpr) => String(dpr).replace('.', '_');
+
+// Every number a check may report, by name.
+export const MEASURES = new Set([
+  'login_ms', 'ttl_seconds', 'load_ms', 'status', 'cookies', 'weaknesses', 'waypoints_status', 'missing', 'tiles',
+  'files', 'files_bad', 'files_differ', 'parts_missing', 'max_age_seconds',
+  'asked', 'not_served', 'slowest_ms', 'not_answered', 'over_budget',
+  'rendered', 'unrendered', 'players', 'heads_listed', 'heads_drawn',
+  'levels', 'samples', 'samples_zooming', 'worst_ratio', 'wrong_size',
+  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles',
+  'hits', 'answer_ms', 'open_ms', 'mob_layers_before', 'mob_layers_in_view', 'mob_layers_after', 'themes', 'distinct',
+  'seconds', 'measured', 'worst_pixels', 'p95_pixels', 'over_tolerance', 'worst_pixels_from_where_it_is', 'samples_left_behind',
+  'frames', 'frames_without_it', 'longest_run_without_it', 'frames_it_moved', 'follow_off_samples',
+  'faces', 'off_centre', 'with_head_box', 'drawn_as_eggs', ...DENSITIES.flatMap((dpr) => [`worst_head_pixels_at_${density(dpr)}`, `worst_ink_pixels_at_${density(dpr)}`]),
+  'width', 'bottom_gap', 'heights',
+  'longest_gap_seconds', 'reconnects', 'streams', 'most_entities',
+  'page_errors', 'failed_responses', 'failed_requests', 'worst_status', 'first_error_line', 'errors_elsewhere', ...SCRIPTS.map((name) => `errors_in_${slug(name)}`),
+  'writes', 'limit_seconds',
+]);
+
+// A series of its own for a family of numbers, and what its one label may
+// hold. A face is named by its picture's key, which is the game's own id
+// for a mob and is held to that shape; a head, which is keyed by gamertag,
+// is never a label.
+export const GAUGES = {
+  mcmap_e2e_api_seconds: {
+    help: 'How long each answer the page is built from took, through the public path.', label: 'endpoint',
+    allows: (key) => ['config', 'me', 'map', 'icons', 'names', 'markers', 'structures', 'biomes', 'biomes_at', 'trails', 'search'].includes(key),
+  },
+  mcmap_e2e_face_offset_pixels: {
+    help: "How far the middle of each face's head is from the middle of its plate, in screen pixels, at the worst of the densities tried.", label: 'face',
+    allows: (key) => /^(face|villager)\/[a-z0-9_]{1,40}$/.test(key),
+  },
+  mcmap_e2e_face_offset_x_pixels: {
+    help: 'The same across only, signed: below zero is left of the middle.', label: 'face',
+    allows: (key) => /^(face|villager)\/[a-z0-9_]{1,40}$/.test(key),
+  },
+};
+
+export const MODES = ['local', 'cluster', 'external'];

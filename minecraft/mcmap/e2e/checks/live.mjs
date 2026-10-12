@@ -30,7 +30,7 @@ export async function liveStream({ watcher, cfg }) {
   // With nobody and nothing in the dimension the map has nothing new to
   // send, and sends only what keeps the connection: then the connection
   // outliving the gateway's 30 s, which it has, is the whole of the check.
-  if (got.most === 0) return { measures, detail: 'nothing is in this dimension, so only the connection was watched' };
+  if (got.most === 0) return { measures };
   // The pack samples every second or two; several missed in a row is a
   // stream that is open and saying nothing.
   if (Math.max(got.gap, got.silent) > cfg.streamGapSeconds) throw new Fail('the live stream went quiet for longer than a few samples', measures);
@@ -308,9 +308,9 @@ export async function faces({ browser, cfg, watch, report }) {
   }
   if (measures.faces === 0) return skip('the server lists no faces');
   // By the picture's key, which is the game's own name for a mob.
-  report.gauge('mcmap_e2e_face_offset_pixels', 'How far the middle of each face\'s head is from the middle of its plate, in screen pixels, at the worst of the densities tried.', 'face', worst);
-  report.gauge('mcmap_e2e_face_offset_x_pixels', 'The same across only, signed: below zero is left of the middle.', 'face', worstX);
+  report.gauge('mcmap_e2e_face_offset_pixels', worst);
+  report.gauge('mcmap_e2e_face_offset_x_pixels', worstX);
   measures.off_centre = wrong.size;
-  if (wrong.size > 0) throw new Fail(`off the middle of the plate with room to be on it: ${[...wrong].sort().slice(0, 8).join(', ')}`, measures);
+  if (wrong.size > 0) throw new Fail('a face is off the middle of its plate with room to be on it', measures);
   return { measures };
 }

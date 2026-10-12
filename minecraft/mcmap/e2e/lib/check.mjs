@@ -1,12 +1,13 @@
 // What a check may say: it failed, with numbers; or the world held nothing
 // for it to look at.
 
-// A failure a check found. Its words are the check's own and its measures
-// are numbers, so it can be logged; anything else thrown is a fault in the
-// run, whose own words are kept out of the log.
+// A failure a check found. Its sentence is one of the catalogue's in
+// fields.mjs, written word for word and never made up from what the page
+// said, and its measures are numbers under names from the same file.
+// Anything else thrown is a fault in the run.
 export class Fail extends Error {
-  constructor(detail, measures = {}) {
-    super(detail);
+  constructor(reason, measures = {}) {
+    super(reason);
     this.measures = measures;
   }
 }

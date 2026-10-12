@@ -21,6 +21,10 @@ export function redact(text) {
   return out;
 }
 
+// Whether anything about to be written to disk holds the secret or the
+// session: asked before it is written, so that neither ever is.
+export const holds = (text) => [...held].some((secret) => secret.length >= 8 && String(text).includes(secret));
+
 function run(command, args, { timeoutMs = 20_000 } = {}) {
   return new Promise((resolve, reject) => {
     // Piped, never inherited: what the command prints goes to this
@@ -115,23 +119,45 @@ export function browserCookie(setCookie, publicUrl) {
   };
 }
 
+// How an exchange went wrong: reason is one of the suite's own sentences,
+// which is what is logged, and the message says more for a person at a
+// terminal. Neither holds what was presented.
+export class ExchangeError extends Error {
+  constructor(reason, more, status = 0) {
+    super(`${reason}: ${more}`);
+    this.reason = reason;
+    this.status = status;
+  }
+}
+
 // Exchanges the secret for a session on the map's internal listener. The
 // secret goes in a header, to an address that carries nothing else.
 export async function exchange({ internalUrl, publicUrl, userAgent, fetchImpl = fetch, ...source }) {
   const target = new URL('/internal/v1/service-sessions', internalUrl);
-  const secret = await readSecret(source);
+  let secret;
+  try {
+    secret = await readSecret(source);
+  } catch (err) {
+    throw new ExchangeError('the secret could not be read', err.message);
+  }
   let res;
   try {
     res = await fetchImpl(target, { method: 'POST', headers: { Authorization: `Bearer ${secret}`, 'User-Agent': userAgent }, redirect: 'error' });
   } catch (err) {
-    throw new Error(`the exchange could not be reached: ${err.cause?.code || err.name}`);
+    throw new ExchangeError('the exchange could not be reached', `${err.cause?.code || err.name}`);
   }
-  if (res.status !== 200) throw new Error(`the exchange answered ${res.status}`);
+  if (res.status !== 200) throw new ExchangeError('the exchange refused the secret', `answered ${res.status}`, res.status);
   const body = await res.json();
-  if (body.identity !== SERVICE_NAME) throw new Error('the exchange issued a session that is not the service identity');
+  if (body.identity !== SERVICE_NAME) throw new ExchangeError('the exchange answered with something that is not a service session', 'not the service identity');
   const cookies = res.headers.getSetCookie();
-  if (cookies.length !== 1) throw new Error(`the exchange set ${cookies.length} cookies, not one`);
-  return { cookie: browserCookie(cookies[0], publicUrl), ttlSeconds: body.ttlSeconds, expiresAt: body.expiresAt };
+  if (cookies.length !== 1) throw new ExchangeError('the exchange answered with something that is not a service session', `${cookies.length} cookies`);
+  let cookie;
+  try {
+    cookie = browserCookie(cookies[0], publicUrl);
+  } catch (err) {
+    throw new ExchangeError('the exchange answered with something that is not a service session', err.message);
+  }
+  return { cookie, ttlSeconds: body.ttlSeconds, expiresAt: body.expiresAt };
 }
 
 // A port-forward to the map's internal port, for a run from outside the

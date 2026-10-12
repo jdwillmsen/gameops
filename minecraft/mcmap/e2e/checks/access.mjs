@@ -22,7 +22,7 @@ export async function loginScreen({ browser, cfg, watch }) {
     const began = Date.now();
     await page.goto(`${cfg.publicUrl}/`, { waitUntil: 'domcontentloaded' });
     const status = (await refused).status();
-    if (status !== 401) throw new Fail(`the map answered ${status} to a browser with no session, not 401`);
+    if (status !== 401) throw new Fail('the map did not answer 401 to a browser with no session', { status });
     await page.waitForFunction(() => !document.getElementById('login').hidden, null, { timeout: 10_000 });
     const shown = await page.evaluate(() => ({
       command: document.getElementById('login-command').textContent,
@@ -42,7 +42,7 @@ export async function loginScreen({ browser, cfg, watch }) {
 export async function session({ page, ctx, cfg }) {
   const host = new URL(cfg.publicUrl).hostname;
   const cookies = (await ctx.cookies(cfg.publicUrl)).filter((c) => c.name === SESSION_COOKIE);
-  if (cookies.length !== 1) throw new Fail(`the browser holds ${cookies.length} session cookies, not one`);
+  if (cookies.length !== 1) throw new Fail('the browser does not hold exactly one session cookie', { cookies: cookies.length });
   const [cookie] = cookies;
   const weak = [];
   if (!cookie.secure) weak.push('not Secure');
@@ -50,7 +50,7 @@ export async function session({ page, ctx, cfg }) {
   if (cookie.sameSite !== 'Lax') weak.push('not SameSite=Lax');
   if (cookie.path !== '/') weak.push('a narrower Path');
   if (cookie.domain !== host) weak.push('not bound to the one host');
-  if (weak.length > 0) throw new Fail(`the session cookie is ${weak.join(', ')}`);
+  if (weak.length > 0) throw new Fail('the session cookie in the browser is weaker than a player\'s', { weaknesses: weak.length });
   const seen = await page.evaluate(async (name) => {
     const me = await (await fetch('api/me', { cache: 'no-store' })).json();
     return {
@@ -86,7 +86,7 @@ export async function scope({ page }) {
       searched: found ? found.waypoints : '',
     };
   });
-  if (got.waypoints !== 403 && got.waypoints !== 404) throw new Fail(`waypoints answered a service session with ${got.waypoints}, not 403`);
+  if (got.waypoints !== 403 && got.waypoints !== 404) throw new Fail('waypoints did not refuse a service session', { waypoints_status: got.waypoints });
   if (got.me) throw new Fail('the icon list names a player as the service session');
   if (got.search === 200 && got.searched !== 'off') throw new Fail('a search for a service session went through a player\'s waypoints');
   return { measures: { waypoints_status: got.waypoints } };
@@ -110,7 +110,7 @@ export async function headers({ page, cfg }) {
   if (got.referrer !== 'no-referrer') missing.push('Referrer-Policy');
   if (cfg.publicUrl.startsWith('https:') && !/max-age=\d+/.test(got.hsts)) missing.push('Strict-Transport-Security');
   if (!got.mapCache.includes('no-store')) missing.push('Cache-Control on the map answer');
-  if (missing.length > 0) throw new Fail(`not as the server sets them: ${missing.join(', ')}`, { missing: missing.length });
+  if (missing.length > 0) throw new Fail('a security header did not arrive as the server sets it', { missing: missing.length });
   return {};
 }
 
@@ -182,8 +182,10 @@ export async function apiBudget({ page, cfg, report }) {
     if (status !== 200) wrong.push(name);
     else if (ms > cfg.apiBudgetMs) slow.push(name);
   }
-  report.gauge('mcmap_e2e_api_seconds', 'How long each answer the page is built from took, through the public path.', 'endpoint', seconds);
-  if (wrong.length > 0) throw new Fail(`not answered: ${wrong.join(', ')}`, measures);
-  if (slow.length > 0) throw new Fail(`slower than the budget: ${slow.join(', ')}`, measures);
+  report.gauge('mcmap_e2e_api_seconds', seconds);
+  measures.not_answered = wrong.length;
+  measures.over_budget = slow.length;
+  if (wrong.length > 0) throw new Fail('an answer the page is built from was not given', measures);
+  if (slow.length > 0) throw new Fail('an answer the page is built from was slower than the budget', measures);
   return { measures };
 }
