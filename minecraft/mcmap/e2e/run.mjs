@@ -18,6 +18,13 @@ import * as live from './checks/live.mjs';
 
 const VERSION = process.env.MCMAP_E2E_VERSION || JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
+// Every check, in the order they run. The two that the rest stand on are
+// run whatever --only says.
+const CHECKS = ['login-screen', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
+  'layer-panel', 'toggles', 'search', 'structure-sheet', 'saved-views', 'themes', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
+  'page-errors', 'read-only'];
+const NEEDED = ['exchange', 'map-loads'];
+
 const OPTIONS = {
   'public-url': { type: 'string', env: 'MCMAP_E2E_PUBLIC_URL' },
   'internal-url': { type: 'string', env: 'MCMAP_E2E_INTERNAL_URL' },
@@ -93,6 +100,8 @@ function configure(argv) {
     faceDensities: [1, 1.25, 1.5, 2],
     only: get('only') ? String(get('only')).split(',').map((name) => name.trim()).filter(Boolean) : null,
   };
+  // A name that is no check's would run nothing and report a clean run.
+  for (const name of cfg.only || []) if (!CHECKS.includes(name)) throw new Error(`--only names ${JSON.stringify(name)}, which is no check; the checks are ${CHECKS.join(', ')}`);
   if (cfg.insecureLocalTls && !local) throw new Error('--insecure-local-tls is for the harness on this machine and nothing else');
   if (Boolean(cfg.secretFile) === Boolean(cfg.secretRef)) throw new Error('give the secret one way: --secret-file, or --secret-from-kube');
   if (Boolean(cfg.internalUrl) === Boolean(cfg.forward)) throw new Error('give the internal listener one way: --internal-url, or --port-forward');
@@ -144,7 +153,8 @@ async function main() {
   // went wrong in full goes to the evidence directory when there is one,
   // and to the log only as the check's own words.
   const run = async (name, fn, { page = null, ctx = null, seconds = 120 } = {}) => {
-    if (cfg.only && !cfg.only.includes(name)) return null;
+    if (!CHECKS.includes(name)) throw new Error(`${name} is not in the list of checks`);
+    if (cfg.only && !cfg.only.includes(name) && !NEEDED.includes(name)) return null;
     const began = Date.now();
     if (runDir && ctx) await ctx.tracing.startChunk({ name }).catch(() => {});
     let timer;
