@@ -2470,8 +2470,10 @@ kept. Only the terrain is of the day: players, markers, structures and
 biomes are still the world as it is, and the row says so. While a day is
 shown the footer says which in place of when the map was updated, and
 putting the row away puts the map back on now. The days are asked for
-when the page loads and every ten minutes after; a server that keeps no
-history answers 404 once and the page then has no History button.
+when the page loads and again, no more often than every ten minutes,
+when the view changes; an ask that fails is tried again after a minute.
+A server that keeps no history answers 404 once and the page then has no
+History button.
 
 What is kept is the rendered tiles and not the world. A tile is an image,
 and showing it again needs nothing of the game's version, the save format

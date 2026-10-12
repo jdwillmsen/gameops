@@ -200,6 +200,10 @@
   let dueSince = null;
   let current = null;
   let layer = null;
+  // The one layer kept under the layer shown while that one's tiles come,
+  // and the wait that takes it away if they never do.
+  let under = null;
+  let swap = 0;
   let extent = null;
   // The day whose terrain is drawn in place of today's, as the server
   // lists it, or null for the map as it is.
@@ -256,6 +260,12 @@
   }
   map.on('resize', limits);
 
+  function settle() {
+    clearTimeout(swap);
+    if (under) map.removeLayer(under);
+    under = null;
+  }
+
   function show(id, view) {
     const today = dimension(id);
     if (!today || !today.rendered) return;
@@ -266,7 +276,10 @@
     const old = layer;
     const stays = old && current === id;
     current = id;
-    if (old && !stays) map.removeLayer(old);
+    if (!stays) {
+      settle();
+      if (old) map.removeLayer(old);
+    }
 
     const reach = (o) => L.latLngBounds(
       [o.minRegionZ * REGION, o.minRegionX * REGION],
@@ -304,15 +317,19 @@
     // through days is one picture turning into the next and not a blink
     // of nothing between them. Not for ever, for tiles that never come,
     // and not at all where the new layer has no tile in view to wait for:
-    // a place the day did not hold is shown as nothing at once.
+    // a place the day did not hold is shown as nothing at once. Only ever
+    // one layer is kept under: a layer replaced before its own tiles came
+    // goes at once, its requests with it, and what was under it stays for
+    // what is left of its wait.
     if (stays) {
-      const drop = () => map.removeLayer(old);
-      if (layer.isLoading()) {
-        layer.once('load', drop);
-        setTimeout(drop, SWAP_MS);
+      if (under) {
+        map.removeLayer(old);
       } else {
-        drop();
+        under = old;
+        swap = setTimeout(settle, SWAP_MS);
       }
+      if (layer.isLoading()) layer.once('load', settle);
+      else settle();
     }
 
     for (const b of el.tabs.children) b.setAttribute('aria-pressed', String(b.dataset.id === id));
