@@ -20,6 +20,9 @@
   const COUNTDOWN_MS = 250;
   // The longest the tiles being replaced stay under the ones replacing them.
   const SWAP_MS = 4000;
+  // How long Leaflet takes to fade a tile in, and a little: what it waits
+  // itself before it takes away the tiles a new one covers.
+  const FADE_MS = 250;
   const LABELS = { overworld: 'Overworld', nether: 'Nether', end: 'The End' };
   // What the viewer keeps, where the page has a script for it. The page
   // and its scripts are cached apart for a few minutes, so just after a
@@ -329,8 +332,9 @@
         swap = setTimeout(settle, SWAP_MS);
       }
       const mine = layer;
-      if (mine.isLoading()) mine.once('load', () => { if (layer === mine) settle(); });
-      else settle();
+      const done = () => { if (layer === mine) settle(); };
+      if (!mine.isLoading()) settle();
+      else mine.once('load', () => { if (map._fadeAnimated) setTimeout(done, FADE_MS); else done(); });
     }
 
     for (const b of el.tabs.children) b.setAttribute('aria-pressed', String(b.dataset.id === id));

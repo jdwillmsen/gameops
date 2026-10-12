@@ -39,6 +39,7 @@ function leaflet() {
     constructor() {
       super();
       this.options = { inertia: true };
+      this._fadeAnimated = true;
       this.layers = new Set();
       this.centre = null;
       this.zoom = null;
@@ -99,8 +100,8 @@ const LATER = { day: '2026-09-02', dimensions: [{ ...THEN.dimensions[0], maxRegi
 const NETHER = { ...TODAY, id: 'nether' };
 
 // A page with app.js run on it, opened at the place its address names.
-async function load(hash) {
-  const p = page(new Map(), { files: [] });
+async function load(hash, look) {
+  const p = page(new Map(look ? [['mcmap.settings', JSON.stringify({ v: 1, look })]] : []), { files: look ? ['settings.js'] : [] });
   const { win, doc } = p;
   const found = doc.getElementById;
   const asked = new Map();
@@ -133,6 +134,9 @@ async function load(hash) {
   return { ...p, app: win.mcmap, map, state, settle, terrain };
 }
 
+// Long enough for tiles to have faded in: the page's waits are cut to a
+// moment by dom.cjs.
+const faded = () => new Promise((done) => setTimeout(done, 30));
 const blocks = (b) => [b.south, b.west, b.north, b.east];
 
 test('a day is drawn from its own tiles, over its own extent and zooms', async () => {
@@ -180,6 +184,18 @@ test('a day that held the place shown is drawn over what was there, which goes w
   p.app.past.set(THEN);
   assert.equal(p.map.hasLayer(today), true);
   p.terrain().at(-1).arrive();
+  assert.equal(p.map.hasLayer(today), true, 'tiles that have just come are still fading in, with nothing under them but what was there');
+  await faded();
+  assert.equal(p.map.hasLayer(today), false);
+});
+
+test('for a viewer who asked for less motion nothing fades in, and what was there goes as the tiles come', async () => {
+  const p = await load('#overworld/100/200/-1', { motion: 'reduce' });
+  const [today] = p.terrain();
+  today.arrive();
+  p.app.past.set(THEN);
+  assert.equal(p.map.hasLayer(today), true);
+  p.terrain().at(-1).arrive();
   assert.equal(p.map.hasLayer(today), false);
 });
 
@@ -206,6 +222,7 @@ test('a second day chosen before the first has come takes the first away, and le
   assert.equal(p.map.hasLayer(first), false, 'a day passed over must not go on asking for its tiles');
   assert.equal(p.map.hasLayer(today), true);
   second.arrive();
+  await faded();
   assert.deepEqual(p.terrain(), [second]);
 });
 
@@ -223,6 +240,7 @@ test('a day whose tiles come late, under a day chosen after it, stays until that
   first.arrive();
   assert.equal(p.map.hasLayer(first), true, 'the picture under the day still coming must not go as it becomes whole');
   second.arrive();
+  await faded();
   assert.deepEqual(p.terrain(), [second]);
 });
 
