@@ -244,6 +244,22 @@ test('a day whose tiles come late, under a day chosen after it, stays until that
   assert.deepEqual(p.terrain(), [second]);
 });
 
+test('a loaded day remains under the next day during its fade wait', async () => {
+  const p = await load('#overworld/100/200/-1');
+  const [today] = p.terrain();
+  today.arrive();
+  p.app.past.set(THEN);
+  const first = p.terrain().at(-1);
+  first.arrive();
+  p.app.past.set(LATER);
+  const second = p.terrain().at(-1);
+  assert.equal(p.map.hasLayer(today), false, 'the earlier under-layer is replaced by the complete first day');
+  assert.equal(p.map.hasLayer(first), true, 'the complete first day stays under the second while it loads');
+  second.arrive();
+  await faded();
+  assert.deepEqual(p.terrain(), [second]);
+});
+
 test('another dimension shown while a day is still coming is shown alone', async () => {
   const p = await load('#overworld/100/200/-1');
   p.terrain()[0].arrive();
