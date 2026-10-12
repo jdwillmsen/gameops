@@ -245,15 +245,13 @@ type mapJSON struct {
 	Problem        string     `json:"problem,omitempty"`
 	// Live tells the page whether there is a live stream to open. It is
 	// here, behind the session, and not in the public config.
-	Live bool `json:"live"`
-	// History tells it whether there are earlier days to ask for.
-	History    bool            `json:"history"`
+	Live       bool            `json:"live"`
 	Dimensions []dimensionJSON `json:"dimensions"`
 }
 
 func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
 	status := s.Status.Snapshot()
-	out := mapJSON{World: s.World, RefreshSeconds: int(s.Refresh.Seconds()), Problem: status.Problem, Live: s.Live != nil, History: s.History != nil}
+	out := mapJSON{World: s.World, RefreshSeconds: int(s.Refresh.Seconds()), Problem: status.Problem, Live: s.Live != nil}
 	if !status.SnapshotAt.IsZero() {
 		out.SnapshotAt = &status.SnapshotAt
 	}
