@@ -1,0 +1,18 @@
+name: mcmap-e2e
+kind: job
+language: node
+# The checks are of the map's page and run against the map's own server, so
+# a change to either runs them.
+depends:
+  - minecraft/mcmap/
+tasks:
+  build: npm ci --prefix minecraft/mcmap/e2e --no-fund --no-audit && go build -o /dev/null ./minecraft/mcmap/e2e/...
+  test: npm ci --prefix minecraft/mcmap/e2e --no-fund --no-audit && npm test --prefix minecraft/mcmap/e2e && (cd minecraft/mcmap/e2e && npx playwright-core install --with-deps chromium) && minecraft/mcmap/e2e/local.sh
+  lint: test -z "$(gofmt -l minecraft/mcmap/e2e)" && go vet ./minecraft/mcmap/e2e/... && for f in minecraft/mcmap/e2e/run.mjs minecraft/mcmap/e2e/lib/*.mjs minecraft/mcmap/e2e/lib/*.js minecraft/mcmap/e2e/checks/*.mjs; do node --check "$f" || exit 1; done
+release:
+  tag: mcmap-e2e
+  artifacts: [image]
+  image:
+    name: minecraft-map-checks
+    description: "Browser checks of the Minecraft Bedrock web map, run against a live map with a read-only service session"
+    short_description: Browser checks of the Minecraft Bedrock web map, run with a read-only service session

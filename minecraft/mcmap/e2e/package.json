@@ -1,0 +1,18 @@
+{
+  "name": "mcmap-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser checks of the map page, run against the local harness or a live map with a service session",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "checks": "node run.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.0"
+  }
+}

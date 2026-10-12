@@ -3289,6 +3289,212 @@ secret is never presented by anything that holds the right one, so
 `source="other"`, which is an address that should not be able to reach the
 listener.
 
+## Browser checks
+
+`e2e/` drives the page in a real browser, Chromium under Playwright, and
+measures what it draws. It is a component of its own, `mcmap-e2e`, with its
+own pinned dependency and lockfile; the Go module gains nothing from it and
+the page stays free of packages. It runs against two things: a harness on
+this machine, which is what CI does, and a live map, with a service session.
+
+### Why against a live map
+
+Until now every check of the page ran against a made-up world, because
+nothing but a player could log in. Two faults reached players that way in
+one week. Follow stopped working whenever a player's head was listed, which
+the made-up world never did; and pictures changed size while the map was
+zoomed. A third only showed against the stream production really sends,
+which is not a whole list once a second: Follow let go of a mob that
+dropped out of one sample.
+
+### How a run goes
+
+1. **The session is had inside the cluster.** The runner reads the secret,
+   exchanges it on the internal listener, and is answered with a
+   `Set-Cookie`.
+2. **The browser goes the way a player's does.** Everything after the
+   exchange is asked of the public address, through the gateway: its TLS,
+   its 30 s idle cut, whatever it caches. A check that only spoke to the
+   pod would see none of that.
+3. **The cookie is installed as the server set it.** The runner copies the
+   name, value and lifetime, and installs the cookie for the public address
+   by URL, which makes it the host-only cookie the `__Host-` prefix demands,
+   with `Secure`, `HttpOnly`, `SameSite=Lax` and `Path=/`. It refuses a
+   cookie that came without any of those rather than add them, and the
+   `session` check then reads the cookie back out of the browser and fails
+   if it is any weaker, or if script on the page can see it.
+
+### What is checked
+
+Each check asserts by measuring, records how long it took and what it
+measured, and ends as `pass`, `fail` or `skip`. A check that needs a player
+online or a mob loaded skips on a quiet world and says so; a skip is
+counted apart and is not a failure.
+
+| Check | What it measures | Needs |
+|---|---|---|
+| `login-screen` | With no session the map answers 401 through the public path, the page shows the login and the code to type, and draws no tile | |
+| `exchange` | The secret is exchanged for a session | |
+| `map-loads` | The page loads with the session and shows a dimension | |
+| `session` | `/api/me` and the page both say `service:e2e`; the cookie in the browser is host-only, `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, and script cannot read it | |
+| `scope` | On the live server, waypoints answer 403, the icon list names nobody as `me`, a search goes through no waypoints | |
+| `headers` | The content security policy, `nosniff`, the referrer policy, HSTS and `no-store` arrive through the gateway as the server sets them | |
+| `scripts` | Every script and stylesheet the page names is served as what it is, the same bytes twice, kept by a browser for no longer than an hour, and each made the part of the page it is there to make: a page of two releases fails here | |
+| `api-budget` | Each of eleven answers the page is built from comes within the budget, 3 s unless set; one for a layer switched off is counted as not served | |
+| `dimensions` | Each dimension's tab draws terrain tiles that decode and are not empty; one never rendered is counted | |
+| `player-heads` | A player with a head listed is drawn with it | a player online, with a head |
+| `zoom-sizes` | Through every zoom level and back, every picture on the map is the size it was made at, each frame of the zoom and once it settles | a marker or a live entity |
+| `layer-panel` | The panel opens, is sized narrower and wider, folds and returns, and the map takes the room | |
+| `toggles` | Switching off a type of mob and a kind of structure takes things off the map and switching them on brings them back; the biome overlay draws tiles, picking one biome out changes them, and off removes them | mobs, structures or biomes; each that is missing is said |
+| `search` | A search for a biome or structure this world has, by a name read off the page, finds it | a biome or a structure |
+| `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
+| `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
+| `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it | |
+| `follow-player` | Follow on a player, one with a head where there is one, for 20 s: it stays on, the button says so, the mark is within 4 pixels of the middle of the map that can be seen, and so is where the stream last put the player, give or take what they travel between samples | a player online |
+| `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
+| `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
+| `phone-sheet` | On a phone-sized touch screen the panel is a sheet across the bottom that changes height by its handle, with the map drawn | |
+| `live-stream` | A stream opened when the run began is still the same connection, unbroken, 125 s later, with frames no more than 10 s apart | the live layer on; with nothing in the dimension only the connection is judged |
+| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, the 403 above) | |
+| `read-only` | Over the whole run the page tried no request but a read | |
+
+`faces` is there to answer a question nobody has settled: villagers' heads
+have been reported a few pixels left of the middle on a real screen, and
+nothing with head boxes served has reproduced it. The check has the page
+compose a marker for every face the server lists, records where the page
+put the picture, and works out from the head box the server gives, or from
+what is drawn where it gives none, how far the head is from the middle. It
+reports the worst for each face in `mcmap_e2e_face_offset_pixels{face}` and,
+across only and signed, in `mcmap_e2e_face_offset_x_pixels{face}`, and how
+far what is drawn sits off as `worst_ink_pixels_at_<ratio>`. It fails only
+where a head is off the middle with room to be on it: a face all of which
+fits its box is kept inside it, and that may hold its head to one side.
+
+### Reading and nothing else
+
+The suite never writes to the server and never touches the game. Every
+context routes every request and aborts any that is not a `GET` or `HEAD`;
+`read-only` fails the run if one was tried. The one request the page makes
+by itself that would leave a trace, asking for a login code when it is
+refused, is answered in the browser and never sent. What the suite presses,
+the panel, the views, the themes, Follow, changes settings the page keeps
+in the browser, and the browser is thrown away. It never presses Log out.
+Every request says who it is: the browser's user agent ends
+`mcmap-e2e/<version> (service:e2e; <mode>)`.
+
+### What a run says, and what it keeps
+
+The map shows where people live, so what a run writes is held to a rule:
+logs and metrics carry a check's name, its verdict, its time and numbers,
+and nothing read off the page.
+
+- A log line is JSON whose only words are the suite's own. Each is passed
+  through a scrubber that takes out addresses, anything quoted, and any run
+  of digits long enough to be a coordinate or an id.
+- An address is only ever written as its route: `/api/structures/detail`,
+  `/tiles`, never its query, where coordinates and gamertags travel.
+- A script error is written as its file and line.
+- Metric labels are check names, measure names and picture keys such as
+  `face/villager_v2`, which are the game's own ids. A player's head is
+  keyed by gamertag and is never a label.
+- The secret and the session cookie are held in one module, which hands
+  neither out and removes both from anything about to be written.
+
+Screenshots and traces are different: they are pictures of the live map,
+with real coordinates and gamertags, and a trace holds the requests made,
+the session cookie among them. None is made unless `--evidence-dir` is
+given. With it, a failed check leaves a screenshot, a trace of that check
+and the full text of what went wrong in a directory per run, readable only
+by the runner's user; the newest five failed runs are kept and none older
+than seven days. By the time anyone opens a trace the session in it has
+ended, and it could only ever read. Evidence stays where it was written, in
+the cluster or on the operator's machine. It is never committed, attached
+to a pull request or a ticket, or uploaded by CI, whose world is made up
+and which is given no evidence directory at all.
+
+### Where it runs
+
+**In the cluster, on a schedule.** The image
+`ghcr.io/jdwillmsen/minecraft-map-checks` is Microsoft's Playwright image,
+pinned by digest, with this directory in it, and runs as a user that is not
+root on a read-only root filesystem with `/tmp` as its only scratch. It
+needs no access to the cluster's API: the secret is a file mounted into it,
+the internal listener is an address, and its results are a file,
+`--metrics-file`, in Prometheus's text format. One CPU and 1 GiB are enough
+for a run. The chart that deploys the map carries the schedule, the
+network policy, where results and evidence go, and the alerts for checks
+failing and for checks not having run.
+
+**From a developer's or an agent's machine, before and after a rollout.**
+The secret must not pass through a shell, where it would be printed, or
+through an argument or a variable, which are things that get printed. So
+the runner takes it itself:
+
+```sh
+node run.mjs --public-url https://<the map's address> \
+  --secret-from-kube <namespace>/<secret>/<key> \
+  --port-forward <namespace>/<map service>:<internal port> \
+  --approved-by <who allowed this run>
+```
+
+It runs `kubectl get secret` as a child whose output goes to the runner's
+memory and to no terminal, opens a `kubectl port-forward` to the internal
+listener for the exchange alone, closes it, and drives the browser against
+the public address like any other run. Both are reads of the cluster;
+nothing in it is changed. There is no way to hand the runner the secret
+directly, on purpose.
+
+**This mode needs the owner's explicit approval before it is first used
+against production, and that approval is the owner's to give each time it
+is asked, not something to assume.** It reads a credential from the
+cluster with whatever access the person or agent running it holds, and it
+looks at the live map from a machine outside the cluster.
+`--approved-by` is required and is sent with the exchange, where the map
+logs it beside `source="loopback"`; that makes a run visible afterwards
+and does nothing to prevent one. Evidence from such a run is on that
+machine and is that person's to delete. It has been built and is run in CI
+against the harness with a stand-in for `kubectl`; it has not been run
+against a live map.
+
+### The harness
+
+`e2e/harness` is the real server, both listeners, with the login on, over
+a world made up in the program: no coordinate, name or seed in it is a real
+one, and it fetches nothing. The page is served over TLS with a certificate
+made at start, because the session cookie is `Secure` and bound to its
+host; `--insecure-local-tls` accepts that certificate and is refused for
+any address but this machine's. It speaks HTTP/1.1, as the gateway does to
+the service.
+
+Its stream is what production's is, by the model
+`web/testdata/stage.cjs` runs the page's scripts against: 225 mobs of
+which the pack lists the 150 nearest the first player, so the list churns
+as that player walks; a mob in about twenty left out of any one sample;
+each list sent as lines of forty that are only a list once every line has
+come, with a line lost now and then; the pack sampling every second for
+twenty seconds and every two for the next twenty; and players with heads
+listed. Faces are of the awkward shapes: a villager's, with its head to
+one side of an odd-width square and a nose below it, and a fox's, with ears
+above a head that fits its box.
+
+```sh
+minecraft/mcmap/e2e/local.sh                  # the whole suite, about 2 min 10 s
+HARNESS_QUIET=1 minecraft/mcmap/e2e/local.sh  # a world with nobody in it
+```
+
+`local.sh` builds the harness, makes a secret that it prints nowhere and
+deletes when it ends, runs the suite, runs the outside-the-cluster path
+with a stand-in for `kubectl`, and fails if the harness's log holds the
+secret. It needs Go, Node and the Chromium that `npx playwright-core
+install chromium` fetches. CI runs it as the `mcmap-e2e` component's test,
+for any change to the map or to the suite. A run is the 60 s and 20 s of
+the two Follow checks, the 125 s of the stream check alongside them, and
+about 30 s of everything else: 126 s on a developer machine.
+`HARNESS_WEB=<a directory>` serves another build of the page, which is how
+the suite was shown to fail on the pages the faults above were in:
+`zoom-sizes` found pictures at eight times their size, `page-errors` the
+script error and `follow-player` a player 5 pixels off the middle.
+
 ## Environment variables
 
 | Variable | Required | Default | Purpose |
@@ -3475,7 +3681,8 @@ The three records read for the newer kinds have fuzz targets with seeds
 built in code, `FuzzVolumes`, `FuzzSeedBook` and `FuzzMapRecord` in
 `internal/structures`, run as
 `go test -run '^$' -fuzz FuzzVolumes -fuzztime 1m ./minecraft/mcmap/internal/structures/`.
-The rest is checked in a browser. Leaflet is vendored
+The rest is checked in a browser, by `e2e/`: see
+[Browser checks](#browser-checks). Leaflet is vendored
 in `web/lib/leaflet` with its licence.
 
 ## Releases
@@ -3484,3 +3691,7 @@ Cut by [`semantic-release.yml`](../../.github/workflows/semantic-release.yml)
 from commits that touch this component, tagged `mcmap-v<version>`, and
 published as `ghcr.io/jdwillmsen/minecraft-map:<version>` and
 `docker.io/jdwillmsen/minecraft-map:<version>`. Never `latest`.
+
+The browser checks in `e2e/` are released apart, as `mcmap-e2e-v<version>`
+and `ghcr.io/jdwillmsen/minecraft-map-checks:<version>`, by a commit that
+touches them or the map.
