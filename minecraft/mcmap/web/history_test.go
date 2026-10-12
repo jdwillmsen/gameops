@@ -27,3 +27,24 @@ func TestHistoryScriptDoesWhatItSaysWhenRun(t *testing.T) {
 		t.Errorf("the history's script did not do what is asked of it: %v", err)
 	}
 }
+
+// The map's own script is run on a map that keeps Leaflet's rules for a
+// view and for a tile layer's loading (testdata/past.test.cjs), and told a
+// day: whose tiles and extent the terrain is then drawn from, that the
+// view does not move for it, and when the tiles it replaces go are checked
+// by doing them. Skipped where there is no node to run it with.
+func TestMapShowsADayWithoutMovingWhenRun(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("no node on this machine to run the map's script with")
+	}
+	out, err := exec.Command(node, "testdata/past.test.cjs").CombinedOutput()
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if !strings.HasPrefix(line, "ok ") {
+			t.Log(line)
+		}
+	}
+	if err != nil {
+		t.Errorf("the map's script did not do what is asked of it: %v", err)
+	}
+}

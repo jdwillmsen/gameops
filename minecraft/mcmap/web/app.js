@@ -268,11 +268,14 @@
     current = id;
     if (old && !stays) map.removeLayer(old);
 
-    const bounds = L.latLngBounds(
-      [d.minRegionZ * REGION, d.minRegionX * REGION],
-      [(d.maxRegionZ + 1) * REGION, (d.maxRegionX + 1) * REGION],
+    const reach = (o) => L.latLngBounds(
+      [o.minRegionZ * REGION, o.minRegionX * REGION],
+      [(o.maxRegionZ + 1) * REGION, (o.maxRegionX + 1) * REGION],
     );
-    extent = bounds;
+    // Only the tiles are of the day. Where the map can be taken, and what
+    // is laid over it, are of the world as it is, so choosing a day never
+    // moves the view.
+    extent = reach(today);
     layer = new Tiles('', {
       dimension: id,
       day: past ? past.day : '',
@@ -284,26 +287,33 @@
       // below the coarsest, which is what lets the zoom be any fraction.
       minZoom: -12,
       maxZoom: MAX_ZOOM,
-      bounds,
+      bounds: reach(d),
       noWrap: true,
       keepBuffer: 2,
     }).addTo(map);
-    // The same place drawn again, a day apart or a render apart: what was
-    // there stays under the new tiles until they have come, so stepping
-    // through days is one picture turning into the next and not a blink
-    // of nothing between them. Not for ever, for tiles that never come.
-    if (stays) {
-      const drop = () => map.removeLayer(old);
-      layer.once('load', drop);
-      setTimeout(drop, SWAP_MS);
-    }
-    map.setMaxBounds(bounds.pad(0.25));
-    wholeWorld = d.minZoom;
+    map.setMaxBounds(extent.pad(0.25));
+    wholeWorld = today.minZoom;
     limits();
 
     if (view) map.setView([view.z, view.x], view.zoom);
-    else if (bounds.contains([0, 0])) map.setView([0, 0], Math.max(d.minZoom, -2));
-    else map.fitBounds(bounds);
+    else if (extent.contains([0, 0])) map.setView([0, 0], Math.max(today.minZoom, -2));
+    else map.fitBounds(extent);
+
+    // The same place drawn again, a day apart or a render apart: what was
+    // there stays under the new tiles until they have come, so stepping
+    // through days is one picture turning into the next and not a blink
+    // of nothing between them. Not for ever, for tiles that never come,
+    // and not at all where the new layer has no tile in view to wait for:
+    // a place the day did not hold is shown as nothing at once.
+    if (stays) {
+      const drop = () => map.removeLayer(old);
+      if (layer.isLoading()) {
+        layer.once('load', drop);
+        setTimeout(drop, SWAP_MS);
+      } else {
+        drop();
+      }
+    }
 
     for (const b of el.tabs.children) b.setAttribute('aria-pressed', String(b.dataset.id === id));
     writeHash();
