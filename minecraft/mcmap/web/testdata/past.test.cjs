@@ -95,6 +95,8 @@ function leaflet() {
 // it was on a day when it was one region and was cut another way.
 const TODAY = { id: 'overworld', rendered: true, renderedAt: '2026-10-14T09:00:00Z', format: 'webp', minZoom: -5, maxZoom: 0, minRegionX: -4, maxRegionX: 3, minRegionZ: -4, maxRegionZ: 3 };
 const THEN = { day: '2026-09-01', dimensions: [{ id: 'overworld', format: 'png', minZoom: -2, maxZoom: 0, minRegionX: 0, maxRegionX: 0, minRegionZ: 0, maxRegionZ: 0 }] };
+const LATER = { day: '2026-09-02', dimensions: [{ ...THEN.dimensions[0], maxRegionX: 1 }] };
+const NETHER = { ...TODAY, id: 'nether' };
 
 // A page with app.js run on it, opened at the place its address names.
 async function load(hash) {
@@ -120,7 +122,7 @@ async function load(hash) {
     setInterval: () => 0,
     clearInterval() {},
     fetch: async (address) => {
-      const body = address === 'api/map' ? { world: 'w', refreshSeconds: 600, dimensions: [state.today] } : {};
+      const body = address === 'api/map' ? { world: 'w', refreshSeconds: 600, dimensions: [state.today, NETHER] } : {};
       return { ok: true, status: 200, headers: { get: () => '' }, json: async () => body, text: async () => JSON.stringify(body) };
     },
   });
@@ -190,6 +192,32 @@ test('what was there does not wait for ever on tiles that never come', async () 
   await new Promise((done) => setTimeout(done, 30));
   assert.equal(p.map.hasLayer(today), false);
   assert.equal(p.terrain().length, 1);
+});
+
+test('a second day chosen before the first has come takes the first away, and leaves what was under it until the second has come', async () => {
+  const p = await load('#overworld/100/200/-1');
+  const [today] = p.terrain();
+  today.arrive();
+  p.app.past.set(THEN);
+  const first = p.terrain().at(-1);
+  p.app.past.set(LATER);
+  const second = p.terrain().at(-1);
+  assert.equal(second.options.day, '2026-09-02');
+  assert.equal(p.map.hasLayer(first), false, 'a day passed over must not go on asking for its tiles');
+  assert.equal(p.map.hasLayer(today), true);
+  second.arrive();
+  assert.deepEqual(p.terrain(), [second]);
+});
+
+test('another dimension shown while a day is still coming is shown alone', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(THEN);
+  assert.equal(p.app.go('nether', 10, 20), true);
+  assert.deepEqual(p.terrain().map((l) => l.options.dimension), ['nether']);
+  const [nether] = p.terrain();
+  await new Promise((done) => setTimeout(done, 30));
+  assert.deepEqual(p.terrain(), [nether]);
 });
 
 (async () => {
