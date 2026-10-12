@@ -125,8 +125,8 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		if _, err := heads.Replace([]icons.Report{
-			{XUID: "1001", Gamertag: "Steve", Head: steveHead},
-			{XUID: "1009", Gamertag: "Alexandra", Head: alexHead},
+			{XUID: "1001", Gamertag: "HarnessPlayerOne", Head: steveHead},
+			{XUID: "1009", Gamertag: "HarnessPlayerTwo", Head: alexHead},
 		}); err != nil {
 			return err
 		}
@@ -450,20 +450,20 @@ func markedWorld() markers.World {
 	overworld.Containers = append(overworld.Containers,
 		markers.Marker{X: -120, Y: 64, Z: -40, Kind: "chest"},
 		markers.Marker{X: -104, Y: 64, Z: -40, Kind: "chest", Trapped: true},
-		markers.Marker{X: -88, Y: 64, Z: -40, Kind: "barrel", Name: "Loot barrel"},
+		markers.Marker{X: -88, Y: 64, Z: -40, Kind: "barrel", Name: "Harness barrel"},
 		markers.Marker{X: -40, Y: 64, Z: -40, Kind: "chest", Name: hostile},
 	)
 	overworld.Mobs = []markers.Marker{
-		{X: 20, Y: 66, Z: -10, Kind: "cat", Name: "OJ", ID: "101"},
-		{X: 50, Y: 66, Z: -10, Kind: "sheep", Name: "Lamb Chop", Baby: true, ID: "102"},
+		{X: 31, Y: 65, Z: -17, Kind: "cat", Name: "Harness Cat One", ID: "101"},
+		{X: 47, Y: 65, Z: -23, Kind: "sheep", Name: "Harness Sheep Two", Baby: true, ID: "102"},
 		{X: 80, Y: 66, Z: -10, Kind: "villager_v2", Name: hostile, ID: "103"},
 	}
 	return markers.World{
 		chunks.Overworld: &overworld,
 		chunks.Nether: {
 			Beds:       []markers.Marker{{X: -1, Y: 2, Z: -3, Colour: "blue"}},
-			Containers: []markers.Marker{{X: 10, Y: 40, Z: -12, Kind: "chest", Name: "Nether loot"}},
-			Mobs:       []markers.Marker{{X: 5, Y: 40, Z: 5, Kind: "strider", Name: "Lavawalker", Baby: true, ID: "201"}},
+			Containers: []markers.Marker{{X: 10, Y: 40, Z: -12, Kind: "chest", Name: "Harness nether chest"}},
+			Mobs:       []markers.Marker{{X: 5, Y: 40, Z: 5, Kind: "strider", Name: "Harness Strider Four", Baby: true, ID: "201"}},
 		},
 	}
 }
@@ -478,7 +478,7 @@ func survey(at time.Time) structures.Survey {
 	village := empty()
 	village.MobsTotal = 9
 	village.Mobs = []structures.MobCount{{Kind: "villager_v2", Count: 7, Babies: 1}, {Kind: "cat", Count: 2}}
-	village.Named = []structures.NamedMob{{Kind: "villager_v2", Name: "Mayor", Profession: "librarian", Level: 5}, {Kind: "villager_v2", Name: hostile, Profession: "farmer", Level: 1}}
+	village.Named = []structures.NamedMob{{Kind: "villager_v2", Name: "Harness Librarian Five", Profession: "librarian", Level: 5}, {Kind: "villager_v2", Name: hostile, Profession: "farmer", Level: 1}}
 	village.Containers = []structures.ContainerCount{{Kind: "chest", Unopened: 3, Holding: 2, Empty: 1}}
 	village.Village = &structures.VillageDetail{
 		Professions: []structures.Profession{{Profession: "farmer", Count: 2, Levels: [5]int{1, 0, 0, 0, 1}}, {Profession: "librarian", Count: 1, Levels: [5]int{0, 0, 0, 0, 1}}},
@@ -602,13 +602,13 @@ func play(ctx context.Context, layer *live.Layer, recorder *trails.Recorder, qui
 			steve.step(pace * seconds)
 			fox.step(pace * seconds)
 			players := []map[string]any{
-				{"i": "1", "n": "Steve", "x": steve.x, "y": 64, "z": steve.z, "r": 270},
+				{"i": "1", "n": "HarnessPlayerOne", "x": steve.x, "y": 64, "z": steve.z, "r": 270},
 				{"i": "7", "n": hostile, "x": 100.5, "y": 64, "z": -40.5, "r": 0},
 			}
 			mobs := []map[string]any{
 				{"i": "52", "t": "wolf", "n": hostile, "x": 100.0, "y": 64, "z": 60.0},
-				{"i": "101", "t": "cat", "n": "OJ", "x": 23.4, "y": 66, "z": -8.6},
-				{"i": "61", "t": "fox", "n": "Rusty", "x": fox.x, "y": 64, "z": fox.z},
+				{"i": "101", "t": "cat", "n": "Harness Cat One", "x": 33.5, "y": 65, "z": -15.5},
+				{"i": "61", "t": "fox", "n": "Harness Fox Three", "x": fox.x, "y": 64, "z": fox.z},
 				{"i": "62", "t": "villager_v2", "x": steve.x + 6, "y": 64, "z": steve.z + 4},
 				{"i": "63", "t": "zombie_villager_v2", "x": steve.x - 6, "y": 64, "z": steve.z + 4},
 			}
@@ -638,13 +638,13 @@ func play(ctx context.Context, layer *live.Layer, recorder *trails.Recorder, qui
 			}
 			records = append(records,
 				map[string]any{"gen": gen, "kind": "players", "dim": "nether", "part": 0, "parts": 1, "items": []map[string]any{
-					{"i": "9", "n": "Alexandra", "x": 12.5, "y": 40, "z": -7.5, "r": 90},
+					{"i": "9", "n": "HarnessPlayerTwo", "x": 12.5, "y": 40, "z": -7.5, "r": 90},
 				}},
 				map[string]any{"gen": gen, "kind": "mobs", "dim": "nether", "part": 0, "parts": 1, "items": []map[string]any{
-					{"i": "201", "t": "strider", "n": "Lavawalker", "x": 6.5, "y": 40, "z": 6.5},
+					{"i": "201", "t": "strider", "n": "Harness Strider Four", "x": 6.5, "y": 40, "z": 6.5},
 				}},
 			)
-			recorder.Record("overworld", t, []live.Entity{{ID: "1", Name: "Steve", X: steve.x, Y: 64, Z: steve.z}})
+			recorder.Record("overworld", t, []live.Entity{{ID: "1", Name: "HarnessPlayerOne", X: steve.x, Y: 64, Z: steve.z}})
 		}
 		for _, record := range records {
 			raw, _ := json.Marshal(record)

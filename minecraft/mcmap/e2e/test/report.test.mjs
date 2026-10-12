@@ -12,8 +12,8 @@ import { FAIL, PASS, Report, SKIP } from '../lib/report.mjs';
 // What must never leave in a log or a metric, in the shapes it would
 // arrive in. None of it is real. The last is the one a scrubber of text
 // cannot catch: a name is a word and a small coordinate is a small number.
-const PRIVATE = ['-2575', '1830', '2535412345678901', 'Steve', 'map.example.test', 'Lamb Chop', 'is at 5 -7'];
-const SAID = 'Steve is at 5 -7 near "Lamb Chop" on https://map.example.test/#overworld/-2575/1830/0 xuid 2535412345678901';
+const PRIVATE = ['-4321', '8765', '1111111111111111', 'Madeup', 'map.example.test', 'Invented Sheep', 'is at 5 -7'];
+const SAID = 'Madeup is at 5 -7 near "Invented Sheep" on https://map.example.test/#overworld/-4321/8765/0 xuid 1111111111111111';
 
 function fresh() {
   const lines = [];
@@ -30,7 +30,7 @@ test('there is no field a word off the page can be written in', () => {
   report.record('search', SAID, 10, '', {});
   report.log('check', { check: SAID, status: SAID, reason: SAID, name: SAID, detail: SAID, why: SAID, ms: SAID, list: [SAID], gauge: SAID });
   report.log(SAID, { ms: 1 });
-  report.gauge('mcmap_e2e_face_offset_pixels', { 'face/villager_v2': 1.5, [SAID]: 2, 'face/Steve': 3, 'head/steve': 4, 'x"y': 5 });
+  report.gauge('mcmap_e2e_face_offset_pixels', { 'face/villager_v2': 1.5, [SAID]: 2, 'face/Madeup': 3, 'head/madeup': 4, 'x"y': 5 });
   report.gauge('mcmap_e2e_api_seconds', { map: 0.1, [SAID]: 1 });
   report.gauge(SAID, { map: 1 });
   report.finish();
@@ -121,13 +121,13 @@ test('a volume that cannot be written does not stop the run saying how it went',
 
 test('an address is written as its route and never its query', () => {
   for (const [address, route] of [
-    ['https://map.example.test/api/structures/detail?dimension=overworld&kind=village&x=-2575&z=1830', '/api/structures/detail'],
+    ['https://map.example.test/api/structures/detail?dimension=overworld&kind=village&x=-4321&z=8765', '/api/structures/detail'],
     ['https://map.example.test/tiles/overworld/0/37/-4.webp', '/tiles'],
     ['https://map.example.test/api/biomes/tiles/overworld/0/1/2.png?biome=plains', '/api/biomes/tiles'],
-    ['https://map.example.test/api/icons/head?name=Steve%20Builds&v=1', '/api/icons/head'],
+    ['https://map.example.test/api/icons/head?name=Madeup%20Player&v=1', '/api/icons/head'],
     ['https://map.example.test/api/icons/picture/face/cow?v=1', '/api/icons/picture'],
     ['https://map.example.test/live.js', '/live.js'],
-    ['https://map.example.test/Steve%20Builds', 'unreadable'],
+    ['https://map.example.test/Madeup%20Player', 'unreadable'],
     ['not an address', 'unreadable'],
   ]) assert.equal(routeOf(address), route);
 });
