@@ -76,6 +76,24 @@ test('only an http or https address is taken for the internal listener', async (
   }
 });
 
+test('the secret is sent in the clear only to this machine or into the cluster', async () => {
+  const { secret } = await scratch();
+  for (const far of ['http://map.example.test:9090', 'http://203.0.113.9:9090', 'http://map-internal.example.svc.evil.test']) {
+    const got = await run(['--public-url', 'https://127.0.0.1:9', '--internal-url', far, '--secret-file', secret, '--insecure-local-tls']);
+    assert.equal(got.code, 2, `${far} was taken`);
+    assert.match(got.err, /must be https/);
+    assert.equal(got.lines.length, 0);
+  }
+  // Each of these is taken, and the run goes on to fail for want of a map.
+  const stuck = path.join((await scratch()).dir, 'browser');
+  await writeFile(stuck, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  for (const near of ['http://127.0.0.1:9', 'http://map:9090', 'http://map.games.svc:9090', 'http://map.games.svc.cluster.local:9090', 'https://map.example.test']) {
+    const got = await run(['--public-url', 'https://127.0.0.1:9', '--internal-url', near, '--secret-file', secret, '--insecure-local-tls'], { env: { MCMAP_E2E_CHROMIUM: stuck } });
+    assert.ok(!/internal-url/.test(got.err), `${near} was refused`);
+    assert.ok(got.lines.length > 0);
+  }
+});
+
 test('a check past its time is stopped before the next begins', async () => {
   const state = { working: true, steps: 0, stopped: 0 };
   // A check that goes on pressing things for as long as its page is there.
