@@ -440,6 +440,31 @@ func TestService_EveryExchangeIsLoggedAndCountedAndTheSecretIsInNeither(t *testi
 	}
 }
 
+// A caller chooses its user agent, and it is logged: it gets one field of
+// one line, however it is written.
+func TestService_WhatACallerSaysOfItselfCannotForgeALogLine(t *testing.T) {
+	s, _, log := withService(t)
+	forged := "checks\n{\"msg\":\"map login issued\",\"xuid\":\"1\"}\r" + strings.Repeat("x", 500)
+	rec := do(s.InternalHandler(), "POST", "/internal/v1/service-sessions", "", nil, "Authorization", "Bearer "+serviceSecret, "User-Agent", forged)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("exchange = %d", rec.Code)
+	}
+	lines := strings.Split(strings.TrimSpace(log.String()), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("%d log lines for one exchange:\n%s", len(lines), log)
+	}
+	var line struct {
+		Msg   string `json:"msg"`
+		Agent string `json:"user_agent"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &line); err != nil {
+		t.Fatal(err)
+	}
+	if line.Msg != "map service session issued" || strings.ContainsAny(line.Agent, "\r\n") || len(line.Agent) != 200 {
+		t.Errorf("logged %q with a user agent of %d characters", line.Msg, len(line.Agent))
+	}
+}
+
 func TestService_WrongSecretsLockTheExchange(t *testing.T) {
 	s, _, _ := withService(t)
 	for range 5 {
