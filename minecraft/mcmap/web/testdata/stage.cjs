@@ -134,6 +134,8 @@ function leaflet(win) {
     panTo(at) { this.centre = latLng(at); this.went.push({ how: 'panTo', centre: this.centre, zoom: this.zoom }); return this; }
     setView(at, zoom) { this.centre = latLng(at); this.zoom = zoom; this.went.push({ how: 'setView', centre: this.centre, zoom }); return this; }
     setZoom(zoom) { this.zoom = zoom; this.went.push({ how: 'setZoom', zoom }); return this; }
+    // A pinch, and the wheel and steps that move the map as one does, put it somewhere a step at a time.
+    _move(centre, zoom, data) { this.centre = latLng(centre); this.zoom = zoom; this.went.push({ how: '_move', centre: this.centre, zoom, data }); return this; }
     setZoomAround(at, zoom) { this.zoom = zoom; this.went.push({ how: 'setZoomAround', at, zoom }); return this; }
     invalidateSize() { this.sized = (this.sized || 0) + 1; return this; }
     hasLayer(layer) { return this.layers.has(layer); }
