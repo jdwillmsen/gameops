@@ -2456,9 +2456,22 @@ trails answers 404 once, and the page then has no Trails row.
 ## History
 
 With `HISTORY_ENABLED=true` the map is kept as it was on each day, so a
-place can be looked at over time. The page does not show it yet; this is
-the store and the routes a timeline will be drawn from, switched on first
-because a day not kept cannot be kept later.
+place can be looked at over time.
+
+**On the page.** A History button in the corner of the map opens a row of
+the days kept: a slider with a step for each day and one more for now,
+the day before and the day after, Play, and Now. Choosing a day draws
+that day's terrain where today's is drawn, at the same place and zoom,
+in whichever dimension is shown; the tiles being replaced stay under the
+new ones until those have come, so stepping through days is one picture
+turning into the next. Play runs from the day shown to now, a day every
+second and a half, and stops there; from now it starts at the first day
+kept. Only the terrain is of the day: players, markers, structures and
+biomes are still the world as it is, and the row says so. While a day is
+shown the footer says which in place of when the map was updated, and
+putting the row away puts the map back on now. The days are asked for
+when the page loads and every ten minutes after; a server that keeps no
+history answers 404 once and the page then has no History button.
 
 What is kept is the rendered tiles and not the world. A tile is an image,
 and showing it again needs nothing of the game's version, the save format
