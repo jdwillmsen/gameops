@@ -78,27 +78,6 @@
     return null;
   }
 
-  const model = { WORLD_MARGIN, REGION_BLOCKS, CHUNK_BLOCKS, BLOCK_DETAIL, level, scale, across, fitBlocks, parse, pixels };
-  window.mcmapZoom = model;
-
-  const app = window.mcmap;
-  if (!app || !app.map || !document.getElementById('zoom-open')) return;
-  const { map } = app;
-  const settings = window.mcmapSettings || null;
-
-  // --- moving the zoom ----------------------------------------------------------
-  //
-  // Everything here moves the map as a pinch does, a step at a time with
-  // the zoom event of each, and not as Leaflet's own zooms do. Those are
-  // animated, and one asked for while another is under way is dropped; a
-  // step of a wheel turned quickly, or of a button held down, would be
-  // lost. A pinch's way is the one that follows the fingers without
-  // starting over, and the markers, the grid and a followed player are all
-  // already made to follow it. _move, _moveStart, _moveEnd, _stop,
-  // _animatingZoom, _onZoomTransitionEnd and _limitZoom are Leaflet
-  // internals, which is safe only because Leaflet is vendored at a fixed
-  // version.
-
   // A turn of a mouse wheel is a hundred pixels of scroll and is half a
   // level; a trackpad's scroll adds up from its small steps to the same.
   const WHEEL_LEVELS_PER_PX = 0.005;
@@ -121,6 +100,65 @@
   const RE_ANCHOR_PX = 4;
   const SETTLED = 0.004;
 
+  // How many levels a wheel event asks for: a turn of a mouse wheel is a
+  // hundred pixels and half a level, a line is a third of a hundred and a
+  // page four, and what Ctrl adds to a trackpad's pinch is finer.
+  function wheelLevels(deltaY, deltaMode, ctrlKey) {
+    const unit = deltaMode === 1 ? LINE_PX : deltaMode === 2 ? PAGE_PX : 1;
+    const dy = Math.max(-MOST_PX, Math.min(MOST_PX, deltaY * unit));
+    return dy === 0 ? 0 : -dy * (ctrlKey ? PINCH_LEVELS_PER_PX : WHEEL_LEVELS_PER_PX);
+  }
+
+  // Safari's pinch is a gesture with a scale from where it began, not
+  // scrolling.
+  const gestureZoom = (startZoom, scale) => (Number.isFinite(scale) && scale > 0 ? startZoom + Math.log2(scale) : startZoom);
+
+  // One frame's catch-up toward a zoom: most of the distance in chase
+  // milliseconds, all of it for a viewer who has asked for less motion.
+  function eased(from, target, dt, chase, still) {
+    const catchUp = still ? 1 : 1 - Math.exp(-Math.min(64, dt) / chase);
+    const next = from + (target - from) * catchUp;
+    return { zoom: Math.abs(target - next) < SETTLED ? target : next, catchUp };
+  }
+
+  // Where the map's centre has to be, at a zoom, for the block that was
+  // under a point of its box to stay under it. Blocks, and the map's box
+  // in pixels: a block is 2^zoom of them.
+  function anchoredCentre(about, at, half, zoom) {
+    const k = 2 ** zoom;
+    return { lat: about.lat - (at.y - half.y) / k, lng: about.lng - (at.x - half.x) / k };
+  }
+
+  // The zoom a step up or down comes to from where it is going: the next
+  // whole level, so that steps land where a scale can be read off, and
+  // levels of them for a shift.
+  function stepped(now, direction, levels = 1) {
+    const nearest = Math.round(now);
+    const first = Math.abs(now - nearest) < 0.01 ? nearest + direction : direction > 0 ? Math.ceil(now) : Math.floor(now);
+    return first + direction * (levels - 1);
+  }
+
+  const model = { WORLD_MARGIN, REGION_BLOCKS, CHUNK_BLOCKS, BLOCK_DETAIL, level, scale, across, fitBlocks, parse, pixels, wheelLevels, gestureZoom, eased, anchoredCentre, stepped };
+  window.mcmapZoom = model;
+
+  const app = window.mcmap;
+  if (!app || !app.map || !document.getElementById('zoom-open')) return;
+  const { map } = app;
+  const settings = window.mcmapSettings || null;
+
+  // --- moving the zoom ----------------------------------------------------------
+  //
+  // Everything here moves the map as a pinch does, a step at a time with
+  // the zoom event of each, and not as Leaflet's own zooms do. Those are
+  // animated, and one asked for while another is under way is dropped; a
+  // step of a wheel turned quickly, or of a button held down, would be
+  // lost. A pinch's way is the one that follows the fingers without
+  // starting over, and the markers, the grid and a followed player are all
+  // already made to follow it. _move, _moveStart, _moveEnd, _stop,
+  // _animatingZoom, _onZoomTransitionEnd and _limitZoom are Leaflet
+  // internals, which is safe only because Leaflet is vendored at a fixed
+  // version.
+
   const still = () => Boolean(settings) && settings.look().motion === 'reduce';
   const limit = (zoom) => Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), zoom));
 
@@ -140,21 +178,17 @@
   function step(now) {
     frame = 0;
     if (!run) return;
-    const dt = Math.min(64, now - run.last);
+    const dt = now - run.last;
     run.last = now;
-    const from = map.getZoom();
-    const catchUp = still() ? 1 : 1 - Math.exp(-dt / run.chase);
-    let zoom = from + (run.target - from) * catchUp;
-    if (Math.abs(run.target - zoom) < SETTLED) zoom = run.target;
+    const { zoom, catchUp } = eased(map.getZoom(), run.target, dt, run.chase, still());
     let centre;
     if (run.centre) {
       const at = map.getCenter();
-      const done = zoom === run.target;
-      centre = done ? run.centre : L.latLng(at.lat + (run.centre.lat - at.lat) * catchUp, at.lng + (run.centre.lng - at.lng) * catchUp);
+      centre = zoom === run.target ? run.centre : L.latLng(at.lat + (run.centre.lat - at.lat) * catchUp, at.lng + (run.centre.lng - at.lng) * catchUp);
     } else {
       // The block that was under the anchor stays under it.
       const half = map.getSize().divideBy(2);
-      centre = map.unproject(map.project(run.about, zoom).subtract(run.at.subtract(half)), zoom);
+      centre = L.latLng(anchoredCentre(run.about, run.at, half, zoom));
     }
     map._move(centre, zoom, { pinch: true, round: false });
     if (zoom === run.target && now >= run.until) finish();
@@ -202,23 +236,18 @@
   // A level up or down. From between two it is to the next whole one, so
   // that the steps land on levels a scale can be read off.
   function by(direction, levels = 1) {
-    const now = heading();
-    const nearest = Math.round(now);
-    const first = Math.abs(now - nearest) < 0.01 ? nearest + direction : direction > 0 ? Math.ceil(now) : Math.floor(now);
-    to(first + direction * (levels - 1));
+    to(stepped(heading(), direction, levels));
   }
   map.zoomIn = (delta) => { by(1, Math.max(1, Math.round(delta || 1))); return map; };
   map.zoomOut = (delta) => { by(-1, Math.max(1, Math.round(delta || 1))); return map; };
 
   map.getContainer().addEventListener('wheel', (e) => {
-    const unit = e.deltaMode === 1 ? LINE_PX : e.deltaMode === 2 ? PAGE_PX : 1;
-    const dy = e.deltaY * unit;
+    const levels = wheelLevels(e.deltaY, e.deltaMode, e.ctrlKey);
     // Sideways scrolling is not a zoom, and the page does not scroll.
     e.preventDefault();
-    if (dy === 0 || !map._loaded) return;
+    if (levels === 0 || !map._loaded) return;
     const box = map.getContainer().getBoundingClientRect();
     const where = L.point(e.clientX - box.left, e.clientY - box.top);
-    const levels = -Math.max(-MOST_PX, Math.min(MOST_PX, dy)) * (e.ctrlKey ? PINCH_LEVELS_PER_PX : WHEEL_LEVELS_PER_PX);
     const going = run && !run.centre && run.at && where.distanceTo(run.at) <= RE_ANCHOR_PX;
     const at = going ? run.at : where;
     begin(heading() + levels, {
@@ -229,6 +258,29 @@
       hold: QUIET_MS,
     });
   }, { passive: false });
+
+  // Safari's trackpad pinch is not scrolling but a gesture, with the scale
+  // it has come to since it began.
+  let pinching = null;
+  const surface = map.getContainer();
+  const pointOf = (e) => {
+    const box = surface.getBoundingClientRect();
+    return L.point(e.clientX - box.left, e.clientY - box.top);
+  };
+  surface.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+    if (!map._loaded) return;
+    const at = pointOf(e);
+    pinching = { zoom: heading(), at, about: map.containerPointToLatLng(at) };
+  });
+  surface.addEventListener('gesturechange', (e) => {
+    e.preventDefault();
+    if (pinching) begin(gestureZoom(pinching.zoom, e.scale), { centre: null, at: pinching.at, about: pinching.about, chase: CHASE_MS, hold: QUIET_MS });
+  });
+  surface.addEventListener('gestureend', (e) => {
+    e.preventDefault();
+    pinching = null;
+  });
 
   // --- where the useful stops are -----------------------------------------------
 

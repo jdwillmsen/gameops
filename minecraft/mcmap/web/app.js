@@ -38,7 +38,9 @@
   // terrain's own tiles stop at a block to the pixel, so everything past
   // that is the same tiles enlarged.
   const MAX_ZOOM = 7;
-  const MIN_ZOOM = -6;
+  // As far out as a world of any size is fitted to a window; each
+  // dimension's own farthest is worked out from its extent.
+  const MIN_ZOOM = -12;
   // Hundredths of a level are well under a pixel at any scale the map
   // has, and keep an address short.
   const tidy = (zoom) => Math.round(zoom * 100) / 100;
@@ -241,7 +243,7 @@
   function limits() {
     if (!extent) return;
     const fit = fitZoom(extent, map.getSize());
-    const floor = Number.isFinite(fit) ? Math.min(wholeWorld, Math.floor(fit * 100) / 100) : wholeWorld;
+    const floor = Number.isFinite(fit) ? Math.min(wholeWorld, Math.floor((fit - 0.1) * 100) / 100) : wholeWorld;
     map.setMinZoom(Math.max(MIN_ZOOM, floor));
   }
   map.on('resize', limits);

@@ -15,13 +15,15 @@ func TestZoomIsToldInPlainTermsAndKeptWhenRun(t *testing.T) {
 	if err != nil {
 		t.Skip("no node on this machine to run the zoom's script with")
 	}
-	out, err := exec.Command(node, "testdata/zoom.test.cjs").CombinedOutput()
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if !strings.HasPrefix(line, "ok ") {
-			t.Log(line)
+	for _, file := range []string{"testdata/zoom.test.cjs", "testdata/zoomfollow.test.cjs"} {
+		out, err := exec.Command(node, file).CombinedOutput()
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if !strings.HasPrefix(line, "ok ") {
+				t.Log(line)
+			}
 		}
-	}
-	if err != nil {
-		t.Errorf("the zoom's script did not do what is asked of it: %v", err)
+		if err != nil {
+			t.Errorf("%s did not do what is asked of it: %v", file, err)
+		}
 	}
 }
