@@ -91,14 +91,14 @@ func TestSearchFindsABiomeAStructureAndAMarkerByName(t *testing.T) {
 		t.Errorf("monument = %+v", h)
 	}
 
-	cat := search(t, s, "oj", me)
+	cat := search(t, s, "tango", me)
 	if len(cat.Hits) != 1 {
-		t.Fatalf("oj: %s", describe(cat))
+		t.Fatalf("tango: %s", describe(cat))
 	}
-	if h := cat.Hits[0]; h.Kind != "mob" || h.Name != "OJ" || h.Detail != "cat" || h.X != 173 || h.Z != 263 || *h.Y != 66 {
+	if h := cat.Hits[0]; h.Kind != "mob" || h.Name != "Tango" || h.Detail != "cat" || h.X != 12 || h.Z != -34 || *h.Y != 64 {
 		t.Errorf("the cat = %+v", h)
 	}
-	if got := search(t, s, "cat", me); describe(got) != "mob:OJ@overworld" {
+	if got := search(t, s, "cat", me); describe(got) != "mob:Tango@overworld" {
 		t.Errorf("a mob by its type: %s", describe(got))
 	}
 	if got := search(t, s, "spawn", me); describe(got) != "spawn:World Spawn@overworld" || got.Hits[0].X != 40 || got.Hits[0].Z != -72 {
