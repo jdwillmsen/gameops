@@ -403,7 +403,7 @@ input[type="number"] { width: 6.5rem; }
    level, what a block comes to in pixels, and how much ground the window
    shows, and a button for the panel that goes somewhere exact. */
 .zoom-open, .zoom-detail, .zoom-wide { display: inline-flex; align-items: baseline; gap: 0 0.4em; }
-.zoom-open { flex: none; min-height: 0; padding: 0.1rem 0.5rem; background: none; border-color: transparent; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zoom-open { flex: none; min-height: 0; margin-block: -1px; padding: 0 0.5rem; line-height: inherit; background: none; border-color: transparent; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .zoom-open:hover:not(:disabled), .zoom-open[aria-expanded="true"] { color: var(--text); border-color: var(--line); }
 .zoom-open output { color: var(--text); }
 .zoom-open .zoom-detail output { color: var(--dim); }
@@ -413,6 +413,8 @@ input[type="number"] { width: 6.5rem; }
 #zoom-scale { min-width: 19ch; text-align: left; }
 #zoom-across { min-width: 23ch; text-align: left; }
 @media (max-width: 1500px) { .zoom-wide { display: none; } }
+@media (max-width: 1200px) { .zoom-detail { display: none; } }
+@media (max-width: 1000px) { .zoom-long { display: none; } .zoom-short { display: inline; } }
 .zoom-pop {
   position: absolute;
   bottom: 100%;
