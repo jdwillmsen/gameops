@@ -1534,3 +1534,20 @@ kbd, .keys code {
 @media (max-width: 720px), (max-height: 480px) {
   .debug { left: 0; right: 0; bottom: 0; width: auto; max-height: 45%; border-radius: 8px 8px 0 0; }
 }
+
+/* The map's history: a button in the corner of the map that opens into a
+   row of the days kept. Over the map and its own controls, under every
+   sheet and menu. */
+.timeline { position: absolute; left: 0.75rem; bottom: 0.75rem; z-index: 1050; display: flex; align-items: flex-end; gap: 0.4rem; max-width: calc(100% - 1.5rem); cursor: default; }
+.timeline[hidden], .timeline-body[hidden] { display: none; }
+.locked .timeline { display: none; }
+.timeline-open { background: var(--float); }
+.timeline-open[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.timeline-body { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.4rem; min-width: 0; padding: 0.4rem 0.5rem; background: var(--float); border: 1px solid var(--line); border-radius: 8px; }
+.timeline-range { flex: 1 1 10rem; min-width: 6rem; accent-color: var(--accent); }
+.timeline-day { min-width: 9.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.timeline-note { flex: 1 1 100%; margin: 0; color: var(--dim); font-size: 0.85em; }
+/* A day that is past is told apart from now at a glance. */
+.past .timeline-body { border-color: var(--warn); }
+.past .timeline-day { color: var(--warn); }
+.past #status { color: var(--warn); }

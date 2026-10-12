@@ -18,6 +18,8 @@
   // How long after a snapshot its tiles are still expected at any moment.
   const DRAWING_MS = 5 * 60_000;
   const COUNTDOWN_MS = 250;
+  // The longest the tiles being replaced stay under the ones replacing them.
+  const SWAP_MS = 4000;
   const LABELS = { overworld: 'Overworld', nether: 'Nether', end: 'The End' };
   // What the viewer keeps, where the page has a script for it. The page
   // and its scripts are cached apart for a few minutes, so just after a
@@ -90,8 +92,11 @@
   // No cache-busting parameter: tiles are served with a short max-age and a
   // Last-Modified, so after a render the browser revalidates and only the
   // tiles that actually changed are downloaded again.
+  // A layer given a day draws the terrain as it was kept on that day, at
+  // the same addresses.
   const Tiles = L.TileLayer.extend({
     getTileUrl(c) {
+      if (this.options.day) return `api/history/tiles/${this.options.day}/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}`;
       return `tiles/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}`;
     },
   });
@@ -196,6 +201,9 @@
   let current = null;
   let layer = null;
   let extent = null;
+  // The day whose terrain is drawn in place of today's, as the server
+  // lists it, or null for the map as it is.
+  let past = null;
   const grid = new Grid();
 
   const dimension = (id) => info && info.dimensions.find((d) => d.id === id);
@@ -249,10 +257,16 @@
   map.on('resize', limits);
 
   function show(id, view) {
-    const d = dimension(id);
-    if (!d || !d.rendered) return;
+    const today = dimension(id);
+    if (!today || !today.rendered) return;
+    // A day kept has its own extent and format: the world was smaller
+    // then, and may have been drawn another way. A day that does not hold
+    // this dimension is drawn as nothing, not as today.
+    const d = (past && past.dimensions.find((o) => o.id === id)) || today;
+    const old = layer;
+    const stays = old && current === id;
     current = id;
-    if (layer) map.removeLayer(layer);
+    if (old && !stays) map.removeLayer(old);
 
     const bounds = L.latLngBounds(
       [d.minRegionZ * REGION, d.minRegionX * REGION],
@@ -261,6 +275,7 @@
     extent = bounds;
     layer = new Tiles('', {
       dimension: id,
+      day: past ? past.day : '',
       format: d.format,
       tileSize: TILE,
       minNativeZoom: d.minZoom,
@@ -273,6 +288,15 @@
       noWrap: true,
       keepBuffer: 2,
     }).addTo(map);
+    // The same place drawn again, a day apart or a render apart: what was
+    // there stays under the new tiles until they have come, so stepping
+    // through days is one picture turning into the next and not a blink
+    // of nothing between them. Not for ever, for tiles that never come.
+    if (stays) {
+      const drop = () => map.removeLayer(old);
+      layer.once('load', drop);
+      setTimeout(drop, SWAP_MS);
+    }
     map.setMaxBounds(bounds.pad(0.25));
     wholeWorld = d.minZoom;
     limits();
@@ -314,6 +338,8 @@
     el.status.classList.toggle('problem', Boolean(info && info.problem));
     if (!info) {
       el.status.textContent = '';
+    } else if (past) {
+      el.status.textContent = `as it was on ${past.day}`;
     } else if (!d || !d.rendered) {
       el.status.textContent = 'the first render is still running; this page updates when it is done';
     } else {
@@ -340,7 +366,8 @@
 
   function countdown() {
     const locked = !el.login.hidden;
-    el.refresh.hidden = locked || !info;
+    // A day that is past is not about to be refreshed.
+    el.refresh.hidden = locked || !info || Boolean(past);
     if (locked || !info) return;
     const now = Date.now() + serverOffset;
     const snapshot = info.snapshotAt ? Date.parse(info.snapshotAt) : NaN;
@@ -540,7 +567,8 @@
       else if (first) show(first.id);
     } else {
       const now = dimension(current);
-      if (layer && now && before && version(now) !== version(before)) {
+      // A new render changes nothing about a day that is past.
+      if (!past && layer && now && before && version(now) !== version(before)) {
         // A render can extend the map, so the layer is rebuilt with the new
         // extent rather than redrawn inside the old one. The view stays put.
         const c = map.getCenter();
@@ -625,6 +653,21 @@
         const view = { x: at.x, z: at.z, zoom: at.zoom };
         if (at.d !== current) show(at.d, view);
         else map.setView([view.z, view.x], view.zoom, { animate: false });
+        return true;
+      },
+    },
+    // The day whose terrain is drawn: read as its date, or '' for now, and
+    // set to a day as GET /api/history lists it, or to null for now. The
+    // view stays where it is.
+    past: {
+      get: () => (past ? past.day : ''),
+      set(day) {
+        const next = day && typeof day.day === 'string' && Array.isArray(day.dimensions) ? day : null;
+        if ((next ? next.day : '') === (past ? past.day : '')) return true;
+        past = next;
+        if (!current) return true;
+        const c = map.getCenter();
+        show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
         return true;
       },
     },
