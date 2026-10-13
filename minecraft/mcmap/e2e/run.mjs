@@ -32,6 +32,7 @@ const OPTIONS = {
   'port-forward': { type: 'string' },
   'approved-by': { type: 'string' },
   'insecure-local-tls': { type: 'boolean' },
+  'no-history': { type: 'boolean', env: 'MCMAP_E2E_NO_HISTORY' },
   'metrics-file': { type: 'string', env: 'MCMAP_E2E_METRICS_FILE' },
   'evidence-dir': { type: 'string', env: 'MCMAP_E2E_EVIDENCE_DIR' },
   'evidence-pages': { type: 'boolean', env: 'MCMAP_E2E_EVIDENCE_PAGES' },
@@ -55,6 +56,8 @@ const USAGE = `usage: node run.mjs --public-url <https://map> --internal-url <ht
   There is no way to give it as an argument or in a variable.
 
   --insecure-local-tls     accept the harness's own certificate; refused for any address but this machine's
+  --no-history             the map keeps no history, so its 404 to the page's one ask for the days kept is
+                           no fault. Without this that answer fails the run, as it should where days are kept
   --metrics-file <path>    write the run as Prometheus text
   --evidence-dir <path>    on a failed check, keep a screenshot of the page here. Off unless given.
                            A screenshot shows the live map: never a directory that is committed or uploaded
@@ -100,6 +103,7 @@ function configure(argv) {
     forward: values['port-forward'],
     approvedBy: values['approved-by'],
     insecureLocalTls: values['insecure-local-tls'] === true,
+    keepsHistory: !(values['no-history'] === true || process.env.MCMAP_E2E_NO_HISTORY === 'true'),
     mode: local ? 'local' : external ? 'external' : 'cluster',
     metricsFile: get('metrics-file'),
     evidenceDir: get('evidence-dir'),

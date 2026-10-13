@@ -6,8 +6,10 @@
 #
 #   minecraft/mcmap/e2e/local.sh [arguments for run.mjs]
 #
-# HARNESS_QUIET=1 runs against a world with nobody in it. HARNESS_WEB=<dir>
-# serves another build of the page. E2E_PORT moves the two ports.
+# HARNESS_QUIET=1 runs against a world with nobody in it. HARNESS_NO_HISTORY=1
+# runs against a map that keeps no days, where it otherwise keeps one.
+# HARNESS_WEB=<dir> serves another build of the page. E2E_PORT moves the two
+# ports.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,7 +31,13 @@ trap cleanup EXIT
 # nothing. It is of no use beyond this script: the harness dies with it.
 (umask 077 && head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$work/secret")
 
-SERVICE_SESSION_SECRET="$(cat "$work/secret")" HTTP_ADDR="127.0.0.1:$port" INTERNAL_ADDR="127.0.0.1:$((port + 1000))" \
+# The runner is told which the map is: a map that keeps no days answers the
+# page's ask for them with a 404, which is a fault from one that does.
+history=true
+no_history=""
+if [[ -n "${HARNESS_NO_HISTORY:-}" ]]; then history=false; no_history="--no-history"; fi
+
+SERVICE_SESSION_SECRET="$(cat "$work/secret")" HISTORY_ENABLED="$history" HTTP_ADDR="127.0.0.1:$port" INTERNAL_ADDR="127.0.0.1:$((port + 1000))" \
   "$work/harness" > "$work/harness.log" 2>&1 &
 harness_pid=$!
 for _ in $(seq 1 100); do
@@ -41,7 +49,7 @@ grep -q '"harness listening"' "$work/harness.log" || { echo "the harness did not
 
 status=0
 node "$here/run.mjs" --public-url "https://127.0.0.1:$port" --internal-url "http://127.0.0.1:$((port + 1000))" \
-  --secret-file "$work/secret" --insecure-local-tls --metrics-file "$work/metrics.prom" "$@" | tee "$work/run.log" || status=$?
+  --secret-file "$work/secret" --insecure-local-tls --metrics-file "$work/metrics.prom" $no_history "$@" | tee "$work/run.log" || status=$?
 
 # What the run wrote of itself: that it finished, and that no check tried to
 # report anything outside the lists of what may be reported.
@@ -67,7 +75,7 @@ FAKE
   chmod +x "$work/bin/kubectl"
   PATH="$work/bin:$PATH" node "$here/run.mjs" --public-url "https://127.0.0.1:$port" --insecure-local-tls \
     --secret-from-kube games/map-checks/secret --port-forward games/map:9090 --approved-by local-harness \
-    --only exchange,map-loads,session,scope || status=$?
+    --only exchange,map-loads,session,scope $no_history || status=$?
 fi
 
 # The map's own record of the run: one exchange, from this machine, and

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { routeOf } from '../lib/browser.mjs';
+import { expectedOf, routeOf } from '../lib/browser.mjs';
 import { CHECKS, MEASURES, REASONS, slug } from '../lib/fields.mjs';
 import { FAIL, PASS, Report, SKIP } from '../lib/report.mjs';
 
@@ -140,4 +140,12 @@ test('an address is written as its route and never its query', () => {
     ['https://map.example.test/Madeup%20Player', 'unreadable'],
     ['not an address', 'unreadable'],
   ]) assert.equal(routeOf(address), route);
+});
+
+test('no list of days is a fault from any map but one said to keep none', () => {
+  assert.equal(expectedOf({ keepsHistory: true }).has('/api/history'), false);
+  assert.deepEqual(expectedOf({ keepsHistory: false }).get('/api/history'), [404]);
+  // What one context is there to be refused is added to the rest, for it alone.
+  assert.deepEqual(expectedOf({ keepsHistory: true }, [['/api/map', 401], ['/api/waypoints', 500]]).get('/api/waypoints'), [403, 404, 500]);
+  assert.equal(expectedOf({ keepsHistory: true }).has('/api/map'), false);
 });
