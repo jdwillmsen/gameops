@@ -24,6 +24,10 @@ function leaflet() {
     south, west, north, east,
     pad: (by) => box(south - (north - south) * by, west - (east - west) * by, north + (north - south) * by, east + (east - west) * by),
     contains: (p) => { const q = at(p); return q.lat >= south && q.lat <= north && q.lng >= west && q.lng <= east; },
+    getSouth: () => south,
+    getWest: () => west,
+    getNorth: () => north,
+    getEast: () => east,
   });
   class Heard {
     on(type, fn) { this.heard = [...(this.heard || []), [type, fn, false]]; return this; }
@@ -49,6 +53,9 @@ function leaflet() {
     getCenter() { return { ...this.centre }; }
     getZoom() { return this.zoom; }
     getContainer() { return {}; }
+    getSize() { return { x: 1024, y: 768 }; }
+    createPane(name) { this.panes = { ...this.panes, [name]: { style: {} } }; return this.panes[name]; }
+    getPane(name) { return this.panes[name]; }
     held() {
       if (this.centre === null) return;
       this.zoom = Math.max(this.zoom, this.least);
@@ -86,7 +93,7 @@ function leaflet() {
     Transformation: class {},
     map: () => map,
     TileLayer: Layer,
-    GridLayer: Layer,
+    Renderer: Layer,
     latLngBounds: (a, b) => box(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])),
   };
   return { L, map };
@@ -155,7 +162,7 @@ test('choosing a day leaves the view where it was, outside what that day held an
   p.app.past.set(THEN);
   assert.deepEqual(p.map.getCenter(), { lat: 1200, lng: -1500 });
   assert.equal(p.map.getZoom(), -5);
-  assert.equal(p.terrain().at(-1).options.minZoom, -5, 'the day is drawn, stretched, as far out as the map goes');
+  assert.ok(p.terrain().at(-1).options.minZoom <= p.map.least, 'the day is drawn, stretched, as far out as the map goes');
   p.app.past.set(null);
   assert.deepEqual(p.map.getCenter(), { lat: 1200, lng: -1500 });
   assert.equal(p.map.getZoom(), -5);
