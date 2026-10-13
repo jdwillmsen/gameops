@@ -613,7 +613,7 @@ test('a record of the version before is brought up, and the script from before t
   const storage = new Map([['mcmap.settings', JSON.stringify({ v: 1, layers: { 'structures/village': false, 'markers/beds': false }, biome: { only: 'desert' }, look: { density: 'compact' } })]]);
   const p = await load(storage);
   const kept = JSON.parse(storage.get('mcmap.settings'));
-  assert.equal(kept.v, 2);
+  assert.equal(kept.v, 3);
   same(kept.layers['structures#kinds'], { only: null, hidden: ['village'] });
   same(kept.layers['biomes#items'], { only: 'desert', hidden: [] });
   assert.equal(p.state('Markers', 'Beds'), 'false');
@@ -622,16 +622,16 @@ test('a record of the version before is brought up, and the script from before t
   const file = { v: 1, layers: { 'structures/monument': false }, panel: { folded: [] }, live: { paused: false, interval: 1 }, trails: { seconds: 3600 }, shortcuts: { on: true }, grid: { on: false }, biome: { only: null }, look: {}, views: { list: [], order: [], start: null, hidden: [], active: null } };
   const read = p.settings.check.record(file);
   assert.ok(read, 'a file of version 1 is read');
-  assert.equal(read.v, 2);
+  assert.equal(read.v, 3);
   same(read.layers['structures#kinds'], { only: null, hidden: ['monument'] });
-  assert.equal(p.settings.check.record({ ...file, v: 3 }), null);
+  assert.equal(p.settings.check.record({ ...file, v: 4 }), null);
   // What the script from before does on meeting a later record is its own
   // and is checked in a browser; that this one does it too is checked here.
-  storage.set('mcmap.settings', JSON.stringify({ ...kept, v: 3 }));
+  storage.set('mcmap.settings', JSON.stringify({ ...kept, v: 4 }));
   const later = await load(storage);
   assert.equal(later.settings.kept(), 'newer');
   await later.press(['Markers', 'Beds']);
-  assert.equal(JSON.parse(storage.get('mcmap.settings')).v, 3, 'a later record is not written over');
+  assert.equal(JSON.parse(storage.get('mcmap.settings')).v, 4, 'a later record is not written over');
 });
 
 // What a line says of everything under it, as the viewer reads the list.

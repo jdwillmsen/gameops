@@ -107,11 +107,14 @@
   // Last-Modified, so after a render the browser revalidates and only the
   // tiles that actually changed are downloaded again.
   // A layer given a day draws the terrain as it was kept on that day, at
-  // the same addresses.
+  // the same addresses. A layer given a level draws that cut of the nether
+  // from the same address with the level after it; the default cut has no
+  // level, so its addresses are the ones there have always been.
   const Tiles = L.TileLayer.extend({
     getTileUrl(c) {
       if (this.options.day) return `api/history/tiles/${this.options.day}/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}`;
-      return `tiles/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}`;
+      const level = this.options.level ? `?level=${this.options.level}` : '';
+      return `tiles/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}${level}`;
     },
   });
 
@@ -230,9 +233,25 @@
   // stands, as a share of the map's width.
   let compared = null;
   let cut = 0.5;
+  // The nether's cut the viewer chose, as the server names it, or '' for
+  // the default one. What is drawn is this only while the server still
+  // offers it: a deployment can take a level away.
+  let netherCut = settings ? settings.get('levels').nether || '' : '';
   const grid = new Grid();
 
   const dimension = (id) => info && info.dimensions.find((d) => d.id === id);
+
+  // The cuts of a dimension the viewer can choose between, the default
+  // first, or none where there is no choice to make.
+  const DEFAULT_LEVEL = 'default';
+  const levelsOf = (id) => {
+    const d = id === 'nether' ? dimension(id) : null;
+    return d && d.rendered && Array.isArray(d.levels) && d.levels.length > 1 ? d.levels : [];
+  };
+  // The level asked of the server for a dimension: none for the default,
+  // for every other dimension and for a day that is past, which was kept
+  // as the default cut only.
+  const levelOf = (id) => (!past && netherCut !== '' && levelsOf(id).some((l) => l.id === netherCut && l.id !== DEFAULT_LEVEL) ? netherCut : '');
 
   // Tells the live layer, which is a file of its own, that what it should
   // be showing may have changed: the dimension, the login, or the map data.
@@ -339,6 +358,7 @@
     s.layer = new Tiles('', {
       dimension: id,
       day: day ? day.day : '',
+      level: day ? '' : levelOf(id),
       format: d.format,
       tileSize: TILE,
       minNativeZoom: d.minZoom,
@@ -440,6 +460,25 @@
     writeHash();
     describe();
     announce();
+  }
+
+  // Takes up a cut of the nether, given as the server names it, and says
+  // whether it is one on offer. It is kept for next time even while another
+  // dimension or a day is shown; it is drawn only for the nether as it is,
+  // from the place the map is at, through the one swap of layers the days
+  // use, so a viewer who steps through the cuts fast is shown one picture
+  // turning into the next.
+  function choose(id) {
+    if (typeof id !== 'string' || !levelsOf('nether').some((l) => l.id === id)) return false;
+    const next = id === DEFAULT_LEVEL ? '' : id;
+    if (next === netherCut) return true;
+    netherCut = next;
+    if (settings) settings.set('levels', { nether: netherCut || null });
+    if (current === 'nether' && !past) {
+      const c = map.getCenter();
+      show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
+    }
+    return true;
   }
 
   function tabs() {
@@ -693,6 +732,9 @@
       // that, the place the viewer's default view was saved with.
       const kept = settings ? settings.place() : null;
       const want = parseHash() || (kept && { id: kept.d, x: kept.x, z: kept.z, zoom: kept.zoom });
+      // The cut a default view was saved with comes with its place, though
+      // it is not the viewer's own choice and so is not kept as one.
+      if (!parseHash() && kept && kept.d === 'nether') netherCut = kept.level || '';
       const first = info.dimensions.find((d) => d.rendered);
       if (want && dimension(want.id) && dimension(want.id).rendered) show(want.id, want);
       else if (first) show(first.id);
@@ -780,11 +822,16 @@
       get() {
         if (!current) return null;
         const c = map.getCenter();
-        return { d: current, x: Math.round(c.lng), z: Math.round(c.lat), zoom: tidy(map.getZoom()) };
+        const where = { d: current, x: Math.round(c.lng), z: Math.round(c.lat), zoom: tidy(map.getZoom()) };
+        // Said only for a cut other than the default one, which is what a
+        // place with no level means.
+        if (levelOf(current) !== '') where.level = levelOf(current);
+        return where;
       },
       set(at) {
         const d = at && dimension(at.d);
         if (!d || !d.rendered || ![at.x, at.z, at.zoom].every(Number.isFinite)) return false;
+        if (at.d === 'nether') choose(at.level || DEFAULT_LEVEL);
         const view = { x: at.x, z: at.z, zoom: at.zoom };
         if (at.d !== current) show(at.d, view);
         else map.setView([view.z, view.x], view.zoom, { animate: false });
@@ -860,6 +907,14 @@
           return cut;
         },
       },
+    },
+    // The cut of the nether that is drawn. It is offered only while the
+    // nether is what is shown, with more than one cut to choose between and
+    // no day past; choosing is remembered by the page, and drawn at once.
+    level: {
+      list: () => (current === 'nether' && !past ? levelsOf('nether').map((l) => ({ ...l })) : []),
+      get: () => levelOf('nether') || DEFAULT_LEVEL,
+      set: (id) => choose(id),
     },
     layers,
   };

@@ -299,7 +299,7 @@
     }
     // The place while the record is still held: another dimension lets go
     // of the biome picked out, and that must not be what is kept.
-    if (was.d) app.place.set({ d: was.d, x: was.x, z: was.z, zoom: was.zoom });
+    if (was.d) app.place.set({ d: was.d, x: was.x, z: was.z, zoom: was.zoom, level: was.level });
     settings.release();
     redraw([]);
     if (app.chunk && app.chunk.pin) app.chunk.pin(was.pin);
@@ -641,6 +641,7 @@
     if (view.place) {
       out.p = [view.place.d, view.place.x, view.place.z, view.place.zoom];
       if (view.place.pin) out.q = [view.place.pin.u, view.place.pin.x, view.place.pin.z];
+      if (view.place.level !== undefined) out.k = view.place.level;
     }
     // Each appearance setting the view has, under its place in the list: a
     // view may have only some of them, and one it lacks is left out.
@@ -664,7 +665,7 @@
     let raw;
     try { raw = JSON.parse(b64.from(part.slice(3))); } catch { return bad; }
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return bad;
-    const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'a'];
+    const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'k', 'a'];
     if (Object.keys(raw).some((key) => !allowed.includes(key))) return bad;
     if (typeof raw.l !== 'string' || !/^[01-]{0,64}$/.test(raw.l)) return bad;
     const view = { name: raw.n, layers: {} };
@@ -712,7 +713,8 @@
         if (!Array.isArray(raw.q) || raw.q.length !== 3) return bad;
         view.place.pin = { u: raw.q[0], x: raw.q[1], z: raw.q[2] };
       }
-    } else if (raw.q !== undefined) return bad;
+      if (raw.k !== undefined) view.place.level = raw.k;
+    } else if (raw.q !== undefined || raw.k !== undefined) return bad;
     if (raw.a !== undefined) {
       if (raw.a === null || typeof raw.a !== 'object' || Array.isArray(raw.a)) return bad;
       view.look = {};

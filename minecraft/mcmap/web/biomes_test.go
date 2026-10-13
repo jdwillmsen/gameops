@@ -59,7 +59,7 @@ func TestBiomeOverlayAsksForTilesAsTheTerrainDoes(t *testing.T) {
 			t.Errorf("biomes.js no longer has %s", need)
 		}
 	}
-	if !bytes.Contains(read(t, "app.js"), []byte("return `tiles/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}`;")) {
+	if !bytes.Contains(read(t, "app.js"), []byte("return `tiles/${this.options.dimension}/${c.z}/${c.x}/${c.y}.${this.options.format}${level}`;")) {
 		t.Error("app.js no longer addresses terrain tiles the way biomes.js assumes")
 	}
 	// Whether the overlay is on is the panel's to keep.
