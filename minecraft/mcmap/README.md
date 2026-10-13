@@ -2269,8 +2269,8 @@ as of the last completed reading, and false where no chunk has been
 generated. It is what anything else in the service asks.
 
 The surface heights are asked of `(*biomes.Store).World().Heights()`, which
-is nil before there is a reading (and every method of the `*heights.Map`
-it returns is safe on nil, and says not known):
+is nil before there is a reading (and these three questions of the
+`*heights.Map` it returns are safe to ask of nil, and say not known):
 
 - `At(d chunks.Dimension, x, z int32) (y int32, ok bool)` is the surface
   at one column, in world y.
