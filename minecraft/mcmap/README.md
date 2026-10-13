@@ -3553,7 +3553,7 @@ counted apart and is not a failure.
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
 | `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it | |
-| `history` | History opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, the view is where it was, Now draws today's tiles again with none of the day's left, and the row closes | a day kept: a map run with `--no-history`, or one that has kept no day yet, skips |
+| `history` | History opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, the view is where it was, Now draws today's tiles again with none of the day's left, and the row closes | a day kept: a map run with `--no-history`, one that has kept no day yet, or one whose newest day kept nothing of the dimension shown, skips |
 | `follow-player` | Follow on a player, one with a head where there is one, for 20 s: it stays on, the button says so, the mark is within 4 pixels of the middle of the map that can be seen, and so is where the stream last put the player, give or take what they travel between samples | a player online |
 | `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
 | `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
