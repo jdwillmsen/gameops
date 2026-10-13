@@ -2555,10 +2555,13 @@ own day, is named in the log, and makes the command exit 1 once the rest
 are done.
 
 It is a job run by hand beside a running map, and can be run again: a day
-already held is left as it is. Three things to know. The running map reads
+already held is left as it is. Four things to know. The running map reads
 its days when it starts, so it lists the new ones after its next restart,
 and should not be restarted while the job runs, since a starting map
-clears half-written files it takes for its own. A day's `changed` is
+clears half-written files it takes for its own. A starting job does the
+same, so one started while the map is keeping its own day, once a day
+after 00:00 UTC, fails that capture; the map tries again on its next
+cycle, and the job is best started away from that hour. A day's `changed` is
 worked out when the day is kept, so the first day that was kept live still
 counts every tile as changed after earlier days are put in before it. And
 the renderer, `UNMINED_SHA256` and `NETHER_TOP_Y` have to be the map's own,

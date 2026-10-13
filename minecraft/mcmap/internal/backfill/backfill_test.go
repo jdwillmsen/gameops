@@ -261,12 +261,14 @@ func TestWhatIsNotAnArchiveOfTheWorldIsPassedOver(t *testing.T) {
 
 func TestAnArchiveCannotWriteOutsideItsWorkDirectory(t *testing.T) {
 	s := newSetup(t)
-	archive(t, s.archives, "fwb-20261001T040007Z.tar.gz", file{"../escaped", "x"}, file{"FWB/level.dat", "the first"})
+	archive(t, s.archives, "fwb-20261001T040007Z.tar.gz", file{"../escaped", "x"}, file{"../../escaped", "x"}, file{"FWB/level.dat", "the first"})
 	if _, err := s.job.Run(context.Background()); err == nil {
 		t.Fatal("an archive naming a path outside itself was drawn")
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(s.job.Work), "escaped")); err == nil {
-		t.Fatal("the archive wrote outside the work directory")
+	for _, dir := range []string{s.job.Work, filepath.Dir(s.job.Work)} {
+		if _, err := os.Stat(filepath.Join(dir, "escaped")); err == nil {
+			t.Fatalf("the archive wrote outside itself, into %s", dir)
+		}
 	}
 	if n := len(s.store.Days()); n != 0 {
 		t.Fatalf("%d days kept", n)
