@@ -171,7 +171,7 @@ export async function apiBudget({ page, cfg, report }) {
     const asks = [
       ['config', 'api/config'], ['me', 'api/me'], ['map', 'api/map'], ['icons', 'api/icons'], ['names', 'api/names'],
       ['markers', `api/markers?dimension=${d}`], ['structures', `api/structures?dimension=${d}&kinds=all`],
-      ['biomes', `api/biomes?dimension=${d}`], ['biomes_at', `api/biomes/at?dimension=${d}&${at}`],
+      ['biomes', `api/biomes?dimension=${d}`], ['biomes_at', `api/biomes/at?dimension=${d}&${at}`], ['topography', `api/topography?dimension=${d}`],
       ['trails', `api/trails?dimension=${d}`], ['search', `api/search?q=a&dimension=${d}&${at}&limit=5`],
     ];
     const out = [];

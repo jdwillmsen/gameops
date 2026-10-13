@@ -74,6 +74,9 @@ export const SENTENCES = [
   "switching the biome overlay on drew no tiles",
   "picking out one biome did not change the overlay",
   "switching the biome overlay off left its tiles on the map",
+  "switching the topography on drew no tiles",
+  "with all three drawings on the map asked for tiles of other drawings too",
+  "switching the topography off left its tiles on the map",
   "no mobs, structures or biomes here to switch",
   "no biome or structure here to search for",
   "a search for something the world holds found nothing",
@@ -134,7 +137,7 @@ export const slug = (sentence) => String(sentence).toLowerCase().replace(/[^a-z0
 export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sentence]));
 
 // The page's own scripts, by which a script error is placed.
-export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js',
+export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js',
   'slime.js', 'chunk.js', 'trails.js', 'history.js', 'levels.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
@@ -147,7 +150,7 @@ export const MEASURES = new Set([
   'asked', 'not_served', 'slowest_ms', 'not_answered', 'over_budget',
   'rendered', 'unrendered', 'players', 'heads_listed', 'heads_drawn',
   'levels', 'samples', 'samples_zooming', 'worst_ratio', 'wrong_size',
-  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles',
+  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles', 'topography_tiles',
   'hits', 'answer_ms', 'open_ms', 'mob_layers_before', 'mob_layers_in_view', 'mob_layers_after', 'themes', 'distinct',
   'days', 'day_tiles', 'day_pictures', 'day_markers', 'moved_pixels',
   'seconds', 'measured', 'worst_pixels', 'p95_pixels', 'over_tolerance', 'worst_pixels_from_where_it_is', 'samples_left_behind',
@@ -166,7 +169,7 @@ export const MEASURES = new Set([
 export const GAUGES = {
   mcmap_e2e_api_seconds: {
     help: 'How long each answer the page is built from took, through the public path.', label: 'endpoint',
-    allows: (key) => ['config', 'me', 'map', 'icons', 'names', 'markers', 'structures', 'biomes', 'biomes_at', 'trails', 'search'].includes(key),
+    allows: (key) => ['config', 'me', 'map', 'icons', 'names', 'markers', 'structures', 'biomes', 'biomes_at', 'topography', 'trails', 'search'].includes(key),
   },
   mcmap_e2e_face_offset_pixels: {
     help: "How far the middle of each face's head is from the middle of its plate, in screen pixels, at the worst of the densities tried.", label: 'face',
