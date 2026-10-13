@@ -29,8 +29,7 @@ import (
 
 // An archive is named for the moment it was taken, which is the only
 // thing here that says which day it is: <anything>-20261001T040007Z.tar.gz.
-// A leading dot is a copy still being written.
-var archiveName = regexp.MustCompile(`^[^.].*-(\d{8}T\d{6}Z)\.tar\.gz$`)
+var archiveName = regexp.MustCompile(`^.*-(\d{8}T\d{6}Z)\.tar\.gz$`)
 
 const stampLayout = "20060102T150405Z"
 
