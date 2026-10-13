@@ -2535,8 +2535,43 @@ records both, and `GET /api/history` marks a day drawn differently from the
 one before it with `rendererChanged`; on such a day the page's row says
 that not every difference from the day before is the world's.
 
+Measured on the FWB world: the first day kept, 2026-10-12, was 3,012 tiles
+and 73 MB, and the day after it added 3.7 MB. One day is not a rate, but at
+anything near it a year is a gigabyte or two, which is why there is still
+no rule for thinning days out.
+
 History cannot be rebuilt, unlike the tiles and the mirror beside it, so
 `HISTORY_DIR` belongs on storage that is kept.
+
+**The days before it was switched on.** `mcmap backfill` makes a day out of
+each archive of the world that the history has no day for. An archive is a
+`.tar.gz` with the level's directory at its root, named for when it was
+taken, `<anything>-20261001T040007Z.tar.gz`, which is all that says which
+day it is; of two from one day the earlier is the day. Each is unpacked
+into `BACKFILL_WORK`, drawn in full by the same renderer as the live map,
+and kept as the UTC day it was taken on, oldest first, with nothing of one
+archive left under the next. One that cannot be unpacked or drawn costs its
+own day, is named in the log, and makes the command exit 1 once the rest
+are done.
+
+It is a job run by hand beside a running map, and can be run again: a day
+already held is left as it is. Three things to know. The running map reads
+its days when it starts, so it lists the new ones after its next restart,
+and should not be restarted while the job runs, since a starting map
+clears half-written files it takes for its own. A day's `changed` is
+worked out when the day is kept, so the first day that was kept live still
+counts every tile as changed after earlier days are put in before it. And
+the renderer, `UNMINED_SHA256` and `NETHER_TOP_Y` have to be the map's own,
+or every day put in is marked as drawn differently from the next.
+
+| Variable | Required | Default | Purpose |
+|---|---|---|---|
+| `HISTORY_DIR` | yes | | The history the days are added to; an absolute path |
+| `BACKFILL_ARCHIVES` | yes | | Directory of archives; an absolute path. Only read |
+| `BACKFILL_WORK` | yes | | Where one archive at a time is unpacked and drawn; an absolute path with room for a world and its tiles. Left empty |
+| `LEVEL_NAME` | yes | | The world's directory name, as in the archive |
+| `DATA_DIR` | no | `/data` | Where the installed renderer is looked for, under `tools/unmined`. The map's own volume, mounted read-only, saves downloading it |
+| `UNMINED_URL`, `UNMINED_SHA256`, `RENDER_CHUNK_PROCESSORS`, `NETHER_TOP_Y` | no | as the service's | As for the service |
 
 ## Page controls
 

@@ -55,6 +55,13 @@ func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "install-pack" || os.Args[1] == "uninstall-pack") {
 		os.Exit(pack.Run(os.Args[1], os.Getenv, logger))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "backfill" {
+		if err := runBackfill(os.Getenv, logger); err != nil {
+			logger.Error("backfill failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(logger); err != nil {
 		logger.Error("exiting", "error", err)
 		os.Exit(1)
