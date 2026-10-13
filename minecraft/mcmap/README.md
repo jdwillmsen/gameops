@@ -2478,6 +2478,21 @@ when the view changes; an ask that fails is tried again after a minute.
 A server that keeps no history answers 404 once and the page then has no
 History button.
 
+The day shown is in the page's address, as a seventh part after the view,
+what is open and a saved view: `#overworld/0/0/-1///2026-10-12`, or
+`#overworld/0/0/-1/structure~village~r~10~20//2026-10-12` with a sheet
+open. It is written when a day is chosen, as the place is when the map is
+moved, and taken out on the way back to now, so Copy link on a day gives
+an address that opens on that day: once the days have arrived the row
+opens on it. An address that changes while the page is open moves the row
+the same way. A day that is not among the days kept, on a server that
+keeps none, or that is not a date written `YYYY-MM-DD`, is dropped from
+the address and the map shows now, with nothing said. An address without
+a day is exactly as it was before there were days, and everything else
+that reads an address takes its parts by their place and so reads one
+with a day as it did. A day beside a saved view is not read: such an
+address is only an offer and moves nothing.
+
 What is kept is the rendered tiles and not the world. A tile is an image,
 and showing it again needs nothing of the game's version, the save format
 or the renderer that drew it. The world would also cost far more: one
@@ -3153,7 +3168,8 @@ the Nether, is switched all the same.
 with one more part than the page's own: `#<dimension>/<x>/<z>/<zoom>/<what
 is open>/<view>`. An address without the sixth part reads exactly as it
 did, and a page from before views reads one with it as far as it
-understands. A view saved with its place puts that place in the first
+understands. It never carries a day of the history, which is a part of
+its own after this one. A view saved with its place puts that place in the first
 parts; one saved without says `-/0/0/0`, which is no dimension, so whoever
 opens it stays where their own page would start. The view is `v1.` and a
 small JSON object in the URL-safe base64 alphabet: `n` the name, `l` one
@@ -3799,7 +3815,10 @@ waypoints in a search, which says `off`. A service session gets 403 from
 anything else behind a login, and from any request that is not a `GET`.
 
 The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, with the
-zoom to two decimals, so a link opens at the same place.
+zoom to two decimals, so a link opens at the same place. After it come, by
+their place and each left empty when there is none before a later one,
+what is open over the map, a saved view, and the day of the history shown:
+`#<dimension>/<x>/<z>/<zoom>/<what is open>/<view>/<day>`.
 
 ## Metrics
 

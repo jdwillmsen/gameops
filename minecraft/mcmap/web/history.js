@@ -111,6 +111,31 @@
     timer = null;
   }
 
+  function unfold(opening) {
+    body.hidden = !opening;
+    open.setAttribute('aria-expanded', String(opening));
+  }
+
+  // The address can name a day: the one a link was copied on. Only the
+  // map reads the address, and only here is it known which days are kept,
+  // so the map says which day is wanted and is told that day, or now when
+  // it is not one of them, which also takes it out of the address. Only
+  // once the days are known: before that every day would look not kept.
+  // A map from before it could say has nothing to follow.
+  let known = false;
+  function follow() {
+    if (!known || !app.past.wanted) return;
+    const named = app.past.wanted();
+    if (named === (at < days.length ? days[at].day : '')) return;
+    const to = named ? days.findIndex((d) => d.day === named) : days.length;
+    stop();
+    at = to < 0 ? days.length : to;
+    app.past.set(at < days.length ? days[at] : null);
+    // A day is never shown with the control that says so put away.
+    if (at < days.length) unfold(true);
+    draw();
+  }
+
   function beat() {
     choose(at + 1);
     if (at >= days.length) {
@@ -126,8 +151,11 @@
     try {
       const res = await fetch('api/history', { cache: 'no-store' });
       if (res.status === 404) {
-        // A server that keeps no history says so once.
+        // A server that keeps no history says so once, and has no day
+        // an address could name.
         gone = true;
+        known = true;
+        follow();
         return;
       }
       if (!res.ok) throw new Error(String(res.status));
@@ -146,13 +174,14 @@
       app.past.set(null);
     }
     bar.hidden = days.length === 0;
+    known = true;
     draw();
+    follow();
   }
 
   open.addEventListener('click', () => {
     const opening = body.hidden;
-    body.hidden = !opening;
-    open.setAttribute('aria-expanded', String(opening));
+    unfold(opening);
     if (!opening) {
       // Put away, the control must not leave the map on a day with
       // nothing in sight saying so.
@@ -184,5 +213,6 @@
     draw();
     ask();
   });
+  document.addEventListener('mcmap:day', follow);
   ask();
 })();

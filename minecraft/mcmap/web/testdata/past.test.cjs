@@ -110,7 +110,9 @@ const LATER = { day: '2026-09-02', dimensions: [{ ...THEN.dimensions[0], maxRegi
 const NETHER = { ...TODAY, id: 'nether' };
 
 // A page with app.js run on it, opened at the place its address names.
-async function load(hash, look) {
+// Given the days a server keeps, the history's script is run on it as
+// well, against a server that lists them.
+async function load(hash, look, kept) {
   const p = page(new Map(look ? [['mcmap.settings', JSON.stringify({ v: 1, look })]] : []), { files: look ? ['settings.js'] : [] });
   const { win, doc } = p;
   const found = doc.getElementById;
@@ -124,24 +126,37 @@ async function load(hash, look) {
   doc.getElementById('login').hidden = true;
   doc.hidden = false;
   const { L, map } = leaflet();
-  const state = { today: TODAY };
+  const state = { today: TODAY, heard: [] };
+  const turns = [];
   Object.assign(win, {
     L,
-    location: { hash, href: '' },
+    location: { hash, get href() { return `https://map.test/${this.hash}`; } },
+    addEventListener: (type, fn) => { if (type === 'hashchange') turns.push(fn); },
     history: { replaceState(_, __, to) { win.location.hash = to; } },
     navigator: {},
     setInterval: () => 0,
     clearInterval() {},
     fetch: async (address) => {
-      const body = address === 'api/map' ? { world: 'w', refreshSeconds: 600, dimensions: [state.today, NETHER] } : {};
+      const body = address === 'api/map' ? { world: 'w', refreshSeconds: 600, dimensions: [state.today, NETHER] } : address === 'api/history' ? { days: kept } : {};
       return { ok: true, status: 200, headers: { get: () => '' }, json: async () => body, text: async () => JSON.stringify(body) };
     },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), win, { filename: 'app.js' });
+  doc.addEventListener('mcmap:day', () => state.heard.push(win.mcmap.past.wanted()));
+  if (kept) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'history.js'), 'utf8'), win, { filename: 'history.js' });
   const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
   await settle();
   const terrain = () => [...map.layers].filter((l) => l.options.dimension);
-  return { ...p, app: win.mcmap, map, state, settle, terrain };
+  // The address changed under the page, as by a link followed to it.
+  const turn = async (to) => {
+    win.location.hash = to;
+    for (const fn of turns) fn({ type: 'hashchange' });
+    await settle();
+  };
+  const address = () => win.location.hash;
+  const part = (name) => doc.body.querySelector(`.timeline-${name}`);
+  const press = async (name) => { part(name).click(); await settle(); };
+  return { ...p, app: win.mcmap, map, state, settle, terrain, turn, address, part, press };
 }
 
 // Long enough for tiles to have faded in: the page's waits are cut to a
@@ -308,6 +323,138 @@ test('a dimension the day did not hold, come to from one it did, asks for none o
   assert.equal(nether.isLoading(), false);
   p.app.past.set(null);
   assert.equal(p.terrain().at(-1).isLoading(), true, 'back on now the dimension is drawn as it is');
+});
+
+const SHEET = 'structure~village~r~10~20';
+
+test('an address without a day is written as it always was', async () => {
+  const p = await load('#overworld/100/200/-1');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+  assert.equal(p.app.past.wanted(), '');
+  p.app.link.set(SHEET);
+  assert.equal(p.address(), `#overworld/100/200/-1/${SHEET}`);
+  p.app.link.set('');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+  p.map.setView([64, -32], 2.5);
+  p.map.fire('moveend');
+  assert.equal(p.address(), '#overworld/-32/64/2.5');
+  assert.equal(p.app.link.href(), 'https://map.test/#overworld/-32/64/2.5');
+});
+
+test('a day chosen is the seventh part of the address, after whatever is open, and now takes it out again', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.app.past.set(THEN);
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-01');
+  assert.equal(p.app.link.href(), 'https://map.test/#overworld/100/200/-1///2026-09-01');
+  p.app.link.set(SHEET);
+  assert.equal(p.address(), `#overworld/100/200/-1/${SHEET}//2026-09-01`);
+  p.app.past.set(LATER);
+  assert.equal(p.address(), `#overworld/100/200/-1/${SHEET}//2026-09-02`);
+  p.app.past.set(null);
+  assert.equal(p.address(), `#overworld/100/200/-1/${SHEET}`);
+  p.app.link.set('');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+});
+
+test('an address with a day reads to everything else as it did without one', async () => {
+  const p = await load(`#nether/100/200/-1/${SHEET}//2026-09-01`);
+  assert.deepEqual(p.terrain().map((l) => l.options.dimension), ['nether']);
+  assert.deepEqual(p.map.getCenter(), { lat: 200, lng: 100 });
+  assert.equal(p.map.getZoom(), -1);
+  assert.equal(p.app.link.get(), SHEET);
+  assert.equal(p.app.past.wanted(), '2026-09-01');
+});
+
+test('a day an address names is kept in it, and not drawn, until the map is told that day or told there is none', async () => {
+  const p = await load('#overworld/100/200/-1///2026-09-01');
+  assert.equal(p.app.past.wanted(), '2026-09-01');
+  assert.equal(p.app.past.get(), '');
+  assert.equal(p.terrain()[0].options.day, '');
+  p.map.fire('moveend');
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-01');
+  p.app.past.set(null);
+  assert.equal(p.address(), '#overworld/100/200/-1');
+  assert.equal(p.app.past.wanted(), '');
+  assert.equal(p.terrain().length, 1, 'a day that was never drawn is not a change to draw');
+});
+
+test('what is not a date is no day, in an address or from whoever sets one', async () => {
+  for (const not of ['2026-9-1', '20260901', '2026-09-01x', '..%2F..', '<b>', 'now']) {
+    const p = await load(`#overworld/100/200/-1///${not}`);
+    assert.equal(p.app.past.wanted(), '', not);
+    assert.equal(p.address(), '#overworld/100/200/-1', not);
+  }
+  const p = await load('#overworld/100/200/-1');
+  p.app.past.set({ day: '../../etc', dimensions: THEN.dimensions });
+  assert.equal(p.app.past.get(), '');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+  assert.equal(p.terrain()[0].options.day, '');
+});
+
+test('a day beside a view in an address is not read, as nothing else beside one is', async () => {
+  const p = await load('#overworld/100/200/-1//v1.e30/2026-09-01');
+  assert.equal(p.app.past.wanted(), '');
+});
+
+test('an address that changes says which day it now names, once, and only when that has changed', async () => {
+  const p = await load('#overworld/100/200/-1');
+  await p.turn('#overworld/300/400/-2///2026-09-01');
+  assert.deepEqual(p.state.heard, ['2026-09-01']);
+  assert.deepEqual(p.map.getCenter(), { lat: 400, lng: 300 });
+  await p.turn('#overworld/500/600/-2///2026-09-01');
+  assert.deepEqual(p.state.heard, ['2026-09-01']);
+  await p.turn('#overworld/500/600/-2');
+  assert.deepEqual(p.state.heard, ['2026-09-01', '']);
+});
+
+test('with the timeline: a link to a kept day opens on that day, and stepping through days and back to now is in the address', async () => {
+  const p = await load('#overworld/100/200/-1///2026-09-01', null, [THEN, LATER]);
+  assert.equal(p.app.past.get(), '2026-09-01');
+  assert.equal(p.terrain().at(-1).options.day, '2026-09-01');
+  assert.equal(p.part('body').hidden, false);
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-01');
+  await p.press('later');
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-02');
+  assert.equal(p.app.link.href(), 'https://map.test/#overworld/100/200/-1///2026-09-02');
+  await p.press('now');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+  assert.equal(p.app.past.get(), '');
+  await p.press('earlier');
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-02');
+  await p.press('open');
+  assert.equal(p.address(), '#overworld/100/200/-1', 'putting the timeline away puts the address back on now');
+});
+
+test('with the timeline: a link to a day that is not kept opens on now, and the address stops naming it', async () => {
+  const p = await load('#overworld/100/200/-1///2025-01-01', null, [THEN, LATER]);
+  assert.equal(p.app.past.get(), '');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+  assert.equal(p.part('body').hidden, true);
+  assert.equal(p.part('day').textContent, 'Now');
+  assert.equal(p.terrain().length, 1);
+  assert.equal(p.terrain()[0].options.day, '');
+});
+
+test('with the timeline: an address that changes to a day, to another place on it, and to none moves the timeline with it', async () => {
+  const p = await load('#overworld/100/200/-1', null, [THEN, LATER]);
+  assert.equal(p.part('body').hidden, true);
+  await p.turn('#overworld/300/400/-1///2026-09-02');
+  assert.equal(p.app.past.get(), '2026-09-02');
+  assert.equal(p.part('body').hidden, false);
+  assert.equal(p.part('range').value, '1');
+  assert.deepEqual(p.map.getCenter(), { lat: 400, lng: 300 });
+  await p.turn('#nether/10/20/-1///2026-09-02');
+  assert.equal(p.app.past.get(), '2026-09-02');
+  assert.equal(p.address(), '#nether/10/20/-1///2026-09-02');
+  await p.turn('#nether/10/20/-1///2025-01-01');
+  assert.equal(p.app.past.get(), '', 'a day not kept is now');
+  assert.equal(p.address(), '#nether/10/20/-1');
+  await p.turn('#overworld/300/400/-1///2026-09-01');
+  assert.equal(p.app.past.get(), '2026-09-01');
+  await p.turn('#overworld/300/400/-1');
+  assert.equal(p.app.past.get(), '');
+  assert.equal(p.part('day').textContent, 'Now');
+  assert.equal(p.address(), '#overworld/300/400/-1');
 });
 
 (async () => {
