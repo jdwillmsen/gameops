@@ -105,6 +105,7 @@ func run(logger *slog.Logger) error {
 	// The end is left unrendered, as a dimension nobody has been to is.
 	status.MarkRendered("overworld", now)
 	status.MarkRendered("nether", now)
+	status.MarkRendered(harnessLevel.Dir(), now)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -154,6 +155,8 @@ func run(logger *slog.Logger) error {
 
 	app := &server.Server{
 		Renderer:      renderer,
+		NetherTop:     100,
+		NetherLevels:  []render.NetherLevel{harnessLevel},
 		MapsDir:       maps,
 		World:         cfg.Level,
 		Status:        status,
@@ -342,10 +345,18 @@ func biomeWorld(at time.Time) *biomes.World {
 
 // terrain writes tiles shaded by biome, so that a tile is not one flat
 // colour and a check can tell terrain from an empty square.
+// harnessLevel is the nether's one extra cut. Its tiles are the default
+// cut's in the opposite shades, so that they can be told from it.
+var harnessLevel = render.NetherLevel{TopY: 66, Label: "Mid"}
+
 func terrain(maps string, r *render.Unmined) error {
 	const properties = "var UnminedMapProperties = {\n    minZoom: -4,\n    maxZoom: 0,\n    imageFormat: \"png\",\n    minRegionX: -1,\n    minRegionZ: -1,\n    maxRegionX: 0,\n    maxRegionZ: 0,\n}\n"
-	for _, dimension := range []string{"overworld", "nether"} {
-		dir := filepath.Join(maps, dimension)
+	for _, name := range []string{"overworld", "nether", harnessLevel.Dir()} {
+		dimension, inverted := name, name == harnessLevel.Dir()
+		if inverted {
+			dimension = "nether"
+		}
+		dir := filepath.Join(maps, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
@@ -363,6 +374,9 @@ func terrain(maps string, r *render.Unmined) error {
 							bx := int(math.Floor((float64(tx*256+px) + 0.5) * blocks))
 							bz := int(math.Floor((float64(ty*256+py) + 0.5) * blocks))
 							g := grey[biomeAt(dimension, bx, bz)]
+							if inverted {
+								g = 255 - g
+							}
 							img.SetNRGBA(px, py, color.NRGBA{g, g, g, 255})
 						}
 					}

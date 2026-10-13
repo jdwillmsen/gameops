@@ -294,6 +294,7 @@ async function main() {
       await run('dimensions', needs(map.dimensions), on);
       await run('player-heads', needs(live.playerHeads), on);
       await run('zoom-sizes', needs(map.zoomSizes), on);
+      await run('nether-levels', needs(map.netherLevels), on);
       await run('layer-panel', needs(map.layerPanel), on);
       await run('toggles', needs(map.toggles), on);
       await run('search', needs(map.search), on);
