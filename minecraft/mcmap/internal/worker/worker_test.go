@@ -50,11 +50,16 @@ func (f *fakeCensus) Take(_ context.Context, dbDir string, at time.Time) (chunks
 }
 
 type fakeRenderer struct {
-	order      *[]string
-	rendered   []string
-	worlds     []string
-	outs       []string
-	failOn     string
+	order    *[]string
+	rendered []string
+	worlds   []string
+	outs     []string
+	topYs    []int
+	failOn   string
+	// failOnTopY fails the render of a nether cut at that height.
+	failOnTopY int
+	// hang makes a render of that cut wait for its context to end.
+	hangOnTopY int
 	prepareErr error
 	prepared   int
 }
@@ -64,14 +69,19 @@ func (f *fakeRenderer) Prepare(context.Context) error {
 	return f.prepareErr
 }
 
-func (f *fakeRenderer) Render(_ context.Context, world, dimension, out string) error {
+func (f *fakeRenderer) Render(ctx context.Context, world, dimension, out string, topY int) error {
 	f.rendered = append(f.rendered, dimension)
 	if f.order != nil {
 		*f.order = append(*f.order, dimension)
 	}
 	f.worlds = append(f.worlds, world)
 	f.outs = append(f.outs, out)
-	if dimension == f.failOn {
+	f.topYs = append(f.topYs, topY)
+	if topY != 0 && topY == f.hangOnTopY {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if dimension == f.failOn && f.failOnTopY == 0 || topY != 0 && topY == f.failOnTopY {
 		return errors.New("render broke")
 	}
 	return nil
@@ -443,6 +453,9 @@ type fakeSurveyor struct {
 	dirs     []string
 	err      error
 	deadline bool
+	ran      bool
+	// after, if set, is called when a survey has been taken.
+	after func()
 	// panics, if set, is what a survey panics with, once.
 	panics any
 }
@@ -450,6 +463,10 @@ type fakeSurveyor struct {
 func (f *fakeSurveyor) Take(ctx context.Context, worldDir string, _ time.Time) (structures.Survey, error) {
 	f.dirs = append(f.dirs, worldDir)
 	_, f.deadline = ctx.Deadline()
+	f.ran = true
+	if f.after != nil {
+		defer f.after()
+	}
 	if f.order != nil {
 		*f.order = append(*f.order, "survey")
 	}
@@ -546,4 +563,125 @@ func TestCycle_NoSurveyWithoutASnapshot(t *testing.T) {
 	if len(survey.dirs) != 0 {
 		t.Errorf("surveyed %v after a refused snapshot", survey.dirs)
 	}
+}
+
+var levels = []render.NetherLevel{{TopY: 66, Label: "Mid"}, {TopY: 34, Label: "Low"}}
+
+func TestCycle_NoExtraLevelsRendersExactlyTheThreeDimensions(t *testing.T) {
+	s, r := &fakeSyncer{}, &fakeRenderer{}
+	w := newWorker(s, r, "")
+
+	w.Cycle(context.Background(), noon)
+
+	if !reflect.DeepEqual(r.outs, []string{"/data/maps/overworld", "/data/maps/nether", "/data/maps/end"}) || !reflect.DeepEqual(r.topYs, []int{0, 0, 0}) {
+		t.Errorf("outs %v, cuts %v", r.outs, r.topYs)
+	}
+}
+
+func TestCycle_ExtraLevelsAreRenderedLastEachInADirectoryOfItsOwn(t *testing.T) {
+	var order []string
+	s, r := &fakeSyncer{}, &fakeRenderer{order: &order}
+	w := newWorker(s, r, "")
+	w.NetherLevels = levels
+	w.Structures = &fakeSurveyor{order: &order}
+
+	w.Cycle(context.Background(), noon)
+
+	if want := []string{"overworld", "nether", "end", "survey", "nether", "nether"}; !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+	if want := []string{"/data/maps/overworld", "/data/maps/nether", "/data/maps/end", "/data/maps/nether-66", "/data/maps/nether-34"}; !reflect.DeepEqual(r.outs, want) {
+		t.Errorf("outs = %v, want %v", r.outs, want)
+	}
+	if want := []int{0, 0, 0, 66, 34}; !reflect.DeepEqual(r.topYs, want) {
+		t.Errorf("cuts = %v, want %v", r.topYs, want)
+	}
+	snap := w.Status.Snapshot()
+	if !snap.RenderedAt["nether-66"].Equal(noon) || !snap.RenderedAt["nether-34"].Equal(noon) || snap.Problem != "" {
+		t.Errorf("status = %+v", snap)
+	}
+}
+
+// A level that fails is counted under its own name and leaves the cycle
+// and the other levels as they were.
+func TestCycle_AFailingExtraLevelCostsNothingElse(t *testing.T) {
+	var order []string
+	s, r := &fakeSyncer{}, &fakeRenderer{order: &order, failOnTopY: 66}
+	w := newWorker(s, r, "")
+	w.NetherLevels = levels
+	survey := &fakeSurveyor{order: &order}
+	w.Structures = survey
+	w.History = &fakeHistorian{order: &order}
+	var log bytes.Buffer
+	w.Logger = slog.New(slog.NewTextHandler(&log, nil))
+	before := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether-66"))
+	untouched := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether"))
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Fatalf("outcome = %v, want applied", got)
+	}
+
+	if got := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether-66")) - before; got != 1 {
+		t.Errorf("failures counted for the level = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether")); got != untouched {
+		t.Errorf("the default nether's failures moved from %v to %v", untouched, got)
+	}
+	snap := w.Status.Snapshot()
+	if snap.Problem != "" || !snap.RenderedAt["end"].Equal(noon) || !snap.RenderedAt["nether-34"].Equal(noon) {
+		t.Errorf("status = %+v", snap)
+	}
+	if _, ok := snap.RenderedAt["nether-66"]; ok {
+		t.Error("the failed level has a render time")
+	}
+	if !survey.ran || !strings.Contains(log.String(), "render failed") {
+		t.Errorf("survey ran = %v; log:\n%s", survey.ran, log.String())
+	}
+	if !contains(order, "history") {
+		t.Errorf("the day was not offered to the history: %v", order)
+	}
+}
+
+// A level that hangs is cut off at its own limit, and the one after it
+// still runs.
+func TestCycle_AnExtraLevelThatRunsOutOfTimeDoesNotHoldTheNext(t *testing.T) {
+	s, r := &fakeSyncer{}, &fakeRenderer{hangOnTopY: 66}
+	w := newWorker(s, r, "")
+	w.NetherLevels = levels
+	w.LevelTimeout = 20 * time.Millisecond
+	before := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether-66"))
+
+	if got := w.Cycle(context.Background(), noon); got != Applied {
+		t.Fatalf("outcome = %v", got)
+	}
+
+	if got := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether-66")) - before; got != 1 {
+		t.Errorf("timeouts counted as failures = %v, want 1", got)
+	}
+	if !w.Status.Snapshot().RenderedAt["nether-34"].Equal(noon) {
+		t.Error("the level after the one that timed out was not rendered")
+	}
+}
+
+func TestCycle_NoExtraLevelIsRenderedOnceTheCycleIsCancelled(t *testing.T) {
+	s, r := &fakeSyncer{}, &fakeRenderer{}
+	w := newWorker(s, r, "")
+	w.NetherLevels = levels
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Structures = &fakeSurveyor{after: cancel}
+
+	w.Cycle(ctx, noon)
+
+	if len(r.topYs) != 3 {
+		t.Errorf("renders after the cancel: %v", r.topYs)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, item := range list {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

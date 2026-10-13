@@ -31,8 +31,15 @@ type Renderer interface {
 	// the server a pause.
 	Prepare(ctx context.Context) error
 	// Render brings the tiles under out up to date with one dimension of
-	// world. out is reused between calls so unchanged areas are skipped.
-	Render(ctx context.Context, world, dimension, out string) error
+	// world. out is reused between calls so unchanged areas are skipped;
+	// it must therefore be a directory of its own for each topY, since
+	// what is already there is judged by the world's changes and not by
+	// the cut it was drawn with.
+	//
+	// topY is the highest block drawn, for the one dimension that is drawn
+	// as a horizontal cut, the nether. Zero is the renderer's own choice,
+	// and any other value for another dimension is refused.
+	Render(ctx context.Context, world, dimension, out string, topY int) error
 	// Info describes what a completed Render left in out.
 	Info(out string) (Info, error)
 	// RenderedAt is when out last began a render, if it ever has.
@@ -56,6 +63,25 @@ type Info struct {
 
 // Dimensions are the ones a Bedrock world has, in display order.
 var Dimensions = []string{"overworld", "nether", "end"}
+
+// DefaultNetherLabel is what the nether's own cut, the one every deployment
+// has, is called beside the extra ones.
+const DefaultNetherLabel = "Top"
+
+// NetherLevel is one extra horizontal cut of the nether, drawn beside the
+// one every deployment has. It is named by its height, which is all the
+// server ever puts in a path for it.
+type NetherLevel struct {
+	TopY  int
+	Label string
+}
+
+// Dir is the directory under the maps directory that holds the level, and
+// the name its render is reported under.
+func (l NetherLevel) Dir() string { return "nether-" + strconv.Itoa(l.TopY) }
+
+// ID is how the page and a tile request name the level.
+func (l NetherLevel) ID() string { return strconv.Itoa(l.TopY) }
 
 const (
 	binaryName     = "unmined-cli"
@@ -226,7 +252,7 @@ func extract(r io.Reader, dir string) error {
 	}
 }
 
-func (u *Unmined) Render(ctx context.Context, world, dimension, out string) error {
+func (u *Unmined) Render(ctx context.Context, world, dimension, out string, topY int) error {
 	args := []string{
 		"web", "render",
 		"--world=" + world,
@@ -241,8 +267,14 @@ func (u *Unmined) Render(ctx context.Context, world, dimension, out string) erro
 	}
 	switch dimension {
 	case "overworld", "end":
+		if topY != 0 {
+			return fmt.Errorf("%s is not drawn as a cut", dimension)
+		}
 	case "nether":
-		args = append(args, "--topY="+strconv.Itoa(u.NetherTopY))
+		if topY == 0 {
+			topY = u.NetherTopY
+		}
+		args = append(args, "--topY="+strconv.Itoa(topY))
 	default:
 		return fmt.Errorf("unknown dimension %q", dimension)
 	}

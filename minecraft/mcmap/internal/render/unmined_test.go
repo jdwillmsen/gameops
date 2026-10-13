@@ -200,7 +200,7 @@ func TestRender_AsksForWebPAndTheDimension(t *testing.T) {
 	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
 	u, out := rendering(t, f)
 
-	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err != nil {
+	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"web", "render", "--world=/mirror/FWB", "--dimension=overworld", "--output=" + out, "--imageformat=webp", "--chunkprocessors=2"} {
@@ -222,11 +222,46 @@ func TestRender_AsksForWebPAndTheDimension(t *testing.T) {
 func TestRender_NetherIsCutBelowItsRoof(t *testing.T) {
 	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
 	u, out := rendering(t, f)
-	if err := u.Render(context.Background(), "/mirror/FWB", "nether", out); err != nil {
+	if err := u.Render(context.Background(), "/mirror/FWB", "nether", out, 0); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(f.args, "--topY=100") {
 		t.Errorf("args %v lack --topY=100", f.args)
+	}
+}
+
+func TestRender_NetherLevelIsCutWhereAsked(t *testing.T) {
+	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
+	u, out := rendering(t, f)
+	if err := u.Render(context.Background(), "/mirror/FWB", "nether", out, 66); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(f.args, "--topY=66") || slices.Contains(f.args, "--topY=100") {
+		t.Errorf("args %v: want the cut that was asked for, not the default", f.args)
+	}
+	for _, a := range f.args {
+		if strings.HasPrefix(a, "--bottomY") {
+			t.Errorf("args carry %s: only the top of a cut is asked for", a)
+		}
+	}
+}
+
+// Cutting the overworld away would show what a player cannot see from the
+// surface; no caller may ask for it, whatever it is configured with.
+func TestRender_OnlyTheNetherIsCut(t *testing.T) {
+	for _, dimension := range []string{"overworld", "end"} {
+		f := &fakeRun{props: true}
+		u, out := rendering(t, f)
+		if err := u.Render(context.Background(), "/mirror/FWB", dimension, out, 64); err == nil || f.args != nil {
+			t.Errorf("%s: err = %v, ran with %v", dimension, err, f.args)
+		}
+	}
+}
+
+func TestNetherLevel_NamesComeFromTheHeightAlone(t *testing.T) {
+	l := NetherLevel{TopY: 66, Label: "../../etc"}
+	if l.Dir() != "nether-66" || l.ID() != "66" {
+		t.Errorf("dir %q, id %q", l.Dir(), l.ID())
 	}
 }
 
@@ -242,7 +277,7 @@ func TestRender_RejectsOutputThatIsNotAMap(t *testing.T) {
 	for name, f := range cases {
 		t.Run(name, func(t *testing.T) {
 			u, out := rendering(t, f)
-			if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err == nil {
+			if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out, 0); err == nil {
 				t.Fatal("Render accepted it")
 			}
 		})
@@ -253,7 +288,7 @@ func TestRender_FailureCarriesTheEndOfTheOutput(t *testing.T) {
 	f := &fakeRun{out: strings.Repeat("noise\n", 200) + "System.InvalidOperationException: GetJpegEncoder\n", err: errors.New("exit status 134")}
 	u, out := rendering(t, f)
 
-	err := u.Render(context.Background(), "/mirror/FWB", "overworld", out)
+	err := u.Render(context.Background(), "/mirror/FWB", "overworld", out, 0)
 	if err == nil || !strings.Contains(err.Error(), "GetJpegEncoder") || !strings.Contains(err.Error(), "exit status 134") {
 		t.Fatalf("err = %v, want the exit status and the last lines of output", err)
 	}
@@ -265,7 +300,7 @@ func TestRender_FailureCarriesTheEndOfTheOutput(t *testing.T) {
 func TestRender_UnknownDimensionIsRefusedBeforeRunning(t *testing.T) {
 	f := &fakeRun{props: true}
 	u, out := rendering(t, f)
-	if err := u.Render(context.Background(), "/mirror/FWB", "aether", out); err == nil || f.args != nil {
+	if err := u.Render(context.Background(), "/mirror/FWB", "aether", out, 0); err == nil || f.args != nil {
 		t.Fatalf("err = %v, ran with %v", err, f.args)
 	}
 }
@@ -367,7 +402,7 @@ func TestEnsure_SweepsWhatAnInterruptedInstallLeftBehind(t *testing.T) {
 func TestRender_StaleOutputFromAnEarlierRenderDoesNotPass(t *testing.T) {
 	f := &fakeRun{tiles: map[string]int{"tiles/zoom.0/0/0/tile.0.0.webp": 5000}, props: true}
 	u, out := rendering(t, f)
-	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err != nil {
+	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out, 0); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-time.Hour)
@@ -377,7 +412,7 @@ func TestRender_StaleOutputFromAnEarlierRenderDoesNotPass(t *testing.T) {
 
 	quiet := &fakeRun{} // exits 0 and writes nothing
 	u.run = quiet.run
-	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out); err == nil {
+	if err := u.Render(context.Background(), "/mirror/FWB", "overworld", out, 0); err == nil {
 		t.Fatal("a render that wrote nothing passed on the strength of the previous render's files")
 	}
 }

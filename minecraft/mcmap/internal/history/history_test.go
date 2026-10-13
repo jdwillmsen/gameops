@@ -337,3 +337,29 @@ func TestAnAddressThatIsNotADayFindsNothing(t *testing.T) {
 		t.Error("a dimension that is not one found a tile")
 	}
 }
+
+// A day is the default maps and nothing more: an extra cut of the nether
+// would multiply what every day costs on the volume, and the page does not
+// offer it for a day that is past.
+func TestADayKeepsOnlyTheDefaultMaps(t *testing.T) {
+	w := newWorld(t)
+	w.draw("nether", home, "the roof")
+	if err := os.Mkdir(filepath.Join(w.maps, "nether-66"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w.draw("nether-66", home, "the middle")
+	if err := os.WriteFile(filepath.Join(w.maps, "nether-66", "unmined.map.properties.js"), []byte(properties), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := open(t, t.TempDir(), w)
+
+	if r := capture(t, s, day1); r.Tiles != 1 {
+		t.Fatalf("capture = %+v, want the one tile of the default nether", r)
+	}
+	if got, ok := tileAt(t, s, "2026-10-12", "nether", home); !ok || got != "the roof" {
+		t.Errorf("nether tile = %q, %v", got, ok)
+	}
+	if _, ok := tileAt(t, s, "2026-10-12", "nether-66", home); ok {
+		t.Error("an extra level was kept")
+	}
+}

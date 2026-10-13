@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -91,9 +92,13 @@ func run(logger *slog.Logger) error {
 		NetherTopY:      cfg.NetherTopY,
 	}
 	status := &worker.Status{}
-	for _, dimension := range render.Dimensions {
-		if at, ok := renderer.RenderedAt(filepath.Join(mapsDir, dimension)); ok {
-			status.MarkRendered(dimension, at)
+	rendered := slices.Clone(render.Dimensions)
+	for _, level := range cfg.NetherLevels {
+		rendered = append(rendered, level.Dir())
+	}
+	for _, name := range rendered {
+		if at, ok := renderer.RenderedAt(filepath.Join(mapsDir, name)); ok {
+			status.MarkRendered(name, at)
 		}
 	}
 
@@ -137,10 +142,15 @@ func run(logger *slog.Logger) error {
 		// five minutes; a snapshot started now is over within this.
 		Lead:          6 * time.Minute,
 		RenderTimeout: 3 * time.Hour,
-		Status:        status,
-		Logger:        logger,
-		Census:        census,
-		Keeper:        keeper,
+		NetherLevels:  cfg.NetherLevels,
+		// An extra cut of a world the default render has just read is a
+		// fraction of that render's work; one that takes this long is stuck,
+		// and the next cycle is due.
+		LevelTimeout: time.Hour,
+		Status:       status,
+		Logger:       logger,
+		Census:       census,
+		Keeper:       keeper,
 	}
 	var marked *markers.Store
 	if cfg.Markers {
@@ -221,6 +231,8 @@ func run(logger *slog.Logger) error {
 		InternalToken: cfg.InternalToken,
 		Live:          layer,
 		LiveKeepalive: cfg.LiveKeepalive,
+		NetherTop:     cfg.NetherTopY,
+		NetherLevels:  cfg.NetherLevels,
 	}
 	if marked != nil {
 		app.Markers = marked
