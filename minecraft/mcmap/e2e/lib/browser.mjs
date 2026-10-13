@@ -20,8 +20,9 @@ export function routeOf(address) {
 
 // Answers that are not faults. A sparse world has no tile for most of its
 // grid; a head is gone when its player leaves between the list and the
-// picture; and waypoints are a player's own, which a service session is
-// refused, so that 403 is the server doing as it should.
+// picture; waypoints are a player's own, which a service session is
+// refused, so that 403 is the server doing as it should; and a map that
+// keeps no history has no list of days, which the page asks for once.
 const EXPECTED = new Map([
   ['/tiles', [404]],
   ['/api/biomes/tiles', [404]],
@@ -29,6 +30,7 @@ const EXPECTED = new Map([
   ['/api/icons/mob', [404]],
   ['/api/icons/picture', [404]],
   ['/api/waypoints', [403, 404]],
+  ['/api/history', [404]],
 ]);
 
 // Where in the page's scripts an error was thrown: which of the page's own
