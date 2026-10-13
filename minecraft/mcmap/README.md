@@ -2269,7 +2269,7 @@ as of the last completed reading, and false where no chunk has been
 generated. It is what anything else in the service asks.
 
 The surface heights are asked of `(*biomes.Store).World().Heights()`, which
-is nil before there is a reading (and these three questions of the
+is nil until the heights have been read (and these three questions of the
 `*heights.Map` it returns are safe to ask of nil, and say not known):
 
 - `At(d chunks.Dimension, x, z int32) (y int32, ok bool)` is the surface
@@ -2282,11 +2282,11 @@ is nil before there is a reading (and these three questions of the
   reads the column under the middle of each pixel of a tile addressed as
   the terrain's and the biomes' are, at any zoom they support.
 
-Both say whether any column was known. A tile of heights takes 0.7 to
-3.6 ms.
+`Rect` and `Tile` say whether any column was known. A tile of heights
+takes 0.7 to 3.6 ms.
 
-The limits on the heights are those of the biomes: a million chunks, and
-268 MB of columns to a dimension.
+The heights are held to the biomes' million chunks, and to 268 MB of
+columns to a dimension.
 
 To check the reading against a copy of a world, and to measure it (this
 prints the heights' size, load time and tile times too, and checks that
