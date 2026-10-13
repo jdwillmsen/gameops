@@ -68,7 +68,7 @@ func TestExtractorFillsTheStoreAndLeavesTheWorldAlone(t *testing.T) {
 	if after := listing(t, dir); !slices.Equal(before, after) {
 		t.Errorf("the world directory changed: %v, then %v", before, after)
 	}
-	if left := listing(t, e.WorkDir); !slices.Equal(left, []string{"biomes.bin"}) {
+	if left := listing(t, e.WorkDir); !slices.Equal(left, []string{"biomes.bin", "heights.bin"}) {
 		t.Errorf("the work directory holds %v", left)
 	}
 }

@@ -8,10 +8,11 @@ import (
 	"math"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 )
 
 // TileSize is a tile's width and height in pixels, as the terrain's is.
-const TileSize = 256
+const TileSize = heights.TileSize
 
 // dimmed is what every other biome is drawn as while one is picked out:
 // dark enough to push the terrain under it back, clear enough to read it.
