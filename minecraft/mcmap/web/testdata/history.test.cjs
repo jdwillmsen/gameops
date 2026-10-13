@@ -19,16 +19,23 @@ const day = (name, more) => ({ day: name, takenAt: `${name}T00:20:00Z`, dimensio
 const THREE = [day('2026-10-12'), day('2026-10-13'), day('2026-10-14', { rendererChanged: true })];
 
 // A page with the history's script and what it asks of the rest of the
-// page. answer() is what the server says to GET /api/history.
-async function load({ answer = () => ({ days: THREE }), locked = false } = {}) {
+// page. answer() is what the server says to GET /api/history, and wanted
+// the day the page's address names, which the map takes for the day it is
+// told as the real one does.
+async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '' } = {}) {
   const p = page(new Map(), { files: [] });
   const { win, doc } = p;
-  const state = { asked: [], shown: [], ticks: [], dimension: 'overworld' };
+  const state = { asked: [], shown: [], ticks: [], dimension: 'overworld', wanted };
   if (locked) doc.body.classList.add('locked');
   win.mcmap.dimension = () => state.dimension;
   win.mcmap.past = {
     get: () => (state.shown.length ? state.shown[state.shown.length - 1] : ''),
-    set(to) { state.shown.push(to ? to.day : ''); return true; },
+    wanted: () => state.wanted,
+    set(to) {
+      state.shown.push(to ? to.day : '');
+      state.wanted = to ? to.day : '';
+      return true;
+    },
   };
   win.fetch = async (address) => {
     state.asked.push(address);
@@ -53,8 +60,14 @@ async function load({ answer = () => ({ days: THREE }), locked = false } = {}) {
   };
   const beat = async () => { for (const fn of state.ticks) if (fn) fn(); await settle(); };
   const view = async () => { doc.dispatchEvent({ type: 'mcmap:view' }); await settle(); };
+  // The address has changed to one that names this day, or none.
+  const named = async (to) => {
+    state.wanted = to;
+    doc.dispatchEvent({ type: 'mcmap:day' });
+    await settle();
+  };
   const last = () => state.shown[state.shown.length - 1];
-  return { ...p, state, bar, part, press, slide, beat, view, last, settle };
+  return { ...p, state, bar, part, press, slide, beat, view, named, last, settle };
 }
 
 test('a server that keeps no history leaves the page without the control, and is not asked again', async () => {
@@ -208,6 +221,89 @@ test('a server that cannot be reached is asked again later, and not on every mov
   await p.view();
   assert.equal(p.state.asked.length, 2);
   assert.equal(p.bar.hidden, false);
+});
+
+test('a page whose address names a kept day opens on that day, with the control open to say so', async () => {
+  const p = await load({ wanted: '2026-10-13' });
+  assert.deepEqual(p.state.shown, ['2026-10-13']);
+  assert.equal(p.part('body').hidden, false);
+  assert.equal(p.part('open').getAttribute('aria-expanded'), 'true');
+  assert.equal(p.part('range').value, '1');
+  assert.match(p.part('day').textContent, /13/);
+  assert.equal(p.doc.body.classList.contains('past'), true);
+  await p.view();
+  assert.deepEqual(p.state.shown, ['2026-10-13'], 'a day once followed is not set again');
+});
+
+test('a page whose address names a day that is not kept opens on now, and the map is told so', async () => {
+  const p = await load({ wanted: '2025-01-01' });
+  assert.deepEqual(p.state.shown, ['']);
+  assert.equal(p.state.wanted, '');
+  assert.equal(p.part('body').hidden, true);
+  assert.equal(p.part('day').textContent, 'Now');
+  assert.equal(p.doc.body.classList.contains('past'), false);
+});
+
+test('a day an address names is neither shown nor given up before the days kept are known', async () => {
+  let answer = () => ({ fails: true });
+  const p = await load({ answer: () => answer(), wanted: '2026-10-13' });
+  await p.named('2026-10-12');
+  assert.equal(p.state.shown.length, 0);
+  assert.equal(p.state.wanted, '2026-10-12');
+  answer = () => ({ days: THREE });
+  p.win.Date = class extends Date { static now() { return Date.now() + 2 * 60_000; } };
+  await p.view();
+  assert.deepEqual(p.state.shown, ['2026-10-12']);
+});
+
+test('a server that keeps no history has no day an address could name', async () => {
+  const p = await load({ answer: () => ({ status: 404 }), wanted: '2026-10-13' });
+  assert.deepEqual(p.state.shown, ['']);
+  assert.equal(p.bar.hidden, true);
+});
+
+test('an address that changes to a day, to a day not kept and to none moves the control with it', async () => {
+  const p = await load();
+  await p.named('2026-10-12');
+  assert.equal(p.last(), '2026-10-12');
+  assert.equal(p.part('body').hidden, false);
+  assert.equal(p.part('range').value, '0');
+  await p.named('2026-10-14');
+  assert.equal(p.last(), '2026-10-14');
+  await p.named('2025-01-01');
+  assert.equal(p.last(), '');
+  assert.equal(p.part('day').textContent, 'Now');
+  await p.named('2026-10-13');
+  await p.named('');
+  assert.equal(p.last(), '');
+  assert.equal(p.part('range').value, '3');
+  const shown = p.state.shown.length;
+  await p.named('');
+  assert.equal(p.state.shown.length, shown, 'an address that names what is shown changes nothing');
+});
+
+test('an address that changes while a play runs stops the play on the day it names', async () => {
+  const p = await load();
+  await p.press('open');
+  await p.press('play');
+  await p.named('2026-10-14');
+  assert.equal(p.part('play').textContent, 'Play');
+  await p.beat();
+  assert.equal(p.last(), '2026-10-14');
+});
+
+test('a day from an address is written as text, and one that is not a date is never on the page', async () => {
+  const p = await load({ wanted: '<img src=x>' });
+  assert.deepEqual(p.state.shown, ['']);
+  assert.equal(p.bar.querySelectorAll('img').length, 0);
+  assert.doesNotMatch(p.bar.textContent, /img/);
+});
+
+test('a map from before it could say which day its address names is left on now', async () => {
+  const p = await load();
+  delete p.win.mcmap.past.wanted;
+  await p.named('2026-10-12');
+  assert.equal(p.state.shown.length, 0);
 });
 
 (async () => {

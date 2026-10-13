@@ -233,6 +233,19 @@
     const part = hash.slice(1).split('/')[4] || '';
     return EXTRA.test(part) ? part : '';
   };
+  // After those, a seventh part: the day whose terrain is drawn. Everything
+  // that reads an address takes its parts by their place, so one past the
+  // last any of them reads changes what none of them reads, and an address
+  // without a day is as it always was. The day in the address is the one
+  // drawn once the timeline has found it among the days kept; until then
+  // it is only what a link asks for, kept through every rewrite as the
+  // part before it is. Never read beside a view, which moves nothing.
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  let wanted = '';
+  const dayOf = (hash) => {
+    const parts = hash.slice(1).split('/');
+    return !parts[5] && DAY.test(parts[6] || '') ? parts[6] : '';
+  };
 
   function parseHash() {
     const [id, x, z, zoom, , view] = location.hash.slice(1).split('/');
@@ -248,7 +261,10 @@
   function writeHash() {
     if (!current) return;
     const c = map.getCenter();
-    const hash = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${tidy(map.getZoom())}${extra ? `/${extra}` : ''}`;
+    const place = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${tidy(map.getZoom())}${extra ? `/${extra}` : ''}`;
+    // A day is the seventh part whatever is before it, so the two it
+    // follows are written even when empty.
+    const hash = wanted ? `${place}${extra ? '' : '/'}//${wanted}` : place;
     // replaceState so panning does not fill the back button with positions.
     if (hash !== location.hash) history.replaceState(null, '', hash);
   }
@@ -698,12 +714,20 @@
     },
     // The day whose terrain is drawn: read as its date, or '' for now, and
     // set to a day as GET /api/history lists it, or to null for now. The
-    // view stays where it is.
+    // view stays where it is. wanted is the day the address names, which
+    // is the day drawn except where the address has only just said it:
+    // whoever knows the days kept then sets that day, or null if it is
+    // not one of them, and either way the address says what is drawn.
     past: {
       get: () => (past ? past.day : ''),
+      wanted: () => wanted,
       set(day) {
-        const next = day && typeof day.day === 'string' && Array.isArray(day.dimensions) ? day : null;
-        if ((next ? next.day : '') === (past ? past.day : '')) return true;
+        const next = day && typeof day.day === 'string' && DAY.test(day.day) && Array.isArray(day.dimensions) ? day : null;
+        wanted = next ? next.day : '';
+        if ((next ? next.day : '') === (past ? past.day : '')) {
+          writeHash();
+          return true;
+        }
         past = next;
         if (!current) return true;
         const c = map.getCenter();
@@ -714,6 +738,7 @@
     layers,
   };
   extra = extraOf(location.hash);
+  wanted = dayOf(location.hash);
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 
@@ -748,6 +773,13 @@
     if (named !== extra) {
       extra = named;
       document.dispatchEvent(new CustomEvent('mcmap:link'));
+    }
+    // Before the view is moved: setting a day draws the map again where
+    // it is, which would cut short a move still on its way.
+    const day = dayOf(location.hash);
+    if (day !== wanted) {
+      wanted = day;
+      document.dispatchEvent(new CustomEvent('mcmap:day'));
     }
     if (want.id !== current) show(want.id, want);
     else map.setView([want.z, want.x], want.zoom);
