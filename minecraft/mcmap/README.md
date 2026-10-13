@@ -2473,7 +2473,8 @@ tiles, and the row says that instead. While a day is
 shown the footer says which in place of when the map was updated, with
 no countdown to a refresh, and putting the row away puts the map back on
 now. The days are asked for
-when the page loads and again, no more often than every ten minutes,
+once the map has shown a dimension, so never by a page with no session,
+and again, no more often than every ten minutes,
 when the view changes; an ask that fails is tried again after a minute.
 A server that keeps no history answers 404 once and the page then has no
 History button.
