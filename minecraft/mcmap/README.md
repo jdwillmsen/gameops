@@ -17,7 +17,10 @@ Every `REFRESH_INTERVAL` the service runs one cycle:
    nothing.
 2. **Render.** It runs the renderer over the mirror, once per dimension, into
    `DATA_DIR/maps/<dimension>`. Rendering is incremental: unchanged areas are
-   skipped, so a cycle after the first takes seconds.
+   skipped, so a cycle after the first takes seconds. With `NETHER_LEVELS`
+   set, the passes that follow the maps (the biome reading and the structure
+   survey) run, and then each extra Nether level is rendered into
+   `DATA_DIR/maps/nether-<y>`; see [Nether levels](#nether-levels).
 3. **Serve.** The page asks `GET /api/map` what exists, and loads tiles from
    `GET /tiles/<dimension>/<zoom>/<x>/<y>.webp`.
 
@@ -43,10 +46,69 @@ Two things about this renderer are handled in `internal/render`:
   still exiting 0. The service always asks for WebP, and rejects a render
   that left no full-scale tile with anything on it.
 - The nether is rendered below `NETHER_TOP_Y`; otherwise the map is the
-  bedrock roof.
+  bedrock roof. `Render` takes that height as an argument, zero meaning the
+  renderer's own `NETHER_TOP_Y`, so that an extra level is another call and
+  not another renderer; any other value for the overworld or the end is
+  refused, so no setting can cut either away.
 
 Everything else goes through the `Renderer` interface, so a different
 renderer is a new implementation, not a change to its callers.
+
+### Nether levels
+
+The nether is several storeys, and one horizontal cut shows one of them. The
+renderer takes only a highest block (`--topY`) and draws the top surface
+below it, so a level is a render at another height, and `NETHER_LEVELS` lists
+the extra ones: `<y>:<label>` pairs separated by commas, as in
+`66:Mid,34:Low`. Unset, the nether is the one cut at `NETHER_TOP_Y`, in
+`maps/nether`, at the addresses it has always had, and nothing below applies.
+
+Heights are 1 to 127, none the same as another or as `NETHER_TOP_Y`; a label is
+1 to 12 letters, digits, spaces and hyphens, none the same as another (case
+aside) or as the default cut's, `Top`; and there are at most three, since each is a
+render of its own on a CPU the game server shares. A value that breaks any of
+these stops the service at start with the variable named.
+
+- **Where.** A level is its own directory, `maps/nether-<y>`, and has to be:
+  the renderer decides what to redraw from what changed in the world, not from
+  the height it was last drawn at, so a second height drawn into a directory
+  that already holds one redraws nothing.
+- **When.** After everything else in the cycle, from the same goroutine, so a
+  level that is slow or broken costs the maps, the history, the biome reading
+  and the survey nothing. Each level has its own limit, an hour (the maps'
+  is three), and one that runs out or fails is counted and logged and the
+  next is rendered regardless. The page is not told of a problem: the maps it
+  shows are whole, and a level that failed keeps the tiles of its last good
+  render. A level is reported in the render metrics under the name of its
+  directory, `dimension="nether-66"`, so the dimensions' own series are as
+  they were and a level that stops being drawn is seen by its age.
+- **Offered.** `GET /api/map` lists, on the nether, the levels that have been
+  drawn at least once, the default first: each an `id`, its `y` and its
+  `label`. The list is left out unless there is something to choose between.
+  The default's `id` is `default` and its label `Top`; the others' is the height.
+- **Addressed.** A tile of a level is `GET /tiles/nether/<zoom>/<x>/<y>.webp?level=<id>`.
+  The value is compared with the configured ids and with nothing else, and the
+  directory is made from the height that matched; no part of the request is
+  ever a path. An id that is not configured, or any level of another
+  dimension, is a 404, and no `level` is the default cut.
+- **Cost.** Measured on a copy of the FWB world with the dev build 0.20.11 and
+  `RENDER_CHUNK_PROCESSORS=1`: the nether's first render took 12 s for the
+  default cut and between 13 and 31 s for each of four others timed (the same
+  work at another height; the spread was the machine's), each about 6.5 MB of
+  tiles. A render after that with nothing changed takes under a second, and
+  one after a snapshot redraws only the regions that changed, as the other
+  maps do. Three levels are therefore about 20 MB of disk and a minute or two
+  of CPU on the first cycle, and a few seconds a cycle after it, on this world.
+
+The heights were chosen by drawing the same world at eight and comparing
+the pixels: below the roof, the cuts at 90, 80 and 70 differ from the one at 100 in
+19%, 24% and 29% of what is drawn, 64 in 33%, 50 in 42%, and the cuts just
+above the lava sea, 36 and 34, in 52% and 57%, where most of the picture is
+the sea itself. Between 100 and 70 each step adds less than the last; 66 shows the middle storey, and 34 the floor above the lava, so
+`NETHER_TOP_Y` as it is, `66:Mid` and `34:Low` are the three that differ most.
+
+The page's picker is under [Page controls](#page-controls). Map history keeps
+only the default cut: see [History](#history).
 
 ### Quiet windows
 
@@ -2727,6 +2789,15 @@ and 73 MB, and the day after it added 3.7 MB. One day is not a rate, but at
 anything near it a year is a gigabyte or two, which is why there is still
 no rule for thinning days out.
 
+**Nether levels.** A day keeps the default cut of the nether and no extra
+level. Each level is as many tiles as the nether's own, so every one kept
+would multiply what a day costs on a volume that is never thinned, for a
+second look at a map that is a few days old; and a day is a picture of one
+moment, which a level drawn after the cycle's passes, and not with the
+rest, is not. While a day is shown the level buttons are away, the day is
+drawn from the cut it was kept with, and the viewer's choice is kept for
+when it is put away.
+
 History cannot be rebuilt, unlike the tiles and the mirror beside it, so
 `HISTORY_DIR` belongs on storage that is kept.
 
@@ -3082,6 +3153,23 @@ changed by clearing. Pasting `x z`, `x, z` or `x y z` into X, with or
 without the axes' letters, fills X and Z from it (`y` is not needed by a
 map) and moves to Go.
 
+**Nether levels.** With `NETHER_LEVELS` set, and once an extra level has been
+drawn, a row of buttons at the top of the map, in the middle, names each cut of the
+nether (`Top`, `Mid`, `Low`), the one drawn pressed, each with a title that
+says its height. It is a group of buttons, so the keyboard reaches each in
+turn, and is there only while the nether is shown, with more than one level
+offered and no past day on the map. Choosing a level draws it where the
+default cut is drawn, at the same place and zoom, through the layer swap the
+history uses: what was there stays under the new tiles until they have come,
+one picture under the one coming at most however fast the choices come, and
+tiles that never come cost the old ones only a few seconds. The choice is kept
+(the `levels` part of the record, the page's record being version 3 for it) and
+is the nether's cut the next time the page opens it, in this browser. A level
+the server no longer offers is read as the default cut. A saved view that is
+saved with its place carries the level in the place (`level`, and `k` in a link),
+and shows it when it is shown; one saved on the default cut puts the default cut
+back. Markers, structures and live positions do not depend on the level.
+
 **Chunk focus.** With Grid on, the chunk under the pointer is outlined and
 a box under the zoom buttons says which it is, by its chunk coordinates,
 the blocks it covers, and in the Overworld whether it is a slime chunk
@@ -3314,11 +3402,12 @@ and outlined while it has the focus.
 **What the page keeps.** Everything the viewer chooses is kept in the
 browser and nowhere else, as one record under `mcmap.settings`, written and
 read by `settings.js` alone, which the other scripts reach as
-`window.mcmapSettings`. The record has a version (`v: 2`; it went from 1
-when a saved view began to keep which of a layer's items are shown, so
-that a tab of the page from before, which reads a later record and
-writes nothing over it, cannot take them out again; a record or an
-exported file of version 1 is read and brought up) and these parts:
+`window.mcmapSettings`. The record has a version (`v: 3`; it went from 1
+to 2 when a saved view began to keep which of a layer's items are shown,
+and to 3 when the nether's level was kept, so that a tab of the page from
+before, which reads a later record and writes nothing over it, cannot take
+them out again; a record or an exported file of an earlier version is read
+and brought up) and these parts:
 
 | Part | Holds |
 |---|---|
@@ -3329,6 +3418,7 @@ exported file of version 1 is read and brought up) and these parts:
 | `shortcuts` | Whether the single-key shortcuts are on |
 | `grid` | Whether the grid is on |
 | `history` | How a play through the days of the map's history goes: `speed`, 1, 2 or 4 days in the time of one, and `loop` |
+| `levels` | The nether's level chosen, as `nether`: the height it is cut at, or null for the default cut |
 | `biome` | The one biome picked out, or null |
 | `look` | The appearance settings |
 | `views` | The saved views, their order, which are hidden, and which the page opens with |
@@ -3771,6 +3861,7 @@ counted apart and is not a failure.
 | `dimensions` | Each dimension's tab draws terrain tiles that decode and are not empty; one never rendered is counted | |
 | `player-heads` | A player with a head listed is drawn with it | a player online, with a head |
 | `zoom-sizes` | Through every zoom level and back, every picture on the map is the size it was made at, each frame of the zoom and once it settles | a marker or a live entity |
+| `nether-levels` | Where the nether has more than one level, the picker is there in the nether and nowhere else, and choosing a level draws tiles from it; skipped where it has one | the nether drawn at more than one level |
 | `layer-panel` | The panel opens, is sized narrower and wider, folds and returns, and the map takes the room | |
 | `toggles` | Switching off a type of mob and a kind of structure takes things off the map and switching them on brings them back; the biome overlay draws tiles, picking one biome out changes them, and off removes them | mobs, structures or biomes; each that is missing is said |
 | `search` | A search for a biome or structure this world has, by a name read off the page, finds it | a biome or a structure |
@@ -3955,6 +4046,9 @@ host; `--insecure-local-tls` accepts that certificate and is refused for
 any address but this machine's. It speaks HTTP/1.1, as the gateway does to
 the service.
 
+Its nether has an extra level, `Mid`, drawn in the opposite shades of the
+default cut, which is what the `nether-levels` check chooses and looks for.
+
 Its stream is what production's is, by the model
 `web/testdata/stage.cjs` runs the page's scripts against: 225 mobs of
 which the pack lists the 150 nearest the first player, so the list churns
@@ -4011,6 +4105,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
 | `RENDER_CHUNK_PROCESSORS` | no | `1` | Chunks rendered at once. More is faster and uses more CPU and memory |
 | `NETHER_TOP_Y` | no | `100` | Highest nether layer drawn |
+| `NETHER_LEVELS` | no | empty | Extra nether cuts the page can choose between, `<y>:<label>,…` as in `66:Mid,34:Low`: at most 3, heights 1 to 127 other than `NETHER_TOP_Y` and each other, labels of 1 to 12 letters, digits, spaces or hyphens, other than `Top` and each other. Each is a render of its own into `maps/nether-<y>`, about 6.5 MB and a few seconds a cycle on the FWB world. Unset, the nether is one cut. See [Nether levels](#nether-levels) |
 | `UNMINED_URL` | no | the dev Linux x64 build | Where the renderer is downloaded from; must be https |
 | `UNMINED_SHA256` | no | the build this release was verified against | Digest the download must match |
 | `LIVE_ENABLED` | no | `true` | `false` turns the live layer off: nothing asks the bridge for records and `/api/live` is not served |
@@ -4041,8 +4136,8 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag. For a service session, `service:e2e` and `service: true` |
-| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time, `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
-| `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks |
+| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time (the nether also `levels`, each an `id`, `y` and `label`, the default first, when it has an extra level that has been drawn), `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
+| `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks. `?level=<id>` on the nether names one of its extra levels, as `/api/map` lists them; 404 for an id that is not configured and for any other dimension |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
 | `GET /api/waypoints` | A player's session required; 403 for a service session. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
@@ -4104,7 +4199,7 @@ and what that day is compared with:
 | `mcmap_snapshot_last_success_timestamp_seconds` | When the mirror last matched the server |
 | `mcmap_snapshot_bytes_total`, `mcmap_snapshot_duration_seconds` | Cost of mirroring |
 | `mcmap_render_last_success_timestamp_seconds{dimension}` | When each dimension's tiles were last current |
-| `mcmap_render_duration_seconds{dimension}`, `mcmap_render_failures_total{dimension}` | Cost and failures of rendering |
+| `mcmap_render_duration_seconds{dimension}`, `mcmap_render_failures_total{dimension}` | Cost and failures of rendering. An extra nether level is a `dimension` of its own, `nether-<y>` |
 | `mcmap_world_chunks{dimension}` | Chunks in the world at the last count |
 | `mcmap_world_chunks_missing{dimension}` | Chunks seen before and absent from the last count |
 | `mcmap_world_chunks_lost{dimension}` | Chunks found missing since the last acknowledgement, including any generated again since. Above zero means the world has lost data; only an acknowledgement clears it |
