@@ -68,10 +68,6 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		// those, and is read back as it was sent.
 		"if (view.look && view.look[key] !== undefined) look[at] = view.look[key];",
 		"if (!/^(0|[1-9]\\d?)$/.test(at) || Number(at) >= LOOKS.length) return bad;",
-		// The cut of the nether a place was saved with goes with the place
-		// and is read only beside one, and then as strictly as a file's.
-		"if (view.place.level !== undefined) out.k = view.place.level;",
-		"} else if (raw.q !== undefined || raw.k !== undefined) return bad;",
 		// Gamertags are not the viewer's to hand round.
 		"if (view.mobs) out.m = { o: view.mobs.only, h: view.mobs.hidden };",
 	} {

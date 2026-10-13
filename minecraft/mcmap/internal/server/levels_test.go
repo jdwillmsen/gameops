@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 )
@@ -45,11 +45,13 @@ func withLevels(t *testing.T, rendered ...string) *Server {
 
 type levelsAnswer struct {
 	Dimensions []struct {
-		ID     string `json:"id"`
-		Levels []struct {
-			ID    string `json:"id"`
-			Y     int    `json:"y"`
-			Label string `json:"label"`
+		ID       string `json:"id"`
+		Rendered bool   `json:"rendered"`
+		Levels   []struct {
+			ID         string     `json:"id"`
+			Y          int        `json:"y"`
+			Label      string     `json:"label"`
+			RenderedAt *time.Time `json:"renderedAt"`
 		} `json:"levels"`
 	} `json:"dimensions"`
 }
@@ -67,8 +69,37 @@ func levelsOf(t *testing.T, s *Server) levelsAnswer {
 func TestMapAPI_TellsNoLevelsWhereNoneAreConfigured(t *testing.T) {
 	s, maps := fixture(t)
 	renderedNether(t, maps, "nether")
-	if body := get(t, s, "/api/map").Body.String(); json.Valid([]byte(body)) && strings.Contains(body, `"levels"`) {
-		t.Errorf("a deployment with no extra levels is told of levels: %s", body)
+	got := levelsOf(t, s)
+	if len(got.Dimensions) != 3 || got.Dimensions[1].ID != "nether" || !got.Dimensions[1].Rendered {
+		t.Fatalf("dimensions = %+v, want a rendered nether second of three", got.Dimensions)
+	}
+	for _, d := range got.Dimensions {
+		if len(d.Levels) != 0 {
+			t.Errorf("a deployment with no extra levels is told of levels of %s: %+v", d.ID, d.Levels)
+		}
+	}
+}
+
+// The levels are drawn after the dimensions, so each says when it was drawn
+// itself; the default cut's time is the nether's own.
+func TestMapAPI_EachLevelSaysWhenItWasDrawn(t *testing.T) {
+	s := withLevels(t, "nether", "nether-66", "nether-34")
+	top, mid := renderedAt.Add(time.Hour), renderedAt.Add(2*time.Hour)
+	s.Status.MarkRendered("nether", top)
+	s.Status.MarkRendered("nether-66", mid)
+
+	levels := levelsOf(t, s).Dimensions[1].Levels
+	if len(levels) != 3 {
+		t.Fatalf("levels = %+v", levels)
+	}
+	if levels[0].RenderedAt == nil || !levels[0].RenderedAt.Equal(top) {
+		t.Errorf("default level drawn at %v, want %v", levels[0].RenderedAt, top)
+	}
+	if levels[1].RenderedAt == nil || !levels[1].RenderedAt.Equal(mid) {
+		t.Errorf("level 66 drawn at %v, want %v", levels[1].RenderedAt, mid)
+	}
+	if levels[2].RenderedAt != nil {
+		t.Errorf("level 34, whose render time is not known, says %v", levels[2].RenderedAt)
 	}
 }
 

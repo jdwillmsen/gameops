@@ -83,9 +83,13 @@ these stops the service at start with the variable named.
   directory, `dimension="nether-66"`, so the dimensions' own series are as
   they were and a level that stops being drawn is seen by its age.
 - **Offered.** `GET /api/map` lists, on the nether, the levels that have been
-  drawn at least once, the default first: each an `id`, its `y` and its
-  `label`. The list is left out unless there is something to choose between.
-  The default's `id` is `default` and its label `Top`; the others' is the height.
+  drawn at least once, the default first: each an `id`, its `y`, its `label`
+  and its `renderedAt`, when that level was last drawn (absent where the
+  service does not know). The list is left out unless there is something to
+  choose between. The default's `id` is `default` and its label `Top`; the
+  others' is the height. A level's time is its own because the levels are
+  drawn after everything else in a cycle: the page draws a level again when
+  that level's time changes, not the nether's.
 - **Addressed.** A tile of a level is `GET /tiles/nether/<zoom>/<x>/<y>.webp?level=<id>`.
   The value is compared with the configured ids and with nothing else, and the
   directory is made from the height that matched; no part of the request is
@@ -3165,7 +3169,11 @@ one picture under the one coming at most however fast the choices come, and
 tiles that never come cost the old ones only a few seconds. The choice is kept
 (the `levels` part of the record, the page's record being version 3 for it) and
 is the nether's cut the next time the page opens it, in this browser. A level
-the server no longer offers is read as the default cut. A saved view that is
+the server no longer offers is read as the default cut, at once if it is
+taken away while it is drawn. While a level is drawn the status line says when
+that level was rendered, and its tiles are asked for again when its own render
+lands, which is after the nether's. Leaving the preview of a link's view puts
+the level back as it was. A saved view that is
 saved with its place carries the level in the place (`level`, and `k` in a link),
 and shows it when it is shown; one saved on the default cut puts the default cut
 back. Markers, structures and live positions do not depend on the level.
@@ -4136,7 +4144,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag. For a service session, `service:e2e` and `service: true` |
-| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time (the nether also `levels`, each an `id`, `y` and `label`, the default first, when it has an extra level that has been drawn), `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
+| `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time (the nether also `levels`, each an `id`, `y`, `label` and `renderedAt`, that level's own last render time, absent where it is not known, the default first, when it has an extra level that has been drawn), `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks. `?level=<id>` on the nether names one of its extra levels, as `/api/map` lists them; 404 for an id that is not configured and for any other dimension |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
 | `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |

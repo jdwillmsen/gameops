@@ -1,7 +1,8 @@
 'use strict';
 
 // What the nether's levels do, checked by doing it: app.js, the record's
-// script and the picker's script are run in a page of the kind dom.cjs makes,
+// script, the picker's script and the views' are run in a page of the kind
+// dom.cjs makes,
 // on a map that keeps Leaflet's rules for a tile layer's loading, against a
 // server that lists the levels it has drawn. Run by `go test ./web/` where
 // there is a node to run it with, or by hand:
@@ -24,10 +25,15 @@ const EXTENT = { rendered: true, renderedAt: '2026-10-14T09:00:00Z', format: 'we
 const LEVELS = [{ id: 'default', y: 100, label: 'Top' }, { id: '66', y: 66, label: 'Mid' }, { id: '34', y: 34, label: 'Low' }];
 const THEN = { day: '2026-09-01', dimensions: [{ id: 'nether', format: 'webp', minZoom: -2, maxZoom: 0, minRegionX: 0, maxRegionX: 0, minRegionZ: 0, maxRegionZ: 0 }] };
 const KEY = 'mcmap.settings';
+const ORIGIN = 'http://map.test';
+// A time so many minutes before now, as the server writes one.
+const minutesAgo = (n) => new Date(Date.now() - n * 60_000).toISOString();
+const drawnAt = (levels, times) => levels.map((l) => ({ ...l, renderedAt: times[l.id] }));
 
 // A page opened at the place its address names. levels is what the server
-// says the nether has, and storage what the browser already holds.
-async function load(hash, { levels = LEVELS, storage = new Map() } = {}) {
+// says the nether has, storage what the browser already holds, and link a
+// view the address carries after its place.
+async function load(hash, { levels = LEVELS, storage = new Map(), link = '' } = {}) {
   const p = page(storage, { files: ['settings.js'] });
   const { win, doc } = p;
   const found = doc.getElementById;
@@ -39,22 +45,33 @@ async function load(hash, { levels = LEVELS, storage = new Map() } = {}) {
   };
   doc.getElementById('login').hidden = true;
   doc.hidden = false;
+  // The views' list hides the two boxes of its form by their labels.
+  for (const id of ['views-place', 'views-look']) doc.createElement('label').append(doc.getElementById(id));
+  const dialog = doc.getElementById('views');
+  dialog.showModal = () => { dialog.open = true; };
+  dialog.close = () => { dialog.open = false; };
   const { L, map } = leaflet();
-  const state = { levels };
+  const state = { levels, renderedAt: EXTENT.renderedAt };
   Object.assign(win, {
     L,
-    location: { hash, href: '' },
+    location: { hash, href: `${ORIGIN}/${hash}${link ? `//${link}` : ''}`, origin: ORIGIN, pathname: '/', search: '' },
+    URL,
+    TextEncoder,
+    TextDecoder,
+    Uint8Array,
+    btoa,
+    atob,
     history: { replaceState(_, __, to) { win.location.hash = to; } },
     navigator: {},
     setInterval: () => 0,
     clearInterval() {},
     fetch: async (address) => {
-      const nether = { id: 'nether', ...EXTENT, ...(state.levels ? { levels: state.levels } : {}) };
+      const nether = { id: 'nether', ...EXTENT, renderedAt: state.renderedAt, ...(state.levels ? { levels: state.levels } : {}) };
       const body = address === 'api/map' ? { world: 'w', refreshSeconds: 600, dimensions: [{ id: 'overworld', ...EXTENT }, nether] } : {};
       return { ok: true, status: 200, headers: { get: () => '' }, json: async () => body, text: async () => JSON.stringify(body) };
     },
   });
-  for (const file of ['app.js', 'levels.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), win, { filename: file });
+  for (const file of ['app.js', 'layers.js', 'levels.js', 'views.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), win, { filename: file });
   const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
   await settle();
   const terrain = () => [...map.layers].filter((l) => l.options.dimension);
@@ -68,7 +85,12 @@ async function load(hash, { levels = LEVELS, storage = new Map() } = {}) {
   const pick = (label) => win.mcmap.level.set(bar.children.find((b) => b.textContent === label).dataset.id);
   const url = (layer) => layer.getTileUrl({ z: -1, x: 2, y: 3 });
   const kept = () => JSON.parse(storage.get(KEY)).levels;
-  return { ...p, app: win.mcmap, map, state, settle, terrain, bar, buttons, pressed, press, pick, url, kept, storage };
+  const status = () => doc.getElementById('status').textContent;
+  const click = async (id) => {
+    doc.getElementById(id).click();
+    await settle();
+  };
+  return { ...p, app: win.mcmap, map, state, settle, terrain, bar, buttons, pressed, press, pick, url, kept, status, click, storage };
 }
 
 // Long enough for tiles to have faded in: the page's waits are cut to a
@@ -243,6 +265,171 @@ test('a saved view and a link may name the level, and nothing else of the kind',
   for (const bad of ['', '1234', '../x', '6 6', 66, null]) assert.equal(p.settings.check.view(view(bad)), null, JSON.stringify(bad));
   assert.equal(p.settings.check.record({ v: 3, levels: { nether: '34' } }).levels.nether, '34');
   assert.equal(p.settings.check.record({ v: 3, levels: { nether: 'x' } }), null);
+});
+
+// The levels are rendered after the dimensions, so the nether's own time
+// changes before a level's tiles do: a layer rebuilt then would hold the
+// level as it was a cycle ago, with nothing to say it should be asked again.
+test('a level is drawn again when its own render lands, and not when only the nether\'s has', async () => {
+  const levels = drawnAt(LEVELS, { default: minutesAgo(200), 66: minutesAgo(190), 34: minutesAgo(190) });
+  const p = await load('#nether/100/200/-1', { levels });
+  await p.press('Mid');
+  const first = p.terrain().at(-1);
+  first.arrive();
+  await faded();
+
+  p.state.renderedAt = minutesAgo(20);
+  p.state.levels = drawnAt(LEVELS, { default: p.state.renderedAt, 66: levels[1].renderedAt, 34: levels[2].renderedAt });
+  await p.app.reload();
+  await p.settle();
+  assert.equal(p.terrain().at(-1), first, 'the level has not been rendered again yet');
+
+  const landed = minutesAgo(10);
+  p.state.levels = drawnAt(LEVELS, { default: p.state.renderedAt, 66: landed, 34: levels[2].renderedAt });
+  await p.app.reload();
+  await p.settle();
+  const second = p.terrain().at(-1);
+  assert.notEqual(second, first, 'the level\'s new tiles are asked for');
+  assert.equal(p.url(second), 'tiles/nether/-1/2/3.webp?level=66');
+
+  second.arrive();
+  await faded();
+  p.state.levels = drawnAt(LEVELS, { default: p.state.renderedAt, 66: landed, 34: minutesAgo(5) });
+  await p.app.reload();
+  await p.settle();
+  assert.equal(p.terrain().at(-1), second, 'another level\'s render is not this one\'s');
+});
+
+test('the default cut is still drawn again when the nether is rendered', async () => {
+  const p = await load('#nether/100/200/-1', { levels: drawnAt(LEVELS, { default: minutesAgo(200), 66: minutesAgo(190), 34: minutesAgo(190) }) });
+  const first = p.terrain().at(-1);
+  first.arrive();
+  await faded();
+  p.state.renderedAt = minutesAgo(20);
+  await p.app.reload();
+  await p.settle();
+  assert.notEqual(p.terrain().at(-1), first);
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp');
+});
+
+test('the status line says when the level drawn was rendered', async () => {
+  const p = await load('#nether/100/200/-1', { levels: drawnAt(LEVELS, { default: minutesAgo(180), 66: minutesAgo(10) }) });
+  p.state.renderedAt = minutesAgo(180);
+  await p.app.reload();
+  await p.settle();
+  assert.equal(p.status(), 'updated 3 h ago');
+  await p.press('Mid');
+  assert.equal(p.status(), 'updated 10 min ago');
+  await p.press('Low');
+  assert.equal(p.status(), 'rendered before the last restart', 'a level with no time known does not borrow the nether\'s');
+  await p.press('Top');
+  assert.equal(p.status(), 'updated 3 h ago');
+});
+
+test('a level taken away while it is drawn gives way to the default cut, and comes back when it does', async () => {
+  const p = await load('#nether/100/200/-1');
+  await p.press('Mid');
+  p.terrain().at(-1).arrive();
+  await faded();
+
+  p.state.levels = [LEVELS[0], LEVELS[2]];
+  await p.app.reload();
+  await p.settle();
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp', 'a level that is not offered is not asked for');
+  same(p.buttons(), ['Top', 'Low']);
+  same(p.pressed(), ['Top']);
+
+  p.terrain().at(-1).arrive();
+  await faded();
+  p.state.levels = null;
+  await p.app.reload();
+  await p.settle();
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp');
+  assert.equal(p.bar.hidden, true);
+
+  p.state.levels = LEVELS;
+  await p.app.reload();
+  await p.settle();
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66', 'the choice was kept for when it is offered again');
+  same(p.pressed(), ['Mid']);
+});
+
+// A link's view as the page itself writes one, for a page to open with.
+async function linkOf(place) {
+  const p = await load('#overworld/0/0/0');
+  return p.app.views.pack({ name: 'shared', layers: {}, place });
+}
+
+test('leaving the preview of a link\'s view puts back the level that was drawn', async () => {
+  const link = await linkOf({ d: 'nether', x: 1, z: 2, zoom: 0, level: '34' });
+  const storage = new Map([[KEY, JSON.stringify({ v: 3, levels: { nether: '66' } })]]);
+  const p = await load('#nether/100/200/-1', { storage, link });
+  same(p.pressed(), ['Mid']);
+
+  await p.click('views-offer-show');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=34', 'the view is previewed at its own level');
+  same(p.pressed(), ['Low']);
+
+  await p.click('preview-back');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66');
+  same(p.pressed(), ['Mid']);
+  assert.equal(p.app.level.get(), '66');
+  assert.equal(p.settings.get('levels').nether, '66', 'what is drawn is what is kept');
+});
+
+test('a preview of a view with no level is left for the level that was drawn, too', async () => {
+  const link = await linkOf({ d: 'nether', x: 1, z: 2, zoom: 0 });
+  const storage = new Map([[KEY, JSON.stringify({ v: 3, levels: { nether: '66' } })]]);
+  const p = await load('#nether/100/200/-1', { storage, link });
+  await p.click('views-offer-show');
+  same(p.pressed(), ['Top']);
+  await p.click('preview-back');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66');
+  same(p.pressed(), ['Mid']);
+});
+
+test('a preview begun in another dimension does not leave its level behind in the nether', async () => {
+  const link = await linkOf({ d: 'nether', x: 1, z: 2, zoom: 0, level: '34' });
+  const storage = new Map([[KEY, JSON.stringify({ v: 3, levels: { nether: '66' } })]]);
+  const p = await load('#overworld/100/200/-1', { storage, link });
+  await p.click('views-offer-show');
+  same(p.pressed(), ['Low']);
+  await p.click('preview-back');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/overworld/-1/2/3.webp');
+  p.app.go('nether', 10, 20);
+  await p.settle();
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66');
+  same(p.pressed(), ['Mid']);
+});
+
+test('a record put in place of the page\'s own brings its level with it', async () => {
+  const p = await load('#nether/100/200/-1');
+  assert.equal(p.settings.replace({ v: 3, levels: { nether: '34' } }), true);
+  await p.settle();
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=34');
+  same(p.pressed(), ['Low']);
+});
+
+// The link's form is the README's: a place's level is `k`, beside the
+// place and never without one, and a height of one to three digits.
+test('a link carries a view\'s level as k, and one that is not a level beside a place is refused', async () => {
+  const p = await load('#nether/100/200/-1');
+  const { pack, unpack } = p.app.views;
+  const part = (raw) => `v1.${Buffer.from(JSON.stringify(raw)).toString('base64url')}`;
+  const sent = (packed) => JSON.parse(Buffer.from(packed.slice(3), 'base64url').toString());
+  const place = { d: 'nether', x: 1, z: 2, zoom: 0 };
+
+  const packed = pack({ name: 'v', layers: {}, place: { ...place, level: '66' } });
+  assert.equal(sent(packed).k, '66');
+  same(unpack(packed).view.place, { ...place, level: '66' });
+  assert.equal(Object.hasOwn(sent(pack({ name: 'v', layers: {}, place })), 'k'), false, 'the default cut is the absence of a level');
+  assert.equal(unpack(pack({ name: 'v', layers: {}, place })).view.place.level, undefined);
+
+  const whole = sent(packed);
+  same(unpack(part(whole)).view.place, { ...place, level: '66' }, 'a link written by hand in the same form is read');
+  const { p: _, ...placeless } = whole;
+  assert.ok(unpack(part(placeless)).error, 'a level with no place');
+  for (const k of ['', '1234', '../x', '6 6', 66, null, ['66']]) assert.ok(unpack(part({ ...whole, k })).error, JSON.stringify(k));
 });
 
 (async () => {
