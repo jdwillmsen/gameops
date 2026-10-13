@@ -1131,8 +1131,8 @@ counts, and `Click for details`. The sheet says:
   `None in the save`, `No raid record`), never shown as nought. A site the
   seed gives has none of this, and the sheet says that only a kind and a
   place can be said of it;
-- the biome at its middle, with the height of the surface there, asked of
-  `/api/biomes/at` while the service has biomes, and how many of its chunks are slime chunks, in the Overworld;
+- the biome at its middle, asked of `/api/biomes/at` while the service has
+  biomes, and how many of its chunks are slime chunks, in the Overworld;
 - for a recorded one, what the map already holds inside its box, counted
   in the browser from the layers loaded: beds by colour, containers by
   kind, named mobs by name, and the players and mobs in the last live
@@ -2268,9 +2268,9 @@ skipped and counted.
 as of the last completed reading, and false where no chunk has been
 generated. It is what anything else in the service asks.
 
-The surface heights are asked of `(*biomes.Store).Heights()`, which is nil
-before there is a reading (and every method of the `*heights.Map` it
-returns is safe on nil, and says not known):
+The surface heights are asked of `(*biomes.Store).World().Heights()`, which
+is nil before there is a reading (and every method of the `*heights.Map`
+it returns is safe on nil, and says not known):
 
 - `At(d chunks.Dimension, x, z int32) (y int32, ok bool)` is the surface
   at one column, in world y.

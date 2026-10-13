@@ -85,9 +85,11 @@ func TestAWorldMadeByBuildHasNoHeightsUntilGivenThem(t *testing.T) {
 	}
 }
 
-func TestTheTileSizeIsTheHeightsAndTheTerrains(t *testing.T) {
-	if TileSize != heights.TileSize {
-		t.Errorf("biome tiles are %d and height tiles %d", TileSize, heights.TileSize)
+// 256 is the size the tile addresses are worked out in and the one the
+// API tells the page its tiles are.
+func TestBiomeAndHeightTilesAreThePublishedSize(t *testing.T) {
+	if TileSize != 256 || heights.TileSize != 256 {
+		t.Errorf("biome tiles are %d and height tiles %d, want 256", TileSize, heights.TileSize)
 	}
 }
 
@@ -98,7 +100,7 @@ func TestHeightsSurviveARestartWithTheirBiomes(t *testing.T) {
 	}
 	next := &Extractor{WorkDir: e.WorkDir, Store: &Store{}, Logger: e.Logger}
 	next.Load()
-	if y, ok := next.Store.Heights().At(chunks.Overworld, 5, 5); !ok || y != 62 {
+	if y, ok := next.Store.World().Heights().At(chunks.Overworld, 5, 5); !ok || y != 62 {
 		t.Errorf("after a restart: %d, %v", y, ok)
 	}
 	// Both are held, so a world that has not grown is still not read.
@@ -122,8 +124,8 @@ func TestABiomeReadingWithoutHeightsIsReadAgainAtTheFirstCycle(t *testing.T) {
 	var log bytes.Buffer
 	next := &Extractor{WorkDir: e.WorkDir, Store: &Store{}, Logger: extractor(t, &log).Logger}
 	next.Load()
-	if next.Store.World() == nil || next.Store.Heights() != nil || log.Len() != 0 {
-		t.Fatalf("loaded %v, heights %v, logged %q", next.Store.World(), next.Store.Heights(), log.String())
+	if next.Store.World() == nil || next.Store.World().Heights() != nil || log.Len() != 0 {
+		t.Fatalf("loaded %v, heights %v, logged %q", next.Store.World(), next.Store.World().Heights(), log.String())
 	}
 	if _, ok := next.Store.At(chunks.Overworld, 5, 5); !ok {
 		t.Error("the biomes are not served from the start")
@@ -132,7 +134,7 @@ func TestABiomeReadingWithoutHeightsIsReadAgainAtTheFirstCycle(t *testing.T) {
 	if err != nil || stats.Unchanged {
 		t.Fatalf("the first cycle: stats %+v, err %v", stats, err)
 	}
-	if y, ok := next.Store.Heights().At(chunks.Overworld, 5, 5); !ok || y != 62 {
+	if y, ok := next.Store.World().Heights().At(chunks.Overworld, 5, 5); !ok || y != 62 {
 		t.Errorf("heights after the first cycle: %d, %v", y, ok)
 	}
 	if _, err := os.Stat(next.heightsFile()); err != nil {
@@ -179,8 +181,8 @@ func TestHeightsFromAnotherVersionOrAnotherSnapshotAreNotUsed(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.Load()
-		if e.Store.World() == nil || e.Store.Heights() != nil || !strings.Contains(log.String(), c.logs) {
-			t.Errorf("%s: loaded %v, heights %v, logged %q", name, e.Store.World() != nil, e.Store.Heights(), log.String())
+		if e.Store.World() == nil || e.Store.World().Heights() != nil || !strings.Contains(log.String(), c.logs) {
+			t.Errorf("%s: loaded %v, heights %v, logged %q", name, e.Store.World() != nil, e.Store.World().Heights(), log.String())
 		}
 		// The next reading writes over it.
 		if _, err := e.Extract(context.Background(), hills().write(t, nil), snapshotAt.Add(time.Minute), 5); err != nil {
@@ -210,7 +212,7 @@ func TestAFailedSaveOfHeightsIsCountedAndTheyAreStillServed(t *testing.T) {
 	if got := testutil.ToFloat64(metricSaveFailures); got != failures+1 {
 		t.Errorf("save failures = %v, want %v", got, failures+1)
 	}
-	if y, ok := e.Store.Heights().At(chunks.Overworld, 5, 5); !ok || y != 62 {
+	if y, ok := e.Store.World().Heights().At(chunks.Overworld, 5, 5); !ok || y != 62 {
 		t.Errorf("not served: %d, %v", y, ok)
 	}
 }
