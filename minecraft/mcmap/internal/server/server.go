@@ -254,6 +254,8 @@ func (s *Server) Handler() http.Handler {
 		s.route(mux, gateViewer, "GET /api/biomes/nearest", s.handleBiomeNearest)
 		s.route(mux, gateViewer, "GET /api/biomes/region", s.handleBiomeRegion)
 		s.route(mux, gateViewer, "GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.handleBiomeTile)
+		s.route(mux, gateViewer, "GET /api/topography", s.handleTopography)
+		s.route(mux, gateViewer, "GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}", s.handleTopographyTile)
 	}
 	if s.Trails != nil {
 		s.route(mux, gateViewer, "GET /api/trails", s.handleTrails)
