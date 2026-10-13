@@ -5,9 +5,10 @@
 // own rules for the two things a day must not disturb. A view outside the
 // bounds it is given is brought inside them and a zoom below its least is
 // raised to it, as Leaflet does, and a tile layer is loading only while
-// the view shows some of its bounds at a zoom it draws, and says 'load'
-// only after that, as Leaflet does. Run by `go test ./web/` where there is
-// a node to run it with, or by hand: `node web/testdata/past.test.cjs`.
+// the view shows some of its bounds, which must have some size, at a zoom
+// it draws, and says 'load' only after that, as Leaflet does. Run by
+// `go test ./web/` where there is a node to run it with, or by hand:
+// `node web/testdata/past.test.cjs`.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -82,7 +83,9 @@ function leaflet() {
     addTo(to) { to.layers.add(this); return this; }
     isLoading() {
       const o = this.options;
-      return !this.come && map.centre !== null && map.zoom >= o.minZoom && map.zoom <= o.maxZoom && (!o.bounds || o.bounds.contains(map.centre));
+      // Bounds of no size hold no tile, wherever the view is.
+      const room = !o.bounds || (o.bounds.north > o.bounds.south && o.bounds.east > o.bounds.west && o.bounds.contains(map.centre));
+      return !this.come && map.centre !== null && map.zoom >= o.minZoom && map.zoom <= o.maxZoom && room;
     }
     // Its tiles have come.
     arrive() { this.come = true; this.fire('load'); }
@@ -276,6 +279,35 @@ test('another dimension shown while a day is still coming is shown alone', async
   const [nether] = p.terrain();
   await new Promise((done) => setTimeout(done, 30));
   assert.deepEqual(p.terrain(), [nether]);
+});
+
+test('a day that did not hold the dimension shown asks for none of its tiles, and what was there goes at once', async () => {
+  const p = await load('#nether/0/0/-1');
+  const [today] = p.terrain();
+  today.arrive();
+  p.app.past.set(THEN);
+  const [layer] = p.terrain();
+  assert.notEqual(layer, today);
+  assert.equal(p.terrain().length, 1, 'today must not stay under a day that has nothing to draw over it');
+  assert.equal(layer.isLoading(), false);
+  const b = layer.options.bounds;
+  assert.ok(b.north === b.south && b.east === b.west, 'the layer has nowhere a tile could be');
+  assert.equal(layer.options.format, 'webp');
+  assert.equal(layer.options.minNativeZoom, -5);
+  assert.deepEqual(blocks(p.app.extent()), [-2048, -2048, 2048, 2048]);
+  assert.deepEqual(p.map.getCenter(), { lat: 0, lng: 0 });
+});
+
+test('a dimension the day did not hold, come to from one it did, asks for none of its tiles either', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(THEN);
+  assert.equal(p.app.go('nether', 100, 200), true);
+  const [nether] = p.terrain();
+  assert.equal(p.terrain().length, 1);
+  assert.equal(nether.isLoading(), false);
+  p.app.past.set(null);
+  assert.equal(p.terrain().at(-1).isLoading(), true, 'back on now the dimension is drawn as it is');
 });
 
 (async () => {

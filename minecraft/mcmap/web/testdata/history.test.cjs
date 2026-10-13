@@ -23,8 +23,9 @@ const THREE = [day('2026-10-12'), day('2026-10-13'), day('2026-10-14', { rendere
 async function load({ answer = () => ({ days: THREE }), locked = false } = {}) {
   const p = page(new Map(), { files: [] });
   const { win, doc } = p;
-  const state = { asked: [], shown: [], ticks: [] };
+  const state = { asked: [], shown: [], ticks: [], dimension: 'overworld' };
   if (locked) doc.body.classList.add('locked');
+  win.mcmap.dimension = () => state.dimension;
   win.mcmap.past = {
     get: () => (state.shown.length ? state.shown[state.shown.length - 1] : ''),
     set(to) { state.shown.push(to ? to.day : ''); return true; },
@@ -140,6 +141,25 @@ test('a day says only its terrain is of the day, and one drawn by a different re
   await p.slide(1);
   assert.doesNotMatch(p.part('note').textContent, /renderer/);
   for (const still of [/Players/, /markers/, /structures/, /biomes/, /as they are now/]) assert.match(p.part('note').textContent, still);
+});
+
+test('a day that kept nothing of the dimension shown says so, and stops saying so when one it kept is shown', async () => {
+  const p = await load();
+  await p.press('open');
+  await p.slide(1);
+  assert.match(p.part('note').textContent, /The terrain is of this day/);
+  p.state.dimension = 'nether';
+  await p.view();
+  assert.match(p.part('note').textContent, /kept nothing of this dimension/);
+  assert.doesNotMatch(p.part('note').textContent, /The terrain is of this day/);
+  assert.match(p.part('note').textContent, /as they are now/);
+  await p.press('now');
+  assert.doesNotMatch(p.part('note').textContent, /kept nothing/);
+  await p.slide(1);
+  assert.match(p.part('note').textContent, /kept nothing of this dimension/);
+  p.state.dimension = 'overworld';
+  await p.view();
+  assert.match(p.part('note').textContent, /The terrain is of this day/);
 });
 
 test('play runs from the day shown to now and stops there', async () => {
