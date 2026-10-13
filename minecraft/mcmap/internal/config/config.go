@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
@@ -62,6 +63,9 @@ type Config struct {
 	UnminedSHA256   string
 	ChunkProcessors int
 	NetherTopY      int
+	// NetherLevels are further cuts of the nether, each a render of its own,
+	// beside the one at NetherTopY. Empty by default.
+	NetherLevels []render.NetherLevel
 
 	// InternalAddr serves metrics and the agent's login claims. It is a
 	// separate listener so that publishing HTTPAddr cannot publish these.
@@ -241,6 +245,9 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.NetherTopY, err = strconv.Atoi(or(getenv("NETHER_TOP_Y"), "100")); err != nil || c.NetherTopY < 1 || c.NetherTopY > 127 {
 		fail("NETHER_TOP_Y must be between 1 and 127")
 	}
+	if c.NetherLevels, err = parseNetherLevels(getenv("NETHER_LEVELS"), c.NetherTopY); err != nil {
+		fail("NETHER_LEVELS: %v", err)
+	}
 
 	if c.Live, err = strconv.ParseBool(or(getenv("LIVE_ENABLED"), "true")); err != nil {
 		fail("LIVE_ENABLED must be true or false")
@@ -348,6 +355,46 @@ func Load(getenv func(string) string) (Config, error) {
 		fail("HISTORY_DIR must be an absolute path, got %q", c.HistoryDir)
 	}
 	return c, errors.Join(errs...)
+}
+
+// maxNetherLevels is how many cuts beside the default one may be asked for.
+// Each is a full render, of about the same cost as the nether's own, on a
+// CPU the game server shares.
+const maxNetherLevels = 3
+
+var levelLabel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 -]{0,11}$`)
+
+// parseNetherLevels reads "<top y>:<label>" pairs separated by commas. The
+// label is what the page's picker shows, so it is short and plain.
+func parseNetherLevels(raw string, defaultTopY int) ([]render.NetherLevel, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var levels []render.NetherLevel
+	labels := []string{strings.ToLower(render.DefaultNetherLabel)}
+	for _, item := range strings.Split(raw, ",") {
+		y, label, ok := strings.Cut(strings.TrimSpace(item), ":")
+		top, err := strconv.Atoi(strings.TrimSpace(y))
+		label = strings.TrimSpace(label)
+		switch {
+		case !ok || err != nil:
+			return nil, fmt.Errorf("%q is not <y>:<label>, as in 66:Mid", item)
+		case top < 1 || top > 127:
+			return nil, fmt.Errorf("the height %d is outside 1 to 127", top)
+		case top == defaultTopY || slices.ContainsFunc(levels, func(l render.NetherLevel) bool { return l.TopY == top }):
+			return nil, fmt.Errorf("the height %d is given twice, or is NETHER_TOP_Y", top)
+		case !levelLabel.MatchString(label):
+			return nil, fmt.Errorf("the label %q must be 1 to 12 letters, digits, spaces or hyphens, starting with a letter or digit", label)
+		case slices.Contains(labels, strings.ToLower(label)):
+			return nil, fmt.Errorf("the label %q is used twice, or is the default level's", label)
+		}
+		labels = append(labels, strings.ToLower(label))
+		levels = append(levels, render.NetherLevel{TopY: top, Label: label})
+		if len(levels) > maxNetherLevels {
+			return nil, fmt.Errorf("at most %d levels beside the default one", maxNetherLevels)
+		}
+	}
+	return levels, nil
 }
 
 func or(v, fallback string) string {

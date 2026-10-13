@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 )
 
@@ -216,5 +217,62 @@ func TestLoad_StructuresWithheld(t *testing.T) {
 		if c, err := Load(with("STRUCTURES_WITHHELD", value)); err == nil {
 			t.Errorf("STRUCTURES_WITHHELD=%q was taken to mean %v", value, c.StructuresWithheld)
 		}
+	}
+}
+
+func TestLoad_NetherLevelsAreOffByDefault(t *testing.T) {
+	c, err := Load(with())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.NetherLevels) != 0 {
+		t.Errorf("levels = %+v, want none", c.NetherLevels)
+	}
+}
+
+func TestLoad_NetherLevels(t *testing.T) {
+	c, err := Load(with("NETHER_LEVELS", " 66:Mid , 34:Low lava "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []render.NetherLevel{{TopY: 66, Label: "Mid"}, {TopY: 34, Label: "Low lava"}}
+	if !slices.Equal(c.NetherLevels, want) {
+		t.Errorf("levels = %+v, want %+v", c.NetherLevels, want)
+	}
+}
+
+func TestLoad_NetherLevelsRefusesWhatCannotBeServed(t *testing.T) {
+	cases := map[string]string{
+		"no label":           "66",
+		"empty label":        "66:",
+		"not a number":       "x:Mid",
+		"above the roof":     "128:Mid",
+		"at the floor":       "0:Mid",
+		"same height twice":  "66:Mid,66:Other",
+		"the default's":      "100:Mid",
+		"same label twice":   "66:Mid,34:mid",
+		"the default label":  "66:top",
+		"long label":         "66:A very long label",
+		"markup in a label":  "66:<b>",
+		"too many":           "10:A,20:B,30:C,40:D",
+		"stray comma":        "66:Mid,",
+		"label with a colon": "66:a:b",
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(with("NETHER_LEVELS", value))
+			if err == nil || !strings.Contains(err.Error(), "NETHER_LEVELS") {
+				t.Errorf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestLoad_NetherLevelsFollowANetherTopYOfTheirOwn(t *testing.T) {
+	if _, err := Load(with("NETHER_TOP_Y", "66", "NETHER_LEVELS", "66:Mid")); err == nil {
+		t.Error("a level at NETHER_TOP_Y was accepted")
+	}
+	if _, err := Load(with("NETHER_TOP_Y", "90", "NETHER_LEVELS", "100:Roof")); err != nil {
+		t.Error(err)
 	}
 }

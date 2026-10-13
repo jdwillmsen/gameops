@@ -31,6 +31,11 @@ type Server struct {
 	// looking again is worth it.
 	Refresh time.Duration
 	Static  fs.FS
+	// NetherTop is the height the nether's own map is cut at, and
+	// NetherLevels the extra cuts rendered beside it. With none, the page
+	// is told of no levels at all.
+	NetherTop    int
+	NetherLevels []render.NetherLevel
 
 	// Sessions and Codes are the login. With Sessions nil there is none and
 	// the map is open to whoever can reach it, which is only acceptable
@@ -298,7 +303,49 @@ type dimensionJSON struct {
 	ID         string     `json:"id"`
 	Rendered   bool       `json:"rendered"`
 	RenderedAt *time.Time `json:"renderedAt,omitempty"`
+	// Levels are the cuts of the dimension that can be drawn, the default
+	// first, and only where there is more than the default.
+	Levels []levelJSON `json:"levels,omitempty"`
 	*render.Info
+}
+
+// defaultLevelID is what the page calls the cut a tile request names with no
+// level at all. It is never a valid level in a request: the default is the
+// absence of one.
+const defaultLevelID = "default"
+
+type levelJSON struct {
+	ID    string `json:"id"`
+	Y     int    `json:"y"`
+	Label string `json:"label"`
+}
+
+// levels lists the nether's cuts that have been drawn at least once. A level
+// whose first render has not finished is left out, so the page never offers
+// a map of nothing.
+func (s *Server) levels() []levelJSON {
+	var out []levelJSON
+	for _, l := range s.NetherLevels {
+		if _, ok := s.info(l.Dir()); ok {
+			out = append(out, levelJSON{ID: l.ID(), Y: l.TopY, Label: l.Label})
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return append([]levelJSON{{ID: defaultLevelID, Y: s.NetherTop, Label: render.DefaultNetherLabel}}, out...)
+}
+
+// level finds the configured cut a request names. Only what was configured
+// can match, and the directory comes from the match and never from the
+// request, so no value of it can reach another path.
+func (s *Server) level(id string) (render.NetherLevel, bool) {
+	for _, l := range s.NetherLevels {
+		if l.ID() == id {
+			return l, true
+		}
+	}
+	return render.NetherLevel{}, false
 }
 
 type mapJSON struct {
@@ -324,6 +371,9 @@ func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
 			d.Rendered, d.Info = true, &info
 			if at, ok := status.RenderedAt[id]; ok {
 				d.RenderedAt = &at
+			}
+			if id == "nether" {
+				d.Levels = s.levels()
 			}
 		}
 		out.Dimensions = append(out.Dimensions, d)
@@ -369,8 +419,20 @@ func (s *Server) handleTile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join(s.MapsDir, dimension)
-	info, ok := s.info(dimension)
+	// The directory is of the dimension, or of the configured level a
+	// request names, and a request that names a level of any other
+	// dimension, or one that is not configured, asks for nothing there is.
+	name := dimension
+	if id := r.URL.Query().Get("level"); id != "" {
+		level, ok := s.level(id)
+		if !ok || dimension != "nether" {
+			http.NotFound(w, r)
+			return
+		}
+		name = level.Dir()
+	}
+	dir := filepath.Join(s.MapsDir, name)
+	info, ok := s.info(name)
 	if !ok {
 		http.NotFound(w, r)
 		return

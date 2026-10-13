@@ -117,8 +117,14 @@ type Worker struct {
 	Lead time.Duration
 	// RenderTimeout bounds one dimension's render; zero means no bound.
 	RenderTimeout time.Duration
-	Status        *Status
-	Logger        *slog.Logger
+	// NetherLevels are extra cuts of the nether, each rendered into a
+	// directory of its own after everything else in the cycle, so that one
+	// that is slow or broken costs the default maps and the passes after
+	// them nothing. LevelTimeout bounds one; zero means no bound.
+	NetherLevels []render.NetherLevel
+	LevelTimeout time.Duration
+	Status       *Status
+	Logger       *slog.Logger
 	// Census, if set, counts the world's chunks after every snapshot.
 	Census Census
 	// Keeper, if set, retains the snapshots the Census found whole. It
@@ -249,7 +255,44 @@ func (w *Worker) render(ctx context.Context, dimension string) error {
 		ctx, cancel = context.WithTimeout(ctx, w.RenderTimeout)
 		defer cancel()
 	}
-	return w.Renderer.Render(ctx, filepath.Join(w.MirrorDir, w.Level), dimension, filepath.Join(w.MapsDir, dimension))
+	return w.Renderer.Render(ctx, filepath.Join(w.MirrorDir, w.Level), dimension, filepath.Join(w.MapsDir, dimension), 0)
+}
+
+// levels renders the extra cuts of the nether, last, from this goroutine.
+// A level is reported under the name of its directory in the render metrics,
+// so a dashboard that watches the dimensions is unchanged and the levels
+// are told apart from them. A failure is counted and logged and goes no
+// further: the page is not told of a problem, since the map it shows is the
+// whole of what the default maps drew, and the level that failed keeps the
+// tiles of its last good render.
+func (w *Worker) levels(ctx context.Context, now time.Time) {
+	for _, level := range w.NetherLevels {
+		if ctx.Err() != nil {
+			return
+		}
+		started := time.Now()
+		name := level.Dir()
+		err := w.renderLevel(ctx, level)
+		if err != nil {
+			metricRenderFailures.WithLabelValues(name).Inc()
+			w.Logger.Error("render failed", "dimension", name, "top_y", level.TopY, "error", err)
+			continue
+		}
+		took := time.Since(started)
+		metricRenderAt.WithLabelValues(name).Set(float64(now.Unix()))
+		metricRenderSeconds.WithLabelValues(name).Set(took.Seconds())
+		w.Logger.Info("rendered", "dimension", name, "top_y", level.TopY, "seconds", took.Seconds())
+		w.Status.MarkRendered(name, now)
+	}
+}
+
+func (w *Worker) renderLevel(ctx context.Context, level render.NetherLevel) error {
+	if w.LevelTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, w.LevelTimeout)
+		defer cancel()
+	}
+	return w.Renderer.Render(ctx, filepath.Join(w.MirrorDir, w.Level), "nether", filepath.Join(w.MapsDir, level.Dir()), level.TopY)
 }
 
 // Cycle runs one refresh. now is passed in so the quiet windows and the
@@ -312,6 +355,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	}
 	w.biomes(ctx, now, report, counted)
 	w.survey(ctx, now)
+	w.levels(ctx, now)
 	return Applied
 }
 
