@@ -46,6 +46,38 @@ export async function dimensions({ page }) {
   return { measures };
 }
 
+// Where the nether is drawn at more than one level, the picker is there in
+// the nether and nowhere else, and choosing a level draws tiles from it. A
+// deployment with one cut of the nether is not an error: there is nothing
+// to choose between.
+export async function netherLevels({ page }) {
+  const home = await page.evaluate(() => window.mcmap.dimension());
+  const put = (id) => page.evaluate((to) => window.mcmap.go(to, 0, 0), id);
+  const shown = () => page.evaluate(() => { const bar = document.querySelector('.levels'); return Boolean(bar) && !bar.hidden; });
+  const back = async () => {
+    await page.evaluate(() => window.mcmap.level.set('default'));
+    await page.evaluate((id) => window.mcmap.go(id, 0, 0), home);
+  };
+  if (!(await put('nether'))) return skip('no nether with more than one level here');
+  await until(() => page.evaluate(() => window.mcmap.dimension() === 'nether'));
+  const offered = await page.evaluate(() => window.mcmap.level.list().length);
+  if (offered < 2) {
+    await back();
+    return skip('no nether with more than one level here');
+  }
+  const measures = { levels: offered, tiles: 0 };
+  const buttons = page.locator('.levels button.level');
+  if (!(await until(shown))) throw new Fail('the nether has levels and no picker is shown', measures);
+  await buttons.nth(1).click();
+  measures.tiles = await until(() => page.evaluate(() => [...document.querySelectorAll('#map img.leaflet-tile-loaded')].filter((img) => img.src.includes('/tiles/nether/') && img.src.includes('level=') && img.naturalWidth > 0).length), { timeoutMs: 20_000 });
+  if (!measures.tiles) throw new Fail('choosing a nether level drew no tiles from it', measures);
+  if (await buttons.nth(1).getAttribute('aria-pressed') !== 'true') throw new Fail('the picker does not show the level that is drawn', measures);
+  await put('overworld');
+  if (await shown()) throw new Fail('the nether level picker is shown outside the nether', measures);
+  await back();
+  return { measures };
+}
+
 // Takes the view to where there is something drawn as a picture: a live
 // entity if the world has one, else a marker the snapshot placed. Answers
 // how many of each the dimension holds, and never where.
