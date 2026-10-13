@@ -87,6 +87,7 @@ export const SENTENCES = [
   "the map was not drawn under a theme",
   "this map keeps no history",
   "no day has been kept yet",
+  "the newest day kept nothing of the dimension shown",
   "the days the map keeps were not listed",
   "days are kept and the page shows no History",
   "the History row did not open",

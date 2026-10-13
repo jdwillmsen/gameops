@@ -245,6 +245,8 @@ func validateRelease(root string, m Manifest, tags map[string]string, bad func(M
 		// one is first heard of as a release that fails part-way.
 		if _, err := os.Stat(filepath.Join(root, m.Dir, imageReadme)); errors.Is(err, fs.ErrNotExist) {
 			bad(m, "release.artifacts has image but %s%s does not exist", m.Dir, imageReadme)
+		} else if err != nil {
+			bad(m, "%s%s could not be looked at: %v", m.Dir, imageReadme, err)
 		}
 	}
 }

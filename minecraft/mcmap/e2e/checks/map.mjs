@@ -327,12 +327,20 @@ export async function history({ page, cfg }) {
   const listed = await page.evaluate(async () => {
     const res = await fetch('api/history', { cache: 'no-store' });
     const days = res.ok ? (await res.json()).days : null;
-    return { status: res.status, days: Array.isArray(days) ? days.length : 0 };
+    const newest = Array.isArray(days) && days.length > 0 ? days[days.length - 1] : null;
+    const shown = window.mcmap.dimension();
+    return {
+      status: res.status, days: Array.isArray(days) ? days.length : 0,
+      drawn: Boolean(newest && Array.isArray(newest.dimensions) && newest.dimensions.some((d) => d && d.id === shown && d.tiles > 0)),
+    };
   });
   if (listed.status === 404 && !cfg.keepsHistory) return skip('this map keeps no history');
   if (listed.status !== 200) throw new Fail('the days the map keeps were not listed', { status: listed.status });
   const measures = { days: listed.days, day_tiles: 0, day_pictures: 0 };
   if (listed.days === 0) return skip('no day has been kept yet', measures);
+  // A day with no terrain of the dimension shown is drawn as nothing, which
+  // is right and leaves no tile to wait for.
+  if (!listed.drawn) return skip('the newest day kept nothing of the dimension shown', measures);
 
   const state = () => page.evaluate(() => {
     const part = (name) => document.querySelector(`#map .timeline-${name}`);
