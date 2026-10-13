@@ -36,6 +36,10 @@
   // down. With this transformation lat is Z and lng is X, in blocks, and
   // zoom 0 is one block per pixel, which is exactly how the tiles are cut.
   const crs = L.extend({}, L.CRS.Simple, { transformation: new L.Transformation(1, 0, 1, 0) });
+  // Bounds no tile is in. Leaflet draws a tile only where it overlaps the
+  // layer's bounds by more than an edge, and a box of no size, on a corner
+  // every tile at every zoom shares, overlaps none.
+  const NOWHERE = L.latLngBounds([0, 0], [0, 0]);
 
   // One block is 2^zoom screen pixels. 7 is 128: a single block fills a
   // third of a phone's width and about a seventh of a desktop's height,
@@ -274,8 +278,11 @@
     if (!today || !today.rendered) return;
     // A day kept has its own extent and format: the world was smaller
     // then, and may have been drawn another way. A day that does not hold
-    // this dimension is drawn as nothing, not as today.
-    const d = (past && past.dimensions.find((o) => o.id === id)) || today;
+    // this dimension is drawn as nothing, not as today: the layer is made
+    // as today's would be and given nowhere to draw, so it asks for none
+    // of the tiles the day does not have.
+    const kept = past ? past.dimensions.find((o) => o.id === id) : today;
+    const d = kept || today;
     const old = layer;
     const stays = old && current === id;
     current = id;
@@ -303,7 +310,7 @@
       // below the coarsest, which is what lets the zoom be any fraction.
       minZoom: -12,
       maxZoom: MAX_ZOOM,
-      bounds: reach(d),
+      bounds: kept ? reach(kept) : NOWHERE,
       noWrap: true,
       keepBuffer: 2,
     }).addTo(map);

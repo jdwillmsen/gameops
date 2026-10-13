@@ -2467,7 +2467,9 @@ new ones until those have come, so stepping through days is one picture
 turning into the next. Play runs from the day shown to now, a day every
 second and a half, and stops there; from now it starts at the first day
 kept. Only the terrain is of the day: players, markers, structures and
-biomes are still the world as it is, and the row says so. While a day is
+biomes are still the world as it is, and the row says so. A day that kept
+nothing of the dimension shown draws no terrain and asks for none of its
+tiles, and the row says that instead. While a day is
 shown the footer says which in place of when the map was updated, with
 no countdown to a refresh, and putting the row away puts the map back on
 now. The days are asked for

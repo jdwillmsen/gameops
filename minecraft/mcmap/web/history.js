@@ -90,6 +90,8 @@
     range.setAttribute('aria-valuetext', shown.textContent);
     if (!past) {
       note.textContent = days.length === 0 ? '' : `${days.length} ${days.length === 1 ? 'day' : 'days'} kept, from ${name(days[0].day)}.`;
+    } else if (app.dimension() && !days[at].dimensions.some((d) => d && d.id === app.dimension())) {
+      note.textContent = 'This day kept nothing of this dimension, so no terrain is drawn. Players, markers, structures and biomes are as they are now.';
     } else {
       note.textContent = `The terrain is of this day. Players, markers, structures and biomes are as they are now.${days[at].rendererChanged ? ' It was drawn by a different renderer than the day before, so not every difference from it is the world\'s.' : ''}`;
     }
@@ -176,6 +178,11 @@
     draw();
   });
 
-  document.addEventListener('mcmap:view', ask);
+  // What a day's note says depends on the dimension shown, which may be
+  // what has changed.
+  document.addEventListener('mcmap:view', () => {
+    draw();
+    ask();
+  });
   ask();
 })();
