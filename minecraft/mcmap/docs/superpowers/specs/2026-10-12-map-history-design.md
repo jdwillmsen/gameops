@@ -1,7 +1,8 @@
 # Map history: the world as it was on each day
 
 Status: proposed 2026-10-12. Storage, capture and the API are built behind
-`HISTORY_ENABLED`; the page's timeline is the next piece.
+`HISTORY_ENABLED`, and the page has its timeline; the README's History
+section says how each works.
 
 ## What is wanted
 
@@ -87,7 +88,8 @@ which is a guess of 5 to 15 MB a day and 2 to 5 GB a year until measured.
 
 ## What this leaves out
 
-- **The page.** A day picker, stepping, and a comparison of two days.
+- **A comparison of two days**, and a link to a day: the page picks a day
+  and steps through them, no more.
 - **Markers, structures and biomes as they were.** A day keeps terrain only.
 - **Days before this was switched on.** The fourteen nightly archives could
   each be rendered once to seed two weeks of history.
