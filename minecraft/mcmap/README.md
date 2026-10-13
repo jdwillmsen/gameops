@@ -3552,12 +3552,13 @@ counted apart and is not a failure.
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
 | `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it | |
+| `history` | History opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, the view is where it was, Now draws today's tiles again with none of the day's left, and the row closes | a day kept: a map run with `--no-history`, or one that has kept no day yet, skips |
 | `follow-player` | Follow on a player, one with a head where there is one, for 20 s: it stays on, the button says so, the mark is within 4 pixels of the middle of the map that can be seen, and so is where the stream last put the player, give or take what they travel between samples | a player online |
 | `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
 | `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
 | `phone-sheet` | On a phone-sized touch screen the panel is a sheet across the bottom that changes height by its handle, with the map drawn | |
 | `live-stream` | A stream opened when the run began is still the same connection, unbroken, 125 s later, with frames no more than 10 s apart | the live layer on; with nothing in the dimension only the connection is judged |
-| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, the 403 above, the list of days where no history is kept) | |
+| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, today or on a day kept; the 403 above; the 401 the login screen's browser gets for the days kept; and, only in a run given `--no-history`, the 404 a map that keeps no days answers for them) | |
 | `read-only` | Over the whole run the page tried no request but a read | |
 
 `faces` is there to answer a question nobody has settled: villagers' heads
@@ -3740,9 +3741,16 @@ listed. Faces are of the awkward shapes: a villager's, with its head to
 one side of an odd-width square and a nose below it, and a fox's, with ears
 above a head that fits its box.
 
+It keeps one day of history, taken by the service's own capture from the
+terrain it draws, so the History row has a day to go back to. A run is
+told when the map it checks keeps none, with `--no-history`: nothing the
+map serves says whether it means to keep days, and without being told the
+suite counts a 404 for the list of them as the history gone missing.
+
 ```sh
-minecraft/mcmap/e2e/local.sh                  # the whole suite, about 2 min 10 s
-HARNESS_QUIET=1 minecraft/mcmap/e2e/local.sh  # a world with nobody in it
+minecraft/mcmap/e2e/local.sh                       # the whole suite, about 2 min 10 s
+HARNESS_QUIET=1 minecraft/mcmap/e2e/local.sh       # a world with nobody in it
+HARNESS_NO_HISTORY=1 minecraft/mcmap/e2e/local.sh  # a map that keeps no days
 ```
 
 `local.sh` builds the harness, makes a secret that it prints nowhere and
