@@ -300,6 +300,7 @@ async function main() {
       await run('structure-sheet', needs(map.structureSheet), on);
       await run('saved-views', needs(map.savedViews), on);
       await run('themes', needs(map.themes), on);
+      await run('history', needs(map.history), on);
       await run('follow-player', needs(live.followPlayer), { ...on, seconds: cfg.followPlayerSeconds + 60 });
       await run('follow-mob', needs(live.followMob), { ...on, seconds: cfg.followMobSeconds + 60 });
       await run('faces', () => live.faces(t), { seconds: 180 });
