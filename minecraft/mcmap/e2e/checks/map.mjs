@@ -249,6 +249,33 @@ export async function toggles({ page }) {
     if (biome.left > 0) throw new Fail('switching the biome overlay off left its tiles on the map', measures);
     measures.toggled += 1;
   }
+  // The topography is tiles too, in one picture for however many of its
+  // three drawings are on: all three on ask for each tile once, with the
+  // three named, and off take them away.
+  const land = await page.evaluate(`(async () => {
+    const rows = (${tree})().filter((r) => r.group === 'Topography' && r.depth === 2);
+    if (rows.length !== 3 || rows.some((r) => r.off || r.on)) return null;
+    const tiles = () => [...document.querySelectorAll('#map img.leaflet-tile')].filter((img) => img.src.includes('api/topography/tiles/'));
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    rows[0].check.click();
+    await wait(1200);
+    const one = tiles().filter((img) => /[?&]styles=hillshade&/.test(img.src)).length;
+    rows[1].check.click();
+    rows[2].check.click();
+    await wait(1500);
+    const all = tiles();
+    const three = all.filter((img) => /[?&]styles=hillshade,contours,tint&/.test(img.src)).length;
+    for (const row of rows) row.check.click();
+    await wait(800);
+    return { one, total: all.length, three, left: tiles().length };
+  })()`);
+  if (land === null) { measures.nothing_to_toggle += 1; } else {
+    measures.topography_tiles = land.total;
+    if (land.one === 0 || land.total === 0) throw new Fail('switching the topography on drew no tiles', measures);
+    if (land.three !== land.total) throw new Fail('with all three drawings on the map asked for tiles of other drawings too', measures);
+    if (land.left > 0) throw new Fail('switching the topography off left its tiles on the map', measures);
+    measures.toggled += 1;
+  }
   if (measures.toggled === 0) return skip('no mobs, structures or biomes here to switch', measures);
   delete measures.row;
   return { measures };

@@ -12,7 +12,7 @@ const probe = await readFile(new URL('./probe.js', import.meta.url), 'utf8');
 export function routeOf(address) {
   let pathname;
   try { pathname = new URL(address).pathname; } catch { return 'unreadable'; }
-  for (const prefix of ['/tiles', '/api/biomes/tiles', '/api/history/tiles', '/api/history/markers', '/api/history/changes', '/api/icons/mob', '/api/icons/picture']) {
+  for (const prefix of ['/tiles', '/api/biomes/tiles', '/api/history/tiles', '/api/history/markers', '/api/history/changes', '/api/topography/tiles', '/api/icons/mob', '/api/icons/picture']) {
     if (pathname.startsWith(`${prefix}/`)) return prefix;
   }
   return /^\/[a-z0-9_./-]{0,80}$/i.test(pathname) ? pathname : 'unreadable';
@@ -28,6 +28,7 @@ const EXPECTED = new Map([
   ['/tiles', [404]],
   ['/api/biomes/tiles', [404]],
   ['/api/history/tiles', [404]],
+  ['/api/topography/tiles', [404]],
   ['/api/icons/head', [404]],
   ['/api/icons/mob', [404]],
   ['/api/icons/picture', [404]],
