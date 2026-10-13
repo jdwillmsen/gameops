@@ -221,8 +221,8 @@
   // Everything the map draws that is never of a day. The second is said by
   // a page whose markers do not follow the day: its map or its markers'
   // script is from before they could, and draws today's.
-  const NOW = 'Players, loaded mobs, waypoints, structures and biomes are as they are now.';
-  const NOW_AND_MARKERS = 'Players, markers, structures and biomes are as they are now.';
+  const NOW = 'Players, loaded mobs, waypoints, structures, biomes and topography are as they are now.';
+  const NOW_AND_MARKERS = 'Players, markers, structures, biomes and topography are as they are now.';
   const followed = () => Boolean(app.past.markers && app.markers && app.markers.day);
 
   // What a day's note says is of the day and what is of now, for the

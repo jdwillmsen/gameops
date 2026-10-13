@@ -242,10 +242,10 @@ test('a day says only its terrain is of the day, and one drawn by a different re
   await p.press('open');
   await p.slide(2);
   assert.match(p.part('note').textContent, /renderer/);
-  for (const still of [/Players/, /markers/, /structures/, /biomes/, /as they are now/]) assert.match(p.part('note').textContent, still);
+  for (const still of [/Players/, /markers/, /structures/, /biomes/, /topography/, /as they are now/]) assert.match(p.part('note').textContent, still);
   await p.slide(1);
   assert.doesNotMatch(p.part('note').textContent, /renderer/);
-  for (const still of [/Players/, /markers/, /structures/, /biomes/, /as they are now/]) assert.match(p.part('note').textContent, still);
+  for (const still of [/Players/, /markers/, /structures/, /biomes/, /topography/, /as they are now/]) assert.match(p.part('note').textContent, still);
 });
 
 test('a day that kept nothing of the dimension shown says so, and stops saying so when one it kept is shown', async () => {
@@ -269,7 +269,7 @@ test('a day that kept nothing of the dimension shown says so, and stops saying s
 
 // What the note must never do is call something of the day that is of
 // now, or the other way about. Each case is read for both halves.
-const OF_NOW = [/Players/, /loaded mobs/, /waypoints/, /structures/, /biomes/, /as they are now/];
+const OF_NOW = [/Players/, /loaded mobs/, /waypoints/, /structures/, /biomes/, /topography/, /as they are now/];
 
 test('a day that kept its markers says the terrain and the beds, containers and named mobs are of the day', async () => {
   const p = await load({ answer: () => ({ days: MARKED }), follows: true });
@@ -323,11 +323,11 @@ test('on a page whose markers do not follow the day, a day that kept them is sti
   const p = await load({ answer: () => ({ days: MARKED }) });
   await p.press('open');
   await p.slide(0);
-  assert.match(p.part('note').textContent, /The terrain is of this day\. Players, markers, structures and biomes are as they are now\./);
+  assert.match(p.part('note').textContent, /The terrain is of this day\. Players, markers, structures, biomes and topography are as they are now\./);
   // The map can say what a day kept and the markers' script cannot draw it.
   p.win.mcmap.past.markers = () => true;
   await p.view();
-  assert.match(p.part('note').textContent, /Players, markers, structures and biomes are as they are now/);
+  assert.match(p.part('note').textContent, /Players, markers, structures, biomes and topography are as they are now/);
 });
 
 test('play runs from the day shown to now and stops there', async () => {

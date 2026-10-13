@@ -375,7 +375,7 @@ func TestLayerPanelKeepsOnlyWhatDiffersAndDrawsOnlyWhatChanged(t *testing.T) {
 	settings := read(t, "settings.js")
 	for _, need := range []string{
 		"items: record(CHOICE, chosen, 32),",
-		"const CHOICES = ['structures#kinds', 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];",
+		"const CHOICES = ['structures#kinds', 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails', 'topography#tint'];",
 		// A record and a view from before the lists are brought to them.
 		"if (layers[BROUGHT] === 1) return record;",
 		"const kinds = fromKindSwitches(view.layers);",
@@ -390,7 +390,7 @@ func TestLayerPanelKeepsOnlyWhatDiffersAndDrawsOnlyWhatChanged(t *testing.T) {
 	for _, need := range []string{
 		"if (app.layers.items) view.items = app.layers.items();",
 		// Game-named choices only: no gamertag, name tag or waypoint.
-		"const SHARED = ['structures#kinds', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs'];",
+		"const SHARED = ['structures#kinds', 'markers#containers', 'markers#beds', 'biomes#items', 'live#mobs', 'topography#tint'];",
 		"redraw(Object.keys(next.layers).filter((key) => !RETIRED.has(key)));",
 	} {
 		if !bytes.Contains(views, []byte(need)) {
