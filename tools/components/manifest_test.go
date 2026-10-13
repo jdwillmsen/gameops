@@ -39,6 +39,7 @@ func TestLoadFindsManifestsAndSetsDir(t *testing.T) {
 	writeFile(t, root, "internal/.keep", "")
 	writeFile(t, root, "minecraft/agent/component.yaml", agentYAML)
 	writeFile(t, root, "minecraft/agent/Dockerfile", "FROM scratch\n")
+	writeFile(t, root, "minecraft/agent/README.docker.md", "# agent\n")
 	writeFile(t, root, "node_modules/x/component.yaml", "name: ignored\n")
 
 	ms, err := Load(root)
@@ -108,12 +109,28 @@ func TestValidateRequiresDockerfileForImage(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "internal/.keep", "")
 	writeFile(t, root, "minecraft/agent/component.yaml", agentYAML)
+	writeFile(t, root, "minecraft/agent/README.docker.md", "# agent\n")
 	ms, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	errs := Validate(root, ms)
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "minecraft/agent/Dockerfile does not exist") {
+		t.Fatalf("got %v", errs)
+	}
+}
+
+func TestValidateRequiresRegistryReadmeForImage(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "internal/.keep", "")
+	writeFile(t, root, "minecraft/agent/component.yaml", agentYAML)
+	writeFile(t, root, "minecraft/agent/Dockerfile", "FROM scratch\n")
+	ms, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	errs := Validate(root, ms)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "minecraft/agent/README.docker.md does not exist") {
 		t.Fatalf("got %v", errs)
 	}
 }

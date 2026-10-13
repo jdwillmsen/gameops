@@ -33,6 +33,7 @@ func fixture(t *testing.T) (root string, base, bridge, shared, docs string) {
 	writeFile(t, root, "internal/.keep", "")
 	writeFile(t, root, "minecraft/agent/component.yaml", agentYAML)
 	writeFile(t, root, "minecraft/agent/Dockerfile", "FROM scratch\n")
+	writeFile(t, root, "minecraft/agent/README.docker.md", "# agent\n")
 	writeFile(t, root, "minecraft/bridge/component.yaml",
 		"name: bridge\nkind: service\nlanguage: go\ntasks: {build: b, test: t}\n")
 	git(t, root, "add", "-A")
