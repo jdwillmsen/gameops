@@ -2531,7 +2531,7 @@ each archive of the world that the history has no day for. An archive is a
 `.tar.gz` with the level's directory at its root, named for when it was
 taken, `<anything>-20261001T040007Z.tar.gz`, which is all that says which
 day it is; of two from one day the earlier is the day. Each is unpacked
-into `BACKFILL_WORK`, drawn in full by the same renderer as the live map,
+under `BACKFILL_WORK`, drawn in full by the same renderer as the live map,
 and kept as the UTC day it was taken on, oldest first, with nothing of one
 archive left under the next. One that cannot be unpacked or drawn costs its
 own day, is named in the log, and makes the command exit 1 once the rest
@@ -2554,7 +2554,7 @@ or every day put in is marked as drawn differently from the next.
 |---|---|---|---|
 | `HISTORY_DIR` | yes | | The history the days are added to; an absolute path |
 | `BACKFILL_ARCHIVES` | yes | | Directory of archives; an absolute path. Only read |
-| `BACKFILL_WORK` | yes | | Where one archive at a time is unpacked and drawn; an absolute path with room for a world and its tiles. Left empty |
+| `BACKFILL_WORK` | yes | | Where one archive at a time is unpacked and drawn; an absolute path with room for a world and its tiles. The job works in a `.mcmap-backfill` directory of its own there, the only thing it deletes, and leaves the rest as it found it |
 | `LEVEL_NAME` | yes | | The world's directory name, as in the archive |
 | `DATA_DIR` | no | `/data` | Where the installed renderer is looked for, under `tools/unmined`. The map's own volume, mounted read-only, saves downloading it |
 | `UNMINED_URL`, `UNMINED_SHA256`, `RENDER_CHUNK_PROCESSORS`, `NETHER_TOP_Y` | no | as the service's | As for the service |

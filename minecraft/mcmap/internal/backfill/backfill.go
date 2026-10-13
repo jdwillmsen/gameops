@@ -47,8 +47,9 @@ type Renderer interface {
 type Job struct {
 	// Archives holds the archives, each the level's directory at its root.
 	Archives string
-	// Work is where one archive at a time is unpacked and drawn. It needs
-	// room for a whole world and its tiles, and is left empty.
+	// Work is where one archive at a time is unpacked and drawn, in a
+	// directory of the job's own inside it. It needs room for a whole
+	// world and its tiles, and is left as it was found.
 	Work  string
 	Level string
 	// Store is the history the days are added to. The job sets where its
