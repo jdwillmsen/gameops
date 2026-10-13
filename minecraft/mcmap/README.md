@@ -2324,7 +2324,8 @@ was hidden before. Resting the
 pointer on the map, or clicking it, names the biome at that block in the
 footer, with the height of its surface (`Biome: Plains · surface 71`) once
 the service has read the heights, and without it until then or where the
-column has none. Like the biome it shows only while the overlay is on, and
+column has none. Like the biome it shows only while the overlay is on (or, alone as the surface,
+while a row of Topography is, below), and
 on a past day it is of the world as it is now, as the biomes are. The listing is asked for again each minute while the overlay is on,
 and a new `version` redraws it. A service without biomes answers 404 to the
 listing, and the page then has no Biomes section at all.
@@ -2377,6 +2378,166 @@ MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/intern
 
 On the FWB world of 2026-10-05 all 11 ocean monuments stand in a deep
 ocean, the witch hut in a swamp, and the fortresses in nether biomes.
+
+## Topography
+
+The shape of the land, laid over the terrain as light and shadow, contour
+lines and a tint by height: a **Hillshade**, **Contour lines** and a
+**Height tint** that the viewer switches independently, all off to begin
+with. They are drawn from the surface heights above and from nothing else.
+
+**Only the heightmap.** The heights are the game's own heightmap: the top
+of a tree's crown, of an ice sheet and of the sea. The ground under them
+is not looked for and there is no way to ask for it, because that means
+reading sub-chunks, which shows more than the terrain tiles do, and this is
+a no-cheats survival world. So the sea is flat, 62, and has no shade and no
+tint (its band is drawn as nothing, so the terrain's own water shows as it
+is), and a forest is its canopy: the drawing blurs a few blocks of it
+before it lights and lines the land, which takes the shape of each tree
+out and leaves the hill, and it can do no more than that.
+
+**One endpoint for the three, composed on the server.**
+`GET /api/topography/tiles/<dimension>/<zoom>/<x>/<y>.png?styles=hillshade,contours,tint`
+draws whichever of the three are named into one picture, rather than three
+tile styles that the page lays one over another. A page with all three on
+makes one request for each tile, not three; and the server reads the
+heights once for all of them. The tile is a paletted PNG, so the
+combinations cost no more than the colours a tile uses, which are
+packed to as few bits as there are of them: the palette is 255 entries at
+most, whatever is on, and the shade has nine steps (four each side of level
+ground), which is what leaves room for eight bands and the two weights of
+line with it. The price is that the three have one opacity, set in the colours,
+and that turning one on is a new address and a new set of tiles, where
+layers laid over each other would have kept the ones already there; the
+browser keeps each combination it has been shown, as it does the biomes'.
+
+**Addressed as the terrain is.** Tile `x`, `y` at zoom `z` is block
+`x*256*2^-z`, `y*256*2^-z`, so the page lays it over the terrain with the
+same Leaflet options. Zoom is -5 to 4: at 0 a pixel is a block, which is
+as fine as the terrain tiles are cut, and at 4 a block is 16 pixels. A zoom
+outside that is a 400; the row says "Zoom in to see it" past -5, where a
+pixel is 32 blocks, a tile covers more than a world explored on foot and
+what is left of a slope is no more than which side of the continent a
+tree stands on. **Finer than a block** the terrain's tiles are squares of
+one colour, and drawing the land the same way would make a line as wide as
+a block and a staircase of a slope: the heights are instead drawn smooth
+between the middles of blocks, after the same blur, and the lines are a
+pixel or two wide at any zoom. Beyond 4 the page enlarges the tile and
+smooths it, where the terrain's are left in squares. A tile at these zooms
+costs what one at zoom 0 does, since it covers fewer blocks and the same pixels.
+
+**What is read, by zoom.** A tile needs its neighbours, since a slope is a
+difference between them, so it reads the pixels of a ring round itself,
+wide enough for a blur and a step each way: 3 pixels at the finest zoom,
+where the blur is widest, and 2 beyond it, so the same land
+drawn from tiles that cut it in other places is the same picture, which is
+what the tests check, down to the pixel, by moving the land across a tile's
+edge. At 1 block to a pixel the columns come from `Rect`; at 2 and 4 every
+column a pixel covers is read the same way and averaged; wider, a column
+in each chunk the pixel covers (one, or four at -5) is taken with `At` and
+averaged, since reading every column would be millions to a tile. Heights
+are kept in sixteenths of a block through the blur, so a plain whose trees
+are a block either way of a contour does not flicker along it.
+
+**Hillshade.** Light comes from the north-west at 45 degrees above the
+horizon, as maps are lit. A slope facing it (one that falls to the
+north-west) is brightened, one facing away is darkened, and one across it
+and level ground are left clear; so the sea and a plain draw nothing, which is
+what lets it lie over the terrain, which has relief of its own, without
+turning it to mud. The shade is drawn translucent, 42% at its darkest and
+18% at its brightest, because a slope can darken by 0.7 of the light of flat
+ground and brighten by only 0.3. Slopes are drawn a little steeper than
+they are as the zoom goes out (by 30% a step), since a pixel of many blocks
+averages the land flat.
+
+**Contour lines.** A line at every height that is a multiple of an interval
+and a heavier one every fifth. The interval is by zoom, so that lines stay
+about as far apart on the screen: 5 blocks at 0, then 10, 20, 50, 100 and
+200 at -5, and a heavy line at 25, 50, 100, 250, 500 and 1,000. A line is
+a pixel wide, on the higher side of the step. The row says what the interval
+is at the zoom the map is at.
+
+**Height tint.** Eight bands in the overworld (below the sea, sea level,
+63 to 69, 70 to 89, 90 to 109, 110 to 139, 140 to 179, and 180 and up), from
+the green of low land through yellow, brown and mauve to the white of the
+peaks, each drawn at 38 to 55% over the terrain; seven in the end. They
+are what the legend lists. Each can be hidden or shown alone from the panel
+as a biome can, which asks for the tile with `hide=<band>,…` (the numbers of
+the bands, from 0, which matter only to a tile that has a tint).
+
+**Dimensions.** The Overworld is drawn. The Nether is refused: its heightmap
+is the bedrock roof, flat over every chunk the world has, so there is nothing
+to draw, and a tile there is a 404, the listing says `offered: false`
+and the page greys the rows out with the reason. The End is drawn, and
+reads well: its islands stand over a void that has no surface and so is left
+clear, and its rim, its pillars and the rise of the main island show in the
+tint and the lines.
+
+**Ground with no surface** (a chunk the world has not generated, or the void
+of the end) draws nothing, and is not a cliff: a neighbour that is not
+known is left out of the step, so the slope is taken from the side that is
+there, and the blur counts only what is known. A tile with no surface in it
+is a 404; one with only level ground is a picture, clear, so that the page
+knows it is there.
+
+**On the page.** Topography is a section of the layer panel after the Biomes,
+with a row for each of the three. A row that is on says why it is not
+drawing where that is so: that the heights have not been read yet, that it
+is not drawn in the Nether, or to zoom in. Under the tint are its bands,
+each with its colour and the heights it is. While any row is on the footer
+says the height of the surface under the pointer, from the `surface` of
+`GET /api/biomes/at` that the biomes' readout already asks for, so that it
+does not depend on the biome overlay: alone it reads `Surface: 71`, and
+with the biome overlay on as well it is the one line `Biome: Plains ·
+surface 71`, where it was for the biomes alone. Where there is no surface it
+says `Surface: none here`, and where nothing is generated `Surface: not
+generated here`. It is not asked for in the Nether, where the rows are
+off. `GET /api/topography?dimension=<id>` gives what the page needs of a
+dimension: whether it is `offered`, whether the heights are `ready`, the
+reading's `version`, the zooms, the contour `intervals` by zoom out from 0 (the same finer than that)
+and `heavyEvery`, and the `bands` with their `from`, `to`, `colour` (empty
+for the band that is not drawn) and `label`. A tile asked for with
+`v=<version>` is kept by the browser for good, and one asked for without
+is checked against its tag. On a past day the topography, like the
+biomes, is of the world as it is now, and the History row says so.
+
+**Cost.** A tile is drawn from memory when asked for, and not kept. On the
+FWB world, every tile of the grid that holds ground, drawn once, one tile at
+a time (so on about a core, the garbage collector aside; the pod has about
+one, shared with the game, and these were taken on an 8-core machine), in
+the three combinations and at each zoom (`MCMAP_REAL_WORLD=… go test -run RealWorld -v
+./minecraft/mcmap/internal/topo/` prints them all; `go test -bench . ./internal/topo/`
+measures them on a made-up land):
+
+| Overworld, all three | Tiles | Time, mean (worst) | Bytes, median (mean, worst) |
+|---|---|---|---|
+| zoom 4 | 479 | 1.5 ms (2.9) | 11.0 KB (9.1, 18.1) |
+| zoom 3 | 757 | 0.99 ms (1.9) | 5.6 KB (7.4, 20.9) |
+| zoom 2 | 954 | 0.86 ms (1.9) | 5.5 KB (6.9, 23.2) |
+| zoom 1 | 1098 | 0.88 ms (2.2) | 6.3 KB (8.1, 31.0) |
+| zoom 0 | 1355 | 0.91 ms (2.9) | 7.1 KB (9.8, 40.6) |
+| zoom -1 | 422 | 1.1 ms (2.5) | 7.2 KB (9.7, 37.8) |
+| zoom -2 | 135 | 1.6 ms (3.7) | 6.5 KB (8.9, 37.0) |
+| zoom -3 | 49 | 1.7 ms (5.3) | 4.5 KB (7.3, 29.3) |
+| zoom -4 | 18 | 1.9 ms (4.2) | 4.4 KB (6.6, 19.9) |
+| zoom -5 | 7 | 4.5 ms (5.5) | 4.3 KB (3.8, 6.8) |
+
+(The finer zooms are each the middle tile of each tile at zoom 0 that holds
+ground, since the grid at zoom 4 is a million tiles.)
+
+One style alone at zoom 0 is 0.7 to 0.8 ms and a mean of 2.0 KB (the tint),
+2.4 KB (the contours) or 5.6 KB (the shade, a smooth picture); the End is
+0.5 to 1.2 ms and 1 to 3 KB, the most of any tile there 14 KB. That is the
+time of the biomes' tiles, 0.3 to 2 ms, and one to three times their size. There is no precomputation and
+nothing new on the volume or in memory beyond the buffers a tile is drawn
+in, which are pooled.
+
+**Limits.** Work is bounded by the zoom range: a tile reads at most 262 by
+262 pixels, which at the widest zoom, taking a column in each chunk, is 4 reads
+a pixel, at 2 and 4 blocks to a pixel at most 1,040 by 1,040 columns, and
+finer than a block at most 136 by 136 blocks.
+A tile asked for with more than three styles, one that is not named, a
+`hide` of a band there is not, or any value over 64 characters, is a 400.
 
 ## Search
 
@@ -2688,8 +2849,10 @@ with each row's count and list those of the day. A day that did not keep
 them, as every day from before they were kept did not until
 `mcmap backfill` has given it them, is drawn with none, and is not asked
 for any: today's over another day's terrain would say what was never so.
-Players, mobs that are loaded, waypoints, structures and biomes are still
-the world as it is. The dock's note says which of these it is: the terrain
+Players, mobs that are loaded, waypoints, structures, biomes and
+topography are still the world as it is; the heights are of the latest
+reading, so a hillshade over an earlier day's terrain shows today's land.
+The dock's note says which of these it is: the terrain
 and the markers of the day, the terrain of the day with its markers not
 kept and none drawn, or, for a day that kept nothing of the dimension
 shown, no terrain and no markers, with none of its tiles asked for; and
@@ -2956,6 +3119,7 @@ and what each layer is made of.
 | Markers | Beds, Containers, Named mobs, Waypoints | Beds by colour; containers by what they are, shulker boxes by colour; each named mob, with its type, whether a baby, and whether it is loaded or only saved; each waypoint |
 | Structures | Known, Predicted, Possible, under the heading How sure | Every kind once, as a list over those three switches, each with its picture, how many are known, and under it how many more are predicted or possible. A mark is on the map when its kind and its certainty are both on. Strongholds are off until asked for |
 | Biomes | (the section is the overlay) | Each biome of the dimension, with its colour and share |
+| Topography | Hillshade, Contour lines, Height tint | Under the tint, its bands: the colour of each and the heights it is, which can be hidden or shown alone. Not in the Nether |
 | Trails | (the section is the layer) | Each player's trail, in its colour, under the choice of how far back |
 | Overlays | Slime chunks, Grid, Chunk focus, World spawn | none |
 
@@ -3306,8 +3470,9 @@ answered by the page; the other three ask `/api/search` for one `kind`.
 The `S` and `M` keys ask for themselves and leave the box's list as it
 was. None of them is a command for the game, and the page writes none.
 
-**The footer.** Where the pointer is, and the biome there, are on the
-left. On the right is one group saying how current the map is, in two parts
+**The footer.** Where the pointer is, and the biome and the height of the
+surface there, are on the left; the height is also said alone, as
+`Surface: 71`, while any row of Topography is on and the biome overlay is not. On the right is one group saying how current the map is, in two parts
 with a label each: `Live positions`, how old the picture of players and
 mobs is (or `paused`, `connecting`, `reconnecting`, `no data`), then the
 interval if it is slower than the server's and how many mobs are shown if
@@ -3510,7 +3675,9 @@ with, copied as a link, and deleted, with Undo offered until something else
 is done. Three views come with the page and are not kept in the record:
 Everything (players, mobs, markers, structures and trails), Exploring
 (players, waypoints, structures, biomes and the world spawn, with no mobs)
-and Base (players, named mobs, beds, containers and waypoints). They cannot be
+and Base (players, named mobs, beds, containers and waypoints); none has
+Topography on. A view carries its three rows like any other, and which
+bands of the tint are shown is one of the choices a link carries. They cannot be
 renamed or deleted, and can be hidden and shown again. The page keeps up to
 50 views, each with a name of up to 40 characters, with no control
 characters, none that take no room or turn the direction of writing
@@ -3889,7 +4056,7 @@ counted apart and is not a failure.
 | `zoom-sizes` | Through every zoom level and back, every picture on the map is the size it was made at, each frame of the zoom and once it settles | a marker or a live entity |
 | `nether-levels` | Where the nether has more than one level, the picker is there in the nether and nowhere else, and choosing a level draws tiles from it; skipped where it has one | the nether drawn at more than one level |
 | `layer-panel` | The panel opens, is sized narrower and wider, folds and returns, and the map takes the room | |
-| `toggles` | Switching off a type of mob and a kind of structure takes things off the map and switching them on brings them back; the biome overlay draws tiles, picking one biome out changes them, and off removes them | mobs, structures or biomes; each that is missing is said |
+| `toggles` | Switching off a type of mob and a kind of structure takes things off the map and switching them on brings them back; the biome overlay draws tiles, picking one biome out changes them, and off removes them; the topography's three rows on ask for tiles of all three drawings and nothing else, and off take them away | mobs, structures or biomes; each that is missing is said |
 | `search` | A search for a biome or structure this world has, by a name read off the page, finds it | a biome or a structure |
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
@@ -4175,11 +4342,13 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/structures?dimension=<id>&kinds=all` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, how many recorded boxes it was joined from, and for an abandoned camp `variant`, the biome it was built for; or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`; or for a kind found by its blocks with `evidence`, how many blocks and mobs it was found by, and for a trial chamber `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, `generated` where the chunk is finished, suits the kind and the world holds none, with `vacant` beside it for a kind that can stand where the save shows no sign of it, or `mapped` where one of the world's explorer maps points at a site in country not generated), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `catalog` (every kind the map can show, in any dimension: its `kind`, the `dimensions` the game generates it in, `asked` where it is off until the viewer turns it on, and `quiet` where a finished site with none may hold one all the same), `surveyed`, `at`, and with the overworld `spawn`. Without `kinds=all` the answer holds only the seven kinds there were before `catalog`, for a page that could not put a later one away. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `reach`, for a kind found by its blocks, how many blocks past the box round those the rest was counted in; `uncounted`, for a stronghold, where nothing but what it was found by is said and the lists are empty for that reason; `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `end_gateway`, `dispenser`, `dropper`, `unbroken_pot`, `unbrushed` for suspicious sand and gravel nobody has brushed, and `dragon_head` and `elytra` for an end ship's, those there are); `elders` for a monument; `bastion` for a bastion whose blocks still say which it is, `treasure`, `stables` or `bridge`; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/diagnostics` | Session required. What the troubleshooting report asks the server: `build`, `go`, `now`, `role` (`player` with a login, `open` without), `features` (which of login, live, markers, waypoints, icons, structures, biomes and trails are on), `refreshSeconds`, `snapshotAt`, `renderedAt` by dimension, `failing`, and `assets`: an FNV-1a fingerprint of each of the page's own files (at most 64), for the page to tell which scripts it loaded are older than the page. Nothing about a player, no error text and no secret. |
-| `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
+| `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below and the two topography routes |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest; `biomes=<name>,…` draws only those and `except=<name>,…` all but those, one of the three at a time and at most 128 names. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block, and the `surface`: the y of the column's highest block, which is the top of a tree, ice or the sea and not the ground. `surface` is left out where it is not known, and until the heights have been read |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
+| `GET /api/topography?dimension=<id>` | Session required. `offered` (false in the Nether), `ready` (false until the heights have been read), `at`, `version`, `tiles` (`minZoom` -5, `maxZoom` 0, `size`), `intervals` (the contour interval in blocks by zoom out from 0), `heavyEvery`, and `bands`, lowest first: each `from`, `to`, `colour` (`#rrggbb`, empty where the band is not drawn) and sometimes a `label`. 400 for an unknown dimension. Served wherever `/api/biomes` is |
+| `GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}.png?styles=<style>,…&hide=<band>,…&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -5 to 4. `styles` names `hillshade`, `contours` and `tint`, any of them, in one picture; `hide` leaves bands of the tint out. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 in the Nether and where the world has no surface, and before the heights are read; 400 for a bad address, no or unknown `styles`, or a band there is not |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the three below, and `404` without it |
