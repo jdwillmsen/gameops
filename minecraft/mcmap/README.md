@@ -3558,7 +3558,7 @@ counted apart and is not a failure.
 | `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
 | `phone-sheet` | On a phone-sized touch screen the panel is a sheet across the bottom that changes height by its handle, with the map drawn | |
 | `live-stream` | A stream opened when the run began is still the same connection, unbroken, 125 s later, with frames no more than 10 s apart | the live layer on; with nothing in the dimension only the connection is judged |
-| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, today or on a day kept; the 403 above; the 401 the login screen's browser gets for the days kept; and, only in a run given `--no-history`, the 404 a map that keeps no days answers for them) | |
+| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, today or on a day kept; the 403 above; and, only in a run given `--no-history`, the 404 a map that keeps no days answers for them) | |
 | `read-only` | Over the whole run the page tried no request but a read | |
 
 `faces` is there to answer a question nobody has settled: villagers' heads
