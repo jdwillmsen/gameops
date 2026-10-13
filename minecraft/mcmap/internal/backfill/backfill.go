@@ -47,7 +47,7 @@ const (
 // Renderer draws a world and says where it put the tiles.
 type Renderer interface {
 	Prepare(ctx context.Context) error
-	Render(ctx context.Context, world, dimension, out string) error
+	Render(ctx context.Context, world, dimension, out string, topY int) error
 	history.Source
 }
 
@@ -254,7 +254,7 @@ func (j Job) keep(ctx context.Context, a dated) (history.Result, error) {
 	}
 	maps := filepath.Join(scratch, "maps")
 	for _, dimension := range render.Dimensions {
-		if err := j.Renderer.Render(ctx, world, dimension, filepath.Join(maps, dimension)); err != nil {
+		if err := j.Renderer.Render(ctx, world, dimension, filepath.Join(maps, dimension), 0); err != nil {
 			return history.Result{}, err
 		}
 	}

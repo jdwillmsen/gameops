@@ -264,11 +264,13 @@
     }
     if (!before) {
       const centre = app.map.getCenter();
+      const place = app.place.get();
       before = {
         d: app.dimension(),
         x: centre.lng,
         z: centre.lat,
         zoom: app.map.getZoom(),
+        level: place ? place.level : undefined,
         pin: app.chunk ? app.chunk.pinned() : null,
         follow: app.inspect && app.inspect.following ? app.inspect.following() : null,
       };

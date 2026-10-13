@@ -257,6 +257,20 @@
   // be showing may have changed: the dimension, the login, or the map data.
   const announce = () => document.dispatchEvent(new CustomEvent('mcmap:view'));
   const version = (d) => (d.renderedAt ? Date.parse(d.renderedAt) : 0);
+  // What says when the tiles drawn for a dimension were rendered: the level
+  // drawn, which is rendered after its dimension and so has a time of its
+  // own, or the dimension itself.
+  const drawnOf = (id) => {
+    const level = levelOf(id);
+    return level === '' ? dimension(id) : levelsOf(id).find((l) => l.id === level);
+  };
+  // Which tiles a dimension's layer holds: a layer is out of date when
+  // this is no longer what it was built for, whether by a new render or
+  // by its level being taken away.
+  const tilesOf = (id) => {
+    const drawn = drawnOf(id);
+    return drawn ? `${levelOf(id)}@${version(drawn)}` : '';
+  };
 
   // What the address carries after the view: one more part, which names
   // something open over the map, such as a structure's details. It is kept
@@ -474,12 +488,26 @@
     if (next === netherCut) return true;
     netherCut = next;
     if (settings) settings.set('levels', { nether: netherCut || null });
-    if (current === 'nether' && !past) {
-      const c = map.getCenter();
-      show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
-    }
+    recut();
     return true;
   }
+
+  function recut() {
+    if (current !== 'nether' || past) return;
+    const c = map.getCenter();
+    show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
+  }
+
+  // The record's cut has changed other than by a choice made here, as when
+  // a preview is let go of and what was kept is put back: the cut drawn
+  // follows it, or the page and its record would disagree until a reload.
+  document.addEventListener('mcmap:settings', (e) => {
+    if (!settings || !e.detail || !e.detail.sections.includes('levels')) return;
+    const kept = settings.get('levels').nether || '';
+    if (kept === netherCut) return;
+    netherCut = kept;
+    recut();
+  });
 
   function tabs() {
     el.tabs.replaceChildren(...info.dimensions.map((d) => {
@@ -513,7 +541,8 @@
     } else if (!d || !d.rendered) {
       el.status.textContent = 'the first render is still running; this page updates when it is done';
     } else {
-      const when = d.renderedAt ? `updated ${ago(d.renderedAt)}` : 'rendered before the last restart';
+      const at = drawnOf(current).renderedAt;
+      const when = at ? `updated ${ago(at)}` : 'rendered before the last restart';
       el.status.textContent = info.problem ? `${when}; the last refresh failed, so this is the previous map` : when;
     }
   }
@@ -555,7 +584,7 @@
         // a snapshot taken this instant.
         text = `next refresh in ${clock(Math.min(-late, every), Math.ceil)}`;
         // The tiles of a snapshot follow it by as long as they take to draw.
-        const d = dimension(current);
+        const d = current && drawnOf(current);
         ask = Boolean(d && d.renderedAt) && Date.parse(d.renderedAt) < snapshot && now - snapshot < DRAWING_MS;
         if (!ask) dueSince = null;
       } else if (late < DUE_GRACE_MS && !info.problem) {
@@ -721,7 +750,7 @@
     }
     if (checking === true && body === answer) return;
     answer = body;
-    const before = current && dimension(current);
+    const before = current && tilesOf(current);
     info = next;
     el.world.textContent = `${info.world} map`;
     document.title = `${info.world} map`;
@@ -739,9 +768,9 @@
       if (want && dimension(want.id) && dimension(want.id).rendered) show(want.id, want);
       else if (first) show(first.id);
     } else {
-      const now = dimension(current);
+      const now = tilesOf(current);
       // A new render changes nothing about a day that is past.
-      const drawnAgain = main.layer && now && before && version(now) !== version(before);
+      const drawnAgain = main.layer && now && before && now !== before;
       if (!past && drawnAgain) {
         // A render can extend the map, so the layer is rebuilt with the new
         // extent rather than redrawn inside the old one. The view stays put.

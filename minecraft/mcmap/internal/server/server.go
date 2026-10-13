@@ -318,22 +318,31 @@ type levelJSON struct {
 	ID    string `json:"id"`
 	Y     int    `json:"y"`
 	Label string `json:"label"`
+	// RenderedAt is when this cut was last drawn. The levels are drawn
+	// after the dimensions, so it is not the dimension's own time.
+	RenderedAt *time.Time `json:"renderedAt,omitempty"`
 }
 
 // levels lists the nether's cuts that have been drawn at least once. A level
 // whose first render has not finished is left out, so the page never offers
 // a map of nothing.
-func (s *Server) levels() []levelJSON {
+func (s *Server) levels(renderedAt map[string]time.Time) []levelJSON {
+	at := func(name string) *time.Time {
+		if t, ok := renderedAt[name]; ok {
+			return &t
+		}
+		return nil
+	}
 	var out []levelJSON
 	for _, l := range s.NetherLevels {
 		if _, ok := s.info(l.Dir()); ok {
-			out = append(out, levelJSON{ID: l.ID(), Y: l.TopY, Label: l.Label})
+			out = append(out, levelJSON{ID: l.ID(), Y: l.TopY, Label: l.Label, RenderedAt: at(l.Dir())})
 		}
 	}
 	if len(out) == 0 {
 		return nil
 	}
-	return append([]levelJSON{{ID: defaultLevelID, Y: s.NetherTop, Label: render.DefaultNetherLabel}}, out...)
+	return append([]levelJSON{{ID: defaultLevelID, Y: s.NetherTop, Label: render.DefaultNetherLabel, RenderedAt: at("nether")}}, out...)
 }
 
 // level finds the configured cut a request names. Only what was configured
@@ -373,7 +382,7 @@ func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
 				d.RenderedAt = &at
 			}
 			if id == "nether" {
-				d.Levels = s.levels()
+				d.Levels = s.levels(status.RenderedAt)
 			}
 		}
 		out.Dimensions = append(out.Dimensions, d)

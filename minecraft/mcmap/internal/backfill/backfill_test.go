@@ -40,7 +40,7 @@ type drawer struct {
 
 func (d *drawer) Prepare(context.Context) error { return d.prepareErr }
 
-func (d *drawer) Render(_ context.Context, world, dimension, out string) error {
+func (d *drawer) Render(_ context.Context, world, dimension, out string, _ int) error {
 	d.worlds = append(d.worlds, world)
 	said, err := os.ReadFile(filepath.Join(world, "level.dat"))
 	if err != nil {
