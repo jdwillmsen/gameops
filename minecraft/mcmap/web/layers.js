@@ -127,6 +127,7 @@
     ['markers', 'Markers'],
     ['structures', 'Structures'],
     ['biomes', 'Biomes'],
+    ['topography', 'Topography'],
     ['trails', 'Trails'],
     ['overlays', 'Overlays'],
   ];
@@ -173,6 +174,7 @@
     markers: 'M8 14s4-4.2 4-7.5a4 4 0 0 0-8 0C4 9.8 8 14 8 14zM8 8a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
     structures: 'M3 14V7l5-4 5 4v7zM6.5 14v-4h3v4',
     biomes: 'M8 14V9M8 9C5 9 3.5 7 3.5 5S5.5 2 8 2s4.5 1 4.5 3S11 9 8 9z',
+    topography: 'M2 13l3.5-6 2.5 3.5L10.5 5 14 13zM2 13h12',
     trails: 'M3 13c0-4 4-2.5 5-5s4-1.5 5-5M3 13h.01M13 3h.01',
     overlays: 'M3 3h10v10H3zM3 8h10M8 3v10',
     other: 'M3 4h10M3 8h10M3 12h10',

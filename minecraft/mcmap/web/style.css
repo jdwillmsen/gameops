@@ -865,6 +865,10 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .key.grid { border: 1px solid var(--text); background: linear-gradient(var(--text), var(--text)) center / 1px 100% no-repeat, linear-gradient(var(--text), var(--text)) center / 100% 1px no-repeat; }
 .key.focus { border: 2px solid var(--chunk-pin); }
 .key.slime { background: var(--slime-far); border: 1px solid var(--slime-line); }
+.key.hillshade { background: linear-gradient(135deg, var(--text) 50%, var(--dim) 50%); border: 1px solid var(--edge); border-radius: 2px; }
+.key.contours { background: repeating-linear-gradient(to bottom, var(--text) 0 1px, transparent 1px 3px); border: 1px solid var(--edge); border-radius: 2px; }
+.key.height { background: linear-gradient(to top, var(--dim), var(--text)); border: 1px solid var(--edge); border-radius: 2px; }
+.key.clear { border: 1px dashed var(--dim); border-radius: 2px; }
 
 .structure span {
   display: grid;
@@ -1177,6 +1181,7 @@ kbd, .keys code {
 /* Rendered one block to a pixel, the tiles are pixel art; smoothing them when
    zoomed in past full scale only blurs it. */
 .leaflet-tile { image-rendering: pixelated; }
+.topography .leaflet-tile { image-rendering: auto; }
 .leaflet-container { background: var(--map-bg); font: inherit; }
 
 /* Without room beside the layer panel, the results take theirs from the map

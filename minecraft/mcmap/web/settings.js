@@ -228,7 +228,7 @@
   // The choices there are, by the key each is kept under beside the
   // switches. The two of the live layer are older than the rest and have
   // a place of their own in a view.
-  const CHOICES = ['structures#kinds', 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails'];
+  const CHOICES = ['structures#kinds', 'markers#containers', 'markers#beds', 'markers#mobs', 'markers#waypoints', 'biomes#items', 'overlays#trails', 'topography#tint'];
   // The kinds of structure that each had a switch before the kinds were
   // a list, and the ones among them that are off until asked for.
   const KIND_SWITCHES = ['fortress', 'monument', 'outpost', 'witch_hut', 'village', 'stronghold', 'trial_chamber'];
@@ -329,6 +329,7 @@
   const MOBS = ['hostile', 'passive', 'villager', 'other'];
   const MARKERS = ['waypoints', 'beds', 'containers', 'mobs'];
   const SORTS = ['recorded', 'predicted', 'candidate'];
+  const TOPOGRAPHY = ['hillshade', 'contours', 'tint'];
   // Every item of every layer showing: no type of mob, no player, no kind
   // of structure, container or bed and no biome is hidden.
   const unfiltered = () => ({
@@ -342,21 +343,21 @@
       id: 'everything',
       name: 'Everything',
       says: 'Players, mobs, markers, structures and trails',
-      layers: { ...rows('live', ['players', ...MOBS], []), ...rows('markers', MARKERS, []), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('biomes', [], ['overlay']), ...rows('overlays', ['trails'], ['slime']) },
+      layers: { ...rows('live', ['players', ...MOBS], []), ...rows('markers', MARKERS, []), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('biomes', [], ['overlay']), ...rows('overlays', ['trails'], ['slime']), ...rows('topography', [], TOPOGRAPHY) },
       ...unfiltered(),
     },
     exploring: {
       id: 'exploring',
       name: 'Exploring',
       says: 'Terrain, structures, biomes and the world spawn; no mobs',
-      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', ['waypoints'], ['beds', 'containers', 'mobs']), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('biomes', ['overlay'], []), ...rows('overlays', [], ['trails', 'slime']) },
+      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', ['waypoints'], ['beds', 'containers', 'mobs']), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('biomes', ['overlay'], []), ...rows('overlays', [], ['trails', 'slime']), ...rows('topography', [], TOPOGRAPHY) },
       ...unfiltered(),
     },
     base: {
       id: 'base',
       name: 'Base',
       says: 'Players, named mobs, beds, containers and waypoints',
-      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', MARKERS, []), ...rows('structures', [], [...SORTS, 'spawn']), ...rows('biomes', [], ['overlay']), ...rows('overlays', [], ['trails', 'slime']) },
+      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', MARKERS, []), ...rows('structures', [], [...SORTS, 'spawn']), ...rows('biomes', [], ['overlay']), ...rows('overlays', [], ['trails', 'slime']), ...rows('topography', [], TOPOGRAPHY) },
       ...unfiltered(),
     },
   };

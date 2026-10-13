@@ -81,6 +81,9 @@
   let atTimer = null;
   let atRequest = null;
   let atShown = '';
+  // Whether the topography overlay wants the surface said, which it does
+  // while any of its rows is on, whether or not this overlay is.
+  let surfaceWanted = false;
 
   const on = () => row !== null && row.enabled;
   const str = (v) => (typeof v === 'string' ? v : '');
@@ -177,7 +180,7 @@
       });
     }
     overlay();
-    const showing = layer !== null;
+    const showing = layer !== null || surfaceWanted;
     if (el.at) el.at.hidden = !showing;
     if (!showing) forget();
     if (!row) return;
@@ -307,19 +310,29 @@
     } catch {
       return; // superseded, or a dropped request: the next move asks again
     }
-    if (atRequest !== request || layer === null) return;
+    if (atRequest !== request || !reading()) return;
     atRequest = null;
     const label = data && data.generated && data.biome ? str(data.biome.label) || (str(data.biome.name) && tidy(data.biome.name)) : '';
     // The top of whatever stands highest there, tree or sea included, so it
     // is called the surface; the server leaves it out until it has read the
     // heights, and then nothing is said of it.
-    const surface = label && Number.isInteger(data.surface) ? ` · surface ${data.surface}` : '';
+    const height = data && Number.isInteger(data.surface) ? data.surface : null;
+    if (layer === null) {
+      // Only the topography is on: its height alone, with the same words
+      // for the ground that has none as the biome's line has.
+      say(height !== null ? `Surface: ${height}` : data && data.generated ? 'Surface: none here' : 'Surface: not generated here');
+      return;
+    }
+    const surface = label && height !== null ? ` · surface ${height}` : '';
     say(label ? `Biome: ${label}${surface}` : 'Biome: not generated here');
   }
 
+  // Whether the footer is saying anything of the ground under the pointer.
+  const reading = () => layer !== null || surfaceWanted;
+
   let asked = '';
   function at(latlng, settle) {
-    if (layer === null || !el.at) return;
+    if (!reading() || !el.at || listing === null) return;
     const x = Math.floor(latlng.lng);
     const z = Math.floor(latlng.lat);
     const key = `${listing.dimension}|${listing.version}|${x}|${z}`;
@@ -346,6 +359,18 @@
       else queued = true;
       pick(name);
       return true;
+    },
+    // For the topography overlay: the footer says the height of the
+    // surface under the pointer while it is on, beside the biome where
+    // that overlay is on too and alone where it is not.
+    surface(on) {
+      if (surfaceWanted === Boolean(on)) return;
+      surfaceWanted = Boolean(on);
+      // What is said was for the other kind of line, and is asked for again
+      // at the next move.
+      asked = '';
+      forget();
+      paint();
     },
   };
 
