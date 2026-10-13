@@ -22,10 +22,10 @@ const THREE = [day('2026-10-12'), day('2026-10-13'), day('2026-10-14', { rendere
 // page. answer() is what the server says to GET /api/history, and wanted
 // the day the page's address names, which the map takes for the day it is
 // told as the real one does.
-async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '' } = {}) {
+async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld' } = {}) {
   const p = page(new Map(), { files: [] });
   const { win, doc } = p;
-  const state = { asked: [], shown: [], ticks: [], dimension: 'overworld', wanted };
+  const state = { asked: [], shown: [], ticks: [], dimension, wanted };
   if (locked) doc.body.classList.add('locked');
   win.mcmap.dimension = () => state.dimension;
   win.mcmap.past = {
@@ -87,6 +87,16 @@ test('nothing is asked while the page is locked, and it is asked once the login 
   const p = await load({ locked: true });
   assert.equal(p.state.asked.length, 0);
   p.doc.body.classList.remove('locked');
+  await p.view();
+  assert.deepEqual(p.state.asked, ['api/history']);
+  assert.equal(p.bar.hidden, false);
+});
+
+test('nothing is asked before the map has shown a dimension, when it is not yet known there is a session', async () => {
+  const p = await load({ dimension: null });
+  await p.view();
+  assert.equal(p.state.asked.length, 0);
+  p.state.dimension = 'overworld';
   await p.view();
   assert.deepEqual(p.state.asked, ['api/history']);
   assert.equal(p.bar.hidden, false);

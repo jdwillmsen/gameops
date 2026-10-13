@@ -145,7 +145,10 @@
   }
 
   async function ask() {
-    if (gone || document.body.classList.contains('locked') || Date.now() < askAfter) return;
+    // Not before the map has shown a dimension, which is the first sign
+    // that there is a session: the page is not locked until the map has
+    // refused it, and asking ahead of that is a request only ever refused.
+    if (gone || !app.dimension() || document.body.classList.contains('locked') || Date.now() < askAfter) return;
     askAfter = Date.now() + ASK_AGAIN_MS;
     let listed;
     try {
