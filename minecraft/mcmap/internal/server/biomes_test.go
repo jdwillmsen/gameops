@@ -15,6 +15,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/trails"
 )
@@ -357,6 +358,77 @@ func TestBiomeAtNamesTheBiomeOfABlock(t *testing.T) {
 	} {
 		if rec := get(t, s, path); rec.Code != http.StatusBadRequest {
 			t.Errorf("GET %s = %d, want 400", path, rec.Code)
+		}
+	}
+}
+
+// withSurfaces is biomeWorld with heights: the overworld's chunk 0, 0 at
+// 127 (the sea, y 62), its chunk 1, 0 at 1 (bedrock, y -64) but for one
+// column with nothing in it, and the nether's roof.
+func withSurfaces(t *testing.T) *Server {
+	t.Helper()
+	s, _ := fixture(t)
+	b := heights.NewBuilder(biomesAt, 4)
+	sea, floor, roof := [heights.Columns]int16{}, [heights.Columns]int16{}, [heights.Columns]int16{}
+	for i := range sea {
+		sea[i], floor[i], roof[i] = 127, 1, 128
+	}
+	floor[5] = 0
+	for pos, c := range map[chunks.Pos]*[heights.Columns]int16{
+		{Dim: chunks.Overworld, X: 0, Z: 0}: &sea,
+		{Dim: chunks.Overworld, X: 1, Z: 0}: &floor,
+		{Dim: chunks.Nether, X: 0, Z: 0}:    &roof,
+		{Dim: chunks.End, X: 0, Z: 0}:       &sea,
+	} {
+		if err := b.AddColumns(pos.Dim, pos.X, pos.Z, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := &biomes.Store{}
+	store.Set(biomeWorld().WithHeights(b.Map()))
+	s.Biomes = store
+	return s
+}
+
+func TestBiomeAtGivesTheSurfaceOfABlockWhereItIsKnown(t *testing.T) {
+	s := withSurfaces(t)
+	type answer struct {
+		Generated bool   `json:"generated"`
+		Surface   *int32 `json:"surface"`
+	}
+	for path, want := range map[string]int32{
+		"/api/biomes/at?dimension=overworld&x=7&z=3":     62,
+		"/api/biomes/at?dimension=overworld&x=7.9&z=3.2": 62,
+		"/api/biomes/at?dimension=overworld&x=17&z=0":    -64,
+		"/api/biomes/at?dimension=nether&x=1&z=1":        127,
+		"/api/biomes/at?dimension=end&x=1&z=1":           126,
+	} {
+		if got := decodeBody[answer](t, get(t, s, path)); got.Surface == nil || *got.Surface != want {
+			t.Errorf("GET %s = %+v, want a surface of %d", path, got, want)
+		}
+	}
+	for path, why := range map[string]string{
+		"/api/biomes/at?dimension=overworld&x=21&z=0":    "a column with nothing in it",
+		"/api/biomes/at?dimension=overworld&x=-1&z=3":    "no chunk",
+		"/api/biomes/at?dimension=overworld&x=965&z=970": "a chunk the heights do not hold",
+		"/api/biomes/at?dimension=end&x=100&z=0":         "no chunk in the end",
+	} {
+		rec := get(t, s, path)
+		if got := decodeBody[answer](t, rec); got.Surface != nil || strings.Contains(rec.Body.String(), "surface") {
+			t.Errorf("GET %s (%s) = %s, want no surface", path, why, rec.Body)
+		}
+	}
+}
+
+func TestBiomeAtSaysNothingOfSurfaceUntilTheHeightsAreRead(t *testing.T) {
+	for name, s := range map[string]*Server{"a reading without heights": withBiomes(t), "no reading": func() *Server {
+		s, _ := fixture(t)
+		s.Biomes = &biomes.Store{}
+		return s
+	}()} {
+		rec := get(t, s, "/api/biomes/at?dimension=overworld&x=7&z=3")
+		if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "surface") {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
 		}
 	}
 }

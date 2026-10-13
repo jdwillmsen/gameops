@@ -40,6 +40,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/leveldat"
@@ -312,24 +313,29 @@ var grey = map[uint32]uint8{1: 60, 2: 200, 4: 120, 14: 250, 8: 90, 178: 160}
 
 func biomeWorld(at time.Time) *biomes.World {
 	columns := map[chunks.Pos][biomes.Columns]uint32{}
+	surfaces := heights.NewBuilder(at, -1)
 	add := func(d chunks.Dimension, name string, lo, hi int) {
 		for cz := lo; cz < hi; cz++ {
 			for cx := lo; cx < hi; cx++ {
 				var c [biomes.Columns]uint32
+				var h [heights.Columns]int16
 				generated := false
 				for i := range c {
 					c[i] = biomeAt(name, cx*16+i&15, cz*16+i>>4)
+					// Stored as the game stores it, counted from the floor.
+					h[i] = int16(200 + (cx*16+i&15)/4 + (cz*16+i>>4)/4)
 					generated = generated || c[i] != 0
 				}
 				if generated {
 					columns[chunks.Pos{Dim: d, X: int32(cx), Z: int32(cz)}] = c
+					_ = surfaces.AddColumns(d, int32(cx), int32(cz), &h)
 				}
 			}
 		}
 	}
 	add(chunks.Overworld, "overworld", -24, 24)
 	add(chunks.Nether, "nether", -2, 2)
-	return biomes.Build(at, columns)
+	return biomes.Build(at, columns).WithHeights(surfaces.Map())
 }
 
 // terrain writes tiles shaded by biome, so that a tile is not one flat
