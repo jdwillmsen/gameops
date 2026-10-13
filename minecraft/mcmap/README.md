@@ -433,6 +433,15 @@ focus in the list, so a group is reached and worked without a pointer;
 Escape shuts it. The panel's counts are of things and not of marks, and
 do not change. The far tiers still apply to what is left by itself.
 
+Zoom is any fraction, and a square is 48 pixels at whichever the map
+rests at, out to the furthest it goes: the groups are made again each
+time a zoom comes to rest, after the canvas has been drawn for it, and
+not part way through one, when the canvas is still of the zoom it began
+at and a mark placed then would be painted somewhere else. Through a
+zoom a group's mark keeps its size as every marker does, so while the
+map is going out the marks of the old squares draw together until it
+rests and they are made again.
+
 The sorting is `groups.js`, with nothing of the page in it; the live
 layer draws every mark, and the markers' layer offers it its beds and
 containers and is told which were taken. Until a script that draws has
