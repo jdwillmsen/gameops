@@ -555,7 +555,8 @@ test('whatever heaps up in a square is one group, and every item is counted once
   const items = [...crowd(40, 'hostile', 'zombie', 0, 0), ...crowd(25, 'passive', 'cow', 0, 0), ...crowd(3, 'hostile', 'creeper', 0, 0), ...crowd(9, 'beds', 'red', 0, 0),
     { id: 'far', x: 5000, z: 5000, family: 'hostile', type: 'zombie' }, { id: 'named', x: 3, z: 3, family: 'passive', type: 'cow', alone: true },
     { id: 'nowhere', x: NaN, z: 0, family: 'passive', type: 'cow' }];
-  for (const zoom of [-1, -2, -3, -6]) {
+  // Whole zooms and the fractions between, out to the furthest the map goes.
+  for (const zoom of [-1, -1.37, -2, -2.5, -3, -6, -9.81, -12]) {
     assert.ok(active(zoom));
     const { groups, single } = cluster(items, zoom, null);
     const counted = groups.reduce((n, g) => n + g.members.length, 0) + single.length;
@@ -573,7 +574,8 @@ test('whatever heaps up in a square is one group, and every item is counted once
     }
     for (const a of groups) for (const b of groups) if (a !== b) assert.ok(Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z)) >= side - 0.001, 'two marks a square apart or more');
     const ids = single.map((m) => m.id);
-    for (const id of ['far', 'named', 'nowhere']) assert.ok(ids.includes(id), `${id} is drawn by itself at zoom ${zoom}`);
+    // From far enough out the one five thousand blocks off is in the same square as the rest.
+    for (const id of zoom >= -6 ? ['far', 'named', 'nowhere'] : ['named', 'nowhere']) assert.ok(ids.includes(id), `${id} is drawn by itself at zoom ${zoom}`);
   }
   // From three steps out the whole patch is one square, and one mark, whatever is in it.
   const far = cluster(items, -3, null).groups;
@@ -586,6 +588,56 @@ test('whatever heaps up in a square is one group, and every item is counted once
   // Whether coming closer would part them.
   assert.equal(s.app.groups.together(crowd(5, 'hostile', 'zombie', 0, 0, 10)), true);
   assert.equal(s.app.groups.together(crowd(5, 'hostile', 'zombie', 0, 0, 30)), false);
+});
+
+test('through a zoom a group\'s mark stays the size it was made, as every marker does', async () => {
+  const s = await stage({});
+  const mark = s.icons.group([['#e5534b', 30], ['#5cc8f0', 10]], 40);
+  const wide = mark.width / s.icons.density();
+  assert.ok(wide <= 38);
+  for (const stretch of [1, 1.6, 2, 4, 0.8, 0.5, 0.25]) {
+    const ctx = drawn(s, s.icons.Tagged, mark, stretch, { heap: { members: [] } });
+    near(ctx.drawn[0].w * stretch, wide, `as wide on the screen with the canvas stretched ${stretch}`);
+    near(ctx.drawn[0].x + ctx.drawn[0].w / 2, 300, 'about its own point');
+  }
+});
+
+test('whoever is followed is never taken into a group, at a zoom between two levels as at one', async () => {
+  const s = await stage({});
+  for (const zoom of [-1.5, -2, -3.25]) {
+    await s.zoomTo(zoom);
+    const mobs = Array.from({ length: 10 }, (_, i) => zombie(100 + i, 10 + i, 10 + (i % 3)));
+    await s.sample({ players: [steve(11, 11)], mobs });
+    assert.ok(s.app.inspect.open({ kind: 'mob', id: '104', type: 'zombie', x: 14, y: 64, z: 11 }));
+    const button = s.doc.getElementById('inspect-follow');
+    if (button.textContent !== 'Following') button.click();
+    for (let n = 0; n < 3; n += 1) {
+      const moved = mobs.map((m) => (m.i === '104' ? { ...m, x: 14 + n * 4, z: 11 + n } : m));
+      await s.sample({ players: [steve(11, 11)], mobs: moved });
+      assert.equal(button.textContent, 'Following', `at zoom ${zoom}`);
+      const own = marks(s).filter((m) => !m.options.heap && m.options.type === 'zombie');
+      assert.equal(own.length, 1, `drawn by itself at zoom ${zoom}`);
+      const at = s.map.onScreen([11 + n, 14 + n * 4]);
+      near(at.x, 500, `kept in the middle at zoom ${zoom}`);
+      assert.ok(marks(s).filter((m) => m.options.heap).every((m) => !m.options.heap.members.some((member) => member.id === 'm:104')));
+    }
+    s.app.inspect.shut();
+  }
+});
+
+test('nothing is regrouped part way through a zoom, and everything is when it ends', async () => {
+  const s = await stage({});
+  await s.zoomTo(-2);
+  await s.sample({ players: [], mobs: Array.from({ length: 8 }, (_, i) => zombie(100 + i, 10 + i * 30, 10)) });
+  const heaps = () => marks(s).filter((m) => m.options.heap).map((m) => `${m.getLatLng().lat},${m.getLatLng().lng}:${m.options.heap.members.length}`).join(' ');
+  const before = heaps();
+  // The map is between zooms and the canvas still of the one it began at.
+  s.map.zoom = -3.4;
+  s.app.groups.changed();
+  s.map.fire('zoomend');
+  assert.equal(heaps(), before, 'left as they were on a canvas of another zoom');
+  await s.zoomTo(-3.4);
+  assert.notEqual(heaps(), before, 'made again for where the map came to rest');
 });
 
 test('from a block to the pixel inwards nothing is grouped', async () => {

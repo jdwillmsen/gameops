@@ -603,6 +603,10 @@
   // what is in a group is off the map and its group's mark on it.
   function regroup() {
     if (!app.groups || !app.groups.drawnBy || !icons.group) return;
+    // Part way through a zoom the canvas is still of the zoom it began at:
+    // a mark placed now would be placed by the one and painted on the
+    // other. The end of the zoom comes back here.
+    if (renderer._zoom !== undefined && renderer._zoom !== map.getZoom()) return;
     const zoom = map.getZoom();
     const on = icons.grouping() && app.groups.active(zoom);
     const items = [];
@@ -1823,7 +1827,8 @@
   mobLayer.addTo(map);
   playerLayer.addTo(map);
   // How far out the map is decides whether anything is grouped, and how.
-  map.on('zoomend', regroup);
+  // After the canvas has been drawn for the zoom the map came to rest at.
+  map.on('zoomend', () => setTimeout(regroup, 0));
   if (app.groups && app.groups.drawnBy) {
     app.groups.drawnBy(regroup);
     app.groups.next = nextGroup;

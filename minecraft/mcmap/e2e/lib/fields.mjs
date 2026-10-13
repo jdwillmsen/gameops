@@ -111,7 +111,7 @@ export const slug = (sentence) => String(sentence).toLowerCase().replace(/[^a-z0
 export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sentence]));
 
 // The page's own scripts, by which a script error is placed.
-export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js',
+export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js',
   'slime.js', 'chunk.js', 'trails.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
