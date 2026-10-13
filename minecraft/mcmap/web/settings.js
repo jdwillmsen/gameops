@@ -17,8 +17,10 @@
   // which of a layer's items are shown: the script from before reads a
   // record of a later version and writes nothing over it, so a tab left
   // open across that release cannot take those choices back out. A record
-  // of version 1, kept or in a file, is read and brought up to this one.
-  const VERSION = 2;
+  // of an earlier version, kept or in a file, is read and brought up to this
+  // one. It went to 3 when the cut of the nether the viewer chose began to
+  // be kept, for the same reason.
+  const VERSION = 3;
   // The most the record may come to, in characters. Fifty views with every
   // layer named and long filters come to a fraction of this; anything
   // near it is not the page's own doing.
@@ -235,6 +237,8 @@
   const LAYER = /^[a-z0-9_-]{1,32}\/[a-z0-9_-]{1,48}$/;
   const ID = text(24, /^[a-z0-9]+$/);
   const BUILT_IN = ['everything', 'exploring', 'base'];
+  // A cut of the nether as the server names it: the height it is cut at.
+  const CUT = text(3, /^[0-9]{1,3}$/);
   const VIEW_FIELDS = {
     id: ID,
     name,
@@ -251,6 +255,7 @@
       x: int(-WORLD_EDGE, WORLD_EDGE),
       z: int(-WORLD_EDGE, WORLD_EDGE),
       zoom: fixed(-12, 8, 2),
+      level: CUT,
       pin: shape({ u: oneOf('chunk', 'region'), x: int(-2_000_000, 2_000_000), z: int(-2_000_000, 2_000_000) }, ['u', 'x', 'z']),
     }, ['d', 'x', 'z', 'zoom']),
     look: lookOf,
@@ -284,6 +289,8 @@
     // How a play through the days of the map's history goes: how many
     // days in the time of one, and whether it starts over at the end.
     history: shape({ speed: oneOf(1, 2, 4), loop: bool }),
+    // The cut of the nether the viewer chose, or null for the default one.
+    levels: shape({ nether: orNull(CUT) }),
     // The troubleshooting tools: the debug panel, the report's controls,
     // and which visual aids the panel has on.
     debug: shape({ on: bool, report: bool, aids: shape({ tiles: bool, lines: bool, hits: bool, room: bool }) }),
@@ -307,6 +314,7 @@
     shortcuts: () => ({ on: true }),
     grid: () => ({ on: false }),
     history: () => ({ speed: 1, loop: false }),
+    levels: () => ({ nether: null }),
     debug: () => ({ on: false, report: false, aids: { tiles: false, lines: false, hits: false, room: false } }),
     biome: () => ({ only: null }),
     look: () => ({ ...LOOK_DEFAULTS }),

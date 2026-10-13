@@ -1632,6 +1632,13 @@ kbd, .keys code {
 .timeline-left, .timeline-right { position: absolute; top: 0.6rem; display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--row-pad); background: var(--float); border: 1px solid var(--line); border-radius: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .timeline-left { right: calc(100% - var(--timeline-cut) + var(--hit) / 2 + 0.4rem); border-color: var(--warn); color: var(--warn); }
 .timeline-right { left: calc(var(--timeline-cut) + var(--hit) / 2 + 0.4rem); pointer-events: auto; }
+/* The nether's levels: a row of buttons at the top of the map, in the middle,
+   clear of the zoom buttons and the layer panel at its corners. Over the map
+   and its own controls, under every sheet and menu. */
+.levels { position: absolute; left: 50%; transform: translateX(-50%); top: 0.75rem; z-index: 1050; display: flex; gap: 0.25rem; padding: 0.25rem; background: var(--float); border: 1px solid var(--line); border-radius: 8px; cursor: default; }
+.levels[hidden] { display: none; }
+.locked .levels { display: none; }
+.level[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 /* A day that is past is told apart from now at a glance. */
 .past .timeline-body { border-top-color: var(--warn); }
 .past .timeline-date { color: var(--warn); }

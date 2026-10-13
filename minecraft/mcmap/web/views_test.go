@@ -57,7 +57,7 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		"if (part.length > MAX_LINK) return { error: 'it was longer than a link’s view may be' };",
 		"if (!/^v1\\.[A-Za-z0-9_-]+$/.test(part)) return bad;",
 		"new TextDecoder('utf-8', { fatal: true })",
-		"const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'a'];",
+		"const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'k', 'a'];",
 		"if (Object.keys(raw).some((key) => !allowed.includes(key))) return bad;",
 		"const read = settings.check.view(view);",
 		// The sixth part, so the five an older link has read as before.
@@ -68,6 +68,10 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		// those, and is read back as it was sent.
 		"if (view.look && view.look[key] !== undefined) look[at] = view.look[key];",
 		"if (!/^(0|[1-9]\\d?)$/.test(at) || Number(at) >= LOOKS.length) return bad;",
+		// The cut of the nether a place was saved with goes with the place
+		// and is read only beside one, and then as strictly as a file's.
+		"if (view.place.level !== undefined) out.k = view.place.level;",
+		"} else if (raw.q !== undefined || raw.k !== undefined) return bad;",
 		// Gamertags are not the viewer's to hand round.
 		"if (view.mobs) out.m = { o: view.mobs.only, h: view.mobs.hidden };",
 	} {
@@ -101,7 +105,7 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 	if !regexp.MustCompile(`if \(!settings\.fits\(next\)\) return null;\s*if \(temporary\) settings\.hold\(\);`).Match(js) {
 		t.Error("views.js no longer holds what is kept before a preview touches anything")
 	}
-	if !regexp.MustCompile(`if \(was\.d\) app\.place\.set\(\{ d: was\.d, x: was\.x, z: was\.z, zoom: was\.zoom \}\);\s*settings\.release\(\);\s*redraw\(\[\]\);`).Match(js) {
+	if !regexp.MustCompile(`if \(was\.d\) app\.place\.set\(\{ d: was\.d, x: was\.x, z: was\.z, zoom: was\.zoom, level: was\.level \}\);\s*settings\.release\(\);\s*redraw\(\[\]\);`).Match(js) {
 		t.Error("views.js no longer puts the place back before it lets go of a preview")
 	}
 	settings := read(t, "settings.js")
