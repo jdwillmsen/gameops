@@ -1131,8 +1131,8 @@ counts, and `Click for details`. The sheet says:
   `None in the save`, `No raid record`), never shown as nought. A site the
   seed gives has none of this, and the sheet says that only a kind and a
   place can be said of it;
-- the biome at its middle, asked of `/api/biomes/at` while the service has
-  biomes, and how many of its chunks are slime chunks, in the Overworld;
+- the biome at its middle, with the height of the surface there, asked of
+  `/api/biomes/at` while the service has biomes, and how many of its chunks are slime chunks, in the Overworld;
 - for a recorded one, what the map already holds inside its box, counted
   in the browser from the layers loaded: beds by colour, containers by
   kind, named mobs by name, and the players and mobs in the last live
@@ -2175,6 +2175,45 @@ The reading is saved to `DATA_DIR/biomes/biomes.bin`, written whole and
 then renamed, so a restart serves the overlay from its first request. A
 file that is damaged, or of another version, is logged and ignored.
 
+**Surface heights.** The same pass keeps what it used to throw away: the
+heightmap at the front of every record, for every column of every
+dimension, in `internal/heights`. A second pass was not an option, the
+first being ten seconds of a core; this one costs well under a second more
+(not separable from the run-to-run spread of 9.1 to 9.4 s).
+
+It is the *surface*, not the ground: the game's heightmap is the top of
+the highest block of any kind, so it is the crown of a tree, the top of
+ice, and the surface of the sea. On the FWB world 32% of the columns top
+out in water and about 19% in leaves. The ground and the sea floor are not
+looked for, because that means reading sub-chunks, which shows more than
+the terrain tiles do, and that is a decision for the owner and not for
+this pass. A height is in world y, the y of the highest block: the stored
+value counts the first air above it from the bottom of the dimension, so
+it is that value, less one, from the floor (-64 in the overworld, 0 in the
+nether and the end). A column with nothing in it, as in the void of the
+end, has no surface, and neither has a column in a chunk that is not
+generated: both are *not known*.
+
+Heights are exact per column. A chunk is its lowest column and each
+column's distance above that in as many bits as the highest takes, from 0,
+1, 2, 4, 8 or 16: a flat chunk, 25% of the overworld and all of the nether
+here, is just the one number, and one spanning more than 255 blocks is
+kept as it was stored. Neighbouring columns differ by 0.7 blocks on
+average, and no chunk of the FWB world needed the sixteen-bit escape. The
+144,163 chunks come to about 18 MiB in memory (20 MiB measured on the
+heap) against 74 MB at sixteen bits a column, 17.5 MB on the volume, and a
+transient 45 to 60 MiB more while the pass builds them. The map's
+container is limited to 2 GiB, so this is about 1%.
+
+They are saved to `DATA_DIR/biomes/heights.bin` beside the biomes, written
+whole and renamed, with the snapshot and chunk count they were read at,
+and are loaded only if those are the saved biomes'. A file that is damaged,
+of another version (the last byte of its magic), or of another reading is
+logged and ignored. A service updated from one that had no heights has
+a `biomes.bin` and no `heights.bin`: the biomes are served from the first
+request and the first cycle reads the world again whatever the chunk count
+says, which is what makes the heights, and it does so once.
+
 **Tiles.** `GET /api/biomes/tiles/<dimension>/<zoom>/<x>/<y>.png` is
 addressed exactly as the terrain tiles are, at every zoom from -12 to 4,
 so the page lays one over the other with the same options. A pixel is the
@@ -2204,7 +2243,10 @@ the same address. Only on a biome asks for `biome=` tiles instead, which
 keep it its colour and dim the rest; pressing it again goes back to what
 was hidden before. Resting the
 pointer on the map, or clicking it, names the biome at that block in the
-footer. The listing is asked for again each minute while the overlay is on,
+footer, with the height of its surface (`Biome: Plains · surface 71`) once
+the service has read the heights, and without it until then or where the
+column has none. Like the biome it shows only while the overlay is on, and
+on a past day it is of the world as it is now, as the biomes are. The listing is asked for again each minute while the overlay is on,
 and a new `version` redraws it. A service without biomes answers 404 to the
 listing, and the page then has no Biomes section at all.
 
@@ -2226,7 +2268,29 @@ skipped and counted.
 as of the last completed reading, and false where no chunk has been
 generated. It is what anything else in the service asks.
 
-To check the reading against a copy of a world, and to measure it:
+The surface heights are asked of `(*biomes.Store).Heights()`, which is nil
+before there is a reading (and every method of the `*heights.Map` it
+returns is safe on nil, and says not known):
+
+- `At(d chunks.Dimension, x, z int32) (y int32, ok bool)` is the surface
+  at one column, in world y.
+- `Rect(d, minX, minZ int32, w, h int, out []int16) bool` reads a box of
+  columns into `out`, `w` to a row and `out[(z-minZ)*w+x-minX]`, with
+  `heights.Unknown` where not known. It is for a tile and the ring of
+  blocks around it, which a slope needs; at most 16.7 million columns.
+- `Tile(d, zoom, tx, ty int, out *[heights.TileSize*heights.TileSize]int16) bool`
+  reads the column under the middle of each pixel of a tile addressed as
+  the terrain's and the biomes' are, at any zoom they support.
+
+Both say whether any column was known. A tile of heights takes 0.7 to
+3.6 ms.
+
+The limits on the heights are those of the biomes: a million chunks, and
+268 MB of columns to a dimension.
+
+To check the reading against a copy of a world, and to measure it (this
+prints the heights' size, load time and tile times too, and checks that
+every surface lies inside its dimension):
 
 ```sh
 MCMAP_REAL_WORLD=/path/to/FWB go test -run RealWorld -v ./minecraft/mcmap/internal/biomes/
@@ -3831,7 +3895,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/diagnostics` | Session required. What the troubleshooting report asks the server: `build`, `go`, `now`, `role` (`player` with a login, `open` without), `features` (which of login, live, markers, waypoints, icons, structures, biomes and trails are on), `refreshSeconds`, `snapshotAt`, `renderedAt` by dimension, `failing`, and `assets`: an FNV-1a fingerprint of each of the page's own files (at most 64), for the page to tell which scripts it loaded are older than the page. Nothing about a player, no error text and no secret. |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below |
 | `GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}.png?biome=<name>&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -12 to 4. `biome` picks one out and dims the rest; `biomes=<name>,…` draws only those and `except=<name>,…` all but those, one of the three at a time and at most 128 names. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 where the world has no chunks, 400 for a bad address or an unknown biome |
-| `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block |
+| `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block, and the `surface`: the y of the column's highest block, which is the top of a tree, ice or the sea and not the ground. `surface` is left out where it is not known, and until the heights have been read |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
@@ -3919,7 +3983,8 @@ what is open over the map, a saved view, and the day of the history shown:
 | `mcmap_biomes_skipped{reason}` | What the last reading left out or cut down: `malformed`, `out_of_range`, `limit`, `coarsened`, `kinds`, `unindexed` |
 | `mcmap_biomes_readings_total{result}` | Cycles by what became of the biomes: `read`, `unchanged` (nothing was generated, so the world was not read), `failed` |
 | `mcmap_biomes_last_success_timestamp_seconds`, `mcmap_biomes_duration_seconds` | The snapshot the biomes served were read from, and how long that reading took |
-| `mcmap_biomes_save_failures_total` | Readings that could not be written to the volume |
+| `mcmap_biomes_save_failures_total` | Readings, their biomes or their surface heights, that could not be written to the volume |
+| `mcmap_heights_chunks{dimension}`, `mcmap_heights_bytes` | Chunks whose surface heights are held, and about how much memory they take |
 | `mcmap_trails_points`, `mcmap_trails_players` | Trail points held in memory, and players with a trail |
 | `mcmap_trails_limit{limit}` | The retention in force: `age_seconds`, `points_per_player`, `players` |
 | `mcmap_trails_oldest_point_age_seconds` | Age of the oldest trail point held. It stays under the age limit |
