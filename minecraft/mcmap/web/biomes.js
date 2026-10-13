@@ -310,7 +310,11 @@
     if (atRequest !== request || layer === null) return;
     atRequest = null;
     const label = data && data.generated && data.biome ? str(data.biome.label) || (str(data.biome.name) && tidy(data.biome.name)) : '';
-    say(label ? `Biome: ${label}` : 'Biome: not generated here');
+    // The top of whatever stands highest there, tree or sea included, so it
+    // is called the surface; the server leaves it out until it has read the
+    // heights, and then nothing is said of it.
+    const surface = label && Number.isInteger(data.surface) ? ` · surface ${data.surface}` : '';
+    say(label ? `Biome: ${label}${surface}` : 'Biome: not generated here');
   }
 
   let asked = '';

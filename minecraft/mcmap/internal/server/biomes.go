@@ -242,9 +242,15 @@ type biomeAtJSON struct {
 	// first reading: there is no biome to name.
 	Generated bool          `json:"generated"`
 	Biome     *biomes.Biome `json:"biome,omitempty"`
+	// Surface is the y of the column's highest block: the top of a tree,
+	// of ice or of the sea where there is one, not the ground under it.
+	// It is left out where it is not known, which includes every column
+	// until the heights have been read.
+	Surface *int32 `json:"surface,omitempty"`
 }
 
-// handleBiomeAt names the biome at one block.
+// handleBiomeAt names the biome at one block, and the height of its
+// surface.
 func (s *Server) handleBiomeAt(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	d, okD := dimensionNamed(q.Get("dimension"))
@@ -257,6 +263,9 @@ func (s *Server) handleBiomeAt(w http.ResponseWriter, r *http.Request) {
 	var out biomeAtJSON
 	if b, ok := s.Biomes.World().At(d, x, z); ok {
 		out.Generated, out.Biome = true, &b
+	}
+	if y, ok := s.Biomes.World().Heights().At(d, x, z); ok {
+		out.Surface = &y
 	}
 	writeJSON(w, http.StatusOK, out)
 }
