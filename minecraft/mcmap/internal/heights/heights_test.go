@@ -214,8 +214,8 @@ func TestChunksPastTheEdgeOfAnyWorldAndPastTheLimitAreNotHeld(t *testing.T) {
 	_ = b.AddColumns(chunks.Overworld, 0, 0, &c)
 	_ = b.AddColumns(chunks.Overworld, 1, 0, &c)
 	m := b.Map()
-	if m.OutOfRange != 1 || m.OverLimit != 1 || m.Chunks(chunks.Overworld) != 1 {
-		t.Errorf("out of range %d, over limit %d, held %d", m.OutOfRange, m.OverLimit, m.Chunks(chunks.Overworld))
+	if _, ok := m.At(chunks.Overworld, 0, 0); !ok || m.Chunks(chunks.Overworld) != 1 {
+		t.Errorf("held %d chunks, the first of them %v", m.Chunks(chunks.Overworld), ok)
 	}
 }
 
@@ -324,6 +324,54 @@ func TestATileIsTheColumnUnderEachPixelsMiddleAtEveryZoom(t *testing.T) {
 	var none *Map
 	if none.Tile(chunks.Overworld, 0, 0, 0, &out) || none.Rect(chunks.Overworld, 0, 0, 1, 1, out[:1]) {
 		t.Error("no map has heights")
+	}
+}
+
+// The addresses are the terrain's: at zoom 0 a pixel is a block and a tile
+// 256 of them from its corner, a zoom below is two blocks to a pixel and a
+// zoom above two pixels to a block. Each block here is worked out from
+// that by hand, in two chunks whose every column has a height of its own.
+func TestATileIsAddressedAsTheTerrainsAre(t *testing.T) {
+	var south, north [Columns]int16
+	for i := range south {
+		// The surface is at y z*16+x-64 in the chunk at the origin, and
+		// at 235+z*16+x in the one across both axes from it.
+		south[i], north[i] = int16(1+i), int16(300+i)
+	}
+	m := build(t, map[chunks.Pos][Columns]int16{
+		{Dim: chunks.Overworld, X: 0, Z: 0}:   south,
+		{Dim: chunks.Overworld, X: -1, Z: -1}: north,
+	})
+	var out [TileSize * TileSize]int16
+	for _, tc := range []struct {
+		zoom, tx, ty, px, py int
+		want                 int16
+	}{
+		// Block 3, 2.
+		{0, 0, 0, 3, 2, -29},
+		// Block -1, -1: the last pixel of the tile before the origin.
+		{0, -1, -1, 255, 255, 490},
+		// Block 16, 0, in a chunk that is not held.
+		{0, 0, 0, 16, 0, Unknown},
+		// Two blocks to a pixel, the one under its middle: 1, 1 and 5, 3.
+		{-1, 0, 0, 0, 0, -47},
+		{-1, 0, 0, 2, 1, -11},
+		// Blocks -1, -1 and -3, -1.
+		{-1, -1, -1, 255, 255, 490},
+		{-1, -1, -1, 254, 255, 488},
+		// Two pixels to a block: both of block 0, 0, then 1, 0 and 1, 1.
+		{1, 0, 0, 0, 0, -64},
+		{1, 0, 0, 1, 1, -64},
+		{1, 0, 0, 2, 0, -63},
+		{1, 0, 0, 3, 2, -47},
+		// Blocks -1, -1 and -2, -1.
+		{1, -1, -1, 255, 255, 490},
+		{1, -1, -1, 253, 255, 489},
+	} {
+		m.Tile(chunks.Overworld, tc.zoom, tc.tx, tc.ty, &out)
+		if got := out[tc.py*TileSize+tc.px]; got != tc.want {
+			t.Errorf("zoom %d tile %d, %d pixel %d, %d is %d, want %d", tc.zoom, tc.tx, tc.ty, tc.px, tc.py, got, tc.want)
+		}
 	}
 }
 

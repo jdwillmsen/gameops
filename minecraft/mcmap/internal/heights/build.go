@@ -46,8 +46,10 @@ func NewBuilder(at time.Time, censusChunks int) *Builder {
 }
 
 // Add takes the heights of one chunk from its Data3D record. A chunk
-// already held is not replaced, and a dimension that is not one of the
-// three, or a record that holds no heightmap, is refused.
+// already held is not replaced, and neither it nor a chunk past the edge
+// of any world or past what is kept is an error: the biome pass counts
+// those. A dimension that is not one of the three, or a record that holds
+// no heightmap, is refused.
 func (b *Builder) Add(d chunks.Dimension, cx, cz int32, record []byte) error {
 	var columns [Columns]int16
 	if err := FromRecord(record, &columns); err != nil {
@@ -64,7 +66,6 @@ func (b *Builder) AddColumns(d chunks.Dimension, cx, cz int32, columns *[Columns
 		return errors.New("not a dimension of the world")
 	}
 	if cx < -maxChunkCoordinate || cx > maxChunkCoordinate || cz < -maxChunkCoordinate || cz > maxChunkCoordinate {
-		b.m.OutOfRange++
 		return nil
 	}
 	key := cellKey(cx, cz)
@@ -92,7 +93,6 @@ func (b *Builder) AddColumns(d chunks.Dimension, cx, cz int32, columns *[Columns
 	}
 	if tier == 0 {
 		if b.room <= 0 {
-			b.m.OverLimit++
 			return nil
 		}
 		b.room--
@@ -100,7 +100,6 @@ func (b *Builder) AddColumns(d chunks.Dimension, cx, cz int32, columns *[Columns
 		return nil
 	}
 	if b.room <= 0 || len(l.data)+recordSize(tier) > maxData {
-		b.m.OverLimit++
 		return nil
 	}
 	b.room--

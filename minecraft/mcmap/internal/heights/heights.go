@@ -35,7 +35,7 @@ const (
 	// the biomes are held to, so that the two cover the same chunks.
 	maxChunks = 1_000_000
 	// maxData is the most bytes of columns kept for a dimension, which is
-	// what a chunk's offset into them has room for. A chunk is at most 514.
+	// what a chunk's offset into them has room for. A chunk is at most 512.
 	maxData = 1 << payloadBits
 	// maxChunkCoordinate is past the edge of any Bedrock world, and keeps
 	// a chunk's block coordinates inside 32 bits.
@@ -94,9 +94,6 @@ type Map struct {
 	// CensusChunks is how many chunks the world held then, by the chunk
 	// count's reckoning, or -1 if nothing had counted them.
 	CensusChunks int
-	// OutOfRange counts chunks past the edge of any world, and OverLimit
-	// chunks past what is kept; neither is held.
-	OutOfRange, OverLimit int
 
 	layers [3]*layer
 }

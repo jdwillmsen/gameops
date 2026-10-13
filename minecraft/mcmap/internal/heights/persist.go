@@ -24,9 +24,10 @@ import (
 // over by the next reading.
 const fileMagic = "MCHEIGH1"
 
-// maxFile is more than a world at every bound comes to: a table entry and
-// a chunk's record at their largest, a million times.
-const maxFile = 3 * (maxChunks*12 + maxData) / 2
+// maxFile is the largest file Encode can write: the magic, the snapshot's
+// time and chunk count, two counts for each dimension and the checksum,
+// and a table entry and a record at its largest for every chunk kept.
+const maxFile = int64(len(fileMagic) + 16 + 3*8 + 4 + maxChunks*(12+Columns*2))
 
 var errFile = errors.New("saved heights are damaged or from another version")
 

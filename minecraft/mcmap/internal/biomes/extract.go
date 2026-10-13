@@ -67,11 +67,6 @@ func (s *Store) World() *World { return s.current.Load() }
 // Set replaces the reading held.
 func (s *Store) Set(w *World) { s.current.Store(w) }
 
-// Heights is the surface height of every column from the last completed
-// reading, or nil before there is one. It is the same snapshot the biomes
-// are of.
-func (s *Store) Heights() *heights.Map { return s.World().Heights() }
-
 // At is the biome at the top of the column at block x, z of a dimension,
 // from the last completed reading. It is false before the first reading,
 // and for a column in a chunk the world has not generated: only the seed
