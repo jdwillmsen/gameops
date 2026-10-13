@@ -17,7 +17,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const manifestFile = "component.yaml"
+const (
+	manifestFile = "component.yaml"
+	imageReadme  = "README.docker.md"
+)
 
 type Manifest struct {
 	Name     string   `yaml:"name"`
@@ -236,6 +239,12 @@ func validateRelease(root string, m Manifest, tags map[string]string, bad func(M
 	if wantsImage {
 		if _, err := os.Stat(filepath.Join(root, m.Dir, "Dockerfile")); errors.Is(err, fs.ErrNotExist) {
 			bad(m, "release.artifacts has image but %sDockerfile does not exist", m.Dir)
+		}
+		// The release reads it as the image's page on the second registry,
+		// after the image is already published, so without this a missing
+		// one is first heard of as a release that fails part-way.
+		if _, err := os.Stat(filepath.Join(root, m.Dir, imageReadme)); errors.Is(err, fs.ErrNotExist) {
+			bad(m, "release.artifacts has image but %s%s does not exist", m.Dir, imageReadme)
 		}
 	}
 }
