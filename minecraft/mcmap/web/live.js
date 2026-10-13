@@ -616,7 +616,19 @@
         items.push({ id: key, x: held.x, z: held.z, family: held.category, type: held.type, alone: Boolean(held.name) || (picked !== null && picked.key === key) });
       }
     }
-    if (on) for (const source of app.groups.sources.values()) for (const item of source.items()) items.push(item);
+    // Another layer's script is another layer's: one that throws here
+    // would stop this frame before whoever is followed had been found in
+    // it, so it is passed over, and what it drew stays as it drew it.
+    const offered = [];
+    if (on) {
+      for (const source of app.groups.sources.values()) {
+        try {
+          const theirs = source.items();
+          for (const item of theirs) items.push(item);
+          offered.push(source);
+        } catch { /* drawn by its own layer, ungrouped */ }
+      }
+    }
     const { groups, memory } = app.groups.cluster(items, zoom, heapMemory);
     heapMemory = memory;
     const within = new Set();
@@ -657,7 +669,11 @@
       if (want === mobLayer.hasLayer(held.marker)) continue;
       if (want) mobLayer.addLayer(held.marker); else mobLayer.removeLayer(held.marker);
     }
-    for (const source of app.groups.sources.values()) source.apply(within);
+    for (const source of on ? offered : app.groups.sources.values()) {
+      try {
+        source.apply(within);
+      } catch { /* its marks stay as they are */ }
+    }
     // A line of where someone has been stays under the marks.
     if (added && app.trails && app.trails.back) app.trails.back();
     if (listed && !heaps.has(listed)) shutList();

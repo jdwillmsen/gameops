@@ -773,6 +773,24 @@ test('what another layer offers is grouped with the mobs, and told which of it w
   assert.equal(taken.size, 0);
 });
 
+test('a layer whose offer throws is passed over, and the frame is drawn and followed all the same', async () => {
+  const s = await stage({});
+  await s.zoomTo(-2);
+  let asked = 0;
+  s.app.groups.offer('beds', { label: 'Beds', colour: () => '#f277b5', title: () => 'bed', items: () => { asked += 1; throw new Error('broken'); }, apply: () => { throw new Error('broken'); } });
+  let heard = 0;
+  s.doc.addEventListener('mcmap:players', () => { heard += 1; });
+  const mobs = Array.from({ length: 5 }, (_, i) => zombie(100 + i, 10 + i, 10));
+  await s.sample({ players: [steve(11, 11)], mobs });
+  assert.ok(asked > 0);
+  assert.equal(heard, 1, 'the frame went on to whoever draws where the players have been');
+  assert.equal(marks(s).filter((m) => m.options.heap).length, 1, 'and the mobs are grouped without it');
+  assert.ok(s.app.inspect.open({ kind: 'player', id: '1', name: 'Steve', x: 11, y: 64, z: 11 }));
+  s.doc.getElementById('inspect-follow').click();
+  await s.sample({ players: [steve(40, 20)], mobs });
+  near(s.map.onScreen([20, 40]).x, 500, 'followed');
+});
+
 test('with grouping off, or a type filtered, nothing hidden is counted in a group', async () => {
   const off = await stage({ look: { group: 'off' } });
   await off.zoomTo(-2);
