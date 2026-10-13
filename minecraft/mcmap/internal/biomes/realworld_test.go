@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 )
 
 // Run against a copy of a real world to check the reading against places
@@ -93,6 +94,8 @@ func TestRealWorld(t *testing.T) {
 		}
 	}
 
+	checkRealHeights(t, e, w)
+
 	places := realPlaces(t)
 	for _, p := range places {
 		got, ok := w.At(p.d, p.x, p.z)
@@ -136,6 +139,83 @@ func TestRealWorld(t *testing.T) {
 		t.Logf("nearest %s to 0, 0 in %s: %d more", name, time.Since(started).Round(time.Microsecond), more)
 		for _, h := range hits {
 			t.Logf("  %6d, %6d  %5.0f blocks away  %8d blocks in %5d chunks", h.X, h.Z, h.Distance, h.Region.Area, h.Region.Chunks)
+		}
+	}
+}
+
+// checkRealHeights measures what the heights cost and checks that they are
+// what the biome reading was of, and that the file brings them back.
+func checkRealHeights(t *testing.T, e *Extractor, w *World) {
+	t.Helper()
+	h := w.Heights()
+	if h == nil {
+		t.Fatal("the reading holds no heights")
+	}
+	saved, err := os.Stat(e.heightsFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, held runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	started := time.Now()
+	back, err := heights.Load(e.heightsFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	took := time.Since(started)
+	runtime.GC()
+	runtime.ReadMemStats(&held)
+	t.Logf("heights: %d MiB estimated, %d KiB on the volume, loaded in %s holding %d KiB more heap", h.Bytes()>>20, saved.Size()>>10, took.Round(time.Millisecond), (held.HeapInuse-before.HeapInuse)>>10)
+	runtime.KeepAlive(back)
+
+	for _, d := range chunks.Dimensions {
+		if h.Chunks(d) != len(w.layers[d].cells) || back.Chunks(d) != h.Chunks(d) {
+			t.Errorf("%s: %d chunks of heights, %d of biomes, %d loaded", d.Name(), h.Chunks(d), len(w.layers[d].cells), back.Chunks(d))
+		}
+		floor, _ := heights.Floor(d)
+		top := map[chunks.Dimension]int32{chunks.Overworld: 319, chunks.Nether: 127, chunks.End: 255}[d]
+		known, void, out := 0, 0, 0
+		var cells [heights.Columns]int16
+		for key := range w.layers[d].cells {
+			cx, cz := int32(key>>32), int32(key)
+			if !h.Rect(d, cx*16, cz*16, 16, 16, cells[:]) {
+				void += heights.Columns
+				continue
+			}
+			for _, y := range cells {
+				switch {
+				case y == heights.Unknown:
+					void++
+				case int32(y) < floor || int32(y) > top:
+					out++
+				default:
+					known++
+				}
+			}
+		}
+		t.Logf("%s: %d columns with a surface, %d without, %d outside the dimension", d.Name(), known, void, out)
+		if out != 0 {
+			t.Errorf("%s: %d surfaces outside the dimension", d.Name(), out)
+		}
+		var a, b [heights.TileSize * heights.TileSize]int16
+		for _, zoom := range []int{0, -2, -4} {
+			started := time.Now()
+			tiles := 0
+			for tx := -2; tx < 2; tx++ {
+				for ty := -2; ty < 2; ty++ {
+					if h.Tile(d, zoom, tx, ty, &a) {
+						tiles++
+						back.Tile(d, zoom, tx, ty, &b)
+						if a != b {
+							t.Errorf("%s: a tile came back different from the volume", d.Name())
+						}
+					}
+				}
+			}
+			if tiles > 0 {
+				t.Logf("%s zoom %d: %d tiles of heights, %s each with the check", d.Name(), zoom, tiles, (time.Since(started) / time.Duration(tiles)).Round(time.Microsecond))
+			}
 		}
 	}
 }

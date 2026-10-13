@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 )
 
 var (
@@ -42,7 +43,15 @@ var (
 	}, []string{"result"})
 	metricSaveFailures = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mcmap_biomes_save_failures_total",
-		Help: "Readings that could not be written to the volume. They are still served; a restart would start without them.",
+		Help: "Readings that could not be written to the volume, the biomes or the surface heights read with them. They are still served; a restart would start without them.",
+	})
+	metricHeightChunks = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "mcmap_heights_chunks",
+		Help: "Chunks whose surface heights are held, by dimension, as of the last reading.",
+	}, []string{"dimension"})
+	metricHeightBytes = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mcmap_heights_bytes",
+		Help: "About how much memory the surface heights take, as of the last reading.",
 	})
 )
 
@@ -57,6 +66,11 @@ func (s *Store) World() *World { return s.current.Load() }
 
 // Set replaces the reading held.
 func (s *Store) Set(w *World) { s.current.Store(w) }
+
+// Heights is the surface height of every column from the last completed
+// reading, or nil before there is one. It is the same snapshot the biomes
+// are of.
+func (s *Store) Heights() *heights.Map { return s.World().Heights() }
 
 // At is the biome at the top of the column at block x, z of a dimension,
 // from the last completed reading. It is false before the first reading,
@@ -88,6 +102,8 @@ type Extractor struct {
 
 func (e *Extractor) file() string { return filepath.Join(e.WorkDir, "biomes.bin") }
 
+func (e *Extractor) heightsFile() string { return filepath.Join(e.WorkDir, "heights.bin") }
+
 // Load brings back the reading an earlier run left on the volume, if
 // there is a whole one. Its absence is the first start; damage is logged
 // and costs only the wait for the first cycle.
@@ -98,8 +114,27 @@ func (e *Extractor) Load() {
 	case err != nil:
 		e.Logger.Warn("saved biomes not used", "error", err)
 	default:
+		e.loadHeights(w)
 		e.Store.Set(w)
 		export(w)
+	}
+}
+
+// loadHeights gives w the heights saved beside it, if they are of the same
+// snapshot. Heights left from an earlier version, or from a reading the
+// biomes file did not survive, are not used: the world is read again at
+// the first cycle, which is what holds the heights of a service that was
+// updated, without waiting for a chunk to be generated.
+func (e *Extractor) loadHeights(w *World) {
+	h, err := heights.Load(e.heightsFile())
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		e.Logger.Warn("saved heights not used", "error", err)
+	case !h.SnapshotAt.Equal(w.SnapshotAt) || h.CensusChunks != w.CensusChunks:
+		e.Logger.Warn("saved heights not used: they are not of the snapshot the saved biomes are")
+	default:
+		w.heights = h
 	}
 }
 
@@ -107,7 +142,7 @@ func (e *Extractor) Load() {
 // in which the chunk count found censusChunks chunks, or -1 if it could
 // not count. A reading that fails leaves the one before in place.
 func (e *Extractor) Extract(ctx context.Context, dbDir string, at time.Time, censusChunks int) (Stats, error) {
-	if held := e.Store.World(); held != nil && censusChunks >= 0 && held.CensusChunks == censusChunks &&
+	if held := e.Store.World(); held != nil && held.heights != nil && censusChunks >= 0 && held.CensusChunks == censusChunks &&
 		at.Sub(held.SnapshotAt) < maxStale && !at.Before(held.SnapshotAt) {
 		metricReads.WithLabelValues("unchanged").Inc()
 		stats := held.Stats
@@ -132,6 +167,10 @@ func (e *Extractor) Extract(ctx context.Context, dbDir string, at time.Time, cen
 	if err := w.save(e.file()); err != nil {
 		metricSaveFailures.Inc()
 		e.Logger.Warn("biomes not saved to the volume; a restart would start without them", "error", err)
+	}
+	if err := w.heights.Save(e.heightsFile()); err != nil {
+		metricSaveFailures.Inc()
+		e.Logger.Warn("heights not saved to the volume; a restart would start without them", "error", err)
 	}
 	return w.Stats, nil
 }
@@ -159,4 +198,8 @@ func export(w *World) {
 		metricSkipped.WithLabelValues(reason).Set(float64(n))
 	}
 	metricReadAt.Set(float64(w.SnapshotAt.Unix()))
+	for _, d := range chunks.Dimensions {
+		metricHeightChunks.WithLabelValues(d.Name()).Set(float64(w.heights.Chunks(d)))
+	}
+	metricHeightBytes.Set(float64(w.heights.Bytes()))
 }

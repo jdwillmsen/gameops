@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 )
 
 // Bounds on what one world may make this hold. The FWB world is 144,000
@@ -109,6 +110,20 @@ type World struct {
 	Stats        Stats
 
 	layers [3]*Layer
+	// heights is the surface of the same chunks from the same pass, or nil
+	// where there is none: a reading made by an earlier version of the
+	// service, until the next one.
+	heights *heights.Map
+}
+
+// Heights is the surface height of every column of the same snapshot, or
+// nil if there are none to give. A nil Map answers every question with
+// "not known".
+func (w *World) Heights() *heights.Map {
+	if w == nil {
+		return nil
+	}
+	return w.heights
 }
 
 func cellKey(cx, cz int32) uint64 { return uint64(uint32(cx))<<32 | uint64(uint32(cz)) }

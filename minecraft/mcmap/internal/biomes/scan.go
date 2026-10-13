@@ -8,6 +8,7 @@ import (
 	"github.com/df-mc/goleveldb/leveldb"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 )
 
 // maxRecord is the largest biome record read. The largest in the FWB world
@@ -21,6 +22,10 @@ const maxRecord = 1 << 20
 // It reads every key once, as the other readers of the world do. Seeking
 // from one chunk's biome record to the next was measured and is no
 // faster: the biome records are themselves most of what there is to read.
+//
+// The same records begin with the chunk's heightmap, which is kept as the
+// surface heights in the same pass: reading the world again for them would
+// cost as much as this does.
 func Scan(ctx context.Context, db *leveldb.DB, at time.Time, censusChunks int) (*World, error) {
 	w := &World{SnapshotAt: at, CensusChunks: censusChunks}
 	room := MaxChunks
@@ -28,6 +33,7 @@ func Scan(ctx context.Context, db *leveldb.DB, at time.Time, censusChunks int) (
 	for i := range builders {
 		builders[i] = newBuilder(&w.Stats, &room)
 	}
+	surfaces := heights.NewBuilder(at, censusChunks)
 	it := db.NewIterator(nil, nil)
 	defer it.Release()
 	var columns [Columns]uint32
@@ -47,6 +53,8 @@ func Scan(ctx context.Context, db *leveldb.DB, at time.Time, censusChunks int) (
 			continue
 		}
 		builders[pos.Dim].add(pos.X, pos.Z, &columns)
+		// A record that parsed as biomes is longer than its heightmap.
+		_ = surfaces.Add(pos.Dim, pos.X, pos.Z, v)
 	}
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("read world: %w", err)
@@ -57,6 +65,7 @@ func Scan(ctx context.Context, db *leveldb.DB, at time.Time, censusChunks int) (
 	for i, b := range builders {
 		w.layers[i] = b.layer
 	}
+	w.heights = surfaces.Map()
 	w.finish()
 	return w, nil
 }
@@ -77,6 +86,14 @@ func Build(at time.Time, columns map[chunks.Pos][Columns]uint32) *World {
 		w.layers[i] = b.layer
 	}
 	w.finish()
+	return w
+}
+
+// WithHeights sets the surface heights a World reports, and returns it. It
+// is for tests of whatever asks a World questions, and for a World that
+// Build made, which has none.
+func (w *World) WithHeights(m *heights.Map) *World {
+	w.heights = m
 	return w
 }
 
