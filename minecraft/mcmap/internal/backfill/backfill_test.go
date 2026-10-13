@@ -299,6 +299,33 @@ func TestARendererThatCannotRunStopsTheJobBeforeAnythingIsUnpacked(t *testing.T)
 	}
 }
 
+// The work directory is given by hand, and the map's own data directory is
+// the one beside it that also holds a world and a maps directory.
+func TestWhatTheWorkDirectoryAlreadyHeldIsLeftAsItWas(t *testing.T) {
+	s := newSetup(t)
+	for _, name := range []string{"maps/overworld/tile", "world/level.dat", "mirror/FWB/level.dat"} {
+		p := filepath.Join(s.job.Work, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("the map's own"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive(t, s.archives, "fwb-20261001T040007Z.tar.gz", world("the first")...)
+	if _, err := s.job.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"maps/overworld/tile", "world/level.dat", "mirror/FWB/level.dat"} {
+		if b, err := os.ReadFile(filepath.Join(s.job.Work, filepath.FromSlash(name))); err != nil || string(b) != "the map's own" {
+			t.Errorf("%s after the run: %q, %v", name, b, err)
+		}
+	}
+	if got := tileOf(t, s.store, "2026-10-01"); got != "overworld of the first" {
+		t.Errorf("the day's tile = %q: it was drawn from what the directory held", got)
+	}
+}
+
 func TestTheWorkDirectoryIsLeftEmpty(t *testing.T) {
 	s := newSetup(t)
 	archive(t, s.archives, "fwb-20261001T040007Z.tar.gz", world("the first")...)

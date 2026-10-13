@@ -31,7 +31,10 @@ import (
 // thing here that says which day it is: <anything>-20261001T040007Z.tar.gz.
 var archiveName = regexp.MustCompile(`^.*-(\d{8}T\d{6}Z)\.tar\.gz$`)
 
-const stampLayout = "20060102T150405Z"
+const (
+	stampLayout = "20060102T150405Z"
+	scratchDir  = ".mcmap-backfill"
+)
 
 // Renderer draws a world and says where it put the tiles.
 type Renderer interface {
@@ -128,11 +131,12 @@ func (j Job) Run(ctx context.Context) (Result, error) {
 }
 
 func (j Job) keep(ctx context.Context, a dated) (history.Result, error) {
-	worlds, maps := filepath.Join(j.Work, "world"), filepath.Join(j.Work, "maps")
-	clear := func() {
-		_ = os.RemoveAll(worlds)
-		_ = os.RemoveAll(maps)
-	}
+	// A directory of the job's own, and the only thing it ever deletes:
+	// Work given as a place that holds something else, the map's own data
+	// above all, which has a maps directory too, then loses nothing.
+	scratch := filepath.Join(j.Work, scratchDir)
+	worlds, maps := filepath.Join(scratch, "world"), filepath.Join(scratch, "maps")
+	clear := func() { _ = os.RemoveAll(scratch) }
 	// What a killed run left; and nothing of this archive is left for the
 	// next, whose tiles must all be its own.
 	clear()
