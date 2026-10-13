@@ -9,12 +9,14 @@ const STUB_CODE = 'E2ECHK';
 // With no session the map answers 401 through the real path and the page
 // shows the login. The page asks for a code as soon as it is refused, and
 // a code is a row in the server's table of waiting logins, so that one
-// request is answered here in the browser and never sent.
+// request is answered here in the browser and never sent. The page also
+// asks for the days the map keeps as it loads, before it has been told it
+// has no session, and a map that keeps any refuses that the same way.
 export async function loginScreen({ browser, cfg, watch, closers = [] }) {
   const ctx = await openContext(browser, {
     cfg, watch,
     stubs: { 'POST /auth/start': { code: STUB_CODE, expiresIn: 600 }, 'GET /auth/status': { state: 'pending' } },
-    expected: [['/api/map', 401]],
+    expected: [['/api/map', 401], ['/api/history', 401]],
   });
   closers.push(() => ctx.close());
   try {

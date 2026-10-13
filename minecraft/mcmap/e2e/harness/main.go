@@ -22,6 +22,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io/fs"
 	"log/slog"
 	"math"
 	"math/big"
@@ -39,6 +40,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/leveldat"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
@@ -64,6 +66,11 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	dir, err := os.MkdirTemp("", "mcmap-harness-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
 	// The service's own reading of its environment, so that a secret the
 	// service would refuse is refused here too. What it needs and the
 	// harness has no use for is given a stand-in.
@@ -78,6 +85,8 @@ func run(logger *slog.Logger) error {
 			"INTERNAL_TOKEN": "harness-internal-token-not-a-secret",
 			"HTTP_ADDR":      "127.0.0.1:18080",
 			"INTERNAL_ADDR":  "127.0.0.1:19090",
+			// Whatever is kept is thrown away with the rest.
+			"DATA_DIR": dir,
 		}[key]
 	})
 	if err != nil {
@@ -85,11 +94,6 @@ func run(logger *slog.Logger) error {
 	}
 	quiet := os.Getenv("HARNESS_QUIET") == "1"
 
-	dir, err := os.MkdirTemp("", "mcmap-harness-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
 	maps := filepath.Join(dir, "maps")
 	renderer := &render.Unmined{}
 	if err := terrain(maps, renderer); err != nil {
@@ -103,6 +107,19 @@ func run(logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Where the map is to keep its days, it keeps this one: the terrain
+	// just written, by the capture the service makes at the end of a cycle.
+	var past *history.Store
+	if cfg.History {
+		if past, err = history.Open(cfg.HistoryDir, logger); err != nil {
+			return err
+		}
+		past.MapsDir, past.Source = maps, cycle{renderer}
+		if _, err := past.Capture(ctx, now); err != nil {
+			return err
+		}
+	}
 
 	layer := live.New(10*time.Second, 1000, logger)
 	marked := markers.NewStore()
@@ -154,6 +171,9 @@ func run(logger *slog.Logger) error {
 		Biomes:     biomeStore,
 		Trails:     recorder,
 	}
+	if past != nil {
+		app.History = past
+	}
 	if dir := os.Getenv("HARNESS_WEB"); dir != "" {
 		// Another build of the page over the same world: how a check is
 		// shown to fail on the page a fault was in.
@@ -193,7 +213,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 	// Said once both are bound: whoever started this waits for the line.
-	logger.Info("harness listening", "http_addr", publicListener.Addr().String(), "internal_addr", internalListener.Addr().String(), "service_sessions", cfg.ServiceSecret != "", "quiet", quiet)
+	logger.Info("harness listening", "http_addr", publicListener.Addr().String(), "internal_addr", internalListener.Addr().String(), "service_sessions", cfg.ServiceSecret != "", "history", cfg.History, "quiet", quiet)
 	// The page is served over TLS, as the gateway serves it: the session
 	// cookie is Secure and bound to its host by name, and a browser will
 	// not be given one for a plain address. The certificate is made here
@@ -237,6 +257,20 @@ func selfSigned() (tls.Certificate, error) {
 		return tls.Certificate{}, err
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
+}
+
+// cycle is the renderer as a day is kept from it. A day is kept only of a
+// cycle that drew all three dimensions, and the harness leaves the end
+// undrawn so that the page has one such to show; for the day it is
+// answered for here, as a dimension drawn with nothing in it.
+type cycle struct{ *render.Unmined }
+
+func (c cycle) Info(out string) (render.Info, error) {
+	info, err := c.Unmined.Info(out)
+	if errors.Is(err, fs.ErrNotExist) {
+		return render.Info{Format: "png"}, nil
+	}
+	return info, err
 }
 
 type waypoints struct{}

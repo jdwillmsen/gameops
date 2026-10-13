@@ -68,6 +68,7 @@ as underscores, such as `MCMAP_E2E_PUBLIC_URL`.
 | Option | Meaning |
 |---|---|
 | `--metrics-file <path>` | Write the run as Prometheus text, from when it begins |
+| `--no-history` | The map keeps no history (`HISTORY_ENABLED` is not `true` on it), so its 404 to the page's ask for the days kept is not a fault. Without it that answer fails the run |
 | `--only a,b` | Run only these checks; the exchange and the page's first load are run whatever it says |
 | `--evidence-dir <path>` | On a failed check, keep a screenshot of the page. Off unless given: a screenshot shows the live map |
 | `--evidence-pages` | With it, also keep the page's HTML and the text of what went wrong |

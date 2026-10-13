@@ -21,8 +21,7 @@ export function routeOf(address) {
 // Answers that are not faults. A sparse world has no tile for most of its
 // grid; a head is gone when its player leaves between the list and the
 // picture; waypoints are a player's own, which a service session is
-// refused, so that 403 is the server doing as it should; and a map that
-// keeps no history has no list of days, which the page asks for once.
+// refused, so that 403 is the server doing as it should.
 const EXPECTED = new Map([
   ['/tiles', [404]],
   ['/api/biomes/tiles', [404]],
@@ -30,8 +29,19 @@ const EXPECTED = new Map([
   ['/api/icons/mob', [404]],
   ['/api/icons/picture', [404]],
   ['/api/waypoints', [403, 404]],
-  ['/api/history', [404]],
 ]);
+
+// The answers that are not faults from this map, in one context: those
+// above, and whatever the context's own check is there to be refused.
+export function expectedOf(cfg, extra = []) {
+  const allowed = new Map(EXPECTED);
+  // The page asks every map once for the days it keeps, and a map that
+  // keeps none answers 404. Only a map said to keep none is let off: from
+  // one that keeps them, the same answer is the history gone missing.
+  if (!cfg.keepsHistory) allowed.set('/api/history', [404]);
+  for (const [route, status] of extra) allowed.set(route, [...(allowed.get(route) || []), status]);
+  return allowed;
+}
 
 // Where in the page's scripts an error was thrown: which of the page's own
 // files, and the line. A file that is not one of them is "elsewhere".
@@ -103,8 +113,7 @@ export async function openContext(browser, { cfg, watch, cookie = null, viewport
     }
     await route.continue();
   });
-  const allowed = new Map(EXPECTED);
-  for (const [route, status] of expected) allowed.set(route, [...(allowed.get(route) || []), status]);
+  const allowed = expectedOf(cfg, expected);
   const attach = (page) => {
     page.on('pageerror', (err) => {
       watch.errors.push(whereOf(err.stack));
