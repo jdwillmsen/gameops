@@ -5,7 +5,7 @@
 // can leave in a log: there is no field for it to be in.
 
 export const CHECKS = ['login-screen', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
-  'layer-panel', 'toggles', 'search', 'structure-sheet', 'saved-views', 'themes', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
+  'layer-panel', 'toggles', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
   'page-errors', 'read-only', 'run'];
 
 // Every reason a check can fail or be skipped for, as the sentence a
@@ -85,6 +85,18 @@ export const SENTENCES = [
   "choosing a theme did not apply it",
   "two themes are drawn in the same colours",
   "the map was not drawn under a theme",
+  "this map keeps no history",
+  "no day has been kept yet",
+  "the days the map keeps were not listed",
+  "days are kept and the page shows no History",
+  "the History row did not open",
+  "stepping back from now did not choose the newest day",
+  "choosing a day asked for none of its tiles",
+  "no tile of the day came as a picture",
+  "choosing a day moved the map",
+  "going back to now left the map on the day",
+  "going back to now moved the map",
+  "the History row did not close",
   "the layer sheet did not open on a phone",
   "the layer sheet is not across the bottom of the screen",
   "pressing the sheet's handle did not change its height",
@@ -112,7 +124,7 @@ export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sent
 
 // The page's own scripts, by which a script error is placed.
 export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js',
-  'slime.js', 'chunk.js', 'trails.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'leaflet.js'];
+  'slime.js', 'chunk.js', 'trails.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'history.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
 const density = (dpr) => String(dpr).replace('.', '_');
@@ -126,6 +138,7 @@ export const MEASURES = new Set([
   'levels', 'samples', 'samples_zooming', 'worst_ratio', 'wrong_size',
   'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles',
   'hits', 'answer_ms', 'open_ms', 'mob_layers_before', 'mob_layers_in_view', 'mob_layers_after', 'themes', 'distinct',
+  'days', 'day_tiles', 'day_pictures', 'moved_pixels',
   'seconds', 'measured', 'worst_pixels', 'p95_pixels', 'over_tolerance', 'worst_pixels_from_where_it_is', 'samples_left_behind',
   'frames', 'frames_without_it', 'longest_run_without_it', 'frames_it_moved', 'follow_off_samples',
   'faces', 'off_centre', 'with_head_box', 'drawn_as_eggs', ...DENSITIES.flatMap((dpr) => [`worst_head_pixels_at_${density(dpr)}`, `worst_ink_pixels_at_${density(dpr)}`]),

@@ -4,7 +4,7 @@
 // to the server but the login and the logout, and neither is touched.
 
 import { Fail, skip, sleep, until } from '../lib/check.mjs';
-import { openContext, openMap } from '../lib/browser.mjs';
+import { openContext, openMap, routeOf } from '../lib/browser.mjs';
 
 // Each dimension's tab shows terrain. One never rendered, as a dimension
 // nobody has been to is, has no tab to press and is counted and left.
@@ -318,6 +318,96 @@ export async function themes({ page }) {
   if (measures.distinct !== 3) throw new Fail('two themes are drawn in the same colours', measures);
   if (seen.some((s) => s.tiles === 0 || s.canvas === 0)) throw new Fail('the map was not drawn under a theme', measures);
   return { measures };
+}
+
+// The map as it was: History opens, the newest day kept is drawn from that
+// day's own tiles where today's were, at the same place and zoom, and Now
+// draws today's again. A map that keeps no days has nothing here to press.
+export async function history({ page, cfg }) {
+  const listed = await page.evaluate(async () => {
+    const res = await fetch('api/history', { cache: 'no-store' });
+    const days = res.ok ? (await res.json()).days : null;
+    return { status: res.status, days: Array.isArray(days) ? days.length : 0 };
+  });
+  if (listed.status === 404 && !cfg.keepsHistory) return skip('this map keeps no history');
+  if (listed.status !== 200) throw new Fail('the days the map keeps were not listed', { status: listed.status });
+  const measures = { days: listed.days, day_tiles: 0, day_pictures: 0 };
+  if (listed.days === 0) return skip('no day has been kept yet', measures);
+
+  const state = () => page.evaluate(() => {
+    const part = (name) => document.querySelector(`#map .timeline-${name}`);
+    const bar = document.querySelector('#map .timeline');
+    if (!bar || bar.hidden) return { shown: false };
+    return {
+      shown: true, open: !part('body').hidden, at: Number(part('range').value), last: Number(part('range').max),
+      past: document.body.classList.contains('past'), day: window.mcmap.past.get() !== '',
+    };
+  });
+  // How far the view is from where it was when the check began, which is
+  // kept in the page: where that is stays there.
+  const moved = () => page.evaluate(() => {
+    const map = window.mcmap.map;
+    const was = window.__view;
+    return { pixels: map.latLngToContainerPoint(was.centre).distanceTo(map.latLngToContainerPoint(map.getCenter())), zoom: Math.abs(map.getZoom() - was.zoom) };
+  });
+  // The terrain on the map by where it was fetched from: a day's tiles, and
+  // today's. A picture counts once it has decoded.
+  const terrain = () => page.evaluate(() => {
+    const out = { day: 0, today: 0, coming: 0 };
+    for (const img of document.querySelectorAll('#map img.leaflet-tile')) {
+      const path = new URL(img.src, location.href).pathname;
+      const kind = path.startsWith('/api/history/tiles/') ? 'day' : path.startsWith('/tiles/') ? 'today' : null;
+      if (!kind) continue;
+      if (img.classList.contains('leaflet-tile-loaded') && img.naturalWidth > 0) out[kind] += 1;
+      else if (kind === 'day') out.coming += 1;
+    }
+    return out;
+  });
+
+  if (!(await until(async () => (await state()).shown, { timeoutMs: 5000 }))) throw new Fail('days are kept and the page shows no History', measures);
+  const seen = (response) => {
+    if (routeOf(response.url()) !== '/api/history/tiles') return;
+    measures.day_tiles += 1;
+    if (response.ok() && /^image\//.test(response.headers()['content-type'] || '')) measures.day_pictures += 1;
+  };
+  page.on('response', seen);
+  try {
+    await page.evaluate(() => { const map = window.mcmap.map; window.__view = { centre: map.getCenter(), zoom: map.getZoom() }; });
+    if (!(await state()).open) await page.locator('#map .timeline-open').click();
+    if (!(await until(async () => (await state()).open))) throw new Fail('the History row did not open', measures);
+
+    // One back from now is the newest day kept.
+    await page.locator('#map .timeline-earlier').click();
+    const chosen = await until(async () => { const s = await state(); return s.past && s.day && s.at === s.last - 1 ? s : null; });
+    if (!chosen) throw new Fail('stepping back from now did not choose the newest day', measures);
+    const drawn = await until(async () => (measures.day_pictures > 0 && (await terrain()).day > 0), { timeoutMs: 20_000 });
+    if (!drawn && measures.day_tiles === 0) throw new Fail('choosing a day asked for none of its tiles', measures);
+    if (!drawn) throw new Fail('no tile of the day came as a picture', measures);
+    const there = await moved();
+    measures.moved_pixels = Math.round(there.pixels * 100) / 100;
+    if (there.pixels > 1 || there.zoom > 0.001) throw new Fail('choosing a day moved the map', measures);
+
+    await page.locator('#map .timeline-now').click();
+    // Today's tiles on the map, and the day's gone from under them.
+    const back = await until(async () => {
+      const s = await state();
+      const t = await terrain();
+      return !s.past && !s.day && s.at === s.last && t.today > 0 && t.day + t.coming === 0;
+    }, { timeoutMs: 20_000 });
+    if (!back) throw new Fail('going back to now left the map on the day', measures);
+    const after = await moved();
+    measures.moved_pixels = Math.max(measures.moved_pixels, Math.round(after.pixels * 100) / 100);
+    if (after.pixels > 1 || after.zoom > 0.001) throw new Fail('going back to now moved the map', measures);
+
+    await page.locator('#map .timeline-open').click();
+    if (!(await until(async () => !(await state()).open))) throw new Fail('the History row did not close', measures);
+    return { measures };
+  } finally {
+    page.off('response', seen);
+    // Whatever went wrong, the checks after this one are of the map as
+    // it is now.
+    await page.evaluate(() => { const now = document.querySelector('#map .timeline-now'); if (now && !now.disabled) now.click(); }).catch(() => {});
+  }
 }
 
 // On a phone the panel is a sheet from the bottom edge, as wide as the

@@ -134,6 +134,8 @@ test('an address is written as its route and never its query', () => {
     ['https://map.example.test/api/structures/detail?dimension=overworld&kind=village&x=-4321&z=8765', '/api/structures/detail'],
     ['https://map.example.test/tiles/overworld/0/37/-4.webp', '/tiles'],
     ['https://map.example.test/api/biomes/tiles/overworld/0/1/2.png?biome=plains', '/api/biomes/tiles'],
+    ['https://map.example.test/api/history/tiles/2026-01-01/overworld/0/37/-4.webp', '/api/history/tiles'],
+    ['https://map.example.test/api/history', '/api/history'],
     ['https://map.example.test/api/icons/head?name=Madeup%20Player&v=1', '/api/icons/head'],
     ['https://map.example.test/api/icons/picture/face/cow?v=1', '/api/icons/picture'],
     ['https://map.example.test/live.js', '/live.js'],
