@@ -2468,8 +2468,9 @@ turning into the next. Play runs from the day shown to now, a day every
 second and a half, and stops there; from now it starts at the first day
 kept. Only the terrain is of the day: players, markers, structures and
 biomes are still the world as it is, and the row says so. While a day is
-shown the footer says which in place of when the map was updated, and
-putting the row away puts the map back on now. The days are asked for
+shown the footer says which in place of when the map was updated, with
+no countdown to a refresh, and putting the row away puts the map back on
+now. The days are asked for
 when the page loads and again, no more often than every ten minutes,
 when the view changes; an ask that fails is tried again after a minute.
 A server that keeps no history answers 404 once and the page then has no
@@ -2514,7 +2515,8 @@ snapshots and renders with it.
 `NETHER_TOP_Y`, can shift colours across the whole map, which stores every
 tile again once and reads as though the world changed everywhere. Each day
 records both, and `GET /api/history` marks a day drawn differently from the
-one before it with `rendererChanged`.
+one before it with `rendererChanged`; on such a day the page's row says
+that not every difference from the day before is the world's.
 
 History cannot be rebuilt, unlike the tiles and the mirror beside it, so
 `HISTORY_DIR` belongs on storage that is kept.
