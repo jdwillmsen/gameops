@@ -30,3 +30,26 @@ func TestMarkersAreTheirSizeAndFollowedOnesStayInTheMiddleWhenRun(t *testing.T) 
 		t.Errorf("the markers' scripts did not do what is asked of them: %v", err)
 	}
 }
+
+// The markers' own script is run on the same stage with the live layer
+// beside it (testdata/daymarkers.test.cjs), against a map that says which
+// day of its history it draws and what that day kept: whose beds,
+// containers and named mobs are then on the map and in the panel's rows,
+// that a day which kept none is drawn with none and asked for none, and
+// that a named mob of a day is never taken for the one loaded now are
+// checked by doing them. Skipped where there is no node to run it with.
+func TestMarkersAreOfTheDayTheMapDrawsWhenRun(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("no node on this machine to run the markers' script with")
+	}
+	out, err := exec.Command(node, "testdata/daymarkers.test.cjs").CombinedOutput()
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if !strings.HasPrefix(line, "ok ") {
+			t.Log(line)
+		}
+	}
+	if err != nil {
+		t.Errorf("the markers' script did not do what is asked of it on a day: %v", err)
+	}
+}

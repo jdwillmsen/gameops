@@ -193,6 +193,21 @@ test('what is laid over a day is laid over the world as it is', async () => {
   assert.deepEqual(blocks(p.app.extent()), [-2048, -2048, 2048, 2048]);
 });
 
+test('the map says which of the day drawn\'s dimensions kept their markers, and none of them while it draws now', async () => {
+  const p = await load('#overworld/100/200/-1');
+  assert.equal(p.app.past.markers('overworld'), false);
+  p.app.past.set({ day: '2026-09-03', dimensions: [{ ...THEN.dimensions[0], markers: true }, { ...THEN.dimensions[0], id: 'nether' }, null, { ...THEN.dimensions[0], id: 'end', markers: 'yes' }] });
+  assert.equal(p.app.past.markers('overworld'), true);
+  assert.equal(p.app.past.markers('nether'), false, 'a dimension listed without markers kept none');
+  assert.equal(p.app.past.markers('end'), false, 'only true is a yes');
+  assert.equal(p.app.past.markers('moon'), false, 'a dimension the day did not hold kept none');
+  p.app.past.set(THEN);
+  assert.equal(p.app.past.markers('overworld'), false, 'a day from before markers were kept');
+  p.app.past.set({ day: '2026-09-03', dimensions: [{ ...THEN.dimensions[0], markers: true }] });
+  p.app.past.set(null);
+  assert.equal(p.app.past.markers('overworld'), false);
+});
+
 test('a day that did not hold the place shown is nothing at once, not today under the day\'s name', async () => {
   const p = await load('#overworld/-1500/1200/-1');
   const [today] = p.terrain();

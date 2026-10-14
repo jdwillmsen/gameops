@@ -718,9 +718,12 @@
     // is the day drawn except where the address has only just said it:
     // whoever knows the days kept then sets that day, or null if it is
     // not one of them, and either way the address says what is drawn.
+    // markers is whether the day drawn kept a dimension's markers, as its
+    // listing says, for the layer that draws them in place of today's.
     past: {
       get: () => (past ? past.day : ''),
       wanted: () => wanted,
+      markers: (id) => Boolean(past) && past.dimensions.some((o) => o && o.id === id && o.markers === true),
       set(day) {
         const next = day && typeof day.day === 'string' && DAY.test(day.day) && Array.isArray(day.dimensions) ? day : null;
         wanted = next ? next.day : '';

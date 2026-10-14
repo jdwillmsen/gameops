@@ -373,10 +373,11 @@
   // savedAt is when the snapshot that placed a named mob was taken, for one
   // chosen by its mark or from a list; wasLive is whether the card has
   // seen it in the picture since it opened. saved marks a named mob placed
-  // by the snapshot. sought is when a search said it was live, for one
-  // chosen from a search: the server has every dimension's newest picture
-  // and this page only the last frame it drew, which is older while the
-  // page is paused or paced slowly.
+  // by the snapshot, and past the day of the map's history it was placed
+  // by, for one that is not of now at all. sought is when a search said
+  // it was live, for one chosen from a search: the server has every
+  // dimension's newest picture and this page only the last frame it drew,
+  // which is older while the page is paused or paced slowly.
   let picked = null;
   let seeking = [];
   let seekTimer = null;
@@ -1503,7 +1504,10 @@
     const ago = span((Date.now() - picked.seenAt) / 1000);
     let what = '';
     let when = `Last seen ${ago} ago.`;
-    if (savedOnly()) {
+    if (savedOnly() && picked.past) {
+      what = `As it was on ${picked.past}: where it was saved that day, not where it is now.`;
+      when = '';
+    } else if (savedOnly()) {
       what = picked.state === 'saved' ? 'Not loaded right now.'
         : picked.state === 'away' ? `Not tracked: the map is on another dimension, ${labelOf(app.dimension())}.` : 'Waiting for live positions.';
       // The snapshot's clock is the server's, which the page's own may
@@ -1538,7 +1542,7 @@
     card.note.hidden = what === '';
     say(card.what, what);
     say(card.when, what === '' ? '' : when);
-    card.follow.disabled = picked.state !== 'live' && picked.state !== 'waiting' && picked.state !== 'missing';
+    card.follow.disabled = Boolean(picked.past) || (picked.state !== 'live' && picked.state !== 'waiting' && picked.state !== 'missing');
     if (card.go) card.go.disabled = !Number.isFinite(picked.x) || !Number.isFinite(picked.z);
     card.follow.setAttribute('aria-pressed', String(picked.follow));
     say(card.follow, picked.follow ? 'Following' : 'Follow');
@@ -1639,6 +1643,9 @@
     if (!player && what.saved === true) {
       known.saved = true;
       if (Number.isFinite(what.savedAt)) known.savedAt = what.savedAt;
+      // One placed by a day of the map's history, which says nothing of
+      // where it is now.
+      if (typeof what.past === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(what.past)) known.past = what.past;
     }
     // With no id there is nothing to find it by in the picture, and the
     // key is one no entity has.

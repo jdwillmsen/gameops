@@ -18,11 +18,19 @@ const test = (name, fn) => tests.push([name, fn]);
 const day = (name, more) => ({ day: name, takenAt: `${name}T00:20:00Z`, dimensions: [{ id: 'overworld', format: 'webp', tiles: 3, changed: 1 }], ...more });
 const THREE = [day('2026-10-12'), day('2026-10-13'), day('2026-10-14', { rendererChanged: true })];
 
+// Three days as a server that keeps markers lists them: one that kept the
+// overworld's, one from before any were kept, and one that kept the
+// overworld's and was drawn by another renderer.
+const marked = (name, more) => ({ ...day(name, more), dimensions: [{ id: 'overworld', format: 'webp', tiles: 3, changed: 1, markers: true }, { id: 'nether', format: 'webp', tiles: 1, changed: 0 }] });
+const MARKED = [marked('2026-10-12'), day('2026-10-13'), marked('2026-10-14', { rendererChanged: true })];
+
 // A page with the history's script and what it asks of the rest of the
 // page. answer() is what the server says to GET /api/history, and wanted
 // the day the page's address names, which the map takes for the day it is
-// told as the real one does.
-async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld' } = {}) {
+// told as the real one does. follows is whether the map and the markers'
+// script are ones that draw a day's markers, which is what the note goes
+// by; the map then answers for the day it was last told.
+async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false } = {}) {
   const p = page(new Map(), { files: [] });
   const { win, doc } = p;
   const state = { asked: [], shown: [], ticks: [], dimension, wanted };
@@ -34,9 +42,14 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
     set(to) {
       state.shown.push(to ? to.day : '');
       state.wanted = to ? to.day : '';
+      state.day = to;
       return true;
     },
   };
+  if (follows) {
+    win.mcmap.past.markers = (id) => Boolean(state.day) && state.day.dimensions.some((d) => d.id === id && d.markers === true);
+    win.mcmap.markers = { day: () => (state.day ? state.day.day : '') };
+  }
   win.fetch = async (address) => {
     state.asked.push(address);
     const given = answer();
@@ -183,6 +196,69 @@ test('a day that kept nothing of the dimension shown says so, and stops saying s
   p.state.dimension = 'overworld';
   await p.view();
   assert.match(p.part('note').textContent, /The terrain is of this day/);
+});
+
+// What the note must never do is call something of the day that is of
+// now, or the other way about. Each case is read for both halves.
+const OF_NOW = [/Players/, /loaded mobs/, /waypoints/, /structures/, /biomes/, /as they are now/];
+
+test('a day that kept its markers says the terrain and the beds, containers and named mobs are of the day', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }), follows: true });
+  await p.press('open');
+  await p.slide(0);
+  const said = p.part('note').textContent;
+  assert.match(said, /The terrain is of this day, and so are the beds, containers and named mobs/);
+  for (const still of OF_NOW) assert.match(said, still);
+  assert.doesNotMatch(said, /markers/, 'a waypoint is a marker too, and is of now');
+  assert.doesNotMatch(said, /not kept/);
+  assert.doesNotMatch(said, /renderer/);
+  await p.slide(2);
+  assert.match(p.part('note').textContent, /and so are the beds, containers and named mobs/);
+  assert.match(p.part('note').textContent, /renderer/);
+});
+
+test('a day that kept its terrain and not its markers says none are drawn, and does not call them the day\'s or today\'s', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }), follows: true });
+  await p.press('open');
+  await p.slide(1);
+  const said = p.part('note').textContent;
+  assert.match(said, /The terrain is of this day\./);
+  assert.match(said, /beds, containers and named mobs were not kept, so none are drawn/);
+  assert.doesNotMatch(said, /and so are/);
+  for (const still of OF_NOW) assert.match(said, still);
+  assert.doesNotMatch(said, /markers/);
+});
+
+test('a dimension whose markers the day did not keep says so, though the day kept another dimension\'s', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }), follows: true, dimension: 'nether' });
+  await p.press('open');
+  await p.slide(0);
+  assert.match(p.part('note').textContent, /were not kept, so none are drawn/);
+  p.state.dimension = 'overworld';
+  await p.view();
+  assert.match(p.part('note').textContent, /and so are the beds, containers and named mobs/);
+});
+
+test('a day that kept nothing of the dimension shown says neither terrain nor markers are drawn', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }), follows: true, dimension: 'end' });
+  await p.press('open');
+  await p.slide(0);
+  const said = p.part('note').textContent;
+  assert.match(said, /kept nothing of this dimension, so no terrain is drawn, and no beds, containers or named mobs/);
+  assert.doesNotMatch(said, /The terrain is of this day/);
+  for (const still of OF_NOW) assert.match(said, still);
+  assert.doesNotMatch(said, /markers/, 'none of today\'s are drawn there, so none are said to be');
+});
+
+test('on a page whose markers do not follow the day, a day that kept them is still said to have today\'s', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }) });
+  await p.press('open');
+  await p.slide(0);
+  assert.match(p.part('note').textContent, /The terrain is of this day\. Players, markers, structures and biomes are as they are now\./);
+  // The map can say what a day kept and the markers' script cannot draw it.
+  p.win.mcmap.past.markers = () => true;
+  await p.view();
+  assert.match(p.part('note').textContent, /Players, markers, structures and biomes are as they are now/);
 });
 
 test('play runs from the day shown to now and stops there', async () => {
