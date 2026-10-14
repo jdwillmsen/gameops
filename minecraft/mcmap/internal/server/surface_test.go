@@ -164,3 +164,26 @@ func TestStructures_SayTheSurfaceAtTheMiddleOfEachRecordedBoxAndNothingOfAPredic
 		t.Errorf("without a reading: %s", bare.Body)
 	}
 }
+
+// A day keeps markers by their content, so two dimensions with the same
+// markers share one file; with the surface put on them they are no longer
+// the same answer, and one's tag must not stand for the other's.
+func TestHistory_DoesNotLetOneDimensionsTagStandForAnothersOnTheSameFile(t *testing.T) {
+	s := withHistory(t)
+	hill(t, s)
+	fake := s.History.(*fakeHistory)
+	fake.days[0].Dimensions[1].Markers = true
+	fake.markers["2026-10-12/nether"] = fake.markers["2026-10-12/overworld"]
+
+	over := get(t, s, "/api/history/markers/2026-10-12?dimension=overworld")
+	if over.Code != http.StatusOK || over.Header().Get("ETag") == "" {
+		t.Fatalf("overworld: %d %q", over.Code, over.Header().Get("ETag"))
+	}
+	nether := do(s.Handler(), "GET", "/api/history/markers/2026-10-12?dimension=nether", "", nil, "If-None-Match", over.Header().Get("ETag"))
+	if nether.Code != http.StatusOK {
+		t.Fatalf("the nether asked with the overworld's tag = %d, want its own answer", nether.Code)
+	}
+	if nether.Body.String() == over.Body.String() {
+		t.Errorf("the nether was given the overworld's surfaced markers: %s", nether.Body)
+	}
+}
