@@ -102,6 +102,7 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/history": {"gateViewer", ""},
 	"public GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {"gateViewer", ""},
 	"public GET /api/history/markers/{day}":                          {"gateViewer", ""},
+	"public GET /api/history/changes/{day}":                          {"gateViewer", ""},
 	"public GET /api/search":                                         {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
 	"public GET /api/me":                                             {"gateViewer", "/api/me"},
 	"public GET /api/waypoints":                                      {"gatePlayer", "/api/waypoints"},

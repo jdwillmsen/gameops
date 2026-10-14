@@ -15,6 +15,7 @@ type HistorySource interface {
 	Days() []history.Day
 	Tile(day, dimension string, tile render.Tile) (path, format string, ok bool)
 	MarkersOn(day, dimension string) (path string, ok bool)
+	Changes(day, dimension string) (history.Changes, bool)
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, _ *http.Request) {
@@ -102,4 +103,37 @@ func (s *Server) handleHistoryMarkers(w http.ResponseWriter, r *http.Request) {
 	// and are as private as a tile.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeContent(w, r, "", stat.ModTime(), f)
+}
+
+// handleHistoryChanges says which tiles of a dimension differ between a day
+// and the day held before it, for the page to outline.
+func (s *Server) handleHistoryChanges(w http.ResponseWriter, r *http.Request) {
+	dimension := r.URL.Query().Get("dimension")
+	if !slices.Contains(render.Dimensions, dimension) {
+		http.Error(w, "unknown dimension", http.StatusBadRequest)
+		return
+	}
+	changes, ok := s.History.Changes(r.PathValue("day"), dimension)
+	if !ok {
+		// Short, as for a tile: the day may be one that is about to be kept.
+		w.Header().Set("Cache-Control", "private, max-age=60")
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	// The answer is of two days, and only the later is named in the address.
+	// Neither day's tiles ever change, but which day is the one before can:
+	// a backfill puts in days that are earlier than days already held. It
+	// can only do that where a calendar day is free between the two, so the
+	// answer is kept for good only where none is, the earlier day being the
+	// day before; nothing is ever deleted that could part them again. Any
+	// other answer is not kept at all, the first day's among them, which
+	// any earlier day would change. That a day is the newest decides
+	// nothing: a day kept after it is never the day before it.
+	if changes.Settled {
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	_ = json.NewEncoder(w).Encode(changes)
 }

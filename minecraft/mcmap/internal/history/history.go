@@ -12,6 +12,7 @@
 package history
 
 import (
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -26,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +55,13 @@ const (
 	// Decoded manifests held for tile requests: enough for a comparison of
 	// two days and a neighbour of each.
 	cachedManifests = 4
+
+	// The zoom whose tiles are compared to say where a day differs from the
+	// one before: the finest, where a tile is 256 blocks square.
+	changesZoom = 0
+	// The most tiles named as changed in one answer. A day drawn by another
+	// renderer differs everywhere, and a list of everywhere outlines nothing.
+	maxChanges = 4096
 )
 
 // Source is what a capture needs from the renderer whose tiles it keeps.
@@ -108,6 +117,26 @@ type DayDimension struct {
 	Changed int `json:"changed"`
 	// Markers is whether the day kept the dimension's markers.
 	Markers bool `json:"markers,omitempty"`
+}
+
+// Changes is where a day's terrain differs from the day held before it.
+type Changes struct {
+	Day string `json:"day"`
+	// Before is the day compared with: the newest held that is earlier, or
+	// empty for the first day held, which has nothing to differ from.
+	Before string `json:"before"`
+	Zoom   int    `json:"zoom"`
+	// Tiles is the address, x then y, of each tile at that zoom whose bytes
+	// are not the earlier day's: drawn differently, added, or gone since.
+	Tiles [][2]int `json:"tiles"`
+	// Of is how many addresses the two days hold between them at that zoom.
+	Of int `json:"of"`
+	// More is how many changed tiles were left out at the limit.
+	More int `json:"more"`
+	// Settled is true where no day can come between the two: the earlier
+	// one is the calendar day before, so the answer stands for as long as
+	// both are held.
+	Settled bool `json:"-"`
 }
 
 // Result is what a capture did.
@@ -385,17 +414,95 @@ func (s *Store) MarkersOn(day, dimension string) (path string, ok bool) {
 	return s.blobPath(hash), true
 }
 
-// before is the newest day held that is earlier than day, if there is one.
-func (s *Store) before(day string) (*manifest, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// earlier is the newest day held that is before day, or empty if there is
+// none. s.mu is held by the caller.
+func (s *Store) earlier(day string) string {
 	newest := ""
 	for d := range s.days {
 		if d < day && d > newest {
 			newest = d
 		}
 	}
-	return s.manifestOf(newest)
+	return newest
+}
+
+// before is the newest day held that is earlier than day, if there is one.
+func (s *Store) before(day string) (*manifest, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.manifestOf(s.earlier(day))
+}
+
+// finest is a tile's x and y, for an address at the zoom that is compared.
+func finest(key string) (at [2]int, ok bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) != 3 || parts[0] != strconv.Itoa(changesZoom) {
+		return at, false
+	}
+	x, errX := strconv.Atoi(parts[1])
+	y, errY := strconv.Atoi(parts[2])
+	return [2]int{x, y}, errX == nil && errY == nil
+}
+
+// Changes is where a dimension's terrain on a day differs from the day held
+// before it, worked out from the two manifests: no tile is read. The day
+// before is whichever is held now, and not the one there was when the day
+// was kept, so a day put in between them later is what the answer is then
+// against. A day that did not hold the dimension has no answer; an earlier
+// day that did not is one every tile differs from, as a capture counts it.
+func (s *Store) Changes(day, dimension string) (Changes, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.manifestOf(day)
+	if !ok {
+		return Changes{}, false
+	}
+	dim, ok := m.Dimensions[dimension]
+	if !ok {
+		return Changes{}, false
+	}
+	out := Changes{Day: day, Zoom: changesZoom, Tiles: [][2]int{}}
+	out.Before = s.earlier(day)
+	if out.Before == "" {
+		return out, true
+	}
+	previous, ok := s.manifestOf(out.Before)
+	if !ok {
+		return Changes{}, false
+	}
+	if at, err := time.Parse(dayLayout, day); err == nil {
+		out.Settled = at.AddDate(0, 0, -1).Format(dayLayout) == out.Before
+	}
+	was := previous.Dimensions[dimension].Tiles
+	for key, hash := range dim.Tiles {
+		at, ok := finest(key)
+		if !ok {
+			continue
+		}
+		out.Of++
+		if was[key] != hash {
+			out.Tiles = append(out.Tiles, at)
+		}
+	}
+	for key := range was {
+		if _, still := dim.Tiles[key]; still {
+			continue
+		}
+		if at, ok := finest(key); ok {
+			out.Of++
+			out.Tiles = append(out.Tiles, at)
+		}
+	}
+	// In one order whatever order the maps gave them in, so the same days
+	// give the same bytes and the same tiles are left out at the limit.
+	slices.SortFunc(out.Tiles, func(a, b [2]int) int {
+		return cmp.Or(cmp.Compare(a[1], b[1]), cmp.Compare(a[0], b[0]))
+	})
+	if len(out.Tiles) > maxChanges {
+		out.More = len(out.Tiles) - maxChanges
+		out.Tiles = out.Tiles[:maxChanges]
+	}
+	return out, true
 }
 
 // Capture keeps the map as it stands as the day at falls on, in UTC. A day

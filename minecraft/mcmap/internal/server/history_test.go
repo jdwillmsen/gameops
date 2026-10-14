@@ -32,6 +32,11 @@ func (f *fakeHistory) MarkersOn(day, dimension string) (string, bool) {
 	return p, ok
 }
 
+// What changed is asked of days really kept, in history_changes_test.go.
+func (f *fakeHistory) Changes(string, string) (history.Changes, bool) {
+	return history.Changes{}, false
+}
+
 const markersThen = `{"at":"2026-10-12T00:20:00Z","beds":[{"x":1,"y":64,"z":-2}],"containers":[],"mobs":[],"more":{"beds":0,"containers":0,"mobs":0}}`
 
 func withHistory(t *testing.T) *Server {
