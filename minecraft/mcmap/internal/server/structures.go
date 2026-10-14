@@ -11,6 +11,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
@@ -36,7 +37,7 @@ type structuresJSON struct {
 	At       *time.Time `json:"at,omitempty"`
 	// Recorded is never null, so the page need not tell an empty world
 	// from a missing field.
-	Recorded      []structures.Structure  `json:"recorded"`
+	Recorded      []recordedJSON          `json:"recorded"`
 	RecordedMore  int                     `json:"recordedMore"`
 	Predicted     []structures.Prediction `json:"predicted"`
 	PredictedMore int                     `json:"predictedMore"`
@@ -57,12 +58,24 @@ type structuresJSON struct {
 	Spawn *spawnJSON `json:"spawn,omitempty"`
 }
 
+// recordedJSON is a recorded structure with the surface at the middle of
+// its box, which is what the page tells how high it stands by. A box whose
+// middle the world has not generated, and every box in the nether, has
+// none; the box itself still says where its blocks are.
+type recordedJSON struct {
+	structures.Structure
+	Surface *int32 `json:"s,omitempty"`
+}
+
 // structureCache is the answers about one survey, written out once each.
 // The overworld's is a quarter of a megabyte and is asked for by every
 // page every five minutes; between surveys it does not change.
 type structureCache struct {
-	at   time.Time
-	held map[structureAsk]structureAnswer
+	at time.Time
+	// reading is the surface heights the answers carry, which are another
+	// reading of the world than the survey is.
+	reading string
+	held    map[structureAsk]structureAnswer
 }
 
 type structureAsk struct {
@@ -105,14 +118,15 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 	}
 	ask := structureAsk{dimension, r.URL.Query().Get("kinds") == "all"}
 	survey, surveyed := s.Structures.Last()
+	surface, reading := s.surfaceReading()
 	s.mu.Lock()
-	if !surveyed || !s.listed.at.Equal(survey.At) || s.listed.held == nil {
-		s.listed = structureCache{at: survey.At, held: map[structureAsk]structureAnswer{}}
+	if !surveyed || !s.listed.at.Equal(survey.At) || s.listed.reading != reading || s.listed.held == nil {
+		s.listed = structureCache{at: survey.At, reading: reading, held: map[structureAsk]structureAnswer{}}
 	}
 	answer, written := s.listed.held[ask]
 	s.mu.Unlock()
 	if !written {
-		body, err := json.Marshal(s.structuresOf(survey, surveyed, ask))
+		body, err := json.Marshal(s.structuresOf(survey, surveyed, ask, surface))
 		if err != nil {
 			http.Error(w, "the structures could not be written out", http.StatusInternalServerError)
 			return
@@ -123,7 +137,7 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 		// be after the first survey, which is another answer.
 		if surveyed {
 			s.mu.Lock()
-			if s.listed.at.Equal(survey.At) {
+			if s.listed.at.Equal(survey.At) && s.listed.reading == reading {
 				s.listed.held[ask] = answer
 			}
 			s.mu.Unlock()
@@ -143,10 +157,10 @@ func (s *Server) handleStructures(w http.ResponseWriter, r *http.Request) {
 }
 
 // structuresOf is the answer about one dimension of a survey.
-func (s *Server) structuresOf(survey structures.Survey, surveyed bool, ask structureAsk) structuresJSON {
+func (s *Server) structuresOf(survey structures.Survey, surveyed bool, ask structureAsk, surface *heights.Map) structuresJSON {
 	dimension, every := ask.dimension, ask.every
 	out := structuresJSON{
-		Recorded:   []structures.Structure{},
+		Recorded:   []recordedJSON{},
 		Predicted:  []structures.Prediction{},
 		Prediction: structures.SeedUnknown,
 		Kinds:      map[structures.Kind]structures.KindCheck{},
@@ -168,7 +182,17 @@ func (s *Server) structuresOf(survey structures.Survey, surveyed bool, ask struc
 		predicted := slices.DeleteFunc(slices.Clone(layer.Predicted), func(p structures.Prediction) bool { return !sent(p.Kind) })
 		// The survey keeps to this bound already. It is applied again
 		// here because this is where a list becomes a response.
-		out.Recorded, out.RecordedMore = clamp(recorded, layer.RecordedMore)
+		var recordedMore int
+		recorded, recordedMore = clamp(recorded, layer.RecordedMore)
+		out.RecordedMore = recordedMore
+		at := surfaceOf(surface, dimension)
+		for _, st := range recorded {
+			one := recordedJSON{Structure: st}
+			if y, ok := at(st.MinX+(st.MaxX-st.MinX)/2, st.MinZ+(st.MaxZ-st.MinZ)/2); ok {
+				one.Surface = &y
+			}
+			out.Recorded = append(out.Recorded, one)
+		}
 		out.Predicted, out.PredictedMore = clamp(predicted, layer.PredictedMore)
 		for _, p := range structures.Predictors {
 			if check, ok := survey.Check.Kinds[structures.Rule{Kind: p.Kind(), Dimension: dimension}]; ok && p.Dimension() == dimension && sent(p.Kind()) {

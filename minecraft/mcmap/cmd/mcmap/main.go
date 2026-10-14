@@ -214,7 +214,7 @@ func run(logger *slog.Logger) error {
 		defer wg.Done()
 		w.Run(ctx, cfg.Refresh)
 	}()
-	layer := startLive(ctx, cfg, logger, &wg)
+	layer := startLive(ctx, cfg, logger, &wg, biomeStore)
 
 	app := &server.Server{
 		Renderer:    renderer,
@@ -323,11 +323,14 @@ func run(logger *slog.Logger) error {
 // startLive begins reading player and mob positions from the bridge. With
 // the layer turned off it starts nothing and returns nil, which is also what
 // keeps the stream's route from being served.
-func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *sync.WaitGroup) *live.Layer {
+func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *sync.WaitGroup, surfaces *biomes.Store) *live.Layer {
 	if !cfg.Live {
 		return nil
 	}
 	layer := live.New(cfg.LiveTTL, cfg.LiveMaxEntities, logger)
+	if surfaces != nil {
+		layer.Surface = surfaces.Surface
+	}
 	source := &live.Source{
 		Poller: live.NewBridge(cfg.BridgeURL, cfg.BridgeToken),
 		Layer:  layer,

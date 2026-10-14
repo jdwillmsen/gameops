@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 )
 
@@ -87,6 +89,13 @@ func (s *Server) handleHistoryMarkers(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// With surfaces to put on them a day's markers are as the world's
+	// surface is now, which is not fixed: the tag is the file's, which is
+	// named by its content, and the reading's.
+	if s.Biomes != nil {
+		s.serveMarkersWithSurface(w, r, path, dimension)
+		return
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		http.NotFound(w, r)
@@ -103,6 +112,34 @@ func (s *Server) handleHistoryMarkers(w http.ResponseWriter, r *http.Request) {
 	// and are as private as a tile.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeContent(w, r, "", stat.ModTime(), f)
+}
+
+func (s *Server) serveMarkersWithSurface(w http.ResponseWriter, r *http.Request, path, dimension string) {
+	surface, reading := s.surfaceReading()
+	etag := `"` + filepath.Base(path) + "-" + reading + `"`
+	h := w.Header()
+	h.Set("Cache-Control", "private, no-cache")
+	h.Set("ETag", etag)
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	body, err := s.surfaced.get("day|"+etag+"|"+dimension, func() ([]byte, error) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		if d, named := dimensionNamed(dimension); surface != nil && named {
+			return markers.WithSurface(raw, surfaceOf(surface, d))
+		}
+		return raw, nil
+	})
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 // handleHistoryChanges says which tiles of a dimension differ between a day

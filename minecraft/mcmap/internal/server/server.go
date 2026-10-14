@@ -108,6 +108,9 @@ type Server struct {
 	// listed is the answers about a survey's structures as they were last
 	// written out, which is the same bytes until the next survey.
 	listed structureCache
+	// surfaced is answers written out again with the surface under each
+	// marker.
+	surfaced surfaceCache
 	// players is the UniqueID the world knows each session's player by,
 	// by XUID, and playersWorld the world those ids are of. clock, for
 	// tests, is what the memory's age is told by.

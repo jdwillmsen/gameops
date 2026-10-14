@@ -16,6 +16,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 )
 
 // Run against a copy of a real world to check the reading against places
@@ -168,6 +169,7 @@ func checkRealHeights(t *testing.T, e *Extractor, w *World) {
 	runtime.ReadMemStats(&held)
 	t.Logf("heights: %d MiB estimated, %d KiB on the volume, loaded in %s holding %d KiB more heap", h.Bytes()>>20, saved.Size()>>10, took.Round(time.Millisecond), (held.HeapInuse-before.HeapInuse)>>10)
 	runtime.KeepAlive(back)
+	checkRealSurfaceCost(t, e.Store, w)
 
 	for _, d := range chunks.Dimensions {
 		if h.Chunks(d) != len(w.layers[d].cells) || back.Chunks(d) != h.Chunks(d) {
@@ -259,4 +261,52 @@ func realPlaces(t *testing.T) []place {
 		places = append(places, place{strings.TrimSpace(f[0]), chunks.Dimensions[d], int32(x), int32(z), strings.TrimSpace(f[4])})
 	}
 	return places
+}
+
+// checkRealSurfaceCost measures what telling the surface under a frame of
+// live entities costs: a thousand lookups at columns spread over the
+// world, which is what each sample of a thousand mobs asks, once.
+func checkRealSurfaceCost(t *testing.T, store *Store, w *World) {
+	t.Helper()
+	l := w.layers[chunks.Overworld]
+	type column struct{ x, z int32 }
+	var at []column
+	for key := range l.cells {
+		if len(at) == 1000 {
+			break
+		}
+		at = append(at, column{int32(key>>32)*16 + 7, int32(key)*16 + 3})
+	}
+	const rounds = 200
+	known := 0
+	started := time.Now()
+	for range rounds {
+		known = 0
+		for _, c := range at {
+			if _, ok := store.Surface("overworld", c.x, c.z); ok {
+				known++
+			}
+		}
+	}
+	each := time.Since(started) / time.Duration(rounds*len(at))
+	t.Logf("surface under %d columns: %d known, %s a lookup, %s for a frame of %d", len(at), known, each, (each * time.Duration(len(at))).Round(time.Microsecond), len(at))
+
+	// And the markers' answer, written out again with a surface on each:
+	// the most a dimension's answer may hold, over columns of the world.
+	var layer markers.Layer
+	for i := 0; i < 3000 && i < len(at); i++ {
+		c := at[i%len(at)]
+		layer.Beds = append(layer.Beds, markers.Marker{X: c.x, Y: 64, Z: c.z, Colour: "red"})
+		layer.Containers = append(layer.Containers, markers.Marker{X: c.x + 1, Y: 40, Z: c.z, Kind: "chest"})
+		layer.Mobs = append(layer.Mobs, markers.Marker{X: c.x + 2, Y: 70, Z: c.z, Kind: "cat", Name: "A named cat", ID: "1234567890"})
+	}
+	marked := markers.NewStore()
+	marked.Set(time.Now(), markers.World{chunks.Overworld: &layer})
+	body, _, _ := marked.Dimension("overworld")
+	var out []byte
+	started = time.Now()
+	for range 20 {
+		out, _ = markers.WithSurface(body, func(x, z int32) (int32, bool) { return w.Heights().Surface(chunks.Overworld, x, z) })
+	}
+	t.Logf("markers answer of %d markers: %d bytes, %d with surfaces; %s to write out again", 3*len(layer.Beds), len(body), len(out), (time.Since(started) / 20).Round(time.Microsecond))
 }

@@ -230,3 +230,29 @@ func TestHeightsAreCountedByDimension(t *testing.T) {
 		t.Errorf("chunks %v, bytes %v", got, testutil.ToFloat64(metricHeightBytes))
 	}
 }
+
+func TestStoreSaysTheSurfaceByDimensionNameAndNotTheNethers(t *testing.T) {
+	s := &Store{}
+	if _, ok := s.Surface("overworld", 0, 0); ok {
+		t.Error("a surface before any reading")
+	}
+	s.Set(scanOf(t, hills(), nil))
+	for _, tc := range []struct {
+		dimension string
+		x, z      int32
+		y         int32
+		ok        bool
+	}{
+		{"overworld", 3, 3, 62, true},
+		{"overworld", 3, -4, -64, true},
+		{"overworld", 300, 300, 0, false},
+		{"nether", 3, 3, 0, false},
+		{"end", 3, 3, 0, false},
+		{"moon", 3, 3, 0, false},
+	} {
+		y, ok := s.Surface(tc.dimension, tc.x, tc.z)
+		if ok != tc.ok || y != tc.y {
+			t.Errorf("%s %d, %d: %d, %v, want %d, %v", tc.dimension, tc.x, tc.z, y, ok, tc.y, tc.ok)
+		}
+	}
+}
