@@ -6,6 +6,9 @@
 // the renderer that drew it. And a day of tiles costs only the tiles that
 // changed, where a day of the world costs nearly a whole world, since
 // compaction rewrites a third or more of its bytes every quarter of an hour.
+//
+// With a day's tiles go the markers the map served over them, where there
+// were any: a few hundred kilobytes that say what stood on that terrain.
 package history
 
 import (
@@ -19,6 +22,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,7 +35,8 @@ import (
 
 const (
 	// blobsDir holds each distinct tile once, named by the SHA-256 of its
-	// bytes, so a tile that did not change between two days is one file.
+	// bytes, so a tile that did not change between two days is one file. A
+	// dimension's markers are held the same way, beside the tiles.
 	blobsDir = "blobs"
 	// daysDir holds one manifest per day. A day exists once its manifest
 	// does, and a manifest is written after every blob it names.
@@ -78,6 +83,10 @@ type dimension struct {
 	Changed int `json:"changed"`
 	// Tiles is the blob at each address, "zoom/x/y".
 	Tiles map[string]string `json:"tiles"`
+	// Markers is the blob holding the dimension's markers as the map
+	// served them that day, or empty where none were kept. A reader from
+	// before there were any passes over it, so the version is the same.
+	Markers string `json:"markers,omitempty"`
 }
 
 // Day is one captured day, without its tiles.
@@ -97,6 +106,8 @@ type DayDimension struct {
 	render.Info
 	Tiles   int `json:"tiles"`
 	Changed int `json:"changed"`
+	// Markers is whether the day kept the dimension's markers.
+	Markers bool `json:"markers,omitempty"`
 }
 
 // Result is what a capture did.
@@ -106,6 +117,8 @@ type Result struct {
 	Skipped bool
 	Tiles   int
 	Changed int
+	// Markers is how many dimensions' markers were kept with the day.
+	Markers int
 	// NewBytes is what the day added to the store.
 	NewBytes int64
 }
@@ -116,6 +129,9 @@ type Store struct {
 	MapsDir  string
 	Source   Source
 	Renderer Stamp
+	// Markers, if set, is asked at each capture for a dimension's markers
+	// as the map serves them, and says false while it has none to keep.
+	Markers func(dimension string) (body []byte, ok bool)
 
 	dir    string
 	logger *slog.Logger
@@ -199,7 +215,7 @@ func summary(m *manifest) Day {
 	d := Day{Day: m.Day, TakenAt: m.TakenAt, Renderer: m.Renderer}
 	for _, id := range render.Dimensions {
 		if dim, ok := m.Dimensions[id]; ok {
-			d.Dimensions = append(d.Dimensions, DayDimension{ID: id, Info: dim.Info, Tiles: len(dim.Tiles), Changed: dim.Changed})
+			d.Dimensions = append(d.Dimensions, DayDimension{ID: id, Info: dim.Info, Tiles: len(dim.Tiles), Changed: dim.Changed, Markers: dim.Markers != ""})
 		}
 	}
 	return d
@@ -280,7 +296,8 @@ func (s *Store) Days() []Day {
 	return days
 }
 
-// Bytes is the size of every tile held, each counted once.
+// Bytes is the size of every tile and every set of markers held, each
+// counted once.
 func (s *Store) Bytes() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -351,6 +368,23 @@ func (s *Store) Tile(day, dimension string, tile render.Tile) (path, format stri
 	return s.blobPath(hash), dim.Info.Format, true
 }
 
+// MarkersOn is the file holding a dimension's markers as they were on a
+// day, where the day kept them. As for a tile, the day is looked up among
+// the days held and never made into a path.
+func (s *Store) MarkersOn(day, dimension string) (path string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m, ok := s.manifestOf(day)
+	if !ok {
+		return "", false
+	}
+	hash := m.Dimensions[dimension].Markers
+	if !isHash(hash) {
+		return "", false
+	}
+	return s.blobPath(hash), true
+}
+
 // before is the newest day held that is earlier than day, if there is one.
 func (s *Store) before(day string) (*manifest, bool) {
 	s.mu.Lock()
@@ -371,6 +405,10 @@ func (s *Store) before(day string) (*manifest, bool) {
 // not yet held copied in and flushed, and then the manifest; a capture that
 // stops anywhere before the manifest has added no day, and the tiles it
 // did copy are found already held by the next one.
+//
+// The markers are kept with the day where there are any, and a day is
+// never lost over them: with none to keep, or none that could be written,
+// it is kept without.
 func (s *Store) Capture(ctx context.Context, at time.Time) (Result, error) {
 	s.capturing.Lock()
 	defer s.capturing.Unlock()
@@ -434,6 +472,11 @@ func (s *Store) capture(ctx context.Context, day string, at time.Time) (Result, 
 		}
 		result.Tiles += len(dim.Tiles)
 		result.Changed += dim.Changed
+		if hash, added, ok := s.keepMarkers(day, id); ok {
+			dim.Markers = hash
+			result.Markers++
+			result.NewBytes += added
+		}
 		m.Dimensions[id] = dim
 	}
 	if err := s.syncBlobs(m); err != nil {
@@ -458,6 +501,9 @@ func (s *Store) syncBlobs(m manifest) error {
 		for _, hash := range dim.Tiles {
 			shards[hash[:2]] = true
 		}
+		if dim.Markers != "" {
+			shards[dim.Markers[:2]] = true
+		}
 	}
 	for shard := range shards {
 		if err := syncDir(filepath.Join(blobs, shard)); err != nil {
@@ -465,6 +511,74 @@ func (s *Store) syncBlobs(m manifest) error {
 		}
 	}
 	return syncDir(blobs)
+}
+
+// keepMarkers holds a dimension's markers as they stand, if there are any.
+func (s *Store) keepMarkers(day, dimension string) (hash string, added int64, ok bool) {
+	if s.Markers == nil {
+		return "", 0, false
+	}
+	body, ok := s.Markers(dimension)
+	if !ok {
+		return "", 0, false
+	}
+	hash, added, err := s.hold(body)
+	if err != nil {
+		s.logger.Error("a day of map history is kept without its markers", "day", day, "dimension", dimension, "error", err)
+		return "", 0, false
+	}
+	return hash, added, true
+}
+
+// AddMarkers gives a day already held the markers it was kept without:
+// each dimension in bodies that the day holds and has no markers for. The
+// blobs are written and flushed first and the manifest then replaced as a
+// new one is written, so a stop anywhere leaves the day as it was or as it
+// is to be. Nothing else of the day changes, and a day that lacks none of
+// them is not written again.
+func (s *Store) AddMarkers(day string, bodies map[string][]byte) (added int, err error) {
+	s.capturing.Lock()
+	defer s.capturing.Unlock()
+
+	s.mu.Lock()
+	held, ok := s.manifestOf(day)
+	s.mu.Unlock()
+	if !ok {
+		return 0, fmt.Errorf("%s is not a day held", day)
+	}
+	defer s.publish()
+	// A copy: the one held is being read by whoever is asking for tiles.
+	m := *held
+	m.Dimensions = maps.Clone(held.Dimensions)
+	for id, dim := range held.Dimensions {
+		body, given := bodies[id]
+		if !given || dim.Markers != "" {
+			continue
+		}
+		hash, _, err := s.hold(body)
+		if err != nil {
+			return 0, fmt.Errorf("keeping the markers of %s: %w", day, err)
+		}
+		dim.Markers = hash
+		m.Dimensions[id] = dim
+		added++
+	}
+	if added == 0 {
+		return 0, nil
+	}
+	if err := s.syncBlobs(m); err != nil {
+		return 0, fmt.Errorf("keeping the markers of %s: %w", day, err)
+	}
+	if err := writeManifest(filepath.Join(s.dir, daysDir), m); err != nil {
+		return 0, fmt.Errorf("keeping the markers of %s: %w", day, err)
+	}
+	s.mu.Lock()
+	s.days[day] = summary(&m)
+	if _, cached := s.cache[day]; cached {
+		s.cache[day] = &m
+	}
+	s.mu.Unlock()
+	return added, nil
 }
 
 // keep makes sure the store holds the tile at path, and returns the name it
@@ -482,6 +596,12 @@ func (s *Store) keep(path string) (hash string, added int64, err error) {
 	if len(data) > maxTileBytes {
 		return "", 0, fmt.Errorf("%s is over %d bytes, which no tile is", filepath.Base(path), maxTileBytes)
 	}
+	return s.hold(data)
+}
+
+// hold makes sure the store holds data, and returns the name it is held
+// under and how many bytes that added.
+func (s *Store) hold(data []byte) (hash string, added int64, err error) {
 	sum := sha256.Sum256(data)
 	hash = hex.EncodeToString(sum[:])
 	blob := s.blobPath(hash)

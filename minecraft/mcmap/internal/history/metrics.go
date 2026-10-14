@@ -36,6 +36,6 @@ var (
 	})
 	metricBytes = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_history_bytes",
-		Help: "Bytes of tiles held for every day together, each distinct tile counted once.",
+		Help: "Bytes of tiles and markers held for every day together, each distinct one counted once.",
 	})
 )

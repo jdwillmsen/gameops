@@ -37,6 +37,9 @@ type served struct {
 type Store struct {
 	mu   sync.RWMutex
 	docs map[string]served
+	// scanned is whether docs are of a scan, and not the empty answers a
+	// store starts with.
+	scanned bool
 	// mobKinds is the type of every named mob served, each once.
 	mobKinds []string
 }
@@ -67,7 +70,7 @@ func (s *Store) Set(at time.Time, w World) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.docs, s.mobKinds = docs, slices.Sorted(maps.Keys(kinds))
+	s.docs, s.mobKinds, s.scanned = docs, slices.Sorted(maps.Keys(kinds)), true
 }
 
 // MobKinds is the type of every named mob in the markers, each once, so
@@ -85,6 +88,16 @@ func (s *Store) Dimension(name string) (body []byte, etag string, ok bool) {
 	defer s.mu.RUnlock()
 	d, ok := s.docs[name]
 	return d.body, d.etag, ok
+}
+
+// Scanned is the named dimension's markers once a scan has read them, for
+// whoever keeps them for later. Before that the answer served is an empty
+// one, which kept would say nothing was there where nothing had looked.
+func (s *Store) Scanned(name string) (body []byte, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	d, ok := s.docs[name]
+	return d.body, ok && s.scanned
 }
 
 func encode(doc document) served {
