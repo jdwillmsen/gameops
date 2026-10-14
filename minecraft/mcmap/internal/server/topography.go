@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/topo"
@@ -26,8 +25,7 @@ type topographyJSON struct {
 	// heightmap of the Nether is the bedrock roof over all of it.
 	Offered bool `json:"offered"`
 	// Ready is false until the heights have been read once.
-	Ready bool       `json:"ready"`
-	At    *time.Time `json:"at,omitempty"`
+	Ready bool `json:"ready"`
 	// Version names the reading, as the biomes' does.
 	Version string `json:"version,omitempty"`
 	Tiles   struct {
@@ -63,8 +61,6 @@ func (s *Server) handleTopography(w http.ResponseWriter, r *http.Request) {
 		}
 		if h := s.Biomes.World().Heights(); h != nil {
 			out.Ready, out.Version = true, topographyVersion(h)
-			at := h.SnapshotAt
-			out.At = &at
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
