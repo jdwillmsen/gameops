@@ -761,9 +761,14 @@
       // that, the place the viewer's default view was saved with.
       const kept = settings ? settings.place() : null;
       const want = parseHash() || (kept && { id: kept.d, x: kept.x, z: kept.z, zoom: kept.zoom });
-      // The cut a default view was saved with comes with its place, though
-      // it is not the viewer's own choice and so is not kept as one.
-      if (!parseHash() && kept && kept.d === 'nether') netherCut = kept.level || '';
+      // The cut a default view was saved with comes with its place, and is
+      // kept as the viewer's choice as one from the picker is: the cut drawn
+      // and the cut kept are then never two, so whatever puts the record
+      // back puts back what was drawn.
+      if (!parseHash() && kept && kept.d === 'nether') {
+        netherCut = kept.level || '';
+        settings.set('levels', { nether: netherCut || null });
+      }
       const first = info.dimensions.find((d) => d.rendered);
       if (want && dimension(want.id) && dimension(want.id).rendered) show(want.id, want);
       else if (first) show(first.id);
