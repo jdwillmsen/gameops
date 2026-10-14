@@ -90,7 +90,8 @@ which is a guess of 5 to 15 MB a day and 2 to 5 GB a year until measured.
 
 - **A comparison of two days**, and a link to a day: the page picks a day
   and steps through them, no more.
-- **Markers, structures and biomes as they were.** A day keeps terrain only.
+- **Structures and biomes as they were.** A day keeps its terrain and,
+  since, the markers served with it, as the README's History section says.
 - **Days before this was switched on.** The fourteen nightly archives could
   each be rendered once to seed two weeks of history.
 - **Thinning**, once there is a year of numbers to decide it by.
