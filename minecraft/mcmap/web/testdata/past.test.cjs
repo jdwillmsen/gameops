@@ -31,7 +31,8 @@ function leaflet() {
     getEast: () => east,
   });
   class Heard {
-    on(type, fn) { this.heard = [...(this.heard || []), [type, fn, false]]; return this; }
+    // Several types at once, parted by spaces, as Leaflet takes them.
+    on(types, fn) { this.heard = [...(this.heard || []), ...types.split(' ').map((type) => [type, fn, false])]; return this; }
     once(type, fn) { this.heard = [...(this.heard || []), [type, fn, true]]; return this; }
     fire(type) {
       const mine = (this.heard || []).filter((h) => h[0] === type);
@@ -55,6 +56,9 @@ function leaflet() {
     getZoom() { return this.zoom; }
     getContainer() { return {}; }
     getSize() { return { x: 1024, y: 768 }; }
+    // A pane is placed by how far the map has been dragged, which is the
+    // test's to say.
+    containerPointToLayerPoint(p) { return { x: p[0] - (this.dragged || 0), y: p[1] }; }
     createPane(name) { this.panes = { ...this.panes, [name]: { style: {} } }; return this.panes[name]; }
     getPane(name) { return this.panes[name]; }
     held() {
@@ -420,6 +424,226 @@ test('an address that changes says which day it now names, once, and only when t
   assert.deepEqual(p.state.heard, ['2026-09-01']);
   await p.turn('#overworld/500/600/-2');
   assert.deepEqual(p.state.heard, ['2026-09-01', '']);
+});
+
+// Where the pane of the terrain on the right is cut, as the four corners
+// the map gave it.
+const cutAt = (p) => (/^polygon\((-?\d+)px /.exec(p.map.panes.beside.style.clipPath || '') || [])[1];
+const sides = (p) => p.terrain().map((l) => `${l.options.pane}:${l.options.day || 'now'}`);
+
+test('a day is compared with now by a second terrain in a pane of its own, cut at the divider, and the view stays', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  assert.equal(p.app.past.compare.on(), false);
+  p.app.past.set(THEN);
+  p.terrain().at(-1).arrive();
+  await faded();
+  assert.deepEqual(sides(p), ['tilePane:2026-09-01']);
+  assert.equal(p.app.past.compare.start(null), true);
+  assert.deepEqual(sides(p), ['tilePane:2026-09-01', 'beside:now']);
+  assert.equal(p.app.past.compare.on(), true);
+  assert.equal(p.app.past.compare.get(), '');
+  assert.equal(p.terrain().at(-1).getTileUrl({ z: -5, x: 0, y: 0 }), 'tiles/overworld/-5/0/0.webp');
+  assert.deepEqual(blocks(p.terrain().at(-1).options.bounds), [-2048, -2048, 2048, 2048], 'the right is today, over today\'s extent');
+  assert.equal(cutAt(p), '512', 'the right is seen from the middle of the map');
+  assert.deepEqual(p.map.getCenter(), { lat: 200, lng: 100 });
+  assert.equal(p.map.getZoom(), -1);
+  assert.equal(p.app.past.get(), '2026-09-01', 'the day the markers follow is the left one');
+});
+
+test('now has nothing to be compared with, and going back to now ends a comparison', async () => {
+  const p = await load('#overworld/100/200/-1');
+  assert.equal(p.app.past.compare.start(null), false);
+  assert.equal(p.app.past.compare.start(THEN), false);
+  assert.equal(p.terrain().length, 1);
+  p.app.past.set(THEN);
+  p.app.past.compare.start(LATER);
+  assert.deepEqual(sides(p).slice(-2), ['tilePane:2026-09-01', 'beside:2026-09-02']);
+  assert.equal(p.app.past.compare.get(), '2026-09-02');
+  assert.equal(p.terrain().at(-1).getTileUrl({ z: -2, x: 0, y: 0 }), 'api/history/tiles/2026-09-02/overworld/-2/0/0.png');
+  p.app.past.set(null);
+  assert.equal(p.app.past.compare.on(), false);
+  assert.equal(p.terrain().some((l) => l.options.pane === 'beside'), false);
+  assert.equal(p.map.panes.beside.style.clipPath, '');
+  assert.equal(p.address(), '#overworld/100/200/-1');
+});
+
+test('the divider is moved, held to the map, and the cut follows it and the map as it is dragged', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.app.past.set(THEN);
+  p.app.past.compare.start(null);
+  assert.equal(p.app.past.compare.cut(), 0.5);
+  assert.equal(p.app.past.compare.cut(0.25), 0.25);
+  assert.equal(cutAt(p), '256');
+  assert.equal(p.app.past.compare.cut(7), 1);
+  assert.equal(p.app.past.compare.cut(-3), 0);
+  assert.equal(p.app.past.compare.cut('x'), 0, 'what is not a number moves nothing');
+  p.app.past.compare.cut(0.5);
+  p.map.dragged = 300;
+  p.map.fire('move');
+  assert.equal(cutAt(p), '212', 'the pane went with the map, and the cut stays under the divider');
+});
+
+test('the day on the right is changed as a day is: what was there stays under it until its tiles have come', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(LATER);
+  p.terrain().at(-1).arrive();
+  await faded();
+  p.app.past.compare.start(null);
+  const now = p.terrain().at(-1);
+  now.arrive();
+  p.app.past.compare.start(THEN);
+  const then = p.terrain().at(-1);
+  assert.equal(then.options.pane, 'beside');
+  assert.equal(p.map.hasLayer(now), true);
+  then.arrive();
+  await faded();
+  assert.deepEqual(sides(p), ['tilePane:2026-09-02', 'beside:2026-09-01']);
+  const drawn = p.terrain().length;
+  p.app.past.compare.start(THEN);
+  assert.equal(p.terrain().length, drawn, 'the day already on the right is not drawn again');
+});
+
+test('stepping the day on the left leaves the right as it is, and each side turns over by itself', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(THEN);
+  const then = p.terrain().at(-1);
+  then.arrive();
+  await faded();
+  p.app.past.compare.start(null);
+  const right = p.terrain().at(-1);
+  right.arrive();
+  p.app.past.set(LATER);
+  assert.equal(p.map.hasLayer(right), true);
+  assert.equal(p.terrain().filter((l) => l.options.pane === 'beside').length, 1);
+  assert.equal(p.map.hasLayer(then), true, 'the day stepped from stays under the day stepped to');
+  p.terrain().find((l) => l.options.day === '2026-09-02').arrive();
+  await faded();
+  assert.deepEqual(sides(p).sort(), ['beside:now', 'tilePane:2026-09-02']);
+});
+
+test('another dimension shown while two are compared draws both sides of it alone', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(THEN);
+  p.app.past.compare.start(null);
+  assert.equal(p.app.go('nether', 10, 20), true);
+  assert.deepEqual(p.terrain().map((l) => `${l.options.pane}:${l.options.dimension}`), ['tilePane:nether', 'beside:nether']);
+  assert.equal(p.terrain()[0].isLoading(), false, 'the day did not hold the nether, so the left asks for none of it');
+  assert.equal(p.terrain()[1].isLoading(), true);
+});
+
+test('leaving a comparison takes the second terrain away and leaves the day as it was drawn', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(THEN);
+  const left = p.terrain().at(-1);
+  left.arrive();
+  await faded();
+  p.app.past.compare.start(LATER);
+  p.app.past.compare.start(null);
+  p.app.past.compare.stop();
+  assert.deepEqual(p.terrain(), [left]);
+  assert.equal(p.app.past.compare.on(), false);
+  assert.equal(p.app.past.get(), '2026-09-01');
+  assert.equal(p.map.panes.beside.style.clipPath, '');
+  await faded();
+  assert.deepEqual(p.terrain(), [left], 'nothing of the right comes back when its wait ends');
+});
+
+test('a new render while a day is compared with now draws the right again and leaves the day', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.terrain()[0].arrive();
+  p.app.past.set(THEN);
+  const left = p.terrain().at(-1);
+  left.arrive();
+  await faded();
+  p.app.past.compare.start(null);
+  const right = p.terrain().at(-1);
+  right.arrive();
+  p.state.today = { ...TODAY, renderedAt: '2026-10-14T10:00:00Z', maxRegionX: 5 };
+  p.app.reload();
+  await p.settle();
+  const again = p.terrain().at(-1);
+  assert.notEqual(again, right);
+  assert.equal(again.options.pane, 'beside');
+  assert.deepEqual(blocks(again.options.bounds), [-2048, -2048, 2048, 3072]);
+  assert.equal(p.map.hasLayer(left), true);
+  p.app.past.compare.start(LATER);
+  const later = p.terrain().at(-1);
+  p.state.today = { ...TODAY, renderedAt: '2026-10-14T11:00:00Z' };
+  p.app.reload();
+  await p.settle();
+  assert.equal(p.terrain().at(-1), later, 'two days that are past are not drawn again for a render');
+  assert.equal(p.map.hasLayer(left), true);
+});
+
+test('the day on the right is an eighth part of the address, after the day, and goes with the comparison', async () => {
+  const p = await load('#overworld/100/200/-1');
+  p.app.past.set(THEN);
+  p.app.past.compare.start(null);
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-01/now');
+  assert.equal(p.app.past.compare.wanted(), 'now');
+  p.app.past.compare.start(LATER);
+  assert.equal(p.address(), '#overworld/100/200/-1///2026-09-01/2026-09-02');
+  p.app.link.set(SHEET);
+  assert.equal(p.address(), `#overworld/100/200/-1/${SHEET}//2026-09-01/2026-09-02`);
+  assert.equal(p.app.link.href(), `https://map.test/#overworld/100/200/-1/${SHEET}//2026-09-01/2026-09-02`);
+  p.map.setView([64, -32], 2.5);
+  p.map.fire('moveend');
+  assert.equal(p.address(), `#overworld/-32/64/2.5/${SHEET}//2026-09-01/2026-09-02`);
+  p.app.past.compare.stop();
+  assert.equal(p.address(), `#overworld/-32/64/2.5/${SHEET}//2026-09-01`);
+  assert.equal(p.app.past.compare.wanted(), '');
+});
+
+test('an address with a day on the right reads to everything else as it did, and says what it asks for until it is taken up', async () => {
+  const p = await load(`#nether/100/200/-1/${SHEET}//2026-09-01/2026-09-02`);
+  assert.deepEqual(p.terrain().map((l) => l.options.dimension), ['nether']);
+  assert.deepEqual(p.map.getCenter(), { lat: 200, lng: 100 });
+  assert.equal(p.app.link.get(), SHEET);
+  assert.equal(p.app.past.wanted(), '2026-09-01');
+  assert.equal(p.app.past.compare.wanted(), '2026-09-02');
+  assert.equal(p.app.past.compare.on(), false, 'what an address asks for is not drawn until the days are known');
+  p.map.fire('moveend');
+  assert.equal(p.address(), `#nether/100/200/-1/${SHEET}//2026-09-01/2026-09-02`);
+  // Whoever sets the day and compares nothing leaves nothing beside it.
+  p.app.past.set(THEN);
+  assert.equal(p.app.past.compare.wanted(), '');
+  assert.equal(p.address(), `#nether/100/200/-1/${SHEET}//2026-09-01`);
+});
+
+test('what is beside no day, or is neither a date nor now, is not read from an address', async () => {
+  for (const [hash, plain] of [
+    ['#overworld/100/200/-1////now', '#overworld/100/200/-1'],
+    ['#overworld/100/200/-1///2026-09-01/later', '#overworld/100/200/-1///2026-09-01'],
+    ['#overworld/100/200/-1///2026-09-01/<b>', '#overworld/100/200/-1///2026-09-01'],
+    ['#overworld/100/200/-1//v1.e30/2026-09-01/now', '#overworld/100/200/-1//v1.e30/2026-09-01/now'],
+  ]) {
+    const p = await load(hash);
+    assert.equal(p.app.past.compare.wanted(), '', hash);
+    if (hash !== plain) {
+      p.map.fire('moveend');
+      assert.equal(p.address(), plain, hash);
+    }
+  }
+});
+
+test('an address that changes only in what is beside its day says so once', async () => {
+  const p = await load('#overworld/100/200/-1');
+  await p.turn('#overworld/100/200/-1///2026-09-01/now');
+  assert.deepEqual(p.state.heard, ['2026-09-01']);
+  assert.equal(p.app.past.compare.wanted(), 'now');
+  await p.turn('#overworld/100/200/-1///2026-09-01/2026-09-02');
+  assert.deepEqual(p.state.heard, ['2026-09-01', '2026-09-01']);
+  assert.equal(p.app.past.compare.wanted(), '2026-09-02');
+  await p.turn('#overworld/300/400/-1///2026-09-01/2026-09-02');
+  assert.equal(p.state.heard.length, 2);
+  await p.turn('#overworld/300/400/-1///2026-09-01');
+  assert.equal(p.state.heard.length, 3);
+  assert.equal(p.app.past.compare.wanted(), '');
 });
 
 test('with the timeline: a link to a kept day opens on that day, and stepping through days and back to now is in the address', async () => {
