@@ -3175,7 +3175,8 @@ tiles that never come cost the old ones only a few seconds. The choice is kept
 (the `levels` part of the record, the page's record being version 3 for it) and
 is the nether's cut the next time the page opens it, in this browser. A level
 the server no longer offers is read as the default cut, at once if it is
-taken away while it is drawn. While a level is drawn the status line says when
+taken away while it is drawn, and a saved or shared view that names one, or
+a preview left for one, opens on the default cut. While a level is drawn the status line says when
 that level was rendered, and its tiles are asked for again when its own render
 lands, which is after the nether's. Leaving the preview of a link's view puts
 the level back as it was. A default view saved in the nether opens on the level
