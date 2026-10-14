@@ -33,7 +33,7 @@ Copied from the spec. Every task's requirements include these.
 - **Comments say why, not what.** No ticket IDs, URLs or names in comments. Match the surrounding comment density and voice.
 - **Commits.** Use conventional commits scoped to the component (`feat(mcmap): …`, `feat(agent): …`, `fix(bridge): …`, `feat(minecraft-fwb): …`). End each with the implementing agent's model in two trailers, for example:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` and `Assisted-by: Claude Code:claude-opus-5-5`. A subagent on another model names its own model.
-- **Go tests** run from the component's directory with stdin closed: `cd minecraft/<component> && go test -count=1 -race ./... </dev/null`. Page tests run by `go test ./web/` from `minecraft/mcmap`. Run `gofmt -l` and `go vet` before every commit, as CI's lint does.
+- **Go tests** run from the component's directory with stdin closed: `cd minecraft/<component> && go test -count=1 -race ./... </dev/null`. Page tests run by `go test ./web/` from `minecraft/mcmap`. Run `gofmt -w` on every Go file you create or change: some of the plan's blocks are not column-aligned, and the commit gate `test -z "$(gofmt -l …)" && go vet …` fails on any file gofmt would change, as CI's lint does.
 
 ## Review Focus
 
@@ -94,7 +94,7 @@ Group 1 (`minecraft/mcmap`):
 
 Group 2 (`minecraft/agent`): `internal/mapclient/client.go`, `internal/plugins/maplogin.go`, `cmd/agent/main.go` (`speak`), and the tests beside them.
 
-Group 3 (`jdw-deployments`): `charts/minecraft-fwb/values.yaml`, `templates/map.yaml`, `templates/map-admin-rules.yaml` (create), `templates/map-admin-loki-rule.yaml` (create), `templates/_helpers.tpl`, `tools/tests/test-map-admin.sh` (create), `charts/minecraft-fwb/README.md`.
+Group 3 (`jdw-deployments`): `charts/minecraft-fwb/values.yaml`, `templates/map.yaml` (the env and its render guard), `templates/map-admin-rules.yaml` (create), `templates/map-admin-loki-rule.yaml` (create), `tools/tests/test-map.sh` (the switches and the origin, where spec Rollout step 2 puts them), `tools/tests/test-map-admin.sh` (create: the alerts and the Loki rule), `charts/minecraft-fwb/README.md`.
 
 Group 4 (`minecraft/bridge`): `http.go`, `http_test.go`.
 
@@ -227,7 +227,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/config && go vet ./minecraft/mcmap/internal/config/
+test -z "$(gofmt -l minecraft/mcmap/internal/config)" && go vet ./minecraft/mcmap/internal/config/
 /usr/bin/git add minecraft/mcmap/internal/config/config.go minecraft/mcmap/internal/config/config_test.go
 /usr/bin/git commit -m "feat(mcmap): add the admin and passkey switches, off by default" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -236,13 +236,17 @@ Assisted-by: Claude Code:claude-opus-5-5"
 ### Task 2: The operator list
 
 **Files:**
-- Create: `minecraft/mcmap/internal/operators/operators.go`, `bridge.go`, `metrics.go`
-- Test: `minecraft/mcmap/internal/operators/operators_test.go`, `bridge_test.go`
+- Create: `minecraft/mcmap/internal/atomicfile/atomicfile.go` (moved out of `internal/auth/revoke.go`, so that `auth` and `operators` share one copy), `minecraft/mcmap/internal/operators/operators.go`, `bridge.go`, `metrics.go`
+- Modify: `minecraft/mcmap/internal/auth/revoke.go` (delete `writeWhole`, call `atomicfile.Write`), `minecraft/mcmap/internal/auth/auth.go` (`LoadKey` calls `atomicfile.Write`)
+- Test: `minecraft/mcmap/internal/atomicfile/atomicfile_test.go`, `minecraft/mcmap/internal/operators/operators_test.go`, `bridge_test.go`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
 - Produces:
   ```go
+  package atomicfile
+  func Write(path string, data []byte) error   // the old auth.writeWhole, unchanged in behaviour
+
   package operators
   type Source string
   const (Live Source = "live"; LastKnownGood Source = "last_known_good"; None Source = "none")
@@ -276,6 +280,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -444,11 +449,32 @@ func TestList_StartupLookupSetsTheGauge(t *testing.T) {
 	}
 }
 
+// Declared on a vector nobody else has touched, so that a result left out
+// of declareLookups shows as a missing series.
 func TestList_EveryLookupResultIsDeclared(t *testing.T) {
-	for _, src := range []Source{Live, LastKnownGood, None} {
-		if _, err := metricLookups.GetMetricWithLabelValues(string(src)); err != nil {
-			t.Errorf("%s: %v", src, err)
-		}
+	v := newLookups(promauto.With(nil))
+	declareLookups(v)
+	if n := testutil.CollectAndCount(v); n != 3 {
+		t.Errorf("%d lookup series declared, want live, last_known_good and none", n)
+	}
+}
+
+// Many requests arriving once the cache has run out ask the bridge once.
+func TestList_ConcurrentRequestsShareOneLookup(t *testing.T) {
+	c := &clock{t: time.Unix(1_790_000_000, 0)}
+	b := &fakeBridge{perms: map[string]string{steve: "operator"}}
+	l, _ := open(t, b, c)
+	l.Refresh(t.Context())
+	c.add(CacheFor)
+	before := b.asked
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() { defer wg.Done(); l.IsOperator(t.Context(), steve) }()
+	}
+	wg.Wait()
+	if got := b.asked - before; got != 1 {
+		t.Errorf("20 requests after the cache ran out asked the bridge %d times, want 1", got)
 	}
 }
 
@@ -503,12 +529,85 @@ func TestBridge_AMissingFileIsAnErrorNotAnEmptyList(t *testing.T) {
 }
 ```
 
+`internal/atomicfile/atomicfile_test.go`:
+
+```go
+package atomicfile
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestWrite_LeavesTheWholeFileAndNoLitter(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "made")
+	path := filepath.Join(dir, "f.json")
+	for _, body := range []string{"first", "second, longer than the first"} {
+		if err := Write(path, []byte(body)); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != body {
+			t.Fatalf("read back %q, want %q", got, body)
+		}
+	}
+	if info, _ := os.Stat(path); info.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, want 0600", info.Mode().Perm())
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("%d files left in the directory, want only the one written", len(entries))
+	}
+}
+```
+
 - [ ] **Step 2: Run the tests and confirm they fail**
 
-Run: `cd minecraft/mcmap && go test -count=1 ./internal/operators/ </dev/null`
-Expected: FAIL to compile, `undefined: Open`.
+Run: `cd minecraft/mcmap && go test -count=1 ./internal/operators/ ./internal/atomicfile/ </dev/null`
+Expected: FAIL to compile, `undefined: Open` and `undefined: Write`.
 
 - [ ] **Step 3: Implement**
+
+Move `writeWhole` out of `internal/auth/revoke.go` into its own package, unchanged but for its name, and delete it from `revoke.go`. `internal/atomicfile/atomicfile.go`:
+
+```go
+// Package atomicfile writes a file so that a crash leaves the old one or
+// the new one, never part of one.
+package atomicfile
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// Write leaves either the old file or the new one at path: a crash
+// mid-write must not leave something that stops the service starting
+// until a person deletes it. The file is 0600, which is what a key needs.
+func Write(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+```
+
+In `internal/auth/revoke.go` replace `err = writeWhole(r.path, raw)` with `err = atomicfile.Write(r.path, raw)`, and in `internal/auth/auth.go` `LoadKey` replace `writeWhole(path, key)` with `atomicfile.Write(path, key)`. Import `github.com/jdwillmsen/gameops/minecraft/mcmap/internal/atomicfile` in both. Run `go test ./internal/auth/` now: it must still pass before going on.
 
 `internal/operators/bridge.go`:
 
@@ -585,17 +684,25 @@ var (
 		Name: "mcmap_admin_operators",
 		Help: "How many operators the map knows of: from the live list, or from the last-known-good one while it is under a day old. A count, never who.",
 	})
-	metricLookups = promauto.NewCounterVec(prometheus.CounterOpts{
+	metricLookups = newLookups(promauto.With(prometheus.DefaultRegisterer))
+)
+
+// newLookups is a constructor so that a test can declare onto a vector of
+// its own, where a missing series cannot be hidden by another test's.
+func newLookups(f promauto.Factory) *prometheus.CounterVec {
+	return f.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_admin_operator_lookups_total",
 		Help: "Lookups of the operator list, by where the answer came from: live, last_known_good while the bridge could not be read, or none.",
 	}, []string{"result"})
-)
+}
 
-func init() {
+func declareLookups(v *prometheus.CounterVec) {
 	for _, s := range []Source{Live, LastKnownGood, None} {
-		metricLookups.WithLabelValues(string(s))
+		v.WithLabelValues(string(s))
 	}
 }
+
+func init() { declareLookups(metricLookups) }
 ```
 
 `internal/operators/operators.go`:
@@ -611,10 +718,11 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/atomicfile"
 )
 
 type Source string
@@ -651,12 +759,16 @@ type List struct {
 	now    func() time.Time
 	log    *slog.Logger
 
-	mu        sync.Mutex
-	live      map[string]bool
-	askedAt   time.Time
-	source    Source
-	kept      file
-	failLog   time.Time
+	// refreshing is held for a lookup, so that requests arriving once the
+	// cache has run out wait for one lookup instead of each making one.
+	refreshing sync.Mutex
+
+	mu      sync.Mutex
+	live    map[string]bool
+	askedAt time.Time
+	source  Source
+	kept    file
+	failLog time.Time
 }
 
 func Open(path string, l Lister, now func() time.Time, log *slog.Logger) (*List, error) {
@@ -678,12 +790,19 @@ func load(path string) (file, error) {
 	return f, json.Unmarshal(raw, &f)
 }
 
-func (o *List) IsOperator(ctx context.Context, xuid string) (bool, Source) {
+func (o *List) fresh() bool {
 	o.mu.Lock()
-	fresh := o.live != nil && o.now().Sub(o.askedAt) < CacheFor
-	o.mu.Unlock()
-	if !fresh {
-		o.Refresh(ctx)
+	defer o.mu.Unlock()
+	return o.live != nil && o.now().Sub(o.askedAt) < CacheFor
+}
+
+func (o *List) IsOperator(ctx context.Context, xuid string) (bool, Source) {
+	if !o.fresh() {
+		o.refreshing.Lock()
+		if !o.fresh() {
+			o.refresh(ctx)
+		}
+		o.refreshing.Unlock()
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -703,6 +822,12 @@ func (o *List) Source() Source {
 }
 
 func (o *List) Refresh(ctx context.Context) Source {
+	o.refreshing.Lock()
+	defer o.refreshing.Unlock()
+	return o.refresh(ctx)
+}
+
+func (o *List) refresh(ctx context.Context) Source {
 	perms, err := o.lister.Permissions(ctx)
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -737,7 +862,8 @@ func (o *List) Refresh(ctx context.Context) Source {
 	metricLookups.WithLabelValues(string(Live)).Inc()
 	if !slices.Equal(xuids, o.kept.XUIDs) || now.Sub(o.kept.ConfirmedAt) >= ConfirmEvery {
 		next := file{XUIDs: xuids, ConfirmedAt: now.UTC()}
-		if err := writeWhole(o.path, next); err != nil {
+		raw, _ := json.Marshal(next)
+		if err := atomicfile.Write(o.path, raw); err != nil {
 			o.log.Error("map operator list not kept", "error_class", "write")
 		} else {
 			o.kept = next
@@ -772,46 +898,18 @@ func classOf(err error) string {
 	}
 	return "unreachable"
 }
-
-func writeWhole(path string, f file) error {
-	raw, err := json.Marshal(f)
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(raw); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
-}
 ```
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-Run: `cd minecraft/mcmap && go test -count=1 -race ./internal/operators/ </dev/null`
-Expected: PASS. If `TestList_StartupLookupSetsTheGauge` sees the gauge from another test, that is because the gauge is package-global. The test sets it itself before reading, so it does not depend on order.
+Run: `cd minecraft/mcmap && go test -count=1 -race ./internal/operators/ ./internal/atomicfile/ ./internal/auth/ </dev/null`
+Expected: PASS. `TestList_StartupLookupSetsTheGauge` reads a package-global gauge, but every reading follows a `Refresh` that set it, so the order tests run in does not matter.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/operators && go vet ./minecraft/mcmap/internal/operators/
-/usr/bin/git add minecraft/mcmap/internal/operators/operators.go minecraft/mcmap/internal/operators/bridge.go minecraft/mcmap/internal/operators/metrics.go minecraft/mcmap/internal/operators/operators_test.go minecraft/mcmap/internal/operators/bridge_test.go
+test -z "$(gofmt -l minecraft/mcmap/internal)" && go vet ./minecraft/mcmap/internal/...
+/usr/bin/git add minecraft/mcmap/internal/atomicfile/atomicfile.go minecraft/mcmap/internal/atomicfile/atomicfile_test.go minecraft/mcmap/internal/auth/revoke.go minecraft/mcmap/internal/auth/auth.go minecraft/mcmap/internal/operators/operators.go minecraft/mcmap/internal/operators/bridge.go minecraft/mcmap/internal/operators/metrics.go minecraft/mcmap/internal/operators/operators_test.go minecraft/mcmap/internal/operators/bridge_test.go
 /usr/bin/git commit -m "feat(mcmap): read the game's operators, with a day of last-known-good" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
 ```
@@ -1024,7 +1122,7 @@ Expected: PASS, including every existing session test.
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/auth && go vet ./minecraft/mcmap/internal/auth/
+test -z "$(gofmt -l minecraft/mcmap/internal/auth)" && go vet ./minecraft/mcmap/internal/auth/
 /usr/bin/git add minecraft/mcmap/internal/auth/auth.go minecraft/mcmap/internal/auth/passkey_session_test.go
 /usr/bin/git commit -m "feat(mcmap): carry a passkey session's key in the cookie and check it every request" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -1037,7 +1135,7 @@ Assisted-by: Claude Code:claude-opus-5-5"
 - Test: `minecraft/mcmap/internal/auth/passkeys_test.go`
 
 **Interfaces:**
-- Consumes: `writeWhole`, `random`, `randomBytes` and `encoding` (already in package `auth`).
+- Consumes: `atomicfile.Write` (Task 2), and `random`, `randomBytes` and `encoding` (already in package `auth`).
 - Produces:
   ```go
   type Passkey struct {
@@ -1055,7 +1153,7 @@ Assisted-by: Claude Code:claude-opus-5-5"
   func (p *Passkeys) Existing(xuid string) []Passkey         // active ones, for excludeCredentials
   func (p *Passkeys) StartPending(pk Passkey, issuedMilli int64) error
   func (p *Passkeys) Cancel(xuid string, issuedMilli int64) (Passkey, bool)
-  func (p *Passkeys) IssueCode(xuid string) (code, fingerprint string, err error)
+  func (p *Passkeys) IssueCode(xuid string) (code string, credentialID []byte, err error)
   func (p *Passkeys) Confirm(xuid string, issuedMilli int64, credentialID []byte, code string) (Passkey, int, error) // int: tries left after a wrong code
   func (p *Passkeys) ByHandle(handle []byte) (xuid string, keys []Passkey, ok bool)
   func (p *Passkeys) IsPending(credentialID []byte) bool
@@ -1064,7 +1162,7 @@ Assisted-by: Claude Code:claude-opus-5-5"
   func (p *Passkeys) Use(credentialID []byte, signCount uint32, backupEligible, backupState bool) (Passkey, error)
   func (p *Passkeys) List(xuid string) []Listed   // Listed{Key, Label string; Created, LastUsed time.Time; Pending bool}
   func (p *Passkeys) Remove(xuid, key string) (Passkey, bool)
-  func (p *Passkeys) RemoveAll(xuid string) []Passkey
+  func (p *Passkeys) RemoveAll(xuid string) ([]Passkey, error)  // the error is the write's: the caller must not report success without it
   func (p *Passkeys) RefreshGamertag(xuid, gamertag string)
   func (p *Passkeys) Counts() (pending, active int)
   Counted func(pending, active int)   // field: told after every change
@@ -1131,9 +1229,9 @@ func TestPasskeys_PendingIsUselessUntilTheWhisperedCodeIsTyped(t *testing.T) {
 	if p.Active(KeyOf([]byte("cred-1")), steve.XUID) || !p.IsPending([]byte("cred-1")) {
 		t.Fatal("a pending credential is active")
 	}
-	code, fp, err := p.IssueCode(steve.XUID)
-	if err != nil || len(code) != 6 || fp != Fingerprint([]byte("cred-1")) {
-		t.Fatalf("IssueCode = %q %q %v", code, fp, err)
+	code, id, err := p.IssueCode(steve.XUID)
+	if err != nil || len(code) != 6 || string(id) != "cred-1" {
+		t.Fatalf("IssueCode = %q %q %v", code, id, err)
 	}
 	if _, _, err := p.Confirm(steve.XUID, issued, []byte("cred-1"), strings.ToLower(code)); err != nil {
 		t.Fatalf("a right code typed in lower case: %v", err)
@@ -1179,8 +1277,8 @@ func TestPasskeys_TheReplacementRace(t *testing.T) {
 	}
 	p.Cancel(steve.XUID, issued)
 	_ = p.StartPending(key("attackers", steve.XUID), issued)
-	code, fp, _ := p.IssueCode(steve.XUID)
-	if fp == Fingerprint([]byte("owners")) {
+	code, id, _ := p.IssueCode(steve.XUID)
+	if Fingerprint(id) == Fingerprint([]byte("owners")) {
 		t.Fatal("the whisper shows the owner's fingerprint for the attacker's credential")
 	}
 	if _, _, err := p.Confirm(steve.XUID, issued, []byte("owners"), code); !errors.Is(err, ErrWrongCode) {
@@ -1345,7 +1443,7 @@ func TestPasskeys_RemoveAllIsOnePlayersOnly(t *testing.T) {
 	_, _, _ = p.Confirm(alex.XUID, issued, alex.ID, code)
 	_ = p.StartPending(key("steves-pending", steve.XUID), issued)
 
-	if gone := p.RemoveAll(steve.XUID); len(gone) != 2 {
+	if gone, err := p.RemoveAll(steve.XUID); err != nil || len(gone) != 2 {
 		t.Errorf("removed %d of Steve's, want the active and the pending one", len(gone))
 	}
 	if !p.Active(KeyOf(alex.ID), alex.XUID) {
@@ -1357,13 +1455,42 @@ func TestPasskeys_RemoveAllIsOnePlayersOnly(t *testing.T) {
 	}
 }
 
-func TestPasskeys_NamesAreStableAndShort(t *testing.T) {
-	id := []byte("credential-id")
-	if fp := Fingerprint(id); len(fp) != 9 || fp[4] != '-' || strings.ToUpper(fp) != fp {
-		t.Errorf("Fingerprint = %q", fp)
+// Known answers: SHA-256 of "abc" begins ba7816bf8f01cfea414140de5dae2223.
+func TestPasskeys_NamesAreTheSpecsBytes(t *testing.T) {
+	id := []byte("abc")
+	if got := Fingerprint(id); got != "BA78-16BF" {
+		t.Errorf("Fingerprint = %q, want BA78-16BF", got)
 	}
-	if len(LogName(id)) != 8 || KeyOf(id) == KeyOf([]byte("other")) {
-		t.Errorf("LogName %q, KeyOf %q", LogName(id), KeyOf(id))
+	if got := LogName(id); got != "ba7816bf" {
+		t.Errorf("LogName = %q, want ba7816bf", got)
+	}
+	if got := KeyOf(id); got != "ungWv48Bz-pBQUDeXa4iIw" {
+		t.Errorf("KeyOf = %q, want the base64url of the first 16 bytes", got)
+	}
+}
+
+// A revocation that could not be written must say so: passkeys left in the
+// file would come back at the next restart.
+func TestPasskeys_RemoveAllReportsAFailedWrite(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory is still writable")
+	}
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	dir := t.TempDir()
+	p, err := LoadPasskeys(filepath.Join(dir, "passkeys.json"), c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmOne(t, p, "kept")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if _, err := p.RemoveAll(steve.XUID); err == nil {
+		t.Error("RemoveAll reported success with the file left unwritten")
+	}
+	if !p.Active(KeyOf([]byte("kept")), steve.XUID) {
+		t.Error("memory and disk disagree after a failed removal")
 	}
 }
 
@@ -1418,6 +1545,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/atomicfile"
 )
 
 const (
@@ -1459,7 +1588,7 @@ type Listed struct {
 	Pending  bool      `json:"pending,omitempty"`
 }
 
-type pending struct {
+type waitingKey struct {
 	key         Passkey
 	issuedMilli int64
 	expires     time.Time
@@ -1481,11 +1610,11 @@ type Passkeys struct {
 	mu      sync.Mutex
 	active  map[string]*Passkey // by KeyOf(ID)
 	handles map[string][]byte   // XUID to user handle
-	waiting map[string]*pending // by XUID
+	waiting map[string]*waitingKey // by XUID
 }
 
 func LoadPasskeys(path string, now func() time.Time) (*Passkeys, error) {
-	p := &Passkeys{path: path, now: now, active: map[string]*Passkey{}, handles: map[string][]byte{}, waiting: map[string]*pending{}}
+	p := &Passkeys{path: path, now: now, active: map[string]*Passkey{}, handles: map[string][]byte{}, waiting: map[string]*waitingKey{}}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return p, nil
@@ -1591,7 +1720,7 @@ func (p *Passkeys) StartPending(k Passkey, issuedMilli int64) error {
 		return ErrTooMany
 	}
 	k.Created = p.now().UTC()
-	p.waiting[k.XUID] = &pending{key: k, issuedMilli: issuedMilli, expires: p.now().Add(PendingFor)}
+	p.waiting[k.XUID] = &waitingKey{key: k, issuedMilli: issuedMilli, expires: p.now().Add(PendingFor)}
 	p.counted()
 	return nil
 }
@@ -1609,18 +1738,22 @@ func (p *Passkeys) Cancel(xuid string, issuedMilli int64) (Passkey, bool) {
 	return w.key, true
 }
 
-func (p *Passkeys) IssueCode(xuid string) (code, fingerprint string, err error) {
+// IssueCode returns the code and the ID of the credential it confirms, from
+// which the caller makes the fingerprint and the log name.
+func (p *Passkeys) IssueCode(xuid string) (string, []byte, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prune()
 	w, ok := p.waiting[xuid]
 	if !ok {
-		return "", "", ErrNothingPending
+		return "", nil, ErrNothingPending
 	}
-	for code = random(codeLength); code == w.code; code = random(codeLength) {
+	code := random(codeLength)
+	for code == w.code {
+		code = random(codeLength)
 	}
 	w.code = code
-	return code, Fingerprint(w.key.ID), nil
+	return code, w.key.ID, nil
 }
 
 // Confirm activates the pending credential only for the session that made
@@ -1772,23 +1905,30 @@ func (p *Passkeys) Remove(xuid, key string) (Passkey, bool) {
 	return *k, true
 }
 
-func (p *Passkeys) RemoveAll(xuid string) []Passkey {
+func (p *Passkeys) RemoveAll(xuid string) ([]Passkey, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var gone []Passkey
+	removed := map[string]*Passkey{}
 	for key, k := range p.active {
 		if k.XUID == xuid {
 			gone = append(gone, *k)
+			removed[key] = k
 			delete(p.active, key)
 		}
+	}
+	if err := p.save(); err != nil {
+		for key, k := range removed {
+			p.active[key] = k
+		}
+		return nil, err
 	}
 	if w, ok := p.waiting[xuid]; ok {
 		gone = append(gone, w.key)
 		delete(p.waiting, xuid)
 	}
-	_ = p.save()
 	p.counted()
-	return gone
+	return gone, nil
 }
 
 func (p *Passkeys) RefreshGamertag(xuid, gamertag string) {
@@ -1827,7 +1967,7 @@ func (p *Passkeys) save() error {
 	if err != nil {
 		return err
 	}
-	return writeWhole(p.path, raw)
+	return atomicfile.Write(p.path, raw)
 }
 ```
 
@@ -1841,7 +1981,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/auth && go vet ./minecraft/mcmap/internal/auth/
+test -z "$(gofmt -l minecraft/mcmap/internal/auth)" && go vet ./minecraft/mcmap/internal/auth/
 /usr/bin/git add minecraft/mcmap/internal/auth/passkeys.go minecraft/mcmap/internal/auth/passkeys_test.go
 /usr/bin/git commit -m "feat(mcmap): keep passkeys, pending until a code from the game confirms them" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -1861,12 +2001,13 @@ Assisted-by: Claude Code:claude-opus-5-5"
   const PasskeyChallengeCookie = cookiePrefix + "mcmap_passkey"
   var ErrLabel, ErrRegistrationExpired, ErrRegistrationRefused error
   type CeremonyError struct{ Result string }   // Result is one of the Result* constants
-  const (ResultBadAssertion = "bad_assertion"; ResultUnknownCredential = "unknown_credential"; ResultExpired = "expired"; ResultPending = "pending"; ResultCounter = "counter"; ResultReplayed = "replayed")
+  const (ResultBadAssertion = "bad_assertion"; ResultUnknownCredential = "unknown_credential"; ResultExpired = "expired"; ResultPending = "pending"; ResultNotOperator = "not_operator"; ResultCounter = "counter"; ResultReplayed = "replayed")
   func NewCeremonies(origin, rpID string, sessionKey []byte, keys *Passkeys, now func() time.Time) (*Ceremonies, error)
   func (c *Ceremonies) BeginRegistration(xuid string, issuedMilli int64, label string) (*protocol.CredentialCreation, error)
   func (c *Ceremonies) FinishRegistration(id Identity, issuedMilli int64, body []byte) (Passkey, error)
   func (c *Ceremonies) BeginLogin(w http.ResponseWriter) (*protocol.CredentialAssertion, error)
-  func (c *Ceremonies) FinishLogin(w http.ResponseWriter, r *http.Request, body []byte) (Passkey, error) // a *CeremonyError on refusal
+  // allowed is asked, after the signature, the replay and the pending checks and before anything is stored, whether the passkey's player may log in.
+  func (c *Ceremonies) FinishLogin(w http.ResponseWriter, r *http.Request, body []byte, allowed func(xuid string) bool) (Passkey, error) // a *CeremonyError on refusal
   func PasskeyChallengeKey(sessionKey []byte) []byte  // HMAC(sessionKey, "mcmap passkey login challenge v1\x00")
   ```
 
@@ -1889,28 +2030,46 @@ Expected: one line `github.com/go-webauthn/webauthn v0.18.2` in the `require` bl
 package auth
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/go-webauthn/webauthn/protocol/webauthncbor"
 )
 
-// softKey is an authenticator in the test: an ES256 key that answers
-// create() and get() the way a browser hands them to the page, so that the
-// map's checks are run against real signatures and real CBOR.
+// softKey is an authenticator in the test: an ES256 key, or an RS256 one,
+// that answers create() and get() the way a browser hands them to the
+// page, so that the map's checks are run against real signatures and real
+// CBOR.
 type softKey struct {
 	t     *testing.T
 	priv  *ecdsa.PrivateKey
+	rsa   *rsa.PrivateKey // set for an RS256 key, in place of priv
 	id    []byte
 	count uint32
 	// flags beyond UP and UV, which every ceremony sets unless told not to.
 	be, bs bool
+	// badSig spoils the next signature after it is made.
+	badSig bool
+}
+
+func newRSASoftKey(t *testing.T) *softKey {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := make([]byte, 32)
+	_, _ = rand.Read(id)
+	return &softKey{t: t, rsa: priv, id: id}
 }
 
 const (
@@ -1968,8 +2127,14 @@ func (k *softKey) clientDataJSON(c ceremony) []byte {
 }
 
 func (k *softKey) cose(alg int) []byte {
-	x, y := k.priv.PublicKey.X.FillBytes(make([]byte, 32)), k.priv.PublicKey.Y.FillBytes(make([]byte, 32))
-	raw, err := webauthncbor.Marshal(map[int]any{1: 2, 3: alg, -1: 1, -2: x, -3: y})
+	var key map[int]any
+	if k.rsa != nil {
+		key = map[int]any{1: 3, 3: alg, -1: k.rsa.PublicKey.N.Bytes(), -2: big.NewInt(int64(k.rsa.PublicKey.E)).Bytes()}
+	} else {
+		x, y := k.priv.PublicKey.X.FillBytes(make([]byte, 32)), k.priv.PublicKey.Y.FillBytes(make([]byte, 32))
+		key = map[int]any{1: 2, 3: alg, -1: 1, -2: x, -3: y}
+	}
+	raw, err := webauthncbor.Marshal(key)
 	if err != nil {
 		k.t.Fatal(err)
 	}
@@ -1993,6 +2158,9 @@ func (k *softKey) create(c ceremony) []byte {
 	}
 	if c.alg == 0 {
 		c.alg = -7
+		if k.rsa != nil {
+			c.alg = -257
+		}
 	}
 	id := k.id
 	if c.id != nil {
@@ -2024,9 +2192,18 @@ func (k *softKey) get(c ceremony, userHandle []byte) []byte {
 	cdj := k.clientDataJSON(c)
 	h := sha256.Sum256(cdj)
 	digest := sha256.Sum256(append(append([]byte{}, ad...), h[:]...))
-	sig, err := ecdsa.SignASN1(rand.Reader, k.priv, digest[:])
+	var sig []byte
+	var err error
+	if k.rsa != nil {
+		sig, err = rsa.SignPKCS1v15(rand.Reader, k.rsa, crypto.SHA256, digest[:])
+	} else {
+		sig, err = ecdsa.SignASN1(rand.Reader, k.priv, digest[:])
+	}
 	if err != nil {
 		k.t.Fatal(err)
+	}
+	if k.badSig {
+		sig[len(sig)-1] ^= 0xff
 	}
 	resp := map[string]any{"clientDataJSON": b64.EncodeToString(cdj), "authenticatorData": b64.EncodeToString(ad), "signature": b64.EncodeToString(sig)}
 	if userHandle != nil {
@@ -2046,6 +2223,9 @@ package auth
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -2250,7 +2430,7 @@ func finish(cer *Ceremonies, jar *http.Cookie, body []byte) (Passkey, error) {
 	if jar != nil {
 		req.AddCookie(jar)
 	}
-	return cer.FinishLogin(httptest.NewRecorder(), req, body)
+	return cer.FinishLogin(httptest.NewRecorder(), req, body, nil)
 }
 
 func resultOf(err error) string {
@@ -2346,8 +2526,63 @@ func TestLogin_ChallengeCookie(t *testing.T) {
 	if _, err := finish(cer, jar, k.get(ceremony{rpID: rpID, origin: origin, challenge: ch}, handle)); resultOf(err) != ResultExpired {
 		t.Errorf("an expired challenge: %s", resultOf(err))
 	}
-	if bytes.Equal(PasskeyChallengeKey([]byte(strings.Repeat("k", 32))), []byte(strings.Repeat("k", 32))) {
-		t.Error("the challenge key is the session key")
+}
+
+// sealWith makes a challenge cookie the map's way under any key, so that a
+// test can show only the key derived with the challenge label is accepted.
+func sealWith(key, challenge []byte, expires time.Time) *http.Cookie {
+	payload := binary.BigEndian.AppendUint64(append([]byte{}, challenge...), uint64(expires.Unix()))
+	mac := hmac.New(sha256.New, key)
+	mac.Write(payload)
+	return &http.Cookie{Name: PasskeyChallengeCookie, Value: encoding.EncodeToString(mac.Sum(payload))}
+}
+
+func TestLogin_OnlyTheChallengeKeySealsAChallenge(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	cer, keys := ceremonies(t, c)
+	k := newSoftKey(t)
+	register(t, cer, keys, k)
+	sessionKey := []byte(strings.Repeat("k", 32))
+	ch, _ := loginWith(t, cer)
+	raw, _ := b64.DecodeString(ch)
+	for name, key := range map[string][]byte{
+		"the session key itself":  sessionKey,
+		"the service session key": ServiceKey(sessionKey, strings.Repeat("s", 48)),
+	} {
+		jar := sealWith(key, raw, c.now().Add(time.Minute))
+		if _, err := finish(cer, jar, k.get(ceremony{rpID: rpID, origin: origin, challenge: ch}, keys.UserHandle(steve.XUID))); resultOf(err) != ResultBadAssertion {
+			t.Errorf("a cookie sealed with %s: %s", name, resultOf(err))
+		}
+	}
+	jar := sealWith(PasskeyChallengeKey(sessionKey), raw, c.now().Add(time.Minute))
+	if _, err := finish(cer, jar, k.get(ceremony{rpID: rpID, origin: origin, challenge: ch}, keys.UserHandle(steve.XUID))); err != nil {
+		t.Errorf("a cookie sealed with the challenge key: %v", err)
+	}
+}
+
+func TestRegistration_AnRS256KeyIsAccepted(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	cer, keys := ceremonies(t, c)
+	k := newRSASoftKey(t)
+	register(t, cer, keys, k)
+	ch, jar := loginWith(t, cer)
+	if _, err := finish(cer, jar, k.get(ceremony{rpID: rpID, origin: origin, challenge: ch}, keys.UserHandle(steve.XUID))); err != nil {
+		t.Errorf("logging in with an RS256 passkey: %s", resultOf(err))
+	}
+}
+
+// Another session of the same player cannot use up the owner's challenge.
+func TestRegistration_AnotherSessionDoesNotSpendTheChallenge(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	cer, _ := ceremonies(t, c)
+	opts, _ := cer.BeginRegistration(steve.XUID, issued, "Phone")
+	k := newSoftKey(t)
+	body := k.create(ceremony{rpID: rpID, origin: origin, challenge: challengeOf(t, opts)})
+	if _, err := cer.FinishRegistration(steve, issued+1, body); !errors.Is(err, ErrRegistrationExpired) {
+		t.Fatalf("another session: %v", err)
+	}
+	if _, err := cer.FinishRegistration(steve, issued, body); err != nil {
+		t.Errorf("the owner's session after another tried: %v", err)
 	}
 }
 
@@ -2408,6 +2643,47 @@ func TestLogin_PendingAndCounterAreJudgedAfterTheSignature(t *testing.T) {
 		t.Errorf("a counter that went back: %s", resultOf(err))
 	}
 }
+
+func TestLogin_SignatureAndBackupFlags(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	for name, spoil := range map[string]func(*softKey){
+		"a bad signature":               func(k *softKey) { k.badSig = true },
+		"BE changed since registration": func(k *softKey) { k.be = true },
+		"BS without BE":                 func(k *softKey) { k.bs = true },
+	} {
+		t.Run(name, func(t *testing.T) {
+			cer, keys := ceremonies(t, c)
+			k := newSoftKey(t)
+			register(t, cer, keys, k)
+			spoil(k)
+			ch, jar := loginWith(t, cer)
+			if _, err := finish(cer, jar, k.get(ceremony{rpID: rpID, origin: origin, challenge: ch}, keys.UserHandle(steve.XUID))); resultOf(err) != ResultBadAssertion {
+				t.Errorf("result %s, want bad_assertion", resultOf(err))
+			}
+		})
+	}
+}
+
+// A player refused after the signature leaves the stored count where it
+// was: only a login that succeeds moves it.
+func TestLogin_ARefusedPlayerMovesNothing(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	cer, keys := ceremonies(t, c)
+	k := newSoftKey(t)
+	register(t, cer, keys, k)
+	before := keys.Existing(steve.XUID)[0]
+	ch, jar := loginWith(t, cer)
+	req := httptest.NewRequest("POST", "/auth/passkey/finish", nil)
+	req.AddCookie(jar)
+	got, err := cer.FinishLogin(httptest.NewRecorder(), req, k.get(ceremony{rpID: rpID, origin: origin, challenge: ch}, keys.UserHandle(steve.XUID)), func(string) bool { return false })
+	if resultOf(err) != ResultNotOperator || got.XUID != steve.XUID {
+		t.Fatalf("result %s for %q, want not_operator for Steve", resultOf(err), got.XUID)
+	}
+	after := keys.Existing(steve.XUID)[0]
+	if after.SignCount != before.SignCount || !after.LastUsed.Equal(before.LastUsed) {
+		t.Errorf("a refused login moved the stored count from %d to %d", before.SignCount, after.SignCount)
+	}
+}
 ```
 
 - [ ] **Step 4: Run the tests and confirm they fail**
@@ -2445,6 +2721,7 @@ const (
 	ResultUnknownCredential = "unknown_credential"
 	ResultExpired           = "expired"
 	ResultPending           = "pending"
+	ResultNotOperator       = "not_operator"
 	ResultCounter           = "counter"
 	ResultReplayed          = "replayed"
 )
@@ -2570,13 +2847,16 @@ func (c *Ceremonies) BeginRegistration(xuid string, issuedMilli int64, label str
 }
 
 func (c *Ceremonies) FinishRegistration(id Identity, issuedMilli int64, body []byte) (Passkey, error) {
+	// Compared before it is spent, so that another session of the same
+	// player cannot use up the challenge the owner's page is waiting on.
 	c.mu.Lock()
 	reg, ok := c.regs[id.XUID]
+	ok = ok && reg.issuedMilli == issuedMilli
 	if ok {
 		delete(c.regs, id.XUID)
 	}
 	c.mu.Unlock()
-	if !ok || reg.issuedMilli != issuedMilli || !c.now().Before(reg.expires) {
+	if !ok || !c.now().Before(reg.expires) {
 		return Passkey{}, ErrRegistrationExpired
 	}
 	parsed, err := protocol.ParseCredentialCreationResponseBytes(body)
@@ -2653,7 +2933,7 @@ func refuse(result string) error { return &CeremonyError{Result: result} }
 
 var errUnknownCredential = errors.New("unknown credential")
 
-func (c *Ceremonies) FinishLogin(w http.ResponseWriter, r *http.Request, body []byte) (Passkey, error) {
+func (c *Ceremonies) FinishLogin(w http.ResponseWriter, r *http.Request, body []byte, allowed func(xuid string) bool) (Passkey, error) {
 	jar, err := r.Cookie(PasskeyChallengeCookie)
 	if err != nil {
 		return Passkey{}, refuse(ResultExpired)
@@ -2711,6 +2991,10 @@ func (c *Ceremonies) FinishLogin(w http.ResponseWriter, r *http.Request, body []
 	if pending {
 		return found, refuse(ResultPending)
 	}
+	// Asked before the count is stored: a refused login moves nothing.
+	if allowed != nil && !allowed(found.XUID) {
+		return found, refuse(ResultNotOperator)
+	}
 	// The count is read from what the authenticator signed and not from
 	// the library's credential: on a count that went back the library
 	// keeps the old one and only raises CloneWarning, and the map refuses.
@@ -2735,7 +3019,7 @@ Expected: PASS. If a "wrong origin" or "top origin" case passes through the libr
 - [ ] **Step 7: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/auth && go vet ./minecraft/mcmap/internal/auth/
+test -z "$(gofmt -l minecraft/mcmap/internal/auth)" && go vet ./minecraft/mcmap/internal/auth/
 /usr/bin/git add go.mod go.sum minecraft/mcmap/internal/auth/ceremony.go minecraft/mcmap/internal/auth/ceremony_test.go minecraft/mcmap/internal/auth/softkey_test.go
 /usr/bin/git commit -m "feat(mcmap): verify passkey registration and login, stricter than the library's defaults" -m "Pins github.com/go-webauthn/webauthn at v0.18.2.
 
@@ -2772,9 +3056,14 @@ Assisted-by: Claude Code:claude-opus-5-5"
   func (s *Server) isAdmin(ctx context.Context, xuid string) bool
   func CountPasskeys(pending, active int)   // Passkeys.Counted
   func CountPasskeyExpired()                // Passkeys.Expired
-  func declareAdminMetrics()
+  func StartPasskeyMetrics(keys *auth.Passkeys) // sets both hooks and the gauge from the loaded store
+  type adminMetricSet struct{ registered, removed, logins, requests *prometheus.CounterVec; passkeys *prometheus.GaugeVec }
+  func newAdminMetrics(f promauto.Factory) adminMetricSet
+  func (m adminMetricSet) declare()                 // called by Handler whenever admin is on
+  func (m adminMetricSet) declareRoute(pattern string) // called by route for each gateAdmin route
+  // Server field, for tests only: adminMetrics *adminMetricSet
   ```
-  `/api/me` gains `"admin": true` for an operator, and `/api/config` gains `"passkeys": true|false`.
+  `/api/me` gains `"admin": true` for an operator, and `/api/config` gains `"passkeys": true` while passkeys are on, and says nothing about them otherwise.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2785,17 +3074,20 @@ package server
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/operators"
 )
-
-var alex = auth.Identity{XUID: "2535412345678902", Gamertag: "Alex Mines"}
 
 // fakeOperators is the operator list as a set, always read live.
 type fakeOperators map[string]bool
@@ -2862,8 +3154,8 @@ func TestAdmin_NoListMeansNobodyAndNoError(t *testing.T) {
 
 func TestConfig_SaysWhetherThereIsAPasskeyLogin(t *testing.T) {
 	s := withAdmin(t, fakeOperators{})
-	if rec := do(s.Handler(), "GET", "/api/config", "", nil); !strings.Contains(rec.Body.String(), `"passkeys":false`) {
-		t.Errorf("/api/config without passkeys = %s", rec.Body)
+	if rec := do(s.Handler(), "GET", "/api/config", "", nil); rec.Body.String() != "{\"login\":true}\n" {
+		t.Errorf("/api/config without passkeys = %q, want it unchanged", rec.Body)
 	}
 	withPasskeys(t, s)
 	if rec := do(s.Handler(), "GET", "/api/config", "", nil); !strings.Contains(rec.Body.String(), `"passkeys":true`) {
@@ -2871,26 +3163,62 @@ func TestConfig_SaysWhetherThereIsAPasskeyLogin(t *testing.T) {
 	}
 }
 
+// On vectors nobody else touches, so that a value left out shows as a
+// missing series instead of being hidden by another test's.
 func TestAdminMetrics_EveryLabelIsDeclaredAtZero(t *testing.T) {
-	declareAdminMetrics()
-	for _, r := range registrationResults {
-		if _, err := metricPasskeysRegistered.GetMetricWithLabelValues(r); err != nil {
-			t.Errorf("registered %s: %v", r, err)
+	m := newAdminMetrics(promauto.With(nil))
+	m.declare()
+	for name, want := range map[*prometheus.CounterVec]int{m.registered: len(registrationResults), m.logins: len(loginResults), m.removed: 2} {
+		if got := testutil.CollectAndCount(name); got != want {
+			t.Errorf("%d series declared, want %d", got, want)
 		}
 	}
-	for _, r := range loginResults {
-		if _, err := metricAdminLogins.GetMetricWithLabelValues(r); err != nil {
-			t.Errorf("logins %s: %v", r, err)
-		}
+	if got := testutil.CollectAndCount(m.passkeys); got != 2 {
+		t.Errorf("%d passkeys gauge series, want pending and active", got)
 	}
-	if n := testutil.CollectAndCount(metricPasskeysRegistered); n < len(registrationResults) {
-		t.Errorf("only %d registration series exist after declaring", n)
+	if testutil.ToFloat64(m.registered.WithLabelValues("confirmed")) != 0 {
+		t.Error("a declared series is not at zero")
 	}
-	if n := testutil.CollectAndCount(metricAdminLogins); n < len(loginResults) {
-		t.Errorf("only %d login series exist after declaring", n)
+}
+
+// Startup declares them: building the handler with admin on, passkeys off,
+// as production runs before passkeys are switched on.
+func TestAdminMetrics_StartupDeclaresThemWithAdminOnAlone(t *testing.T) {
+	s := withAdmin(t, fakeOperators{})
+	m := newAdminMetrics(promauto.With(nil))
+	s.adminMetrics = &m
+	s.Handler()
+	if got := testutil.CollectAndCount(m.registered); got != len(registrationResults) {
+		t.Errorf("%d registration series after startup, want %d", got, len(registrationResults))
 	}
-	if n := testutil.CollectAndCount(metricPasskeys); n != 2 {
-		t.Errorf("%d passkeys gauge series, want pending and active", n)
+	if got := testutil.CollectAndCount(m.logins); got != len(loginResults) {
+		t.Errorf("%d login series after startup, want %d", got, len(loginResults))
+	}
+	s.Admin = false
+	off := newAdminMetrics(promauto.With(nil))
+	s.adminMetrics = &off
+	s.Handler()
+	if got := testutil.CollectAndCount(off.registered); got != 0 {
+		t.Errorf("with admin off, %d series were declared", got)
+	}
+}
+
+// The bridge down, a real operator list, no last-known-good: nobody is an
+// admin, and nothing answers 5xx for it.
+func TestAdmin_ABridgeThatCannotBeReadMakesNobodyAdminAndNothingFail(t *testing.T) {
+	s := withLogin(t)
+	list, err := operators.Open(filepath.Join(t.TempDir(), "operators.json"), operators.NewBridge("http://127.0.0.1:1", "tok"), time.Now, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Admin, s.Operators = true, list
+	reached := false
+	gate := s.Sessions.Require(s.requireAdmin("GET /test", func(http.ResponseWriter, *http.Request) { reached = true }))
+	if rec := do(gate, "GET", "/test", "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusForbidden || reached {
+		t.Errorf("the gate with the bridge down = %d", rec.Code)
+	}
+	if rec := do(s.Handler(), "GET", "/api/me", "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "admin") {
+		t.Errorf("/api/me with the bridge down = %d %s", rec.Code, rec.Body)
 	}
 }
 ```
@@ -2898,10 +3226,12 @@ func TestAdminMetrics_EveryLabelIsDeclaredAtZero(t *testing.T) {
 Add this helper to `admin_test.go`. Task 7 uses it too:
 
 ```go
-// withPasskeys switches passkeys on for s, against the test origin.
-func withPasskeys(t *testing.T, s *Server) (*auth.Passkeys, *auth.Ceremonies) {
+// withPasskeys switches passkeys on for s, against the test origin, and
+// says where the store is kept.
+func withPasskeys(t *testing.T, s *Server) (*auth.Passkeys, *auth.Ceremonies, string) {
 	t.Helper()
-	keys, err := auth.LoadPasskeys(t.TempDir()+"/passkeys.json", time.Now)
+	path := filepath.Join(t.TempDir(), "passkeys.json")
+	keys, err := auth.LoadPasskeys(path, time.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2911,11 +3241,9 @@ func withPasskeys(t *testing.T, s *Server) (*auth.Passkeys, *auth.Ceremonies) {
 	}
 	s.Passkeys, s.Ceremonies = keys, cer
 	s.Sessions.Passkeys, s.Sessions.PasskeyTTL = keys, 12*time.Hour
-	return keys, cer
+	return keys, cer, path
 }
 ```
-
-Add `"time"` to the imports.
 
 In `service_test.go`, change the listener rule in `TestService_EveryRouteHasAGateThatWasChosenForIt` to:
 
@@ -2986,6 +3314,15 @@ In `route`, add the case:
 		if s.Sessions != nil {
 			handler = s.Sessions.Require(s.requireAdmin(pattern, h))
 		}
+		s.metricSet().declareRoute(pattern)
+```
+
+At the top of `Handler`, right after `mux := http.NewServeMux()`:
+
+```go
+	if s.adminOn() {
+		s.metricSet().declare()
+	}
 ```
 
 `internal/server/admin.go`:
@@ -3054,43 +3391,78 @@ var registrationResults = []string{"pending", "refused", "code_issued", "code_wr
 // after it mean a real passkey was turned away, which is what pages.
 var loginResults = []string{"ok", "bad_assertion", "unknown_credential", "expired", "disabled", "pending", "not_operator", "counter", "replayed"}
 
+// adminMetricSet is every D6 series of the server, built by a constructor
+// so that a test can hand a server vectors of its own and see exactly what
+// it declared.
+type adminMetricSet struct {
+	registered, removed, logins, requests *prometheus.CounterVec
+	passkeys                              *prometheus.GaugeVec
+}
+
+func newAdminMetrics(f promauto.Factory) adminMetricSet {
+	return adminMetricSet{
+		registered: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcmap_admin_passkeys_registered_total",
+			Help: "Steps of adding a passkey, by result: pending, refused, code_issued, code_wrong, abandoned, cancelled, expired, confirmed.",
+		}, []string{"result"}),
+		removed: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcmap_admin_passkeys_removed_total",
+			Help: "Passkeys removed, by why: player (from the page) or revoked (!map logout or Log out everywhere).",
+		}, []string{"why"}),
+		logins: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcmap_admin_logins_total",
+			Help: "Passkey logins, by result. bad_assertion, unknown_credential, expired and disabled come before the signature is verified; pending, not_operator, counter and replayed after.",
+		}, []string{"result"}),
+		requests: f.NewCounterVec(prometheus.CounterOpts{
+			Name: "mcmap_admin_requests_total",
+			Help: "Requests to admin routes, by route pattern and whether the player was an admin.",
+		}, []string{"route", "allowed"}),
+		passkeys: f.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "mcmap_admin_passkeys",
+			Help: "Passkeys held, by state: pending or active. Read back from the volume at start, so a restart does not move it.",
+		}, []string{"state"}),
+	}
+}
+
 var (
-	metricPasskeysRegistered = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mcmap_admin_passkeys_registered_total",
-		Help: "Steps of adding a passkey, by result: pending, refused, code_issued, code_wrong, abandoned, cancelled, expired, confirmed.",
-	}, []string{"result"})
-	metricPasskeysRemoved = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mcmap_admin_passkeys_removed_total",
-		Help: "Passkeys removed, by why: player (from the page) or revoked (!map logout or Log out everywhere).",
-	}, []string{"why"})
-	metricAdminLogins = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mcmap_admin_logins_total",
-		Help: "Passkey logins, by result. bad_assertion, unknown_credential, expired and disabled come before the signature is verified; pending, not_operator, counter and replayed after.",
-	}, []string{"result"})
-	metricAdminRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "mcmap_admin_requests_total",
-		Help: "Requests to admin routes, by route pattern and whether the player was an admin.",
-	}, []string{"route", "allowed"})
-	metricPasskeys = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "mcmap_admin_passkeys",
-		Help: "Passkeys held, by state: pending or active. Read back from the volume at start, so a restart does not move it.",
-	}, []string{"state"})
+	adminMetrics             = newAdminMetrics(promauto.With(prometheus.DefaultRegisterer))
+	metricPasskeysRegistered = adminMetrics.registered
+	metricPasskeysRemoved    = adminMetrics.removed
+	metricAdminLogins        = adminMetrics.logins
+	metricAdminRequests      = adminMetrics.requests
+	metricPasskeys           = adminMetrics.passkeys
 )
 
-// declareAdminMetrics puts every series an alert reads at zero before its
-// first event, so that the first confirmation on a new pod is an increase.
-func declareAdminMetrics() {
+// declare puts every series an alert reads at zero before its first event,
+// so that the first confirmation on a new pod is an increase.
+func (m adminMetricSet) declare() {
 	for _, r := range registrationResults {
-		metricPasskeysRegistered.WithLabelValues(r)
+		m.registered.WithLabelValues(r)
 	}
 	for _, r := range loginResults {
-		metricAdminLogins.WithLabelValues(r)
+		m.logins.WithLabelValues(r)
 	}
 	for _, why := range []string{"player", "revoked"} {
-		metricPasskeysRemoved.WithLabelValues(why)
+		m.removed.WithLabelValues(why)
 	}
-	metricPasskeys.WithLabelValues("pending")
-	metricPasskeys.WithLabelValues("active")
+	m.passkeys.WithLabelValues("pending")
+	m.passkeys.WithLabelValues("active")
+}
+
+// declareRoute puts an admin route's two series at zero where it is
+// registered.
+func (m adminMetricSet) declareRoute(pattern string) {
+	m.requests.WithLabelValues(pattern, "true")
+	m.requests.WithLabelValues(pattern, "false")
+}
+
+// metricSet is the set this server declares into: its own in a test,
+// the process's otherwise.
+func (s *Server) metricSet() adminMetricSet {
+	if s.adminMetrics != nil {
+		return *s.adminMetrics
+	}
+	return adminMetrics
 }
 
 func CountPasskeys(pending, active int) {
@@ -3099,13 +3471,28 @@ func CountPasskeys(pending, active int) {
 }
 
 func CountPasskeyExpired() { metricPasskeysRegistered.WithLabelValues("expired").Inc() }
+
+// StartPasskeyMetrics ties the store to the gauge and the expiry count, and
+// reads the gauge from what was loaded, so a restart does not move it.
+func StartPasskeyMetrics(keys *auth.Passkeys) {
+	keys.Counted, keys.Expired = CountPasskeys, CountPasskeyExpired
+	CountPasskeys(keys.Counts())
+}
 ```
+
+Add `"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"` to `admin_metrics.go`'s imports. Add the field `adminMetrics *adminMetricSet` to `Server`, beside `limitedLog`, with the comment `// adminMetrics, set only by tests, is where the admin series are declared.`
 
 In `auth.go`, replace `handleConfig` and `handleMe`:
 
 ```go
 func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"login": s.Sessions != nil, "passkeys": s.passkeysOn()})
+	out := map[string]any{"login": s.Sessions != nil}
+	// Said only while on, so a map without passkeys answers as it always
+	// has.
+	if s.passkeysOn() {
+		out["passkeys"] = true
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -3129,7 +3516,7 @@ Expected: PASS. `TestService_EveryRouteHasAGateThatWasChosenForIt` still passes,
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/server && go vet ./minecraft/mcmap/internal/server/
+test -z "$(gofmt -l minecraft/mcmap/internal/server)" && go vet ./minecraft/mcmap/internal/server/
 /usr/bin/git add minecraft/mcmap/internal/server/admin.go minecraft/mcmap/internal/server/admin_metrics.go minecraft/mcmap/internal/server/admin_test.go minecraft/mcmap/internal/server/server.go minecraft/mcmap/internal/server/auth.go minecraft/mcmap/internal/server/service_test.go
 /usr/bin/git commit -m "feat(mcmap): add the admin gate, read from the operator list on every request" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -3182,7 +3569,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 )
 
-var b64 = base64.RawURLEncoding
+var b64url = base64.RawURLEncoding
 
 type device struct {
 	t     *testing.T
@@ -3212,8 +3599,8 @@ func (d *device) create(challenge string) string {
 	ad = binary.BigEndian.AppendUint16(ad, uint16(len(d.id)))
 	ad = append(append(ad, d.id...), cose...)
 	att, _ := webauthncbor.Marshal(map[string]any{"fmt": "none", "attStmt": map[string]any{}, "authData": ad})
-	body, _ := json.Marshal(map[string]any{"id": b64.EncodeToString(d.id), "rawId": b64.EncodeToString(d.id), "type": "public-key",
-		"response": map[string]any{"clientDataJSON": b64.EncodeToString(clientData("webauthn.create", challenge)), "attestationObject": b64.EncodeToString(att)}})
+	body, _ := json.Marshal(map[string]any{"id": b64url.EncodeToString(d.id), "rawId": b64url.EncodeToString(d.id), "type": "public-key",
+		"response": map[string]any{"clientDataJSON": b64url.EncodeToString(clientData("webauthn.create", challenge)), "attestationObject": b64url.EncodeToString(att)}})
 	return string(body)
 }
 
@@ -3225,8 +3612,8 @@ func (d *device) get(challenge string, handle []byte) string {
 	ch := sha256.Sum256(cdj)
 	digest := sha256.Sum256(append(append([]byte{}, ad...), ch[:]...))
 	sig, _ := ecdsa.SignASN1(rand.Reader, d.priv, digest[:])
-	body, _ := json.Marshal(map[string]any{"id": b64.EncodeToString(d.id), "rawId": b64.EncodeToString(d.id), "type": "public-key",
-		"response": map[string]any{"clientDataJSON": b64.EncodeToString(cdj), "authenticatorData": b64.EncodeToString(ad), "signature": b64.EncodeToString(sig), "userHandle": b64.EncodeToString(handle)}})
+	body, _ := json.Marshal(map[string]any{"id": b64url.EncodeToString(d.id), "rawId": b64url.EncodeToString(d.id), "type": "public-key",
+		"response": map[string]any{"clientDataJSON": b64url.EncodeToString(cdj), "authenticatorData": b64url.EncodeToString(ad), "signature": b64url.EncodeToString(sig), "userHandle": b64url.EncodeToString(handle)}})
 	return string(body)
 }
 
@@ -3244,28 +3631,31 @@ func challengeIn(t *testing.T, body []byte) string {
 }
 
 // addPasskey runs the whole of D3's adding, the agent's part included, as
-// the operator whose game-code session is given.
-func addPasskey(t *testing.T, s *Server, as *http.Cookie, d *device) {
+// the operator whose game-code session is given. It returns the code and
+// the registration challenge, which a test may look for in the log.
+func addPasskey(t *testing.T, s *Server, as *http.Cookie, d *device) (code, challenge string) {
 	t.Helper()
 	h, internal := s.Handler(), s.InternalHandler()
 	opts := do(h, "POST", "/auth/passkey/register/options", `{"label":"Phone"}`, []*http.Cookie{as})
 	if opts.Code != http.StatusOK {
 		t.Fatalf("register options = %d %s", opts.Code, opts.Body)
 	}
-	fin := do(h, "POST", "/auth/passkey/register/finish", d.create(challengeIn(t, opts.Body.Bytes())), []*http.Cookie{as})
+	challenge = challengeIn(t, opts.Body.Bytes())
+	fin := do(h, "POST", "/auth/passkey/register/finish", d.create(challenge), []*http.Cookie{as})
 	if fin.Code != http.StatusOK || !strings.Contains(fin.Body.String(), auth.Fingerprint(d.id)) {
 		t.Fatalf("register finish = %d %s", fin.Code, fin.Body)
 	}
-	code := do(internal, "POST", "/internal/v1/passkey-codes", `{"xuid":"`+steve.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken)
+	asked := do(internal, "POST", "/internal/v1/passkey-codes", `{"xuid":"`+steve.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken)
 	var got struct{ Code, Fingerprint string }
-	_ = json.Unmarshal(code.Body.Bytes(), &got)
-	if code.Code != http.StatusOK || got.Fingerprint != auth.Fingerprint(d.id) {
-		t.Fatalf("passkey code = %d %s", code.Code, code.Body)
+	_ = json.Unmarshal(asked.Body.Bytes(), &got)
+	if asked.Code != http.StatusOK || got.Fingerprint != auth.Fingerprint(d.id) {
+		t.Fatalf("passkey code = %d %s", asked.Code, asked.Body)
 	}
-	confirm := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64.EncodeToString(d.id)+`","code":"`+got.Code+`"}`, []*http.Cookie{as})
+	confirm := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64url.EncodeToString(d.id)+`","code":"`+got.Code+`"}`, []*http.Cookie{as})
 	if confirm.Code != http.StatusNoContent {
 		t.Fatalf("confirm = %d %s", confirm.Code, confirm.Body)
 	}
+	return got.Code, challenge
 }
 
 func passkeyLogin(t *testing.T, s *Server, d *device) *httptest.ResponseRecorder {
@@ -3281,11 +3671,11 @@ func TestPasskey_AddThenLogInWithoutTheGame(t *testing.T) {
 	withPasskeys(t, s)
 	var log bytes.Buffer
 	s.Log = slog.New(slog.NewJSONHandler(&log, nil))
-	declareAdminMetrics()
 	confirmed := testutil.ToFloat64(metricPasskeysRegistered.WithLabelValues("confirmed"))
 
 	d := newDevice(t)
-	addPasskey(t, s, session(s, steve), d)
+	as := session(s, steve)
+	code, challenge := addPasskey(t, s, as, d)
 	if testutil.ToFloat64(metricPasskeysRegistered.WithLabelValues("confirmed")) != confirmed+1 {
 		t.Error("a confirmation was not counted")
 	}
@@ -3297,7 +3687,7 @@ func TestPasskey_AddThenLogInWithoutTheGame(t *testing.T) {
 	if me := do(s.Handler(), "GET", "/api/me", "", []*http.Cookie{sess}); !strings.Contains(me.Body.String(), `"admin":true`) {
 		t.Errorf("/api/me after a passkey login = %s", me.Body)
 	}
-	for _, never := range []string{steve.Gamertag, "Phone", b64.EncodeToString(d.id)} {
+	for _, never := range []string{steve.Gamertag, "Phone", b64url.EncodeToString(d.id), code, challenge, as.Value, sess.Value} {
 		if strings.Contains(log.String(), never) {
 			t.Errorf("the log holds %q:\n%s", never, log.String())
 		}
@@ -3316,7 +3706,6 @@ func TestPasskey_ANonOperatorWithAPasskeyIsRefusedAfterTheSignature(t *testing.T
 	d := newDevice(t)
 	addPasskey(t, s, session(s, steve), d)
 	delete(ops, steve.XUID)
-	declareAdminMetrics()
 	before := testutil.ToFloat64(metricAdminLogins.WithLabelValues("not_operator"))
 	if rec := passkeyLogin(t, s, d); rec.Code != http.StatusUnauthorized || cookie(rec, "__Host-mcmap_session") != nil {
 		t.Errorf("a demoted holder's login = %d", rec.Code)
@@ -3341,12 +3730,12 @@ func TestPasskey_RegistrationStatuses(t *testing.T) {
 		t.Errorf("a second while one is pending = %d", rec.Code)
 	}
 	for i, want := range []int{http.StatusBadRequest, http.StatusBadRequest, http.StatusGone} {
-		rec := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64.EncodeToString(d.id)+`","code":"ZZZZZZ"}`, []*http.Cookie{as})
+		rec := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64url.EncodeToString(d.id)+`","code":"ZZZZZZ"}`, []*http.Cookie{as})
 		if rec.Code != want {
 			t.Errorf("wrong code %d = %d %s", i+1, rec.Code, rec.Body)
 		}
 	}
-	if rec := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64.EncodeToString(d.id)+`","code":"ABC234"}`, []*http.Cookie{as}); rec.Code != http.StatusNotFound {
+	if rec := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64url.EncodeToString(d.id)+`","code":"ABC234"}`, []*http.Cookie{as}); rec.Code != http.StatusNotFound {
 		t.Errorf("after abandonment = %d", rec.Code)
 	}
 	if rec := do(h, "POST", "/auth/passkey/register/cancel", "", []*http.Cookie{as}); rec.Code != http.StatusNoContent {
@@ -3360,7 +3749,6 @@ func TestPasskeyLogin_GarbageIsABadAssertionNotAFault(t *testing.T) {
 	s := withAdmin(t, fakeOperators{steve.XUID: true})
 	withPasskeys(t, s)
 	h := s.Handler()
-	declareAdminMetrics()
 	before := testutil.ToFloat64(metricAdminLogins.WithLabelValues("bad_assertion"))
 	for name, body := range map[string]string{
 		"not json":   "{{{",
@@ -3376,6 +3764,34 @@ func TestPasskeyLogin_GarbageIsABadAssertionNotAFault(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(metricAdminLogins.WithLabelValues("bad_assertion")) - before; got != 4 {
 		t.Errorf("%v counted as bad_assertion, want 4", got)
+	}
+}
+
+// A flood of refusals anyone could send is a count: five lines at once,
+// then one a minute.
+func TestPasskeyLogin_RefusalsAreLoggedWithinABudget(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	var log bytes.Buffer
+	s.Log = slog.New(slog.NewJSONHandler(&log, nil))
+	now := time.Unix(1_790_000_000, 0)
+	s.clock = func() time.Time { return now }
+	h := s.Handler()
+	before := testutil.ToFloat64(metricAdminLogins.WithLabelValues("bad_assertion"))
+	// An empty body is refused before anything else is read, as bad_assertion.
+	for range 20 {
+		_ = do(h, "POST", "/auth/passkey/finish", "", nil)
+	}
+	if got := strings.Count(log.String(), "map passkey login refused"); got != 5 {
+		t.Errorf("%d lines for 20 refusals at once, want 5", got)
+	}
+	if got := testutil.ToFloat64(metricAdminLogins.WithLabelValues("bad_assertion")) - before; got != 20 {
+		t.Errorf("%v refusals counted, want 20", got)
+	}
+	now = now.Add(time.Minute)
+	_ = do(h, "POST", "/auth/passkey/finish", "", nil)
+	if got := strings.Count(log.String(), "map passkey login refused"); got != 6 {
+		t.Errorf("a minute later, %d lines, want 6", got)
 	}
 }
 
@@ -3452,9 +3868,35 @@ func (s *Server) handlePasskeyOptions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, opts)
 }
 
+// logBudget decides whether a refusal anyone could cause is written down:
+// a few at once, then one a minute, as the service-session exchange does,
+// so that a flood is a count and cannot bury the lines that matter.
+type logBudget struct {
+	mu       sync.Mutex
+	tokens   float64
+	refilled time.Time
+}
+
+const refusalBurst = 5
+
+func (b *logBudget) Allow(now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.refilled.IsZero() {
+		b.tokens, b.refilled = refusalBurst, now
+	}
+	b.tokens = min(refusalBurst, b.tokens+now.Sub(b.refilled).Minutes())
+	b.refilled = now
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
+}
+
 // loginRefused counts every refusal. One made before the signature is
-// verified is anyone's to make and is written down at most once a minute;
-// one after it is written down every time, with the XUID it was for.
+// verified is anyone's to make and is written down within logBudget; one
+// after it is written down every time, with the XUID it was for.
 func (s *Server) loginRefused(w http.ResponseWriter, result string, k *auth.Passkey) {
 	metricAdminLogins.WithLabelValues(result).Inc()
 	passkeyRefused.Add(1)
@@ -3472,12 +3914,18 @@ func (s *Server) handlePasskeyFinish(w http.ResponseWriter, r *http.Request) {
 		s.loginRefused(w, auth.ResultBadAssertion, nil)
 		return
 	}
-	k, err := s.Ceremonies.FinishLogin(w, r, body)
+	// The operator list is asked inside the ceremony, before the counter
+	// is stored, so that a refused login moves nothing.
+	k, err := s.Ceremonies.FinishLogin(w, r, body, func(xuid string) bool { return s.isAdmin(r.Context(), xuid) })
 	var refused *auth.CeremonyError
 	switch {
 	case errors.As(err, &refused):
-		after := refused.Result == auth.ResultPending || refused.Result == auth.ResultCounter || refused.Result == auth.ResultReplayed
-		if after && k.XUID != "" {
+		switch refused.Result {
+		case auth.ResultPending, auth.ResultNotOperator, auth.ResultCounter, auth.ResultReplayed:
+		default:
+			k = auth.Passkey{}
+		}
+		if k.XUID != "" {
 			s.loginRefused(w, refused.Result, &k)
 		} else {
 			s.loginRefused(w, refused.Result, nil)
@@ -3485,10 +3933,6 @@ func (s *Server) handlePasskeyFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		s.loginRefused(w, auth.ResultBadAssertion, nil)
-		return
-	}
-	if !s.isAdmin(r.Context(), k.XUID) {
-		s.loginRefused(w, "not_operator", &k)
 		return
 	}
 	if s.Sessions.Passkeys == nil {
@@ -3605,7 +4049,7 @@ func (s *Server) handlePasskeyCode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a passkey code needs the player's xuid", http.StatusBadRequest)
 		return
 	}
-	code, fingerprint, err := s.Passkeys.IssueCode(req.XUID)
+	code, id, err := s.Passkeys.IssueCode(req.XUID)
 	if errors.Is(err, auth.ErrNothingPending) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
@@ -3615,20 +4059,18 @@ func (s *Server) handlePasskeyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metricPasskeysRegistered.WithLabelValues("code_issued").Inc()
-	// The fingerprint is the same four bytes LogName writes.
-	s.log().Info("map passkey code issued", "xuid", req.XUID, "credential", strings.ToLower(strings.ReplaceAll(fingerprint, "-", "")))
-	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expiresIn": int(auth.PendingFor.Seconds()), "fingerprint": fingerprint})
+	s.log().Info("map passkey code issued", "xuid", req.XUID, "credential", auth.LogName(id))
+	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expiresIn": int(auth.PendingFor.Seconds()), "fingerprint": auth.Fingerprint(id)})
 }
 ```
 
-Add `refusedLog sparse` to `Server` beside `limitedLog`. `FinishLogin` (Task 5) returns the passkey it found alongside a refusal made after the signature, so that those log lines carry the XUID.
+Add `refusedLog logBudget` to `Server` beside `limitedLog`, and `"sync"` and `"time"` to `passkeys.go`'s imports. `FinishLogin` (Task 5) returns the passkey it found alongside a refusal made after the signature, so that those log lines carry the XUID.
 
 In `Handler`, after the `s.Sessions != nil` block:
 
 ```go
 	if s.passkeysOn() {
-		declareAdminMetrics()
-		s.route(mux, gatePublic, "POST /auth/passkey/options", s.handlePasskeyOptions)
+			s.route(mux, gatePublic, "POST /auth/passkey/options", s.handlePasskeyOptions)
 		s.route(mux, gatePublic, "POST /auth/passkey/finish", s.handlePasskeyFinish)
 		s.route(mux, gateAdmin, "POST /auth/passkey/register/options", s.handleRegisterOptions)
 		s.route(mux, gateAdmin, "POST /auth/passkey/register/finish", s.handleRegisterFinish)
@@ -3653,7 +4095,7 @@ Expected: PASS, including the route-table and service-session tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/server && go vet ./minecraft/mcmap/internal/server/
+test -z "$(gofmt -l minecraft/mcmap/internal/server)" && go vet ./minecraft/mcmap/internal/server/
 /usr/bin/git add minecraft/mcmap/internal/server/passkeys.go minecraft/mcmap/internal/server/passkeys_test.go minecraft/mcmap/internal/server/server.go minecraft/mcmap/internal/server/service_test.go
 /usr/bin/git commit -m "feat(mcmap): serve passkey registration, its in-game code, and passkey login" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -3751,6 +4193,22 @@ func TestPasskeys_AGameLoginRefreshesTheGamertag(t *testing.T) {
 		t.Errorf("passkey login after a rename = %s", rec.Body)
 	}
 }
+
+// The gauge the alert backstop reads comes back from disk at start.
+func TestPasskeys_TheGaugeIsReadBackAtStart(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	_, _, path := withPasskeys(t, s)
+	addPasskey(t, s, session(s, steve), newDevice(t))
+	CountPasskeys(0, 0)
+	again, err := auth.LoadPasskeys(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	StartPasskeyMetrics(again)
+	if got := testutil.ToFloat64(metricPasskeys.WithLabelValues("active")); got != 1 {
+		t.Errorf("active gauge after a restart = %v, want 1", got)
+	}
+}
 ```
 
 Add to the `routes` table:
@@ -3813,7 +4271,12 @@ func (s *Server) revokeEverywhere(xuid string) error {
 	}
 	s.log().Info("map logins revoked", "xuid", xuid)
 	if s.Passkeys != nil {
-		for _, k := range s.Passkeys.RemoveAll(xuid) {
+		gone, err := s.Passkeys.RemoveAll(xuid)
+		if err != nil {
+			s.log().Error("map passkeys not removed", "xuid", xuid, "error_class", "write")
+			return err
+		}
+		for _, k := range gone {
 			metricPasskeysRemoved.WithLabelValues("revoked").Inc()
 			s.log().Info("map passkey removed", "xuid", xuid, "credential", auth.LogName(k.ID), "why", "revoked")
 		}
@@ -3866,7 +4329,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/server && go vet ./minecraft/mcmap/internal/server/
+test -z "$(gofmt -l minecraft/mcmap/internal/server)" && go vet ./minecraft/mcmap/internal/server/
 /usr/bin/git add minecraft/mcmap/internal/server/passkeys.go minecraft/mcmap/internal/server/passkeys_test.go minecraft/mcmap/internal/server/server.go minecraft/mcmap/internal/server/auth.go minecraft/mcmap/internal/server/service_test.go
 /usr/bin/git commit -m "feat(mcmap): let players list and remove their passkeys, and remove them on logout everywhere" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -4027,10 +4490,85 @@ func TestStatus_AdminCopyAddsOnlyItsTwoFields(t *testing.T) {
 func TestStatus_SaysTheProblemThePageShows(t *testing.T) {
 	s, _, _ := withService(t)
 	s.Status.MarkProblem("render")
-	s.clock = func() time.Time { return time.Now() }
 	rec := do(s.InternalHandler(), "GET", "/internal/v1/status", "", nil)
 	if !strings.Contains(rec.Body.String(), `"problem":"render"`) {
 		t.Errorf("status = %s", rec.Body)
+	}
+}
+
+// The kill switches end what was issued under them, on the next request.
+func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	d := newDevice(t)
+	addPasskey(t, s, session(s, steve), d)
+	game := session(s, steve)
+	pk := cookie(passkeyLogin(t, s, d), "__Host-mcmap_session")
+	adminRoutes := [][2]string{{"GET", "/api/admin/status"}, {"POST", "/auth/passkey/register/options"}, {"POST", "/auth/passkey/register/finish"}, {"POST", "/auth/passkey/register/confirm"}, {"POST", "/auth/passkey/register/cancel"}}
+	passkeyRoutes := [][2]string{{"POST", "/auth/passkey/options"}, {"POST", "/auth/passkey/finish"}, {"GET", "/api/passkeys"}, {"DELETE", "/api/passkeys/x"}}
+
+	// Passkeys off: the chart's map.admin.passkeys: false.
+	s.Passkeys, s.Ceremonies, s.Sessions.Passkeys = nil, nil, nil
+	h := s.Handler()
+	for _, r := range passkeyRoutes {
+		if rec := do(h, r[0], r[1], "", []*http.Cookie{game}); rec.Code != http.StatusNotFound {
+			t.Errorf("passkeys off: %s %s = %d, want 404", r[0], r[1], rec.Code)
+		}
+	}
+	for _, path := range []string{"/api/map", "/api/me", "/api/admin/status"} {
+		if rec := do(h, "GET", path, "", []*http.Cookie{pk}); rec.Code != http.StatusUnauthorized {
+			t.Errorf("passkeys off: a passkey session's GET %s = %d, want 401", path, rec.Code)
+		}
+	}
+	if rec := do(s.InternalHandler(), "POST", "/internal/v1/passkey-codes", `{"xuid":"`+steve.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken); rec.Code != http.StatusNotFound {
+		t.Errorf("passkeys off: the code route = %d, want 404", rec.Code)
+	}
+
+	// Admin off as well: both values false in one change.
+	s.Admin = false
+	h = s.Handler()
+	for _, r := range adminRoutes {
+		if rec := do(h, r[0], r[1], "", []*http.Cookie{game}); rec.Code != http.StatusNotFound {
+			t.Errorf("admin off: %s %s for an operator's cookie = %d, want 404", r[0], r[1], rec.Code)
+		}
+	}
+	if rec := do(h, "GET", "/api/me", "", []*http.Cookie{game}); strings.Contains(rec.Body.String(), "admin") {
+		t.Errorf("admin off: /api/me = %s", rec.Body)
+	}
+}
+
+// With the login off and both switches asked for, the map serves as an open
+// map always has, and no admin or passkey route exists.
+func TestAdmin_WithNoLoginNothingErrors(t *testing.T) {
+	s, _ := fixture(t)
+	s.Admin, s.Operators = true, fakeOperators{steve.XUID: true}
+	h := s.Handler()
+	for _, path := range []string{"/api/config", "/api/map", "/api/diagnostics"} {
+		if rec := do(h, "GET", path, "", nil); rec.Code != http.StatusOK {
+			t.Errorf("no login: GET %s = %d", path, rec.Code)
+		}
+	}
+	if rec := do(h, "GET", "/api/admin/status", "", nil); rec.Code != http.StatusNotFound {
+		t.Errorf("no login: /api/admin/status = %d, want 404", rec.Code)
+	}
+	if rec := do(s.InternalHandler(), "GET", "/internal/v1/status", "", nil); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"admin":true`) {
+		t.Errorf("no login: internal status = %d %s", rec.Code, rec.Body)
+	}
+}
+
+// The policy that keeps foreign script off the page is the one control
+// between a script and an admin's session: byte for byte what it was, on
+// every new route as on the old.
+func TestSecurityHeaders_TheCSPIsByteForByteWhatItWas(t *testing.T) {
+	const want = "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	h := s.Handler()
+	for _, r := range [][2]string{{"GET", "/"}, {"GET", "/api/config"}, {"GET", "/api/me"}, {"GET", "/api/admin/status"}, {"GET", "/api/passkeys"}, {"POST", "/auth/passkey/options"}, {"POST", "/auth/passkey/finish"}, {"POST", "/auth/passkey/register/options"}} {
+		rec := do(h, r[0], r[1], "", []*http.Cookie{session(s, steve)})
+		if got := rec.Header().Get("Content-Security-Policy"); got != want {
+			t.Errorf("%s %s: CSP = %q", r[0], r[1], got)
+		}
 	}
 }
 ```
@@ -4201,13 +4739,13 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/mcmap/internal/server && go vet ./minecraft/mcmap/internal/server/
+test -z "$(gofmt -l minecraft/mcmap/internal/server)" && go vet ./minecraft/mcmap/internal/server/
 /usr/bin/git add minecraft/mcmap/internal/server/status.go minecraft/mcmap/internal/server/status_test.go minecraft/mcmap/internal/server/diagnostics.go minecraft/mcmap/internal/server/server.go minecraft/mcmap/internal/server/service_test.go
 /usr/bin/git commit -m "feat(mcmap): say what the server is doing, in fixed words, on the internal listener" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
 ```
 
-### Task 10: The page: passkey login, the account panel, and the Admin section
+### Task 10: The page: passkey login, the account panel, and the debug panel's Admin section
 
 **Files:**
 - Create: `minecraft/mcmap/web/passkey.js`, `minecraft/mcmap/web/testdata/passkey.test.cjs`, `minecraft/mcmap/web/passkey_run_test.go`
@@ -4670,7 +5208,7 @@ In `index.html`:
 
 - Inside `#login`, after `login-new`, add `<button id="login-passkey" type="button" hidden>Log in with a passkey</button>` and `<p id="login-passkey-note" class="note" role="status"></p>`.
 - After `<span id="who" …>`, add `<button id="account-open" type="button" hidden>Account</button>`.
-- Before the debug `<section>`, add:
+- Before the debug `<section>`, add the account panel, which every player has:
 
 ```html
   <section id="account" class="account" aria-label="Account" hidden>
@@ -4678,6 +5216,12 @@ In `index.html`:
     <ul id="account-passkeys"></ul>
     <button id="account-logout-all" type="button">Log out everywhere</button>
     <p id="account-note" class="note" role="status"></p>
+  </section>
+```
+
+- Spec D5 puts the server's status "in an Admin section of the debug panel", so the Admin section goes there. Add it as the last child of `<div id="debug-body" class="debug-body">`, and it shows whenever the debug panel is open (the D key or `?debug=1`) and the viewer is an admin:
+
+```html
     <div id="admin" class="admin" hidden>
       <h2>Admin</h2>
       <div id="admin-status"></div>
@@ -4690,12 +5234,13 @@ In `index.html`:
       <button id="admin-cancel" type="button" hidden>Cancel</button>
       <p id="admin-note" class="note" role="status"></p>
     </div>
-  </section>
 ```
 
 - After `<script src="appearance.js"></script>` and the other scripts, add `<script src="passkey.js"></script>`.
 
-In `style.css`, give `.account` the same panel look as `.debug`. Copy the `.debug` block's position, background, border and padding rules under `.account`, and add `.account[hidden], .admin[hidden] { display: none; }`. Do not touch the CSP: the page sets no inline style or script.
+In `style.css`, add `.account` to the selector of the existing `.debug` panel rule (so `.debug, .account { … }`) rather than copying its rules, and add `.account[hidden], .admin[hidden] { display: none; }`. Do not touch the CSP: the page sets no inline style or script.
+
+`signalOrphan` builds the `{rpId, credentialId}` the browser call takes itself. The spec cites `protocol.CredentialDescriptor.SignalUnknownCredential`, a server-side builder of the same two fields. The browser call needs nothing the page does not already have, so a server round trip would add a route and nothing else.
 
 In `e2e/lib/fields.mjs`, add `'passkey.js'` to `SCRIPTS`, before `'leaflet.js'`.
 
@@ -4715,7 +5260,7 @@ Assisted-by: Claude Code:claude-opus-5-5"
 ### Task 11: Wiring, the e2e harness, and the README
 
 **Files:**
-- Modify: `minecraft/mcmap/cmd/mcmap/main.go`, `minecraft/mcmap/cmd/mcmap/main_test.go`, `minecraft/mcmap/e2e/harness/main.go`, `minecraft/mcmap/e2e/checks/access.mjs`, `minecraft/mcmap/e2e/lib/fields.mjs`, `minecraft/mcmap/README.md`
+- Modify: `minecraft/mcmap/cmd/mcmap/main.go`, `minecraft/mcmap/e2e/harness/main.go`, `minecraft/mcmap/e2e/checks/access.mjs`, `minecraft/mcmap/e2e/lib/fields.mjs`, `minecraft/mcmap/README.md`
 
 **Interfaces:**
 - Consumes everything above.
@@ -4741,13 +5286,29 @@ and return `{ measures: { waypoints_status: got.waypoints, admin_status: got.adm
 
 In `e2e/lib/fields.mjs`, add the two sentences `"an admin route did not refuse a service session"` and `"the passkey list did not refuse a service session"` to `SENTENCES`, and `'admin_status'`, `'passkeys_status'` to `MEASURES`. Only reads are made, so the suite's read-only rule holds.
 
-In `e2e/harness/main.go`, in `run`, after the `if cfg.ServiceSecret != "" { … }` block, turn admin and passkeys on. Use a fake operator list holding one made-up XUID that no session the suite holds ever is:
+In `e2e/harness/main.go`, in `run`, after the `if cfg.ServiceSecret != "" { … }` block, turn admin and passkeys on. The spec has the harness gain "a fake bridge `GET /permissions` with one made-up operator", so the operator list is the real `operators.List` reading a real bridge client, over HTTP, from a server in the harness:
 
 ```go
-	// One made-up operator, so that the admin and passkey routes are
-	// served and every session the suite holds is refused by them. The
-	// suite never completes a ceremony, so the origin only has to parse.
-	app.Admin, app.Operators = true, harnessOperators{"2535412345678909": true}
+	// A bridge that answers GET /permissions and nothing else, with one
+	// made-up operator, so that the operator list runs as it does in
+	// production and every session the suite holds is refused by the admin
+	// routes. The suite never completes a ceremony, so the passkey origin
+	// only has to parse.
+	permissions := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/permissions" || r.Header.Get("Authorization") != "Bearer "+cfg.BridgeToken {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"2535412345678909":"operator"}`))
+	}))
+	defer permissions.Close()
+	list, err := operators.Open(filepath.Join(dir, "auth", "operators.json"), operators.NewBridge(permissions.URL, cfg.BridgeToken), time.Now, logger)
+	if err != nil {
+		return err
+	}
+	list.Refresh(ctx)
+	app.Admin, app.Operators = true, list
 	keys, err := auth.LoadPasskeys(filepath.Join(dir, "passkeys.json"), time.Now)
 	if err != nil {
 		return err
@@ -4760,16 +5321,7 @@ In `e2e/harness/main.go`, in `run`, after the `if cfg.ServiceSecret != "" { … 
 	app.Sessions.Passkeys, app.Sessions.PasskeyTTL = keys, 12*time.Hour
 ```
 
-Add the type at the end of the file, and add `"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/operators"` to the imports:
-
-```go
-type harnessOperators map[string]bool
-
-func (h harnessOperators) IsOperator(_ context.Context, xuid string) (bool, operators.Source) {
-	return h[xuid], operators.Live
-}
-func (harnessOperators) Source() operators.Source { return operators.Live }
-```
+Add `"net/http/httptest"` and `"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/operators"` to the harness's imports. `ctx` is the context `run` already makes for `play`.
 
 - [ ] **Step 2: Run the e2e suite and confirm the new check is exercised**
 
@@ -4795,9 +5347,7 @@ In `cmd/mcmap/main.go`, inside `if cfg.Login { … }` after the service-session 
 			if err != nil {
 				return err
 			}
-			keys.Counted, keys.Expired = server.CountPasskeys, server.CountPasskeyExpired
-			pending, active := keys.Counts()
-			server.CountPasskeys(pending, active)
+			server.StartPasskeyMetrics(keys)
 			cer, err := auth.NewCeremonies(cfg.PublicOrigin, cfg.PasskeyRPID, key, keys, time.Now)
 			if err != nil {
 				return err
@@ -4807,25 +5357,9 @@ In `cmd/mcmap/main.go`, inside `if cfg.Login { … }` after the service-session 
 		}
 ```
 
-Set `Quiet: cfg.Quiet` in the `server.Server{…}` literal. Add `"admin", cfg.Admin, "passkeys", cfg.Passkeys` to the `starting` log line. When `cfg.Login` is false and either switch was asked for, log once: `logger.Warn("admin and passkeys asked for with no login: there is no player to be an admin")`. `config.Load` has already turned both off, so read the raw environment for this one line: `os.Getenv("ADMIN_ENABLED") == "true"`.
+Set `Quiet: cfg.Quiet` in the `server.Server{…}` literal. Add `"admin", cfg.Admin, "passkeys", cfg.Passkeys` to the `starting` log line. When `cfg.Login` is false and either switch was asked for, log once: `logger.Warn("admin and passkeys asked for with no login: there is no player to be an admin")`. `config.Load` has already turned both off, so read the raw environment for this one line, the way `config` reads a switch: `asked, _ := strconv.ParseBool(os.Getenv("ADMIN_ENABLED"))`, and the same for `PASSKEYS_ENABLED`.
 
-Add to `cmd/mcmap/main_test.go`, following the file's existing style of building the service from an environment and probing its handlers:
-
-```go
-// With the switches off, which is the default, none of the new routes is
-// served and nobody is an admin.
-func TestRun_AdminAndPasskeysAreOffByDefault(t *testing.T) {
-	cfg, err := config.Load(func(k string) string {
-		return map[string]string{"BRIDGE_URL": "http://bridge.invalid", "BRIDGE_TOKEN": "tok", "LEVEL_NAME": "FWB", "INTERNAL_TOKEN": "internal-token-0123456789"}[k]
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Admin || cfg.Passkeys {
-		t.Fatalf("defaults: admin %v passkeys %v", cfg.Admin, cfg.Passkeys)
-	}
-}
-```
+The switches' defaults are pinned by Task 1, and what each switch does to the routes by Task 9's `TestKillSwitches_EndWhatWasIssuedUnderThem` and `TestAdmin_WithNoLoginNothingErrors`. `main.go` itself gets no test of its own here.
 
 - [ ] **Step 4: Document it in the README**
 
@@ -4852,7 +5386,7 @@ Expected: all pass, and no `minecraft/mcmap/mcmap` binary listed.
 - [ ] **Step 6: Commit, push and open the group's pull request**
 
 ```bash
-/usr/bin/git add minecraft/mcmap/cmd/mcmap/main.go minecraft/mcmap/cmd/mcmap/main_test.go minecraft/mcmap/e2e/harness/main.go minecraft/mcmap/e2e/checks/access.mjs minecraft/mcmap/e2e/lib/fields.mjs minecraft/mcmap/README.md
+/usr/bin/git add minecraft/mcmap/cmd/mcmap/main.go minecraft/mcmap/e2e/harness/main.go minecraft/mcmap/e2e/checks/access.mjs minecraft/mcmap/e2e/lib/fields.mjs minecraft/mcmap/README.md
 /usr/bin/git commit -m "feat(mcmap): wire admin access and passkeys behind their switches, and document them" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
 ```
@@ -5081,7 +5615,7 @@ Expected: PASS. `cmd/agent` compiles because `*mapclient.Client` now has `Passke
 - [ ] **Step 5: Commit**
 
 ```bash
-gofmt -l minecraft/agent && go vet ./minecraft/agent/...
+test -z "$(gofmt -l minecraft/agent)" && go vet ./minecraft/agent/...
 /usr/bin/git add minecraft/agent/internal/mapclient/client.go minecraft/agent/internal/mapclient/client_test.go minecraft/agent/internal/plugins/maplogin.go minecraft/agent/internal/plugins/maplogin_test.go
 /usr/bin/git commit -m "feat(agent): whisper a map passkey code to the player who asks for it" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -5101,11 +5635,11 @@ Assisted-by: Claude Code:claude-opus-5-5"
 Append to `cmd/agent/reply_logging_test.go`:
 
 ```go
-// failingVoice is a bridge that refuses or fails every whisper, quoting it
-// back the way the bridge's error body does.
-type failingVoice struct{ recordingVoice }
+// quotingVoice is a bridge that refuses every whisper, quoting it back the
+// way the bridge's error body does.
+type quotingVoice struct{ recordingVoice }
 
-func (v *failingVoice) Tell(_ context.Context, _ string, message string) error {
+func (v *quotingVoice) Tell(_ context.Context, _ string, message string) error {
 	return errors.New("bridge: POST /command: status 403: command not allowed: tellraw " + message)
 }
 
@@ -5113,14 +5647,20 @@ func (v *failingVoice) Tell(_ context.Context, _ string, message string) error {
 // in the log by way of the error.
 func TestRedactedReplyNeverReachesTheLogThroughAFailedWhisper(t *testing.T) {
 	registry, pctx, _, eventBus, _, playerRoster, permResolver := newHarness(t)
-	pctx.Voice = &failingVoice{}
+	pctx.Voice = &quotingVoice{}
 	if err := registry.Register(replyPlugin{}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	out := captureAgentStdout(t, func() {
-		log := logging.New("debug")
-		handlePacket(context.Background(), chatPacket(playerXUID, "Steve", "!whereami"), selfXUID, nil, log, registry, pctx, eventBus, unlimitedRateLimit(), playerRoster, permResolver, testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
+	// Error-level lines go to stderr and the rest to stdout, so both are
+	// captured: the failure is on the first, the redacted reply on the second.
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureAgentStdout(t, func() {
+			log := logging.New("debug")
+			handlePacket(context.Background(), chatPacket(playerXUID, "Steve", "!whereami"), selfXUID, nil, log, registry, pctx, eventBus, unlimitedRateLimit(), playerRoster, permResolver, testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
+		})
 	})
+	out := stdout + stderr
 	if strings.Contains(out, "123 64 -456") {
 		t.Errorf("a failed whisper put the redacted reply in the log:\n%s", out)
 	}
@@ -5130,9 +5670,9 @@ func TestRedactedReplyNeverReachesTheLogThroughAFailedWhisper(t *testing.T) {
 }
 ```
 
-Add `"errors"` to that file's imports.
+Add `"errors"` to that file's imports. `captureStderr` is the existing helper in `leading_test.go`.
 
-Append to `internal/adapters/bridgeclient_test.go`:
+Append to `internal/adapters/bridgeclient_test.go`, and add `"errors"` and `"strings"` to its imports:
 
 ```go
 func TestErrorClass_SaysTheKindAndNotTheWords(t *testing.T) {
@@ -5152,7 +5692,7 @@ func TestErrorClass_SaysTheKindAndNotTheWords(t *testing.T) {
 - [ ] **Step 2: Run the tests and confirm they fail**
 
 Run: `cd minecraft/agent && go test -count=1 -run 'TestRedactedReplyNeverReachesTheLogThroughAFailedWhisper|TestErrorClass' ./cmd/agent/ ./internal/adapters/ </dev/null`
-Expected: FAIL. The first because the log line holds the error text; the second because `ErrorClass` is undefined.
+Expected: FAIL. The first because the `voice_tell_failed` line on stderr holds the error text; the second because `ErrorClass` is undefined.
 
 - [ ] **Step 3: Implement**
 
@@ -5209,7 +5749,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit, push, open the group's pull request**
 
 ```bash
-gofmt -l minecraft/agent && go vet ./minecraft/agent/...
+test -z "$(gofmt -l minecraft/agent)" && go vet ./minecraft/agent/...
 /usr/bin/git add minecraft/agent/cmd/agent/main.go minecraft/agent/cmd/agent/reply_logging_test.go minecraft/agent/internal/adapters/bridgeclient.go minecraft/agent/internal/adapters/bridgeclient_test.go
 /usr/bin/git commit -m "fix(agent): keep a redacted reply's words out of the log when its whisper fails" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -5241,38 +5781,24 @@ Before opening the PR, check the base branch's gates as the global rules say. At
 ### Task 14: The switches, the origin, and the render guard
 
 **Files:**
-- Modify: `charts/minecraft-fwb/values.yaml` (`map.image.tag` and its history comment, `agent.image.tag`, a new `map.admin` block after `map.checks`), `charts/minecraft-fwb/templates/map.yaml` (env)
-- Create: `tools/tests/test-map-admin.sh`
+- Modify: `charts/minecraft-fwb/values.yaml` (`map.image.tag` and its history comment, `agent.image.tag`, a new `map.admin` block after `map.checks`), `charts/minecraft-fwb/templates/map.yaml` (env), `tools/tests/test-map.sh` (spec Rollout step 2 names it as the test that checks the origin and the switches' order)
 
 **Interfaces:**
-- Produces the values `map.admin.enabled` (`true` in this PR, which is spec Rollout step 2), `map.admin.passkeys` (`false`) and `map.admin.loki.enabled` (`true`). It produces the env `ADMIN_ENABLED`, `PASSKEYS_ENABLED` and, only with passkeys, `PUBLIC_ORIGIN=https://<map.host>`.
+- Produces the values `map.admin.enabled` (`true` in this PR, which is spec Rollout step 2), `map.admin.passkeys` (`false`) and `map.admin.loki.enabled` (`true`). It produces the env `ADMIN_ENABLED`, `PASSKEYS_ENABLED` and, whenever admin is on, `PUBLIC_ORIGIN=https://<map.host>`. Spec Rollout step 2 sets the origin with admin; the map reads it only once passkeys are on.
 
 - [ ] **Step 1: Write the failing test**
 
-`tools/tests/test-map-admin.sh`:
+In `tools/tests/test-map.sh`, add this section immediately before the line `if ! command -v promtool >/dev/null 2>&1; then`, so that it runs whether or not promtool is installed. It reuses the file's `chart`, `work` and `fail`:
 
 ```bash
-#!/usr/bin/env bash
-# Pins the map's admin access: the two switches and the order they may be
-# turned on in, the one origin passkeys are bound to, and the alerts that
-# tell the owner a passkey was added. Read from the rendered chart with the
-# value files production applies.
-set -euo pipefail
-
-here="$(cd "$(dirname "$0")/../.." && pwd)"
-chart="$here/charts/minecraft-fwb"
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
-
-fail() { echo "FAIL: $1"; exit 1; }
-
-render() {
+# Seventh, admin access: the two switches, the order they may be turned on
+# in, and the one origin a passkey is bound to.
+render_with() {
   helm template minecraft-fwb "$chart" --namespace jdwillmsen-prd \
     -f "$chart/values.yaml" -f "$chart/values-prd.yaml" \
     -f "$chart/values-console-bridge.yaml" -f "$chart/values-map-pack.yaml" "$@"
 }
-
-env_of() {
+map_env() {
   python3 - "$1" <<'PY'
 import sys, yaml
 for d in yaml.safe_load_all(open(sys.argv[1])):
@@ -5281,32 +5807,25 @@ for d in yaml.safe_load_all(open(sys.argv[1])):
             print(f'{e["name"]}={e.get("value", "<from secret>")}')
 PY
 }
-
-render > "$work/prod.yaml" || fail "the chart does not render with production values"
-env_of "$work/prod.yaml" > "$work/prod.env"
-grep -qx 'ADMIN_ENABLED=true' "$work/prod.env" || fail "production does not set ADMIN_ENABLED=true"
-grep -qx 'PASSKEYS_ENABLED=false' "$work/prod.env" || fail "production does not set PASSKEYS_ENABLED=false"
-! grep -q '^PUBLIC_ORIGIN=' "$work/prod.env" || fail "PUBLIC_ORIGIN is set with passkeys off"
-
-render --set map.admin.passkeys=true > "$work/on.yaml" || fail "the chart does not render with passkeys on"
-env_of "$work/on.yaml" > "$work/on.env"
 host="$(python3 -c 'import sys,yaml; print(yaml.safe_load(open(sys.argv[1]))["map"]["host"])' "$chart/values.yaml")"
-grep -qx "PUBLIC_ORIGIN=https://$host" "$work/on.env" || fail "PUBLIC_ORIGIN is not https:// plus map.host"
-
-if render --set map.admin.enabled=false --set map.admin.passkeys=true > /dev/null 2>&1; then
+map_env "$work/rendered.yaml" > "$work/admin.env"
+grep -qx 'ADMIN_ENABLED=true' "$work/admin.env" || fail "production does not set ADMIN_ENABLED=true"
+grep -qx 'PASSKEYS_ENABLED=false' "$work/admin.env" || fail "production does not set PASSKEYS_ENABLED=false"
+grep -qx "PUBLIC_ORIGIN=https://$host" "$work/admin.env" || fail "PUBLIC_ORIGIN is not https:// plus map.host"
+render_with --set map.admin.passkeys=true > "$work/passkeys.yaml" || fail "the chart does not render with passkeys on"
+map_env "$work/passkeys.yaml" | grep -qx 'PASSKEYS_ENABLED=true' || fail "passkeys on does not set PASSKEYS_ENABLED=true"
+if render_with --set map.admin.enabled=false --set map.admin.passkeys=true > /dev/null 2>&1; then
   fail "passkeys on with admin off rendered; the map would refuse to start"
 fi
-render --set map.admin.enabled=false --set map.admin.passkeys=false > "$work/off.yaml" || fail "both off, which is how admin is turned off, does not render"
-env_of "$work/off.yaml" | grep -qx 'ADMIN_ENABLED=false' || fail "with admin off, ADMIN_ENABLED is not false"
-
-echo "ok: map admin switches"
+render_with --set map.admin.enabled=false --set map.admin.passkeys=false > "$work/admin-off.yaml" || fail "both off, which is how admin is turned off, does not render"
+map_env "$work/admin-off.yaml" > "$work/admin-off.env"
+grep -qx 'ADMIN_ENABLED=false' "$work/admin-off.env" || fail "with admin off, ADMIN_ENABLED is not false"
+! grep -q '^PUBLIC_ORIGIN=' "$work/admin-off.env" || fail "PUBLIC_ORIGIN is set with admin off"
 ```
-
-Then `chmod +x tools/tests/test-map-admin.sh`.
 
 - [ ] **Step 2: Run it and confirm it fails**
 
-Run: `tools/tests/test-map-admin.sh`
+Run: `tools/tests/test-map.sh`
 Expected: `FAIL: production does not set ADMIN_ENABLED=true`.
 
 - [ ] **Step 3: Implement**
@@ -5356,8 +5875,9 @@ In `templates/map.yaml`, after the `HISTORY_ENABLED` block:
               value: {{ .Values.map.admin.enabled | quote }}
             - name: PASSKEYS_ENABLED
               value: {{ .Values.map.admin.passkeys | quote }}
-            {{- if .Values.map.admin.passkeys }}
-            # A passkey is bound to this exact origin.
+            {{- if .Values.map.admin.enabled }}
+            # A passkey is bound to this exact origin. Set with admin, as the
+            # spec's rollout has it; the map reads it once passkeys are on.
             - name: PUBLIC_ORIGIN
               value: "https://{{ .Values.map.host }}"
             {{- end }}
@@ -5365,13 +5885,13 @@ In `templates/map.yaml`, after the `HISTORY_ENABLED` block:
 
 - [ ] **Step 4: Run it and the existing map suite, and confirm they pass**
 
-Run: `tools/tests/test-map-admin.sh && tools/tests/test-map.sh && shellcheck -s bash tools/tests/test-map-admin.sh`
-Expected: `ok: map admin switches`, the existing suite passes, and shellcheck is quiet.
+Run: `tools/tests/test-map.sh && shellcheck -s bash tools/tests/test-map.sh`
+Expected: the suite passes, and shellcheck is quiet.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-/usr/bin/git add charts/minecraft-fwb/values.yaml charts/minecraft-fwb/templates/map.yaml tools/tests/test-map-admin.sh
+/usr/bin/git add charts/minecraft-fwb/values.yaml charts/minecraft-fwb/templates/map.yaml tools/tests/test-map.sh
 /usr/bin/git commit -m "feat(minecraft-fwb): run the map and agent with admin access, passkeys off" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
 ```
@@ -5379,22 +5899,41 @@ Assisted-by: Claude Code:claude-opus-5-5"
 ### Task 15: The two alerts, with promtool tests
 
 **Files:**
-- Create: `charts/minecraft-fwb/templates/map-admin-rules.yaml`
-- Modify: `tools/tests/test-map-admin.sh` (append the promtool section)
+- Create: `charts/minecraft-fwb/templates/map-admin-rules.yaml`, `tools/tests/test-map-admin.sh`
 
 **Interfaces:**
-- Produces the PrometheusRule `<map name>-admin` with `JdwillmsenMinecraftMapPasskeyAdded` and `JdwillmsenMinecraftMapPasskeyLoginRefused`. Both carry `severity: warning` and `tenant: jdwillmsen`, so that they route straight to Discord.
+- Produces the PrometheusRule `<map name>-admin`. It holds `JdwillmsenMinecraftMapPasskeyAdded` as two rules of one name, the spec's two expressions, "either of which fires it", and `JdwillmsenMinecraftMapPasskeyLoginRefused`. All carry `severity: warning` and `tenant: jdwillmsen`, so that they route straight to Discord.
 
-The spec writes the comparison "aggregated without pod/instance". The rules below aggregate `by (namespace)`. That drops pod and instance too, and also gives both halves of the `or` one label set, so the alert fires once and not twice.
+Each expression aggregates `without (pod, instance)`, as the spec writes it. So the counter's alert carries `result="confirmed"` and the gauge's carries `state="active"`, and when both see one passkey the owner gets two alerts of the same name. The tests expect exactly that.
 
 - [ ] **Step 1: Write the failing promtool tests**
 
-Append to `tools/tests/test-map-admin.sh`, before the final `echo`:
+Create `tools/tests/test-map-admin.sh` and `chmod +x` it:
 
 ```bash
+#!/usr/bin/env bash
+# Pins the map's admin alerts: the owner is told when a passkey is added,
+# across a restart and after every other passkey was revoked too, and when
+# a real passkey is refused. The switches and the origin are pinned in
+# test-map.sh. Read from the rendered chart with the value files
+# production applies.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")/../.." && pwd)"
+chart="$here/charts/minecraft-fwb"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+fail() { echo "FAIL: $1"; exit 1; }
+
+helm template minecraft-fwb "$chart" --namespace jdwillmsen-prd \
+  -f "$chart/values.yaml" -f "$chart/values-prd.yaml" \
+  -f "$chart/values-console-bridge.yaml" -f "$chart/values-map-pack.yaml" > "$work/prod.yaml" \
+  || fail "the chart does not render with production values"
+
 if ! command -v promtool >/dev/null 2>&1; then
+  # Loud rather than silent, as test-map.sh is: CI installs promtool.
   echo "SKIP: promtool not on PATH; map admin alerts not verified"
-  echo "ok: map admin switches"
   exit 0
 fi
 
@@ -5407,21 +5946,25 @@ PY
 [ -s "$work/rules.yaml" ] || fail "could not extract the map admin rules from the chart"
 promtool check rules "$work/rules.yaml" >/dev/null || fail "promtool rejected the map admin rules"
 
-added_labels='
-          - exp_labels:
-              severity: warning
-              tenant: jdwillmsen
-              namespace: jdwillmsen-prd
-            exp_annotations:
-              summary: "A passkey was added to the FWB map"
-              description: "A passkey for logging in to the map as an admin was confirmed in the last 15 minutes. If nobody you know added one, the player it belongs to should type !map logout in the game, which logs out every browser and removes every passkey they hold."'
+added_desc='"A passkey for logging in to the map as an admin was confirmed in the last 15 minutes. If nobody you know added one, the player it belongs to should type !map logout in the game, which logs out every browser and removes every passkey they hold."'
+by_counter="
+          - exp_labels: {severity: warning, tenant: jdwillmsen, namespace: jdwillmsen-prd, result: confirmed}
+            exp_annotations: {summary: \"A passkey was added to the FWB map\", description: $added_desc}"
+by_gauge="
+          - exp_labels: {severity: warning, tenant: jdwillmsen, namespace: jdwillmsen-prd, state: active}
+            exp_annotations: {summary: \"A passkey was added to the FWB map\", description: $added_desc}"
+refused_desc='"In the last 15 minutes a passkey login whose signature was good was refused: a counter that went back (a copied key), a replay, a holder who is no longer an operator, or a passkey never confirmed. mcmap_admin_logins_total by result says which."'
+refused() {
+  printf '\n          - exp_labels: {severity: warning, tenant: jdwillmsen, namespace: jdwillmsen-prd, result: %s}\n            exp_annotations: {summary: "A real passkey was turned away at the FWB map", description: %s}' "$1" "$refused_desc"
+}
 
 cat > "$work/tests.yaml" <<TESTS
 rule_files:
   - rules.yaml
 evaluation_interval: 1m
 tests:
-  # The first passkey ever, from the gauge and counter declared at zero.
+  # The first passkey ever, from the gauge and counter declared at zero:
+  # both expressions see it.
   - interval: 1m
     input_series:
       - series: 'mcmap_admin_passkeys{namespace="jdwillmsen-prd", pod="map-a", state="active"}'
@@ -5431,7 +5974,7 @@ tests:
     alert_rule_test:
       - eval_time: 65m
         alertname: JdwillmsenMinecraftMapPasskeyAdded
-        exp_alerts:$added_labels
+        exp_alerts:$by_counter$by_gauge
       - eval_time: 100m
         alertname: JdwillmsenMinecraftMapPasskeyAdded
         exp_alerts: []
@@ -5446,10 +5989,10 @@ tests:
     alert_rule_test:
       - eval_time: 65m
         alertname: JdwillmsenMinecraftMapPasskeyAdded
-        exp_alerts:$added_labels
+        exp_alerts:$by_counter$by_gauge
 
-  # Revoke all, then add one: the count ends lower than it was, and the
-  # confirmation is what fires.
+  # Revoke all, then add one: the count ends lower than it was, and only
+  # the confirmation fires.
   - interval: 1m
     input_series:
       - series: 'mcmap_admin_passkeys{namespace="jdwillmsen-prd", pod="map-a", state="active"}'
@@ -5459,7 +6002,7 @@ tests:
     alert_rule_test:
       - eval_time: 70m
         alertname: JdwillmsenMinecraftMapPasskeyAdded
-        exp_alerts:$added_labels
+        exp_alerts:$by_counter
 
   # A Recreate restart with nothing confirmed: the old pod's series goes
   # stale at 61m, nothing is scraped at 62m or 63m, and a new pod reports the
@@ -5494,7 +6037,7 @@ tests:
     alert_rule_test:
       - eval_time: 80m
         alertname: JdwillmsenMinecraftMapPasskeyAdded
-        exp_alerts:$added_labels
+        exp_alerts:$by_counter$by_gauge
 
   # Confirmed before the new pod's first scrape: its counter is first seen
   # at 1, which increase() cannot see, and the gauge must fire instead.
@@ -5511,7 +6054,7 @@ tests:
     alert_rule_test:
       - eval_time: 70m
         alertname: JdwillmsenMinecraftMapPasskeyAdded
-        exp_alerts:$added_labels
+        exp_alerts:$by_gauge
 
   # A removal.
   - interval: 1m
@@ -5539,24 +6082,41 @@ tests:
       - { eval_time: 75m, alertname: JdwillmsenMinecraftMapPasskeyAdded, exp_alerts: [] }
       - { eval_time: 100m, alertname: JdwillmsenMinecraftMapPasskeyAdded, exp_alerts: [] }
 
-  # Refusals after the signature page; those before it do not.
+  # Each refusal made after the signature pages, one case per result.
   - interval: 1m
     input_series:
       - series: 'mcmap_admin_logins_total{namespace="jdwillmsen-prd", pod="map-a", result="counter"}'
         values: '0x30 1x30'
-      - series: 'mcmap_admin_logins_total{namespace="jdwillmsen-prd", pod="map-a", result="bad_assertion"}'
-        values: '0x30 9x30'
     alert_rule_test:
       - eval_time: 40m
         alertname: JdwillmsenMinecraftMapPasskeyLoginRefused
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              tenant: jdwillmsen
-              namespace: jdwillmsen-prd
-            exp_annotations:
-              summary: "A real passkey was turned away at the FWB map"
-              description: "In the last 15 minutes a passkey login whose signature was good was refused: a counter that went back (a copied key), a replay, a holder who is no longer an operator, or a passkey never confirmed. mcmap_admin_logins_total by result says which."
+        exp_alerts:$(refused counter)
+  - interval: 1m
+    input_series:
+      - series: 'mcmap_admin_logins_total{namespace="jdwillmsen-prd", pod="map-a", result="replayed"}'
+        values: '0x30 1x30'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: JdwillmsenMinecraftMapPasskeyLoginRefused
+        exp_alerts:$(refused replayed)
+  - interval: 1m
+    input_series:
+      - series: 'mcmap_admin_logins_total{namespace="jdwillmsen-prd", pod="map-a", result="not_operator"}'
+        values: '0x30 1x30'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: JdwillmsenMinecraftMapPasskeyLoginRefused
+        exp_alerts:$(refused not_operator)
+  - interval: 1m
+    input_series:
+      - series: 'mcmap_admin_logins_total{namespace="jdwillmsen-prd", pod="map-a", result="pending"}'
+        values: '0x30 1x30'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: JdwillmsenMinecraftMapPasskeyLoginRefused
+        exp_alerts:$(refused pending)
+
+  # Those before the signature are anyone's to make, and do not page.
   - interval: 1m
     input_series:
       - series: 'mcmap_admin_logins_total{namespace="jdwillmsen-prd", pod="map-a", result="bad_assertion"}'
@@ -5571,12 +6131,14 @@ if ! out="$(cd "$work" && promtool test rules tests.yaml 2>&1)"; then
   echo "$out"
   fail "the map admin alerts do not behave as tested"
 fi
+
+echo "ok: map admin alerts"
 ```
 
 - [ ] **Step 2: Run it and confirm it fails**
 
 Run: `tools/tests/test-map-admin.sh`
-Expected: `FAIL: could not extract the map admin rules from the chart` (or `SKIP` where promtool is missing; install it as `ci.yml` does to see the failure).
+Expected: `FAIL: could not extract the map admin rules from the chart`. Where promtool is missing it prints `SKIP`; install it as `ci.yml` does to see the failure.
 
 - [ ] **Step 3: Implement**
 
@@ -5595,37 +6157,35 @@ spec:
   groups:
     - name: minecraft-fwb-map-admin
       rules:
+        # Two rules of one name, either of which fires it.
         - alert: JdwillmsenMinecraftMapPasskeyAdded
-          # Two ways to see one event. The counter sees every confirmation,
-          # including one that follows revoking every other passkey, which
-          # leaves the count lower than it was. The gauge, read back from
-          # the volume at start, sees a confirmation made before a new pod's
-          # first scrape, which its counter never shows at zero. The window
-          # is half an hour so that a restart's gap of a few scrapes does not
-          # empty it. By namespace, so both halves have one label set and
-          # fire as one alert.
+          # Every confirmation, including one that follows revoking every
+          # other passkey, which leaves the count lower than it was.
           expr: |
-            (
-              sum by (namespace) (increase(mcmap_admin_passkeys_registered_total{namespace="{{ .Release.Namespace }}", result="confirmed"}[15m])) > 0
-            )
-            or
-            (
-              max by (namespace) (mcmap_admin_passkeys{namespace="{{ .Release.Namespace }}", state="active"})
-                > max by (namespace) (max_over_time(mcmap_admin_passkeys{namespace="{{ .Release.Namespace }}", state="active"}[30m] offset 15m))
-            )
-          labels:
+            sum without (pod, instance) (increase(mcmap_admin_passkeys_registered_total{namespace="{{ .Release.Namespace }}", result="confirmed"}[15m])) > 0
+          labels: &passkeyAddedLabels
             severity: warning
             tenant: jdwillmsen
             namespace: {{ .Release.Namespace }}
-          annotations:
+          annotations: &passkeyAddedAnnotations
             summary: "A passkey was added to the FWB map"
             description: "A passkey for logging in to the map as an admin was confirmed in the last 15 minutes. If nobody you know added one, the player it belongs to should type !map logout in the game, which logs out every browser and removes every passkey they hold."
+        - alert: JdwillmsenMinecraftMapPasskeyAdded
+          # The backstop: a confirmation made before a new pod's first
+          # scrape, which its counter never shows at zero. The gauge is read
+          # back from the volume at start, and the half-hour window still
+          # holds the old pod's samples across a restart's gap.
+          expr: |
+            max without (pod, instance) (mcmap_admin_passkeys{namespace="{{ .Release.Namespace }}", state="active"})
+              > max without (pod, instance) (max_over_time(mcmap_admin_passkeys{namespace="{{ .Release.Namespace }}", state="active"}[30m] offset 15m))
+          labels: *passkeyAddedLabels
+          annotations: *passkeyAddedAnnotations
         - alert: JdwillmsenMinecraftMapPasskeyLoginRefused
           # Only refusals made after the signature verified: someone held a
           # real passkey and was still turned away. Those before it are
           # anyone on the internet's to make, and stay on the dashboard.
           expr: |
-            sum by (namespace) (increase(mcmap_admin_logins_total{namespace="{{ .Release.Namespace }}", result=~"counter|replayed|not_operator|pending"}[15m])) > 0
+            sum without (pod, instance) (increase(mcmap_admin_logins_total{namespace="{{ .Release.Namespace }}", result=~"counter|replayed|not_operator|pending"}[15m])) > 0
           labels:
             severity: warning
             tenant: jdwillmsen
@@ -5636,10 +6196,12 @@ spec:
 {{- end }}
 ```
 
+If the cluster's tooling rejects YAML anchors in a PrometheusRule, write the labels and annotations out in both rules instead. The tests do not change.
+
 - [ ] **Step 4: Run it and confirm it passes**
 
-Run: `tools/tests/test-map-admin.sh`
-Expected: `ok: map admin switches`, with promtool's tests passing. If promtool reports a case's alert at a different `eval_time` than expected, recheck the series against the window arithmetic in each case's comment. Do not loosen an expectation to make it pass.
+Run: `tools/tests/test-map-admin.sh && shellcheck -s bash tools/tests/test-map-admin.sh`
+Expected: `ok: map admin alerts`, with promtool's tests passing. If promtool reports a case's alert at a different `eval_time` than expected, recheck the series against the window arithmetic in each case's comment. Do not loosen an expectation to make it pass.
 
 - [ ] **Step 5: Commit**
 
@@ -5657,7 +6219,7 @@ Assisted-by: Claude Code:claude-opus-5-5"
 
 - [ ] **Step 1: Write the failing check**
 
-In `test-map-admin.sh`, after the switch checks and before the promtool section:
+In `test-map-admin.sh`, right after the `helm template` render and before the promtool check, so that it runs whether or not promtool is installed:
 
 ```bash
 python3 - "$work/prod.yaml" <<'PY' || fail "the Loki copy of the passkey alert is missing or wrong"
@@ -5724,7 +6286,7 @@ In `charts/minecraft-fwb/README.md`, add a section `## Map admin access`. In the
 - how to turn them off (passkeys alone, or both in one change; Argo sync plus a restart);
 - the two alerts and where they route;
 - that the Loki copy is inert until the platform's ruler reads tenant orgs;
-- that `tools/tests/test-map-admin.sh` pins all of it.
+- that `tools/tests/test-map.sh` pins the switches and the origin, and `tools/tests/test-map-admin.sh` the alerts and the Loki rule.
 
 - [ ] **Step 4: Run every chart suite and confirm they pass**
 
@@ -5812,8 +6374,13 @@ func TestCommand_ATellrawIsNeverQuotedBack(t *testing.T) {
 	})
 	secret := "ABC234"
 	for name, cmd := range map[string]string{
-		"refused": `tellraw Steve {"no":"` + secret + `"}`,
-		"failed":  `tellraw Steve {"rawtext":[{"text":"` + secret + `"}]}`,
+		// Fails the payload check, whose error does not quote the payload.
+		"refused, bad payload": `tellraw Steve {"no":"` + secret + `"}`,
+		// Matches no template, and ErrCommandNotAllowed's message quotes the
+		// whole command (%q in allowlist.go): the path that leaked.
+		"refused, quoted target": `tellraw "Steve Builds" {"rawtext":[{"text":"` + secret + `"}]}`,
+		// Allowed, then cannot be sent: the console is never connected.
+		"failed": `tellraw Steve {"rawtext":[{"text":"` + secret + `"}]}`,
 	} {
 		rec := postCommand(t, mux, cmd)
 		if rec.Code == http.StatusOK {
@@ -5897,7 +6464,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit, push, open the PR**
 
 ```bash
-gofmt -l minecraft/bridge && go vet ./minecraft/bridge/...
+test -z "$(gofmt -l minecraft/bridge)" && go vet ./minecraft/bridge/...
 /usr/bin/git add minecraft/bridge/http.go minecraft/bridge/http_test.go
 /usr/bin/git commit -m "fix(bridge): name a refused or failed tellraw by its rule, never its words" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Assisted-by: Claude Code:claude-opus-5-5"
@@ -5937,6 +6504,8 @@ This restarts the game server, so it goes through the restart-and-announce path.
 
 ## Self-review
 
+A pre-flight scan compiled and ran this plan's code in scratch copies (`.superpowers/sdd/2026-10-14-map-admin-access/preflight.md`). Every finding in it is fixed in the tasks above.
+
 Run against the spec after writing; fixes are already applied above.
 
 **Spec coverage.**
@@ -5964,7 +6533,7 @@ Run against the spec after writing; fixes are already applied above.
 
 **Gaps found and how each was settled:**
 
-- The spec's "aggregated without pod/instance" became `by (namespace)`. The reason is given in Task 15.
+- The passkey-added alert follows the spec exactly: two rules of one name, each `without (pod, instance)`. When both see one passkey the owner gets two alerts; the promtool cases expect that.
 - The spec's `disabled` login result has no natural path. It is counted when a passkey login would issue a cookie that sessions cannot check (Task 7), so that a wiring mistake shows on the dashboard.
 - Nothing else in the spec lacks a task.
 
@@ -5976,7 +6545,7 @@ Run against the spec after writing; fixes are already applied above.
 - `Ceremonies.{BeginRegistration, FinishRegistration, BeginLogin, FinishLogin}`
 - `auth.Result*`, `auth.MethodPasskey`, `Sessions.{Passkeys, PasskeyTTL, IssuePasskey}`, `SessionFromContext`
 - `operators.{Open, NewBridge, Live, LastKnownGood, None}`
-- `server.{CountPasskeys, CountPasskeyExpired, declareAdminMetrics}`
+- `server.{CountPasskeys, CountPasskeyExpired, StartPasskeyMetrics, newAdminMetrics, adminMetricSet.declare, adminMetricSet.declareRoute}`
 - `mapclient.{PasskeyCode, ErrNoPendingPasskey}`, `adapters.ErrorClass`
 
 `FinishLogin` returns the passkey it found together with a refusal after the signature, and Task 7 relies on that.
