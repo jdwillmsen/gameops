@@ -323,7 +323,8 @@ export async function themes({ page }) {
 // The map as it was: History opens, the newest day kept is drawn from that
 // day's own tiles where today's were, at the same place and zoom, with that
 // day's markers where it kept them and with no request for them where it
-// did not, and Now draws today's again. A map that keeps no days has
+// did not, Compare draws today's beside it and takes them away again, and
+// Now draws today's again. A map that keeps no days has
 // nothing here to press.
 export async function history({ page, cfg }) {
   const listed = await page.evaluate(async () => {
@@ -413,6 +414,28 @@ export async function history({ page, cfg }) {
     const there = await moved();
     measures.moved_pixels = Math.round(there.pixels * 100) / 100;
     if (there.pixels > 1 || there.zoom > 0.001) throw new Fail('choosing a day moved the map', measures);
+
+    // Compare puts today's terrain beside the day's, right of a divider,
+    // and leaving it takes today's away again. A page from before there
+    // was one has no button for it.
+    if (await page.locator('.timeline-compare:not([hidden])').count() > 0) {
+      await page.locator('.timeline-compare').click();
+      const split = await until(async () => {
+        const t = await terrain();
+        const shown = await page.evaluate(() => window.mcmap.past.compare.on() && !document.querySelector('#map .timeline-divide').hidden && document.querySelector('#map .leaflet-beside-pane').style.clipPath !== '');
+        return shown && t.day > 0 && t.today > 0;
+      }, { timeoutMs: 20_000 });
+      if (!split) throw new Fail('Compare did not draw now beside the day', measures);
+      await page.locator('.timeline-compare').click();
+      const whole = await until(async () => {
+        const t = await terrain();
+        return !(await page.evaluate(() => window.mcmap.past.compare.on())) && (await state()).day && t.today === 0 && t.day > 0;
+      }, { timeoutMs: 20_000 });
+      if (!whole) throw new Fail('leaving Compare left the map in two', measures);
+      const beside = await moved();
+      measures.moved_pixels = Math.max(measures.moved_pixels, Math.round(beside.pixels * 100) / 100);
+      if (beside.pixels > 1 || beside.zoom > 0.001) throw new Fail('choosing a day moved the map', measures);
+    }
 
     await page.locator('.timeline-now').click();
     // Today's tiles on the map, and the day's gone from under them.

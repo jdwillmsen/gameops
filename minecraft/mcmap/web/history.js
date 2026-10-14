@@ -10,7 +10,9 @@
 // It is a button in the corner of the map that opens a dock under it: the
 // day shown, which opens a calendar of the days kept, what is of that day
 // and what of now, the steps and the play through the days, and a scrubber
-// with a tick for every day since the first one kept.
+// with a tick for every day since the first one kept. A day can be compared
+// with now or with another day, the two side by side over the map with a
+// divider between them.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -32,6 +34,8 @@
   const DAY_MS = 86_400_000;
   // How many days kept the keys that go further than one step go.
   const LEAP = 7;
+  // How far a press of an arrow key moves the divider, as a share of the map.
+  const NUDGE = 0.02;
   const WEEK = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
   const make = (tag, part, text) => {
@@ -99,10 +103,13 @@
   const loop = button('loop', 'Loop');
   loop.title = 'Start again from the first day in place of stopping';
   loop.setAttribute('aria-pressed', 'false');
+  const compare = button('compare', 'Compare');
+  compare.title = 'This day beside now or another day, with a divider to move between them';
+  compare.setAttribute('aria-pressed', 'false');
   const now = button('now', 'Now');
   const close = button('close', '', 'Close the history');
   close.classList.add('clear');
-  controls.append(earlier, play, later, speeds, pace, loop, now, close);
+  controls.append(earlier, play, later, speeds, pace, loop, compare, now, close);
 
   // The scrubber: a slider whose steps are the days kept and now, drawn as
   // every calendar day from the first one kept, so that the days nothing
@@ -118,7 +125,12 @@
   const ticks = make('div', 'ticks');
   ticks.setAttribute('aria-hidden', 'true');
   const handle = make('span', 'handle');
-  range.append(months, ticks, handle);
+  // Where the day on the right of a comparison is, which the scrubber
+  // shows and does not move.
+  const mate = make('span', 'handle');
+  mate.classList.add('other');
+  mate.hidden = true;
+  range.append(months, ticks, mate, handle);
   scrub.append(range);
 
   // The calendar hangs from the dock over the map's corner. It is not a
@@ -140,11 +152,40 @@
   legend.append(make('i', 'key'), 'No day kept');
   const count = make('span', 'count');
   foot.append(legend, count);
-  calendar.append(head, grid, foot);
+  // Offered for the day right of the divider, which starts as now.
+  const current = button('pick-now', 'Now');
+  current.hidden = true;
+  calendar.append(head, grid, current, foot);
 
   body.append(date, controls, note, more, scrub, calendar);
   bar.append(open, body);
   column.append(bar);
+
+  // What a comparison puts over the map: the divider, which is a slider
+  // of its own, and either side of it which day that side is. The one on
+  // the right is how that day is chosen. They are in the map's own box,
+  // where the two terrains are, and take only the presses that land on
+  // them.
+  const divide = make('div', 'divide');
+  divide.hidden = true;
+  const divider = make('div', 'divider');
+  divider.setAttribute('role', 'slider');
+  divider.setAttribute('aria-orientation', 'horizontal');
+  divider.setAttribute('aria-label', 'Divider between the two days');
+  divider.setAttribute('aria-valuemin', '0');
+  divider.setAttribute('aria-valuemax', '100');
+  divider.tabIndex = 0;
+  divider.append(make('span', 'grip'));
+  const left = make('output', 'left');
+  const right = button('right');
+  right.setAttribute('aria-haspopup', 'dialog');
+  right.setAttribute('aria-expanded', 'false');
+  right.title = 'Pick the day on the right from a calendar';
+  divide.append(left, divider, right);
+  stage.append(divide);
+  // Being in the map's box, a press on them would otherwise be the map's
+  // too: dragging the divider would drag the map.
+  if (window.L && L.DomEvent) for (const node of [divider, right]) L.DomEvent.disableClickPropagation(node);
 
   // The days kept, oldest first. at is the one shown; one past the last
   // is now, which is where the control rests.
@@ -155,12 +196,18 @@
   let timer = null;
   let speed = 1;
   let looped = false;
+  // Whether the day shown is compared with another, and which: a date, or
+  // '' for now. A map from before it could draw two has nothing to ask.
+  let comparing = false;
+  let other = '';
+  const pairs = () => Boolean(app.past.compare);
 
   // A day is a date in UTC, and is said as that date wherever it is read.
   const utc = (day) => Date.parse(`${day}T00:00:00Z`);
   const dayAt = (ms) => new Date(ms).toISOString().slice(0, 10);
   const written = (day, how) => new Date(utc(day)).toLocaleDateString(undefined, { ...how, timeZone: 'UTC' });
   const name = (day) => written(day, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const brief = (day) => written(day, { day: 'numeric', month: 'short' });
 
   // Everything the map draws that is never of a day. The second is said by
   // a page whose markers do not follow the day: its map or its markers'
@@ -170,18 +217,25 @@
   const followed = () => Boolean(app.past.markers && app.markers && app.markers.day);
 
   // What a day's note says is of the day and what is of now, for the
-  // dimension shown.
+  // dimension shown. Compared with another, the day is only the terrain
+  // left of the divider, and the note says what is right of it; the beds,
+  // containers and named mobs are still the day's, on both sides, since
+  // they are drawn once over the whole map.
   function said(day) {
     const kept = day.dimensions.find((d) => d && d.id === app.dimension());
+    const beside = comparing ? ` Right of the divider is ${other ? `the terrain of ${name(other)}` : 'the terrain as it is now'}.` : '';
+    const where = comparing ? ' left of the divider' : '';
+    const both = comparing ? ' on either side' : '';
     if (app.dimension() && !kept) {
       return followed()
-        ? `This day kept nothing of this dimension, so no terrain is drawn, and no beds, containers or named mobs. ${NOW}`
-        : `This day kept nothing of this dimension, so no terrain is drawn. ${NOW_AND_MARKERS}`;
+        ? `This day kept nothing of this dimension, so no terrain is drawn${where}, and no beds, containers or named mobs${both}.${beside} ${NOW}`
+        : `This day kept nothing of this dimension, so no terrain is drawn${where}.${beside} ${NOW_AND_MARKERS}`;
     }
+    const terrain = comparing ? 'The terrain left of the divider is of this day' : 'The terrain is of this day';
     let text;
-    if (!followed()) text = `The terrain is of this day. ${NOW_AND_MARKERS}`;
-    else if (kept && kept.markers === true) text = `The terrain is of this day, and so are the beds, containers and named mobs, each where it was saved then. ${NOW}`;
-    else text = `The terrain is of this day. Its beds, containers and named mobs were not kept, so none are drawn. ${NOW}`;
+    if (!followed()) text = `${terrain}.${beside} ${NOW_AND_MARKERS}`;
+    else if (kept && kept.markers === true) text = `${terrain}, and so are the beds, containers and named mobs${both}, each where it was saved then.${beside} ${NOW}`;
+    else text = `${terrain}. Its beds, containers and named mobs were not kept, so none are drawn${both}.${beside} ${NOW}`;
     return day.rendererChanged ? `${text} It was drawn by a different renderer than the day before, so not every difference from it is the world's.` : text;
   }
 
@@ -282,6 +336,18 @@
     pace.textContent = `${speed}×`;
     pace.setAttribute('aria-label', `Playing at ${PACES[speed]}. Press to change`);
     loop.setAttribute('aria-pressed', String(looped));
+    compare.hidden = !pairs();
+    compare.setAttribute('aria-pressed', String(comparing));
+    mate.hidden = !comparing;
+    divide.hidden = !comparing;
+    document.body.classList.toggle('comparing', comparing);
+    if (comparing) {
+      const its = other ? where[days.findIndex((d) => d.day === other)] : span.length;
+      range.style.setProperty('--timeline-other', String(its));
+      left.textContent = brief(days[at].day);
+      right.textContent = other ? brief(other) : 'Now';
+      right.setAttribute('aria-label', `Right of the divider: ${other ? name(other) : 'now'}. Pick another day`);
+    }
     if (!past) {
       note.textContent = days.length === 0 ? '' : `${days.length} ${days.length === 1 ? 'day' : 'days'} kept, from ${name(days[0].day)}.`;
     } else {
@@ -296,7 +362,36 @@
     const next = Math.max(0, Math.min(days.length, Math.round(to)));
     if (!Number.isFinite(next) || next === at) return;
     at = next;
+    // Now has nothing to be compared with. A day that comes to be the one
+    // it was compared with is compared with now instead.
+    if (at >= days.length) {
+      comparing = false;
+      if (picking === 'other') pick(false);
+    }
     app.past.set(at < days.length ? days[at] : null);
+    if (comparing && other === days[at].day) beside('');
+    draw();
+  }
+
+  // Puts a day on the right of the divider, or now.
+  function beside(day) {
+    other = day;
+    comparing = app.past.compare.start(day ? days.find((d) => d.day === day) : null) !== false;
+  }
+
+  // A comparison needs a day on the left, so from now it is of the newest
+  // day kept, with now on the right.
+  function pair(on) {
+    if (!pairs() || on === comparing || (on && days.length === 0)) return;
+    if (on) {
+      if (at >= days.length) choose(days.length - 1);
+      beside('');
+      place(app.past.compare.cut());
+    } else {
+      comparing = false;
+      app.past.compare.stop();
+      if (picking === 'other') pick(false);
+    }
     draw();
   }
 
@@ -327,6 +422,7 @@
   // sight saying so.
   function shut() {
     stop();
+    pair(false);
     unfold(false);
     choose(days.length);
     draw();
@@ -342,21 +438,36 @@
   function follow() {
     if (!known || !app.past.wanted) return;
     const named = app.past.wanted();
-    if (named === (at < days.length ? days[at].day : '')) return;
+    // Read before the map is told the day, which drops what an address
+    // asked for beside a day nobody then compares.
+    const wanted = pairs() && app.past.compare.wanted ? app.past.compare.wanted() : '';
+    const mine = comparing ? other || 'now' : '';
+    if (named === (at < days.length ? days[at].day : '') && wanted === mine) return;
     const to = named ? days.findIndex((d) => d.day === named) : days.length;
     stop();
     at = to < 0 ? days.length : to;
     app.past.set(at < days.length ? days[at] : null);
+    if (at < days.length && wanted) {
+      // A day on the right that is not kept, or is the day on the left,
+      // is now.
+      beside(wanted !== days[at].day && days.some((d) => d.day === wanted) ? wanted : '');
+      place(app.past.compare.cut());
+    } else if (comparing) {
+      comparing = false;
+      app.past.compare.stop();
+    }
     // A day is never shown with the control that says so put away.
     if (at < days.length) unfold(true);
     draw();
   }
 
-  // A play that is not to start over rests on now.
+  // A play that is not to start over rests on now, or on the newest day
+  // while days are compared, which now would put an end to.
   function beat() {
+    const rest = comparing ? days.length - 1 : days.length;
     if (looped && at + 1 >= days.length) choose(0);
-    else choose(at + 1);
-    if (!looped && at >= days.length) stop();
+    else if (at < rest) choose(at + 1);
+    if (!looped && at >= rest) stop();
     draw();
   }
 
@@ -419,8 +530,11 @@
     at = was ? days.findIndex((d) => d.day === was) : days.length;
     if (at < 0) {
       at = days.length;
+      comparing = false;
       app.past.set(null);
     }
+    // And a day on the right that is no longer kept is now.
+    if (comparing && other && !days.some((d) => d.day === other)) beside('');
     bar.hidden = days.length === 0;
     if (days.length === 0) unfold(false);
     known = true;
@@ -435,14 +549,21 @@
   // pressed, and neither can a day before the first one kept or after
   // today. The months it turns through are those that have a day.
 
+  // It chooses the day shown, or the day right of the divider while two
+  // are compared: picking is which, 'day' or 'other', or '' while it is
+  // put away. For the right it also offers now, and not the day on the
+  // left, which is there already.
+  let picking = '';
   let month = '';
   let filled = '';
   let cells = new Map();
+  const opener = () => (picking === 'other' ? right : date);
 
   const monthOf = (year, index) => new Date(Date.UTC(year, index, 1)).toISOString().slice(0, 7);
 
   function fill() {
-    const chosen = at < days.length ? days[at].day : '';
+    const shown = at < days.length ? days[at].day : '';
+    const chosen = picking === 'other' ? other : shown;
     const first = days[0].day.slice(0, 7);
     const last = days[days.length - 1].day.slice(0, 7);
     if (!month) month = (chosen || days[days.length - 1].day).slice(0, 7);
@@ -450,7 +571,7 @@
     if (month > last) month = last;
     before.disabled = month <= first;
     after.disabled = month >= last;
-    const sign = `${month} ${chosen} ${laid}`;
+    const sign = `${picking} ${month} ${chosen} ${shown} ${laid}`;
     if (sign === filled) return;
     filled = sign;
 
@@ -474,8 +595,11 @@
       cell.dataset.day = day;
       const inside = day >= from && day <= to;
       if (inside) within += 1;
-      if (held.has(day)) {
-        kept += 1;
+      if (held.has(day)) kept += 1;
+      if (held.has(day) && picking === 'other' && day === shown) {
+        cell.disabled = true;
+        cell.setAttribute('aria-label', `${name(day)}, the day on the left`);
+      } else if (held.has(day)) {
         cell.setAttribute('aria-label', name(day));
         cell.setAttribute('aria-pressed', String(day === chosen));
       } else {
@@ -490,19 +614,25 @@
     // Of the month's days that could have been kept, not of all its days:
     // the month the first day is in, and this month, are not yet whole.
     count.textContent = `${kept} of ${within} ${within === 1 ? 'day' : 'days'} kept`;
+    current.hidden = picking !== 'other';
+    current.setAttribute('aria-pressed', String(other === ''));
     const back = cells.get(focused);
     if (back && !back.disabled) back.focus();
   }
 
-  function pick(opening) {
-    if (calendar.hidden === !opening) return;
+  function pick(opening, side = 'day') {
+    if (!opening && calendar.hidden) return;
     calendar.hidden = !opening;
-    date.setAttribute('aria-expanded', String(opening));
+    const was = opener();
+    picking = opening ? side : '';
+    was.setAttribute('aria-expanded', 'false');
     if (!opening) return;
+    opener().setAttribute('aria-expanded', 'true');
+    calendar.setAttribute('aria-label', side === 'other' ? 'Pick the day right of the divider' : 'Pick a day');
     month = '';
     filled = '';
     fill();
-    const chosen = at < days.length ? cells.get(days[at].day) : null;
+    const chosen = cells.get(side === 'other' ? other : at < days.length ? days[at].day : '');
     const first = chosen || [...cells.values()].find((cell) => !cell.disabled);
     if (first) first.focus();
   }
@@ -513,7 +643,15 @@
     fill();
   }
 
-  date.addEventListener('click', () => pick(calendar.hidden));
+  date.addEventListener('click', () => pick(picking !== 'day', 'day'));
+  right.addEventListener('click', () => pick(picking !== 'other', 'other'));
+  current.addEventListener('click', () => {
+    const back = opener();
+    pick(false);
+    beside('');
+    draw();
+    back.focus();
+  });
   before.addEventListener('click', () => turn(-1));
   after.addEventListener('click', () => turn(1));
   grid.addEventListener('click', (e) => {
@@ -521,11 +659,16 @@
     if (!cell || cell.disabled) return;
     const to = days.findIndex((d) => d.day === cell.dataset.day);
     if (to < 0) return;
-    stop();
+    const back = opener();
+    if (picking === 'other') {
+      beside(days[to].day);
+    } else {
+      stop();
+      choose(to);
+    }
     pick(false);
-    choose(to);
     draw();
-    date.focus();
+    back.focus();
   });
   // The arrow keys go to the next day kept that way, a day or a week on.
   grid.addEventListener('keydown', (e) => {
@@ -546,12 +689,13 @@
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape' || calendar.hidden) return;
     e.stopPropagation();
+    const back = opener();
     pick(false);
-    date.focus();
+    back.focus();
   }, true);
   document.addEventListener('pointerdown', (e) => {
     if (calendar.hidden || !(e.target instanceof Node)) return;
-    if (!calendar.contains(e.target) && !date.contains(e.target)) pick(false);
+    if (![calendar, date, right].some((node) => node.contains(e.target))) pick(false);
   });
 
   // --- the scrubber -------------------------------------------------------------
@@ -630,8 +774,9 @@
       return;
     }
     if (days.length === 0) return;
-    // From now there is nowhere later to run to, so it starts over.
-    if (at >= days.length) choose(0);
+    // From now there is nowhere later to run to, so it starts over, as it
+    // does from the newest day while days are compared.
+    if (at >= (comparing ? days.length - 1 : days.length)) choose(0);
     run();
     draw();
   });
@@ -651,6 +796,53 @@
     keep();
     draw();
   });
+  compare.addEventListener('click', () => pair(!comparing));
+
+  // --- the divider ---------------------------------------------------------------
+  //
+  // Dragged, or moved by the arrow keys while it has the focus, a fiftieth
+  // of the map at a time; Home and End take it to the map's edges. The
+  // map cuts its second terrain where this says, and holds it to the map.
+
+  function place(share) {
+    const cut = app.past.compare.cut(share);
+    const percent = Math.round(cut * 100);
+    divide.style.setProperty('--timeline-cut', `${cut * 100}%`);
+    divider.setAttribute('aria-valuenow', String(percent));
+    divider.setAttribute('aria-valuetext', `${percent}% of the map is the day on the left`);
+  }
+  let cutting = null;
+  const cutAt = (e) => {
+    const box = stage.getBoundingClientRect();
+    if (box.width > 0) place((e.clientX - box.left) / box.width);
+  };
+  divider.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault();
+    divider.focus();
+    divider.setPointerCapture(e.pointerId);
+    cutting = e.pointerId;
+    cutAt(e);
+  });
+  divider.addEventListener('pointermove', (e) => {
+    if (cutting === e.pointerId) cutAt(e);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    divider.addEventListener(type, (e) => {
+      if (cutting === e.pointerId) cutting = null;
+    });
+  }
+  divider.addEventListener('keydown', (e) => {
+    const here = app.past.compare.cut();
+    const to = {
+      ArrowLeft: here - NUDGE, ArrowDown: here - NUDGE, ArrowRight: here + NUDGE, ArrowUp: here + NUDGE,
+      PageDown: here - NUDGE * 5, PageUp: here + NUDGE * 5, Home: 0, End: 1,
+    }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    place(to);
+  });
+
   more.addEventListener('click', () => {
     const whole = note.classList.toggle('whole');
     more.textContent = whole ? 'Less' : 'More';

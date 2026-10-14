@@ -97,6 +97,8 @@ export const SENTENCES = [
   "the day kept its markers and the page did not draw them",
   "the page asked for the markers of a day that kept none",
   "choosing a day moved the map",
+  "Compare did not draw now beside the day",
+  "leaving Compare left the map in two",
   "going back to now left the map on the day",
   "going back to now moved the map",
   "the History row did not close",

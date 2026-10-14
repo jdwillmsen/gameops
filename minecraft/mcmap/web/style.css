@@ -118,6 +118,10 @@
   --timeline-room: 0px;
   --timeline-slots: 1;
   --timeline-at: 0;
+  /* And while two days are compared, the place of the day on the right,
+     and where across the map the divider between them stands. */
+  --timeline-other: 0;
+  --timeline-cut: 50%;
   /* How far in a line of the panel starts, which goes with its depth. */
   --inset: var(--row-pad);
 }
@@ -1606,6 +1610,26 @@ kbd, .keys code {
 .timeline-cell[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
 .timeline-kept { display: flex; align-items: center; justify-content: space-between; gap: var(--row-gap); margin: var(--row-gap) 0 0; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
 .timeline-key { display: inline-block; width: 12px; height: 12px; margin-right: 0.4em; vertical-align: -2px; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--dim) 4px 5px); border: 1px solid var(--line); }
+.timeline-handle.other { left: calc((var(--timeline-other) + 0.5) / var(--timeline-slots) * 100%); border-style: dashed; border-color: var(--dim); }
+.timeline-pick-now { width: 100%; margin-top: var(--row-gap); }
+/* Two days compared: over the map, a divider to drag with a day named
+   either side of it. The line is drawn as a mark on the map is, white in
+   a dark casing whatever the theme, since it is the terrain it is read
+   against; it is as wide to catch as anything pressed. Only the divider
+   and the day on the right, which is a button, take a press: the rest of
+   the map under them is still the map's. */
+.timeline-divide { position: absolute; inset: 0; z-index: 1040; overflow: hidden; pointer-events: none; }
+.timeline-divide[hidden] { display: none; }
+.timeline-divider { position: absolute; top: 0; bottom: 0; left: calc(var(--timeline-cut) - var(--hit) / 2); width: var(--hit); cursor: ew-resize; touch-action: none; pointer-events: auto; }
+.timeline-divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: var(--marker-fill); box-shadow: 0 0 0 1px var(--marker-ink); }
+.timeline-divider:focus-visible { outline-offset: -2px; }
+.timeline-grip { position: absolute; top: 50%; left: 50%; width: 36px; height: 36px; margin: -18px; background: var(--panel); border: 2px solid var(--text); border-radius: 50%; }
+.timeline-grip::before, .timeline-grip::after { content: ""; position: absolute; top: calc(50% - 4px); width: 6px; height: 6px; border: solid var(--text); border-width: 0 0 2px 2px; }
+.timeline-grip::before { left: 7px; transform: rotate(45deg); }
+.timeline-grip::after { right: 7px; transform: rotate(-135deg); }
+.timeline-left, .timeline-right { position: absolute; top: 0.6rem; display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--row-pad); background: var(--float); border: 1px solid var(--line); border-radius: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timeline-left { right: calc(100% - var(--timeline-cut) + var(--hit) / 2 + 0.4rem); border-color: var(--warn); color: var(--warn); }
+.timeline-right { left: calc(var(--timeline-cut) + var(--hit) / 2 + 0.4rem); pointer-events: auto; }
 /* A day that is past is told apart from now at a glance. */
 .past .timeline-body { border-top-color: var(--warn); }
 .past .timeline-date { color: var(--warn); }
@@ -1631,8 +1655,10 @@ kbd, .keys code {
   .timeline-note:empty, .timeline-note:empty + .timeline-more { display: none; }
   .timeline-more { display: inline-flex; align-items: center; justify-content: center; order: 4; flex: none; align-self: flex-start; }
   .timeline-scrub { order: 5; flex: 1 1 100%; }
-  .timeline-earlier, .timeline-play, .timeline-later, .timeline-pace, .timeline-loop { order: 6; }
-  .timeline-play { flex: 1 1 auto; }
+  .timeline-earlier, .timeline-play, .timeline-later, .timeline-pace, .timeline-loop, .timeline-compare { order: 6; }
+  .timeline-play, .timeline-compare { flex: 1 1 auto; }
+  /* Clear of the map's own buttons and the layer panel's, at the top. */
+  .timeline-left, .timeline-right { top: auto; bottom: 0.6rem; }
   .timeline-speed { display: none; }
   .timeline-pace { display: inline-flex; align-items: center; justify-content: center; }
   .timeline-calendar { left: 0.5rem; right: 0.5rem; width: auto; max-width: none; }
