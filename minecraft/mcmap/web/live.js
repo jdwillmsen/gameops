@@ -217,10 +217,28 @@
   // gamertag as the game compares it.
   const sortOf = (category, name, type) => (category === 'players' ? (typeof name === 'string' ? name.toLowerCase() : '') : (typeof type === 'string' ? type : ''));
   const passes = (category, sort) => choices[domainOf(category)].shows(sort);
+  // The height bands, where the page has them: whether the entity's band is
+  // shown, and the colour of the ring it is given. The surface under it is
+  // the server's, sent with it.
+  const heights = () => app.heights || null;
+  const atHeight = (held) => {
+    const h = heights();
+    return h === null || h.shows(pictured, held.y, held.s);
+  };
+  // Gives the entity's marker the ring of its band, and says whether that
+  // is not what it had, in which case it is to be drawn again.
+  function banded(held) {
+    const h = heights();
+    const colour = h === null ? '' : h.tint(pictured, held.y, held.s);
+    if ((held.marker.options.band || '') === colour) return false;
+    held.marker.options.band = colour;
+    return true;
+  }
+
   // Whether an entity is on the map: its row is on and its kind is not
   // filtered out. Two set lookups, which is all a frame of a thousand mobs
   // pays for the filters.
-  const visible = (held) => shown(held.category) && passes(held.category, held.sort);
+  const visible = (held) => shown(held.category) && passes(held.category, held.sort) && atHeight(held);
 
   // One canvas for every marker. Leaflet's default draws each as its own
   // SVG element, which is fine for a grid and not for a thousand mobs moving
@@ -266,11 +284,12 @@
     // The pointer reaches past the radius, and the canvas only repaints
     // inside the bounds a marker claims.
     _updateBounds() {
-      const reach = this._radius + (this.options.sprite ? POINTER : 0) + this._clickTolerance();
+      const reach = this._radius + (this.options.sprite ? POINTER : 0) + (this.options.band ? icons.BAND_REACH || 0 : 0) + this._clickTolerance();
       this._pxBounds = L.bounds(this._point.subtract([reach, reach]), this._point.add([reach, reach]));
     },
     _updatePath() {
       if (!this._renderer._drawing || this._empty()) return;
+      if (this.options.band && icons.bandRing) icons.bandRing(this);
       steady(this, () => this._arrow());
     },
     _arrow() {
@@ -461,6 +480,7 @@
     playerLayer.removeLayer(held.marker);
     held.pic = pic;
     held.marker = make({ n: held.name, x: held.x, z: held.z, r: held.yaw }, 'players', pic);
+    banded(held);
     if (visible(held)) playerLayer.addLayer(held.marker);
   }
 
@@ -834,18 +854,23 @@
       }
       if (!held) {
         const pic = category === 'players' ? headOf(e.n) : null;
-        held = { marker: make(e, category, pic), category, sort: sortOf(category, e.n, e.t), x: e.x, y: e.y, z: e.z, yaw: e.r, name: e.n, type: e.t, pic };
+        held = { marker: make(e, category, pic), category, sort: sortOf(category, e.n, e.t), x: e.x, y: e.y, z: e.z, s: e.s, yaw: e.r, name: e.n, type: e.t, pic };
+        banded(held);
         entities.set(key, held);
         if (visible(held)) layerOf(category).addLayer(held.marker);
         added = true;
         return;
       }
       held.y = e.y;
+      held.s = e.s;
       held.name = e.n;
+      const ringed = banded(held);
       if (held.x !== e.x || held.z !== e.z) {
         held.x = e.x;
         held.z = e.z;
         held.marker.setLatLng([e.z, e.x]);
+      } else if (ringed) {
+        held.marker.redraw();
       }
       if (category === 'players') {
         if (held.yaw !== e.r) {
@@ -863,6 +888,7 @@
     for (const e of frame.mobs || []) place(e, categoryOf.get(e.t) || 'other', 'm:');
     for (const key of [...entities.keys()]) if (!seen.has(key)) forget(key);
     wanted(frame.players || []);
+    seatPlayers();
     // The canvas paints in the order markers were added; players stay on
     // top of a mob that arrived after them.
     if (added) playerLayer.eachLayer((marker) => marker.bringToFront());
@@ -878,6 +904,32 @@
     // And which mobs are loaded, for the layer that marks where the
     // snapshot left them.
     document.dispatchEvent(new CustomEvent('mcmap:live'));
+  }
+
+  // Where the viewer is, for "near my height", and which players are at the
+  // heights shown. Players are never part of a group, so a frame is what
+  // brings them on and off the map as they climb and fall; the mobs are
+  // seated by regroup, which every frame ends in.
+  function seatPlayers() {
+    const h = heights();
+    if (h === null) return;
+    let mine = null;
+    if (!stale) {
+      for (const held of entities.values()) {
+        if (held.category === 'players' && isMe(held.name)) {
+          mine = held;
+          break;
+        }
+      }
+    }
+    h.viewer(pictured, mine === null ? null : mine.y);
+    if (!h.active()) return;
+    for (const held of entities.values()) {
+      if (held.category !== 'players') continue;
+      const want = visible(held);
+      if (want === playerLayer.hasLayer(held.marker)) continue;
+      if (want) playerLayer.addLayer(held.marker); else playerLayer.removeLayer(held.marker);
+    }
   }
 
   // A player's head for their line in the panel, drawn once the picture
@@ -951,6 +1003,7 @@
       // By name, so that a line stays where it is while its count moves.
       row.setItems(items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })));
     }
+    if (heights() !== null) heights().changed();
   }
 
   // Takes the map to everything of one row, or of one type in it, that is
@@ -1168,6 +1221,7 @@
   function refilter() {
     let added = false;
     for (const held of entities.values()) {
+      if (banded(held)) held.marker.redraw();
       const layer = layerOf(held.category);
       const want = visible(held) && held.grouped !== true;
       if (want === layer.hasLayer(held.marker)) continue;
@@ -1866,6 +1920,16 @@
     count();
   });
   for (const choice of Object.values(choices)) choice.onChange(refilter);
+  if (heights() !== null) {
+    heights().onChange(refilter);
+    // Their own height moving matters only to what is near it: the frame
+    // that moved it has seated the players, and the mobs are seated here.
+    heights().onViewer(regroup);
+    heights().count('live', (add, addBox, dimension) => {
+      if (dimension !== pictured || stale) return;
+      for (const held of entities.values()) add(held.y, held.s);
+    });
+  }
   // A tooltip already open says the old name until it is told.
   document.addEventListener('mcmap:names', () => {
     if (mobLayer.isTooltipOpen()) mobLayer.getTooltip().update();

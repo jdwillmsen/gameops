@@ -238,6 +238,31 @@
     return groups[sort].get(kind);
   };
 
+  // Every recorded structure's marks, as { group, layers, height, on },
+  // where height is { low, high, surface } or null for one with no Y.
+  // Predicted ones have no Y either and are always shown, so they are
+  // drawn as they were and only counted.
+  const placed = [];
+  const heights = () => app.heights || null;
+  const atHeight = (entry) => {
+    const h = heights();
+    return entry.height === null || h === null || h.showsBox(shown, entry.height.low, entry.height.high, entry.height.surface);
+  };
+  function seat(entry) {
+    const want = atHeight(entry);
+    if (want === entry.on) return;
+    entry.on = want;
+    for (const layer of entry.layers) {
+      if (want) layer.addTo(entry.group); else entry.group.removeLayer(layer);
+    }
+  }
+  function hold(group, layers, s) {
+    const box = s && Number.isFinite(s.minY) && Number.isFinite(s.maxY) ? { low: s.minY, high: s.maxY, surface: Number.isFinite(s.s) ? s.s : NaN } : null;
+    const entry = { group, layers, height: box, on: false };
+    placed.push(entry);
+    seat(entry);
+  }
+
   const spawnLayer = L.layerGroup();
   // Whether the dimension shown has the world spawn in it.
   let spawned = false;
@@ -273,6 +298,7 @@
 
   function clear() {
     for (const sort of Object.values(groups)) for (const group of sort.values()) group.clearLayers();
+    placed.length = 0;
     spawnLayer.clearLayers();
     spawned = false;
     shown = null;
@@ -285,6 +311,7 @@
     foundKinds = new Set();
     checks = {};
     rules = {};
+    if (heights() !== null) heights().changed();
   }
 
   function draw(dimension, data) {
@@ -304,12 +331,13 @@
       // The box is what the world recorded, to the block. A block's far
       // edge is one past its coordinate. One round the blocks a kind was
       // found by is dashed: the structure is there, and its edge is not.
-      L.rectangle([[s.minZ, s.minX], [s.maxZ + 1, s.maxX + 1]], {
+      const box = L.rectangle([[s.minZ, s.minX], [s.maxZ + 1, s.maxX + 1]], {
         color: k.color, weight: 2, fillColor: k.color, fillOpacity: found(s) ? 0.08 : 0.18, dashArray: found(s) ? '5 5' : null, interactive: false,
-      }).addTo(group);
+      });
       // And a mark that stays the same size, since a box 58 blocks wide is
       // less than a pixel from far out.
-      mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded', s.variant), label, { recorded: s }).addTo(group);
+      const pin = mark([(s.minZ + s.maxZ + 1) / 2, (s.minX + s.maxX + 1) / 2], icon(s.kind, 'recorded', s.variant), label, { recorded: s });
+      hold(group, [box, pin], s);
     }
     for (const p of predicted) {
       const sort = p.candidate ? 'candidate' : 'predicted';
@@ -355,6 +383,7 @@
       }
     }
     apply();
+    if (heights() !== null) heights().changed();
     if (wanted === null) fromLink();
     wantedNow();
   }
@@ -1233,6 +1262,20 @@
   // For the search: one chosen there is shown in full once the map is on
   // its dimension.
   choice.onChange(apply);
+  if (heights() !== null) {
+    const reseat = () => placed.forEach(seat);
+    heights().onChange(reseat);
+    heights().onViewer(reseat);
+    // One in several bands is counted in each; one with no height, as every
+    // predicted one is, is counted apart.
+    heights().count('structures', (add, addBox, dimension) => {
+      if (shown !== dimension) return;
+      for (const { height } of placed) {
+        if (height === null) add(NaN, NaN); else addBox(height.low, height.high, height.surface);
+      }
+      add(NaN, NaN, counts.predicted + counts.candidate);
+    });
+  }
 
   app.structures = {
     // Whether the viewer has a kind's known structures on the map.

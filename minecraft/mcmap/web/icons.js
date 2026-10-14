@@ -791,6 +791,32 @@
   }
   const HOVER_REACH = STATES.hovered.gap + STATES.hovered.weight + 2;
 
+  // The ring of the height band a marker is in, when the map is asked to
+  // colour by height: the band's colour on a casing, round a dot or a
+  // picture of any size. It reaches this far past the radius, and the
+  // bounds a marker claims have to as well.
+  const BAND = { gap: 2.5, weight: 2 };
+  const BAND_REACH = BAND.gap + (BAND.weight + 2) / 2 + 1;
+  function bandRing(layer) {
+    const band = layer.options.band;
+    if (!band) return;
+    const ctx = layer._renderer._ctx;
+    const { x, y } = layer._point;
+    steady(layer, () => {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(x, y, layer._radius + BAND.gap, 0, Math.PI * 2);
+      ctx.lineWidth = BAND.weight + 2;
+      ctx.strokeStyle = casing();
+      ctx.stroke();
+      ctx.lineWidth = BAND.weight;
+      ctx.strokeStyle = band;
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
   // A marker that is its picture, or, with none to draw, the circle it
   // has always been. Under the pointer it is ringed, picture or circle.
   const Stamped = L.CircleMarker.extend({
@@ -826,6 +852,7 @@
       // are Leaflet's and this script's strokes, sized by the context.
       if (this.options.sprite) stamp(this, this.options.sprite);
       else steady(this, () => L.CircleMarker.prototype._updatePath.call(this));
+      bandRing(this);
       if (this._hovered) steady(this, () => halo(this._renderer._ctx, this._point.x, this._point.y, this._radius, 'hovered'));
     },
   });
@@ -1046,6 +1073,8 @@
     stamp,
     steady,
     steadies,
+    bandRing,
+    BAND_REACH,
     Stamped,
     tag,
     Tagged,

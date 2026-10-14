@@ -70,6 +70,8 @@
   const SAVED_ALPHA = DIMMED.alpha;
   const SAVED_DASH = DIMMED.dash;
   const SAVED_RING = 3;
+  // A saved mark's broken ring is outside the ring of its band, not on it.
+  const BAND_ROOM = 4;
   // picture -> the same picture faded. The pictures are made once and
   // kept by whoever made them, so each is faded once.
   const faded = new WeakMap();
@@ -103,6 +105,20 @@
     return made;
   }
   const WORLD_KINDS = ['beds', 'containers', 'mobs'];
+
+  // The height bands, where the page has them. A marker of the world has
+  // the surface under it from the server, and a waypoint is the player's
+  // own and is not sorted by height.
+  const heights = () => app.heights || null;
+  const dimensionOf = () => drawn.dimension || app.dimension();
+  const atHeight = (kind, data) => {
+    const h = heights();
+    return kind === 'waypoints' || h === null || h.shows(dimensionOf(), data.y, data.s);
+  };
+  const ringOf = (kind, data) => {
+    const h = heights();
+    return kind === 'waypoints' || h === null ? '' : h.tint(dimensionOf(), data.y, data.s);
+  };
   const BABY_RADIUS = 4;
 
   // Each kind's row in the panel, once the service is known to have that
@@ -204,7 +220,7 @@
     // The canvas only repaints inside the bounds a marker claims.
     _updateBounds() {
       Pin.prototype._updateBounds.call(this);
-      const reach = this._radius + SAVED_RING + 2;
+      const reach = this._radius + SAVED_RING + 2 + (this.options.band ? BAND_ROOM : 0);
       this._pxBounds.extend(this._point.subtract([reach, reach]));
       this._pxBounds.extend(this._point.add([reach, reach]));
     },
@@ -217,7 +233,7 @@
         ctx.save();
         ctx.globalAlpha = 1;
         ctx.beginPath();
-        ctx.arc(this._point.x, this._point.y, this._radius + SAVED_RING, 0, Math.PI * 2);
+        ctx.arc(this._point.x, this._point.y, this._radius + SAVED_RING + (this.options.band ? BAND_ROOM : 0), 0, Math.PI * 2);
         ctx.setLineDash(SAVED_DASH);
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = this.options.color;
@@ -301,6 +317,7 @@
       kind,
       data: m,
       sprite: null,
+      band: ringOf(kind, m),
       tag: kind === 'mobs' ? tagOf(m.n) : null,
     });
     dress(marker);
@@ -357,7 +374,7 @@
           const out = [];
           if (!map.hasLayer(layers[kind])) return out;
           for (const entry of held[kind]) {
-            if (!choices[kind].shows(entry.item)) continue;
+            if (!choices[kind].shows(entry.item) || !atHeight(kind, entry.data)) continue;
             sorts[kind].set(entry.item, entry.data);
             out.push({ id: entry, x: entry.data.x + 0.5, z: entry.data.z + 0.5, family: kind, type: entry.item });
           }
@@ -397,7 +414,7 @@
         group.removeLayer(entry.marker);
         continue;
       }
-      const want = choices[kind].shows(entry.item) && !(card && entry.live !== null && card.drawn(entry.live.id));
+      const want = choices[kind].shows(entry.item) && atHeight(kind, entry.data) && !(card && entry.live !== null && card.drawn(entry.live.id));
       if (want === group.hasLayer(entry.marker)) continue;
       if (want) group.addLayer(entry.marker); else group.removeLayer(entry.marker);
       back = back || want;
@@ -626,6 +643,7 @@
       fill(kind, Array.isArray(doc[kind]) ? doc[kind] : []);
       more[kind] = (doc.more && Number.isFinite(doc.more[kind])) ? doc.more[kind] : 0;
     }
+    if (heights() !== null) heights().changed();
   }
 
   // Takes the world's marks off, for a dimension or a day they are not of.
@@ -642,6 +660,7 @@
     opened = null;
     drawn = { dimension: null, etag: null, day: '' };
     snapshotAt = null;
+    if (heights() !== null) heights().changed();
   }
 
   // A day's markers, which never change: asked for once, and only of a day
@@ -854,6 +873,27 @@
   document.addEventListener('mcmap:names', renamed);
   document.addEventListener('mcmap:live', aside);
   for (const kind of Object.keys(KINDS)) choices[kind].onChange(() => place(kind));
+  if (heights() !== null) {
+    // A band shown or hidden, the colouring turned on or off, or the
+    // viewer's height moved while near it is asked for.
+    const rebanded = () => {
+      for (const kind of WORLD_KINDS) {
+        for (const { marker, data } of held[kind]) {
+          const ring = ringOf(kind, data);
+          if ((marker.options.band || '') === ring) continue;
+          marker.options.band = ring;
+          marker.redraw();
+        }
+        place(kind);
+      }
+    };
+    heights().onChange(rebanded);
+    heights().onViewer(rebanded);
+    heights().count('markers', (add, addBox, dimension) => {
+      if (drawn.dimension !== dimension) return;
+      for (const kind of WORLD_KINDS) for (const { data } of held[kind]) add(data.y, data.s);
+    });
+  }
   const styledAs = () => {
     const { theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers, group } = look();
     return [theme, size, text, labelMobs, labelWaypoints, picturesLive, picturesMarkers, group, icons.composedAs ? icons.composedAs() : ''].join('|');
