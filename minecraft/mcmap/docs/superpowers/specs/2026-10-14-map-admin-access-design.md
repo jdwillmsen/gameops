@@ -1,6 +1,6 @@
 # Admin access to the production map
 
-Status: proposed 2026-10-14, revised the same day after two independent
+Status: proposed 2026-10-14, revised the same day after three independent
 reviews. Nothing is built. Each decision below is numbered so that it can be
 approved or rejected on its own.
 
@@ -268,10 +268,18 @@ enough that a list that keeps growing is noticed.
    /auth/passkey/register/finish` (admin gate) checks that the caller's
    XUID and `IssuedMilli` are the ones the challenge was issued to, then
    runs the §7.1 steps listed below. On success it stores the credential
-   as **pending**, tied to that XUID, and at most one pending credential
-   per XUID: a new one replaces the old. A pending credential cannot log
-   anyone in. The page says: "Now type `!map passkey` in the game. You
-   will be whispered a code to type here."
+   as **pending**, tied to that XUID. There is at most one pending
+   credential per XUID, and **a second registration while one is pending
+   is refused, not replaced**. It is allowed again only once the pending
+   one has expired, after 2 minutes, or has been cancelled with
+   `POST /auth/passkey/register/cancel` by a session with the same XUID
+   and `IssuedMilli`. A pending credential cannot log anyone in. The page
+   shows the credential's **fingerprint**, the first 4 bytes of the SHA-256
+   of its ID as `XXXX-XXXX` in hex, and says: "Now type `!map passkey` in
+   the game. You will be whispered a code to type here. Check that the
+   whisper shows the same fingerprint, `7F3A-91C2`." A stolen cookie can
+   start or cancel a registration but cannot change which credential the
+   owner's page is holding.
 4. The operator types `!map passkey` in game. The code goes **from the
    game to the browser**, the opposite way to a login code, so the
    player is never asked to type something a page showed them.
@@ -280,29 +288,50 @@ enough that a list that keeps growing is noticed.
    (`gateAgent`), body `{"xuid": "<the sender's XUID>"}`. The map answers
    `200 {"code": "<6 characters>", "expiresIn": 120}` only if that XUID
    has a pending credential less than 2 minutes old, and `404` otherwise.
-   The code is drawn from the login codes' alphabet, bound to that XUID
-   and that pending credential, single use, and replaces any earlier code
-   for it.
+   The answer also carries the pending credential's fingerprint. The code
+   is drawn from the login codes' alphabet, bound to that XUID and that
+   pending credential, single use, and replaces any earlier code for the
+   same credential.
 6. The agent whispers the code to that player alone, through its usual
    private reply path, which reaches them through the bridge's `tellraw`:
-   "Your map passkey code is ABC234. Type it into the map page that asked
-   for it, within 2 minutes. It lets that browser log in to the map as
+   "Your map passkey code is ABC234, for the passkey with fingerprint
+   7F3A-91C2. Type it into the map page that asked for it, within 2
+   minutes, only if that page shows the same fingerprint. It lets that browser log in to the map as
    you, as admin, without the game. Never give it to anyone, and never
    type it into a page someone else sent you. If you did not just add a
    passkey, type !map logout." The reply is marked `RedactReply`, so the
-   code is not written to the agent's log. One place can still record it:
-   the bridge logs a command's text when sending it to the console fails
-   (`command send failed` in `minecraft/bridge/http.go`). Such a code was
-   never delivered, is single use and expires in 2 minutes. The agent
-   change includes making the bridge log only the rule name for `tellraw`
-   instead of the whole text, so that whispers never land there. On a `404` the agent answers:
+   agent does not log it as a reply. **Today the code can still reach a
+   log on three paths**, each of which logs a whisper only when sending it
+   went wrong:
+   - the bridge's `command refused` line, and its 403 body, which repeats
+     the command through `ErrCommandNotAllowed`;
+   - the bridge's `command send failed` line (`minecraft/bridge/http.go`);
+   - the agent's `voice_tell_failed` line, whose error carries the
+     bridge's answer body (`BridgeClient.do`,
+     `agent/internal/adapters/bridgeclient.go` line 128).
+
+   Phase 1 closes all three. For a `tellraw`, the bridge logs and answers
+   with the rule name only, never the command, on both its refusal and its
+   send-failure paths. For a reply marked `RedactReply`, the agent logs
+   `voice_tell_failed` with the error's class and status and without its
+   text. Until the new bridge is running (Rollout step 5), a code from a
+   failed whisper can sit in the bridge's log. Such a code was never
+   delivered, is single use and expires in 2 minutes. On a `404` the
+   agent answers:
    "There is no passkey waiting to be added for you. Start from the map
    page." The console cannot use the command.
 7. The player types the code into the page that is registering, which
    sends it to `POST /auth/passkey/register/confirm` (admin gate). The map
-   activates the credential only if the caller's XUID and `IssuedMilli`
-   are the ones the registration was made under, the code is the current
-   one for that pending credential, and both are under 2 minutes old.
+   activates the credential only if all of these hold:
+   - the caller's XUID and `IssuedMilli` are the ones the registration
+     was made under;
+   - the request carries the **credential ID that this page's `create()`
+     returned**, and it is the current pending credential's;
+   - the code is the current one for that credential;
+   - both are under 2 minutes old.
+
+   A code for another credential, or a credential ID that is no longer
+   pending, is a wrong code.
    **Three wrong codes delete the pending credential and its code**, and
    the owner starts again. With 32^6 codes, three tries in two minutes is
    no attack.
@@ -610,29 +639,42 @@ So the alerts are:
   label changes with every restart, so the rule aggregates it away:
 
   ```promql
-  (
-    max without (pod, instance) (mcmap_admin_passkeys{state="active"})
-      > max without (pod, instance) (mcmap_admin_passkeys{state="active"} offset 15m)
-  )
-  or
-  (
-    max without (pod, instance) (mcmap_admin_passkeys{state="active"}) > 0
-      unless max without (pod, instance) (mcmap_admin_passkeys{state="active"} offset 15m)
-  )
+  max without (pod, instance) (mcmap_admin_passkeys{state="active"})
+    > max without (pod, instance) (
+        max_over_time(mcmap_admin_passkeys{state="active"}[30m] offset 15m)
+      )
   ```
 
-  The second half covers the first passkey ever, which has no series 15
-  minutes earlier. It also fires once if the map was not scraped for over
-  15 minutes while holding passkeys. That is a known false alarm, and
-  cheaper than missing the first passkey. A removal and an addition in
-  the same 15 minutes cancel out, so the counter's `confirmed` results are
-  on the dashboard beside it. It should fire a few times a year, and each
-  firing is worth a look. A **promtool rule test** in the chart covers:
-  - the first passkey on a new series;
+  The right side is the highest the count reached in the half hour that
+  ended 15 minutes ago, across every pod that reported it. A `Recreate`
+  restart leaves a gap of a few scrape intervals (the old series goes
+  stale and the new pod has not been scraped yet), and comparing against a
+  single instant 15 minutes back would find nothing there and misfire. A
+  30-minute window still holds the old pod's samples. The first passkey
+  needs no special case, because the gauge is declared at 0 from startup
+  (D6): 1 is greater than the 0 the window holds.
+
+  What it misses, said plainly:
+  - **A long outage.** If the map was not scraped at all for the whole
+    window, from 45 to 15 minutes before, the right side is empty and the
+    rule says nothing. A passkey added in the first 15 minutes after that
+    is not alerted on. The Loki rule, once it evaluates, and the dashboard
+    are the fallback.
+  - **A removal and an addition close together.** They cancel out, so
+    the counter's `confirmed` results are on the dashboard beside it.
+
+  It should fire a few times a year, and each firing is worth a look. A
+  **promtool rule test** in the chart, at the real 60 s scrape interval,
+  covers:
+  - the first passkey, from the declared 0;
   - a second one added;
-  - a restart with an unchanged count, which must stay silent;
-  - a restart followed by an addition;
-  - a removal, which must stay silent.
+  - a restart with the count unchanged: the old pod's series stops, at
+    least two scrape intervals pass with no sample from either pod, then a
+    new pod label reports the same count. It must stay silent throughout;
+  - the same restart followed by an addition, which must fire;
+  - a removal, which must stay silent;
+  - an outage longer than 45 minutes followed by a restart with the count
+    unchanged, which must stay silent.
 - **The same as a Loki rule** on the `map passkey registered` line, in
   the chart's existing Loki ConfigMap pattern. It ships now, so that it
   starts working when the platform fixes the ruler, and until then the
@@ -820,6 +862,10 @@ owner:
    - `PUBLIC_ORIGIN`, the exact `https://` origin passkeys are bound to.
      Required with `PASSKEYS_ENABLED`.
 
+   The same pull request carries the bridge change from D3: for a
+   `tellraw`, the bridge logs and answers with the rule name only. That
+   is a new bridge image, and it rolls out separately in step 5.
+
    The internal status is on whenever the map runs: it holds nothing a
    switch would protect.
 2. **jdw-deployments: run map N and agent M, with
@@ -837,12 +883,22 @@ owner:
    an operator list with someone on it. It does not say that the owner is
    that someone, or that his login will work.
 4. **jdw-deployments: `map.admin.passkeys: true`.**
+5. **jdw-deployments: the new console-bridge image, on its own.** The
+   bridge is a sidecar of the game server, and its image is a literal in
+   the StatefulSet (`charts/minecraft-fwb/values.yaml`, around line 347),
+   so a new bridge restarts the game server. It goes through the normal
+   path for that: the deploy hook's restart announcement, and either an
+   empty server or the owner's explicit go-ahead, as for any change that
+   restarts the game. **Nothing in phase 1 depends on it.** Steps 1 to 4
+   work on the current bridge. All step 5 closes is the bridge's logs
+   holding a code from a whisper that failed to send (D3). It can wait for
+   the next game server restart that is needed anyway.
 
 **Done is the owner seeing it, and that needs him.** No agent can log in
 as an operator, so the last check, the owner seeing "Admin" in the page,
 adding a passkey and logging in with it from another device, waits for him.
 Until then the change is shipped but not proven end to end in production.
-Steps 1 to 4 are proven by the tests and the harness.
+Steps 1 to 5 are proven by the tests and the harness.
 
 Phase 2 (D4) needs the owner's approval of one platform change and is
 built only if he wants it. Phase 3 (D9) needs network-policy enforcement
@@ -885,7 +941,16 @@ Go, in `internal/auth`, `internal/server` and the agent, all run in CI:
   or UV clear; BS without BE; another `alg`; a format other than `none`;
   a credential ID over 1023 bytes or already held; a sixth passkey; a
   label that is not 1 to 32 allowed characters. A pending credential
-  cannot log in. A second registration replaces the XUID's pending one.
+  cannot log in. A second registration while one is pending is refused
+  until the first expires or is cancelled by the same session.
+- **The replacement race.** Two browsers hold the same cookie. A starts a
+  registration, and B's is refused. B cancels A's and registers its own,
+  and the agent's code is then bound to B's credential. A confirms with
+  B's code and A's credential ID, and is refused, so B's credential is
+  never activated by A's page. A confirm whose credential ID is not the
+  pending one is refused even with the right code. The fingerprint in the
+  code answer and in the page are the same function of the credential
+  ID.
 - **Passkey codes.** `POST /internal/v1/passkey-codes` without the token
   is 401; for an XUID with no pending credential, or one over 2 minutes
   old, is 404; otherwise it returns a code, and asking again replaces it.
@@ -935,14 +1000,21 @@ Go, in `internal/auth`, `internal/server` and the agent, all run in CI:
   XUID, never the gamertag. It whispers the code with the exact warning
   text to that player only, and never broadcasts it. The reply is
   redacted from the agent's log. On a 404 it gives the "nothing waiting"
-  reply, and it refuses the console. The new `!map logout` reply.
+  reply, and it refuses the console. The new `!map logout` reply. The
+  whisper shows the fingerprint from the map's answer. With a fake bridge
+  that refuses the whisper or fails to send it, the agent's
+  `voice_tell_failed` line for a redacted reply holds no part of the
+  bridge's answer body, and so not the code.
+- **Bridge.** A `tellraw` that is refused, and one whose send fails,
+  produce log lines and an answer body with the rule name and no part of
+  the command. Other commands are logged as today.
 
 Chart, in `jdw-deployments`:
 
-- A promtool rule test for `JdwillmsenMinecraftMapPasskeyAdded`. It must
-  fire on the first passkey on a new series and on a later addition. It
-  must stay silent on a restart with the count unchanged and the pod label
-  changed, and on a removal. It must fire on an addition after a restart.
+- A promtool rule test for `JdwillmsenMinecraftMapPasskeyAdded`, with
+  the cases listed in D6. The restart cases have a realistic gap: the old
+  pod's series goes stale, then at least two 60 s scrape intervals pass
+  with no samples, then a new pod label reports.
 - A promtool test that `JdwillmsenMinecraftMapPasskeyLoginRefused` fires
   on `counter`, `replayed`, `not_operator` and `pending`, and not on
   `bad_assertion` or `unknown_credential`.
