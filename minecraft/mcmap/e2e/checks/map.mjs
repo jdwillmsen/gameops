@@ -603,3 +603,89 @@ export async function phoneSheet({ browser, cfg, watch, closers = [] }) {
     await ctx.close();
   }
 }
+
+// The bar is one row on a wide screen, with every control in it on the
+// screen, as large as anything pressed is, and doing what it is for when
+// pressed; on a phone each of them is in More, at the size a finger needs.
+// Log out is measured and never pressed.
+export async function pageBar({ browser, cfg, watch, closers = [] }) {
+  const IDS = ['search-box', 'goto-x', 'goto-z', 'grid', 'live-pause', 'views-open', 'appearance-open', 'copy', 'help-open', 'logout'];
+  const seen = (page, scope) => page.evaluate(([ids, within]) => {
+    const hit = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hit'));
+    const out = { controls: 0, off_screen: 0, too_small: 0, tops: [] };
+    const tabs = [...document.querySelectorAll('#dimensions button')];
+    for (const node of [...tabs, ...ids.map((id) => document.getElementById(id))]) {
+      // A control its own script has not offered, as the live layer's
+      // pause on a map with none, is not on the page to measure.
+      if (!node || node.hidden || node.closest('[hidden]') || (within && !node.closest(within))) continue;
+      out.controls += 1;
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      if (box.width === 0 || style.visibility === 'hidden' || box.left < 0 || box.right > innerWidth + 0.5 || box.top < 0 || box.bottom > innerHeight + 0.5) out.off_screen += 1;
+      // A checkbox is pressed through its label, which is what is measured.
+      const pressed = node.type === 'checkbox' && node.closest('label') ? node.closest('label').getBoundingClientRect() : box;
+      if (pressed.width < hit - 0.5 || pressed.height < hit - 0.5) out.too_small += 1;
+      out.tops.push(Math.round(box.top + box.height / 2));
+    }
+    return out;
+  }, [IDS, scope]);
+  const shut = (page, id) => page.evaluate((dialog) => { const node = document.getElementById(dialog); if (node.open) node.close(); }, id);
+  const opens = async (page, button, dialog) => {
+    await page.locator(`#${button}`).click();
+    const open = await until(() => page.evaluate((id) => document.getElementById(id).open, dialog), { timeoutMs: 3000 });
+    await shut(page, dialog);
+    return Boolean(open);
+  };
+
+  const wideCtx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie, viewport: { width: 1440, height: 900 } });
+  closers.push(() => wideCtx.close());
+  const measures = {};
+  let outside = 0;
+  try {
+    const page = await openMap(wideCtx, cfg);
+    await until(() => page.evaluate(() => !document.getElementById('appearance-open').hidden && !document.getElementById('views-open').hidden));
+    const wide = await seen(page, null);
+    // Everything but the dimensions and the search box, which keep their
+    // own places on a phone.
+    outside = wide.controls - (await page.evaluate(() => document.querySelectorAll('#dimensions button').length)) - 1;
+    const centres = [...new Set(wide.tops)].sort((a, b) => a - b);
+    measures.controls = wide.controls;
+    measures.rows = centres.length === 0 ? 0 : 1 + centres.filter((y, n) => n > 0 && y - centres[n - 1] > 16).length;
+    measures.off_screen = wide.off_screen;
+    measures.too_small = wide.too_small;
+    if (wide.off_screen > 0) throw new Fail('a control in the bar is off the screen', measures);
+    if (wide.too_small > 0) throw new Fail('a control in the bar is smaller than anything pressed should be', measures);
+    if (measures.rows > 1) throw new Fail('the bar takes more than one row on a wide screen', measures);
+    let working = 0;
+    if (await opens(page, 'help-open', 'help')) working += 1;
+    if (await opens(page, 'appearance-open', 'appearance')) working += 1;
+    if (await opens(page, 'views-open', 'views')) working += 1;
+    // Copy link answers in a word beside its picture, whether or not the
+    // browser let it at the clipboard.
+    await page.locator('#copy').click();
+    if (await until(() => page.evaluate(() => document.getElementById('copy').classList.contains('told') && document.getElementById('copy-word').getBoundingClientRect().width > 1), { timeoutMs: 3000 })) working += 1;
+    measures.working = working;
+    if (working < 4) throw new Fail('a control in the bar did not do what it is for', measures);
+  } finally {
+    await wideCtx.close();
+  }
+
+  const phoneCtx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie, viewport: { width: 390, height: 844 }, dpr: 2, touch: true });
+  closers.push(() => phoneCtx.close());
+  try {
+    const page = await openMap(phoneCtx, cfg);
+    await until(() => page.evaluate(() => !document.getElementById('appearance-open').hidden));
+    await page.locator('#more-open').tap();
+    if (!(await until(() => page.evaluate(() => document.body.classList.contains('more-shown'))))) throw new Fail('a control in the bar is not in More on a phone', measures);
+    const more = await seen(page, '#more');
+    measures.in_more = more.controls;
+    if (more.controls < outside) throw new Fail('a control in the bar is not in More on a phone', measures);
+    if (more.too_small > 0) throw new Fail('a control in the bar is smaller than anything pressed should be', { ...measures, too_small: more.too_small });
+    await page.locator('#help-open').tap();
+    if (!(await until(() => page.evaluate(() => document.getElementById('help').open), { timeoutMs: 3000 }))) throw new Fail('a control in the bar did not do what it is for', measures);
+    await shut(page, 'help');
+    return { measures };
+  } finally {
+    await phoneCtx.close();
+  }
+}
