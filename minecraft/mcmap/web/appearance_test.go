@@ -156,8 +156,12 @@ func TestLightAndHighContrastThemesMeetTheContrastTheyAreFor(t *testing.T) {
 // held to four and a half to one against every ground a control stands on,
 // the page's, a panel's and a raised button's, and the edge of anything
 // typed in or ticked, which is a line, to three to one against each of
-// them, as is a checkbox that is on. A rule only parts two things and is
-// held to nothing.
+// them, as are a checkbox that is on, its tick and the ring of the focus.
+// What is chosen among a few is written in its own ink on a wash of the
+// accent, and held to four and a half to one there. The ring of the focus
+// is not the accent, so that a control with the focus and one that is on
+// are never the same picture. A rule only parts two things and is held to
+// nothing.
 func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 	css := read(t, "style.css")
 	for _, theme := range []string{"", "light", "contrast"} {
@@ -178,14 +182,46 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 					t.Errorf("%s theme: %s on %s is %.2f to one, want at least 4.5", name, fg, bg, got)
 				}
 			}
-			// A box's edge and a checkbox's, and a checkbox that is on.
-			for _, fg := range []string{"line", "accent"} {
+			// A box's edge and a checkbox's, a checkbox that is on, and the
+			// ring of the focus.
+			for _, fg := range []string{"line", "accent", "focus-colour"} {
 				got := contrast(get(fg), get(bg))
 				edge = math.Min(edge, got)
 				if got < 3 {
 					t.Errorf("%s theme: an edge in %s on %s is %.2f to one, want at least 3", name, fg, bg, got)
 				}
 			}
+			// The tick of a checkbox that is on, on whatever the checkbox
+			// is filled with, which may be nothing.
+			fill := get(bg)
+			if v := resolved(t, c, "check-fill"); v != "transparent" {
+				fill = colourOf(t, v).over(get(bg))
+			}
+			if got := contrast(get("check-tick"), fill); got < 3 {
+				t.Errorf("%s theme: a checkbox's tick on %s is %.2f to one, want at least 3", name, bg, got)
+			} else {
+				edge = math.Min(edge, got)
+			}
+			// A dimension, a speed or a choice in the panel that is on.
+			if got := contrast(get("sel-ink"), get("accent-soft").over(get(bg))); got < 4.5 {
+				t.Errorf("%s theme: what is chosen, on %s, is %.2f to one, want at least 4.5", name, bg, got)
+			} else {
+				text = math.Min(text, got)
+			}
+		}
+		// And over what floats on the map, where the map is darkest and
+		// lightest under it.
+		for _, under := range []rgba{get("map-bg"), {0, 0, 0, 1}, {255, 255, 255, 1}} {
+			float := get("float").over(under)
+			if got := contrast(get("focus-colour"), float); got < 3 {
+				t.Errorf("%s theme: the ring of the focus on what floats over the map is %.2f to one, want at least 3", name, got)
+			}
+			if got := contrast(get("text"), float); got < 4.5 {
+				t.Errorf("%s theme: text on what floats over the map is %.2f to one, want at least 4.5", name, got)
+			}
+		}
+		if resolved(t, c, "focus-colour") == resolved(t, c, "accent") {
+			t.Errorf("%s theme: the ring of the focus is the accent, which is what a control that is on is drawn in", name)
 		}
 		if got := contrast(get("on-accent"), get("accent")); got < 4.5 {
 			t.Errorf("%s theme: on-accent on accent is %.2f to one, want at least 4.5", name, got)
@@ -195,13 +231,17 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 		t.Logf("%s theme: the controls' lowest text %.2f, lowest edge %.2f", name, text, edge)
 	}
 	// And those are the colours the controls are drawn in: every box that
-	// is typed in, and every checkbox, edged in the line.
+	// is typed in, and every checkbox, edged in the line, the focus in its
+	// own colour, and a choice that is on in its ink on the wash.
 	for _, need := range []string{
 		"border: 2px solid var(--line);",
-		"border: 1px solid var(--line);",
-		":focus-visible { outline: var(--focus) solid var(--accent); outline-offset: 1px; }",
+		`input[type="number"], input[type="search"], input[type="text"], select { background: var(--bg); border: 1px solid var(--line); }`,
+		":focus-visible { outline: var(--focus) solid var(--focus-colour); outline-offset: 1px; }",
 		".row mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; }",
-		".segment[aria-checked=\"true\"], .segment.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }",
+		`.segment[aria-checked="true"], .segment[aria-pressed="true"], .segment.on { background: var(--accent-soft); border-color: transparent; color: var(--sel-ink); font-weight: 600; }`,
+		`button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--sel-ink); }`,
+		`.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--check-fill); border-color: var(--accent); }`,
+		"border: solid var(--check-tick);",
 	} {
 		if !bytes.Contains(css, []byte(need)) {
 			t.Errorf("style.css no longer has %s", need)

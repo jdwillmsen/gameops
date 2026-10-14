@@ -715,7 +715,9 @@
   const listTitle = document.createElement('h2');
   const listShut = document.createElement('button');
   listShut.type = 'button';
-  listShut.textContent = 'Close';
+  listShut.className = 'close';
+  listShut.setAttribute('aria-label', 'Close');
+  listShut.title = 'Close';
   const listHead = document.createElement('div');
   listHead.className = 'heap-head';
   listHead.append(listTitle, listShut);
