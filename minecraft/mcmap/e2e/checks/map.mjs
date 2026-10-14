@@ -570,6 +570,18 @@ export async function history({ page, cfg }) {
     if (!(await until(async () => (await state()).open))) throw new Fail('the History row did not open', measures);
     const follow = page.locator('#inspect-follow');
     if (await follow.getAttribute('aria-pressed') === 'true') await follow.click();
+    let still = 0;
+    let previous = null;
+    if (!(await until(async () => {
+      const center = await page.evaluate(() => {
+        const point = window.mcmap.map.project(window.mcmap.map.getCenter());
+        return { x: point.x, y: point.y };
+      });
+      const moved = previous ? Math.hypot(center.x - previous.x, center.y - previous.y) : Infinity;
+      previous = center;
+      still = moved < 0.1 ? still + 1 : 0;
+      return still >= 3;
+    }, { timeoutMs: 5000 }))) throw new Fail('choosing a day moved the map', measures);
     await page.evaluate(() => { const map = window.mcmap.map; window.__view = { centre: map.getCenter(), zoom: map.getZoom() }; });
 
     // One back from now is the newest day kept.
