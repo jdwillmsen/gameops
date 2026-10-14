@@ -3379,6 +3379,42 @@ a phone's, whichever density is chosen. A picture from the game is drawn
 at 16 pixels in every density, in a box the size the scale gives: pixel
 art is not enlarged by a fraction.
 
+**How the page looks.** The chrome is quiet and what is on is loud. The
+page's greys are four steps of one hue, darkest under the map: the map's
+ground, the page and the boxes typed in, the panels and bars, and what is
+raised off a panel. A rule, which only parts two things, is quiet; a line,
+the edge of anything typed in or ticked, stands off every ground it is on
+by at least three to one in every theme. Controls come in three weights: a
+box to type in or choose from is a well edged in the line, a button is
+filled, and a button for something done seldom (Views, Appearance, Copy
+link, the shortcuts, Log out, Pause live) is its word or picture alone
+until it is pointed at, with an edge only in high contrast. The accent
+means on: the dimension shown, a play's speed and a choice in the panel
+are a soft wash of it in a segmented well; a checkbox that is on is the
+accent's edge and tick, unfilled; and a line of the panel that is off has
+its name in the dim text, so that in a list that starts all on, the ones
+off are what is seen. In high contrast what is on is filled solid,
+checkboxes too; a filled checkbox is `--check-fill` and `--check-tick` in
+any theme. The ring of the focus has a colour of its own, so a control
+with the focus never looks like one that is on. What floats over the map
+(the zoom buttons, History, the card, the chunk focus, the menus and the
+sheets) is one surface: the floating ground, a quiet edge, the large
+corner and a shadow, or a hard edge and no shadow in high contrast. Every
+close is the same drawn cross, named Close to a screen reader. Corners
+come from three radii and headings from one size, a step over the text's
+at every density.
+
+On a wide screen the bar is one row. At 1440 pixels across and the
+comfortable density it holds the world's name (cut short past 14 rem),
+the dimensions, the search, go to coordinates, the grid, the live pause
+and interval, and at its end Views and Appearance as words and Copy link,
+the shortcuts and Log out as pictures, each with its word said to a screen
+reader and shown beside the picture in More on a small screen. Copy link
+shows its answer beside the picture while it says it. Who is logged in is
+in Log out's tooltip on a wide screen and in More on a small one. In a
+narrower window, or at a larger density, the search gives up room first
+and the bar then takes a second row.
+
 **Which items are shown, and how that is kept.** A layer's items are
 shown by a choice the panel keeps beside the switches, as what differs
 from everything showing, under `<group>#<name>`. It has two forms. As
@@ -3538,8 +3574,9 @@ high two rows of bar leave less than two thirds of it to the map. There:
 - the bar is one row: the dimensions, a button that opens the search over
   the bar with its results hanging under it, and More;
 - More holds everything else the bar has, in titled parts: go to
-  coordinates, the grid, the live pause and interval, copy link and the
-  shortcuts list, and who is logged in. It is a sheet under the bar, or
+  coordinates, the grid, the live pause and interval, views and
+  appearance, copy link and the shortcuts list, and who is logged in,
+  each a button with its word. It is a sheet under the bar, or
   down the right-hand side when the window is wider than it is tall;
 - the layer panel's button stays in the corner of the map and the panel
   comes up from the bottom over the whole width as a sheet with three
@@ -3944,8 +3981,19 @@ to one in the light theme and 8.22 in high contrast, the lowest name tag
 is drawn as while it has no picture is at 5.28 and 5.67 on a recorded one
 and 4.79 and 5.67 on a predicted one, over snow; a trail's key, which is
 its line on the line's own dark casing, is at 6.46 and 6.94 against the
-casing. The dark theme is the page as it was, and was not changed to meet
-them: there a predicted structure's letter over snow is still at 1.17.
+casing. Those figures on the page were taken before the page's greys were
+retuned. The dark theme is not held to them on the map: there a predicted
+structure's letter over snow is still at 1.17.
+
+The page's controls are held to them in every theme, the dark one
+included, by a second test over the stylesheet's values: text 4.5 to one
+and the edge of anything typed in or ticked, a checkbox that is on, its
+tick and the ring of the focus 3 to one, against the page, a panel and a
+raised button, and what is chosen in its ink on the accent's wash 4.5 to
+one. The lowest it finds, dark, light and high contrast: text 5.53, 6.05
+and 11.79; an edge 3.13, 3.66 and 13.58, the dark one being a
+checkbox's edge on the raised ground a line of the panel takes under the
+pointer.
 
 **Settings that follow a player (a design, not built).** Everything above
 stays in one browser. This is how it would follow a player to another.
@@ -4220,6 +4268,7 @@ counted apart and is not a failure.
 | `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
 | `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
 | `phone-sheet` | On a phone-sized touch screen the panel is a sheet across the bottom that changes height by its handle, with the map drawn | |
+| `page-bar` | At 1440 by 900 the bar is one row, every control in it is on the screen and at least as large as anything pressed, and the shortcuts, Appearance, Views and Copy link do what they are for; on a phone every one of them but the dimensions and the search is in More, at a finger's size, and the shortcuts open from there. Log out is measured, never pressed | |
 | `live-stream` | A stream opened when the run began is still the same connection, unbroken, 125 s later, with frames no more than 10 s apart | the live layer on; with nothing in the dimension only the connection is judged |
 | `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, today or on a day kept, but not a day's markers, which the page asks for only where the list of days says they were kept; the 403 above; and, only in a run given `--no-history`, the 404 a map that keeps no days answers for them) | |
 | `read-only` | Over the whole run the page tried no request but a read | |
