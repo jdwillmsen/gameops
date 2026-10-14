@@ -91,7 +91,8 @@ func (s *Server) handleHistoryMarkers(w http.ResponseWriter, r *http.Request) {
 	}
 	// With surfaces to put on them a day's markers are as the world's
 	// surface is now, which is not fixed: the tag is the file's, which is
-	// named by its content, and the reading's.
+	// named by its content and so may be another dimension's too, the
+	// dimension's, and the reading's.
 	if s.Biomes != nil {
 		s.serveMarkersWithSurface(w, r, path, dimension)
 		return
@@ -116,7 +117,7 @@ func (s *Server) handleHistoryMarkers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveMarkersWithSurface(w http.ResponseWriter, r *http.Request, path, dimension string) {
 	surface, reading := s.surfaceReading()
-	etag := `"` + filepath.Base(path) + "-" + reading + `"`
+	etag := `"` + filepath.Base(path) + "-" + dimension + "-" + reading + `"`
 	h := w.Header()
 	h.Set("Cache-Control", "private, no-cache")
 	h.Set("ETag", etag)
