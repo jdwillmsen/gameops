@@ -2530,15 +2530,87 @@ trails answers 404 once, and the page then has no Trails row.
 With `HISTORY_ENABLED=true` the map is kept as it was on each day, so a
 place can be looked at over time.
 
-**On the page.** A History button in the corner of the map opens a row of
-the days kept: a slider with a step for each day and one more for now,
-the day before and the day after, Play, and Now. Choosing a day draws
+**On the page.** A History button in the corner of the map opens a dock
+under the map: a band as wide as the map, between it and the footer and
+never under the layer panel, which the map gives its height to and takes
+it back from, with the middle of the view where it was. While the dock
+is open the button is gone, and the dock's own button puts it away. In
+it are the day shown, written large, or Now; a note; the day before,
+Play and the day after; the speed of a play; Loop; Compare; Show
+changes; Now; and under them a scrubber. Choosing a day draws
 that day's terrain where today's is drawn, at the same place and zoom,
 in whichever dimension is shown; the tiles being replaced stay under the
 new ones until those have come, so stepping through days is one picture
-turning into the next. Play runs from the day shown to now, a day every
-second and a half, and stops there; from now it starts at the first day
-kept. The terrain is of the day, and so are the beds, containers and
+turning into the next.
+
+The scrubber has a tick for every calendar day from the first day kept
+to today, a taller one and the month's name where a month begins,
+hatching in place of a tick for a day nothing was kept of, a mark on the
+day shown, and now at its right end. A press or a drag on it, by a
+pointer or a finger, goes to the day kept nearest, or to now at its end,
+and never rests on a day nothing was kept of. It is a slider to the
+keyboard and to a screen reader, whose steps are the days kept and now
+and whose value is said as the date: the arrow keys step a day kept at a
+time, Page Up and Page Down seven, Home goes to the first day and End to
+now. A day is never drawn narrower than six pixels: with more days than
+fit, the scrubber scrolls sideways and brings the day shown into sight
+when it changes.
+
+The day shown is a button that opens a calendar over the corner of the
+map: a month at a time, the days kept to press, the days nothing was kept
+of struck through and hatched, and the days before the first one kept or
+after today faint, none of which can be pressed. It turns only through
+the months that have a day kept, marks the day shown, and counts the
+month's days kept out of those that could have been, "26 of 30 days
+kept", which in the first month and in this one is fewer than the
+month's length. Choosing a day shows it and puts the calendar away;
+Escape puts it away and gives the focus back to the day, and a press
+anywhere else puts it away too. In it the arrow keys go to the next day
+kept, a day or a week on. It is not a dialog that takes the page: the
+map under it is still the map.
+
+Play runs from the day shown to now and stops there; from now it starts
+at the first day kept. It shows a day every second and a half, or two or
+four in that time by the speed chosen, which is one button that goes
+round the three on a small screen. With Loop on it starts again from the
+first day in place of going to now. The speed and the loop are kept with
+the page's other settings (see Page controls), as `history`: `speed`,
+1, 2 or 4, and `loop`. A play is the viewer's own asking, so it runs for
+a viewer who has asked for less motion as for any other; what such a
+viewer does not get is the fade of one day's tiles into the next.
+
+Compare puts a second terrain beside the day shown: the day is left of a
+divider down the map and the other is right of it, at one place and zoom,
+moving and zooming together. The other is now until another day kept is
+chosen for it, from the same calendar, opened by the name written right
+of the divider, where the day on the left cannot be chosen and Now puts
+it back. The divider is dragged by a pointer or a finger, or moved by
+the arrow keys while it has the focus, a fiftieth of the map at a time,
+Page Up and Page Down a tenth, Home and End to the map's edges; it too
+is a slider. From now, Compare first goes to the newest day kept, since
+it needs a day on the left; Now, and putting the dock away, end it and
+leave one terrain. Stepping the day on the left onto the day on the right
+puts now on the right. While two are compared a play rests on the newest
+day and not on now. The second terrain is a tile layer in a pane of its
+own inside the tile pane, cut at the divider, so the biome tint, the
+slime chunks and everything else laid over the map are over both sides.
+The beds, containers and named mobs follow the day on the left across
+the whole map, as they do out of a comparison, and the note says so.
+
+Show changes outlines, on the map, the areas whose terrain on the day
+shown is not what it was on the day kept before it. An area is a tile of
+the finest terrain, 256 blocks square; tiles side by side are outlined as
+one. The note counts them, "140 of 3,012 areas changed since the day
+before", names the earlier day where it is not the calendar day before,
+and says so where the day is the first one kept and there is nothing to
+have changed since. It is off until asked for and goes off when the dock
+is put away; nothing is outlined on now, or while two days are compared.
+The page asks `/api/history/changes/<day>` once for a day and a
+dimension, never for a day that kept nothing of the dimension shown, and
+again only when the list of days says the day before has become another;
+an ask that fails is said in the note and tried again after a minute.
+
+The terrain is of the day, and so are the beds, containers and
 named mobs where the day kept them for the dimension shown: they are
 fetched from `/api/history/markers/<day>` and drawn where today's are,
 with each row's count and list those of the day. A day that did not keep
@@ -2546,15 +2618,21 @@ them, as every day from before they were kept did not until
 `mcmap backfill` has given it them, is drawn with none, and is not asked
 for any: today's over another day's terrain would say what was never so.
 Players, mobs that are loaded, waypoints, structures and biomes are still
-the world as it is. The row's note says which of these it is: the terrain
+the world as it is. The dock's note says which of these it is: the terrain
 and the markers of the day, the terrain of the day with its markers not
 kept and none drawn, or, for a day that kept nothing of the dimension
 shown, no terrain and no markers, with none of its tiles asked for; and
 in each case what is as it is now. A page whose map or markers script is
 still the one from before a release, cached a few minutes longer than the
-rest, draws today's markers and its note says that. While a day is
+rest, draws today's markers and its note says that; one whose map is from
+before it could draw two terrains has no Compare. On a screen the size of
+a phone's the dock is a sheet of rows, the day with Now and the button
+that puts it away, the note cut to two lines with More to read it whole,
+the scrubber, and under it the rest; the card about a mob or a player is
+tucked away while it is open, and the layer sheet comes up from the top
+of it. While a day is
 shown the footer says which in place of when the map was updated, with
-no countdown to a refresh, and putting the row away puts the map back on
+no countdown to a refresh, and putting the dock away puts the map back on
 now. The days are asked for
 once the map has shown a dimension, so never by a page with no session,
 and again, no more often than every ten minutes,
@@ -2567,8 +2645,8 @@ what is open and a saved view: `#overworld/0/0/-1///2026-10-12`, or
 `#overworld/0/0/-1/structure~village~r~10~20//2026-10-12` with a sheet
 open. It is written when a day is chosen, as the place is when the map is
 moved, and taken out on the way back to now, so Copy link on a day gives
-an address that opens on that day: once the days have arrived the row
-opens on it. An address that changes while the page is open moves the row
+an address that opens on that day: once the days have arrived the dock
+opens on it. An address that changes while the page is open moves the dock
 the same way. A day that is not among the days kept, on a server that
 keeps none, or that is not a date written `YYYY-MM-DD`, is dropped from
 the address and the map shows now, with nothing said. An address without
@@ -2576,6 +2654,15 @@ a day is exactly as it was before there were days, and everything else
 that reads an address takes its parts by their place and so reads one
 with a day as it did. A day beside a saved view is not read: such an
 address is only an offer and moves nothing.
+
+While the day is compared, what is right of the divider is an eighth
+part, after the day: `#overworld/0/0/-1///2026-10-12/now`, or
+`#overworld/0/0/-1///2026-10-12/2026-10-14`. It is past the last part any
+other reader takes, means nothing without a day before it, and is taken
+out when the comparison ends, so Copy link on a comparison opens on it. A
+day there that is not kept, or is the day on the left, is read as now;
+anything else that is not a date or `now` is dropped. Where the divider
+stands is not in the address.
 
 What is kept is the rendered tiles and not the world, and with them the
 markers as the map served them. A tile is an image,
@@ -2632,7 +2719,7 @@ snapshots and renders with it.
 `NETHER_TOP_Y`, can shift colours across the whole map, which stores every
 tile again once and reads as though the world changed everywhere. Each day
 records both, and `GET /api/history` marks a day drawn differently from the
-one before it with `rendererChanged`; on such a day the page's row says
+one before it with `rendererChanged`; on such a day the dock's note says
 that not every difference from the day before is the world's.
 
 Measured on the FWB world: the first day kept, 2026-10-12, was 3,012 tiles
@@ -2697,7 +2784,9 @@ same, so one started while the map is keeping its own day, once a day
 after 00:00 UTC, fails that capture; the map tries again on its next
 cycle, and the job is best started away from that hour. A day's `changed` is
 worked out when the day is kept, so the first day that was kept live still
-counts every tile as changed after earlier days are put in before it. And
+counts every tile as changed after earlier days are put in before it; what
+`/api/history/changes` says of that day is worked out when it is asked,
+against whichever day is then before it. And
 the renderer, `UNMINED_SHA256` and `NETHER_TOP_Y` have to be the map's own,
 or every day put in is marked as drawn differently from the next.
 
@@ -3239,6 +3328,7 @@ exported file of version 1 is read and brought up) and these parts:
 | `trails` | The window, as `seconds` |
 | `shortcuts` | Whether the single-key shortcuts are on |
 | `grid` | Whether the grid is on |
+| `history` | How a play through the days of the map's history goes: `speed`, 1, 2 or 4 days in the time of one, and `loop` |
 | `biome` | The one biome picked out, or null |
 | `look` | The appearance settings |
 | `views` | The saved views, their order, which are hidden, and which the page opens with |
@@ -3687,7 +3777,7 @@ counted apart and is not a failure.
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
 | `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it | |
-| `history` | History opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, where the day kept the markers of the dimension shown they are fetched and the page says its markers are that day's, where it did not no request for them is made, the view is where it was, Now draws today's tiles again with none of the day's left, and the row closes | a day kept: a map run with `--no-history`, one that has kept no day yet, or one whose newest day kept nothing of the dimension shown, skips |
+| `history` | The History dock opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, where the day kept the markers of the dimension shown they are fetched and the page says its markers are that day's, where it did not no request for them is made, the view is where it was with the dock open, Compare draws today's tiles beside the day's, cut at the divider, and leaving it takes today's away, Now draws today's tiles again with none of the day's left, and the dock closes | a day kept: a map run with `--no-history`, one that has kept no day yet, or one whose newest day kept nothing of the dimension shown, skips |
 | `follow-player` | Follow on a player, one with a head where there is one, for 20 s: it stays on, the button says so, the mark is within 4 pixels of the middle of the map that can be seen, and so is where the stream last put the player, give or take what they travel between samples | a player online |
 | `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
 | `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
@@ -3877,7 +3967,7 @@ one side of an odd-width square and a nose below it, and a fox's, with ears
 above a head that fits its box.
 
 It keeps one day of history, taken by the service's own capture from the
-terrain it draws and the markers it serves, so the History row has a day
+terrain it draws and the markers it serves, so the History dock has a day
 to go back to and that day has markers to draw. A run is
 told when the map it checks keeps none, with `--no-history`: nothing the
 map serves says whether it means to keep days, and without being told the
@@ -3940,7 +4030,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |
 | `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
-| `HISTORY_ENABLED` | no | `false` | `true` keeps the map as it was on each day and serves `/api/history`, its tiles and its markers |
+| `HISTORY_ENABLED` | no | `false` | `true` keeps the map as it was on each day and serves `/api/history`, its tiles, its markers and what changed on each day |
 | `HISTORY_DIR` | no | `DATA_DIR/history` | Where the days are kept; an absolute path. It cannot be rebuilt and only grows, so give it storage that is kept. Checked only with `HISTORY_ENABLED=true` |
 
 ## Endpoints
@@ -3971,9 +4061,10 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
-| `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the two below, and `404` without it |
+| `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the three below, and `404` without it |
 | `GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One tile as it was on that day, addressed as the terrain's. Kept for good by the browser, since a day's tile never changes. 404 for a day not held or a tile the map did not have that day, 400 for a bad address |
 | `GET /api/history/markers/{day}?dimension=<id>` | Session required. That dimension's beds, containers and named mobs as they were kept on that day: the body `GET /api/markers` gave then, as `application/json`. Kept for good by the browser (`private, max-age=31536000, immutable`), since a day's markers never change. 404 for a day not held, or a day or dimension that kept no markers; 400 for an unknown dimension |
+| `GET /api/history/changes/{day}?dimension=<id>` | Session required. Where that dimension's terrain on that day differs from the day held before it: `day`; `before`, the newest day held that is earlier, or empty for the first day held; `zoom`, always 0, the finest; `tiles`, the `[x, y]` of each tile at that zoom whose bytes are not the earlier day's, with the tiles the day added and the ones it no longer has among them, by row and then along it, at most 4,096; `of`, how many addresses the two days hold between them at that zoom; and `more`, how many changed tiles were left out at the limit. For the first day held `tiles` is empty. Worked out from the two days' manifests, with no tile read, against the day that is before it when asked: `mcmap backfill` can put a day in between two already held. So the answer is kept for good by the browser (`private, max-age=31536000, immutable`) only where `before` is the calendar day before `day`, where no day can come between them, and is `no-store` everywhere else, the first day held included; whether `day` is the newest decides nothing, since a later day is never the day before it. That rests on no day ever being deleted, which a rule for thinning days out would have to take up. 404 for a day not held or one that held nothing of the dimension, 400 for an unknown dimension |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
