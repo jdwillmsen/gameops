@@ -285,6 +285,39 @@ export async function toggles({ page }) {
   return { measures };
 }
 
+// Hiding a height band takes what is in it off the map, and showing it
+// again brings it back. The band with the most in it is the one pressed.
+export async function heightBands({ page }) {
+  await goToSomething(page);
+  await sleep(800);
+  const found = await page.evaluate(`(async () => {
+    const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+    const row = (${tree})().find((r) => r.group === 'Height' && r.depth === 2);
+    if (!row) return null;
+    if (row.li.querySelector(':scope > .row .twist').getAttribute('aria-expanded') !== 'true') row.li.querySelector(':scope > .row .twist').click();
+    await wait(600);
+    const bands = (${tree})().filter((r) => r.group === 'Height' && r.depth === 3);
+    const pick = bands.filter((r) => r.on && r.count > 0).sort((a, b) => b.count - a.count)[0];
+    if (!pick) return { bands: bands.length, none: true };
+    const before = (${drawn})();
+    pick.check.click();
+    await wait(800);
+    const off = pick.check.getAttribute('aria-checked') !== 'true';
+    const during = (${drawn})();
+    pick.check.click();
+    await wait(800);
+    return { bands: bands.length, off, before, during, after: (${drawn})() };
+  })()`);
+  if (found === null) return skip('this page has no height bands');
+  const measures = { bands: found.bands };
+  if (found.none) throw new Fail('the panel lists height bands but none of them has anything in it', measures);
+  if (!found.off) throw new Fail('pressing a height band did not switch it off', measures);
+  measures.band_removed = found.before - found.during;
+  if (found.during >= found.before) throw new Fail('switching a height band off removed nothing from the map', measures);
+  if (found.after <= found.during) throw new Fail('switching a height band back on drew nothing', measures);
+  return { measures };
+}
+
 // A search for something this world has finds it. What is searched for is
 // a biome's or a structure's name taken from the page, never written down.
 export async function search({ page }) {

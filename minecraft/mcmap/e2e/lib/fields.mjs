@@ -5,7 +5,7 @@
 // can leave in a log: there is no field for it to be in.
 
 export const CHECKS = ['login-screen', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
-  'nether-levels', 'layer-panel', 'toggles', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
+  'nether-levels', 'layer-panel', 'toggles', 'height-bands', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'live-stream',
   'page-errors', 'read-only', 'run'];
 
 // Every reason a check can fail or be skipped for, as the sentence a
@@ -71,6 +71,10 @@ export const SENTENCES = [
   "pressing a row of the panel did not switch it off",
   "switching a row off removed nothing from the map",
   "switching a row back on drew nothing",
+  "the panel lists height bands but none of them has anything in it",
+  "pressing a height band did not switch it off",
+  "switching a height band off removed nothing from the map",
+  "switching a height band back on drew nothing",
   "switching the biome overlay on drew no tiles",
   "picking out one biome did not change the overlay",
   "switching the biome overlay off left its tiles on the map",
@@ -78,6 +82,7 @@ export const SENTENCES = [
   "with all three drawings on the map asked for tiles of other drawings too",
   "switching the topography off left its tiles on the map",
   "no mobs, structures or biomes here to switch",
+  "this page has no height bands",
   "no biome or structure here to search for",
   "a search for something the world holds found nothing",
   "structures are not served",
@@ -137,7 +142,7 @@ export const slug = (sentence) => String(sentence).toLowerCase().replace(/[^a-z0
 export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sentence]));
 
 // The page's own scripts, by which a script error is placed.
-export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js',
+export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'heights.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js',
   'slime.js', 'chunk.js', 'trails.js', 'history.js', 'levels.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
@@ -150,7 +155,7 @@ export const MEASURES = new Set([
   'asked', 'not_served', 'slowest_ms', 'not_answered', 'over_budget',
   'rendered', 'unrendered', 'players', 'heads_listed', 'heads_drawn',
   'levels', 'samples', 'samples_zooming', 'worst_ratio', 'wrong_size',
-  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles', 'topography_tiles',
+  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles', 'topography_tiles', 'bands', 'band_removed',
   'hits', 'answer_ms', 'open_ms', 'mob_layers_before', 'mob_layers_in_view', 'mob_layers_after', 'themes', 'distinct',
   'days', 'day_tiles', 'day_pictures', 'day_markers', 'moved_pixels',
   'seconds', 'measured', 'worst_pixels', 'p95_pixels', 'over_tolerance', 'worst_pixels_from_where_it_is', 'samples_left_behind',

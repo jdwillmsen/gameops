@@ -297,6 +297,7 @@ async function main() {
       await run('nether-levels', needs(map.netherLevels), on);
       await run('layer-panel', needs(map.layerPanel), on);
       await run('toggles', needs(map.toggles), on);
+      await run('height-bands', needs(map.heightBands), on);
       await run('search', needs(map.search), on);
       await run('structure-sheet', needs(map.structureSheet), on);
       await run('saved-views', needs(map.savedViews), on);
