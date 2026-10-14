@@ -30,10 +30,17 @@ const MARKED = [marked('2026-10-12'), day('2026-10-13'), marked('2026-10-14', { 
 // told as the real one does. follows is whether the map and the markers'
 // script are ones that draw a day's markers, which is what the note goes
 // by; the map then answers for the day it was last told.
-async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false } = {}) {
-  const p = page(new Map(), { files: [] });
+// today is the day it is, which is where the scrubber's days end; kept is
+// what the browser holds for the page, with whose settings script the
+// page is then loaded, as it is when a play's speed is to be remembered.
+async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false, today = '2026-10-14', kept = null } = {}) {
+  const p = page(kept || new Map(), { files: kept ? ['settings.js'] : [] });
   const { win, doc } = p;
-  const state = { asked: [], shown: [], ticks: [], dimension, wanted };
+  const state = { asked: [], shown: [], ticks: [], paces: [], dimension, wanted };
+  // The clock is the test's: noon of the day it is, and later when told.
+  const noon = Date.parse(`${today}T12:00:00Z`);
+  const clock = (ms) => { win.Date = class extends Date { static now() { return noon + ms; } }; };
+  clock(0);
   if (locked) doc.body.classList.add('locked');
   win.mcmap.dimension = () => state.dimension;
   win.mcmap.past = {
@@ -57,20 +64,35 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
     if (given.fails) throw new Error('offline');
     return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(given)) };
   };
-  // The clock a play runs on is the test's to move.
-  win.setInterval = (fn) => { state.ticks.push(fn); return state.ticks.length; };
+  // The clock a play runs on is the test's to move. paces is how long
+  // each play that was started waits between two days.
+  win.setInterval = (fn, ms) => { state.ticks.push(fn); state.paces.push(ms); return state.ticks.length; };
   win.clearInterval = (id) => { state.ticks[id - 1] = null; };
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'history.js'), 'utf8'), win, { filename: 'history.js' });
   const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
   await settle();
   const bar = doc.body.querySelector('.timeline');
   const part = (name) => bar.querySelector(`.timeline-${name}`);
+  const parts = (name) => bar.querySelectorAll(`.timeline-${name}`);
   const press = async (name) => { part(name).click(); await settle(); };
+  const key = async (name, pressed) => { part(name).dispatchEvent({ type: 'keydown', key: pressed }); await settle(); };
+  // The scrubber is a slider over the days kept and now: where it stands,
+  // and its last step, which is now.
+  const value = () => part('range').getAttribute('aria-valuenow');
+  const max = () => part('range').getAttribute('aria-valuemax');
+  // To a day by its place among the days kept, by the keys.
   const slide = async (to) => {
-    part('range').value = String(to);
-    part('range').dispatchEvent({ type: 'input' });
-    await settle();
+    await key('range', 'Home');
+    for (let i = 0; i < to; i++) await key('range', 'ArrowRight');
   };
+  // The scrubber as it would be laid out, so many pixels to a calendar
+  // day, and a pointer put down on it, moved and lifted.
+  const WIDE = 20;
+  const slots = () => parts('tick').length;
+  part('range').getBoundingClientRect = () => ({ left: 100, top: 0, width: slots() * WIDE, height: 40 });
+  const point = async (type, slot) => { part('range').dispatchEvent({ type, pointerId: 1, button: 0, clientX: 100 + slot * WIDE + WIDE / 2 }); await settle(); };
+  // The calendar's day of that date.
+  const cell = (day) => parts('cell').find((node) => node.dataset.day === day) || null;
   const beat = async () => { for (const fn of state.ticks) if (fn) fn(); await settle(); };
   const view = async () => { doc.dispatchEvent({ type: 'mcmap:view' }); await settle(); };
   // The address has changed to one that names this day, or none.
@@ -80,7 +102,7 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
     await settle();
   };
   const last = () => state.shown[state.shown.length - 1];
-  return { ...p, state, bar, part, press, slide, beat, view, named, last, settle };
+  return { ...p, state, bar, part, parts, press, key, value, max, slide, slots, point, cell, beat, view, named, last, settle, clock };
 }
 
 test('a server that keeps no history leaves the page without the control, and is not asked again', async () => {
@@ -123,8 +145,8 @@ test('the control opens on now, with the days there are to go back to', async ()
   assert.equal(p.part('body').hidden, false);
   assert.equal(p.part('open').getAttribute('aria-expanded'), 'true');
   assert.equal(p.part('day').textContent, 'Now');
-  assert.equal(p.part('range').max, '3');
-  assert.equal(p.part('range').value, '3');
+  assert.equal(p.max(), '3');
+  assert.equal(p.value(), '3');
   assert.equal(p.part('later').disabled, true);
   assert.equal(p.part('now').disabled, true);
   assert.match(p.part('note').textContent, /3 days kept/);
@@ -162,7 +184,7 @@ test('closing the control puts the map back as it is', async () => {
   const p = await load();
   await p.press('open');
   await p.slide(1);
-  await p.press('open');
+  await p.press('close');
   assert.equal(p.part('body').hidden, true);
   assert.equal(p.last(), '');
   assert.equal(p.doc.body.classList.contains('past'), false);
@@ -290,10 +312,320 @@ test('play from now starts at the first day kept, and pause holds the day it is 
   assert.equal(p.last(), '2026-10-13');
 });
 
+// Four days kept over ten, with days nothing was kept of between them and
+// a month beginning on one of those.
+const GAPPED = [day('2026-09-28'), day('2026-09-29'), day('2026-10-02'), day('2026-10-05')];
+const gapped = (more) => load({ answer: () => ({ days: GAPPED }), today: '2026-10-07', ...more });
+
+test('the control is a dock under the map, in a column with it, whose button goes while it is open and comes back with the focus', async () => {
+  const p = await load();
+  const column = p.bar.parentNode;
+  const map = p.doc.getElementById('map');
+  assert.equal(column.className, 'timeline-column');
+  assert.deepEqual(column.children, [map, p.bar], 'the dock is the foot of the map\'s own column');
+  assert.equal(column.parentNode.className, 'stage');
+  assert.equal(p.doc.getElementById('layers').parentNode, column.parentNode, 'the layer panel is beside the column, not in it');
+  assert.equal(map.querySelector('.timeline'), null, 'nothing of the dock is over the map');
+  assert.equal(p.part('open').hidden, false);
+  await p.press('open');
+  assert.equal(p.part('open').hidden, true);
+  assert.equal(p.doc.body.classList.contains('timeline-shown'), true);
+  assert.equal(p.doc.activeElement, p.part('date'));
+  await p.press('close');
+  assert.equal(p.part('body').hidden, true);
+  assert.equal(p.part('open').hidden, false);
+  assert.equal(p.part('open').getAttribute('aria-expanded'), 'false');
+  assert.equal(p.doc.body.classList.contains('timeline-shown'), false);
+  assert.equal(p.doc.activeElement, p.part('open'));
+});
+
+test('the scrubber has a tick for every calendar day since the first one kept, a gap where none was, a taller one where a month begins, and now at its end', async () => {
+  const p = await gapped();
+  await p.press('open');
+  const ticks = p.parts('tick').map((node) => node.className.replace(/timeline-tick ?/, ''));
+  assert.deepEqual(ticks, ['kept', 'kept', 'gap', 'gap month', 'kept', 'gap', 'gap', 'kept', 'gap', 'gap', 'now']);
+  const names = p.parts('month-name').map((node) => node.textContent);
+  assert.equal(names.length, 2, 'the month the days begin in has no room for its name three days before the next');
+  assert.match(names[0], /2026/);
+  assert.equal(names[1], 'Now');
+  assert.equal(p.part('range').style.getPropertyValue('--timeline-slots'), '11');
+  assert.equal(p.part('range').style.getPropertyValue('--timeline-at'), '10', 'now is the last place');
+  assert.equal(p.part('range').getAttribute('role'), 'slider');
+  assert.equal(p.max(), '4', 'the slider\'s steps are the days kept and now, not the days of the calendar');
+  assert.equal(p.value(), '4');
+});
+
+test('the scrubber grows by a day when the day turns, with nothing kept of it yet', async () => {
+  const p = await gapped();
+  await p.press('open');
+  assert.equal(p.slots(), 11);
+  p.clock(86_400_000);
+  await p.view();
+  assert.equal(p.slots(), 12);
+  assert.equal(p.max(), '4');
+});
+
+test('a press on the scrubber goes to the day kept nearest it, never to a day nothing was kept of, and to now at its end', async () => {
+  const p = await gapped();
+  await p.press('open');
+  for (const [slot, to] of [[2, '2026-09-29'], [3, '2026-10-02'], [4, '2026-10-02'], [5, '2026-10-02'], [6, '2026-10-05'], [8, '2026-10-05'], [9, ''], [0, '2026-09-28'], [10, '']]) {
+    await p.point('pointerdown', slot);
+    await p.point('pointerup', slot);
+    assert.equal(p.last(), to, `a press on place ${slot}`);
+  }
+  assert.equal(p.part('day').textContent, 'Now');
+  assert.equal(p.doc.activeElement, p.part('range'), 'a press leaves the keys on the scrubber');
+});
+
+test('a drag along the scrubber goes through the days kept, and ends when the pointer is lifted', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.point('pointerdown', 0);
+  assert.equal(p.last(), '2026-09-28');
+  assert.equal(p.part('range').style.getPropertyValue('--timeline-at'), '0');
+  await p.point('pointermove', 3);
+  assert.equal(p.last(), '2026-10-02');
+  assert.equal(p.part('range').style.getPropertyValue('--timeline-at'), '4', 'the mark is on the day chosen, not under the pointer');
+  await p.point('pointermove', 7);
+  assert.equal(p.last(), '2026-10-05');
+  await p.point('pointerup', 7);
+  const shown = p.state.shown.length;
+  await p.point('pointermove', 0);
+  assert.equal(p.state.shown.length, shown);
+});
+
+test('the arrow keys step the scrubber between days kept, Home and End go to the first day and to now, and the date is what it says', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.key('range', 'ArrowLeft');
+  assert.equal(p.last(), '2026-10-05');
+  assert.equal(p.value(), '3');
+  assert.match(p.part('range').getAttribute('aria-valuetext'), /5/);
+  assert.match(p.part('range').getAttribute('aria-valuetext'), /2026/);
+  await p.key('range', 'ArrowDown');
+  assert.equal(p.last(), '2026-10-02', 'the days between that kept nothing are passed over');
+  await p.key('range', 'Home');
+  assert.equal(p.last(), '2026-09-28');
+  await p.key('range', 'ArrowLeft');
+  assert.equal(p.last(), '2026-09-28');
+  await p.key('range', 'ArrowUp');
+  assert.equal(p.last(), '2026-09-29');
+  await p.key('range', 'PageUp');
+  assert.equal(p.last(), '');
+  assert.equal(p.part('range').getAttribute('aria-valuetext'), 'Now');
+  await p.key('range', 'PageDown');
+  assert.equal(p.last(), '2026-09-28');
+  await p.key('range', 'End');
+  assert.equal(p.last(), '');
+  const shown = p.state.shown.length;
+  await p.key('range', 'a');
+  assert.equal(p.state.shown.length, shown, 'a key that is not the slider\'s is left alone');
+});
+
+test('a step along the scrubber stops a play', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.press('play');
+  await p.key('range', 'ArrowRight');
+  assert.equal(p.part('play').textContent, 'Play');
+  await p.press('play');
+  await p.point('pointerdown', 7);
+  assert.equal(p.part('play').textContent, 'Play');
+  assert.equal(p.last(), '2026-10-05');
+});
+
+test('the day opens a calendar of its month, with the days kept to press, the days nothing was kept of struck out, and the rest out of reach', async () => {
+  const p = await gapped();
+  await p.press('open');
+  assert.equal(p.part('calendar').hidden, true);
+  await p.press('date');
+  assert.equal(p.part('calendar').hidden, false);
+  assert.equal(p.part('date').getAttribute('aria-expanded'), 'true');
+  assert.notEqual(p.part('calendar').tagName, 'DIALOG', 'the map under it is still the map');
+  assert.equal(p.part('calendar').getAttribute('aria-modal'), 'false');
+  assert.match(p.part('month').textContent, /October/, 'from now it opens on the month of the newest day');
+  assert.equal(p.parts('cell').length, 31);
+  const pressable = p.parts('cell').filter((node) => !node.disabled).map((node) => node.dataset.day);
+  assert.deepEqual(pressable, ['2026-10-02', '2026-10-05']);
+  for (const none of ['2026-10-01', '2026-10-03', '2026-10-07']) {
+    assert.equal(p.cell(none).classList.contains('gap'), true, none);
+    assert.match(p.cell(none).getAttribute('aria-label'), /no day kept/);
+  }
+  assert.equal(p.cell('2026-10-08').classList.contains('gap'), false, 'a day that has not come is not a day nothing was kept of');
+  assert.match(p.cell('2026-10-08').getAttribute('aria-label'), /outside/);
+  assert.equal(p.part('count').textContent, '2 of 7 days kept');
+  assert.equal(p.part('month-after').disabled, true);
+  assert.equal(p.part('month-before').disabled, false);
+  assert.equal(p.doc.activeElement, p.cell('2026-10-02'), 'the focus is on a day that can be pressed');
+  assert.equal(p.state.shown.length, 0, 'opening it must not move the map');
+});
+
+test('the calendar turns only through the months that have a day, and marks the day shown', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.slide(1);
+  await p.press('date');
+  assert.match(p.part('month').textContent, /September/, 'it opens on the month of the day shown');
+  assert.equal(p.cell('2026-09-29').getAttribute('aria-pressed'), 'true');
+  assert.equal(p.cell('2026-09-28').getAttribute('aria-pressed'), 'false');
+  assert.equal(p.doc.activeElement, p.cell('2026-09-29'));
+  assert.equal(p.part('count').textContent, '2 of 3 days kept');
+  assert.equal(p.cell('2026-09-27').disabled, true);
+  assert.equal(p.cell('2026-09-27').classList.contains('gap'), false);
+  assert.equal(p.cell('2026-09-30').classList.contains('gap'), true);
+  assert.equal(p.part('month-before').disabled, true);
+  await p.press('month-before');
+  assert.match(p.part('month').textContent, /September/);
+  await p.press('month-after');
+  assert.match(p.part('month').textContent, /October/);
+  assert.equal(p.part('month-after').disabled, true);
+  await p.press('month-after');
+  assert.match(p.part('month').textContent, /October/);
+});
+
+test('choosing a day in the calendar shows it, puts the calendar away and gives the focus back to the day', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.press('play');
+  await p.press('date');
+  await p.press('month-after');
+  p.cell('2026-10-01').click();
+  await p.settle();
+  assert.equal(p.part('calendar').hidden, false, 'a day nothing was kept of cannot be chosen');
+  p.cell('2026-10-05').click();
+  await p.settle();
+  assert.equal(p.last(), '2026-10-05');
+  assert.equal(p.part('calendar').hidden, true);
+  assert.equal(p.part('date').getAttribute('aria-expanded'), 'false');
+  assert.equal(p.doc.activeElement, p.part('date'));
+  assert.equal(p.part('play').textContent, 'Play', 'a day chosen by hand stops a play');
+  assert.match(p.part('day').textContent, /5/);
+});
+
+test('Escape puts the calendar away with the focus back on the day, and a press elsewhere puts it away where the press went', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.press('date');
+  let passed = 0;
+  p.doc.addEventListener('keydown', () => { passed += 1; });
+  p.cell('2026-10-05').dispatchEvent({ type: 'keydown', key: 'Escape' });
+  await p.settle();
+  assert.equal(p.part('calendar').hidden, true);
+  assert.equal(p.doc.activeElement, p.part('date'));
+  assert.equal(p.state.shown.length, 0);
+  await p.press('date');
+  p.part('calendar').dispatchEvent({ type: 'pointerdown' });
+  assert.equal(p.part('calendar').hidden, false, 'a press in the calendar is not a press elsewhere');
+  p.part('play').focus();
+  p.part('play').dispatchEvent({ type: 'pointerdown' });
+  assert.equal(p.part('calendar').hidden, true);
+  assert.equal(p.doc.activeElement, p.part('play'));
+  // With no calendar open the key is whoever else's it is.
+  const before = passed;
+  p.part('play').dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(passed, before + 1);
+});
+
+test('the arrow keys in the calendar go to the next day kept that way, and closing the dock puts the calendar away', async () => {
+  const p = await gapped();
+  await p.press('open');
+  await p.press('date');
+  p.cell('2026-10-02').dispatchEvent({ type: 'keydown', key: 'ArrowRight' });
+  assert.equal(p.doc.activeElement, p.cell('2026-10-05'));
+  p.cell('2026-10-05').dispatchEvent({ type: 'keydown', key: 'ArrowRight' });
+  assert.equal(p.doc.activeElement, p.cell('2026-10-05'), 'there is no day kept after it');
+  p.cell('2026-10-05').dispatchEvent({ type: 'keydown', key: 'ArrowLeft' });
+  assert.equal(p.doc.activeElement, p.cell('2026-10-02'));
+  await p.press('close');
+  assert.equal(p.part('calendar').hidden, true);
+  await p.press('open');
+  assert.equal(p.part('calendar').hidden, true);
+});
+
+test('a play goes at the speed chosen, twice and four times as fast, and a speed chosen while it runs is taken up at once', async () => {
+  const p = await load();
+  await p.press('open');
+  const chosen = () => p.parts('times').map((node) => node.getAttribute('aria-checked'));
+  assert.deepEqual(chosen(), ['true', 'false', 'false']);
+  await p.press('play');
+  assert.deepEqual(p.state.paces, [1500]);
+  p.parts('times')[1].click();
+  await p.settle();
+  assert.deepEqual(chosen(), ['false', 'true', 'false']);
+  assert.deepEqual(p.state.paces, [1500, 750]);
+  assert.equal(p.state.ticks.filter(Boolean).length, 1, 'the play it was is not left running beside the faster one');
+  assert.equal(p.part('play').textContent, 'Pause');
+  await p.beat();
+  assert.equal(p.last(), '2026-10-13');
+  await p.press('play');
+  p.parts('times')[2].click();
+  await p.settle();
+  assert.deepEqual(p.state.paces, [1500, 750], 'a speed chosen while nothing plays starts nothing');
+  await p.press('play');
+  assert.deepEqual(p.state.paces, [1500, 750, 375]);
+  // Where there is no room for the three, one button goes round them.
+  assert.equal(p.part('pace').textContent, '4×');
+  await p.press('pace');
+  assert.equal(p.part('pace').textContent, '1×');
+  assert.deepEqual(chosen(), ['true', 'false', 'false']);
+  assert.equal(p.state.paces.at(-1), 1500);
+  p.part('speed').dispatchEvent({ type: 'keydown', key: 'ArrowRight' });
+  assert.deepEqual(chosen(), ['false', 'true', 'false']);
+  assert.equal(p.doc.activeElement, p.parts('times')[1]);
+});
+
+test('a play that loops starts again from the first day in place of going to now, until the loop is taken off', async () => {
+  const p = await load();
+  await p.press('open');
+  assert.equal(p.part('loop').getAttribute('aria-pressed'), 'false');
+  await p.press('loop');
+  assert.equal(p.part('loop').getAttribute('aria-pressed'), 'true');
+  await p.slide(1);
+  await p.press('play');
+  await p.beat();
+  assert.equal(p.last(), '2026-10-14');
+  await p.beat();
+  assert.equal(p.last(), '2026-10-12', 'from the newest day it goes round to the first');
+  assert.equal(p.part('play').textContent, 'Pause');
+  await p.beat();
+  await p.beat();
+  await p.beat();
+  assert.equal(p.last(), '2026-10-12');
+  assert.equal(p.state.shown.includes(''), false, 'a play that loops never rests on now');
+  await p.press('loop');
+  await p.beat();
+  await p.beat();
+  await p.beat();
+  assert.equal(p.last(), '');
+  assert.equal(p.part('play').textContent, 'Play');
+});
+
+test('the speed and the loop are kept with the page\'s settings, and are how the next page opens', async () => {
+  const kept = new Map();
+  const p = await load({ kept });
+  await p.press('open');
+  p.parts('times')[2].click();
+  await p.press('loop');
+  assert.equal(JSON.stringify(p.settings.get('history')), '{"speed":4,"loop":true}');
+  const next = await load({ kept });
+  await next.press('open');
+  assert.deepEqual(next.parts('times').map((node) => node.getAttribute('aria-checked')), ['false', 'false', 'true']);
+  assert.equal(next.part('loop').getAttribute('aria-pressed'), 'true');
+  await next.press('play');
+  assert.deepEqual(next.state.paces, [375]);
+  // Changed from elsewhere, as by a file of settings taken in.
+  next.settings.set('history', { speed: 2, loop: false });
+  await next.settle();
+  assert.equal(next.part('loop').getAttribute('aria-pressed'), 'false');
+  assert.deepEqual(next.state.paces, [375, 750]);
+  next.settings.set('history', { speed: 3, loop: 'yes' });
+  assert.equal(JSON.stringify(next.settings.get('history')), '{"speed":1,"loop":false}', 'what is not a speed or a switch is not kept');
+});
+
 test('a name from the server that is not a day is not offered', async () => {
   const p = await load({ answer: () => ({ days: [day('2026-10-12'), day('../../etc'), { day: '2026-10-13' }, day('2026-10-14')] }) });
   await p.press('open');
-  assert.equal(p.part('range').max, '2');
+  assert.equal(p.max(), '2');
 });
 
 test('a server that cannot be reached is asked again later, and not on every move of the map', async () => {
@@ -303,7 +635,7 @@ test('a server that cannot be reached is asked again later, and not on every mov
   await p.view();
   assert.equal(p.state.asked.length, 1);
   answer = () => ({ days: THREE });
-  p.win.Date = class extends Date { static now() { return Date.now() + 2 * 60_000; } };
+  p.clock(2 * 60_000);
   await p.view();
   assert.equal(p.state.asked.length, 2);
   assert.equal(p.bar.hidden, false);
@@ -314,7 +646,7 @@ test('a page whose address names a kept day opens on that day, with the control 
   assert.deepEqual(p.state.shown, ['2026-10-13']);
   assert.equal(p.part('body').hidden, false);
   assert.equal(p.part('open').getAttribute('aria-expanded'), 'true');
-  assert.equal(p.part('range').value, '1');
+  assert.equal(p.value(), '1');
   assert.match(p.part('day').textContent, /13/);
   assert.equal(p.doc.body.classList.contains('past'), true);
   await p.view();
@@ -337,7 +669,7 @@ test('a day an address names is neither shown nor given up before the days kept 
   assert.equal(p.state.shown.length, 0);
   assert.equal(p.state.wanted, '2026-10-12');
   answer = () => ({ days: THREE });
-  p.win.Date = class extends Date { static now() { return Date.now() + 2 * 60_000; } };
+  p.clock(2 * 60_000);
   await p.view();
   assert.deepEqual(p.state.shown, ['2026-10-12']);
 });
@@ -353,7 +685,7 @@ test('an address that changes to a day, to a day not kept and to none moves the 
   await p.named('2026-10-12');
   assert.equal(p.last(), '2026-10-12');
   assert.equal(p.part('body').hidden, false);
-  assert.equal(p.part('range').value, '0');
+  assert.equal(p.value(), '0');
   await p.named('2026-10-14');
   assert.equal(p.last(), '2026-10-14');
   await p.named('2025-01-01');
@@ -362,7 +694,7 @@ test('an address that changes to a day, to a day not kept and to none moves the 
   await p.named('2026-10-13');
   await p.named('');
   assert.equal(p.last(), '');
-  assert.equal(p.part('range').value, '3');
+  assert.equal(p.value(), '3');
   const shown = p.state.shown.length;
   await p.named('');
   assert.equal(p.state.shown.length, shown, 'an address that names what is shown changes nothing');

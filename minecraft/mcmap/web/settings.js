@@ -281,6 +281,9 @@
     trails: shape({ seconds: int(60, 7 * 86_400) }),
     shortcuts: shape({ on: bool }),
     grid: shape({ on: bool }),
+    // How a play through the days of the map's history goes: how many
+    // days in the time of one, and whether it starts over at the end.
+    history: shape({ speed: oneOf(1, 2, 4), loop: bool }),
     // The troubleshooting tools: the debug panel, the report's controls,
     // and which visual aids the panel has on.
     debug: shape({ on: bool, report: bool, aids: shape({ tiles: bool, lines: bool, hits: bool, room: bool }) }),
@@ -303,6 +306,7 @@
     trails: () => ({ seconds: 3600 }),
     shortcuts: () => ({ on: true }),
     grid: () => ({ on: false }),
+    history: () => ({ speed: 1, loop: false }),
     debug: () => ({ on: false, report: false, aids: { tiles: false, lines: false, hits: false, room: false } }),
     biome: () => ({ only: null }),
     look: () => ({ ...LOOK_DEFAULTS }),
