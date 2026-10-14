@@ -4091,8 +4091,10 @@ anything else behind a login, and from any request that is not a `GET`.
 The page's address carries the view, `#<dimension>/<x>/<z>/<zoom>`, with the
 zoom to two decimals, so a link opens at the same place. After it come, by
 their place and each left empty when there is none before a later one,
-what is open over the map, a saved view, and the day of the history shown:
-`#<dimension>/<x>/<z>/<zoom>/<what is open>/<view>/<day>`.
+what is open over the map, a saved view, the day of the history shown,
+and what that day is compared with:
+`#<dimension>/<x>/<z>/<zoom>/<what is open>/<view>/<day>/<compared with>`.
+[History](#history) says what the last two hold.
 
 ## Metrics
 
