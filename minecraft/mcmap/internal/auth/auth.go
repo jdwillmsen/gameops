@@ -87,6 +87,40 @@ type Sessions struct {
 	// ServiceSeen, if set, is told of every request a service session
 	// makes and whether it was let through.
 	ServiceSeen func(allowed bool)
+
+	// Passkeys is asked about every passkey session, on every request.
+	// Nil refuses them all, which is what switching passkeys off does to
+	// sessions already issued.
+	Passkeys   PasskeyChecker
+	PasskeyTTL time.Duration
+}
+
+const MethodPasskey = "passkey"
+
+type PasskeyChecker interface {
+	Active(key, xuid string) bool
+}
+
+// IssuePasskey logs the browser in as id by way of the passkey key names.
+func (s *Sessions) IssuePasskey(w http.ResponseWriter, id Identity, key string) time.Time {
+	return s.issue(w, s.Key, s.PasskeyTTL, claims{Identity: id, Method: MethodPasskey, Key: key})
+}
+
+// Session is what a handler may know of the login it was let through on.
+type Session struct {
+	Identity
+	IssuedMilli int64
+	Method      string
+}
+
+// SessionFromContext answers false for a service session, as FromContext
+// does.
+func SessionFromContext(ctx context.Context) (Session, bool) {
+	c, ok := ctx.Value(contextKey{}).(claims)
+	if !ok || c.Service || !IsXUID(c.XUID) {
+		return Session{}, false
+	}
+	return Session{Identity: c.Identity, IssuedMilli: c.IssuedMilli, Method: c.Method}, true
 }
 
 type claims struct {
@@ -96,6 +130,11 @@ type claims struct {
 	// Service marks the session of an automated check. It is no player's:
 	// it carries no XUID, and is signed with a key of its own.
 	Service bool `json:"s,omitempty"`
+	// Method is how the session was had: absent for a game code, "passkey"
+	// for a passkey. Key names that passkey, as the first 16 bytes of the
+	// SHA-256 of its ID, so that removing it can end its sessions.
+	Method string `json:"m,omitempty"`
+	Key    string `json:"k,omitempty"`
 }
 
 var encoding = base64.RawURLEncoding
@@ -191,6 +230,18 @@ func (s *Sessions) verify(r *http.Request) (claims, bool) {
 		return c, true
 	}
 	if c.XUID == "" {
+		return claims{}, false
+	}
+	switch c.Method {
+	case "":
+		if c.Key != "" {
+			return claims{}, false
+		}
+	case MethodPasskey:
+		if c.Key == "" || s.Passkeys == nil || !s.Passkeys.Active(c.Key, c.XUID) {
+			return claims{}, false
+		}
+	default:
 		return claims{}, false
 	}
 	if s.Revoked != nil && s.Revoked.covers(c.XUID, c.IssuedMilli) {
