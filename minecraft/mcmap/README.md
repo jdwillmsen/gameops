@@ -2893,13 +2893,13 @@ that can be pressed: a row that is greyed out for now, as Chunk focus is
 while the grid is off, neither holds the section half on nor is switched
 by it, though what the press itself switched off comes back with it.
 When none of what it remembers can be pressed now, as slime chunks cannot
-in the Nether, it switches on everything that can be. The
-count beside a section's name is of every row listed under it, a greyed
-one included, so it is out of the same number whatever can be pressed. A
-list with no switch of its own, as the kinds of structure are, reads as
-off while its section is, and ticking one of its items, Only on one, or
-Show all in group brings the section back with that shown. An item or a row that is off as the
-page first has it, as strongholds are, is the baseline: it makes nothing
+in the Nether, it switches on everything that can be. The count beside a
+section's name is of every row listed under it, a greyed one included,
+so it is out of the same number whatever can be pressed. A list with no
+switch of its own, as the kinds of structure are, reads as off while its
+section is, and ticking one of its items, Only on one, or Show all in
+group brings the section back with that shown. An item or a row that is
+off as the page first has it, as strongholds are, is the baseline: it makes nothing
 read as half on or as hidden until the viewer has changed something, and
 Reset returns to it. The button at the end of a line opens a menu: Only
 this (and, once it is the one alone, Back to before, which puts every
