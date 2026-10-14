@@ -96,7 +96,7 @@ test('a day that kept its markers is drawn with them in place of today\'s, and n
   assert.equal(p.app.markers.day(), '');
 
   await p.choose(KEPT);
-  assert.deepEqual(p.asked('api/history/markers/'), ['api/history/markers/2026-10-12?dimension=overworld']);
+  assert.deepEqual(p.asked('api/history/markers/'), ['api/history/markers/2026-10-12?dimension=overworld&s=1']);
   assert.deepEqual(p.spots('beds'), ['-10,-20']);
   assert.deepEqual(p.spots('containers'), []);
   assert.deepEqual(p.spots('mobs'), ['-70,-80']);

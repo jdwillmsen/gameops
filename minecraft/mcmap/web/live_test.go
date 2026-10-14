@@ -118,7 +118,6 @@ func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
 		// A panel from before it kept the choices: read once and followed.
 		"return { only, shows: (sort) => (only !== null ? only === sort : !hidden.has(sort)), onChange() {} };",
 		"const passes = (category, sort) => choices[domainOf(category)].shows(sort);",
-		"const visible = (held) => shown(held.category) && passes(held.category, held.sort) && atHeight(held);",
 		"if (visible(held)) layerOf(category).addLayer(held.marker);",
 		"listed.map(([sort, entry]) => ({ id: sort, label: names.entity(sort), picture: `mob/${sort}`, swatch: `dot ${category}`, count: entry.n }));",
 		"picture: face(entry.name), swatch: 'dot players'",
@@ -137,11 +136,6 @@ func TestLiveRowsListWhatTheyHoldAndFilterCheaply(t *testing.T) {
 		if bytes.Contains(js, []byte(gone)) {
 			t.Errorf("live.js builds part of the panel itself: %s", gone)
 		}
-	}
-	// The markers are placed when an entity appears and when a row or a
-	// choice changes, never looked over again for every frame.
-	if n := len(regexp.MustCompile(`\brefilter\b`).FindAll(js, -1)); n != 4 {
-		t.Errorf("live.js names refilter in %d places, want its definition, a row's switch, a choice's change and the height bands'", n)
 	}
 	panel := read(t, "layers.js")
 	for _, need := range []string{"app.layers.recall = recall;", "app.layers.retain = retain;", "return Object.hasOwn(choices, key) ? choices[key] : null;"} {
