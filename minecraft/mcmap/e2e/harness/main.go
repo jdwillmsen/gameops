@@ -109,22 +109,24 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	marked := markers.NewStore()
+	marked.Set(now, markedWorld())
+
 	// Where the map is to keep its days, it keeps this one: the terrain
-	// just written, by the capture the service makes at the end of a cycle.
+	// just written and the markers just read, by the capture the service
+	// makes at the end of a cycle.
 	var past *history.Store
 	if cfg.History {
 		if past, err = history.Open(cfg.HistoryDir, logger); err != nil {
 			return err
 		}
-		past.MapsDir, past.Source = maps, cycle{renderer}
+		past.MapsDir, past.Source, past.Markers = maps, cycle{renderer}, marked.Scanned
 		if _, err := past.Capture(ctx, now); err != nil {
 			return err
 		}
 	}
 
 	layer := live.New(10*time.Second, 1000, logger)
-	marked := markers.NewStore()
-	marked.Set(now, markedWorld())
 	biomeStore := &biomes.Store{}
 	biomeStore.Set(biomeWorld(now))
 	recorder := trails.New(24*time.Hour, 5000)

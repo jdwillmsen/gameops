@@ -12,7 +12,7 @@ const probe = await readFile(new URL('./probe.js', import.meta.url), 'utf8');
 export function routeOf(address) {
   let pathname;
   try { pathname = new URL(address).pathname; } catch { return 'unreadable'; }
-  for (const prefix of ['/tiles', '/api/biomes/tiles', '/api/history/tiles', '/api/icons/mob', '/api/icons/picture']) {
+  for (const prefix of ['/tiles', '/api/biomes/tiles', '/api/history/tiles', '/api/history/markers', '/api/icons/mob', '/api/icons/picture']) {
     if (pathname.startsWith(`${prefix}/`)) return prefix;
   }
   return /^\/[a-z0-9_./-]{0,80}$/i.test(pathname) ? pathname : 'unreadable';
@@ -21,7 +21,9 @@ export function routeOf(address) {
 // Answers that are not faults. A sparse world has no tile for most of its
 // grid, on a day that was kept as now; a head is gone when its player leaves between the list and the
 // picture; waypoints are a player's own, which a service session is
-// refused, so that 403 is the server doing as it should.
+// refused, so that 403 is the server doing as it should. A day's markers
+// are not here: the page asks only for those the list of days says were
+// kept, so a 404 for them is a fault.
 const EXPECTED = new Map([
   ['/tiles', [404]],
   ['/api/biomes/tiles', [404]],
