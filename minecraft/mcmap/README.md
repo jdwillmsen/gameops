@@ -972,6 +972,14 @@ looked for by name and type, and only while exactly one is saved and
 exactly one is loaded under them; two that share a name are never taken
 for each other.
 
+None of that is done for a day of the [history](#history). While the map
+draws a day, its beds, containers and named mobs are that day's, and a
+named mob of a day is only the place it was saved then: its mark stays on
+the map beside the live marker of the same animal, its line in the list
+says `saved`, its tooltip says `saved on` and the day, and its card says
+where it was that day and offers no Follow. The waypoints are the player's
+own as they are now, on any day.
+
 The snapshot's mark is a saved position, not a mob that is there: it is as
 old as the snapshot, and the mob may have walked off, been renamed or died
 since. So it is drawn faded, in a broken ring, where a live marker is
@@ -2530,10 +2538,21 @@ in whichever dimension is shown; the tiles being replaced stay under the
 new ones until those have come, so stepping through days is one picture
 turning into the next. Play runs from the day shown to now, a day every
 second and a half, and stops there; from now it starts at the first day
-kept. Only the terrain is of the day: players, markers, structures and
-biomes are still the world as it is, and the row says so. A day that kept
-nothing of the dimension shown draws no terrain and asks for none of its
-tiles, and the row says that instead. While a day is
+kept. The terrain is of the day, and so are the beds, containers and
+named mobs where the day kept them for the dimension shown: they are
+fetched from `/api/history/markers/<day>` and drawn where today's are,
+with each row's count and list those of the day. A day that did not keep
+them, as every day from before they were kept did not until
+`mcmap backfill` has given it them, is drawn with none, and is not asked
+for any: today's over another day's terrain would say what was never so.
+Players, mobs that are loaded, waypoints, structures and biomes are still
+the world as it is. The row's note says which of these it is: the terrain
+and the markers of the day, the terrain of the day with its markers not
+kept and none drawn, or, for a day that kept nothing of the dimension
+shown, no terrain and no markers, with none of its tiles asked for; and
+in each case what is as it is now. A page whose map or markers script is
+still the one from before a release, cached a few minutes longer than the
+rest, draws today's markers and its note says that. While a day is
 shown the footer says which in place of when the map was updated, with
 no countdown to a refresh, and putting the row away puts the map back on
 now. The days are asked for
@@ -2558,7 +2577,8 @@ that reads an address takes its parts by their place and so reads one
 with a day as it did. A day beside a saved view is not read: such an
 address is only an offer and moves nothing.
 
-What is kept is the rendered tiles and not the world. A tile is an image,
+What is kept is the rendered tiles and not the world, and with them the
+markers as the map served them. A tile is an image,
 and showing it again needs nothing of the game's version, the save format
 or the renderer that drew it. The world would also cost far more: one
 fifteen-minute snapshot fetches 300 to 400 MB of an 819 MB world, because
@@ -2567,8 +2587,8 @@ with the day before and each kept day would be close to a whole world.
 
 ```
 HISTORY_DIR/
-  blobs/ab/abcdef…          one tile's bytes, named by their SHA-256
-  days/2026-10-12.json.gz   which blob is at each tile address that day
+  blobs/ab/abcdef…          one tile's bytes, or one dimension's markers, named by their SHA-256
+  days/2026-10-12.json.gz   which blob is at each tile address that day, and which holds each dimension's markers
 ```
 
 **A day.** At the end of the first cycle of each UTC day in which all three
@@ -2581,9 +2601,24 @@ picture of no moment the world was in, and the next cycle is offered
 instead. Later cycles of a day that is held are passed over: the first
 capture of a day is the day.
 
-**Interrupted part-way.** A blob is flushed before it has its name and the
-manifest is written after every blob it names, so a day exists whole or not
-at all. A capture that was killed, or ran out of room, has added no day;
+**Its markers.** With the tiles, the capture keeps what `/api/markers`
+was answering for each dimension, byte for byte, as one more blob, and
+the day's manifest names it in an optional `markers` beside the
+dimension's tiles. They are the markers read earlier in the same cycle,
+from the snapshot the tiles were drawn from; if that read failed they are
+those of the last one that worked, and their own `at` says when that was.
+A day is never lost over them. With `MARKERS_ENABLED=false`, or before
+any scan has read the world since the map started, the day is kept
+without: the empty answer served until the first scan is not kept, since
+it would say for good that nothing was there. A blob that cannot be
+written is logged and the day kept without it. The manifest's version is
+unchanged: a manifest with no `markers` is a day that kept none, and a
+map from before they were kept reads a newer manifest and passes over
+the field.
+
+**Interrupted part-way.** A blob, of a tile or of markers, is flushed
+before it has its name and the manifest is written after every blob it
+names, so a day exists whole or not at all. A capture that was killed, or ran out of room, has added no day;
 the tiles it did copy are found already held by the next attempt.
 
 **Nothing is deleted.** There is no retention yet, deliberately: what a day
@@ -2610,18 +2645,52 @@ History cannot be rebuilt, unlike the tiles and the mirror beside it, so
 
 **The days before it was switched on.** `mcmap backfill` makes a day out of
 each archive of the world that the history has no day for. An archive is a
-`.tar.gz` with the level's directory at its root, named for when it was
-taken, `<anything>-20261001T040007Z.tar.gz`, which is all that says which
-day it is; of two from one day the earlier is the day. Each is unpacked
+`.tar.gz` named for when it was taken,
+`<anything>-20261001T040007Z.tar.gz`, which is all that says which day it
+is; of two from one day the earlier is the day. The level is found in it
+by what it is: a directory named `LEVEL_NAME` that holds a `level.dat`
+file, at the archive's root or up to three directories down, so
+`<level>/`, `worlds/<level>/` and `server/worlds/<level>/` are all read.
+Of several the shallowest is taken, and of several as shallow the first
+by path; a directory of the name with no `level.dat` in it is not the
+level, and an archive with none is refused. Each archive is unpacked
 under `BACKFILL_WORK`, drawn in full by the same renderer as the live map,
 and kept as the UTC day it was taken on, oldest first, with nothing of one
 archive left under the next. One that cannot be unpacked or drawn costs its
 own day, is named in the log, and makes the command exit 1 once the rest
 are done.
 
+Each day is kept with its archive's markers, read before the world is
+drawn by the scan the map runs after a snapshot, on hard links in the
+job's own directory so the unpacked world is drawn as it was unpacked,
+and encoded as `/api/markers` would serve them with the archive's time
+as their `at`. An archive whose markers cannot be read still becomes its
+day, without them.
+
+**Markers for days already held.** A day held without markers for any of
+its dimensions, as every day kept before they were is, is amended from an
+archive of that day when one is there: the archive is unpacked and read,
+not drawn, the markers are written as blobs, and the day's manifest is
+replaced as a new one is written, by a flushed temporary file renamed
+over it. Only the dimensions that lacked markers are given them, and the
+day's tiles, `takenAt`, renderer and `changed` are as they were. The
+markers are of the archive's moment, which for a day the map kept itself
+is some hours from the tiles'; their `at` says when. A held day with no
+archive is left as it is, and so is one that lacks nothing, so a second
+run amends nothing. If the first archive of a day cannot be read, a later
+one of the same day is tried. With `MARKERS_ENABLED=false` the job reads
+no markers, keeps days without them and amends none.
+
+The last line of the log, `backfill finished`, counts `kept`, `amended`,
+`already_held` (archives of a day that lacked nothing), `failed`, and
+`unmarked`: archives whose markers could not be read, for a new day or a
+held one. Any `unmarked`, like any `failed`, makes the command exit 1,
+and running it again tries those again without drawing anything.
+
 It is a job run by hand beside a running map, and can be run again: a day
-already held is left as it is. Four things to know. The running map reads
-its days when it starts, so it lists the new ones after its next restart,
+already held with its markers is left as it is. Four things to know. The running map reads
+its days when it starts, so it lists the new ones, and the markers given
+to held ones, after its next restart,
 and should not be restarted while the job runs, since a starting map
 clears half-written files it takes for its own. A starting job does the
 same, so one started while the map is keeping its own day, once a day
@@ -2638,6 +2707,7 @@ or every day put in is marked as drawn differently from the next.
 | `BACKFILL_ARCHIVES` | yes | | Directory of archives; an absolute path. Only read |
 | `BACKFILL_WORK` | yes | | Where one archive at a time is unpacked and drawn; an absolute path with room for a world and its tiles. The job works in a `.mcmap-backfill` directory of its own there, the only thing it deletes, and leaves the rest as it found it |
 | `LEVEL_NAME` | yes | | The world's directory name, as in the archive |
+| `MARKERS_ENABLED` | no | `true` | As for the service: `false` keeps days without markers and amends none |
 | `DATA_DIR` | no | `/data` | Where the installed renderer is looked for, under `tools/unmined`. The map's own volume, mounted read-only, saves downloading it |
 | `UNMINED_URL`, `UNMINED_SHA256`, `RENDER_CHUNK_PROCESSORS`, `NETHER_TOP_Y` | no | as the service's | As for the service |
 
@@ -3617,13 +3687,13 @@ counted apart and is not a failure.
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
 | `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it | |
-| `history` | History opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, the view is where it was, Now draws today's tiles again with none of the day's left, and the row closes | a day kept: a map run with `--no-history`, one that has kept no day yet, or one whose newest day kept nothing of the dimension shown, skips |
+| `history` | History opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, where the day kept the markers of the dimension shown they are fetched and the page says its markers are that day's, where it did not no request for them is made, the view is where it was, Now draws today's tiles again with none of the day's left, and the row closes | a day kept: a map run with `--no-history`, one that has kept no day yet, or one whose newest day kept nothing of the dimension shown, skips |
 | `follow-player` | Follow on a player, one with a head where there is one, for 20 s: it stays on, the button says so, the mark is within 4 pixels of the middle of the map that can be seen, and so is where the stream last put the player, give or take what they travel between samples | a player online |
 | `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
 | `faces` | At device pixel ratios 1, 1.25, 1.5 and 2, how far the middle of each face's head is from the middle of its plate | faces listed |
 | `phone-sheet` | On a phone-sized touch screen the panel is a sheet across the bottom that changes height by its handle, with the map drawn | |
 | `live-stream` | A stream opened when the run began is still the same connection, unbroken, 125 s later, with frames no more than 10 s apart | the live layer on; with nothing in the dimension only the connection is judged |
-| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, today or on a day kept; the 403 above; and, only in a run given `--no-history`, the 404 a map that keeps no days answers for them) | |
+| `page-errors` | Over the whole run, in every page: no script error, no failed request, no answer of 400 or above but the ones that are meant (a tile the world has none of, today or on a day kept, but not a day's markers, which the page asks for only where the list of days says they were kept; the 403 above; and, only in a run given `--no-history`, the 404 a map that keeps no days answers for them) | |
 | `read-only` | Over the whole run the page tried no request but a read | |
 
 `faces` is there to answer a question nobody has settled: villagers' heads
@@ -3807,7 +3877,8 @@ one side of an odd-width square and a nose below it, and a fox's, with ears
 above a head that fits its box.
 
 It keeps one day of history, taken by the service's own capture from the
-terrain it draws, so the History row has a day to go back to. A run is
+terrain it draws and the markers it serves, so the History row has a day
+to go back to and that day has markers to draw. A run is
 told when the map it checks keeps none, with `--no-history`: nothing the
 map serves says whether it means to keep days, and without being told the
 suite counts a 404 for the list of them as the history gone missing.
@@ -3869,7 +3940,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |
 | `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
-| `HISTORY_ENABLED` | no | `false` | `true` keeps the map as it was on each day and serves `/api/history` and its tiles |
+| `HISTORY_ENABLED` | no | `false` | `true` keeps the map as it was on each day and serves `/api/history`, its tiles and its markers |
 | `HISTORY_DIR` | no | `DATA_DIR/history` | Where the days are kept; an absolute path. It cannot be rebuilt and only grows, so give it storage that is kept. Checked only with `HISTORY_ENABLED=true` |
 
 ## Endpoints
@@ -3900,8 +3971,9 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
-| `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, and `changed`, how many of them differ from the day before. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the one below, and `404` without it |
+| `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the two below, and `404` without it |
 | `GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One tile as it was on that day, addressed as the terrain's. Kept for good by the browser, since a day's tile never changes. 404 for a day not held or a tile the map did not have that day, 400 for a bad address |
+| `GET /api/history/markers/{day}?dimension=<id>` | Session required. That dimension's beds, containers and named mobs as they were kept on that day: the body `GET /api/markers` gave then, as `application/json`. Kept for good by the browser (`private, max-age=31536000, immutable`), since a day's markers never change. 404 for a day not held, or a day or dimension that kept no markers; 400 for an unknown dimension |
 | `GET /healthz` | Liveness, on both listeners |
 
 On `INTERNAL_ADDR` only:
@@ -3991,7 +4063,7 @@ what is open over the map, a saved view, and the day of the history shown:
 | `mcmap_trails_points_dropped_total{reason}` | Trail points let go: `age`, `thinned`, `count`, `players` |
 | `mcmap_history_captures_total{result}` | Days of the map offered for keeping: `captured` or `failed`. A day already held is not counted |
 | `mcmap_history_last_success_timestamp_seconds` | The snapshot the newest day was drawn from. More than a day and a cycle old means days are being missed |
-| `mcmap_history_days`, `mcmap_history_bytes` | Days held, and the bytes of tiles held for all of them, each distinct tile counted once |
+| `mcmap_history_days`, `mcmap_history_bytes` | Days held, and the bytes of tiles and markers held for all of them, each distinct one counted once |
 | `mcmap_history_capture_bytes` | Bytes the last day captured added: what a day of history costs |
 | `mcmap_history_capture_tiles`, `mcmap_history_capture_tiles_changed`, `mcmap_history_capture_duration_seconds` | Tiles in the last day captured, how many of them differ from the day before, and how long keeping it took |
 | `mcmap_service_exchanges_total{result,source}` | Attempts to exchange the checks' secret for a service session: `ok`, `denied` (a wrong secret), `limited` (a wrong one past the few judged each minute), `malformed`; from a `private` address inside the cluster, `loopback` (a port-forward) or `other`. Present, at zero, only with `SERVICE_SESSION_SECRET` |
