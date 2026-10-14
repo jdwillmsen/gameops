@@ -82,6 +82,16 @@ type Config struct {
 	// ServiceSessionTTL is how long one of those sessions lasts.
 	ServiceSessionTTL time.Duration
 
+	// Admin is whether the game's operators are the map's admins. Off, no
+	// admin route is served and nobody is told they are one.
+	Admin bool
+	// Passkeys is whether an admin may add a passkey and log in with it.
+	// It needs Admin, and PublicOrigin, the one origin a passkey is bound
+	// to; PasskeyRPID is that origin's host.
+	Passkeys     bool
+	PublicOrigin string
+	PasskeyRPID  string
+
 	// Live is whether players and mobs are drawn on the map as they move.
 	// Off, nothing asks the bridge for them and the page is not offered a
 	// stream.
@@ -228,6 +238,31 @@ func Load(getenv func(string) string) (Config, error) {
 		if c.ServiceSessionTTL, err = time.ParseDuration(or(getenv("SERVICE_SESSION_TTL"), "10m")); err != nil || c.ServiceSessionTTL < auth.MinServiceTTL || c.ServiceSessionTTL > auth.MaxServiceTTL {
 			fail("SERVICE_SESSION_TTL must be a duration between %s and %s", auth.MinServiceTTL, auth.MaxServiceTTL)
 		}
+	}
+
+	if c.Admin, err = strconv.ParseBool(or(getenv("ADMIN_ENABLED"), "false")); err != nil {
+		fail("ADMIN_ENABLED must be true or false")
+	}
+	if c.Passkeys, err = strconv.ParseBool(or(getenv("PASSKEYS_ENABLED"), "false")); err != nil {
+		fail("PASSKEYS_ENABLED must be true or false")
+	}
+	if c.Passkeys {
+		if !c.Admin {
+			fail("PASSKEYS_ENABLED needs ADMIN_ENABLED: only an admin may add a passkey")
+		}
+		// A passkey is bound to the exact host it was made on, so anything
+		// but a bare https origin would make passkeys nobody can use.
+		raw := getenv("PUBLIC_ORIGIN")
+		u, perr := url.Parse(raw)
+		if perr != nil || u.Scheme != "https" || u.Host == "" || u.Port() != "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+			fail("PUBLIC_ORIGIN must be the map's https origin with no port or path, got %q", raw)
+		} else {
+			c.PublicOrigin, c.PasskeyRPID = "https://"+u.Host, u.Hostname()
+		}
+	}
+	// No login means no player, and so no admin: logged and run, not refused.
+	if !c.Login {
+		c.Admin, c.Passkeys = false, false
 	}
 
 	if c.Refresh, err = time.ParseDuration(or(getenv("REFRESH_INTERVAL"), "15m")); err != nil {
