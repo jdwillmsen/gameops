@@ -236,8 +236,8 @@ func TestHistoryChanges_StopAtALimitAndSayHowManyWereLeftOut(t *testing.T) {
 
 	rec := get(t, s, "/api/history/changes/2026-10-13?dimension=overworld")
 	got := changesOf(t, rec)
-	if len(got.Tiles) >= drawn || len(got.Tiles)+*got.More != drawn || *got.Of != drawn+1 {
-		t.Errorf("%d tiles and %d more of %d, want %d between them of %d", len(got.Tiles), *got.More, *got.Of, drawn, drawn+1)
+	if len(got.Tiles) != 4096 || *got.More != drawn-4096 || *got.Of != drawn+1 {
+		t.Errorf("%d tiles and %d more of %d, want 4096 and %d of %d", len(got.Tiles), *got.More, *got.Of, drawn-4096, drawn+1)
 	}
 }
 

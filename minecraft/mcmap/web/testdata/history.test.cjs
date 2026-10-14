@@ -530,6 +530,21 @@ test('the calendar turns only through the months that have a day, and marks the 
   assert.match(p.part('month').textContent, /October/);
 });
 
+test('the calendar passes over a month nothing was kept of', async () => {
+  const p = await load({ answer: () => ({ days: [day('2026-08-30'), day('2026-10-02')] }), today: '2026-10-07' });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('date');
+  assert.match(p.part('month').textContent, /October/);
+  await p.press('month-before');
+  assert.match(p.part('month').textContent, /August/, 'September has no day to go to');
+  assert.equal(p.cell('2026-08-30').disabled, false);
+  assert.equal(p.part('month-before').disabled, true);
+  await p.press('month-after');
+  assert.match(p.part('month').textContent, /October/);
+  assert.equal(p.part('month-after').disabled, true);
+});
+
 test('choosing a day in the calendar shows it, puts the calendar away and gives the focus back to the day', async () => {
   const p = await gapped();
   await p.press('open');

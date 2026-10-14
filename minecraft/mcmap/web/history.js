@@ -725,8 +725,6 @@
   let cells = new Map();
   const opener = () => (picking === 'other' ? right : date);
 
-  const monthOf = (year, index) => new Date(Date.UTC(year, index, 1)).toISOString().slice(0, 7);
-
   function fill() {
     const shown = at < days.length ? days[at].day : '';
     const chosen = picking === 'other' ? other : shown;
@@ -804,8 +802,10 @@
   }
 
   function turn(by) {
-    const [year, m] = month.split('-').map(Number);
-    month = monthOf(year, m - 1 + by);
+    const months = [...new Set(days.map((d) => d.day.slice(0, 7)))];
+    const to = months[months.indexOf(month) + by];
+    if (!to) return;
+    month = to;
     fill();
   }
 
