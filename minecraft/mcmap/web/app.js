@@ -455,9 +455,9 @@
     // Only the tiles are of the day. Where the map can be taken, and what
     // is laid over it, are of the world as it is, so choosing a day never
     // moves the view.
-    extent = reach(today);
     const old = lay(main, id, past, stays);
     if (!terrainOnly) {
+      extent = reach(today);
       map.setMaxBounds(extent.pad(0.25));
       wholeWorld = today.minZoom;
       limits();
