@@ -73,6 +73,13 @@
   // tile pane at 200, and under everything drawn as a shape or a marker.
   map.createPane('grid').style.zIndex = 250;
   map.getPane('grid').style.pointerEvents = 'none';
+  // For the terrain drawn beside the map's own while two days are
+  // compared. Inside the tile pane, over the terrain there and under the
+  // biome tint and the slime chunks, so that what is laid over the map is
+  // laid over both, and a pane of its own so that it can be cut at the
+  // divider whichever layers are in it.
+  const besidePane = map.createPane('beside', map.getPane('tilePane'));
+  besidePane.style.zIndex = 1;
 
   const el = {
     world: document.getElementById('world'),
@@ -206,15 +213,23 @@
   // When the countdown stopped having a time to count to; null while it has.
   let dueSince = null;
   let current = null;
-  let layer = null;
-  // The one layer kept under the layer shown while that one's tiles come,
-  // and the wait that takes it away if they never do.
-  let under = null;
-  let swap = 0;
+  // A terrain on the map: the layer shown, the one layer kept under it
+  // while that one's tiles come, and the wait that takes it away if they
+  // never do. There is the map's own, and the one beside it while two
+  // days are compared.
+  const side = (pane) => ({ pane, layer: null, under: null, swap: 0 });
+  const main = side('tilePane');
+  const other = side('beside');
   let extent = null;
   // The day whose terrain is drawn in place of today's, as the server
   // lists it, or null for the map as it is.
   let past = null;
+  // While two are compared, what is drawn right of the divider: { day },
+  // a day as the server lists it or null for the map as it is. The map's
+  // own terrain is then the left of the two. cut is where the divider
+  // stands, as a share of the map's width.
+  let compared = null;
+  let cut = 0.5;
   const grid = new Grid();
 
   const dimension = (id) => info && info.dimensions.find((d) => d.id === id);
@@ -246,6 +261,16 @@
     const parts = hash.slice(1).split('/');
     return !parts[5] && DAY.test(parts[6] || '') ? parts[6] : '';
   };
+  // And an eighth while that day is compared with another: the day right
+  // of the divider, or "now". It is past the last part anything else
+  // reads, as the day is, means nothing without a day before it, and is
+  // kept and handed over the way the day is.
+  const NOW = 'now';
+  let wantedBeside = '';
+  const besideOf = (hash) => {
+    const part = hash.slice(1).split('/')[7] || '';
+    return dayOf(hash) && (part === NOW || DAY.test(part)) ? part : '';
+  };
 
   function parseHash() {
     const [id, x, z, zoom, , view] = location.hash.slice(1).split('/');
@@ -264,7 +289,7 @@
     const place = `#${current}/${Math.round(c.lng)}/${Math.round(c.lat)}/${tidy(map.getZoom())}${extra ? `/${extra}` : ''}`;
     // A day is the seventh part whatever is before it, so the two it
     // follows are written even when empty.
-    const hash = wanted ? `${place}${extra ? '' : '/'}//${wanted}` : place;
+    const hash = wanted ? `${place}${extra ? '' : '/'}//${wanted}${wantedBeside ? `/${wantedBeside}` : ''}` : place;
     // replaceState so panning does not fill the back button with positions.
     if (hash !== location.hash) history.replaceState(null, '', hash);
   }
@@ -283,41 +308,37 @@
   }
   map.on('resize', limits);
 
-  function settle() {
-    clearTimeout(swap);
-    if (under) map.removeLayer(under);
-    under = null;
+  function settle(s) {
+    clearTimeout(s.swap);
+    if (s.under) map.removeLayer(s.under);
+    s.under = null;
   }
 
-  function show(id, view) {
+  const reach = (o) => L.latLngBounds(
+    [o.minRegionZ * REGION, o.minRegionX * REGION],
+    [(o.maxRegionZ + 1) * REGION, (o.maxRegionX + 1) * REGION],
+  );
+
+  // Puts a dimension's terrain on one side, as it is or as a day kept it,
+  // and gives back the layer that was there. stays is whether that one
+  // drew the same dimension, and may be left under the new one.
+  function lay(s, id, day, stays) {
     const today = dimension(id);
-    if (!today || !today.rendered) return;
     // A day kept has its own extent and format: the world was smaller
     // then, and may have been drawn another way. A day that does not hold
     // this dimension is drawn as nothing, not as today: the layer is made
     // as today's would be and given nowhere to draw, so it asks for none
     // of the tiles the day does not have.
-    const kept = past ? past.dimensions.find((o) => o.id === id) : today;
+    const kept = day ? day.dimensions.find((o) => o && o.id === id) : today;
     const d = kept || today;
-    const old = layer;
-    const stays = old && current === id;
-    current = id;
+    const old = s.layer;
     if (!stays) {
-      settle();
+      settle(s);
       if (old) map.removeLayer(old);
     }
-
-    const reach = (o) => L.latLngBounds(
-      [o.minRegionZ * REGION, o.minRegionX * REGION],
-      [(o.maxRegionZ + 1) * REGION, (o.maxRegionX + 1) * REGION],
-    );
-    // Only the tiles are of the day. Where the map can be taken, and what
-    // is laid over it, are of the world as it is, so choosing a day never
-    // moves the view.
-    extent = reach(today);
-    layer = new Tiles('', {
+    s.layer = new Tiles('', {
       dimension: id,
-      day: past ? past.day : '',
+      day: day ? day.day : '',
       format: d.format,
       tileSize: TILE,
       minNativeZoom: d.minZoom,
@@ -329,7 +350,79 @@
       bounds: kept ? reach(kept) : NOWHERE,
       noWrap: true,
       keepBuffer: 2,
+      pane: s.pane,
+      // Under the pane of the terrain beside it, which is in this one.
+      zIndex: 0,
     }).addTo(map);
+    return old;
+  }
+
+  // The same place drawn again, a day apart or a render apart: what was
+  // there stays under the new tiles until they have come, so stepping
+  // through days is one picture turning into the next and not a blink
+  // of nothing between them. Not for ever, for tiles that never come,
+  // and not at all where the new layer has no tile in view to wait for:
+  // a place the day did not hold is shown as nothing at once. Only ever
+  // one layer is kept under: a layer replaced before its own tiles came
+  // goes at once, its requests with it, and what was under it stays for
+  // what is left of its wait.
+  function turn(s, old) {
+    if (s.under && old.isLoading()) {
+      map.removeLayer(old);
+    } else {
+      settle(s);
+      s.under = old;
+      s.swap = setTimeout(() => settle(s), SWAP_MS);
+    }
+    const mine = s.layer;
+    const done = () => { if (s.layer === mine) settle(s); };
+    if (!mine.isLoading()) settle(s);
+    else mine.once('load', () => { if (map._fadeAnimated) setTimeout(done, FADE_MS); else done(); });
+  }
+
+  // Cuts the terrain beside the map's own at the divider, so that it is
+  // seen right of it and the map's own left of it. The pane moves with
+  // the map and has no size of its own, so the cut is said in the pane's
+  // own measure, again whenever the map has moved under it, and reaches
+  // a view's worth past the other three edges.
+  function clip() {
+    if (!compared) return;
+    const size = map.getSize();
+    const from = map.containerPointToLayerPoint([Math.round(cut * size.x), -size.y]);
+    const to = map.containerPointToLayerPoint([size.x * 2, size.y * 2]);
+    besidePane.style.clipPath = `polygon(${from.x}px ${from.y}px, ${to.x}px ${from.y}px, ${to.x}px ${to.y}px, ${from.x}px ${to.y}px)`;
+  }
+  map.on('move zoom viewreset resize', clip);
+
+  // Draws what is right of the divider. fresh is for a dimension just
+  // come to, which is drawn alone; otherwise what was there turns into
+  // it as the map's own terrain does.
+  function showBeside(fresh) {
+    const stays = !fresh && Boolean(other.layer);
+    const old = lay(other, current, compared.day, stays);
+    if (stays) turn(other, old);
+    clip();
+  }
+
+  function stopComparing() {
+    if (!compared) return;
+    compared = null;
+    settle(other);
+    if (other.layer) map.removeLayer(other.layer);
+    other.layer = null;
+    besidePane.style.clipPath = '';
+  }
+
+  function show(id, view) {
+    const today = dimension(id);
+    if (!today || !today.rendered) return;
+    const stays = Boolean(main.layer) && current === id;
+    current = id;
+    // Only the tiles are of the day. Where the map can be taken, and what
+    // is laid over it, are of the world as it is, so choosing a day never
+    // moves the view.
+    extent = reach(today);
+    const old = lay(main, id, past, stays);
     map.setMaxBounds(extent.pad(0.25));
     wholeWorld = today.minZoom;
     limits();
@@ -338,28 +431,10 @@
     else if (extent.contains([0, 0])) map.setView([0, 0], Math.max(today.minZoom, -2));
     else map.fitBounds(extent);
 
-    // The same place drawn again, a day apart or a render apart: what was
-    // there stays under the new tiles until they have come, so stepping
-    // through days is one picture turning into the next and not a blink
-    // of nothing between them. Not for ever, for tiles that never come,
-    // and not at all where the new layer has no tile in view to wait for:
-    // a place the day did not hold is shown as nothing at once. Only ever
-    // one layer is kept under: a layer replaced before its own tiles came
-    // goes at once, its requests with it, and what was under it stays for
-    // what is left of its wait.
-    if (stays) {
-      if (under && old.isLoading()) {
-        map.removeLayer(old);
-      } else {
-        settle();
-        under = old;
-        swap = setTimeout(settle, SWAP_MS);
-      }
-      const mine = layer;
-      const done = () => { if (layer === mine) settle(); };
-      if (!mine.isLoading()) settle();
-      else mine.once('load', () => { if (map._fadeAnimated) setTimeout(done, FADE_MS); else done(); });
-    }
+    if (stays) turn(main, old);
+    // What is beside it is of a day of its own, and is drawn again only
+    // for another dimension.
+    if (compared && (!stays || !other.layer)) showBeside(true);
 
     for (const b of el.tabs.children) b.setAttribute('aria-pressed', String(b.dataset.id === id));
     writeHash();
@@ -624,11 +699,15 @@
     } else {
       const now = dimension(current);
       // A new render changes nothing about a day that is past.
-      if (!past && layer && now && before && version(now) !== version(before)) {
+      const drawnAgain = main.layer && now && before && version(now) !== version(before);
+      if (!past && drawnAgain) {
         // A render can extend the map, so the layer is rebuilt with the new
         // extent rather than redrawn inside the old one. The view stays put.
         const c = map.getCenter();
         show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
+      } else if (compared && !compared.day && drawnAgain) {
+        // Beside a day, the map as it is has been drawn again all the same.
+        showBeside(false);
       }
     }
     describe();
@@ -727,6 +806,10 @@
       set(day) {
         const next = day && typeof day.day === 'string' && DAY.test(day.day) && Array.isArray(day.dimensions) ? day : null;
         wanted = next ? next.day : '';
+        // Now has nothing beside it, and a day set by whoever compares
+        // none is beside nothing either, whatever the address had asked.
+        if (!next) stopComparing();
+        if (!compared) wantedBeside = '';
         if ((next ? next.day : '') === (past ? past.day : '')) {
           writeHash();
           return true;
@@ -737,11 +820,52 @@
         show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
         return true;
       },
+      // The day drawn, compared with another: the map's own terrain is
+      // seen left of a divider and the other's right of it, at one place
+      // and zoom. start takes the day for the right as the server lists
+      // it, or null for the map as it is, and is refused while no day is
+      // drawn, which leaves nothing to compare; stop puts the map back as
+      // one. get is the date on the right, or '' for now, and on whether
+      // two are drawn at all. wanted is what the address asks for beside
+      // its day, a date or "now", handed over as the day is. cut is where
+      // the divider stands as a share of the map's width, and moves it
+      // when given one.
+      compare: {
+        on: () => compared !== null,
+        get: () => (compared && compared.day ? compared.day.day : ''),
+        wanted: () => wantedBeside,
+        start(day) {
+          if (!past) return false;
+          const next = day && typeof day.day === 'string' && DAY.test(day.day) && Array.isArray(day.dimensions) ? day : null;
+          wantedBeside = next ? next.day : NOW;
+          const same = compared && (compared.day ? compared.day.day : '') === (next ? next.day : '');
+          if (!same) {
+            const fresh = !compared;
+            compared = { day: next };
+            if (current) showBeside(fresh);
+          }
+          writeHash();
+          return true;
+        },
+        stop() {
+          stopComparing();
+          wantedBeside = '';
+          writeHash();
+        },
+        cut(to) {
+          if (Number.isFinite(to)) {
+            cut = Math.min(1, Math.max(0, to));
+            clip();
+          }
+          return cut;
+        },
+      },
     },
     layers,
   };
   extra = extraOf(location.hash);
   wanted = dayOf(location.hash);
+  wantedBeside = besideOf(location.hash);
 
   const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 
@@ -780,8 +904,10 @@
     // Before the view is moved: setting a day draws the map again where
     // it is, which would cut short a move still on its way.
     const day = dayOf(location.hash);
-    if (day !== wanted) {
+    const beside = besideOf(location.hash);
+    if (day !== wanted || beside !== wantedBeside) {
       wanted = day;
+      wantedBeside = beside;
       document.dispatchEvent(new CustomEvent('mcmap:day'));
     }
     if (want.id !== current) show(want.id, want);
