@@ -741,6 +741,27 @@ test('a list with no switch of its own reads as off under a section that is off,
   assert.equal(kinds.shows('village'), true);
   assert.equal(p.state('Structures'), 'mixed');
   assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), ['structures/predicted', 'structures/recorded']);
+  // So does Only on one, with that kind alone.
+  await p.press(['Structures']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), []);
+  await p.menu(['Structures', 'Monuments'], 'Only this');
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), ['structures/predicted', 'structures/recorded']);
+  assert.equal(kinds.shows('monument'), true);
+  assert.equal(kinds.shows('village'), false);
+  assert.equal(p.state('Structures'), 'mixed');
+});
+
+test('a section whose remembered rows are all greyed out now switches on everything that can be pressed', async () => {
+  const p = await load();
+  await p.press(['Overlays', 'Slime chunks']);
+  await p.press(['Overlays']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('overlays/')), ['overlays/chunk']);
+  // As slime chunks are in the Nether.
+  p.rows['overlays/slime'].setAvailable(false);
+  await p.tick();
+  await p.press(['Overlays']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('overlays/')), ['overlays/chunk', 'overlays/grid']);
+  assert.equal(p.state('Overlays'), 'true');
 });
 
 test('Show all in group on a list with no switch of its own brings back the section that is off', async () => {
