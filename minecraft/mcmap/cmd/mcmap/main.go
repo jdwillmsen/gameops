@@ -144,13 +144,13 @@ func run(logger *slog.Logger) error {
 		RenderTimeout: 3 * time.Hour,
 		NetherLevels:  cfg.NetherLevels,
 		// An extra cut of a world the default render has just read is a
-		// fraction of that render's work; one that takes this long is stuck,
-		// and the next cycle is due.
-		LevelTimeout: time.Hour,
-		Status:       status,
-		Logger:       logger,
-		Census:       census,
-		Keeper:       keeper,
+		// fraction of that render's work, seconds each; all of them taking
+		// this long are stuck, and the next cycle is due.
+		LevelBudget: 10 * time.Minute,
+		Status:      status,
+		Logger:      logger,
+		Census:      census,
+		Keeper:      keeper,
 	}
 	var marked *markers.Store
 	if cfg.Markers {

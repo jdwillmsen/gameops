@@ -5,6 +5,7 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"path/filepath"
@@ -120,9 +121,11 @@ type Worker struct {
 	// NetherLevels are extra cuts of the nether, each rendered into a
 	// directory of its own after everything else in the cycle, so that one
 	// that is slow or broken costs the default maps and the passes after
-	// them nothing. LevelTimeout bounds one; zero means no bound.
+	// them nothing. LevelBudget bounds all of them together, so that what
+	// they can hold the next cycle back by does not grow with their number;
+	// zero means no bound.
 	NetherLevels []render.NetherLevel
-	LevelTimeout time.Duration
+	LevelBudget  time.Duration
 	Status       *Status
 	Logger       *slog.Logger
 	// Census, if set, counts the world's chunks after every snapshot.
@@ -264,15 +267,27 @@ func (w *Worker) render(ctx context.Context, dimension string) error {
 // are told apart from them. A failure is counted and logged and goes no
 // further: the page is not told of a problem, since the map it shows is the
 // whole of what the default maps drew, and the level that failed keeps the
-// tiles of its last good render.
+// tiles of its last good render. A level the budget cut off, or left no time
+// to start, is a failure like any other and is tried again next cycle.
 func (w *Worker) levels(ctx context.Context, now time.Time) {
+	budget := ctx
+	if w.LevelBudget > 0 {
+		var cancel context.CancelFunc
+		budget, cancel = context.WithTimeout(ctx, w.LevelBudget)
+		defer cancel()
+	}
 	for _, level := range w.NetherLevels {
 		if ctx.Err() != nil {
 			return
 		}
 		started := time.Now()
 		name := level.Dir()
-		err := w.renderLevel(ctx, level)
+		err := budget.Err()
+		if err != nil {
+			err = fmt.Errorf("not started, the levels' time for this cycle ran out: %w", err)
+		} else {
+			err = w.Renderer.Render(budget, filepath.Join(w.MirrorDir, w.Level), "nether", filepath.Join(w.MapsDir, name), level.TopY)
+		}
 		if err != nil {
 			metricRenderFailures.WithLabelValues(name).Inc()
 			w.Logger.Error("render failed", "dimension", name, "top_y", level.TopY, "error", err)
@@ -284,15 +299,6 @@ func (w *Worker) levels(ctx context.Context, now time.Time) {
 		w.Logger.Info("rendered", "dimension", name, "top_y", level.TopY, "seconds", took.Seconds())
 		w.Status.MarkRendered(name, now)
 	}
-}
-
-func (w *Worker) renderLevel(ctx context.Context, level render.NetherLevel) error {
-	if w.LevelTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, w.LevelTimeout)
-		defer cancel()
-	}
-	return w.Renderer.Render(ctx, filepath.Join(w.MirrorDir, w.Level), "nether", filepath.Join(w.MapsDir, level.Dir()), level.TopY)
 }
 
 // Cycle runs one refresh. now is passed in so the quiet windows and the

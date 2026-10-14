@@ -75,9 +75,12 @@ these stops the service at start with the variable named.
   that already holds one redraws nothing.
 - **When.** After everything else in the cycle, from the same goroutine, so a
   level that is slow or broken costs the maps, the history, the biome reading
-  and the survey nothing. Each level has its own limit, an hour (the maps'
-  is three), and one that runs out or fails is counted and logged and the
-  next is rendered regardless. The page is not told of a problem: the maps it
+  and the survey nothing. The levels have ten minutes between them in a cycle
+  (each map has three hours of its own), so that however many there are they
+  hold the next cycle back by no more than that. A level that fails is counted
+  and logged and the next is rendered regardless; one cut off when the ten
+  minutes are spent, and any there was then no time to start, are counted and
+  logged the same, and all are tried again the next cycle. The page is not told of a problem: the maps it
   shows are whole, and a level that failed keeps the tiles of its last good
   render. A level is reported in the render metrics under the name of its
   directory, `dimension="nether-66"`, so the dimensions' own series are as
@@ -103,6 +106,8 @@ these stops the service at start with the variable named.
   one after a snapshot redraws only the regions that changed, as the other
   maps do. Three levels are therefore about 20 MB of disk and a minute or two
   of CPU on the first cycle, and a few seconds a cycle after it, on this world.
+  The ten minutes the levels share in a cycle are several times that first
+  cycle, and a first render they cut short is taken up again the next cycle.
 
 The heights were chosen by drawing the same world at eight and comparing
 the pixels: below the roof, the cuts at 90, 80 and 70 differ from the one at 100 in
