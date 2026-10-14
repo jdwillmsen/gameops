@@ -513,6 +513,7 @@
     el.tabs.replaceChildren(...info.dimensions.map((d) => {
       const b = document.createElement('button');
       b.type = 'button';
+      b.className = 'segment';
       b.dataset.id = d.id;
       b.textContent = LABELS[d.id] || d.id;
       b.disabled = !d.rendered;
@@ -711,6 +712,7 @@
       const res = await fetch('api/me', { cache: 'no-store' });
       if (!res.ok) return;
       el.who.textContent = (await res.json()).gamertag;
+      el.logout.title = `Logged in as ${el.who.textContent}. Log out`;
       el.who.hidden = false;
       el.logout.hidden = false;
     } catch { /* the name is decoration */ }
@@ -1129,15 +1131,24 @@
     }
   });
 
+  // The word is the button's name and what a press is answered with. In
+  // the bar the button is a picture, and the word is shown while it says
+  // something other than its name. A page from before the picture has the
+  // word as the button's only text.
+  const copyWord = document.getElementById('copy-word') || el.copy;
+  const sayCopy = (word) => {
+    copyWord.textContent = word;
+    el.copy.classList.toggle('told', word !== 'Copy link');
+  };
   el.copy.addEventListener('click', async () => {
     writeHash();
     try {
       await navigator.clipboard.writeText(location.href);
-      el.copy.textContent = 'Copied';
+      sayCopy('Copied');
     } catch {
-      el.copy.textContent = 'Copy the address bar';
+      sayCopy('Copy the address bar');
     }
-    setTimeout(() => { el.copy.textContent = 'Copy link'; }, 2000);
+    setTimeout(() => sayCopy('Copy link'), 2000);
   });
 
   (async () => {

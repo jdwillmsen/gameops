@@ -726,7 +726,7 @@ test('a click on a group goes to its members, or lists them where coming closer 
   clickOn(s, knot);
   const list = listOf(s);
   assert.equal(list.hidden, false, 'the knot is listed');
-  const buttons = list.querySelectorAll('button').map((b) => b.textContent);
+  const buttons = list.querySelectorAll('button').map((b) => b.getAttribute('aria-label') || b.textContent);
   assert.equal(JSON.stringify(buttons), JSON.stringify(['Close', 'Zoom to these', '5 × Zombie', '1 × Creeper']));
   // One chosen from the list is the one the card is about, and is drawn by itself.
   list.querySelectorAll('button').find((b) => b.textContent === '1 × Creeper').click();

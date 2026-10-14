@@ -26,6 +26,19 @@
   --accent: #6ecf7a;
   --on-accent: #0b0c0e;
   --warn: #f0a35e;
+  /* Accent means on. Something chosen among a few is a soft wash of it
+     with its letters in it; a checkbox that is on is its edge and its
+     tick, unfilled, so that in a list that starts all on the ones off are
+     what is seen. The ring of the focus is a colour of its own, so a
+     control with the focus and a control that is on never look alike. A
+     button for something seldom done has no edge until it is pointed at,
+     except where every edge has to be seen. */
+  --accent-soft: rgba(110, 207, 122, 0.15);
+  --sel-ink: var(--accent);
+  --check-fill: transparent;
+  --check-tick: var(--accent);
+  --focus-colour: #8fbcff;
+  --ghost-edge: transparent;
   /* A panel that floats over the map, the shadow that lifts it off the
      terrain, and what dims the page under a sheet. */
   --float: rgba(24, 27, 32, 0.96);
@@ -159,6 +172,8 @@
   --accent: #0f5c26;
   --on-accent: #ffffff;
   --warn: #8f3a00;
+  --accent-soft: rgba(15, 92, 38, 0.1);
+  --focus-colour: #1450b8;
   --float: rgba(255, 255, 255, 0.97);
   --shadow-float: 0 1px 2px rgba(27, 31, 36, 0.16), 0 8px 24px rgba(27, 31, 36, 0.16);
   --scrim: rgba(27, 31, 36, 0.45);
@@ -188,6 +203,13 @@
   --accent: #ffe14d;
   --on-accent: #000000;
   --warn: #ffb347;
+  /* What is on is filled solid here, a checkbox too. */
+  --accent-soft: #ffe14d;
+  --sel-ink: var(--on-accent);
+  --check-fill: var(--accent);
+  --check-tick: var(--on-accent);
+  --focus-colour: #7fdcff;
+  --ghost-edge: var(--line);
   --float: #000000;
   --shadow-float: none;
   --scrim: rgba(0, 0, 0, 0.8);
@@ -314,42 +336,56 @@ body {
   padding-bottom: calc(var(--row-gap) + env(safe-area-inset-bottom));
 }
 
-h1 { margin: 0; font-size: var(--title); font-weight: 600; }
+h1 { flex: 0 1 auto; min-width: 0; max-width: 14rem; margin: 0; overflow: hidden; font-size: var(--title); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 
-.tabs { display: flex; gap: 0.25rem; }
+/* The bar is one row where the window is wide enough for it: the search
+   gives up room before anything goes to a second row, and what is done
+   seldom keeps to the end. */
+header.bar { gap: var(--row-gap); }
+header.bar button { white-space: nowrap; }
+.tabs { flex: none; flex-wrap: nowrap; }
 
-button, .tabs button, input[type="number"], input[type="search"], input[type="text"], select {
+button, input[type="number"], input[type="search"], input[type="text"], select {
   font: inherit;
   color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--line);
   border-radius: var(--radius-m);
   min-height: var(--control-h);
   padding: 0 var(--row-pad);
 }
-
-button { cursor: pointer; }
+/* Three weights of control. A box that is typed in or chosen from is a
+   well with an edge; a button is filled and needs no edge; a button for
+   something done seldom is its word alone until it is pointed at. */
+input[type="number"], input[type="search"], input[type="text"], select { background: var(--bg); border: 1px solid var(--line); }
+button { background: var(--raised); border: 1px solid var(--rule); cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--dim); }
 button:disabled { color: var(--dim); cursor: not-allowed; }
-button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-:focus-visible { outline: var(--focus) solid var(--accent); outline-offset: 1px; }
+button.ghost { padding: 0 var(--row-gap); background: none; border-color: var(--ghost-edge); color: var(--dim); }
+button.ghost:hover:not(:disabled), button.ghost[aria-expanded="true"] { background: var(--raised); border-color: var(--rule); color: var(--text); }
+button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--sel-ink); }
+:focus-visible { outline: var(--focus) solid var(--focus-colour); outline-offset: 1px; }
 
-.goto { display: flex; align-items: center; gap: 0.4rem; margin-left: auto; }
+.goto { display: flex; align-items: center; gap: calc(var(--row-gap) / 2); }
 .goto .clear { position: relative; }
-.goto label, .toggle { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; }
+.goto label, .toggle { color: var(--dim); display: flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+header .toggle { min-height: var(--hit); }
 input[type="number"] { width: 6.5rem; }
+.goto input[type="number"] { width: 5rem; padding: 0 var(--row-gap); }
+/* What is done seldom keeps to the end of the bar. */
+#views-open, #views-open[hidden] + #appearance-open { margin-left: auto; }
 
 /* The results hang from the box, over the map's left side: the layer panel
    keeps the right, and the list stops short of the card about a mob. */
-.search { position: relative; }
-.search input { width: 15rem; max-width: 100%; padding-right: 2rem; }
+.search { position: relative; flex: 1 1 10rem; min-width: 10rem; max-width: 18rem; }
+.search input { width: 100%; padding-right: 2rem; }
 /* The page's own clear button takes the place of the browser's, which only
    some browsers draw and which cannot take the mark off the map. */
 .search input::-webkit-search-cancel-button { display: none; }
 .search .clear { position: absolute; top: calc((var(--control-h) - var(--hit)) / 2); right: calc((var(--control-h) - var(--hit)) / 2); }
 /* A cross that is drawn, not written: a character would be read out as
-   part of the button's name. */
-.clear {
+   part of the button's name. It clears a box, and the same cross, with a
+   ground while it is pointed at, closes whatever it is in: a card, a
+   sheet, a list or the history. */
+.clear, .close {
   width: var(--hit);
   height: var(--hit);
   min-height: 0;
@@ -359,7 +395,7 @@ input[type="number"] { width: 6.5rem; }
   color: var(--dim);
   flex: none;
 }
-.clear::before, .clear::after {
+.clear::before, .clear::after, .close::before, .close::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -369,8 +405,12 @@ input[type="number"] { width: 6.5rem; }
   background: currentColor;
   transform: translate(-50%, -50%) rotate(45deg);
 }
-.clear::after { transform: translate(-50%, -50%) rotate(-45deg); }
-.clear:hover:not(:disabled) { color: var(--text); }
+.clear::after, .close::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.clear:hover:not(:disabled), .close:hover:not(:disabled) { color: var(--text); }
+.close { position: relative; min-width: var(--hit); }
+.close:hover:not(:disabled), .timeline-close:hover:not(:disabled) { background: var(--raised); border-color: var(--rule); }
+/* A picture for a button in place of its word. */
+button.pictured { display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-width: var(--hit); padding: 0 calc((var(--hit) - 18px) / 2); }
 .search-panel {
   position: absolute;
   top: calc(100% + 0.35rem);
@@ -396,7 +436,7 @@ input[type="number"] { width: 6.5rem; }
   border-radius: var(--radius-m);
   cursor: pointer;
 }
-.search-panel li:hover { border-color: var(--line); }
+.search-panel li:hover { background: var(--raised); }
 .search-panel li[aria-selected="true"] { border-color: var(--accent); }
 .search-panel .kind { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); align-self: center; }
 .search-panel .name { min-width: 0; overflow-wrap: anywhere; }
@@ -437,7 +477,7 @@ input[type="number"] { width: 6.5rem; }
    shows, and a button for the panel that goes somewhere exact. */
 .zoom-open, .zoom-detail, .zoom-wide { display: inline-flex; align-items: baseline; gap: 0 0.4em; }
 .zoom-open { flex: none; min-height: 0; margin-block: -1px; padding: 0 0.5rem; line-height: inherit; background: none; border-color: transparent; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.zoom-open:hover:not(:disabled), .zoom-open[aria-expanded="true"] { color: var(--text); border-color: var(--line); }
+.zoom-open:hover:not(:disabled), .zoom-open[aria-expanded="true"] { color: var(--text); background: var(--raised); border-color: var(--rule); }
 .zoom-open output { color: var(--text); }
 .zoom-open .zoom-detail output { color: var(--dim); }
 .zoom-short { display: none; }
@@ -591,7 +631,7 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
 .glyph { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .glyph.heavy { stroke-width: 2.5; }
 button.icon { display: inline-grid; place-items: center; flex: none; width: var(--hit); min-width: var(--hit); height: var(--hit); min-height: 0; padding: 0; background: none; border-color: transparent; color: var(--dim); }
-button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var(--text); border-color: var(--line); }
+button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var(--text); background: var(--raised); border-color: var(--rule); }
 /* The rail: the panel's button over a button for each section. */
 #layers-toggle, .panel-rail button.icon { width: var(--rail); height: var(--rail); border-radius: 0; }
 #layers-toggle {
@@ -663,7 +703,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .menu hr { margin: calc(var(--row-gap) / 2) 0; border: 0; border-top: 1px solid var(--rule); }
 .menu-title { margin: 0; padding: calc(var(--row-gap) / 2) var(--row-gap); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); font-weight: 600; }
 .menu-item { display: flex; align-items: center; gap: var(--row-gap); width: 100%; min-height: var(--row-h); padding: 0 var(--row-gap); text-align: left; background: none; border-color: transparent; }
-.menu-item:hover:not(:disabled), .menu-item:focus-visible { border-color: var(--line); background: var(--bg); }
+.menu-item:hover:not(:disabled), .menu-item:focus-visible { border-color: var(--rule); background: var(--raised); }
 .menu-item[role="menuitemradio"]::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--dim); }
 .menu-item[aria-checked="true"]::before { background: var(--accent); border-color: var(--accent); }
 
@@ -697,7 +737,11 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   cursor: pointer;
 }
 .d1 > .row { min-height: var(--head-h); }
-.row:hover, .row:focus-within { background: var(--bg); }
+.row:hover, .row:focus-within { background: var(--raised); }
+/* A line that is off is the one to find in a list that starts all on, so
+   its name steps back to the dim text and its picture fades. */
+.row:has(> .check[aria-checked="false"]) > .name { color: var(--dim); }
+.row:has(> .check[aria-checked="false"]) > .pic { opacity: 0.6; }
 /* The name keeps two fifths of the line whatever stands beside it, and
    what is said beside it gives way first. */
 .row .name { flex: 1; min-width: 40%; overflow-wrap: anywhere; }
@@ -732,7 +776,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 }
 .check::before { content: ""; position: absolute; inset: calc((var(--check) - var(--hit)) / 2 - 2px); }
 .check:hover:not(:disabled) { border-color: var(--text); }
-.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--accent); border-color: var(--accent); }
+.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--check-fill); border-color: var(--accent); }
 .check[aria-checked="true"]::after {
   content: "";
   position: absolute;
@@ -740,11 +784,11 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   top: 8%;
   width: 30%;
   height: 58%;
-  border: solid var(--on-accent);
+  border: solid var(--check-tick);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
-.check[aria-checked="mixed"]::after { content: ""; position: absolute; left: 18%; right: 18%; top: calc(50% - 1px); height: 2px; background: var(--on-accent); }
+.check[aria-checked="mixed"]::after { content: ""; position: absolute; left: 18%; right: 18%; top: calc(50% - 1px); height: 2px; background: var(--check-tick); }
 .check:focus-visible { outline-offset: 2px; }
 .unavailable > .row { cursor: not-allowed; }
 .unavailable > .row > :is(.check, .pic, .name, .detail, .count), .masked > .row > :is(.pic, .name, .detail, .count) { opacity: 0.55; }
@@ -798,13 +842,14 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .panel-status { display: flex; align-items: center; justify-content: space-between; gap: var(--row-gap); margin: 0; min-height: var(--hit); padding: 0 var(--row-pad); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); border-bottom: 1px solid var(--rule); }
 .panel-status.cut { color: var(--warn); }
 .panel-none { margin: 0; padding: var(--row-gap) var(--row-pad); color: var(--dim); }
-/* A choice among a few values, as buttons side by side with one of them
-   on, and the box that hangs from the last for a value that is typed. */
-.segmented { display: flex; flex-wrap: wrap; gap: calc(var(--row-gap) / 2) 0; }
-.segment { flex: 1 0 auto; min-width: 0; margin-left: -1px; padding: 0 var(--row-gap); border-color: var(--line); border-radius: 0; }
-.segment:first-child { margin-left: 0; border-radius: var(--radius-m) 0 0 var(--radius-m); }
-.segment:last-child { border-radius: 0 var(--radius-m) var(--radius-m) 0; }
-.segment[aria-checked="true"], .segment.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+/* A choice among a few values, as buttons side by side in a well with one
+   of them on, and the box that hangs from the last for a value that is
+   typed: the dimensions, a play's speed, a layer's choices. The well is
+   drawn round the buttons and not padded into them, so each is as tall
+   to press as any other control. */
+.segmented { display: flex; flex-wrap: wrap; gap: 2px; background: var(--bg); border-radius: var(--radius-m); box-shadow: 0 0 0 2px var(--bg); }
+.segment { flex: 1 0 auto; min-width: 0; padding: 0 var(--row-gap); background: none; border-color: var(--ghost-edge); }
+.segment[aria-checked="true"], .segment[aria-pressed="true"], .segment.on { background: var(--accent-soft); border-color: transparent; color: var(--sel-ink); font-weight: 600; }
 .segment:focus-visible { position: relative; z-index: 1; }
 .popover { display: grid; gap: var(--row-gap); width: min(20rem, calc(100vw - 16px)); padding: var(--row-pad); }
 .popover label { font-weight: 600; }
@@ -1010,7 +1055,6 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .inspect-title { flex: 1; min-width: 0; display: grid; }
 .inspect-title h2 { margin: 0; font-size: var(--title); font-weight: 600; overflow-wrap: anywhere; }
 .inspect-title span { color: var(--dim); }
-.inspect-head button { flex: none; background: none; color: var(--dim); min-height: var(--hit); padding: 0 var(--row-gap); }
 /* The letters are drawn, not written, so that selecting the numbers takes
    exactly what the game's commands accept. */
 .inspect-coords { font-variant-numeric: tabular-nums; word-spacing: 0.5rem; user-select: all; }
@@ -1058,7 +1102,7 @@ kbd, .keys code {
   font: 600 0.9em ui-monospace, "Cascadia Mono", Consolas, monospace;
   text-align: center;
 }
-.help-open { font-weight: 700; min-width: 2rem; }
+.help-open { font-weight: 700; }
 .sheet-picture { flex: none; margin-top: 0.15rem; }
 .sheet-picture .picture { width: 24px; height: 24px; }
 .standing p { margin: 0 0 0.35rem; color: var(--dim); }
@@ -1147,11 +1191,19 @@ kbd, .keys code {
 /* Labels on the map, at the size the viewer has chosen. */
 .leaflet-tooltip { font-size: var(--label-size); }
 
-/* A theme made for contrast has no shadow to tell a control from the map
-   by, so the map's own buttons take the page's colours and edges. */
-:root[data-theme="contrast"] .leaflet-bar { border: 2px solid var(--line); }
-:root[data-theme="contrast"] .leaflet-bar a { background: var(--panel); color: var(--text); border-bottom-color: var(--line); }
-:root[data-theme="contrast"] .leaflet-bar a.leaflet-disabled { color: var(--dim); }
+/* What floats over the map or the page is one kind of surface: the
+   floating ground, a quiet edge, the large corner and a shadow, which the
+   theme made for contrast has none of and takes a hard edge for. The
+   map's own zoom buttons are one of them, in the page's colours. */
+.inspect, .chunk, .heap-list, .said-over, .frozen, .levels, .timeline-open, .timeline-left, .timeline-right, .timeline-calendar,
+.search-panel, .panel-popup, .zoom-pop, .duration .said, .sheet, .debug, .leaflet-container .leaflet-bar { box-shadow: var(--shadow-float); }
+.leaflet-container .leaflet-bar { overflow: hidden; border: 1px solid var(--rule); border-radius: var(--radius-m); background-clip: border-box; }
+.leaflet-container .leaflet-bar a { background: var(--float); color: var(--text); border-bottom-color: var(--rule); }
+.leaflet-container .leaflet-bar a:hover, .leaflet-container .leaflet-bar a:focus { background: var(--raised); color: var(--text); }
+.leaflet-container .leaflet-bar a.leaflet-disabled { background: var(--float); color: var(--dim); }
+/* Inside the bar's edge, which would otherwise cut the ring off. */
+.leaflet-container .leaflet-bar a:focus-visible { outline-offset: calc(var(--focus) * -1 - 1px); }
+:root[data-theme="contrast"] .leaflet-container .leaflet-bar { border-width: 2px; }
 :root[data-theme="contrast"] button, :root[data-theme="contrast"] select, :root[data-theme="contrast"] input { border-width: 2px; }
 
 /* While logged out the map and its controls are not there to use. */
@@ -1225,7 +1277,15 @@ kbd, .keys code {
    pressed is at least 44 pixels across and down. */
 .compact-only { display: none; }
 .more, .more-part { display: contents; }
-.more-title, .more-note, .more-word { display: none; }
+.more-title, .more-note { display: none; }
+/* A button that is a picture in the bar has its word said and not shown,
+   and shown beside the picture in More on a small screen; a word that
+   answers a press is shown for as long as it is said. */
+@media (min-width: 721px) and (min-height: 481px) {
+  /* The name of who is logged in is said by the button that logs out. */
+  .who { display: none; }
+  button:not(.told) > .more-word { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 
 @media (max-width: 720px), (max-height: 480px) {
   html, body { height: 100vh; height: 100dvh; }
@@ -1245,7 +1305,9 @@ kbd, .keys code {
   h1 { display: none; }
   /* The dimensions keep their names, and scroll within the bar if three
      of them are wider than it. */
-  .tabs { flex: 1; min-width: 0; gap: 0.15rem; overflow-x: auto; scrollbar-width: none; }
+  .tabs { flex: 0 1 auto; min-width: 0; margin-right: auto; overflow-x: auto; scrollbar-width: none; }
+  /* Inside the button, since the row scrolls and would cut a ring off. */
+  .tabs .segment:focus-visible { outline-offset: calc(var(--focus) * -1); }
   .tabs::-webkit-scrollbar { display: none; }
   /* Three names, a search and More in one row: the names are written at
      the caption's size, which under a finger is still fourteen pixels. */
@@ -1318,6 +1380,9 @@ kbd, .keys code {
   .more-title { display: block; flex: 1 1 100%; margin: 0; font-size: 0.85em; font-weight: 600; color: var(--dim); }
   .more-note { display: block; flex: 1 1 100%; margin: 0; color: var(--dim); font-size: 0.9em; }
   .more-word { display: inline; font-weight: 400; }
+  /* In More nothing is seldom beside anything else: each is a button. */
+  .more button.ghost { background: var(--raised); border-color: var(--rule); color: var(--text); }
+  #views-open, #appearance-open { margin-left: 0; }
   .goto { margin-left: 0; flex: 1 1 100%; }
   .goto label { flex: 1; }
   .goto input[type="number"] { width: 100%; min-width: 3.5rem; }
@@ -1352,9 +1417,10 @@ kbd, .keys code {
     height: auto;
     min-height: 44px;
     padding: 0 var(--row-pad);
-    background: var(--panel);
+    background: var(--float);
     border: 1px solid var(--rule);
     border-radius: var(--radius-m);
+    box-shadow: var(--shadow-float);
     color: var(--text);
     font-size: inherit;
     background-image: none;
@@ -1588,7 +1654,7 @@ kbd, .keys code {
    calendar, which the mark beside it says. */
 .timeline-date { grid-area: day; justify-self: start; display: inline-flex; align-items: center; gap: 0.5em; max-width: 100%; margin-left: calc(var(--row-gap) * -1); padding: 0 var(--row-gap); background: none; border-color: transparent; font-size: calc(var(--body) * 1.5); font-weight: 600; font-variant-numeric: tabular-nums; }
 .timeline-date::after { content: ""; flex: none; width: 0.35em; height: 0.35em; margin-top: -0.2em; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-.timeline-date:hover:not(:disabled), .timeline-date[aria-expanded="true"] { border-color: var(--line); }
+.timeline-date:hover:not(:disabled), .timeline-date[aria-expanded="true"] { background: var(--raised); border-color: var(--rule); }
 .timeline-day { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Two lines whatever it says, so that stepping from a day with a short
    note to one with a long one does not change the height of the map. */
@@ -1597,7 +1663,7 @@ kbd, .keys code {
 .timeline-controls { grid-area: controls; display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: calc(var(--row-gap) / 2); }
 .timeline-earlier, .timeline-later, .timeline-month-before, .timeline-month-after { min-width: var(--control-h); padding: 0; font-weight: 700; }
 .timeline-play { min-width: 4.2em; }
-.timeline-speed { flex-wrap: nowrap; gap: 0; }
+.timeline-speed { flex-wrap: nowrap; }
 .timeline-times, .timeline-pace { font-variant-numeric: tabular-nums; }
 .timeline-pace { display: none; }
 .timeline-close { position: relative; }
@@ -1608,7 +1674,7 @@ kbd, .keys code {
 .timeline-scrub { grid-area: scrub; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
 .timeline-range { position: relative; min-width: calc(var(--timeline-slots) * 6px); height: calc(var(--caption-lh) + 28px); margin: 3px 8px; cursor: pointer; touch-action: none; }
 .timeline-range:focus-visible { outline: none; }
-.timeline-range:focus-visible .timeline-handle { outline: var(--focus) solid var(--accent); outline-offset: 1px; }
+.timeline-range:focus-visible .timeline-handle { outline: var(--focus) solid var(--focus-colour); outline-offset: 1px; }
 .timeline-months { position: absolute; inset: 0 0 auto; height: var(--caption-lh); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); font-weight: 600; pointer-events: none; }
 /* Each on the dock's own ground, so that a name too near the next is cut
    short by it and not written through it. */
