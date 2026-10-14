@@ -4054,7 +4054,7 @@ counted apart and is not a failure.
 | `scope` | On the live server, waypoints answer 403, the icon list names nobody as `me`, a search goes through no waypoints | |
 | `headers` | The content security policy, `nosniff`, the referrer policy, HSTS and `no-store` arrive through the gateway as the server sets them | |
 | `scripts` | Every script and stylesheet the page names is served as what it is, the same bytes twice, kept by a browser for no longer than an hour, and each made the part of the page it is there to make: a page of two releases fails here | |
-| `api-budget` | Each of eleven answers the page is built from comes within the budget, 3 s unless set; one for a layer switched off is counted as not served | |
+| `api-budget` | Each of twelve answers the page is built from comes within the budget, 3 s unless set; one for a layer switched off is counted as not served | |
 | `dimensions` | Each dimension's tab draws terrain tiles that decode and are not empty; one never rendered is counted | |
 | `player-heads` | A player with a head listed is drawn with it | a player online, with a head |
 | `zoom-sizes` | Through every zoom level and back, every picture on the map is the size it was made at, each frame of the zoom and once it settles | a marker or a live entity |
