@@ -1,7 +1,7 @@
 /* Every colour on the page is named here, once for each theme, and used
    by its name everywhere below; what is drawn on a canvas reads the same
-   names. The first set is the page as it has always looked, and is what a
-   page with no theme chosen gets.
+   names. The first set is the dark theme, and is what a page with no
+   theme chosen gets.
 
    The terrain under the map is the same in every theme, so what is drawn
    over it keeps a dark outline and a dark backing behind its picture in
@@ -9,19 +9,28 @@
    labels are written on. */
 :root {
   color-scheme: dark;
-  --bg: #14161a;
-  --panel: #1d2026;
-  --line: #2e333c;
-  --text: #e6e8eb;
-  --dim: #9aa3ad;
+  /* Four steps of one neutral, darkest under the map: the map, the page
+     and the wells that are typed in, the panels and bars, and what is
+     raised off a panel. */
+  --map-bg: #0a0b0d;
+  --bg: #101216;
+  --panel: #181b20;
+  --raised: #252930;
+  /* A rule parts two things and means nothing, so it is quiet. A line is
+     the edge of something typed in or ticked, and stands off every ground
+     it is on by three to one. */
+  --rule: #2b3038;
+  --line: #6c7581;
+  --text: #e9ebee;
+  --dim: #a3abb5;
   --accent: #6ecf7a;
   --on-accent: #0b0c0e;
   --warn: #f0a35e;
-  /* A panel that floats over the map, and what dims the page under a
-     sheet. */
-  --float: rgba(29, 32, 38, 0.94);
+  /* A panel that floats over the map, the shadow that lifts it off the
+     terrain, and what dims the page under a sheet. */
+  --float: rgba(24, 27, 32, 0.96);
+  --shadow-float: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 24px rgba(0, 0, 0, 0.45);
   --scrim: rgba(11, 12, 14, 0.6);
-  --map-bg: #0b0c0e;
   /* The hairline round a colour key. */
   --edge: #0b0c0e;
   --focus: 2px;
@@ -84,6 +93,14 @@
   --chunk-pin: #6ecf7a;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 
+  /* Three corners: small for a checkbox or a key, middling for a control,
+     large for what floats or is a sheet. And one size for a heading, a
+     step over the body's whatever the density. */
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+  --title: calc(var(--body) + 2px);
+
   /* One scale for everything the page puts a control on: how tall a row is,
      how much air is round it, and how large its text, its checkbox and its
      picture are. The stylesheet below uses these by name and never a size
@@ -131,8 +148,11 @@
    to one for an edge. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f1f3f5;
+  --map-bg: #d9dee4;
+  --bg: #eef0f3;
   --panel: #ffffff;
+  --raised: #eceff2;
+  --rule: #d3d8de;
   --line: #747c86;
   --text: #1b1f24;
   --dim: #4c555f;
@@ -140,8 +160,8 @@
   --on-accent: #ffffff;
   --warn: #8f3a00;
   --float: rgba(255, 255, 255, 0.97);
+  --shadow-float: 0 1px 2px rgba(27, 31, 36, 0.16), 0 8px 24px rgba(27, 31, 36, 0.16);
   --scrim: rgba(27, 31, 36, 0.45);
-  --map-bg: #d9dee4;
   --edge: #1b1f24;
   /* Nearly solid, so that a ring still stands off its backing by three to
      one where the terrain under it is snow, and the letter of a predicted
@@ -154,12 +174,14 @@
   --me-text: #0f5c26;
 }
 
-/* High contrast: black and white, with nothing translucent and every edge
-   as strong as the text. */
+/* High contrast: black and white, with nothing translucent, no shadow,
+   and every edge, a rule's too, as strong as the text. */
 :root[data-theme="contrast"] {
   color-scheme: dark;
   --bg: #000000;
   --panel: #000000;
+  --raised: #000000;
+  --rule: #ffffff;
   --line: #ffffff;
   --text: #ffffff;
   --dim: #e4e4e4;
@@ -167,6 +189,7 @@
   --on-accent: #000000;
   --warn: #ffb347;
   --float: #000000;
+  --shadow-float: none;
   --scrim: rgba(0, 0, 0, 0.8);
   --map-bg: #000000;
   --edge: #ffffff;
@@ -280,18 +303,18 @@ body {
   gap: var(--row-gap) calc(var(--row-gap) * 2);
   padding: var(--row-gap) var(--row-pad);
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--rule);
 }
 
 .foot {
   position: relative;
   justify-content: space-between;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--rule);
   border-bottom: 0;
   padding-bottom: calc(var(--row-gap) + env(safe-area-inset-bottom));
 }
 
-h1 { margin: 0; font-size: 1rem; font-weight: 600; }
+h1 { margin: 0; font-size: var(--title); font-weight: 600; }
 
 .tabs { display: flex; gap: 0.25rem; }
 
@@ -300,7 +323,7 @@ button, .tabs button, input[type="number"], input[type="search"], input[type="te
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   min-height: var(--control-h);
   padding: 0 var(--row-pad);
 }
@@ -357,8 +380,8 @@ input[type="number"] { width: 6.5rem; }
   max-height: calc(100vh - 9rem);
   overflow-y: auto;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
 }
 .inspecting .search-panel { max-height: calc(100vh - 10rem - var(--inspect-height, 9rem)); }
 .search-panel ul { list-style: none; margin: 0; padding: 0.2rem; }
@@ -370,7 +393,7 @@ input[type="number"] { width: 6.5rem; }
   align-content: center;
   padding: calc(var(--row-gap) / 2) var(--row-gap);
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   cursor: pointer;
 }
 .search-panel li:hover { border-color: var(--line); }
@@ -435,12 +458,12 @@ input[type="number"] { width: 6.5rem; }
   padding: var(--sheet-pad);
   background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 10px 10px 0 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
 }
 .zoom-pop[hidden] { display: none; }
 .zoom-head { display: flex; align-items: center; gap: 0.75rem; }
-.zoom-head h2 { flex: 1; margin: 0; font-size: 1.1rem; }
+.zoom-head h2 { flex: 1; margin: 0; font-size: var(--title); font-weight: 600; }
 .zoom-says { margin: 0; color: var(--dim); font-variant-numeric: tabular-nums; }
 .zoom-slider { display: flex; align-items: center; gap: 0.5rem; }
 .zoom-slider input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
@@ -459,7 +482,7 @@ input[type="number"] { width: 6.5rem; }
    nothing in the footer moves as the seconds count. */
 .currency { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: flex-end; gap: 0.15rem 0; color: var(--dim); font-variant-numeric: tabular-nums; }
 .stat { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 0.4rem; padding: 0 0.9rem; }
-.stat + .stat { border-left: 1px solid var(--line); }
+.stat + .stat { border-left: 1px solid var(--rule); }
 .stat:last-child { padding-right: 0; }
 .stat-label { color: var(--text); font-size: var(--caption); line-height: var(--caption-lh); font-weight: 600; letter-spacing: 0.02em; }
 .stat .slot { display: inline-block; }
@@ -474,7 +497,7 @@ input[type="number"] { width: 6.5rem; }
 /* A length of time chosen from a menu or typed. What was understood, or
    why it was not, is said under the box without moving what is beside it. */
 .duration { position: relative; display: inline-flex; align-items: center; }
-.duration input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; min-height: var(--control-h); padding: 0 var(--row-gap); width: 8.5rem; }
+.duration input { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-m); min-height: var(--control-h); padding: 0 var(--row-gap); width: 8.5rem; }
 .duration .said {
   position: absolute;
   top: calc(100% + 0.35rem);
@@ -484,8 +507,8 @@ input[type="number"] { width: 6.5rem; }
   max-width: min(18rem, 80vw);
   padding: 0.25rem 0.5rem;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
   color: var(--text);
 }
 .duration .said.end { left: auto; right: 0; }
@@ -506,7 +529,7 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
   padding: 0.3rem 0.7rem;
   background: var(--float);
   border: 1px solid var(--warn);
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   color: var(--warn);
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -526,8 +549,8 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
   max-width: calc(100% - 1.2rem);
   padding: var(--row-gap) var(--card-pad);
   background: var(--float);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
   font-variant-numeric: tabular-nums;
 }
 .chunk p { margin: 0; overflow-wrap: anywhere; }
@@ -556,7 +579,7 @@ select { padding: 0 var(--row-gap); cursor: pointer; }
   align-items: center;
   width: var(--rail);
   background: var(--panel);
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--rule);
 }
 .layers.open.docked { width: var(--w); }
 /* Under a finger on a screen with room for the panel beside the map, the
@@ -578,7 +601,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   overflow: hidden;
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--rule);
   color: transparent;
   font-size: 0;
   /* The three sheets of the panel's own mark, drawn and not written. */
@@ -612,9 +635,9 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   bottom: 0;
   width: var(--w);
   background: var(--panel);
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--rule);
 }
-.panel-head { display: flex; align-items: center; gap: calc(var(--row-gap) / 2); min-height: var(--head-h); padding: calc(var(--row-gap) / 2) var(--row-gap) calc(var(--row-gap) / 2) var(--row-pad); border-bottom: 1px solid var(--line); }
+.panel-head { display: flex; align-items: center; gap: calc(var(--row-gap) / 2); min-height: var(--head-h); padding: calc(var(--row-gap) / 2) var(--row-gap) calc(var(--row-gap) / 2) var(--row-pad); border-bottom: 1px solid var(--rule); }
 .panel-title { flex: 1; margin: 0; font-size: var(--body); font-weight: 600; }
 .panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .panel-grab { display: none; }
@@ -634,10 +657,10 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   max-width: min(20rem, calc(100vw - 16px));
   padding: calc(var(--row-gap) / 2);
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
 }
-.menu hr { margin: calc(var(--row-gap) / 2) 0; border: 0; border-top: 1px solid var(--line); }
+.menu hr { margin: calc(var(--row-gap) / 2) 0; border: 0; border-top: 1px solid var(--rule); }
 .menu-title { margin: 0; padding: calc(var(--row-gap) / 2) var(--row-gap); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); font-weight: 600; }
 .menu-item { display: flex; align-items: center; gap: var(--row-gap); width: 100%; min-height: var(--row-h); padding: 0 var(--row-gap); text-align: left; background: none; border-color: transparent; }
 .menu-item:hover:not(:disabled), .menu-item:focus-visible { border-color: var(--line); background: var(--bg); }
@@ -646,7 +669,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 
 /* The panel's script from before this stylesheet, for the minutes the two
    can be cached apart: its box as it was, over the corner of the map. */
-.layers:not(.shell) { position: absolute; top: 0.6rem; right: 0.6rem; width: 17rem; max-width: calc(100% - 1.2rem); max-height: calc(100% - 1.2rem); overflow-y: auto; align-items: stretch; padding: var(--row-gap); border: 1px solid var(--line); border-radius: 8px; pointer-events: auto; }
+.layers:not(.shell) { position: absolute; top: 0.6rem; right: 0.6rem; width: 17rem; max-width: calc(100% - 1.2rem); max-height: calc(100% - 1.2rem); overflow-y: auto; align-items: stretch; padding: var(--row-gap); border: 1px solid var(--rule); border-radius: var(--radius-l); pointer-events: auto; }
 .layers:not(.shell) #layers-toggle { display: block; position: static; width: auto; height: auto; min-height: var(--control-h); background-image: none; border: 0; color: var(--text); font-size: inherit; }
 .layers:not(.shell) ul { list-style: none; margin: 0; padding: 0; }
 .layers:not(.shell) :is(li, label, .layer-group-head) { display: flex; flex-wrap: wrap; align-items: center; gap: var(--row-gap); }
@@ -663,7 +686,7 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .d1 { --inset: var(--row-pad); }
 .d2 { --inset: calc(var(--row-pad) + var(--indent)); }
 .d3 { --inset: calc(var(--row-pad) + var(--indent) * 2); }
-.d1 + .d1 { margin-top: calc(var(--group-gap) / 2); padding-top: calc(var(--group-gap) / 2); border-top: 1px solid var(--line); }
+.d1 + .d1 { margin-top: calc(var(--group-gap) / 2); padding-top: calc(var(--group-gap) / 2); border-top: 1px solid var(--rule); }
 .row {
   position: relative;
   display: flex;
@@ -693,8 +716,8 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
 .twist[aria-expanded="true"] .glyph { transform: rotate(90deg); }
 .leaf > .row > .twist { visibility: hidden; }
 /* A checkbox drawn by the page, so that it is the scale's size, takes the
-   theme's colours, and can be half on. Its edge is the dim text's colour,
-   which stands off a panel by more than three to one in every theme. */
+   theme's colours, and can be half on. Its edge is a line, which stands
+   off a panel by three to one in every theme. */
 .check {
   position: relative;
   flex: none;
@@ -704,8 +727,8 @@ button.icon:hover:not(:disabled), button.icon[aria-expanded="true"] { color: var
   min-height: 0;
   padding: 0;
   background: none;
-  border: 2px solid var(--dim);
-  border-radius: 4px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-s);
 }
 .check::before { content: ""; position: absolute; inset: calc((var(--check) - var(--hit)) / 2 - 2px); }
 .check:hover:not(:disabled) { border-color: var(--text); }
@@ -770,20 +793,17 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .panel-search { position: relative; padding: var(--row-gap) var(--row-pad) calc(var(--row-gap) / 2); }
 .panel-search input { width: 100%; min-height: var(--field-h); padding: 0 var(--field-h) 0 calc(var(--row-gap) * 2 + 16px); }
 .panel-search input::-webkit-search-cancel-button { display: none; }
-/* The panel's own boxes and buttons are edged in the dim text's colour,
-   which stands off a panel by three to one in the dark theme too. */
-.panel-search input, .popover input, .popover button, .row .only { border-color: var(--dim); }
 .panel-search .glyph { position: absolute; left: calc(var(--row-pad) + var(--row-gap)); top: calc(var(--row-gap) + (var(--field-h) - 16px) / 2); color: var(--dim); pointer-events: none; }
 .panel-search .clear { position: absolute; right: calc(var(--row-pad) + (var(--field-h) - var(--hit)) / 2); top: calc(var(--row-gap) + (var(--field-h) - var(--hit)) / 2); }
-.panel-status { display: flex; align-items: center; justify-content: space-between; gap: var(--row-gap); margin: 0; min-height: var(--hit); padding: 0 var(--row-pad); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); border-bottom: 1px solid var(--line); }
+.panel-status { display: flex; align-items: center; justify-content: space-between; gap: var(--row-gap); margin: 0; min-height: var(--hit); padding: 0 var(--row-pad); color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); border-bottom: 1px solid var(--rule); }
 .panel-status.cut { color: var(--warn); }
 .panel-none { margin: 0; padding: var(--row-gap) var(--row-pad); color: var(--dim); }
 /* A choice among a few values, as buttons side by side with one of them
    on, and the box that hangs from the last for a value that is typed. */
 .segmented { display: flex; flex-wrap: wrap; gap: calc(var(--row-gap) / 2) 0; }
-.segment { flex: 1 0 auto; min-width: 0; margin-left: -1px; padding: 0 var(--row-gap); border-color: var(--dim); border-radius: 0; }
-.segment:first-child { margin-left: 0; border-radius: 6px 0 0 6px; }
-.segment:last-child { border-radius: 0 6px 6px 0; }
+.segment { flex: 1 0 auto; min-width: 0; margin-left: -1px; padding: 0 var(--row-gap); border-color: var(--line); border-radius: 0; }
+.segment:first-child { margin-left: 0; border-radius: var(--radius-m) 0 0 var(--radius-m); }
+.segment:last-child { border-radius: 0 var(--radius-m) var(--radius-m) 0; }
 .segment[aria-checked="true"], .segment.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
 .segment:focus-visible { position: relative; z-index: 1; }
 .popover { display: grid; gap: var(--row-gap); width: min(20rem, calc(100vw - 16px)); padding: var(--row-pad); }
@@ -824,7 +844,7 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 
 .leaflet-tooltip.marker-name, .leaflet-tooltip.marker-tip {
   background: var(--label-plate);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   color: var(--text);
   box-shadow: none;
   padding: 0.05rem 0.4rem;
@@ -934,7 +954,7 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 
 .leaflet-tooltip.live-name, .leaflet-tooltip.live-tip {
   background: var(--label-plate);
-  border: 1px solid var(--line);
+  border: 1px solid var(--rule);
   color: var(--text);
   box-shadow: none;
   padding: 0.05rem 0.4rem;
@@ -955,8 +975,8 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
   max-width: calc(100% - 1.2rem);
   padding: var(--card-pad);
   background: var(--float);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
 }
 .inspect.adrift { border-color: var(--warn); }
 /* What the card knows of its entity, for a visit made with ?debug=1. */
@@ -976,19 +996,19 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
   max-height: calc(100% - 6rem);
   padding: var(--card-pad);
   background: var(--float);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
 }
 .heap-list[hidden] { display: none; }
 .heap-head { display: flex; align-items: center; gap: 0.5rem; }
-.heap-head h2 { flex: 1; margin: 0; font-size: 1rem; font-weight: 600; }
+.heap-head h2 { flex: 1; margin: 0; font-size: var(--title); font-weight: 600; }
 .heap-body { display: grid; gap: 0.25rem; overflow-y: auto; }
 .heap-body h3 { margin: 0.3rem 0 0; font-size: var(--caption); color: var(--dim); font-weight: 600; }
 .heap-body button { min-height: var(--hit); text-align: left; }
 .inspect-head { display: flex; align-items: flex-start; gap: 0.5rem; }
 .inspect-head canvas { flex: none; width: 32px; height: 32px; }
 .inspect-title { flex: 1; min-width: 0; display: grid; }
-.inspect-title h2 { margin: 0; font-size: 1rem; font-weight: 600; overflow-wrap: anywhere; }
+.inspect-title h2 { margin: 0; font-size: var(--title); font-weight: 600; overflow-wrap: anywhere; }
 .inspect-title span { color: var(--dim); }
 .inspect-head button { flex: none; background: none; color: var(--dim); min-height: var(--hit); padding: 0 var(--row-gap); }
 /* The letters are drawn, not written, so that selecting the numbers takes
@@ -1016,14 +1036,14 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
   padding: var(--sheet-pad);
   background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
 }
 /* A backdrop does not take the page's colours in every browser, so the
    colour it had before there were themes is given first. */
 .sheet::backdrop { background: rgba(11, 12, 14, 0.6); background: var(--scrim, rgba(11, 12, 14, 0.6)); }
 .sheet-head { display: flex; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.5rem; }
-.sheet-head h2 { flex: 1; margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
+.sheet-head h2 { flex: 1; margin: 0; font-size: var(--title); font-weight: 600; overflow-wrap: anywhere; }
 .sheet h3 { margin: var(--sheet-pad) 0 var(--row-gap); font-size: var(--body); color: var(--dim); font-weight: 600; }
 .keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 0.9rem; margin: 0; align-items: baseline; }
 .keys dt { white-space: nowrap; }
@@ -1032,8 +1052,8 @@ kbd, .keys code {
   display: inline-block;
   min-width: 1.6em;
   padding: 0.05rem 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 5px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
   background: var(--bg);
   font: 600 0.9em ui-monospace, "Cascadia Mono", Consolas, monospace;
   text-align: center;
@@ -1068,8 +1088,8 @@ kbd, .keys code {
   max-width: calc(100% - var(--dock) - 2rem);
   padding: 0.3rem 0.7rem;
   background: var(--float);
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
   text-align: center;
   pointer-events: none;
 }
@@ -1095,7 +1115,7 @@ kbd, .keys code {
 .sheet .toggle input { accent-color: var(--accent); flex: none; }
 /* What a link or a file has brought, set apart until it is taken or sent
    away. */
-.offer { margin: 0.5rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--accent); border-radius: 8px; }
+.offer { margin: 0.5rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--accent); border-radius: var(--radius-l); }
 .offer h3 { margin-top: 0; }
 .offer p { margin: 0.2rem 0; overflow-wrap: anywhere; }
 #views-offer-what { display: block; color: var(--dim); }
@@ -1147,21 +1167,21 @@ kbd, .keys code {
 .card {
   max-width: 30rem;
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
   padding: 1.25rem 1.5rem;
   line-height: 1.5;
 }
 
-.card h2 { margin: 0 0 0.5rem; font-size: 1.15rem; }
+.card h2 { margin: 0 0 0.5rem; font-size: var(--title); font-weight: 600; }
 .card ol { padding-left: 1.25rem; }
 .card li { margin: 0.35rem 0; }
 
 .card code {
   display: inline-block;
   padding: 0.15rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
   background: var(--bg);
   color: var(--accent);
   font: 600 1.15rem ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -1264,7 +1284,7 @@ kbd, .keys code {
     max-height: min(60dvh, calc(100dvh - 7rem));
     margin: 0;
     border-width: 0 0 1px;
-    border-radius: 0 0 10px 10px;
+    border-radius: 0 0 var(--radius-l) var(--radius-l);
   }
 
   /* More: everything else the bar holds, in parts with a title each.
@@ -1288,8 +1308,8 @@ kbd, .keys code {
     overflow-y: auto;
     padding: 0.75rem max(0.75rem, env(safe-area-inset-right)) 0.9rem max(0.75rem, env(safe-area-inset-left));
     background: var(--panel);
-    border-bottom: 1px solid var(--line);
-    border-radius: 0 0 10px 10px;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0 0 var(--radius-l) var(--radius-l);
   }
   .more-part { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
   /* A part with nothing in it but its title, as the live controls are on a
@@ -1333,8 +1353,8 @@ kbd, .keys code {
     min-height: 44px;
     padding: 0 var(--row-pad);
     background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 6px;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-m);
     color: var(--text);
     font-size: inherit;
     background-image: none;
@@ -1352,8 +1372,8 @@ kbd, .keys code {
     padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left);
     background: var(--panel);
     border: 0;
-    border-top: 1px solid var(--line);
-    border-radius: 12px 12px 0 0;
+    border-top: 1px solid var(--rule);
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
   }
   .detent-peek .panel { height: calc(var(--head-h) + 28px); }
   .detent-full .panel { height: 100%; border-radius: 0; }
@@ -1382,7 +1402,7 @@ kbd, .keys code {
     padding: 0;
     background: none;
     border: 0;
-    border-radius: 12px 12px 0 0;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
     cursor: ns-resize;
     touch-action: none;
   }
@@ -1413,7 +1433,7 @@ kbd, .keys code {
   .zoom-long, .zoom-detail { display: none; }
   .zoom-short { display: inline; }
   .zoom-open { padding: 0.1rem 0.4rem; min-width: 3.4em; }
-  .zoom-pop { left: 0 !important; right: 0; width: auto; border-radius: 10px 10px 0 0; }
+  .zoom-pop { left: 0 !important; right: 0; width: auto; border-radius: var(--radius-l) var(--radius-l) 0 0; }
   .where { flex: 1; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
   .where output { overflow: hidden; text-overflow: ellipsis; }
   #coords { flex: 0 1 auto; }
@@ -1435,8 +1455,8 @@ kbd, .keys code {
     z-index: 1200;
     padding: 0.6rem max(0.75rem, env(safe-area-inset-right)) 0.6rem max(0.75rem, env(safe-area-inset-left));
     background: var(--panel);
-    border-top: 1px solid var(--line);
-    border-radius: 10px 10px 0 0;
+    border-top: 1px solid var(--rule);
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
   }
   .stat { padding: 0; }
   .stat + .stat { border-left: 0; }
@@ -1458,7 +1478,7 @@ kbd, .keys code {
     max-height: 58vh;
     max-height: 58dvh;
     border-width: 1px 0 0;
-    border-radius: 12px 12px 0 0;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
     padding-bottom: calc(1.1rem + env(safe-area-inset-bottom));
   }
   .looks { grid-template-columns: minmax(6.5rem, 2fr) minmax(0, 3fr); }
@@ -1476,7 +1496,7 @@ kbd, .keys code {
    down the right, which leaves the map its width, and the card keeps to
    the left. */
 @media (max-height: 480px) and (min-width: 560px) {
-  .panel, .layers.floating .panel, .detent-peek .panel, .detent-full .panel { top: 0; left: auto; width: min(22rem, 55%); height: auto; border-top: 0; border-left: 1px solid var(--line); border-radius: 12px 0 0 12px; padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 0; }
+  .panel, .layers.floating .panel, .detent-peek .panel, .detent-full .panel { top: 0; left: auto; width: min(22rem, 55%); height: auto; border-top: 0; border-left: 1px solid var(--rule); border-radius: var(--radius-l) 0 0 var(--radius-l); padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 0; }
   .panel-grab { display: none; }
   /* The drawer has no heights, so the shortest of them does not stop it
      scrolling here. */
@@ -1490,8 +1510,8 @@ kbd, .keys code {
     width: min(24rem, 60%);
     max-height: calc(100vh - 3.6rem - env(safe-area-inset-top));
     max-height: calc(100dvh - 3.6rem - env(safe-area-inset-top));
-    border-left: 1px solid var(--line);
-    border-radius: 0 0 0 10px;
+    border-left: 1px solid var(--rule);
+    border-radius: 0 0 0 var(--radius-l);
   }
   .inspect { right: auto; width: 18.5rem; max-width: calc(100% - 1rem); }
   .stage:has(.layers.open) .inspect { display: grid; max-width: calc(45% - 1rem); }
@@ -1526,12 +1546,12 @@ kbd, .keys code {
   flex-direction: column;
   background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
   font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
 .debug[hidden] { display: none; }
-.debug-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); }
+.debug-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule); }
 .debug-head h2 { flex: 1; margin: 0; font-size: 12px; }
 .debug-head button, .debug-report button { min-height: var(--hit); padding: 0 0.5rem; font-size: 11px; }
 .debug-body { overflow: auto; padding: 0.3rem 0.5rem 0.5rem; overscroll-behavior: contain; }
@@ -1540,7 +1560,7 @@ kbd, .keys code {
 .debug dl { display: grid; grid-template-columns: max-content 1fr; gap: 0 0.75rem; margin: 0; }
 .debug dt { color: var(--dim); }
 .debug dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.debug-aids { margin: 0.5rem 0 0; padding: 0.2rem 0.4rem; border: 1px solid var(--line); border-radius: 6px; }
+.debug-aids { margin: 0.5rem 0 0; padding: 0.2rem 0.4rem; border: 1px solid var(--rule); border-radius: var(--radius-m); }
 .debug-aids legend { padding: 0 0.3rem; color: var(--dim); }
 .debug .toggle { display: flex; align-items: center; gap: 0.4rem; }
 .debug-report { margin-top: 0.4rem; }
@@ -1548,7 +1568,7 @@ kbd, .keys code {
 .debug .note { margin: 0.3rem 0 0; }
 .debug-aids-canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; z-index: 650; pointer-events: none; }
 @media (max-width: 720px), (max-height: 480px) {
-  .debug { left: 0; right: 0; bottom: 0; width: auto; max-height: 45%; border-radius: 8px 8px 0 0; }
+  .debug { left: 0; right: 0; bottom: 0; width: auto; max-height: 45%; border-radius: var(--radius-l) var(--radius-l) 0 0; }
 }
 
 /* The map's history: a button in the corner of the map that opens a dock
@@ -1563,7 +1583,7 @@ kbd, .keys code {
 .timeline[hidden], .timeline-body[hidden] { display: none; }
 .locked .timeline { display: none; }
 .timeline-open { position: absolute; left: 0.75rem; bottom: calc(100% + 0.75rem); z-index: 1050; background: var(--float); }
-.timeline-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "day controls" "note note" "scrub scrub"; align-items: center; gap: calc(var(--row-gap) / 2) var(--row-pad); padding: var(--row-gap) var(--row-pad); background: var(--panel); border-top: 1px solid var(--line); }
+.timeline-body { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "day controls" "note note" "scrub scrub"; align-items: center; gap: calc(var(--row-gap) / 2) var(--row-pad); padding: var(--row-gap) var(--row-pad); background: var(--panel); border-top: 1px solid var(--rule); }
 /* The day shown is the largest thing in the dock, and is what opens the
    calendar, which the mark beside it says. */
 .timeline-date { grid-area: day; justify-self: start; display: inline-flex; align-items: center; gap: 0.5em; max-width: 100%; margin-left: calc(var(--row-gap) * -1); padding: 0 var(--row-gap); background: none; border-color: transparent; font-size: calc(var(--body) * 1.5); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -1594,15 +1614,15 @@ kbd, .keys code {
    short by it and not written through it. */
 .timeline-month-name { position: absolute; top: 0; padding: 0 0.5em 0 0.3em; border-left: 1px solid var(--dim); background: var(--panel); white-space: nowrap; }
 .timeline-month-name.now { right: 0; padding: 0 0 0 0.5em; border-left: 0; color: var(--accent); }
-.timeline-ticks { position: absolute; inset: var(--caption-lh) 0 0; display: flex; align-items: flex-end; border-bottom: 1px solid var(--line); pointer-events: none; }
+.timeline-ticks { position: absolute; inset: var(--caption-lh) 0 0; display: flex; align-items: flex-end; border-bottom: 1px solid var(--rule); pointer-events: none; }
 .timeline-tick { flex: 1 0 0; min-width: 0; height: 10px; }
 .timeline-tick.kept { background: linear-gradient(var(--dim), var(--dim)) center / 1px 100% no-repeat; }
 .timeline-tick.gap { height: 14px; background: repeating-linear-gradient(135deg, transparent 0 3px, var(--dim) 3px 4px); opacity: 0.6; }
 .timeline-tick.month { height: 18px; }
 .timeline-tick.now { height: 22px; background: linear-gradient(var(--accent), var(--accent)) center / 3px 100% no-repeat; }
-.timeline-handle { position: absolute; top: calc(var(--caption-lh) + 2px); bottom: -2px; left: calc((var(--timeline-at) + 0.5) / var(--timeline-slots) * 100%); width: 12px; margin-left: -6px; border: 2px solid var(--text); border-radius: 4px; pointer-events: none; }
+.timeline-handle { position: absolute; top: calc(var(--caption-lh) + 2px); bottom: -2px; left: calc((var(--timeline-at) + 0.5) / var(--timeline-slots) * 100%); width: 12px; margin-left: -6px; border: 2px solid var(--text); border-radius: var(--radius-s); pointer-events: none; }
 /* The calendar, hung from the dock over the corner of the map. */
-.timeline-calendar { position: absolute; left: var(--row-pad); bottom: calc(100% + var(--row-gap)); z-index: 1060; width: 19rem; max-width: calc(100% - var(--row-pad) * 2); padding: var(--card-pad); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.timeline-calendar { position: absolute; left: var(--row-pad); bottom: calc(100% + var(--row-gap)); z-index: 1060; width: 19rem; max-width: calc(100% - var(--row-pad) * 2); padding: var(--card-pad); background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius-l); }
 .timeline-calendar[hidden] { display: none; }
 .timeline-calendar-head { display: flex; align-items: center; gap: var(--row-gap); margin-bottom: var(--row-gap); }
 .timeline-month { flex: 1; text-align: center; font-weight: 600; }
@@ -1612,10 +1632,10 @@ kbd, .keys code {
 .timeline-cell:disabled { opacity: 0.55; }
 /* A day nothing was kept of is struck through and hatched, which a day
    out of reach is not: told apart by more than how faint they are. */
-.timeline-cell.gap { opacity: 1; text-decoration: line-through; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px); }
+.timeline-cell.gap { opacity: 1; text-decoration: line-through; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--rule) 4px 5px); }
 .timeline-cell[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
 .timeline-kept { display: flex; align-items: center; justify-content: space-between; gap: var(--row-gap); margin: var(--row-gap) 0 0; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
-.timeline-key { display: inline-block; width: 12px; height: 12px; margin-right: 0.4em; vertical-align: -2px; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--dim) 4px 5px); border: 1px solid var(--line); }
+.timeline-key { display: inline-block; width: 12px; height: 12px; margin-right: 0.4em; vertical-align: -2px; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--dim) 4px 5px); border: 1px solid var(--rule); }
 .timeline-handle.other { left: calc((var(--timeline-other) + 0.5) / var(--timeline-slots) * 100%); border-style: dashed; border-color: var(--dim); }
 .timeline-pick-now { width: 100%; margin-top: var(--row-gap); }
 /* Two days compared: over the map, a divider to drag with a day named
@@ -1635,13 +1655,13 @@ kbd, .keys code {
 .timeline-grip::before, .timeline-grip::after { content: ""; position: absolute; top: calc(50% - 4px); width: 6px; height: 6px; border: solid var(--text); border-width: 0 0 2px 2px; }
 .timeline-grip::before { left: 7px; transform: rotate(45deg); }
 .timeline-grip::after { right: 7px; transform: rotate(-135deg); }
-.timeline-left, .timeline-right { position: absolute; top: 0.6rem; display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--row-pad); background: var(--float); border: 1px solid var(--line); border-radius: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.timeline-left, .timeline-right { position: absolute; top: 0.6rem; display: inline-flex; align-items: center; min-height: var(--control-h); padding: 0 var(--row-pad); background: var(--float); border: 1px solid var(--rule); border-radius: var(--radius-m); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .timeline-left { right: calc(100% - var(--timeline-cut) + var(--hit) / 2 + 0.4rem); border-color: var(--warn); color: var(--warn); }
 .timeline-right { left: calc(var(--timeline-cut) + var(--hit) / 2 + 0.4rem); pointer-events: auto; }
 /* The nether's levels: a row of buttons at the top of the map, in the middle,
    clear of the zoom buttons and the layer panel at its corners. Over the map
    and its own controls, under every sheet and menu. */
-.levels { position: absolute; left: 50%; transform: translateX(-50%); top: 0.75rem; z-index: 1050; display: flex; gap: 0.25rem; padding: 0.25rem; background: var(--float); border: 1px solid var(--line); border-radius: 8px; cursor: default; }
+.levels { position: absolute; left: 50%; transform: translateX(-50%); top: 0.75rem; z-index: 1050; display: flex; gap: 0.25rem; padding: 0.25rem; background: var(--float); border: 1px solid var(--rule); border-radius: var(--radius-l); cursor: default; }
 .levels[hidden] { display: none; }
 .locked .levels { display: none; }
 .level[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }

@@ -152,10 +152,12 @@ func TestLightAndHighContrastThemesMeetTheContrastTheyAreFor(t *testing.T) {
 	}
 }
 
-// The layer panel is in every theme, the dark one included: its text is
-// held to four and a half to one against the panel and against the ground
-// a line takes under the pointer, and what marks out a control there, a
-// checkbox's edge, the ring of the focus, a box's edge, to three to one.
+// The page's controls are in every theme, the dark one included: text is
+// held to four and a half to one against every ground a control stands on,
+// the page's, a panel's and a raised button's, and the edge of anything
+// typed in or ticked, which is a line, to three to one against each of
+// them, as is a checkbox that is on. A rule only parts two things and is
+// held to nothing.
 func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 	css := read(t, "style.css")
 	for _, theme := range []string{"", "light", "contrast"} {
@@ -164,11 +166,11 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 		if name == "" {
 			name = "dark"
 		}
-		get := func(colour string) rgba { return colourOf(t, c[colour]) }
+		get := func(colour string) rgba { return colourOf(t, resolved(t, c, colour)) }
 		text, edge := math.Inf(1), math.Inf(1)
-		for _, bg := range []string{"panel", "bg"} {
+		for _, bg := range []string{"panel", "bg", "raised"} {
 			// A name, a count or a note, the match in a search, what is
-			// hidden, and the tick on a checkbox that is on.
+			// hidden, and the label of a button.
 			for _, fg := range []string{"text", "dim", "accent", "warn"} {
 				got := contrast(get(fg), get(bg))
 				text = math.Min(text, got)
@@ -176,9 +178,8 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 					t.Errorf("%s theme: %s on %s is %.2f to one, want at least 4.5", name, fg, bg, got)
 				}
 			}
-			// A checkbox's edge and a box's, and the ring of the focus and a
-			// checkbox that is on.
-			for _, fg := range []string{"dim", "accent"} {
+			// A box's edge and a checkbox's, and a checkbox that is on.
+			for _, fg := range []string{"line", "accent"} {
 				got := contrast(get(fg), get(bg))
 				edge = math.Min(edge, got)
 				if got < 3 {
@@ -191,12 +192,13 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 		} else {
 			text = math.Min(text, got)
 		}
-		t.Logf("%s theme: the panel's lowest text %.2f, lowest edge %.2f", name, text, edge)
+		t.Logf("%s theme: the controls' lowest text %.2f, lowest edge %.2f", name, text, edge)
 	}
-	// And those are the colours the panel's own controls are drawn in.
+	// And those are the colours the controls are drawn in: every box that
+	// is typed in, and every checkbox, edged in the line.
 	for _, need := range []string{
-		"border: 2px solid var(--dim);",
-		".panel-search input, .popover input, .popover button, .row .only { border-color: var(--dim); }",
+		"border: 2px solid var(--line);",
+		"border: 1px solid var(--line);",
 		":focus-visible { outline: var(--focus) solid var(--accent); outline-offset: 1px; }",
 		".row mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; }",
 		".segment[aria-checked=\"true\"], .segment.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }",
@@ -205,6 +207,24 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 			t.Errorf("style.css no longer has %s", need)
 		}
 	}
+}
+
+// A theme's value for a name, following a value that is another name's.
+func resolved(t *testing.T, theme map[string]string, name string) string {
+	t.Helper()
+	value, ok := theme[name]
+	for hops := 0; ok && hops < 8; hops++ {
+		m := regexp.MustCompile(`^var\(--([a-z-]+)\)$`).FindStringSubmatch(value)
+		if m == nil {
+			return value
+		}
+		value, ok = theme[m[1]]
+	}
+	if !ok {
+		t.Fatalf("no theme defines --%s, or what it names", name)
+	}
+	t.Fatalf("--%s names other colours too deep to follow", name)
+	return ""
 }
 
 // A colour written into a rule does not follow the theme. Each has a name
