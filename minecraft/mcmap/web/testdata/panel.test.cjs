@@ -634,6 +634,122 @@ test('a record of the version before is brought up, and the script from before t
   assert.equal(JSON.parse(storage.get('mcmap.settings')).v, 3, 'a later record is not written over');
 });
 
+// What a line says of everything under it, as the viewer reads the list.
+const under = (p, ...labels) => p.li(...labels).querySelectorAll('.node').map((node) => {
+  const row = node.children.find((child) => child.classList.contains('row'));
+  const name = row.children.find((child) => child.classList.contains('name')).textContent;
+  return [name, row.children.find((child) => child.classList.contains('check')).getAttribute('aria-checked')];
+});
+
+test('a greyed row is not counted in its section and is not switched by the section\'s checkbox', async () => {
+  const p = await load();
+  // Chunk focus is on and greyed out while the grid is off: the
+  // section reads as the rows that can be pressed read.
+  assert.equal(p.layers.states()['overlays/chunk'], true);
+  assert.equal(p.state('Overlays'), 'false');
+  await p.press(['Overlays']);
+  assert.equal(p.state('Overlays'), 'true');
+  assert.deepEqual(p.on().filter((key) => key.startsWith('overlays/')), ['overlays/chunk', 'overlays/grid', 'overlays/slime']);
+  await p.press(['Overlays']);
+  assert.equal(p.state('Overlays'), 'false');
+  assert.deepEqual(p.on().filter((key) => key.startsWith('overlays/')), ['overlays/chunk'], 'the greyed row is left as it was');
+  // One that is off and greyed stays off when the section is switched on.
+  p.rows['overlays/chunk'].setAvailable(true);
+  p.rows['overlays/chunk'].setEnabled(false);
+  p.rows['overlays/chunk'].setAvailable(false);
+  await p.press(['Overlays']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('overlays/')), ['overlays/grid', 'overlays/slime']);
+  // And the section is half on when a row that can be pressed is, as before.
+  await p.press(['Overlays', 'Grid']);
+  assert.equal(p.state('Overlays'), 'mixed');
+});
+
+test('a row that the section\'s own press greys out comes back with it', async () => {
+  const p = await load();
+  // As the page does it: the focus is greyed out whenever the grid is off.
+  p.rows['overlays/grid'].onToggle((on) => p.rows['overlays/chunk'].setAvailable(on));
+  await p.press(['Overlays', 'Grid']);
+  await p.press(['Overlays', 'Slime chunks']);
+  const overlays = () => p.on().filter((key) => key.startsWith('overlays/'));
+  const all = ['overlays/chunk', 'overlays/grid', 'overlays/slime'];
+  assert.deepEqual(overlays(), all);
+  assert.equal(p.state('Overlays'), 'true');
+  await p.press(['Overlays']);
+  assert.deepEqual(overlays(), []);
+  await p.press(['Overlays']);
+  assert.deepEqual(overlays(), all);
+  assert.equal(p.state('Overlays'), 'true');
+});
+
+test('a section with nothing in it that can be pressed cannot be pressed either', async () => {
+  const p = await load();
+  p.rows['overlays/slime'].setAvailable(false);
+  p.rows['overlays/grid'].setAvailable(false);
+  await p.tick();
+  const before = JSON.stringify(p.layers.states());
+  assert.equal(p.part(['Overlays'], 'check').getAttribute('aria-disabled'), 'true');
+  await p.press(['Overlays']);
+  assert.equal(JSON.stringify(p.layers.states()), before);
+});
+
+test('a list with no switch of its own reads as off under a section that is off, and ticking it brings the section back', async () => {
+  const p = await load();
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, [
+    { id: 'village', label: 'Villages', count: 3 }, { id: 'monument', label: 'Monuments', count: 2 }, { id: 'stronghold', label: 'Strongholds', count: 1, off: true },
+  ]);
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure', order: 10 });
+  p.add({ group: 'structures', id: 'predicted', label: 'Predicted', heading: 'How sure', order: 20 });
+  await p.tick();
+  await p.press(['Structures', 'Villages']);
+  assert.equal(kinds.shows('village'), false);
+  await p.press(['Structures', 'Villages']);
+  assert.equal(kinds.shows('village'), true);
+  // Nothing under the section is on once it is off, and what was
+  // chosen of the kinds is still there for when it comes back.
+  await p.press(['Structures', 'Monuments']);
+  await p.press(['Structures']);
+  assert.equal(p.state('Structures'), 'false');
+  assert.deepEqual(under(p, 'Structures').map(([, on]) => on), ['false', 'false', 'false', 'false', 'false']);
+  assert.equal(kinds.shows('village'), true);
+  assert.equal(kinds.shows('monument'), false);
+  await p.press(['Structures']);
+  assert.deepEqual(under(p, 'Structures'), [['Villages', 'true'], ['Monuments', 'false'], ['Strongholds', 'false'], ['Known', 'true'], ['Predicted', 'true']]);
+  // A kind ticked while the section is off brings it back with that kind shown, and does not hide it.
+  await p.press(['Structures']);
+  await p.press(['Structures', 'Villages']);
+  assert.equal(kinds.shows('village'), true);
+  assert.equal(p.state('Structures'), 'mixed');
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), ['structures/predicted', 'structures/recorded']);
+});
+
+test('pressing a line with things under it twice puts everything under it off at some press, from any state', async () => {
+  const starts = {
+    'all on': async () => {},
+    'a row off': (p) => p.press(['Mobs', 'Hostile']),
+    'an item off': (p) => p.press(['Mobs', 'Passive', 'Cow']),
+    'every row off': async (p) => { await p.press(['Mobs', 'Hostile']); await p.press(['Mobs', 'Passive']); },
+    'shown alone': (p) => p.menu(['Mobs', 'Passive', 'Cat'], 'Only this'),
+    'a section shown alone': (p) => p.menu(['Mobs'], 'Only this section'),
+  };
+  for (const [name, setup] of Object.entries(starts)) {
+    for (const parent of [['Mobs'], ['Mobs', 'Passive']]) {
+      const p = await load();
+      await p.open('Mobs', 'Hostile');
+      await p.open('Mobs', 'Passive');
+      await setup(p);
+      const seen = [];
+      for (let n = 0; n < 2; n += 1) {
+        await p.press(parent);
+        seen.push([p.state(...parent), ...under(p, ...parent).map(([, on]) => on)]);
+      }
+      const off = seen.some((line) => line.every((on) => on === 'false'));
+      assert.ok(off, `from ${name}, two presses of ${parent.join(' > ')} never had everything under it off: ${JSON.stringify(seen)}`);
+      // And the line never says something its children contradict.
+      for (const line of seen) if (line[0] === 'false') assert.ok(line.every((on) => on === 'false'), `${parent.join(' > ')} is off with something under it on: ${JSON.stringify(line)}`);
+    }
+  }
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {

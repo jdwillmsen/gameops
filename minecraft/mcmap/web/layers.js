@@ -985,7 +985,9 @@
     const lines = [];
     for (const item of some) {
       if (!item.dom) item.dom = line(item, depth);
-      const on = itemOn(row, item);
+      // A list under a section that is off is off with it, as the items of
+      // a layer that is off are.
+      const on = itemOn(row, item) && row.masked !== true;
       pictured(item.dom, item);
       show(item.dom, {
         label: item.label,
@@ -1109,6 +1111,12 @@
     // A list with no switch of its own: its items stand first under the
     // section, counted and searched as any layer's are.
     const { bare } = section;
+    const counted = reach(section);
+    if (counted.length > 0) {
+      mine.rows = counted.length;
+      mine.rowsOn = counted.filter((row) => row.on).length;
+      mine.mixed = counted.some((row) => rowState(row) === 'mixed');
+    }
     if (bare) {
       const within = query !== '' && bare.list.some((item) => hit(item.label));
       visible = visible || within;
@@ -1118,7 +1126,7 @@
         mine.on += listed.filter((item) => bare.facet.shows(item.id)).length;
       }
       mine.mixed = mine.mixed || bare.facet.only !== null || bare.list.some((item) => hiddenIn(bare, item));
-      bare.masked = mine.rowsOn === 0;
+      bare.masked = counted.length > 0 && mine.rowsOn === 0;
     }
     if (whole) {
       if (dom.was.open) lines.unshift(...itemLines(whole, 2, hit(section.label) || hit(whole.label), mine));
@@ -1129,7 +1137,7 @@
       show(dom, {
         label: section.label,
         state: mine.rowsOn === 0 ? 'false' : mine.rowsOn === mine.rows && !mine.mixed ? 'true' : 'mixed',
-        disabled: false,
+        disabled: !whole && section.rows.length > 0 && counted.length === 0,
         masked: false,
         twisted: true,
         open,
@@ -1228,6 +1236,11 @@
   // --- what a line does ----------------------------------------------------------
 
   const wholeOf = (section) => section.rows.find((row) => row.whole) || null;
+  // The rows of a section that its checkbox reads and switches: those that
+  // can be pressed. A greyed row that is on would otherwise hold the
+  // section half on however the rest were put, and be switched behind the
+  // viewer's back by a press that cannot be taken back with the row itself.
+  const reach = (section) => section.rows.filter((row) => row.available);
 
   function toggle(node) {
     if (node.kind === 'section') {
@@ -1240,14 +1253,16 @@
       const { row } = node;
       const f = row.facet;
       if (!f || node.disabled || !row.available) return;
-      if (!row.on) {
+      if (!row.on || row.masked === true) {
         // Under a layer that is off, an item switched on brings the layer
-        // on as it was last chosen, with this item shown as well.
+        // on as it was last chosen, with this item shown as well. A list
+        // with no switch of its own brings back the section it stands under.
         changeFacet(f, () => {
           if (f.only !== null && f.only !== node.id) leaveOnly(f);
           showItem(f, node.id, true);
         });
-        switchRow(row, true);
+        if (row.on) rest(row.section);
+        else switchRow(row, true);
         return;
       }
       changeFacet(f, () => {
@@ -1272,13 +1287,16 @@
   })();
   const keepRested = () => retain('panel', 'rest', Object.keys(rested).length > 0 ? rested : null);
   function rest(section) {
-    const on = section.rows.filter((row) => row.on);
+    const here = reach(section);
+    const on = here.filter((row) => row.on);
     if (on.length > 0) {
-      place(section.rows, () => false);
+      place(here, () => false);
       rested[section.id] = on.map((row) => row.key);
     } else {
+      // What the press before took off is put back even if it has been
+      // greyed out since, as the focus is by the grid it was pressed with.
       const was = Object.hasOwn(rested, section.id) ? rested[section.id].filter((key) => section.rows.some((row) => row.key === key)) : [];
-      place(section.rows, (row) => was.length === 0 || was.includes(row.key));
+      place(section.rows.filter((row) => row.available || was.includes(row.key)), (row) => was.length === 0 || was.includes(row.key));
       delete rested[section.id];
     }
     forget(section.id, 'all');
@@ -1327,6 +1345,7 @@
       // Pressed on the one already alone, it lets the rest back.
       changeFacet(f, () => { showAlone(f, f.only === node.id ? null : node.id); });
       if (!node.row.on) switchRow(node.row, true);
+      else if (node.row.masked === true) rest(node.row.section);
       return;
     }
     const scope = node.kind === 'section' || node.whole ? 'all' : node.section.id;
