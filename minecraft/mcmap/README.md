@@ -2428,8 +2428,9 @@ costs what one at zoom 0 does, since it covers fewer blocks and the same pixels.
 
 **What is read, by zoom.** A tile needs its neighbours, since a slope is a
 difference between them, so it reads the pixels of a ring round itself,
-wide enough for a blur and a step each way: 3 pixels at the finest zoom,
-where the blur is widest, and 2 beyond it, so the same land
+wide enough for a blur and a step each way: 3 pixels at a block to a pixel,
+where the blur is widest, 2 wider than that, and finer than a block one
+pixel over a margin of 4 blocks, where the blur is done, so the same land
 drawn from tiles that cut it in other places is the same picture, which is
 what the tests check, down to the pixel, by moving the land across a tile's
 edge. At 1 block to a pixel the columns come from `Rect`; at 2 and 4 every

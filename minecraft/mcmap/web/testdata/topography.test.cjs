@@ -288,6 +288,17 @@ test('a list of just the bands to show, made over one dimension, leaves none of 
   assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=0,1,2,5,6,7&v=v1$/);
 });
 
+test('a list of just the bands to show with every one taken off it leaves the whole tint out', async () => {
+  const p = await load();
+  await p.on('Height tint');
+  await p.press(['Topography', 'Height tint'], 'twist');
+  p.layers.facet('topography', 'tint').solo('overworld:3');
+  await wait();
+  await p.press(['Topography', 'Height tint', '70 to 89']);
+  assert.equal(p.layers.facet('topography', 'tint').only, null);
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=0,1,2,3,4,5,6,7&v=v1$/);
+});
+
 test('a band of another dimension shown alone by a view is let go of as it comes', async () => {
   const p = await load({ scripts: ['biomes.js', 'topography.js', 'views.js'] });
   await p.on('Height tint');
