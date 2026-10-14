@@ -33,10 +33,10 @@ const MARKED = [marked('2026-10-12'), day('2026-10-13'), marked('2026-10-14', { 
 // today is the day it is, which is where the scrubber's days end; kept is
 // what the browser holds for the page, with whose settings script the
 // page is then loaded, as it is when a play's speed is to be remembered.
-async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false, today = '2026-10-14', kept = null } = {}) {
+async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false, today = '2026-10-14', kept = null, pairs = false, beside = '' } = {}) {
   const p = page(kept || new Map(), { files: kept ? ['settings.js'] : [] });
   const { win, doc } = p;
-  const state = { asked: [], shown: [], ticks: [], paces: [], dimension, wanted };
+  const state = { asked: [], shown: [], ticks: [], paces: [], dimension, wanted, right: [], beside, cut: 0.5 };
   // The clock is the test's: noon of the day it is, and later when told.
   const noon = Date.parse(`${today}T12:00:00Z`);
   const clock = (ms) => { win.Date = class extends Date { static now() { return noon + ms; } }; };
@@ -50,9 +50,38 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
       state.shown.push(to ? to.day : '');
       state.wanted = to ? to.day : '';
       state.day = to;
+      // As the map does: now is beside nothing, and a day set by whoever
+      // compares nothing drops what the address asked for beside it.
+      if (!to && state.comparing) { state.comparing = false; state.right.push('off'); }
+      if (!state.comparing) state.beside = '';
       return true;
     },
   };
+  // A map that can draw a second day beside the one shown: right is what
+  // it was told to put there, a date, 'now', or 'off' when told to stop,
+  // and beside what the address asks for, as the map takes it.
+  if (pairs) {
+    win.mcmap.past.compare = {
+      on: () => state.comparing === true,
+      wanted: () => state.beside,
+      start(to) {
+        if (!state.day) return false;
+        state.comparing = true;
+        state.right.push(to ? to.day : 'now');
+        state.beside = to ? to.day : 'now';
+        return true;
+      },
+      stop() {
+        state.comparing = false;
+        state.right.push('off');
+        state.beside = '';
+      },
+      cut(to) {
+        if (Number.isFinite(to)) state.cut = Math.min(1, Math.max(0, to));
+        return state.cut;
+      },
+    };
+  }
   if (follows) {
     win.mcmap.past.markers = (id) => Boolean(state.day) && state.day.dimensions.some((d) => d.id === id && d.markers === true);
     win.mcmap.markers = { day: () => (state.day ? state.day.day : '') };
@@ -95,14 +124,18 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
   const cell = (day) => parts('cell').find((node) => node.dataset.day === day) || null;
   const beat = async () => { for (const fn of state.ticks) if (fn) fn(); await settle(); };
   const view = async () => { doc.dispatchEvent({ type: 'mcmap:view' }); await settle(); };
-  // The address has changed to one that names this day, or none.
-  const named = async (to) => {
+  // What a comparison puts over the map is in the map's box, not the dock.
+  const over = (name) => doc.getElementById('map').querySelector(`.timeline-${name}`);
+  // The address has changed to one that names this day, or none, and
+  // beside it this, if anything.
+  const named = async (to, right = '') => {
     state.wanted = to;
+    state.beside = right;
     doc.dispatchEvent({ type: 'mcmap:day' });
     await settle();
   };
   const last = () => state.shown[state.shown.length - 1];
-  return { ...p, state, bar, part, parts, press, key, value, max, slide, slots, point, cell, beat, view, named, last, settle, clock };
+  return { ...p, state, bar, part, parts, over, press, key, value, max, slide, slots, point, cell, beat, view, named, last, settle, clock };
 }
 
 test('a server that keeps no history leaves the page without the control, and is not asked again', async () => {
@@ -598,6 +631,225 @@ test('a play that loops starts again from the first day in place of going to now
   await p.beat();
   assert.equal(p.last(), '');
   assert.equal(p.part('play').textContent, 'Play');
+});
+
+test('a map that cannot draw two days has no Compare to press', async () => {
+  const p = await load();
+  await p.press('open');
+  assert.equal(p.part('compare').hidden, true);
+  assert.equal(p.over('divide').hidden, true);
+});
+
+test('Compare from now chooses the newest day kept, puts now on the right, and shows the divider with a day named either side', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  assert.equal(p.part('compare').hidden, false);
+  assert.equal(p.part('compare').getAttribute('aria-pressed'), 'false');
+  await p.press('compare');
+  assert.deepEqual(p.state.shown, ['2026-10-14'], 'a comparison needs a day on the left');
+  assert.deepEqual(p.state.right, ['now']);
+  assert.equal(p.part('compare').getAttribute('aria-pressed'), 'true');
+  assert.equal(p.over('divide').hidden, false);
+  assert.match(p.over('left').textContent, /14/);
+  assert.equal(p.over('right').textContent, 'Now');
+  assert.equal(p.over('divider').getAttribute('role'), 'slider');
+  assert.equal(p.over('divider').getAttribute('aria-valuenow'), '50');
+  assert.equal(p.doc.body.classList.contains('comparing'), true);
+  // The scrubber shows where the day on the right is, at its end for now.
+  assert.equal(p.parts('handle').find((node) => node.classList.contains('other')).hidden, false);
+  assert.equal(p.part('range').style.getPropertyValue('--timeline-other'), '3');
+});
+
+test('compared, the note says which side is the day and what is on the other, and whose the markers are', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }), follows: true, pairs: true });
+  await p.press('open');
+  await p.slide(0);
+  await p.press('compare');
+  let said = p.part('note').textContent;
+  assert.match(said, /The terrain left of the divider is of this day, and so are the beds, containers and named mobs on either side/);
+  assert.match(said, /Right of the divider is the terrain as it is now\./);
+  for (const still of OF_NOW) assert.match(said, still);
+  assert.doesNotMatch(said, /The terrain is of this day/, 'the terrain on the right is not of this day');
+  await p.slide(1);
+  said = p.part('note').textContent;
+  assert.match(said, /The terrain left of the divider is of this day\. Its beds, containers and named mobs were not kept, so none are drawn on either side\./);
+  p.state.dimension = 'end';
+  await p.view();
+  said = p.part('note').textContent;
+  assert.match(said, /kept nothing of this dimension, so no terrain is drawn left of the divider, and no beds, containers or named mobs on either side\./);
+  assert.match(said, /Right of the divider is the terrain as it is now/);
+  for (const still of OF_NOW) assert.match(said, still);
+  await p.press('compare');
+  assert.match(p.part('note').textContent, /so no terrain is drawn, and no beds, containers or named mobs\. Players/, 'out of a comparison the note is as it was');
+});
+
+test('leaving Compare puts the map back as one, on the day it was on', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('compare');
+  await p.press('compare');
+  assert.deepEqual(p.state.right, ['now', 'off']);
+  assert.equal(p.last(), '2026-10-13');
+  assert.equal(p.over('divide').hidden, true);
+  assert.equal(p.part('compare').getAttribute('aria-pressed'), 'false');
+  assert.equal(p.doc.body.classList.contains('comparing'), false);
+  assert.match(p.part('note').textContent, /The terrain is of this day/);
+});
+
+test('the day on the right is chosen from the same calendar, which offers now and not the day on the left', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('compare');
+  p.over('right').click();
+  await p.settle();
+  assert.equal(p.part('calendar').hidden, false);
+  assert.equal(p.over('right').getAttribute('aria-expanded'), 'true');
+  assert.equal(p.part('date').getAttribute('aria-expanded'), 'false');
+  assert.equal(p.part('pick-now').hidden, false);
+  assert.equal(p.part('pick-now').getAttribute('aria-pressed'), 'true');
+  assert.equal(p.cell('2026-10-13').disabled, true, 'a day is not compared with itself');
+  assert.match(p.cell('2026-10-13').getAttribute('aria-label'), /on the left/);
+  assert.equal(p.cell('2026-10-12').disabled, false);
+  p.cell('2026-10-12').click();
+  await p.settle();
+  assert.deepEqual(p.state.right, ['now', '2026-10-12']);
+  assert.equal(p.last(), '2026-10-13', 'the day on the left is left where it is');
+  assert.equal(p.part('calendar').hidden, true);
+  assert.equal(p.doc.activeElement, p.over('right'));
+  assert.match(p.over('right').textContent, /12/);
+  assert.match(p.part('note').textContent, /Right of the divider is the terrain of .*12/);
+  assert.equal(p.part('range').style.getPropertyValue('--timeline-other'), '0');
+  p.over('right').click();
+  await p.settle();
+  assert.equal(p.cell('2026-10-12').getAttribute('aria-pressed'), 'true');
+  assert.equal(p.part('pick-now').getAttribute('aria-pressed'), 'false');
+  await p.press('pick-now');
+  assert.deepEqual(p.state.right, ['now', '2026-10-12', 'now']);
+  assert.equal(p.over('right').textContent, 'Now');
+  assert.equal(p.part('calendar').hidden, true);
+  // Opened from the day, it is the day's calendar again.
+  await p.press('date');
+  assert.equal(p.part('pick-now').hidden, true);
+  assert.equal(p.cell('2026-10-13').getAttribute('aria-pressed'), 'true');
+  p.cell('2026-10-14').dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(p.doc.activeElement, p.part('date'));
+});
+
+test('a day stepped to that is the day on the right is compared with now, and Escape gives the focus back to the right', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  await p.slide(2);
+  await p.press('compare');
+  p.over('right').click();
+  await p.settle();
+  p.cell('2026-10-13').dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(p.part('calendar').hidden, true);
+  assert.equal(p.doc.activeElement, p.over('right'));
+  p.over('right').click();
+  await p.settle();
+  p.cell('2026-10-13').click();
+  await p.settle();
+  await p.press('earlier');
+  assert.equal(p.last(), '2026-10-13');
+  assert.equal(p.state.right.at(-1), 'now');
+  assert.equal(p.over('right').textContent, 'Now');
+});
+
+test('now, and closing the dock, each end a comparison', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  await p.press('compare');
+  await p.press('now');
+  assert.equal(p.last(), '');
+  assert.equal(p.state.comparing, false);
+  assert.equal(p.over('divide').hidden, true);
+  assert.equal(p.part('compare').getAttribute('aria-pressed'), 'false');
+  await p.press('compare');
+  assert.equal(p.state.comparing, true);
+  await p.press('close');
+  assert.equal(p.state.comparing, false);
+  assert.equal(p.last(), '');
+  assert.equal(p.over('divide').hidden, true);
+  assert.equal(p.doc.body.classList.contains('comparing'), false);
+});
+
+test('the divider is moved by the arrow keys, to the edges by Home and End, and by a drag across the map', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  await p.press('compare');
+  const divider = p.over('divider');
+  const press = (key) => divider.dispatchEvent({ type: 'keydown', key });
+  press('ArrowLeft');
+  assert.equal(p.state.cut.toFixed(2), '0.48');
+  assert.equal(divider.getAttribute('aria-valuenow'), '48');
+  assert.match(divider.getAttribute('aria-valuetext'), /48%/);
+  assert.equal(p.over('divide').style.getPropertyValue('--timeline-cut'), '48%');
+  press('ArrowRight');
+  press('ArrowUp');
+  assert.equal(p.state.cut.toFixed(2), '0.52');
+  press('Home');
+  assert.equal(p.state.cut, 0);
+  press('ArrowLeft');
+  assert.equal(p.state.cut, 0, 'it is held to the map');
+  press('End');
+  assert.equal(p.state.cut, 1);
+  assert.equal(divider.getAttribute('aria-valuenow'), '100');
+  p.doc.getElementById('map').getBoundingClientRect = () => ({ left: 40, top: 0, width: 800, height: 600 });
+  divider.dispatchEvent({ type: 'pointerdown', pointerId: 4, button: 0, clientX: 240 });
+  assert.equal(p.state.cut, 0.25);
+  assert.equal(p.doc.activeElement, divider);
+  divider.dispatchEvent({ type: 'pointermove', pointerId: 4, clientX: 640 });
+  assert.equal(p.state.cut, 0.75);
+  divider.dispatchEvent({ type: 'pointermove', pointerId: 9, clientX: 40 });
+  assert.equal(p.state.cut, 0.75, 'another pointer is not the one dragging');
+  divider.dispatchEvent({ type: 'pointerup', pointerId: 4 });
+  divider.dispatchEvent({ type: 'pointermove', pointerId: 4, clientX: 40 });
+  assert.equal(p.state.cut, 0.75);
+  assert.equal(p.state.shown.length, 1, 'moving the divider moves no day');
+});
+
+test('a play while days are compared rests on the newest day, and starts over from it', async () => {
+  const p = await load({ pairs: true });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('compare');
+  await p.press('play');
+  await p.beat();
+  assert.equal(p.last(), '2026-10-14');
+  assert.equal(p.part('play').textContent, 'Play');
+  assert.equal(p.state.comparing, true, 'a play does not run on to now and out of the comparison');
+  await p.press('play');
+  assert.equal(p.last(), '2026-10-12');
+  assert.equal(p.part('play').textContent, 'Pause');
+});
+
+test('an address that names a day and what is beside it opens on the comparison, and one that drops it leaves it', async () => {
+  const p = await load({ pairs: true, wanted: '2026-10-13', beside: 'now' });
+  assert.deepEqual(p.state.shown, ['2026-10-13']);
+  assert.deepEqual(p.state.right, ['now']);
+  assert.equal(p.part('body').hidden, false);
+  assert.equal(p.over('divide').hidden, false);
+  await p.view();
+  assert.deepEqual(p.state.right, ['now'], 'a comparison once followed is not started again');
+  await p.named('2026-10-13', '2026-10-12');
+  assert.deepEqual(p.state.right, ['now', '2026-10-12']);
+  assert.match(p.over('right').textContent, /12/);
+  // A day on the right that is not kept, or is the day on the left, is now.
+  await p.named('2026-10-13', '2025-01-01');
+  assert.equal(p.state.right.at(-1), 'now');
+  await p.named('2026-10-14', '2026-10-14');
+  assert.equal(p.last(), '2026-10-14');
+  assert.equal(p.state.right.at(-1), 'now');
+  await p.named('2026-10-14');
+  assert.equal(p.state.right.at(-1), 'off');
+  assert.equal(p.over('divide').hidden, true);
+  assert.equal(p.last(), '2026-10-14');
+  await p.named('2026-10-12', 'now');
+  await p.named('');
+  assert.equal(p.last(), '');
+  assert.equal(p.state.comparing, false);
 });
 
 test('the speed and the loop are kept with the page\'s settings, and are how the next page opens', async () => {
