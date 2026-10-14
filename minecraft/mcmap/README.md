@@ -3994,6 +3994,9 @@ one. The lowest it finds, dark, light and high contrast: text 5.53, 6.05
 and 11.79; an edge 3.13, 3.66 and 13.58, the dark one being a
 checkbox's edge on the raised ground a line of the panel takes under the
 pointer.
+The browser check `themes` measures the same in the colours the page is
+drawn in, where a rule more particular than a control's own may paint
+over them.
 
 **Settings that follow a player (a design, not built).** Everything above
 stays in one browser. This is how it would follow a player to another.
@@ -4262,7 +4265,7 @@ counted apart and is not a failure.
 | `search` | A search for a biome or structure this world has, by a name read off the page, finds it | a biome or a structure |
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
-| `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it | |
+| `themes` | Each of the three themes is applied, in colours of its own, with the map still drawn under it; in each, as the browser draws them, the chosen dimension and nether level and a box's text stand off what is behind them by 4.5 to one, and that box's edge, a ticked checkbox's edge and tick and the ring of the focus by 3 to one | |
 | `history` | The History dock opens, one step back from now is the newest day kept, that day's tiles are asked for at its own addresses and at least one comes as a picture, where the day kept the markers of the dimension shown they are fetched and the page says its markers are that day's, where it did not no request for them is made, the view is where it was with the dock open, Compare draws today's tiles beside the day's, cut at the divider, and leaving it takes today's away, Now draws today's tiles again with none of the day's left, and the dock closes | a day kept: a map run with `--no-history`, one that has kept no day yet, or one whose newest day kept nothing of the dimension shown, skips |
 | `follow-player` | Follow on a player, one with a head where there is one, for 20 s: it stays on, the button says so, the mark is within 4 pixels of the middle of the map that can be seen, and so is where the stream last put the player, give or take what they travel between samples | a player online |
 | `follow-mob` | The same on a mob for 60 s, through the samples that leave it out | a mob loaded |
