@@ -1,6 +1,6 @@
 # Admin access to the production map
 
-Status: proposed 2026-10-14, revised the same day after three independent
+Status: proposed 2026-10-14, revised the same day after four independent
 reviews. Nothing is built. Each decision below is numbered so that it can be
 approved or rejected on its own.
 
@@ -594,8 +594,9 @@ SHA-256 of its ID. A user agent is cut as `said` already cuts it.
 
 | Event | Log line | Metric |
 |---|---|---|
-| Passkey made pending | `map passkey pending` xuid, credential | `mcmap_admin_passkeys_registered_total{result}`, `result` one of `pending`, `refused` (a §7.1 check failed), `code_issued`, `code_wrong`, `abandoned` (three wrong codes), `expired`, `confirmed` |
+| Passkey made pending | `map passkey pending` xuid, credential | `mcmap_admin_passkeys_registered_total{result}`, `result` one of `pending`, `refused` (a §7.1 check failed), `code_issued`, `code_wrong`, `abandoned` (three wrong codes), `cancelled`, `expired`, `confirmed` |
 | Code asked for by the agent | `map passkey code issued` xuid, credential (never the code) | same, `code_issued` |
+| Pending passkey cancelled | `map passkey cancelled` xuid, credential, from `POST /auth/passkey/register/cancel` | same, `cancelled` |
 | Passkey confirmed | `map passkey registered` xuid, credential | same, `confirmed` |
 | Passkey removed | `map passkey removed` xuid, credential, why (`player`, `revoked`) | `mcmap_admin_passkeys_removed_total{why}` |
 | Passkey login | `map login issued` (the existing line) with `method=passkey`, credential | `mcmap_admin_logins_total{result}` with `ok`; before the signature verifies `bad_assertion`, `unknown_credential`, `expired`, `disabled`; after it `pending`, `not_operator`, `counter`, `replayed` |
@@ -631,12 +632,27 @@ rules:
 So the alerts are:
 
 - **`JdwillmsenMinecraftMapPasskeyAdded`**, `severity: warning`,
-  `tenant: jdwillmsen`, so that it reaches the owner directly. It is
-  based on the persisted gauge, not on a counter. A counter starts again
-  at zero when the map restarts, and its first increment on a new series
-  is invisible to `increase()`. The gauge is read back from
-  `passkeys.json` at startup, so a restart leaves it where it was. The pod
-  label changes with every restart, so the rule aggregates it away:
+  `tenant: jdwillmsen`, so that it reaches the owner directly. It has two
+  expressions, either of which fires it.
+
+  **The page: every confirmation.**
+
+  ```promql
+  sum without (pod, instance) (
+    increase(mcmap_admin_passkeys_registered_total{result="confirmed"}[15m])
+  ) > 0
+  ```
+
+  This counts events, not the number held, so it cannot be fooled by a
+  removal. The case it exists for: whoever holds the internal token
+  revokes the owner's XUID, which deletes his passkeys (n to 0), then
+  adds one of their own (0 to 1). The count ends lower than it was, and a
+  rule on the count alone stays silent. Because every `result` value is
+  declared at 0 at startup (D6), a new pod's series exists at 0 before
+  its first confirmation, and `increase()` sees that confirmation.
+  `increase()` treats the drop to 0 at a restart as a reset, not a fall.
+
+  **The backstop: the count held, across restarts.**
 
   ```promql
   max without (pod, instance) (mcmap_admin_passkeys{state="active"})
@@ -645,36 +661,38 @@ So the alerts are:
       )
   ```
 
-  The right side is the highest the count reached in the half hour that
+  The counter misses one case: a confirmation made before the new pod's
+  first scrape, which the counter's series never shows at 0. The gauge is
+  read back from `passkeys.json` at startup, so it still shows the rise.
+  Its right side is the highest the count reached in the half hour that
   ended 15 minutes ago, across every pod that reported it. A `Recreate`
-  restart leaves a gap of a few scrape intervals (the old series goes
-  stale and the new pod has not been scraped yet), and comparing against a
-  single instant 15 minutes back would find nothing there and misfire. A
-  30-minute window still holds the old pod's samples. The first passkey
-  needs no special case, because the gauge is declared at 0 from startup
-  (D6): 1 is greater than the 0 the window holds.
+  restart leaves a gap of a few scrape intervals, and the 30-minute window
+  still holds the old pod's samples across it, so a restart alone does
+  not fire it. The first passkey needs no special case, because the gauge
+  is declared at 0 (D6).
 
-  What it misses, said plainly:
-  - **A long outage.** If the map was not scraped at all for the whole
-    window, from 45 to 15 minutes before, the right side is empty and the
-    rule says nothing. A passkey added in the first 15 minutes after that
-    is not alerted on. The Loki rule, once it evaluates, and the dashboard
-    are the fallback.
-  - **A removal and an addition close together.** They cancel out, so
-    the counter's `confirmed` results are on the dashboard beside it.
+  What the pair still misses, said plainly: a passkey confirmed before
+  the new pod's first scrape, after an outage of more than 45 minutes,
+  during which neither series was scraped. The Loki rule, once it
+  evaluates, and the dashboard are the fallback.
 
   It should fire a few times a year, and each firing is worth a look. A
   **promtool rule test** in the chart, at the real 60 s scrape interval,
   covers:
-  - the first passkey, from the declared 0;
-  - a second one added;
-  - a restart with the count unchanged: the old pod's series stops, at
+  - the first passkey, from the declared 0, which must fire;
+  - a second one added, which must fire;
+  - **revoke all, then add one** (the count goes from 3 to 0 to 1 inside
+    15 minutes), which must fire;
+  - a restart with nothing confirmed: the old pod's series stops, at
     least two scrape intervals pass with no sample from either pod, then a
-    new pod label reports the same count. It must stay silent throughout;
-  - the same restart followed by an addition, which must fire;
+    new pod label reports the same count and a counter back at 0. It must
+    stay silent throughout;
+  - the same restart followed by a confirmation, which must fire;
+  - a confirmation before the new pod's first scrape, which the counter
+    misses and the gauge must fire on;
   - a removal, which must stay silent;
-  - an outage longer than 45 minutes followed by a restart with the count
-    unchanged, which must stay silent.
+  - an outage longer than 45 minutes followed by a restart with nothing
+    confirmed, which must stay silent.
 - **The same as a Loki rule** on the `map passkey registered` line, in
   the chart's existing Loki ConfigMap pattern. It ships now, so that it
   starts working when the platform fixes the ruler, and until then the
@@ -834,8 +852,8 @@ memory, which is the agent holding it.
 | Replay of an assertion or attestation | Challenges are random, last 2 minutes and are single use: registration in a server-side table, login by an atomic check-and-insert into the used set after the signature verifies and before anything is issued. The used set does not survive a restart (D3); the sign counter is checked where there is one |
 | Flooding login challenges | Login challenges are stateless; only verified assertions enter the used set |
 | A normal player making themselves admin | They cannot write `permissions.json`; the bridge has no command to; a claim for a code can only be for the XUID the server stamped on their own chat |
-| **The internal token as an escalation path** | Whoever holds `INTERNAL_TOKEN` can claim a login code as any XUID, an operator's included, start a passkey under that session, and ask `POST /internal/v1/passkey-codes` for the code themselves. So they can add a passkey that outlives a token rotation. This exists today for logins; passkeys make it last. **A code fetched with the token never goes through the agent, so no whisper is sent and the player is told nothing in game.** The alert to the owner on every new passkey is then the only timely control. After it come the passkey list in the page, `!map logout` removing passkeys, and the cap of 5. Only the map and the agent pods mount the token. Accepted, with the alert as the control |
-| **The internal token as a lockout** | The same holder can post a revocation for the owner's XUID, which now deletes his passkeys. He gets back in through the game and adds them again. The revocation is logged with its XUID |
+| **The internal token as an escalation path** | Whoever holds `INTERNAL_TOKEN` can claim a login code as any XUID, an operator's included, start a passkey under that session, and ask `POST /internal/v1/passkey-codes` for the code themselves. So they can add a passkey that outlives a token rotation. This exists today for logins; passkeys make it last. **A code fetched with the token never goes through the agent, so no whisper is sent and the player is told nothing in game.** The alert to the owner on every confirmed passkey is then the only timely control. It fires on the confirmation itself, so revoking the owner's passkeys first and then adding one does not hide it. After it come the passkey list in the page, `!map logout` removing passkeys, and the cap of 5. Only the map and the agent pods mount the token. Accepted, with the alert as the control |
+| **The internal token as a lockout** | The same holder can post a revocation for the owner's XUID, which now deletes his passkeys. He gets back in through the game and adds them again. The revocation is logged with its XUID. Followed by a passkey of their own, it is the escalation above, and the alert on the confirmation still fires |
 | An agent or anyone with cluster-admin | Can read every Secret and the map's volume. Whoever can read `session.key`, which is on the same volume as `passkeys.json`, can mint any session, a passkey session included, given the hash of a stored credential's ID. They can also edit `permissions.json`. Nothing in the map can stop them; the design only makes sure no workflow needs it |
 | Logs leaking identities | New lines carry XUIDs as the existing login line does, never gamertags, labels, codes, coordinates, challenges, keys or cookies (D6). A test captures them |
 | Brute force | A passkey cannot be guessed. A passkey code is 6 symbols of 32 (about a billion), lasts 2 minutes, and three wrong tries delete the pending passkey, so guessing it is hopeless. Typing it needs the session the registration was made under. Refused assertions are counted and logged at most once a minute past a small budget, as the exchange does. The map sees only the gateway's address, so there is no per-client limit |
@@ -845,8 +863,9 @@ memory, which is the agent holding it.
 
 ## Rollout
 
-Phase 1 is four changes, each its own pull request, none needing the
-owner:
+Phase 1 is five changes, each its own pull request. Steps 1 to 4 need
+nothing from the owner. Step 5 restarts the game server, so it needs his
+go-ahead unless the server is empty:
 
 1. **gameops: map release N and agent release M.** The map gets D1, D2,
    D3, D5, D7 and D8. The agent gets `!map passkey` (Visitor permission,
@@ -1012,7 +1031,8 @@ Go, in `internal/auth`, `internal/server` and the agent, all run in CI:
 Chart, in `jdw-deployments`:
 
 - A promtool rule test for `JdwillmsenMinecraftMapPasskeyAdded`, with
-  the cases listed in D6. The restart cases have a realistic gap: the old
+  the cases listed in D6, "revoke all, then add one" among them. The
+  restart cases have a realistic gap: the old
   pod's series goes stale, then at least two 60 s scrape intervals pass
   with no samples, then a new pod label reports.
 - A promtool test that `JdwillmsenMinecraftMapPasskeyLoginRefused` fires
