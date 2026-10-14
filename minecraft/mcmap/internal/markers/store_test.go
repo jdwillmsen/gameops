@@ -163,3 +163,41 @@ func TestStore_ListsEachNamedMobsTypeOnce(t *testing.T) {
 		t.Errorf("mob kinds = %s", got)
 	}
 }
+
+func TestWithSurfaceKeepsEverythingAMarkerHasAndAddsTheSurfaceWhereKnown(t *testing.T) {
+	s := NewStore()
+	at := time.Date(2026, 10, 5, 4, 1, 1, 0, time.UTC)
+	s.Set(at, World{chunks.Overworld: {
+		Beds:       []Marker{{X: 3, Y: 64, Z: 5, Colour: "red"}},
+		Containers: []Marker{{X: -9, Y: -20, Z: 9, Kind: "chest", Trapped: true, Name: "Ore"}},
+		More:       More{Beds: 2},
+	}})
+	body, _, _ := s.Dimension("overworld")
+	out, err := WithSurface(body, func(x, z int32) (int32, bool) { return 70, x > 0 })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d decoded
+	if err := json.Unmarshal(out, &d); err != nil {
+		t.Fatal(err)
+	}
+	if d.At == nil || !d.At.Equal(at) || d.More.Beds != 2 || d.Mobs == nil {
+		t.Errorf("the rest of the answer changed: %s", out)
+	}
+	bed, chest := d.Beds[0], d.Containers[0]
+	if bed.Surface == nil || *bed.Surface != 70 || bed.Y != 64 || bed.Colour != "red" {
+		t.Errorf("bed = %+v", bed)
+	}
+	if chest.Surface != nil || chest.Y != -20 || !chest.Trapped || chest.Name != "Ore" {
+		t.Errorf("a marker where nothing is known = %+v", chest)
+	}
+
+	// Empty lists stay lists.
+	out, err = WithSurface([]byte(`{"beds":[]}`), func(int32, int32) (int32, bool) { return 0, false })
+	if err != nil || !strings.Contains(string(out), `"containers":[]`) || !strings.Contains(string(out), `"mobs":[]`) {
+		t.Errorf("%s, %v", out, err)
+	}
+	if _, err := WithSurface([]byte(`nope`), nil); err == nil {
+		t.Error("a body that is not markers was written out")
+	}
+}

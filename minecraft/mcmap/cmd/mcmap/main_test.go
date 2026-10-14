@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 )
@@ -37,7 +38,7 @@ func liveConfig(t *testing.T, enabled bool) (config.Config, *atomic.Int32) {
 func TestLiveDisabledStartsNothing(t *testing.T) {
 	cfg, asked := liveConfig(t, false)
 	var wg sync.WaitGroup
-	if layer := startLive(t.Context(), cfg, slog.New(slog.DiscardHandler), &wg); layer != nil {
+	if layer := startLive(t.Context(), cfg, slog.New(slog.DiscardHandler), &wg, nil); layer != nil {
 		t.Fatal("a layer was built with the live layer off")
 	}
 	done := make(chan struct{})
@@ -58,7 +59,7 @@ func TestLiveEnabledPollsTheBridgeUntilShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var wg sync.WaitGroup
-	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg); layer == nil {
+	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, nil); layer == nil {
 		t.Fatal("no layer with the live layer on")
 	}
 	for deadline := time.Now().Add(5 * time.Second); asked.Load() == 0; time.Sleep(5 * time.Millisecond) {
@@ -73,6 +74,23 @@ func TestLiveEnabledPollsTheBridgeUntilShutdown(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the source outlived the context it was started with")
+	}
+}
+
+// The surface under each entity is the biome reading's, and is there from
+// the first record: a layer given one after its source had begun would read
+// the field while it was being set.
+func TestLiveIsGivenTheSurfacesOfTheBiomeReadingWhereThereIsOne(t *testing.T) {
+	cfg, _ := liveConfig(t, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	defer cancel()
+	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, nil); layer.Surface != nil {
+		t.Error("a layer was given surfaces where there are no biomes")
+	}
+	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, &biomes.Store{}); layer.Surface == nil {
+		t.Error("a layer was given no surfaces where there are biomes")
 	}
 }
 

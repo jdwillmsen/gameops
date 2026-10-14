@@ -24,10 +24,17 @@ type WaypointSource interface {
 // are the same for every player and change once a snapshot, so the browser
 // keeps its copy and asks only whether it is still current.
 func (s *Server) handleMarkers(w http.ResponseWriter, r *http.Request) {
-	body, etag, ok := s.Markers.Dimension(r.URL.Query().Get("dimension"))
+	dimension := r.URL.Query().Get("dimension")
+	body, etag, ok := s.Markers.Dimension(dimension)
 	if !ok {
 		http.Error(w, "unknown dimension", http.StatusBadRequest)
 		return
+	}
+	// With the surface under each marker, the answer changes whenever the
+	// reading of the world does, and the tag says so.
+	surface, reading := s.surfaceReading()
+	if surface != nil {
+		etag = etag[:len(etag)-1] + "-" + reading + `"`
 	}
 	h := w.Header()
 	// Private, because it is only for the logged-in browser that asked;
@@ -37,6 +44,15 @@ func (s *Server) handleMarkers(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
+	}
+	if d, named := dimensionNamed(dimension); surface != nil && named {
+		var err error
+		if body, err = s.surfaced.get("markers|"+dimension+"|"+etag, func() ([]byte, error) {
+			return markers.WithSurface(body, surfaceOf(surface, d))
+		}); err != nil {
+			http.Error(w, "the markers could not be written out", http.StatusInternalServerError)
+			return
+		}
 	}
 	h.Set("Content-Type", "application/json")
 	_, _ = w.Write(body)

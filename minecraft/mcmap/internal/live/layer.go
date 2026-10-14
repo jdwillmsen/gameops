@@ -3,9 +3,14 @@ package live
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 )
+
+// maxBlock is past the edge of any Bedrock world, and keeps a block
+// coordinate inside 32 bits.
+const maxBlock = 32_000_000
 
 // Layer is the live picture and the browsers watching it.
 type Layer struct {
@@ -13,6 +18,12 @@ type Layer struct {
 	Hub   *Hub
 	// Logger records what the heartbeat says of the pack. Nil discards it.
 	Logger *slog.Logger
+	// Surface says the y of the highest block at a block of a dimension,
+	// by the dimension's name, or false where it is not known. It is read
+	// once for each entity of each sample, not for each frame sent, and
+	// must be set before the first record is ingested. Nil leaves every
+	// entity without one.
+	Surface func(dimension string, x, z int32) (int32, bool)
 
 	flush sync.Mutex
 
@@ -55,6 +66,8 @@ func (l *Layer) Ingest(raw RawRecord, now time.Time) {
 		at = now
 	}
 
+	l.annotate(&rec)
+
 	if rec.Kind == Tick {
 		l.mu.Lock()
 		l.beat(rec, at)
@@ -66,6 +79,25 @@ func (l *Layer) Ingest(raw RawRecord, now time.Time) {
 	metricIngestLag.Observe(now.Sub(at).Seconds())
 	if rec.SentMillis > 0 {
 		metricLogLag.Observe(max(0, at.Sub(time.UnixMilli(rec.SentMillis)).Seconds()))
+	}
+}
+
+// annotate gives each entity of a record the surface under it. They share
+// one backing array, so a sample of a thousand is one allocation.
+func (l *Layer) annotate(rec *Record) {
+	if l.Surface == nil || len(rec.Items) == 0 {
+		return
+	}
+	surfaces := make([]int32, len(rec.Items))
+	for i := range rec.Items {
+		it := &rec.Items[i]
+		if math.Abs(it.X) > maxBlock || math.Abs(it.Z) > maxBlock {
+			continue
+		}
+		if y, ok := l.Surface(rec.Dimension, int32(math.Floor(it.X)), int32(math.Floor(it.Z))); ok {
+			surfaces[i] = y
+			it.Surface = &surfaces[i]
+		}
 	}
 }
 

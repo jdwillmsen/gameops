@@ -481,3 +481,30 @@ func TestAFileThatIsAbsentOrTooLargeIsNotRead(t *testing.T) {
 		t.Error("a file past every bound is read")
 	}
 }
+
+// The nether's heightmap is the bedrock roof over all of it, so a marker
+// in the nether has no surface to be above or below.
+func TestSurfaceIsTheHighestBlockExceptInTheNetherWhereThereIsNone(t *testing.T) {
+	m := build(t, map[chunks.Pos][Columns]int16{
+		{Dim: chunks.Overworld}: filled(127),
+		{Dim: chunks.Nether}:    filled(128),
+		{Dim: chunks.End}:       filled(61),
+	})
+	for _, tc := range []struct {
+		d    chunks.Dimension
+		y    int32
+		want bool
+	}{{chunks.Overworld, 62, true}, {chunks.End, 60, true}, {chunks.Nether, 0, false}} {
+		y, ok := m.Surface(tc.d, 3, 4)
+		if ok != tc.want || y != tc.y {
+			t.Errorf("%v: surface %d, %v, want %d, %v", tc.d, y, ok, tc.y, tc.want)
+		}
+	}
+	if y, ok := m.Surface(chunks.Overworld, 16, 0); ok {
+		t.Errorf("a chunk not held has a surface of %d", y)
+	}
+	var none *Map
+	if _, ok := none.Surface(chunks.Overworld, 0, 0); ok {
+		t.Error("no heights at all have a surface")
+	}
+}

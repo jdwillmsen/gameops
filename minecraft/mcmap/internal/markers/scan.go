@@ -86,6 +86,10 @@ type Marker struct {
 	// without going by its name or where it stands. It is left out where
 	// the world does not say.
 	ID string `json:"i,omitempty"`
+	// Surface is the y of the highest block in the marker's column, which
+	// WithSurface sets on the way out and a scan never does: what the page
+	// tells how high above or below the ground a marker is by.
+	Surface *int32 `json:"s,omitempty"`
 }
 
 // More is how many markers of each kind a dimension has beyond its limit.

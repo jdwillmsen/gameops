@@ -75,6 +75,20 @@ func (s *Store) At(d chunks.Dimension, x, z int32) (Biome, bool) {
 	return s.World().At(d, x, z)
 }
 
+// Surface is the y of the highest block in the column at block x, z of the
+// dimension with this name, from the last completed reading, for telling
+// how high a marker stands above or below the ground. It is false before
+// the first reading, for a column the world has not generated, for a
+// dimension with no name like one of the three, and in the nether.
+func (s *Store) Surface(dimension string, x, z int32) (int32, bool) {
+	for _, d := range chunks.Dimensions {
+		if d.Name() == dimension {
+			return s.World().Heights().Surface(d, x, z)
+		}
+	}
+	return 0, false
+}
+
 // maxStale is how long a reading stands while the chunk count stays the
 // same. A world whose count has not moved has generated nothing, which is
 // the only thing that adds a biome, so it is not read again. The count

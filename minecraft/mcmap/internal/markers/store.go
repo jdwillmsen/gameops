@@ -100,6 +100,33 @@ func (s *Store) Scanned(name string) (body []byte, ok bool) {
 	return d.body, ok && s.scanned
 }
 
+// WithSurface is a dimension's markers as encode wrote them, with the
+// surface under each marker where surface knows it. A scan reads only
+// where things stand, and the surface is of another reading of the world,
+// so it is put on when the markers are served and not stored with them.
+func WithSurface(body []byte, surface func(x, z int32) (int32, bool)) ([]byte, error) {
+	var doc document
+	if err := json.Unmarshal(body, &doc); err != nil {
+		return nil, err
+	}
+	for _, list := range []*[]Marker{&doc.Beds, &doc.Containers, &doc.Mobs} {
+		if *list == nil {
+			*list = []Marker{}
+		}
+	}
+	for _, list := range [][]Marker{doc.Beds, doc.Containers, doc.Mobs} {
+		// One array for the list, rather than one allocation a marker.
+		ys := make([]int32, len(list))
+		for i := range list {
+			if y, ok := surface(list[i].X, list[i].Z); ok {
+				ys[i] = y
+				list[i].Surface = &ys[i]
+			}
+		}
+	}
+	return json.Marshal(doc)
+}
+
 func encode(doc document) served {
 	for {
 		// A browser reads an absent list as a broken answer.

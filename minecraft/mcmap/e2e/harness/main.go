@@ -130,6 +130,7 @@ func run(logger *slog.Logger) error {
 	layer := live.New(10*time.Second, 1000, logger)
 	biomeStore := &biomes.Store{}
 	biomeStore.Set(biomeWorld(now))
+	layer.Surface = biomeStore.Surface
 	recorder := trails.New(24*time.Hour, 5000)
 
 	mobs := &icons.Mobs{Dir: filepath.Join(dir, "icons"), Ref: "harness", Logger: logger,

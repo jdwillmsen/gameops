@@ -222,6 +222,17 @@ func (m *Map) At(d chunks.Dimension, x, z int32) (int32, bool) {
 	return int32(y), true
 }
 
+// Surface is At for telling how high a marker stands above or below the
+// ground it is on. The nether has none to give: its heightmap is the
+// bedrock roof over the whole of it, which every marker is under and so
+// says nothing of where in the nether one is.
+func (m *Map) Surface(d chunks.Dimension, x, z int32) (int32, bool) {
+	if d == chunks.Nether {
+		return 0, false
+	}
+	return m.At(d, x, z)
+}
+
 // Rect reads the surface y of the w by h columns whose lowest x and z are
 // minX and minZ into out, a row of w for each z, so that the column at
 // block x, z is out[(z-minZ)*w+x-minX]. A column with no surface is

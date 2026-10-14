@@ -59,6 +59,11 @@ type Entity struct {
 	Z    float64 `json:"z"`
 	// Yaw is the way a player faces, in degrees.
 	Yaw *float64 `json:"r,omitempty"`
+	// Surface is the y of the highest block in the column the entity is
+	// over, set here and never by the pack: what the page tells how high
+	// above or below the ground one stands by. It is left out where the
+	// column is not known and in the nether.
+	Surface *int32 `json:"s,omitempty"`
 }
 
 // Record is one line from the pack.
