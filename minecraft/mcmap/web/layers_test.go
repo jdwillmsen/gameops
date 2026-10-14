@@ -317,7 +317,7 @@ func TestLayerPanelDrawsEveryLineWithOneFunction(t *testing.T) {
 		"min-height: var(--row-h);", ".d1 > .row { min-height: var(--head-h); }",
 		".d2 { --inset: calc(var(--row-pad) + var(--indent)); }", ".d3 { --inset: calc(var(--row-pad) + var(--indent) * 2); }",
 		`.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--accent); border-color: var(--accent); }`,
-		"border: 2px solid var(--dim);",
+		"border: 2px solid var(--line);",
 		".check::before { content: \"\"; position: absolute; inset: calc((var(--check) - var(--hit)) / 2 - 2px); }",
 		".row:hover > .only { visibility: visible; }",
 		// A line with nothing to open keeps the room of what would open it,
