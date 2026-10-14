@@ -276,3 +276,50 @@ func TestLoad_NetherLevelsFollowANetherTopYOfTheirOwn(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// Off unless asked for, and asked for in an order that makes sense: a
+// passkey belongs to an admin, and is bound to one exact origin.
+func TestLoad_AdminAndPasskeys(t *testing.T) {
+	c, err := Load(with())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Admin || c.Passkeys || c.PublicOrigin != "" {
+		t.Errorf("defaults: admin %v, passkeys %v, origin %q", c.Admin, c.Passkeys, c.PublicOrigin)
+	}
+
+	c, err = Load(with("ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "https://map.example"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Admin || !c.Passkeys || c.PublicOrigin != "https://map.example" || c.PasskeyRPID != "map.example" {
+		t.Errorf("on: %+v", c)
+	}
+
+	for name, getenv := range map[string]func(string) string{
+		"passkeys without admin":     with("PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "https://map.example"),
+		"passkeys without an origin": with("ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true"),
+		"origin over plain http":     with("ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "http://map.example"),
+		"origin with a path":         with("ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "https://map.example/map"),
+		"origin with a port":         with("ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "https://map.example:8443"),
+		"admin not a boolean":        with("ADMIN_ENABLED", "yes please"),
+		"passkeys not a boolean":     with("PASSKEYS_ENABLED", "maybe"),
+	} {
+		if _, err := Load(getenv); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+// With no login there is no player to be an admin. That is a state to run
+// in, never a reason to stop.
+func TestLoad_AdminWithNoLoginIsNotAnError(t *testing.T) {
+	bare := []string{"BRIDGE_URL", "http://bridge:8766", "BRIDGE_TOKEN", "tok", "LEVEL_NAME", "FWB", "AUTH_DISABLED", "true"}
+	c, err := Load(env(append(bare, "ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "https://map.example")...))
+	if err != nil {
+		t.Fatalf("admin and passkeys with the login off: %v", err)
+	}
+	if c.Admin || c.Passkeys {
+		t.Errorf("with no login, admin %v and passkeys %v, want both off", c.Admin, c.Passkeys)
+	}
+}
