@@ -3173,7 +3173,9 @@ the server no longer offers is read as the default cut, at once if it is
 taken away while it is drawn. While a level is drawn the status line says when
 that level was rendered, and its tiles are asked for again when its own render
 lands, which is after the nether's. Leaving the preview of a link's view puts
-the level back as it was. A saved view that is
+the level back as it was. A default view saved in the nether opens on the level
+it was saved with, and that level is then the one kept, as if chosen from the
+picker, unless the address names a place of its own. A saved view that is
 saved with its place carries the level in the place (`level`, and `k` in a link),
 and shows it when it is shown; one saved on the default cut puts the default cut
 back. Markers, structures and live positions do not depend on the level.

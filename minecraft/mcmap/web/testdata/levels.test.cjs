@@ -377,6 +377,43 @@ test('leaving the preview of a link\'s view puts back the level that was drawn',
   assert.equal(p.settings.get('levels').nether, '66', 'what is drawn is what is kept');
 });
 
+// A record whose default view was saved in the nether on a level, beside
+// the level the picker last kept.
+const opensOn = (level, chosen) => JSON.stringify({
+  v: 3,
+  levels: { nether: chosen },
+  views: { list: [{ id: 'home', name: 'home', layers: {}, place: { d: 'nether', x: 10, z: 20, zoom: -1, ...(level ? { level } : {}) } }], order: ['everything', 'exploring', 'base', 'home'], start: 'home', hidden: [], active: null },
+});
+
+test('a default view saved on a level opens on it, and that level is then the one kept', async () => {
+  const p = await load('', { storage: new Map([[KEY, opensOn('34', '66')]]) });
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=34');
+  same(p.pressed(), ['Low']);
+  same(p.kept(), { nether: '34' });
+
+  const top = await load('', { storage: new Map([[KEY, opensOn('', '66')]]) });
+  assert.equal(top.url(top.terrain().at(-1)), 'tiles/nether/-1/2/3.webp');
+  same(top.kept(), { nether: null });
+
+  // An address that names a place is not the default view's place, and
+  // leaves the level kept as it was.
+  const named = await load('#nether/100/200/-1', { storage: new Map([[KEY, opensOn('34', '66')]]) });
+  assert.equal(named.url(named.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66');
+  same(named.pressed(), ['Mid']);
+});
+
+test('leaving a preview puts back the level a default view opened on', async () => {
+  const link = await linkOf({ d: 'nether', x: 1, z: 2, zoom: 0, level: '66' });
+  const p = await load('#-/0/0/0', { storage: new Map([[KEY, opensOn('34', '66')]]), link });
+  same(p.pressed(), ['Low']);
+  await p.click('views-offer-show');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66');
+  await p.click('preview-back');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=34');
+  same(p.pressed(), ['Low']);
+  assert.equal(p.settings.get('levels').nether, '34', 'what is drawn is what is kept');
+});
+
 test('a preview of a view with no level is left for the level that was drawn, too', async () => {
   const link = await linkOf({ d: 'nether', x: 1, z: 2, zoom: 0 });
   const storage = new Map([[KEY, JSON.stringify({ v: 3, levels: { nether: '66' } })]]);
