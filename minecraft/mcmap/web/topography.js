@@ -66,9 +66,9 @@
     let hide = '';
     if (on('tint')) {
       const hidden = listing.bands.map((_, at) => at).filter((at) => !choice.shows(bandId(listing.dimension, at)));
-      // A list of just the bands to show that names none of this
+      // A list of just the bands to show that names some and none of this
       // dimension's was made over another's, and leaves none out here.
-      const elsewhere = hidden.length === listing.bands.length && choice.state().mode === 'just';
+      const elsewhere = hidden.length === listing.bands.length && choice.state().mode === 'just' && choice.state().just.length > 0;
       if (hidden.length > 0 && !elsewhere) hide = `&hide=${hidden.join(',')}`;
     }
     return `styles=${styles}${hide}`;
