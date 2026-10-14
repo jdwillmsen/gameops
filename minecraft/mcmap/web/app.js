@@ -865,7 +865,7 @@
       set(at) {
         const d = at && dimension(at.d);
         if (!d || !d.rendered || ![at.x, at.z, at.zoom].every(Number.isFinite)) return false;
-        if (at.d === 'nether') choose(at.level || DEFAULT_LEVEL);
+        if (at.d === 'nether' && !choose(at.level || DEFAULT_LEVEL)) choose(DEFAULT_LEVEL);
         const view = { x: at.x, z: at.z, zoom: at.zoom };
         if (at.d !== current) show(at.d, view);
         else map.setView([view.z, view.x], view.zoom, { animate: false });

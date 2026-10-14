@@ -447,6 +447,33 @@ test('a record put in place of the page\'s own brings its level with it', async 
   same(p.pressed(), ['Low']);
 });
 
+// A level that has gone is answered as the picker answers it: the default cut.
+test('a saved view naming a level no longer offered opens on the default cut', async () => {
+  const p = await load('#nether/100/200/-1');
+  await p.press('Mid');
+  p.state.levels = [LEVELS[0], LEVELS[1]];
+  await p.app.reload();
+  await p.settle();
+  p.app.views.apply({ name: 'old', layers: {}, place: { d: 'nether', x: 1, z: 2, zoom: 0, level: '34' } });
+  await p.settle();
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp');
+  same(p.pressed(), ['Top']);
+  same(p.kept(), { nether: null });
+});
+
+test('a shared view naming a level not offered is previewed on the default cut, and left for the level that was drawn', async () => {
+  const link = await linkOf({ d: 'nether', x: 1, z: 2, zoom: 0, level: '34' });
+  const storage = new Map([[KEY, JSON.stringify({ v: 3, levels: { nether: '66' } })]]);
+  const p = await load('#nether/100/200/-1', { storage, link, levels: [LEVELS[0], LEVELS[1]] });
+  same(p.pressed(), ['Mid']);
+  await p.click('views-offer-show');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp');
+  same(p.pressed(), ['Top']);
+  await p.click('preview-back');
+  assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66');
+  same(p.pressed(), ['Mid']);
+});
+
 // The link's form is the README's: a place's level is `k`, beside the
 // place and never without one, and a height of one to three digits.
 test('a link carries a view\'s level as k, and one that is not a level beside a place is refused', async () => {
