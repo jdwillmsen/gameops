@@ -348,11 +348,12 @@ export async function history({ page, cfg }) {
   if (!listed.drawn) return skip('the newest day kept nothing of the dimension shown', measures);
 
   const state = () => page.evaluate(() => {
-    const part = (name) => document.querySelector(`#map .timeline-${name}`);
-    const bar = document.querySelector('#map .timeline');
+    const part = (name) => document.querySelector(`.timeline-${name}`);
+    const bar = document.querySelector('.timeline');
     if (!bar || bar.hidden) return { shown: false };
+    // The scrubber is a slider over the days kept, with now its last step.
     return {
-      shown: true, open: !part('body').hidden, at: Number(part('range').value), last: Number(part('range').max),
+      shown: true, open: !part('body').hidden, at: Number(part('range').getAttribute('aria-valuenow')), last: Number(part('range').getAttribute('aria-valuemax')),
       past: document.body.classList.contains('past'), day: window.mcmap.past.get() !== '',
     };
   });
@@ -391,11 +392,11 @@ export async function history({ page, cfg }) {
   page.on('response', seen);
   try {
     await page.evaluate(() => { const map = window.mcmap.map; window.__view = { centre: map.getCenter(), zoom: map.getZoom() }; });
-    if (!(await state()).open) await page.locator('#map .timeline-open').click();
+    if (!(await state()).open) await page.locator('.timeline-open').click();
     if (!(await until(async () => (await state()).open))) throw new Fail('the History row did not open', measures);
 
     // One back from now is the newest day kept.
-    await page.locator('#map .timeline-earlier').click();
+    await page.locator('.timeline-earlier').click();
     const chosen = await until(async () => { const s = await state(); return s.past && s.day && s.at === s.last - 1 ? s : null; });
     if (!chosen) throw new Fail('stepping back from now did not choose the newest day', measures);
     const drawn = await until(async () => (measures.day_pictures > 0 && (await terrain()).day > 0), { timeoutMs: 20_000 });
@@ -413,7 +414,7 @@ export async function history({ page, cfg }) {
     measures.moved_pixels = Math.round(there.pixels * 100) / 100;
     if (there.pixels > 1 || there.zoom > 0.001) throw new Fail('choosing a day moved the map', measures);
 
-    await page.locator('#map .timeline-now').click();
+    await page.locator('.timeline-now').click();
     // Today's tiles on the map, and the day's gone from under them.
     const back = await until(async () => {
       const s = await state();
@@ -425,14 +426,14 @@ export async function history({ page, cfg }) {
     measures.moved_pixels = Math.max(measures.moved_pixels, Math.round(after.pixels * 100) / 100);
     if (after.pixels > 1 || after.zoom > 0.001) throw new Fail('going back to now moved the map', measures);
 
-    await page.locator('#map .timeline-open').click();
+    await page.locator('.timeline-close').click();
     if (!(await until(async () => !(await state()).open))) throw new Fail('the History row did not close', measures);
     return { measures };
   } finally {
     page.off('response', seen);
     // Whatever went wrong, the checks after this one are of the map as
     // it is now.
-    await page.evaluate(() => { const now = document.querySelector('#map .timeline-now'); if (now && !now.disabled) now.click(); }).catch(() => {});
+    await page.evaluate(() => { const now = document.querySelector('.timeline-now'); if (now && !now.disabled) now.click(); }).catch(() => {});
   }
 }
 

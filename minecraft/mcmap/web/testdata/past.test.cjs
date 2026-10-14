@@ -160,7 +160,9 @@ async function load(hash, look, kept) {
   const address = () => win.location.hash;
   const part = (name) => doc.body.querySelector(`.timeline-${name}`);
   const press = async (name) => { part(name).click(); await settle(); };
-  return { ...p, app: win.mcmap, map, state, settle, terrain, turn, address, part, press };
+  // Where the timeline's scrubber stands among the days kept.
+  const value = () => part('range').getAttribute('aria-valuenow');
+  return { ...p, app: win.mcmap, map, state, settle, terrain, turn, address, part, press, value };
 }
 
 // Long enough for tiles to have faded in: the page's waits are cut to a
@@ -660,7 +662,7 @@ test('with the timeline: a link to a kept day opens on that day, and stepping th
   assert.equal(p.app.past.get(), '');
   await p.press('earlier');
   assert.equal(p.address(), '#overworld/100/200/-1///2026-09-02');
-  await p.press('open');
+  await p.press('close');
   assert.equal(p.address(), '#overworld/100/200/-1', 'putting the timeline away puts the address back on now');
 });
 
@@ -680,7 +682,7 @@ test('with the timeline: an address that changes to a day, to another place on i
   await p.turn('#overworld/300/400/-1///2026-09-02');
   assert.equal(p.app.past.get(), '2026-09-02');
   assert.equal(p.part('body').hidden, false);
-  assert.equal(p.part('range').value, '1');
+  assert.equal(p.value(), '1');
   assert.deepEqual(p.map.getCenter(), { lat: 400, lng: 300 });
   await p.turn('#nether/10/20/-1///2026-09-02');
   assert.equal(p.app.past.get(), '2026-09-02');

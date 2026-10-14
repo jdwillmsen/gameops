@@ -74,7 +74,7 @@
             look: view.look ? Object.keys(view.look).length : undefined,
           })),
         };
-      } else if (section === 'look' || section === 'live' || section === 'trails' || section === 'shortcuts' || section === 'grid' || section === 'panel' || section === 'debug') {
+      } else if (section === 'look' || section === 'live' || section === 'trails' || section === 'shortcuts' || section === 'grid' || section === 'history' || section === 'panel' || section === 'debug') {
         out[section] = JSON.parse(JSON.stringify(value));
       } else if (section === 'biome') {
         out.biome = { only: value && value.only ? '[redacted]' : null };
