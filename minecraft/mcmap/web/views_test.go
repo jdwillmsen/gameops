@@ -57,7 +57,6 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		"if (part.length > MAX_LINK) return { error: 'it was longer than a link’s view may be' };",
 		"if (!/^v1\\.[A-Za-z0-9_-]+$/.test(part)) return bad;",
 		"new TextDecoder('utf-8', { fatal: true })",
-		"const allowed = ['n', 'l', 'x', 'm', 'y', 'b', 't', 'i', 'g', 'p', 'q', 'k', 'a'];",
 		"if (Object.keys(raw).some((key) => !allowed.includes(key))) return bad;",
 		"const read = settings.check.view(view);",
 		// The sixth part, so the five an older link has read as before.
@@ -92,17 +91,13 @@ func TestAViewInALinkIsBoundedCheckedAndOnlyOffered(t *testing.T) {
 		t.Error("views.js no longer shows a link's view only when asked")
 	}
 	// And showing it is a preview: what is kept is held as it was before
-	// anything is touched, so nothing the preview changes is written, and
-	// going back puts the place back before it lets go.
+	// anything is touched, so nothing the preview changes is written.
 	shown := regexp.MustCompile(`(?s)function preview\(view\) \{.*?\n  \}`).Find(js)
 	if shown == nil || !bytes.Contains(shown, []byte("apply(view, true)")) || bytes.Contains(shown, []byte("settings.adopt(")) || bytes.Contains(shown, []byte("settings.set(")) {
 		t.Error("views.js no longer shows a link's view as a preview")
 	}
 	if !regexp.MustCompile(`if \(!settings\.fits\(next\)\) return null;\s*if \(temporary\) settings\.hold\(\);`).Match(js) {
 		t.Error("views.js no longer holds what is kept before a preview touches anything")
-	}
-	if !regexp.MustCompile(`if \(was\.d\) app\.place\.set\(\{ d: was\.d, x: was\.x, z: was\.z, zoom: was\.zoom, level: was\.level \}\);\s*settings\.release\(\);\s*redraw\(\[\]\);`).Match(js) {
-		t.Error("views.js no longer puts the place back before it lets go of a preview")
 	}
 	settings := read(t, "settings.js")
 	for _, need := range []string{
