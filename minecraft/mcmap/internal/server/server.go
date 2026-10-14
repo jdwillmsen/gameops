@@ -256,6 +256,7 @@ func (s *Server) Handler() http.Handler {
 	if s.History != nil {
 		s.route(mux, gateViewer, "GET /api/history", s.handleHistory)
 		s.route(mux, gateViewer, "GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}", s.handleHistoryTile)
+		s.route(mux, gateViewer, "GET /api/history/markers/{day}", s.handleHistoryMarkers)
 	}
 	s.route(mux, gateViewer, "GET /api/search", s.handleSearch)
 	if s.Sessions != nil {

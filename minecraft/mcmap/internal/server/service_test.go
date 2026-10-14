@@ -101,9 +101,10 @@ var routes = map[string]struct{ gate, path string }{
 	// The map as it was on each day, which is every player's to look at.
 	"public GET /api/history": {"gateViewer", ""},
 	"public GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {"gateViewer", ""},
-	"public GET /api/search":    {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
-	"public GET /api/me":        {"gateViewer", "/api/me"},
-	"public GET /api/waypoints": {"gatePlayer", "/api/waypoints"},
+	"public GET /api/history/markers/{day}":                          {"gateViewer", ""},
+	"public GET /api/search":                                         {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
+	"public GET /api/me":                                             {"gateViewer", "/api/me"},
+	"public GET /api/waypoints":                                      {"gatePlayer", "/api/waypoints"},
 	// The internal listener's. Its liveness route is the public one's twin.
 	"internal GET /healthz":                        {"gatePublic", ""},
 	"internal GET /metrics":                        {"gatePublic", ""},
