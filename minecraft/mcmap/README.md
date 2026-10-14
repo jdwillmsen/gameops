@@ -2888,7 +2888,13 @@ they were, so switching it on again brings the same selection back, and
 so does ticking one of its items while it is off, with that item shown
 as well. A section's own checkbox does the same over its layers: with
 any of them on it switches the section off and remembers which were on,
-and the next press puts those back. An item or a row that is off as the
+and the next press puts those back. It counts and switches only the rows
+that can be pressed: a row that is greyed out for now, as Chunk focus is
+while the grid is off, neither holds the section half on nor is switched
+by it, though what the press itself switched off comes back with it. A
+list with no switch of its own, as the kinds of structure are, reads as
+off while its section is, and ticking one of its items brings the section
+back with that item shown. An item or a row that is off as the
 page first has it, as strongholds are, is the baseline: it makes nothing
 read as half on or as hidden until the viewer has changed something, and
 Reset returns to it. The button at the end of a line opens a menu: Only
