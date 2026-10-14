@@ -71,6 +71,8 @@ function leaflet() {
       return Sub;
     }
     addTo(to) { to.layers.add(this); return this; }
+    redraw() { return this; }
+    setOpacity(to) { this.options.opacity = to; return this; }
     isLoading() {
       const o = this.options;
       // Bounds of no size hold no tile, wherever the view is.

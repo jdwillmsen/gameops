@@ -31,9 +31,10 @@ const minutesAgo = (n) => new Date(Date.now() - n * 60_000).toISOString();
 const drawnAt = (levels, times) => levels.map((l) => ({ ...l, renderedAt: times[l.id] }));
 
 // A page opened at the place its address names. levels is what the server
-// says the nether has, storage what the browser already holds, and link a
-// view the address carries after its place.
-async function load(hash, { levels = LEVELS, storage = new Map(), link = '' } = {}) {
+// says the nether has, storage what the browser already holds, link a
+// view the address carries after its place, and biomes the listing a
+// server with biomes gives, which loads the biomes' script.
+async function load(hash, { levels = LEVELS, storage = new Map(), link = '', biomes = null } = {}) {
   const p = page(storage, { files: ['settings.js'] });
   const { win, doc } = p;
   const found = doc.getElementById;
@@ -63,18 +64,20 @@ async function load(hash, { levels = LEVELS, storage = new Map(), link = '' } = 
     atob,
     history: { replaceState(_, __, to) { win.location.hash = to; } },
     navigator: {},
+    AbortController,
     setInterval: () => 0,
     clearInterval() {},
     fetch: async (address) => {
       const nether = { id: 'nether', ...EXTENT, renderedAt: state.renderedAt, ...(state.levels ? { levels: state.levels } : {}) };
+      if (address.startsWith('api/biomes?')) return biomes ? { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(biomes)) } : { ok: false, status: 404 };
       const body = address === 'api/map' ? { world: 'w', refreshSeconds: 600, dimensions: [{ id: 'overworld', ...EXTENT }, nether] } : {};
       return { ok: true, status: 200, headers: { get: () => '' }, json: async () => body, text: async () => JSON.stringify(body) };
     },
   });
-  for (const file of ['app.js', 'layers.js', 'levels.js', 'views.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), win, { filename: file });
+  for (const file of ['app.js', 'layers.js', ...(biomes ? ['biomes.js'] : []), 'levels.js', 'views.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), win, { filename: file });
   const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
   await settle();
-  const terrain = () => [...map.layers].filter((l) => l.options.dimension);
+  const terrain = () => [...map.layers].filter((l) => l.options.format);
   const bar = doc.getElementById('map').querySelector('.levels');
   const buttons = () => bar.children.map((b) => b.textContent);
   const pressed = () => bar.children.filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent);
@@ -352,6 +355,22 @@ test('a level taken away while it is drawn gives way to the default cut, and com
   await p.settle();
   assert.equal(p.url(p.terrain().at(-1)), 'tiles/nether/-1/2/3.webp?level=66', 'the choice was kept for when it is offered again');
   same(p.pressed(), ['Mid']);
+});
+
+// The biome overlay is drawn over the terrain tile for tile, so a tile of
+// it is asked for at the place and zoom the terrain's tile is.
+test('the biome overlay asks for the tile the default cut is drawn from, and a level does not move it', async () => {
+  const BIOMES = { extracted: true, version: 'abc', biomes: [{ name: 'plains', label: 'Plains', color: '#8db360', area: 10 }], tiles: { minZoom: -6, maxZoom: 2, size: 256 } };
+  const p = await load('#nether/100/200/-1', { biomes: BIOMES });
+  assert.equal(p.app.biomes.show('plains'), true);
+  await p.settle();
+  const overlay = [...p.map.layers].find((l) => l.options.pick !== undefined);
+  assert.ok(overlay, 'the overlay is on the map');
+  const tile = (address) => address.match(/^(?:api\/biomes\/)?(tiles\/[^.]+)\./)[1];
+  assert.equal(tile(p.url(p.terrain().at(-1))), 'tiles/nether/-1/2/3');
+  assert.equal(tile(p.url(overlay)), 'tiles/nether/-1/2/3');
+  await p.press('Mid');
+  assert.equal(tile(p.url(p.terrain().at(-1))), tile(p.url(overlay)));
 });
 
 // A link's view as the page itself writes one, for a page to open with.
