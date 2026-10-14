@@ -321,8 +321,10 @@ export async function themes({ page }) {
 }
 
 // The map as it was: History opens, the newest day kept is drawn from that
-// day's own tiles where today's were, at the same place and zoom, and Now
-// draws today's again. A map that keeps no days has nothing here to press.
+// day's own tiles where today's were, at the same place and zoom, with that
+// day's markers where it kept them and with no request for them where it
+// did not, and Now draws today's again. A map that keeps no days has
+// nothing here to press.
 export async function history({ page, cfg }) {
   const listed = await page.evaluate(async () => {
     const res = await fetch('api/history', { cache: 'no-store' });
@@ -332,11 +334,14 @@ export async function history({ page, cfg }) {
     return {
       status: res.status, days: Array.isArray(days) ? days.length : 0,
       drawn: Boolean(newest && Array.isArray(newest.dimensions) && newest.dimensions.some((d) => d && d.id === shown && d.tiles > 0)),
+      marked: Boolean(newest && Array.isArray(newest.dimensions) && newest.dimensions.some((d) => d && d.id === shown && d.markers === true)),
+      // A page whose markers follow the day says which day they are of.
+      follows: Boolean(window.mcmap.markers && window.mcmap.markers.day),
     };
   });
   if (listed.status === 404 && !cfg.keepsHistory) return skip('this map keeps no history');
   if (listed.status !== 200) throw new Fail('the days the map keeps were not listed', { status: listed.status });
-  const measures = { days: listed.days, day_tiles: 0, day_pictures: 0 };
+  const measures = { days: listed.days, day_tiles: 0, day_pictures: 0, day_markers: 0 };
   if (listed.days === 0) return skip('no day has been kept yet', measures);
   // A day with no terrain of the dimension shown is drawn as nothing, which
   // is right and leaves no tile to wait for.
@@ -373,7 +378,12 @@ export async function history({ page, cfg }) {
   });
 
   if (!(await until(async () => (await state()).shown, { timeoutMs: 5000 }))) throw new Fail('days are kept and the page shows no History', measures);
+  let markersAsked = 0;
   const seen = (response) => {
+    if (routeOf(response.url()) === '/api/history/markers') {
+      markersAsked += 1;
+      if (response.ok()) measures.day_markers += 1;
+    }
     if (routeOf(response.url()) !== '/api/history/tiles') return;
     measures.day_tiles += 1;
     if (response.ok() && /^image\//.test(response.headers()['content-type'] || '')) measures.day_pictures += 1;
@@ -391,6 +401,14 @@ export async function history({ page, cfg }) {
     const drawn = await until(async () => (measures.day_pictures > 0 && (await terrain()).day > 0), { timeoutMs: 20_000 });
     if (!drawn && measures.day_tiles === 0) throw new Fail('choosing a day asked for none of its tiles', measures);
     if (!drawn) throw new Fail('no tile of the day came as a picture', measures);
+    // The markers over the day are the day's, which the page says once it
+    // has drawn them; a day that kept none is not asked for any.
+    if (listed.follows && listed.marked) {
+      const theirs = await until(async () => measures.day_markers > 0 && (await page.evaluate(() => window.mcmap.markers.day() === window.mcmap.past.get())), { timeoutMs: 10_000 });
+      if (!theirs) throw new Fail('the day kept its markers and the page did not draw them', measures);
+    } else if (markersAsked > 0) {
+      throw new Fail('the page asked for the markers of a day that kept none', measures);
+    }
     const there = await moved();
     measures.moved_pixels = Math.round(there.pixels * 100) / 100;
     if (there.pixels > 1 || there.zoom > 0.001) throw new Fail('choosing a day moved the map', measures);

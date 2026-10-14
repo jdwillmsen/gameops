@@ -135,6 +135,7 @@ test('an address is written as its route and never its query', () => {
     ['https://map.example.test/tiles/overworld/0/37/-4.webp', '/tiles'],
     ['https://map.example.test/api/biomes/tiles/overworld/0/1/2.png?biome=plains', '/api/biomes/tiles'],
     ['https://map.example.test/api/history/tiles/2026-01-01/overworld/0/37/-4.webp', '/api/history/tiles'],
+    ['https://map.example.test/api/history/markers/2026-01-01?dimension=overworld', '/api/history/markers'],
     ['https://map.example.test/api/history', '/api/history'],
     ['https://map.example.test/api/icons/head?name=Madeup%20Player&v=1', '/api/icons/head'],
     ['https://map.example.test/api/icons/picture/face/cow?v=1', '/api/icons/picture'],
@@ -150,4 +151,6 @@ test('no list of days is a fault from any map but one said to keep none', () => 
   // What one context is there to be refused is added to the rest, for it alone.
   assert.deepEqual(expectedOf({ keepsHistory: true }, [['/api/map', 401], ['/api/waypoints', 500]]).get('/api/waypoints'), [403, 404, 500]);
   assert.equal(expectedOf({ keepsHistory: true }).has('/api/map'), false);
+  // The page asks for a day's markers only where the list says they were kept.
+  assert.equal(expectedOf({ keepsHistory: true }).has('/api/history/markers'), false);
 });
