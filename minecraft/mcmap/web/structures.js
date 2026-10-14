@@ -781,7 +781,11 @@
       }
       const parts = facts('On the map inside its box', inside);
       if (parts.length > 0) {
-        out.push(...parts, el('p', 'note', 'Counted from the layers loaded now: beds, containers and named mobs as of the last snapshot, players and mobs as of the last live frame, and only those the map was sent.'));
+        // The markers of a day of the history are that day's, and a
+        // markers' script from before it drew any has today's.
+        const day = app.markers && app.markers.day ? app.markers.day() : '';
+        const saved = day ? `as kept on ${day}` : 'as of the last snapshot';
+        out.push(...parts, el('p', 'note', `Counted from the layers loaded now: beds, containers and named mobs ${saved}, players and mobs as of the last live frame, and only those the map was sent.`));
       }
     }
     view.body.replaceChildren(...out);

@@ -811,8 +811,10 @@
     && (!Number.isFinite(box.minY) || !Number.isFinite(box.maxY) || (d.y >= box.minY && d.y <= box.maxY));
 
   app.markers = {
-    // For whoever else opens the card on a mob the snapshot placed.
-    savedAt: () => snapshotAt,
+    // When today's snapshot was taken, for whoever else opens the card on
+    // a mob it placed: null while a day's markers are drawn, whose time
+    // says nothing of where a mob was last saved.
+    savedAt: () => (drawn.day ? null : snapshotAt),
     // The day of the history the beds, containers and named mobs drawn
     // are of, or '' while they are today's. Its being here is also how
     // another script knows that this one draws a day's at all.
