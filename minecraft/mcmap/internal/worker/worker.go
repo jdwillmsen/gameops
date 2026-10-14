@@ -406,7 +406,7 @@ func (w *Worker) remember(ctx context.Context, now time.Time) {
 	if r.Skipped {
 		return
 	}
-	w.Logger.Info("map history kept", "day", r.Day, "tiles", r.Tiles, "changed", r.Changed, "new_bytes", r.NewBytes, "seconds", time.Since(started).Seconds())
+	w.Logger.Info("map history kept", "day", r.Day, "tiles", r.Tiles, "changed", r.Changed, "markers", r.Markers, "new_bytes", r.NewBytes, "seconds", time.Since(started).Seconds())
 }
 
 // survey runs last. Structures change only when new chunks are generated,

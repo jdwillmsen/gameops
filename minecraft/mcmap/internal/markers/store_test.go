@@ -42,6 +42,27 @@ func TestStore_AnswersWithEmptyListsBeforeTheFirstScan(t *testing.T) {
 	}
 }
 
+// A day of history is kept with the markers of its moment, and the empty
+// answer from before the first scan is not that: it would be kept for good
+// as a day on which the world held nothing.
+func TestStore_HasNothingToKeepUntilAScanHasReadTheWorld(t *testing.T) {
+	s := NewStore()
+	if body, ok := s.Scanned("overworld"); ok {
+		t.Fatalf("markers to keep before any scan: %s", body)
+	}
+	s.Set(time.Date(2026, 10, 5, 4, 1, 1, 0, time.UTC), World{chunks.Overworld: {Beds: []Marker{{X: 1, Y: 2, Z: 3}}}})
+	served, _, _ := s.Dimension("overworld")
+	if body, ok := s.Scanned("overworld"); !ok || string(body) != string(served) {
+		t.Errorf("markers to keep = %s, %v; want what is served, %s", body, ok, served)
+	}
+	if body, ok := s.Scanned("end"); !ok || !strings.Contains(string(body), `"beds":[]`) {
+		t.Errorf("a dimension scanned and found empty = %s, %v; want its empty answer kept", body, ok)
+	}
+	if _, ok := s.Scanned("aether"); ok {
+		t.Error("an unknown dimension has markers to keep")
+	}
+}
+
 func TestStore_ServesEachDimensionItsOwnMarkers(t *testing.T) {
 	s := NewStore()
 	_, before := read(t, s, "overworld")

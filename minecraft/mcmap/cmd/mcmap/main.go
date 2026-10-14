@@ -191,13 +191,11 @@ func run(logger *slog.Logger) error {
 	// A history that cannot be opened stops the service, as the other
 	// things that cannot be rebuilt do: running on would quietly keep no
 	// days, and a day not kept cannot be kept later.
-	var past *history.Store
-	if cfg.History {
-		if past, err = history.Open(cfg.HistoryDir, logger); err != nil {
-			return err
-		}
-		past.MapsDir, past.Source = mapsDir, renderer
-		past.Renderer = history.Stamp{SHA256: cfg.UnminedSHA256, NetherTopY: cfg.NetherTopY}
+	past, err := openHistory(cfg, mapsDir, renderer, marked, logger)
+	if err != nil {
+		return err
+	}
+	if past != nil {
 		w.History = past
 	}
 	var wg sync.WaitGroup
@@ -326,6 +324,27 @@ func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *
 	}
 	wg.Go(func() { source.Run(ctx) })
 	return layer
+}
+
+// openHistory opens the days the map has kept, to keep more from the tiles
+// in mapsDir. With history turned off it opens nothing and returns nil,
+// which is also what keeps the routes from being served. A day is kept
+// with the markers read in the cycle that drew it, where markers are read
+// at all: the scan comes before the renders and the capture after them.
+func openHistory(cfg config.Config, mapsDir string, renderer history.Source, marked *markers.Store, logger *slog.Logger) (*history.Store, error) {
+	if !cfg.History {
+		return nil, nil
+	}
+	past, err := history.Open(cfg.HistoryDir, logger)
+	if err != nil {
+		return nil, err
+	}
+	past.MapsDir, past.Source = mapsDir, renderer
+	past.Renderer = history.Stamp{SHA256: cfg.UnminedSHA256, NetherTopY: cfg.NetherTopY}
+	if marked != nil {
+		past.Markers = marked.Scanned
+	}
+	return past, nil
 }
 
 // startTrails begins keeping players' positions from the live layer. With
