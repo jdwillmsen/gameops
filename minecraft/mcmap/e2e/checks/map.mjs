@@ -255,6 +255,10 @@ export async function toggles({ page }) {
   const land = await page.evaluate(`(async () => {
     const rows = (${tree})().filter((r) => r.group === 'Topography' && r.depth === 2);
     if (rows.length !== 3 || rows.some((r) => r.off || r.on)) return null;
+    // Rows that are there may still have nothing to draw, and say why: the
+    // heights are not read yet, or the map is wider than the widest tile.
+    const said = await fetch('api/topography?dimension=' + encodeURIComponent(window.mcmap.dimension()), { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null), () => null);
+    if (!said || !said.offered || !said.ready || window.mcmap.map.getZoom() < said.tiles.minZoom) return null;
     const tiles = () => [...document.querySelectorAll('#map img.leaflet-tile')].filter((img) => img.src.includes('api/topography/tiles/'));
     const wait = (ms) => new Promise((done) => setTimeout(done, ms));
     rows[0].check.click();

@@ -2477,8 +2477,10 @@ tint and the lines.
 of the end) draws nothing, and is not a cliff: a neighbour that is not
 known is left out of the step, so the slope is taken from the side that is
 there, and the blur counts only what is known. A tile with no surface in it
-is a 404; one with only level ground is a picture, clear, so that the page
-knows it is there.
+or in the ring read round it is a 404, and finer than a block to a pixel so
+is one with none in it, whatever its ring holds. One with only level
+ground, or at a block to a pixel and wider with a surface only in its ring,
+is a picture, clear, so that the page knows it is there.
 
 **On the page.** Topography is a section of the layer panel after the Biomes,
 with a row for each of the three. A row that is on says why it is not
@@ -2536,8 +2538,9 @@ in, which are pooled.
 262 pixels, which at the widest zoom, taking a column in each chunk, is 4 reads
 a pixel, at 2 and 4 blocks to a pixel at most 1,040 by 1,040 columns, and
 finer than a block at most 136 by 136 blocks.
-A tile asked for with more than three styles, one that is not named, a
-`hide` of a band there is not, or any value over 64 characters, is a 400.
+A tile asked for with no styles, a style that is not one of the three, a
+`hide` of a band there is not, or either value over 64 characters, is a
+400. A style named twice is that style once.
 
 ## Search
 
@@ -4347,8 +4350,8 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block, and the `surface`: the y of the column's highest block, which is the top of a tree, ice or the sea and not the ground. `surface` is left out where it is not known, and until the heights have been read |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
-| `GET /api/topography?dimension=<id>` | Session required. `offered` (false in the Nether), `ready` (false until the heights have been read), `at`, `version`, `tiles` (`minZoom` -5, `maxZoom` 0, `size`), `intervals` (the contour interval in blocks by zoom out from 0), `heavyEvery`, and `bands`, lowest first: each `from`, `to`, `colour` (`#rrggbb`, empty where the band is not drawn) and sometimes a `label`. 400 for an unknown dimension. Served wherever `/api/biomes` is |
-| `GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}.png?styles=<style>,…&hide=<band>,…&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -5 to 4. `styles` names `hillshade`, `contours` and `tint`, any of them, in one picture; `hide` leaves bands of the tint out. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 in the Nether and where the world has no surface, and before the heights are read; 400 for a bad address, no or unknown `styles`, or a band there is not |
+| `GET /api/topography?dimension=<id>` | Session required. `offered` (false in the Nether), `ready` (false until the heights have been read), `version`, `tiles` (`minZoom` -5, `maxZoom` 4, `size`), `intervals` (the contour interval in blocks by zoom out from 0), `heavyEvery`, and `bands`, lowest first: each `from`, `to`, `colour` (`#rrggbb`, empty where the band is not drawn) and sometimes a `label`. 400 for an unknown dimension. Served wherever `/api/biomes` is |
+| `GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}.png?styles=<style>,…&hide=<band>,…&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -5 to 4. `styles` names `hillshade`, `contours` and `tint`, any of them, in one picture; `hide` leaves bands of the tint out. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 in the Nether, where neither the tile nor (at zoom 0 and wider) the ring read round it has a surface, and before the heights are read; 400 for a bad address, no or unknown `styles`, or a band there is not |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the three below, and `404` without it |

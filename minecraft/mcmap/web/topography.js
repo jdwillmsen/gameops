@@ -48,7 +48,7 @@
   const bandId = (dimension, at) => `${dimension}:${at}`;
   // Which bands of the tint are drawn, which the panel keeps: any of them
   // hidden, or one shown alone.
-  const choice = app.layers.facet ? app.layers.facet('topography', 'tint') : { shows: () => true, onChange() {} };
+  const choice = app.layers.facet ? app.layers.facet('topography', 'tint') : { shows: () => true, only: null, onChange() {} };
 
   const on = (id) => rows.has(id) && rows.get(id).enabled;
   const anyOn = () => STYLES.some((style) => on(style.id));
@@ -183,6 +183,14 @@
     }
   }
 
+  // A band shown alone that this dimension's tint does not have would
+  // leave all of it out, so it is let go of: the bands are a dimension's
+  // own, and the one choice is over them all.
+  function settle() {
+    if (listing !== null && choice.only !== null && !bandIds.get(listing.dimension).includes(choice.only)) choice.solo(null);
+    else paint();
+  }
+
   function clear() {
     listing = null;
     fetchedAt = 0;
@@ -222,7 +230,7 @@
       bandIds.set(dimension, listing.bands.map((_, at) => bandId(dimension, at)));
       // Before the first reading, ask again soon rather than in a minute.
       fetchedAt = listing.ready || !listing.offered ? Date.now() : Date.now() - REFRESH_MS + RETRY_MS;
-      paint();
+      settle();
     } catch {
       fetchedAt = Date.now() - REFRESH_MS + RETRY_MS;
     } finally {
@@ -253,7 +261,7 @@
     }
   }
 
-  choice.onChange(paint);
+  choice.onChange(settle);
   map.on('zoomend', paint);
   document.addEventListener('mcmap:view', sync);
   document.addEventListener('visibilitychange', sync);

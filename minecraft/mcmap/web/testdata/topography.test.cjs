@@ -47,13 +47,19 @@ const plains = { generated: true, biome: { name: 'plains', label: 'Plains' } };
 
 // A page with the panel, the biomes' script and the topography's, and a
 // server whose answers are given by what the test passes.
-async function load({ dimension = 'overworld', listings = {}, at = () => ({ ...plains, surface: 71 }), scripts = ['biomes.js', 'topography.js'], status = {} } = {}) {
-  const p = page(new Map());
+async function load({ dimension = 'overworld', listings = {}, at = () => ({ ...plains, surface: 71 }), scripts = ['biomes.js', 'topography.js'], status = {}, storage = new Map() } = {}) {
+  const p = page(storage);
   const { win, doc } = p;
   const output = doc.createElement('output');
   output.hidden = true;
   const lookup = doc.getElementById;
-  doc.getElementById = (id) => (id === 'biome' ? output : lookup(id));
+  // What the views' script looks for on the page, made as it is asked for.
+  const made = new Map();
+  const dialog = (id) => {
+    if (!made.has(id)) made.set(id, Object.assign(doc.createElement(id === 'grid' ? 'input' : 'div'), { id, checked: false, showModal() {}, close() {} }));
+    return made.get(id);
+  };
+  doc.getElementById = (id) => (id === 'biome' ? output : lookup(id) || (/^(views|preview)(-|$)|^(grid|more-open)$/.test(id) ? dialog(id) : null));
   const heard = new Map();
   const state = { dimension, zoom: 0, asked: [], layers: [], removed: [], listings: { overworld: listingOf(), end: listingOf({ bands: BANDS.slice(0, 5) }), nether: NETHER, ...listings } };
   win.L = {
@@ -80,6 +86,8 @@ async function load({ dimension = 'overworld', listings = {}, at = () => ({ ...p
     extent: () => null,
   });
   win.AbortController = AbortController;
+  Object.assign(win, { location: { href: 'http://map.example/', origin: 'http://map.example', pathname: '/', search: '' }, URL, TextEncoder, TextDecoder, Uint8Array, atob, btoa });
+  win.mcmap.place = { get: () => null, set: () => true };
   win.setInterval = () => 0;
   win.fetch = async (address) => {
     state.asked.push(address);
@@ -122,6 +130,7 @@ async function load({ dimension = 'overworld', listings = {}, at = () => ({ ...p
   const zoom = async (z) => { state.zoom = z; for (const fn of heard.get('zoomend')) fn(); await wait(); };
   return {
     ...p,
+    views: win.mcmap.views,
     state,
     output,
     find,
@@ -243,6 +252,94 @@ test('bands left out of the tint are left out of the address, and one shown alon
   p.layers.facet('topography', 'tint').solo('overworld:3');
   await p.on('Height tint');
   assert.doesNotMatch(layer.getTileUrl({ z: 0, x: 0, y: 0 }), /hide/);
+});
+
+test('a band shown alone that another dimension does not have is let go of there, and the tint is whole', async () => {
+  const p = await load();
+  await p.on('Height tint');
+  p.layers.facet('topography', 'tint').solo('overworld:3');
+  await wait();
+  await p.view('end');
+  assert.equal(p.layer().options.dimension, 'end');
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&v=v1$/, 'the end\'s tint is drawn with bands left out');
+  assert.equal(p.layers.facet('topography', 'tint').only, null);
+  // One of this dimension's own is kept when its listing is read again.
+  p.layers.facet('topography', 'tint').solo('end:2');
+  await wait();
+  later();
+  await p.view();
+  assert.equal(p.asked('api/topography?dimension=end').length, 2);
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=0,1,3,4&v=v1$/);
+});
+
+test('a band of another dimension shown alone by a view is let go of as it comes', async () => {
+  const p = await load({ scripts: ['biomes.js', 'topography.js', 'views.js'] });
+  await p.on('Height tint');
+  const view = p.views.capture(false, false);
+  view.name = 'Elsewhere';
+  view.items['topography#tint'] = { only: 'end:2', hidden: [] };
+  assert.ok(p.views.apply(view), 'the view was refused');
+  await wait();
+  assert.equal(p.layers.facet('topography', 'tint').only, null);
+  assert.doesNotMatch(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /hide/);
+});
+
+// A link says which layers are on by their place in a list that is only
+// ever added to at the end, and which of what a layer is made of by the
+// place of the choice in another: the topography's are the 24th to 26th
+// and the 6th, written here apart from the script's own lists.
+test('a link carries the three rows and the bands left out, and puts them back on another page', async () => {
+  const scripts = ['biomes.js', 'topography.js', 'views.js'];
+  const p = await load({ scripts });
+  await p.on('Height tint');
+  await p.press(['Topography', 'Height tint'], 'twist');
+  await p.press(['Topography', 'Height tint', '70 to 89']);
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=3&v=v1$/);
+  const part = p.views.pack({ ...p.views.capture(false, false), name: 'Hills' });
+  const written = JSON.parse(Buffer.from(part.slice(3), 'base64url').toString('utf8'));
+  assert.equal(written.l.slice(23, 26), '001');
+  assert.deepEqual(JSON.parse(JSON.stringify(written.y['5'])), { o: null, h: ['overworld:3'] });
+
+  const q = await load({ scripts });
+  const read = q.views.unpack(part);
+  assert.ok(read.view, read.error);
+  assert.ok(q.views.apply(read.view), 'the view was refused');
+  await wait();
+  // On, with a band of it left out.
+  assert.equal(q.checked('Topography', 'Height tint'), 'mixed');
+  assert.equal(q.checked('Topography', 'Hillshade'), 'false');
+  assert.equal(q.checked('Topography', 'Contour lines'), 'false');
+  assert.match(q.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=3&v=v1$/);
+});
+
+test('each view that comes with the page has the three rows off and every band of the tint shown', async () => {
+  for (const id of ['everything', 'exploring', 'base']) {
+    const p = await load({ scripts: ['biomes.js', 'topography.js', 'views.js'] });
+    for (const row of ROWS) await p.on(row);
+    await p.press(['Topography', 'Height tint'], 'twist');
+    await p.press(['Topography', 'Height tint', '70 to 89']);
+    // The biomes' layer, which one of the views has on, is not counted.
+    const drawn = () => p.live().filter((l) => l.options.className === 'topography').length;
+    assert.equal(drawn(), 1);
+    assert.ok(p.views.apply(p.settings.view(id)), `${id} was refused`);
+    await wait();
+    for (const row of ROWS) assert.equal(p.checked('Topography', row), 'false', `${id} leaves ${row} on`);
+    assert.equal(drawn(), 0, `${id} leaves the topography drawn`);
+    await p.on('Height tint');
+    assert.doesNotMatch(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /hide/, `${id} leaves a band of the tint out`);
+  }
+});
+
+test('the rows that are on and the bands left out are kept from one load to the next', async () => {
+  const storage = new Map();
+  const p = await load({ storage });
+  await p.on('Height tint');
+  await p.press(['Topography', 'Height tint'], 'twist');
+  await p.press(['Topography', 'Height tint', '70 to 89']);
+  await wait(60);
+  const q = await load({ storage });
+  assert.equal(q.checked('Topography', 'Height tint'), 'mixed');
+  assert.match(q.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=3&v=v1$/);
 });
 
 test('the contours say how far apart they are at the zoom the map is at', async () => {
