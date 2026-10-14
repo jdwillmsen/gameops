@@ -12,7 +12,8 @@
 // and what of now, the steps and the play through the days, and a scrubber
 // with a tick for every day since the first one kept. A day can be compared
 // with now or with another day, the two side by side over the map with a
-// divider between them.
+// divider between them, and the areas whose terrain changed since the day
+// kept before can be outlined on the map.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -36,6 +37,11 @@
   const LEAP = 7;
   // How far a press of an arrow key moves the divider, as a share of the map.
   const NUDGE = 0.02;
+  // A tile of the finest terrain is this many blocks square, and what
+  // changed is told by the tile.
+  const TILE = 256;
+  // The most changed tiles outlined, whatever a server says there are.
+  const MOST_CHANGES = 8192;
   const WEEK = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
 
   const make = (tag, part, text) => {
@@ -106,10 +112,13 @@
   const compare = button('compare', 'Compare');
   compare.title = 'This day beside now or another day, with a divider to move between them';
   compare.setAttribute('aria-pressed', 'false');
+  const changes = button('changes', 'Show changes');
+  changes.title = 'Outline the areas, each 256 blocks square, whose terrain differs from the day kept before';
+  changes.setAttribute('aria-pressed', 'false');
   const now = button('now', 'Now');
   const close = button('close', '', 'Close the history');
   close.classList.add('clear');
-  controls.append(earlier, play, later, speeds, pace, loop, compare, now, close);
+  controls.append(earlier, play, later, speeds, pace, loop, compare, changes, now, close);
 
   // The scrubber: a slider whose steps are the days kept and now, drawn as
   // every calendar day from the first one kept, so that the days nothing
@@ -348,10 +357,14 @@
       right.textContent = other ? brief(other) : 'Now';
       right.setAttribute('aria-label', `Right of the divider: ${other ? name(other) : 'now'}. Pick another day`);
     }
+    changes.disabled = !past || comparing;
+    changes.setAttribute('aria-pressed', String(showing));
+    outline();
     if (!past) {
       note.textContent = days.length === 0 ? '' : `${days.length} ${days.length === 1 ? 'day' : 'days'} kept, from ${name(days[0].day)}.`;
     } else {
-      note.textContent = said(days[at]);
+      // What changed is said first, where a note cut short still says it.
+      note.textContent = [differs(), said(days[at])].filter(Boolean).join(' ');
     }
     document.body.classList.toggle('past', past);
     if (!calendar.hidden) fill();
@@ -422,6 +435,7 @@
   // sight saying so.
   function shut() {
     stop();
+    showing = false;
     pair(false);
     unfold(false);
     choose(days.length);
@@ -540,6 +554,158 @@
     known = true;
     draw();
     follow();
+  }
+
+  // --- what changed ---------------------------------------------------------------
+  //
+  // The areas whose terrain on the day shown is not what it was on the day
+  // kept before it, outlined on the map. The server says which, by the
+  // tile; it is asked once for a day and a dimension, and again only if
+  // the day before has become another, as it does when an earlier day is
+  // put in. Nothing is outlined on now, which is no day, or while two days
+  // are compared, where the map already shows a difference of its own.
+
+  let showing = false;
+  const answers = new Map();
+  const asking = new Set();
+  const failed = new Map();
+  // The outline on the map and what it is of.
+  let marks = [];
+  let outlined = '';
+
+  const figure = (n) => n.toLocaleString('en-US');
+  const colour = (named) => (settings && settings.colour(named)) || getComputedStyle(document.documentElement).getPropertyValue(`--${named}`).trim() || 'currentColor';
+
+  // What is wanted outlined: the dimension, the day, and the day before
+  // it as far as the page knows. '' for nothing.
+  function wants() {
+    const id = app.dimension();
+    if (!showing || comparing || at >= days.length || !id) return '';
+    if (!days[at].dimensions.some((d) => d && d.id === id)) return '';
+    return `${id} ${days[at].day} ${at > 0 ? days[at - 1].day : ''}`;
+  }
+
+  // What the server said, as far as it is what it should be.
+  function understood(body) {
+    if (!body || !Array.isArray(body.tiles)) return null;
+    const whole = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
+    const tiles = body.tiles.filter((t) => Array.isArray(t) && Number.isInteger(t[0]) && Number.isInteger(t[1]));
+    return {
+      before: typeof body.before === 'string' && DAY.test(body.before) ? body.before : '',
+      tiles: tiles.slice(0, MOST_CHANGES),
+      of: whole(body.of),
+      more: whole(body.more) + Math.max(0, tiles.length - MOST_CHANGES),
+    };
+  }
+
+  async function learn(key) {
+    if (asking.has(key) || (failed.get(key) || 0) > Date.now()) return;
+    asking.add(key);
+    const [id, day] = key.split(' ');
+    let answer = null;
+    try {
+      // Kept by the browser where the server says it may be, so not asked
+      // for afresh.
+      const res = await fetch(`api/history/changes/${encodeURIComponent(day)}?dimension=${encodeURIComponent(id)}`);
+      if (res.ok) answer = understood(await res.json());
+    } catch { /* said in the note, and asked again later */ }
+    asking.delete(key);
+    if (answer) {
+      // A few days' worth at most: each is a list of some thousands.
+      if (answers.size >= 16) answers.delete(answers.keys().next().value);
+      answers.set(key, answer);
+    } else {
+      failed.set(key, Date.now() + RETRY_MS);
+    }
+    draw();
+  }
+
+  // The edges of the changed tiles that have no changed tile across them,
+  // each run of them one line, so that tiles side by side are outlined as
+  // one area. In blocks, as [z, x] pairs.
+  function edges(tiles) {
+    const has = new Set(tiles.map(([x, y]) => `${x} ${y}`));
+    const level = new Map();
+    const upright = new Map();
+    const put = (lines, line, from) => {
+      if (!lines.has(line)) lines.set(line, []);
+      lines.get(line).push(from);
+    };
+    for (const [x, y] of tiles) {
+      if (!has.has(`${x} ${y - 1}`)) put(level, y, x);
+      if (!has.has(`${x} ${y + 1}`)) put(level, y + 1, x);
+      if (!has.has(`${x - 1} ${y}`)) put(upright, x, y);
+      if (!has.has(`${x + 1} ${y}`)) put(upright, x + 1, y);
+    }
+    const out = [];
+    const runs = (lines, add) => {
+      for (const [line, starts] of lines) {
+        starts.sort((a, b) => a - b);
+        let from = starts[0];
+        let to = from + 1;
+        for (const next of starts.slice(1)) {
+          if (next === to) {
+            to += 1;
+            continue;
+          }
+          add(line, from, to);
+          from = next;
+          to = next + 1;
+        }
+        add(line, from, to);
+      }
+    };
+    runs(level, (y, from, to) => out.push([[y * TILE, from * TILE], [y * TILE, to * TILE]]));
+    runs(upright, (x, from, to) => out.push([[from * TILE, x * TILE], [to * TILE, x * TILE]]));
+    return out;
+  }
+
+  function erase() {
+    for (const mark of marks) mark.remove();
+    marks = [];
+    outlined = '';
+  }
+
+  // Drawn in a pane of its own, over the terrain, its tint and the grid,
+  // and under every marker: a line in the colour a past day is said in,
+  // on a dark casing so that it reads on pale terrain as well as dark.
+  let renderer = null;
+  function trace(key, answer) {
+    outlined = key;
+    if (!window.L || !L.polyline || !app.map || answer.tiles.length === 0) return;
+    if (!renderer) {
+      const pane = app.map.createPane('changes');
+      pane.style.zIndex = 260;
+      pane.style.pointerEvents = 'none';
+      renderer = L.svg({ pane: 'changes', padding: 0.5 });
+    }
+    const lines = edges(answer.tiles);
+    const line = (weight, named) => L.polyline(lines, { pane: 'changes', renderer, interactive: false, weight, color: colour(named), opacity: 1, lineCap: 'square' }).addTo(app.map);
+    marks = [line(5, 'marker-ink'), line(2, 'warn')];
+  }
+
+  function outline() {
+    const key = wants();
+    if (key !== outlined) erase();
+    if (!key || key === outlined) return;
+    const answer = answers.get(key);
+    if (answer) trace(key, answer);
+    else learn(key);
+  }
+
+  // What the note says of it.
+  function differs() {
+    const key = wants();
+    if (!key) return '';
+    const answer = answers.get(key);
+    if (!answer) return asking.has(key) ? 'Looking for what changed.' : 'What changed since the day before could not be fetched.';
+    if (!answer.before) return 'This is the first day kept, so there is no day before it for anything to have changed since.';
+    const next = dayAt(utc(answer.before) + DAY_MS) === days[at].day;
+    const since = next ? 'the day before' : `${name(answer.before)}, the last day kept before it`;
+    const n = answer.tiles.length + answer.more;
+    if (n === 0) return `No area of ${figure(answer.of)} changed since ${since}.`;
+    const all = `${figure(n)} of ${figure(answer.of)} ${answer.of === 1 ? 'area' : 'areas'} changed since ${since}.`;
+    return answer.more > 0 ? `${all} The first ${figure(answer.tiles.length)} are outlined.` : all;
   }
 
   // --- the calendar -----------------------------------------------------------
@@ -797,6 +963,10 @@
     draw();
   });
   compare.addEventListener('click', () => pair(!comparing));
+  changes.addEventListener('click', () => {
+    showing = !showing;
+    draw();
+  });
 
   // --- the divider ---------------------------------------------------------------
   //
@@ -858,6 +1028,11 @@
   document.addEventListener('mcmap:day', follow);
   // Another tab, a file or a saved view may have changed how a play goes.
   document.addEventListener('mcmap:settings', (e) => {
+    // The outline is in the theme's colours, which may be what changed.
+    if (e.detail && e.detail.sections.includes('look') && outlined) {
+      erase();
+      draw();
+    }
     if (!e.detail || !e.detail.sections.includes('history')) return;
     const was = speed;
     recall();

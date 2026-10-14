@@ -1655,8 +1655,8 @@ kbd, .keys code {
   .timeline-note:empty, .timeline-note:empty + .timeline-more { display: none; }
   .timeline-more { display: inline-flex; align-items: center; justify-content: center; order: 4; flex: none; align-self: flex-start; }
   .timeline-scrub { order: 5; flex: 1 1 100%; }
-  .timeline-earlier, .timeline-play, .timeline-later, .timeline-pace, .timeline-loop, .timeline-compare { order: 6; }
-  .timeline-play, .timeline-compare { flex: 1 1 auto; }
+  .timeline-earlier, .timeline-play, .timeline-later, .timeline-pace, .timeline-loop, .timeline-compare, .timeline-changes { order: 6; }
+  .timeline-play, .timeline-compare, .timeline-changes { flex: 1 1 auto; }
   /* Clear of the map's own buttons and the layer panel's, at the top. */
   .timeline-left, .timeline-right { top: auto; bottom: 0.6rem; }
   .timeline-speed { display: none; }
