@@ -14,7 +14,7 @@ import (
 )
 
 // hill gives chunks 0, 0 and 0, -1 of the overworld a surface at y 70 and
-// chunk 0, 0 of the nether its roof, at 127. The overworld's chunk 0, -3 is
+// chunk -1, -1 of the nether, which has a bed in it, its roof, at 127. The overworld's chunk 0, -3 is
 // not generated.
 func hill(t *testing.T, s *Server) *biomes.Store {
 	t.Helper()
@@ -27,7 +27,7 @@ func hill(t *testing.T, s *Server) *biomes.Store {
 		return &c
 	}
 	// Stored counted from the floor: -64 for the overworld, 0 below.
-	for pos, raw := range map[chunks.Pos]int16{{Dim: chunks.Overworld}: 70 + 64 + 1, {Dim: chunks.Overworld, Z: -1}: 70 + 64 + 1, {Dim: chunks.Nether}: 128} {
+	for pos, raw := range map[chunks.Pos]int16{{Dim: chunks.Overworld}: 70 + 64 + 1, {Dim: chunks.Overworld, Z: -1}: 70 + 64 + 1, {Dim: chunks.Nether, X: -1, Z: -1}: 128} {
 		if err := b.AddColumns(pos.Dim, pos.X, pos.Z, flat(raw)); err != nil {
 			t.Fatal(err)
 		}

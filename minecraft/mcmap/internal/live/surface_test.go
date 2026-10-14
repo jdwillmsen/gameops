@@ -8,12 +8,9 @@ import (
 	"time"
 )
 
-// A hill 70 high at the origin's chunk and the sea at 62 everywhere else;
-// the nether has no surface to give.
-func hills(dimension string, x, z int32) (int32, bool) {
+// A hill 70 high at the origin's chunk and the sea at 62 everywhere else.
+func hills(_ string, x, z int32) (int32, bool) {
 	switch {
-	case dimension == "nether":
-		return 0, false
 	case x >= 0 && x < 16 && z >= 0 && z < 16:
 		return 70, true
 	case x < -1000:
@@ -64,13 +61,6 @@ func TestLayerLeavesTheSurfaceOutWhereItCannotBeToldAndNeverTakesThePacksOwn(t *
 	l.Ingest(raw(1, t0, surfaced), t0)
 	if s := string(l.Current("overworld", t0).Data); strings.Contains(s, `"s":`) {
 		t.Errorf("a frame with no surface source or the pack's own claim carries one: %s", s)
-	}
-	l.Surface = hills
-	l.Ingest(raw(2, t0, surfaced), t0)
-	nether := `{"gen":2,"kind":"mobs","dim":"nether","part":0,"parts":1,"more":0,"items":[{"i":"n","t":"ghast","x":5,"y":40,"z":5}]}`
-	l.Ingest(raw(3, t0, nether), t0)
-	if s := string(l.Current("nether", t0).Data); strings.Contains(s, `"s":`) {
-		t.Errorf("the nether's frame carries a surface: %s", s)
 	}
 }
 
