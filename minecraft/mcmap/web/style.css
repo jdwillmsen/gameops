@@ -1617,11 +1617,13 @@ kbd, .keys code {
    a dark casing whatever the theme, since it is the terrain it is read
    against; it is as wide to catch as anything pressed. Only the divider
    and the day on the right, which is a button, take a press: the rest of
-   the map under them is still the map's. */
+   the map under them is still the map's. The line goes to the map's
+   edges and what is pressed stops inside them, since past the right one
+   a press is the layer panel's, whose edge is dragged there. */
 .timeline-divide { position: absolute; inset: 0; z-index: 1040; overflow: hidden; pointer-events: none; }
 .timeline-divide[hidden] { display: none; }
-.timeline-divider { position: absolute; top: 0; bottom: 0; left: calc(var(--timeline-cut) - var(--hit) / 2); width: var(--hit); cursor: ew-resize; touch-action: none; pointer-events: auto; }
-.timeline-divider::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(50% - 1px); width: 2px; background: var(--marker-fill); box-shadow: 0 0 0 1px var(--marker-ink); }
+.timeline-divide::before { content: ""; position: absolute; top: 0; bottom: 0; left: calc(var(--timeline-cut) - 1px); width: 2px; background: var(--marker-fill); box-shadow: 0 0 0 1px var(--marker-ink); }
+.timeline-divider { position: absolute; top: 0; bottom: 0; left: clamp(0px, calc(var(--timeline-cut) - var(--hit) / 2), calc(100% - var(--hit))); width: var(--hit); cursor: ew-resize; touch-action: none; pointer-events: auto; }
 .timeline-divider:focus-visible { outline-offset: -2px; }
 .timeline-grip { position: absolute; top: 50%; left: 50%; width: 36px; height: 36px; margin: -18px; background: var(--panel); border: 2px solid var(--text); border-radius: 50%; }
 .timeline-grip::before, .timeline-grip::after { content: ""; position: absolute; top: calc(50% - 4px); width: 6px; height: 6px; border: solid var(--text); border-width: 0 0 2px 2px; }

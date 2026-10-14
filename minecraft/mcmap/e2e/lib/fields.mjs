@@ -98,6 +98,7 @@ export const SENTENCES = [
   "the page asked for the markers of a day that kept none",
   "choosing a day moved the map",
   "Compare did not draw now beside the day",
+  "the divider at the map's right edge could not be dragged back",
   "leaving Compare left the map in two",
   "going back to now left the map on the day",
   "going back to now moved the map",
