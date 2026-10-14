@@ -1,7 +1,8 @@
 # Admin access to the production map
 
-Status: proposed 2026-10-14. Nothing is built. Each decision below is
-numbered so that it can be approved or rejected on its own.
+Status: proposed 2026-10-14, revised the same day after an independent
+review. Nothing is built. Each decision below is numbered so that it can be
+approved or rejected on its own.
 
 ## What is wanted
 
@@ -18,6 +19,13 @@ That is two people with different needs:
    seen by the map as its admin.
 2. **AI agents.** To find out what the production map is doing when a bug
    is reported.
+
+**What phase 1 does not do: it does not let agents see the production map
+itself.** No agent holds a production session, sees its tiles or drives a
+browser against it. Agents get what the server says about itself (D8),
+which needs no credential. Seeing the map is phase 3 (D9), and it is
+blocked on two things only the owner can give: network-policy enforcement
+in the namespace, and his word that the standing rule may change.
 
 ## Limits this works inside
 
@@ -41,37 +49,40 @@ That is two people with different needs:
   XUID in a chart value is not acceptable.
 - **GitOps only.** No `kubectl` changes to production. `gameops` and
   `jdw-deployments` both require 0 approvals on `main` (checked
-  2026-10-14 through the rulesets API), so map and chart changes need
-  nothing from the owner.
+  2026-10-14 through the rulesets API), so map, agent and chart changes
+  need nothing from the owner.
 - **The standing rule on agent runs.** Each run of the browser checks
   from an agent's machine against production needs the owner's approval
   that time (README, "Who has to approve what"). This design does not
-  change that rule. Decision D9 asks whether he wants to, later.
+  change that rule.
 
 ## What was found by reading the code
 
 - The map already holds `BRIDGE_URL` and `BRIDGE_TOKEN`
   (`internal/config/config.go`), for snapshots and the live layer.
+  `BRIDGE_URL` is required, so a map always has a bridge to ask, though
+  the bridge may be down.
 - The console bridge already serves `GET /permissions` behind that token
-  (`minecraft/bridge/http.go`), reading the server's own `permissions.json`
-  off the game's data volume, which it mounts read-only. It answers a map
-  of XUID to `operator`, `member` or `visitor`.
+  (`minecraft/bridge/http.go`). It reads the server's own
+  `permissions.json` off the game's data volume, which it mounts
+  read-only, on every request, and answers a map of XUID to `operator`,
+  `member` or `visitor`. Its parser keeps the last entry when an XUID is
+  listed twice (`ParsePermissions` writes into a map).
 - The agent already decides who may run operator commands from exactly
   that answer, cached for 10 seconds, failing closed to `visitor` on any
   error (`agent/internal/adapters/permissions.go`).
 - `permissions.json` is not in git and not rendered by the chart. The
   nightly backup copies it beside the world.
-- The bridge's command allowlist has no `op` or `permission` command, so
-  the bridge token cannot change who is an operator.
+- The bridge's command allowlist has no `op`, `deop` or `permission`
+  command, so the bridge token cannot change who is an operator.
 - A session is a signed cookie carrying `Identity{XUID, Gamertag}`, issued
-  for 7 days by default (`SESSION_TTL`). Revocation is per XUID, "every
-  session issued up to this moment", on the data volume
+  for 7 days by default (`SESSION_TTL`), `SameSite=Lax`. Revocation is per
+  XUID, "every session issued up to this moment", on the data volume
   (`internal/auth/revoke.go`).
-- Every route goes through `route` with a gate (`gatePublic`,
-  `gatePlayer`, `gateViewer`, `gateAgent`, `gateExchange`), and
-  `service_test.go` fails on any route registered another way.
-  `auth.FromContext` answers "no player" for a service session, so
-  anything keyed by XUID is out of its reach by construction.
+- Every route goes through `route` with a gate, and `service_test.go`
+  fails on any route registered another way. `auth.FromContext` answers
+  "no player" for a service session, so anything keyed by XUID is out of
+  its reach by construction.
 - `GET /api/diagnostics` is on the **public** listener behind
   `gateViewer`. Without a session it cannot be read. The internal listener
   has only `/healthz`, `/metrics`, the agent's routes and the checks'
@@ -80,10 +91,11 @@ That is two people with different needs:
   (`map login issued`, `internal/server/auth.go`).
 - `worker.Status.Problem` is only a stage name, `snapshot` or `render`;
   the detail goes to the log.
-- The world runs with `allowCheats: false` (chart values), so what an
-  operator can do in chat is narrower than on a cheats-on server.
-  Unverified: which commands an operator can still run there, and whether
-  an operator can `/op` another player with cheats off.
+- The metrics already cover render, snapshot, live, markers, history,
+  structures and the checks' exchange. They do not carry the build
+  revision, the page's file fingerprints, the problem the page is showing,
+  or which features the server resolved as on.
+- The world runs with `allowCheats: false` (chart values).
 - **The kube credential agents use on the devbox is `system:masters`**
   (`kubectl auth whoami`, 2026-10-14). An agent can technically read every
   Secret in the namespace, exec into the map and read `session.key`. So
@@ -91,37 +103,88 @@ That is two people with different needs:
   cluster enforces. This design never requires an agent to touch a
   credential; it cannot prevent one from doing so.
 
+### What the game does with `permissions.json`
+
+Read from `bedrock_server_how_to.html` in the Bedrock Dedicated Server
+1.26.52.3 archive for Linux, Mojang's own manual (a copy already unpacked
+on the devbox; the current download, checked 2026-10-14, is the same
+version):
+
+- "If you change this file while the server is running, then run the
+  command `permission reload` to make sure that the server knows about your
+  new change." `permission list` prints the operator list in use.
+- Console `op <player>`: "Promote a player to operator. This will also
+  persist in permissions.json if the player is authenticated to XBL. If
+  permissions.json is missing it will be created. If the player is not
+  connected to XBL, the player is promoted for the current server session
+  and it will not be persisted on disk."
+- Console `deop <player>`: "Demote a player to member. This will also
+  persist in permissions.json if the player is authenticated to XBL."
+- An XUID not in the file gets `default-player-permission-level`, which
+  defaults to `member`.
+
+**Verified:** the console's `op` and `deop` rewrite the file for a player
+signed in to Xbox Live, and `permission reload` re-reads it. **Not
+verified:** whether an operator typing `/op` or `/deop` in game chat does
+the same, and whether they can at all with cheats off; the manual
+describes console commands only. **Consequence:** the bridge reads the
+file, not the server's memory. An `op` for a player not signed in to Xbox
+Live, or a hand edit before `permission reload`, makes the game and the
+map disagree until the file and the server agree again.
+
 ## Decisions
 
 ### D1. An admin is an operator in the game's own `permissions.json`
 
-A logged-in player is the map's admin while the bridge's `GET /permissions`
-says `operator` for their XUID. Nothing else makes an admin. The map asks
-on every admin request, through a 10-second cache, as the agent does. Any
-error, a missing file, an absent XUID, `member`, `visitor` or an unknown
-word all mean "not an admin".
+A logged-in player is the map's admin while the operator list says
+`operator` for their XUID. Nothing else makes an admin. Any other word, an
+absent XUID (which the game treats as `member`), or an unknown word means
+"not an admin".
 
-Why:
+**Where the list comes from, in order:**
+
+1. **Live.** The bridge's `GET /permissions`, cached 10 seconds, as the
+   agent does.
+2. **Last known good.** On every successful lookup the map keeps the set of
+   operator XUIDs in `DATA_DIR/auth/operators.json` with the time it was
+   read, written whole like `revoked.json`, and only when the set has
+   changed. It holds XUIDs and nothing else, and is never logged. When the
+   bridge cannot be reached or answers with an error, the map uses this
+   set if it is under 24 hours old.
+3. **Nobody.** Past 24 hours, or with no file, nobody is an admin.
+
+**The trade-off of (2):** while the bridge is down, de-opping someone
+takes effect only once it is reachable again, up to 24 hours late. In
+return the owner can still get in to debug the outage that took the bridge
+down, which is when he most needs to. A bridge outage of that length also
+stops snapshots and the live layer, which have their own alerts
+(`JdwillmsenMinecraftMapStale`, `JdwillmsenMinecraftMapLiveStale`).
+
+**Duplicates.** The bridge keeps the last entry for an XUID listed twice,
+so the map does too. What the game does with a duplicate is not
+documented. Q5 asks whether the bridge should instead treat an XUID with
+conflicting entries as not an operator, which would change the agent too.
+
+**Why this source:**
 
 - **No identity in git.** The truth is the game's own file on the game's
   own volume, already backed up nightly, which the owner already curates.
 - **No new secret and no new wiring.** The map already has the bridge
-  token; the bridge already serves the file; the agent already trusts it.
-- **One list for the game and the map.** Whoever the owner makes an
-  operator for the game is an operator for the map, and taking it away in
-  one takes it away in both, within 10 seconds.
+  token, the bridge already serves the file, and the agent already trusts
+  it.
+- **One list for the game and the map.** Taking someone off it in one
+  takes them off in both, within 10 seconds while the bridge is up.
 - **Spoofing.** The XUID comes from the session, which comes from the code
   flow (the agent reports the XUID the server stamped on the chat packet;
-  the gamertag is never trusted) or from a passkey bound to that XUID (D3).
-  The answer comes from the bridge over the cluster network. Faking it
-  takes a write to the Service or the pod, which is cluster-admin, and
+  the gamertag is never trusted) or from a passkey bound to that XUID
+  (D3). The answer comes from the bridge over the cluster network. Faking
+  it takes a write to the Service or the pod, which is cluster-admin, and
   cluster-admin can rewrite `permissions.json` itself.
 
 What this does not settle: every operator is an admin. If the owner has
-made friends operators, they see what D5 shows too. D5 is chosen so that
-this is harmless (nothing in it is about the world or another player), but
-the owner-only views on the roadmap (underground views) need something
-narrower. See open question Q1.
+made friends operators, they get D5 too. D5 is chosen so that this is
+harmless (nothing in it is about the world or another player), but the
+owner-only views on the roadmap need something narrower. See Q1.
 
 Rejected for who is admin:
 
@@ -129,91 +192,205 @@ Rejected for who is admin:
   allowed. A hash of one is no better: XUIDs are short numbers, and the
   hash is found by trying them.
 - **The first player to claim "owner" in the map.** Whoever gets there
-  first wins, including someone holding the internal token, and nothing
-  in the map can tell the real owner from them.
-- **A value in an existing Secret.** Someone has to write it, which is a
-  person with Vault access or `kubectl`, and it is a second list of
-  operators to keep in step with the game's.
-- **Bedrock's `default-player-permission-level`.** Read by nobody here,
-  and only matters for XUIDs absent from the file; absent is "not admin".
+  first wins, including someone holding the internal token.
+- **A value in an existing Secret.** Someone has to write it, with Vault
+  or `kubectl`, and it is a second operator list to keep in step.
 
 ### D2. Admin is a gate, not a kind of cookie
 
 A new gate, `gateAdmin`, is a player's session (`Require`) plus D1's check
 on `auth.FromContext`'s XUID. The cookie says nothing about being an
-admin: a cookie issued while someone was an operator stops opening admin
-routes the moment the file says otherwise. A service session has no XUID
+admin. A cookie issued while someone was an operator stops opening admin
+routes as soon as the list says otherwise. A service session has no XUID
 and so can never be an admin, by the same construction that keeps it from
-waypoints. `service_test.go` learns the new gate and asserts that every
-`gateAdmin` route answers 403 to a service session and 403 to a player the
-fake bridge calls `member`.
+waypoints. `service_test.go` learns the new gate.
 
 `/api/me` gains `admin: true` for an operator, so the page can show what
 only an admin has. Nothing else in a viewer's answers changes for an
 admin.
 
-### D3. Phase 1: passkeys, registered while logged in through the game
+**With the admin switch off** (`ADMIN_ENABLED=false`), no `gateAdmin`
+route is registered, so each answers 404, and `/api/me` never says
+`admin`. **With the login off** (`AUTH_DISABLED=true`) there is no
+player, so nobody is an admin and the admin and passkey switches do
+nothing. That is logged once at start and is never an error. **With the
+bridge unreachable** the map uses D1's order and, past it, says "not an
+admin". It never answers 5xx for that.
+
+### D3. Phase 1: passkeys, added from the game and confirmed in the game
 
 The owner gets in without the game with a passkey (WebAuthn) that the map
 itself checks. Nothing is configured, no client is registered anywhere,
 and no secret exists that a person or an agent has to hold: the map
 stores only public keys.
 
-**Registering one.**
+**Only operators may add one** (`gateAdmin`). The owner asked for an admin
+way in, and every player already has the game login, so giving passkeys
+to everyone would add surface nobody asked for. **At most 5 per XUID**:
+enough for a phone, a laptop, a security key and two spares, and few
+enough that a list that keeps growing is noticed.
 
-1. The owner logs in the normal way, typing `!map <code>` in the game.
-2. If he is an operator, the page offers "Add a passkey" for the first 10
-   minutes of that session and no later. The session has to have come from
-   a game code: a session that came from a passkey cannot add another, so
-   one stolen passkey session cannot plant more.
-3. `POST /auth/passkey/register/options` (admin gate) returns creation
-   options: a 32-byte random challenge, the RP ID (the map's host,
-   `fwb.prd.jdwlabs.com` from `map.host`), the user handle (32 random bytes
-   kept beside the XUID, never the XUID itself), `residentKey: required`,
-   `userVerification: required`, `attestation: none`, ES256 and RS256.
-   The challenge is held server-side, single use, for 2 minutes, bound to
-   an `HttpOnly`, `SameSite=Strict`, `__Host-` cookie, in a bounded table
-   like the login codes.
-4. The browser creates the credential; `POST
-   /auth/passkey/register/finish` (admin gate) verifies it as §7.1 of the
-   WebAuthn spec says: the challenge matches (step 8), the origin is the
-   map's exact origin (step 9), the RP ID hash matches (step 14), user
-   presence (step 15) and user verification (step 16) are set, and the
-   credential ID is not registered to anyone (step 26).
-5. The map stores `{credential ID, public key, sign count, user handle,
-   XUID, created at, last used at, a label the owner types}` in
-   `DATA_DIR/auth/passkeys.json`, written whole as `revoked.json` is. At
-   most 5 per XUID.
+#### Adding a passkey
 
-**Logging in with one.** The login screen gains "Log in with a passkey",
-shown only when the map has passkeys switched on. It is a discoverable
-credential, so there is nothing to type: `POST /auth/passkey/options`
-returns a challenge with no allowed list, the browser asks the
-authenticator, and `POST /auth/passkey/finish` verifies the assertion
-(origin, RP ID hash, UP, UV, signature), finds the credential, and then
-issues a session only if all of these hold:
+1. The owner is logged in, by game code or by an earlier passkey, as an
+   operator. The page's admin section offers "Add a passkey" and asks for
+   a label of 1 to 32 letters, digits, spaces or hyphens. The page shows
+   it as text only, never as HTML.
+2. `POST /auth/passkey/register/options` (admin gate) answers with
+   creation options: a 32-byte random challenge, the RP ID (the host of
+   `PUBLIC_ORIGIN`, `fwb.prd.jdwlabs.com`), and a user handle of 32 random
+   bytes kept beside the XUID. The handle is never the XUID itself.
+   `user.name` is `fwb-map` and `user.displayName` is `FWB map admin`.
+   Neither is the gamertag or the XUID, so neither ends up in a password
+   manager or a cloud keychain. The options also set
+   `residentKey: required`, `userVerification: required`,
+   `attestation: none`, ES256 and RS256, and an `excludeCredentials` list
+   of the XUID's existing credentials. The map keeps the challenge for 2
+   minutes, single use, together with the XUID and the session's
+   `IssuedMilli`. The table is bounded and admin-only, so filling it takes
+   an operator's session.
+3. The browser creates the credential. `POST
+   /auth/passkey/register/finish` (admin gate) checks that the caller's
+   XUID and `IssuedMilli` are the ones the challenge was issued to, then
+   runs the §7.1 steps listed below. On success it stores the credential
+   as **pending**. A pending credential cannot log anyone in. It answers
+   with a 6-character confirmation code from the login codes' alphabet.
+4. The page shows the code and asks the owner to type `!map passkey <code>`
+   in game, within 2 minutes.
+5. The agent sees the chat line, with the XUID the server stamped on it,
+   and reports `{code, xuid}` to a new `POST
+   /internal/v1/passkey-confirmations` (`gateAgent`). The map activates
+   the pending credential only if the code is its own, unexpired and
+   unused, and the XUID is the one that registered it. Anything else gets
+   the same "not valid or expired" answer the login codes give.
+6. The agent's reply in chat is the in-game notice that a passkey was
+   added: "A passkey was added to your map login. If you did not just add
+   one, type !map logout, which logs out every browser and removes every
+   passkey." It goes to the player who typed it, through the agent's usual
+   reply path, which already reaches them through the bridge. If no
+   confirmation arrives in 2 minutes, the pending credential is deleted.
+7. The map writes `{credential ID, public key, sign count, backup flags,
+   user handle, XUID, gamertag, label, created at, last used at}` to
+   `DATA_DIR/auth/passkeys.json`, written whole like `revoked.json`.
 
-- the credential's XUID is an operator now (D1);
-- the credential was created after that XUID's last revocation (so
-  `!map logout` ends passkeys as well as sessions, D7);
-- the sign count, where the authenticator keeps one, has moved forward.
-  A synced passkey reports 0 every time, which is allowed; a counter that
-  goes backwards is refused and logged, as §6.1.1 suggests a clone
-  (the spec leaves the response to the relying party).
+**Why the in-game confirmation.** Only the real player, in the game right
+now, can make a passkey usable. A stolen session cookie, a session that
+someone talked an operator into creating with a code off another person's
+screen, or a script on the page cannot do it. This replaces the first
+draft's two rules, "only in a session's first 10 minutes" and "never from
+a passkey session". Both were a stand-in for "the real player is here
+now", and the confirmation proves that directly. With both rules gone, an
+owner who logged in with a passkey can add a second one, as long as he is
+in the game to confirm it.
 
-The session is an ordinary player session with one more signed field,
-`m: "passkey"` (absent means a game code, so old cookies read as they
-always did), and lasts 12 hours, not 7 days. The method is what step 2
-above reads.
+#### Logging in with one
+
+The login screen gains "Log in with a passkey". `/api/config`, the one
+answer the map gives before login, gains `passkeys: true` so that the
+screen knows to show it. That tells anyone who loads the page that the map
+has a passkey login. It names nobody and says nothing about the world.
+
+1. `POST /auth/passkey/options` (public) answers with a 32-byte random
+   challenge and no allowed-credentials list (a discoverable credential:
+   nothing to type). The map keeps no state for it. The challenge, its
+   expiry 2 minutes on, and an HMAC over both, under a key derived from
+   the session key, go in a `__Host-mcmap_passkey` cookie, `HttpOnly`,
+   `Secure`, `SameSite=Strict`. A flood of requests for challenges
+   therefore costs nothing to store and can push nobody's challenge out.
+2. The browser asks the authenticator, and `POST /auth/passkey/finish`
+   (public, behind `CrossOriginProtection` like every `POST`) runs the
+   §7.2 steps below.
+3. Single use. Once the signature has verified, the challenge's hash goes
+   into a used set until it expires, and a challenge already there is
+   refused. Only an assertion that verifies against a stored credential is
+   ever added, so only a holder of a passkey can grow the set, and each
+   entry leaves after 2 minutes.
+4. A session is issued only if the credential is active (not pending),
+   its XUID is an operator now (D1), and the sign count passes.
+5. The session is an ordinary player session with two more signed fields:
+   `m: "passkey"` and `k`, the first 16 bytes of the SHA-256 of the
+   credential ID, base64url. Its gamertag is the one stored with the
+   credential. That is the gamertag of the game-code session that added
+   it, refreshed every time that XUID logs in through the game. A passkey
+   session lasts 12 hours, not 7 days.
+
+**Sign count.** If both the stored and the presented count are 0, the
+authenticator keeps no counter (synced passkeys do this) and the count is
+not judged. If the presented count is greater than the stored one, the
+stored one is raised. Otherwise, equal or lower with either one non-zero,
+the login is refused and logged as `counter`, which is what §7.2 step 22
+says may mean a cloned key. Reading, comparing and writing the count
+happen under one lock on the store, so two logins at once cannot both
+pass with the same count.
+
+**Every request, not only at login,** a `m: "passkey"` cookie is refused
+unless passkeys are switched on and the credential its `k` names is still
+stored and active. So removing a passkey, or switching passkeys off, ends
+its sessions at once, not after 12 hours. A cookie whose `m` is anything
+but absent or `passkey`, or that has `m: "passkey"` and no `k`, is
+refused. A cookie with no `m` is a game-code session and verifies as it
+does today.
+
+#### The WebAuthn steps the map performs
+
+From §7.1 and §7.2 of the W3C Recommendation. Step numbers are the spec's.
+
+Registration (§7.1):
+
+| Step | Check |
+|---|---|
+| 5-6 | Decode `clientDataJSON` as UTF-8, removing a leading BOM, and parse it |
+| 7 | `type` is `webauthn.create` |
+| 8 | `challenge` is the one issued, unexpired and not used before, and the caller's XUID and `IssuedMilli` are the ones it was issued to |
+| 9 | `origin` equals `PUBLIC_ORIGIN` exactly |
+| 10 | `crossOrigin` true is **refused**: the map is never framed |
+| 11 | `topOrigin` present is **refused**, for the same reason |
+| 13 | CBOR-decode the attestation object |
+| 14 | `rpIdHash` is the SHA-256 of the RP ID |
+| 15 | UP is set |
+| 16 | UV is set |
+| 17 | BS is not set unless BE is |
+| 20 | The key's `alg` is ES256 or RS256 |
+| 21-22, 24 | Format `none` only. Anything else is refused, since the map asked for none and has no trust anchors |
+| 25 | Credential ID at most 1023 bytes |
+| 26 | Credential ID not stored for anyone, pending or active |
+| 27, 29 | Store it, as pending, then active on confirmation |
+
+Login (§7.2):
+
+| Step | Check |
+|---|---|
+| 6 | `userHandle` is present, names a stored user handle, and that user's credentials include `rawId`. A missing handle, or one that names a different XUID than the credential's, is refused |
+| 8-9 | Decode and parse `clientDataJSON` |
+| 10 | `type` is `webauthn.get` |
+| 11 | `challenge` is the one in the HMAC'd cookie, unexpired and not in the used set |
+| 12 | `origin` equals `PUBLIC_ORIGIN` exactly |
+| 13 | `crossOrigin` true is refused |
+| 14 | `topOrigin` present is refused |
+| 15 | `rpIdHash` is the SHA-256 of the RP ID |
+| 16 | UP is set |
+| 17 | UV is set |
+| 18 | BS is not set unless BE is; BE is what it was at registration |
+| 20-21 | The signature over `authData` followed by the SHA-256 of `clientDataJSON` verifies with the stored key |
+| 22 | Sign count, as above |
+| 24 | Store the new sign count, backup state and last-used time |
+
+**Library.** `github.com/go-webauthn/webauthn`, pinned (v0.18.2 is the
+newest on the Go module proxy, 2026-09-19), its version moved only by a
+reviewed change. The map does not rely on the library's defaults for the
+counter, `crossOrigin`, `topOrigin` or the user handle. It checks those
+itself, and the tests below prove every step in the tables whatever the
+library does. A hand-written verifier was rejected: CBOR, COSE keys and
+attestation parsing are where such code goes wrong.
 
 **Why passkeys for phase 1.**
 
 - Everything is inside the map: no Dex client, no Vault, no chart secret.
 - The owner's phone or laptop already has a passkey provider with a
-  screen lock, so `userVerification: required` costs him nothing.
-- A passkey cannot be phished onto another site (the RP ID binds it to
-  this host, glossary "Relying Party Identifier"), and the map holds
-  nothing that would let anyone log in if the volume leaked.
+  screen lock.
+- A passkey is bound to this host's RP ID, so another site cannot use it,
+  and the map holds nothing that would let anyone log in if the volume
+  leaked.
 - Bootstrapping uses the proof the map already trusts, being in the game,
   and recovery is the same: if every passkey is lost, log in through the
   game and add a new one.
@@ -222,198 +399,278 @@ above reads.
 
 - A port-forward is `localhost`, a different origin, so passkeys work only
   on the public address.
-- The map's volume is not backed up. Losing it loses the passkeys; the
-  owner adds them again through the game.
-- **New dependency.** Verifying WebAuthn by hand (CBOR, COSE keys,
-  attestation parsing) is where mistakes are made. Recommended:
-  `github.com/go-webauthn/webauthn`, pinned, its version reviewed like
-  any other. The alternative is a hand-written verifier for ES256 with
-  `none` attestation only, about 400 lines plus tests. Open question Q2.
+- The map's volume is not backed up. Losing it loses the passkeys and the
+  last-known-good operators. The owner adds passkeys again through the
+  game.
+- Adding a passkey needs the owner in the game, once per passkey.
 
 Rejected for phase 1:
 
-- **Long-lived owner sessions** (a 90-day cookie for operators). Still
-  needs the game to start, and turns one stolen cookie into three months
-  of access with no second factor.
+- **Long-lived operator sessions** (a 90-day cookie). Still needs the game
+  to start, and turns one stolen cookie into three months of access.
 - **A recovery code or admin password.** A credential that someone has to
   create, see and keep, and a thing to guess at on the public listener.
-- **A magic link sent out of band.** There is no mail or chat channel to
-  send it on that is not itself a new credential.
+- **A magic link sent out of band.** There is no channel to send it on
+  that is not itself a new credential.
 
 ### D4. Phase 2, optional and owner-gated: log in through Dex
 
 Phase 2 registers the map with the platform's Dex as a **public client
-using PKCE**, so that it, too, needs no secret: Dex documents
-`public: true` clients with no secret, and PKCE has been in Dex since
-2.26 (secondary source: the Dex issue that introduced it; check against
-the running version before relying on it). The platform change is one
-`staticClients` entry in `tenants/platform/services/argo-cd/values.yaml`:
-id `mcmap`, `public: true`, redirect URI
+using PKCE**, so that it, too, needs no secret. Dex documents
+`public: true` clients with no secret. PKCE has been in Dex since 2.26,
+but the only source for that is the Dex issue that introduced it; check it
+against the running version before relying on it. The platform change is
+one `staticClients` entry in
+`tenants/platform/services/argo-cd/values.yaml`: id `mcmap`,
+`public: true`, redirect URI
 `https://fwb.prd.jdwlabs.com/auth/oidc/callback`. That is the one thing
 that needs the owner's approval.
 
 The map does not trust an email. The Google connector accepts any Google
-account on the internet (the platform's own comment says so), so who logs
-in is decided by the map, fail closed: an operator, while logged in
-through the game, presses "Link Dex login", goes through Dex once, and the
-map stores the pair `(issuer, sub)` beside his XUID on the volume. A later
-Dex login whose `(issuer, sub)` is linked is that XUID, still subject to
-D1 and to revocation like a passkey. No email and no XUID go in git.
-
-What it adds over phase 1:
-
-- the owner's GitHub or Google account, with whatever second factor it
-  already has, as a second way in;
-- a way in when every passkey is lost and the game is not to hand;
-- the same identity he uses for Argo CD and Headlamp.
-
-Why it is optional: phase 1 already gets him in without the game, and
-phase 2 adds a dependency on Argo CD's Dex being up and a platform change.
+account on the internet (the platform's own comment says so), so the map
+decides who gets in, and refuses anyone it cannot place. An operator,
+logged in, presses "Link Dex login", goes through Dex once, and confirms
+in game with `!map passkey <code>` as in D3. The map stores the pair
+`(issuer, sub)` beside his XUID on the volume. A later Dex login whose
+pair is linked is that XUID, subject to D1, to revocation and to the kill
+switches, like a passkey. No email and no XUID go in git.
 `github.com/coreos/go-oidc/v3`, already an indirect dependency of this
 module, verifies the ID token.
 
+What it adds over phase 1: the owner's GitHub or Google account, with
+whatever second factor it has, as a second way in; a way in when every
+passkey is lost and the game is not to hand; the identity he already uses
+for Argo CD and Headlamp. Why it is optional: phase 1 already gets him in
+without the game, and phase 2 adds a dependency on Argo CD's Dex and a
+platform change.
+
 ### D5. What an admin can do in phase 1
 
-Small, read-only, and nothing about the world that every player cannot
-already see. The owner plays this world too: an admin view that showed
-more of it than other players see would be the cheat the login exists to
-prevent.
+The admin powers are small and read-only, and none of them shows anything
+about the world that every player cannot already see. The owner plays this
+world too: an admin view that showed more of it than other players see
+would be the cheat the login exists to prevent.
 
-1. **See the map as any player does**, which an operator already can.
-2. **The server's status in the page.** `GET /api/admin/status` (admin
-   gate) returns the same payload as D8's internal status: the worker's
-   stage and timings, generations and chunk-census counts, the live
-   layer's freshness, bridge reachability, history capture state, the
-   effective non-secret settings, and counts of sessions issued and
-   refused. The debug panel shows it in an Admin section. It holds no
-   gamertag, XUID, coordinate, seed or path.
-3. **Their own passkeys:** list (label, created, last used), add (D3),
-   remove. `GET`, `POST` and `DELETE` under `/api/admin/passkeys`, admin
-   gate, each acting only on the caller's own XUID.
-4. **Log out everywhere** for themselves: the same revocation `!map
-   logout` makes, from the page. `POST /api/admin/logout-all`, admin gate,
-   own XUID only.
+Behind `gateAdmin`:
+
+1. **The server's status in the page.** `GET /api/admin/status`, D8's
+   payload plus the admin-only fields listed there, shown in an Admin
+   section of the debug panel.
+2. **Add a passkey** (D3).
+
+Behind `gatePlayer`, each acting only on the caller's own XUID, so that a
+player who is no longer an operator can still clean up after themselves:
+
+3. **List their passkeys** (label, created, last used, whether pending).
+   `GET /api/passkeys`.
+4. **Remove one.** `DELETE /api/passkeys/{id}`. Its sessions end at once
+   (D3).
+5. **Log out everywhere.** `POST /api/logout-all`, the same revocation
+   `!map logout` makes (D7). The page asks first: "This logs out every
+   browser logged in as you and removes all your passkeys."
+
+And, without a gate of its own, an admin sees the map as any player does.
 
 Rejected for phase 1:
 
 - **"View as" a player.** The only things that differ by player are their
   own waypoints, their standing in a village and which head is "me".
-  Seeing another player's waypoints is reading their private notes; it
+  Seeing another player's waypoints is reading their private notes. It
   helps with no bug that a fixture cannot reproduce, and it makes every
-  admin request ambiguous in the log about whose data it touched. If a bug
-  ever needs it, it should be its own design, with the player told in
-  game.
-- **Withheld structures, caves, seeds, other players' trails beyond what
-  everyone sees.** Not admin powers in phase 1. The underground view on
-  the roadmap is the owner's to decide (Q1).
+  admin request ambiguous in the log about whose data it touched. If a
+  bug ever needs it, it should get its own design, with the player told
+  in game.
+- **Withheld structures, caves, seeds, others' trails.** Not admin powers
+  in phase 1. The underground view on the roadmap is the owner's to
+  decide (Q1).
 - **Anything that writes to the world or the game**, including the chunk
-  reset approvals on the roadmap. That design will add its own admin
-  routes behind this gate.
-- **A list of who logged in.** It is in the log already, and putting it
-  in the page makes a list of players and their habits for every
-  operator.
+  reset approvals on the roadmap. That design will add its own routes
+  behind this gate.
+- **A list of who logged in.** It is in the log already, and in the page
+  it becomes a record of players' habits shown to every operator.
 
 ### D6. Audit and metrics
 
-Every admin-relevant event is one log line, and a count. The lines carry
-the XUID, as the existing login line already does, and **not** the
-gamertag, a coordinate, the challenge, the credential's public key or the
-cookie. A credential is named by the first 8 hex digits of the SHA-256 of
-its ID. A user agent is cut as `said` already cuts it.
+Every admin-relevant event is one log line and a count. The lines carry
+the XUID, as the existing login line already does. They do **not** carry
+a gamertag (the existing `map login issued` line keeps its gamertag, as
+today), a label, a coordinate, a challenge, a confirmation code, a public
+key or a cookie. A credential is named by the first 8 hex digits of the
+SHA-256 of its ID. A user agent is cut as `said` already cuts it.
 
 | Event | Log line | Metric |
 |---|---|---|
-| Passkey added | `map passkey registered` xuid, credential, label length, method of the session | `mcmap_admin_passkeys_registered_total{result}` |
-| Passkey removed | `map passkey removed` xuid, credential | `mcmap_admin_passkeys_removed_total` |
-| Passkey login | `map login issued` (the existing line) with `method=passkey`, credential | `mcmap_admin_logins_total{method,result}` with `result` one of `ok`, `bad_assertion`, `unknown_credential`, `not_operator`, `revoked`, `counter`, `limited` |
+| Passkey made pending | `map passkey pending` xuid, credential | `mcmap_admin_passkeys_registered_total{result}`, `result` one of `pending`, `confirmed`, `expired`, `refused` |
+| Passkey confirmed in game | `map passkey registered` xuid, credential | same, `confirmed` |
+| Passkey removed | `map passkey removed` xuid, credential, why (`player`, `revoked`) | `mcmap_admin_passkeys_removed_total{why}` |
+| Passkey login | `map login issued` (the existing line) with `method=passkey`, credential | `mcmap_admin_logins_total{result}` with `ok`, `bad_assertion`, `unknown_credential`, `pending`, `not_operator`, `counter`, `replayed`, `expired`, `disabled` |
 | Admin route used | `map admin request` xuid, route pattern, allowed | `mcmap_admin_requests_total{route,allowed}` |
-| Operator lookup failed | `map operator lookup failed` error class | `mcmap_admin_operator_lookups_total{result}` |
-| Passkeys held | none | `mcmap_admin_passkeys` gauge |
+| Operator lookup | `map operator lookup failed` error class, on failure only, at most once a minute | `mcmap_admin_operator_lookups_total{result}`, `result` one of `live`, `last_known_good`, `none` |
+| Operators known | none | `mcmap_admin_operators` (a count, no identities) |
+| Passkeys held | none | `mcmap_admin_passkeys{state}` (`pending`, `active`) |
 
-Alerts, in the chart beside the map's other rules:
+**Where an alert goes.** Read from the platform's Alertmanager
+configuration (`tenants/platform/services/kube-prometheus-stack/
+postInstall/alertmanager-config-externalsecret.yaml`) and this chart's
+rules:
 
-- **A passkey was added.** Any increase of
-  `mcmap_admin_passkeys_registered_total{result="ok"}`. It should happen a
-  few times a year; each one is worth a look, and it is the signal for the
-  internal-token abuse in the threat model.
-- **Passkey logins refused**, more than a handful an hour.
-- **Operator lookups failing** for 15 minutes (admins are locked out, and
-  the bridge is probably down too).
+- A `warning` without a `tenant` label, which is every rule this chart
+  has today, goes to the AI-SRE relay and nowhere else. The direct
+  Discord routes take only `tenant` labels and `severity="critical"`. So
+  a warning from this chart reaches the owner only if the relay posts
+  about it.
+- A rule labelled `tenant: jdwillmsen` reaches Discord directly, at any
+  severity, as the tenant's own `jdwillmsen-alerts` rules already do.
+- **This chart's Loki rules do not evaluate.** The chart says so itself
+  (`world-integrity-loki-rule.yaml`), and the platform's Loki rules
+  sidecar is pinned to the `platform` org (`folder: /rules/platform` in
+  `tenants/platform/services/loki/values.yaml`), while these logs are in
+  org `jdwillmsen`. Fixing that is a platform change, which needs the
+  owner.
+
+So the alerts are:
+
+- **`JdwillmsenMinecraftMapPasskeyAdded`**, a PrometheusRule on any
+  increase of `mcmap_admin_passkeys_registered_total{result="confirmed"}`
+  over 15 minutes, `severity: warning`, `tenant: jdwillmsen`, so that it
+  reaches the owner directly. It should fire a few times a year, and each
+  firing is worth a look.
+- **The same as a Loki rule** on the `map passkey registered` line, in
+  the chart's existing Loki ConfigMap pattern. It ships now, so that it
+  starts working when the platform fixes the ruler, and until then the
+  PrometheusRule is the one that fires. The Loki rule also catches the
+  event when the map's metrics are not being scraped.
+- **Passkey logins refused**, more than 10 in an hour, `warning`, with
+  `tenant: jdwillmsen`.
+- **No alert on operator lookups.** A bridge down long enough to matter
+  already raises `JdwillmsenMinecraftMapStale` and
+  `JdwillmsenMinecraftMapLiveStale`, and lookups happen only when an
+  admin uses the map, which is too seldom for a failure ratio to mean
+  anything. The metric stays for the dashboard.
 
 ### D7. Revocation and turning it off
 
+`!map logout` and Log out everywhere now do two things. They record the
+revocation, as today, and they **delete every passkey that XUID holds**,
+pending or active. The agent's reply to `!map logout` becomes: "Every
+browser that was logged in to the map as you has been logged out, and any
+passkeys for your map login have been removed."
+
+The chart switches take effect when Argo CD has synced the merge (the
+tenant's applications sync automatically) and the map has restarted. The
+map's Deployment is `Recreate`, so the map is down for that restart. In
+all, a few minutes.
+
 | To end | Do | Takes effect |
 |---|---|---|
-| One person's admin | Remove them as operator in the game | Within 10 s, every session |
+| One person's admin | Take them off the operator list: the console's `deop`, which writes the file, or edit `permissions.json` and run `permission reload` (both verified in the manual). Whether an in-game `/deop` writes the file is not verified | Within 10 s while the bridge is up; up to 24 h late while it is down (D1) |
 | One person's sessions and passkeys | `!map logout` in game, or Log out everywhere in the page | At once |
-| One passkey | Remove it in the page | At once |
-| Passkey logins for everyone | `map.admin.passkeys: false` in the chart | When the map restarts; stored passkeys are kept but not used |
-| The admin role for everyone | `map.admin.enabled: false` in the chart | When the map restarts |
-| Every login of every kind | Delete `session.key` (existing) | At once; needs the volume, so a person |
+| One passkey and its sessions | Remove it in the page | At once |
+| Passkey logins for everyone | `map.admin.passkeys: false` in the chart | Argo sync plus restart. Every passkey session is refused from then on (D3). Stored passkeys are kept but unused |
+| The admin role for everyone | `map.admin.enabled: false` in the chart | Argo sync plus restart. No admin route is registered |
+| Every passkey | Delete `DATA_DIR/auth/passkeys.json` and restart the map | Needs the volume and a restart, so a person with cluster access |
+| Every login of every kind | Delete `session.key` and restart the map | Needs the volume and a restart. Passkeys survive it and work again at once |
 
 Both chart switches are a one-line revert, and `jdw-deployments` needs no
 approval, so an agent can make it.
 
-### D8. Agents: no production session in phase 1
+### D8. Agents: what the server says about itself, with no session
 
 Agents do not hold a production session in phase 1, and this design does
 not create one for them. Holding one means holding a credential, the
 namespace is not enforced, and the owner's rule is an approval per run.
-What agents get instead needs no credential at all:
 
-1. **An identity-free status on the internal listener.**
-   `GET /internal/v1/status`, `gatePublic` on `INTERNAL_ADDR`, the same
-   payload as D5's admin status. An agent reads it with the access it
-   already uses for Prometheus, through the API server's service proxy:
+**What the status gives that metrics and logs do not.** An owner's bug
+report from the page's debug panel has the page's view: its script
+fingerprints, the problem it is showing, the features it was told of. An
+agent reading it today cannot tell whether the server agrees. The status
+answers that, and nothing more:
 
-   ```sh
-   kubectl get --raw \
-     "/api/v1/namespaces/jdwillmsen-prd/services/http:<map service>:internal/proxy/internal/v1/status"
-   ```
+- the build the server is running, and the fingerprint of each page file
+  it serves, so that "this report came from a stale script" is a
+  comparison and not a guess;
+- the problem stage the page is showing players right now;
+- which features the server resolved as on, after defaults;
+- whether the map is in a quiet window, which is why it would not be
+  refreshing;
+- where the operator list is coming from, so that "the owner says he is
+  not admin" can be checked.
 
-   No secret is involved: the request is authorised by the agent's own
-   kube identity, and the map needs none.
-2. **Metrics** on the same listener, as today.
-3. **Logs** through `kubectl logs`, as today. They hold XUIDs and
-   gamertags (login lines), so an agent quotes counts and event names from
-   them and never names in a ticket, commit or pull request.
-4. **The owner's debug report.** The page's debug panel already builds a
-   report that holds no name or place unless asked; the owner pastes it.
-5. **The harness.** `e2e/local.sh` runs the real server over a made-up
-   world, which is where page bugs are reproduced.
+Everything else an agent needs is already in `/metrics`, and this
+endpoint does not repeat it.
 
-**What the status may hold, since every pod can read it.** The namespace
-is not enforced, so every workload in the cluster can reach the internal
-listener. The status is held to a closed set of fields, as the checks'
-reporter is (`e2e/lib/fields.mjs`): numbers, timestamps, booleans and
-words from fixed lists. It has no free-text field, so it has nowhere to
-put a gamertag, a path, a coordinate or a seed. A Go test builds the
-payload from a server full of fixture players and markers and fails if any
-string in it is not from the lists. This is the same exposure `/metrics`
-already has.
+**How an agent reads it.** `GET /internal/v1/status`, `gatePublic` on
+`INTERNAL_ADDR`, with the kube access agents already use for Prometheus,
+through the API server's service proxy:
 
-Why not give it a token: a token is a credential an agent would then hold,
-and a pod that can reach the port could read the token's Secret no less
-easily than the agent.
+```sh
+kubectl get --raw \
+  "/api/v1/namespaces/jdwillmsen-prd/services/http:<map service>:internal/proxy/internal/v1/status"
+```
 
-### D9. Later, for the owner to decide: agents seeing the map itself
+No secret is involved: the request is authorised by the agent's own kube
+identity, and the map needs none. Why not a token: an agent would then
+hold it, and any pod that can reach the port could read the token's Secret
+no less easily.
 
-When the platform enforces network policy in `jdwillmsen-prd` (an owner
-approval under `tenants/*/tenant.yaml`), the scheduled browser checks can
-be switched on as already designed, and their verdicts are something
-agents can read without any session. Beyond that, the owner could
-delegate one of these, and this spec recommends none of them until he
-asks:
+**The fields.** Every pod in the cluster can read the internal copy, so it
+has no free-text field. A Go test builds it from a server full of fixture
+players, markers, a seed and withheld structures. It fails if any key or
+string value falls outside these shapes:
 
-- **(a) Keep the rule.** Each agent run against production needs his
-  approval that time. Recommended.
-- **(b) Agents may start a run of the in-cluster checks through git**,
-  for example a chart value that renders a one-off Job from the CronJob.
-  The agent never sees the secret, the run is the same read-only
-  10-minute `service:e2e` session, each run is a commit, and the existing
-  `maxExchangesPerHour` alert bounds it. It changes the standing rule from
-  "approval per run" to "approval once, audited per run", and the owner
-  would say so in writing.
+| Field | Type | Values |
+|---|---|---|
+| `build` | string | 0 to 12 lowercase hex digits, the VCS revision |
+| `go` | string | `go` then digits and dots |
+| `now` | string | RFC 3339 UTC |
+| `problem` | string | `""`, `snapshot` or `render` |
+| `quiet` | boolean | in a quiet window now |
+| `features` | object | keys from the fixed list `login`, `live`, `markers`, `waypoints`, `icons`, `structures`, `biomes`, `trails`, `history`, `admin`, `passkeys`; values boolean |
+| `snapshotAt` | string or absent | RFC 3339 UTC |
+| `renderedAt` | object | keys from `render.Dimensions` (`overworld`, `nether`, `end`); values RFC 3339 UTC |
+| `assets` | object | keys are the page's own file names, fixed at build; values 8 lowercase hex digits |
+| `operators` | string | `live`, `last_known_good` or `none` |
+
+Left out on purpose: URLs, the icons ref, the withheld structure kinds,
+the seed, paths, the nether level labels, and any count of players,
+sessions or entities.
+
+**The admin copy** (`/api/admin/status`, D5) is the same, plus:
+
+| Field | Type | Values |
+|---|---|---|
+| `live.lastFrameAgeSeconds` | object | keys from `render.Dimensions`; values a number of seconds, or absent |
+| `sessions` | object | `issued`, `passkeyLogins`, `refused`: whole numbers since the map started |
+
+**What else agents use, as today:** metrics on the same listener; logs
+through `kubectl logs`, which hold XUIDs and gamertags in login lines, so
+an agent quotes counts and event names from them and never names in a
+ticket, commit or pull request; the owner's pasted debug report; and the
+harness (`e2e/local.sh`), the real server over a made-up world, where page
+bugs are reproduced.
+
+### D9. Phase 3, for the owner: agents seeing the map itself
+
+**Phase 1's behaviour is (a): the rule stays.** Each agent run against
+production needs the owner's approval that time. Agents use D8 and
+nothing that holds a session.
+
+**(b) is a question for the owner, and it is blocked today.** The
+in-cluster browser checks already exist, off. Turning them on renders only
+with `map.checks.networkPolicyEnforced: true`, and
+`charts/minecraft-fwb/templates/_helpers.tpl` line 129 in
+`jdw-deployments` fails the render otherwise. That value may be true only
+once the platform enforces network policy in `jdwillmsen-prd`, which is an
+owner-approved change to `tenants/jdwillmsen/tenant.yaml`. Once it is, the
+owner could decide:
+
+- **(b) agents may start a run of the in-cluster checks through git**,
+  for example by a chart value that renders a one-off Job from the
+  CronJob. The agent never sees the secret. The run is the same read-only
+  10-minute `service:e2e` session. Each run is a commit, and the existing
+  `maxExchangesPerHour` alert bounds them. This changes the standing rule
+  from "approval per run" to "approval once, audited per run", and the
+  owner would have to say so in writing.
 
 Not offered: an agent running the checks from its own machine without
 approval. `run.mjs --secret-from-kube` reads the secret into the runner's
@@ -423,44 +680,58 @@ memory, which is the agent holding it.
 
 | Threat | What stops it |
 |---|---|
-| Stolen session cookie | `HttpOnly`, `Secure`, `__Host-`, `SameSite=Lax` as today. A passkey session lasts 12 h. A stolen game-code session older than 10 minutes cannot add a passkey; a passkey session never can. The owner ends it with Log out everywhere or `!map logout` |
-| CSRF on the new endpoints | All state changes are `POST` or `DELETE` behind `http.NewCrossOriginProtection` (as today). The WebAuthn challenge is bound to a `SameSite=Strict` cookie. The browser itself refuses a WebAuthn call for an RP ID that is not the page's host |
-| Passkey registration hijack | Registration needs: an operator's session, from a game code, under 10 minutes old, the challenge cookie, and a user-verified authenticator. Every registration is logged, counted and alerted (D6), and listed in the page with its date |
-| Replay of an assertion or attestation | Challenges are random, single use and 2 minutes long; the sign counter is checked where there is one |
+| Stolen session cookie | `HttpOnly`, `Secure`, `__Host-`, `SameSite=Lax` as today. A passkey session lasts 12 h and ends when its passkey is removed. A stolen cookie cannot make a passkey usable: that takes the real player typing a code in game. The owner ends it with Log out everywhere or `!map logout` |
+| **Phishing an operator** into making a passkey for someone else: someone gets an operator's session (a code typed off another person's screen, or a stolen cookie) and starts adding a passkey | The passkey stays pending until the operator types `!map passkey <code>` in game within 2 minutes. The code is bound to that registration and that XUID. The agent's reply says a passkey was added and how to remove it. The login code and the passkey code are different commands, so typing one for the other does nothing |
+| CSRF on the new endpoints | Every state change is `POST` or `DELETE` behind `http.NewCrossOriginProtection`, as today. The registration challenge is bound to the caller's XUID and session; the login challenge to a `SameSite=Strict` cookie |
+| Script on the map's own origin calling WebAuthn with the admin's session | The content security policy, `default-src 'self'` with nothing from elsewhere, is what keeps foreign script off the page, and the confirmation in game is what keeps a passkey such a script made from working. **The CSP is never relaxed**; a test asserts the header byte for byte. With `attestation: none`, UV and attestation say nothing about whose authenticator it is, so they are not controls here |
+| Replay of an assertion or attestation | Challenges are random, last 2 minutes and are single use: registration in a server-side table, login by the used set. The sign counter is checked where there is one |
+| Flooding login challenges | Login challenges are stateless; only verified assertions enter the used set |
 | A normal player making themselves admin | They cannot write `permissions.json`; the bridge has no command to; a claim for a code can only be for the XUID the server stamped on their own chat |
-| **The internal token as an escalation path** | Whoever holds `INTERNAL_TOKEN` can already claim a code as any XUID, an operator's included, and so can log in as the owner, become admin and add a passkey that outlives a token rotation. This exists today for logins; passkeys make it last. Mitigations: the registration alert, the passkey list in the page, `!map logout` ending passkeys, and the 5-per-XUID cap. Only the map and the agent pods mount the token. Enforcing network policy does not change who can read the Secret. Accepted, with the alert as the control |
-| An agent or anyone with cluster-admin | Can read every Secret, exec into the map, read `session.key` and edit `permissions.json`. Nothing in the map can stop them. The design only makes sure no workflow needs it. See "What was found" |
-| Logs leaking identities | New lines carry XUIDs as the existing login line does, never gamertags, coordinates, challenges, keys or cookies (D6) |
-| Brute force | A passkey cannot be guessed. The challenge table is bounded like the codes table, oldest first. Refused assertions are counted and logged at most once a minute past a small budget, as the exchange does. The map sees only the gateway's address, so there is no per-client limit |
+| **The internal token as an escalation path** | Whoever holds `INTERNAL_TOKEN` can claim a login code as any XUID, an operator's included, and can also forge a passkey confirmation. So they can add a passkey that outlives a token rotation. This exists today for logins; passkeys make it last. Mitigations: the alert to the owner on every confirmed passkey, the list in the page, `!map logout` removing passkeys, the cap of 5. Only the map and the agent pods mount the token. Accepted, with the alert as the control |
+| **The internal token as a lockout** | The same holder can post a revocation for the owner's XUID, which now deletes his passkeys. He gets back in through the game and adds them again. The revocation is logged with its XUID |
+| An agent or anyone with cluster-admin | Can read every Secret and the map's volume. Whoever can read `session.key`, which is on the same volume as `passkeys.json`, can mint any session, a passkey session included, given the hash of a stored credential's ID. They can also edit `permissions.json`. Nothing in the map can stop them; the design only makes sure no workflow needs it |
+| Logs leaking identities | New lines carry XUIDs as the existing login line does, never gamertags, labels, codes, coordinates, challenges, keys or cookies (D6). A test captures them |
+| Brute force | A passkey cannot be guessed. A confirmation code is 6 symbols of 32 that lasts 2 minutes and needs the internal token to present. Refused assertions are counted and logged at most once a minute past a small budget, as the exchange does. The map sees only the gateway's address, so there is no per-client limit |
 | A pod reading the internal status | Closed field set, tested (D8) |
-| Lockout | Lost passkey: log in through the game and add another. Bridge down: no admin (fail closed) but the map still works for players. Lost volume: passkeys gone, the game login still works. Phase 2 adds Dex as a second way |
-| `permissions.json` read wrongly | The map, like the agent, accepts only the literal `operator`. An unparsable file is an error, which is "not admin" |
+| Lockout | Lost passkey: log in through the game and add another. Bridge down: the last-known-good operators for 24 h, then no admin, while the map still works for players. Lost volume: passkeys gone, the game login still works. Phase 2 adds Dex as a second way |
+| `permissions.json` read wrongly | Only the literal `operator` counts. An unparsable file is an error, which falls to the last-known-good order |
 
 ## Rollout
 
-Phase 1 is three changes, each its own pull request, none needing the
+Phase 1 is four changes, each its own pull request, none needing the
 owner:
 
-1. **gameops, map release N.** D1, D2, D5 and D8: the operator check, the
-   admin gate, `/api/me`'s flag, the admin status, the internal status,
-   Log out everywhere, and passkeys built but behind their own switch.
-   New settings, both off unless set:
+1. **gameops: map release N and agent release M.** The map gets D1, D2,
+   D3, D5, D7 and D8. The agent gets `!map passkey <code>`, the new
+   `!map logout` reply, and the confirmation call. New map settings, all
+   off unless set:
    - `ADMIN_ENABLED` (default `false`): recognise operators as admins.
-   - `PASSKEYS_ENABLED` (default `false`): the passkey routes. Refuses to
-     start without `ADMIN_ENABLED`, without the login, or without
-     `PUBLIC_ORIGIN`.
+   - `PASSKEYS_ENABLED` (default `false`): the passkey routes and
+     sessions. Without `ADMIN_ENABLED` the map refuses to start, since
+     only admins may add a passkey. With the login off it does nothing
+     (D2).
    - `PUBLIC_ORIGIN`, the exact `https://` origin passkeys are bound to.
+     Required with `PASSKEYS_ENABLED`.
 
    The internal status is on whenever the map runs: it holds nothing a
    switch would protect.
-2. **jdw-deployments: run release N, `map.admin.enabled: true`.** Sets
-   `ADMIN_ENABLED` and `PUBLIC_ORIGIN` from `map.host`, and adds the
-   alerts. `tools/tests/test-map.sh` checks the origin is `https://` plus
-   `map.host`, and that `map.admin.passkeys` cannot be on without
-   `map.admin.enabled`. Agents can then read the internal status.
-3. **jdw-deployments: `map.admin.passkeys: true`**, after (2) has run a
-   day with operator lookups succeeding. The owner can add a passkey the
-   next time he logs in through the game.
+2. **jdw-deployments: run map N and agent M, with
+   `map.admin.enabled: true`.** Sets `ADMIN_ENABLED` and `PUBLIC_ORIGIN`
+   (from `map.host`) and adds the alerts. `tools/tests/test-map.sh` checks
+   that the origin is `https://` plus `map.host`, and that
+   `map.admin.passkeys` cannot be on without `map.admin.enabled`. From
+   here agents can read the internal status.
+3. **Wait for `mcmap_admin_operators` to be at least 1.** It goes there
+   only once the map has read the operator list and found an operator in
+   it. An agent can check this through Prometheus. If it stays at 0, the
+   operator list is empty or unreadable and step 4 waits.
+4. **jdw-deployments: `map.admin.passkeys: true`.**
+
+**Done is the owner seeing it, and that needs him.** No agent can log in
+as an operator, so the last check, the owner seeing "Admin" in the page,
+adding a passkey and logging in with it from another device, waits for him.
+Until then the change is shipped but not proven end to end in production.
+Steps 1 to 4 are proven by the tests and the harness.
 
 Phase 2 (D4) needs the owner's approval of one platform change and is
 built only if he wants it. Phase 3 (D9) needs network-policy enforcement
@@ -468,49 +739,82 @@ and his written choice.
 
 ## Tests
 
-Go, in `internal/auth` and `internal/server`, all executed in CI:
+Go, in `internal/auth`, `internal/server` and the agent, all run in CI:
 
-- The operator check: `operator` is admin; `member`, `visitor`, absent,
-  unknown words, a bridge error, a timeout and a malformed body are not.
-  The cache expires at 10 s.
-- `gateAdmin`: no session is 401; a service session is 403; a `member`
-  is 403; an operator is let through; demoting the operator in the fake
-  bridge refuses the same cookie within the cache's life.
-- `service_test.go` knows `gateAdmin`, and the existing check that every
-  route is registered through `route` covers the new ones.
-- Passkey registration, against a software authenticator in the test
-  (ES256, `none` attestation): refused without an operator, from a
-  passkey session, after 10 minutes, with a reused or expired challenge,
-  a wrong origin, a wrong RP ID hash, UP or UV clear, a credential ID
-  already held, and past 5 per XUID. Accepted otherwise, and written
-  whole to disk.
-- Passkey login: refused for an unknown credential, a bad signature, a
-  wrong origin, UV clear, a counter that went backwards, a credential
-  created before the XUID's revocation, and a non-operator. Accepted
-  otherwise; the cookie carries `m: "passkey"` and a 12-hour expiry; a
-  cookie without `m` still verifies.
-- Cookies: a `m` that is anything but absent or `passkey` is refused.
-- The internal status: built from a fixture server full of made-up players,
-  markers and a seed, every string in the payload is from the closed
-  lists. No gamertag, number that is an XUID, path or seed appears.
-- Logs: a test captures the new log lines and fails on a gamertag, a
-  challenge, a public key or a cookie value in them.
-- Config: each refusal named under Rollout.
+- **The operator list.** `operator` is admin; `member`, `visitor`,
+  absent, unknown words are not. The cache expires at 10 s. With the fake
+  bridge failing, a last-known-good file under 24 h is used and one over
+  24 h is not, and with neither there is no admin. The file is rewritten
+  only when the set changes and holds only XUIDs. Duplicate entries
+  follow the bridge's last-wins rule.
+- **`gateAdmin`.** No session is 401; a service session is 403; a
+  `member` is 403; an operator is let through; demoting the operator in
+  the fake bridge refuses the same cookie within the cache's life.
+  `service_test.go` knows the gate.
+- **Kill switches.** With `ADMIN_ENABLED=false`, every admin route is
+  404 and `/api/me` has no `admin`, for an operator's cookie issued while
+  it was on. With `PASSKEYS_ENABLED=false`, a `m: "passkey"` cookie
+  issued while it was on is refused on every route, and the passkey routes
+  are 404.
+- **Login off and bridge down.** With `AUTH_DISABLED=true` and both
+  switches on, the map starts, nobody is admin, and no route errors. With
+  the bridge unreachable and no last-known-good, `/api/me` answers
+  without `admin` and `gateAdmin` answers 403, never 5xx.
+- **Registration**, against a software authenticator in the test (ES256
+  and RS256, `none` attestation). Refused: without an operator; by a
+  session whose XUID or `IssuedMilli` differs from the challenge's; with
+  a reused or expired challenge; `type` not `webauthn.create`; a wrong
+  origin; `crossOrigin` true; `topOrigin` present; a wrong RP ID hash; UP
+  or UV clear; BS without BE; another `alg`; a format other than `none`;
+  a credential ID over 1023 bytes or already held; a sixth passkey; a
+  label that is not 1 to 32 allowed characters. A pending credential
+  cannot log in. Confirmation is refused for a wrong code, an expired
+  one, a reused one, and a right code from another XUID. Unconfirmed
+  credentials are gone after 2 minutes. Confirmed ones are written whole
+  to disk.
+- **Login.** Refused: an unknown credential; a pending one; a missing
+  `userHandle`; a `userHandle` that names another XUID; `type` not
+  `webauthn.get`; a challenge reused (the used set), expired, or with a
+  bad HMAC; a wrong origin; `crossOrigin` true; `topOrigin` present; a
+  wrong RP ID hash; UP or UV clear; BE changed since registration; a bad
+  signature; an equal or lower counter with either non-zero; a
+  non-operator. Accepted with both counters 0, and with a higher one,
+  which is stored. Two concurrent logins with the same counter: one
+  passes. The cookie carries `m: "passkey"`, the credential hash, the
+  stored gamertag and a 12-hour expiry.
+- **Sessions.** Removing a passkey refuses its sessions on the next
+  request. A cookie with an unknown `m`, or `passkey` without `k`, is
+  refused. A cookie without `m` verifies as today.
+- **Revocation.** `POST /internal/v1/revocations` and Log out everywhere
+  delete that XUID's passkeys, pending and active, and only that XUID's.
+- **Options.** The creation options hold no gamertag and no XUID.
+- **The internal status.** Built from a fixture server full of made-up
+  players, markers, a seed and withheld kinds, every key and string is
+  within the shapes in D8. The admin copy adds only its two fields.
+- **Logs.** A test captures every new log line and fails on a gamertag,
+  a label, a code, a challenge, a public key or a cookie value in them.
+- **CSP.** The header on every response is the one in `secured`,
+  byte for byte.
+- **Config.** Each refusal named under Rollout, and none of the others.
+- **Agent.** `!map passkey <code>` posts the confirmation with the
+  sender's XUID, refuses the console, and replies with the notice; the
+  new `!map logout` reply.
 
 Page, under `web/testdata/*.test.cjs`, run by the existing Go wrappers:
 
-- The login screen offers a passkey only when the config says passkeys
-  are on, and falls back to the code when the browser has no WebAuthn.
-- The Admin section of the debug panel renders from a fixture status and
-  is absent without `admin` in `/api/me`.
-- "Add a passkey" is shown only to an admin, only in the first 10 minutes
-  of a game-code session.
+- The login screen offers a passkey only when `/api/config` says so, and
+  keeps the code when the browser has no WebAuthn.
+- The Admin section renders from a fixture status, and is absent without
+  `admin` in `/api/me`.
+- Add a passkey shows the code and the exact command, and a label is
+  rendered as text (a label of `<b>x</b>` shows those characters).
+- Log out everywhere asks first and says passkeys are removed.
 
 `e2e/`: the harness gains a fake bridge `GET /permissions` with one
 made-up operator, and the run gains a check that a service session is
-refused by every admin route. A full passkey ceremony in Chromium uses the
-DevTools virtual authenticator; whether `playwright-core` exposes it
-cleanly enough for the suite is unverified.
+refused by every admin and passkey route. A full passkey ceremony in
+Chromium would use the DevTools virtual authenticator; whether
+`playwright-core` exposes it cleanly enough for the suite is unverified.
 
 ## Alternatives considered
 
@@ -523,55 +827,70 @@ cleanly enough for the suite is unverified.
 | Long-lived operator sessions | Still needs the game to start, and widens a stolen cookie |
 | Agents holding `service:e2e` sessions now | A credential in an agent's hands, in an unenforced namespace, against the owner's standing rule |
 | "View as" a player | Reads players' private data for little debugging value (D5) |
+| Passkeys for every player | Nobody asked for it, and every player already has the game login |
+| A hand-written WebAuthn verifier | Where such code goes wrong; the library is pinned and the tests prove each step |
+| A stateful login challenge table | A flood of requests would push real challenges out; the HMAC'd cookie needs no table |
 
 ## Open questions
 
 - **Q1. Is "operator" the same as "owner"?** If other players are
   operators, they are admins too. Phase 1 gives an admin nothing about the
   world, so it does not matter yet. The owner-only underground view will
-  need a narrower role. Candidates, none needing an XUID in git: only XUIDs
-  that hold a passkey (an operator who has gone to the trouble), or a role
-  the console grants by name through a bridge command, or the owner simply
-  keeping the operator list to himself. Unknown to this spec: who the
-  operators are today. It was not looked at, on purpose.
-- **Q2. Library or hand-written WebAuthn?** Recommended: the library.
-- **Q3. Session length for a passkey login.** 12 hours is a guess at "one
-  debugging evening". The owner may want longer on his own phone.
-- **Q4. Tell the player in game when a passkey is added to their login?**
-  The map could `tellraw` them through the bridge's allowlist. It would
-  catch internal-token abuse while they are online. Left out for now as
-  more surface for a rare event the alert already covers.
-- **Q5. Can an operator `/op` another player with cheats off?** If yes,
-  any operator can make any player an admin. Unverified; it does not change
-  the design, only who the owner should trust with operator.
+  need a narrower role. There are three candidates, none of which needs an
+  XUID in git:
+  - only XUIDs that hold a passkey;
+  - a role the console grants by name;
+  - the owner keeping the operator list to himself.
+
+  Who the operators are today was not looked at, on purpose.
+- **Q2. Session length for a passkey login.** 12 hours is a guess at "one
+  debugging evening".
+- **Q3. Can an operator `/op` or `/deop` in game chat with cheats off,
+  and does it write the file?** The manual covers only the console.
+  Testing it needs a player client on a test server.
+- **Q4. When will the platform's Loki ruler read tenant orgs?** Until
+  then the Loki copy of the passkey alert is inert, and the
+  PrometheusRule is the one that fires.
+- **Q5. Should the bridge refuse an XUID with conflicting entries,**
+  rather than keep the last? It would change the agent's answer too.
 
 ## Sources
 
 - W3C, *Web Authentication: An API for accessing Public Key Credentials,
-  Level 3*, https://www.w3.org/TR/webauthn-3/ : glossary "Relying Party
-  Identifier" (an RP ID is the origin's effective domain or a registrable
-  suffix of it); §5.1.4.3 (a `rp.id` that is neither is a `SecurityError`);
-  §5.4 (`attestation` defaults to `none`); §6.1 (UP, UV, BE and BS flags);
-  §6.1.1 (signature counter: a counter that does not increase suggests a
-  clone, and the response is the relying party's choice; authenticators
-  without a counter report 0); §7.1 steps 8, 9, 14, 15, 16 and 26.
-- Dex, *Using Dex*, https://dexidp.io/docs/guides/using-dex/ (clients are
-  `staticClients` with an id, redirect URIs and, for confidential ones, a
-  secret; the verifier trusts only its own client ID).
-- Dex, *Scopes and Claims*,
+  Level 3*, Recommendation, version of 25 August 2026,
+  https://www.w3.org/TR/webauthn-3/. Sections used:
+  - glossary "Relying Party Identifier";
+  - §5.1.4.3;
+  - §5.4 (`attestation` defaults to `none`);
+  - §6.1 (the UP, UV, BE and BS flags);
+  - §6.1.1 (the signature counter);
+  - §7.1 steps 5 to 29;
+  - §7.2 steps 6 to 24.
+
+  Step numbers were counted from the published HTML.
+- Mojang, `bedrock_server_how_to.html`, in the Bedrock Dedicated Server
+  1.26.52.3 archive for Linux: sections "Permissions" and "Commands"
+  (`permission list|reload`, `op`, `deop`) and the
+  `default-player-permission-level` property. The version was confirmed
+  as current through Mojang's download links API on 2026-10-14.
+- Dex, *Using Dex*, https://dexidp.io/docs/guides/using-dex/, and
+  *Scopes and Claims*,
   https://dexidp.io/docs/configuration/custom-scopes-claims-clients/
   (`public: true` clients without a secret). PKCE: dexidp/dex issue 2244,
-  a secondary source; to be checked against the running Dex.
+  a secondary source.
 - Argo CD, *User Management*,
   https://argo-cd.readthedocs.io/en/stable/operator-manual/user-management/
   (the bundled Dex is served under `/api/dex`).
-- Bedrock `permissions.json`: no Mojang page was found online. The
-  primary source is `bedrock_server_how_to.html` in the server archive,
-  not read for this spec. What this design relies on is what the bridge's
-  own parser and tests accept (`minecraft/bridge/permissions.go`) and
-  what the agent already trusts. Third-party guides agree on the shape
-  (an array of `{permission, xuid}` with `operator`, `member`, `visitor`)
-  and are not relied on.
-- Platform ADR 0003, Headlamp mobile OIDC; `tenants/platform/services/
-  argo-cd/values.yaml`; `.github/CODEOWNERS`; `tenants/jdwillmsen/
-  tenant.yaml`, all at the platform's `main` on 2026-10-14.
+- Go module proxy, `github.com/go-webauthn/webauthn/@latest`, read
+  2026-10-14.
+- Platform, at `main` on 2026-10-14: ADR 0003; `.github/CODEOWNERS`;
+  `tenants/jdwillmsen/tenant.yaml`;
+  `tenants/platform/services/argo-cd/values.yaml`;
+  `tenants/platform/services/kube-prometheus-stack/postInstall/alertmanager-config-externalsecret.yaml`;
+  `tenants/platform/services/loki/values.yaml`;
+  `helm-charts/tenant-envelope/templates/deployments-appset.yaml`
+  (automated sync).
+- `jdw-deployments`, at `main` on 2026-10-14:
+  `charts/minecraft-fwb/templates/map.yaml` (Service, route, rules,
+  `Recreate`); `_helpers.tpl` line 129; `world-integrity-loki-rule.yaml`;
+  `values.yaml`.
