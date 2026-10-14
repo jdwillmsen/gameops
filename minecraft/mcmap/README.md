@@ -294,6 +294,12 @@ script writes `null` for one, which would otherwise be a marker at the
 origin), or is over 8 KB. A NUL byte, which the server puts at the start
 of the line after an over-long one, is removed and counted.
 
+**What is sent on.** Each entity goes to the browser as `i`, `n`, `t`, `x`,
+`y`, `z` and `r` as the pack wrote it, and with `s`, the y of the highest
+block of the column it is over, which the service adds and the pack cannot:
+see [Height bands](#height-bands). It is left out where the column is not
+known and in the nether.
+
 **What is drawn.** A list replaces the one before it only when every part
 of it has arrived. If a part is lost, the last whole list stays until
 something whole replaces it or it is `LIVE_TTL` old, measured from when
@@ -2180,6 +2186,148 @@ them are the seed; the recorded structures it does print are the world's
 own. `-run RealWorldDetails` prints what the save holds in the structures
 instead, as counts for each kind and never a place or a name.
 
+## Height bands
+
+Where a marker stands in height can be filtered and coloured, as an indoor
+map has floors. Every marker that has a `y` is in one band; the Height
+section of the layer panel hides a band, counts what is in it, keeps what
+is near the viewer's own height, and, if asked, rings each marker in its
+band's colour.
+
+**The bands.** What a band is depends on the dimension. In the overworld
+and the end it is relative to the surface under the marker, and
+"surface" is the game's heightmap, [the top of a tree or of the sea, not
+the ground](#biomes): a player on the ground under a big tree is further
+under the surface than the tree is tall. A marker's block is its `y`
+rounded down.
+
+| Dimension | Band | Is |
+|---|---|---|
+| Overworld | Sky | More than 8 above the surface |
+| | Surface | Within 8 of it, above or below |
+| | Shallow underground | More than 8 and up to 32 under it |
+| | Deep underground | Deeper than that, down to y 0 |
+| | Deepslate | Below y 0, whatever the surface is, unless the marker is within 8 of a surface that is itself under y 0 |
+| Nether | Upper | y 96 and up |
+| | Middle | y 32 to 95 |
+| | Lava sea | Below y 32, where the lava sea fills |
+| End | Sky | More than 8 above the surface |
+| | Surface | Within 8 of it |
+| | Below the islands | More than 8 under it |
+
+The nether's heightmap is its bedrock roof over everything, which every
+marker is under, so the nether has no surface to be relative to and uses
+fixed heights, and the server sends it none. The end's surface is the top
+of an island; where there is no island the column is void and has none. A
+margin of 8 is a tree's crown, a house's roof and its cellar; a
+dimension's bands share every id they have in common, so hiding Sky hides
+it in both the overworld and the end. Every block over a known surface is
+in exactly one band.
+
+**What they filter.** Live players and mobs, beds, containers, named mobs
+as the world saved them (loaded or not), and recorded structures, today
+and on a day of the history. A recorded structure has a box, so it is in
+every band its `minY` to `maxY` reaches and is counted in each, and on the
+map while any of them is shown. Not filtered: waypoints, which are a
+player's own named places; trails, because a trail is one line of where
+someone went, and cutting it by band would leave gaps and jumps that say
+nothing true, and its points carry no surface to be sorted by; the world
+spawn; and the spawners and chests a structure's sheet lists, which are
+lines of text and not marks. A group of crowded markers holds only the
+markers whose bands are shown, so its count and its list follow the filter;
+the group's own mark is not ringed, since its members may be in several
+bands.
+
+**Height unknown.** A marker is never hidden for want of a height, and the
+panel counts these apart (`3 with no known height, always shown`): a
+predicted or possible structure, which has no `y` at all, and a marker in
+the overworld or the end over a column with no surface, as when the
+service has not read the heights yet, or has none (`BIOMES_ENABLED=false`).
+In the overworld a marker under y 0 needs no surface to be in Deepslate.
+
+**Near my height.** A switch, off by default, that keeps what is within 16
+blocks of the viewer's own `y`: a marker is shown when it passes this and
+its band. It is for a viewer who is online and seen live in the dimension
+on the map, and is greyed out with that said when they are not; it follows
+them up and down a frame at a time. A structure passes if its box reaches
+the range. The viewer is the one the session's gamertag names, so a
+service session has none.
+
+**Colour by height.** Off by default. Each marker with a known band is
+ringed in the band's colour, light at the top to dark at the bottom (the
+overworld: sky `#bde0ff`, surface `#7fd7c4`, shallow `#e8c458`, deep
+`#d9774a`, deepslate `#8a5cc9`), on a dark casing so it shows on any
+terrain. It is the same ring round a dot, a plate or a large picture, at
+every zoom and density, and is drawn through the same steady-size path as
+the marker. While it is on, the bands' lines in the panel carry the colours
+as a legend. Structures are not ringed.
+
+**On the page.** The Height section has three rows: Filter by height, whose
+items are the dimension's bands with a count each and a line saying what the
+band is, and whose own switch turns the filter off without forgetting the
+choice; Near my height; and Colour by height. A band is hidden like any
+item, by its checkbox or its menu (Only this, Show all in group). The
+counts are of what is in the dimension on the map, whatever else hides it,
+and are made again a quarter of a second after anything changes.
+
+**What is kept.** Nothing here has a part of its own in the settings: the
+bands hidden are `heights#bands`, a choice like the other panel items, and
+the rows are `heights/bands`, `heights/near` and `heights/colour`, all in
+`layers`. A saved view and a link carry them as they carry the other
+rows and choices, and the three built-in views put every band back and
+switch Near my height and Colour by height off. A view saved before this
+names none of the rows and leaves them as they are, and its choice of items
+leaves the bands as they are unless it is old enough to have no choices of
+items at all, which shows every band.
+
+**Where the surface comes from.** The server puts it on what it sends, as
+`s`, so the page never asks for one marker's height:
+
+- Each live entity of a sample gets `s` once when the record is taken in,
+  not for each frame sent or each browser. The pack's own records are never
+  read for it: a record that says `s` itself is ignored.
+- Each marker in `GET /api/markers` gets it when the answer is written out,
+  which is once for each reading of the world and dimension, and
+  the `ETag` changes with the reading. A day's markers in
+  `GET /api/history/markers/<day>` carry the surface of the world as it is
+  now, not as it was that day, so they are checked against the reading
+  each time (`private, no-cache`) and no longer kept for good, where the
+  service has biomes; without them they are served as they were.
+- Each recorded structure in `GET /api/structures` gets the surface at the
+  middle of its box, so a box that spans a hillside is sorted by its middle.
+  A predicted one has none, and neither has any structure in the nether.
+
+All of it is `heights.Map.Surface`, which is `At` except that the nether has
+none. It is the heightmap the terrain tiles already say, nothing is read
+from a sub-chunk, and nothing is said of what is under the ground beyond
+the markers already served and the `y` their tooltips already show.
+
+**What it costs.** Measured on the FWB world copy (144,000 chunks), on one
+CPU core:
+
+- 17 ns for each surface lookup: 17 µs for a sample of 1,000 entities,
+  once per sample. Taking in a sample of 1,000 mobs as forty-entity lines,
+  parse and store included, is 0.56 ms without surfaces and 0.58 to 0.60 ms
+  with them.
+- A frame of 1,000 mobs is written out in 0.21 ms without and 0.23 ms with
+  them, and weighs 48.4 KB without and 55.4 KB with: seven bytes an entity.
+  It is written once per sample for each dimension, however many browsers
+  are watching; a browser that connects is sent one more.
+- A dimension's markers answer of 3,000 markers is written out again with
+  surfaces in 1.5 ms, once for each reading of the world, and goes from 149
+  to 170 KB.
+- In the browser, a frame of 1,000 mobs took 1.0 to 1.4 ms to take in
+  whether the bands were absent, on with nothing hidden, two bands hidden,
+  coloured, or near my height was on: the differences are inside the
+  spread. The ring is one extra stroke for each marker that has one.
+
+`go test -bench . ./internal/live/` and the real-world test of the biomes
+(`MCMAP_REAL_WORLD=… go test -run RealWorld -v ./internal/biomes/`) print
+these. `web/testdata/heights.test.cjs` checks the bands against worked
+examples, the filter and the counts on the live layer, the markers and the
+structures, and what is kept, by running the scripts; `go test ./web/` runs
+it where there is a `node`.
+
 ## Biomes
 
 The overlay shows the biomes the world has actually stored, chunk by
@@ -3122,6 +3270,7 @@ and what each layer is made of.
 | Mobs | Hostile, Passive, Villagers, Other | Each type of mob there now, with its icon and count |
 | Markers | Beds, Containers, Named mobs, Waypoints | Beds by colour; containers by what they are, shulker boxes by colour; each named mob, with its type, whether a baby, and whether it is loaded or only saved; each waypoint |
 | Structures | Known, Predicted, Possible, under the heading How sure | Every kind once, as a list over those three switches, each with its picture, how many are known, and under it how many more are predicted or possible. A mark is on the map when its kind and its certainty are both on. Strongholds are off until asked for |
+| Height | Filter by height, Near my height, Colour by height | The bands of the dimension, each with its colour when colouring is on, how many markers are in it and what it is; see [Height bands](#height-bands) |
 | Biomes | (the section is the overlay) | Each biome of the dimension, with its colour and share |
 | Topography | Hillshade, Contour lines, Height tint | Under the tint, its bands: the colour of each and the heights it is, which can be hidden or shown alone. Not in the Nether |
 | Trails | (the section is the layer) | Each player's trail, in its colour, under the choice of how far back |
@@ -4061,6 +4210,7 @@ counted apart and is not a failure.
 | `nether-levels` | Where the nether has more than one level, the picker is there in the nether and nowhere else, and choosing a level draws tiles from it; skipped where it has one | the nether drawn at more than one level |
 | `layer-panel` | The panel opens, is sized narrower and wider, folds and returns, and the map takes the room | |
 | `toggles` | Switching off a type of mob and a kind of structure takes things off the map and switching them on brings them back; the biome overlay draws tiles, picking one biome out changes them, and off removes them; the topography's three rows on ask for tiles of all three drawings and nothing else, and off take them away | mobs, structures or biomes; each that is missing is said |
+| `height-bands` | The Height section lists bands; hiding the one with the most in it takes markers off the map and showing it brings them back | a marker or a live entity with a height |
 | `search` | A search for a biome or structure this world has, by a name read off the page, finds it | a biome or a structure |
 | `structure-sheet` | A recorded structure's sheet opens with its detail and closes; the detail holds no standing | a recorded structure |
 | `saved-views` | The built-in view with no mobs switches the mob layers off and the one with everything brings them back | |
@@ -4237,7 +4387,9 @@ not been run against a live map.
 
 `e2e/harness` is the real server, both listeners, with the login on, over
 a world made up in the program: no coordinate, name or seed in it is a real
-one, and it fetches nothing. The page is served over TLS with a certificate
+one, and it fetches nothing. Its surface is at y 64 with the odd hill, and
+its herd stands in the air, on the ground, in a cellar, a cave and the
+deepslate, so that every height band has something in it. The page is served over TLS with a certificate
 made at start, because the session cookie is `Secure` and bound to its
 host; `--insecure-local-tls` accepts that certificate and is refused for
 any address but this machine's. It speaks HTTP/1.1, as the gateway does to
@@ -4335,15 +4487,15 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/me` | The logged-in player's gamertag. For a service session, `service:e2e` and `service: true` |
 | `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time (the nether also `levels`, each an `id`, `y`, `label` and `renderedAt`, that level's own last render time, absent where it is not known, the default first, when it has an extra level that has been drawn), `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks. `?level=<id>` on the nether names one of its extra levels, as `/api/map` lists them; 404 for an id that is not configured and for any other dimension |
-| `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs`, `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
-| `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag` and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
+| `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs` (each entity `i`, `n`, `t`, `x`, `y`, `z`, `r`, and `s`, the surface under it, where known and outside the nether), `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
+| `GET /api/markers?dimension=<id>` | Session required. That dimension's `beds`, `containers` and `mobs`, each `x`, `y`, `z` with `k` (a container's kind or a mob's type), `n` (a name, where there is one), `c` (a bed's or shulker box's colour, `undyed` for a shulker box nobody dyed, absent when not known), `t` (true on a trapped chest), `b` (true on a baby mob) and `i` (a named mob's own id, the `i` the live stream gives the same mob while it is loaded; absent where the world does not say) and `s` (the y of the highest block of its column: absent where not known, in the nether, and where the service has no biomes); `at`, the snapshot they were read from; and `more`, how many of each were left out at the limit. Carries an `ETag`, which changes with the reading the surfaces are of, and answers 304 to a matching `If-None-Match`. 400 for an unknown dimension. Not served with `MARKERS_ENABLED=false` |
 | `GET /api/waypoints` | A player's session required; 403 for a service session. The logged-in player's own `waypoints`, each `name`, `x`, `y`, `z` and `dimension`, across all dimensions, and `more`. 502 while the agent cannot be read, 503 when too many reads are open. Not served without `AGENT_URL` |
 | `GET /api/icons` | Session required. Which live markers have a picture: `mobs` with a `version` and the `types` that have an icon, `pictures` with a `version`, the `keys` that have a picture and `boxes`, the head of each that is a face as `[x, y, width, height]` in the picture's own pixels (the groups `bed`, `container`, `shulker`, `marker` and `structure`, and since faces and blocks were made `face`, `villager` and `block` in the same list under the same version, so a page from before them reads the answer as it always did), `names` with the `version` of `/api/names`, `heads` giving each head's version by gamertag in lower case, and `me`, the gamertag the session's player is online under. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/mob/{type}?v=<version>` | Session required. That mob type's icon as a PNG, kept for good by the browser when `v` is the current version. 404 for a type with no icon |
 | `GET /api/icons/picture/{group}/{name}?v=<version>` | Session required. The picture with the key `{group}/{name}` as a PNG, whichever group it is of, kept for good by the browser when `v` is the current `pictures.version`. 404 for a key `/api/icons` does not list |
 | `GET /api/names` | Session required. Display names by id: `entities` (by mob type), `containers` (`chest`, `trapped_chest`, `barrel`, `shulker`), `beds` and `shulkers` (by colour, plus `default`, and `undyed` for shulkers) and `structures` (by kind), with a `version`. Every value is plain text, to be written as text and never as markup. Carries an `ETag` and answers 304 to a matching `If-None-Match`. Not served with `ICONS_ENABLED=false` |
 | `GET /api/icons/head?name=<gamertag>&v=<version>` | Session required. The head of the one online player holding that gamertag, as a PNG. 404 if nobody does, two players do, or their skin gave no head |
-| `GET /api/structures?dimension=<id>&kinds=all` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `areas`, how many recorded boxes it was joined from, and for an abandoned camp `variant`, the biome it was built for; or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`; or for a kind found by its blocks with `evidence`, how many blocks and mobs it was found by, and for a trial chamber `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, `generated` where the chunk is finished, suits the kind and the world holds none, with `vacant` beside it for a kind that can stand where the save shows no sign of it, or `mapped` where one of the world's explorer maps points at a site in country not generated), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `catalog` (every kind the map can show, in any dimension: its `kind`, the `dimensions` the game generates it in, `asked` where it is off until the viewer turns it on, and `quiet` where a finished site with none may hold one all the same), `surveyed`, `at`, and with the overworld `spawn`. Without `kinds=all` the answer holds only the seven kinds there were before `catalog`, for a page that could not put a later one away. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
+| `GET /api/structures?dimension=<id>&kinds=all` | Session required. `recorded` (each a `kind` and its box, `minX` to `maxZ`, with `s`, the surface at the middle of the box where known and outside the nether, with `areas`, how many recorded boxes it was joined from, and for an abandoned camp `variant`, the biome it was built for; or for a `village` with `village`: `counted`, `villagers`, `golems`, `cats`, `beds`, `bells`, `jobSites`; or for a kind found by its blocks with `evidence`, how many blocks and mobs it was found by, and for a trial chamber `partial` where that is fewer than a finished one is found by), `predicted` (each a `kind`, `x`, `z`, with `candidate` where the chunk is not generated and the biome will decide, `generated` where the chunk is finished, suits the kind and the world holds none, with `vacant` beside it for a kind that can stand where the save shows no sign of it, or `mapped` where one of the world's explorer maps points at a site in country not generated), `recordedMore` and `predictedMore` for what the bounds left out, `prediction` (`verified`, `unverified`, `refuted` or `unknown`, of the seed), `kinds` (for each kind the dimension has a rule for, its own `state` and how many recorded ones `agree` and `disagree`), `catalog` (every kind the map can show, in any dimension: its `kind`, the `dimensions` the game generates it in, `asked` where it is off until the viewer turns it on, and `quiet` where a finished site with none may hold one all the same), `surveyed`, `at`, and with the overworld `spawn`. Without `kinds=all` the answer holds only the seven kinds there were before `catalog`, for a page that could not put a later one away. 400 for an unknown dimension. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/structures/detail?dimension=<id>&kind=<kind>&x=<x>&z=<z>` | Session required. One recorded structure of the list, named by its kind and the middle of its box (`minX + (maxX - minX) / 2` rounded down, and likewise `z`, which is what the page's address carries). `at`, the structure as the list gives it, and `detail`, left out if the last survey could not work it out: `reach`, for a kind found by its blocks, how many blocks past the box round those the rest was counted in; `uncounted`, for a stronghold, where nothing but what it was found by is said and the lists are empty for that reason; `mobsTotal`; `mobs` (each `kind`, `count`, and `babies` and `captains` where there are any) with `mobKindsMore`; `named` (each `kind`, `name`, `baby`, and a villager's `profession` and `level`, 1 to 5) with `namedMore`; `spawnerCounts` (each `mob`, `count`, `trial`); `spawners` (each `mob`, `x`, `y`, `z`, `trial`) with `spawnersMore`; `containers` (each `kind` of `chest`, `barrel` or `shulker`, with `unopened`, `holding`, `empty`); `blocks` (counts of `cauldron`, `bell`, `vault`, `ominous_vault`, `end_portal`, `end_gateway`, `dispenser`, `dropper`, `unbroken_pot`, `unbrushed` for suspicious sand and gravel nobody has brushed, and `dragon_head` and `elytra` for an end ship's, those there are); `elders` for a monument; `bastion` for a bastion whose blocks still say which it is, `treasure`, `stables` or `bridge`; and for a counted village `village`: `professions` (each `profession`, empty for none, `count`, and `levels`, five counts from novice to master), `babies`, `missing`, `notLookedUp`, `golems`, `cats`, `jobSites` (each `profession`, `count`), `idleSeconds`, `raid` (`wave`, `waves`, `raiders`, `idleSeconds`) and `met`. With a counted village, `standing`: `state` (`known`, `none`, `pending`, `unknown`) and, when known, `value`, which is only ever the standing of the player the session belongs to. A name tag is plain text, to be written as text and never as markup. Never cached: `no-store`. 400 without a dimension, kind, `x` and `z`; 404 for a structure the list does not hold, and before the first survey. Not served with `STRUCTURES_ENABLED=false` |
 | `GET /api/diagnostics` | Session required. What the troubleshooting report asks the server: `build`, `go`, `now`, `role` (`player` with a login, `open` without), `features` (which of login, live, markers, waypoints, icons, structures, biomes and trails are on), `refreshSeconds`, `snapshotAt`, `renderedAt` by dimension, `failing`, and `assets`: an FNV-1a fingerprint of each of the page's own files (at most 64), for the page to tell which scripts it loaded are older than the page. Nothing about a player, no error text and no secret. |
 | `GET /api/biomes?dimension=<id>` | Session required. `extracted`, `at`, `version`, `tiles` (`minZoom`, `maxZoom`, `size`), and `biomes`, largest first: each `id`, `name`, `label`, `color` (`#rrggbb`), `known`, `area` in square blocks, `chunks` and `regions`. 400 for an unknown dimension. Served only with `BIOMES_ENABLED=true`, like the four below and the two topography routes |
@@ -4357,7 +4509,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the three below, and `404` without it |
 | `GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One tile as it was on that day, addressed as the terrain's. Kept for good by the browser, since a day's tile never changes. 404 for a day not held or a tile the map did not have that day, 400 for a bad address |
-| `GET /api/history/markers/{day}?dimension=<id>` | Session required. That dimension's beds, containers and named mobs as they were kept on that day: the body `GET /api/markers` gave then, as `application/json`. Kept for good by the browser (`private, max-age=31536000, immutable`), since a day's markers never change. 404 for a day not held, or a day or dimension that kept no markers; 400 for an unknown dimension |
+| `GET /api/history/markers/{day}?dimension=<id>` | Session required. That dimension's beds, containers and named mobs as they were kept on that day: the body `GET /api/markers` gave then, as `application/json`. With `s` as `GET /api/markers` gives it, of the world as it is now; where the service has biomes it is checked against its `ETag` each time (`private, no-cache`), and where it has none it is kept for good by the browser (`private, max-age=31536000, immutable`), since a day's markers then never change. 404 for a day not held, or a day or dimension that kept no markers; 400 for an unknown dimension |
 | `GET /api/history/changes/{day}?dimension=<id>` | Session required. Where that dimension's terrain on that day differs from the day held before it: `day`; `before`, the newest day held that is earlier, or empty for the first day held; `zoom`, always 0, the finest; `tiles`, the `[x, y]` of each tile at that zoom whose bytes are not the earlier day's, with the tiles the day added and the ones it no longer has among them, by row and then along it, at most 4,096; `of`, how many addresses the two days hold between them at that zoom; and `more`, how many changed tiles were left out at the limit. For the first day held `tiles` is empty. Worked out from the two days' manifests, with no tile read, against the day that is before it when asked: `mcmap backfill` can put a day in between two already held. So the answer is kept for good by the browser (`private, max-age=31536000, immutable`) only where `before` is the calendar day before `day`, where no day can come between them, and is `no-store` everywhere else, the first day held included; whether `day` is the newest decides nothing, since a later day is never the day before it. That rests on no day ever being deleted, which a rule for thinning days out would have to take up. 404 for a day not held or one that held nothing of the dimension, 400 for an unknown dimension |
 | `GET /healthz` | Liveness, on both listeners |
 
@@ -4476,7 +4628,10 @@ where there is none; by hand it is `node web/testdata/panel.test.cjs`.
 `web/testdata/structures.test.cjs` does the same for the structures'
 script, beside the panel's, with a map that remembers what is put on it
 and a server that answers as each test says: which kinds a dimension
-lists, what is drawn and what is not, and what a link may switch on.
+lists, what is drawn and what is not, and what a link may switch on, and,
+with the bands' script loaded, which recorded structures a band hides.
+`web/testdata/heights.test.cjs` runs the height bands' script with the panel's
+and the live layer's, and the markers', and reads back which are on the map.
 The three records read for the newer kinds have fuzz targets with seeds
 built in code, `FuzzVolumes`, `FuzzSeedBook` and `FuzzMapRecord` in
 `internal/structures`, run as
