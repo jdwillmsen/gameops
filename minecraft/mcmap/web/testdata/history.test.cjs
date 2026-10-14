@@ -33,10 +33,10 @@ const MARKED = [marked('2026-10-12'), day('2026-10-13'), marked('2026-10-14', { 
 // today is the day it is, which is where the scrubber's days end; kept is
 // what the browser holds for the page, with whose settings script the
 // page is then loaded, as it is when a play's speed is to be remembered.
-async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false, today = '2026-10-14', kept = null, pairs = false, beside = '' } = {}) {
+async function load({ answer = () => ({ days: THREE }), locked = false, wanted = '', dimension = 'overworld', follows = false, today = '2026-10-14', kept = null, pairs = false, beside = '', changed = null, draws = false } = {}) {
   const p = page(kept || new Map(), { files: kept ? ['settings.js'] : [] });
   const { win, doc } = p;
-  const state = { asked: [], shown: [], ticks: [], paces: [], dimension, wanted, right: [], beside, cut: 0.5 };
+  const state = { asked: [], shown: [], ticks: [], paces: [], dimension, wanted, right: [], beside, cut: 0.5, marks: [], panes: {} };
   // The clock is the test's: noon of the day it is, and later when told.
   const noon = Date.parse(`${today}T12:00:00Z`);
   const clock = (ms) => { win.Date = class extends Date { static now() { return noon + ms; } }; };
@@ -86,9 +86,23 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
     win.mcmap.past.markers = (id) => Boolean(state.day) && state.day.dimensions.some((d) => d.id === id && d.markers === true);
     win.mcmap.markers = { day: () => (state.day ? state.day.day : '') };
   }
+  // A map with Leaflet enough to draw lines on: marks is every line made,
+  // each with whether it is on the map.
+  if (draws) {
+    win.L = {
+      svg: (options) => ({ options }),
+      polyline: (lines, options) => {
+        const mark = { lines, options, on: false, addTo() { mark.on = true; state.marks.push(mark); return mark; }, remove() { mark.on = false; } };
+        return mark;
+      },
+    };
+    win.mcmap.map = { createPane: (name) => { state.panes[name] = { style: {} }; return state.panes[name]; } };
+  }
+  // changed is what the server says of what changed on a day, by the
+  // address asked; the days kept are whatever else is asked for.
   win.fetch = async (address) => {
     state.asked.push(address);
-    const given = answer();
+    const given = address.startsWith('api/history/changes/') ? changed(address) : answer();
     if (given.status) return { ok: false, status: given.status };
     if (given.fails) throw new Error('offline');
     return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(given)) };
@@ -135,7 +149,7 @@ async function load({ answer = () => ({ days: THREE }), locked = false, wanted =
     await settle();
   };
   const last = () => state.shown[state.shown.length - 1];
-  return { ...p, state, bar, part, parts, over, press, key, value, max, slide, slots, point, cell, beat, view, named, last, settle, clock };
+  return { ...p, state, bar, part, parts, over, asks: () => state.asked.filter((a) => a.startsWith('api/history/changes/')), press, key, value, max, slide, slots, point, cell, beat, view, named, last, settle, clock };
 }
 
 test('a server that keeps no history leaves the page without the control, and is not asked again', async () => {
@@ -850,6 +864,127 @@ test('an address that names a day and what is beside it opens on the comparison,
   await p.named('');
   assert.equal(p.last(), '');
   assert.equal(p.state.comparing, false);
+});
+
+// What changed on a day, as the server says it: two tiles side by side
+// and one apart, of sixteen.
+const SOME = { day: '2026-10-13', before: '2026-10-12', zoom: 0, tiles: [[0, 0], [1, 0], [5, 5]], of: 16, more: 0 };
+
+test('what changed is not asked for until it is asked to be shown, and then once for a day and a dimension', async () => {
+  const p = await load({ answer: () => ({ days: MARKED }), changed: () => SOME, draws: true });
+  await p.press('open');
+  assert.equal(p.part('changes').getAttribute('aria-pressed'), 'false');
+  assert.equal(p.part('changes').disabled, true, 'now is no day to have changed');
+  await p.slide(1);
+  assert.equal(p.part('changes').disabled, false);
+  assert.deepEqual(p.asks(), []);
+  await p.press('changes');
+  assert.equal(p.part('changes').getAttribute('aria-pressed'), 'true');
+  assert.deepEqual(p.asks(), ['api/history/changes/2026-10-13?dimension=overworld']);
+  assert.match(p.part('note').textContent, /^3 of 16 areas changed since the day before\. The terrain is of this day/);
+  await p.view();
+  await p.view();
+  await p.press('changes');
+  await p.press('changes');
+  assert.equal(p.asks().length, 1, 'a day once asked of is not asked of again');
+  await p.press('later');
+  assert.deepEqual(p.asks().slice(1), ['api/history/changes/2026-10-14?dimension=overworld']);
+  await p.press('earlier');
+  assert.equal(p.asks().length, 2);
+  p.state.dimension = 'nether';
+  await p.view();
+  assert.deepEqual(p.asks().slice(2), [], 'the day kept nothing of the nether, so there is nothing to ask');
+  await p.press('earlier');
+  assert.deepEqual(p.asks().slice(2), ['api/history/changes/2026-10-12?dimension=nether']);
+});
+
+test('the changed areas are outlined on the map, tiles side by side as one, and the outline goes with the day, with Compare and with the switch', async () => {
+  const p = await load({ changed: () => SOME, draws: true, pairs: true });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('changes');
+  const on = () => p.state.marks.filter((mark) => mark.on);
+  assert.equal(on().length, 2, 'a line and the casing under it');
+  assert.equal(p.state.panes.changes.style.pointerEvents, 'none');
+  assert.equal(on().every((mark) => mark.options.pane === 'changes' && mark.options.interactive === false), true);
+  const lines = on()[0].lines.map((line) => JSON.stringify(line));
+  assert.equal(lines.length, 8, 'four sides round the two that touch and four round the one apart');
+  assert.ok(lines.includes('[[0,0],[0,512]]'), 'the tops of two tiles side by side are one line, in blocks');
+  assert.ok(lines.includes('[[0,256],[256,256]]') === false, 'no line is drawn between two changed tiles');
+  assert.ok(lines.includes('[[1280,1280],[1280,1536]]'));
+  await p.press('changes');
+  assert.equal(on().length, 0);
+  await p.press('changes');
+  assert.equal(on().length, 2);
+  await p.press('compare');
+  assert.equal(on().length, 0, 'two days compared show a difference of their own');
+  assert.equal(p.part('changes').disabled, true);
+  assert.doesNotMatch(p.part('note').textContent, /areas changed/);
+  await p.press('compare');
+  assert.equal(on().length, 2);
+  await p.press('now');
+  assert.equal(on().length, 0);
+  assert.doesNotMatch(p.part('note').textContent, /changed/);
+  await p.slide(1);
+  assert.equal(on().length, 2, 'the switch stays as it was left while the dock is open');
+  await p.press('close');
+  assert.equal(on().length, 0);
+  await p.press('open');
+  await p.slide(1);
+  assert.equal(on().length, 0, 'put away, the dock comes back with it off');
+  assert.equal(p.part('changes').getAttribute('aria-pressed'), 'false');
+});
+
+test('the note says what the changes are since: the day before, an earlier day by its date, or nothing for the first day kept', async () => {
+  let given = { ...SOME, before: '2026-10-09', tiles: [[0, 0]], of: 3012, more: 139 };
+  const p = await load({ changed: () => given });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('changes');
+  assert.match(p.part('note').textContent, /^140 of 3,012 areas changed since .*9.*2026, the last day kept before it\. The first 1 are outlined\./);
+  given = { ...SOME, before: '2026-10-13', tiles: [], of: 16 };
+  await p.press('later');
+  assert.match(p.part('note').textContent, /^No area of 16 changed since the day before\./);
+  given = { day: '2026-10-12', before: '', zoom: 0, tiles: [], of: 0, more: 0 };
+  await p.key('range', 'Home');
+  assert.match(p.part('note').textContent, /^This is the first day kept, so there is no day before it/);
+  assert.match(p.part('note').textContent, /The terrain is of this day/);
+});
+
+test('what changed that cannot be fetched is said, and asked for again later and not with every move of the map', async () => {
+  let given = { status: 500 };
+  const p = await load({ changed: () => given, draws: true });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('changes');
+  assert.match(p.part('note').textContent, /^What changed since the day before could not be fetched\./);
+  await p.view();
+  await p.view();
+  assert.equal(p.asks().length, 1);
+  given = { tiles: 'all of them' };
+  p.clock(2 * 60_000);
+  await p.view();
+  assert.equal(p.asks().length, 2);
+  assert.match(p.part('note').textContent, /could not be fetched/, 'an answer that is not a list of tiles is no answer');
+  given = { ...SOME, tiles: [[0, 0], ['<b>', 1], [2], null, [3, 4.5]] };
+  p.clock(4 * 60_000);
+  await p.view();
+  assert.match(p.part('note').textContent, /^1 of 16 areas changed/, 'what is not a tile is not counted or drawn');
+  assert.equal(p.state.marks.filter((mark) => mark.on)[0].lines.length, 4);
+});
+
+test('a day put in before the day shown makes what changed be asked for again, since it is then since another day', async () => {
+  let days = [day('2026-10-10'), day('2026-10-13')];
+  const p = await load({ answer: () => ({ days }), changed: () => SOME });
+  await p.press('open');
+  await p.slide(1);
+  await p.press('changes');
+  assert.equal(p.asks().length, 1);
+  days = [day('2026-10-10'), day('2026-10-12'), day('2026-10-13')];
+  p.clock(11 * 60_000);
+  await p.view();
+  assert.equal(p.last(), '2026-10-13');
+  assert.equal(p.asks().length, 2);
 });
 
 test('the speed and the loop are kept with the page\'s settings, and are how the next page opens', async () => {
