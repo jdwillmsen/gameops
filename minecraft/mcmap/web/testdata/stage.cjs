@@ -142,6 +142,7 @@ function leaflet(win) {
     fitBounds(bounds, options) { this.went.push({ how: 'fitBounds', bounds: bounds.held, options }); return this; }
     invalidateSize() { this.sized = (this.sized || 0) + 1; return this; }
     hasLayer(layer) { return this.layers.has(layer); }
+    removeLayer(layer) { this.layers.delete(layer); return this; }
     eachLayer(fn) { [...this.layers].forEach(fn); return this; }
     // Where a place is on the screen, by the map's centre and its box.
     onScreen(at) {

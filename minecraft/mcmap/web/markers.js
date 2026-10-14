@@ -13,6 +13,13 @@
 // and a long walk ago, so it is drawn faded in a broken ring and says how
 // old it is: it must never pass for the marker of a mob that is there.
 //
+// While the map draws a day of its history, the beds, containers and named
+// mobs are that day's, where the day kept them, and none at all where it
+// did not: today's over another day's terrain would say what was never so.
+// A named mob of a day is only ever where it was saved then. It is not
+// looked for in the live picture, which is of now. The waypoints are the
+// player's own as they are, on any day.
+//
 // Each kind's row in the panel lists what it is made of, and each of
 // those can be hidden: the containers by what they are, the beds by
 // their colour, and every named mob and every waypoint by itself.
@@ -170,6 +177,7 @@
   // tells the age, since it knows how far this clock is from the server's.
   function savedSaid() {
     const card = inspect();
+    if (drawn.day) return `saved on ${drawn.day}`;
     return snapshotAt !== null && card && card.age ? `saved ${card.age(snapshotAt)}` : 'last saved position';
   }
 
@@ -229,8 +237,14 @@
   const available = { world: null, waypoints: null };
   const totals = { waypoints: null, beds: null, containers: null, mobs: null };
   const more = { waypoints: 0, beds: 0, containers: 0, mobs: 0 };
-  // What is drawn now, so that an unchanged answer redraws nothing.
-  let drawn = { dimension: null, etag: null };
+  // What is drawn now, so that an unchanged answer redraws nothing. day
+  // is the day of the history the world's markers are of, or '' for now.
+  let drawn = { dimension: null, etag: null, day: '' };
+  // The day the map is drawing, where it can also say what that day kept:
+  // a map from before it could is one whose markers are always today's.
+  const dayShown = () => (app.past && app.past.get && app.past.markers ? app.past.get() : '');
+  // The card opened on a named mob of a day, to shut when the day goes.
+  let opened = null;
   let waypoints = [];
   let timer = null;
   let asked = 0;
@@ -423,6 +437,11 @@
   // type, a guess, and one taken only while it cannot be wrong about
   // which: one mob of that name and type saved, and one loaded.
   function pair() {
+    if (drawn.day) {
+      // A day's mobs are where they were then, and the picture is of now.
+      for (const entry of held.mobs) entry.live = null;
+      return;
+    }
     const card = inspect();
     const loaded = card && card.named ? card.named() : [];
     const byId = new Map(loaded.map((mob) => [mob.id, mob]));
@@ -454,6 +473,17 @@
     const card = inspect();
     const { data } = entry;
     const dimension = drawn.dimension || app.dimension();
+    if (drawn.day) {
+      // A mob of a day is where it was saved then and nothing more:
+      // without its id it cannot be taken for the one loaded now,
+      // followed, or moved to where that one is.
+      const then = { x: data.x + 0.5, y: data.y, z: data.z + 0.5 };
+      if (go && dimension) app.go(dimension, then.x, then.z);
+      if (!card) return;
+      card.open({ kind: 'mob', id: null, name: str(data.n), type: str(data.k), baby: data.b === true, ...then, dimension, saved: true, savedAt: snapshotAt, past: drawn.day });
+      opened = card.key ? card.key() : null;
+      return;
+    }
     const id = liveOf(entry) || idOf(data);
     const now = card && id ? card.where(id) : null;
     // The middle of the block, not its north-west corner.
@@ -541,7 +571,10 @@
   }
 
   function paint() {
-    const has = { waypoints: available.waypoints, beds: available.world, containers: available.world, mobs: available.world };
+    // A day that kept markers has them whether or not the server reads
+    // any now.
+    const world = available.world || (drawn.day !== '' && totals.beds !== null);
+    const has = { waypoints: available.waypoints, beds: world, containers: world, mobs: world };
     let added = false;
     Object.keys(KINDS).forEach((kind, at) => {
       if (!has[kind]) {
@@ -578,10 +611,65 @@
       totals[kind] = null;
       more[kind] = 0;
     }
-    drawn = { dimension: null, etag: null };
+    drawn = { dimension: null, etag: null, day: '' };
     waypoints = [];
     snapshotAt = null;
     paint();
+  }
+
+  // Draws one answer's beds, containers and named mobs in place of
+  // whatever was drawn.
+  function put(doc) {
+    const at = Date.parse(doc.at);
+    snapshotAt = Number.isFinite(at) ? at : null;
+    for (const kind of WORLD_KINDS) {
+      fill(kind, Array.isArray(doc[kind]) ? doc[kind] : []);
+      more[kind] = (doc.more && Number.isFinite(doc.more[kind])) ? doc.more[kind] : 0;
+    }
+  }
+
+  // Takes the world's marks off, for a dimension or a day they are not of.
+  function strip() {
+    for (const kind of WORLD_KINDS) {
+      layers[kind].clearLayers();
+      held[kind] = [];
+      regrouped(kind);
+      totals[kind] = null;
+      more[kind] = 0;
+    }
+    const card = inspect();
+    if (opened !== null && card && card.key && card.key() === opened) card.shut();
+    opened = null;
+    drawn = { dimension: null, etag: null, day: '' };
+    snapshotAt = null;
+  }
+
+  // A day's markers, which never change: asked for once, and only of a day
+  // whose listing says it kept them, so a day without is no request and
+  // no refusal. That day is drawn with none.
+  async function loadDay(dimension, day, turn) {
+    if (drawn.dimension === dimension && drawn.day === day) return false;
+    let doc = {};
+    if (app.past.markers(dimension)) {
+      const address = `api/history/markers/${encodeURIComponent(day)}?dimension=${encodeURIComponent(dimension)}`;
+      let res;
+      try {
+        res = await fetch(address);
+      } catch {
+        return false; // nothing is drawn; the next announcement asks again
+      }
+      if (turn !== asked || !res.ok) return false;
+      try { doc = await res.json(); } catch { return false; }
+      if (turn !== asked) return false;
+      drawn = { dimension, etag: null, day };
+      put(doc);
+      return true;
+    }
+    if (turn !== asked) return false;
+    drawn = { dimension, etag: null, day };
+    // Counted as none where the rows are there to say so.
+    if (available.world) put(doc);
+    return true;
   }
 
   function drawWaypoints(dimension) {
@@ -609,13 +697,8 @@
     if (turn !== asked) return false;
     available.world = true;
     if (drawn.dimension === dimension && etag && drawn.etag === etag) return false;
-    drawn = { dimension, etag };
-    const at = Date.parse(doc.at);
-    snapshotAt = Number.isFinite(at) ? at : null;
-    for (const kind of WORLD_KINDS) {
-      fill(kind, Array.isArray(doc[kind]) ? doc[kind] : []);
-      more[kind] = (doc.more && Number.isFinite(doc.more[kind])) ? doc.more[kind] : 0;
-    }
+    drawn = { dimension, etag, day: '' };
+    put(doc);
     return true;
   }
 
@@ -654,18 +737,17 @@
     }
     if (!dimension || document.hidden) return;
     const turn = asked += 1;
-    if (drawn.dimension !== null && drawn.dimension !== dimension) {
-      // Another dimension's markers are wrong here, not merely old.
-      for (const kind of WORLD_KINDS) {
-        layers[kind].clearLayers();
-        held[kind] = [];
-        regrouped(kind);
-      }
-      drawn = { dimension: null, etag: null };
-      drawWaypoints(dimension);
+    const day = dayShown();
+    if (drawn.dimension !== null && (drawn.dimension !== dimension || drawn.day !== day)) {
+      // Another dimension's markers are wrong here, not merely old, and
+      // so are another day's.
+      const moved = drawn.dimension !== dimension;
+      strip();
+      if (moved) drawWaypoints(dimension);
     }
     const jobs = [];
-    if (available.world !== false) jobs.push(loadWorld(dimension, turn));
+    if (day) jobs.push(loadDay(dimension, day, turn));
+    else if (available.world !== false) jobs.push(loadWorld(dimension, turn));
     if (available.waypoints !== false) jobs.push(loadWaypoints(dimension, turn));
     const redrawn = await Promise.all(jobs);
     if (turn !== asked) return;
@@ -731,6 +813,10 @@
   app.markers = {
     // For whoever else opens the card on a mob the snapshot placed.
     savedAt: () => snapshotAt,
+    // The day of the history the beds, containers and named mobs drawn
+    // are of, or '' while they are today's. Its being here is also how
+    // another script knows that this one draws a day's at all.
+    day: () => drawn.day,
     // What the snapshot's markers hold inside a box, from what is already
     // loaded for this dimension: beds and containers counted by what they
     // are called, and each named mob with a way to open its card. Null

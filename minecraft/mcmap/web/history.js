@@ -3,8 +3,9 @@
 // The map as it was. The server keeps the terrain of one cycle a day, and
 // this is the control that goes back through those days: it tells the map
 // which day to draw and the map draws that day's tiles where it draws
-// today's. Only the terrain is of the day; everything laid over it is
-// still the world as it is now, and the control says so.
+// today's. The terrain is of the day, and so are the beds, containers and
+// named mobs where the day kept them; everything else laid over it is
+// still the world as it is now, and the control says which is which.
 (() => {
   const app = window.mcmap;
   // The page and its scripts are cached apart for a few minutes, so just
@@ -78,6 +79,29 @@
     weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
   });
 
+  // Everything the map draws that is never of a day. The second is said by
+  // a page whose markers do not follow the day: its map or its markers'
+  // script is from before they could, and draws today's.
+  const NOW = 'Players, loaded mobs, waypoints, structures and biomes are as they are now.';
+  const NOW_AND_MARKERS = 'Players, markers, structures and biomes are as they are now.';
+  const followed = () => Boolean(app.past.markers && app.markers && app.markers.day);
+
+  // What a day's note says is of the day and what is of now, for the
+  // dimension shown.
+  function said(day) {
+    const kept = day.dimensions.find((d) => d && d.id === app.dimension());
+    if (app.dimension() && !kept) {
+      return followed()
+        ? `This day kept nothing of this dimension, so no terrain is drawn, and no beds, containers or named mobs. ${NOW}`
+        : `This day kept nothing of this dimension, so no terrain is drawn. ${NOW_AND_MARKERS}`;
+    }
+    let text;
+    if (!followed()) text = `The terrain is of this day. ${NOW_AND_MARKERS}`;
+    else if (kept && kept.markers === true) text = `The terrain is of this day, and so are the beds, containers and named mobs, each where it was saved then. ${NOW}`;
+    else text = `The terrain is of this day. Its beds, containers and named mobs were not kept, so none are drawn. ${NOW}`;
+    return day.rendererChanged ? `${text} It was drawn by a different renderer than the day before, so not every difference from it is the world's.` : text;
+  }
+
   function draw() {
     const past = at < days.length;
     range.max = String(days.length);
@@ -90,10 +114,8 @@
     range.setAttribute('aria-valuetext', shown.textContent);
     if (!past) {
       note.textContent = days.length === 0 ? '' : `${days.length} ${days.length === 1 ? 'day' : 'days'} kept, from ${name(days[0].day)}.`;
-    } else if (app.dimension() && !days[at].dimensions.some((d) => d && d.id === app.dimension())) {
-      note.textContent = 'This day kept nothing of this dimension, so no terrain is drawn. Players, markers, structures and biomes are as they are now.';
     } else {
-      note.textContent = `The terrain is of this day. Players, markers, structures and biomes are as they are now.${days[at].rendererChanged ? ' It was drawn by a different renderer than the day before, so not every difference from it is the world\'s.' : ''}`;
+      note.textContent = said(days[at]);
     }
     document.body.classList.toggle('past', past);
   }
