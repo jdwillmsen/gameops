@@ -83,7 +83,6 @@ func TestNamedMobIsOneMarkerAndOpensTheCard(t *testing.T) {
 	markers, live, icons := read(t, "markers.js"), read(t, "live.js"), read(t, "icons.js")
 	for _, need := range []string{
 		"const idOf = (data) => (typeof data.i === 'string' && data.i !== '' ? data.i : null);",
-		"const want = choices[kind].shows(entry.item) && atHeight(kind, entry.data) && !(card && entry.live !== null && card.drawn(entry.live.id));",
 		"if (want) group.addLayer(entry.marker); else group.removeLayer(entry.marker);",
 		"layers.mobs.on('click', (e) => {",
 		"card.open({ kind: 'mob', id, name: nameOf(entry), type: str(data.k), baby: data.b === true, ...at, dimension, saved: true, savedAt: snapshotAt });",

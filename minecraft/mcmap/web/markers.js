@@ -663,14 +663,15 @@
     if (heights() !== null) heights().changed();
   }
 
-  // A day's markers, which never change: asked for once, and only of a day
-  // whose listing says it kept them, so a day without is no request and
-  // no refusal. That day is drawn with none.
+  // A day's markers: asked for once, and only of a day whose listing says
+  // it kept them, so a day without is no request and no refusal. That day
+  // is drawn with none. They carry today's surface, so the address is not
+  // the one a copy from before surfaces was kept for a year under.
   async function loadDay(dimension, day, turn) {
     if (drawn.dimension === dimension && drawn.day === day) return false;
     let doc = {};
     if (app.past.markers(dimension)) {
-      const address = `api/history/markers/${encodeURIComponent(day)}?dimension=${encodeURIComponent(dimension)}`;
+      const address = `api/history/markers/${encodeURIComponent(day)}?dimension=${encodeURIComponent(dimension)}&s=1`;
       let res;
       try {
         res = await fetch(address);
