@@ -246,7 +246,7 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.Passkeys, err = strconv.ParseBool(or(getenv("PASSKEYS_ENABLED"), "false")); err != nil {
 		fail("PASSKEYS_ENABLED must be true or false")
 	}
-	if c.Passkeys {
+	if c.Passkeys && c.Login {
 		if !c.Admin {
 			fail("PASSKEYS_ENABLED needs ADMIN_ENABLED: only an admin may add a passkey")
 		}
@@ -260,7 +260,8 @@ func Load(getenv func(string) string) (Config, error) {
 			c.PublicOrigin, c.PasskeyRPID = "https://"+u.Host, u.Hostname()
 		}
 	}
-	// No login means no player, and so no admin: logged and run, not refused.
+	// No login means no player, and so no admin. The switches are turned off
+	// here, after which nothing about them is checked; the caller logs it.
 	if !c.Login {
 		c.Admin, c.Passkeys = false, false
 	}
