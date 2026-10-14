@@ -322,4 +322,19 @@ func TestLoad_AdminWithNoLoginIsNotAnError(t *testing.T) {
 	if c.Admin || c.Passkeys {
 		t.Errorf("with no login, admin %v and passkeys %v, want both off", c.Admin, c.Passkeys)
 	}
+
+	for name, extra := range map[string][]string{
+		"passkeys without admin":         {"PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "https://map.example"},
+		"passkeys with a bad origin":     {"ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", "http://map.example:80/x"},
+		"passkeys with a missing origin": {"ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true"},
+	} {
+		c, err := Load(env(append(append([]string{}, bare...), extra...)...))
+		if err != nil {
+			t.Errorf("%s with the login off: %v", name, err)
+			continue
+		}
+		if c.Admin || c.Passkeys {
+			t.Errorf("%s with the login off: admin %v, passkeys %v, want both off", name, c.Admin, c.Passkeys)
+		}
+	}
 }
