@@ -333,13 +333,13 @@
   // of Leaflet, whose answer is held to the limit it is being set.
   let wholeWorld = MIN_ZOOM;
   const fitZoom = (bounds, size) => Math.log2(Math.min(size.x / (bounds.getEast() - bounds.getWest()), size.y / (bounds.getNorth() - bounds.getSouth())));
-  function limits() {
+  function limits(preserveZoom = false) {
     if (!extent) return;
     const fit = fitZoom(extent, map.getSize());
     const floor = Number.isFinite(fit) ? Math.min(wholeWorld, Math.floor((fit - 0.1) * 100) / 100) : wholeWorld;
-    map.setMinZoom(Math.max(MIN_ZOOM, floor));
+    map.setMinZoom(Math.max(MIN_ZOOM, preserveZoom ? Math.min(floor, map.getZoom()) : floor));
   }
-  map.on('resize', limits);
+  map.on('resize', () => limits(true));
 
   function settle(s) {
     clearTimeout(s.swap);
@@ -447,7 +447,7 @@
     besidePane.style.clipPath = '';
   }
 
-  function show(id, view) {
+  function show(id, view, terrainOnly = false) {
     const today = dimension(id);
     if (!today || !today.rendered) return;
     const stays = Boolean(main.layer) && current === id;
@@ -457,13 +457,17 @@
     // moves the view.
     extent = reach(today);
     const old = lay(main, id, past, stays);
-    map.setMaxBounds(extent.pad(0.25));
-    wholeWorld = today.minZoom;
-    limits();
+    if (!terrainOnly) {
+      map.setMaxBounds(extent.pad(0.25));
+      wholeWorld = today.minZoom;
+      limits();
+    }
 
-    if (view) map.setView([view.z, view.x], view.zoom);
-    else if (extent.contains([0, 0])) map.setView([0, 0], Math.max(today.minZoom, -2));
-    else map.fitBounds(extent);
+    if (!terrainOnly) {
+      if (view) map.setView([view.z, view.x], view.zoom);
+      else if (extent.contains([0, 0])) map.setView([0, 0], Math.max(today.minZoom, -2));
+      else map.fitBounds(extent);
+    }
 
     if (stays) turn(main, old);
     // What is beside it is of a day of its own, and is drawn again only
@@ -617,7 +621,7 @@
     document.body.classList.toggle('locked', locked);
     el.login.hidden = !locked;
     // Leaflet measured the map while it was hidden.
-    if (!locked) map.invalidateSize();
+    if (!locked) map.invalidateSize({ pan: false });
     announce();
   }
 
@@ -899,8 +903,7 @@
         }
         past = next;
         if (!current) return true;
-        const c = map.getCenter();
-        show(current, { x: c.lng, z: c.lat, zoom: map.getZoom() });
+        show(current, null, true);
         return true;
       },
       // The day drawn, compared with another: the map's own terrain is
@@ -1028,7 +1031,7 @@
       if (resized !== 0) return;
       resized = requestAnimationFrame(() => {
         resized = 0;
-        map.invalidateSize();
+        map.invalidateSize({ pan: false });
       });
     }).observe(map.getContainer());
   }
