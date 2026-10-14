@@ -692,6 +692,27 @@ test('a section with nothing in it that can be pressed cannot be pressed either'
   assert.equal(JSON.stringify(p.layers.states()), before);
 });
 
+test('the count beside a section\'s name is of every row listed, greyed or not', async () => {
+  const p = await load();
+  const count = () => p.part(['Overlays'], 'count').textContent;
+  // Three rows are listed; the one that is on is greyed out, so the
+  // checkbox reads off while the count still has it.
+  assert.equal(p.state('Overlays'), 'false');
+  assert.equal(count(), '1/3');
+  await p.press(['Overlays']);
+  assert.equal(count(), '3/3');
+  await p.press(['Overlays']);
+  assert.equal(count(), '1/3');
+  p.rows['overlays/chunk'].setAvailable(true);
+  await p.tick();
+  assert.equal(count(), '1/3');
+  p.rows['overlays/slime'].setAvailable(false);
+  p.rows['overlays/grid'].setAvailable(false);
+  p.rows['overlays/chunk'].setAvailable(false);
+  await p.tick();
+  assert.equal(count(), '1/3');
+});
+
 test('a list with no switch of its own reads as off under a section that is off, and ticking it brings the section back', async () => {
   const p = await load();
   const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, [
@@ -720,6 +741,25 @@ test('a list with no switch of its own reads as off under a section that is off,
   assert.equal(kinds.shows('village'), true);
   assert.equal(p.state('Structures'), 'mixed');
   assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), ['structures/predicted', 'structures/recorded']);
+});
+
+test('Show all in group on a list with no switch of its own brings back the section that is off', async () => {
+  const p = await load();
+  const kinds = p.add({ group: 'structures', id: 'kinds', label: 'Kinds', bare: true, facet: 'kinds' }, [
+    { id: 'village', label: 'Villages', count: 3 }, { id: 'monument', label: 'Monuments', count: 2 },
+  ]);
+  p.add({ group: 'structures', id: 'recorded', label: 'Known', heading: 'How sure', order: 10 });
+  p.add({ group: 'structures', id: 'predicted', label: 'Predicted', heading: 'How sure', order: 20 });
+  await p.tick();
+  await p.press(['Structures', 'Monuments']);
+  await p.press(['Structures']);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), []);
+  await p.menu(['Structures', 'Villages'], 'Show all in group');
+  assert.equal(kinds.shows('village'), true);
+  assert.equal(kinds.shows('monument'), true);
+  assert.deepEqual(p.on().filter((key) => key.startsWith('structures/')), ['structures/predicted', 'structures/recorded']);
+  assert.deepEqual(under(p, 'Structures'), [['Villages', 'true'], ['Monuments', 'true'], ['Known', 'true'], ['Predicted', 'true']]);
+  assert.equal(p.state('Structures'), 'true');
 });
 
 test('pressing a line with things under it twice puts everything under it off at some press, from any state', async () => {

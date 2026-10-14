@@ -1112,11 +1112,9 @@
     // section, counted and searched as any layer's are.
     const { bare } = section;
     const counted = reach(section);
-    if (counted.length > 0) {
-      mine.rows = counted.length;
-      mine.rowsOn = counted.filter((row) => row.on).length;
-      mine.mixed = counted.some((row) => rowState(row) === 'mixed');
-    }
+    const read = counted.length > 0 ? counted : section.rows;
+    const readOn = read.filter((row) => row.on).length;
+    mine.mixed = read.some((row) => rowState(row) === 'mixed');
     if (bare) {
       const within = query !== '' && bare.list.some((item) => hit(item.label));
       visible = visible || within;
@@ -1126,7 +1124,7 @@
         mine.on += listed.filter((item) => bare.facet.shows(item.id)).length;
       }
       mine.mixed = mine.mixed || bare.facet.only !== null || bare.list.some((item) => hiddenIn(bare, item));
-      bare.masked = counted.length > 0 && mine.rowsOn === 0;
+      bare.masked = counted.length > 0 && readOn === 0;
     }
     if (whole) {
       if (dom.was.open) lines.unshift(...itemLines(whole, 2, hit(section.label) || hit(whole.label), mine));
@@ -1136,7 +1134,7 @@
       pictured(dom, { drawn: section.id, swatch: '', colour: '', shape: '' });
       show(dom, {
         label: section.label,
-        state: mine.rowsOn === 0 ? 'false' : mine.rowsOn === mine.rows && !mine.mixed ? 'true' : 'mixed',
+        state: readOn === 0 ? 'false' : readOn === read.length && !mine.mixed ? 'true' : 'mixed',
         disabled: !whole && section.rows.length > 0 && counted.length === 0,
         masked: false,
         twisted: true,
@@ -1255,14 +1253,12 @@
       if (!f || node.disabled || !row.available) return;
       if (!row.on || row.masked === true) {
         // Under a layer that is off, an item switched on brings the layer
-        // on as it was last chosen, with this item shown as well. A list
-        // with no switch of its own brings back the section it stands under.
+        // on as it was last chosen, with this item shown as well.
         changeFacet(f, () => {
           if (f.only !== null && f.only !== node.id) leaveOnly(f);
           showItem(f, node.id, true);
         });
-        if (row.on) rest(row.section);
-        else switchRow(row, true);
+        bring(row);
         return;
       }
       changeFacet(f, () => {
@@ -1302,6 +1298,13 @@
     forget(section.id, 'all');
     keepRested();
     schedule();
+  }
+
+  // Switches a row on for what was asked of its items. A list with no
+  // switch of its own brings back the section it stands under.
+  function bring(row) {
+    if (row.masked === true) rest(row.section);
+    else if (!row.on) switchRow(row, true);
   }
 
   const expandable = (node) => node.kind === 'section' || (node.kind === 'row' && (node.whole || node.list.length > 0 || node.control !== null));
@@ -1344,8 +1347,7 @@
       if (!f) return;
       // Pressed on the one already alone, it lets the rest back.
       changeFacet(f, () => { showAlone(f, f.only === node.id ? null : node.id); });
-      if (!node.row.on) switchRow(node.row, true);
-      else if (node.row.masked === true) rest(node.row.section);
+      bring(node.row);
       return;
     }
     const scope = node.kind === 'section' || node.whole ? 'all' : node.section.id;
@@ -1367,7 +1369,7 @@
         for (const item of row.list) showItem(f, item.id, true);
       });
     }
-    switchRow(row, true);
+    bring(row);
   }
 
   const act = (row, what, id) => {
