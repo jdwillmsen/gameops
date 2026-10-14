@@ -328,8 +328,10 @@ func biomeWorld(at time.Time) *biomes.World {
 				generated := false
 				for i := range c {
 					c[i] = biomeAt(name, cx*16+i&15, cz*16+i>>4)
-					// Stored as the game stores it, counted from the floor.
-					h[i] = int16(200 + (cx*16+i&15)/4 + (cz*16+i>>4)/4)
+					// Stored as the game stores it, counted from the floor: a
+					// surface at y 64 and the odd hill of up to three more,
+					// so that the markers at y 64 are on the ground.
+					h[i] = int16(129 + (cx+cz)&3)
 					generated = generated || c[i] != 0
 				}
 				if generated {
@@ -507,7 +509,7 @@ func markedWorld() markers.World {
 	overworld.Containers = append(overworld.Containers,
 		markers.Marker{X: -120, Y: 64, Z: -40, Kind: "chest"},
 		markers.Marker{X: -104, Y: 64, Z: -40, Kind: "chest", Trapped: true},
-		markers.Marker{X: -88, Y: 64, Z: -40, Kind: "barrel", Name: "Harness barrel"},
+		markers.Marker{X: -88, Y: 30, Z: -40, Kind: "barrel", Name: "Harness barrel"},
 		markers.Marker{X: -40, Y: 64, Z: -40, Kind: "chest", Name: hostile},
 	)
 	overworld.Mobs = []markers.Marker{
@@ -610,12 +612,17 @@ const (
 	paceEvery = 20
 )
 
+// herdHeights are where the herd stands, over a surface of about 64: most
+// on the ground, and some in the air, in a cellar, in a cave and in the
+// deepslate, so that every height band has something in it.
+var herdHeights = []float64{64, 64, 64, 120, 45, 10, -20}
+
 // herd is more mobs than the cap lets through, spread over the ground the
 // first player walks.
 func herd() []map[string]any {
 	var mobs []map[string]any
 	for i := range 220 {
-		mobs = append(mobs, map[string]any{"i": strconv.Itoa(1000 + i), "t": mobTypes[i%len(mobTypes)], "x": float64(-190+(i%20)*20) + 0.5, "y": 64, "z": float64(-110+(i/20)*20) + 0.5})
+		mobs = append(mobs, map[string]any{"i": strconv.Itoa(1000 + i), "t": mobTypes[i%len(mobTypes)], "x": float64(-190+(i%20)*20) + 0.5, "y": herdHeights[i%len(herdHeights)], "z": float64(-110+(i/20)*20) + 0.5})
 	}
 	return mobs
 }
