@@ -566,9 +566,11 @@ export async function history({ page, cfg }) {
   };
   page.on('response', seen);
   try {
-    await page.evaluate(() => { const map = window.mcmap.map; window.__view = { centre: map.getCenter(), zoom: map.getZoom() }; });
     if (!(await state()).open) await page.locator('.timeline-open').click();
     if (!(await until(async () => (await state()).open))) throw new Fail('the History row did not open', measures);
+    const follow = page.locator('#inspect-follow');
+    if (await follow.getAttribute('aria-pressed') === 'true') await follow.click();
+    await page.evaluate(() => { const map = window.mcmap.map; window.__view = { centre: map.getCenter(), zoom: map.getZoom() }; });
 
     // One back from now is the newest day kept.
     await page.locator('.timeline-earlier').click();

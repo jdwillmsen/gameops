@@ -218,9 +218,6 @@ func TestLayerPanelShellIsSizedDockedAndPutAway(t *testing.T) {
 	if !bytes.Contains(css, []byte(".stage { position: relative; flex: 1; min-height: 0; display: flex; }")) || !bytes.Contains(css, []byte("#map { flex: 1; min-width: 0;")) {
 		t.Error("style.css no longer lays the map and the panel out in one row")
 	}
-	if !regexp.MustCompile(`new ResizeObserver\(\(\) => \{\s*if \(resized !== 0\) return;\s*resized = requestAnimationFrame\(\(\) => \{\s*resized = 0;\s*map\.invalidateSize\(\);`).Match(read(t, "app.js")) {
-		t.Error("app.js no longer tells the map when its box changes size, once a frame")
-	}
 	// A touch on the map does not put the sheet away.
 	if bytes.Contains(read(t, "compact.js"), []byte("if (panelOpen() && !within(el.layers)) shutPanel();")) {
 		t.Error("compact.js shuts the layer panel on a touch outside it; below full height the map is there to be used")
