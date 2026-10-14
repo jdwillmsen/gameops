@@ -230,18 +230,11 @@ func TestThePanelsControlsStandOffTheirGroundInEveryTheme(t *testing.T) {
 		}
 		t.Logf("%s theme: the controls' lowest text %.2f, lowest edge %.2f", name, text, edge)
 	}
-	// And those are the colours the controls are drawn in: every box that
-	// is typed in, and every checkbox, edged in the line, the focus in its
-	// own colour, and a choice that is on in its ink on the wash.
+	// What the browser draws in these colours, where a rule more particular
+	// than a control's own may paint over them, is measured in each theme
+	// by the browser checks.
 	for _, need := range []string{
-		"border: 2px solid var(--line);",
-		`input[type="number"], input[type="search"], input[type="text"], select { background: var(--bg); border: 1px solid var(--line); }`,
-		":focus-visible { outline: var(--focus) solid var(--focus-colour); outline-offset: 1px; }",
 		".row mark { background: none; color: var(--accent); font-weight: 700; text-decoration: underline; }",
-		`.segment[aria-checked="true"], .segment[aria-pressed="true"], .segment.on { background: var(--accent-soft); border-color: transparent; color: var(--sel-ink); font-weight: 600; }`,
-		`button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--sel-ink); }`,
-		`.check[aria-checked="true"], .check[aria-checked="mixed"] { background: var(--check-fill); border-color: var(--accent); }`,
-		"border: solid var(--check-tick);",
 	} {
 		if !bytes.Contains(css, []byte(need)) {
 			t.Errorf("style.css no longer has %s", need)

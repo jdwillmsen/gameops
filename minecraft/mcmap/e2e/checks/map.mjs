@@ -391,28 +391,106 @@ export async function savedViews({ page }) {
   return { measures };
 }
 
-// Each of the three themes is applied and the map is still drawn under it.
+// What a control is drawn in, as the browser paints it, in contrast to
+// what is behind it, by WCAG 2's relative luminance: the text of what is
+// chosen, a dimension and a nether level, and the text of a box typed in;
+// and the edge of that box, a ticked checkbox's edge and its tick, and the
+// ring of the focus. Each is found on the page, and one that is not there
+// is not measured.
+const drawnContrast = () => {
+  const parse = (value) => {
+    const n = (value.match(/[\d.]+/g) || []).map(Number);
+    return { r: n[0] || 0, g: n[1] || 0, b: n[2] || 0, a: n.length > 3 ? n[3] : 1 };
+  };
+  const over = (top, under) => {
+    const a = top.a + under.a * (1 - top.a);
+    if (a === 0) return { r: 0, g: 0, b: 0, a: 0 };
+    const mix = (k) => (top[k] * top.a + under[k] * under.a * (1 - top.a)) / a;
+    return { r: mix('r'), g: mix('g'), b: mix('b'), a };
+  };
+  const ground = (node) => {
+    const layers = [];
+    for (let at = node; at; at = at.parentElement) {
+      const c = parse(getComputedStyle(at).backgroundColor);
+      layers.push(c);
+      if (c.a >= 1) break;
+    }
+    return layers.reverse().reduce((under, top) => over(top, under), { r: 255, g: 255, b: 255, a: 1 });
+  };
+  const lum = (c) => {
+    const lin = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  };
+  const ratio = (fg, bg) => {
+    const [hi, lo] = [lum(over(fg, bg)), lum(bg)].sort((a, b) => b - a);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const visible = (node) => node && node.getClientRects().length > 0;
+  const text = [];
+  const edge = [];
+  for (const node of [document.querySelector('#dimensions button[aria-pressed="true"]'), document.querySelector('.levels button[aria-pressed="true"]'), document.getElementById('search-box')]) {
+    if (visible(node)) text.push(ratio(parse(getComputedStyle(node).color), ground(node)));
+  }
+  const field = document.getElementById('search-box');
+  if (visible(field)) edge.push(ratio(parse(getComputedStyle(field).borderTopColor), ground(field.parentElement)));
+  const check = [...document.querySelectorAll('#layers .check[aria-checked="true"]')].find(visible);
+  if (check) {
+    edge.push(ratio(parse(getComputedStyle(check).borderTopColor), ground(check.parentElement)));
+    edge.push(ratio(parse(getComputedStyle(check, '::after').borderRightColor), ground(check)));
+  }
+  const focused = document.activeElement;
+  if (visible(focused) && focused.matches(':focus-visible')) edge.push(ratio(parse(getComputedStyle(focused).outlineColor), ground(focused.parentElement)));
+  return { text, edge };
+};
+
+// Each of the three themes is applied and the map is still drawn under it,
+// and in each what is chosen is drawn at four and a half to one or more
+// against what is behind it, and an edge, a tick or the ring of the focus
+// at three to one or more.
 export async function themes({ page }) {
   const was = await page.evaluate(() => window.mcmapSettings.get('look').theme);
+  const home = await page.evaluate(() => window.mcmap.dimension());
+  // The nether, at a level that is not its first, so that a level is drawn
+  // chosen; and the layer panel open, so that a checkbox is drawn ticked.
+  if (await page.evaluate(() => window.mcmap.go('nether', 0, 0))) {
+    await until(() => page.evaluate(() => window.mcmap.dimension() === 'nether'));
+    const levels = await page.evaluate(() => window.mcmap.level.list().map((l) => l.id));
+    if (levels.length > 1) await page.evaluate((id) => window.mcmap.level.set(id), levels[1]);
+  }
+  if (!(await page.evaluate(() => document.getElementById('layers').classList.contains('open')))) await page.locator('#layers-toggle').click();
   await page.locator('#appearance-open').click();
   const seen = [];
   for (const theme of ['dark', 'light', 'contrast']) {
     await page.locator('#look-theme').selectOption(theme);
+    await page.locator('#look-theme').focus();
+    await page.keyboard.press('Shift+Tab');
     await sleep(300);
-    seen.push(await page.evaluate(() => ({
-      theme: document.documentElement.dataset.theme,
-      ground: getComputedStyle(document.body).backgroundColor,
-      ink: getComputedStyle(document.body).color,
-      tiles: document.querySelectorAll('#map img.leaflet-tile-loaded').length,
-      canvas: document.querySelectorAll('#map canvas.leaflet-zoom-animated').length,
-    })));
+    seen.push({
+      ...(await page.evaluate(() => ({
+        theme: document.documentElement.dataset.theme,
+        ground: getComputedStyle(document.body).backgroundColor,
+        ink: getComputedStyle(document.body).color,
+        tiles: document.querySelectorAll('#map img.leaflet-tile-loaded').length,
+        canvas: document.querySelectorAll('#map canvas.leaflet-zoom-animated').length,
+      }))),
+      ...(await page.evaluate(drawnContrast)),
+    });
   }
   await page.locator('#look-theme').selectOption(was);
   await page.locator('#appearance-close').click();
-  const measures = { themes: seen.length, distinct: new Set(seen.map((s) => `${s.ground}|${s.ink}`)).size };
+  await page.evaluate(() => window.mcmap.level.set('default'));
+  await page.evaluate((id) => window.mcmap.go(id, 0, 0), home);
+  const round = (n) => Math.round(n * 100) / 100;
+  const measures = {
+    themes: seen.length, distinct: new Set(seen.map((s) => `${s.ground}|${s.ink}`)).size,
+    texts_measured: seen.reduce((n, s) => n + s.text.length, 0), edges_measured: seen.reduce((n, s) => n + s.edge.length, 0),
+    lowest_text_ratio: round(Math.min(...seen.flatMap((s) => s.text))), lowest_edge_ratio: round(Math.min(...seen.flatMap((s) => s.edge))),
+  };
   if (seen.some((s, n) => s.theme !== ['dark', 'light', 'contrast'][n])) throw new Fail('choosing a theme did not apply it', measures);
   if (measures.distinct !== 3) throw new Fail('two themes are drawn in the same colours', measures);
   if (seen.some((s) => s.tiles === 0 || s.canvas === 0)) throw new Fail('the map was not drawn under a theme', measures);
+  if (measures.lowest_text_ratio < 4.5) throw new Fail('a control is written too faint to read under a theme', measures);
+  if (measures.lowest_edge_ratio < 3) throw new Fail("a control's edge, its tick or the focus is drawn too faint under a theme", measures);
   return { measures };
 }
 

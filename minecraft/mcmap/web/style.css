@@ -1730,7 +1730,6 @@ kbd, .keys code {
 .levels { position: absolute; left: 50%; transform: translateX(-50%); top: 0.75rem; z-index: 1050; display: flex; gap: 0.25rem; padding: 0.25rem; background: var(--float); border: 1px solid var(--rule); border-radius: var(--radius-l); cursor: default; }
 .levels[hidden] { display: none; }
 .locked .levels { display: none; }
-.level[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 /* A day that is past is told apart from now at a glance. */
 .past .timeline-body { border-top-color: var(--warn); }
 .past .timeline-date { color: var(--warn); }
