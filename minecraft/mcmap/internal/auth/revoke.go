@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/atomicfile"
 )
 
 // Revocations is the one piece of login state kept server-side. A session is
@@ -53,7 +54,7 @@ func (r *Revocations) Revoke(xuid string, at time.Time) error {
 	r.notBefore[xuid] = max(previous, at.UnixMilli())
 	raw, err := json.Marshal(r.notBefore)
 	if err == nil {
-		err = writeWhole(r.path, raw)
+		err = atomicfile.Write(r.path, raw)
 	}
 	if err != nil {
 		if had {
@@ -71,32 +72,4 @@ func (r *Revocations) covers(xuid string, issuedMilli int64) bool {
 	defer r.mu.RUnlock()
 	notBefore, ok := r.notBefore[xuid]
 	return ok && issuedMilli <= notBefore
-}
-
-// writeWhole leaves either the old file or the new one at path, never part
-// of one: a crash mid-write must not leave something that stops the service
-// starting until a person deletes it.
-func writeWhole(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	// CreateTemp makes the file 0600, which is what a key needs.
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

@@ -19,6 +19,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/atomicfile"
 )
 
 // Identity is who a session belongs to. The XUID is the identity; the
@@ -308,7 +310,7 @@ func LoadKey(path string) ([]byte, error) {
 	if _, err := rand.Read(key); err != nil {
 		return nil, err
 	}
-	if err := writeWhole(path, key); err != nil {
+	if err := atomicfile.Write(path, key); err != nil {
 		return nil, err
 	}
 	return key, nil
