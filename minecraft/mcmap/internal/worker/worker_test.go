@@ -642,24 +642,70 @@ func TestCycle_AFailingExtraLevelCostsNothingElse(t *testing.T) {
 	}
 }
 
-// A level that hangs is cut off at its own limit, and the one after it
-// still runs.
-func TestCycle_AnExtraLevelThatRunsOutOfTimeDoesNotHoldTheNext(t *testing.T) {
+// The levels have one budget between them, so a level that hangs is cut
+// off when it is spent and the one after it is not started: what the levels
+// can hold the next cycle back by is the budget, however many there are.
+// Both are failures, neither is the page's problem, and both are tried
+// again the next cycle.
+func TestCycle_ExtraLevelsShareOneBudgetAndAreTriedAgainNextCycle(t *testing.T) {
 	s, r := &fakeSyncer{}, &fakeRenderer{hangOnTopY: 66}
 	w := newWorker(s, r, "")
 	w.NetherLevels = levels
-	w.LevelTimeout = 20 * time.Millisecond
-	before := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether-66"))
+	w.LevelBudget = 20 * time.Millisecond
+	var log bytes.Buffer
+	w.Logger = slog.New(slog.NewTextHandler(&log, nil))
+	failures := func(name string) float64 { return testutil.ToFloat64(metricRenderFailures.WithLabelValues(name)) }
+	cutOff, notStarted := failures("nether-66"), failures("nether-34")
 
 	if got := w.Cycle(context.Background(), noon); got != Applied {
-		t.Fatalf("outcome = %v", got)
+		t.Fatalf("outcome = %v, want applied", got)
 	}
 
-	if got := testutil.ToFloat64(metricRenderFailures.WithLabelValues("nether-66")) - before; got != 1 {
-		t.Errorf("timeouts counted as failures = %v, want 1", got)
+	if got := failures("nether-66") - cutOff; got != 1 {
+		t.Errorf("failures counted for the level cut off = %v, want 1", got)
 	}
-	if !w.Status.Snapshot().RenderedAt["nether-34"].Equal(noon) {
-		t.Error("the level after the one that timed out was not rendered")
+	if got := failures("nether-34") - notStarted; got != 1 {
+		t.Errorf("failures counted for the level not started = %v, want 1", got)
+	}
+	if want := []int{0, 0, 0, 66}; !reflect.DeepEqual(r.topYs, want) {
+		t.Errorf("cuts rendered = %v, want %v: a level was started with no time left", r.topYs, want)
+	}
+	snap := w.Status.Snapshot()
+	if snap.Problem != "" || !snap.RenderedAt["end"].Equal(noon) {
+		t.Errorf("status = %+v", snap)
+	}
+	for _, name := range []string{"nether-66", "nether-34"} {
+		if _, ok := snap.RenderedAt[name]; ok {
+			t.Errorf("%s has a render time", name)
+		}
+	}
+	if got := strings.Count(log.String(), "render failed"); got != 2 {
+		t.Errorf("failures logged = %d, want 2:\n%s", got, log.String())
+	}
+
+	r.hangOnTopY = 0
+	later := noon.Add(15 * time.Minute)
+	if got := w.Cycle(context.Background(), later); got != Applied {
+		t.Fatalf("outcome = %v, want applied", got)
+	}
+	snap = w.Status.Snapshot()
+	if !snap.RenderedAt["nether-66"].Equal(later) || !snap.RenderedAt["nether-34"].Equal(later) {
+		t.Errorf("the levels were not rendered the cycle after: %+v", snap.RenderedAt)
+	}
+}
+
+// A budget that is not spent holds nothing back.
+func TestCycle_ExtraLevelsWithinTheirBudgetAreAllRendered(t *testing.T) {
+	s, r := &fakeSyncer{}, &fakeRenderer{}
+	w := newWorker(s, r, "")
+	w.NetherLevels = levels
+	w.LevelBudget = time.Minute
+
+	w.Cycle(context.Background(), noon)
+
+	snap := w.Status.Snapshot()
+	if !snap.RenderedAt["nether-66"].Equal(noon) || !snap.RenderedAt["nether-34"].Equal(noon) {
+		t.Errorf("status = %+v", snap)
 	}
 }
 
