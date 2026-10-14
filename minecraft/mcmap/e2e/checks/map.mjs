@@ -426,6 +426,21 @@ export async function history({ page, cfg }) {
         return shown && t.day > 0 && t.today > 0;
       }, { timeoutMs: 20_000 });
       if (!split) throw new Fail('Compare did not draw now beside the day', measures);
+      // Taken to the map's right edge, where the layer panel's own edge is
+      // dragged, the divider is still caught by a press on what shows of
+      // its grip, and the panel keeps its width.
+      const divider = page.locator('.timeline-divider');
+      await divider.focus();
+      await page.keyboard.press('End');
+      const box = await page.locator('#map').boundingBox();
+      const grip = await page.locator('.timeline-grip').boundingBox();
+      const right = Math.min(grip.x + grip.width, box.x + box.width);
+      await page.mouse.move((Math.max(grip.x, box.x) + right) / 2, grip.y + grip.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2, grip.y + grip.height / 2, { steps: 4 });
+      await page.mouse.up();
+      const freed = Number(await divider.getAttribute('aria-valuenow')) < 100 && (await page.locator('#map').boundingBox()).width === box.width;
+      if (!freed) throw new Fail('the divider at the map\'s right edge could not be dragged back', measures);
       await page.locator('.timeline-compare').click();
       const whole = await until(async () => {
         const t = await terrain();
