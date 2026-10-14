@@ -106,7 +106,7 @@ test('a day that kept its markers is drawn with them in place of today\'s, and n
   assert.deepEqual(Array.from(p.row('beds').items, (item) => item.id), ['blue'], 'the row lists what is drawn');
   assert.match(p.row('containers').note, /4 more/, 'what the day left out is the day\'s to say');
   assert.equal(p.app.markers.day(), '2026-10-12');
-  assert.equal(p.app.markers.savedAt(), Date.parse(THEN.at));
+  assert.equal(p.app.markers.savedAt(), null, 'the day\'s time is not when today\'s snapshot was taken');
 
   // The day is asked for once however often the view announces itself.
   await p.view();

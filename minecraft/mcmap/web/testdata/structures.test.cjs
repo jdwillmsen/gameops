@@ -50,9 +50,23 @@ const WORLD = {
 
 // A page with the panel, the structures' script and what that script asks
 // of the rest of the page. answer(dimension) is what the server says.
-async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dimension = 'overworld', answer } = {}) {
+async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dimension = 'overworld', answer, markers } = {}) {
   const p = page(storage);
   const { win, doc } = p;
+  // The sheet a structure opens, as the page has it, where a test opens one.
+  if (markers) {
+    const made = new Map();
+    for (const id of ['structure', 'structure-picture', 'structure-title', 'structure-standing', 'structure-body', 'structure-go', 'structure-copy', 'structure-link', 'structure-said', 'structure-close']) {
+      made.set(id, doc.createElement(id === 'structure' ? 'dialog' : 'div'));
+    }
+    const dialog = made.get('structure');
+    dialog.showModal = () => { dialog.open = true; };
+    dialog.close = () => { dialog.open = false; };
+    const byId = doc.getElementById;
+    doc.getElementById = (id) => made.get(id) || byId(id);
+    win.mcmap.markers = markers;
+    win.AbortController = AbortController;
+  }
   const state = { dimension, asked: [], map: new Set() };
   const layer = () => {
     const group = { layers: [] };
@@ -92,6 +106,8 @@ async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dim
   win.fetch = async (address) => {
     state.asked.push(address);
     const at = /dimension=([a-z]+)/.exec(address)[1];
+    // What the save holds in one structure is not what these tests ask.
+    if (address.startsWith('api/structures/detail')) return { ok: false, status: 404 };
     const given = answer ? answer(at, address) : undefined;
     if (given && given.status) return { ok: false, status: given.status };
     const body = given || { surveyed: true, prediction: 'verified', recorded: [], predicted: [], kinds: {}, ...world[at], ...(catalog ? { catalog } : {}) };
@@ -129,7 +145,14 @@ async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dim
     const note = find(li);
     return note ? note.textContent : '';
   };
-  return { ...p, state, lines, kinds, press, onMap, classes, go, noteOf, settle, structures: win.mcmap.structures, storage };
+  // Every note of the sheet that is open, as it reads.
+  const sheetNotes = () => {
+    const out = [];
+    const walk = (node) => { if (node.classList && node.classList.contains('note')) out.push(node.textContent); (node.children || []).forEach(walk); };
+    walk(doc.getElementById('structure-body'));
+    return out;
+  };
+  return { ...p, state, lines, kinds, press, onMap, classes, go, noteOf, sheetNotes, settle, structures: win.mcmap.structures, storage };
 }
 
 test('a dimension is listed with the kinds the server says it can hold, and its own counts', async () => {
@@ -224,6 +247,29 @@ test('a site with nothing found at it is said to be that, and is not counted as 
 test('a fortress\'s line says what it counts', async () => {
   const p = await load({ dimension: 'nether' });
   assert.match(p.noteOf('Fortresss'), /Parts within 96 blocks of each other are counted as one fortress/);
+});
+
+test('what a sheet counts of the markers is said to be of the day they are drawn for, and of the last snapshot only now', async () => {
+  const counted = () => ({ beds: new Map([['Red Bed', 1]]), containers: new Map(), mobs: [] });
+  const monument = { kind: 'monument', recorded: true, x: 5, z: 5, dimension: 'overworld' };
+  const counts = (p) => p.sheetNotes().find((note) => note.startsWith('Counted from the layers loaded now'));
+
+  const now = await load({ markers: { day: () => '', within: counted } });
+  now.structures.show(monument);
+  await now.settle();
+  assert.match(counts(now), /beds, containers and named mobs as of the last snapshot,/);
+
+  const then = await load({ markers: { day: () => '2026-10-12', within: counted } });
+  then.structures.show(monument);
+  await then.settle();
+  assert.match(counts(then), /beds, containers and named mobs as kept on 2026-10-12,/);
+  assert.doesNotMatch(counts(then), /last snapshot/, 'a day\'s markers are not the last snapshot\'s');
+
+  // A markers' script from before it drew a day's has only today's.
+  const old = await load({ markers: { within: counted } });
+  old.structures.show(monument);
+  await old.settle();
+  assert.match(counts(old), /as of the last snapshot,/);
 });
 
 (async () => {
