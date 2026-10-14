@@ -820,6 +820,7 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .ring.beds { border-color: var(--marker-beds); }
 .ring.containers { border-color: var(--marker-containers); }
 .ring.mobs { border-color: var(--marker-mobs); }
+.ring.heights { border-color: var(--dim); }
 
 .leaflet-tooltip.marker-name, .leaflet-tooltip.marker-tip {
   background: var(--label-plate);

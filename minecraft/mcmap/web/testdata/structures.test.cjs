@@ -50,7 +50,7 @@ const WORLD = {
 
 // A page with the panel, the structures' script and what that script asks
 // of the rest of the page. answer(dimension) is what the server says.
-async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dimension = 'overworld', answer, markers } = {}) {
+async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dimension = 'overworld', answer, markers, heights = false } = {}) {
   const p = page(storage);
   const { win, doc } = p;
   // The sheet a structure opens, as the page has it, where a test opens one.
@@ -72,6 +72,7 @@ async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dim
     const group = { layers: [] };
     group.addTo = (to) => { if (to === win.mcmap.map) state.map.add(group); else to.layers.push(group); return group; };
     group.clearLayers = () => { group.layers = []; };
+    group.removeLayer = (layer) => { group.layers = group.layers.filter((one) => one !== layer); };
     group.eachLayer = (fn) => group.layers.forEach(fn);
     return group;
   };
@@ -113,6 +114,23 @@ async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dim
     const body = given || { surveyed: true, prediction: 'verified', recorded: [], predicted: [], kinds: {}, ...world[at], ...(catalog ? { catalog } : {}) };
     return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
   };
+  // The height bands, with what the panel is told of them kept.
+  const banded = { items: [], note: '' };
+  if (heights) {
+    const register = win.mcmap.layers.register;
+    win.mcmap.layers.register = (spec) => {
+      const row = register(spec);
+      if (spec.group === 'heights' && spec.id === 'bands') {
+        for (const [name, keep] of [['setItems', (list) => { banded.items = list; }], ['setNote', (text) => { banded.note = text; }]]) {
+          const was = row[name];
+          row[name] = (...args) => { keep(...args); return was.apply(row, args); };
+        }
+      }
+      return row;
+    };
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'heights.js'), 'utf8'), win, { filename: 'heights.js' });
+    win.mcmap.layers.register = register;
+  }
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'structures.js'), 'utf8'), win, { filename: 'structures.js' });
   const settle = async () => { for (let i = 0; i < 6; i++) await tick(); await new Promise((done) => setTimeout(done, 10)); };
   await settle();
@@ -152,7 +170,7 @@ async function load({ storage = new Map(), catalog = CATALOG, world = WORLD, dim
     walk(doc.getElementById('structure-body'));
     return out;
   };
-  return { ...p, state, lines, kinds, press, onMap, classes, go, noteOf, sheetNotes, settle, structures: win.mcmap.structures, storage };
+  return { ...p, state, lines, kinds, press, onMap, classes, go, noteOf, sheetNotes, settle, structures: win.mcmap.structures, storage, banded };
 }
 
 test('a dimension is listed with the kinds the server says it can hold, and its own counts', async () => {
@@ -270,6 +288,65 @@ test('what a sheet counts of the markers is said to be of the day they are drawn
   old.structures.show(monument);
   await old.settle();
   assert.match(counts(old), /as of the last snapshot,/);
+});
+
+// --- the height bands -------------------------------------------------------------
+
+const boxAt = (x, z, minY, maxY, s) => ({ minX: x, minY, minZ: z, maxX: x + 10, maxY, maxZ: z + 10, ...(s === undefined ? {} : { s }) });
+const HEIGHT_WORLD = {
+  overworld: {
+    recorded: [
+      { kind: 'monument', ...boxAt(0, 0, 60, 70, 70) },
+      { kind: 'village', ...boxAt(100, 0, 100, 110, 70), village: { counted: false } },
+      { kind: 'village', ...boxAt(200, 0, 5, 20, 70), village: { counted: false } },
+      // A structure the world gives no height for.
+      { kind: 'ruined_portal', minX: 300, minZ: 0, maxX: 310, maxZ: 10, evidence: 1 },
+    ],
+    predicted: [{ kind: 'monument', x: 1000, z: 0 }, { kind: 'village', x: 1100, z: 0, candidate: true }],
+    kinds: {},
+  },
+};
+const hide = async (p, ...ids) => {
+  p.settings.set('layers', { ...p.settings.get('layers'), 'heights#bands': { only: null, hidden: ids } });
+  p.layers.adopt([]);
+  await p.settle();
+};
+const recordedOnMap = (p) => p.onMap().filter((label) => label.includes('recorded by the world') || label.includes('found by its blocks')).map((label) => label.split(' · ')[0]);
+
+test('a recorded structure is on the map by the bands its box reaches, and a prediction, which has no height, always is', async () => {
+  const p = await load({ world: HEIGHT_WORLD, heights: true });
+  same(recordedOnMap(p).sort(), ['Monument', 'Ruined Portal', 'Village', 'Village']);
+  await hide(p, 'sky');
+  same(recordedOnMap(p).sort(), ['Monument', 'Ruined Portal', 'Village'], 'the village at 100 to 110 is in the sky');
+  // The monument's box is in the surface and the shallow underground: it stays while either is shown.
+  await hide(p, 'sky', 'surface');
+  same(recordedOnMap(p).sort(), ['Monument', 'Ruined Portal', 'Village']);
+  await hide(p, 'sky', 'surface', 'shallow');
+  same(recordedOnMap(p).sort(), ['Ruined Portal', 'Village'], 'the village at 5 to 20 is deep');
+  await hide(p, 'sky', 'surface', 'shallow', 'deep', 'deepslate');
+  same(recordedOnMap(p), ['Ruined Portal'], 'the one with no height is never hidden');
+  assert.ok(p.onMap().some((label) => label.includes('predicted from the seed')), 'nor is a prediction');
+  assert.ok(p.onMap().some((label) => label.includes('possible here')));
+  await hide(p);
+  assert.equal(recordedOnMap(p).length, 4);
+});
+
+test('the bands count a structure in each band it reaches, and the ones with no height apart', async () => {
+  const p = await load({ world: HEIGHT_WORLD, heights: true });
+  await new Promise((done) => setTimeout(done, 30));
+  const counts = Object.fromEntries(p.banded.items.map((item) => [item.id, item.count]));
+  same(counts, { sky: 1, surface: 1, shallow: 1, deep: 1, deepslate: 0 });
+  assert.match(p.banded.note, /^3 with no known height, always shown$/, 'the portal and the two predicted');
+});
+
+test('the nether\'s structures are sorted by fixed heights, with no surface sent', async () => {
+  const world = { nether: { recorded: [{ kind: 'fortress', ...boxAt(0, 0, 40, 100) }, { kind: 'bastion', ...boxAt(100, 0, 10, 20), evidence: 5 }], predicted: [], kinds: {} } };
+  const p = await load({ world, heights: true, dimension: 'nether' });
+  await new Promise((done) => setTimeout(done, 30));
+  const counts = Object.fromEntries(p.banded.items.map((item) => [item.id, item.count]));
+  same(counts, { upper: 1, middle: 1, lava: 1 });
+  await hide(p, 'lava');
+  same(recordedOnMap(p), ['Fortress']);
 });
 
 (async () => {
