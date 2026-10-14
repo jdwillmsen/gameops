@@ -272,6 +272,22 @@ test('a band shown alone that another dimension does not have is let go of there
   assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=0,1,3,4&v=v1$/);
 });
 
+test('a list of just the bands to show, made over one dimension, leaves none of another\'s out', async () => {
+  const p = await load();
+  await p.on('Height tint');
+  await p.press(['Topography', 'Height tint'], 'twist');
+  p.layers.facet('topography', 'tint').solo('overworld:3');
+  await wait();
+  await p.press(['Topography', 'Height tint', '90 to 109']);
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=0,1,2,5,6,7&v=v1$/);
+  await p.view('end');
+  assert.equal(p.layer().options.dimension, 'end');
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&v=v1$/, 'the end\'s tint is drawn with bands left out');
+  // And back, the list is as it was made.
+  await p.view('overworld');
+  assert.match(p.layer().getTileUrl({ z: 0, x: 0, y: 0 }), /styles=tint&hide=0,1,2,5,6,7&v=v1$/);
+});
+
 test('a band of another dimension shown alone by a view is let go of as it comes', async () => {
   const p = await load({ scripts: ['biomes.js', 'topography.js', 'views.js'] });
   await p.on('Height tint');
@@ -364,6 +380,14 @@ test('past the widest zoom there are no tiles, and the row that is on says to zo
   await p.zoom(-6);
   assert.equal(p.note('Hillshade'), 'Zoom in to see it.');
   assert.equal(p.note('Height tint'), '', 'a row that is off says it too');
+  // The map rests between zooms, and has the widest tiles from half a
+  // zoom wider than they are drawn at.
+  await p.on('Contour lines');
+  await p.zoom(-5.3);
+  assert.equal(p.note('Hillshade'), '');
+  assert.equal(p.note('Contour lines'), 'A line every 200 blocks at this zoom, every 5th heavier.');
+  await p.zoom(-5.6);
+  assert.equal(p.note('Contour lines'), 'Zoom in to see it.');
 });
 
 test('it is not offered in the nether: the rows are greyed out, nothing is drawn and the way back is as it was', async () => {

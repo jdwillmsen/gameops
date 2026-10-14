@@ -305,8 +305,6 @@ func TestTopographyTilesAreKeptAsLongAsTheReadingStands(t *testing.T) {
 	}
 
 	// A new reading is a new version.
-	later := biomeWorld().WithHeights(s.Biomes.World().Heights())
-	later.SnapshotAt = biomesAt.Add(15 * time.Minute)
 	moved := heights.NewBuilder(biomesAt.Add(15*time.Minute), 4)
 	var cols [heights.Columns]int16
 	for i := range cols {

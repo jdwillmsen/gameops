@@ -66,7 +66,10 @@
     let hide = '';
     if (on('tint')) {
       const hidden = listing.bands.map((_, at) => at).filter((at) => !choice.shows(bandId(listing.dimension, at)));
-      if (hidden.length > 0) hide = `&hide=${hidden.join(',')}`;
+      // A list of just the bands to show that names none of this
+      // dimension's was made over another's, and leaves none out here.
+      const elsewhere = hidden.length === listing.bands.length && choice.state().mode === 'just';
+      if (hidden.length > 0 && !elsewhere) hide = `&hide=${hidden.join(',')}`;
     }
     return `styles=${styles}${hide}`;
   }
@@ -162,7 +165,7 @@
       let note = '';
       if (known && !listing.offered) note = 'Not drawn in the Nether, where the surface is the roof of bedrock everywhere.';
       else if (known && !listing.ready) note = 'The heights have not been read yet.';
-      else if (known && row.enabled && map.getZoom() < listing.tiles.minZoom) note = 'Zoom in to see it.';
+      else if (known && row.enabled && Math.round(map.getZoom()) < listing.tiles.minZoom) note = 'Zoom in to see it.';
       else if (style.id === 'contours' && row.enabled && interval() > 0) note = `A line every ${interval()} blocks at this zoom, every ${listing.heavyEvery}th heavier.`;
       row.setNote(note);
     }
