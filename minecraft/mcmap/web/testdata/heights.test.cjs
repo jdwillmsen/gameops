@@ -406,6 +406,20 @@ test('players are hidden by band too, and near my height follows the viewer up a
   assert.equal(drawnMobs(p).length, 2);
 });
 
+test('a player hidden by near my height comes back when the viewer leaves, with nothing else asked of the heights', async () => {
+  const p = await load();
+  const steve = (y) => ({ i: 'p1', n: 'Steve', x: 0, y, z: 0, r: 0, s: 70 });
+  const alex = (y) => ({ i: 'p2', n: 'Alex', x: 5, y, z: 5, r: 0, s: 70 });
+  const players = () => p.marks().filter((m) => m.options.yaw !== undefined);
+  if (p.state_('Height', 'Filter by height') === 'true') await p.press(['Height', 'Filter by height']);
+  await p.send({ players: [steve(64), alex(120)] });
+  await p.press(['Height', 'Near my height (±16)']);
+  assert.equal(players().length, 1, 'Alex is 56 blocks up');
+  await p.send({ players: [alex(120)] });
+  assert.equal(players().length, 1, 'with the viewer gone nothing filters Alex out');
+  assert.equal(players()[0].getLatLng().lng, 5);
+});
+
 test('a group of crowded mobs holds only those at the heights shown', async () => {
   const p = await load({ look: { group: 'on' } });
   await p.zoomTo(-2);

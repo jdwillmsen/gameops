@@ -286,9 +286,6 @@
     shows,
     showsBox,
     tint,
-    // Whether anything is asked of the markers at all, so that a layer can
-    // leave its per-frame work alone while nothing is.
-    active: () => rows !== null && (filtering || nearOn() || colourOn()),
     colouring: colourOn,
     viewer,
     onChange(fn) { if (typeof fn === 'function') listeners.push(fn); },

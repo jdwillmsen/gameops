@@ -923,7 +923,6 @@
       }
     }
     h.viewer(pictured, mine === null ? null : mine.y);
-    if (!h.active()) return;
     for (const held of entities.values()) {
       if (held.category !== 'players') continue;
       const want = visible(held);
