@@ -15,8 +15,9 @@ import (
 )
 
 type fakeHistory struct {
-	days  []history.Day
-	tiles map[string]string
+	days    []history.Day
+	tiles   map[string]string
+	markers map[string]string
 }
 
 func (f *fakeHistory) Days() []history.Day { return f.days }
@@ -26,11 +27,22 @@ func (f *fakeHistory) Tile(day, dimension string, tile render.Tile) (string, str
 	return p, "webp", ok
 }
 
+func (f *fakeHistory) MarkersOn(day, dimension string) (string, bool) {
+	p, ok := f.markers[day+"/"+dimension]
+	return p, ok
+}
+
+const markersThen = `{"at":"2026-10-12T00:20:00Z","beds":[{"x":1,"y":64,"z":-2}],"containers":[],"mobs":[],"more":{"beds":0,"containers":0,"mobs":0}}`
+
 func withHistory(t *testing.T) *Server {
 	t.Helper()
 	s, _ := fixture(t)
 	blob := filepath.Join(t.TempDir(), "blob")
 	if err := os.WriteFile(blob, []byte("RIFFas-it-was"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	marked := filepath.Join(t.TempDir(), "markers")
+	if err := os.WriteFile(marked, []byte(markersThen), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s.History = &fakeHistory{
@@ -39,10 +51,13 @@ func withHistory(t *testing.T) *Server {
 			TakenAt:  time.Date(2026, 10, 12, 0, 20, 0, 0, time.UTC),
 			Renderer: history.Stamp{SHA256: "aaaa", NetherTopY: 100},
 			Dimensions: []history.DayDimension{{
-				ID: "overworld", Info: render.Info{MinZoom: -6, MinRegionX: -13, Format: "webp"}, Tiles: 1, Changed: 1,
+				ID: "overworld", Info: render.Info{MinZoom: -6, MinRegionX: -13, Format: "webp"}, Tiles: 1, Changed: 1, Markers: true,
+			}, {
+				ID: "nether", Info: render.Info{MinZoom: -6, Format: "webp"},
 			}},
 		}},
-		tiles: map[string]string{"2026-10-12/overworld/0/37/-4": blob},
+		tiles:   map[string]string{"2026-10-12/overworld/0/37/-4": blob},
+		markers: map[string]string{"2026-10-12/overworld": marked},
 	}
 	return s
 }
@@ -63,6 +78,7 @@ func TestHistory_ListsTheDaysWithEachDimensionsExtent(t *testing.T) {
 				Format     string
 				Tiles      int
 				Changed    int
+				Markers    *bool
 			}
 		}
 	}
@@ -74,6 +90,13 @@ func TestHistory_ListsTheDaysWithEachDimensionsExtent(t *testing.T) {
 	}
 	if d := out.Days[0].Dimensions[0]; d.ID != "overworld" || d.MinZoom != -6 || d.MinRegionX != -13 || d.Format != "webp" || d.Tiles != 1 || d.Changed != 1 {
 		t.Errorf("dimension = %+v", d)
+	}
+	// Said only where it is so: a page reads its absence as none kept.
+	if kept := out.Days[0].Dimensions[0].Markers; kept == nil || !*kept {
+		t.Errorf("a dimension that kept its markers does not say so: %s", rec.Body)
+	}
+	if kept := out.Days[0].Dimensions[1].Markers; kept != nil {
+		t.Errorf("a dimension that kept no markers says %v of them: %s", *kept, rec.Body)
 	}
 }
 
@@ -119,6 +142,44 @@ func TestHistory_RefusesWhatIsNotATileOfADayHeld(t *testing.T) {
 	}
 }
 
+// A day's markers are the answer the map gave for them that day, byte for
+// byte, and never change, so the browser never has to ask for them twice.
+func TestHistory_ServesADaysMarkersAndLetsTheBrowserKeepThem(t *testing.T) {
+	rec := get(t, withHistory(t), "/api/history/markers/2026-10-12?dimension=overworld")
+	if rec.Code != http.StatusOK || rec.Body.String() != markersThen {
+		t.Fatalf("status %d, body %q", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("content type = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=31536000, immutable" {
+		t.Errorf("cache control = %q", got)
+	}
+}
+
+func TestHistory_RefusesMarkersOfWhatIsNotADimensionOfADayHeld(t *testing.T) {
+	s := withHistory(t)
+	for path, want := range map[string]int{
+		"/api/history/markers/2026-10-12?dimension=nether":            http.StatusNotFound,
+		"/api/history/markers/2026-10-11?dimension=overworld":         http.StatusNotFound,
+		"/api/history/markers/..%2Fdays%2F2026-10-12?dimension=end":   http.StatusNotFound,
+		"/api/history/markers/2026-10-12?dimension=moon":              http.StatusBadRequest,
+		"/api/history/markers/2026-10-12?dimension=..%2Foverworld":    http.StatusBadRequest,
+		"/api/history/markers/2026-10-12":                             http.StatusBadRequest,
+		"/api/history/markers/2026-10-12/overworld":                   http.StatusNotFound,
+		"/api/history/markers/":                                       http.StatusNotFound,
+		"/api/history/markers/2026-10-12.json.gz?dimension=overworld": http.StatusNotFound,
+	} {
+		rec := get(t, s, path)
+		if rec.Code != want {
+			t.Errorf("%s = %d, want %d", path, rec.Code, want)
+		}
+		if got := rec.Header().Get("Cache-Control"); strings.Contains(got, "immutable") {
+			t.Errorf("%s: a refusal may be kept for good: %q", path, got)
+		}
+	}
+}
+
 // Where a base was a month ago is as much the players' business alone as
 // where it is now.
 func TestHistory_NeedsASession(t *testing.T) {
@@ -126,7 +187,7 @@ func TestHistory_NeedsASession(t *testing.T) {
 	login := withLogin(t)
 	s.Sessions, s.Codes, s.InternalToken = login.Sessions, login.Codes, login.InternalToken
 	h := s.Handler()
-	for _, path := range []string{"/api/history", "/api/history/tiles/2026-10-12/overworld/0/37/-4.webp"} {
+	for _, path := range []string{"/api/history", "/api/history/tiles/2026-10-12/overworld/0/37/-4.webp", "/api/history/markers/2026-10-12?dimension=overworld"} {
 		if rec := do(h, "GET", path, "", nil); rec.Code != http.StatusUnauthorized {
 			t.Errorf("GET %s without a session = %d, want 401", path, rec.Code)
 		}
@@ -135,7 +196,9 @@ func TestHistory_NeedsASession(t *testing.T) {
 
 func TestHistory_WithoutHistoryThereIsNothingToAskFor(t *testing.T) {
 	s, _ := fixture(t)
-	if code := get(t, s, "/api/history").Code; code != http.StatusNotFound {
-		t.Errorf("/api/history without history = %d", code)
+	for _, path := range []string{"/api/history", "/api/history/markers/2026-10-12?dimension=overworld"} {
+		if code := get(t, s, path).Code; code != http.StatusNotFound {
+			t.Errorf("%s without history = %d", path, code)
+		}
 	}
 }
