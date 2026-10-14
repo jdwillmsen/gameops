@@ -1291,7 +1291,8 @@
     } else {
       // What the press before took off is put back even if it has been
       // greyed out since, as the focus is by the grid it was pressed with.
-      const was = Object.hasOwn(rested, section.id) ? rested[section.id].filter((key) => section.rows.some((row) => row.key === key)) : [];
+      const kept = Object.hasOwn(rested, section.id) ? rested[section.id].filter((key) => section.rows.some((row) => row.key === key)) : [];
+      const was = here.some((row) => kept.includes(row.key)) ? kept : [];
       place(section.rows.filter((row) => row.available || was.includes(row.key)), (row) => was.length === 0 || was.includes(row.key));
       delete rested[section.id];
     }
