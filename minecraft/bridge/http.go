@@ -120,11 +120,19 @@ type commandResponse struct {
 	Output string `json:"output"`
 }
 
+// isTellraw is deliberately looser than the allowlist: a refused spelling
+// (case, tab, newline, leading space) is still a whisper and must not be
+// quoted back.
+func isTellraw(cmd string) bool {
+	f := strings.Fields(cmd)
+	return len(f) > 0 && strings.EqualFold(f[0], "tellraw")
+}
+
 // spoken is a command as it may be written down or answered with. A
 // tellraw is a whisper to one player, and its words are theirs, so it is
 // named by its rule only.
 func spoken(cmd string) string {
-	if strings.HasPrefix(cmd, "tellraw ") {
+	if isTellraw(cmd) {
 		return "tellraw"
 	}
 	return cmd
@@ -133,7 +141,7 @@ func spoken(cmd string) string {
 // spokenErr is err as it may be written down or answered with: the errors
 // for a tellraw can quote the command, so they are replaced by the rule.
 func spokenErr(cmd string, err error) string {
-	if strings.HasPrefix(cmd, "tellraw ") {
+	if isTellraw(cmd) {
 		if errors.Is(err, ErrCommandNotAllowed) {
 			return "command not allowed: tellraw"
 		}
