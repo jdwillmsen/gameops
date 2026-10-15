@@ -14,7 +14,7 @@ import (
 const (
 	// maxRecord is far past a full inventory, an ender chest and every
 	// recipe; a record over it is not read.
-	maxRecord = 4 << 20
+	maxRecord = 1 << 20
 	// maxItems bounds one list of stacks: a chest holds 27 and an
 	// inventory 36.
 	maxItems = 64
@@ -75,6 +75,9 @@ func Decode(data []byte) (int64, Record, error) {
 	var m compound
 	if len(data) > maxRecord {
 		return 0, Record{}, errRecord
+	}
+	if err := guard(data); err != nil {
+		return 0, Record{}, err
 	}
 	if err := nbt.UnmarshalEncoding(data, &m, nbt.LittleEndian); err != nil {
 		return 0, Record{}, fmt.Errorf("%w: %v", errRecord, err)
