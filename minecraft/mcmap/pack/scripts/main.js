@@ -3,13 +3,15 @@
 //
 // Read-only, and that is a guardrail rather than a style choice: this runs
 // inside a no-cheats survival world whose achievements depend on no script
-// ever changing it. Nothing here runs a command, changes an entity, writes a
-// property or subscribes to an event, so nothing here can cancel one either.
-// The one registration is a timer.
+// ever changing it. Nothing here runs a command, changes an entity or writes
+// a property. The registrations are one timer and five after-events, which
+// run once the game has already decided and so cannot cancel anything; each
+// only adds to a counter in memory.
 //
-// Every line it prints is one of three kinds of record, because the map
-// refuses any other: players, mobs, and a heartbeat that also carries the
-// throttle state and the last error.
+// Every line it prints is one of four kinds of record, because the map
+// refuses any other: players, mobs, counts (what players did since the last
+// counts record), and a heartbeat that also carries the throttle state and
+// the last error.
 import { system, world } from "@minecraft/server";
 import { MOB_CAP, VERSION } from "./config.js";
 
@@ -47,6 +49,14 @@ const ERROR_CHARS = 200;
 // this, costs the whole record and not only the entity that caused it.
 const ID_BYTES = 64;
 const MAX_PARTS = 256;
+
+// Counts are deltas the map adds up, so what one record holds is bounded
+// here and the rest of a busy sample is folded into the totals, which are
+// always exact. The map bounds its own side as well.
+const MAX_TYPES = 12;
+const MAX_PENDING_PLAYERS = 256;
+const TYPE_CHARS = 48;
+const UNKNOWN_TYPE = "other";
 
 const DIMENSIONS = [
   ["overworld", "minecraft:overworld"],
@@ -117,6 +127,16 @@ let ticksUntilSample = 1;
 let errors = 0;
 let lastError = "";
 const dropped = new Map();
+
+// Names this run of the script among all of them. The map remembers the
+// last count it took from each run, which is what lets it ignore a line the
+// console bridge hands it twice; a restart of the script restarts seq.
+const boot = Date.now();
+let seq = 0;
+// player id -> what happened since the last counts record
+const pending = new Map();
+// player id -> when this run first saw them online
+const onlineSince = new Map();
 
 function print(record) {
   console.log(SENTINEL + record);
@@ -189,6 +209,32 @@ function noteError(where, error) {
   lastError = clip(`${where}: ${error}`, ERROR_CHARS);
 }
 
+// Health and experience level, left out whatever cannot be read: a missing
+// field is how the map knows not to show it.
+function vitalsOf(player) {
+  const out = {};
+  try {
+    const health = player.getComponent("minecraft:health");
+    if (health) {
+      const current = round(health.currentValue);
+      const max = round(health.effectiveMax);
+      if (Number.isFinite(current) && Number.isFinite(max)) {
+        out.h = current;
+        out.hm = max;
+      }
+    }
+  } catch {
+    // No health component yet, as during a respawn.
+  }
+  try {
+    const level = player.level;
+    if (Number.isInteger(level) && level >= 0) out.xl = level;
+  } catch {
+    // Left between being listed and being read.
+  }
+  return out;
+}
+
 function playerItems(players) {
   const items = [];
   const sizes = [];
@@ -208,6 +254,7 @@ function playerItems(players) {
         y,
         z,
         r: Math.round(player.getRotation().y),
+        ...vitalsOf(player),
       });
       items.push(item);
       sizes.push(byteLength(item));
@@ -329,6 +376,158 @@ function sample(tick, cap) {
   return totals;
 }
 
+// --- counts --------------------------------------------------------------
+
+function deltaFor(id) {
+  if (typeof id !== "string" || !id || id.length > ID_BYTES) return null;
+  let delta = pending.get(id);
+  if (!delta && pending.size < MAX_PENDING_PLAYERS) {
+    delta = { d: new Map(), k: new Map(), bt: new Map(), pt: new Map(), b: 0, p: 0, j: 0, l: 0, t: 0 };
+    pending.set(id, delta);
+  }
+  return delta || null;
+}
+
+function bump(map, name) {
+  const key = clip(name.startsWith("minecraft:") ? name.slice(10) : name, TYPE_CHARS);
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function guarded(where, fn) {
+  return (event) => {
+    try {
+      fn(event);
+    } catch (error) {
+      noteError(where, error);
+    }
+  };
+}
+
+function onDeath(event) {
+  const dead = event.deadEntity;
+  const source = event.damageSource;
+  if (dead.typeId === "minecraft:player") {
+    const delta = deltaFor(dead.id);
+    if (delta) bump(delta.d, String(source.cause));
+    return;
+  }
+  const killer = source.damagingEntity;
+  if (!killer || killer.typeId !== "minecraft:player" || NOT_MOBS.excludeTypes.includes(dead.typeId)) return;
+  const delta = deltaFor(killer.id);
+  if (delta) bump(delta.k, dead.typeId);
+}
+
+function onBreak(event) {
+  const delta = deltaFor(event.player.id);
+  if (!delta) return;
+  delta.b++;
+  bump(delta.bt, event.brokenBlockPermutation.type.id);
+}
+
+function onPlace(event) {
+  const delta = deltaFor(event.player.id);
+  if (!delta) return;
+  delta.p++;
+  bump(delta.pt, event.block.typeId);
+}
+
+function onSpawn(event) {
+  if (!event.initialSpawn) return;
+  const id = event.player.id;
+  onlineSince.set(id, Date.now());
+  const delta = deltaFor(id);
+  if (delta) delta.j++;
+}
+
+function onLeave(event) {
+  const id = event.playerId;
+  const since = onlineSince.get(id);
+  onlineSince.delete(id);
+  const delta = deltaFor(id);
+  if (!delta) return;
+  delta.l++;
+  if (since !== undefined) delta.t += Math.max(0, Math.round((Date.now() - since) / 1000));
+}
+
+// The most-counted names up to the limit as a JSON object, or null if none.
+function topTypes(map) {
+  if (map.size === 0) return null;
+  const sorted = [...map].sort((a, b) => b[1] - a[1]).slice(0, MAX_TYPES);
+  return Object.fromEntries(sorted);
+}
+
+function deltaItem(id, delta) {
+  const item = { i: id };
+  const deaths = topTypes(delta.d);
+  const kills = topTypes(delta.k);
+  const broken = topTypes(delta.bt);
+  const placed = topTypes(delta.pt);
+  if (deaths) item.d = deaths;
+  if (kills) item.k = kills;
+  if (delta.b) item.b = delta.b;
+  if (broken) item.bt = broken;
+  if (delta.p) item.p = delta.p;
+  if (placed) item.pt = placed;
+  if (delta.j) item.j = delta.j;
+  if (delta.l) item.l = delta.l;
+  if (delta.t) item.t = delta.t;
+  return JSON.stringify(item);
+}
+
+// Each line is complete in itself and has a seq of its own, so the map can
+// take or refuse it without waiting for its neighbours: there is no list to
+// assemble, which is why none of the part/parts bookkeeping of a sample's
+// lists is repeated here.
+function emitCounts(tick) {
+  if (pending.size === 0) return;
+  const items = [...pending].map(([id, delta]) => deltaItem(id, delta));
+  pending.clear();
+
+  const head = () => `{"gen":${gen},"tick":${tick},"ts":${Date.now()},"kind":"counts","boot":${boot},"seq":${seq},"items":[`;
+  // Sized for a seq that will never be reached, so the real one fits.
+  const room = RECORD_BYTES - (head().length + 10 + "]}".length);
+  let current = "";
+  let used = 0;
+  const flush = () => {
+    if (!current) return;
+    seq++;
+    print(head() + current + "]}");
+    current = "";
+    used = 0;
+  };
+  for (const item of items) {
+    const size = byteLength(item) + 1;
+    if (size > room) {
+      noteError("counts", "a player's counts did not fit one record");
+      continue;
+    }
+    if (used + size > room) flush();
+    current += (current ? "," : "") + item;
+    used += size;
+  }
+  flush();
+}
+
+function subscribeCounts() {
+  world.afterEvents.entityDie.subscribe(guarded("die", onDeath));
+  world.afterEvents.playerBreakBlock.subscribe(guarded("break", onBreak));
+  world.afterEvents.playerPlaceBlock.subscribe(guarded("place", onPlace));
+  world.afterEvents.playerSpawn.subscribe(guarded("spawn", onSpawn));
+  world.afterEvents.playerLeave.subscribe(guarded("leave", onLeave));
+}
+
+// Players already here when the script loads have no spawn event to wait
+// for, so their time counts from the first sample. Done there and not at
+// load because the world's players can be unreadable that early.
+let seeded = false;
+function seedOnline() {
+  if (seeded) return;
+  seeded = true;
+  for (const player of world.getAllPlayers()) {
+    if (!onlineSince.has(player.id)) onlineSince.set(player.id, Date.now());
+  }
+}
+
 // The tick rate always wins over the map's freshness: a slow sample makes
 // the next one later, and once it is as late as it gets, smaller.
 function throttle(scanMs) {
@@ -354,6 +553,11 @@ function onTimer() {
   const errorsBefore = errors;
   const started = Date.now();
   let totals = { players: 0, mobs: 0, more: 0 };
+  try {
+    seedOnline();
+  } catch (error) {
+    noteError("seed", error);
+  }
   // An exception that escaped would end the timer, and a pack whose timer
   // died is indistinguishable from a broken pipeline.
   try {
@@ -362,6 +566,11 @@ function onTimer() {
     noteError("sample", error);
   }
   const scanMs = Date.now() - started;
+  try {
+    emitCounts(tick);
+  } catch (error) {
+    noteError("counts", error);
+  }
   throttle(scanMs);
   ticksUntilSample = intervalTicksAt(level) / BASE_TICKS;
 
@@ -370,6 +579,13 @@ function onTimer() {
   // throttle level shows on the sample that caused it.
   const failed = errors === errorsBefore ? "" : `,"error":${JSON.stringify(lastError)}`;
   print(`{"gen":${gen},"tick":${tick},"ts":${Date.now()},"kind":"tick","players":${totals.players},"mobs":${totals.mobs},"more":${totals.more},"scan":${scanMs},"interval":${intervalTicksAt(level) * TICK_MS},"cap":${capAt(level)},"level":${level},"errors":${errors}${failed}}`);
+}
+
+try {
+  subscribeCounts();
+} catch (error) {
+  // Positions are worth having without the counts.
+  noteError("subscribe", error);
 }
 
 system.runInterval(() => {

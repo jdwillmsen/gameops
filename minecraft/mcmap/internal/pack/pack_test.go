@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -172,7 +173,7 @@ func TestInstallWritesPackAndRegistersIt(t *testing.T) {
 	if len(entries) != 1 || entries[0]["pack_id"] != ourID(t) {
 		t.Fatalf("registry = %v", entries)
 	}
-	if v, _ := json.Marshal(entries[0]["version"]); string(v) != "[1,0,0]" {
+	if v, _ := json.Marshal(entries[0]["version"]); string(v) != "[1,1,0]" {
 		t.Errorf("registered version = %s", v)
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, stagingName)); !errors.Is(err, os.ErrNotExist) {
@@ -307,7 +308,7 @@ func TestInstallReplacesAStaleRegistration(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("registry = %v", entries)
 	}
-	if v, _ := json.Marshal(entries[0]["version"]); string(v) != "[1,0,0]" {
+	if v, _ := json.Marshal(entries[0]["version"]); string(v) != "[1,1,0]" {
 		t.Errorf("registered version = %s", v)
 	}
 }
@@ -754,16 +755,32 @@ func TestScriptIsReadOnly(t *testing.T) {
 	code := regexp.MustCompile(`(?m)^\s*//.*$`).ReplaceAllString(string(raw), "")
 
 	for _, banned := range []string{
-		"runCommand", "Events", "subscribe", "cancel",
+		"runCommand", "beforeEvents", "cancel",
 		"DynamicProperty", "setProperty", "setRotation", "teleport", "tryTeleport",
 		"spawnEntity", "spawnItem", "spawnParticle", "createExplosion",
 		".remove(", ".kill(", "applyDamage", "applyImpulse", "applyKnockback", "addEffect", "addTag", "removeTag",
 		"setBlock", "fillBlocks", "setWeather", "setTime", "gameRules", "scoreboard", "structureManager",
-		"sendMessage", "playSound", "getComponent", "eval(", "Function(", "import(",
+		"sendMessage", "playSound", "eval(", "Function(", "import(",
 	} {
 		if strings.Contains(code, banned) {
 			t.Errorf("main.js uses %q", banned)
 		}
+	}
+	// The pack listens to five events that fire once the game has decided,
+	// and reads one component. Anything else subscribed to or read is a new
+	// capability and has to be added here on purpose.
+	subscribed := regexp.MustCompile(`[A-Za-z.]*\.subscribe\(`).FindAllString(code, -1)
+	wantSubscribed := []string{
+		"world.afterEvents.entityDie.subscribe(", "world.afterEvents.playerBreakBlock.subscribe(",
+		"world.afterEvents.playerPlaceBlock.subscribe(", "world.afterEvents.playerSpawn.subscribe(",
+		"world.afterEvents.playerLeave.subscribe(",
+	}
+	if strings.Join(subscribed, "\n") != strings.Join(wantSubscribed, "\n") {
+		t.Errorf("subscriptions = %q", subscribed)
+	}
+	components := regexp.MustCompile(`getComponent\([^)]*\)`).FindAllString(code, -1)
+	if strings.Join(components, "\n") != `getComponent("minecraft:health")` {
+		t.Errorf("components read = %q", components)
 	}
 	imports := regexp.MustCompile(`(?m)^import .*$`).FindAllString(code, -1)
 	want := []string{
@@ -783,4 +800,22 @@ func TestScriptIsReadOnly(t *testing.T) {
 func itoa(n int) string {
 	raw, _ := json.Marshal(n)
 	return string(raw)
+}
+
+// The counting is run, against a stand-in for the game. Skipped where there
+// is no node.
+func TestCountingDoesWhatItSaysWhenRun(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("no node on this machine to run the pack with")
+	}
+	out, err := exec.Command(node, "testdata/counts.test.cjs").CombinedOutput()
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if !strings.HasPrefix(line, "ok ") {
+			t.Log(line)
+		}
+	}
+	if err != nil {
+		t.Errorf("the pack's counting did not do what is asked of it: %v", err)
+	}
 }
