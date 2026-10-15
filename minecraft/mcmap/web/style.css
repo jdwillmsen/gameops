@@ -1843,3 +1843,15 @@ kbd, .keys code {
   .timeline-shown .inspect { display: none; }
   .stage .layers, .stage .layers.open.docked { bottom: var(--timeline-room); }
 }
+
+/* Links to the pages that need no login: under the login card, in the menu
+   and at the foot of the help. */
+.site-links { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: var(--sheet-pad) 0 0; font-size: var(--caption); line-height: var(--caption-lh); }
+.site-links a { color: var(--dim); }
+.site-links a:hover, .site-links a:focus-visible { color: var(--text); }
+/* On a wide screen More is laid out in the bar, which has room for one row
+   only; there the links are a press away, at the foot of the help. */
+.site-links.menu-links { display: none; margin: 0; }
+@media (max-width: 720px), (max-height: 480px) {
+  .site-links.menu-links { display: flex; flex: 1 1 100%; }
+}
