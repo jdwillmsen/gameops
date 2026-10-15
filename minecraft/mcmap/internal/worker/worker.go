@@ -22,6 +22,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
@@ -83,6 +84,11 @@ type Marker interface {
 	Extract(ctx context.Context, dbDir string, at time.Time) (markers.Stats, error)
 }
 
+// PlayerReader reads the players' records out of the mirrored world.
+type PlayerReader interface {
+	Extract(ctx context.Context, dbDir string, at time.Time) (players.Stats, error)
+}
+
 // Surveyor reads the structures of a freshly mirrored world.
 type Surveyor interface {
 	Take(ctx context.Context, worldDir string, at time.Time) (structures.Survey, error)
@@ -137,6 +143,8 @@ type Worker struct {
 	// Markers, if set, reads the world's beds, containers and named mobs
 	// after every snapshot.
 	Markers Marker
+	// Players, if set, reads the players' records after every snapshot.
+	Players PlayerReader
 	// Structures, if set, reads the world's structures after every
 	// snapshot. SurveyTimeout bounds one reading; zero means no bound.
 	Structures    Surveyor
@@ -338,6 +346,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	report, counted := w.census(ctx, now)
 	w.keep(ctx, now, report, counted)
 	w.mark(ctx, now)
+	w.players(ctx, now)
 
 	problem := ""
 	for _, dimension := range render.Dimensions {
@@ -437,6 +446,20 @@ func (w *Worker) mark(ctx context.Context, now time.Time) {
 		return
 	}
 	w.Logger.Info("markers read", "beds", stats.Beds, "containers", stats.Containers, "mobs", stats.Mobs, "skipped", stats.Skipped, "seconds", time.Since(started).Seconds())
+}
+
+// players reads the player records, which are small and cheap to read, and
+// whose failure costs only the details panel.
+func (w *Worker) players(ctx context.Context, now time.Time) {
+	if w.Players == nil {
+		return
+	}
+	stats, err := w.Players.Extract(ctx, filepath.Join(w.MirrorDir, w.Level, "db"), now)
+	if err != nil {
+		w.Logger.Error("player records not read", "error", err)
+		return
+	}
+	w.Logger.Info("player records read", "players", stats.Players, "skipped", stats.Skipped)
 }
 
 // remember offers the map just drawn to the history, straight after the
