@@ -212,3 +212,44 @@ func TestReportHeads_FailureIsAnErrorThatNamesTheStatus(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestPasskeyCode_AsksForTheSendersCodeAndReadsIt(t *testing.T) {
+	var seen http.Request
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = *r
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		_, _ = w.Write([]byte(`{"code":"ABC234","expiresIn":120,"fingerprint":"7F3A-91C2"}`))
+	}))
+	defer srv.Close()
+	code, fp, err := New(srv.URL, "internal-token", time.Second).PasskeyCode(context.Background(), "2535412345678901")
+	if err != nil || code != "ABC234" || fp != "7F3A-91C2" {
+		t.Fatalf("PasskeyCode = %q %q %v", code, fp, err)
+	}
+	if seen.URL.Path != "/internal/v1/passkey-codes" || seen.Header.Get("Authorization") != "Bearer internal-token" || body != `{"xuid":"2535412345678901"}` {
+		t.Errorf("request %s %q %s", seen.URL.Path, seen.Header.Get("Authorization"), body)
+	}
+}
+
+func TestPasskeyCode_NothingPendingIsItsOwnErrorAndOtherFailuresQuoteNoBody(t *testing.T) {
+	var seen http.Request
+	var body string
+	if _, _, err := server(t, http.StatusNotFound, &seen, &body).PasskeyCode(context.Background(), "2535412345678901"); !errors.Is(err, ErrNoPendingPasskey) {
+		t.Errorf("404 = %v", err)
+	}
+	_, _, err := server(t, http.StatusServiceUnavailable, &seen, &body).PasskeyCode(context.Background(), "2535412345678901")
+	if err == nil || strings.Contains(err.Error(), "detail") {
+		t.Errorf("503 = %v; want an error that quotes nothing the map said", err)
+	}
+}
+
+func TestPasskeyCode_AnAnswerOfTheWrongShapeIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":"<script>","fingerprint":"x"}`))
+	}))
+	defer srv.Close()
+	if _, _, err := New(srv.URL, "t", time.Second).PasskeyCode(context.Background(), "2535412345678901"); err == nil {
+		t.Error("a code of the wrong shape was passed on to a player")
+	}
+}

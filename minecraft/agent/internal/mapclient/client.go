@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -23,6 +24,15 @@ var ErrUnknownCode = errors.New("map: that code is not valid or has expired")
 // it names is no longer the current one. The newer count may hold losses
 // nobody has looked at, so the caller has to read again before retrying.
 var ErrCountReplaced = errors.New("map: a newer chunk count has replaced the one acknowledged")
+
+// ErrNoPendingPasskey is the map saying nobody started adding a passkey
+// for that player in the last two minutes.
+var ErrNoPendingPasskey = errors.New("map: no passkey is waiting for that player")
+
+var (
+	passkeyCodeShape  = regexp.MustCompile(`^[A-HJ-NP-Z2-9]{6}$`)
+	passkeyPrintShape = regexp.MustCompile(`^[0-9A-F]{4}-[0-9A-F]{4}$`)
+)
 
 type Client struct {
 	baseURL string
@@ -66,6 +76,33 @@ func (c *Client) Revoke(ctx context.Context, xuid string) error {
 		return nil
 	}
 	return fmt.Errorf("map: revoke: status %d: %s", status, detail)
+}
+
+// PasskeyCode asks the map for the code to whisper to the player who typed
+// !map passkey. A failure quotes nothing the map said: on this path the
+// map's words are a code meant for one player.
+func (c *Client) PasskeyCode(ctx context.Context, xuid string) (code, fingerprint string, err error) {
+	body, err := json.Marshal(map[string]string{"xuid": xuid})
+	if err != nil {
+		return "", "", err
+	}
+	status, reply, err := c.do(ctx, http.MethodPost, "/internal/v1/passkey-codes", body)
+	switch {
+	case err != nil:
+		return "", "", fmt.Errorf("map: passkey code: %w", err)
+	case status == http.StatusNotFound:
+		return "", "", ErrNoPendingPasskey
+	case status != http.StatusOK:
+		return "", "", fmt.Errorf("map: passkey code: status %d", status)
+	}
+	var out struct {
+		Code        string `json:"code"`
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(reply, &out); err != nil || !passkeyCodeShape.MatchString(out.Code) || !passkeyPrintShape.MatchString(out.Fingerprint) {
+		return "", "", errors.New("map: passkey code: an answer of the wrong shape")
+	}
+	return out.Code, out.Fingerprint, nil
 }
 
 // Chunk is one lost chunk, at the block coordinates of its corner.

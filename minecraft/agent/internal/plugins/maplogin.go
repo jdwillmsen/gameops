@@ -13,10 +13,12 @@ import (
 )
 
 // MapClaimer tells the map service that a player typed a login code, or
-// wants every map login of theirs ended.
+// wants every map login of theirs ended, or needs the code that confirms a
+// passkey being added.
 type MapClaimer interface {
 	Claim(ctx context.Context, code, xuid, gamertag string) error
 	Revoke(ctx context.Context, xuid string) error
+	PasskeyCode(ctx context.Context, xuid string) (code, fingerprint string, err error)
 }
 
 // MapNames resolves an XUID to the gamertag the map page will show.
@@ -52,7 +54,9 @@ func (m *MapLogin) Commands() []plugin.Command {
 	return []plugin.Command{
 		{
 			Name:        "map",
-			Description: "Unlock the world map in your browser: !map <code>. !map logout ends your map logins.",
+			Description: "Unlock the world map in your browser: !map <code>. !map logout ends your map logins. !map passkey sends the code that adds a passkey.",
+			// A reply can be a passkey code meant for one player.
+			RedactReply: true,
 			// Visitor: being able to chat is the whole proof the map asks
 			// for, and everyone on the server can.
 			Permission: plugin.PermissionVisitor,
@@ -69,11 +73,24 @@ func (m *MapLogin) run(ctx context.Context, _ *plugin.Context, inv plugin.Invoca
 	if inv.ActorXUID == chat.ServerOrigin {
 		return "Only a player in the game can use !map.", nil
 	}
+	if len(inv.Args) == 1 && strings.EqualFold(inv.Args[0], "passkey") {
+		code, fingerprint, err := m.claimer.PasskeyCode(ctx, inv.ActorXUID)
+		switch {
+		case errors.Is(err, mapclient.ErrNoPendingPasskey):
+			return "There is no passkey waiting to be added for you. Start from the map page.", nil
+		case err != nil:
+			return "", fmt.Errorf("map: !map passkey: %w", err)
+		}
+		return fmt.Sprintf("Your map passkey code is %s, for the passkey with fingerprint %s. Type it into the map page that asked for it, within 2 minutes, only if that page shows the same fingerprint. It lets that browser log in to the map as you, as admin, without the game. Never give it to anyone, and never type it into a page someone else sent you. If you did not just add a passkey, type !map logout.", code, fingerprint), nil
+	}
 	if len(inv.Args) == 1 && strings.EqualFold(inv.Args[0], "logout") {
 		if err := m.claimer.Revoke(ctx, inv.ActorXUID); err != nil {
-			return "", fmt.Errorf("map: !map logout: %w", err)
+			// The map can end the sessions and still fail to delete the
+			// passkeys, so the generic failure reply would leave the player
+			// unsure which half happened; say plainly that it is unfinished.
+			return "The logout did not fully finish, so some map logins or passkeys of yours may remain. Type !map logout to try again.", nil
 		}
-		return "Every browser that was logged in to the map as you has been logged out.", nil
+		return "Every browser that was logged in to the map as you has been logged out, and any passkeys for your map login have been removed.", nil
 	}
 	code := strings.ToUpper(inv.Args[0])
 	if len(inv.Args) != 1 || !mapCode.MatchString(code) {
