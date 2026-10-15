@@ -106,7 +106,11 @@ func (s *Server) counters(id string) countersJSON {
 	// The pack counts under the signed id the game gives; the page may have
 	// been handed the same number read as unsigned.
 	if u, err := strconv.ParseUint(id, 10, 64); err == nil && u > math.MaxInt64 {
-		id = strconv.FormatInt(int64(u), 10)
+		// The same 64 bits read as signed, worked out from the distance to
+		// the top so that no conversion can overflow.
+		if below := math.MaxUint64 - u; below <= math.MaxInt64 {
+			id = strconv.FormatInt(-int64(below)-1, 10)
+		}
 	}
 	if totals, ok := s.Live.Counters.Lookup(id); ok {
 		return countersJSON{State: detailKnown, Totals: &totals}
