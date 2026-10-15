@@ -257,6 +257,9 @@ func (s *Server) Handler() http.Handler {
 	s.route(mux, gatePublic, "GET /api/config", s.handleConfig)
 	s.route(mux, gateViewer, "GET /api/map", s.handleMap)
 	s.route(mux, gateViewer, "GET /api/diagnostics", s.handleDiagnostics)
+	if s.adminOn() {
+		s.route(mux, gateAdmin, "GET /api/admin/status", s.handleAdminStatus)
+	}
 	s.route(mux, gateViewer, "GET /tiles/{dimension}/{zoom}/{x}/{y}", s.handleTile)
 	if s.Live != nil {
 		s.route(mux, gateViewer, "GET /api/live", s.handleLive)

@@ -116,6 +116,9 @@ func (s *Server) InternalHandler() http.Handler {
 	mux := http.NewServeMux()
 	s.route(mux, gatePublic, "GET /healthz", healthy)
 	s.route(mux, gatePublic, "GET /metrics", promhttp.Handler().ServeHTTP)
+	// Read by agents through the API server's service proxy, with no
+	// credential: see statusJSON for why that is safe.
+	s.route(mux, gatePublic, "GET /internal/v1/status", s.handleInternalStatus)
 	if s.Chunks != nil && s.InternalToken != "" {
 		s.route(mux, gateAgent, "GET /internal/v1/world", s.handleWorld)
 		s.route(mux, gateAgent, "POST /internal/v1/world/acknowledge", s.handleAcknowledge)
