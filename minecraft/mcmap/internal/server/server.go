@@ -56,6 +56,13 @@ type Server struct {
 	// Passkeys and Ceremonies are the passkey login. Nil, there is none.
 	Passkeys   *auth.Passkeys
 	Ceremonies *auth.Ceremonies
+	// XboxClient, XboxFlow and Known are the sign-in with an Xbox account,
+	// which also needs Sessions.XboxOn. Any nil, there is none. Allowlist,
+	// if set, also lets in the players the game server's allowlist names.
+	XboxClient XboxProvider
+	XboxFlow   *auth.XboxFlow
+	Known      KnownPlayers
+	Allowlist  Allowlist
 	// Quiet is the map's quiet windows, for the status to say whether it is
 	// in one.
 	Quiet schedule.Quiet
@@ -113,6 +120,8 @@ type Server struct {
 	limitedLog sparse
 	// refusedLog budgets the log lines of passkey logins refused unjudged.
 	refusedLog logBudget
+	// xboxRefusedLog budgets the log lines of Xbox sign-ins turned away.
+	xboxRefusedLog logBudget
 	// adminMetrics, set only by tests, is where the admin series are declared.
 	adminMetrics *adminMetricSet
 
@@ -337,6 +346,11 @@ func (s *Server) Handler() http.Handler {
 		s.route(mux, gatePublic, "POST /auth/start", s.handleStart)
 		s.route(mux, gatePublic, "GET /auth/status", s.handleStatus)
 		s.route(mux, gatePublic, "POST /auth/logout", s.handleLogout)
+	}
+	if s.xboxOn() {
+		declareXboxMetrics()
+		s.route(mux, gatePublic, "GET /auth/xbox/start", s.handleXboxStart)
+		s.route(mux, gatePublic, "GET /auth/xbox/callback", s.handleXboxCallback)
 	}
 	if s.passkeysOn() {
 		s.route(mux, gatePublic, "POST /auth/passkey/options", s.handlePasskeyOptions)

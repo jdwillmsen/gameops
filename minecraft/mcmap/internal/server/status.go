@@ -52,7 +52,7 @@ func (s *Server) status() statusJSON {
 			"login": s.Sessions != nil, "live": s.Live != nil, "markers": s.Markers != nil,
 			"waypoints": s.Waypoints != nil && s.Sessions != nil, "icons": s.MobIcons != nil || s.Heads != nil || s.Art != nil,
 			"structures": s.Structures != nil, "biomes": s.Biomes != nil, "trails": s.Trails != nil,
-			"history": s.History != nil, "admin": s.adminOn(), "passkeys": s.passkeysOn(),
+			"history": s.History != nil, "admin": s.adminOn(), "passkeys": s.passkeysOn(), "xbox": s.xboxOn(),
 		},
 	}
 	out.Build, out.Go = buildInfo()

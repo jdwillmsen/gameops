@@ -17,7 +17,7 @@ var (
 	goVersion   = regexp.MustCompile(`^(go[0-9.]+)?$`)
 	rfc3339     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$`)
 	hex8        = regexp.MustCompile(`^[0-9a-f]{8}$`)
-	featureKeys = []string{"login", "live", "markers", "waypoints", "icons", "structures", "biomes", "trails", "history", "admin", "passkeys"}
+	featureKeys = []string{"login", "live", "markers", "waypoints", "icons", "structures", "biomes", "trails", "history", "admin", "passkeys", "xbox"}
 )
 
 // checkShape fails on any key or string outside D8's table: every pod in
