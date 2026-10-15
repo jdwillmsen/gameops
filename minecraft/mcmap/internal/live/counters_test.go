@@ -3,6 +3,8 @@ package live
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"os"
 	"path/filepath"
 	"strings"
@@ -403,4 +405,24 @@ func TestTheSourceNeverCountsADeltaTwiceWhenTheBridgeRepeatsItself(t *testing.T)
 	if bo, _ := c.Lookup("-22"); bo.Broken != 4 {
 		t.Errorf("broken = %d, want 4", bo.Broken)
 	}
+}
+
+func TestALineMissedAtTheStartOfARunIsCounted(t *testing.T) {
+	l, _ := newCounted(t)
+	before := testutilCounter(t, metricCountsMissed)
+	ingest(l, countsLine(5, 4, boDelta), epoch)
+	ingest(l, countsLine(5, 5, boDelta), epoch)
+	ingest(l, countsLine(6, 1, boDelta), epoch)
+	if got := testutilCounter(t, metricCountsMissed) - before; got != 3 {
+		t.Errorf("missed = %v, want 3", got)
+	}
+}
+
+func testutilCounter(t *testing.T, c prometheus.Counter) float64 {
+	t.Helper()
+	var m dto.Metric
+	if err := c.Write(&m); err != nil {
+		t.Fatal(err)
+	}
+	return m.GetCounter().GetValue()
 }
