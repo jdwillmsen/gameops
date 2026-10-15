@@ -116,10 +116,10 @@ type trail struct {
 	seenX     float64
 	seenZ     float64
 	dimension uint8
-	// days is what the player did on each day they were seen, oldest
-	// first. It is kept from every sample and not from the points, which
-	// leave out a player standing still and thin out the old.
-	days []day
+	// buckets is what the player did in each few minutes they were seen,
+	// oldest first. It is kept from every sample and not from the points,
+	// which leave out a player standing still and thin out the old.
+	buckets []bucket
 }
 
 // Recorder keeps each player's recent positions, within its limits.
@@ -311,21 +311,23 @@ func (r *Recorder) Prune(now time.Time) {
 }
 
 func (r *Recorder) prune(now time.Time) {
-	cutoff := now.Add(-r.MaxAge).Unix()
+	cutoff := now.Add(-r.MaxAge)
 	for k, t := range r.trails {
 		old := 0
-		for old < len(t.points) && t.points[old].T < cutoff {
+		for old < len(t.points) && t.points[old].T < cutoff.Unix() {
 			old++
 		}
 		if old > 0 {
 			t.points = slices.Delete(t.points, 0, old)
 			metricDropped.WithLabelValues("age").Add(float64(old))
 		}
-		t.forgetDays(now.Add(-r.MaxAge))
+		t.forget(cutoff)
 		switch {
-		case len(t.points) == 0:
+		// A player who stood still for longer than the points are kept
+		// is still here: their time online is counted from every sample.
+		case len(t.points) == 0 && t.seenAt.Unix() < cutoff.Unix():
 			delete(r.trails, k)
-		case old > 0:
+		case old > 0 && len(t.points) > 0:
 			t.points[0].begins = true
 		}
 	}

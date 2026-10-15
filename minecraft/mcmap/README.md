@@ -2853,8 +2853,9 @@ It has two halves, each saying where it comes from.
   unlisted id shows as its number) and durability from a table of
   tools and armour.
 - **The trails.** Time online and distance are added up from every sample
-  per UTC day, not from the thinned trail points, which leave out a player
-  standing still. A silence over two minutes between samples counts as
+  in five-minute buckets, not from the thinned trail points, which leave out
+  a player standing still. The window is the retention to the second (the
+  oldest bucket is counted in proportion), and the per-day rows are UTC. A silence over two minutes between samples counts as
   offline; a portal or teleport adds no distance. Figures cover the trail
   retention (`TRAILS_MAX_AGE`) and are forgotten by a restart, like the
   trails. With trails off the panel says so.

@@ -1,6 +1,7 @@
 package trails
 
 import (
+	"cmp"
 	"math"
 	"slices"
 	"strings"
@@ -17,50 +18,49 @@ import (
 // counted as offline, so a stalled feed costs at most this much per stall.
 const OnlineGap = 2 * time.Minute
 
-// dateLayout names a day. Days are UTC: the server has no way to know which
+// dateLayout names a day, for the per-day figures. Days are UTC: the server has no way to know which
 // zone a viewer reads the page in.
 const dateLayout = "2006-01-02"
 
-type day struct {
-	date   string
+// bucketWidth is how finely time online and distance are kept. The window
+// they are summed over is cut at the second, by taking only the part of the
+// oldest bucket that falls inside it.
+const bucketWidth = 5 * 60
+
+type bucket struct {
+	start  int64
 	online time.Duration
 	blocks float64
 	// dimensions is a bit for each of render.Dimensions the player was in.
 	dimensions uint8
 }
 
-// account takes one sample of a player into the day it was taken on. The
+// account takes one sample of a player into the bucket it falls in. The
 // time since the last sample is online time when it is short, and the way
 // moved since is distance when the player walked it and did not arrive by
 // a portal or a teleport, by the same rule that breaks a line.
 func (t *trail) account(at time.Time, x, z float64, dimension uint8, begins bool) {
-	date := at.UTC().Format(dateLayout)
-	if n := len(t.days); n == 0 || t.days[n-1].date != date {
-		// A clock set back lands in a day already held, and is added to it.
-		if i := slices.IndexFunc(t.days, func(d day) bool { return d.date == date }); i >= 0 {
-			t.days = append(t.days, t.days[i])
-			t.days = slices.Delete(t.days, i, i+1)
-		} else {
-			t.days = append(t.days, day{date: date})
-		}
+	start := at.Unix() / bucketWidth * bucketWidth
+	i, found := slices.BinarySearchFunc(t.buckets, start, func(b bucket, s int64) int { return cmp.Compare(b.start, s) })
+	if !found {
+		t.buckets = slices.Insert(t.buckets, i, bucket{start: start})
 	}
-	d := &t.days[len(t.days)-1]
-	d.dimensions |= 1 << dimension
+	b := &t.buckets[i]
+	b.dimensions |= 1 << dimension
 	if t.seenAt.IsZero() || !at.After(t.seenAt) {
 		return
 	}
 	if gap := at.Sub(t.seenAt); gap <= OnlineGap {
-		d.online += gap
+		b.online += gap
 	}
 	if !begins {
-		d.blocks += math.Hypot(x-t.seenX, z-t.seenZ)
+		b.blocks += math.Hypot(x-t.seenX, z-t.seenZ)
 	}
 }
 
-// forgetDays lets go of the days that ended before cutoff.
-func (t *trail) forgetDays(cutoff time.Time) {
-	first := cutoff.UTC().Format(dateLayout)
-	t.days = slices.DeleteFunc(t.days, func(d day) bool { return d.date < first })
+// forget lets go of the buckets that ended before cutoff.
+func (t *trail) forget(cutoff time.Time) {
+	t.buckets = slices.DeleteFunc(t.buckets, func(b bucket) bool { return b.start+bucketWidth <= cutoff.Unix() })
 }
 
 // DayStats is one day of a player's time and travel.
@@ -115,11 +115,27 @@ func (r *Recorder) Stats(player string, now time.Time) (Stats, bool) {
 	var online time.Duration
 	var blocks float64
 	var seen uint8
-	for _, d := range t.days {
-		online += d.online
-		blocks += d.blocks
-		seen |= d.dimensions
-		out.Days = append(out.Days, DayStats{Date: d.date, OnlineSeconds: int(d.online.Seconds()), Blocks: int(d.blocks)})
+	cutoff := now.Add(-r.MaxAge).Unix()
+	perDay := map[string]*[2]float64{}
+	for _, b := range t.buckets {
+		// The oldest bucket may straddle the start of the window.
+		inside := 1.0
+		if b.start < cutoff {
+			inside = float64(b.start+bucketWidth-cutoff) / bucketWidth
+		}
+		seen |= b.dimensions
+		secs, walked := b.online.Seconds()*inside, b.blocks*inside
+		online += time.Duration(secs * float64(time.Second))
+		blocks += walked
+		date := time.Unix(b.start, 0).UTC().Format(dateLayout)
+		if perDay[date] == nil {
+			perDay[date] = &[2]float64{}
+		}
+		perDay[date][0] += secs
+		perDay[date][1] += walked
+	}
+	for date, v := range perDay {
+		out.Days = append(out.Days, DayStats{Date: date, OnlineSeconds: int(v[0]), Blocks: int(v[1])})
 	}
 	slices.SortFunc(out.Days, func(a, b DayStats) int { return strings.Compare(a.Date, b.Date) })
 	out.OnlineSeconds, out.Blocks = int(online.Seconds()), int(blocks)
