@@ -257,13 +257,13 @@ func (p *Passkeys) Confirm(xuid string, issuedMilli int64, credentialID []byte, 
 		}
 		return Passkey{}, MaxWrongCodes - w.wrong, ErrWrongCode
 	}
-	delete(p.waiting, xuid)
 	k := w.key
 	p.active[KeyOf(k.ID)] = &k
 	if err := p.save(); err != nil {
 		delete(p.active, KeyOf(k.ID))
 		return Passkey{}, 0, err
 	}
+	delete(p.waiting, xuid)
 	p.counted()
 	return k, 0, nil
 }
