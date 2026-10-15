@@ -129,6 +129,16 @@ func run(logger *slog.Logger) error {
 	}
 
 	layer := live.New(10*time.Second, 1000, logger)
+	layer.Counters = &live.Counters{Path: filepath.Join(dir, "counters", "counters.json"), Logger: logger}
+	if err := layer.Counters.Load(); err != nil {
+		return err
+	}
+	// Counted once, as the pack would have printed it over a few sessions.
+	// Invented, like everything else here.
+	layer.Ingest(live.RawRecord{ID: 1, At: now, Data: `{"gen":1,"kind":"counts","boot":1,"seq":1,"items":[{"i":"1",` +
+		`"d":{"fall":2,"entityAttack":1,"lava":1},"k":{"zombie":41,"skeleton":17,"creeper":6,"enderman":2,"zombie_villager_v2":1},` +
+		`"b":512,"bt":{"stone":240,"dirt":96,"deepslate":80,"oak_log":44},"p":210,"pt":{"cobblestone":120,"oak_planks":60,"torch":30},` +
+		`"j":6,"l":5,"t":19800}]}`}, now)
 	biomeStore := &biomes.Store{}
 	biomeStore.Set(biomeWorld(now))
 	layer.Surface = biomeStore.Surface
@@ -670,7 +680,7 @@ func play(ctx context.Context, layer *live.Layer, recorder *trails.Recorder, qui
 			steve.step(pace * seconds)
 			fox.step(pace * seconds)
 			players := []map[string]any{
-				{"i": "1", "n": "HarnessPlayerOne", "x": steve.x, "y": 64, "z": steve.z, "r": 270},
+				{"i": "1", "n": "HarnessPlayerOne", "x": steve.x, "y": 64, "z": steve.z, "r": 270, "h": 13, "hm": 20, "xl": 14},
 				{"i": "7", "n": hostile, "x": 100.5, "y": 64, "z": -40.5, "r": 0},
 			}
 			mobs := []map[string]any{
