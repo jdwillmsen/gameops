@@ -118,6 +118,7 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/players/{id}":                                   {"gateViewer", "/api/players/42"},
 	"public GET /api/search":                                         {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
 	"public GET /api/me":                                             {"gateViewer", "/api/me"},
+	"public GET /api/admin/status":                                   {"gateAdmin", "/api/admin/status"},
 	"public GET /api/waypoints":                                      {"gatePlayer", "/api/waypoints"},
 	"public GET /api/passkeys":                                       {"gatePlayer", "/api/passkeys"},
 	"public DELETE /api/passkeys/{id}":                               {"gatePlayer", "/api/passkeys/none"},
@@ -125,6 +126,7 @@ var routes = map[string]struct{ gate, path string }{
 	// The internal listener's. Its liveness route is the public one's twin.
 	"internal GET /healthz":                        {"gatePublic", ""},
 	"internal GET /metrics":                        {"gatePublic", ""},
+	"internal GET /internal/v1/status":             {"gatePublic", ""},
 	"internal GET /internal/v1/world":              {"gateAgent", ""},
 	"internal POST /internal/v1/world/acknowledge": {"gateAgent", ""},
 	"internal PUT /internal/v1/heads":              {"gateAgent", ""},

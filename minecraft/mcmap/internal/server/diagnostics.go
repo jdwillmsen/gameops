@@ -97,17 +97,7 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 			out.Role = "service"
 		}
 	}
-	if info, ok := debug.ReadBuildInfo(); ok {
-		out.Go = info.GoVersion
-		for _, setting := range info.Settings {
-			if setting.Key == "vcs.revision" {
-				out.Build = strings.TrimSpace(setting.Value)
-				if len(out.Build) > 12 {
-					out.Build = out.Build[:12]
-				}
-			}
-		}
-	}
+	out.Build, out.Go = buildInfo()
 	if !status.SnapshotAt.IsZero() {
 		out.SnapshotAt = &status.SnapshotAt
 	}
@@ -117,4 +107,26 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func buildInfo() (build, goVersion string) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "", ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			build = strings.TrimSpace(setting.Value)
+			if len(build) > 12 {
+				build = build[:12]
+			}
+		}
+	}
+	// The revision is written to the status as hex and nothing else; a
+	// build made outside version control says nothing rather than
+	// something else.
+	if strings.Trim(build, "0123456789abcdef") != "" {
+		build = ""
+	}
+	return build, info.GoVersion
 }
