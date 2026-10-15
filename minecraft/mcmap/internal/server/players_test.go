@@ -17,6 +17,22 @@ type playerAnswer struct {
 		AsOf   *time.Time      `json:"asOf"`
 		Record *players.Record `json:"record"`
 	} `json:"saved"`
+	Counters struct {
+		State         string           `json:"state"`
+		Since         *time.Time       `json:"since"`
+		Kills         map[string]int64 `json:"kills"`
+		Deaths        map[string]int64 `json:"deaths"`
+		Broken        int64            `json:"broken"`
+		Placed        int64            `json:"placed"`
+		Joins         int64            `json:"joins"`
+		OnlineSeconds int64            `json:"onlineSeconds"`
+	} `json:"counters"`
+	Live *struct {
+		Health    *float64 `json:"health"`
+		MaxHealth *float64 `json:"maxHealth"`
+		Level     *int     `json:"level"`
+		Dimension string   `json:"dimension"`
+	} `json:"live"`
 	Trails struct {
 		State string `json:"state"`
 		Stats *struct {
@@ -141,5 +157,58 @@ func TestPlayerDetailsAreLeftOutWithNoRecords(t *testing.T) {
 	s.Players = nil
 	if rec := get(t, s, "/api/players/-9"); rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d", rec.Code)
+	}
+}
+
+func withCounters(t *testing.T, s *Server) {
+	t.Helper()
+	s.Live.Counters = &live.Counters{}
+	now := time.Now()
+	s.Live.Ingest(live.RawRecord{At: now, Data: `{"gen":2,"kind":"counts","boot":5,"seq":1,"items":[{"i":"-9","k":{"zombie":2},"d":{"fall":1},"b":4,"p":1,"j":1,"t":60}]}`}, now)
+}
+
+func TestPlayerDetailsCarryTheCounters(t *testing.T) {
+	s := withPlayers(t)
+	withCounters(t, s)
+	got := askPlayer(t, s, "/api/players/-9")
+	c := got.Counters
+	if c.State != "known" || c.Since == nil || c.Kills["zombie"] != 2 || c.Deaths["fall"] != 1 || c.Broken != 4 || c.Placed != 1 || c.Joins != 1 || c.OnlineSeconds != 60 {
+		t.Errorf("counters = %+v", c)
+	}
+	// The same player, named by the unsigned reading of the id.
+	if got := askPlayer(t, s, "/api/players/18446744073709551607"); got.Counters.State != "known" {
+		t.Errorf("unsigned id: counters = %+v", got.Counters)
+	}
+}
+
+func TestPlayerDetailsSayWhenNothingHasBeenCountedAndWhenNothingIs(t *testing.T) {
+	s := withPlayers(t)
+	if got := askPlayer(t, s, "/api/players/-9"); got.Counters.State != "off" {
+		t.Errorf("no counters kept = %+v", got.Counters)
+	}
+	withCounters(t, s)
+	got := askPlayer(t, s, "/api/players/123")
+	if got.Counters.State != "none" || got.Counters.Since != nil {
+		t.Errorf("a player nobody counted = %+v", got.Counters)
+	}
+	s.Live = nil
+	if got := askPlayer(t, s, "/api/players/-9"); got.Counters.State != "off" {
+		t.Errorf("no live feed = %+v", got.Counters)
+	}
+}
+
+func TestPlayerDetailsCarryLiveVitalsOnlyForAnOnlinePlayer(t *testing.T) {
+	s := withPlayers(t)
+	if got := askPlayer(t, s, "/api/players/-9"); got.Live != nil {
+		t.Errorf("a pack that sends no vitals still gave %+v", got.Live)
+	}
+	now := time.Now()
+	s.Live.Ingest(live.RawRecord{At: now, Data: `{"gen":3,"dim":"overworld","kind":"players","part":0,"parts":1,"more":0,"items":[{"i":"-9","n":"Dotablaze","x":1,"y":64,"z":1,"h":13,"hm":20,"xl":31}]}`}, now)
+	got := askPlayer(t, s, "/api/players/-9")
+	if got.Live == nil || *got.Live.Health != 13 || *got.Live.MaxHealth != 20 || *got.Live.Level != 31 || got.Live.Dimension != "overworld" {
+		t.Errorf("live = %+v", got.Live)
+	}
+	if got := askPlayer(t, s, "/api/players/123"); got.Live != nil {
+		t.Errorf("an offline player has live vitals: %+v", got.Live)
 	}
 }
