@@ -596,6 +596,11 @@ func TestCommand_ATellrawIsNeverQuotedBack(t *testing.T) {
 		"refused, quoted target": `tellraw "Steve Builds" {"rawtext":[{"text":"` + secret + `"}]}`,
 		// Allowed, then cannot be sent: the console is never connected.
 		"failed": `tellraw Steve {"rawtext":[{"text":"` + secret + `"}]}`,
+		// Refused for the verb's spelling, but still a whisper.
+		"refused, newline":       "tellraw\n" + secret,
+		"refused, upper case":    "TELLRAW Steve " + secret,
+		"refused, leading space": " tellraw Steve " + secret,
+		"refused, tab":           "tellraw\t" + secret,
 	} {
 		rec := postCommand(t, mux, cmd)
 		if rec.Code == http.StatusOK {
