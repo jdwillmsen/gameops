@@ -1,6 +1,7 @@
 package atomicfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,5 +33,19 @@ func TestWrite_IntoExistingDirectoryReturnsNoError(t *testing.T) {
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != "body" {
 		t.Fatalf("read back %q, %v", got, err)
+	}
+}
+
+func TestWrite_DirectorySyncFailureAfterRenameIsNotAnError(t *testing.T) {
+	orig := syncDir
+	t.Cleanup(func() { syncDir = orig })
+	syncDir = func(string) error { return errors.New("sync failed") }
+
+	path := filepath.Join(t.TempDir(), "f.json")
+	if err := Write(path, []byte("new")); err != nil {
+		t.Fatalf("Write returned %v after a successful rename", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "new" {
+		t.Fatalf("read back %q, want %q", got, "new")
 	}
 }
