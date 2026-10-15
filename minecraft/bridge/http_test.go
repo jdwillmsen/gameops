@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -574,5 +575,46 @@ func TestScriptEndpointServesWhatTheConsolePrints(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("a record printed on the console never reached GET /script")
+	}
+}
+
+// A tellraw carries a whisper, which can be a passkey code meant for one
+// player. Refused or failed, the bridge says which rule and nothing more.
+func TestCommand_ATellrawIsNeverQuotedBack(t *testing.T) {
+	var log bytes.Buffer
+	mux := newMux(&server{
+		cfg:     Config{BridgeToken: "tok", DataDir: t.TempDir()},
+		console: testConsole(), // never connected, so an allowed command fails to send
+		logger:  slog.New(slog.NewTextHandler(&log, nil)),
+	})
+	secret := "ABC234"
+	for name, cmd := range map[string]string{
+		// Fails the payload check, whose error does not quote the payload.
+		"refused, bad payload": `tellraw Steve {"no":"` + secret + `"}`,
+		// Matches no template, and ErrCommandNotAllowed's message quotes the
+		// whole command (%q in allowlist.go): the path that leaked.
+		"refused, quoted target": `tellraw "Steve Builds" {"rawtext":[{"text":"` + secret + `"}]}`,
+		// Allowed, then cannot be sent: the console is never connected.
+		"failed": `tellraw Steve {"rawtext":[{"text":"` + secret + `"}]}`,
+	} {
+		rec := postCommand(t, mux, cmd)
+		if rec.Code == http.StatusOK {
+			t.Fatalf("%s: answered 200", name)
+		}
+		if strings.Contains(rec.Body.String(), secret) {
+			t.Errorf("%s: the answer quotes the whisper: %s", name, rec.Body)
+		}
+	}
+	if strings.Contains(log.String(), secret) {
+		t.Errorf("the log quotes a whisper:\n%s", log.String())
+	}
+	if !strings.Contains(log.String(), "tellraw") {
+		t.Error("the log does not say which rule, so this test saw nothing")
+	}
+	// Other commands are logged as they are today.
+	log.Reset()
+	_ = postCommand(t, mux, "op Steve")
+	if !strings.Contains(log.String(), "op Steve") {
+		t.Errorf("a refused command that is not a tellraw is no longer logged as it was:\n%s", log.String())
 	}
 }
