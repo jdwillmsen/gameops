@@ -86,10 +86,10 @@ var routes = map[string]struct{ gate, path string }{
 	"public POST /auth/logout":                                    {"gatePublic", ""},
 	"public POST /auth/passkey/options":                           {"gatePublic", ""},
 	"public POST /auth/passkey/finish":                            {"gatePublic", ""},
-	"public POST /auth/passkey/register/options":                  {"gateAdmin", ""},
-	"public POST /auth/passkey/register/finish":                   {"gateAdmin", ""},
-	"public POST /auth/passkey/register/confirm":                  {"gateAdmin", ""},
-	"public POST /auth/passkey/register/cancel":                   {"gateAdmin", ""},
+	"public POST /auth/passkey/register/options":                  {"gateAdmin", "/auth/passkey/register/options"},
+	"public POST /auth/passkey/register/finish":                   {"gateAdmin", "/auth/passkey/register/finish"},
+	"public POST /auth/passkey/register/confirm":                  {"gateAdmin", "/auth/passkey/register/confirm"},
+	"public POST /auth/passkey/register/cancel":                   {"gateAdmin", "/auth/passkey/register/cancel"},
 	"public GET /api/map":                                         {"gateViewer", "/api/map"},
 	"public GET /api/diagnostics":                                 {"gateViewer", "/api/diagnostics"},
 	"public GET /tiles/{dimension}/{zoom}/{x}/{y}":                {"gateViewer", "/tiles/overworld/0/37/-4.webp"},
@@ -358,8 +358,16 @@ func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 		if route.path == "" || route.gate == "gateAgent" || route.gate == "gateExchange" {
 			continue
 		}
-		asService := do(h, "GET", route.path, "", []*http.Cookie{service})
-		asPlayer := do(h, "GET", route.path, "", []*http.Cookie{player})
+		method := "GET"
+		if route.gate == "gateAdmin" {
+			// The method is the pattern's, and the request is from the
+			// same site, so that it is the session that is refused and not
+			// the request's origin.
+			_, rest, _ := strings.Cut(pattern, " ")
+			method, _, _ = strings.Cut(rest, " ")
+		}
+		asService := do(h, method, route.path, "", []*http.Cookie{service}, "Sec-Fetch-Site", "same-origin")
+		asPlayer := do(h, method, route.path, "", []*http.Cookie{player}, "Sec-Fetch-Site", "same-origin")
 		// A player is turned away from nothing by any of this.
 		if route.gate != "gateAdmin" && (asPlayer.Code == http.StatusForbidden || asPlayer.Code == http.StatusUnauthorized) {
 			t.Errorf("%s as a player = %d", pattern, asPlayer.Code)
@@ -472,7 +480,7 @@ func TestService_NoCodePathTreatsASessionAsAPlayer(t *testing.T) {
 	service := serviceSession(t, s)
 	h := s.Handler()
 	for pattern, route := range routes {
-		if route.path == "" {
+		if route.path == "" || route.gate == "gateAdmin" {
 			continue
 		}
 		for _, path := range []string{route.path, strings.Replace(route.path, "q=a", "q=base", 1)} {

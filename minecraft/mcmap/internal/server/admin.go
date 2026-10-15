@@ -17,7 +17,9 @@ type OperatorList interface {
 
 func (s *Server) adminOn() bool { return s.Admin && s.Sessions != nil && s.Operators != nil }
 
-func (s *Server) passkeysOn() bool { return s.adminOn() && s.Passkeys != nil && s.Ceremonies != nil }
+func (s *Server) passkeysOn() bool {
+	return s.adminOn() && s.Passkeys != nil && s.Ceremonies != nil && s.Sessions.Passkeys != nil
+}
 
 func (s *Server) isAdmin(ctx context.Context, xuid string) bool {
 	if !s.adminOn() {
