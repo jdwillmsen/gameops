@@ -174,7 +174,7 @@ func TestMap_LogoutEndsEveryMapLoginOfWhoeverTypedIt(t *testing.T) {
 	}
 }
 
-func TestMap_LogoutThatFailedSaysSoRatherThanClaimingIt(t *testing.T) {
+func TestMap_LogoutThatFailedPropagatesWithoutClaimingSuccess(t *testing.T) {
 	claimer := &fakeClaimer{err: errors.New("map: status 502")}
 	if reply, err := runMap(t, claimer, "logout"); err == nil || reply != "" {
 		t.Fatalf("reply %q, err %v", reply, err)
