@@ -464,3 +464,44 @@ func TestRegisterFinish_OnlyTheCredentialsFaultIsARefusal(t *testing.T) {
 		}
 	}
 }
+
+// A body that begins with a byte-order mark is refused, never stripped
+// and read: what the map takes is JSON exactly as the page sends it.
+func TestPasskeys_ABodyWithALeadingBOMIsRefused(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	h, as := s.Handler(), session(s, steve)
+	const bom = "\xef\xbb\xbf"
+	if rec := do(h, "POST", "/auth/passkey/register/options", bom+`{"label":"Phone"}`, []*http.Cookie{as}); rec.Code != http.StatusBadRequest {
+		t.Errorf("register options with a BOM = %d, want 400", rec.Code)
+	}
+	opts := do(h, "POST", "/auth/passkey/register/options", `{"label":"Phone"}`, []*http.Cookie{as})
+	d := newDevice(t)
+	if rec := do(h, "POST", "/auth/passkey/register/finish", bom+d.create(challengeIn(t, opts.Body.Bytes())), []*http.Cookie{as}); rec.Code != http.StatusBadRequest {
+		t.Errorf("register finish with a BOM = %d, want 400", rec.Code)
+	}
+}
+
+// Before finish there is only a challenge, and asking again replaces it
+// rather than being refused. Only once a passkey is pending is a second
+// registration refused.
+func TestPasskeys_ASecondStartReplacesTheChallengeUntilFinish(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	h, as := s.Handler(), session(s, steve)
+	first := challengeIn(t, do(h, "POST", "/auth/passkey/register/options", `{"label":"Phone"}`, []*http.Cookie{as}).Body.Bytes())
+	again := do(h, "POST", "/auth/passkey/register/options", `{"label":"Laptop"}`, []*http.Cookie{as})
+	if again.Code != http.StatusOK {
+		t.Fatalf("a second start before finish = %d, want 200", again.Code)
+	}
+	second := challengeIn(t, again.Body.Bytes())
+	if first == second {
+		t.Fatal("the second start reused the first challenge")
+	}
+	if rec := do(h, "POST", "/auth/passkey/register/finish", newDevice(t).create(second), []*http.Cookie{as}); rec.Code != http.StatusOK {
+		t.Errorf("finishing the newer challenge = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(h, "POST", "/auth/passkey/register/options", `{"label":"Spare"}`, []*http.Cookie{as}); rec.Code != http.StatusConflict {
+		t.Errorf("a start once a passkey is pending = %d, want 409", rec.Code)
+	}
+}

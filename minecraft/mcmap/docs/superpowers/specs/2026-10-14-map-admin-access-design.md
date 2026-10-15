@@ -262,7 +262,8 @@ enough that a list that keeps growing is noticed.
    `attestation: none`, ES256 and RS256, and an `excludeCredentials` list
    of the XUID's existing credentials. The map keeps the challenge for 2
    minutes, single use, together with the XUID and the session's
-   `IssuedMilli`. The table is bounded and admin-only, so filling it takes
+   `IssuedMilli`. Asking again before finishing replaces that XUID's
+   challenge, so only the newest one can finish. The table is bounded and admin-only, so filling it takes
    an operator's session.
 3. The browser creates the credential. `POST
    /auth/passkey/register/finish` (admin gate) checks that the caller's
@@ -270,7 +271,8 @@ enough that a list that keeps growing is noticed.
    runs the §7.1 steps listed below. On success it stores the credential
    as **pending**, tied to that XUID. There is at most one pending
    credential per XUID, and **a second registration while one is pending
-   is refused, not replaced**. It is allowed again only once the pending
+   is refused, not replaced**. This applies from finish on: before it
+   there is only a challenge, which step 2 replaces. It is allowed again only once the pending
    one has expired, after 2 minutes, or has been cancelled with
    `POST /auth/passkey/register/cancel` by a session with the same XUID
    and `IssuedMilli`. A pending credential cannot log anyone in. The page
@@ -422,7 +424,9 @@ pass with the same count.
 **Every request, not only at login,** a `m: "passkey"` cookie is refused
 unless passkeys are switched on and the credential its `k` names is still
 stored and active. So removing a passkey, or switching passkeys off, ends
-its sessions at once, not after 12 hours. A cookie whose `m` is anything
+its sessions at once, not after 12 hours. Switching passkeys off refuses
+those cookies without destroying them: switched back on within their 12
+hours, the cookies of passkeys still stored work again. A cookie whose `m` is anything
 but absent or `passkey`, or that has `m: "passkey"` and no `k`, is
 refused. A cookie with no `m` is a game-code session and verifies as it
 does today.
@@ -435,7 +439,7 @@ Registration (§7.1):
 
 | Step | Check |
 |---|---|
-| 5-6 | Decode `clientDataJSON` as UTF-8, removing a leading BOM, and parse it |
+| 5-6 | Decode `clientDataJSON` as UTF-8, removing a leading BOM, and parse it. This is the field inside the credential; a request body that itself begins with a BOM is refused, not stripped, as every JSON body the map takes is |
 | 7 | `type` is `webauthn.create` |
 | 8 | `challenge` is the one issued, unexpired and not used before, and the caller's XUID and `IssuedMilli` are the ones it was issued to |
 | 9 | `origin` equals `PUBLIC_ORIGIN` exactly |
@@ -559,7 +563,9 @@ player who is no longer an operator can still clean up after themselves:
    `GET /api/passkeys`.
 4. **Remove one.** `DELETE /api/passkeys/{id}`. Its sessions end at once
    (D3).
-5. **Log out everywhere.** `POST /api/logout-all`, the same revocation
+5. **Log out everywhere.** `POST /api/logout-all`, registered only with
+   passkeys on, as the page's Account panel that offers it is. With
+   passkeys off, `!map logout` is the way. It is the same revocation
    `!map logout` makes (D7). The page asks first: "This logs out every
    browser logged in as you and removes all your passkeys."
 
@@ -602,7 +608,7 @@ SHA-256 of its ID. A user agent is cut as `said` already cuts it.
 | The map failed to add a passkey (its own fault, not the credential's) | At error level, xuid and error class only: `map passkey not held as pending` (answered 500 `fault`), `map passkey not registered` (the store could not be written; 503 `busy`), `map passkey code not issued` (503) | none |
 | Passkey login | `map login issued` (the existing line) with `method=passkey`, credential | `mcmap_admin_logins_total{result}` with `ok`; before the signature verifies `bad_assertion`, `unknown_credential`, `expired`, `disabled`; after it `pending`, `not_operator`, `counter`, `replayed` |
 | Admin route used | `map admin request` xuid, route pattern, allowed | `mcmap_admin_requests_total{route,allowed}` |
-| Operator lookup | `map operator lookup failed` error class, on failure only, at most once a minute | `mcmap_admin_operator_lookups_total{result}`, `result` one of `live`, `last_known_good`, `none` |
+| Operator lookup | `map operator lookup failed` error class (`no_file`, `timeout`, `cancelled`, `unreachable`), on failure only, at most once a minute | `mcmap_admin_operator_lookups_total{result}`, `result` one of `live`, `last_known_good`, `none` |
 | Operators known | none | `mcmap_admin_operators` (a count, no identities) |
 | Passkeys held | none | `mcmap_admin_passkeys{state}` (`pending`, `active`), set from `passkeys.json` at startup and on every change |
 
@@ -729,9 +735,9 @@ all, a few minutes.
 | To end | Do | Takes effect |
 |---|---|---|
 | One person's admin | Take them off the operator list: the console's `deop`, which writes the file, or edit `permissions.json` and run `permission reload` (both verified in the manual). Whether an in-game `/deop` writes the file is not verified. **Deleting `permissions.json` does not do it**: the bridge answers 404, which the map treats as an outage and falls back to the last-known-good set | Within 10 s while the bridge is up; up to 24 h late while it is down or the file is missing (D1) |
-| One person's sessions and passkeys | `!map logout` in game, or Log out everywhere in the page | At once |
+| One person's sessions and passkeys | `!map logout` in game, or, with passkeys on, Log out everywhere in the page | At once |
 | One passkey and its sessions | Remove it in the page | At once |
-| Passkey logins for everyone | `map.admin.passkeys: false` in the chart | Argo sync plus restart. Every passkey session is refused from then on (D3). Stored passkeys are kept but unused |
+| Passkey logins for everyone | `map.admin.passkeys: false` in the chart | Argo sync plus restart. Every passkey session is refused from then on (D3). Stored passkeys are kept but unused, and switched back on within 12 hours an unexpired passkey session works again |
 | The admin role for everyone | `map.admin.enabled: false` **and** `map.admin.passkeys: false`, in one change. The map refuses to start with passkeys on and admin off, so turning admin off alone would stop the map | Argo sync plus restart. No admin route is registered and no passkey session is accepted |
 | Every passkey | Delete `DATA_DIR/auth/passkeys.json` and restart the map | Needs the volume and a restart, so a person with cluster access |
 | Every login of every kind | Delete `session.key` and restart the map | Needs the volume and a restart. Passkeys survive it and work again at once |
@@ -947,8 +953,8 @@ Go, in `internal/auth`, `internal/server` and the agent, all run in CI:
 - **Kill switches.** With `ADMIN_ENABLED=false`, every admin route is
   404 and `/api/me` has no `admin`, for an operator's cookie issued while
   it was on. With `PASSKEYS_ENABLED=false`, a `m: "passkey"` cookie
-  issued while it was on is refused on every route, and the passkey routes
-  are 404.
+  issued while it was on is refused on every route, and the passkey routes,
+  `POST /api/logout-all` among them, are 404.
 - **Login off and bridge down.** With `AUTH_DISABLED=true` and both
   switches on, the map starts, nobody is admin, and no route errors. With
   the bridge unreachable and no last-known-good, `/api/me` answers
