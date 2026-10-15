@@ -51,12 +51,13 @@ const ID_BYTES = 64;
 const MAX_PARTS = 256;
 
 // Counts are deltas the map adds up, so what one record holds is bounded
-// here and the rest of a busy sample is folded into the totals, which are
-// always exact. The map bounds its own side as well.
+// here: only the most-counted types of a sample are named, and a player who
+// would be the 257th with something to report in one sample goes uncounted
+// (and noted as an error). The block totals of those that are counted are
+// exact. The map bounds its own side as well.
 const MAX_TYPES = 12;
 const MAX_PENDING_PLAYERS = 256;
 const TYPE_CHARS = 48;
-const UNKNOWN_TYPE = "other";
 
 const DIMENSIONS = [
   ["overworld", "minecraft:overworld"],
@@ -126,6 +127,7 @@ let samplesUnder = 0;
 let ticksUntilSample = 1;
 let errors = 0;
 let lastError = "";
+let errorsReported = 0;
 const dropped = new Map();
 
 // Names this run of the script among all of them. The map remembers the
@@ -381,11 +383,15 @@ function sample(tick, cap) {
 function deltaFor(id) {
   if (typeof id !== "string" || !id || id.length > ID_BYTES) return null;
   let delta = pending.get(id);
-  if (!delta && pending.size < MAX_PENDING_PLAYERS) {
+  if (!delta) {
+    if (pending.size >= MAX_PENDING_PLAYERS) {
+      noteError("counts", "too many players with counts in one sample");
+      return null;
+    }
     delta = { d: new Map(), k: new Map(), bt: new Map(), pt: new Map(), b: 0, p: 0, j: 0, l: 0, t: 0 };
     pending.set(id, delta);
   }
-  return delta || null;
+  return delta;
 }
 
 function bump(map, name) {
@@ -565,7 +571,6 @@ function onTimer() {
 
   gen++;
   const tick = system.currentTick;
-  const errorsBefore = errors;
   const started = Date.now();
   let totals = { players: 0, mobs: 0, more: 0 };
   try {
@@ -592,7 +597,10 @@ function onTimer() {
   // Sent even with nobody online, so silence means the pipeline broke. It
   // reports the interval and cap the next sample will use, so a change of
   // throttle level shows on the sample that caused it.
-  const failed = errors === errorsBefore ? "" : `,"error":${JSON.stringify(lastError)}`;
+  // Errors from event handlers happen between samples, so the heartbeat
+  // reports any that have not been reported yet, not only this sample's.
+  const failed = errors === errorsReported ? "" : `,"error":${JSON.stringify(lastError)}`;
+  errorsReported = errors;
   print(`{"gen":${gen},"tick":${tick},"ts":${Date.now()},"kind":"tick","players":${totals.players},"mobs":${totals.mobs},"more":${totals.more},"scan":${scanMs},"interval":${intervalTicksAt(level) * TICK_MS},"cap":${capAt(level)},"level":${level},"errors":${errors}${failed}}`);
 }
 

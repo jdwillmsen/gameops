@@ -139,8 +139,20 @@ test('an event that throws is counted as an error and does not stop the rest', (
   g.events.playerBreakBlock.fire({ player: null });
   g.events.playerPlaceBlock.fire({ player: actor('-2'), block: { typeId: 'minecraft:dirt' } });
   const out = g.sample();
-  assert.equal(out.find((r) => r.kind === 'tick').errors, 1);
+  const beat = out.find((r) => r.kind === 'tick');
+  assert.equal(beat.errors, 1);
+  assert.ok(String(beat.error).startsWith('break:'), 'the heartbeat did not carry the handler error');
+  assert.equal(g.sample().find((r) => r.kind === 'tick').error, undefined, 'reported twice');
   assert.equal(out.find((r) => r.kind === 'counts').items[0].p, 1);
+});
+
+test('a player past the cap of one sample is noted as an error, not dropped silently', () => {
+  const g = boot();
+  g.sample();
+  for (let p = 0; p < 257; p++) g.events.playerPlaceBlock.fire({ player: actor(String(-5000 - p)), block: { typeId: 'minecraft:dirt' } });
+  const out = g.sample();
+  assert.equal(out.filter((r) => r.kind === 'counts').reduce((n, r) => n + r.items.length, 0), 256);
+  assert.ok(String(out.find((r) => r.kind === 'tick').error).startsWith('counts:'));
 });
 
 let failed = 0;
