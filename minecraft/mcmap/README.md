@@ -4185,7 +4185,17 @@ refused with 403.
 The login is on unless `AUTH_DISABLED=true` says otherwise by name; with it
 on and no `INTERNAL_TOKEN` the service refuses to start. Other ways to log
 in can be added beside the code flow: anything that can establish an XUID
-ends in the same `Sessions.Issue`.
+ends in a session of the same kind. [Passkeys](#admin-access) are one, for
+admins, and [signing in with Xbox](#signing-in-with-xbox) is another, for
+players the map has seen.
+
+Every successful claim also notes the player's XUID, with when it was first
+and last seen and nothing else, in `DATA_DIR/auth/known.json`. A claim is the
+agent saying that XUID is on the server, which is what makes a player
+"known" to the Xbox sign-in. The note is made whether or not that sign-in is
+on, so turning it on later finds everyone who has logged in since. A player
+stays known for 180 days from the last claim; a failed write is logged and
+does not fail the login.
 
 Two listeners keep the internet away from what is not for it:
 
@@ -4402,6 +4412,80 @@ That copy has no free text in it: the build, Go version, time, problem stage,
 quiet window, features, snapshot and render times, the page files'
 fingerprints and where the operators come from. It names no player and
 counts none. Everything else an agent needs is in `/metrics`.
+
+## Signing in with Xbox
+
+A player the map knows can sign in with their Microsoft account, with no game
+running. It is off unless `XBOX_LOGIN_ENABLED=true`; off, `/auth/xbox/start`
+and `/auth/xbox/callback` are 404, `/api/config` does not mention it and the
+login screen has no button.
+
+1. The login screen offers Sign in with Xbox, a form that goes to
+   `GET /auth/xbox/start`. The map makes a state and a PKCE verifier, keeps
+   both in a `__Host-mcmap_xbox` cookie, and answers 302 to Microsoft's
+   `consumers` sign-in for the `XboxLive.signin` scope. The cookie is signed
+   with a key derived from the session key, lasts 10 minutes and is
+   `HttpOnly`, `Secure` and **`SameSite=Lax`**, where the other cookies are
+   `Strict`: the browser returns from Microsoft by a navigation Microsoft
+   started, and `Strict` cookies are not sent on that. `Lax` sends it on a
+   top-level `GET` and on nothing a page embeds or posts. The callback changes
+   nothing until the cookie, the state in the address and Microsoft's code all
+   agree.
+2. Microsoft sends the browser to `GET /auth/xbox/callback`. The map clears
+   the cookie whatever happens, checks the state, refuses a state it has
+   already finished (a bounded memory of 4,096; Microsoft's codes are single
+   use besides), and exchanges the code on the server with the client secret
+   and the verifier. It then asks Xbox Live for a user token and an XSTS
+   token and reads the XUID and gamertag from the XSTS token's claims. No
+   Microsoft or Xbox token is stored, returned or logged; the scope has no
+   `offline_access`, so no refresh token exists.
+3. The XUID must be known: see below. A known player gets a session that
+   lasts **24 hours**, marked as had by Xbox, and is sent to `/`. Anyone else
+   is sent to `/?xbox=<result>` with no session, and the page says why in a
+   sentence of its own. The word in the address is one of a closed list the
+   server writes; nothing a caller sent is shown or logged.
+
+**Who is known.** An XUID is let in if it has completed a `!map` code login
+within 180 days (the record above), or, with `XBOX_ALLOWLIST=true`, if it is
+on the game server's `allowlist.json`, which the map reads through the console
+bridge's `GET /allowlist` with the token it already holds, and keeps for 30
+seconds. With the bridge down the allowlist names nobody; only the record
+applies. Names added to the allowlist by hand that have not joined yet have
+no XUID and are not counted. To remove someone, take them off the allowlist
+and delete their entry from `known.json` (deleting the file makes everyone
+type `!map` once). `!map logout` and Log out everywhere end a player's Xbox
+sessions like any other, and do not stop them signing in again with their own
+account.
+
+**Sessions.** An Xbox session is an ordinary player's. It cannot make anyone
+an admin: that is still the operator list, asked per request. It is refused
+while `XBOX_LOGIN_ENABLED` is off and works again if the switch is turned back
+on within its day. Changing the session key ends them with every other login.
+
+**Setting it up.** In the Entra admin center, register an application:
+
+- Supported account types: personal Microsoft accounts only.
+- Redirect URI: platform Web, `PUBLIC_ORIGIN` followed by
+  `/auth/xbox/callback`, written exactly.
+- A client secret (certificates and secrets). It expires, at most 24 months
+  on; an expired or wrong one shows as `exchange_failed` in the metric, and
+  as `invalid_client` in the log line.
+- Delegated permission `XboxLive.signin`, if the portal lists it. No admin
+  consent applies to personal accounts.
+
+Whether Microsoft will consent a personal app to `XboxLive.signin` without
+Xbox partner enrolment is not documented by Microsoft and was not verified
+without a real sign-in: [the design](docs/superpowers/specs/2026-10-15-xbox-sign-in-design.md)
+sets out the evidence. If it is refused, the sign-in fails closed and the
+code login is untouched.
+
+**Refusals.** `stranger` (not known), `cancelled`, `microsoft_error`,
+`expired` (no usable cookie: too slow, or another browser), `state_mismatch`,
+`replayed`, `bad_request`, `exchange_failed` (Microsoft refused the code or
+the app), `no_xbox_profile` (the account has no Xbox profile, XErr
+2148916233), `child_account` (XErr 2148916238), `xbox_refused` (any other
+XErr: banned, region, adult verification), `xbox_unavailable` (the network, a
+5xx, an unreadable answer), `bad_identity` and `fault`.
 
 ## Browser checks
 
@@ -4704,7 +4788,12 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `SERVICE_SESSION_TTL` | no | `10m` | How long a service session lasts; `1m` to `30m`. Read only with `SERVICE_SESSION_SECRET` |
 | `ADMIN_ENABLED` | no | `false` | `true` makes a logged-in operator of the game an admin: [Admin access](#admin-access). Has no effect, and is not an error, with `AUTH_DISABLED=true` |
 | `PASSKEYS_ENABLED` | no | `false` | `true` lets an admin add a passkey and log in with it. Needs `ADMIN_ENABLED=true` and `PUBLIC_ORIGIN`, or the map does not start |
-| `PUBLIC_ORIGIN` | with passkeys | | The one origin the page is served from, a bare `https://` origin by host name, no port, path or fragment, e.g. `https://fwb.prd.jdwlabs.com`. An IP address or a trailing colon stops the map from starting; the host is lower-cased. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` |
+| `XBOX_LOGIN_ENABLED` | no | `false` | `true` lets players the map knows sign in with an Xbox account: [Signing in with Xbox](#signing-in-with-xbox). Needs `XBOX_CLIENT_ID`, a client secret and `PUBLIC_ORIGIN`, or the map does not start. Has no effect, and is not an error, with `AUTH_DISABLED=true` |
+| `XBOX_CLIENT_ID` | with Xbox sign-in | | The Entra app registration's application (client) ID, a GUID |
+| `XBOX_CLIENT_SECRET_FILE` | with Xbox sign-in | | Path of a file holding the app's client secret, as a mounted Kubernetes Secret makes one. A trailing newline is dropped. Set this or `XBOX_CLIENT_SECRET`, not both |
+| `XBOX_CLIENT_SECRET` | with Xbox sign-in | | The client secret itself, for a run on a workstation |
+| `XBOX_ALLOWLIST` | no | `false` | `true` also lets in the players on the game server's allowlist. Read only with `XBOX_LOGIN_ENABLED=true` |
+| `PUBLIC_ORIGIN` | with passkeys or Xbox sign-in | | The one origin the page is served from, a bare `https://` origin by host name, no port, path or fragment, e.g. `https://fwb.prd.jdwlabs.com`. An IP address or a trailing colon stops the map from starting; the host is lower-cased. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` or `XBOX_LOGIN_ENABLED=true`; the Xbox redirect URI is this and `/auth/xbox/callback` |
 | `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies cannot be rebuilt, and neither can the history kept here unless `HISTORY_DIR` puts it elsewhere, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
@@ -4742,6 +4831,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag, and `admin: true` for an admin. For a service session, `service:e2e` and `service: true` |
 | `POST /auth/passkey/options`, `POST /auth/passkey/finish` | Public, only with passkeys on. A passkey login: a challenge in a `__Host-mcmap_passkey` cookie, then the assertion; 200 with a 12-hour session cookie, 401 for any refusal |
+| `GET /auth/xbox/start`, `GET /auth/xbox/callback` | Public, only with Xbox sign-in on, else 404. Start answers 302 to Microsoft and sets a `__Host-mcmap_xbox` cookie; the callback answers 303 to `/` with a 24-hour session cookie, or to `/?xbox=<result>` with none |
 | `GET /api/admin/status` | An admin's session; 403 for anyone else. The status of `GET /internal/v1/status` and also `live.lastFrameAgeSeconds` and `sessions` (`issued`, `passkeyLogins`, `refused`). Only with admin on |
 | `POST /auth/passkey/register/options`, `POST /auth/passkey/register/finish`, `POST /auth/passkey/register/confirm`, `POST /auth/passkey/register/cancel` | An admin's session; 403 for anyone else. Adding a passkey: options (a `label`), the new credential held as pending with its fingerprint, the code from the game, and cancelling a pending one. Only with passkeys on |
 | `GET /api/passkeys`, `DELETE /api/passkeys/{id}` | A player's session; 403 for a service session. The caller's own passkeys (label, created, last used, pending or not), and removing one, which ends its sessions. Only with passkeys on |
@@ -4780,7 +4870,7 @@ On `INTERNAL_ADDR` only:
 | Route | Purpose |
 |---|---|
 | `GET /metrics` | Prometheus |
-| `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code. 204, or 404 for a code that is unknown, expired or used |
+| `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code, and so is known to the Xbox sign-in. 204, or 404 for a code that is unknown, expired or used |
 | `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds and remove their passkeys. 204 |
 | `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
@@ -4877,6 +4967,7 @@ and what that day is compared with:
 | `mcmap_admin_requests_total{route,allowed}` | Requests to an admin route by its pattern, and whether the gate let them through |
 | `mcmap_admin_operator_lookups_total{result}` | Where the operator list was read from: `live`, `last_known_good` or `none` |
 | `mcmap_admin_operators` | Operators known, a count and no identities |
+| `mcmap_xbox_logins_total{result}` | Sign-ins with Xbox, every result at zero from start: `ok`, `stranger`, `cancelled`, `microsoft_error`, `expired`, `state_mismatch`, `replayed`, `bad_request`, `exchange_failed`, `no_xbox_profile`, `child_account`, `xbox_refused`, `xbox_unavailable`, `bad_identity`, `fault`. Present only with Xbox sign-in on |
 | `mcmap_admin_passkeys{state}` | Passkeys held, `pending` or `active`, read from the file at startup and set on every change |
 
 ## Build and test
