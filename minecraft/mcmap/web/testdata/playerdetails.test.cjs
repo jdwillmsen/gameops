@@ -38,6 +38,8 @@ function load(answer) {
   const dialog = made.get('player');
   dialog.show = () => { dialog.open = true; };
   dialog.close = () => { dialog.open = false; dialog.dispatchEvent({ type: 'close' }); };
+  doc.body.append(dialog);
+  dialog.append(made.get('player-body'), made.get('player-close'));
   const byId = doc.getElementById;
   doc.getElementById = (id) => made.get(id) || byId(id);
   const asked = [];
@@ -48,8 +50,10 @@ function load(answer) {
     return { ok: out.status === undefined, status: out.status || 200, json: async () => out.body };
   };
   win.AbortController = AbortController;
-  win.setInterval = setInterval;
-  win.clearInterval = clearInterval;
+  // The minute's refresh is run by hand.
+  const ticks = [];
+  win.setInterval = (fn) => { ticks.push(fn); return ticks.length; };
+  win.clearInterval = () => {};
   win.mcmap = {
     icons: { keyOf: (sort, o) => `${sort}/${o.kind || o.colour}`, picture: (key) => { const c = doc.createElement('canvas'); c.dataset.picture = key; return c; }, paint() {} },
     names: { tidy: (id) => String(id).split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') },
@@ -57,7 +61,7 @@ function load(answer) {
     go: (d, x, z) => { went.push([d, x, z]); return d !== 'end'; },
   };
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'playerdetails.js'), 'utf8'), win, { filename: 'playerdetails.js' });
-  return { win, doc, dialog, made, asked, went, app: win.mcmap };
+  return { win, doc, dialog, made, asked, went, ticks, app: win.mcmap };
 }
 
 const body = (t) => t.made.get('player-body');
@@ -175,6 +179,38 @@ test('shuts with its button and with Escape, and stops asking', async () => {
   await tick();
   t.dialog.dispatchEvent({ type: 'keydown', key: 'Escape' });
   assert.equal(t.dialog.open, false);
+});
+
+test('a refresh with nothing new leaves the panel as it is, and one with news keeps focus and the item being read', async () => {
+  let n = 0;
+  const t = load(() => ({ body: n === 0 ? ANSWER : { ...ANSWER, trails: { ...ANSWER.trails, stats: { ...STATS, blocks: 99 + n } } } }));
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const slotAt = () => body(t).querySelectorAll('button').find((b) => b.dataset.pos === 'Inventory|20');
+  slotAt().focus();
+  slotAt().click();
+  assert.equal(t.doc.activeElement, slotAt());
+  const before = slotAt();
+  // The same answer: nothing is rebuilt.
+  await t.ticks[0]();
+  assert.equal(slotAt(), before);
+  assert.equal(t.doc.activeElement, before);
+  // A new one: drawn again, with focus on the same slot and its details read.
+  n = 1;
+  await t.ticks[0]();
+  assert.notEqual(slotAt(), before);
+  assert.equal(t.doc.activeElement, slotAt());
+  assert.ok(body(t).querySelectorAll('p').some((p) => p.textContent.startsWith('Chest × 2')));
+  assert.ok(words(t).includes('100 blocks'));
+  // Focus on something that has gone stays in the panel, so Escape works.
+  const gone = load(() => ({ body: n === 0 ? ANSWER : { ...ANSWER, saved: { ...ANSWER.saved, record: { ...SAVED, inventory: [] } } } }));
+  n = 0;
+  gone.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  gone.doc.getElementById('player-body').querySelectorAll('button').find((b) => b.dataset.pos === 'Inventory|20').focus();
+  n = 1;
+  await gone.ticks[0]();
+  assert.equal(gone.doc.activeElement, gone.made.get('player-close'));
 });
 
 (async () => {
