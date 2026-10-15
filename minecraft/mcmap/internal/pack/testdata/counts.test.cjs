@@ -60,21 +60,46 @@ test('counts what players did and prints it once, as a delta', () => {
   assert.deepEqual(g.sample().filter((r) => r.kind === 'counts'), [], 'counted again');
 });
 
-test('a leave adds the time since the join', () => {
+test('a leave adds the time since the join, and a sample before it takes its share once', () => {
   const g = boot();
   const realNow = Date.now;
+  let rest;
   try {
     Date.now = () => 1_000_000;
     g.events.playerSpawn.fire({ player: actor('-7'), initialSpawn: true });
+    Date.now = () => 1_030_500;
+    const first = g.sample().find((r) => r.kind === 'counts').items[0];
+    assert.equal(first.t, 30);
+    assert.equal(first.j, 1);
     Date.now = () => 1_090_000;
     g.events.playerLeave.fire({ playerId: '-7' });
+    Date.now = () => 1_200_000;
+    rest = g.sample().find((r) => r.kind === 'counts').items[0];
   } finally {
     Date.now = realNow;
   }
-  const item = g.sample().find((r) => r.kind === 'counts').items[0];
-  assert.equal(item.t, 90);
-  assert.equal(item.l, 1);
-  assert.equal(item.j, 1);
+  // 30 s were counted at the sample, 60 s more at the leave, and nothing
+  // after it: 90 s in all, none twice.
+  assert.equal(rest.t, 60);
+  assert.equal(rest.l, 1);
+});
+
+test('time online is added at every sample, so a stop without a leave loses at most one sample', () => {
+  const g = boot([{ id: '-8', name: 'Bo', location: { x: 0, y: 0, z: 0 }, dimension: { id: 'minecraft:overworld' }, getRotation: () => ({ y: 0 }), getComponent: () => undefined }]);
+  const realNow = Date.now;
+  let sum = 0;
+  try {
+    Date.now = () => 5_000_000;
+    g.sample();
+    for (let at = 5_001_000; at <= 5_007_000; at += 1000) {
+      Date.now = () => at;
+      const counts = g.sample().find((r) => r.kind === 'counts');
+      sum += counts.items[0].t;
+    }
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(sum, 7);
 });
 
 test('sequence numbers rise by one per line and every line stays under the limit', () => {
