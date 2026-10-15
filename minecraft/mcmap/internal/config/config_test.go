@@ -311,6 +311,39 @@ func TestLoad_AdminAndPasskeys(t *testing.T) {
 	}
 }
 
+// The browser compares the origin and the RP ID as it writes them, lower
+// case with no trailing colon, so the map must hold the same strings or
+// every passkey ceremony fails.
+func TestLoad_PublicOriginIsNormalised(t *testing.T) {
+	on := func(origin string) func(string) string {
+		return with("ADMIN_ENABLED", "true", "PASSKEYS_ENABLED", "true", "PUBLIC_ORIGIN", origin)
+	}
+	for origin, want := range map[string]string{
+		"https://Map.Example":  "map.example",
+		"https://map.example/": "map.example",
+	} {
+		c, err := Load(on(origin))
+		if err != nil {
+			t.Errorf("%q: %v", origin, err)
+			continue
+		}
+		if c.PublicOrigin != "https://"+want || c.PasskeyRPID != want {
+			t.Errorf("%q: origin %q, RP ID %q, want https://%s and %s", origin, c.PublicOrigin, c.PasskeyRPID, want, want)
+		}
+	}
+	for name, origin := range map[string]string{
+		"a trailing colon":         "https://map.example:",
+		"an IPv4 literal":          "https://192.0.2.10",
+		"an IPv6 literal":          "https://[2001:db8::1]",
+		"a fragment":               "https://map.example#top",
+		"a fragment after a slash": "https://map.example/#x",
+	} {
+		if _, err := Load(on(origin)); err == nil {
+			t.Errorf("%s (%q): want an error", name, origin)
+		}
+	}
+}
+
 // With no login there is no player to be an admin. That is a state to run
 // in, never a reason to stop.
 func TestLoad_AdminWithNoLoginIsNotAnError(t *testing.T) {
