@@ -178,6 +178,8 @@
       <button id="login-new" type="button" hidden>Get a new code</button>
       <button id="login-passkey" type="button" hidden>Log in with a passkey</button>
       <p id="login-passkey-note" class="note" role="status"></p>
+      <form id="login-xbox" action="auth/xbox/start" method="get" hidden><button type="submit">Sign in with Xbox</button></form>
+      <p id="login-xbox-note" class="note problem" role="status"></p>
       <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
       <nav class="site-links" aria-label="About this map"><a href="about">About</a> <a href="guide">Guide</a> <a href="privacy">Privacy</a> <a href="terms">Terms</a> <a href="credits">Credits</a></nav>
     </div>
@@ -477,5 +479,6 @@
   <script src="compact.js"></script>
   <script src="debug.js"></script>
   <script src="passkey.js"></script>
+  <script src="xbox.js"></script>
 </body>
 </html>

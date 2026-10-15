@@ -157,7 +157,7 @@ export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sent
 
 // The page's own scripts, by which a script error is placed.
 export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'heights.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js',
-  'slime.js', 'chunk.js', 'trails.js', 'history.js', 'levels.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'passkey.js', 'leaflet.js'];
+  'slime.js', 'chunk.js', 'trails.js', 'history.js', 'levels.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'passkey.js', 'xbox.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
 const density = (dpr) => String(dpr).replace('.', '_');
