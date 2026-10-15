@@ -25,6 +25,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -43,6 +44,9 @@ const (
 
 var version = "dev"
 
+// hub is non-nil only in the rendered-camera spike.
+var hub *camera.Hub
+
 func main() {
 	log := logging.New(os.Getenv("LOG_LEVEL"))
 
@@ -55,21 +59,32 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	store, err := mcauth.NewFileStore(cfg.AuthCacheDir, cfg.Username)
-	if err != nil {
-		log.Error("auth_store_invalid", logging.Fields{"error": err.Error()})
-		os.Exit(1)
-	}
-	// The device code is printed by design: a first start against an empty
-	// cache needs a human, and this is the only place the code appears.
-	ts, err := mcauth.TokenSource(ctx, store, os.Stdout)
-	if err != nil {
-		log.Error("auth_failed", logging.Fields{"error": err.Error()})
-		os.Exit(1)
+	// Spike only: join an offline-mode lab server with no Microsoft account.
+	// Without the flag crew behaves exactly as before.
+	spike := os.Getenv("CREW_SPIKE_OFFLINE") == "1"
+	var ts oauth2.TokenSource
+	if !spike {
+		store, err := mcauth.NewFileStore(cfg.AuthCacheDir, cfg.Username)
+		if err != nil {
+			log.Error("auth_store_invalid", logging.Fields{"error": err.Error()})
+			os.Exit(1)
+		}
+		// The device code is printed by design: a first start against an empty
+		// cache needs a human, and this is the only place the code appears.
+		ts, err = mcauth.TokenSource(ctx, store, os.Stdout)
+		if err != nil {
+			log.Error("auth_failed", logging.Fields{"error": err.Error()})
+			os.Exit(1)
+		}
 	}
 
 	tracker := belief.New(time.Now)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusapi.Handler(tracker, version), ReadHeaderTimeout: 5 * time.Second}
+	var handler http.Handler = statusapi.Handler(tracker, version)
+	if spike {
+		hub = camera.NewHub()
+		handler = camera.Mount(handler, hub)
+	}
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
@@ -120,9 +135,14 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 		})
 	})
 
+	var identity login.IdentityData
+	if ts == nil {
+		identity.DisplayName = cfg.Username
+	}
 	conn, err := mcdial.Dial(ctx, minecraft.Dialer{
-		TokenSource: ts,
-		Protocol:    proto,
+		TokenSource:  ts,
+		Protocol:     proto,
+		IdentityData: identity,
 		ClientData: login.ClientData{
 			SkinID:          unitSkin.ID,
 			SkinData:        unitSkin.Data,
@@ -145,6 +165,10 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 	}
 	gd := conn.GameData()
 	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Dimension)
+	if hub != nil {
+		hub.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Pitch, gd.Yaw, gd.Dimension)
+		defer hub.Reset()
+	}
 	log.Info("spawned", spawnedFields(conn.IdentityData().XUID, cfg.ViewDistance))
 
 	if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {
@@ -161,6 +185,9 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 			return fmt.Errorf("read: %w", err)
 		}
 		tracker.Apply(pk)
+		if hub != nil {
+			hub.Apply(pk, conn)
+		}
 
 		// A dead unit stays connected and spawned; only the respawn
 		// handshake shows it, so belief is told explicitly.
