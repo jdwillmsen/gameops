@@ -132,7 +132,7 @@ func (o *List) refresh(ctx context.Context) Source {
 			o.failLog = now
 			o.log.Warn("map operator lookup failed", "error_class", classOf(err))
 		}
-		if !o.kept.ConfirmedAt.IsZero() && now.Sub(o.kept.ConfirmedAt) < Window {
+		if o.trusted(now) {
 			o.source = LastKnownGood
 			metricOperators.Set(float64(len(o.kept.XUIDs)))
 		} else {
@@ -153,7 +153,7 @@ func (o *List) refresh(ctx context.Context) Source {
 	o.live, o.source = live, Live
 	metricOperators.Set(float64(len(xuids)))
 	metricLookups.WithLabelValues(string(Live)).Inc()
-	if !slices.Equal(xuids, o.kept.XUIDs) || now.Sub(o.kept.ConfirmedAt) >= ConfirmEvery {
+	if !slices.Equal(xuids, o.kept.XUIDs) || now.Sub(o.kept.ConfirmedAt) >= ConfirmEvery || o.kept.ConfirmedAt.After(now) {
 		next := file{XUIDs: xuids, ConfirmedAt: now.UTC()}
 		raw, _ := json.Marshal(next)
 		if err := atomicfile.Write(o.path, raw); err != nil {
@@ -163,6 +163,14 @@ func (o *List) refresh(ctx context.Context) Source {
 		}
 	}
 	return Live
+}
+
+// trusted says whether the kept set may stand in for the live one. A
+// confirmation later than now, from a clock stepped back or a file edited
+// by hand, is not one: trusting it would stretch the day past its end.
+func (o *List) trusted(now time.Time) bool {
+	c := o.kept.ConfirmedAt
+	return !c.IsZero() && !c.After(now) && now.Sub(c) < Window
 }
 
 // Run looks the list up now and then hourly, so that the gauge and the
