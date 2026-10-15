@@ -13,6 +13,7 @@ import (
 // TrailSource is where players have recently been.
 type TrailSource interface {
 	Trails(dimension, player string, since, now time.Time) trails.Reply
+	Stats(player string, now time.Time) (trails.Stats, bool)
 }
 
 // maxGamertag is longer than any gamertag, and bounds what is compared.

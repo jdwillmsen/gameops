@@ -26,6 +26,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/pack"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
@@ -43,6 +44,10 @@ const maxPendingLogins = 10_000
 // One still running after this is given up, so that the renders behind it
 // are never held for longer.
 const markerScanTimeout = 2 * time.Minute
+
+// playerReadTimeout bounds reading the player records, of which there are
+// a few dozen.
+const playerReadTimeout = time.Minute
 
 // Reading the full world's biomes takes about ten seconds at a whole CPU.
 // One still running after this is given up, and the last reading stands.
@@ -157,6 +162,9 @@ func run(logger *slog.Logger) error {
 		marked = markers.NewStore()
 		w.Markers = &markers.Extractor{WorkDir: filepath.Join(cfg.DataDir, "markers"), Store: marked, Timeout: markerScanTimeout}
 	}
+	// Cheap, so it needs no switch: it reads a few dozen small records.
+	playerStore := &players.Store{}
+	w.Players = &players.Extractor{WorkDir: filepath.Join(cfg.DataDir, "players"), Store: playerStore, Timeout: playerReadTimeout}
 	// A directory of its own: the survey clears what a killed run left
 	// there, and the chunk count does the same in its own.
 	var surveyor *structures.Surveyor
@@ -234,6 +242,7 @@ func run(logger *slog.Logger) error {
 		NetherTop:     cfg.NetherTopY,
 		NetherLevels:  cfg.NetherLevels,
 	}
+	app.Players = playerStore
 	if marked != nil {
 		app.Markers = marked
 	}
