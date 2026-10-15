@@ -2,6 +2,7 @@ package operators
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -248,5 +249,31 @@ func TestClassOf_ACancelledLookupIsNotUnreachable(t *testing.T) {
 		if got := classOf(err); got != want {
 			t.Errorf("classOf(%v) = %q, want %q", err, got, want)
 		}
+	}
+}
+
+// A confirmedAt ahead of the clock, from a clock stepped back or a file
+// written by hand, would otherwise keep a stale set alive past its day.
+func TestList_AConfirmationInTheFutureIsNotTrusted(t *testing.T) {
+	c := &clock{t: time.Unix(1_790_000_000, 0)}
+	path := filepath.Join(t.TempDir(), "operators.json")
+	raw, _ := json.Marshal(file{XUIDs: []string{steve}, ConfirmedAt: c.now().Add(time.Hour).UTC()})
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := &fakeBridge{err: errors.New("bridge down")}
+	l, err := Open(path, b, c.now, quiet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, src := l.IsOperator(t.Context(), steve); got || src != None {
+		t.Errorf("confirmedAt an hour ahead, bridge down: admin %v from %s, want nobody", got, src)
+	}
+
+	// With the bridge back, the same unchanged set is confirmed afresh.
+	b.set(map[string]string{steve: "operator"}, nil)
+	l.Refresh(t.Context())
+	if got := read(t, path).ConfirmedAt; !got.Equal(c.now().UTC()) {
+		t.Errorf("an unchanged set with confirmedAt in the future was not rewritten: confirmedAt %s, now %s", got, c.now().UTC())
 	}
 }
