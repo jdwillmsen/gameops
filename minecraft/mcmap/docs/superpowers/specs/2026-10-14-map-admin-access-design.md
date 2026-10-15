@@ -608,7 +608,7 @@ SHA-256 of its ID. A user agent is cut as `said` already cuts it.
 | Passkey confirmed | `map passkey registered` xuid, credential | same, `confirmed` |
 | Passkey removed | `map passkey removed` xuid, credential, why (`player`, `revoked`) | `mcmap_admin_passkeys_removed_total{why}` |
 | The map failed to add a passkey (its own fault, not the credential's) | At error level, xuid and error class only: `map passkey not held as pending` (answered 500 `fault`), `map passkey not registered` (the store could not be written; 503 `busy`), `map passkey code not issued` (503) | none |
-| Passkey login | `map login issued` (the existing line) with `method=passkey`, credential | `mcmap_admin_logins_total{result}` with `ok`; before the signature verifies `bad_assertion`, `unknown_credential`, `expired`, `disabled`; after it `pending`, `not_operator`, `counter`, `replayed` |
+| Passkey login | `map login issued` (the existing line) with `method=passkey`, credential | `mcmap_admin_logins_total{result}` with `ok`; before the signature verifies `bad_assertion`, `unknown_credential`, `expired`; after it `pending`, `not_operator`, `counter`, `replayed` |
 | Admin route used | `map admin request` xuid, route pattern, allowed | `mcmap_admin_requests_total{route,allowed}` |
 | Operator lookup | `map operator lookup failed` error class (`no_file`, `timeout`, `cancelled`, `unreachable`), on failure only, at most once a minute | `mcmap_admin_operator_lookups_total{result}`, `result` one of `live`, `last_known_good`, `none` |
 | Operators known | none | `mcmap_admin_operators` (a count, no identities) |

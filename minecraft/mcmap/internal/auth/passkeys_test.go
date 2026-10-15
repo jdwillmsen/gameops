@@ -26,6 +26,11 @@ func key(id string, xuid string) Passkey {
 
 const issued = int64(1_790_000_000_000)
 
+func pendingFor(p *Passkeys, id string) bool {
+	_, _, pending, ok := p.Lookup(p.UserHandle(steve.XUID), []byte(id))
+	return ok && pending
+}
+
 func confirmOne(t *testing.T, p *Passkeys, id string) Passkey {
 	t.Helper()
 	if err := p.StartPending(key(id, steve.XUID), issued); err != nil {
@@ -48,7 +53,7 @@ func TestPasskeys_PendingIsUselessUntilTheWhisperedCodeIsTyped(t *testing.T) {
 	if err := p.StartPending(key("cred-1", steve.XUID), issued); err != nil {
 		t.Fatal(err)
 	}
-	if p.Active(KeyOf([]byte("cred-1")), steve.XUID) || !p.IsPending([]byte("cred-1")) {
+	if p.Active(KeyOf([]byte("cred-1")), steve.XUID) || !pendingFor(p, "cred-1") {
 		t.Fatal("a pending credential is active")
 	}
 	code, id, err := p.IssueCode(steve.XUID)
@@ -189,7 +194,7 @@ func TestPasskeys_PendingDoesNotSurviveAReload(t *testing.T) {
 	if !again.Active(KeyOf([]byte("kept")), steve.XUID) {
 		t.Error("an active passkey did not survive a reload")
 	}
-	if again.IsPending([]byte("half-made")) {
+	if pendingFor(again, "half-made") {
 		t.Error("a pending credential survived a reload")
 	}
 	if _, _, err := again.IssueCode(steve.XUID); !errors.Is(err, ErrNothingPending) {
@@ -340,7 +345,7 @@ func TestPasskeys_AConfirmWhoseWriteFailedCanBeRetried(t *testing.T) {
 	if _, _, err := p.Confirm(steve.XUID, issued, []byte("cred-1"), code); err == nil {
 		t.Fatal("Confirm reported success with the file left unwritten")
 	}
-	if p.Active(KeyOf([]byte("cred-1")), steve.XUID) || !p.IsPending([]byte("cred-1")) {
+	if p.Active(KeyOf([]byte("cred-1")), steve.XUID) || !pendingFor(p, "cred-1") {
 		t.Fatal("a failed write did not leave the credential pending")
 	}
 	if pending, active := p.Counts(); pending != 1 || active != 0 {
@@ -350,7 +355,7 @@ func TestPasskeys_AConfirmWhoseWriteFailedCanBeRetried(t *testing.T) {
 	if _, _, err := p.Confirm(steve.XUID, issued, []byte("cred-1"), code); err != nil {
 		t.Fatalf("retrying the same code after the write recovered: %v", err)
 	}
-	if !p.Active(KeyOf([]byte("cred-1")), steve.XUID) || p.IsPending([]byte("cred-1")) {
+	if !p.Active(KeyOf([]byte("cred-1")), steve.XUID) || pendingFor(p, "cred-1") {
 		t.Error("the retried confirm did not activate the credential")
 	}
 }
@@ -369,9 +374,6 @@ func TestPasskeys_TheUserHandleIsRandomAndKept(t *testing.T) {
 	_, _, _ = p.Confirm(steve.XUID, issued, k.ID, code)
 	if string(p.UserHandle(steve.XUID)) != string(h) {
 		t.Error("a player's handle changed once they had a passkey")
-	}
-	if xuid, keys, ok := p.ByHandle(h); !ok || xuid != steve.XUID || len(keys) != 1 {
-		t.Errorf("ByHandle = %q %d %v", xuid, len(keys), ok)
 	}
 	if _, _, _, ok := p.Lookup(p.UserHandle("2535412345678902"), k.ID); ok {
 		t.Error("a credential was found under another player's handle")
@@ -409,9 +411,6 @@ func TestPasskeys_AnEmptyHandleNeverMatches(t *testing.T) {
 	for _, h := range [][]byte{nil, {}} {
 		if _, _, _, ok := p.Lookup(h, []byte("cred-1")); ok {
 			t.Error("Lookup matched an empty handle")
-		}
-		if _, _, ok := p.ByHandle(h); ok {
-			t.Error("ByHandle matched an empty handle")
 		}
 	}
 }

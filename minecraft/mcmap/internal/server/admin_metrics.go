@@ -11,7 +11,7 @@ var registrationResults = []string{"pending", "refused", "code_issued", "code_wr
 
 // The results before the signature verifies are anyone's to make; those
 // after it mean a real passkey was turned away, which is what pages.
-var loginResults = []string{"ok", "bad_assertion", "unknown_credential", "expired", "disabled", "pending", "not_operator", "counter", "replayed"}
+var loginResults = []string{"ok", "bad_assertion", "unknown_credential", "expired", "pending", "not_operator", "counter", "replayed"}
 
 // adminMetricSet is every D6 series of the server, built by a constructor
 // so that a test can hand a server vectors of its own and see exactly what
@@ -33,7 +33,7 @@ func newAdminMetrics(f promauto.Factory) adminMetricSet {
 		}, []string{"why"}),
 		logins: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcmap_admin_logins_total",
-			Help: "Passkey logins, by result. bad_assertion, unknown_credential, expired and disabled come before the signature is verified; pending, not_operator, counter and replayed after.",
+			Help: "Passkey logins, by result. bad_assertion, unknown_credential and expired come before the signature is verified; pending, not_operator, counter and replayed after.",
 		}, []string{"result"}),
 		requests: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "mcmap_admin_requests_total",
@@ -49,9 +49,7 @@ func newAdminMetrics(f promauto.Factory) adminMetricSet {
 var (
 	adminMetrics             = newAdminMetrics(promauto.With(prometheus.DefaultRegisterer))
 	metricPasskeysRegistered = adminMetrics.registered
-	metricPasskeysRemoved    = adminMetrics.removed
 	metricAdminLogins        = adminMetrics.logins
-	metricAdminRequests      = adminMetrics.requests
 	metricPasskeys           = adminMetrics.passkeys
 )
 

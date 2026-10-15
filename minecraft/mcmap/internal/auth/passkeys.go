@@ -268,18 +268,6 @@ func (p *Passkeys) Confirm(xuid string, issuedMilli int64, credentialID []byte, 
 	return k, 0, nil
 }
 
-func (p *Passkeys) IsPending(id []byte) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.prune()
-	for _, w := range p.waiting {
-		if bytes.Equal(w.key.ID, id) {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *Passkeys) HasPending(xuid string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -307,24 +295,6 @@ func (p *Passkeys) Lookup(handle, id []byte) (string, Passkey, bool, bool) {
 		return "", Passkey{}, false, false
 	}
 	return "", Passkey{}, false, false
-}
-
-func (p *Passkeys) ByHandle(handle []byte) (string, []Passkey, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for xuid, h := range p.handles {
-		if len(handle) == 0 || subtle.ConstantTimeCompare(h, handle) != 1 {
-			continue
-		}
-		var keys []Passkey
-		for _, k := range p.active {
-			if k.XUID == xuid {
-				keys = append(keys, *k)
-			}
-		}
-		return xuid, keys, len(keys) > 0
-	}
-	return "", nil, false
 }
 
 // Use records a login. Reading, judging and writing the count are one step
