@@ -175,13 +175,16 @@ func TestMap_LogoutEndsEveryMapLoginOfWhoeverTypedIt(t *testing.T) {
 }
 
 func TestMap_LogoutThatFailedSaysSoRatherThanClaimingIt(t *testing.T) {
-	claimer := &fakeClaimer{err: errors.New("map: status 500")}
-	reply, err := runMap(t, claimer, "logout")
-	if err != nil {
-		t.Fatal(err)
+	claimer := &fakeClaimer{err: errors.New("map: status 502")}
+	if reply, err := runMap(t, claimer, "logout"); err == nil || reply != "" {
+		t.Fatalf("reply %q, err %v", reply, err)
 	}
-	if !strings.Contains(reply, "did not fully finish") || !strings.Contains(reply, "try again") || strings.Contains(reply, "removed") {
-		t.Errorf("reply = %q", reply)
+}
+
+func TestMap_PasskeyFailureOtherThanNothingWaitingPropagatesWithoutAWhisper(t *testing.T) {
+	reply, err := runMap(t, &fakeClaimer{passkeyErr: errors.New("map: status 503")}, "passkey")
+	if err == nil || reply != "" {
+		t.Errorf("reply %q, err %v", reply, err)
 	}
 }
 
@@ -211,10 +214,14 @@ func TestMap_PasskeyWithNothingWaitingSaysSo(t *testing.T) {
 }
 
 func TestMap_PasskeyIsNotTheConsoles(t *testing.T) {
-	p := NewMapLogin(&fakeClaimer{passkeyCode: "ABC234"}, fakeNames{}, mapURL)
+	claimer := &fakeClaimer{passkeyCode: "ABC234"}
+	p := NewMapLogin(claimer, fakeNames{}, mapURL)
 	reply, _ := p.Commands()[0].Run(context.Background(), &plugin.Context{}, plugin.Invocation{ActorXUID: chat.ServerOrigin, Args: []string{"passkey"}})
 	if strings.Contains(reply, "ABC234") {
 		t.Errorf("the console was given a code: %q", reply)
+	}
+	if len(claimer.passkeyFor) != 0 {
+		t.Errorf("the map was asked for a code for the console: %v", claimer.passkeyFor)
 	}
 }
 

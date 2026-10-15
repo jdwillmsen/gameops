@@ -85,10 +85,7 @@ func (m *MapLogin) run(ctx context.Context, _ *plugin.Context, inv plugin.Invoca
 	}
 	if len(inv.Args) == 1 && strings.EqualFold(inv.Args[0], "logout") {
 		if err := m.claimer.Revoke(ctx, inv.ActorXUID); err != nil {
-			// The map can end the sessions and still fail to delete the
-			// passkeys, so the generic failure reply would leave the player
-			// unsure which half happened; say plainly that it is unfinished.
-			return "The logout did not fully finish, so some map logins or passkeys of yours may remain. Type !map logout to try again.", nil
+			return "", fmt.Errorf("map: !map logout: %w", err)
 		}
 		return "Every browser that was logged in to the map as you has been logged out, and any passkeys for your map login have been removed.", nil
 	}
