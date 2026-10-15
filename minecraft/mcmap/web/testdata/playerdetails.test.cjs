@@ -276,6 +276,30 @@ test('without a live sample the vitals are the save’s and are not labelled liv
   assert.ok(words(t).includes('8.5 of 10 hearts') && !words(t).includes('Live:'));
 });
 
+test('an offline player with no saved record has no empty live section', async () => {
+  for (const live of [undefined, {}, { dimension: 'overworld' }]) {
+    const t = load({ body: { id: '5', saved: { state: 'none', asOf: new Date().toISOString() }, trails: { state: 'off' }, counters: { state: 'off' }, live } });
+    t.app.playerDetails.open({ id: '5', name: 'Alex' });
+    await tick();
+    assert.ok(!words(t).includes('Right now') && !words(t).includes('Absorption'), words(t));
+    assert.ok(words(t).includes('No saved record'));
+  }
+});
+
+test('an online player’s answer that differs only in its age is not drawn again, but the age moves', async () => {
+  let at = Date.now() - 1000;
+  const t = load(() => ({ body: { ...ANSWER, live: { ...LIVE, at: new Date(at).toISOString() } } }));
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const node = body(t).children[0];
+  assert.ok(words(t).includes('(a moment ago)'));
+  at = Date.now() - 300_000;
+  await t.ticks[1]();
+  await tick();
+  assert.equal(body(t).children[0], node, 'redrawn for a new age');
+  assert.ok(words(t).includes('(5 min ago)'), words(t));
+});
+
 test('a player with no saved record yet still shows the live vitals', async () => {
   const t = load({ body: { id: '5', saved: { state: 'none', asOf: new Date().toISOString() }, trails: { state: 'off' }, counters: { state: 'off' }, live: LIVE } });
   t.app.playerDetails.open({ id: '5', name: 'Alex' });
