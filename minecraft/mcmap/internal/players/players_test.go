@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -262,6 +263,54 @@ func TestDurabilityIsLookedUpByMaterialAndKind(t *testing.T) {
 	for name, n := range map[string]int{"netherite_boots": 481, "stone_axe": 131, "golden_hoe": 32, "bow": 384} {
 		if maxDamage[name] != n {
 			t.Errorf("%s = %d, want %d", name, maxDamage[name], n)
+		}
+	}
+}
+
+// The decoder makes a slice of whatever length a list header gives, so a
+// few bytes that claim billions of elements must be refused before it does.
+func TestDecodeRefusesAListThatClaimsMoreThanTheRecordHolds(t *testing.T) {
+	record := func(elem byte, length uint32) []byte {
+		b := []byte{tagCompound, 0, 0}
+		b = append(b, tagList, 9, 0)
+		b = append(b, "Inventory"...)
+		b = append(b, elem, byte(length), byte(length>>8), byte(length>>16), byte(length>>24))
+		return append(b, tagEnd)
+	}
+	for name, data := range map[string][]byte{
+		"compounds":      record(tagCompound, 0x7fffffff),
+		"longs":          record(tagLong, 1<<20),
+		"bounded":        record(tagInt, 1<<16+1),
+		"negative":       record(tagInt, 0xffffffff),
+		"more than left": record(tagCompound, 50),
+		"of nothing":     record(tagEnd, 3),
+	} {
+		if _, _, err := Decode(data); err == nil {
+			t.Errorf("%s: a hostile list header was decoded", name)
+		}
+	}
+	deep := []byte{tagCompound, 0, 0}
+	for range 100 {
+		deep = append(deep, tagCompound, 1, 0, 'a')
+	}
+	if _, _, err := Decode(deep); err == nil {
+		t.Error("a record nested past any the game writes was decoded")
+	}
+}
+
+func TestLookupAndSetAgreeOnBothReadingsOfEveryId(t *testing.T) {
+	var s Store
+	ids := []int64{0, 1, -1, math.MaxInt64, math.MinInt64}
+	byID := map[int64]Record{}
+	for i, id := range ids {
+		byID[id] = Record{RecipesUnlocked: i + 1}
+	}
+	s.Set(time.Now(), byID)
+	for i, id := range ids {
+		for _, text := range []string{strconv.FormatInt(id, 10), strconv.FormatUint(uint64(id), 10)} {
+			if r, _, ok := s.Lookup(text); !ok || r.RecipesUnlocked != i+1 {
+				t.Errorf("Lookup(%s) = %+v, %v", text, r, ok)
+			}
 		}
 	}
 }

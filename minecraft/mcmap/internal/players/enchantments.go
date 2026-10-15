@@ -1,8 +1,7 @@
 package players
 
 // enchantments are the Bedrock enchantments by the number the save writes.
-// The save has no names; an id not listed shows as its number, which is
-// better than a name that might be another enchantment's.
+// The save has no names; an id not listed shows as its number.
 var enchantments = map[int]string{
 	0: "Protection", 1: "Fire Protection", 2: "Feather Falling", 3: "Blast Protection",
 	4: "Projectile Protection", 5: "Thorns", 6: "Respiration", 7: "Depth Strider",
@@ -13,7 +12,8 @@ var enchantments = map[int]string{
 	24: "Lure", 25: "Frost Walker", 26: "Mending", 27: "Curse of Binding",
 	28: "Curse of Vanishing", 29: "Impaling", 30: "Riptide", 31: "Loyalty",
 	32: "Channeling", 33: "Multishot", 34: "Piercing", 35: "Quick Charge",
-	36: "Soul Speed", 37: "Swift Sneak",
+	36: "Soul Speed", 37: "Swift Sneak", 38: "Wind Burst", 39: "Density",
+	40: "Breach",
 }
 
 // maxDamage is how much durability an item has, which the save leaves out:

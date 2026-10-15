@@ -4,8 +4,6 @@
 // server, so everything here is as old as the last save.
 package players
 
-import "time"
-
 // Gauge is an attribute with its ceiling.
 type Gauge struct {
 	Current float64 `json:"current"`
@@ -78,10 +76,4 @@ type Record struct {
 	RecipesUnlocked int  `json:"recipesUnlocked"`
 	SeenCredits     bool `json:"seenCredits"`
 	WardenThreat    *int `json:"wardenThreat,omitempty"`
-}
-
-// Held is a Record with when the snapshot it was read from was taken.
-type Held struct {
-	Record
-	At time.Time `json:"-"`
 }
