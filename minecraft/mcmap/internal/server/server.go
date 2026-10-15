@@ -314,9 +314,6 @@ func (s *Server) Handler() http.Handler {
 		s.route(mux, gatePublic, "POST /auth/start", s.handleStart)
 		s.route(mux, gatePublic, "GET /auth/status", s.handleStatus)
 		s.route(mux, gatePublic, "POST /auth/logout", s.handleLogout)
-		if s.Sessions.Revoked != nil {
-			s.route(mux, gatePlayer, "POST /api/logout-all", s.handleLogoutAll)
-		}
 	}
 	if s.passkeysOn() {
 		s.route(mux, gatePublic, "POST /auth/passkey/options", s.handlePasskeyOptions)
@@ -327,6 +324,11 @@ func (s *Server) Handler() http.Handler {
 		s.route(mux, gateAdmin, "POST /auth/passkey/register/cancel", s.handleRegisterCancel)
 		s.route(mux, gatePlayer, "GET /api/passkeys", s.handleListPasskeys)
 		s.route(mux, gatePlayer, "DELETE /api/passkeys/{id}", s.handleRemovePasskey)
+		// Only the account panel asks for it, and that panel is passkeys;
+		// with them off, !map logout is the way to end every session.
+		if s.Sessions.Revoked != nil {
+			s.route(mux, gatePlayer, "POST /api/logout-all", s.handleLogoutAll)
+		}
 	}
 	static := http.FileServerFS(filesOnly{s.Static})
 	s.route(mux, gatePublic, "GET /", func(w http.ResponseWriter, r *http.Request) {

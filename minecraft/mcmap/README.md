@@ -4304,16 +4304,17 @@ section: the build, the fingerprint of each page file it serves, the problem
 stage players are being shown, which features resolved as on, whether the map
 is in a quiet window, where the operator list is coming from, the age of the
 last live frame by dimension, and counts of sessions issued, passkey logins and
-refusals since it started. Every player, admin or not, can list their own
-passkeys, remove one, and log out everywhere; the last does what `!map logout`
-does.
+refusals since it started. With passkeys on, every player, admin or not, has
+an Account button to list their own passkeys, remove one, and log out
+everywhere; the last does what `!map logout` does. With passkeys off there is
+no Account button, and `!map logout` is how to end every session.
 
 **Taking it back.**
 
 | To end | Do | Takes effect |
 |---|---|---|
 | One person's admin | Take them off the operator list (`deop` in the console, or edit `permissions.json` and `permission reload`) | Within 10 seconds while the bridge is up; up to 24 hours late while it is down or the file is missing |
-| One person's sessions and passkeys | `!map logout` in game, or Log out everywhere in the page | At once |
+| One person's sessions and passkeys | `!map logout` in game, or, with passkeys on, Log out everywhere in the page | At once |
 | One passkey and its sessions | Remove it in the page | At once |
 | Passkey logins for everyone | `PASSKEYS_ENABLED=false` | After a restart; every passkey session is refused from then on, and stored passkeys are kept but unused |
 | The admin role for everyone | `ADMIN_ENABLED=false` and `PASSKEYS_ENABLED=false`, in one change: passkeys on with admin off stops the map from starting | After a restart; no admin route is served and no passkey session is accepted |
@@ -4675,7 +4676,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/admin/status` | An admin's session; 403 for anyone else. The status of `GET /internal/v1/status` and also `live.lastFrameAgeSeconds` and `sessions` (`issued`, `passkeyLogins`, `refused`). Only with admin on |
 | `POST /auth/passkey/register/options`, `POST /auth/passkey/register/finish`, `POST /auth/passkey/register/confirm`, `POST /auth/passkey/register/cancel` | An admin's session; 403 for anyone else. Adding a passkey: options (a `label`), the new credential held as pending with its fingerprint, the code from the game, and cancelling a pending one. Only with passkeys on |
 | `GET /api/passkeys`, `DELETE /api/passkeys/{id}` | A player's session; 403 for a service session. The caller's own passkeys (label, created, last used, pending or not), and removing one, which ends its sessions. Only with passkeys on |
-| `POST /api/logout-all` | A player's session; 403 for a service session. The revocation `!map logout` makes, which also removes the caller's passkeys |
+| `POST /api/logout-all` | A player's session; 403 for a service session. The revocation `!map logout` makes, which also removes the caller's passkeys. Only with passkeys on |
 | `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time (the nether also `levels`, each an `id`, `y`, `label` and `renderedAt`, that level's own last render time, absent where it is not known, the default first, when it has an extra level that has been drawn), `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks. `?level=<id>` on the nether names one of its extra levels, as `/api/map` lists them; 404 for an id that is not configured and for any other dimension |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs` (each entity `i`, `n`, `t`, `x`, `y`, `z`, `r`, and `s`, the surface under it, where known and outside the nether), `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |

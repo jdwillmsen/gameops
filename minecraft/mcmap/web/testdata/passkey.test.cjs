@@ -20,8 +20,10 @@ const json = (status, body) => ({ ok: status < 300, status, json: async () => bo
 // A page with passkey.js in it. answers maps "METHOD path" to a function of
 // the request body, or to a response; webauthn says whether the browser has
 // it and what the authenticator answers; signal says whether the browser
-// can be asked to drop a credential.
-function env({ answers = {}, webauthn = true, signal = true, confirm = true } = {}) {
+// can be asked to drop a credential. Passkeys are on unless answers says
+// otherwise for api/config.
+function env({ answers: given = {}, webauthn = true, signal = true, confirm = true } = {}) {
+  const answers = { 'GET api/config': json(200, { login: true, passkeys: true }), ...given };
   const { win, doc } = page(new Map(), { files: [] });
   const made = new Map();
   const plain = doc.getElementById;
@@ -320,6 +322,33 @@ test('a busy or refusing map is said to be so, not unreachable', async () => {
   await startAdding(e);
   assert.match(e.el('admin-note').textContent, /not allowed/);
   assert.doesNotMatch(e.el('admin-note').textContent, /reached/);
+});
+
+test('with passkeys off there is no Account button and no passkey request, and an admin keeps the status only', async () => {
+  for (const config of [{ login: true }, { login: true, passkeys: false }]) {
+    const e = env({ answers: {
+      'GET api/config': json(200, config),
+      'GET api/me': json(200, { gamertag: 'Steve Builds', admin: true }),
+      'GET api/passkeys': json(200, []),
+      'GET api/admin/status': json(200, { build: 'abc', operators: 'live' }),
+      'POST api/logout-all': json(204, {}),
+    } });
+    await e.win.mcmapPasskey.ready;
+    const what = JSON.stringify(config);
+    assert.equal(e.el('account-open').hidden, true, what);
+    assert.ok(!e.calls.includes('GET api/passkeys'), what);
+    e.el('account-logout-all').click();
+    for (let i = 0; i < 5; i++) await tick();
+    assert.ok(!e.calls.some((c) => c.startsWith('confirm ')), what);
+    assert.ok(!e.calls.includes('POST api/logout-all'), what);
+    assert.equal(e.el('admin').hidden, false, what);
+    assert.match(e.el('admin-status').textContent, /live/, what);
+    assert.equal(e.el('admin-passkey').hidden, true, what);
+    e.el('admin-label').value = 'Phone';
+    e.el('admin-add').click();
+    for (let i = 0; i < 5; i++) await tick();
+    assert.ok(!e.calls.includes('POST auth/passkey/register/options'), what);
+  }
 });
 
 test('the account panel opens and closes on its own', async () => {
