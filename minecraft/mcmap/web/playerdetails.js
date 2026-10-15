@@ -303,7 +303,7 @@
     const what = [now.health ? 'health' : '', now.level !== undefined ? 'level' : ''].filter(Boolean).join(' and ');
     if (!what) return null;
     const at = live.at ? Date.parse(live.at) : NaN;
-    return el('p', 'note live-note', `Live: the ${what} below ${what.includes(' and ') ? 'are' : 'is'} from the game right now${Number.isFinite(at) ? ` (${ago(at)})` : ''}; the rest is from the save.`);
+    return el('p', 'note live-note', `Live: the ${what} below ${what.includes(' and ') ? 'are' : 'is'} from the game right now${Number.isFinite(at) ? ` (${Date.now() - at < 15_000 ? 'a moment ago' : ago(at)})` : ''}; the rest is from the save.`);
   }
 
   function savedParts(saved, live) {
