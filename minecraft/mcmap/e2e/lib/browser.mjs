@@ -33,6 +33,8 @@ const EXPECTED = new Map([
   ['/api/icons/mob', [404]],
   ['/api/icons/picture', [404]],
   ['/api/waypoints', [403, 404]],
+  ['/api/admin/status', [403, 404]],
+  ['/api/passkeys', [403, 404]],
 ]);
 
 // The answers that are not faults from this map, in one context: those

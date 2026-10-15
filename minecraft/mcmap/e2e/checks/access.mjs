@@ -14,7 +14,7 @@ export async function loginScreen({ browser, cfg, watch, closers = [] }) {
   const ctx = await openContext(browser, {
     cfg, watch,
     stubs: { 'POST /auth/start': { code: STUB_CODE, expiresIn: 600 }, 'GET /auth/status': { state: 'pending' } },
-    expected: [['/api/map', 401]],
+    expected: [['/api/map', 401], ['/api/me', 401]],
   });
   closers.push(() => ctx.close());
   try {
@@ -94,6 +94,8 @@ export async function scope({ page }) {
     const found = search.ok ? await search.json() : null;
     return {
       waypoints: waypoints.status,
+      adminStatus: (await fetch('api/admin/status', { cache: 'no-store' })).status,
+      passkeys: (await fetch('api/passkeys', { cache: 'no-store' })).status,
       icons: icons.status,
       me: listed ? typeof listed.me === 'string' && listed.me !== '' : false,
       search: search.status,
@@ -101,9 +103,11 @@ export async function scope({ page }) {
     };
   });
   if (got.waypoints !== 403 && got.waypoints !== 404) throw new Fail('waypoints did not refuse a service session', { waypoints_status: got.waypoints });
+  if (got.adminStatus !== 403 && got.adminStatus !== 404) throw new Fail('an admin route did not refuse a service session', { admin_status: got.adminStatus });
+  if (got.passkeys !== 403 && got.passkeys !== 404) throw new Fail('the passkey list did not refuse a service session', { passkeys_status: got.passkeys });
   if (got.me) throw new Fail('the icon list names a player as the service session');
   if (got.search === 200 && got.searched !== 'off') throw new Fail('a search for a service session went through a player\'s waypoints');
-  return { measures: { waypoints_status: got.waypoints } };
+  return { measures: { waypoints_status: got.waypoints, admin_status: got.adminStatus, passkeys_status: got.passkeys } };
 }
 
 // The headers that keep the page from being framed or fed from elsewhere,

@@ -3232,6 +3232,9 @@ or every day put in is marked as drawn differently from the next.
 | `BACKFILL_WORK` | yes | | Where one archive at a time is unpacked and drawn; an absolute path with room for a world and its tiles. The job works in a `.mcmap-backfill` directory of its own there, the only thing it deletes, and leaves the rest as it found it |
 | `LEVEL_NAME` | yes | | The world's directory name, as in the archive |
 | `MARKERS_ENABLED` | no | `true` | As for the service: `false` keeps days without markers and amends none |
+| `ADMIN_ENABLED` | no | `false` | `true` makes a logged-in operator of the game an admin: [Admin access](#admin-access). Has no effect, and is not an error, with `AUTH_DISABLED=true` |
+| `PASSKEYS_ENABLED` | no | `false` | `true` lets an admin add a passkey and log in with it. Needs `ADMIN_ENABLED=true` and `PUBLIC_ORIGIN`, or the map does not start |
+| `PUBLIC_ORIGIN` | with passkeys | | The one origin the page is served from, a bare `https://` origin, no port or path, e.g. `https://fwb.prd.jdwlabs.com`. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` |
 | `DATA_DIR` | no | `/data` | Where the installed renderer is looked for, under `tools/unmined`. The map's own volume, mounted read-only, saves downloading it |
 | `UNMINED_URL`, `UNMINED_SHA256`, `RENDER_CHUNK_PROCESSORS`, `NETHER_TOP_Y` | no | as the service's | As for the service |
 
@@ -4243,6 +4246,97 @@ wrong secret is never presented by anything that holds the right one, so
 any result but `ok` is worth an alert by itself, as is `source="other"`,
 which is an address that should not be able to reach the listener.
 
+## Admin access
+
+An admin is a logged-in player whom the game lists as `operator` in its own
+`permissions.json`. Nothing else makes one: any other word, a player the file
+does not name, or a word this map does not know is not an admin. The map asks
+the bridge's `GET /permissions` and keeps the answer for 10 seconds, asks once
+at startup and once an hour besides, and keeps the operators' XUIDs, with the
+time of the last lookup that succeeded, in `DATA_DIR/auth/operators.json`.
+While the bridge cannot be reached, or answers with any error, a 404 for a
+missing file included, that set is used for as long as the last lookup was under
+24 hours ago; after that, or with no file, nobody is an admin. So taking
+someone off the operator list takes effect within 10 seconds while the bridge
+is up, and up to a day late while it is not. Deleting `permissions.json` does
+not end anyone's admin, for the same reason.
+
+Admin needs the login and has no effect without it: with `AUTH_DISABLED=true`
+nobody is an admin, both switches are turned off, and the map says so once at
+startup.
+
+**Adding a passkey.** A passkey lets an admin log in from a browser without
+typing a code in the game. It is added from the game and confirmed in the
+game:
+
+1. An admin opens the Admin section of the debug panel, chooses Add a passkey
+   and gives it a label of 1 to 32 letters, digits, spaces or hyphens, shown as
+   text and never as markup.
+2. The map answers with options for a discoverable credential that is checked
+   by the device (`residentKey: required`, `userVerification: required`, no
+   attestation), ES256 and RS256 only, for the user `fwb-map` and a random
+   handle that is not the XUID. The challenge lasts 2 minutes and is used once.
+3. The browser makes the credential, and the map holds it as pending, tied to
+   that XUID. It cannot log anyone in yet. The page shows its fingerprint, the
+   first 4 bytes of the SHA-256 of its ID as `XXXX-XXXX`. A second
+   registration while one is pending is refused, not replaced; it is allowed
+   once the pending one has expired, or has been cancelled by the same session.
+   At most 5 passkeys are held per player.
+4. The admin types `!map passkey` in game.
+5. The agent asks the map for a code for that XUID and whispers it to that
+   player alone, with the passkey's fingerprint. There is nothing to whisper
+   unless that XUID has a pending passkey under 2 minutes old.
+6. The admin types the code into the page that is registering, after checking
+   that the whisper shows the same fingerprint as the page. The passkey is then
+   active. The code is used once and lasts 2 minutes, and three wrong codes
+   delete the pending passkey and its code, to be started again.
+
+**Logging in with one.** The login screen offers Log in with a passkey when the
+map has them on. The browser asks the device, which names the passkey, so there
+is nothing to type. The map checks the signature, that the player is still an
+operator and that the passkey is not pending, then gives a session that lasts
+12 hours, not the 7 days of a login by code. The challenge is kept in a
+`__Host-mcmap_passkey` cookie, signed with a key of its own and good for 2
+minutes, so the map stores nothing for it; one assertion is accepted once.
+A passkey session ends when its passkey is removed, when its player is
+revoked, and as soon as passkeys are switched off.
+
+**What an admin sees.** Nothing of the world that every player does not.
+`GET /api/admin/status` is the server's own account of itself in the Admin
+section: the build, the fingerprint of each page file it serves, the problem
+stage players are being shown, which features resolved as on, whether the map
+is in a quiet window, where the operator list is coming from, the age of the
+last live frame by dimension, and counts of sessions issued, passkey logins and
+refusals since it started. Every player, admin or not, can list their own
+passkeys, remove one, and log out everywhere; the last does what `!map logout`
+does.
+
+**Taking it back.**
+
+| To end | Do | Takes effect |
+|---|---|---|
+| One person's admin | Take them off the operator list (`deop` in the console, or edit `permissions.json` and `permission reload`) | Within 10 seconds while the bridge is up; up to 24 hours late while it is down or the file is missing |
+| One person's sessions and passkeys | `!map logout` in game, or Log out everywhere in the page | At once |
+| One passkey and its sessions | Remove it in the page | At once |
+| Passkey logins for everyone | `PASSKEYS_ENABLED=false` | After a restart; every passkey session is refused from then on, and stored passkeys are kept but unused |
+| The admin role for everyone | `ADMIN_ENABLED=false` and `PASSKEYS_ENABLED=false`, in one change: passkeys on with admin off stops the map from starting | After a restart; no admin route is served and no passkey session is accepted |
+| Every passkey | Delete `DATA_DIR/auth/passkeys.json` and restart | Needs the volume |
+| Every login of every kind | Delete `DATA_DIR/auth/session.key` and restart | Needs the volume; passkeys work again at once |
+
+**Agents.** An agent holds no session on the map. It reads what the server says
+about itself from `GET /internal/v1/status` on `INTERNAL_ADDR`, through the API
+server's service proxy, with its own kube identity and no token:
+
+```sh
+kubectl get --raw \
+  "/api/v1/namespaces/jdwillmsen-prd/services/http:<map service>:internal/proxy/internal/v1/status"
+```
+
+That copy has no free text in it: the build, Go version, time, problem stage,
+quiet window, features, snapshot and render times, the page files'
+fingerprints and where the operators come from. It names no player and
+counts none. Everything else an agent needs is in `/metrics`.
+
 ## Browser checks
 
 `e2e/` drives the page in a real browser, Chromium under Playwright, and
@@ -4577,6 +4671,11 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/config` | Whether there is a login; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
 | `GET /api/me` | The logged-in player's gamertag. For a service session, `service:e2e` and `service: true` |
+| `POST /auth/passkey/options`, `POST /auth/passkey/finish` | Public, only with passkeys on. A passkey login: a challenge in a `__Host-mcmap_passkey` cookie, then the assertion; 200 with a 12-hour session cookie, 401 for any refusal |
+| `GET /api/admin/status` | An admin's session; 403 for anyone else. The status of `GET /internal/v1/status` and also `live.lastFrameAgeSeconds` and `sessions` (`issued`, `passkeyLogins`, `refused`). Only with admin on |
+| `POST /auth/passkey/register/options`, `POST /auth/passkey/register/finish`, `POST /auth/passkey/register/confirm`, `POST /auth/passkey/register/cancel` | An admin's session; 403 for anyone else. Adding a passkey: options (a `label`), the new credential held as pending with its fingerprint, the code from the game, and cancelling a pending one. Only with passkeys on |
+| `GET /api/passkeys`, `DELETE /api/passkeys/{id}` | A player's session; 403 for a service session. The caller's own passkeys (label, created, last used, pending or not), and removing one, which ends its sessions. Only with passkeys on |
+| `POST /api/logout-all` | A player's session; 403 for a service session. The revocation `!map logout` makes, which also removes the caller's passkeys |
 | `GET /api/map` | Session required. World name, refresh interval (`refreshSeconds`), when the last snapshot was taken (`snapshotAt`, absent before the first), each dimension's extent and last render time (the nether also `levels`, each an `id`, `y`, `label` and `renderedAt`, that level's own last render time, absent where it is not known, the default first, when it has an extra level that has been drawn), `live` (whether there is a live stream to open), and `problem` (`snapshot` or `render`) while the last cycle failed |
 | `GET /tiles/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One 256-pixel tile. Zoom 0 is one block per pixel; each step below halves the scale. 404 where the world has no chunks. `?level=<id>` on the nether names one of its extra levels, as `/api/map` lists them; 404 for an id that is not configured and for any other dimension |
 | `GET /api/live?dimension=<id>` | Session required. Server-sent events: one frame at once and one per sample, each the whole of that dimension as `at`, `serverNow`, `players`, `mobs` (each entity `i`, `n`, `t`, `x`, `y`, `z`, `r`, and `s`, the surface under it, where known and outside the nether), `more`, `stale` and `ttlSeconds`. 400 for an unknown dimension, 503 when too many streams are open. Not served with `LIVE_ENABLED=false` |
@@ -4617,6 +4716,8 @@ On `INTERNAL_ADDR` only:
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
 | `PUT /internal/v1/heads` | Bearer `INTERNAL_TOKEN`. `{"players":[{"xuid","gamertag","head"}]}`: everyone online now, `head` a PNG in base64 or absent. Replaces the last report whole. 200 with `players` and how many heads were `refused`; 400 for more than 256 players, a body over 1 MB, or an entry that is not a player. Not served with `ICONS_ENABLED=false` |
 | `POST /internal/v1/service-sessions` | Bearer `SERVICE_SESSION_SECRET`, in the header and nowhere else: 400 for a request with anything in its query. 200 with `identity`, `expiresAt` and `ttlSeconds`, and the session as a `Set-Cookie` with the attributes a player's has. 401 for a wrong secret; 429 with `Retry-After` for a wrong one past five at once and one a minute. The right secret is never refused. Not served without `SERVICE_SESSION_SECRET` |
+| `GET /internal/v1/status` | None: the cluster's network is the gate, and an agent reads it through the API server's service proxy. `build`, `go`, `now`, `problem`, `quiet`, `features`, `snapshotAt`, `renderedAt`, `assets` and `operators`, all fixed in shape and none free text |
+| `POST /internal/v1/passkey-codes` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: the agent asks for the code to whisper to this player. 200 with `code`, `expiresIn` and the pending passkey's `fingerprint`; 404 when that player has none pending. Only with passkeys on |
 
 The internal API is served whenever `INTERNAL_TOKEN` is set, with or without
 the login.
@@ -4700,6 +4801,13 @@ and what that day is compared with:
 | `mcmap_history_capture_tiles`, `mcmap_history_capture_tiles_changed`, `mcmap_history_capture_duration_seconds` | Tiles in the last day captured, how many of them differ from the day before, and how long keeping it took |
 | `mcmap_service_exchanges_total{result,source}` | Attempts to exchange the checks' secret for a service session: `ok`, `denied` (a wrong secret), `limited` (a wrong one past the few judged each minute), `malformed`; from a `private` address inside the cluster, `loopback` (a port-forward) or `other`. Present, at zero, only with `SERVICE_SESSION_SECRET` |
 | `mcmap_service_requests_total{result}` | Requests made with a service session: `allowed`, or `forbidden` for a route that is a player's own or a request that is not a read |
+| `mcmap_admin_passkeys_registered_total{result}` | Steps of adding a passkey: `pending`, `refused` (a check on the new credential failed), `code_issued`, `code_wrong`, `abandoned` (three wrong codes), `cancelled`, `expired`, `confirmed` |
+| `mcmap_admin_passkeys_removed_total{why}` | Passkeys removed: `player` (by their owner) or `revoked` (by a logout) |
+| `mcmap_admin_logins_total{result}` | Passkey logins: `ok`; refused before the signature verified, `bad_assertion`, `unknown_credential`, `expired`, `disabled`; and after it, `pending`, `not_operator`, `counter` (a clone), `replayed` |
+| `mcmap_admin_requests_total{route,allowed}` | Requests to an admin route by its pattern, and whether the gate let them through |
+| `mcmap_admin_operator_lookups_total{result}` | Where the operator list was read from: `live`, `last_known_good` or `none` |
+| `mcmap_admin_operators` | Operators known, a count and no identities |
+| `mcmap_admin_passkeys{state}` | Passkeys held, `pending` or `active`, read from the file at startup and set on every change |
 
 ## Build and test
 

@@ -28,6 +28,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -46,6 +47,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/leveldat"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/operators"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
@@ -202,6 +204,36 @@ func run(logger *slog.Logger) error {
 		app.Sessions.ServiceSeen = server.CountServiceRequest
 		app.Service = auth.NewExchange(cfg.ServiceSecret, time.Now)
 	}
+	// A bridge that answers GET /permissions and nothing else, with one
+	// made-up operator, so that the operator list runs as it does in
+	// production and every session the suite holds is refused by the admin
+	// routes. The suite never completes a ceremony, so the passkey origin
+	// only has to parse.
+	permissions := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/permissions" || r.Header.Get("Authorization") != "Bearer "+cfg.BridgeToken {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"2535412345678909":"operator"}`))
+	}))
+	defer permissions.Close()
+	list, err := operators.Open(filepath.Join(dir, "auth", "operators.json"), operators.NewBridge(permissions.URL, cfg.BridgeToken), time.Now, logger)
+	if err != nil {
+		return err
+	}
+	list.Refresh(ctx)
+	app.Admin, app.Operators = true, list
+	keys, err := auth.LoadPasskeys(filepath.Join(dir, "passkeys.json"), time.Now)
+	if err != nil {
+		return err
+	}
+	cer, err := auth.NewCeremonies("https://localhost", "localhost", key, keys, time.Now)
+	if err != nil {
+		return err
+	}
+	app.Passkeys, app.Ceremonies = keys, cer
+	app.Sessions.Passkeys, app.Sessions.PasskeyTTL = keys, 12*time.Hour
 
 	go play(ctx, layer, recorder, quiet)
 

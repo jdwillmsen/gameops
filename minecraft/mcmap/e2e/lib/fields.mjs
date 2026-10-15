@@ -21,6 +21,8 @@ export const SENTENCES = [
   "the page does not say the session is the service identity",
   "script on the page can read the session cookie",
   "waypoints did not refuse a service session",
+  "an admin route did not refuse a service session",
+  "the passkey list did not refuse a service session",
   "the icon list names a player as the service session",
   "a search for a service session went through a player's waypoints",
   "a security header did not arrive as the server sets it",
@@ -157,7 +159,7 @@ const density = (dpr) => String(dpr).replace('.', '_');
 
 // Every number a check may report, by name.
 export const MEASURES = new Set([
-  'login_ms', 'ttl_seconds', 'load_ms', 'status', 'cookies', 'weaknesses', 'waypoints_status', 'missing', 'tiles',
+  'login_ms', 'ttl_seconds', 'load_ms', 'status', 'cookies', 'weaknesses', 'waypoints_status', 'admin_status', 'passkeys_status', 'missing', 'tiles',
   'files', 'files_bad', 'files_differ', 'parts_missing', 'max_age_seconds',
   'asked', 'not_served', 'slowest_ms', 'not_answered', 'over_budget',
   'rendered', 'unrendered', 'players', 'heads_listed', 'heads_drawn',
