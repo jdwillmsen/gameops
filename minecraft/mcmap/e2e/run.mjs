@@ -207,7 +207,7 @@ async function main() {
   // evidence which cannot be written costs nothing but itself.
   // t is what every check is handed. closers is whatever the check now
   // running has opened for itself, to be shut if it has to be stopped.
-  const t = { cfg, watch, report, closers: [] };
+  const t = { cfg, watch, report, browser, closers: [] };
   // on names the shared page a check works on, 'page' or 'watcher'.
   const run = async (name, fn, { on = null, seconds = 120 } = {}) => {
     if (!CHECKS.includes(name)) throw new Error(`${name} is not in the list of checks`);

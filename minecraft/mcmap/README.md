@@ -3232,9 +3232,6 @@ or every day put in is marked as drawn differently from the next.
 | `BACKFILL_WORK` | yes | | Where one archive at a time is unpacked and drawn; an absolute path with room for a world and its tiles. The job works in a `.mcmap-backfill` directory of its own there, the only thing it deletes, and leaves the rest as it found it |
 | `LEVEL_NAME` | yes | | The world's directory name, as in the archive |
 | `MARKERS_ENABLED` | no | `true` | As for the service: `false` keeps days without markers and amends none |
-| `ADMIN_ENABLED` | no | `false` | `true` makes a logged-in operator of the game an admin: [Admin access](#admin-access). Has no effect, and is not an error, with `AUTH_DISABLED=true` |
-| `PASSKEYS_ENABLED` | no | `false` | `true` lets an admin add a passkey and log in with it. Needs `ADMIN_ENABLED=true` and `PUBLIC_ORIGIN`, or the map does not start |
-| `PUBLIC_ORIGIN` | with passkeys | | The one origin the page is served from, a bare `https://` origin, no port or path, e.g. `https://fwb.prd.jdwlabs.com`. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` |
 | `DATA_DIR` | no | `/data` | Where the installed renderer is looked for, under `tools/unmined`. The map's own volume, mounted read-only, saves downloading it |
 | `UNMINED_URL`, `UNMINED_SHA256`, `RENDER_CHUNK_PROCESSORS`, `NETHER_TOP_Y` | no | as the service's | As for the service |
 
@@ -4635,6 +4632,9 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `SESSION_TTL` | no | `168h` | How long a login lasts |
 | `SERVICE_SESSION_SECRET` | no | empty | What an automated check exchanges for a service session; at least 32 characters, and not `INTERNAL_TOKEN` or `BRIDGE_TOKEN`. Empty, there are no service sessions and no exchange to ask. Changing it ends every service session issued under the old one. Needs the login. See [Service sessions](#service-sessions) |
 | `SERVICE_SESSION_TTL` | no | `10m` | How long a service session lasts; `1m` to `30m`. Read only with `SERVICE_SESSION_SECRET` |
+| `ADMIN_ENABLED` | no | `false` | `true` makes a logged-in operator of the game an admin: [Admin access](#admin-access). Has no effect, and is not an error, with `AUTH_DISABLED=true` |
+| `PASSKEYS_ENABLED` | no | `false` | `true` lets an admin add a passkey and log in with it. Needs `ADMIN_ENABLED=true` and `PUBLIC_ORIGIN`, or the map does not start |
+| `PUBLIC_ORIGIN` | with passkeys | | The one origin the page is served from, a bare `https://` origin, no port or path, e.g. `https://fwb.prd.jdwlabs.com`. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` |
 | `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies cannot be rebuilt, and neither can the history kept here unless `HISTORY_DIR` puts it elsewhere, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |

@@ -84,7 +84,25 @@ export async function session({ page, ctx, cfg }) {
 // What a service session must not see, asked for on the live server: a
 // refusal here is the thing working. Nothing but reads is tried; that a
 // write is refused is the server's own tests' to prove.
-export async function scope({ page }) {
+export async function scope({ page, browser, cfg, watch }) {
+  // The admin routes are asked for from a context of their own, on a
+  // document that runs no script of the page's: a refusal is expected of
+  // these asks alone, and not of the page the other checks watch.
+  const asker = await openContext(browser, {
+    cfg, watch, cookie: cfg.session.cookie,
+    expected: [['/api/admin/status', 403], ['/api/admin/status', 404], ['/api/passkeys', 403], ['/api/passkeys', 404]],
+  });
+  let refused;
+  try {
+    const bare = await asker.newPage();
+    await bare.goto(`${cfg.publicUrl}/healthz`, { waitUntil: 'domcontentloaded' });
+    refused = await bare.evaluate(async () => ({
+      adminStatus: (await fetch('api/admin/status', { cache: 'no-store' })).status,
+      passkeys: (await fetch('api/passkeys', { cache: 'no-store' })).status,
+    }));
+  } finally {
+    await asker.close();
+  }
   const got = await page.evaluate(async () => {
     const dimension = window.mcmap.dimension();
     const waypoints = await fetch('api/waypoints', { cache: 'no-store' });
@@ -94,8 +112,6 @@ export async function scope({ page }) {
     const found = search.ok ? await search.json() : null;
     return {
       waypoints: waypoints.status,
-      adminStatus: (await fetch('api/admin/status', { cache: 'no-store' })).status,
-      passkeys: (await fetch('api/passkeys', { cache: 'no-store' })).status,
       icons: icons.status,
       me: listed ? typeof listed.me === 'string' && listed.me !== '' : false,
       search: search.status,
@@ -103,11 +119,11 @@ export async function scope({ page }) {
     };
   });
   if (got.waypoints !== 403 && got.waypoints !== 404) throw new Fail('waypoints did not refuse a service session', { waypoints_status: got.waypoints });
-  if (got.adminStatus !== 403 && got.adminStatus !== 404) throw new Fail('an admin route did not refuse a service session', { admin_status: got.adminStatus });
-  if (got.passkeys !== 403 && got.passkeys !== 404) throw new Fail('the passkey list did not refuse a service session', { passkeys_status: got.passkeys });
+  if (refused.adminStatus !== 403 && refused.adminStatus !== 404) throw new Fail('an admin route did not refuse a service session', { admin_status: refused.adminStatus });
+  if (refused.passkeys !== 403 && refused.passkeys !== 404) throw new Fail('the passkey list did not refuse a service session', { passkeys_status: refused.passkeys });
   if (got.me) throw new Fail('the icon list names a player as the service session');
   if (got.search === 200 && got.searched !== 'off') throw new Fail('a search for a service session went through a player\'s waypoints');
-  return { measures: { waypoints_status: got.waypoints, admin_status: got.adminStatus, passkeys_status: got.passkeys } };
+  return { measures: { waypoints_status: got.waypoints, admin_status: refused.adminStatus, passkeys_status: refused.passkeys } };
 }
 
 // The headers that keep the page from being framed or fed from elsewhere,
