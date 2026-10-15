@@ -4,5 +4,23 @@ package web
 
 import "embed"
 
-//go:embed index.html settings.js diag.js appearance.js views.js app.js zoom.js duration.js names.js icons.js layers.js room.js groups.js heights.js playerdetails.js live.js markers.js structures.js biomes.js topography.js search.js menu.js compact.js debug.js passkey.js slime.js chunk.js trails.js history.js levels.js style.css lib
+//go:embed index.html about.html guide.html privacy.html terms.html credits.html pages.css settings.js diag.js appearance.js views.js app.js zoom.js duration.js names.js icons.js layers.js room.js groups.js heights.js playerdetails.js live.js markers.js structures.js biomes.js topography.js search.js menu.js compact.js debug.js passkey.js slime.js chunk.js trails.js history.js levels.js style.css lib
 var FS embed.FS
+
+// Owner is who runs the map and holds the copyright in what is written
+// here. The pages say {{owner}} and {{copyright}} where they mean it, and
+// the server fills them in, so this is the one place to change.
+const (
+	Owner     = "Jacob Willmsen"
+	Copyright = "© 2026 " + Owner
+)
+
+// Pages are the routes of the pages that need no login, with the file each
+// is served from.
+var Pages = map[string]string{
+	"/about":   "about.html",
+	"/guide":   "guide.html",
+	"/privacy": "privacy.html",
+	"/terms":   "terms.html",
+	"/credits": "credits.html",
+}

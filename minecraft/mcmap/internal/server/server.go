@@ -21,6 +21,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/web"
 )
 
 type Server struct {
@@ -223,6 +224,22 @@ func (s *Server) route(mux *http.ServeMux, behind gate, pattern string, h http.H
 	mux.Handle(pattern, handler)
 }
 
+var pageWords = strings.NewReplacer("{{owner}}", web.Owner, "{{copyright}}", web.Copyright)
+
+// handlePage serves a page about the map. These hold nothing of the world
+// and are open to anyone, since a visitor has to be able to read what the
+// map does with them before they log in.
+func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
+	body, err := fs.ReadFile(s.Static, web.Pages[r.URL.Path])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=300")
+	_, _ = pageWords.WriteString(w, string(body))
+}
+
 func healthy(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 
 // filesOnly hides directories from the static file server, which would
@@ -330,6 +347,12 @@ func (s *Server) Handler() http.Handler {
 			s.route(mux, gatePlayer, "POST /api/logout-all", s.handleLogoutAll)
 		}
 	}
+	// Written out one by one, as every route is, for the list in service_test.go.
+	s.route(mux, gatePublic, "GET /about", s.handlePage)
+	s.route(mux, gatePublic, "GET /guide", s.handlePage)
+	s.route(mux, gatePublic, "GET /privacy", s.handlePage)
+	s.route(mux, gatePublic, "GET /terms", s.handlePage)
+	s.route(mux, gatePublic, "GET /credits", s.handlePage)
 	static := http.FileServerFS(filesOnly{s.Static})
 	s.route(mux, gatePublic, "GET /", func(w http.ResponseWriter, r *http.Request) {
 		// The page changes only with a release; embedded files carry no

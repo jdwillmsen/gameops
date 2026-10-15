@@ -1,0 +1,40 @@
+/* The pages about the map, which are read with no login. They wear the
+   map's colours and sizes from style.css and add only how a page of text
+   is laid out. */
+html, body { height: auto; min-height: 100%; }
+body.page { min-height: 100vh; min-height: 100dvh; }
+
+.page-bar, .page-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  padding: 0.6rem max(1rem, env(safe-area-inset-left));
+  background: var(--panel);
+  border-color: var(--rule);
+  border-style: solid;
+  border-width: 0 0 1px;
+}
+.page-foot { flex-direction: column; align-items: flex-start; margin-top: auto; border-width: 1px 0 0; }
+.page-foot .legal { margin: 0; }
+
+.page-nav { display: flex; flex-wrap: wrap; gap: 0 0.25rem; }
+.page-nav a, .page-back { display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.6rem; }
+.page-nav a[aria-current="page"] { color: var(--text); font-weight: 600; text-decoration: none; }
+.page a { color: var(--accent); }
+.page-nav a:focus-visible, .page-back:focus-visible, .page-body a:focus-visible { outline: var(--focus) solid var(--focus-colour); outline-offset: 2px; }
+
+.page-body { width: 100%; max-width: 42rem; margin: 0 auto; padding: 1rem max(1rem, env(safe-area-inset-left)) 2rem; line-height: 1.55; }
+.page-body h1 { margin: 0.5rem 0 1rem; font-size: calc(var(--title) + 6px); font-weight: 600; }
+.page-body h2 { margin: 1.75rem 0 0.5rem; font-size: var(--title); font-weight: 600; }
+.page-body ul, .page-body ol { padding-left: 1.4rem; }
+.page-body li { margin: 0.35rem 0; }
+.page-body code { padding: 0.05rem 0.35rem; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--panel); font: 0.92em ui-monospace, "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
+.page-body .keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1rem; margin: 0.5rem 0; }
+.page-body .keys dt, .page-body .keys dd { margin: 0; }
+.page-body .legal-big { margin: 0.5rem 0; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-m); font-weight: 600; }
+
+@media (max-width: 30rem) {
+  .page-body .keys { grid-template-columns: 1fr; gap: 0; }
+  .page-body .keys dd { margin-bottom: 0.6rem; }
+}

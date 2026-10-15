@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>Credits - FWB map</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="pages.css">
+  <script src="settings.js"></script>
+</head>
+<body class="page">
+  <header class="page-bar">
+    <a class="page-back" href="./">&larr; Back to the map</a>
+    <nav class="page-nav" aria-label="About this map">
+      <a href="about">About</a>
+      <a href="guide">Guide</a>
+      <a href="privacy">Privacy</a>
+      <a href="terms">Terms</a>
+      <a href="credits" aria-current="page">Credits</a>
+    </nav>
+  </header>
+  <main class="page-body">
+    <h1>Credits</h1>
+    <p>The map stands on other people&rsquo;s work. Thank you to all of them. Licences are as the authors state them.</p>
+    <h2>The game</h2>
+    <p>Minecraft is made by Mojang and Microsoft, who have no part in this map. The map reads the server&rsquo;s own world.</p>
+    <p>The mob and block pictures on the map are Mojang&rsquo;s own artwork. They are not part of the map&rsquo;s code or its downloads: the running map fetches them from Mojang&rsquo;s public sample files, keeps them on its own disk, and shows them only to logged-in players. They remain &copy; Mojang AB, all rights reserved.</p>
+    <h2>Terrain drawing</h2>
+    <p><a href="https://unmined.net/" rel="noreferrer">uNmINeD</a> draws the terrain tiles. It is closed-source software, free for non-commercial use but not to be redistributed, so the map downloads it from its author when it first needs it.</p>
+    <h2>In the browser</h2>
+    <ul>
+      <li><a href="https://leafletjs.com/" rel="noreferrer">Leaflet</a> 1.9.4, the map widget: BSD 2-Clause licence, &copy; Volodymyr Agafonkin and CloudMade.</li>
+    </ul>
+    <h2>In the server</h2>
+    <p>The server is written in Go and uses these libraries:</p>
+    <ul>
+      <li>gophertunnel (Sandertv), beorn7/perks, cespare/xxhash: MIT licence.</li>
+      <li>Prometheus client_golang, client_model, common and procfs: Apache 2.0 licence.</li>
+      <li>df-mc/goleveldb: BSD 2-Clause licence.</li>
+      <li>golang/snappy, munnerz/goautoneg, golang.org/x/sys, google.golang.org/protobuf: BSD 3-Clause licence.</li>
+      <li>klauspost/compress: BSD 3-Clause licence, with some parts under Apache 2.0 and MIT.</li>
+    </ul>
+    <p>The Go language and its standard library are &copy; The Go Authors, under a BSD licence.</p>
+  </main>
+  <footer class="page-foot">
+    <nav class="page-nav" aria-label="About this map">
+      <a href="about">About</a>
+      <a href="guide">Guide</a>
+      <a href="privacy">Privacy</a>
+      <a href="terms">Terms</a>
+      <a href="credits" aria-current="page">Credits</a>
+    </nav>
+    <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+    <p class="legal">{{copyright}}. Questions? Ask the server operator.</p>
+  </footer>
+</body>
+</html>
