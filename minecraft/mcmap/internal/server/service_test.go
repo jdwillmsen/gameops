@@ -119,6 +119,9 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/search":                                         {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
 	"public GET /api/me":                                             {"gateViewer", "/api/me"},
 	"public GET /api/waypoints":                                      {"gatePlayer", "/api/waypoints"},
+	"public GET /api/passkeys":                                       {"gatePlayer", "/api/passkeys"},
+	"public DELETE /api/passkeys/{id}":                               {"gatePlayer", "/api/passkeys/none"},
+	"public POST /api/logout-all":                                    {"gatePlayer", "/api/logout-all"},
 	// The internal listener's. Its liveness route is the public one's twin.
 	"internal GET /healthz":                        {"gatePublic", ""},
 	"internal GET /metrics":                        {"gatePublic", ""},
@@ -359,7 +362,7 @@ func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 			continue
 		}
 		method := "GET"
-		if route.gate == "gateAdmin" {
+		if route.gate == "gateAdmin" || route.gate == "gatePlayer" {
 			// The method is the pattern's, and the request is from the
 			// same site, so that it is the session that is refused and not
 			// the request's origin.
@@ -367,7 +370,13 @@ func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 			method, _, _ = strings.Cut(rest, " ")
 		}
 		asService := do(h, method, route.path, "", []*http.Cookie{service}, "Sec-Fetch-Site", "same-origin")
-		asPlayer := do(h, method, route.path, "", []*http.Cookie{player}, "Sec-Fetch-Site", "same-origin")
+		// Logging out everywhere ends every other session the player holds,
+		// so it is asked as someone nothing else here depends on.
+		asWho := player
+		if strings.HasSuffix(pattern, "/api/logout-all") {
+			asWho = session(s, auth.Identity{XUID: "2535400000000099", Gamertag: "Disposable"})
+		}
+		asPlayer := do(h, method, route.path, "", []*http.Cookie{asWho}, "Sec-Fetch-Site", "same-origin")
 		// A player is turned away from nothing by any of this.
 		if route.gate != "gateAdmin" && (asPlayer.Code == http.StatusForbidden || asPlayer.Code == http.StatusUnauthorized) {
 			t.Errorf("%s as a player = %d", pattern, asPlayer.Code)
