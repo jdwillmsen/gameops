@@ -254,6 +254,7 @@ async function main() {
 
     t.browser = browser;
     await run('login-screen', () => access.loginScreen(t));
+    await run('about-pages', () => access.aboutPages(t));
 
     await run('exchange', async () => {
       if (cfg.forward) {

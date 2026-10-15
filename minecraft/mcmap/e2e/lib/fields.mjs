@@ -4,7 +4,7 @@
 // Nothing read off the page can be among them, so nothing read off the page
 // can leave in a log: there is no field for it to be in.
 
-export const CHECKS = ['login-screen', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
+export const CHECKS = ['login-screen', 'about-pages', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
   'nether-levels', 'layer-panel', 'toggles', 'height-bands', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'page-bar', 'live-stream',
   'page-errors', 'read-only', 'run'];
 
@@ -15,6 +15,10 @@ export const SENTENCES = [
   "the map did not answer 401 to a browser with no session",
   "the login is shown without the code to type",
   "the page drew tiles for a browser with no session",
+  "a page about the map did not open with no session",
+  "a page about the map is missing its disclaimer or its links",
+  "a page about the map fetched something from the world",
+  "a page about the map is wider than a phone",
   "the browser does not hold exactly one session cookie",
   "the session cookie in the browser is weaker than a player's",
   "the session is not the service identity",
