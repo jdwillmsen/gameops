@@ -16,6 +16,11 @@ services:
       DIFFICULTY: "normal"
       ALLOW_CHEATS: "true"
       ONLINE_MODE: "true"
+      # Bedrock 1.26.51 defaults a fresh world to NetherNet, which opens no
+      # RakNet listener, and crew dials RakNet only. FWB runs RakNet for the
+      # same reason, and retail clients still join it, despite the server's
+      # startup error claiming NetherNet is the only supported transport.
+      TRANSPORT: "raknet"
       # Ops are granted from the console with `send-command op <gamertag>`,
       # so no gamertag needs to be committed here.
     ports:
