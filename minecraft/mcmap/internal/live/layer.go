@@ -24,6 +24,9 @@ type Layer struct {
 	// must be set before the first record is ingested. Nil leaves every
 	// entity without one.
 	Surface func(dimension string, x, z int32) (int32, bool)
+	// Counters takes the pack's counts records. Nil refuses them, which is
+	// how a map that is not keeping counters stays one.
+	Counters *Counters
 
 	flush sync.Mutex
 
@@ -64,6 +67,15 @@ func (l *Layer) Ingest(raw RawRecord, now time.Time) {
 	// one: a record from the future would outlive its welcome by the skew.
 	if at.IsZero() || at.After(now) {
 		at = now
+	}
+
+	if rec.Kind == Counts {
+		result := resultDropped
+		if l.Counters != nil {
+			result = l.Counters.Apply(rec, at)
+		}
+		metricFrames.WithLabelValues(result).Inc()
+		return
 	}
 
 	l.annotate(&rec)
