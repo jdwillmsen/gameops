@@ -104,7 +104,12 @@ func (k *softKey) cose(alg int) []byte {
 	if k.rsa != nil {
 		key = map[int]any{1: 3, 3: alg, -1: k.rsa.PublicKey.N.Bytes(), -2: big.NewInt(int64(k.rsa.PublicKey.E)).Bytes()}
 	} else {
-		x, y := k.priv.PublicKey.X.FillBytes(make([]byte, 32)), k.priv.PublicKey.Y.FillBytes(make([]byte, 32))
+		// Uncompressed P-256 point: 0x04 || X || Y, 32 bytes each.
+		point, err := k.priv.PublicKey.Bytes()
+		if err != nil {
+			k.t.Fatal(err)
+		}
+		x, y := point[1:33], point[33:65]
 		key = map[int]any{1: 2, 3: alg, -1: 1, -2: x, -3: y}
 	}
 	raw, err := webauthncbor.Marshal(key)
