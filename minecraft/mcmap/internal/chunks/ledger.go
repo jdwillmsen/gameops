@@ -162,6 +162,14 @@ func (l *Ledger) Acknowledge(checkedAt time.Time) error {
 	return l.commit(seen, Set{}, Set{}, l.at)
 }
 
+// Missing is the chunks seen before and absent from the last count, as a
+// copy that is the caller's.
+func (l *Ledger) Missing() Set {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return maps.Clone(l.missing)
+}
+
 // Last is the most recent report, if there has been a count, including one
 // recorded before this process started.
 func (l *Ledger) Last() (Report, bool) {
