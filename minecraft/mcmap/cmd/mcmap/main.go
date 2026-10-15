@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/operators"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/pack"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
@@ -241,6 +243,7 @@ func run(logger *slog.Logger) error {
 		LiveKeepalive: cfg.LiveKeepalive,
 		NetherTop:     cfg.NetherTopY,
 		NetherLevels:  cfg.NetherLevels,
+		Quiet:         cfg.Quiet,
 	}
 	app.Players = playerStore
 	if marked != nil {
@@ -288,8 +291,39 @@ func run(logger *slog.Logger) error {
 			app.Sessions.ServiceSeen = server.CountServiceRequest
 			app.Service = auth.NewExchange(cfg.ServiceSecret, time.Now)
 		}
+		if cfg.Admin {
+			list, err := operators.Open(filepath.Join(cfg.DataDir, "auth", "operators.json"), operators.NewBridge(cfg.BridgeURL, cfg.BridgeToken), time.Now, logger)
+			if err != nil {
+				return err
+			}
+			wg.Add(1)
+			go func() { defer wg.Done(); list.Run(ctx) }()
+			app.Admin, app.Operators = true, list
+		}
+		if cfg.Passkeys {
+			keys, err := auth.LoadPasskeys(filepath.Join(cfg.DataDir, "auth", "passkeys.json"), time.Now)
+			if err != nil {
+				return err
+			}
+			server.StartPasskeyMetrics(keys)
+			cer, err := auth.NewCeremonies(cfg.PublicOrigin, cfg.PasskeyRPID, key, keys, time.Now)
+			if err != nil {
+				return err
+			}
+			app.Passkeys, app.Ceremonies = keys, cer
+			// Set only here, so that with passkeys off a passkey cookie
+			// is refused rather than checked against a store.
+			app.Sessions.Passkeys, app.Sessions.PasskeyTTL = keys, 12*time.Hour
+		}
 	} else {
 		logger.Warn("running with no login: anyone who can reach this port sees the whole map")
+		// config has already turned both off, so what was asked for is read
+		// from the environment again.
+		admin, _ := strconv.ParseBool(os.Getenv("ADMIN_ENABLED"))
+		passkeys, _ := strconv.ParseBool(os.Getenv("PASSKEYS_ENABLED"))
+		if admin || passkeys {
+			logger.Warn("admin and passkeys asked for with no login: there is no player to be an admin")
+		}
 	}
 
 	serve := func(addr string, handler http.Handler) *http.Server {
@@ -316,7 +350,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "history", cfg.History, "service_sessions", cfg.ServiceSecret != "")
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "history", cfg.History, "service_sessions", cfg.ServiceSecret != "", "admin", cfg.Admin, "passkeys", cfg.Passkeys)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()
