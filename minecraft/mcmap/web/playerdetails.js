@@ -3,8 +3,10 @@
 // Everything the map knows of one player, in a panel beside the map: what
 // the world save holds (vitals, what they carry, where they died and
 // sleep) and what the trails saw (how far they went, how long they were
-// online). The save is rewritten only when the world saves and when the
-// player logs out, so that half says when it is from. The panel opens from
+// online) and what the pack has counted since the map began counting. The
+// save is rewritten only when the world saves and when the player logs out,
+// so that half says when it is from, and health and level are replaced by
+// the live ones while the player is online. The panel opens from
 // the player's card and does not take the page: the map stays alive under
 // it, and the card stays on the map.
 (() => {
@@ -28,6 +30,10 @@
   // second. A minute keeps the trail figures current without asking more
   // often than the save could have changed.
   const REFRESH_MS = 60_000;
+  // While the player is online the vitals are a second old at most on the
+  // server, so the panel asks as often as it is worth drawing.
+  const LIVE_REFRESH_MS = 5_000;
+  const LIST_ROWS = 10;
   const MAX_AIR = 300;
   const TICKS_PER_SECOND = 20;
   const HOTBAR = 9;
@@ -48,6 +54,8 @@
   let drawn = '';
   // The slot whose details are being read, as its grid and place in it.
   let pickedPos = '';
+  // The quick refresh, which only runs for a player who is online.
+  let liveTimer = null;
 
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
   const one = (n) => (Math.round(n * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 });
@@ -256,7 +264,26 @@
     return row;
   }
 
-  function vitals(r) {
+  // The pack's last sample of an online player, as the saved record's own
+  // shapes, so the same gauges draw it.
+  function liveVitals(live) {
+    if (!live) return {};
+    const out = {};
+    const health = num(live.health);
+    const max = num(live.maxHealth);
+    if (health !== null && max !== null && max > 0) out.health = { current: health, max };
+    const level = num(live.level);
+    if (level !== null) out.level = level;
+    return out;
+  }
+
+  function vitals(saved, live) {
+    const now = liveVitals(live);
+    // Experience progress is not in the live sample, so a live level has no
+    // bar of its own and the saved progress, which belongs to an older
+    // level, is not drawn beside it.
+    const r = { ...saved, ...now };
+    if (now.level !== undefined) delete r.progress;
     const hearts = gauge(r.health, 'Health', (g) => `${one(g.current / 2)} of ${one(g.max / 2)} hearts`);
     const hunger = gauge(r.hunger, 'Hunger', (g) => `${one(g.current)} of ${one(g.max)}`);
     const sat = gauge(r.saturation, 'Saturation', (g) => one(g.current));
@@ -270,7 +297,16 @@
     return facts([['Health', hearts], ['Hunger', hunger], ['Saturation', sat], ['Absorption', absorb], ['Air', breath], ['Experience', experience]]);
   }
 
-  function savedParts(saved) {
+  // Which of the figures above are live, said in words.
+  function liveNote(live) {
+    const now = liveVitals(live);
+    const what = [now.health ? 'health' : '', now.level !== undefined ? 'level' : ''].filter(Boolean).join(' and ');
+    if (!what) return null;
+    const at = live.at ? Date.parse(live.at) : NaN;
+    return el('p', 'note live-note', `Live: the ${what} below ${what.includes(' and ') ? 'are' : 'is'} from the game right now${Number.isFinite(at) ? ` (${ago(at)})` : ''}; the rest is from the save.`);
+  }
+
+  function savedParts(saved, live) {
     const out = [];
     const state = text(saved && saved.state);
     const at = saved && saved.asOf ? Date.parse(saved.asOf) : NaN;
@@ -280,6 +316,8 @@
       return out;
     }
     if (state !== 'known' || !saved.record) {
+      const status = vitals({}, live);
+      if (status) out.push(el('h3', '', 'Right now'), liveNote(live), status);
       out.push(el('p', 'note', `No saved record for this player yet. The game writes one when the world next saves after a player joins, and the map reads it from the snapshot after that${Number.isFinite(at) ? `; the last snapshot was ${ago(at)}` : ''}.`));
       return out;
     }
@@ -288,7 +326,9 @@
       ? `As of the snapshot ${ago(at)}. The game rewrites this when the world saves and when the player logs out, so it can be older than what they are doing now.`
       : 'The game rewrites this when the world saves and when the player logs out, so it can be older than what they are doing now.'));
 
-    const status = vitals(r);
+    const status = vitals(r, live);
+    const labelled = liveNote(live);
+    if (labelled) out.push(labelled);
     if (status) out.push(status);
     out.push(...[facts([
       ['Game mode', GAME_MODES[text(r.gameMode)] || null],
@@ -360,6 +400,71 @@
     return out;
   }
 
+  // --- the counters ------------------------------------------------------
+
+  const sinceDate = (iso) => {
+    const at = Date.parse(iso);
+    return Number.isNaN(at) ? '' : new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  };
+
+  // "entityAttack" and "entity_attack" are both read as words.
+  const causeName = (c) => {
+    const words = String(c).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  };
+
+  const tallyOf = (v) => (v && typeof v === 'object' ? Object.entries(v).filter(([k, n]) => k && Number.isFinite(n) && n > 0).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)) : []);
+  const total = (rows) => rows.reduce((n, [, c]) => n + c, 0);
+
+  // A heading's worth of figures: the biggest first, and how many were left
+  // off the end.
+  function tally(rows, nameOf) {
+    const list = el('ul', 'tally');
+    for (const [name, n] of rows.slice(0, LIST_ROWS)) {
+      const row = el('li');
+      row.append(el('span', 'name', nameOf(name)), el('span', 'dim', fmt(n)));
+      list.append(row);
+    }
+    if (rows.length > LIST_ROWS) list.append(el('li', 'dim', `and ${fmt(rows.length - LIST_ROWS)} more`));
+    return list;
+  }
+
+  function counterParts(counters) {
+    const state = text(counters && counters.state);
+    if (state === 'off' || !counters) return [];
+    const out = [];
+    if (state !== 'known') {
+      out.push(el('h3', '', 'Counted by the map'), el('p', 'note', 'Nothing has been counted for this player yet. The game keeps no statistics, so the map counts from when its script pack started reporting; the first count appears once the player has done something.'));
+      return out;
+    }
+    const since = sinceDate(text(counters.since));
+    const when = since ? `Counting since ${since} (UTC)` : 'Counting since the map began';
+    const kills = tallyOf(counters.kills);
+    const deaths = tallyOf(counters.deaths);
+    const broken = tallyOf(counters.brokenTypes);
+    const placed = tallyOf(counters.placedTypes);
+
+    out.push(el('h3', '', 'Combat'), el('p', 'note', `${when}. The game keeps no statistics, so nothing before that is counted.`));
+    const combat = el('div', 'tiles');
+    combat.append(tile(fmt(total(kills)), 'mobs killed'), tile(fmt(total(deaths)), 'deaths'));
+    out.push(combat);
+    if (kills.length > 0) out.push(el('h4', '', 'Mobs killed'), tally(kills, (k) => names.tidy(k)));
+    if (deaths.length > 0) out.push(el('h4', '', 'Deaths by cause'), tally(deaths, causeName));
+
+    out.push(el('h3', '', 'Building'), el('p', 'note', `${when}. The lists name the kinds most often broken and placed, so they can add up to less than the totals.`));
+    const building = el('div', 'tiles');
+    building.append(tile(fmt(num(counters.broken) || 0), 'blocks broken'), tile(fmt(num(counters.placed) || 0), 'blocks placed'));
+    out.push(building);
+    if (broken.length > 0) out.push(el('h4', '', 'Broken'), tally(broken, (k) => names.tidy(k)));
+    if (placed.length > 0) out.push(el('h4', '', 'Placed'), tally(placed, (k) => names.tidy(k)));
+
+    out.push(el('h3', '', 'Sessions'), el('p', 'note', `${when}. Time online counts only sessions the map saw end, so one in progress is added when it does.`));
+    const sessions = el('div', 'tiles');
+    sessions.append(tile(fmt(num(counters.joins) || 0), 'joins'), tile(span(num(counters.onlineSeconds) || 0), 'online'));
+    out.push(sessions);
+    return out;
+  }
+
   // --- opening -----------------------------------------------------------
 
   function note(content) {
@@ -392,7 +497,7 @@
     if (!force && now === drawn) return;
     drawn = now;
     const was = focused();
-    view.body.replaceChildren(...savedParts(data.saved), ...trailParts(data.trails));
+    view.body.replaceChildren(...savedParts(data.saved, data.live), ...counterParts(data.counters), ...trailParts(data.trails));
     icons.paint(view.body);
     refocus(was);
     const own = text(data.name);
@@ -429,6 +534,7 @@
     drawn = '';
     pickedPos = '';
     clearInterval(timer);
+    clearInterval(liveTimer);
     view.name.textContent = subject.name || 'Player';
     view.sub.textContent = 'Everything the world save and the trails know of this player';
     view.body.replaceChildren(el('p', 'note', 'Reading what the map knows…'));
@@ -437,6 +543,11 @@
     document.body.classList.add('player-shown');
     view.dialog.scrollTop = 0;
     timer = setInterval(() => fetchIt(false), REFRESH_MS);
+    // Quick while the player is online, which only the answer says. It goes
+    // through the same drawing, so an unchanged answer redraws nothing.
+    liveTimer = setInterval(() => {
+      if (last && last.live) fetchIt(false);
+    }, LIVE_REFRESH_MS);
     fetchIt(true);
     return true;
   }
@@ -446,6 +557,7 @@
     if (ask) ask.abort();
     ask = null;
     clearInterval(timer);
+    clearInterval(liveTimer);
     if (view.dialog.open) view.dialog.close();
   }
 
@@ -455,6 +567,7 @@
     if (ask) ask.abort();
     ask = null;
     clearInterval(timer);
+    clearInterval(liveTimer);
     document.body.classList.remove('player-shown');
   });
   // A non-modal dialog is not shut by Escape on its own.

@@ -26,7 +26,12 @@ const SAVED = {
   recipesUnlocked: 3, seenCredits: false, wardenThreat: 2,
 };
 const STATS = { name: 'Alex', windowSeconds: 86_400, gapSeconds: 120, onlineSeconds: 5400, blocks: 1234, days: [{ date: '2026-10-14', onlineSeconds: 5400, blocks: 1234 }], dimensions: ['overworld', 'nether'], lastSeen: Math.floor(Date.now() / 1000) - 30, lastDimension: 'nether' };
-const ANSWER = { id: '-9', name: 'Alex', saved: { state: 'known', asOf: new Date(Date.now() - 600_000).toISOString(), record: SAVED }, trails: { state: 'known', stats: STATS } };
+const COUNTERS = {
+  state: 'known', since: '2026-10-01T12:00:00Z', kills: { zombie: 12, spider: 3, creeper: 1 }, deaths: { entityAttack: 2, fall: 1 },
+  broken: 40, brokenTypes: { stone: 25, dirt: 10 }, placed: 17, placedTypes: { oak_planks: 12 }, joins: 4, leaves: 3, onlineSeconds: 7200,
+};
+const LIVE = { health: 9, maxHealth: 20, level: 31, dimension: 'overworld', at: new Date(Date.now() - 2000).toISOString() };
+const ANSWER = { id: '-9', name: 'Alex', counters: COUNTERS, saved: { state: 'known', asOf: new Date(Date.now() - 600_000).toISOString(), record: SAVED }, trails: { state: 'known', stats: STATS } };
 
 function load(answer) {
   const p = page(new Map(), { files: [] });
@@ -211,6 +216,101 @@ test('a refresh with nothing new leaves the panel as it is, and one with news ke
   n = 1;
   await gone.ticks[0]();
   assert.equal(gone.doc.activeElement, gone.made.get('player-close'));
+});
+
+test('shows what was counted under combat, building and sessions, since when', async () => {
+  const t = load({ body: ANSWER });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const text = words(t);
+  for (const need of ['Combat', 'Building', 'Sessions', 'Counting since 1 Oct 2026 (UTC)', '16mobs killed', '3deaths', 'Zombie12', 'Spider3', 'Entity attack2', 'Fall1',
+    '40blocks broken', '17blocks placed', 'Stone25', 'Oak Planks12', '4joins', '2 honline']) {
+    assert.ok(text.includes(need), `missing ${need} in ${text}`);
+  }
+  // The biggest first.
+  assert.ok(text.indexOf('Zombie12') < text.indexOf('Spider3'));
+});
+
+test('long lists are cut and say how many were left off', async () => {
+  const many = Object.fromEntries(Array.from({ length: 14 }, (_, i) => [`mob_${String.fromCharCode(97 + i)}`, 20 - i]));
+  const t = load({ body: { ...ANSWER, counters: { ...COUNTERS, kills: many } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.ok(words(t).includes('and 4 more'));
+  assert.ok(!words(t).includes('Mob N'));
+});
+
+test('says so when nothing is counted yet, and says nothing when the map keeps no counters', async () => {
+  const none = load({ body: { ...ANSWER, counters: { state: 'none' } } });
+  none.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.ok(words(none).includes('Nothing has been counted for this player yet'));
+  assert.ok(!words(none).includes('Combat'));
+  const off = load({ body: { ...ANSWER, counters: { state: 'off' } } });
+  off.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.ok(!words(off).includes('counted') && !words(off).includes('Combat'));
+  const old = load({ body: { ...ANSWER, counters: undefined } });
+  old.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.ok(words(old).includes('From the world save') && !words(old).includes('Combat'));
+});
+
+test('live health and level replace the saved ones, and the panel says which is which', async () => {
+  const t = load({ body: { ...ANSWER, live: LIVE } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const text = words(t);
+  assert.ok(text.includes('Live: the health and level below are from the game right now'));
+  assert.ok(text.includes('4.5 of 10 hearts'), 'live health');
+  assert.ok(!text.includes('8.5 of 10 hearts'), 'saved health');
+  assert.ok(text.includes('Level 31') && !text.includes('Level 12'));
+  // The rest of the vitals are still the save's.
+  assert.ok(text.includes('14 of 20'));
+});
+
+test('without a live sample the vitals are the save’s and are not labelled live', async () => {
+  const t = load({ body: ANSWER });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.ok(words(t).includes('8.5 of 10 hearts') && !words(t).includes('Live:'));
+});
+
+test('a player with no saved record yet still shows the live vitals', async () => {
+  const t = load({ body: { id: '5', saved: { state: 'none', asOf: new Date().toISOString() }, trails: { state: 'off' }, counters: { state: 'off' }, live: LIVE } });
+  t.app.playerDetails.open({ id: '5', name: 'Alex' });
+  await tick();
+  assert.ok(words(t).includes('Right now') && words(t).includes('4.5 of 10 hearts') && words(t).includes('Level 31'));
+});
+
+test('keeps asking quickly while the player is online, through the same unchanged-skip drawing', async () => {
+  const t = load({ body: { ...ANSWER, live: LIVE } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  // The first timer is the slow one every player has; the second is quick.
+  assert.equal(t.ticks.length, 2);
+  const before = t.asked.length;
+  const node = body(t).children[0];
+  await t.ticks[1]();
+  assert.equal(t.asked.length, before + 1, 'online: asked again');
+  assert.equal(body(t).children[0], node, 'an unchanged answer was drawn again');
+
+  const quiet = load({ body: ANSWER });
+  quiet.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const asked = quiet.asked.length;
+  await quiet.ticks[1]();
+  assert.equal(quiet.asked.length, asked, 'offline: asked on the quick timer');
+  await quiet.ticks[0]();
+  assert.equal(quiet.asked.length, asked + 1, 'offline: not asked on the slow timer');
+});
+
+test('counter names are put in as text, never as markup', async () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  const t = load({ body: { ...ANSWER, counters: { ...COUNTERS, kills: { [hostile]: 2 }, deaths: { [hostile]: 1 } } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.equal(body(t).querySelectorAll('img').length, 0);
 });
 
 (async () => {
