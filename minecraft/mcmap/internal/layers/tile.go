@@ -42,6 +42,10 @@ type Timings struct {
 // Renderer draws tiles of cuts through a world.
 type Renderer struct {
 	Reader
+	// Biomes, if set, is asked for the biomes the grass, the leaves and
+	// the water are coloured by, as it is at the time of each tile. With
+	// none, or with nothing for a column, a plains biome's colours are used.
+	Biomes func() Biomes
 }
 
 type pixel struct {
@@ -91,6 +95,10 @@ func (r *Renderer) Tile(spec Spec, zoom, tx, ty int) (data []byte, t Timings, ok
 	cx0, cz0 := (x0-1)>>4, (z0-1)>>4
 	cx1, cz1 := (x0+blocks-1)>>4, (z0+blocks-1)>>4
 	known := r.Registry.Blocks()
+	var tn *tinter
+	if r.Biomes != nil {
+		tn = newTinter(r.Biomes(), spec.Dim)
+	}
 	for cz := cz0; cz <= cz1; cz++ {
 		for cx := cx0; cx <= cx1; cx++ {
 			began := time.Now()
@@ -106,7 +114,7 @@ func (r *Renderer) Tile(spec Spec, zoom, tx, ty int) (data []byte, t Timings, ok
 			}
 			began = time.Now()
 			known = r.Registry.Blocks()
-			paintChunk(&w.col, known, spec, px, side, x0, z0, cx, cz)
+			paintChunk(&w.col, known, spec, tn, px, side, x0, z0, cx, cz)
 			t.Paint += time.Since(began)
 		}
 	}
@@ -134,7 +142,7 @@ func (r *Renderer) Tile(spec Spec, zoom, tx, ty int) (data []byte, t Timings, ok
 
 // paintChunk works out the 256 columns of one chunk into the tile's pixels
 // at a block to a pixel, with the light not yet put on.
-func paintChunk(col *Column, blocks []Block, spec Spec, px []pixel, side, x0, z0, cx, cz int) {
+func paintChunk(col *Column, blocks []Block, spec Spec, tn *tinter, px []pixel, side, x0, z0, cx, cz int) {
 	for z := range 16 {
 		pz := cz*16 + z - z0 + 1
 		if pz < 0 || pz >= side {
@@ -149,7 +157,7 @@ func paintChunk(col *Column, blocks []Block, spec Spec, px []pixel, side, x0, z0
 			if s.Kind == Nothing {
 				continue
 			}
-			px[pz*side+pxx] = colourOfSight(blocks, s, spec)
+			px[pz*side+pxx] = colourOfSight(blocks, s, spec, tn.at(int32(cx*16+x), int32(cz*16+z)))
 		}
 	}
 }
@@ -157,9 +165,10 @@ func paintChunk(col *Column, blocks []Block, spec Spec, px []pixel, side, x0, z0
 // colourOfSight is the colour a column is drawn in before the light
 // from its neighbours: its block's own, darkened by how far below the cut it
 // is so that a cave reads as a pit, with water laid over what it covers.
-func colourOfSight(blocks []Block, s Sight, spec Spec) pixel {
+func colourOfSight(blocks []Block, s Sight, spec Spec, p *palette) pixel {
 	b := &blocks[s.ID]
-	rgb := [3]int{int(b.RGB[0]), int(b.RGB[1]), int(b.RGB[2])}
+	own := tinted(b.RGB, b.Flags, p)
+	rgb := [3]int{int(own[0]), int(own[1]), int(own[2])}
 	if b.Flags&Water != 0 {
 		// The bed shows through shallow water and the water's own colour
 		// takes over with depth: a block of water lets through about
@@ -167,15 +176,16 @@ func colourOfSight(blocks []Block, s Sight, spec Spec) pixel {
 		bed := [3]int{rgb[0] / 3, rgb[1] / 3, rgb[2] / 3}
 		if s.Bed != AirID {
 			bb := &blocks[s.Bed]
-			bed = [3]int{int(bb.RGB[0]), int(bb.RGB[1]), int(bb.RGB[2])}
+			under := tinted(bb.RGB, bb.Flags, p)
+			bed = [3]int{int(under[0]), int(under[1]), int(under[2])}
 		}
 		share := min(96+s.Depth*20, 224)
 		for i := range rgb {
 			rgb[i] = (bed[i]*(256-share) + rgb[i]*share) / 256
 		}
 	} else if s.Wet {
-		for i, w := range [3]int{0x3f, 0x76, 0xe4} {
-			rgb[i] = (rgb[i]*3 + w) / 4
+		for i, w := range p.water {
+			rgb[i] = (rgb[i]*3 + int(w)) / 4
 		}
 	}
 	level := 256

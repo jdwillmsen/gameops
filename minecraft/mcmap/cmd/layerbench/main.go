@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/df-mc/goleveldb/leveldb/util"
+
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/layers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/topo"
@@ -374,6 +376,16 @@ func probe(r *layers.Renderer, spec layers.Spec, tx, ty, px, pz int) {
 	col := layers.GetColumn()
 	found, err := r.Read(chunks.Pos{Dim: spec.Dim, X: int32(x >> 4), Z: int32(z >> 4)}, col)
 	fmt.Println("found", found, "err", err, "slices", col.Slices)
+	prefix := chunks.RecordKey(chunks.Pos{Dim: spec.Dim, X: int32(x >> 4), Z: int32(z >> 4)}, 0)
+	prefix = prefix[:len(prefix)-1]
+	it := r.DB.NewIterator(util.BytesPrefix(prefix), nil)
+	for it.Next() {
+		if spec.Dim == chunks.Overworld && len(it.Key()) > 10 {
+			continue
+		}
+		fmt.Printf("record tag 0x%02x, %d key bytes, %d value bytes\n", it.Key()[len(prefix)], len(it.Key()), len(it.Value()))
+	}
+	it.Release()
 	blocks := r.Registry.Blocks()
 	for y := spec.Cut + 16; y >= layers.MinY(spec.Dim) && y >= spec.Cut-40; y-- {
 		id := col.ID(x&15, y, z&15)
