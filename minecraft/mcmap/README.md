@@ -4306,17 +4306,19 @@ startup.
 typing a code in the game. It is added from the game and confirmed in the
 game:
 
-1. An admin opens the Admin section of the debug panel, chooses Add a passkey
-   and gives it a label of 1 to 32 letters, digits, spaces or hyphens, shown as
+1. With passkeys on, an admin opens the Admin section of the debug panel,
+   chooses Add a passkey and gives it a label of 1 to 32 letters, digits, spaces or hyphens, shown as
    text and never as markup.
 2. The map answers with options for a discoverable credential that is checked
    by the device (`residentKey: required`, `userVerification: required`, no
    attestation), ES256 and RS256 only, for the user `fwb-map` and a random
    handle that is not the XUID. The challenge lasts 2 minutes and is used once.
+   Starting again before the browser has finished replaces it: only the newest
+   challenge can finish.
 3. The browser makes the credential, and the map holds it as pending, tied to
    that XUID. It cannot log anyone in yet. The page shows its fingerprint, the
-   first 4 bytes of the SHA-256 of its ID as `XXXX-XXXX`. A second
-   registration while one is pending is refused, not replaced; it is allowed
+   first 4 bytes of the SHA-256 of its ID as `XXXX-XXXX`. Once a passkey is
+   pending, a second registration is refused, not replaced; it is allowed
    once the pending one has expired, or has been cancelled by the same session.
    At most 5 passkeys are held per player.
 4. The admin types `!map passkey` in game.
@@ -4335,8 +4337,13 @@ operator and that the passkey is not pending, then gives a session that lasts
 12 hours, not the 7 days of a login by code. The challenge is kept in a
 `__Host-mcmap_passkey` cookie, signed with a key of its own and good for 2
 minutes, so the map stores nothing for it; one assertion is accepted once.
-A passkey session ends when its passkey is removed, when its player is
-revoked, and as soon as passkeys are switched off.
+A passkey session ends when its passkey is removed and when its player is
+revoked. While passkeys are switched off every passkey session is refused, but
+not destroyed: switched back on within its 12 hours, a session whose passkey is
+still held works again.
+
+Every request body these routes take is JSON, and one that begins with a
+byte-order mark is refused, not stripped.
 
 **What an admin sees.** Nothing of the world that every player does not.
 `GET /api/admin/status` is the server's own account of itself in the Admin
@@ -4356,7 +4363,7 @@ no Account button, and `!map logout` is how to end every session.
 | One person's admin | Take them off the operator list (`deop` in the console, or edit `permissions.json` and `permission reload`) | Within 10 seconds while the bridge is up; up to 24 hours late while it is down or the file is missing |
 | One person's sessions and passkeys | `!map logout` in game, or, with passkeys on, Log out everywhere in the page | At once |
 | One passkey and its sessions | Remove it in the page | At once |
-| Passkey logins for everyone | `PASSKEYS_ENABLED=false` | After a restart; every passkey session is refused from then on, and stored passkeys are kept but unused |
+| Passkey logins for everyone | `PASSKEYS_ENABLED=false` | After a restart; every passkey session is refused from then on, and stored passkeys are kept but unused. Switched back on, an unexpired passkey session works again |
 | The admin role for everyone | `ADMIN_ENABLED=false` and `PASSKEYS_ENABLED=false`, in one change: passkeys on with admin off stops the map from starting | After a restart; no admin route is served and no passkey session is accepted |
 | Every passkey | Delete `DATA_DIR/auth/passkeys.json` and restart | Needs the volume |
 | Every login of every kind | Delete `DATA_DIR/auth/session.key` and restart | Needs the volume; passkeys work again at once |

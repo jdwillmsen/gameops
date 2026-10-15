@@ -179,7 +179,7 @@ func absent(method string, code int) bool {
 // The kill switches end what was issued under them, on the next request.
 func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
 	s := withAdmin(t, fakeOperators{steve.XUID: true})
-	withPasskeys(t, s)
+	keys, cer, _ := withPasskeys(t, s)
 	d := newDevice(t)
 	addPasskey(t, s, session(s, steve), d)
 	game := session(s, steve)
@@ -203,6 +203,14 @@ func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
 	if rec := do(s.InternalHandler(), "POST", "/internal/v1/passkey-codes", `{"xuid":"`+steve.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken); rec.Code != http.StatusNotFound {
 		t.Errorf("passkeys off: the code route = %d, want 404", rec.Code)
 	}
+
+	// Refused, not destroyed: switched back on, the unexpired cookie of a
+	// passkey still held works again.
+	s.Passkeys, s.Ceremonies, s.Sessions.Passkeys = keys, cer, keys
+	if rec := do(s.Handler(), "GET", "/api/me", "", []*http.Cookie{pk}); rec.Code != http.StatusOK {
+		t.Errorf("passkeys back on: a passkey session's GET /api/me = %d, want 200", rec.Code)
+	}
+	s.Passkeys, s.Ceremonies, s.Sessions.Passkeys = nil, nil, nil
 
 	// Admin off as well: both values false in one change.
 	s.Admin = false
