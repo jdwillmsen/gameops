@@ -135,7 +135,7 @@ const boot = Date.now();
 let seq = 0;
 // player id -> what happened since the last counts record
 const pending = new Map();
-// player id -> when this run first saw them online
+// player id -> the moment up to which their time online has been counted
 const onlineSince = new Map();
 
 function print(record) {
@@ -439,14 +439,27 @@ function onSpawn(event) {
   if (delta) delta.j++;
 }
 
+// Time online is added as it passes, at every counts record, and not when a
+// player leaves: the server restarts daily and a stop ends sessions without
+// any leave event, so what is added only at the end would be lost with it.
+// Only whole seconds are taken and the rest waits, so none is counted twice
+// or dropped between records.
+function accrue(id, now) {
+  const mark = onlineSince.get(id);
+  if (mark === undefined) return;
+  const seconds = Math.floor((now - mark) / 1000);
+  if (seconds <= 0) return;
+  onlineSince.set(id, mark + seconds * 1000);
+  const delta = deltaFor(id);
+  if (delta) delta.t += seconds;
+}
+
 function onLeave(event) {
   const id = event.playerId;
-  const since = onlineSince.get(id);
+  accrue(id, Date.now());
   onlineSince.delete(id);
   const delta = deltaFor(id);
-  if (!delta) return;
-  delta.l++;
-  if (since !== undefined) delta.t += Math.max(0, Math.round((Date.now() - since) / 1000));
+  if (delta) delta.l++;
 }
 
 // The most-counted names up to the limit as a JSON object, or null if none.
@@ -479,6 +492,8 @@ function deltaItem(id, delta) {
 // assemble, which is why none of the part/parts bookkeeping of a sample's
 // lists is repeated here.
 function emitCounts(tick) {
+  const now = Date.now();
+  for (const id of [...onlineSince.keys()]) accrue(id, now);
   if (pending.size === 0) return;
   const items = [...pending].map(([id, delta]) => deltaItem(id, delta));
   pending.clear();

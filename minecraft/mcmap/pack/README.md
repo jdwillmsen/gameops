@@ -84,7 +84,7 @@ Items:
 
 | Key | Meaning |
 | --- | --- |
-| `i` | Entity id, as a string. For a player it is the id of this session, not an XUID; the stable API has none. An entity with no id, or one over 64 bytes, is left out |
+| `i` | Entity id, as a string. For a player it is the save record's `UniqueID` as a signed decimal, which is stable across server restarts; it is not an XUID, which the stable API does not have. An entity with no id, or one over 64 bytes, is left out |
 | `n` | Player name, or a mob's name tag when it has one. Cut to 64 characters |
 | `t` | Mob type without the `minecraft:` prefix |
 | `x` `y` `z` | Position, rounded to one decimal. An entity whose position is not a finite number is left out |
@@ -110,7 +110,7 @@ MCMAP1 {"gen":99,"tick":562338523,"ts":1791200870385,"kind":"counts","boot":1791
 | `b`, `p` | Blocks broken and placed, exact |
 | `bt`, `pt` | Most-counted block types broken and placed, at most 12 each |
 | `j`, `l` | Joins (`playerSpawn` with `initialSpawn`) and leaves (`playerLeave`) |
-| `t` | Seconds online of the sessions that ended, for players whose join this run saw (those online at load count from the first sample) |
+| `t` | Seconds online since the player's last record, so a server stop loses at most one sample's worth. Counted from the join this run saw, or from the first sample for players already online at load |
 
 Every line is complete and has a `seq` of its own, so there is nothing to
 assemble and a line is taken or refused alone; a sample with many players is
