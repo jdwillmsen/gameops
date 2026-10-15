@@ -52,6 +52,8 @@ func withService(t *testing.T) (*Server, *fakeWaypoints, *bytes.Buffer) {
 	s.Sessions.ServiceTTL = 10 * time.Minute
 	s.Sessions.ServiceSeen = CountServiceRequest
 	s.Service = auth.NewExchange(serviceSecret, time.Now)
+	s.Admin, s.Operators = true, fakeOperators{}
+	withPasskeys(t, s)
 	var log bytes.Buffer
 	s.Log = slog.New(slog.NewJSONHandler(&log, nil))
 	return s, waypoints, &log
@@ -234,7 +236,7 @@ func TestService_EveryRouteHasAGateThatWasChosenForIt(t *testing.T) {
 			t.Errorf("%s is shown to a service session and is not a GET", key)
 		}
 		// And each kind of gate belongs to one listener.
-		if (gate == "gateViewer" || gate == "gatePlayer") != (listener == "public") && gate != "gatePublic" {
+		if (gate == "gateViewer" || gate == "gatePlayer" || gate == "gateAdmin") != (listener == "public") && gate != "gatePublic" {
 			t.Errorf("%s is behind %s, which is not a gate of the %s listener", key, gate, listener)
 		}
 	}
@@ -352,10 +354,17 @@ func TestService_ASessionReachesWhatIsShownAndIsForbiddenTheRest(t *testing.T) {
 		asService := do(h, "GET", route.path, "", []*http.Cookie{service})
 		asPlayer := do(h, "GET", route.path, "", []*http.Cookie{player})
 		// A player is turned away from nothing by any of this.
-		if asPlayer.Code == http.StatusForbidden || asPlayer.Code == http.StatusUnauthorized {
+		if route.gate != "gateAdmin" && (asPlayer.Code == http.StatusForbidden || asPlayer.Code == http.StatusUnauthorized) {
 			t.Errorf("%s as a player = %d", pattern, asPlayer.Code)
 		}
 		switch route.gate {
+		case "gateAdmin":
+			// Steve is no operator here: both are turned away, and the
+			// service session is turned away before the list is read.
+			wantForbidden++
+			if asService.Code != http.StatusForbidden || asPlayer.Code != http.StatusForbidden {
+				t.Errorf("%s: service %d, member %d; want 403 for both", pattern, asService.Code, asPlayer.Code)
+			}
 		case "gatePlayer":
 			wantForbidden++
 			if asService.Code != http.StatusForbidden {

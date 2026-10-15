@@ -28,7 +28,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // handleConfig is the one thing the page may ask before logging in: whether
 // there is a login to show. Even the world's name waits for a session.
 func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"login": s.Sessions != nil})
+	out := map[string]any{"login": s.Sessions != nil}
+	// Said only while on, so a map without passkeys answers as it always
+	// has.
+	if s.passkeysOn() {
+		out["passkeys"] = true
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +44,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	// the shape of a name.
 	if viewer.Service {
 		out["service"] = true
+	}
+	if id, ok := auth.FromContext(r.Context()); ok && s.isAdmin(r.Context(), id.XUID) {
+		out["admin"] = true
 	}
 	writeJSON(w, http.StatusOK, out)
 }
