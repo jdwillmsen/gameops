@@ -4170,7 +4170,8 @@ only the gateway's address.
 
 A session cannot be withdrawn by itself, but a player's can be withdrawn
 together. `POST /internal/v1/revocations` records the moment, on the data
-volume, and every session that player was issued up to then stops working.
+volume, and every session that player was issued up to then stops working;
+with passkeys on, their passkeys are removed too.
 The agent calls it for whoever types `!map logout`, which is the way out for
 a player who typed a code off someone else's screen. Deleting `session.key`
 logs everyone out.
@@ -4716,9 +4717,9 @@ script error and `follow-player` a player 5 pixels off the middle.
 | Route | Purpose |
 |---|---|
 | `GET /` | The map page; public, and holds nothing about the world |
-| `GET /api/config` | Whether there is a login; public |
+| `GET /api/config` | Whether there is a login, and `passkeys: true` while passkeys are on; public |
 | `POST /auth/start`, `GET /auth/status`, `POST /auth/logout` | The login flow above |
-| `GET /api/me` | The logged-in player's gamertag. For a service session, `service:e2e` and `service: true` |
+| `GET /api/me` | The logged-in player's gamertag, and `admin: true` for an admin. For a service session, `service:e2e` and `service: true` |
 | `POST /auth/passkey/options`, `POST /auth/passkey/finish` | Public, only with passkeys on. A passkey login: a challenge in a `__Host-mcmap_passkey` cookie, then the assertion; 200 with a 12-hour session cookie, 401 for any refusal |
 | `GET /api/admin/status` | An admin's session; 403 for anyone else. The status of `GET /internal/v1/status` and also `live.lastFrameAgeSeconds` and `sessions` (`issued`, `passkeyLogins`, `refused`). Only with admin on |
 | `POST /auth/passkey/register/options`, `POST /auth/passkey/register/finish`, `POST /auth/passkey/register/confirm`, `POST /auth/passkey/register/cancel` | An admin's session; 403 for anyone else. Adding a passkey: options (a `label`), the new credential held as pending with its fingerprint, the code from the game, and cancelling a pending one. Only with passkeys on |
@@ -4759,7 +4760,7 @@ On `INTERNAL_ADDR` only:
 |---|---|
 | `GET /metrics` | Prometheus |
 | `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code. 204, or 404 for a code that is unknown, expired or used |
-| `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds. 204 |
+| `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds and remove their passkeys. 204 |
 | `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
 | `PUT /internal/v1/heads` | Bearer `INTERNAL_TOKEN`. `{"players":[{"xuid","gamertag","head"}]}`: everyone online now, `head` a PNG in base64 or absent. Replaces the last report whole. 200 with `players` and how many heads were `refused`; 400 for more than 256 players, a body over 1 MB, or an entry that is not a player. Not served with `ICONS_ENABLED=false` |
