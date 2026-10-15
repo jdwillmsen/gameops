@@ -75,11 +75,11 @@ func TestAdmin_TheGate(t *testing.T) {
 	if rec := do(gate, "GET", "/test", "", []*http.Cookie{session(s, alex)}); rec.Code != http.StatusForbidden {
 		t.Errorf("a member = %d", rec.Code)
 	}
-	before := testutil.ToFloat64(metricAdminRequests.WithLabelValues("GET /test", "true"))
+	before := testutil.ToFloat64(s.metricSet().requests.WithLabelValues("GET /test", "true"))
 	if rec := do(gate, "GET", "/test", "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusOK || reached != 1 {
 		t.Errorf("an operator = %d, reached %d", rec.Code, reached)
 	}
-	if testutil.ToFloat64(metricAdminRequests.WithLabelValues("GET /test", "true")) != before+1 {
+	if testutil.ToFloat64(s.metricSet().requests.WithLabelValues("GET /test", "true")) != before+1 {
 		t.Error("an admin request was not counted")
 	}
 	// Demoted: the same cookie, the next lookup.
@@ -165,5 +165,22 @@ func TestAdmin_ABridgeThatCannotBeReadMakesNobodyAdminAndNothingFail(t *testing.
 	}
 	if rec := do(s.Handler(), "GET", "/api/me", "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "admin") {
 		t.Errorf("/api/me with the bridge down = %d %s", rec.Code, rec.Body)
+	}
+}
+
+// An admin route on a map with no login, or with admin off, is closed, not
+// open to whoever can reach it.
+func TestAdmin_ARouteFailsClosedWithoutALoginOrWithAdminOff(t *testing.T) {
+	for name, s := range map[string]*Server{
+		"no sessions": {Admin: true, Operators: fakeOperators{steve.XUID: true}},
+		"admin off":   func() *Server { s := withLogin(t); s.Operators = fakeOperators{steve.XUID: true}; return s }(),
+	} {
+		called := false
+		mux := http.NewServeMux()
+		s.route(mux, gateAdmin, "GET /test", func(http.ResponseWriter, *http.Request) { called = true })
+		rec := do(mux, "GET", "/test", "", nil)
+		if rec.Code != http.StatusForbidden || called || rec.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: %d, called %v, cache %q", name, rec.Code, called, rec.Header().Get("Cache-Control"))
+		}
 	}
 }
