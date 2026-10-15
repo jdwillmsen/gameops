@@ -96,3 +96,43 @@ func TestStatsOfAPlayerNeverSeenAreAbsent(t *testing.T) {
 		t.Error("stats for nobody")
 	}
 }
+
+// The window is the retention to the second, not whole days: a player online
+// steadily for two days has exactly the last day's worth in a day's window.
+func TestStatsCoverExactlyTheRetentionAndNotTheWholeDaysItTouches(t *testing.T) {
+	r := New(24*time.Hour, 1000)
+	from := time.Date(2026, 10, 3, 1, 0, 0, 0, time.UTC)
+	end := from.Add(48 * time.Hour)
+	for when := from; !when.After(end); when = when.Add(time.Minute) {
+		at(r, "overworld", when, 0, 0)
+	}
+	got, ok := r.Stats("Alex", end)
+	if !ok {
+		t.Fatal("no stats")
+	}
+	if diff := got.OnlineSeconds - 24*3600; diff < -60 || diff > 60 {
+		t.Errorf("online = %ds, want a day to within a sample (%ds out)", got.OnlineSeconds, diff)
+	}
+}
+
+// Points are kept for the retention and a player who stood still has one,
+// but their time online is from every sample, so they are not forgotten
+// while they are still being seen.
+func TestAPlayerWhoStoodStillLongerThanTheRetentionIsKept(t *testing.T) {
+	r := New(time.Hour, 100)
+	for when := start; when.Before(start.Add(3 * time.Hour)); when = when.Add(10 * time.Second) {
+		at(r, "overworld", when, 5, 5)
+	}
+	now := start.Add(3*time.Hour - 10*time.Second)
+	got, ok := r.Stats("Alex", now)
+	if !ok || got.OnlineSeconds < 59*60 || got.OnlineSeconds > 61*60 {
+		t.Fatalf("stats = %+v, %v; want an hour online", got, ok)
+	}
+	if n := count(r.Trails("overworld", "", time.Time{}, now)); n != 0 {
+		t.Errorf("%d points served for a player standing still, whose only one is past the retention", n)
+	}
+	// Once they are not seen for the retention, they are let go.
+	if _, ok := r.Stats("Alex", now.Add(2*time.Hour)); ok {
+		t.Error("a player not seen for longer than the retention is still held")
+	}
+}
