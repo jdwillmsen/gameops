@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -128,5 +129,13 @@ func buildInfo() (build, goVersion string) {
 	if strings.Trim(build, "0123456789abcdef") != "" {
 		build = ""
 	}
-	return build, info.GoVersion
+	return build, goRelease(info.GoVersion)
 }
+
+// goRelease keeps the version and drops any toolchain suffix or experiment
+// list, so the status holds digits and dots after "go" and nothing else.
+func goRelease(v string) string {
+	return goReleasePattern.FindString(v)
+}
+
+var goReleasePattern = regexp.MustCompile(`^go[0-9.]+`)

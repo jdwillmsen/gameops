@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 var (
 	hexUpTo12   = regexp.MustCompile(`^[0-9a-f]{0,12}$`)
-	goVersion   = regexp.MustCompile(`^go[0-9.]+`)
+	goVersion   = regexp.MustCompile(`^(go[0-9.]+)?$`)
 	rfc3339     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$`)
 	hex8        = regexp.MustCompile(`^[0-9a-f]{8}$`)
 	featureKeys = []string{"login", "live", "markers", "waypoints", "icons", "structures", "biomes", "trails", "history", "admin", "passkeys"}
@@ -77,11 +78,54 @@ func checkShape(t *testing.T, raw []byte, admin bool) {
 			t.Errorf("asset %q %q", file, print)
 		}
 	}
+	if admin {
+		onlyKeys(t, top["sessions"], "issued", "passkeyLogins", "refused")
+		if raw, ok := top["live"]; ok {
+			onlyKeys(t, raw, "lastFrameAgeSeconds")
+		}
+	}
 	if s.Live != nil {
 		for dim := range s.Live.LastFrameAgeSeconds {
 			if !strings.Contains(" "+strings.Join(render.Dimensions, " ")+" ", " "+dim+" ") {
 				t.Errorf("live dimension %q", dim)
 			}
+		}
+	}
+}
+
+// onlyKeys fails on any key of a nested admin object that the spec does not
+// list, and on any listed key that is missing.
+func onlyKeys(t *testing.T, raw json.RawMessage, keys ...string) {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Errorf("nested object: %v: %s", err, raw)
+		return
+	}
+	want := map[string]bool{}
+	for _, k := range keys {
+		want[k] = true
+		if _, ok := obj[k]; !ok {
+			t.Errorf("nested object lacks %q: %s", k, raw)
+		}
+	}
+	for k := range obj {
+		if !want[k] {
+			t.Errorf("a nested field the spec does not list: %s", k)
+		}
+	}
+}
+
+func TestAbsent_AGetToAnUnregisteredRouteIsA404(t *testing.T) {
+	if absent(http.MethodGet, http.StatusMethodNotAllowed) || !absent(http.MethodPost, http.StatusMethodNotAllowed) || !absent(http.MethodGet, http.StatusNotFound) {
+		t.Error("absent accepts the wrong codes")
+	}
+}
+
+func TestGoRelease_KeepsOnlyTheVersion(t *testing.T) {
+	for in, want := range map[string]string{"go1.27.2 X:boringcrypto": "go1.27.2", "go1.24": "go1.24", "devel +abc": "", "": ""} {
+		if got := goRelease(in); got != want {
+			t.Errorf("goRelease(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -94,7 +138,7 @@ func TestStatus_InternalCopyIsTheClosedShapeAndNamesNobody(t *testing.T) {
 		t.Fatalf("internal status = %d", rec.Code)
 	}
 	checkShape(t, rec.Body.Bytes(), false)
-	for _, never := range []string{steve.XUID, steve.Gamertag, "FWB", "http", "buried_treasure", "/data", "Mid"} {
+	for _, never := range []string{steve.XUID, steve.Gamertag, "FWB", "http", "buried_treasure", "/data", "Mid", fmt.Sprint(secretSeed)} {
 		if strings.Contains(rec.Body.String(), never) {
 			t.Errorf("the internal status holds %q: %s", never, rec.Body)
 		}
@@ -128,7 +172,9 @@ func TestStatus_SaysTheProblemThePageShows(t *testing.T) {
 
 // absent is what an unregistered route answers: 405 where the page's own
 // GET / pattern shares the path, 404 elsewhere. Either way no handler ran.
-func absent(code int) bool { return code == http.StatusNotFound || code == http.StatusMethodNotAllowed }
+func absent(method string, code int) bool {
+	return code == http.StatusNotFound || (method != http.MethodGet && code == http.StatusMethodNotAllowed)
+}
 
 // The kill switches end what was issued under them, on the next request.
 func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
@@ -145,7 +191,7 @@ func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
 	s.Passkeys, s.Ceremonies, s.Sessions.Passkeys = nil, nil, nil
 	h := s.Handler()
 	for _, r := range passkeyRoutes {
-		if rec := do(h, r[0], r[1], "", []*http.Cookie{game}); !absent(rec.Code) {
+		if rec := do(h, r[0], r[1], "", []*http.Cookie{game}); !absent(r[0], rec.Code) {
 			t.Errorf("passkeys off: %s %s = %d, want 404", r[0], r[1], rec.Code)
 		}
 	}
@@ -162,7 +208,7 @@ func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
 	s.Admin = false
 	h = s.Handler()
 	for _, r := range adminRoutes {
-		if rec := do(h, r[0], r[1], "", []*http.Cookie{game}); !absent(rec.Code) {
+		if rec := do(h, r[0], r[1], "", []*http.Cookie{game}); !absent(r[0], rec.Code) {
 			t.Errorf("admin off: %s %s for an operator's cookie = %d, want 404", r[0], r[1], rec.Code)
 		}
 	}
