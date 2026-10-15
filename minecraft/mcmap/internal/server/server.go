@@ -110,6 +110,8 @@ type Server struct {
 
 	// limitedLog spaces out the log lines of exchanges refused unjudged.
 	limitedLog sparse
+	// refusedLog budgets the log lines of passkey logins refused unjudged.
+	refusedLog logBudget
 	// adminMetrics, set only by tests, is where the admin series are declared.
 	adminMetrics *adminMetricSet
 
@@ -309,6 +311,14 @@ func (s *Server) Handler() http.Handler {
 		s.route(mux, gatePublic, "POST /auth/start", s.handleStart)
 		s.route(mux, gatePublic, "GET /auth/status", s.handleStatus)
 		s.route(mux, gatePublic, "POST /auth/logout", s.handleLogout)
+	}
+	if s.passkeysOn() {
+		s.route(mux, gatePublic, "POST /auth/passkey/options", s.handlePasskeyOptions)
+		s.route(mux, gatePublic, "POST /auth/passkey/finish", s.handlePasskeyFinish)
+		s.route(mux, gateAdmin, "POST /auth/passkey/register/options", s.handleRegisterOptions)
+		s.route(mux, gateAdmin, "POST /auth/passkey/register/finish", s.handleRegisterFinish)
+		s.route(mux, gateAdmin, "POST /auth/passkey/register/confirm", s.handleRegisterConfirm)
+		s.route(mux, gateAdmin, "POST /auth/passkey/register/cancel", s.handleRegisterCancel)
 	}
 	static := http.FileServerFS(filesOnly{s.Static})
 	s.route(mux, gatePublic, "GET /", func(w http.ResponseWriter, r *http.Request) {

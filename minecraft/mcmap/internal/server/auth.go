@@ -124,6 +124,9 @@ func (s *Server) InternalHandler() http.Handler {
 		if s.Sessions != nil && s.Sessions.Revoked != nil {
 			s.route(mux, gateAgent, "POST /internal/v1/revocations", s.handleRevoke)
 		}
+		if s.passkeysOn() {
+			s.route(mux, gateAgent, "POST /internal/v1/passkey-codes", s.handlePasskeyCode)
+		}
 	}
 	// Here and never on the public listener: the secret is then of no use
 	// to anyone who cannot already reach into the cluster, and a guess from
