@@ -1188,6 +1188,60 @@ kbd, .keys code {
 }
 .sheet.aside::backdrop { background: transparent; }
 
+/* The player's details sit beside the map, on its right, and leave it
+   alive: the map is not dimmed or blocked while it is open. */
+.sheet.player {
+  position: fixed;
+  z-index: 1200;
+  width: min(30rem, calc(100vw - 1rem));
+  max-height: calc(100vh - 6.5rem);
+  max-height: calc(100dvh - 6.5rem);
+  margin: 0;
+  inset: 3.6rem 0.6rem auto auto;
+}
+.sheet-title { flex: 1; min-width: 0; display: grid; }
+.sheet-title h2 { overflow-wrap: anywhere; }
+.sheet-title span { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
+.sheet.player .facts { grid-template-columns: minmax(6rem, max-content) 1fr; }
+.sheet.player .dim { color: var(--dim); }
+.sheet.player .where { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.5rem; }
+.gauge { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.gauge > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.meter { flex: none; display: block; width: 6.5rem; height: 0.55rem; overflow: hidden; background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-s); }
+.meter .fill, .wear .fill { display: block; height: 100%; background: var(--accent); }
+.grids { display: grid; gap: 0.4rem; }
+.grid { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 3px; }
+.slot {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+  color: var(--text);
+  font-size: var(--caption);
+  line-height: 1;
+}
+.slot.empty { opacity: 0.55; }
+.slot.enchanted { border-color: var(--accent); }
+.slot .picture { position: absolute; inset: 15%; width: 70%; height: 70%; }
+.slot .picture:not([hidden]) ~ .abbr { visibility: hidden; }
+.slot .abbr { font-weight: 600; color: var(--dim); }
+.slot .count { position: absolute; right: 2px; bottom: 1px; font-size: 0.7rem; font-weight: 600; font-variant-numeric: tabular-nums; text-shadow: 0 0 2px var(--edge), 0 0 2px var(--edge); }
+.slot .wear { position: absolute; left: 3px; right: 3px; bottom: 2px; height: 3px; background: var(--edge); }
+.slot-said { min-height: 1.2em; overflow-wrap: anywhere; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--row-gap); margin-top: 0.5rem; }
+.tile { display: grid; gap: 0.1rem; padding: var(--row-gap); background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-m); min-width: 0; }
+.tile strong { font-size: var(--title); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tile span { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); overflow-wrap: anywhere; }
+.days { list-style: none; margin: 0.6rem 0 0; padding: 0; display: grid; gap: 0.25rem; font-variant-numeric: tabular-nums; }
+.days li { display: grid; grid-template-columns: 6.5rem auto 1fr; align-items: center; gap: 0.2rem 0.6rem; }
+.days .gauge .meter { width: 4.5rem; }
+
 /* Labels on the map, at the size the viewer has chosen. */
 .leaflet-tooltip { font-size: var(--label-size); }
 
@@ -1548,6 +1602,20 @@ kbd, .keys code {
     padding-bottom: calc(1.1rem + env(safe-area-inset-bottom));
   }
   .looks { grid-template-columns: minmax(6.5rem, 2fr) minmax(0, 3fr); }
+  /* The player's details come up from the bottom, over the card, which
+     they hand the foot of the screen to. */
+  .sheet.player {
+    inset: auto 0 0 0;
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 62vh;
+    max-height: 62dvh;
+    border-width: 1px 0 0;
+    border-radius: var(--radius-l) var(--radius-l) 0 0;
+    padding-bottom: calc(1.1rem + env(safe-area-inset-bottom));
+  }
+  .player-shown .inspect { display: none; }
+  .days li { grid-template-columns: 5.2rem auto 1fr; }
 }
 
 /* The narrowest phones: three dimensions' names, a search and More in 320

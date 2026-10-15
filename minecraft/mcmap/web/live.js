@@ -161,6 +161,7 @@
     when: document.getElementById('inspect-when'),
     follow: document.getElementById('inspect-follow'),
     go: document.getElementById('inspect-go'),
+    details: document.getElementById('inspect-details'),
     said: document.getElementById('inspect-said'),
     copy: document.getElementById('inspect-copy'),
     close: document.getElementById('inspect-close'),
@@ -1599,6 +1600,10 @@
     say(card.when, what === '' ? '' : when);
     card.follow.disabled = Boolean(picked.past) || (picked.state !== 'live' && picked.state !== 'waiting' && picked.state !== 'missing');
     if (card.go) card.go.disabled = !Number.isFinite(picked.x) || !Number.isFinite(picked.z);
+    // Only a player in the picture has the id the save is looked up by; the
+    // script that shows the details may be missing from a page cached from
+    // before it.
+    if (card.details) card.details.hidden = !(player && /^p:-?\d{1,20}$/.test(picked.key) && app.playerDetails);
     card.follow.setAttribute('aria-pressed', String(picked.follow));
     say(card.follow, picked.follow ? 'Following' : 'Follow');
     // The layer panel stops short of the card on a narrow screen, and the
@@ -1713,6 +1718,11 @@
     if (app.go) app.go(picked.dimension, picked.x, picked.z);
   }
 
+  function showDetails() {
+    if (!picked || !app.playerDetails || !/^p:-?\d{1,20}$/.test(picked.key)) return;
+    app.playerDetails.open({ id: picked.key.slice(2), name: typeof picked.name === 'string' ? picked.name : '' });
+  }
+
   async function copyPosition() {
     if (!picked) return;
     let said = 'Copied';
@@ -1738,6 +1748,7 @@
     card.close.addEventListener('click', shut);
     card.copy.addEventListener('click', copyPosition);
     if (card.go) card.go.addEventListener('click', goTo);
+    if (card.details) card.details.addEventListener('click', showDetails);
     card.follow.addEventListener('click', () => {
       if (!picked) return;
       picked.follow = !picked.follow;

@@ -91,6 +91,7 @@
       <div class="inspect-actions">
         <button id="inspect-follow" type="button" aria-pressed="false">Follow</button>
         <button id="inspect-go" type="button">Go to</button>
+        <button id="inspect-details" type="button" aria-controls="player" hidden>Details</button>
         <button id="inspect-copy" type="button">Copy x y z</button>
       </div>
     </section>
@@ -227,6 +228,17 @@
       <button id="structure-link" type="button">Copy link</button>
     </div>
     <p id="structure-said" class="note" role="status"></p>
+  </dialog>
+  <dialog id="player" class="sheet aside player" aria-labelledby="player-title">
+    <div class="sheet-head">
+      <div class="sheet-title">
+        <h2 id="player-title"></h2>
+        <span id="player-sub"></span>
+      </div>
+      <button id="player-close" class="close" type="button" aria-label="Close" title="Close"></button>
+    </div>
+    <div id="player-body"></div>
+    <p id="player-said" class="note" role="status"></p>
   </dialog>
   <dialog id="views" class="sheet" aria-labelledby="views-title">
     <div class="sheet-head">
@@ -420,7 +432,8 @@
   <script src="room.js"></script>
   <script src="groups.js"></script>
   <script src="heights.js"></script>
-  <script src="live.js"></script>
+  <script src="playerdetails.js"></script>
+<script src="live.js"></script>
   <script src="markers.js"></script>
   <script src="structures.js"></script>
   <script src="biomes.js"></script>
