@@ -115,6 +115,29 @@ test('the Admin section is there for an admin only', async () => {
   assert.match(admin.el('admin-status').textContent, /live/);
 });
 
+test('a game-code login on the open page brings the account panel and the Admin section', async () => {
+  let me = json(401, {});
+  const e = env({ answers: {
+    'GET api/me': () => me,
+    'GET api/passkeys': json(200, []),
+    'GET api/admin/status': json(200, { operators: 'live' }),
+  } });
+  await e.win.mcmapPasskey.ready;
+  assert.equal(e.el('admin').hidden, true);
+  assert.equal(e.el('account-open').hidden, true);
+  me = json(200, { gamertag: 'Steve Builds', admin: true });
+  for (let i = 0; i < 2; i++) {
+    e.doc.dispatchEvent(new e.win.CustomEvent('mcmap:login'));
+    for (let j = 0; j < 10; j++) await tick();
+  }
+  assert.equal(e.el('admin').hidden, false);
+  assert.equal(e.el('account-open').hidden, false);
+  assert.match(e.el('admin-status').textContent, /live/);
+  // Wired once however often the page logs in: one click opens the panel.
+  e.el('account-open').click();
+  assert.equal(e.el('account').hidden, false);
+});
+
 function adding(extra = {}) {
   return env({ ...extra, answers: {
     'GET api/me': json(200, { gamertag: 'Steve Builds', admin: true }),

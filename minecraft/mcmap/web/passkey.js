@@ -234,7 +234,11 @@
     try { listPasskeys(await (await fetch('api/passkeys', { cache: 'no-store' })).json()); } catch { /* the list is stale until the next load */ }
   }
 
+  // Shown once: account() runs again after a login, and a second run must
+  // not wire the buttons twice.
+  let shown = false;
   async function account() {
+    if (shown) return;
     const config = await configured;
     // The account panel is passkeys and the Log out everywhere that removes
     // them; with passkeys off there is neither, and !map logout remains.
@@ -245,7 +249,8 @@
       if (!res.ok) return;
       me = await res.json();
     } catch { return; }
-    if (me.service) return;
+    if (me.service || shown) return;
+    shown = true;
     if (passkeys) await accountPanel();
     if (!me.admin) return;
     $('admin').hidden = false;
@@ -272,4 +277,6 @@
   }
 
   api.ready = Promise.all([loginButton(), account()]);
+  // A game-code login unlocks this page without reloading it.
+  document.addEventListener('mcmap:login', account);
 })();
