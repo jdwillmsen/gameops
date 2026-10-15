@@ -337,6 +337,15 @@ func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *
 		return nil
 	}
 	layer := live.New(cfg.LiveTTL, cfg.LiveMaxEntities, logger)
+	counters := &live.Counters{Path: filepath.Join(cfg.DataDir, "counters", "counters.json"), Logger: logger}
+	// A volume that cannot be read costs the counts and nothing else: the
+	// positions are worth drawing without them.
+	if err := counters.Load(); err != nil {
+		logger.Error("player counters could not be loaded; they are not kept", "error", err.Error())
+	} else {
+		layer.Counters = counters
+		wg.Go(func() { counters.Run(ctx) })
+	}
 	if surfaces != nil {
 		layer.Surface = surfaces.Surface
 	}
