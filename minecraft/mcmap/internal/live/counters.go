@@ -178,6 +178,12 @@ func (c *Counters) Apply(rec Record, at time.Time) string {
 		}
 		c.sources = append(c.sources, source{Boot: rec.Boot})
 		i = len(c.sources) - 1
+		// A run's lines count from 1, so a first one past that means the
+		// ones before it were dropped by the bridge before this read them.
+		if rec.Seq > 1 {
+			metricCountsMissed.Add(float64(rec.Seq - 1))
+			c.log().Warn("counts lines were missed at the start of a run of the pack", "missed", rec.Seq-1)
+		}
 	} else if rec.Seq <= c.sources[i].Seq {
 		return resultDropped
 	} else if missed := rec.Seq - c.sources[i].Seq - 1; missed > 0 {
