@@ -63,6 +63,7 @@
     <h2 class="more-title">Logged in as</h2>
     <span id="who" class="who" hidden></span>
     <button id="logout" class="ghost pictured" type="button" title="Log out" hidden><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 2.5h-3v11h3M10 5l3 3-3 3M13 8H6.5"/></svg><span class="more-word">Log out</span></button>
+    <button id="account-open" type="button" hidden>Account</button>
     </div>
     </div>
   </header>
@@ -113,6 +114,12 @@
     <span id="inspect-said" class="unseen" role="status"></span>
     <p id="said" class="said-over" role="status" hidden></p>
     <p id="frozen" class="frozen" hidden><strong id="frozen-what" role="status"></strong> <span id="frozen-age"></span></p>
+    <section id="account" class="account" aria-label="Account" hidden>
+      <h2>Your passkeys</h2>
+      <ul id="account-passkeys"></ul>
+      <button id="account-logout-all" type="button">Log out everywhere</button>
+      <p id="account-note" class="note" role="status"></p>
+    </section>
     <section id="debug" class="debug" role="region" aria-labelledby="debug-title" hidden>
       <div class="debug-head">
         <h2 id="debug-title">Debug</h2>
@@ -137,6 +144,18 @@
           <label class="toggle"><input id="debug-position" type="checkbox"> Include my position</label>
           <p id="debug-said" class="note" role="status"></p>
         </div>
+        <div id="admin" class="admin" hidden>
+          <h2>Admin</h2>
+          <div id="admin-status"></div>
+          <label>Name for a new passkey <input id="admin-label" maxlength="32" autocomplete="off"></label>
+          <button id="admin-add" type="button">Add a passkey</button>
+          <p id="admin-step" class="note"></p>
+          <code id="admin-fingerprint"></code>
+          <input id="admin-code" maxlength="6" autocomplete="one-time-code" hidden>
+          <button id="admin-confirm" type="button" hidden>Confirm</button>
+          <button id="admin-cancel" type="button" hidden>Cancel</button>
+          <p id="admin-note" class="note" role="status"></p>
+        </div>
       </div>
     </section>
   </div>
@@ -153,6 +172,8 @@
       </ol>
       <p id="login-note" class="note" role="status"></p>
       <button id="login-new" type="button" hidden>Get a new code</button>
+      <button id="login-passkey" type="button" hidden>Log in with a passkey</button>
+      <p id="login-passkey-note" class="note" role="status"></p>
       <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
     </div>
   </section>
@@ -449,5 +470,6 @@
   <script src="views.js"></script>
   <script src="compact.js"></script>
   <script src="debug.js"></script>
+  <script src="passkey.js"></script>
 </body>
 </html>

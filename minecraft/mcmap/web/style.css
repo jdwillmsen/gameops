@@ -1673,8 +1673,10 @@ kbd, .keys code {
 @keyframes arrive { from { opacity: 0; } to { opacity: 1; } }
 
 /* The debug panel: figures over a corner of the map, small and monospaced,
-   that the pointer passes through everywhere but its own buttons. */
-.debug {
+   that the pointer passes through everywhere but its own buttons. The
+   account panel shares its frame. */
+.debug,
+.account {
   position: absolute;
   left: 0.5rem;
   bottom: 0.5rem;
@@ -1689,7 +1691,8 @@ kbd, .keys code {
   border-radius: var(--radius-l);
   font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
-.debug[hidden] { display: none; }
+.account { z-index: 1160; padding: 0.5rem; }
+.debug[hidden], .account[hidden], .admin[hidden] { display: none; }
 .debug-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule); }
 .debug-head h2 { flex: 1; margin: 0; font-size: 12px; }
 .debug-head button, .debug-report button { min-height: var(--hit); padding: 0 0.5rem; font-size: 11px; }
