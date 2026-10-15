@@ -102,7 +102,7 @@ type Delta struct {
 	PlacedTypes map[string]int `json:"pt,omitempty"`
 	Joins       int            `json:"j,omitempty"`
 	Leaves      int            `json:"l,omitempty"`
-	// OnlineSeconds is the time of the sessions that ended in this delta.
+	// OnlineSeconds is the time online since the player's last delta.
 	OnlineSeconds int `json:"t,omitempty"`
 }
 

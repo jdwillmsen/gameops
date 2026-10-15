@@ -412,7 +412,7 @@ agent repeats it every minute, which is also what restores heads after
 this service restarts).
 
 **Matching a marker to a head.** The live record names a player by
-gamertag and a per-session id, never by XUID, so the page asks for a head
+gamertag and the save's player id, never by XUID, so the page asks for a head
 by gamertag and this service answers from the agent's report, which pairs
 each gamertag with an XUID. A gamertag is answered only while exactly one
 online player holds it, compared without regard to case. If two do, or two
@@ -2864,8 +2864,8 @@ It has three parts, each saying where it comes from.
   by type, deaths by cause, blocks broken and placed (and the most-counted
   kinds of each), joins and time online. They are kept per player id from
   the day the map first took a count, and the panel says "counting since"
-  that date; nothing before it exists. Time online counts only sessions
-  the map saw end.
+  that date; nothing before it exists. Time online is added as it passes, so a
+  server restart loses at most a sample's worth.
 
 While the player is online the pack's last sample also gives health and
 experience level, which replace the saved ones in the vitals, labelled as

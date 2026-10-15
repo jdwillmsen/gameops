@@ -458,7 +458,7 @@
     if (broken.length > 0) out.push(el('h4', '', 'Broken'), tally(broken, (k) => names.tidy(k)));
     if (placed.length > 0) out.push(el('h4', '', 'Placed'), tally(placed, (k) => names.tidy(k)));
 
-    out.push(el('h3', '', 'Sessions'), el('p', 'note', `${when}. Time online counts only sessions the map saw end, so one in progress is added when it does.`));
+    out.push(el('h3', '', 'Sessions'), el('p', 'note', `${when}. Time online is added as it passes, so a server restart loses at most a few seconds.`));
     const sessions = el('div', 'tiles');
     sessions.append(tile(fmt(num(counters.joins) || 0), 'joins'), tile(span(num(counters.onlineSeconds) || 0), 'online'));
     out.push(sessions);
