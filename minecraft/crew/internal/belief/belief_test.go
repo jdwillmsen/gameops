@@ -90,3 +90,17 @@ func TestPacketsBeforeSpawnAreIgnored(t *testing.T) {
 		t.Errorf("snapshot = %+v, want untouched", s)
 	}
 }
+
+// After a death the server places the unit at its spawn point and says so
+// only in the Respawn packet; without it the unit would report where it died.
+func TestRespawnMovesTheUnitToWhereTheServerPutIt(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.Respawn{State: packet.RespawnStateSearchingForSpawn, Position: mgl32.Vec3{0, 0, 0}})
+	if got := tr.Snapshot().Position; got != [3]float32{1, 2, 3} {
+		t.Fatalf("a respawn still searching moved the unit to %v", got)
+	}
+	tr.Apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{7, 70, 7}})
+	if got := tr.Snapshot().Position; got != [3]float32{7, 70, 7} {
+		t.Errorf("position = %v, want [7 70 7]", got)
+	}
+}

@@ -64,6 +64,13 @@ func (t *Tracker) Apply(pk packet.Packet) {
 				t.s.Health, t.s.HealthKnown = a.Value, true
 			}
 		}
+	case *packet.Respawn:
+		// Only ever about the receiving player, so no runtime ID check; the
+		// position is settled only once the server is ready to spawn.
+		if p.State != packet.RespawnStateReadyToSpawn {
+			return
+		}
+		t.s.Position = p.Position
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 	default:
