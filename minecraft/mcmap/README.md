@@ -2839,7 +2839,7 @@ the map, a sheet from the bottom on a phone. It does not take the page, so
 the map and the card stay usable under it. Every logged-in viewer sees it
 for every player, as they see where each is.
 
-It has two halves, each saying where it comes from.
+It has three parts, each saying where it comes from.
 
 - **The world save.** After every snapshot the service reads each
   `player_server_*` record of the mirrored copy (never the live server)
@@ -2859,17 +2859,57 @@ It has two halves, each saying where it comes from.
   offline; a portal or teleport adds no distance. Figures cover the trail
   retention (`TRAILS_MAX_AGE`) and are forgotten by a restart, like the
   trails. With trails off the panel says so.
+- **The counters.** Bedrock keeps no per-player statistics, so the pack
+  counts from the game's events and the map adds the counts up: mobs killed
+  by type, deaths by cause, blocks broken and placed (and the most-counted
+  kinds of each), joins and time online. They are kept per player id from
+  the day the map first took a count, and the panel says "counting since"
+  that date; nothing before it exists. Time online counts only sessions
+  the map saw end.
+
+While the player is online the pack's last sample also gives health and
+experience level, which replace the saved ones in the vitals, labelled as
+live; the panel then asks every 5 s instead of every minute.
 
 A live player is matched to a record by the id the pack reports, which is
 the record's `UniqueID` written as a signed decimal; the same 64 bits read
 as unsigned are accepted too. A player who joined since the last snapshot
 has no record yet, and the panel says so and still shows the trails.
 
-`GET /api/players/<id>` serves the same: `id`, `name`, `saved` and
-`trails`, each with a `state` of `known`, `none` (read, nothing there),
+`GET /api/players/<id>` serves the same: `id`, `name`, `saved`, `trails`
+and `counters`, each with a `state` of `known`, `none` (read, nothing there),
 `pending` (no snapshot read yet) or `off`. `saved.asOf` is the snapshot the
 record was read from. The name is the live feed's for that id, or the
-optional `name` query for a player who is offline.
+optional `name` query for a player who is offline. `counters` also has
+`since` and the totals (`kills`, `deaths`, `broken`, `brokenTypes`,
+`placed`, `placedTypes`, `joins`, `leaves`, `onlineSeconds`); it is `off`
+with the live layer off. `live` (`health`, `maxHealth`, `level`,
+`dimension`, `at`) is present only for an online player whose pack sends
+vitals.
+
+### The counters file
+
+The totals are `counters/counters.json` under `DATA_DIR`: counters only, no
+event log. At most 512 players, and per player 256 mob types, 64 causes and
+256 block types each for broken and placed; a name past a limit is added to
+`other`. It is loaded at start and written every 10 s while it changes, and
+on shutdown, to a temporary file that is synced and renamed over the old
+one. A file that cannot be read is kept as `counters.json.unreadable` and
+counting starts again.
+
+The pack prints a `counts` record (see the pack's README) in lines of their
+own, each with the pack's `boot` and a `seq`. The map keeps the last `seq`
+taken from each of the last 8 boots, in the same file and the same rename as
+the totals, so a line the bridge hands over again (a failed poll, a restart
+of either side, the bridge answering with its whole ring) is refused and
+never counted twice. Lines the bridge dropped before they were read are
+lost, and `mcmap_live_counts_missed_total` says how many.
+
+Rollout: the pack is part of the image, and moving it to a new version
+(`values-map-pack.yaml` in the deployments chart) restarts the game server,
+as any pack change does. The counters start at the first record after
+that; a map that is not yet updated refuses the new record kind and ignores
+the new player fields, so the pack can go first.
 
 ## Trails
 
@@ -4598,7 +4638,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/topography?dimension=<id>` | Session required. `offered` (false in the Nether), `ready` (false until the heights have been read), `version`, `tiles` (`minZoom` -5, `maxZoom` 4, `size`), `intervals` (the contour interval in blocks by zoom out from 0), `heavyEvery`, and `bands`, lowest first: each `from`, `to`, `colour` (`#rrggbb`, empty where the band is not drawn) and sometimes a `label`. 400 for an unknown dimension. Served wherever `/api/biomes` is |
 | `GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}.png?styles=<style>,…&hide=<band>,…&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -5 to 4. `styles` names `hillshade`, `contours` and `tint`, any of them, in one picture; `hide` leaves bands of the tint out. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 in the Nether, where neither the tile nor (at zoom 0 and wider) the ring read round it has a surface, and before the heights are read; 400 for a bad address, no or unknown `styles`, or a band there is not |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
-| `GET /api/players/<id>?name=<gamertag>` | Session required. `id` is the live feed's player id, a number; 400 otherwise. `saved` (`state`, `asOf`, `record`) and `trails` (`state`, `stats`) as in Player details. Always 200 for a well-formed id. |
+| `GET /api/players/<id>?name=<gamertag>` | Session required. `id` is the live feed's player id, a number; 400 otherwise. `saved` (`state`, `asOf`, `record`), `trails` (`state`, `stats`), `counters` and `live` as in Player details. Always 200 for a well-formed id. |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the three below, and `404` without it |
 | `GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}.webp` | Session required. One tile as it was on that day, addressed as the terrain's. Kept for good by the browser, since a day's tile never changes. 404 for a day not held or a tile the map did not have that day, 400 for a bad address |

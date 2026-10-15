@@ -14,9 +14,12 @@ achievements depend on that. So the pack is read-only by construction:
 
 - It depends on `@minecraft/server` `2.10.0` and nothing else. No `-beta`
   version, no second module, no `capabilities`, no resource pack.
-- It never runs a command, changes an entity, writes a dynamic property or
-  subscribes to an event. With no event subscription there is nothing it
-  could cancel. Its only registration is one `system.runInterval` timer.
+- It never runs a command, changes an entity or writes a dynamic property.
+  Its registrations are one `system.runInterval` timer and five
+  `world.afterEvents` (`entityDie`, `playerBreakBlock`, `playerPlaceBlock`,
+  `playerSpawn`, `playerLeave`): after-events run once the game has decided,
+  so there is nothing to cancel, and each only adds to a counter in memory.
+  It reads one component, `minecraft:health`, and `Player.level`.
 - It never prints a line the server would break: see the size cap below.
 
 `internal/pack/pack_test.go` holds the manifest to the first point and scans
@@ -45,8 +48,9 @@ itself prints one such line at load, naming its version and mob cap.
 
 The shape is the one `internal/live` parses, and that parser is strict: a
 record of a kind it does not know, or with one entity it cannot place, is
-refused whole. So there are exactly three kinds, and anything else the pack
-has to say rides on the heartbeat as fields the parser ignores.
+refused whole (an older map counts it as unparseable and goes on). Fields
+it does not know are ignored, so what an older map need not understand
+rides as new fields, and what is new in kind is a record it may refuse.
 
 Every record has `gen`, a counter that goes up by one per sample and restarts
 at 1 when the server or its scripts are reloaded; `tick`, the server tick the
@@ -57,6 +61,7 @@ the record was written.
 | --- | --- | --- |
 | `players` | every sample, every dimension, even when empty | `dim`, `part`, `parts`, `more`, `items` |
 | `mobs` | every sample, every dimension, even when empty | `dim`, `part`, `parts`, `more`, `items` |
+| `counts` | after the samples, only when a player did something | `boot`, `seq`, `items` |
 | `tick` | every sample, last | `players` and `mobs` (how many were sent), `more`, `scan` and `interval` in ms, `cap`, `level`, `errors`, and `error` on a sample that failed |
 
 `dim` is `overworld`, `nether` or `end`. A list too long for one record is
@@ -84,6 +89,36 @@ Items:
 | `t` | Mob type without the `minecraft:` prefix |
 | `x` `y` `z` | Position, rounded to one decimal. An entity whose position is not a finite number is left out |
 | `r` | Player yaw in whole degrees |
+| `h`, `hm` | Player health now and its effective maximum, in half-hearts. Left out when the component cannot be read |
+| `xl` | Player experience level |
+
+### Counts
+
+`counts` carries what players did since the last one, as amounts to add:
+
+```
+MCMAP1 {"gen":99,"tick":562338523,"ts":1791200870385,"kind":"counts","boot":1791200000000,"seq":12,"items":[{"i":"-100","d":{"fall":1},"k":{"zombie":2},"b":5,"bt":{"stone":4},"p":3,"pt":{"oak_planks":3},"j":1,"l":1,"t":90}]}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `boot` | When this run of the script started, in Unix milliseconds. Names the run |
+| `seq` | Counts lines printed by this run, from 1, one per line |
+| `i` | Player id, as in the player records |
+| `d` | Deaths by damage cause (`entityDie` of the player, `damageSource.cause`) |
+| `k` | Mobs killed by type (`entityDie` with a player as `damageSource.damagingEntity`; players and the types in `NOT_MOBS` are not mobs) |
+| `b`, `p` | Blocks broken and placed, exact |
+| `bt`, `pt` | Most-counted block types broken and placed, at most 12 each |
+| `j`, `l` | Joins (`playerSpawn` with `initialSpawn`) and leaves (`playerLeave`) |
+| `t` | Seconds online of the sessions that ended, for players whose join this run saw (those online at load count from the first sample) |
+
+Every line is complete and has a `seq` of its own, so there is nothing to
+assemble and a line is taken or refused alone; a sample with many players is
+simply several lines, each under the 3,500-byte cap. The map remembers the
+last `seq` it took from each `boot`, which is what makes a line delivered
+twice count once. A player's counts that would not fit one line are dropped
+and counted as an error on the heartbeat. Projectile kills are credited only
+when the shooter is the damaging entity.
 
 ### What counts as a mob
 
