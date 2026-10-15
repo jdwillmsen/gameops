@@ -46,6 +46,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/leveldat"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
@@ -132,6 +133,8 @@ func run(logger *slog.Logger) error {
 	biomeStore.Set(biomeWorld(now))
 	layer.Surface = biomeStore.Surface
 	recorder := trails.New(24*time.Hour, 5000)
+	saved := &players.Store{}
+	saved.Set(now, map[int64]players.Record{1: harnessPlayer()})
 
 	mobs := &icons.Mobs{Dir: filepath.Join(dir, "icons"), Ref: "harness", Logger: logger,
 		Fetch: func(context.Context) (icons.Set, error) { return art() }}
@@ -177,6 +180,7 @@ func run(logger *slog.Logger) error {
 		Structures: surveyed{survey(now)},
 		Biomes:     biomeStore,
 		Trails:     recorder,
+		Players:    saved,
 	}
 	if past != nil {
 		app.History = past
@@ -715,5 +719,53 @@ func play(ctx context.Context, layer *live.Layer, recorder *trails.Recorder, qui
 			layer.Ingest(live.RawRecord{ID: gen, At: t, Data: string(raw)}, t)
 		}
 		layer.Flush(t)
+	}
+}
+
+// harnessPlayer is the save's record of HarnessPlayerOne: made up, with a
+// little of everything the details panel shows.
+func harnessPlayer() players.Record {
+	level, progress, air, warden := 12, 0.4, 280, 1
+	item := func(slot int, name string, count int, tweak func(*players.Item)) players.Item {
+		it := players.Item{Slot: slot, Name: name, Count: count}
+		if tweak != nil {
+			tweak(&it)
+		}
+		return it
+	}
+	return players.Record{
+		Health:     &players.Gauge{Current: 17, Max: 20},
+		Hunger:     &players.Gauge{Current: 14, Max: 20},
+		Saturation: &players.Gauge{Current: 3.5, Max: 20},
+		Absorption: &players.Gauge{Current: 4, Max: 16},
+		Air:        &air,
+		Level:      &level,
+		Progress:   &progress,
+		GameMode:   "survival",
+		Dimension:  "overworld",
+		Armor: []players.Item{
+			item(0, "iron_helmet", 1, func(i *players.Item) {
+				i.Damage, i.MaxDamage = 33, 165
+				i.Enchants = []players.Enchantment{{ID: 0, Name: "Protection", Level: 4}, {ID: 17, Name: "Unbreaking", Level: 3}}
+			}),
+			item(2, "diamond_leggings", 1, nil),
+		},
+		Mainhand: &players.Item{Slot: 0, Name: "diamond_sword", Count: 1, Damage: 100, MaxDamage: 1561, Custom: "Harness Blade",
+			Enchants: []players.Enchantment{{ID: 9, Name: "Sharpness", Level: 5}, {ID: 99, Level: 1}}},
+		Inventory: []players.Item{
+			item(0, "diamond_pickaxe", 1, func(i *players.Item) { i.Damage, i.MaxDamage = 500, 1561 }),
+			item(1, "cobblestone", 64, nil),
+			item(2, "bread", 12, nil),
+			item(9, "chest", 3, nil),
+			item(10, "pig_spawn_egg", 1, nil),
+			item(30, "oak_planks", 7, nil),
+		},
+		EnderChest: []players.Item{item(0, "ender_pearl", 16, nil), item(26, "shulker_box", 1, nil)},
+		Death:      &players.Place{X: 12, Y: 64, Z: -34, Dimension: "overworld"},
+		Spawn:      &players.Place{X: -5, Y: 65, Z: 8, Dimension: "overworld"},
+
+		RecipesUnlocked: 120,
+		SeenCredits:     true,
+		WardenThreat:    &warden,
 	}
 }
