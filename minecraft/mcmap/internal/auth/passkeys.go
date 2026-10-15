@@ -31,6 +31,7 @@ var (
 	ErrAbandoned      = errors.New("too many wrong codes; start again")
 	ErrCounter        = errors.New("the authenticator's counter did not move forward")
 	ErrUnknownKey     = errors.New("no such passkey")
+	ErrWrongHandle    = errors.New("that credential names a different user handle")
 )
 
 type Passkey struct {
@@ -186,6 +187,17 @@ func (p *Passkeys) StartPending(k Passkey, issuedMilli int64) error {
 	if n >= MaxPerPlayer {
 		return ErrTooMany
 	}
+	// The handle belongs to the XUID, not to the caller: a credential made
+	// under another one would re-point the player and lock out their passkeys.
+	h, ok := p.handles[k.XUID]
+	if !ok || len(h) == 0 {
+		h = randomBytes(32)
+		p.handles[k.XUID] = h
+	}
+	if len(k.UserHandle) != 0 && subtle.ConstantTimeCompare(k.UserHandle, h) != 1 {
+		return ErrWrongHandle
+	}
+	k.UserHandle = h
 	k.Created = p.now().UTC()
 	p.waiting[k.XUID] = &waitingKey{key: k, issuedMilli: issuedMilli, expires: p.now().Add(PendingFor)}
 	p.counted()
@@ -248,7 +260,6 @@ func (p *Passkeys) Confirm(xuid string, issuedMilli int64, credentialID []byte, 
 	delete(p.waiting, xuid)
 	k := w.key
 	p.active[KeyOf(k.ID)] = &k
-	p.handles[xuid] = k.UserHandle
 	if err := p.save(); err != nil {
 		delete(p.active, KeyOf(k.ID))
 		return Passkey{}, 0, err
@@ -284,7 +295,7 @@ func (p *Passkeys) Lookup(handle, id []byte) (string, Passkey, bool, bool) {
 	defer p.mu.Unlock()
 	p.prune()
 	for xuid, h := range p.handles {
-		if subtle.ConstantTimeCompare(h, handle) != 1 {
+		if len(handle) == 0 || subtle.ConstantTimeCompare(h, handle) != 1 {
 			continue
 		}
 		if k, ok := p.active[KeyOf(id)]; ok && k.XUID == xuid {
@@ -302,7 +313,7 @@ func (p *Passkeys) ByHandle(handle []byte) (string, []Passkey, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for xuid, h := range p.handles {
-		if subtle.ConstantTimeCompare(h, handle) != 1 {
+		if len(handle) == 0 || subtle.ConstantTimeCompare(h, handle) != 1 {
 			continue
 		}
 		var keys []Passkey
@@ -356,20 +367,20 @@ func (p *Passkeys) List(xuid string) []Listed {
 	return out
 }
 
-func (p *Passkeys) Remove(xuid, key string) (Passkey, bool) {
+func (p *Passkeys) Remove(xuid, key string) (Passkey, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	k, ok := p.active[key]
 	if !ok || k.XUID != xuid {
-		return Passkey{}, false
+		return Passkey{}, ErrUnknownKey
 	}
 	delete(p.active, key)
 	if err := p.save(); err != nil {
 		p.active[key] = k
-		return Passkey{}, false
+		return Passkey{}, err
 	}
 	p.counted()
-	return *k, true
+	return *k, nil
 }
 
 func (p *Passkeys) RemoveAll(xuid string) ([]Passkey, error) {

@@ -341,3 +341,69 @@ func TestPasskeys_TheUserHandleIsRandomAndKept(t *testing.T) {
 		t.Errorf("Lookup = %q pending %v ok %v", xuid, pend, ok)
 	}
 }
+
+func TestPasskeys_TheStoreOwnsTheHandle(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	p, _ := newPasskeys(t, c)
+	first := confirmOne(t, p, "first")
+	if string(first.UserHandle) != string(p.UserHandle(steve.XUID)) || len(first.UserHandle) != 32 {
+		t.Fatalf("a nil handle was not filled from the store: %x", first.UserHandle)
+	}
+	bad := key("second", steve.XUID)
+	bad.UserHandle = []byte("some other handle")
+	if err := p.StartPending(bad, issued); !errors.Is(err, ErrWrongHandle) {
+		t.Fatalf("a different handle: %v, want ErrWrongHandle", err)
+	}
+	if _, _, _, ok := p.Lookup(first.UserHandle, first.ID); !ok {
+		t.Error("the player's existing passkey is no longer found under their handle")
+	}
+	second := confirmOne(t, p, "second")
+	if string(second.UserHandle) != string(first.UserHandle) {
+		t.Error("a second passkey did not keep the stored handle")
+	}
+}
+
+func TestPasskeys_AnEmptyHandleNeverMatches(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	p, _ := newPasskeys(t, c)
+	confirmOne(t, p, "cred-1")
+	for _, h := range [][]byte{nil, {}} {
+		if _, _, _, ok := p.Lookup(h, []byte("cred-1")); ok {
+			t.Error("Lookup matched an empty handle")
+		}
+		if _, _, ok := p.ByHandle(h); ok {
+			t.Error("ByHandle matched an empty handle")
+		}
+	}
+}
+
+func TestPasskeys_RemoveReportsWhyItFailed(t *testing.T) {
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	p, _ := newPasskeys(t, c)
+	confirmOne(t, p, "kept")
+	k := KeyOf([]byte("kept"))
+	if _, err := p.Remove(steve.XUID, "nope"); !errors.Is(err, ErrUnknownKey) {
+		t.Errorf("unknown key: %v", err)
+	}
+	if _, err := p.Remove("2535412345678902", k); !errors.Is(err, ErrUnknownKey) {
+		t.Errorf("another player's key: %v", err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory is still writable")
+	}
+	dir := filepath.Dir(p.path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if _, err := p.Remove(steve.XUID, k); err == nil || errors.Is(err, ErrUnknownKey) {
+		t.Errorf("a failed write: %v, want the write's error", err)
+	}
+	if !p.Active(k, steve.XUID) {
+		t.Error("memory and disk disagree after a failed removal")
+	}
+	_ = os.Chmod(dir, 0o700)
+	if _, err := p.Remove(steve.XUID, k); err != nil {
+		t.Errorf("remove once writable: %v", err)
+	}
+}
