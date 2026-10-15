@@ -116,6 +116,10 @@ type trail struct {
 	seenX     float64
 	seenZ     float64
 	dimension uint8
+	// days is what the player did on each day they were seen, oldest
+	// first. It is kept from every sample and not from the points, which
+	// leave out a player standing still and thin out the old.
+	days []day
 }
 
 // Recorder keeps each player's recent positions, within its limits.
@@ -210,6 +214,7 @@ func (r *Recorder) Record(dimension string, at time.Time, players []live.Entity)
 		t.name = p.Name
 		begins := len(t.points) == 0 || t.dimension != uint8(d) || at.Sub(t.seenAt) > breakAfter ||
 			math.Hypot(p.X-t.seenX, p.Z-t.seenZ) > breakJump
+		t.account(at, p.X, p.Z, uint8(d), begins)
 		t.seenAt, t.seenX, t.seenZ, t.dimension = at, p.X, p.Z, uint8(d)
 		point := held{
 			Point:     Point{T: at.Unix(), X: int32(math.Floor(p.X)), Y: int32(math.Floor(p.Y)), Z: int32(math.Floor(p.Z))},
@@ -316,6 +321,7 @@ func (r *Recorder) prune(now time.Time) {
 			t.points = slices.Delete(t.points, 0, old)
 			metricDropped.WithLabelValues("age").Add(float64(old))
 		}
+		t.forgetDays(now.Add(-r.MaxAge))
 		switch {
 		case len(t.points) == 0:
 			delete(r.trails, k)
