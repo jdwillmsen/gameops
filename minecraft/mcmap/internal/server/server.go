@@ -122,6 +122,8 @@ type Server struct {
 	refusedLog logBudget
 	// xboxRefusedLog budgets the log lines of Xbox sign-ins turned away.
 	xboxRefusedLog logBudget
+	// xboxLimit bounds the callbacks that reach Microsoft.
+	xboxLimit bucket
 	// adminMetrics, set only by tests, is where the admin series are declared.
 	adminMetrics *adminMetricSet
 

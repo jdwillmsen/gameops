@@ -146,6 +146,9 @@ func (s *Server) InternalHandler() http.Handler {
 		if s.Sessions != nil && s.Sessions.Revoked != nil {
 			s.route(mux, gateAgent, "POST /internal/v1/revocations", s.handleRevoke)
 		}
+		if s.Known != nil {
+			s.route(mux, gateAgent, "POST /internal/v1/known/forget", s.handleForgetKnown)
+		}
 		if s.passkeysOn() {
 			s.route(mux, gateAgent, "POST /internal/v1/passkey-codes", s.handlePasskeyCode)
 		}
@@ -310,5 +313,25 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not record the revocation", http.StatusInternalServerError)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleForgetKnown makes a player unknown to the Xbox sign-in at once.
+// Their sessions are not touched; /internal/v1/revocations ends those and
+// does this as well.
+func (s *Server) handleForgetKnown(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		XUID string `json:"xuid"`
+	}
+	if err := decodeStrict(w, r, &req); err != nil || !auth.IsXUID(req.XUID) {
+		http.Error(w, "forgetting a player needs their xuid", http.StatusBadRequest)
+		return
+	}
+	if err := s.Known.Forget(req.XUID); err != nil {
+		s.log().Error("map known player not forgotten", "xuid", req.XUID, "error_class", "write")
+		http.Error(w, "could not record that", http.StatusInternalServerError)
+		return
+	}
+	s.log().Info("map known player forgotten", "xuid", req.XUID)
 	w.WriteHeader(http.StatusNoContent)
 }

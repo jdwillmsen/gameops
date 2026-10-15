@@ -143,6 +143,7 @@ var routes = map[string]struct{ gate, path string }{
 	"internal POST /internal/v1/claims":            {"gateAgent", ""},
 	"internal POST /internal/v1/revocations":       {"gateAgent", ""},
 	"internal POST /internal/v1/service-sessions":  {"gateExchange", ""},
+	"internal POST /internal/v1/known/forget":      {"gateAgent", ""},
 	"internal POST /internal/v1/passkey-codes":     {"gateAgent", ""},
 }
 

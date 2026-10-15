@@ -127,3 +127,46 @@ func TestKnown_ACorruptFileIsAnErrorNotAnEmptyList(t *testing.T) {
 		t.Error("a corrupt file loaded")
 	}
 }
+
+func TestKnown_ForgetRemovesAtRuntimeAndForAGoodAndAFurtherClaimDoesNotBringBackAnother(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	k, path := knownAt(t, &now)
+	_ = k.Record("2535400000000001")
+	_ = k.Record("2535400000000002")
+	if err := k.Forget("2535400000000001"); err != nil {
+		t.Fatal(err)
+	}
+	if k.Has("2535400000000001") || !k.Has("2535400000000002") {
+		t.Fatal("the wrong player was forgotten")
+	}
+	// A later record of someone else writes the file again; it must not
+	// bring back the one forgotten.
+	now = now.Add(2 * time.Hour)
+	_ = k.Record("2535400000000002")
+	again, _ := LoadKnown(path, func() time.Time { return now })
+	if again.Has("2535400000000001") {
+		t.Error("a forgotten player came back with the next write")
+	}
+	if err := k.Forget("2535400000000009"); err != nil {
+		t.Errorf("forgetting a stranger = %v", err)
+	}
+	if k.Forget("nope") == nil {
+		t.Error("a non-XUID was accepted")
+	}
+}
+
+func TestKnown_AForgetThatCannotBeWrittenKeepsThePlayer(t *testing.T) {
+	now := time.Now()
+	dir := t.TempDir()
+	k, _ := LoadKnown(filepath.Join(dir, "sub", "known.json"), func() time.Time { return now })
+	_ = os.MkdirAll(filepath.Join(dir, "sub"), 0o700)
+	_ = k.Record("2535400000000001")
+	_ = os.RemoveAll(filepath.Join(dir, "sub"))
+	_ = os.WriteFile(filepath.Join(dir, "sub"), nil, 0o600)
+	if k.Forget("2535400000000001") == nil {
+		t.Fatal("reported done")
+	}
+	if !k.Has("2535400000000001") {
+		t.Error("a failed forget removed the player in memory only")
+	}
+}
