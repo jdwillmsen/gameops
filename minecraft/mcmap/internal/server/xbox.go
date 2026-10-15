@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -23,6 +25,7 @@ type XboxProvider interface {
 type KnownPlayers interface {
 	Has(xuid string) bool
 	Record(xuid string) error
+	Forget(xuid string) error
 }
 
 // Allowlist is the game server's own list, when the map is told to count it.
@@ -42,17 +45,22 @@ const (
 	xboxReplayed      = "replayed"
 	xboxBadRequest    = "bad_request"
 	xboxFault         = "fault"
+	// xboxBusy is a callback turned away before Microsoft was asked, and
+	// xboxAllowlistDown a refusal for want of an answer from the bridge:
+	// neither is a stranger.
+	xboxBusy          = "busy"
+	xboxAllowlistDown = "allowlist_unavailable"
 )
 
 var xboxResults = []string{
 	xboxOK, xboxStranger, xboxCancelled, xboxMicrosoft, xboxExpired, xboxStateMismatch, xboxReplayed, xboxBadRequest,
 	xbox.ResultExchangeFailed, xbox.ResultNoProfile, xbox.ResultChild, xbox.ResultRefused, xbox.ResultUnavailable, xbox.ResultBadProfile,
-	xboxFault,
+	xboxFault, xboxBusy, xboxAllowlistDown,
 }
 
 var metricXboxLogins = promauto.NewCounterVec(prometheus.CounterOpts{
 	Name: "mcmap_xbox_logins_total",
-	Help: "Sign-ins with an Xbox account, by result: ok, stranger, cancelled, microsoft_error, expired, state_mismatch, replayed, bad_request, exchange_failed, no_xbox_profile, child_account, xbox_refused, xbox_unavailable, bad_identity, fault.",
+	Help: "Sign-ins with an Xbox account, by result: ok, stranger, cancelled, microsoft_error, expired, state_mismatch, replayed, bad_request, exchange_failed, no_xbox_profile, child_account, xbox_refused, xbox_unavailable, bad_identity, fault, busy, allowlist_unavailable.",
 }, []string{"result"})
 
 func declareXboxMetrics() {
@@ -131,6 +139,14 @@ func (s *Server) handleXboxCallback(w http.ResponseWriter, r *http.Request) {
 		s.xboxRefused(w, r, xboxBadRequest)
 		return
 	}
+	// Every callback that gets this far costs Microsoft three requests, so a
+	// script with a valid cookie each time could have the app throttled for
+	// everyone. The service sees only the gateway's address, so the bucket
+	// is global.
+	if !s.xboxLimit.Allow(s.now()) {
+		s.xboxRefused(w, r, xboxBusy)
+		return
+	}
 	profile, err := s.XboxClient.Resolve(r.Context(), code, verifier)
 	var failure *xbox.Failure
 	switch {
@@ -146,7 +162,14 @@ func (s *Server) handleXboxCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := auth.Identity{XUID: profile.XUID, Gamertag: profile.Gamertag}
-	if !s.knownPlayer(r.Context(), id.XUID) {
+	known, unavailable := s.knownPlayer(r.Context(), id.XUID)
+	switch {
+	case unavailable:
+		// No XUID: nothing says this one was refused for the bridge's sake
+		// rather than theirs, and a flood of these must not name anyone.
+		s.xboxRefused(w, r, xboxAllowlistDown, "bridge", "no_answer")
+		return
+	case !known:
 		s.xboxRefused(w, r, xboxStranger, "xuid", id.XUID)
 		return
 	}
@@ -167,14 +190,46 @@ func (s *Server) handleXboxCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // knownPlayer is the gate: seen on the server, or on its allowlist where
-// the map is told to count that. A bridge that cannot answer says nobody.
-func (s *Server) knownPlayer(ctx context.Context, xuid string) bool {
+// the map is told to count that. unavailable is true only for a player who
+// is not known and whom the bridge could not be asked about, so that the
+// refusal is not taken for a stranger's.
+func (s *Server) knownPlayer(ctx context.Context, xuid string) (known, unavailable bool) {
 	if s.Known.Has(xuid) {
-		return true
+		return true, false
 	}
 	if s.Allowlist == nil {
+		return false, false
+	}
+	on, answered := s.Allowlist.Has(ctx, xuid)
+	return on, !answered && !on
+}
+
+// Callbacks that reach Microsoft: a burst, then one per refill.
+const (
+	xboxBurst  = 10
+	xboxRefill = 6 * time.Second
+)
+
+// bucket is a token bucket for the callback, filled at start.
+type bucket struct {
+	mu       sync.Mutex
+	tokens   float64
+	refilled time.Time
+}
+
+func (b *bucket) Allow(now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.refilled.IsZero() {
+		b.tokens, b.refilled = xboxBurst, now
+	}
+	if now.After(b.refilled) {
+		b.tokens = min(xboxBurst, b.tokens+now.Sub(b.refilled).Seconds()/xboxRefill.Seconds())
+		b.refilled = now
+	}
+	if b.tokens < 1 {
 		return false
 	}
-	on, _ := s.Allowlist.Has(ctx, xuid)
-	return on
+	b.tokens--
+	return true
 }

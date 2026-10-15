@@ -20,6 +20,8 @@
     child_account: 'Xbox does not let a child account sign in here until it is part of a Family. Use the code from the game.',
     xbox_refused: 'Xbox would not sign that account in. Use the code from the game.',
     bad_identity: 'The map could not tell which player that account is. Use the code from the game.',
+    busy: 'Lots of people are signing in just now. Try again in a minute, or use the code from the game.',
+    allowlist_unavailable: 'The map could not check the server just now. Use the code from the game, or try again in a minute.',
     fault: 'The map could not sign you in. Use the code from the game.',
   };
   const FALLBACK = 'The Xbox sign-in did not work. Use the code from the game.';

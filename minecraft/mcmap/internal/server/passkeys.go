@@ -285,6 +285,14 @@ func (s *Server) revokeEverywhere(xuid string) error {
 		return err
 	}
 	s.log().Info("map logins revoked", "xuid", xuid)
+	// Whoever holds the player's Microsoft account could otherwise sign
+	// straight back in; they need a fresh !map in game first.
+	if s.Known != nil {
+		if err := s.Known.Forget(xuid); err != nil {
+			s.log().Error("map known player not forgotten", "xuid", xuid, "error_class", "write")
+			return err
+		}
+	}
 	if s.Passkeys != nil {
 		gone, err := s.Passkeys.RemoveAll(xuid)
 		if err != nil {

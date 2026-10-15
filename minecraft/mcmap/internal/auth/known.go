@@ -81,6 +81,28 @@ func (k *Known) Record(xuid string) error {
 	return nil
 }
 
+// Forget removes xuid at once, on disk and in memory, so that the player is
+// unknown until the next claim. The file is only read at start, so editing
+// it by hand would change nothing while the map runs and the next write
+// would put the entry back.
+func (k *Known) Forget(xuid string) error {
+	if !IsXUID(xuid) {
+		return errors.New("a player's XUID is a number")
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	previous, had := k.players[xuid]
+	if !had {
+		return nil
+	}
+	delete(k.players, xuid)
+	if err := k.save(); err != nil {
+		k.players[xuid] = previous
+		return err
+	}
+	return nil
+}
+
 // Has reports whether xuid was seen within KnownFor.
 func (k *Known) Has(xuid string) bool {
 	k.mu.Lock()

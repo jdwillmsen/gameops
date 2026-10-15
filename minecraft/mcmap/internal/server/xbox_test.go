@@ -179,7 +179,7 @@ func TestXbox_TheAllowlistLetsAPlayerInOnlyWhenTurnedOnAndAnswering(t *testing.T
 	refused(t, r.signIn(strangerBox), "stranger")
 
 	list.answered, list.xuids = false, nil // the bridge is down
-	refused(t, r.signIn(alexXbox), "stranger")
+	refused(t, r.signIn(alexXbox), "allowlist_unavailable")
 }
 
 func TestXbox_KnownIsCheckedBeforeTheBridgeIsAsked(t *testing.T) {
@@ -214,6 +214,7 @@ type failingKnown struct{}
 
 func (failingKnown) Has(string) bool     { return false }
 func (failingKnown) Record(string) error { return errors.New("disk full") }
+func (failingKnown) Forget(string) error { return errors.New("disk full") }
 
 func TestXbox_AFailedClaimRecordsNobody(t *testing.T) {
 	r := withXbox(t)
@@ -422,7 +423,9 @@ func TestXbox_ARevokedPlayersXboxSessionIsRejected(t *testing.T) {
 	if me := do(r.h, "GET", "/api/me", "", []*http.Cookie{sess}); me.Code != http.StatusUnauthorized {
 		t.Errorf("after !map logout the Xbox session = %d, want 401", me.Code)
 	}
-	// And the player can sign in again, which a revocation was never to stop.
+	// A revocation makes the player unknown; a fresh claim lets them sign in.
+	refused(t, r.signIn(alexXbox), "stranger")
+	_ = r.known.Record(alexXbox.XUID)
 	time.Sleep(2 * time.Millisecond)
 	if again := cookie(r.signIn(alexXbox), "__Host-mcmap_session"); again == nil {
 		t.Error("could not sign in after a revocation")
@@ -532,3 +535,102 @@ func mustQuery(target, key string) string {
 }
 
 func jsonInto(raw []byte, into any) error { return json.Unmarshal(raw, into) }
+
+func TestXbox_LogoutEverywhereAlsoMakesThePlayerUnknown(t *testing.T) {
+	r := withXbox(t)
+	_ = r.known.Record(alexXbox.XUID)
+	rev := do(r.s.InternalHandler(), "POST", "/internal/v1/revocations", `{"xuid":"`+alexXbox.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken)
+	if rev.Code != http.StatusNoContent {
+		t.Fatalf("revoke = %d", rev.Code)
+	}
+	if r.known.Has(alexXbox.XUID) {
+		t.Error("still known after !map logout")
+	}
+	time.Sleep(2 * time.Millisecond)
+	refused(t, r.signIn(alexXbox), "stranger")
+	// A fresh code login makes them known again.
+	_ = r.known.Record(alexXbox.XUID)
+	if rec := r.signIn(alexXbox); rec.Header().Get("Location") != "/" {
+		t.Error("could not sign in after a fresh claim")
+	}
+}
+
+func TestXbox_ALogoutThatCannotForgetFails(t *testing.T) {
+	r := withXbox(t)
+	r.s.Known = failingKnown{}
+	rev := do(r.s.InternalHandler(), "POST", "/internal/v1/revocations", `{"xuid":"`+alexXbox.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken)
+	if rev.Code != http.StatusInternalServerError {
+		t.Errorf("revoke = %d, want 500 so the agent tries again", rev.Code)
+	}
+}
+
+func TestXbox_ForgetRouteRemovesAPlayerAtRuntimeForTheAgentOnly(t *testing.T) {
+	r := withXbox(t)
+	_ = r.known.Record(alexXbox.XUID)
+	h := r.s.InternalHandler()
+	body := `{"xuid":"` + alexXbox.XUID + `"}`
+	if rec := do(h, "POST", "/internal/v1/known/forget", body, nil); rec.Code != http.StatusUnauthorized || !r.known.Has(alexXbox.XUID) {
+		t.Errorf("no token = %d", rec.Code)
+	}
+	for _, bad := range []string{`{}`, `{"xuid":"console"}`, `{"xuid":"1","extra":1}`} {
+		if rec := do(h, "POST", "/internal/v1/known/forget", bad, nil, "Authorization", "Bearer "+internalToken); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s = %d", bad, rec.Code)
+		}
+	}
+	if rec := do(h, "POST", "/internal/v1/known/forget", body, nil, "Authorization", "Bearer "+internalToken); rec.Code != http.StatusNoContent {
+		t.Fatalf("forget = %d", rec.Code)
+	}
+	if r.known.Has(alexXbox.XUID) {
+		t.Error("still known")
+	}
+	if rec := do(r.s.Handler(), "POST", "/internal/v1/known/forget", body, nil, "Authorization", "Bearer "+internalToken); rec.Code == http.StatusNoContent {
+		t.Error("the public listener serves it")
+	}
+}
+
+func TestXbox_AnAllowlistThatDoesNotAnswerIsNotAStranger(t *testing.T) {
+	r := withXbox(t)
+	r.s.Allowlist = &fakeAllowlist{answered: false}
+	before, strangers := count("allowlist_unavailable"), count(xboxStranger)
+	refused(t, r.signIn(strangerBox), "allowlist_unavailable")
+	if count("allowlist_unavailable") != before+1 || count(xboxStranger) != strangers {
+		t.Error("counted as the wrong thing")
+	}
+	if strings.Contains(r.logged(), strangerBox.XUID) {
+		t.Errorf("the log names the XUID: %s", r.logged())
+	}
+	if !strings.Contains(r.logged(), "allowlist") {
+		t.Errorf("not written down: %s", r.logged())
+	}
+	// A bridge that answers "no" is a stranger.
+	r.s.Allowlist = &fakeAllowlist{answered: true}
+	refused(t, r.signIn(strangerBox), "stranger")
+}
+
+func TestXbox_ACallbackFloodIsStoppedBeforeMicrosoftIsAsked(t *testing.T) {
+	r := withXbox(t)
+	_ = r.known.Record(alexXbox.XUID)
+	now := time.Now()
+	r.s.clock = func() time.Time { return now }
+	r.fake.SignIn(alexXbox)
+	var busy int
+	for range 40 {
+		state, authorize := r.start()
+		rec := visit(r.h, r.fake.Approve(authorize, false), state)
+		if result(rec) == "busy" {
+			busy++
+			if cookie(rec, "__Host-mcmap_session") != nil {
+				t.Fatal("a busy answer set a session")
+			}
+		}
+	}
+	asked := r.fake.Calls["token"]
+	if busy == 0 || asked > xboxBurst || asked+busy != 40 {
+		t.Errorf("busy %d, asked Microsoft %d times of 40", busy, asked)
+	}
+	now = now.Add(xboxRefill)
+	state, authorize := r.start()
+	if rec := visit(r.h, r.fake.Approve(authorize, false), state); rec.Header().Get("Location") != "/" {
+		t.Errorf("after the refill = %s", rec.Header().Get("Location"))
+	}
+}
