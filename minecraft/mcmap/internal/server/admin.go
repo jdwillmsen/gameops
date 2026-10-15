@@ -34,13 +34,17 @@ func (s *Server) requireAdmin(pattern string, next http.HandlerFunc) http.Handle
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := auth.FromContext(r.Context())
 		allowed := ok && s.isAdmin(r.Context(), id.XUID)
-		metricAdminRequests.WithLabelValues(pattern, strconv.FormatBool(allowed)).Inc()
+		s.metricSet().requests.WithLabelValues(pattern, strconv.FormatBool(allowed)).Inc()
 		s.log().Info("map admin request", "xuid", id.XUID, "route", pattern, "allowed", allowed)
 		if !allowed {
-			w.Header().Set("Cache-Control", "no-store")
-			http.Error(w, "not open to this player", http.StatusForbidden)
+			refuseAdmin(w, r)
 			return
 		}
 		next(w, r)
 	}
+}
+
+func refuseAdmin(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, "not open to this player", http.StatusForbidden)
 }

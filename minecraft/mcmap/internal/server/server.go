@@ -208,10 +208,13 @@ func (s *Server) route(mux *http.ServeMux, behind gate, pattern string, h http.H
 	case gateAgent:
 		handler = s.agentOnly(h)
 	case gateAdmin:
-		if s.Sessions != nil {
+		// Fails closed: with no login or admin off, nobody is let through.
+		if s.adminOn() {
 			handler = s.Sessions.Require(s.requireAdmin(pattern, h))
+			s.metricSet().declareRoute(pattern)
+		} else {
+			handler = http.HandlerFunc(refuseAdmin)
 		}
-		s.metricSet().declareRoute(pattern)
 	default:
 		panic("route " + pattern + " was given no gate")
 	}
