@@ -12,15 +12,23 @@ import (
 )
 
 type fakeClaimer struct {
-	code, xuid, gamertag string
-	calls                int
-	err                  error
-	revoked              []string
+	code, xuid, gamertag   string
+	calls                  int
+	err                    error
+	revoked                []string
+	passkeyCode, passkeyFP string
+	passkeyErr             error
+	passkeyFor             []string
 }
 
 func (f *fakeClaimer) Revoke(_ context.Context, xuid string) error {
 	f.revoked = append(f.revoked, xuid)
 	return f.err
+}
+
+func (f *fakeClaimer) PasskeyCode(_ context.Context, xuid string) (string, string, error) {
+	f.passkeyFor = append(f.passkeyFor, xuid)
+	return f.passkeyCode, f.passkeyFP, f.passkeyErr
 }
 
 func (f *fakeClaimer) Claim(_ context.Context, code, xuid, gamertag string) error {
@@ -160,15 +168,60 @@ func TestMap_LogoutEndsEveryMapLoginOfWhoeverTypedIt(t *testing.T) {
 		if claimer.calls != 0 || len(claimer.revoked) != 1 || claimer.revoked[0] != "2535412345678901" {
 			t.Errorf("!map %s: %d claims, revoked %v", word, claimer.calls, claimer.revoked)
 		}
-		if !strings.Contains(reply, "logged out") {
+		if reply != "Every browser that was logged in to the map as you has been logged out, and any passkeys for your map login have been removed." {
 			t.Errorf("reply = %q", reply)
 		}
 	}
 }
 
 func TestMap_LogoutThatFailedSaysSoRatherThanClaimingIt(t *testing.T) {
-	claimer := &fakeClaimer{err: errors.New("map: status 502")}
-	if reply, err := runMap(t, claimer, "logout"); err == nil || reply != "" {
-		t.Fatalf("reply %q, err %v", reply, err)
+	claimer := &fakeClaimer{err: errors.New("map: status 500")}
+	reply, err := runMap(t, claimer, "logout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "did not fully finish") || !strings.Contains(reply, "try again") || strings.Contains(reply, "removed") {
+		t.Errorf("reply = %q", reply)
+	}
+}
+
+const passkeyWhisper = "Your map passkey code is ABC234, for the passkey with fingerprint 7F3A-91C2. Type it into the map page that asked for it, within 2 minutes, only if that page shows the same fingerprint. It lets that browser log in to the map as you, as admin, without the game. Never give it to anyone, and never type it into a page someone else sent you. If you did not just add a passkey, type !map logout."
+
+func TestMap_PasskeyWhispersTheCodeWithItsWarning(t *testing.T) {
+	for _, word := range []string{"passkey", "PASSKEY"} {
+		claimer := &fakeClaimer{passkeyCode: "ABC234", passkeyFP: "7F3A-91C2"}
+		reply, err := runMap(t, claimer, word)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reply != passkeyWhisper {
+			t.Errorf("!map %s reply = %q", word, reply)
+		}
+		if len(claimer.passkeyFor) != 1 || claimer.passkeyFor[0] != "2535412345678901" || claimer.calls != 0 {
+			t.Errorf("asked for %v, claims %d", claimer.passkeyFor, claimer.calls)
+		}
+	}
+}
+
+func TestMap_PasskeyWithNothingWaitingSaysSo(t *testing.T) {
+	reply, err := runMap(t, &fakeClaimer{passkeyErr: mapclient.ErrNoPendingPasskey}, "passkey")
+	if err != nil || reply != "There is no passkey waiting to be added for you. Start from the map page." {
+		t.Errorf("reply %q, err %v", reply, err)
+	}
+}
+
+func TestMap_PasskeyIsNotTheConsoles(t *testing.T) {
+	p := NewMapLogin(&fakeClaimer{passkeyCode: "ABC234"}, fakeNames{}, mapURL)
+	reply, _ := p.Commands()[0].Run(context.Background(), &plugin.Context{}, plugin.Invocation{ActorXUID: chat.ServerOrigin, Args: []string{"passkey"}})
+	if strings.Contains(reply, "ABC234") {
+		t.Errorf("the console was given a code: %q", reply)
+	}
+}
+
+func TestMap_RepliesAreKeptOutOfTheLog(t *testing.T) {
+	for _, c := range NewMapLogin(&fakeClaimer{}, fakeNames{}, mapURL).Commands() {
+		if c.Name == "map" && !c.RedactReply {
+			t.Error("!map's replies, which now carry passkey codes, are logged")
+		}
 	}
 }
