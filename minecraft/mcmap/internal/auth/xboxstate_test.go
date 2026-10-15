@@ -57,7 +57,7 @@ func TestXboxState_TheChallengeIsTheVerifiersS256AndTheVerifierComesBackOnce(t *
 		t.Fatal(err)
 	}
 	if len(verifier) < 43 {
-		t.Errorf("verifier is %d characters; RFC 7636 wants at least 43", len(verifier))
+		t.Errorf("verifier is %d characters; a verifier is at least 43", len(verifier))
 	}
 	if want := s256Challenge(verifier); want != challenge {
 		t.Errorf("challenge %q is not S256 of the verifier", challenge)
@@ -67,8 +67,9 @@ func TestXboxState_TheChallengeIsTheVerifiersS256AndTheVerifierComesBackOnce(t *
 	}
 }
 
-// RFC 7636 appendix B: the verifier and challenge it gives as an example.
-func TestXboxState_ChallengeMatchesTheRFCExample(t *testing.T) {
+// A published pair of verifier and S256 challenge, so that the challenge is
+// checked against something this code did not make.
+func TestXboxState_ChallengeMatchesAPublishedPair(t *testing.T) {
 	if got := s256Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"); got != "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" {
 		t.Errorf("challenge = %q", got)
 	}
