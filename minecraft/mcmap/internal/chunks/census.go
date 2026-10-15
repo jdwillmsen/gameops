@@ -93,6 +93,9 @@ func (c *Census) Acknowledge(checkedAt time.Time) error {
 	return nil
 }
 
+// Missing is the chunks seen before and absent from the last count.
+func (c *Census) Missing() Set { return c.Ledger.Missing() }
+
 // Last is the most recent report, if there has been a count.
 func (c *Census) Last() (Report, bool) { return c.Ledger.Last() }
 
