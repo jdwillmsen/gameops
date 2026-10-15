@@ -243,10 +243,16 @@ func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
 func healthy(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 
 // filesOnly hides directories from the static file server, which would
-// otherwise answer a directory path with a listing of it.
+// otherwise answer a directory path with a listing of it, and the page files
+// that handlePage serves, which hold placeholders it fills in.
 type filesOnly struct{ fs.FS }
 
 func (f filesOnly) Open(name string) (fs.File, error) {
+	for _, page := range web.Pages {
+		if name == page {
+			return nil, fs.ErrNotExist
+		}
+	}
 	file, err := f.FS.Open(name)
 	if err != nil {
 		return nil, err
