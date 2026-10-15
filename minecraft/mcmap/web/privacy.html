@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>Privacy - FWB map</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="pages.css">
+  <script src="settings.js"></script>
+</head>
+<body class="page">
+  <header class="page-bar">
+    <a class="page-back" href="./">&larr; Back to the map</a>
+    <nav class="page-nav" aria-label="About this map">
+      <a href="about">About</a>
+      <a href="guide">Guide</a>
+      <a href="privacy" aria-current="page">Privacy</a>
+      <a href="terms">Terms</a>
+      <a href="credits">Credits</a>
+    </nav>
+  </header>
+  <main class="page-body">
+    <h1>Privacy</h1>
+    <p>The map keeps as little about you as it can. This page says what that is. It is a plain description of how the map works, written by the person who runs it.</p>
+    <h2>What the map knows about you</h2>
+    <ul>
+      <li><strong>Who you are in game.</strong> When you log in with <code>!map</code>, the server tells the map your Xbox user ID (XUID) and gamertag. They go into your login cookie. No list of logins is kept. When you ask to be logged out everywhere, the time of that request is kept with your XUID, so your older logins stop working.</li>
+      <li><strong>Where you are.</strong> While you are online, your position is shown live to every player who is logged in to the map. A trail of where you have been, with older points thinned out, is kept in the map&rsquo;s memory for 24 hours unless the operator has set it longer (up to a week). Trails are never written to disk, and a restart of the map clears them.</li>
+      <li><strong>Your head.</strong> Your skin&rsquo;s face may be used as your marker while you are online. It is kept in memory only and dropped a few minutes after you leave.</li>
+      <li><strong>Your waypoints.</strong> Places you save in game with <code>!waypoint</code> are shown on the map to you and nobody else.</li>
+      <li><strong>The world.</strong> Terrain and places such as beds and chests are read from the server&rsquo;s world. Where the operator has switched history on, the map keeps a picture of the terrain and its markers for each day, and does not delete old days automatically.</li>
+      <li><strong>Logs.</strong> The map&rsquo;s logs record that a login was issued, with the XUID and gamertag it was issued to, and when logins are withdrawn.</li>
+    </ul>
+    <h2>Cookies</h2>
+    <p>The map sets two cookies, both needed to log in and neither for tracking. Both are named with a <code>__Host-</code> prefix, so a browser sends them only to this exact site over a secure connection, and both are <code>HttpOnly</code>, so scripts on the page cannot read them.</p>
+    <ul>
+      <li><code>__Host-mcmap_pending</code>: set while you wait for your login to complete, so only the browser that asked for a code can collect it.</li>
+      <li><code>__Host-mcmap_session</code>: your login. It holds your XUID and gamertag, when it was issued and when it ends, signed so it cannot be altered. By default it lasts seven days.</li>
+    </ul>
+    <h2>What stays in your browser</h2>
+    <p>Settings such as the theme, the layers you turned on, your saved views and the live-update pace are kept in your browser&rsquo;s local storage. They are never sent to the server. Clearing your site data removes them.</p>
+    <h2>Who sees what</h2>
+    <p>Only players who have logged in from the game can see the map, including where other players are right now. These pages, and the login screen, show nothing about the world.</p>
+    <h2>No tracking, no third parties</h2>
+    <p>The map has no analytics, no advertising and no social-media widgets. Its pages load everything from the map&rsquo;s own address, and nothing about you is sent to anyone else.</p>
+    <h2>Logging out and deletion</h2>
+    <p>Type <code>!map logout</code> in game chat to end every login of yours, on every device. The Log out button ends the one in the browser you are using. To have anything else about you removed, ask the server operator in game.</p>
+  </main>
+  <footer class="page-foot">
+    <nav class="page-nav" aria-label="About this map">
+      <a href="about">About</a>
+      <a href="guide">Guide</a>
+      <a href="privacy" aria-current="page">Privacy</a>
+      <a href="terms">Terms</a>
+      <a href="credits">Credits</a>
+    </nav>
+    <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+    <p class="legal">{{copyright}}. Questions? Ask the server operator.</p>
+  </footer>
+</body>
+</html>
