@@ -27,11 +27,11 @@
     <h2>What the map knows about you</h2>
     <ul>
       <li><strong>Who you are in game.</strong> When you log in with <code>!map</code>, the server tells the map your Xbox user ID (XUID) and gamertag. They go into your login cookie. No list of logins is kept. When you ask to be logged out everywhere, the time of that request is kept with your XUID, so your older logins stop working.</li>
-      <li><strong>Where you are.</strong> While you are online, your position is shown live to every player who is logged in to the map. A trail of where you have been, with older points thinned out, is kept in the map&rsquo;s memory for 24 hours unless the operator has set it longer (up to a week). Trails are never written to disk, and a restart of the map clears them.</li>
+      <li><strong>Where you are.</strong> While you are online, your position is shown live to every player who is logged in to the map. Trails are an optional feature: where the operator has switched them on, a trail of where you have been is kept in the map&rsquo;s memory for as long as the operator sets, up to a week, and older points are thinned out. Trails are never written to disk, and a restart of the map clears them.</li>
       <li><strong>Your head.</strong> Your skin&rsquo;s face may be used as your marker while you are online. It is kept in memory only and dropped a few minutes after you leave.</li>
       <li><strong>Your waypoints.</strong> Places you save in game with <code>!waypoint</code> are shown on the map to you and nobody else.</li>
       <li><strong>The world.</strong> Terrain and places such as beds and chests are read from the server&rsquo;s world. Where the operator has switched history on, the map keeps a picture of the terrain and its markers for each day, and does not delete old days automatically.</li>
-      <li><strong>Logs.</strong> The map&rsquo;s logs record that a login was issued, with the XUID and gamertag it was issued to, and when logins are withdrawn.</li>
+      <li><strong>Logs.</strong> The map&rsquo;s logs record that a login was issued, with the XUID and gamertag it was issued to, and when logins are withdrawn. Your XUID can also appear there when something goes wrong with your own data, such as your waypoints.</li>
     </ul>
     <h2>Cookies</h2>
     <p>The map sets two cookies, both needed to log in and neither for tracking. Both are named with a <code>__Host-</code> prefix, so a browser sends them only to this exact site over a secure connection, and both are <code>HttpOnly</code>, so scripts on the page cannot read them.</p>
