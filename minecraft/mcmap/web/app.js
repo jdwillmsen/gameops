@@ -664,6 +664,7 @@
     clearInterval(loginTimer);
     if (state === 'ok') {
       lock(false);
+      document.dispatchEvent(new CustomEvent('mcmap:login'));
       await load();
       return;
     }
