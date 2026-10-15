@@ -127,14 +127,30 @@ var endBands = []Band{
 	band(120, highest, "", 246, 246, 250, 0.55),
 }
 
+// The Nether's floors lie between the bedrock at the bottom and the roof
+// over its caverns: the lava sea at 31 with its shores just over it, then
+// the floors of the middle, and the high ones under the roof.
+var netherBands = []Band{
+	band(lowest, 30, "", 92, 84, 156, 0.45),
+	band(31, 31, "lava sea level", 0, 0, 0, 0),
+	band(32, 45, "", 150, 198, 96, 0.38),
+	band(46, 69, "", 232, 214, 112, 0.38),
+	band(70, 89, "", 222, 168, 84, 0.42),
+	band(90, 109, "", 190, 112, 70, 0.45),
+	band(110, highest, "", 246, 246, 250, 0.55),
+}
+
 // Bands are the tint's colours in a dimension, lowest first, which is
-// what its legend says. It is none in a dimension that is not offered.
+// what its legend says. It is none in a dimension that is not offered,
+// and the Nether's are for the floors of a level and not for Tile.
 func Bands(d chunks.Dimension) []Band {
 	switch d {
 	case chunks.Overworld:
 		return overworldBands
 	case chunks.End:
 		return endBands
+	case chunks.Nether:
+		return netherBands
 	}
 	return nil
 }

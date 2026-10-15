@@ -163,7 +163,24 @@ func floorDiv(a, b int) int {
 // dimension that is not offered, a zoom there are no tiles at, and styles
 // that are none.
 func Tile(m *heights.Map, d chunks.Dimension, zoom, tx, ty int, pick Pick) (data []byte, ok bool) {
-	if !Offered(d) || !pick.Styles.Valid() || zoom < MinZoom || zoom > MaxZoom {
+	if !Offered(d) {
+		return nil, false
+	}
+	return draw(m, d, zoom, tx, ty, pick)
+}
+
+// FloorTile is Tile for a map of the floors under a cut, which the Nether
+// has one of for each level, since its own heightmap is the roof. The
+// caller vouches that m is such a map: nothing in it says so.
+func FloorTile(m *heights.Map, d chunks.Dimension, zoom, tx, ty int, pick Pick) (data []byte, ok bool) {
+	if d != chunks.Nether {
+		return nil, false
+	}
+	return draw(m, d, zoom, tx, ty, pick)
+}
+
+func draw(m *heights.Map, d chunks.Dimension, zoom, tx, ty int, pick Pick) (data []byte, ok bool) {
+	if !pick.Styles.Valid() || zoom < MinZoom || zoom > MaxZoom {
 		return nil, false
 	}
 	pl := planFor(d, pick.Styles, pick.Hidden)
