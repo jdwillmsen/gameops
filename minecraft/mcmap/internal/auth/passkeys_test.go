@@ -316,6 +316,45 @@ func TestPasskeys_RemoveAllReportsAFailedWrite(t *testing.T) {
 	}
 }
 
+func TestPasskeys_AConfirmWhoseWriteFailedCanBeRetried(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory is still writable")
+	}
+	c := &clock{time.Unix(1_790_000_000, 0)}
+	dir := t.TempDir()
+	p, err := LoadPasskeys(filepath.Join(dir, "passkeys.json"), c.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.StartPending(key("cred-1", steve.XUID), issued); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := p.IssueCode(steve.XUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if _, _, err := p.Confirm(steve.XUID, issued, []byte("cred-1"), code); err == nil {
+		t.Fatal("Confirm reported success with the file left unwritten")
+	}
+	if p.Active(KeyOf([]byte("cred-1")), steve.XUID) || !p.IsPending([]byte("cred-1")) {
+		t.Fatal("a failed write did not leave the credential pending")
+	}
+	if pending, active := p.Counts(); pending != 1 || active != 0 {
+		t.Errorf("Counts = %d active, %d pending, want 0 and 1", active, pending)
+	}
+	_ = os.Chmod(dir, 0o700)
+	if _, _, err := p.Confirm(steve.XUID, issued, []byte("cred-1"), code); err != nil {
+		t.Fatalf("retrying the same code after the write recovered: %v", err)
+	}
+	if !p.Active(KeyOf([]byte("cred-1")), steve.XUID) || p.IsPending([]byte("cred-1")) {
+		t.Error("the retried confirm did not activate the credential")
+	}
+}
+
 func TestPasskeys_TheUserHandleIsRandomAndKept(t *testing.T) {
 	c := &clock{time.Unix(1_790_000_000, 0)}
 	p, _ := newPasskeys(t, c)
