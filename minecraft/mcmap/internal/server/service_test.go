@@ -84,6 +84,12 @@ var routes = map[string]struct{ gate, path string }{
 	"public POST /auth/start":                                     {"gatePublic", ""},
 	"public GET /auth/status":                                     {"gatePublic", "/auth/status"},
 	"public POST /auth/logout":                                    {"gatePublic", ""},
+	"public POST /auth/passkey/options":                           {"gatePublic", ""},
+	"public POST /auth/passkey/finish":                            {"gatePublic", ""},
+	"public POST /auth/passkey/register/options":                  {"gateAdmin", ""},
+	"public POST /auth/passkey/register/finish":                   {"gateAdmin", ""},
+	"public POST /auth/passkey/register/confirm":                  {"gateAdmin", ""},
+	"public POST /auth/passkey/register/cancel":                   {"gateAdmin", ""},
 	"public GET /api/map":                                         {"gateViewer", "/api/map"},
 	"public GET /api/diagnostics":                                 {"gateViewer", "/api/diagnostics"},
 	"public GET /tiles/{dimension}/{zoom}/{x}/{y}":                {"gateViewer", "/tiles/overworld/0/37/-4.webp"},
@@ -122,6 +128,7 @@ var routes = map[string]struct{ gate, path string }{
 	"internal POST /internal/v1/claims":            {"gateAgent", ""},
 	"internal POST /internal/v1/revocations":       {"gateAgent", ""},
 	"internal POST /internal/v1/service-sessions":  {"gateExchange", ""},
+	"internal POST /internal/v1/passkey-codes":     {"gateAgent", ""},
 }
 
 // The two functions that may make a mux, and the listener each makes it for.
