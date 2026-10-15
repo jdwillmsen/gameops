@@ -105,12 +105,6 @@ func (s *Server) handlePasskeyFinish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "fault"})
 		return
 	}
-	if s.Sessions.Passkeys == nil {
-		// Wiring that left sessions unable to check passkeys would issue
-		// a cookie that never verifies; it shows here and not as a riddle.
-		s.loginRefused(w, "disabled", &k)
-		return
-	}
 	s.Sessions.IssuePasskey(w, auth.Identity{XUID: k.XUID, Gamertag: k.Gamertag}, auth.KeyOf(k.ID))
 	s.metricSet().logins.WithLabelValues("ok").Inc()
 	passkeyLogins.Add(1)

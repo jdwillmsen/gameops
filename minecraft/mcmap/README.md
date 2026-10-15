@@ -4851,7 +4851,7 @@ and what that day is compared with:
 | `mcmap_service_requests_total{result}` | Requests made with a service session: `allowed`, or `forbidden` for a route that is a player's own or a request that is not a read |
 | `mcmap_admin_passkeys_registered_total{result}` | Steps of adding a passkey: `pending`, `refused` (a check on the new credential failed), `code_issued`, `code_wrong`, `abandoned` (three wrong codes), `cancelled`, `expired`, `confirmed` |
 | `mcmap_admin_passkeys_removed_total{why}` | Passkeys removed: `player` (by their owner) or `revoked` (by a logout) |
-| `mcmap_admin_logins_total{result}` | Passkey logins: `ok`; refused before the signature verified, `bad_assertion`, `unknown_credential`, `expired`, `disabled`; and after it, `pending`, `not_operator`, `counter` (a clone), `replayed` |
+| `mcmap_admin_logins_total{result}` | Passkey logins: `ok`; refused before the signature verified, `bad_assertion`, `unknown_credential`, `expired`; and after it, `pending`, `not_operator`, `counter` (a clone), `replayed` |
 | `mcmap_admin_requests_total{route,allowed}` | Requests to an admin route by its pattern, and whether the gate let them through |
 | `mcmap_admin_operator_lookups_total{result}` | Where the operator list was read from: `live`, `last_known_good` or `none` |
 | `mcmap_admin_operators` | Operators known, a count and no identities |
