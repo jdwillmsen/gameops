@@ -374,12 +374,12 @@
     const at = document.activeElement;
     if (!at || !view.body.contains(at)) return null;
     if (at.dataset && at.dataset.pos) return `pos:${at.dataset.pos}`;
-    return `button:${view.body.querySelectorAll('button').indexOf(at)}`;
+    return `button:${Array.from(view.body.querySelectorAll('button')).indexOf(at)}`;
   }
 
   function refocus(was) {
     if (was === null) return;
-    const buttons = view.body.querySelectorAll('button');
+    const buttons = Array.from(view.body.querySelectorAll('button'));
     const found = was.startsWith('pos:') ? buttons.find((b) => b.dataset.pos === was.slice(4) && !b.disabled) : buttons[Number(was.slice(7))];
     // What had focus has gone, so focus stays in the panel, where Escape
     // still shuts it.
