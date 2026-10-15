@@ -120,6 +120,28 @@ type commandResponse struct {
 	Output string `json:"output"`
 }
 
+// spoken is a command as it may be written down or answered with. A
+// tellraw is a whisper to one player, and its words are theirs, so it is
+// named by its rule only.
+func spoken(cmd string) string {
+	if strings.HasPrefix(cmd, "tellraw ") {
+		return "tellraw"
+	}
+	return cmd
+}
+
+// spokenErr is err as it may be written down or answered with: the errors
+// for a tellraw can quote the command, so they are replaced by the rule.
+func spokenErr(cmd string, err error) string {
+	if strings.HasPrefix(cmd, "tellraw ") {
+		if errors.Is(err, ErrCommandNotAllowed) {
+			return "command not allowed: tellraw"
+		}
+		return "tellraw could not be sent"
+	}
+	return err.Error()
+}
+
 func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxCommandBodyBytes)
 
@@ -132,16 +154,16 @@ func (s *server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	rule, err := CheckAllowlist(req.Command, s.cfg.Kickable)
 	if err != nil {
 		metricCommandsRefused.Inc()
-		s.logger.Info("command refused", "command", req.Command, "error", err)
-		http.Error(w, err.Error(), http.StatusForbidden)
+		s.logger.Info("command refused", "command", spoken(req.Command), "error", spokenErr(req.Command, err))
+		http.Error(w, spokenErr(req.Command, err), http.StatusForbidden)
 		return
 	}
 
 	out, err := s.console.SendCommand(r.Context(), req.Command)
 	if err != nil {
 		metricCommandsFailed.Inc()
-		s.logger.Warn("command send failed", "command", req.Command, "error", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		s.logger.Warn("command send failed", "command", spoken(req.Command), "error", spokenErr(req.Command, err))
+		http.Error(w, spokenErr(req.Command, err), http.StatusBadGateway)
 		return
 	}
 
