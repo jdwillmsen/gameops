@@ -178,11 +178,26 @@ An XUID is let in if either:
    and is off by default because a server that does not use its allowlist
    may keep a stale one.
 
-Removing someone: take them off the allowlist and delete their entry from
-`known.json` (or delete the file, which makes everyone type `!map` once).
-`!map logout` and Log out everywhere end their sessions as before but do
-not keep them from signing in again, which they could do with their own
-Microsoft account only.
+Removing someone: take them off the allowlist and call
+`POST /internal/v1/known/forget` (agent gate, `{"xuid"}`), which drops the
+entry in memory and on disk at once. `known.json` is read only at start, so
+editing it while the map runs does nothing and the next claim's write would
+restore the entry. `!map logout` and Log out everywhere (`revokeEverywhere`)
+end the player's sessions and also forget them, so that someone holding a
+compromised Microsoft account needs a fresh `!map` in game before it can
+sign in again; if forgetting fails the revocation answers 500 so the agent
+retries. The allowlist stays an OR with the record, as the owner chose, so a
+player still on it must be taken off it too.
+
+If the bridge cannot be asked and the player is not otherwise known, the
+refusal is `allowlist_unavailable` (logged within a budget, with no XUID),
+not `stranger`.
+
+The callback is guarded by a global token bucket (burst 10, one per 6
+seconds) after the state is checked and before Microsoft is asked, so that
+a script holding valid cookies cannot get the app throttled for everyone.
+The service sees only the gateway's address, so a per-client limit would
+mean nothing. A turned-away callback is `busy`.
 
 ### Sessions
 
@@ -195,8 +210,10 @@ session: `!map logout` and Log out everywhere end Xbox sessions. Lifetime:
 7 days; an Xbox sign-in proves only who owns an account and that the
 account is known, and costs one click to repeat, so it should not outlive
 a day. It is longer than a passkey's 12 hours because a passkey is an
-admin's. A session is an ordinary player's: it cannot be an admin on its
-own (admin is still the operator list, by XUID, per request).
+admin's. Admin follows the player: it is the operator list, by XUID, asked on every
+request, so an operator who signs in with Xbox is an admin. That is
+intended, so that the owner can run map operations from a phone. Adding a
+passkey still needs the code typed in game.
 
 ### Configuration
 
@@ -223,7 +240,7 @@ start: `ok`, `stranger`, `cancelled`, `microsoft_error`, `expired`
 (no usable state cookie), `state_mismatch`, `replayed`, `bad_request`,
 `exchange_failed` (Microsoft refused the code or the app), `no_xbox_profile`,
 `child_account`, `xbox_refused` (other XErr), `xbox_unavailable` (the
-network, a 5xx or an unreadable answer), `bad_identity`, `fault`. Logs: an
+network, a 5xx or an unreadable answer), `bad_identity`, `fault`, `busy`, `allowlist_unavailable`. Logs: an
 issued login is `map login issued` with `xuid` and `method=xbox`, as for
 the other methods; a stranger is `map xbox login refused` with the `xuid`,
 at the same budget as the passkey refusals; failures before an identity

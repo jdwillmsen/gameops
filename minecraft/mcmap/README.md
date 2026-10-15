@@ -4451,15 +4451,24 @@ on the game server's `allowlist.json`, which the map reads through the console
 bridge's `GET /allowlist` with the token it already holds, and keeps for 30
 seconds. With the bridge down the allowlist names nobody; only the record
 applies. Names added to the allowlist by hand that have not joined yet have
-no XUID and are not counted. To remove someone, take them off the allowlist
-and delete their entry from `known.json` (deleting the file makes everyone
-type `!map` once). `!map logout` and Log out everywhere end a player's Xbox
-sessions like any other, and do not stop them signing in again with their own
-account.
+no XUID and are not counted. If the bridge cannot be asked about someone who
+is not otherwise known, the refusal is `allowlist_unavailable` and not
+`stranger`, so that an outage does not look like strangers.
 
-**Sessions.** An Xbox session is an ordinary player's. It cannot make anyone
-an admin: that is still the operator list, asked per request. It is refused
-while `XBOX_LOGIN_ENABLED` is off and works again if the switch is turned back
+To remove someone, take them off the allowlist and make them unknown with
+`POST /internal/v1/known/forget` (bearer `INTERNAL_TOKEN`, `{"xuid"}`, 204),
+which takes effect at once. `known.json` is read only at start, so editing it
+while the map runs changes nothing, and the next write would put the entry
+back. `!map logout` and Log out everywhere end a player's sessions and also
+make them unknown, so that whoever holds a compromised Microsoft account needs
+a fresh `!map` in game before it can sign in again. A player still on the
+allowlist is not made unknown by this: take them off it too.
+
+**Sessions.** An Xbox session is the player's, and admin follows the player:
+it is checked by XUID against the operator list on every request, so an
+operator who signs in with Xbox is an admin. That is intended, so that the
+owner can run map operations from a phone. Adding a passkey still needs the
+code typed in game. It is refused while `XBOX_LOGIN_ENABLED` is off and works again if the switch is turned back
 on within its day. Changing the session key ends them with every other login.
 
 **Setting it up.** In the Entra admin center, register an application:
@@ -4485,7 +4494,10 @@ code login is untouched.
 the app), `no_xbox_profile` (the account has no Xbox profile, XErr
 2148916233), `child_account` (XErr 2148916238), `xbox_refused` (any other
 XErr: banned, region, adult verification), `xbox_unavailable` (the network, a
-5xx, an unreadable answer), `bad_identity` and `fault`.
+5xx, an unreadable answer), `bad_identity`, `fault`, `busy` (more than 10 callbacks in a burst, then one
+every 6 seconds across all visitors, turned away before Microsoft is asked;
+the service sees only the gateway's address, so the limit is global) and
+`allowlist_unavailable`.
 
 ## Browser checks
 
@@ -4871,7 +4883,8 @@ On `INTERNAL_ADDR` only:
 |---|---|
 | `GET /metrics` | Prometheus |
 | `POST /internal/v1/claims` | Bearer `INTERNAL_TOKEN`. `{"code","xuid","gamertag"}`: this player typed this code, and so is known to the Xbox sign-in. 204, or 404 for a code that is unknown, expired or used |
-| `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds and remove their passkeys. 204 |
+| `POST /internal/v1/revocations` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: end every session this player holds, remove their passkeys and make them unknown to the Xbox sign-in. 204 |
+| `POST /internal/v1/known/forget` | Bearer `INTERNAL_TOKEN`. `{"xuid"}`: make this player unknown to the Xbox sign-in, at once, leaving their sessions. 204 |
 | `GET /internal/v1/world` | Bearer `INTERNAL_TOKEN`. The last chunk count: `checked`, `checkedAt`, and by dimension `chunks`, `missing` and `lost`, with `missingTotal`, `lostTotal`, and up to 20 lost chunks as block coordinates in `lostSample`. `{"checked":false}` before the first count. Also `generations`, with `current`, `previous` and `damaged`, each naming its directory and carrying `takenAt`, `files` and `bytes` — what a restore needs to choose between them |
 | `POST /internal/v1/world/acknowledge` | Bearer `INTERNAL_TOKEN`. `{"checkedAt"}` from the GET: accept the world as that count found it. 204; 409 before the first count or if a newer count has replaced that one |
 | `PUT /internal/v1/heads` | Bearer `INTERNAL_TOKEN`. `{"players":[{"xuid","gamertag","head"}]}`: everyone online now, `head` a PNG in base64 or absent. Replaces the last report whole. 200 with `players` and how many heads were `refused`; 400 for more than 256 players, a body over 1 MB, or an entry that is not a player. Not served with `ICONS_ENABLED=false` |
@@ -4967,7 +4980,7 @@ and what that day is compared with:
 | `mcmap_admin_requests_total{route,allowed}` | Requests to an admin route by its pattern, and whether the gate let them through |
 | `mcmap_admin_operator_lookups_total{result}` | Where the operator list was read from: `live`, `last_known_good` or `none` |
 | `mcmap_admin_operators` | Operators known, a count and no identities |
-| `mcmap_xbox_logins_total{result}` | Sign-ins with Xbox, every result at zero from start: `ok`, `stranger`, `cancelled`, `microsoft_error`, `expired`, `state_mismatch`, `replayed`, `bad_request`, `exchange_failed`, `no_xbox_profile`, `child_account`, `xbox_refused`, `xbox_unavailable`, `bad_identity`, `fault`. Present only with Xbox sign-in on |
+| `mcmap_xbox_logins_total{result}` | Sign-ins with Xbox, every result at zero from start: `ok`, `stranger`, `cancelled`, `microsoft_error`, `expired`, `state_mismatch`, `replayed`, `bad_request`, `exchange_failed`, `no_xbox_profile`, `child_account`, `xbox_refused`, `xbox_unavailable`, `bad_identity`, `fault`, `busy`, `allowlist_unavailable`. Present only with Xbox sign-in on |
 | `mcmap_admin_passkeys{state}` | Passkeys held, `pending` or `active`, read from the file at startup and set on every change |
 
 ## Build and test
