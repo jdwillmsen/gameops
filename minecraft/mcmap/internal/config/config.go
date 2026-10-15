@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -251,13 +252,16 @@ func Load(getenv func(string) string) (Config, error) {
 			fail("PASSKEYS_ENABLED needs ADMIN_ENABLED: only an admin may add a passkey")
 		}
 		// A passkey is bound to the exact host it was made on, so anything
-		// but a bare https origin would make passkeys nobody can use.
+		// but a bare https origin would make passkeys nobody can use. The
+		// browser compares both strings as it writes them, lower case and
+		// with no trailing colon, and an IP address cannot be an RP ID.
 		raw := getenv("PUBLIC_ORIGIN")
 		u, perr := url.Parse(raw)
-		if perr != nil || u.Scheme != "https" || u.Host == "" || u.Port() != "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
-			fail("PUBLIC_ORIGIN must be the map's https origin with no port or path, got %q", raw)
+		if perr != nil || u.Scheme != "https" || u.Host == "" || strings.HasSuffix(u.Host, ":") || u.Port() != "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil || net.ParseIP(u.Hostname()) != nil {
+			fail("PUBLIC_ORIGIN must be the map's https origin by name, with no port, path or fragment, got %q", raw)
 		} else {
-			c.PublicOrigin, c.PasskeyRPID = "https://"+u.Host, u.Hostname()
+			h := strings.ToLower(u.Hostname())
+			c.PublicOrigin, c.PasskeyRPID = "https://"+h, h
 		}
 	}
 	// No login means no player, and so no admin. The switches are turned off
