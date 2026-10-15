@@ -90,7 +90,10 @@ func (o *List) IsOperator(ctx context.Context, xuid string) (bool, Source) {
 	if !o.fresh() {
 		o.refreshing.Lock()
 		if !o.fresh() {
-			o.refresh(ctx)
+			// Every request waiting on the lock shares this lookup, so it
+			// must not end with whichever request made it; the bridge
+			// client's own timeout bounds it instead.
+			o.refresh(context.WithoutCancel(ctx))
 		}
 		o.refreshing.Unlock()
 	}
@@ -185,6 +188,8 @@ func classOf(err error) string {
 		return "no_file"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
 	}
 	return "unreachable"
 }
