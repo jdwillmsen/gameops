@@ -54,7 +54,7 @@ var table = map[string]uint32{
 	"snow": 0xf9fefe, "powder_snow": 0xf3f9f9, "ice": 0x91b7fd, "packed_ice": 0x8db4fa, "blue_ice": 0x74a7fd,
 	"frosted_ice": 0x8fb3f5, "amethyst_block": 0x8561bf, "budding_amethyst": 0x8864c2,
 	// Liquids.
-	"water": 0x3f76e4, "flowing_water": 0x3f76e4, "lava": 0xcf5c0f, "flowing_lava": 0xcf5c0f,
+	"water": 0x44aff5, "flowing_water": 0x44aff5, "lava": 0xcf5c0f, "flowing_lava": 0xcf5c0f,
 	// Ores, as the average of the stone and its specks.
 	"coal_ore": 0x696969, "iron_ore": 0x887368, "copper_ore": 0x7c7d72, "gold_ore": 0x8f8c7d,
 	"redstone_ore": 0x856b6b, "lit_redstone_ore": 0x956b6b, "lapis_ore": 0x66708a, "diamond_ore": 0x798d8c,
@@ -135,7 +135,7 @@ var table = map[string]uint32{
 	"lever": 0x7d7d7d, "unlit_redstone_torch": 0x5a2a1a, "end_rod": 0xe8e8e8, "lightning_rod": 0xc06b4f,
 	"unpowered_repeater": 0x9a9a9a, "powered_repeater": 0xb0a0a0, "unpowered_comparator": 0x9a9a9a, "powered_comparator": 0xb0a0a0,
 	"copper_bulb": 0xa57a65, "copper_grate": 0xc06b4f, "chiseled_copper": 0xc06b4f, "copper_door": 0xc06b4f,
-	"copper_trapdoor": 0xc06b4f, "copper_chest": 0xc06b4f, "copper_lantern": 0xc78b38, "bubble_column": 0x3f76e4,
+	"copper_trapdoor": 0xc06b4f, "copper_chest": 0xc06b4f, "copper_lantern": 0xc78b38, "bubble_column": 0x44aff5,
 	// Blocks this service has only ever seen by name, with colours that
 	// are guesses from their names.
 	"sulfur": 0xcbbf55, "potent_sulfur": 0xd7c93a, "sulfur_bricks": 0xbfb350, "polished_sulfur": 0xc9bd53,

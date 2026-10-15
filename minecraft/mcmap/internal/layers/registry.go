@@ -29,6 +29,10 @@ const (
 	// Feature is passable and thin like a plant, but is something built or
 	// made and not the ground's cover: a rail, a torch, a ladder.
 	Feature
+	// TintGrass and TintFoliage are blocks the game colours by the biome
+	// they stand in; water is coloured so too.
+	TintGrass
+	TintFoliage
 )
 
 // Liquid is either liquid.
@@ -141,6 +145,12 @@ func classify(name string) Flags {
 		if strings.HasSuffix(name, s) {
 			return Plant
 		}
+	}
+	switch name {
+	case "grass_block", "grass":
+		return TintGrass
+	case "oak_leaves", "jungle_leaves", "acacia_leaves", "dark_oak_leaves", "mangrove_leaves", "leaves", "leaves2":
+		return TintFoliage
 	}
 	return 0
 }

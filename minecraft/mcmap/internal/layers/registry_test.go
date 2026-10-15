@@ -34,7 +34,7 @@ func TestClassify(t *testing.T) {
 		{"water", Water}, {"flowing_water", Water}, {"lava", Lava},
 		{"short_grass", Plant}, {"oak_sapling", Plant}, {"pink_carpet", Plant}, {"snow_layer", Plant},
 		{"rail", Feature}, {"torch", Feature}, {"oak_wall_sign", Feature}, {"stone_button", Feature}, {"waxed_lightning_rod", Feature},
-		{"stone", 0}, {"oak_leaves", 0}, {"grass_block", 0}, {"red_mushroom_block", 0}, {"copper_chest", 0},
+		{"stone", 0}, {"oak_leaves", TintFoliage}, {"grass_block", TintGrass}, {"birch_leaves", 0}, {"red_mushroom_block", 0}, {"copper_chest", 0},
 	} {
 		if got := classify(c.name); got != c.want {
 			t.Errorf("%s is %b, want %b", c.name, got, c.want)
