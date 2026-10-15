@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A local lab Bedrock server, and a new `minecraft/crew` worker binary that joins it, tracks its own position, health and life state from packets, serves that state over a local HTTP status API, survives deaths and server restarts, and does nothing else.
+**Goal:** A lab Bedrock server and a new `minecraft/crew` worker, both running on the cluster through ArgoCD. The worker joins the lab, tracks its own position, health and life state from packets, serves that state over an HTTP status API, survives deaths and server restarts, and does nothing else.
 
 **Architecture:** `crew` follows afkbot's shape: one process, a reconnect loop, and one session per connection. The connection plumbing comes from `minecraft/agent/pkg/*`. Two new packages carry the worker-specific parts. `internal/belief` is a thread-safe tracker that turns packets into a `Snapshot`. `internal/statusapi` serves that snapshot. Wave 1 has no presence client: crew runs only on the lab, and parking crew is `crew-control`'s job from Wave 3 (design D5).
 
@@ -14,7 +14,7 @@
 
 - Do not change any file under `minecraft/afkbot/`, `minecraft/agent/`, `minecraft/mcmap/`, `minecraft/bridge/` or `internal/presenceapi/`. Crew imports `minecraft/agent/pkg/*` read-only.
 - No live LLM, model client or chat handling anywhere in `minecraft/crew`.
-- Wave 1 makes no changes to `jdw-deployments` and never connects to FWB. Crew's only target is the lab server from Task 1.
+- Crew never connects to FWB. Its only target is the lab server. In `jdw-deployments`, Wave 1 adds only the new `charts/crew-lab` chart and its ArgoCD entry (Task 6). It does not touch `charts/minecraft-fwb`.
 - Never log a position, coordinate or seed. Positions appear only in `/v1/state` response bodies. No FWB coordinates, seeds or player names in code, tests, fixtures, docs, commits or PR text.
 - `STATUS_ADDR` defaults to loopback (`127.0.0.1:8080`). Only the compose file binds it wider, and only inside the compose network.
 - The lab server image is pinned to the tag FWB uses (`2026.9.2`) with `VERSION=LATEST`, the same as FWB, so both speak the same protocol.
@@ -34,7 +34,7 @@
 
 ```
 Task 1 (lab + scaffold + config) ──► Task 2 (belief) ──┐
-                                 └─► Task 3 (statusapi)┴─► Task 4 (cmd/crew) ──► Task 5 (image, compose, docs, live check)
+                                 └─► Task 3 (statusapi)┴─► Task 4 (cmd/crew) ──► Task 5 (image, compose, docs, live check) ──► Task 6 (cluster: crew-lab chart + ArgoCD)
 ```
 
 Tasks 2 and 3 may run in parallel worktrees once Task 1 has merged. Task 3 depends only on `belief.Snapshot`'s shape, which is fixed below. Implementers use Sonnet. Reviewers use Opus.
@@ -126,7 +126,7 @@ tasks:
   lint: test -z "$(gofmt -l minecraft/crew)" && go vet ./minecraft/crew/...
 ```
 
-No `release:` block yet. Crew ships no image until it has a deploy target (Wave 3).
+No `release:` block yet. Task 5 adds it with the Dockerfile, because the validator requires the Dockerfile to exist first.
 
 - [ ] **Step 4: Write the failing config tests**
 
@@ -1256,6 +1256,22 @@ Expected: `matches=1` (grep found nothing).
 - "no presence client yet": crew-control will own crew parking (D5), and the lab has no agent.
 - "status API defaults to loopback": positions are seed-equivalent on FWB.
 
+- [ ] **Step 7b: Publish the image**
+
+Add the release block to `minecraft/crew/component.yaml`, matching afkbot's:
+
+```yaml
+release:
+  tag: crew
+  artifacts: [image]
+  image:
+    name: minecraft-crew
+    description: Programmable Minecraft Bedrock worker unit that joins a server and reports its own state
+    short_description: Programmable Minecraft Bedrock worker unit
+```
+
+Create `minecraft/crew/README.docker.md`, the image page the validator requires. Model it on `minecraft/afkbot/README.docker.md`: what the image is, its environment variables, the `/data` volume, and port 8080.
+
 - [ ] **Step 8: Validate and commit**
 
 Run: `go run ./tools/components validate && docker build -f minecraft/crew/Dockerfile .`
@@ -1268,4 +1284,73 @@ Expected: both succeed.
 
 - [ ] **Step 9: Ship**
 
-Run the `/no-mistakes` pipeline. The PR body's *Verified* section lists Steps 3–6 with their observed outputs (no gamertags, no positions). Before opening the PR, check the base branch for a required approval or CODEOWNERS gate in both places it can live: `gh api repos/jdwillmsen/gameops/rules/branches/main` and `.../branches/main/protection`. If either gates, open the PR as `jdwlabs-agent-bot`.
+Run the `/no-mistakes` pipeline. The PR body's *Verified* section lists Steps 3–6 with their observed outputs (no gamertags, no positions). After merge, confirm the release workflow published `ghcr.io/jdwillmsen/minecraft-crew` and note the tag for Task 6. Before opening the PR, check the base branch for a required approval or CODEOWNERS gate in both places it can live: `gh api repos/jdwillmsen/gameops/rules/branches/main` and `.../branches/main/protection`. If either gates, open the PR as `jdwlabs-agent-bot`.
+
+---
+
+### Task 6: Run the lab and crew-1 on the cluster
+
+**Repo:** `jdwillmsen/jdw-deployments`. The branch is `feat/JDW-<n>-crew-lab-chart`, in its own worktree.
+
+**Files:**
+- Create: `charts/crew-lab/Chart.yaml`, `charts/crew-lab/values.yaml`, `charts/crew-lab/values-prd.yaml`
+- Create: `charts/crew-lab/templates/crew-deployment.yaml`, `crew-pvc.yaml`, `crew-service.yaml`
+- Create: `charts/crew-lab/README.md`
+- Modify: `argocd/prd/config.yaml` (append one app)
+
+**Interfaces:**
+- Consumes: the image `ghcr.io/jdwillmsen/minecraft-crew:<tag>` from Task 5, its env vars (Task 1's `config.Load`), and `/healthz`, `/readyz` and `/v1/state` on port 8080 (Task 3).
+
+Before writing, read `charts/minecraft-fwb/Chart.yaml`, `values.yaml` (server, storage, affinity, NodePort and Service sections), `templates/bot-deployment.yaml`, `templates/bot-pvc.yaml` and `argocd/prd/config.yaml`. Copy their patterns and the reasoning in their comments where it applies. Do not reference FWB's values from the new chart.
+
+- [ ] **Step 1: The lab server as the itzg subchart**
+
+`Chart.yaml` depends on `minecraft-bedrock` 2.9.0 from `https://itzg.github.io/minecraft-server-charts/`, the same as FWB. In `values.yaml` under `minecraft-bedrock:`:
+- image `itzg/minecraft-bedrock-server`, the same tag as FWB (`2026.9.2`), with `version: "LATEST"` and a comment saying both move together
+- `eula: "TRUE"`, `gameMode: survival`, `difficulty: normal`, `cheats: true`, `onlineMode: true`, `serverName: crew-lab`, `levelName: crew-lab`
+- `serviceType: NodePort` with a `nodePort` FWB does not use (check with `grep -rn nodePort charts/`), so the owner can join from a game client and watch
+- persistence on `truenas-iscsi`. Copy FWB's single-node affinity and its comment about iSCSI volume migration, but pick the node by `kubectl get nodes` headroom and record the measurement in the comment. Losing the lab world is acceptable, so there is no backup CronJob
+- resources and probes copied from FWB's server, scaled down: a lab with one or two players needs a fraction of FWB's memory
+
+- [ ] **Step 2: crew-1 Deployment, auth PVC and Service**
+
+Model these on `bot-deployment.yaml` and `bot-pvc.yaml`:
+- Deployment `crew-1`, `replicas: 1`, `strategy: Recreate`. Two pods would sign in as the same account and kick each other.
+- env: `MC_HOST` = the lab's in-cluster Service name, `MC_PORT` = the server's container port, `MC_USERNAME` from values, and `STATUS_ADDR=0.0.0.0:8080`
+- `livenessProbe` → `/healthz`, `readinessProbe` → `/readyz` on 8080. Readiness can be false for long periods (death, server restart), so nothing may restart the pod on readiness.
+- PVC on `truenas-nfs` at `/data` for the token cache, same as the bot's
+- the same securityContext as the bot: non-root, read-only root filesystem, all capabilities dropped
+- a ClusterIP Service on 8080. No Ingress: `/v1/state` carries positions and stays in-cluster until crew-control adds auth in Wave 3.
+
+- [ ] **Step 3: Render and lint**
+
+Run: `helm dependency build charts/crew-lab && helm lint charts/crew-lab -f charts/crew-lab/values.yaml -f charts/crew-lab/values-prd.yaml && helm template crew-lab charts/crew-lab -f charts/crew-lab/values.yaml -f charts/crew-lab/values-prd.yaml -n jdwillmsen-prd > /tmp/crew-lab.yaml`
+Expected: lint passes. `grep -c '^kind:' /tmp/crew-lab.yaml` lists the StatefulSet, Services, Deployment and PVCs, and nothing named `minecraft-fwb`.
+
+- [ ] **Step 4: Register with ArgoCD**
+
+Append to `argocd/prd/config.yaml`:
+
+```yaml
+  - name: crew-lab-prd
+    namespace: jdwillmsen-prd
+    chartPath: charts/crew-lab
+    syncWave: "2"
+    valueFiles:
+      - values.yaml
+      - values-prd.yaml
+```
+
+Then run the repo's own validation (`.github/workflows` lists it; run the same commands locally) and commit.
+
+- [ ] **Step 5: Ship, then the first sign-in**
+
+Ship through `/no-mistakes`, after the same approval-gate check as Task 5. After ArgoCD syncs, crew-1 prints a Microsoft device code on its first start. The device code is a credential prompt, so an agent must not read it through its own shell. Hand the owner this command for a separate terminal:
+
+```bash
+kubectl -n jdwillmsen-prd logs deploy/crew-1 -f | grep -m1 -i 'microsoft.com/link'
+```
+
+- [ ] **Step 6: Live checks in the cluster**
+
+After sign-in, from a `kubectl port-forward -n jdwillmsen-prd svc/crew-1 8080:8080`, repeat Task 5's Steps 3–6 against the cluster: join, death (`kubectl exec` into the lab pod and run `send-command kill <gamertag>`), lab restart (`kubectl delete pod` on the lab server pod), and the log grep. Also check that the ArgoCD app `crew-lab-prd` is Synced and Healthy, and that FWB's app was not touched (`argocd app get minecraft-fwb-prd` shows no new sync). Paste the outputs into the Jira ticket, without gamertags or positions.

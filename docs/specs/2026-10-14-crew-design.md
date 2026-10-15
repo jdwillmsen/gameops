@@ -28,11 +28,11 @@ Mindcraft, Mineflayer and the Andy models are Java-only. FWB is Bedrock on
 | D1 | New actor kinds `crew` (worker) and `camera` (POV follower). AFK bots are not evolved. | Keeps the process farms depend on minimal. |
 | D2 | The runtime is deterministic: typed Go skills, a task planner built from recipe tables, and an executor. No live LLM in any crew process. | Predictable, testable, free to run. Revisit only through a later decision record. |
 | D3 | Free or local models are used **offline** only, to help author and review skills. | They are a development aid, not a runtime dependency. |
-| D4 | Cameras show a true POV: a full Bedrock client per camera, following its crew unit, captured and streamed to the browser over WebRTC. | Owner wants a "security camera" view, not a reconstructed one. |
+| D4 | Every unit gets a **rendered camera**: crew forwards the chunks, entities and its own look direction it already receives, and the browser draws them as a first-person 3D view. True-pixel POV is a separate spike (a real Bedrock client fed crew's packet stream through a mirror proxy). | The rendered view needs no extra client, account or command, so it works on FWB under the no-cheats rule. Real-pixel cameras are heavy and have no Bedrock prior art. |
 | D5 | Control plane is a new `crew-control` service. It owns task queues, telemetry and **presence for crew/camera actors**. | Keeps the chat agent's blast radius small. The agent's presence API is FWB-only, and crew starts on the lab. Settles the brainstorm's open choice 2. |
 | D6 | Crew does real work on a **lab world** first: a separate Bedrock server with cheats on, not FWB. | FWB is pure survival (no cheats). Automated gathering there needs the group's agreement first. |
-| D7 | Spectator mode and teleport-follow cameras run on the **lab only**. On FWB a camera is a survival player or absent, until a later rule decision. | FWB's no-cheats rule limits the console to read-only and messaging commands. |
-| D8 | Home is `minecraft/crew`, `minecraft/crew-control` and later `minecraft/crew-console` in this repo. Tracked in JDW and deployed on the jdwillmsen tenant. | Siblings of afkbot, agent and mcmap. |
+| D7 | No camera ever uses spectator mode or teleport on FWB. A spectator account following its unit is a lab-only fallback if the mirror proxy fails. | Bedrock spectator mode needs cheats, and FWB's no-cheats rule limits the console to read-only and messaging commands. |
+| D8 | Home is `minecraft/crew`, `minecraft/crew-control` and later `minecraft/crew-console` in this repo. Tracked in JDW. Everything runs on the cluster: a `crew-lab` chart in `jdw-deployments` deployed by ArgoCD to `jdwillmsen-prd`, beside FWB. Docker Compose is for local development only. | Siblings of afkbot, agent and mcmap; same GitOps path as everything else. |
 | D9 | Crew reuses `minecraft/agent/pkg/*` (auth, dial, protocol negotiation, skin, respawn, logging). | One copy of the connection code. afkbot's copies are `internal/` and cannot be imported. |
 
 ## Standing rules every wave inherits
@@ -53,18 +53,25 @@ Mindcraft, Mineflayer and the Andy models are Java-only. FWB is Bedrock on
 
 ```
 Crew Console (web) ── HTTPS/WS ──► crew-control ──► crew-N  (gophertunnel, skills)
-      │                              │  tasks, telemetry,       │
-      │ WebRTC                       │  crew/camera presence    │ RakNet
-      ▼                              ▼                          ▼
- stream gateway (MediaMTX) ◄── camera-N (full Bedrock client) ──► lab Bedrock server
+   │  3D camera tiles                │  tasks, telemetry,       │  RakNet
+   │◄── WS: chunks, entities, look ──┼──────────────────────────┤
+   │                                 │  crew/camera presence    ▼
+   │ WebRTC (spike only)                                lab Bedrock server (k8s)
+   ◄── MediaMTX ◄── real Bedrock client ◄── mirror proxy ◄── crew-N's packet stream
 ```
 
 - **crew-N**: headless Go client. It builds a picture of the world from
   packets (position, health, inventory, nearby blocks), runs skills, and
   serves its state over a local HTTP status API.
-- **camera-N**: a full Bedrock client in spectator mode on the lab,
-  following crew-N. Its display is captured with ffmpeg and published to
-  MediaMTX.
+- **Rendered camera**: crew streams the world data it already holds
+  (chunks, nearby entities, its own position and look direction) over a
+  websocket. The console draws it in 3D with block textures, the way
+  prismarine-viewer does for Java bots. It costs no extra client, account
+  or server slot.
+- **Mirror camera (spike)**: a real Bedrock client connects to a small
+  gophertunnel proxy that replays crew-N's server-to-client packets and
+  drops the client's own input. The server only ever sees crew-N. The
+  display is captured with ffmpeg and published to MediaMTX.
 - **crew-control**: task CRUD (`POST /v1/crew/{id}/tasks`, cancel, list),
   telemetry fan-out (SSE), and parking for crew/camera actors. It uses the
   same `internal/presenceapi` contract shape as the agent's API.
@@ -79,36 +86,39 @@ plan is written when the wave starts, from what the wave before it learned.
 | Wave | Delivers | Done when | Plan |
 | --- | --- | --- | --- |
 | 1 | Lab world + empty `crew` worker with a status API | crew-1 joins the lab, reports state, survives a server restart and a death | written |
-| 2 | POV spike: one camera following one player on the lab, in a browser | ≥10 min of a stable stream, unattended | spike brief below; plan after |
+| 2a | Rendered camera spike: crew-1's view drawn in a browser from its own data | a recognisable first-person view of crew-1, updating live, for ≥10 min | spike brief below |
+| 2b | Mirror camera spike: a real client rendering crew-1's packet stream | ≥10 min of a stable stream, unattended, or a written reason it cannot work | spike brief below |
 | 3 | Skill runtime + `crew-control` MVP | operator assigns "mine 16 cobblestone → deposit in chest", it completes without an LLM | after W1 |
 | 4 | Crew Console MVP | one operator runs a W3 task while watching the POV, from the UI alone | after W2 + W3 |
 | 5 | Scale + polish: crew-2/camera-2, more skills, failure taxonomy, optional offline skill-authoring CLI | two units work side by side for an hour | after W4 |
 | Gate | FWB rollout | group agrees crew may work on FWB, and on whether cameras appear there | owner decision |
 
-Waves 1 and 2 are independent and can run in parallel. Wave 2 only needs
-the lab world from Wave 1's Task 1.
+Wave 2a needs Wave 1's crew command (Task 4). Wave 2b needs only the lab
+world (Task 1), so it can run beside Wave 1.
 
-### Wave 2 spike brief (POV camera)
+### Wave 2a spike brief (rendered camera)
 
-Timebox: 3 working sessions. The output is a findings doc plus one running
-stream. Production-quality code is not expected.
+Timebox: 2 working sessions. Crew exposes a websocket on its status API
+that streams the chunks and entities it receives plus its own position and
+look direction. A bare HTML page draws them with three.js and Bedrock block
+textures. Start from prismarine-viewer's renderer (Java, MIT) and the
+experimental `bedrock-viewer` fork. Reuse mcmap's Bedrock chunk decoding
+where it fits. Answer: does the view read as crew-1's first-person view?
+What is crew's extra CPU and bandwidth per viewer? Record findings in
+`docs/specs/<date>-crew-rendered-camera-spike.md`, with lab data only.
 
-Packagings to try, in this order:
+### Wave 2b spike brief (mirror camera)
 
-1. **Linux + `mcpelauncher`** (unofficial launcher for the Android Bedrock
-   build) under Xvfb with Mesa software rendering. It is lightest on hardware
-   and fits a container. Requires a game licence on the camera account.
-2. **Windows VM** running the official Bedrock client, using WARP software
-   rendering or a non-passthrough GPU.
-3. **Wine/Proton** with the Windows client. Listed in the brainstorm, but the
-   GDK build is the least likely to run.
-
-For each: does it join the lab's pinned server version? Does `/gamemode spectator`
-plus a periodic `/tp @s <crew>` (lab only) hold the camera behind its unit?
-What frame rate does capture reach (target 15 fps at 720p)? What CPU and RAM
-does it cost? Stream with `ffmpeg` → MediaMTX (WHIP/RTSP in, WebRTC out) and
-play in a bare HTML page. Record the findings in
-`docs/specs/<date>-crew-camera-spike.md`. Do not include any FWB data.
+Timebox: 3 working sessions. Build a gophertunnel proxy that a real
+Bedrock client joins. It replays crew-1's server-to-client packets and
+drops the client's input. Answer: does the client accept the stream and
+hold crew-1's position, or does its own movement prediction fight it?
+Which client packaging runs it: `mcpelauncher` (Linux, Android build)
+under Xvfb with software rendering first, then a Windows VM with WARP?
+What frame rate does capture reach (target 15 fps at 720p), and at what
+CPU/RAM? Stream with ffmpeg → MediaMTX → WebRTC. If the proxy cannot
+work, record why; the lab-only spectator camera is the fallback. Findings
+go in `docs/specs/<date>-crew-mirror-camera-spike.md`.
 
 ### Wave 3 outline (for its plan)
 
@@ -134,5 +144,5 @@ FWB. Open-world survival without an assigned task. Passing as human.
 | --- | --- |
 | Camera clients are heavy | W2 measures cost before W4 depends on it; start at 1 camera |
 | Protocol drift between Mojang releases | The lab pins the same server image tag as FWB, and crew reuses `mcproto.Negotiate` |
-| A camera needs a GPU and the only GPU belongs to vLLM | Software rendering first. GPU sharing is an owner decision |
+| A real-pixel camera needs a GPU and the only GPU belongs to vLLM | The rendered camera needs none; the mirror spike uses software rendering. GPU sharing is an owner decision |
 | Operators expect "AI" | Console copy says "programmable units" |
