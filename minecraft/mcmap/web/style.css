@@ -1691,7 +1691,7 @@ kbd, .keys code {
   border-radius: var(--radius-l);
   font: 11px/1.4 ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
-.account { z-index: 1160; padding: 0.5rem; }
+.account { z-index: 1160; padding: 0.5rem; left: auto; right: 0.5rem; bottom: auto; top: 0.5rem; }
 .debug[hidden], .account[hidden], .admin[hidden] { display: none; }
 .debug-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule); }
 .debug-head h2 { flex: 1; margin: 0; font-size: 12px; }
