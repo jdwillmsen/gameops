@@ -1,7 +1,7 @@
 // Package xbox turns a Microsoft sign-in into the XUID and gamertag of the
 // Xbox profile behind it, and keeps nothing of the tokens it passes through.
 //
-// The chain is the one Minecraft launchers use: an OAuth 2.0 authorization
+// The chain is the usual one for Minecraft sign-in: an OAuth 2.0 authorization
 // code with PKCE for the XboxLive.signin scope, that access token for an
 // Xbox Live user token, that for an XSTS token whose display claims name
 // the player. Only the last step's xid and gtg leave this package.
