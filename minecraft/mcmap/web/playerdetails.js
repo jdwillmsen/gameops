@@ -52,6 +52,9 @@
   // The picture of it that was drawn, so that an answer that has not
   // changed does not rebuild what the viewer is holding focus in.
   let drawn = '';
+  // The live note of what is drawn, whose age is the one part of an online
+  // player's answer that changes every time it is asked.
+  let liveLine = null;
   // The slot whose details are being read, as its grid and place in it.
   let pickedPos = '';
   // The quick refresh, which only runs for a player who is online.
@@ -298,12 +301,19 @@
   }
 
   // Which of the figures above are live, said in words.
-  function liveNote(live) {
+  function liveSentence(live) {
     const now = liveVitals(live);
     const what = [now.health ? 'health' : '', now.level !== undefined ? 'level' : ''].filter(Boolean).join(' and ');
-    if (!what) return null;
+    if (!what) return '';
     const at = live.at ? Date.parse(live.at) : NaN;
-    return el('p', 'note live-note', `Live: the ${what} below ${what.includes(' and ') ? 'are' : 'is'} from the game right now${Number.isFinite(at) ? ` (${Date.now() - at < 15_000 ? 'a moment ago' : ago(at)})` : ''}; the rest is from the save.`);
+    return `Live: the ${what} below ${what.includes(' and ') ? 'are' : 'is'} from the game right now${Number.isFinite(at) ? ` (${Date.now() - at < 15_000 ? 'a moment ago' : ago(at)})` : ''}; the rest is from the save.`;
+  }
+
+  function liveNote(live) {
+    const sentence = liveSentence(live);
+    if (!sentence) return null;
+    liveLine = el('p', 'note live-note', sentence);
+    return liveLine;
   }
 
   function savedParts(saved, live) {
@@ -316,8 +326,10 @@
       return out;
     }
     if (state !== 'known' || !saved.record) {
-      const status = vitals({}, live);
-      if (status) out.push(el('h3', '', 'Right now'), liveNote(live), status);
+      // Only real live figures make a section: with none, vitals() would
+      // still draw its fallback rows.
+      const labelled = liveNote(live);
+      if (labelled) out.push(el('h3', '', 'Right now'), labelled, vitals({}, live));
       out.push(el('p', 'note', `No saved record for this player yet. The game writes one when the world next saves after a player joins, and the map reads it from the snapshot after that${Number.isFinite(at) ? `; the last snapshot was ${ago(at)}` : ''}.`));
       return out;
     }
@@ -493,8 +505,12 @@
 
   function show(data, force) {
     last = data;
-    const now = JSON.stringify(data);
-    if (!force && now === drawn) return;
+    const now = JSON.stringify({ ...data, live: data.live && { ...data.live, at: undefined } });
+    if (!force && now === drawn) {
+      if (liveLine && data.live) liveLine.textContent = liveSentence(data.live);
+      return;
+    }
+    liveLine = null;
     drawn = now;
     const was = focused();
     view.body.replaceChildren(...savedParts(data.saved, data.live), ...counterParts(data.counters), ...trailParts(data.trails));
