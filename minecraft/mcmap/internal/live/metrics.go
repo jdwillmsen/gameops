@@ -14,6 +14,7 @@ const (
 	resultDropped     = "dropped"
 	resultUnparseable = "unparseable"
 	resultNulStripped = "nul_stripped"
+	resultCounted     = "counted"
 )
 
 var lagBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
@@ -21,8 +22,16 @@ var lagBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 
 var (
 	metricFrames = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "mcmap_live_frames_total",
-		Help: "Records from the script pack, by what became of them: applied (it completed a list, now drawn), buffered (part of a list still arriving), heartbeat, incomplete (a list abandoned with parts missing, counted once per list), dropped (a repeat of a list or part already held), unparseable. nul_stripped counts records that arrived with a NUL byte and is in addition to their outcome.",
+		Help: "Records from the script pack, by what became of them: applied (it completed a list, now drawn), buffered (part of a list still arriving), heartbeat, incomplete (a list abandoned with parts missing, counted once per list), dropped (a repeat of a list or part already held), unparseable. A counts record is counted (its deltas were added to the totals) or dropped (it had been taken already). nul_stripped counts records that arrived with a NUL byte and is in addition to their outcome.",
 	}, []string{"result"})
+	metricCountsMissed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_live_counts_missed_total",
+		Help: "Counts lines the pack printed that this service never read, from gaps in their sequence numbers. What they held is not in the totals.",
+	})
+	metricCountsRefused = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_live_counts_refused_total",
+		Help: "Deltas of players not counted because the table of players was full.",
+	})
 	metricLastFrame = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "mcmap_live_last_frame_timestamp_seconds",
 		Help: "When the bridge received the newest record this service has accepted, heartbeats included. Old means the pipeline is broken, not that the server is empty.",
