@@ -9,6 +9,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -403,5 +405,62 @@ func TestPasskeys_TheGaugeIsReadBackAtStart(t *testing.T) {
 	StartPasskeyMetrics(again)
 	if got := testutil.ToFloat64(metricPasskeys.WithLabelValues("active")); got != 1 {
 		t.Errorf("active gauge after a restart = %v, want 1", got)
+	}
+}
+
+// A store that cannot write is the map's fault: it answers busy, and is
+// written down as an error an operator can find, naming no secret.
+func TestPasskeys_AFailedConfirmWriteIsLoggedAsAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through a read-only directory")
+	}
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	_, _, path := withPasskeys(t, s)
+	var log bytes.Buffer
+	s.Log = slog.New(slog.NewJSONHandler(&log, nil))
+	h, as, d := s.Handler(), session(s, steve), newDevice(t)
+	opts := do(h, "POST", "/auth/passkey/register/options", `{"label":"Phone"}`, []*http.Cookie{as})
+	challenge := challengeIn(t, opts.Body.Bytes())
+	if fin := do(h, "POST", "/auth/passkey/register/finish", d.create(challenge), []*http.Cookie{as}); fin.Code != http.StatusOK {
+		t.Fatalf("register finish = %d %s", fin.Code, fin.Body)
+	}
+	asked := do(s.InternalHandler(), "POST", "/internal/v1/passkey-codes", `{"xuid":"`+steve.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken)
+	var got struct{ Code string }
+	_ = json.Unmarshal(asked.Body.Bytes(), &got)
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	log.Reset()
+	rec := do(h, "POST", "/auth/passkey/register/confirm", `{"credentialId":"`+b64url.EncodeToString(d.id)+`","code":"`+got.Code+`"}`, []*http.Cookie{as})
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("confirm with an unwritable store = %d", rec.Code)
+	}
+	line := log.String()
+	if !strings.Contains(line, `"level":"ERROR"`) || !strings.Contains(line, `"error_class":"write"`) {
+		t.Errorf("confirm with an unwritable store logged %q, want an error with its class", line)
+	}
+	for _, secret := range []string{got.Code, challenge, steve.Gamertag, "Phone", b64url.EncodeToString(d.id)} {
+		if strings.Contains(line, secret) {
+			t.Errorf("the log line carries %q: %s", secret, line)
+		}
+	}
+}
+
+// Only what is wrong with the credential is the caller's refusal; anything
+// else is the map's own fault and must not be counted or answered as one.
+func TestRegisterFinish_OnlyTheCredentialsFaultIsARefusal(t *testing.T) {
+	for err, want := range map[error]bool{
+		auth.ErrRegistrationRefused:                 true,
+		auth.ErrDuplicate:                           true,
+		auth.ErrWrongHandle:                         true,
+		errors.New("open passkeys.json: read-only"): false,
+		fmt.Errorf("save: %w", os.ErrPermission):    false,
+	} {
+		if got := refusedRegistration(err); got != want {
+			t.Errorf("refusedRegistration(%v) = %v, want %v", err, got, want)
+		}
 	}
 }

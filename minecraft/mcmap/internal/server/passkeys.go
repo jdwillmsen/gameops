@@ -156,14 +156,24 @@ func (s *Server) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "pending"})
 	case errors.Is(err, auth.ErrTooMany):
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "too_many"})
-	case err != nil:
+	case refusedRegistration(err):
 		s.metricSet().registered.WithLabelValues("refused").Inc()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "refused"})
+	case err != nil:
+		s.log().Error("map passkey not held as pending", "xuid", sess.XUID, "error_class", "fault")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "fault"})
 	default:
 		s.metricSet().registered.WithLabelValues("pending").Inc()
 		s.log().Info("map passkey pending", "xuid", sess.XUID, "credential", auth.LogName(k.ID))
 		writeJSON(w, http.StatusOK, map[string]any{"fingerprint": auth.Fingerprint(k.ID), "expiresIn": int(auth.PendingFor.Seconds())})
 	}
+}
+
+// refusedRegistration says whether a failed finish was the credential's
+// fault. Anything else is the map's own, and a player told "refused" for
+// it would try another authenticator instead of waiting for a fix.
+func refusedRegistration(err error) bool {
+	return errors.Is(err, auth.ErrRegistrationRefused) || errors.Is(err, auth.ErrDuplicate) || errors.Is(err, auth.ErrWrongHandle)
 }
 
 func (s *Server) handleRegisterConfirm(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +201,7 @@ func (s *Server) handleRegisterConfirm(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, auth.ErrNothingPending):
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "nothing_pending"})
 	case err != nil:
+		s.log().Error("map passkey not registered", "xuid", sess.XUID, "error_class", "write")
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "busy"})
 	default:
 		s.metricSet().registered.WithLabelValues("confirmed").Inc()
@@ -225,6 +236,7 @@ func (s *Server) handlePasskeyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		s.log().Error("map passkey code not issued", "xuid", req.XUID, "error_class", "fault")
 		http.Error(w, "busy", http.StatusServiceUnavailable)
 		return
 	}
