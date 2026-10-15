@@ -185,7 +185,7 @@ func TestKillSwitches_EndWhatWasIssuedUnderThem(t *testing.T) {
 	game := session(s, steve)
 	pk := cookie(passkeyLogin(t, s, d), "__Host-mcmap_session")
 	adminRoutes := [][2]string{{"GET", "/api/admin/status"}, {"POST", "/auth/passkey/register/options"}, {"POST", "/auth/passkey/register/finish"}, {"POST", "/auth/passkey/register/confirm"}, {"POST", "/auth/passkey/register/cancel"}}
-	passkeyRoutes := [][2]string{{"POST", "/auth/passkey/options"}, {"POST", "/auth/passkey/finish"}, {"GET", "/api/passkeys"}, {"DELETE", "/api/passkeys/x"}}
+	passkeyRoutes := [][2]string{{"POST", "/auth/passkey/options"}, {"POST", "/auth/passkey/finish"}, {"GET", "/api/passkeys"}, {"DELETE", "/api/passkeys/x"}, {"POST", "/api/logout-all"}}
 
 	// Passkeys off: the chart's map.admin.passkeys: false.
 	s.Passkeys, s.Ceremonies, s.Sessions.Passkeys = nil, nil, nil

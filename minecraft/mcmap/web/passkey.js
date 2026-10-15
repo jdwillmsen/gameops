@@ -54,11 +54,16 @@
   const post = (url, body) => fetch(url, { method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   const webauthn = () => typeof window.PublicKeyCredential === 'function' && window.navigator && window.navigator.credentials;
 
+  // Asked once: the login button and the account panel both follow it.
+  const configured = (async () => {
+    try { return await (await fetch('api/config', { cache: 'no-store' })).json(); } catch { return null; }
+  })();
+
   async function loginButton() {
     const button = $('login-passkey');
     if (!button) return;
-    let config = {};
-    try { config = await (await fetch('api/config', { cache: 'no-store' })).json(); } catch { return; }
+    const config = await configured;
+    if (!config) return;
     button.hidden = !(config.passkeys && webauthn());
     button.addEventListener('click', async () => {
       try {
@@ -230,6 +235,10 @@
   }
 
   async function account() {
+    const config = await configured;
+    // The account panel is passkeys and the Log out everywhere that removes
+    // them; with passkeys off there is neither, and !map logout remains.
+    const passkeys = Boolean(config && config.passkeys);
     let me;
     try {
       const res = await fetch('api/me', { cache: 'no-store' });
@@ -237,6 +246,15 @@
       me = await res.json();
     } catch { return; }
     if (me.service) return;
+    if (passkeys) await accountPanel();
+    if (!me.admin) return;
+    $('admin').hidden = false;
+    $('admin-passkey').hidden = !passkeys;
+    if (passkeys) adminSection();
+    try { showStatus(await (await fetch('api/admin/status', { cache: 'no-store' })).json()); } catch { /* the section is shown without the status */ }
+  }
+
+  async function accountPanel() {
     $('account-open').hidden = false;
     $('account-open').addEventListener('click', () => { $('account').hidden = !$('account').hidden; });
     $('account-close').addEventListener('click', () => { $('account').hidden = true; });
@@ -251,10 +269,6 @@
       }
     });
     await refreshList();
-    if (!me.admin) return;
-    $('admin').hidden = false;
-    adminSection();
-    try { showStatus(await (await fetch('api/admin/status', { cache: 'no-store' })).json()); } catch { /* the section still offers adding a passkey */ }
   }
 
   api.ready = Promise.all([loginButton(), account()]);

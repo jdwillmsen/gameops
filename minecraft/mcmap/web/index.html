@@ -148,14 +148,16 @@
         <div id="admin" class="admin" hidden>
           <h2>Admin</h2>
           <div id="admin-status"></div>
-          <label>Name for a new passkey <input id="admin-label" maxlength="32" autocomplete="off"></label>
-          <button id="admin-add" type="button">Add a passkey</button>
-          <p id="admin-step" class="note"></p>
-          <code id="admin-fingerprint"></code>
-          <input id="admin-code" maxlength="6" autocomplete="one-time-code" hidden>
-          <button id="admin-confirm" type="button" hidden>Confirm</button>
-          <button id="admin-cancel" type="button" hidden>Cancel</button>
-          <p id="admin-note" class="note" role="status"></p>
+          <div id="admin-passkey" hidden>
+            <label>Name for a new passkey <input id="admin-label" maxlength="32" autocomplete="off"></label>
+            <button id="admin-add" type="button">Add a passkey</button>
+            <p id="admin-step" class="note"></p>
+            <code id="admin-fingerprint"></code>
+            <input id="admin-code" maxlength="6" autocomplete="one-time-code" hidden>
+            <button id="admin-confirm" type="button" hidden>Confirm</button>
+            <button id="admin-cancel" type="button" hidden>Cancel</button>
+            <p id="admin-note" class="note" role="status"></p>
+          </div>
         </div>
       </div>
     </section>

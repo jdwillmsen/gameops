@@ -120,9 +120,10 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/me":                                             {"gateViewer", "/api/me"},
 	"public GET /api/admin/status":                                   {"gateAdmin", "/api/admin/status"},
 	"public GET /api/waypoints":                                      {"gatePlayer", "/api/waypoints"},
-	"public GET /api/passkeys":                                       {"gatePlayer", "/api/passkeys"},
-	"public DELETE /api/passkeys/{id}":                               {"gatePlayer", "/api/passkeys/none"},
-	"public POST /api/logout-all":                                    {"gatePlayer", "/api/logout-all"},
+	// Registered only with passkeys on, as they are in withService.
+	"public GET /api/passkeys":         {"gatePlayer", "/api/passkeys"},
+	"public DELETE /api/passkeys/{id}": {"gatePlayer", "/api/passkeys/none"},
+	"public POST /api/logout-all":      {"gatePlayer", "/api/logout-all"},
 	// The internal listener's. Its liveness route is the public one's twin.
 	"internal GET /healthz":                        {"gatePublic", ""},
 	"internal GET /metrics":                        {"gatePublic", ""},
