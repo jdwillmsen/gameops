@@ -8,6 +8,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/announce"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/audit"
+	"github.com/jdwillmsen/gameops/minecraft/agent/internal/chat"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/plugin"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/agent/internal/store"
@@ -89,6 +90,10 @@ func TestPrivateRepliesAreRedacted(t *testing.T) {
 // way the bridge's error body does.
 type quotingVoice struct{ recordingVoice }
 
+func (v *quotingVoice) Say(_ context.Context, message string) error {
+	return errors.New("bridge: POST /command: status 403: command not allowed: say " + message)
+}
+
 func (v *quotingVoice) Tell(_ context.Context, _ string, message string) error {
 	return errors.New("bridge: POST /command: status 403: command not allowed: tellraw " + message)
 }
@@ -116,5 +121,25 @@ func TestRedactedReplyNeverReachesTheLogThroughAFailedWhisper(t *testing.T) {
 	}
 	if !strings.Contains(out, "voice_tell_failed") {
 		t.Errorf("the failure itself was not logged:\n%s", out)
+	}
+}
+
+// The console is broadcast to rather than whispered to, and a console user
+// can run the same redacted commands, so that path must not leak either.
+func TestRedactedReplyNeverReachesTheLogThroughAFailedBroadcast(t *testing.T) {
+	registry := plugin.NewRegistry()
+	if err := registry.Register(replyPlugin{}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	pctx := &plugin.Context{Voice: &quotingVoice{}, Directory: registry}
+	stderr := captureStderr(t, func() {
+		handleCommand(context.Background(), chat.ServerOrigin, chat.ParseTrigger("!whereami"), false, logging.New("debug"),
+			registry, pctx, unlimitedRateLimit(), fakePermResolver(t, nil), &recordingAudit{}, roster.New())
+	})
+	if strings.Contains(stderr, "123 64 -456") {
+		t.Errorf("a failed broadcast put the redacted reply in the log:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "voice_say_failed") {
+		t.Errorf("the failure itself was not logged:\n%s", stderr)
 	}
 }
