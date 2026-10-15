@@ -34,6 +34,9 @@ func (s *Server) handleConfig(w http.ResponseWriter, _ *http.Request) {
 	if s.passkeysOn() {
 		out["passkeys"] = true
 	}
+	if s.xboxOn() {
+		out["xbox"] = true
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -100,6 +103,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
 	s.Sessions.Clear(w)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// recordKnown notes that a player typed a code in game, which is what
+// makes them someone an Xbox sign-in may let in. A failure to write it is
+// only that: the login they asked for goes ahead.
+func (s *Server) recordKnown(xuid string) {
+	if s.Known == nil {
+		return
+	}
+	if err := s.Known.Record(xuid); err != nil {
+		s.log().Error("map known player not recorded", "xuid", xuid, "error_class", "write")
+	}
 }
 
 func (s *Server) log() *slog.Logger {
@@ -267,7 +282,11 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a claim needs code and xuid", http.StatusBadRequest)
 		return
 	}
-	switch err := s.Codes.Claim(req.Code, auth.Identity{XUID: req.XUID, Gamertag: req.Gamertag}); {
+	err := s.Codes.Claim(req.Code, auth.Identity{XUID: req.XUID, Gamertag: req.Gamertag})
+	if err == nil {
+		s.recordKnown(req.XUID)
+	}
+	switch {
 	case errors.Is(err, auth.ErrUnknownCode):
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case err != nil:

@@ -129,6 +129,10 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/passkeys":         {"gatePlayer", "/api/passkeys"},
 	"public DELETE /api/passkeys/{id}": {"gatePlayer", "/api/passkeys/none"},
 	"public POST /api/logout-all":      {"gatePlayer", "/api/logout-all"},
+	// Registered only with Xbox sign-in on. Both are the way in and so
+	// are public; neither changes anything before Microsoft's answer.
+	"public GET /auth/xbox/start":    {"gatePublic", "/auth/xbox/start"},
+	"public GET /auth/xbox/callback": {"gatePublic", "/auth/xbox/callback"},
 	// The internal listener's. Its liveness route is the public one's twin.
 	"internal GET /healthz":                        {"gatePublic", ""},
 	"internal GET /metrics":                        {"gatePublic", ""},
