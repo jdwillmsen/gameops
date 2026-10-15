@@ -25,7 +25,7 @@ function env({ answers = {}, webauthn = true, signal = true, confirm = true } = 
   const { win, doc } = page(new Map(), { files: [] });
   const made = new Map();
   const plain = doc.getElementById;
-  const kind = (id) => (/-(passkey|open|logout-all|add|confirm|cancel)$/.test(id) ? 'button' : /-(label|code)$/.test(id) ? 'input' : /passkeys$/.test(id) ? 'ul' : 'div');
+  const kind = (id) => (/-(passkey|open|close|logout-all|add|confirm|cancel)$/.test(id) ? 'button' : /-(label|code)$/.test(id) ? 'input' : /passkeys$/.test(id) ? 'ul' : 'div');
   doc.getElementById = (id) => plain(id) || (made.has(id) ? made.get(id) : (made.set(id, Object.assign(doc.createElement(kind(id)), { id })), made.get(id)));
   for (const id of ['login-passkey', 'account-open', 'account', 'admin']) doc.getElementById(id).hidden = true;
   const calls = [];
@@ -239,13 +239,96 @@ test('a removal that failed is shown as failed and the passkey stays listed', as
   }
 });
 
-test('Log out everywhere that could not delete the passkeys says so and does not claim success', async () => {
+test('Log out everywhere that failed claims nothing', async () => {
   const e = env({ answers: { 'GET api/me': json(200, { gamertag: 'Steve Builds' }), 'GET api/passkeys': json(200, []), 'POST api/logout-all': json(500, {}) } });
   await e.win.mcmapPasskey.ready;
   e.el('account-logout-all').click();
   for (let i = 0; i < 5; i++) await tick();
-  assert.match(e.el('account-note').textContent, /passkeys .*not .*(removed|deleted)/i);
-  assert.match(e.el('account-note').textContent, /logged out/i);
+  assert.match(e.el('account-note').textContent, /did not finish/i);
+  assert.doesNotMatch(e.el('account-note').textContent, /you are logged out/i);
+  assert.ok(!e.calls.includes('reload'));
+});
+
+test('a passkey is listed with its label, when it was added, and when it was last used or never', async () => {
+  const e = listed({ answers: { 'GET api/passkeys': json(200, [{ id: 'k1', label: 'Phone', created: '2026-10-14T00:00:00Z' }, { id: 'k3', label: 'Key-A', created: '2026-10-01T00:00:00Z', lastUsed: '2026-10-13T08:00:00Z' }, { id: 'k2', label: 'Spare', created: '2026-10-14T00:00:00Z', pending: true }]) } });
+  await e.win.mcmapPasskey.ready;
+  const [a, b, c] = e.el('account-passkeys').children.map((li) => li.textContent);
+  assert.match(a, /Phone.*2026-10-14.*never/);
+  assert.match(b, /Key-A.*2026-10-01.*2026-10-13/);
+  assert.doesNotMatch(b, /never/);
+  assert.match(c, /Spare.*waiting/);
+});
+
+test('the Admin status shows every field of the payload', async () => {
+  const status = { build: 'abc123', go: 'go1.99', now: '2026-10-15T01:02:03Z', problem: '', quiet: true, features: { login: true, passkeys: false }, snapshotAt: '2026-10-15T00:00:00Z', renderedAt: { overworld: '2026-10-14T23:00:00Z' }, assets: { 'app.js': 'sha-1' }, operators: 'live', live: { lastFrameAgeSeconds: { overworld: 1.5 } }, sessions: { issued: 7, passkeyLogins: 3, refused: 2 } };
+  const e = env({ answers: { 'GET api/me': json(200, { admin: true }), 'GET api/passkeys': json(200, []), 'GET api/admin/status': json(200, status) } });
+  await e.win.mcmapPasskey.ready;
+  const text = e.el('admin-status').textContent;
+  for (const want of ['build', 'abc123', 'go1.99', '2026-10-15T01:02:03Z', 'problem', 'quiet', 'features', 'login', 'snapshotAt', '2026-10-15T00:00:00Z', 'renderedAt', 'overworld', 'assets', 'app.js', 'sha-1', 'operators', 'live', 'lastFrameAgeSeconds', '1.5', 'sessions', 'issued', '7', 'passkeyLogins', '3', 'refused', '2']) {
+    assert.ok(text.includes(want), want);
+  }
+});
+
+test('two confirms in flight: the passkey is added whichever answer comes first, and nothing is signalled', async () => {
+  for (const order of [[204, 404], [404, 204]]) {
+    let n = 0;
+    const gates = [];
+    const e = adding({ answers: { 'POST auth/passkey/register/confirm': () => new Promise((done) => { const status = order[n++]; gates.push(() => done(json(status, status === 404 ? { error: 'nothing_pending' } : {}))); }) } });
+    await startAdding(e);
+    e.el('admin-code').value = 'ABC234';
+    e.el('admin-confirm').dispatchEvent({ type: 'click' });
+    e.el('admin-confirm').dispatchEvent({ type: 'click' });
+    await tick();
+    assert.equal(gates.length, 2);
+    gates[0]();
+    await tick();
+    gates[1]();
+    for (let i = 0; i < 8; i++) await tick();
+    assert.match(e.el('admin-note').textContent, /added/, String(order));
+    assert.equal(e.signalled.length, 0, String(order));
+  }
+});
+
+test('buttons are disabled while a request is in flight', async () => {
+  let release;
+  const e = adding({ answers: { 'POST auth/passkey/register/confirm': () => new Promise((done) => { release = () => done(json(204, {})); }) } });
+  await startAdding(e);
+  e.el('admin-confirm').click();
+  await tick();
+  for (const id of ['admin-add', 'admin-confirm', 'admin-cancel']) assert.equal(e.el(id).disabled, true, id);
+  release();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(e.el('admin-add').disabled, false);
+});
+
+test('a wrong code with no count left says only that it is wrong', async () => {
+  const e = adding({ answers: { 'POST auth/passkey/register/confirm': json(400, { error: 'wrong_code' }) } });
+  await startAdding(e);
+  e.el('admin-code').value = 'ZZZZZZ';
+  e.el('admin-confirm').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(e.el('admin-note').textContent, 'That is not the code.');
+});
+
+test('a busy or refusing map is said to be so, not unreachable', async () => {
+  const login = env({ answers: { 'GET api/config': json(200, { passkeys: true }), 'POST auth/passkey/options': json(503, {}) } });
+  await login.win.mcmapPasskey.ready;
+  login.el('login-passkey').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.match(login.el('login-passkey-note').textContent, /busy/);
+  const e = adding({ answers: { 'POST auth/passkey/register/options': { ok: false, status: 403, json: async () => { throw new Error('not json'); } } } });
+  await startAdding(e);
+  assert.match(e.el('admin-note').textContent, /not allowed/);
+  assert.doesNotMatch(e.el('admin-note').textContent, /reached/);
+});
+
+test('the account panel opens and closes on its own', async () => {
+  const e = env({ answers: { 'GET api/me': json(200, { gamertag: 'Steve Builds' }), 'GET api/passkeys': json(200, []) } });
+  await e.win.mcmapPasskey.ready;
+  e.el('account-open').click();
+  assert.equal(e.el('account').hidden, false);
+  e.el('account-close').click();
+  assert.equal(e.el('account').hidden, true);
 });
 
 async function main() {
