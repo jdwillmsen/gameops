@@ -93,9 +93,19 @@ type Sessions struct {
 	// sessions already issued.
 	Passkeys   PasskeyChecker
 	PasskeyTTL time.Duration
+
+	// XboxOn is whether sessions had by signing in with an Xbox account are
+	// accepted, and XboxTTL how long one lasts. Off, every one already
+	// issued is refused, as with passkeys, and comes back if it is switched
+	// on again within its life.
+	XboxOn  bool
+	XboxTTL time.Duration
 }
 
-const MethodPasskey = "passkey"
+const (
+	MethodPasskey = "passkey"
+	MethodXbox    = "xbox"
+)
 
 type PasskeyChecker interface {
 	Active(key, xuid string) bool
@@ -104,6 +114,19 @@ type PasskeyChecker interface {
 // IssuePasskey logs the browser in as id by way of the passkey key names.
 func (s *Sessions) IssuePasskey(w http.ResponseWriter, id Identity, key string) time.Time {
 	return s.issue(w, s.Key, s.PasskeyTTL, claims{Identity: id, Method: MethodPasskey, Key: key})
+}
+
+// IssueXbox logs the browser in as id, who has signed in with an Xbox
+// account. It refuses an identity that Identity.check would, so that the
+// one place sessions are made does not depend on the caller having looked.
+func (s *Sessions) IssueXbox(w http.ResponseWriter, id Identity) (time.Time, error) {
+	if !s.XboxOn || s.XboxTTL <= 0 {
+		return time.Time{}, errors.New("signing in with Xbox is not switched on")
+	}
+	if err := id.check(); err != nil {
+		return time.Time{}, err
+	}
+	return s.issue(w, s.Key, s.XboxTTL, claims{Identity: id, Method: MethodXbox}), nil
 }
 
 // Session is what a handler may know of the login it was let through on.
@@ -131,7 +154,7 @@ type claims struct {
 	// it carries no XUID, and is signed with a key of its own.
 	Service bool `json:"s,omitempty"`
 	// Method is how the session was had: absent for a game code, "passkey"
-	// for a passkey. Key names that passkey, as the first 16 bytes of the
+	// for a passkey, "xbox" for an Xbox account. Key names that passkey, as the first 16 bytes of the
 	// SHA-256 of its ID, so that removing it can end its sessions.
 	Method string `json:"m,omitempty"`
 	Key    string `json:"k,omitempty"`
@@ -239,6 +262,10 @@ func (s *Sessions) verify(r *http.Request) (claims, bool) {
 		}
 	case MethodPasskey:
 		if c.Key == "" || s.Passkeys == nil || !s.Passkeys.Active(c.Key, c.XUID) {
+			return claims{}, false
+		}
+	case MethodXbox:
+		if c.Key != "" || !s.XboxOn {
 			return claims{}, false
 		}
 	default:
