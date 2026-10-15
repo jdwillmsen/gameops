@@ -1,8 +1,10 @@
 # Admin access to the production map
 
 Status: proposed 2026-10-14, revised the same day after four independent
-reviews. Nothing is built. Each decision below is numbered so that it can be
-approved or rejected on its own.
+reviews. Phase 1 is built in this PR: D1, D2, D3, D5, D7 and D8, as
+implemented. The chart rollout steps, phase 2 (Dex) and D9(b) remain
+proposed. Each decision below is numbered so that it can be approved or
+rejected on its own.
 
 ## What is wanted
 
