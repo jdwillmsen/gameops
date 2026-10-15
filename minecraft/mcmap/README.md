@@ -4195,6 +4195,24 @@ Two listeners keep the internet away from what is not for it:
 - `INTERNAL_ADDR` is for the cluster only: `/metrics`, the claims and
   revocations the agent reports, and the exchange below.
 
+## Pages about the map
+
+`/about`, `/guide`, `/privacy`, `/terms` and `/credits` are plain HTML files
+in `web/`, served on the public listener outside the login, so a visitor can
+read what the map is and what it keeps before they log in. They hold nothing
+of the world and ask for nothing of it, load only the map's own stylesheet
+and scripts, and so run under the page's security policy unchanged. Each
+carries the not-an-official-product disclaimer, links to the others and back
+to the map, and is linked from the login screen, from the menu's Link and
+help group and from the foot of the help.
+
+The owner's name and the copyright line are `Owner` and `Copyright` in
+`web/embed.go`; the pages say `{{owner}}` and `{{copyright}}` and the server
+fills them in. The texts describe what the code does, so a change to what the
+map stores, to its cookies or to the libraries it uses is a change to
+`privacy.html` or `credits.html` too. `about-pages` in the browser checks
+opens each page with no session.
+
 ## Service sessions
 
 The login above needs a player in the game, so nothing automated can ever
@@ -4428,6 +4446,7 @@ counted apart and is not a failure.
 | Check | What it measures | Needs |
 |---|---|---|
 | `login-screen` | With no session the map answers 401 through the public path, the page shows the login and the code to type, and draws no tile | |
+| `about-pages` | With no session each page about the map opens, carries the disclaimer and links to the others and back to the map, fits a phone, asks for nothing of the world, and the login screen links to them | |
 | `exchange` | The secret is exchanged for a session | |
 | `map-loads` | The page loads with the session and shows a dimension | |
 | `session` | `/api/me` and the page both say `service:e2e`; the cookie in the browser is host-only, `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, and script cannot read it | |

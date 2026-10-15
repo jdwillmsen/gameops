@@ -51,6 +51,55 @@ export async function loginScreen({ browser, cfg, watch, closers = [] }) {
   }
 }
 
+const ABOUT_PAGES = ['about', 'guide', 'privacy', 'terms', 'credits'];
+const DISCLAIMER = 'NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.';
+
+// The pages about the map open for a browser with no session, say what the
+// game's publisher asks of them, link to each other and to the map, and ask
+// the server for nothing of the world. The login screen links to them.
+export async function aboutPages({ browser, cfg, watch, closers = [] }) {
+  const ctx = await openContext(browser, { cfg, watch, viewport: { width: 390, height: 780 }, touch: true, dpr: 2, expected: [['/api/map', 401], ['/api/me', 401]] });
+  closers.push(() => ctx.close());
+  try {
+    const page = await ctx.newPage();
+    const asked = [];
+    page.on('request', (req) => asked.push(new URL(req.url()).pathname));
+    for (const name of ABOUT_PAGES) {
+      let res;
+      try {
+        res = await page.goto(`${cfg.publicUrl}/${name}`, { waitUntil: 'load' });
+      } catch {
+        throw new Fail('the map could not be reached');
+      }
+      if (!res || res.status() !== 200) throw new Fail('a page about the map did not open with no session', { status: res ? res.status() : 0 });
+      const found = await page.evaluate((links) => ({
+        disclaimer: [...document.querySelectorAll('footer .legal')].map((p) => p.textContent.trim()),
+        links: links.every((n) => document.querySelectorAll(`footer a[href="${n}"]`).length === 1),
+        back: document.querySelectorAll('a[href="./"]').length > 0,
+        wide: document.documentElement.scrollWidth > window.innerWidth,
+      }), ABOUT_PAGES);
+      if (!found.disclaimer.includes(DISCLAIMER) || !found.links || !found.back) throw new Fail('a page about the map is missing its disclaimer or its links');
+      if (found.wide) throw new Fail('a page about the map is wider than a phone');
+    }
+    if (asked.some((path) => path.startsWith('/api/') || path.startsWith('/tiles/'))) throw new Fail('a page about the map fetched something from the world');
+    const { listed, linked } = await openLogin(ctx, cfg);
+    if (!ABOUT_PAGES.every((n) => linked.includes(n))) throw new Fail('a page about the map is missing its disclaimer or its links', { listed });
+    return {};
+  } finally {
+    await ctx.close();
+  }
+}
+
+// The login screen as a browser with no session meets it.
+async function openLogin(ctx, cfg) {
+  const page = await ctx.newPage();
+  await page.route('**/auth/**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(route.request().url().endsWith('start') ? { code: STUB_CODE, expiresIn: 600 } : { state: 'pending' }) }));
+  await page.goto(`${cfg.publicUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => !document.getElementById('login').hidden, null, { timeout: 10_000 });
+  const linked = await page.evaluate(() => [...document.querySelectorAll('#login .site-links a')].map((a) => a.getAttribute('href')));
+  return { listed: linked.length, linked };
+}
+
 // The service session reaches the map, says what it is, and its cookie is
 // in the browser as a player's would be.
 export async function session({ page, ctx, cfg }) {
