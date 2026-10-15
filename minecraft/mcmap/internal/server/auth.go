@@ -83,6 +83,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"state": "pending"})
 	case auth.Claimed:
 		s.Sessions.Issue(w, id)
+		issuedSessions.Add(1)
+		if s.Passkeys != nil {
+			s.Passkeys.RefreshGamertag(id.XUID, id.Gamertag)
+		}
 		// Sessions are not stored, so this line is the only record of
 		// who was let in and when.
 		s.log().Info("map login issued", "xuid", id.XUID, "gamertag", id.Gamertag)
@@ -280,11 +284,9 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "a revocation needs the player's xuid", http.StatusBadRequest)
 		return
 	}
-	if err := s.Sessions.Revoked.Revoke(req.XUID, s.Sessions.Now()); err != nil {
-		s.log().Error("map logins not revoked", "xuid", req.XUID, "error", err.Error())
+	if err := s.revokeEverywhere(req.XUID); err != nil {
 		http.Error(w, "could not record the revocation", http.StatusInternalServerError)
 		return
 	}
-	s.log().Info("map logins revoked", "xuid", req.XUID)
 	w.WriteHeader(http.StatusNoContent)
 }

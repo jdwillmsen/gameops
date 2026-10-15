@@ -232,3 +232,63 @@ func (s *Server) handlePasskeyCode(w http.ResponseWriter, r *http.Request) {
 	s.log().Info("map passkey code issued", "xuid", req.XUID, "credential", auth.LogName(id))
 	writeJSON(w, http.StatusOK, map[string]any{"code": code, "expiresIn": int(auth.PendingFor.Seconds()), "fingerprint": auth.Fingerprint(id)})
 }
+
+func (s *Server) handleListPasskeys(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	list := s.Passkeys.List(id.XUID)
+	if list == nil {
+		list = []auth.Listed{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) handleRemovePasskey(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	k, err := s.Passkeys.Remove(id.XUID, r.PathValue("id"))
+	if errors.Is(err, auth.ErrUnknownKey) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		s.log().Error("map passkey not removed", "xuid", id.XUID, "error_class", "write")
+		http.Error(w, "could not remove the passkey", http.StatusInternalServerError)
+		return
+	}
+	s.metricSet().removed.WithLabelValues("player").Inc()
+	s.log().Info("map passkey removed", "xuid", id.XUID, "credential", auth.LogName(k.ID), "why", "player")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
+	id, _ := auth.FromContext(r.Context())
+	if err := s.revokeEverywhere(id.XUID); err != nil {
+		http.Error(w, "could not record the revocation", http.StatusInternalServerError)
+		return
+	}
+	s.Sessions.Clear(w)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// revokeEverywhere is what !map logout and Log out everywhere both do: end
+// every session the player was issued, and delete every passkey they hold,
+// so that the way out of a stolen login is also the way out of a passkey
+// someone else added.
+func (s *Server) revokeEverywhere(xuid string) error {
+	if err := s.Sessions.Revoked.Revoke(xuid, s.Sessions.Now()); err != nil {
+		s.log().Error("map logins not revoked", "xuid", xuid, "error", err.Error())
+		return err
+	}
+	s.log().Info("map logins revoked", "xuid", xuid)
+	if s.Passkeys != nil {
+		gone, err := s.Passkeys.RemoveAll(xuid)
+		if err != nil {
+			s.log().Error("map passkeys not removed", "xuid", xuid, "error_class", "write")
+			return err
+		}
+		for _, k := range gone {
+			s.metricSet().removed.WithLabelValues("revoked").Inc()
+			s.log().Info("map passkey removed", "xuid", xuid, "credential", auth.LogName(k.ID), "why", "revoked")
+		}
+	}
+	return nil
+}

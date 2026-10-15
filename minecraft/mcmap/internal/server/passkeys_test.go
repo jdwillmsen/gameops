@@ -287,3 +287,121 @@ func TestPasskeyLogin_AFailedStoreWriteIssuesNoSession(t *testing.T) {
 		t.Errorf("a login whose count could not be stored = %d, session cookie %v", rec.Code, cookie(rec, "__Host-mcmap_session"))
 	}
 }
+
+func TestPasskeys_APlayerListsAndRemovesTheirOwnOnly(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	d := newDevice(t)
+	addPasskey(t, s, session(s, steve), d)
+	login := cookie(passkeyLogin(t, s, d), "__Host-mcmap_session")
+	h := s.Handler()
+
+	if rec := do(h, "GET", "/api/passkeys", "", []*http.Cookie{session(s, alex)}); strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Errorf("another player's list = %s", rec.Body)
+	}
+	key := auth.KeyOf(d.id)
+	if rec := do(h, "DELETE", "/api/passkeys/"+key, "", []*http.Cookie{session(s, alex)}); rec.Code != http.StatusNotFound {
+		t.Errorf("another player removing it = %d", rec.Code)
+	}
+	if rec := do(h, "GET", "/api/passkeys", "", []*http.Cookie{session(s, steve)}); !strings.Contains(rec.Body.String(), key) || !strings.Contains(rec.Body.String(), "Phone") {
+		t.Errorf("own list = %s", rec.Body)
+	}
+	// Removing it ends the session made with it, on the next request.
+	if rec := do(h, "DELETE", "/api/passkeys/"+key, "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusNoContent {
+		t.Fatalf("remove = %d", rec.Code)
+	}
+	if rec := do(h, "GET", "/api/me", "", []*http.Cookie{login}); rec.Code != http.StatusUnauthorized {
+		t.Errorf("the removed passkey's session = %d", rec.Code)
+	}
+}
+
+// !map logout and Log out everywhere end sessions and delete passkeys.
+func TestRevocation_DeletesThatPlayersPasskeys(t *testing.T) {
+	for _, via := range []string{"agent", "page"} {
+		t.Run(via, func(t *testing.T) {
+			s := withAdmin(t, fakeOperators{steve.XUID: true})
+			withPasskeys(t, s)
+			d := newDevice(t)
+			addPasskey(t, s, session(s, steve), d)
+			switch via {
+			case "agent":
+				rec := do(s.InternalHandler(), "POST", "/internal/v1/revocations", `{"xuid":"`+steve.XUID+`"}`, nil, "Authorization", "Bearer "+internalToken)
+				if rec.Code != http.StatusNoContent {
+					t.Fatalf("revoke = %d", rec.Code)
+				}
+			case "page":
+				rec := do(s.Handler(), "POST", "/api/logout-all", "", []*http.Cookie{session(s, steve)})
+				if rec.Code != http.StatusNoContent {
+					t.Fatalf("logout-all = %d", rec.Code)
+				}
+			}
+			if _, active := s.Passkeys.Counts(); active != 0 {
+				t.Errorf("%d passkeys left after revocation", active)
+			}
+			if rec := passkeyLogin(t, s, d); rec.Code != http.StatusUnauthorized {
+				t.Errorf("logging in with a revoked passkey = %d", rec.Code)
+			}
+		})
+	}
+}
+
+// A store that cannot write must never be reported as having removed.
+func TestPasskeys_AFailedWriteIsNeverReportedAsRemoved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through a read-only directory")
+	}
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	_, _, path := withPasskeys(t, s)
+	d := newDevice(t)
+	addPasskey(t, s, session(s, steve), d)
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	h := s.Handler()
+	if rec := do(h, "DELETE", "/api/passkeys/"+auth.KeyOf(d.id), "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusInternalServerError {
+		t.Errorf("remove with an unwritable store = %d", rec.Code)
+	}
+	if rec := do(h, "POST", "/api/logout-all", "", []*http.Cookie{session(s, steve)}); rec.Code != http.StatusInternalServerError {
+		t.Errorf("logout-all with an unwritable store = %d", rec.Code)
+	}
+	if _, active := s.Passkeys.Counts(); active != 1 {
+		t.Errorf("%d passkeys after failed removals, want 1", active)
+	}
+}
+
+// A game login refreshes the gamertag a passkey session will carry.
+func TestPasskeys_AGameLoginRefreshesTheGamertag(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	withPasskeys(t, s)
+	d := newDevice(t)
+	addPasskey(t, s, session(s, steve), d)
+	public, internal := s.Handler(), s.InternalHandler()
+	start := do(public, "POST", "/auth/start", "", nil)
+	var started struct{ Code string }
+	_ = json.Unmarshal(start.Body.Bytes(), &started)
+	_ = do(internal, "POST", "/internal/v1/claims", `{"code":"`+started.Code+`","xuid":"`+steve.XUID+`","gamertag":"Steve Renamed"}`, nil, "Authorization", "Bearer "+internalToken)
+	_ = do(public, "GET", "/auth/status", "", []*http.Cookie{cookie(start, "__Host-mcmap_pending")})
+	rec := passkeyLogin(t, s, d)
+	if !strings.Contains(rec.Body.String(), "Steve Renamed") {
+		t.Errorf("passkey login after a rename = %s", rec.Body)
+	}
+}
+
+// The gauge the alert backstop reads comes back from disk at start.
+func TestPasskeys_TheGaugeIsReadBackAtStart(t *testing.T) {
+	s := withAdmin(t, fakeOperators{steve.XUID: true})
+	_, _, path := withPasskeys(t, s)
+	addPasskey(t, s, session(s, steve), newDevice(t))
+	CountPasskeys(0, 0)
+	again, err := auth.LoadPasskeys(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	StartPasskeyMetrics(again)
+	if got := testutil.ToFloat64(metricPasskeys.WithLabelValues("active")); got != 1 {
+		t.Errorf("active gauge after a restart = %v, want 1", got)
+	}
+}
