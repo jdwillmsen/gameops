@@ -5,9 +5,57 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/heights"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/layers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/topo"
 )
+
+// FloorSource is the Nether's floors under each of its levels, as of the
+// last reading, nil before the first.
+type FloorSource interface {
+	Floors() *layers.Floors
+}
+
+// surfaceOf is the heights a dimension's topography is drawn from: its own
+// heightmap, or for the Nether the floors under a cut, since its own is the
+// roof of bedrock. cut is the Nether's level asked for, "" for the default
+// one, and is refused where it is none of the levels configured.
+func (s *Server) surfaceOf(d chunks.Dimension, cut string) (*heights.Map, bool) {
+	if d != chunks.Nether {
+		if s.Biomes == nil {
+			return nil, true
+		}
+		return s.Biomes.World().Heights(), true
+	}
+	y, ok := s.netherCutOf(cut)
+	if !ok || s.Floors == nil {
+		return nil, false
+	}
+	return s.Floors.Floors().Level(y), true
+}
+
+// netherCutOf is the height of the Nether's level a request names: none
+// for the default one, an id for a configured one. A request names no
+// other, and the number that reaches the maps is the configured one.
+func (s *Server) netherCutOf(id string) (int, bool) {
+	if id == "" || id == defaultLevelID {
+		return s.NetherTop, true
+	}
+	if l, ok := s.level(id); ok {
+		return l.TopY, true
+	}
+	return 0, false
+}
+
+// topographyOffered says a dimension has land to draw: the overworld and
+// the End from their heightmaps, and the Nether where its floors are read.
+func (s *Server) topographyOffered(d chunks.Dimension) bool {
+	if d == chunks.Nether {
+		return s.Floors != nil
+	}
+	return topo.Offered(d) && s.Biomes != nil
+}
 
 // topographyVersion names a reading of the heights. A tile asked for with
 // it as v may be kept by the browser for good: a new reading is a new
@@ -52,14 +100,19 @@ func (s *Server) handleTopography(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown dimension", http.StatusBadRequest)
 		return
 	}
-	out := topographyJSON{Offered: topo.Offered(d), HeavyEvery: topo.HeavyEvery, Bands: []topo.Band{}, Intervals: []int{}}
+	out := topographyJSON{Offered: s.topographyOffered(d), HeavyEvery: topo.HeavyEvery, Bands: []topo.Band{}, Intervals: []int{}}
 	out.Tiles.MinZoom, out.Tiles.MaxZoom, out.Tiles.Size = topo.MinZoom, topo.MaxZoom, topo.TileSize
 	if out.Offered {
 		out.Bands = topo.Bands(d)
 		for zoom := 0; zoom >= topo.MinZoom; zoom-- {
 			out.Intervals = append(out.Intervals, topo.Interval(zoom))
 		}
-		if h := s.Biomes.World().Heights(); h != nil {
+		h, known := s.surfaceOf(d, r.URL.Query().Get("level"))
+		if !known {
+			http.Error(w, "unknown level", http.StatusBadRequest)
+			return
+		}
+		if h != nil {
 			out.Ready, out.Version = true, topographyVersion(h)
 		}
 	}
@@ -110,7 +163,7 @@ func topographyPick(q map[string][]string, bands int) (pick topo.Pick, tag strin
 // memory, which is less than reading one from the volume would save.
 func (s *Server) handleTopographyTile(w http.ResponseWriter, r *http.Request) {
 	d, ok := dimensionNamed(r.PathValue("dimension"))
-	if !ok || !topo.Offered(d) {
+	if !ok || !s.topographyOffered(d) {
 		http.NotFound(w, r)
 		return
 	}
@@ -131,7 +184,12 @@ func (s *Server) handleTopographyTile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h := w.Header()
-	surface := s.Biomes.World().Heights()
+	level := r.URL.Query().Get("level")
+	surface, known := s.surfaceOf(d, level)
+	if !known {
+		http.Error(w, "unknown level", http.StatusBadRequest)
+		return
+	}
 	if surface == nil {
 		h.Set("Cache-Control", "private, max-age=60")
 		http.NotFound(w, r)
@@ -139,6 +197,10 @@ func (s *Server) handleTopographyTile(w http.ResponseWriter, r *http.Request) {
 	}
 	version := topographyVersion(surface)
 	etag := `"` + version + "-" + picked + `"`
+	// Each of the Nether's levels is drawn from floors of its own.
+	if d == chunks.Nether {
+		etag = `"` + version + "-" + picked + "-" + level + `"`
+	}
 	// Private, because a tile is only for the logged-in browser that asked.
 	if r.URL.Query().Get("v") == version {
 		h.Set("Cache-Control", "private, max-age=31536000, immutable")
@@ -150,7 +212,11 @@ func (s *Server) handleTopographyTile(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	data, ok := topo.Tile(surface, d, zoom, x, y, pick)
+	draw := topo.Tile
+	if d == chunks.Nether {
+		draw = topo.FloorTile
+	}
+	data, ok := draw(surface, d, zoom, x, y, pick)
 	if !ok {
 		// Most of a sparse world's grid has no tile; that is not an error.
 		// It may have one after the next reading, so this is not kept long.

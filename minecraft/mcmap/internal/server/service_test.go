@@ -44,6 +44,7 @@ func withService(t *testing.T) (*Server, *fakeWaypoints, *bytes.Buffer) {
 	store.Set(biomeWorld())
 	s.Biomes = store
 	s.Structures = detailed()
+	s.Layers = &fakeLayers{version: "v1"}
 	trailed, _ := withTrails(t)
 	s.Trails = trailed.Trails
 	s.Players = &players.Store{}
@@ -114,6 +115,10 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}":     {"gateViewer", "/api/biomes/tiles/overworld/0/0/0.png"},
 	"public GET /api/topography":                                  {"gateViewer", "/api/topography?dimension=overworld"},
 	"public GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}": {"gateViewer", "/api/topography/tiles/overworld/0/0/0.png?styles=tint"},
+	"public GET /api/layers":                                      {"gateViewer", "/api/layers?dimension=overworld"},
+	"public GET /api/layers/tiles/{dimension}/{zoom}/{x}/{y}":     {"gateViewer", "/api/layers/tiles/overworld/0/0/0.png?level=0&style=floor"},
+	"public GET /api/lost":                                        {"gateViewer", ""},
+	"public GET /api/lost/tiles/{dimension}/{zoom}/{x}/{y}":       {"gateViewer", ""},
 	"public GET /api/trails":                                      {"gateViewer", "/api/trails?dimension=overworld"},
 	// The map as it was on each day, which is every player's to look at.
 	"public GET /api/history": {"gateViewer", ""},

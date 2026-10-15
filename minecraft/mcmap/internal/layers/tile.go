@@ -15,11 +15,12 @@ const (
 	// TileSize is a tile's width and height in pixels, as every other
 	// tile's is.
 	TileSize = 256
-	// MinZoom is the widest tile drawn. A tile there is 1,024 blocks across
-	// and reads 4,096 chunks; wider ones are left to the surface map, as
-	// reading a world's depths for them is not a cost worth paying on
-	// request.
-	MinZoom = -2
+	// MinZoom is the widest tile drawn: 512 blocks across, which reads
+	// 1,089 chunks and takes about a sixth of a second. One more zoom out
+	// reads four times as many and is nearly two seconds of the one CPU
+	// the service has, which is not a cost to pay on a viewer's request;
+	// there the page shows the terrain.
+	MinZoom = -1
 	// MaxZoom is the finest: a block to a pixel, which the page enlarges.
 	MaxZoom = 0
 )

@@ -51,6 +51,19 @@ type Floors struct {
 	maps         map[int]*heights.Map
 }
 
+// NewFloors holds floor maps already built, by the height of the cut each is
+// under, as one reading of a snapshot taken at at.
+func NewFloors(at time.Time, censusChunks int, byCut map[int]*heights.Map) *Floors {
+	out := &Floors{SnapshotAt: at, CensusChunks: censusChunks, maps: map[int]*heights.Map{}}
+	for cut, m := range byCut {
+		out.levels = append(out.levels, cut)
+		out.maps[cut] = m
+	}
+	slices.Sort(out.levels)
+	slices.Reverse(out.levels)
+	return out
+}
+
 // Levels are the cuts the floors were read for, highest first.
 func (f *Floors) Levels() []int {
 	if f == nil {
