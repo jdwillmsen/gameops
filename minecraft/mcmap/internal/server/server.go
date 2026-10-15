@@ -18,6 +18,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/schedule"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
 )
@@ -47,6 +48,16 @@ type Server struct {
 	// Service judges the secret an automated check exchanges for a session
 	// of its own. Nil, there is no such exchange.
 	Service *auth.Exchange
+	// Admin is whether the game's operators are the map's admins, and
+	// Operators the list that says who they are. Either off, there are none.
+	Admin     bool
+	Operators OperatorList
+	// Passkeys and Ceremonies are the passkey login. Nil, there is none.
+	Passkeys   *auth.Passkeys
+	Ceremonies *auth.Ceremonies
+	// Quiet is the map's quiet windows, for the status to say whether it is
+	// in one.
+	Quiet schedule.Quiet
 	// Chunks is the world's chunk census, which the agent reads to warn
 	// players while chunks are missing. Nil leaves those routes out.
 	Chunks ChunkCensus
@@ -99,6 +110,8 @@ type Server struct {
 
 	// limitedLog spaces out the log lines of exchanges refused unjudged.
 	limitedLog sparse
+	// adminMetrics, set only by tests, is where the admin series are declared.
+	adminMetrics *adminMetricSet
 
 	// assetsOnce and assetPrints are the fingerprints of the page's files.
 	assetsOnce  sync.Once
@@ -174,6 +187,10 @@ const (
 	// gateExchange is the checks' exchange, which judges the secret it is
 	// presented with itself.
 	gateExchange
+	// gateAdmin is a player's session whose XUID the game's operator list
+	// holds, read when the request arrives. A service session has no XUID
+	// and is refused before the list is read.
+	gateAdmin
 )
 
 func (s *Server) route(mux *http.ServeMux, behind gate, pattern string, h http.HandlerFunc) {
@@ -190,6 +207,11 @@ func (s *Server) route(mux *http.ServeMux, behind gate, pattern string, h http.H
 		}
 	case gateAgent:
 		handler = s.agentOnly(h)
+	case gateAdmin:
+		if s.Sessions != nil {
+			handler = s.Sessions.Require(s.requireAdmin(pattern, h))
+		}
+		s.metricSet().declareRoute(pattern)
 	default:
 		panic("route " + pattern + " was given no gate")
 	}
@@ -223,6 +245,9 @@ func (f filesOnly) Open(name string) (fs.File, error) {
 // change anything, is gatePlayer.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if s.adminOn() {
+		s.metricSet().declare()
+	}
 	s.route(mux, gatePublic, "GET /healthz", healthy)
 	s.route(mux, gatePublic, "GET /api/config", s.handleConfig)
 	s.route(mux, gateViewer, "GET /api/map", s.handleMap)
