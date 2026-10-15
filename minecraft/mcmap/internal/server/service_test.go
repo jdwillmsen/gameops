@@ -25,6 +25,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 )
 
 // Made up, like every credential in these tests.
@@ -45,6 +46,7 @@ func withService(t *testing.T) (*Server, *fakeWaypoints, *bytes.Buffer) {
 	s.Structures = detailed()
 	trailed, _ := withTrails(t)
 	s.Trails = trailed.Trails
+	s.Players = &players.Store{}
 
 	s.Sessions.ServiceKey = auth.ServiceKey(s.Sessions.Key, serviceSecret)
 	s.Sessions.ServiceTTL = 10 * time.Minute
@@ -105,6 +107,7 @@ var routes = map[string]struct{ gate, path string }{
 	"public GET /api/history/tiles/{day}/{dimension}/{zoom}/{x}/{y}": {"gateViewer", ""},
 	"public GET /api/history/markers/{day}":                          {"gateViewer", ""},
 	"public GET /api/history/changes/{day}":                          {"gateViewer", ""},
+	"public GET /api/players/{id}":                                   {"gateViewer", "/api/players/42"},
 	"public GET /api/search":                                         {"gateViewer", "/api/search?dimension=overworld&x=0&z=0&q=a"},
 	"public GET /api/me":                                             {"gateViewer", "/api/me"},
 	"public GET /api/waypoints":                                      {"gatePlayer", "/api/waypoints"},

@@ -90,6 +90,9 @@ type Server struct {
 	Biomes BiomeSource
 	// Trails is where players have recently been. Nil leaves the route out.
 	Trails TrailSource
+	// Players is the player records of the last snapshot. Nil leaves the
+	// route out.
+	Players PlayerSource
 	// History is the map as it was on each day kept. Nil leaves its routes
 	// out.
 	History HistorySource
@@ -262,6 +265,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Trails != nil {
 		s.route(mux, gateViewer, "GET /api/trails", s.handleTrails)
+	}
+	if s.Players != nil {
+		s.route(mux, gateViewer, "GET /api/players/{id}", s.handlePlayer)
 	}
 	if s.History != nil {
 		s.route(mux, gateViewer, "GET /api/history", s.handleHistory)
