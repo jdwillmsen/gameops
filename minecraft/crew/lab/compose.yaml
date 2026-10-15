@@ -1,0 +1,29 @@
+# The crew lab: a throwaway Bedrock world where crew and cameras may use
+# cheats. Never point anything here at FWB, and never point crew at FWB.
+name: crew-lab
+
+services:
+  lab:
+    # Same tag and VERSION policy as FWB, so a protocol bump that breaks crew
+    # here is the one that would break it there.
+    image: itzg/minecraft-bedrock-server:2026.9.2
+    environment:
+      EULA: "TRUE"
+      VERSION: "LATEST"
+      SERVER_NAME: "crew-lab"
+      LEVEL_NAME: "crew-lab"
+      GAMEMODE: "survival"
+      DIFFICULTY: "normal"
+      ALLOW_CHEATS: "true"
+      ONLINE_MODE: "true"
+      # Ops are granted from the console with `send-command op <gamertag>`,
+      # so no gamertag needs to be committed here.
+    ports:
+      - "19132:19132/udp"
+    volumes:
+      - lab-world:/data
+    stdin_open: true
+    tty: true
+
+volumes:
+  lab-world:

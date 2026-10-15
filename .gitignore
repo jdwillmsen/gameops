@@ -10,3 +10,4 @@ node_modules
 /minecraft/mcmap/mcmap
 /bridge
 /mcmap
+minecraft/crew/lab/.env
