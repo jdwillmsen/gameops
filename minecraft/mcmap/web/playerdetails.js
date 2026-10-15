@@ -43,6 +43,11 @@
   let said = null;
   // The last answer, drawn again when the names change.
   let last = null;
+  // The picture of it that was drawn, so that an answer that has not
+  // changed does not rebuild what the viewer is holding focus in.
+  let drawn = '';
+  // The slot whose details are being read, as its grid and place in it.
+  let pickedPos = '';
 
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
   const one = (n) => (Math.round(n * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 });
@@ -157,9 +162,10 @@
   }
 
   // One stack in a box: its picture or its initials, how many, and how worn.
-  function slot(item, onPick) {
+  function slot(item, pos, onPick) {
     const box = el('button', 'slot');
     box.type = 'button';
+    box.dataset.pos = pos;
     if (!item) {
       box.className = 'slot empty';
       box.disabled = true;
@@ -182,7 +188,7 @@
       bar.append(fill);
       box.append(bar);
     }
-    box.addEventListener('click', () => onPick(sentence));
+    box.addEventListener('click', () => onPick(sentence, pos));
     return box;
   }
 
@@ -192,13 +198,22 @@
     const by = new Map(stacks.map((s) => [s.slot, s]));
     const line = el('p', 'note slot-said', 'Choose an item for its details.');
     line.setAttribute('role', 'status');
-    const pick = (sentence) => { line.textContent = sentence; };
+    const pick = (sentence, pos) => {
+      pickedPos = pos;
+      line.textContent = sentence;
+    };
     const wrap = el('div', 'grids');
     for (const [from, to, name] of ranges) {
       const out = el('div', 'grid');
       out.setAttribute('role', 'group');
       out.setAttribute('aria-label', name ? `${label}, ${name}` : label);
-      for (let i = from; i < to; i++) out.append(slot(by.get(i), pick));
+      for (let i = from; i < to; i++) {
+        const pos = `${label}|${i}`;
+        const cell = slot(by.get(i), pos, pick);
+        out.append(cell);
+        // The item being read is read again from the new answer.
+        if (pos === pickedPos && by.has(i)) line.textContent = cell.title;
+      }
       wrap.append(out);
     }
     wrap.append(line);
@@ -353,10 +368,33 @@
     said = content === '' ? null : setTimeout(() => note(''), 4000);
   }
 
-  function show(data) {
+  // What in the body has focus, named by where it is so that it can be
+  // found again after the body is drawn anew.
+  function focused() {
+    const at = document.activeElement;
+    if (!at || !view.body.contains(at)) return null;
+    if (at.dataset && at.dataset.pos) return `pos:${at.dataset.pos}`;
+    return `button:${view.body.querySelectorAll('button').indexOf(at)}`;
+  }
+
+  function refocus(was) {
+    if (was === null) return;
+    const buttons = view.body.querySelectorAll('button');
+    const found = was.startsWith('pos:') ? buttons.find((b) => b.dataset.pos === was.slice(4) && !b.disabled) : buttons[Number(was.slice(7))];
+    // What had focus has gone, so focus stays in the panel, where Escape
+    // still shuts it.
+    (found || view.close).focus();
+  }
+
+  function show(data, force) {
     last = data;
+    const now = JSON.stringify(data);
+    if (!force && now === drawn) return;
+    drawn = now;
+    const was = focused();
     view.body.replaceChildren(...savedParts(data.saved), ...trailParts(data.trails));
     icons.paint(view.body);
+    refocus(was);
     const own = text(data.name);
     if (own && subject && !subject.name) view.name.textContent = own;
   }
@@ -388,6 +426,8 @@
     if (!who || typeof who.id !== 'string' || !/^-?\d{1,20}$/.test(who.id)) return false;
     subject = { id: who.id, name: text(who.name) };
     last = null;
+    drawn = '';
+    pickedPos = '';
     clearInterval(timer);
     view.name.textContent = subject.name || 'Player';
     view.sub.textContent = 'Everything the world save and the trails know of this player';
@@ -430,7 +470,7 @@
   });
   // The names were written with the table there was then.
   document.addEventListener('mcmap:names', () => {
-    if (view.dialog.open && last) show(last);
+    if (view.dialog.open && last) show(last, true);
   });
 
   app.playerDetails = { open, shut, isOpen: () => view.dialog.open === true };
