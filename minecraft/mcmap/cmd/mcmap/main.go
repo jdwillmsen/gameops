@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/allowlist"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
@@ -34,6 +35,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/trails"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/web"
 )
 
@@ -315,6 +317,25 @@ func run(logger *slog.Logger) error {
 			// is refused rather than checked against a store.
 			app.Sessions.Passkeys, app.Sessions.PasskeyTTL = keys, 12*time.Hour
 		}
+		// Kept whether or not Xbox sign-in is on, so that turning it on
+		// finds the players who have typed a code since this was shipped.
+		known, err := auth.LoadKnown(filepath.Join(cfg.DataDir, "auth", "known.json"), time.Now)
+		if err != nil {
+			return err
+		}
+		app.Known = known
+		if cfg.XboxLogin {
+			flow, err := auth.NewXboxFlow(key, time.Now)
+			if err != nil {
+				return err
+			}
+			app.XboxFlow = flow
+			app.XboxClient = xbox.New(xbox.Config{ClientID: cfg.XboxClientID, ClientSecret: cfg.XboxClientSecret, RedirectURI: cfg.PublicOrigin + "/auth/xbox/callback"})
+			app.Sessions.XboxOn, app.Sessions.XboxTTL = true, auth.XboxSessionTTL
+			if cfg.XboxAllowlist {
+				app.Allowlist = allowlist.New(allowlist.NewBridge(cfg.BridgeURL, cfg.BridgeToken), time.Now)
+			}
+		}
 	} else {
 		logger.Warn("running with no login: anyone who can reach this port sees the whole map")
 		// config has already turned both off, so what was asked for is read
@@ -323,6 +344,9 @@ func run(logger *slog.Logger) error {
 		passkeys, _ := strconv.ParseBool(os.Getenv("PASSKEYS_ENABLED"))
 		if admin || passkeys {
 			logger.Warn("admin and passkeys asked for with no login: there is no player to be an admin")
+		}
+		if xboxAsked, _ := strconv.ParseBool(os.Getenv("XBOX_LOGIN_ENABLED")); xboxAsked {
+			logger.Warn("Xbox sign-in asked for with no login: there is no session to issue")
 		}
 	}
 
@@ -350,7 +374,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "history", cfg.History, "service_sessions", cfg.ServiceSecret != "", "admin", cfg.Admin, "passkeys", cfg.Passkeys)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "history", cfg.History, "service_sessions", cfg.ServiceSecret != "", "admin", cfg.Admin, "passkeys", cfg.Passkeys, "xbox", cfg.XboxLogin, "xbox_allowlist", cfg.XboxLogin && cfg.XboxAllowlist)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()

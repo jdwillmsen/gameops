@@ -17,6 +17,11 @@ import (
 // the browser leaving for Microsoft and coming back.
 const XboxStateCookie = cookiePrefix + "mcmap_xbox"
 
+// XboxSessionTTL is a day. A code login proves someone is in the game now
+// and lasts a week; an Xbox sign-in proves who owns an account and costs
+// one click to repeat.
+const XboxSessionTTL = 24 * time.Hour
+
 // XboxStateTTL is long enough for a password and a second factor.
 const XboxStateTTL = 10 * time.Minute
 

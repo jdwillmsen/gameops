@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -93,6 +94,15 @@ type Config struct {
 	PublicOrigin string
 	PasskeyRPID  string
 
+	// XboxLogin is whether known players may sign in with an Xbox account.
+	// It needs PublicOrigin, which the redirect URI is made from, and the
+	// registered app's client ID and secret. XboxAllowlist also lets in the
+	// players the game server's allowlist names.
+	XboxLogin        bool
+	XboxClientID     string
+	XboxClientSecret string
+	XboxAllowlist    bool
+
 	// Live is whether players and mobs are drawn on the map as they move.
 	// Off, nothing asks the bridge for them and the page is not offered a
 	// stream.
@@ -176,6 +186,34 @@ const (
 	maxTrailPoints = 50_000
 )
 
+var guid = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// minXboxSecret is well under a generated client secret's length, so it
+// refuses only a placeholder or a value cut short.
+const minXboxSecret = 16
+
+// xboxSecret reads the client secret from the file a mounted Secret makes,
+// or from the environment for a local run, and not from both. Messages name
+// the variable and never the value.
+func xboxSecret(getenv func(string) string) (string, error) {
+	path, direct := getenv("XBOX_CLIENT_SECRET_FILE"), getenv("XBOX_CLIENT_SECRET")
+	if path != "" && direct != "" {
+		return "", errors.New("set XBOX_CLIENT_SECRET_FILE or XBOX_CLIENT_SECRET, not both")
+	}
+	secret := direct
+	if path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("XBOX_CLIENT_SECRET_FILE: %w", err)
+		}
+		secret = strings.TrimRight(string(raw), "\r\n")
+	}
+	if len(secret) < minXboxSecret || strings.ContainsAny(secret, " \t\r\n") {
+		return "", fmt.Errorf("the Xbox client secret (XBOX_CLIENT_SECRET_FILE or XBOX_CLIENT_SECRET) must be the app's secret value: at least %d characters, no whitespace", minXboxSecret)
+	}
+	return secret, nil
+}
+
 func Load(getenv func(string) string) (Config, error) {
 	c := Config{
 		HTTPAddr:      or(getenv("HTTP_ADDR"), ":8080"),
@@ -247,14 +285,33 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.Passkeys, err = strconv.ParseBool(or(getenv("PASSKEYS_ENABLED"), "false")); err != nil {
 		fail("PASSKEYS_ENABLED must be true or false")
 	}
-	if c.Passkeys && c.Login {
-		if !c.Admin {
-			fail("PASSKEYS_ENABLED needs ADMIN_ENABLED: only an admin may add a passkey")
+	if c.Passkeys && c.Login && !c.Admin {
+		fail("PASSKEYS_ENABLED needs ADMIN_ENABLED: only an admin may add a passkey")
+	}
+	if c.XboxLogin, err = strconv.ParseBool(or(getenv("XBOX_LOGIN_ENABLED"), "false")); err != nil {
+		fail("XBOX_LOGIN_ENABLED must be true or false")
+	}
+	if c.XboxAllowlist, err = strconv.ParseBool(or(getenv("XBOX_ALLOWLIST"), "false")); err != nil {
+		fail("XBOX_ALLOWLIST must be true or false")
+	}
+	if c.XboxLogin && c.Login {
+		c.XboxClientID = getenv("XBOX_CLIENT_ID")
+		if !guid.MatchString(c.XboxClientID) {
+			fail("XBOX_CLIENT_ID must be the app registration's application (client) ID, a GUID")
 		}
-		// A passkey is bound to the exact host it was made on, so anything
-		// but a bare https origin would make passkeys nobody can use. The
-		// browser compares both strings as it writes them, lower case and
-		// with no trailing colon, and an IP address cannot be an RP ID.
+		secret, serr := xboxSecret(getenv)
+		if serr != nil {
+			fail("%v", serr)
+		}
+		c.XboxClientSecret = secret
+	}
+	// A passkey is bound to the exact host it was made on, so anything but
+	// a bare https origin would make passkeys nobody can use; the Xbox
+	// redirect URI is made from the same origin and is registered with
+	// Microsoft exactly. The browser compares both strings as it writes
+	// them, lower case and with no trailing colon, and an IP address
+	// cannot be an RP ID.
+	if (c.Passkeys || c.XboxLogin) && c.Login {
 		raw := getenv("PUBLIC_ORIGIN")
 		u, perr := url.Parse(raw)
 		if perr != nil || u.Scheme != "https" || u.Host == "" || strings.HasSuffix(u.Host, ":") || u.Port() != "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.User != nil || net.ParseIP(u.Hostname()) != nil {
@@ -267,7 +324,7 @@ func Load(getenv func(string) string) (Config, error) {
 	// No login means no player, and so no admin. The switches are turned off
 	// here, after which nothing about them is checked; the caller logs it.
 	if !c.Login {
-		c.Admin, c.Passkeys = false, false
+		c.Admin, c.Passkeys, c.XboxLogin = false, false, false
 	}
 
 	if c.Refresh, err = time.ParseDuration(or(getenv("REFRESH_INTERVAL"), "15m")); err != nil {
