@@ -3,8 +3,10 @@ package adapters
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -124,5 +126,18 @@ func TestBridgeClient_TrimsTrailingSlashFromBaseURL(t *testing.T) {
 	}
 	if gotPath != "/command" {
 		t.Errorf("path = %q, want /command (no double slash)", gotPath)
+	}
+}
+
+func TestErrorClass_SaysTheKindAndNotTheWords(t *testing.T) {
+	cases := map[string]error{
+		"refused_403": statusError{status: 403, err: errors.New("status 403: command not allowed: tellraw secret")},
+		"failed_502":  statusError{status: 502, err: errors.New("status 502: secret")},
+		"transport":   errors.New("dial tcp: secret"),
+	}
+	for want, err := range cases {
+		if got := ErrorClass(err); got != want || strings.Contains(got, "secret") {
+			t.Errorf("ErrorClass(%v) = %q, want %q", err, got, want)
+		}
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -81,5 +82,39 @@ func TestPrivateRepliesAreRedacted(t *testing.T) {
 		if !cmd.RedactReply {
 			t.Errorf("!%s replies are logged in full", name)
 		}
+	}
+}
+
+// quotingVoice is a bridge that refuses every whisper, quoting it back the
+// way the bridge's error body does.
+type quotingVoice struct{ recordingVoice }
+
+func (v *quotingVoice) Tell(_ context.Context, _ string, message string) error {
+	return errors.New("bridge: POST /command: status 403: command not allowed: tellraw " + message)
+}
+
+// The whisper of a passkey code that failed to send must not put the code
+// in the log by way of the error.
+func TestRedactedReplyNeverReachesTheLogThroughAFailedWhisper(t *testing.T) {
+	registry, pctx, _, eventBus, _, playerRoster, permResolver := newHarness(t)
+	pctx.Voice = &quotingVoice{}
+	if err := registry.Register(replyPlugin{}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// Error-level lines go to stderr and the rest to stdout, so both are
+	// captured: the failure is on the first, the redacted reply on the second.
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureAgentStdout(t, func() {
+			log := logging.New("debug")
+			handlePacket(context.Background(), chatPacket(playerXUID, "Steve", "!whereami"), selfXUID, nil, log, registry, pctx, eventBus, unlimitedRateLimit(), playerRoster, permResolver, testAnswering(), store.Nop{}, audit.Nop{}, newJoinTimes())
+		})
+	})
+	out := stdout + stderr
+	if strings.Contains(out, "123 64 -456") {
+		t.Errorf("a failed whisper put the redacted reply in the log:\n%s", out)
+	}
+	if !strings.Contains(out, "voice_tell_failed") {
+		t.Errorf("the failure itself was not logged:\n%s", out)
 	}
 }

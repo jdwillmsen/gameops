@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -81,6 +82,19 @@ type statusError struct {
 }
 
 func (e statusError) Error() string { return e.err.Error() }
+
+// ErrorClass names what kind of failure err was without any of its words,
+// for a log line about a message whose words are not to be kept.
+func ErrorClass(err error) string {
+	var se statusError
+	if errors.As(err, &se) {
+		if se.status >= 400 && se.status < 500 {
+			return "refused_" + strconv.Itoa(se.status)
+		}
+		return "failed_" + strconv.Itoa(se.status)
+	}
+	return "transport"
+}
 
 // refusedBeforeConsole reports whether err is the bridge declining a command
 // outright — a 4xx, which its allowlist answers with before the console is

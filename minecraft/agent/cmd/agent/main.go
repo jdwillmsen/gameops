@@ -1567,7 +1567,7 @@ func handleCommand(ctx context.Context, actorXUID string, trigger chat.Trigger, 
 		// indistinguishable from the agent being down.
 		log.Debug("command_unknown", logging.Fields{"command": trigger.Command, "actor": actorXUID, "whispered": whispered})
 		if whispered {
-			speak(settle, log, pctx, actorXUID, trigger.Command, unknownCommandReply(trigger.Command))
+			speak(settle, log, pctx, actorXUID, trigger.Command, unknownCommandReply(trigger.Command), false)
 		}
 		writeAudit(audit.OutcomeUnknown)
 		return
@@ -1583,7 +1583,7 @@ func handleCommand(ctx context.Context, actorXUID string, trigger chat.Trigger, 
 		// than the existence of !shutdown being guessable on a server whose
 		// members are known to each other.
 		log.Info("command_denied", logging.Fields{"command": trigger.Command, "actor": actorXUID})
-		speak(settle, log, pctx, actorXUID, trigger.Command, deniedCommandReply(trigger.Command))
+		speak(settle, log, pctx, actorXUID, trigger.Command, deniedCommandReply(trigger.Command), false)
 		writeAudit(audit.OutcomeDenied)
 		return
 	case errors.Is(err, plugin.ErrCommandTimedOut):
@@ -1591,25 +1591,27 @@ func handleCommand(ctx context.Context, actorXUID string, trigger chat.Trigger, 
 		// wraps into that branch too, and a timeout recorded as a plain error
 		// loses exactly the distinction the schema draws between them.
 		log.Error("command_timed_out", logging.Fields{"command": trigger.Command, "actor": actorXUID})
-		speak(settle, log, pctx, actorXUID, trigger.Command, commandTimedOutReply)
+		speak(settle, log, pctx, actorXUID, trigger.Command, commandTimedOutReply, false)
 		writeAudit(audit.OutcomeTimeout)
 		return
 	case err != nil:
 		log.Error("command_failed", logging.Fields{"command": trigger.Command, "actor": actorXUID, "error": err.Error()})
-		speak(settle, log, pctx, actorXUID, trigger.Command, commandFailedReply)
+		speak(settle, log, pctx, actorXUID, trigger.Command, commandFailedReply, false)
 		writeAudit(audit.OutcomeError)
 		return
 	}
 
 	replied := logging.Fields{"command": trigger.Command, "actor": actorXUID}
+	redact := false
 	if cmd, ok := registry.Lookup(trigger.Command); ok && cmd.RedactReply {
+		redact = true
 		replied["reply_chars"] = len(reply)
 	} else {
 		replied["reply"] = reply
 	}
 	log.Info("command_replied", replied)
 
-	speak(settle, log, pctx, actorXUID, trigger.Command, reply)
+	speak(settle, log, pctx, actorXUID, trigger.Command, reply, redact)
 	// Written after the reply is sent, not before: the record must never be
 	// in front of what the player is waiting on.
 	writeAudit(audit.OutcomeOK)
@@ -1676,7 +1678,7 @@ func deniedCommandReply(command string) string {
 // Bounded like Dispatch is, and for the same reason: this runs on the
 // packet-read goroutine, so a hung Voice implementation must not be able to
 // stall the read loop indefinitely.
-func speak(ctx context.Context, log *logging.Logger, pctx *plugin.Context, actorXUID, command, reply string) {
+func speak(ctx context.Context, log *logging.Logger, pctx *plugin.Context, actorXUID, command, reply string, redact bool) {
 	replyCtx, cancel := context.WithTimeout(ctx, plugin.DefaultDispatchTimeout)
 	defer cancel()
 
@@ -1687,7 +1689,13 @@ func speak(ctx context.Context, log *logging.Logger, pctx *plugin.Context, actor
 		return
 	}
 	if err := pctx.Voice.Tell(replyCtx, actorXUID, reply); err != nil {
-		log.Error("voice_tell_failed", logging.Fields{"command": command, "actor": actorXUID, "error": err.Error()})
+		// The bridge's answer quotes the command back, which for a
+		// redacted reply is the very text the log must not keep.
+		detail := err.Error()
+		if redact {
+			detail = adapters.ErrorClass(err)
+		}
+		log.Error("voice_tell_failed", logging.Fields{"command": command, "actor": actorXUID, "error": detail})
 	}
 }
 
