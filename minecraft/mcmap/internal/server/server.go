@@ -107,6 +107,12 @@ type Server struct {
 	// Biomes is the biomes the world stored for its chunks. Nil leaves the
 	// overlay and its routes out; search then finds no biomes.
 	Biomes BiomeSource
+	// Layers draws the cave and level views. Nil leaves their routes out,
+	// which is what the feature being off comes to.
+	Layers LayerSource
+	// Floors is the Nether's floors under each of its levels, which its
+	// topography is drawn from. Nil leaves the Nether without topography.
+	Floors FloorSource
 	// Trails is where players have recently been. Nil leaves the route out.
 	Trails TrailSource
 	// Players is the player records of the last snapshot. Nil leaves the
@@ -138,6 +144,8 @@ type Server struct {
 	// listed is the answers about a survey's structures as they were last
 	// written out, which is the same bytes until the next survey.
 	listed structureCache
+	// lostHeld is the chunks missing as of the last count, indexed.
+	lostHeld *lostSet
 	// surfaced is answers written out again with the surface under each
 	// marker.
 	surfaced surfaceCache
@@ -327,8 +335,19 @@ func (s *Server) Handler() http.Handler {
 		s.route(mux, gateViewer, "GET /api/biomes/nearest", s.handleBiomeNearest)
 		s.route(mux, gateViewer, "GET /api/biomes/region", s.handleBiomeRegion)
 		s.route(mux, gateViewer, "GET /api/biomes/tiles/{dimension}/{zoom}/{x}/{y}", s.handleBiomeTile)
+	}
+	if s.Biomes != nil || s.Floors != nil {
 		s.route(mux, gateViewer, "GET /api/topography", s.handleTopography)
 		s.route(mux, gateViewer, "GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}", s.handleTopographyTile)
+	}
+	if s.Layers != nil {
+		s.route(mux, gateViewer, "GET /api/layers", s.handleLayers)
+		s.route(mux, gateViewer, "GET /api/layers/tiles/{dimension}/{zoom}/{x}/{y}", s.handleLayerTile)
+	}
+	// Part of the feature LAYERS_ENABLED turns on, and off with it.
+	if s.Layers != nil && s.Chunks != nil {
+		s.route(mux, gateViewer, "GET /api/lost", s.handleLost)
+		s.route(mux, gateViewer, "GET /api/lost/tiles/{dimension}/{zoom}/{x}/{y}", s.handleLostTile)
 	}
 	if s.Trails != nil {
 		s.route(mux, gateViewer, "GET /api/trails", s.handleTrails)

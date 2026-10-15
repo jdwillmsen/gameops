@@ -217,7 +217,7 @@ func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 // tiles with most of their chunks generated and a spread of the rest.
 func sample(r *layers.Renderer, set chunks.Set, spec layers.Spec, n int) {
 	rng := rand.New(rand.NewPCG(7, 7))
-	for _, zoom := range []int{0, -1, -2} {
+	for _, zoom := range []int{0, -1} {
 		full := (16 << -zoom) * (16 << -zoom)
 		tiles := occupied(set, spec.Dim, zoom, full/2)
 		if len(tiles) == 0 {
@@ -225,9 +225,6 @@ func sample(r *layers.Renderer, set chunks.Set, spec layers.Spec, n int) {
 		}
 		rng.Shuffle(len(tiles), func(i, j int) { tiles[i], tiles[j] = tiles[j], tiles[i] })
 		tiles = tiles[:min(n, len(tiles))]
-		if zoom == -2 {
-			tiles = tiles[:min(len(tiles), 4)]
-		}
 		var read, paint, enc, total, bytes, nchunks stats
 		for _, t := range tiles {
 			began := time.Now()
