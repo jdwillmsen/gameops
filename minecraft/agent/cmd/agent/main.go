@@ -1682,19 +1682,22 @@ func speak(ctx context.Context, log *logging.Logger, pctx *plugin.Context, actor
 	replyCtx, cancel := context.WithTimeout(ctx, plugin.DefaultDispatchTimeout)
 	defer cancel()
 
+	// The bridge's answer quotes the command back, which for a redacted
+	// reply is the very text the log must not keep.
+	failure := func(err error) string {
+		if redact {
+			return adapters.ErrorClass(err)
+		}
+		return err.Error()
+	}
 	if actorXUID == chat.ServerOrigin {
 		if err := pctx.Voice.Say(replyCtx, reply); err != nil {
-			log.Error("voice_say_failed", logging.Fields{"command": command, "error": err.Error()})
+			log.Error("voice_say_failed", logging.Fields{"command": command, "error": failure(err)})
 		}
 		return
 	}
 	if err := pctx.Voice.Tell(replyCtx, actorXUID, reply); err != nil {
-		// The bridge's answer quotes the command back, which for a
-		// redacted reply is the very text the log must not keep.
-		detail := err.Error()
-		if redact {
-			detail = adapters.ErrorClass(err)
-		}
+		detail := failure(err)
 		log.Error("voice_tell_failed", logging.Fields{"command": command, "actor": actorXUID, "error": detail})
 	}
 }
