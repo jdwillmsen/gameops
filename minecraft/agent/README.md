@@ -1327,7 +1327,8 @@ carries their XUID, so nothing else has to be trusted.
 |---|---|---|
 | `!map` | visitor | Says where the map is and how to log in |
 | `!map <code>` | visitor | Logs in the browser showing that code as the player who typed it |
-| `!map logout` | visitor | Ends every map login held in the name of the player who typed it |
+| `!map logout` | visitor | Ends every map login held in the name of the player who typed it, and removes their map passkeys |
+| `!map passkey` | visitor | Whispers the code that confirms a passkey the player is adding on the map page |
 
 A code is checked for shape here before the map is asked, so a typo is not
 spent as a guess against it. The map answers every bad code the same way
@@ -1340,6 +1341,14 @@ from a page they opened themselves, but a player talked into it never types
 a bare `!map`; the reply they do see, to the code itself, says to type
 `!map logout` if the screen was not theirs. That ends every map login in
 their name, wherever it is.
+
+An operator adding a passkey on the map page types `!map passkey`; the
+agent sends the map their XUID and whispers back a code and the passkey's
+fingerprint, to be typed into that page only if it shows the same
+fingerprint. If no passkey is waiting for them (or the map predates
+passkeys), the reply says so. Because a `!map` reply can carry such a code,
+the agent logs only its length, and a failed whisper is logged by error
+class, never the bridge's text.
 
 The console can speak in chat but is not a player, and `!map` refuses it.
 
