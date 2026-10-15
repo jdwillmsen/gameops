@@ -24,3 +24,13 @@ func TestWrite_LeavesTheWholeFileAndNoLitter(t *testing.T) {
 		t.Errorf("%d files left in the directory, want only the one written", len(entries))
 	}
 }
+
+func TestWrite_IntoExistingDirectoryReturnsNoError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f.json")
+	if err := Write(path, []byte("body")); err != nil {
+		t.Fatalf("Write returned %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "body" {
+		t.Fatalf("read back %q, %v", got, err)
+	}
+}

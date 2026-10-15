@@ -1,5 +1,5 @@
-// Package atomicfile writes a file so that a crash leaves the old one or
-// the new one, never part of one.
+// Package atomicfile writes a file so that a crash or power loss leaves the
+// old one or the new one, never part of one.
 package atomicfile
 
 import (
@@ -31,5 +31,18 @@ func Write(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// Without this the rename can be lost on power failure, after callers
+	// have already told a client the change was made.
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
