@@ -39,7 +39,11 @@ Mindcraft, Mineflayer and the Andy models are Java-only. FWB is Bedrock on
 
 - **No FWB coordinates, seeds or structure positions** in code, tests, docs,
   PR text or Jira. Coordinates are seed-equivalent. Crew never logs a
-  position. Positions travel only in the status API's response bodies.
+  position. Positions travel only over crew's own HTTP surface: the
+  `/v1/state` response bodies, and from Wave 2a the camera websocket that
+  carries chunks and the unit's look. Both stay in-cluster until
+  crew-control puts authentication in front of them (Wave 3), and neither
+  serves FWB data before the FWB rollout gate.
 - **No-cheats on FWB.** No `/give`, `/summon`, `/tp`, `/gamemode` or kills on FWB,
   ever. The lab is the only place cheats are on.
 - **The homelab GPU is not a camera host by default.** The RTX 5090 is passed

@@ -17,7 +17,7 @@
 - Crew never connects to FWB. Its only target is the lab server. In `jdw-deployments`, Wave 1 adds only the new `charts/crew-lab` chart and its ArgoCD entry (Task 6). It does not touch `charts/minecraft-fwb`.
 - Never log a position, coordinate or seed. Positions appear only in `/v1/state` response bodies. No FWB coordinates, seeds or player names in code, tests, fixtures, docs, commits or PR text.
 - `STATUS_ADDR` defaults to loopback (`127.0.0.1:8080`). Only the compose file binds it wider, and only inside the compose network.
-- The lab server image is pinned to the tag FWB uses (`2026.9.2`) with `VERSION=LATEST`, the same as FWB, so both speak the same protocol.
+- The lab server uses FWB's image tag (`2026.9.2`) and FWB's `VERSION=LATEST` policy. The tag pins the image, not the Bedrock server: both resolve the latest release when they start, so they can differ briefly across a Mojang release. That is deliberate. FWB follows LATEST because Bedrock clients only connect within a narrow protocol window, and pinning the lab alone would guarantee the two diverge. Crew tolerates the gap through `mcproto.Negotiate`, which announces the server's own protocol number.
 - Cheats are allowed on the lab and on nothing else.
 - Comments explain *why*, never *what*. Match afkbot's density and tone. No URLs, ticket IDs or names in comments.
 - Every commit carries `Co-Authored-By:` and `Assisted-by: <agent>:<model-id>` trailers. The branch is `feat/JDW-<n>-crew-wave1` (ticket key from the JDW epic). Merges are rebase-only.
