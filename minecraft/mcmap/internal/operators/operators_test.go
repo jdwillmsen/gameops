@@ -3,6 +3,7 @@ package operators
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -33,10 +34,14 @@ type fakeBridge struct {
 	asked int
 }
 
-func (f *fakeBridge) Permissions(context.Context) (map[string]string, error) {
+// Permissions fails on a done context, as an HTTP request would.
+func (f *fakeBridge) Permissions(ctx context.Context) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked++
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return f.perms, f.err
 }
 
@@ -217,4 +222,31 @@ func read(t *testing.T, path string) file {
 		t.Fatal(err)
 	}
 	return f
+}
+
+// The lookup is shared by every request waiting on it, so one caller going
+// away must not make it fail for the rest.
+func TestList_ACancelledCallerStillGetsTheLiveList(t *testing.T) {
+	c := &clock{t: time.Unix(1_790_000_000, 0)}
+	b := &fakeBridge{perms: map[string]string{steve: "operator"}}
+	l, _ := open(t, b, c)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if got, src := l.IsOperator(ctx, steve); !got || src != Live {
+		t.Errorf("a cancelled caller with the bridge up: admin %v from %s, want true from live", got, src)
+	}
+}
+
+func TestClassOf_ACancelledLookupIsNotUnreachable(t *testing.T) {
+	for err, want := range map[error]string{
+		context.Canceled:                        "cancelled",
+		context.DeadlineExceeded:                "timeout",
+		ErrNoFile:                               "no_file",
+		errors.New("dial tcp: refused"):         "unreachable",
+		fmt.Errorf("get: %w", context.Canceled): "cancelled",
+	} {
+		if got := classOf(err); got != want {
+			t.Errorf("classOf(%v) = %q, want %q", err, got, want)
+		}
+	}
 }
