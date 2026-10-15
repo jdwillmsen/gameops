@@ -886,7 +886,9 @@ go-ahead unless the server is empty:
      only admins may add a passkey. With the login off it does nothing
      (D2).
    - `PUBLIC_ORIGIN`, the exact `https://` origin passkeys are bound to.
-     Required with `PASSKEYS_ENABLED`.
+     Required with `PASSKEYS_ENABLED`. Its host is lower-cased, as the
+     browser writes it; an IP address, a port, a trailing colon, a path
+     or a fragment stops the map from starting.
 
    The same pull request carries the bridge change from D3: for a
    `tellraw`, the bridge logs and answers with the rule name only. That

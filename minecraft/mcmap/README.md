@@ -4682,7 +4682,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `SERVICE_SESSION_TTL` | no | `10m` | How long a service session lasts; `1m` to `30m`. Read only with `SERVICE_SESSION_SECRET` |
 | `ADMIN_ENABLED` | no | `false` | `true` makes a logged-in operator of the game an admin: [Admin access](#admin-access). Has no effect, and is not an error, with `AUTH_DISABLED=true` |
 | `PASSKEYS_ENABLED` | no | `false` | `true` lets an admin add a passkey and log in with it. Needs `ADMIN_ENABLED=true` and `PUBLIC_ORIGIN`, or the map does not start |
-| `PUBLIC_ORIGIN` | with passkeys | | The one origin the page is served from, a bare `https://` origin, no port or path, e.g. `https://fwb.prd.jdwlabs.com`. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` |
+| `PUBLIC_ORIGIN` | with passkeys | | The one origin the page is served from, a bare `https://` origin by host name, no port, path or fragment, e.g. `https://fwb.prd.jdwlabs.com`. An IP address or a trailing colon stops the map from starting; the host is lower-cased. Its host is the passkeys' relying party, so changing it orphans every passkey. Read only with `PASSKEYS_ENABLED=true` |
 | `DATA_DIR` | no | `/data` | Mirror, retained world copies, tiles, the installed renderer and the fetched mob icons, marker pictures and names. The retained copies cannot be rebuilt, and neither can the history kept here unless `HISTORY_DIR` puts it elsewhere, so keep it on a volume |
 | `REFRESH_INTERVAL` | no | `15m` | Time between cycles, as a Go duration. At least `1m`: each cycle pauses world saving for a moment |
 | `QUIET_UTC` | no | empty | Daily UTC windows with no snapshot, `HH:MM-HH:MM,HH:MM-HH:MM`. A window may cross midnight |
