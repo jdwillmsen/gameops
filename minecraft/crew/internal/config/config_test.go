@@ -84,3 +84,49 @@ func TestLoadRejectsInvertedBackoff(t *testing.T) {
 		t.Fatalf("err = %v, want one naming RECONNECT_MIN_MS", err)
 	}
 }
+
+// The camera streams the unit's surroundings and look, so it must be an
+// explicit choice rather than what an unset variable does.
+func TestCameraIsOffByDefault(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.CameraEnabled {
+		t.Error("CameraEnabled is true with CAMERA_ENABLED unset")
+	}
+	if cfg.CameraMaxViewers != 4 {
+		t.Errorf("CameraMaxViewers = %d, want 4", cfg.CameraMaxViewers)
+	}
+}
+
+func TestCameraCanBeEnabled(t *testing.T) {
+	setRequired(t)
+	t.Setenv("CAMERA_ENABLED", "true")
+	t.Setenv("CAMERA_MAX_VIEWERS", "2")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.CameraEnabled || cfg.CameraMaxViewers != 2 {
+		t.Errorf("camera = %v/%d, want true/2", cfg.CameraEnabled, cfg.CameraMaxViewers)
+	}
+}
+
+func TestLoadRejectsBadCameraSettings(t *testing.T) {
+	cases := map[string]string{
+		"CAMERA_ENABLED":     "yes please",
+		"CAMERA_MAX_VIEWERS": "0",
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(name, value)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), name) {
+				t.Fatalf("%s=%s: err = %v, want one naming %s", name, value, err, name)
+			}
+		})
+	}
+}
