@@ -19,8 +19,10 @@
   // open across that release cannot take those choices back out. A record
   // of an earlier version, kept or in a file, is read and brought up to this
   // one. It went to 3 when the cut of the nether the viewer chose began to
-  // be kept, for the same reason.
-  const VERSION = 3;
+  // be kept, for the same reason, and to 4 when the height of the
+  // underground view of the overworld did, and with it a cut could be
+  // below zero.
+  const VERSION = 4;
   // The most the record may come to, in characters. Fifty views with every
   // layer named and long filters come to a fraction of this; anything
   // near it is not the page's own doing.
@@ -237,8 +239,9 @@
   const LAYER = /^[a-z0-9_-]{1,32}\/[a-z0-9_-]{1,48}$/;
   const ID = text(24, /^[a-z0-9]+$/);
   const BUILT_IN = ['everything', 'exploring', 'base'];
-  // A cut of the nether as the server names it: the height it is cut at.
-  const CUT = text(3, /^[0-9]{1,3}$/);
+  // A cut as the server names it: the height it is cut at, which is below
+  // zero for the overworld's depths.
+  const CUT = text(4, /^-?[0-9]{1,3}$/);
   const VIEW_FIELDS = {
     id: ID,
     name,
@@ -291,6 +294,9 @@
     history: shape({ speed: oneOf(1, 2, 4), loop: bool }),
     // The cut of the nether the viewer chose, or null for the default one.
     levels: shape({ nether: orNull(CUT) }),
+    // The height of the overworld's underground view, or null for the
+    // one the page starts at.
+    underground: shape({ level: orNull(CUT) }),
     // The troubleshooting tools: the debug panel, the report's controls,
     // and which visual aids the panel has on.
     debug: shape({ on: bool, report: bool, aids: shape({ tiles: bool, lines: bool, hits: bool, room: bool }) }),
@@ -315,6 +321,7 @@
     grid: () => ({ on: false }),
     history: () => ({ speed: 1, loop: false }),
     levels: () => ({ nether: null }),
+    underground: () => ({ level: null }),
     debug: () => ({ on: false, report: false, aids: { tiles: false, lines: false, hits: false, room: false } }),
     biome: () => ({ only: null }),
     look: () => ({ ...LOOK_DEFAULTS }),
@@ -330,6 +337,7 @@
   const MARKERS = ['waypoints', 'beds', 'containers', 'mobs'];
   const SORTS = ['recorded', 'predicted', 'candidate'];
   const TOPOGRAPHY = ['hillshade', 'contours', 'tint'];
+  const UNDERGROUND = ['floor', 'cut'];
   // Every item of every layer showing: no type of mob, no player, no kind
   // of structure, container or bed and no biome is hidden.
   const unfiltered = () => ({
@@ -343,21 +351,21 @@
       id: 'everything',
       name: 'Everything',
       says: 'Players, mobs, markers, structures and trails',
-      layers: { ...rows('live', ['players', ...MOBS], []), ...rows('markers', MARKERS, []), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('heights', ['bands'], ['near', 'colour']), ...rows('biomes', [], ['overlay']), ...rows('overlays', ['trails'], ['slime']), ...rows('topography', [], TOPOGRAPHY) },
+      layers: { ...rows('live', ['players', ...MOBS], []), ...rows('markers', MARKERS, []), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('heights', ['bands'], ['near', 'colour']), ...rows('biomes', [], ['overlay']), ...rows('overlays', ['trails'], ['slime', 'lost']), ...rows('topography', [], TOPOGRAPHY), ...rows('underground', [], UNDERGROUND) },
       ...unfiltered(),
     },
     exploring: {
       id: 'exploring',
       name: 'Exploring',
       says: 'Terrain, structures, biomes and the world spawn; no mobs',
-      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', ['waypoints'], ['beds', 'containers', 'mobs']), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('heights', ['bands'], ['near', 'colour']), ...rows('biomes', ['overlay'], []), ...rows('overlays', [], ['trails', 'slime']), ...rows('topography', [], TOPOGRAPHY) },
+      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', ['waypoints'], ['beds', 'containers', 'mobs']), ...rows('structures', [...SORTS, 'spawn'], []), ...rows('heights', ['bands'], ['near', 'colour']), ...rows('biomes', ['overlay'], []), ...rows('overlays', [], ['trails', 'slime', 'lost']), ...rows('topography', [], TOPOGRAPHY), ...rows('underground', [], UNDERGROUND) },
       ...unfiltered(),
     },
     base: {
       id: 'base',
       name: 'Base',
       says: 'Players, named mobs, beds, containers and waypoints',
-      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', MARKERS, []), ...rows('structures', [], [...SORTS, 'spawn']), ...rows('heights', ['bands'], ['near', 'colour']), ...rows('biomes', [], ['overlay']), ...rows('overlays', [], ['trails', 'slime']), ...rows('topography', [], TOPOGRAPHY) },
+      layers: { ...rows('live', ['players'], MOBS), ...rows('markers', MARKERS, []), ...rows('structures', [], [...SORTS, 'spawn']), ...rows('heights', ['bands'], ['near', 'colour']), ...rows('biomes', [], ['overlay']), ...rows('overlays', [], ['trails', 'slime', 'lost']), ...rows('topography', [], TOPOGRAPHY), ...rows('underground', [], UNDERGROUND) },
       ...unfiltered(),
     },
   };
