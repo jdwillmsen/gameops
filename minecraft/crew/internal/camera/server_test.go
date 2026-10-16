@@ -1,6 +1,7 @@
 package camera
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -65,12 +66,19 @@ func TestWebsocketStreamsTheWorldAndEnforcesTheViewerCap(t *testing.T) {
 	defer c.CloseNow()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	typ, _, err := c.Read(ctx)
-	if err != nil || typ != websocket.MessageText {
-		t.Fatalf("first message = %v, %v; want the material table", typ, err)
+	var types []byte
+	for len(types) < 4 {
+		typ, data, err := c.Read(ctx)
+		if err != nil || typ != websocket.MessageBinary {
+			t.Fatalf("read = %v, %v; want binary frames", typ, err)
+		}
+		types = append(types, data[0])
+		if data[0] == frameSubChunk {
+			break
+		}
 	}
-	if typ, data, err := c.Read(ctx); err != nil || typ != websocket.MessageBinary || len(data) != 13+4096 {
-		t.Fatalf("second message = %v %d bytes, %v; want a sub-chunk frame", typ, len(data), err)
+	if want := []byte{frameHello, frameMaterials, frameEntityTypes, frameSubChunk}; !bytes.Equal(types, want) {
+		t.Fatalf("frame types = %v, want %v", types, want)
 	}
 
 	_, res, err := dial(t, srv)

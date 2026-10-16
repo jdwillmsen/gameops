@@ -9,12 +9,10 @@ package camera
 
 import (
 	"cmp"
-	"encoding/binary"
-	"encoding/json"
-	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -22,13 +20,14 @@ import (
 )
 
 const (
-	frameSubChunk byte = 1
-	frameBlock    byte = 2
-
 	// Enough for a few seconds of block edits and entity churn while a viewer
 	// is busy replaying the held world, small enough that a stalled one is cut
 	// loose quickly.
 	defaultQueueLimit = 1024
+
+	// Moved things reach a viewer in one batch per tick, matching the
+	// server's own rate, instead of one message per movement packet.
+	defaultTick = 50 * time.Millisecond
 )
 
 // PacketWriter is the part of the connection the hub needs: sub-chunk requests.
@@ -44,16 +43,18 @@ type Options struct {
 	MaxViewers int
 	// QueueLimit bounds each viewer's ordered backlog. Zero means the default.
 	QueueLimit int
+	// Tick is the longest a moved entity waits before it is sent. Zero means
+	// the default.
+	Tick time.Duration
 }
 
 type entity struct {
-	ID    uint64  `json:"id"`
-	Type  string  `json:"type"`
-	X     float32 `json:"x"`
-	Y     float32 `json:"y"`
-	Z     float32 `json:"z"`
-	Yaw   float32 `json:"yaw"`
-	Pitch float32 `json:"pitch"`
+	ID      uint64
+	Type    string
+	TypeID  uint16
+	X, Y, Z float32
+	Yaw     float32
+	Pitch   float32
 }
 
 type Hub struct {
@@ -61,6 +62,7 @@ type Hub struct {
 	self       SelfSource
 	maxViewers int
 	queueLimit int
+	tick       time.Duration
 	mats       *materialTable
 
 	mu       sync.Mutex
@@ -69,9 +71,15 @@ type Hub struct {
 	ents     map[uint64]*entity
 	uniqueID map[int64]uint64
 	viewers  map[*Viewer]struct{}
+	types    []string // entity type names; the index is the wire type id
+	typeIDs  map[string]uint16
 
 	decodeFailures atomic.Uint64
 	unmapped       atomic.Uint64
+	bytesSent      atomic.Uint64
+	subChunksSent  atomic.Uint64
+	viewersCut     atomic.Uint64
+	viewersTurned  atomic.Uint64
 }
 
 // New builds a hub. Nothing is registered globally: the caller mounts it.
@@ -79,16 +87,21 @@ func New(o Options) *Hub {
 	if o.QueueLimit <= 0 {
 		o.QueueLimit = defaultQueueLimit
 	}
+	if o.Tick <= 0 {
+		o.Tick = defaultTick
+	}
 	return &Hub{
 		dec:        o.Decoder,
 		self:       o.Self,
 		maxViewers: o.MaxViewers,
 		queueLimit: o.QueueLimit,
+		tick:       o.Tick,
 		mats:       newMaterialTable(),
 		subs:       map[[3]int32][]byte{},
 		ents:       map[uint64]*entity{},
 		uniqueID:   map[int64]uint64{},
 		viewers:    map[*Viewer]struct{}{},
+		typeIDs:    map[string]uint16{},
 	}
 }
 
@@ -99,6 +112,14 @@ type Stats struct {
 	Entities       int    `json:"entities"`
 	DecodeFailures uint64 `json:"decode_failures"`
 	UnmappedBlocks uint64 `json:"unmapped_blocks"`
+	// BytesSent counts application bytes handed to viewers, before the
+	// websocket's own compression.
+	BytesSent     uint64 `json:"bytes_sent"`
+	SubChunksSent uint64 `json:"sub_chunks_sent"`
+	// ViewersDropped counts viewers cut for falling behind; ViewersRefused
+	// counts connections turned away at the cap.
+	ViewersDropped uint64 `json:"viewers_dropped"`
+	ViewersRefused uint64 `json:"viewers_refused"`
 }
 
 func (h *Hub) Stats() Stats {
@@ -107,6 +128,8 @@ func (h *Hub) Stats() Stats {
 	return Stats{
 		Viewers: len(h.viewers), SubChunksHeld: len(h.subs), Entities: len(h.ents),
 		DecodeFailures: h.decodeFailures.Load(), UnmappedBlocks: h.unmapped.Load(),
+		BytesSent: h.bytesSent.Load(), SubChunksSent: h.subChunksSent.Load(),
+		ViewersDropped: h.viewersCut.Load(), ViewersRefused: h.viewersTurned.Load(),
 	}
 }
 
@@ -131,9 +154,8 @@ func (h *Hub) resetLocked() {
 	h.subs = map[[3]int32][]byte{}
 	h.ents = map[uint64]*entity{}
 	h.uniqueID = map[int64]uint64{}
-	reset := jsonMsg(map[string]string{"t": "reset"})
 	for v := range h.viewers {
-		v.restart(reset)
+		v.restart()
 	}
 }
 
@@ -144,9 +166,10 @@ func (h *Hub) Attach() (*Viewer, error) {
 	h.mu.Lock()
 	if len(h.viewers) >= h.maxViewers {
 		h.mu.Unlock()
+		h.viewersTurned.Add(1)
 		return nil, ErrFull
 	}
-	v := newViewer(h, h.queueLimit)
+	v := newViewer(h, h.queueLimit, h.tick)
 	h.viewers[v] = struct{}{}
 	type held struct {
 		key   [3]int32
@@ -157,9 +180,9 @@ func (h *Hub) Attach() (*Viewer, error) {
 		frames = append(frames, held{k, f})
 	}
 	for _, e := range h.ents {
-		v.latest[entityKey(e.ID)] = entityMsg(e)
+		v.ents[e.ID] = e.record()
 	}
-	mats := h.mats.all()
+	head := [][]byte{helloFrame(), encodeMaterials(h.mats.all()), encodeEntityTypes(h.types)}
 	// Read under the hub lock so a later publishSelf cannot be overwritten by
 	// this older pose.
 	var me belief.Snapshot
@@ -167,7 +190,8 @@ func (h *Hub) Attach() (*Viewer, error) {
 		me = h.self.Snapshot()
 	}
 	if me.PositionKnown {
-		v.latest["self"] = selfMsg(me)
+		p := poseOf(me)
+		v.self = &p
 	}
 	h.mu.Unlock()
 
@@ -176,9 +200,8 @@ func (h *Hub) Attach() (*Viewer, error) {
 			return cmp.Compare(distSq(a.key, me.Position), distSq(b.key, me.Position))
 		})
 	}
-	head := []Message{materialsMsg(mats)}
 	for _, f := range frames {
-		head = append(head, Message{Data: f.frame})
+		head = append(head, f.frame)
 	}
 	v.mu.Lock()
 	v.head = head
@@ -265,11 +288,11 @@ func (h *Hub) Apply(pk packet.Packet, w PacketWriter) {
 		if rid, ok := h.uniqueID[p.EntityUniqueID]; ok {
 			delete(h.ents, rid)
 			delete(h.uniqueID, p.EntityUniqueID)
-			rm := jsonMsg(map[string]any{"t": "rm", "id": rid})
-			for v := range h.viewers {
-				v.drop(entityKey(rid))
-				v.push(rm, "")
-			}
+			rm := encodeRemove([]uint64{rid})
+			h.broadcastLocked(func(v *Viewer) bool {
+				v.dropEntity(rid)
+				return v.push(rm)
+			})
 		}
 		h.mu.Unlock()
 	}
@@ -286,10 +309,10 @@ func (h *Hub) publishSelf() {
 	if !snap.PositionKnown {
 		return
 	}
-	m := selfMsg(snap)
+	p := poseOf(snap)
 	h.mu.Lock()
 	for v := range h.viewers {
-		v.push(m, "self")
+		v.setSelf(p)
 	}
 	h.mu.Unlock()
 }
@@ -320,15 +343,53 @@ func (h *Hub) setEntityLocked(e *entity) {
 	if h.runtime != 0 && e.ID == h.runtime {
 		return
 	}
+	e.TypeID = h.typeIDLocked(e.Type)
 	h.ents[e.ID] = e
 	h.pushEntityLocked(e)
 }
 
 func (h *Hub) pushEntityLocked(e *entity) {
-	m := entityMsg(e)
+	rec := e.record()
 	for v := range h.viewers {
-		v.push(m, entityKey(e.ID))
+		v.setEntity(e.ID, rec)
 	}
+}
+
+func (e *entity) record() []byte {
+	return entityRecord(e.ID, e.TypeID, e.X, e.Y, e.Z, e.Yaw, e.Pitch)
+}
+
+// typeIDLocked numbers entity type names. A new name is announced to every
+// viewer in order, ahead of any record that uses it.
+func (h *Hub) typeIDLocked(name string) uint16 {
+	if id, ok := h.typeIDs[name]; ok {
+		return id
+	}
+	// 65535 distinct entity types never happens; the last id absorbs the
+	// overflow instead of wrapping.
+	if len(h.types) >= 0xffff {
+		return 0xffff
+	}
+	id := uint16(len(h.types))
+	h.types = append(h.types, name)
+	h.typeIDs[name] = id
+	m := encodeEntityTypes(h.types)
+	h.broadcastLocked(func(v *Viewer) bool { return v.push(m) })
+	return id
+}
+
+// broadcastLocked runs send for every viewer and forgets those it cut loose.
+func (h *Hub) broadcastLocked(send func(*Viewer) (cut bool)) {
+	for v := range h.viewers {
+		if send(v) {
+			delete(h.viewers, v)
+			h.viewersCut.Add(1)
+		}
+	}
+}
+
+func poseOf(s belief.Snapshot) selfPose {
+	return selfPose{s.Position[0], s.Position[1], s.Position[2], s.Yaw, s.Pitch}
 }
 
 // subChunkRequest builds the request for a chunk the server announced in
@@ -408,26 +469,16 @@ func (h *Hub) blockMaterial(netID uint32) (id uint8, fresh bool) {
 
 func (h *Hub) updateBlock(pos protocol.BlockPos, netID uint32) {
 	id, fresh := h.blockMaterial(netID)
-	b := make([]byte, 0, 14)
-	b = append(b, frameBlock)
-	b = binary.LittleEndian.AppendUint32(b, uint32(pos.X()))
-	b = binary.LittleEndian.AppendUint32(b, uint32(pos.Y()))
-	b = binary.LittleEndian.AppendUint32(b, uint32(pos.Z()))
-	b = append(b, id)
+	frame := encodeBlock(pos.X(), pos.Y(), pos.Z(), id)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.pushMaterialsLocked(fresh)
-	h.pushOrderedLocked(Message{Data: b})
+	h.pushOrderedLocked(frame)
 }
 
-// emit converts a section to the wire format -- 4096 material IDs, indexed
-// (y*16+z)*16+x -- keeps it for later viewers and tells current ones.
+// emit converts a section to the wire format, keeps it for later viewers and
+// tells current ones.
 func (h *Hub) emit(cx, cy, cz int32, s Section) {
-	frame := make([]byte, 13+4096)
-	frame[0] = frameSubChunk
-	binary.LittleEndian.PutUint32(frame[1:], uint32(cx))
-	binary.LittleEndian.PutUint32(frame[5:], uint32(cy))
-	binary.LittleEndian.PutUint32(frame[9:], uint32(cz))
 	mat := make([]uint8, len(s.Palette))
 	anyFresh, anyBlock := false, false
 	for i, name := range s.Palette {
@@ -438,15 +489,16 @@ func (h *Hub) emit(cx, cy, cz int32, s Section) {
 		mat[i], fresh = h.mats.id(name)
 		anyFresh = anyFresh || fresh
 	}
-	body := frame[13:]
+	var cells [subChunkCells]uint8
 	for i, c := range s.Cells {
 		if int(c) >= len(mat) {
 			h.decodeFailures.Add(1)
 			return
 		}
-		body[i] = mat[c]
+		cells[i] = mat[c]
 		anyBlock = anyBlock || mat[c] != 0
 	}
+	frame := encodeSubChunk(cx, cy, cz, &cells)
 	key := [3]int32{cx, cy, cz}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -461,49 +513,15 @@ func (h *Hub) emit(cx, cy, cz int32, s Section) {
 		return
 	}
 	h.pushMaterialsLocked(anyFresh)
-	h.pushOrderedLocked(Message{Data: frame})
+	h.pushOrderedLocked(frame)
 }
 
 func (h *Hub) pushMaterialsLocked(fresh bool) {
 	if fresh {
-		h.pushOrderedLocked(materialsMsg(h.mats.all()))
+		h.pushOrderedLocked(encodeMaterials(h.mats.all()))
 	}
 }
 
-func (h *Hub) pushOrderedLocked(m Message) {
-	for v := range h.viewers {
-		v.push(m, "")
-		if v.dropped() {
-			delete(h.viewers, v)
-		}
-	}
-}
-
-func entityKey(id uint64) string { return fmt.Sprintf("ent:%d", id) }
-
-func jsonMsg(v any) Message {
-	b, err := json.Marshal(v)
-	if err != nil {
-		// Every value passed in is a plain struct or map of numbers and strings.
-		panic("camera: marshal: " + err.Error())
-	}
-	return Message{Text: true, Data: b}
-}
-
-func materialsMsg(list []material) Message {
-	return jsonMsg(map[string]any{"t": "materials", "list": list})
-}
-
-func entityMsg(e *entity) Message {
-	return jsonMsg(struct {
-		T string `json:"t"`
-		*entity
-	}{"ent", e})
-}
-
-func selfMsg(s belief.Snapshot) Message {
-	return jsonMsg(map[string]any{
-		"t": "self", "x": s.Position[0], "y": s.Position[1], "z": s.Position[2],
-		"yaw": s.Yaw, "pitch": s.Pitch,
-	})
+func (h *Hub) pushOrderedLocked(m []byte) {
+	h.broadcastLocked(func(v *Viewer) bool { return v.push(m) })
 }
