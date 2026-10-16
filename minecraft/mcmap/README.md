@@ -443,14 +443,20 @@ layer's one canvas with `drawImage`.
 `icons.js` holds one registry of everything the map draws a picture for,
 by key: `mob/<type>`, `villager/<profession>`, `bed/<colour>`,
 `shulker/<colour>`, `container/<kind>`, `structure/<kind>`,
-`marker/waypoint`. A key has the renditions the server lists for it (a
+`marker/waypoint`, and for the player panel `item/<id>` and `ui/<mark>`. A
+key has the renditions the server lists for it (a
 mob's face and its egg; anything else's flat picture and its block), and
 which is drawn is decided there and nowhere else, so the map, the layer
 panel, the inspect card, a structure's sheet and a search result show the
 same picture. It is on `window.mcmap.icons.registry` for any script that
 draws: `renditions(key)`, `chosen(key)`, `marker(key, colour, { baby })`
-for the map's own sprite, `picture(key)` for an element, `tier()`, and
-`STATES`.
+for the map's own sprite, `picture(key, { side, glint })` for an element,
+`tier()`, and `STATES`. An item's picture and the marks for health and hunger are the
+panel's: they are drawn whatever the markers' style, as their one flat
+picture. `side` is the box in CSS pixels, a whole number of the picture's
+pixels so none is drawn at a pixel and a half (a panel draws an item at 32
+and a mark at 18), and `glint` washes what is drawn in violet, which is
+what the player panel gives an enchanted item.
 
 | Marker style | A mob | A bed or container | A structure |
 |---|---|---|---|
@@ -3101,6 +3107,23 @@ It has three parts, each saying where it comes from.
 While the player is online the pack's last sample also gives health and
 experience level, which replace the saved ones in the vitals, labelled as
 live; the panel then asks every 5 s instead of every minute.
+
+**What the save's part looks like.** Health, hunger and absorption are
+drawn with the game's own marks, a heart or a drumstick for each two
+points, whole, half or empty (an absorbed heart is gold), beside the words
+that say the same and that a screen reader is given in their place. Where
+the server has no marks the bar they replace is drawn instead, and a gauge
+too large to be a row of them (over 20 marks) stays a bar. The worn and
+held items are slots like the inventory's, in a row of four armour slots and one of the
+two hands, each with its place named under it, its picture, its count
+and its wear. The inventory is one block in the game's layout, the
+backpack's three rows with the hotbar directly under them, and the ender
+chest the same slots in three rows. Every item has the [picture of its
+own](#item-pictures) where the pin holds a texture for it, and its
+initials where it does not. An enchanted item has a violet wash over its
+picture, which catches the light unless motion is reduced, and a violet
+border; its enchantments are in its tooltip and in the line under the
+slots a touch screen reads.
 
 A live player is matched to a record by the id the pack reports, which is
 the record's `UniqueID` written as a signed decimal; the same 64 bits read

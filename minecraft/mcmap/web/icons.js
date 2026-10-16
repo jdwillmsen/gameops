@@ -29,6 +29,7 @@
   // face 8 pixels a side fills a 16 pixel box and one 6 a side stands 12
   // in it: pixel art is never drawn at a pixel and a half.
   const ICON = 16;
+  const GLINT = 'rgba(150, 80, 255, 0.45)';
   const MOB_RADIUS = 12;
   const BABY_RADIUS = 10;
   const PLATE_RADIUS = 11;
@@ -421,7 +422,8 @@
   //
   // Everything the map draws a picture for has one key here: mob/<type>,
   // villager/<profession>, bed/<colour>, shulker/<colour>,
-  // container/<kind>, structure/<kind>, marker/waypoint, block/<kind>.
+  // container/<kind>, structure/<kind>, marker/waypoint, block/<kind>,
+  // item/<id> and ui/<mark>.
   // A key has the renditions the server has listed for it, and which of
   // them is drawn is decided here and nowhere else, so the map, the
   // panel, a card and a search result cannot disagree.
@@ -460,6 +462,9 @@
   // whichever of the two there is; a block is drawn as one only where
   // there is no plate to fit it on.
   function chosen(key, style = styleOf(living(str(key)) ? 'live' : 'markers')) {
+    // An item's picture and the marks for health are for the page's panels
+    // and not for the map, so how markers are drawn is no business of theirs.
+    if (/^(item|ui)\//.test(str(key))) return renditions(key).flat || null;
     if (style === 'dots') return null;
     const has = renditions(key);
     if (living(str(key))) return (faces() ? has.face || has.egg : has.egg || has.face) || null;
@@ -470,7 +475,8 @@
 
   // The key of the picture a thing is drawn with, wherever on the page it
   // is drawn: sort is bed, container, mob, structure or waypoint, and kind
-  // a container's kind, a mob's type or a structure's kind. A bed whose
+  // a container's kind, a mob's type or a structure's kind, and item for
+  // what a player carries, by its id. A bed whose
   // colour the world does not say is the red one the game itself falls
   // back to, and a shulker box likewise the undyed one. A villager whose
   // profession is known is drawn in it, and a village whose biome is
@@ -489,6 +495,7 @@
 
   function keyOf(sort, { kind, colour, trapped, profession, biome, variant } = {}) {
     if (sort === 'waypoint') return WAYPOINT;
+    if (sort === 'item') return `item/${str(kind)}`;
     if (sort === 'bed') return `bed/${str(colour) || 'red'}`;
     if (sort === 'mob') return kind === VILLAGER && /^[a-z_]{1,32}$/.test(str(profession)) ? `villager/${profession}` : `mob/${str(kind)}`;
     if (sort === 'structure') {
@@ -603,13 +610,14 @@
   // was one to draw. Without one the element is hidden, and whatever
   // stands beside it as the fallback shows.
   function fill(canvas) {
+    const side = Number(canvas.dataset.side) || ICON;
     let from = addressOf(canvas.dataset.picture);
     let drawn = bitmap(from);
     // A block is drawn on the page only where it fits its box whole. In
     // a row 16 pixels tall on an ordinary screen it would be halved and
     // blurred, and the flat picture of the same thing is used, which is
     // drawn at that size.
-    if (drawn && Math.max(drawn.width, drawn.height) > ICON * DENSITY) {
+    if (drawn && Math.max(drawn.width, drawn.height) > side * DENSITY) {
       const flat = renditions(canvas.dataset.picture).flat;
       if (flat && flat !== from) {
         from = flat;
@@ -618,8 +626,8 @@
     }
     canvas.hidden = !drawn;
     // Made for another density, it is made again for this one.
-    if (canvas.width !== ICON * DENSITY) {
-      canvas.width = canvas.height = ICON * DENSITY;
+    if (canvas.width !== side * DENSITY) {
+      canvas.width = canvas.height = side * DENSITY;
       delete canvas.dataset.drawn;
     }
     // Drawn again if the server has since said where its head is.
@@ -629,17 +637,31 @@
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     centred(ctx, drawn, canvas.width, canvas.width / DENSITY, head);
+    if (canvas.dataset.glint === '1') tint(ctx, canvas.width);
     canvas.dataset.drawn = as;
+  }
+
+  // What the game lays over an enchanted item: a violet wash over what is
+  // drawn and nothing round it.
+  function tint(ctx, side) {
+    ctx.globalCompositeOperation = 'source-atop';
+    ctx.fillStyle = GLINT;
+    ctx.fillRect(0, 0, side, side);
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   // A picture for the page itself, outside the map: a panel row, a search
   // result, a tooltip. It is the one the map draws for the same key, and
-  // appears by itself once the server has it.
-  function picture(key) {
+  // appears by itself once the server has it. It is ICON a side unless a
+  // whole number of times the picture's own pixels is asked for, and glint
+  // gives it what the game gives an enchanted item.
+  function picture(key, { side = ICON, glint = false } = {}) {
     const canvas = document.createElement('canvas');
     canvas.className = 'picture';
-    canvas.width = canvas.height = ICON * DENSITY;
+    canvas.width = canvas.height = side * DENSITY;
     canvas.dataset.picture = str(key);
+    if (side !== ICON) canvas.dataset.side = String(side);
+    if (glint) canvas.dataset.glint = '1';
     canvas.setAttribute('aria-hidden', 'true');
     fill(canvas);
     // One made before its picture has arrived may not be on the page yet

@@ -60,7 +60,15 @@ function load(answer) {
   win.setInterval = (fn) => { ticks.push(fn); return ticks.length; };
   win.clearInterval = () => {};
   win.mcmap = {
-    icons: { keyOf: (sort, o) => `${sort}/${o.kind || o.colour}`, picture: (key) => { const c = doc.createElement('canvas'); c.dataset.picture = key; return c; }, paint() {} },
+    icons: { keyOf: (sort, o) => `${sort}/${o.kind || o.colour}`, picture: (key, o = {}) => {
+      const c = doc.createElement('canvas');
+      c.dataset.picture = key;
+      if (o.side) c.dataset.side = String(o.side);
+      if (o.glint) c.dataset.glint = '1';
+      return c;
+    },
+    paint() {},
+  },
     names: { tidy: (id) => String(id).split('_').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ') },
     label: (d) => ({ overworld: 'Overworld', nether: 'Nether', end: 'The End' }[d] || d),
     go: (d, x, z) => { went.push([d, x, z]); return d !== 'end'; },
@@ -97,7 +105,7 @@ test('says what the save holds, with when it is from', async () => {
   await tick();
   const text = words(t);
   for (const need of ['As of the snapshot 10 min ago', '8.5 of 10 hearts', '14 of 20', 'Full', 'Level 12, 25% to the next', 'Survival',
-    'Iron Helmet · Protection IV, Enchantment 99 I · 132 of 165 uses left', 'Sting (Diamond Sword)', 'Recipes unlocked', 'Warden threatLevel 2']) {
+    'Worn and held', 'Recipes unlocked', 'Warden threatLevel 2']) {
     assert.ok(text.includes(need), `missing ${need} in ${text}`);
   }
   // Nothing absorbed is said as nothing, and the credits as not seen.
@@ -105,23 +113,186 @@ test('says what the save holds, with when it is from', async () => {
   assert.ok(text.includes('Has seen the creditsNo'));
 });
 
-test('draws 36 inventory slots with the hotbar apart, and 27 of the ender chest', async () => {
+test('draws 36 inventory slots as one block, the backpack over the hotbar, and 27 of the ender chest', async () => {
   const t = load({ body: ANSWER });
   t.app.playerDetails.open({ id: '-9', name: 'Alex' });
   await tick();
   const groups = body(t).querySelectorAll('div').filter((d) => d.getAttribute('role') === 'group');
-  assert.deepEqual(groups.map((g) => [g.getAttribute('aria-label'), g.children.length]), [['Inventory, hotbar', 9], ['Inventory, backpack', 27], ['Ender chest', 27]]);
-  const [hotbar, backpack, ender] = groups;
+  assert.deepEqual(groups.map((g) => [g.getAttribute('aria-label'), g.children.length]),
+    [['Worn', 4], ['Held', 2], ['Inventory, backpack', 27], ['Inventory, hotbar', 9], ['Ender chest', 27]]);
+  const [, , backpack, hotbar, ender] = groups;
+  // The game's layout: the three rows of the backpack, then the hotbar
+  // directly under them, in one block of the page that the ender chest is not.
+  assert.equal(backpack.parentNode, hotbar.parentNode);
+  assert.equal(backpack.parentNode.childNodes.indexOf(hotbar), backpack.parentNode.childNodes.indexOf(backpack) + 1);
+  assert.notEqual(ender.parentNode, hotbar.parentNode);
   assert.ok(hotbar.children[0].getAttribute('aria-label').startsWith('Cobblestone × 64'));
   assert.equal(hotbar.children[1].disabled, true);
   // Slot 20 is the twelfth of the backpack; a chest has a picture of its own.
   assert.ok(backpack.children[11].getAttribute('aria-label').startsWith('Chest × 2'));
   assert.equal(backpack.children[11].querySelectorAll('canvas')[0].dataset.picture, 'container/chest');
   assert.ok(ender.children[26].getAttribute('aria-label').startsWith('Ender Pearl × 16'));
-  // An item with no picture is its initials, and a touch can read it.
+  // An item with a picture is that, over its initials, which stand in
+  // while the picture is not there and are what a touch screen reads.
   assert.equal(hotbar.children[0].querySelectorAll('span')[0].textContent, 'CO');
   hotbar.children[0].click();
   assert.ok(body(t).querySelectorAll('p').some((p) => p.textContent.startsWith('Cobblestone × 64')));
+});
+
+test('an item is drawn with the picture of its own, asked for at 32 pixels, and its initials under it', async () => {
+  const record = {
+    ...SAVED,
+    inventory: [
+      { slot: 0, name: 'diamond_pickaxe', count: 1 }, { slot: 1, name: 'chest', count: 1 }, { slot: 2, name: 'pig_spawn_egg', count: 1 },
+      { slot: 3, name: 'light_blue_shulker_box', count: 1 }, { slot: 4, name: 'Not-An-Id', count: 1 }, { slot: 5, name: 'golden_apple', count: 3 },
+      { slot: 6, name: 'light_blue_bed', count: 1 }, { slot: 7, name: 'straw_bed', count: 1 }, { slot: 8, name: 'mauve_shulker_box', count: 1 },
+    ],
+  };
+  const t = load({ body: { ...ANSWER, saved: { ...ANSWER.saved, record } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const hotbar = body(t).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Inventory, hotbar');
+  const picture = (n) => hotbar.children[n].querySelectorAll('canvas')[0];
+  assert.equal(picture(0).dataset.picture, 'item/diamond_pickaxe');
+  assert.equal(picture(0).dataset.side, '32');
+  assert.equal(picture(5).dataset.picture, 'item/golden_apple');
+  // What the map already draws for a thing is what it is drawn with here.
+  assert.equal(picture(1).dataset.picture, 'container/chest');
+  assert.equal(picture(2).dataset.picture, 'mob/pig');
+  assert.equal(picture(3).dataset.picture, 'container/shulker');
+  // Two-word colours are colours too, and not the item of a bed that is not there.
+  assert.equal(picture(6).dataset.picture, 'bed/light_blue');
+  // A name that is not a colour is an item like any other, not a bed or box of a colour that is not there.
+  assert.equal(picture(7).dataset.picture, 'item/straw_bed');
+  assert.equal(picture(8).dataset.picture, 'item/mauve_shulker_box');
+  // An id that is not one is asked for nothing.
+  assert.equal(picture(4), undefined);
+  assert.equal(hotbar.children[0].querySelectorAll('span')[0].textContent, 'DP');
+  assert.equal(picture(0).dataset.glint, undefined);
+});
+
+test('an enchanted item is marked on its picture and not only on its border, and its enchantments stay in the words', async () => {
+  const record = {
+    ...SAVED,
+    inventory: [{ slot: 0, name: 'diamond_pickaxe', count: 1, enchantments: [{ id: 15, name: 'Efficiency', level: 5 }] }, { slot: 1, name: 'diamond_axe', count: 1 }],
+  };
+  const t = load({ body: { ...ANSWER, saved: { ...ANSWER.saved, record } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const hotbar = body(t).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Inventory, hotbar');
+  const [enchanted, plain] = hotbar.children;
+  assert.equal(enchanted.querySelectorAll('canvas')[0].dataset.glint, '1');
+  assert.ok(enchanted.classList.contains('enchanted'));
+  assert.equal(plain.querySelectorAll('canvas')[0].dataset.glint, undefined);
+  assert.ok(!plain.classList.contains('enchanted'));
+  assert.equal(enchanted.title, 'Diamond Pickaxe · Efficiency V');
+  // The head slot of the fixture holds an enchanted helmet too.
+  const worn = body(t).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Worn');
+  assert.equal(worn.children[0].querySelectorAll('button')[0].querySelectorAll('canvas')[0].dataset.glint, '1');
+});
+
+test('worn and held items are slots, each under the place it is in, and say the place and the wear', async () => {
+  const record = {
+    ...SAVED,
+    armor: [
+      { slot: 0, name: 'iron_helmet', count: 1, damage: 33, maxDamage: 165, enchantments: [{ id: 0, name: 'Protection', level: 4 }] },
+      { slot: 2, name: 'diamond_leggings', count: 1 },
+    ],
+    mainhand: { slot: 0, name: 'diamond_sword', count: 1, customName: 'Sting' },
+    offhand: { slot: 1, name: 'shield', count: 1, damage: 10, maxDamage: 336 },
+  };
+  const t = load({ body: { ...ANSWER, saved: { ...ANSWER.saved, record } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const worn = body(t).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Worn');
+  const held = body(t).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Held');
+  const captions = (group) => group.children.map((c) => c.querySelectorAll('span').find((s) => s.classList.contains('place')).textContent);
+  assert.deepEqual(captions(worn), ['Head', 'Chest', 'Legs', 'Feet']);
+  assert.deepEqual(captions(held), ['Main hand', 'Off hand']);
+  const box = (group, n) => group.children[n].querySelectorAll('button')[0];
+  assert.equal(box(worn, 0).getAttribute('aria-label'), 'Head: Iron Helmet · Protection IV · 132 of 165 uses left');
+  assert.equal(box(worn, 0).querySelectorAll('canvas')[0].dataset.picture, 'item/iron_helmet');
+  // The wear is the bar a slot of the grid has.
+  assert.equal(box(worn, 0).querySelectorAll('span').filter((s) => s.classList.contains('wear')).length, 1);
+  assert.equal(box(worn, 1).getAttribute('aria-label'), 'Chest: Empty');
+  assert.equal(box(worn, 1).disabled, true);
+  assert.equal(box(worn, 2).getAttribute('aria-label'), 'Legs: Diamond Leggings');
+  assert.equal(box(worn, 3).disabled, true);
+  assert.equal(box(held, 0).getAttribute('aria-label'), 'Main hand: Sting (Diamond Sword)');
+  assert.equal(box(held, 1).getAttribute('aria-label'), 'Off hand: Shield · 326 of 336 uses left');
+  assert.equal(box(held, 1).querySelectorAll('canvas')[0].dataset.picture, 'item/shield');
+  // Nothing in either hand is an empty slot and not the word for it.
+  const bare = load({ body: { ...ANSWER, saved: { ...ANSWER.saved, record: { ...SAVED, mainhand: undefined, offhand: undefined, armor: [] } } } });
+  bare.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const empty = body(bare).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Held');
+  assert.deepEqual(empty.children.map((c) => c.querySelectorAll('button')[0].getAttribute('aria-label')), ['Main hand: Empty', 'Off hand: Empty']);
+  // A touch reads one by choosing it, and it is read again from a new answer.
+  box(worn, 0).click();
+  assert.ok(body(t).querySelectorAll('p').some((p) => p.textContent === 'Iron Helmet · Protection IV · 132 of 165 uses left'));
+});
+
+const marksOf = (t) => body(t).querySelectorAll('.marks').map((row) => row.children.map((mark) => mark.querySelectorAll('canvas').map((c) => c.dataset.picture)));
+
+test('health, hunger and absorption are drawn as the game draws them, full, half and empty, and the words stay', async () => {
+  const record = { ...SAVED, absorption: { current: 5, max: 16 } };
+  const t = load({ body: { ...ANSWER, saved: { ...ANSWER.saved, record } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const [health, hunger, absorption] = marksOf(t);
+  // 17 of 20: eight whole hearts, a half and an empty container.
+  assert.equal(health.length, 10);
+  assert.deepEqual(health[0], ['ui/heart_container', 'ui/heart']);
+  assert.deepEqual(health[7], ['ui/heart_container', 'ui/heart']);
+  assert.deepEqual(health[8], ['ui/heart_container', 'ui/heart_half']);
+  assert.deepEqual(health[9], ['ui/heart_container']);
+  // 14 of 20: seven drumsticks and three empty.
+  assert.deepEqual(hunger.map((m) => m.length), [2, 2, 2, 2, 2, 2, 2, 1, 1, 1]);
+  assert.ok(hunger.slice(0, 7).every((m) => m[1] === 'ui/hunger') && hunger[7][0] === 'ui/hunger_container');
+  // 5 absorbed: two whole hearts and a half, in gold, and no empty ones.
+  assert.deepEqual(absorption, [['ui/heart_container', 'ui/absorption'], ['ui/heart_container', 'ui/absorption'], ['ui/heart_container', 'ui/absorption_half']]);
+  // Each is two of the picture's pixels to one, and is for the eye alone.
+  const row = body(t).querySelectorAll('.marks')[0];
+  assert.equal(row.getAttribute('aria-hidden'), 'true');
+  assert.ok(row.querySelectorAll('canvas').every((c) => c.dataset.side === '18'));
+  // The words say the same, and the bar is there for when the marks are not.
+  const text = words(t);
+  assert.ok(text.includes('8.5 of 10 hearts') && text.includes('14 of 20') && text.includes('2.5 hearts'));
+  const gauge = row.parentNode;
+  assert.ok(gauge.classList.contains('gauge'));
+  assert.equal(gauge.querySelectorAll('.meter').length, 1);
+  assert.equal(gauge.querySelectorAll('.meter')[0].getAttribute('role'), 'meter');
+});
+
+test('live health is drawn as marks too, and a half point is half a heart', async () => {
+  const t = load({ body: { ...ANSWER, live: { ...LIVE, health: 9 } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const [health] = marksOf(t);
+  assert.deepEqual(health.map((m) => m[1] || ''), ['ui/heart', 'ui/heart', 'ui/heart', 'ui/heart', 'ui/heart_half', '', '', '', '', '']);
+  const barely = load({ body: { ...ANSWER, live: { ...LIVE, health: 0.5 } } });
+  barely.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.deepEqual(marksOf(barely)[0][0], ['ui/heart_container', 'ui/heart_half']);
+});
+
+test('a gauge too large to be a row of the game’s marks stays a bar, and so does one with nothing to count', async () => {
+  const record = { ...SAVED, health: { current: 150, max: 200 }, hunger: { current: 3, max: 0 }, absorption: { current: 0, max: 16 } };
+  const t = load({ body: { ...ANSWER, saved: { ...ANSWER.saved, record } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.equal(body(t).querySelectorAll('.marks').length, 0);
+  assert.ok(words(t).includes('75 of 100 hearts'));
+  // The health is the bar, with the words the marks would have had beside it,
+  // and the hunger that has no ceiling is not drawn at all.
+  const meters = body(t).querySelectorAll('.meter');
+  const health = meters.find((m) => m.getAttribute('aria-label') === 'Health');
+  assert.ok(health, 'no bar for the health');
+  assert.equal(health.getAttribute('role'), 'meter');
+  assert.equal(health.getAttribute('aria-valuetext'), '75 of 100 hearts');
+  assert.equal(health.parentNode.querySelectorAll('.marks').length, 0);
+  assert.equal(meters.some((m) => m.getAttribute('aria-label') === 'Hunger'), false);
+  assert.ok(words(t).includes('None'));
 });
 
 test('goes to where the player died, in the dimension it was in', async () => {
@@ -169,6 +340,11 @@ test('puts player text in as text, never as markup', async () => {
   t.app.playerDetails.open({ id: '-9', name: hostile });
   await tick();
   assert.equal(t.made.get('player-title').textContent, hostile);
+  // The name is read from the slot, and is text wherever it is put.
+  const held = body(t).querySelectorAll('div').find((d) => d.getAttribute('aria-label') === 'Held');
+  const stick = held.children[0].querySelectorAll('button')[0];
+  assert.ok(stick.getAttribute('aria-label').includes(hostile) && stick.title.includes(hostile));
+  stick.click();
   assert.ok(words(t).includes(hostile));
   assert.equal(body(t).querySelectorAll('img').length, 0);
 });

@@ -550,7 +550,80 @@ func art() (icons.Set, error) {
 		set.Pictures[key] = pic
 		n++
 	}
+	// What the player carries, each a square of its own colour: all but the
+	// ones that are left without, which the panel shows as their initials.
+	for i, name := range itemNames(harnessPlayer()) {
+		if unpictured[name] {
+			continue
+		}
+		pic, err := square(16, shade(100+i))
+		if err != nil {
+			return set, err
+		}
+		set.Pictures["item/"+name] = pic
+	}
+	// The marks for health and hunger: a container, and a whole and a half
+	// of what fills it, each 9 pixels a side as the game's are.
+	for key, c := range map[string]color.NRGBA{
+		"heart": {220, 40, 50, 255}, "hunger": {170, 110, 60, 255}, "absorption": {230, 190, 40, 255},
+	} {
+		whole, err := mark(c, 9)
+		if err != nil {
+			return set, err
+		}
+		half, err := mark(c, 5)
+		if err != nil {
+			return set, err
+		}
+		set.Pictures["ui/"+key], set.Pictures["ui/"+key+"_half"] = whole, half
+	}
+	for _, key := range []string{"heart_container", "hunger_container"} {
+		pic, err := mark(color.NRGBA{40, 40, 44, 255}, 9)
+		if err != nil {
+			return set, err
+		}
+		set.Pictures["ui/"+key] = pic
+	}
 	return set, nil
+}
+
+// unpictured are the items the harness has no picture for.
+var unpictured = map[string]bool{"ender_pearl": true, "unlisted_gizmo": true}
+
+// mark is a square 9 pixels a side with its left columns filled.
+func mark(c color.NRGBA, columns int) ([]byte, error) {
+	img := image.NewNRGBA(image.Rect(0, 0, 9, 9))
+	for y := range 9 {
+		for x := range columns {
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	err := png.Encode(&b, img)
+	return b.Bytes(), err
+}
+
+// itemNames is the id of every item a record holds, once each.
+func itemNames(r players.Record) []string {
+	seen := map[string]bool{}
+	var names []string
+	add := func(items ...players.Item) {
+		for _, it := range items {
+			if !seen[it.Name] {
+				seen[it.Name] = true
+				names = append(names, it.Name)
+			}
+		}
+	}
+	add(r.Armor...)
+	add(r.Inventory...)
+	add(r.EnderChest...)
+	for _, held := range []*players.Item{r.Mainhand, r.Offhand} {
+		if held != nil {
+			add(*held)
+		}
+	}
+	return names
 }
 
 func markedWorld() markers.World {
@@ -801,12 +874,22 @@ func harnessPlayer() players.Record {
 		},
 		Mainhand: &players.Item{Slot: 0, Name: "diamond_sword", Count: 1, Damage: 100, MaxDamage: 1561, Custom: "Harness Blade",
 			Enchants: []players.Enchantment{{ID: 9, Name: "Sharpness", Level: 5}, {ID: 99, Level: 1}}},
+		Offhand: &players.Item{Slot: 1, Name: "shield", Count: 1, Damage: 40, MaxDamage: 336},
 		Inventory: []players.Item{
-			item(0, "diamond_pickaxe", 1, func(i *players.Item) { i.Damage, i.MaxDamage = 500, 1561 }),
+			item(0, "diamond_pickaxe", 1, func(i *players.Item) {
+				i.Damage, i.MaxDamage = 500, 1561
+				i.Enchants = []players.Enchantment{{ID: 15, Name: "Efficiency", Level: 4}}
+			}),
 			item(1, "cobblestone", 64, nil),
 			item(2, "bread", 12, nil),
+			item(3, "torch", 32, nil),
+			item(4, "golden_apple", 3, nil),
+			item(5, "unlisted_gizmo", 1, nil),
 			item(9, "chest", 3, nil),
 			item(10, "pig_spawn_egg", 1, nil),
+			item(11, "oak_planks", 7, nil),
+			item(12, "iron_ingot", 21, nil),
+			item(18, "diamond", 5, nil),
 			item(30, "oak_planks", 7, nil),
 		},
 		EnderChest: []players.Item{item(0, "ender_pearl", 16, nil), item(26, "shulker_box", 1, nil)},
