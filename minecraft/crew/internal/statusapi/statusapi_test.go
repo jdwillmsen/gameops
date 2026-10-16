@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
@@ -65,5 +66,12 @@ func TestWritesAreRefused(t *testing.T) {
 	Handler(fixed{}, "dev").ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/state", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /v1/state = %d, want 405", rec.Code)
+	}
+}
+
+func TestMetricsServesTheProcessRegistry(t *testing.T) {
+	rec := get(t, Handler(fixed{}, "dev"), "/metrics")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "go_goroutines") {
+		t.Errorf("metrics = %d, body lacks go_goroutines", rec.Code)
 	}
 }
