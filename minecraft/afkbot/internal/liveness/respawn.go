@@ -38,15 +38,19 @@ type Writer interface {
 
 // Respawner completes the respawn handshake on the agent's behalf.
 //
-// Bedrock respawn is a three-step exchange, not a single packet: the client
-// asks with a PlayerAction, the server answers with Respawn states, and the
-// client confirms with ClientReadyToSpawn. Sending only the last step does
-// nothing, which is why this is a small state machine rather than one write.
+// Bedrock respawn is an exchange, not a single packet, and the order matters:
+// the server announces it is searching for a spawn point, the client says it
+// is ready with ClientReadyToSpawn, the server answers with the spawn point
+// it chose, and only then does the client ask with a PlayerAction. A server
+// since 1.26.5x does not search without the second step, drops it if it
+// arrives before the first, and drops a request sent before the third; each
+// leaves the player dead for good, which is why this is a small state
+// machine rather than one write.
 type Respawner struct {
 	runtimeID uint64
 	// dead tracks whether a death has been seen but not yet completed, so a
-	// stray Respawn packet outside a death cannot make the agent confirm a
-	// respawn nobody asked for.
+	// stray Respawn packet outside a death cannot make the agent request a
+	// respawn it does not need.
 	dead bool
 }
 
@@ -63,32 +67,39 @@ func (r *Respawner) Dead() bool { return r.dead }
 
 // Handle inspects one incoming packet and drives the respawn exchange.
 //
-// Returns true when the packet was part of a death or respawn, so the caller
-// can log it; every other packet is left entirely alone.
+// Returns true when the packet changed whether the agent is dead, so the
+// caller can log and count the death or the respawn exactly once; every other
+// packet, including the exchange's intermediate steps, reports false.
 func (r *Respawner) Handle(pk packet.Packet, w Writer) (handled bool, err error) {
 	switch p := pk.(type) {
 	case *packet.DeathInfo:
-		// The death screen has appeared. Ask to respawn immediately: there is
-		// nobody at a keyboard to press the button.
+		// Nothing to send yet: a ClientReadyToSpawn that reaches the server
+		// before it has started waiting for one is silently dropped.
 		r.dead = true
-		return true, w.WritePacket(&packet.PlayerAction{
-			EntityRuntimeID: r.runtimeID,
-			ActionType:      protocol.PlayerActionRespawn,
-		})
+		return true, nil
 
 	case *packet.Respawn:
-		// The server sends two of these while placing the player. Only the
-		// second expects an answer, and answering the first would confirm a
-		// spawn that has not been found yet.
-		if !r.dead || p.State != packet.RespawnStateReadyToSpawn {
+		// Joining sends the same states with no death, and those are the
+		// connection's own to answer.
+		if !r.dead {
 			return false, nil
 		}
-		r.dead = false
-		return true, w.WritePacket(&packet.Respawn{
-			Position:        p.Position,
-			State:           packet.RespawnStateClientReadyToSpawn,
-			EntityRuntimeID: r.runtimeID,
-		})
+		switch p.State {
+		case packet.RespawnStateSearchingForSpawn:
+			// The position is the server's to choose, not ours.
+			return false, w.WritePacket(&packet.Respawn{
+				State:           packet.RespawnStateClientReadyToSpawn,
+				EntityRuntimeID: r.runtimeID,
+			})
+		case packet.RespawnStateReadyToSpawn:
+			// This is the respawn button, and nobody is at a keyboard to
+			// press it.
+			r.dead = false
+			return true, w.WritePacket(&packet.PlayerAction{
+				EntityRuntimeID: r.runtimeID,
+				ActionType:      protocol.PlayerActionRespawn,
+			})
+		}
 	}
 	return false, nil
 }
