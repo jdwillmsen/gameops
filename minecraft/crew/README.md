@@ -98,3 +98,49 @@ page keeps the type table, so adding a mob is a page-only change. Entity
 records on the wire carry the feet position and a head yaw byte. Players
 reported by `MovePlayer` are shifted down by the 1.62 eye height; the other
 position packets are taken to report the feet.
+
+## Camera wall load test
+
+`loadtest/run.sh` starts M crew units against a lab server with distinct
+usernames and status ports, opens N headless Chrome viewers spread across them
+(`loadtest/viewers.mjs`, playwright-core), and appends one row per run to a
+markdown file. Crew CPU and RSS come from `/proc`, bytes from
+`/v1/camera/stats`, and frame cost from the page's `window.__stats`.
+
+```
+minecraft/crew/loadtest/run.sh -b <crew binary> -c <chrome> -w <dir holding node_modules/playwright-core> \
+  -a <atlas cache dir> -m <units> -n <viewers> [-r radius] [-k viewer cap] [-d window seconds] -o results.md
+```
+
+Units are named `load-1`, `load-2`, ... (`-u` changes the prefix) on status
+ports from 18100 up (`-p`). The lab must already be running. Crew CPU and
+bytes cover the steady window after every page has meshed; "Replay" is the one
+off cost of the viewers' first connect.
+
+Results, 8-core Linux host shared with other work, lab world, view distance 8,
+software GL (no GPU), 60 s steady window, one viewer per unit where N equals M.
+Frame work is time inside the page's frame callback; the software renderer's
+cost lands outside it, so the page frame rate is the figure to read. The max
+includes the replay burst. The page has no frustum-limited radius or worker
+meshing yet, so these rows are without them.
+
+| Units | Viewers | Radius | Crew CPU mean / max | Crew RSS max (MB) | Steady KB/s per unit | Steady KB/s per viewer | Replay MB (all units) | Settle (s) | Frame work avg (ms) | Frame work max (ms) | Page fps |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | 4 | 1.1% / 1.1% | 116 | 3.9 | 3.9 | 0.6 | 0.4 | 0.6 | 72 | 60.0 |
+| 2 | 3 | 4 | 1.1% / 1.2% | 111 | 6.3 | 4.2 | 1.7 | 0.7 | 0.8 | 349 | 34.3 |
+| 4 | 4 | 4 | 0.9% / 1.0% | 129 | 3.8 | 3.8 | 2.2 | 0.8 | 0.9 | 597 | 25.5 |
+| 4 | 4 | 8 | 1.0% / 1.0% | 112 | 4.3 | 4.3 | 15.5 | 1.4 | 2.7 | 947 | 8.4 |
+| 1 | 8 | 4 | 2.3% / 2.3% | 109 | 30.0 | 3.8 | 4.6 | 1.6 | 0.8 | 1024 | 13.1 |
+
+The last two rows are beyond the required (1,1), (2,3), (4,4) runs: radius 8
+for comparison, and eight viewers on one unit with `CAMERA_MAX_VIEWERS=8`.
+
+Chosen defaults: **tile radius 4 and viewer cap 4, unchanged.** Crew is not
+the limit: a unit stays near 1 to 2% of a core and about 4 KB/s per viewer
+however many units run, and even eight viewers on one unit cost 2.3% CPU. The
+browser is: doubling the radius to 8 sends 7 times the replay data and drops
+four tiles from 25 to 8 fps on software GL, while radius 4 settles in under a
+second. The cap stays 4 because the cost it guards is the viewers' rendering
+and the single unit's fan-out has no measured cliff below it; raise it per
+deployment if a wall needs more than four viewers on one unit. Re-measure on
+real GPUs once frustum limiting and worker meshing land.
