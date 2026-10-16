@@ -2538,7 +2538,9 @@ with. They are drawn from the surface heights above and from nothing else.
 of a tree's crown, of an ice sheet and of the sea. The ground under them
 is not looked for and there is no way to ask for it, because that means
 reading sub-chunks, which shows more than the terrain tiles do, and this is
-a no-cheats survival world. So the sea is flat, 62, and has no shade and no
+a no-cheats survival world. (The [underground views](#underground-views) do
+read them, by the owner's decision, and the Nether's topography is drawn from
+them; the Overworld's and the End's still is not.) So the sea is flat, 62, and has no shade and no
 tint (its band is drawn as nothing, so the terrain's own water shows as it
 is), and a forest is its canopy: the drawing blurs a few blocks of it
 before it lights and lines the land, which takes the shape of each tree
@@ -2614,9 +2616,12 @@ are what the legend lists. Each can be hidden or shown alone from the panel
 as a biome can, which asks for the tile with `hide=<band>,…` (the numbers of
 the bands, from 0, which matter only to a tile that has a tint).
 
-**Dimensions.** The Overworld is drawn. The Nether is refused: its heightmap
-is the bedrock roof, flat over every chunk the world has, so there is nothing
-to draw, and a tile there is a 404, the listing says `offered: false`
+**Dimensions.** The Overworld is drawn. The Nether's own heightmap is the
+bedrock roof, flat over every chunk the world has, so it is not what is
+drawn there: with `LAYERS_ENABLED=true` it is drawn from the floors under the
+level the map is cut at, read from the sub-chunks (see [Underground
+views](#underground-views)), and the tile address and the listing take a
+`level`. Without it a tile there is a 404, the listing says `offered: false`
 and the page greys the rows out with the reason. The End is drawn, and
 reads well: its islands stand over a void that has no surface and so is left
 clear, and its rim, its pillars and the rise of the main island show in the
@@ -2634,7 +2639,7 @@ is a picture, clear, so that the page knows it is there.
 **On the page.** Topography is a section of the layer panel after the Biomes,
 with a row for each of the three. A row that is on says why it is not
 drawing where that is so: that the heights have not been read yet, that it
-is not drawn in the Nether, or to zoom in. Under the tint are its bands,
+is not drawn in the Nether (where the floors are not read), or to zoom in. Under the tint are its bands,
 each with its colour and the heights it is. While any row is on the footer
 says the height of the surface under the pointer, from the `surface` of
 `GET /api/biomes/at` that the biomes' readout already asks for, so that it
@@ -2642,8 +2647,8 @@ does not depend on the biome overlay: alone it reads `Surface: 71`, and
 with the biome overlay on as well it is the one line `Biome: Plains ·
 surface 71`, where it was for the biomes alone. Where there is no surface it
 says `Surface: none here`, and where nothing is generated `Surface: not
-generated here`. It is not asked for in the Nether, where the rows are
-off. `GET /api/topography?dimension=<id>` gives what the page needs of a
+generated here`. In the Nether it is not asked for: the floors have no
+surface to read under the pointer. `GET /api/topography?dimension=<id>` gives what the page needs of a
 dimension: whether it is `offered`, whether the heights are `ready`, the
 reading's `version`, the zooms, the contour `intervals` by zoom out from 0 (the same finer than that)
 and `heavyEvery`, and the `bands` with their `from`, `to`, `colour` (empty
@@ -2690,6 +2695,169 @@ finer than a block at most 136 by 136 blocks.
 A tile asked for with no styles, a style that is not one of the three, a
 `hide` of a band there is not, or either value over 64 characters, is a
 400. A style named twice is that style once.
+
+## Underground views
+
+A cut through a dimension at a height, drawn in the true colours of its
+blocks and laid over the terrain, and the Nether's topography at each of its
+levels. It is off until `LAYERS_ENABLED=true`, and for each viewer until they
+turn a row on.
+
+**What the owner decided.** Everything the save holds is shown, in the
+colours it has: ores, lava, spawners, mineshaft timbers, the sculk of an
+ancient city. It is shown to every logged-in player and not to a few, in
+every dimension. There is no masking of ores or loot, no limit to places
+visited and no per-player gate; the map keeps no record of where anyone has
+been to limit it by, and the save has none either. This is a decision about
+a no-cheats survival world, made knowingly: a viewer can see where caves
+and lava are and can dig to a diamond. What stays as it was is the
+structures the owner [withholds](#structures), which are left out of every
+answer about structures and are drawn by nothing here, and the heights,
+which are read from the same files the game itself draws from.
+
+**Two styles.** **Cave spaces** draws the ground of the highest enclosed
+space at or below the cut: the highest air with something to stand on and a
+solid roof anywhere over it, within the band under the cut. Rock between
+the spaces is drawn dimmed, to 55% of its colour, so that caves and
+tunnels are what stands out, and a column open to the sky shows as the cut
+would. **Cut view** draws the highest block that is not air or a plant at or
+below the cut: the world with everything above taken away. Tried against the
+FWB world, spaces reads better for finding caves: a cut at depth is a field
+of granite, diorite and andesite with the caves as dark pits in it, where
+the dimming of spaces makes the caves bright against flat rock. The cut view
+stays for the surface (at 62) and for the Nether's top level, where the band
+is all of what is under the cut. Both light a block by the two beside it to
+the north and west, even across the edge of a tile, so that tiles meet
+without a seam, and darken with the depth under the cut, to 60% at the
+bottom of the band. Water is laid over its bed by how deep it is, lava is
+never darkened, and a plant is seen through.
+
+**Levels.** The overworld's are Sea level (62), 40, 16, 0, -16, -32 and -48,
+each looking at the 16 blocks under its cut, a sub-chunk; the request may
+also ask for a band of 32 or 64, or all of what is under the cut. The
+Nether's are its own levels, `NETHER_TOP_Y` and `NETHER_LEVELS`, with their
+labels, each looking at all of what is under the cut: a column has several
+floors and the cut says which is seen first. The picker of levels over the
+map and this are one choice, whichever moves it. The End has one cut, which
+is all of it. A level's id is the height of its cut, in the address.
+
+**Colours.** A table of about 330 blocks, with rules for the sixteen dyes,
+the woods, the stages of copper and the shapes of a block (a stair or a slab
+is its material), and a colour made from the name for any block with none
+of those, the same for the same name, so a new block is neither invisible
+nor the colour of its neighbour. The numbers are this service's own
+estimates of the average colour of each block seen from above, written
+down as numbers: no texture or other asset of Mojang's is in the repository
+or the image, and none is fetched for this. On the FWB world 697 kinds of
+block were met; the ones still guessed are plants and invisible blocks,
+which are not drawn. Grass, leaves and water are tinted by the biome the
+biome reading holds for the column: the colour in the table is a plains
+biome's and a biome's own is laid on it as a ratio per channel, so that
+plains is as the table has it. The biome is the surface one, so no cave
+biome is shown by it. Fetching the textures from `bedrock-samples` at run
+time and averaging them, as the icons are fetched, would give truer colours;
+that is not done, and is the way to better ones. Legacy names the game kept
+from before its blocks were renamed one by one are in the table too, and
+blocks new to the game (sulfur, cinnabar, poplar) are guesses from their
+names.
+
+**Reading the sub-chunks.** `internal/layers` reads versions 1, 8 and 9 of a
+sub-chunk record, every width of palette (1, 2, 3, 4, 5, 6, 8, 16 bits and
+none), and the second storage layer as a mark that a block stands in water.
+A palette entry is walked by a reader that skips the states in place, so a
+slice costs about 20 microseconds to decode. A slice that does not read is a
+gap in the chunk and does not take the tile with it; the chunks of a tile
+that had one are counted in `mcmap_layers_unreadable_chunks_total`.
+
+**Drawn on request.** `GET /api/layers/tiles/<dimension>/<zoom>/<x>/<y>.png`
+is drawn when asked for, from a view of the mirrored world opened after each
+snapshot that changed a file (a snapshot that fetched and removed nothing
+leaves the pictures as they are), and kept in a cache of `LAYERS_CACHE_MB`
+(64): a least recently used one, counted in bytes, which includes tiles with
+nothing in them, since most of a sparse world's grid is such tiles. A tile
+asked for by several viewers at once is drawn once. At most
+`LAYERS_MAX_RENDERS` (2) are drawn at a time, because the cost falls on a
+CPU the game server shares; the rest wait, up to 25 seconds, and are then
+told 503 with a `Retry-After`. Only zoom 0 and zoom -1 are drawn: a tile at
+-1 is 512 blocks across and reads 1,089 chunks; one more zoom out reads
+four times as many and is nearly two seconds, which is not a cost for a
+viewer's request, so below -1 the page shows the terrain. A new snapshot is
+a new version, which lets go of every tile of the old, and a tile asked for
+with the current `v` is kept by the browser for good. Dropping only the
+tiles of chunks that changed would need the mirror to say which chunks
+changed, which it does not, and the version bump is the whole of the
+invalidation. The world is opened through hard links under
+`DATA_DIR/layers/serve`, in two directories used in turn.
+
+**The Nether's floors.** The worker reads every Nether chunk once, in one
+walk of the database, after the biomes and gated as they are: it is not
+read again while the chunk count stands and the reading is under an hour
+old. For each level it builds a heights map of the floor at or below the
+cut, counted as the game counts its heightmap, which `internal/topo` draws
+as it draws the overworld's. They are kept on the volume in
+`DATA_DIR/layers/floors`, so a restart serves them from its first request,
+and used only if they are of one snapshot and of the levels configured now.
+A column with no floor under its cut has no surface there.
+
+**Block cache.** The database's block cache was tried at 8, 32 and 128 MB
+over a block of neighbouring tiles, as a viewer panning would ask for them:
+53, 56 and 50 ms a tile at zoom 0, the same within the noise, at 80, 122 and
+315 MB resident. It is left at the library's.
+
+**Cost, measured** on the FWB world (128,000 overworld chunks, 19,000
+Nether), one core, a warm page cache, on a devbox of 8 cores, so on the
+pod's 500m CPU allow twice the wall time. Per tile, mean in milliseconds,
+over 24 tiles that are nearly all chunks, with the biome tint:
+
+| Tile | Read and decode | Paint | PNG | Bytes |
+|---|---|---|---|---|
+| Overworld spaces y0, zoom 0 | 46 | 9.6 | 1.5 | 28 KB |
+| Overworld spaces y0, zoom -1 | 151 | 36 | 2.0 | 49 KB |
+| Overworld cut, sea level, zoom 0 / -1 | 45 / 150 | 5.1 / 20 | 1.4 / 2.1 | 22 KB / 50 KB |
+| Overworld spaces y-32, zoom 0 / -1 | 46 / 151 | 9.5 / 36 | 1.5 / 1.9 | 26 KB / 48 KB |
+| Nether spaces y66, zoom 0 / -1 | 42 / 153 | 8.7 / 30 | 2.2 / 2.9 | 59 KB / 85 KB |
+| Nether cut y100, zoom 0 / -1 | 43 / 152 | 6.3 / 22 | 1.7 / 2.2 | 36 KB / 57 KB |
+
+So about 55 ms at zoom 0 and 180 ms at zoom -1, of which three quarters is
+the database lookups and decoding. The tint costs 4 and 16 ms. Whole-dimension
+passes, which the service does not make, for scale: every zoom-0 tile of the
+Nether is 7 seconds and 5 MB, of the overworld 51 seconds and 20 MB; a bare
+walk and decode of all the sub-chunks is 12 and 15 seconds, most of it the
+10 it takes to iterate every key. The Nether's floors for three levels are
+10 seconds in one walk and 4.7, 4.5 and 3.5 MB in memory. Resident memory
+peaked at 150 to 180 MB in these runs, the biome reading included. PNG,
+because Go has no WebP encoder without cgo; a tile is 20 to 85 KB and not
+the 10 to 20 an estimate had it.
+
+**Chunks that are blank.** A column the view leaves clear is one with no
+chunk, or a chunk with no sub-chunk records. The FWB world has chunks that
+hold only a finalized-state record: the game wrote them as it began to
+generate and no blocks followed. They are counted as chunks and are blank
+here and on the terrain; it is not a fault of the tile.
+
+**Lost chunks.** A chunk that was never generated and one that was and has
+gone look the same on the terrain: nothing. The chunk ledger (`DATA_DIR/chunks/seen.bin`,
+the `mcmap_world_chunks_lost` count) knows every chunk the world has held.
+The **Lost chunks** row of the Overlays section, off to begin with, marks
+those the last count did not find (`missing`, the ones absent now, and not
+every chunk ever lost, since one that came back is ground again) as a red
+translucent square with a heavier diagonal, at zoom -5 to 4, as a pixel at
+least at the widest. `GET /api/lost?dimension=<id>` says whether there is a
+record and how many are missing; the tiles are drawn from a set held in
+memory, indexed once for a count.
+
+**On the page.** An Underground section of the layer panel, after the
+Topography, has two rows, Cave spaces and Cut view, both off to begin with
+and at most one on. Under each is the choice of height, as buttons, the
+same choice under both. The height of the overworld is kept in the record
+(settings version 4, its own `underground` part, which a record of version 3
+is brought to with the height unset; a cut can now be below zero), is
+carried in a saved view's place as the Nether's level is, and starts at 0
+where nothing is kept. Which style is on is the rows' own switches, kept and
+saved in a view as any layer's. It is drawn over the terrain and under the
+overlays, gives way to a past day and to the login, and past zoom -1 the
+terrain is what shows; a row says why where it is not drawing. On a phone it
+is in the sheet with the rest.
 
 ## Search
 
@@ -4556,6 +4724,8 @@ counted apart and is not a failure.
 | `player-heads` | A player with a head listed is drawn with it | a player online, with a head |
 | `zoom-sizes` | Through every zoom level and back, every picture on the map is the size it was made at, each frame of the zoom and once it settles | a marker or a live entity |
 | `nether-levels` | Where the nether has more than one level, the picker is there in the nether and nowhere else, and choosing a level draws tiles from it; skipped where it has one | the nether drawn at more than one level |
+| `underground` | Where the map draws the underground views: each style on asks for its tiles and draws them, the cut takes the place of the spaces and is not drawn beside it, the nether is drawn at its level and its topography from its floors, the lost chunks are marked where a record is kept, and off takes the tiles away; skipped where the views are off | the underground tiles drawn, the cut's, the nether's, its topography's, the lost chunks' |
+| `underground-phone` | On a phone the underground rows are in the layer sheet, can be pressed with a finger and draw; skipped where the views are off | the tiles drawn |
 | `layer-panel` | The panel opens, is sized narrower and wider, folds and returns, and the map takes the room | |
 | `toggles` | Switching off a type of mob and a kind of structure takes things off the map and switching them on brings them back; the biome overlay draws tiles, picking one biome out changes them, and off removes them; the topography's three rows on ask for tiles of all three drawings and nothing else, and off take them away | mobs, structures or biomes; each that is missing is said |
 | `height-bands` | The Height section lists bands; hiding the one with the most in it takes markers off the map and showing it brings them back | a marker or a live entity with a height |
@@ -4744,6 +4914,8 @@ host; `--insecure-local-tls` accepts that certificate and is refused for
 any address but this machine's. It speaks HTTP/1.1, as the gateway does to
 the service.
 
+It has a world of sub-chunks made up for the underground views, written as the game writes them: four by four chunks of overworld with a cave in the stone, and a chunk of Nether with a floor and a shelf, from which the views and the Nether's floors are drawn, and a chunk count that found four chunks gone. That is what the `underground` checks draw and mark.
+
 Its nether has an extra level, `Mid`, drawn in the opposite shades of the
 default cut, which is what the `nether-levels` check chooses and looks for.
 
@@ -4828,6 +5000,9 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `STRUCTURES_WITHHELD` | no | `buried_treasure` | The kinds of structure kept off the map for everybody, by the names the API uses, separated by commas: not surveyed, and in no answer. `none` withholds nothing; a name that is no kind's stops the service |
 | `STRUCTURE_SEED_SEARCH` | no | `true` | `false` leaves a seed the world's records refute as it is, instead of working the right one out from them |
 | `BIOMES_ENABLED` | no | `false` | `true` reads biomes and serves `/api/biomes` and its tiles; off, search finds no biomes |
+| `LAYERS_ENABLED` | no | `false` | `true` draws the [underground views](#underground-views) on request, reads the Nether's floors each cycle for its topography, and serves `/api/layers`. Off, none of it is served and the page has no rows for it. Grass, leaves and water are tinted by biome only with `BIOMES_ENABLED` |
+| `LAYERS_CACHE_MB` | no | `64` | The most the tile cache of the underground views holds, 1 to 1024. Checked only with `LAYERS_ENABLED=true` |
+| `LAYERS_MAX_RENDERS` | no | `2` | The most underground tiles drawn at once, 1 to 8: the cost falls on a CPU the game server shares. Checked only with `LAYERS_ENABLED=true` |
 | `TRAILS_ENABLED` | no | `false` | `true` keeps player positions and serves `/api/trails`. Trails also need `LIVE_ENABLED` |
 | `TRAILS_MAX_AGE` | no | `24h` | How long a trail point is kept; `1m` to `168h`. Checked only with `TRAILS_ENABLED=true` |
 | `TRAILS_MAX_POINTS` | no | `5000` | Most trail points kept for one player, after old ones are thinned; 10 to 50000. `20000` suits `TRAILS_MAX_AGE=168h`. Checked only with `TRAILS_ENABLED=true` |
@@ -4866,8 +5041,12 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/biomes/at?dimension=<id>&x=<x>&z=<z>` | Session required. `generated`, and with it the `biome` at that block, and the `surface`: the y of the column's highest block, which is the top of a tree, ice or the sea and not the ground. `surface` is left out where it is not known, and until the heights have been read |
 | `GET /api/biomes/nearest?dimension=<id>&biome=<name>&x=<x>&z=<z>&limit=<n>` | Session required. `biome`, and `hits`, nearest first: each `x`, `z`, `distance` and its `region` (`area`, `chunks`, `minX`, `minZ`, `maxX`, `maxZ`), with `more`. `limit` is 10 unless given and at most 50. 400 for an unknown biome |
 | `GET /api/biomes/region?dimension=<id>&x=<x>&z=<z>` | Session required. The stretch of biome that block is in: `found`, `biome`, `region`, and `rects`, at most 4,096 rows of chunks each `[minX, minZ, maxX, maxZ]` in blocks, with `rectsMore` |
-| `GET /api/topography?dimension=<id>` | Session required. `offered` (false in the Nether), `ready` (false until the heights have been read), `version`, `tiles` (`minZoom` -5, `maxZoom` 4, `size`), `intervals` (the contour interval in blocks by zoom out from 0), `heavyEvery`, and `bands`, lowest first: each `from`, `to`, `colour` (`#rrggbb`, empty where the band is not drawn) and sometimes a `label`. 400 for an unknown dimension. Served wherever `/api/biomes` is |
-| `GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}.png?styles=<style>,…&hide=<band>,…&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -5 to 4. `styles` names `hillshade`, `contours` and `tint`, any of them, in one picture; `hide` leaves bands of the tint out. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 in the Nether, where neither the tile nor (at zoom 0 and wider) the ring read round it has a surface, and before the heights are read; 400 for a bad address, no or unknown `styles`, or a band there is not |
+| `GET /api/topography?dimension=<id>&level=<id>` | Session required. `offered` (false in the Nether unless `LAYERS_ENABLED=true`, which reads its floors; `level` is one of its levels, `default` or an id, and 400 for any other), `ready` (false until the heights have been read), `version`, `tiles` (`minZoom` -5, `maxZoom` 4, `size`), `intervals` (the contour interval in blocks by zoom out from 0), `heavyEvery`, and `bands`, lowest first: each `from`, `to`, `colour` (`#rrggbb`, empty where the band is not drawn) and sometimes a `label`. 400 for an unknown dimension. Served wherever `/api/biomes` is |
+| `GET /api/topography/tiles/{dimension}/{zoom}/{x}/{y}.png?styles=<style>,…&hide=<band>,…&v=<version>` | Session required. One 256-pixel tile of the overlay, addressed as the terrain's; zoom -5 to 4. `styles` names `hillshade`, `contours` and `tint`, any of them, in one picture; `hide` leaves bands of the tint out. Carries an `ETag`, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 in the Nether where its floors are not read, where neither the tile nor (at zoom 0 and wider) the ring read round it has a surface, and before the heights are read; in the Nether a `level` names the floors drawn, and the `ETag` carries it; 400 for a bad address, no or unknown `styles`, a band there is not, or a level that is not configured |
+| `GET /api/layers?dimension=<id>` | Session required. `offered`, `ready` (false until the world has been opened for drawing), `version`, `tiles` (`minZoom` -1, `maxZoom` 0, `size`), `styles` (`floor` and `cut`, each with a `label` and what it `says`), `levels` (each `id`, the height `y`, a `label` and its `band`, 0 where it looks at all that is under the cut), and the `bands` a request may name. 400 for an unknown dimension. Served only with `LAYERS_ENABLED=true` |
+| `GET /api/layers/tiles/{dimension}/{zoom}/{x}/{y}.png?level=<id>&style=floor\|cut&band=16\|32\|64\|all&v=<version>` | Session required. One 256-pixel tile of a cut, addressed as the terrain's; zoom -1 and 0. `level` is one `/api/layers` lists, `style` is required, and `band` is optional and only for a level that has one. Drawn when asked for from a cache; carries an `ETag` and a `Server-Timing` of what a drawn one cost, answers 304 to a matching `If-None-Match`, and is kept for good when `v` is the current version. 404 for a tile with nothing in its band, 503 with `Retry-After` before the world is open or when the wait for a place to draw in ran out, 400 for a bad address, a level the dimension does not have, a style there is not or a band there is not |
+| `GET /api/lost?dimension=<id>` | Session required. `offered` (false before the first chunk count), `version`, `missing` (chunks of the dimension seen before and absent from the last count), and `tiles` (`minZoom` -5, `maxZoom` 4, `size`). 400 for an unknown dimension |
+| `GET /api/lost/tiles/{dimension}/{zoom}/{x}/{y}.png?v=<version>` | Session required. One tile marking the missing chunks, addressed as the terrain's; zoom -5 to 4. Carries an `ETag`, kept for good when `v` is the current count's. 404 for a tile with none in it, 400 for a bad address |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
 | `GET /api/players/<id>?name=<gamertag>` | Session required. `id` is the live feed's player id, a number; 400 otherwise. `saved` (`state`, `asOf`, `record`), `trails` (`state`, `stats`), `counters` and `live` as in Player details. Always 200 for a well-formed id. |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
@@ -4963,6 +5142,14 @@ and what that day is compared with:
 | `mcmap_biomes_last_success_timestamp_seconds`, `mcmap_biomes_duration_seconds` | The snapshot the biomes served were read from, and how long that reading took |
 | `mcmap_biomes_save_failures_total` | Readings, their biomes or their surface heights, that could not be written to the volume |
 | `mcmap_heights_chunks{dimension}`, `mcmap_heights_bytes` | Chunks whose surface heights are held, and about how much memory they take |
+| `mcmap_layers_render_duration_seconds{dimension}` | A histogram of how long an underground tile took to draw. Tiles served from the cache are not in it |
+| `mcmap_layers_render_phase_seconds_total{phase}` | Where the time of drawn tiles went: `read`, `paint`, `encode` |
+| `mcmap_layers_cache_hits_total`, `mcmap_layers_cache_misses_total` | Tiles served without drawing and tiles drawn, the ones that waited for another's drawing counted as hits |
+| `mcmap_layers_cache_bytes`, `mcmap_layers_cache_entries` | What the tile cache holds, against `LAYERS_CACHE_MB` |
+| `mcmap_layers_renders_active`, `mcmap_layers_renders_waiting` | Tiles being drawn, never more than `LAYERS_MAX_RENDERS`, and tiles waiting for a place; waiting for long is a burst of viewers on a busy CPU |
+| `mcmap_layers_render_failures_total`, `mcmap_layers_unreadable_chunks_total` | Tiles that could not be drawn, and chunks drawn with a sub-chunk that would not read |
+| `mcmap_layers_floor_chunks{level}`, `mcmap_layers_floor_bytes` | Chunks of the Nether whose floors under a level are held, and about how much memory they take |
+| `mcmap_layers_floor_duration_seconds`, `mcmap_layers_floor_readings_total{result}`, `mcmap_layers_floor_save_failures_total`, `mcmap_layers_floor_panics_total` | The reading of the Nether's floors: how long the last took, cycles by `read`, `unchanged` or `failed`, readings that could not be written to the volume, and readings that panicked |
 | `mcmap_trails_points`, `mcmap_trails_players` | Trail points held in memory, and players with a trail |
 | `mcmap_trails_limit{limit}` | The retention in force: `age_seconds`, `points_per_player`, `players` |
 | `mcmap_trails_oldest_point_age_seconds` | Age of the oldest trail point held. It stays under the age limit |

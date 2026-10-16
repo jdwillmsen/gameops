@@ -26,6 +26,7 @@ import (
 
 	"github.com/df-mc/goleveldb/leveldb/util"
 
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/biomes"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/layers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/topo"
@@ -45,6 +46,7 @@ func main() {
 	pxX := flag.Int("px", 0, "probe mode: pixel x in the tile")
 	pxZ := flag.Int("pz", 0, "probe mode: pixel y in the tile")
 	procs := flag.Int("procs", 1, "cores to use")
+	tint := flag.Bool("biomes", false, "read the biomes first and tint grass, leaves and water by them")
 	flag.Parse()
 	runtime.GOMAXPROCS(*procs)
 	if *world == "" {
@@ -80,6 +82,15 @@ func main() {
 	defer closeDB()
 	reg := layers.NewRegistry()
 	r := &layers.Renderer{Reader: layers.Reader{DB: db, Registry: reg}}
+	if *tint {
+		began := time.Now()
+		world, err := biomes.Scan(context.Background(), db, time.Now(), -1)
+		if err != nil {
+			fatal(err.Error())
+		}
+		fmt.Printf("biomes read in %s\n", time.Since(began).Round(100*time.Millisecond))
+		r.Biomes = func() layers.Biomes { return world }
+	}
 	fmt.Printf("chunks: %d overworld, %d nether, %d end (key scan %s)\n",
 		count1(set, chunks.Overworld), count1(set, chunks.Nether), count1(set, chunks.End), scanned.Round(time.Millisecond))
 
