@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
@@ -49,6 +50,9 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer v.Close()
+	if r, err := strconv.Atoi(r.URL.Query().Get("r")); err == nil {
+		v.SetRadius(r)
+	}
 
 	// Accept refuses a cross-origin page by default; the viewer is served from
 	// this same origin.
@@ -58,7 +62,23 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
-	ctx := conn.CloseRead(r.Context())
+	// The only thing a viewer says is how far it wants to see; the read loop
+	// also keeps control frames answered.
+	conn.SetReadLimit(16)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		defer cancel()
+		for {
+			_, msg, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+			if len(msg) == 2 && msg[0] == cmdRadius {
+				v.SetRadius(int(msg[1]))
+			}
+		}
+	}()
 	for {
 		m, err := v.Next(ctx)
 		if err != nil {

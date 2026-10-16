@@ -136,8 +136,16 @@ function entity(e) {
 
 let status = 'connecting...';
 let wsConn = null;
+// The server replays the unit's surroundings out to a small radius, then
+// whatever the viewer asks for: ] widens it, nearest chunks first.
+let radius = Number(new URLSearchParams(location.search).get('r')) || 4;
+addEventListener('keydown', e => {
+  if (e.key !== ']' || !wsConn || wsConn.readyState !== 1) return;
+  radius = Math.min(radius + 2, 32);
+  wsConn.send(new Uint8Array([1, radius]));
+});
 function connect() {
-  const ws = wsConn = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/v1/camera/ws');
+  const ws = wsConn = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/v1/camera/ws' + location.search);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { status = 'live'; stats.wsOpenMs = performance.now() - t0; };
   // A viewer is dropped when it falls behind or the unit's session ends; a
@@ -246,7 +254,7 @@ function frame() {
   stats.frames++;
   if (stats.settledMs === null && blocks.size > 0 && dirty.size === 0 && performance.now() - stats.lastBlockAt > 1000) stats.settledMs = stats.lastBlockAt - t0;
   if (stats.firstFrameMs === null && meshes.size > 0) stats.firstFrameMs = performance.now() - t0;
-  hud.textContent = `crew camera  ${status}\nsub-chunks ${blocks.size}  meshes ${meshes.size}  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
+  hud.textContent = `crew camera  ${status}  radius ${radius} (] widens)\nsub-chunks ${blocks.size}  meshes ${meshes.size}  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
   requestAnimationFrame(frame);
 }
 frame();

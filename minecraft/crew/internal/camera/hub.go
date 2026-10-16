@@ -8,7 +8,6 @@
 package camera
 
 import (
-	"cmp"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -25,9 +24,17 @@ const (
 	// loose quickly.
 	defaultQueueLimit = 1024
 
+	// A fill touches thousands of blocks; past this many in one chunk, the
+	// chunk is cheaper to send whole than edit by edit.
+	maxEditFrames = 64
+
 	// Moved things reach a viewer in one batch per tick, matching the
 	// server's own rate, instead of one message per movement packet.
 	defaultTick = 50 * time.Millisecond
+
+	// A camera wall tile needs the unit's surroundings, not its whole world.
+	defaultStartRadius = 4
+	defaultMaxRadius   = 32
 )
 
 // PacketWriter is the part of the connection the hub needs: sub-chunk requests.
@@ -46,6 +53,9 @@ type Options struct {
 	// Tick is the longest a moved entity waits before it is sent. Zero means
 	// the default.
 	Tick time.Duration
+	// StartRadius is how many chunks around the unit a new viewer is replayed;
+	// MaxRadius bounds what a viewer may ask for. Zero means the defaults.
+	StartRadius, MaxRadius int
 }
 
 type entity struct {
@@ -63,6 +73,8 @@ type Hub struct {
 	maxViewers int
 	queueLimit int
 	tick       time.Duration
+	startR     int
+	maxRadius  int
 	mats       *materialTable
 
 	mu       sync.Mutex
@@ -90,12 +102,21 @@ func New(o Options) *Hub {
 	if o.Tick <= 0 {
 		o.Tick = defaultTick
 	}
+	if o.MaxRadius <= 0 {
+		o.MaxRadius = defaultMaxRadius
+	}
+	if o.StartRadius <= 0 {
+		o.StartRadius = defaultStartRadius
+	}
+	o.StartRadius = min(o.StartRadius, o.MaxRadius)
 	return &Hub{
 		dec:        o.Decoder,
 		self:       o.Self,
 		maxViewers: o.MaxViewers,
 		queueLimit: o.QueueLimit,
 		tick:       o.Tick,
+		startR:     o.StartRadius,
+		maxRadius:  o.MaxRadius,
 		mats:       newMaterialTable(),
 		subs:       map[[3]int32][]byte{},
 		ents:       map[uint64]*entity{},
@@ -159,53 +180,30 @@ func (h *Hub) resetLocked() {
 	}
 }
 
-// Attach registers a viewer and queues the held world for it. The replay is
-// held by the viewer, not pushed through its bounded queue, so a large world
-// never counts as a slow consumer.
+// Attach registers a viewer. Its connection head is queued; the held world is
+// not, because the viewer pulls it nearest-first as it reads.
 func (h *Hub) Attach() (*Viewer, error) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	if len(h.viewers) >= h.maxViewers {
-		h.mu.Unlock()
 		h.viewersTurned.Add(1)
 		return nil, ErrFull
 	}
-	v := newViewer(h, h.queueLimit, h.tick)
+	v := newViewer(h, h.queueLimit, h.tick, h.startR)
 	h.viewers[v] = struct{}{}
-	type held struct {
-		key   [3]int32
-		frame []byte
-	}
-	frames := make([]held, 0, len(h.subs))
-	for k, f := range h.subs {
-		frames = append(frames, held{k, f})
-	}
 	for _, e := range h.ents {
 		v.ents[e.ID] = e.record()
 	}
-	head := [][]byte{helloFrame(), encodeMaterials(h.mats.all()), encodeEntityTypes(h.types)}
+	v.head = [][]byte{helloFrame(), encodeMaterials(h.mats.all()), encodeEntityTypes(h.types)}
 	// Read under the hub lock so a later publishSelf cannot be overwritten by
 	// this older pose.
-	var me belief.Snapshot
 	if h.self != nil {
-		me = h.self.Snapshot()
+		if me := h.self.Snapshot(); me.PositionKnown {
+			p := poseOf(me)
+			v.self = &p
+			v.setPoseLocked(p)
+		}
 	}
-	if me.PositionKnown {
-		p := poseOf(me)
-		v.self = &p
-	}
-	h.mu.Unlock()
-
-	if me.PositionKnown {
-		slices.SortFunc(frames, func(a, b held) int {
-			return cmp.Compare(distSq(a.key, me.Position), distSq(b.key, me.Position))
-		})
-	}
-	for _, f := range frames {
-		head = append(head, f.frame)
-	}
-	v.mu.Lock()
-	v.head = head
-	v.mu.Unlock()
 	return v, nil
 }
 
@@ -234,12 +232,14 @@ func (h *Hub) Apply(pk packet.Packet, w PacketWriter) {
 		h.subChunk(p)
 	case *packet.UpdateBlock:
 		if p.Layer == 0 {
-			h.updateBlock(p.Position, p.NewBlockRuntimeID)
+			h.updateBlocks(h.blockEdits([]blockPlacement{{p.Position, p.NewBlockRuntimeID}}))
 		}
 	case *packet.UpdateSubChunkBlocks:
-		for _, b := range p.Blocks {
-			h.updateBlock(b.BlockPos, b.BlockRuntimeID)
+		placed := make([]blockPlacement, len(p.Blocks))
+		for i, b := range p.Blocks {
+			placed[i] = blockPlacement{b.BlockPos, b.BlockRuntimeID}
 		}
+		h.updateBlocks(h.blockEdits(placed))
 	case *packet.Respawn:
 		if p.State == packet.RespawnStateReadyToSpawn {
 			h.publishSelf()
@@ -458,6 +458,22 @@ func (h *Hub) subChunk(p *packet.SubChunk) {
 	}
 }
 
+type blockPlacement struct {
+	pos   protocol.BlockPos
+	netID uint32
+}
+
+// blockEdits resolves names outside the hub lock; fresh is true if any
+// material is new.
+func (h *Hub) blockEdits(placed []blockPlacement) (edits []blockEdit, fresh bool) {
+	edits = make([]blockEdit, len(placed))
+	for i, p := range placed {
+		id, f := h.blockMaterial(p.netID)
+		edits[i], fresh = blockEdit{p.pos, id}, fresh || f
+	}
+	return edits, fresh
+}
+
 func (h *Hub) blockMaterial(netID uint32) (id uint8, fresh bool) {
 	name, ok := h.dec.BlockName(netID)
 	if !ok {
@@ -467,13 +483,57 @@ func (h *Hub) blockMaterial(netID uint32) (id uint8, fresh bool) {
 	return h.mats.id(name)
 }
 
-func (h *Hub) updateBlock(pos protocol.BlockPos, netID uint32) {
-	id, fresh := h.blockMaterial(netID)
-	frame := encodeBlock(pos.X(), pos.Y(), pos.Z(), id)
+type blockEdit struct {
+	pos protocol.BlockPos
+	id  uint8
+}
+
+func (h *Hub) updateBlocks(edits []blockEdit, fresh bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.pushMaterialsLocked(fresh)
-	h.pushOrderedLocked(frame)
+
+	type group struct {
+		cells [subChunkCells]uint8
+		held  bool
+		n     int
+	}
+	groups := map[[3]int32]*group{}
+	for _, e := range edits {
+		key := [3]int32{e.pos.X() >> 4, e.pos.Y() >> 4, e.pos.Z() >> 4}
+		g, ok := groups[key]
+		if !ok {
+			g = &group{}
+			if frame, held := h.subs[key]; held {
+				_, _, _, g.cells, _ = decodeSubChunk(frame)
+				g.held = true
+			}
+			groups[key] = g
+		}
+		g.cells[(e.pos.Y()&15<<4|e.pos.Z()&15)<<4|e.pos.X()&15] = e.id
+		g.n++
+	}
+	for key, g := range groups {
+		old, held := h.subs[key]
+		frame := encodeSubChunk(key[0], key[1], key[2], &g.cells)
+		if held && string(old) == string(frame) {
+			continue
+		}
+		if !held && !slices.ContainsFunc(g.cells[:], func(c uint8) bool { return c != 0 }) {
+			continue
+		}
+		h.subs[key] = frame
+		if !held || g.n > maxEditFrames {
+			h.broadcastLocked(func(v *Viewer) bool { return v.noteSub(key, frame, true) })
+			continue
+		}
+		for _, e := range edits {
+			if e.pos.X()>>4 == key[0] && e.pos.Y()>>4 == key[1] && e.pos.Z()>>4 == key[2] {
+				m := encodeBlock(e.pos.X(), e.pos.Y(), e.pos.Z(), e.id)
+				h.broadcastLocked(func(v *Viewer) bool { return v.noteEdit(key, m) })
+			}
+		}
+	}
 }
 
 // emit converts a section to the wire format, keeps it for later viewers and
@@ -513,7 +573,7 @@ func (h *Hub) emit(cx, cy, cz int32, s Section) {
 		return
 	}
 	h.pushMaterialsLocked(anyFresh)
-	h.pushOrderedLocked(frame)
+	h.broadcastLocked(func(v *Viewer) bool { return v.noteSub(key, frame, anyBlock) })
 }
 
 func (h *Hub) pushMaterialsLocked(fresh bool) {
