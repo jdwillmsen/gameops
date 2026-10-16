@@ -7,3 +7,10 @@ tasks:
   build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/crew/...
   test: go test -race ./minecraft/crew/...
   lint: test -z "$(gofmt -l minecraft/crew)" && go vet ./minecraft/crew/...
+release:
+  tag: crew
+  artifacts: [image]
+  image:
+    name: minecraft-crew
+    description: Programmable Minecraft Bedrock worker unit that joins a server and reports its own state
+    short_description: Programmable Minecraft Bedrock worker unit
