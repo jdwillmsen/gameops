@@ -1324,10 +1324,13 @@ func handleMention(ctx context.Context, actorXUID string, trigger chat.Trigger, 
 	// what the mentions counter below records.
 	metrics.Answer(time.Since(started), err)
 	if err != nil {
-		// Logged, never spoken. A backend timeout is an operator's problem,
-		// and narrating it in chat turns one failure into an audience.
+		// Whispered, never broadcast. Silence here read to players as the
+		// agent being down, but narrating a backend failure in open chat
+		// turns one failure into an audience -- so only the asker hears it,
+		// and the cause stays in the log.
 		metrics.Mention(metrics.MentionFailed)
 		log.Error("mention_answer_failed", logging.Fields{"actor": actorXUID, "error": err.Error()})
+		tellAnswerFailed(ctx, actorXUID, pctx, ans, log)
 		return
 	}
 	if reply == "" {

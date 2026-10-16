@@ -13,6 +13,10 @@ import (
 // a line in open chat for every slow answer would be noise to everyone else.
 const progressText = "Looking that up…"
 
+// answerFailedText is whispered to the asker when no answer could be built,
+// for the same reason progressText is whispered rather than broadcast.
+const answerFailedText = "I couldn't answer that right now - try again in a minute."
+
 // progressDelay is how long a question can go unanswered before its asker is
 // told it is coming. Most answers land well inside it, and for those the
 // message would only be clutter.
@@ -50,5 +54,21 @@ func sendProgress(ctx context.Context, actorXUID string, pctx *plugin.Context, a
 				log.Error("mention_progress_send_failed", logging.Fields{"actor": actorXUID, "error": err.Error()})
 			}
 		}()
+	}
+}
+
+// tellAnswerFailed whispers answerFailedText to the asker. Like
+// sendProgress, the console gets nothing because it has no chat to whisper
+// into. Detached from ctx for the reason the answer's own send is: a
+// shutdown landing here should not swallow the one line explaining the
+// silence.
+func tellAnswerFailed(ctx context.Context, actorXUID string, pctx *plugin.Context, ans answering, log *logging.Logger) {
+	if actorXUID == chat.ServerOrigin || pctx.Voice == nil {
+		return
+	}
+	tellCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ans.broadcast)
+	defer cancel()
+	if err := pctx.Voice.Tell(tellCtx, actorXUID, answerFailedText); err != nil {
+		log.Error("mention_failure_send_failed", logging.Fields{"actor": actorXUID, "error": err.Error()})
 	}
 }

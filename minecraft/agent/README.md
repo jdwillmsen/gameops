@@ -416,7 +416,7 @@ without that gauge beside them there is nothing on the graph to say so.
 | `LLM_API_KEY` | *(empty)* | Bearer token for the LLM backend, if it requires one |
 | `LLM_MAX_TOKENS` | `192` | Max tokens per LLM call |
 | `LLM_TIMEOUT_MS` | `8000` | Timeout for each individual LLM call; one answer makes up to `MAX_TOOL_ROUNDS` + 1 of them (every tool round plus the final answer), so `LLM_TOTAL_TIMEOUT_MS` has to leave room for that many |
-| `LLM_TOTAL_TIMEOUT_MS` | `30000` | Bounds one whole `@server` answering attempt, including every tool round trip - separate from `LLM_TIMEOUT_MS` so one stalled call can't eat the entire budget, and separate from having no bound so a model that keeps calling tools can't answer arbitrarily late. Startup refuses a value below (`MAX_TOOL_ROUNDS` + 1) x `LLM_TIMEOUT_MS`; leave margin above that for the tool calls in between, or a model that uses every tool round is cut off mid-answer and the asker hears nothing |
+| `LLM_TOTAL_TIMEOUT_MS` | `30000` | Bounds one whole `@server` answering attempt, including every tool round trip - separate from `LLM_TIMEOUT_MS` so one stalled call can't eat the entire budget, and separate from having no bound so a model that keeps calling tools can't answer arbitrarily late. Startup refuses a value below (`MAX_TOOL_ROUNDS` + 1) x `LLM_TIMEOUT_MS`; leave margin above that for the tool calls in between, or a model that uses every tool round is cut off mid-answer and the asker gets only the could-not-answer whisper |
 | `MAX_TOOL_ROUNDS` | `2` | Tool rounds one answer may use before the next request withholds tools and forces text out. Accepted 1-6; anything else refuses startup, as does a value the two timeouts above cannot fit |
 | `WIKI_ENABLED` | `false` | Offers the model `wiki_lookup`, which answers game questions from minecraft.wiki - the only request the agent makes to the internet. Off by default: it has not yet cleared its evaluation bar (`docs/eval/2026-09-25-wiki-lookup.md`). Only `true`/`false` (and the other spellings Go's `strconv.ParseBool` accepts) are valid; anything else refuses startup rather than guessing |
 | `WIKI_BASE_URL` | `https://minecraft.wiki/api.php` | The wiki API `wiki_lookup` calls. Startup refuses any other value unless `WIKI_ALLOW_TEST_BASE_URL=true`, so a stray setting cannot point the agent at a host nobody chose |
@@ -708,8 +708,13 @@ seconds after the question arrived, the asker is whispered `Looking that
 up…` - once per question, never broadcast, and never to the console, which
 has no chat to whisper into. It does not depend on the wiki: any answer that
 is still working through tool rounds at that point sends it. It promises
-nothing, either - an answer that then fails or comes back empty leaves the
-asker with only that line, the same silence as before it plus one message.
+nothing, either - an answer that comes back empty leaves the asker with only
+that line.
+
+A failed answer says so, privately. When the model errors or the answer
+outlasts `LLM_TOTAL_TIMEOUT_MS`, the asker is whispered that it could not
+answer right now; open chat hears nothing and the cause stays in the log as
+`mention_answer_failed`. The console gets no whisper.
 
 The security property this rests on: there is no write tool. Every tool
 answers a question and changes nothing, so a prompt-injection attempt
