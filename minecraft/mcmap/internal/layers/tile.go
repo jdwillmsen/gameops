@@ -94,7 +94,7 @@ func (r *Renderer) Tile(spec Spec, zoom, tx, ty int) (data []byte, t Timings, ok
 
 	cx0, cz0 := (x0-1)>>4, (z0-1)>>4
 	cx1, cz1 := (x0+blocks-1)>>4, (z0+blocks-1)>>4
-	known := r.Registry.Blocks()
+	var known []Block
 	var tn *tinter
 	if r.Biomes != nil {
 		tn = newTinter(r.Biomes(), spec.Dim)
