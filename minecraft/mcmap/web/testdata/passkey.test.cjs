@@ -383,6 +383,46 @@ test('the account panel opens and closes on its own', async () => {
   assert.equal(e.el('account').hidden, true);
 });
 
+test('logging in with a pending passkey explains that in-game confirmation is needed', async () => {
+  const e = env({ answers: {
+    'GET api/config': json(200, { passkeys: true }),
+    'POST auth/passkey/options': json(200, options),
+    'POST auth/passkey/finish': json(401, { error: 'pending' }),
+  } });
+  await e.win.mcmapPasskey.ready;
+  e.el('login-passkey').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.match(e.el('login-passkey-note').textContent, /waiting for in-game confirmation/i);
+});
+
+test('logging in with a non-operator passkey explains operator requirement', async () => {
+  const e = env({ answers: {
+    'GET api/config': json(200, { passkeys: true }),
+    'POST auth/passkey/options': json(200, options),
+    'POST auth/passkey/finish': json(401, { error: 'not_operator' }),
+  } });
+  await e.win.mcmapPasskey.ready;
+  e.el('login-passkey').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.match(e.el('login-passkey-note').textContent, /not currently an operator/i);
+});
+
+test('a pending passkey error from register options offers the cancel button', async () => {
+  const e = adding({ answers: {
+    'POST auth/passkey/register/options': json(400, { error: 'pending' }),
+  } });
+  await e.win.mcmapPasskey.ready;
+  e.el('admin-label').value = 'Phone';
+  e.el('admin-add').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.match(e.el('admin-note').textContent, /already waiting/i);
+  assert.equal(e.el('admin-cancel').hidden, false);
+  e.el('admin-cancel').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.ok(e.calls.includes('POST auth/passkey/register/cancel'));
+  assert.equal(e.el('admin-cancel').hidden, true);
+});
+
 async function main() {
   let failed = 0;
   for (const [name, fn] of tests) {
