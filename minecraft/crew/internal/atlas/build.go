@@ -101,6 +101,9 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 		faces := map[string]textureEntry{}
 		complete := true
 		for _, f := range faceNames {
+			if f == "side" && primary[f] == "" && carried[f] == "" {
+				continue // blocks that name all six faces have no generic side
+			}
 			entry, ok := b.resolve(primary[f])
 			if !ok {
 				entry, ok = b.resolve(carried[f])
@@ -113,6 +116,9 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 		}
 		if !complete {
 			continue
+		}
+		if _, ok := faces["side"]; !ok {
+			faces["side"] = faces["north"]
 		}
 		r := resolved{name: name, sound: def.Sound, faces: faces, tint: tintFor(name), model: modelFor(name)}
 		r.material = firstMatch(materialRules, name, def.Sound)

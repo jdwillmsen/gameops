@@ -14,6 +14,9 @@
       "sound" : "stone",
       "textures" : { "side" : "rock", "north" : "soil", "up" : "trunk_end" }
    },
+   "six_sided" : {
+      "textures" : { "down" : "soil", "east" : "rock", "north" : "rock", "south" : "trunk_end", "up" : "trunk_bark", "west" : "rock" }
+   },
    "oak_leaves" : { "sound" : "grass", "carried_textures" : "canopy", "textures" : "canopy" },
    "azalea_leaves" : { "sound" : "grass", "textures" : "canopy" },
    "water" : { "textures" : "pond" },
