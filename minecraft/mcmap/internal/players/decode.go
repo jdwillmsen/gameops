@@ -21,6 +21,14 @@ const (
 	// maxEnchants is how many are kept on one item.
 	maxEnchants = 16
 	maxName     = 128
+	// maxNesting is how many containers deep a stack's contents are read.
+	// The game does not let a shulker box into another, so more than one
+	// level is only a save that was made by hand; the page opens as many.
+	maxNesting = 3
+	// maxContained bounds every stack read out of other stacks in one record.
+	// All 63 inventory and ender chest slots as full shulker boxes come to
+	// 1,701; the rest is a save that was made to be large.
+	maxContained = 2048
 )
 
 var errRecord = errors.New("not a player record")
@@ -140,13 +148,14 @@ func Decode(data []byte) (int64, Record, error) {
 		}
 	}
 
-	r.Armor = items(m["Armor"], false)
-	r.Inventory = items(m["Inventory"], true)
-	r.EnderChest = items(m["EnderChestInventory"], true)
-	if held := items(m["Mainhand"], false); len(held) > 0 {
+	read := &reader{spare: maxContained}
+	r.Inventory = read.items(m["Inventory"], true, true, 0)
+	r.EnderChest = read.items(m["EnderChestInventory"], true, true, 0)
+	r.Armor = read.items(m["Armor"], false, false, 0)
+	if held := read.items(m["Mainhand"], false, false, 0); len(held) > 0 {
 		r.Mainhand = &held[0]
 	}
-	if held := items(m["Offhand"], false); len(held) > 0 {
+	if held := read.items(m["Offhand"], false, false, 0); len(held) > 0 {
 		r.Offhand = &held[0]
 	}
 
@@ -202,13 +211,34 @@ func place(m compound, prefix, dimension string) *Place {
 	return &Place{x, y, z, chunks.Dimension(d).Name()}
 }
 
+// reader reads lists of stacks for one record, and holds how many more
+// stacks it may read out of the contents of others.
+type reader struct {
+	spare int
+}
+
+// isContainer is whether a stack of this item keeps what is inside it in its
+// own tag: a shulker box of any colour.
+func isContainer(name string) bool {
+	return strings.HasSuffix(name, "shulker_box")
+}
+
 // items reads a list of stacks. Empty slots are left out; a list kept by
 // slot (an inventory) says which each is, and one that is not (what is
-// worn) is numbered by position.
-func items(v any, bySlot bool) []Item {
+// worn) is numbered by position. depth is how many containers the list is
+// inside. A box is opened only where opens is set: the page has no way into
+// one that is worn or held, and reading them would let a save made by hand
+// spend the allowance before the inventory is read.
+func (r *reader) items(v any, bySlot, opens bool, depth int) []Item {
 	out := []Item{}
 	for i, e := range list(v) {
 		if len(out) >= maxItems {
+			break
+		}
+		// A stack inside another is paid for out of the record's allowance,
+		// so that boxes of boxes cannot multiply a small record into a
+		// large answer.
+		if depth > 0 && r.spare <= 0 {
 			break
 		}
 		it, ok := e.(compound)
@@ -220,6 +250,9 @@ func items(v any, bySlot bool) []Item {
 		count, _ := intOf(it, "Count")
 		if name == "" || count <= 0 {
 			continue
+		}
+		if depth > 0 {
+			r.spare--
 		}
 		item := Item{Slot: i, Name: clip(name), Count: count}
 		if bySlot {
@@ -246,6 +279,11 @@ func items(v any, bySlot bool) []Item {
 				level, okL := intOf(e, "lvl")
 				if okI && okL {
 					item.Enchants = append(item.Enchants, Enchantment{ID: id, Name: enchantments[id], Level: level})
+				}
+			}
+			if opens && isContainer(name) && depth < maxNesting {
+				if inside := r.items(tag["Items"], true, true, depth+1); len(inside) > 0 {
+					item.Contents = inside
 				}
 			}
 		}

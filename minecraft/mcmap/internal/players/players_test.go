@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -312,5 +313,164 @@ func TestLookupAndSetAgreeOnBothReadingsOfEveryId(t *testing.T) {
 				t.Errorf("Lookup(%s) = %+v, %v", text, r, ok)
 			}
 		}
+	}
+}
+
+// box is a shulker box stack carrying the given stacks.
+func box(name string, slot uint8, inside ...any) c {
+	return item(name, 1, slot, c{"Items": inside})
+}
+
+func TestDecodeReadsWhatAShulkerBoxCarries(t *testing.T) {
+	m := fixture(1)
+	m["Inventory"] = []any{
+		box("minecraft:blue_shulker_box", 2,
+			item("minecraft:diamond", 12, 0, nil),
+			item("minecraft:iron_pickaxe", 1, 5, c{"Damage": int32(40), "ench": []any{c{"id": int16(15), "lvl": int16(3)}}}),
+			item("", 0, 6, nil)),
+		box("minecraft:undyed_shulker_box", 3),
+		item("minecraft:chest", 1, 4, c{"Items": []any{item("minecraft:stick", 1, 0, nil)}}),
+	}
+	_, r, err := Decode(encode(t, m))
+	if err != nil || len(r.Inventory) != 3 {
+		t.Fatalf("%d items, %v", len(r.Inventory), err)
+	}
+	blue := r.Inventory[0]
+	if len(blue.Contents) != 2 || blue.Contents[0].Name != "diamond" || blue.Contents[0].Count != 12 || blue.Contents[1].Slot != 5 {
+		t.Fatalf("blue box = %+v", blue.Contents)
+	}
+	if pick := blue.Contents[1]; pick.Damage != 40 || pick.MaxDamage == 0 || len(pick.Enchants) != 1 || pick.Enchants[0].Level != 3 {
+		t.Errorf("pickaxe in the box = %+v", pick)
+	}
+	if r.Inventory[1].Contents != nil {
+		t.Errorf("an empty box has contents %+v", r.Inventory[1].Contents)
+	}
+	if r.Inventory[2].Contents != nil {
+		t.Errorf("a chest item, which keeps nothing in its stack, has contents %+v", r.Inventory[2].Contents)
+	}
+}
+
+func depthOf(it Item) int {
+	deepest := 0
+	for _, in := range it.Contents {
+		deepest = max(deepest, 1+depthOf(in))
+	}
+	return deepest
+}
+
+func TestDecodeStopsReadingBoxesInBoxesAtTheNestingLimit(t *testing.T) {
+	nested := func(levels int) c {
+		inner := item("minecraft:diamond", 1, 0, nil)
+		for range levels {
+			inner = box("minecraft:red_shulker_box", 0, inner)
+		}
+		return inner
+	}
+	m := fixture(1)
+	m["Inventory"] = []any{nested(5)}
+	_, r, err := Decode(encode(t, m))
+	if err != nil || len(r.Inventory) != 1 {
+		t.Fatalf("%d items, %v", len(r.Inventory), err)
+	}
+	if got := depthOf(r.Inventory[0]); got != maxNesting {
+		t.Errorf("read %d boxes deep, want %d", got, maxNesting)
+	}
+	// The box at the limit is still an item, only without what is in it.
+	deepest := r.Inventory[0]
+	for range maxNesting {
+		deepest = deepest.Contents[0]
+	}
+	if deepest.Name != "red_shulker_box" || deepest.Contents != nil {
+		t.Errorf("box at the limit = %+v", deepest)
+	}
+}
+
+// This is the record guard's depth limit at work, not the nesting limit of
+// the box reader, which only a record that gets past the guard reaches.
+func TestDecodeRefusesBoxesNestedPastAnythingTheGameWrites(t *testing.T) {
+	inner := item("minecraft:diamond", 1, 0, nil)
+	for range 60 {
+		inner = box("minecraft:shulker_box", 0, inner)
+	}
+	m := fixture(1)
+	m["Inventory"] = []any{inner}
+	if _, _, err := Decode(encode(t, m)); err == nil {
+		t.Error("a record nested 60 boxes deep was decoded")
+	}
+}
+
+func TestDecodeBoundsABoxAndTheWholeRecordsBoxes(t *testing.T) {
+	var full []any
+	for i := range 500 {
+		full = append(full, item("minecraft:stick", 1, uint8(i), nil))
+	}
+	m := fixture(1)
+	m["Inventory"] = []any{box("minecraft:shulker_box", 0, full...)}
+	_, r, err := Decode(encode(t, m))
+	if err != nil || len(r.Inventory[0].Contents) != maxItems {
+		t.Fatalf("%d items in one box, %v", len(r.Inventory[0].Contents), err)
+	}
+
+	var boxes []any
+	for i := range 40 {
+		boxes = append(boxes, box("minecraft:shulker_box", uint8(i), full[:maxItems+6]...))
+	}
+	m["Inventory"], m["EnderChestInventory"] = boxes, boxes
+	data := encode(t, m)
+	if len(data) > maxRecord {
+		t.Fatalf("fixture is %d bytes, over the limit before any box is read", len(data))
+	}
+	_, r, err = Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := 0
+	for _, list := range [][]Item{r.Inventory, r.EnderChest} {
+		for _, b := range list {
+			held += len(b.Contents)
+		}
+	}
+	if held != maxContained {
+		t.Errorf("%d stacks read out of boxes, want %d", held, maxContained)
+	}
+}
+
+// This is the size limit on a whole record, which was there before boxes
+// were read; it does not bound what the box reader returns.
+func TestDecodeRefusesARecordOverTheSizeLimit(t *testing.T) {
+	m := fixture(1)
+	var big []any
+	for i := range 40 {
+		big = append(big, item("minecraft:stick", 1, uint8(i), c{"display": c{"Name": strings.Repeat("x", 30000)}}))
+	}
+	m["Inventory"] = []any{box("minecraft:shulker_box", 0, big...)}
+	data := encode(t, m)
+	if len(data) <= maxRecord {
+		t.Fatalf("fixture is %d bytes, under the limit", len(data))
+	}
+	if _, _, err := Decode(data); err == nil {
+		t.Error("a record over the limit was decoded")
+	}
+}
+
+func TestDecodeReadsNoBoxesOutOfWhatIsWornOrHeld(t *testing.T) {
+	inside := item("minecraft:diamond", 1, 0, nil)
+	m := fixture(1)
+	m["Armor"] = []any{box("minecraft:shulker_box", 0, inside)}
+	m["Mainhand"] = []any{box("minecraft:shulker_box", 0, inside)}
+	m["Offhand"] = []any{box("minecraft:shulker_box", 0, inside)}
+	m["Inventory"] = []any{box("minecraft:shulker_box", 0, inside)}
+	m["EnderChestInventory"] = []any{box("minecraft:shulker_box", 0, inside)}
+	_, r, err := Decode(encode(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string][]Item{"armor": r.Armor, "mainhand": {*r.Mainhand}, "offhand": {*r.Offhand}} {
+		if len(got) != 1 || got[0].Name != "shulker_box" || got[0].Contents != nil {
+			t.Errorf("%s = %+v", name, got)
+		}
+	}
+	if len(r.Inventory[0].Contents) != 1 || len(r.EnderChest[0].Contents) != 1 {
+		t.Errorf("inventory %+v, ender chest %+v", r.Inventory[0].Contents, r.EnderChest[0].Contents)
 	}
 }

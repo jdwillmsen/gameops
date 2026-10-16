@@ -31,6 +31,10 @@ type Item struct {
 	MaxDamage int           `json:"maxDamage,omitempty"`
 	Custom    string        `json:"customName,omitempty"`
 	Enchants  []Enchantment `json:"enchantments,omitempty"`
+	// Contents is what a shulker box carries, each stack with the slot of
+	// the box it is in. It is absent from an empty box and from one past the
+	// depth the map reads.
+	Contents []Item `json:"contents,omitempty"`
 }
 
 // Place is a position in a dimension.
