@@ -70,6 +70,7 @@ function leaflet() {
       Object.assign(Sub.prototype, props);
       return Sub;
     }
+    static include(props) { Object.assign(this.prototype, props); return this; }
     addTo(to) { to.layers.add(this); return this; }
     redraw() { return this; }
     setOpacity(to) { this.options.opacity = to; return this; }
@@ -87,6 +88,7 @@ function leaflet() {
     CRS: { Simple: {} },
     Transformation: class {},
     map: () => map,
+    GridLayer: Layer,
     TileLayer: Layer,
     Renderer: Layer,
     latLngBounds: (a, b) => box(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])),
