@@ -4307,9 +4307,9 @@ startup.
 typing a code in the game. It is added from the game and confirmed in the
 game:
 
-1. With passkeys on, an admin opens the Admin section of the debug panel,
-   chooses Add a passkey and gives it a label of 1 to 32 letters, digits, spaces or hyphens, shown as
-   text and never as markup.
+1. With passkeys on, an admin opens the Account panel from the Account
+   button, chooses Add a passkey and gives it a label of 1 to 32 letters,
+   digits, spaces or hyphens, shown as text and never as markup.
 2. The map answers with options for a discoverable credential that is checked
    by the device (`residentKey: required`, `userVerification: required`, no
    attestation), ES256 and RS256 only, for the user `fwb-map` and a random
@@ -4320,7 +4320,9 @@ game:
    that XUID. It cannot log anyone in yet. The page shows its fingerprint, the
    first 4 bytes of the SHA-256 of its ID as `XXXX-XXXX`. Once a passkey is
    pending, a second registration is refused, not replaced; it is allowed
-   once the pending one has expired, or has been cancelled by the same session.
+   once the pending one has expired, or has been cancelled by any session of
+   that player, so losing the page that started it does not lock them out
+   for the 2 minutes.
    At most 5 passkeys are held per player.
 4. The admin types `!map passkey` in game.
 5. The agent asks the map for a code for that XUID and whispers it to that
@@ -4354,7 +4356,8 @@ is in a quiet window, where the operator list is coming from, the age of the
 last live frame by dimension, and counts of sessions issued, passkey logins and
 refusals since it started. With passkeys on, every player, admin or not, has
 an Account button to list their own passkeys, remove one, and log out
-everywhere; the last does what `!map logout` does. With passkeys off there is
+everywhere; the last does what `!map logout` does. An admin also adds a
+passkey there. With passkeys off there is
 no Account button, and `!map logout` is how to end every session.
 
 **Taking it back.**
