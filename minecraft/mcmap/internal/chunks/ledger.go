@@ -70,6 +70,35 @@ type Ledger struct {
 	missing Set
 	lost    Set
 	at      time.Time
+	// bounds is the box of chunks of each dimension that holds every chunk
+	// seen, worked out when the set last changed.
+	bounds map[Dimension]Box
+}
+
+// Box is the least rectangle of chunks, corners included, that holds a set.
+type Box struct{ MinX, MinZ, MaxX, MaxZ int32 }
+
+func boundsOf(s Set) map[Dimension]Box {
+	out := map[Dimension]Box{}
+	for p := range s {
+		b, ok := out[p.Dim]
+		if !ok {
+			out[p.Dim] = Box{p.X, p.Z, p.X, p.Z}
+			continue
+		}
+		out[p.Dim] = Box{min(b.MinX, p.X), min(b.MinZ, p.Z), max(b.MaxX, p.X), max(b.MaxZ, p.Z)}
+	}
+	return out
+}
+
+// Bounds is the box of the chunks of a dimension the world has been seen to
+// hold, and false where it has been seen to hold none. A tile wholly outside
+// it has nothing in it to draw.
+func (l *Ledger) Bounds(d Dimension) (Box, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.bounds[d]
+	return b, ok
 }
 
 // The file is the magic, the time of the last count in Unix nanoseconds, and
@@ -118,6 +147,7 @@ func OpenLedger(path string) (*Ledger, error) {
 	if len(body) != 0 {
 		return nil, bad("trailing bytes")
 	}
+	l.bounds = boundsOf(l.seen)
 	return l, nil
 }
 
@@ -195,6 +225,7 @@ func (l *Ledger) commit(seen, missing, lost Set, at time.Time) error {
 		return err
 	}
 	l.seen, l.missing, l.lost, l.at = seen, missing, lost, at
+	l.bounds = boundsOf(seen)
 	return nil
 }
 

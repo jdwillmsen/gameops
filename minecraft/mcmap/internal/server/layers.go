@@ -178,6 +178,14 @@ func (s *Server) handleLayerTile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	spec := layers.SpecOf(d, level, style, band)
+	// A tile past every chunk the world has held has nothing in it, and is
+	// not worth a place in the queue to draw: a sweep of the map's far
+	// reaches would otherwise hold both places and push the cache's tiles out.
+	if s.tileOutside(d, zoom, x, y) {
+		w.Header().Set("Cache-Control", "private, max-age=60")
+		http.NotFound(w, r)
+		return
+	}
 
 	version := s.Layers.Version()
 	if version == "" {
@@ -236,3 +244,34 @@ func (s *Server) handleLayerTile(w http.ResponseWriter, r *http.Request) {
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+
+// BoundsSource is the box of chunks of a dimension that the world has been
+// seen to hold, from the record of every chunk it has had.
+type BoundsSource interface {
+	Bounds(d chunks.Dimension) (chunks.Box, bool)
+}
+
+// tileOutside says the world has been counted and no chunk it has held is
+// in or beside the tile. Before the first count nothing is known of where
+// the world is.
+func (s *Server) tileOutside(d chunks.Dimension, zoom, x, y int) bool {
+	src, ok := s.Chunks.(BoundsSource)
+	if !ok {
+		return false
+	}
+	if _, counted := s.Chunks.Last(); !counted {
+		return false
+	}
+	box, held := src.Bounds(d)
+	return !held || !tileTouches(box, zoom, x, y)
+}
+
+// tileTouches says a tile is within a chunk of the box, the margin being the
+// row of chunks its lighting reads beyond its edge. Without any chunk seen
+// in a dimension nothing is touched.
+func tileTouches(b chunks.Box, zoom, x, y int) bool {
+	span := 256 << -zoom
+	cx0, cz0 := floorDiv(x*span, 16)-1, floorDiv(y*span, 16)-1
+	cx1, cz1 := floorDiv((x+1)*span-1, 16)+1, floorDiv((y+1)*span-1, 16)+1
+	return cx1 >= int(b.MinX) && cx0 <= int(b.MaxX) && cz1 >= int(b.MinZ) && cz0 <= int(b.MaxZ)
+}
