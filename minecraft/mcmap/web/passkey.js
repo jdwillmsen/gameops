@@ -76,7 +76,7 @@
         let body = {};
         try { body = await res.json(); } catch { /* ignore */ }
         if (body && body.error === 'pending') {
-          say('login-passkey-note', 'This passkey is waiting for in-game confirmation. Log in from the game to finish adding it.');
+          say('login-passkey-note', 'This passkey is waiting for in-game confirmation: type !map passkey in the game and enter the code in the browser that added it. Otherwise log in with a game code, then cancel it and add it again.');
           return;
         }
         if (body && body.error === 'not_operator') {

@@ -204,12 +204,15 @@ func (p *Passkeys) StartPending(k Passkey, issuedMilli int64) error {
 	return nil
 }
 
-func (p *Passkeys) Cancel(xuid string, issuedMilli int64) (Passkey, bool) {
+// Cancel drops the XUID's pending credential for any of its sessions, so a
+// player who lost the session that started it is not locked out until it
+// expires. Only Confirm is bound to that session.
+func (p *Passkeys) Cancel(xuid string) (Passkey, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.prune()
 	w, ok := p.waiting[xuid]
-	if !ok || w.issuedMilli != issuedMilli {
+	if !ok {
 		return Passkey{}, false
 	}
 	delete(p.waiting, xuid)

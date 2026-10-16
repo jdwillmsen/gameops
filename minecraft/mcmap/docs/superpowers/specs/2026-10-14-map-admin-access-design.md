@@ -276,8 +276,8 @@ enough that a list that keeps growing is noticed.
    is refused, not replaced**. This applies from finish on: before it
    there is only a challenge, which step 2 replaces. It is allowed again only once the pending
    one has expired, after 2 minutes, or has been cancelled with
-   `POST /auth/passkey/register/cancel` by a session with the same XUID
-   and `IssuedMilli`. A pending credential cannot log anyone in. The page
+   `POST /auth/passkey/register/cancel` by any session with the same XUID,
+   so losing the session that started it does not lock the player out. A pending credential cannot log anyone in. The page
    shows the credential's **fingerprint**, the first 4 bytes of the SHA-256
    of its ID as `XXXX-XXXX` in hex, and says: "Now type `!map passkey` in
    the game. You will be whispered a code to type here. Check that the
