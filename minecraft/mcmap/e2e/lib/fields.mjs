@@ -82,6 +82,7 @@ export const SENTENCES = [
   "switching the biome overlay off left its tiles on the map",
   "switching the topography on drew no tiles",
   "with all three drawings on the map asked for tiles of other drawings too",
+  "switching another topography drawing on left the overlay empty",
   "switching the topography off left its tiles on the map",
   "no mobs, structures or biomes here to switch",
   "this page has no height bands",

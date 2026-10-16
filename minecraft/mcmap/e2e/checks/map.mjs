@@ -251,7 +251,9 @@ export async function toggles({ page }) {
   }
   // The topography is tiles too, in one picture for however many of its
   // three drawings are on: all three on ask for each tile once, with the
-  // three named, and off take them away.
+  // three named, and off take them away. It is switched at a zoom between
+  // two levels, where a layer drawn again once asked for tiles at a level
+  // no tile is cut for and was refused every one.
   const land = await page.evaluate(`(async () => {
     const rows = (${tree})().filter((r) => r.group === 'Topography' && r.depth === 2);
     if (rows.length !== 3 || rows.some((r) => r.off || r.on)) return null;
@@ -259,7 +261,12 @@ export async function toggles({ page }) {
     // heights are not read yet, or the map is wider than the widest tile.
     const said = await fetch('api/topography?dimension=' + encodeURIComponent(window.mcmap.dimension()), { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null), () => null);
     if (!said || !said.offered || !said.ready || Math.round(window.mcmap.map.getZoom()) < said.tiles.minZoom) return null;
+    const map = window.mcmap.map;
+    const was = map.getZoom();
+    const between = Math.min(Math.round(was) + 0.4, map.getMaxZoom());
+    if (Math.round(between) >= said.tiles.minZoom) map.setZoom(between, { animate: false });
     const tiles = () => [...document.querySelectorAll('#map img.leaflet-tile')].filter((img) => img.src.includes('api/topography/tiles/'));
+    const loaded = (img) => img.complete && img.naturalWidth > 0;
     const wait = (ms) => new Promise((done) => setTimeout(done, ms));
     rows[0].check.click();
     await wait(1200);
@@ -269,14 +276,17 @@ export async function toggles({ page }) {
     await wait(1500);
     const all = tiles();
     const three = all.filter((img) => /[?&]styles=hillshade,contours,tint&/.test(img.src)).length;
+    const shown = all.filter(loaded).length;
     for (const row of rows) row.check.click();
     await wait(800);
-    return { one, total: all.length, three, left: tiles().length };
+    map.setZoom(was, { animate: false });
+    return { one, total: all.length, three, shown, left: tiles().length };
   })()`);
   if (land === null) { measures.nothing_to_toggle += 1; } else {
     measures.topography_tiles = land.total;
     if (land.one === 0 || land.total === 0) throw new Fail('switching the topography on drew no tiles', measures);
     if (land.three !== land.total) throw new Fail('with all three drawings on the map asked for tiles of other drawings too', measures);
+    if (land.shown === 0) throw new Fail('switching another topography drawing on left the overlay empty', measures);
     if (land.left > 0) throw new Fail('switching the topography off left its tiles on the map', measures);
     measures.toggled += 1;
   }
