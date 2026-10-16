@@ -39,7 +39,22 @@
   const HOTBAR = 9;
   const INVENTORY = 36;
   const ENDER = 27;
+  // The pictures are 16 and 9 pixels a side and are drawn at twice that, so
+  // that every pixel of them is two on the screen and none is a pixel and a half.
+  const SLOT_ICON = 32;
+  const MARK_ICON = 18;
+  // More marks than this is a health or hunger that is not the game's: a bar
+  // says it better.
+  const MAX_MARKS = 20;
+  // What fills the mark of each, by whole and by half, over the same container.
+  const MARKS = {
+    health: ['ui/heart_container', 'ui/heart', 'ui/heart_half'],
+    hunger: ['ui/hunger_container', 'ui/hunger', 'ui/hunger_half'],
+    absorption: ['ui/heart_container', 'ui/absorption', 'ui/absorption_half'],
+  };
   const ARMOUR = ['Head', 'Chest', 'Legs', 'Feet'];
+  // The sixteen dyes, in the game's order and the spelling its ids use.
+  const COLOURS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'];
   const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
   const GAME_MODES = { survival: 'Survival', creative: 'Creative', adventure: 'Adventure', spectator: 'Spectator', default: 'The world’s default' };
 
@@ -127,21 +142,52 @@
 
   const gauge = (g, what, say) => (g && Number.isFinite(g.current) && Number.isFinite(g.max) && g.max > 0 ? meter(g.current / g.max, say(g), what) : null);
 
+  // A row of the game's marks for a gauge counted in halves: a container for
+  // each pair of points, filled whole, by half or not at all. It is a picture
+  // of what the words beside it say, and the page leaves it out for them.
+  function marks(kind, current, max) {
+    const [container, whole, half] = MARKS[kind];
+    const count = Math.ceil(max / 2);
+    if (!(count >= 1 && count <= MAX_MARKS)) return null;
+    const row = el('span', 'marks');
+    row.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < count; i++) {
+      const left = current - i * 2;
+      const mark = el('span', 'mark');
+      mark.append(icons.picture(container, { side: MARK_ICON }));
+      if (left > 0) mark.append(icons.picture(left >= 2 ? whole : half, { side: MARK_ICON }));
+      row.append(mark);
+    }
+    return row;
+  }
+
+  // A gauge drawn as marks where the server has them, and as a bar where it
+  // has not: the bar goes when the first mark is drawn.
+  function marked(row, kind, g) {
+    if (!row) return row;
+    const drawn = marks(kind, g.current, kind === 'absorption' ? g.current : g.max);
+    if (drawn) row.prepend(drawn);
+    return row;
+  }
+
   // --- items -------------------------------------------------------------
 
   // The picture the map already has for what an item is, where it has one:
-  // containers, shulker boxes, beds and spawn eggs. Every other item is its
-  // initials, which is all the page can draw of it.
+  // containers, shulker boxes, beds and spawn eggs. Every other item has the
+  // picture of its own texture if the server made one, and is its initials
+  // where it did not.
   function pictureOf(name) {
     if (!/^[a-z0-9_]{1,64}$/.test(name)) return '';
     if (name === 'chest' || name === 'trapped_chest' || name === 'barrel') return icons.keyOf('container', { kind: name === 'trapped_chest' ? 'chest' : name, trapped: name === 'trapped_chest' });
     if (name === 'shulker_box') return icons.keyOf('container', { kind: 'shulker' });
-    const shulker = /^([a-z]+)_shulker_box$/.exec(name);
-    if (shulker) return icons.keyOf('container', { kind: 'shulker', colour: shulker[1] });
-    const bed = /^([a-z]+)_bed$/.exec(name);
-    if (bed) return icons.keyOf('bed', { colour: bed[1] });
+    // Only a colour the map has a picture of: a bed of any other name is an
+    // item like the rest, and not a bed of a colour that is not there.
+    const shulker = /^(.+)_shulker_box$/.exec(name);
+    if (shulker && (shulker[1] === 'undyed' || COLOURS.includes(shulker[1]))) return icons.keyOf('container', { kind: 'shulker', colour: shulker[1] });
+    const bed = /^(.+)_bed$/.exec(name);
+    if (bed && COLOURS.includes(bed[1])) return icons.keyOf('bed', { colour: bed[1] });
     const egg = /^(.+)_spawn_egg$/.exec(name);
-    return egg ? icons.keyOf('mob', { kind: egg[1] }) : '';
+    return egg ? icons.keyOf('mob', { kind: egg[1] }) : icons.keyOf('item', { kind: name });
   }
 
   function initials(label) {
@@ -187,10 +233,11 @@
     box.title = sentence;
     box.setAttribute('aria-label', sentence);
     const key = pictureOf(item.name);
-    if (key) box.append(icons.picture(key));
+    const enchanted = listOf(item.enchantments).length > 0;
+    if (key) box.append(icons.picture(key, { side: SLOT_ICON, glint: enchanted }));
     box.append(el('span', 'abbr', initials(item.customName || names.tidy(item.name))));
     if (item.count > 1) box.append(el('span', 'count', fmt(item.count)));
-    if (listOf(item.enchantments).length > 0) box.classList.add('enchanted');
+    if (enchanted) box.classList.add('enchanted');
     const d = durability(item);
     if (d && d.left < d.max) {
       const bar = el('span', 'wear');
@@ -203,54 +250,67 @@
     return box;
   }
 
-  // Grids of slots, 9 across, one for each range of slots given. The
-  // hotbar is the first row of an inventory and is parted from the rest.
-  function grids(stacks, ranges, label) {
-    const by = new Map(stacks.map((s) => [s.slot, s]));
+  // The line under slots that says what the one chosen holds, and what a slot
+  // does when it is chosen.
+  function reading() {
     const line = el('p', 'note slot-said', 'Choose an item for its details.');
     line.setAttribute('role', 'status');
     const pick = (sentence, pos) => {
       pickedPos = pos;
       line.textContent = sentence;
     };
+    return { line, pick };
+  }
+
+  // A slot, which is read again from a new answer if it is the one chosen.
+  function stocked(item, pos, { line, pick }) {
+    const cell = slot(item, pos, pick);
+    if (item && pos === pickedPos) line.textContent = cell.title;
+    return cell;
+  }
+
+  // Grids of slots, 9 across, one for each range of slots given, in the
+  // order given and one under the next.
+  function grids(stacks, ranges, label) {
+    const by = new Map(stacks.map((s) => [s.slot, s]));
+    const read = reading();
     const wrap = el('div', 'grids');
     for (const [from, to, name] of ranges) {
       const out = el('div', 'grid');
       out.setAttribute('role', 'group');
       out.setAttribute('aria-label', name ? `${label}, ${name}` : label);
-      for (let i = from; i < to; i++) {
-        const pos = `${label}|${i}`;
-        const cell = slot(by.get(i), pos, pick);
-        out.append(cell);
-        // The item being read is read again from the new answer.
-        if (pos === pickedPos && by.has(i)) line.textContent = cell.title;
-      }
+      for (let i = from; i < to; i++) out.append(stocked(by.get(i), `${label}|${i}`, read));
       wrap.append(out);
     }
-    wrap.append(line);
+    wrap.append(read.line);
     return wrap;
   }
 
-  // Worn and held items, a line each, since each has more to say than a box
-  // can: the enchantments and the wear.
+  // Worn and held items as slots like the rest, each with its place named
+  // under it, since a slot of armour alone does not say which it is.
   function equipment(record) {
     const worn = new Map(listOf(record.armor).map((s) => [s.slot, s]));
-    const rows = ARMOUR.map((place, i) => [place, worn.get(i) || null]);
-    rows.push(['Main hand', record.mainhand || null], ['Off hand', record.offhand || null]);
-    const list = el('dl', 'facts');
-    for (const [place, item] of rows) {
-      const dd = el('dd');
-      if (!item) {
-        dd.textContent = 'Nothing';
-        dd.className = 'dim';
-      } else {
-        const picture = pictureOf(item.name);
-        if (picture) dd.append(icons.picture(picture), ' ');
-        dd.append(describe(item));
-      }
-      list.append(el('dt', '', place), dd);
-    }
-    return list;
+    const read = reading();
+    const group = (label, kind, places) => {
+      const out = el('div', `grid ${kind}`);
+      out.setAttribute('role', 'group');
+      out.setAttribute('aria-label', label);
+      places.forEach(([place, item], i) => {
+        const box = stocked(item, `${label}|${i}`, read);
+        box.setAttribute('aria-label', `${place}: ${item ? box.title : 'Empty'}`);
+        const cell = el('div', 'gear');
+        cell.append(box, el('span', 'place', place));
+        out.append(cell);
+      });
+      return out;
+    };
+    const wrap = el('div', 'equipment');
+    wrap.append(
+      group('Worn', 'worn', ARMOUR.map((place, i) => [place, worn.get(i) || null])),
+      group('Held', 'held', [['Main hand', record.mainhand || null], ['Off hand', record.offhand || null]]),
+      read.line,
+    );
+    return wrap;
   }
 
   // --- the save ----------------------------------------------------------
@@ -287,10 +347,10 @@
     // level, is not drawn beside it.
     const r = { ...saved, ...now };
     if (now.level !== undefined) delete r.progress;
-    const hearts = gauge(r.health, 'Health', (g) => `${one(g.current / 2)} of ${one(g.max / 2)} hearts`);
-    const hunger = gauge(r.hunger, 'Hunger', (g) => `${one(g.current)} of ${one(g.max)}`);
+    const hearts = marked(gauge(r.health, 'Health', (g) => `${one(g.current / 2)} of ${one(g.max / 2)} hearts`), 'health', r.health);
+    const hunger = marked(gauge(r.hunger, 'Hunger', (g) => `${one(g.current)} of ${one(g.max)}`), 'hunger', r.hunger);
     const sat = gauge(r.saturation, 'Saturation', (g) => one(g.current));
-    const absorb = r.absorption && r.absorption.current > 0 ? gauge(r.absorption, 'Absorption', (g) => `${one(g.current / 2)} hearts`) : 'None';
+    const absorb = r.absorption && r.absorption.current > 0 ? marked(gauge(r.absorption, 'Absorption', (g) => `${one(g.current / 2)} hearts`), 'absorption', r.absorption) : 'None';
     const air = num(r.air);
     let breath = null;
     if (air !== null) breath = meter(air / MAX_AIR, air >= MAX_AIR ? 'Full' : `${one(Math.max(0, air) / TICKS_PER_SECOND)} s of breath`, 'Air');
@@ -348,7 +408,8 @@
     ])].filter(Boolean));
 
     out.push(el('h3', '', 'Worn and held'), equipment(r));
-    out.push(el('h3', '', 'Inventory'), grids(listOf(r.inventory), [[0, HOTBAR, 'hotbar'], [HOTBAR, INVENTORY, 'backpack']], 'Inventory'));
+    // As the game lays it out: the backpack's three rows, the hotbar under them.
+    out.push(el('h3', '', 'Inventory'), grids(listOf(r.inventory), [[HOTBAR, INVENTORY, 'backpack'], [0, HOTBAR, 'hotbar']], 'Inventory'));
     out.push(el('h3', '', 'Ender chest'), grids(listOf(r.enderChest), [[0, ENDER, '']], 'Ender chest'));
 
     out.push(el('h3', '', 'Places and progress'));

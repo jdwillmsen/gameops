@@ -163,7 +163,7 @@ func TestADensityChangeRecomposesAndTheStylesheetAgreesWithTheCanvas(t *testing.
 		"window.addEventListener('resize', rescale);",
 		"root.toggleAttribute('data-dense', DENSITY === 2);",
 		"return [theme, size, text, style, mobPicture, picturesLive, picturesMarkers, DENSITY].join('|');",
-		"if (canvas.width !== ICON * DENSITY) {",
+		"if (canvas.width !== side * DENSITY) {",
 	} {
 		if !bytes.Contains(icons, []byte(need)) {
 			t.Errorf("icons.js no longer has %q", need)
@@ -189,11 +189,40 @@ func TestThePanelsRowsShowWhatTheMapShows(t *testing.T) {
 	if !bytes.Contains(css, []byte(".pic .picture.saved { opacity: 0.55; outline: 1.5px dashed var(--marker-mobs);")) {
 		t.Error("style.css no longer fades a saved mob's picture in a row and rings it")
 	}
-	if !bytes.Contains(icons, []byte("if (drawn && Math.max(drawn.width, drawn.height) > ICON * DENSITY) {\n      const flat = renditions(canvas.dataset.picture).flat;")) {
+	if !bytes.Contains(icons, []byte("if (drawn && Math.max(drawn.width, drawn.height) > side * DENSITY) {\n      const flat = renditions(canvas.dataset.picture).flat;")) {
 		t.Error("icons.js draws a block in a row it does not fit, blurred")
 	}
 	// The panel asks the registry's own function for a row's picture.
 	if !bytes.Contains(read(t, "layers.js"), []byte("app.icons.picture(picture)")) || !bytes.Contains(icons, []byte("    picture,\n    paint,")) {
 		t.Error("the panel's rows no longer take their pictures from the icon registry")
+	}
+}
+
+// What a player carries and the marks for health and hunger are pictures of
+// the page's panels: they are asked for by key like any other, are drawn
+// whatever style the map's markers are in, and are drawn at a size that is a
+// whole number of their pixels, with a violet wash over an enchanted item.
+func TestItemAndMarkPicturesAreThePanelsAndNotTheMapsStyle(t *testing.T) {
+	icons := read(t, "icons.js")
+	for _, need := range []string{
+		"if (sort === 'item') return `item/${str(kind)}`;",
+		"function picture(key, { side = ICON, glint = false } = {}) {",
+		"canvas.width = canvas.height = side * DENSITY;",
+		"if (side !== ICON) canvas.dataset.side = String(side);",
+		"if (glint) canvas.dataset.glint = '1';",
+		"const side = Number(canvas.dataset.side) || ICON;",
+		"if (canvas.dataset.glint === '1') tint(ctx, canvas.width);",
+		"ctx.globalCompositeOperation = 'source-atop';",
+		"ctx.globalCompositeOperation = 'source-over';",
+	} {
+		if !bytes.Contains(icons, []byte(need)) {
+			t.Errorf("icons.js no longer has %q", need)
+		}
+	}
+	// Decided before the style is: with plain marks chosen, an item in a
+	// slot is still its picture.
+	page, plain := bytes.Index(icons, []byte("if (/^(item|ui)\\//.test(str(key))) return renditions(key).flat || null;")), bytes.Index(icons, []byte("if (style === 'dots') return null;"))
+	if page < 0 || plain < 0 || page > plain {
+		t.Error("icons.js lets the style chosen for markers take an item's picture from a panel")
 	}
 }
