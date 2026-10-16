@@ -66,6 +66,14 @@ never join it; a FWB unit needs a real account and `MC_OFFLINE` unset. Offline
 mode skips the auth cache entirely and logs one `auth_offline` line at start so
 such a unit is never mistaken for a signed-in one.
 
+The compose file also runs `crew-1` from the real image, with the camera on
+and the status port published on `127.0.0.1:8080` only:
+
+```
+docker compose -f minecraft/crew/lab/compose.yaml up -d --build crew-1
+curl -s localhost:8080/readyz
+```
+
 ### Textures
 
 Once the camera knows the server version it builds a texture atlas in the
