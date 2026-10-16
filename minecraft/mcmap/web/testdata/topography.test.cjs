@@ -538,6 +538,30 @@ test('in the nether the overlay is drawn from the floors under the level the map
   assert.doesNotMatch(p.asked('api/topography?').at(-1), /level/);
 });
 
+test('in the nether a level chosen while the last one is still being asked about is asked about once that answer is in', async () => {
+  const p = await load({ dimension: 'nether', listings: { nether: listingOf({ bands: BANDS.slice(0, 4) }) } });
+  let cut = 'default';
+  p.win.mcmap.level = { get: () => cut };
+  await p.on('Height tint');
+  const answer = p.win.fetch;
+  let release;
+  p.win.fetch = (address) => {
+    if (!address.startsWith('api/topography?')) return answer(address);
+    p.win.fetch = answer;
+    const answered = answer(address);
+    return new Promise((resolve) => { release = () => resolve(answered); });
+  };
+  cut = '66';
+  await p.view();
+  cut = '34';
+  await p.view();
+  assert.deepEqual(p.asked('api/topography?').slice(-1), ['api/topography?dimension=nether&level=66'], 'a second listing was asked for while the first was out');
+  release();
+  await wait();
+  assert.equal(p.asked('api/topography?').at(-1), 'api/topography?dimension=nether&level=34', 'the level chosen while the first was out was never asked for');
+  assert.match(p.layer().getTileUrl({ z: 0, x: 1, y: 2 }), /level=34/);
+});
+
 test('a nether whose floors are not read is not offered, and says so', async () => {
   const p = await load({ dimension: 'nether' });
   await p.on('Height tint');
