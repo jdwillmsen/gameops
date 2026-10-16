@@ -24,6 +24,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/icons"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/layers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/live"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
@@ -56,6 +57,11 @@ const playerReadTimeout = time.Minute
 // Reading the full world's biomes takes about ten seconds at a whole CPU.
 // One still running after this is given up, and the last reading stands.
 const biomeReadTimeout = 2 * time.Minute
+
+// Reading the Nether's floors for all its levels takes about ten seconds at
+// a whole CPU. One still running after this is given up, and the last
+// reading stands.
+const layerFloorTimeout = 2 * time.Minute
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -201,6 +207,44 @@ func run(logger *slog.Logger) error {
 		reader.Load()
 		w.Biomes = reader
 	}
+	// The cave and level views draw from the mirrored world on request, and
+	// the Nether's floors are read after each snapshot for its topography.
+	// Both have directories of their own: opening a view clears what a
+	// killed run left in its directory.
+	var caves *layers.Service
+	var floorStore *layers.FloorStore
+	if cfg.Layers {
+		var tint func() layers.Biomes
+		if biomeStore != nil {
+			tint = func() layers.Biomes {
+				if world := biomeStore.World(); world != nil {
+					return world
+				}
+				return nil
+			}
+		}
+		caves = layers.NewService(layers.Config{
+			WorkDir:    filepath.Join(cfg.DataDir, "layers", "serve"),
+			CacheBytes: cfg.LayersCacheMB << 20,
+			MaxRenders: cfg.LayersMaxRenders,
+			Biomes:     tint,
+			Logger:     logger,
+		})
+		defer caves.Close()
+		// What the mirror holds from before this start can be drawn at once.
+		if err := caves.Refresh(filepath.Join(mirrorDir, cfg.Level, "db"), strconv.FormatInt(time.Now().Unix(), 36)); err != nil {
+			logger.Info("cave views wait for the first snapshot", "reason", err.Error())
+		}
+		w.Layers = caves
+		cuts := []int{cfg.NetherTopY}
+		for _, level := range cfg.NetherLevels {
+			cuts = append(cuts, level.TopY)
+		}
+		floorStore = &layers.FloorStore{}
+		floors := &layers.FloorExtractor{WorkDir: filepath.Join(cfg.DataDir, "layers", "floors"), Levels: cuts, Store: floorStore, Timeout: layerFloorTimeout, Logger: logger}
+		floors.Load()
+		w.Floors = floors
+	}
 	// The biomes are read before the survey in each cycle, so a site is
 	// judged by the biome of the snapshot it is in, or of the last one
 	// that was read if this one could not be.
@@ -269,6 +313,9 @@ func run(logger *slog.Logger) error {
 	}
 	if biomeStore != nil {
 		app.Biomes = biomeStore
+	}
+	if caves != nil {
+		app.Layers, app.Floors = caves, floorStore
 	}
 	if past != nil {
 		app.History = past
@@ -374,7 +421,7 @@ func run(logger *slog.Logger) error {
 		_ = internal.Shutdown(shutdown)
 	}()
 
-	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "trails", cfg.Trails && cfg.Live, "history", cfg.History, "service_sessions", cfg.ServiceSecret != "", "admin", cfg.Admin, "passkeys", cfg.Passkeys, "xbox", cfg.XboxLogin, "xbox_allowlist", cfg.XboxLogin && cfg.XboxAllowlist)
+	logger.Info("starting", "http_addr", cfg.HTTPAddr, "internal_addr", cfg.InternalAddr, "login", cfg.Login, "level", cfg.Level, "refresh", cfg.Refresh.String(), "quiet_windows", len(cfg.Quiet), "live", cfg.Live, "markers", cfg.Markers, "waypoints", cfg.AgentURL != "", "icons", cfg.Icons, "biomes", cfg.Biomes, "layers", cfg.Layers, "trails", cfg.Trails && cfg.Live, "history", cfg.History, "service_sessions", cfg.ServiceSecret != "", "admin", cfg.Admin, "passkeys", cfg.Passkeys, "xbox", cfg.XboxLogin, "xbox_allowlist", cfg.XboxLogin && cfg.XboxAllowlist)
 	errs := make(chan error, 2)
 	go func() { errs <- internal.ListenAndServe() }()
 	go func() { errs <- public.ListenAndServe() }()

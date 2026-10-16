@@ -147,6 +147,12 @@ type Config struct {
 
 	// Biomes is whether the world's biomes are read and served.
 	Biomes bool
+	// Layers is whether the cave and level views are drawn on request, and
+	// the Nether's floors read for its topography. LayersCacheMB bounds the
+	// pictures kept and LayersMaxRenders how many are drawn at once.
+	Layers           bool
+	LayersCacheMB    int
+	LayersMaxRenders int
 	// Trails is whether players' recent positions are kept and served. It
 	// needs the live layer, which is where the positions come from.
 	Trails bool
@@ -426,6 +432,20 @@ func Load(getenv func(string) string) (Config, error) {
 	// that on by itself.
 	if c.Biomes, err = strconv.ParseBool(or(getenv("BIOMES_ENABLED"), "false")); err != nil {
 		fail("BIOMES_ENABLED must be true or false")
+	}
+	// Off until asked for: a tile costs a sixth of a second of a CPU the
+	// game server shares, and the Nether's floors a ten second pass.
+	if c.Layers, err = strconv.ParseBool(or(getenv("LAYERS_ENABLED"), "false")); err != nil {
+		fail("LAYERS_ENABLED must be true or false")
+	}
+	c.LayersCacheMB, c.LayersMaxRenders = 64, 2
+	if c.Layers {
+		if c.LayersCacheMB, err = strconv.Atoi(or(getenv("LAYERS_CACHE_MB"), "64")); err != nil || c.LayersCacheMB < 1 || c.LayersCacheMB > 1024 {
+			fail("LAYERS_CACHE_MB must be between 1 and 1024")
+		}
+		if c.LayersMaxRenders, err = strconv.Atoi(or(getenv("LAYERS_MAX_RENDERS"), "2")); err != nil || c.LayersMaxRenders < 1 || c.LayersMaxRenders > 8 {
+			fail("LAYERS_MAX_RENDERS must be between 1 and 8")
+		}
 	}
 	if c.Trails, err = strconv.ParseBool(or(getenv("TRAILS_ENABLED"), "false")); err != nil {
 		fail("TRAILS_ENABLED must be true or false")
