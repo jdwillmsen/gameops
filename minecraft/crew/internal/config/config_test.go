@@ -147,6 +147,7 @@ func TestCameraAtlasDirDefaultsToTheDataVolume(t *testing.T) {
 // something a lab author writes down.
 func TestOfflineIsOffByDefaultAndCanBeEnabled(t *testing.T) {
 	setRequired(t)
+	t.Setenv("MC_OFFLINE", "")
 	cfg, err := Load()
 	if err != nil || cfg.Offline {
 		t.Fatalf("default Offline = %v, %v; want false", cfg.Offline, err)
