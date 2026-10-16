@@ -19,7 +19,7 @@ func fixedClock() func() time.Time {
 func spawned(t *testing.T) *Tracker {
 	t.Helper()
 	tr := New(fixedClock())
-	tr.Spawn(self, mgl32.Vec3{1, 2, 3}, 0)
+	tr.Spawn(self, mgl32.Vec3{1, 2, 3}, 10, 20, 0)
 	return tr
 }
 
@@ -102,5 +102,62 @@ func TestRespawnMovesTheUnitToWhereTheServerPutIt(t *testing.T) {
 	tr.Apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{7, 70, 7}})
 	if got := tr.Snapshot().Position; got != [3]float32{7, 70, 7} {
 		t.Errorf("position = %v, want [7 70 7]", got)
+	}
+}
+
+// GameData carries a placeholder Y, so the spawn position must not be
+// reported as known until a packet that carries the real one.
+func TestSpawnPositionIsUntrustedUntilAReliablePacket(t *testing.T) {
+	tr := spawned(t)
+	if tr.Snapshot().PositionKnown {
+		t.Fatal("position known straight after Spawn")
+	}
+	tr.Apply(&packet.Respawn{State: packet.RespawnStateSearchingForSpawn})
+	if tr.Snapshot().PositionKnown {
+		t.Fatal("a respawn still searching made the position known")
+	}
+	tr.Apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{7, 70, 7}})
+	if s := tr.Snapshot(); !s.PositionKnown || s.Position != [3]float32{7, 70, 7} {
+		t.Errorf("after ready respawn = %+v", s)
+	}
+}
+
+func TestOwnMovePlayerMakesThePositionKnown(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.MovePlayer{EntityRuntimeID: self + 1, Position: mgl32.Vec3{9, 9, 9}})
+	if tr.Snapshot().PositionKnown {
+		t.Fatal("another entity's move made the position known")
+	}
+	tr.Apply(&packet.MovePlayer{EntityRuntimeID: self, Position: mgl32.Vec3{4, 5, 6}})
+	if !tr.Snapshot().PositionKnown {
+		t.Error("own MovePlayer did not make the position known")
+	}
+}
+
+func TestSpawnSeedsRotation(t *testing.T) {
+	s := spawned(t).Snapshot()
+	if s.Yaw != 10 || s.Pitch != 20 {
+		t.Errorf("yaw=%v pitch=%v, want 10 20", s.Yaw, s.Pitch)
+	}
+}
+
+func TestOwnMovePlayerUpdatesRotation(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.MovePlayer{EntityRuntimeID: self + 1, Yaw: 99, Pitch: 99})
+	if s := tr.Snapshot(); s.Yaw != 10 || s.Pitch != 20 {
+		t.Fatalf("another entity changed rotation: %+v", s)
+	}
+	tr.Apply(&packet.MovePlayer{EntityRuntimeID: self, Position: mgl32.Vec3{4, 5, 6}, Yaw: 90, Pitch: -15})
+	if s := tr.Snapshot(); s.Yaw != 90 || s.Pitch != -15 {
+		t.Errorf("yaw=%v pitch=%v, want 90 -15", s.Yaw, s.Pitch)
+	}
+}
+
+func TestResetForgetsKnownPosition(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.MovePlayer{EntityRuntimeID: self})
+	tr.Reset()
+	if tr.Snapshot().PositionKnown {
+		t.Error("position still known after reset")
 	}
 }

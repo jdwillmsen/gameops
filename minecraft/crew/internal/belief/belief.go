@@ -20,10 +20,17 @@ type Snapshot struct {
 	Dimension int32 `json:"dimension"`
 	// As the server reports it. Bedrock places players at eye height, so this
 	// is not the block the unit stands on.
-	Position    [3]float32 `json:"position"`
-	Health      float32    `json:"health"`
-	HealthKnown bool       `json:"health_known"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	Position [3]float32 `json:"position"`
+	// False until a packet that carries the real position arrives: GameData's
+	// Y is a placeholder offset, so the spawn position cannot be trusted.
+	PositionKnown bool `json:"position_known"`
+	// Degrees, as the server reports them. A /tp to the same position sends no
+	// MovePlayer, so a look-only teleport leaves these stale.
+	Yaw         float32   `json:"yaw"`
+	Pitch       float32   `json:"pitch"`
+	Health      float32   `json:"health"`
+	HealthKnown bool      `json:"health_known"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -36,11 +43,11 @@ type Tracker struct {
 
 func New(now func() time.Time) *Tracker { return &Tracker{now: now} }
 
-func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, dimension int32) {
+func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, dimension int32) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.self = runtimeID
-	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, UpdatedAt: t.now()}
+	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, Yaw: yaw, Pitch: pitch, UpdatedAt: t.now()}
 }
 
 func (t *Tracker) Apply(pk packet.Packet) {
@@ -54,7 +61,8 @@ func (t *Tracker) Apply(pk packet.Packet) {
 		if p.EntityRuntimeID != t.self {
 			return
 		}
-		t.s.Position = p.Position
+		t.s.Position, t.s.PositionKnown = p.Position, true
+		t.s.Yaw, t.s.Pitch = p.Yaw, p.Pitch
 	case *packet.UpdateAttributes:
 		if p.EntityRuntimeID != t.self {
 			return
@@ -70,7 +78,7 @@ func (t *Tracker) Apply(pk packet.Packet) {
 		if p.State != packet.RespawnStateReadyToSpawn {
 			return
 		}
-		t.s.Position = p.Position
+		t.s.Position, t.s.PositionKnown = p.Position, true
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 	default:
