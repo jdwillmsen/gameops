@@ -44,7 +44,7 @@ func TestEveryAboutPageSaysItIsNotAnOfficialProductAndLinksToTheRest(t *testing.
 		if !bytes.Contains(page, []byte(`href="./"`)) {
 			t.Errorf("%s has no way back to the map", name)
 		}
-		if !bytes.Contains(page, []byte("Questions? Ask the server operator.")) {
+		if !bytes.Contains(page, []byte(`Questions? Email <a href="mailto:{{contact}}">{{contact}}</a>.`)) {
 			t.Errorf("%s does not say whom to ask", name)
 		}
 		if !bytes.Contains(page, []byte("{{copyright}}")) {

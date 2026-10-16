@@ -8,11 +8,14 @@ import "embed"
 var FS embed.FS
 
 // Owner is who runs the map and holds the copyright in what is written
-// here. The pages say {{owner}} and {{copyright}} where they mean it, and
-// the server fills them in, so this is the one place to change.
+// here, and Contact is where to reach them: the game's usage guidelines do
+// not accept a chat as the way to get in touch. The pages say {{owner}},
+// {{copyright}} and {{contact}} where they mean them, and the server fills
+// them in, so this is the one place to change.
 const (
-	Owner     = "Jacob Willmsen"
+	Owner     = "Jake Willmsen"
 	Copyright = "© 2026 " + Owner
+	Contact   = "admin@jdwlabs.com"
 )
 
 // Pages are the routes of the pages that need no login, with the file each
