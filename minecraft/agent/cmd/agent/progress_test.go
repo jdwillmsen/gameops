@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 	"time"
@@ -49,5 +51,26 @@ func TestProgressWhisperSkipsTheConsole(t *testing.T) {
 	}
 	if got := voice.output(); len(got) != 1 {
 		t.Errorf("voice output = %q, want only %q -- the console must get no whisper", got, want)
+	}
+}
+
+// A failed answer used to end in silence, which players read as the agent
+// being down. The asker is told privately; the console, which has no chat to
+// whisper into, is not.
+func TestAFailedAnswerIsWhisperedToTheAskerOnly(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer backend.Close()
+
+	_, pctx, voice, _, _, playerRoster, _ := newHarness(t)
+	ans := enabledAnswering(backend.URL)
+
+	handleMention(context.Background(), chat.ServerOrigin, chat.ParseTrigger("@server hi"), false, quietLog, pctx, ans, playerRoster)
+	handleMention(context.Background(), playerXUID, chat.ParseTrigger("@server hi"), false, quietLog, pctx, ans, playerRoster)
+
+	want := []string{"tell " + playerXUID + ": " + answerFailedText}
+	if got := voice.output(); !slices.Equal(got, want) {
+		t.Errorf("voice output = %q, want only %q", got, want)
 	}
 }
