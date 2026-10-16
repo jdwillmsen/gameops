@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/sandertv/go-raknet"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/atlas"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
@@ -34,7 +36,67 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, log *logging.Logger) 
 		Self:       tracker,
 		MaxViewers: cfg.CameraMaxViewers,
 	})
-	return hub, func(ctx context.Context, addr string) { dec.BeginSession(pingVersion(ctx, addr)) }
+	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log, build: ensureAtlas(atlas.Fetcher{})}
+	return hub, func(ctx context.Context, addr string) {
+		version := pingVersion(ctx, addr)
+		dec.BeginSession(version)
+		go atlases.load(context.WithoutCancel(ctx), version)
+	}
+}
+
+// atlasTimeout bounds the background build: the resource pack is a few
+// hundred MB, and a stuck download must not hold the loader forever.
+const atlasTimeout = 20 * time.Minute
+
+type atlasBuilder func(ctx context.Context, serverVersion, dir string) (*atlas.Atlas, error)
+
+func ensureAtlas(f atlas.Fetcher) atlasBuilder {
+	return func(ctx context.Context, serverVersion, dir string) (*atlas.Atlas, error) {
+		a, _, err := atlas.Ensure(ctx, f, serverVersion, dir, atlas.Options{})
+		return a, err
+	}
+}
+
+// atlasLoader builds the texture atlas once the server version is known. A
+// failure only costs the textures: the camera keeps drawing flat colours and
+// the next session tries again.
+type atlasLoader struct {
+	dir   string
+	hub   *camera.Hub
+	log   *logging.Logger
+	build atlasBuilder
+
+	mu            sync.Mutex
+	running, done bool
+}
+
+func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
+	l.mu.Lock()
+	if serverVersion == "" || l.running || l.done {
+		l.mu.Unlock()
+		return
+	}
+	l.running = true
+	l.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(ctx, atlasTimeout)
+	defer cancel()
+	a, err := l.build(ctx, serverVersion, l.dir)
+	if err == nil {
+		err = l.hub.SetAtlas(a)
+	}
+	l.mu.Lock()
+	l.running, l.done = false, err == nil
+	l.mu.Unlock()
+	if err != nil {
+		l.log.Warn("camera_atlas_unavailable", logging.Fields{
+			"server_version": serverVersion,
+			"error":          err.Error(),
+			"hint":           "the camera draws flat colours until an atlas is built",
+		})
+		return
+	}
+	l.log.Info("camera_atlas_ready", logging.Fields{"server_version": serverVersion})
 }
 
 // pingVersion asks the server for the version it advertises. The game data's
