@@ -69,6 +69,20 @@
     maxBoundsViscosity: 0.8,
   });
 
+  // Leaflet's own redraw takes the map's zoom for the tiles' as it is, and
+  // with any fraction allowed that is a level no tile is cut for: the
+  // overlay asks for tiles at z -1.5, is refused every one, and stays empty
+  // until a zoom or a reload lays it out again. This lays it out the way a
+  // zoom does, at the whole level nearest.
+  L.GridLayer.include({
+    redraw() {
+      if (!this._map) return this;
+      this._removeAllTiles();
+      this._resetView();
+      return this;
+    },
+  });
+
   // Over the terrain, the biome tint and the slime chunks, which are in the
   // tile pane at 200, and under everything drawn as a shape or a marker.
   map.createPane('grid').style.zIndex = 250;
