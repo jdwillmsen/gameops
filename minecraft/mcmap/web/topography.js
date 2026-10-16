@@ -214,6 +214,10 @@
   async function load(dimension) {
     if (pending === dimension) return;
     pending = dimension;
+    // A level chosen while this was out was turned away by the check above,
+    // so it is asked for once this answer is in; only after an answer, so a
+    // failing request does not ask again at once.
+    let moved = false;
     try {
       const level = dimension === 'nether' ? levelNow() : '';
       const res = await fetch(`api/topography?dimension=${encodeURIComponent(dimension)}${levelQuery(level)}`, { cache: 'no-store' });
@@ -248,11 +252,13 @@
       // Before the first reading, ask again soon rather than in a minute.
       fetchedAt = listing.ready || !listing.offered ? Date.now() : Date.now() - REFRESH_MS + RETRY_MS;
       settle();
+      moved = dimension === 'nether' && level !== levelNow();
     } catch {
       fetchedAt = Date.now() - REFRESH_MS + RETRY_MS;
     } finally {
       if (pending === dimension) pending = null;
     }
+    if (moved && pending === null && app.dimension() === 'nether') load('nether');
   }
 
   // Brings the listing in line with the view: the current dimension's, and
