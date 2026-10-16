@@ -17,6 +17,9 @@ const (
 	// A worker needs the chunks it is working in, not a farm's radius. 32 is
 	// generous for that and far inside RequestChunkRadius's uint8.
 	maxViewDistance uint8 = 32
+	// Every viewer holds a replay of the unit's world in flight; the cap keeps
+	// a stray page reload loop from becoming crew's main cost.
+	maxCameraViewers = 64
 )
 
 type Config struct {
@@ -31,6 +34,9 @@ type Config struct {
 	ReconnectMaxMs int
 
 	StatusAddr string
+
+	CameraEnabled    bool
+	CameraMaxViewers int
 }
 
 func Load() (Config, error) {
@@ -65,6 +71,14 @@ func Load() (Config, error) {
 	if _, _, err := net.SplitHostPort(statusAddr); err != nil {
 		return Config{}, fmt.Errorf("STATUS_ADDR %q: %w", statusAddr, err)
 	}
+	cameraEnabled, err := boolDefault("CAMERA_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	cameraMaxViewers, err := intInRange("CAMERA_MAX_VIEWERS", 4, 1, maxCameraViewers)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -75,6 +89,9 @@ func Load() (Config, error) {
 		ReconnectMinMs: reconnectMin,
 		ReconnectMaxMs: reconnectMax,
 		StatusAddr:     statusAddr,
+
+		CameraEnabled:    cameraEnabled,
+		CameraMaxViewers: cameraMaxViewers,
 	}, nil
 }
 
@@ -91,6 +108,18 @@ func stringDefault(name, def string) string {
 		return v
 	}
 	return def
+}
+
+func boolDefault(name string, def bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s=%q: want true or false", name, raw)
+	}
+	return v, nil
 }
 
 func intInRange(name string, def, min, max int) (int, error) {
