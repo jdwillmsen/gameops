@@ -74,3 +74,13 @@ for the same reason and are drawn as bottom slabs and stairs that rise towards +
 If the fetch fails, the camera is offline at first start or the page cannot
 load the atlas, the view stays flat-coloured and the build is retried on the
 next session.
+
+### Entities
+
+Players, mobs and dropped items are drawn as simple boxes sized to their
+Bedrock hit boxes, with a per-type colour (unknown types get a hashed colour).
+A player's head turns independently of its body and carries a name label; the
+page keeps the type table, so adding a mob is a page-only change. Entity
+records on the wire carry the feet position and a head yaw byte. Players
+reported by `MovePlayer` are shifted down by the 1.62 eye height; the other
+position packets are taken to report the feet.
