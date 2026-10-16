@@ -93,6 +93,9 @@ func (c *Census) Acknowledge(checkedAt time.Time) error {
 	return nil
 }
 
+// Bounds is the box of chunks of a dimension the world has been seen to hold.
+func (c *Census) Bounds(d Dimension) (Box, bool) { return c.Ledger.Bounds(d) }
+
 // Missing is the chunks seen before and absent from the last count.
 func (c *Census) Missing() Set { return c.Ledger.Missing() }
 

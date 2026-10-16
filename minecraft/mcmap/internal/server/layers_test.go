@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -250,5 +251,49 @@ func TestLayerTileSaysWhyItHasNone(t *testing.T) {
 	s.Handler().ServeHTTP(rec, req)
 	if rec.Body.Len() != 0 {
 		t.Errorf("a cancelled request was answered with %q", rec.Body)
+	}
+}
+
+// boxed is a chunk count that knows where the world has been.
+type boxed struct {
+	missingCensus
+	box map[chunks.Dimension]chunks.Box
+}
+
+func (b *boxed) Bounds(d chunks.Dimension) (chunks.Box, bool) {
+	box, ok := b.box[d]
+	return box, ok
+}
+
+func TestLayerTileOutsideEveryChunkTheWorldHasHeldIsNotQueuedToBeDrawn(t *testing.T) {
+	s, f := withLayers(t)
+	s.Chunks = &boxed{missingCensus: missingCensus{counted: true}, box: map[chunks.Dimension]chunks.Box{
+		chunks.Overworld: {MinX: 0, MinZ: 0, MaxX: 31, MaxZ: 31},
+	}}
+	path := func(dim string, zoom, x, y int) string {
+		return "/api/layers/tiles/" + dim + "/" + strconv.Itoa(zoom) + "/" + strconv.Itoa(x) + "/" + strconv.Itoa(y) + ".png?level=0&style=floor"
+	}
+	// Chunks 0 to 31 are blocks 0 to 511: tiles 0 and 1 at zoom 0.
+	for _, c := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{"a tile inside", path("overworld", 0, 1, 1), http.StatusOK},
+		{"a tile beside the box, within the lighting's chunk", path("overworld", 0, -1, 0), http.StatusOK},
+		{"a tile far east", path("overworld", 0, 50, 0), http.StatusNotFound},
+		{"a tile far north", path("overworld", 0, 0, -50), http.StatusNotFound},
+		{"a wide tile that holds the box", path("overworld", -1, 0, 0), http.StatusOK},
+		{"a wide tile that does not", path("overworld", -1, 9, 9), http.StatusNotFound},
+		{"a dimension the world has held no chunk of", "/api/layers/tiles/end/0/0/0.png?level=255&style=floor", http.StatusNotFound},
+	} {
+		before := len(f.asked)
+		rec := fetch(t, s, c.path)
+		if rec.Code != c.want {
+			t.Errorf("%s: %d, want %d", c.name, rec.Code, c.want)
+		}
+		if c.want == http.StatusNotFound && len(f.asked) != before {
+			t.Errorf("%s was queued to be drawn", c.name)
+		}
 	}
 }
