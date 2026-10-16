@@ -50,8 +50,10 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer v.Close()
-	if r, err := strconv.Atoi(r.URL.Query().Get("r")); err == nil {
-		v.SetRadius(r)
+	// Parsed at 8 bits so the value is bounded where it enters, not only by
+	// SetRadius's clamp further in.
+	if r, err := strconv.ParseUint(r.URL.Query().Get("r"), 10, 8); err == nil {
+		v.SetRadius(int(r))
 	}
 
 	// Accept refuses a cross-origin page by default; the viewer is served from
