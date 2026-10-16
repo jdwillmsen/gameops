@@ -31,13 +31,17 @@
       <li><strong>Your head.</strong> Your skin&rsquo;s face may be used as your marker while you are online. It is kept in memory only and dropped a few minutes after you leave.</li>
       <li><strong>Your waypoints.</strong> Places you save in game with <code>!waypoint</code> are shown on the map to you and nobody else.</li>
       <li><strong>The world.</strong> Terrain and places such as beds and chests are read from the server&rsquo;s world. Where the operator has switched history on, the map keeps a picture of the terrain and its markers for each day, and does not delete old days automatically.</li>
+      <li><strong>What you have done.</strong> Running totals for each player: deaths and kills by kind, blocks broken and placed by kind, joins, leaves and time online, counted from when the map started keeping them. Only the totals are kept, never the events. Any logged-in player can see them in a player&rsquo;s details.</li>
+      <li><strong>Operators.</strong> Server operators are the map&rsquo;s admins. The map reads who they are from the game and keeps their XUIDs, with when that was last confirmed, so admin still works for up to a day while the game cannot be asked.</li>
+      <li><strong>Passkeys.</strong> If you add a passkey, the map keeps its public key and ID, a counter your device updates, your XUID and gamertag, the name you gave it, and when it was added and last used. The private key stays on your device. Removing the passkey, or logging out everywhere, deletes it.</li>
       <li><strong>Logs.</strong> The map&rsquo;s logs record that a login was issued, with the XUID and gamertag it was issued to, and when logins are withdrawn. Your XUID can also appear there when something goes wrong with your own data, such as your waypoints.</li>
     </ul>
     <h2>Cookies</h2>
-    <p>The map sets two cookies, both needed to log in and neither for tracking. Both are named with a <code>__Host-</code> prefix, so a browser sends them only to this exact site over a secure connection, and both are <code>HttpOnly</code>, so scripts on the page cannot read them.</p>
+    <p>The map sets only cookies needed to log in, none for tracking. All are named with a <code>__Host-</code> prefix, so a browser sends them only to this exact site over a secure connection, and all are <code>HttpOnly</code>, so scripts on the page cannot read them.</p>
     <ul>
       <li><code>__Host-mcmap_pending</code>: set while you wait for your login to complete, so only the browser that asked for a code can collect it.</li>
-      <li><code>__Host-mcmap_session</code>: your login. It holds your XUID and gamertag, when it was issued and when it ends, signed so it cannot be altered. By default it lasts seven days.</li>
+      <li><code>__Host-mcmap_passkey</code>: set for a few minutes while you log in with a passkey, so the answer your device gives is matched to the request this browser made.</li>
+      <li><code>__Host-mcmap_session</code>: your login. It holds your XUID and gamertag, when it was issued and when it ends, signed so it cannot be altered. By default it lasts seven days, or twelve hours after a passkey login.</li>
     </ul>
     <h2>What stays in your browser</h2>
     <p>Settings such as the theme, the layers you turned on, your saved views and the live-update pace are kept in your browser&rsquo;s local storage. They are never sent to the server. Clearing your site data removes them.</p>
