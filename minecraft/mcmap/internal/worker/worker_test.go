@@ -25,10 +25,15 @@ import (
 type fakeSyncer struct {
 	calls int
 	err   error
+	// idle is a snapshot that found the world as the last one left it.
+	idle bool
 }
 
 func (f *fakeSyncer) Sync(context.Context) (mirror.Stats, error) {
 	f.calls++
+	if f.idle {
+		return mirror.Stats{Files: 3}, f.err
+	}
 	return mirror.Stats{Files: 3, Fetched: 1, Bytes: 42}, f.err
 }
 

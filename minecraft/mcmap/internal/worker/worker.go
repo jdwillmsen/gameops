@@ -10,6 +10,7 @@ import (
 	"maps"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/generations"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/history"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/layers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/markers"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/mirror"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
@@ -61,6 +63,10 @@ var (
 		Name: "mcmap_biomes_panics_total",
 		Help: "Biome readings that panicked and were abandoned; the rest of the cycle went on.",
 	})
+	metricFloorPanics = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "mcmap_layers_floor_panics_total",
+		Help: "Readings of the Nether's floors that panicked and were abandoned; the rest of the cycle went on.",
+	})
 	metricSurveyPanics = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "mcmap_structures_survey_panics_total",
 		Help: "Structure surveys that panicked and were abandoned; the structures of the last survey that worked are still served.",
@@ -98,6 +104,18 @@ type Surveyor interface {
 // many chunks the count found in it, or -1 if nothing counted them.
 type BiomeReader interface {
 	Extract(ctx context.Context, dbDir string, at time.Time, chunks int) (biomes.Stats, error)
+}
+
+// LayerView opens the mirrored world for the cave and level views to draw
+// from, as the world of the version given.
+type LayerView interface {
+	Refresh(dbDir, version string) error
+}
+
+// FloorReader reads the floors of the Nether under each of its levels.
+// chunks is how many chunks the count found, or -1.
+type FloorReader interface {
+	Extract(ctx context.Context, dbDir string, at time.Time, chunks int) (layers.FloorStats, error)
 }
 
 // Historian keeps the map as it is drawn, once a day. It is offered every
@@ -155,6 +173,15 @@ type Worker struct {
 	// History, if set, is offered the map after every cycle in which all
 	// of it was drawn.
 	History Historian
+	// Layers, if set, is pointed at each snapshot that changed the world,
+	// which is a new version of every tile it has kept. Floors, if set,
+	// reads the Nether's floors after the biomes, gated as they are.
+	Layers LayerView
+	Floors FloorReader
+
+	// layersOpened is whether Layers has been given a world at all, and
+	// layersRetry that the last opening failed and is to be made again.
+	layersOpened, layersRetry bool
 }
 
 // Status is what the last cycles achieved, for the web page to report.
@@ -347,6 +374,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 	w.keep(ctx, now, report, counted)
 	w.mark(ctx, now)
 	w.players(ctx, now)
+	w.openLayers(stats, now)
 
 	problem := ""
 	for _, dimension := range render.Dimensions {
@@ -369,6 +397,7 @@ func (w *Worker) Cycle(ctx context.Context, now time.Time) Outcome {
 		w.remember(ctx, now)
 	}
 	w.biomes(ctx, now, report, counted)
+	w.floors(ctx, now, report, counted)
 	w.survey(ctx, now)
 	w.levels(ctx, now)
 	return Applied
@@ -560,4 +589,52 @@ func (w *Worker) biomes(ctx context.Context, now time.Time, r chunks.Report, cou
 		"malformed", stats.Malformed, "out_of_range", stats.OutOfRange, "over_limit", stats.OverLimit,
 		"coarsened", stats.Coarsened, "kinds_left_out", stats.KindsLeftOut, "unindexed", stats.Unindexed,
 		"seconds", time.Since(started).Seconds())
+}
+
+// openLayers gives the cave views the snapshot just applied. A snapshot
+// that fetched and removed nothing left the world as it was, and the
+// pictures kept of it stand: an idle world costs the cache nothing.
+func (w *Worker) openLayers(stats mirror.Stats, now time.Time) {
+	if w.Layers == nil || (w.layersOpened && !w.layersRetry && stats.Fetched == 0 && stats.Removed == 0) {
+		return
+	}
+	version := strconv.FormatInt(now.Unix(), 36)
+	if err := w.Layers.Refresh(filepath.Join(w.MirrorDir, w.Level, "db"), version); err != nil {
+		w.Logger.Error("cave views not opened on the new snapshot; they keep the last", "error", err)
+		w.layersRetry = true
+		return
+	}
+	w.layersOpened, w.layersRetry = true, false
+}
+
+// floors reads the Nether's floors, after the biomes and before the
+// survey. A reading that fails or runs out of time costs nothing else: the
+// page keeps the floors of the last one that worked.
+func (w *Worker) floors(ctx context.Context, now time.Time, r chunks.Report, counted bool) {
+	if w.Floors == nil {
+		return
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			metricFloorPanics.Inc()
+			w.Logger.Error("floor reading panicked", "panic", p, "stack", string(debug.Stack()))
+		}
+	}()
+	// The Nether's own count: the floors change when its chunks do, and the
+	// whole world's moves with every step taken in the overworld.
+	total := -1
+	if counted {
+		total = r.Present[chunks.Nether]
+	}
+	started := time.Now()
+	stats, err := w.Floors.Extract(ctx, filepath.Join(w.MirrorDir, w.Level, "db"), now, total)
+	if err != nil {
+		w.Logger.Error("floors not read", "error", err)
+		return
+	}
+	if stats.Unchanged {
+		w.Logger.Info("floors unchanged: nothing generated since the last reading", "chunks", stats.Chunks)
+		return
+	}
+	w.Logger.Info("floors read", "chunks", stats.Chunks, "seconds", time.Since(started).Seconds())
 }
