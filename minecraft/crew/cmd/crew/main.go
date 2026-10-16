@@ -144,7 +144,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 		return fmt.Errorf("spawn: %w", err)
 	}
 	gd := conn.GameData()
-	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Dimension)
+	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Yaw, gd.Pitch, gd.Dimension)
 	log.Info("spawned", spawnedFields(conn.IdentityData().XUID, cfg.ViewDistance))
 
 	if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {
