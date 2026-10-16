@@ -69,7 +69,7 @@ func main() {
 	}
 
 	tracker := belief.New(time.Now)
-	hub := newCamera(cfg, tracker)
+	hub, beginSession := newCamera(cfg, tracker, log)
 	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, hub), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -85,7 +85,7 @@ func main() {
 			maxDelay: time.Duration(cfg.ReconnectMaxMs) * time.Millisecond,
 			after:    time.After,
 		},
-		func(ctx context.Context) error { return session(ctx, cfg, ts, tracker, hub, log) },
+		func(ctx context.Context) error { return session(ctx, cfg, ts, tracker, hub, beginSession, log) },
 		tracker.Reset,
 		logAdapter{log},
 	)
@@ -104,7 +104,7 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 	return logging.Fields{"xuid": xuid, "view_distance": viewDistance}
 }
 
-func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, tracker *belief.Tracker, hub *camera.Hub, log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, tracker *belief.Tracker, hub *camera.Hub, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
 	// A headless client uploads no skin of its own, and without one the unit
 	// joins as a black silhouette under a fresh skin ID every connect.
 	unitSkin := skin.For(cfg.Username)
@@ -146,6 +146,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 	}
 	gd := conn.GameData()
 	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Yaw, gd.Pitch, gd.Dimension)
+	beginSession(ctx, addr)
 	if hub != nil {
 		hub.Spawn(gd.EntityRuntimeID)
 		defer hub.Reset()
