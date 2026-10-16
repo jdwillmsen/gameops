@@ -10,8 +10,9 @@ import (
 	"testing"
 )
 
-func fixtureTarball(t *testing.T) []byte {
+func fixtureGitHub(t *testing.T) *fakeGitHub {
 	t.Helper()
+	var tree []treeEntry
 	files := map[string]string{}
 	err := filepath.WalkDir("testdata/pack", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -19,19 +20,21 @@ func fixtureTarball(t *testing.T) []byte {
 		}
 		rel, _ := filepath.Rel("testdata/pack", p)
 		data, err := os.ReadFile(p)
-		files["Mojang-bedrock-samples-abc/resource_pack/"+filepath.ToSlash(rel)] = string(data)
+		repoPath := "resource_pack/" + filepath.ToSlash(rel)
+		tree = append(tree, blob(repoPath))
+		files[repoPath] = string(data)
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return makeTarball(t, files)
+	return newFakeGitHub(t, tree, files)
 }
 
 func TestEnsureBuildsOnceAndReloadsFromCache(t *testing.T) {
-	gh := newFakeGitHub(t, fixtureTarball(t))
+	gh := fixtureGitHub(t)
 	cache := t.TempDir()
-	f := Fetcher{Client: gh.Client(), BaseURL: gh.URL}
+	f := gh.fetcher()
 	opts := Options{TileSize: 4}
 
 	first, pack, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts)
