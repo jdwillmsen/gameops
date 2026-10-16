@@ -70,7 +70,7 @@ frame and the page textures cube faces with nearest filtering, tints grass,
 foliage and water, and draws slabs, stairs, cross-plants and torches as simple
 shapes. Crew does not receive biome data, so tint is sampled for one climate
 everywhere (the plains biome); stairs and slabs have no orientation or half
-for the same reason and are drawn as bottom slabs and north-facing stairs.
+for the same reason and are drawn as bottom slabs and stairs that rise towards +z.
 If the fetch fails, the camera is offline at first start or the page cannot
 load the atlas, the view stays flat-coloured and the build is retried on the
 next session.
