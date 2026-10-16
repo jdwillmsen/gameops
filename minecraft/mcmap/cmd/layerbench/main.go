@@ -103,6 +103,8 @@ func main() {
 		pass(r, set, spec)
 	case "floors":
 		floors(r, set, *out)
+	case "pan":
+		pan(r, set, spec)
 	case "probe":
 		probe(r, spec, *tileX, *tileY, *pxX, *pxZ)
 	case "png":
@@ -398,5 +400,36 @@ func probe(r *layers.Renderer, spec layers.Spec, tx, ty, px, pz int) {
 	for y := spec.Cut + 16; y >= layers.MinY(spec.Dim) && y >= spec.Cut-40; y-- {
 		id := col.ID(x&15, y, z&15)
 		fmt.Printf("y %d: %s\n", y, blocks[id].Name)
+	}
+}
+
+// pan draws a block of neighbouring tiles in the order a viewer dragging
+// the map would ask for them, which is where a block cache pays: the
+// tiles side by side share the table blocks their chunks are in.
+func pan(r *layers.Renderer, set chunks.Set, spec layers.Spec) {
+	for _, zoom := range []int{0, -1} {
+		side := 6
+		if zoom == -1 {
+			side = 4
+		}
+		full := (16 << -zoom) * (16 << -zoom)
+		tiles := occupied(set, spec.Dim, zoom, full*3/4)
+		if len(tiles) == 0 {
+			continue
+		}
+		start := tiles[len(tiles)/2]
+		var total, read time.Duration
+		n := 0
+		for dy := range side {
+			for dx := range side {
+				began := time.Now()
+				_, tm, _, err := r.Tile(spec, zoom, start.x+dx, start.y+dy)
+				must(err)
+				total += time.Since(began)
+				read += tm.Read
+				n++
+			}
+		}
+		fmt.Printf("pan %dx%d tiles at zoom %d: %.1f ms a tile, of which read %.1f\n", side, side, zoom, ms(total)/float64(n), ms(read)/float64(n))
 	}
 }
