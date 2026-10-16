@@ -90,13 +90,15 @@ func ofType(ms [][]byte, typ byte) [][]byte {
 // last self pose seen.
 type tickView struct {
 	ids  []uint64
-	x    map[uint64]float32
-	self *selfPose
+	x, y map[uint64]float32
+	// yaw, pitch and head are the quantised angle bytes.
+	yaw, pitch, head map[uint64]byte
+	self             *selfPose
 }
 
 func parseTicks(t *testing.T, ms [][]byte) tickView {
 	t.Helper()
-	tv := tickView{x: map[uint64]float32{}}
+	tv := tickView{x: map[uint64]float32{}, y: map[uint64]float32{}, yaw: map[uint64]byte{}, pitch: map[uint64]byte{}, head: map[uint64]byte{}}
 	for _, f := range ofType(ms, frameTick) {
 		p := 2
 		if f[1]&1 != 0 {
@@ -112,7 +114,9 @@ func parseTicks(t *testing.T, ms [][]byte) tickView {
 			p += k + 2
 			tv.ids = append(tv.ids, id)
 			tv.x[id] = math.Float32frombits(binary.LittleEndian.Uint32(f[p:]))
-			p += 14
+			tv.y[id] = math.Float32frombits(binary.LittleEndian.Uint32(f[p+4:]))
+			tv.yaw[id], tv.pitch[id], tv.head[id] = f[p+12], f[p+13], f[p+14]
+			p += 15
 		}
 	}
 	return tv
@@ -465,5 +469,116 @@ func TestAtlasDocumentCarriesDefaultClimateTintsAndNoColormaps(t *testing.T) {
 		if !regexp.MustCompile(`^#[0-9a-f]{6}$`).MatchString(d.Tints[k]) {
 			t.Errorf("tint %s = %q", k, d.Tints[k])
 		}
+	}
+}
+
+func TestMovePlayerIsShiftedFromEyesToFeetButOtherPacketsAreNot(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	v := attach(t, h)
+	drain(t, v)
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Position: mgl32.Vec3{0, 10, 0}}, &sink{})
+	h.Apply(&packet.AddActor{EntityRuntimeID: 9, EntityType: "minecraft:cow", Position: mgl32.Vec3{0, 5, 0}}, &sink{})
+	tv := parseTicks(t, mustDrain(t, v))
+	if tv.y[8] != 10 || tv.y[9] != 5 {
+		t.Errorf("player y = %v cow y = %v, want the reported feet", tv.y[8], tv.y[9])
+	}
+	h.Apply(&packet.MovePlayer{EntityRuntimeID: 8, Position: mgl32.Vec3{0, 21.62, 0}}, &sink{})
+	if got := parseTicks(t, mustDrain(t, v)).y[8]; got < 19.99 || got > 20.01 {
+		t.Errorf("MovePlayer y = %v, want 20 (eye 21.62 less 1.62)", got)
+	}
+	h.Apply(&packet.MoveActorAbsolute{EntityRuntimeID: 8, Position: mgl32.Vec3{0, 30, 0}}, &sink{})
+	if got := parseTicks(t, mustDrain(t, v)).y[8]; got != 30 {
+		t.Errorf("absolute move y = %v, want 30", got)
+	}
+}
+
+func mustDrain(t *testing.T, v *Viewer) [][]byte {
+	t.Helper()
+	got, err := drain(t, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestHeadYawTravelsFromEveryPacketThatCarriesIt(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	v := attach(t, h)
+	drain(t, v)
+	h.Apply(&packet.AddActor{EntityRuntimeID: 9, EntityType: "minecraft:zombie", Yaw: 90, HeadYaw: 180}, &sink{})
+	if tv := parseTicks(t, mustDrain(t, v)); tv.yaw[9] != 64 || tv.head[9] != 128 {
+		t.Errorf("add: yaw %d head %d, want 64 and 128", tv.yaw[9], tv.head[9])
+	}
+	h.Apply(&packet.MoveActorAbsolute{EntityRuntimeID: 9, Rotation: mgl32.Vec3{0, 90, 270}}, &sink{})
+	if tv := parseTicks(t, mustDrain(t, v)); tv.head[9] != 192 {
+		t.Errorf("absolute: head %d, want 192", tv.head[9])
+	}
+	h.Apply(&packet.MoveActorDelta{EntityRuntimeID: 9, RotationYHead: protocol.Option(float32(90))}, &sink{})
+	if tv := parseTicks(t, mustDrain(t, v)); tv.head[9] != 64 || tv.yaw[9] != 64 {
+		t.Errorf("delta: head %d yaw %d, want 64 and 64", tv.head[9], tv.yaw[9])
+	}
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Yaw: 0, HeadYaw: 90}, &sink{})
+	h.Apply(&packet.MovePlayer{EntityRuntimeID: 8, Yaw: 0, HeadYaw: 270}, &sink{})
+	if tv := parseTicks(t, mustDrain(t, v)); tv.head[8] != 192 {
+		t.Errorf("player: head %d, want 192", tv.head[8])
+	}
+}
+
+func parseNames(t *testing.T, ms [][]byte) map[uint64]string {
+	t.Helper()
+	out := map[uint64]string{}
+	for _, f := range ofType(ms, frameNames) {
+		n, k := binary.Uvarint(f[1:])
+		p := 1 + k
+		for ; n > 0; n-- {
+			id, k := binary.Uvarint(f[p:])
+			p += k
+			l := int(f[p])
+			out[id] = string(f[p+1 : p+1+l])
+			p += 1 + l
+		}
+	}
+	return out
+}
+
+func TestPlayerNamesReachLiveViewersAndLateOnesInTheirHead(t *testing.T) {
+	h, _ := newTestHub(t, 2)
+	live := attach(t, h)
+	drain(t, live)
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Alex"}, &sink{})
+	h.Apply(&packet.AddActor{EntityRuntimeID: 9, EntityType: "minecraft:cow"}, &sink{})
+	if names := parseNames(t, mustDrain(t, live)); len(names) != 1 || names[8] != "Alex" {
+		t.Errorf("live names = %v", names)
+	}
+	late := mustDrain(t, attach(t, h))
+	if names := parseNames(t, late); len(names) != 1 || names[8] != "Alex" {
+		t.Errorf("late names = %v", names)
+	}
+	if late[0][0] != frameHello {
+		t.Error("connection must still start with hello")
+	}
+}
+
+func TestRemovedPlayerLeavesNoNameBehind(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Alex", AbilityData: protocol.AbilityData{EntityUniqueID: 80}}, &sink{})
+	h.Apply(&packet.RemoveActor{EntityUniqueID: 80}, &sink{})
+	if names := parseNames(t, mustDrain(t, attach(t, h))); len(names) != 0 || h.Stats().Entities != 0 {
+		t.Errorf("names %v entities %d after the player left", names, h.Stats().Entities)
+	}
+}
+
+func TestDroppedItemsAreEntities(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	v := attach(t, h)
+	drain(t, v)
+	h.Apply(&packet.AddItemActor{EntityUniqueID: 4, EntityRuntimeID: 40, Position: mgl32.Vec3{1, 2, 3}}, &sink{})
+	got := mustDrain(t, v)
+	if tv := parseTicks(t, got); tv.x[40] != 1 {
+		t.Errorf("item not sent: %+v", tv)
+	}
+	h.Apply(&packet.RemoveActor{EntityUniqueID: 4}, &sink{})
+	if rm := ofType(mustDrain(t, v), frameRemove); len(rm) != 1 {
+		t.Error("removed item was not announced")
 	}
 }

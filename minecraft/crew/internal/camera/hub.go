@@ -65,7 +65,15 @@ type entity struct {
 	X, Y, Z float32
 	Yaw     float32
 	Pitch   float32
+	HeadYaw float32
+	Name    string
 }
+
+// playerEyeHeight is how far above the feet a MovePlayer position sits. The
+// other packets that place an entity (AddPlayer, AddActor, the actor moves)
+// report the feet; observed against a live server for AddPlayer and MovePlayer,
+// assumed for the rest.
+const playerEyeHeight = 1.62
 
 type Hub struct {
 	dec        Decoder
@@ -200,6 +208,15 @@ func (h *Hub) Attach() (*Viewer, error) {
 	if h.atlasDoc != nil {
 		v.head = append(v.head, atlasFrame())
 	}
+	names := map[uint64]string{}
+	for _, e := range h.ents {
+		if e.Name != "" {
+			names[e.ID] = e.Name
+		}
+	}
+	if len(names) > 0 {
+		v.head = append(v.head, encodeNames(names))
+	}
 	// Read under the hub lock so a later publishSelf cannot be overwritten by
 	// this older pose.
 	if h.self != nil {
@@ -258,17 +275,24 @@ func (h *Hub) Apply(pk packet.Packet, w PacketWriter) {
 	case *packet.AddActor:
 		h.mu.Lock()
 		h.uniqueID[p.EntityUniqueID] = p.EntityRuntimeID
-		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: p.EntityType, X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch})
+		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: p.EntityType, X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw})
+		h.mu.Unlock()
+	case *packet.AddItemActor:
+		h.mu.Lock()
+		h.uniqueID[p.EntityUniqueID] = p.EntityRuntimeID
+		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "minecraft:item", X: p.Position[0], Y: p.Position[1], Z: p.Position[2]})
 		h.mu.Unlock()
 	case *packet.AddPlayer:
 		h.mu.Lock()
-		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "player", X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch})
+		h.uniqueID[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
+		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "player", Name: p.Username,
+			X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw})
 		h.mu.Unlock()
 	case *packet.MovePlayer:
 		h.movePlayer(p)
 	case *packet.MoveActorAbsolute:
 		h.moveEntity(p.EntityRuntimeID, func(e *entity) {
-			e.X, e.Y, e.Z, e.Pitch, e.Yaw = p.Position[0], p.Position[1], p.Position[2], p.Rotation[0], p.Rotation[1]
+			e.X, e.Y, e.Z, e.Pitch, e.Yaw, e.HeadYaw = p.Position[0], p.Position[1], p.Position[2], p.Rotation[0], p.Rotation[1], p.Rotation[2]
 		})
 	case *packet.MoveActorDelta:
 		h.moveEntity(p.EntityRuntimeID, func(e *entity) {
@@ -286,6 +310,9 @@ func (h *Hub) Apply(pk packet.Packet, w PacketWriter) {
 			}
 			if v, ok := p.RotationX.Value(); ok {
 				e.Pitch = v
+			}
+			if v, ok := p.RotationYHead.Value(); ok {
+				e.HeadYaw = v
 			}
 		})
 	case *packet.RemoveActor:
@@ -331,7 +358,7 @@ func (h *Hub) movePlayer(p *packet.MovePlayer) {
 		return
 	}
 	h.moveEntity(p.EntityRuntimeID, func(e *entity) {
-		e.X, e.Y, e.Z, e.Yaw, e.Pitch = p.Position[0], p.Position[1], p.Position[2], p.Yaw, p.Pitch
+		e.X, e.Y, e.Z, e.Yaw, e.Pitch, e.HeadYaw = p.Position[0], p.Position[1]-playerEyeHeight, p.Position[2], p.Yaw, p.Pitch, p.HeadYaw
 	})
 }
 
@@ -350,6 +377,9 @@ func (h *Hub) setEntityLocked(e *entity) {
 	}
 	e.TypeID = h.typeIDLocked(e.Type)
 	h.ents[e.ID] = e
+	if e.Name != "" {
+		h.pushOrderedLocked(encodeNames(map[uint64]string{e.ID: e.Name}))
+	}
 	h.pushEntityLocked(e)
 }
 
@@ -361,7 +391,7 @@ func (h *Hub) pushEntityLocked(e *entity) {
 }
 
 func (e *entity) record() []byte {
-	return entityRecord(e.ID, e.TypeID, e.X, e.Y, e.Z, e.Yaw, e.Pitch)
+	return entityRecord(e.ID, e.TypeID, e.X, e.Y, e.Z, e.Yaw, e.Pitch, e.HeadYaw)
 }
 
 // typeIDLocked numbers entity type names. A new name is announced to every

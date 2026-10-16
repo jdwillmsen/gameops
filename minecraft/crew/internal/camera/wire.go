@@ -1,6 +1,6 @@
 package camera
 
-// Wire format, version 2. Every websocket message from the camera is binary
+// Wire format, version 3. Every websocket message from the camera is binary
 // and starts with a type byte; integers are little-endian.
 //
 //	hello        [1][version u8]                         first message of a connection
@@ -12,10 +12,11 @@ package camera
 //	reset        [7]
 //	entity types [8][n u16]{len u8, name}...             index = type id
 //	atlas        [9][atlas version u8]                   a texture atlas can be fetched
+//	names        [10][n uvarint]{id uvarint, len u8, name}...   player name labels
 //
 // Material flag bit 0 marks a block that is not a full cube; a page without an
 // atlas has no shape to draw it with and skips it. Version 2 added the flags
-// byte. The atlas frame carries no data: the page fetches the PNG and the
+// byte; version 3 added the head yaw to entity records. The atlas frame carries no data: the page fetches the PNG and the
 // table from /v1/camera/atlas.png and /v1/camera/atlas.json, and a page that
 // never gets the frame keeps drawing flat colours.
 //
@@ -23,8 +24,9 @@ package camera
 // "not drawn"). Indices are packed LSB-first, bits(n) each, in
 // (y*16+z)*16+x order, with no padding between cells; a palette of one entry
 // has zero index bits. An entity record is
-// [id uvarint][type u16][x y z f32][yaw u8][pitch u8], angles in 360/256
-// degree steps; self is [x y z yaw pitch f32]. A tick frame holds the newest
+// [id uvarint][type u16][x y z f32][yaw u8][pitch u8][head yaw u8], angles in
+// 360/256 degree steps, x y z at the entity's feet (the hub shifts MovePlayer's
+// eye height down); self is [x y z yaw pitch f32]. A tick frame holds the newest
 // state of everything that moved since the last one.
 //
 // The client sends [1][radius u8] to widen the sub-chunk radius (in chunks)
@@ -35,10 +37,12 @@ import (
 	"errors"
 	"math"
 	"math/bits"
+	"slices"
+	"unicode/utf8"
 )
 
 const (
-	wireVersion byte = 2
+	wireVersion byte = 3
 
 	frameHello       byte = 1
 	frameMaterials   byte = 2
@@ -49,6 +53,7 @@ const (
 	frameReset       byte = 7
 	frameEntityTypes byte = 8
 	frameAtlas       byte = 9
+	frameNames       byte = 10
 
 	matNonCube byte = 1
 
@@ -157,11 +162,11 @@ func angleByte(deg float32) byte {
 	return byte(int(math.Round(float64(deg)/360*256)) & 255)
 }
 
-func entityRecord(id uint64, typ uint16, x, y, z, yaw, pitch float32) []byte {
+func entityRecord(id uint64, typ uint16, x, y, z, yaw, pitch, headYaw float32) []byte {
 	r := binary.AppendUvarint(make([]byte, 0, 24), id)
 	r = binary.LittleEndian.AppendUint16(r, typ)
 	r = appendF32(r, x, y, z)
-	return append(r, angleByte(yaw), angleByte(pitch))
+	return append(r, angleByte(yaw), angleByte(pitch), angleByte(headYaw))
 }
 
 func appendF32(b []byte, vs ...float32) []byte {
@@ -202,6 +207,32 @@ func encodeMaterials(list []material) []byte {
 		}
 		f = append(f, m.ID, uint8(math.Round(float64(m.Alpha)*255)), r, g, b, flags, uint8(len(m.Name)))
 		f = append(f, m.Name...)
+	}
+	return f
+}
+
+// maxNameLen is what the length byte can carry.
+const maxNameLen = 255
+
+func encodeNames(names map[uint64]string) []byte {
+	ids := make([]uint64, 0, len(names))
+	for id := range names {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	f := binary.AppendUvarint([]byte{frameNames}, uint64(len(ids)))
+	for _, id := range ids {
+		n := names[id]
+		if len(n) > maxNameLen {
+			n = n[:maxNameLen]
+			// A cut inside a multi-byte character would send invalid UTF-8.
+			for len(n) > 0 && !utf8.ValidString(n) {
+				n = n[:len(n)-1]
+			}
+		}
+		f = binary.AppendUvarint(f, id)
+		f = append(f, uint8(len(n)))
+		f = append(f, n...)
 	}
 	return f
 }
