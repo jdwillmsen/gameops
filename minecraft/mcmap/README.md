@@ -366,11 +366,14 @@ that are fetched with them).
   stands, projectiles) or have no egg.
 - **What is asked for**: one listing from `api.github.com`, then from
   `raw.githubusercontent.com` the two atlases, 180 definitions, 193 model
-  files and 173 render controllers, about 90 spawn-egg textures, 37 marker
-  textures, about 150 textures the made pictures are made from, and the
-  language file: 839 requests and 7.7 MB in all, in 13 to 16 seconds, measured at
-  the default pin. Before faces and blocks were made it was 319 requests
-  and 1.6 MB in under ten seconds. Most of the growth is the listing:
+  files and 173 render controllers, about 90 spawn-egg textures, 45 marker
+  and health and hunger textures, about 150 textures the made pictures are
+  made from, the list of items and the blocks file with some 1,100 item and
+  block textures that the [item pictures](#item-pictures) are made from, and the
+  language file: 1,932 requests and 8.6 MB in all, in about 40 seconds,
+  measured at the default pin. Before the items it was 839 requests and
+  7.7 MB in 13 to 16 seconds, and before faces and blocks were made 319
+  requests and 1.6 MB in under ten seconds. Most of the early growth is the listing:
   three directories are wanted, the API lists one directory to a request,
   and the one request that lists more is the whole of `resource_pack`, 5.5
   MB of it, which is chosen over three requests because it is the listing
@@ -744,6 +747,13 @@ own from the game's models, at the fetch and from the same pin:
 | `block/shulker_<colour>`, `block/shulker_undyed` | Likewise | The lid and base of the texture its model is wrapped in |
 | `block/bed_<colour>` | Likewise, 16 by 6 by 32 | The two slabs of the texture its model is wrapped in |
 | `block/bell` | The bell as the game shows it in the hand, at two pixels to each of its own so that it is the size a block's picture is | `items/villagebell`, which the atlas names as `bell_carried`. A bell is no box, and its three sides drawn as one are three bells adrift |
+| `item/<id>` | What a player carries, 1,487 of the 1,623 items at the default pin | The item's texture, or its block's, as it is: see [item pictures](#item-pictures) |
+
+The marks for health, hunger and absorption are served as they came, under
+`ui/`: `heart_container`, `heart` and `heart_half`, `hunger_container`,
+`hunger` and `hunger_half`, `absorption` and `absorption_half`, each 9
+pixels a side so that a half is drawn over its container as a whole one is.
+A volume written before they were asked for has them added, by themselves.
 
 **A face** is worked out the way the game would draw the mob, and nothing
 about any mob is guessed:
@@ -937,17 +947,67 @@ included, while the made pictures are made and put beside or over them.
 
 **Rolling back to the release before made pictures.** The index on the
 volume has the same format, with fields that release does not read. It
-reads an index of up to 200 pictures; at the default pin there are 173,
-so it takes the volume as it is, serves every picture in it (a structure
-keeps the face it was given; the faces and blocks are simply never asked
-for by its page) and fetches nothing. At a pin with more than 200 it
-would refuse the index, fetch its own smaller set over it, and a later
-roll forward would find no made pictures and make them again, serving
-what is there meanwhile. Neither direction loses a picture that the
-running release draws. A set over the limits this release reads back
-(800 pictures, 600 recipes) is never written, since it would be refused
-and fetched again at every start; it is served from memory and said in
-the log.
+reads an index of up to 200 pictures. Before the item pictures there were
+173 at the default pin, which it took as they were; with them there are
+some 1,700, so it would refuse the index, fetch its own smaller set over
+it, and a later roll forward would find no made pictures and make them
+again, serving what is there meanwhile. The release that made faces and
+blocks reads up to 800 pictures and 600 recipes, and does the same.
+
+Rolling back is not free of a gap. The release refusing the index has to
+fetch its own set, which wants the rationed listing, and the listing is
+not asked for again within ten minutes of this release's last asking (the
+time is kept on the volume), or within up to two hours if the host's own
+word was that the ration is spent. A rollback inside that window draws
+plain dots, rings and letters until the window is over and the fetch
+succeeds, retried after a minute and then at doubling intervals. A roll
+forward is not held up in the same way: the volume it finds has no made
+pictures, and what is there is served while they are made. A set over the
+limits this release reads back (3,000 pictures, 3,000 recipes) is never
+written, since it would be refused and fetched again at every start; the
+items are what is left out of it first, and it is served from memory and
+said in the log.
+
+#### Item pictures
+
+The player panel draws what a player carries. The atlas of item textures
+is no list of items and is keyed by the game's older names (`beef_cooked`
+is the cooked beef, and `axe` lists seven textures), so an item's texture
+is worked out from three things the same pin holds: the game's list of its
+items (`metadata/vanilladata_modules/mojang-items.json`), the textures the
+listing names, and `resource_pack/blocks.json` with the terrain atlas for
+what a block is drawn with. For each id, the first that holds:
+
+1. A name the game keeps in itself and the samples do not (`beef` is
+   `beef_raw`, a dye is `dye_powder_<colour>`); a short table in
+   `internal/icons/items.go`.
+2. A texture under `items/` named as the id, or with a word moved from one
+   end to the other (`cooked_beef`, `oak_boat`), or with the older word for
+   the material (`wooden`, `golden`), or the atlas's entry of that name.
+3. The item's block: the one texture it is drawn with, or its side where
+   it has one for each. A block's picture is that texture flat and not the
+   cube the game draws, since the samples do not say which blocks are cubes.
+
+The picture is the texture as it is, and an animated one (a stack of
+frames) is its first frame. Left without a picture, and so its initials in
+the panel, are what no texture is held for; a spawn egg, which the panel
+draws as the mob's own icon; a head or skull, a grindstone, a beacon and
+the legacy bed and banner, whose only texture is another thing's; leather
+armour, whose texture is the grey base its dye is laid over; and what the
+game colours by where it stands: leaves, grass and ferns are grey in the
+samples and would be the wrong colour. At the default pin 1,487 of the
+1,623 items have a picture and 32 more could have had one and have none.
+If the list of items cannot be read, none has a picture and the log says so.
+
+Each is a recipe like a face's, a flat texture, so one whose texture
+could not be fetched is made later from the recipe alone. The limits an
+index is read back within are 3,000 pictures and 3,000 recipes, of which
+the faces may use 500, and the fetch may name 2,400 textures. The items
+are added last and are the first left out: they may fill only what the
+plain pictures and the other made ones leave of the 3,000, and of the
+2,400 textures, so that a crowded pin loses items and never the faces,
+the blocks or the whole set. Raising the art revision made every volume
+make them on its next start.
 
 #### Where the pictures come from, and what is done with them
 
@@ -5123,7 +5183,7 @@ and what that day is compared with:
 | `mcmap_markers_last_success_timestamp_seconds`, `mcmap_markers_duration_seconds`, `mcmap_markers_failures_total` | Whether the marker scan is running, and what it costs |
 | `mcmap_icons_mob_types` | Mob types that have an icon. Zero means every mob is being drawn as a dot |
 | `mcmap_icons_fetches_total{result}` | Attempts to fetch the mob icons, marker pictures and names, `ok` or `failed`. None at all means they were read from the volume, or that `ICONS_ENABLED=false` |
-| `mcmap_icons_marker_pictures` | Marker, structure, face and block pictures held, 173 when whole at the default pin. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
+| `mcmap_icons_marker_pictures` | Marker, structure, face, block, item and health-mark pictures held, 1,687 when whole at the default pin. Zero means every marker is a ring and every structure a letter, which is also the case with `ICONS_ENABLED=false` |
 | `mcmap_icons_names` | Display names read from the language file. Zero means every name served is a tidied id, or that `ICONS_ENABLED=false` and none is served |
 | `mcmap_icons_faults_total` | Faults caught while making a picture from the samples' models. Each cost one picture, or all the made ones, and is one line in the log; none stopped the map |
 | `mcmap_icons_player_heads`, `mcmap_icons_player_heads_refused_total` | Online players with a head, and heads the agent sent that were refused |

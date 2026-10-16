@@ -32,12 +32,28 @@ var (
 )
 
 // A picture's key is its group and its name within it: bed/red,
-// shulker/undyed, container/chest, structure/monument, marker/waypoint.
-var pictureKey = regexp.MustCompile(`^[a-z]{1,16}/[a-z0-9_]{1,32}$`)
+// shulker/undyed, container/chest, structure/monument, marker/waypoint,
+// item/diamond_pickaxe, ui/heart. A name is as long as the longest item id.
+var pictureKey = regexp.MustCompile(`^[a-z]{1,16}/[a-z0-9_]{1,64}$`)
 
-// maxPictures is more than the 250 or so there are, and bounds what an index on
-// the volume can make a start read.
-const maxPictures = 800
+// maxPictures is more than the 1,800 or so there are, mostly items, and
+// bounds what an index on the volume can make a start read.
+const maxPictures = 3000
+
+// vitalPictures are the game's own marks for health, hunger and absorption,
+// each served as it came: the container every one stands in, and what fills
+// it, whole or by half. Each is 9 pixels a side, so that a half is drawn
+// over its container exactly as a whole one is.
+var vitalPictures = []markerPicture{
+	{name: "ui/heart_container", path: "textures/ui/heart_background"},
+	{name: "ui/heart", path: "textures/ui/heart"},
+	{name: "ui/heart_half", path: "textures/ui/heart_half"},
+	{name: "ui/hunger_container", path: "textures/ui/hunger_background"},
+	{name: "ui/hunger", path: "textures/ui/hunger_full"},
+	{name: "ui/hunger_half", path: "textures/ui/hunger_half"},
+	{name: "ui/absorption", path: "textures/ui/absorption_heart"},
+	{name: "ui/absorption_half", path: "textures/ui/absorption_heart_half"},
+}
 
 // structureArt is what one kind of structure is drawn as. The first of
 // these the samples hold is its picture: the game's own mark for the kind
@@ -154,6 +170,7 @@ func pictures(items atlas) []markerPicture {
 		{name: "container/barrel", path: "textures/blocks/barrel_side"},
 		{name: "marker/waypoint", path: "textures/items/compass_item"},
 	}
+	out = append(out, vitalPictures...)
 	// The atlas lists a bed's sixteen textures in the order the game
 	// numbers the colours, which is the order of markers.Colours.
 	for index, colour := range markers.Colours {
@@ -171,6 +188,9 @@ func pictures(items atlas) []markerPicture {
 // faces and the blocks.
 func pictureKeys() []string {
 	keys := []string{"container/chest", "container/trapped_chest", "container/barrel", "marker/waypoint", "shulker/" + markers.Undyed}
+	for _, p := range vitalPictures {
+		keys = append(keys, p.name)
+	}
 	for _, colour := range markers.Colours {
 		keys = append(keys, "bed/"+colour, "shulker/"+colour)
 	}

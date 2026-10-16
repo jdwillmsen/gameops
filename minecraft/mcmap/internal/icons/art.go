@@ -22,7 +22,7 @@ const (
 	terrainPath   = "resource_pack/textures/terrain_texture.json"
 
 	maxTerrainBytes  = 2 << 20
-	maxModelTextures = 600
+	maxModelTextures = 2400
 
 	// artPlan stands among what a set is missing for the recipes
 	// themselves: the models could not all be read, so which pictures
@@ -33,7 +33,7 @@ const (
 	// differently from the same samples: a face chosen otherwise, a kind
 	// of picture added. A volume written under another has its made
 	// pictures served as they are until they have been made again.
-	ArtRevision = 3
+	ArtRevision = 4
 )
 
 // mobLook is a mob type's client definition as far as drawing its face
@@ -125,6 +125,10 @@ func (s *Source) planned(ctx context.Context, ls listing, looks map[string]mobLo
 	case !errors.Is(err, errSettled):
 		return unplanned
 	}
+	src, reached := s.itemSources(ctx, ls, items, terrain, total)
+	if !reached {
+		return unplanned
+	}
 	lib := library{models: map[string]model{}, controllers: map[string]controller{}}
 	for _, path := range ls.models {
 		models, err := parseModels(files[path])
@@ -150,6 +154,7 @@ func (s *Source) planned(ctx context.Context, ls listing, looks map[string]mobLo
 	}
 	lib.tga = ls.tga
 	recipes, rejected := plan(ctx, lib, looks, items, terrain, s.guarded)
+	addItems(recipes, rejected, src.recipes())
 	if ls.partial != "" {
 		rejected[artPlan] = ls.partial
 	}
@@ -182,10 +187,8 @@ func plan(ctx context.Context, lib library, looks map[string]mobLook, items, ter
 		if ctx.Err() != nil {
 			break
 		}
-		// The made pictures that are not faces number under a hundred,
-		// and are left room.
-		if len(recipes) >= maxRecipes-100 {
-			rejected[faceKey(kind)] = fmt.Sprintf("over the limit of %d made pictures", maxRecipes)
+		if len(recipes) >= maxFaceRecipes {
+			rejected[faceKey(kind)] = fmt.Sprintf("over the limit of %d made faces", maxFaceRecipes)
 			continue
 		}
 		look := looks[kind]
@@ -469,14 +472,18 @@ func (s *Source) guarded(what string, do func()) (ok bool) {
 	defer func() {
 		if fault := recover(); fault != nil {
 			metricFaults.Inc()
-			logger := s.Logger
-			if logger == nil {
-				logger = slog.Default()
-			}
-			logger.Error("a picture could not be made; the map goes on without it", "what", what, "fault", tidyReason(fmt.Sprint(fault)))
+			s.logger().Error("a picture could not be made; the map goes on without it", "what", what, "fault", tidyReason(fmt.Sprint(fault)))
 			ok = false
 		}
 	}()
 	do()
 	return true
+}
+
+// logger is the one given, or the default.
+func (s *Source) logger() *slog.Logger {
+	if s.Logger != nil {
+		return s.Logger
+	}
+	return slog.Default()
 }
