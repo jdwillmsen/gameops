@@ -68,6 +68,7 @@
     ['biomes/overlay', 'Biome overlay'], ['overlays/slime', 'Slime chunks'], ['overlays/trails', 'Trails'],
     ['overlays/grid', 'Grid'], ['overlays/chunk', 'Chunk focus'],
     ['topography/hillshade', 'Hillshade'], ['topography/contours', 'Contour lines'], ['topography/tint', 'Height tint'],
+    ['underground/floor', 'Cave spaces'], ['underground/cut', 'Cut view'], ['overlays/lost', 'Lost chunks'],
   ];
   // The switches a kind of structure had before each layer listed its
   // kinds. A view saved then names them, and what they said is put on the
