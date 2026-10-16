@@ -582,6 +582,9 @@ type listing struct {
 	// tga is the textures, by path without an extension, kept as a TGA
 	// with no PNG beside it.
 	tga map[string]bool
+	// textures is the item and block textures, by path without an extension,
+	// which is what says whether an item has a picture to be made.
+	textures map[string]bool
 }
 
 // errListingTooLong marks a listing of the whole tree that cannot come
@@ -769,7 +772,7 @@ func (s *Source) wide(ctx context.Context, total *budget) (listing, http.Header,
 	if tree.Truncated || len(tree.Entries) > maxListEntries {
 		return listing{}, headers, errListingTooLong
 	}
-	out := listing{tga: map[string]bool{}}
+	out := listing{tga: map[string]bool{}, textures: map[string]bool{}}
 	png := map[string]bool{}
 	for _, e := range tree.Entries {
 		if e.Type != "blob" {
@@ -777,6 +780,9 @@ func (s *Source) wide(ctx context.Context, total *budget) (listing, http.Header,
 		}
 		if texture, ok := strings.CutSuffix(e.Path, ".png"); ok {
 			png[texture] = true
+			if strings.HasPrefix(texture, "textures/items/") || strings.HasPrefix(texture, "textures/blocks/") {
+				out.textures[texture] = true
+			}
 		} else if texture, ok := strings.CutSuffix(e.Path, tgaSuffix); ok && strings.HasPrefix(texture, "textures/entity/") {
 			out.tga[texture] = true
 		}
@@ -807,6 +813,9 @@ func (s *Source) wide(ctx context.Context, total *budget) (listing, http.Header,
 	// without and the icons are not held up for them.
 	if len(out.models) > maxModelFiles || len(out.controllers) > maxControllerFiles {
 		out.models, out.controllers = nil, nil
+	}
+	if len(out.textures) > maxListedTextures {
+		out.textures = nil
 	}
 	return out, headers, nil
 }

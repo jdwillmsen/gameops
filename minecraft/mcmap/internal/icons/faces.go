@@ -44,7 +44,11 @@ const (
 	// along its shorter side once everything on it is drawn.
 	faceBox      = 16
 	minFaceShort = 4
-	maxRecipes   = 600
+	// maxRecipes holds every kind of picture made here; the faces are held
+	// to maxFaceRecipes of it, which leaves the rest for the structures, the
+	// blocks and the items, of which the real set has some 1,500.
+	maxRecipes     = 3000
+	maxFaceRecipes = 500
 )
 
 // textureStore is the textures one making of pictures draws from. It keeps
@@ -829,6 +833,10 @@ func (r Recipe) render(textures map[string]*image.NRGBA) (*image.NRGBA, error) {
 		if tex == nil {
 			return nil, fmt.Errorf("texture %s is not held", r.Flat)
 		}
+		// An animated texture is its frames stacked, and the first is the picture.
+		if w := tex.Rect.Dx(); tex.Rect.Dy() > w && tex.Rect.Dy()%w == 0 {
+			tex = tex.SubImage(image.Rect(tex.Rect.Min.X, tex.Rect.Min.Y, tex.Rect.Max.X, tex.Rect.Min.Y+w)).(*image.NRGBA)
+		}
 		if tex.Rect.Dx() > maxIconSide || tex.Rect.Dy() > maxIconSide {
 			return nil, fmt.Errorf("picture is %dx%d, over %d a side", tex.Rect.Dx(), tex.Rect.Dy(), maxIconSide)
 		}
@@ -909,5 +917,5 @@ func faceKey(kind string) string { return "face/" + kind }
 // and not a texture served as it came.
 func derived(key string) bool {
 	group, _, _ := strings.Cut(key, "/")
-	return group == "face" || group == "block" || group == "structure" || group == "villager"
+	return group == "face" || group == "block" || group == "structure" || group == "villager" || group == "item"
 }

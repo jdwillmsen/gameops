@@ -98,6 +98,8 @@ type index struct {
 	// Structures is the kinds of structure whose pictures the source was
 	// asked for. An index without it was written when there were five.
 	Structures []string `json:"structures,omitempty"`
+	// Vitals says the marks for health and hunger were asked for.
+	Vitals bool `json:"vitals,omitempty"`
 	// Recipes and Rejected are of the pictures made here, and Art the
 	// revision of the making they came from. An index without them was
 	// written before any picture was made.
@@ -535,6 +537,16 @@ func (m *Mobs) load() (set Set, earlier bool, err error) {
 			slices.Sort(out.Missing)
 		}
 	}
+	// And an index written before the marks for health and hunger were asked
+	// for has none of them to be read, nor any note that they were not there.
+	if !idx.Vitals {
+		for _, p := range vitalPictures {
+			if _, held := out.Pictures[p.name]; !held && !slices.Contains(out.Missing, p.name) {
+				out.Missing = append(slices.Clip(out.Missing), p.name)
+				slices.Sort(out.Missing)
+			}
+		}
+	}
 	if slices.ContainsFunc(idx.Entities, func(kind string) bool { return !mobType.MatchString(kind) }) {
 		return Set{}, false, errors.New("the icon index is damaged")
 	}
@@ -579,7 +591,7 @@ func (m *Mobs) store(set Set) error {
 		return err
 	}
 	defer os.RemoveAll(staging)
-	idx := index{Format: indexFormat, Ref: m.Ref, Icons: map[string]string{}, Pictures: map[string]string{}, Lang: set.Lang, Entities: set.Entities, Missing: set.Missing, Structures: StructureKinds, Recipes: set.Recipes, Rejected: set.Rejected, Art: ArtRevision}
+	idx := index{Format: indexFormat, Ref: m.Ref, Icons: map[string]string{}, Pictures: map[string]string{}, Lang: set.Lang, Entities: set.Entities, Missing: set.Missing, Structures: StructureKinds, Vitals: true, Recipes: set.Recipes, Rejected: set.Rejected, Art: ArtRevision}
 	for _, group := range []struct {
 		from map[string][]byte
 		to   map[string]string

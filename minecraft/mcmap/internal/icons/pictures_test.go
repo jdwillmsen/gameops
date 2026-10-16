@@ -108,6 +108,9 @@ func markerFiles(t testing.TB) map[string][]byte {
 		"resource_pack/textures/items/compass_item.png":         picture(t, 16, 16, blue),
 		langPath: []byte(syntheticLang),
 	}
+	for _, p := range vitalPictures {
+		files["resource_pack/"+p.path+".png"] = picture(t, 9, 9, red)
+	}
 	for index, colour := range markers.Colours {
 		files["resource_pack/textures/items/bed_"+legacyColour(colour)+".png"] = picture(t, 16, 16, bedColour(index))
 		files["resource_pack/textures/entity/shulker/shulker_"+legacyColour(colour)+".png"] = modelSheet(t, 1)
@@ -163,6 +166,9 @@ func everyPicture() []string {
 		}
 	}
 	keys = append(keys, blockKeys()...)
+	for _, p := range vitalPictures {
+		keys = append(keys, p.name)
+	}
 	slices.Sort(keys)
 	return keys
 }
@@ -215,8 +221,9 @@ func TestFetchAsksForOneListingOnly(t *testing.T) {
 	}
 	// The atlas, ten definitions and the three textures they name, the
 	// pictures served as they come and the language file, then the
-	// terrain atlas and each texture a made picture is made from: one
-	// request each, and no model, since the listing names none.
+	// terrain atlas, the list of items, and each texture a made picture is
+	// made from: one request each, and no model, since the listing names
+	// none. The blocks file is not asked for where no item is listed.
 	plain := len(pictureKeys())
 	// A kind's mark, and each of its others, is fetched beside its item.
 	marks := 0
@@ -226,7 +233,7 @@ func TestFetchAsksForOneListingOnly(t *testing.T) {
 		}
 	}
 	made := len(structureArts) + marks + 13 + 17 + 16
-	if want := 1 + 10 + 3 + plain + 1 + 1 + made; listings != 1 || files != want {
+	if want := 1 + 10 + 3 + plain + 1 + 1 + 1 + made; listings != 1 || files != want {
 		t.Errorf("%d listing requests and %d file requests, want 1 and %d", listings, files, want)
 	}
 }
