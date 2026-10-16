@@ -14,6 +14,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
+| `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the texture atlas and the resource pack it is built from are cached; put it on the data volume |
 
 ## Status API
 
@@ -30,6 +31,7 @@ view with three.js:
 - `/camera`: the page
 - `/v1/camera/ws`: the websocket the page reads
 - `/v1/camera/stats`: counts only
+- `/v1/camera/atlas.png` and `/v1/camera/atlas.json`: the texture atlas and its block table, 404 until built
 
 The stream is a position channel and has **no authentication**, so it must not
 get an ingress until crew-control puts auth in front of it. Reach it from your
@@ -57,3 +59,18 @@ sent, sub-chunks sent, viewers dropped for lagging and viewers refused.
 run without a Microsoft account, set `ONLINE_MODE: "false"` and
 `ALLOW_LIST: "false"` in an uncommitted `compose.override.yaml`; crew itself
 always authenticates, so an offline server needs a local, uncommitted build.
+
+### Textures
+
+Once the camera knows the server version it builds a texture atlas in the
+background from Mojang's `bedrock-samples` pack, fetched at runtime and cached
+under `CAMERA_ATLAS_DIR` (about 300 MB). Nothing from the pack is committed
+or shipped in the image. When the atlas is ready the stream sends an atlas
+frame and the page textures cube faces with nearest filtering, tints grass,
+foliage and water, and draws slabs, stairs, cross-plants and torches as simple
+shapes. Crew does not receive biome data, so tint is sampled for one climate
+everywhere (the plains biome); stairs and slabs have no orientation or half
+for the same reason and are drawn as bottom slabs and north-facing stairs.
+If the fetch fails, the camera is offline at first start or the page cannot
+load the atlas, the view stays flat-coloured and the build is retried on the
+next session.

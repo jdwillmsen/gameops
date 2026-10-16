@@ -37,6 +37,9 @@ type Config struct {
 
 	CameraEnabled    bool
 	CameraMaxViewers int
+	// CameraAtlasDir holds the cached texture atlas; it belongs on the data
+	// volume so a restart does not download the resource pack again.
+	CameraAtlasDir string
 }
 
 func Load() (Config, error) {
@@ -92,6 +95,7 @@ func Load() (Config, error) {
 
 		CameraEnabled:    cameraEnabled,
 		CameraMaxViewers: cameraMaxViewers,
+		CameraAtlasDir:   stringDefault("CAMERA_ATLAS_DIR", "/data/atlas"),
 	}, nil
 }
 

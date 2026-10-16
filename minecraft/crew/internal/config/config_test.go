@@ -130,3 +130,15 @@ func TestLoadRejectsBadCameraSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestCameraAtlasDirDefaultsToTheDataVolume(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.CameraAtlasDir != "/data/atlas" {
+		t.Fatalf("dir = %q, %v; want /data/atlas", cfg.CameraAtlasDir, err)
+	}
+	t.Setenv("CAMERA_ATLAS_DIR", "/var/cache/atlas")
+	if cfg, _ = Load(); cfg.CameraAtlasDir != "/var/cache/atlas" {
+		t.Errorf("dir = %q", cfg.CameraAtlasDir)
+	}
+}
