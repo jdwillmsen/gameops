@@ -8,7 +8,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MC_HOST`, `MC_USERNAME` | required | Server and the Microsoft account name |
+| `MC_HOST`, `MC_USERNAME` | required | Server, and the Microsoft account name (the display name when `MC_OFFLINE` is true) |
+| `MC_OFFLINE` | `false` | Lab only: skip Microsoft sign-in and join with `MC_USERNAME` as a bare display name |
 | `MC_PORT` | `19132` | RakNet port |
 | `MC_VIEW_DISTANCE` | `8` | Chunk radius requested (1 to 32) |
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
@@ -55,10 +56,15 @@ sent, sub-chunks sent, viewers dropped for lagging and viewers refused.
 
 ## Lab
 
-`lab/compose.yaml` is a throwaway Bedrock server with cheats on. For a local
-run without a Microsoft account, set `ONLINE_MODE: "false"` and
-`ALLOW_LIST: "false"` in an uncommitted `compose.override.yaml`; crew itself
-always authenticates, so an offline server needs a local, uncommitted build.
+`lab/compose.yaml` is a throwaway Bedrock server with cheats on and online
+mode off (`ONLINE_MODE: "false"`, `ALLOW_LIST: "false"`), so crew can join it
+with `MC_OFFLINE=true` and no Microsoft account.
+
+Offline mode is lab-only. FWB runs online mode, which verifies every client
+against Xbox Live and rejects an offline one outright, so an offline unit can
+never join it; a FWB unit needs a real account and `MC_OFFLINE` unset. Offline
+mode skips the auth cache entirely and logs one `auth_offline` line at start so
+such a unit is never mistaken for a signed-in one.
 
 ### Textures
 
