@@ -142,3 +142,21 @@ func TestCameraAtlasDirDefaultsToTheDataVolume(t *testing.T) {
 		t.Errorf("dir = %q", cfg.CameraAtlasDir)
 	}
 }
+
+// Offline skips authentication, which a real server would reject; it must be
+// something a lab author writes down.
+func TestOfflineIsOffByDefaultAndCanBeEnabled(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.Offline {
+		t.Fatalf("default Offline = %v, %v; want false", cfg.Offline, err)
+	}
+	t.Setenv("MC_OFFLINE", "true")
+	if cfg, err = Load(); err != nil || !cfg.Offline {
+		t.Fatalf("MC_OFFLINE=true: Offline = %v, %v", cfg.Offline, err)
+	}
+	t.Setenv("MC_OFFLINE", "maybe")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "MC_OFFLINE") {
+		t.Fatalf("err = %v, want one naming MC_OFFLINE", err)
+	}
+}

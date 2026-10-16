@@ -20,7 +20,6 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/liveness"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
-	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcauth"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
@@ -30,7 +29,6 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
-	"golang.org/x/oauth2"
 )
 
 const (
@@ -55,14 +53,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	store, err := mcauth.NewFileStore(cfg.AuthCacheDir, cfg.Username)
-	if err != nil {
-		log.Error("auth_store_invalid", logging.Fields{"error": err.Error()})
-		os.Exit(1)
+	if cfg.Offline {
+		log.Warn("auth_offline", logging.Fields{"note": "no sign-in; only a server with online mode off accepts this unit"})
 	}
-	// The device code is printed by design: a first start against an empty
-	// cache needs a human, and this is the only place the code appears.
-	ts, err := mcauth.TokenSource(ctx, store, os.Stdout)
+	auth, err := resolveAuth(ctx, cfg, openTokenSource)
 	if err != nil {
 		log.Error("auth_failed", logging.Fields{"error": err.Error()})
 		os.Exit(1)
@@ -85,7 +79,7 @@ func main() {
 			maxDelay: time.Duration(cfg.ReconnectMaxMs) * time.Millisecond,
 			after:    time.After,
 		},
-		func(ctx context.Context) error { return session(ctx, cfg, ts, tracker, hub, beginSession, log) },
+		func(ctx context.Context) error { return session(ctx, cfg, auth, tracker, hub, beginSession, log) },
 		tracker.Reset,
 		logAdapter{log},
 	)
@@ -104,7 +98,7 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 	return logging.Fields{"xuid": xuid, "view_distance": viewDistance}
 }
 
-func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, tracker *belief.Tracker, hub *camera.Hub, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, hub *camera.Hub, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
 	// A headless client uploads no skin of its own, and without one the unit
 	// joins as a black silhouette under a fresh skin ID every connect.
 	unitSkin := skin.For(cfg.Username)
@@ -122,8 +116,9 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 	})
 
 	conn, err := mcdial.Dial(ctx, minecraft.Dialer{
-		TokenSource: ts,
-		Protocol:    proto,
+		TokenSource:  auth.tokens,
+		IdentityData: auth.identity,
+		Protocol:     proto,
 		ClientData: login.ClientData{
 			SkinID:          unitSkin.ID,
 			SkinData:        unitSkin.Data,
