@@ -77,12 +77,13 @@ func TestPasskeys_ASecondRegistrationWhileOneIsPendingIsRefused(t *testing.T) {
 	if err := p.StartPending(key("cred-b", steve.XUID), issued); !errors.Is(err, ErrPendingExists) {
 		t.Fatalf("second registration: %v, want ErrPendingExists", err)
 	}
-	// Only the same session may cancel; then a new one may start.
-	if _, ok := p.Cancel(steve.XUID, issued+1); ok {
-		t.Error("another session cancelled the pending credential")
+	// Any of the player's sessions may cancel, so losing the one that
+	// started it does not lock them out; then a new one may start.
+	if _, ok := p.Cancel("2535499999999999"); ok {
+		t.Error("another player cancelled the pending credential")
 	}
-	if _, ok := p.Cancel(steve.XUID, issued); !ok {
-		t.Fatal("the same session could not cancel")
+	if _, ok := p.Cancel(steve.XUID); !ok {
+		t.Fatal("the player could not cancel")
 	}
 	if err := p.StartPending(key("cred-b", steve.XUID), issued); err != nil {
 		t.Fatal(err)
@@ -102,7 +103,7 @@ func TestPasskeys_TheReplacementRace(t *testing.T) {
 	if err := p.StartPending(key("attackers", steve.XUID), issued); !errors.Is(err, ErrPendingExists) {
 		t.Fatalf("the attacker replaced the pending credential: %v", err)
 	}
-	p.Cancel(steve.XUID, issued)
+	p.Cancel(steve.XUID)
 	_ = p.StartPending(key("attackers", steve.XUID), issued)
 	code, id, _ := p.IssueCode(steve.XUID)
 	if Fingerprint(id) == Fingerprint([]byte("owners")) {

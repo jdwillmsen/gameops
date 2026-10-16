@@ -392,7 +392,7 @@ test('logging in with a pending passkey explains that in-game confirmation is ne
   await e.win.mcmapPasskey.ready;
   e.el('login-passkey').click();
   for (let i = 0; i < 5; i++) await tick();
-  assert.match(e.el('login-passkey-note').textContent, /waiting for in-game confirmation/i);
+  assert.match(e.el('login-passkey-note').textContent, /waiting for in-game confirmation: type !map passkey/i);
 });
 
 test('logging in with a non-operator passkey explains operator requirement', async () => {
@@ -409,7 +409,7 @@ test('logging in with a non-operator passkey explains operator requirement', asy
 
 test('a pending passkey error from register options offers the cancel button', async () => {
   const e = adding({ answers: {
-    'POST auth/passkey/register/options': json(400, { error: 'pending' }),
+    'POST auth/passkey/register/options': json(409, { error: 'pending' }),
   } });
   await e.win.mcmapPasskey.ready;
   e.el('admin-label').value = 'Phone';

@@ -161,7 +161,7 @@ func TestRegistration_ChallengeIsSingleUseAndShortLived(t *testing.T) {
 	if _, err := cer.FinishRegistration(steve, issued, body); err != nil {
 		t.Fatal(err)
 	}
-	keys.Cancel(steve.XUID, issued)
+	keys.Cancel(steve.XUID)
 	if _, err := cer.FinishRegistration(steve, issued, body); !errors.Is(err, ErrRegistrationExpired) {
 		t.Errorf("a reused challenge: %v", err)
 	}

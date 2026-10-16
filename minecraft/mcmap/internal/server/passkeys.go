@@ -206,7 +206,7 @@ func (s *Server) handleRegisterConfirm(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRegisterCancel(w http.ResponseWriter, r *http.Request) {
 	sess, _ := auth.SessionFromContext(r.Context())
-	if k, ok := s.Passkeys.Cancel(sess.XUID, sess.IssuedMilli); ok {
+	if k, ok := s.Passkeys.Cancel(sess.XUID); ok {
 		s.metricSet().registered.WithLabelValues("cancelled").Inc()
 		s.log().Info("map passkey cancelled", "xuid", sess.XUID, "credential", auth.LogName(k.ID))
 	}
