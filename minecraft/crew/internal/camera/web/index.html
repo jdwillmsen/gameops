@@ -1,0 +1,196 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>crew camera</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px monospace; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 8px; top: 8px; color: #fff; background: #0008; padding: 4px 8px; white-space: pre; }
+</style>
+<div id="hud">connecting...</div>
+<script type="importmap">{
+  "imports": { "three": "https://unpkg.com/three@0.170.0/build/three.module.min.js" },
+  "integrity": { "https://unpkg.com/three@0.170.0/build/three.module.min.js": "sha384-IDC7sAMAIMB/TZ6dgKKPPAKZ2bXXXP8+FBMBC8cU319eBhKITx+PaalhfDkDNH28" }
+}</script>
+<script type="module">
+// Per-sub-chunk geometry with only the faces next to a non-opaque neighbour,
+// the same technique prismarine-viewer's mesher uses; no code is copied.
+import * as THREE from 'three';
+
+const t0 = performance.now();
+const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0 };
+const hud = document.getElementById('hud');
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const sky = new THREE.Color(0x9ec5f0);
+scene.background = sky;
+scene.fog = new THREE.Fog(sky, 40, 120);
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.05, 300);
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+});
+
+let mats = [];            // index = id
+const blocks = new Map(); // "cx,cy,cz" -> Uint8Array(4096)
+const meshes = new Map(); // key -> [opaque, translucent]
+const dirty = new Set();
+const entMeshes = new Map();
+const me = { x: 0, y: 70, z: 0, yaw: 0, pitch: 0 };
+window.__dbg = { scene, camera, me, blocks, meshes };
+
+const FACES = [ // dir, corners (ccw seen from outside), shade
+  { d: [1, 0, 0],  c: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], s: .8 },
+  { d: [-1, 0, 0], c: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], s: .8 },
+  { d: [0, 1, 0],  c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], s: 1 },
+  { d: [0, -1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], s: .5 },
+  { d: [0, 0, 1],  c: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], s: .65 },
+  { d: [0, 0, -1], c: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], s: .65 },
+];
+
+function blockAt(wx, wy, wz) {
+  const cx = wx >> 4, cy = wy >> 4, cz = wz >> 4;
+  const b = blocks.get(cx + ',' + cy + ',' + cz);
+  if (!b) return -1; // not loaded
+  return b[(((wy & 15) << 4) | (wz & 15)) << 4 | (wx & 15)];
+}
+function jitter(x, y, z) {
+  let h = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
+  h = (h ^ (h >>> 13)) * 1274126177; h ^= h >>> 16;
+  return 0.9 + ((h & 255) / 255) * 0.2;
+}
+const colorCache = new Map();
+function rgb(id) {
+  let c = colorCache.get(id);
+  if (!c) { const m = mats[id - 1]; c = new THREE.Color(m ? m.color : '#f0f'); colorCache.set(id, c); }
+  return c;
+}
+
+function mesh(key) {
+  const [cx, cy, cz] = key.split(',').map(Number);
+  const b = blocks.get(key);
+  const old = meshes.get(key);
+  if (old) { for (const m of old) { scene.remove(m); m.geometry.dispose(); } meshes.delete(key); }
+  if (!b) return;
+  const buf = [{ p: [], c: [], i: [] }, { p: [], c: [], i: [] }];
+  for (let y = 0; y < 16; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
+    const id = b[((y << 4 | z) << 4) | x];
+    if (!id) continue;
+    const wx = cx * 16 + x, wy = cy * 16 + y, wz = cz * 16 + z;
+    const trans = mats[id - 1] && mats[id - 1].alpha < 1;
+    const g = buf[trans ? 1 : 0];
+    const col = rgb(id), j = jitter(wx, wy, wz);
+    for (const f of FACES) {
+      const n = blockAt(wx + f.d[0], wy + f.d[1], wz + f.d[2]);
+      if (n === -1) continue;               // unloaded: hide until it arrives
+      if (n === id) continue;
+      if (n !== 0 && !(mats[n - 1] && mats[n - 1].alpha < 1)) continue; // opaque neighbour
+      const base = g.p.length / 3;
+      for (const q of f.c) {
+        g.p.push(wx + q[0], wy + q[1], wz + q[2]);
+        const s = f.s * j;
+        g.c.push(col.r * s, col.g * s, col.b * s);
+      }
+      g.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  }
+  const out = [];
+  buf.forEach((g, k) => {
+    if (!g.i.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(g.p, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(g.c, 3));
+    geo.setIndex(g.i);
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: k === 1, opacity: k === 1 ? .6 : 1, side: THREE.FrontSide }));
+    scene.add(m); out.push(m);
+  });
+  meshes.set(key, out);
+}
+
+function markDirty(key, neighbours) {
+  dirty.add(key);
+  if (!neighbours) return;
+  const [cx, cy, cz] = key.split(',').map(Number);
+  for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+    const k = (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz);
+    if (blocks.has(k)) dirty.add(k);
+  }
+}
+
+const entGeo = new THREE.BoxGeometry(0.6, 1.8, 0.6);
+function entity(e) {
+  let m = entMeshes.get(e.id);
+  if (!m) {
+    let h = 0; for (const ch of e.type) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const color = e.type === 'player' ? 0xd04040 : new THREE.Color().setHSL((h % 360) / 360, .6, .5);
+    m = new THREE.Mesh(entGeo, new THREE.MeshBasicMaterial({ color }));
+    scene.add(m); entMeshes.set(e.id, m);
+  }
+  // Players report eye height, other actors report their feet.
+  m.position.set(e.x, e.y + (e.type === 'player' ? -0.72 : 0.9), e.z);
+  m.rotation.y = -e.yaw * Math.PI / 180;
+}
+
+let status = 'connecting...';
+function connect() {
+  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/v1/camera/ws');
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { status = 'live'; stats.wsOpenMs = performance.now() - t0; };
+  // A viewer is dropped when it falls behind or the unit's session ends; a
+  // reconnect replays the world, so retrying is always safe.
+  ws.onclose = () => { status = 'disconnected, retrying'; setTimeout(connect, 2000); };
+  ws.onmessage = onMessage;
+}
+function onMessage(ev) {
+  stats.bytes += ev.data.byteLength ?? ev.data.length;
+  if (typeof ev.data === 'string') {
+    const m = JSON.parse(ev.data);
+    switch (m.t) {
+      case 'materials': mats = m.list; colorCache.clear(); for (const k of blocks.keys()) dirty.add(k); break;
+      case 'self': Object.assign(me, m); break;
+      case 'ent': entity(m); break;
+      case 'rm': { const o = entMeshes.get(m.id); if (o) { scene.remove(o); entMeshes.delete(m.id); } break; }
+      case 'reset':
+        blocks.clear(); for (const ms of meshes.values()) for (const o of ms) { scene.remove(o); o.geometry.dispose(); }
+        meshes.clear(); for (const o of entMeshes.values()) scene.remove(o); entMeshes.clear(); break;
+    }
+    return;
+  }
+  const dv = new DataView(ev.data);
+  if (dv.getUint8(0) === 1) {
+    const key = dv.getInt32(1, true) + ',' + dv.getInt32(5, true) + ',' + dv.getInt32(9, true);
+    blocks.set(key, new Uint8Array(ev.data, 13, 4096));
+    stats.lastBlockAt = performance.now();
+    markDirty(key, true);
+  } else if (dv.getUint8(0) === 2) {
+    const x = dv.getInt32(1, true), y = dv.getInt32(5, true), z = dv.getInt32(9, true);
+    const key = (x >> 4) + ',' + (y >> 4) + ',' + (z >> 4);
+    const b = blocks.get(key);
+    if (b) { b[((((y & 15) << 4) | (z & 15)) << 4) | (x & 15)] = dv.getUint8(13); markDirty(key, true); }
+  }
+}
+connect();
+
+function frame() {
+  // Mesh nearest-first, within a time budget so the view stays interactive.
+  if (dirty.size) {
+    const ordered = [...dirty].map(k => { const [a, b, c] = k.split(',').map(Number);
+      return [k, (a * 16 + 8 - me.x) ** 2 + (b * 16 + 8 - me.y) ** 2 + (c * 16 + 8 - me.z) ** 2]; }).sort((p, q) => p[1] - q[1]);
+    const until = performance.now() + 25;
+    for (const [k] of ordered) { if (performance.now() > until) break; dirty.delete(k); mesh(k); }
+  }
+  camera.position.set(me.x, me.y, me.z);
+  const yaw = me.yaw * Math.PI / 180, pitch = me.pitch * Math.PI / 180;
+  camera.lookAt(me.x - Math.sin(yaw) * Math.cos(pitch), me.y - Math.sin(pitch), me.z + Math.cos(yaw) * Math.cos(pitch));
+  renderer.render(scene, camera);
+  stats.frames++;
+  if (stats.settledMs === null && blocks.size > 0 && dirty.size === 0 && performance.now() - stats.lastBlockAt > 1000) stats.settledMs = stats.lastBlockAt - t0;
+  if (stats.firstFrameMs === null && meshes.size > 0) stats.firstFrameMs = performance.now() - t0;
+  hud.textContent = `crew camera  ${status}\nsub-chunks ${blocks.size}  meshes ${meshes.size}  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
