@@ -168,7 +168,7 @@ func TestConnectionStartsWithHelloThenMaterials(t *testing.T) {
 }
 
 func TestSubChunkReachesViewerAsMaterialsThenPalettisedFrame(t *testing.T) {
-	h, _ := newTestHub(t, 1)
+	h, _ := newLocatedHub(t, 1)
 	v := attach(t, h)
 	drain(t, v) // hello, materials, entity types
 	h.Apply(subChunkPacket(1, 2, 3), &sink{})
@@ -200,9 +200,9 @@ func TestDecodeFailureIsCountedNotFatal(t *testing.T) {
 }
 
 func TestLateViewerGetsMaterialsThenTheHeldWorld(t *testing.T) {
-	h, _ := newTestHub(t, 2)
+	h, _ := newLocatedHub(t, 2)
 	h.Apply(subChunkPacket(0, 0, 0), &sink{})
-	h.Apply(subChunkPacket(5, 0, 5), &sink{})
+	h.Apply(subChunkPacket(3, 0, 3), &sink{})
 	got, _ := drain(t, attach(t, h))
 	if got[1][0] != frameMaterials {
 		t.Fatal("the material table does not precede the world")
@@ -213,10 +213,11 @@ func TestLateViewerGetsMaterialsThenTheHeldWorld(t *testing.T) {
 }
 
 func TestBlockUpdateIsForwardedAndUnknownBlocksCounted(t *testing.T) {
-	h, _ := newTestHub(t, 1)
+	h, _ := newLocatedHub(t, 1)
+	hold(h, [3]int32{-1, 4, 0}, [3]int32{0, 0, 0})
 	v := attach(t, h)
 	drain(t, v)
-	h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{-1, 64, 2}, NewBlockRuntimeID: 1}, &sink{})
+	h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{-1, 65, 2}, NewBlockRuntimeID: 1}, &sink{})
 	h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{0, 0, 0}, NewBlockRuntimeID: 99}, &sink{})
 	got, _ := drain(t, v)
 	if blocks := len(ofType(got, frameBlock)); blocks != 2 || h.Stats().UnmappedBlocks != 1 {
@@ -235,7 +236,7 @@ func TestStalledViewerNeverBlocksTheReadLoop(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 50_000; i++ {
-			h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{int32(i), 64, 0}, NewBlockRuntimeID: 1}, &sink{})
+			churn(h, i)
 			drain1(healthy)
 		}
 	}()
@@ -250,6 +251,13 @@ func TestStalledViewerNeverBlocksTheReadLoop(t *testing.T) {
 	if _, err := stalled.Next(context.Background()); !errors.Is(err, ErrTooSlow) {
 		t.Errorf("stalled viewer err = %v, want ErrTooSlow", err)
 	}
+}
+
+// churn adds and removes an entity: ordered traffic that every viewer owes a
+// message for, whatever part of the world it can see.
+func churn(h *Hub, i int) {
+	h.Apply(&packet.AddActor{EntityUniqueID: int64(i), EntityRuntimeID: uint64(1000 + i), EntityType: "minecraft:cow"}, &sink{})
+	h.Apply(&packet.RemoveActor{EntityUniqueID: int64(i)}, &sink{})
 }
 
 // drain1 empties a viewer without waiting.
@@ -357,9 +365,10 @@ func TestOtherPlayersMoveAsEntitiesNotAsSelf(t *testing.T) {
 }
 
 func TestResetEmptiesTheWorldForEveryone(t *testing.T) {
-	h, _ := newTestHub(t, 1)
+	h, _ := newLocatedHub(t, 1)
 	v := attach(t, h)
 	h.Apply(subChunkPacket(0, 0, 0), &sink{})
+	drain(t, v)
 	h.Reset()
 	got, _ := drain(t, v)
 	if r := ofType(got, frameReset); len(r) != 1 || got[len(got)-1][0] != frameReset {
@@ -371,7 +380,7 @@ func TestResetEmptiesTheWorldForEveryone(t *testing.T) {
 }
 
 func TestMetricsCountBytesDropsAndRefusals(t *testing.T) {
-	h, _ := newTestHub(t, 2)
+	h, _ := newLocatedHub(t, 2)
 	h.Apply(subChunkPacket(0, 0, 0), &sink{})
 	v := attach(t, h)
 	got, _ := drain(t, v)
@@ -388,7 +397,7 @@ func TestMetricsCountBytesDropsAndRefusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 100; i++ {
-		h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{int32(i), 64, 0}, NewBlockRuntimeID: 1}, &sink{})
+		churn(h, i)
 		drain1(v)
 	}
 	if st := h.Stats(); st.ViewersDropped != 1 || st.ViewersRefused != 1 {

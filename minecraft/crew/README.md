@@ -44,6 +44,13 @@ inside the pod's network namespace. A viewer beyond `CAMERA_MAX_VIEWERS` is
 refused with 503, and one that cannot keep up is disconnected and reconnects.
 The page loads three.js from a CDN, so the browser needs internet access.
 
+A new viewer is replayed the sub-chunks within 4 chunks of the unit, nearest
+first, pulled as it reads; `?r=N` on the page picks another radius and `]`
+widens it (up to 32). Sub-chunks travel as a material palette plus bit-packed
+indices and moving entities as one batch per 50 ms tick; the byte layout is
+documented in `internal/camera/wire.go`. `/v1/camera/stats` also reports bytes
+sent, sub-chunks sent, viewers dropped for lagging and viewers refused.
+
 ## Lab
 
 `lab/compose.yaml` is a throwaway Bedrock server with cheats on. For a local
