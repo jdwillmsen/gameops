@@ -17,7 +17,7 @@
 import * as THREE from 'three';
 
 const t0 = performance.now();
-const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0 };
+const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0, workMs: 0, workMaxMs: 0 };
 const hud = document.getElementById('hud');
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
@@ -498,6 +498,7 @@ function onMessage(ev) {
 connect();
 
 function frame() {
+  const workStart = performance.now();
   // Mesh nearest-first, within a time budget so the view stays interactive.
   if (dirty.size) {
     const ordered = [...dirty].map(k => { const [a, b, c] = k.split(',').map(Number);
@@ -510,6 +511,11 @@ function frame() {
   camera.lookAt(me.x - Math.sin(yaw) * Math.cos(pitch), me.y - Math.sin(pitch), me.z + Math.cos(yaw) * Math.cos(pitch));
   renderer.render(scene, camera);
   stats.frames++;
+  // Time spent in this callback, not the gap between frames: the gap is pinned
+  // to the display refresh and says nothing about how heavy a tile is.
+  const work = performance.now() - workStart;
+  stats.workMs += work;
+  if (work > stats.workMaxMs) stats.workMaxMs = work;
   if (stats.settledMs === null && blocks.size > 0 && dirty.size === 0 && performance.now() - stats.lastBlockAt > 1000) stats.settledMs = stats.lastBlockAt - t0;
   if (stats.firstFrameMs === null && meshes.size > 0) stats.firstFrameMs = performance.now() - t0;
   hud.textContent = `crew camera  ${status}  radius ${radius} (] widens)\ntextures ${atlas ? 'on' : 'off'}  sub-chunks ${blocks.size}  meshes ${meshes.size}  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
