@@ -169,6 +169,9 @@ type Command struct {
 	// moderation records -- would otherwise sit there in full, outside every
 	// limit this agent promises about that data.
 	RedactReply bool
+	// Hidden keeps the command out of !help's list while it still runs. For
+	// aliases of a listed command: listing both would only repeat it.
+	Hidden bool
 }
 
 // Plugin is one self-contained unit of agent behaviour.
