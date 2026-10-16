@@ -73,6 +73,16 @@
         const cred = await navigator.credentials.get(requestOptions(opts));
         const res = await post('auth/passkey/finish', credentialJSON(cred));
         if (res.ok) { window.location.reload(); return; }
+        let body = {};
+        try { body = await res.json(); } catch { /* ignore */ }
+        if (body && body.error === 'pending') {
+          say('login-passkey-note', 'This passkey is waiting for in-game confirmation. Log in from the game to finish adding it.');
+          return;
+        }
+        if (body && body.error === 'not_operator') {
+          say('login-passkey-note', 'This passkey belongs to a player who is not currently an operator.');
+          return;
+        }
         say('login-passkey-note', 'That passkey did not log you in. Use the code from the game instead.');
       } catch {
         say('login-passkey-note', 'No passkey was used.');
@@ -176,7 +186,12 @@
         if (!opts.ok) {
           let why = '';
           try { why = (await opts.json()).error; } catch { /* judged by status below */ }
-          say('admin-note', why === 'pending' ? 'A passkey is already waiting for its code. Finish or cancel it first.' : why === 'label' ? LABEL_RULE : refusal(opts.status));
+          if (why === 'pending') {
+            say('admin-note', 'A passkey is already waiting for its code. Finish or cancel it first.');
+            $('admin-cancel').hidden = false;
+            return;
+          }
+          say('admin-note', why === 'label' ? LABEL_RULE : refusal(opts.status));
           return;
         }
         opts = await opts.json();
@@ -224,9 +239,10 @@
     $('admin-cancel').addEventListener('click', () => flight(async () => {
       const id = created;
       try { await post('auth/passkey/register/cancel'); } catch { /* the pending passkey expires by itself */ }
-      if (created !== id) return;
+      if (id && created !== id) return;
       const orphan = restart('');
       if (orphan) await signalOrphan(orphan);
+      await refreshList();
     }));
   }
 
