@@ -1273,6 +1273,11 @@ kbd, .keys code {
 /* Along the top: the count has the bottom right and the bottom left is kept clear for a mark. */
 .sheet.player .slot .wear { position: absolute; left: 3px; right: 3px; top: 2px; height: 3px; background: var(--edge); }
 .sheet.player .slot-said { min-height: 1.2em; overflow-wrap: anywhere; }
+.sheet.player .slot.container { cursor: pointer; }
+.sheet.player .slot.container::after { content: "▸"; position: absolute; left: 2px; bottom: 1px; font-size: var(--caption); color: var(--accent); }
+.sheet.player .nested { display: grid; gap: 0.4rem; }
+.sheet.player .nested-bar { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.sheet.player .nested-title { min-width: 0; overflow-wrap: anywhere; }
 .sheet.player .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--row-gap); margin-top: 0.5rem; }
 .sheet.player .tile { display: grid; gap: 0.1rem; padding: var(--row-gap); background: var(--bg); border: 1px solid var(--rule); border-radius: var(--radius-m); min-width: 0; }
 .sheet.player .tile strong { font-size: var(--title); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
