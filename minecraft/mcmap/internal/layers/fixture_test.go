@@ -2,7 +2,9 @@ package layers
 
 import (
 	"encoding/binary"
+	"errors"
 	"math/bits"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -112,18 +114,20 @@ func sliceRecord(t testing.TB, version byte, h int8, width int, layers ...blockF
 
 // fake is a made-up world: chunks of slices written as a game writes them.
 type fake struct {
-	t  testing.TB
-	db *leveldb.DB
+	t   testing.TB
+	db  *leveldb.DB
+	dir string
 }
 
 func newFake(t testing.TB) *fake {
 	t.Helper()
-	db, err := leveldb.OpenFile(filepath.Join(t.TempDir(), "db"), nil)
+	dir := filepath.Join(t.TempDir(), "db")
+	db, err := leveldb.OpenFile(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return &fake{t: t, db: db}
+	return &fake{t: t, db: db, dir: dir}
 }
 
 func (f *fake) reader() Reader { return Reader{DB: f.db, Registry: NewRegistry()} }
@@ -150,3 +154,17 @@ func (f *fake) chunk(pos chunks.Pos, top int, world blockFunc) {
 }
 
 func all(n string) blockFunc { return func(int, int, int) string { return n } }
+
+// closed finishes writing and gives the directory of the database as the
+// mirror holds one: closed, and with no LOCK file.
+func (f *fake) closed() string {
+	f.t.Helper()
+	dir := f.dir
+	if err := f.db.Close(); err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "LOCK")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		f.t.Fatal(err)
+	}
+	return dir
+}
