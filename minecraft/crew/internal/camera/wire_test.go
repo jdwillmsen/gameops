@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"math"
 	"math/rand"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func cellsFrom(f func(i int) uint8) *[4096]uint8 {
@@ -85,21 +87,21 @@ func TestDecodeRejectsMalformedFrames(t *testing.T) {
 }
 
 func TestEntityRecordQuantisesAnglesAndKeepsPositionsExact(t *testing.T) {
-	rec := entityRecord(300, 5, 1.5, -2.25, 1e6, 90, -90)
+	rec := entityRecord(300, 5, 1.5, -2.25, 1e6, 90, -90, 180)
 	id, n := binary.Uvarint(rec)
-	if id != 300 || n != 2 || len(rec) != n+2+12+2 {
+	if id != 300 || n != 2 || len(rec) != n+2+12+3 {
 		t.Fatalf("record = % x", rec)
 	}
 	typ := binary.LittleEndian.Uint16(rec[n:])
 	x := math.Float32frombits(binary.LittleEndian.Uint32(rec[n+2:]))
 	z := math.Float32frombits(binary.LittleEndian.Uint32(rec[n+10:]))
-	if typ != 5 || x != 1.5 || z != 1e6 || rec[n+14] != 64 || rec[n+15] != 192 {
-		t.Errorf("type %d x %v z %v yaw %d pitch %d", typ, x, z, rec[n+14], rec[n+15])
+	if typ != 5 || x != 1.5 || z != 1e6 || rec[n+14] != 64 || rec[n+15] != 192 || rec[n+16] != 128 {
+		t.Errorf("type %d x %v z %v yaw %d pitch %d head %d", typ, x, z, rec[n+14], rec[n+15], rec[n+16])
 	}
 }
 
 func TestTickFrameCarriesSelfThenEntities(t *testing.T) {
-	a, b := entityRecord(1, 0, 0, 0, 0, 0, 0), entityRecord(2, 0, 1, 1, 1, 0, 0)
+	a, b := entityRecord(1, 0, 0, 0, 0, 0, 0, 0), entityRecord(2, 0, 1, 1, 1, 0, 0, 0)
 	if f := encodeTick(nil, [][]byte{a, b}); len(f) != 3+len(a)+len(b) || f[0] != frameTick || f[1] != 0 || f[2] != 2 {
 		t.Errorf("without self: % x", f)
 	}
@@ -124,5 +126,20 @@ func TestMaterialsAndEntityTypesFrames(t *testing.T) {
 func TestAtlasFrameIsATypeByteAndTheAtlasVersion(t *testing.T) {
 	if f := atlasFrame(); !bytes.Equal(f, []byte{frameAtlas, 1}) {
 		t.Errorf("atlas frame = % x", f)
+	}
+}
+
+func TestNamesFrameCarriesIdAndNameAndCapsTheLength(t *testing.T) {
+	f := encodeNames(map[uint64]string{300: "Steve"})
+	if want := []byte{frameNames, 1, 0xac, 0x02, 5, 'S', 't', 'e', 'v', 'e'}; !bytes.Equal(f, want) {
+		t.Errorf("names = % x\nwant    % x", f, want)
+	}
+	long := encodeNames(map[uint64]string{1: strings.Repeat("a", 400)})
+	if len(long) != 3+1+255 {
+		t.Errorf("long name frame is %d bytes", len(long))
+	}
+	cut := encodeNames(map[uint64]string{1: strings.Repeat("\u00e9", 200)})
+	if n := int(cut[3]); n != 254 || !utf8.Valid(cut[4:]) {
+		t.Errorf("a name cut inside a character: len %d valid %v", n, utf8.Valid(cut[4:]))
 	}
 }
