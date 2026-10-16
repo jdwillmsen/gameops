@@ -197,6 +197,13 @@ func run(logger *slog.Logger) error {
 	if past != nil {
 		app.History = past
 	}
+	// The cave views, the nether's floors and the chunks lost, over a world
+	// made up for them.
+	app.Layers, app.Floors, err = caves(ctx, dir, now, biomeStore, []int{app.NetherTop, harnessLevel.TopY})
+	if err != nil {
+		return err
+	}
+	app.Chunks = lostWorld{at: now}
 	if dir := os.Getenv("HARNESS_WEB"); dir != "" {
 		// Another build of the page over the same world: how a check is
 		// shown to fail on the page a fault was in.

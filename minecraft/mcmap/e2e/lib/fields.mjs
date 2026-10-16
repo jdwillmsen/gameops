@@ -5,7 +5,7 @@
 // can leave in a log: there is no field for it to be in.
 
 export const CHECKS = ['login-screen', 'about-pages', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
-  'nether-levels', 'layer-panel', 'toggles', 'height-bands', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'page-bar', 'live-stream',
+  'nether-levels', 'underground', 'underground-phone', 'layer-panel', 'toggles', 'height-bands', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'page-bar', 'live-stream',
   'page-errors', 'read-only', 'run'];
 
 // Every reason a check can fail or be skipped for, as the sentence a
@@ -65,6 +65,21 @@ export const SENTENCES = [
   "choosing a nether level drew no tiles from it",
   "the picker does not show the level that is drawn",
   "the nether level picker is shown outside the nether",
+  "the underground rows are not in the panel",
+  "switching the underground view on drew no tiles",
+  "the cut view was switched on beside the spaces view",
+  "the cut view drew no tiles",
+  "the underground view drew no tiles in the nether",
+  "the nether has topography and the panel has no row for it",
+  "the topography drew no tiles in the nether",
+  "the world keeps a record of lost chunks and the panel has no row for it",
+  "switching the lost chunks on asked for no tiles",
+  "switching the underground view off left its tiles on the map",
+  "the underground rows are not in the layer sheet on a phone",
+  "the underground row is too small to press with a finger on a phone",
+  "switching the underground view on drew no tiles on a phone",
+  "this map draws no underground view",
+  "the world is not open for the underground view yet",
   "nothing in this dimension is drawn as a picture",
   "no marker picture was painted at any zoom",
   "a marker was painted at a size it was not made at",
@@ -156,7 +171,7 @@ export const slug = (sentence) => String(sentence).toLowerCase().replace(/[^a-z0
 export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sentence]));
 
 // The page's own scripts, by which a script error is placed.
-export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'heights.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js',
+export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'heights.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js', 'underground.js', 'lost.js',
   'slime.js', 'chunk.js', 'trails.js', 'history.js', 'levels.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'passkey.js', 'xbox.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
@@ -169,7 +184,7 @@ export const MEASURES = new Set([
   'asked', 'not_served', 'slowest_ms', 'not_answered', 'over_budget',
   'rendered', 'unrendered', 'players', 'heads_listed', 'heads_drawn',
   'levels', 'samples', 'samples_zooming', 'worst_ratio', 'wrong_size',
-  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles', 'topography_tiles', 'bands', 'band_removed',
+  'width_change', 'map_gain', 'toggled', 'nothing_to_toggle', 'row', 'mob_type_removed', 'structure_kind_removed', 'biome_tiles', 'topography_tiles', 'underground_tiles', 'cut_tiles', 'nether_tiles', 'lost_tiles', 'bands', 'band_removed',
   'hits', 'answer_ms', 'open_ms', 'mob_layers_before', 'mob_layers_in_view', 'mob_layers_after', 'themes', 'distinct', 'texts_measured', 'edges_measured', 'lowest_text_ratio', 'lowest_edge_ratio',
   'days', 'day_tiles', 'day_pictures', 'day_markers', 'moved_pixels',
   'seconds', 'measured', 'worst_pixels', 'p95_pixels', 'over_tolerance', 'worst_pixels_from_where_it_is', 'samples_left_behind',
