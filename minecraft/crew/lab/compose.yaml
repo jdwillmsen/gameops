@@ -26,8 +26,10 @@ services:
       TRANSPORT: "raknet"
       # Ops are granted from the console with `send-command op <gamertag>`,
       # so no gamertag needs to be committed here.
+    # Loopback only: with online mode and the allow list off, anyone who can
+    # reach this port joins under any name they choose.
     ports:
-      - "19132:19132/udp"
+      - "127.0.0.1:19132:19132/udp"
     volumes:
       - lab-world:/data
     stdin_open: true
