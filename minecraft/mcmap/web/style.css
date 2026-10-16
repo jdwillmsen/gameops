@@ -935,6 +935,7 @@ button.link { min-width: 0; min-height: var(--hit); padding: 0; background: none
 .key.contours { background: repeating-linear-gradient(to bottom, var(--text) 0 1px, transparent 1px 3px); border: 1px solid var(--edge); border-radius: 2px; }
 .key.height { background: linear-gradient(to top, var(--dim), var(--text)); border: 1px solid var(--edge); border-radius: 2px; }
 .key.clear { border: 1px dashed var(--dim); border-radius: 2px; }
+.key.lost { background: repeating-linear-gradient(135deg, var(--warn) 0 2px, transparent 2px 5px); border: 1px solid var(--warn); border-radius: 2px; }
 
 .structure span {
   display: grid;
@@ -1314,6 +1315,8 @@ kbd, .keys code {
    zoomed in past full scale only blurs it. */
 .leaflet-tile { image-rendering: pixelated; }
 .topography .leaflet-tile { image-rendering: auto; }
+/* The blocks of a cut are squares, as the terrain's are. */
+.underground .leaflet-tile, .lost .leaflet-tile { image-rendering: pixelated; }
 .leaflet-container { background: var(--map-bg); font: inherit; }
 
 /* Without room beside the layer panel, the results take theirs from the map

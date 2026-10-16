@@ -129,6 +129,7 @@
     ['heights', 'Height'],
     ['biomes', 'Biomes'],
     ['topography', 'Topography'],
+    ['underground', 'Underground'],
     ['trails', 'Trails'],
     ['overlays', 'Overlays'],
   ];
@@ -177,6 +178,7 @@
     heights: 'M3 13h10M3 9.5h10M3 6h10M3 2.5h10M8 2v12',
     biomes: 'M8 14V9M8 9C5 9 3.5 7 3.5 5S5.5 2 8 2s4.5 1 4.5 3S11 9 8 9z',
     topography: 'M2 13l3.5-6 2.5 3.5L10.5 5 14 13zM2 13h12',
+    underground: 'M2 3h12M2 3v10h12V3M5 13V8h3v5M10 13v-3h2v3',
     trails: 'M3 13c0-4 4-2.5 5-5s4-1.5 5-5M3 13h.01M13 3h.01',
     overlays: 'M3 3h10v10H3zM3 8h10M8 3v10',
     other: 'M3 4h10M3 8h10M3 12h10',

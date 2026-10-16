@@ -512,6 +512,39 @@ test('in the nether, where it is not offered, the footer says nothing of the sur
   assert.equal(p.output.hidden, true);
 });
 
+test('in the nether the overlay is drawn from the floors under the level the map is cut at, and follows the picker', async () => {
+  const p = await load({ dimension: 'nether', listings: { nether: listingOf({ bands: BANDS.slice(0, 4) }) } });
+  let cut = 'default';
+  p.win.mcmap.level = { get: () => cut };
+  await p.on('Height tint');
+  assert.equal(p.live().length, 1);
+  // The default level is the one with no level in the address.
+  assert.equal(p.layer().getTileUrl({ z: 0, x: 1, y: 2 }), 'api/topography/tiles/nether/0/1/2.png?styles=tint&v=v1');
+  assert.deepEqual(p.asked('api/topography?'), ['api/topography?dimension=nether']);
+  const layer = p.layer();
+  cut = '66';
+  await p.view();
+  assert.deepEqual(p.asked('api/topography?').at(-1), 'api/topography?dimension=nether&level=66', 'the listing of the level was not asked for');
+  assert.equal(p.live().length, 1, 'the layer was made again for a level');
+  assert.equal(layer.redraws, 1);
+  assert.equal(layer.getTileUrl({ z: 0, x: 1, y: 2 }), 'api/topography/tiles/nether/0/1/2.png?styles=tint&level=66&v=v1');
+  // Where the level is not changed nothing is asked again.
+  const asked = p.asked('api/topography?').length;
+  await p.view();
+  assert.equal(p.asked('api/topography?').length, asked);
+  // Another dimension's address has no level in it, whatever the picker says.
+  await p.view('overworld');
+  assert.doesNotMatch(p.layer().getTileUrl({ z: 0, x: 1, y: 2 }), /level/);
+  assert.doesNotMatch(p.asked('api/topography?').at(-1), /level/);
+});
+
+test('a nether whose floors are not read is not offered, and says so', async () => {
+  const p = await load({ dimension: 'nether' });
+  await p.on('Height tint');
+  assert.equal(p.state.layers.length, 0);
+  assert.match(p.note('Height tint'), /Not drawn in the Nether/);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {
