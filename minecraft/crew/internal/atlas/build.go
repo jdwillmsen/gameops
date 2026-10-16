@@ -20,6 +20,13 @@ type Options struct {
 	TileSize int
 }
 
+func (o Options) tileSize() int {
+	if o.TileSize == 0 {
+		return 16
+	}
+	return o.TileSize
+}
+
 // Build reads an extracted vanilla resource_pack directory and produces the
 // atlas and block table.
 func Build(packDir string) (*Atlas, error) { return BuildWithOptions(packDir, Options{}) }
@@ -39,10 +46,7 @@ type builder struct {
 
 // BuildWithOptions is Build with explicit options.
 func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
-	tile := opts.TileSize
-	if tile == 0 {
-		tile = 16
-	}
+	tile := opts.tileSize()
 	b := &builder{
 		dir:      packDir,
 		images:   map[string]*image.NRGBA{},
