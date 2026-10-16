@@ -296,6 +296,8 @@ async function main() {
       await run('player-heads', needs(live.playerHeads), on);
       await run('zoom-sizes', needs(map.zoomSizes), on);
       await run('nether-levels', needs(map.netherLevels), on);
+      await run('underground', needs(map.underground), on);
+      await run('underground-phone', () => map.undergroundPhone(t));
       await run('layer-panel', needs(map.layerPanel), on);
       await run('toggles', needs(map.toggles), on);
       await run('height-bands', needs(map.heightBands), on);

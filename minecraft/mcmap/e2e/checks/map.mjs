@@ -791,3 +791,104 @@ export async function pageBar({ browser, cfg, watch, closers = [] }) {
     await phoneCtx.close();
   }
 }
+
+// The underground view is tiles the server draws from the world's own
+// files when they are asked for. Turned on, the tiles are asked for and
+// drawn; the second style takes the place of the first and is not drawn
+// beside it; the nether is drawn at its levels and its topography from the
+// floors under them; the chunks the world has lost are marked; and turned
+// off, each takes its tiles away. A map without the views is not an error:
+// there is nothing to check.
+export async function underground({ page }) {
+  const said = await page.evaluate(() => fetch('api/layers?dimension=overworld', { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null), () => null));
+  if (!said || !said.offered) return skip('this map draws no underground view');
+  if (!said.ready) return skip('the world is not open for the underground view yet');
+  const measures = { underground_tiles: 0, cut_tiles: 0, nether_tiles: 0, topography_tiles: 0, lost_tiles: 0 };
+  const put = (id, x, z) => page.evaluate(([to, px, pz]) => window.mcmap.place.set({ d: to, x: px, z: pz, zoom: 0 }), [id, x, z]);
+  const rowOf = (group, label) => `(${tree})().find((r) => r.group === ${JSON.stringify(group)} && r.depth === 2 && r.li.querySelector(':scope > .row .name').textContent === ${JSON.stringify(label)})`;
+  const press = (group, label) => page.evaluate(`(() => { const row = ${rowOf(group, label)}; if (!row || row.off) return false; row.check.click(); return true; })()`);
+  const isOn = (group, label) => page.evaluate(`(() => { const row = ${rowOf(group, label)}; return Boolean(row) && row.on; })()`);
+  // Tiles of an address that are in the page, and those that were drawn.
+  const tiles = (part) => page.evaluate((p) => {
+    const all = [...document.querySelectorAll('#map img.leaflet-tile')].filter((img) => img.src.includes(p));
+    return { present: all.length, drawn: all.filter((img) => img.complete && img.naturalWidth > 0).length };
+  }, part);
+
+  await put('overworld', 32, 32);
+  await sleep(800);
+  if (!(await press('Underground', 'Cave spaces'))) throw new Fail('the underground rows are not in the panel');
+  const first = await until(async () => { const t = await tiles('api/layers/tiles/overworld/'); return t.drawn > 0 ? t : null; }, { timeoutMs: 20_000 });
+  if (!first) throw new Fail('switching the underground view on drew no tiles', measures);
+  measures.underground_tiles = first.drawn;
+  if (!(await press('Underground', 'Cut view'))) throw new Fail('the underground rows are not in the panel', measures);
+  await sleep(600);
+  if (await isOn('Underground', 'Cave spaces')) throw new Fail('the cut view was switched on beside the spaces view', measures);
+  const cut = await until(async () => {
+    const t = await page.evaluate(() => [...document.querySelectorAll('#map img.leaflet-tile')].filter((img) => /api\/layers\/tiles\/overworld\/.*[?&]style=cut&/.test(img.src) && img.complete && img.naturalWidth > 0).length);
+    return t > 0 ? t : null;
+  }, { timeoutMs: 20_000 });
+  if (!cut) throw new Fail('the cut view drew no tiles', measures);
+  measures.cut_tiles = cut;
+
+  // The nether, at the level its own picker is at.
+  if (await put('nether', 8, 8)) {
+    await sleep(800);
+    const hell = await until(async () => { const t = await tiles('api/layers/tiles/nether/'); return t.drawn > 0 ? t : null; }, { timeoutMs: 20_000 });
+    if (!hell) throw new Fail('the underground view drew no tiles in the nether', measures);
+    measures.nether_tiles = hell.drawn;
+    const topo = await page.evaluate(() => fetch('api/topography?dimension=nether', { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null), () => null));
+    if (topo && topo.offered && topo.ready) {
+      if (!(await press('Topography', 'Height tint'))) throw new Fail('the nether has topography and the panel has no row for it', measures);
+      const land = await until(async () => { const t = await tiles('api/topography/tiles/nether/'); return t.drawn > 0 ? t : null; }, { timeoutMs: 20_000 });
+      if (!land) throw new Fail('the topography drew no tiles in the nether', measures);
+      measures.topography_tiles = land.drawn;
+      await press('Topography', 'Height tint');
+    }
+  }
+
+  // The chunks the world has lost, where the service keeps a record.
+  await put('overworld', 32, 32);
+  await sleep(800);
+  const lost = await page.evaluate(() => fetch('api/lost?dimension=overworld', { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null), () => null));
+  if (lost && lost.offered) {
+    if (!(await press('Overlays', 'Lost chunks'))) throw new Fail('the world keeps a record of lost chunks and the panel has no row for it', measures);
+    const marks = await until(async () => { const t = await tiles('api/lost/tiles/overworld/'); return t.present > 0 ? t : null; }, { timeoutMs: 20_000 });
+    if (!marks) throw new Fail('switching the lost chunks on asked for no tiles', measures);
+    measures.lost_tiles = marks.present;
+    await press('Overlays', 'Lost chunks');
+  }
+
+  // Off, they are gone.
+  if (await isOn('Underground', 'Cut view')) await press('Underground', 'Cut view');
+  await sleep(800);
+  const left = await tiles('api/layers/tiles/');
+  if (left.present > 0) throw new Fail('switching the underground view off left its tiles on the map', measures);
+  return { measures };
+}
+
+// On a phone the underground view is in the layer sheet, as every layer
+// is: its rows are there, can be pressed with a finger, and draw.
+export async function undergroundPhone({ browser, cfg, watch, closers = [] }) {
+  const ctx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie, viewport: { width: 390, height: 780 }, dpr: 2, touch: true });
+  closers.push(() => ctx.close());
+  try {
+    const page = await openMap(ctx, cfg);
+    const said = await page.evaluate(() => fetch('api/layers?dimension=overworld', { cache: 'no-store' }).then((res) => (res.ok ? res.json() : null), () => null));
+    if (!said || !said.offered || !said.ready) return skip('this map draws no underground view');
+    if (!(await page.evaluate(() => document.getElementById('layers').classList.contains('open')))) await page.locator('#layers-toggle').tap();
+    await sleep(600);
+    await page.evaluate(() => window.mcmap.place.set({ d: 'overworld', x: 32, z: 32, zoom: 0 }));
+    const row = page.locator('#layers-list li.node.d2', { hasText: 'Cave spaces' }).locator(':scope > .row .check');
+    if (!(await until(async () => (await row.count()) > 0))) throw new Fail('the underground rows are not in the layer sheet on a phone');
+    // The box is small and the press zone round it is the page's --hit.
+    const hit = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hit')));
+    if (!(hit >= 40)) throw new Fail('the underground row is too small to press with a finger on a phone', { too_small: 1 });
+    await row.tap();
+    const drawn = await until(() => page.evaluate(() => [...document.querySelectorAll('#map img.leaflet-tile')].filter((img) => img.src.includes('api/layers/tiles/') && img.complete && img.naturalWidth > 0).length), { timeoutMs: 20_000 });
+    if (!drawn) throw new Fail('switching the underground view on drew no tiles on a phone');
+    await row.tap();
+    return { measures: { underground_tiles: drawn } };
+  } finally {
+    await ctx.close();
+  }
+}
