@@ -26,6 +26,10 @@ type Config struct {
 	Host     string
 	Port     int
 	Username string
+	// Offline joins with only a display name and no Microsoft sign-in. An
+	// online-mode server rejects such a client, so it is for a lab server
+	// with online mode off.
+	Offline bool
 
 	ViewDistance uint8
 
@@ -48,6 +52,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	username, err := required("MC_USERNAME")
+	if err != nil {
+		return Config{}, err
+	}
+	offline, err := boolDefault("MC_OFFLINE", false)
 	if err != nil {
 		return Config{}, err
 	}
@@ -87,6 +95,7 @@ func Load() (Config, error) {
 		Host:           host,
 		Port:           port,
 		Username:       username,
+		Offline:        offline,
 		ViewDistance:   viewDistance,
 		AuthCacheDir:   stringDefault("AUTH_CACHE_DIR", "/data/auth"),
 		ReconnectMinMs: reconnectMin,
