@@ -4,7 +4,7 @@ package web
 
 import "embed"
 
-//go:embed index.html about.html guide.html privacy.html terms.html credits.html pages.css settings.js diag.js appearance.js views.js app.js zoom.js duration.js names.js icons.js layers.js room.js groups.js heights.js playerdetails.js live.js markers.js structures.js biomes.js topography.js search.js menu.js compact.js debug.js passkey.js xbox.js slime.js chunk.js trails.js history.js levels.js style.css lib
+//go:embed index.html about.html guide.html privacy.html terms.html credits.html pages.css settings.js diag.js appearance.js views.js app.js zoom.js duration.js names.js icons.js layers.js room.js groups.js heights.js playerdetails.js live.js markers.js structures.js biomes.js topography.js underground.js lost.js search.js menu.js compact.js debug.js passkey.js xbox.js slime.js chunk.js trails.js history.js levels.js style.css lib
 var FS embed.FS
 
 // Owner is who runs the map and holds the copyright in what is written

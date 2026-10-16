@@ -50,6 +50,16 @@
   // hidden, or one shown alone.
   const choice = app.layers.facet ? app.layers.facet('topography', 'tint') : { shows: () => true, only: null, onChange() {} };
 
+  // The nether has no land of its own to draw: its heightmap is the roof.
+  // What is drawn is the floors under the level the map is cut at, so the
+  // overlay follows the picker of levels; '' for any other dimension.
+  const levelNow = () => {
+    if (app.dimension() !== 'nether' || !app.level || typeof app.level.get !== 'function') return '';
+    const id = app.level.get();
+    return typeof id === 'string' && id !== 'default' ? id : '';
+  };
+  const levelQuery = (id) => (id ? `&level=${encodeURIComponent(id)}` : '');
+
   const on = (id) => rows.has(id) && rows.get(id).enabled;
   const anyOn = () => STYLES.some((style) => on(style.id));
   // Whether there is anything to draw here: the dimension has land, the
@@ -77,7 +87,7 @@
   const Tiles = L.TileLayer.extend({
     getTileUrl(c) {
       const o = this.options;
-      return `api/topography/tiles/${o.dimension}/${c.z}/${c.x}/${c.y}.png?${o.pick}&v=${encodeURIComponent(o.version)}`;
+      return `api/topography/tiles/${o.dimension}/${c.z}/${c.x}/${c.y}.png?${o.pick}${levelQuery(o.level)}&v=${encodeURIComponent(o.version)}`;
     },
   });
 
@@ -100,6 +110,7 @@
         dimension: listing.dimension,
         version: listing.version,
         pick,
+        level: listing.level,
         tileSize: listing.tiles.size,
         minNativeZoom: listing.tiles.minZoom,
         maxNativeZoom: listing.tiles.maxZoom,
@@ -116,9 +127,10 @@
       }).addTo(map);
       return;
     }
-    if (layer.options.version === listing.version && layer.options.pick === pick) return;
+    if (layer.options.version === listing.version && layer.options.pick === pick && layer.options.level === listing.level) return;
     layer.options.version = listing.version;
     layer.options.pick = pick;
+    layer.options.level = listing.level;
     layer.redraw();
   }
 
@@ -203,7 +215,8 @@
     if (pending === dimension) return;
     pending = dimension;
     try {
-      const res = await fetch(`api/topography?dimension=${encodeURIComponent(dimension)}`, { cache: 'no-store' });
+      const level = dimension === 'nether' ? levelNow() : '';
+      const res = await fetch(`api/topography?dimension=${encodeURIComponent(dimension)}${levelQuery(level)}`, { cache: 'no-store' });
       if (pending !== dimension) return; // the view moved on while this was out
       if (res.status === 404) {
         // The service is running without it, and will be until it restarts.
@@ -221,6 +234,7 @@
       const tiles = data.tiles && typeof data.tiles === 'object' ? data.tiles : {};
       listing = {
         dimension,
+        level,
         offered: Boolean(data.offered),
         ready: Boolean(data.ready),
         version: str(data.version),
@@ -257,6 +271,10 @@
     if (!listing || listing.dimension !== dimension) {
       clear();
       paint();
+      load(dimension);
+    } else if (dimension === 'nether' && listing.level !== levelNow()) {
+      // Another level's floors are another reading to ask about; the layer
+      // there is stays until the answer, and is drawn again from it.
       load(dimension);
     } else if (anyOn() && Date.now() - fetchedAt > REFRESH_MS && !document.hidden) {
       // Only while something is on: off, there is no tile to be stale.
