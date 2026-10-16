@@ -4206,9 +4206,11 @@ carries the not-an-official-product disclaimer, links to the others and back
 to the map, and is linked from the login screen, from the menu's Link and
 help group and from the foot of the help.
 
-The owner's name and the copyright line are `Owner` and `Copyright` in
-`web/embed.go`; the pages say `{{owner}}` and `{{copyright}}` and the server
-fills them in. The texts describe what the code does, so a change to what the
+The owner's name, the copyright line and the contact address are `Owner`,
+`Copyright` and `Contact` in `web/embed.go`; the pages say `{{owner}}`,
+`{{copyright}}` and `{{contact}}` and the server fills them in. The address
+is there because the game's usage guidelines ask for a way to reach whoever
+runs a site and do not count a chat. The texts describe what the code does, so a change to what the
 map stores, to its cookies or to the libraries it uses is a change to
 `privacy.html` or `credits.html` too. `about-pages` in the browser checks
 opens each page with no session.

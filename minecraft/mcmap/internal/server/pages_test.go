@@ -40,6 +40,9 @@ func TestPagesAboutTheMapNeedNoLogin(t *testing.T) {
 	if body := do(h, "GET", "/terms", "", nil).Body.String(); !strings.Contains(body, web.Owner) {
 		t.Errorf("/terms does not name %q, the owner", web.Owner)
 	}
+	if body := do(h, "GET", "/privacy", "", nil).Body.String(); !strings.Contains(body, `href="mailto:`+web.Contact+`"`) {
+		t.Errorf("/privacy does not give %q to write to", web.Contact)
+	}
 }
 
 func TestPagesAboutTheMapAreOnlyRead(t *testing.T) {

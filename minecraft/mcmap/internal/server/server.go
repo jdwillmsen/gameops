@@ -224,7 +224,7 @@ func (s *Server) route(mux *http.ServeMux, behind gate, pattern string, h http.H
 	mux.Handle(pattern, handler)
 }
 
-var pageWords = strings.NewReplacer("{{owner}}", web.Owner, "{{copyright}}", web.Copyright)
+var pageWords = strings.NewReplacer("{{owner}}", web.Owner, "{{copyright}}", web.Copyright, "{{contact}}", web.Contact)
 
 // handlePage serves a page about the map. These hold nothing of the world
 // and are open to anyone, since a visitor has to be able to read what the
