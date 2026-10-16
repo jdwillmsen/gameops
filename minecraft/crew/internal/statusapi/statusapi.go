@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
@@ -36,5 +38,8 @@ func Handler(src Source, version string) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(stateBody{Version: version, State: src.Snapshot()})
 	})
+	// The process-wide registry: packages register their own metrics at init,
+	// so this stays the one place metrics are exposed.
+	mux.Handle("GET /metrics", promhttp.Handler())
 	return mux
 }
