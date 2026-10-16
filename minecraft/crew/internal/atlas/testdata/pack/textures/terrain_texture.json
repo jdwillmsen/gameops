@@ -1,0 +1,28 @@
+// Synthetic fixture shaped like the vanilla terrain texture index.
+{
+  "resource_pack_name": "synthetic",
+  "texture_name": "atlas.terrain",
+  "padding": 8,
+  "num_mip_levels": 4,
+  "texture_data": {
+    "rock": { "textures": "textures/blocks/rock" },
+    "soil": { "textures": "textures/blocks/soil" },
+    "turf_top": {
+      "textures": ["textures/blocks/turf_top", "textures/blocks/rock"]
+    },
+    "turf_side": {
+      "textures": [
+        { "path": "textures/blocks/soil", "overlay_color": "#79c05a" }
+      ]
+    },
+    "trunk_end": { "textures": "textures/blocks/trunk_end" },
+    "trunk_bark": { "textures": "textures/blocks/trunk_bark" },
+    "canopy": { "textures": "textures/blocks/canopy" },
+    "pond": { "textures": "textures/blocks/pond" },
+    "flame_stick": { "textures": "textures/blocks/flame_stick" },
+    "sprig_carried": { "textures": "textures/blocks/sprig" },
+    "wide_panel": { "textures": "textures/blocks/wide_panel" },
+    "tide": { "textures": "textures/blocks/tide_strip" },
+    "ghost": { "textures": "textures/blocks/not_on_disk" },
+  }
+}
