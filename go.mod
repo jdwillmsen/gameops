@@ -6,6 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/df-mc/dragonfly v0.11.5
 	github.com/df-mc/goleveldb v1.1.9
 	github.com/go-gl/mathgl v1.2.0
 	github.com/go-webauthn/webauthn v0.18.2
@@ -27,12 +28,13 @@ require (
 	github.com/df-mc/go-playfab/v2 v2.0.3 // indirect
 	github.com/df-mc/go-xsapi/v2 v2.0.3 // indirect
 	github.com/df-mc/jsonc v1.0.5 // indirect
+	github.com/df-mc/worldupgrader v1.0.22 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.3.1 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
-	github.com/golang/snappy v0.0.1 // indirect
+	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
