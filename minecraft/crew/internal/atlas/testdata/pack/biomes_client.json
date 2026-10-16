@@ -1,0 +1,10 @@
+/*
+ Synthetic fixture shaped like the client biome file.
+  */
+{
+  "biomes": {
+    "default": { "water_surface_color": "#44AFF5", "water_surface_transparency": 0.65 },
+    "minecraft:plains": { "fog_identifier": "minecraft:fog_plains" },
+    "minecraft:swamp": { "water_surface_color": "#617B64" },
+  }
+}

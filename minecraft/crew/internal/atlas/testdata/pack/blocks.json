@@ -1,0 +1,30 @@
+{
+   "format_version" : "1.21.40",
+   "stone" : { "sound" : "stone", "textures" : "rock" },
+   "dirt" : { "sound" : "gravel", "textures" : "soil" },
+   "grass" : {
+      "sound" : "grass",
+      "textures" : { "down" : "soil", "side" : "turf_side", "up" : "turf_top" }
+   },
+   "oak_log" : {
+      "sound" : "wood",
+      "textures" : { "down" : "trunk_end", "side" : "trunk_bark", "up" : "trunk_end" }
+   },
+   "pillar" : {
+      "sound" : "stone",
+      "textures" : { "side" : "rock", "north" : "soil", "up" : "trunk_end" }
+   },
+   "oak_leaves" : { "sound" : "grass", "carried_textures" : "canopy", "textures" : "canopy" },
+   "azalea_leaves" : { "sound" : "grass", "textures" : "canopy" },
+   "water" : { "textures" : "pond" },
+   "flowing_water" : { "textures" : "pond" },
+   "torch" : { "sound" : "wood", "textures" : "flame_stick" },
+   "short_grass" : { "sound" : "grass", "textures" : "missing_key", "carried_textures" : "sprig_carried" },
+   "stone_stairs" : { "textures" : "rock" },
+   "oak_slab" : { "sound" : "wood", "textures" : "trunk_bark" },
+   "oak_double_slab" : { "sound" : "wood", "textures" : "trunk_bark" },
+   "panel" : { "sound" : "stone", "textures" : "wide_panel" },
+   "tide_block" : { "textures" : "tide" },
+   "haunted" : { "textures" : "ghost" },
+   "nowhere" : { "textures" : "no_such_key" }
+}
