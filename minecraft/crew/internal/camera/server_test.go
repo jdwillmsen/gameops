@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +177,16 @@ func TestAtlasRoutesAnswer404UntilTheAtlasIsBuilt(t *testing.T) {
 	}
 	if code, ct := get("/v1/camera/atlas.json"); code != 200 || ct != "application/json" {
 		t.Errorf("json = %d %q", code, ct)
+	}
+}
+
+// The page is embedded and not type-checked, so a wire bump that forgets it
+// would only show in a browser.
+func TestPageSpeaksTheCurrentWireVersionAndFetchesTheAtlas(t *testing.T) {
+	want := "u8[1] !== " + strconv.Itoa(int(wireVersion))
+	for _, s := range []string{want, "/v1/camera/atlas.json", "/v1/camera/atlas.png", "case " + strconv.Itoa(int(frameAtlas)) + ":"} {
+		if !strings.Contains(string(page), s) {
+			t.Errorf("page does not contain %q", s)
+		}
 	}
 }

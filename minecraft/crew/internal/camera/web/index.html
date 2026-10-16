@@ -40,16 +40,40 @@ const meshes = new Map(); // key -> [opaque, translucent]
 const dirty = new Set();
 const entMeshes = new Map();
 const me = { x: 0, y: 70, z: 0, yaw: 0, pitch: 0 };
-window.__dbg = { scene, camera, me, blocks, meshes };
+window.__dbg = { scene, camera, me, blocks, meshes, get mats() { return mats; }, atlasReady: () => !!atlas };
 
-const FACES = [ // dir, corners (ccw seen from outside), shade
-  { d: [1, 0, 0],  c: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], s: .8 },
-  { d: [-1, 0, 0], c: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], s: .8 },
-  { d: [0, 1, 0],  c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], s: 1 },
-  { d: [0, -1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], s: .5 },
-  { d: [0, 0, 1],  c: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], s: .65 },
-  { d: [0, 0, -1], c: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], s: .65 },
+const FACES = [ // name, dir, corners (ccw seen from outside, bottom-left first), shade
+  { n: 'east',  d: [1, 0, 0],  c: [[1,0,1],[1,0,0],[1,1,0],[1,1,1]], s: .8 },
+  { n: 'west',  d: [-1, 0, 0], c: [[0,0,0],[0,0,1],[0,1,1],[0,1,0]], s: .8 },
+  { n: 'up',    d: [0, 1, 0],  c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]], s: 1 },
+  { n: 'down',  d: [0, -1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], s: .5 },
+  { n: 'south', d: [0, 0, 1],  c: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], s: .65 },
+  { n: 'north', d: [0, 0, -1], c: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], s: .65 },
 ];
+// Which block axis runs along a face's texture s (left to right) and t
+// (bottom to top), and whether it grows that way, so a box that covers only
+// part of a block shows the matching part of the texture.
+for (const f of FACES) {
+  const [c0, c1, , c3] = f.c;
+  f.axis = f.d.findIndex(v => v !== 0);
+  f.ax = [0, 1, 2].find(k => c0[k] !== c1[k]); f.sx = c1[f.ax] > c0[f.ax];
+  f.ay = [0, 1, 2].find(k => c0[k] !== c3[k]); f.sy = c3[f.ay] > c0[f.ay];
+}
+
+// Stand-in shapes for blocks the engine builds itself: boxes as
+// [x0,y0,z0,x1,y1,z1] in block units. Block state is not on the wire, so
+// slabs are always the bottom half and stairs always rise towards +z.
+const BOXES = {
+  slab: [[0, 0, 0, 1, .5, 1]],
+  stairs: [[0, 0, 0, 1, .5, 1], [0, .5, .5, 1, 1, 1]],
+  torch: [[.4375, 0, .4375, .5625, .625, .5625]],
+  layer: [[0, 0, 0, 1, .0625, 1]],
+  fence: [[.375, 0, .375, .625, 1, .625], [0, .75, .4375, 1, .9375, .5625], [0, .375, .4375, 1, .5625, .5625]],
+  wall: [[.25, 0, .25, .75, 1, .75], [0, 0, .3125, 1, .8125, .6875]],
+  pane: [[.4375, 0, 0, .5625, 1, 1]],
+  door: [[0, 0, 0, 1, 1, .1875]],
+};
+const FULL = [[0, 0, 0, 1, 1, 1]];
 
 function blockAt(wx, wy, wz) {
   const cx = wx >> 4, cy = wy >> 4, cz = wz >> 4;
@@ -69,32 +93,96 @@ function rgb(id) {
   return c;
 }
 
+// The atlas arrives after the first frames, so everything that depends on it
+// is looked up lazily and dropped when it changes. Without it every block is
+// a flat colour and the shapes the page cannot draw are skipped.
+let atlas = null; // { table, tints: {kind: Color}, tex }
+const infoCache = new Map();
+const WHITE = new THREE.Color(1, 1, 1);
+function info(id) {
+  let r = infoCache.get(id);
+  if (r) return r;
+  const m = mats[id - 1];
+  const blk = (m && atlas && atlas.table.blocks['minecraft:' + m.name]) || null;
+  let shape = 'cube';
+  if (blk) {
+    const k = blk.model;
+    // A name the flat list marks as non-cube stays hidden when the table
+    // would draw it as a cube, which is how it hid before textures existed.
+    shape = k === 'liquid' ? 'cube' : k === 'none' || (k === 'cube' && m.nonCube) ? 'skip' : k;
+  } else if (m && m.nonCube) shape = 'skip';
+  const trans = !!m && m.alpha < 1;
+  r = { m, blk, shape, trans, opaque: shape === 'cube' && !trans, tint: blk && atlas.tints[blk.tint] || null };
+  infoCache.set(id, r);
+  return r;
+}
+
+function faceColor(inf, face) {
+  if (face.tinted && inf.tint) return inf.tint;
+  // The pack's per-texture overlay colour is not applied: it is a legacy
+  // multiplier that turns grass sides orange.
+  return WHITE;
+}
+
+// One quad. uv is null for flat colour.
+function quad(g, pos, col, shade, uv, flip) {
+  const base = g.p.length / 3;
+  for (let k = 0; k < 4; k++) {
+    g.p.push(pos[k][0], pos[k][1], pos[k][2]);
+    g.c.push(col.r * shade, col.g * shade, col.b * shade);
+    if (uv) g.u.push(uv[k][0], uv[k][1]);
+  }
+  g.i.push(...(flip ? [base, base + 2, base + 1, base, base + 3, base + 2] : [base, base + 1, base + 2, base, base + 2, base + 3]));
+}
+
 function mesh(key) {
   const [cx, cy, cz] = key.split(',').map(Number);
   const b = blocks.get(key);
   const old = meshes.get(key);
   if (old) { for (const m of old) { scene.remove(m); m.geometry.dispose(); } meshes.delete(key); }
   if (!b) return;
-  const buf = [{ p: [], c: [], i: [] }, { p: [], c: [], i: [] }];
+  // 0 textured, 1 textured translucent, 2 flat, 3 flat translucent
+  const buf = [0, 1, 2, 3].map(() => ({ p: [], c: [], u: [], i: [] }));
   for (let y = 0; y < 16; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const id = b[((y << 4 | z) << 4) | x];
     if (!id) continue;
+    const inf = info(id);
+    if (inf.shape === 'skip') continue;
     const wx = cx * 16 + x, wy = cy * 16 + y, wz = cz * 16 + z;
-    const trans = mats[id - 1] && mats[id - 1].alpha < 1;
-    const g = buf[trans ? 1 : 0];
-    const col = rgb(id), j = jitter(wx, wy, wz);
-    for (const f of FACES) {
-      const n = blockAt(wx + f.d[0], wy + f.d[1], wz + f.d[2]);
-      if (n === -1) continue;               // unloaded: hide until it arrives
-      if (n === id) continue;
-      if (n !== 0 && !(mats[n - 1] && mats[n - 1].alpha < 1)) continue; // opaque neighbour
-      const base = g.p.length / 3;
-      for (const q of f.c) {
-        g.p.push(wx + q[0], wy + q[1], wz + q[2]);
-        const s = f.s * j;
-        g.c.push(col.r * s, col.g * s, col.b * s);
+    const textured = !!inf.blk;
+    const g = buf[(textured ? 0 : 2) + (inf.trans ? 1 : 0)];
+    const flat = rgb(id), j = jitter(wx, wy, wz);
+
+    if (inf.shape === 'cross') {
+      // The pack names a double plant's lower half under down; side holds an
+      // unrelated flower texture for it.
+      const face = inf.blk.down, col = faceColor(inf, face);
+      const uv = faceUV(face.uv, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+      for (const q of [[[0,0,0],[1,0,1],[1,1,1],[0,1,0]], [[1,0,0],[0,0,1],[0,1,1],[1,1,0]]])
+        for (const flip of [false, true])
+          quad(g, q.map(v => [wx + v[0], wy + v[1], wz + v[2]]), col, .9, uv, flip);
+      continue;
+    }
+    for (const box of inf.shape === 'cube' ? FULL : BOXES[inf.shape] || FULL) {
+      for (const f of FACES) {
+        const flush = f.d[f.axis] > 0 ? box[f.axis + 3] === 1 : box[f.axis] === 0;
+        if (flush) {
+          const n = blockAt(wx + f.d[0], wy + f.d[1], wz + f.d[2]);
+          if (n === -1) continue;                        // unloaded: hide until it arrives
+          if (n === id && inf.shape === 'cube') continue;
+          if (n !== 0 && info(n).opaque) continue;       // opaque neighbour
+        }
+        const pos = [], st = [];
+        for (const q of f.c) {
+          const p = [0, 1, 2].map(k => box[k] + q[k] * (box[k + 3] - box[k]));
+          pos.push([wx + p[0], wy + p[1], wz + p[2]]);
+          st.push([f.sx ? p[f.ax] : 1 - p[f.ax], f.sy ? p[f.ay] : 1 - p[f.ay]]);
+        }
+        if (textured) {
+          const face = inf.blk[f.n];
+          quad(g, pos, faceColor(inf, face), f.s, faceUV(face.uv, st), false);
+        } else quad(g, pos, flat, f.s * j, null, false);
       }
-      g.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
   }
   const out = [];
@@ -103,11 +191,52 @@ function mesh(key) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(g.p, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(g.c, 3));
+    if (k < 2) geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.u, 2));
     geo.setIndex(g.i);
-    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: k === 1, opacity: k === 1 ? .6 : 1, side: THREE.FrontSide }));
+    const m = new THREE.Mesh(geo, blockMaterial(k));
     scene.add(m); out.push(m);
   });
   meshes.set(key, out);
+}
+
+// Texture coordinates for a face rectangle given (s,t) in 0..1 across it,
+// t up. The rectangle is inset a hair so nearest sampling at a tile edge
+// never picks up the neighbouring tile.
+function faceUV(r, st) {
+  const e = 0.02 / atlas.table.width, f = 0.02 / atlas.table.height;
+  const u0 = r[0] + e, u1 = r[2] - e, v0 = r[1] + f, v1 = r[3] - f;
+  return st.map(([s, t]) => [u0 + s * (u1 - u0), v1 - t * (v1 - v0)]);
+}
+
+const flatMaterials = [null, null, new THREE.MeshBasicMaterial({ vertexColors: true }),
+  new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: .6 })];
+let texturedMaterials = null;
+function blockMaterial(k) { return k < 2 ? texturedMaterials[k] : flatMaterials[k]; }
+
+async function loadAtlas() {
+  if (atlas) return;
+  try {
+    const [doc, img] = await Promise.all([
+      fetch('/v1/camera/atlas.json').then(r => { if (!r.ok) throw new Error('atlas.json ' + r.status); return r.json(); }),
+      new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('atlas.png')); i.src = '/v1/camera/atlas.png'; }),
+    ]);
+    const tex = new THREE.Texture(img);
+    tex.magFilter = tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    const tints = {};
+    for (const [k, v] of Object.entries(doc.tints)) tints[k] = new THREE.Color(v);
+    texturedMaterials = [
+      new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, alphaTest: .5 }),
+      new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, opacity: .6 }),
+    ];
+    atlas = { table: doc.table, tints, tex };
+    infoCache.clear();
+    for (const k of blocks.keys()) dirty.add(k);
+  } catch (e) {
+    // Flat colours are the fallback; nothing else depends on the atlas.
+    console.warn('atlas unavailable, drawing flat colours', e);
+  }
 }
 
 function markDirty(key, neighbours) {
@@ -153,7 +282,7 @@ function connect() {
   ws.onclose = () => { status = 'disconnected, retrying'; setTimeout(connect, 2000); };
   ws.onmessage = onMessage;
 }
-// Wire format 1: every message is binary, type byte first, little-endian.
+// Wire format 2: every message is binary, type byte first, little-endian.
 // The layout is documented beside the encoder in wire.go.
 let entTypes = [];
 function onMessage(ev) {
@@ -167,17 +296,17 @@ function onMessage(ev) {
   const angle = a => { const d = a * 360 / 256; return d > 180 ? d - 360 : d; };
   switch (u8[0]) {
     case 1:
-      if (u8[1] !== 1) { status = 'unsupported wire version ' + u8[1]; wsConn.close(); }
+      if (u8[1] !== 2) { status = 'unsupported wire version ' + u8[1]; wsConn.close(); }
       break;
     case 2: {
       const n = dv.getUint16(p, true); p += 2;
       mats = [];
       for (let i = 0; i < n; i++) {
-        const id = u8[p], alpha = u8[p + 1] / 255, r = u8[p + 2], g = u8[p + 3], b = u8[p + 4], len = u8[p + 5];
-        p += 6;
-        mats[id - 1] = { name: text(len), alpha, color: '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('') };
+        const id = u8[p], alpha = u8[p + 1] / 255, r = u8[p + 2], g = u8[p + 3], b = u8[p + 4], flags = u8[p + 5], len = u8[p + 6];
+        p += 7;
+        mats[id - 1] = { name: text(len), alpha, nonCube: (flags & 1) !== 0, color: '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('') };
       }
-      colorCache.clear(); for (const k of blocks.keys()) dirty.add(k);
+      colorCache.clear(); infoCache.clear(); for (const k of blocks.keys()) dirty.add(k);
       break;
     }
     case 3: {
@@ -235,6 +364,9 @@ function onMessage(ev) {
       for (let i = 0; i < n; i++) { const len = u8[p++]; entTypes.push(text(len)); }
       break;
     }
+    case 9:
+      loadAtlas();
+      break;
   }
 }
 connect();
@@ -254,7 +386,7 @@ function frame() {
   stats.frames++;
   if (stats.settledMs === null && blocks.size > 0 && dirty.size === 0 && performance.now() - stats.lastBlockAt > 1000) stats.settledMs = stats.lastBlockAt - t0;
   if (stats.firstFrameMs === null && meshes.size > 0) stats.firstFrameMs = performance.now() - t0;
-  hud.textContent = `crew camera  ${status}  radius ${radius} (] widens)\nsub-chunks ${blocks.size}  meshes ${meshes.size}  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
+  hud.textContent = `crew camera  ${status}  radius ${radius} (] widens)\ntextures ${atlas ? 'on' : 'off'}  sub-chunks ${blocks.size}  meshes ${meshes.size}  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
   requestAnimationFrame(frame);
 }
 frame();
