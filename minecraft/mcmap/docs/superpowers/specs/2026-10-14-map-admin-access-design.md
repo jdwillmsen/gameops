@@ -250,7 +250,7 @@ enough that a list that keeps growing is noticed.
 #### Adding a passkey
 
 1. The owner is logged in, by game code or by an earlier passkey, as an
-   operator. The page's admin section offers "Add a passkey" and asks for
+   operator. The page's Account panel offers "Add a passkey" and asks for
    a label of 1 to 32 letters, digits, spaces or hyphens. The page shows
    it as text only, never as HTML.
 2. `POST /auth/passkey/register/options` (admin gate) answers with
@@ -277,7 +277,8 @@ enough that a list that keeps growing is noticed.
    there is only a challenge, which step 2 replaces. It is allowed again only once the pending
    one has expired, after 2 minutes, or has been cancelled with
    `POST /auth/passkey/register/cancel` by any session with the same XUID,
-   so losing the session that started it does not lock the player out. A pending credential cannot log anyone in. The page
+   so losing the session that started it does not lock the player out. A
+   pending credential cannot log anyone in. The page
    shows the credential's **fingerprint**, the first 4 bytes of the SHA-256
    of its ID as `XXXX-XXXX` in hex, and says: "Now type `!map passkey` in
    the game. You will be whispered a code to type here. Check that the
