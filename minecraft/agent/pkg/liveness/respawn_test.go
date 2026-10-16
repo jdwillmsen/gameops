@@ -2,8 +2,10 @@ package liveness
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -23,65 +25,84 @@ func (r *recorder) WritePacket(pk packet.Packet) error {
 
 const runtimeID = 42
 
-func TestDeathRequestsRespawn(t *testing.T) {
-	r, w := New(runtimeID), &recorder{}
-	handled, err := r.Handle(&packet.DeathInfo{Cause: "lava"}, w)
-	if err != nil || !handled {
-		t.Fatalf("Handle(DeathInfo) = (%v, %v), want (true, nil)", handled, err)
-	}
-	if !r.Dead() {
-		t.Error("Dead() false immediately after a death")
-	}
-	action, ok := w.sent[0].(*packet.PlayerAction)
-	if !ok {
-		t.Fatalf("sent %T, want a PlayerAction", w.sent[0])
-	}
-	if action.ActionType != protocol.PlayerActionRespawn {
-		t.Errorf("ActionType = %d, want PlayerActionRespawn", action.ActionType)
-	}
-	if action.EntityRuntimeID != runtimeID {
-		t.Errorf("EntityRuntimeID = %d, want %d", action.EntityRuntimeID, runtimeID)
+// step is one recorded server packet and what the respawner must do with it.
+type step struct {
+	pk packet.Packet
+	// reply is the packet the client must answer with, nil for none.
+	reply       packet.Packet
+	wantHandled bool
+	wantDead    bool
+}
+
+var (
+	clientReady = &packet.Respawn{State: packet.RespawnStateClientReadyToSpawn, EntityRuntimeID: runtimeID}
+	respawnAsk  = &packet.PlayerAction{EntityRuntimeID: runtimeID, ActionType: protocol.PlayerActionRespawn}
+)
+
+// deathSequence is what a 1.26.52 dedicated server sends a client that dies,
+// as recorded from a lab server, with the replies that respawned it. The
+// first searching state is sent when the death is processed and the server
+// then waits for ClientReadyToSpawn before it searches; the ready state
+// carries the chosen spawn point, and only a PlayerAction sent after it
+// respawns the player.
+func deathSequence() []step {
+	return []step{
+		{pk: &packet.DeathInfo{Cause: "death.attack.generic"}, wantHandled: true, wantDead: true},
+		{pk: &packet.Respawn{Position: mgl32.Vec3{10.5, 70.62, 20.5}, State: packet.RespawnStateSearchingForSpawn}, reply: clientReady, wantDead: true},
+		{pk: &packet.Respawn{Position: mgl32.Vec3{10, 32767, 20}, State: packet.RespawnStateSearchingForSpawn}, reply: clientReady, wantDead: true},
+		{pk: &packet.Respawn{Position: mgl32.Vec3{12.5, 71.62, 18.5}, State: packet.RespawnStateReadyToSpawn}, reply: respawnAsk, wantHandled: true},
 	}
 }
 
-// The server sends two Respawn packets. Confirming the first would claim
-// readiness for a spawn position it has not chosen yet.
-func TestOnlyTheReadyStateIsConfirmed(t *testing.T) {
-	r, w := New(runtimeID), &recorder{}
-	_, _ = r.Handle(&packet.DeathInfo{}, w)
-	w.sent = nil
-
-	handled, err := r.Handle(&packet.Respawn{State: packet.RespawnStateSearchingForSpawn}, w)
-	if err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if handled || len(w.sent) != 0 {
-		t.Errorf("answered the searching-for-spawn state; sent %d packets", len(w.sent))
-	}
-	if !r.Dead() {
-		t.Error("Dead() cleared before the respawn completed")
+func play(t *testing.T, r *Respawner, steps []step) {
+	t.Helper()
+	for i, s := range steps {
+		w := &recorder{}
+		handled, err := r.Handle(s.pk, w)
+		if err != nil {
+			t.Fatalf("step %d Handle(%T): %v", i, s.pk, err)
+		}
+		if handled != s.wantHandled {
+			t.Errorf("step %d Handle(%T) handled = %v, want %v", i, s.pk, handled, s.wantHandled)
+		}
+		if r.Dead() != s.wantDead {
+			t.Errorf("step %d after %T Dead() = %v, want %v", i, s.pk, r.Dead(), s.wantDead)
+		}
+		switch {
+		case s.reply == nil && len(w.sent) != 0:
+			t.Errorf("step %d answered %T with %+v, want no reply", i, s.pk, w.sent)
+		case s.reply != nil && (len(w.sent) != 1 || !reflect.DeepEqual(w.sent[0], s.reply)):
+			t.Errorf("step %d answered %T with %+v, want [%+v]", i, s.pk, w.sent, s.reply)
+		}
 	}
 }
 
-func TestRespawnCompletesTheHandshake(t *testing.T) {
-	r, w := New(runtimeID), &recorder{}
-	_, _ = r.Handle(&packet.DeathInfo{}, w)
-	w.sent = nil
+// Asking with a PlayerAction on death, as older servers accepted, is dropped
+// and the search never starts. Saying ClientReadyToSpawn on DeathInfo is
+// dropped too whenever the server's searching state lands a tick later,
+// which in the lab was about one death in four. Both leave the player dead
+// for good.
+func TestDeathCompletesTheHandshakeInServerOrder(t *testing.T) {
+	play(t, New(runtimeID), deathSequence())
+}
 
-	handled, err := r.Handle(&packet.Respawn{State: packet.RespawnStateReadyToSpawn}, w)
-	if err != nil || !handled {
-		t.Fatalf("Handle(ReadyToSpawn) = (%v, %v), want (true, nil)", handled, err)
+// A second death on the same session must go through the same exchange: the
+// unit that broke in the lab could be killed once and never again.
+func TestConsecutiveDeathsEachRespawn(t *testing.T) {
+	r := New(runtimeID)
+	play(t, r, deathSequence())
+	play(t, r, deathSequence())
+}
+
+// Joining runs the same Respawn states before the player has ever died. The
+// connection's own spawn handles them, and answering would send a respawn
+// request for a player who is alive.
+func TestJoinSpawnSequenceIsIgnored(t *testing.T) {
+	join := deathSequence()[1:]
+	for i := range join {
+		join[i].reply, join[i].wantHandled, join[i].wantDead = nil, false, false
 	}
-	reply, ok := w.sent[0].(*packet.Respawn)
-	if !ok {
-		t.Fatalf("sent %T, want a Respawn", w.sent[0])
-	}
-	if reply.State != packet.RespawnStateClientReadyToSpawn {
-		t.Errorf("State = %d, want ClientReadyToSpawn", reply.State)
-	}
-	if r.Dead() {
-		t.Error("Dead() still true after completing the respawn")
-	}
+	play(t, New(runtimeID), join)
 }
 
 // A Respawn arriving outside a death -- on a dimension change, say -- must not
@@ -115,8 +136,11 @@ func TestUnrelatedPacketsAreLeftAlone(t *testing.T) {
 // nothing recording why -- the exact silence this package exists to end.
 func TestWriteFailureIsReported(t *testing.T) {
 	r := New(runtimeID)
+	_, _ = r.Handle(&packet.DeathInfo{}, &recorder{})
 	w := &recorder{err: errors.New("connection closed")}
-	if _, err := r.Handle(&packet.DeathInfo{}, w); err == nil {
-		t.Fatal("want an error when the respawn request cannot be written")
+	for _, state := range []byte{packet.RespawnStateSearchingForSpawn, packet.RespawnStateReadyToSpawn} {
+		if _, err := r.Handle(&packet.Respawn{State: state}, w); err == nil {
+			t.Errorf("Respawn{State: %d}: want an error when the reply cannot be written", state)
+		}
 	}
 }
