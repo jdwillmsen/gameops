@@ -35,5 +35,26 @@ services:
     stdin_open: true
     tty: true
 
+  crew-1:
+    build:
+      context: ../../..
+      dockerfile: minecraft/crew/Dockerfile
+    depends_on: [lab]
+    environment:
+      MC_HOST: lab
+      MC_PORT: "19132"
+      # The lab is offline, so crew joins by display name alone.
+      MC_OFFLINE: "true"
+      MC_USERNAME: crew-1
+      CAMERA_ENABLED: "true"
+      # Bound wide only inside the compose network; the published port below
+      # is loopback-only on the host.
+      STATUS_ADDR: 0.0.0.0:8080
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - crew-1-data:/data
+
 volumes:
   lab-world:
+  crew-1-data:
