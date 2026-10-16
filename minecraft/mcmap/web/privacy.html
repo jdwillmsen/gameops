@@ -34,6 +34,8 @@
       <li><strong>What you have done.</strong> Running totals for each player: deaths and kills by kind, blocks broken and placed by kind, joins, leaves and time online, counted from when the map started keeping them. Only the totals are kept, never the events. Any logged-in player can see them in a player&rsquo;s details.</li>
       <li><strong>Operators.</strong> Server operators are the map&rsquo;s admins. The map reads who they are from the game and keeps their XUIDs, with when that was last confirmed, so admin still works for up to a day while the game cannot be asked.</li>
       <li><strong>Passkeys.</strong> If you add a passkey, the map keeps its public key and ID, a counter your device updates, your XUID and gamertag, the name you gave it, and when it was added and last used. The private key stays on your device. Removing the passkey, or logging out everywhere, deletes it.</li>
+      <li><strong>Players the map knows.</strong> Each time you log in with <code>!map</code>, the map notes your XUID with when it first and last saw you, so that you can sign in with Xbox later without the game. A player last seen more than 180 days ago, or who logs out everywhere, is forgotten.</li>
+      <li><strong>Signing in with Xbox.</strong> If the operator has switched it on, you can sign in with your Microsoft account instead of typing a code. Microsoft tells the map your XUID and gamertag; the map checks that you are a player it knows, or are on the server&rsquo;s allowlist, and then forgets everything Microsoft sent. It keeps no Microsoft password, token or email address.</li>
       <li><strong>Logs.</strong> The map&rsquo;s logs record that a login was issued, with the XUID and gamertag it was issued to, and when logins are withdrawn. Your XUID can also appear there when something goes wrong with your own data, such as your waypoints.</li>
     </ul>
     <h2>Cookies</h2>
@@ -41,7 +43,8 @@
     <ul>
       <li><code>__Host-mcmap_pending</code>: set while you wait for your login to complete, so only the browser that asked for a code can collect it.</li>
       <li><code>__Host-mcmap_passkey</code>: set for a few minutes while you log in with a passkey, so the answer your device gives is matched to the request this browser made.</li>
-      <li><code>__Host-mcmap_session</code>: your login. It holds your XUID and gamertag, when it was issued and when it ends, signed so it cannot be altered. By default it lasts seven days, or twelve hours after a passkey login.</li>
+      <li><code>__Host-mcmap_xbox</code>: set for up to ten minutes while you sign in with Xbox, so the answer Microsoft sends back is matched to the request this browser made.</li>
+      <li><code>__Host-mcmap_session</code>: your login. It holds your XUID and gamertag, when it was issued and when it ends, signed so it cannot be altered. By default it lasts seven days, twelve hours after a passkey login, or a day after signing in with Xbox.</li>
     </ul>
     <h2>What stays in your browser</h2>
     <p>Settings such as the theme, the layers you turned on, your saved views and the live-update pace are kept in your browser&rsquo;s local storage. They are never sent to the server. Clearing your site data removes them.</p>
