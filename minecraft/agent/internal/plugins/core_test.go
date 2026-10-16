@@ -144,3 +144,29 @@ func findCommand(t *testing.T, cmds []plugin.Command, name string) plugin.Comman
 	t.Fatalf("command %q not found", name)
 	return plugin.Command{}
 }
+
+// !commands and !command are what players type looking for !help; they must
+// answer like it, without !help then listing the same thing three times.
+func TestCoreHelpAliasesAnswerLikeHelpAndStayUnlisted(t *testing.T) {
+	cmds := NewCore().Commands()
+	dir := fakeDirectory{cmds: cmds}
+	pctx := &plugin.Context{Directory: dir}
+	inv := plugin.Invocation{ActorPermission: plugin.PermissionVisitor}
+
+	want, err := findCommand(t, cmds, "help").Run(context.Background(), pctx, inv)
+	if err != nil {
+		t.Fatalf("help: unexpected error: %v", err)
+	}
+	if want != "Available: !ping, !help" {
+		t.Errorf("help = %q, want the aliases left out of the list", want)
+	}
+	for _, alias := range []string{"commands", "command"} {
+		got, err := findCommand(t, cmds, alias).Run(context.Background(), pctx, inv)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", alias, err)
+		}
+		if got != want {
+			t.Errorf("!%s = %q, want the same reply as !help (%q)", alias, got, want)
+		}
+	}
+}

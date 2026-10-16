@@ -68,26 +68,33 @@ func (Core) Commands() []plugin.Command {
 			Name:        "help",
 			Description: "List available commands.",
 			Permission:  plugin.PermissionVisitor,
-			Run: func(ctx context.Context, pctx *plugin.Context, inv plugin.Invocation) (string, error) {
-				if pctx.Directory == nil {
-					return "", fmt.Errorf("core: no command directory available")
-				}
-				cmds := pctx.Directory.Commands()
-				if len(cmds) == 0 {
-					return "No commands registered.", nil
-				}
-				names := make([]string, 0, len(cmds))
-				for _, cmd := range cmds {
-					if inv.ActorPermission < cmd.Permission {
-						continue
-					}
-					names = append(names, "!"+cmd.Name)
-				}
-				if len(names) == 0 {
-					return "No commands available to you.", nil
-				}
-				return "Available: " + strings.Join(names, ", "), nil
-			},
+			Run:         runHelp,
 		},
+		// The names players actually tried: the command audit shows !commands
+		// and !command as the most common unknown commands, each one answered
+		// with silence because unknown commands in open chat get no reply.
+		{Name: "commands", Description: "Same as !help.", Permission: plugin.PermissionVisitor, Run: runHelp, Hidden: true},
+		{Name: "command", Description: "Same as !help.", Permission: plugin.PermissionVisitor, Run: runHelp, Hidden: true},
 	}
+}
+
+func runHelp(ctx context.Context, pctx *plugin.Context, inv plugin.Invocation) (string, error) {
+	if pctx.Directory == nil {
+		return "", fmt.Errorf("core: no command directory available")
+	}
+	cmds := pctx.Directory.Commands()
+	if len(cmds) == 0 {
+		return "No commands registered.", nil
+	}
+	names := make([]string, 0, len(cmds))
+	for _, cmd := range cmds {
+		if cmd.Hidden || inv.ActorPermission < cmd.Permission {
+			continue
+		}
+		names = append(names, "!"+cmd.Name)
+	}
+	if len(names) == 0 {
+		return "No commands available to you.", nil
+	}
+	return "Available: " + strings.Join(names, ", "), nil
 }
