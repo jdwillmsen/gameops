@@ -135,8 +135,9 @@ function entity(e) {
 }
 
 let status = 'connecting...';
+let wsConn = null;
 function connect() {
-  const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/v1/camera/ws');
+  const ws = wsConn = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/v1/camera/ws');
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => { status = 'live'; stats.wsOpenMs = performance.now() - t0; };
   // A viewer is dropped when it falls behind or the unit's session ends; a
@@ -144,32 +145,88 @@ function connect() {
   ws.onclose = () => { status = 'disconnected, retrying'; setTimeout(connect, 2000); };
   ws.onmessage = onMessage;
 }
+// Wire format 1: every message is binary, type byte first, little-endian.
+// The layout is documented beside the encoder in wire.go.
+let entTypes = [];
 function onMessage(ev) {
-  stats.bytes += ev.data.byteLength ?? ev.data.length;
-  if (typeof ev.data === 'string') {
-    const m = JSON.parse(ev.data);
-    switch (m.t) {
-      case 'materials': mats = m.list; colorCache.clear(); for (const k of blocks.keys()) dirty.add(k); break;
-      case 'self': Object.assign(me, m); break;
-      case 'ent': entity(m); break;
-      case 'rm': { const o = entMeshes.get(m.id); if (o) { scene.remove(o); entMeshes.delete(m.id); } break; }
-      case 'reset':
-        blocks.clear(); for (const ms of meshes.values()) for (const o of ms) { scene.remove(o); o.geometry.dispose(); }
-        meshes.clear(); for (const o of entMeshes.values()) scene.remove(o); entMeshes.clear(); break;
+  const buf = ev.data;
+  stats.bytes += buf.byteLength;
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let p = 1;
+  const uvarint = () => { let v = 0, shift = 1; for (;;) { const b = u8[p++]; v += (b & 127) * shift; if (b < 128) return v; shift *= 128; } };
+  const f32 = () => { const v = dv.getFloat32(p, true); p += 4; return v; };
+  const text = n => { const s = new TextDecoder().decode(u8.subarray(p, p + n)); p += n; return s; };
+  const angle = a => { const d = a * 360 / 256; return d > 180 ? d - 360 : d; };
+  switch (u8[0]) {
+    case 1:
+      if (u8[1] !== 1) { status = 'unsupported wire version ' + u8[1]; wsConn.close(); }
+      break;
+    case 2: {
+      const n = dv.getUint16(p, true); p += 2;
+      mats = [];
+      for (let i = 0; i < n; i++) {
+        const id = u8[p], alpha = u8[p + 1] / 255, r = u8[p + 2], g = u8[p + 3], b = u8[p + 4], len = u8[p + 5];
+        p += 6;
+        mats[id - 1] = { name: text(len), alpha, color: '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('') };
+      }
+      colorCache.clear(); for (const k of blocks.keys()) dirty.add(k);
+      break;
     }
-    return;
-  }
-  const dv = new DataView(ev.data);
-  if (dv.getUint8(0) === 1) {
-    const key = dv.getInt32(1, true) + ',' + dv.getInt32(5, true) + ',' + dv.getInt32(9, true);
-    blocks.set(key, new Uint8Array(ev.data, 13, 4096));
-    stats.lastBlockAt = performance.now();
-    markDirty(key, true);
-  } else if (dv.getUint8(0) === 2) {
-    const x = dv.getInt32(1, true), y = dv.getInt32(5, true), z = dv.getInt32(9, true);
-    const key = (x >> 4) + ',' + (y >> 4) + ',' + (z >> 4);
-    const b = blocks.get(key);
-    if (b) { b[((((y & 15) << 4) | (z & 15)) << 4) | (x & 15)] = dv.getUint8(13); markDirty(key, true); }
+    case 3: {
+      const cx = dv.getInt32(1, true), cy = dv.getInt32(5, true), cz = dv.getInt32(9, true);
+      const n = dv.getUint16(13, true), pal = u8.subarray(15, 15 + n);
+      const w = n <= 1 ? 0 : 32 - Math.clz32(n - 1);
+      const cells = new Uint8Array(4096);
+      if (w === 0) cells.fill(pal[0]);
+      else {
+        let at = 15 + n, acc = 0, have = 0;
+        const mask = (1 << w) - 1;
+        for (let i = 0; i < 4096; i++) {
+          while (have < w) { acc |= u8[at++] << have; have += 8; }
+          cells[i] = pal[acc & mask]; acc >>>= w; have -= w;
+        }
+      }
+      const key = cx + ',' + cy + ',' + cz;
+      blocks.set(key, cells);
+      stats.lastBlockAt = performance.now();
+      markDirty(key, true);
+      break;
+    }
+    case 4: {
+      const x = dv.getInt32(1, true), y = dv.getInt32(5, true), z = dv.getInt32(9, true);
+      const key = (x >> 4) + ',' + (y >> 4) + ',' + (z >> 4);
+      const b = blocks.get(key);
+      if (b) { b[((((y & 15) << 4) | (z & 15)) << 4) | (x & 15)] = u8[13]; markDirty(key, true); }
+      break;
+    }
+    case 5: {
+      const flags = u8[p++];
+      if (flags & 1) { me.x = f32(); me.y = f32(); me.z = f32(); me.yaw = f32(); me.pitch = f32(); }
+      for (let n = uvarint(); n > 0; n--) {
+        const id = uvarint(), type = entTypes[dv.getUint16(p, true)] ?? '?';
+        p += 2;
+        const x = f32(), y = f32(), z = f32();
+        entity({ id, type, x, y, z, yaw: angle(u8[p]), pitch: angle(u8[p + 1]) });
+        p += 2;
+      }
+      break;
+    }
+    case 6:
+      for (let n = uvarint(); n > 0; n--) {
+        const id = uvarint(), o = entMeshes.get(id);
+        if (o) { scene.remove(o); entMeshes.delete(id); }
+      }
+      break;
+    case 7:
+      blocks.clear(); for (const ms of meshes.values()) for (const o of ms) { scene.remove(o); o.geometry.dispose(); }
+      meshes.clear(); for (const o of entMeshes.values()) scene.remove(o); entMeshes.clear();
+      break;
+    case 8: {
+      const n = dv.getUint16(p, true); p += 2;
+      entTypes = [];
+      for (let i = 0; i < n; i++) { const len = u8[p++]; entTypes.push(text(len)); }
+      break;
+    }
   }
 }
 connect();

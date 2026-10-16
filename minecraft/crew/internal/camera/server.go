@@ -67,12 +67,8 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		typ := websocket.MessageBinary
-		if m.Text {
-			typ = websocket.MessageText
-		}
 		wctx, cancel := context.WithTimeout(ctx, writeTimeout)
-		err = conn.Write(wctx, typ, m.Data)
+		err = conn.Write(wctx, websocket.MessageBinary, m)
 		cancel()
 		if err != nil {
 			return

@@ -1,10 +1,11 @@
 package camera
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -49,17 +50,17 @@ func newTestHub(t *testing.T, max int) (*Hub, *belief.Tracker) {
 	t.Helper()
 	tr := belief.New(time.Now)
 	tr.Spawn(self, mgl32.Vec3{0, 1000, 0}, 0, 0, 0)
-	h := New(Options{Decoder: fakeDecoder{section: stoneOnFloor()}, Self: tr, MaxViewers: max, QueueLimit: 8})
+	h := New(Options{Decoder: fakeDecoder{section: stoneOnFloor()}, Self: tr, MaxViewers: max, QueueLimit: 8, Tick: time.Millisecond})
 	h.Spawn(self)
 	return h, tr
 }
 
 // drain reads whatever is ready and stops at the first wait.
-func drain(t *testing.T, v *Viewer) ([]Message, error) {
+func drain(t *testing.T, v *Viewer) ([][]byte, error) {
 	t.Helper()
-	var out []Message
+	var out [][]byte
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 		m, err := v.Next(ctx)
 		cancel()
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -72,17 +73,46 @@ func drain(t *testing.T, v *Viewer) ([]Message, error) {
 	}
 }
 
-func texts(ms []Message) []map[string]any {
-	var out []map[string]any
+func ofType(ms [][]byte, typ byte) [][]byte {
+	var out [][]byte
 	for _, m := range ms {
-		if !m.Text {
-			continue
+		if m[0] == typ {
+			out = append(out, m)
 		}
-		var d map[string]any
-		_ = json.Unmarshal(m.Data, &d)
-		out = append(out, d)
 	}
 	return out
+}
+
+// tickEntities lists the entity ids and x positions of tick frames, and the
+// last self pose seen.
+type tickView struct {
+	ids  []uint64
+	x    map[uint64]float32
+	self *selfPose
+}
+
+func parseTicks(t *testing.T, ms [][]byte) tickView {
+	t.Helper()
+	tv := tickView{x: map[uint64]float32{}}
+	for _, f := range ofType(ms, frameTick) {
+		p := 2
+		if f[1]&1 != 0 {
+			var s selfPose
+			fl := func(i int) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(f[2+4*i:])) }
+			s = selfPose{fl(0), fl(1), fl(2), fl(3), fl(4)}
+			tv.self, p = &s, 22
+		}
+		n, k := binary.Uvarint(f[p:])
+		p += k
+		for ; n > 0; n-- {
+			id, k := binary.Uvarint(f[p:])
+			p += k + 2
+			tv.ids = append(tv.ids, id)
+			tv.x[id] = math.Float32frombits(binary.LittleEndian.Uint32(f[p:]))
+			p += 14
+		}
+	}
+	return tv
 }
 
 func attach(t *testing.T, h *Hub) *Viewer {
@@ -129,25 +159,35 @@ func TestOtherDimensionsAreNotDrawn(t *testing.T) {
 	}
 }
 
-func TestSubChunkReachesViewerAsMaterialsThenFrame(t *testing.T) {
+func TestConnectionStartsWithHelloThenMaterials(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	got, _ := drain(t, attach(t, h))
+	if len(got) < 2 || got[0][0] != frameHello || got[0][1] != wireVersion || got[1][0] != frameMaterials {
+		t.Fatalf("head = %v", got)
+	}
+}
+
+func TestSubChunkReachesViewerAsMaterialsThenPalettisedFrame(t *testing.T) {
 	h, _ := newTestHub(t, 1)
 	v := attach(t, h)
-	drain(t, v) // materials only
+	drain(t, v) // hello, materials, entity types
 	h.Apply(subChunkPacket(1, 2, 3), &sink{})
 	got, err := drain(t, v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || !got[0].Text || got[0].Data[0] != '{' || got[1].Text {
-		t.Fatalf("messages = %+v, want materials then a binary frame", got)
+	if len(got) != 2 || got[0][0] != frameMaterials || got[1][0] != frameSubChunk {
+		t.Fatalf("messages = %v, want materials then a sub-chunk frame", got)
 	}
-	f := got[1].Data
-	if len(f) != 13+4096 || f[0] != frameSubChunk ||
-		int32(binary.LittleEndian.Uint32(f[1:])) != 1 || int32(binary.LittleEndian.Uint32(f[5:])) != 2 || int32(binary.LittleEndian.Uint32(f[9:])) != 3 {
-		t.Fatalf("bad frame header")
+	x, y, z, cells, err := decodeSubChunk(got[1])
+	if err != nil || x != 1 || y != 2 || z != 3 {
+		t.Fatalf("frame = %d,%d,%d %v", x, y, z, err)
 	}
-	if f[13] == 0 || f[13+256] != 0 {
-		t.Errorf("stone layer = %d, air above = %d", f[13], f[13+256])
+	if cells[0] == 0 || cells[256] != 0 {
+		t.Errorf("stone layer = %d, air above = %d", cells[0], cells[256])
+	}
+	if len(got[1]) > 13+2+2+512 {
+		t.Errorf("frame is %d bytes; a stone-and-air section needs one index bit per cell", len(got[1]))
 	}
 }
 
@@ -164,16 +204,10 @@ func TestLateViewerGetsMaterialsThenTheHeldWorld(t *testing.T) {
 	h.Apply(subChunkPacket(0, 0, 0), &sink{})
 	h.Apply(subChunkPacket(5, 0, 5), &sink{})
 	got, _ := drain(t, attach(t, h))
-	var frames int
-	for i, m := range got {
-		if i == 0 && !m.Text {
-			t.Fatal("first message is not the material table")
-		}
-		if !m.Text {
-			frames++
-		}
+	if got[1][0] != frameMaterials {
+		t.Fatal("the material table does not precede the world")
 	}
-	if frames != 2 {
+	if frames := len(ofType(got, frameSubChunk)); frames != 2 {
 		t.Errorf("replayed %d frames, want 2", frames)
 	}
 }
@@ -185,13 +219,7 @@ func TestBlockUpdateIsForwardedAndUnknownBlocksCounted(t *testing.T) {
 	h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{-1, 64, 2}, NewBlockRuntimeID: 1}, &sink{})
 	h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{0, 0, 0}, NewBlockRuntimeID: 99}, &sink{})
 	got, _ := drain(t, v)
-	var blocks int
-	for _, m := range got {
-		if !m.Text && m.Data[0] == frameBlock {
-			blocks++
-		}
-	}
-	if blocks != 2 || h.Stats().UnmappedBlocks != 1 {
+	if blocks := len(ofType(got, frameBlock)); blocks != 2 || h.Stats().UnmappedBlocks != 1 {
 		t.Errorf("blocks=%d unmapped=%d, want 2 and 1", blocks, h.Stats().UnmappedBlocks)
 	}
 }
@@ -235,10 +263,12 @@ func drain1(v *Viewer) {
 	}
 }
 
-func TestEntityMovesCoalesceInsteadOfFillingTheQueue(t *testing.T) {
+func TestEntityMovesCoalesceIntoOneRecordPerTick(t *testing.T) {
 	h, _ := newTestHub(t, 1)
 	v := attach(t, h)
+	drain(t, v)
 	h.Apply(&packet.AddActor{EntityRuntimeID: 50, EntityType: "minecraft:cow", Position: mgl32.Vec3{1, 2, 3}}, &sink{})
+	h.Apply(&packet.AddActor{EntityRuntimeID: 51, EntityType: "minecraft:pig"}, &sink{})
 	for i := 0; i < 5000; i++ {
 		h.Apply(&packet.MoveActorAbsolute{EntityRuntimeID: 50, Position: mgl32.Vec3{float32(i), 2, 3}}, &sink{})
 	}
@@ -246,28 +276,31 @@ func TestEntityMovesCoalesceInsteadOfFillingTheQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("viewer was dropped by entity traffic: %v", err)
 	}
-	var ents []map[string]any
-	for _, d := range texts(got) {
-		if d["t"] == "ent" {
-			ents = append(ents, d)
-		}
+	if n := len(ofType(got, frameTick)); n != 1 {
+		t.Errorf("%d tick frames, want the two entities batched in one", n)
 	}
-	if len(ents) != 1 || ents[0]["x"] != float64(4999) {
-		t.Errorf("entity updates = %v, want the single latest", ents)
+	tv := parseTicks(t, got)
+	if len(tv.ids) != 2 || tv.x[50] != 4999 {
+		t.Errorf("tick = %v, want both entities at their latest", tv)
+	}
+	if types := ofType(got, frameEntityTypes); len(types) == 0 {
+		t.Error("entity types were not announced before their records")
 	}
 }
 
-func TestRemovedEntityIsAnnounced(t *testing.T) {
+func TestRemovedEntityIsAnnouncedAndNeverMovedAgain(t *testing.T) {
 	h, _ := newTestHub(t, 1)
 	v := attach(t, h)
 	drain(t, v)
 	h.Apply(&packet.AddActor{EntityUniqueID: 9, EntityRuntimeID: 50, EntityType: "minecraft:cow"}, &sink{})
 	h.Apply(&packet.RemoveActor{EntityUniqueID: 9}, &sink{})
 	got, _ := drain(t, v)
-	for _, d := range texts(got) {
-		if d["t"] == "ent" {
-			t.Errorf("a removed entity was still sent: %v", d)
-		}
+	if ids := parseTicks(t, got).ids; len(ids) != 0 {
+		t.Errorf("a removed entity was still sent: %v", ids)
+	}
+	rm := ofType(got, frameRemove)
+	if len(rm) != 1 || !bytes.Equal(rm[0], encodeRemove([]uint64{50})) {
+		t.Errorf("remove frames = %v", rm)
 	}
 	if h.Stats().Entities != 0 {
 		t.Error("entity still held")
@@ -296,33 +329,32 @@ func TestSelfIsPublishedOnlyOnceBeliefTrustsIt(t *testing.T) {
 
 	own := &packet.MovePlayer{EntityRuntimeID: self}
 	h.Apply(own, &sink{}) // belief has not seen it yet, as in main's ordering mistake
-	if got, _ := drain(t, v); len(texts(got)) != 0 {
-		t.Fatalf("an untrusted position was published: %v", texts(got))
+	if got, _ := drain(t, v); len(got) != 0 {
+		t.Fatalf("an untrusted position was published: %v", got)
 	}
 
 	own.Position, own.Yaw, own.Pitch = mgl32.Vec3{4, 70, 5}, 90, -10
 	tr.Apply(own)
 	h.Apply(own, &sink{})
 	got, _ := drain(t, v)
-	ts := texts(got)
-	if len(ts) != 1 || ts[0]["t"] != "self" || ts[0]["yaw"] != float64(90) || ts[0]["pitch"] != float64(-10) || ts[0]["y"] != float64(70) {
-		t.Errorf("self = %v", ts)
+	s := parseTicks(t, got).self
+	if s == nil || *s != (selfPose{4, 70, 5, 90, -10}) {
+		t.Errorf("self = %+v", s)
 	}
 }
 
 func TestOtherPlayersMoveAsEntitiesNotAsSelf(t *testing.T) {
 	h, _ := newTestHub(t, 1)
 	v := attach(t, h)
+	drain(t, v)
 	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8}, &sink{})
 	h.Apply(&packet.MovePlayer{EntityRuntimeID: 8, Position: mgl32.Vec3{1, 2, 3}}, &sink{})
-	for _, d := range texts(first(drain(t, v))) {
-		if d["t"] == "self" {
-			t.Errorf("another player's move was published as self: %v", d)
-		}
+	got, _ := drain(t, v)
+	tv := parseTicks(t, got)
+	if tv.self != nil || len(tv.ids) != 1 || tv.x[8] != 1 {
+		t.Errorf("tick = %+v", tv)
 	}
 }
-
-func first(ms []Message, _ error) []Message { return ms }
 
 func TestResetEmptiesTheWorldForEveryone(t *testing.T) {
 	h, _ := newTestHub(t, 1)
@@ -330,10 +362,37 @@ func TestResetEmptiesTheWorldForEveryone(t *testing.T) {
 	h.Apply(subChunkPacket(0, 0, 0), &sink{})
 	h.Reset()
 	got, _ := drain(t, v)
-	if len(got) != 1 || texts(got)[0]["t"] != "reset" {
-		t.Errorf("after reset = %+v, want only the reset marker", got)
+	if r := ofType(got, frameReset); len(r) != 1 || got[len(got)-1][0] != frameReset {
+		t.Errorf("after reset = %v, want the connection head then only the reset marker", got)
 	}
-	if h.Stats().SubChunksHeld != 0 {
+	if len(ofType(got, frameSubChunk)) != 0 || h.Stats().SubChunksHeld != 0 {
 		t.Error("world still held")
 	}
+}
+
+func TestMetricsCountBytesDropsAndRefusals(t *testing.T) {
+	h, _ := newTestHub(t, 2)
+	h.Apply(subChunkPacket(0, 0, 0), &sink{})
+	v := attach(t, h)
+	got, _ := drain(t, v)
+	var want uint64
+	for _, m := range got {
+		want += uint64(len(m))
+	}
+	st := h.Stats()
+	if st.BytesSent != want || st.SubChunksSent != 1 {
+		t.Errorf("bytes %d (want %d), sub-chunks %d", st.BytesSent, want, st.SubChunksSent)
+	}
+	stalled := attach(t, h)
+	if _, err := h.Attach(); !errors.Is(err, ErrFull) {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{int32(i), 64, 0}, NewBlockRuntimeID: 1}, &sink{})
+		drain1(v)
+	}
+	if st := h.Stats(); st.ViewersDropped != 1 || st.ViewersRefused != 1 {
+		t.Errorf("dropped %d refused %d, want 1 and 1", st.ViewersDropped, st.ViewersRefused)
+	}
+	_ = stalled
 }
