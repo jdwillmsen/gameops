@@ -1,16 +1,23 @@
 package camera
 
-// Wire format, version 1. Every websocket message from the camera is binary
+// Wire format, version 2. Every websocket message from the camera is binary
 // and starts with a type byte; integers are little-endian.
 //
 //	hello        [1][version u8]                         first message of a connection
-//	materials    [2][n u16]{id u8, alpha u8, r g b u8, len u8, name}...
+//	materials    [2][n u16]{id u8, alpha u8, r g b u8, flags u8, len u8, name}...
 //	sub-chunk    [3][cx i32][cy i32][cz i32][n u16][palette n x u8][indices]
 //	block        [4][x i32][y i32][z i32][material u8]
 //	tick         [5][flags u8][self 5 x f32 if flags&1][n uvarint][entity]...
 //	remove       [6][n uvarint][id uvarint]...
 //	reset        [7]
 //	entity types [8][n u16]{len u8, name}...             index = type id
+//	atlas        [9][atlas version u8]                   a texture atlas can be fetched
+//
+// Material flag bit 0 marks a block that is not a full cube; a page without an
+// atlas has no shape to draw it with and skips it. Version 2 added the flags
+// byte. The atlas frame carries no data: the page fetches the PNG and the
+// table from /v1/camera/atlas.png and /v1/camera/atlas.json, and a page that
+// never gets the frame keeps drawing flat colours.
 //
 // A sub-chunk's palette lists the materials it uses (1 to 256 entries; 0 is
 // "not drawn"). Indices are packed LSB-first, bits(n) each, in
@@ -31,7 +38,7 @@ import (
 )
 
 const (
-	wireVersion byte = 1
+	wireVersion byte = 2
 
 	frameHello       byte = 1
 	frameMaterials   byte = 2
@@ -41,6 +48,12 @@ const (
 	frameRemove      byte = 6
 	frameReset       byte = 7
 	frameEntityTypes byte = 8
+	frameAtlas       byte = 9
+
+	matNonCube byte = 1
+
+	// atlasFormat is the version of the table document the page fetches.
+	atlasFormat byte = 1
 
 	cmdRadius byte = 1
 
@@ -51,6 +64,8 @@ const (
 type selfPose struct{ X, Y, Z, Yaw, Pitch float32 }
 
 func helloFrame() []byte { return []byte{frameHello, wireVersion} }
+
+func atlasFrame() []byte { return []byte{frameAtlas, atlasFormat} }
 
 func resetFrame() []byte { return []byte{frameReset} }
 
@@ -181,7 +196,11 @@ func encodeMaterials(list []material) []byte {
 	f := binary.LittleEndian.AppendUint16([]byte{frameMaterials}, uint16(len(list)))
 	for _, m := range list {
 		r, g, b := parseColor(m.Color)
-		f = append(f, m.ID, uint8(math.Round(float64(m.Alpha)*255)), r, g, b, uint8(len(m.Name)))
+		var flags byte
+		if m.NonCube {
+			flags |= matNonCube
+		}
+		f = append(f, m.ID, uint8(math.Round(float64(m.Alpha)*255)), r, g, b, flags, uint8(len(m.Name)))
 		f = append(f, m.Name...)
 	}
 	return f

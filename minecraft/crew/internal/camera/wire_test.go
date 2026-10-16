@@ -111,12 +111,18 @@ func TestTickFrameCarriesSelfThenEntities(t *testing.T) {
 }
 
 func TestMaterialsAndEntityTypesFrames(t *testing.T) {
-	m := encodeMaterials([]material{{ID: 1, Name: "stone", Color: "#7d7d7d", Alpha: 1}, {ID: 2, Name: "water", Color: "#3050c0", Alpha: .6}})
-	want := []byte{frameMaterials, 2, 0, 1, 255, 0x7d, 0x7d, 0x7d, 5, 's', 't', 'o', 'n', 'e', 2, 153, 0x30, 0x50, 0xc0, 5, 'w', 'a', 't', 'e', 'r'}
+	m := encodeMaterials([]material{{ID: 1, Name: "stone", Color: "#7d7d7d", Alpha: 1}, {ID: 2, Name: "torch", Color: "#3050c0", Alpha: .6, NonCube: true}})
+	want := []byte{frameMaterials, 2, 0, 1, 255, 0x7d, 0x7d, 0x7d, 0, 5, 's', 't', 'o', 'n', 'e', 2, 153, 0x30, 0x50, 0xc0, matNonCube, 5, 't', 'o', 'r', 'c', 'h'}
 	if !bytes.Equal(m, want) {
 		t.Errorf("materials = % x\nwant        % x", m, want)
 	}
 	if e := encodeEntityTypes([]string{"player", "cow"}); !bytes.Equal(e, []byte{frameEntityTypes, 2, 0, 6, 'p', 'l', 'a', 'y', 'e', 'r', 3, 'c', 'o', 'w'}) {
 		t.Errorf("types = % x", e)
+	}
+}
+
+func TestAtlasFrameIsATypeByteAndTheAtlasVersion(t *testing.T) {
+	if f := atlasFrame(); !bytes.Equal(f, []byte{frameAtlas, 1}) {
+		t.Errorf("atlas frame = % x", f)
 	}
 }
