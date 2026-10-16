@@ -52,6 +52,10 @@
     hunger: ['ui/hunger_container', 'ui/hunger', 'ui/hunger_half'],
     absorption: ['ui/heart_container', 'ui/absorption', 'ui/absorption_half'],
   };
+  const SHULKER = 27;
+  // How many containers deep the panel opens, which is as deep as the map
+  // reads them; a container past it is shown as the item it is.
+  const MAX_OPEN = 3;
   const ARMOUR = ['Head', 'Chest', 'Legs', 'Feet'];
   // The sixteen dyes, in the game's order and the spelling its ids use.
   const COLOURS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'];
@@ -72,6 +76,10 @@
   let liveLine = null;
   // The slot whose details are being read, as its grid and place in it.
   let pickedPos = '';
+  // The container being looked into: the grid it is in and the slot of each
+  // container on the way down. It is kept by slot so that a fresh answer
+  // finds the same container again.
+  let inside = null;
   // The quick refresh, which only runs for a player who is online.
   let liveTimer = null;
 
@@ -263,23 +271,82 @@
   }
 
   // A slot, which is read again from a new answer if it is the one chosen.
-  function stocked(item, pos, { line, pick }) {
-    const cell = slot(item, pos, pick);
+  // A slot that opens something is given what to do in place of choosing.
+  function stocked(item, pos, { line, pick }, open) {
+    const cell = slot(item, pos, open || pick);
     if (item && pos === pickedPos) line.textContent = cell.title;
     return cell;
   }
 
+  const contentsOf = (item) => listOf(item && item.contents);
+
+  // The containers a path of slots goes through, outermost first, or null
+  // where the answer no longer has one of them.
+  function descend(by, path) {
+    const trail = [];
+    let level = by;
+    for (const at of path) {
+      const item = level.get(at);
+      if (!item || contentsOf(item).length === 0) return null;
+      trail.push(item);
+      level = new Map(contentsOf(item).map((s) => [s.slot, s]));
+    }
+    return trail;
+  }
+
+  function look(label, path, focusPos) {
+    inside = path.length > 0 ? { label, path } : null;
+    if (!last) return;
+    show(last, true);
+    const target = focusPos
+      ? Array.from(view.body.querySelectorAll('button')).find((b) => b.dataset.pos === focusPos && !b.disabled)
+      : view.body.querySelector('.nested-bar button');
+    if (target) target.focus();
+  }
+
+  // A container's contents in place of the grid it was opened from, with the
+  // way back to the one outside it.
+  function nested(label, path, trail) {
+    const inner = trail.map((item) => item.customName || names.tidy(item.name));
+    const title = [label, ...inner].join(' › ');
+    const bar = el('div', 'nested-bar');
+    const parent = path.slice(0, -1);
+    const slotOfThis = `${[label, ...parent].join('/')}|${path[path.length - 1]}`;
+    bar.append(button('Back', () => look(label, parent, slotOfThis)), el('strong', 'nested-title', title));
+    const wrap = el('div', 'nested');
+    wrap.append(bar, grids(contentsOf(trail[trail.length - 1]), [[0, SHULKER, '']], label, path, title));
+    return wrap;
+  }
+
   // Grids of slots, 9 across, one for each range of slots given, in the
-  // order given and one under the next.
-  function grids(stacks, ranges, label) {
+  // order given and one under the next. A slot holding a container opens it,
+  // down to MAX_OPEN containers.
+  function grids(stacks, ranges, label, path = [], title = label) {
     const by = new Map(stacks.map((s) => [s.slot, s]));
+    if (path.length === 0 && inside && inside.label === label) {
+      const trail = descend(by, inside.path);
+      if (trail) return nested(label, inside.path, trail);
+      inside = null;
+    }
     const read = reading();
+    const key = [label, ...path].join('/');
     const wrap = el('div', 'grids');
     for (const [from, to, name] of ranges) {
       const out = el('div', 'grid');
       out.setAttribute('role', 'group');
-      out.setAttribute('aria-label', name ? `${label}, ${name}` : label);
-      for (let i = from; i < to; i++) out.append(stocked(by.get(i), `${label}|${i}`, read));
+      out.setAttribute('aria-label', name ? `${title}, ${name}` : title);
+      for (let i = from; i < to; i++) {
+        const stack = by.get(i);
+        const opens = stack && path.length < MAX_OPEN && contentsOf(stack).length > 0;
+        const cell = stocked(stack, `${key}|${i}`, read, opens ? () => look(label, [...path, i]) : undefined);
+        out.append(cell);
+        if (opens) {
+          const hint = `opens ${contentsOf(stack).length} ${contentsOf(stack).length === 1 ? 'stack' : 'stacks'}`;
+          cell.classList.add('container');
+          cell.title = `${cell.title} · ${hint}`;
+          cell.setAttribute('aria-label', `${cell.getAttribute('aria-label')}, ${hint}`);
+        }
+      }
       wrap.append(out);
     }
     wrap.append(read.line);
@@ -559,9 +626,9 @@
     if (was === null) return;
     const buttons = Array.from(view.body.querySelectorAll('button'));
     const found = was.startsWith('pos:') ? buttons.find((b) => b.dataset.pos === was.slice(4) && !b.disabled) : buttons[Number(was.slice(7))];
-    // What had focus has gone, so focus stays in the panel, where Escape
-    // still shuts it.
-    (found || view.close).focus();
+    // What had focus has gone, or is now an empty slot that a browser will
+    // not focus, so focus stays in the panel, where Escape still shuts it.
+    (found && !found.disabled ? found : view.close).focus();
   }
 
   function show(data, force) {
@@ -610,6 +677,7 @@
     last = null;
     drawn = '';
     pickedPos = '';
+    inside = null;
     clearInterval(timer);
     clearInterval(liveTimer);
     view.name.textContent = subject.name || 'Player';

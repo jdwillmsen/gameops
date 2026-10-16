@@ -3089,6 +3089,17 @@ It has three parts, each saying where it comes from.
   maximum durability: enchantment ids are named from a static table (an
   unlisted id shows as its number) and durability from a table of
   tools and armour.
+  A shulker box of any colour in the inventory or ender chest carries its
+  contents in its own item, and the panel opens it: a click replaces the
+  grid with the box's 27 slots (icon, count, enchantments and durability as
+  in any slot) and a **Back** button returns to the slot it came from. A
+  box inside a box opens too, to three boxes deep; one past that is shown as
+  the item it is. The same limit is applied when the record is read, along
+  with the usual 64 stacks to a list and a total of 2,048 stacks read out of
+  boxes in one record, so a hostile save cannot make an answer larger than
+  that. Only boxes the player carries open: chests and shulker boxes placed
+  in the world are not, because the map keeps only whether they hold
+  anything, not what.
 - **The trails.** Time online and distance are added up from every sample
   in five-minute buckets, not from the thinned trail points, which leave out
   a player standing still. The window is the retention to the second (the

@@ -513,6 +513,132 @@ test('counter names are put in as text, never as markup', async () => {
   assert.equal(body(t).querySelectorAll('img').length, 0);
 });
 
+// A shulker box of an invented player, with a stack of everything the panel
+// shows of a slot.
+const stack = (slot, name, count, more = {}) => ({ slot, name, count, ...more });
+const box = (slot, contents, more = {}) => stack(slot, 'blue_shulker_box', 1, { contents, ...more });
+const withInventory = (inventory) => ({ body: { ...ANSWER, saved: { ...ANSWER.saved, record: { ...SAVED, inventory } } } });
+const EQUIPMENT = ['Worn', 'Held'];
+// The inventory is the backpack over the hotbar, then the ender chest; a
+// nested box is one grid in place of its whole list.
+const groupsOf = (t) => body(t).querySelectorAll('div').filter((d) => d.getAttribute('role') === 'group' && !EQUIPMENT.includes(d.getAttribute('aria-label')));
+const SHELVES = ['Inventory, backpack', 'Inventory, hotbar', 'Ender chest'];
+
+test('opens a shulker box into its own grid, with a way back to where it was', async () => {
+  const pick = stack(5, 'iron_pickaxe', 1, { damage: 40, maxDamage: 250, enchantments: [{ id: 15, name: 'Efficiency', level: 3 }] });
+  const t = load(withInventory([stack(0, 'cobblestone', 64), box(11, [stack(0, 'diamond', 12), pick])]));
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const opener = groupsOf(t)[0].children[2];
+  assert.ok(opener.getAttribute('aria-label').includes('opens 2 stacks'));
+  assert.ok(opener.classList.contains('container'));
+  assert.equal(groupsOf(t)[1].children[0].classList.contains('container'), false);
+
+  opener.click();
+  const inner = groupsOf(t);
+  assert.deepEqual(inner.map((g) => [g.getAttribute('aria-label'), g.children.length]), [['Inventory › Blue Shulker Box', 27], ['Ender chest', 27]]);
+  assert.ok(words(t).includes('Inventory › Blue Shulker Box'));
+  assert.ok(inner[0].children[0].getAttribute('aria-label').startsWith('Diamond × 12'));
+  assert.ok(inner[0].children[5].getAttribute('aria-label').includes('Efficiency III · 210 of 250 uses left'));
+  assert.equal(inner[0].children[5].classList.contains('enchanted'), true);
+  assert.equal(inner[0].children[5].querySelectorAll('span').some((x) => x.className === 'wear'), true);
+  assert.equal(inner[0].children[1].disabled, true);
+  assert.equal(t.doc.activeElement, press(body(t), 'Back'), 'focus moves to the way back');
+  inner[0].children[0].click();
+  assert.ok(body(t).querySelectorAll('p').some((p) => p.textContent.startsWith('Diamond × 12')));
+
+  press(body(t), 'Back').click();
+  assert.deepEqual(groupsOf(t).map((g) => g.getAttribute('aria-label')), SHELVES);
+  assert.equal(t.doc.activeElement, groupsOf(t)[0].children[2], 'focus returns to the box that was opened');
+});
+
+test('opens containers inside containers to a fixed depth, and shows the next as the item it is', async () => {
+  const deepest = box(0, [stack(3, 'diamond', 1)], { customName: 'Too deep' });
+  const level3 = box(1, [deepest]);
+  const level2 = box(2, [level3]);
+  const t = load(withInventory([box(0, [level2])]));
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  groupsOf(t)[1].children[0].click();
+  groupsOf(t)[0].children[2].click();
+  assert.ok(groupsOf(t)[0].getAttribute('aria-label').endsWith('Blue Shulker Box › Blue Shulker Box'));
+  groupsOf(t)[0].children[1].click();
+  const last = groupsOf(t)[0];
+  assert.equal(last.getAttribute('aria-label'), 'Inventory › Blue Shulker Box › Blue Shulker Box › Blue Shulker Box');
+  const stuck = last.children[0];
+  assert.equal(stuck.classList.contains('container'), false);
+  assert.ok(stuck.getAttribute('aria-label').startsWith('Too deep (Blue Shulker Box)'));
+  assert.ok(!stuck.getAttribute('aria-label').includes('opens'));
+  const before = body(t).textContent;
+  stuck.click();
+  assert.ok(body(t).textContent.startsWith(before.slice(0, 40)));
+  assert.ok(body(t).querySelectorAll('p').some((p) => p.textContent.startsWith('Too deep')));
+
+  press(body(t), 'Back').click();
+  assert.ok(groupsOf(t)[0].getAttribute('aria-label').endsWith('Blue Shulker Box › Blue Shulker Box'));
+});
+
+test('a refresh keeps the box that is open, and leaves it when the box is gone', async () => {
+  let answer = withInventory([box(11, [stack(0, 'diamond', 12)])]);
+  const t = load(() => answer);
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  groupsOf(t)[0].children[2].click();
+  answer = withInventory([box(11, [stack(0, 'diamond', 40)])]);
+  await t.ticks[0]();
+  await tick();
+  assert.ok(groupsOf(t)[0].children[0].getAttribute('aria-label').startsWith('Diamond × 40'));
+  answer = withInventory([stack(11, 'dirt', 1)]);
+  await t.ticks[0]();
+  await tick();
+  assert.deepEqual(groupsOf(t).map((g) => g.getAttribute('aria-label')), SHELVES);
+  assert.equal(press(body(t), 'Back'), undefined);
+});
+
+test('focus on the way back is not lost to an empty slot when a refresh takes the box away', async () => {
+  let answer = withInventory([box(11, [stack(0, 'diamond', 12)])]);
+  const t = load(() => answer);
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  groupsOf(t)[0].children[2].click();
+  assert.equal(t.doc.activeElement, press(body(t), 'Back'));
+  answer = withInventory([stack(11, 'dirt', 1)]);
+  await t.ticks[0]();
+  await tick();
+  const at = t.doc.activeElement;
+  assert.notEqual(at, t.doc.body, 'focus fell to the page, where Escape no longer shuts the panel');
+  assert.ok(body(t).contains(at) || at === t.made.get('player-close'));
+  assert.notEqual(at.disabled, true);
+});
+
+test('opening the player again starts from the grids, not from the last box', async () => {
+  const t = load(withInventory([box(0, [stack(0, 'diamond', 1)])]));
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  groupsOf(t)[1].children[0].click();
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  assert.equal(groupsOf(t)[0].getAttribute('aria-label'), 'Inventory, backpack');
+});
+
+test('contents that are not a list, or that are named like markup, are only text', async () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  const t = load(withInventory([
+    stack(0, 'chest', 1, { contents: 'lots' }),
+    box(1, [stack(0, 'diamond', 1, { customName: hostile }), null, 7, stack(40, 'dirt', 1)], { customName: hostile }),
+    stack(2, 'bundle', 1, { contents: [] }),
+  ]));
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const [, hotbar] = groupsOf(t);
+  assert.equal(hotbar.children[0].classList.contains('container'), false);
+  assert.equal(hotbar.children[2].classList.contains('container'), false);
+  hotbar.children[1].click();
+  assert.equal(body(t).querySelectorAll('img').length, 0);
+  assert.equal(groupsOf(t)[0].children.length, 27);
+  assert.ok(groupsOf(t)[0].children[0].getAttribute('aria-label').startsWith(`${hostile} (Diamond)`));
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

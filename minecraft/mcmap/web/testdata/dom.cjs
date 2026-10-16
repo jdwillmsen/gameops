@@ -174,7 +174,9 @@ class Element {
   }
   click() { if (!this.disabled) this.dispatchEvent({ type: 'click' }); }
   focus() {
-    if (this.offsetParent === null) return;
+    // A browser leaves focus where it was when asked to move it to a
+    // disabled control.
+    if (this.offsetParent === null || this.disabled === true) return;
     this.ownerDocument.activeElement = this;
     this.dispatchEvent({ type: 'focusin' });
   }
