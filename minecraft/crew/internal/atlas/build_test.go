@@ -97,6 +97,17 @@ func TestBuildDirectionalFacesOverrideSideAndSideFillsGaps(t *testing.T) {
 	}
 }
 
+func TestBuildAcceptsBlocksThatNameEveryFaceWithoutSide(t *testing.T) {
+	a := buildFixture(t)
+	b := block(t, a, "minecraft:six_sided")
+	if got := sample(t, a, b.South.UV); got != (color.NRGBA{150, 120, 70, 255}) {
+		t.Errorf("south = %v", got)
+	}
+	if b.Side.UV != b.North.UV {
+		t.Error("side should default to the north face")
+	}
+}
+
 func TestBuildGrassUsesFirstVariationAndTintsTopOnly(t *testing.T) {
 	a := buildFixture(t)
 	g := block(t, a, "minecraft:grass")
