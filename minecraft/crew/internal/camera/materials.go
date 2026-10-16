@@ -6,14 +6,16 @@ import (
 	"sync"
 )
 
-// material is what the browser draws a block as. There is no texture atlas
-// yet: a colour per block name, jittered per block in the browser, is enough
-// to judge whether the view reads as a first-person scene.
+// material is what the browser draws a block as when it has no atlas: a
+// colour per block name, jittered per block in the browser.
 type material struct {
 	ID    uint8   `json:"id"`
 	Name  string  `json:"name"`
 	Color string  `json:"color"`
 	Alpha float32 `json:"alpha"`
+	// NonCube marks blocks the flat page leaves out and the textured page
+	// draws from the atlas table's model kind.
+	NonCube bool `json:"non_cube,omitempty"`
 }
 
 // unmappedBlock names a block state the decoder could not resolve; it is drawn
@@ -34,8 +36,8 @@ var known = map[string]string{
 
 var translucent = map[string]float32{"water": .6, "flowing_water": .6, "ice": .8}
 
-// Block names that are not full cubes. Drawing them as cubes would bury the
-// scene in solid green, so they are left out until models exist.
+// Block names that are not full cubes. Drawn as cubes they would bury the
+// scene in solid green, so a page without an atlas leaves them out.
 var nonCube = []string{"grass", "fern", "flower", "sapling", "vine", "dead_bush", "deadbush", "torch",
 	"carpet", "tallgrass", "double_plant", "rail", "button", "sign", "fire", "web", "mushroom", "sweet_berry",
 	"kelp", "seagrass", "litter", "bush", "peony", "lilac", "bluet", "reeds", "bud", "cluster", "lichen", "bubble_column", "pointed", "stairs", "trapdoor", "fence", "wall", "lily", "snow_layer", "tulip", "poppy", "dandelion", "rose", "allium"}
@@ -59,9 +61,11 @@ func (t *materialTable) id(full string) (id uint8, fresh bool) {
 	if airLike[name] {
 		return 0, false
 	}
+	flat := false
 	for _, s := range nonCube {
 		if strings.Contains(name, s) && name != "grass_block" && name != "snow" {
-			return 0, false
+			flat = true
+			break
 		}
 	}
 	t.mu.Lock()
@@ -89,7 +93,7 @@ func (t *materialTable) id(full string) (id uint8, fresh bool) {
 		alpha = a
 	}
 	id = uint8(len(t.list) + 1)
-	t.list = append(t.list, material{ID: id, Name: name, Color: color, Alpha: alpha})
+	t.list = append(t.list, material{ID: id, Name: name, Color: color, Alpha: alpha, NonCube: flat})
 	t.byName[name] = id
 	return id, true
 }

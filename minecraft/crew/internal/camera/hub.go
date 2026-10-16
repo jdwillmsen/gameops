@@ -83,6 +83,8 @@ type Hub struct {
 	ents     map[uint64]*entity
 	uniqueID map[int64]uint64
 	viewers  map[*Viewer]struct{}
+	atlasPNG []byte
+	atlasDoc []byte
 	types    []string // entity type names; the index is the wire type id
 	typeIDs  map[string]uint16
 
@@ -195,6 +197,9 @@ func (h *Hub) Attach() (*Viewer, error) {
 		v.ents[e.ID] = e.record()
 	}
 	v.head = [][]byte{helloFrame(), encodeMaterials(h.mats.all()), encodeEntityTypes(h.types)}
+	if h.atlasDoc != nil {
+		v.head = append(v.head, atlasFrame())
+	}
 	// Read under the hub lock so a later publishSelf cannot be overwritten by
 	// this older pose.
 	if h.self != nil {

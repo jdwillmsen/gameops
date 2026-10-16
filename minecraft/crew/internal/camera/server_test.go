@@ -150,3 +150,31 @@ func TestViewerChoosesItsRadiusByQueryAndWidensItOverTheSocket(t *testing.T) {
 		t.Errorf("widening replayed %d more chunks, want 1", n)
 	}
 }
+
+func TestAtlasRoutesAnswer404UntilTheAtlasIsBuilt(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	srv := httptest.NewServer(Mount(okBase(), h))
+	defer srv.Close()
+	get := func(path string) (int, string) {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		return res.StatusCode, res.Header.Get("Content-Type")
+	}
+	for _, p := range []string{"/v1/camera/atlas.png", "/v1/camera/atlas.json"} {
+		if code, _ := get(p); code != http.StatusNotFound {
+			t.Errorf("%s before the build = %d, want 404", p, code)
+		}
+	}
+	if err := h.SetAtlas(testAtlas(t)); err != nil {
+		t.Fatal(err)
+	}
+	if code, ct := get("/v1/camera/atlas.png"); code != 200 || ct != "image/png" {
+		t.Errorf("png = %d %q", code, ct)
+	}
+	if code, ct := get("/v1/camera/atlas.json"); code != 200 || ct != "application/json" {
+		t.Errorf("json = %d %q", code, ct)
+	}
+}

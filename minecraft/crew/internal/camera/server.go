@@ -33,6 +33,12 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(h.Stats())
 	})
+	mux.HandleFunc("GET /v1/camera/atlas.png", func(w http.ResponseWriter, _ *http.Request) {
+		serveAtlas(w, h, "image/png", func(png, _ []byte) []byte { return png })
+	})
+	mux.HandleFunc("GET /v1/camera/atlas.json", func(w http.ResponseWriter, _ *http.Request) {
+		serveAtlas(w, h, "application/json", func(_, doc []byte) []byte { return doc })
+	})
 	mux.HandleFunc("GET /v1/camera/ws", h.serveWS)
 	return mux
 }
@@ -96,4 +102,20 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// serveAtlas answers 404 until the background build has finished, which a
+// page only requests after the atlas frame, so a miss means a stale page.
+func serveAtlas(w http.ResponseWriter, h *Hub, contentType string, pick func(png, doc []byte) []byte) {
+	png, doc, ok := h.atlasData()
+	if !ok {
+		http.Error(w, "no atlas", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	// The atlas changes only when the server version does, which restarts
+	// the camera's viewers anyway.
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = w.Write(pick(png, doc))
 }

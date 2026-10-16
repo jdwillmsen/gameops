@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"math"
+	"regexp"
 	"testing"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/atlas"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -404,4 +407,63 @@ func TestMetricsCountBytesDropsAndRefusals(t *testing.T) {
 		t.Errorf("dropped %d refused %d, want 1 and 1", st.ViewersDropped, st.ViewersRefused)
 	}
 	_ = stalled
+}
+
+func testAtlas(t *testing.T) *atlas.Atlas {
+	t.Helper()
+	a, err := atlas.Build("../atlas/testdata/pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a
+}
+
+func TestAtlasIsAnnouncedToLiveViewersAndLaterOnesInTheirHead(t *testing.T) {
+	h, _ := newTestHub(t, 2)
+	live := attach(t, h)
+	drain(t, live)
+	if _, _, ok := h.atlasData(); ok {
+		t.Fatal("atlas present before SetAtlas")
+	}
+	if err := h.SetAtlas(testAtlas(t)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := drain(t, live)
+	if len(got) != 1 || got[0][0] != frameAtlas {
+		t.Fatalf("live viewer got %v, want one atlas frame", got)
+	}
+	late, _ := drain(t, attach(t, h))
+	if len(late) < 4 || late[3][0] != frameAtlas {
+		t.Errorf("late viewer head = %v, want the atlas frame after entity types", late)
+	}
+}
+
+func TestAtlasDocumentCarriesDefaultClimateTintsAndNoColormaps(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	if err := h.SetAtlas(testAtlas(t)); err != nil {
+		t.Fatal(err)
+	}
+	png, doc, ok := h.atlasData()
+	if !ok || len(png) == 0 {
+		t.Fatal("no atlas data")
+	}
+	var d struct {
+		Table struct {
+			Blocks    map[string]json.RawMessage `json:"blocks"`
+			Colormaps json.RawMessage            `json:"colormaps"`
+		} `json:"table"`
+		Tints map[string]string `json:"tints"`
+		Biome string            `json:"default_biome"`
+	}
+	if err := json.Unmarshal(doc, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Table.Blocks) == 0 || d.Table.Colormaps != nil || d.Biome != "plains" {
+		t.Errorf("blocks %d colormaps %q biome %q", len(d.Table.Blocks), d.Table.Colormaps, d.Biome)
+	}
+	for _, k := range []string{"grass", "foliage", "water"} {
+		if !regexp.MustCompile(`^#[0-9a-f]{6}$`).MatchString(d.Tints[k]) {
+			t.Errorf("tint %s = %q", k, d.Tints[k])
+		}
+	}
 }
