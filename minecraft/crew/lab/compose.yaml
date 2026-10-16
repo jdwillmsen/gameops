@@ -15,7 +15,10 @@ services:
       GAMEMODE: "survival"
       DIFFICULTY: "normal"
       ALLOW_CHEATS: "true"
-      ONLINE_MODE: "true"
+      # Offline, so crew joins with only a display name. This is why the lab
+      # can never be FWB: an online-mode server rejects such a client.
+      ONLINE_MODE: "false"
+      ALLOW_LIST: "false"
       # Bedrock 1.26.51 defaults a fresh world to NetherNet, which opens no
       # RakNet listener, and crew dials RakNet only. FWB runs RakNet for the
       # same reason, and retail clients still join it, despite the server's
