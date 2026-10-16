@@ -25,8 +25,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
-	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -69,7 +69,8 @@ func main() {
 	}
 
 	tracker := belief.New(time.Now)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusapi.Handler(tracker, version), ReadHeaderTimeout: 5 * time.Second}
+	hub := newCamera(cfg, tracker)
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, hub), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
@@ -84,7 +85,7 @@ func main() {
 			maxDelay: time.Duration(cfg.ReconnectMaxMs) * time.Millisecond,
 			after:    time.After,
 		},
-		func(ctx context.Context) error { return session(ctx, cfg, ts, tracker, log) },
+		func(ctx context.Context) error { return session(ctx, cfg, ts, tracker, hub, log) },
 		tracker.Reset,
 		logAdapter{log},
 	)
@@ -103,7 +104,7 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 	return logging.Fields{"xuid": xuid, "view_distance": viewDistance}
 }
 
-func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, tracker *belief.Tracker, log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, tracker *belief.Tracker, hub *camera.Hub, log *logging.Logger) error {
 	// A headless client uploads no skin of its own, and without one the unit
 	// joins as a black silhouette under a fresh skin ID every connect.
 	unitSkin := skin.For(cfg.Username)
@@ -145,6 +146,10 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 	}
 	gd := conn.GameData()
 	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Yaw, gd.Pitch, gd.Dimension)
+	if hub != nil {
+		hub.Spawn(gd.EntityRuntimeID)
+		defer hub.Reset()
+	}
 	log.Info("spawned", spawnedFields(conn.IdentityData().XUID, cfg.ViewDistance))
 
 	if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {
@@ -161,6 +166,10 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, trac
 			return fmt.Errorf("read: %w", err)
 		}
 		tracker.Apply(pk)
+		// After belief: the hub reads the unit's pose back from it.
+		if hub != nil {
+			hub.Apply(pk, conn)
+		}
 
 		// A dead unit stays connected and spawned; only the respawn
 		// handshake shows it, so belief is told explicitly.
