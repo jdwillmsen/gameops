@@ -36,7 +36,7 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, log *logging.Logger) 
 		Self:       tracker,
 		MaxViewers: cfg.CameraMaxViewers,
 	})
-	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log, build: ensureAtlas(atlas.Fetcher{})}
+	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log, build: ensureAtlas(atlas.Fetcher{OnDownload: logAtlasDownload(log)})}
 	return hub, func(ctx context.Context, addr string) {
 		version := pingVersion(ctx, addr)
 		dec.BeginSession(version)
@@ -44,9 +44,21 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, log *logging.Logger) 
 	}
 }
 
-// atlasTimeout bounds the background build: the resource pack is a few
-// hundred MB, and a stuck download must not hold the loader forever.
+// atlasTimeout bounds the background build: the download is a few thousand
+// small files, and a stuck one must not hold the loader forever.
 const atlasTimeout = 20 * time.Minute
+
+func logAtlasDownload(log *logging.Logger) func(atlas.Pack) {
+	return func(p atlas.Pack) {
+		log.Info("camera_atlas_downloaded", logging.Fields{
+			"tag":         p.Tag,
+			"bytes":       p.Bytes,
+			"files":       p.Files,
+			"requests":    p.Requests,
+			"duration_ms": p.Elapsed.Milliseconds(),
+		})
+	}
+}
 
 type atlasBuilder func(ctx context.Context, serverVersion, dir string) (*atlas.Atlas, error)
 
