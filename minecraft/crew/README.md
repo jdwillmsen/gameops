@@ -15,7 +15,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
-| `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the texture atlas and the resource pack it is built from are cached; put it on the data volume |
+| `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
 
 ## Status API
 

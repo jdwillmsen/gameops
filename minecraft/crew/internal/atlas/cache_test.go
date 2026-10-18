@@ -65,6 +65,30 @@ func TestEnsureBuildsOnceAndReloadsFromCache(t *testing.T) {
 	}
 }
 
+func TestEnsureKeepsOnlyTheBuiltAtlasInTheCache(t *testing.T) {
+	gh := fixtureGitHub(t)
+	cache := t.TempDir()
+	if _, _, err := Ensure(context.Background(), gh.fetcher(), "1.26.52.3", cache, Options{TileSize: 4}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	err := filepath.WalkDir(cache, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(cache, p)
+		got = append(got, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"index.json", "v1.26.50.4/atlas/atlas.png", "v1.26.50.4/atlas/table.json"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("cache holds %v, want %v", got, want)
+	}
+}
+
 func TestLoadRejectsStaleTableVersion(t *testing.T) {
 	a := buildFixture(t)
 	dir := t.TempDir()
