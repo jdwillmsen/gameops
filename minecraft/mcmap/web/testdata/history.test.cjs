@@ -11,6 +11,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { page } = require('./dom.cjs');
 
+// The days are placed and named where the reader is, so the tests say
+// where that is: in UTC unless a test moves it.
+process.env.TZ = 'UTC';
+const where = async (zone, fn) => {
+  process.env.TZ = zone;
+  try { await fn(); } finally { process.env.TZ = 'UTC'; }
+};
+
 const tick = () => new Promise((done) => setTimeout(done, 0));
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
@@ -1125,6 +1133,61 @@ test('a map from before it could say which day its address names is left on now'
   await p.named('2026-10-12');
   assert.equal(p.state.shown.length, 0);
 });
+
+// Captured just after midnight UTC, as the server does: the evening
+// before, in Chicago.
+const EVENING = ['2026-10-12', '2026-10-13', '2026-10-14'].map((d) => day(d, { takenAt: `${d}T00:03:00Z` }));
+
+test('a day is named by the date and time it was captured where the reader is, and asked for by its own name', async () => where('America/Chicago', async () => {
+  const p = await load({ answer: () => ({ days: EVENING }) });
+  await p.press('open');
+  await p.press('earlier');
+  assert.equal(p.last(), '2026-10-14', 'the map is told the day by the name the server gave it');
+  assert.match(p.part('day').textContent, /Oct 13, 2026, 7:03\sPM/);
+  await p.press('date');
+  const pressable = p.parts('cell').filter((node) => !node.disabled).map((node) => node.dataset.day);
+  assert.deepEqual(pressable, ['2026-10-11', '2026-10-12', '2026-10-13']);
+  assert.equal(p.cell('2026-10-13').getAttribute('aria-pressed'), 'true');
+  assert.equal(p.cell('2026-10-14').disabled, true, 'nothing was captured on the 14th here yet');
+  p.cell('2026-10-11').click();
+  await p.settle();
+  assert.equal(p.last(), '2026-10-12');
+  // Three days captured, today, and now.
+  assert.equal(p.slots(), 5);
+}));
+
+test('the same days are named by their UTC dates for a reader in UTC', async () => {
+  const p = await load({ answer: () => ({ days: EVENING }) });
+  await p.press('open');
+  await p.press('earlier');
+  assert.match(p.part('day').textContent, /Oct 14, 2026, 12:03\sAM/);
+  assert.equal(p.slots(), 4);
+});
+
+test('two captures on one date where the reader is each have a slot, and the calendar goes to the later', async () => where('America/Chicago', async () => {
+  const late = [day('2026-10-12', { takenAt: '2026-10-12T23:00:00Z' }), day('2026-10-13', { takenAt: '2026-10-13T00:05:00Z' })];
+  const p = await load({ answer: () => ({ days: late }) });
+  await p.press('open');
+  // Both on the 12th, the 13th and today the 14th with none, and now.
+  assert.equal(p.slots(), 5);
+  await p.press('earlier');
+  assert.match(p.part('day').textContent, /Oct 12, 2026, 7:05\sPM/);
+  await p.press('earlier');
+  assert.equal(p.last(), '2026-10-12');
+  assert.match(p.part('day').textContent, /Oct 12, 2026, 6:00\sPM/);
+  await p.press('date');
+  assert.equal(p.cell('2026-10-12').getAttribute('aria-pressed'), 'false', 'the cell is the later capture');
+  p.cell('2026-10-12').click();
+  await p.settle();
+  assert.equal(p.last(), '2026-10-13');
+}));
+
+test('a day listed without the time it was captured is named and placed by its own date', async () => where('America/Chicago', async () => {
+  const p = await load({ answer: () => ({ days: THREE.map(({ takenAt, ...d }) => d) }) });
+  await p.press('open');
+  await p.press('earlier');
+  assert.match(p.part('day').textContent, /Oct 14, 2026$/);
+}));
 
 (async () => {
   let failed = 0;
