@@ -74,7 +74,8 @@ func writeAtomic(path string, data []byte) error {
 // Only the built atlas and the version index are kept in cacheDir. The pack's
 // few thousand small files go to a scratch directory under os.TempDir and are
 // removed after the build: on network storage each file costs a round trip,
-// which made a cold build take minutes for a download of seconds.
+// which made a cold build take minutes for a download of seconds. The
+// returned Pack describes the download, so its Dir is always empty.
 func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
 	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
 		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
@@ -90,7 +91,9 @@ func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts
 	if err != nil {
 		return nil, Pack{}, err
 	}
-	a, err := BuildWithOptions(pack.Dir, opts)
+	packDir := pack.Dir
+	pack.Dir = ""
+	a, err := BuildWithOptions(packDir, opts)
 	if err != nil {
 		return nil, pack, err
 	}
