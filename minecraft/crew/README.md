@@ -77,9 +77,9 @@ curl -s localhost:8080/readyz
 ### Textures
 
 Once the camera knows the server version it builds a texture atlas in the
-background from Mojang's `bedrock-samples` pack, fetched at runtime and cached
-under `CAMERA_ATLAS_DIR` (about 300 MB). Nothing from the pack is committed
-or shipped in the image. When the atlas is ready the stream sends an atlas
+background from Mojang's `bedrock-samples` pack, fetched at runtime; only the
+built atlas is cached, under `CAMERA_ATLAS_DIR`. Nothing from the pack is
+committed or shipped in the image. When the atlas is ready the stream sends an atlas
 frame and the page textures cube faces with nearest filtering, tints grass,
 foliage and water, and draws slabs, stairs, cross-plants and torches as simple
 shapes. Crew does not receive biome data, so tint is sampled for one climate
