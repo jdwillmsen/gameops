@@ -41,15 +41,12 @@ func TestEnsureBuildsOnceAndReloadsFromCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pack.Tag != "v1.26.50.4" || len(first.Table().Blocks) == 0 {
+	if pack.Tag != "v1.26.50.4" || pack.Dir != "" || len(first.Table().Blocks) == 0 {
 		t.Fatalf("pack %+v, blocks %d", pack, len(first.Table().Blocks))
 	}
 
-	// Remove the source pack and the network: the built atlas alone must serve.
+	// Without the network the built atlas alone must serve.
 	gh.Close()
-	if err := os.RemoveAll(pack.Dir); err != nil {
-		t.Fatal(err)
-	}
 	second, _, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts)
 	if err != nil {
 		t.Fatalf("cached ensure: %v", err)
