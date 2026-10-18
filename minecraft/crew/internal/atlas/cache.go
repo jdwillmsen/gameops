@@ -70,20 +70,34 @@ func writeAtomic(path string, data []byte) error {
 // Ensure returns the atlas for a server version, fetching the pack and
 // building it only when cacheDir/<tag>/atlas is missing or stale. The result
 // is keyed by release tag, so server versions that share a tag share a build.
+//
+// Only the built atlas and the version index are kept in cacheDir. The pack's
+// few thousand small files go to a scratch directory under os.TempDir and are
+// removed after the build: on network storage each file costs a round trip,
+// which made a cold build take minutes for a download of seconds.
 func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
-	pack, err := f.Fetch(ctx, serverVersion, cacheDir)
+	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
+		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
+			return a, Pack{Tag: tag}, nil
+		}
+	}
+	scratch, err := os.MkdirTemp("", "crew-atlas-")
 	if err != nil {
 		return nil, Pack{}, err
 	}
-	dir := filepath.Join(cacheDir, pack.Tag, atlasSubdir)
-	if a, err := LoadAtlas(dir); err == nil && a.table.TileSize == opts.tileSize() {
-		return a, pack, nil
+	defer func() { _ = os.RemoveAll(scratch) }()
+	pack, err := f.Fetch(ctx, serverVersion, scratch)
+	if err != nil {
+		return nil, Pack{}, err
 	}
 	a, err := BuildWithOptions(pack.Dir, opts)
 	if err != nil {
 		return nil, pack, err
 	}
-	if err := a.Save(dir); err != nil {
+	if err := a.Save(filepath.Join(cacheDir, pack.Tag, atlasSubdir)); err != nil {
+		return nil, pack, err
+	}
+	if err := writeIndex(cacheDir, serverVersion, pack.Tag); err != nil {
 		return nil, pack, err
 	}
 	return a, pack, nil
