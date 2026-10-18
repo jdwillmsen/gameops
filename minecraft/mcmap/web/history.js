@@ -211,12 +211,31 @@
   let other = '';
   const pairs = () => Boolean(app.past.compare);
 
-  // A day is a date in UTC, and is said as that date wherever it is read.
-  const utc = (day) => Date.parse(`${day}T00:00:00Z`);
+  // A day is named by the server as the date its capture fell on in UTC,
+  // which is how it is asked for. The reader is shown it as the date and
+  // time it was captured where they are: a capture just after midnight UTC
+  // is the evening before across the Americas. Dates here are calendar
+  // dates without a zone, worked on as midnights in UTC only so that every
+  // one of them is a whole day long.
+  const utc = (date) => Date.parse(`${date}T00:00:00Z`);
   const dayAt = (ms) => new Date(ms).toISOString().slice(0, 10);
-  const written = (day, how) => new Date(utc(day)).toLocaleDateString(undefined, { ...how, timeZone: 'UTC' });
-  const name = (day) => written(day, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-  const brief = (day) => written(day, { day: 'numeric', month: 'short' });
+  const two = (n) => String(n).padStart(2, '0');
+  const dateHere = (ms) => {
+    const t = new Date(ms);
+    return `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())}`;
+  };
+  const written = (date, how) => new Date(utc(date)).toLocaleDateString(undefined, { ...how, timeZone: 'UTC' });
+  const dated = (date) => written(date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  // When each day kept was captured, by its name. A day listed without a
+  // time it was captured at is placed and named by the server's date.
+  let taken = new Map();
+  const local = (day) => (taken.has(day) ? dateHere(taken.get(day)) : day);
+  const name = (day) => {
+    if (!taken.has(day)) return dated(day);
+    const time = new Date(taken.get(day)).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return `${dated(local(day))}, ${time}`;
+  };
+  const brief = (day) => written(local(day), { day: 'numeric', month: 'short' });
 
   // Everything the map draws that is never of a day. The second is said by
   // a page whose markers do not follow the day: its map or its markers'
@@ -248,31 +267,40 @@
     return day.rendererChanged ? `${text} It was drawn by a different renderer than the day before, so not every difference from it is the world's.` : text;
   }
 
-  // Every calendar day from the first one kept to today, each with its
-  // place among the days kept or -1 for a day nothing was kept of, and
-  // for each day kept its place among those. The scrubber has a slot for
-  // each of them and one more, at the end, for now.
+  // Every calendar day, where the reader is, from the first one kept to
+  // today, each with its place among the days kept or -1 for a day nothing
+  // was kept of, and for each day kept its place among those. The
+  // scrubber has a slot for each of them and one more, at the end, for
+  // now. Two captures that fall on one date here, as a late one and the
+  // next on time can, have a slot each under that date.
   let span = [];
   let where = [];
   let laid = '';
 
   function lay() {
-    const today = dayAt(Date.now());
-    const sign = `${today} ${days.map((d) => d.day).join(' ')}`;
+    const today = dateHere(Date.now());
+    const sign = `${today} ${days.map((d) => `${d.day}@${local(d.day)}`).join(' ')}`;
     if (sign === laid) return;
     laid = sign;
     span = [];
     where = [];
     if (days.length > 0) {
-      const held = new Map(days.map((d, i) => [d.day, i]));
+      const held = new Map();
+      days.forEach((d, i) => {
+        const on = local(d.day);
+        if (!held.has(on)) held.set(on, []);
+        held.get(on).push(i);
+      });
+      const dates = [...held.keys()].sort();
       // A day kept after today, by a clock that is ahead of this one, is
       // still a day to go to.
-      const end = Math.max(utc(today), utc(days[days.length - 1].day));
-      for (let t = utc(days[0].day); t <= end; t += DAY_MS) {
+      const end = Math.max(utc(today), utc(dates[dates.length - 1]));
+      for (let t = utc(dates[0]); t <= end; t += DAY_MS) {
         const day = dayAt(t);
-        const index = held.has(day) ? held.get(day) : -1;
-        if (index >= 0) where[index] = span.length;
-        span.push({ day, kept: index });
+        for (const index of held.get(day) || [-1]) {
+          if (index >= 0) where[index] = span.length;
+          span.push({ day, kept: index });
+        }
       }
     }
     const slots = span.length + 1;
@@ -283,7 +311,7 @@
     span.forEach((d, i) => {
       const tick = make('i', 'tick');
       tick.classList.add(d.kept >= 0 ? 'kept' : 'gap');
-      const starts = d.day.endsWith('-01');
+      const starts = d.day.endsWith('-01') && (i === 0 || span[i - 1].day !== d.day);
       if (starts) tick.classList.add('month');
       marks.push(tick);
       // The first day's month is named where the days begin, unless the
@@ -541,6 +569,11 @@
     // The day shown stays the day shown while days are added after it.
     const was = at < days.length ? days[at].day : '';
     days = kept;
+    taken = new Map();
+    for (const d of days) {
+      const ms = typeof d.takenAt === 'string' ? Date.parse(d.takenAt) : NaN;
+      if (Number.isFinite(ms)) taken.set(d.day, ms);
+    }
     at = was ? days.findIndex((d) => d.day === was) : days.length;
     if (at < 0) {
       at = days.length;
@@ -700,7 +733,7 @@
     const answer = answers.get(key);
     if (!answer) return asking.has(key) ? 'Looking for what changed.' : 'What changed since the day before could not be fetched.';
     if (!answer.before) return 'This is the first day kept, so there is no day before it for anything to have changed since.';
-    const next = dayAt(utc(answer.before) + DAY_MS) === days[at].day;
+    const next = dayAt(utc(local(answer.before)) + DAY_MS) === local(days[at].day);
     const since = next ? 'the day before' : `${name(answer.before)}, the last day kept before it`;
     const n = answer.tiles.length + answer.more;
     if (n === 0) return `No area of ${figure(answer.of)} changed since ${since}.`;
@@ -725,23 +758,29 @@
   let cells = new Map();
   const opener = () => (picking === 'other' ? right : date);
 
+  // Its cells are dates where the reader is. Of two captures on one date,
+  // the cell goes to the later; the earlier is a step or a slot away.
+  const monthsKept = () => [...new Set(days.map((d) => local(d.day).slice(0, 7)))].sort();
+
   function fill() {
-    const shown = at < days.length ? days[at].day : '';
-    const chosen = picking === 'other' ? other : shown;
-    const first = days[0].day.slice(0, 7);
-    const last = days[days.length - 1].day.slice(0, 7);
-    if (!month) month = (chosen || days[days.length - 1].day).slice(0, 7);
+    const shown = at < days.length ? local(days[at].day) : '';
+    const chosen = picking === 'other' ? (other ? local(other) : '') : shown;
+    const months = monthsKept();
+    const first = months[0];
+    const last = months[months.length - 1];
+    if (!month) month = (chosen || last).slice(0, 7);
     if (month < first) month = first;
     if (month > last) month = last;
     before.disabled = month <= first;
     after.disabled = month >= last;
-    const sign = `${picking} ${month} ${chosen} ${shown} ${laid}`;
+    const sign = `${picking} ${month} ${at} ${other} ${laid}`;
     if (sign === filled) return;
     filled = sign;
 
     const [year, m] = month.split('-').map(Number);
     title.textContent = written(`${month}-01`, { month: 'long', year: 'numeric' });
-    const held = new Map(days.map((d, i) => [d.day, i]));
+    const held = new Map(days.map((d, i) => [local(d.day), i]));
+    const mine = picking === 'other' ? days.findIndex((d) => d.day === other) : at;
     const from = span[0].day;
     const to = span[span.length - 1].day;
     const focused = grid.contains(document.activeElement) ? document.activeElement.dataset.day : '';
@@ -758,18 +797,22 @@
       const cell = button('cell', String(d));
       cell.dataset.day = day;
       const inside = day >= from && day <= to;
+      const index = held.has(day) ? held.get(day) : -1;
       if (inside) within += 1;
-      if (held.has(day)) kept += 1;
-      if (held.has(day) && picking === 'other' && day === shown) {
+      if (index >= 0) {
+        kept += 1;
+        cell.dataset.index = String(index);
+      }
+      if (index >= 0 && picking === 'other' && index === at) {
         cell.disabled = true;
-        cell.setAttribute('aria-label', `${name(day)}, the day on the left`);
-      } else if (held.has(day)) {
-        cell.setAttribute('aria-label', name(day));
-        cell.setAttribute('aria-pressed', String(day === chosen));
+        cell.setAttribute('aria-label', `${name(days[index].day)}, the day on the left`);
+      } else if (index >= 0) {
+        cell.setAttribute('aria-label', name(days[index].day));
+        cell.setAttribute('aria-pressed', String(index === mine));
       } else {
         cell.disabled = true;
         if (inside) cell.classList.add('gap');
-        cell.setAttribute('aria-label', `${name(day)}, ${inside ? 'no day kept' : 'outside the days kept'}`);
+        cell.setAttribute('aria-label', `${dated(day)}, ${inside ? 'no day kept' : 'outside the days kept'}`);
       }
       cells.set(day, cell);
       nodes.push(cell);
@@ -796,13 +839,13 @@
     month = '';
     filled = '';
     fill();
-    const chosen = cells.get(side === 'other' ? other : at < days.length ? days[at].day : '');
+    const chosen = cells.get(side === 'other' ? (other ? local(other) : '') : at < days.length ? local(days[at].day) : '');
     const first = chosen || [...cells.values()].find((cell) => !cell.disabled);
     if (first) first.focus();
   }
 
   function turn(by) {
-    const months = [...new Set(days.map((d) => d.day.slice(0, 7)))];
+    const months = monthsKept();
     const to = months[months.indexOf(month) + by];
     if (!to) return;
     month = to;
@@ -823,8 +866,8 @@
   grid.addEventListener('click', (e) => {
     const cell = e.target instanceof Element ? e.target.closest('.timeline-cell') : null;
     if (!cell || cell.disabled) return;
-    const to = days.findIndex((d) => d.day === cell.dataset.day);
-    if (to < 0) return;
+    const to = Number(cell.dataset.index);
+    if (!(to >= 0 && to < days.length)) return;
     const back = opener();
     if (picking === 'other') {
       beside(days[to].day);
