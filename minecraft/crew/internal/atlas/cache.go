@@ -67,9 +67,10 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// Ensure returns the atlas for a server version, fetching the pack and
-// building it only when cacheDir/<tag>/atlas is missing or stale. The result
-// is keyed by release tag, so server versions that share a tag share a build.
+// Ensure returns the atlas for a server version. It serves the cached atlas
+// when the index already maps the version to a tag whose atlas is current;
+// otherwise it fetches the pack and builds, overwriting that tag's atlas. A
+// new server version therefore rebuilds once even if its tag was built before.
 //
 // Only the built atlas and the version index are kept in cacheDir. The pack's
 // few thousand small files go to a scratch directory under os.TempDir and are
