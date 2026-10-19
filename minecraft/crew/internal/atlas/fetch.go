@@ -31,7 +31,11 @@ const (
 	rawRepoPath  = "/Mojang/bedrock-samples"
 	packPrefix   = "resource_pack/"
 	completeMark = ".complete"
-	indexFile    = "index.json"
+	// cacheLayout is written into the complete mark. It is raised when the
+	// fetch starts reading more, so that a directory filled by an older
+	// version is fetched again and not taken as complete.
+	cacheLayout = "2"
+	indexFile   = "index.json"
 
 	defaultBackoff        = 2 * time.Second
 	defaultRequestTimeout = 60 * time.Second
@@ -113,8 +117,18 @@ func (f Fetcher) Fetch(ctx context.Context, serverVersion, cacheDir string) (Pac
 
 func packDir(cacheDir, tag string) string { return filepath.Join(cacheDir, tag, "resource_pack") }
 
+// cached reports whether the tag's directory holds everything this version
+// reads. A directory from an older fetch lacks the entity files and is
+// fetched again, unless it holds the whole pack, which has them.
 func cached(cacheDir, tag string) bool {
-	_, err := os.Stat(filepath.Join(cacheDir, tag, completeMark))
+	b, err := os.ReadFile(filepath.Join(cacheDir, tag, completeMark))
+	if err != nil {
+		return false
+	}
+	if string(b) == cacheLayout {
+		return true
+	}
+	_, err = os.Stat(filepath.Join(packDir(cacheDir, tag), "entity"))
 	return err == nil
 }
 
@@ -264,8 +278,23 @@ func wanted(p string) bool {
 			return true
 		}
 	}
-	return false
+	return wantedEntityData(rel)
 }
+
+// wantedEntityData reports whether rel, a path inside the pack, is an entity
+// definition or model. The entity textures are not listed here: only those a
+// definition names are fetched, in a second step.
+func wantedEntityData(rel string) bool {
+	if rel == "models/mobs.json" {
+		return true
+	}
+	if dir, name := path.Split(rel); dir == "entity/" {
+		return strings.HasSuffix(name, ".json")
+	}
+	return strings.HasPrefix(rel, "models/entity/") && strings.HasSuffix(rel, ".geo.json")
+}
+
+const entityTextureDir = "textures/entity/"
 
 type treeResponse struct {
 	Tree []struct {
@@ -276,30 +305,59 @@ type treeResponse struct {
 	Truncated bool `json:"truncated"`
 }
 
+// listing is what one tree call yields: the files to fetch outright, and the
+// entity textures that exist, from which a second step picks those the
+// definitions name.
+type listing struct {
+	files    []string
+	entityTx map[string]bool
+}
+
 // listFiles asks for the whole tag tree in one API call and keeps the regular
 // files Build reads. Symlinks and submodules are skipped by mode.
-func (s *session) listFiles(ctx context.Context, tag string) ([]string, error) {
+func (s *session) listFiles(ctx context.Context, tag string) (listing, error) {
 	body, err := s.getBody(ctx, fmt.Sprintf("%s%s/git/trees/%s?recursive=1", s.baseURL(), repoPath, url.PathEscape(tag)), apiAccept)
 	if err != nil {
-		return nil, err
+		return listing{}, err
 	}
 	var tree treeResponse
 	if err := json.Unmarshal(body, &tree); err != nil {
-		return nil, fmt.Errorf("atlas: decode tree for %s: %w", tag, err)
+		return listing{}, fmt.Errorf("atlas: decode tree for %s: %w", tag, err)
 	}
 	if tree.Truncated {
-		return nil, fmt.Errorf("atlas: tree for %s is truncated by the API", tag)
+		return listing{}, fmt.Errorf("atlas: tree for %s is truncated by the API", tag)
 	}
-	var files []string
+	out := listing{entityTx: map[string]bool{}}
 	for _, e := range tree.Tree {
-		if e.Type == "blob" && (e.Mode == "100644" || e.Mode == "100755") && wanted(e.Path) {
-			files = append(files, e.Path)
+		if e.Type != "blob" || (e.Mode != "100644" && e.Mode != "100755") {
+			continue
+		}
+		switch {
+		case wanted(e.Path):
+			out.files = append(out.files, e.Path)
+		case path.Clean(e.Path) == e.Path && strings.HasPrefix(e.Path, packPrefix+entityTextureDir):
+			out.entityTx[strings.TrimPrefix(e.Path, packPrefix)] = true
 		}
 	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("atlas: tree for %s has no resource_pack files to read", tag)
+	if len(out.files) == 0 {
+		return listing{}, fmt.Errorf("atlas: tree for %s has no resource_pack files to read", tag)
 	}
-	return files, nil
+	return out, nil
+}
+
+// entityTextureFiles resolves the textures the downloaded definitions name to
+// files the tree has, preferring PNG over TGA as Build does.
+func entityTextureFiles(packDir string, have map[string]bool) []string {
+	var out []string
+	for _, ref := range entityTextureRefs(packDir) {
+		for _, ext := range []string{".png", ".tga"} {
+			if have[ref+ext] {
+				out = append(out, packPrefix+ref+ext)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (s *session) rawURL(tag, p string) string {
@@ -323,14 +381,21 @@ func (s *session) download(ctx context.Context, tag, cacheDir string) (int, erro
 	}
 	defer func() { _ = os.RemoveAll(tmp) }()
 
-	files, err := s.listFiles(ctx, tag)
+	list, err := s.listFiles(ctx, tag)
 	if err != nil {
 		return 0, err
 	}
-	if err := s.fetchFiles(ctx, tag, tmp, files); err != nil {
+	if err := s.fetchFiles(ctx, tag, tmp, list.files); err != nil {
 		return 0, fmt.Errorf("atlas: fetch %s: %w", tag, err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, completeMark), nil, 0o644); err != nil {
+	// The definitions are only known once downloaded, so the textures they
+	// name are a second round.
+	textures := entityTextureFiles(filepath.Join(tmp, "resource_pack"), list.entityTx)
+	if err := s.fetchFiles(ctx, tag, tmp, textures); err != nil {
+		return 0, fmt.Errorf("atlas: fetch %s: %w", tag, err)
+	}
+	files := append(list.files, textures...)
+	if err := os.WriteFile(filepath.Join(tmp, completeMark), []byte(cacheLayout), 0o644); err != nil {
 		return 0, err
 	}
 	dest := filepath.Join(cacheDir, tag)
