@@ -160,9 +160,20 @@ async function startAdding(e, label = 'Phone') {
 test('adding a passkey asks for !map passkey and shows the fingerprint to compare', async () => {
   const e = adding();
   await startAdding(e);
-  assert.match(e.el('admin-step').textContent, /!map passkey/);
+  assert.match(e.el('admin-step').textContent, /does not work yet/);
+  assert.match(e.el('admin-step').textContent, /2 minutes/);
+  assert.equal(e.el('admin-steps').hidden, false);
   assert.equal(e.el('admin-fingerprint').textContent, '7F3A-91C2');
   assert.equal(e.el('admin-code').hidden, false);
+});
+
+test('starting again hides the steps', async () => {
+  const e = adding();
+  await startAdding(e);
+  e.el('admin-cancel').click();
+  for (let i = 0; i < 5; i++) await tick();
+  assert.equal(e.el('admin-steps').hidden, true);
+  assert.equal(e.el('admin-step').textContent, '');
 });
 
 test('a label outside the rules is refused before anything is asked of the server', async () => {

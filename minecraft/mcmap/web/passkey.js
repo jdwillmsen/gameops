@@ -166,7 +166,7 @@
         if (flying === 0) for (const b of buttons()) b.disabled = false;
       }
     };
-    const entry = (on) => { for (const id of ['admin-code', 'admin-confirm', 'admin-cancel']) $(id).hidden = !on; };
+    const entry = (on) => { for (const id of ['admin-steps', 'admin-code', 'admin-confirm', 'admin-cancel']) $(id).hidden = !on; };
     const restart = (text) => {
       const orphan = created;
       created = null;
@@ -201,10 +201,13 @@
       try {
         const fin = await post('auth/passkey/register/finish', credentialJSON(cred));
         if (!fin.ok) { say('admin-note', `${refusal(fin.status)} Start again.`); await signalOrphan(cred.id); return; }
-        const { fingerprint } = await fin.json();
+        const { fingerprint, expiresIn } = await fin.json();
         created = cred.id;
         say('admin-fingerprint', fingerprint);
-        say('admin-step', `Now type !map passkey in the game. You will be whispered a code to type here. Check that the whisper shows the same fingerprint, ${fingerprint}.`);
+        // The browser has already said the passkey is saved; it is not usable
+        // until the code from the game confirms it.
+        const minutes = Math.max(1, Math.round((Number(expiresIn) || 120) / 60));
+        say('admin-step', `Your browser saved the passkey, but it does not work yet. Finish these steps within ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}:`);
         entry(true);
       } catch { say('admin-note', 'The map could not be reached. Start again.'); await signalOrphan(cred.id); }
     }));
