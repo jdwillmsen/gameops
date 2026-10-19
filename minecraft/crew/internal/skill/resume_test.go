@@ -133,6 +133,20 @@ func TestNavigateResumesToTheSameGoal(t *testing.T) {
 	near(t, r, goal, 0.8)
 }
 
+func TestNavigateResumeDoesNotCountKnockbackAsLostProgress(t *testing.T) {
+	n := newNavigator(flatWorld(14), protocol.BlockPos{10, 1, 8}, 0.8)
+	if err := n.replan(act.Pose{Feet: feetAt(9, 1, 8)}); err != nil {
+		t.Fatal(err)
+	}
+	n.resume()
+	if err := n.replan(act.Pose{Feet: feetAt(2, 1, 2)}); err != nil {
+		t.Fatal(err)
+	}
+	if n.noGain != 0 {
+		t.Fatalf("noGain %d after the first replan since resuming, want 0", n.noGain)
+	}
+}
+
 func actIdle(r *rig) act.Input {
 	p := r.Pose()
 	return act.Input{Yaw: p.Yaw, Pitch: p.Pitch}

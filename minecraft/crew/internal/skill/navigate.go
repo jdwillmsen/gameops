@@ -134,8 +134,10 @@ func (n *navigator) straying(p act.Pose) bool {
 }
 
 // resume drops the plan, which the unit has left; the next step plans afresh
-// and the lost-progress count starts over.
-func (n *navigator) resume() { n.plan, n.noGain = nil, 0 }
+// and the lost-progress count starts over. The next replan also sets a new
+// baseline, so the knockback that ended the fight is not counted as lost
+// progress.
+func (n *navigator) resume() { n.plan, n.noGain, n.planCount = nil, 0, 0 }
 
 // replan plans from the unit's cell. A replan that leaves the unit no nearer
 // the goal than the last one counts against it, so a unit the server keeps
