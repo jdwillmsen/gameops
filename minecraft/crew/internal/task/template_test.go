@@ -96,6 +96,8 @@ func TestParseHaulTemplate(t *testing.T) {
 		"five sources": strings.Replace(haulBody, `[{"x":0,"y":0,"z":0}]`, chests(5), 1),
 		"missing from": `{"template":"haul","items":{"cobblestone":1},"to":{"x":0,"y":0,"z":0}}`,
 		"missing to":   `{"template":"haul","items":{"cobblestone":1},"from":[{"x":0,"y":0,"z":0}]}`,
+		"to in from":   strings.Replace(haulBody, `[{"x":0,"y":0,"z":0}]`, `[{"x":0,"y":0,"z":0},{"x":9,"y":9,"z":9}]`, 1),
+		"duplicate":    strings.Replace(haulBody, `[{"x":0,"y":0,"z":0}]`, `[{"x":0,"y":0,"z":0},{"x":0,"y":0,"z":0}]`, 1),
 		"extra field":  strings.Replace(haulBody, `"template":"haul"`, `"template":"haul","qty":1`, 1),
 		"gather field": strings.Replace(goodBody, `"template":"gather_and_deposit"`, `"template":"gather_and_deposit","items":{}`, 1),
 	}
