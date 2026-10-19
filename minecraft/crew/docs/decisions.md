@@ -96,3 +96,16 @@ selects `@a`: it would teleport and strip them. It takes the unit's username
 and defaults to `crew-1`. The scene's platform is not stone, because mining
 takes the nearest stone and, found live, that was the platform under the unit
 rather than the quarry.
+
+## 2026-10-19: parallel units have a fixed number and a name
+
+Units are crew-01 Agate, crew-02 Basalt and crew-03 Cobble: the number is the
+identity (`CREW_ID`, logs, deployments) and the name is the Bedrock username
+players see. Neither is ever reused for another unit.
+
+## 2026-10-19: chests are the only hand-off between units
+
+Units never message each other or share state. One unit's output is a chest,
+the next unit's input is the same chest, and a hauler waits for items to
+arrive. A crashed unit therefore leaves a chest that is simply less full, and
+the others carry on.

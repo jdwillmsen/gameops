@@ -67,17 +67,16 @@ same item, so tools stay put, and it fails after three attempts in a row that
 move nothing. Its `progress` is the total moved and its `qty` the total asked
 for.
 
-Crew runs one task at a
-time. A session end or death fails the running task (`session ended`,
-`unit died`) and queued tasks wait for the next spawn. Bodies are capped at
-4096 bytes (413) and at most 16 tasks may wait (429). Task logs carry the id,
-template, state and reason, never the request.
+Crew runs one task at a time. A session end or death fails the running task
+(`session ended`, `unit died`) and queued tasks wait for the next spawn.
+Bodies are capped at 4096 bytes (413) and at most 16 tasks may wait (429).
+Task logs carry the id, template, state and reason, never the request.
 
 ```
 curl -H "Authorization: Bearer $TASKS_TOKEN" \
   -d '{"template":"gather_and_deposit","item":"oak_log","qty":16,"chest":{"x":-4,"y":100,"z":0}}' \
-  localhost:8080/v1/tasks
-curl -H "Authorization: Bearer $TASKS_TOKEN" localhost:8080/v1/tasks
+  localhost:8081/v1/tasks
+curl -H "Authorization: Bearer $TASKS_TOKEN" localhost:8081/v1/tasks
 ```
 
 ## Rendered camera
@@ -125,13 +124,18 @@ never join it; a FWB unit needs a real account and `MC_OFFLINE` unset. Offline
 mode skips the auth cache entirely and logs one `auth_offline` line at start so
 such a unit is never mistaken for a signed-in one.
 
-The compose file also runs `crew-1` from the real image, with the camera on
-and the status port published on `127.0.0.1:8080` only:
+The compose file also runs three units from the real image, `crew-01` Agate,
+`crew-02` Basalt and `crew-03` Cobble, with the camera on and their status
+ports published on `127.0.0.1:8081` to `8083` only:
 
 ```
-docker compose -f minecraft/crew/lab/compose.yaml up -d --build crew-1
-curl -s localhost:8080/readyz
+export TASKS_TOKEN=$(openssl rand -hex 16)   # compose passes it to every unit
+docker compose -f minecraft/crew/lab/compose.yaml up -d --build --remove-orphans
+curl -s localhost:8081/readyz
 ```
+
+A unit's number (`CREW_ID`, `crew-NN`) is fixed and its name (`MC_USERNAME`,
+16 characters at most) is what players see. They are never renamed or reused.
 
 ### Gather-and-deposit scene
 
@@ -139,9 +143,7 @@ curl -s localhost:8080/readyz
 and a chest, then puts the unit on the platform with a wooden pickaxe:
 
 ```
-export TASKS_TOKEN=$(openssl rand -hex 16)   # compose passes it to crew-1
-docker compose -f minecraft/crew/lab/compose.yaml up -d --build
-minecraft/crew/lab/scene.sh lab
+minecraft/crew/lab/scene.sh lab Agate
 ```
 
 On the cluster lab, name the server pod instead of a compose service. The
@@ -156,6 +158,27 @@ so lab commands target the unit by name and never `@a`: the script's second
 argument is the unit's username and defaults to `crew-1`. `send-command` exits
 0 even when the server rejects a command, so check the server log. The scene
 needs cheats, so it only ever runs against a lab; crew itself sends no command.
+
+### Three units in parallel
+
+`lab/parallel-scene.sh [--confirm-overwrite] <lab> [agate] [basalt] [cobble]`
+clears 25x8x25 around the origin and builds a quarry, a grove of ten oak
+trunks, two outbox chests and a store chest (the layout lives in
+`lab/parallel-layout.sh`), then places and equips the three units by name.
+`lab/parallel-demo.sh <compose|k8s:<ns>> [timeout-s]` submits one task each:
+Agate mines 16 cobblestone into outbox A, Basalt fells 16 oak logs into outbox
+B, and Cobble hauls both into the store. It prints
+`<id> <name> <state> <reason> <seconds>` per unit and exits non-zero unless
+all three are `done`. The units share nothing but the chests.
+
+```
+minecraft/crew/lab/parallel-scene.sh lab
+minecraft/crew/lab/parallel-demo.sh compose 600
+```
+
+The `k8s:<ns>` form port-forwards `deploy/crew-01` to `crew-03` on 18081 to
+18083 and reads the token from Secret `crew-tasks`; it needs
+`--confirm-overwrite` on the scene like the single-unit one.
 
 ### Operator overlay
 
