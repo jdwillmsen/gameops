@@ -48,6 +48,13 @@ type Skill interface {
 	Step(ctx context.Context, a Actuator) (Status, error)
 }
 
+// Stopper is implemented by skills that leave server-side state behind when
+// they are abandoned mid-run: an open chest window or a live break session.
+// It must be called from the goroutine that steps the skill.
+type Stopper interface {
+	Stop(Actuator)
+}
+
 // Logger is the part of crew's logger skills write to.
 type Logger interface {
 	Info(event string, fields map[string]any)

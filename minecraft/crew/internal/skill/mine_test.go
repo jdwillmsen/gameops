@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -161,5 +162,26 @@ func TestSkillsRefuseOtherDimensions(t *testing.T) {
 		if st, err := s.Step(t.Context(), r); st != Failed || err == nil || !strings.Contains(err.Error(), "only the overworld") {
 			t.Errorf("%s: Step = %v, %v", s.Name(), st, err)
 		}
+	}
+}
+
+func TestMineBlockStopAbortsALiveBreakOnce(t *testing.T) {
+	w := quarry()
+	r := withPickaxe(newRig(t, w, feetAt(2, 1, 2)))
+	r.stallBreaks = true
+	m := NewMineBlock(w, r.self, "stone", "cobblestone", "pickaxe", 16, 0)
+	_ = m.Ready(r.self())
+	for i := 0; i < 400 && r.breaking == nil; i++ {
+		if st, _ := m.Step(context.Background(), r); st != Running {
+			break
+		}
+	}
+	if r.breaking == nil {
+		t.Fatal("no break started")
+	}
+	m.(Stopper).Stop(r)
+	m.(Stopper).Stop(r)
+	if r.aborts != 1 || r.breaking != nil {
+		t.Errorf("aborts = %d, session = %v", r.aborts, r.breaking)
 	}
 }
