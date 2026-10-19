@@ -119,14 +119,7 @@ func (m *Mine) Name() string { return "mine_block" }
 
 // toolStack finds a matching stack on the hotbar, the only place the server
 // lets the unit select from.
-func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) {
-	for _, it := range s.Inventory {
-		if it.Slot < hotbarSlots && hasSuffix(it.Name, m.tool) {
-			return it, true
-		}
-	}
-	return belief.Item{}, false
-}
+func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) { return hotbarTool(s, m.tool) }
 
 // Resume goes back to finding a block. Where the unit stands and what it holds
 // may have changed, but the baseline, the blocks ruled out and the misses

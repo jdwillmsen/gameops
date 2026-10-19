@@ -22,6 +22,8 @@ const (
 	idCobblestone = 4
 	idOakLog      = 5
 	idWoodenPick  = 312
+	idGravel      = 6
+	idCoal        = 7
 	chestHash     = 3162850062
 	blockHash     = 777
 )
@@ -30,6 +32,8 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:dirt", RuntimeID: idDirt},
 	{Name: "minecraft:cobblestone", RuntimeID: idCobblestone},
 	{Name: "minecraft:oak_log", RuntimeID: idOakLog},
+	{Name: "minecraft:gravel", RuntimeID: idGravel},
+	{Name: "minecraft:coal", RuntimeID: idCoal},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: idWoodenPick},
 	{Name: "minecraft:iron_axe", RuntimeID: idAxe},
 	{Name: "minecraft:wooden_sword", RuntimeID: 300},
@@ -122,8 +126,12 @@ type rig struct {
 	breaking *breakSession
 	drops    []drop
 	breaks   int
-	aborts   int
-	held     int // last MobEquipment hotbar slot, -1 before one
+	// cleared lists every cell the server emptied, in order, so a test can
+	// check what the unit opened.
+	cleared []protocol.BlockPos
+	falls   []fall
+	aborts  int
+	held    int // last MobEquipment hotbar slot, -1 before one
 
 	// chest is the chest every test that never names a position talks to;
 	// chests holds the others, so a haul can have several.
@@ -164,6 +172,12 @@ type timedFill struct {
 	chest *[27]slotStack
 	slot  int
 	stack slotStack
+}
+
+// fall is a block that was left unsupported and lands a few ticks later.
+type fall struct {
+	at   protocol.BlockPos
+	left int
 }
 
 type breakSession struct {
@@ -352,6 +366,16 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 		}
 	}
 
+	live := r.falls[:0]
+	for _, f := range r.falls {
+		if f.left--; f.left > 0 {
+			live = append(live, f)
+			continue
+		}
+		r.settle(f.at)
+	}
+	r.falls = live
+
 	pose := r.Actuator.Pose()
 	kept := r.drops[:0]
 	for _, d := range r.drops {
@@ -378,7 +402,11 @@ func (r *rig) onBroken(pos protocol.BlockPos) {
 	name := r.world[pos]
 	r.world[pos] = "air"
 	r.breaks++
-	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone}
+	r.cleared = append(r.cleared, pos)
+	if falling(r.world[protocol.BlockPos{pos.X(), pos.Y() + 1, pos.Z()}]) {
+		r.falls = append(r.falls, fall{at: pos, left: 4})
+	}
+	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone, "gravel": idGravel, "coal_ore": idCoal}
 	if item, ok := drops[name]; ok {
 		// An item falls to the first solid block under it.
 		y := pos.Y()
@@ -389,6 +417,20 @@ func (r *rig) onBroken(pos protocol.BlockPos) {
 		}
 		at := mgl32.Vec3{float32(pos.X()) + 0.5, float32(y), float32(pos.Z()) + 0.5}
 		r.drops = append(r.drops, drop{at: at, item: item})
+	}
+}
+
+func falling(name string) bool { return name == "gravel" || name == "sand" }
+
+// settle drops the falling blocks above a emptied cell by one, as gravity
+// does: the block lands in the cell and the column above follows.
+func (r *rig) settle(at protocol.BlockPos) {
+	for y := at.Y(); ; y++ {
+		cell, above := protocol.BlockPos{at.X(), y, at.Z()}, protocol.BlockPos{at.X(), y + 1, at.Z()}
+		if r.world[cell] != "air" || !falling(r.world[above]) {
+			return
+		}
+		r.world[cell], r.world[above] = r.world[above], "air"
 	}
 }
 
