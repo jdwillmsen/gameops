@@ -28,7 +28,7 @@ On `crew.prd.jdwlabs.com`:
 - **Enrolment needs an invite**, because a passkey proves only that the same device came back, not who enrolled it.
   - The owner creates a Secret, `crew-control-invites`, with one key per operator id and a random value. The README gives the exact command. The value never passes through Git or an agent's shell.
   - The owner sends Josh his invite out of band.
-  - Opening `/signin?invite=<code>` lets that operator register a passkey. The code is compared in constant time against the Secret's value for that id.
+  - Opening `/signin#operator=<id>&invite=<code>` lets that operator register a passkey. The code is compared in constant time against the Secret's value for that id.
   - An invite is single-use: crew-control records a hash of each used code. A new device needs a new value in the Secret, which the owner rotates.
 - **Limits.** Up to 5 passkeys per operator. The owner removes one by deleting it from the store file (README). There is no removal UI in this step.
 - **Library and RP ID.** The library is `go-webauthn/webauthn`, already in `go.mod` for the map. The RP ID is `crew.prd.jdwlabs.com`.

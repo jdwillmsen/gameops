@@ -1,4 +1,4 @@
-import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping } from '/static/state.js';
+import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel } from '/static/state.js';
 
 const statuses = new Map();
 let order = [];
@@ -153,6 +153,7 @@ function connect() {
   es.onerror = () => {
     if (source !== es) return;
     $('link').textContent = 'status offline';
+    if (operator) checkSession();
     // The browser retries a dropped stream itself, but gives up for good after
     // a non-200 answer (client cap, gateway restart), so those are rebuilt.
     if (es.readyState !== EventSource.CLOSED) return;
@@ -199,7 +200,14 @@ async function api(method, path, body) {
 function setOperator(op) {
   const changed = (operator && operator.id) !== (op && op.id);
   operator = op;
-  if (!op) work.clear();
+  if (!op) {
+    work.clear();
+    // The next sign-in builds a fresh panel instead of reusing one whose
+    // lists and message belong to the previous session.
+    panel = null;
+    panelUnit = '';
+    $('panel').replaceChildren();
+  }
   renderSession();
   renderPanel();
   if (changed) reconnect();
@@ -209,11 +217,18 @@ function renderSession() {
   const box = $('session');
   if (operator) {
     const out = el('button', { type: 'button', textContent: 'Sign out' });
+    const fail = el('span', { className: 'session-error', role: 'alert' });
     out.addEventListener('click', async () => {
-      await api('POST', '/auth/logout');
+      fail.textContent = '';
+      const r = await api('POST', '/auth/logout');
+      // A refused sign-out leaves the session alive, so the panel must stay.
+      if (!r.ok) {
+        fail.textContent = 'Sign out failed.';
+        return;
+      }
       setOperator(null);
     });
-    box.replaceChildren(el('span', { className: 'who', textContent: operator.name || operator.id }), out);
+    box.replaceChildren(el('span', { className: 'who', textContent: operator.name || operator.id }), out, fail);
   } else if (authAvailable) {
     box.replaceChildren(el('a', { href: '/signin', textContent: 'Sign in' }));
   } else {
@@ -221,13 +236,25 @@ function renderSession() {
   }
 }
 
-async function loadSession() {
+// Only a definite answer changes the session: an unreachable server says
+// nothing about whether the cookie is still good.
+async function checkSession() {
   const r = await api('GET', '/auth/me');
   authAvailable = r.status !== 404;
-  if (r.ok && r.data && r.data.operator) operator = r.data.operator;
-  renderSession();
-  renderPanel();
+  if (r.ok && r.data && r.data.operator) setOperator(r.data.operator);
+  else if (r.status === 401) setOperator(null);
+  else {
+    renderSession();
+    renderPanel();
+  }
 }
+
+// A session can lapse or be revoked while the page sits open, and the stream
+// just stops sending work without saying why.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && operator) checkSession();
+});
+setInterval(() => { if (operator) checkSession(); }, 5 * 60 * 1000);
 
 function numberField(label, value) {
   const input = el('input', { type: 'number', step: '1', value: value ?? '' });
@@ -363,7 +390,7 @@ function itemRow(it, withCancel) {
   if (it.state === 'running' && it.progress) bits.push(`${it.progress}`);
   if (it.reason) bits.push(it.reason);
   const li = el('li', { className: 'item ' + it.state }, el('span', { textContent: bits.join(' - ') }));
-  if (withCancel) {
+  if (withCancel && canCancel(it)) {
     const b = el('button', { type: 'button', textContent: 'Cancel' });
     b.addEventListener('click', () => panel.cancel(b, it.id));
     li.append(b);
@@ -378,4 +405,7 @@ function renderWork() {
   panel.historyList.replaceChildren(...(history.length ? history.map(i => itemRow(i, false)) : [el('li', { className: 'empty', textContent: 'no history' })]));
 }
 
-loadSession().finally(connect);
+// The stream does not wait for the session check; the check reconnects it if
+// it finds an operator.
+connect();
+checkSession();

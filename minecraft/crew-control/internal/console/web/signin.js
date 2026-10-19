@@ -1,8 +1,8 @@
-// The invite is a credential: it leaves the address bar, history and any
-// later referrer before anything else runs.
-const params = new URLSearchParams(location.search);
-const invite = params.get('invite') || '';
-const operator = params.get('operator') || '';
+import { signinParams } from '/static/state.js';
+
+// The invite is a credential: it leaves the address bar and history before
+// anything else runs.
+const { invite, operator } = signinParams(location.hash);
 history.replaceState(null, '', location.pathname);
 
 const $ = id => document.getElementById(id);

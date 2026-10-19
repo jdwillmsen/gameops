@@ -43,3 +43,4 @@ body.signin { align-items: center; justify-content: center; }
 #card h1 { margin: 0; font-size: 20px; }
 #card p { margin: 0; }
 @media (max-width: 720px) { #content { flex-direction: column; } #panel { width: auto; max-height: 50%; border-left: 0; border-top: 1px solid #333; } }
+.session-error { color: #e88; }

@@ -95,6 +95,17 @@ export function describeItem(it) {
   return b.template || 'task';
 }
 
+// A command (stop) is not undone from the queue: it is delivered at once and
+// the unit reports it done.
+export const canCancel = it => it.kind !== 'command';
+
+// The invite is a credential, so it travels in the fragment, which browsers
+// never send to a server or proxy.
+export function signinParams(hash) {
+  const q = new URLSearchParams(String(hash).replace(/^#/, ''));
+  return { invite: q.get('invite') || '', operator: q.get('operator') || '' };
+}
+
 // The console's shortcut keys are plain letters and digits, so they must not
 // fire while an operator types into the panel.
 export function isTyping(t) {

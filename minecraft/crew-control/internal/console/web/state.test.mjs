@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping } from './state.js';
+import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, signinParams } from './state.js';
 
 const units = [{ id: 'crew-01' }, { id: 'crew-02' }, { id: 'crew-03' }];
 
@@ -117,4 +117,15 @@ test('typing targets do not trigger shortcuts', () => {
   assert.equal(isTyping({ tagName: 'BUTTON' }), false);
   assert.equal(isTyping({ tagName: 'DIV', isContentEditable: true }), true);
   assert.equal(isTyping(null), false);
+});
+
+test('a stop command is never offered a Cancel button', () => {
+  assert.equal(canCancel({ kind: 'command', state: 'delivered', body: { name: 'stop' } }), false);
+  assert.equal(canCancel({ kind: 'task', state: 'queued' }), true);
+});
+
+test('sign-in reads operator and invite from the fragment', () => {
+  assert.deepEqual(signinParams('#operator=owner&invite=abc-123'), { invite: 'abc-123', operator: 'owner' });
+  assert.deepEqual(signinParams(''), { invite: '', operator: '' });
+  assert.deepEqual(signinParams('#invite=a%20b'), { invite: 'a b', operator: '' });
 });
