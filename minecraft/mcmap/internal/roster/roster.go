@@ -52,6 +52,8 @@ type Entry struct {
 	XUID    string    `json:"xuid,omitempty"`
 	First   time.Time `json:"first"`
 	Last    time.Time `json:"last"`
+	// saved is Last as of the last write.
+	saved time.Time
 }
 
 type file struct {
@@ -122,6 +124,7 @@ func (r *Roster) Load() error {
 		if e == nil || !playerID.MatchString(e.ID) || !validName(e.Name) {
 			continue
 		}
+		e.saved = e.Last
 		r.players[e.ID] = e
 	}
 	r.trim()
@@ -182,15 +185,14 @@ func (r *Roster) Seen(id, name string, at time.Time) {
 		e.XUID = ""
 		r.dirty = true
 	}
-	if x, ok := r.xuids[strings.ToLower(name)]; ok && e.XUID != x {
-		e.XUID = x
-		r.dirty = true
-	}
-	if at.Sub(e.Last) >= lastSeenStep {
+	if at.Sub(e.saved) >= lastSeenStep {
 		r.dirty = true
 	}
 	if at.After(e.Last) {
 		e.Last = at
+	}
+	if x, ok := r.xuids[strings.ToLower(name)]; ok && e.XUID != x {
+		r.link(name, x)
 	}
 }
 
@@ -208,15 +210,34 @@ func (r *Roster) Link(gamertag, xuid string) {
 		clear(r.xuids)
 	}
 	r.xuids[folded] = xuid
+	r.link(gamertag, xuid)
+}
+
+// link gives xuid to the player seen most recently under gamertag and takes
+// it, and any XUID that gamertag gave, from everyone else.
+func (r *Roster) link(gamertag, xuid string) {
+	var holder *Entry
 	for _, e := range r.players {
+		if strings.EqualFold(e.Name, gamertag) && (holder == nil || e.Last.After(holder.Last) || (e.Last.Equal(holder.Last) && e.ID < holder.ID)) {
+			holder = e
+		}
+	}
+	for _, e := range r.players {
+		want := e.XUID
 		switch {
-		case strings.EqualFold(e.Name, gamertag) && e.XUID != xuid:
-			e.XUID = xuid
-			r.dirty = true
-		case e.XUID == xuid && !strings.EqualFold(e.Name, gamertag):
+		case e == holder:
+			want = xuid
+		case strings.EqualFold(e.Name, gamertag):
+			// An earlier holder of the gamertag, who gave it up before
+			// the feed showed them under another.
+			want = ""
+		case e.XUID == xuid:
 			// The same account under a name the feed has not shown yet:
 			// the old entry's link would otherwise outlive the name.
-			e.XUID = ""
+			want = ""
+		}
+		if e.XUID != want {
+			e.XUID = want
 			r.dirty = true
 		}
 	}
@@ -267,6 +288,7 @@ func (r *Roster) Save() error {
 	}
 	f := file{Version: fileVersion, Players: make([]*Entry, 0, len(r.players))}
 	for _, e := range r.players {
+		e.saved = e.Last
 		c := *e
 		c.Earlier = slices.Clone(e.Earlier)
 		f.Players = append(f.Players, &c)

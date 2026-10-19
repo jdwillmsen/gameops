@@ -71,6 +71,24 @@ func TestAGamertagGivenUpDoesNotCarryItsXUIDToTheNextPlayer(t *testing.T) {
 	}
 }
 
+func TestLinkGoesOnlyToTheLatestHolderOfAGamertag(t *testing.T) {
+	r := &Roster{}
+	r.Seen("1", "Taken", t0)
+	r.Seen("2", "Taken", t0.Add(time.Hour))
+	r.Link("Taken", "500")
+	for _, e := range r.List() {
+		if (e.XUID == "500") != (e.ID == "2") {
+			t.Fatalf("%s has XUID %q", e.ID, e.XUID)
+		}
+	}
+	r.Seen("1", "Taken", t0.Add(2*time.Hour))
+	for _, e := range r.List() {
+		if (e.XUID == "500") != (e.ID == "1") {
+			t.Fatalf("after 1 took the gamertag back: %s has XUID %q", e.ID, e.XUID)
+		}
+	}
+}
+
 func TestLinkBeforeTheFirstSample(t *testing.T) {
 	r := &Roster{}
 	r.Link("Beta", "99")
@@ -171,5 +189,29 @@ func TestRunSavesOnTheWayOut(t *testing.T) {
 	<-done
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("not saved on the way out")
+	}
+}
+
+func TestLastSeenIsSavedWhileAPlayerStaysOnline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "roster.json")
+	r := &Roster{Path: path}
+	r.Seen("1", "A", t0)
+	if err := r.Save(); err != nil {
+		t.Fatal(err)
+	}
+	last := t0
+	for i := range 90 {
+		last = t0.Add(time.Duration(i+1) * time.Second)
+		r.Seen("1", "A", last)
+	}
+	if err := r.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again := &Roster{Path: path}
+	if err := again.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if got := again.List()[0].Last; !got.Equal(last) {
+		t.Fatalf("last seen %v after a reload, want %v", got, last)
 	}
 }
