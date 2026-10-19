@@ -706,12 +706,47 @@ export async function phoneSheet({ browser, cfg, watch, closers = [] }) {
   }
 }
 
+// The list of all players puts those online first, and picking one who is
+// offline, where there is one, opens their details beside the list. The
+// harness has a player who left days ago; a live map may have nobody yet.
+export async function allPlayers({ browser, cfg, watch, closers = [] }) {
+  const ctx = await openContext(browser, { cfg, watch, cookie: cfg.session.cookie, viewport: { width: 1440, height: 900 } });
+  closers.push(() => ctx.close());
+  try {
+    const page = await openMap(ctx, cfg);
+    if (!(await until(() => page.evaluate(() => !document.getElementById('roster-open').hidden)))) throw new Fail('the list of all players is not offered');
+    await page.locator('#roster-open').click();
+    if (!(await until(() => page.evaluate(() => document.getElementById('roster-said').textContent !== '' && !/^Reading/.test(document.getElementById('roster-said').textContent)), { timeoutMs: 5000 }))) {
+      throw new Fail('the list of all players did not load');
+    }
+    const shape = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('#roster-list .roster-row')];
+      const online = rows.map((row) => row.querySelector('.roster-tag.online') !== null);
+      const first = online.indexOf(false);
+      return { rows: rows.length, online: online.filter(Boolean).length, away: first, ordered: first < 0 || online.slice(first).every((on) => !on) };
+    });
+    const measures = { players: shape.rows, online: shape.online };
+    if (shape.rows === 0) return skip('the map has not seen anyone play yet', measures);
+    if (!shape.ordered) throw new Fail('the list of all players puts an offline player before one online', measures);
+    if (shape.away < 0) return skip('every player the map has seen is online', measures);
+    const row = page.locator('#roster-list .roster-row').nth(shape.away);
+    const name = await row.locator('.roster-name').textContent();
+    await row.click();
+    const opened = await until(() => page.evaluate((want) => document.getElementById('player').open && document.getElementById('roster').open
+      && document.getElementById('player-title').textContent === want, name), { timeoutMs: 5000 });
+    if (!opened) throw new Fail('picking an offline player did not open their details beside the list', measures);
+    return { measures };
+  } finally {
+    await ctx.close();
+  }
+}
+
 // The bar is one row on a wide screen, with every control in it on the
 // screen, as large as anything pressed is, and doing what it is for when
 // pressed; on a phone each of them is in More, at the size a finger needs.
 // Log out is measured and never pressed.
 export async function pageBar({ browser, cfg, watch, closers = [] }) {
-  const IDS = ['search-box', 'goto-x', 'goto-z', 'grid', 'live-pause', 'views-open', 'appearance-open', 'copy', 'help-open', 'logout'];
+  const IDS = ['search-box', 'goto-x', 'goto-z', 'grid', 'live-pause', 'roster-open', 'views-open', 'appearance-open', 'copy', 'help-open', 'logout'];
   const seen = (page, scope) => page.evaluate(([ids, within]) => {
     const hit = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--hit'));
     const out = { controls: 0, off_screen: 0, too_small: 0, tops: [] };
@@ -745,7 +780,7 @@ export async function pageBar({ browser, cfg, watch, closers = [] }) {
   let outside = 0;
   try {
     const page = await openMap(wideCtx, cfg);
-    await until(() => page.evaluate(() => !document.getElementById('appearance-open').hidden && !document.getElementById('views-open').hidden));
+    await until(() => page.evaluate(() => ['appearance-open', 'views-open', 'roster-open'].every((id) => !document.getElementById(id).hidden)));
     const wide = await seen(page, null);
     // Everything but the dimensions and the search box, which keep their
     // own places on a phone.
@@ -762,12 +797,13 @@ export async function pageBar({ browser, cfg, watch, closers = [] }) {
     if (await opens(page, 'help-open', 'help')) working += 1;
     if (await opens(page, 'appearance-open', 'appearance')) working += 1;
     if (await opens(page, 'views-open', 'views')) working += 1;
+    if (await opens(page, 'roster-open', 'roster')) working += 1;
     // Copy link answers in a word beside its picture, whether or not the
     // browser let it at the clipboard.
     await page.locator('#copy').click();
     if (await until(() => page.evaluate(() => document.getElementById('copy').classList.contains('told') && document.getElementById('copy-word').getBoundingClientRect().width > 1), { timeoutMs: 3000 })) working += 1;
     measures.working = working;
-    if (working < 4) throw new Fail('a control in the bar did not do what it is for', measures);
+    if (working < 5) throw new Fail('a control in the bar did not do what it is for', measures);
   } finally {
     await wideCtx.close();
   }

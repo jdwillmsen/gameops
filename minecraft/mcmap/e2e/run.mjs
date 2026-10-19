@@ -311,6 +311,7 @@ async function main() {
       await run('faces', () => live.faces(t), { seconds: 180 });
       await run('phone-sheet', () => map.phoneSheet(t));
       await run('page-bar', () => map.pageBar(t));
+      await run('all-players', () => map.allPlayers(t));
       await run('live-stream', () => live.liveStream(t), { on: 'watcher', seconds: cfg.streamSeconds + 90 });
       await ctx.close();
     } else {

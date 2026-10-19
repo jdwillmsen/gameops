@@ -50,6 +50,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/operators"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/trails"
@@ -141,6 +142,13 @@ func run(logger *slog.Logger) error {
 		`"d":{"fall":2,"entityAttack":1,"lava":1},"k":{"zombie":41,"skeleton":17,"creeper":6,"enderman":2,"zombie_villager_v2":1},` +
 		`"b":512,"bt":{"stone":240,"dirt":96,"deepslate":80,"oak_log":44},"p":210,"pt":{"cobblestone":120,"oak_planks":60,"torch":30},` +
 		`"j":6,"l":5,"t":19800}]}`}, now)
+	// One player who has been and gone, for the list of all players.
+	seen := &roster.Roster{Path: filepath.Join(dir, "roster", "roster.json"), Logger: logger}
+	if err := seen.Load(); err != nil {
+		return err
+	}
+	seen.Seen("5", "HarnessPlayerAway", now.Add(-72*time.Hour))
+	layer.Roster = seen
 	biomeStore := &biomes.Store{}
 	biomeStore.Set(biomeWorld(now))
 	layer.Surface = biomeStore.Surface
@@ -193,6 +201,7 @@ func run(logger *slog.Logger) error {
 		Biomes:     biomeStore,
 		Trails:     recorder,
 		Players:    saved,
+		Roster:     seen,
 	}
 	if past != nil {
 		app.History = past
