@@ -2,8 +2,9 @@
 # Builds a crew test field on a lab from the commands labcourses prints:
 #   grounds  work yards east of the spawn hub (x 150..293, z -500..-357)
 #   courses  physics, shapes and numbered pads west of it (x -294..-151)
+#   signs    name-tag labels at spawn, the hub's gates and the fields
 #
-# usage: courses.sh [--confirm-overwrite] <lab> grounds|courses
+# usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|signs
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
 #   for the cluster lab's server pod.
 #
@@ -22,7 +23,7 @@ if [[ ${1:-} == --confirm-overwrite ]]; then
   shift
 fi
 
-usage="usage: courses.sh [--confirm-overwrite] <lab> grounds|courses"
+usage="usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|signs"
 lab=${1:?$usage}
 field=${2:?$usage}
 here=$(cd "$(dirname "$0")" && pwd)

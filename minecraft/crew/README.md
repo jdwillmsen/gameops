@@ -245,7 +245,7 @@ running. The gatherers get the scene's cleared box as their `area`.
 
 ### Test fields
 
-`lab/courses.sh [--confirm-overwrite] <lab> grounds|courses` builds one of two
+`lab/courses.sh [--confirm-overwrite] <lab> grounds|courses|signs` builds one of two
 fixed test fields on the lab's flat ground (grass at y 63), beside the spawn
 hub at x -61..51, z -519..-323. Each is a 3x3 grid of 40x40 cells with roads
 between, joined to the hub's gates by paths:
@@ -268,6 +268,12 @@ placed. A `k8s:` target needs `--confirm-overwrite`:
 ```
 minecraft/crew/lab/courses.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod> courses
 ```
+
+`signs` places the hub's labels: a credit for the hub's author at spawn, a
+direction label inside each east and west gate, and a name at each field's
+end of the gate paths. They are name-tagged armor stands, because the console
+cannot write sign text and the server ignores block placement from a bot. A
+rebuild replaces each stand rather than adding one.
 
 ### Operator overlay
 
