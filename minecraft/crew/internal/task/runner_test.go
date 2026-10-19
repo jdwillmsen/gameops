@@ -277,7 +277,11 @@ func TestTaskLogsCarryNoBody(t *testing.T) {
 				t.Errorf("log field %q beyond id/template/state/reason", k)
 			}
 		}
-		for _, v := range l {
+		for k, v := range l {
+			// The id is random hex, so it can contain the coordinate digits by chance.
+			if k == "id" {
+				continue
+			}
 			s, _ := v.(string)
 			for _, bad := range []string{"701", "4242", "chest", "cobblestone"} {
 				if strings.Contains(s, bad) {
