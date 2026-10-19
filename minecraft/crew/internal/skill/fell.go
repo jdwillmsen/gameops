@@ -27,9 +27,11 @@ const (
 	placeClearance = 0.05
 	placeTries     = 3
 	// Ticks to wait for the server to confirm a placed block once landed.
-	placeGrace  = 6
-	fallWait    = 30
-	collectWait = 20
+	placeGrace = 6
+	fallWait   = 30
+	// A log breaks high up and falls to the ground while the unit climbs down,
+	// so a pickup can land a second or two after the unit stands there.
+	collectWait = 40
 	riseWait    = 40
 	// Horizontal speed, in blocks per tick, below which the unit counts as
 	// standing still.
@@ -106,6 +108,10 @@ type Fell struct {
 	brk      cellBreak
 	falling  bool
 
+	// The item count the pickups should bring the unit to.
+	cutBase   int
+	expect    int
+	matBase   int
 	cols      []protocol.BlockPos
 	colsInit  bool
 	collected int
@@ -287,6 +293,7 @@ func (f *Fell) plan(a Actuator, p act.Pose) outcome {
 		f.target, f.ground, f.height, f.leaves = l, g, h, leaves
 		f.material, f.digTool = mat, tool
 		f.pillars++
+		f.cutBase, f.matBase = count(snap, f.mine.item), count(snap, mat.Name)
 		f.waited, f.tries, f.jump, f.selected = 0, 0, jIdle, false
 		f.emit("fell_pillar_planned", map[string]any{"height": h, "leaves": len(leaves), "attempt": f.pillars})
 		f.nav = newNavigator(f.world, g, 0.3)
@@ -629,7 +636,7 @@ func (f *Fell) collect(a Actuator, p act.Pose) outcome {
 		f.colsInit = true
 		f.initCollect()
 	}
-	if len(f.cols) == 0 {
+	if len(f.cols) == 0 || f.pickedUp() {
 		return f.back(a)
 	}
 	if f.nav == nil && f.colWait == 0 {
@@ -683,6 +690,7 @@ func (f *Fell) initCollect() {
 	for _, b := range f.mine.felled {
 		add(b.X(), b.Z(), b.Y())
 	}
+	f.expect = f.cutBase + len(f.mine.felled)
 	f.mine.felled = nil
 	if len(cols) > 1 {
 		rest := cols[1:]
@@ -706,4 +714,11 @@ func (f *Fell) back(a Actuator) outcome {
 	}
 	f.phase = fMine
 	return next
+}
+
+// pickedUp says whether the cut logs and the pillar's blocks are all back in
+// the inventory.
+func (f *Fell) pickedUp() bool {
+	s := f.self()
+	return count(s, f.mine.item) >= f.expect && count(s, f.material.Name) >= f.matBase
 }
