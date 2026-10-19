@@ -10,8 +10,9 @@ AREA_MAX=(12 106 12)
 QUARRY_FROM=(6 100 -10)
 QUARRY_TO=(9 101 -8)
 
-# Oak trunks, two logs high, for Basalt.
-GROVE_X=(-9 -7 -5 -3)
+# Oak trunks, two logs high, for Basalt. Ten trunks (20 logs) for a 16-log
+# gather: with exactly 16 the unit came up one log short.
+GROVE_X=(-9 -7 -5 -3 -1)
 GROVE_Z=(8 10)
 
 # Chest positions as "x y z".
