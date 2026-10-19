@@ -48,6 +48,11 @@
   /* The hairline round a colour key. */
   --edge: #0b0c0e;
   --focus: 2px;
+  /* The faint dots and the glow of the accent that the login and the
+     pages of text are set on, and the shadow under the login card. */
+  --glow: rgba(110, 207, 122, 0.1);
+  --dot: rgba(255, 255, 255, 0.05);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 18px 50px rgba(0, 0, 0, 0.25);
 
   /* On the map: the outline of every marker, what a picture stands on,
      the plate a label is written on, and a mark that is plain white. */
@@ -179,6 +184,9 @@
   --float: rgba(255, 255, 255, 0.97);
   --shadow-float: 0 1px 2px rgba(27, 31, 36, 0.16), 0 8px 24px rgba(27, 31, 36, 0.16);
   --scrim: rgba(27, 31, 36, 0.45);
+  --glow: rgba(15, 92, 38, 0.08);
+  --dot: rgba(27, 31, 36, 0.07);
+  --shadow-card: 0 1px 2px rgba(27, 31, 36, 0.08), 0 18px 50px rgba(27, 31, 36, 0.1);
   --edge: #1b1f24;
   /* Nearly solid, so that a ring still stands off its backing by three to
      one where the terrain under it is snow, and the letter of a predicted
@@ -216,6 +224,9 @@
   --float: #000000;
   --shadow-float: none;
   --scrim: rgba(0, 0, 0, 0.8);
+  --glow: transparent;
+  --dot: transparent;
+  --shadow-card: none;
   --map-bg: #000000;
   --edge: #ffffff;
   --focus: 3px;
@@ -1334,40 +1345,108 @@ kbd, .keys code {
 /* While logged out the map and its controls are not there to use. */
 .locked .stage, .locked .tabs, .locked .search, .locked .goto, .locked .toggle, .locked .live-control, .locked #copy, .locked .help-open, .locked #views-open, .locked #appearance-open, .locked .foot { display: none; }
 
+/* Logged out, the page is the login alone: the bar of the map gives way to
+   the brand, and the ground is a faint grid under a glow of the accent.
+   Both are named by the theme, which has none in high contrast. */
+.locked {
+  background: radial-gradient(60% 50% at 50% 0%, var(--glow), transparent 70%), radial-gradient(var(--dot) 1px, transparent 1px) 0 0 / 18px 18px, var(--bg);
+}
+.locked > header.bar { display: none; }
+
 .login {
   flex: 1;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  padding: 0 1rem;
 }
+
+.login-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.75rem 0.25rem;
+}
+.brand { display: inline-flex; align-items: center; gap: 0.6rem; font-weight: 650; font-size: calc(var(--body) + 1px); color: var(--text); text-decoration: none; }
+.brand .mark { width: 26px; height: 26px; flex: none; }
+
+/* A choice among a few, drawn as one pill. The buttons are put in by
+   theme.js, so a page without it has none to press. */
+.theme-switch { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--rule); border-radius: 999px; background: var(--panel); }
+.theme-switch button { display: grid; place-items: center; width: calc(var(--hit) + 6px); min-height: var(--hit); padding: 0; border-color: transparent; border-radius: 999px; background: none; color: var(--dim); }
+.theme-switch button[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--sel-ink); }
+.theme-switch button:hover:not(:disabled) { color: var(--text); border-color: transparent; }
+.theme-switch button[aria-pressed="true"]:hover:not(:disabled) { color: var(--sel-ink); }
+.theme-switch svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 
 .card {
-  max-width: 30rem;
+  width: 100%;
+  max-width: 25rem;
+  margin: auto 0;
   background: var(--panel);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-l);
-  padding: 1.25rem 1.5rem;
+  border-radius: 16px;
+  padding: 1.6rem 1.6rem 1.4rem;
   line-height: 1.5;
+  box-shadow: var(--shadow-card);
 }
 
-.card h2 { margin: 0 0 0.5rem; font-size: var(--title); font-weight: 600; }
-.card ol { padding-left: 1.25rem; }
-.card li { margin: 0.35rem 0; }
+.eyebrow { display: inline-block; padding: 0.15rem 0.65rem; border-radius: 999px; background: var(--accent-soft); color: var(--sel-ink); font-size: var(--caption); font-weight: 600; }
+.card h2 { margin: 0.75rem 0 0.25rem; font-size: calc(var(--body) + 8px); line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; }
+.card .sub { margin: 0 0 1.1rem; color: var(--dim); }
 
+.codebox { padding: 0.75rem 0.75rem 0.75rem 1rem; border: 1px solid var(--rule); border-radius: 12px; background: var(--bg); }
+.codelabel { margin: 0 0 0.25rem; color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
+.coderow { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
 .card code {
-  display: inline-block;
-  padding: 0.15rem 0.5rem;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-m);
-  background: var(--bg);
+  min-width: 0;
   color: var(--accent);
-  font: 600 1.15rem ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font: 700 1.5rem ui-monospace, "Cascadia Mono", Consolas, monospace;
   letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
   user-select: all;
 }
+#login-copy { flex: none; min-height: var(--hit); padding: 0 0.9rem; border-color: var(--accent); border-radius: 8px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+#login-copy:hover:not(:disabled) { border-color: var(--text); }
+.copied { color: var(--accent); }
+.copied:empty { display: none; }
 
-.card li button { margin-left: 0.4rem; }
-.copied { margin-left: 0.4rem; color: var(--accent); }
+/* The status line says what the page is doing, and the dot beside it
+   beats while it waits when motion is on. */
+#login-note { display: flex; align-items: center; gap: 0.5rem; margin: 0.75rem 0.15rem 0; font-size: var(--caption); line-height: var(--caption-lh); }
+#login-note:not(:empty)::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+#login-note.problem::before { background: var(--warn); box-shadow: none; }
+:root[data-motion="full"] #login-note:not(.problem):not(:empty)::before { animation: beat 1.8s ease-in-out infinite; }
+@keyframes beat { 50% { opacity: 0.35; } }
+#login-new { margin-top: 0.5rem; min-height: var(--hit); }
+
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin: 1.1rem 0 0; padding: 0; list-style: none; counter-reset: step; }
+.card .steps li { display: flex; flex-direction: column; gap: 0.4rem; margin: 0; color: var(--dim); font-size: var(--caption); line-height: 1.35; }
+.steps li::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--rule); border-radius: 50%; background: var(--raised); color: var(--text); font-weight: 700; }
+
+.or { display: flex; align-items: center; gap: 0.6rem; margin: 1.25rem 0 0.9rem; color: var(--dim); font-size: var(--caption); }
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.card:not(:has(.alt > :not([hidden]))) :is(.or, .alt) { display: none; }
+.alt { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 0.5rem; }
+.alt > * { display: flex; }
+.alt button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: max(var(--hit), 38px); border-radius: 10px; font-weight: 600; }
+.alt svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Empty, a note takes no room, and is still there to be read out when it fills. */
+.card .note { min-height: 0; margin: 0.6rem 0 0; font-size: var(--caption); line-height: var(--caption-lh); }
+.card .note:empty { margin: 0; }
+.login-foot { width: 100%; padding: 1.25rem 0 1rem; text-align: center; }
+.login-foot .site-links { justify-content: center; margin: 0 0 0.4rem; }
+.login-foot .legal { margin: 0; }
+
+@media (max-width: 24rem) {
+  .steps { grid-template-columns: 1fr; }
+  .card { padding: 1.25rem 1rem 1.1rem; }
+  .card code { font-size: 1.3rem; }
+}
 
 .note { color: var(--dim); min-height: 1.5em; }
 /* What the game's publisher asks every site about the game to say. */

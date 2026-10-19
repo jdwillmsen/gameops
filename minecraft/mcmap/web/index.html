@@ -179,24 +179,39 @@
     </section>
   </div>
   <section id="login" class="login" aria-labelledby="login-title" hidden>
+    <div class="login-top">
+      <span class="brand"><svg class="mark" viewBox="0 0 26 26" aria-hidden="true"><path d="M13 2 24 7.5 13 13 2 7.5Z" fill="#6ecf7a"/><path d="M2 7.5 13 13v11L2 18.5Z" fill="#7a5532"/><path d="M24 7.5 13 13v11l11-5.5Z" fill="#5c3f24"/><path d="M2 7.5 13 13l11-5.5v3L13 16 2 10.5Z" fill="#4fae5c"/></svg>FWB map</span>
+    </div>
     <div class="card">
+      <span class="eyebrow">For players on the server</span>
       <h2 id="login-title">Log in from the game</h2>
-      <p>This map is for players on the server. To show you are one:</p>
-      <ol>
-        <li>Join the server in Minecraft.</li>
-        <li>Open chat and type <code id="login-command">!map</code>
-          <button id="login-copy" type="button" hidden>Copy command</button>
-          <span id="login-copied" class="copied" role="status"></span></li>
-        <li>Wait a moment. This page unlocks by itself.</li>
-      </ol>
+      <p class="sub">Prove you play here with one chat message.</p>
+      <div class="codebox">
+        <p class="codelabel">Type this in Minecraft chat</p>
+        <div class="coderow">
+          <code id="login-command">!map</code>
+          <button id="login-copy" type="button" hidden>Copy</button>
+        </div>
+        <span id="login-copied" class="copied" role="status"></span>
+      </div>
       <p id="login-note" class="note" role="status"></p>
       <button id="login-new" type="button" hidden>Get a new code</button>
-      <button id="login-passkey" type="button" hidden>Log in with a passkey</button>
+      <ol class="steps">
+        <li>Join the server</li>
+        <li>Paste the code in chat</li>
+        <li>This page unlocks by itself</li>
+      </ol>
+      <div class="or" aria-hidden="true">or</div>
+      <div class="alt">
+        <button id="login-passkey" type="button" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="5.5" cy="8" r="3"/><path d="M8.5 8h6M12.5 8v2.5M14.5 8v2"/></svg>Log in with a passkey</button>
+        <form id="login-xbox" action="auth/xbox/start" method="get" hidden><button type="submit"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M4.5 4.5c2 1 5 4.5 7 7M11.5 4.5c-2 1-5 4.5-7 7"/></svg>Sign in with Xbox</button></form>
+      </div>
       <p id="login-passkey-note" class="note" role="status"></p>
-      <form id="login-xbox" action="auth/xbox/start" method="get" hidden><button type="submit">Sign in with Xbox</button></form>
       <p id="login-xbox-note" class="note problem" role="status"></p>
-      <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+    </div>
+    <div class="login-foot">
       <nav class="site-links" aria-label="About this map"><a href="about">About</a> <a href="guide">Guide</a> <a href="privacy">Privacy</a> <a href="terms">Terms</a> <a href="credits">Credits</a></nav>
+      <p class="legal">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
     </div>
   </section>
   <dialog id="help" class="sheet" aria-labelledby="help-title">
