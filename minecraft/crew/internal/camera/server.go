@@ -15,6 +15,9 @@ import (
 //go:embed web/index.html
 var page []byte
 
+//go:embed web/mesher.js
+var mesher []byte
+
 // A browser that stops reading must not pin a goroutine and a socket forever.
 const writeTimeout = 5 * time.Second
 
@@ -28,6 +31,12 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(page)
+	})
+	mux.HandleFunc("GET /v1/camera/mesher.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(mesher)
 	})
 	mux.HandleFunc("GET /v1/camera/stats", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

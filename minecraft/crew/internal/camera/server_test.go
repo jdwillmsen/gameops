@@ -3,6 +3,7 @@ package camera
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -208,5 +209,26 @@ func TestPageFetchesTheOverlayDataAndTogglesDebugOnF3(t *testing.T) {
 	// Server-supplied text must not be parsed as markup.
 	if strings.Contains(string(page), "innerHTML") {
 		t.Error("page assigns innerHTML")
+	}
+}
+
+// The worker file is embedded and not type-checked, like the page, and the
+// page loads it by this exact path.
+func TestMesherWorkerIsServedWhereThePageLoadsIt(t *testing.T) {
+	const path = "/v1/camera/mesher.js"
+	if !strings.Contains(string(page), "new Worker('"+path+"')") {
+		t.Errorf("page does not start a worker from %s", path)
+	}
+	h, _ := newTestHub(t, 1)
+	srv := httptest.NewServer(Mount(okBase(), h))
+	defer srv.Close()
+	res, err := http.Get(srv.URL + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/javascript") || !bytes.Equal(body, mesher) || len(body) == 0 {
+		t.Errorf("mesher.js = %d %q, %d bytes", res.StatusCode, res.Header.Get("Content-Type"), len(body))
 	}
 }
