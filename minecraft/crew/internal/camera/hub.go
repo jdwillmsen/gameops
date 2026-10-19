@@ -197,6 +197,14 @@ func (h *Hub) resetLocked() {
 	}
 }
 
+// Full reports whether Attach would refuse a viewer right now. It attaches
+// nothing and does not count a refusal.
+func (h *Hub) Full() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.viewers) >= h.maxViewers
+}
+
 // Attach registers a viewer. Its connection head is queued; the held world is
 // not, because the viewer pulls it nearest-first as it reads.
 func (h *Hub) Attach() (*Viewer, error) {

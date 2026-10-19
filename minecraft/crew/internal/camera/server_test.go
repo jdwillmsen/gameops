@@ -262,3 +262,44 @@ func TestPageUsesRelativeURLs(t *testing.T) {
 		t.Error("page does not build the websocket URL relative to the page")
 	}
 }
+
+func TestPlainProbeOnAFullHubAnswers503WithoutCountingARefusal(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	v, err := h.Attach()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v.Close()
+	srv := httptest.NewServer(Mount(okBase(), h))
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL + "/v1/camera/ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("probe on a full hub = %d, want 503", res.StatusCode)
+	}
+	if got := h.Stats().ViewersRefused; got != 0 {
+		t.Errorf("viewersRefused = %d, want 0", got)
+	}
+}
+
+func TestPlainProbeOnAHubWithRoomAnswers426AndAttachesNobody(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	srv := httptest.NewServer(Mount(okBase(), h))
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL + "/v1/camera/ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusUpgradeRequired {
+		t.Errorf("probe with room = %d, want 426", res.StatusCode)
+	}
+	if got := h.Stats().Viewers; got != 0 {
+		t.Errorf("viewers = %d, want 0", got)
+	}
+}

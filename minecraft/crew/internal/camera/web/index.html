@@ -532,7 +532,9 @@ addEventListener('message', ev => {
 let azimuth = 0, elevation = 30, orbitDist = 8, dragging = false;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 renderer.domElement.addEventListener('pointerdown', e => { dragging = true; renderer.domElement.setPointerCapture(e.pointerId); });
-addEventListener('pointerup', () => { dragging = false; });
+// A cancelled pointer (touch scroll takeover, lost capture) never sends
+// pointerup, which would leave the drag stuck on.
+for (const t of ['pointerup', 'pointercancel']) addEventListener(t, () => { dragging = false; });
 addEventListener('pointermove', e => {
   if (!dragging || mode !== 'orbit') return;
   azimuth -= e.movementX * 0.4;
@@ -565,7 +567,9 @@ function connect() {
   // A viewer is dropped when it falls behind or the unit's session ends; a
   // reconnect replays the world, so retrying is always safe.
   ws.onclose = () => {
-    status = 'disconnected, retrying';
+    // Kept until the next open so a refused tile does not flicker back to
+    // "retrying" on every probe cycle.
+    if (status !== 'viewer limit reached') status = 'disconnected, retrying';
     setTimeout(connect, 2000);
     // A refused handshake gives the page no status; the plain GET reaches the
     // same viewer-cap check and answers 503.
