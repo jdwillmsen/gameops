@@ -25,6 +25,10 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:diamond_sword", RuntimeID: 303},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: 312},
 	{Name: "minecraft:dirt", RuntimeID: 3},
+	{Name: "minecraft:bread", RuntimeID: 340},
+	{Name: "minecraft:cooked_beef", RuntimeID: 341},
+	{Name: "minecraft:rotten_flesh", RuntimeID: 342},
+	{Name: "minecraft:stone_sword", RuntimeID: 343},
 }
 
 // world is a known block map: dirt at y=0, air above, bounded by size.
@@ -121,7 +125,7 @@ func newRig(t *testing.T, cfg Config, feet mgl32.Vec3) *rig {
 	return &rig{t: t, w: w, out: out, a: a, tracker: tracker, l: l, log: log}
 }
 
-var defaults = Config{Wander: true, Radius: 8, Defend: true}
+var defaults = Config{Wander: true, Radius: 8, Defend: true, Eat: true}
 
 // step is one runner tick: the life decides, then sends the tick's one input.
 func (r *rig) step() (engaged bool) {
@@ -132,6 +136,8 @@ func (r *rig) step() (engaged bool) {
 	if r.l.Engaged(r.a.Pose(), snap) {
 		engaged = true
 		err = r.l.Fight(context.Background(), r.a, snap)
+	} else if r.l.Tending(snap, false) {
+		err = r.l.Tend(context.Background(), r.a, snap)
 	} else {
 		err = r.l.Idle(context.Background(), r.a)
 	}

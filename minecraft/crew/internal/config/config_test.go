@@ -57,6 +57,7 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"IDLE_RADIUS":      "0",
 		"IDLE_WANDER":      "maybe",
 		"DEFEND":           "sometimes",
+		"EAT":              "yes please",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -244,6 +245,18 @@ func TestIdleLifeIsOnByDefaultAndConfigurable(t *testing.T) {
 	t.Setenv("DEFEND", "false")
 	cfg, err = Load()
 	if err != nil || cfg.IdleWander || cfg.IdleRadius != 12 || cfg.Defend {
+		t.Fatalf("config = %+v, err %v", cfg, err)
+	}
+}
+
+func TestEatIsOnByDefaultAndConfigurable(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || !cfg.Eat {
+		t.Fatalf("defaults = %+v, err %v", cfg, err)
+	}
+	t.Setenv("EAT", "false")
+	if cfg, err = Load(); err != nil || cfg.Eat {
 		t.Fatalf("config = %+v, err %v", cfg, err)
 	}
 }

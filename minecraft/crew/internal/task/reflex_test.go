@@ -16,7 +16,13 @@ type fakeReflex struct {
 	tick               int
 	fights, idles      int
 	cancels, resets    int
-	timeline           *[]string
+	// The reflex tends the unit for ticks in [tendFrom, tendTo) of the ticks
+	// it was not engaged on.
+	tendFrom, tendTo int
+	asked            int
+	tends            int
+	workingSeen      []bool
+	timeline         *[]string
 }
 
 func (f *fakeReflex) note(s string) {
@@ -32,6 +38,16 @@ func (f *fakeReflex) Engaged(act.Pose, belief.Snapshot) bool {
 func (f *fakeReflex) Fight(context.Context, skill.Actuator, belief.Snapshot) error {
 	f.fights++
 	f.note("fight")
+	return nil
+}
+func (f *fakeReflex) Tending(_ belief.Snapshot, working bool) bool {
+	f.asked++
+	f.workingSeen = append(f.workingSeen, working)
+	return f.asked >= f.tendFrom && f.asked < f.tendTo
+}
+func (f *fakeReflex) Tend(context.Context, skill.Actuator, belief.Snapshot) error {
+	f.tends++
+	f.note("tend")
 	return nil
 }
 func (f *fakeReflex) Idle(context.Context, skill.Actuator) error {
@@ -181,5 +197,51 @@ func TestDeathAndSessionEndResetTheReflexOnTheSteppingGoroutine(t *testing.T) {
 	h.tick(1)
 	if rf.resets != 2 {
 		t.Errorf("resets = %d after the session ended, want 2", rf.resets)
+	}
+}
+
+func TestTendingStopsTheSkillThenResumesItAndTellsTheReflexATaskIsRunning(t *testing.T) {
+	rf := &fakeReflex{tendFrom: 4, tendTo: 9}
+	h, sk, _ := reflexHarness(t, time.Minute, 6, rf)
+	h.r.Submit(tpl())
+	h.tick(25)
+	if sk.stops != 1 || sk.resumes != 1 || sk.readies != 1 {
+		t.Errorf("stops %d resumes %d readies %d, want one of each", sk.stops, sk.resumes, sk.readies)
+	}
+	if rf.tends != 4 {
+		t.Errorf("tends = %d, want 4: the tick that stopped the skill carried the stop's input", rf.tends)
+	}
+	if rf.workingSeen[0] || !rf.workingSeen[4] {
+		t.Errorf("working = %v: false before the task started, true once it ran", rf.workingSeen[:6])
+	}
+}
+
+func TestTendingTimeDoesNotCountTowardsTheTaskTimeout(t *testing.T) {
+	rf := &fakeReflex{tendFrom: 3, tendTo: 100}
+	h, _, _ := reflexHarness(t, time.Second, 100000, rf)
+	a, _ := h.r.Submit(tpl())
+	h.tick(90)
+	if got := stateOf(t, h.r, a.ID); got.State != "running" {
+		t.Fatalf("task = %+v, want it still running", got)
+	}
+}
+
+func TestTendingKeepsAQueuedTaskWaiting(t *testing.T) {
+	rf := &fakeReflex{tendFrom: 1, tendTo: 6}
+	h, sk, _ := reflexHarness(t, time.Minute, 2, rf)
+	a, _ := h.r.Submit(tpl())
+	h.tick(5)
+	if got := stateOf(t, h.r, a.ID); got.State != "queued" || sk.readies != 0 || rf.tends != 5 {
+		t.Errorf("task = %+v, readies %d, tends %d", got, sk.readies, rf.tends)
+	}
+}
+
+func TestAFightWinsOverTending(t *testing.T) {
+	rf := &fakeReflex{fightFrom: 1, fightTo: 4, tendFrom: 1, tendTo: 100}
+	h, _, _ := reflexHarness(t, time.Minute, 2, rf)
+	h.r.Submit(tpl())
+	h.tick(3)
+	if rf.fights != 3 || rf.tends != 0 {
+		t.Errorf("fights %d tends %d, want the fight to take every tick", rf.fights, rf.tends)
 	}
 }

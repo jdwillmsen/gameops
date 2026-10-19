@@ -59,8 +59,14 @@ type Reflex interface {
 	// Engaged advances the reflex's clock by one tick and says whether the
 	// unit must fight or flee this tick instead of working or idling.
 	Engaged(act.Pose, belief.Snapshot) bool
-	// Fight and Idle each send exactly one input.
+	// Tending says whether the unit has something to see to, such as a meal or
+	// a chest to rearm from, before its task or its idling. It is asked only
+	// when the unit is not engaged, and working says a task is running, which
+	// some errands never interrupt.
+	Tending(s belief.Snapshot, working bool) bool
+	// Fight, Tend and Idle each send exactly one input.
 	Fight(context.Context, skill.Actuator, belief.Snapshot) error
+	Tend(context.Context, skill.Actuator, belief.Snapshot) error
 	Idle(context.Context, skill.Actuator) error
 	// Cancel drops an idle walk because a task is about to start.
 	Cancel()
@@ -75,10 +81,11 @@ type entry struct {
 	idx     int
 	started time.Time
 	ready   bool
-	// fought is the time spent defending, which the timeout does not count.
+	// fought is the time the reflex had the unit, in a fight or at a meal,
+	// which the timeout does not count.
 	fought time.Duration
-	// resume is set when a fight interrupted the skill, so it picks up where
-	// it left off instead of starting over.
+	// resume is set when the reflex interrupted the skill, so it picks up
+	// where it left off instead of starting over.
 	resume bool
 }
 
@@ -206,6 +213,23 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
+// preempt takes the running task's skill off the unit for the reflex, and
+// returns it to stop when it has started. The time away is not the task's. It
+// must be called with mu held.
+func (r *Runner) preempt(dt time.Duration) skill.Stopper {
+	e := r.cur
+	if e == nil {
+		return nil
+	}
+	e.fought += dt
+	if !e.ready {
+		return nil
+	}
+	e.ready, e.resume = false, true
+	stop, _ := e.skills[e.idx].(skill.Stopper)
+	return stop
+}
+
 // step does one tick of work and makes sure the unit sent exactly one input
 // for it. Bedrock only advances a player on client input, so a unit that sent
 // nothing would hang in mid-air; one that sent two would run ahead of the
@@ -254,15 +278,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		return a, before
 	}
 	if x := r.reflex; x != nil && x.Engaged(a.Pose(), snap) {
-		var stop skill.Stopper
-		if e := r.cur; e != nil {
-			e.fought += dt
-			if e.ready {
-				// The skill is stopped for the fight and resumed after it.
-				e.ready, e.resume = false, true
-				stop, _ = e.skills[e.idx].(skill.Stopper)
-			}
-		}
+		stop := r.preempt(dt)
 		r.mu.Unlock()
 		if stop != nil {
 			// Stop may send the tick's one input; the fight begins next tick.
@@ -271,6 +287,16 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		}
 		// A write error surfaces on the read loop, which ends the session.
 		_ = x.Fight(ctx, a, snap)
+		return a, before
+	}
+	if x := r.reflex; x != nil && x.Tending(snap, r.cur != nil) {
+		stop := r.preempt(dt)
+		r.mu.Unlock()
+		if stop != nil {
+			stop.Stop(a)
+			return a, before
+		}
+		_ = x.Tend(ctx, a, snap)
 		return a, before
 	}
 	if r.cur == nil {
