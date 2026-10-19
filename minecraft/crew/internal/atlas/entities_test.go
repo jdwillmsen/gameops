@@ -378,3 +378,26 @@ func TestEntityTexturesStopLoadingPastTheAggregateBudget(t *testing.T) {
 		t.Fatal("a texture past the budget was kept")
 	}
 }
+
+func TestResolveRefusesInheritedBoxesOverTheModelLimit(t *testing.T) {
+	cubes := func(n int) []geoCube { return make([]geoCube, n) }
+	models := map[string]geoModel{
+		"geometry.base": {id: "geometry.base", bones: []geoBone{{Name: "a", Cubes: cubes(maxModelCubes - 10)}}},
+		"geometry.kid":  {id: "geometry.kid", parent: "geometry.base", bones: []geoBone{{Name: "b", Cubes: cubes(20)}}},
+	}
+	if _, err := resolveModel(models, "geometry.base", 0); err != nil {
+		t.Fatalf("the base alone is within the limit: %v", err)
+	}
+	if _, err := resolveModel(models, "geometry.kid", 0); err == nil {
+		t.Fatal("a model over the limit with what it inherits was resolved")
+	}
+}
+
+func TestEntityTableOverTheSizeCapIsRefused(t *testing.T) {
+	old := maxEntityTableBytes
+	maxEntityTableBytes = 100
+	defer func() { maxEntityTableBytes = old }()
+	if _, _, err := buildEntities(fixturePack(t)); err == nil {
+		t.Fatal("an oversized table was built")
+	}
+}

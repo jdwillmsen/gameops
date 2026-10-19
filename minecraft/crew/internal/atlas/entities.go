@@ -31,6 +31,10 @@ const (
 	maxEntitySheet    = 4096
 )
 
+// maxEntityTableBytes caps the table every viewer downloads; the real one is
+// a few hundred KB. A variable for tests.
+var maxEntityTableBytes = 8 << 20
+
 // maxEntityPixels bounds the decoded textures held at once, before they are
 // packed; the sheet's own limit is 4096 squared. A variable for tests.
 var maxEntityPixels = maxEntitySheet * maxEntitySheet
@@ -720,7 +724,15 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 	if err := png.Encode(&enc, sheet); err != nil {
 		return nil, EntityTable{}, err
 	}
-	return enc.Bytes(), EntityTable{Version: entityTableVersion, Width: width, Height: height, Models: models}, nil
+	tbl := EntityTable{Version: entityTableVersion, Width: width, Height: height, Models: models}
+	doc, err := json.Marshal(tbl)
+	if err != nil {
+		return nil, EntityTable{}, err
+	}
+	if len(doc) > maxEntityTableBytes {
+		return nil, EntityTable{}, fmt.Errorf("atlas: entity table is %d bytes, over the limit of %d", len(doc), maxEntityTableBytes)
+	}
+	return enc.Bytes(), tbl, nil
 }
 
 // placeLayer maps a layer's texture fractions to sheet pixels. It builds new
