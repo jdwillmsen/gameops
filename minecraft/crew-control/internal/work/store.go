@@ -55,7 +55,11 @@ type Store interface {
 	Enqueue(ctx context.Context, unit, kind string, body json.RawMessage, operator string) (Item, error)
 	// Next returns the oldest command, else the oldest task, that is queued
 	// or delivered more than RedeliverAfter before now, and marks it delivered.
-	Next(ctx context.Context, unit string, now time.Time) (Item, bool, error)
+	// With nothing to hand out, redeliverIn is how long until a delivered item
+	// becomes due again (zero when none is), so a poller can wake for it.
+	// A database-backed store takes now from the database, not the argument,
+	// so every timestamp it writes and compares shares one clock.
+	Next(ctx context.Context, unit string, now time.Time) (it Item, ok bool, redeliverIn time.Duration, err error)
 	// Apply records a unit's report. An item already in a terminal state is
 	// returned unchanged.
 	Apply(ctx context.Context, unit string, id uuid.UUID, state string, progress int, reason string) (Item, error)
@@ -140,10 +144,10 @@ func (l *Lazy) Enqueue(ctx context.Context, unit, kind string, body json.RawMess
 	return s.Enqueue(ctx, unit, kind, body, operator)
 }
 
-func (l *Lazy) Next(ctx context.Context, unit string, now time.Time) (Item, bool, error) {
+func (l *Lazy) Next(ctx context.Context, unit string, now time.Time) (Item, bool, time.Duration, error) {
 	s, err := l.get()
 	if err != nil {
-		return Item{}, false, err
+		return Item{}, false, 0, err
 	}
 	return s.Next(ctx, unit, now)
 }

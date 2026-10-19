@@ -88,7 +88,7 @@ func main() {
 	go func() { poller.Run(ctx); close(pollDone) }()
 
 	storeDone := make(chan struct{})
-	go func() { openStore(ctx, store, dsn, log); close(storeDone) }()
+	go func() { openStore(ctx, store, dsn, os.Getenv("WORK_STORE") == "memory", log); close(storeDone) }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -138,12 +138,20 @@ func postgresDSN() (string, error) {
 // openStore fills store once a backend is ready, then prunes it until ctx
 // ends. A database that is down at start must not stop the console, so the
 // work routes answer 503 while this retries.
-func openStore(ctx context.Context, store *work.Lazy, dsn string, log *logging.Logger) {
+//
+// The memory store needs an explicit opt-in: a production deployment that
+// lost its PG_HOST would otherwise run on a queue that vanishes on restart,
+// and nothing would say so. Unconfigured behaves like a database that is down.
+func openStore(ctx context.Context, store *work.Lazy, dsn string, memory bool, log *logging.Logger) {
 	var backend work.Store
-	if dsn == "" {
+	switch {
+	case dsn == "" && memory:
 		log.Info("work_store_memory", nil)
 		backend = work.NewMemory()
-	} else {
+	case dsn == "":
+		log.Error("work_store_unconfigured", logging.Fields{"effect": "work routes answer 503; set PG_HOST, or WORK_STORE=memory for development"})
+		return
+	default:
 		wait := time.Second
 		warned := false
 		for backend == nil {

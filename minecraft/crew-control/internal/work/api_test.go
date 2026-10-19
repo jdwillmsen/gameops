@@ -206,21 +206,49 @@ func TestStoreNotConnectedAnswers503(t *testing.T) {
 	}
 }
 
-func TestEmptyTokenRefusesEverything(t *testing.T) {
+func TestEmptyTokenRegistersNoRoutes(t *testing.T) {
 	units, _ := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`)
 	mux := http.NewServeMux()
 	Routes(mux, NewMemory(), units, "", nil)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	req, _ := http.NewRequest("GET", srv.URL+"/v1/units/crew-01/work?wait=1s", nil)
-	req.Header.Set("Authorization", "Bearer ")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	for _, c := range []struct{ method, path, auth string }{
+		{"GET", "/v1/units/crew-01/work?wait=1s", "Bearer "},
+		{"GET", "/v1/units/crew-01/work?wait=1s", ""},
+		{"POST", "/v1/units/crew-01/events", "Bearer "},
+	} {
+		req, _ := http.NewRequest(c.method, srv.URL+c.path, strings.NewReader("{}"))
+		req.Header.Set("Authorization", c.auth)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 404 {
+			t.Errorf("%s %s: status %d, want 404", c.method, c.path, resp.StatusCode)
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 401 {
-		t.Fatalf("status %d", resp.StatusCode)
+}
+
+func TestPollWakesForRedeliveryDueMidWait(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var skew atomic.Int64
+	r.api.now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	if resp := r.do(t, "GET", "/v1/units/crew-01/work?wait=1s", "", nil); resp.StatusCode != 200 {
+		t.Fatalf("first delivery: %d", resp.StatusCode)
+	}
+	// Half a second of real time from the 30 s mark; the poll's own wait is
+	// far longer than that.
+	skew.Store(int64(29*time.Second + 500*time.Millisecond))
+	start := time.Now()
+	resp := r.do(t, "GET", "/v1/units/crew-01/work?wait=20s", "", nil)
+	body := readBody(t, resp)
+	if !strings.Contains(body, it.ID.String()) {
+		t.Fatalf("body %s", body)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("redelivery took %v, should follow the due time", d)
 	}
 }
 

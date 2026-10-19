@@ -39,10 +39,13 @@ func (m *Memory) Enqueue(_ context.Context, unit, kind string, body json.RawMess
 	return it.Item, nil
 }
 
-func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool, error) {
+func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool, time.Duration, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var pick *memItem
+	var (
+		pick *memItem
+		due  time.Duration
+	)
 	for _, it := range m.items {
 		if it.Unit != unit {
 			continue
@@ -50,7 +53,10 @@ func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool
 		switch it.State {
 		case Queued:
 		case Delivered:
-			if now.Sub(m.delivered[it.ID]) <= RedeliverAfter {
+			if left := RedeliverAfter - now.Sub(m.delivered[it.ID]); left > 0 {
+				if due == 0 || left < due {
+					due = left
+				}
 				continue
 			}
 		default:
@@ -62,12 +68,12 @@ func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool
 		}
 	}
 	if pick == nil {
-		return Item{}, false, nil
+		return Item{}, false, due, nil
 	}
 	pick.State = Delivered
 	pick.Updated = now
 	m.delivered[pick.ID] = now
-	return pick.Item, true, nil
+	return pick.Item, true, 0, nil
 }
 
 func (m *Memory) Apply(_ context.Context, unit string, id uuid.UUID, state string, progress int, reason string) (Item, error) {

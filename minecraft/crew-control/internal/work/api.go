@@ -29,6 +29,7 @@ type API struct {
 	units  roster.Roster
 	token  [sha256.Size]byte
 	notify func(unit string)
+	now    func() time.Time
 
 	mu    sync.Mutex
 	waits map[string]chan struct{}
@@ -38,10 +39,15 @@ func Routes(mux *http.ServeMux, s Store, units roster.Roster, token string, noti
 	if notify == nil {
 		notify = func(string) {}
 	}
-	a := &API{store: s, units: units, token: sha256.Sum256([]byte(token)), notify: notify, waits: map[string]chan struct{}{}}
-	// With no token configured nothing is accepted, rather than "Bearer ".
-	mux.HandleFunc("GET /v1/units/{id}/work", a.guard(token != "", a.poll))
-	mux.HandleFunc("POST /v1/units/{id}/events", a.guard(token != "", a.event))
+	a := &API{store: s, units: units, token: sha256.Sum256([]byte(token)), notify: notify, now: time.Now, waits: map[string]chan struct{}{}}
+	// With no token configured the routes do not exist, rather than existing
+	// to refuse; a deployment that lost its secret looks like one without
+	// the feature.
+	if token == "" {
+		return a
+	}
+	mux.HandleFunc("GET /v1/units/{id}/work", a.guard(a.poll))
+	mux.HandleFunc("POST /v1/units/{id}/events", a.guard(a.event))
 	return a
 }
 
@@ -68,7 +74,7 @@ func (a *API) waiter(unit string) <-chan struct{} {
 	return ch
 }
 
-func (a *API) guard(tokenSet bool, next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
+func (a *API) guard(next func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only the cluster-internal path is meant to reach these routes.
 		if r.Header.Get("X-Forwarded-For") != "" {
@@ -77,7 +83,7 @@ func (a *API) guard(tokenSet bool, next func(http.ResponseWriter, *http.Request,
 		}
 		got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		sum := sha256.Sum256([]byte(got))
-		if !tokenSet || !ok || subtle.ConstantTimeCompare(sum[:], a.token[:]) != 1 {
+		if !ok || subtle.ConstantTimeCompare(sum[:], a.token[:]) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -110,7 +116,7 @@ func (a *API) poll(w http.ResponseWriter, r *http.Request, unit string) {
 	defer timer.Stop()
 	for {
 		woken := a.waiter(unit)
-		it, ok, err := a.store.Next(r.Context(), unit, time.Now())
+		it, ok, due, err := a.store.Next(r.Context(), unit, a.now())
 		if err != nil {
 			storeError(w, r, err)
 			return
@@ -126,14 +132,27 @@ func (a *API) poll(w http.ResponseWriter, r *http.Request, unit string) {
 			_ = json.NewEncoder(w).Encode(wi)
 			return
 		}
+		// An item delivered earlier may fall due again before the wait ends.
+		var (
+			redeliver <-chan time.Time
+			rt        *time.Timer
+		)
+		if due > 0 {
+			rt = time.NewTimer(due)
+			redeliver = rt.C
+		}
 		select {
 		case <-woken:
+		case <-redeliver:
 		case <-timer.C:
 			w.WriteHeader(http.StatusNoContent)
 			return
 		case <-r.Context().Done():
 			// Shutdown or a gone unit: nobody is left to read an answer.
 			return
+		}
+		if rt != nil {
+			rt.Stop()
 		}
 	}
 }
