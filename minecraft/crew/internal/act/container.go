@@ -57,7 +57,12 @@ func trimNamespace(n string) string {
 	return n
 }
 
+// instance names a stack for a packet. A zero Item is an empty hand, which is
+// what an empty hotbar slot holds.
 func (a *Actuator) instance(it belief.Item) (protocol.ItemInstance, error) {
+	if it.Name == "" && it.Count == 0 {
+		return protocol.ItemInstance{}, nil
+	}
 	id, ok := a.itemIDs[it.Name]
 	if !ok {
 		return protocol.ItemInstance{}, fmt.Errorf("item %q is not in the server's item table", it.Name)
