@@ -215,9 +215,10 @@ func TestFetchDownloadsOnlyWhatBuildReadsAndCaches(t *testing.T) {
 
 func TestFetchKeepsOldFullPackCache(t *testing.T) {
 	cache := t.TempDir()
-	dir := filepath.Join(cache, testTag, "resource_pack", "textures", "entity")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
+	for _, d := range []string{"textures/entity", "entity"} {
+		if err := os.MkdirAll(filepath.Join(cache, testTag, "resource_pack", filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(cache, testTag, completeMark), nil, 0o644); err != nil {
 		t.Fatal(err)
@@ -331,5 +332,87 @@ func TestWantedPaths(t *testing.T) {
 		if got := wanted(p); got != want {
 			t.Errorf("wanted(%q) = %v, want %v", p, got, want)
 		}
+	}
+}
+
+func TestWantedEntityData(t *testing.T) {
+	for p, want := range map[string]bool{
+		"resource_pack/entity/cow.entity.json":          true,
+		"resource_pack/entity/cow.v1.0.json":            true,
+		"resource_pack/entity/sub/cow.json":             false,
+		"resource_pack/models/entity/cow.geo.json":      true,
+		"resource_pack/models/entity/sub/cow.geo.json":  true,
+		"resource_pack/models/entity/readme.txt":        false,
+		"resource_pack/models/mobs.json":                true,
+		"resource_pack/models/blocks/x.geo.json":        false,
+		"resource_pack/textures/entity/cow/cow.png":     false,
+		"resource_pack/entity/../textures/blocks/a.png": false,
+		"behavior_pack/entity/cow.json":                 false,
+	} {
+		if got := wanted(p); got != want {
+			t.Errorf("wanted(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+func TestFetchEntityTexturesOnlyThoseDefinitionsName(t *testing.T) {
+	tree := append([]treeEntry{}, packTree...)
+	tree = append(tree,
+		blob("resource_pack/entity/cow.entity.json"),
+		blob("resource_pack/models/entity/cow.geo.json"),
+		blob("resource_pack/textures/entity/cow/cow.png"),
+		blob("resource_pack/textures/entity/cow/cow.tga"),
+		blob("resource_pack/textures/entity/cow/cow_mers.tga"),
+		blob("resource_pack/textures/entity/creeper.tga"),
+	)
+	files := map[string]string{}
+	for k, v := range packFiles {
+		files[k] = v
+	}
+	files["resource_pack/entity/cow.entity.json"] = def("minecraft:cow", "1.8.0", `"default":"textures/entity/cow/cow"`, `"default":"geometry.cow"`, "")
+	files["resource_pack/models/entity/cow.geo.json"] = `{}`
+	files["resource_pack/textures/entity/cow/cow.png"] = "png"
+	files["resource_pack/textures/entity/cow/cow.tga"] = "tga"
+	files["resource_pack/textures/entity/cow/cow_mers.tga"] = "mers"
+	files["resource_pack/textures/entity/creeper.tga"] = "creeper"
+	gh := newFakeGitHub(t, tree, files)
+	cache := t.TempDir()
+	pack, err := gh.fetcher().Fetch(context.Background(), "1.26.52.3", cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.hits("resource_pack/textures/entity/cow/cow.png") != 1 {
+		t.Fatal("the named texture was not fetched")
+	}
+	for _, skipped := range []string{"cow/cow.tga", "cow/cow_mers.tga", "creeper.tga"} {
+		if gh.hits("resource_pack/textures/entity/"+skipped) != 0 {
+			t.Fatalf("%s was fetched", skipped)
+		}
+	}
+	if pack.Files != 6+3 {
+		t.Fatalf("files = %d", pack.Files)
+	}
+	if b, _ := os.ReadFile(filepath.Join(cache, testTag, completeMark)); string(b) != cacheLayout {
+		t.Fatalf("complete mark = %q", b)
+	}
+}
+
+func TestFetchRefetchesAnOlderCacheLayout(t *testing.T) {
+	gh := newFakeGitHub(t, packTree, packFiles)
+	cache := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cache, testTag, "resource_pack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, testTag, completeMark), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, indexFile), []byte(`{"1.26.52.3":"`+testTag+`"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gh.fetcher().Fetch(context.Background(), "1.26.52.3", cache); err != nil {
+		t.Fatal(err)
+	}
+	if gh.treeCalls.Load() != 1 {
+		t.Fatalf("an old cache was served: tree calls = %d", gh.treeCalls.Load())
 	}
 }
