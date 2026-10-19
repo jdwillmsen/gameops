@@ -31,6 +31,10 @@ type MapNames interface {
 // spent as guesses against the service.
 var mapCode = regexp.MustCompile(`^[A-HJ-NP-Z2-9]{6}$`)
 
+// passkeyFingerprint is the shape the map page shows beside a passkey
+// waiting for its code, which players mistake for the code itself.
+var passkeyFingerprint = regexp.MustCompile(`^[0-9A-F]{4}-[0-9A-F]{4}$`)
+
 // MapLogin is how a player proves to the world map that they are on the
 // server. The map page shows a code; typing it in chat is something only a
 // connected player can do, and the chat packet carries their XUID. Links in
@@ -90,8 +94,11 @@ func (m *MapLogin) run(ctx context.Context, _ *plugin.Context, inv plugin.Invoca
 		return "Every browser that was logged in to the map as you has been logged out, and any passkeys for your map login have been removed.", nil
 	}
 	code := strings.ToUpper(inv.Args[0])
+	if len(inv.Args) == 1 && passkeyFingerprint.MatchString(code) {
+		return "That is a passkey's fingerprint, only for checking. To get the code for a passkey, type exactly !map passkey.", nil
+	}
 	if len(inv.Args) != 1 || !mapCode.MatchString(code) {
-		return fmt.Sprintf("A map code is six letters and digits, like !map ABC234. Open %s to get one.", m.url), nil
+		return fmt.Sprintf("A map code is six letters and digits, like !map ABC234. Open %s to get one. To add a passkey, type exactly !map passkey.", m.url), nil
 	}
 	gamertag, _ := m.names.NameFor(inv.ActorXUID)
 	err := m.claimer.Claim(ctx, code, inv.ActorXUID, gamertag)

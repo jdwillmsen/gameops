@@ -125,6 +125,22 @@ func TestMap_MalformedCodesAreAnsweredWithoutAsking(t *testing.T) {
 	}
 }
 
+// The map page shows a passkey's fingerprint beside the box for its code,
+// and a player who types that fingerprint, or the passkey's name, has
+// mistaken which command adds it.
+func TestMap_APasskeyFingerprintOrNamePointsToMapPasskey(t *testing.T) {
+	for _, args := range [][]string{{"3EB9-B4A4"}, {"3eb9-b4a4"}, {"google"}} {
+		claimer := &fakeClaimer{}
+		reply, err := runMap(t, claimer, args...)
+		if err != nil || claimer.calls != 0 || len(claimer.passkeyFor) != 0 {
+			t.Errorf("%v: err %v, %d claims, %d passkey codes", args, err, claimer.calls, len(claimer.passkeyFor))
+		}
+		if !strings.Contains(reply, "!map passkey") {
+			t.Errorf("%v: reply %q does not name !map passkey", args, reply)
+		}
+	}
+}
+
 func TestMap_UnknownOrExpiredCodeIsAPlainAnswer(t *testing.T) {
 	claimer := &fakeClaimer{err: mapclient.ErrUnknownCode}
 	reply, err := runMap(t, claimer, "ABC234")
