@@ -165,7 +165,6 @@ func TestPollerSingleFailureStaysOnline(t *testing.T) {
 func streamServer(t *testing.T, p *Poller) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/units", p.ListHandler)
 	mux.HandleFunc("/v1/units/stream", p.StreamHandler)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -253,17 +252,6 @@ func TestStreamLimit(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("65th client status = %d, want 503", resp.StatusCode)
-	}
-}
-
-func TestListReturnsSnapshot(t *testing.T) {
-	unit := newFakeUnit(t, stateKnownWithTask)
-	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
-	rec := httptest.NewRecorder()
-	p.ListHandler(rec, httptest.NewRequest("GET", "/v1/units", nil))
-	var got []Status
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got) != 1 || got[0].Online {
-		t.Fatalf("body = %s (%v)", rec.Body, err)
 	}
 }
 

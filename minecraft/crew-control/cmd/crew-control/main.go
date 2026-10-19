@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,15 +43,6 @@ func main() {
 
 	poller := telemetry.NewPoller(units, &http.Client{}, pollEvery)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/units", poller.ListHandler)
-	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler)
-	console.Mount(mux)
-	mux.Handle("/units/", proxy.Handler(units, log))
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
-
 	// No WriteTimeout: it would cut the camera websocket and the status
 	// stream, which are long-lived by design.
 	// Shutdown waits for active requests, and an SSE stream never ends on its
@@ -59,7 +51,7 @@ func main() {
 	defer endStreams()
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           newHandler(units, poller, log),
 		ReadHeaderTimeout: 5 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return streamCtx },
 	}
@@ -88,4 +80,24 @@ func main() {
 		log.Warn("shutdown_incomplete", logging.Fields{"error": err.Error()})
 	}
 	<-pollDone
+}
+
+func newHandler(units roster.Roster, poller *telemetry.Poller, log *logging.Logger) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler)
+	console.Mount(mux)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	// The proxy bypasses the mux, which would answer an unclean path with a
+	// redirect before the proxy could refuse it.
+	unitProxy := proxy.Handler(units, log)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/units/") {
+			unitProxy.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }

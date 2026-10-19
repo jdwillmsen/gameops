@@ -14,13 +14,6 @@ const (
 	streamWriteTimeout = 5 * time.Second
 )
 
-// ListHandler serves GET /v1/units.
-func (p *Poller) ListHandler(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(p.Snapshot())
-}
-
 func (p *Poller) acquireStream() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
