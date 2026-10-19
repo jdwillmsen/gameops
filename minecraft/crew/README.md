@@ -39,15 +39,35 @@ Off unless `TASKS_TOKEN` is set. Every request needs
 - `GET /v1/tasks` lists queued, running and the last 50 finished tasks.
 - `POST /v1/tasks/{id}/cancel` cancels a queued or running task (404 unknown, 409 already finished).
 
-The only template is `gather_and_deposit`; any other template, item or field
-is a 400:
+Two templates exist; any other template, item or field is a 400. Each field
+is required.
+
+`gather_and_deposit` mines an item and puts it in one chest:
 
 ```json
 {"template": "gather_and_deposit", "item": "cobblestone", "qty": 16,
  "chest": {"x": 0, "y": 0, "z": 0}}
 ```
 
-`qty` is 1 to 256 and `item` must be `cobblestone`. Crew runs one task at a
+`qty` is 1 to 256 and `item` is `cobblestone` (mined with a pickaxe) or
+`oak_log` (chopped with an axe the unit must carry).
+
+`haul` empties source chests into one destination chest, waiting for items to
+arrive and making as many trips as the inventory needs. It ends when every
+item has been moved the requested number of times:
+
+```json
+{"template": "haul", "items": {"cobblestone": 16, "oak_log": 16},
+ "from": [{"x": 0, "y": 0, "z": 0}], "to": {"x": 0, "y": 0, "z": 0}}
+```
+
+`items` lists 1 to 8 items from the same set, each 1 to 256. `from` lists 1 to
+4 chests. A haul only takes into empty inventory slots or onto stacks of the
+same item, so tools stay put, and it fails after three attempts in a row that
+move nothing. Its `progress` is the total moved and its `qty` the total asked
+for.
+
+Crew runs one task at a
 time. A session end or death fails the running task (`session ended`,
 `unit died`) and queued tasks wait for the next spawn. Bodies are capped at
 4096 bytes (413) and at most 16 tasks may wait (429). Task logs carry the id,
@@ -55,7 +75,7 @@ template, state and reason, never the request.
 
 ```
 curl -H "Authorization: Bearer $TASKS_TOKEN" \
-  -d '{"template":"gather_and_deposit","item":"cobblestone","qty":16,"chest":{"x":-4,"y":100,"z":0}}' \
+  -d '{"template":"gather_and_deposit","item":"oak_log","qty":16,"chest":{"x":-4,"y":100,"z":0}}' \
   localhost:8080/v1/tasks
 curl -H "Authorization: Bearer $TASKS_TOKEN" localhost:8080/v1/tasks
 ```

@@ -42,7 +42,8 @@ type Task struct {
 	State    string `json:"state"`
 	Reason   string `json:"reason,omitempty"`
 	Skill    string `json:"skill,omitempty"`
-	// Item and Qty are what the task gathers; Progress counts toward Qty.
+	// Item and Qty are what the task gathers; Progress counts toward Qty. A
+	// haul has no single item: its Qty is the total to move.
 	Item     string    `json:"item,omitempty"`
 	Qty      int       `json:"qty,omitempty"`
 	Progress int       `json:"progress"`
@@ -229,7 +230,11 @@ func (r *Runner) step(ctx context.Context) {
 		return
 	}
 	e.ready = true
-	e.Progress = have(r.self(), e.item)
+	if p, ok := sk.(skill.Progresser); ok {
+		e.Progress = p.Progress()
+	} else {
+		e.Progress = have(r.self(), e.item)
+	}
 	e.Updated = r.now()
 	switch st {
 	case skill.Failed:

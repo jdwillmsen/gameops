@@ -155,7 +155,7 @@ func (d *Deposit) start(a Actuator) outcome {
 		d.phase = dOpen
 		return next
 	}
-	stand, ok := d.standCell(p)
+	stand, ok := standCell(d.world, d.chest, p)
 	if !ok {
 		return d.failed(a, errors.New("no standing spot within reach of the chest"))
 	}
@@ -163,14 +163,16 @@ func (d *Deposit) start(a Actuator) outcome {
 	return next
 }
 
-func (d *Deposit) standCell(p act.Pose) (protocol.BlockPos, bool) {
+// standCell picks the standing spot within reach of a chest that is nearest
+// the unit.
+func standCell(world ChestWorld, chest protocol.BlockPos, p act.Pose) (protocol.BlockPos, bool) {
 	best, bestD, found := protocol.BlockPos{}, float32(1e30), false
 	const span = 3
 	for dx := int32(-span); dx <= span; dx++ {
 		for dy := int32(-span); dy <= span; dy++ {
 			for dz := int32(-span); dz <= span; dz++ {
-				c := protocol.BlockPos{d.chest.X() + dx, d.chest.Y() + dy, d.chest.Z() + dz}
-				if centre(d.chest).Sub(standEye(c)).Len() > chestRange-arriveSlack || !path.Standable(d.world, c) {
+				c := protocol.BlockPos{chest.X() + dx, chest.Y() + dy, chest.Z() + dz}
+				if centre(chest).Sub(standEye(c)).Len() > chestRange-arriveSlack || !path.Standable(world, c) {
 					continue
 				}
 				if dist := centre(c).Sub(p.Feet).LenSqr(); dist < bestD {
