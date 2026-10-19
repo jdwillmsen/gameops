@@ -35,6 +35,7 @@ type Actuator interface {
 	Attack(target uint64, slot int, held belief.Item) error
 	UseItem(slot int, held belief.Item) error
 	ReleaseItem(slot int, held belief.Item) error
+	PlaceOnTop(against protocol.BlockPos, hotbar int, held belief.Item, hash uint32) error
 	OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
 	Container() (open bool, windowID byte, pos protocol.BlockPos)
 	ContainerContent() []protocol.ItemInstance

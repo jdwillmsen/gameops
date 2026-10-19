@@ -62,6 +62,12 @@ type Mine struct {
 	walkFails int
 	nav       *navigator
 
+	// hold keeps the unit where it stands: only blocks already in reach are
+	// broken, drops are left, and progress is not judged. Fell uses it from a
+	// pillar, where walking to a drop would mean leaving.
+	hold   bool
+	felled []protocol.BlockPos
+
 	selected     bool
 	breakStarted bool
 	// A Start is outstanding: the server is still timing a break that has not
@@ -164,7 +170,7 @@ func (m *Mine) Step(ctx context.Context, a Actuator) (Status, error) {
 	if !m.started {
 		m.started, m.baseline, m.have = true, have, have
 	}
-	if have-m.baseline >= m.qty {
+	if !m.hold && have-m.baseline >= m.qty {
 		return Done, nil
 	}
 
@@ -187,11 +193,17 @@ func (m *Mine) Step(ctx context.Context, a Actuator) (Status, error) {
 	}
 }
 
+// noSourceError says no block of the kind can be reached from anywhere the
+// unit can stand.
+type noSourceError struct{ msg string }
+
+func (e noSourceError) Error() string { return e.msg }
+
 func (m *Mine) noSource() error {
 	if m.area != nil {
-		return fmt.Errorf("no reachable %s in the area", m.block)
+		return noSourceError{fmt.Sprintf("no reachable %s in the area", m.block)}
 	}
-	return fmt.Errorf("no reachable %s within %d blocks", m.block, m.radius)
+	return noSourceError{fmt.Sprintf("no reachable %s within %d blocks", m.block, m.radius)}
 }
 
 // fail ends the skill, aborting a break that is still in progress first. The
@@ -205,9 +217,9 @@ func (m *Mine) fail(a Actuator, err error) (Status, error) {
 	return Failed, err
 }
 
-// find picks the nearest block that can be broken from somewhere standable,
-// and sets up the walk there if the unit is not already in reach.
-func (m *Mine) find(a Actuator, p act.Pose) outcome {
+// candidates lists the blocks of the kind within the radius that the skill
+// may break, nearest first, leaving out those it ruled out unless asked.
+func (m *Mine) candidates(p act.Pose, withSkipped bool) []protocol.BlockPos {
 	feet := cellOf(p.Feet)
 	r := m.radius
 	var cands []protocol.BlockPos
@@ -218,7 +230,7 @@ func (m *Mine) find(a Actuator, p act.Pose) outcome {
 					continue
 				}
 				b := protocol.BlockPos{feet.X() + int32(dx), feet.Y() + int32(dy), feet.Z() + int32(dz)}
-				if name, known := m.world.Block(b); known && name == m.block && !m.skip[b] && (m.area == nil || m.area.contains(b)) {
+				if name, known := m.world.Block(b); known && name == m.block && (withSkipped || !m.skip[b]) && (m.area == nil || m.area.contains(b)) {
 					cands = append(cands, b)
 				}
 			}
@@ -226,6 +238,14 @@ func (m *Mine) find(a Actuator, p act.Pose) outcome {
 	}
 	d2 := func(b protocol.BlockPos) float32 { return centre(b).Sub(p.Feet).LenSqr() }
 	sort.SliceStable(cands, func(i, j int) bool { return d2(cands[i]) < d2(cands[j]) })
+	return cands
+}
+
+// find picks the nearest block that can be broken from somewhere standable,
+// and sets up the walk there if the unit is not already in reach.
+func (m *Mine) find(a Actuator, p act.Pose) outcome {
+	feet := cellOf(p.Feet)
+	cands := m.candidates(p, m.hold)
 
 	under := protocol.BlockPos{feet.X(), feet.Y() - 1, feet.Z()}
 	for i, b := range cands {
@@ -239,6 +259,9 @@ func (m *Mine) find(a Actuator, p act.Pose) outcome {
 		if centre(b).Sub(eyeOf(p.Feet)).Len() <= mineReach {
 			m.aim(b, mBreak)
 			return next
+		}
+		if m.hold {
+			continue
 		}
 		if stand, ok := m.standCell(b, p.Feet); ok {
 			m.aim(b, mWalk)
@@ -311,6 +334,10 @@ func (m *Mine) standCell(b protocol.BlockPos, from mgl32.Vec3) (protocol.BlockPo
 func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 	if name, known := m.world.Block(m.target); known && name != m.block {
 		m.sessionOpen = false
+		if m.hold {
+			m.phase = mFind
+			return next
+		}
 		m.phase, m.waited, m.pickInit = mPickup, 0, false
 		return next
 	}
@@ -328,6 +355,11 @@ func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 			m.selected = true
 		}
 		m.breakStarted, m.sessionOpen = true, true
+		if m.hold {
+			// Noted at the start: a fight can end the skill's step after the
+			// block has gone and before it sees so.
+			m.felled = append(m.felled, m.target)
+		}
 		in.Break = &act.BreakAction{Pos: m.target, Face: faceToward(m.target, eyeOf(p.Feet)), Phase: act.BreakStart}
 	} else if m.waited++; m.waited > breakTicks {
 		return m.failed(a, errors.New("block did not break"))

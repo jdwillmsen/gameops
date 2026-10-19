@@ -23,6 +23,7 @@ const (
 	idOakLog      = 5
 	idWoodenPick  = 312
 	chestHash     = 3162850062
+	blockHash     = 777
 )
 
 var itemTable = []protocol.ItemEntry{
@@ -30,6 +31,7 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:cobblestone", RuntimeID: idCobblestone},
 	{Name: "minecraft:oak_log", RuntimeID: idOakLog},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: idWoodenPick},
+	{Name: "minecraft:iron_axe", RuntimeID: idAxe},
 	{Name: "minecraft:wooden_sword", RuntimeID: 300},
 	{Name: "minecraft:iron_sword", RuntimeID: 301},
 	{Name: "minecraft:bread", RuntimeID: 340},
@@ -43,10 +45,14 @@ type simWorld map[protocol.BlockPos]string
 func (w simWorld) Block(p protocol.BlockPos) (string, bool) { n, ok := w[p]; return n, ok }
 
 func (w simWorld) BlockHash(p protocol.BlockPos) (uint32, bool) {
-	if w[p] == "chest" {
+	switch name := w[p]; name {
+	case "chest":
 		return chestHash, true
+	case "", "air":
+		return 0, false
+	default:
+		return blockHash, true
 	}
-	return 0, false
 }
 
 // platform lays a dirt floor at y=0 over [x0,x1]x[z0,z1] with air above it.
@@ -128,6 +134,8 @@ type rig struct {
 	takeStatus  []uint8 // answers to the next withdraws, in order
 	takes       int
 	places      int
+	placed      int // blocks the server accepted on a top face
+	maxRise     float32
 	chestAt     protocol.BlockPos
 	window      byte
 	opens       int
@@ -225,6 +233,12 @@ func (r *rig) OpenChest(pos protocol.BlockPos, face int32, hotbar int, held beli
 	return err
 }
 
+func (r *rig) PlaceOnTop(against protocol.BlockPos, hotbar int, held belief.Item, hash uint32) error {
+	err := r.Actuator.PlaceOnTop(against, hotbar, held, hash)
+	r.pump()
+	return err
+}
+
 func (r *rig) Deposit(from belief.Item, count int, to byte) (int32, error) {
 	id, err := r.Actuator.Deposit(from, count, to)
 	r.pump()
@@ -315,6 +329,10 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 		for _, a := range acts {
 			switch a.Action {
 			case protocol.PlayerActionStartBreak:
+				eye := r.Actuator.Pose().Feet.Add(mgl32.Vec3{0, 1.62, 0})
+				if centre := (mgl32.Vec3{float32(a.BlockPos.X()) + 0.5, float32(a.BlockPos.Y()) + 0.5, float32(a.BlockPos.Z()) + 0.5}); centre.Sub(eye).Len() > 5.5 {
+					continue
+				}
 				r.breaking = &breakSession{pos: a.BlockPos, left: 23}
 			case protocol.PlayerActionAbortBreak:
 				r.breaking = nil
@@ -341,7 +359,7 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 		// until it despawns, so a drop missed at first can still be taken.
 		if d.age++; d.age >= 10 {
 			dx, dz := float64(d.at.X()-pose.Feet.X()), float64(d.at.Z()-pose.Feet.Z())
-			if !r.refusePickups && math.Hypot(dx, dz) <= 1.5 {
+			if !r.refusePickups && math.Hypot(dx, dz) <= 1.5 && math.Abs(float64(d.at.Y()-pose.Feet.Y())) <= 1 {
 				r.pickUp(d.item)
 				continue
 			}
@@ -360,9 +378,16 @@ func (r *rig) onBroken(pos protocol.BlockPos) {
 	name := r.world[pos]
 	r.world[pos] = "air"
 	r.breaks++
-	drops := map[string]int32{"stone": idCobblestone}
+	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone}
 	if item, ok := drops[name]; ok {
-		at := mgl32.Vec3{float32(pos.X()) + 0.5, float32(pos.Y()), float32(pos.Z()) + 0.5}
+		// An item falls to the first solid block under it.
+		y := pos.Y()
+		for ; y > -64; y-- {
+			if n := r.world[protocol.BlockPos{pos.X(), y - 1, pos.Z()}]; n != "air" {
+				break
+			}
+		}
+		at := mgl32.Vec3{float32(pos.X()) + 0.5, float32(y), float32(pos.Z()) + 0.5}
 		r.drops = append(r.drops, drop{at: at, item: item})
 	}
 }
@@ -402,6 +427,10 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 	if !ok || r.ignoreOpen {
 		return
 	}
+	if r.world[u.BlockPosition] != "chest" {
+		r.onPlace(u)
+		return
+	}
 	eye := r.Actuator.Pose().Feet.Add(mgl32.Vec3{0, 1.62, 0})
 	centre := mgl32.Vec3{float32(u.BlockPosition.X()) + 0.5, float32(u.BlockPosition.Y()) + 0.5, float32(u.BlockPosition.Z()) + 0.5}
 	hash, _ := r.world.BlockHash(u.BlockPosition)
@@ -413,6 +442,39 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 		return
 	}
 	r.openChestNow(u.BlockPosition)
+}
+
+// onPlace is the server placing a block on a top face. It refuses what the
+// real one does: an air or unknown target, a cell the unit's body overlaps, a
+// click out of reach or a held stack that is not the one named.
+func (r *rig) onPlace(u *protocol.UseItemTransactionData) {
+	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone"}
+	pose := r.Actuator.Pose()
+	at := protocol.BlockPos{u.BlockPosition.X(), u.BlockPosition.Y() + 1, u.BlockPosition.Z()}
+	stack := &r.inv[u.HotBarSlot]
+	name, placeable := blocks[stack.item]
+	if u.BlockFace != 1 || !placeable || stack.count == 0 || u.HeldItem.Stack.NetworkID != stack.item ||
+		r.world[u.BlockPosition] == "" || r.world[u.BlockPosition] == "air" || r.world[at] != "air" {
+		return
+	}
+	if hash, _ := r.world.BlockHash(u.BlockPosition); u.BlockRuntimeID != hash {
+		return
+	}
+	overlapX := math.Abs(float64(pose.Feet.X())-float64(at.X())-0.5) < 0.8
+	overlapZ := math.Abs(float64(pose.Feet.Z())-float64(at.Z())-0.5) < 0.8
+	if overlapX && overlapZ && pose.Feet.Y() < float32(at.Y())+1 && pose.Feet.Y()+1.8 > float32(at.Y()) {
+		return
+	}
+	r.world[at] = name
+	r.placed++
+	if rise := pose.Feet.Y() - float32(at.Y()); rise > r.maxRise {
+		r.maxRise = rise
+	}
+	stack.count--
+	if stack.count == 0 {
+		*stack = slotStack{}
+	}
+	r.send(&packet.InventorySlot{WindowID: 0, Slot: uint32(u.HotBarSlot), NewItem: instance(*stack)})
 }
 
 func (r *rig) openChestNow(pos protocol.BlockPos) {
