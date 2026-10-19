@@ -1774,6 +1774,10 @@ kbd, .keys code {
   letter-spacing: 0.05em;
   width: fit-content;
 }
+#admin-steps { margin: 0; padding-left: 1.25rem; }
+#admin-steps[hidden] { display: none; }
+#admin-steps li { margin-bottom: 0.3rem; }
+#admin-steps code { padding: 0 0.25rem; background: var(--raised); border: 1px solid var(--rule); border-radius: var(--radius-s); font-weight: bold; }
 .debug[hidden], .account[hidden], .admin[hidden] { display: none; }
 .debug-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule); }
 .debug-head h2 { flex: 1; margin: 0; font-size: 12px; }

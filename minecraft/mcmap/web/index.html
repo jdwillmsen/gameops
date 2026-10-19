@@ -124,8 +124,12 @@
         <label>Name for a new passkey <input id="admin-label" maxlength="32" autocomplete="off"></label>
         <button id="admin-add" type="button">Add a passkey</button>
         <p id="admin-step" class="note"></p>
-        <code id="admin-fingerprint"></code>
-        <input id="admin-code" maxlength="6" autocomplete="one-time-code" placeholder="6-character code" hidden>
+        <ol id="admin-steps" class="steps" hidden>
+          <li>In the game chat, type exactly <code>!map passkey</code></li>
+          <li>The game whispers you a code. Check that the whisper names this fingerprint: <code id="admin-fingerprint"></code></li>
+          <li>Type the code from the whisper here, then Confirm.</li>
+        </ol>
+        <input id="admin-code" maxlength="6" autocomplete="one-time-code" placeholder="Code from the whisper" aria-label="Code from the whisper" hidden>
         <button id="admin-confirm" type="button" hidden>Confirm</button>
         <button id="admin-cancel" type="button" hidden>Cancel</button>
         <p id="admin-note" class="note" role="status"></p>
