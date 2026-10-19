@@ -132,6 +132,9 @@ type rig struct {
 	falls   []fall
 	// fallDelay is how many ticks unsupported gravel waits before it falls.
 	fallDelay int
+	// fallFlight is how many ticks a falling column spends in the air, its
+	// cells empty, before it lands.
+	fallFlight int
 	aborts    int
 	held      int // last MobEquipment hotbar slot, -1 before one
 
@@ -178,8 +181,9 @@ type timedFill struct {
 
 // fall is a block that was left unsupported and lands a few ticks later.
 type fall struct {
-	at   protocol.BlockPos
-	left int
+	at     protocol.BlockPos
+	left   int
+	flying []string
 }
 
 type breakSession struct {
@@ -374,7 +378,15 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 			live = append(live, f)
 			continue
 		}
-		r.settle(f.at)
+		switch {
+		case f.flying != nil:
+			r.land(f.at, f.flying)
+		case r.fallFlight > 0:
+			f.flying, f.left = r.lift(f.at), r.fallFlight
+			live = append(live, f)
+		default:
+			r.settle(f.at)
+		}
 	}
 	r.falls = live
 
@@ -433,6 +445,31 @@ func (r *rig) settle(at protocol.BlockPos) {
 			return
 		}
 		r.world[cell], r.world[above] = r.world[above], "air"
+	}
+}
+
+// lift takes the falling column above an emptied cell off the world, as the
+// server does when it turns the blocks into falling entities.
+func (r *rig) lift(at protocol.BlockPos) []string {
+	flying := []string{}
+	for y := at.Y() + 1; ; y++ {
+		cell := protocol.BlockPos{at.X(), y, at.Z()}
+		if !falling(r.world[cell]) {
+			return flying
+		}
+		flying = append(flying, r.world[cell])
+		r.world[cell] = "air"
+	}
+}
+
+// land puts a lifted column back down from the emptied cell up, one block in
+// each empty cell.
+func (r *rig) land(at protocol.BlockPos, flying []string) {
+	for y := at.Y(); len(flying) > 0; y++ {
+		cell := protocol.BlockPos{at.X(), y, at.Z()}
+		if r.world[cell] == "air" {
+			r.world[cell], flying = flying[0], flying[1:]
+		}
 	}
 }
 

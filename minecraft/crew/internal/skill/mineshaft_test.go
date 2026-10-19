@@ -264,6 +264,24 @@ func TestShaftWaitsOutGravelThatIsSlowToFall(t *testing.T) {
 	}
 }
 
+func TestShaftWaitsForGravelInTheAirToLand(t *testing.T) {
+	w := mineWorld()
+	w.fill("gravel", 13, 1, 10, 13, 3, 10)
+	r := shaftRig(t, w)
+	r.fallDelay = 40
+	r.fallFlight = 6
+	st, err := r.run(newShaft(t, w, r, shaftSpec(4, 0, 0), nil), 12000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := w.count("gravel"); got != 0 {
+		t.Errorf("%d gravel left in the world", got)
+	}
+	if got := chestCount(r, idGravel); got != 3 {
+		t.Errorf("chest gravel = %d, want 3", got)
+	}
+}
+
 func TestShaftStopsWhenGravelHidesWater(t *testing.T) {
 	w := mineWorld()
 	w.fill("gravel", 13, 1, 10, 13, 2, 10)
