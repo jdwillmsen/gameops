@@ -120,6 +120,15 @@ func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) {
 	return belief.Item{}, false
 }
 
+// Resume goes back to finding a block. Where the unit stands and what it holds
+// may have changed, but the baseline, the blocks ruled out and the misses
+// stay: they are what the skill has learned.
+func (m *Mine) Resume() {
+	m.phase, m.nav, m.target = mFind, nil, protocol.BlockPos{}
+	m.breakStarted, m.sessionOpen, m.selected = false, false, false
+	m.waited, m.pickInit = 0, false
+}
+
 func (m *Mine) Ready(s belief.Snapshot) error {
 	if err := overworld(s); err != nil {
 		return err

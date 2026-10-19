@@ -32,6 +32,7 @@ type Actuator interface {
 	// Ticks counts the inputs sent so far.
 	Ticks() uint64
 	SelectHotbar(slot int, item belief.Item) error
+	Attack(target uint64, slot int, held belief.Item) error
 	OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
 	Container() (open bool, windowID byte, pos protocol.BlockPos)
 	ContainerContent() []protocol.ItemInstance
@@ -56,6 +57,15 @@ type Skill interface {
 // It must be called from the goroutine that steps the skill.
 type Stopper interface {
 	Stop(Actuator)
+}
+
+// Resumer is implemented by skills that can pick up again after the unit left
+// them to fight. The runner stops the skill first when it is a Stopper, then
+// calls Resume instead of Ready: Ready judges a fresh start, and a skill part
+// way through no longer meets it. Resume forgets where in its steps the skill
+// was and keeps what it has accomplished.
+type Resumer interface {
+	Resume()
 }
 
 // Progresser is implemented by skills that count their own work, for tasks

@@ -98,6 +98,14 @@ func (d *Deposit) Ready(s belief.Snapshot) error {
 	return nil
 }
 
+// Resume starts the visit again. Stop shut the chest, and a request in flight
+// is forgotten: what was deposited shows in the inventory, which the amount
+// left is read from.
+func (d *Deposit) Resume() {
+	d.phase, d.nav, d.opened, d.waited = dStart, nil, false, 0
+	d.pending, d.settling, d.drainErr = false, false, nil
+}
+
 func (d *Deposit) Step(ctx context.Context, a Actuator) (Status, error) {
 	if err := ctx.Err(); err != nil {
 		return d.fail(a, err)
