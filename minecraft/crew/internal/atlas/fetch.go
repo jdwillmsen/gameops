@@ -44,6 +44,10 @@ const (
 	rawAccept             = "*/*"
 )
 
+// maxFileBytes bounds one response body, decompressed. The largest file the
+// camera reads is well under a megabyte; the variable is for tests.
+var maxFileBytes int64 = 16 << 20
+
 // Pack is a resource pack on local disk.
 type Pack struct {
 	Tag string
@@ -232,9 +236,15 @@ func (s *session) getOnce(ctx context.Context, target, accept string) ([]byte, e
 		}
 		r = gz
 	}
-	body, err := io.ReadAll(r)
+	// The cap applies after decompression, so a small gzip stream cannot
+	// expand without bound.
+	body, err := io.ReadAll(io.LimitReader(r, maxFileBytes+1))
+	if err == nil && int64(len(body)) > maxFileBytes {
+		err = fmt.Errorf("atlas: GET %s: response is over %d bytes", target, maxFileBytes)
+		body = nil
+	}
 	// Drain so the count covers the whole response, not just what gzip read.
-	_, _ = io.Copy(io.Discard, counted)
+	_, _ = io.Copy(io.Discard, io.LimitReader(counted, maxFileBytes))
 	s.bytes.Add(counted.n)
 	return body, err
 }
