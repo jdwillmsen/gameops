@@ -121,8 +121,6 @@ func (t *transport) abandon() bool {
 func (t *transport) leave(conn *minecraft.Conn, wait time.Duration) {
 	_ = conn.WritePacket(&packet.Disconnect{HideDisconnectionScreen: true})
 	_ = conn.Close()
-	_ = conn.Close()
-	_ = conn.Close()
 
 	t.mu.Lock()
 	raw := t.conn
