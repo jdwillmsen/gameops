@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -61,6 +62,11 @@ type Config struct {
 	// TasksToken guards the task endpoints; empty leaves them unregistered.
 	TasksToken   string
 	TaskTimeoutS int
+
+	// ControlURL and ControlToken connect the unit to crew-control; both are
+	// set or neither.
+	ControlURL   *url.URL
+	ControlToken string
 
 	// IdleWander lets a unit with no task look about and take short walks.
 	IdleWander bool
@@ -132,6 +138,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	controlURL, controlToken, err := controlSettings()
+	if err != nil {
+		return Config{}, err
+	}
+
 	idleWander, err := boolDefault("IDLE_WANDER", true)
 	if err != nil {
 		return Config{}, err
@@ -176,6 +187,9 @@ func Load() (Config, error) {
 		TasksToken:   strings.TrimSpace(os.Getenv("TASKS_TOKEN")),
 		TaskTimeoutS: taskTimeout,
 
+		ControlURL:   controlURL,
+		ControlToken: controlToken,
+
 		IdleWander: idleWander,
 		IdleRadius: idleRadius,
 		Defend:     defend,
@@ -205,6 +219,26 @@ func positionOptional(name string) (*[3]int32, error) {
 		pos[i] = int32(n)
 	}
 	return &pos, nil
+}
+
+// A URL without its token (or the reverse) would leave the unit silently
+// disconnected from the controller that thinks it is managing it.
+func controlSettings() (*url.URL, string, error) {
+	raw := strings.TrimSpace(os.Getenv("CONTROL_URL"))
+	token := strings.TrimSpace(os.Getenv("CONTROL_TOKEN"))
+	switch {
+	case raw == "" && token == "":
+		return nil, "", nil
+	case raw == "":
+		return nil, "", errors.New("CONTROL_TOKEN is set but CONTROL_URL is not")
+	case token == "":
+		return nil, "", errors.New("CONTROL_URL is set but CONTROL_TOKEN is not")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, "", errors.New("CONTROL_URL: want an http or https URL with a host")
+	}
+	return u, token, nil
 }
 
 func required(name string) (string, error) {
