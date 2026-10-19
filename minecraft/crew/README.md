@@ -108,13 +108,19 @@ curl -s localhost:8080/readyz
 
 ### Gather-and-deposit scene
 
-`lab/scene.sh <lab-service> [unit]` builds a stone-free platform, a quarry
+`lab/scene.sh <lab> [unit]` builds a stone-free platform, a quarry
 and a chest, then puts the unit on the platform with a wooden pickaxe:
 
 ```
 export TASKS_TOKEN=$(openssl rand -hex 16)   # compose passes it to crew-1
 docker compose -f minecraft/crew/lab/compose.yaml up -d --build
 minecraft/crew/lab/scene.sh lab
+```
+
+On the cluster lab, name the server pod instead of a compose service:
+
+```
+minecraft/crew/lab/scene.sh k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0
 ```
 
 The cluster lab is joinable by real players (NodePort 31136, offline, no
