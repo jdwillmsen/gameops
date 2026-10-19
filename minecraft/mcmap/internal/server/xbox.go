@@ -178,6 +178,7 @@ func (s *Server) handleXboxCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metricXboxLogins.WithLabelValues(xboxOK).Inc()
+	s.linkRoster(id)
 	issuedSessions.Add(1)
 	if s.Passkeys != nil {
 		s.Passkeys.RefreshGamertag(id.XUID, id.Gamertag)

@@ -38,7 +38,7 @@ func liveConfig(t *testing.T, enabled bool) (config.Config, *atomic.Int32) {
 func TestLiveDisabledStartsNothing(t *testing.T) {
 	cfg, asked := liveConfig(t, false)
 	var wg sync.WaitGroup
-	if layer := startLive(t.Context(), cfg, slog.New(slog.DiscardHandler), &wg, nil); layer != nil {
+	if layer, seen := startLive(t.Context(), cfg, slog.New(slog.DiscardHandler), &wg, nil); layer != nil || seen != nil {
 		t.Fatal("a layer was built with the live layer off")
 	}
 	done := make(chan struct{})
@@ -59,7 +59,7 @@ func TestLiveEnabledPollsTheBridgeUntilShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var wg sync.WaitGroup
-	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, nil); layer == nil {
+	if layer, seen := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, nil); layer == nil || seen == nil {
 		t.Fatal("no layer with the live layer on")
 	}
 	for deadline := time.Now().Add(5 * time.Second); asked.Load() == 0; time.Sleep(5 * time.Millisecond) {
@@ -86,10 +86,10 @@ func TestLiveIsGivenTheSurfacesOfTheBiomeReadingWhereThereIsOne(t *testing.T) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	defer cancel()
-	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, nil); layer.Surface != nil {
+	if layer, _ := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, nil); layer.Surface != nil {
 		t.Error("a layer was given surfaces where there are no biomes")
 	}
-	if layer := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, &biomes.Store{}); layer.Surface == nil {
+	if layer, _ := startLive(ctx, cfg, slog.New(slog.DiscardHandler), &wg, &biomes.Store{}); layer.Surface == nil {
 		t.Error("a layer was given no surfaces where there are biomes")
 	}
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/pack"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/players"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/render"
+	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/server"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/trails"
@@ -270,7 +271,7 @@ func run(logger *slog.Logger) error {
 		defer wg.Done()
 		w.Run(ctx, cfg.Refresh)
 	}()
-	layer := startLive(ctx, cfg, logger, &wg, biomeStore)
+	layer, seen := startLive(ctx, cfg, logger, &wg, biomeStore)
 
 	app := &server.Server{
 		Renderer:    renderer,
@@ -292,6 +293,9 @@ func run(logger *slog.Logger) error {
 		Quiet:         cfg.Quiet,
 	}
 	app.Players = playerStore
+	if seen != nil {
+		app.Roster = seen
+	}
 	if marked != nil {
 		app.Markers = marked
 	}
@@ -436,10 +440,11 @@ func run(logger *slog.Logger) error {
 
 // startLive begins reading player and mob positions from the bridge. With
 // the layer turned off it starts nothing and returns nil, which is also what
-// keeps the stream's route from being served.
-func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *sync.WaitGroup, surfaces *biomes.Store) *live.Layer {
+// keeps the stream's route from being served. The roster it keeps is nil
+// where it could not be loaded.
+func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *sync.WaitGroup, surfaces *biomes.Store) (*live.Layer, *roster.Roster) {
 	if !cfg.Live {
-		return nil
+		return nil, nil
 	}
 	layer := live.New(cfg.LiveTTL, cfg.LiveMaxEntities, logger)
 	counters := &live.Counters{Path: filepath.Join(cfg.DataDir, "counters", "counters.json"), Logger: logger}
@@ -451,6 +456,14 @@ func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *
 		layer.Counters = counters
 		wg.Go(func() { counters.Run(ctx) })
 	}
+	seen := &roster.Roster{Path: filepath.Join(cfg.DataDir, "roster", "roster.json"), Logger: logger}
+	if err := seen.Load(); err != nil {
+		logger.Error("player roster could not be loaded; offline players are not listed", "error", err.Error())
+		seen = nil
+	} else {
+		layer.Roster = seen
+		wg.Go(func() { seen.Run(ctx) })
+	}
 	if surfaces != nil {
 		layer.Surface = surfaces.Surface
 	}
@@ -461,7 +474,7 @@ func startLive(ctx context.Context, cfg config.Config, logger *slog.Logger, wg *
 		Logger: logger,
 	}
 	wg.Go(func() { source.Run(ctx) })
-	return layer
+	return layer, seen
 }
 
 // openHistory opens the days the map has kept, to keep more from the tiles

@@ -288,6 +288,7 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	err := s.Codes.Claim(req.Code, auth.Identity{XUID: req.XUID, Gamertag: req.Gamertag})
 	if err == nil {
 		s.recordKnown(req.XUID)
+		s.linkRoster(auth.Identity{XUID: req.XUID, Gamertag: req.Gamertag})
 	}
 	switch {
 	case errors.Is(err, auth.ErrUnknownCode):

@@ -118,6 +118,9 @@ type Server struct {
 	// Players is the player records of the last snapshot. Nil leaves the
 	// route out.
 	Players PlayerSource
+	// Roster is every player the live feed has shown, online or not. Nil
+	// leaves the list of players out.
+	Roster Roster
 	// History is the map as it was on each day kept. Nil leaves its routes
 	// out.
 	History HistorySource
@@ -354,6 +357,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	if s.Players != nil {
 		s.route(mux, gateViewer, "GET /api/players/{id}", s.handlePlayer)
+	}
+	if s.Roster != nil {
+		s.route(mux, gateViewer, "GET /api/players", s.handleRoster)
 	}
 	if s.History != nil {
 		s.route(mux, gateViewer, "GET /api/history", s.handleHistory)
