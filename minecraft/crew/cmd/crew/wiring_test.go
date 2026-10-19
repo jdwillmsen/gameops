@@ -172,6 +172,25 @@ func TestStateShowsTasksButNeverTheTokenOrControl(t *testing.T) {
 	}
 }
 
+func TestUnitsOwnHotbarSelectionReachesTheTracker(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)
+	conn := &recordingConn{}
+	w := heldRecorder{packetWriter: conn, runtimeID: 7, tracker: tracker}
+
+	_ = w.WritePacket(&packet.MobEquipment{EntityRuntimeID: 9, HotBarSlot: 2})
+	if tracker.Snapshot().HeldKnown {
+		t.Fatal("another entity's equipment moved the unit's selection")
+	}
+	_ = w.WritePacket(&packet.MobEquipment{EntityRuntimeID: 7, HotBarSlot: 5})
+	if s := tracker.Snapshot(); !s.HeldKnown || s.HeldSlot != 5 {
+		t.Errorf("held = %d known %v, want 5", s.HeldSlot, s.HeldKnown)
+	}
+	if len(conn.out) != 2 {
+		t.Errorf("forwarded %d packets, want 2", len(conn.out))
+	}
+}
+
 func TestDeathClearsTheOpenContainer(t *testing.T) {
 	tracker := belief.New(time.Now)
 	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)

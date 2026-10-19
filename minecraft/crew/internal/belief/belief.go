@@ -31,6 +31,10 @@ type Snapshot struct {
 	Health      float32   `json:"health"`
 	HealthKnown bool      `json:"health_known"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// The selected hotbar slot. Unknown until the server moves it or the unit
+	// selects one itself: a session starts with no packet that says.
+	HeldSlot  int  `json:"held_slot"`
+	HeldKnown bool `json:"held_known"`
 	// Window 0 only, non-empty slots in slot order.
 	Inventory []Item `json:"inventory"`
 }
@@ -85,6 +89,11 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 		t.s.Position, t.s.PositionKnown = p.Position, true
+	case *packet.PlayerHotBar:
+		if p.WindowID != 0 || !p.SelectHotBarSlot || p.SelectedHotBarSlot >= hotbarSlots {
+			return
+		}
+		t.s.HeldSlot, t.s.HeldKnown = int(p.SelectedHotBarSlot), true
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 	default:
@@ -92,6 +101,18 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 	}
+	t.s.UpdatedAt = t.now()
+}
+
+// SetHeld records the hotbar slot the unit itself selected: the server never
+// echoes a client's own selection back.
+func (t *Tracker) SetHeld(slot int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if slot < 0 || slot >= hotbarSlots {
+		return
+	}
+	t.s.HeldSlot, t.s.HeldKnown = slot, true
 	t.s.UpdatedAt = t.now()
 }
 
