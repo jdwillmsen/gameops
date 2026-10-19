@@ -38,6 +38,7 @@ var kinds = map[string]kind{
 var shooters = map[string]bool{
 	"skeleton": true, "stray": true, "bogged": true, "pillager": true,
 	"witch": true, "blaze": true, "breeze": true, "evoker": true, "evocation_illager": true,
+	"drowned": true,
 }
 
 func name(entityType string) string { return strings.TrimPrefix(entityType, "minecraft:") }
