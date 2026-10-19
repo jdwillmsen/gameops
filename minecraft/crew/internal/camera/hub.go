@@ -291,6 +291,8 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 			placed[i] = blockPlacement{b.BlockPos, b.BlockRuntimeID}
 		}
 		h.updateBlocks(h.blockEdits(placed))
+	case *packet.CorrectPlayerMovePrediction:
+		h.publishSelf()
 	case *packet.Respawn:
 		if p.State == packet.RespawnStateReadyToSpawn {
 			h.publishSelf()
@@ -380,6 +382,10 @@ func (h *Hub) publishSelf() {
 	}
 	h.mu.Unlock()
 }
+
+// PublishSelf pushes belief's current pose to the viewers; the unit calls it
+// after each input it sends, which the server does not answer.
+func (h *Hub) PublishSelf() { h.publishSelf() }
 
 func (h *Hub) movePlayer(p *packet.MovePlayer) {
 	h.mu.Lock()

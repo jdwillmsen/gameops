@@ -190,3 +190,21 @@ func TestHeldSlotIsUnknownUntilTheServerOrUnitSetsIt(t *testing.T) {
 		t.Errorf("held survived a session end: %+v", s)
 	}
 }
+
+func TestCorrectionMovesTheUnit(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.CorrectPlayerMovePrediction{Position: mgl32.Vec3{5, 66, 7}, Rotation: mgl32.Vec2{20, 40}})
+	s := tr.Snapshot()
+	if !s.PositionKnown || s.Position != [3]float32{5, 66, 7} || s.Pitch != 20 || s.Yaw != 40 {
+		t.Errorf("snapshot = %+v", s)
+	}
+}
+
+func TestSetPoseRecordsTheUnitsOwnMove(t *testing.T) {
+	tr := spawned(t)
+	tr.SetPose(mgl32.Vec3{1, 2, 3}, 30, 4)
+	s := tr.Snapshot()
+	if !s.PositionKnown || s.Position != [3]float32{1, 2, 3} || s.Yaw != 30 || s.Pitch != 4 {
+		t.Errorf("snapshot = %+v", s)
+	}
+}
