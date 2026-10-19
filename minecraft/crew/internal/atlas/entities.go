@@ -61,6 +61,8 @@ type Layer struct {
 	Bones []Bone `json:"bones"`
 	// Tint marks a layer the entity's dye colour multiplies.
 	Tint bool `json:"tint,omitempty"`
+	// Glass marks a layer drawn see-through, like a slime's outer shell.
+	Glass bool `json:"glass,omitempty"`
 
 	tex string
 }
@@ -377,6 +379,14 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
+// hiddenBones are parts the game shows only under conditions the camera
+// does not know: harness and saddle bags on a horse, a llama's chests, a
+// sleeping fox's second head.
+var hiddenBones = map[string]bool{
+	"bagl": true, "bagr": true, "bridle": true, "reinsl": true, "reinsr": true, "reins": true,
+	"saddle": true, "chest1": true, "chest2": true, "head_sleeping": true,
+}
+
 // Compilation turns a resolved model into bones whose UV rects are fractions
 // of the model's texture; packing later maps them into the shared sheet.
 func compileBones(m geoModel, texW, texH int) []Bone {
@@ -392,14 +402,61 @@ func compileBones(m geoModel, texW, texH int) []Bone {
 		if r, _ := vec3(gb.BindPose); r != ([3]float32{}) {
 			b.Bind = r[:]
 		}
-		if !gb.NeverRender {
+		if !gb.NeverRender && !hiddenBones[strings.ToLower(gb.Name)] {
 			for _, gc := range gb.Cubes {
 				b.Cubes = append(b.Cubes, compileCube(gc, gb, texW, texH))
 			}
 		}
 		bones = append(bones, b)
 	}
+	layBodies(bones)
 	return bones
+}
+
+// layBodies turns the body of a four-legged mob onto its side. Many of the
+// pack's quadruped models draw the torso upright and leave lying it down to
+// a setup animation this build does not read. A mob counts as one when its
+// legs are spread further front to back than side to side and its head is
+// out in front of the body, which keeps a creeper's upright body as it is; a
+// body that already carries a rotation is left alone.
+func layBodies(bones []Bone) {
+	var legs [][3]float32
+	var body, head *Bone
+	for i := range bones {
+		n := strings.ToLower(bones[i].Name)
+		if strings.HasPrefix(n, "leg") || strings.Contains(n, "backleg") || strings.Contains(n, "frontleg") {
+			legs = append(legs, bones[i].Pivot)
+		}
+		if n == "body" {
+			body = &bones[i]
+		}
+		if n == "head" {
+			head = &bones[i]
+		}
+	}
+	if len(legs) < 4 || body == nil || head == nil || head.Pivot[2] > body.Pivot[2]-2 || body.Rot != nil || body.Bind != nil || len(body.Cubes) == 0 {
+		return
+	}
+	lo, hi := legs[0], legs[0]
+	for _, l := range legs {
+		for i := range 3 {
+			lo[i], hi[i] = min(lo[i], l[i]), max(hi[i], l[i])
+		}
+	}
+	if hi[2]-lo[2] < 1.5*(hi[0]-lo[0]) {
+		return
+	}
+	for _, c := range body.Cubes {
+		if c.Rot != nil || c.Size[1] <= c.Size[2]*1.2 {
+			return
+		}
+	}
+	for i := range bones {
+		if n := strings.ToLower(bones[i].Name); (n == "body" || n == "upperbody") && bones[i].Rot == nil {
+			// Only the torso's own boxes lie down: the head and legs hang off it.
+			bones[i].Bind = []float32{90, 0, 0}
+		}
+	}
 }
 
 func compileCube(gc geoCube, gb geoBone, texW, texH int) Cube {
@@ -415,6 +472,9 @@ func compileCube(gc geoCube, gb geoBone, texW, texH int) Cube {
 	}
 	if p, _ := vec3(gc.Pivot); p != ([3]float32{}) {
 		c.Pivot = p[:]
+	} else if c.Rot != nil {
+		// A turned box that names no pivot turns about its own centre.
+		c.Pivot = []float32{c.Origin[0] + c.Size[0]/2, c.Origin[1] + c.Size[1]/2, c.Origin[2] + c.Size[2]/2}
 	}
 	for f := range faceCount {
 		r, ok := faceRect(gc, gb.Mirror, f)
@@ -450,10 +510,24 @@ func (eb *entityBuilder) texture(p string) *image.NRGBA {
 	if img != nil {
 		if bd := img.Bounds(); bd.Dx() > maxEntityTexSide || bd.Dy() > maxEntityTexSide {
 			img = nil
+		} else {
+			solidifyMasks(img)
 		}
 	}
 	eb.imgs[p] = img
 	return img
+}
+
+// solidifyMasks makes pixels with an alpha of 1 to 15 opaque. The pack uses
+// such nearly invisible alphas as a mask for effects the camera does not draw
+// (a sheep's skin is painted at an alpha of 3), and a viewer that took them
+// at face value would see through the animal.
+func solidifyMasks(img *image.NRGBA) {
+	for i := 3; i < len(img.Pix); i += 4 {
+		if a := img.Pix[i]; a > 0 && a < 16 {
+			img.Pix[i] = 255
+		}
+	}
 }
 
 // layer compiles geometry id drawn with texture texPath, or false if either
@@ -519,6 +593,13 @@ func (eb *entityBuilder) model(def entityDef) (EntityModel, bool) {
 			if s, ok := eb.layer(shearedID, texPath, false); ok {
 				out.Sheared = []Layer{s}
 			}
+		}
+	}
+	// A slime's shell is a second geometry over its core, not a variant.
+	if shellID, ok := def.geometry.get("armor"); ok && def.id == "minecraft:slime" {
+		if l, ok := eb.layer(shellID, texPath, false); ok {
+			l.Glass = true
+			out.Default = append(out.Default, l)
 		}
 	}
 	if babyID, ok := def.geometry.get("baby"); ok {
