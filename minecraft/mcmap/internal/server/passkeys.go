@@ -106,6 +106,7 @@ func (s *Server) handlePasskeyFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Sessions.IssuePasskey(w, auth.Identity{XUID: k.XUID, Gamertag: k.Gamertag}, auth.KeyOf(k.ID))
+	s.linkRoster(auth.Identity{XUID: k.XUID, Gamertag: k.Gamertag})
 	s.metricSet().logins.WithLabelValues("ok").Inc()
 	passkeyLogins.Add(1)
 	s.log().Info("map login issued", "xuid", k.XUID, "method", auth.MethodPasskey, "credential", auth.LogName(k.ID))
