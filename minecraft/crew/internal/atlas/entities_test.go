@@ -401,3 +401,32 @@ func TestEntityTableOverTheSizeCapIsRefused(t *testing.T) {
 		t.Fatal("an oversized table was built")
 	}
 }
+
+func TestCompileBonesDropsMissingSelfAndCyclicParents(t *testing.T) {
+	m := geoModel{bones: []geoBone{
+		{Name: "ok"}, {Name: "kid", Parent: "ok"},
+		{Name: "orphan", Parent: "nowhere"}, {Name: "self", Parent: "self"},
+		{Name: "a", Parent: "b"}, {Name: "b", Parent: "c"}, {Name: "c", Parent: "a"},
+		{Name: "tail", Parent: "a"},
+	}}
+	got := map[string]string{}
+	for _, b := range compileBones(m, 16, 16) {
+		got[b.Name] = b.Parent
+	}
+	if got["kid"] != "ok" {
+		t.Errorf("a valid parent was dropped: %v", got)
+	}
+	for _, n := range []string{"orphan", "self", "a"} {
+		if got[n] != "" {
+			t.Errorf("%s kept parent %q", n, got[n])
+		}
+	}
+	// Following a bone's chain must now end at the root for every bone.
+	for n := range got {
+		for at, hops := n, 0; at != ""; at, hops = got[at], hops+1 {
+			if hops > len(got) {
+				t.Fatalf("%s still loops: %v", n, got)
+			}
+		}
+	}
+}

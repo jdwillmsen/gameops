@@ -417,8 +417,34 @@ func compileBones(m geoModel, texW, texH int) []Bone {
 		}
 		bones = append(bones, b)
 	}
+	dropBadParents(bones)
 	layBodies(bones)
 	return bones
+}
+
+// dropBadParents detaches a bone whose parent is missing, is itself or leads
+// back to it, so the page's bone tree always reaches the root.
+func dropBadParents(bones []Bone) {
+	parent := make(map[string]string, len(bones))
+	for _, b := range bones {
+		parent[b.Name] = b.Parent
+	}
+	for i := range bones {
+		p := bones[i].Parent
+		if p == "" {
+			continue
+		}
+		if _, ok := parent[p]; !ok {
+			bones[i].Parent = ""
+			continue
+		}
+		for at, hops := p, 0; at != ""; at, hops = parent[at], hops+1 {
+			if at == bones[i].Name || hops > len(bones) {
+				bones[i].Parent = ""
+				break
+			}
+		}
+	}
 }
 
 // layBodies turns the body of a four-legged mob onto its side. Many of the
