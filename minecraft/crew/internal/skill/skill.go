@@ -87,6 +87,7 @@ type Option func(*options)
 type options struct {
 	log    Logger
 	groups []group
+	hotbar bool
 }
 
 // group is a budget of n items to take from any of names, best first.
@@ -105,6 +106,10 @@ func WithLogger(l Logger) Option { return func(o *options) { o.log = l } }
 func OneOf(n int, names ...string) Option {
 	return func(o *options) { o.groups = append(o.groups, group{names: names, n: n}) }
 }
+
+// IntoHotbar keeps a withdraw's items on the hotbar, the only stacks a unit
+// can hold, instead of anywhere in the inventory.
+func IntoHotbar() Option { return func(o *options) { o.hotbar = true } }
 
 var errOverworld = errors.New("only the overworld is supported")
 

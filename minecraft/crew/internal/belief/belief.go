@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	healthAttribute     = "minecraft:health"
-	hungerAttribute     = "minecraft:player.hunger"
-	saturationAttribute = "minecraft:player.saturation"
+	healthAttribute = "minecraft:health"
+	hungerAttribute = "minecraft:player.hunger"
 )
 
 // Snapshot is a copy, safe to hand to another goroutine.
@@ -34,10 +33,8 @@ type Snapshot struct {
 	Pitch       float32 `json:"pitch"`
 	Health      float32 `json:"health"`
 	HealthKnown bool    `json:"health_known"`
-	// Hunger is the food level out of 20; saturation is the hidden buffer that
-	// drains before it.
+	// Hunger is the food level out of 20.
 	Hunger      float32   `json:"hunger"`
-	Saturation  float32   `json:"saturation"`
 	HungerKnown bool      `json:"hunger_known"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// The selected hotbar slot. Unknown until the server moves it or the unit
@@ -103,8 +100,6 @@ func (t *Tracker) Apply(pk packet.Packet) {
 				t.s.Health, t.s.HealthKnown = a.Value, true
 			case hungerAttribute:
 				t.s.Hunger, t.s.HungerKnown = a.Value, true
-			case saturationAttribute:
-				t.s.Saturation = a.Value
 			}
 		}
 	case *packet.Respawn:

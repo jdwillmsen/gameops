@@ -80,8 +80,8 @@ chest and takes the best sword it holds and up to `KIT_FOOD` food. This is how
 a unit that died gets its sword and bread back. A chest that cannot make the
 unit whole is logged as `kit_empty` (with what was `missing`, never a
 position) and left alone for three minutes; a failed visit (`kit_failed`) backs
-off the same way. A visit only fills empty slots, so a tool is never
-displaced. The task queue waits while a visit is under way.
+off the same way. A visit only fills empty hotbar slots, so a tool is never
+displaced, and a unit whose hotbar is full does not go. The task queue waits while a visit is under way.
 
 To use it, set the same two variables on every unit in the deployment's
 environment, for example in the Helm values that carry `DEFEND`:
@@ -94,8 +94,8 @@ KIT_FOOD=8
 `parallel-scene.sh` builds and stocks a chest at the position in
 `lab/parallel-layout.sh` (`KIT_CHEST`, six stone swords and 64 bread), which is
 what to set `KIT_CHEST` to on the lab's units. The scene empties the units'
-inventories, so with the kit on they walk to the chest first and then run
-their task.
+inventories, so with the kit on they walk to the chest once idle for five
+seconds; a task submitted sooner runs first, barehanded.
 
 ## Status API
 

@@ -20,7 +20,7 @@ for i in 0 1 2; do
   ((KIT_CHEST[i] >= AREA_MIN[i] && KIT_CHEST[i] <= AREA_MAX[i])) || { echo "kit chest axis $i outside the area" >&2; exit 1; }
 done
 ((KIT_CHEST[1] == 100)) || { echo "kit chest must stand on the floor at y=100" >&2; exit 1; }
-((KIT_SWORDS <= 27 && KIT_BREAD <= 64)) || { echo "kit stock does not fit a chest slot" >&2; exit 1; }
+((KIT_SWORDS <= 26 && KIT_BREAD <= 64)) || { echo "kit stock does not fit a chest slot" >&2; exit 1; }
 for taken in "${OUTBOX_A[*]}" "${OUTBOX_B[*]}" "${STORE[*]}" "${START_AGATE[*]}" "${START_BASALT[*]}" "${START_COBBLE[*]}"; do
   [[ $taken != "${KIT_CHEST[*]}" ]] || { echo "kit chest shares a cell with another feature" >&2; exit 1; }
 done

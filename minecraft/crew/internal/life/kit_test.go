@@ -100,6 +100,18 @@ func TestAnArmedAndFedUnitStaysAway(t *testing.T) {
 	}
 }
 
+func TestAUnitWithAFullHotbarStaysAway(t *testing.T) {
+	r, visits := kitRig(t)
+	for slot := 0; slot < 9; slot++ {
+		r.give(slot, 3, 64)
+	}
+	r.give(20, idBread, 10)
+	r.run(500)
+	if len(*visits) != 0 {
+		t.Errorf("visits = %d with no hotbar slot free, want 0", len(*visits))
+	}
+}
+
 func TestAKitNeverInterruptsATask(t *testing.T) {
 	r, _ := kitRig(t)
 	snap := r.tracker.Snapshot()

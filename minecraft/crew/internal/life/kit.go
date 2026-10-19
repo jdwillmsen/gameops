@@ -81,6 +81,19 @@ func lacks(s belief.Snapshot) (weapon, food bool) {
 	return weapon, food
 }
 
+// hotbarFree says whether a hotbar slot is empty. Whatever a unit lacks has no
+// stack on the hotbar to merge onto, so a visit with no empty slot could only
+// fail to bring it.
+func hotbarFree(s belief.Snapshot) bool {
+	used := 0
+	for _, it := range s.Inventory {
+		if it.Slot < hotbarSlots {
+			used++
+		}
+	}
+	return used < hotbarSlots
+}
+
 // kitWants says whether the unit should go to the kit now. working says a
 // task is running, which a visit never interrupts.
 func (l *Life) kitWants(s belief.Snapshot, working bool) bool {
@@ -99,7 +112,7 @@ func (l *Life) kitWants(s belief.Snapshot, working bool) bool {
 	if !k.needing {
 		k.needing, k.needSince = true, l.tick
 	}
-	return !working && l.tick >= k.blockedUntil && l.tick-k.needSince >= kitSettleTicks
+	return !working && hotbarFree(s) && l.tick >= k.blockedUntil && l.tick-k.needSince >= kitSettleTicks
 }
 
 // tendKit steps the visit to the chest by one tick, starting it first if none is
@@ -189,7 +202,7 @@ func (l *Life) newKit(weapon bool, food int) skill.Skill {
 	if l.makeKit != nil {
 		return l.makeKit(weapon, food)
 	}
-	var opts []skill.Option
+	opts := []skill.Option{skill.IntoHotbar()}
 	if weapon {
 		opts = append(opts, skill.OneOf(1, swords...))
 	}

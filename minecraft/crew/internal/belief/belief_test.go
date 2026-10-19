@@ -62,7 +62,7 @@ func TestHealthComesFromOwnAttributes(t *testing.T) {
 	}
 }
 
-func TestHungerAndSaturationComeFromOwnAttributes(t *testing.T) {
+func TestHungerComesFromOwnAttributes(t *testing.T) {
 	tr := spawned(t)
 	if s := tr.Snapshot(); s.HungerKnown {
 		t.Fatal("hunger known before any attribute update")
@@ -75,11 +75,11 @@ func TestHungerAndSaturationComeFromOwnAttributes(t *testing.T) {
 		t.Fatal("another entity's hunger was taken")
 	}
 	tr.Apply(&packet.UpdateAttributes{EntityRuntimeID: self, Attributes: []protocol.Attribute{
-		attr("minecraft:player.hunger", 13), attr("minecraft:player.saturation", 2.5),
+		attr("minecraft:player.hunger", 13),
 	}})
 	s := tr.Snapshot()
-	if !s.HungerKnown || s.Hunger != 13 || s.Saturation != 2.5 {
-		t.Errorf("hunger %v saturation %v known=%v", s.Hunger, s.Saturation, s.HungerKnown)
+	if !s.HungerKnown || s.Hunger != 13 {
+		t.Errorf("hunger %v known=%v", s.Hunger, s.HungerKnown)
 	}
 }
 

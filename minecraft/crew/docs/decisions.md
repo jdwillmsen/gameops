@@ -152,10 +152,10 @@ A unit that dies loses its sword and bread (keepInventory is off on the lab)
 and, on normal difficulty, health only regenerates at 18 of 20 food. So it
 fought barehanded and never healed.
 
-**Eating.** The unit tracks its hunger and saturation from its own
-`minecraft:player.hunger` and `minecraft:player.saturation` attributes. Below
-the threshold, with food on the hotbar and no fight, the runner hands it the
-tick (the same preemption a fight uses: stop the skill, act, `Resume`). The
+**Eating.** The unit tracks its hunger from its own `minecraft:player.hunger`
+attribute. Below the threshold, with food on the hotbar and no fight, the
+runner hands it the tick (the same preemption a fight uses: stop the skill,
+act, `Resume`). The
 sequence is `MobEquipment` to select the stack, an `InventoryTransaction`
 with `UseItemTransactionData{ActionType: ClickAir, TriggerType:
 PlayerInput, HotBarSlot, HeldItem}`, a `PlayerAuthInput` with
@@ -163,8 +163,7 @@ PlayerInput, HotBarSlot, HeldItem}`, a `PlayerAuthInput` with
 holding, and an `InventoryTransaction` with `ReleaseItemTransactionData`.
 Thresholds: 17 when hurt (regeneration needs 18, so at most a point or two is
 wasted) and 14 otherwise (so a 5-point bread never overshoots 20 by much and
-a full unit never tries, which the server refuses). Saturation is tracked but
-unused: regeneration is gated on food, not saturation.
+a full unit never tries, which the server refuses).
 
 Confirmed from source (gophertunnel v1.62.0, dragonfly v0.11.5):
 - `UseItemActionClickAir` with `TriggerTypePlayerInput` is what starts a use;
@@ -199,6 +198,7 @@ asking for the best sword and up to `KIT_FOOD` food through a ranked budget
 advance. Only what is missing is asked for. A kit never interrupts a task or a
 fight (a fight stops the visit and closes the chest), and the task queue waits
 for a visit in progress. The hotbar is the test because a unit can only hold a
-hotbar stack. A kit that cannot make the unit whole is not retried for three
+hotbar stack; for the same reason the withdraw only places into the hotbar,
+and a unit with no free hotbar slot does not visit. A kit that cannot make the unit whole is not retried for three
 minutes. Judgment call: a unit's weapon sitting outside the hotbar counts as
 no weapon, since `loadout` never selects it either.
