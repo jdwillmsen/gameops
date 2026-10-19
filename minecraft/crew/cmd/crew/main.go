@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -41,10 +42,18 @@ const (
 	// have completed is worse than waiting.
 	spawnTimeout = 90 * time.Second
 
-	// About 16 KiB each when solid. Skills read blocks within a few dozen of
-	// the unit; the rest of the view distance is kept only while it fits.
-	maxStoredSubChunks = 2048
+	// The overworld's -64..319 in 16-block sections.
+	sectionsPerColumn = 24
 )
+
+// storedSubChunks sizes the world store to the whole view, one chunk of margin
+// all round. The server never resends a chunk the client already had, so a
+// smaller store loses blocks for good. A solid section is about 16 KiB and an
+// all-air one costs nothing, so a view of 8 is at most about 100 MiB.
+func storedSubChunks(viewDistance uint8) int {
+	r := float64(viewDistance) + 1
+	return int(math.Ceil(math.Pi*r*r)) * sectionsPerColumn
+}
 
 var version = "dev"
 
@@ -72,7 +81,7 @@ func main() {
 	tracker := belief.New(time.Now)
 	dec := newDecoder(log)
 	hub, beginSession := newCamera(cfg, tracker, dec, log)
-	world := blocks.New(dec, maxStoredSubChunks)
+	world := blocks.New(dec, storedSubChunks(cfg.ViewDistance))
 	runner := task.NewRunner(func(t task.Template) ([]skill.Skill, error) {
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
