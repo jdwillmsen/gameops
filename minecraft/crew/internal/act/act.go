@@ -68,9 +68,17 @@ func (a *Actuator) Pose() Pose {
 	return a.pose
 }
 
+// Ticks counts the inputs sent so far, so the runner can tell whether a step
+// already sent its input.
+func (a *Actuator) Ticks() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.tick - firstTick
+}
+
 // Tick sends exactly one PlayerAuthInput and advances the pose by it. Call it
-// every 50 ms while a skill is active; an idle tick still has to be sent so
-// the server sees the unit's leftover momentum.
+// every 50 ms while the unit is spawned, with or without a skill; an idle tick
+// still has to be sent so the server sees the unit's leftover momentum.
 func (a *Actuator) Tick(in Input) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
@@ -169,29 +170,46 @@ func (r *Runner) Run(ctx context.Context) {
 	}
 }
 
-// step does one tick of work. The skill's Step runs outside the lock because
-// it talks to the server; a cancel that lands meanwhile is honoured by
-// dropping the result.
+// step does one tick of work and makes sure the unit sent exactly one input
+// for it. Bedrock only advances a player on client input, so a unit that sent
+// nothing would hang in mid-air; one that sent two would run ahead of the
+// server.
 func (r *Runner) step(ctx context.Context) {
+	a, before := r.work(ctx)
+	if a == nil || a.Ticks() != before {
+		return
+	}
+	p := a.Pose()
+	// A failed write means the session is ending, which the read loop reports.
+	_ = a.Tick(act.Input{Yaw: p.Yaw, Pitch: p.Pitch})
+}
+
+// work does the task bookkeeping and the skill's step. It returns the
+// actuator it may have ticked and the tick count before it did, or nil when
+// the unit is not in a state to send inputs. The skill's Step runs outside
+// the lock because it talks to the server; a cancel that lands meanwhile is
+// honoured by dropping the result.
+func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	r.mu.Lock()
 	snap := r.self()
 	if !snap.Spawned || snap.Dead || r.act == nil {
 		r.pending = nil
 		r.mu.Unlock()
-		return
+		return nil, 0
 	}
+	act := r.act
+	before := act.Ticks()
 	if st := r.pending; st != nil {
 		r.pending = nil
-		act := r.act
 		r.mu.Unlock()
 		st.Stop(act)
-		return
+		return act, before
 	}
 	if r.cur == nil {
 		r.cur = r.nextQueued()
 		if r.cur == nil {
 			r.mu.Unlock()
-			return
+			return act, before
 		}
 		r.cur.State = Running
 		r.cur.started = r.now()
@@ -199,11 +217,11 @@ func (r *Runner) step(ctx context.Context) {
 		r.cur.Skill = r.cur.skills[0].Name()
 		r.logEvent("task_started", r.cur)
 	}
-	e, act := r.cur, r.act
+	e := r.cur
 	if r.now().Sub(e.started) > r.timeout {
 		r.abandon(e, Failed, "timed out")
 		r.mu.Unlock()
-		return
+		return act, before
 	}
 	sk := e.skills[e.idx]
 	needReady := !e.ready
@@ -227,7 +245,7 @@ func (r *Runner) step(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cur != e {
-		return
+		return act, before
 	}
 	e.ready = true
 	if p, ok := sk.(skill.Progresser); ok {
@@ -248,10 +266,11 @@ func (r *Runner) step(ctx context.Context) {
 		e.ready = false
 		if e.idx == len(e.skills) {
 			r.finish(e, Done, "")
-			return
+			return act, before
 		}
 		e.Skill = e.skills[e.idx].Name()
 	}
+	return act, before
 }
 
 func have(s belief.Snapshot, item string) int {

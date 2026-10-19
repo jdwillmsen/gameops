@@ -8,11 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
-type fakeAct struct{ skill.Actuator }
+// fakeAct counts the inputs a runner sends.
+type fakeAct struct {
+	skill.Actuator
+	ticks uint64
+}
+
+func (f *fakeAct) Ticks() uint64        { return f.ticks }
+func (f *fakeAct) Pose() act.Pose       { return act.Pose{} }
+func (f *fakeAct) Tick(act.Input) error { f.ticks++; return nil }
 
 type fakeSkill struct {
 	name     string
@@ -21,11 +30,16 @@ type fakeSkill struct {
 	readyErr error
 	ran      int
 	order    *[]string
+	// ticks makes Step send its input, as the real skills do.
+	ticks bool
 }
 
 func (f *fakeSkill) Name() string                { return f.name }
 func (f *fakeSkill) Ready(belief.Snapshot) error { return f.readyErr }
-func (f *fakeSkill) Step(context.Context, skill.Actuator) (skill.Status, error) {
+func (f *fakeSkill) Step(_ context.Context, a skill.Actuator) (skill.Status, error) {
+	if f.ticks {
+		_ = a.Tick(act.Input{})
+	}
 	if f.order != nil && f.ran == 0 {
 		*f.order = append(*f.order, f.name)
 	}
@@ -56,6 +70,7 @@ func (c *captureLog) Info(event string, f map[string]any) {
 
 type harness struct {
 	r     *Runner
+	act   *fakeAct
 	log   *captureLog
 	snap  belief.Snapshot
 	clock time.Time
@@ -72,7 +87,8 @@ func newHarness(t *testing.T, timeout time.Duration, steps int) *harness {
 		h.made = append(h.made, a, b)
 		return []skill.Skill{a, b}, nil
 	}
-	h.r = NewRunner(newSkills, fakeAct{}, func() belief.Snapshot { return h.snap }, timeout, h.log)
+	h.act = &fakeAct{}
+	h.r = NewRunner(newSkills, h.act, func() belief.Snapshot { return h.snap }, timeout, h.log)
 	h.r.now = func() time.Time { return h.clock }
 	return h
 }
@@ -139,7 +155,7 @@ func TestRunnerFailsTheRunningTaskWhenTheSessionEnds(t *testing.T) {
 	}
 
 	h.snap.Spawned = true
-	h.r.SetActuator(fakeAct{})
+	h.r.SetActuator(&fakeAct{})
 	h.tick(1)
 	c := stateOf(t, h.r, b.ID)
 	h.r.Died()
@@ -333,7 +349,7 @@ func TestSessionEndAndDeathSkipCleanup(t *testing.T) {
 	h.tick(2)
 	h.r.SessionEnded()
 	h.tick(3)
-	h.r.SetActuator(fakeAct{})
+	h.r.SetActuator(&fakeAct{})
 	h.tick(3)
 	if sk.count() != 0 {
 		t.Errorf("stops = %d, want none", sk.count())
