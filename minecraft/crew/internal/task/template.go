@@ -23,6 +23,7 @@ const (
 	maxShaftDepth    = 32
 	maxBranches      = 3
 	maxBranchLength  = 32
+	gotoTemplate     = "goto"
 	maxHaulItems     = 8
 	maxHaulSources   = 4
 	minQty           = 1
@@ -30,6 +31,12 @@ const (
 	maxAreaSpan      = 64
 	// How far from the unit MineBlock looks for stone.
 	mineRadius = 24
+	// goto is confined to the lab's flat square, so a typo cannot send the
+	// unit off to unloaded terrain.
+	gotoMinXZ, gotoMaxXZ = -500, 499
+	gotoMinY, gotoMaxY   = -64, 320
+	// gotoWithin is how close to the cell counts as arrived.
+	gotoWithin = 1.5
 )
 
 type Chest struct {
@@ -99,6 +106,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseHaul(body)
 	case shaftTemplate:
 		return parseShaft(body)
+	case gotoTemplate:
+		return parseGoto(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -208,6 +217,26 @@ func parseShaft(body []byte) (Template, error) {
 		Branches: raw.Branches, BranchLength: raw.Length, Area: &a, To: raw.To}, nil
 }
 
+func parseGoto(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		To       *Chest `json:"to"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.To == nil {
+		return Template{}, errors.New("to is required")
+	}
+	// The message names no coordinate: they are lab locations and must stay
+	// out of logs.
+	c := *raw.To
+	if c.X < gotoMinXZ || c.X > gotoMaxXZ || c.Z < gotoMinXZ || c.Z > gotoMaxXZ || c.Y < gotoMinY || c.Y > gotoMaxY {
+		return Template{}, errors.New("to is outside the allowed area")
+	}
+	return Template{Template: raw.Template, To: raw.To}, nil
+}
+
 func parseHaul(body []byte) (Template, error) {
 	var raw struct {
 		Template string         `json:"template"`
@@ -275,6 +304,10 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		}
 		dest := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
 		return []skill.Skill{skill.NewHaul(world, self, sources, dest, t.Items, opts...)}, nil
+	}
+	if t.Template == gotoTemplate && t.To != nil {
+		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
+		return []skill.Skill{skill.NewNavigate(world, self, goal, gotoWithin)}, nil
 	}
 	src, ok := recipes[t.Item]
 	if t.Template != gatherAndDeposit || !ok {

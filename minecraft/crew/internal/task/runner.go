@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"regexp"
 	"sync"
 	"time"
 
@@ -33,7 +34,13 @@ var (
 	ErrNotFound  = errors.New("no such task")
 	ErrFinished  = errors.New("task already finished")
 	ErrQueueFull = errors.New("task queue is full")
+	ErrDuplicate = errors.New("task id already in use")
+	ErrBadID     = errors.New("invalid task id")
 )
+
+// validID is the shape of a controller-chosen id: hex and dashes, so a UUID
+// fits and nothing else that could be misread downstream does.
+var validID = regexp.MustCompile(`^[0-9a-f-]{8,64}$`)
 
 // Task is the public record. It deliberately omits the request, which holds
 // lab coordinates.
@@ -113,6 +120,16 @@ type Runner struct {
 	// reflex's state; the read loop only raises the flag.
 	resetReflex bool
 	prevStep    time.Time
+
+	// observer gets every state or progress change. Changes are queued under
+	// mu and delivered by one goroutine at a time, in queue order, with mu
+	// released: a slow or re-entrant observer cannot stall the runner, and a
+	// task's transitions never arrive inverted. Delivery runs on the stepping
+	// goroutine, or on the caller's for Submit and Cancel, unless another
+	// goroutine is already delivering, in which case that one does it.
+	observer   func(Task)
+	outbox     []Task
+	delivering bool
 }
 
 func NewRunner(newSkills func(Template) ([]skill.Skill, error), a skill.Actuator, self func() belief.Snapshot, timeout time.Duration, log skill.Logger) *Runner {
@@ -134,17 +151,71 @@ func (r *Runner) SetReflex(x Reflex) {
 	r.mu.Unlock()
 }
 
-func (r *Runner) Submit(t Template) (Task, error) {
-	skills, err := r.newSkills(t)
-	if err != nil {
-		return Task{}, err
+// Observe sets the one observer, replacing any earlier one.
+func (r *Runner) Observe(f func(Task)) {
+	r.mu.Lock()
+	r.observer = f
+	r.mu.Unlock()
+}
+
+// notify must be called with mu held, after the entry has changed.
+func (r *Runner) notify(e *entry) {
+	if r.observer != nil {
+		r.outbox = append(r.outbox, e.Task)
 	}
+}
+
+// flush delivers queued changes. Call it with mu released.
+func (r *Runner) flush() {
+	r.mu.Lock()
+	if r.delivering {
+		r.mu.Unlock()
+		return
+	}
+	r.delivering = true
+	for len(r.outbox) > 0 {
+		batch, f := r.outbox, r.observer
+		r.outbox = nil
+		r.mu.Unlock()
+		if f != nil {
+			for _, t := range batch {
+				f(t)
+			}
+		}
+		r.mu.Lock()
+	}
+	r.delivering = false
+	r.mu.Unlock()
+}
+
+func (r *Runner) Submit(t Template) (Task, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return Task{}, err
 	}
+	return r.submit(hex.EncodeToString(b[:]), t)
+}
+
+// SubmitAs is Submit with an id the caller chose, so an external controller
+// can name its work and find it again.
+func (r *Runner) SubmitAs(id string, t Template) (Task, error) {
+	if !validID.MatchString(id) {
+		return Task{}, ErrBadID
+	}
+	return r.submit(id, t)
+}
+
+func (r *Runner) submit(id string, t Template) (Task, error) {
+	skills, err := r.newSkills(t)
+	if err != nil {
+		return Task{}, err
+	}
+	defer r.flush()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.find(id) != nil {
+		return Task{}, ErrDuplicate
+	}
 	queued := 0
 	for _, e := range r.entries {
 		if e.State == Queued {
@@ -155,13 +226,15 @@ func (r *Runner) Submit(t Template) (Task, error) {
 		return Task{}, ErrQueueFull
 	}
 	now := r.now()
-	e := &entry{Task: Task{ID: hex.EncodeToString(b[:]), Template: t.Template, State: Queued, Item: t.Item, Qty: t.Qty, Created: now, Updated: now}, item: t.Item, skills: skills}
+	e := &entry{Task: Task{ID: id, Template: t.Template, State: Queued, Item: t.Item, Qty: t.Qty, Created: now, Updated: now}, item: t.Item, skills: skills}
 	r.entries = append(r.entries, e)
 	r.logEvent("task_submitted", e)
+	r.notify(e)
 	return e.Task, nil
 }
 
 func (r *Runner) Cancel(id string) (Task, error) {
+	defer r.flush()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e := r.find(id)
@@ -188,6 +261,7 @@ func (r *Runner) List() []Task {
 // SessionEnded fails the running task: the new session starts from a world
 // the old task never saw, so resuming it would act on stale assumptions.
 func (r *Runner) SessionEnded() {
+	defer r.flush()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.act = nil
@@ -197,6 +271,7 @@ func (r *Runner) SessionEnded() {
 }
 
 func (r *Runner) Died() {
+	defer r.flush()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pending = nil // a dead unit has no chest open and no break running
@@ -239,6 +314,7 @@ func (r *Runner) preempt(dt time.Duration) skill.Stopper {
 // nothing would hang in mid-air; one that sent two would run ahead of the
 // server.
 func (r *Runner) step(ctx context.Context) {
+	defer r.flush()
 	a, before := r.work(ctx)
 	if a == nil || a.Ticks() != before {
 		return
@@ -333,6 +409,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		r.cur.Updated = r.cur.started
 		r.cur.Skill = r.cur.skills[0].Name()
 		r.logEvent("task_started", r.cur)
+		r.notify(r.cur)
 	}
 	e := r.cur
 	if r.now().Sub(e.started)-e.fought > r.timeout {
@@ -369,12 +446,16 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		return a, before
 	}
 	e.ready, e.resume = true, false
+	progress := have(r.self(), e.item)
 	if p, ok := sk.(skill.Progresser); ok {
-		e.Progress = p.Progress()
-	} else {
-		e.Progress = have(r.self(), e.item)
+		progress = p.Progress()
 	}
+	changed := progress != e.Progress
+	e.Progress = progress
 	e.Updated = r.now()
+	if changed {
+		r.notify(e)
+	}
 	switch st {
 	case skill.Failed:
 		reason := "skill failed"
@@ -390,6 +471,9 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 			return a, before
 		}
 		e.Skill = e.skills[e.idx].Name()
+		if !changed {
+			r.notify(e)
+		}
 	}
 	return a, before
 }
@@ -447,6 +531,7 @@ func (r *Runner) finish(e *entry, state, reason string) {
 		r.cur = nil
 	}
 	r.logEvent("task_finished", e)
+	r.notify(e)
 	finished := 0
 	for _, x := range r.entries {
 		if x.State != Queued && x.State != Running {
