@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
@@ -26,6 +27,18 @@ const (
 
 	minBackoff = time.Second
 	maxBackoff = 30 * time.Second
+
+	// A running task is re-reported this often so the controller can tell a
+	// working unit from one that restarted and lost the task; the controller
+	// re-hands a running item after 30 s of silence.
+	heartbeatEvery = 15 * time.Second
+
+	// Keeps a report under the controller's 1 KiB body cap with room for the
+	// rest of the JSON.
+	maxReasonBytes = 400
+
+	// How many handled stop ids are remembered to recognise a redelivery.
+	stopMemory = 64
 
 	// Far above a real item (a template is about 100 bytes).
 	maxWorkBytes = 64 << 10
@@ -71,6 +84,8 @@ type Client struct {
 	http   *http.Client
 	// sleep reports false when ctx ended first; tests replace it.
 	sleep func(ctx context.Context, d time.Duration) bool
+	// heartbeat is the period of the running-task refresh; tests shorten it.
+	heartbeat time.Duration
 
 	mu sync.Mutex
 	// owned is the tasks control submitted and has not yet seen finish; tasks
@@ -79,16 +94,21 @@ type Client struct {
 	pending map[string]event // latest unsent event per id
 	order   []string         // ids in the order they first became pending
 	wake    chan struct{}
+	// stopped is the last stopMemory handled stop ids, oldest first: a
+	// redelivered stop must not cancel work queued after the first one.
+	stopped []string
 }
 
 func New(base *url.URL, unit, token string, r Runner, log Logger) *Client {
 	c := &Client{
 		base: base, unit: unit, token: token, runner: r, log: log,
-		http:    &http.Client{},
-		sleep:   realSleep,
-		owned:   map[string]struct{}{},
-		pending: map[string]event{},
-		wake:    make(chan struct{}, 1),
+		http:  &http.Client{},
+		sleep: realSleep,
+
+		heartbeat: heartbeatEvery,
+		owned:     map[string]struct{}{},
+		pending:   map[string]event{},
+		wake:      make(chan struct{}, 1),
 	}
 	r.Observe(c.observe)
 	return c
@@ -126,6 +146,11 @@ func (c *Client) Run(ctx context.Context) {
 	go func() {
 		defer wg.Done()
 		c.sendEvents(ctx)
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.beat(ctx)
 	}()
 	defer wg.Wait()
 
@@ -176,7 +201,11 @@ func (c *Client) poll(ctx context.Context) (*workItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		// Reading to the end lets the connection be reused.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+	}()
 	switch resp.StatusCode {
 	case http.StatusNoContent:
 		return nil, nil
@@ -221,6 +250,13 @@ func (c *Client) submit(item workItem) {
 		if !had {
 			c.disown(item.ID)
 		}
+		// The controller handed it again because it has not heard from the
+		// task lately; saying where it is now ends the redelivery.
+		for _, t := range c.runner.List() {
+			if t.ID == item.ID && t.State != task.Queued {
+				c.enqueue(eventOf(t))
+			}
+		}
 	default:
 		c.disown(item.ID)
 		c.enqueue(event{ID: item.ID, State: task.Failed, Reason: err.Error()})
@@ -236,6 +272,10 @@ func (c *Client) disown(id string) {
 // stop cancels everything, not only what control sent: the controller asked
 // the unit to stand down.
 func (c *Client) stop(commandID string) {
+	if c.seenStop(commandID) {
+		c.enqueue(event{ID: commandID, State: task.Done})
+		return
+	}
 	for _, t := range c.runner.List() {
 		if t.State == task.Queued || t.State == task.Running {
 			// A task that finished since List is already as stopped as it gets.
@@ -243,6 +283,59 @@ func (c *Client) stop(commandID string) {
 		}
 	}
 	c.enqueue(event{ID: commandID, State: task.Done})
+}
+
+// seenStop records id and reports whether it was already recorded.
+func (c *Client) seenStop(id string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.stopped {
+		if s == id {
+			return true
+		}
+	}
+	c.stopped = append(c.stopped, id)
+	if len(c.stopped) > stopMemory {
+		c.stopped = c.stopped[1:]
+	}
+	return false
+}
+
+func eventOf(t task.Task) event {
+	return event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason}
+}
+
+// beat re-reports every task control owns that is still running.
+func (c *Client) beat(ctx context.Context) {
+	tick := time.NewTicker(c.heartbeat)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		running := c.runner.List()
+		c.mu.Lock()
+		var fresh []event
+		for _, t := range running {
+			if t.State != task.Running {
+				continue
+			}
+			// A pending event is at least as new as this snapshot.
+			if _, owned := c.owned[t.ID]; !owned {
+				continue
+			}
+			if _, queued := c.pending[t.ID]; queued {
+				continue
+			}
+			fresh = append(fresh, eventOf(t))
+		}
+		c.mu.Unlock()
+		for _, ev := range fresh {
+			c.enqueue(ev)
+		}
+	}
 }
 
 // observe runs on the runner's goroutines and must never wait on the network.
@@ -259,12 +352,13 @@ func (c *Client) observe(t task.Task) {
 		delete(c.owned, t.ID)
 	}
 	c.mu.Unlock()
-	c.enqueue(event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason})
+	c.enqueue(eventOf(t))
 }
 
 // enqueue keeps only the latest event per id: a controller needs where a task
 // is now, and an outage must not build a backlog.
 func (c *Client) enqueue(ev event) {
+	ev.Reason = clipReason(ev.Reason)
 	c.mu.Lock()
 	if _, ok := c.pending[ev.ID]; !ok {
 		c.order = append(c.order, ev.ID)
@@ -275,6 +369,18 @@ func (c *Client) enqueue(ev event) {
 	case c.wake <- struct{}{}:
 	default:
 	}
+}
+
+// clipReason cuts at a rune boundary so the report stays valid UTF-8.
+func clipReason(s string) string {
+	if len(s) <= maxReasonBytes {
+		return s
+	}
+	cut := maxReasonBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 func (c *Client) sendEvents(ctx context.Context) {
@@ -308,7 +414,13 @@ func (c *Client) drain(ctx context.Context) bool {
 		c.mu.Unlock()
 
 		if err := c.post(ctx, ev); err != nil {
-			return false
+			var rej rejected
+			if !errors.As(err, &rej) {
+				return false
+			}
+			// The controller will never take this event; keeping it would
+			// block every report behind it.
+			c.log.Error("control_event_rejected", map[string]any{"id": ev.ID, "status": int(rej)})
 		}
 
 		c.mu.Lock()
@@ -320,6 +432,11 @@ func (c *Client) drain(ctx context.Context) bool {
 		c.mu.Unlock()
 	}
 }
+
+// rejected is a 4xx the controller will answer the same way every time.
+type rejected int
+
+func (r rejected) Error() string { return fmt.Sprintf("events: status %d", int(r)) }
 
 func (c *Client) post(ctx context.Context, ev event) error {
 	body, err := json.Marshal(ev)
@@ -340,7 +457,12 @@ func (c *Client) post(ctx context.Context, ev event) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode/100 != 2 {
+	switch {
+	case resp.StatusCode/100 == 2:
+	case resp.StatusCode/100 == 4 && resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests:
+		return rejected(resp.StatusCode)
+	default:
 		return fmt.Errorf("events: status %d", resp.StatusCode)
 	}
 	return nil
