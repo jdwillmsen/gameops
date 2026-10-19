@@ -227,6 +227,32 @@ forward to answer `/healthz` before sending the token and refuses a local port
 that is already in use. A timeout, error or interrupt cancels every task still
 running. The gatherers get the scene's cleared box as their `area`.
 
+### Test fields
+
+`lab/courses.sh [--confirm-overwrite] <lab> grounds|courses` builds one of two
+fixed test fields on the lab's flat ground (grass at y 63), beside the spawn
+hub at x -61..51, z -519..-323. Each is a 3x3 grid of 40x40 cells with roads
+between, joined to the hub's gates by paths:
+
+| Field | Box | Cells (north row first, west to east) |
+|---|---|---|
+| `grounds` | x 150..293, z -500..-357 | tree grove (9 woods), ore quarry, liquids and hazards / chests and workstations, beacon plaza with a block gallery, redstone / farm, animal pens, pathfinding course |
+| `courses` | x -294..-151, z -500..-357 | drops 1-4, trenches 1-4, jump steps, gaps / pit, low ceilings, water pool, lava behind glass / slabs, stairs, fences, ladders, doors, thin blocks; pads 1-12 (16x16) and 13-15 (38x38) |
+
+A unit's gather `area` can be one cell: the grove, the quarry and the chest
+rows are the work yards. Pads are blank on purpose; a test may clear one
+(air from y 64 up) and build on it each run. Every number is drawn on its pad.
+
+`cmd/labcourses` generates the commands; the script loads the chunks with
+ticking areas, streams the commands to the server's stdin, waits for a logged
+end marker and counts real errors. A rebuild replaces the field, including
+its stocked chests and its animals, and reports zero errors when everything
+placed. A `k8s:` target needs `--confirm-overwrite`:
+
+```
+minecraft/crew/lab/courses.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod> courses
+```
+
 ### Operator overlay
 
 The page draws a game-style overlay from `/v1/state`, polled once a second:
