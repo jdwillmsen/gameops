@@ -48,6 +48,11 @@ type Tracker struct {
 
 	inv       [inventorySize]stackRef
 	itemNames map[int32]string
+
+	// opened maps stack IDs seen in the open container's window to their
+	// item; nil until a container opens.
+	window uint32
+	opened map[int32]int32
 }
 
 func New(now func() time.Time) *Tracker { return &Tracker{now: now} }
@@ -57,6 +62,7 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	defer t.mu.Unlock()
 	t.self = runtimeID
 	t.inv = [inventorySize]stackRef{}
+	t.opened = nil
 	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, Yaw: yaw, Pitch: pitch, UpdatedAt: t.now()}
 }
 
@@ -130,6 +136,7 @@ func (t *Tracker) Reset() {
 	defer t.mu.Unlock()
 	t.self = 0
 	t.inv = [inventorySize]stackRef{}
+	t.opened = nil
 	t.s = Snapshot{UpdatedAt: t.now()}
 }
 

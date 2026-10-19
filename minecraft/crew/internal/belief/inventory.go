@@ -53,8 +53,15 @@ func (t *Tracker) ItemNames(entries []protocol.ItemEntry) {
 // applyInventoryLocked reports whether the packet was one the inventory reads.
 func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 	switch p := pk.(type) {
+	case *packet.ContainerOpen:
+		t.window, t.opened = uint32(p.WindowID), map[int32]int32{}
 	case *packet.InventoryContent:
 		if p.WindowID != 0 {
+			if t.opened != nil && p.WindowID == t.window {
+				for _, it := range p.Content {
+					t.noteOpened(it)
+				}
+			}
 			return true
 		}
 		t.inv = [inventorySize]stackRef{}
@@ -64,6 +71,8 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 	case *packet.InventorySlot:
 		if p.WindowID == 0 && p.Slot < inventorySize {
 			t.inv[p.Slot] = refOf(p.NewItem)
+		} else if t.opened != nil && p.WindowID != 0 && p.WindowID == t.window {
+			t.noteOpened(p.NewItem)
 		}
 	case *packet.InventoryTransaction:
 		// Pickups arrive as a server transaction, not as slot updates. Its
@@ -83,6 +92,7 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 			if r.Status != 0 {
 				continue
 			}
+			leftBehind := t.leftInContainer(r)
 			for _, c := range r.ContainerInfo {
 				if c.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory {
 					continue
@@ -99,6 +109,17 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 						// The response does not name the item, so a slot
 						// belief has lost cannot be rebuilt from it.
 						cur.count, cur.stackID = int(s.Count), s.StackNetworkID
+					default:
+						// A withdraw into an empty slot: the response gives
+						// only a stack ID, which a whole stack keeps from the
+						// chest and a split one does not.
+						id, ok := t.opened[s.StackNetworkID]
+						if !ok {
+							id, ok = leftBehind()
+						}
+						if ok {
+							*cur = stackRef{itemID: id, count: int(s.Count), stackID: s.StackNetworkID}
+						}
 					}
 				}
 			}
@@ -107,6 +128,32 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 		return false
 	}
 	return true
+}
+
+// noteOpened remembers which item a stack in the open container is, because
+// a withdraw's response names the stack by ID alone.
+func (t *Tracker) noteOpened(it protocol.ItemInstance) {
+	if it.StackNetworkID != 0 && it.Stack.NetworkID != 0 {
+		t.opened[it.StackNetworkID] = it.Stack.NetworkID
+	}
+}
+
+// leftInContainer finds the item of a stack that stayed in the container
+// after a partial withdraw: it shares the item with the part that left.
+func (t *Tracker) leftInContainer(r protocol.ItemStackResponse) func() (int32, bool) {
+	return func() (int32, bool) {
+		for _, c := range r.ContainerInfo {
+			if c.Container.ContainerID != protocol.ContainerLevelEntity {
+				continue
+			}
+			for _, s := range c.SlotInfo {
+				if id, ok := t.opened[s.StackNetworkID]; ok && s.Count > 0 {
+					return id, true
+				}
+			}
+		}
+		return 0, false
+	}
 }
 
 func (t *Tracker) inventoryLocked() []Item {

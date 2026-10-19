@@ -2,6 +2,7 @@ package act
 
 import (
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -239,5 +240,121 @@ func TestDiedForgetsTheOpenContainer(t *testing.T) {
 	a.Died()
 	if open, _, _ := a.Container(); open {
 		t.Error("container still open after death")
+	}
+}
+
+// withdrawFixture replays the recording up to the server's answer to the
+// withdraw, returning the actuator and the packets that follow. The server
+// empties the chest slot just before its response, so the split is there.
+func withdrawFixture(t *testing.T) (*Actuator, *sink, []packet.Packet) {
+	t.Helper()
+	a, s := newAct(flat(), Pose{})
+	pks := labPackets(t, "chest_withdraw")
+	for i, pk := range pks {
+		if sl, ok := pk.(*packet.InventorySlot); ok && sl.WindowID == 2 {
+			return a, s, pks[i:]
+		}
+		a.Apply(pk)
+	}
+	t.Fatal("fixture has no chest slot update")
+	return nil, nil, nil
+}
+
+func TestWithdrawQuotesTheSourceStackAndAnEmptyDestination(t *testing.T) {
+	a, s, rest := withdrawFixture(t)
+	id, err := a.Withdraw(0, 16, belief.Item{}, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != -3 {
+		t.Errorf("first request ID = %d, want -3", id)
+	}
+	req, ok := s.last(t).(*packet.ItemStackRequest)
+	if !ok || len(req.Requests) != 1 || req.Requests[0].RequestID != id || len(req.Requests[0].Actions) != 1 {
+		t.Fatalf("sent %#v", s.last(t))
+	}
+	tk, ok := req.Requests[0].Actions[0].(*protocol.TakeStackRequestAction)
+	if !ok {
+		t.Fatalf("action %T", req.Requests[0].Actions[0])
+	}
+	wantSrc := a.ContainerContent()[0].StackNetworkID
+	if wantSrc == 0 {
+		t.Fatal("fixture chest slot 0 has no stack ID")
+	}
+	if tk.Count != 16 ||
+		tk.Source.Container.ContainerID != protocol.ContainerLevelEntity || tk.Source.Slot != 0 || tk.Source.StackNetworkID != wantSrc ||
+		tk.Destination.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory || tk.Destination.Slot != 9 || tk.Destination.StackNetworkID != 0 {
+		t.Errorf("take = %+v", tk)
+	}
+
+	id2, err := a.Withdraw(0, 1, beliefItem(9, "cobblestone", 16, 55), 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id2 != -5 {
+		t.Errorf("second request ID = %d, want -5", id2)
+	}
+	tk = s.last(t).(*packet.ItemStackRequest).Requests[0].Actions[0].(*protocol.TakeStackRequestAction)
+	if tk.Destination.StackNetworkID != 55 {
+		t.Errorf("merge destination stack ID = %d, want 55", tk.Destination.StackNetworkID)
+	}
+
+	// The recorded reply to exactly this request is what Response reports.
+	for _, pk := range rest {
+		a.Apply(pk)
+	}
+	if st, done := a.Response(id); !done || st != StatusOK {
+		t.Errorf("response = %d done=%v, want ok", st, done)
+	}
+}
+
+func TestWithdrawRejectsEmptySourceAndBadSlots(t *testing.T) {
+	a, _ := newAct(flat(), Pose{})
+	if _, err := a.Withdraw(0, 1, belief.Item{}, 9); err == nil {
+		t.Error("withdraw with no chest open succeeded")
+	}
+	b, s, _ := withdrawFixture(t)
+	sent := len(s.got)
+	for _, c := range []struct {
+		name   string
+		from   byte
+		count  int
+		toSlot int
+	}{
+		{"empty source slot", 5, 1, 9},
+		{"source past the chest", 27, 1, 9},
+		{"zero count", 0, 0, 9},
+		{"negative count", 0, -1, 9},
+		{"more than the stack holds", 0, 17, 9},
+		{"negative destination", 0, 1, -1},
+		{"destination past the inventory", 0, 1, 36},
+	} {
+		if _, err := b.Withdraw(c.from, c.count, belief.Item{}, c.toSlot); err == nil {
+			t.Errorf("%s accepted", c.name)
+		}
+	}
+	if len(s.got) != sent {
+		t.Error("a rejected withdraw still sent a packet")
+	}
+}
+
+func TestWithdrawResponseUpdatesBelief(t *testing.T) {
+	tr := belief.New(time.Now)
+	tr.Spawn(1, mgl32.Vec3{}, 0, 0, 0)
+	tr.ItemNames([]protocol.ItemEntry{
+		{Name: "minecraft:cobblestone", RuntimeID: cobblestone},
+		{Name: "minecraft:wooden_pickaxe", RuntimeID: woodenPick},
+	})
+	for _, pk := range labPackets(t, "chest_withdraw") {
+		tr.Apply(pk)
+	}
+	var got belief.Item
+	for _, it := range tr.Snapshot().Inventory {
+		if it.Slot == 9 {
+			got = it
+		}
+	}
+	if got.Name != "cobblestone" || got.Count != 16 || got.StackNetworkID == 0 {
+		t.Errorf("slot 9 = %+v, want 16 cobblestone", got)
 	}
 }

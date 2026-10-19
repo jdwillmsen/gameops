@@ -241,3 +241,52 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 		}
 	}
 }
+
+// Withdraw moves count items from a slot of the open container into slot
+// toSlot of the unit's inventory, returning the request ID to poll with
+// Response. to is the stack already in toSlot, or the zero Item when it is
+// empty; the server must be quoted the destination's ID to merge onto it.
+func (a *Actuator) Withdraw(fromSlot byte, count int, to belief.Item, toSlot int) (requestID int32, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.cont.open {
+		return 0, errors.New("no container is open")
+	}
+	if int(fromSlot) >= len(a.cont.slots) {
+		return 0, fmt.Errorf("slot %d is not in the container", fromSlot)
+	}
+	src := a.cont.slots[fromSlot]
+	held := int(src.Stack.Count)
+	if src.Stack.NetworkID == 0 || held == 0 {
+		return 0, fmt.Errorf("container slot %d is empty", fromSlot)
+	}
+	if count < 1 || count > held || count > 255 {
+		return 0, fmt.Errorf("cannot take %d from a stack of %d", count, held)
+	}
+	if toSlot < 0 || toSlot > 35 {
+		return 0, fmt.Errorf("slot %d is not in the inventory", toSlot)
+	}
+
+	take := &protocol.TakeStackRequestAction{}
+	take.Count = byte(count)
+	take.Source = protocol.StackRequestSlotInfo{
+		Container:      protocol.FullContainerName{ContainerID: protocol.ContainerLevelEntity},
+		Slot:           fromSlot,
+		StackNetworkID: src.StackNetworkID,
+	}
+	take.Destination = protocol.StackRequestSlotInfo{
+		Container:      protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+		Slot:           byte(toSlot),
+		StackNetworkID: to.StackNetworkID,
+	}
+	id := a.nextRequest
+	err = a.w.WritePacket(&packet.ItemStackRequest{Requests: []protocol.ItemStackRequest{{
+		RequestID: id,
+		Actions:   []protocol.StackRequestAction{take},
+	}}})
+	if err != nil {
+		return 0, err
+	}
+	a.nextRequest -= 2
+	return id, nil
+}
