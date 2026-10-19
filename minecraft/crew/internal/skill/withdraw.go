@@ -33,6 +33,8 @@ type Withdraw struct {
 	log   Logger
 	// groups ask for items by ranking rather than by name.
 	groups []group
+	// slots bounds the inventory slots withdrawn items may land in.
+	slots int
 
 	phase wPhaseState
 }
@@ -67,7 +69,10 @@ func NewWithdrawChest(world ChestWorld, self func() belief.Snapshot, chest proto
 	for _, f := range opts {
 		f(&o)
 	}
-	w := &Withdraw{world: world, self: self, chest: chest, want: map[string]int{}, log: o.log, groups: o.groups}
+	w := &Withdraw{world: world, self: self, chest: chest, want: map[string]int{}, log: o.log, groups: o.groups, slots: inventorySlots}
+	if o.hotbar {
+		w.slots = hotbarSlots
+	}
 	for k, v := range want {
 		w.want[k] = v
 	}
@@ -335,11 +340,11 @@ func (w *Withdraw) destination(s belief.Snapshot, item string, rejected map[int]
 	used := map[int]bool{}
 	for _, it := range s.Inventory {
 		used[it.Slot] = true
-		if it.Name == item && it.Count < fullStack && !rejected[it.Slot] {
+		if it.Name == item && it.Count < fullStack && it.Slot < w.slots && !rejected[it.Slot] {
 			return it, fullStack - it.Count, true
 		}
 	}
-	for slot := 0; slot < inventorySlots; slot++ {
+	for slot := 0; slot < w.slots; slot++ {
 		if !used[slot] && !rejected[slot] {
 			return belief.Item{Slot: slot}, fullStack, true
 		}

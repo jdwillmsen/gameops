@@ -227,3 +227,25 @@ func TestWithdrawOneOfSpendsItsBudgetDownTheRanking(t *testing.T) {
 		t.Errorf("beef %d bread %d, want 2 and 3", r.have("cooked_beef"), r.have("bread"))
 	}
 }
+
+func TestWithdrawIntoHotbarNeverLandsOffTheHotbar(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	for slot := 1; slot < 8; slot++ {
+		r.give(slot, idCobblestone, 64)
+	}
+	r.give(20, 340, 10) // bread off the hotbar, which a plain withdraw would merge onto
+	c := r.chestFor(srcA)
+	c[0] = slotStack{343, 2, 700}  // stone swords
+	c[1] = slotStack{340, 64, 701} // bread
+	s := NewWithdrawChest(w, r.self, srcA, nil, OneOf(1, "stone_sword"), OneOf(8, "bread"), IntoHotbar())
+	if st, err := r.run(s, 900); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.inv[8].item != 343 || r.inv[20].count != 10 || r.have("bread") != 10 {
+		t.Errorf("slot 8 holds %d, off-hotbar bread %d, bread %d", r.inv[8].item, r.inv[20].count, r.have("bread"))
+	}
+	if !s.(*Withdraw).Full() || r.stored(srcA, 340) != 64 {
+		t.Errorf("full=%v, bread left %d, want the bread left behind", s.(*Withdraw).Full(), r.stored(srcA, 340))
+	}
+}
