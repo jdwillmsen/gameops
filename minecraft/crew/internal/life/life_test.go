@@ -877,6 +877,83 @@ func TestTheFightEndsAfterTheGraceWhenTheMobIsGone(t *testing.T) {
 	if last.event != "defend_ended" {
 		t.Errorf("last log = %+v, want defend_ended", last)
 	}
+	if last.fields["reason"] != endGone {
+		t.Errorf("reason = %v, want %q", last.fields["reason"], endGone)
+	}
+}
+
+// endReasons lists the reason of every defend_ended logged so far.
+func endReasons(r *rig) []any {
+	var out []any
+	for _, l := range r.log.lines {
+		if l.event == "defend_ended" {
+			out = append(out, l.fields["reason"])
+		}
+	}
+	return out
+}
+
+func TestTheFightEndsWithTheReasonTheTargetWasDropped(t *testing.T) {
+	sealed := func(r *rig) {
+		for dx := int32(-1); dx <= 1; dx++ {
+			for dz := int32(-1); dz <= 1; dz++ {
+				for y := int32(1); y <= 3; y++ {
+					if y == 3 || dx != 0 || dz != 0 {
+						r.w.over[protocol.BlockPos{25 + dx, y, 20 + dz}] = "stone"
+					}
+				}
+			}
+		}
+	}
+	t.Run("no path to a mob in a sealed cell", func(t *testing.T) {
+		r := newRig(t, defaults, start)
+		sealed(r)
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{25.5, 1, 20.5})
+		r.run(100)
+		if got := endReasons(r); len(got) != 1 || got[0] != endNoPath {
+			t.Errorf("reasons = %v, want [%s]", got, endNoPath)
+		}
+	})
+	t.Run("no cell to stand on near the mob", func(t *testing.T) {
+		r := newRig(t, defaults, start)
+		for dx := int32(-1); dx <= 1; dx++ {
+			for dz := int32(-1); dz <= 1; dz++ {
+				for y := int32(1); y <= 4; y++ {
+					r.w.over[protocol.BlockPos{25 + dx, y, 20 + dz}] = "stone"
+				}
+			}
+		}
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{25.5, 1, 20.5})
+		r.run(100)
+		if got := endReasons(r); len(got) != 1 || got[0] != endNoStandCell {
+			t.Errorf("reasons = %v, want [%s]", got, endNoStandCell)
+		}
+	})
+	t.Run("fight limit", func(t *testing.T) {
+		r := newRig(t, defaults, start)
+		for y := int32(1); y <= 2; y++ {
+			r.w.over[protocol.BlockPos{21, y, 20}] = "stone"
+		}
+		r.spawn(53, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+		r.l.engaged = true
+		r.l.target, _ = r.l.ents.Get(53)
+		r.l.fightTicks[53] = fightLimit
+		r.run(graceTicks + 10)
+		if got := endReasons(r); len(got) != 1 || got[0] != endFightLimit {
+			t.Errorf("reasons = %v, want [%s]", got, endFightLimit)
+		}
+	})
+	t.Run("a later target replaces the reason", func(t *testing.T) {
+		r := newRig(t, defaults, start)
+		r.l.endReason = endNoPath
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{21, 1, 20.5})
+		r.run(5)
+		r.l.Apply(&packet.RemoveActor{EntityUniqueID: 50})
+		r.run(graceTicks + 10)
+		if got := endReasons(r); len(got) != 1 || got[0] != endGone {
+			t.Errorf("reasons = %v, want [%s]", got, endGone)
+		}
+	})
 }
 
 func TestNoLogLineCarriesAPosition(t *testing.T) {
@@ -887,7 +964,7 @@ func TestNoLogLineCarriesAPosition(t *testing.T) {
 	for _, l := range r.log.lines {
 		for k := range l.fields {
 			switch k {
-			case "entity", "mode", "ticks":
+			case "entity", "mode", "ticks", "reason":
 			default:
 				t.Errorf("%s logged field %q: only types, modes and counts belong in the log", l.event, k)
 			}

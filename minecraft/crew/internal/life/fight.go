@@ -12,6 +12,15 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
+// Why the last target was dropped, as logged on defend_ended. A fight that
+// ends because the mob left or died has no giveUp and logs endGone.
+const (
+	endGone        = "gone"
+	endNoStandCell = "no_stand_cell"
+	endNoPath      = "no_path"
+	endFightLimit  = "fight_limit"
+)
+
 // bodyCentre is how high above an entity's feet a swing is aimed.
 const bodyCentre = 0.9
 
@@ -78,6 +87,9 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	}
 
 	if best.ID != 0 {
+		// A new target outranks an earlier giveUp: the fight no longer ends
+		// because of the mob that was dropped.
+		l.endReason = ""
 		l.target, l.mode = best, m
 		l.holdUntil = l.tick + graceTicks
 		if !l.engaged {
@@ -93,7 +105,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		}
 		l.fightTicks[best.ID]++
 		if l.fightTicks[best.ID] > fightLimit && !(l.isSuspect(best.ID) && inMeleeReach(p, best)) {
-			l.giveUp(best.ID)
+			l.giveUp(best.ID, endFightLimit)
 		}
 		return true
 	}
@@ -105,7 +117,12 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	if l.engaged {
 		l.engaged = false
 		l.chase, l.flee = nil, nil
-		l.logEvent("defend_ended", map[string]any{"ticks": l.tick - l.engagedAt})
+		reason := l.endReason
+		if reason == "" {
+			reason = endGone
+		}
+		l.endReason = ""
+		l.logEvent("defend_ended", map[string]any{"ticks": l.tick - l.engagedAt, "reason": reason})
 	}
 	return false
 }
@@ -172,8 +189,10 @@ func (l *Life) noteHurt(p act.Pose) {
 }
 
 // giveUp stops considering a mob a threat for a while: it cannot be reached,
-// or the fight with it is going nowhere.
-func (l *Life) giveUp(id uint64) {
+// or the fight with it is going nowhere. The reason is what defend_ended
+// reports if no other target takes over.
+func (l *Life) giveUp(id uint64, reason string) {
+	l.endReason = reason
 	if len(l.ignore) >= maxIgnored {
 		clear(l.ignore)
 		clear(l.fightTicks)
@@ -243,7 +262,7 @@ func (l *Life) approach(ctx context.Context, a skill.Actuator, p act.Pose, e bel
 	if l.chase == nil || (l.tick-l.chaseAt >= chaseEvery && l.chaseGoal != cell) {
 		goal, ok := l.standNear(cell)
 		if !ok {
-			l.giveUp(e.ID)
+			l.giveUp(e.ID, endNoStandCell)
 			return l.stillFacing(a, p, e)
 		}
 		l.chase = skill.NewNavigate(l.world, l.self, goal, chaseWithin)
@@ -253,7 +272,7 @@ func (l *Life) approach(ctx context.Context, a skill.Actuator, p act.Pose, e bel
 	case skill.Running:
 		return nil
 	case skill.Failed:
-		l.giveUp(e.ID)
+		l.giveUp(e.ID, endNoPath)
 	}
 	return l.stillFacing(a, p, e)
 }

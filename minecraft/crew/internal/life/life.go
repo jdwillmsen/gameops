@@ -108,6 +108,7 @@ type Life struct {
 	mode       mode
 	retreating int
 	lastAttack uint64
+	endReason  string
 
 	chase     skill.Skill
 	chaseGoal [3]int32
@@ -144,7 +145,7 @@ func (l *Life) Reset() {
 	clear(l.ignore)
 	clear(l.fightTicks)
 	l.engaged, l.holdUntil, l.target = false, 0, belief.Entity{}
-	l.retreating = 0
+	l.retreating, l.endReason = 0, ""
 	l.chase, l.flee = nil, nil
 	l.idle = idleState{}
 }
