@@ -1203,6 +1203,28 @@ kbd, .keys code {
   margin: 0;
   inset: 3.6rem 0.6rem auto auto;
 }
+/* The list of players, on the left, so that a player's details open
+   beside it and the list stays to pick the next one from. It is not modal,
+   so it is not in the top layer, and is lifted over the map as the details
+   are. */
+.sheet.roster {
+  position: fixed;
+  z-index: 1200;
+  margin: 0;
+  inset: 3.6rem auto auto 0.6rem;
+}
+.roster-filter { width: 100%; margin: 0 0 0.4rem; }
+.roster-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
+.roster-row { display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left; padding: 0.35rem 0.5rem; background: transparent; border: 1px solid transparent; border-radius: var(--radius-s); }
+.roster-row:hover, .roster-row:focus-visible { border-color: var(--rule); }
+.roster-face { flex: none; width: 24px; height: 24px; image-rendering: pixelated; border-radius: var(--radius-s); }
+.roster-face.none { background: var(--rule); }
+.roster-who { flex: 1; min-width: 0; display: grid; }
+.roster-name { overflow-wrap: anywhere; }
+.roster-when { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); overflow-wrap: anywhere; }
+.roster-tags { flex: none; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.25rem; }
+.roster-tag { font-size: var(--caption); line-height: var(--caption-lh); padding: 0 0.35rem; border: 1px solid var(--rule); border-radius: var(--radius-s); color: var(--dim); }
+.roster-tag.online { color: var(--accent); border-color: var(--accent); }
 .sheet-title { flex: 1; min-width: 0; display: grid; }
 .sheet-title h2 { overflow-wrap: anywhere; }
 .sheet-title span { color: var(--dim); font-size: var(--caption); line-height: var(--caption-lh); }
@@ -1666,6 +1688,7 @@ kbd, .keys code {
     padding-bottom: calc(1.1rem + env(safe-area-inset-bottom));
   }
   .player-shown .inspect { display: none; }
+  .sheet.roster { inset: auto 0 0 0; }
   .sheet.player .days li { grid-template-columns: 5.2rem auto 1fr; }
 }
 

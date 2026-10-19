@@ -3152,6 +3152,39 @@ with the live layer off. `live` (`health`, `maxHealth`, `level`,
 `dimension`, `at`) is present only for an online player whose pack sends
 vitals.
 
+### All players
+
+**More → All players** opens a list of every player the map has seen,
+online or not. It is a side panel on the left, so a player's details open
+beside it on the right and the list stays open. On a phone both are
+sheets from the bottom, so picking a player puts the list away. Online
+players come first, by name, and then everyone else by when they were last
+seen. Each row shows the player's face where the map has one, where an
+online player is or how long ago an offline one was seen, earlier
+gamertags, and tags: **Online**, **You**, and **Operator** for a player
+whose XUID the game's operator list holds (only with admin on). Typing in
+the box filters by any part of a current or earlier gamertag. Picking a
+row opens that player's details, which read an offline player from the
+save.
+
+The list comes from the roster, `roster/roster.json` under `DATA_DIR`. It
+has the live feed's id for each player who has appeared in a sample, their
+gamertag, up to 5 earlier ones, and first and last seen. It also has the
+XUID the player logged in with (`!map`, passkey or Xbox), matched by
+gamertag; a change of gamertag drops the XUID until the next login. At most
+1,024 players are kept, and when it is full the player seen longest ago
+makes room. The roster is written every 10 s while it changes, and on
+shutdown, atomically. A last-seen moving by under a minute is not worth a
+write. A file that cannot be read is kept as `roster.json.unreadable`, and
+the roster starts again. Players who have not been online since the roster
+shipped are not listed until they are. The roster is kept whenever the live
+layer is on.
+
+`GET /api/players` (session required) answers `{ players: [...] }`, each
+with `id`, `name`, `earlier`, `firstSeen`, `lastSeen`, `tags` (`online`,
+`you`, `operator`) and, for an online player only, `dimension`. It carries
+no position and no XUID. It is 404 with the live layer off.
+
 ### The counters file
 
 The totals are `counters/counters.json` under `DATA_DIR`: counters only, no
@@ -5148,6 +5181,7 @@ script error and `follow-player` a player 5 pixels off the middle.
 | `GET /api/lost?dimension=<id>` | Session required. Served only with `LAYERS_ENABLED=true`, as the tiles below are. `offered` (false before the first chunk count), `version`, `missing` (chunks of the dimension seen before and absent from the last count), and `tiles` (`minZoom` -5, `maxZoom` 4, `size`). 400 for an unknown dimension |
 | `GET /api/lost/tiles/{dimension}/{zoom}/{x}/{y}.png?v=<version>` | Session required. One tile marking the missing chunks, addressed as the terrain's; zoom -5 to 4. Carries an `ETag`, kept for good when `v` is the current count's. 404 for a tile with none in it, 400 for a bad address |
 | `GET /api/search?q=<text>&dimension=<id>&x=<x>&z=<z>&limit=<n>&kind=<kind>` | Session required. `hits`, each `kind` (`player`, `biome`, `structure`, `spawn`, `bed`, `container`, `mob`, `waypoint`), `name`, `detail`, a marker's `colour`, `trapped` and `baby` where it has them, a player's or mob's `id` and `live` (true where the position is the live layer's), `dimension`, `x`, `z`, `y` where there is one, and `distance` in the dimension asked from; `more`; and `waypoints` (`searched`, `unavailable`, `off`). `limit` is 20 unless given and at most 50. `kind`, if given, keeps the answer to that kind. `asked=<kind>,<kind>` lists the kinds named among the structures where they are kinds that are off until asked for, which are otherwise left out; `strongholds=1` is the older way of saying so of strongholds. 400 without `q` of 1 to 64 characters, a dimension, `x` and `z`, or with a `kind` that is not one |
+| `GET /api/players` | Session required. Every player the roster has seen, online first: `id`, `name`, `earlier`, `firstSeen`, `lastSeen`, `tags`, and `dimension` while online. No positions or XUIDs. 404 with the live layer off. |
 | `GET /api/players/<id>?name=<gamertag>` | Session required. `id` is the live feed's player id, a number; 400 otherwise. `saved` (`state`, `asOf`, `record`), `trails` (`state`, `stats`), `counters` and `live` as in Player details. Always 200 for a well-formed id. |
 | `GET /api/trails?dimension=<id>&player=<gamertag>&since=<unix seconds>` | Session required. `players`, each a `name` and `segments`, lines of `[t, x, y, z]` points oldest first; `more`, `maxAgeSeconds` and `maxPoints`; `thinning`, the detail points are kept at, each a point `olderThanSeconds` (0 for full detail) and its `stepBlocks`. 400 for an unknown dimension. Served only with `TRAILS_ENABLED=true` and `LIVE_ENABLED=true` |
 | `GET /api/history` | Session required. `days`, oldest first: each `day` (`YYYY-MM-DD`, UTC), `takenAt`, the snapshot it was drawn from, `renderer` (`sha256`, `netherTopY`), `rendererChanged` where that differs from the day before, and `dimensions`, each an `id`, the extent and `format` `GET /api/map` gives a dimension, `tiles`, `changed`, how many of them differ from the day before, and `markers: true` where the day kept that dimension's markers, left out where it did not. Never cached: `no-store`. Served only with `HISTORY_ENABLED=true`, like the three below, and `404` without it |
