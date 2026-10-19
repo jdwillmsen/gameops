@@ -4,9 +4,223 @@
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 12px monospace; }
   canvas { display: block; }
-  #hud { position: fixed; left: 8px; top: 8px; color: #fff; background: #0008; padding: 4px 8px; white-space: pre; }
+  #debug { position: fixed; left: 8px; top: 8px; color: #fff; background: #0008; padding: 4px 8px; white-space: pre; }
+  #debug.off { display: none; }
+
+  /* Operator overlay: plain DOM over the canvas, fed by /v1/state. */
+  #ui { position: fixed; inset: 0; pointer-events: none; color: #fff; font: 12px/1.3 monospace; text-shadow: 1px 1px 0 #000; }
+  #ui .panel { position: absolute; background: #000a; border: 1px solid #fff3; padding: 6px 8px; }
+  #ui h2 { margin: 0 0 4px; font-size: 11px; font-weight: normal; letter-spacing: .08em; text-transform: uppercase; color: #bbb; }
+  #cross { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; mix-blend-mode: difference; }
+  #cross::before, #cross::after { content: ""; position: absolute; background: #fff; }
+  #cross::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #cross::after { top: 8px; left: 0; height: 2px; width: 18px; }
+  #bottom { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  #hearts { display: flex; gap: 1px; height: 18px; }
+  .heart { width: 18px; height: 18px; image-rendering: pixelated; background-size: 100% 100%; }
+  .row { display: flex; gap: 2px; }
+  .slot { position: relative; width: 36px; height: 36px; box-sizing: border-box; background: #0009; border: 2px solid #555; }
+  .slot.sel { border-color: #fff; box-shadow: 0 0 0 2px #000; }
+  .icon { position: absolute; inset: 2px; image-rendering: pixelated; background-repeat: no-repeat; font-size: 9px; overflow: hidden; word-break: break-all; }
+  .count { position: absolute; right: 2px; bottom: 0; font-size: 12px; font-weight: bold; }
+  #inv { right: 8px; top: 8px; }
+  #inv .gap { height: 8px; }
+  #status { right: 8px; bottom: 8px; min-width: 200px; }
+  #status .dead { color: #f66; font-weight: bold; }
+  #status .live { color: #7f7; }
+  #status .bad { color: #fb5; }
+  #tasks { left: 8px; bottom: 28px; width: 280px; }
+  #tasks .cur { margin-bottom: 6px; }
+  .bar { height: 8px; background: #333; border: 1px solid #888; margin: 3px 0; }
+  .bar > div { height: 100%; background: #5c5; }
+  .bar.pending > div { width: 30%; background: #aa5; }
+  .t { display: flex; gap: 6px; }
+  .t .st { width: 62px; flex: none; }
+  .st.done { color: #7f7; } .st.failed { color: #f66; } .st.running { color: #8cf; } .st.queued { color: #bbb; } .st.cancelled { color: #fb5; }
+  .reason { color: #f99; margin-left: 68px; }
+  #hint { position: absolute; left: 8px; bottom: 8px; color: #ccc; font-size: 10px; }
+  #ui.stale .panel, #ui.stale #bottom { opacity: .5; }
 </style>
-<div id="hud">connecting...</div>
+<div id="debug">connecting...</div>
+<div id="ui">
+  <div id="cross"></div>
+  <div id="inv" class="panel"><h2>inventory</h2><div id="invgrid"></div></div>
+  <div id="tasks" class="panel"><h2>tasks</h2><div id="tasklist">no state yet</div></div>
+  <div id="status" class="panel"><h2>status</h2><div id="statuslist"></div></div>
+  <div id="bottom"><div id="hearts"></div><div id="hotbar" class="row"></div></div>
+  <div id="hint">F3: debug info</div>
+</div>
+<script>
+// Operator overlay. A classic script, apart from the three.js module, so the
+// readouts survive a failed CDN load. Server strings only ever reach the page
+// through textContent.
+(() => {
+  const $ = id => document.getElementById(id);
+  const ui = $('ui');
+  const DIMENSIONS = { 0: 'overworld', 1: 'nether', 2: 'the end' };
+  let sheet = null; // { doc, url }
+  let last = null, failed = false;
+
+  addEventListener('keydown', e => {
+    if (e.key !== 'F3') return;
+    e.preventDefault();
+    $('debug').classList.toggle('off');
+  });
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  // Pixel hearts as data URIs, drawn once.
+  const HEART = ['.XX..XX.', 'XXXXXXXX', 'XXXXXXXX', 'XXXXXXXX', '.XXXXXX.', '..XXXX..', '...XX...'];
+  function heartURL(fill) {
+    let r = '';
+    HEART.forEach((row, y) => [...row].forEach((c, x) => {
+      if (c !== 'X') return;
+      const edge = y === 0 || y === HEART.length - 1 || x === 0 || x === 7 || HEART[y][x - 1] === '.' || HEART[y][x + 1] === '.' || HEART[y - 1]?.[x] === '.' || HEART[y + 1]?.[x] === '.';
+      const lit = fill === 'full' || (fill === 'half' && x < 4);
+      const colour = edge ? '#2b0000' : lit ? (y < 2 && x % 4 === 1 ? '#ff9a9a' : '#e02020') : '#3a3a3a';
+      r += `<rect x="${x}" y="${y}" width="1" height="1" fill="${colour}"/>`;
+    }));
+    return `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 7" shape-rendering="crispEdges">${r}</svg>`)}")`;
+  }
+  const HEARTS = { full: heartURL('full'), half: heartURL('half'), empty: heartURL('empty') };
+
+  function drawHearts(s) {
+    const box = $('hearts');
+    if (!s.health_known) { box.replaceChildren(); return; }
+    const halves = Math.max(0, Math.min(20, Math.round(s.health)));
+    const kids = [];
+    for (let i = 0; i < 10; i++) {
+      const h = el('div', 'heart');
+      h.style.backgroundImage = HEARTS[halves >= 2 * i + 2 ? 'full' : halves === 2 * i + 1 ? 'half' : 'empty'];
+      kids.push(h);
+    }
+    box.title = `${s.health} health`;
+    box.replaceChildren(...kids);
+  }
+
+  // Item names arrive without the namespace.
+  function icon(name) {
+    const d = el('div', 'icon');
+    if (!sheet) { d.textContent = name.slice(0, 6); return d; }
+    const r = sheet.doc.items['minecraft:' + name] ?? sheet.doc.placeholder;
+    const w = r[2] - r[0], h = r[3] - r[1], px = 28;
+    d.style.backgroundImage = `url(${sheet.url})`;
+    d.style.backgroundSize = `${px / w}px ${px / h}px`;
+    d.style.backgroundPosition = `${-r[0] / w * px}px ${-r[1] / h * px}px`;
+    return d;
+  }
+
+  function slotEl(item, selected) {
+    const d = el('div', 'slot' + (selected ? ' sel' : ''));
+    if (item) {
+      d.title = item.name.replace(/_/g, ' ');
+      d.append(icon(item.name));
+      if (item.count > 1) d.append(el('span', 'count', String(item.count)));
+    }
+    return d;
+  }
+
+  function drawInventory(s) {
+    const bySlot = new Map((s.inventory ?? []).map(i => [i.slot, i]));
+    const row = (from) => { const r = el('div', 'row'); for (let i = from; i < from + 9; i++) r.append(slotEl(bySlot.get(i), false)); return r; };
+    const grid = [];
+    for (let r = 1; r < 4; r++) grid.push(row(r * 9));
+    grid.push(el('div', 'gap'), row(0));
+    $('invgrid').replaceChildren(...grid);
+
+    const hot = [];
+    for (let i = 0; i < 9; i++) hot.push(slotEl(bySlot.get(i), s.held_known && s.held_slot === i));
+    $('hotbar').replaceChildren(...hot);
+  }
+
+  function field(label, value, cls) {
+    const d = el('div');
+    d.append(el('span', '', label + ' '), el('span', cls || '', value));
+    return d;
+  }
+
+  function drawStatus(s) {
+    const cam = window.__camStatus ?? 'page script not running';
+    const rows = [field('camera', cam, cam === 'live' ? 'live' : 'bad')];
+    if (failed) rows.push(field('crew', 'status unreachable', 'bad'));
+    else if (!s.spawned) rows.push(field('crew', 'not in the world', 'bad'));
+    else rows.push(s.dead ? field('crew', 'dead', 'dead') : field('crew', 'alive', 'live'));
+    if (s.spawned) {
+      rows.push(field('dimension', DIMENSIONS[s.dimension] ?? `unknown (${s.dimension})`));
+      rows.push(field('position', s.position_known ? s.position.map(v => Math.round(v)).join(', ') : 'unknown'));
+    }
+    $('statuslist').replaceChildren(...rows);
+  }
+
+  function taskLine(t) {
+    const d = el('div');
+    const line = el('div', 't');
+    line.append(el('span', 'st ' + t.state, t.state), el('span', '', `${t.template}${t.item ? ' ' + t.item.replace(/^minecraft:/, '') : ''}`));
+    d.append(line);
+    if (t.reason) d.append(el('div', 'reason', t.reason));
+    return d;
+  }
+
+  function drawTasks(tasks) {
+    const out = [];
+    const cur = tasks?.current;
+    if (cur) {
+      const c = el('div', 'cur');
+      c.append(el('div', '', `${cur.template}${cur.item ? ': ' + cur.item.replace(/^minecraft:/, '') : ''}`));
+      c.append(el('div', '', `skill ${cur.skill || '-'}  state ${cur.state}`));
+      const bar = el('div', cur.qty > 0 ? 'bar' : 'bar pending'), fill = el('div');
+      if (cur.qty > 0) fill.style.width = Math.min(100, cur.progress / cur.qty * 100) + '%';
+      bar.append(fill);
+      c.append(bar, el('div', '', cur.qty > 0 ? `${cur.progress} / ${cur.qty}` : `progress ${cur.progress}`));
+      out.push(c);
+    } else {
+      out.push(el('div', 'cur', 'idle'));
+    }
+    const recent = tasks?.recent ?? [];
+    if (recent.length) out.push(el('h2', '', 'recent'), ...recent.map(taskLine));
+    $('tasklist').replaceChildren(...out);
+  }
+
+  function render() {
+    const s = last?.state ?? { spawned: false, inventory: [] };
+    ui.classList.toggle('stale', failed);
+    drawHearts(s);
+    drawInventory(s);
+    drawStatus(s);
+    drawTasks(last?.tasks);
+  }
+
+  // 404 until the server has built the sheet; retried on every poll.
+  async function loadSheet() {
+    if (sheet) return;
+    try {
+      const doc = await fetch('/v1/camera/items.json').then(r => { if (!r.ok) throw 0; return r.json(); });
+      const url = '/v1/camera/items.png';
+      await new Promise((ok, no) => { const i = new Image(); i.onload = ok; i.onerror = no; i.src = url; });
+      sheet = { doc, url };
+    } catch { /* icons stay as text until it exists */ }
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch('/v1/state', { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      last = await r.json();
+      failed = false;
+    } catch { failed = true; }
+    if (!sheet) await loadSheet();
+    render();
+  }
+  render();
+  poll();
+  setInterval(poll, 1000);
+})();
+</script>
 <script type="importmap">{
   "imports": { "three": "https://unpkg.com/three@0.170.0/build/three.module.min.js" },
   "integrity": { "https://unpkg.com/three@0.170.0/build/three.module.min.js": "sha384-IDC7sAMAIMB/TZ6dgKKPPAKZ2bXXXP8+FBMBC8cU319eBhKITx+PaalhfDkDNH28" }
@@ -18,7 +232,7 @@ import * as THREE from 'three';
 
 const t0 = performance.now();
 const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0, workMs: 0, workMaxMs: 0 };
-const hud = document.getElementById('hud');
+const hud = document.getElementById('debug');
 
 const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1);
@@ -382,6 +596,8 @@ function entity(e) {
 }
 
 let status = 'connecting...';
+// Read by the overlay script, which must keep working if this module cannot load.
+Object.defineProperty(window, '__camStatus', { get: () => status });
 let wsConn = null;
 // The server replays the unit's surroundings out to a small radius, then
 // whatever the viewer asks for: ] widens it, nearest chunks first.
