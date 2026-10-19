@@ -1771,7 +1771,11 @@ kbd, .keys code {
   overscroll-behavior: contain;
   gap: 0.4rem;
 }
-.account h2 { margin: 0 0 0.2rem; font-size: 12px; }
+.account-head { display: flex; align-items: center; gap: 0.4rem; }
+.account h2 { flex: 1; margin: 0; font-size: 12px; }
+.account p { margin: 0; }
+/* An empty note keeps the panel's gap around it; it is shown once it says something. */
+.account .note:empty { display: none; }
 .account ul { margin: 0; padding-left: 1.25rem; }
 .account li { margin-bottom: 0.25rem; }
 .account button { min-height: var(--hit); font: inherit; }
@@ -1784,7 +1788,7 @@ kbd, .keys code {
   gap: 0.35rem;
 }
 #admin-passkey[hidden] { display: none; }
-#admin-passkey h3 { margin: 0 0 0.2rem; font-size: 11px; color: var(--accent); }
+#admin-passkey h3 { margin: 0; font-size: 11px; color: var(--accent); }
 #admin-passkey label { display: flex; flex-direction: column; gap: 0.2rem; }
 #admin-passkey input { min-height: var(--hit); padding: 0.2rem 0.4rem; font: inherit; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-s); }
 #admin-fingerprint:not(:empty) {
@@ -1800,6 +1804,10 @@ kbd, .keys code {
 #admin-steps { margin: 0; padding-left: 1.25rem; }
 #admin-steps[hidden] { display: none; }
 #admin-steps li { margin-bottom: 0.3rem; }
+#admin-steps button { min-height: 0; margin-left: 0.3rem; padding: 0.1rem 0.4rem; }
+.admin-entry { display: flex; gap: 0.35rem; }
+.admin-entry input { flex: 1; min-width: 0; }
+.admin-entry:not(:has(> :not([hidden]))) { display: none; }
 #admin-steps code { padding: 0 0.25rem; background: var(--raised); border: 1px solid var(--rule); border-radius: var(--radius-s); font-weight: bold; }
 .debug[hidden], .account[hidden], .admin[hidden] { display: none; }
 .debug-head { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule); }

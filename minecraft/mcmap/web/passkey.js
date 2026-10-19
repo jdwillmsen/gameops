@@ -151,6 +151,26 @@
       : status === 503 ? 'The map is busy. Try again in a moment.'
         : 'The map could not do that. Try again.');
 
+  // Copies the command exactly as the steps show it, which is exactly as it
+  // has to be typed.
+  let copiedTimer = null;
+  async function copyCommand() {
+    const command = $('admin-command');
+    let said = 'Copied';
+    try {
+      await navigator.clipboard.writeText(command.textContent);
+    } catch {
+      // No clipboard to write to, as on a page not served securely: the
+      // command is selected and copied the old way, or left selected.
+      let done = false;
+      try { getSelection().selectAllChildren(command); done = document.execCommand('copy'); } catch { /* left selected */ }
+      if (!done) said = 'Selected: copy it';
+    }
+    say('admin-copied', said);
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => say('admin-copied', ''), 4000);
+  }
+
   function adminSection() {
     let created = null;
     // Confirms whose answer has not come back. A second one must not read
@@ -176,6 +196,7 @@
       say('admin-note', text);
       return orphan;
     };
+    $('admin-copy').addEventListener('click', copyCommand);
     $('admin-add').addEventListener('click', () => flight(async () => {
       const label = $('admin-label').value;
       if (!labelOK(label)) { say('admin-note', LABEL_RULE); return; }
