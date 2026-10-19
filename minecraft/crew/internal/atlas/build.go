@@ -306,13 +306,21 @@ func (b *builder) firstEntry(key string) (textureEntry, bool) {
 	return textureEntry{path: obj.Path, overlay: obj.OverlayColor}, true
 }
 
+// maxTextureSide bounds the width and height of any texture read from the
+// pack; the real ones are at most a few hundred pixels.
+const maxTextureSide = 2048
+
 // loadImage prefers PNG over TGA when a texture has both.
 func (b *builder) loadImage(texPath string) *image.NRGBA {
 	base := filepath.Join(b.dir, filepath.FromSlash(texPath))
 	if data, err := os.ReadFile(base + ".png"); err == nil {
-		if img, err := png.Decode(bytes.NewReader(data)); err == nil {
-			b.formats["png"]++
-			return toNRGBA(img)
+		// The size is read from the header first: decoding allocates what the
+		// header claims.
+		if cfg, err := png.DecodeConfig(bytes.NewReader(data)); err == nil && cfg.Width <= maxTextureSide && cfg.Height <= maxTextureSide {
+			if img, err := png.Decode(bytes.NewReader(data)); err == nil {
+				b.formats["png"]++
+				return toNRGBA(img)
+			}
 		}
 	}
 	if data, err := os.ReadFile(base + ".tga"); err == nil {

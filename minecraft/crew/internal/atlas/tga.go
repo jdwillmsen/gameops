@@ -26,6 +26,10 @@ func decodeTGA(data []byte) (*image.NRGBA, error) {
 	if w == 0 || h == 0 {
 		return nil, errors.New("tga: empty image")
 	}
+	// Checked before anything is sized from the header.
+	if w > maxTextureSide || h > maxTextureSide {
+		return nil, fmt.Errorf("tga: %dx%d is over the size limit", w, h)
+	}
 	bytesPer := bpp / 8
 	pix := data[min(18+idLen, len(data)):]
 
