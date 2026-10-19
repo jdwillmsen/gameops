@@ -2,18 +2,26 @@
 # Builds the gather-and-deposit scene on a crew lab: a stone platform, a quarry
 # and a chest, then puts the crew unit on the platform with a pickaxe.
 #
-# usage: scene.sh <lab-service> [unit-username]   (unit defaults to crew-1)
+# usage: scene.sh <lab> [unit-username]   (unit defaults to crew-1)
+#   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
+#   for the cluster lab's server pod.
 #
 # The unit is targeted by name, never with @a: the cluster lab is a world real
 # players join, and @a would teleport them and empty their inventories. Cheats
 # are for this script only; crew itself never sends a command.
 set -euo pipefail
 
-service=${1:?usage: scene.sh <lab-service> [unit-username]}
+lab=${1:?usage: scene.sh <lab> [unit-username]}
 unit=${2:-crew-1}
-compose=(docker compose -f "$(dirname "$0")/compose.yaml")
 
-cmd() { "${compose[@]}" exec -T "$service" send-command "$@"; }
+if [[ $lab == k8s:*/* ]]; then
+  target=${lab#k8s:}
+  exec_prefix=(kubectl -n "${target%%/*}" exec "${target#*/}" --)
+else
+  exec_prefix=(docker compose -f "$(dirname "$0")/compose.yaml" exec -T "$lab")
+fi
+
+cmd() { "${exec_prefix[@]}" send-command "$@"; }
 
 # A fill needs loaded chunks, and the lab's spawn can be far from the origin.
 cmd tickingarea add -8 99 -8 8 106 8 crew-scene
