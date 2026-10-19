@@ -138,13 +138,13 @@ func TestFellSkipsLeafThatDisappearsAfterPlanning(t *testing.T) {
 	w[protocol.BlockPos{treeX, 3, treeZ}] = "oak_log"
 	r := fellRig(t, w, 3)
 	f := NewFell(w, r.self, "oak_log", "oak_log", "axe", 7, 0, nil).(*Fell)
-	for i := 0; i < 1000 && (f.phase != fClear || len(f.leaves) == 0); i++ {
+	for i := 0; i < 1000 && (f.phase != fWalk || len(f.leaves) == 0); i++ {
 		if st, err := f.Step(t.Context(), r); st == Failed || err != nil {
 			t.Fatalf("planning stopped with status %v, err %v", st, err)
 		}
 	}
-	if f.phase != fClear || len(f.leaves) == 0 {
-		t.Fatal("fell skill did not plan leaves to clear")
+	if f.phase != fWalk || len(f.leaves) == 0 || f.brk.name != "" {
+		t.Fatal("fell skill did not stop after planning leaves and before clearing")
 	}
 	w[f.leaves[0]] = "air"
 	if st, err := r.run(f, 4000); st != Done || err != nil {
