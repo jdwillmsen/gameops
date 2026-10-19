@@ -485,4 +485,27 @@ three alternating before/after runs each. The host was busy (load average
 
 Radius 4 is unchanged within noise: it was already past 30 fps in this world,
 so the rows above, not this one, show the render-bound case. Radius 8 gains
-about 16%. The `run.sh` re-run on the lab is still to do.
+about 16%.
+
+The `run.sh` re-run on the lab, three builds (`crew-v1.10.0` before
+worker meshing and culling, `crew-v1.10.1` with them, and main with the
+mipmapped array, AO, sky and mob models), interleaved, 60 s window, software
+GL, the lab world with its three standing units. Another browser on the host
+held about five cores for the whole session (load average 8 to 16 at the start
+of each run), so every figure is far below an idle host: one tile ran 52 fps
+on 1.10.0 in a short run at load 0.5 and 28 fps here.
+
+| Units | Viewers | Radius | 1.10.0 page fps (runs) | 1.10.1 page fps (runs) | main page fps (runs) |
+|---|---|---|---|---|---|
+| 1 | 1 | 4 | 28.2 | 28.1 | 12.2 |
+| 2 | 3 | 4 | 9.7 | 9.5 | 3.7 |
+| 4 | 4 | 4 | 7.0, 7.1 | 6.5, 6.6 | 2.7, 2.8 |
+| 4 | 4 | 8 | 4.1, 4.2 | 4.1, 4.7 | 1.6, 1.6 |
+| 1 | 8 (cap 8) | 4 | 3.6 | 3.1 | 1.4 |
+
+No build holds 30 fps with four tiles at radius 4 on this host, so the target
+is not shown met here. 1.10.0 and 1.10.1 are indistinguishable under this
+load; the culling gain seen above is within the noise. Main runs at about 40%
+of the 1.10.x frame rate, and its units send more (4 tiles at radius 4:
+6.2 KB/s per unit against 2.5). Crew CPU stays under 2.2% of a core in every
+run. Re-measure on an idle host or real GPUs before reading anything finer.
