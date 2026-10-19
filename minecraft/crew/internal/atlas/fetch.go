@@ -419,8 +419,8 @@ func (s *session) download(ctx context.Context, tag, cacheDir string) (int, erro
 }
 
 // fetchFiles downloads files concurrently; the first failure cancels the rest.
-func (s *session) fetchFiles(ctx context.Context, tag, dest string, files []string) error {
-	ctx, cancel := context.WithCancel(ctx)
+func (s *session) fetchFiles(parent context.Context, tag, dest string, files []string) error {
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var (
 		wg      sync.WaitGroup
@@ -450,6 +450,11 @@ func (s *session) fetchFiles(ctx context.Context, tag, dest string, files []stri
 	}
 	close(jobs)
 	wg.Wait()
+	// Workers skip what is left once cancelled, so without this a cancelled
+	// round would look complete.
+	if firstEr == nil {
+		return parent.Err()
+	}
 	return firstEr
 }
 
