@@ -14,6 +14,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
 const selfID = 1
@@ -664,6 +665,7 @@ func TestAdjacentAttackingZombieRemainsThreatAfterFightLimit(t *testing.T) {
 	r := newRig(t, defaults, start)
 	r.spawn(52, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
 	r.l.engaged = true
+	r.l.target, _ = r.l.ents.Get(52)
 	r.l.fighting = fightLimit
 	r.hurt()
 	if !r.step() {
@@ -684,6 +686,39 @@ func TestAdjacentAttackingZombieRemainsThreatAfterFightLimit(t *testing.T) {
 	}
 }
 
+func TestNewZombieGetsFreshFightLimitAfterRecentAttacker(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.spawn(54, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+	r.hurt()
+	r.step()
+	if r.l.target.ID != 54 {
+		t.Fatalf("first target = %d, want 54", r.l.target.ID)
+	}
+	r.l.fighting = fightLimit + 20
+	r.hurt()
+	r.step()
+	if _, ignored := r.l.ignore[54]; ignored {
+		t.Fatal("recent attacker was given up while still in melee reach")
+	}
+	oldChase := skill.NewNavigate(r.w, r.tracker.Snapshot, protocol.BlockPos{25, 1, 20}, 1)
+	r.l.chase = oldChase
+	r.l.flee = skill.NewNavigate(r.w, r.tracker.Snapshot, protocol.BlockPos{18, 1, 20}, 1)
+	r.l.Apply(&packet.RemoveActor{EntityUniqueID: 54})
+	r.spawn(55, "minecraft:zombie", mgl32.Vec3{23.5, 1, 20.5})
+	if !r.step() {
+		t.Fatal("did not engage the fresh zombie")
+	}
+	if r.l.target.ID != 55 || r.l.fighting != 1 {
+		t.Fatalf("new target=%d fight ticks=%d, want target 55 at tick 1", r.l.target.ID, r.l.fighting)
+	}
+	if _, ignored := r.l.ignore[55]; ignored {
+		t.Fatal("fresh zombie inherited the previous target's fight limit")
+	}
+	if r.l.chase == nil || r.l.chase == oldChase || r.l.flee != nil {
+		t.Fatal("new target inherited a route from the previous target")
+	}
+}
+
 func TestInReachZombieThatNeverAttackedIsGivenUpAfterFightLimit(t *testing.T) {
 	r := newRig(t, defaults, start)
 	for y := int32(1); y <= 2; y++ {
@@ -691,6 +726,7 @@ func TestInReachZombieThatNeverAttackedIsGivenUpAfterFightLimit(t *testing.T) {
 	}
 	r.spawn(53, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
 	r.l.engaged = true
+	r.l.target, _ = r.l.ents.Get(53)
 	r.l.fighting = fightLimit
 	if !r.step() {
 		t.Fatal("did not process the in-reach zombie before giving up")
