@@ -247,8 +247,8 @@ func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 		d.phase = dMove
 		return next
 	}
-	if d.waited++; d.waited >= waitTicks {
-		d.drainErr = fmt.Errorf("chest did not open within %d ticks", waitTicks)
+	if d.waited++; d.waited >= answerTicks {
+		d.drainErr = fmt.Errorf("chest did not open within %d ticks", answerTicks)
 		d.phase, d.waited = dDrain, 0
 		return next
 	}
@@ -294,8 +294,8 @@ func (d *Deposit) move(a Actuator, snap belief.Snapshot, have int) outcome {
 	if d.pending {
 		status, answered := a.Response(d.reqID)
 		if !answered {
-			if d.waited++; d.waited >= waitTicks {
-				return d.failed(a, fmt.Errorf("no answer to the deposit request within %d ticks", waitTicks))
+			if d.waited++; d.waited >= answerTicks {
+				return d.failed(a, fmt.Errorf("no answer to the deposit request within %d ticks", answerTicks))
 			}
 			return d.idle(a)
 		}
@@ -315,8 +315,8 @@ func (d *Deposit) move(a Actuator, snap belief.Snapshot, have int) outcome {
 	}
 	if d.settling {
 		if have >= d.before {
-			if d.waited++; d.waited >= waitTicks {
-				return d.failed(a, fmt.Errorf("inventory did not show the deposit within %d ticks", waitTicks))
+			if d.waited++; d.waited >= answerTicks {
+				return d.failed(a, fmt.Errorf("inventory did not show the deposit within %d ticks", answerTicks))
 			}
 			return d.idle(a)
 		}

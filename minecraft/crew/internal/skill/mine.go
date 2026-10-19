@@ -21,8 +21,12 @@ const (
 	// The unit counts as arrived within this distance of a stand cell, so a
 	// cell is only a candidate if the block is in reach with that much slack.
 	arriveSlack = 0.75
-	// The server finishes a wooden-pickaxe stone break in 23 ticks.
-	breakTicks   = 30
+	// A healthy server finishes a wooden-pickaxe stone break in 23 ticks. The
+	// cap is far above that because a loaded server runs its ticks slower than
+	// the unit sends inputs, and a break that is only late must not fail.
+	breakTicks = 200
+	// Least wait for a drop after the block went; the time the break itself
+	// took is added, as it measures how slowly this server is running.
 	pickupTicks  = 40
 	maxMisses    = 3
 	maxWalkFails = 12
@@ -76,8 +80,10 @@ type Mine struct {
 	// finished. Once the block is gone there is nothing left to abort.
 	sessionOpen bool
 	waited      int
-	misses      int
-	pickInit    bool
+	// Inputs the last finished break took.
+	lastBreak int
+	misses    int
+	pickInit  bool
 }
 
 // Area is an inclusive box of blocks.
@@ -334,6 +340,7 @@ func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 			return next
 		}
 		m.broken++
+		m.lastBreak = m.waited
 		m.phase, m.waited, m.pickInit = mPickup, 0, false
 		return next
 	}
@@ -378,7 +385,7 @@ func (m *Mine) pickupStep(a Actuator, have int, p act.Pose) outcome {
 		m.phase = mFind
 		return next
 	}
-	if m.waited >= pickupTicks {
+	if m.waited >= pickupTicks+m.lastBreak {
 		if m.misses++; m.misses >= maxMisses {
 			return m.failed(a, errors.New("no pickup after 3 breaks"))
 		}
