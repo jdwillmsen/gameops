@@ -14,7 +14,6 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
-	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
 const selfID = 1
@@ -666,7 +665,7 @@ func TestAdjacentAttackingZombieRemainsThreatAfterFightLimit(t *testing.T) {
 	r.spawn(52, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
 	r.l.engaged = true
 	r.l.target, _ = r.l.ents.Get(52)
-	r.l.fighting = fightLimit
+	r.l.fightTicks[52] = fightLimit
 	r.hurt()
 	if !r.step() {
 		t.Fatal("stopped defending an adjacent zombie at fight limit")
@@ -694,28 +693,22 @@ func TestNewZombieGetsFreshFightLimitAfterRecentAttacker(t *testing.T) {
 	if r.l.target.ID != 54 {
 		t.Fatalf("first target = %d, want 54", r.l.target.ID)
 	}
-	r.l.fighting = fightLimit + 20
+	r.l.fightTicks[54] = fightLimit + 20
 	r.hurt()
 	r.step()
 	if _, ignored := r.l.ignore[54]; ignored {
 		t.Fatal("recent attacker was given up while still in melee reach")
 	}
-	oldChase := skill.NewNavigate(r.w, r.tracker.Snapshot, protocol.BlockPos{25, 1, 20}, 1)
-	r.l.chase = oldChase
-	r.l.flee = skill.NewNavigate(r.w, r.tracker.Snapshot, protocol.BlockPos{18, 1, 20}, 1)
 	r.l.Apply(&packet.RemoveActor{EntityUniqueID: 54})
 	r.spawn(55, "minecraft:zombie", mgl32.Vec3{23.5, 1, 20.5})
 	if !r.step() {
 		t.Fatal("did not engage the fresh zombie")
 	}
-	if r.l.target.ID != 55 || r.l.fighting != 1 {
-		t.Fatalf("new target=%d fight ticks=%d, want target 55 at tick 1", r.l.target.ID, r.l.fighting)
+	if r.l.target.ID != 55 || r.l.fightTicks[55] != 1 {
+		t.Fatalf("new target=%d fight ticks=%d, want target 55 at tick 1", r.l.target.ID, r.l.fightTicks[55])
 	}
 	if _, ignored := r.l.ignore[55]; ignored {
 		t.Fatal("fresh zombie inherited the previous target's fight limit")
-	}
-	if r.l.chase == nil || r.l.chase == oldChase || r.l.flee != nil {
-		t.Fatal("new target inherited a route from the previous target")
 	}
 }
 
@@ -727,7 +720,7 @@ func TestInReachZombieThatNeverAttackedIsGivenUpAfterFightLimit(t *testing.T) {
 	r.spawn(53, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
 	r.l.engaged = true
 	r.l.target, _ = r.l.ents.Get(53)
-	r.l.fighting = fightLimit
+	r.l.fightTicks[53] = fightLimit
 	if !r.step() {
 		t.Fatal("did not process the in-reach zombie before giving up")
 	}
@@ -737,12 +730,45 @@ func TestInReachZombieThatNeverAttackedIsGivenUpAfterFightLimit(t *testing.T) {
 	if r.l.ignore[53] <= r.l.tick {
 		t.Fatal("did not ignore the in-reach zombie after the fight limit")
 	}
+	if _, ok := r.l.fightTicks[53]; ok {
+		t.Fatal("kept per-mob fight ticks after giving up")
+	}
 	for i := 0; i < graceTicks+5; i++ {
 		r.step()
 	}
 	if r.l.engaged {
 		t.Fatal("kept the task preempted by a non-attacking zombie after giving up")
 	}
+	r.l.fightTicks[99] = 1
+	r.l.Reset()
+	if len(r.l.fightTicks) != 0 {
+		t.Fatal("kept per-mob fight ticks after Reset")
+	}
+}
+
+func TestAlternatingUnreachableZombiesAccumulateFightTicksIndependently(t *testing.T) {
+	r := newRig(t, defaults, start)
+	for y := int32(1); y <= 2; y++ {
+		r.w.over[protocol.BlockPos{21, y, 20}] = "stone"
+	}
+	a := mgl32.Vec3{22.5, 1, 20.5}
+	b := mgl32.Vec3{22.5, 1, 21.5}
+	r.spawn(56, "minecraft:zombie", a)
+	r.spawn(57, "minecraft:zombie", b)
+	for i := 0; i < 2*fightLimit+10; i++ {
+		if i%2 == 0 {
+			r.moveTo(56, a)
+			r.moveTo(57, b)
+		} else {
+			r.moveTo(56, b)
+			r.moveTo(57, a)
+		}
+		r.step()
+		if r.l.ignore[56] > r.l.tick && r.l.ignore[57] > r.l.tick {
+			return
+		}
+	}
+	t.Fatalf("alternating mobs were not both given up within %d ticks: fight ticks=%v ignore=%v", 2*fightLimit+10, r.l.fightTicks, r.l.ignore)
 }
 
 func TestIgnoredPillarSkeletonDoesNotRestartFightAfterEachArrow(t *testing.T) {

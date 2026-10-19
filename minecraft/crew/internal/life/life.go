@@ -99,6 +99,7 @@ type Life struct {
 	attackerUntil  uint64
 	attackerPlayer bool
 	ignore         map[uint64]uint64
+	fightTicks     map[uint64]int
 
 	engaged    bool
 	engagedAt  uint64
@@ -106,7 +107,6 @@ type Life struct {
 	target     belief.Entity
 	mode       mode
 	retreating int
-	fighting   int
 	lastAttack uint64
 
 	chase     skill.Skill
@@ -124,7 +124,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	if cfg.Radius < 1 {
 		cfg.Radius = 1
 	}
-	return &Life{cfg: cfg, world: world, self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}}
+	return &Life{cfg: cfg, world: world, self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
 }
 
 // Spawn starts a session for the unit with the runtime ID. It leaves the
@@ -142,8 +142,9 @@ func (l *Life) Spawn(runtimeID uint64) {
 func (l *Life) Reset() {
 	l.attacker, l.attackerUntil, l.attackerPlayer = 0, 0, false
 	clear(l.ignore)
+	clear(l.fightTicks)
 	l.engaged, l.holdUntil, l.target = false, 0, belief.Entity{}
-	l.retreating, l.fighting = 0, 0
+	l.retreating = 0
 	l.chase, l.flee = nil, nil
 	l.idle = idleState{}
 }

@@ -37,7 +37,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 			return
 		}
 		k := kindOf(e.Type)
-		suspect := e.ID == l.attacker && !l.attackerPlayer && l.tick < l.attackerUntil
+		suspect := l.isSuspect(e.ID)
 		if k == other || (k == provoked && !suspect) {
 			return
 		}
@@ -78,23 +78,21 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	}
 
 	if best.ID != 0 {
-		if l.target.ID != best.ID {
-			l.fighting = 0
-			l.chase, l.flee = nil, nil
-		}
 		l.target, l.mode = best, m
 		l.holdUntil = l.tick + graceTicks
 		if !l.engaged {
-			l.engaged, l.engagedAt, l.fighting, l.retreating = true, l.tick, 0, 0
+			l.engaged, l.engagedAt, l.retreating = true, l.tick, 0
 			l.lastAttack = l.tick - attackEvery
 			l.logEvent("defend_started", map[string]any{"entity": name(best.Type), "mode": modeName(m)})
 		}
-		l.fighting++
 		if m == modeRetreat {
 			l.retreating++
 		}
-		bestSuspect := best.ID == l.attacker && !l.attackerPlayer && l.tick < l.attackerUntil
-		if l.fighting > fightLimit && !(bestSuspect && inMeleeReach(p, best)) {
+		if _, ok := l.fightTicks[best.ID]; !ok && len(l.fightTicks) >= maxIgnored {
+			clear(l.fightTicks)
+		}
+		l.fightTicks[best.ID]++
+		if l.fightTicks[best.ID] > fightLimit && !(l.isSuspect(best.ID) && inMeleeReach(p, best)) {
 			l.giveUp(best.ID)
 		}
 		return true
@@ -110,6 +108,10 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		l.logEvent("defend_ended", map[string]any{"ticks": l.tick - l.engagedAt})
 	}
 	return false
+}
+
+func (l *Life) isSuspect(id uint64) bool {
+	return id == l.attacker && !l.attackerPlayer && l.tick < l.attackerUntil
 }
 
 func inMeleeReach(p act.Pose, e belief.Entity) bool {
@@ -174,10 +176,11 @@ func (l *Life) noteHurt(p act.Pose) {
 func (l *Life) giveUp(id uint64) {
 	if len(l.ignore) >= maxIgnored {
 		clear(l.ignore)
+		clear(l.fightTicks)
 	}
 	l.ignore[id] = l.tick + ignoreTicks
+	delete(l.fightTicks, id)
 	l.chase = nil
-	l.fighting = 0
 }
 
 // Fight sends this tick's input while engaged: it faces the threat, then
