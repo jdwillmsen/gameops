@@ -253,27 +253,51 @@ func TestIdleNeverWalksOntoWaterOrOffALedge(t *testing.T) {
 	}
 }
 
-func TestIdleRejectsPathThatDetoursOutsideRadiusAroundWall(t *testing.T) {
-	r := newRig(t, defaults, mgl32.Vec3{20.5, 1, 20.5})
-	for z := int32(12); z <= 29; z++ {
+func TestIdleStaysWithinRadiusWhenWallForcesDetour(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.step()
+	r.a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{26.5, 1.62, 20.5},
+		OnGround: true,
+	})
+	for z := int32(19); z <= 21; z++ {
 		for y := int32(1); y <= 2; y++ {
-			r.w.over[protocol.BlockPos{21, y, z}] = "stone"
+			r.w.over[protocol.BlockPos{27, y, z}] = "stone"
 		}
 	}
-	from := protocol.BlockPos{20, 1, 20}
-	goal := protocol.BlockPos{22, 1, 20}
-	plan, err := path.Find(r.w, from, goal, 1000)
-	if err != nil {
-		t.Fatalf("could not plan around wall: %v", err)
+	for i := 0; i < 3000; i++ {
+		r.step()
+		if d := dist(r.feet(), start); d > 8.6 {
+			t.Fatalf("tick %d: wandered %.2f blocks from idle anchor, want at most 8.6", i, d)
+		}
 	}
-	if !safePath(r.w, plan, from.Y(), from.Y()) {
-		t.Fatal("wall detour unexpectedly violates terrain safety")
-	}
-	if withinRadius(plan, from, 8) {
-		t.Fatalf("wall detour stayed within radius: %v", plan)
-	}
-	if !withinRadius([]protocol.BlockPos{{21, 1, 20}, {22, 1, 20}}, from, 8) {
-		t.Fatal("in-radius route was rejected")
+}
+
+func TestIdleStopsWalkAfterCorrectionLeavesRadiusOrHeightBand(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		feet mgl32.Vec3
+	}{
+		{name: "radius", feet: mgl32.Vec3{30, 1, 20.5}},
+		{name: "height", feet: mgl32.Vec3{20.5, 4, 20.5}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, defaults, start)
+			for i := 0; i < 3000 && r.l.idle.walk == nil; i++ {
+				r.step()
+			}
+			if r.l.idle.walk == nil {
+				t.Fatal("never started an idle walk")
+			}
+			r.a.Apply(&packet.CorrectPlayerMovePrediction{
+				Position: tc.feet.Add(mgl32.Vec3{0, 1.62, 0}),
+				OnGround: true,
+			})
+			r.step()
+			if r.l.idle.walk != nil {
+				t.Fatal("kept navigating after correction left idle bounds")
+			}
+		})
 	}
 }
 
