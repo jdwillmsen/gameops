@@ -227,3 +227,23 @@ func TestBlockHashReportsWhatTheServerSent(t *testing.T) {
 		t.Errorf("after update hash = %d, want 7", h)
 	}
 }
+
+// The server announces chunks in no useful order, so the latest one can sit
+// at the far edge of the view. Eviction has to measure from the point the
+// server publishes chunks around, which is the unit, or the blocks under the
+// unit are the first to go once the store is full.
+func TestEvictionKeepsTheBlocksAroundThePublisherCentre(t *testing.T) {
+	s := New(names, 48)
+	w := &sink{}
+	stone := uniformPayload(stoneHash)
+	s.Apply(&packet.NetworkChunkPublisherUpdate{Position: protocol.BlockPos{8, 100, 8}, Radius: 128}, w)
+	for _, c := range [][2]int32{{0, 0}, {5, 5}, {6, 6}} {
+		s.Apply(&packet.LevelChunk{Position: protocol.ChunkPos{c[0], c[1]}}, w)
+		for y := int32(-4); y < 20; y++ {
+			s.Apply(subChunkPacket(c[0], y, c[1], stone), w)
+		}
+	}
+	if name, known := s.Block(protocol.BlockPos{8, 99, 8}); !known || name != "stone" {
+		t.Fatalf("block under the unit = %q, known %v; want stone", name, known)
+	}
+}
