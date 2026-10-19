@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -263,5 +264,56 @@ func TestListReturnsSnapshot(t *testing.T) {
 	var got []Status
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got) != 1 || got[0].Online {
 		t.Fatalf("body = %s (%v)", rec.Body, err)
+	}
+}
+
+func TestIdleStreamRefreshesSeen(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	every := 20 * time.Millisecond
+	p := startPoller(t, rosterFor(t, unit.server.URL), every)
+	p.keepalive = 100 * time.Millisecond
+	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })
+	ev, _ := events(t, streamServer(t, p))
+
+	var first, second []Status
+	for _, dst := range []*[]Status{&first, &second} {
+		select {
+		case d := <-ev:
+			if err := json.Unmarshal([]byte(d), dst); err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("no refreshed event on an idle stream")
+		}
+	}
+	if !second[0].Seen.After(first[0].Seen) {
+		t.Errorf("seen did not advance: %v then %v", first[0].Seen, second[0].Seen)
+	}
+}
+
+func TestShutdownEndsActiveStreams(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler)
+
+	ctx, end := context.WithCancel(context.Background())
+	defer end()
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.BaseContext = func(net.Listener) context.Context { return ctx }
+	srv.Config.RegisterOnShutdown(end)
+	srv.Start()
+	defer srv.Close()
+
+	ev, _ := events(t, srv)
+	<-ev
+	start := time.Now()
+	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Config.Shutdown(shut); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("shutdown took %v with a viewer connected", d)
 	}
 }

@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -50,7 +51,17 @@ func main() {
 
 	// No WriteTimeout: it would cut the camera websocket and the status
 	// stream, which are long-lived by design.
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	// Shutdown waits for active requests, and an SSE stream never ends on its
+	// own; cancelling the base context when shutdown starts ends them at once.
+	streamCtx, endStreams := context.WithCancel(context.Background())
+	defer endStreams()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return streamCtx },
+	}
+	srv.RegisterOnShutdown(endStreams)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
