@@ -15,9 +15,6 @@ const (
 	defaultMaxNodes = 4096
 	maxStepUp       = 1
 	maxDrop         = 3
-	// unitHeight is the unit's height in whole blocks: it needs a feet and a
-	// head cell clear.
-	unitHeight = 2
 )
 
 // ErrNoPath means no route exists within the search budget.
@@ -29,32 +26,20 @@ type Blocks interface {
 	Block(protocol.BlockPos) (name string, known bool)
 }
 
-func passableAt(b Blocks, p protocol.BlockPos) bool {
-	name, known := b.Block(p)
-	return known && Passable(name)
-}
-
-// Standable reports whether the unit fits at feet: both cells it occupies are
-// clear and the block under it is known and solid.
+// Standable reports whether the unit fits at feet: the cells it occupies are
+// known, the surface under it holds it, and the space above that surface is
+// clear. feet is the cell the feet are in, so a unit on a slab is in the cell
+// of the slab.
 func Standable(b Blocks, feet protocol.BlockPos) bool {
-	x, y, z := feet.X(), feet.Y(), feet.Z()
-	if !passableAt(b, feet) || !passableAt(b, protocol.BlockPos{x, y + 1, z}) {
-		return false
-	}
-	name, known := b.Block(protocol.BlockPos{x, y - 1, z})
-	return known && !Passable(name)
+	_, ok := Footing(b, feet)
+	return ok
 }
-
-type solid struct{ b Blocks }
-
-// NewSolid adapts a block store to the collision query the actuator makes.
-// Unknown blocks are solid, matching the planner.
-func NewSolid(b Blocks) interface{ Solid(protocol.BlockPos) bool } { return solid{b} }
-
-func (s solid) Solid(p protocol.BlockPos) bool { return !passableAt(s.b, p) }
 
 type node struct {
-	pos    protocol.BlockPos
+	pos protocol.BlockPos
+	// y is the height of the unit's feet, which a slab or stair leaves
+	// between cell boundaries.
+	y      float32
 	g, f   float64
 	parent *node
 	index  int
@@ -92,17 +77,33 @@ func octile(a, b protocol.BlockPos) float64 {
 
 // Find returns the feet positions from from (excluded) to to (included).
 // maxNodes bounds the nodes expanded; zero or less means the default.
+//
+// The unit is taken to stand wherever from lets it: on the ground of that cell,
+// or, in mid-air, on what it falls onto.
 func Find(b Blocks, from, to protocol.BlockPos, maxNodes int) ([]protocol.BlockPos, error) {
+	v := newView(b)
+	from, y := v.landing(from)
+	return find(v, from, y, to, maxNodes)
+}
+
+// FindFrom is Find for a unit known to stand with its feet at height y, as one
+// does halfway up a stair, where the cell it is in holds no footing of its
+// own.
+func FindFrom(b Blocks, from protocol.BlockPos, y float32, to protocol.BlockPos, maxNodes int) ([]protocol.BlockPos, error) {
+	return find(newView(b), from, y, to, maxNodes)
+}
+
+func find(v *view, from protocol.BlockPos, y float32, to protocol.BlockPos, maxNodes int) ([]protocol.BlockPos, error) {
 	if maxNodes <= 0 {
 		maxNodes = defaultMaxNodes
 	}
 	if from == to {
 		return nil, nil
 	}
-	if !Standable(b, to) {
+	if _, ok := v.footing(to); !ok {
 		return nil, ErrNoPath
 	}
-	start := &node{pos: from, f: octile(from, to)}
+	start := &node{pos: from, y: y, f: octile(from, to)}
 	nodes := map[protocol.BlockPos]*node{from: start}
 	open := &queue{}
 	heap.Push(open, start)
@@ -119,7 +120,7 @@ func Find(b Blocks, from, to protocol.BlockPos, maxNodes int) ([]protocol.BlockP
 		if expanded++; expanded > maxNodes {
 			return nil, ErrNoPath
 		}
-		for _, m := range neighbours(b, cur.pos) {
+		for _, m := range neighbours(v, cur) {
 			n, seen := nodes[m.pos]
 			if seen && n.closed {
 				continue
@@ -129,7 +130,7 @@ func Find(b Blocks, from, to protocol.BlockPos, maxNodes int) ([]protocol.BlockP
 				continue
 			}
 			if !seen {
-				n = &node{pos: m.pos}
+				n = &node{pos: m.pos, y: m.y}
 				nodes[m.pos] = n
 			}
 			n.g, n.f, n.parent = g, g+octile(m.pos, to), cur
@@ -156,49 +157,52 @@ func unwind(n *node) []protocol.BlockPos {
 
 type move struct {
 	pos  protocol.BlockPos
+	y    float32
 	cost float64
 }
 
 var dirs = [8][2]int32{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}
 
-func neighbours(b Blocks, at protocol.BlockPos) []move {
+// neighbours are the cells one move away: a walk, a step up or down a ledge
+// the unit can step, or a jump or drop. Each is found by walking the unit's
+// footprint across and noting where it ends.
+func neighbours(v *view, at *node) []move {
 	var out []move
-	x, y, z := at.X(), at.Y(), at.Z()
 	for _, d := range dirs {
-		diagonal := d[0] != 0 && d[1] != 0
-		if diagonal &&
-			!Standable(b, protocol.BlockPos{x + d[0], y, z}) ||
-			diagonal && !Standable(b, protocol.BlockPos{x, y, z + d[1]}) {
+		y, _, ok := v.edge(at.pos, at.y, d[0], d[1])
+		if !ok {
 			continue
 		}
-		tx, tz := x+d[0], z+d[1]
-		for dy := int32(maxStepUp); dy >= -maxDrop; dy-- {
-			to := protocol.BlockPos{tx, y + dy, tz}
-			if !Standable(b, to) || !fits(b, at, to) {
-				continue
-			}
-			cost := 1.0
-			if diagonal {
-				cost = math.Sqrt2
-			}
-			out = append(out, move{to, cost})
-			break
+		to := protocol.BlockPos{at.pos.X() + d[0], floor32(y + slack), at.pos.Z() + d[1]}
+		if _, standable := v.footing(to); !standable {
+			continue
 		}
+		cost := 1.0
+		if d[0] != 0 && d[1] != 0 {
+			cost = math.Sqrt2
+		}
+		out = append(out, move{to, y, cost})
 	}
 	return out
 }
 
-// fits checks the cells the unit sweeps through that Standable at the
-// destination does not cover: the column it falls through when stepping down,
-// or the headroom it needs at the origin to jump up.
-func fits(b Blocks, from, to protocol.BlockPos) bool {
-	if to.Y() > from.Y() {
-		return passableAt(b, protocol.BlockPos{from.X(), from.Y() + unitHeight, from.Z()})
-	}
-	for y := to.Y(); y < from.Y()+unitHeight; y++ {
-		if !passableAt(b, protocol.BlockPos{to.X(), y, to.Z()}) {
-			return false
+// landing is where a unit in cell c ends up standing: the cell itself, or the
+// first one below it that holds the unit, since a unit in mid-air falls. A
+// column with nothing to stand on within reach is taken at face value.
+func (v *view) landing(c protocol.BlockPos) (protocol.BlockPos, float32) {
+	for d := int32(0); d <= maxDrop; d++ {
+		below := protocol.BlockPos{c.X(), c.Y() - d, c.Z()}
+		if y, ok := v.footing(below); ok {
+			return below, y
 		}
 	}
-	return true
+	return c, float32(c.Y())
+}
+
+// NeedsJump reports whether the move between two adjacent cells of a plan
+// takes a jump, as opposed to a walk or a step up a half block. y is the
+// height of the unit's feet in the first cell.
+func NeedsJump(b Blocks, from protocol.BlockPos, y float32, to protocol.BlockPos) bool {
+	_, jump, ok := newView(b).edge(from, y, to.X()-from.X(), to.Z()-from.Z())
+	return ok && jump
 }

@@ -123,6 +123,7 @@ type rig struct {
 
 	lastTick uint64
 	ticks    int // PlayerAuthInputs seen
+	jumps    int // inputs that started a jump
 	breaking *breakSession
 	drops    []drop
 	breaks   int
@@ -331,6 +332,9 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 	}
 	r.lastTick = p.Tick
 	r.ticks++
+	if p.InputData.Load(packet.InputFlagStartJumping) {
+		r.jumps++
+	}
 
 	due := r.fills[:0]
 	for _, f := range r.fills {
