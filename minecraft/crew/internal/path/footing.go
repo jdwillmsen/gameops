@@ -48,6 +48,12 @@ func (c Collider) Shape(p protocol.BlockPos) []shape.Box {
 // Solid reports whether the block has any collision.
 func (c Collider) Solid(p protocol.BlockPos) bool { return len(c.Shape(p)) > 0 }
 
+// Climbable reports whether the unit climbs the block at p.
+func (c Collider) Climbable(p protocol.BlockPos) bool {
+	name, known := c.b.Block(p)
+	return known && shape.Climbable(name)
+}
+
 func shapeAt(b Blocks, p protocol.BlockPos) (boxes []shape.Box, known bool) {
 	var name string
 	var props map[string]any

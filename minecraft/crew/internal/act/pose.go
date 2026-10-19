@@ -37,6 +37,11 @@ const (
 
 	// The most a grounded unit rises onto a ledge without jumping.
 	stepHeight = 0.6
+
+	// On a ladder the server lifts a unit that presses into it at a steady
+	// rate and lets one that does not slide down no faster than this.
+	ladderClimb = 0.2
+	ladderSlide = 0.15
 )
 
 // Solid answers collision queries. Unknown blocks must report true, so the
@@ -50,6 +55,9 @@ type Solid interface{ Solid(protocol.BlockPos) bool }
 type Shaper interface {
 	Shape(protocol.BlockPos) []shape.Box
 }
+
+// Climber is what a Solid offers when it knows which blocks the unit climbs.
+type Climber interface{ Climbable(protocol.BlockPos) bool }
 
 // Pose is the unit's predicted state, which the server must agree with.
 type Pose struct {
@@ -67,6 +75,9 @@ type Pose struct {
 	vy float32
 	// Set for a jump, so falling off an edge does not claim to be jumping.
 	jumped bool
+	// pushed says the unit walked into something on its last tick, which on
+	// a ladder is what makes it climb.
+	pushed bool
 }
 
 // stepInfo is what a tick tells the packet about the move it made.
@@ -87,6 +98,11 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 	var info stepInfo
 	dir := forwardDir(p.Yaw)
 
+	climbing := onLadder(w, p.Feet)
+	if climbing && forward > 0 && p.pushed {
+		p.OnGround, p.jumped, p.vy = false, false, ladderClimb
+	}
+
 	var v mgl32.Vec2
 	dy := float32(0)
 	switch {
@@ -103,6 +119,14 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 		v = p.Carry.Mul(airDrag).Add(dir.Mul(airAccel * forward))
 		dy = p.vy
 		p.vy = (dy - gravity) * verticalDrag
+		if climbing {
+			dy, p.vy = ladderMotion(dy, p.vy, forward > 0 && p.pushed)
+		}
+	}
+	if climbing {
+		for i := range v {
+			v[i] = clamp(v[i], ladderSlide)
+		}
 	}
 
 	feet := p.Feet
@@ -128,6 +152,7 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 		}
 	}
 	info.delta[0], info.delta[2] = feet[0]-moved[0], feet[2]-moved[2]
+	p.pushed = forward > 0 && v != wanted
 
 	if p.OnGround {
 		if !info.landed {
@@ -142,6 +167,31 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 	}
 	p.Feet = feet
 	return p, info
+}
+
+// onLadder reports whether the unit's feet are in a block it climbs.
+func onLadder(w Solid, feet mgl32.Vec3) bool {
+	c, ok := w.(Climber)
+	return ok && c.Climbable(protocol.BlockPos{int32(math.Floor(float64(feet[0]))), int32(math.Floor(float64(feet[1]) + skin)), int32(math.Floor(float64(feet[2])))})
+}
+
+// ladderMotion is the vertical step of a unit on a ladder: steady up while it
+// presses in, otherwise falling but never faster than the slide.
+func ladderMotion(dy, next float32, pressing bool) (float32, float32) {
+	if pressing {
+		return ladderClimb, ladderClimb
+	}
+	if dy < -ladderSlide {
+		dy = -ladderSlide
+	}
+	if next < -ladderSlide {
+		next = -ladderSlide
+	}
+	return dy, next
+}
+
+func clamp(x, limit float32) float32 {
+	return float32(math.Max(-float64(limit), math.Min(float64(limit), float64(x))))
 }
 
 // knock adopts a velocity the server gave the unit, such as knockback. The
