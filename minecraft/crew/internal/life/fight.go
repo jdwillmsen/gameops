@@ -55,8 +55,8 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if d > limit {
 			return
 		}
-		inReach := inMeleeReach(p, e)
-		if l.ignore[e.ID] > l.tick && !inReach {
+		meleeExempt := suspect && inMeleeReach(p, e)
+		if l.ignore[e.ID] > l.tick && !meleeExempt {
 			return
 		}
 		if d < bestD {
@@ -89,7 +89,8 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if m == modeRetreat {
 			l.retreating++
 		}
-		if l.fighting > fightLimit && !inMeleeReach(p, best) {
+		bestSuspect := best.ID == l.attacker && !l.attackerPlayer && l.tick < l.attackerUntil
+		if l.fighting > fightLimit && !(bestSuspect && inMeleeReach(p, best)) {
 			l.giveUp(best.ID)
 		}
 		return true
