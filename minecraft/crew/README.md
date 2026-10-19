@@ -226,13 +226,44 @@ next session.
 
 ### Entities
 
-Players, mobs and dropped items are drawn as simple boxes sized to their
-Bedrock hit boxes, with a per-type colour (unknown types get a hashed colour).
-A player's head turns independently of its body and carries a name label; the
-page keeps the type table, so adding a mob is a page-only change. Entity
-records on the wire carry the feet position and a head yaw byte. Players
-reported by `MovePlayer` are shifted down by the 1.62 eye height; the other
-position packets are taken to report the feet.
+The atlas build also compiles the pack's mob models. It reads each client
+entity definition (the newest one where the pack keeps a legacy copy), the
+geometry it names (both file layouts, inheritance, mirrored boxes, per-face
+or box-unfolded UVs, bind poses) and its default texture, under the same size
+and count limits mcmap applies to the models it reads. The textures are
+packed into one sheet. The camera serves `/v1/camera/entities.json` and
+`/v1/camera/entities.png` and announces them with a models frame; the table
+holds a few hundred KB. A cached atlas without them is rebuilt on the next
+start, which downloads the pack again: the entity step adds about 520 files
+(definitions, models and only the textures the definitions name, roughly 1.5
+MB) to the several thousand the atlas already reads.
+
+The page (`web/entities.js`) builds a bone tree per entity from that table,
+nearest-filtered and lit like a Lambert surface, in the pack's own
+coordinates (a model faces north and is drawn mirrored in z so a yaw of zero
+faces +z). Legs and arms swing with ground speed, the head follows the
+entity's head yaw and pitch, zombies hold their arms out, spiders hold their
+default leg pose, and positions are interpolated between the 50 ms ticks. Baby
+entities use the pack's baby model where it has one and half size otherwise; a
+sheep is drawn as its bare skin with the wool model over it, tinted by its dye
+colour, and shows the skin alone once sheared. Dropped items are drawn as a
+spinning, bobbing icon from the item sheet. Names are drawn above an entity on
+a dark translucent plate. Until the table loads, and for any type it lacks,
+the old stand-in boxes (sized to the Bedrock hit boxes, coloured per type)
+are drawn.
+
+The pack leaves some posing to animations and render controllers that are not
+read. The build covers the common cases (quadruped torsos lie down, spider
+legs splay) and shows one fixed look per entity: its default texture, no
+armour, saddles, villager professions, horse markings or glowing eyes. Players
+are the pack's Steve until skins are carried.
+
+Appearance that is not pose travels in an entity data frame: baby, sheared,
+the sheep dye index and a dropped item's name, taken from `AddActor`,
+`AddItemActor` and `SetActorData`. Entity records on the wire carry the feet
+position and a head yaw byte. Players reported by `MovePlayer` are shifted
+down by the 1.62 eye height; the other position packets are taken to report
+the feet. The frame layouts are documented in `internal/camera/wire.go`.
 
 ## Camera wall load test
 
