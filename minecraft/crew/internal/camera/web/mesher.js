@@ -239,10 +239,10 @@ function markDirty(key, neighbours) {
   dirty.add(key);
   if (!neighbours) return;
   const [cx, cy, cz] = key.split(',').map(Number);
-  // Edge neighbours too: a corner cell of one chunk shades the face corners of
-  // the chunk diagonal to it.
+  // The whole 3x3x3 ring mesh() reads: an occlusion probe at a chunk corner
+  // reaches the edge and corner neighbours as well as the face ones.
   for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
-    if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 2 || (!dx && !dy && !dz)) continue;
+    if (!dx && !dy && !dz) continue;
     const k = (cx + dx) + ',' + (cy + dy) + ',' + (cz + dz);
     if (blocks.has(k)) dirty.add(k);
   }
