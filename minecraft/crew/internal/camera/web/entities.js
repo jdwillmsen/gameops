@@ -4,7 +4,7 @@ import * as THREE from 'three';
 
 const RAD = Math.PI / 180;
 const BLOCK = 1 / 16; // model units per block
-const wrap = d => ((d + 540) % 360) - 180;
+const wrap = d => (((d % 360) + 540) % 360) - 180;
 
 // Sheep wool multipliers by dye index, the game's own fleece colours.
 const DYE = [
@@ -110,6 +110,36 @@ const BIPED_LEGS = new Set(['rightleg', 'leftleg', 'rightarm', 'leftarm', 'arm0'
 // a spider's legs are modelled straight.
 const SPIDER_POSE = [[0, 45, -45], [0, -45, 45], [0, 22.5, -33.3], [0, -22.5, 33.3], [0, -22.5, -33.3], [0, 22.5, 33.3], [0, -45, -45], [0, 45, 45]];
 const ARMS_FORWARD = /zombie|husk|drowned|zombie_pigman|zombified_piglin/;
+const SPIDER_TYPE = /spider$/;
+const SPIDER_LEG = /^leg[0-7]$/;
+
+// A cheap fingerprint of a downloaded body, to tell a repeat of the same
+// sheet from a changed one without keeping the sheet.
+function fingerprint(bytes) {
+  let h = 2166136261;
+  for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i], 16777619);
+  return bytes.length + ':' + (h >>> 0);
+}
+
+// The table and its picture are fetched together and returned together, so a
+// load can never pair one build's table with another's sheet.
+async function fetchSheet(jsonUrl, pngUrl) {
+  const [jsonRes, pngRes] = await Promise.all([fetch(jsonUrl), fetch(pngUrl)]);
+  if (!jsonRes.ok || !pngRes.ok) throw new Error('sheet not available');
+  const [jsonBytes, pngBytes] = await Promise.all([jsonRes.arrayBuffer(), pngRes.arrayBuffer()]);
+  const doc = JSON.parse(new TextDecoder().decode(jsonBytes));
+  const url = URL.createObjectURL(new Blob([pngBytes], { type: 'image/png' }));
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+    const tex = new THREE.Texture(img);
+    tex.magFilter = tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return { doc, tex, key: fingerprint(new Uint8Array(jsonBytes)) + '/' + fingerprint(new Uint8Array(pngBytes)) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export function createEntities(scene) {
   const lights = [new THREE.AmbientLight(0xffffff, 1.6), new THREE.DirectionalLight(0xffffff, 1.4)];
@@ -121,6 +151,8 @@ export function createEntities(scene) {
   const names = new Map();
   let table = null, sheet = null, modelTex = null;
   let items = null; // {doc, tex}
+  let modelsKey = null, modelsLoading = null, modelsAgain = false;
+  let itemsLoading = null, itemsFailed = false;
   const boneGeos = new Map(); // table bone -> geometry
   const materials = new Map();
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -200,7 +232,7 @@ export function createEntities(scene) {
         const g = new THREE.Group();
         const bind = new THREE.Group();
         g.add(bind);
-        const spiderLeg = /spider$/.test(type) && /^leg[0-7]$/.test(b.n) ? SPIDER_POSE[+b.n[3]] : null;
+        const spiderLeg = SPIDER_TYPE.test(type) && SPIDER_LEG.test(b.n) ? SPIDER_POSE[+b.n[3]] : null;
         if (b.r || spiderLeg) g.rotation.copy(packEuler(spiderLeg ?? b.r));
         if (b.bp) bind.rotation.copy(packEuler(b.bp));
         let geo = boneGeos.get(b);
@@ -217,20 +249,27 @@ export function createEntities(scene) {
           g.position.set(...b.pv);
           root.add(g);
         }
-        bones.push({ name: b.n.toLowerCase(), g, base: g.rotation.clone() });
+        const name = b.n.toLowerCase();
+        // Yaw then pitch, as the stand-ins turn, so a head never rolls.
+        if (name === 'head') g.rotation.reorder('YXZ');
+        bones.push({
+          name, g, base: g.rotation.clone(), head: name === 'head',
+          swing: LEG_SWING[name], arm: BIPED_LEGS.has(name) && name.includes('arm'),
+          spiderLeg: SPIDER_TYPE.test(type) && SPIDER_LEG.test(name) ? +name[3] : -1,
+        });
       }
     }
     const group = new THREE.Group();
     group.add(root);
-    const head = bones.find(b => b.name === 'head') ?? null;
-    return { group, head: null, headBone: head, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned: [] };
+    return { group, head: null, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned: [] };
   }
 
   function itemRect(name) {
     return items.doc.items['minecraft:' + name] ?? items.doc.placeholder;
   }
 
-  // A dropped item is its icon on a plane that spins and bobs.
+  // A flat icon rather than a model: the item sheet has one picture per item
+  // and nothing to extrude a block from.
   function buildItem(name) {
     const r = itemRect(name);
     const geo = new THREE.PlaneGeometry(.4, .4);
@@ -304,7 +343,8 @@ export function createEntities(scene) {
 
   function create(id, type) {
     const inst = { id, type, root: new THREE.Group(), body: null, built: null, label: null, labelled: undefined,
-      cur: null, from: null, to: null, t0: 0, dur: 50, lastAt: 0, phase: 0, amp: 0, seed: Math.random() * 100 };
+      cur: null, from: null, to: null, t0: 0, dur: 50, lastAt: 0, phase: 0, amp: 0, seed: Math.random() * 100,
+      raised: ARMS_FORWARD.test(type), spider: SPIDER_TYPE.test(type) };
     scene.add(inst.root);
     meshes.set(id, inst);
     build(inst);
@@ -338,8 +378,10 @@ export function createEntities(scene) {
     c.x = inst.from.x + (inst.to.x - inst.from.x) * a;
     c.y = inst.from.y + (inst.to.y - inst.from.y) * a;
     c.z = inst.from.z + (inst.to.z - inst.from.z) * a;
-    c.yaw = lerpAngle(inst.from.yaw, inst.to.yaw, a);
-    c.head = lerpAngle(inst.from.head, inst.to.head, a);
+    // Normalised after each step so repeated turns cannot accumulate whole
+    // revolutions.
+    c.yaw = wrap(lerpAngle(inst.from.yaw, inst.to.yaw, a));
+    c.head = wrap(lerpAngle(inst.from.head, inst.to.head, a));
     c.pitch = inst.from.pitch + (inst.to.pitch - inst.from.pitch) * a;
     inst.root.position.set(c.x, c.y, c.z);
     inst.root.rotation.y = -c.yaw * RAD;
@@ -357,27 +399,28 @@ export function createEntities(scene) {
     const swing = Math.cos(inst.phase) * inst.amp * .85;
     const t = now / 1000 + inst.seed;
     const headYaw = wrap(c.head - c.yaw) * RAD, pitch = Math.max(-1, Math.min(1, c.pitch * RAD));
-    if (built.headBone) {
-      const h = built.headBone;
-      h.g.rotation.set(h.base.x - pitch + Math.sin(t * .9) * .02, h.base.y + Math.max(-1.3, Math.min(1.3, headYaw)), h.base.z, h.base.order);
+    if (built.bones.length) {
+      const yaw = Math.max(-1.3, Math.min(1.3, headYaw));
+      for (const h of built.bones) {
+        if (h.head) h.g.rotation.set(h.base.x - pitch + Math.sin(t * .9) * .02, h.base.y + yaw, h.base.z, h.base.order);
+      }
     } else if (built.head) {
       built.head.rotation.y = -headYaw;
       built.head.rotation.x = pitch;
     }
-    const raised = ARMS_FORWARD.test(inst.type);
-    const spider = /spider/.test(inst.type);
+    const { raised, spider } = inst;
     for (const b of built.bones) {
-      const dir = LEG_SWING[b.name];
+      const dir = b.swing;
       const rest = b.base;
       if (dir !== undefined && !spider) {
         let x = rest.x + dir * swing;
-        if (BIPED_LEGS.has(b.name) && b.name.includes('arm')) {
+        if (b.arm) {
           if (raised) x = rest.x + Math.PI / 2 + dir * swing * .15;
           else x += Math.sin(t * 1.3 + (dir > 0 ? 0 : 2)) * .04 * (1 - inst.amp);
         }
         b.g.rotation.set(x, rest.y, rest.z, rest.order);
-      } else if (spider && /^leg\d$/.test(b.name)) {
-        const n = +b.name[3], s = Math.cos(inst.phase * 2 + (n % 2 ? Math.PI : 0) + n * .6) * inst.amp * .35;
+      } else if (spider && b.spiderLeg >= 0) {
+        const n = b.spiderLeg, s = Math.cos(inst.phase * 2 + (n % 2 ? Math.PI : 0) + n * .6) * inst.amp * .35;
         b.g.rotation.set(rest.x, rest.y + s, rest.z, rest.order);
       }
     }
@@ -388,34 +431,50 @@ export function createEntities(scene) {
     get count() { return meshes.size; },
     get modelsReady() { return !!table; },
 
-    async loadModels() {
-      try {
-        const doc = await fetch('/v1/camera/entities.json').then(r => { if (!r.ok) throw 0; return r.json(); });
-        const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = '/v1/camera/entities.png'; });
-        const tex = new THREE.Texture(img);
-        tex.magFilter = tex.minFilter = THREE.NearestFilter;
-        tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
-        tex.needsUpdate = true;
-        modelTex = tex; sheet = { w: doc.width, h: doc.height }; table = doc;
-        boneGeos.clear(); materials.clear();
-        for (const inst of meshes.values()) build(inst);
-      } catch (e) {
-        console.warn('entity models unavailable, drawing stand-ins', e);
-      }
+    // Frame 12 arrives on every attach and reconnect, so a load of what is
+    // already held does nothing, and a load asked for while another runs is
+    // run once more after it rather than alongside it.
+    loadModels() {
+      if (modelsLoading) { modelsAgain = true; return modelsLoading; }
+      modelsLoading = (async () => {
+        try {
+          const loaded = await fetchSheet('/v1/camera/entities.json', '/v1/camera/entities.png');
+          if (loaded.key === modelsKey) { loaded.tex.dispose(); return; }
+          const old = { tex: modelTex, geos: [...boneGeos.values()], mats: [...materials.values()] };
+          modelsKey = loaded.key; modelTex = loaded.tex; table = loaded.doc; sheet = { w: loaded.doc.width, h: loaded.doc.height };
+          boneGeos.clear(); materials.clear();
+          for (const inst of meshes.values()) build(inst);
+          old.tex?.dispose();
+          for (const g of old.geos) g?.dispose();
+          for (const m of old.mats) m.dispose();
+          itemsFailed = false;
+        } catch (e) {
+          console.warn('entity models unavailable, drawing stand-ins', e);
+        } finally {
+          modelsLoading = null;
+          if (modelsAgain) { modelsAgain = false; this.loadModels(); }
+        }
+      })();
+      return modelsLoading;
     },
 
-    async loadItems() {
-      if (items) return;
-      try {
-        const doc = await fetch('/v1/camera/items.json').then(r => { if (!r.ok) throw 0; return r.json(); });
-        const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = '/v1/camera/items.png'; });
-        const tex = new THREE.Texture(img);
-        tex.magFilter = tex.minFilter = THREE.NearestFilter;
-        tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
-        tex.needsUpdate = true;
-        items = { doc, tex };
-        for (const inst of meshes.values()) if (inst.type === 'minecraft:item') build(inst);
-      } catch { /* dropped items stay boxes */ }
+    loadItems() {
+      if (items || itemsFailed) return Promise.resolve();
+      if (itemsLoading) return itemsLoading;
+      itemsLoading = (async () => {
+        try {
+          const loaded = await fetchSheet('/v1/camera/items.json', '/v1/camera/items.png');
+          items = { doc: loaded.doc, tex: loaded.tex };
+          for (const inst of meshes.values()) if (inst.type === 'minecraft:item') build(inst);
+        } catch {
+          // Remembered, so every look update does not repeat the request; a
+          // later models frame clears it.
+          itemsFailed = true;
+        } finally {
+          itemsLoading = null;
+        }
+      })();
+      return itemsLoading;
     },
 
     update,
