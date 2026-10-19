@@ -209,9 +209,15 @@ built atlas is cached, under `CAMERA_ATLAS_DIR`. The item sheet is built
 from the same pack's item textures, with block items drawn as a block face.
 Nothing from the pack is
 committed or shipped in the image. When the atlas is ready the stream sends an
-atlas frame and the page textures cube faces with nearest filtering, tints grass,
-foliage and water, and draws slabs, stairs, cross-plants and torches as simple
-shapes. Crew does not receive biome data, so tint is sampled for one climate
+atlas frame and the page loads every tile as a layer of one array texture with
+mipmaps (crisp up close, smooth at distance; leaves keep their holes), tints
+grass, foliage and water, and draws slabs, stairs, cross-plants and torches as
+simple shapes. Faces carry Bedrock-style shading (top brightest, bottom
+darkest) and soft ambient occlusion at corners; water is translucent with its
+surface two sixteenths below the block's edge, and glass and ice are blended. The
+sky is a gradient whose horizon colour is the fog colour, and fog closes at the
+requested radius so the edge of the loaded terrain fades out. The canvas is
+antialiased at up to 2x pixel ratio. Crew does not receive biome data, so tint is sampled for one climate
 everywhere (the plains biome); stairs and slabs have no orientation or half
 for the same reason and are drawn as bottom slabs and stairs that rise towards +z.
 If the fetch fails, the camera is offline at first start or the page cannot
