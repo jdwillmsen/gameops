@@ -13,6 +13,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `MC_PORT` | `19132` | RakNet port |
 | `MC_VIEW_DISTANCE` | `8` | Chunk radius requested (1 to 32) |
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
+| `TASKS_TOKEN` | unset | Bearer token for the task endpoints; unset leaves them out entirely (404) |
+| `TASK_TIMEOUT_S` | `900` | Longest a task may run before it fails with `timed out` (30 to 3600) |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
@@ -22,6 +24,29 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 `/healthz`, `/readyz` and `/v1/state`. The state carries `position`,
 `position_known`, `yaw` and `pitch`. Until `position_known` is true the
 position is the server's placeholder, not a real one.
+
+## Task API
+
+Off unless `TASKS_TOKEN` is set. Every request needs
+`Authorization: Bearer <TASKS_TOKEN>`; a missing or wrong token gets 401.
+
+- `POST /v1/tasks` queues a task and returns 202 with its record.
+- `GET /v1/tasks` lists queued, running and the last 50 finished tasks.
+- `POST /v1/tasks/{id}/cancel` cancels a queued or running task (404 unknown, 409 already finished).
+
+The only template is `gather_and_deposit`; any other template, item or field
+is a 400:
+
+```json
+{"template": "gather_and_deposit", "item": "cobblestone", "qty": 16,
+ "chest": {"x": 0, "y": 0, "z": 0}}
+```
+
+`qty` is 1 to 256 and `item` must be `cobblestone`. Crew runs one task at a
+time. A session end or death fails the running task (`session ended`,
+`unit died`) and queued tasks wait for the next spawn. Bodies are capped at
+4096 bytes (413) and at most 16 tasks may wait (429). Task logs carry the id,
+template, state and reason, never the request.
 
 ## Rendered camera
 
