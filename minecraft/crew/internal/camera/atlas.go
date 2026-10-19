@@ -54,9 +54,14 @@ func (h *Hub) SetAtlas(a *atlas.Atlas) error {
 	if err != nil {
 		return err
 	}
+	items, err := json.Marshal(a.Items())
+	if err != nil {
+		return err
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.atlasPNG, h.atlasDoc = a.PNG(), doc
+	h.itemsPNG, h.itemsDoc = a.ItemPNG(), items
 	h.pushOrderedLocked(atlasFrame())
 	return nil
 }
@@ -66,4 +71,11 @@ func (h *Hub) atlasData() (png, doc []byte, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.atlasPNG, h.atlasDoc, h.atlasDoc != nil
+}
+
+// itemData returns the item sprite sheet, or ok=false while there is none.
+func (h *Hub) itemData() (png, doc []byte, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.itemsPNG, h.itemsDoc, h.itemsDoc != nil
 }

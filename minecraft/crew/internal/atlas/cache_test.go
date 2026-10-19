@@ -80,7 +80,7 @@ func TestEnsureKeepsOnlyTheBuiltAtlasInTheCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"index.json", "v1.26.50.4/atlas/atlas.png", "v1.26.50.4/atlas/table.json"}
+	want := []string{"index.json", "v1.26.50.4/atlas/atlas.png", "v1.26.50.4/atlas/items.json", "v1.26.50.4/atlas/items.png", "v1.26.50.4/atlas/table.json"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("cache holds %v, want %v", got, want)
 	}

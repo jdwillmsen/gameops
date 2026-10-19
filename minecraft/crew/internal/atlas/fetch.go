@@ -256,10 +256,10 @@ func wanted(p string) bool {
 	}
 	rel := strings.TrimPrefix(p, packPrefix)
 	switch rel {
-	case "blocks.json", "biomes_client.json", "textures/terrain_texture.json":
+	case "blocks.json", "biomes_client.json", "textures/terrain_texture.json", "textures/item_texture.json":
 		return true
 	}
-	for _, dir := range []string{"textures/blocks/", "textures/colormap/"} {
+	for _, dir := range []string{"textures/blocks/", "textures/colormap/", "textures/items/"} {
 		if strings.HasPrefix(rel, dir) && len(rel) > len(dir) {
 			return true
 		}

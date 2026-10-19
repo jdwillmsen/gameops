@@ -96,6 +96,9 @@ type Atlas struct {
 	png   []byte
 	table Table
 
+	itemPNG []byte
+	items   ItemTable
+
 	cmOnce sync.Once
 	cms    map[string]image.Image
 }

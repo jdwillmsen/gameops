@@ -34,10 +34,16 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 		_ = json.NewEncoder(w).Encode(h.Stats())
 	})
 	mux.HandleFunc("GET /v1/camera/atlas.png", func(w http.ResponseWriter, _ *http.Request) {
-		serveAtlas(w, h, "image/png", func(png, _ []byte) []byte { return png })
+		serveSheet(w, h.atlasData, "image/png", func(png, _ []byte) []byte { return png })
 	})
 	mux.HandleFunc("GET /v1/camera/atlas.json", func(w http.ResponseWriter, _ *http.Request) {
-		serveAtlas(w, h, "application/json", func(_, doc []byte) []byte { return doc })
+		serveSheet(w, h.atlasData, "application/json", func(_, doc []byte) []byte { return doc })
+	})
+	mux.HandleFunc("GET /v1/camera/items.png", func(w http.ResponseWriter, _ *http.Request) {
+		serveSheet(w, h.itemData, "image/png", func(png, _ []byte) []byte { return png })
+	})
+	mux.HandleFunc("GET /v1/camera/items.json", func(w http.ResponseWriter, _ *http.Request) {
+		serveSheet(w, h.itemData, "application/json", func(_, doc []byte) []byte { return doc })
 	})
 	mux.HandleFunc("GET /v1/camera/ws", h.serveWS)
 	return mux
@@ -104,10 +110,10 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// serveAtlas answers 404 until the background build has finished, which a
+// serveSheet answers 404 until the background build has finished, which a
 // page only requests after the atlas frame, so a miss means a stale page.
-func serveAtlas(w http.ResponseWriter, h *Hub, contentType string, pick func(png, doc []byte) []byte) {
-	png, doc, ok := h.atlasData()
+func serveSheet(w http.ResponseWriter, data func() (png, doc []byte, ok bool), contentType string, pick func(png, doc []byte) []byte) {
+	png, doc, ok := data()
 	if !ok {
 		http.Error(w, "no atlas", http.StatusNotFound)
 		return

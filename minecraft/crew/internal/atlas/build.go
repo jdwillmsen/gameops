@@ -214,7 +214,11 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 
 	b.loadBiomeWater(&tbl)
 	b.loadColormaps(&tbl)
-	return &Atlas{png: enc.Bytes(), table: tbl}, nil
+	itemPNG, items, err := buildItems(packDir, tile, tbl, sheet)
+	if err != nil {
+		return nil, err
+	}
+	return &Atlas{png: enc.Bytes(), table: tbl, itemPNG: itemPNG, items: items}, nil
 }
 
 var faceNames = []string{"up", "down", "side", "north", "south", "east", "west"}

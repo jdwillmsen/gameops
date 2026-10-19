@@ -93,6 +93,8 @@ type Hub struct {
 	viewers  map[*Viewer]struct{}
 	atlasPNG []byte
 	atlasDoc []byte
+	itemsPNG []byte
+	itemsDoc []byte
 	types    []string // entity type names; the index is the wire type id
 	typeIDs  map[string]uint16
 

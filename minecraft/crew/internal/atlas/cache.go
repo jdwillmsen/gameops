@@ -11,6 +11,8 @@ import (
 const (
 	atlasPNGFile   = "atlas.png"
 	atlasTableFile = "table.json"
+	itemsPNGFile   = "items.png"
+	itemsTableFile = "items.json"
 	atlasSubdir    = "atlas"
 )
 
@@ -23,15 +25,26 @@ func (a *Atlas) Save(dir string) error {
 	if err != nil {
 		return err
 	}
+	items, err := json.Marshal(a.items)
+	if err != nil {
+		return err
+	}
 	// Table last: its presence marks the entry as complete.
 	if err := writeAtomic(filepath.Join(dir, atlasPNGFile), a.png); err != nil {
+		return err
+	}
+	if err := writeAtomic(filepath.Join(dir, itemsPNGFile), a.itemPNG); err != nil {
+		return err
+	}
+	if err := writeAtomic(filepath.Join(dir, itemsTableFile), items); err != nil {
 		return err
 	}
 	return writeAtomic(filepath.Join(dir, atlasTableFile), table)
 }
 
-// LoadAtlas reads an atlas written by Save. A table from an older layout is
-// rejected so the caller rebuilds it.
+// LoadAtlas reads an atlas written by Save. A table from an older layout, or
+// an entry saved before the item sheet existed, is rejected so the caller
+// rebuilds it.
 func LoadAtlas(dir string) (*Atlas, error) {
 	table, err := os.ReadFile(filepath.Join(dir, atlasTableFile))
 	if err != nil {
@@ -41,14 +54,26 @@ func LoadAtlas(dir string) (*Atlas, error) {
 	if err != nil {
 		return nil, err
 	}
+	itemPNG, err := os.ReadFile(filepath.Join(dir, itemsPNGFile))
+	if err != nil {
+		return nil, err
+	}
+	itemDoc, err := os.ReadFile(filepath.Join(dir, itemsTableFile))
+	if err != nil {
+		return nil, err
+	}
 	var t Table
 	if err := json.Unmarshal(table, &t); err != nil {
 		return nil, fmt.Errorf("atlas: decode table: %w", err)
 	}
+	var items ItemTable
+	if err := json.Unmarshal(itemDoc, &items); err != nil {
+		return nil, fmt.Errorf("atlas: decode items: %w", err)
+	}
 	if t.Version != tableVersion {
 		return nil, fmt.Errorf("atlas: cached table version %d, want %d", t.Version, tableVersion)
 	}
-	return &Atlas{png: img, table: t}, nil
+	return &Atlas{png: img, table: t, itemPNG: itemPNG, items: items}, nil
 }
 
 func writeAtomic(path string, data []byte) error {
