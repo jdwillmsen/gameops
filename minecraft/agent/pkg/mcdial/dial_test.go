@@ -192,3 +192,47 @@ func TestDialStopsWhenCallerCancels(t *testing.T) {
 		t.Fatal("server still holds the session of a cancelled dial after 10s")
 	}
 }
+
+// The failure behind crew rejoining as "name(2)": a process that exits right
+// after leaving must already have told the server, because nothing is left
+// to send the goodbye afterwards.
+func TestLeaveTellsServerBeforeReturning(t *testing.T) {
+	world := startSlowWorld(t, 0)
+
+	tr := &transport{connectBy: time.Now().Add(5 * time.Second)}
+	conn, leave, err := dialOn(context.Background(), tr, dialerFor("Agent"), world.address(), 20*time.Second)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	if err := conn.DoSpawnContext(context.Background()); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+
+	leave(5 * time.Second)
+
+	// Close alone only marks the transport closing; its goodbye goes out on a
+	// later tick, which a process that is exiting never gets to run.
+	if tr.conn.(interface{ Context() context.Context }).Context().Err() == nil {
+		t.Error("transport still open when leave returned: the goodbye has not been sent")
+	}
+
+	select {
+	case name := <-world.left:
+		if name != "Agent" {
+			t.Fatalf("server saw %q leave, want Agent", name)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("server had not learned the player left by the time leave returned")
+	}
+
+	again, leaveAgain, err := DialWithLeave(context.Background(), dialerFor("Agent"), world.address(), 5*time.Second, 20*time.Second)
+	if err != nil {
+		t.Fatalf("rejoin: %v", err)
+	}
+	defer leaveAgain(time.Second)
+	_ = again
+	if n := world.refusals(); n != 0 {
+		t.Errorf("server refused %d logins, want 0", n)
+	}
+	leave(time.Second) // idempotent
+}
