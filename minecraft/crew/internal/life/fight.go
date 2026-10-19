@@ -55,7 +55,8 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if d > limit {
 			return
 		}
-		if l.ignore[e.ID] > l.tick {
+		inReach := inMeleeReach(p, e)
+		if l.ignore[e.ID] > l.tick && !inReach {
 			return
 		}
 		if d < bestD {
@@ -88,7 +89,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if m == modeRetreat {
 			l.retreating++
 		}
-		if l.fighting > fightLimit {
+		if l.fighting > fightLimit && !inMeleeReach(p, best) {
 			l.giveUp(best.ID)
 		}
 		return true
@@ -104,6 +105,11 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		l.logEvent("defend_ended", map[string]any{"ticks": l.tick - l.engagedAt})
 	}
 	return false
+}
+
+func inMeleeReach(p act.Pose, e belief.Entity) bool {
+	return horizontal(p.Feet, e.Pos) <= meleeReach &&
+		math.Abs(float64(e.Pos.Y()-p.Feet.Y())) <= reachHeight
 }
 
 func modeName(m mode) string {
@@ -135,7 +141,7 @@ func (l *Life) noteHurt(p act.Pose) {
 			if d <= attributionRange && d < playerD {
 				player, playerD, playerSeen = e, d, true
 			}
-		case kindOf(e.Type) != other && (kindOf(e.Type) != provoked || d <= meleeReach):
+		case kindOf(e.Type) != other && (kindOf(e.Type) != provoked || inMeleeReach(p, e)):
 			limit := attributionRange
 			if shooters[name(e.Type)] {
 				limit = shooterRange
@@ -184,7 +190,7 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 	case modeStepBack:
 		return l.retreat(ctx, a, p, e, 4)
 	}
-	if horizontal(p.Feet, e.Pos) <= meleeReach && math.Abs(float64(e.Pos.Y()-p.Feet.Y())) <= reachHeight {
+	if inMeleeReach(p, e) {
 		return l.strike(a, p, e, s)
 	}
 	return l.approach(ctx, a, p, e)
