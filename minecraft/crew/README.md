@@ -134,8 +134,9 @@ is required unless marked optional.
 `oak_log` (chopped with an axe the unit must carry). Oak logs are felled whole
 trees at a time: for logs above its reach the unit pillars up beside the trunk
 with dirt (or cobblestone, with a pickaxe) from its hotbar, cuts, climbs down
-and takes the pillar apart. Without dirt it only takes logs it can reach from
-the ground.
+and takes the pillar apart. The pillar needs one hotbar stack holding at least
+as many blocks as the pillar is tall; without one, the unit only takes logs it
+can reach from the ground.
 
 `area` is optional: an inclusive box `{"min": {x,y,z}, "max": {x,y,z}}` with
 min at most max on each axis and at most 64 blocks on an axis. When set, the
