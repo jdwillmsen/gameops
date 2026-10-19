@@ -143,13 +143,13 @@ func pingVersion(ctx context.Context, addr string) string {
 
 // statusHandler mounts the task routes only when a token is set, so a unit
 // without one has no way to be told what to do.
-func statusHandler(tracker *belief.Tracker, version string, hub *camera.Hub, runner *task.Runner, tasksToken string) http.Handler {
+func statusHandler(tracker *belief.Tracker, version string, unit statusapi.Unit, hub *camera.Hub, runner *task.Runner, tasksToken string) http.Handler {
 	mux := http.NewServeMux()
 	var tasks statusapi.TaskSource
 	if runner != nil {
 		tasks = runner
 	}
-	mux.Handle("/", statusapi.Handler(tracker, version, tasks))
+	mux.Handle("/", statusapi.Handler(tracker, version, unit, tasks))
 	task.Routes(mux, runner, tasksToken)
 	if hub == nil {
 		return mux

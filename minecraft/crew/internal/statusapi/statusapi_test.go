@@ -27,16 +27,16 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 }
 
 func TestHealthzIsAlwaysOK(t *testing.T) {
-	if rec := get(t, Handler(fixed{}, "dev", nil), "/healthz"); rec.Code != http.StatusOK {
+	if rec := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/healthz"); rec.Code != http.StatusOK {
 		t.Errorf("healthz = %d", rec.Code)
 	}
 }
 
 func TestReadyzFollowsSpawn(t *testing.T) {
-	if rec := get(t, Handler(fixed{}, "dev", nil), "/readyz"); rec.Code != http.StatusServiceUnavailable {
+	if rec := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/readyz"); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("unspawned readyz = %d, want 503", rec.Code)
 	}
-	if rec := get(t, Handler(fixed{Spawned: true}, "dev", nil), "/readyz"); rec.Code != http.StatusOK {
+	if rec := get(t, Handler(fixed{Spawned: true}, "dev", Unit{}, nil), "/readyz"); rec.Code != http.StatusOK {
 		t.Errorf("spawned readyz = %d, want 200", rec.Code)
 	}
 }
@@ -44,13 +44,13 @@ func TestReadyzFollowsSpawn(t *testing.T) {
 // A dead unit is connected and spawned but can do no work, and nothing else
 // outside the process can tell.
 func TestReadyzIsUnavailableWhileDead(t *testing.T) {
-	if rec := get(t, Handler(fixed{Spawned: true, Dead: true}, "dev", nil), "/readyz"); rec.Code != http.StatusServiceUnavailable {
+	if rec := get(t, Handler(fixed{Spawned: true, Dead: true}, "dev", Unit{}, nil), "/readyz"); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("dead readyz = %d, want 503", rec.Code)
 	}
 }
 
 func TestStateReturnsTheSnapshotAndVersion(t *testing.T) {
-	rec := get(t, Handler(fixed{Spawned: true, Health: 20, HealthKnown: true}, "1.2.3", nil), "/v1/state")
+	rec := get(t, Handler(fixed{Spawned: true, Health: 20, HealthKnown: true}, "1.2.3", Unit{}, nil), "/v1/state")
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("state = %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
@@ -68,14 +68,14 @@ func TestStateReturnsTheSnapshotAndVersion(t *testing.T) {
 
 func TestWritesAreRefused(t *testing.T) {
 	rec := httptest.NewRecorder()
-	Handler(fixed{}, "dev", nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/state", nil))
+	Handler(fixed{}, "dev", Unit{}, nil).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/state", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /v1/state = %d, want 405", rec.Code)
 	}
 }
 
 func TestMetricsServesTheProcessRegistry(t *testing.T) {
-	rec := get(t, Handler(fixed{}, "dev", nil), "/metrics")
+	rec := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/metrics")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "go_goroutines") {
 		t.Errorf("metrics = %d, body lacks go_goroutines", rec.Code)
 	}
@@ -89,7 +89,7 @@ func TestStateCarriesTheRunningTaskAndTheLastFive(t *testing.T) {
 	all[2] = task.Task{ID: "run", Template: "gather_and_deposit", State: task.Running, Skill: "mine", Item: "minecraft:log", Qty: 8, Progress: 3}
 	all[6] = task.Task{ID: "bad", State: task.Failed, Reason: "no path"}
 
-	rec := get(t, Handler(fixed{}, "dev", all), "/v1/state")
+	rec := get(t, Handler(fixed{}, "dev", Unit{}, all), "/v1/state")
 	var body struct {
 		Tasks struct {
 			Current *task.Task  `json:"current"`
@@ -115,8 +115,25 @@ func TestStateCarriesTheRunningTaskAndTheLastFive(t *testing.T) {
 }
 
 func TestStateReportsNoTasksWithoutARunner(t *testing.T) {
-	rec := get(t, Handler(fixed{}, "dev", nil), "/v1/state")
+	rec := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/v1/state")
 	if got := strings.TrimSpace(rec.Body.String()); !strings.Contains(got, `"tasks":{"current":null,"recent":[]}`) {
 		t.Errorf("body = %s", got)
+	}
+}
+
+func TestStateNamesTheUnit(t *testing.T) {
+	rec := get(t, Handler(fixed{}, "dev", Unit{ID: "crew-02", Name: "Basalt"}, nil), "/v1/state")
+	var body struct {
+		Version string `json:"version"`
+		Unit    struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"unit"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Unit.ID != "crew-02" || body.Unit.Name != "Basalt" || body.Version != "dev" {
+		t.Errorf("body = %+v", body)
 	}
 }

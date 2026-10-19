@@ -186,3 +186,46 @@ func TestTasksTokenAndTimeoutConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestUnitIDDefaultsToTheUsername(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.UnitID != "crew" {
+		t.Errorf("UnitID = %q, want the username", cfg.UnitID)
+	}
+	t.Setenv("CREW_ID", "crew-02")
+	if cfg, err = Load(); err != nil || cfg.UnitID != "crew-02" {
+		t.Errorf("UnitID = %q, err %v, want crew-02", cfg.UnitID, err)
+	}
+}
+
+func TestUnitIDMustBeCrewNN(t *testing.T) {
+	for id, ok := range map[string]bool{"crew-1": false, "agate": false, "crew-01": true, "crew-123": true} {
+		t.Run(id, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("CREW_ID", id)
+			_, err := Load()
+			if ok && err != nil {
+				t.Errorf("rejected %q: %v", id, err)
+			}
+			if !ok && (err == nil || !strings.Contains(err.Error(), "CREW_ID")) {
+				t.Errorf("err = %v, want one naming CREW_ID", err)
+			}
+		})
+	}
+}
+
+func TestUsernameIsAtMost16Characters(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_USERNAME", strings.Repeat("a", 17))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MC_USERNAME") {
+		t.Errorf("err = %v, want one naming MC_USERNAME", err)
+	}
+	t.Setenv("MC_USERNAME", strings.Repeat("a", 16))
+	if _, err := Load(); err != nil {
+		t.Errorf("16 characters rejected: %v", err)
+	}
+}
