@@ -161,7 +161,6 @@ Repo gameops, worktree `~/worktrees/jdwillmsen/gameops/feat/JDW-115-crew-control
 - `(*Poller) Snapshot() []Status` returns statuses in roster order.
 - `(*Poller) Subscribe() (<-chan []Status, func())` delivers a snapshot only when it changed. Its buffer is 1, and it drops stale values (latest wins).
 - Routes:
-  - `GET /v1/units` returns the JSON snapshot.
   - `GET /v1/units/stream` is SSE. It sends `event: units\ndata: <json>\n\n` immediately, then on every change, plus a `: ping` every 15 s.
   - The stream allows at most 64 concurrent clients, and answers 503 beyond that.
   - It sets the header `X-Accel-Buffering: no`.

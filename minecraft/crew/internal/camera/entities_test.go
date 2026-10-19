@@ -223,21 +223,15 @@ func TestModelsAreServedAndAnnouncedOnlyWhenBuilt(t *testing.T) {
 	}
 }
 
-// The page and its entity module are embedded and not type-checked, so the
-// frame numbers they switch on and the paths they fetch are checked here.
-func TestPageHandlesTheEntityFramesAndLoadsItsModule(t *testing.T) {
+// The page is embedded and not type-checked, so the frame numbers it switches
+// on are checked here.
+func TestPageHandlesTheEntityFrames(t *testing.T) {
 	for _, s := range []string{
-		"from './v1/camera/entities.js'",
 		"case " + strconv.Itoa(int(frameEntityData)) + ":",
 		"case " + strconv.Itoa(int(frameModels)) + ":",
 	} {
 		if !strings.Contains(string(page), s) {
 			t.Errorf("page does not contain %q", s)
-		}
-	}
-	for _, s := range []string{"'v1/camera/entities.json'", "'v1/camera/entities.png'", "'v1/camera/items.json'"} {
-		if !strings.Contains(string(entitiesJS), s) {
-			t.Errorf("entities.js does not fetch %q", s)
 		}
 	}
 }

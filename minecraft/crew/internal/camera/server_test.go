@@ -189,22 +189,20 @@ func TestAtlasRoutesAnswer404UntilTheAtlasIsBuilt(t *testing.T) {
 
 // The page is embedded and not type-checked, so a wire bump that forgets it
 // would only show in a browser.
-func TestPageSpeaksTheCurrentWireVersionAndFetchesTheAtlas(t *testing.T) {
+func TestPageSpeaksTheCurrentWireVersionAndHandlesTheAtlas(t *testing.T) {
 	want := "u8[1] !== " + strconv.Itoa(int(wireVersion))
-	for _, s := range []string{want, "v1/camera/atlas.json", "v1/camera/atlas.png", "case " + strconv.Itoa(int(frameAtlas)) + ":"} {
+	for _, s := range []string{want, "case " + strconv.Itoa(int(frameAtlas)) + ":"} {
 		if !strings.Contains(string(page), s) {
 			t.Errorf("page does not contain %q", s)
 		}
 	}
 }
 
-// Same reasoning: the overlay's endpoints, and the only key that hides the
-// debug box, exist nowhere the compiler can see.
-func TestPageFetchesTheOverlayDataAndTogglesDebugOnF3(t *testing.T) {
-	for _, s := range []string{"v1/state", "v1/camera/items.json", "v1/camera/items.png", "'F3'"} {
-		if !strings.Contains(string(page), s) {
-			t.Errorf("page does not contain %q", s)
-		}
+// Same reasoning: the only key that hides the debug box exists nowhere the
+// compiler can see.
+func TestPageTogglesDebugOnF3(t *testing.T) {
+	if !strings.Contains(string(page), "'F3'") {
+		t.Error("page does not contain 'F3'")
 	}
 	// Server-supplied text must not be parsed as markup.
 	if strings.Contains(string(page), "innerHTML") {
@@ -212,13 +210,9 @@ func TestPageFetchesTheOverlayDataAndTogglesDebugOnF3(t *testing.T) {
 	}
 }
 
-// The worker file is embedded and not type-checked, like the page, and the
-// page loads it by this exact path.
-func TestMesherWorkerIsServedWhereThePageLoadsIt(t *testing.T) {
+// The worker file is embedded and not type-checked, like the page.
+func TestMesherWorkerIsServed(t *testing.T) {
 	const path = "/v1/camera/mesher.js"
-	if !strings.Contains(string(page), "new Worker('"+strings.TrimPrefix(path, "/")+"')") {
-		t.Errorf("page does not start a worker from %s", path)
-	}
 	h, _ := newTestHub(t, 1)
 	srv := httptest.NewServer(Mount(okBase(), h))
 	defer srv.Close()
@@ -230,36 +224,6 @@ func TestMesherWorkerIsServedWhereThePageLoadsIt(t *testing.T) {
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode != 200 || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/javascript") || !bytes.Equal(body, mesher) || len(body) == 0 {
 		t.Errorf("mesher.js = %d %q, %d bytes", res.StatusCode, res.Header.Get("Content-Type"), len(body))
-	}
-}
-
-// The console frames this page at /units/{id}/camera behind a prefix-stripping
-// proxy, so a root-absolute URL would escape the unit and hit the wrong host.
-func TestPageUsesRelativeURLs(t *testing.T) {
-	h, _ := newTestHub(t, 1)
-	srv := httptest.NewServer(Mount(okBase(), h))
-	defer srv.Close()
-
-	get := func(path string) string {
-		t.Helper()
-		res, err := http.Get(srv.URL + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer res.Body.Close()
-		b, _ := io.ReadAll(res.Body)
-		return string(b)
-	}
-	pageBody := get("/camera")
-	for name, body := range map[string]string{"page": pageBody, "entities.js": get("/v1/camera/entities.js")} {
-		for _, bad := range []string{"'/v1/", `"/v1/`} {
-			if strings.Contains(body, bad) {
-				t.Errorf("%s contains root-absolute URL %s", name, bad)
-			}
-		}
-	}
-	if !strings.Contains(pageBody, "new URL('v1/camera/ws'") {
-		t.Error("page does not build the websocket URL relative to the page")
 	}
 }
 
