@@ -207,6 +207,7 @@ func (l *Life) giveUp(id uint64, reason string) {
 func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	l.idle = idleState{}
 	l.stopEating(a, s)
+	l.stopKit(a)
 	e, ok := l.ents.Get(l.target.ID)
 	p := a.Pose()
 	if l.target.ID == 0 || !ok {

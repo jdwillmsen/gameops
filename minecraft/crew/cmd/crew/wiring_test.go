@@ -15,6 +15,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
@@ -251,5 +252,17 @@ func TestUnitsOwnWalkingReachesTheTracker(t *testing.T) {
 	}
 	if len(conn.out) != 1 {
 		t.Errorf("forwarded %d packets, want 1", len(conn.out))
+	}
+}
+
+func TestLifeConfigTurnsTheKitOnOnlyWithAChest(t *testing.T) {
+	world := blocks.New(noNames{}, 1)
+	lc := lifeConfig(config.Config{IdleWander: true, IdleRadius: 5, Defend: true, Eat: true, KitFood: 8}, world)
+	if lc.Kit != nil || !lc.Eat || !lc.Wander || lc.Radius != 5 || !lc.Defend {
+		t.Errorf("no chest: %+v", lc)
+	}
+	lc = lifeConfig(config.Config{KitChest: &[3]int32{1, 2, 3}, KitFood: 12}, world)
+	if lc.Kit == nil || lc.Kit.Chest != (protocol.BlockPos{1, 2, 3}) || lc.Kit.Food != 12 || lc.Kit.World == nil {
+		t.Errorf("with a chest: %+v", lc.Kit)
 	}
 }

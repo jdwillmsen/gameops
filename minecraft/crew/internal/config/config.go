@@ -70,6 +70,10 @@ type Config struct {
 	Defend bool
 	// Eat lets a hungry unit eat food from its hotbar.
 	Eat bool
+	// KitChest is the chest a unit without a weapon or food rearms from; nil
+	// leaves the feature off. KitFood is how many food items one visit takes.
+	KitChest *[3]int32
+	KitFood  int
 }
 
 func Load() (Config, error) {
@@ -144,6 +148,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	kitChest, err := positionOptional("KIT_CHEST")
+	if err != nil {
+		return Config{}, err
+	}
+	kitFood, err := intInRange("KIT_FOOD", 8, 1, 64)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -168,7 +180,31 @@ func Load() (Config, error) {
 		IdleRadius: idleRadius,
 		Defend:     defend,
 		Eat:        eat,
+		KitChest:   kitChest,
+		KitFood:    kitFood,
 	}, nil
+}
+
+// positionOptional reads "x,y,z" block coordinates. Unset is nil. The error
+// leaves the value out: it is a lab position, which logs never carry.
+func positionOptional(name string) (*[3]int32, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("%s: want x,y,z", name)
+	}
+	var pos [3]int32
+	for i, p := range parts {
+		n, err := strconv.ParseInt(strings.TrimSpace(p), 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("%s: want x,y,z as whole numbers", name)
+		}
+		pos[i] = int32(n)
+	}
+	return &pos, nil
 }
 
 func required(name string) (string, error) {

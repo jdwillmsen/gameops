@@ -63,20 +63,26 @@ type eatState struct {
 }
 
 // Tending says whether the unit has something to see to besides its task, and
-// the runner then hands it the tick through Tend. It is only asked when the
-// unit is not engaged in a fight.
+// the runner then hands it the tick through Tend. working says a task is
+// running. It is only asked when the unit is not engaged in a fight.
 func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 	if l.eat.active {
 		return true
 	}
-	_, ok := l.wantsMeal(s)
-	return ok
+	// A visit under way has a chest open, so a meal waits for it.
+	if l.kit.visit != nil {
+		return true
+	}
+	if _, ok := l.wantsMeal(s); ok {
+		return true
+	}
+	return l.kitWants(s, working)
 }
 
 // Tend sends exactly one input for a tick Tending claimed.
 func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	l.idle = idleState{}
-	if !l.eat.active {
+	if !l.eat.active && l.kit.visit == nil {
 		if food, ok := l.wantsMeal(s); ok {
 			l.eat = eatState{active: true, slot: food.Slot, food: food, startHunger: s.Hunger, startCount: food.Count, blockedUntil: l.eat.blockedUntil}
 			if s.HeldKnown && s.HeldSlot == food.Slot {
@@ -87,7 +93,7 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	if l.eat.active {
 		return l.eating(a, s)
 	}
-	return l.still(a)
+	return l.tendKit(ctx, a, s)
 }
 
 // wantsMeal picks the food to eat now, if the unit is hungry enough.

@@ -66,6 +66,8 @@ type Config struct {
 	Defend bool
 	// Eat makes the unit eat when hungry and food is on its hotbar.
 	Eat bool
+	// Kit, when set, is a chest the unit rearms from.
+	Kit *Kit
 }
 
 type mode uint8
@@ -120,6 +122,9 @@ type Life struct {
 
 	idle idleState
 	eat  eatState
+	kit  kitState
+	// makeKit replaces the withdraw a visit runs, for tests.
+	makeKit func(weapon bool, food int) skill.Skill
 }
 
 // New builds a unit's life. The random source is the idle walk's only
@@ -151,7 +156,7 @@ func (l *Life) Reset() {
 	l.retreating, l.endReason = 0, ""
 	l.chase, l.flee = nil, nil
 	l.idle = idleState{}
-	l.eat = eatState{}
+	l.eat, l.kit = eatState{}, kitState{}
 }
 
 // End drops the session's entities. Like Spawn it is for the read loop.
