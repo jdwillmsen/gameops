@@ -107,5 +107,5 @@ players see. Neither is ever reused for another unit.
 
 Units never message each other or share state. One unit's output is a chest,
 the next unit's input is the same chest, and a hauler waits for items to
-arrive. A crashed unit therefore leaves a chest that is simply less full, and
-the others carry on.
+arrive. A crashed unit therefore leaves a chest that is simply less full. The
+others are not told: a hauler waits until it is cancelled or times out.

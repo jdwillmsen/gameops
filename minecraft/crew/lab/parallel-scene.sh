@@ -35,10 +35,15 @@ agate=${2:-${DEFAULT_NAMES[0]}}
 basalt=${3:-${DEFAULT_NAMES[1]}}
 cobble=${4:-${DEFAULT_NAMES[2]}}
 
-# Rejects @-selectors and anything that could break out of the quoted name.
+# Rejects @-selectors, anything that could break out of the quoted name and
+# names the server would not accept as a username.
 for n in "$agate" "$basalt" "$cobble"; do
   if [[ ! $n =~ ^[A-Za-z0-9_\ -]+$ ]]; then
     echo "parallel-scene.sh: unit name must match [A-Za-z0-9_ -]+ (no selectors)" >&2
+    exit 2
+  fi
+  if ((${#n} > 16)); then
+    echo "parallel-scene.sh: unit name '$n' is over the 16-character Bedrock limit" >&2
     exit 2
   fi
 done

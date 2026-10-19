@@ -40,7 +40,7 @@ Off unless `TASKS_TOKEN` is set. Every request needs
 - `POST /v1/tasks/{id}/cancel` cancels a queued or running task (404 unknown, 409 already finished).
 
 Two templates exist; any other template, item or field is a 400. Each field
-is required.
+is required unless marked optional.
 
 `gather_and_deposit` mines an item and puts it in one chest:
 
@@ -51,6 +51,12 @@ is required.
 
 `qty` is 1 to 256 and `item` is `cobblestone` (mined with a pickaxe) or
 `oak_log` (chopped with an axe the unit must carry).
+
+`area` is optional: an inclusive box `{"min": {x,y,z}, "max": {x,y,z}}` with
+min at most max on each axis and at most 64 blocks on an axis. When set, the
+unit only ever breaks blocks inside it and fails with `no reachable <block> in
+the area` if none is left. Without it, the unit may break any matching block
+within 24 blocks, so set it wherever other blocks of that kind matter.
 
 `haul` empties source chests into one destination chest, waiting for items to
 arrive and making as many trips as the inventory needs. It ends when every
@@ -65,7 +71,7 @@ item has been moved the requested number of times:
 4 chests. A haul only takes into empty inventory slots or onto stacks of the
 same item, so tools stay put, and it fails after three attempts in a row that
 move nothing. Its `progress` is the total moved and its `qty` the total asked
-for.
+for. The destination must not also be a source and a source may be listed once.
 
 Crew runs one task at a time. A session end or death fails the running task
 (`session ended`, `unit died`) and queued tasks wait for the next spawn.
@@ -155,7 +161,9 @@ minecraft/crew/lab/scene.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod>
 
 The cluster lab is joinable by real players (details in the deployment repo),
 so lab commands target the unit by name and never `@a`: the script's second
-argument is the unit's username and defaults to `crew-1`. `send-command` exits
+argument is the unit's username. `scene.sh` defaults it to `crew-1`, the name
+from the single-unit lab; the compose lab now runs Agate, Basalt and Cobble, so
+pass a name there or use `parallel-scene.sh`. `send-command` exits
 0 even when the server rejects a command, so check the server log. The scene
 needs cheats, so it only ever runs against a lab; crew itself sends no command.
 
@@ -178,7 +186,10 @@ minecraft/crew/lab/parallel-demo.sh compose 600
 
 The `k8s:<ns>` form port-forwards `deploy/crew-01` to `crew-03` on 18081 to
 18083 and reads the token from Secret `crew-tasks`; it needs
-`--confirm-overwrite` on the scene like the single-unit one.
+`--confirm-overwrite` on the scene like the single-unit one. It waits for each
+forward to answer `/healthz` before sending the token and refuses a local port
+that is already in use. A timeout, error or interrupt cancels every task still
+running. The gatherers get the scene's cleared box as their `area`.
 
 ### Operator overlay
 
@@ -197,8 +208,8 @@ background from Mojang's `bedrock-samples` pack, fetched at runtime; only the
 built atlas is cached, under `CAMERA_ATLAS_DIR`. The item sheet is built
 from the same pack's item textures, with block items drawn as a block face.
 Nothing from the pack is
-committed or shipped in the image. When the atlas is ready the stream sends an atlas
-frame and the page textures cube faces with nearest filtering, tints grass,
+committed or shipped in the image. When the atlas is ready the stream sends an
+atlas frame and the page textures cube faces with nearest filtering, tints grass,
 foliage and water, and draws slabs, stairs, cross-plants and torches as simple
 shapes. Crew does not receive biome data, so tint is sampled for one climate
 everywhere (the plains biome); stairs and slabs have no orientation or half
