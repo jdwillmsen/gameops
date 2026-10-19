@@ -71,6 +71,11 @@ func (l *Life) Idle(ctx context.Context, a skill.Actuator) error {
 		st.walk, st.pause = nil, l.between(pauseMin, pauseMax)
 		p = a.Pose()
 	}
+	if !idleWalkInBounds(p, st.anchor, l.cfg.Radius) {
+		st.anchored, st.anchor = true, cellOf(p.Feet)
+		st.pause = l.between(pauseMin, pauseMax)
+		st.lookYaw, st.lookPitch, st.lookLeft = p.Yaw, p.Pitch, 0
+	}
 	if st.pause--; st.pause <= 0 {
 		if l.startWalk(p) {
 			if status, _ := st.walk.Step(ctx, a); status == skill.Running {

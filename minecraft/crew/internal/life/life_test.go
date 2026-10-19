@@ -257,7 +257,7 @@ func TestIdleStaysWithinRadiusWhenWallForcesDetour(t *testing.T) {
 	r := newRig(t, defaults, start)
 	r.step()
 	r.a.Apply(&packet.CorrectPlayerMovePrediction{
-		Position: mgl32.Vec3{26.5, 1.62, 20.5},
+		Position: mgl32.Vec3{26.5, 2.62, 20.5},
 		OnGround: true,
 	})
 	for z := int32(19); z <= 21; z++ {
@@ -298,6 +298,32 @@ func TestIdleStopsWalkAfterCorrectionLeavesRadiusOrHeightBand(t *testing.T) {
 				t.Fatal("kept navigating after correction left idle bounds")
 			}
 		})
+	}
+}
+
+func TestIdleReanchorsAfterCorrectionOutsideRadius(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.step()
+	r.a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{30, 2.62, 20.5},
+		OnGround: true,
+	})
+	r.step()
+	if want := (protocol.BlockPos{30, 1, 20}); r.l.idle.anchor != want {
+		t.Fatalf("anchor = %v after correction, want %v", r.l.idle.anchor, want)
+	}
+	moved := false
+	for i := 0; i < 3000; i++ {
+		r.step()
+		if d := dist(r.feet(), mgl32.Vec3{30.5, 1, 20.5}); d > 1 {
+			moved = true
+		}
+		if d := dist(r.feet(), mgl32.Vec3{30.5, 1, 20.5}); d > 8.6 {
+			t.Fatalf("tick %d: wandered %.2f blocks from corrected position", i, d)
+		}
+	}
+	if !moved {
+		t.Fatal("unit did not resume wandering from its corrected position")
 	}
 }
 
@@ -621,6 +647,30 @@ func TestAMobTheUnitCannotReachIsGivenUpOn(t *testing.T) {
 	}
 	if engaged > graceTicks+10 {
 		t.Errorf("engaged for %d of 100 ticks with a mob it cannot reach", engaged)
+	}
+}
+
+func TestAdjacentAttackingZombieRemainsThreatAfterFightLimit(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.spawn(52, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+	r.l.engaged = true
+	r.l.fighting = fightLimit
+	r.hurt()
+	if !r.step() {
+		t.Fatal("stopped defending an adjacent zombie at fight limit")
+	}
+	if _, ignored := r.l.ignore[52]; ignored {
+		t.Fatal("gave up on a zombie already within melee reach")
+	}
+	r.l.ignore[52] = r.l.tick + ignoreTicks
+	for i := 0; i < 20; i++ {
+		r.hurt()
+		if !r.step() {
+			t.Fatalf("stopped defending adjacent zombie at tick %d", i)
+		}
+	}
+	if len(r.out.attacks()) == 0 {
+		t.Fatal("never struck adjacent zombie despite the ignore entry")
 	}
 }
 
