@@ -278,10 +278,27 @@ func (a *API) cancelItem(w http.ResponseWriter, r *http.Request, unit, op string
 		opStoreError(w, r, err)
 		return
 	}
+	stopped := false
 	for _, c := range open {
 		if c.ID == id {
 			it = c
+			stopped = true
 		}
+	}
+	if !stopped {
+		recent, err = a.store.Recent(r.Context(), unit, historyLen)
+		if err != nil {
+			opStoreError(w, r, err)
+			return
+		}
+		for _, c := range recent {
+			if c.ID == id {
+				it = c
+				break
+			}
+		}
+		opJSON(w, http.StatusOK, cancelled{View: view(it)})
+		return
 	}
 	it.State = Cancelled
 	opJSON(w, http.StatusAccepted, cancelled{view(it), stoppedNote})

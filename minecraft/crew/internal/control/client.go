@@ -42,6 +42,7 @@ const (
 
 	// Far above a real item (a template is about 100 bytes).
 	maxWorkBytes = 64 << 10
+	queueWait    = 50 * time.Millisecond
 )
 
 // Runner is the part of task.Runner the client drives.
@@ -160,6 +161,18 @@ func (c *Client) Run(ctx context.Context) {
 		seen bool
 	)
 	for ctx.Err() == nil {
+		queued := 0
+		for _, t := range c.runner.List() {
+			if t.State == task.Queued {
+				queued++
+			}
+		}
+		if queued >= task.MaxQueued {
+			if !c.sleep(ctx, queueWait) {
+				return
+			}
+			continue
+		}
 		item, err := c.poll(ctx)
 		if err != nil {
 			if ctx.Err() != nil {

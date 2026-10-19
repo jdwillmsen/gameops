@@ -29,8 +29,7 @@ func Mount(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /signin", func(w http.ResponseWriter, r *http.Request) {
 		secure(w)
-		// The invite rides in this page's query string until the script
-		// strips it; nothing the page loads or links to may see it.
+		// Referrers must not expose the invite fragment to resources loaded by this page.
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		http.ServeFileFS(w, r, web, "signin.html")
 	})

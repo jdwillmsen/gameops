@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -54,7 +55,7 @@ type fakeControl struct {
 
 func newFakeControl(t *testing.T) *fakeControl {
 	t.Helper()
-	f := &fakeControl{work: make(chan string, 16)}
+	f := &fakeControl{work: make(chan string, 32)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/units/"+unit+"/work", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -191,6 +192,16 @@ func (s *stubRunner) SubmitAs(id string, _ task.Template) (task.Task, error) {
 			s.mu.Unlock()
 			return task.Task{}, task.ErrDuplicate
 		}
+	}
+	queued := 0
+	for _, t := range s.tasks {
+		if t.State == task.Queued {
+			queued++
+		}
+	}
+	if queued >= task.MaxQueued {
+		s.mu.Unlock()
+		return task.Task{}, task.ErrQueueFull
 	}
 	t := task.Task{ID: id, State: task.Queued}
 	s.tasks = append(s.tasks, t)
@@ -407,6 +418,59 @@ func TestBadTemplatePostsFailed(t *testing.T) {
 	}
 	if len(r.submitted()) != 0 {
 		t.Error("a template that does not parse reached the runner")
+	}
+}
+
+func TestClientWaitsForRunnerCapacity(t *testing.T) {
+	f := newFakeControl(t)
+	r := &stubRunner{}
+	start(t, r, f)
+	for i := 1; i <= 20; i++ {
+		f.work <- fmt.Sprintf(`{"id":"%08x-0000","kind":"task","template":%s}`, i, gotoBody)
+	}
+	waitUntil(t, "runner queue to fill", func() bool { return len(r.submitted()) == task.MaxQueued })
+	waitUntil(t, "client to pause polling at capacity", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.polls == task.MaxQueued && len(f.work) == 4
+	})
+
+	for i := 0; i < 20; i++ {
+		var queued string
+		for _, item := range r.List() {
+			if item.State == task.Queued {
+				queued = item.ID
+				break
+			}
+		}
+		if queued != "" {
+			r.set(queued, task.Running, 0, "")
+		}
+		want := min(task.MaxQueued+i+1, 20)
+		waitUntil(t, "next task to be delivered", func() bool { return len(r.submitted()) >= want })
+	}
+
+	ids := r.submitted()
+	for _, id := range ids {
+		r.set(id, task.Running, 1, "")
+		r.set(id, task.Done, 1, "")
+	}
+	events := f.waitFor(t, "all twenty tasks to finish", func(events []event) bool {
+		done := 0
+		for _, e := range events {
+			if e.State == task.Done {
+				done++
+			}
+		}
+		return done == 20
+	})
+	if len(ids) != 20 {
+		t.Fatalf("submitted %d tasks", len(ids))
+	}
+	for _, e := range events {
+		if e.State == task.Failed && e.Reason == task.ErrQueueFull.Error() {
+			t.Fatalf("task %s failed because the runner queue was full", e.ID)
+		}
 	}
 }
 

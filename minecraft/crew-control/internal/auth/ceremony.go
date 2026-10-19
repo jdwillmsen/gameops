@@ -142,7 +142,7 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
 
 func (a *Auth) registerOptions(w http.ResponseWriter, r *http.Request) {
 	if !stateChanging(r) {
-		fail(w, http.StatusForbidden, "bad_request")
+		rejectStateChanging(w, r)
 		return
 	}
 	raw, ok := readBody(w, r)
@@ -213,7 +213,7 @@ func allowedAlg(publicKey []byte) bool {
 
 func (a *Auth) registerFinish(w http.ResponseWriter, r *http.Request) {
 	if !stateChanging(r) {
-		fail(w, http.StatusForbidden, "bad_request")
+		rejectStateChanging(w, r)
 		return
 	}
 	cer, ok := a.take(w, r, kindRegister)
@@ -282,7 +282,7 @@ func (a *Auth) registerFinish(w http.ResponseWriter, r *http.Request) {
 
 func (a *Auth) loginOptions(w http.ResponseWriter, r *http.Request) {
 	if !stateChanging(r) {
-		fail(w, http.StatusForbidden, "bad_request")
+		rejectStateChanging(w, r)
 		return
 	}
 	assertion, session, err := a.wa.BeginDiscoverableLogin(webauthn.WithUserVerification(protocol.VerificationRequired))
@@ -299,7 +299,7 @@ var errUnknownCredential = errors.New("unknown credential")
 
 func (a *Auth) loginFinish(w http.ResponseWriter, r *http.Request) {
 	if !stateChanging(r) {
-		fail(w, http.StatusForbidden, "bad_request")
+		rejectStateChanging(w, r)
 		return
 	}
 	// Every refusal is the same 401 and the same body.
