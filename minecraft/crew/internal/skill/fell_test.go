@@ -313,3 +313,79 @@ func TestFellWalksOntoAPillarSpotFromInsideTheBrakeDistance(t *testing.T) {
 		t.Errorf("oak_log = %d, want 7", got)
 	}
 }
+
+// stepUntil steps the fell skill until cond holds, failing if it stops first.
+func stepUntil(t *testing.T, r *rig, f *Fell, cond func() bool) {
+	t.Helper()
+	for i := 0; i < 3000 && !cond(); i++ {
+		if st, err := f.Step(t.Context(), r); st != Running || err != nil {
+			t.Fatalf("stopped early with status %v, err %v", st, err)
+		}
+	}
+	if !cond() {
+		t.Fatal("condition never reached")
+	}
+}
+
+func TestFellCollectsALogWhoseGroundDropArrivedAfterPlanning(t *testing.T) {
+	w := oak(7)
+	r := fellRig(t, w, 3)
+	f := newFell(w, r, 7).(*Fell)
+	// The last log mined from the ground is picked up only once the unit is
+	// walking to its pillar, as a drop that bounced away is live.
+	stepUntil(t, r, f, func() bool { return r.breaks == 6 })
+	r.refusePickups = true
+	stepUntil(t, r, f, func() bool { return f.phase == fWalk })
+	if got := r.have("oak_log"); got != 5 {
+		t.Fatalf("oak_log at planning = %d, want 5 with one drop still on the ground", got)
+	}
+	r.refusePickups = false
+	stepUntil(t, r, f, func() bool { return f.phase == fCut })
+	// The top log's drop is not picked up from the pillar, so the unit must
+	// still collect it from the ground.
+	r.refusePickups = true
+	stepUntil(t, r, f, func() bool { return f.phase == fCollect })
+	r.refusePickups = false
+	// It bounced past the pillar's foot, as drops do live, so only a visit to
+	// the trunk's column collects it.
+	for i := range r.drops {
+		if r.drops[i].item == idOakLog {
+			r.drops[i].at[0] += 1.2
+		}
+	}
+	if st, err := r.run(f, 4000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("oak_log"); got != 7 {
+		t.Errorf("oak_log = %d, want 7", got)
+	}
+}
+
+func TestFellResumesAfterAFightThatTookTheUnitOffItsPillar(t *testing.T) {
+	w := oak(7)
+	r := fellRig(t, w, 3)
+	f := newFell(w, r, 7).(*Fell)
+	stepUntil(t, r, f, func() bool { return f.phase == fCut })
+	f.Stop(r)
+	// The defence chased a mob away from the tree, out of reach of the pillar.
+	r.send(&packet.CorrectPlayerMovePrediction{Position: feetAt(2, 1, 2).Add(mgl32.Vec3{0, 1.62, 0}), OnGround: true})
+	for i := 0; i < 3; i++ {
+		if err := r.Tick(actIdle(r)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Resume()
+	if st, err := r.run(f, 5000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("oak_log"); got != 7 {
+		t.Errorf("oak_log = %d, want 7", got)
+	}
+	if got := w.count("dirt"); got != 18*18 {
+		t.Errorf("%d dirt blocks left in the world, want the pillar taken down", got-18*18)
+	}
+	if got := r.have("dirt"); got != 3 {
+		t.Errorf("dirt held = %d, want all 3 back", got)
+	}
+	onGround(t, r)
+}

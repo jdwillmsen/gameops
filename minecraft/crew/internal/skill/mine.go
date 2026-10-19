@@ -67,6 +67,8 @@ type Mine struct {
 	// pillar, where walking to a drop would mean leaving.
 	hold   bool
 	felled []protocol.BlockPos
+	// Blocks broken from the ground, whose drops may still be on their way.
+	broken int
 
 	selected     bool
 	breakStarted bool
@@ -338,6 +340,7 @@ func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 			m.phase = mFind
 			return next
 		}
+		m.broken++
 		m.phase, m.waited, m.pickInit = mPickup, 0, false
 		return next
 	}
