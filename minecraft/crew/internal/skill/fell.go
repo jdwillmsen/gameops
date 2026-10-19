@@ -48,6 +48,7 @@ const (
 	fJump
 	fCut
 	fDescend
+	fReturn
 	fWalkOff
 	fCollect
 )
@@ -98,6 +99,11 @@ type Fell struct {
 	nav    *navigator
 	pillar []protocol.BlockPos
 
+	// The unit was off its pillar when it came to take it down, as a fight
+	// leaves it, so the log it aimed for never had its cut and stays a target.
+	offPillar bool
+	returned  bool
+
 	jump     jumpState
 	tries    int
 	waited   int
@@ -108,8 +114,10 @@ type Fell struct {
 	brk      cellBreak
 	falling  bool
 
-	// The item count the pickups should bring the unit to.
-	cutBase   int
+	// Logs the pillars have cut, and the item count the pickups should bring
+	// the unit to. Counted from breaks, not the inventory, because a ground
+	// drop can still be on the way when a pillar is planned.
+	felled    int
 	expect    int
 	matBase   int
 	cols      []protocol.BlockPos
@@ -179,9 +187,10 @@ func (f *Fell) Resume() {
 		}
 	case fCut:
 		f.enterCut()
-	case fWalkOff:
+	case fReturn, fWalkOff:
 		f.phase = fDescend
 	}
+	f.returned = false
 }
 
 func (f *Fell) enterCut() {
@@ -220,6 +229,8 @@ func (f *Fell) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = f.cut(ctx, a)
 		case fDescend:
 			o = f.descend(a, p)
+		case fReturn:
+			o = f.walk(a, fDescend)
 		case fWalkOff:
 			o = f.walk(a, fCollect)
 		case fCollect:
@@ -296,7 +307,7 @@ func (f *Fell) plan(a Actuator, p act.Pose) outcome {
 		f.target, f.ground, f.height, f.leaves = l, g, h, leaves
 		f.material, f.digTool = mat, tool
 		f.pillars++
-		f.cutBase, f.matBase = count(snap, f.mine.item), count(snap, mat.Name)
+		f.matBase = count(snap, mat.Name)
 		f.waited, f.tries, f.jump, f.selected = 0, 0, jIdle, false
 		f.emit("fell_pillar_planned", map[string]any{"height": h, "leaves": len(leaves), "attempt": f.pillars})
 		f.nav = newNavigator(f.world, g, 0.4)
@@ -399,8 +410,12 @@ func (f *Fell) walk(a Actuator, then fellPhase) outcome {
 		f.nav, f.phase = nil, then
 		return next
 	}
-	if f.phase == fWalkOff {
+	switch f.phase {
+	case fWalkOff:
 		return f.finish(a, err)
+	case fReturn:
+		f.nav, f.phase = nil, fDescend
+		return next
 	}
 	// A pillar that cannot be walked to rules out its log, not the task.
 	f.rule(f.target)
@@ -592,8 +607,19 @@ func (f *Fell) descend(a Actuator, p act.Pose) outcome {
 		return f.tick(a, act.Input{Yaw: p.Yaw, Pitch: 90})
 	}
 	onTop := feet.X() == top.X() && feet.Z() == top.Z() && feet.Y() == top.Y()+1
+	if !onTop {
+		f.offPillar = true
+	}
 	if !onTop && centre(top).Sub(eyeOf(p.Feet)).Len() > mineReach {
-		// Knocked off or put down elsewhere, out of reach: the blocks stay.
+		// Knocked off or put down elsewhere: go back and take the pillar down
+		// from beside it, once. Only if that fails do the blocks stay.
+		if !f.returned {
+			f.returned = true
+			if c, ok := f.besidePillar(top); ok {
+				f.nav, f.phase = newNavigator(f.world, c, 0.4), fReturn
+				return next
+			}
+		}
 		f.emit("fell_pillar_left", map[string]any{"height": len(f.pillar)})
 		f.pillar = nil
 		return next
@@ -629,14 +655,22 @@ func (f *Fell) walkOff(a Actuator) outcome {
 	f.emit("fell_pillar_left", map[string]any{"height": len(f.pillar)})
 	top := f.pillar[len(f.pillar)-1]
 	f.pillar, f.brk = nil, cellBreak{}
+	if c, ok := f.besidePillar(top); ok {
+		f.nav, f.phase = newNavigator(f.world, c, 0.4), fWalkOff
+		return next
+	}
+	return f.finish(a, errors.New("no way down from the pillar"))
+}
+
+// besidePillar finds a ground cell next to the pillar.
+func (f *Fell) besidePillar(top protocol.BlockPos) (protocol.BlockPos, bool) {
 	for _, d := range [][2]int32{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
 		c := protocol.BlockPos{top.X() + d[0], f.ground.Y(), top.Z() + d[1]}
 		if path.Standable(f.world, c) {
-			f.nav, f.phase = newNavigator(f.world, c, 0.4), fWalkOff
-			return next
+			return c, true
 		}
 	}
-	return f.finish(a, errors.New("no way down from the pillar"))
+	return protocol.BlockPos{}, false
 }
 
 // collect walks to where the cut logs fell and waits for the pickup, then
@@ -677,7 +711,7 @@ func (f *Fell) collect(a Actuator, p act.Pose) outcome {
 }
 
 func (f *Fell) initCollect() {
-	if n, known := f.world.Block(f.target); known && n == f.mine.block {
+	if n, known := f.world.Block(f.target); known && n == f.mine.block && !f.offPillar {
 		f.rule(f.target)
 	}
 	type col struct{ x, z int32 }
@@ -701,7 +735,8 @@ func (f *Fell) initCollect() {
 	for _, b := range f.mine.felled {
 		add(b.X(), b.Z(), b.Y())
 	}
-	f.expect = f.cutBase + len(f.mine.felled)
+	f.felled += len(f.mine.felled)
+	f.expect = f.mine.baseline + f.mine.broken + f.felled
 	f.mine.felled = nil
 	if len(cols) > 1 {
 		rest := cols[1:]
@@ -716,6 +751,7 @@ func (f *Fell) initCollect() {
 func (f *Fell) back(a Actuator) outcome {
 	f.emit("fell_collected", map[string]any{"pillars": f.pillars})
 	f.colsInit, f.colWait, f.nav = false, 0, nil
+	f.offPillar, f.returned = false, false
 	f.ground, f.target = protocol.BlockPos{}, protocol.BlockPos{}
 	f.mine.hold = false
 	f.mine.Resume()
