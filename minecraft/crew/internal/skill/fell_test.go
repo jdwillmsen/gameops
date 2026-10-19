@@ -389,3 +389,22 @@ func TestFellResumesAfterAFightThatTookTheUnitOffItsPillar(t *testing.T) {
 	}
 	onGround(t, r)
 }
+
+// On a loaded server a tree whose logs are all above ground reach is cut only
+// from the pillar, and the drops must still be waited for once on the ground.
+func TestFellCollectsPillarCutLogsOnALoadedServer(t *testing.T) {
+	w := oak(7)
+	w.fill("air", treeX, 1, treeZ, treeX, 6, treeZ)
+	r := fellRig(t, w, 3)
+	r.slowBreak, r.slowPickup = 150, 300
+	if st, err := r.run(newFell(w, r, 1), 4000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("oak_log"); got != 1 {
+		t.Errorf("oak_log = %d, want 1", got)
+	}
+	if r.placed == 0 {
+		t.Error("no pillar was built, yet the only log is above ground reach")
+	}
+	onGround(t, r)
+}

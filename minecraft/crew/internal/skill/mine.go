@@ -335,12 +335,12 @@ func (m *Mine) standCell(b protocol.BlockPos, from mgl32.Vec3) (protocol.BlockPo
 func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 	if name, known := m.world.Block(m.target); known && name != m.block {
 		m.sessionOpen = false
+		m.lastBreak = m.waited
 		if m.hold {
 			m.phase = mFind
 			return next
 		}
 		m.broken++
-		m.lastBreak = m.waited
 		m.phase, m.waited, m.pickInit = mPickup, 0, false
 		return next
 	}
