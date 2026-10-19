@@ -195,8 +195,7 @@ Results, 8-core Linux host shared with other work, lab world, view distance 8,
 software GL (no GPU), 60 s steady window, one viewer per unit where N equals M.
 Frame work is time inside the page's frame callback; the software renderer's
 cost lands outside it, so the page frame rate is the figure to read. The max
-includes the replay burst. The page has no frustum-limited radius or worker
-meshing yet, so these rows are without them.
+includes the replay burst. These rows predate worker meshing and culling.
 
 | Units | Viewers | Radius | Crew CPU mean / max | Crew RSS max (MB) | Steady KB/s per unit | Steady KB/s per viewer | Replay MB (all units) | Settle (s) | Frame work avg (ms) | Frame work max (ms) | Page fps |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -217,4 +216,29 @@ four tiles from 25 to 8 fps on software GL, while radius 4 settles in under a
 second. The cap stays 4 because the cost it guards is the viewers' rendering
 and the single unit's fan-out has no measured cliff below it; raise it per
 deployment if a wall needs more than four viewers on one unit. Re-measure on
-real GPUs once frustum limiting and worker meshing land.
+real GPUs.
+
+### Worker meshing and culling
+
+The page meshes sub-chunks in a Web Worker (`web/mesher.js`, buffers
+transferred back) and culls each mesh by hand: a three.js `Frustum` against the
+tight box the worker measures, plus a distance cut at the fog's far plane,
+where everything is already the sky colour. About 36% of meshes are drawn at
+radius 4 and 25% at radius 8 (looking along one axis). three.js already tested
+a loose bounding sphere per mesh, so the gain is the tighter box and the fog
+cut, not culling as such.
+
+These rows are not from `run.sh`, which needs a lab server. They use a
+synthetic hills world served by a throwaway hub (no bots, 1 unit), four
+headless Chrome viewers on software GL, `loadtest/viewers.mjs`, a 15 s window,
+three alternating before/after runs each. The host was busy (load average
+5 to 10), so absolute numbers are lower and noisier than the table above.
+
+| Viewers | Radius | Page fps before (runs) | Page fps after (runs) |
+|---|---|---|---|
+| 4 | 4 | 38.9, 41.3, 43.2 | 40.0, 41.6, 42.0 |
+| 4 | 8 | 17.1, 19.3, 19.8 | 23.7, 26.3, 26.5 |
+
+Radius 4 is unchanged within noise: it was already past 30 fps in this world,
+so the rows above, not this one, show the render-bound case. Radius 8 gains
+about 35%. The `run.sh` re-run on the lab is still to do.
