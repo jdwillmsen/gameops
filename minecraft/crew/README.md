@@ -18,6 +18,9 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `IDLE_WANDER` | `true` | A unit with no task looks about and takes short walks. `false` leaves it standing, though it still sends an input every tick |
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
+| `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
+| `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
+| `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
@@ -57,13 +60,50 @@ Logs carry only events and types (`defend_started`, `hurt_by`,
 `reason`: `gone` (the mob left range or died), `no_stand_cell` (no standable
 cell near it), `no_path` (the chase failed) or `fight_limit`.
 
+## Eating and rearming
+
+A unit that died fights barehanded and never heals: on normal difficulty
+health only regenerates while food is at 18 of 20 or more. With `EAT` a unit
+that is not in a fight and holds food on its hotbar selects it, uses it for
+the 32 ticks a meal takes and lets go. It eats from 17 food when hurt and from
+14 when not, preferring the richest food (steak, then bread, then lesser
+foods); rotten flesh, raw meat and anything that poisons or teleports are
+never eaten, and neither is food outside the hotbar. The running skill is
+stopped for the meal and resumed after it, and meal time does not count toward
+`TASK_TIMEOUT_S`. A fight cuts a meal short. Logs carry `eat` and `eat_failed`
+with the food and hunger only; a meal that does not land is not retried for a
+minute.
+
+With `KIT_CHEST` set, a unit that has had no sword or axe, or no food, on its
+hotbar for five seconds, and is not running a task or fighting, walks to that
+chest and takes the best sword it holds and up to `KIT_FOOD` food. This is how
+a unit that died gets its sword and bread back. A chest that cannot make the
+unit whole is logged as `kit_empty` (with what was `missing`, never a
+position) and left alone for three minutes; a failed visit (`kit_failed`) backs
+off the same way. A visit only fills empty slots, so a tool is never
+displaced. The task queue waits while a visit is under way.
+
+To use it, set the same two variables on every unit in the deployment's
+environment, for example in the Helm values that carry `DEFEND`:
+
+```
+KIT_CHEST=-3,100,-3
+KIT_FOOD=8
+```
+
+`parallel-scene.sh` builds and stocks a chest at the position in
+`lab/parallel-layout.sh` (`KIT_CHEST`, six stone swords and 64 bread), which is
+what to set `KIT_CHEST` to on the lab's units. The scene empties the units'
+inventories, so with the kit on they walk to the chest first and then run
+their task.
+
 ## Status API
 
 `/healthz`, `/readyz` and `/v1/state`. The state carries `position`,
 `position_known`, `yaw` and `pitch`, which follow the unit's own walking as
 well as the server's corrections and teleports. Until `position_known` is
 true the position is the server's placeholder, not a real one. It also carries
-`health`, the 36-slot `inventory`, `held_slot` (only meaningful when
+`health`, `hunger`, the 36-slot `inventory`, `held_slot` (only meaningful when
 `held_known`) and a read-only `tasks` object: `current` (the running task or
 null) and `recent` (the last five others, newest first), each with id,
 template, state, skill, item, qty, progress, reason and timestamps. It never

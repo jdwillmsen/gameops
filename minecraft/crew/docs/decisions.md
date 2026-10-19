@@ -145,3 +145,60 @@ of a hostile type are targets. A player's blow makes the unit face them and
 step back, which is all it does. The cost is that a griefer can hit a unit
 freely; the gain is that a bug in target choice cannot turn a worker into a
 danger to the people it shares the world with.
+
+## 2026-10-19: units eat when hungry and rearm from a kit chest
+
+A unit that dies loses its sword and bread (keepInventory is off on the lab)
+and, on normal difficulty, health only regenerates at 18 of 20 food. So it
+fought barehanded and never healed.
+
+**Eating.** The unit tracks its hunger and saturation from its own
+`minecraft:player.hunger` and `minecraft:player.saturation` attributes. Below
+the threshold, with food on the hotbar and no fight, the runner hands it the
+tick (the same preemption a fight uses: stop the skill, act, `Resume`). The
+sequence is `MobEquipment` to select the stack, an `InventoryTransaction`
+with `UseItemTransactionData{ActionType: ClickAir, TriggerType:
+PlayerInput, HotBarSlot, HeldItem}`, a `PlayerAuthInput` with
+`InputFlagStartUsingItem` set on the next tick only, still inputs while
+holding, and an `InventoryTransaction` with `ReleaseItemTransactionData`.
+Thresholds: 17 when hurt (regeneration needs 18, so at most a point or two is
+wasted) and 14 otherwise (so a 5-point bread never overshoots 20 by much and
+a full unit never tries, which the server refuses). Saturation is tracked but
+unused: regeneration is gated on food, not saturation.
+
+Confirmed from source (gophertunnel v1.62.0, dragonfly v0.11.5):
+- `UseItemActionClickAir` with `TriggerTypePlayerInput` is what starts a use;
+  dragonfly's handler calls `UseItem` for it, and compares `HeldItem` with the
+  stack in the held slot, ignoring the click on a mismatch.
+- `InputFlagStartUsingItem` exists in `PlayerAuthInput`. dragonfly ignores it;
+  it is the flag a vanilla client sets on the tick it starts using an item.
+- `ReleaseItemTransactionData` carries the hotbar slot, held item and head
+  position; dragonfly's `ReleaseItem` ends the use, and a releasable item is
+  only released when its requirements hold.
+- Completion shows as the stack's count dropping or hunger rising, both
+  arriving as `InventorySlot`/`InventoryContent` and `UpdateAttributes`, which
+  belief already applies. `ActorEventFeed` (57) is only the eating particles
+  sent to viewers, so it is not used as a completion signal.
+
+Not confirmed, needs a live check on the lab:
+- That Bedrock Dedicated Server starts the meal from the ClickAir transaction
+  alone, or also wants `InputFlagStartUsingItem`. Both are sent.
+- That it finishes the meal itself after about 32 ticks of held use rather
+  than waiting for the release. The unit holds 34 ticks and releases either
+  way, and reads the count or hunger afterwards for 20 ticks.
+- Whether a release after the server already finished the meal is harmless.
+- Whether the server wants `TriggerTypeSimulationTick` transactions while the
+  use is held. None are sent.
+If a meal does not land the unit logs `eat_failed` and does not retry for a
+minute, so a wrong guess costs a minute of hunger, not a loop.
+
+**Kit chest.** `KIT_CHEST` names a chest; a unit with no sword/axe or no food
+on its hotbar, idle for five seconds, runs the existing withdraw skill on it,
+asking for the best sword and up to `KIT_FOOD` food through a ranked budget
+(`skill.OneOf`) rather than by name, because the chest's stock is not known in
+advance. Only what is missing is asked for. A kit never interrupts a task or a
+fight (a fight stops the visit and closes the chest), and the task queue waits
+for a visit in progress. The hotbar is the test because a unit can only hold a
+hotbar stack. A kit that cannot make the unit whole is not retried for three
+minutes. Judgment call: a unit's weapon sitting outside the hotbar counts as
+no weapon, since `loadout` never selects it either.
