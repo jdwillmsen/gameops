@@ -102,6 +102,12 @@ type Atlas struct {
 	// without one.
 	itemsErr error
 
+	entPNG   []byte
+	entities EntityTable
+	// entitiesErr is why there are no entity models, which only costs the
+	// camera its mob models.
+	entitiesErr error
+
 	cmOnce sync.Once
 	cms    map[string]image.Image
 }
