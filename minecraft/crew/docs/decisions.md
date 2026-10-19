@@ -233,7 +233,8 @@ climbs down and collects the drops that fell.
 - Leaves are only cleared where the unit's own body or jump needs the cell.
   The canopy is never cleared. Logs count as the tree if they are oak logs in
   the task's area within the mine radius, so branches are cut when in reach;
-  the `area` bound applies to every log broken.
+  the `area` bound applies to every log broken, and every pillar block and
+  cleared leaf must lie inside it too, or that log is left.
 - A fight preempts as for any skill: `Resume` from the pillar cuts what is in
   reach and descends; from the ground it carries on. At most four pillars
   are built per task and a log that survives an attempt is ruled out.
