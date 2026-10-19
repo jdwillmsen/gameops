@@ -1,6 +1,7 @@
 package atlas
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -414,5 +415,31 @@ func TestFetchRefetchesAnOlderCacheLayout(t *testing.T) {
 	}
 	if gh.treeCalls.Load() != 1 {
 		t.Fatalf("an old cache was served: tree calls = %d", gh.treeCalls.Load())
+	}
+}
+
+func TestFetchRefusesABodyOverTheCapEvenWhenGzipped(t *testing.T) {
+	old := maxFileBytes
+	maxFileBytes = 1024
+	defer func() { maxFileBytes = old }()
+	gh := newFakeGitHub(t, packTree, packFiles)
+	big := strings.Repeat("a", 4096)
+	for _, p := range []string{"resource_pack/blocks.json"} {
+		gh.files[p] = big
+	}
+	if _, err := gh.fetcher().Fetch(context.Background(), "1.26.52.3", t.TempDir()); err == nil || !strings.Contains(err.Error(), "over 1024 bytes") {
+		t.Fatalf("err = %v", err)
+	}
+
+	gz := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Encoding", "gzip")
+		zw := gzip.NewWriter(w)
+		_, _ = zw.Write([]byte(big))
+		_ = zw.Close()
+	}))
+	defer gz.Close()
+	s := &session{Fetcher: Fetcher{Client: gz.Client(), Backoff: time.Millisecond}}
+	if _, err := s.getBody(context.Background(), gz.URL, rawAccept); err == nil {
+		t.Fatal("a gzip body over the cap was accepted")
 	}
 }
