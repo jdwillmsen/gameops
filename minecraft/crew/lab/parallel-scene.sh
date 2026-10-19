@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the parallel scene on a crew lab: a quarry for Agate, a grove for
-# Basalt, an outbox chest for each and a store chest for Cobble's haul.
+# Basalt, an outbox chest for each, a store chest for Cobble's haul and a kit
+# chest of swords and bread for units started with KIT_CHEST at its position.
 #
 # usage: parallel-scene.sh [--confirm-overwrite] <lab> [agate] [basalt] [cobble]
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
@@ -78,6 +79,13 @@ done
 cmd setblock "${OUTBOX_A[@]}" chest
 cmd setblock "${OUTBOX_B[@]}" chest
 cmd setblock "${STORE[@]}" chest
+cmd setblock "${KIT_CHEST[@]}" chest
+# Swords do not stack, so each takes a slot. setblock replaces an old chest,
+# which empties it.
+for ((slot = 0; slot < KIT_SWORDS; slot++)); do
+  cmd replaceitem block "${KIT_CHEST[@]}" slot.container "$slot" stone_sword 1
+done
+cmd replaceitem block "${KIT_CHEST[@]}" slot.container "$KIT_SWORDS" bread "$KIT_BREAD"
 
 # Cleared first so a rerun never leaves a unit holding last run's stack.
 cmd clear "\"$agate\""
