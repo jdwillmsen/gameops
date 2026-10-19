@@ -86,10 +86,10 @@ func main() {
 	defer endStreams()
 	srv := &http.Server{
 		Addr: addr,
-		Handler: newHandler(units, poller, log, operators.Mount, func(mux *http.ServeMux) {
-			// Console wiring will hook the wake and notify later; the unit
-			// routes alone need neither yet.
-			work.Routes(mux, store, units, workToken, nil)
+		Handler: newHandler(units, poller, operators.Operator, log, operators.Mount, func(mux *http.ServeMux) {
+			api := work.Routes(mux, store, units, workToken, poller.PublishWork)
+			api.MountOperator(mux, operators)
+			poller.SetWorkSource(api.Feed)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return streamCtx },
@@ -212,12 +212,17 @@ func openStore(ctx context.Context, store *work.Lazy, dsn string, memory bool, l
 	}
 }
 
-func newHandler(units roster.Roster, poller *telemetry.Poller, log *logging.Logger, mounts ...func(*http.ServeMux)) http.Handler {
+// who reports whether a request carries a valid operator session; it decides
+// once per stream whether work events are sent.
+func newHandler(units roster.Roster, poller *telemetry.Poller, who func(*http.Request) (auth.Operator, bool), log *logging.Logger, mounts ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
 	for _, m := range mounts {
 		m(mux)
 	}
-	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler)
+	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler(func(r *http.Request) bool {
+		_, ok := who(r)
+		return ok
+	}))
 	console.Mount(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))

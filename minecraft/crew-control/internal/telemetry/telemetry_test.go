@@ -165,7 +165,7 @@ func TestPollerSingleFailureStaysOnline(t *testing.T) {
 func streamServer(t *testing.T, p *Poller) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/units/stream", p.StreamHandler)
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(nil))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
@@ -283,7 +283,7 @@ func TestShutdownEndsActiveStreams(t *testing.T) {
 	unit := newFakeUnit(t, stateKnownWithTask)
 	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/units/stream", p.StreamHandler)
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(nil))
 
 	ctx, end := context.WithCancel(context.Background())
 	defer end()
@@ -303,5 +303,78 @@ func TestShutdownEndsActiveStreams(t *testing.T) {
 	}
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("shutdown took %v with a viewer connected", d)
+	}
+}
+
+// workEvents yields "event: name" and the data line that follows, joined.
+func workEvents(t *testing.T, url string, hdr http.Header) <-chan string {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, url+"/v1/units/stream", nil)
+	req.Header = hdr
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	out := make(chan string, 32)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		name := ""
+		for sc.Scan() {
+			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+				name = n
+			}
+			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+				out <- name + " " + d
+			}
+		}
+		close(out)
+	}()
+	return out
+}
+
+func authedByHeader(r *http.Request) bool { return r.Header.Get("X-Test-Auth") == "yes" }
+
+func TestWorkEventsReachOnlyAuthenticatedStreams(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
+	p.SetWorkSource(func(_ context.Context, id string) ([]byte, error) {
+		return []byte(`{"unit":"` + id + `","items":[]}`), nil
+	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(authedByHeader))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	anon := workEvents(t, srv.URL, http.Header{})
+	authed := workEvents(t, srv.URL, http.Header{"X-Test-Auth": {"yes"}})
+
+	next := func(ch <-chan string) string {
+		select {
+		case s := <-ch:
+			return s
+		case <-time.After(2 * time.Second):
+			t.Fatal("no event")
+			return ""
+		}
+	}
+	if got := next(authed); !strings.HasPrefix(got, "units ") {
+		t.Fatalf("first authed event %q", got)
+	}
+	if got := next(authed); got != `work {"unit":"crew-01","items":[]}` {
+		t.Fatalf("history event %q", got)
+	}
+	if got := next(anon); !strings.HasPrefix(got, "units ") {
+		t.Fatalf("first anon event %q", got)
+	}
+
+	p.PublishWork("crew-01")
+	if got := next(authed); !strings.HasPrefix(got, "work ") {
+		t.Fatalf("after publish %q", got)
+	}
+	select {
+	case got := <-anon:
+		t.Fatalf("anonymous stream got %q", got)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
