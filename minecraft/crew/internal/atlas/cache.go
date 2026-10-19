@@ -33,18 +33,22 @@ func (a *Atlas) Save(dir string) error {
 	if err := writeAtomic(filepath.Join(dir, atlasPNGFile), a.png); err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(dir, itemsPNGFile), a.itemPNG); err != nil {
-		return err
-	}
-	if err := writeAtomic(filepath.Join(dir, itemsTableFile), items); err != nil {
-		return err
+	// An atlas without items leaves the item files out, so the next start
+	// sees an incomplete entry and tries the build again.
+	if a.itemsErr == nil {
+		if err := writeAtomic(filepath.Join(dir, itemsPNGFile), a.itemPNG); err != nil {
+			return err
+		}
+		if err := writeAtomic(filepath.Join(dir, itemsTableFile), items); err != nil {
+			return err
+		}
 	}
 	return writeAtomic(filepath.Join(dir, atlasTableFile), table)
 }
 
-// LoadAtlas reads an atlas written by Save. A table from an older layout, or
-// an entry saved before the item sheet existed, is rejected so the caller
-// rebuilds it.
+// LoadAtlas reads an atlas written by Save. A table from an older layout is
+// rejected so the caller rebuilds it. An entry without the item sheet loads
+// with ItemsErr set: the caller rebuilds it, but can still fall back to it.
 func LoadAtlas(dir string) (*Atlas, error) {
 	table, err := os.ReadFile(filepath.Join(dir, atlasTableFile))
 	if err != nil {
@@ -54,26 +58,32 @@ func LoadAtlas(dir string) (*Atlas, error) {
 	if err != nil {
 		return nil, err
 	}
-	itemPNG, err := os.ReadFile(filepath.Join(dir, itemsPNGFile))
-	if err != nil {
-		return nil, err
-	}
-	itemDoc, err := os.ReadFile(filepath.Join(dir, itemsTableFile))
-	if err != nil {
-		return nil, err
-	}
 	var t Table
 	if err := json.Unmarshal(table, &t); err != nil {
 		return nil, fmt.Errorf("atlas: decode table: %w", err)
 	}
-	var items ItemTable
-	if err := json.Unmarshal(itemDoc, &items); err != nil {
-		return nil, fmt.Errorf("atlas: decode items: %w", err)
-	}
 	if t.Version != tableVersion {
 		return nil, fmt.Errorf("atlas: cached table version %d, want %d", t.Version, tableVersion)
 	}
-	return &Atlas{png: img, table: t, itemPNG: itemPNG, items: items}, nil
+	a := &Atlas{png: img, table: t}
+	a.itemPNG, a.items, a.itemsErr = loadItems(dir)
+	return a, nil
+}
+
+func loadItems(dir string) ([]byte, ItemTable, error) {
+	img, err := os.ReadFile(filepath.Join(dir, itemsPNGFile))
+	if err != nil {
+		return nil, ItemTable{}, fmt.Errorf("atlas: no cached item sheet: %w", err)
+	}
+	doc, err := os.ReadFile(filepath.Join(dir, itemsTableFile))
+	if err != nil {
+		return nil, ItemTable{}, fmt.Errorf("atlas: no cached item sheet: %w", err)
+	}
+	var items ItemTable
+	if err := json.Unmarshal(doc, &items); err != nil {
+		return nil, ItemTable{}, fmt.Errorf("atlas: decode items: %w", err)
+	}
+	return img, items, nil
 }
 
 func writeAtomic(path string, data []byte) error {
@@ -103,11 +113,26 @@ func writeAtomic(path string, data []byte) error {
 // which made a cold build take minutes for a download of seconds. The
 // returned Pack describes the download, so its Dir is always empty.
 func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
+	// A cached atlas that lacks only its item sheet is rebuilt, but kept to
+	// fall back on: losing the fetch should not also lose the terrain.
+	var fallback *Atlas
+	var fallbackTag string
 	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
 		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
-			return a, Pack{Tag: tag}, nil
+			if a.itemsErr == nil {
+				return a, Pack{Tag: tag}, nil
+			}
+			fallback, fallbackTag = a, tag
 		}
 	}
+	a, pack, err := build(ctx, f, serverVersion, cacheDir, opts)
+	if err != nil && fallback != nil {
+		return fallback, Pack{Tag: fallbackTag}, nil
+	}
+	return a, pack, err
+}
+
+func build(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
 	scratch, err := os.MkdirTemp("", "crew-atlas-")
 	if err != nil {
 		return nil, Pack{}, err

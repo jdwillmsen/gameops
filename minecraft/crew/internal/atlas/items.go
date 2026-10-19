@@ -34,6 +34,9 @@ func (a *Atlas) ItemPNG() []byte { return a.itemPNG }
 // Items returns the item sheet's lookup table.
 func (a *Atlas) Items() ItemTable { return a.items }
 
+// ItemsErr reports why the atlas has no item sheet, or nil when it has one.
+func (a *Atlas) ItemsErr() error { return a.itemsErr }
+
 // buildItems packs one tile per distinct picture: an item's own texture where
 // the pack has one, otherwise a face of the block of the same name. The
 // pack's item texture index is optional so a pack without one still yields

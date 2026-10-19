@@ -62,6 +62,9 @@ func (h *Hub) SetAtlas(a *atlas.Atlas) error {
 	defer h.mu.Unlock()
 	h.atlasPNG, h.atlasDoc = a.PNG(), doc
 	h.itemsPNG, h.itemsDoc = a.ItemPNG(), items
+	if a.ItemsErr() != nil {
+		h.itemsPNG, h.itemsDoc = nil, nil
+	}
 	h.pushOrderedLocked(atlasFrame())
 	return nil
 }

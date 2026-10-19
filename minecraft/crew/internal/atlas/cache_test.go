@@ -62,6 +62,30 @@ func TestEnsureBuildsOnceAndReloadsFromCache(t *testing.T) {
 	}
 }
 
+// An entry cached before the item sheet existed is rebuilt, but when the
+// rebuild cannot fetch, its terrain still serves.
+func TestEnsureFallsBackToAnEntryWithoutItems(t *testing.T) {
+	gh := fixtureGitHub(t)
+	cache := t.TempDir()
+	f := gh.fetcher()
+	opts := Options{TileSize: 4}
+	first, pack, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(cache, pack.Tag, atlasSubdir, itemsTableFile)); err != nil {
+		t.Fatal(err)
+	}
+	gh.Close()
+	got, _, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts)
+	if err != nil {
+		t.Fatalf("no fallback: %v", err)
+	}
+	if !bytes.Equal(got.PNG(), first.PNG()) || got.ItemsErr() == nil {
+		t.Errorf("fallback png equal %v, items err %v", bytes.Equal(got.PNG(), first.PNG()), got.ItemsErr())
+	}
+}
+
 func TestEnsureKeepsOnlyTheBuiltAtlasInTheCache(t *testing.T) {
 	gh := fixtureGitHub(t)
 	cache := t.TempDir()

@@ -132,7 +132,7 @@ func TestItemSheetSurvivesTheCache(t *testing.T) {
 
 // An entry saved before the sheet existed has no way to produce one, so it
 // must read as missing and be rebuilt.
-func TestLoadAtlasRejectsAnEntryWithoutItems(t *testing.T) {
+func TestLoadAtlasFlagsAnEntryWithoutItems(t *testing.T) {
 	dir := t.TempDir()
 	if err := buildFixture(t).Save(dir); err != nil {
 		t.Fatal(err)
@@ -140,7 +140,37 @@ func TestLoadAtlasRejectsAnEntryWithoutItems(t *testing.T) {
 	if err := os.Remove(filepath.Join(dir, itemsTableFile)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadAtlas(dir); err == nil {
-		t.Error("loaded an atlas with no item table")
+	a, err := LoadAtlas(dir)
+	if err != nil {
+		t.Fatalf("the block atlas should still load: %v", err)
+	}
+	if a.ItemsErr() == nil {
+		t.Error("an entry with no item table reports no item error")
+	}
+}
+
+// A broken item index costs the item sheet, never the terrain, and is not
+// cached as complete.
+func TestABrokenItemIndexKeepsTheBlockAtlas(t *testing.T) {
+	pack := t.TempDir()
+	if err := os.CopyFS(pack, os.DirFS("testdata/pack")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pack, "textures", "item_texture.json"), []byte("{ not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := BuildWithOptions(pack, Options{TileSize: 4})
+	if err != nil {
+		t.Fatalf("build failed on a broken item index: %v", err)
+	}
+	if a.ItemsErr() == nil || len(a.Table().Blocks) == 0 {
+		t.Fatalf("items err %v, blocks %d", a.ItemsErr(), len(a.Table().Blocks))
+	}
+	dir := t.TempDir()
+	if err := a.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, itemsTableFile)); !os.IsNotExist(err) {
+		t.Errorf("an atlas without items saved an item table: %v", err)
 	}
 }
