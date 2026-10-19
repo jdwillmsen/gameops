@@ -328,6 +328,7 @@ func (f *Fell) pillarSpot(l protocol.BlockPos, from mgl32.Vec3) (ground protocol
 				continue
 			}
 			for h := 1; h <= maxPillar; h++ {
+				// A viable pillar cannot extend above an in-area target: that target is already within ground reach from g.
 				if f.mine.area != nil && !f.mine.area.contains(protocol.BlockPos{g.X(), g.Y() + int32(h) - 1, g.Z()}) {
 					continue
 				}
