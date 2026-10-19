@@ -132,8 +132,12 @@ func TestGatherAcceptsOakLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} }); err != nil || len(skills) != 2 {
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 2 {
 		t.Fatalf("skills %v, err %v", skills, err)
+	}
+	if skills[0].Name() != "fell_tree" || skills[1].Name() != "deposit_chest" {
+		t.Errorf("skills = %s, %s: oak logs are felled, not just mined", skills[0].Name(), skills[1].Name())
 	}
 }
 

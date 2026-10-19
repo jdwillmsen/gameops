@@ -210,8 +210,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 			Max: protocol.BlockPos{t.Area.Max.X, t.Area.Max.Y, t.Area.Max.Z},
 		}))
 	}
-	return []skill.Skill{
-		skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...),
-		skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...),
-	}, nil
+	gather := skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...)
+	if src.Fell {
+		gather = skill.NewFell(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts, opts...)
+	}
+	return []skill.Skill{gather, skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...)}, nil
 }
