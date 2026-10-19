@@ -1,6 +1,6 @@
 # crew-control: sign-in, commands and the task queue
 
-**Status:** draft for owner review, 2026-10-19
+**Status:** approved by the owner 2026-10-19 (the owner OK'd agents generating the two Secrets in-cluster, values never printed)
 **Epic:** JDW-59. **Ticket:** JDW-116.
 **Builds on:** `docs/specs/2026-10-19-crew-console-and-control-design.md` (step 2), and crew-control v0 (JDW-115, live).
 
@@ -62,12 +62,12 @@ On `crew.prd.jdwlabs.com`:
 
 ### 5. Queue and history: Postgres
 
-- **Database.** The platform's shared CloudNativePG cluster, database `jdwillmsen_prd`, new schema `crew`. The migration is a Flyway file in `jdwlabs/platform`, beside the agent's.
+- **Database.** The platform's shared CloudNativePG cluster, database `jdwillmsen_prd`, in the existing `minecraft` schema. The migration is a Flyway file, V9, in `jdwlabs/platform` (`tenants/jdwillmsen/services/jdwillmsen-schemas`), beside the agent's. The tables go in `minecraft` rather than a new schema because V2's default privileges for the `app` role cover only schemas that existed when it ran; a new schema would need its own grants.
 - **Credentials.** The agent's pattern: an ExternalSecret mirroring the app-role Secret, read as `PG_*` env from `secretKeyRef`.
 - **Tables:**
-  - `crew.work(id uuid pk, unit text, kind text, body jsonb, state text, progress int, reason text, operator text, created_at, updated_at, delivered_at)`
+  - `minecraft.crew_work(id uuid pk, unit text, kind text, body jsonb, state text, progress int, reason text, operator text, created_at, updated_at, delivered_at)`
   - an index on `(unit, state)`
-  - `crew.work_event(id bigserial, work_id uuid, state text, progress int, at timestamptz)`
+  - `minecraft.crew_work_event(id bigserial, work_id uuid, state text, progress int, at timestamptz)`
 - **History.** The console shows the last 50 items per unit. Rows older than 30 days are deleted by crew-control on start and then daily.
 - **No coordinates in logs.** A `goto` target lives only in `body` and is never logged.
 - **Postgres down.** If Postgres is unreachable, crew-control still serves the view-only console and answers command endpoints with 503. Viewing never depends on the database.
@@ -102,8 +102,8 @@ On `crew.prd.jdwlabs.com`:
 
 | PR | Repo | Contents |
 |---|---|---|
-| 1 | jdwlabs/platform | Flyway migration for schema `crew` and grants |
+| 1 | jdwlabs/platform | Flyway V9: `minecraft.crew_work` and `minecraft.crew_work_event` |
 | 2 | gameops | crew `internal/control` and the `goto` template; crew-control auth, work API, Postgres store and console panel |
 | 3 | jdw-deployments | PVC, Secrets references, ExternalSecret, env, route allow-list and tests |
 
-The owner creates `crew-control-invites` and `crew-work` with the README commands. Their values are never printed by an agent.
+`crew-control-invites` and `crew-work` are generated in-cluster (owner-approved, values never printed); the README has the commands to rotate them.
