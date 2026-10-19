@@ -86,6 +86,17 @@ func TestRosterTagsOperatorsLinkedByALogin(t *testing.T) {
 	}
 }
 
+func TestRosterTagsOnlyTheLatestHolderOfTheViewersGamertag(t *testing.T) {
+	s, r := withRoster(t)
+	r.Seen("-1", "Recent", time.Now().Add(-2*time.Hour))
+	got := askRoster(t, s, session(s, auth.Identity{XUID: "100", Gamertag: "Recent"}))
+	for _, p := range got.Players {
+		if you := slices.Contains(p.Tags, "you"); you != (p.ID == "2") {
+			t.Errorf("%s tagged you = %v", p.ID, you)
+		}
+	}
+}
+
 func TestRosterIsBehindTheLogin(t *testing.T) {
 	s, _ := withRoster(t)
 	if rec := do(s.Handler(), "GET", "/api/players", "", nil); rec.Code != http.StatusUnauthorized {

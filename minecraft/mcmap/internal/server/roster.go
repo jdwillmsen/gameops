@@ -78,9 +78,6 @@ func (s *Server) handleRoster(w http.ResponseWriter, r *http.Request) {
 				p.LastSeen = w.at.UTC().Truncate(time.Second)
 			}
 		}
-		if viewer != "" && strings.EqualFold(p.Name, viewer) {
-			p.Tags = append(p.Tags, tagYou)
-		}
 		if xuid != "" && s.isAdmin(r.Context(), xuid) {
 			p.Tags = append(p.Tags, tagOperator)
 		}
@@ -103,6 +100,17 @@ func (s *Server) handleRoster(w http.ResponseWriter, r *http.Request) {
 			at := w.at.UTC().Truncate(time.Second)
 			add(rosterPlayerJSON{ID: id, Name: names[id], FirstSeen: at, LastSeen: at}, "")
 		}
+	}
+	// A gamertag is the viewer's only on whoever was seen under it last.
+	you := -1
+	for i, p := range out.Players {
+		if viewer != "" && strings.EqualFold(p.Name, viewer) && (you < 0 || p.LastSeen.After(out.Players[you].LastSeen)) {
+			you = i
+		}
+	}
+	if you >= 0 {
+		p := &out.Players[you]
+		p.Tags = slices.Insert(p.Tags, slices.Index(p.Tags, tagOnline)+1, tagYou)
 	}
 	slices.SortStableFunc(out.Players, func(a, b rosterPlayerJSON) int {
 		ao, bo := slices.Contains(a.Tags, tagOnline), slices.Contains(b.Tags, tagOnline)
