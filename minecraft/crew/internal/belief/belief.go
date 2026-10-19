@@ -11,7 +11,11 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-const healthAttribute = "minecraft:health"
+const (
+	healthAttribute     = "minecraft:health"
+	hungerAttribute     = "minecraft:player.hunger"
+	saturationAttribute = "minecraft:player.saturation"
+)
 
 // Snapshot is a copy, safe to hand to another goroutine.
 type Snapshot struct {
@@ -26,10 +30,15 @@ type Snapshot struct {
 	PositionKnown bool `json:"position_known"`
 	// Degrees, as the server reports them. A /tp to the same position sends no
 	// MovePlayer, so a look-only teleport leaves these stale.
-	Yaw         float32   `json:"yaw"`
-	Pitch       float32   `json:"pitch"`
-	Health      float32   `json:"health"`
-	HealthKnown bool      `json:"health_known"`
+	Yaw         float32 `json:"yaw"`
+	Pitch       float32 `json:"pitch"`
+	Health      float32 `json:"health"`
+	HealthKnown bool    `json:"health_known"`
+	// Hunger is the food level out of 20; saturation is the hidden buffer that
+	// drains before it.
+	Hunger      float32   `json:"hunger"`
+	Saturation  float32   `json:"saturation"`
+	HungerKnown bool      `json:"hunger_known"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	// The selected hotbar slot. Unknown until the server moves it or the unit
 	// selects one itself: a session starts with no packet that says.
@@ -89,8 +98,13 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 		for _, a := range p.Attributes {
-			if a.Name == healthAttribute {
+			switch a.Name {
+			case healthAttribute:
 				t.s.Health, t.s.HealthKnown = a.Value, true
+			case hungerAttribute:
+				t.s.Hunger, t.s.HungerKnown = a.Value, true
+			case saturationAttribute:
+				t.s.Saturation = a.Value
 			}
 		}
 	case *packet.Respawn:

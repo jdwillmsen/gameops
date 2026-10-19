@@ -62,6 +62,27 @@ func TestHealthComesFromOwnAttributes(t *testing.T) {
 	}
 }
 
+func TestHungerAndSaturationComeFromOwnAttributes(t *testing.T) {
+	tr := spawned(t)
+	if s := tr.Snapshot(); s.HungerKnown {
+		t.Fatal("hunger known before any attribute update")
+	}
+	attr := func(name string, v float32) protocol.Attribute {
+		return protocol.Attribute{AttributeValue: protocol.AttributeValue{Name: name, Value: v}}
+	}
+	tr.Apply(&packet.UpdateAttributes{EntityRuntimeID: self + 1, Attributes: []protocol.Attribute{attr("minecraft:player.hunger", 1)}})
+	if tr.Snapshot().HungerKnown {
+		t.Fatal("another entity's hunger was taken")
+	}
+	tr.Apply(&packet.UpdateAttributes{EntityRuntimeID: self, Attributes: []protocol.Attribute{
+		attr("minecraft:player.hunger", 13), attr("minecraft:player.saturation", 2.5),
+	}})
+	s := tr.Snapshot()
+	if !s.HungerKnown || s.Hunger != 13 || s.Saturation != 2.5 {
+		t.Errorf("hunger %v saturation %v known=%v", s.Hunger, s.Saturation, s.HungerKnown)
+	}
+}
+
 func TestChangeDimensionMovesTheUnit(t *testing.T) {
 	tr := spawned(t)
 	tr.Apply(&packet.ChangeDimension{Dimension: 1, Position: mgl32.Vec3{8, 64, 8}})

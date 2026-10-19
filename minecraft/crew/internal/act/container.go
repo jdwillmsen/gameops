@@ -118,6 +118,51 @@ func (a *Actuator) Attack(target uint64, slot int, held belief.Item) error {
 	return a.w.WritePacket(&packet.Animate{ActionType: packet.AnimateActionSwingArm, EntityRuntimeID: a.runtimeID})
 }
 
+// UseItem presses use with the held stack, which starts eating food. The
+// server runs the use itself and finishes it when the duration has passed, so
+// the unit must keep sending inputs meanwhile.
+func (a *Actuator) UseItem(slot int, held belief.Item) error {
+	if slot < 0 || slot >= hotbarSlots {
+		return fmt.Errorf("slot %d is not on the hotbar", slot)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	inst, err := a.instance(held)
+	if err != nil {
+		return err
+	}
+	eye := a.pose.Feet.Add(mgl32.Vec3{0, eyeHeight, 0})
+	return a.w.WritePacket(&packet.InventoryTransaction{TransactionData: &protocol.UseItemTransactionData{
+		ActionType:       protocol.UseItemActionClickAir,
+		TriggerType:      protocol.TriggerTypePlayerInput,
+		HotBarSlot:       int32(slot),
+		Hand:             protocol.HandSlotMainHand,
+		HeldItem:         inst,
+		Position:         eye,
+		ClickedPosition:  mgl32.Vec3{},
+		ClientPrediction: protocol.ClientPredictionSuccess,
+	}})
+}
+
+// ReleaseItem lets go of the use key. After a finished meal it ends the use;
+// before one it cancels the meal.
+func (a *Actuator) ReleaseItem(slot int, held belief.Item) error {
+	if slot < 0 || slot >= hotbarSlots {
+		return fmt.Errorf("slot %d is not on the hotbar", slot)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	inst, err := a.instance(held)
+	if err != nil {
+		return err
+	}
+	return a.w.WritePacket(&packet.InventoryTransaction{TransactionData: &protocol.ReleaseItemTransactionData{
+		HotBarSlot:   int32(slot),
+		HeldItem:     inst,
+		HeadPosition: a.pose.Feet.Add(mgl32.Vec3{0, eyeHeight, 0}),
+	}})
+}
+
 // OpenChest clicks the block at pos from the unit's current position. face is
 // the side toward the unit, and blockRuntimeID the block's hash from its
 // UpdateBlock; the server compares both with its own world.

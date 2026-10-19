@@ -33,6 +33,8 @@ type Actuator interface {
 	Ticks() uint64
 	SelectHotbar(slot int, item belief.Item) error
 	Attack(target uint64, slot int, held belief.Item) error
+	UseItem(slot int, held belief.Item) error
+	ReleaseItem(slot int, held belief.Item) error
 	OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
 	Container() (open bool, windowID byte, pos protocol.BlockPos)
 	ContainerContent() []protocol.ItemInstance

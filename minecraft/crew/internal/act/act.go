@@ -25,6 +25,9 @@ type Input struct {
 	Jump       bool
 	// Break rides this tick's input as a block action.
 	Break *BreakAction
+	// StartUsing marks this tick as the one where the unit begins using the
+	// held item, as eating does. Send it once, after UseItem.
+	StartUsing bool
 }
 
 // Actuator is safe to call from a skill goroutine while Apply runs on the
@@ -123,6 +126,9 @@ func (a *Actuator) Tick(in Input) error {
 		Delta:              step.delta,
 		AnalogueMoveVector: mgl32.Vec2{0, in.Forward},
 		RawMoveVector:      mgl32.Vec2{0, in.Forward},
+	}
+	if in.StartUsing {
+		pk.InputData.Set(packet.InputFlagStartUsingItem)
 	}
 	if in.Break != nil {
 		pk.InputData.Set(packet.InputFlagPerformBlockActions)
