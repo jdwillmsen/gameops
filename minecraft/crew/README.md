@@ -53,7 +53,9 @@ With `DEFEND` the unit watches the entities the server announces:
   `TASK_TIMEOUT_S`.
 
 Logs carry only events and types (`defend_started`, `hurt_by`,
-`defend_ended`), never positions.
+`defend_ended`), never positions. `defend_ended` carries `ticks` and a
+`reason`: `gone` (the mob left range or died), `no_stand_cell` (no standable
+cell near it), `no_path` (the chase failed) or `fight_limit`.
 
 ## Status API
 
