@@ -35,7 +35,7 @@ services:
     stdin_open: true
     tty: true
 
-  crew-1:
+  crew-01:
     build:
       context: ../../..
       dockerfile: minecraft/crew/Dockerfile
@@ -45,7 +45,8 @@ services:
       MC_PORT: "19132"
       # The lab is offline, so crew joins by display name alone.
       MC_OFFLINE: "true"
-      MC_USERNAME: crew-1
+      CREW_ID: crew-01
+      MC_USERNAME: Agate
       CAMERA_ENABLED: "true"
       # Bound wide only inside the compose network; the published port below
       # is loopback-only on the host.
@@ -54,10 +55,60 @@ services:
       # compose; it is never written to a file here.
       TASKS_TOKEN: ${TASKS_TOKEN:-}
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8080"
     volumes:
-      - crew-1-data:/data
+      - crew-01-data:/data
+
+  crew-02:
+    build:
+      context: ../../..
+      dockerfile: minecraft/crew/Dockerfile
+    depends_on: [lab]
+    environment:
+      MC_HOST: lab
+      MC_PORT: "19132"
+      # The lab is offline, so crew joins by display name alone.
+      MC_OFFLINE: "true"
+      CREW_ID: crew-02
+      MC_USERNAME: Basalt
+      CAMERA_ENABLED: "true"
+      # Bound wide only inside the compose network; the published port below
+      # is loopback-only on the host.
+      STATUS_ADDR: 0.0.0.0:8080
+      # Unset leaves the task endpoints off. Export it in the shell that runs
+      # compose; it is never written to a file here.
+      TASKS_TOKEN: ${TASKS_TOKEN:-}
+    ports:
+      - "127.0.0.1:8082:8080"
+    volumes:
+      - crew-02-data:/data
+
+  crew-03:
+    build:
+      context: ../../..
+      dockerfile: minecraft/crew/Dockerfile
+    depends_on: [lab]
+    environment:
+      MC_HOST: lab
+      MC_PORT: "19132"
+      # The lab is offline, so crew joins by display name alone.
+      MC_OFFLINE: "true"
+      CREW_ID: crew-03
+      MC_USERNAME: Cobble
+      CAMERA_ENABLED: "true"
+      # Bound wide only inside the compose network; the published port below
+      # is loopback-only on the host.
+      STATUS_ADDR: 0.0.0.0:8080
+      # Unset leaves the task endpoints off. Export it in the shell that runs
+      # compose; it is never written to a file here.
+      TASKS_TOKEN: ${TASKS_TOKEN:-}
+    ports:
+      - "127.0.0.1:8083:8080"
+    volumes:
+      - crew-03-data:/data
 
 volumes:
   lab-world:
-  crew-1-data:
+  crew-01-data:
+  crew-02-data:
+  crew-03-data:
