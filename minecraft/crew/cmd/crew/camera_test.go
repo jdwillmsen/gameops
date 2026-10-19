@@ -16,7 +16,7 @@ import (
 func status(t *testing.T, cfg config.Config, path string) (int, bool) {
 	t.Helper()
 	tracker := belief.New(time.Now)
-	hub, _ := newCamera(cfg, tracker, logging.New(""))
+	hub, _ := newCamera(cfg, tracker, newDecoder(logging.New("")), logging.New(""))
 	rec := httptest.NewRecorder()
 	statusHandler(tracker, "dev", hub).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 	return rec.Code, hub != nil
@@ -59,7 +59,7 @@ func TestMetricsShowTheDriftCounterOncePerVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	tracker := belief.New(time.Now)
-	hub, beginSession := newCamera(cfg, tracker, logging.New(""))
+	hub, beginSession := newCamera(cfg, tracker, newDecoder(logging.New("")), logging.New(""))
 	// Nothing listens here, so the version is unknown; the series must exist
 	// all the same.
 	beginSession(context.Background(), "127.0.0.1:1")

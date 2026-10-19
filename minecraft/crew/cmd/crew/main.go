@@ -26,6 +26,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -37,6 +38,10 @@ const (
 	// world for the first player in, and abandoning a login the server would
 	// have completed is worse than waiting.
 	spawnTimeout = 90 * time.Second
+
+	// About 16 KiB each when solid. Skills read blocks within a few dozen of
+	// the unit; the rest of the view distance is kept only while it fits.
+	maxStoredSubChunks = 2048
 )
 
 var version = "dev"
@@ -63,7 +68,9 @@ func main() {
 	}
 
 	tracker := belief.New(time.Now)
-	hub, beginSession := newCamera(cfg, tracker, log)
+	dec := newDecoder(log)
+	hub, beginSession := newCamera(cfg, tracker, dec, log)
+	world := blocks.New(dec, maxStoredSubChunks)
 	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, hub), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -79,7 +86,9 @@ func main() {
 			maxDelay: time.Duration(cfg.ReconnectMaxMs) * time.Millisecond,
 			after:    time.After,
 		},
-		func(ctx context.Context) error { return session(ctx, cfg, auth, tracker, hub, beginSession, log) },
+		func(ctx context.Context) error {
+			return session(ctx, cfg, auth, tracker, world, hub, beginSession, log)
+		},
 		tracker.Reset,
 		logAdapter{log},
 	)
@@ -98,7 +107,7 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 	return logging.Fields{"xuid": xuid, "view_distance": viewDistance}
 }
 
-func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, hub *camera.Hub, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
 	// A headless client uploads no skin of its own, and without one the unit
 	// joins as a black silhouette under a fresh skin ID every connect.
 	unitSkin := skin.For(cfg.Username)
@@ -141,6 +150,9 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	}
 	gd := conn.GameData()
 	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Yaw, gd.Pitch, gd.Dimension)
+	tracker.ItemNames(gd.Items)
+	world.Reset()
+	defer world.Reset()
 	beginSession(ctx, addr)
 	if hub != nil {
 		hub.Spawn(gd.EntityRuntimeID)
@@ -162,6 +174,9 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 			return fmt.Errorf("read: %w", err)
 		}
 		tracker.Apply(pk)
+		// The store is the only requester of sub-chunks, so it sees every
+		// packet whether or not the camera is on.
+		world.Apply(pk, conn)
 		// After belief: the hub reads the unit's pose back from it.
 		if hub != nil {
 			hub.Apply(pk, conn)
