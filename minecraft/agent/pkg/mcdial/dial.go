@@ -19,6 +19,7 @@ import (
 
 	"github.com/sandertv/go-raknet"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 // Dial connects to address and returns once the world has spawned the player.
@@ -33,19 +34,36 @@ import (
 // A dial that fails after the transport came up closes it, so the server is
 // told the client has left.
 func Dial(ctx context.Context, dialer minecraft.Dialer, address string, connect, spawn time.Duration) (*minecraft.Conn, error) {
-	connectBy := time.Now().Add(connect)
-	ctx, cancel := context.WithDeadline(ctx, connectBy.Add(spawn))
+	conn, _, err := DialWithLeave(ctx, dialer, address, connect, spawn)
+	return conn, err
+}
+
+// DialWithLeave is Dial that also returns the function to end the session
+// with. Plain Close is not enough: the transport only marks itself closing and
+// sends the server its goodbye from a background tick up to a second later, so
+// a process that exits straight after Close never says it. The server then
+// holds the player until its own timeout and renames the next login from the
+// same account "name(2)".
+//
+// leave tells the server the player is going and returns once that has been
+// sent, or after wait. It is safe to call more than once.
+func DialWithLeave(ctx context.Context, dialer minecraft.Dialer, address string, connect, spawn time.Duration) (*minecraft.Conn, func(wait time.Duration), error) {
+	return dialOn(ctx, &transport{connectBy: time.Now().Add(connect)}, dialer, address, spawn)
+}
+
+func dialOn(ctx context.Context, transport *transport, dialer minecraft.Dialer, address string, spawn time.Duration) (*minecraft.Conn, func(wait time.Duration), error) {
+	ctx, cancel := context.WithDeadline(ctx, transport.connectBy.Add(spawn))
 	defer cancel()
 
-	transport := &transport{connectBy: connectBy}
 	conn, err := dialer.DialContextNetwork(ctx, transport, address)
 	if err != nil {
 		if transport.abandon() {
-			return nil, fmt.Errorf("connected, awaiting spawn: %w", err)
+			return nil, nil, fmt.Errorf("connected, awaiting spawn: %w", err)
 		}
-		return nil, err
+		return nil, nil, err
 	}
-	return conn, nil
+	var once sync.Once
+	return conn, func(wait time.Duration) { once.Do(func() { transport.leave(conn, wait) }) }, nil
 }
 
 // transport is RakNet with the connect budget applied, which keeps hold of
@@ -95,4 +113,26 @@ func (t *transport) abandon() bool {
 	}
 	_ = t.conn.Close()
 	return true
+}
+
+// leave sends a Disconnect packet, which the server acts on at once, then
+// closes and waits for the transport to finish its own goodbye as a fallback
+// for a server that ignores the packet.
+func (t *transport) leave(conn *minecraft.Conn, wait time.Duration) {
+	_ = conn.WritePacket(&packet.Disconnect{HideDisconnectionScreen: true})
+	_ = conn.Close()
+	_ = conn.Close()
+	_ = conn.Close()
+
+	t.mu.Lock()
+	raw := t.conn
+	t.mu.Unlock()
+	done, ok := raw.(interface{ Context() context.Context })
+	if !ok {
+		return
+	}
+	select {
+	case <-done.Context().Done():
+	case <-time.After(wait):
+	}
 }
