@@ -38,3 +38,5 @@ body.page { min-height: 100vh; min-height: 100dvh; }
   .page-body .keys { grid-template-columns: 1fr; gap: 0; }
   .page-body .keys dd { margin-bottom: 0.6rem; }
 }
+
+.page-bar .theme-switch { margin-left: auto; }
