@@ -102,3 +102,57 @@ func TestNavigateGivesUpWhenReplansMakeNoProgress(t *testing.T) {
 		t.Fatalf("status %v, err %v; want a no-progress failure", st, err)
 	}
 }
+
+func TestNavigateWalksUpSlabsAndStairsWithoutJumping(t *testing.T) {
+	// Slabs lead to a stair flight rising east; neither takes a jump.
+	w := flatWorld(16)
+	for x := int32(4); x <= 5; x++ {
+		w[protocol.BlockPos{x, 1, 3}] = "stone_slab"
+	}
+	for i := int32(0); i < 3; i++ {
+		w[protocol.BlockPos{7 + i, 1 + i, 3}] = "oak_stairs"
+		for y := int32(1); y < 1+i; y++ {
+			w[protocol.BlockPos{7 + i, y, 3}] = "stone"
+		}
+	}
+	r := newRig(t, w, feetAt(1, 1, 3))
+	goal := protocol.BlockPos{9, 4, 3}
+	st, err := r.run(NewNavigate(w, r.self, goal, 0.8), 300)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	near(t, r, goal, 0.8)
+	if r.jumps != 0 {
+		t.Errorf("%d jumps, want none", r.jumps)
+	}
+}
+
+func TestNavigateStillJumpsFullBlocks(t *testing.T) {
+	w := flatWorld(12)
+	w.fill("dirt", 5, 1, 0, 11, 1, 11)
+	w.fill("air", 5, 2, 0, 11, 7, 11)
+	r := newRig(t, w, feetAt(1, 1, 3))
+	if st, err := r.run(NewNavigate(w, r.self, protocol.BlockPos{8, 2, 3}, 0.8), 200); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.jumps == 0 {
+		t.Error("a full block is not steppable, the unit must jump")
+	}
+}
+
+func TestNavigateArrivesOnTopOfASlab(t *testing.T) {
+	w := flatWorld(12)
+	w[protocol.BlockPos{6, 1, 3}] = "stone_slab"
+	r := newRig(t, w, feetAt(1, 1, 3))
+	goal := protocol.BlockPos{6, 1, 3}
+	st, err := r.run(NewNavigate(w, r.self, goal, 0.4), 200)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if y := r.Pose().Feet.Y(); y != 1.5 {
+		t.Errorf("feet y = %v, want on top of the slab at 1.5", y)
+	}
+	if r.jumps != 0 {
+		t.Errorf("%d jumps, want a step", r.jumps)
+	}
+}

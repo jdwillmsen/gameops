@@ -26,7 +26,10 @@ const (
 	// momentum to carry it onto the waypoint.
 	brakeDistance = 0.4
 	// A level mismatch tolerated at a waypoint, in blocks.
-	levelSlack  = 0.3
+	levelSlack = 0.3
+	// What a grounded unit rises onto without a jump; a jump is only worth
+	// starting for a waypoint further up.
+	stepUp      = 0.6
 	maxNoGain   = 3
 	gainEpsilon = 0.25
 )
@@ -38,8 +41,14 @@ type navigator struct {
 	goal   protocol.BlockPos
 	within float64
 
-	plan      []protocol.BlockPos
-	idx       int
+	plan []protocol.BlockPos
+	idx  int
+	// from is the cell the current segment starts in, and jumps says whether
+	// the planner needs a jump to cross it.
+	from      protocol.BlockPos
+	fromY     float32
+	jumps     bool
+	jumpsFor  int
 	segStart  mgl32.Vec2
 	onWaypt   int
 	replans   int
@@ -53,7 +62,8 @@ func newNavigator(world path.Blocks, goal protocol.BlockPos, within float64) *na
 }
 
 func (n *navigator) distance(p act.Pose) float64 {
-	return float64(p.Feet.Sub(mgl32.Vec3{float32(n.goal.X()) + 0.5, float32(n.goal.Y()), float32(n.goal.Z()) + 0.5}).Len())
+	// The goal's floor may sit above its cell's bottom, as a slab's does.
+	return float64(p.Feet.Sub(mgl32.Vec3{float32(n.goal.X()) + 0.5, float32(n.level(n.goal)), float32(n.goal.Z()) + 0.5}).Len())
 }
 
 func (n *navigator) step(a Actuator) (Status, error) {
@@ -74,7 +84,7 @@ func (n *navigator) step(a Actuator) (Status, error) {
 	last := n.idx == len(n.plan)-1
 
 	if !last && dist <= waypointReach {
-		if math.Abs(float64(p.Feet.Y())-float64(wp.Y())) > levelSlack {
+		if math.Abs(float64(p.Feet.Y())-n.level(wp)) > levelSlack {
 			if p.OnGround {
 				// Landed on another level than planned.
 				n.plan = nil
@@ -82,6 +92,7 @@ func (n *navigator) step(a Actuator) (Status, error) {
 			}
 		} else {
 			n.segStart = mgl32.Vec2{c.X(), c.Z()}
+			n.from, n.fromY = wp, float32(n.level(wp))
 			n.idx++
 			n.onWaypt = 0
 			wp = n.plan[n.idx]
@@ -99,9 +110,28 @@ func (n *navigator) step(a Actuator) (Status, error) {
 	if last && dist < brakeDistance {
 		in.Forward = 0
 	}
-	in.Jump = p.OnGround && wp.Y() > cellOf(p.Feet).Y() && dist <= jumpReach
+	in.Jump = p.OnGround && dist <= jumpReach && n.level(wp)-float64(p.Feet.Y()) > stepUp && n.needsJump(wp)
 	n.onWaypt++
 	return n.tick(a, in)
+}
+
+// level is the height the unit's feet rest at in a waypoint's cell, which a
+// slab or stair leaves between whole blocks.
+func (n *navigator) level(wp protocol.BlockPos) float64 {
+	if y, ok := path.Footing(n.world, wp); ok {
+		return float64(y)
+	}
+	return float64(wp.Y())
+}
+
+// needsJump asks the planner whether the segment into wp takes a jump. A rise
+// the unit can step, like a stair's, must not be jumped: the server counts the
+// jump against its own prediction.
+func (n *navigator) needsJump(wp protocol.BlockPos) bool {
+	if n.jumpsFor != n.idx+1 {
+		n.jumps, n.jumpsFor = path.NeedsJump(n.world, n.from, n.fromY, wp), n.idx+1
+	}
+	return n.jumps
 }
 
 // tickError marks a failure to send an input, as opposed to a failure to plan.
@@ -158,7 +188,13 @@ func (n *navigator) replan(p act.Pose) error {
 	n.lastDist = d
 	n.planCount++
 
-	plan, err := path.Find(n.world, cellOf(p.Feet), n.goal, 0)
+	var plan []protocol.BlockPos
+	var err error
+	if p.OnGround {
+		plan, err = path.FindFrom(n.world, cellOf(p.Feet), p.Feet.Y(), n.goal, 0)
+	} else {
+		plan, err = path.Find(n.world, cellOf(p.Feet), n.goal, 0)
+	}
 	if err != nil {
 		return fmt.Errorf("walking to the goal: %w", err)
 	}
@@ -166,6 +202,7 @@ func (n *navigator) replan(p act.Pose) error {
 		plan = []protocol.BlockPos{n.goal}
 	}
 	n.plan, n.idx, n.onWaypt = plan, 0, 0
+	n.from, n.fromY, n.jumpsFor = cellOf(p.Feet), p.Feet.Y(), 0
 	n.segStart = mgl32.Vec2{p.Feet.X(), p.Feet.Z()}
 	return nil
 }
