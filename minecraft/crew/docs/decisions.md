@@ -109,3 +109,37 @@ Units never message each other or share state. One unit's output is a chest,
 the next unit's input is the same chest, and a hauler waits for items to
 arrive. A crashed unit therefore leaves a chest that is simply less full. The
 others are not told: a hauler waits until it is cancelled or times out.
+
+## 2026-10-19: a unit with no task still ticks, and defends itself
+
+Found live: crew-01 to crew-03 died to zombies every few minutes. With no
+task the runner sent no input, so the unit stood frozen: it took no knockback,
+never turned and never fought back, and a server that expects an input every
+tick had a player that was alive but silent.
+
+An idle unit now sends one input per tick, takes the server's knockback
+(`SetActorMotion` becomes the predicted pose's velocity, so the server stops
+correcting it) and, by default, looks around and strolls within a few blocks
+of where it went idle. The stroll is bounded by `IDLE_RADIUS`, planned over
+known blocks only, and limited to floor that is neither liquid nor hurtful,
+because the planner alone would happily stand on water or lava.
+
+Defence preempts a running task. The skill is stopped, the unit fights or
+flees, and the skill resumes through a `Resume` that forgets which step it was
+in but keeps its progress; `Ready` cannot be reused, since a deposit part way
+through no longer holds what it began with. The task timeout does not count
+fight time, because a timeout that a mob can trigger would make a gather task
+fail for being attacked. Resuming restarts the skill's current step
+rather than its place in it: a pending chest request is forgotten, and a
+withdraw may be counted short and take a stack again.
+
+Judgment calls: creepers are backed away from, not meleed, since the blast
+costs more than the kill gains; a retreat that cannot shake its threat for 10
+s becomes a fight, as does one with no escape route; a mob with no route to it
+is ignored for 10 s, so a zombie behind a wall cannot hold a miner hostage.
+
+**crew never attacks a player.** Only entities the server announced as mobs
+of a hostile type are targets. A player's blow makes the unit face them and
+step back, which is all it does. The cost is that a griefer can hit a unit
+freely; the gain is that a bug in target choice cannot turn a worker into a
+danger to the people it shares the world with.

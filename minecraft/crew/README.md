@@ -15,9 +15,43 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `TASKS_TOKEN` | unset | Bearer token for the task endpoints; unset leaves them out entirely (404) |
 | `TASK_TIMEOUT_S` | `900` | Longest a task may run before it fails with `timed out` (30 to 3600) |
+| `IDLE_WANDER` | `true` | A unit with no task looks about and takes short walks. `false` leaves it standing, though it still sends an input every tick |
+| `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
+| `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
+
+## Idle life and defence
+
+A unit never stands silent. With no task it sends one input per 50 ms tick
+like a real client, so the server's knockback and corrections reach its
+predicted pose. With `IDLE_WANDER` it also glances around every second or two
+and, after a pause of 2 to 8 s, walks 2 to 6 blocks to a random spot within
+`IDLE_RADIUS` of where it went idle. Walks use the pathfinder over known,
+loaded blocks, keep to safe floor (never water, lava, ice or a ledge) within
+2 blocks of the starting height, and never break or place anything. A task
+submitted while idle cancels the walk at once.
+
+With `DEFEND` the unit watches the entities the server announces:
+
+- A hostile mob within 6 blocks (zombie, husk, drowned, skeleton, spider and
+  so on), or one that just hurt the unit, is faced, approached and hit about
+  every 10 ticks with the best hotbar weapon (sword, then axe, then a tool,
+  then a fist). Neutral mobs such as an enderman are fought only after they
+  hurt the unit.
+- At 6 health (3 hearts) or less, and from a creeper within 5 blocks, the unit
+  walks away instead. A retreat that cannot shake the threat for 10 s, or has
+  nowhere to go, turns into a fight.
+- A player is never attacked, and neither are passive mobs. A player's blow
+  makes the unit face the player and step back.
+- It does this during a task too: the running skill is stopped (closing a
+  chest, aborting a break), the unit fights, and the skill then resumes from
+  its start with its progress kept. Fight time does not count toward
+  `TASK_TIMEOUT_S`.
+
+Logs carry only events and types (`defend_started`, `hurt_by`,
+`defend_ended`), never positions.
 
 ## Status API
 
