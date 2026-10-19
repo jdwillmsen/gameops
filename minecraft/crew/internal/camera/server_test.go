@@ -164,7 +164,7 @@ func TestAtlasRoutesAnswer404UntilTheAtlasIsBuilt(t *testing.T) {
 		defer res.Body.Close()
 		return res.StatusCode, res.Header.Get("Content-Type")
 	}
-	for _, p := range []string{"/v1/camera/atlas.png", "/v1/camera/atlas.json"} {
+	for _, p := range []string{"/v1/camera/atlas.png", "/v1/camera/atlas.json", "/v1/camera/items.png", "/v1/camera/items.json"} {
 		if code, _ := get(p); code != http.StatusNotFound {
 			t.Errorf("%s before the build = %d, want 404", p, code)
 		}
@@ -177,6 +177,12 @@ func TestAtlasRoutesAnswer404UntilTheAtlasIsBuilt(t *testing.T) {
 	}
 	if code, ct := get("/v1/camera/atlas.json"); code != 200 || ct != "application/json" {
 		t.Errorf("json = %d %q", code, ct)
+	}
+	if code, ct := get("/v1/camera/items.png"); code != 200 || ct != "image/png" {
+		t.Errorf("items png = %d %q", code, ct)
+	}
+	if code, ct := get("/v1/camera/items.json"); code != 200 || ct != "application/json" {
+		t.Errorf("items json = %d %q", code, ct)
 	}
 }
 

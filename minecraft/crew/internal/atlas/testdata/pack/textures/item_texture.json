@@ -1,0 +1,11 @@
+// Synthetic fixture shaped like the vanilla item texture index.
+{
+  "resource_pack_name": "synthetic",
+  "texture_name": "atlas.items",
+  "texture_data": {
+    "gem": { "textures": "textures/items/gem" },
+    "wand": { "textures": ["textures/items/wand", "textures/items/gem"] },
+    "torch": { "textures": { "path": "textures/items/lantern_item" } },
+    "ember": { "textures": "textures/items/not_on_disk" },
+  }
+}
