@@ -440,6 +440,19 @@ func TestAControllerIsAskedWhatAGrownDefaultMobWears(t *testing.T) {
 	}
 }
 
+func TestAControllerHidesABoneWhateverTheCaseOfItsName(t *testing.T) {
+	controllers, err := parseControllers(t.Context(), []byte(`{"format_version": "1.8.0", "render_controllers": {
+ "controller.render.bug": {"geometry": "Geometry.default", "textures": ["Texture.default"],
+  "part_visibility": [{"*": "0"}, {"bodypart_0": "1"}]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bug := controllers["controller.render.bug"]
+	if bug.hides("bodyPart_0") || !bug.hides("bodyPart_1") {
+		t.Error("a controller naming bodypart_0 did not show the bone bodyPart_0 alone")
+	}
+}
+
 func TestAnOverrideIsAppliedInPlaceOfWhatTheModelWouldGive(t *testing.T) {
 	// The model's head is a small box; the override names the body.
 	models := modelsOf(t, `{"geometry.blob": {"texturewidth": 64, "textureheight": 32, "bones": [
