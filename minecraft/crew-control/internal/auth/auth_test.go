@@ -587,10 +587,10 @@ func TestDisabledLocksEverything(t *testing.T) {
 
 func TestCeremoniesAreBounded(t *testing.T) {
 	e := newEnv(t)
-	for i := 0; i < maxCeremonies*3; i++ {
+	for i := 0; i < maxLoginCeremonies*3; i++ {
 		mustOK(t, e.client().post("/auth/login/options", map[string]string{}), "options")
 	}
-	if n := e.a.ceremonyCount(); n > maxCeremonies {
+	if n := e.a.ceremonyCount(); n > maxLoginCeremonies {
 		t.Fatalf("%d ceremonies held", n)
 	}
 	e.clk.advance(ceremonyTTL + time.Second)
@@ -598,6 +598,17 @@ func TestCeremoniesAreBounded(t *testing.T) {
 	if n := e.a.ceremonyCount(); n != 1 {
 		t.Fatalf("expired ceremonies kept: %d", n)
 	}
+}
+
+func TestLoginFloodKeepsPendingRegistration(t *testing.T) {
+	e := newEnv(t)
+	c := e.client()
+	rec := c.post("/auth/register/options", map[string]string{"operator": "owner", "invite": "owner-code-0001"})
+	mustOK(t, rec, "register options")
+	for i := 0; i < 100; i++ {
+		mustOK(t, e.client().post("/auth/login/options", map[string]string{}), "login options")
+	}
+	mustOK(t, c.finish("/auth/register/finish", newSoftKey(t).create(answer{rpID: rpID, origin: origin, challenge: challengeOf(t, rec)})), "register finish")
 }
 
 func TestWrongInvitesAreThrottled(t *testing.T) {

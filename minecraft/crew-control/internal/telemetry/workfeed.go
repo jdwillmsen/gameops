@@ -59,6 +59,14 @@ func (p *Poller) PublishWork(unit string) {
 	}
 }
 
+// PublishAllWork republishes every unit, for a store that just became
+// readable after streams opened without history.
+func (p *Poller) PublishAllWork() {
+	for _, u := range p.units {
+		p.PublishWork(u.ID)
+	}
+}
+
 func (p *Poller) subscribeWork() (*workSub, func()) {
 	s := &workSub{pending: map[string]struct{}{}, sig: make(chan struct{}, 1)}
 	p.mu.Lock()

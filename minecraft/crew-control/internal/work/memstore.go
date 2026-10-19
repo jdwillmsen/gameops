@@ -52,8 +52,14 @@ func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool
 		}
 		switch it.State {
 		case Queued:
-		case Delivered:
-			if left := RedeliverAfter - now.Sub(m.delivered[it.ID]); left > 0 {
+		case Delivered, Running:
+			// A running item is silent only if its unit died; a live unit
+			// keeps refreshing Updated.
+			since := m.delivered[it.ID]
+			if it.State == Running {
+				since = it.Updated
+			}
+			if left := RedeliverAfter - now.Sub(since); left > 0 {
 				if due == 0 || left < due {
 					due = left
 				}

@@ -20,7 +20,10 @@ const (
 	ceremonyTTL    = 5 * time.Minute
 	// Anonymous login options also take a slot, so a flood evicts the oldest
 	// instead of refusing: a refusal would let anyone lock operators out.
-	maxCeremonies = 64
+	// Each kind has its own budget so a login flood cannot push out an invited
+	// operator's pending registration.
+	maxRegisterCeremonies = 16
+	maxLoginCeremonies    = 64
 
 	kindRegister = "register"
 	kindLogin    = "login"
@@ -47,12 +50,23 @@ func (a *Auth) start(w http.ResponseWriter, r *http.Request, c *ceremony) {
 		delete(a.cer, old.Value)
 	}
 	a.prune(now)
-	for len(a.cer) >= maxCeremonies {
-		oldest, first := "", true
+	limit := maxLoginCeremonies
+	if c.kind == kindRegister {
+		limit = maxRegisterCeremonies
+	}
+	for {
+		count, oldest := 0, ""
 		for k, v := range a.cer {
-			if first || v.expires.Before(a.cer[oldest].expires) {
-				oldest, first = k, false
+			if v.kind != c.kind {
+				continue
 			}
+			count++
+			if oldest == "" || v.expires.Before(a.cer[oldest].expires) {
+				oldest = k
+			}
+		}
+		if count < limit {
+			break
 		}
 		delete(a.cer, oldest)
 	}
