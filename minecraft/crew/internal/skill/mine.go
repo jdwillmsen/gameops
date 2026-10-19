@@ -50,6 +50,7 @@ type Mine struct {
 	tool   string
 	qty    int
 	radius int
+	area   *Area
 
 	started  bool
 	baseline int
@@ -71,14 +72,39 @@ type Mine struct {
 	pickInit    bool
 }
 
+// Area is an inclusive box of blocks.
+type Area struct{ Min, Max protocol.BlockPos }
+
+func (a Area) contains(b protocol.BlockPos) bool {
+	return b.X() >= a.Min.X() && b.X() <= a.Max.X() &&
+		b.Y() >= a.Min.Y() && b.Y() <= a.Max.Y() &&
+		b.Z() >= a.Min.Z() && b.Z() <= a.Max.Z()
+}
+
+// MineOption configures a Mine.
+type MineOption func(*Mine)
+
+// InArea limits the blocks the skill will break to those inside the box, so a
+// misplaced unit cannot dig up anything outside the area it was given.
+func InArea(a Area) MineOption { return func(m *Mine) { m.area = &a } }
+
 // NewMineBlock breaks blocks until qty more of item are in the inventory.
 // tool is a name suffix: "pickaxe" matches any "*_pickaxe". A radius of zero
 // or less means 24.
 func NewMineBlock(world path.Blocks, self func() belief.Snapshot, block, item, tool string, qty, radius int) Skill {
+	return NewMineBlockWith(world, self, block, item, tool, qty, radius)
+}
+
+// NewMineBlockWith is NewMineBlock with options.
+func NewMineBlockWith(world path.Blocks, self func() belief.Snapshot, block, item, tool string, qty, radius int, opts ...MineOption) Skill {
 	if radius <= 0 {
 		radius = defaultRadius
 	}
-	return &Mine{world: world, self: self, block: block, item: item, tool: tool, qty: qty, radius: radius, skip: map[protocol.BlockPos]bool{}}
+	m := &Mine{world: world, self: self, block: block, item: item, tool: tool, qty: qty, radius: radius, skip: map[protocol.BlockPos]bool{}}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
 }
 
 func (m *Mine) Name() string { return "mine_block" }
@@ -153,6 +179,9 @@ func (m *Mine) Step(ctx context.Context, a Actuator) (Status, error) {
 }
 
 func (m *Mine) noSource() error {
+	if m.area != nil {
+		return fmt.Errorf("no reachable %s in the area", m.block)
+	}
 	return fmt.Errorf("no reachable %s within %d blocks", m.block, m.radius)
 }
 
@@ -180,7 +209,7 @@ func (m *Mine) find(a Actuator, p act.Pose) outcome {
 					continue
 				}
 				b := protocol.BlockPos{feet.X() + int32(dx), feet.Y() + int32(dy), feet.Z() + int32(dz)}
-				if name, known := m.world.Block(b); known && name == m.block && !m.skip[b] {
+				if name, known := m.world.Block(b); known && name == m.block && !m.skip[b] && (m.area == nil || m.area.contains(b)) {
 					cands = append(cands, b)
 				}
 			}

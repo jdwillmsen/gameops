@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +68,7 @@ func TestGatherAndDepositExpandsToMineThenDeposit(t *testing.T) {
 	}
 }
 
-const haulBody = `{"template":"haul","items":{"cobblestone":16,"oak_log":16},"from":[{"x":0,"y":0,"z":0}],"to":{"x":0,"y":0,"z":0}}`
+const haulBody = `{"template":"haul","items":{"cobblestone":16,"oak_log":16},"from":[{"x":0,"y":0,"z":0}],"to":{"x":9,"y":9,"z":9}}`
 
 func TestParseHaulTemplate(t *testing.T) {
 	tpl, err := ParseTemplate([]byte(haulBody))
@@ -78,7 +79,11 @@ func TestParseHaulTemplate(t *testing.T) {
 		t.Errorf("parsed %+v", tpl)
 	}
 	chests := func(n int) string {
-		return `[` + strings.TrimSuffix(strings.Repeat(`{"x":0,"y":0,"z":0},`, n), ",") + `]`
+		var cs []string
+		for i := 0; i < n; i++ {
+			cs = append(cs, fmt.Sprintf(`{"x":%d,"y":0,"z":0}`, i))
+		}
+		return `[` + strings.Join(cs, ",") + `]`
 	}
 	nine := `{"cobblestone":1,"oak_log":1,"a":1,"b":1,"c":1,"d":1,"e":1,"f":1,"g":1}`
 	cases := map[string]string{
@@ -149,5 +154,46 @@ func TestHaulProgressIsTheTotalMoved(t *testing.T) {
 	r.step(context.Background())
 	if got := stateOf(t, r, tk.ID); got.Progress != 7 || got.Qty != 32 {
 		t.Errorf("task = %+v, want progress 7 of 32", got)
+	}
+}
+
+func TestParseGatherArea(t *testing.T) {
+	with := func(area string) string {
+		return strings.Replace(goodBody, `"chest"`, `"area":`+area+`,"chest"`, 1)
+	}
+	tpl, err := ParseTemplate([]byte(with(`{"min":{"x":-12,"y":99,"z":-12},"max":{"x":12,"y":106,"z":12}}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tpl.Area == nil || tpl.Area.Min.X != -12 || tpl.Area.Max.Y != 106 {
+		t.Errorf("parsed %+v", tpl.Area)
+	}
+	if tpl, err := ParseTemplate([]byte(goodBody)); err != nil || tpl.Area != nil {
+		t.Errorf("no area: %+v, %v", tpl.Area, err)
+	}
+	if _, err := ParseTemplate([]byte(with(`{"min":{"x":0,"y":0,"z":0},"max":{"x":63,"y":63,"z":63}}`))); err != nil {
+		t.Errorf("64 blocks wide rejected: %v", err)
+	}
+	cases := map[string]string{
+		"inverted x":    with(`{"min":{"x":5,"y":0,"z":0},"max":{"x":4,"y":0,"z":0}}`),
+		"inverted y":    with(`{"min":{"x":0,"y":5,"z":0},"max":{"x":0,"y":4,"z":0}}`),
+		"oversize":      with(`{"min":{"x":0,"y":0,"z":0},"max":{"x":64,"y":0,"z":0}}`),
+		"huge span":     with(`{"min":{"x":-2147483648,"y":0,"z":0},"max":{"x":2147483647,"y":0,"z":0}}`),
+		"unknown field": with(`{"min":{"x":0,"y":0,"z":0},"max":{"x":1,"y":1,"z":1},"pad":1}`),
+		"unknown coord": with(`{"min":{"x":0,"y":0,"z":0,"w":1},"max":{"x":1,"y":1,"z":1}}`),
+		"missing max":   with(`{"min":{"x":0,"y":0,"z":0}}`),
+		"null parts":    with(`{}`),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseTemplate([]byte(body))
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			// The span limit is a constant, not a coordinate.
+			if strings.ContainsAny(strings.ReplaceAll(err.Error(), "at most 64 blocks", ""), "0123456789") {
+				t.Errorf("error carries numbers: %q", err)
+			}
+		})
 	}
 }
