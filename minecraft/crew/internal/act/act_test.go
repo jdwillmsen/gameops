@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -296,6 +297,7 @@ func TestWalkingOffAnEdgeFalls(t *testing.T) {
 }
 
 func TestCorrectionResetsThePose(t *testing.T) {
+	before := testutil.ToFloat64(metricCorrections)
 	a, s := newAct(flat(), Pose{})
 	for i := 0; i < 5; i++ {
 		_ = a.Tick(Input{Forward: 1})
@@ -306,6 +308,9 @@ func TestCorrectionResetsThePose(t *testing.T) {
 		Rotation: mgl32.Vec2{3, 40},
 		OnGround: true,
 	})
+	if got := testutil.ToFloat64(metricCorrections) - before; got != 1 {
+		t.Errorf("corrections counted = %v, want 1", got)
+	}
 	p := a.Pose()
 	if p.Feet != (mgl32.Vec3{4, 0, 9}) || !p.OnGround {
 		t.Fatalf("pose = %+v", p)

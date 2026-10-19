@@ -7,9 +7,19 @@ import (
 	"sync"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
+
+// metricCorrections counts the times the server overruled the predicted pose.
+// A model that matches the server's keeps it near zero; a rise after a
+// movement change means the prediction has drifted from the server's.
+var metricCorrections = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "crew_movement_corrections_total",
+	Help: "Server corrections of the unit's predicted movement.",
+})
 
 // firstTick is arbitrary: the server only needs ticks to rise.
 const firstTick = 100
@@ -150,6 +160,7 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	defer a.mu.Unlock()
 	switch p := pk.(type) {
 	case *packet.CorrectPlayerMovePrediction:
+		metricCorrections.Inc()
 		a.pose = Pose{
 			Feet:     p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
 			Pitch:    p.Rotation.X(),
