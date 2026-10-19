@@ -146,3 +146,50 @@ func TestDepositIsNotReadyWithTooLittle(t *testing.T) {
 		t.Fatalf("Ready = %v", err)
 	}
 }
+
+func TestDepositClosesAChestThatOpensAfterTheTimeout(t *testing.T) {
+	w := chestWorld()
+	r := depositRig(t, w, 6, 5)
+	r.openDelay = waitTicks + 3
+	st, err := r.run(NewDepositChest(w, r.self, chestPos, "cobblestone", 16), 400)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "chest did not open") {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.openIn > 0 {
+		// The reply still in flight when the skill stopped sending inputs.
+		r.openChestNow(r.openFor)
+	}
+	if open, _, _ := r.Container(); open || !r.chestClosed {
+		t.Error("a late-opening chest was left open")
+	}
+}
+
+func TestDepositReplacesARejectedSlot(t *testing.T) {
+	w := chestWorld()
+	r := depositRig(t, w, 6, 5)
+	// The content the unit sees shows slot 0 empty, but the server holds dirt.
+	r.staleSlots = map[int]slotStack{0: {idDirt, 3, 950}}
+	st, err := r.run(NewDepositChest(w, r.self, chestPos, "cobblestone", 16), 400)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.chest[0].item != idDirt || r.chest[1].item != idCobblestone || r.chest[1].count != 16 {
+		t.Errorf("chest = %+v %+v", r.chest[0], r.chest[1])
+	}
+	if r.requests != 2 {
+		t.Errorf("requests = %d, want the rejected one and its retry", r.requests)
+	}
+}
+
+func TestDepositHoldsAnEmptyHandWhenTheHotbarIsEmpty(t *testing.T) {
+	w := chestWorld()
+	r := newRig(t, w, feetAt(6, 1, 5))
+	r.give(20, idCobblestone, 30)
+	st, err := r.run(NewDepositChest(w, r.self, chestPos, "cobblestone", 16), 400)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.chest[0].count != 16 || r.held != 0 {
+		t.Errorf("chest %+v held %d", r.chest[0], r.held)
+	}
+}

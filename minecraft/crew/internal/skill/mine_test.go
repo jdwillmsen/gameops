@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -54,8 +55,33 @@ func TestMineBlockCountsFromInventoryAndGivesUp(t *testing.T) {
 	if r.breaks != 3 {
 		t.Errorf("broke %d blocks, want it to stop at 3", r.breaks)
 	}
-	if r.aborts != 1 {
-		t.Errorf("aborts = %d, want the break session closed on giving up", r.aborts)
+	if r.aborts != 0 {
+		t.Errorf("aborts = %d: every block had already broken, so there was nothing to abort", r.aborts)
+	}
+}
+
+func TestMineBlockAbortsABreakThatNeverFinishes(t *testing.T) {
+	w := quarry()
+	r := withPickaxe(newRig(t, w, feetAt(2, 1, 2)))
+	r.stallBreaks = true
+	m := NewMineBlock(w, r.self, "stone", "cobblestone", "pickaxe", 4, 0)
+	st, err := r.run(m, 800)
+	if st != Failed || err == nil || err.Error() != "block did not break" {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.aborts != 1 || r.breaking != nil {
+		t.Errorf("aborts = %d, session = %v; want the live break aborted", r.aborts, r.breaking)
+	}
+}
+
+func TestMineBlockPropagatesAWriteErrorMidWalk(t *testing.T) {
+	w := quarry()
+	r := withPickaxe(newRig(t, w, feetAt(2, 1, 2)))
+	r.failWriteAt = 5
+	m := NewMineBlock(w, r.self, "stone", "cobblestone", "pickaxe", 4, 0)
+	st, err := r.run(m, 800)
+	if st != Failed || !errors.Is(err, errWire) {
+		t.Fatalf("status %v, err %v; want the transport error", st, err)
 	}
 }
 

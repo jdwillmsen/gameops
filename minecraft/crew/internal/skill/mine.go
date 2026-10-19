@@ -63,8 +63,8 @@ type Mine struct {
 
 	selected     bool
 	breakStarted bool
-	// A break session outlives its block on the server, so any exit after the
-	// first Start has to close it.
+	// A Start is outstanding: the server is still timing a break that has not
+	// finished. Once the block is gone there is nothing left to abort.
 	sessionOpen bool
 	waited      int
 	misses      int
@@ -156,8 +156,8 @@ func (m *Mine) noSource() error {
 	return fmt.Errorf("no reachable %s within %d blocks", m.block, m.radius)
 }
 
-// fail ends the skill, closing the server's break session first if one is
-// open. The abort rides one last input.
+// fail ends the skill, aborting a break that is still in progress first. The
+// abort rides one last input.
 func (m *Mine) fail(a Actuator, err error) (Status, error) {
 	if m.sessionOpen {
 		m.sessionOpen = false
@@ -222,7 +222,11 @@ func (m *Mine) failed(a Actuator, err error) outcome {
 }
 
 func (m *Mine) walk(a Actuator) outcome {
-	st, _ := m.nav.step(a)
+	st, err := m.nav.step(a)
+	var te tickError
+	if errors.As(err, &te) {
+		return m.failed(a, te.err)
+	}
 	switch st {
 	case Running:
 		return outcome{st: Running}
@@ -265,6 +269,7 @@ func (m *Mine) standCell(b protocol.BlockPos, from mgl32.Vec3) (protocol.BlockPo
 
 func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 	if name, known := m.world.Block(m.target); known && name != m.block {
+		m.sessionOpen = false
 		m.phase, m.waited, m.pickInit = mPickup, 0, false
 		return next
 	}
@@ -323,7 +328,12 @@ func (m *Mine) pickupStep(a Actuator, have int, p act.Pose) outcome {
 	}
 	m.waited++
 	if m.nav != nil {
-		if st, _ := m.nav.step(a); st == Running {
+		st, err := m.nav.step(a)
+		var te tickError
+		if errors.As(err, &te) {
+			return m.failed(a, te.err)
+		}
+		if st == Running {
 			return outcome{st: Running}
 		}
 		m.nav = nil

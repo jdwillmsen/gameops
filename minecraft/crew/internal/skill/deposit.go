@@ -17,8 +17,10 @@ const (
 	// unit to still be drifting when the click lands.
 	chestRange = 3.0
 	chestSlots = 27
-	// The server gives no signal for a stack limit, so a stack of this size is
-	// full whatever it holds.
+	// The item table carries no stack limit, so 64 is assumed. For an item that
+	// stacks lower the server answers StatusOccupied, the slot is marked
+	// rejected and the next is tried, so a wrong guess costs one request per
+	// slot and cannot loop.
 	fullStack = 64
 )
 
@@ -36,7 +38,13 @@ const (
 	dWalk
 	dOpen
 	dMove
+	dDrain
 )
+
+// A ContainerOpen can arrive after the wait gave up. The skill keeps sending
+// inputs this many more ticks so a window that opens late is closed rather
+// than left open on the server.
+const drainTicks = 10
 
 // Deposit moves an item from the inventory into a chest.
 type Deposit struct {
@@ -57,6 +65,9 @@ type Deposit struct {
 	names    map[int32]string
 	itemID   int32
 	rejected map[int]bool
+
+	// Set once the skill has decided to fail but is still draining.
+	drainErr error
 
 	pending  bool
 	reqID    int32
@@ -110,6 +121,8 @@ func (d *Deposit) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = d.open(a, snap)
 		case dMove:
 			o = d.move(a, snap, have)
+		case dDrain:
+			o = d.drain(a)
 		}
 		if !o.again {
 			return o.st, o.err
@@ -188,10 +201,7 @@ func (d *Deposit) idle(a Actuator) outcome {
 
 func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 	if !d.opened {
-		held, ok := holdable(snap, d.item)
-		if !ok {
-			return d.failed(a, errors.New("nothing on the hotbar to hold"))
-		}
+		held := holdable(snap, d.item)
 		hash, known := d.world.BlockHash(d.chest)
 		if !known {
 			return d.failed(a, errors.New("the chest's block is not known"))
@@ -221,14 +231,27 @@ func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 		return next
 	}
 	if d.waited++; d.waited >= waitTicks {
-		return d.failed(a, fmt.Errorf("chest did not open within %d ticks", waitTicks))
+		d.drainErr = fmt.Errorf("chest did not open within %d ticks", waitTicks)
+		d.phase, d.waited = dDrain, 0
+		return next
 	}
 	return d.idle(a)
 }
 
+// drain waits a few more ticks for a late ContainerOpen, then fails with the
+// open's timeout. fail closes the window if it did open.
+func (d *Deposit) drain(a Actuator) outcome {
+	if open, _, _ := a.Container(); open || d.waited >= drainTicks {
+		return d.failed(a, d.drainErr)
+	}
+	d.waited++
+	return d.idle(a)
+}
+
 // holdable picks the hotbar stack to hold while clicking: the item itself if
-// it is there, else anything, since the click quotes the held item.
-func holdable(s belief.Snapshot, item string) (belief.Item, bool) {
+// it is there, else anything, since the click quotes the held item. With an
+// empty hotbar it is the zero Item, an empty hand in slot 0.
+func holdable(s belief.Snapshot, item string) belief.Item {
 	var any belief.Item
 	found := false
 	for _, it := range s.Inventory {
@@ -236,13 +259,14 @@ func holdable(s belief.Snapshot, item string) (belief.Item, bool) {
 			continue
 		}
 		if it.Name == item {
-			return it, true
+			return it
 		}
 		if !found {
 			any, found = it, true
 		}
 	}
-	return any, found
+	// An empty hotbar is a valid state: hold slot 0 with nothing in it.
+	return any
 }
 
 func (d *Deposit) move(a Actuator, snap belief.Snapshot, have int) outcome {
