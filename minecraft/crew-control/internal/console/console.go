@@ -1,0 +1,46 @@
+// Package console serves the static console page.
+package console
+
+import (
+	"embed"
+	"io/fs"
+	"net/http"
+)
+
+// The explicit list keeps the node test files out of the binary.
+//
+//go:embed web/index.html web/console.js web/state.js web/console.css
+var assets embed.FS
+
+const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+
+// Mount registers the page, its static files and the redirect for the old
+// /camera bookmark.
+func Mount(mux *http.ServeMux) {
+	web, err := fs.Sub(assets, "web")
+	if err != nil {
+		panic(err)
+	}
+	files := http.FileServerFS(web)
+
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		secure(w)
+		http.ServeFileFS(w, r, web, "index.html")
+	})
+	mux.HandleFunc("GET /static/{file}", func(w http.ResponseWriter, r *http.Request) {
+		secure(w)
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/" + r.PathValue("file")
+		files.ServeHTTP(w, r2)
+	})
+	mux.HandleFunc("GET /camera", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusFound)
+	})
+}
+
+func secure(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", csp)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "no-cache")
+}

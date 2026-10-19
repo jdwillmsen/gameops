@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
@@ -44,6 +45,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/units", poller.ListHandler)
 	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler)
+	console.Mount(mux)
 	mux.Handle("/units/", proxy.Handler(units, log))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
