@@ -674,6 +674,31 @@ func TestAdjacentAttackingZombieRemainsThreatAfterFightLimit(t *testing.T) {
 	}
 }
 
+func TestInReachZombieThatNeverAttackedIsGivenUpAfterFightLimit(t *testing.T) {
+	r := newRig(t, defaults, start)
+	for y := int32(1); y <= 2; y++ {
+		r.w.over[protocol.BlockPos{21, y, 20}] = "stone"
+	}
+	r.spawn(53, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+	r.l.engaged = true
+	r.l.fighting = fightLimit
+	if !r.step() {
+		t.Fatal("did not process the in-reach zombie before giving up")
+	}
+	if r.l.attacker != 0 {
+		t.Fatalf("unexpected attacker %d for a zombie that never hurt the unit", r.l.attacker)
+	}
+	if r.l.ignore[53] <= r.l.tick {
+		t.Fatal("did not ignore the in-reach zombie after the fight limit")
+	}
+	for i := 0; i < graceTicks+5; i++ {
+		r.step()
+	}
+	if r.l.engaged {
+		t.Fatal("kept the task preempted by a non-attacking zombie after giving up")
+	}
+}
+
 func TestIgnoredPillarSkeletonDoesNotRestartFightAfterEachArrow(t *testing.T) {
 	r := newRig(t, defaults, start)
 	for y := int32(1); y <= 3; y++ {
