@@ -36,6 +36,33 @@ func TestIndexServesHTMLWithCSP(t *testing.T) {
 	}
 }
 
+func TestSigninServesHTMLWithCSP(t *testing.T) {
+	rec := serve(t, "/signin")
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("content type %q", ct)
+	}
+	const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+	if got := rec.Header().Get("Content-Security-Policy"); got != csp {
+		t.Fatalf("csp %q", got)
+	}
+	if rec.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatal("the sign-in page must not leak its address")
+	}
+	if !strings.Contains(rec.Body.String(), "/static/signin.js") {
+		t.Fatal("page does not load its script")
+	}
+}
+
+func TestSigninHasNoInlineScript(t *testing.T) {
+	body := serve(t, "/signin").Body.String() + serve(t, "/").Body.String()
+	if strings.Contains(body, "<script>") || strings.Contains(body, "onclick=") {
+		t.Fatal("inline script would break the CSP")
+	}
+}
+
 func TestIndexOnlyAtRoot(t *testing.T) {
 	if rec := serve(t, "/nope"); rec.Code != 404 {
 		t.Fatalf("status %d", rec.Code)
@@ -46,6 +73,7 @@ func TestStaticFiles(t *testing.T) {
 	for path, want := range map[string]string{
 		"/static/console.js":  "javascript",
 		"/static/state.js":    "javascript",
+		"/static/signin.js":   "javascript",
 		"/static/console.css": "text/css",
 	} {
 		rec := serve(t, path)

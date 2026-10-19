@@ -1,4 +1,4 @@
-import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode } from '/static/state.js';
+import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping } from '/static/state.js';
 
 const statuses = new Map();
 let order = [];
@@ -80,6 +80,7 @@ function apply() {
   sync();
   renderBar();
   renderStage();
+  renderPanel();
 }
 
 function pickUnit(id) {
@@ -108,6 +109,7 @@ function toggleWall() {
 $('wall-toggle').addEventListener('click', toggleWall);
 
 function onKey(ev) {
+  if (isTyping(ev.target)) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (/^[1-9]$/.test(ev.key)) pickUnit(order[Number(ev.key) - 1]);
   else if (ev.key === 'c') setMode(nextMode(state.mode));
@@ -128,26 +130,252 @@ function onUnits(list) {
   if (!statuses.has(state.unit)) state = { ...parse('', order), mode: state.mode, view: state.view };
   renderBar();
   renderLabels();
+  renderPanel();
 }
 
 const BACKOFF_MIN = 2000, BACKOFF_MAX = 30000;
 let backoff = BACKOFF_MIN;
+let source = null;
+let retryTimer = null;
 
 function connect() {
-  const es = new EventSource('/v1/units/stream');
+  const es = source = new EventSource('/v1/units/stream');
   es.addEventListener('units', ev => {
     backoff = BACKOFF_MIN;
     $('link').textContent = '';
     onUnits(JSON.parse(ev.data));
   });
+  es.addEventListener('work', ev => {
+    const w = JSON.parse(ev.data);
+    work.set(w.unit, w.items || []);
+    if (w.unit === state.unit) renderWork();
+  });
   es.onerror = () => {
+    if (source !== es) return;
     $('link').textContent = 'status offline';
     // The browser retries a dropped stream itself, but gives up for good after
     // a non-200 answer (client cap, gateway restart), so those are rebuilt.
     if (es.readyState !== EventSource.CLOSED) return;
     es.close();
-    setTimeout(connect, backoff);
+    retryTimer = setTimeout(connect, backoff);
     backoff = Math.min(backoff * 2, BACKOFF_MAX);
   };
 }
-connect();
+
+// A stream is signed in or not for its whole life, so a change of session
+// needs a new one.
+function reconnect() {
+  clearTimeout(retryTimer);
+  if (source) source.close();
+  backoff = BACKOFF_MIN;
+  connect();
+}
+
+// ---- operator session and command panel ----
+
+const work = new Map();
+let operator = null;
+let authAvailable = true;
+let panel = null;
+let panelUnit = '';
+
+async function api(method, path, body) {
+  const init = { method, headers: {} };
+  if (method === 'POST') {
+    init.headers = { 'Content-Type': 'application/json', 'X-Crew-Request': '1' };
+    init.body = JSON.stringify(body ?? {});
+  }
+  let res;
+  try {
+    res = await fetch(path, init);
+  } catch {
+    return { ok: false, status: 0, data: { error: 'could not reach the server' } };
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* an error page has no JSON */ }
+  return { ok: res.ok, status: res.status, data };
+}
+
+function setOperator(op) {
+  const changed = (operator && operator.id) !== (op && op.id);
+  operator = op;
+  if (!op) work.clear();
+  renderSession();
+  renderPanel();
+  if (changed) reconnect();
+}
+
+function renderSession() {
+  const box = $('session');
+  if (operator) {
+    const out = el('button', { type: 'button', textContent: 'Sign out' });
+    out.addEventListener('click', async () => {
+      await api('POST', '/auth/logout');
+      setOperator(null);
+    });
+    box.replaceChildren(el('span', { className: 'who', textContent: operator.name || operator.id }), out);
+  } else if (authAvailable) {
+    box.replaceChildren(el('a', { href: '/signin', textContent: 'Sign in' }));
+  } else {
+    box.replaceChildren();
+  }
+}
+
+async function loadSession() {
+  const r = await api('GET', '/auth/me');
+  authAvailable = r.status !== 404;
+  if (r.ok && r.data && r.data.operator) operator = r.data.operator;
+  renderSession();
+  renderPanel();
+}
+
+function numberField(label, value) {
+  const input = el('input', { type: 'number', step: '1', value: value ?? '' });
+  input.setAttribute('aria-label', label);
+  return input;
+}
+
+function pointFields(title) {
+  const x = numberField(title + ' x'), y = numberField(title + ' y'), z = numberField(title + ' z');
+  const row = el('div', { className: 'point' }, el('span', { textContent: title }), x, y, z);
+  return {
+    row,
+    read: () => ({ x: x.value, y: y.value, z: z.value }),
+    set(p) { x.value = p.x; y.value = p.y; z.value = p.z; },
+  };
+}
+
+function buildPanel() {
+  const msg = el('p', { id: 'panel-msg', role: 'status' });
+  const say = text => { msg.textContent = text; };
+
+  const act = async (button, run) => {
+    button.disabled = true;
+    say('');
+    try { await run(); } finally { button.disabled = false; }
+  };
+
+  // Every command answers the same way, so one place reports it.
+  const send = async (path, body, done) => {
+    const r = await api('POST', path, body);
+    if (r.status === 401) {
+      say('You were signed out.');
+      setOperator(null);
+      return;
+    }
+    if (!r.ok) {
+      say((r.data && r.data.error) || `Failed (${r.status}).`);
+      return;
+    }
+    say(done(r.data || {}));
+  };
+
+  const unitPath = suffix => `/v1/work/${encodeURIComponent(state.unit)}${suffix}`;
+
+  const stop = el('button', { type: 'button', id: 'stop', className: 'danger', textContent: 'Stop' });
+  stop.addEventListener('click', () => act(stop, () => send(unitPath('/stop'), {}, d =>
+    d.cancelled ? `Stopped, cancelled ${d.cancelled} open.` : 'Stop sent.')));
+
+  const go = pointFields('Go to');
+  const goForm = el('form', { id: 'goto-form', noValidate: true }, go.row, el('button', { type: 'submit', textContent: 'Go' }));
+  const here = el('button', { type: 'button', textContent: 'Here', title: 'Fill in the unit\'s current position' });
+  here.addEventListener('click', () => prefill());
+  goForm.append(here);
+  goForm.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const b = gotoBody(go.read());
+    if (b.error) { say(b.error); return; }
+    act(goForm.querySelector('[type=submit]'), () => send(unitPath('/goto'), b.body, () => 'Go to queued.'));
+  });
+
+  const kind = el('select', { id: 'template' },
+    ...[['gather:cobblestone', 'Gather cobblestone'], ['gather:oak_log', 'Chop oak_log'], ['haul:cobblestone', 'Haul cobblestone'], ['haul:oak_log', 'Haul oak_log']]
+      .map(([value, textContent]) => el('option', { value, textContent })));
+  kind.setAttribute('aria-label', 'Template');
+  const qty = el('input', { type: 'number', step: '1', min: '1', max: '256', value: '8' });
+  qty.setAttribute('aria-label', 'Quantity');
+  const from = pointFields('From chest');
+  const chest = pointFields('Chest');
+  const syncKind = () => {
+    const hauling = kind.value.startsWith('haul');
+    from.row.hidden = !hauling;
+    chest.row.firstChild.textContent = hauling ? 'To chest' : 'Chest';
+  };
+  kind.addEventListener('change', syncKind);
+  syncKind();
+  const queue = el('form', { id: 'queue-form', noValidate: true }, kind, el('label', {}, 'Qty ', qty), from.row, chest.row,
+    el('button', { type: 'submit', textContent: 'Queue' }));
+  queue.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const [template, item] = kind.value.split(':');
+    const b = taskBody({ template, item, qty: qty.value, chest: chest.read(), from: from.read() });
+    if (b.error) { say(b.error); return; }
+    act(queue.querySelector('[type=submit]'), () => send(unitPath('/tasks'), b.body, () => 'Queued.'));
+  });
+
+  const openList = el('ul', { id: 'open-items' });
+  const historyList = el('ul', { id: 'history-items' });
+
+  const cancel = (button, id) => act(button, () => send(unitPath(`/items/${encodeURIComponent(id)}/cancel`), {}, d =>
+    d.note || 'Cancelled.'));
+
+  const title = el('h2', { id: 'panel-title' });
+
+  return {
+    root: [
+      title,
+      stop, goForm, queue, msg,
+      el('h3', { textContent: 'Queue' }), openList,
+      el('h3', { textContent: 'History' }), historyList,
+    ],
+    title,
+    go, openList, historyList, cancel,
+  };
+}
+
+async function prefill() {
+  const unit = state.unit;
+  const r = await api('GET', `/units/${encodeURIComponent(unit)}/v1/state`);
+  if (!r.ok || unit !== state.unit || !panel) return;
+  const p = startPoint(r.data);
+  if (p) panel.go.set(p);
+}
+
+function renderPanel() {
+  const aside = $('panel');
+  const show = !!operator && state.view === 'focus' && !!state.unit && statuses.has(state.unit);
+  aside.hidden = !show;
+  if (!show) return;
+  if (!panel) {
+    panel = buildPanel();
+    aside.replaceChildren(...panel.root);
+  }
+  panel.title.textContent = (statuses.get(state.unit).name || state.unit);
+  if (panelUnit !== state.unit) {
+    panelUnit = state.unit;
+    prefill();
+  }
+  renderWork();
+}
+
+function itemRow(it, withCancel) {
+  const bits = [describeItem(it), it.state];
+  if (it.state === 'running' && it.progress) bits.push(`${it.progress}`);
+  if (it.reason) bits.push(it.reason);
+  const li = el('li', { className: 'item ' + it.state }, el('span', { textContent: bits.join(' - ') }));
+  if (withCancel) {
+    const b = el('button', { type: 'button', textContent: 'Cancel' });
+    b.addEventListener('click', () => panel.cancel(b, it.id));
+    li.append(b);
+  }
+  return li;
+}
+
+function renderWork() {
+  if (!panel || $('panel').hidden) return;
+  const { open, history } = splitWork(work.get(state.unit) || []);
+  panel.openList.replaceChildren(...(open.length ? open.map(i => itemRow(i, true)) : [el('li', { className: 'empty', textContent: 'nothing queued' })]));
+  panel.historyList.replaceChildren(...(history.length ? history.map(i => itemRow(i, false)) : [el('li', { className: 'empty', textContent: 'no history' })]));
+}
+
+loadSession().finally(connect);
