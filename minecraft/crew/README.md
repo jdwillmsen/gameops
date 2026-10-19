@@ -99,6 +99,44 @@ what to set `KIT_CHEST` to on the lab's units. The scene empties the units'
 inventories, so with the kit on they walk to the chest once idle for five
 seconds; a task submitted sooner runs first, barehanded.
 
+## Movement and block shapes
+
+The unit predicts its own movement and sends the result with every input; the
+server accepts it or corrects it, and `crew_movement_corrections_total` counts
+the corrections. The prediction collides with each block's real shape, which
+comes from the block's name and states (`internal/world/shape`), not from a
+full cube per solid block:
+
+| Block | Collision |
+| --- | --- |
+| Slab | half a block, bottom or top; a double slab is a cube |
+| Stairs | the half slab plus the step, by facing, half and corner state |
+| Fence, wall, fence gate | 1.5 high, so nothing jumps them; fences and walls follow their `connection` states, a gate is 0.25 thick across its facing and has no collision when open |
+| Carpet | 1/16 high |
+| Snow layer | `height / 8` high, so a single layer has no collision |
+| Door, trapdoor | a panel 0.1825 thick on the side its facing and open state (and a door's hinge) give |
+| Ladder | a panel 3/16 thick; a unit that presses into it climbs 0.2 a tick, and one that does not slides down at most 0.15 |
+
+Door and trapdoor thickness, the snow rule and the ladder rates were measured
+on the lab; the other boxes match the block table (a test checks them against
+every state it knows). A block the unit has not been told about, or one that is
+not in `shape`, is a full cube.
+
+A grounded unit that is blocked retries from 0.6 higher and keeps that if it
+carries it further, which is how it steps onto a slab, a stair or a carpet
+without a jump. The step tick reports the standing vertical delta: the server
+reads the delta as velocity and corrects one that carries the rise.
+
+The pathfinder walks the same shapes. It slides the unit's footprint across
+each move in eighths of a block, so a half block or a stair is a walk, a block
+and a half is a wall and a full block takes a jump, and `NeedsJump` tells the
+navigator which waypoints to jump for. Ladders are collided with and climbed
+when the unit walks into one, but the planner does not route up them.
+
+Descending a flight of stairs is the known weak spot: the unit falls half a
+block at a time, and the server's landing and take-off ticks differ slightly
+from the prediction, which costs about one small correction per flight.
+
 ## Status API
 
 `/healthz`, `/readyz` and `/v1/state`. The state carries `position`,
