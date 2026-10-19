@@ -162,6 +162,7 @@ func (l *Life) advanceKit(ctx context.Context, a skill.Actuator, s belief.Snapsh
 // snapshot already counts them.
 func (l *Life) endKit(err error) {
 	k := &l.kit
+	full, _ := k.visit.(interface{ Full() bool })
 	k.visit = nil
 	if err != nil {
 		l.logEvent("kit_failed", map[string]any{"error": err.Error()})
@@ -180,7 +181,11 @@ func (l *Life) endKit(err error) {
 	if food {
 		missing = append(missing, "food")
 	}
-	l.logEvent("kit_empty", map[string]any{"missing": missing})
+	event := "kit_empty"
+	if full != nil && full.Full() && !hotbarFree(l.self()) {
+		event = "kit_no_room"
+	}
+	l.logEvent(event, map[string]any{"missing": missing})
 	k.blockedUntil = l.tick + kitEmptyBackoff
 }
 

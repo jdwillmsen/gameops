@@ -81,7 +81,9 @@ a unit that died gets its sword and bread back. A chest that cannot make the
 unit whole is logged as `kit_empty` (with what was `missing`, never a
 position) and left alone for three minutes; a failed visit (`kit_failed`) backs
 off the same way. A visit only fills empty hotbar slots, so a tool is never
-displaced, and a unit whose hotbar is full does not go. The task queue waits while a visit is under way.
+displaced, and a unit whose hotbar is full does not go; a visit that fills
+the hotbar before taking everything it needed logs `kit_no_room` instead of
+`kit_empty`. The task queue waits while a visit is under way.
 
 To use it, set the same two variables on every unit in the deployment's
 environment, for example in the Helm values that carry `DEFEND`:
