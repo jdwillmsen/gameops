@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
@@ -57,6 +58,20 @@ func main() {
 		log.Error("config_invalid", logging.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
+	operators, err := auth.New(auth.Config{
+		Origin:     os.Getenv("PUBLIC_ORIGIN"),
+		DataDir:    os.Getenv("DATA_DIR"),
+		Operators:  os.Getenv("CREW_OPERATORS"),
+		InvitesDir: os.Getenv("CREW_INVITES_DIR"),
+		Log:        log,
+	})
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": err.Error()})
+		os.Exit(1)
+	}
+	if !operators.Enabled() {
+		log.Warn("auth_disabled", logging.Fields{"effect": "no /auth routes; every command route answers 401; set PUBLIC_ORIGIN and CREW_OPERATORS"})
+	}
 	store := &work.Lazy{}
 	workToken := os.Getenv("WORK_TOKEN")
 	if workToken == "" {
@@ -71,7 +86,7 @@ func main() {
 	defer endStreams()
 	srv := &http.Server{
 		Addr: addr,
-		Handler: newHandler(units, poller, log, func(mux *http.ServeMux) {
+		Handler: newHandler(units, poller, log, operators.Mount, func(mux *http.ServeMux) {
 			// Console wiring will hook the wake and notify later; the unit
 			// routes alone need neither yet.
 			work.Routes(mux, store, units, workToken, nil)

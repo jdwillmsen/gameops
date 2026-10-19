@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
@@ -150,4 +151,28 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestAuthRoutesOnlyWhenConfigured(t *testing.T) {
+	units, err := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://127.0.0.1:1"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
+	status := func(a *auth.Auth) int {
+		h := newHandler(units, poller, logging.New("error"), a.Mount)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/me", nil))
+		return rec.Code
+	}
+	if got := status(auth.Disabled()); got != http.StatusNotFound {
+		t.Fatalf("disabled: /auth/me %d, want 404", got)
+	}
+	on, err := auth.New(auth.Config{Origin: "https://crew.example", DataDir: t.TempDir(), Operators: `[{"id":"owner","name":"Owner"}]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := status(on); got != http.StatusUnauthorized {
+		t.Fatalf("enabled: /auth/me %d, want 401", got)
+	}
 }
