@@ -151,7 +151,7 @@ func TestDepositIsNotReadyWithTooLittle(t *testing.T) {
 func TestDepositClosesAChestThatOpensAfterTheTimeout(t *testing.T) {
 	w := chestWorld()
 	r := depositRig(t, w, 6, 5)
-	r.openDelay = waitTicks + 3
+	r.openDelay = answerTicks + 3
 	st, err := r.run(NewDepositChest(w, r.self, chestPos, "cobblestone", 16), 400)
 	if st != Failed || err == nil || !strings.Contains(err.Error(), "chest did not open") {
 		t.Fatalf("status %v, err %v", st, err)

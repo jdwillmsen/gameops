@@ -213,8 +213,8 @@ func (w *Withdraw) open(a Actuator, snap belief.Snapshot) outcome {
 		ph.p = wTake
 		return next
 	}
-	if ph.waited++; ph.waited >= waitTicks {
-		ph.drain = fmt.Errorf("chest did not open within %d ticks", waitTicks)
+	if ph.waited++; ph.waited >= answerTicks {
+		ph.drain = fmt.Errorf("chest did not open within %d ticks", answerTicks)
 		ph.p, ph.waited = wDrain, 0
 		return next
 	}
@@ -239,8 +239,8 @@ func (w *Withdraw) take(a Actuator, snap belief.Snapshot) outcome {
 	if ph.pending {
 		status, answered := a.Response(ph.reqID)
 		if !answered {
-			if ph.waited++; ph.waited >= waitTicks {
-				return w.failed(a, fmt.Errorf("no answer to the withdraw request within %d ticks", waitTicks))
+			if ph.waited++; ph.waited >= answerTicks {
+				return w.failed(a, fmt.Errorf("no answer to the withdraw request within %d ticks", answerTicks))
 			}
 			return w.idle(a)
 		}
@@ -261,8 +261,8 @@ func (w *Withdraw) take(a Actuator, snap belief.Snapshot) outcome {
 	}
 	if ph.settling {
 		if count(snap, ph.item) < ph.before+ph.n {
-			if ph.waited++; ph.waited >= waitTicks {
-				return w.failed(a, fmt.Errorf("inventory did not show the withdrawal within %d ticks", waitTicks))
+			if ph.waited++; ph.waited >= answerTicks {
+				return w.failed(a, fmt.Errorf("inventory did not show the withdrawal within %d ticks", answerTicks))
 			}
 			return w.idle(a)
 		}

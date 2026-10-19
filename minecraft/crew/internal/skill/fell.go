@@ -708,7 +708,7 @@ func (f *Fell) collect(a Actuator, p act.Pose) outcome {
 			return next
 		}
 	}
-	if f.colWait++; f.colWait > collectWait {
+	if f.colWait++; f.colWait > collectWait+f.mine.lastBreak {
 		f.cols, f.colWait = f.cols[1:], 0
 		return next
 	}

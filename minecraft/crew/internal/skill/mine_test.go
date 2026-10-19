@@ -210,3 +210,15 @@ func TestMineBlockIgnoresBlocksOutsideTheArea(t *testing.T) {
 		t.Errorf("error carries coordinates: %q", err)
 	}
 }
+
+// A loaded server finishes a break and offers its drop many ticks late; the
+// skill must wait for it, not fail a task that is only slow.
+func TestMineBlockToleratesALoadedServer(t *testing.T) {
+	w := quarry()
+	r := withPickaxe(newRig(t, w, feetAt(2, 1, 2)))
+	r.slowBreak, r.slowPickup = 70, 70
+	m := NewMineBlock(w, r.self, "stone", "cobblestone", "pickaxe", 3, 0)
+	if st, err := r.run(m, 3000); st != Done {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}

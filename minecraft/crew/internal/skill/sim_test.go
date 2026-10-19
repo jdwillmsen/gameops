@@ -157,6 +157,11 @@ type rig struct {
 
 	refusePickups bool
 	stallBreaks   bool
+	// slowBreak and slowPickup stand in for a loaded server: inputs it takes
+	// to finish a break, and age a drop must reach before it can be taken.
+	// Zero is a healthy server.
+	slowBreak  int
+	slowPickup int
 	// openDelay holds the ContainerOpen back this many inputs after the click.
 	openDelay     int
 	openIn        int
@@ -353,7 +358,11 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 				if centre := (mgl32.Vec3{float32(a.BlockPos.X()) + 0.5, float32(a.BlockPos.Y()) + 0.5, float32(a.BlockPos.Z()) + 0.5}); centre.Sub(eye).Len() > 5.5 {
 					continue
 				}
-				r.breaking = &breakSession{pos: a.BlockPos, left: 23}
+				left := 23
+				if r.slowBreak > 0 {
+					left = r.slowBreak
+				}
+				r.breaking = &breakSession{pos: a.BlockPos, left: left}
 			case protocol.PlayerActionAbortBreak:
 				r.breaking = nil
 				r.aborts++
@@ -395,7 +404,11 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 	for _, d := range r.drops {
 		// The server keeps offering a drop to anyone who comes within range
 		// until it despawns, so a drop missed at first can still be taken.
-		if d.age++; d.age >= 10 {
+		ready := 10
+		if r.slowPickup > 0 {
+			ready = r.slowPickup
+		}
+		if d.age++; d.age >= ready {
 			dx, dz := float64(d.at.X()-pose.Feet.X()), float64(d.at.Z()-pose.Feet.Z())
 			if !r.refusePickups && math.Hypot(dx, dz) <= 1.5 && math.Abs(float64(d.at.Y()-pose.Feet.Y())) <= 1 {
 				r.pickUp(d.item)

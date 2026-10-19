@@ -118,6 +118,9 @@ const (
 	eyeHeight = 1.62
 	// A wait that long is a fault, not slowness: 5 s at 20 ticks per second.
 	waitTicks = 100
+	// The longest a server may take to answer a chest open or a request. A
+	// loaded server answers late; only silence for this long is a fault.
+	answerTicks = 300
 )
 
 func overworld(s belief.Snapshot) error {
