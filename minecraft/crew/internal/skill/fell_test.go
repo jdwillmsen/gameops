@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
 const (
@@ -280,5 +281,35 @@ func TestFellDoesNotBuildWithCobblestoneItCannotBreak(t *testing.T) {
 	r.give(2, idCobblestone, 3)
 	if st, _ := r.run(newFell(w, r, 7), 3000); st != Failed || r.placed != 0 {
 		t.Errorf("status %v, placed %d", st, r.placed)
+	}
+}
+
+func TestFellWalksOntoAPillarSpotFromInsideTheBrakeDistance(t *testing.T) {
+	w := oak(7)
+	r := fellRig(t, w, 3)
+	f := NewFell(w, r.self, "oak_log", "oak_log", "axe", 7, 0, nil).(*Fell)
+	for i := 0; i < 2000 && f.phase != fWalk; i++ {
+		if st, err := f.Step(t.Context(), r); st != Running || err != nil {
+			t.Fatalf("planning stopped with status %v, err %v", st, err)
+		}
+	}
+	if f.phase != fWalk {
+		t.Fatal("fell skill never planned a pillar")
+	}
+	// The navigator stops pushing within brakeDistance (0.4) of its goal, so a
+	// unit left 0.32 from the ground cell's centre, as seen live, gets no
+	// nearer. Offset away from the trunk to stay clear of it.
+	g := f.ground
+	away := mgl32.Vec2{float32(g.X() - treeX), float32(g.Z() - treeZ)}.Normalize().Mul(0.32)
+	feet := mgl32.Vec3{float32(g.X()) + 0.5 + away.X(), float32(g.Y()), float32(g.Z()) + 0.5 + away.Y()}
+	r.send(&packet.CorrectPlayerMovePrediction{Position: feet.Add(mgl32.Vec3{0, 1.62, 0}), OnGround: true})
+	if err := r.Tick(actIdle(r)); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := r.run(f, 4000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("oak_log"); got != 7 {
+		t.Errorf("oak_log = %d, want 7", got)
 	}
 }
