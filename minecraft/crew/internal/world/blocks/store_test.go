@@ -247,3 +247,31 @@ func TestEvictionKeepsTheBlocksAroundThePublisherCentre(t *testing.T) {
 		t.Fatalf("block under the unit = %q, known %v; want stone", name, known)
 	}
 }
+
+type stateTable struct{ table }
+
+func (s stateTable) BlockState(h uint32) (string, map[string]any, bool) {
+	n, ok := s.table[h]
+	return n, map[string]any{"half": "top"}, ok
+}
+
+func TestStateCarriesTheBlocksStatesWhenTheNameTableHasThem(t *testing.T) {
+	pos := protocol.BlockPos{1, 2, 3}
+	for _, tc := range []struct {
+		names Names
+		props map[string]any
+	}{
+		{stateTable{names}, map[string]any{"half": "top"}},
+		{names, nil},
+	} {
+		s := New(tc.names, 4)
+		s.Apply(subChunkPacket(0, 0, 0, uniformPayload(stoneHash)), &sink{})
+		name, props, known := s.State(pos)
+		if name != "stone" || !known || len(props) != len(tc.props) {
+			t.Errorf("State = %q %v known=%v, want stone %v", name, props, known, tc.props)
+		}
+	}
+	if _, _, known := New(names, 4).State(pos); known {
+		t.Error("a block in an unreceived sub-chunk must be unknown")
+	}
+}
