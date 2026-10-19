@@ -272,3 +272,17 @@ func TestItemStackResponseForOtherContainersAndRejectionsIsIgnored(t *testing.T)
 		t.Errorf("slot 3 = %+v, %v", it, ok)
 	}
 }
+
+func TestPartialWithdrawNamesTheNewStackFromWhatStayed(t *testing.T) {
+	tr := withItems(t)
+	tr.Apply(&packet.ContainerOpen{WindowID: 2})
+	tr.Apply(&packet.InventoryContent{WindowID: 2, Content: []protocol.ItemInstance{stack(cobblestone, 16, 7)}})
+	r := &packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{ContainerInfo: []protocol.StackResponseContainerInfo{
+		{Container: protocol.FullContainerName{ContainerID: protocol.ContainerLevelEntity}, SlotInfo: []protocol.StackResponseSlotInfo{{Slot: 0, Count: 10, StackNetworkID: 7}}},
+		{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory}, SlotInfo: []protocol.StackResponseSlotInfo{{Slot: 4, Count: 6, StackNetworkID: 9}}},
+	}}}}
+	tr.Apply(r)
+	if it, ok := find(tr.Snapshot().Inventory, 4); !ok || it.Name != "cobblestone" || it.Count != 6 || it.StackNetworkID != 9 {
+		t.Errorf("slot 4 = %+v, %v", it, ok)
+	}
+}
