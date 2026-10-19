@@ -92,7 +92,8 @@ plan is written when the wave starts, from what the wave before it learned.
 | 1 | Lab world + empty `crew` worker with a status API | crew-1 joins the lab, reports state, survives a server restart and a death | written |
 | 2a | Rendered camera spike: crew-1's view drawn in a browser from its own data | a recognisable first-person view of crew-1, updating live, for ≥10 min | spike brief below |
 | 2b | Mirror camera spike: a real client rendering crew-1's packet stream | ≥10 min of a stable stream, unattended, or a written reason it cannot work | spike brief below |
-| 3 | Skill runtime + `crew-control` MVP | operator assigns "mine 16 cobblestone → deposit in chest", it completes without an LLM | after W1 |
+| 3a | Crew acts: world store, actuator, pathfinder, skills and a token-guarded task API on crew itself | operator submits "mine 16 cobblestone → deposit in chest" to crew-1 on the lab and it completes without an LLM | `docs/superpowers/plans/2026-10-18-crew-wave3a-actions.md` |
+| 3b | `crew-control` MVP: task queue, SSE telemetry, authentication in front of crew | tasks are queued and watched through crew-control instead of crew's own API | after 3a |
 | 4 | Crew Console MVP | one operator runs a W3 task while watching the POV, from the UI alone | after W2 + W3 |
 | 5 | Scale + polish: crew-2/camera-2, more skills, failure taxonomy, optional offline skill-authoring CLI | two units work side by side for an hour | after W4 |
 | Gate | FWB rollout | group agrees crew may work on FWB, and on whether cameras appear there | owner decision |

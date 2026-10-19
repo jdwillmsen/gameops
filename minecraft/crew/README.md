@@ -48,6 +48,13 @@ time. A session end or death fails the running task (`session ended`,
 4096 bytes (413) and at most 16 tasks may wait (429). Task logs carry the id,
 template, state and reason, never the request.
 
+```
+curl -H "Authorization: Bearer $TASKS_TOKEN" \
+  -d '{"template":"gather_and_deposit","item":"cobblestone","qty":16,"chest":{"x":-4,"y":100,"z":0}}' \
+  localhost:8080/v1/tasks
+curl -H "Authorization: Bearer $TASKS_TOKEN" localhost:8080/v1/tasks
+```
+
 ## Rendered camera
 
 With `CAMERA_ENABLED=true`, crew streams the chunks, entities and its own look
@@ -98,6 +105,22 @@ and the status port published on `127.0.0.1:8080` only:
 docker compose -f minecraft/crew/lab/compose.yaml up -d --build crew-1
 curl -s localhost:8080/readyz
 ```
+
+### Gather-and-deposit scene
+
+`lab/scene.sh <lab-service> [unit]` builds a stone-free platform, a quarry
+and a chest, then puts the unit on the platform with a wooden pickaxe:
+
+```
+export TASKS_TOKEN=$(openssl rand -hex 16)   # compose passes it to crew-1
+docker compose -f minecraft/crew/lab/compose.yaml up -d --build
+minecraft/crew/lab/scene.sh lab
+```
+
+The cluster lab is joinable by real players (NodePort 31136, offline, no
+ops), so lab commands target the unit by name and never `@a`: the script's
+second argument is the unit's username and defaults to `crew-1`. The scene
+needs cheats, so it only ever runs against a lab; crew itself sends no command.
 
 ### Textures
 
