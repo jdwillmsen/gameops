@@ -225,7 +225,7 @@ The page meshes sub-chunks in a Web Worker (`web/mesher.js`, buffers
 transferred back) and culls each mesh by hand: a three.js `Frustum` against the
 tight box the worker measures, plus a cut at the fog's far plane by view depth,
 where everything is already the sky colour. About 36% of meshes are drawn at
-radius 4 and 25% at radius 8 (looking along one axis). three.js already tested
+radius 4 and 31% at radius 8 (looking along one axis). three.js already tested
 a loose bounding sphere per mesh, so the gain is the tighter box and the fog
 cut, not culling as such.
 
@@ -237,9 +237,9 @@ three alternating before/after runs each. The host was busy (load average
 
 | Viewers | Radius | Page fps before (runs) | Page fps after (runs) |
 |---|---|---|---|
-| 4 | 4 | 38.9, 41.3, 43.2 | 40.0, 41.6, 42.0 |
-| 4 | 8 | 17.1, 19.3, 19.8 | 23.7, 26.3, 26.5 |
+| 4 | 4 | 42.1, 43.1, 43.9 | 38.8, 43.4, 44.9 |
+| 4 | 8 | 17.2, 18.1, 18.8 | 20.8, 20.8, 21.1 |
 
 Radius 4 is unchanged within noise: it was already past 30 fps in this world,
 so the rows above, not this one, show the render-bound case. Radius 8 gains
-about 35%. The `run.sh` re-run on the lab is still to do.
+about 16%. The `run.sh` re-run on the lab is still to do.
