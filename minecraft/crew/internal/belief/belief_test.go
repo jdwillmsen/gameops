@@ -161,3 +161,32 @@ func TestResetForgetsKnownPosition(t *testing.T) {
 		t.Error("position still known after reset")
 	}
 }
+
+func TestHeldSlotIsUnknownUntilTheServerOrUnitSetsIt(t *testing.T) {
+	tr := spawned(t)
+	if s := tr.Snapshot(); s.HeldKnown {
+		t.Fatalf("held known at spawn: %+v", s)
+	}
+	tr.Apply(&packet.PlayerHotBar{SelectedHotBarSlot: 4, SelectHotBarSlot: true})
+	if s := tr.Snapshot(); !s.HeldKnown || s.HeldSlot != 4 {
+		t.Errorf("after PlayerHotBar: %+v", s)
+	}
+	// A hotbar packet that does not move the selection, or names another
+	// window or a slot off the bar, must not.
+	tr.Apply(&packet.PlayerHotBar{SelectedHotBarSlot: 6})
+	tr.Apply(&packet.PlayerHotBar{SelectedHotBarSlot: 6, SelectHotBarSlot: true, WindowID: 3})
+	tr.Apply(&packet.PlayerHotBar{SelectedHotBarSlot: 9, SelectHotBarSlot: true})
+	tr.SetHeld(-1)
+	tr.SetHeld(9)
+	if s := tr.Snapshot(); s.HeldSlot != 4 {
+		t.Errorf("held = %d, want 4", s.HeldSlot)
+	}
+	tr.SetHeld(8)
+	if s := tr.Snapshot(); s.HeldSlot != 8 {
+		t.Errorf("held = %d, want 8", s.HeldSlot)
+	}
+	tr.Reset()
+	if s := tr.Snapshot(); s.HeldKnown {
+		t.Errorf("held survived a session end: %+v", s)
+	}
+}

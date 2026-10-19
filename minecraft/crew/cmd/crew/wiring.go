@@ -56,6 +56,22 @@ func (u *unit) apply(pk packet.Packet) error {
 	return u.startActing()
 }
 
+// heldRecorder tells the tracker which hotbar slot the unit selects, because
+// the server does not echo a client's own MobEquipment back.
+type heldRecorder struct {
+	packetWriter
+	runtimeID uint64
+	tracker   *belief.Tracker
+}
+
+func (h heldRecorder) WritePacket(pk packet.Packet) error {
+	err := h.packetWriter.WritePacket(pk)
+	if m, ok := pk.(*packet.MobEquipment); ok && err == nil && m.EntityRuntimeID == h.runtimeID {
+		h.tracker.SetHeld(int(m.HotBarSlot))
+	}
+	return err
+}
+
 // startActing waits for the position the server reports: the spawn game data
 // carries only a placeholder, and an actuator started from it would be
 // corrected on its first tick.
@@ -64,7 +80,7 @@ func (u *unit) startActing() error {
 	if !snap.PositionKnown {
 		return nil
 	}
-	a := act.New(u.conn, u.runtimeID, startPose(snap), path.NewSolid(u.world))
+	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
 	a.ItemNames(u.items)
 	// Until the loading screen ends, the server drops every action without an
 	// error, so this precedes any task tick.

@@ -12,6 +12,9 @@ import (
 // Armor, the offhand and containers arrive in other windows and are not kept.
 const inventorySize = 36
 
+// hotbarSlots are the first slots of that inventory.
+const hotbarSlots = 9
+
 // Item is one non-empty inventory stack.
 type Item struct {
 	Slot int    `json:"slot"`
