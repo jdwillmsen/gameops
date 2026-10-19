@@ -13,6 +13,17 @@ package camera
 //	entity types [8][n u16]{len u8, name}...             index = type id
 //	atlas        [9][atlas version u8]                   a texture atlas can be fetched
 //	names        [10][n uvarint]{id uvarint, len u8, name}...   player name labels
+//	entity data  [11][n uvarint]{id uvarint, flags u8, colour u8, len u8, item}...
+//	models       [12][models version u8]                 entity models can be fetched
+//
+// Entity data carries what changes how an entity looks and is not part of
+// its pose: flags bit 0 is baby and bit 1 sheared, colour is the dye index
+// (0 to 15) of a sheep's wool, and item is the name of a dropped item without
+// its namespace. It is sent when an entity appears and whenever one of these
+// changes; an entity never mentioned has all of them zero. Pages that predate
+// a frame type skip it. The models frame carries no data either: the page
+// fetches /v1/camera/entities.json and /v1/camera/entities.png, and a page
+// that never gets the frame keeps drawing stand-in boxes.
 //
 // Material flag bit 0 marks a block that is not a full cube; a page without an
 // atlas has no shape to draw it with and skips it. Version 2 added the flags
@@ -54,6 +65,12 @@ const (
 	frameEntityTypes byte = 8
 	frameAtlas       byte = 9
 	frameNames       byte = 10
+	frameEntityData  byte = 11
+	frameModels      byte = 12
+
+	// Entity data flag bits.
+	entBaby    byte = 1
+	entSheared byte = 2
 
 	matNonCube byte = 1
 
@@ -71,6 +88,40 @@ type selfPose struct{ X, Y, Z, Yaw, Pitch float32 }
 func helloFrame() []byte { return []byte{frameHello, wireVersion} }
 
 func atlasFrame() []byte { return []byte{frameAtlas, atlasFormat} }
+
+// modelsFormat is the version of the entity table document the page fetches.
+const modelsFormat byte = 1
+
+func modelsFrame() []byte { return []byte{frameModels, modelsFormat} }
+
+// entityLook is the appearance data of one entity.
+type entityLook struct {
+	Flags byte
+	Color byte
+	Item  string
+}
+
+func (l entityLook) zero() bool { return l == entityLook{} }
+
+func encodeEntityData(looks map[uint64]entityLook) []byte {
+	ids := make([]uint64, 0, len(looks))
+	for id := range looks {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	f := binary.AppendUvarint([]byte{frameEntityData}, uint64(len(ids)))
+	for _, id := range ids {
+		l := looks[id]
+		item := l.Item
+		if len(item) > maxNameLen {
+			item = ""
+		}
+		f = binary.AppendUvarint(f, id)
+		f = append(f, l.Flags, l.Color, uint8(len(item)))
+		f = append(f, item...)
+	}
+	return f
+}
 
 func resetFrame() []byte { return []byte{frameReset} }
 

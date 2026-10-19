@@ -183,6 +183,7 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	beginSession(ctx, addr)
 	if hub != nil {
 		hub.Spawn(gd.EntityRuntimeID)
+		hub.SetItems(gd.Items)
 		defer hub.Reset()
 	}
 	log.Info("spawned", spawnedFields(conn.IdentityData().XUID, cfg.ViewDistance))
