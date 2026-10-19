@@ -288,9 +288,9 @@ loop.
 
 `area` and `to` are required: the lab bound is not optional for a skill that
 removes terrain. Depth 1 to 32, branches 0 to 3 (forward, left, right of the
-facing, all off the shaft's bottom cell), branch length 1 to 32. Parsing
-rejects a plan with any cell outside `area`, so a bad request fails at
-submit, and the skill checks every cell again before opening it.
+facing, all off the shaft's bottom cell), branch length 1 to 32. Submit
+rejects a plan with any cell outside `area`, so a bad request fails
+there, and the skill checks every cell again before opening it.
 
 **Geometry.** One block down per block forward, three cells tall per step, so
 the unit walks both ways with the planner's existing step-up and one-block

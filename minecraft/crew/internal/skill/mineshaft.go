@@ -153,6 +153,7 @@ type MineShaft struct {
 	reachTried bool
 	settleNext bool
 	waited     int
+	calm       int
 	selected   bool
 	brk        cellBreak
 	nav        *navigator
@@ -415,6 +416,12 @@ func (m *MineShaft) dig(a Actuator, snap belief.Snapshot) outcome {
 		m.phase = shBreak
 		return next
 	}
+	for i, c := range st.cells {
+		if name, known := m.world.Block(c); !known || !path.Passable(name) {
+			m.ci = i
+			return next
+		}
+	}
 	m.phase = shWalk
 	return next
 }
@@ -429,7 +436,7 @@ func (m *MineShaft) breakCell(a Actuator) outcome {
 		return outcome{st: Running}
 	}
 	m.dug++
-	m.waited = 0
+	m.waited, m.calm = 0, 0
 	m.phase = shDig
 	if m.settleNext {
 		m.phase = shSettle
@@ -438,11 +445,16 @@ func (m *MineShaft) breakCell(a Actuator) outcome {
 }
 
 // settle idles while what the break left unsupported falls, so the next look
-// at the cell sees it. The server may sit on the fall for a while, so it waits
-// as long as the block above the cell is still falling kind.
+// at the cell sees it. The server may sit on the fall for a while, and once it
+// lets go the block is in the air with nothing above the cell, so the minimum
+// wait counts from the last tick the block above was still falling kind.
 func (m *MineShaft) settle(a Actuator) outcome {
 	m.waited++
-	if m.waited > settleCap || (m.waited > settleTicks && !isFalling(m.nameAt(up(m.brk.pos, 1)))) {
+	m.calm++
+	if isFalling(m.nameAt(up(m.brk.pos, 1))) {
+		m.calm = 0
+	}
+	if m.waited > settleCap || m.calm > settleTicks {
 		m.phase = shDig
 		return next
 	}
