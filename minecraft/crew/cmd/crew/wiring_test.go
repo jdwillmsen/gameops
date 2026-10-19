@@ -15,6 +15,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 )
@@ -119,7 +120,7 @@ func TestTaskRoutesExistOnlyWithAToken(t *testing.T) {
 	runner := task.NewRunner(nil, nil, tracker.Snapshot, time.Minute, nopLog{})
 	for token, want := range map[string]int{"": http.StatusNotFound, "tok": http.StatusUnauthorized} {
 		rec := httptest.NewRecorder()
-		statusHandler(tracker, "dev", nil, runner, token).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/tasks", nil))
+		statusHandler(tracker, "dev", statusapi.Unit{}, nil, runner, token).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/tasks", nil))
 		if rec.Code != want {
 			t.Errorf("token %q: GET /v1/tasks = %d, want %d", token, rec.Code, want)
 		}
@@ -140,7 +141,7 @@ func TestStateShowsTasksButNeverTheTokenOrControl(t *testing.T) {
 	}
 
 	for _, tok := range []string{"", token} {
-		h := statusHandler(tracker, "dev", nil, runner, tok)
+		h := statusHandler(tracker, "dev", statusapi.Unit{}, nil, runner, tok)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/state", nil))
 		body := rec.Body.String()
@@ -155,7 +156,7 @@ func TestStateShowsTasksButNeverTheTokenOrControl(t *testing.T) {
 		}
 	}
 
-	h := statusHandler(tracker, "dev", nil, runner, "")
+	h := statusHandler(tracker, "dev", statusapi.Unit{}, nil, runner, "")
 	for _, c := range []struct{ method, path string }{
 		{http.MethodPost, "/v1/tasks"},
 		{http.MethodPost, "/v1/tasks/" + submitted.ID + "/cancel"},

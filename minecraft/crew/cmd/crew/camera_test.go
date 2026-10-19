@@ -11,6 +11,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 )
 
 func status(t *testing.T, cfg config.Config, path string) (int, bool) {
@@ -18,7 +19,7 @@ func status(t *testing.T, cfg config.Config, path string) (int, bool) {
 	tracker := belief.New(time.Now)
 	hub, _ := newCamera(cfg, tracker, newDecoder(logging.New("")), logging.New(""))
 	rec := httptest.NewRecorder()
-	statusHandler(tracker, "dev", hub, nil, "").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	statusHandler(tracker, "dev", statusapi.Unit{}, hub, nil, "").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 	return rec.Code, hub != nil
 }
 
@@ -65,7 +66,7 @@ func TestMetricsShowTheDriftCounterOncePerVersion(t *testing.T) {
 	beginSession(context.Background(), "127.0.0.1:1")
 
 	rec := httptest.NewRecorder()
-	statusHandler(tracker, "dev", hub, nil, "").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	statusHandler(tracker, "dev", statusapi.Unit{}, hub, nil, "").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	want := `crew_camera_unmapped_block_hashes_total{server_version="unknown"} 0`
 	if !strings.Contains(rec.Body.String(), want) {
 		t.Errorf("/metrics lacks %q", want)

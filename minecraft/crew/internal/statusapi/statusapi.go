@@ -26,8 +26,15 @@ type TaskSource interface {
 	List() []task.Task
 }
 
+// Unit is who the state belongs to: a fixed id and the in-game name.
+type Unit struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type stateBody struct {
 	Version string          `json:"version"`
+	Unit    Unit            `json:"unit"`
 	State   belief.Snapshot `json:"state"`
 	Tasks   tasksView       `json:"tasks"`
 }
@@ -57,7 +64,7 @@ func viewTasks(src TaskSource) tasksView {
 }
 
 // Handler serves the status routes. tasks may be nil, which reports no tasks.
-func Handler(src Source, version string, tasks TaskSource) http.Handler {
+func Handler(src Source, version string, unit Unit, tasks TaskSource) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
@@ -72,7 +79,7 @@ func Handler(src Source, version string, tasks TaskSource) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(stateBody{Version: version, State: src.Snapshot(), Tasks: viewTasks(tasks)})
+		_ = json.NewEncoder(w).Encode(stateBody{Version: version, Unit: unit, State: src.Snapshot(), Tasks: viewTasks(tasks)})
 	})
 	// The process-wide registry: packages register their own metrics at init,
 	// so this stays the one place metrics are exposed.

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -20,12 +22,20 @@ const (
 	// Every viewer holds a replay of the unit's world in flight; the cap keeps
 	// a stray page reload loop from becoming crew's main cost.
 	maxCameraViewers = 64
+	// Bedrock refuses a longer display name at login.
+	maxUsernameLen = 16
 )
+
+// A fixed number is the unit's identity; the username is only its name, so
+// the number can stay put if a name is ever changed.
+var unitIDPattern = regexp.MustCompile(`^crew-[0-9]{2,}$`)
 
 type Config struct {
 	Host     string
 	Port     int
 	Username string
+	// UnitID is the unit's fixed identity, as opposed to its name.
+	UnitID string
 	// Offline joins with only a display name and no Microsoft sign-in. An
 	// online-mode server rejects such a client, so it is for a lab server
 	// with online mode off.
@@ -58,6 +68,13 @@ func Load() (Config, error) {
 	username, err := required("MC_USERNAME")
 	if err != nil {
 		return Config{}, err
+	}
+	if n := utf8.RuneCountInString(username); n > maxUsernameLen {
+		return Config{}, fmt.Errorf("MC_USERNAME is %d characters, at most %d", n, maxUsernameLen)
+	}
+	unitID := stringDefault("CREW_ID", username)
+	if os.Getenv("CREW_ID") != "" && !unitIDPattern.MatchString(unitID) {
+		return Config{}, fmt.Errorf("CREW_ID=%q: want crew- followed by at least two digits", unitID)
 	}
 	offline, err := boolDefault("MC_OFFLINE", false)
 	if err != nil {
@@ -103,6 +120,7 @@ func Load() (Config, error) {
 		Host:           host,
 		Port:           port,
 		Username:       username,
+		UnitID:         unitID,
 		Offline:        offline,
 		ViewDistance:   viewDistance,
 		AuthCacheDir:   stringDefault("AUTH_CACHE_DIR", "/data/auth"),

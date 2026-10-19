@@ -28,6 +28,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -72,6 +73,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	log = log.With(logging.Fields{"unit": cfg.UnitID})
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -92,7 +95,7 @@ func main() {
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
 	go runner.Run(ctx)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, hub, runner, cfg.TasksToken), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
