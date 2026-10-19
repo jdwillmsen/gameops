@@ -130,8 +130,10 @@ type rig struct {
 	// check what the unit opened.
 	cleared []protocol.BlockPos
 	falls   []fall
-	aborts  int
-	held    int // last MobEquipment hotbar slot, -1 before one
+	// fallDelay is how many ticks unsupported gravel waits before it falls.
+	fallDelay int
+	aborts    int
+	held      int // last MobEquipment hotbar slot, -1 before one
 
 	// chest is the chest every test that never names a position talks to;
 	// chests holds the others, so a haul can have several.
@@ -404,7 +406,7 @@ func (r *rig) onBroken(pos protocol.BlockPos) {
 	r.breaks++
 	r.cleared = append(r.cleared, pos)
 	if falling(r.world[protocol.BlockPos{pos.X(), pos.Y() + 1, pos.Z()}]) {
-		r.falls = append(r.falls, fall{at: pos, left: 4})
+		r.falls = append(r.falls, fall{at: pos, left: max(r.fallDelay, 4)})
 	}
 	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone, "gravel": idGravel, "coal_ore": idCoal}
 	if item, ok := drops[name]; ok {

@@ -248,6 +248,22 @@ func TestShaftKeepsMiningAGravelColumnUntilItIsStable(t *testing.T) {
 	}
 }
 
+func TestShaftWaitsOutGravelThatIsSlowToFall(t *testing.T) {
+	w := mineWorld()
+	w.fill("gravel", 13, 1, 10, 13, 3, 10)
+	r := shaftRig(t, w)
+	r.fallDelay = 40
+	st, err := r.run(newShaft(t, w, r, shaftSpec(4, 0, 0), nil), 12000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	for y := int32(-2); y <= 0; y++ {
+		if n := w[protocol.BlockPos{13, y, 10}]; n != "air" {
+			t.Errorf("column cell %d is %q: gravel fell in behind the unit", y, n)
+		}
+	}
+}
+
 func TestShaftStopsWhenGravelHidesWater(t *testing.T) {
 	w := mineWorld()
 	w.fill("gravel", 13, 1, 10, 13, 2, 10)

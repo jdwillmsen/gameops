@@ -15,9 +15,12 @@ import (
 )
 
 const (
-	// A column of gravel or sand that has lost its support lands within a
-	// few ticks; this leaves room for the server's timing and the network.
-	settleTicks = 12
+	// Least wait after breaking under gravel or sand: the block is already
+	// falling, in neither cell, for a few ticks before it lands.
+	settleTicks = 8
+	// A column that has not come down by then is not going to; the next look
+	// at the cell decides what to do.
+	settleCap = 100
 	// Breaks of one cell before a column that keeps refilling is given up.
 	maxCellBreaks = 12
 	// Taller than any column of falling blocks the unit will reason about.
@@ -435,9 +438,11 @@ func (m *MineShaft) breakCell(a Actuator) outcome {
 }
 
 // settle idles while what the break left unsupported falls, so the next look
-// at the cell sees it.
+// at the cell sees it. The server may sit on the fall for a while, so it waits
+// as long as the block above the cell is still falling kind.
 func (m *MineShaft) settle(a Actuator) outcome {
-	if m.waited++; m.waited > settleTicks {
+	m.waited++
+	if m.waited > settleCap || (m.waited > settleTicks && !isFalling(m.nameAt(up(m.brk.pos, 1)))) {
 		m.phase = shDig
 		return next
 	}
