@@ -19,6 +19,10 @@ import (
 const (
 	gatherAndDeposit = "gather_and_deposit"
 	haulTemplate     = "haul"
+	shaftTemplate    = "mine_shaft"
+	maxShaftDepth    = 32
+	maxBranches      = 3
+	maxBranchLength  = 32
 	maxHaulItems     = 8
 	maxHaulSources   = 4
 	minQty           = 1
@@ -47,7 +51,16 @@ type Template struct {
 	Items map[string]int `json:"items,omitempty"`
 	From  []Chest        `json:"from,omitempty"`
 	To    *Chest         `json:"to,omitempty"`
+
+	Entrance     *Chest `json:"entrance,omitempty"`
+	Facing       string `json:"facing,omitempty"`
+	Depth        int    `json:"depth,omitempty"`
+	Branches     int    `json:"branches,omitempty"`
+	BranchLength int    `json:"branch_length,omitempty"`
 }
+
+// facings maps a heading to its step in x and z: north is toward negative z.
+var facings = map[string][2]int32{"north": {0, -1}, "south": {0, 1}, "east": {1, 0}, "west": {-1, 0}}
 
 // Area is an inclusive box, min at most max on every axis.
 type Area struct {
@@ -84,6 +97,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseGather(body)
 	case haulTemplate:
 		return parseHaul(body)
+	case shaftTemplate:
+		return parseShaft(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -146,6 +161,53 @@ func (a Area) validate() error {
 	return nil
 }
 
+func parseShaft(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Entrance *Chest `json:"entrance"`
+		Facing   string `json:"facing"`
+		Depth    int    `json:"depth"`
+		Branches int    `json:"branches"`
+		Length   int    `json:"branch_length"`
+		Area     *struct {
+			Min *Chest `json:"min"`
+			Max *Chest `json:"max"`
+		} `json:"area"`
+		To *Chest `json:"to"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Entrance == nil {
+		return Template{}, errors.New("entrance is required")
+	}
+	if _, ok := facings[raw.Facing]; !ok {
+		return Template{}, errors.New("facing must be north, south, east or west")
+	}
+	if raw.Depth < 1 || raw.Depth > maxShaftDepth {
+		return Template{}, fmt.Errorf("depth must be 1 to %d", maxShaftDepth)
+	}
+	if raw.Branches < 0 || raw.Branches > maxBranches {
+		return Template{}, fmt.Errorf("branches must be 0 to %d", maxBranches)
+	}
+	if raw.Length < 0 || raw.Length > maxBranchLength || (raw.Branches > 0) != (raw.Length > 0) {
+		return Template{}, fmt.Errorf("branch_length must be 1 to %d with branches, and absent without", maxBranchLength)
+	}
+	// The lab bound is not optional for a template that removes terrain.
+	if raw.Area == nil || raw.Area.Min == nil || raw.Area.Max == nil {
+		return Template{}, errors.New("area with min and max is required")
+	}
+	a := Area{Min: *raw.Area.Min, Max: *raw.Area.Max}
+	if err := a.validate(); err != nil {
+		return Template{}, err
+	}
+	if raw.To == nil {
+		return Template{}, errors.New("to is required")
+	}
+	return Template{Template: raw.Template, Entrance: raw.Entrance, Facing: raw.Facing, Depth: raw.Depth,
+		Branches: raw.Branches, BranchLength: raw.Length, Area: &a, To: raw.To}, nil
+}
+
 func parseHaul(body []byte) (Template, error) {
 	var raw struct {
 		Template string         `json:"template"`
@@ -190,6 +252,22 @@ func parseHaul(body []byte) (Template, error) {
 
 // Expand lists the skills a template stands for, in order.
 func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opts ...skill.Option) ([]skill.Skill, error) {
+	if t.Template == shaftTemplate && t.Entrance != nil && t.Area != nil && t.To != nil {
+		sk, err := skill.NewMineShaft(world, self, skill.ShaftSpec{
+			Entrance: protocol.BlockPos{t.Entrance.X, t.Entrance.Y, t.Entrance.Z},
+			Dir:      facings[t.Facing],
+			Depth:    t.Depth, Branches: t.Branches, BranchLength: t.BranchLength,
+			Area: skill.Area{
+				Min: protocol.BlockPos{t.Area.Min.X, t.Area.Min.Y, t.Area.Min.Z},
+				Max: protocol.BlockPos{t.Area.Max.X, t.Area.Max.Y, t.Area.Max.Z},
+			},
+			Chest: protocol.BlockPos{t.To.X, t.To.Y, t.To.Z},
+		}, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return []skill.Skill{sk}, nil
+	}
 	if t.Template == haulTemplate && t.To != nil {
 		sources := make([]protocol.BlockPos, len(t.From))
 		for i, c := range t.From {
