@@ -114,6 +114,13 @@ func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
 		})
 		return
 	}
+	if ierr := a.ItemsErr(); ierr != nil {
+		l.log.Warn("camera_items_unavailable", logging.Fields{
+			"server_version": serverVersion,
+			"error":          ierr.Error(),
+			"hint":           "the overlay shows item names instead of pictures",
+		})
+	}
 	l.log.Info("camera_atlas_ready", logging.Fields{"server_version": serverVersion})
 }
 

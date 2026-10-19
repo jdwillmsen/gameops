@@ -98,6 +98,9 @@ type Atlas struct {
 
 	itemPNG []byte
 	items   ItemTable
+	// itemsErr is why there is no item sheet; the block atlas is usable
+	// without one.
+	itemsErr error
 
 	cmOnce sync.Once
 	cms    map[string]image.Image

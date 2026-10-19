@@ -214,9 +214,11 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 
 	b.loadBiomeWater(&tbl)
 	b.loadColormaps(&tbl)
+	// The item sheet is decoration: a pack it cannot read must not cost the
+	// terrain, so the atlas is returned without it.
 	itemPNG, items, err := buildItems(packDir, tile, tbl, sheet)
 	if err != nil {
-		return nil, err
+		return &Atlas{png: enc.Bytes(), table: tbl, itemsErr: err}, nil
 	}
 	return &Atlas{png: enc.Bytes(), table: tbl, itemPNG: itemPNG, items: items}, nil
 }
