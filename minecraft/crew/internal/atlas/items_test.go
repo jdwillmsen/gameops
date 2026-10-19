@@ -39,6 +39,29 @@ func TestItemSheetUsesTheItemTexture(t *testing.T) {
 	}
 }
 
+// A shared key's later list entries are reachable under the item names their
+// files are named for, including the renamed wooden_ and colour_bed forms.
+func TestItemSheetNamesListedPicturesByFile(t *testing.T) {
+	a := buildFixture(t)
+	items := a.Items()
+	for name, want := range map[string]color.NRGBA{
+		"minecraft:wood_staff":   {90, 60, 30, 255},
+		"minecraft:wooden_staff": {90, 60, 30, 255},
+		"minecraft:bed_teal":     {20, 150, 150, 255},
+		"minecraft:teal_bed":     {20, 150, 150, 255},
+		"minecraft:gem":          {200, 30, 60, 255},
+	} {
+		r, ok := items.Items[name]
+		if !ok {
+			t.Errorf("%s has no picture", name)
+			continue
+		}
+		if got := itemPixel(t, a, r); got != want {
+			t.Errorf("%s pixel = %v, want %v", name, got, want)
+		}
+	}
+}
+
 func TestItemSheetFallsBackToTheBlockFace(t *testing.T) {
 	a := buildFixture(t)
 	want := sample(t, a, block(t, a, "minecraft:stone").Side.UV)

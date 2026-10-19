@@ -10,8 +10,10 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 // ItemTable is the lookup that goes with the item sheet. Rects are
@@ -72,6 +74,26 @@ func buildItems(packDir string, tile int, tbl Table, blockSheet image.Image) ([]
 	for _, k := range keys {
 		if e, ok := ib.resolve(k); ok {
 			srcs["minecraft:"+k] = source{"item:" + e.path, normalise(ib.images[e.path], tile)}
+		}
+	}
+
+	// Many items share one key whose list is indexed by a data value that
+	// modern item names no longer carry (every pickaxe under "pickaxe", every
+	// bed under "bed"), so each listed picture is also offered under the item
+	// name its file is named for.
+	for _, k := range keys {
+		for _, p := range texturePaths(ib.keys[k]) {
+			for _, n := range namesForFile(path.Base(p)) {
+				if _, taken := srcs["minecraft:"+n]; taken {
+					continue
+				}
+				if _, loaded := ib.images[p]; !loaded {
+					ib.images[p] = ib.loadImage(p)
+				}
+				if img := ib.images[p]; img != nil {
+					srcs["minecraft:"+n] = source{"item:" + p, normalise(img, tile)}
+				}
+			}
 		}
 	}
 
@@ -158,4 +180,44 @@ func placeholderTile(tile int) *image.NRGBA {
 		}
 	}
 	return img
+}
+
+// texturePaths lists every picture a texture spec names: a path, an object
+// with a path, or a list of either.
+func texturePaths(raw json.RawMessage) []string {
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		return []string{str}
+	}
+	var obj struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(raw, &obj) == nil && obj.Path != "" {
+		return []string{obj.Path}
+	}
+	var list []json.RawMessage
+	if json.Unmarshal(raw, &list) != nil {
+		return nil
+	}
+	var out []string
+	for _, item := range list {
+		out = append(out, texturePaths(item)...)
+	}
+	return out
+}
+
+// namesForFile is the item names a picture's file name stands for. Files keep
+// names from before the items were renamed: wood_pickaxe is wooden_pickaxe,
+// gold_axe is golden_axe, bed_red is red_bed.
+func namesForFile(base string) []string {
+	names := []string{base}
+	switch {
+	case strings.HasPrefix(base, "wood_"):
+		names = append(names, "wooden_"+strings.TrimPrefix(base, "wood_"))
+	case strings.HasPrefix(base, "gold_"):
+		names = append(names, "golden_"+strings.TrimPrefix(base, "gold_"))
+	case strings.HasPrefix(base, "bed_"):
+		names = append(names, strings.TrimPrefix(base, "bed_")+"_bed")
+	}
+	return names
 }

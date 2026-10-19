@@ -7,5 +7,6 @@
     "wand": { "textures": ["textures/items/wand", "textures/items/gem"] },
     "torch": { "textures": { "path": "textures/items/lantern_item" } },
     "ember": { "textures": "textures/items/not_on_disk" },
+    "staff": { "textures": ["textures/items/wood_staff", "textures/items/bed_teal"] },
   }
 }
