@@ -153,3 +153,27 @@ func TestWarnGoesToStdoutNotStderr(t *testing.T) {
 		t.Errorf("fields were dropped: %v", line)
 	}
 }
+
+func TestWithAttachesFieldsToEveryLevelAndCallFieldsWin(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	l := newWithWriters("debug", &stdout, &stderr).With(Fields{"unit": "crew-01", "n": 1})
+	l.Info("a", nil)
+	l.Debug("b", nil)
+	l.Warn("c", Fields{"n": 2})
+	l.Error("d", nil)
+
+	for _, raw := range []string{stdout.String(), stderr.String()} {
+		for _, ln := range bytes.Split(bytes.TrimSpace([]byte(raw)), []byte("\n")) {
+			var line map[string]any
+			if err := json.Unmarshal(ln, &line); err != nil {
+				t.Fatalf("bad line %q: %v", ln, err)
+			}
+			if line["unit"] != "crew-01" {
+				t.Errorf("line %v lacks the bound unit", line)
+			}
+			if line["event"] == "c" && line["n"] != float64(2) {
+				t.Errorf("call field did not win: %v", line)
+			}
+		}
+	}
+}
