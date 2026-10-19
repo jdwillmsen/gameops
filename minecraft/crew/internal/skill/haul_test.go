@@ -191,3 +191,39 @@ func TestHaulStopClosesAnOpenChest(t *testing.T) {
 		t.Error("the chest is still open after Stop")
 	}
 }
+
+func TestWithdrawOneOfTakesTheBestPresentItemAndABudgetOfFood(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	c := r.chestFor(srcA)
+	c[0] = slotStack{300, 1, 700} // wooden sword
+	c[1] = slotStack{343, 6, 701} // stone swords
+	c[2] = slotStack{idCobblestone, 5, 702}
+	c[3] = slotStack{340, 64, 703} // bread
+	swords := OneOf(1, "iron_sword", "stone_sword", "wooden_sword")
+	s := NewWithdrawChest(w, r.self, srcA, nil, swords, OneOf(8, "bread"))
+	if st, err := r.run(s, 900); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.have("stone_sword") != 1 || r.have("wooden_sword") != 0 || r.have("bread") != 8 || r.have("cobblestone") != 0 {
+		t.Errorf("stone %d wooden %d bread %d cobble %d", r.have("stone_sword"), r.have("wooden_sword"), r.have("bread"), r.have("cobblestone"))
+	}
+	if r.stored(srcA, 343) != 5 || r.stored(srcA, 340) != 56 {
+		t.Errorf("left %d stone swords, %d bread", r.stored(srcA, 343), r.stored(srcA, 340))
+	}
+}
+
+func TestWithdrawOneOfSpendsItsBudgetDownTheRanking(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	c := r.chestFor(srcA)
+	c[0] = slotStack{340, 10, 700} // bread, before the better food in slot order
+	c[1] = slotStack{341, 2, 701}  // cooked beef
+	s := NewWithdrawChest(w, r.self, srcA, nil, OneOf(5, "cooked_beef", "bread"))
+	if st, err := r.run(s, 900); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.have("cooked_beef") != 2 || r.have("bread") != 3 {
+		t.Errorf("beef %d bread %d, want 2 and 3", r.have("cooked_beef"), r.have("bread"))
+	}
+}

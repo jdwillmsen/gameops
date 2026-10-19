@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -30,6 +31,8 @@ type Withdraw struct {
 	chest protocol.BlockPos
 	want  map[string]int
 	log   Logger
+	// groups ask for items by ranking rather than by name.
+	groups []group
 
 	phase wPhaseState
 }
@@ -64,7 +67,7 @@ func NewWithdrawChest(world ChestWorld, self func() belief.Snapshot, chest proto
 	for _, f := range opts {
 		f(&o)
 	}
-	w := &Withdraw{world: world, self: self, chest: chest, want: map[string]int{}, log: o.log}
+	w := &Withdraw{world: world, self: self, chest: chest, want: map[string]int{}, log: o.log, groups: o.groups}
 	for k, v := range want {
 		w.want[k] = v
 	}
@@ -263,13 +266,14 @@ func (w *Withdraw) take(a Actuator, snap belief.Snapshot) outcome {
 
 	content := a.ContainerContent()
 	ph.full = false
+	present := w.present(content)
 	for i := 0; i < chestSlots && i < len(content); i++ {
 		s := content[i].Stack
 		if s.Count == 0 || s.NetworkID == 0 {
 			continue
 		}
 		name, known := ph.names[s.NetworkID]
-		left := w.want[name] - ph.taken[name]
+		left := w.left(name, present)
 		if !known || left <= 0 {
 			continue
 		}
@@ -287,6 +291,40 @@ func (w *Withdraw) take(a Actuator, snap belief.Snapshot) outcome {
 		return w.idle(a)
 	}
 	return w.finish(a)
+}
+
+// present lists the items the chest holds right now.
+func (w *Withdraw) present(content []protocol.ItemInstance) map[string]bool {
+	out := map[string]bool{}
+	for i := 0; i < chestSlots && i < len(content); i++ {
+		if s := content[i].Stack; s.Count > 0 && s.NetworkID != 0 {
+			out[w.phase.names[s.NetworkID]] = true
+		}
+	}
+	return out
+}
+
+// left is how many more of an item the visit may take: its own want, plus its
+// group's remaining budget unless a better-ranked item is still in the chest.
+func (w *Withdraw) left(name string, present map[string]bool) int {
+	left := w.want[name] - w.phase.taken[name]
+	for _, g := range w.groups {
+		rank := slices.Index(g.names, name)
+		if rank < 0 {
+			continue
+		}
+		budget := g.n
+		for _, m := range g.names {
+			budget -= w.phase.taken[m]
+		}
+		for _, better := range g.names[:rank] {
+			if present[better] {
+				budget = 0
+			}
+		}
+		left += max(budget, 0)
+	}
+	return max(left, 0)
 }
 
 // destination finds where a withdrawn item can go: onto a stack of the same

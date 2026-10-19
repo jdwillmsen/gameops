@@ -84,10 +84,27 @@ type Logger interface {
 // Option configures a skill.
 type Option func(*options)
 
-type options struct{ log Logger }
+type options struct {
+	log    Logger
+	groups []group
+}
+
+// group is a budget of n items to take from any of names, best first.
+type group struct {
+	names []string
+	n     int
+}
 
 // WithLogger sets where a skill reports what it observed.
 func WithLogger(l Logger) Option { return func(o *options) { o.log = l } }
+
+// OneOf makes a withdraw take up to n items in all from the listed names,
+// spending the budget on the first name the chest holds before the next. It is
+// how a unit asks for the best sword there is, or any food, without knowing
+// what is stocked.
+func OneOf(n int, names ...string) Option {
+	return func(o *options) { o.groups = append(o.groups, group{names: names, n: n}) }
+}
 
 var errOverworld = errors.New("only the overworld is supported")
 

@@ -30,6 +30,11 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:cobblestone", RuntimeID: idCobblestone},
 	{Name: "minecraft:oak_log", RuntimeID: idOakLog},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: idWoodenPick},
+	{Name: "minecraft:wooden_sword", RuntimeID: 300},
+	{Name: "minecraft:iron_sword", RuntimeID: 301},
+	{Name: "minecraft:bread", RuntimeID: 340},
+	{Name: "minecraft:cooked_beef", RuntimeID: 341},
+	{Name: "minecraft:stone_sword", RuntimeID: 343},
 }
 
 // simWorld is the block map the skills and the simulated server share.
