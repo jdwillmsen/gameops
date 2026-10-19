@@ -304,3 +304,61 @@ func TestEntityTablePersists(t *testing.T) {
 		t.Fatal("an entry without its entity table should report it")
 	}
 }
+
+func bone(name, parent string, pivot [3]float32, size [3]float32) Bone {
+	return Bone{Name: name, Parent: parent, Pivot: pivot, Cubes: []Cube{{Size: size}}}
+}
+
+func TestLayBodiesLaysAQuadrupedAndLeavesAnUprightMob(t *testing.T) {
+	quad := []Bone{
+		bone("body", "", [3]float32{0, 10, 2}, [3]float32{6, 9, 6}),
+		bone("head", "", [3]float32{0, 10, -7}, [3]float32{6, 6, 4}),
+		bone("leg0", "", [3]float32{-2, 8, 7}, [3]float32{2, 8, 2}), bone("leg1", "", [3]float32{2, 8, 7}, [3]float32{2, 8, 2}),
+		bone("leg2", "", [3]float32{-2, 8, -4}, [3]float32{2, 8, 2}), bone("leg3", "", [3]float32{2, 8, -4}, [3]float32{2, 8, 2}),
+	}
+	layBodies(quad)
+	if quad[0].Bind == nil || quad[0].Bind[0] != 90 || quad[0].Rot != nil {
+		t.Fatalf("quadruped body = %+v", quad[0])
+	}
+	creeper := []Bone{
+		bone("body", "", [3]float32{0, 18, 0}, [3]float32{4, 12, 4}),
+		bone("head", "", [3]float32{0, 18, 0}, [3]float32{8, 8, 8}),
+		bone("leg0", "", [3]float32{-2, 6, 4}, [3]float32{4, 6, 4}), bone("leg1", "", [3]float32{2, 6, 4}, [3]float32{4, 6, 4}),
+		bone("leg2", "", [3]float32{-2, 6, -4}, [3]float32{4, 6, 4}), bone("leg3", "", [3]float32{2, 6, -4}, [3]float32{4, 6, 4}),
+	}
+	layBodies(creeper)
+	if creeper[0].Bind != nil {
+		t.Fatalf("a creeper's body was laid down: %+v", creeper[0])
+	}
+}
+
+func TestSolidifyMasksKeepsRealTransparency(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 1))
+	for i, a := range []uint8{0, 3, 100, 255} {
+		img.Pix[i*4+3] = a
+	}
+	solidifyMasks(img)
+	for i, want := range []uint8{0, 255, 100, 255} {
+		if got := img.Pix[i*4+3]; got != want {
+			t.Errorf("pixel %d alpha = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestHiddenBonesDrawNothing(t *testing.T) {
+	m := geoModel{bones: []geoBone{
+		{Name: "body", Cubes: []geoCube{{Size: [3]float64{1, 1, 1}, UV: []byte(`[0,0]`)}}},
+		{Name: "Saddle", Cubes: []geoCube{{Size: [3]float64{1, 1, 1}, UV: []byte(`[0,0]`)}}},
+	}}
+	bones := compileBones(m, 16, 16)
+	if len(bones[0].Cubes) != 1 || len(bones[1].Cubes) != 0 {
+		t.Fatalf("bones = %+v", bones)
+	}
+}
+
+func TestATurnedBoxWithoutAPivotTurnsAboutItsCentre(t *testing.T) {
+	c := compileCube(geoCube{Origin: [3]float64{-4, 0, -2}, Size: [3]float64{8, 6, 4}, Rotation: []float64{90, 0, 0}, UV: []byte(`[0,0]`)}, geoBone{}, 16, 16)
+	if len(c.Pivot) != 3 || c.Pivot[0] != 0 || c.Pivot[1] != 3 || c.Pivot[2] != 0 {
+		t.Fatalf("pivot = %v", c.Pivot)
+	}
+}
