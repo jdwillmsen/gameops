@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -74,6 +75,17 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 }
 
 func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
+	// A refused websocket handshake gives the page no status, so it probes
+	// with a plain GET. Answered without Attach, which builds a full head and
+	// counts a refusal, so a tile retrying every few seconds costs nothing.
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		if h.Full() {
+			http.Error(w, "viewer limit reached", http.StatusServiceUnavailable)
+			return
+		}
+		http.Error(w, "websocket upgrade required", http.StatusUpgradeRequired)
+		return
+	}
 	// Checked before the upgrade so a refused viewer gets a plain status the
 	// page can act on, and no websocket state is allocated for it.
 	v, err := h.Attach()
