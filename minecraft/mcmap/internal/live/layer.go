@@ -27,6 +27,11 @@ type Layer struct {
 	// Counters takes the pack's counts records. Nil refuses them, which is
 	// how a map that is not keeping counters stays one.
 	Counters *Counters
+	// Roster is told of each player in each sample, which is how the map
+	// remembers who has played once they are offline. Nil tells nobody.
+	Roster interface {
+		Seen(id, name string, at time.Time)
+	}
 
 	flush sync.Mutex
 
@@ -79,6 +84,11 @@ func (l *Layer) Ingest(raw RawRecord, now time.Time) {
 	}
 
 	l.annotate(&rec)
+	if rec.Kind == Players && l.Roster != nil {
+		for _, p := range rec.Items {
+			l.Roster.Seen(p.ID, p.Name, at)
+		}
+	}
 
 	if rec.Kind == Tick {
 		l.mu.Lock()
