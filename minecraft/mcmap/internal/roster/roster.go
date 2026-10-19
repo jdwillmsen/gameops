@@ -69,12 +69,7 @@ type Roster struct {
 
 	mu      sync.Mutex
 	players map[string]*Entry
-	// xuids is the XUID of each gamertag, folded, that has logged in. It is
-	// kept so that a login reported before the player's first sample still
-	// links them once the sample arrives. It is not written: the next login
-	// sets it again.
-	xuids map[string]string
-	dirty bool
+	dirty   bool
 }
 
 func (r *Roster) log() *slog.Logger {
@@ -86,7 +81,7 @@ func (r *Roster) log() *slog.Logger {
 
 func (r *Roster) init() {
 	if r.players == nil {
-		r.players, r.xuids = map[string]*Entry{}, map[string]string{}
+		r.players = map[string]*Entry{}
 	}
 }
 
@@ -96,7 +91,7 @@ func (r *Roster) init() {
 func (r *Roster) Load() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.players, r.xuids, r.dirty = nil, nil, false
+	r.players, r.dirty = nil, false
 	r.init()
 	if r.Path == "" {
 		return nil
@@ -174,13 +169,8 @@ func (r *Roster) Seen(id, name string, at time.Time) {
 		if len(e.Earlier) > maxEarlier {
 			e.Earlier = e.Earlier[:maxEarlier]
 		}
-		// The old gamertag is free for another player to take, who must
-		// not be given this one's XUID by it.
-		if old := strings.ToLower(e.Name); e.XUID != "" && r.xuids[old] == e.XUID {
-			delete(r.xuids, old)
-		}
 		e.Name = name
-		// Nor is the XUID carried to the new name unchecked: it may be
+		// The XUID is not carried to the new name unchecked: it may be
 		// another player's old one.
 		e.XUID = ""
 		r.dirty = true
@@ -191,36 +181,28 @@ func (r *Roster) Seen(id, name string, at time.Time) {
 	if at.After(e.Last) {
 		e.Last = at
 	}
-	if x, ok := r.xuids[strings.ToLower(name)]; ok && e.XUID != x {
-		r.link(name, x)
-	}
 }
 
 // Link notes the XUID of the player who logged in to the map under this
-// gamertag, which the game or the Xbox account vouched for.
+// gamertag, which the game or the Xbox account vouched for as theirs now.
+// It goes to the player seen most recently under the gamertag and is taken,
+// with any XUID that gamertag gave, from everyone else. A gamertag nobody in
+// the roster holds links nobody: the feed has not shown them yet, and the
+// next login links them.
 func (r *Roster) Link(gamertag, xuid string) {
 	if !validName(gamertag) || xuid == "" || len(xuid) > 20 {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.init()
-	folded := strings.ToLower(gamertag)
-	if len(r.xuids) >= MaxPlayers {
-		clear(r.xuids)
-	}
-	r.xuids[folded] = xuid
-	r.link(gamertag, xuid)
-}
-
-// link gives xuid to the player seen most recently under gamertag and takes
-// it, and any XUID that gamertag gave, from everyone else.
-func (r *Roster) link(gamertag, xuid string) {
 	var holder *Entry
 	for _, e := range r.players {
 		if strings.EqualFold(e.Name, gamertag) && (holder == nil || e.Last.After(holder.Last) || (e.Last.Equal(holder.Last) && e.ID < holder.ID)) {
 			holder = e
 		}
+	}
+	if holder == nil {
+		return
 	}
 	for _, e := range r.players {
 		want := e.XUID
