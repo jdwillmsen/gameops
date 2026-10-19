@@ -268,6 +268,14 @@ func resolveModel(models map[string]geoModel, id string, depth int) (geoModel, e
 	if len(out.bones) > maxModelBones {
 		return geoModel{}, fmt.Errorf("%s has over %d bones with what it inherits", id, maxModelBones)
 	}
+	// Each model passed the cube limit alone; inheriting adds a parent's.
+	cubes := 0
+	for _, b := range out.bones {
+		cubes += len(b.Cubes)
+	}
+	if cubes > maxModelCubes {
+		return geoModel{}, fmt.Errorf("%s has over %d boxes with what it inherits", id, maxModelCubes)
+	}
 	return out, nil
 }
 
