@@ -58,3 +58,41 @@ join it despite the server's startup error claiming NetherNet is the only
 supported transport. Pinning the lab keeps it the same shape as FWB, so a
 break here is the break that would happen there. Revisit when crew gains a
 NetherNet dialer.
+
+## 2026-10-18: Wave 3 splits into 3a and 3b
+
+Acting in the world carries all the protocol risk and ends in something an
+operator can watch. `crew-control` needs a database migration, authentication
+and a chart, and depends on none of that. 3a (crew acts, with its own task
+API) ships first; 3b (`crew-control`) follows.
+
+## 2026-10-18: the task API is local and token-guarded
+
+Task requests tell the unit where to go and what to break, so unlike the
+read-only status API they need authentication. The endpoints exist only when
+`TASKS_TOKEN` is set, and every request needs it as a bearer token. Until
+`crew-control` puts real authentication in front, the token and the default
+loopback `STATUS_ADDR` are the whole defence. Task JSON carries lab
+coordinates, so task logs record the id, template and state, never the body.
+
+## 2026-10-18: unknown blocks are solid
+
+The pathfinder and the collision check treat a block crew has not received as
+solid. The cost is that crew will not cross unloaded terrain; the alternative
+is walking into a void the server would correct or kill it in.
+
+## 2026-10-18: progress is counted from the inventory
+
+`MineBlock` is done when the inventory holds `qty` more of the item, not when
+`qty` blocks have broken. A break can succeed with nothing collected (a full
+inventory, a drop out of reach, the wrong tool), and counting breaks would
+report a gather that never happened. Three breaks without a pickup fail the
+skill with `no pickup after 3 breaks`.
+
+## 2026-10-19: lab commands target the unit by name
+
+The cluster lab is a world real players join, so the scene script never
+selects `@a`: it would teleport and strip them. It takes the unit's username
+and defaults to `crew-1`. The scene's platform is not stone, because mining
+takes the nearest stone and, found live, that was the platform under the unit
+rather than the quarry.
