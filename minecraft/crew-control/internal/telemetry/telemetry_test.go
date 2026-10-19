@@ -195,7 +195,7 @@ func events(t *testing.T, srv *httptest.Server) (<-chan string, *http.Response) 
 
 func TestStreamSendsOnChange(t *testing.T) {
 	unit := newFakeUnit(t, stateKnownWithTask)
-	every := 30 * time.Millisecond
+	every := 100 * time.Millisecond
 	p := startPoller(t, rosterFor(t, unit.server.URL), every)
 	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })
 	srv := streamServer(t, p)
