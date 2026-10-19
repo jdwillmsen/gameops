@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
@@ -46,6 +48,8 @@ type fakeControl struct {
 	workCode  int // when non-zero, the work endpoint answers this instead
 	eventFail int // how many event posts to refuse before accepting
 	badAuth   bool
+	rejectID  string // events about this id get a 400
+	conns     int    // connections the server accepted
 }
 
 func newFakeControl(t *testing.T) *fakeControl {
@@ -89,10 +93,22 @@ func newFakeControl(t *testing.T) *fakeControl {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+		if ev.ID == f.rejectID {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		f.events = append(f.events, ev)
 		w.WriteHeader(http.StatusNoContent)
 	})
-	f.srv = httptest.NewServer(mux)
+	f.srv = httptest.NewUnstartedServer(mux)
+	f.srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			f.mu.Lock()
+			f.conns++
+			f.mu.Unlock()
+		}
+	}
+	f.srv.Start()
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -273,6 +289,12 @@ func (s *sleepRecorder) got() []time.Duration {
 
 func start(t *testing.T, r Runner, f *fakeControl) *harness {
 	t.Helper()
+	return startWith(t, r, f, nil)
+}
+
+// startWith lets a test adjust the client before it runs.
+func startWith(t *testing.T, r Runner, f *fakeControl, tune func(*Client)) *harness {
+	t.Helper()
 	base, err := url.Parse(f.srv.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -281,6 +303,9 @@ func start(t *testing.T, r Runner, f *fakeControl) *harness {
 	c := New(base, unit, token, r, log)
 	rec := &sleepRecorder{}
 	c.sleep = rec.sleep
+	if tune != nil {
+		tune(c)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	h := &harness{f: f, run: r, c: c, log: log, sleeps: rec, cancel: cancel, done: make(chan struct{})}
 	go func() { c.Run(ctx); close(h.done) }()
@@ -548,5 +573,114 @@ func TestCancelDuringStepIsReported(t *testing.T) {
 	}
 	if _, err := runner.Cancel(taskA); !errors.Is(err, task.ErrFinished) {
 		t.Errorf("second Cancel = %v, want ErrFinished", err)
+	}
+}
+
+func countOf(ev []event, id, state string) int {
+	n := 0
+	for _, e := range ev {
+		if e.ID == id && e.State == state {
+			n++
+		}
+	}
+	return n
+}
+
+func TestRedeliveryOfRunningTaskReportsItsState(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "submit", func() bool { return len(r.submitted()) == 1 })
+	r.set(taskA, task.Running, 5, "")
+	f.waitFor(t, "running", func(ev []event) bool { return countOf(ev, taskA, "running") == 1 })
+
+	f.work <- taskItem(taskA, gotoBody)
+	ev := f.waitFor(t, "second report", func(ev []event) bool { return countOf(ev, taskA, "running") == 2 })
+	if got := ev[len(ev)-1]; got != (event{ID: taskA, State: "running", Progress: 5}) {
+		t.Errorf("refresh = %+v", got)
+	}
+	if n := len(r.submitted()); n != 1 {
+		t.Errorf("task submitted %d times", n)
+	}
+}
+
+func TestHeartbeatRefreshesOnlyRunningOwnedTasks(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	startWith(t, r, f, func(c *Client) { c.heartbeat = 10 * time.Millisecond })
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "submit", func() bool { return len(r.submitted()) == 1 })
+	// A task from the local API is not control's to report.
+	r.mu.Lock()
+	r.tasks = append(r.tasks, task.Task{ID: "local-1", State: task.Running})
+	r.mu.Unlock()
+	r.set(taskA, task.Running, 5, "")
+	f.waitFor(t, "heartbeats", func(ev []event) bool { return countOf(ev, taskA, "running") >= 4 })
+
+	r.set(taskA, task.Done, 9, "")
+	ev := f.waitFor(t, "done", func(ev []event) bool { return has(ev, taskA, "done") })
+	time.Sleep(60 * time.Millisecond)
+	ev = f.seen()
+	if last := ev[len(ev)-1]; last.State != "done" {
+		t.Errorf("heartbeat reported after the task finished: %+v", last)
+	}
+	for _, e := range ev {
+		if e.ID == "local-1" {
+			t.Errorf("heartbeat reported a task control does not own: %+v", e)
+		}
+	}
+}
+
+func TestRedeliveredStopLeavesNewerTasksAlone(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "A queued", func() bool { return len(r.submitted()) == 1 })
+	f.work <- stopItem(commandID)
+	f.waitFor(t, "first stop", func(ev []event) bool { return countOf(ev, commandID, "done") == 1 })
+
+	f.work <- taskItem(taskB, gotoBody)
+	waitUntil(t, "B queued", func() bool { return len(r.submitted()) == 2 })
+	r.set(taskB, task.Running, 1, "")
+	f.work <- stopItem(commandID)
+	f.waitFor(t, "second stop", func(ev []event) bool { return countOf(ev, commandID, "done") == 2 })
+
+	for _, tk := range r.List() {
+		if tk.ID == taskB && tk.State != task.Running {
+			t.Errorf("redelivered stop moved the newer task to %s", tk.State)
+		}
+	}
+}
+
+func TestRejectedEventDoesNotBlockLaterOnes(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	f.rejectID = taskA
+	h := start(t, r, f)
+
+	f.work <- taskItem(taskA, `{"template":"nope"}`)
+	f.work <- taskItem(taskB, `{"template":"nope"}`)
+	f.waitFor(t, "B reported", func(ev []event) bool { return has(ev, taskB, "failed") })
+	waitUntil(t, "rejection logged", func() bool { return h.log.count("control_event_rejected") == 1 })
+	if has(f.seen(), taskA, "failed") {
+		t.Error("the rejected event was accepted")
+	}
+}
+
+func TestLongReasonFitsTheControllersBodyCap(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	r.failErr = errors.New(strings.Repeat("\u00e9", 1000))
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	ev := f.waitFor(t, "failed", func(ev []event) bool { return has(ev, taskA, "failed") })
+	got := ev[len(ev)-1].Reason
+	if len(got) > 400 || !utf8.ValidString(got) || got == "" {
+		t.Errorf("reason is %d bytes, valid=%v", len(got), utf8.ValidString(got))
+	}
+	body, _ := json.Marshal(ev[len(ev)-1])
+	if len(body) > 512 {
+		t.Errorf("event body is %d bytes", len(body))
 	}
 }
