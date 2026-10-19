@@ -3170,8 +3170,10 @@ save.
 The list comes from the roster, `roster/roster.json` under `DATA_DIR`. It
 has the live feed's id for each player who has appeared in a sample, their
 gamertag, up to 5 earlier ones, and first and last seen. It also has the
-XUID the player logged in with (`!map`, passkey or Xbox), matched by
-gamertag; a change of gamertag drops the XUID until the next login. At most
+XUID the player logged in with (`!map` or Xbox, which vouch for the
+gamertag now; a passkey's gamertag may be stale, so it links nobody),
+matched by gamertag; a change of gamertag drops the XUID until the next
+login. At most
 1,024 players are kept, and when it is full the player seen longest ago
 makes room. The roster is written every 10 s while it changes, and on
 shutdown, atomically. A last-seen moving by under a minute is not worth a

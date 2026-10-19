@@ -82,19 +82,29 @@ func TestLinkGoesOnlyToTheLatestHolderOfAGamertag(t *testing.T) {
 		}
 	}
 	r.Seen("1", "Taken", t0.Add(2*time.Hour))
+	r.Link("Taken", "700")
 	for _, e := range r.List() {
-		if (e.XUID == "500") != (e.ID == "1") {
+		if (e.XUID == "700") != (e.ID == "1") || e.XUID == "500" {
 			t.Fatalf("after 1 took the gamertag back: %s has XUID %q", e.ID, e.XUID)
 		}
 	}
 }
 
-func TestLinkBeforeTheFirstSample(t *testing.T) {
+func TestAGamertagGivenUpOfflineDoesNotCarryItsXUIDToTheNextPlayer(t *testing.T) {
 	r := &Roster{}
-	r.Link("Beta", "99")
-	r.Seen("3", "beta", t0)
-	if x := r.List()[0].XUID; x != "99" {
-		t.Fatalf("XUID %q, want the one logged in before the sample", x)
+	r.Link("Taken", "500")
+	r.Seen("1", "Taken", t0)
+	r.Link("Taken", "500")
+	r.Seen("2", "Taken", t0.Add(time.Hour))
+	for _, e := range r.List() {
+		if e.ID == "2" && e.XUID != "" {
+			t.Fatalf("the player who took the gamertag was given XUID %q", e.XUID)
+		}
+	}
+	r.Link("Gone", "600")
+	r.Seen("3", "Gone", t0.Add(2*time.Hour))
+	if x := r.List()[0].XUID; x != "" {
+		t.Fatalf("a login before the player was seen linked them to %q", x)
 	}
 }
 
