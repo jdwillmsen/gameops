@@ -454,6 +454,32 @@ func TestAMobOutOfRangeOrOnAnotherFloorIsLeftAlone(t *testing.T) {
 	}
 }
 
+func TestBedrockZombieVillagerV2IsDefendedAgainst(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.spawn(64, "minecraft:zombie_villager_v2", mgl32.Vec3{22.5, 1, 20.5})
+	if !r.step() {
+		t.Fatal("did not defend against a Bedrock zombie villager")
+	}
+	if attacks := r.out.attacks(); len(attacks) == 0 || attacks[0].TargetEntityRuntimeID != 64 {
+		t.Fatalf("attacks = %+v, want an attack on the zombie villager", attacks)
+	}
+}
+
+func TestBedrockEvocationIllagerShooterIsAttributed(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.spawn(65, "minecraft:evocation_illager", mgl32.Vec3{29.5, 1, 20.5})
+	r.hurt()
+	if !r.step() {
+		t.Fatal("did not defend against the ranged Bedrock evocation illager")
+	}
+	if r.l.attacker != 65 || r.l.attackerPlayer {
+		t.Fatalf("attacker = %d (player=%v), want evocation illager", r.l.attacker, r.l.attackerPlayer)
+	}
+	if got := r.log.lines[len(r.log.lines)-1].fields["entity"]; got != "evocation_illager" {
+		t.Fatalf("hurt_by entity = %v, want evocation_illager", got)
+	}
+}
+
 func TestPlayersAndPassiveMobsAreNeverAttacked(t *testing.T) {
 	r := newRig(t, defaults, start)
 	r.player(60, mgl32.Vec3{21, 1, 20.5})

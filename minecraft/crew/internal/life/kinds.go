@@ -18,9 +18,10 @@ const (
 
 var kinds = map[string]kind{
 	"zombie": hostile, "husk": hostile, "drowned": hostile, "zombie_villager": hostile,
-	"skeleton": hostile, "stray": hostile, "bogged": hostile, "wither_skeleton": hostile,
+	"zombie_villager_v2": hostile,
+	"skeleton":           hostile, "stray": hostile, "bogged": hostile, "wither_skeleton": hostile,
 	"spider": hostile, "cave_spider": hostile, "witch": hostile, "pillager": hostile,
-	"vindicator": hostile, "evoker": hostile, "ravager": hostile, "vex": hostile,
+	"vindicator": hostile, "evoker": hostile, "evocation_illager": hostile, "ravager": hostile, "vex": hostile,
 	"slime": hostile, "magma_cube": hostile, "phantom": hostile, "silverfish": hostile,
 	"endermite": hostile, "blaze": hostile, "guardian": hostile, "piglin_brute": hostile,
 	"hoglin": hostile, "zoglin": hostile, "breeze": hostile,
@@ -36,7 +37,7 @@ var kinds = map[string]kind{
 // worth a look for one of them.
 var shooters = map[string]bool{
 	"skeleton": true, "stray": true, "bogged": true, "pillager": true,
-	"witch": true, "blaze": true, "breeze": true, "evoker": true,
+	"witch": true, "blaze": true, "breeze": true, "evoker": true, "evocation_illager": true,
 }
 
 func name(entityType string) string { return strings.TrimPrefix(entityType, "minecraft:") }
