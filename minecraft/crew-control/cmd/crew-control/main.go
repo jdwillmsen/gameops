@@ -14,12 +14,16 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 )
 
 // Stamped by the Dockerfile at build time.
 var version = "dev"
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout = 10 * time.Second
+	pollEvery       = time.Second
+)
 
 func main() {
 	log := logging.New(os.Getenv("LOG_LEVEL"))
@@ -34,7 +38,11 @@ func main() {
 		addr = "0.0.0.0:8080"
 	}
 
+	poller := telemetry.NewPoller(units, &http.Client{}, pollEvery)
+
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/units", poller.ListHandler)
+	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler)
 	mux.Handle("/units/", proxy.Handler(units, log))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
@@ -46,6 +54,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	pollDone := make(chan struct{})
+	go func() { poller.Run(ctx); close(pollDone) }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -63,4 +74,5 @@ func main() {
 	if err := srv.Shutdown(shutCtx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Warn("shutdown_incomplete", logging.Fields{"error": err.Error()})
 	}
+	<-pollDone
 }
