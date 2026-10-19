@@ -29,8 +29,10 @@ like a real client, so the server's knockback and corrections reach its
 predicted pose. With `IDLE_WANDER` it also glances around every second or two
 and, after a pause of 2 to 8 s, walks 2 to 6 blocks to a random spot within
 `IDLE_RADIUS` of where it went idle. Walks use the pathfinder over known,
-loaded blocks, keep to safe floor (never water, lava, ice or a ledge) within
-2 blocks of the starting height, and never break or place anything. A task
+loaded blocks, keep the whole route inside the radius on safe floor (never
+water, lava, ice or a ledge) within 2 blocks of the starting height, and never
+break or place anything. A walk knocked outside those bounds stops, and a unit
+pushed out of them takes its new spot as the centre. A task
 submitted while idle cancels the walk at once.
 
 With `DEFEND` the unit watches the entities the server announces:

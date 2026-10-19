@@ -137,6 +137,8 @@ Judgment calls: creepers are backed away from, not meleed, since the blast
 costs more than the kill gains; a retreat that cannot shake its threat for 10
 s becomes a fight, as does one with no escape route; a mob with no route to it
 is ignored for 10 s, so a zombie behind a wall cannot hold a miner hostage.
+So is a mob the unit has fought for 30 s, unless it hit the unit recently from
+within reach; an attacker still hitting at arm's length is not dropped.
 
 **crew never attacks a player.** Only entities the server announced as mobs
 of a hostile type are targets. A player's blow makes the unit face them and
