@@ -104,9 +104,16 @@ func (n *navigator) step(a Actuator) (Status, error) {
 	return n.tick(a, in)
 }
 
+// tickError marks a failure to send an input, as opposed to a failure to plan.
+// The first ends the skill; the second may only rule out one target.
+type tickError struct{ err error }
+
+func (e tickError) Error() string { return e.err.Error() }
+func (e tickError) Unwrap() error { return e.err }
+
 func (n *navigator) tick(a Actuator, in act.Input) (Status, error) {
 	if err := a.Tick(in); err != nil {
-		return Failed, err
+		return Failed, tickError{err}
 	}
 	return Running, nil
 }

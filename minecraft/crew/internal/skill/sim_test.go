@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -74,6 +75,8 @@ func (w simWorld) count(name string) int {
 	return n
 }
 
+var errWire = errors.New("wire down")
+
 type slotStack struct {
 	item  int32
 	count int
@@ -117,6 +120,13 @@ type rig struct {
 	chestClosed bool
 
 	refusePickups bool
+	stallBreaks   bool
+	// openDelay holds the ContainerOpen back this many inputs after the click.
+	openDelay     int
+	openIn        int
+	openFor       protocol.BlockPos
+	staleSlots    map[int]slotStack // chest slots the server has but the content hides
+	failWriteAt   int               // writes fail once this many inputs were sent
 	ignoreOpen    bool
 	dropResponses bool
 	rejectWith    uint8
@@ -172,6 +182,9 @@ func (r *rig) have(name string) int {
 // WritePacket queues what the unit sent; the server answers once the actuator
 // has released its lock, because replies call back into it.
 func (r *rig) WritePacket(pk packet.Packet) error {
+	if r.failWriteAt > 0 && r.ticks >= r.failWriteAt {
+		return errWire
+	}
 	r.pending = append(r.pending, pk)
 	return nil
 }
@@ -249,8 +262,14 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 		}
 	}
 	if b := r.breaking; b != nil {
-		if b.left--; b.left == 0 {
+		if b.left--; b.left == 0 && !r.stallBreaks {
 			r.onBroken(b.pos)
+			r.breaking = nil
+		}
+	}
+	if r.openIn > 0 {
+		if r.openIn--; r.openIn == 0 {
+			r.openChestNow(r.openFor)
 		}
 	}
 
@@ -328,16 +347,27 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 	if centre.Sub(eye).Len() > 6 || u.BlockRuntimeID != hash || hash == 0 {
 		return
 	}
+	if r.openDelay > 0 {
+		r.openIn, r.openFor = r.openDelay, u.BlockPosition
+		return
+	}
+	r.openChestNow(u.BlockPosition)
+}
+
+func (r *rig) openChestNow(pos protocol.BlockPos) {
 	r.opens++
 	r.window += 5
-	r.chestAt = u.BlockPosition
+	r.chestAt = pos
 	r.chestClosed = false
-	r.send(&packet.ContainerOpen{WindowID: r.window, ContainerPosition: u.BlockPosition, ContainerEntityUniqueID: -1})
+	r.send(&packet.ContainerOpen{WindowID: r.window, ContainerPosition: pos, ContainerEntityUniqueID: -1})
 	content := make([]protocol.ItemInstance, len(r.chest))
 	for i, s := range r.chest {
 		content[i] = instance(s)
 	}
 	r.send(&packet.InventoryContent{WindowID: uint32(r.window), Content: content})
+	for i, st := range r.staleSlots {
+		r.chest[i] = st
+	}
 }
 
 func (r *rig) onRequest(p *packet.ItemStackRequest) {
