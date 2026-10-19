@@ -216,3 +216,20 @@ func TestItemTableCopiesTheServerTable(t *testing.T) {
 		t.Error("the table was shared, not copied")
 	}
 }
+
+func TestAnEmptyHeldItemIsAnEmptyHand(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	if err := a.OpenChest(protocol.BlockPos{1, 0, 5}, 5, 0, belief.Item{}, 3162850062); err != nil {
+		t.Fatal(err)
+	}
+	u := s.last(t).(*packet.InventoryTransaction).TransactionData.(*protocol.UseItemTransactionData)
+	if u.HeldItem.Stack.NetworkID != 0 || u.HeldItem.Stack.Count != 0 {
+		t.Errorf("held = %+v, want empty", u.HeldItem)
+	}
+	if err := a.SelectHotbar(0, belief.Item{}); err != nil {
+		t.Fatal(err)
+	}
+	if me := s.last(t).(*packet.MobEquipment); me.NewItem.Stack.NetworkID != 0 {
+		t.Errorf("equipped = %+v, want empty", me.NewItem)
+	}
+}
