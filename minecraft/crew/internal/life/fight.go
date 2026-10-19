@@ -55,7 +55,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if d > limit {
 			return
 		}
-		if until := l.ignore[e.ID]; until > l.tick && d > nearAlways && !suspect {
+		if l.ignore[e.ID] > l.tick {
 			return
 		}
 		if d < bestD {
@@ -101,7 +101,6 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	if l.engaged {
 		l.engaged = false
 		l.chase, l.flee = nil, nil
-		l.equipped = false
 		l.logEvent("defend_ended", map[string]any{"ticks": l.tick - l.engagedAt})
 	}
 	return false
@@ -136,7 +135,7 @@ func (l *Life) noteHurt(p act.Pose) {
 			if d <= attributionRange && d < playerD {
 				player, playerD, playerSeen = e, d, true
 			}
-		case kindOf(e.Type) != other:
+		case kindOf(e.Type) != other && (kindOf(e.Type) != provoked || d <= meleeReach):
 			limit := attributionRange
 			if shooters[name(e.Type)] {
 				limit = shooterRange
@@ -147,9 +146,8 @@ func (l *Life) noteHurt(p act.Pose) {
 		}
 	})
 	switch {
-	case mobSeen:
+	case mobSeen && (!playerSeen || mobD < playerD):
 		l.attacker, l.attackerPlayer = mob.ID, false
-		delete(l.ignore, mob.ID)
 		l.logEvent("hurt_by", map[string]any{"entity": name(mob.Type)})
 	case playerSeen:
 		l.attacker, l.attackerPlayer = player.ID, true

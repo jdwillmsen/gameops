@@ -576,6 +576,54 @@ func TestAMobTheUnitCannotReachIsGivenUpOn(t *testing.T) {
 	}
 }
 
+func TestIgnoredPillarSkeletonDoesNotRestartFightAfterEachArrow(t *testing.T) {
+	r := newRig(t, defaults, start)
+	for y := int32(1); y <= 3; y++ {
+		r.w.over[protocol.BlockPos{30, y, 20}] = "stone"
+	}
+	r.spawn(51, "minecraft:skeleton", mgl32.Vec3{30.5, 4, 20.5})
+	active := 0
+	for i := 0; i < 100; i++ {
+		r.hurt()
+		if r.step() {
+			active++
+		}
+	}
+	if active > graceTicks+10 {
+		t.Errorf("engaged for %d of 100 ticks despite the unreachable mob ignore", active)
+	}
+}
+
+func TestPlayerHitOutranksNearbyWolfsNeutralAttribution(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.player(71, mgl32.Vec3{21.5, 1, 20.5})
+	r.spawn(72, "minecraft:wolf", mgl32.Vec3{24.5, 1, 20.5})
+	r.hurt()
+	r.step()
+	if r.l.attacker != 71 || !r.l.attackerPlayer {
+		t.Fatalf("attributed hit to %d (player=%v), want the nearby player", r.l.attacker, r.l.attackerPlayer)
+	}
+	if len(r.out.attacks()) != 0 {
+		t.Fatalf("attacked the wolf after a player hit")
+	}
+	if r.l.mode != modeStepBack {
+		t.Errorf("mode = %v, want step back", r.l.mode)
+	}
+}
+
+func TestEnvironmentalDamageDoesNotProvokeDistantGolem(t *testing.T) {
+	r := newRig(t, defaults, start)
+	r.setHealth(20)
+	r.spawn(73, "minecraft:iron_golem", mgl32.Vec3{24.5, 1, 20.5})
+	r.setHealth(17)
+	if r.step() {
+		t.Fatal("engaged with a golem outside melee reach after an environmental health drop")
+	}
+	if r.l.attacker != 0 || len(r.out.attacks()) != 0 {
+		t.Fatalf("attributed or attacked golem: attacker=%d attacks=%d", r.l.attacker, len(r.out.attacks()))
+	}
+}
+
 func TestDefendOffNeverEngages(t *testing.T) {
 	r := newRig(t, Config{Wander: true, Radius: 8, Defend: false}, start)
 	r.spawn(50, "minecraft:zombie", mgl32.Vec3{21, 1, 20.5})
