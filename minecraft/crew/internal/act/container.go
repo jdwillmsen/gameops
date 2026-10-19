@@ -209,6 +209,16 @@ type container struct {
 	slots  []protocol.ItemInstance
 }
 
+// Died forgets the open window and any pending stack responses: death closes
+// the window on the server without a ContainerClose, and a stale open window
+// would let a later deposit believe a chest it never clicked is open.
+func (a *Actuator) Died() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cont = container{}
+	a.responses = map[int32]uint8{}
+}
+
 func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 	switch p := pk.(type) {
 	case *packet.ContainerOpen:
