@@ -203,3 +203,56 @@ func TestParseGatherArea(t *testing.T) {
 		})
 	}
 }
+
+const shaftBody = `{"template":"mine_shaft","entrance":{"x":10,"y":1,"z":10},"facing":"east","depth":4,"branches":2,"branch_length":3,` +
+	`"area":{"min":{"x":5,"y":-15,"z":2},"max":{"x":25,"y":6,"z":20}},"to":{"x":8,"y":1,"z":5}}`
+
+func TestMineShaftTemplateParsesAndExpandsToOneSkill(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(shaftBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "mine_shaft" {
+		t.Fatalf("skills %v, err %v", skills, err)
+	}
+}
+
+func TestMineShaftTemplateRejectsWhatWouldLeaveTheAreaOrIsMalformed(t *testing.T) {
+	cases := map[string]string{
+		"no area":       strings.Replace(shaftBody, `"area":{"min":{"x":5,"y":-15,"z":2},"max":{"x":25,"y":6,"z":20}},`, ``, 1),
+		"no to":         strings.Replace(shaftBody, `,"to":{"x":8,"y":1,"z":5}`, ``, 1),
+		"no entrance":   strings.Replace(shaftBody, `"entrance":{"x":10,"y":1,"z":10},`, ``, 1),
+		"bad facing":    strings.Replace(shaftBody, `"east"`, `"up"`, 1),
+		"zero depth":    strings.Replace(shaftBody, `"depth":4`, `"depth":0`, 1),
+		"deep":          strings.Replace(shaftBody, `"depth":4`, `"depth":33`, 1),
+		"four branches": strings.Replace(shaftBody, `"branches":2`, `"branches":4`, 1),
+		"no length":     strings.Replace(shaftBody, `"branch_length":3`, `"branch_length":0`, 1),
+		"length alone":  strings.Replace(shaftBody, `"branches":2`, `"branches":0`, 1),
+		"extra field":   strings.Replace(shaftBody, `"depth":4`, `"depth":4,"qty":1`, 1),
+		"huge area":     strings.Replace(shaftBody, `"x":25,"y":6`, `"x":125,"y":6`, 1),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+	// The plan, not just the entrance, must fit: this one parses but cannot
+	// be submitted.
+	for name, body := range map[string]string{
+		"too deep for the area": strings.Replace(shaftBody, `"y":-15`, `"y":-1`, 1),
+		"branch past the edge":  strings.Replace(shaftBody, `"x":25`, `"x":14`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tpl, err := ParseTemplate([]byte(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} }); err == nil {
+				t.Fatal("expanded")
+			}
+		})
+	}
+}
