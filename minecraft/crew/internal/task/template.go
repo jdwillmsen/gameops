@@ -175,6 +175,16 @@ func parseHaul(body []byte) (Template, error) {
 	if raw.To == nil {
 		return Template{}, errors.New("to is required")
 	}
+	seen := map[Chest]bool{}
+	for _, c := range raw.From {
+		if c == *raw.To {
+			return Template{}, errors.New("to must not be one of from")
+		}
+		if seen[c] {
+			return Template{}, errors.New("from lists a chest twice")
+		}
+		seen[c] = true
+	}
 	return Template{Template: raw.Template, Qty: total, Items: raw.Items, From: raw.From, To: raw.To}, nil
 }
 
