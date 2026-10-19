@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
 )
 
 func TestServerRefusesUncleanUnitPathsWithoutRedirect(t *testing.T) {
@@ -67,5 +70,54 @@ func TestServerRoutesConsoleAndRemovedList(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("%s: status %d, want %d", path, rec.Code, want)
 		}
+	}
+}
+
+// The expected value is assembled rather than written as one literal: a
+// complete postgres:// URI with an embedded password is what secret scanners
+// are built to find, and a fixture that trips them on every push trains people
+// to wave the scanner through.
+func TestPostgresDSNFromEnv(t *testing.T) {
+	const (
+		user = "crew"
+		pass = "p/ss@w:rd"
+		host = "db.internal"
+	)
+	t.Setenv("PG_HOST", "")
+	if dsn, err := postgresDSN(); dsn != "" || err != nil {
+		t.Fatalf("unset host: %q %v", dsn, err)
+	}
+	t.Setenv("PG_HOST", host)
+	t.Setenv("PG_PORT", "6432")
+	t.Setenv("PG_DATABASE", "gameops")
+	t.Setenv("PG_USERNAME", user)
+	t.Setenv("PG_PASSWORD", pass)
+	dsn, err := postgresDSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "postgres://" + user + ":" + url.QueryEscape(pass) + "@" + host + ":6432/gameops?sslmode=require"; dsn != want {
+		t.Fatalf("dsn %q, want %q", dsn, want)
+	}
+	// Raw @ / : in the password would re-parse as URL structure.
+	if userinfo := strings.TrimPrefix(dsn[:strings.LastIndex(dsn, "@")], "postgres://"+user+":"); strings.ContainsAny(userinfo, "@/:") {
+		t.Fatalf("raw password characters survived into the DSN: %q", userinfo)
+	}
+	t.Setenv("PG_PORT", "nope")
+	if _, err := postgresDSN(); err == nil {
+		t.Fatal("bad port accepted")
+	}
+}
+
+func TestUnitWorkRoutesAreMounted(t *testing.T) {
+	units, _ := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`)
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), logging.New("error"),
+		func(mux *http.ServeMux) { work.Routes(mux, &work.Lazy{}, units, "tok", nil) })
+	req := httptest.NewRequest(http.MethodGet, "/v1/units/crew-01/work?wait=1s", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503 while the store is not connected", rec.Code)
 	}
 }

@@ -5,10 +5,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +21,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
 )
 
 // Stamped by the Dockerfile at build time.
@@ -26,6 +30,11 @@ var version = "dev"
 const (
 	shutdownTimeout = 10 * time.Second
 	pollEvery       = time.Second
+
+	pruneAfter     = 30 * 24 * time.Hour
+	pruneEvery     = 24 * time.Hour
+	connectTimeout = 5 * time.Second
+	maxRetryWait   = 30 * time.Second
 )
 
 func main() {
@@ -43,6 +52,17 @@ func main() {
 
 	poller := telemetry.NewPoller(units, &http.Client{}, pollEvery)
 
+	dsn, err := postgresDSN()
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": err.Error()})
+		os.Exit(1)
+	}
+	store := &work.Lazy{}
+	workToken := os.Getenv("WORK_TOKEN")
+	if workToken == "" {
+		log.Warn("work_token_unset", logging.Fields{"effect": "unit work routes refuse every request"})
+	}
+
 	// No WriteTimeout: it would cut the camera websocket and the status
 	// stream, which are long-lived by design.
 	// Shutdown waits for active requests, and an SSE stream never ends on its
@@ -50,8 +70,12 @@ func main() {
 	streamCtx, endStreams := context.WithCancel(context.Background())
 	defer endStreams()
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           newHandler(units, poller, log),
+		Addr: addr,
+		Handler: newHandler(units, poller, log, func(mux *http.ServeMux) {
+			// Console wiring will hook the wake and notify later; the unit
+			// routes alone need neither yet.
+			work.Routes(mux, store, units, workToken, nil)
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return streamCtx },
 	}
@@ -62,6 +86,9 @@ func main() {
 
 	pollDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollDone) }()
+
+	storeDone := make(chan struct{})
+	go func() { openStore(ctx, store, dsn, log); close(storeDone) }()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -80,10 +107,93 @@ func main() {
 		log.Warn("shutdown_incomplete", logging.Fields{"error": err.Error()})
 	}
 	<-pollDone
+	<-storeDone
 }
 
-func newHandler(units roster.Roster, poller *telemetry.Poller, log *logging.Logger) http.Handler {
+// postgresDSN is empty when PG_HOST is unset. The password is read apart from
+// the host so it can come from a Secret; url.UserPassword escapes it.
+func postgresDSN() (string, error) {
+	host := os.Getenv("PG_HOST")
+	if host == "" {
+		return "", nil
+	}
+	port := 5432
+	if v := os.Getenv("PG_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("PG_PORT %q is not a port", v)
+		}
+		port = n
+	}
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(os.Getenv("PG_USERNAME"), os.Getenv("PG_PASSWORD")),
+		Host:     net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:     "/" + os.Getenv("PG_DATABASE"),
+		RawQuery: "sslmode=require",
+	}
+	return u.String(), nil
+}
+
+// openStore fills store once a backend is ready, then prunes it until ctx
+// ends. A database that is down at start must not stop the console, so the
+// work routes answer 503 while this retries.
+func openStore(ctx context.Context, store *work.Lazy, dsn string, log *logging.Logger) {
+	var backend work.Store
+	if dsn == "" {
+		log.Info("work_store_memory", nil)
+		backend = work.NewMemory()
+	} else {
+		wait := time.Second
+		warned := false
+		for backend == nil {
+			pg, err := work.OpenPostgres(ctx, dsn, connectTimeout)
+			if err == nil {
+				defer pg.Close()
+				log.Info("work_store_ready", nil)
+				backend = pg
+				break
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			if !warned {
+				warned = true
+				log.Error("work_store_unavailable", logging.Fields{"error": err.Error()})
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			wait = min(wait*2, maxRetryWait)
+		}
+	}
+	store.Set(backend)
+
+	for {
+		n, err := backend.Prune(ctx, time.Now().Add(-pruneAfter))
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Warn("work_prune_failed", logging.Fields{"error": err.Error()})
+		} else {
+			log.Info("work_pruned", logging.Fields{"rows": n})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(pruneEvery):
+		}
+	}
+}
+
+func newHandler(units roster.Roster, poller *telemetry.Poller, log *logging.Logger, mounts ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
+	for _, m := range mounts {
+		m(mux)
+	}
 	mux.HandleFunc("GET /v1/units/stream", poller.StreamHandler)
 	console.Mount(mux)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
