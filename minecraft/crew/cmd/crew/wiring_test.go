@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,6 +123,52 @@ func TestTaskRoutesExistOnlyWithAToken(t *testing.T) {
 		if rec.Code != want {
 			t.Errorf("token %q: GET /v1/tasks = %d, want %d", token, rec.Code, want)
 		}
+	}
+}
+
+// The state route is open to anyone the gateway lets through, so it must show
+// what the unit is doing without ever carrying or enabling control.
+func TestStateShowsTasksButNeverTheTokenOrControl(t *testing.T) {
+	const token = "s3cret-token"
+	tracker := belief.New(time.Now)
+	runner := task.NewRunner(func(task.Template) ([]skill.Skill, error) {
+		return []skill.Skill{forever{}}, nil
+	}, nil, tracker.Snapshot, time.Minute, nopLog{})
+	submitted, err := runner.Submit(task.Template{Template: "gather_and_deposit", Item: "minecraft:log", Qty: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tok := range []string{"", token} {
+		h := statusHandler(tracker, "dev", nil, runner, tok)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/state", nil))
+		body := rec.Body.String()
+		if rec.Code != http.StatusOK || !strings.Contains(body, submitted.ID) {
+			t.Errorf("token %q: state = %d %s", tok, rec.Code, body)
+		}
+		if tok != "" && strings.Contains(body, tok) {
+			t.Errorf("state leaks the task token: %s", body)
+		}
+		if strings.Contains(strings.ToLower(body), "chest") {
+			t.Errorf("state leaks the task request: %s", body)
+		}
+	}
+
+	h := statusHandler(tracker, "dev", nil, runner, "")
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/tasks"},
+		{http.MethodPost, "/v1/tasks/" + submitted.ID + "/cancel"},
+		{http.MethodPost, "/v1/state"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, strings.NewReader(`{"template":"gather_and_deposit"}`)))
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s with no token = %d, want 404 or 405", c.method, c.path, rec.Code)
+		}
+	}
+	if got := runner.List()[0].State; got != task.Queued {
+		t.Errorf("task state = %s; the status routes changed it", got)
 	}
 }
 
