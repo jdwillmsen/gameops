@@ -362,3 +362,19 @@ func TestATurnedBoxWithoutAPivotTurnsAboutItsCentre(t *testing.T) {
 		t.Fatalf("pivot = %v", c.Pivot)
 	}
 }
+
+func TestEntityTexturesStopLoadingPastTheAggregateBudget(t *testing.T) {
+	old := maxEntityPixels
+	maxEntityPixels = 100
+	defer func() { maxEntityPixels = old }()
+	root := t.TempDir()
+	writePNG(t, root, "textures/entity/a.png", 8, 8)
+	writePNG(t, root, "textures/entity/b.png", 8, 8)
+	eb := &entityBuilder{b: &builder{dir: root, images: map[string]*image.NRGBA{}, formats: map[string]int{}}, imgs: map[string]*image.NRGBA{}}
+	if eb.texture("textures/entity/a") == nil {
+		t.Fatal("the first texture should fit")
+	}
+	if eb.texture("textures/entity/b") != nil {
+		t.Fatal("a texture past the budget was kept")
+	}
+}

@@ -31,6 +31,10 @@ const (
 	maxEntitySheet    = 4096
 )
 
+// maxEntityPixels bounds the decoded textures held at once, before they are
+// packed; the sheet's own limit is 4096 squared. A variable for tests.
+var maxEntityPixels = maxEntitySheet * maxEntitySheet
+
 // EntityTable is what the page loads next to the entity sheet. Rects are in
 // sheet pixels, so Width and Height turn them into texture coordinates.
 type EntityTable struct {
@@ -496,7 +500,8 @@ type entityBuilder struct {
 	b      *builder
 	models map[string]geoModel
 	// imgs holds each texture asked for by path; nil means unreadable.
-	imgs map[string]*image.NRGBA
+	imgs   map[string]*image.NRGBA
+	pixels int
 }
 
 func (eb *entityBuilder) texture(p string) *image.NRGBA {
@@ -509,6 +514,9 @@ func (eb *entityBuilder) texture(p string) *image.NRGBA {
 	}
 	if img != nil {
 		if bd := img.Bounds(); bd.Dx() > maxEntityTexSide || bd.Dy() > maxEntityTexSide {
+			img = nil
+		} else if eb.pixels += bd.Dx() * bd.Dy(); eb.pixels > maxEntityPixels {
+			// Later textures are skipped, so their entities fall back to boxes.
 			img = nil
 		} else {
 			solidifyMasks(img)
