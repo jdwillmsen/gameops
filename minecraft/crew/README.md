@@ -23,7 +23,12 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 
 `/healthz`, `/readyz` and `/v1/state`. The state carries `position`,
 `position_known`, `yaw` and `pitch`. Until `position_known` is true the
-position is the server's placeholder, not a real one.
+position is the server's placeholder, not a real one. It also carries
+`health`, the 36-slot `inventory`, `held_slot` (only meaningful when
+`held_known`) and a read-only `tasks` object: `current` (the running task or
+null) and `recent` (the last five others, newest first), each with id,
+template, state, skill, item, qty, progress, reason and timestamps. It never
+carries the task token, and the task routes below stay token-guarded.
 
 ## Task API
 
@@ -65,6 +70,7 @@ view with three.js:
 - `/v1/camera/ws`: the websocket the page reads
 - `/v1/camera/stats`: counts only
 - `/v1/camera/atlas.png` and `/v1/camera/atlas.json`: the texture atlas and its block table, 404 until built
+- `/v1/camera/items.png` and `/v1/camera/items.json`: one item icon sprite sheet and its name lookup, 404 until built
 
 The stream is a position channel and has **no authentication**, so it must not
 get an ingress until crew-control puts auth in front of it. Reach it from your
@@ -130,11 +136,23 @@ argument is the unit's username and defaults to `crew-1`. `send-command` exits
 0 even when the server rejects a command, so check the server log. The scene
 needs cheats, so it only ever runs against a lab; crew itself sends no command.
 
+### Operator overlay
+
+The page draws a game-style overlay from `/v1/state`, polled once a second:
+hearts, a nine-slot hotbar (the selected slot is outlined once crew has chosen
+one or the server has moved it), a crosshair, the full inventory, the current
+task with a progress bar and the last five, and connection, alive or dead,
+position and dimension. It needs no task token. The debug text is in its own
+box, visible by default; F3 hides it. Item icons come from the item sheet; an
+item the pack has no picture for is drawn as a grey placeholder.
+
 ### Textures
 
 Once the camera knows the server version it builds a texture atlas in the
 background from Mojang's `bedrock-samples` pack, fetched at runtime; only the
-built atlas is cached, under `CAMERA_ATLAS_DIR`. Nothing from the pack is
+built atlas is cached, under `CAMERA_ATLAS_DIR`. The item sheet is built
+from the same pack's item textures, with block items drawn as a block face.
+Nothing from the pack is
 committed or shipped in the image. When the atlas is ready the stream sends an atlas
 frame and the page textures cube faces with nearest filtering, tints grass,
 foliage and water, and draws slabs, stairs, cross-plants and torches as simple

@@ -196,3 +196,17 @@ func TestPageSpeaksTheCurrentWireVersionAndFetchesTheAtlas(t *testing.T) {
 		}
 	}
 }
+
+// Same reasoning: the overlay's endpoints, and the only key that hides the
+// debug box, exist nowhere the compiler can see.
+func TestPageFetchesTheOverlayDataAndTogglesDebugOnF3(t *testing.T) {
+	for _, s := range []string{"/v1/state", "/v1/camera/items.json", "/v1/camera/items.png", "'F3'"} {
+		if !strings.Contains(string(page), s) {
+			t.Errorf("page does not contain %q", s)
+		}
+	}
+	// Server-supplied text must not be parsed as markup.
+	if strings.Contains(string(page), "innerHTML") {
+		t.Error("page assigns innerHTML")
+	}
+}
