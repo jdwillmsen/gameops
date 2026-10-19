@@ -167,7 +167,7 @@
     coords: oneOf('blocks', 'chunks'),
   };
   const LOOK_DEFAULTS = Object.freeze({
-    theme: 'dark',
+    theme: 'system',
     size: 'normal',
     text: 'normal',
     labelMobs: 'always',

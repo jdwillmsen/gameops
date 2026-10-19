@@ -4355,7 +4355,7 @@ and Reset to defaults puts them all back.
 
 | Setting | Values (default first) |
 |---|---|
-| Theme | Dark, light, high contrast, or the same as the system |
+| Theme | The same as the system, dark, light, high contrast |
 | Marker style | Pictures on plates, dots, large pictures |
 | Mob picture | Faces, spawn eggs |
 | Marker size | Normal, small, large, extra large |
