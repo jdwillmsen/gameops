@@ -66,6 +66,8 @@ type Poller struct {
 	failures []int
 	subs     map[chan []Status]struct{}
 	streams  int
+	workSrc  WorkSource
+	wsubs    map[*workSub]struct{}
 }
 
 func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Poller {
@@ -79,6 +81,7 @@ func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Polle
 		statuses:  make([]Status, len(units)),
 		failures:  make([]int, len(units)),
 		subs:      map[chan []Status]struct{}{},
+		wsubs:     map[*workSub]struct{}{},
 	}
 	for i, u := range units {
 		p.statuses[i] = Status{ID: u.ID, Name: u.Name}

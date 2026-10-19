@@ -30,7 +30,7 @@ func TestServerRefusesUncleanUnitPathsWithoutRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), logging.New("error"))
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), auth.Disabled().Operator, logging.New("error"))
 
 	for _, p := range []string{
 		"/units/crew-01/./camera",
@@ -61,7 +61,7 @@ func TestServerRoutesConsoleAndRemovedList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), logging.New("error"))
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), auth.Disabled().Operator, logging.New("error"))
 	for path, want := range map[string]int{
 		"/":         http.StatusOK,
 		"/healthz":  http.StatusOK,
@@ -114,7 +114,7 @@ func TestPostgresDSNFromEnv(t *testing.T) {
 
 func TestUnitWorkRoutesAreMounted(t *testing.T) {
 	units, _ := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`)
-	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), logging.New("error"),
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), auth.Disabled().Operator, logging.New("error"),
 		func(mux *http.ServeMux) { work.Routes(mux, &work.Lazy{}, units, "tok", nil) })
 	req := httptest.NewRequest(http.MethodGet, "/v1/units/crew-01/work?wait=1s", nil)
 	req.Header.Set("Authorization", "Bearer tok")
@@ -160,7 +160,7 @@ func TestAuthRoutesOnlyWhenConfigured(t *testing.T) {
 	}
 	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
 	status := func(a *auth.Auth) int {
-		h := newHandler(units, poller, logging.New("error"), a.Mount)
+		h := newHandler(units, poller, a.Operator, logging.New("error"), a.Mount)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/me", nil))
 		return rec.Code
@@ -175,4 +175,39 @@ func TestAuthRoutesOnlyWhenConfigured(t *testing.T) {
 	if got := status(on); got != http.StatusUnauthorized {
 		t.Fatalf("enabled: /auth/me %d, want 401", got)
 	}
+}
+
+func TestStoreDownKeepsConsoleAndStreamUp(t *testing.T) {
+	units, _ := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://127.0.0.1:1"}]`)
+	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
+	a, err := auth.New(auth.Config{Origin: "https://crew.example", DataDir: t.TempDir(), Operators: `[{"id":"owner","name":"Owner"}]`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHandler(units, poller, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
+		api := work.Routes(mux, &work.Lazy{}, units, "tok", poller.PublishWork)
+		api.MountOperator(mux, a)
+		poller.SetWorkSource(api.Feed)
+	})
+	for _, c := range []struct {
+		method, path string
+		want         int
+	}{
+		{"GET", "/", 200},
+		{"POST", "/v1/work/crew-01/stop", 403},
+		{"GET", "/v1/work/crew-01", 401},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
+		if rec.Code != c.want {
+			t.Errorf("%s %s: %d, want %d", c.method, c.path, rec.Code, c.want)
+		}
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "/v1/units/stream")
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("stream: %v %v", resp, err)
+	}
+	resp.Body.Close()
 }
