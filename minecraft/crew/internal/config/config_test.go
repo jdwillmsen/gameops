@@ -161,3 +161,28 @@ func TestOfflineIsOffByDefaultAndCanBeEnabled(t *testing.T) {
 		t.Fatalf("err = %v, want one naming MC_OFFLINE", err)
 	}
 }
+
+func TestTasksTokenAndTimeoutConfig(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TasksToken != "" || cfg.TaskTimeoutS != 900 {
+		t.Errorf("defaults = %q, %d; want the endpoints off and 900", cfg.TasksToken, cfg.TaskTimeoutS)
+	}
+
+	t.Setenv("TASKS_TOKEN", " tok ")
+	t.Setenv("TASK_TIMEOUT_S", "30")
+	cfg, err = Load()
+	if err != nil || cfg.TasksToken != "tok" || cfg.TaskTimeoutS != 30 {
+		t.Errorf("set = %q, %d, %v", cfg.TasksToken, cfg.TaskTimeoutS, err)
+	}
+
+	for _, v := range []string{"29", "3601", "x"} {
+		t.Setenv("TASK_TIMEOUT_S", v)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "TASK_TIMEOUT_S") {
+			t.Errorf("TASK_TIMEOUT_S=%s: err = %v", v, err)
+		}
+	}
+}

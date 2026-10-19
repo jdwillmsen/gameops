@@ -44,6 +44,10 @@ type Config struct {
 	// CameraAtlasDir holds the cached texture atlas; it belongs on the data
 	// volume so a restart does not download the resource pack again.
 	CameraAtlasDir string
+
+	// TasksToken guards the task endpoints; empty leaves them unregistered.
+	TasksToken   string
+	TaskTimeoutS int
 }
 
 func Load() (Config, error) {
@@ -90,6 +94,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	taskTimeout, err := intInRange("TASK_TIMEOUT_S", 900, 30, 3600)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -105,6 +113,9 @@ func Load() (Config, error) {
 		CameraEnabled:    cameraEnabled,
 		CameraMaxViewers: cameraMaxViewers,
 		CameraAtlasDir:   stringDefault("CAMERA_ATLAS_DIR", "/data/atlas"),
+
+		TasksToken:   strings.TrimSpace(os.Getenv("TASKS_TOKEN")),
+		TaskTimeoutS: taskTimeout,
 	}, nil
 }
 
