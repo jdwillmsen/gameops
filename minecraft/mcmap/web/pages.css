@@ -1,42 +1,83 @@
 /* The pages about the map, which are read with no login. They wear the
    map's colours and sizes from style.css and add only how a page of text
-   is laid out. */
+   is laid out: a bar that stays, and the text on a card over the same
+   faint ground the login is set on. */
 html, body { height: auto; min-height: 100%; }
-body.page { min-height: 100vh; min-height: 100dvh; }
+body.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: radial-gradient(60% 40rem at 50% 0%, var(--glow), transparent 70%), radial-gradient(var(--dot) 1px, transparent 1px) 0 0 / 18px 18px, var(--bg);
+}
 
-.page-bar, .page-foot {
+.page-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem 1.25rem;
-  padding: 0.6rem max(1rem, env(safe-area-inset-left));
-  background: var(--panel);
-  border-color: var(--rule);
-  border-style: solid;
-  border-width: 0 0 1px;
+  gap: 0.25rem 1rem;
+  padding: 0.5rem max(1rem, env(safe-area-inset-left)) 0.5rem max(1rem, env(safe-area-inset-right));
+  background: var(--float);
+  border-bottom: 1px solid var(--rule);
+  backdrop-filter: blur(8px);
 }
-.page-foot { flex-direction: column; align-items: flex-start; margin-top: auto; border-width: 1px 0 0; }
-.page-foot .legal { margin: 0; }
+.page-bar .brand { min-height: var(--hit); }
+.page-bar .theme-switch { margin-left: auto; }
 
-.page-nav { display: flex; flex-wrap: wrap; gap: 0 0.25rem; }
-.page-nav a, .page-back { display: inline-flex; align-items: center; min-height: 44px; padding: 0 0.6rem; }
-.page-nav a[aria-current="page"] { color: var(--text); font-weight: 600; text-decoration: none; }
-.page a { color: var(--accent); }
-.page-nav a:focus-visible, .page-back:focus-visible, .page-body a:focus-visible { outline: var(--focus) solid var(--focus-colour); outline-offset: 2px; }
+/* Behind a finger's width the links are a row under the brand, which
+   slides sideways when they do not all fit. */
+.page-nav { display: flex; gap: 0.25rem; overflow-x: auto; scrollbar-width: none; }
+.page-nav a { display: inline-flex; flex: none; align-items: center; min-height: var(--hit); padding: 0 0.85rem; border-radius: 999px; color: var(--dim); text-decoration: none; }
+.page-nav a:hover { color: var(--text); background: var(--raised); }
+.page-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--sel-ink); font-weight: 600; }
+.page-nav a:focus-visible, .brand:focus-visible, .page-body a:focus-visible, .page-foot a:focus-visible { outline: var(--focus) solid var(--focus-colour); outline-offset: 2px; }
+@media (max-width: 40rem) {
+  .page-nav { order: 3; flex: 1 1 100%; margin: 0 -0.5rem; }
+}
+@media (min-width: 40.01rem) {
+  .page-nav { flex: 1; }
+}
 
-.page-body { width: 100%; max-width: 42rem; margin: 0 auto; padding: 1rem max(1rem, env(safe-area-inset-left)) 2rem; line-height: 1.55; }
-.page-body h1 { margin: 0.5rem 0 1rem; font-size: calc(var(--title) + 6px); font-weight: 600; }
-.page-body h2 { margin: 1.75rem 0 0.5rem; font-size: var(--title); font-weight: 600; }
+.page-body a { color: var(--accent); text-underline-offset: 0.18em; text-decoration-thickness: 1px; }
+.page .brand { color: var(--text); }
+
+.page-body {
+  width: calc(100% - 2rem);
+  max-width: 44rem;
+  margin: 1.5rem auto;
+  padding: 1.75rem 2rem 2rem;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  font-size: max(var(--body), 15px);
+  line-height: 1.65;
+}
+.page-body h1 { display: block; max-width: none; overflow: visible; white-space: normal; margin: 0 0 0.5rem; font-size: clamp(1.75rem, 1rem + 3vw, 2.25rem); line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
+.page-body h1 + p { margin: 0 0 0.5rem; color: var(--dim); font-size: 1.1em; }
+.page-body h2 { margin: 2rem 0 0.5rem; font-size: 1.25rem; line-height: 1.3; font-weight: 650; }
+.page-body p { margin: 0.75rem 0; }
 .page-body ul, .page-body ol { padding-left: 1.4rem; }
 .page-body li { margin: 0.35rem 0; }
-.page-body code { padding: 0.05rem 0.35rem; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--panel); font: 0.92em ui-monospace, "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
-.page-body .keys { display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1rem; margin: 0.5rem 0; }
-.page-body .keys dt, .page-body .keys dd { margin: 0; }
-.page-body .legal-big { margin: 0.5rem 0; padding: 0.75rem 1rem; border: 1px solid var(--line); border-radius: var(--radius-m); font-weight: 600; }
+.page-body li::marker { color: var(--dim); }
+.page-body code { padding: 0.1rem 0.4rem; border: 1px solid var(--rule); border-radius: var(--radius-s); background: var(--bg); font: 0.9em ui-monospace, "Cascadia Mono", Consolas, monospace; overflow-wrap: anywhere; }
+.page-body .keys { display: grid; grid-template-columns: max-content 1fr; margin: 0.75rem 0; border: 1px solid var(--rule); border-radius: var(--radius-l); overflow: hidden; }
+.page-body .keys dt, .page-body .keys dd { margin: 0; padding: 0.55rem 1rem; border-top: 1px solid var(--rule); }
+.page-body .keys dt:first-of-type, .page-body .keys dt:first-of-type + dd { border-top: 0; }
+.page-body .keys dt { background: var(--bg); }
+.page-body .legal-big { margin: 0.75rem 0; padding: 0.75rem 1rem; border: 1px solid var(--line); border-left-width: 4px; border-left-color: var(--accent); border-radius: var(--radius-m); background: var(--bg); font-size: 0.9em; font-weight: 600; letter-spacing: 0.02em; }
+
+.page-foot { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; margin-top: auto; padding: 0.5rem 1rem calc(1.5rem + env(safe-area-inset-bottom)); text-align: center; }
+.page-foot .site-links { justify-content: center; margin: 0; }
+.page-foot .site-links a { display: inline-flex; align-items: center; min-height: var(--hit); padding: 0 0.4rem; }
+.page-foot .legal { max-width: 40rem; margin: 0; letter-spacing: 0.02em; }
+.page-foot .legal a { color: var(--dim); }
 
 @media (max-width: 30rem) {
-  .page-body .keys { grid-template-columns: 1fr; gap: 0; }
-  .page-body .keys dd { margin-bottom: 0.6rem; }
+  .page-body { padding: 1.25rem 1.1rem 1.5rem; }
+  .page-body .keys { grid-template-columns: 1fr; }
+  .page-body .keys dt { border-top: 1px solid var(--rule); padding-bottom: 0.25rem; background: none; }
+  .page-body .keys dd { border-top: 0; padding-top: 0; }
+  .page-body .keys dt:first-of-type { border-top: 0; }
 }
-
-.page-bar .theme-switch { margin-left: auto; }
