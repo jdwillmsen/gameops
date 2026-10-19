@@ -37,6 +37,18 @@ func (a *Actuator) ItemNames(entries []protocol.ItemEntry) {
 	a.itemIDs = ids
 }
 
+// ItemTable copies the name-to-ID table. A skill compares a container's stacks
+// with the item it moves, and stacks carry only IDs.
+func (a *Actuator) ItemTable() map[string]int32 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make(map[string]int32, len(a.itemIDs))
+	for n, id := range a.itemIDs {
+		out[n] = id
+	}
+	return out
+}
+
 func trimNamespace(n string) string {
 	const prefix = "minecraft:"
 	if len(n) > len(prefix) && n[:len(prefix)] == prefix {

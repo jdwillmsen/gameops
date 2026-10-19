@@ -203,3 +203,16 @@ func TestResponseReportsAFailedRequest(t *testing.T) {
 		t.Error("status constants do not match the recorded server")
 	}
 }
+
+func TestItemTableCopiesTheServerTable(t *testing.T) {
+	a, _ := newAct(flat(), Pose{})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:cobblestone", RuntimeID: cobblestone}})
+	got := a.ItemTable()
+	if got["cobblestone"] != cobblestone || len(got) != 1 {
+		t.Fatalf("table = %v", got)
+	}
+	got["dirt"] = 1
+	if _, leaked := a.ItemTable()["dirt"]; leaked {
+		t.Error("the table was shared, not copied")
+	}
+}
