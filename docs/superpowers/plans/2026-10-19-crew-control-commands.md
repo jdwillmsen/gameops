@@ -275,7 +275,7 @@ type Store interface {
 ### Task 7: Console — sign-in page and command panel
 
 **Files:**
-- Create: `minecraft/crew-control/internal/console/web/signin.html` and `signin.js`. These run the WebAuthn browser calls: `navigator.credentials.create` and `.get` with base64url helpers. An invite arrives as `?invite=…&operator=…` and is removed from the URL with `history.replaceState` before anything else runs.
+- Create: `minecraft/crew-control/internal/console/web/signin.html` and `signin.js`. These run the WebAuthn browser calls: `navigator.credentials.create` and `.get` with base64url helpers. An invite arrives as `#operator=…&invite=…` (a fragment, so it never reaches a server or proxy log) and is removed from the URL with `history.replaceState` before anything else runs.
 - Modify: `console.go` (serve `/signin`), `web/index.html`, `web/console.js` and `web/console.css` (panel)
 - Modify: `web/state.js` and its tests (pure helpers for the panel's form → template body)
 
@@ -328,7 +328,7 @@ type Store interface {
 
 ### Task 10: Prove it live
 
-- [ ] Ask the owner to enrol: give them the one command that prints the owner's invite, plus the URL `https://crew.prd.jdwlabs.com/signin?operator=owner&invite=<code>`. Agents never read invite values.
+- [ ] Ask the owner to enrol: give them the one command that prints the owner's invite, plus the URL `https://crew.prd.jdwlabs.com/signin#operator=owner&invite=<code>`. Agents never read invite values.
 - [ ] Without any credential, prove everything an agent can on production:
   - anonymous gets 401 on `GET /v1/work/crew-01` and 401 or 403 on each POST;
   - an anonymous SSE stream carries no `work` event;
