@@ -124,8 +124,8 @@ curl -H "Authorization: Bearer $TASKS_TOKEN" localhost:8081/v1/tasks
 ## Rendered camera
 
 With `CAMERA_ENABLED=true`, crew streams the chunks, entities and its own look
-direction it already receives to a browser page that draws a first-person
-view with three.js:
+direction it already receives to a browser page that draws the view with
+three.js:
 
 - `/camera`: the page
 - `/v1/camera/ws`: the websocket the page reads
@@ -134,9 +134,10 @@ view with three.js:
 - `/v1/camera/mesher.js`: the page's meshing worker
 - `/v1/camera/items.png` and `/v1/camera/items.json`: one item icon sprite sheet and its name lookup, 404 until built
 
-The stream is a position channel and has **no authentication**, so it must not
-get an ingress until crew-control puts auth in front of it. Reach it from your
-machine with a port-forward and open `http://127.0.0.1:8080/camera`:
+The stream is a position channel and has **no authentication**, so the unit
+gets no ingress of its own; crew-control proxies an allow-list of these routes
+publicly. Reach a unit directly from your machine with a port-forward and open
+`http://127.0.0.1:8080/camera`:
 
 ```
 kubectl -n <namespace> port-forward deploy/<crew deployment> 8080:8080
@@ -145,10 +146,22 @@ kubectl -n <namespace> port-forward deploy/<crew deployment> 8080:8080
 This works with the default `STATUS_ADDR` because a port-forward connects
 inside the pod's network namespace. A viewer beyond `CAMERA_MAX_VIEWERS` is
 refused with 503, and one that cannot keep up is disconnected and reconnects.
-The page loads three.js from a CDN, so the browser needs internet access.
+A plain GET of `/v1/camera/ws` attaches nothing and answers 503 when the cap
+is reached and 426 otherwise; the page uses it to tell a refusal from an
+outage. The page loads three.js from a CDN, so the browser needs internet
+access.
+
+The page uses relative URLs, so it also works under a path prefix such as
+crew-control's `/units/{id}/camera`. `?mode=first|third|orbit|top` picks the
+camera (first person by default; in orbit, drag turns and the wheel zooms),
+and outside first person the unit's own body is drawn. `?hud=0` hides the
+overlay and debug text and skips the state poll, for wall tiles. A
+same-origin `postMessage({type: 'crew-camera', mode})` switches mode without
+reconnecting.
 
 A new viewer is replayed the sub-chunks within 4 chunks of the unit, nearest
-first, pulled as it reads; `?r=N` on the page picks another radius and `]`
+first, pulled as it reads; orbit and top-down ask for 6 instead. `?r=N` on
+the page picks another radius for every mode and `]`
 widens it (up to 32). Sub-chunks travel as a material palette plus bit-packed
 indices and moving entities as one batch per 50 ms tick; the byte layout is
 documented in `internal/camera/wire.go`. `/v1/camera/stats` also reports bytes

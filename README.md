@@ -12,6 +12,7 @@ load. One repo so a change that crosses components lands in one reviewed PR.
 | `minecraft/afkbot/` | AFK bots |
 | `minecraft/mcmap/` | Web map of the world, rendered from the live server's save |
 | `minecraft/crew/` | Programmable Bedrock worker unit: joins a lab server, reports state and runs mining and chest tasks |
+| `minecraft/crew-control/` | Public, view-only console for the crew units, proxying an allow-list of their camera routes |
 | `internal/` | Go code shared across games (`internal/presenceapi`: the actor-presence contract) |
 | `minecraft/internal/` | Go code shared across Minecraft components (created when first needed) |
 | `tools/components/` | Reads `component.yaml`; CI and releases use it |
