@@ -1,0 +1,16 @@
+name: crew-control
+kind: service
+language: go
+depends:
+  - minecraft/agent/pkg/
+tasks:
+  build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/crew-control/...
+  test: go test -race ./minecraft/crew-control/...
+  lint: test -z "$(gofmt -l minecraft/crew-control)" && go vet ./minecraft/crew-control/...
+release:
+  tag: crew-control
+  artifacts: [image]
+  image:
+    name: minecraft-crew-control
+    description: Console and control plane for Crew worker units
+    short_description: Console and control plane for Crew worker units
