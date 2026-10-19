@@ -8,6 +8,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
@@ -27,14 +28,18 @@ type unit struct {
 	world     *blocks.Store
 	hub       *camera.Hub
 	runner    *task.Runner
+	life      *life.Life
 	conn      packetWriter
 	items     []protocol.ItemEntry
 
 	act *act.Actuator
 }
 
-func newUnit(runtimeID uint64, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, conn packetWriter) *unit {
-	return &unit{runtimeID: runtimeID, tracker: tracker, world: world, hub: hub, runner: runner, conn: conn}
+func newUnit(runtimeID uint64, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, conn packetWriter) *unit {
+	if lf != nil {
+		lf.Spawn(runtimeID)
+	}
+	return &unit{runtimeID: runtimeID, tracker: tracker, world: world, hub: hub, runner: runner, life: lf, conn: conn}
 }
 
 func (u *unit) actuator() *act.Actuator { return u.act }
@@ -42,6 +47,9 @@ func (u *unit) actuator() *act.Actuator { return u.act }
 // apply is the read loop's per-packet fan-out.
 func (u *unit) apply(pk packet.Packet) error {
 	u.tracker.Apply(pk)
+	if u.life != nil {
+		u.life.Apply(pk)
+	}
 	// The store is the only requester of sub-chunks, so it sees every
 	// packet whether or not the camera is on.
 	u.world.Apply(pk, u.conn)
@@ -126,4 +134,9 @@ func (u *unit) respawned() {
 	})
 }
 
-func (u *unit) end() { u.runner.SessionEnded() }
+func (u *unit) end() {
+	u.runner.SessionEnded()
+	if u.life != nil {
+		u.life.End()
+	}
+}

@@ -54,6 +54,9 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"MC_VIEW_DISTANCE": "256",
 		"MC_PORT":          "70000",
 		"STATUS_ADDR":      "8080",
+		"IDLE_RADIUS":      "0",
+		"IDLE_WANDER":      "maybe",
+		"DEFEND":           "sometimes",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -227,5 +230,20 @@ func TestUsernameIsAtMost16Characters(t *testing.T) {
 	t.Setenv("MC_USERNAME", strings.Repeat("a", 16))
 	if _, err := Load(); err != nil {
 		t.Errorf("16 characters rejected: %v", err)
+	}
+}
+
+func TestIdleLifeIsOnByDefaultAndConfigurable(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || !cfg.IdleWander || cfg.IdleRadius != 8 || !cfg.Defend {
+		t.Fatalf("defaults = %+v, err %v", cfg, err)
+	}
+	t.Setenv("IDLE_WANDER", "false")
+	t.Setenv("IDLE_RADIUS", "12")
+	t.Setenv("DEFEND", "false")
+	cfg, err = Load()
+	if err != nil || cfg.IdleWander || cfg.IdleRadius != 12 || cfg.Defend {
+		t.Fatalf("config = %+v, err %v", cfg, err)
 	}
 }
