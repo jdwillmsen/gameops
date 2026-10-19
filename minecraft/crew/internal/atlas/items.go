@@ -34,6 +34,16 @@ func (a *Atlas) ItemPNG() []byte { return a.itemPNG }
 // Items returns the item sheet's lookup table.
 func (a *Atlas) Items() ItemTable { return a.items }
 
+// EntityPNG returns the encoded entity texture sheet.
+func (a *Atlas) EntityPNG() []byte { return a.entPNG }
+
+// Entities returns the entity model table.
+func (a *Atlas) Entities() EntityTable { return a.entities }
+
+// EntitiesErr reports why the atlas has no entity models, or nil when it has
+// them.
+func (a *Atlas) EntitiesErr() error { return a.entitiesErr }
+
 // ItemsErr reports why the atlas has no item sheet, or nil when it has one.
 func (a *Atlas) ItemsErr() error { return a.itemsErr }
 

@@ -13,6 +13,8 @@ const (
 	atlasTableFile = "table.json"
 	itemsPNGFile   = "items.png"
 	itemsTableFile = "items.json"
+	entPNGFile     = "entities.png"
+	entTableFile   = "entities.json"
 	atlasSubdir    = "atlas"
 )
 
@@ -43,12 +45,25 @@ func (a *Atlas) Save(dir string) error {
 			return err
 		}
 	}
+	if a.entitiesErr == nil {
+		ents, err := json.Marshal(a.entities)
+		if err != nil {
+			return err
+		}
+		if err := writeAtomic(filepath.Join(dir, entPNGFile), a.entPNG); err != nil {
+			return err
+		}
+		if err := writeAtomic(filepath.Join(dir, entTableFile), ents); err != nil {
+			return err
+		}
+	}
 	return writeAtomic(filepath.Join(dir, atlasTableFile), table)
 }
 
 // LoadAtlas reads an atlas written by Save. A table from an older layout is
-// rejected so the caller rebuilds it. An entry without the item sheet loads
-// with ItemsErr set: the caller rebuilds it, but can still fall back to it.
+// rejected so the caller rebuilds it. An entry without the item sheet or the
+// entity models loads with ItemsErr or EntitiesErr set: the caller rebuilds
+// it, but can still fall back to it.
 func LoadAtlas(dir string) (*Atlas, error) {
 	table, err := os.ReadFile(filepath.Join(dir, atlasTableFile))
 	if err != nil {
@@ -67,7 +82,27 @@ func LoadAtlas(dir string) (*Atlas, error) {
 	}
 	a := &Atlas{png: img, table: t}
 	a.itemPNG, a.items, a.itemsErr = loadItems(dir)
+	a.entPNG, a.entities, a.entitiesErr = loadEntities(dir)
 	return a, nil
+}
+
+func loadEntities(dir string) ([]byte, EntityTable, error) {
+	img, err := os.ReadFile(filepath.Join(dir, entPNGFile))
+	if err != nil {
+		return nil, EntityTable{}, fmt.Errorf("atlas: no cached entity sheet: %w", err)
+	}
+	doc, err := os.ReadFile(filepath.Join(dir, entTableFile))
+	if err != nil {
+		return nil, EntityTable{}, fmt.Errorf("atlas: no cached entity sheet: %w", err)
+	}
+	var t EntityTable
+	if err := json.Unmarshal(doc, &t); err != nil {
+		return nil, EntityTable{}, fmt.Errorf("atlas: decode entities: %w", err)
+	}
+	if t.Version != entityTableVersion {
+		return nil, EntityTable{}, fmt.Errorf("atlas: cached entity table version %d, want %d", t.Version, entityTableVersion)
+	}
+	return img, t, nil
 }
 
 func loadItems(dir string) ([]byte, ItemTable, error) {
@@ -113,13 +148,14 @@ func writeAtomic(path string, data []byte) error {
 // which made a cold build take minutes for a download of seconds. The
 // returned Pack describes the download, so its Dir is always empty.
 func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
-	// A cached atlas that lacks only its item sheet is rebuilt, but kept to
-	// fall back on: losing the fetch should not also lose the terrain.
+	// A cached atlas that lacks only its item sheet or entity models is
+	// rebuilt, but kept to fall back on: losing the fetch should not also
+	// lose the terrain.
 	var fallback *Atlas
 	var fallbackTag string
 	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
 		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
-			if a.itemsErr == nil {
+			if a.itemsErr == nil && a.entitiesErr == nil {
 				return a, Pack{Tag: tag}, nil
 			}
 			fallback, fallbackTag = a, tag

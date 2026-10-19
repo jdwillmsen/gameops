@@ -216,11 +216,14 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 	b.loadColormaps(&tbl)
 	// The item sheet is decoration: a pack it cannot read must not cost the
 	// terrain, so the atlas is returned without it.
-	itemPNG, items, err := buildItems(packDir, tile, tbl, sheet)
-	if err != nil {
-		return &Atlas{png: enc.Bytes(), table: tbl, itemsErr: err}, nil
+	a := &Atlas{png: enc.Bytes(), table: tbl}
+	if a.itemPNG, a.items, a.itemsErr = buildItems(packDir, tile, tbl, sheet); a.itemsErr != nil {
+		a.itemPNG, a.items = nil, ItemTable{}
 	}
-	return &Atlas{png: enc.Bytes(), table: tbl, itemPNG: itemPNG, items: items}, nil
+	if a.entPNG, a.entities, a.entitiesErr = buildEntities(packDir); a.entitiesErr != nil {
+		a.entPNG, a.entities = nil, EntityTable{}
+	}
+	return a, nil
 }
 
 var faceNames = []string{"up", "down", "side", "north", "south", "east", "west"}
