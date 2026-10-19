@@ -610,7 +610,8 @@ function onMessage(ev) {
       }
       break;
     case 12:
-      ents.loadModels();
+      // Only the table format this page understands; a newer one is left alone.
+      if (u8[1] === 1) ents.loadModels();
       break;
   }
 }
