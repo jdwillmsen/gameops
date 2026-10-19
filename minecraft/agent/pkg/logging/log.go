@@ -28,10 +28,13 @@ const (
 // signal handler) at once, and interleaved fmt.Fprintln calls to the same
 // *os.File are not otherwise guaranteed atomic.
 type Logger struct {
-	mu     sync.Mutex
+	// A pointer so a Logger derived by With serialises against its parent on
+	// the same streams.
+	mu     *sync.Mutex
 	level  Level
 	stdout io.Writer
 	stderr io.Writer
+	bound  Fields
 }
 
 // New builds a Logger that writes to the process's real stdout/stderr.
@@ -49,14 +52,33 @@ func newWithWriters(levelName string, stdout, stderr io.Writer) *Logger {
 	if strings.EqualFold(strings.TrimSpace(levelName), "debug") {
 		lvl = LevelDebug
 	}
-	return &Logger{level: lvl, stdout: stdout, stderr: stderr}
+	return &Logger{mu: &sync.Mutex{}, level: lvl, stdout: stdout, stderr: stderr}
 }
 
 // Fields is a shorthand for the extra key/value pairs attached to a line.
 type Fields map[string]any
 
+// With returns a Logger that adds fields to every line, so identity set once
+// at the root reaches every component that logs. A field passed to a call
+// wins over a bound one.
+func (l *Logger) With(fields Fields) *Logger {
+	bound := make(Fields, len(l.bound)+len(fields))
+	for k, v := range l.bound {
+		bound[k] = v
+	}
+	for k, v := range fields {
+		bound[k] = v
+	}
+	derived := *l
+	derived.bound = bound
+	return &derived
+}
+
 func (l *Logger) write(w io.Writer, level, event string, fields Fields) {
-	line := make(map[string]any, len(fields)+3)
+	line := make(map[string]any, len(l.bound)+len(fields)+3)
+	for k, v := range l.bound {
+		line[k] = v
+	}
 	for k, v := range fields {
 		line[k] = v
 	}
