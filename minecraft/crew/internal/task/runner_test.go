@@ -376,3 +376,128 @@ func TestCancelDuringAStepStillCleansUpOnce(t *testing.T) {
 		t.Errorf("stops = %d, want 1", sk.count())
 	}
 }
+
+func TestSubmitAsUsesCallersIDAndRejectsDuplicates(t *testing.T) {
+	h := newHarness(t, time.Minute, 1)
+	got, err := h.r.SubmitAs("0123abcd-ef01", tpl())
+	if err != nil || got.ID != "0123abcd-ef01" || got.State != Queued {
+		t.Fatalf("SubmitAs = %+v, %v", got, err)
+	}
+	if _, err := h.r.SubmitAs("0123abcd-ef01", tpl()); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicate err = %v", err)
+	}
+	if n := len(h.r.List()); n != 1 {
+		t.Errorf("tasks = %d, want 1", n)
+	}
+}
+
+func TestSubmitAsRejectsBadIDs(t *testing.T) {
+	h := newHarness(t, time.Minute, 1)
+	for _, id := range []string{"", "abc", "0123ABCD", "0123abcg", strings.Repeat("a", 65), "0123abcd\n"} {
+		if _, err := h.r.SubmitAs(id, tpl()); !errors.Is(err, ErrBadID) {
+			t.Errorf("id %q: err = %v", id, err)
+		}
+	}
+}
+
+type seen struct {
+	mu  sync.Mutex
+	all []Task
+}
+
+func (s *seen) add(t Task) { s.mu.Lock(); s.all = append(s.all, t); s.mu.Unlock() }
+func (s *seen) states() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, t := range s.all {
+		if len(out) == 0 || out[len(out)-1] != t.State {
+			out = append(out, t.State)
+		}
+	}
+	return out
+}
+
+func TestObserverSeesQueuedRunningDone(t *testing.T) {
+	h := newHarness(t, time.Minute, 1)
+	var s seen
+	h.r.Observe(s.add)
+	h.r.Submit(tpl())
+	h.tick(10)
+	if got := strings.Join(s.states(), ","); got != "queued,running,done" {
+		t.Errorf("states = %s", got)
+	}
+}
+
+func TestObserverSeesCancelled(t *testing.T) {
+	h := newHarness(t, time.Minute, 5)
+	var s seen
+	h.r.Observe(s.add)
+	tk, _ := h.r.Submit(tpl())
+	h.tick(2)
+	if _, err := h.r.Cancel(tk.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.states(), ","); got != "queued,running,cancelled" {
+		t.Errorf("states = %s", got)
+	}
+}
+
+func TestObserverRunsOutsideTheLock(t *testing.T) {
+	h := newHarness(t, time.Minute, 1)
+	h.r.Observe(func(Task) { h.r.List() }) // deadlocks if called under mu
+	done := make(chan struct{})
+	go func() { h.r.Submit(tpl()); h.tick(5); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("observer was called with the runner locked")
+	}
+}
+
+func TestObserverMayCancelWithoutDeadlock(t *testing.T) {
+	h := newHarness(t, time.Minute, 5)
+	h.r.Observe(func(tk Task) {
+		if tk.State == Running {
+			h.r.Cancel(tk.ID)
+		}
+	})
+	done := make(chan struct{})
+	go func() { h.r.Submit(tpl()); h.tick(3); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("re-entrant observer deadlocked")
+	}
+}
+
+func TestObserverOrderHoldsAcrossGoroutines(t *testing.T) {
+	h := newHarness(t, time.Minute, 1)
+	// The harness records made skills without a lock, so submit from many
+	// goroutines through a factory that shares nothing.
+	h.r.newSkills = func(Template) ([]skill.Skill, error) {
+		return []skill.Skill{&fakeSkill{name: "a", steps: 1}}, nil
+	}
+	var s seen
+	h.r.Observe(s.add)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); h.r.Submit(tpl()) }()
+	}
+	wg.Wait()
+	last := map[string]int{}
+	rank := map[string]int{Queued: 0, Running: 1, Done: 2, Cancelled: 2, Failed: 2}
+	check := func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, tk := range s.all {
+			if rank[tk.State] < last[tk.ID] {
+				t.Errorf("task %s went back to %s", tk.ID, tk.State)
+			}
+			last[tk.ID] = rank[tk.State]
+		}
+	}
+	h.tick(60)
+	check()
+}

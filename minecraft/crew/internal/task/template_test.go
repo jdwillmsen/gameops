@@ -256,3 +256,39 @@ func TestMineShaftTemplateRejectsWhatWouldLeaveTheAreaOrIsMalformed(t *testing.T
 		})
 	}
 }
+
+func TestParseGoto(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(`{"template":"goto","to":{"x":-500,"y":320,"z":499}}`))
+	if err != nil {
+		t.Fatalf("valid goto: %v", err)
+	}
+	if tpl.Template != "goto" || tpl.To == nil || *tpl.To != (Chest{X: -500, Y: 320, Z: 499}) {
+		t.Fatalf("parsed = %+v", tpl)
+	}
+	cases := map[string]string{
+		"missing to": `{"template":"goto"}`,
+		"x low":      `{"template":"goto","to":{"x":-501,"y":0,"z":0}}`,
+		"x high":     `{"template":"goto","to":{"x":500,"y":0,"z":0}}`,
+		"y low":      `{"template":"goto","to":{"x":0,"y":-65,"z":0}}`,
+		"y high":     `{"template":"goto","to":{"x":0,"y":321,"z":0}}`,
+		"z low":      `{"template":"goto","to":{"x":0,"y":0,"z":-501}}`,
+		"z high":     `{"template":"goto","to":{"x":0,"y":0,"z":500}}`,
+		"extra":      `{"template":"goto","to":{"x":0,"y":0,"z":0},"item":"oak_log"}`,
+		"extra key":  `{"template":"goto","to":{"x":0,"y":0,"z":0,"w":1}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+func TestGotoExpandsToOneNavigate(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(`{"template":"goto","to":{"x":1,"y":2,"z":3}}`))
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "navigate" {
+		t.Fatalf("skills = %v, err = %v", skills, err)
+	}
+}
