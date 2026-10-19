@@ -25,7 +25,10 @@ type visit struct {
 	stopped int
 	weapon  bool
 	food    int
+	full    bool
 }
+
+func (v *visit) Full() bool { return v.full }
 
 func (v *visit) Name() string                { return "withdraw_chest" }
 func (v *visit) Ready(belief.Snapshot) error { return nil }
@@ -164,6 +167,26 @@ func TestAnEmptyKitIsReportedAndBackedOffFor(t *testing.T) {
 	r.run(300)
 	if len(*visits) != 2 {
 		t.Errorf("visits = %d, want a second try after the back-off", len(*visits))
+	}
+}
+
+func TestAVisitThatFillsTheHotbarIsReportedAsNoRoom(t *testing.T) {
+	r, visits := kitRig(t)
+	for slot := 1; slot < 9; slot++ {
+		r.give(slot, 3, 64)
+	}
+	r.l.makeKit = func(weapon bool, food int) skill.Skill {
+		v := &visit{r: r, ticks: 3, weapon: weapon, food: food, full: true}
+		v.stock = func() { r.give(0, idStoneSwrd, 1) }
+		*visits = append(*visits, v)
+		return v
+	}
+	r.run(kitSettleTicks + 30)
+	if len(*visits) != 1 {
+		t.Fatalf("visits = %d", len(*visits))
+	}
+	if r.logged("kit_empty") || !r.logged("kit_no_room") {
+		t.Errorf("log = %+v, want kit_no_room and no kit_empty", r.log.lines)
 	}
 }
 
