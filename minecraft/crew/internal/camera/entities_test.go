@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/atlas"
@@ -218,5 +220,24 @@ func TestModelsAreServedAndAnnouncedOnlyWhenBuilt(t *testing.T) {
 	}
 	if late := mustDrain(t, attach(t, h)); len(ofType(late, frameModels)) != 1 {
 		t.Errorf("late viewer head has no models frame: %v", late)
+	}
+}
+
+// The page and its entity module are embedded and not type-checked, so the
+// frame numbers they switch on and the paths they fetch are checked here.
+func TestPageHandlesTheEntityFramesAndLoadsItsModule(t *testing.T) {
+	for _, s := range []string{
+		"from '/v1/camera/entities.js'",
+		"case " + strconv.Itoa(int(frameEntityData)) + ":",
+		"case " + strconv.Itoa(int(frameModels)) + ":",
+	} {
+		if !strings.Contains(string(page), s) {
+			t.Errorf("page does not contain %q", s)
+		}
+	}
+	for _, s := range []string{"/v1/camera/entities.json", "/v1/camera/entities.png", "/v1/camera/items.json"} {
+		if !strings.Contains(string(entitiesJS), s) {
+			t.Errorf("entities.js does not fetch %q", s)
+		}
 	}
 }

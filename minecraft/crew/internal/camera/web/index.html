@@ -229,6 +229,7 @@
 // Per-sub-chunk geometry with only the faces next to a non-opaque neighbour,
 // the same technique prismarine-viewer's mesher uses; no code is copied.
 import * as THREE from 'three';
+import { createEntities } from '/v1/camera/entities.js';
 
 const t0 = performance.now();
 const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0, workMs: 0, workMaxMs: 0, drawn: 0, total: 0, drawnSum: 0, totalSum: 0 };
@@ -288,9 +289,8 @@ addEventListener('resize', () => {
 let mats = [];            // index = id
 const blocks = new Map(); // "cx,cy,cz" -> Uint8Array(4096)
 const meshes = new Map(); // key -> [opaque, translucent]
-const entMeshes = new Map();
 const me = { x: 0, y: 70, z: 0, yaw: 0, pitch: 0 };
-window.__dbg = { entMeshes, scene, camera, me, blocks, meshes, get mats() { return mats; }, atlasReady: () => !!atlas };
+window.__dbg = { get entMeshes() { return ents.meshes; }, scene, camera, me, blocks, meshes, get mats() { return mats; }, atlasReady: () => !!atlas };
 
 // Meshing runs in a worker (mesher.js); the page keeps the cells only to
 // apply block edits and report its size.
@@ -486,137 +486,8 @@ async function loadAtlas() {
   }
 }
 
-// Entity stand-ins: sizes are the Bedrock hit boxes (width, height in
-// blocks), colours are rough impressions. kind picks the silhouette:
-// biped is an upright body with a head on top, quad a long body with its head
-// at the front, blob a single box. These are invented simple shapes, not the
-// game's models. Unknown types draw as a hashed-colour biped.
-const ENTITY_TYPES = {
-  player: { w: .6, h: 1.8, color: 0x2f6fd8, head: 0xe0b48a, kind: 'biped' },
-  zombie: { w: .6, h: 1.95, color: 0x3a6f9a, head: 0x5a9a4a, kind: 'biped' },
-  husk: { w: .6, h: 1.95, color: 0x8a7a55, head: 0xa89870, kind: 'biped' },
-  drowned: { w: .6, h: 1.95, color: 0x3a8a8a, head: 0x5ab0a0, kind: 'biped' },
-  skeleton: { w: .6, h: 1.99, color: 0xcfcfc6, head: 0xe6e6dc, kind: 'biped' },
-  creeper: { w: .6, h: 1.7, color: 0x4bb23c, head: 0x5fcf4a, kind: 'biped', head_h: .5 },
-  enderman: { w: .6, h: 2.9, color: 0x1c1226, head: 0x2a1a38, kind: 'biped', head_h: .5 },
-  villager: { w: .6, h: 1.95, color: 0x7a5a3a, head: 0xd8a888, kind: 'biped' },
-  witch: { w: .6, h: 1.95, color: 0x5a2a7a, head: 0xd8a888, kind: 'biped' },
-  iron_golem: { w: 1.4, h: 2.7, color: 0xb8b8b0, head: 0xd0d0c8, kind: 'biped', head_h: .7 },
-  armor_stand: { w: .5, h: 1.975, color: 0xa8865a, head: 0xc8a878, kind: 'biped', head_h: .35 },
-  cow: { w: .9, h: 1.4, color: 0x4a3226, head: 0x5a4030, kind: 'quad', len: 1.3 },
-  pig: { w: .9, h: .9, color: 0xe89a9a, head: 0xf0b0b0, kind: 'quad', len: 1.1 },
-  sheep: { w: .9, h: 1.3, color: 0xe8e8e0, head: 0xc8b8a0, kind: 'quad', len: 1.2 },
-  horse: { w: 1.4, h: 1.6, color: 0x8a5a30, head: 0x9a6a3a, kind: 'quad', len: 1.6 },
-  wolf: { w: .6, h: .85, color: 0xbcbcb8, head: 0xd0d0cc, kind: 'quad', len: .9 },
-  cat: { w: .6, h: .7, color: 0xc89a5a, head: 0xd8aa6a, kind: 'quad', len: .8 },
-  chicken: { w: .4, h: .7, color: 0xf2f2f2, head: 0xe8d8a0, kind: 'biped', head_h: .25 },
-  rabbit: { w: .4, h: .5, color: 0x9a7a5a, head: 0xb0906a, kind: 'quad', len: .5 },
-  spider: { w: 1.4, h: .9, color: 0x3a2f2f, head: 0x4a3a3a, kind: 'quad', len: 1.2 },
-  slime: { w: .52, h: .52, color: 0x6fd05a, kind: 'blob' },
-  bat: { w: .5, h: .9, color: 0x4a3a2a, kind: 'blob' },
-  bee: { w: .55, h: .5, color: 0xe8c030, kind: 'blob' },
-  item: { w: .25, h: .25, color: 0xd8d8e8, kind: 'blob' },
-  xp_orb: { w: .25, h: .25, color: 0x9ae83a, kind: 'blob' },
-  arrow: { w: .2, h: .2, color: 0x8a6a40, kind: 'blob' },
-};
-const DEFAULT_ENTITY = { w: .6, h: 1.8, kind: 'biped' };
-
-function entityDef(type) {
-  const name = type.replace(/^minecraft:/, '');
-  const d = ENTITY_TYPES[name];
-  if (d) return d;
-  let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const color = new THREE.Color().setHSL((h % 360) / 360, .6, .5).getHex();
-  return { ...DEFAULT_ENTITY, color, head: new THREE.Color(color).offsetHSL(0, 0, .12).getHex() };
-}
-
-const entLights = [new THREE.AmbientLight(0xffffff, 1.6), new THREE.DirectionalLight(0xffffff, 1.4)];
-entLights[1].position.set(.4, 1, .6);
-for (const l of entLights) scene.add(l);
-const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-const noseMat = new THREE.MeshLambertMaterial({ color: 0x20140c });
-function part(w, h, d, mat, x, y, z) {
-  const m = new THREE.Mesh(boxGeo, mat);
-  m.scale.set(w, h, d); m.position.set(x, y, z);
-  return m;
-}
-
-// Feet-origin group facing +z, so the body yaw is the group's own rotation.
-// `head` is a pivot at the neck that the head yaw and pitch turn.
-function buildEntity(type) {
-  const def = entityDef(type), g = new THREE.Group();
-  const body = new THREE.MeshLambertMaterial({ color: def.color });
-  const headMat = new THREE.MeshLambertMaterial({ color: def.head ?? def.color });
-  const head = new THREE.Group();
-  head.rotation.order = 'YXZ';
-  if (def.kind === 'biped') {
-    const hs = def.head_h ?? Math.min(.5, def.h * .26), bh = def.h - hs;
-    g.add(part(def.w, bh, def.w * .6, body, 0, bh / 2, 0));
-    head.position.set(0, bh, 0);
-    head.add(part(hs, hs, hs, headMat, 0, hs / 2, 0), part(hs * .3, hs * .25, hs * .25, noseMat, 0, hs * .45, hs / 2));
-  } else if (def.kind === 'quad') {
-    const len = def.len ?? def.w * 1.2, hs = def.h * .36;
-    g.add(part(def.w * .7, def.h * .45, len, body, 0, def.h * .55, 0), part(def.w * .45, def.h * .3, len * .6, body, 0, def.h * .15, 0));
-    head.position.set(0, def.h * .75, len / 2);
-    head.add(part(hs, hs, hs, headMat, 0, 0, hs * .4), part(hs * .3, hs * .25, hs * .25, noseMat, 0, -hs * .1, hs * .9));
-  } else {
-    g.add(part(def.w, def.h, def.w, body, 0, def.h / 2, 0), part(def.w * .3, def.h * .25, def.w * .25, noseMat, 0, def.h * .6, def.w / 2));
-  }
-  g.add(head);
-  g.userData = { def, head };
-  return g;
-}
-
-function makeLabel(text) {
-  const c = document.createElement('canvas');
-  const ctx = c.getContext('2d');
-  ctx.font = 'bold 28px monospace';
-  c.width = Math.ceil(ctx.measureText(text).width) + 20; c.height = 40;
-  ctx.font = 'bold 28px monospace'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillRect(0, 0, c.width, c.height);
-  ctx.fillStyle = '#fff'; ctx.fillText(text, 10, c.height / 2 + 1);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, fog: false, depthWrite: false }));
-  s.scale.set(.3 * c.width / c.height, .3, 1);
-  return s;
-}
-
-function disposeEntity(o) {
-  scene.remove(o);
-  o.traverse(n => {
-    if (n.isMesh) n.material.dispose();
-    if (n.isSprite) { n.material.map.dispose(); n.material.dispose(); }
-  });
-}
-
-const names = new Map(); // entity id -> player name
-function setLabel(id) {
-  const m = entMeshes.get(id), name = names.get(id);
-  if (!m || m.userData.labelled === name) return;
-  if (m.userData.label) { m.remove(m.userData.label); m.userData.label.material.map.dispose(); m.userData.label.material.dispose(); m.userData.label = null; }
-  m.userData.labelled = name;
-  if (!name) return;
-  const l = makeLabel(name);
-  l.position.set(0, m.userData.def.h + .4, 0);
-  m.add(l); m.userData.label = l;
-}
-
-const wrap = d => ((d + 540) % 360) - 180;
-function entity(e) {
-  let m = entMeshes.get(e.id);
-  if (!m) {
-    m = buildEntity(e.type);
-    scene.add(m); entMeshes.set(e.id, m);
-  }
-  setLabel(e.id);
-  // The wire carries the feet, so the model needs no per-type offset.
-  m.position.set(e.x, e.y, e.z);
-  m.rotation.y = -e.yaw * Math.PI / 180;
-  const head = m.userData.head;
-  head.rotation.y = -wrap(e.head - e.yaw) * Math.PI / 180;
-  head.rotation.x = e.pitch * Math.PI / 180;
-}
+// Entity models, stand-ins, labels and animation live in entities.js.
+const ents = createEntities(scene);
 
 let status = 'connecting...';
 // Read by the overlay script, which must keep working if this module cannot load.
@@ -702,21 +573,19 @@ function onMessage(ev) {
         const id = uvarint(), type = entTypes[dv.getUint16(p, true)] ?? '?';
         p += 2;
         const x = f32(), y = f32(), z = f32();
-        entity({ id, type, x, y, z, yaw: angle(u8[p]), pitch: angle(u8[p + 1]), head: angle(u8[p + 2]) });
+        ents.update({ id, type, x, y, z, yaw: angle(u8[p]), pitch: angle(u8[p + 1]), head: angle(u8[p + 2]) });
         p += 3;
       }
       break;
     }
     case 6:
       for (let n = uvarint(); n > 0; n--) {
-        const id = uvarint(), o = entMeshes.get(id);
-        names.delete(id);
-        if (o) { disposeEntity(o); entMeshes.delete(id); }
+        ents.remove(uvarint());
       }
       break;
     case 7:
       blocks.clear(); ready.length = 0; queued = 0; post({ t: 'clear', epoch: ++epoch }); for (const ms of meshes.values()) for (const o of ms) { scene.remove(o); o.geometry.dispose(); }
-      meshes.clear(); for (const o of entMeshes.values()) disposeEntity(o); entMeshes.clear(); names.clear();
+      meshes.clear(); ents.clear();
       break;
     case 8: {
       const n = dv.getUint16(p, true); p += 2;
@@ -730,9 +599,18 @@ function onMessage(ev) {
     case 10:
       for (let n = uvarint(); n > 0; n--) {
         const id = uvarint(), len = u8[p++];
-        names.set(id, text(len));
-        setLabel(id);
+        ents.setName(id, text(len));
       }
+      break;
+    case 11:
+      for (let n = uvarint(); n > 0; n--) {
+        const id = uvarint(), flags = u8[p], color = u8[p + 1], len = u8[p + 2];
+        p += 3;
+        ents.setLook(id, flags, color, text(len));
+      }
+      break;
+    case 12:
+      ents.loadModels();
       break;
   }
 }
@@ -750,6 +628,7 @@ function frame() {
   const yaw = me.yaw * Math.PI / 180, pitch = me.pitch * Math.PI / 180;
   camera.lookAt(me.x - Math.sin(yaw) * Math.cos(pitch), me.y - Math.sin(pitch), me.z + Math.cos(yaw) * Math.cos(pitch));
   cull();
+  ents.frame(performance.now());
   renderer.render(scene, camera);
   stats.frames++;
   // Time spent in this callback, not the gap between frames: the gap is pinned
@@ -759,7 +638,7 @@ function frame() {
   if (work > stats.workMaxMs) stats.workMaxMs = work;
   if (stats.settledMs === null && blocks.size > 0 && !meshing() && performance.now() - stats.lastBlockAt > 1000) stats.settledMs = stats.lastBlockAt - t0;
   if (stats.firstFrameMs === null && meshes.size > 0) stats.firstFrameMs = performance.now() - t0;
-  hud.textContent = `crew camera  ${status}  radius ${radius} (] widens)\ntextures ${atlas ? 'on' : 'off'}  sub-chunks ${blocks.size}  meshes ${stats.drawn}/${stats.total} drawn  entities ${entMeshes.size}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
+  hud.textContent = `crew camera  ${status}  radius ${radius} (] widens)\ntextures ${atlas ? 'on' : 'off'}  sub-chunks ${blocks.size}  meshes ${stats.drawn}/${stats.total} drawn  entities ${ents.count}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
   requestAnimationFrame(frame);
 }
 frame();
