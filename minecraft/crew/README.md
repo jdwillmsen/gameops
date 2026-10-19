@@ -117,15 +117,17 @@ docker compose -f minecraft/crew/lab/compose.yaml up -d --build
 minecraft/crew/lab/scene.sh lab
 ```
 
-On the cluster lab, name the server pod instead of a compose service:
+On the cluster lab, name the server pod instead of a compose service. The
+scene erases a 17x8x17 area, so a `k8s:` target needs `--confirm-overwrite`:
 
 ```
-minecraft/crew/lab/scene.sh k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0
+minecraft/crew/lab/scene.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod>
 ```
 
-The cluster lab is joinable by real players (NodePort 31136, offline, no
-ops), so lab commands target the unit by name and never `@a`: the script's
-second argument is the unit's username and defaults to `crew-1`. The scene
+The cluster lab is joinable by real players (details in the deployment repo),
+so lab commands target the unit by name and never `@a`: the script's second
+argument is the unit's username and defaults to `crew-1`. `send-command` exits
+0 even when the server rejects a command, so check the server log. The scene
 needs cheats, so it only ever runs against a lab; crew itself sends no command.
 
 ### Textures
