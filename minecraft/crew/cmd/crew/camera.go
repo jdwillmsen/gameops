@@ -15,6 +15,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
 // newDecoder is the block table both the world store and the camera read, so
@@ -133,10 +134,14 @@ func pingVersion(ctx context.Context, addr string) string {
 	return ad.Version
 }
 
-func statusHandler(tracker *belief.Tracker, version string, hub *camera.Hub) http.Handler {
-	h := statusapi.Handler(tracker, version)
+// statusHandler mounts the task routes only when a token is set, so a unit
+// without one has no way to be told what to do.
+func statusHandler(tracker *belief.Tracker, version string, hub *camera.Hub, runner *task.Runner, tasksToken string) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", statusapi.Handler(tracker, version))
+	task.Routes(mux, runner, tasksToken)
 	if hub == nil {
-		return h
+		return mux
 	}
-	return camera.Mount(h, hub)
+	return camera.Mount(mux, hub)
 }

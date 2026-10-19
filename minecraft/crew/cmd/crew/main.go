@@ -26,6 +26,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
@@ -71,7 +73,11 @@ func main() {
 	dec := newDecoder(log)
 	hub, beginSession := newCamera(cfg, tracker, dec, log)
 	world := blocks.New(dec, maxStoredSubChunks)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, hub), ReadHeaderTimeout: 5 * time.Second}
+	runner := task.NewRunner(func(t task.Template) ([]skill.Skill, error) {
+		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
+	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
+	go runner.Run(ctx)
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, hub, runner, cfg.TasksToken), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
@@ -87,7 +93,7 @@ func main() {
 			after:    time.After,
 		},
 		func(ctx context.Context) error {
-			return session(ctx, cfg, auth, tracker, world, hub, beginSession, log)
+			return session(ctx, cfg, auth, tracker, world, hub, runner, beginSession, log)
 		},
 		tracker.Reset,
 		logAdapter{log},
@@ -107,7 +113,7 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 	return logging.Fields{"xuid": xuid, "view_distance": viewDistance}
 }
 
-func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
 	// A headless client uploads no skin of its own, and without one the unit
 	// joins as a black silhouette under a fresh skin ID every connect.
 	unitSkin := skin.For(cfg.Username)
@@ -153,6 +159,9 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	tracker.ItemNames(gd.Items)
 	world.Reset()
 	defer world.Reset()
+	u := newUnit(gd.EntityRuntimeID, tracker, world, hub, runner, conn)
+	u.items = gd.Items
+	defer u.end()
 	beginSession(ctx, addr)
 	if hub != nil {
 		hub.Spawn(gd.EntityRuntimeID)
@@ -173,13 +182,8 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 			}
 			return fmt.Errorf("read: %w", err)
 		}
-		tracker.Apply(pk)
-		// The store is the only requester of sub-chunks, so it sees every
-		// packet whether or not the camera is on.
-		world.Apply(pk, conn)
-		// After belief: the hub reads the unit's pose back from it.
-		if hub != nil {
-			hub.Apply(pk, conn)
+		if err := u.apply(pk); err != nil {
+			return fmt.Errorf("start acting: %w", err)
 		}
 
 		// A dead unit stays connected and spawned; only the respawn
@@ -194,9 +198,11 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 		}
 		tracker.SetDead(respawner.Dead())
 		if respawner.Dead() {
+			u.died()
 			log.Info("died", nil)
 			continue
 		}
+		u.respawned()
 		log.Info("respawned", nil)
 		// The server drops the radius when the player is replaced.
 		if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {

@@ -50,6 +50,9 @@ services:
       # Bound wide only inside the compose network; the published port below
       # is loopback-only on the host.
       STATUS_ADDR: 0.0.0.0:8080
+      # Unset leaves the task endpoints off. Export it in the shell that runs
+      # compose; it is never written to a file here.
+      TASKS_TOKEN: ${TASKS_TOKEN:-}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
