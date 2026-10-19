@@ -227,7 +227,7 @@ func TestModelsAreServedAndAnnouncedOnlyWhenBuilt(t *testing.T) {
 // frame numbers they switch on and the paths they fetch are checked here.
 func TestPageHandlesTheEntityFramesAndLoadsItsModule(t *testing.T) {
 	for _, s := range []string{
-		"from '/v1/camera/entities.js'",
+		"from './v1/camera/entities.js'",
 		"case " + strconv.Itoa(int(frameEntityData)) + ":",
 		"case " + strconv.Itoa(int(frameModels)) + ":",
 	} {
@@ -235,7 +235,7 @@ func TestPageHandlesTheEntityFramesAndLoadsItsModule(t *testing.T) {
 			t.Errorf("page does not contain %q", s)
 		}
 	}
-	for _, s := range []string{"/v1/camera/entities.json", "/v1/camera/entities.png", "/v1/camera/items.json"} {
+	for _, s := range []string{"'v1/camera/entities.json'", "'v1/camera/entities.png'", "'v1/camera/items.json'"} {
 		if !strings.Contains(string(entitiesJS), s) {
 			t.Errorf("entities.js does not fetch %q", s)
 		}
