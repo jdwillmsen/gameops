@@ -138,6 +138,9 @@ func (d *Deposit) fail(a Actuator, err error) (Status, error) {
 	return Failed, err
 }
 
+// Stop shuts the chest when the skill is abandoned.
+func (d *Deposit) Stop(a Actuator) { _, _ = d.fail(a, nil) }
+
 func (d *Deposit) failed(a Actuator, err error) outcome {
 	st, err := d.fail(a, err)
 	return outcome{st: st, err: err}

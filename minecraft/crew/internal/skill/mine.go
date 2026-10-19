@@ -216,6 +216,9 @@ func (m *Mine) aim(b protocol.BlockPos, phase minePhase) {
 	m.breakStarted, m.waited, m.pickInit = false, 0, false
 }
 
+// Stop releases the server's break session when the skill is abandoned.
+func (m *Mine) Stop(a Actuator) { _, _ = m.fail(a, nil) }
+
 func (m *Mine) failed(a Actuator, err error) outcome {
 	st, err := m.fail(a, err)
 	return outcome{st: st, err: err}

@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -191,5 +192,27 @@ func TestDepositHoldsAnEmptyHandWhenTheHotbarIsEmpty(t *testing.T) {
 	}
 	if r.chest[0].count != 16 || r.held != 0 {
 		t.Errorf("chest %+v held %d", r.chest[0], r.held)
+	}
+}
+
+func TestDepositStopClosesAnOpenChest(t *testing.T) {
+	w := chestWorld()
+	r := depositRig(t, w, 1, 1)
+	d := NewDepositChest(w, r.self, chestPos, "cobblestone", 16)
+	_ = d.Ready(r.self())
+	for i := 0; i < 600; i++ {
+		if open, _, _ := r.Container(); open {
+			break
+		}
+		if st, _ := d.Step(context.Background(), r); st != Running {
+			t.Fatal("finished before the chest opened")
+		}
+	}
+	if open, _, _ := r.Container(); !open {
+		t.Fatal("chest never opened")
+	}
+	d.(Stopper).Stop(r)
+	if open, _, _ := r.Container(); open || !r.chestClosed {
+		t.Error("the chest was left open")
 	}
 }
