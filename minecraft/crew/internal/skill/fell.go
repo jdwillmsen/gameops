@@ -428,8 +428,13 @@ func (f *Fell) walk(a Actuator, then fellPhase) outcome {
 // breakCell sends one input of breaking a block, looking at it. It reports
 // true, sending nothing, once the block is gone.
 func (f *Fell) breakCell(a Actuator, p act.Pose) (bool, error) {
-	cb := &f.brk
-	if n, known := f.world.Block(cb.pos); known && n != cb.name {
+	return driveBreak(f.world, &f.brk, a, p)
+}
+
+// driveBreak is the per-tick body of breaking one cell outside the mine
+// skill, shared by the skills that dig on their own.
+func driveBreak(world path.Blocks, cb *cellBreak, a Actuator, p act.Pose) (bool, error) {
+	if n, known := world.Block(cb.pos); known && n != cb.name {
 		cb.open = false
 		return true, nil
 	}
