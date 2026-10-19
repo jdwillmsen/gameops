@@ -159,6 +159,27 @@ same item, so tools stay put, and it fails after three attempts in a row that
 move nothing. Its `progress` is the total moved and its `qty` the total asked
 for. The destination must not also be a source and a source may be listed once.
 
+`mine_shaft` digs a staircase down from an entrance, tunnels branches off its
+bottom, climbs out and deposits everything it gained in one chest. It needs a
+pickaxe on the hotbar and is lab-only by construction:
+
+```json
+{"template": "mine_shaft", "entrance": {"x": 0, "y": 0, "z": 0}, "facing": "north",
+ "depth": 12, "branches": 2, "branch_length": 8,
+ "area": {"min": {"x": 0, "y": 0, "z": 0}, "max": {"x": 0, "y": 0, "z": 0}},
+ "to": {"x": 0, "y": 0, "z": 0}}
+```
+
+`entrance` is the open ground cell the unit stands in; `facing` is north
+(negative z), south, east or west; `depth` is 1 to 32 steps down, one block per
+block forward. `branches` is 0 to 3 tunnels off the bottom (ahead, left, right)
+of `branch_length` 1 to 32, and is absent when there are none. `area` and `to`
+are required, and a plan with any cell outside `area` is rejected when
+submitted. A cell is left closed when lava, water, magma, an unloaded block or
+no floor is next to it: the heading is dropped, logged as `mine_hazard`, and the
+unit carries on with the next. A shaft blocked at its first step fails the
+task. Tunnels are not lit.
+
 Crew runs one task at a time. A session end or death fails the running task
 (`session ended`, `unit died`) and queued tasks wait for the next spawn.
 Bodies are capped at 4096 bytes (413) and at most 16 tasks may wait (429).
