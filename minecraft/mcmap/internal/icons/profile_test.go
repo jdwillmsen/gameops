@@ -18,7 +18,7 @@ const tippedModel = `{"format_version": "1.12.0", "minecraft:geometry": [
    {"name": "head", "parent": "neck", "pivot": [0, 10, -4], "cubes": [{"origin": [-1, 10, -5], "size": [2, 2, 2], "uv": [0, 32]}]},
    {"name": "wing", "parent": "body", "pivot": [0, 4, 0], "rotation": [0, 40, 0], "cubes": [{"origin": [2, 2, -2], "size": [6, 1, 4], "uv": [32, 0]}]},
    {"name": "feather", "parent": "wing", "cubes": [{"origin": [8, 2, -2], "size": [2, 1, 2], "uv": [32, 16]}]},
-   {"name": "fin", "parent": "body", "cubes": [{"origin": [0, 4, 0], "size": [0, 2, 3], "uv": [48, 0]}]},
+   {"name": "fin", "parent": "body", "cubes": [{"origin": [-3, 4, 0], "size": [0, 2, 3], "uv": [48, 0]}]},
    {"name": "lying", "parent": "body", "pivot": [0, 0, 4], "bind_pose_rotation": [90, 0, 0], "cubes": [{"origin": [-1, 0, 4], "size": [2, 4, 1], "uv": [48, 16]}]},
    {"name": "lyingChild", "parent": "lying", "cubes": [{"origin": [-1, 0, 6], "size": [2, 1, 1], "uv": [48, 32]}]}
   ]}
@@ -85,6 +85,20 @@ func TestASheetIsDrawnFromWhicheverSideTheTextureFills(t *testing.T) {
 	}
 	if fin[0].cx != fin[1].cx || fin[0].cy != fin[1].cy || fin[0].w != fin[1].w {
 		t.Errorf("the two faces of a sheet are not in one place: %+v", fin)
+	}
+	// The fin stands at x = -3, behind the body's middle seen from the
+	// west: both faces lie in that plane, and the near one is drawn last.
+	if fin[0].depth != -3 || fin[1].depth != -3 {
+		t.Errorf("the faces of a sheet at x = -3 lie at depths %v and %v, want both -3", fin[0].depth, fin[1].depth)
+	}
+	var near placed
+	for _, b := range modelsOf(t, tippedModel)["geometry.tipped"].bones {
+		if b.Name == "fin" {
+			near, _ = place(b.Cubes[0], false, 0, faceWest)
+		}
+	}
+	if fin[1].src != near.src {
+		t.Errorf("the face drawn last is %+v, want the near face %+v", fin[1].src, near.src)
 	}
 }
 

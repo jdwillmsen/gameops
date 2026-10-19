@@ -201,18 +201,20 @@ func (m model) sideOf(from string, roots, skip []string, hides func(string) bool
 				continue
 			}
 			part := sidePart{placed: p, angle: math.Mod(t.angle, 360), cx: cx, cy: cy, w: w, h: h, bone: b.Name}
-			out = append(out, part)
 			// A sheet with no thickness, a tadpole's tail or a fin, is one
 			// plane with a face on either side, and which of the two the
 			// texture fills is up to the model: the far one is drawn too,
-			// turned to face this way.
+			// turned to face this way, in the same plane and just before
+			// the near one so it shows only where the near one is clear.
 			if from == faceWest && size[0] == 0 {
 				if back, ok := place(c, b.Mirror, b.Inflate, faceEast); ok {
-					part.placed = back
-					part.src.Flip = !part.src.Flip
-					out = append(out, part)
+					far := part
+					far.src = back.src
+					far.src.Flip = !far.src.Flip
+					out = append(out, far)
 				}
 			}
+			out = append(out, part)
 		}
 	}
 	return out
