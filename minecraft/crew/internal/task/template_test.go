@@ -63,3 +63,15 @@ func TestGatherAndDepositExpandsToMineThenDeposit(t *testing.T) {
 		t.Errorf("skills = %s", got)
 	}
 }
+
+func TestGatherAcceptsOakLog(t *testing.T) {
+	body := strings.Replace(goodBody, `"cobblestone"`, `"oak_log"`, 1)
+	tpl, err := ParseTemplate([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} }); err != nil || len(skills) != 2 {
+		t.Fatalf("skills %v, err %v", skills, err)
+	}
+}
+

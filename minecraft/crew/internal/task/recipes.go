@@ -11,4 +11,5 @@ type Source struct {
 // instead of sending the unit to mine something it cannot collect.
 var recipes = map[string]Source{
 	"cobblestone": {Block: "stone", Tool: "pickaxe"},
+	"oak_log":     {Block: "oak_log", Tool: "axe"},
 }
