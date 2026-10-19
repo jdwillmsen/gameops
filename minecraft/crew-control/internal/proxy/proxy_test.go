@@ -199,3 +199,24 @@ func TestProxyWebSocketSameOrigin(t *testing.T) {
 		t.Fatalf("echo = %q, %v", msg, err)
 	}
 }
+
+func TestProxyForwardsOnlyCameraRadius(t *testing.T) {
+	cases := []struct{ path, wantQuery string }{
+		{"/units/crew-01/v1/camera/ws?r=2", "r=2"},
+		{"/units/crew-01/v1/camera/ws?r=2&x=1", "r=2"},
+		{"/units/crew-01/v1/camera/ws?x=1", ""},
+		{"/units/crew-01/v1/camera/ws?r=abc", ""},
+		{"/units/crew-01/v1/camera/ws?r=1234", ""},
+		{"/units/crew-01/v1/camera/stats?r=2", ""},
+		{"/units/crew-01/v1/state?r=2&x=1", ""},
+	}
+	unit := newFakeUnit(t, nil)
+	h := Handler(rosterFor(t, unit.URL), logging.New("error"))
+	for _, c := range cases {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", c.path, nil))
+		reqs := unit.seen()
+		if got := reqs[len(reqs)-1].URL.RawQuery; got != c.wantQuery {
+			t.Errorf("%s: upstream query %q, want %q", c.path, got, c.wantQuery)
+		}
+	}
+}
