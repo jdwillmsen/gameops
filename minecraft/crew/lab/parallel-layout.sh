@@ -19,6 +19,11 @@ GROVE_Z=(8 10)
 OUTBOX_A=(4 100 -5)
 OUTBOX_B=(-5 100 5)
 STORE=(0 100 0)
+# Stocked with swords and bread for units that set KIT_CHEST to this
+# position. Clear of the quarry, the grove and the other chests.
+KIT_CHEST=(-3 100 -3)
+KIT_SWORDS=6
+KIT_BREAD=64
 
 START_AGATE=(5 100 -7)
 START_BASALT=(-6 100 7)
