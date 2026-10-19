@@ -58,6 +58,8 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"IDLE_WANDER":      "maybe",
 		"DEFEND":           "sometimes",
 		"EAT":              "yes please",
+		"KIT_CHEST":        "1,2",
+		"KIT_FOOD":         "0",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -258,5 +260,32 @@ func TestEatIsOnByDefaultAndConfigurable(t *testing.T) {
 	t.Setenv("EAT", "false")
 	if cfg, err = Load(); err != nil || cfg.Eat {
 		t.Fatalf("config = %+v, err %v", cfg, err)
+	}
+}
+
+func TestKitChestIsOffUnlessAPositionIsGiven(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.KitChest != nil || cfg.KitFood != 8 {
+		t.Fatalf("defaults = %+v, err %v", cfg, err)
+	}
+	t.Setenv("KIT_CHEST", " 12, 100 ,-30 ")
+	t.Setenv("KIT_FOOD", "16")
+	cfg, err = Load()
+	if err != nil || cfg.KitChest == nil || *cfg.KitChest != [3]int32{12, 100, -30} || cfg.KitFood != 16 {
+		t.Fatalf("config = %+v, err %v", cfg, err)
+	}
+}
+
+func TestKitChestRejectsWhatIsNotAPosition(t *testing.T) {
+	for _, v := range []string{"1,2", "1,2,3,4", "a,b,c", "1,2,99999999999", "~1,2,3"} {
+		setRequired(t)
+		t.Setenv("KIT_CHEST", v)
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "KIT_CHEST") {
+			t.Errorf("KIT_CHEST=%q: err = %v", v, err)
+		} else if strings.Contains(err.Error(), v) && len(v) > 8 {
+			t.Errorf("error echoes the position: %v", err)
+		}
 	}
 }

@@ -96,7 +96,7 @@ func main() {
 	runner := task.NewRunner(func(t task.Template) ([]skill.Skill, error) {
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
-	lf := life.New(life.Config{Wander: cfg.IdleWander, Radius: cfg.IdleRadius, Defend: cfg.Defend, Eat: cfg.Eat}, world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
+	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
 	runner.SetReflex(lf)
 	go runner.Run(ctx)
 	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken), ReadHeaderTimeout: 5 * time.Second}
