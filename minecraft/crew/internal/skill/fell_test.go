@@ -118,6 +118,29 @@ func TestFellClearsLeavesInTheWayOfThePillarOnly(t *testing.T) {
 	onGround(t, r)
 }
 
+func TestFellSkipsLeafThatDisappearsAfterPlanning(t *testing.T) {
+	w := oak(7)
+	w.fill("oak_leaves", treeX-1, 3, treeZ-1, treeX+1, 3, treeZ+1)
+	w[protocol.BlockPos{treeX, 3, treeZ}] = "oak_log"
+	r := fellRig(t, w, 3)
+	f := NewFell(w, r.self, "oak_log", "oak_log", "axe", 7, 0, nil).(*Fell)
+	for i := 0; i < 1000 && (f.phase != fClear || len(f.leaves) == 0); i++ {
+		if st, err := f.Step(t.Context(), r); st == Failed || err != nil {
+			t.Fatalf("planning stopped with status %v, err %v", st, err)
+		}
+	}
+	if f.phase != fClear || len(f.leaves) == 0 {
+		t.Fatal("fell skill did not plan leaves to clear")
+	}
+	w[f.leaves[0]] = "air"
+	if st, err := r.run(f, 4000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v after planned leaf disappeared", st, err)
+	}
+	if got := r.have("oak_log"); got != 7 {
+		t.Errorf("oak_log = %d, want 7", got)
+	}
+}
+
 func TestFellWithNothingToBuildWithTakesWhatItReaches(t *testing.T) {
 	w := oak(8)
 	r := fellRig(t, w, 0)
@@ -142,7 +165,7 @@ func TestFellLeavesLogsBeyondAPillarAndStaysSafe(t *testing.T) {
 		t.Fatalf("status %v, err %v; the top log is out of reach even from a pillar", st, err)
 	}
 	if got := r.have("oak_log"); got != 8 {
-		t.Errorf("oak_log = %d, want 9", got)
+		t.Errorf("oak_log = %d, want 8", got)
 	}
 	if r.maxRise > 1.3 {
 		t.Errorf("rise %.2f", r.maxRise)
