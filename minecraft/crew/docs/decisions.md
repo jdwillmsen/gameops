@@ -202,3 +202,70 @@ hotbar stack; for the same reason the withdraw only places into the hotbar,
 and a unit with no free hotbar slot does not visit. A kit that cannot make the unit whole is not retried for three
 minutes. Judgment call: a unit's weapon sitting outside the hotbar counts as
 no weapon, since `loadout` never selects it either.
+
+## 2026-10-19: units fell whole oaks (JDW-119)
+
+The `oak_log` gather recipe used the plain mine skill, which only breaks logs
+a standable cell puts within reach. A full oak (trunk of 4 to 7 logs under a
+canopy) has logs above that, so the unit took the low ones and then failed
+with "no reachable oak_log".
+
+**Approach.** `oak_log` now expands to a `fell_tree` skill that wraps the
+mine skill. It runs the mine skill from the ground first, which takes every
+log within reach and collects the drops. If logs remain that no standable
+cell reaches, it pillars up beside the trunk, cuts what is then in reach,
+climbs down and collects the drops that fell.
+- Pillar: stand on the ground in a column next to the log, clear any leaves
+  in the body column and the jump's headroom, then jump and place a block
+  from the hotbar (dirt, or cobblestone when a pickaxe is also held) under
+  the feet at the top of the jump. At most two blocks: the unit that is left
+  on one (a failed task, a fight that knocks it off) steps or falls at most
+  two blocks, which does no fall damage, so it is never stranded. Reach is
+  the mine skill's 4.5 from the eye, so a 7-log trunk needs one block.
+- Cutting from the pillar uses the mine skill in a hold-position mode: it
+  breaks logs in reach only, does not walk to drops, and does not count
+  progress (the drops are on the ground).
+- Descent: break the block under the feet (one-block falls), top first, so
+  the pillar is cleaned up and its blocks return to the inventory. If a
+  break fails the unit walks off, which is safe at two blocks high.
+- Collect: the drops rest where the logs were, so the unit visits the
+  columns it cut, standing on the ground there until the pickup lands.
+- Leaves are only cleared where the unit's own body or jump needs the cell.
+  The canopy is never cleared. Logs count as the tree if they are oak logs in
+  the task's area within the mine radius, so branches are cut when in reach;
+  the `area` bound applies to every log broken.
+- A fight preempts as for any skill: `Resume` from the pillar cuts what is in
+  reach and descends; from the ground it carries on. At most four pillars
+  are built per task and a log that survives an attempt is ruled out.
+
+**Rejected.**
+- Standing in the trunk's own column after cutting the base: no more reach
+  (the eye stays 1.6 above the feet) and floating logs sit over the head.
+- Jump-mining: the unit gains 1.2 blocks for 3 ticks only, and the break
+  takes longer than that.
+- Climbing leaves or a ladder: not walkable in the movement model, and no
+  scaffolding material to rely on.
+- A separate template: callers should say "gather oak logs", not how.
+
+**Not done.** Replanting saplings. Fell logs of other species.
+
+**Live check** (private Bedrock Dedicated Server, offline, 7-log oak with
+leaves hanging over the pillar's column): the task `gather_and_deposit
+oak_log qty 7 area ...` ended `done`, the chest held 7 `oak_log`, the unit's
+three dirt were back in its inventory and it stood on the ground at full
+health. Confirmed:
+- The server accepts the `ClickBlock` transaction on a top face with the
+  clicked block's hash as `BlockRuntimeID`, sent in the air above the target
+  cell, on the first jump.
+- A leaf above the pillar is broken by hand in time, and breaking the top log
+  from the pillar worked with leaves around it, so no line-of-sight leaf
+  clearing was needed.
+- Breaking the block under the feet drops the unit one block and returns the
+  dirt.
+- Pickups: the last log landed after the unit stood in the column, which is
+  why collection waits for the inventory to reach the expected count (up to
+  2 s per column) instead of a fixed pause.
+
+Not live-checked: a fight on the pillar (the sim covers a resume at every
+step), a 2-block pillar, a cobblestone pillar, and the saplings the leaves
+drop are left on the ground.
