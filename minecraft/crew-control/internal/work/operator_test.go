@@ -93,6 +93,9 @@ func (o *opRig) post(t *testing.T, path, body string, hdr map[string]string) (in
 func (o *opRig) call(t *testing.T, method, path, body string, h map[string]string) (int, string) {
 	t.Helper()
 	req, _ := http.NewRequest(method, o.srv.URL+path, strings.NewReader(body))
+	if method == http.MethodPost {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	for k, v := range h {
 		req.Header.Set(k, v)
 	}
@@ -412,6 +415,36 @@ func TestCancelLosingTheDeliveryRaceStopsTheUnit(t *testing.T) {
 	items, _ := m.Recent(context.Background(), "crew-01", 5)
 	if len(items) != 2 || items[0].Kind != KindCommand || items[1].State != Cancelled {
 		t.Fatalf("items %+v", items)
+	}
+}
+
+type finishBeforeCancelOpen struct {
+	*Memory
+	id uuid.UUID
+}
+
+func (s finishBeforeCancelOpen) CancelOpen(ctx context.Context, unit string) ([]Item, error) {
+	if _, err := s.Memory.Apply(ctx, unit, s.id, Done, 1, ""); err != nil {
+		return nil, err
+	}
+	return s.Memory.CancelOpen(ctx, unit)
+}
+
+func TestCancelReportsItemThatFinishedBeforeUnitStop(t *testing.T) {
+	m := NewMemory()
+	first := must(t, m, "crew-01", KindTask, tpl)
+	_, ok, _, err := m.Next(context.Background(), "crew-01", time.Now())
+	if err != nil || !ok {
+		t.Fatal("setup: item was not delivered")
+	}
+	o := newOpRig(t, finishBeforeCancelOpen{Memory: m, id: first.ID})
+	code, resp := o.post(t, "/v1/work/crew-01/items/"+first.ID.String()+"/cancel", "", nil)
+	var got map[string]any
+	if err := json.Unmarshal([]byte(resp), &got); err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK || got["state"] != Done || got["note"] != nil {
+		t.Fatalf("finished item was mislabeled: %d %s", code, resp)
 	}
 }
 

@@ -74,6 +74,7 @@ func (e *env) client() *client { return &client{e: e, cookies: map[string]*http.
 
 func (c *client) do(method, path string, body []byte, hdr bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	if hdr {
 		req.Header.Set("X-Crew-Request", "1")
 	}
@@ -505,6 +506,7 @@ func TestRequire(t *testing.T) {
 
 	do := func(method string, hdr map[string]string, session bool) int {
 		r := httptest.NewRequest(method, "/v1/work/x", strings.NewReader("{}"))
+		r.Header.Set("Content-Type", "application/json")
 		for k, v := range hdr {
 			r.Header.Set(k, v)
 		}
@@ -529,12 +531,15 @@ func TestRequire(t *testing.T) {
 		{"GET", "GET", hdr, true, 403},
 		{"no header or session", "POST", nil, false, 403},
 		{"no session", "POST", hdr, false, 401},
+		{"non-json content type", "POST", map[string]string{"X-Crew-Request": "1", "Content-Type": "text/plain"}, true, 415},
+		{"missing content type", "POST", map[string]string{"X-Crew-Request": "1", "Content-Type": ""}, true, 415},
+		{"json with charset", "POST", map[string]string{"X-Crew-Request": "1", "Content-Type": "application/json; charset=utf-8"}, true, 200},
 	} {
 		if got := do(tc.method, tc.hdr, tc.session); got != tc.want {
 			t.Errorf("%s: %d, want %d", tc.name, got, tc.want)
 		}
 	}
-	if called != 1 {
+	if called != 2 {
 		t.Fatalf("handler ran %d times", called)
 	}
 }

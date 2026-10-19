@@ -281,8 +281,9 @@ func TestWorkStreamNeedsARealSession(t *testing.T) {
 		t.Fatal("signed-in stream missed its history")
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/work/crew-01/stop", nil)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/work/crew-01/stop", strings.NewReader("{}"))
 	req.Header.Set("X-Crew-Request", "1")
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(cookie)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -7,6 +7,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"mime"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -148,7 +149,22 @@ func (a *Auth) Operator(r *http.Request) (Operator, bool) {
 // cookie off cross-site requests, and a custom header cannot be sent
 // cross-origin without a preflight this server never grants.
 func stateChanging(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.Header.Get(requestHeader) == "1"
+	if r.Method != http.MethodPost || r.Header.Get(requestHeader) != "1" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	return err == nil && mediaType == "application/json"
+}
+
+func rejectStateChanging(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && r.Header.Get(requestHeader) == "1" {
+		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil || mediaType != "application/json" {
+			fail(w, http.StatusUnsupportedMediaType, "json_required")
+			return
+		}
+	}
+	fail(w, http.StatusForbidden, "bad_request")
 }
 
 // Require lets a request through only as a signed-in operator's POST.
@@ -159,7 +175,7 @@ func (a *Auth) Require(h http.Handler) http.Handler {
 			return
 		}
 		if !stateChanging(r) {
-			fail(w, http.StatusForbidden, "bad_request")
+			rejectStateChanging(w, r)
 			return
 		}
 		if _, ok := a.Operator(r); !ok {
@@ -205,7 +221,7 @@ func (a *Auth) me(w http.ResponseWriter, r *http.Request) {
 
 func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 	if !stateChanging(r) {
-		fail(w, http.StatusForbidden, "bad_request")
+		rejectStateChanging(w, r)
 		return
 	}
 	clearCookie(w, SessionCookie)

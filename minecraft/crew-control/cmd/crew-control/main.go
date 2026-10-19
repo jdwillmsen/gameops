@@ -76,7 +76,7 @@ func main() {
 	store.OnReady(poller.PublishAllWork)
 	workToken := os.Getenv("WORK_TOKEN")
 	if workToken == "" {
-		log.Warn("work_token_unset", logging.Fields{"effect": "unit work routes refuse every request"})
+		log.Warn("work_token_unset", logging.Fields{"effect": "unit work routes are not registered"})
 	}
 
 	// No WriteTimeout: it would cut the camera websocket and the status
