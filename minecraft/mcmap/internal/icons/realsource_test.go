@@ -124,6 +124,9 @@ func TestRealSource(t *testing.T) {
 	}
 	slices.Sort(faceless)
 	t.Logf("not made (%d), of which mobs left as their spawn egg (%d): %v", len(set.Rejected), len(faceless), faceless)
+	if len(faceless) > 0 {
+		t.Errorf("%d mobs have no picture made from their model", len(faceless))
+	}
 	if len(set.Missing) > 0 {
 		t.Errorf("the pin left %d things out", len(set.Missing))
 	}

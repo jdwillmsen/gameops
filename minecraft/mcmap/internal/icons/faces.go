@@ -39,6 +39,9 @@ const (
 	// horns, and minFaceUnits the narrowest box that can be one.
 	maxFaceUnits = 48
 	minFaceUnits = 3
+	// minPictureUnits is the thinnest picture made: a tadpole seen from
+	// the side, which is as thin as the mob.
+	minPictureUnits = 2
 	// faceBox is the side of the box the page fits every face into, in
 	// the model's units, and minFaceShort the least a face may measure
 	// along its shorter side once everything on it is drawn.
@@ -135,7 +138,38 @@ type Layer struct {
 	Turn int  `json:"r,omitempty"`
 	// Skin marks the mob's own hide, as against what is laid over it.
 	Skin bool `json:"k,omitempty"`
+	// Span, where it is given, is the layer's size in the picture's units
+	// and Centre its middle, neither of which need be whole: a box of a
+	// model seen from the side lies where its bones put it. Angle turns
+	// such a layer that many degrees clockwise about its middle, for a
+	// bone set at a slant. Dst is then the whole units it covers.
+	Span   [2]float64 `json:"z,omitempty"`
+	Centre [2]float64 `json:"c,omitempty"`
+	Angle  float64    `json:"a,omitempty"`
+	// Tint, #rrggbb, is a colour the texture is multiplied by, for a mob
+	// whose colours the game lays on a grey texture.
+	Tint string `json:"h,omitempty"`
 }
+
+var tintColour = regexp.MustCompile(`^#[0-9a-f]{6}$`)
+
+// multiplied is a colour multiplied by a tint.
+func multiplied(c color.NRGBA, tint string) color.NRGBA {
+	if len(tint) != 7 {
+		return c
+	}
+	var rgb [3]uint8
+	for i := range rgb {
+		var v int
+		fmt.Sscanf(tint[1+2*i:3+2*i], "%02x", &v)
+		rgb[i] = uint8(v)
+	}
+	c.R, c.G, c.B = uint8(int(c.R)*int(rgb[0])/255), uint8(int(c.G)*int(rgb[1])/255), uint8(int(c.B)*int(rgb[2])/255)
+	return c
+}
+
+// free reports whether a layer lies where its Span and Centre put it.
+func (l Layer) free() bool { return l.Span != [2]float64{} }
 
 // Recipe is how one picture is made from textures: a mob's face, as the
 // boxes of its head seen from the front, or a block drawn from three of
@@ -209,7 +243,7 @@ func checkLayers(layers []Layer, w, h int) error {
 		return fmt.Errorf("%d layers", len(layers))
 	}
 	for _, l := range layers {
-		if !modelTexture.MatchString(l.Texture) || l.Turn < 0 || l.Turn > 3 {
+		if !modelTexture.MatchString(l.Texture) || l.Turn < 0 || l.Turn > 3 || (l.Tint != "" && !tintColour.MatchString(l.Tint)) {
 			return errors.New("a layer names no texture")
 		}
 		for _, n := range [...]int{l.Units[0], l.Units[1], l.Src[0], l.Src[1]} {
@@ -219,6 +253,18 @@ func checkLayers(layers []Layer, w, h int) error {
 		}
 		if l.Src[2] < 1 || l.Src[3] < 1 || l.Src[2] > maxModelUnit || l.Src[3] > maxModelUnit {
 			return errors.New("a layer is of no size")
+		}
+		if l.free() {
+			if !inRange(l.Angle, l.Centre[0], l.Centre[1], l.Span[0], l.Span[1]) || math.Abs(l.Angle) > 360 || l.Span[0] <= 0 || l.Span[1] <= 0 {
+				return errors.New("a layer set by its middle is out of range")
+			}
+			if b := freeBounds(l); b.Min.X < 0 || b.Min.Y < 0 || b.Max.X > w || b.Max.Y > h || b != image.Rect(l.Dst[0], l.Dst[1], l.Dst[0]+l.Dst[2], l.Dst[1]+l.Dst[3]) {
+				return errors.New("a layer set by its middle is outside its picture")
+			}
+			continue
+		}
+		if l.Angle != 0 {
+			return errors.New("a layer is turned with no middle to turn about")
 		}
 		if l.Dst[0] < 0 || l.Dst[1] < 0 || l.Dst[2] < 1 || l.Dst[3] < 1 || l.Dst[0]+l.Dst[2] > w || l.Dst[1]+l.Dst[3] > h {
 			return errors.New("a layer is outside its picture")
@@ -245,11 +291,11 @@ func (r Recipe) check() error {
 		}
 		return r.Block.check()
 	}
-	if r.W < minFaceUnits || r.H < minFaceUnits || r.W > maxFaceUnits || r.H > maxFaceUnits {
+	if r.W < minPictureUnits || r.H < minPictureUnits || r.W > maxFaceUnits || r.H > maxFaceUnits {
 		return fmt.Errorf("a face of %dx%d units", r.W, r.H)
 	}
 	m := r.Main
-	if m[0] < 0 || m[1] < 0 || m[2] < minFaceUnits || m[3] < minFaceUnits || m[0]+m[2] > r.W || m[1]+m[3] > r.H {
+	if m[0] < 0 || m[1] < 0 || m[2] < minPictureUnits || m[3] < minPictureUnits || m[0]+m[2] > r.W || m[1]+m[3] > r.H {
 		return errors.New("the head is outside its picture")
 	}
 	return checkLayers(r.Layers, r.W, r.H)
@@ -657,6 +703,9 @@ func (lib library) face(a appearance, o override) (Recipe, error) {
 		out := Recipe{W: r[2], H: r[3], Main: [4]int{0, 0, r[2], r[3]}, Layers: []Layer{{Texture: path, Units: o.units, Src: r, Dst: [4]int{0, 0, r[2], r[3]}}}}
 		return out, out.check()
 	}
+	if o.profile {
+		return lib.profile(a, o)
+	}
 	parts, err := lib.parts(a, o)
 	if err != nil {
 		return Recipe{}, err
@@ -746,22 +795,45 @@ func compose(layers []Layer, w, h, scale int, textures map[string]*image.NRGBA, 
 			return nil, err
 		}
 		sw, sh := l.Src[2]*k, l.Src[3]*k
+		sample := func(u, v float64) color.NRGBA {
+			if l.Flip {
+				u = 1 - u
+			}
+			for range l.Turn {
+				u, v = v, 1-u
+			}
+			c := tex.NRGBAAt(l.Src[0]*k+min(int(u*float64(sw)), sw-1), l.Src[1]*k+min(int(v*float64(sh)), sh-1))
+			if l.Skin && l.Texture == base && (solid || tga) {
+				c.A = 255
+			}
+			return multiplied(c, l.Tint)
+		}
+		if l.free() {
+			// Each pixel of the picture the layer covers is turned back
+			// onto the layer and takes the texture's pixel there.
+			b := freeBounds(l)
+			sin, cos := math.Sincos(-l.Angle * math.Pi / 180)
+			for py := b.Min.Y * scale; py < b.Max.Y*scale; py++ {
+				for px := b.Min.X * scale; px < b.Max.X*scale; px++ {
+					x, y := (float64(px)+0.5)/float64(scale)-l.Centre[0], (float64(py)+0.5)/float64(scale)-l.Centre[1]
+					u := (x*cos-y*sin)/l.Span[0] + 0.5
+					v := (x*sin+y*cos)/l.Span[1] + 0.5
+					if u < 0 || u >= 1 || v < 0 || v >= 1 {
+						continue
+					}
+					if c := sample(u, v); c.A != 0 {
+						out.SetNRGBA(px, py, over(c, out.NRGBAAt(px, py)))
+					}
+				}
+			}
+			continue
+		}
 		dw, dh := l.Dst[2]*scale, l.Dst[3]*scale
 		for y := range dh {
 			for x := range dw {
 				// The place in the layer as it lies in the picture, then
 				// flipped and turned back to where it is in the texture.
-				u, v := (float64(x)+0.5)/float64(dw), (float64(y)+0.5)/float64(dh)
-				if l.Flip {
-					u = 1 - u
-				}
-				for range l.Turn {
-					u, v = v, 1-u
-				}
-				c := tex.NRGBAAt(l.Src[0]*k+min(int(u*float64(sw)), sw-1), l.Src[1]*k+min(int(v*float64(sh)), sh-1))
-				if l.Skin && l.Texture == base && (solid || tga) {
-					c.A = 255
-				}
+				c := sample((float64(x)+0.5)/float64(dw), (float64(y)+0.5)/float64(dh))
 				if c.A == 0 {
 					continue
 				}
@@ -918,4 +990,13 @@ func faceKey(kind string) string { return "face/" + kind }
 func derived(key string) bool {
 	group, _, _ := strings.Cut(key, "/")
 	return group == "face" || group == "block" || group == "structure" || group == "villager" || group == "item"
+}
+
+// freeBounds is the whole units of a picture a layer set by its middle
+// covers.
+func freeBounds(l Layer) image.Rectangle {
+	sin, cos := math.Sincos(l.Angle * math.Pi / 180)
+	hw, hh := l.Span[0]/2, l.Span[1]/2
+	ex, ey := math.Abs(hw*cos)+math.Abs(hh*sin), math.Abs(hw*sin)+math.Abs(hh*cos)
+	return image.Rect(int(math.Floor(l.Centre[0]-ex+1e-9)), int(math.Floor(l.Centre[1]-ey+1e-9)), int(math.Ceil(l.Centre[0]+ex-1e-9)), int(math.Ceil(l.Centre[1]+ey-1e-9)))
 }

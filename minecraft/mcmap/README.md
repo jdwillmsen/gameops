@@ -337,7 +337,7 @@ second is the pack slowing itself down to protect the server's tick rate.
 
 ### Icons and heads
 
-A mob is drawn as its face, or its spawn egg, and a player as their skin's
+A mob is drawn as its face or profile, or its spawn egg, and a player as their skin's
 head, each inside a ring or border in its category's colour so the filters
 still read at a glance. A marker with no picture is the dot or arrow it was before.
 
@@ -471,9 +471,11 @@ read by. Round is what moves and square is what stays put. A picture with
 no plate is cased round its own outline, in the layer's colour and then
 in the dark, so a chest is a chest's shape and still reads on snow.
 
-**Mob picture** chooses between a mob's face and its spawn egg. A mob
-with no face (17 of 92 at the default pin) is its egg under either, and
-one with a face and no egg its face.
+**Mob picture** chooses between a mob's face and its spawn egg. Every
+mob at the default pin has a picture made from its model, a face or a
+[profile](#faces-blocks-and-structure-pictures), so the egg is drawn
+only when it is chosen; a mob with no picture made, as one a later pin
+adds may be, is its egg under either, and one with no egg its face.
 
 **Size is chosen apart from style**: the box a picture is drawn in is 12,
 16, 24 or 32 pixels on a plate (32 and 48 for the two larger on a screen
@@ -746,7 +748,7 @@ own from the game's models, at the fetch and from the same pin:
 
 | Key | What it is | Made from |
 |---|---|---|
-| `face/<type>` | A mob's face, 75 of the 92 mob types at the default pin | Its model and its texture |
+| `face/<type>` | A mob's face, or its profile where its face is not what it is known by: all 92 mob types at the default pin, 66 faces and 26 profiles | Its model and its texture |
 | `villager/<profession>` | A villager's face in each of 14 professions, as a structure's sheet lists them | The same, with the profession's texture laid over the skin |
 | `structure/<kind>` | The face of the mob that stands for the structure | That mob's face, or the item above |
 | `block/chest`, `trapped_chest`, `ender_chest`, `barrel`, `spawner`, `vault` | The block seen from above and to one side | The three textures the terrain atlas names for its top, front and side |
@@ -806,11 +808,12 @@ than two and a half times as long as it is tall, is a strip that would
 be a speck, and is not made.
 
 A face that comes out blank, nearly all one colour, or such a strip is
-rejected, and the mob keeps its spawn egg. So does any mob the table of
-overrides says to leave alone. That table (`internal/icons/overrides.go`)
-is data, one line a mob with its reason, for the mobs whose face is not
-the front of a box called head. At the default pin 51 faces are made with
-no override, 24 with one, and 17 mobs keep their egg:
+rejected, and the mob keeps its spawn egg. So would any mob the table of
+overrides said to leave alone; none is, at the default pin. That table
+(`internal/icons/overrides.go`) is data, one line a mob with its reason,
+for the mobs whose face is not the front of a box called head. At the
+default pin 50 faces are made with no override, 16 with one, and 26 mobs
+are drawn in profile:
 
 | Mobs | What is done | Why |
 |---|---|---|
@@ -824,22 +827,50 @@ no override, 24 with one, and 17 mobs keep their egg:
 | guardian, elder guardian | Without the spikes | They would leave the eye a speck among them |
 | pufferfish | Its largest form | The smallest is three pixels across |
 | llama, trader llama | The top 8 of the head's box | Head and neck are one box 18 tall |
-| camel, camel husk | The third box of the head bone | The two larger are its neck |
 | ravager | The top 16 of its head, alone | The head is 16 by 20 with the jaw |
-| frog | The lip with the two eyes above it | The eyes are on a bone of their own |
-| bat | The head with its ears | The head alone is four pixels wide |
-| dolphin, turtle | The head from the side | The front is a blank; the eye and the beak are on the side |
-| nautilus, zombie nautilus | The shell from the side | It is a spiral only from there |
-| horse, donkey, mule, skeleton horse, zombie horse | Spawn egg | A horse is known in profile, and its profile is its neck, a bone set 30 degrees off square that a flat view cannot draw; the head alone is a bar with an eye |
-| hoglin, zoglin | Spawn egg | The head is a long box hung at a slant: its front is a brow six pixels tall, and its top is not a face |
-| sniffer | Spawn egg | Its face is behind a beak that fills the front of its head |
-| phantom, armadillo | Spawn egg | A head seven pixels by three, and three by five |
-| parrot, tadpole | Spawn egg | Two and three pixels wide |
-| cod, salmon, tropical fish, silverfish, endermite | Spawn egg | A fish is its side, which is a line at a marker's size; the tropical fish's colours are laid on by the game; the two arthropods are rows of segments with no face |
+| horse, donkey, mule, skeleton horse, zombie horse | Head and neck in profile; the horse brown, not the white the first of its skins is | A horse is known by its profile, which is its neck set 30 degrees off square |
+| hoglin, zoglin, camel, camel husk, frog, armadillo | Whole, in profile | The hoglin's head hangs at a slant and alone is a bar; the camel's head bone is mostly neck; the frog's head is a lip; the armadillo's is three pixels by five |
+| sniffer | Its head in profile | Its face is behind a beak that fills the front of its head |
+| dolphin, turtle | Whole, in profile | The front is a blank; the eye and the beak, the shell, are on the side |
+| nautilus, zombie nautilus | Whole, in profile | It is a spiral only from there |
+| cod, salmon, silverfish, endermite, tadpole | Whole, in profile | A fish is known by its side; the two arthropods are rows of segments with no face; a tadpole is a tail |
+| tropical fish | Whole, in profile, as the clownfish: its first pattern in the game's orange and white | The game lays a variant's colours on a grey texture when it draws it, and nothing in the samples says what they are |
+| parrot | Whole, in profile, as the red one | Its head is two pixels wide |
+| phantom | Whole, from above | It is known by its wings |
+| bat, creaking | Whole, from the front | The bat by its wings, the creaking by its trunk and branches; their heads alone are four pixels wide and a narrow trunk |
 
-Goat, allay and creaking need no override: a goat's head is set at an
-angle, an allay's hangs off an empty bone, and a creaking's largest
-"box" is a flat sheet of branches, all of which the steps above allow
+**A profile** is the mob seen from its left side, its front to the left,
+or from above or the front where the table says: every box of the bones
+named and all that hang off them, or of the whole model. It is what a
+face cannot be, because it follows the bones' turns:
+
+1. Each bone is turned about its pivot by its own rotation and by every
+   bone above it, as the game poses the model at rest. Seen from the
+   side, a turn about the model's x axis, which runs from flank to
+   flank, lies in the picture's plane and is drawn: a horse's neck, a
+   hoglin's head. A turn the other two ways takes a box out of the view,
+   and one of more than 15 degrees is left out with all that hangs off
+   it. An older model's `bind_pose_rotation` turns the bone's own boxes
+   and nothing under it, as the game reads it.
+2. A box lies where its numbers put it, which need not be whole units: a
+   parrot's are set in tenths. A box with no thickness across the view,
+   a fin or a tail, has a face on either side and the texture fills only
+   one, so both are drawn.
+3. A turned box is drawn by taking each pixel of the picture back to the
+   texture, so it stays unblended, its pixels whole. The picture is the
+   whole units the boxes cover, and the page centres it on what is
+   drawn, since a profile is mostly air round a slanted neck or a pair
+   of legs: it is held to an eighth of its box filled, not a half.
+4. A profile more than three times as long as it is tall is a strip and
+   not made, unless the table says the mob is one: a salmon, a dolphin,
+   a turtle and a tadpole are.
+
+The controllers' `part_visibility` is read whatever the case of a bone's
+name, as the game reads it: a silverfish's names `bodypart_0` for its
+model's `bodyPart_0`.
+
+Goat and allay need no override: a goat's head is set at an angle and an
+allay's hangs off an empty bone, both of which the steps above allow
 for.
 
 Some of the model textures are TGA files, which Go's standard

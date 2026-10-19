@@ -475,14 +475,17 @@ func TestAnOverrideIsAppliedInPlaceOfWhatTheModelWouldGive(t *testing.T) {
 		t.Errorf("with the top named the face is %+v %v", side, err)
 	}
 	// And through the table itself: a slime's face is on its core, and a
-	// parrot keeps its egg, whatever its model would have given.
-	looks := map[string]mobLook{"slime": {appearance: look, egg: true}, "parrot": {appearance: look, egg: true}, "boat": {appearance: look}}
+	// mob the table says to leave alone keeps its egg, whatever its model
+	// would have given. No mob is left so now, so the test adds one.
+	overrides["eggish"] = override{why: "kept for the test", egg: true}
+	t.Cleanup(func() { delete(overrides, "eggish") })
+	looks := map[string]mobLook{"slime": {appearance: look, egg: true}, "eggish": {appearance: look, egg: true}, "boat": {appearance: look}}
 	recipes, rejected := plan(t.Context(), lib, looks, atlas{}, atlas{}, nil)
 	if got := recipes["face/slime"]; len(got.Layers) == 0 || got.Layers[0].Src != [4]int{6, 22, 6, 6} {
 		t.Errorf("the slime's override was not applied: %+v", got)
 	}
-	if _, made := recipes["face/parrot"]; made || !strings.HasPrefix(rejected["face/parrot"], "kept as its spawn egg") {
-		t.Errorf("the parrot was not left as its egg: %q", rejected["face/parrot"])
+	if _, made := recipes["face/eggish"]; made || !strings.HasPrefix(rejected["face/eggish"], "kept as its spawn egg") {
+		t.Errorf("the mob was not left as its egg: %q", rejected["face/eggish"])
 	}
 	if _, made := recipes["face/boat"]; made {
 		t.Error("something with no spawn egg was given a face")
