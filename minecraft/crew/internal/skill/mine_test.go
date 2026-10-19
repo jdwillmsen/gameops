@@ -185,3 +185,28 @@ func TestMineBlockStopAbortsALiveBreakOnce(t *testing.T) {
 		t.Errorf("aborts = %d, session = %v", r.aborts, r.breaking)
 	}
 }
+
+func TestMineBlockIgnoresBlocksOutsideTheArea(t *testing.T) {
+	w := quarry()
+	w.fill("stone", 4, 1, 2, 4, 1, 2)
+	r := withPickaxe(newRig(t, w, feetAt(2, 1, 2)))
+	area := Area{Min: protocol.BlockPos{9, 1, 9}, Max: protocol.BlockPos{11, 2, 11}}
+	m := NewMineBlockWith(w, r.self, "stone", "cobblestone", "pickaxe", 4, 0, InArea(area))
+	if st, err := r.run(m, 800); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if n, _ := w.Block(protocol.BlockPos{4, 1, 2}); n != "stone" {
+		t.Errorf("the nearer block outside the area became %q", n)
+	}
+
+	empty := Area{Min: protocol.BlockPos{0, 5, 0}, Max: protocol.BlockPos{1, 6, 1}}
+	r = withPickaxe(newRig(t, w, feetAt(2, 1, 2)))
+	m = NewMineBlockWith(w, r.self, "stone", "cobblestone", "pickaxe", 1, 0, InArea(empty))
+	st, err := r.run(m, 200)
+	if st != Failed || err == nil || err.Error() != "no reachable stone in the area" {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if strings.ContainsAny(err.Error(), "0123456789") {
+		t.Errorf("error carries coordinates: %q", err)
+	}
+}

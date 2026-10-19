@@ -23,6 +23,7 @@ const (
 	maxHaulSources   = 4
 	minQty           = 1
 	maxQty           = 256
+	maxAreaSpan      = 64
 	// How far from the unit MineBlock looks for stone.
 	mineRadius = 24
 )
@@ -40,10 +41,18 @@ type Template struct {
 	Item     string `json:"item"`
 	Qty      int    `json:"qty"`
 	Chest    Chest  `json:"chest"`
+	// Area, when set, confines gather_and_deposit to blocks inside the box.
+	Area *Area `json:"area,omitempty"`
 
 	Items map[string]int `json:"items,omitempty"`
 	From  []Chest        `json:"from,omitempty"`
 	To    *Chest         `json:"to,omitempty"`
+}
+
+// Area is an inclusive box, min at most max on every axis.
+type Area struct {
+	Min Chest `json:"min"`
+	Max Chest `json:"max"`
 }
 
 // decodeStrict rejects unknown fields and anything after the object.
@@ -93,6 +102,10 @@ func parseGather(body []byte) (Template, error) {
 		Item     string `json:"item"`
 		Qty      int    `json:"qty"`
 		Chest    *Chest `json:"chest"`
+		Area     *struct {
+			Min *Chest `json:"min"`
+			Max *Chest `json:"max"`
+		} `json:"area"`
 	}
 	if err := decodeStrict(body, &raw); err != nil {
 		return Template{}, err
@@ -106,7 +119,31 @@ func parseGather(body []byte) (Template, error) {
 	if raw.Chest == nil {
 		return Template{}, errors.New("chest is required")
 	}
-	return Template{Template: raw.Template, Item: raw.Item, Qty: raw.Qty, Chest: *raw.Chest}, nil
+	t := Template{Template: raw.Template, Item: raw.Item, Qty: raw.Qty, Chest: *raw.Chest}
+	if raw.Area != nil {
+		if raw.Area.Min == nil || raw.Area.Max == nil {
+			return Template{}, errors.New("area needs min and max")
+		}
+		a := Area{Min: *raw.Area.Min, Max: *raw.Area.Max}
+		if err := a.validate(); err != nil {
+			return Template{}, err
+		}
+		t.Area = &a
+	}
+	return t, nil
+}
+
+func (a Area) validate() error {
+	// int64 so a span across the int32 range cannot wrap.
+	for _, ax := range [][2]int32{{a.Min.X, a.Max.X}, {a.Min.Y, a.Max.Y}, {a.Min.Z, a.Max.Z}} {
+		if ax[0] > ax[1] {
+			return errors.New("area min must not exceed max")
+		}
+		if int64(ax[1])-int64(ax[0])+1 > maxAreaSpan {
+			return fmt.Errorf("area must span at most %d blocks on each axis", maxAreaSpan)
+		}
+	}
+	return nil
 }
 
 func parseHaul(body []byte) (Template, error) {
@@ -156,8 +193,15 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		return nil, errors.New("unknown template or item")
 	}
 	chest := protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z}
+	var mineOpts []skill.MineOption
+	if t.Area != nil {
+		mineOpts = append(mineOpts, skill.InArea(skill.Area{
+			Min: protocol.BlockPos{t.Area.Min.X, t.Area.Min.Y, t.Area.Min.Z},
+			Max: protocol.BlockPos{t.Area.Max.X, t.Area.Max.Y, t.Area.Max.Z},
+		}))
+	}
 	return []skill.Skill{
-		skill.NewMineBlock(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius),
+		skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...),
 		skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...),
 	}, nil
 }
