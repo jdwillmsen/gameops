@@ -107,6 +107,21 @@ func (s *Store) Block(pos protocol.BlockPos) (name string, known bool) {
 	return strings.TrimPrefix(n, "minecraft:"), true
 }
 
+// BlockHash returns the network hash of the block at pos. A server compares the
+// hash a click quotes with its own, so a skill that clicks a block needs it.
+func (s *Store) BlockHash(pos protocol.BlockPos) (hash uint32, known bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sec, held := s.subs[[3]int32{pos.X() >> 4, pos.Y() >> 4, pos.Z() >> 4}]
+	switch {
+	case !held:
+		return 0, false
+	case sec.hashes == nil:
+		return airHash, true
+	}
+	return sec.hashes[index(pos.X()&15, pos.Y()&15, pos.Z()&15)], true
+}
+
 // index matches subchunk.Layer.Block, which Bedrock orders x, then z, then y.
 func index(x, y, z int32) int { return int(x<<8 | z<<4 | y) }
 

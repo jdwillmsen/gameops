@@ -211,3 +211,19 @@ func TestLevelChunkWithoutRequestModeWritesNothing(t *testing.T) {
 		t.Errorf("sent %d packets", len(w.sent))
 	}
 }
+
+func TestBlockHashReportsWhatTheServerSent(t *testing.T) {
+	s := New(names, 8)
+	pos := protocol.BlockPos{3, 4, 5}
+	if _, known := s.BlockHash(pos); known {
+		t.Error("a hash was invented for an unknown sub-chunk")
+	}
+	s.Apply(subChunkPacket(0, 0, 0, uniformPayload(stoneHash)), &sink{})
+	if h, known := s.BlockHash(pos); !known || h != stoneHash {
+		t.Errorf("hash = %d, %v; want stone", h, known)
+	}
+	s.Apply(&packet.UpdateBlock{Position: pos, NewBlockRuntimeID: 7}, &sink{})
+	if h, _ := s.BlockHash(pos); h != 7 {
+		t.Errorf("after update hash = %d, want 7", h)
+	}
+}
