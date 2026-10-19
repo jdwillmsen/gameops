@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -441,5 +442,22 @@ func TestFetchRefusesABodyOverTheCapEvenWhenGzipped(t *testing.T) {
 	s := &session{Fetcher: Fetcher{Client: gz.Client(), Backoff: time.Millisecond}}
 	if _, err := s.getBody(context.Background(), gz.URL, rawAccept); err == nil {
 		t.Fatal("a gzip body over the cap was accepted")
+	}
+}
+
+// Workers skip whatever is left once the context is done, so a round
+// cancelled between requests has no failed request to report.
+func TestFetchFilesCancelledReturnsTheContextError(t *testing.T) {
+	gh := newFakeGitHub(t, packTree, packFiles)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &session{Fetcher: gh.fetcher()}
+	dest := t.TempDir()
+	err := s.fetchFiles(ctx, testTag, dest, []string{"resource_pack/blocks.json", "resource_pack/biomes_client.json"})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "resource_pack", "blocks.json")); err == nil {
+		t.Fatal("a file was written after cancellation")
 	}
 }
