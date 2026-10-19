@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -120,4 +122,32 @@ func TestUnitWorkRoutesAreMounted(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503 while the store is not connected", rec.Code)
 	}
+}
+
+func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
+	log := logging.New("error")
+	enqueue := func(s *work.Lazy) error {
+		_, err := s.Enqueue(context.Background(), "crew-01", work.KindCommand, []byte(`{"name":"stop"}`), "op")
+		return err
+	}
+
+	unconfigured := &work.Lazy{}
+	openStore(context.Background(), unconfigured, "", false, log) // returns at once
+	if err := enqueue(unconfigured); !errors.Is(err, work.ErrUnavailable) {
+		t.Fatalf("unconfigured store: %v, want ErrUnavailable", err)
+	}
+
+	mem := &work.Lazy{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { openStore(ctx, mem, "", true, log); close(done) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for enqueue(mem) != nil {
+		if time.Now().After(deadline) {
+			t.Fatal("memory store never became ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
 }

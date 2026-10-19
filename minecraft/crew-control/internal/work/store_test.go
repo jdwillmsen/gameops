@@ -18,7 +18,9 @@ var (
 )
 
 func TestMemoryStore(t *testing.T) {
-	suite(t, func(t *testing.T) Store { return NewMemory() })
+	suite(t, func(t *testing.T) Store { return NewMemory() },
+		// The memory store takes its clock from Next's argument.
+		func(_ *testing.T, _ Store, _ uuid.UUID, d time.Duration) time.Time { return time.Now().Add(d) })
 }
 
 func TestPostgresStore(t *testing.T) {
@@ -38,10 +40,20 @@ func TestPostgresStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		return p
+	}, func(t *testing.T, s Store, id uuid.UUID, d time.Duration) time.Time {
+		// The database keeps its own clock, so age the row instead.
+		_, err := s.(*Postgres).pool.Exec(ctx,
+			`UPDATE `+workTable+` SET delivered_at = delivered_at - make_interval(secs => $2) WHERE id = $1`,
+			id, d.Seconds())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return time.Now()
 	})
 }
 
-func suite(t *testing.T, mk func(*testing.T) Store) {
+// age makes a delivered item d older and returns the now to hand Next.
+func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, uuid.UUID, time.Duration) time.Time) {
 	cases := map[string]func(*testing.T, Store){
 		"commands before tasks, FIFO within a kind": func(t *testing.T, s Store) {
 			t1 := must(t, s, "crew-01", KindTask, tpl)
@@ -49,7 +61,7 @@ func suite(t *testing.T, mk func(*testing.T) Store) {
 			c1 := must(t, s, "crew-01", KindCommand, stop)
 			now := time.Now()
 			for i, want := range []uuid.UUID{c1.ID, t1.ID, t2.ID} {
-				it, ok, err := s.Next(ctx, "crew-01", now)
+				it, ok, _, err := s.Next(ctx, "crew-01", now)
 				if err != nil || !ok || it.ID != want {
 					t.Fatalf("pull %d: got %v ok=%v err=%v, want %v", i, it.ID, ok, err, want)
 				}
@@ -57,26 +69,31 @@ func suite(t *testing.T, mk func(*testing.T) Store) {
 					t.Fatalf("state %q, want delivered", it.State)
 				}
 			}
-			if _, ok, _ := s.Next(ctx, "crew-01", now); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", now); ok {
 				t.Fatal("queue should be drained")
 			}
 		},
 		"units do not see each other's work": func(t *testing.T, s Store) {
 			must(t, s, "crew-02", KindTask, tpl)
-			if _, ok, _ := s.Next(ctx, "crew-03", time.Now()); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-03", time.Now()); ok {
 				t.Fatal("crew-03 received crew-02 work")
 			}
 		},
 		"redelivery after 30 seconds": func(t *testing.T, s Store) {
 			it := must(t, s, "crew-01", KindTask, tpl)
-			now := time.Now()
-			if _, ok, _ := s.Next(ctx, "crew-01", now); !ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); !ok {
 				t.Fatal("first delivery missing")
 			}
-			if _, ok, _ := s.Next(ctx, "crew-01", now.Add(20*time.Second)); ok {
+			now := age(t, s, it.ID, 20*time.Second)
+			_, ok, due, _ := s.Next(ctx, "crew-01", now)
+			if ok {
 				t.Fatal("redelivered too early")
 			}
-			got, ok, err := s.Next(ctx, "crew-01", now.Add(31*time.Second))
+			if due < 5*time.Second || due > 11*time.Second {
+				t.Fatalf("redeliverIn %v, want about 10s", due)
+			}
+			now = age(t, s, it.ID, 31*time.Second)
+			got, ok, _, err := s.Next(ctx, "crew-01", now)
 			if err != nil || !ok || got.ID != it.ID {
 				t.Fatalf("no redelivery: %v %v %v", got.ID, ok, err)
 			}
@@ -88,7 +105,7 @@ func suite(t *testing.T, mk func(*testing.T) Store) {
 			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, _ := s.Next(ctx, "crew-01", now.Add(time.Hour)); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", age(t, s, it.ID, time.Hour)); ok {
 				t.Fatal("running item came back")
 			}
 		},
@@ -147,7 +164,7 @@ func suite(t *testing.T, mk func(*testing.T) Store) {
 			if len(recent) != 1 || recent[0].ID != other.ID || recent[0].State != Queued {
 				t.Fatalf("other unit touched: %+v", recent)
 			}
-			if _, ok, _ := s.Next(ctx, "crew-01", time.Now()); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); ok {
 				t.Fatal("cancelled item delivered")
 			}
 		},
