@@ -438,7 +438,7 @@ export function createEntities(scene) {
       if (modelsLoading) { modelsAgain = true; return modelsLoading; }
       modelsLoading = (async () => {
         try {
-          const loaded = await fetchSheet('/v1/camera/entities.json', '/v1/camera/entities.png');
+          const loaded = await fetchSheet('v1/camera/entities.json', 'v1/camera/entities.png');
           if (loaded.key === modelsKey) { loaded.tex.dispose(); return; }
           const old = { tex: modelTex, geos: [...boneGeos.values()], mats: [...materials.values()] };
           modelsKey = loaded.key; modelTex = loaded.tex; table = loaded.doc; sheet = { w: loaded.doc.width, h: loaded.doc.height };
@@ -463,7 +463,7 @@ export function createEntities(scene) {
       if (itemsLoading) return itemsLoading;
       itemsLoading = (async () => {
         try {
-          const loaded = await fetchSheet('/v1/camera/items.json', '/v1/camera/items.png');
+          const loaded = await fetchSheet('v1/camera/items.json', 'v1/camera/items.png');
           items = { doc: loaded.doc, tex: loaded.tex };
           for (const inst of meshes.values()) if (inst.type === 'minecraft:item') build(inst);
         } catch {
