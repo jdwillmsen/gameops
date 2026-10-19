@@ -3,6 +3,7 @@ package atlas
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -104,7 +105,7 @@ func TestEnsureKeepsOnlyTheBuiltAtlasInTheCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"index.json", "v1.26.50.4/atlas/atlas.png", "v1.26.50.4/atlas/items.json", "v1.26.50.4/atlas/items.png", "v1.26.50.4/atlas/table.json"}
+	want := []string{"index.json", "v1.26.50.4/atlas/atlas.png", "v1.26.50.4/atlas/entities.failed", "v1.26.50.4/atlas/items.json", "v1.26.50.4/atlas/items.png", "v1.26.50.4/atlas/table.json"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("cache holds %v, want %v", got, want)
 	}
@@ -119,5 +120,53 @@ func TestLoadRejectsStaleTableVersion(t *testing.T) {
 	}
 	if _, err := LoadAtlas(dir); err == nil {
 		t.Fatal("stale cache entry should not load")
+	}
+}
+
+func TestSaveRemovesStaleEntityFilesWhenThereAreNone(t *testing.T) {
+	dir := t.TempDir()
+	a := &Atlas{png: []byte("p"), table: Table{Version: tableVersion}, entPNG: []byte("e"), entities: EntityTable{Version: entityTableVersion}}
+	if err := a.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	b := &Atlas{png: []byte("p"), table: Table{Version: tableVersion}, entitiesErr: errors.New("no models")}
+	if err := b.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{entPNGFile, entTableFile} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Errorf("%s survived", f)
+		}
+	}
+	got, err := LoadAtlas(dir)
+	if err != nil || got.EntitiesErr() == nil || !got.entitiesFailed {
+		t.Fatalf("load = %v, err %v, failed %v", got, err, got != nil && got.entitiesFailed)
+	}
+}
+
+// A pack whose entity build fails is not downloaded again at every start.
+func TestEnsureDoesNotRefetchForAFailedEntityBuildAndReportsFallbacks(t *testing.T) {
+	gh := fixtureGitHub(t)
+	cache := t.TempDir()
+	f := gh.fetcher()
+	opts := Options{TileSize: 4}
+	first, _, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts)
+	if err != nil || first.EntitiesErr() == nil {
+		t.Fatalf("first = %v, %v", first, err)
+	}
+	gh.Close()
+	var fell []error
+	opts.OnFallback = func(err error) { fell = append(fell, err) }
+	second, _, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts)
+	if err != nil || len(fell) != 0 || second.EntitiesErr() == nil {
+		t.Fatalf("second = %v, err %v, fallbacks %v", second, err, fell)
+	}
+
+	// An entry that lacks its items is rebuilt, and the failure is reported.
+	if err := os.Remove(filepath.Join(cache, testTag, atlasSubdir, itemsTableFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Ensure(context.Background(), f, "1.26.52.3", cache, opts); err != nil || len(fell) != 1 {
+		t.Fatalf("err %v, fallbacks %v", err, fell)
 	}
 }
