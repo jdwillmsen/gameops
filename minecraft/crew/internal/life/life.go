@@ -64,6 +64,8 @@ type Config struct {
 	Radius int
 	// Defend makes the unit fight hostile mobs and avoid players' blows.
 	Defend bool
+	// Eat makes the unit eat when hungry and food is on its hotbar.
+	Eat bool
 }
 
 type mode uint8
@@ -117,6 +119,7 @@ type Life struct {
 	fleeAt    uint64
 
 	idle idleState
+	eat  eatState
 }
 
 // New builds a unit's life. The random source is the idle walk's only
@@ -148,6 +151,7 @@ func (l *Life) Reset() {
 	l.retreating, l.endReason = 0, ""
 	l.chase, l.flee = nil, nil
 	l.idle = idleState{}
+	l.eat = eatState{}
 }
 
 // End drops the session's entities. Like Spawn it is for the read loop.

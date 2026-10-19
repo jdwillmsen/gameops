@@ -68,6 +68,8 @@ type Config struct {
 	IdleRadius int
 	// Defend lets a unit fight hostile mobs and back away from players' blows.
 	Defend bool
+	// Eat lets a hungry unit eat food from its hotbar.
+	Eat bool
 }
 
 func Load() (Config, error) {
@@ -138,6 +140,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	eat, err := boolDefault("EAT", true)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -161,6 +167,7 @@ func Load() (Config, error) {
 		IdleWander: idleWander,
 		IdleRadius: idleRadius,
 		Defend:     defend,
+		Eat:        eat,
 	}, nil
 }
 
