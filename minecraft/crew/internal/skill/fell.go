@@ -435,7 +435,11 @@ func (f *Fell) clear(a Actuator, p act.Pose) outcome {
 		return next
 	}
 	if f.brk.pos != f.leaves[0] || f.brk.name == "" {
-		name, _ := f.world.Block(f.leaves[0])
+		name, known := f.world.Block(f.leaves[0])
+		if known && !isLeaves(name) {
+			f.leaves, f.brk = f.leaves[1:], cellBreak{}
+			return next
+		}
 		f.brk = cellBreak{pos: f.leaves[0], name: name}
 	}
 	done, err := f.breakCell(a, p)
