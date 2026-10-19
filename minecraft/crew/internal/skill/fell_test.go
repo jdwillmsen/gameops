@@ -86,6 +86,20 @@ func TestFellTakesAFullTreeIncludingLogsAboveReach(t *testing.T) {
 	onGround(t, r)
 }
 
+func TestFellUsesOneBlockForAOneBlockPillar(t *testing.T) {
+	w := oak(7)
+	r := fellRig(t, w, 1)
+	if st, err := r.run(newFell(w, r, 7), 4000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("oak_log"); got != 7 {
+		t.Errorf("oak_log = %d, want 7", got)
+	}
+	if r.placed != 1 || r.have("dirt") != 1 {
+		t.Errorf("placed %d blocks and held %d dirt; want one pillar block returned", r.placed, r.have("dirt"))
+	}
+}
+
 func TestFellTakesOnlyWhatItNeeds(t *testing.T) {
 	w := oak(5)
 	r := fellRig(t, w, 3)
@@ -187,6 +201,24 @@ func TestFellStaysInsideTheArea(t *testing.T) {
 	}
 	if n := w.count("oak_log"); n != 5 {
 		t.Errorf("logs left = %d, want the 5 of the tree outside the area", n)
+	}
+}
+
+func TestFellKeepsPillarBlocksInsideTheArea(t *testing.T) {
+	w := oak(10)
+	r := fellRig(t, w, 4)
+	area := Area{Min: protocol.BlockPos{0, 1, 0}, Max: protocol.BlockPos{17, 1, 17}}
+	st, err := r.run(newFell(w, r, 10, InArea(area)), 5000)
+	if st != Failed || err == nil {
+		t.Fatalf("status %v, err %v; logs above the area should remain", st, err)
+	}
+	if left := logsLeft(w); left == 0 {
+		t.Fatal("felled logs that require a pillar above the task area")
+	}
+	for pos, name := range w {
+		if name == "dirt" && pos.Y() > area.Max.Y() && pos.Y() < 10 {
+			t.Errorf("pillar block at y=%d outside the task area", pos.Y())
+		}
 	}
 }
 

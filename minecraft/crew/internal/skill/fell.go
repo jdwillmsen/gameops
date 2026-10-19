@@ -245,10 +245,10 @@ func isLeaves(name string) bool { return strings.HasSuffix(name, "_leaves") }
 
 // pillarMaterial finds a hotbar stack to build with, and the tool to take it
 // down again where that needs one.
-func (f *Fell) pillarMaterial(s belief.Snapshot) (mat, tool belief.Item, ok bool) {
+func (f *Fell) pillarMaterial(s belief.Snapshot, height int) (mat, tool belief.Item, ok bool) {
 	for _, name := range []string{"dirt", "cobblestone"} {
 		for _, it := range s.Inventory {
-			if it.Slot >= hotbarSlots || it.Name != name || it.Count < maxPillar {
+			if it.Slot >= hotbarSlots || it.Name != name || it.Count < height {
 				continue
 			}
 			if name == "dirt" {
@@ -275,8 +275,7 @@ func (f *Fell) pickaxe(s belief.Snapshot) (belief.Item, bool) {
 // sends the unit to the foot of that pillar.
 func (f *Fell) plan(a Actuator, p act.Pose) outcome {
 	snap := f.self()
-	mat, tool, ok := f.pillarMaterial(snap)
-	if !ok || f.pillars >= maxPillars {
+	if f.pillars >= maxPillars {
 		return f.finish(a, f.noSrc)
 	}
 	for i, l := range f.mine.candidates(p, true) {
@@ -288,6 +287,10 @@ func (f *Fell) plan(a Actuator, p act.Pose) outcome {
 		}
 		g, h, leaves, found := f.pillarSpot(l, p.Feet)
 		if !found {
+			continue
+		}
+		mat, tool, ok := f.pillarMaterial(snap, h)
+		if !ok {
 			continue
 		}
 		f.target, f.ground, f.height, f.leaves = l, g, h, leaves
@@ -325,6 +328,9 @@ func (f *Fell) pillarSpot(l protocol.BlockPos, from mgl32.Vec3) (ground protocol
 				continue
 			}
 			for h := 1; h <= maxPillar; h++ {
+				if f.mine.area != nil && !f.mine.area.contains(protocol.BlockPos{g.X(), g.Y() + int32(h) - 1, g.Z()}) {
+					continue
+				}
 				if centre(l).Sub(standEye(protocol.BlockPos{g.X(), g.Y() + int32(h), g.Z()})).Len() > mineReach-pillarSlack {
 					continue
 				}
