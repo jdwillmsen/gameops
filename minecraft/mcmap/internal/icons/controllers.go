@@ -134,7 +134,10 @@ func parseControllers(ctx context.Context, raw []byte) (map[string]controller, e
 }
 
 // hides reports whether the controller leaves a bone undrawn on a grown
-// mob of the default variant. The last rule that names the bone decides.
+// mob of the default variant. The last rule that names the bone decides,
+// whatever the case of either: the game's bone names are not
+// case-sensitive, and a silverfish's controller names bodypart_0 for a
+// bone its model calls bodyPart_0.
 func (c controller) hides(bone string) bool {
 	if c.work != nil && c.work.spent {
 		return false
@@ -142,7 +145,7 @@ func (c controller) hides(bone string) bool {
 	shown := true
 	for _, rule := range c.Visibility[:min(len(c.Visibility), maxArrayEntries)] {
 		for pattern, raw := range rule {
-			if ok, err := path.Match(pattern, bone); err != nil || !ok {
+			if ok, err := path.Match(strings.ToLower(pattern), strings.ToLower(bone)); err != nil || !ok {
 				continue
 			}
 			var flag bool
