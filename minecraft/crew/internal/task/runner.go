@@ -78,8 +78,8 @@ type Runner struct {
 	pending skill.Stopper
 }
 
-func NewRunner(newSkills func(Template) ([]skill.Skill, error), act skill.Actuator, self func() belief.Snapshot, timeout time.Duration, log skill.Logger) *Runner {
-	return &Runner{newSkills: newSkills, act: act, self: self, timeout: timeout, log: log, now: time.Now}
+func NewRunner(newSkills func(Template) ([]skill.Skill, error), a skill.Actuator, self func() belief.Snapshot, timeout time.Duration, log skill.Logger) *Runner {
+	return &Runner{newSkills: newSkills, act: a, self: self, timeout: timeout, log: log, now: time.Now}
 }
 
 // SetActuator hands the runner a new session's actuator.
@@ -197,19 +197,19 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		r.mu.Unlock()
 		return nil, 0
 	}
-	act := r.act
-	before := act.Ticks()
+	a := r.act
+	before := a.Ticks()
 	if st := r.pending; st != nil {
 		r.pending = nil
 		r.mu.Unlock()
-		st.Stop(act)
-		return act, before
+		st.Stop(a)
+		return a, before
 	}
 	if r.cur == nil {
 		r.cur = r.nextQueued()
 		if r.cur == nil {
 			r.mu.Unlock()
-			return act, before
+			return a, before
 		}
 		r.cur.State = Running
 		r.cur.started = r.now()
@@ -221,7 +221,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	if r.now().Sub(e.started) > r.timeout {
 		r.abandon(e, Failed, "timed out")
 		r.mu.Unlock()
-		return act, before
+		return a, before
 	}
 	sk := e.skills[e.idx]
 	needReady := !e.ready
@@ -236,16 +236,16 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		st = skill.Failed
 		if err == nil {
 			st = skill.Running
-			st, err = sk.Step(ctx, act)
+			st, err = sk.Step(ctx, a)
 		}
 	} else {
-		st, err = sk.Step(ctx, act)
+		st, err = sk.Step(ctx, a)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.cur != e {
-		return act, before
+		return a, before
 	}
 	e.ready = true
 	if p, ok := sk.(skill.Progresser); ok {
@@ -266,11 +266,11 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		e.ready = false
 		if e.idx == len(e.skills) {
 			r.finish(e, Done, "")
-			return act, before
+			return a, before
 		}
 		e.Skill = e.skills[e.idx].Name()
 	}
-	return act, before
+	return a, before
 }
 
 func have(s belief.Snapshot, item string) int {
