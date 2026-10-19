@@ -31,6 +31,8 @@ type Snapshot struct {
 	Health      float32   `json:"health"`
 	HealthKnown bool      `json:"health_known"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Window 0 only, non-empty slots in slot order.
+	Inventory []Item `json:"inventory"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -39,6 +41,9 @@ type Tracker struct {
 	now  func() time.Time
 	self uint64
 	s    Snapshot
+
+	inv       [inventorySize]stackRef
+	itemNames map[int32]string
 }
 
 func New(now func() time.Time) *Tracker { return &Tracker{now: now} }
@@ -47,6 +52,7 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.self = runtimeID
+	t.inv = [inventorySize]stackRef{}
 	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, Yaw: yaw, Pitch: pitch, UpdatedAt: t.now()}
 }
 
@@ -82,7 +88,9 @@ func (t *Tracker) Apply(pk packet.Packet) {
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 	default:
-		return
+		if !t.applyInventoryLocked(pk) {
+			return
+		}
 	}
 	t.s.UpdatedAt = t.now()
 }
@@ -100,11 +108,14 @@ func (t *Tracker) Reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.self = 0
+	t.inv = [inventorySize]stackRef{}
 	t.s = Snapshot{UpdatedAt: t.now()}
 }
 
 func (t *Tracker) Snapshot() Snapshot {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.s
+	s := t.s
+	s.Inventory = t.inventoryLocked()
+	return s
 }
