@@ -138,5 +138,7 @@ they hurt:
   (playwright-core). Screenshots go in the PR and on JDW-113.
 - Page frame time and settle time from `window.__stats` at radius 4, compared
   with the current release.
+- The four-viewer load test (`minecraft/crew/loadtest/run.sh -n 4`): settle
+  and frame time within 25% of the current release's run on the same box.
 - After merge: release, jdw-deployments image bump, confirm the new version
   serves at crew.prd.jdwlabs.com/camera.
