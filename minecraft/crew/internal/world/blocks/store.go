@@ -37,10 +37,14 @@ type Store struct {
 	names Names
 	limit int
 
-	mu       sync.RWMutex
-	subs     map[[3]int32]section
-	anchor   [2]int32 // chunk of the latest LevelChunk
-	anchored bool
+	mu   sync.RWMutex
+	subs map[[3]int32]section
+	// anchor is the chunk eviction measures from: the centre the server
+	// publishes chunks around once it has said so, the latest LevelChunk
+	// until then.
+	anchor    [2]int32
+	anchored  bool
+	published bool
 }
 
 func New(names Names, maxSubChunks int) *Store {
@@ -55,11 +59,21 @@ func (s *Store) Apply(pk packet.Packet, w PacketWriter) {
 			return
 		}
 		s.mu.Lock()
-		s.anchor, s.anchored = p.Position, true
+		if !s.published {
+			s.anchor, s.anchored = p.Position, true
+		}
 		s.mu.Unlock()
 		if req := SubChunkRequest(p); req != nil {
 			_ = w.WritePacket(req)
 		}
+	case *packet.NetworkChunkPublisherUpdate:
+		// The server centres this on the unit. Chunks arrive in no useful
+		// order, so measuring from the latest one evicts the unit's own
+		// surroundings first, and the server never resends them.
+		s.mu.Lock()
+		s.anchor = [2]int32{p.Position.X() >> 4, p.Position.Z() >> 4}
+		s.anchored, s.published = true, true
+		s.mu.Unlock()
 	case *packet.SubChunk:
 		s.subChunk(p)
 	case *packet.UpdateBlock:
@@ -80,7 +94,7 @@ func (s *Store) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subs = map[[3]int32]section{}
-	s.anchored = false
+	s.anchored, s.published = false, false
 }
 
 // Block returns the block's name without its namespace. known is false for a
@@ -170,8 +184,8 @@ func (s *Store) put(key [3]int32, sec section) {
 	}
 }
 
-// evictFarthestLocked measures from the latest LevelChunk, the area the unit
-// is being told about, so the unit's surroundings outlive distant leftovers.
+// evictFarthestLocked measures from the anchor, so the unit's surroundings
+// outlive distant leftovers.
 func (s *Store) evictFarthestLocked() {
 	var worst [3]int32
 	var worstD int64 = -1
