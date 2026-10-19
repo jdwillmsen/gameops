@@ -128,11 +128,23 @@ func (l *Life) startWalk(p act.Pose) bool {
 		}
 		minY, maxY := st.anchor.Y()-heightBand, st.anchor.Y()+heightBand
 		plan, err := path.Find(l.world, from, goal, walkNodes)
-		if err != nil || len(plan) == 0 || len(plan) > maxWalkCells || !safePath(l.world, plan, minY, maxY) {
+		if err != nil || len(plan) == 0 || len(plan) > maxWalkCells ||
+			!safePath(l.world, plan, minY, maxY) || !withinRadius(plan, st.anchor, float64(l.cfg.Radius)) {
 			continue
 		}
 		st.walk = skill.NewNavigate(l.world, l.self, goal, walkWithin)
 		return true
 	}
 	return false
+}
+
+func withinRadius(plan []protocol.BlockPos, anchor protocol.BlockPos, radius float64) bool {
+	for _, p := range plan {
+		dx := float64(p.X() - anchor.X())
+		dz := float64(p.Z() - anchor.Z())
+		if math.Hypot(dx, dz) > radius {
+			return false
+		}
+	}
+	return true
 }

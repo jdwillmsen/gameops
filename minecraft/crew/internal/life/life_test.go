@@ -253,6 +253,30 @@ func TestIdleNeverWalksOntoWaterOrOffALedge(t *testing.T) {
 	}
 }
 
+func TestIdleRejectsPathThatDetoursOutsideRadiusAroundWall(t *testing.T) {
+	r := newRig(t, defaults, mgl32.Vec3{20.5, 1, 20.5})
+	for z := int32(12); z <= 29; z++ {
+		for y := int32(1); y <= 2; y++ {
+			r.w.over[protocol.BlockPos{21, y, z}] = "stone"
+		}
+	}
+	from := protocol.BlockPos{20, 1, 20}
+	goal := protocol.BlockPos{22, 1, 20}
+	plan, err := path.Find(r.w, from, goal, 1000)
+	if err != nil {
+		t.Fatalf("could not plan around wall: %v", err)
+	}
+	if !safePath(r.w, plan, from.Y(), from.Y()) {
+		t.Fatal("wall detour unexpectedly violates terrain safety")
+	}
+	if withinRadius(plan, from, 8) {
+		t.Fatalf("wall detour stayed within radius: %v", plan)
+	}
+	if !withinRadius([]protocol.BlockPos{{21, 1, 20}, {22, 1, 20}}, from, 8) {
+		t.Fatal("in-radius route was rejected")
+	}
+}
+
 func TestTaskStartCancelsTheWalk(t *testing.T) {
 	r := newRig(t, defaults, start)
 	for i := 0; i < 3000 && r.l.idle.walk == nil; i++ {
