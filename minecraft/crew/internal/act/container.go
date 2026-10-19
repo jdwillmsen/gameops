@@ -93,6 +93,31 @@ func (a *Actuator) SelectHotbar(slot int, item belief.Item) error {
 	})
 }
 
+// Attack hits an entity with the held stack and swings the arm, which the
+// server expects alongside the hit. slot is the hotbar slot the stack is in.
+func (a *Actuator) Attack(target uint64, slot int, held belief.Item) error {
+	if slot < 0 || slot >= hotbarSlots {
+		return fmt.Errorf("slot %d is not on the hotbar", slot)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	inst, err := a.instance(held)
+	if err != nil {
+		return err
+	}
+	if err := a.w.WritePacket(&packet.InventoryTransaction{TransactionData: &protocol.UseItemOnEntityTransactionData{
+		TargetEntityRuntimeID: target,
+		ActionType:            protocol.UseItemOnEntityActionAttack,
+		HotBarSlot:            int32(slot),
+		HeldItem:              inst,
+		Position:              a.pose.Feet.Add(mgl32.Vec3{0, eyeHeight, 0}),
+		ClickedPosition:       mgl32.Vec3{0, 1, 0},
+	}}); err != nil {
+		return err
+	}
+	return a.w.WritePacket(&packet.Animate{ActionType: packet.AnimateActionSwingArm, EntityRuntimeID: a.runtimeID})
+}
+
 // OpenChest clicks the block at pos from the unit's current position. face is
 // the side toward the unit, and blockRuntimeID the block's hash from its
 // UpdateBlock; the server compares both with its own world.

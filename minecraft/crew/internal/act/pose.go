@@ -122,6 +122,17 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 	return p, info
 }
 
+// knock adopts a velocity the server gave the unit, such as knockback. The
+// server applies it on its own side, so a prediction that ignored it would be
+// corrected on the next tick.
+func (p *Pose) knock(v mgl32.Vec3) {
+	p.Carry = mgl32.Vec2{v.X(), v.Z()}
+	if v.Y() > 0 || !p.OnGround {
+		p.OnGround, p.jumped = false, false
+		p.vy = v.Y()
+	}
+}
+
 func headBlocked(w Solid, f mgl32.Vec3) bool {
 	return overlaps(w, f[0], f[1]+supportReach, f[2])
 }

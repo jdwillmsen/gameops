@@ -423,3 +423,69 @@ func TestTickPropagatesWriteErrorsWithoutAdvancing(t *testing.T) {
 		t.Error("pose advanced on a packet that never left")
 	}
 }
+
+func TestOwnKnockbackBecomesVelocityAndOthersAreIgnored(t *testing.T) {
+	a, _ := newAct(flat(), Pose{Feet: mgl32.Vec3{0, 0, 0}})
+	a.Apply(&packet.SetActorMotion{EntityRuntimeID: 99, Velocity: mgl32.Vec3{1, 1, 1}})
+	if p := a.Pose(); p.Carry != (mgl32.Vec2{}) || !p.OnGround {
+		t.Fatalf("another entity's motion moved the unit: %+v", p)
+	}
+	a.Apply(&packet.SetActorMotion{EntityRuntimeID: 7, Velocity: mgl32.Vec3{0.3, 0.36, -0.2}})
+	p := a.Pose()
+	if p.OnGround || p.Carry != (mgl32.Vec2{0.3, -0.2}) {
+		t.Fatalf("pose after knockback = %+v, want airborne with the horizontal carry", p)
+	}
+	before := p.Feet
+	if err := a.Tick(Input{}); err != nil {
+		t.Fatal(err)
+	}
+	after := a.Pose()
+	if after.Feet.X() <= before.X() || after.Feet.Y() <= before.Y() || after.Feet.Z() >= before.Z() {
+		t.Errorf("feet %v -> %v: the knockback did not carry the unit", before, after.Feet)
+	}
+}
+
+func TestHorizontalKnockbackKeepsAGroundedUnitOnTheGround(t *testing.T) {
+	a, _ := newAct(flat(), Pose{})
+	a.Apply(&packet.SetActorMotion{EntityRuntimeID: 7, Velocity: mgl32.Vec3{0.2, 0, 0}})
+	if p := a.Pose(); !p.OnGround || p.Carry.X() != 0.2 {
+		t.Fatalf("pose = %+v, want grounded with carry 0.2", p)
+	}
+}
+
+func TestAttackSendsTheHitAndTheSwing(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{4, 0, 4}})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:iron_sword", RuntimeID: 300}})
+	sword := beliefItem(2, "iron_sword", 1, 9)
+	if err := a.Attack(55, 2, sword); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.got) != 2 {
+		t.Fatalf("sent %d packets, want the transaction and the swing", len(s.got))
+	}
+	tx, ok := s.got[0].(*packet.InventoryTransaction)
+	if !ok {
+		t.Fatalf("first packet is %T", s.got[0])
+	}
+	d, ok := tx.TransactionData.(*protocol.UseItemOnEntityTransactionData)
+	if !ok || d.TargetEntityRuntimeID != 55 || d.ActionType != protocol.UseItemOnEntityActionAttack || d.HotBarSlot != 2 || d.HeldItem.Stack.NetworkID != 300 {
+		t.Errorf("transaction = %+v", d)
+	}
+	if got := d.Position; got != (mgl32.Vec3{4, eyeHeight, 4}) {
+		t.Errorf("position = %v, want the eye", got)
+	}
+	sw, ok := s.got[1].(*packet.Animate)
+	if !ok || sw.ActionType != packet.AnimateActionSwingArm || sw.EntityRuntimeID != 7 {
+		t.Errorf("second packet = %+v", s.got[1])
+	}
+	if err := a.Attack(55, 9, beliefItem(9, "iron_sword", 1, 9)); err == nil {
+		t.Error("a slot off the hotbar was accepted")
+	}
+}
+
+func TestAttackWithAnEmptyHandNeedsNoItemTable(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	if err := a.Attack(1, 0, beliefItem(0, "", 0, 0)); err != nil || len(s.got) != 2 {
+		t.Fatalf("err %v, %d packets", err, len(s.got))
+	}
+}

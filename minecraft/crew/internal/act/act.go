@@ -137,8 +137,8 @@ func (a *Actuator) Tick(in Input) error {
 }
 
 // Apply feeds server packets in. It adopts the server's position when it
-// corrects or teleports the unit, and tracks the container and item-request
-// replies Deposit depends on.
+// corrects or teleports the unit, takes the server's knockback as velocity,
+// and tracks the container and item-request replies Deposit depends on.
 func (a *Actuator) Apply(pk packet.Packet) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -155,6 +155,10 @@ func (a *Actuator) Apply(pk packet.Packet) {
 		}
 		if !p.OnGround {
 			a.pose.vy = (p.Delta.Y() - gravity) * verticalDrag
+		}
+	case *packet.SetActorMotion:
+		if p.EntityRuntimeID == a.runtimeID {
+			a.pose.knock(p.Velocity)
 		}
 	case *packet.MovePlayer:
 		if p.EntityRuntimeID != a.runtimeID {
