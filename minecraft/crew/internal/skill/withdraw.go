@@ -89,6 +89,15 @@ func (w *Withdraw) Taken() map[string]int {
 // nowhere to put them.
 func (w *Withdraw) Full() bool { return w.phase.full }
 
+// Resume starts the visit again, keeping what was taken. A request in flight
+// is forgotten, so a stack the server moved after the fight began is counted
+// short and may be taken once more, up to what the inventory has room for.
+func (w *Withdraw) Resume() {
+	ph := &w.phase
+	ph.p, ph.nav, ph.opened, ph.waited = wStart, nil, false, 0
+	ph.pending, ph.settling, ph.drain = false, false, nil
+}
+
 func (w *Withdraw) Step(ctx context.Context, a Actuator) (Status, error) {
 	if err := ctx.Err(); err != nil {
 		return w.fail(a, err)

@@ -94,6 +94,14 @@ func (h *Haul) Stop(a Actuator) {
 	}
 }
 
+// Resume resumes the visit in progress; a haul between visits has nothing to
+// forget.
+func (h *Haul) Resume() {
+	if r, ok := h.sub.(Resumer); ok {
+		r.Resume()
+	}
+}
+
 func (h *Haul) items() []string {
 	out := make([]string, 0, len(h.want))
 	for k := range h.want {

@@ -133,6 +133,10 @@ func (n *navigator) straying(p act.Pose) bool {
 	return pt.Sub(a.Add(ab.Mul(t))).Len() > offCourse
 }
 
+// resume drops the plan, which the unit has left; the next step plans afresh
+// and the lost-progress count starts over.
+func (n *navigator) resume() { n.plan, n.noGain = nil, 0 }
+
 // replan plans from the unit's cell. A replan that leaves the unit no nearer
 // the goal than the last one counts against it, so a unit the server keeps
 // pushing back gives up instead of walking forever.
@@ -177,6 +181,9 @@ func NewNavigate(world path.Blocks, self func() belief.Snapshot, goal protocol.B
 }
 
 func (n *Navigate) Name() string { return "navigate" }
+
+// Resume plans again from wherever the unit now stands.
+func (n *Navigate) Resume() { n.nav.resume() }
 
 func (n *Navigate) Ready(s belief.Snapshot) error { return overworld(s) }
 
