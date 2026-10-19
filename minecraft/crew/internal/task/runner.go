@@ -52,6 +52,22 @@ type Task struct {
 	Updated  time.Time `json:"updated"`
 }
 
+// Reflex is what the unit does on its own: fight or flee when threatened, and
+// keep itself ticking and alive-looking when it has no task. The runner calls
+// every method from the goroutine that steps it.
+type Reflex interface {
+	// Engaged advances the reflex's clock by one tick and says whether the
+	// unit must fight or flee this tick instead of working or idling.
+	Engaged(act.Pose, belief.Snapshot) bool
+	// Fight and Idle each send exactly one input.
+	Fight(context.Context, skill.Actuator, belief.Snapshot) error
+	Idle(context.Context, skill.Actuator) error
+	// Cancel drops an idle walk because a task is about to start.
+	Cancel()
+	// Reset forgets everything about the last fight or walk.
+	Reset()
+}
+
 type entry struct {
 	Task
 	item    string
@@ -59,6 +75,11 @@ type entry struct {
 	idx     int
 	started time.Time
 	ready   bool
+	// fought is the time spent defending, which the timeout does not count.
+	fought time.Duration
+	// resume is set when a fight interrupted the skill, so it picks up where
+	// it left off instead of starting over.
+	resume bool
 }
 
 type Runner struct {
@@ -76,6 +97,11 @@ type Runner struct {
 	// cleanup sends inputs, so it runs on the stepping goroutine, once, before
 	// anything else uses the actuator.
 	pending skill.Stopper
+	reflex  Reflex
+	// resetReflex defers Reset to the stepping goroutine, which owns the
+	// reflex's state; the read loop only raises the flag.
+	resetReflex bool
+	prevStep    time.Time
 }
 
 func NewRunner(newSkills func(Template) ([]skill.Skill, error), a skill.Actuator, self func() belief.Snapshot, timeout time.Duration, log skill.Logger) *Runner {
@@ -86,6 +112,14 @@ func NewRunner(newSkills func(Template) ([]skill.Skill, error), a skill.Actuator
 func (r *Runner) SetActuator(a skill.Actuator) {
 	r.mu.Lock()
 	r.act = a
+	r.mu.Unlock()
+}
+
+// SetReflex gives the runner the unit's own behaviour. Without one a unit with
+// no task only sends an input-less tick.
+func (r *Runner) SetReflex(x Reflex) {
+	r.mu.Lock()
+	r.reflex = x
 	r.mu.Unlock()
 }
 
@@ -147,6 +181,7 @@ func (r *Runner) SessionEnded() {
 	defer r.mu.Unlock()
 	r.act = nil
 	r.pending = nil // the old actuator is gone
+	r.resetReflex = true
 	r.failCurrent("session ended")
 }
 
@@ -154,6 +189,7 @@ func (r *Runner) Died() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.pending = nil // a dead unit has no chest open and no break running
+	r.resetReflex = true
 	r.failCurrent("unit died")
 }
 
@@ -191,6 +227,12 @@ func (r *Runner) step(ctx context.Context) {
 // honoured by dropping the result.
 func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	r.mu.Lock()
+	if r.resetReflex {
+		r.resetReflex = false
+		if r.reflex != nil {
+			r.reflex.Reset()
+		}
+	}
 	snap := r.self()
 	if !snap.Spawned || snap.Dead || r.act == nil {
 		r.pending = nil
@@ -199,17 +241,50 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	}
 	a := r.act
 	before := a.Ticks()
+	now := r.now()
+	dt := now.Sub(r.prevStep)
+	r.prevStep = now
+	if dt <= 0 || dt > time.Second {
+		dt = tickEvery
+	}
 	if st := r.pending; st != nil {
 		r.pending = nil
 		r.mu.Unlock()
 		st.Stop(a)
 		return a, before
 	}
+	if x := r.reflex; x != nil && x.Engaged(a.Pose(), snap) {
+		var stop skill.Stopper
+		if e := r.cur; e != nil {
+			e.fought += dt
+			if e.ready {
+				// The skill is stopped for the fight and resumed after it.
+				e.ready, e.resume = false, true
+				stop, _ = e.skills[e.idx].(skill.Stopper)
+			}
+		}
+		r.mu.Unlock()
+		if stop != nil {
+			// Stop may send the tick's one input; the fight begins next tick.
+			stop.Stop(a)
+			return a, before
+		}
+		// A write error surfaces on the read loop, which ends the session.
+		_ = x.Fight(ctx, a, snap)
+		return a, before
+	}
 	if r.cur == nil {
 		r.cur = r.nextQueued()
 		if r.cur == nil {
+			x := r.reflex
 			r.mu.Unlock()
+			if x != nil {
+				_ = x.Idle(ctx, a)
+			}
 			return a, before
+		}
+		if r.reflex != nil {
+			r.reflex.Cancel()
 		}
 		r.cur.State = Running
 		r.cur.started = r.now()
@@ -218,20 +293,24 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		r.logEvent("task_started", r.cur)
 	}
 	e := r.cur
-	if r.now().Sub(e.started) > r.timeout {
+	if r.now().Sub(e.started)-e.fought > r.timeout {
 		r.abandon(e, Failed, "timed out")
 		r.mu.Unlock()
 		return a, before
 	}
 	sk := e.skills[e.idx]
 	needReady := !e.ready
+	resume := e.resume
 	r.mu.Unlock()
 
 	var (
 		st  skill.Status
 		err error
 	)
-	if needReady {
+	if rs, ok := sk.(skill.Resumer); needReady && resume && ok {
+		rs.Resume()
+		st, err = sk.Step(ctx, a)
+	} else if needReady {
 		err = sk.Ready(snap)
 		st = skill.Failed
 		if err == nil {
@@ -247,7 +326,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	if r.cur != e {
 		return a, before
 	}
-	e.ready = true
+	e.ready, e.resume = true, false
 	if p, ok := sk.(skill.Progresser); ok {
 		e.Progress = p.Progress()
 	} else {
