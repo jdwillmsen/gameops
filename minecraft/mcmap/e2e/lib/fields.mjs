@@ -5,7 +5,7 @@
 // can leave in a log: there is no field for it to be in.
 
 export const CHECKS = ['login-screen', 'about-pages', 'exchange', 'map-loads', 'session', 'scope', 'headers', 'scripts', 'api-budget', 'dimensions', 'player-heads', 'zoom-sizes',
-  'nether-levels', 'underground', 'underground-phone', 'layer-panel', 'toggles', 'height-bands', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'page-bar', 'live-stream',
+  'nether-levels', 'underground', 'underground-phone', 'layer-panel', 'toggles', 'height-bands', 'search', 'structure-sheet', 'saved-views', 'themes', 'history', 'follow-player', 'follow-mob', 'faces', 'phone-sheet', 'page-bar', 'all-players', 'live-stream',
   'page-errors', 'read-only', 'run'];
 
 // Every reason a check can fail or be skipped for, as the sentence a
@@ -13,6 +13,12 @@ export const CHECKS = ['login-screen', 'about-pages', 'exchange', 'map-loads', '
 // underscores; a reason that is not one of these is written as `unlisted`.
 export const SENTENCES = [
   "the map did not answer 401 to a browser with no session",
+  "the list of all players is not offered",
+  "the list of all players did not load",
+  "the map has not seen anyone play yet",
+  "the list of all players puts an offline player before one online",
+  "every player the map has seen is online",
+  "picking an offline player did not open their details beside the list",
   "the login is shown without the code to type",
   "the page drew tiles for a browser with no session",
   "a page about the map did not open with no session",
@@ -171,7 +177,7 @@ export const slug = (sentence) => String(sentence).toLowerCase().replace(/[^a-z0
 export const REASONS = new Map(SENTENCES.map((sentence) => [slug(sentence), sentence]));
 
 // The page's own scripts, by which a script error is placed.
-export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'heights.js', 'live.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js', 'underground.js', 'lost.js',
+export const SCRIPTS = ['settings.js', 'app.js', 'duration.js', 'names.js', 'icons.js', 'layers.js', 'room.js', 'groups.js', 'heights.js', 'live.js', 'roster.js', 'markers.js', 'structures.js', 'biomes.js', 'topography.js', 'underground.js', 'lost.js',
   'slime.js', 'chunk.js', 'trails.js', 'history.js', 'levels.js', 'search.js', 'menu.js', 'appearance.js', 'views.js', 'compact.js', 'passkey.js', 'xbox.js', 'leaflet.js'];
 
 export const DENSITIES = [1, 1.25, 1.5, 2];
@@ -191,7 +197,7 @@ export const MEASURES = new Set([
   'frames', 'frames_without_it', 'longest_run_without_it', 'frames_it_moved', 'follow_off_samples',
   'faces', 'off_centre', 'with_head_box', 'drawn_as_eggs', ...DENSITIES.flatMap((dpr) => [`worst_head_pixels_at_${density(dpr)}`, `worst_ink_pixels_at_${density(dpr)}`]),
   'width', 'bottom_gap', 'heights',
-  'controls', 'rows', 'off_screen', 'too_small', 'working', 'in_more',
+  'controls', 'rows', 'off_screen', 'too_small', 'working', 'in_more', 'online',
   'longest_gap_seconds', 'reconnects', 'streams', 'most_entities',
   'page_errors', 'failed_responses', 'failed_requests', 'worst_status', 'first_error_line', 'errors_elsewhere', ...SCRIPTS.map((name) => `errors_in_${slug(name)}`),
   'writes', 'limit_seconds',
