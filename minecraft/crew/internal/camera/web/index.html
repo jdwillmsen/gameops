@@ -296,16 +296,25 @@ function adopt(m) {
 }
 
 const frustum = new THREE.Frustum(), projView = new THREE.Matrix4();
+const fwd = new THREE.Vector3(), mid = new THREE.Vector3(), half = new THREE.Vector3();
 // Past the fog's far plane everything is the sky colour, so those meshes
-// cost fill and vertex work for nothing.
+// cost fill and vertex work for nothing. Fog grows with depth along the view
+// direction, not distance: off-axis terrain past FOG_FAR by distance can sit
+// well inside it by depth and still show.
+function nearestDepth(box) {
+  box.getCenter(mid).sub(camera.position);
+  box.getSize(half).multiplyScalar(.5);
+  return mid.dot(fwd) - (Math.abs(fwd.x) * half.x + Math.abs(fwd.y) * half.y + Math.abs(fwd.z) * half.z);
+}
 function cull() {
   camera.updateMatrixWorld();
   projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
   frustum.setFromProjectionMatrix(projView);
+  camera.getWorldDirection(fwd);
   let drawn = 0, total = 0;
   for (const ms of meshes.values()) for (const o of ms) {
     const box = o.userData.box;
-    o.visible = frustum.intersectsBox(box) && box.distanceToPoint(camera.position) < FOG_FAR;
+    o.visible = frustum.intersectsBox(box) && nearestDepth(box) < FOG_FAR;
     total++; if (o.visible) drawn++;
   }
   stats.drawn = drawn; stats.total = total;
