@@ -50,6 +50,10 @@
     </div>
     </div>
     <div class="more-part">
+    <h2 class="more-title">Players</h2>
+    <button id="roster-open" class="ghost pictured" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="roster" aria-label="All players" title="All players, online or not" hidden><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5" r="2.5"/><path d="M1.5 13.5a4.5 4.5 0 0 1 9 0M10.5 3a2.5 2.5 0 0 1 0 4.6M12 9.3a4.5 4.5 0 0 1 2.5 4.2"/></svg><span class="more-word">All players</span></button>
+    </div>
+    <div class="more-part">
     <h2 class="more-title">Views and appearance</h2>
     <button id="views-open" class="ghost" type="button" aria-haspopup="dialog" title="Saved views (V)" hidden>Views</button>
     <button id="appearance-open" class="ghost" type="button" aria-haspopup="dialog" hidden>Appearance</button>
@@ -270,6 +274,18 @@
     <div id="player-body"></div>
     <p id="player-said" class="note" role="status"></p>
   </dialog>
+  <dialog id="roster" class="sheet aside roster" aria-labelledby="roster-title">
+    <div class="sheet-head">
+      <div class="sheet-title">
+        <h2 id="roster-title">Players</h2>
+        <span>Everyone the map has seen play, online or not</span>
+      </div>
+      <button id="roster-close" class="close" type="button" aria-label="Close" title="Close"></button>
+    </div>
+    <input id="roster-filter" class="roster-filter" type="search" maxlength="64" autocomplete="off" placeholder="Find a player" aria-label="Find a player by gamertag">
+    <p id="roster-said" class="note" role="status"></p>
+    <ul id="roster-list" class="roster-list" aria-label="Players. Each opens the player's details."></ul>
+  </dialog>
   <dialog id="views" class="sheet" aria-labelledby="views-title">
     <div class="sheet-head">
       <h2 id="views-title">Views</h2>
@@ -464,6 +480,7 @@
   <script src="heights.js"></script>
   <script src="playerdetails.js"></script>
   <script src="live.js"></script>
+  <script src="roster.js"></script>
   <script src="markers.js"></script>
   <script src="structures.js"></script>
   <script src="biomes.js"></script>
