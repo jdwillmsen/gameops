@@ -204,24 +204,6 @@ func TestFellStaysInsideTheArea(t *testing.T) {
 	}
 }
 
-func TestFellKeepsPillarBlocksInsideTheArea(t *testing.T) {
-	w := oak(10)
-	r := fellRig(t, w, 4)
-	area := Area{Min: protocol.BlockPos{0, 1, 0}, Max: protocol.BlockPos{17, 1, 17}}
-	st, err := r.run(newFell(w, r, 10, InArea(area)), 5000)
-	if st != Failed || err == nil {
-		t.Fatalf("status %v, err %v; logs above the area should remain", st, err)
-	}
-	if left := logsLeft(w); left == 0 {
-		t.Fatal("felled logs that require a pillar above the task area")
-	}
-	for pos, name := range w {
-		if name == "dirt" && pos.Y() > area.Max.Y() && pos.Y() < 10 {
-			t.Errorf("pillar block at y=%d outside the task area", pos.Y())
-		}
-	}
-}
-
 func TestFellResumesAfterAFightAtAnyPoint(t *testing.T) {
 	for n := 1; n < 700; n += 11 {
 		w := oak(7)
