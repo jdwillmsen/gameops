@@ -270,3 +270,63 @@ health. Confirmed:
 Not live-checked: a fight on the pillar (the sim covers a resume at every
 step), a 2-block pillar, a cobblestone pillar, and the saplings the leaves
 drop are left on the ground.
+
+## 2026-10-19: units dig a stair shaft and a branch mine
+
+**Decision.** A `mine_shaft` template digs a staircase down from an entrance
+to a depth, tunnels up to three branches off the bottom, climbs out and
+deposits everything the unit gained into one chest. It is one skill
+(`mine_shaft`) that reuses the navigator for every walk and the deposit skill
+for the hand-off; its only new mechanics are the hazard checks and the break
+loop.
+
+```json
+{"template":"mine_shaft","entrance":{"x":0,"y":0,"z":0},"facing":"north",
+ "depth":12,"branches":2,"branch_length":8,
+ "area":{"min":{...},"max":{...}},"to":{"x":0,"y":0,"z":0}}
+```
+
+`area` and `to` are required: the lab bound is not optional for a skill that
+removes terrain. Depth 1 to 32, branches 0 to 3 (forward, left, right of the
+facing, all off the shaft's bottom cell), branch length 1 to 32. Parsing
+rejects a plan with any cell outside `area`, so a bad request fails at
+submit, and the skill checks every cell again before opening it.
+
+**Geometry.** One block down per block forward, three cells tall per step, so
+the unit walks both ways with the planner's existing step-up and one-block
+drop and needs no items. Each step is dug top cell first from the previous
+step's floor, so a cell is only ever opened beside or above the unit and never
+under it. A branch is a two-high tunnel on the bottom level.
+
+**Hazards.** Before a cell is opened, and again before every re-break, the
+skill reads the cell's six neighbours (and the floor the unit will stand on).
+Lava, water, magma, a missing or unknown block, a floor that is not solid, or
+a cell outside `area` rules out that heading: the skill logs `mine_hazard`
+with the kind, leaves the cell closed and moves on. A shaft that is ruled out
+after at least one step still gets its branches, at the depth it reached; one
+ruled out at the first step fails the task with the hazard named. A branch
+ruled out is skipped. Nothing is breached, so there is nothing to seal; sealing
+would need side-face placement the actuator does not have.
+
+Falling blocks: when a cell has gravel, sand or powder above it, the check
+also looks up that column and at what caps it, and after the cell is broken
+the skill waits for the column to settle, then breaks whatever fell into the
+cell, up to 12 times, re-running the hazard check each time. Past that it
+fails the heading.
+
+**Delivery.** Anything whose inventory count rose since the start, which is
+the cobblestone, ore, gravel and dirt the digging dropped, is deposited with
+the deposit skill after the unit is back on the surface. Tools and torches
+did not rise, so they stay.
+
+**Rejected.**
+- A ladder shaft: needs a stack of ladders and is not walkable.
+- Digging straight down: no way back and no way to see what is below.
+- Sealing a hazard with a held block: needs a side-face place; not opening it
+  is as safe and needs no items.
+- Torches: the ticket makes them optional and the actuator only places on top
+  faces, so tunnels are left dark for now.
+
+**Needs a live check.** Walking the stairs both ways under the real physics,
+drops from a staircase landing on the steps, gravel falling on the server's
+timing, and that a lava pocket two blocks from a branch is left alone.
