@@ -176,6 +176,18 @@ test('starting again hides the steps', async () => {
   assert.equal(e.el('admin-step').textContent, '');
 });
 
+test('the command in the steps is copied exactly as it has to be typed', async () => {
+  const e = adding();
+  const copied = [];
+  e.win.navigator.clipboard = { writeText: async (text) => { copied.push(text); } };
+  e.el('admin-command').textContent = '!map passkey';
+  await startAdding(e);
+  e.el('admin-copy').click();
+  for (let i = 0; i < 3; i++) await tick();
+  assert.deepEqual(copied, ['!map passkey']);
+  assert.equal(e.el('admin-copied').textContent, 'Copied');
+});
+
 test('a label outside the rules is refused before anything is asked of the server', async () => {
   const e = adding();
   await startAdding(e, 'Café');
