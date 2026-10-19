@@ -299,7 +299,7 @@ func (f *Fell) plan(a Actuator, p act.Pose) outcome {
 		f.cutBase, f.matBase = count(snap, f.mine.item), count(snap, mat.Name)
 		f.waited, f.tries, f.jump, f.selected = 0, 0, jIdle, false
 		f.emit("fell_pillar_planned", map[string]any{"height": h, "leaves": len(leaves), "attempt": f.pillars})
-		f.nav = newNavigator(f.world, g, 0.3)
+		f.nav = newNavigator(f.world, g, 0.4)
 		f.phase = fWalk
 		return next
 	}
