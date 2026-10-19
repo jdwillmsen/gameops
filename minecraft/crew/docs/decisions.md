@@ -330,3 +330,20 @@ did not rise, so they stay.
 **Needs a live check.** Walking the stairs both ways under the real physics,
 drops from a staircase landing on the steps, gravel falling on the server's
 timing, and that a lava pocket two blocks from a branch is left alone.
+
+**Live check** (private Bedrock Dedicated Server, offline, a flat stone slab
+with a gravel stack in the third step's column, a lava pocket beside the
+forward branch and a water pocket in the left branch): the task `mine_shaft`
+at depth 6 with 3 branches of 6 ended `done`; the unit stood on the surface at
+full health, never died, and the chest held 35 `cobblestone` and 3 `gravel`.
+The log showed one `mine_hazard` of kind `lava` (forward branch stopped three
+cells in) and one of kind `water` (left branch stopped two cells in); the cells
+beside both pockets were still stone and the pockets intact. Confirmed:
+- The stairs walk both ways under the server's physics, and drops from a
+  staircase are collected on the way.
+- Gravel is slow to fall on the server: the first attempt moved on while it
+  was still hanging and it dropped into the cells dug below, so the skill now
+  waits while the block above the cell is still falling kind.
+
+Not live-checked: a fight mid-shaft (the sim resumes at 12 points), sand,
+a hazard that appears after a cell is opened, and ore other than stone.
