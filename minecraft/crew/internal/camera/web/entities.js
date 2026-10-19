@@ -132,7 +132,9 @@ export function createEntities(scene) {
     if (!m) {
       m = glass
         ? new THREE.MeshLambertMaterial({ map: modelTex, alphaTest: .02, transparent: true, depthWrite: false, color })
-        : new THREE.MeshLambertMaterial({ map: modelTex, alphaTest: .5, color });
+        // Both sides, as the game draws cutout mobs: a chicken's legs are
+        // painted only on the inside of each leg box's back face.
+        : new THREE.MeshLambertMaterial({ map: modelTex, alphaTest: .5, color, side: THREE.DoubleSide });
       materials.set(key, m);
     }
     return m;
