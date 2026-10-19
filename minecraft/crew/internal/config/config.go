@@ -22,6 +22,9 @@ const (
 	// Every viewer holds a replay of the unit's world in flight; the cap keeps
 	// a stray page reload loop from becoming crew's main cost.
 	maxCameraViewers = 64
+	// A wander is a few blocks' stroll in loaded chunks; past this it would
+	// leave the area the unit knows.
+	maxIdleRadius = 32
 	// Bedrock refuses a longer display name at login.
 	maxUsernameLen = 16
 )
@@ -58,6 +61,13 @@ type Config struct {
 	// TasksToken guards the task endpoints; empty leaves them unregistered.
 	TasksToken   string
 	TaskTimeoutS int
+
+	// IdleWander lets a unit with no task look about and take short walks.
+	IdleWander bool
+	// IdleRadius bounds those walks, in blocks around where the unit went idle.
+	IdleRadius int
+	// Defend lets a unit fight hostile mobs and back away from players' blows.
+	Defend bool
 }
 
 func Load() (Config, error) {
@@ -116,6 +126,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	idleWander, err := boolDefault("IDLE_WANDER", true)
+	if err != nil {
+		return Config{}, err
+	}
+	idleRadius, err := intInRange("IDLE_RADIUS", 8, 1, maxIdleRadius)
+	if err != nil {
+		return Config{}, err
+	}
+	defend, err := boolDefault("DEFEND", true)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Host:           host,
 		Port:           port,
@@ -134,6 +157,10 @@ func Load() (Config, error) {
 
 		TasksToken:   strings.TrimSpace(os.Getenv("TASKS_TOKEN")),
 		TaskTimeoutS: taskTimeout,
+
+		IdleWander: idleWander,
+		IdleRadius: idleRadius,
+		Defend:     defend,
 	}, nil
 }
 

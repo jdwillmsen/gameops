@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
@@ -63,7 +65,7 @@ func TestSessionWiresTasksToTheReadLoop(t *testing.T) {
 	runner := task.NewRunner(func(task.Template) ([]skill.Skill, error) {
 		return []skill.Skill{forever{}}, nil
 	}, nil, tracker.Snapshot, time.Minute, nopLog{})
-	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, conn)
+	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, nil, conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -196,11 +198,42 @@ func TestDeathClearsTheOpenContainer(t *testing.T) {
 	tracker := belief.New(time.Now)
 	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)
 	runner := task.NewRunner(nil, nil, tracker.Snapshot, time.Minute, nopLog{})
-	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, &recordingConn{})
+	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, nil, &recordingConn{})
 	_ = u.apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{0, 101.62, 0}})
 	_ = u.apply(&packet.ContainerOpen{WindowID: 3})
 	u.died()
 	if open, _, _ := u.actuator().Container(); open {
 		t.Fatal("the container survived the unit's death")
 	}
+}
+
+func (c *recordingConn) countInputs() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, pk := range c.out {
+		if _, ok := pk.(*packet.PlayerAuthInput); ok {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAnIdleUnitKeepsTicking(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{0, 32768, 0}, 0, 0, 0)
+	conn := &recordingConn{}
+	world := blocks.New(noNames{}, 4)
+	runner := task.NewRunner(nil, nil, tracker.Snapshot, time.Minute, nopLog{})
+	lf := life.New(life.Config{Wander: true, Radius: 8, Defend: true}, world, tracker.Snapshot, nopLog{}, rand.New(rand.NewSource(1)))
+	runner.SetReflex(lf)
+	u := newUnit(7, tracker, world, nil, runner, lf, conn)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go runner.Run(ctx)
+
+	u.apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{4, 101.62, 5}})
+	waitFor(t, func() bool { return conn.countInputs() >= 5 })
+
 }
