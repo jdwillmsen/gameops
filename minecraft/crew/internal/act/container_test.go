@@ -233,3 +233,11 @@ func TestAnEmptyHeldItemIsAnEmptyHand(t *testing.T) {
 		t.Errorf("equipped = %+v, want empty", me.NewItem)
 	}
 }
+
+func TestDiedForgetsTheOpenContainer(t *testing.T) {
+	a, _ := opened(t)
+	a.Died()
+	if open, _, _ := a.Container(); open {
+		t.Error("container still open after death")
+	}
+}
