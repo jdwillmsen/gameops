@@ -30,6 +30,8 @@ func (w shaped) Shape(p protocol.BlockPos) []shape.Box {
 
 func (w shaped) Solid(p protocol.BlockPos) bool { return len(w.Shape(p)) > 0 }
 
+func (w shaped) Climbable(p protocol.BlockPos) bool { return w[p].name == "ladder" }
+
 // southward walks the +z direction from the middle of block (0, 0, 0).
 func southward(t *testing.T, w Solid, ticks int, jump bool) (*Actuator, *sink, []Pose) {
 	t.Helper()
@@ -246,5 +248,63 @@ func TestWorldWithoutShapesStillMeansFullCubes(t *testing.T) {
 	a, _, _ := southward(t, w, 40, false)
 	if p := a.Pose(); p.Feet.Y() != 0 || p.Feet.Z() > 2-0.3+1e-3 {
 		t.Errorf("pose = %+v: a full cube is a wall", p.Feet)
+	}
+}
+
+func ladderColumn(height int32) shaped {
+	w := shaped{}
+	for y := int32(0); y < height; y++ {
+		// Facing 2 mounts the panel on the cell's south side.
+		w[protocol.BlockPos{0, y, 3}] = cell{"ladder", map[string]any{"facing_direction": int32(2)}}
+	}
+	return w
+}
+
+func TestUnitPressingIntoALadderClimbsAtASteadyRate(t *testing.T) {
+	_, _, trail := southward(t, ladderColumn(4), 40, false)
+	var rises []float32
+	prev := float32(0)
+	for _, p := range trail {
+		if p.Feet.Y() > prev {
+			rises = append(rises, p.Feet.Y()-prev)
+		}
+		prev = p.Feet.Y()
+	}
+	if len(rises) < 15 {
+		t.Fatalf("the unit rose on %d ticks, want it to climb the column", len(rises))
+	}
+	for _, r := range rises[1 : len(rises)-4] {
+		near(t, "rise per tick", float64(r), ladderClimb, 1e-4)
+	}
+	if top := prev; top < 4 {
+		t.Errorf("unit ended at y=%v, want over the top of a 4-high ladder", top)
+	}
+}
+
+func TestUnitOnALadderSlidesNoFasterThanTheSlide(t *testing.T) {
+	a, _ := newAct(ladderColumn(30), Pose{Feet: mgl32.Vec3{0.5, 20, 3.5}})
+	a.pose.OnGround = false
+	prev := a.Pose().Feet.Y()
+	for i := 0; i < 12; i++ {
+		_ = a.Tick(Input{})
+		y := a.Pose().Feet.Y()
+		if prev-y > ladderSlide+1e-5 {
+			t.Fatalf("tick %d fell %v, faster than the slide", i, prev-y)
+		}
+		prev = y
+	}
+	if prev > 20-0.5 {
+		t.Errorf("unit hung at y=%v, want it sliding", prev)
+	}
+}
+
+func TestStandingInALadderCellWithoutPressingDoesNotClimb(t *testing.T) {
+	w := ladderColumn(4)
+	a, _ := newAct(w, Pose{Feet: mgl32.Vec3{0.5, 0, 3.2}})
+	for i := 0; i < 10; i++ {
+		_ = a.Tick(Input{})
+	}
+	if y := a.Pose().Feet.Y(); y != 0 {
+		t.Errorf("standing in a ladder cell moved the unit to y=%v", y)
 	}
 }
