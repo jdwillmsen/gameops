@@ -4,6 +4,8 @@
 package proxy
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -60,6 +62,11 @@ func Handler(r roster.Roster, log *logging.Logger) http.Handler {
 			IdleConnTimeout:       60 * time.Second,
 		},
 		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
+			// A viewer closing its tile cancels the request; that is not an
+			// upstream fault.
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			log.Warn("proxy_upstream_failed", logging.Fields{
 				"unit":  req.PathValue("id"),
 				"error": err.Error(),

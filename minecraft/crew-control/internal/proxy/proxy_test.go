@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -218,5 +219,66 @@ func TestProxyForwardsOnlyCameraRadius(t *testing.T) {
 		if got := reqs[len(reqs)-1].URL.RawQuery; got != c.wantQuery {
 			t.Errorf("%s: upstream query %q, want %q", c.path, got, c.wantQuery)
 		}
+	}
+}
+
+// captureStdout swaps the process stdout, which logging.New binds at
+// construction, so build the proxy inside fn.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = orig
+	w.Close()
+	out, _ := io.ReadAll(r)
+	r.Close()
+	return string(out)
+}
+
+func TestProxyLogsUpstreamFailureButNotClientCancel(t *testing.T) {
+	var cancelled, failed string
+
+	cancelled = captureStdout(t, func() {
+		release := make(chan struct{})
+		unit := newFakeUnit(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+		s := httptest.NewServer(Handler(rosterFor(t, unit.URL), logging.New("info")))
+		ctx, cancel := context.WithCancel(context.Background())
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL+"/units/crew-01/v1/state", nil)
+		go func() {
+			for len(unit.seen()) == 0 {
+				time.Sleep(5 * time.Millisecond)
+			}
+			cancel()
+		}()
+		if _, err := http.DefaultClient.Do(req); err == nil {
+			t.Error("cancelled request succeeded")
+		}
+		close(release)
+		s.Close()
+	})
+	if strings.Contains(cancelled, "proxy_upstream_failed") {
+		t.Errorf("client cancel was logged: %s", cancelled)
+	}
+
+	failed = captureStdout(t, func() {
+		dead := httptest.NewServer(http.NotFoundHandler())
+		deadURL := dead.URL
+		dead.Close()
+		s := httptest.NewServer(Handler(rosterFor(t, deadURL), logging.New("info")))
+		resp, err := http.Get(s.URL + "/units/crew-01/v1/state")
+		if err != nil {
+			t.Error(err)
+		} else {
+			resp.Body.Close()
+		}
+		s.Close()
+	})
+	if !strings.Contains(failed, "proxy_upstream_failed") {
+		t.Errorf("real upstream failure not logged: %q", failed)
 	}
 }
