@@ -66,6 +66,9 @@ type cube struct {
 	Inflate  *float64        `json:"inflate"`
 	Mirror   *bool           `json:"mirror"`
 	Rotation []float64       `json:"rotation"`
+	// Pivot is the point a box is turned about, which a box that is not
+	// turned need not give.
+	Pivot []float64 `json:"pivot"`
 }
 
 type bone struct {
@@ -75,6 +78,12 @@ type bone struct {
 	Inflate     float64   `json:"inflate"`
 	NeverRender bool      `json:"neverRender"`
 	Rotation    []float64 `json:"rotation"`
+	// Pivot is the point the bone, and all that hangs off it, is turned
+	// about.
+	Pivot []float64 `json:"pivot"`
+	// BindPose turns the bone's own boxes about its pivot and nothing
+	// that hangs off it: the older models set a body lying down so.
+	BindPose []float64 `json:"bind_pose_rotation"`
 	// Cubes is nil where the bone names none, which in a model that
 	// inherits means the parent's are kept.
 	Cubes []cube `json:"cubes"`
@@ -142,11 +151,11 @@ func (m *model) check() error {
 		if cubes += len(b.Cubes); cubes > maxModelCubes {
 			return fmt.Errorf("over %d boxes", maxModelCubes)
 		}
-		if !inRange(b.Inflate) || !inRange(b.Rotation...) {
+		if !inRange(b.Inflate) || !inRange(b.Rotation...) || !inRange(b.Pivot...) || !inRange(b.BindPose...) {
 			return fmt.Errorf("bone %s has a number out of range", b.Name)
 		}
 		for _, c := range b.Cubes {
-			if !inRange(c.Origin[:]...) || !inRange(c.Size[:]...) || !inRange(c.Rotation...) || (c.Inflate != nil && !inRange(*c.Inflate)) ||
+			if !inRange(c.Origin[:]...) || !inRange(c.Size[:]...) || !inRange(c.Rotation...) || !inRange(c.Pivot...) || (c.Inflate != nil && !inRange(*c.Inflate)) ||
 				c.Size[0] < 0 || c.Size[1] < 0 || c.Size[2] < 0 || len(c.UV) > 1024 {
 				return fmt.Errorf("bone %s has a box with a number out of range", b.Name)
 			}
