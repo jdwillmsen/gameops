@@ -26,8 +26,6 @@ const (
 	attributionRange = 5.0
 	// A creeper this close is backed away from.
 	creeperRange = 5.0
-	// Within this of the unit a mob is fought even if no route to it is known.
-	nearAlways = 3.0
 	// Horizontal reach of a hit, inside the server's own limit.
 	meleeReach  = 2.8
 	reachHeight = 2.0
@@ -110,7 +108,6 @@ type Life struct {
 	retreating int
 	fighting   int
 	lastAttack uint64
-	equipped   bool
 
 	chase     skill.Skill
 	chaseGoal [3]int32
@@ -146,7 +143,7 @@ func (l *Life) Reset() {
 	l.attacker, l.attackerUntil, l.attackerPlayer = 0, 0, false
 	clear(l.ignore)
 	l.engaged, l.holdUntil, l.target = false, 0, belief.Entity{}
-	l.retreating, l.fighting, l.equipped = 0, 0, false
+	l.retreating, l.fighting = 0, 0
 	l.chase, l.flee = nil, nil
 	l.idle = idleState{}
 }
