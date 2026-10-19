@@ -343,7 +343,8 @@ beside both pockets were still stone and the pockets intact. Confirmed:
   staircase are collected on the way.
 - Gravel is slow to fall on the server: the first attempt moved on while it
   was still hanging and it dropped into the cells dug below, so the skill now
-  waits while the block above the cell is still falling kind.
+  waits until the block above the cell has stopped being falling kind for the
+  whole settle window, and re-checks every cell of a step before walking it.
 
 Not live-checked: a fight mid-shaft (the sim resumes at 12 points), sand,
 a hazard that appears after a cell is opened, and ore other than stone.

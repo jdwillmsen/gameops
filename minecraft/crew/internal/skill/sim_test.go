@@ -135,8 +135,8 @@ type rig struct {
 	// fallFlight is how many ticks a falling column spends in the air, its
 	// cells empty, before it lands.
 	fallFlight int
-	aborts    int
-	held      int // last MobEquipment hotbar slot, -1 before one
+	aborts     int
+	held       int // last MobEquipment hotbar slot, -1 before one
 
 	// chest is the chest every test that never names a position talks to;
 	// chests holds the others, so a haul can have several.
