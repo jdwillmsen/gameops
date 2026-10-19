@@ -43,7 +43,8 @@ func TestPostgresStore(t *testing.T) {
 	}, func(t *testing.T, s Store, id uuid.UUID, d time.Duration) time.Time {
 		// The database keeps its own clock, so age the row instead.
 		_, err := s.(*Postgres).pool.Exec(ctx,
-			`UPDATE `+workTable+` SET delivered_at = delivered_at - make_interval(secs => $2) WHERE id = $1`,
+			`UPDATE `+workTable+` SET delivered_at = delivered_at - make_interval(secs => $2),
+			 updated_at = updated_at - make_interval(secs => $2) WHERE id = $1`,
 			id, d.Seconds())
 		if err != nil {
 			t.Fatal(err)
@@ -119,15 +120,33 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatalf("no redelivery: %v %v %v", got.ID, ok, err)
 			}
 		},
-		"running items are not redelivered": func(t *testing.T, s Store) {
+		"running items are re-handed only after a silence": func(t *testing.T, s Store) {
 			it := must(t, s, "crew-01", KindTask, tpl)
-			now := time.Now()
-			s.Next(ctx, "crew-01", now)
+			s.Next(ctx, "crew-01", time.Now())
 			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, _, _ := s.Next(ctx, "crew-01", age(t, s, it.ID, time.Hour)); ok {
-				t.Fatal("running item came back")
+			if _, ok, _, _ := s.Next(ctx, "crew-01", age(t, s, it.ID, 20*time.Second)); ok {
+				t.Fatal("running item came back while its unit was reporting")
+			}
+			// A heartbeat from a live unit restarts the silence.
+			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok, _, _ := s.Next(ctx, "crew-01", age(t, s, it.ID, 20*time.Second)); ok {
+				t.Fatal("heartbeat did not keep the item")
+			}
+		},
+		"running item whose unit restarted is handed out again": func(t *testing.T, s Store) {
+			it := must(t, s, "crew-01", KindTask, tpl)
+			s.Next(ctx, "crew-01", time.Now())
+			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
+				t.Fatal(err)
+			}
+			now := age(t, s, it.ID, 31*time.Second)
+			got, ok, _, err := s.Next(ctx, "crew-01", now)
+			if err != nil || !ok || got.ID != it.ID || got.State != Delivered {
+				t.Fatalf("restarted unit got %+v %v %v", got, ok, err)
 			}
 		},
 		"apply updates and terminal states are sticky": func(t *testing.T, s Store) {
@@ -230,4 +249,20 @@ func must(t *testing.T, s Store, unit, kind string, body json.RawMessage) Item {
 		t.Fatal(err)
 	}
 	return it
+}
+
+func TestLazyAnnouncesWhenTheStoreIsSet(t *testing.T) {
+	var l Lazy
+	calls := 0
+	l.OnReady(func() { calls++ })
+	if _, err := l.Recent(ctx, "crew-01", 1); !errors.Is(err, ErrUnavailable) || calls != 0 {
+		t.Fatalf("before Set: %v, %d calls", err, calls)
+	}
+	l.Set(NewMemory())
+	if calls != 1 {
+		t.Fatalf("OnReady ran %d times", calls)
+	}
+	if _, err := l.Recent(ctx, "crew-01", 1); err != nil {
+		t.Fatal(err)
+	}
 }

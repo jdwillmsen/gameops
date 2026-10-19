@@ -73,6 +73,7 @@ func main() {
 		log.Warn("auth_disabled", logging.Fields{"effect": "no /auth routes; every command route answers 401; set PUBLIC_ORIGIN and CREW_OPERATORS"})
 	}
 	store := &work.Lazy{}
+	store.OnReady(poller.PublishAllWork)
 	workToken := os.Getenv("WORK_TOKEN")
 	if workToken == "" {
 		log.Warn("work_token_unset", logging.Fields{"effect": "unit work routes refuse every request"})

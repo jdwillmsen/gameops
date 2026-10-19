@@ -54,7 +54,9 @@ type Item struct {
 type Store interface {
 	Enqueue(ctx context.Context, unit, kind string, body json.RawMessage, operator string) (Item, error)
 	// Next returns the oldest command, else the oldest task, that is queued
-	// or delivered more than RedeliverAfter before now, and marks it delivered.
+	// or delivered, or running without a report, for more than RedeliverAfter
+	// before now, and marks it delivered. A running item that goes quiet means
+	// its unit restarted and lost the task.
 	// With nothing to hand out, redeliverIn is how long until a delivered item
 	// becomes due again (zero when none is), so a poller can wake for it.
 	// A database-backed store takes now from the database, not the argument,
@@ -121,14 +123,28 @@ func cleanReport(progress int, reason string) (int, string) {
 // Lazy stands in for a store that is not connected yet, so the routes can be
 // mounted at start and answer 503 until the database is reachable.
 type Lazy struct {
-	mu sync.RWMutex
-	s  Store
+	mu      sync.RWMutex
+	s       Store
+	onReady func()
+}
+
+// OnReady registers f to run each time a store is set. Streams that opened
+// while the store was down skipped their history, and this is how they hear
+// that it can be read now.
+func (l *Lazy) OnReady(f func()) {
+	l.mu.Lock()
+	l.onReady = f
+	l.mu.Unlock()
 }
 
 func (l *Lazy) Set(s Store) {
 	l.mu.Lock()
 	l.s = s
+	f := l.onReady
 	l.mu.Unlock()
+	if f != nil {
+		f()
+	}
 }
 
 func (l *Lazy) get() (Store, error) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -210,4 +211,94 @@ func TestStoreDownKeepsConsoleAndStreamUp(t *testing.T) {
 		t.Fatalf("stream: %v %v", resp, err)
 	}
 	resp.Body.Close()
+}
+
+func TestWorkStreamNeedsARealSession(t *testing.T) {
+	units, err := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://127.0.0.1:1"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := auth.New(auth.Config{
+		Origin: "https://crew.example.test", DataDir: t.TempDir(), InvitesDir: t.TempDir(),
+		Operators: `[{"id":"owner","name":"Owner"}]`, Log: logging.New("error"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := a.SessionForTest("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
+	h := newHandler(units, poller, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
+		api := work.Routes(mux, work.NewMemory(), units, "unit-token", poller.PublishWork)
+		api.MountOperator(mux, a)
+		poller.SetWorkSource(api.Feed)
+	})
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	open := func(c *http.Cookie) <-chan string {
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/units/stream", nil)
+		if c != nil {
+			req.AddCookie(c)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { resp.Body.Close() })
+		out := make(chan string, 16)
+		go func() {
+			sc := bufio.NewScanner(resp.Body)
+			for sc.Scan() {
+				if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+					out <- n
+				}
+			}
+			close(out)
+		}()
+		return out
+	}
+	anon, signed := open(nil), open(cookie)
+	expect := func(ch <-chan string, want string) bool {
+		deadline := time.After(2 * time.Second)
+		for {
+			select {
+			case n := <-ch:
+				if n == want {
+					return true
+				}
+			case <-deadline:
+				return false
+			}
+		}
+	}
+	if !expect(anon, "units") || !expect(signed, "units") {
+		t.Fatal("streams did not open")
+	}
+	if !expect(signed, "work") {
+		t.Fatal("signed-in stream missed its history")
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/work/crew-01/stop", nil)
+	req.Header.Set("X-Crew-Request", "1")
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("enqueue: %d", resp.StatusCode)
+	}
+
+	if !expect(signed, "work") {
+		t.Fatal("signed-in stream missed the enqueue")
+	}
+	select {
+	case n := <-anon:
+		t.Fatalf("anonymous stream got %q", n)
+	case <-time.After(300 * time.Millisecond):
+	}
 }
