@@ -37,11 +37,14 @@ var (
 // Task is the public record. It deliberately omits the request, which holds
 // lab coordinates.
 type Task struct {
-	ID       string    `json:"id"`
-	Template string    `json:"template"`
-	State    string    `json:"state"`
-	Reason   string    `json:"reason,omitempty"`
-	Skill    string    `json:"skill,omitempty"`
+	ID       string `json:"id"`
+	Template string `json:"template"`
+	State    string `json:"state"`
+	Reason   string `json:"reason,omitempty"`
+	Skill    string `json:"skill,omitempty"`
+	// Item and Qty are what the task gathers; Progress counts toward Qty.
+	Item     string    `json:"item,omitempty"`
+	Qty      int       `json:"qty,omitempty"`
 	Progress int       `json:"progress"`
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"`
@@ -105,7 +108,7 @@ func (r *Runner) Submit(t Template) (Task, error) {
 		return Task{}, ErrQueueFull
 	}
 	now := r.now()
-	e := &entry{Task: Task{ID: hex.EncodeToString(b[:]), Template: t.Template, State: Queued, Created: now, Updated: now}, item: t.Item, skills: skills}
+	e := &entry{Task: Task{ID: hex.EncodeToString(b[:]), Template: t.Template, State: Queued, Item: t.Item, Qty: t.Qty, Created: now, Updated: now}, item: t.Item, skills: skills}
 	r.entries = append(r.entries, e)
 	r.logEvent("task_submitted", e)
 	return e.Task, nil
