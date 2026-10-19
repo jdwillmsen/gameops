@@ -271,3 +271,88 @@ func TestTaskLogsCarryNoBody(t *testing.T) {
 		}
 	}
 }
+
+type stopSkill struct {
+	fakeSkill
+	mu      sync.Mutex
+	stops   int
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *stopSkill) Step(ctx context.Context, a skill.Actuator) (skill.Status, error) {
+	if s.entered != nil {
+		s.entered <- struct{}{}
+		<-s.release
+	}
+	return skill.Running, nil
+}
+
+func (s *stopSkill) Stop(skill.Actuator) {
+	s.mu.Lock()
+	s.stops++
+	s.mu.Unlock()
+}
+
+func (s *stopSkill) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stops
+}
+
+func stopHarness(t *testing.T, timeout time.Duration, sk *stopSkill) *harness {
+	h := newHarness(t, timeout, 0)
+	h.r.newSkills = func(Template) ([]skill.Skill, error) { return []skill.Skill{sk}, nil }
+	return h
+}
+
+func TestCancelAndTimeoutCleanUpTheRunningSkillOnce(t *testing.T) {
+	sk := &stopSkill{fakeSkill: fakeSkill{name: "deposit_chest"}}
+	h := stopHarness(t, time.Minute, sk)
+	a, _ := h.r.Submit(tpl())
+	h.tick(3)
+	h.r.Cancel(a.ID)
+	h.tick(5)
+	if sk.count() != 1 {
+		t.Errorf("stops after cancel = %d, want 1", sk.count())
+	}
+
+	sk = &stopSkill{fakeSkill: fakeSkill{name: "mine_block"}}
+	h = stopHarness(t, time.Second, sk)
+	h.r.Submit(tpl())
+	h.tick(40)
+	if sk.count() != 1 {
+		t.Errorf("stops after timeout = %d, want 1", sk.count())
+	}
+}
+
+func TestSessionEndAndDeathSkipCleanup(t *testing.T) {
+	sk := &stopSkill{fakeSkill: fakeSkill{name: "mine_block"}}
+	h := stopHarness(t, time.Minute, sk)
+	h.r.Submit(tpl())
+	h.tick(2)
+	h.r.SessionEnded()
+	h.tick(3)
+	h.r.SetActuator(fakeAct{})
+	h.tick(3)
+	if sk.count() != 0 {
+		t.Errorf("stops = %d, want none", sk.count())
+	}
+}
+
+func TestCancelDuringAStepStillCleansUpOnce(t *testing.T) {
+	sk := &stopSkill{fakeSkill: fakeSkill{name: "mine_block"}, entered: make(chan struct{}), release: make(chan struct{})}
+	h := stopHarness(t, time.Minute, sk)
+	a, _ := h.r.Submit(tpl())
+	done := make(chan struct{})
+	go func() { h.r.step(context.Background()); close(done) }()
+	<-sk.entered
+	h.r.Cancel(a.ID)
+	close(sk.release)
+	<-done
+	sk.entered = nil
+	h.tick(4)
+	if sk.count() != 1 {
+		t.Errorf("stops = %d, want 1", sk.count())
+	}
+}

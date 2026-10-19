@@ -67,6 +67,10 @@ type Runner struct {
 	act     skill.Actuator
 	entries []*entry // creation order
 	cur     *entry
+	// pending is the skill of a task cancelled or timed out mid-run. Its
+	// cleanup sends inputs, so it runs on the stepping goroutine, once, before
+	// anything else uses the actuator.
+	pending skill.Stopper
 }
 
 func NewRunner(newSkills func(Template) ([]skill.Skill, error), act skill.Actuator, self func() belief.Snapshot, timeout time.Duration, log skill.Logger) *Runner {
@@ -117,7 +121,7 @@ func (r *Runner) Cancel(id string) (Task, error) {
 	if e.State != Queued && e.State != Running {
 		return Task{}, ErrFinished
 	}
-	r.finish(e, Cancelled, "")
+	r.abandon(e, Cancelled, "")
 	return e.Task, nil
 }
 
@@ -137,12 +141,14 @@ func (r *Runner) SessionEnded() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.act = nil
+	r.pending = nil // the old actuator is gone
 	r.failCurrent("session ended")
 }
 
 func (r *Runner) Died() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.pending = nil // a dead unit has no chest open and no break running
 	r.failCurrent("unit died")
 }
 
@@ -166,7 +172,15 @@ func (r *Runner) step(ctx context.Context) {
 	r.mu.Lock()
 	snap := r.self()
 	if !snap.Spawned || snap.Dead || r.act == nil {
+		r.pending = nil
 		r.mu.Unlock()
+		return
+	}
+	if st := r.pending; st != nil {
+		r.pending = nil
+		act := r.act
+		r.mu.Unlock()
+		st.Stop(act)
 		return
 	}
 	if r.cur == nil {
@@ -183,7 +197,7 @@ func (r *Runner) step(ctx context.Context) {
 	}
 	e, act := r.cur, r.act
 	if r.now().Sub(e.started) > r.timeout {
-		r.finish(e, Failed, "timed out")
+		r.abandon(e, Failed, "timed out")
 		r.mu.Unlock()
 		return
 	}
@@ -258,6 +272,17 @@ func (r *Runner) nextQueued() *entry {
 		}
 	}
 	return nil
+}
+
+// abandon ends a task that may be mid-skill by the caller's choice, leaving
+// its cleanup to the stepping goroutine.
+func (r *Runner) abandon(e *entry, state, reason string) {
+	if r.cur == e && e.idx < len(e.skills) {
+		if st, ok := e.skills[e.idx].(skill.Stopper); ok {
+			r.pending = st
+		}
+	}
+	r.finish(e, state, reason)
 }
 
 func (r *Runner) failCurrent(reason string) {
