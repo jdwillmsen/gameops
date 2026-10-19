@@ -289,3 +289,35 @@ func TestKitChestRejectsWhatIsNotAPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestControlConfigIsBothOrNeither(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.ControlURL != nil || cfg.ControlToken != "" {
+		t.Fatalf("unset = %+v, %v; want control off", cfg, err)
+	}
+
+	t.Setenv("CONTROL_URL", "http://crew-control:8080/")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CONTROL_TOKEN") {
+		t.Fatalf("url only: err = %v, want one naming CONTROL_TOKEN", err)
+	}
+
+	t.Setenv("CONTROL_URL", "")
+	t.Setenv("CONTROL_TOKEN", "tok")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CONTROL_URL") {
+		t.Fatalf("token only: err = %v, want one naming CONTROL_URL", err)
+	}
+
+	t.Setenv("CONTROL_URL", "http://crew-control:8080/")
+	cfg, err = Load()
+	if err != nil || cfg.ControlURL == nil || cfg.ControlURL.Host != "crew-control:8080" || cfg.ControlToken != "tok" {
+		t.Fatalf("both = %+v, %v", cfg, err)
+	}
+
+	for _, bad := range []string{"crew-control:8080", "ftp://x", "http://"} {
+		t.Setenv("CONTROL_URL", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CONTROL_URL") {
+			t.Errorf("CONTROL_URL=%q: err = %v, want a CONTROL_URL error", bad, err)
+		}
+	}
+}

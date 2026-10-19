@@ -28,6 +28,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/control"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
@@ -104,6 +105,9 @@ func main() {
 	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
 	runner.SetReflex(lf)
 	go runner.Run(ctx)
+	if cfg.ControlURL != nil {
+		go control.New(cfg.ControlURL, cfg.UnitID, cfg.ControlToken, runner, logAdapter{log}).Run(ctx)
+	}
 	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
