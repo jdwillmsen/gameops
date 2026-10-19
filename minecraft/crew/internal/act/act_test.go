@@ -489,3 +489,64 @@ func TestAttackWithAnEmptyHandNeedsNoItemTable(t *testing.T) {
 		t.Fatalf("err %v, %d packets", err, len(s.got))
 	}
 }
+
+func TestUseItemClicksAirWithTheHeldStack(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{1, 0, 2}})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:bread", RuntimeID: 340}})
+	if err := a.UseItem(3, beliefItem(3, "bread", 5, 88)); err != nil {
+		t.Fatal(err)
+	}
+	tx, ok := s.last(t).(*packet.InventoryTransaction)
+	if !ok {
+		t.Fatalf("sent %T", s.last(t))
+	}
+	d, ok := tx.TransactionData.(*protocol.UseItemTransactionData)
+	if !ok {
+		t.Fatalf("transaction data %T", tx.TransactionData)
+	}
+	if d.ActionType != protocol.UseItemActionClickAir || d.TriggerType != protocol.TriggerTypePlayerInput || d.HotBarSlot != 3 || d.Hand != protocol.HandSlotMainHand {
+		t.Errorf("data = %+v", d)
+	}
+	if d.HeldItem.Stack.NetworkID != 340 || d.HeldItem.StackNetworkID != 88 || d.HeldItem.Stack.Count != 5 {
+		t.Errorf("held = %+v", d.HeldItem)
+	}
+	if err := a.UseItem(12, beliefItem(12, "bread", 1, 1)); err == nil {
+		t.Error("a non-hotbar slot was accepted")
+	}
+	if err := a.UseItem(0, beliefItem(0, "mystery", 1, 1)); err == nil {
+		t.Error("an item the server never listed was sent")
+	}
+}
+
+func TestReleaseItemSendsAReleaseTransaction(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{1, 0, 2}})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:bread", RuntimeID: 340}})
+	if err := a.ReleaseItem(3, beliefItem(3, "bread", 5, 88)); err != nil {
+		t.Fatal(err)
+	}
+	tx := s.last(t).(*packet.InventoryTransaction)
+	d, ok := tx.TransactionData.(*protocol.ReleaseItemTransactionData)
+	if !ok {
+		t.Fatalf("transaction data %T", tx.TransactionData)
+	}
+	if d.HotBarSlot != 3 || d.HeldItem.Stack.NetworkID != 340 || d.HeadPosition.Y() < 1.6 {
+		t.Errorf("data = %+v", d)
+	}
+}
+
+func TestStartUsingRidesOnlyTheInputThatAsksForIt(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{1, 0, 2}})
+	if err := a.Tick(Input{StartUsing: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Tick(Input{}); err != nil {
+		t.Fatal(err)
+	}
+	in := s.inputs(t)
+	if !in[0].InputData.Load(packet.InputFlagStartUsingItem) {
+		t.Error("the asking input lacks StartUsingItem")
+	}
+	if in[1].InputData.Load(packet.InputFlagStartUsingItem) {
+		t.Error("the flag stayed on for the next tick")
+	}
+}
