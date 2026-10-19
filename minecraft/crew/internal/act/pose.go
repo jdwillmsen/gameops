@@ -5,6 +5,8 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape"
 )
 
 // The server's movement model, as measured on the lab. Unit tests pin these;
@@ -32,11 +34,22 @@ const (
 	skin = 1e-3
 	// How far below the feet counts as standing on something.
 	supportReach = 0.02
+
+	// The most a grounded unit rises onto a ledge without jumping.
+	stepHeight = 0.6
 )
 
 // Solid answers collision queries. Unknown blocks must report true, so the
 // unit never walks into unloaded terrain.
 type Solid interface{ Solid(protocol.BlockPos) bool }
+
+// Shaper is what a Solid offers when it knows block shapes: the collision
+// boxes of a block, in block-local coordinates and possibly reaching above
+// the block, as a fence's do. A Solid without it is taken to be full cubes.
+// An unknown block must be a full cube.
+type Shaper interface {
+	Shape(protocol.BlockPos) []shape.Box
+}
 
 // Pose is the unit's predicted state, which the server must agree with.
 type Pose struct {
@@ -103,16 +116,25 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 		info.delta[1] = dy
 	}
 	moved := feet
+	wanted := v
 	feet[0], v[0] = moveX(w, feet, v[0])
 	feet[2], v[1] = moveZ(w, feet, v[1])
+	if p.OnGround && (v != wanted) {
+		if up, ok := stepOnto(w, moved, wanted, feet); ok {
+			// The delta stays the standing one although the position rose: the
+			// server reads it as velocity, and a delta carrying the rise is
+			// corrected.
+			feet, v = up.feet, up.v
+		}
+	}
 	info.delta[0], info.delta[2] = feet[0]-moved[0], feet[2]-moved[2]
 
 	if p.OnGround {
 		if !info.landed {
 			info.delta[1] = standingDeltaY
-			if !supported(w, feet) {
-				p.OnGround, p.vy = false, standingDeltaY
-			}
+		}
+		if !info.landed && !supported(w, feet) {
+			p.OnGround, p.vy = false, standingDeltaY
 		}
 		p.Carry = v.Mul(groundCarry)
 	} else {
@@ -133,24 +155,124 @@ func (p *Pose) knock(v mgl32.Vec3) {
 	}
 }
 
-func headBlocked(w Solid, f mgl32.Vec3) bool {
-	return overlaps(w, f[0], f[1]+supportReach, f[2])
-}
+// aabb is a world-space collision box.
+type aabb struct{ lo, hi mgl32.Vec3 }
 
-func supported(w Solid, f mgl32.Vec3) bool { return overlaps(w, f[0], f[1]-supportReach, f[2]) }
+// bodyLo and bodyHi are how far the body box reaches below and above a
+// coordinate on each axis; the feet are its bottom face.
+var (
+	bodyLo = mgl32.Vec3{halfWidth, 0, halfWidth}
+	bodyHi = mgl32.Vec3{halfWidth, bodyHeight, halfWidth}
+)
 
-// overlaps reports whether the body box at feet (x, y, z) touches a solid block.
-func overlaps(w Solid, x, y, z float32) bool {
-	x0, x1 := blockRange(x-halfWidth, x+halfWidth)
-	y0, y1 := blockRange(y, y+bodyHeight)
-	z0, z1 := blockRange(z-halfWidth, z+halfWidth)
+// obstacles lists the collision boxes of every block the region touches.
+func obstacles(w Solid, lo, hi mgl32.Vec3) []aabb {
+	x0, x1 := blockRange(lo[0], hi[0])
+	y0, y1 := blockRange(lo[1], hi[1])
+	z0, z1 := blockRange(lo[2], hi[2])
+	sh, shaped := w.(Shaper)
+	var out []aabb
+	// The cell below can reach up into the region: fences and walls are
+	// taller than their block.
 	for bx := x0; bx <= x1; bx++ {
-		for by := y0; by <= y1; by++ {
+		for by := y0 - 1; by <= y1; by++ {
 			for bz := z0; bz <= z1; bz++ {
-				if w.Solid(protocol.BlockPos{bx, by, bz}) {
-					return true
+				pos := protocol.BlockPos{bx, by, bz}
+				origin := mgl32.Vec3{float32(bx), float32(by), float32(bz)}
+				if !shaped {
+					if w.Solid(pos) {
+						out = append(out, aabb{origin, origin.Add(mgl32.Vec3{1, 1, 1})})
+					}
+					continue
+				}
+				for _, b := range sh.Shape(pos) {
+					out = append(out, aabb{origin.Add(b.Min), origin.Add(b.Max)})
 				}
 			}
+		}
+	}
+	return out
+}
+
+// region is the body box at feet, grown by d along one axis.
+func region(f mgl32.Vec3, axis int, d float32) (lo, hi mgl32.Vec3) {
+	lo, hi = f.Sub(bodyLo), f.Add(bodyHi)
+	if d > 0 {
+		hi[axis] += d
+	} else {
+		lo[axis] += d
+	}
+	return lo, hi
+}
+
+// sweep moves the body along one axis by d and returns where it ends and
+// whether a box stopped it. It ends touching the first box in its way, which
+// is where the server stops it.
+func sweep(w Solid, f mgl32.Vec3, axis int, d float32) (float32, bool) {
+	target := f[axis] + d
+	if d == 0 {
+		return target, false
+	}
+	lo, hi := region(f, axis, d)
+	stopped := false
+	for _, o := range obstacles(w, lo, hi) {
+		if !crosses(o, f, axis) {
+			continue
+		}
+		if d > 0 {
+			// Only boxes ahead of the front face block; one the body already
+			// overlaps is something it is inside, not something it hits.
+			if o.lo[axis] < f[axis]+bodyHi[axis]-skin {
+				continue
+			}
+			if limit := o.lo[axis] - bodyHi[axis]; limit < target {
+				target, stopped = limit, true
+			}
+			continue
+		}
+		if o.hi[axis] > f[axis]-bodyLo[axis]+skin {
+			continue
+		}
+		if limit := o.hi[axis] + bodyLo[axis]; limit > target {
+			target, stopped = limit, true
+		}
+	}
+	if stopped && ((d > 0 && target < f[axis]) || (d < 0 && target > f[axis])) {
+		target = f[axis]
+	}
+	return target, stopped
+}
+
+// crosses reports whether the body, at feet f, overlaps the box on the two
+// axes other than the one it moves along.
+func crosses(o aabb, f mgl32.Vec3, axis int) bool {
+	for a := 0; a < 3; a++ {
+		if a == axis {
+			continue
+		}
+		if o.lo[a] >= f[a]+bodyHi[a]-skin || o.hi[a] <= f[a]-bodyLo[a]+skin {
+			return false
+		}
+	}
+	return true
+}
+
+func headBlocked(w Solid, f mgl32.Vec3) bool {
+	lo, hi := region(f, 1, supportReach)
+	top := f[1] + bodyHeight
+	for _, o := range obstacles(w, lo, hi) {
+		if crosses(o, f, 1) && o.lo[1] >= top-skin {
+			return true
+		}
+	}
+	return false
+}
+
+func supported(w Solid, f mgl32.Vec3) bool {
+	lo, hi := region(f, 1, -supportReach)
+	for _, o := range obstacles(w, lo, hi) {
+		if crosses(o, f, 1) && o.hi[1] > f[1]-supportReach && o.hi[1] <= f[1]+skin {
+			return true
 		}
 	}
 	return false
@@ -160,52 +282,59 @@ func blockRange(lo, hi float32) (int32, int32) {
 	return int32(math.Floor(float64(lo) + skin)), int32(math.Floor(float64(hi) - skin))
 }
 
-// moveX and moveZ stop the unit with its box touching the first solid face in
-// its way, which is where the server stops it, and zero the blocked velocity.
+// moveX and moveZ stop the unit with its box touching the first face in its
+// way and zero the blocked velocity.
 func moveX(w Solid, f mgl32.Vec3, dx float32) (float32, float32) {
-	nx := f[0] + dx
-	if dx == 0 || !overlaps(w, nx, f[1], f[2]) {
-		return nx, dx
+	nx, stopped := sweep(w, f, 0, dx)
+	if stopped {
+		return nx, 0
 	}
-	if dx > 0 {
-		nx = float32(math.Floor(float64(nx+halfWidth))) - halfWidth
-	} else {
-		nx = float32(math.Floor(float64(nx-halfWidth))) + 1 + halfWidth
-	}
-	return clampStep(f[0], nx, dx), 0
+	return nx, dx
 }
 
 func moveZ(w Solid, f mgl32.Vec3, dz float32) (float32, float32) {
-	nz := f[2] + dz
-	if dz == 0 || !overlaps(w, f[0], f[1], nz) {
-		return nz, dz
+	nz, stopped := sweep(w, f, 2, dz)
+	if stopped {
+		return nz, 0
 	}
-	if dz > 0 {
-		nz = float32(math.Floor(float64(nz+halfWidth))) - halfWidth
-	} else {
-		nz = float32(math.Floor(float64(nz-halfWidth))) + 1 + halfWidth
-	}
-	return clampStep(f[2], nz, dz), 0
-}
-
-// clampStep keeps a collision from pushing the unit backwards.
-func clampStep(from, to, d float32) float32 {
-	if (d > 0 && to < from) || (d < 0 && to > from) {
-		return from
-	}
-	return to
+	return nz, dz
 }
 
 // moveY applies a vertical step, clamping it at a floor (landed) or a ceiling.
 func moveY(w Solid, f mgl32.Vec3, dy float32) (y, applied float32, landed bool) {
-	ny := f[1] + dy
-	if !overlaps(w, f[0], ny, f[2]) {
-		return ny, dy, false
-	}
-	if dy > 0 {
-		ny = float32(math.Floor(float64(ny+bodyHeight))) - bodyHeight
-		return ny, ny - f[1], false
-	}
-	ny = float32(math.Floor(float64(ny))) + 1
-	return ny, ny - f[1], true
+	ny, stopped := sweep(w, f, 1, dy)
+	return ny, ny - f[1], stopped && dy < 0
 }
+
+// stepResult is where a step onto a ledge leaves the unit.
+type stepResult struct {
+	feet mgl32.Vec3
+	v    mgl32.Vec2
+}
+
+// stepOnto retries a blocked ground move from a raised start, as the server
+// does for a unit on the ground: it lifts the unit by the step height (less
+// if a ceiling is in the way), moves horizontally, and sets it back down. The
+// result is used only if it carries the unit further than the flat move did,
+// which ended at flat.
+func stepOnto(w Solid, start mgl32.Vec3, v mgl32.Vec2, flat mgl32.Vec3) (stepResult, bool) {
+	top, _, _ := moveY(w, start, stepHeight)
+	lift := top - start[1]
+	if lift <= skin {
+		return stepResult{}, false
+	}
+	f := start
+	f[1] = top
+	var out stepResult
+	f[0], out.v[0] = moveX(w, f, v[0])
+	f[2], out.v[1] = moveZ(w, f, v[1])
+	gained := sq(f[0]-start[0]) + sq(f[2]-start[2])
+	if gained <= sq(flat[0]-start[0])+sq(flat[2]-start[2]) {
+		return stepResult{}, false
+	}
+	f[1], _, _ = moveY(w, f, -lift)
+	out.feet = f
+	return out, true
+}
+
+func sq(x float32) float32 { return x * x }
