@@ -344,8 +344,8 @@ func TestEveryAppearanceSettingHasAControlAndADefault(t *testing.T) {
 	if len(defaults) != 15 {
 		t.Fatalf("read %d appearance settings from settings.js, want 15", len(defaults))
 	}
-	// The page opens as it always has until the viewer chooses otherwise.
-	for name, want := range map[string]string{"theme": "dark", "size": "normal", "opacityBiomes": "60", "motion": "system", "labelPlayers": "always"} {
+	// The page opens as the system has it until the viewer chooses otherwise.
+	for name, want := range map[string]string{"theme": "system", "size": "normal", "opacityBiomes": "60", "motion": "system", "labelPlayers": "always"} {
 		if defaults[name] != want {
 			t.Errorf("the default %s is %s, want %s", name, defaults[name], want)
 		}

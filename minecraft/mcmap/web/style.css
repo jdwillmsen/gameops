@@ -1,7 +1,7 @@
 /* Every colour on the page is named here, once for each theme, and used
    by its name everywhere below; what is drawn on a canvas reads the same
-   names. The first set is the dark theme, and is what a page with no
-   theme chosen gets.
+   names. The first set is the dark theme, and is what a page gets
+   where no script runs to put the system's choice on it.
 
    The terrain under the map is the same in every theme, so what is drawn
    over it keeps a dark outline and a dark backing behind its picture in
