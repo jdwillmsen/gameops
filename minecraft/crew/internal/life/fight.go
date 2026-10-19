@@ -181,10 +181,17 @@ func (l *Life) giveUp(id uint64) {
 func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	l.idle = idleState{}
 	e, ok := l.ents.Get(l.target.ID)
+	p := a.Pose()
 	if l.target.ID == 0 || !ok {
+		// Walking only goes forward, so a step back turns away from the
+		// player; the hold after it turns round to face them again.
+		if l.mode == modeStepBack && l.attackerPlayer {
+			if pl, ok := l.ents.Get(l.attacker); ok {
+				return l.stillFacing(a, p, pl)
+			}
+		}
 		return l.still(a)
 	}
-	p := a.Pose()
 	switch l.mode {
 	case modeRetreat:
 		return l.retreat(ctx, a, p, e, 8)
