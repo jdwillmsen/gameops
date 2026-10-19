@@ -228,6 +228,38 @@ Server replies (`chest_deposit.bin`):
 server replied `ContainerClose{WindowID, ContainerType: 247, ServerSide: false}`
 and a `BlockEvent` with `EventData` 0.
 
+### Withdraw
+
+Recorded 2026-10-19 on the lab (`chest_withdraw.bin`, one throwaway probe, deleted).
+Take with `packet.ItemStackRequest{Requests: [{RequestID, Actions:
+[&protocol.TakeStackRequestAction{Count, Source: {Container:
+{ContainerID: ContainerLevelEntity (7)}, Slot, StackNetworkID: the chest slot's},
+Destination: {Container: {ContainerID: ContainerCombinedHotBarAndInventory
+(12)}, Slot, StackNetworkID: 0 for an empty slot}}]}]}`. Request IDs
+counted down from -3 as for a deposit.
+
+Accepted exchange (16 cobblestone from chest slot 0 into empty slot 9): an
+`InventorySlot` for the chest slot (now empty), then `ItemStackResponse{Status 0,
+ContainerInfo: [{Container 7, [{Slot 0, Count 0, StackNetworkID 0}]},
+{Container 12, [{Slot 9, Count 16, StackNetworkID 7}]}]}`, then the same
+`InventorySlot` again. **No `InventorySlot` or `InventoryContent` for the
+unit's own slot**, and the response does not name the item. The destination
+kept the chest stack's `StackNetworkID` (7). Belief therefore remembers item
+IDs from the open window's contents and names the new stack from its stack ID,
+or, after a partial take (new ID), from the stack left in the chest.
+
+| Case | Status |
+|---|---|
+| Taking 16 into an empty slot | 0 |
+| Source slot empty (quoted ID 0) | 49 `FailedToValidateSrcSlot` |
+| Source `StackNetworkID` stale (99999) | 49 |
+| Destination holds another item (wooden pickaxe, correct ID quoted) | 1 `Error` |
+| Count 20 against a stack of 8 | 0, and all 8 moved: the server clamps, so crew must check the count itself |
+
+Not separately recorded: a destination slot index of 36. The one request sent
+for it was aimed at a chest slot an earlier request had just emptied, so its
+49 says nothing about the index; crew refuses it before sending.
+
 ### Rejections
 
 The server always answered; a request was never dropped silently and nothing
