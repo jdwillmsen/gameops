@@ -35,6 +35,7 @@ type Actuator interface {
 	ContainerContent() []protocol.ItemInstance
 	ItemTable() map[string]int32
 	Deposit(from belief.Item, count int, toSlot byte) (int32, error)
+	Withdraw(fromSlot byte, count int, to belief.Item, toSlot int) (int32, error)
 	Response(requestID int32) (status uint8, done bool)
 	CloseContainer() error
 }
@@ -53,6 +54,12 @@ type Skill interface {
 // It must be called from the goroutine that steps the skill.
 type Stopper interface {
 	Stop(Actuator)
+}
+
+// Progresser is implemented by skills that count their own work, for tasks
+// whose progress is not one item's inventory count.
+type Progresser interface {
+	Progress() int
 }
 
 // Logger is the part of crew's logger skills write to.

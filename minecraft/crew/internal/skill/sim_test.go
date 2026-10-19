@@ -20,6 +20,7 @@ import (
 const (
 	idDirt        = 3
 	idCobblestone = 4
+	idOakLog      = 5
 	idWoodenPick  = 312
 	chestHash     = 3162850062
 )
@@ -27,6 +28,7 @@ const (
 var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:dirt", RuntimeID: idDirt},
 	{Name: "minecraft:cobblestone", RuntimeID: idCobblestone},
+	{Name: "minecraft:oak_log", RuntimeID: idOakLog},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: idWoodenPick},
 }
 
@@ -112,7 +114,15 @@ type rig struct {
 	aborts   int
 	held     int // last MobEquipment hotbar slot, -1 before one
 
-	chest       [27]slotStack
+	// chest is the chest every test that never names a position talks to;
+	// chests holds the others, so a haul can have several.
+	chest       *[27]slotStack
+	chests      map[protocol.BlockPos]*[27]slotStack
+	opened      *[27]slotStack
+	fills       []timedFill
+	takeStatus  []uint8 // answers to the next withdraws, in order
+	takes       int
+	places      int
 	chestAt     protocol.BlockPos
 	window      byte
 	opens       int
@@ -134,6 +144,15 @@ type rig struct {
 	correctBy     mgl32.Vec3
 }
 
+// timedFill puts a stack in a chest slot once the unit has sent that many
+// inputs, as another unit's deposit would.
+type timedFill struct {
+	tick  int
+	chest *[27]slotStack
+	slot  int
+	stack slotStack
+}
+
 type breakSession struct {
 	pos  protocol.BlockPos
 	left int
@@ -141,7 +160,7 @@ type breakSession struct {
 
 func newRig(t *testing.T, w simWorld, feet mgl32.Vec3) *rig {
 	t.Helper()
-	r := &rig{t: t, world: w, nextID: 100, held: -1, window: 2, chestClosed: true}
+	r := &rig{t: t, world: w, nextID: 100, held: -1, window: 2, chestClosed: true, chest: new([27]slotStack), chests: map[protocol.BlockPos]*[27]slotStack{}}
 	r.tracker = belief.New(time.Now)
 	r.tracker.Spawn(1, feet.Add(mgl32.Vec3{0, 1.62, 0}), 0, 0, 0)
 	r.tracker.ItemNames(itemTable)
@@ -207,6 +226,30 @@ func (r *rig) Deposit(from belief.Item, count int, to byte) (int32, error) {
 	return id, err
 }
 
+func (r *rig) Withdraw(fromSlot byte, count int, to belief.Item, toSlot int) (int32, error) {
+	id, err := r.Actuator.Withdraw(fromSlot, count, to, toSlot)
+	r.pump()
+	return id, err
+}
+
+// chestFor returns the chest at a position, creating it empty.
+func (r *rig) chestFor(pos protocol.BlockPos) *[27]slotStack {
+	if pos == chestPos {
+		return r.chest
+	}
+	c, ok := r.chests[pos]
+	if !ok {
+		c = new([27]slotStack)
+		r.chests[pos] = c
+	}
+	return c
+}
+
+// fillAt schedules a stack to appear in a chest after the unit has sent tick inputs.
+func (r *rig) fillAt(tick int, pos protocol.BlockPos, slot int, s slotStack) {
+	r.fills = append(r.fills, timedFill{tick, r.chestFor(pos), slot, s})
+}
+
 func (r *rig) CloseContainer() error {
 	err := r.Actuator.CloseContainer()
 	r.pump()
@@ -249,6 +292,19 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 	}
 	r.lastTick = p.Tick
 	r.ticks++
+
+	due := r.fills[:0]
+	for _, f := range r.fills {
+		if r.ticks < f.tick {
+			due = append(due, f)
+			continue
+		}
+		f.chest[f.slot] = f.stack
+		if !r.chestClosed && r.opened == f.chest {
+			r.send(&packet.InventorySlot{WindowID: uint32(r.window), Slot: uint32(f.slot), NewItem: instance(f.stack)})
+		}
+	}
+	r.fills = due
 
 	if acts, ok := p.BlockActions.Value(); ok {
 		for _, a := range acts {
@@ -358,15 +414,16 @@ func (r *rig) openChestNow(pos protocol.BlockPos) {
 	r.opens++
 	r.window += 5
 	r.chestAt = pos
+	r.opened = r.chestFor(pos)
 	r.chestClosed = false
 	r.send(&packet.ContainerOpen{WindowID: r.window, ContainerPosition: pos, ContainerEntityUniqueID: -1})
-	content := make([]protocol.ItemInstance, len(r.chest))
-	for i, s := range r.chest {
+	content := make([]protocol.ItemInstance, len(r.opened))
+	for i, s := range r.opened {
 		content[i] = instance(s)
 	}
 	r.send(&packet.InventoryContent{WindowID: uint32(r.window), Content: content})
 	for i, st := range r.staleSlots {
-		r.chest[i] = st
+		r.opened[i] = st
 	}
 }
 
@@ -376,11 +433,15 @@ func (r *rig) onRequest(p *packet.ItemStackRequest) {
 		return
 	}
 	for _, req := range p.Requests {
+		if tk, ok := req.Actions[0].(*protocol.TakeStackRequestAction); ok {
+			r.onTake(req.RequestID, tk)
+			continue
+		}
 		pl, ok := req.Actions[0].(*protocol.PlaceStackRequestAction)
 		if !ok {
 			continue
 		}
-		src, dst := &r.inv[pl.Source.Slot], &r.chest[pl.Destination.Slot]
+		src, dst := &r.inv[pl.Source.Slot], &r.opened[pl.Destination.Slot]
 		n := int(pl.Count)
 		status := uint8(0)
 		switch {
@@ -402,6 +463,7 @@ func (r *rig) onRequest(p *packet.ItemStackRequest) {
 				dst.id = r.nextID
 			}
 		}
+		r.places++
 		dst.count += n
 		src.count -= n
 		if src.count == 0 {
@@ -418,6 +480,57 @@ func (r *rig) onRequest(p *packet.ItemStackRequest) {
 			},
 		}}})
 	}
+}
+
+// onTake answers a withdraw the way the lab server does: the chest slot's
+// update, then a response naming both slots, with no update for the unit's
+// own slot. A whole stack keeps its ID; a split one gets a new ID.
+func (r *rig) onTake(id int32, tk *protocol.TakeStackRequestAction) {
+	r.takes++
+	reply := func(status uint8) {
+		r.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{Status: status, RequestID: id}}})
+	}
+	if len(r.takeStatus) > 0 {
+		status := r.takeStatus[0]
+		r.takeStatus = r.takeStatus[1:]
+		if status != 0 {
+			reply(status)
+			return
+		}
+	}
+	src, dst := &r.opened[tk.Source.Slot], &r.inv[tk.Destination.Slot]
+	n := int(tk.Count)
+	switch {
+	case chestClosedFor(r) || src.count == 0 || src.id != tk.Source.StackNetworkID || src.count < n:
+		reply(act.StatusBadSource)
+		return
+	case dst.count > 0 && (dst.item != src.item || dst.id != tk.Destination.StackNetworkID || dst.count+n > 64):
+		reply(act.StatusOccupied)
+		return
+	}
+	moved := slotStack{src.item, n, src.id}
+	if n < src.count {
+		r.nextID++
+		moved.id = r.nextID
+	}
+	if dst.count > 0 {
+		moved = slotStack{dst.item, dst.count + n, dst.id}
+	}
+	*dst = moved
+	src.count -= n
+	if src.count == 0 {
+		*src = slotStack{}
+	}
+	r.send(&packet.InventorySlot{WindowID: uint32(r.window), Slot: uint32(tk.Source.Slot), NewItem: instance(*src)})
+	r.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: id,
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerLevelEntity},
+				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: tk.Source.Slot, Count: byte(src.count), StackNetworkID: src.id}}},
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: tk.Destination.Slot, Count: byte(dst.count), StackNetworkID: dst.id}}},
+		},
+	}}})
 }
 
 func chestClosedFor(r *rig) bool { return r.chestClosed }
