@@ -60,8 +60,13 @@ func (l *Life) Idle(ctx context.Context, a skill.Actuator) error {
 	}
 
 	if st.walk != nil {
-		if status, _ := st.walk.Step(ctx, a); status == skill.Running {
-			return nil
+		if idleWalkInBounds(p, st.anchor, l.cfg.Radius) {
+			if status, _ := st.walk.Step(ctx, a); status == skill.Running {
+				if !idleWalkInBounds(a.Pose(), st.anchor, l.cfg.Radius) {
+					st.walk, st.pause = nil, l.between(pauseMin, pauseMax)
+				}
+				return nil
+			}
 		}
 		st.walk, st.pause = nil, l.between(pauseMin, pauseMax)
 		p = a.Pose()
@@ -69,6 +74,9 @@ func (l *Life) Idle(ctx context.Context, a skill.Actuator) error {
 	if st.pause--; st.pause <= 0 {
 		if l.startWalk(p) {
 			if status, _ := st.walk.Step(ctx, a); status == skill.Running {
+				if !idleWalkInBounds(a.Pose(), st.anchor, l.cfg.Radius) {
+					st.walk, st.pause = nil, l.between(pauseMin, pauseMax)
+				}
 				return nil
 			}
 			st.walk = nil
@@ -76,6 +84,12 @@ func (l *Life) Idle(ctx context.Context, a skill.Actuator) error {
 		st.pause = l.between(pauseMin, pauseMax)
 	}
 	return a.Tick(l.glance(p))
+}
+
+func idleWalkInBounds(p act.Pose, anchor protocol.BlockPos, radius int) bool {
+	feet := cellOf(p.Feet)
+	return !far(p, anchor, float64(radius)+0.6) &&
+		feet.Y() >= anchor.Y()-heightBand && feet.Y() <= anchor.Y()+heightBand
 }
 
 func far(p act.Pose, anchor protocol.BlockPos, r float64) bool {
