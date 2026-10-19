@@ -132,8 +132,12 @@ func cached(cacheDir, tag string) bool {
 	if string(b) == cacheLayout {
 		return true
 	}
-	_, err = os.Stat(filepath.Join(packDir(cacheDir, tag), "entity"))
-	return err == nil
+	for _, d := range []string{"entity", "textures/entity"} {
+		if _, err := os.Stat(filepath.Join(packDir(cacheDir, tag), filepath.FromSlash(d))); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // session tallies the traffic of one Fetch.
