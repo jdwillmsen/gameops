@@ -3,7 +3,9 @@ package atlas
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -15,6 +17,7 @@ const (
 	itemsTableFile = "items.json"
 	entPNGFile     = "entities.png"
 	entTableFile   = "entities.json"
+	entFailedFile  = "entities.failed"
 	atlasSubdir    = "atlas"
 )
 
@@ -56,6 +59,20 @@ func (a *Atlas) Save(dir string) error {
 		if err := writeAtomic(filepath.Join(dir, entTableFile), ents); err != nil {
 			return err
 		}
+		_ = os.Remove(filepath.Join(dir, entFailedFile))
+	} else {
+		// Files from an earlier build must not outlive it, or the cache would
+		// serve models its table no longer describes.
+		for _, f := range []string{entPNGFile, entTableFile} {
+			if err := os.Remove(filepath.Join(dir, f)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+		}
+		// The failure is remembered so the next start does not download the
+		// whole pack again to fail the same way.
+		if err := writeAtomic(filepath.Join(dir, entFailedFile), []byte(a.entitiesErr.Error())); err != nil {
+			return err
+		}
 	}
 	return writeAtomic(filepath.Join(dir, atlasTableFile), table)
 }
@@ -83,6 +100,10 @@ func LoadAtlas(dir string) (*Atlas, error) {
 	a := &Atlas{png: img, table: t}
 	a.itemPNG, a.items, a.itemsErr = loadItems(dir)
 	a.entPNG, a.entities, a.entitiesErr = loadEntities(dir)
+	if a.entitiesErr != nil {
+		_, err := os.Stat(filepath.Join(dir, entFailedFile))
+		a.entitiesFailed = err == nil
+	}
 	return a, nil
 }
 
@@ -155,7 +176,7 @@ func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts
 	var fallbackTag string
 	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
 		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
-			if a.itemsErr == nil && a.entitiesErr == nil {
+			if a.itemsErr == nil && (a.entitiesErr == nil || a.entitiesFailed) {
 				return a, Pack{Tag: tag}, nil
 			}
 			fallback, fallbackTag = a, tag
@@ -163,6 +184,9 @@ func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts
 	}
 	a, pack, err := build(ctx, f, serverVersion, cacheDir, opts)
 	if err != nil && fallback != nil {
+		if opts.OnFallback != nil {
+			opts.OnFallback(err)
+		}
 		return fallback, Pack{Tag: fallbackTag}, nil
 	}
 	return a, pack, err

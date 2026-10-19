@@ -18,6 +18,9 @@ import (
 type Options struct {
 	// TileSize is the edge length every texture is normalised to. Zero means 16.
 	TileSize int
+	// OnFallback, if set, receives the error of a rebuild that Ensure gave
+	// up on in favour of an older cached atlas.
+	OnFallback func(error)
 }
 
 func (o Options) tileSize() int {

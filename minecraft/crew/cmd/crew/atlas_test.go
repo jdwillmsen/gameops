@@ -68,7 +68,7 @@ func TestUnknownServerVersionBuildsNothing(t *testing.T) {
 // No network and nothing cached is the offline start: it must end in a plain
 // error, not a hang or a panic.
 func TestUnreachablePackSourceIsAnErrorNotACrash(t *testing.T) {
-	build := ensureAtlas(atlas.Fetcher{BaseURL: "http://127.0.0.1:1"})
+	build := ensureAtlas(atlas.Fetcher{BaseURL: "http://127.0.0.1:1"}, nil)
 	if _, err := build(context.Background(), "1.2.3.4", t.TempDir()); err == nil {
 		t.Error("build succeeded with no pack source")
 	}

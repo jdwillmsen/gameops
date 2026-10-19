@@ -107,6 +107,9 @@ type Atlas struct {
 	// entitiesErr is why there are no entity models, which only costs the
 	// camera its mob models.
 	entitiesErr error
+	// entitiesFailed is set on a loaded entry whose entity build was tried
+	// and failed, so it is not rebuilt for that alone.
+	entitiesFailed bool
 
 	cmOnce sync.Once
 	cms    map[string]image.Image

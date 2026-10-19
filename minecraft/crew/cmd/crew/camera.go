@@ -42,7 +42,12 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, dec *camera.NetworkDe
 		Self:       tracker,
 		MaxViewers: cfg.CameraMaxViewers,
 	})
-	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log, build: ensureAtlas(atlas.Fetcher{OnDownload: logAtlasDownload(log)})}
+	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log, build: ensureAtlas(atlas.Fetcher{OnDownload: logAtlasDownload(log)}, func(err error) {
+		log.Warn("camera_atlas_rebuild_failed", logging.Fields{
+			"error": err.Error(),
+			"hint":  "serving the older cached atlas, which lacks the item sheet or the mob models",
+		})
+	})}
 	return hub, func(ctx context.Context, addr string) {
 		version := pingVersion(ctx, addr)
 		dec.BeginSession(version)
@@ -68,9 +73,9 @@ func logAtlasDownload(log *logging.Logger) func(atlas.Pack) {
 
 type atlasBuilder func(ctx context.Context, serverVersion, dir string) (*atlas.Atlas, error)
 
-func ensureAtlas(f atlas.Fetcher) atlasBuilder {
+func ensureAtlas(f atlas.Fetcher, onFallback func(error)) atlasBuilder {
 	return func(ctx context.Context, serverVersion, dir string) (*atlas.Atlas, error) {
-		a, _, err := atlas.Ensure(ctx, f, serverVersion, dir, atlas.Options{})
+		a, _, err := atlas.Ensure(ctx, f, serverVersion, dir, atlas.Options{OnFallback: onFallback})
 		return a, err
 	}
 }
