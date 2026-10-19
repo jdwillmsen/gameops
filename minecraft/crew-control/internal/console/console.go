@@ -9,7 +9,7 @@ import (
 
 // The explicit list keeps the node test files out of the binary.
 //
-//go:embed web/index.html web/console.js web/state.js web/console.css
+//go:embed web/index.html web/signin.html web/signin.js web/console.js web/state.js web/console.css
 var assets embed.FS
 
 const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
@@ -26,6 +26,13 @@ func Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		secure(w)
 		http.ServeFileFS(w, r, web, "index.html")
+	})
+	mux.HandleFunc("GET /signin", func(w http.ResponseWriter, r *http.Request) {
+		secure(w)
+		// The invite rides in this page's query string until the script
+		// strips it; nothing the page loads or links to may see it.
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		http.ServeFileFS(w, r, web, "signin.html")
 	})
 	mux.HandleFunc("GET /static/{file}", func(w http.ResponseWriter, r *http.Request) {
 		secure(w)
