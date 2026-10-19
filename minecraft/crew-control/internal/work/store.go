@@ -63,6 +63,10 @@ type Store interface {
 	// Apply records a unit's report. An item already in a terminal state is
 	// returned unchanged.
 	Apply(ctx context.Context, unit string, id uuid.UUID, state string, progress int, reason string) (Item, error)
+	// CancelQueued cancels the item only while it is still queued. It reports
+	// false, with the item as it now is, when the unit already took it or it
+	// finished, so a caller never cancels work a unit may be running.
+	CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error)
 	// CancelOpen marks every non-terminal item of unit cancelled.
 	CancelOpen(ctx context.Context, unit string) ([]Item, error)
 	// Recent returns the unit's newest items first.
@@ -158,6 +162,14 @@ func (l *Lazy) Apply(ctx context.Context, unit string, id uuid.UUID, state strin
 		return Item{}, err
 	}
 	return s.Apply(ctx, unit, id, state, progress, reason)
+}
+
+func (l *Lazy) CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+	s, err := l.get()
+	if err != nil {
+		return Item{}, false, err
+	}
+	return s.CancelQueued(ctx, unit, id)
 }
 
 func (l *Lazy) CancelOpen(ctx context.Context, unit string) ([]Item, error) {

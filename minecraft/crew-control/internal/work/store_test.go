@@ -73,6 +73,27 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatal("queue should be drained")
 			}
 		},
+		"CancelQueued cancels only while queued": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			got, ok, err := s.CancelQueued(ctx, "crew-01", a.ID)
+			if err != nil || !ok || got.State != Cancelled {
+				t.Fatalf("queued: %+v ok=%v err=%v", got, ok, err)
+			}
+			b := must(t, s, "crew-01", KindTask, tpl)
+			if it, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); !ok || it.ID != b.ID {
+				t.Fatalf("a cancelled item must not be handed out, got %v", it.ID)
+			}
+			got, ok, err = s.CancelQueued(ctx, "crew-01", b.ID)
+			if err != nil || ok || got.State != Delivered {
+				t.Fatalf("delivered: %+v ok=%v err=%v", got, ok, err)
+			}
+			if _, _, err := s.CancelQueued(ctx, "crew-02", b.ID); !errors.Is(err, ErrWrongUnit) {
+				t.Fatalf("wrong unit: %v", err)
+			}
+			if _, _, err := s.CancelQueued(ctx, "crew-01", uuid.New()); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("unknown: %v", err)
+			}
+		},
 		"units do not see each other's work": func(t *testing.T, s Store) {
 			must(t, s, "crew-02", KindTask, tpl)
 			if _, ok, _, _ := s.Next(ctx, "crew-03", time.Now()); ok {

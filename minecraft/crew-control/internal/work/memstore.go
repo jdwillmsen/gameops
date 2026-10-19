@@ -99,6 +99,25 @@ func (m *Memory) Apply(_ context.Context, unit string, id uuid.UUID, state strin
 	return Item{}, ErrNotFound
 }
 
+func (m *Memory) CancelQueued(_ context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, it := range m.items {
+		if it.ID != id {
+			continue
+		}
+		if it.Unit != unit {
+			return Item{}, false, ErrWrongUnit
+		}
+		if it.State != Queued {
+			return it.Item, false, nil
+		}
+		it.State, it.Reason, it.Updated = Cancelled, "cancelled by operator", m.now()
+		return it.Item, true, nil
+	}
+	return Item{}, false, ErrNotFound
+}
+
 func (m *Memory) CancelOpen(_ context.Context, unit string) ([]Item, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
