@@ -17,20 +17,25 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 )
 
+// newDecoder is the block table both the world store and the camera read, so
+// it exists whether or not the camera is on.
+func newDecoder(log *logging.Logger) *camera.NetworkDecoder {
+	return camera.NewNetworkDecoder(func(serverVersion string) {
+		log.Warn("camera_unmapped_block_hashes", logging.Fields{
+			"server_version": serverVersion,
+			"hint":           "the block table does not match this server; unknown blocks are drawn as placeholders and treated as solid",
+		})
+	})
+}
+
 // newCamera returns a nil hub unless the camera was asked for. A nil hub is
 // how the rest of main knows to build no routes and do no per-packet work.
 // beginSession tells the decoder which server a session runs against; it is
 // always safe to call.
-func newCamera(cfg config.Config, tracker *belief.Tracker, log *logging.Logger) (hub *camera.Hub, beginSession func(ctx context.Context, addr string)) {
+func newCamera(cfg config.Config, tracker *belief.Tracker, dec *camera.NetworkDecoder, log *logging.Logger) (hub *camera.Hub, beginSession func(ctx context.Context, addr string)) {
 	if !cfg.CameraEnabled {
-		return nil, func(context.Context, string) {}
+		return nil, func(ctx context.Context, addr string) { dec.BeginSession(pingVersion(ctx, addr)) }
 	}
-	dec := camera.NewNetworkDecoder(func(serverVersion string) {
-		log.Warn("camera_unmapped_block_hashes", logging.Fields{
-			"server_version": serverVersion,
-			"hint":           "the block table does not match this server; the camera draws placeholders",
-		})
-	})
 	hub = camera.New(camera.Options{
 		Decoder:    dec,
 		Self:       tracker,

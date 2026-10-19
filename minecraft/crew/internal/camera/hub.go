@@ -37,7 +37,7 @@ const (
 	defaultMaxRadius   = 32
 )
 
-// PacketWriter is the part of the connection the hub needs: sub-chunk requests.
+// PacketWriter is the connection Apply is handed.
 type PacketWriter interface{ WritePacket(packet.Packet) error }
 
 // SelfSource is where the unit's own position and look come from. The hub
@@ -245,11 +245,13 @@ func distSq(sub [3]int32, p [3]float32) float32 {
 }
 
 // Apply is called for every packet the session reads, after belief has seen
-// it. It never waits on a viewer. w is used to request sub-chunks.
-func (h *Hub) Apply(pk packet.Packet, w PacketWriter) {
+// it. It never waits on a viewer. It requests nothing: the world store asks
+// for sub-chunks, and the hub only draws the replies. w is kept so callers
+// need not change.
+func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 	switch p := pk.(type) {
 	case *packet.LevelChunk:
-		h.levelChunk(p, w)
+		h.levelChunk(p)
 	case *packet.SubChunk:
 		h.subChunk(p)
 	case *packet.UpdateBlock:
@@ -427,39 +429,8 @@ func poseOf(s belief.Snapshot) selfPose {
 	return selfPose{s.Position[0], s.Position[1], s.Position[2], s.Yaw, s.Pitch}
 }
 
-// subChunkRequest builds the request for a chunk the server announced in
-// request mode: the whole column from the world floor to the server's limit.
-func subChunkRequest(p *packet.LevelChunk) *packet.SubChunkRequest {
-	limit, ok := p.SubChunkLimit.Value()
-	if !ok {
-		return nil
-	}
-	const floor, ceiling = minY >> 4, maxY >> 4
-	top := ceiling
-	if limit >= 0 && floor+int(limit)-1 < top {
-		top = floor + int(limit) - 1
-	}
-	if top < floor {
-		return nil
-	}
-	offsets := make([]protocol.SubChunkOffset, 0, top-floor+1)
-	// Offsets are relative to a base of sub-chunk Y 0.
-	for y := floor; y <= top; y++ {
-		offsets = append(offsets, protocol.SubChunkOffset{0, int8(y), 0})
-	}
-	return &packet.SubChunkRequest{
-		Dimension: p.Dimension,
-		Position:  protocol.SubChunkPos{p.Position[0], 0, p.Position[1]},
-		Offsets:   offsets,
-	}
-}
-
-func (h *Hub) levelChunk(p *packet.LevelChunk, w PacketWriter) {
+func (h *Hub) levelChunk(p *packet.LevelChunk) {
 	if p.Dimension != 0 {
-		return
-	}
-	if req := subChunkRequest(p); req != nil {
-		_ = w.WritePacket(req)
 		return
 	}
 	if _, requestMode := p.SubChunkLimit.Value(); requestMode || p.CacheEnabled {

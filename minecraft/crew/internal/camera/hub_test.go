@@ -142,17 +142,12 @@ func subChunkPacket(x, y, z int32) *packet.SubChunk {
 	}
 }
 
-func TestLevelChunkInRequestModeAsksForTheWholeColumn(t *testing.T) {
+func TestLevelChunkInRequestModeRequestsNothing(t *testing.T) {
 	h, _ := newTestHub(t, 1)
 	w := &sink{}
 	h.Apply(&packet.LevelChunk{Position: protocol.ChunkPos{3, -5}, SubChunkLimit: protocol.Option(int32(9))}, w)
-	if len(w.sent) != 1 {
-		t.Fatalf("sent %d packets, want 1", len(w.sent))
-	}
-	req := w.sent[0].(*packet.SubChunkRequest)
-	if req.Position != (protocol.SubChunkPos{3, 0, -5}) || len(req.Offsets) != 9 ||
-		req.Offsets[0] != (protocol.SubChunkOffset{0, -4, 0}) || req.Offsets[8] != (protocol.SubChunkOffset{0, 4, 0}) {
-		t.Errorf("request = %+v", req)
+	if len(w.sent) != 0 || h.Stats().SubChunksHeld != 0 {
+		t.Errorf("sent %d packets, held %d; the world store is the only requester", len(w.sent), h.Stats().SubChunksHeld)
 	}
 }
 
