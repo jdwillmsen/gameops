@@ -234,16 +234,52 @@ const t0 = performance.now();
 const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0, workMs: 0, workMaxMs: 0, drawn: 0, total: 0, drawnSum: 0, totalSum: 0 };
 const hud = document.getElementById('debug');
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
-renderer.setPixelRatio(1);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-const sky = new THREE.Color(0x9ec5f0);
-scene.background = sky;
-const FOG_FAR = 120;
-scene.fog = new THREE.Fog(sky, 40, FOG_FAR);
-const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.05, 300);
+// Daytime sky: the fog fades distant terrain into the horizon colour, so the
+// edge of the loaded area melts into the sky instead of showing a hard cut.
+const SKY_HORIZON = new THREE.Color(0xc0d8ff), SKY_ZENITH = new THREE.Color(0x78a7ff);
+renderer.setClearColor(SKY_HORIZON);
+scene.fog = new THREE.Fog(SKY_HORIZON, 40, 64);
+// Shared by every block material and kept in step with scene.fog, which the
+// entity materials read.
+const fogUniforms = { uFogColor: { value: SKY_HORIZON }, uFogNear: { value: 40 }, uFogFar: { value: 64 } };
+let fogFar = 64;
+const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.05, 100);
+// Terrain is only loaded out to the requested radius, so the fog closes
+// just there.
+function setFog(chunks) {
+  fogFar = Math.max(48, chunks * 16);
+  fogUniforms.uFogFar.value = scene.fog.far = fogFar;
+  fogUniforms.uFogNear.value = scene.fog.near = fogFar * .55;
+  camera.far = fogFar + 32;
+  camera.updateProjectionMatrix();
+}
+
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), new THREE.ShaderMaterial({
+  uniforms: { uHorizon: { value: SKY_HORIZON }, uZenith: { value: SKY_ZENITH } },
+  vertexShader: `
+    varying vec3 vDir;
+    void main() {
+      vDir = position;
+      gl_Position = (projectionMatrix * modelViewMatrix * vec4(position, 1.)).xyww;
+    }`,
+  fragmentShader: `
+    uniform vec3 uHorizon, uZenith;
+    varying vec3 vDir;
+    void main() {
+      float h = normalize(vDir).y;
+      gl_FragColor = vec4(mix(uHorizon, uZenith, pow(clamp(h, 0., 1.), .6)), 1.);
+      #include <colorspace_fragment>
+    }`,
+  side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false,
+}));
+skyDome.frustumCulled = false;
+skyDome.renderOrder = -1;
+scene.add(skyDome);
 addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
@@ -281,25 +317,27 @@ function adopt(m) {
   for (const q of m.parts) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(q.p, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(q.c, 3));
-    if (q.k < 2) geo.setAttribute('uv', new THREE.BufferAttribute(q.u, 2));
+    geo.setAttribute('shade', new THREE.BufferAttribute(q.c, 4));
+    if (q.k < 2) geo.setAttribute('tex', new THREE.BufferAttribute(q.u, 3));
     geo.setIndex(new THREE.BufferAttribute(q.i, 1));
     const o = new THREE.Mesh(geo, blockMaterial(q.k));
     // Culled by hand against the tight box the worker measured; the built-in
     // test would compute a loose bounding sphere on the main thread instead.
     o.frustumCulled = false;
     o.matrixAutoUpdate = false;
+    o.userData.blended = q.k & 1;
     o.userData.box = new THREE.Box3(new THREE.Vector3(q.box[0], q.box[1], q.box[2]), new THREE.Vector3(q.box[3], q.box[4], q.box[5]));
     scene.add(o); out.push(o);
   }
   meshes.set(m.key, out);
 }
 
+const blended = [];
 const frustum = new THREE.Frustum(), projView = new THREE.Matrix4();
 const fwd = new THREE.Vector3(), mid = new THREE.Vector3(), half = new THREE.Vector3();
 // Past the fog's far plane everything is the sky colour, so those meshes
 // cost fill and vertex work for nothing. Fog grows with depth along the view
-// direction, not distance: off-axis terrain past FOG_FAR by distance can sit
+// direction, not distance: off-axis terrain past fogFar by distance can sit
 // well inside it by depth and still show.
 function nearestDepth(box) {
   box.getCenter(mid).sub(camera.position);
@@ -312,21 +350,122 @@ function cull() {
   frustum.setFromProjectionMatrix(projView);
   camera.getWorldDirection(fwd);
   let drawn = 0, total = 0;
+  blended.length = 0;
   for (const ms of meshes.values()) for (const o of ms) {
     const box = o.userData.box;
-    o.visible = frustum.intersectsBox(box) && nearestDepth(box) < FOG_FAR;
-    total++; if (o.visible) drawn++;
+    o.visible = frustum.intersectsBox(box) && nearestDepth(box) < fogUniforms.uFogFar.value;
+    total++; if (o.visible) { drawn++; if (o.userData.blended) blended.push(o); }
   }
+  // Every mesh sits at the origin, so the renderer's own back-to-front sort
+  // cannot tell them apart; blending needs the far ones drawn first.
+  for (const o of blended) o.userData.dist = o.userData.box.distanceToPoint(camera.position);
+  blended.sort((a, b) => b.userData.dist - a.userData.dist);
+  blended.forEach((o, i) => { o.renderOrder = i; });
   stats.drawn = drawn; stats.total = total;
   stats.drawnSum += drawn; stats.totalSum += total;
 }
 
 let atlas = null; // { table, tints, tex }; the worker holds its own copy of the table
 
-const flatMaterials = [null, null, new THREE.MeshBasicMaterial({ vertexColors: true }),
-  new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: .6 })];
+// One shader for every block. Shade and occlusion arrive baked into the
+// vertex colour; the shader only multiplies the texel by it, alpha-tests
+// cutouts, blends the translucent pass and applies the sky fog.
+const BLOCK_VERT = `
+  attribute vec4 shade;
+  attribute vec3 tex;
+  varying vec4 vShade;
+  varying vec3 vTex;
+  varying float vDepth;
+  void main() {
+    vShade = shade;
+    vTex = tex;
+    vec4 mv = modelViewMatrix * vec4(position, 1.);
+    vDepth = -mv.z;
+    gl_Position = projectionMatrix * mv;
+  }`;
+const BLOCK_FRAG = `
+  precision highp sampler2DArray;
+  uniform sampler2DArray uTiles;
+  uniform vec3 uFogColor;
+  uniform float uFogNear, uFogFar;
+  varying vec4 vShade;
+  varying vec3 vTex;
+  varying float vDepth;
+  void main() {
+    vec3 rgb = vShade.rgb;
+    float a = vShade.a;
+    #ifdef TEXTURED
+      vec4 t = texture(uTiles, vec3(vTex.xy, floor(vTex.z + .5)));
+      rgb *= t.rgb;
+      a *= t.a;
+      #ifdef CUTOUT
+        // Mip levels average the holes away, so the threshold relaxes with
+        // distance or leaves thin out to nothing.
+        vec2 gx = dFdx(vTex.xy) * TILE, gy = dFdy(vTex.xy) * TILE;
+        float lod = .5 * log2(max(max(dot(gx, gx), dot(gy, gy)), 1.));
+        if (t.a < max(.2, .5 - .07 * lod)) discard;
+        a = 1.;
+      #endif
+    #endif
+    #ifdef BLENDED
+      if (a < .02) discard;
+    #endif
+    rgb = mix(rgb, uFogColor, smoothstep(uFogNear, uFogFar, vDepth));
+    gl_FragColor = vec4(rgb, a);
+    #include <colorspace_fragment>
+  }`;
+function makeBlockMaterial(tex, tile, blended) {
+  const defines = {};
+  if (tex) { defines.TEXTURED = ''; defines.TILE = tile.toFixed(1); if (!blended) defines.CUTOUT = ''; }
+  if (blended) defines.BLENDED = '';
+  return new THREE.ShaderMaterial({
+    defines, uniforms: { uTiles: { value: tex }, ...fogUniforms },
+    vertexShader: BLOCK_VERT, fragmentShader: BLOCK_FRAG,
+    transparent: blended, depthWrite: !blended,
+  });
+}
+const flatMaterials = [null, null, makeBlockMaterial(null, 0, false), makeBlockMaterial(null, 0, true)];
 let texturedMaterials = null;
 function blockMaterial(k) { return k < 2 ? texturedMaterials[k] : flatMaterials[k]; }
+
+// One array layer per distinct tile rectangle, so mipmaps never mix
+// neighbouring tiles and a face can repeat its tile at any scale.
+function buildTileArray(img, table) {
+  const T = table.tile_size, W = table.width, H = table.height;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  const px = ctx.getImageData(0, 0, W, H).data;
+  const tiles = {}, rects = [];
+  for (const b of Object.values(table.blocks)) for (const f of ['up', 'down', 'side', 'north', 'south', 'east', 'west']) {
+    const k = b[f].uv.join(',');
+    if (!(k in tiles)) { tiles[k] = rects.length; rects.push(b[f].uv); }
+  }
+  const gl = renderer.getContext();
+  if (rects.length > gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS)) throw new Error(`${rects.length} tiles exceed the array texture limit`);
+  const data = new Uint8Array(T * T * 4 * rects.length);
+  rects.forEach((r, layer) => {
+    const x0 = Math.round(r[0] * W), y0 = Math.round(r[1] * H), out = layer * T * T * 4;
+    for (let y = 0; y < T; y++) data.set(px.subarray(((y0 + y) * W + x0) * 4, ((y0 + y) * W + x0 + T) * 4), out + y * T * 4);
+    // The browser hands back transparent texels as black. Mipmaps average
+    // them into their neighbours, so give them the tile's own colour first or
+    // cutouts grow dark fringes with distance.
+    let sr = 0, sg = 0, sb = 0, sa = 0;
+    for (let i = out; i < out + T * T * 4; i += 4) { const a = data[i + 3]; sr += data[i] * a; sg += data[i + 1] * a; sb += data[i + 2] * a; sa += a; }
+    if (sa === 0) return;
+    const fr = Math.round(sr / sa), fg = Math.round(sg / sa), fb = Math.round(sb / sa);
+    for (let i = out; i < out + T * T * 4; i += 4) if (data[i + 3] === 0) { data[i] = fr; data[i + 1] = fg; data[i + 2] = fb; }
+  });
+  const tex = new THREE.DataArrayTexture(data, T, T, rects.length);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.needsUpdate = true;
+  return { tex, tiles };
+}
 
 async function loadAtlas() {
   if (atlas) return;
@@ -335,18 +474,12 @@ async function loadAtlas() {
       fetch('/v1/camera/atlas.json').then(r => { if (!r.ok) throw new Error('atlas.json ' + r.status); return r.json(); }),
       new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('atlas.png')); i.src = '/v1/camera/atlas.png'; }),
     ]);
-    const tex = new THREE.Texture(img);
-    tex.magFilter = tex.minFilter = THREE.NearestFilter;
-    tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
-    tex.needsUpdate = true;
+    const { tex, tiles } = buildTileArray(img, doc.table);
     const tints = {}, workerTints = {};
     for (const [k, v] of Object.entries(doc.tints)) { tints[k] = new THREE.Color(v); workerTints[k] = [tints[k].r, tints[k].g, tints[k].b]; }
-    texturedMaterials = [
-      new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, alphaTest: .5 }),
-      new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, opacity: .6 }),
-    ];
+    texturedMaterials = [makeBlockMaterial(tex, doc.table.tile_size, false), makeBlockMaterial(tex, doc.table.tile_size, true)];
     atlas = { table: doc.table, tints, tex };
-    post({ t: 'atlas', atlas: { table: doc.table, tints: workerTints } });
+    post({ t: 'atlas', atlas: { table: doc.table, tiles, tints: workerTints } });
   } catch (e) {
     // Flat colours are the fallback; nothing else depends on the atlas.
     console.warn('atlas unavailable, drawing flat colours', e);
@@ -492,9 +625,11 @@ let wsConn = null;
 // The server replays the unit's surroundings out to a small radius, then
 // whatever the viewer asks for: ] widens it, nearest chunks first.
 let radius = Number(new URLSearchParams(location.search).get('r')) || 4;
+setFog(radius);
 addEventListener('keydown', e => {
   if (e.key !== ']' || !wsConn || wsConn.readyState !== 1) return;
   radius = Math.min(radius + 2, 32);
+  setFog(radius);
   wsConn.send(new Uint8Array([1, radius]));
 });
 function connect() {
@@ -611,6 +746,7 @@ function frame() {
   while (ready.length && performance.now() < until) adopt(ready.shift());
   if (performance.now() - lastAt > 200) { lastAt = performance.now(); worker.postMessage({ t: 'at', at: { x: me.x, y: me.y, z: me.z } }); }
   camera.position.set(me.x, me.y, me.z);
+  skyDome.position.copy(camera.position);
   const yaw = me.yaw * Math.PI / 180, pitch = me.pitch * Math.PI / 180;
   camera.lookAt(me.x - Math.sin(yaw) * Math.cos(pitch), me.y - Math.sin(pitch), me.z + Math.cos(yaw) * Math.cos(pitch));
   cull();
