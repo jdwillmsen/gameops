@@ -78,6 +78,10 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	}
 
 	if best.ID != 0 {
+		if l.target.ID != best.ID {
+			l.fighting = 0
+			l.chase, l.flee = nil, nil
+		}
 		l.target, l.mode = best, m
 		l.holdUntil = l.tick + graceTicks
 		if !l.engaged {
