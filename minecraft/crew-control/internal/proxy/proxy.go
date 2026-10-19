@@ -7,7 +7,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,7 +28,11 @@ func Handler(r roster.Roster, log *logging.Logger) http.Handler {
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			unit, ok := r.Get(pr.In.PathValue("id"))
 			if !ok {
-				// Unreachable: the route guard has already checked the unit.
+				// The route guard has already checked the unit; if that ever
+				// breaks, an empty host makes the transport fail with a 502
+				// rather than send the inbound URL anywhere.
+				pr.Out.URL.Scheme = "http"
+				pr.Out.URL.Host = ""
 				return
 			}
 			pr.SetURL(unit.URL)
@@ -34,7 +40,7 @@ func Handler(r roster.Roster, log *logging.Logger) http.Handler {
 			// against the allow-list, so it is safe to forward verbatim.
 			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/units/"+unit.ID)
 			pr.Out.URL.RawPath = ""
-			pr.Out.URL.RawQuery = ""
+			pr.Out.URL.RawQuery = cameraQuery(pr.In)
 			// A unit accepts its camera websocket with the default origin
 			// check, which rejects an Origin that differs from Host. The
 			// browser's Origin is the console's host, so the unit must see
@@ -91,4 +97,20 @@ func guard(r roster.Roster, next http.Handler) http.HandlerFunc {
 		}
 		next.ServeHTTP(w, req)
 	}
+}
+
+var radiusPattern = regexp.MustCompile(`^[0-9]{1,3}$`)
+
+// cameraQuery forwards only the view radius, and only to the websocket: it is
+// the one query parameter the camera reads, and anything else a visitor
+// supplies must not reach a unit.
+func cameraQuery(in *http.Request) string {
+	if !strings.HasSuffix(in.URL.Path, "/v1/camera/ws") {
+		return ""
+	}
+	r := in.URL.Query().Get("r")
+	if !radiusPattern.MatchString(r) {
+		return ""
+	}
+	return url.Values{"r": {r}}.Encode()
 }
