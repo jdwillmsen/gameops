@@ -87,7 +87,12 @@ func startPose(s belief.Snapshot) act.Pose {
 
 // died fails the running task: a dead unit has no chest open and no break
 // running, and its queue waits for the respawn.
-func (u *unit) died() { u.runner.Died() }
+func (u *unit) died() {
+	u.runner.Died()
+	if u.act != nil {
+		u.act.Died()
+	}
+}
 
 // respawned moves the actuator to where the server put the unit, keeping its
 // tick counter so ticks keep rising across the death.
