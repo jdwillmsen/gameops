@@ -475,9 +475,11 @@ func TestAPlayerHittingTheUnitIsFacedAndSteppedAwayFromNotHit(t *testing.T) {
 	r.player(60, mgl32.Vec3{21.5, 1, 20.5})
 	r.hurt()
 	engaged := 0
+	var endPose act.Pose
 	for i := 0; i < 40; i++ {
 		if r.step() {
 			engaged++
+			endPose = r.a.Pose()
 		}
 	}
 	if n := len(r.out.attacks()); n != 0 {
@@ -485,6 +487,14 @@ func TestAPlayerHittingTheUnitIsFacedAndSteppedAwayFromNotHit(t *testing.T) {
 	}
 	if engaged == 0 {
 		t.Fatal("a blow from a player was ignored")
+	}
+	// Bedrock yaw 0 looks along +Z and -90 along +X, so the view is
+	// (-sin yaw, cos yaw); when the step back ends it must point at the player.
+	rad := float64(endPose.Yaw) * math.Pi / 180
+	toPlayer := mgl32.Vec2{21.5 - endPose.Feet.X(), 20.5 - endPose.Feet.Z()}.Normalize()
+	cos := -math.Sin(rad)*float64(toPlayer.X()) + math.Cos(rad)*float64(toPlayer.Y())
+	if off := math.Acos(math.Max(-1, math.Min(1, cos))) * 180 / math.Pi; off > 20 {
+		t.Errorf("faces %.0f degrees away from the player when the step back ends (yaw %.0f)", off, endPose.Yaw)
 	}
 	if d := dist(r.feet(), mgl32.Vec3{21.5, 1, 20.5}); d < 2.5 {
 		t.Errorf("only %.1f blocks from the player after stepping back", d)
