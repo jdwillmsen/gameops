@@ -26,6 +26,12 @@ type Names interface {
 	BlockName(hash uint32) (name string, ok bool)
 }
 
+// StateNames is what a Names may also offer: the block's states, which decide
+// its collision shape. Without it State reports no states.
+type StateNames interface {
+	BlockState(hash uint32) (name string, props map[string]any, ok bool)
+}
+
 // PacketWriter is the part of the connection the store needs.
 type PacketWriter interface{ WritePacket(packet.Packet) error }
 
@@ -101,6 +107,17 @@ func (s *Store) Reset() {
 // block in a sub-chunk the unit has not received and for a hash the name table
 // lacks, so callers can treat both as solid.
 func (s *Store) Block(pos protocol.BlockPos) (name string, known bool) {
+	name, _, known = s.lookup(pos, false)
+	return name, known
+}
+
+// State is Block plus the block's states, such as a slab's half. props is nil
+// when the name table cannot supply them.
+func (s *Store) State(pos protocol.BlockPos) (name string, props map[string]any, known bool) {
+	return s.lookup(pos, true)
+}
+
+func (s *Store) lookup(pos protocol.BlockPos, withState bool) (name string, props map[string]any, known bool) {
 	s.mu.RLock()
 	sec, held := s.subs[[3]int32{pos.X() >> 4, pos.Y() >> 4, pos.Z() >> 4}]
 	var hash uint32
@@ -109,16 +126,22 @@ func (s *Store) Block(pos protocol.BlockPos) (name string, known bool) {
 	}
 	s.mu.RUnlock()
 	if !held {
-		return "", false
+		return "", nil, false
 	}
 	if sec.hashes == nil {
-		return "air", true
+		return "air", nil, true
 	}
-	n, ok := s.names.BlockName(hash)
+	var n string
+	var ok bool
+	if sn, has := s.names.(StateNames); has && withState {
+		n, props, ok = sn.BlockState(hash)
+	} else {
+		n, ok = s.names.BlockName(hash)
+	}
 	if !ok {
-		return "", false
+		return "", nil, false
 	}
-	return strings.TrimPrefix(n, "minecraft:"), true
+	return strings.TrimPrefix(n, "minecraft:"), props, true
 }
 
 // BlockHash returns the network hash of the block at pos. A server compares the

@@ -93,16 +93,21 @@ func (d *NetworkDecoder) Chunk(payload []byte, count int) ([]PlacedSection, erro
 }
 
 func (d *NetworkDecoder) BlockName(networkID uint32) (string, bool) {
+	name, _, ok := d.BlockState(networkID)
+	return name, ok
+}
+
+// BlockState is BlockName with the block's states.
+func (d *NetworkDecoder) BlockState(networkID uint32) (string, map[string]any, bool) {
 	reg := world.DefaultBlockRegistry
 	rid, ok := reg.HashToRuntimeID(networkID)
 	if ok {
-		var name string
-		if name, _, ok = reg.RuntimeIDToState(rid); ok {
-			return name, true
+		if name, props, ok := reg.RuntimeIDToState(rid); ok {
+			return name, props, true
 		}
 	}
 	d.noteUnmapped()
-	return "", false
+	return "", nil, false
 }
 
 // section reads the first layer; layer 1 only holds waterlogging.
