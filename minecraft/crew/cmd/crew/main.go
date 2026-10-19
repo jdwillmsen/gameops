@@ -42,6 +42,12 @@ const (
 	// have completed is worse than waiting.
 	spawnTimeout = 90 * time.Second
 
+	// Bounds the wait for the server to be told the unit left. Without it the
+	// process exits first, the server keeps the old player until its own
+	// timeout, and the next login comes up as "crew-1(2)". Well inside the
+	// pod's termination grace period.
+	leaveTimeout = 5 * time.Second
+
 	// The overworld's -64..319 in 16-block sections.
 	sectionsPerColumn = 24
 )
@@ -139,7 +145,7 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 		})
 	})
 
-	conn, err := mcdial.Dial(ctx, minecraft.Dialer{
+	conn, leave, err := mcdial.DialWithLeave(ctx, minecraft.Dialer{
 		TokenSource:  auth.tokens,
 		IdentityData: auth.identity,
 		Protocol:     proto,
@@ -153,11 +159,11 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
+	defer leave(leaveTimeout)
 
 	// ReadPacket does not watch ctx, so shutdown would otherwise wait for the
 	// server's next packet.
-	stopClose := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	stopClose := context.AfterFunc(ctx, func() { leave(leaveTimeout) })
 	defer stopClose()
 
 	if err := conn.DoSpawnContext(ctx); err != nil {
