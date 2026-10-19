@@ -18,6 +18,9 @@ var page []byte
 //go:embed web/mesher.js
 var mesher []byte
 
+//go:embed web/entities.js
+var entitiesJS []byte
+
 // A browser that stops reading must not pin a goroutine and a socket forever.
 const writeTimeout = 5 * time.Second
 
@@ -37,6 +40,18 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(mesher)
+	})
+	mux.HandleFunc("GET /v1/camera/entities.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(entitiesJS)
+	})
+	mux.HandleFunc("GET /v1/camera/entities.png", func(w http.ResponseWriter, _ *http.Request) {
+		serveSheet(w, h.modelData, "image/png", func(png, _ []byte) []byte { return png })
+	})
+	mux.HandleFunc("GET /v1/camera/entities.json", func(w http.ResponseWriter, _ *http.Request) {
+		serveSheet(w, h.modelData, "application/json", func(_, doc []byte) []byte { return doc })
 	})
 	mux.HandleFunc("GET /v1/camera/stats", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

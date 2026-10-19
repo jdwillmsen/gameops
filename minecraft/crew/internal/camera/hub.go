@@ -9,6 +9,7 @@ package camera
 
 import (
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -67,6 +68,7 @@ type entity struct {
 	Pitch   float32
 	HeadYaw float32
 	Name    string
+	Look    entityLook
 }
 
 // playerEyeHeight is how far above the feet a MovePlayer position sits. The
@@ -95,7 +97,10 @@ type Hub struct {
 	atlasDoc []byte
 	itemsPNG []byte
 	itemsDoc []byte
-	types    []string // entity type names; the index is the wire type id
+	entPNG   []byte
+	entDoc   []byte
+	itemName map[int32]string // item network id -> name without namespace
+	types    []string         // entity type names; the index is the wire type id
 	typeIDs  map[string]uint16
 
 	decodeFailures atomic.Uint64
@@ -210,6 +215,18 @@ func (h *Hub) Attach() (*Viewer, error) {
 	if h.atlasDoc != nil {
 		v.head = append(v.head, atlasFrame())
 	}
+	if h.entDoc != nil {
+		v.head = append(v.head, modelsFrame())
+	}
+	looks := map[uint64]entityLook{}
+	for _, e := range h.ents {
+		if !e.Look.zero() {
+			looks[e.ID] = e.Look
+		}
+	}
+	if len(looks) > 0 {
+		v.head = append(v.head, encodeEntityData(looks))
+	}
 	names := map[uint64]string{}
 	for _, e := range h.ents {
 		if e.Name != "" {
@@ -279,12 +296,13 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 	case *packet.AddActor:
 		h.mu.Lock()
 		h.uniqueID[p.EntityUniqueID] = p.EntityRuntimeID
-		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: p.EntityType, X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw})
+		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: p.EntityType, X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw, Look: lookOf(p.EntityMetadata, entityLook{})})
 		h.mu.Unlock()
 	case *packet.AddItemActor:
 		h.mu.Lock()
 		h.uniqueID[p.EntityUniqueID] = p.EntityRuntimeID
-		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "minecraft:item", X: p.Position[0], Y: p.Position[1], Z: p.Position[2]})
+		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "minecraft:item", X: p.Position[0], Y: p.Position[1], Z: p.Position[2],
+			Look: entityLook{Item: h.itemName[p.Item.Stack.NetworkID]}})
 		h.mu.Unlock()
 	case *packet.AddPlayer:
 		h.mu.Lock()
@@ -292,6 +310,8 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "player", Name: p.Username,
 			X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw})
 		h.mu.Unlock()
+	case *packet.SetActorData:
+		h.setLook(p.EntityRuntimeID, p.EntityMetadata)
 	case *packet.MovePlayer:
 		h.movePlayer(p)
 	case *packet.MoveActorAbsolute:
@@ -375,6 +395,77 @@ func (h *Hub) moveEntity(id uint64, update func(*entity)) {
 	}
 }
 
+// SetItems gives the hub the server's item table, which names dropped items.
+func (h *Hub) SetItems(entries []protocol.ItemEntry) {
+	names := make(map[int32]string, len(entries))
+	for _, e := range entries {
+		names[int32(e.RuntimeID)] = strings.TrimPrefix(e.Name, "minecraft:")
+	}
+	h.mu.Lock()
+	h.itemName = names
+	h.mu.Unlock()
+}
+
+// metaInt reads an integer metadata value; the protocol carries them in
+// several widths.
+func metaInt(m protocol.EntityMetadata, key uint32) (int64, bool) {
+	switch v := m[key].(type) {
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case int16:
+		return int64(v), true
+	case byte:
+		return int64(v), true
+	}
+	return 0, false
+}
+
+// metaFlag reads one flag; indices from 64 up live in the second flags word.
+func metaFlag(m protocol.EntityMetadata, index int) bool {
+	key := uint32(protocol.EntityDataKeyFlags)
+	if index >= 64 {
+		key, index = protocol.EntityDataKeyFlagsTwo, index-64
+	}
+	v, _ := metaInt(m, key)
+	return v>>uint(index)&1 != 0
+}
+
+// lookOf applies what metadata says over prev. A packet that carries no
+// flags or colour leaves them as they were, because SetActorData sends only
+// what changed.
+func lookOf(m protocol.EntityMetadata, prev entityLook) entityLook {
+	l := prev
+	_, hasFlags := m[protocol.EntityDataKeyFlags]
+	if _, ok := m[protocol.EntityDataKeyFlagsTwo]; ok || hasFlags {
+		l.Flags = 0
+		if metaFlag(m, protocol.EntityDataFlagBaby) {
+			l.Flags |= entBaby
+		}
+		if metaFlag(m, protocol.EntityDataFlagSheared) {
+			l.Flags |= entSheared
+		}
+	}
+	if c, ok := metaInt(m, protocol.EntityDataKeyColorIndex); ok {
+		l.Color = byte(c) & 15
+	}
+	return l
+}
+
+func (h *Hub) setLook(id uint64, m protocol.EntityMetadata) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e, ok := h.ents[id]
+	if !ok {
+		return
+	}
+	if look := lookOf(m, e.Look); look != e.Look {
+		e.Look = look
+		h.pushOrderedLocked(encodeEntityData(map[uint64]entityLook{id: look}))
+	}
+}
+
 func (h *Hub) setEntityLocked(e *entity) {
 	if h.runtime != 0 && e.ID == h.runtime {
 		return
@@ -383,6 +474,9 @@ func (h *Hub) setEntityLocked(e *entity) {
 	h.ents[e.ID] = e
 	if e.Name != "" {
 		h.pushOrderedLocked(encodeNames(map[uint64]string{e.ID: e.Name}))
+	}
+	if !e.Look.zero() {
+		h.pushOrderedLocked(encodeEntityData(map[uint64]entityLook{e.ID: e.Look}))
 	}
 	h.pushEntityLocked(e)
 }

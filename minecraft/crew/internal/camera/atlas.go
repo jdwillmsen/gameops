@@ -58,6 +58,12 @@ func (h *Hub) SetAtlas(a *atlas.Atlas) error {
 	if err != nil {
 		return err
 	}
+	var ents []byte
+	if a.EntitiesErr() == nil {
+		if ents, err = json.Marshal(a.Entities()); err != nil {
+			return err
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.atlasPNG, h.atlasDoc = a.PNG(), doc
@@ -66,6 +72,10 @@ func (h *Hub) SetAtlas(a *atlas.Atlas) error {
 		h.itemsPNG, h.itemsDoc = nil, nil
 	}
 	h.pushOrderedLocked(atlasFrame())
+	if ents != nil {
+		h.entPNG, h.entDoc = a.EntityPNG(), ents
+		h.pushOrderedLocked(modelsFrame())
+	}
 	return nil
 }
 
@@ -81,4 +91,11 @@ func (h *Hub) itemData() (png, doc []byte, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.itemsPNG, h.itemsDoc, h.itemsDoc != nil
+}
+
+// modelData returns the entity model sheet, or ok=false while there is none.
+func (h *Hub) modelData() (png, doc []byte, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.entPNG, h.entDoc, h.entDoc != nil
 }
