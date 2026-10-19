@@ -124,3 +124,16 @@ func TestTaskRoutesExistOnlyWithAToken(t *testing.T) {
 		}
 	}
 }
+
+func TestDeathClearsTheOpenContainer(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)
+	runner := task.NewRunner(nil, nil, tracker.Snapshot, time.Minute, nopLog{})
+	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, &recordingConn{})
+	_ = u.apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{0, 101.62, 0}})
+	_ = u.apply(&packet.ContainerOpen{WindowID: 3})
+	u.died()
+	if open, _, _ := u.actuator().Container(); open {
+		t.Fatal("the container survived the unit's death")
+	}
+}

@@ -196,13 +196,16 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 		if !handled {
 			continue
 		}
-		tracker.SetDead(respawner.Dead())
 		if respawner.Dead() {
+			tracker.SetDead(true)
 			u.died()
 			log.Info("died", nil)
 			continue
 		}
+		// Before the unit counts as alive, so a task never starts from the
+		// pose it died at.
 		u.respawned()
+		tracker.SetDead(false)
 		log.Info("respawned", nil)
 		// The server drops the radius when the player is replaced.
 		if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {
