@@ -58,6 +58,8 @@ type Poller struct {
 	client  *http.Client
 	every   time.Duration
 	timeout time.Duration
+	// Interval of the full-snapshot refresh on an otherwise quiet stream.
+	keepalive time.Duration
 
 	mu       sync.Mutex
 	statuses []Status
@@ -69,13 +71,14 @@ type Poller struct {
 func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Poller {
 	units := r.Units()
 	p := &Poller{
-		units:    units,
-		client:   client,
-		every:    every,
-		timeout:  every * 8 / 10,
-		statuses: make([]Status, len(units)),
-		failures: make([]int, len(units)),
-		subs:     map[chan []Status]struct{}{},
+		units:     units,
+		client:    client,
+		every:     every,
+		timeout:   every * 8 / 10,
+		keepalive: defaultKeepalive,
+		statuses:  make([]Status, len(units)),
+		failures:  make([]int, len(units)),
+		subs:      map[chan []Status]struct{}{},
 	}
 	for i, u := range units {
 		p.statuses[i] = Status{ID: u.ID, Name: u.Name}

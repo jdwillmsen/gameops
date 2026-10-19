@@ -2,14 +2,16 @@ package telemetry
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 )
 
 const (
-	maxStreams   = 64
-	pingInterval = 15 * time.Second
+	maxStreams         = 64
+	defaultKeepalive   = 15 * time.Second
+	streamWriteTimeout = 5 * time.Second
 )
 
 // ListHandler serves GET /v1/units.
@@ -37,11 +39,6 @@ func (p *Poller) releaseStream() {
 
 // StreamHandler serves GET /v1/units/stream as server-sent events.
 func (p *Poller) StreamHandler(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return
-	}
 	if !p.acquireStream() {
 		http.Error(w, "too many viewers", http.StatusServiceUnavailable)
 		return
@@ -59,36 +56,42 @@ func (p *Poller) StreamHandler(w http.ResponseWriter, r *http.Request) {
 	// Stops the ingress from buffering the stream until it fills.
 	h.Set("X-Accel-Buffering", "no")
 
-	if !writeEvent(w, flusher, p.Snapshot()) {
+	rc := http.NewResponseController(w)
+	if !writeEvent(w, rc, p.Snapshot()) {
 		return
 	}
-	ping := time.NewTicker(pingInterval)
-	defer ping.Stop()
+	// Events go out only on a visible change, so an idle unit's seen would go
+	// stale; a full event on this timer bounds that and keeps the link alive.
+	refresh := time.NewTicker(p.keepalive)
+	defer refresh.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case snap := <-updates:
-			if !writeEvent(w, flusher, snap) {
+			if !writeEvent(w, rc, snap) {
 				return
 			}
-		case <-ping.C:
-			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+		case <-refresh.C:
+			if !writeEvent(w, rc, p.Snapshot()) {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }
 
-func writeEvent(w http.ResponseWriter, f http.Flusher, snap []Status) bool {
+// The write deadline frees the slot of a client that stopped reading instead
+// of letting it block the handler forever.
+func writeEvent(w http.ResponseWriter, rc *http.ResponseController, snap []Status) bool {
 	data, err := json.Marshal(snap)
 	if err != nil {
+		return false
+	}
+	if err := rc.SetWriteDeadline(time.Now().Add(streamWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
 		return false
 	}
 	if _, err := fmt.Fprintf(w, "event: units\ndata: %s\n\n", data); err != nil {
 		return false
 	}
-	f.Flush()
-	return true
+	return rc.Flush() == nil
 }
