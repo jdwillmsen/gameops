@@ -79,6 +79,11 @@ func (t *Tracker) Apply(pk packet.Packet) {
 		}
 		t.s.Position, t.s.PositionKnown = p.Position, true
 		t.s.Yaw, t.s.Pitch = p.Yaw, p.Pitch
+	case *packet.CorrectPlayerMovePrediction:
+		// The server never echoes a client's own walking as MovePlayer; a
+		// correction is how it overrules the pose the unit sent.
+		t.s.Position, t.s.PositionKnown = p.Position, true
+		t.s.Pitch, t.s.Yaw = p.Rotation.X(), p.Rotation.Y()
 	case *packet.UpdateAttributes:
 		if p.EntityRuntimeID != t.self {
 			return
@@ -107,6 +112,20 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 	}
+	t.s.UpdatedAt = t.now()
+}
+
+// SetPose records the pose the unit itself sent. The server accepts a walk
+// without answering it, so without this the position stays at the last
+// teleport or correction.
+func (t *Tracker) SetPose(pos mgl32.Vec3, yaw, pitch float32) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.s.Spawned {
+		return
+	}
+	t.s.Position, t.s.PositionKnown = pos, true
+	t.s.Yaw, t.s.Pitch = yaw, pitch
 	t.s.UpdatedAt = t.now()
 }
 

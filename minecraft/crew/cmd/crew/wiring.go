@@ -64,18 +64,30 @@ func (u *unit) apply(pk packet.Packet) error {
 	return u.startActing()
 }
 
-// heldRecorder tells the tracker which hotbar slot the unit selects, because
-// the server does not echo a client's own MobEquipment back.
+// heldRecorder tells the tracker (and the camera) what the unit itself did:
+// the server echoes back neither its hotbar selection nor its walking.
 type heldRecorder struct {
 	packetWriter
 	runtimeID uint64
 	tracker   *belief.Tracker
+	hub       *camera.Hub
 }
 
 func (h heldRecorder) WritePacket(pk packet.Packet) error {
 	err := h.packetWriter.WritePacket(pk)
-	if m, ok := pk.(*packet.MobEquipment); ok && err == nil && m.EntityRuntimeID == h.runtimeID {
-		h.tracker.SetHeld(int(m.HotBarSlot))
+	if err != nil {
+		return err
+	}
+	switch m := pk.(type) {
+	case *packet.MobEquipment:
+		if m.EntityRuntimeID == h.runtimeID {
+			h.tracker.SetHeld(int(m.HotBarSlot))
+		}
+	case *packet.PlayerAuthInput:
+		h.tracker.SetPose(m.Position, m.Yaw, m.Pitch)
+		if h.hub != nil {
+			h.hub.PublishSelf()
+		}
 	}
 	return err
 }
@@ -88,7 +100,7 @@ func (u *unit) startActing() error {
 	if !snap.PositionKnown {
 		return nil
 	}
-	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
+	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker, hub: u.hub}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
 	a.ItemNames(u.items)
 	// Until the loading screen ends, the server drops every action without an
 	// error, so this precedes any task tick.

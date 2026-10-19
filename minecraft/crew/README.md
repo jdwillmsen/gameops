@@ -58,7 +58,7 @@ Logs carry only events and types (`defend_started`, `hurt_by`,
 ## Status API
 
 `/healthz`, `/readyz` and `/v1/state`. The state carries `position`,
-`position_known`, `yaw` and `pitch`. Until `position_known` is true the
+`position_known`, `yaw` and `pitch`, which follow the unit's own walking as well as the server's corrections and teleports. Until `position_known` is true the
 position is the server's placeholder, not a real one. It also carries
 `health`, the 36-slot `inventory`, `held_slot` (only meaningful when
 `held_known`) and a read-only `tasks` object: `current` (the running task or

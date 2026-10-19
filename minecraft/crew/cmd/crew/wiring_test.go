@@ -237,3 +237,19 @@ func TestAnIdleUnitKeepsTicking(t *testing.T) {
 	waitFor(t, func() bool { return conn.countInputs() >= 5 })
 
 }
+
+func TestUnitsOwnWalkingReachesTheTracker(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)
+	conn := &recordingConn{}
+	w := heldRecorder{packetWriter: conn, runtimeID: 7, tracker: tracker}
+
+	_ = w.WritePacket(&packet.PlayerAuthInput{Position: mgl32.Vec3{3.5, 65.62, -392.5}, Yaw: 90, Pitch: 10})
+	s := tracker.Snapshot()
+	if !s.PositionKnown || s.Position != [3]float32{3.5, 65.62, -392.5} || s.Yaw != 90 || s.Pitch != 10 {
+		t.Errorf("snapshot = %+v, want the position the unit just sent", s)
+	}
+	if len(conn.out) != 1 {
+		t.Errorf("forwarded %d packets, want 1", len(conn.out))
+	}
+}
