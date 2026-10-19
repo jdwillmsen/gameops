@@ -70,6 +70,7 @@ view with three.js:
 - `/v1/camera/ws`: the websocket the page reads
 - `/v1/camera/stats`: counts only
 - `/v1/camera/atlas.png` and `/v1/camera/atlas.json`: the texture atlas and its block table, 404 until built
+- `/v1/camera/mesher.js`: the page's meshing worker
 - `/v1/camera/items.png` and `/v1/camera/items.json`: one item icon sprite sheet and its name lookup, 404 until built
 
 The stream is a position channel and has **no authentication**, so it must not
