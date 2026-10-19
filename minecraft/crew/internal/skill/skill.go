@@ -29,6 +29,8 @@ const (
 type Actuator interface {
 	Pose() act.Pose
 	Tick(act.Input) error
+	// Ticks counts the inputs sent so far.
+	Ticks() uint64
 	SelectHotbar(slot int, item belief.Item) error
 	OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
 	Container() (open bool, windowID byte, pos protocol.BlockPos)

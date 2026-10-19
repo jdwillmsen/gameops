@@ -148,7 +148,7 @@ func (m *movedSkill) Step(context.Context, skill.Actuator) (skill.Status, error)
 
 func TestHaulProgressIsTheTotalMoved(t *testing.T) {
 	r := NewRunner(func(Template) ([]skill.Skill, error) { return []skill.Skill{&movedSkill{n: 7}}, nil },
-		fakeAct{}, func() belief.Snapshot { return belief.Snapshot{Spawned: true} }, time.Minute, &captureLog{})
+		&fakeAct{}, func() belief.Snapshot { return belief.Snapshot{Spawned: true} }, time.Minute, &captureLog{})
 	tk, err := r.Submit(Template{Template: "haul", Qty: 32})
 	if err != nil {
 		t.Fatal(err)
