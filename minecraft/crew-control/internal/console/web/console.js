@@ -44,8 +44,16 @@ function renderStage() {
   stage.className = state.view;
   if (!state.unit) return;
   if (state.view === 'focus') {
-    focusFrame = el('iframe', { src: tileSrc(state.unit, state.mode), title: state.unit });
-    stage.append(focusFrame);
+    const frame = focusFrame = el('iframe', { src: tileSrc(state.unit, state.mode), title: state.unit });
+    // A message posted before the page has registered its listener is lost,
+    // so the mode is re-sent once it has loaded. The same-origin window also
+    // gets the console's keys, which a focused tile would otherwise swallow.
+    frame.addEventListener('load', () => {
+      if (focusFrame !== frame) return;
+      frame.contentWindow.postMessage({ type: 'crew-camera', mode: state.mode }, location.origin);
+      frame.contentWindow.addEventListener('keydown', onKey);
+    });
+    stage.append(frame);
     return;
   }
   stage.append(...order.map(id => {
@@ -76,6 +84,8 @@ function apply() {
 
 function pickUnit(id) {
   if (!statuses.has(id)) return;
+  // Rebuilding the frame would re-attach a viewer and replay the whole world.
+  if (state.unit === id && state.view === 'focus') return;
   state.unit = id;
   state.view = 'focus';
   apply();
@@ -97,12 +107,13 @@ function toggleWall() {
 
 $('wall-toggle').addEventListener('click', toggleWall);
 
-addEventListener('keydown', ev => {
+function onKey(ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (/^[1-9]$/.test(ev.key)) pickUnit(order[Number(ev.key) - 1]);
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
-});
+}
+addEventListener('keydown', onKey);
 
 function onUnits(list) {
   const first = order.length === 0;
@@ -119,9 +130,24 @@ function onUnits(list) {
   renderLabels();
 }
 
-const es = new EventSource('/v1/units/stream');
-es.addEventListener('units', ev => {
-  $('link').textContent = '';
-  onUnits(JSON.parse(ev.data));
-});
-es.onerror = () => { $('link').textContent = 'status offline'; };
+const BACKOFF_MIN = 2000, BACKOFF_MAX = 30000;
+let backoff = BACKOFF_MIN;
+
+function connect() {
+  const es = new EventSource('/v1/units/stream');
+  es.addEventListener('units', ev => {
+    backoff = BACKOFF_MIN;
+    $('link').textContent = '';
+    onUnits(JSON.parse(ev.data));
+  });
+  es.onerror = () => {
+    $('link').textContent = 'status offline';
+    // The browser retries a dropped stream itself, but gives up for good after
+    // a non-200 answer (client cap, gateway restart), so those are rebuilt.
+    if (es.readyState !== EventSource.CLOSED) return;
+    es.close();
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, BACKOFF_MAX);
+  };
+}
+connect();
