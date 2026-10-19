@@ -1,0 +1,425 @@
+package act
+
+import (
+	"bytes"
+	"encoding/binary"
+	"math"
+	"os"
+	"sync"
+	"testing"
+
+	"github.com/go-gl/mathgl/mgl32"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+)
+
+// Item IDs of the lab server that recorded the fixtures.
+const (
+	cobblestone = 4
+	woodenPick  = 312
+	shieldID    = 358
+)
+
+type sink struct {
+	mu  sync.Mutex
+	got []packet.Packet
+	err error
+}
+
+func (s *sink) WritePacket(pk packet.Packet) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	s.got = append(s.got, pk)
+	return nil
+}
+
+func (s *sink) inputs(t *testing.T) []*packet.PlayerAuthInput {
+	t.Helper()
+	var out []*packet.PlayerAuthInput
+	for _, pk := range s.got {
+		if in, ok := pk.(*packet.PlayerAuthInput); ok {
+			out = append(out, in)
+		}
+	}
+	return out
+}
+
+func (s *sink) last(t *testing.T) packet.Packet {
+	t.Helper()
+	if len(s.got) == 0 {
+		t.Fatal("nothing was sent")
+	}
+	return s.got[len(s.got)-1]
+}
+
+// world is a fake solid map: every block at or below floor, plus extras.
+type world struct {
+	floor int32
+	extra map[protocol.BlockPos]bool
+}
+
+func (w world) Solid(p protocol.BlockPos) bool { return p[1] <= w.floor || w.extra[p] }
+
+// flat has ground whose top face is y=0, so a unit standing on it has feet at 0.
+func flat() world { return world{floor: -1} }
+
+func newAct(w Solid, start Pose) (*Actuator, *sink) {
+	s := &sink{}
+	start.OnGround = true
+	return New(s, 7, start, w), s
+}
+
+func near(t *testing.T, name string, got, want, tol float64) {
+	t.Helper()
+	if math.Abs(got-want) > tol {
+		t.Errorf("%s = %.5f, want %.5f", name, got, want)
+	}
+}
+
+func hasFlag(in *packet.PlayerAuthInput, f int) bool { return in.InputData.Load(f) }
+
+// labPackets decodes a fixture: a uint32 little-endian length, then the packet
+// header and payload as the server sent them.
+func labPackets(t *testing.T, name string) []packet.Packet {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name + ".bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := packet.NewServerPool()
+	var out []packet.Packet
+	for len(b) > 0 {
+		n := binary.LittleEndian.Uint32(b)
+		// bytes.Buffer, not Reader: a Reader fails on every empty item.
+		body := bytes.NewBuffer(b[4 : 4+n])
+		b = b[4+n:]
+		var h packet.Header
+		if err := h.Read(body); err != nil {
+			t.Fatal(err)
+		}
+		pk := pool[h.PacketID]()
+		pk.Marshal(protocol.NewReader(body, shieldID, false))
+		out = append(out, pk)
+	}
+	return out
+}
+
+func TestTickSendsOneInputWithIncreasingTick(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	for i := 0; i < 5; i++ {
+		if err := a.Tick(Input{Forward: float32(i % 2)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins := s.inputs(t)
+	if len(ins) != 5 || len(s.got) != 5 {
+		t.Fatalf("sent %d packets, %d inputs, want 5 of each", len(s.got), len(ins))
+	}
+	for i := 1; i < len(ins); i++ {
+		if ins[i].Tick <= ins[i-1].Tick {
+			t.Errorf("tick %d after %d", ins[i].Tick, ins[i-1].Tick)
+		}
+	}
+}
+
+func TestInputUsesTheRecordedFieldValues(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{10, 0, 20}, Yaw: 90, Pitch: 5})
+	if err := a.Tick(Input{Forward: 1, Yaw: 90, Pitch: 5}); err != nil {
+		t.Fatal(err)
+	}
+	in := s.inputs(t)[0]
+	if in.InputMode != packet.InputModeMouse || in.PlayMode != packet.PlayModeNormal || in.InteractionModel != packet.InteractionModelClassic {
+		t.Errorf("modes = %d/%d/%d", in.InputMode, in.PlayMode, in.InteractionModel)
+	}
+	if in.HeadYaw != 90 || in.InteractYaw != 90 || in.InteractPitch != 5 || in.Yaw != 90 || in.Pitch != 5 {
+		t.Errorf("rotation not carried: %+v", in)
+	}
+	want := mgl32.Vec2{0, 1}
+	if in.MoveVector != want || in.RawMoveVector != want || in.AnalogueMoveVector != want {
+		t.Errorf("move vectors = %v %v %v", in.MoveVector, in.RawMoveVector, in.AnalogueMoveVector)
+	}
+	for _, f := range []int{packet.InputFlagUp, packet.InputFlagBlockBreakingDelayEnabled, packet.InputFlagVerticalCollision} {
+		if !hasFlag(in, f) {
+			t.Errorf("flag %d not set", f)
+		}
+	}
+	// Position is the eye, one tick of forward at yaw 90 (toward -X) ahead.
+	near(t, "eye y", float64(in.Position.Y()), 1.62, 1e-4)
+	near(t, "x", float64(in.Position.X()), 10-0.098, 1e-4)
+	near(t, "z", float64(in.Position.Z()), 20, 1e-4)
+	near(t, "delta y", float64(in.Delta.Y()), -0.0784, 1e-5)
+}
+
+func TestWalkingAdvancesByTheSpikeStep(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	for i := 0; i < 40; i++ {
+		if err := a.Tick(Input{Forward: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins := s.inputs(t)
+	want := []float64{0.098, 0.1515, 0.1807, 0.1966}
+	for i, w := range want {
+		near(t, "step", float64(ins[i].Delta.Z()), w, 5e-4)
+	}
+	near(t, "steady step", float64(ins[39].Delta.Z()), 0.2159, 5e-4)
+	// Yaw 0 faces +Z, and a wall-less flat world never moves Y.
+	if p := a.Pose(); p.Feet.Y() != 0 || !p.OnGround || p.Feet.Z() < 7 {
+		t.Errorf("pose = %+v", p)
+	}
+}
+
+func TestYawPicksTheForwardDirection(t *testing.T) {
+	for _, c := range []struct {
+		yaw    float32
+		dx, dz float64
+	}{{0, 0, 1}, {-90, 1, 0}, {90, -1, 0}, {180, 0, -1}} {
+		a, s := newAct(flat(), Pose{})
+		if err := a.Tick(Input{Forward: 1, Yaw: c.yaw}); err != nil {
+			t.Fatal(err)
+		}
+		d := s.inputs(t)[0].Delta
+		near(t, "dx", float64(d.X()), c.dx*0.098, 1e-5)
+		near(t, "dz", float64(d.Z()), c.dz*0.098, 1e-5)
+	}
+}
+
+func TestIdleTicksSendTheDecayingCarry(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	for i := 0; i < 5; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	for i := 0; i < 7; i++ {
+		if err := a.Tick(Input{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ins := s.inputs(t)
+	if len(ins) != 12 {
+		t.Fatalf("idle ticks must still send an input, got %d", len(ins))
+	}
+	for i := 6; i < 12; i++ {
+		prev, cur := float64(ins[i-1].Delta.Z()), float64(ins[i].Delta.Z())
+		near(t, "decay", cur, prev*0.546, 1e-4)
+		if hasFlag(ins[i], packet.InputFlagUp) {
+			t.Error("idle tick carries the Up flag")
+		}
+	}
+	if d := float64(ins[11].Delta.Z()); d > 0.01 {
+		t.Errorf("carry still %.4f after six idle ticks", d)
+	}
+}
+
+func TestJumpRisesOneBlockAndLands(t *testing.T) {
+	// A one-block step whose face is 1.0 ahead of the unit's centre.
+	w := flat()
+	w.extra = map[protocol.BlockPos]bool{}
+	for x := int32(-2); x <= 2; x++ {
+		for z := int32(1); z <= 3; z++ {
+			w.extra[protocol.BlockPos{x, 0, z}] = true
+		}
+	}
+	a, s := newAct(w, Pose{Feet: mgl32.Vec3{0.5, 0, 0.0}})
+	if err := a.Tick(Input{Forward: 1, Jump: true}); err != nil {
+		t.Fatal(err)
+	}
+	first := s.inputs(t)[0]
+	for _, f := range []int{packet.InputFlagJumping, packet.InputFlagStartJumping, packet.InputFlagJumpDown} {
+		if !hasFlag(first, f) {
+			t.Errorf("takeoff flag %d missing", f)
+		}
+	}
+	if hasFlag(first, packet.InputFlagVerticalCollision) {
+		t.Error("takeoff tick must not report a vertical collision")
+	}
+	near(t, "takeoff dy", float64(first.Delta.Y()), 0.42, 1e-5)
+
+	for i := 0; i < 30 && !a.Pose().OnGround; i++ {
+		if err := a.Tick(Input{Forward: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := a.Pose()
+	if !p.OnGround || p.Feet.Y() != 1 {
+		t.Fatalf("pose after the jump = %+v, want on the step at y=1", p)
+	}
+	ins := s.inputs(t)
+	wantDY := []float64{0.42, 0.3332, 0.2481, 0.1648, 0.0831, 0.0030, -0.0754}
+	for i, d := range wantDY {
+		if i >= len(ins) {
+			break
+		}
+		near(t, "dy", float64(ins[i].Delta.Y()), d, 6e-4)
+	}
+	land := ins[len(ins)-1]
+	if !hasFlag(land, packet.InputFlagVerticalCollision) || !hasFlag(land, packet.InputFlagJumping) {
+		t.Error("landing tick must carry VerticalCollision")
+	}
+	if land.Delta.Y() >= 0 {
+		t.Errorf("landing dy = %v, want a clamped fall", land.Delta.Y())
+	}
+	for _, in := range ins[1 : len(ins)-1] {
+		if hasFlag(in, packet.InputFlagVerticalCollision) {
+			t.Error("airborne tick carries VerticalCollision")
+		}
+	}
+}
+
+func TestWallStopsTheUnitAtTheHitboxEdge(t *testing.T) {
+	w := flat()
+	w.extra = map[protocol.BlockPos]bool{{0, 0, 3}: true, {0, 1, 3}: true}
+	a, _ := newAct(w, Pose{Feet: mgl32.Vec3{0.5, 0, 0.5}})
+	for i := 0; i < 40; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	near(t, "z", float64(a.Pose().Feet.Z()), 3-0.3, 1e-3)
+}
+
+func TestWalkingOffAnEdgeFalls(t *testing.T) {
+	// A ledge: the raised floor ends at z=2, leaving a 1-block drop.
+	w := world{floor: -2, extra: map[protocol.BlockPos]bool{}}
+	for x := int32(-2); x <= 2; x++ {
+		for z := int32(-3); z < 2; z++ {
+			w.extra[protocol.BlockPos{x, -1, z}] = true
+		}
+	}
+	a, _ := newAct(w, Pose{Feet: mgl32.Vec3{0.5, 0, 0.5}})
+	for i := 0; i < 40; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	if p := a.Pose(); p.Feet.Y() != -1 || !p.OnGround {
+		t.Errorf("pose = %+v, want landed one block down", p)
+	}
+}
+
+func TestCorrectionResetsThePose(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	for i := 0; i < 5; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{4, 1.62 + 0, 9},
+		Delta:    mgl32.Vec3{0, -0.0784, 0.05},
+		Rotation: mgl32.Vec2{3, 40},
+		OnGround: true,
+	})
+	p := a.Pose()
+	if p.Feet != (mgl32.Vec3{4, 0, 9}) || !p.OnGround {
+		t.Fatalf("pose = %+v", p)
+	}
+	if p.Pitch != 3 || p.Yaw != 40 {
+		t.Errorf("rotation = %v/%v, want 3/40", p.Pitch, p.Yaw)
+	}
+	// The correction's horizontal delta is the new carry.
+	_ = a.Tick(Input{})
+	d := s.inputs(t)[5].Delta
+	near(t, "carry z", float64(d.Z()), 0.05, 1e-5)
+}
+
+func TestOwnMovePlayerAdoptsThePositionAndOthersAreIgnored(t *testing.T) {
+	a, _ := newAct(flat(), Pose{})
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 99, Position: mgl32.Vec3{50, 51.62, 50}})
+	if a.Pose().Feet != (mgl32.Vec3{}) {
+		t.Fatal("another entity's move was adopted")
+	}
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 7, Position: mgl32.Vec3{5, 1.62, 6}, Yaw: 12, Pitch: 3, OnGround: true})
+	p := a.Pose()
+	if p.Feet != (mgl32.Vec3{5, 0, 6}) || p.Yaw != 12 || p.Pitch != 3 {
+		t.Errorf("pose = %+v", p)
+	}
+}
+
+func TestBreakSendsTheRecordedActionOrder(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	pos := protocol.BlockPos{3, 0, 4}
+	for _, ph := range []BreakPhase{BreakStart, BreakContinue, BreakContinue, BreakAbort} {
+		if err := a.Tick(Input{Break: &BreakAction{Pos: pos, Face: 2, Phase: ph}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.Tick(Input{}); err != nil {
+		t.Fatal(err)
+	}
+	want := []int32{protocol.PlayerActionStartBreak, protocol.PlayerActionContinueDestroyBlock, protocol.PlayerActionContinueDestroyBlock, protocol.PlayerActionAbortBreak}
+	ins := s.inputs(t)
+	for i, w := range want {
+		acts, ok := ins[i].BlockActions.Value()
+		if !hasFlag(ins[i], packet.InputFlagPerformBlockActions) || !ok || len(acts) != 1 {
+			t.Fatalf("input %d: flag/actions wrong: %+v", i, ins[i])
+		}
+		if acts[0].Action != w || acts[0].BlockPos != pos || acts[0].Face != 2 {
+			t.Errorf("input %d action = %+v, want %d", i, acts[0], w)
+		}
+	}
+	if hasFlag(ins[4], packet.InputFlagPerformBlockActions) {
+		t.Error("a tick without a break still performs block actions")
+	}
+	if _, ok := ins[4].BlockActions.Value(); ok {
+		t.Error("a tick without a break still carries actions")
+	}
+}
+
+func TestRecordedBreakRepliesDoNotMoveTheUnit(t *testing.T) {
+	a, _ := newAct(flat(), Pose{Feet: mgl32.Vec3{1, 0, 2}})
+	for _, pk := range labPackets(t, "break_stone") {
+		a.Apply(pk)
+	}
+	if a.Pose().Feet != (mgl32.Vec3{1, 0, 2}) {
+		t.Error("block and inventory replies changed the pose")
+	}
+	if open, _, _ := a.Container(); open {
+		t.Error("a break opened a container")
+	}
+}
+
+func TestSelectHotbarSendsMobEquipment(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:wooden_pickaxe", RuntimeID: woodenPick}})
+	if err := a.SelectHotbar(0, beliefItem(0, "wooden_pickaxe", 1, 77)); err != nil {
+		t.Fatal(err)
+	}
+	me, ok := s.last(t).(*packet.MobEquipment)
+	if !ok {
+		t.Fatalf("sent %T", s.last(t))
+	}
+	if me.EntityRuntimeID != 7 || me.HotBarSlot != 0 || me.InventorySlot != 0 || me.WindowID != 0 {
+		t.Errorf("equipment = %+v", me)
+	}
+	if me.NewItem.Stack.NetworkID != woodenPick || me.NewItem.StackNetworkID != 77 || me.NewItem.Stack.Count != 1 {
+		t.Errorf("item = %+v", me.NewItem)
+	}
+	if err := a.SelectHotbar(0, beliefItem(0, "mystery", 1, 5)); err == nil {
+		t.Error("an item the server never listed was sent")
+	}
+	if err := a.SelectHotbar(12, beliefItem(12, "wooden_pickaxe", 1, 5)); err == nil {
+		t.Error("a non-hotbar slot was accepted")
+	}
+}
+
+func TestEndLoadingScreenSendsTheGateRelease(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	if err := a.EndLoadingScreen(); err != nil {
+		t.Fatal(err)
+	}
+	ls, ok := s.last(t).(*packet.ServerBoundLoadingScreen)
+	if !ok || ls.Type != packet.LoadingScreenTypeEnd {
+		t.Fatalf("sent %#v", s.last(t))
+	}
+	if _, set := ls.LoadingScreenID.Value(); set {
+		t.Error("the release must not carry a screen ID")
+	}
+}
+
+func TestTickPropagatesWriteErrorsWithoutAdvancing(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	s.err = os.ErrClosed
+	if err := a.Tick(Input{Forward: 1}); err == nil {
+		t.Fatal("write error swallowed")
+	}
+	if a.Pose().Feet != (mgl32.Vec3{}) {
+		t.Error("pose advanced on a packet that never left")
+	}
+}
