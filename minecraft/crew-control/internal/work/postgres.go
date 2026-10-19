@@ -217,6 +217,38 @@ func (p *Postgres) Apply(ctx context.Context, unit string, id uuid.UUID, state s
 	return it, err
 }
 
+func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+	var (
+		it        Item
+		cancelled bool
+	)
+	err := p.inTx(ctx, func(tx pgx.Tx) error {
+		var err error
+		it, err = scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+workTable+` WHERE id = $1 FOR UPDATE`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if it.Unit != unit {
+			return ErrWrongUnit
+		}
+		if it.State != Queued {
+			return nil
+		}
+		it, err = scan(tx.QueryRow(ctx,
+			`UPDATE `+workTable+` SET state = 'cancelled', reason = 'cancelled by operator', updated_at = now()
+			 WHERE id = $1 AND state = 'queued' RETURNING `+columns, id))
+		if err != nil {
+			return err
+		}
+		cancelled = true
+		return addEvent(ctx, tx, it)
+	})
+	return it, cancelled, err
+}
+
 func (p *Postgres) CancelOpen(ctx context.Context, unit string) ([]Item, error) {
 	var out []Item
 	err := p.inTx(ctx, func(tx pgx.Tx) error {

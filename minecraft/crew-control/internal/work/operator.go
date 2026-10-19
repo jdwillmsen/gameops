@@ -196,6 +196,8 @@ func (a *API) stopUnit(ctx context.Context, unit, op string) (cancelled []Item, 
 	if err != nil {
 		return nil, Item{}, err
 	}
+	// If this fails after CancelOpen succeeded the caller answers 503, yet the
+	// unit keeps running its current work until the next stop gets through.
 	stop, err = a.store.Enqueue(ctx, unit, KindCommand, json.RawMessage(`{"name":"stop"}`), op)
 	return cancelled, stop, err
 }
@@ -243,37 +245,46 @@ func (a *API) cancelItem(w http.ResponseWriter, r *http.Request, unit, op string
 		opError(w, http.StatusNotFound, "no such item")
 		return
 	}
-	switch {
-	case terminal(it.State):
+	if terminal(it.State) {
 		opJSON(w, http.StatusOK, cancelled{View: view(it)})
-	case it.State == Queued:
-		got, err := a.store.Apply(r.Context(), unit, id, Cancelled, 0, "cancelled by operator")
-		if err != nil {
-			opStoreError(w, r, err)
-			return
-		}
-		a.changed(unit)
-		opJSON(w, http.StatusOK, cancelled{View: view(got)})
-	default:
-		// The unit has this item and has no per-item cancel yet, so the only
-		// way to end it is stopping the unit, which also cancels every other
-		// open item. The note tells the operator that happened.
-		open, _, err := a.stopUnit(r.Context(), unit, op)
-		if len(open) > 0 || err == nil {
-			a.changed(unit)
-		}
-		if err != nil {
-			opStoreError(w, r, err)
-			return
-		}
-		for _, c := range open {
-			if c.ID == id {
-				it = c
-			}
-		}
-		it.State = Cancelled
-		opJSON(w, http.StatusAccepted, cancelled{view(it), stoppedNote})
+		return
 	}
+	if it.State == Queued {
+		// Conditional, because the unit may take the item after the lookup.
+		got, ok, err := a.store.CancelQueued(r.Context(), unit, id)
+		if err != nil {
+			opStoreError(w, r, err)
+			return
+		}
+		if ok {
+			a.changed(unit)
+			opJSON(w, http.StatusOK, cancelled{View: view(got)})
+			return
+		}
+		it = got
+		if terminal(it.State) {
+			opJSON(w, http.StatusOK, cancelled{View: view(it)})
+			return
+		}
+	}
+	// The unit has this item and has no per-item cancel yet, so the only way
+	// to end it is stopping the unit, which also cancels every other open
+	// item. The note tells the operator that happened.
+	open, _, err := a.stopUnit(r.Context(), unit, op)
+	if len(open) > 0 || err == nil {
+		a.changed(unit)
+	}
+	if err != nil {
+		opStoreError(w, r, err)
+		return
+	}
+	for _, c := range open {
+		if c.ID == id {
+			it = c
+		}
+	}
+	it.State = Cancelled
+	opJSON(w, http.StatusAccepted, cancelled{view(it), stoppedNote})
 }
 
 func decodeStrict(r io.Reader, v any) error {

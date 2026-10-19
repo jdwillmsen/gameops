@@ -36,11 +36,21 @@ func (p *Poller) releaseStream() {
 // every stream is anonymous.
 func (p *Poller) StreamHandler(authed func(*http.Request) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p.stream(w, r, authed != nil && authed(r))
+		p.stream(w, r, authed)
 	}
 }
 
-func (p *Poller) stream(w http.ResponseWriter, r *http.Request, signedIn bool) {
+func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*http.Request) bool) {
+	// The cookie is re-checked before every work event: a session that lapsed
+	// or was revoked must stop receiving task bodies on a stream that stays
+	// open. Once it fails the stream is anonymous for good.
+	signedIn := authed != nil && authed(r)
+	stillSignedIn := func() bool {
+		if signedIn && !authed(r) {
+			signedIn = false
+		}
+		return signedIn
+	}
 	if !p.acquireStream() {
 		http.Error(w, "too many viewers", http.StatusServiceUnavailable)
 		return
@@ -76,6 +86,9 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, signedIn bool) {
 		// The panel renders history from work events alone, so a new stream
 		// needs one per unit rather than waiting for the next change.
 		for _, u := range p.units {
+			if !stillSignedIn() {
+				break
+			}
 			if !p.writeWork(w, rc, r, u.ID) {
 				return
 			}
@@ -95,6 +108,9 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, signedIn bool) {
 			}
 		case <-workSig:
 			for _, u := range workPending() {
+				if !stillSignedIn() {
+					break
+				}
 				if !p.writeWork(w, rc, r, u) {
 					return
 				}

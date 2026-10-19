@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -376,5 +377,52 @@ func TestWorkEventsReachOnlyAuthenticatedStreams(t *testing.T) {
 	case got := <-anon:
 		t.Fatalf("anonymous stream got %q", got)
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestWorkEventsStopWhenTheSessionLapses(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
+	p.SetWorkSource(func(_ context.Context, id string) ([]byte, error) {
+		return []byte(`{"unit":"` + id + `","items":[]}`), nil
+	})
+	var valid atomic.Bool
+	valid.Store(true)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(func(*http.Request) bool { return valid.Load() }))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	ch := workEvents(t, srv.URL, http.Header{})
+	next := func() string {
+		select {
+		case s := <-ch:
+			return s
+		case <-time.After(2 * time.Second):
+			t.Fatal("no event")
+			return ""
+		}
+	}
+	next() // units
+	next() // history
+	p.PublishWork("crew-01")
+	if got := next(); !strings.HasPrefix(got, "work ") {
+		t.Fatalf("while signed in: %q", got)
+	}
+
+	valid.Store(false)
+	p.PublishWork("crew-01")
+	select {
+	case got := <-ch:
+		t.Fatalf("work event after the session lapsed: %q", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+	// Signing back in on the same stream must not resume it either.
+	valid.Store(true)
+	p.PublishWork("crew-01")
+	select {
+	case got := <-ch:
+		t.Fatalf("stream resumed work events: %q", got)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

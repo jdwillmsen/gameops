@@ -9,13 +9,15 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 )
 
-// fakeGate follows the contract of auth.Auth: Require answers 401 without a
-// session and 403 for a POST missing the header; X-Test-Op is the session.
+// fakeGate follows the contract of auth.Auth: Require answers 403 for a POST
+// missing the header, then 401 without a session; X-Test-Op is the session.
 type fakeGate struct{}
 
 func (fakeGate) Operator(r *http.Request) (auth.Operator, bool) {
@@ -27,12 +29,12 @@ func (fakeGate) Operator(r *http.Request) (auth.Operator, bool) {
 
 func (g fakeGate) Require(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := g.Operator(r); !ok {
-			http.Error(w, "signed_out", http.StatusUnauthorized)
-			return
-		}
 		if r.Method != http.MethodPost || r.Header.Get("X-Crew-Request") != "1" {
 			http.Error(w, "bad_request", http.StatusForbidden)
+			return
+		}
+		if _, ok := g.Operator(r); !ok {
+			http.Error(w, "signed_out", http.StatusUnauthorized)
 			return
 		}
 		h.ServeHTTP(w, r)
@@ -120,7 +122,7 @@ const (
 func TestOperatorRoutesNeedSessionAndHeader(t *testing.T) {
 	o := newOpRig(t, NewMemory())
 	for _, p := range []string{"/v1/work/crew-01/tasks", "/v1/work/crew-01/stop", "/v1/work/crew-01/goto", "/v1/work/crew-01/items/" + zeroID + "/cancel"} {
-		if code, _ := o.post(t, p, gatherOK, map[string]string{"X-Test-Op": ""}); code != 401 {
+		if code, _ := o.post(t, p, gatherOK, map[string]string{"X-Test-Op": "", "X-Crew-Request": "1"}); code != 401 {
 			t.Errorf("%s anonymous: %d, want 401", p, code)
 		}
 		if code, _ := o.post(t, p, gatherOK, map[string]string{"X-Crew-Request": ""}); code != 403 {
@@ -384,5 +386,49 @@ func TestStoreDownIs503(t *testing.T) {
 	}
 	if _, err := o.api.Feed(context.Background(), "crew-01"); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("Feed: %v", err)
+	}
+}
+
+// raceStore lets the unit take the item between the lookup and the cancel.
+type raceStore struct{ *Memory }
+
+func (r raceStore) CancelQueued(c context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+	if _, ok, _, _ := r.Memory.Next(c, unit, time.Now()); !ok {
+		panic("race setup: nothing to deliver")
+	}
+	return r.Memory.CancelQueued(c, unit, id)
+}
+
+func TestCancelLosingTheDeliveryRaceStopsTheUnit(t *testing.T) {
+	m := NewMemory()
+	o := newOpRig(t, raceStore{m})
+	it := must(t, m, "crew-01", KindTask, tpl)
+	code, resp := o.post(t, "/v1/work/crew-01/items/"+it.ID.String()+"/cancel", "", nil)
+	var v map[string]any
+	_ = json.Unmarshal([]byte(resp), &v)
+	if code != 202 || v["note"] != "stopped the unit" || v["state"] != Cancelled {
+		t.Fatalf("%d %s", code, resp)
+	}
+	items, _ := m.Recent(context.Background(), "crew-01", 5)
+	if len(items) != 2 || items[0].Kind != KindCommand || items[1].State != Cancelled {
+		t.Fatalf("items %+v", items)
+	}
+}
+
+type stopDown struct{ *Memory }
+
+func (s stopDown) Enqueue(c context.Context, unit, kind string, b json.RawMessage, op string) (Item, error) {
+	if kind == KindCommand {
+		return Item{}, ErrUnavailable
+	}
+	return s.Memory.Enqueue(c, unit, kind, b, op)
+}
+
+func TestStopAnswers503WhenTheStopCannotBeQueued(t *testing.T) {
+	m := NewMemory()
+	o := newOpRig(t, stopDown{m})
+	must(t, m, "crew-01", KindTask, tpl)
+	if code, resp := o.post(t, "/v1/work/crew-01/stop", "", nil); code != 503 || !strings.Contains(resp, "queue unavailable") {
+		t.Fatalf("%d %s", code, resp)
 	}
 }
