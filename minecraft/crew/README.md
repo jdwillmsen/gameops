@@ -223,7 +223,7 @@ real GPUs.
 
 The page meshes sub-chunks in a Web Worker (`web/mesher.js`, buffers
 transferred back) and culls each mesh by hand: a three.js `Frustum` against the
-tight box the worker measures, plus a distance cut at the fog's far plane,
+tight box the worker measures, plus a cut at the fog's far plane by view depth,
 where everything is already the sky colour. About 36% of meshes are drawn at
 radius 4 and 25% at radius 8 (looking along one axis). three.js already tested
 a loose bounding sphere per mesh, so the gain is the tighter box and the fog
