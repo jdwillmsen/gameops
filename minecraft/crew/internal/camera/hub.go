@@ -185,6 +185,7 @@ func (h *Hub) Spawn(runtimeID uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.runtime = runtimeID
+	h.forgetPlayersLocked()
 	h.resetLocked()
 }
 
@@ -194,17 +195,29 @@ func (h *Hub) Reset() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.runtime = 0
+	h.forgetPlayersLocked()
 	h.resetLocked()
+}
+
+// forgetPlayersLocked drops what the server sends once per session, not again
+// after a dimension change.
+func (h *Hub) forgetPlayersLocked() {
+	h.skins = map[uuid.UUID]*skinInfo{}
+	h.ownArmor = armourSlots{}
 }
 
 func (h *Hub) resetLocked() {
 	h.subs = map[[3]int32][]byte{}
 	h.ents = map[uint64]*entity{}
 	h.uniqueID = map[int64]uint64{}
-	h.skins = map[uuid.UUID]*skinInfo{}
-	h.ownArmor = armourSlots{}
 	for v := range h.viewers {
 		v.restart()
+	}
+	if h.ownSkin != nil {
+		h.pushOrderedLocked(encodeSkin(0, *h.ownSkin))
+	}
+	if !h.ownArmor.zero() {
+		h.pushOrderedLocked(encodeArmour(map[uint64]armourSlots{0: h.ownArmor}))
 	}
 }
 
@@ -351,8 +364,11 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		h.mu.Unlock()
 	case *packet.PlayerList:
 		for _, e := range p.Entries {
-			if e.ActionType == protocol.PlayerListActionAdd {
+			switch e.ActionType {
+			case protocol.PlayerListActionAdd:
 				h.setSkin(e.UUID, e.Skin)
+			case protocol.PlayerListActionRemove:
+				h.forgetSkin(e.UUID)
 			}
 		}
 	case *packet.PlayerSkin:

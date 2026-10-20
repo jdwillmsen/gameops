@@ -217,7 +217,7 @@ func TestFetchDownloadsOnlyWhatBuildReadsAndCaches(t *testing.T) {
 
 func TestFetchKeepsOldFullPackCache(t *testing.T) {
 	cache := t.TempDir()
-	for _, d := range []string{"textures/entity", "entity"} {
+	for _, d := range []string{"textures/entity", "entity", "textures/models/armor"} {
 		if err := os.MkdirAll(filepath.Join(cache, testTag, "resource_pack", filepath.FromSlash(d)), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -472,5 +472,20 @@ func TestOldCacheWithOnlyEntityDefinitionsIsFetchedAgain(t *testing.T) {
 	}
 	if cached(cache, testTag) {
 		t.Fatal("a directory without the entity textures counted as complete")
+	}
+}
+
+func TestCacheFromBeforeArmourIsFetchedAgain(t *testing.T) {
+	cache := t.TempDir()
+	for _, d := range []string{"textures/entity", "entity"} {
+		if err := os.MkdirAll(filepath.Join(cache, testTag, "resource_pack", filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(cache, testTag, completeMark), []byte("2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cached(cache, testTag) {
+		t.Fatal("a directory without the armour textures counted as complete")
 	}
 }
