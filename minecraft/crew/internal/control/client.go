@@ -73,8 +73,8 @@ type event struct {
 	State    string `json:"state"`
 	Progress int    `json:"progress"`
 	Reason   string `json:"reason,omitempty"`
-	// Seen is optional so an older controller, which ignores unknown fields,
-	// and an older unit, which never sends it, both keep working.
+	// Seen is optional: a deployed controller rejects unknown fields with a
+	// 400, so post retries without it, and an older unit never sends it.
 	Seen *Seen `json:"seen,omitempty"`
 }
 
@@ -616,9 +616,10 @@ func (c *Client) post(ctx context.Context, ev event) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode == http.StatusRequestEntityTooLarge && ev.Seen != nil {
-		// A controller with a tighter cap than this unit assumes: the state
-		// is worth more than the chest.
+	if (resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest) && ev.Seen != nil {
+		// 413: a controller with a tighter cap than this unit assumes. 400: a
+		// controller that predates seen and rejects unknown fields. Either
+		// way the state is worth more than the chest.
 		ev.Seen = nil
 		return c.post(ctx, ev)
 	}

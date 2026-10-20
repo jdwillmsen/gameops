@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,6 +56,7 @@ type fakeControl struct {
 	badAuth      bool
 	rejectID     string // events about this id get a 400
 	refuseSeen   bool   // events carrying seen get a 413
+	legacy       bool   // decodes like the deployed controller: unknown fields get a 400
 	bodies       []int  // sizes of the event bodies received
 	conns        int    // connections the server accepted
 	releaseFirst chan struct{}
@@ -157,6 +159,20 @@ func newFakeControl(t *testing.T) *fakeControl {
 		if err := json.Unmarshal(raw, &ev); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
+		}
+		if f.legacy {
+			var old struct {
+				ID       string `json:"id"`
+				State    string `json:"state"`
+				Progress int    `json:"progress"`
+				Reason   string `json:"reason"`
+			}
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&old); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 		}
 		if f.refuseSeen && ev.Seen != nil {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
@@ -1033,6 +1049,23 @@ func TestTerminalEventCarriesWhatTheTaskSaw(t *testing.T) {
 			if e.Seen != nil {
 				t.Errorf("a task that saw nothing reported %+v", e.Seen)
 			}
+		}
+	}
+}
+
+func TestControllerRejectingSeenStillGetsTheState(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	f.legacy = true
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "queued", func() bool { return len(r.submitted()) == 1 })
+	r.finishWithSeen(taskA, &skill.ChestSeen{Chest: protocol.BlockPos{3, 64, -7}, Items: map[string]int{"dirt": 5}, At: time.Now()})
+
+	ev := f.waitFor(t, "done", func(ev []event) bool { return has(ev, taskA, "done") })
+	for _, e := range ev {
+		if e.Seen != nil {
+			t.Errorf("a controller that rejects unknown fields was sent %+v", e.Seen)
 		}
 	}
 }
