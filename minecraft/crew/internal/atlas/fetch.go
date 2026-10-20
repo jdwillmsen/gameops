@@ -34,7 +34,7 @@ const (
 	// cacheLayout is written into the complete mark. It is raised when the
 	// fetch starts reading more, so that a directory filled by an older
 	// version is fetched again and not taken as complete.
-	cacheLayout = "2"
+	cacheLayout = "3"
 	indexFile   = "index.json"
 
 	defaultBackoff        = 2 * time.Second
@@ -122,8 +122,8 @@ func (f Fetcher) Fetch(ctx context.Context, serverVersion, cacheDir string) (Pac
 func packDir(cacheDir, tag string) string { return filepath.Join(cacheDir, tag, "resource_pack") }
 
 // cached reports whether the tag's directory holds everything this version
-// reads. A directory from an older fetch lacks the entity files and is
-// fetched again, unless it holds the whole pack, which has them.
+// reads. A directory from an older fetch lacks the entity or armour files and
+// is fetched again, unless it holds the whole pack, which has them.
 func cached(cacheDir, tag string) bool {
 	b, err := os.ReadFile(filepath.Join(cacheDir, tag, completeMark))
 	if err != nil {
@@ -132,7 +132,7 @@ func cached(cacheDir, tag string) bool {
 	if string(b) == cacheLayout {
 		return true
 	}
-	for _, d := range []string{"entity", "textures/entity"} {
+	for _, d := range []string{"entity", "textures/entity", armorDir} {
 		if _, err := os.Stat(filepath.Join(packDir(cacheDir, tag), filepath.FromSlash(d))); err != nil {
 			return false
 		}

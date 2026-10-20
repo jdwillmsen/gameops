@@ -30,6 +30,12 @@ func (h *Hub) setSkin(id uuid.UUID, s protocol.Skin) {
 	}
 }
 
+func (h *Hub) forgetSkin(id uuid.UUID) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.skins, id)
+}
+
 // SetOwnSkin gives the unit's own appearance, which the server never sends
 // back: the camera draws the unit's body in the third-person modes with it.
 func (h *Hub) SetOwnSkin(width, height int, rgba []byte, slim bool) {

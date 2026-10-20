@@ -18,6 +18,9 @@ func TestRenderNameCarriesTheShapeStatesChange(t *testing.T) {
 		{"oak_stairs", map[string]any{"weirdo_direction": int32(1), "upside_down_bit": true}, "oak_stairs@0,8,0,16,16,16;0,0,0,8,8,16"},
 		{"snow_layer", map[string]any{"height": int32(3)}, "snow_layer@0,0,0,16,8,16"},
 		{"stone", nil, "stone"},
+		{"minecraft:trapdoor", map[string]any{"open_bit": false, "upside_down_bit": true}, "minecraft:trapdoor@0,13,0,16,16,16"},
+		{"minecraft:snow_layer", map[string]any{"height": int32(3)}, "minecraft:snow_layer@0,0,0,16,8,16"},
+		{"minecraft:stone_brick_slab", map[string]any{"minecraft:vertical_half": "top"}, "minecraft:stone_brick_slab@0,8,0,16,16,16"},
 	}
 	for _, c := range cases {
 		if got := renderName(c.name, c.props); got != c.want {

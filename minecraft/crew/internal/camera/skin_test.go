@@ -138,6 +138,39 @@ func TestOwnSkinIsSentAsIdZero(t *testing.T) {
 	}
 }
 
+func TestDimensionChangeKeepsSkins(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	live := attach(t, h)
+	h.SetOwnSkin(64, 64, pixels(64, 64), false)
+	id := uuid.New()
+	h.Apply(&packet.PlayerList{Entries: []protocol.PlayerListEntry{
+		{ActionType: protocol.PlayerListActionAdd, UUID: id, Skin: protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: pixels(64, 64)}},
+	}}, &sink{})
+	mustDrain(t, live)
+	h.Apply(&packet.ChangeDimension{Dimension: 1}, &sink{})
+	// The page forgets every skin on the reset frame, the unit's own too.
+	if got := skinFrames(mustDrain(t, live)); got[0].png == nil {
+		t.Errorf("own skin after the reset = %v", got)
+	}
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Alex", UUID: id}, &sink{})
+	if got := skinFrames(mustDrain(t, live)); got[8].png == nil {
+		t.Errorf("skin of a player met again = %v", got)
+	}
+}
+
+func TestPlayerLeavingFreesTheirSkin(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	id := uuid.New()
+	h.Apply(&packet.PlayerList{Entries: []protocol.PlayerListEntry{
+		{ActionType: protocol.PlayerListActionAdd, UUID: id, Skin: protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: pixels(64, 64)}},
+	}}, &sink{})
+	h.Apply(&packet.PlayerList{Entries: []protocol.PlayerListEntry{{ActionType: protocol.PlayerListActionRemove, UUID: id}}}, &sink{})
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Alex", UUID: id}, &sink{})
+	if got := skinFrames(mustDrain(t, attach(t, h))); len(got) != 0 {
+		t.Errorf("skins = %v", got)
+	}
+}
+
 func armourFrames(ms [][]byte) map[uint64]armourSlots {
 	out := map[uint64]armourSlots{}
 	for _, f := range ofType(ms, frameArmour) {

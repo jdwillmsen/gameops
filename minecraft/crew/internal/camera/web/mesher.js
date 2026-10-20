@@ -162,7 +162,8 @@ function isAir(cx, cy, cz) {
   return false;
 }
 
-// Keeps columns in step with blocks. True when the column had nothing before.
+// Keeps columns in step with blocks. True when the column's floor dropped: it
+// had nothing before, or nothing as low.
 function track(key, add) {
   const [cx, , cz] = key.split(',').map(Number);
   const cy = Number(key.split(',')[1]);
@@ -170,16 +171,17 @@ function track(key, add) {
   let col = columns.get(ck);
   if (add) {
     if (!col) columns.set(ck, col = new Set());
-    const first = col.size === 0;
+    let lower = true;
+    for (const y of col) if (y <= cy) { lower = false; break; }
     col.add(cy);
-    return first;
+    return lower;
   }
   if (col) { col.delete(cy); if (!col.size) columns.delete(ck); }
   return false;
 }
 
-// A column that just became known changes what its neighbours' edge faces
-// look into, at every height.
+// A column that just became known, or reaches lower, changes what its
+// neighbours' edge faces look into, at every height.
 function markColumnRing(key) {
   const [cx, , cz] = key.split(',').map(Number);
   for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {

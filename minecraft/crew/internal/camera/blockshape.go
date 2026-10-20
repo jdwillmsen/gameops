@@ -16,18 +16,19 @@ import (
 // in sixteenths of a block.
 func renderName(name string, props map[string]any) string {
 	var boxes []shape.Box
+	base := strings.TrimPrefix(name, "minecraft:")
 	switch {
-	case strings.Contains(name, "double_slab"):
+	case strings.Contains(base, "double_slab"):
 		return name
-	case strings.HasSuffix(name, "_slab"):
+	case strings.HasSuffix(base, "_slab"):
 		if v, _ := props["minecraft:vertical_half"].(string); v != "top" {
 			return name
 		}
-		boxes = shape.Boxes(name, props)
-	case strings.HasSuffix(name, "_stairs"), strings.HasSuffix(name, "_trapdoor"), name == "trapdoor",
-		strings.HasSuffix(name, "_door"):
-		boxes = shape.Boxes(name, props)
-	case name == "snow_layer":
+		boxes = shape.Boxes(base, props)
+	case strings.HasSuffix(base, "_stairs"), strings.HasSuffix(base, "_trapdoor"), base == "trapdoor",
+		strings.HasSuffix(base, "_door"):
+		boxes = shape.Boxes(base, props)
+	case base == "snow_layer":
 		// The collision box is a layer lower than the picture.
 		h := 0
 		switch v := props["height"].(type) {

@@ -116,6 +116,16 @@ test('a neighbouring column that arrives later reveals the edge', async () => {
   assert.equal(quads(m.get('0,0,0')), 6);
 });
 
+test('a neighbouring column whose lower sub-chunk arrives later reveals the edge', async () => {
+  const w = worker(['stone'], kinds);
+  w.set('1,6,0', (c, put) => put(0, 0, 0, 1));
+  w.set('0,5,0', (c, put) => put(15, 5, 5, 1));
+  await w.meshes();
+  w.set('1,3,0', (c, put) => put(0, 0, 0, 1));
+  const m = await w.meshes();
+  assert.equal(quads(m.get('0,5,0')), 6);
+});
+
 test('leaf blocks keep the faces between them', async () => {
   const w = worker(['oak_leaves'], kinds);
   w.set('0,0,0', (c, put) => { put(5, 5, 5, 1); put(6, 5, 5, 1); });
