@@ -51,6 +51,11 @@ func Empty(name string) bool {
 // Climbable reports whether a unit inside the block climbs it.
 func Climbable(name string) bool { return name == "ladder" || name == "vine" }
 
+// Fallback, when set, answers for the blocks Boxes does not model itself. It
+// returns false for a block it does not know, which is then a cube. Set it
+// once at start-up, before the first Boxes call.
+var Fallback func(name string, props map[string]any) ([]Box, bool)
+
 // Boxes returns the collision boxes of a block. Missing states take their
 // default, so a caller that only knows the name still gets a sensible shape.
 func Boxes(name string, p map[string]any) []Box {
@@ -82,6 +87,14 @@ func Boxes(name string, p map[string]any) []Box {
 		return fence(p)
 	case strings.HasSuffix(name, "_wall"):
 		return wall(p)
+	}
+	if boxes, ok := partial(name); ok {
+		return boxes
+	}
+	if Fallback != nil {
+		if boxes, ok := Fallback(name, p); ok {
+			return boxes
+		}
 	}
 	return []Box{full}
 }
