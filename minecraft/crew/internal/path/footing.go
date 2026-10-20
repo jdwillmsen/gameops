@@ -39,10 +39,21 @@ type Collider struct{ b Blocks }
 // Unknown blocks are solid cubes, matching the planner.
 func NewSolid(b Blocks) Collider { return Collider{b} }
 
-// Shape returns the collision boxes of the block at p.
+// Shape returns the collision boxes of the block at p. Water has none: the
+// body sinks through it, though the planner treats it as a wall.
 func (c Collider) Shape(p protocol.BlockPos) []shape.Box {
+	if c.Liquid(p) {
+		return nil
+	}
 	boxes, _ := shapeAt(c.b, p)
 	return boxes
+}
+
+// Liquid reports whether the block at p is water the body swims in. Lava is
+// not: it stays solid to the body.
+func (c Collider) Liquid(p protocol.BlockPos) bool {
+	name, known := c.b.Block(p)
+	return known && Water(name)
 }
 
 // Solid reports whether the block has any collision.
@@ -68,8 +79,12 @@ func shapeAt(b Blocks, p protocol.BlockPos) (boxes []shape.Box, known bool) {
 	return shape.Boxes(name, props), true
 }
 
-// box is a world-space collision box.
-type box struct{ lo, hi [3]float32 }
+// box is a world-space collision box. A water box blocks the planner's unit
+// but is never a floor for it.
+type box struct {
+	lo, hi [3]float32
+	water  bool
+}
 
 type cell struct {
 	boxes []box
@@ -91,9 +106,11 @@ func (v *view) cell(p protocol.BlockPos) cell {
 	}
 	boxes, known := shapeAt(v.b, p)
 	c := cell{known: known}
+	name, _ := v.b.Block(p)
+	water := Water(name)
 	o := [3]float32{float32(p.X()), float32(p.Y()), float32(p.Z())}
 	for _, s := range boxes {
-		var w box
+		w := box{water: water}
 		for a := 0; a < 3; a++ {
 			w.lo[a], w.hi[a] = o[a]+s.Min[a], o[a]+s.Max[a]
 		}
@@ -141,7 +158,7 @@ func (v *view) clear(x, z, y, top float32) bool {
 func (v *view) ground(x, z, y, rise float32) (float32, bool) {
 	best, found := float32(0), false
 	for _, b := range v.under(x, z, floor32(y)-maxDrop-1, floor32(y+rise)) {
-		if b.hi[1] <= y+rise+slack && (!found || b.hi[1] > best) {
+		if !b.water && b.hi[1] <= y+rise+slack && (!found || b.hi[1] > best) {
 			best, found = b.hi[1], true
 		}
 	}
@@ -159,7 +176,7 @@ func (v *view) footing(c protocol.BlockPos) (float32, bool) {
 	}
 	best, found := float32(0), false
 	for _, b := range v.under(x, z, c.Y()-1, c.Y()) {
-		if t := b.hi[1]; t >= y-slack && (!found || t > best) {
+		if t := b.hi[1]; !b.water && t >= y-slack && (!found || t > best) {
 			best, found = t, true
 		}
 	}
