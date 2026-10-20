@@ -235,11 +235,13 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 	world.Store(&led)
 	store.Set(backend)
 
+	units := func(ctx context.Context) ([]ledger.UnitStatus, error) {
+		return unitStatuses(ctx, poller.Snapshot(), backend)
+	}
+	checks := jobs.DefaultChecks()
+	checks[jobs.KindStock] = jobs.StockCheck(led, units, time.Now)
 	scheduler := jobs.New(jobs.Config{
-		Jobs: js, Work: backend, Checks: jobs.DefaultChecks(), Log: log,
-		Units: func(ctx context.Context) ([]ledger.UnitStatus, error) {
-			return unitStatuses(ctx, poller.Snapshot(), backend)
-		},
+		Jobs: js, Work: backend, Checks: checks, Log: log, Units: units,
 		// Task 7 streams job changes; until then nothing listens.
 		Notify: func(uuid.UUID) {},
 	})
