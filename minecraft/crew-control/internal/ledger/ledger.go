@@ -1,0 +1,163 @@
+// Package ledger is the crew's shared picture of the world: named places,
+// the stock last seen in each chest, and which units are free to take work.
+// Job planners read it; units feed it by reporting what they see.
+package ledger
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	KindChest = "chest"
+	KindArea  = "area"
+
+	minX, maxX = -500, 499
+	minY, maxY = -64, 320
+	minZ, maxZ = -500, 499
+
+	// Large enough to be useful, small enough that a typo cannot make a
+	// "place" the size of the world.
+	maxAreaSpan = 64
+	maxItems    = 64
+	maxName     = 64
+)
+
+var (
+	ErrSeeded   = errors.New("ledger: place comes from configuration")
+	ErrNotFound = errors.New("ledger: no such place")
+	ErrInvalid  = errors.New("ledger: invalid place")
+
+	idRE   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
+	itemRE = regexp.MustCompile(`^[a-z_]{1,32}$`)
+)
+
+type Pos struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	Z int `json:"z"`
+}
+
+// Box is inclusive on both corners.
+type Box struct {
+	Min Pos `json:"min"`
+	Max Pos `json:"max"`
+}
+
+type Place struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Kind   string   `json:"kind"`
+	Box    Box      `json:"box"`
+	Items  []string `json:"items,omitempty"`
+	Seeded bool     `json:"-"`
+}
+
+// Stock is the count a unit last saw, not a live inventory.
+type Stock struct {
+	Item   string
+	Count  int
+	SeenAt time.Time
+	Unit   string
+}
+
+type Ledger interface {
+	Places(ctx context.Context) ([]Place, error)
+	Place(ctx context.Context, id string) (Place, bool, error)
+	// PutPlace creates or replaces an unseeded place; ErrSeeded for a seeded id.
+	PutPlace(ctx context.Context, p Place) error
+	// DeletePlace removes an unseeded place and its stock.
+	DeletePlace(ctx context.Context, id string) error
+	// Seed upserts ps as seeded and removes seeded places not in ps. It
+	// never touches unseeded places.
+	Seed(ctx context.Context, ps []Place) error
+	// Observe replaces the stock of the chest at the position with items,
+	// which is the chest's whole contents, creating an unseeded place if no
+	// chest is known there. An observation older than the stock already held
+	// is ignored: events can arrive out of order.
+	Observe(ctx context.Context, unit string, at time.Time, chest Pos, items map[string]int) error
+	Stock(ctx context.Context, placeID string) ([]Stock, error)
+	ChestAt(ctx context.Context, p Pos) (Place, bool, error)
+}
+
+func invalid(format string, a ...any) error {
+	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, a...))
+}
+
+func validPos(p Pos) bool {
+	return p.X >= minX && p.X <= maxX && p.Y >= minY && p.Y <= maxY && p.Z >= minZ && p.Z <= maxZ
+}
+
+// Validate applies the world's bounds and naming rules, which the database
+// repeats only for the id and kind.
+func Validate(p Place) error {
+	if !idRE.MatchString(p.ID) {
+		return invalid("id must match %s", idRE)
+	}
+	if n := len([]rune(strings.TrimSpace(p.Name))); n == 0 || n > maxName {
+		return invalid("name must be 1 to %d characters", maxName)
+	}
+	if !validPos(p.Box.Min) || !validPos(p.Box.Max) {
+		return invalid("box is outside the world")
+	}
+	mn, mx := p.Box.Min, p.Box.Max
+	if mn.X > mx.X || mn.Y > mx.Y || mn.Z > mx.Z {
+		return invalid("box min is above max")
+	}
+	switch p.Kind {
+	case KindChest:
+		if mn != mx {
+			return invalid("a chest is one block")
+		}
+	case KindArea:
+		if mx.X-mn.X >= maxAreaSpan || mx.Y-mn.Y >= maxAreaSpan || mx.Z-mn.Z >= maxAreaSpan {
+			return invalid("an area spans at most %d blocks on each axis", maxAreaSpan)
+		}
+	default:
+		return invalid("kind must be chest or area")
+	}
+	if len(p.Items) > maxItems {
+		return invalid("at most %d items", maxItems)
+	}
+	for _, it := range p.Items {
+		if !itemRE.MatchString(it) {
+			return invalid("item %q is not an item name", it)
+		}
+	}
+	return nil
+}
+
+// chestID names a chest found at a position nobody described. A minus sign
+// cannot appear in the id, where it would read as a separator, so a negative
+// coordinate is written m<abs>.
+func chestID(p Pos) string {
+	c := func(v int) string {
+		if v < 0 {
+			return "m" + strconv.Itoa(-v)
+		}
+		return strconv.Itoa(v)
+	}
+	return "chest-" + c(p.X) + "-" + c(p.Y) + "-" + c(p.Z)
+}
+
+func autoChest(p Pos) Place {
+	return Place{ID: chestID(p), Name: "Unnamed chest", Kind: KindChest, Box: Box{p, p}}
+}
+
+// cleanObservation keeps what the ledger can store. The report is already
+// filtered upstream, but a row the table would reject must not discard the
+// rest of a chest's contents.
+func cleanObservation(items map[string]int) map[string]int {
+	out := make(map[string]int, len(items))
+	for k, v := range items {
+		if itemRE.MatchString(k) && v >= 0 {
+			out[k] = v
+		}
+	}
+	return out
+}

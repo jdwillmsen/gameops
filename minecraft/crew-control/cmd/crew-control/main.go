@@ -14,12 +14,14 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
@@ -73,7 +75,15 @@ func main() {
 	if !operators.Enabled() {
 		log.Warn("auth_disabled", logging.Fields{"effect": "no /auth routes; every command route answers 401; set PUBLIC_ORIGIN and CREW_OPERATORS"})
 	}
+	places, err := ledger.ParseSeed(os.Getenv("CREW_PLACES"))
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": err.Error()})
+		os.Exit(1)
+	}
 	store := &work.Lazy{}
+	// Set once the backend is ready; until then reports cannot be applied
+	// either, so there is nothing for it to miss.
+	var world atomic.Pointer[ledger.Ledger]
 	store.OnReady(poller.PublishAllWork)
 	workToken := os.Getenv("WORK_TOKEN")
 	if workToken == "" {
@@ -91,6 +101,7 @@ func main() {
 		Handler: newHandler(units, poller, operators.Operator, log, operators.Mount, func(mux *http.ServeMux) {
 			api := work.Routes(mux, store, units, workToken, poller.PublishWork)
 			api.MountOperator(mux, operators)
+			api.OnSeen = observeSeen(&world, log)
 			poller.SetWorkSource(api.Feed)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -105,7 +116,10 @@ func main() {
 	go func() { poller.Run(ctx); close(pollDone) }()
 
 	storeDone := make(chan struct{})
-	go func() { openStore(ctx, store, dsn, os.Getenv("WORK_STORE") == "memory", log); close(storeDone) }()
+	go func() {
+		openStore(ctx, store, &world, places, dsn, os.Getenv("WORK_STORE") == "memory", log)
+		close(storeDone)
+	}()
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -159,12 +173,16 @@ func postgresDSN() (string, error) {
 // The memory store needs an explicit opt-in: a production deployment that
 // lost its PG_HOST would otherwise run on a queue that vanishes on restart,
 // and nothing would say so. Unconfigured behaves like a database that is down.
-func openStore(ctx context.Context, store *work.Lazy, dsn string, memory bool, log *logging.Logger) {
-	var backend work.Store
+func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], places []ledger.Place, dsn string, memory bool, log *logging.Logger) {
+	var (
+		backend work.Store
+		led     ledger.Ledger
+	)
 	switch {
 	case dsn == "" && memory:
 		log.Info("work_store_memory", nil)
 		backend = work.NewMemory()
+		led = ledger.NewMemory()
 	case dsn == "":
 		log.Error("work_store_unconfigured", logging.Fields{"effect": "work routes answer 503; set PG_HOST, or WORK_STORE=memory for development"})
 		return
@@ -177,6 +195,7 @@ func openStore(ctx context.Context, store *work.Lazy, dsn string, memory bool, l
 				defer pg.Close()
 				log.Info("work_store_ready", nil)
 				backend = pg
+				led = ledger.NewPostgres(pg.Pool())
 				break
 			}
 			if ctx.Err() != nil {
@@ -194,6 +213,17 @@ func openStore(ctx context.Context, store *work.Lazy, dsn string, memory bool, l
 			wait = min(wait*2, maxRetryWait)
 		}
 	}
+	if len(places) > 0 {
+		seedCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+		err := led.Seed(seedCtx, places)
+		cancel()
+		if err != nil {
+			log.Error("places_seed_failed", logging.Fields{"error": err.Error()})
+		} else {
+			log.Info("places_seeded", logging.Fields{"count": len(places)})
+		}
+	}
+	world.Store(&led)
 	store.Set(backend)
 
 	for {
@@ -211,6 +241,31 @@ func openStore(ctx context.Context, store *work.Lazy, dsn string, memory bool, l
 			return
 		case <-time.After(pruneEvery):
 		}
+	}
+}
+
+// observeSeen records what a unit saw. It runs on the report request, so it
+// is bounded; a lost observation costs a stale stock row until the next look.
+// The log names the place and unit only, never where it is or what it holds.
+func observeSeen(world *atomic.Pointer[ledger.Ledger], log *logging.Logger) func(string, work.Seen) {
+	return func(unit string, s work.Seen) {
+		l := world.Load()
+		if l == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+		defer cancel()
+		pos := ledger.Pos{X: s.Chest.X, Y: s.Chest.Y, Z: s.Chest.Z}
+		if err := (*l).Observe(ctx, unit, s.At, pos, s.Items); err != nil {
+			log.Warn("stock_observe_failed", logging.Fields{"unit": unit, "error": err.Error()})
+			return
+		}
+		// An unnamed chest's id spells out its coordinates, so it is not logged.
+		place := "unnamed"
+		if p, ok, err := (*l).ChestAt(ctx, pos); err == nil && ok && !strings.HasPrefix(p.ID, "chest-") {
+			place = p.ID
+		}
+		log.Info("stock_observed", logging.Fields{"place": place, "unit": unit})
 	}
 }
 

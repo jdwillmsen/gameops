@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
@@ -140,7 +142,7 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	}
 
 	unconfigured := &work.Lazy{}
-	openStore(context.Background(), unconfigured, "", false, log) // returns at once
+	openStore(context.Background(), unconfigured, &atomic.Pointer[ledger.Ledger]{}, nil, "", false, log) // returns at once
 	if err := enqueue(unconfigured); !errors.Is(err, work.ErrUnavailable) {
 		t.Fatalf("unconfigured store: %v, want ErrUnavailable", err)
 	}
@@ -148,7 +150,10 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	mem := &work.Lazy{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { openStore(ctx, mem, "", true, log); close(done) }()
+	var world atomic.Pointer[ledger.Ledger]
+	seeds := []ledger.Place{{ID: "home-chest", Name: "Home", Kind: ledger.KindChest,
+		Box: ledger.Box{Min: ledger.Pos{X: 1, Y: 64, Z: 2}, Max: ledger.Pos{X: 1, Y: 64, Z: 2}}}}
+	go func() { openStore(ctx, mem, &world, seeds, "", true, log); close(done) }()
 	deadline := time.Now().Add(2 * time.Second)
 	for enqueue(mem) != nil {
 		if time.Now().After(deadline) {
@@ -156,8 +161,54 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	l := world.Load()
+	if l == nil {
+		t.Fatal("ledger not published with the store")
+	}
+	if _, ok, err := (*l).Place(context.Background(), "home-chest"); err != nil || !ok {
+		t.Fatalf("seed place missing: ok=%v err=%v", ok, err)
+	}
 	cancel()
 	<-done
+}
+
+func TestSeenReachesTheLedgerAndTheLogHoldsNoCoordinates(t *testing.T) {
+	// The logger binds os.Stdout when built, so swap it first.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	real := os.Stdout
+	os.Stdout = w
+	log := logging.New("info")
+	os.Stdout = real
+	var world atomic.Pointer[ledger.Ledger]
+	hook := observeSeen(&world, log)
+	var s work.Seen
+	s.Chest.X, s.Chest.Y, s.Chest.Z = -12, 100, 5
+	s.Items = map[string]int{"coal": 7}
+	s.At = time.Now()
+
+	hook("crew-01", s) // no ledger yet: dropped, not a panic
+	var l ledger.Ledger = ledger.NewMemory()
+	world.Store(&l)
+	hook("crew-01", s)
+
+	st, err := l.Stock(context.Background(), "chest-m12-100-5")
+	if err != nil || len(st) != 1 || st[0].Count != 7 {
+		t.Fatalf("stock %v err=%v", st, err)
+	}
+	_ = w.Close()
+	raw, _ := io.ReadAll(r)
+	out := string(raw)
+	if !strings.Contains(out, "stock_observed") || !strings.Contains(out, `"place":"unnamed"`) {
+		t.Errorf("log %q", out)
+	}
+	for _, leak := range []string{"coal", "100", `"x"`} {
+		if strings.Contains(out, leak) {
+			t.Errorf("log leaks %q: %s", leak, out)
+		}
+	}
 }
 
 func TestAuthRoutesOnlyWhenConfigured(t *testing.T) {

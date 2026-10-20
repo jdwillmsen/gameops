@@ -446,6 +446,27 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				}
 			}
 		},
+		"open lists a unit's unfinished items newest first": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-07", KindTask, tpl)
+			b := must(t, s, "crew-07", KindTask, tpl)
+			c := must(t, s, "crew-07", KindTask, tpl)
+			must(t, s, "crew-08", KindTask, tpl)
+			if _, err := s.Apply(ctx, "crew-07", a.ID, Done, 100, ""); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := s.CancelTask(ctx, "crew-07", c.ID, "op"); err != nil {
+				t.Fatal(err)
+			}
+			d := must(t, s, "crew-07", KindTask, tpl)
+			got, err := s.Open(ctx, "crew-07")
+			if err != nil || len(got) != 2 || got[0].ID != d.ID || got[1].ID != b.ID {
+				t.Fatalf("got %v err=%v, want [%v %v]", got, err, d.ID, b.ID)
+			}
+			none, err := s.Open(ctx, "crew-09")
+			if err != nil || len(none) != 0 {
+				t.Fatalf("idle unit: %v %v", none, err)
+			}
+		},
 		"prune": func(t *testing.T, s Store) {
 			must(t, s, "crew-01", KindTask, tpl)
 			if n, err := s.Prune(ctx, time.Now().Add(-time.Hour)); err != nil || n != 0 {

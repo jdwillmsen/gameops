@@ -67,6 +67,9 @@ func OpenPostgres(ctx context.Context, dsn string, connectTimeout time.Duration)
 	return &Postgres{pool: pool}, nil
 }
 
+// Pool lets the world ledger share this connection pool.
+func (p *Postgres) Pool() *pgxpool.Pool { return p.pool }
+
 func (p *Postgres) Close() {
 	p.closed.Store(true)
 	p.pool.Close()
@@ -445,6 +448,19 @@ func (p *Postgres) Recent(ctx context.Context, unit string, n int) ([]Item, erro
 	defer cancel()
 	rows, err := p.pool.Query(ctx,
 		`SELECT `+columns+` FROM `+workTable+` WHERE unit = $1 ORDER BY created_at DESC, id DESC LIMIT $2`, unit, n)
+	if err != nil {
+		return nil, p.wrap(err)
+	}
+	items, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Item, error) { return scan(r) })
+	return items, p.wrap(err)
+}
+
+func (p *Postgres) Open(ctx context.Context, unit string) ([]Item, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	rows, err := p.pool.Query(ctx,
+		`SELECT `+columns+` FROM `+workTable+` WHERE unit = $1 AND state NOT IN ('done', 'failed', 'cancelled')
+		 ORDER BY created_at DESC, id DESC`, unit)
 	if err != nil {
 		return nil, p.wrap(err)
 	}

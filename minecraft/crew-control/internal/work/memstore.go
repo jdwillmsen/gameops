@@ -282,6 +282,18 @@ func (m *Memory) Recent(_ context.Context, unit string, n int) ([]Item, error) {
 	return out, nil
 }
 
+func (m *Memory) Open(_ context.Context, unit string) ([]Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Item
+	for i := len(m.items) - 1; i >= 0; i-- {
+		if it := m.items[i]; it.Unit == unit && !terminal(it.State) {
+			out = append(out, it.Item)
+		}
+	}
+	return out, nil
+}
+
 func (m *Memory) Prune(_ context.Context, before time.Time) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
