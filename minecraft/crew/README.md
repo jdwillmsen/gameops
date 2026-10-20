@@ -130,7 +130,10 @@ reads the delta as velocity and corrects one that carries the rise.
 The pathfinder walks the same shapes. It slides the unit's footprint across
 each move in eighths of a block, so a half block or a stair is a walk, a block
 and a half is a wall and a full block takes a jump, and `NeedsJump` tells the
-navigator which waypoints to jump for. Ladders are collided with and climbed
+navigator which waypoints to jump for. A replan starts from where the unit
+really stands, not its cell's centre, so a unit that brushed a fence post or a
+gate can plan its way out; a diagonal move needs both cells beside it open.
+Ladders are collided with and climbed
 when the unit walks into one, but the planner does not route up them.
 
 Descending a flight of stairs is the known weak spot: the unit falls half a
