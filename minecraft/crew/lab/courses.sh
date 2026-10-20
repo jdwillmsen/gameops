@@ -49,6 +49,11 @@ fi
 
 cmd() { "${exec_prefix[@]}" send-command "$@" >/dev/null; }
 
+# Reads the whole log rather than using grep -q: under pipefail an early exit
+# kills the log reader with SIGPIPE, and the failed pipeline reads as no match
+# whenever the server keeps logging after the line.
+logged() { server_logs "$started" | grep -F "$1" >/dev/null; }
+
 plan=$(mktemp)
 trap 'rm -f "$plan"' EXIT
 (cd "$repo" && go run ./minecraft/crew/cmd/labcourses "$field") >"$plan"
@@ -72,7 +77,7 @@ for a in "${areas[@]}"; do
   for try in $(seq 1 60); do
     cmd testforblock "$x0" 319 "$z0" air
     sleep 2
-    if server_logs "$started" | grep -q "at $x0,319,$z0"; then break; fi
+    if logged "at $x0,319,$z0"; then break; fi
     if ((try == 60)); then
       echo "courses.sh: chunks at $x0,$z0 never loaded" >&2
       exit 1
@@ -95,7 +100,7 @@ rm -f "$plan.cmds"
 
 # About 20 commands a second; allow a generous margin before giving up.
 deadline=$((SECONDS + lines / 5 + 120))
-until server_logs "$started" | grep -q "at $mx,318,$mz"; do
+until logged "at $mx,318,$mz"; do
   if ((SECONDS > deadline)); then
     echo "courses.sh: end marker not seen after $lines commands" >&2
     exit 1
