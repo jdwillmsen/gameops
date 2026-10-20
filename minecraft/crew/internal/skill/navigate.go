@@ -47,6 +47,8 @@ type navigator struct {
 	// the planner needs a jump to cross it.
 	from      protocol.BlockPos
 	fromY     float32
+	fromX     float32
+	fromZ     float32
 	jumps     bool
 	jumpsFor  int
 	segStart  mgl32.Vec2
@@ -85,14 +87,17 @@ func (n *navigator) step(a Actuator) (Status, error) {
 
 	if !last && dist <= waypointReach {
 		if math.Abs(float64(p.Feet.Y())-n.level(wp)) > levelSlack {
-			if p.OnGround {
+			// A unit still above the waypoint has a drop to make, and walking
+			// on is how it makes it; only one that came down short of the
+			// waypoint's level has landed somewhere else than planned.
+			if p.OnGround && float64(p.Feet.Y()) < n.level(wp) {
 				// Landed on another level than planned.
 				n.plan = nil
 				return n.tick(a, act.Input{Yaw: p.Yaw})
 			}
 		} else {
 			n.segStart = mgl32.Vec2{c.X(), c.Z()}
-			n.from, n.fromY = wp, float32(n.level(wp))
+			n.from, n.fromY, n.fromX, n.fromZ = wp, float32(n.level(wp)), c.X(), c.Z()
 			n.idx++
 			n.onWaypt = 0
 			wp = n.plan[n.idx]
@@ -129,7 +134,7 @@ func (n *navigator) level(wp protocol.BlockPos) float64 {
 // jump against its own prediction.
 func (n *navigator) needsJump(wp protocol.BlockPos) bool {
 	if n.jumpsFor != n.idx+1 {
-		n.jumps, n.jumpsFor = path.NeedsJump(n.world, n.from, n.fromY, wp), n.idx+1
+		n.jumps, n.jumpsFor = path.NeedsJumpFrom(n.world, n.fromX, n.fromY, n.fromZ, wp), n.idx+1
 	}
 	return n.jumps
 }
@@ -188,13 +193,7 @@ func (n *navigator) replan(p act.Pose) error {
 	n.lastDist = d
 	n.planCount++
 
-	var plan []protocol.BlockPos
-	var err error
-	if p.OnGround {
-		plan, err = path.FindFrom(n.world, cellOf(p.Feet), p.Feet.Y(), n.goal, 0)
-	} else {
-		plan, err = path.Find(n.world, cellOf(p.Feet), n.goal, 0)
-	}
+	plan, err := path.FindFromPos(n.world, p.Feet.X(), p.Feet.Y(), p.Feet.Z(), n.goal, 0)
 	if err != nil {
 		return fmt.Errorf("walking to the goal: %w", err)
 	}
@@ -202,7 +201,7 @@ func (n *navigator) replan(p act.Pose) error {
 		plan = []protocol.BlockPos{n.goal}
 	}
 	n.plan, n.idx, n.onWaypt = plan, 0, 0
-	n.from, n.fromY, n.jumpsFor = cellOf(p.Feet), p.Feet.Y(), 0
+	n.from, n.fromY, n.fromX, n.fromZ, n.jumpsFor = cellOf(p.Feet), p.Feet.Y(), p.Feet.X(), p.Feet.Z(), 0
 	n.segStart = mgl32.Vec2{p.Feet.X(), p.Feet.Z()}
 	return nil
 }

@@ -225,3 +225,44 @@ func TestColliderShapesComeFromStates(t *testing.T) {
 		t.Error("an unloaded block must collide")
 	}
 }
+
+func TestADiagonalMoveCannotCutTheCornerOfAFencePost(t *testing.T) {
+	w := statedFlat()
+	w.set(4, 1, 3, "oak_fence", nil)
+	plan, err := Find(w, protocol.BlockPos{3, 1, 3}, protocol.BlockPos{4, 1, 4}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) != 2 || plan[0] != (protocol.BlockPos{3, 1, 4}) {
+		t.Errorf("plan = %v, want round the post, not across its corner", plan)
+	}
+}
+
+func TestPlanningFromBesideAPostStartsFromTheUnitsOwnPosition(t *testing.T) {
+	w := statedFlat()
+	w.set(3, 1, 3, "oak_fence", nil)
+	plan, err := FindFromPos(w, 3.05, 1, 3.5, protocol.BlockPos{6, 1, 3}, 0)
+	if err != nil || len(plan) == 0 || plan[len(plan)-1] != (protocol.BlockPos{6, 1, 3}) {
+		t.Errorf("plan %v, err %v: the unit beside a post must find a way on", plan, err)
+	}
+}
+
+func TestAMoveThatSinksIntoAPitAndClimbsOutIsAJump(t *testing.T) {
+	// Blocks stand at x=2, 4 and 5; x=3 is a one-deep pit. The unit stands on
+	// the block at x=2 with its body hanging over the pit.
+	w := statedFlat()
+	for _, x := range []int32{2, 4, 5} {
+		for z := int32(0); z < 8; z++ {
+			w.set(x, 1, z, "stone", nil)
+			w.set(x, 2, z, "air", nil)
+		}
+	}
+	from := protocol.BlockPos{2, 2, 3}
+	plan, err := FindFromPos(w, 2.9, 2, 3.5, protocol.BlockPos{5, 2, 3}, 0)
+	if err != nil {
+		t.Fatalf("no way out of the overhang: %v", err)
+	}
+	if n := jumps(t, w, from, plan); n == 0 {
+		t.Errorf("plan %v needs the jump out of the pit", plan)
+	}
+}

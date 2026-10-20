@@ -156,3 +156,29 @@ func TestNavigateArrivesOnTopOfASlab(t *testing.T) {
 		t.Errorf("%d jumps, want a step", r.jumps)
 	}
 }
+
+// A unit that brushed a fence post or a closed gate stands in the post's cell
+// with its centre off to one side; planning from the cell's centre would put
+// the box inside the post and find no way out.
+func TestNavigateLeavesTheSideOfAFencePostOrGate(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		at   protocol.BlockPos
+		feet mgl32.Vec3
+	}{
+		{"oak_fence", protocol.BlockPos{3, 1, 3}, mgl32.Vec3{3.05, 1, 3.5}},
+		{"fence_gate", protocol.BlockPos{3, 1, 3}, mgl32.Vec3{3.5, 1, 3.05}},
+		{"fence_gate", protocol.BlockPos{3, 1, 3}, mgl32.Vec3{3.5, 1, 3.95}},
+	} {
+		w := flatWorld(12)
+		w[tc.at] = tc.name
+		r := newRig(t, w, tc.feet)
+		goal := protocol.BlockPos{8, 1, 8}
+		st, err := r.run(NewNavigate(w, r.self, goal, 0.8), 400)
+		if st != Done || err != nil {
+			t.Errorf("%s from %v: status %v, err %v", tc.name, tc.feet, st, err)
+			continue
+		}
+		near(t, r, goal, 0.8)
+	}
+}
