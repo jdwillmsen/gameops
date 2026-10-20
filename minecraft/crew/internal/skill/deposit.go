@@ -172,7 +172,8 @@ func (d *Deposit) start(a Actuator) outcome {
 }
 
 // standCell picks the standing spot within reach of a chest that is nearest
-// the unit.
+// the unit. The chest's own cell is not one: a chest is lower than a block, so
+// a unit can stand on it, and one that did tried to open what it stood on.
 func standCell(world ChestWorld, chest protocol.BlockPos, p act.Pose) (protocol.BlockPos, bool) {
 	best, bestD, found := protocol.BlockPos{}, float32(1e30), false
 	const span = 3
@@ -180,6 +181,9 @@ func standCell(world ChestWorld, chest protocol.BlockPos, p act.Pose) (protocol.
 		for dy := int32(-span); dy <= span; dy++ {
 			for dz := int32(-span); dz <= span; dz++ {
 				c := protocol.BlockPos{chest.X() + dx, chest.Y() + dy, chest.Z() + dz}
+				if c == chest {
+					continue
+				}
 				if centre(chest).Sub(standEye(c)).Len() > chestRange-arriveSlack || !path.Standable(world, c) {
 					continue
 				}
