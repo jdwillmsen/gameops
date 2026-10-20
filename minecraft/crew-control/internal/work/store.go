@@ -64,6 +64,9 @@ type Seen struct {
 	} `json:"chest"`
 	Items map[string]int `json:"items"`
 	At    time.Time      `json:"at"`
+	// Partial is set when the unit left items out, so missing ones are not
+	// gone from the chest.
+	Partial bool `json:"partial"`
 }
 
 type Store interface {

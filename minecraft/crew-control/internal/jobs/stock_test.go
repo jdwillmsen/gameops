@@ -35,7 +35,7 @@ func world(t *testing.T, ps ...ledger.Place) *ledger.Memory {
 
 func observe(t *testing.T, l *ledger.Memory, p ledger.Place, ago time.Duration, items map[string]int) {
 	t.Helper()
-	if err := l.Observe(context.Background(), "crew-01", time.Now().Add(-ago), p.Box.Min, items); err != nil {
+	if err := l.Observe(context.Background(), "crew-01", time.Now().Add(-ago), p.Box.Min, items, false); err != nil {
 		t.Fatal(err)
 	}
 }

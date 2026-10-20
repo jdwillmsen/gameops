@@ -218,8 +218,9 @@ func parseSeen(raw json.RawMessage) (Seen, bool) {
 		Chest *struct {
 			X, Y, Z *int
 		} `json:"chest"`
-		Items map[string]int `json:"items"`
-		At    time.Time      `json:"at"`
+		Items   map[string]int `json:"items"`
+		At      time.Time      `json:"at"`
+		Partial bool           `json:"partial"`
 	}
 	if decodeStrict(bytes.NewReader(raw), &w) != nil || w.At.IsZero() || len(w.Items) > maxSeenItems ||
 		w.Chest == nil || w.Chest.X == nil || w.Chest.Y == nil || w.Chest.Z == nil {
@@ -231,7 +232,7 @@ func parseSeen(raw json.RawMessage) (Seen, bool) {
 		}
 	}
 	s.Chest.X, s.Chest.Y, s.Chest.Z = *w.Chest.X, *w.Chest.Y, *w.Chest.Z
-	s.Items, s.At = w.Items, w.At
+	s.Items, s.At, s.Partial = w.Items, w.At, w.Partial
 	if s.Items == nil {
 		s.Items = map[string]int{}
 	}

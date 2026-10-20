@@ -39,6 +39,8 @@ var (
 
 	idRE   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 	itemRE = regexp.MustCompile(`^[a-z_]{1,32}$`)
+	// autoIDRE is the form chestID writes.
+	autoIDRE = regexp.MustCompile(`^chest-(m?[0-9]+)-(m?[0-9]+)-(m?[0-9]+)$`)
 )
 
 type Pos struct {
@@ -74,24 +76,29 @@ type Ledger interface {
 	Places(ctx context.Context) ([]Place, error)
 	Place(ctx context.Context, id string) (Place, bool, error)
 	// PutPlace creates or replaces an unseeded place; ErrSeeded for a seeded id.
+	// An id in the form Observe gives the chests it finds is refused unless it
+	// names such a chest and keeps its box and kind: only the name can change.
 	PutPlace(ctx context.Context, p Place) error
 	// DeletePlace removes an unseeded place and its stock.
 	DeletePlace(ctx context.Context, id string) error
-	// Seed upserts ps as seeded and removes seeded places not in ps. It
-	// never removes unseeded places, but an unseeded chest at a seeded
-	// chest's position is folded into it: its stock moves over if newer,
-	// then it is deleted, so one position never holds two chests.
+	// Seed upserts ps as seeded and removes seeded places not in ps; an id in
+	// Observe's form is refused. It never removes unseeded places, but an
+	// unseeded chest at a seeded chest's position is folded into it: its
+	// stock moves over if newer, then it is deleted, so one position never
+	// holds two chests.
 	Seed(ctx context.Context, ps []Place) error
 	// Observe replaces the stock of the chest at the position with items,
 	// which is the chest's whole contents, creating an unseeded place if no
-	// chest is known there. An observation older than the stock already held
-	// is ignored: events can arrive out of order. A time in the future is
-	// taken as now, so one bad clock cannot outrank every later report.
+	// chest is known there. A partial observation is only some of the
+	// contents: it updates the items it carries and leaves the rest as they
+	// were. An observation older than the stock already held is ignored:
+	// events can arrive out of order. A time in the future is taken as now,
+	// so one bad clock cannot outrank every later report.
 	//
 	// The guard reads the stored rows' times, so a chest observed empty
 	// (which has no rows to carry a time) cannot reject an older report that
 	// arrives later. The schema has no place-level last-seen to hold it.
-	Observe(ctx context.Context, unit string, at time.Time, chest Pos, items map[string]int) error
+	Observe(ctx context.Context, unit string, at time.Time, chest Pos, items map[string]int, partial bool) error
 	Stock(ctx context.Context, placeID string) ([]Stock, error)
 	ChestAt(ctx context.Context, p Pos) (Place, bool, error)
 }
@@ -154,6 +161,22 @@ func chestID(p Pos) string {
 		return strconv.Itoa(v)
 	}
 	return "chest-" + c(p.X) + "-" + c(p.Y) + "-" + c(p.Z)
+}
+
+// Observe files stock under the id its position encodes, so that id must
+// stay on that position and stay a chest.
+func checkAutoID(p, old Place, exists bool) error {
+	if autoIDRE.MatchString(p.ID) && (!exists || old.Kind != p.Kind || old.Box != p.Box) {
+		return invalid("ids like chest-x-y-z are kept for chests units find")
+	}
+	return nil
+}
+
+func validSeed(p Place) error {
+	if err := Validate(p); err != nil {
+		return err
+	}
+	return checkAutoID(p, Place{}, false)
 }
 
 func autoChest(p Pos) Place {

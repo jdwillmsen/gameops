@@ -115,7 +115,7 @@ func TestPlaceRoutesRoundTrip(t *testing.T) {
 		t.Fatalf("create: %d %s", code, body)
 	}
 	at := time.Now()
-	if err := rg.led.Observe(ctx, "crew-01", at, Pos{1, 64, 1}, map[string]int{"oak_log": 7}); err != nil {
+	if err := rg.led.Observe(ctx, "crew-01", at, Pos{1, 64, 1}, map[string]int{"oak_log": 7}, false); err != nil {
 		t.Fatal(err)
 	}
 	code, body := rg.do(t, "GET", "/v1/places", "", signed)
