@@ -437,7 +437,7 @@ Task API or crew-control, so an operator's job starts at once.
 
 ### Test fields
 
-`lab/courses.sh [--confirm-overwrite] <lab> grounds|courses|trees|works|signs`
+`lab/courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs`
 builds one of four fixed test fields on the lab's flat ground (grass at y 63)
 around the spawn hub at x -61..51, z -519..-323. Each is a 3x3 grid of 40x40
 cells with roads between, joined to the hub's gates or to the next field by
@@ -462,7 +462,8 @@ and the field clears 48 blocks up because the giants outgrow 32. Pads are blank 
 ticking areas, streams the commands to the server's stdin, waits for a logged
 end marker and counts real errors. A rebuild replaces the field, including
 its stocked chests and its animals, and reports zero errors when everything
-placed. A `k8s:` target needs `--confirm-overwrite`:
+placed. `--plan` feeds a saved `labcourses <field>` output instead of running
+the generator, for hosts without Go. A `k8s:` target needs `--confirm-overwrite`:
 
 ```
 minecraft/crew/lab/courses.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod> courses
@@ -473,6 +474,25 @@ direction label inside each east and west gate, and a name at each field's
 end of the gate paths. They are name-tagged armor stands, because the console
 cannot write sign text and the server ignores block placement from a bot. A
 rebuild replaces each stand rather than adding one.
+
+#### Nightly rebuild
+
+The lab chart can rebuild fields every night so a test starts clean
+(`labRebuild` in `charts/crew-lab`). The crew image carries `/labcourses`; an
+init container runs `labcourses -o <dir> grounds courses trees works`, which writes
+`<field>.plan` files and the two lab scripts into a shared volume, and a
+kubectl container runs `nightly.sh` from there. `nightly.sh` is the only
+extra logic: for each field it checks `list` and `tickingarea list`, then
+calls `courses.sh --confirm-overwrite --plan <field>.plan`, the same feed as
+a manual run. It skips (exit 0, one log line) while any player outside the
+`NON_HUMAN` name patterns is online or any `crew-course-*` ticking area exists, and exits 1 if
+a field reports errors or the server's state cannot be read.
+
+```
+LAB=k8s:<ns>/<pod> FIELDS="grounds courses trees works" PLANS=<dir> \
+  NON_HUMAN="Agate Basalt load-*" \
+  nightly.sh
+```
 
 ### Operator overlay
 
