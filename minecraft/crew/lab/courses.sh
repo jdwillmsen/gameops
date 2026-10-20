@@ -2,9 +2,13 @@
 # Builds a crew test field on a lab from the commands labcourses prints:
 #   grounds  work yards east of the spawn hub (x 150..293, z -500..-357)
 #   courses  physics, shapes and numbered pads west of it (x -294..-151)
+#   trees    fixed oaks, natural species, swamp, nursery beyond the courses
+#            (x -444..-301, z -500..-357)
+#   works    rails, boats, arena, gates, climbing, bridges north of the
+#            grounds (x 150..293, z -700..-557)
 #   signs    name-tag labels at spawn, the hub's gates and the fields
 #
-# usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|signs
+# usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|trees|works|signs
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
 #   for the cluster lab's server pod.
 #
@@ -23,7 +27,7 @@ if [[ ${1:-} == --confirm-overwrite ]]; then
   shift
 fi
 
-usage="usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|signs"
+usage="usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|trees|works|signs"
 lab=${1:?$usage}
 field=${2:?$usage}
 here=$(cd "$(dirname "$0")" && pwd)
@@ -109,7 +113,9 @@ until logged "at $mx,318,$mz"; do
 done
 
 # Not failures: "0 blocks filled" (an air-on-air fill), "No targets matched"
-# (a first build has no animals to kill), and the probes' unloaded columns.
-errors=$(server_logs "$started" | grep ERROR | grep -cv -e '] 0 blocks filled' -e 'outside of the world' -e 'already exists' -e 'No targets matched selector' || true)
+# (a first build has no animals to kill), the probes' unloaded columns, and a
+# natural tree that grew too big for its spot (the game picks each tree's
+# size at random, so now and then one does not fit).
+errors=$(server_logs "$started" | grep ERROR | grep -cv -e '] 0 blocks filled' -e 'outside of the world' -e 'already exists' -e 'No targets matched selector' -e 'Feature could not be placed' || true)
 echo "courses.sh: built $field ($lines commands, $errors errors)"
 ((errors == 0))

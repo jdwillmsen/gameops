@@ -39,9 +39,20 @@ func TestCoursesFitServerLimits(t *testing.T) {
 					if v := (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1); v > maxFill {
 						t.Errorf("%s: %d blocks, limit %d", cmd, v, maxFill)
 					}
-				case "setblock", "summon", "replaceitem":
+				case "setblock", "summon", "replaceitem", "place":
 					i := 1
-					if f[0] != "setblock" {
+					switch {
+					case f[0] == "replaceitem" && f[1] == "entity":
+						if !strings.HasPrefix(f[2], "@e[type=armor_stand,") {
+							t.Errorf("%s: replaceitem must target an armor stand", cmd)
+						}
+						continue
+					case f[0] == "place":
+						if f[1] != "feature" {
+							t.Errorf("%s: only place feature is used", cmd)
+						}
+						i = 3
+					case f[0] != "setblock":
 						i = 2
 					}
 					mustScan(t, cmd, f[i:i+3], &x0, &y0, &z0)
@@ -78,11 +89,25 @@ func mustScan(t *testing.T, cmd string, fields []string, dst ...*int) {
 	}
 }
 
-func TestFieldsDoNotOverlapTheHub(t *testing.T) {
-	hub := box{-61, -519, 51, -323}
-	for name, r := range map[string]box{"grounds": groundsGrid.bounds(), "courses": courseGrid.bounds()} {
-		if r.x0 <= hub.x1 && r.x1 >= hub.x0 && r.z0 <= hub.z1 && r.z1 >= hub.z0 {
-			t.Errorf("%s %v overlaps the hub %v", name, r, hub)
+// The fields and the hub must not overlap each other, and every field must
+// stay inside the flat square: outside it is natural terrain.
+func TestFieldsDoNotOverlap(t *testing.T) {
+	boxes := map[string]box{
+		"hub":     {-61, -519, 51, -323},
+		"grounds": groundsGrid.bounds(),
+		"courses": courseGrid.bounds(),
+		"trees":   treesGrid.bounds(),
+		"works":   worksGrid.bounds(),
+	}
+	square := box{-500, -900, 499, 99}
+	for a, r := range boxes {
+		if r.x0 < square.x0 || r.x1 > square.x1 || r.z0 < square.z0 || r.z1 > square.z1 {
+			t.Errorf("%s %v leaves the flat square %v", a, r, square)
+		}
+		for b, s := range boxes {
+			if a < b && r.x0 <= s.x1 && r.x1 >= s.x0 && r.z0 <= s.z1 && r.z1 >= s.z0 {
+				t.Errorf("%s %v overlaps %s %v", a, r, b, s)
+			}
 		}
 	}
 }

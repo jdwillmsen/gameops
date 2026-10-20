@@ -9,10 +9,12 @@ type label struct {
 }
 
 const (
-	westText    = "§b<< WEST§r  Crew courses: physics, shapes, pads"
-	eastText    = "§aEAST >>§r  Crew test grounds: work yards"
+	westText    = "§b<< WEST§r  Crew courses: physics, shapes, pads; trees beyond"
+	eastText    = "§aEAST >>§r  Crew test grounds: work yards; works to the north"
 	coursesText = "§bCREW COURSES§r  x -294..-151, z -500..-357"
 	groundsText = "§aCREW TEST GROUNDS§r  x 150..293, z -500..-357"
+	treesText   = "§2CREW TREES§r  x -444..-301, z -500..-357"
+	worksText   = "§6CREW WORKS§r  x 150..293, z -700..-557  (rails, boats, arena, climbing)"
 )
 
 // The credit faces the spawn road; the rest stand inside each gate and at
@@ -23,6 +25,8 @@ var labels = []label{
 	{66, -403, eastText}, {66, -441, eastText},
 	{-148, -403, coursesText}, {-148, -441, coursesText},
 	{148, -403, groundsText}, {148, -441, groundsText},
+	{-297, -403, treesText}, {-297, -441, treesText},
+	{worksPathX + 2, -505, worksText},
 }
 
 // buildSigns removes the stand in each label's block before summoning its
@@ -35,5 +39,9 @@ func buildSigns(b *builder) {
 }
 
 func signsAreas() []box {
-	return tickingAreas(box{-148, -441, 148, -402})
+	var out []box
+	for _, r := range []box{{-297, -441, 148, -402}, {worksPathX + 2, -505, worksPathX + 2, -505}} {
+		out = append(out, tickingAreas(r)...)
+	}
+	return out
 }
