@@ -41,13 +41,23 @@ type NetworkDecoder struct {
 	mu      sync.Mutex
 	version string
 	warned  bool
+
+	// states remembers what a hash resolved to: the registry builds a fresh
+	// property map on every call, and the planner reads a hash per cell.
+	statesMu sync.RWMutex
+	states   map[uint32]blockState
+}
+
+type blockState struct {
+	name  string
+	props map[string]any
 }
 
 // NewNetworkDecoder returns a decoder. warn, if set, is called at most once
 // per session, on the first unmapped hash; it must not be given positions.
 func NewNetworkDecoder(warn func(serverVersion string)) *NetworkDecoder {
 	finalizeRegistry.Do(world.DefaultBlockRegistry.Finalize)
-	return &NetworkDecoder{warn: warn, version: "unknown"}
+	return &NetworkDecoder{warn: warn, version: "unknown", states: map[uint32]blockState{}}
 }
 
 // BeginSession labels the unmapped-hash counter with the server version and
@@ -97,12 +107,21 @@ func (d *NetworkDecoder) BlockName(networkID uint32) (string, bool) {
 	return name, ok
 }
 
-// BlockState is BlockName with the block's states.
+// BlockState is BlockName with the block's states. The returned map is shared
+// between calls and must not be changed.
 func (d *NetworkDecoder) BlockState(networkID uint32) (string, map[string]any, bool) {
+	d.statesMu.RLock()
+	st, hit := d.states[networkID]
+	d.statesMu.RUnlock()
+	if hit {
+		return st.name, st.props, true
+	}
 	reg := world.DefaultBlockRegistry
-	rid, ok := reg.HashToRuntimeID(networkID)
-	if ok {
+	if rid, ok := reg.HashToRuntimeID(networkID); ok {
 		if name, props, ok := reg.RuntimeIDToState(rid); ok {
+			d.statesMu.Lock()
+			d.states[networkID] = blockState{name, props}
+			d.statesMu.Unlock()
 			return name, props, true
 		}
 	}
