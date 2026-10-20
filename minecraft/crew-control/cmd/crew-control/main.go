@@ -109,6 +109,21 @@ func main() {
 			api.OnSeen = observeSeen(&world, log)
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
 			poller.SetWorkSource(api.Feed)
+			ledger.NewAPI(func() ledger.Ledger {
+				if l := world.Load(); l != nil {
+					return *l
+				}
+				return nil
+			}).MountOperator(mux, operators)
+			jobAPI := jobs.NewAPI(func() (ledger.Ledger, *jobs.Scheduler) {
+				l := world.Load()
+				if l == nil {
+					return nil, nil
+				}
+				return *l, sched.Load()
+			}, poller.PublishJobs)
+			jobAPI.MountOperator(mux, operators)
+			poller.SetJobsSource(jobAPI.Feed)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return streamCtx },
@@ -242,10 +257,11 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 	checks[jobs.KindStock] = jobs.StockCheck(led, units, time.Now)
 	scheduler := jobs.New(jobs.Config{
 		Jobs: js, Work: backend, Checks: checks, Log: log, Units: units,
-		// Task 7 streams job changes; until then nothing listens.
-		Notify: func(uuid.UUID) {},
+		Notify: func(uuid.UUID) { poller.PublishJobs() },
 	})
 	sched.Store(scheduler)
+	// Streams that opened before the store was ready have no job list yet.
+	poller.PublishJobs()
 	schedDone := make(chan struct{})
 	go func() { scheduler.Run(ctx); close(schedDone) }()
 	defer func() { <-schedDone }()

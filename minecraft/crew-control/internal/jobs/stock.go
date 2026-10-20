@@ -28,6 +28,20 @@ const (
 // gatherable lists the items some unit template can collect.
 var gatherable = []string{"cobblestone", "oak_log"}
 
+// ErrUnplannable marks a goal the world cannot meet as asked, such as a
+// missing place or an item nothing produces; the message is safe to show.
+var ErrUnplannable = errors.New("jobs: cannot plan")
+
+type unplannable string
+
+func (e unplannable) Error() string        { return string(e) }
+func (e unplannable) Is(target error) bool { return target == ErrUnplannable }
+
+type badSpec string
+
+func (e badSpec) Error() string        { return string(e) }
+func (e badSpec) Is(target error) bool { return target == ErrInvalid }
+
 // StockSpec asks for Want[item] of each item to be in the chest Place.
 type StockSpec struct {
 	Place string         `json:"place"`
@@ -45,14 +59,14 @@ func sortedItems(want map[string]int) []string {
 
 func (s StockSpec) validate() error {
 	if len(s.Want) == 0 {
-		return errors.New("want nothing")
+		return badSpec("want nothing")
 	}
 	for _, it := range sortedItems(s.Want) {
 		if !slices.Contains(gatherable, it) {
-			return fmt.Errorf("no source for %s", it)
+			return unplannable("no source for " + it)
 		}
 		if n := s.Want[it]; n < minWant || n > maxWant {
-			return fmt.Errorf("want for %s must be %d to %d", it, minWant, maxWant)
+			return badSpec(fmt.Sprintf("want for %s must be %d to %d", it, minWant, maxWant))
 		}
 	}
 	return nil
@@ -64,10 +78,10 @@ func targetChest(ctx context.Context, l ledger.Ledger, id string) (ledger.Place,
 		return ledger.Place{}, err
 	}
 	if !ok {
-		return ledger.Place{}, fmt.Errorf("place %s not found", id)
+		return ledger.Place{}, unplannable("place " + id + " not found")
 	}
 	if p.Kind != ledger.KindChest {
-		return ledger.Place{}, fmt.Errorf("place %s is not a chest", id)
+		return ledger.Place{}, unplannable("place " + id + " is not a chest")
 	}
 	return p, nil
 }
@@ -174,7 +188,7 @@ func planStock(ctx context.Context, l ledger.Ledger, spec StockSpec, free []ledg
 			}
 		}
 		if area == nil {
-			return nil, fmt.Errorf("no source for %s", item)
+			return nil, unplannable("no source for " + item)
 		}
 		for i, q := range chunks(remaining, min(len(free), (remaining+perUnit-1)/perUnit)) {
 			work = append(work, Step{Key: fmt.Sprintf("gather-%s-%d", item, i+1), DependsOn: slices.Clone(after),
