@@ -482,8 +482,10 @@ surface two sixteenths below the block's edge, and glass and ice are blended. Th
 sky is a gradient whose horizon colour is the fog colour, and fog closes at the
 requested radius so the edge of the loaded terrain fades out. The canvas is
 antialiased at up to 2x pixel ratio. Crew does not receive biome data, so tint is sampled for one climate
-everywhere (the plains biome); stairs and slabs have no orientation or half
-for the same reason and are drawn as bottom slabs and stairs that rise towards +z.
+everywhere (the plains biome). The page cannot see block states either, so
+stairs, top slabs, doors, trapdoors and snow layers carry their boxes in the
+block name, from the same shape table the unit's pathing uses; past a budget of
+shape variants a block falls back to its default shape.
 If the fetch fails, the camera is offline at first start or the page cannot
 load the atlas, the view stays flat-coloured and the build is retried on the
 next session.
@@ -519,8 +521,14 @@ are drawn.
 The pack leaves some posing to animations and render controllers that are not
 read. The build covers the common cases (quadruped torsos lie down, spider
 legs splay) and shows one fixed look per entity: its default texture, no
-armour, saddles, villager professions, horse markings or glowing eyes. Players
-are the pack's Steve until skins are carried.
+saddles, villager professions, horse markings or glowing eyes.
+
+Players, the unit's own body included, wear their skins: crew relays each
+listed skin as a PNG in skin frames, with slim arms, legacy 64x32 skins
+converted, and the pack's Steve for a skin it cannot draw. Worn armour, from
+`MobArmourEquipment` and the unit's own armour window, travels in an armour
+frame and is drawn from the pack's `_1`/`_2` armour textures, which the atlas
+build packs into the entity sheet (leather in its undyed brown).
 
 Appearance that is not pose travels in an entity data frame: baby, sheared,
 the sheep dye index and a dropped item's name, taken from `AddActor`,
