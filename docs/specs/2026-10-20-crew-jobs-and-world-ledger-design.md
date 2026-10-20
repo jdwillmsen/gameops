@@ -125,7 +125,7 @@ Two new nullable columns on `crew_work`, `job_id` and `step_id`, give every work
 
 ### 7. Console
 
-- **Jobs view.** There is a new "Jobs" view (key `j`), visible only when signed in.
+- **Jobs view.** There is a new "Jobs" view (key Shift-J; plain `j` steps to the next unit), visible only when signed in.
   - Start a job from a template:
     - "Parallel demo" (no fields);
     - "Stock goal" (place picker plus item/qty rows).

@@ -86,19 +86,33 @@ func targetChest(ctx context.Context, l ledger.Ledger, id string) (ledger.Place,
 	return p, nil
 }
 
-// counts sums the stock seen at or after since; newest is the latest sighting
-// of any item, zero when the ledger holds no rows.
-func counts(rows []ledger.Stock, since time.Time) (have map[string]int, newest time.Time) {
-	have = map[string]int{}
+// counts sums the stock seen at or after since.
+func counts(rows []ledger.Stock, since time.Time) map[string]int {
+	have := map[string]int{}
 	for _, r := range rows {
-		if r.SeenAt.After(newest) {
-			newest = r.SeenAt
-		}
 		if !r.SeenAt.Before(since) {
 			have[r.Item] = r.Count
 		}
 	}
-	return have, newest
+	return have
+}
+
+// staleFor reports whether any wanted item lacks a row seen at or after
+// since. Items are judged one by one: a partial report restamps only the
+// items it carried.
+func staleFor(rows []ledger.Stock, want map[string]int, since time.Time) bool {
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if !r.SeenAt.Before(since) {
+			seen[r.Item] = true
+		}
+	}
+	for item := range want {
+		if !seen[item] {
+			return true
+		}
+	}
+	return false
 }
 
 // chunks splits n into parts as equal as possible: k is the wish, raised
@@ -134,8 +148,8 @@ func planStock(ctx context.Context, l ledger.Ledger, spec StockSpec, free []ledg
 	if err != nil {
 		return nil, err
 	}
-	have, newest := counts(rows, since)
-	stale := newest.IsZero() || now.Sub(newest) > freshFor
+	have := counts(rows, since)
+	stale := staleFor(rows, spec.Want, now.Add(-freshFor))
 
 	var steps, work []Step
 	var after []string
@@ -210,7 +224,8 @@ func keysOf(steps []Step) []string {
 
 // CheckStock compares the target's count with the want. Only counts seen
 // since the job began are believed: an older count says nothing about what
-// the job did. topUp is one more round of work that could close the gap.
+// the job did, so a wanted item counted only before then asks for a fresh
+// look. topUp is one more round of work that could close the gap.
 func CheckStock(ctx context.Context, l ledger.Ledger, spec StockSpec, since time.Time, free []ledger.UnitStatus) (ok bool, short string, topUp []Step, err error) {
 	return checkStock(ctx, l, spec, since, free, time.Now())
 }
@@ -224,11 +239,14 @@ func checkStock(ctx context.Context, l ledger.Ledger, spec StockSpec, since time
 	if err != nil {
 		return false, "", nil, err
 	}
-	have, _ := counts(rows, since)
+	have := counts(rows, since)
 	fresh := false
 	for _, r := range rows {
 		if !r.SeenAt.Before(since) {
 			fresh = true
+		} else if _, wanted := spec.Want[r.Item]; wanted {
+			fresh = false
+			break
 		}
 	}
 	if !fresh {

@@ -195,6 +195,7 @@ export const KEYS = [
   ['r', 'roster'],
   ['e', 'event feed'],
   ['m', 'radar (signed in)'],
+  ['Shift-J', 'jobs and places (signed in)'],
   ['p', 'pin / unpin picture-in-picture'],
   ['f', 'kiosk: hide the chrome'],
   ['Ctrl-K or :', 'command palette'],
