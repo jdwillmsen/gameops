@@ -157,3 +157,64 @@ func TestUnknownBlocksAreFullCubesAndPlantsAreEmpty(t *testing.T) {
 		}
 	}
 }
+
+func centreTop(bs []Box) float32 {
+	top := float32(0)
+	for _, b := range bs {
+		if b.Min[0] <= 0.5 && b.Max[0] >= 0.5 && b.Min[2] <= 0.5 && b.Max[2] >= 0.5 && b.Max[1] > top {
+			top = b.Max[1]
+		}
+	}
+	return top
+}
+
+// Blocks the block table gets wrong rest a unit where the lab server rested
+// one dropped on their middle.
+func TestMeasuredPartialBlocksRestAUnitAtTheMeasuredHeight(t *testing.T) {
+	for name, want := range map[string]float32{
+		"trapped_chest": 0.95, "soul_sand": 0.875, "mud": 0.875, "daylight_detector": 0.375,
+		"composter": 0.125, "brewing_stand": 0.875, "flower_pot": 0.375, "bell": 0.8125,
+		"sculk_sensor": 0.5, "hopper": 0.6875, "cauldron": 0.3125, "turtle_egg": 0.45,
+		"waterlily": 0.09375, "grindstone": 1,
+	} {
+		if got := centreTop(Boxes(name, nil)); got != want {
+			t.Errorf("%s: top = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestAVesselKeepsItsWallsAroundTheFloor(t *testing.T) {
+	for _, name := range []string{"cauldron", "composter", "hopper"} {
+		bs := Boxes(name, nil)
+		if len(bs) != 5 {
+			t.Fatalf("%s: %d boxes, want a floor and four walls", name, len(bs))
+		}
+		walls := 0
+		for _, b := range bs {
+			if b.Max[1] == 1 {
+				walls++
+			}
+		}
+		if walls != 4 {
+			t.Errorf("%s: %d walls reach the rim, want 4", name, walls)
+		}
+	}
+}
+
+func TestWithoutAFallbackAnUnknownBlockIsACubeAndWithOneItAsksIt(t *testing.T) {
+	old := Fallback
+	t.Cleanup(func() { Fallback = old })
+	Fallback = nil
+	if got := Boxes("chest", nil); len(got) != 1 || got[0] != Full() {
+		t.Errorf("chest with no table = %v", got)
+	}
+	Fallback = func(name string, _ map[string]any) ([]Box, bool) {
+		return []Box{{Max: [3]float32{1, 0.5, 1}}}, name == "chest"
+	}
+	if got := Boxes("chest", nil); got[0].Max[1] != 0.5 {
+		t.Errorf("chest = %v, want the table's", got)
+	}
+	if got := Boxes("stone", nil); got[0] != Full() {
+		t.Errorf("stone = %v, want a cube when the table does not know it", got)
+	}
+}
