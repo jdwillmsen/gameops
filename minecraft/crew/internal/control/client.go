@@ -25,8 +25,9 @@ const (
 	pollTimeout = 40 * time.Second
 	postTimeout = 10 * time.Second
 
-	minBackoff = time.Second
-	maxBackoff = 30 * time.Second
+	minBackoff      = time.Second
+	maxBackoff      = 30 * time.Second
+	commandPollWait = "1s"
 
 	// A running task is re-reported this often so the controller can tell a
 	// working unit from one that restarted and lost the task; the controller
@@ -42,7 +43,6 @@ const (
 
 	// Far above a real item (a template is about 100 bytes).
 	maxWorkBytes = 64 << 10
-	queueWait    = 50 * time.Millisecond
 )
 
 // Runner is the part of task.Runner the client drives.
@@ -162,28 +162,18 @@ func (c *Client) Run(ctx context.Context) {
 		held *workItem
 	)
 	for ctx.Err() == nil {
-		if held != nil {
-			if !c.submit(*held) {
-				if !c.sleep(ctx, queueWait) {
-					return
-				}
-				continue
-			}
-			held = nil
-		}
 		queued := 0
 		for _, t := range c.runner.List() {
 			if t.State == task.Queued {
 				queued++
 			}
 		}
-		if queued >= task.MaxQueued {
-			if !c.sleep(ctx, queueWait) {
-				return
-			}
-			continue
+		commandOnly := held != nil || queued >= task.MaxQueued
+		kinds := ""
+		if commandOnly {
+			kinds = "command"
 		}
-		item, err := c.poll(ctx)
+		item, err := c.poll(ctx, kinds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -203,8 +193,22 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		down, seen = false, true
 		if item != nil {
+			if item.Kind == "command" && item.Command != nil && item.Command.Name == "stop" {
+				held = nil
+			}
 			if !c.handle(*item) {
 				held = item
+			}
+		}
+		if item == nil && held != nil {
+			queued = 0
+			for _, t := range c.runner.List() {
+				if t.State == task.Queued {
+					queued++
+				}
+			}
+			if queued < task.MaxQueued && c.submit(*held) {
+				held = nil
 			}
 		}
 	}
@@ -214,10 +218,18 @@ func (c *Client) endpoint(leaf string) string {
 	return c.base.JoinPath("v1", "units", c.unit, leaf).String()
 }
 
-func (c *Client) poll(ctx context.Context) (*workItem, error) {
+func (c *Client) poll(ctx context.Context, kinds string) (*workItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, pollTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("work")+"?wait="+pollWait, nil)
+	wait := pollWait
+	if kinds == "command" {
+		wait = commandPollWait
+	}
+	query := url.Values{"wait": {wait}}
+	if kinds != "" {
+		query.Set("kinds", kinds)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint("work")+"?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}

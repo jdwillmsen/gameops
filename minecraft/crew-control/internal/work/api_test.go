@@ -73,6 +73,31 @@ func TestPollReturnsQueuedTaskAndCommandInWireFormat(t *testing.T) {
 	}
 }
 
+func TestCommandOnlyPollNeverReturnsTasks(t *testing.T) {
+	r := newRig(t, NewMemory())
+	task := must(t, r.store, "crew-01", KindTask, tpl)
+	resp := r.do(t, "GET", "/v1/units/crew-01/work?wait=1s&kinds=command", "", nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("command-only poll returned task %s with status %d", task.ID, resp.StatusCode)
+	}
+	command := must(t, r.store, "crew-01", KindCommand, stop)
+	r.api.Wake("crew-01")
+	got := readBody(t, r.do(t, "GET", "/v1/units/crew-01/work?wait=1s&kinds=command", "", nil))
+	if want := fmt.Sprintf(`{"id":%q,"kind":"command","command":{"name":"stop"}}`, command.ID); got != want {
+		t.Fatalf("command-only response %s, want %s", got, want)
+	}
+}
+
+func TestPollRejectsUnknownOrRepeatedKinds(t *testing.T) {
+	r := newRig(t, NewMemory())
+	for _, query := range []string{"kinds=task", "kinds=", "kinds=command&kinds=command"} {
+		resp := r.do(t, "GET", "/v1/units/crew-01/work?wait=1s&"+query, "", nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("query %q: status %d, want 400", query, resp.StatusCode)
+		}
+	}
+}
+
 func TestPollTimesOutWith204(t *testing.T) {
 	r := newRig(t, NewMemory())
 	start := time.Now()

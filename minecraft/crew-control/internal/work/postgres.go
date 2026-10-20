@@ -138,7 +138,7 @@ func (p *Postgres) Enqueue(ctx context.Context, unit, kind string, body json.Raw
 	return it, err
 }
 
-func (p *Postgres) Next(ctx context.Context, unit string, _ time.Time) (Item, bool, time.Duration, error) {
+func (p *Postgres) Next(ctx context.Context, unit, kinds string, _ time.Time) (Item, bool, time.Duration, error) {
 	var (
 		it    Item
 		found bool
@@ -150,19 +150,19 @@ func (p *Postgres) Next(ctx context.Context, unit string, _ time.Time) (Item, bo
 		var err error
 		it, err = scan(tx.QueryRow(ctx,
 			`SELECT `+columns+` FROM `+workTable+`
-			 WHERE unit = $1 AND (state = 'queued'
+				 WHERE unit = $1 AND ($3 = '' OR kind = 'command') AND (state = 'queued'
 			       OR (state = 'delivered' AND delivered_at <= now() - make_interval(secs => $2))
 			       OR (state = 'running' AND updated_at <= now() - make_interval(secs => $2)))
 			 ORDER BY (kind = 'command') DESC, created_at, id
 			 LIMIT 1 FOR UPDATE SKIP LOCKED`,
-			unit, RedeliverAfter.Seconds()))
+			unit, RedeliverAfter.Seconds(), kinds))
 		if errors.Is(err, pgx.ErrNoRows) {
 			var secs *float64
 			if err := tx.QueryRow(ctx,
 				`SELECT extract(epoch FROM min(CASE state WHEN 'delivered' THEN delivered_at ELSE updated_at END)
 				        + make_interval(secs => $2) - now())::float8
-				 FROM `+workTable+` WHERE unit = $1 AND state IN ('delivered', 'running')`,
-				unit, RedeliverAfter.Seconds()).Scan(&secs); err != nil {
+				 FROM `+workTable+` WHERE unit = $1 AND ($3 = '' OR kind = 'command') AND state IN ('delivered', 'running')`,
+				unit, RedeliverAfter.Seconds(), kinds).Scan(&secs); err != nil {
 				return err
 			}
 			if secs != nil {
