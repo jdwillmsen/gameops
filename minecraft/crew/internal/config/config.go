@@ -80,6 +80,15 @@ type Config struct {
 	// leaves the feature off. KitFood is how many food items one visit takes.
 	KitChest *[3]int32
 	KitFood  int
+
+	// WorkPlan is the unit's standing work, a JSON array of task bodies run in
+	// rotation whenever it has nothing else; empty leaves it idle. Validated by
+	// the task package, which owns the templates.
+	WorkPlan string
+
+	// JoinDelayS holds back the first connect, so a rollout of many units does
+	// not log them all in on the same second.
+	JoinDelayS int
 }
 
 func Load() (Config, error) {
@@ -167,6 +176,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	joinDelay, err := intInRange("JOIN_DELAY_S", 0, 0, 600)
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -196,6 +209,8 @@ func Load() (Config, error) {
 		Eat:        eat,
 		KitChest:   kitChest,
 		KitFood:    kitFood,
+		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
+		JoinDelayS: joinDelay,
 	}, nil
 }
 

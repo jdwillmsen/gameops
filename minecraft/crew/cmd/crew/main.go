@@ -105,6 +105,14 @@ func main() {
 	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
 	runner.SetReflex(lf)
 	go runner.Run(ctx)
+	plan, err := task.ParsePlan(cfg.WorkPlan)
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": "WORK_PLAN: " + err.Error()})
+		os.Exit(1)
+	}
+	if plan != nil {
+		go task.NewPlanner(runner, plan).Run(ctx)
+	}
 	if cfg.ControlURL != nil {
 		go control.New(cfg.ControlURL, cfg.UnitID, cfg.ControlToken, runner, logAdapter{log}).Run(ctx)
 	}
@@ -116,6 +124,14 @@ func main() {
 		}
 	}()
 	defer func() { _ = srv.Shutdown(context.Background()) }()
+
+	if cfg.JoinDelayS > 0 {
+		select {
+		case <-time.After(time.Duration(cfg.JoinDelayS) * time.Second):
+		case <-ctx.Done():
+			return
+		}
+	}
 
 	runConnectLoop(ctx,
 		loopOptions{
