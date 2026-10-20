@@ -23,14 +23,14 @@ crew-control; it never calls them to command them.
 | `CREW_INVITES_DIR` | unset | Mounted Secret directory with one file per operator id holding that operator's one-time invite code; missing or empty means nobody can enrol |
 | `DATA_DIR` | `/data` | Persistent volume for `session.key`, `passkeys.json` and `invites-used.json` |
 | `WORK_TOKEN` | unset | Shared bearer token for the unit work routes; unset leaves them out entirely (404) |
-| `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USERNAME`, `PG_PASSWORD` | unset, `5432` | Postgres holding the queue (`minecraft.crew_work`, `minecraft.crew_work_event`), over `sslmode=require` |
-| `WORK_STORE` | unset | `memory` keeps the queue in memory when `PG_HOST` is unset; development only, it is lost on restart |
+| `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USERNAME`, `PG_PASSWORD` | unset, `5432` | Postgres holding the queue (`minecraft.crew_work`, `minecraft.crew_work_event`), the world ledger (`minecraft.crew_place`, `minecraft.crew_stock`) and jobs (`minecraft.crew_job`, `minecraft.crew_job_step`), over `sslmode=require` |
+| `WORK_STORE` | unset | `memory` keeps the queue, ledger and jobs in memory when `PG_HOST` is unset; development only, it is lost on restart |
 | `CREW_PLACES` | unset | JSON list of named chests and areas, `[{"id","name","kind","box":{"min":{x,y,z},"max":{x,y,z}},"items":[]}]`; seeded at start, replacing earlier seeded places but never ones added by hand. `[]` removes every seeded place; unset or blank seeds nothing |
 
 ## Routes
 
 - `GET /`: the console, one focused unit or a wall of every unit; `GET /static/{file}` its assets; `GET /camera` redirects to `/`
-- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved
+- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /healthz`
@@ -38,6 +38,8 @@ crew-control; it never calls them to command them.
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
 - `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
+- `POST /v1/jobs`: `{"kind":"plan","template":"parallel-demo"}` or `{"kind":"stock","place":"<id>","want":{"cobblestone":16}}`, 202 with the job, 422 when it cannot be planned; `GET /v1/jobs` (the last 50), `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` (409 while the scheduler holds it)
+- `GET /v1/places`: every place with its stock; `POST /v1/places` (`{"id","name","kind","box"}`, as in `CREW_PLACES`) adds or edits one, `POST /v1/places/delete` (`{"id"}`) removes one; seeded places answer 409. Chests units report get `chest-x-y-z` ids, which a request may only rename, never move or create
 - `GET /v1/units/{id}/work?wait=25s[&kinds=command]`, `POST /v1/units/{id}/events`: unit-facing, `Authorization: Bearer <WORK_TOKEN>`, cluster-only
 
 Any other path, method, unknown unit or unclean path under `/units/` gets 404
@@ -56,10 +58,10 @@ is signed out and enrolment is refused until it parses again; it is never
 overwritten. An invite works once: a new device needs a new code in the
 invites Secret.
 
-The `/v1/work/*` routes answer 401 without a session. Every `POST` needs a JSON
+The `/v1/work/*`, `/v1/jobs` and `/v1/places` routes answer 401 without a session. Every `POST` needs a JSON
 body and `X-Crew-Request: 1`. Stop cancels everything open for the unit and
 reaches it before any queued task; cancelling an item the unit already has
-stops the whole unit (the response note says `stopped the unit`). Signed-in
+sends it a `cancel_task` command and answers 202, leaving its other work alone. Signed-in
 streams also get a `work` event per unit; anonymous streams never do. Coordinates follow the same rule: only signed-in
 streams get `positions`, so the radar exists only for operators.
 

@@ -14,7 +14,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `MC_VIEW_DISTANCE` | `8` | Chunk radius requested (1 to 32) |
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `TASKS_TOKEN` | unset | Bearer token for the task endpoints; unset leaves them out entirely (404) |
-| `CONTROL_URL`, `CONTROL_TOKEN` | unset | crew-control's base URL and its `WORK_TOKEN`; set both or neither. When set, the unit long-polls crew-control for tasks and stop commands and reports their progress. Unset, it takes tasks only from the Task API |
+| `CONTROL_URL`, `CONTROL_TOKEN` | unset | crew-control's base URL and its `WORK_TOKEN`; set both or neither. When set, the unit long-polls crew-control for tasks, stop and per-task `cancel_task` commands and reports their progress, with the contents of the last chest the task closed (dropped and resent once without them if crew-control answers 400 or 413). Unset, it takes tasks only from the Task API |
 | `TASK_TIMEOUT_S` | `900` | Longest a task may run before it fails with `timed out` (30 to 3600) |
 | `IDLE_WANDER` | `true` | A unit with no task looks about and takes short walks. `false` leaves it standing, though it still sends an input every tick |
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
@@ -270,6 +270,13 @@ task. Tunnels are not lit.
 
 ```json
 {"template": "goto", "to": {"x": 0, "y": 0, "z": 0}}
+```
+
+`inspect` walks within reach of one chest, opens it, records what it holds and
+closes it, taking nothing. `chest` has the same bounds as `goto`'s `to`:
+
+```json
+{"template": "inspect", "chest": {"x": 0, "y": 0, "z": 0}}
 ```
 
 Crew runs one task at a time. A session end or death fails the running task
