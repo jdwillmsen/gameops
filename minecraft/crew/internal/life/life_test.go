@@ -133,7 +133,10 @@ func (r *rig) step() (engaged bool) {
 	snap := r.tracker.Snapshot()
 	before := len(r.out.inputs())
 	var err error
-	if r.l.Engaged(r.a.Pose(), snap) {
+	fight := r.l.Engaged(r.a.Pose(), snap)
+	if r.l.Swimming(r.a.Pose()) {
+		err = r.l.Swim(context.Background(), r.a)
+	} else if fight {
 		engaged = true
 		err = r.l.Fight(context.Background(), r.a, snap)
 	} else if r.l.Tending(snap, false) {

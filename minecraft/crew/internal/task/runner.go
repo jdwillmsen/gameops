@@ -59,6 +59,10 @@ type Reflex interface {
 	// Engaged advances the reflex's clock by one tick and says whether the
 	// unit must fight or flee this tick instead of working or idling.
 	Engaged(act.Pose, belief.Snapshot) bool
+	// Swimming says whether the unit is in water, which it leaves before it
+	// does anything else; Swim sends that tick's one input.
+	Swimming(act.Pose) bool
+	Swim(context.Context, skill.Actuator) error
 	// Tending says whether the unit has something to see to, such as a meal or
 	// a chest to rearm from, before its task or its idling. It is asked only
 	// when the unit is not engaged, and working says a task is running, which
@@ -277,7 +281,19 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		st.Stop(a)
 		return a, before
 	}
-	if x := r.reflex; x != nil && x.Engaged(a.Pose(), snap) {
+	// Engaged runs every tick, swimming or not, because it is the reflex's clock.
+	engaged := r.reflex != nil && r.reflex.Engaged(a.Pose(), snap)
+	if x := r.reflex; x != nil && x.Swimming(a.Pose()) {
+		stop := r.preempt(dt)
+		r.mu.Unlock()
+		if stop != nil {
+			stop.Stop(a)
+			return a, before
+		}
+		_ = x.Swim(ctx, a)
+		return a, before
+	}
+	if x := r.reflex; engaged {
 		stop := r.preempt(dt)
 		r.mu.Unlock()
 		if stop != nil {
