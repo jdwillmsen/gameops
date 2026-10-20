@@ -162,31 +162,27 @@ function isAir(cx, cy, cz) {
   return false;
 }
 
-// Keeps columns in step with blocks. True when the column's floor dropped: it
-// had nothing before, or nothing as low.
-function track(key, add) {
-  const [cx, , cz] = key.split(',').map(Number);
-  const cy = Number(key.split(',')[1]);
+// Records a sub-chunk in its column. Returns the column's lowest height before,
+// Infinity when it had nothing.
+function track(key) {
+  const [cx, cy, cz] = key.split(',').map(Number);
   const ck = cx + ',' + cz;
   let col = columns.get(ck);
-  if (add) {
-    if (!col) columns.set(ck, col = new Set());
-    let lower = true;
-    for (const y of col) if (y <= cy) { lower = false; break; }
-    col.add(cy);
-    return lower;
-  }
-  if (col) { col.delete(cy); if (!col.size) columns.delete(ck); }
-  return false;
+  if (!col) columns.set(ck, col = new Set());
+  let min = Infinity;
+  for (const y of col) if (y < min) min = y;
+  col.add(cy);
+  return min;
 }
 
-// A column that just became known, or reaches lower, changes what its
-// neighbours' edge faces look into, at every height.
-function markColumnRing(key) {
+// A column that just became known changes what its neighbours' edge faces look
+// into at every height; one whose floor dropped, only from the new floor up to
+// the old one.
+function markColumnRing(key, lo, hi) {
   const [cx, , cz] = key.split(',').map(Number);
   for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
     const col = columns.get((cx + dx) + ',' + (cz + dz));
-    if (col) for (const y of col) dirty.add((cx + dx) + ',' + y + ',' + (cz + dz));
+    if (col) for (const y of col) if (y >= lo && y <= hi) dirty.add((cx + dx) + ',' + y + ',' + (cz + dz));
   }
 }
 
@@ -355,11 +351,14 @@ onmessage = ev => {
       atlas = m.atlas; infoCache.clear();
       for (const k of blocks.keys()) dirty.add(k);
       break;
-    case 'set':
+    case 'set': {
       blocks.set(m.key, m.cells);
-      if (track(m.key, true)) markColumnRing(m.key);
+      const cy = Number(m.key.split(',')[1]), floor = track(m.key);
+      if (floor === Infinity) markColumnRing(m.key, -Infinity, Infinity);
+      else if (cy < floor) markColumnRing(m.key, cy, floor);
       markDirty(m.key, true);
       break;
+    }
     case 'edit': {
       const b = blocks.get(m.key);
       if (b) { b[m.i] = m.v; markDirty(m.key, true); }
