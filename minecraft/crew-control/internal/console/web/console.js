@@ -32,7 +32,7 @@ function renderBar() {
     units.replaceChildren(prev, el('span', { className: 'cur-unit', textContent: cur ? `${order.indexOf(cur.id) + 1}. ${cur.name || cur.id}` : '' }), next);
   } else units.replaceChildren(...order.map((id, i) => {
     const s = statuses.get(id);
-    const b = el('button', { type: 'button', title: `Key ${i + 1}` }, s.name || id, el('span', { className: 'badge ' + (!s.online ? 'offline' : s.dead ? 'dead' : ''), textContent: badge(s) }));
+    const b = el('button', { type: 'button', title: i < 10 ? `Key ${(i + 1) % 10}` : 'Keys [ and ]' }, s.name || id, el('span', { className: 'badge ' + (!s.online ? 'offline' : s.dead ? 'dead' : ''), textContent: badge(s) }));
     b.setAttribute('aria-pressed', String(state.unit === id && state.view === 'focus'));
     b.addEventListener('click', () => pickUnit(id));
     return b;
@@ -111,7 +111,12 @@ function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
   if (isTyping(ev.target)) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-  if (/^[1-9]$/.test(ev.key)) pickUnit(order[Number(ev.key) - 1]);
+  // 1-9 and 0 reach the first ten units; [ and ] step through all of them.
+  if (/^[0-9]$/.test(ev.key)) pickUnit(order[(Number(ev.key) + 9) % 10]);
+  else if (ev.key === '[' || ev.key === ']') {
+    const at = order.indexOf(state.unit);
+    pickUnit(order[(at + (ev.key === ']' ? 1 : order.length - 1)) % order.length]);
+  }
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
   else ops.key(ev);
