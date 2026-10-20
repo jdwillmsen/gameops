@@ -109,14 +109,17 @@ func (p *Postgres) PutPlace(ctx context.Context, pl Place) error {
 		return err
 	}
 	return p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var seeded bool
-		err := tx.QueryRow(ctx, `SELECT seeded FROM `+placeTable+` WHERE id = $1 FOR UPDATE`, pl.ID).Scan(&seeded)
+		old, err := scanPlace(tx.QueryRow(ctx, `SELECT `+placeColumns+` FROM `+placeTable+` WHERE id = $1 FOR UPDATE`, pl.ID))
+		exists := err == nil
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
 			return err
-		case seeded:
+		case old.Seeded:
 			return ErrSeeded
+		}
+		if err := checkAutoID(pl, old, exists); err != nil {
+			return err
 		}
 		if pl.Kind == KindChest {
 			var taken bool
@@ -154,7 +157,7 @@ func (p *Postgres) DeletePlace(ctx context.Context, id string) error {
 func (p *Postgres) Seed(ctx context.Context, ps []Place) error {
 	keep := make([]string, 0, len(ps))
 	for _, pl := range ps {
-		if err := Validate(pl); err != nil {
+		if err := validSeed(pl); err != nil {
 			return err
 		}
 		keep = append(keep, pl.ID)
@@ -235,7 +238,7 @@ func (p *Postgres) ChestAt(ctx context.Context, pos Pos) (Place, bool, error) {
 	return p.chestAt(ctx, p.pool, pos)
 }
 
-func (p *Postgres) Observe(ctx context.Context, unit string, at time.Time, chest Pos, observed map[string]int) error {
+func (p *Postgres) Observe(ctx context.Context, unit string, at time.Time, chest Pos, observed map[string]int, partial bool) error {
 	if !validPos(chest) {
 		return invalid("chest is outside the world")
 	}
@@ -285,9 +288,11 @@ func (p *Postgres) Observe(ctx context.Context, unit string, at time.Time, chest
 		}
 		// Rows for items no longer in the chest stay, at zero, so a planner
 		// can tell "none left" from "never looked".
-		if _, err := tx.Exec(ctx, `UPDATE `+stockTable+` SET count = 0, seen_at = $3, unit = $4
-			WHERE place_id = $1 AND NOT (item = ANY($2))`, pl.ID, names, at, unit); err != nil {
-			return err
+		if !partial {
+			if _, err := tx.Exec(ctx, `UPDATE `+stockTable+` SET count = 0, seen_at = $3, unit = $4
+				WHERE place_id = $1 AND NOT (item = ANY($2))`, pl.ID, names, at, unit); err != nil {
+				return err
+			}
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO `+stockTable+` (place_id, item, count, seen_at, unit)
 			SELECT $1, n, c, $4, $5 FROM unnest($2::text[], $3::int[]) AS t(n, c)

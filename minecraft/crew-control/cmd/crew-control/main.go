@@ -322,7 +322,7 @@ func observeSeen(world *atomic.Pointer[ledger.Ledger], log *logging.Logger) func
 		ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 		defer cancel()
 		pos := ledger.Pos{X: s.Chest.X, Y: s.Chest.Y, Z: s.Chest.Z}
-		if err := (*l).Observe(ctx, unit, s.At, pos, s.Items); err != nil {
+		if err := (*l).Observe(ctx, unit, s.At, pos, s.Items, s.Partial); err != nil {
 			log.Warn("stock_observe_failed", logging.Fields{"unit": unit, "error": err.Error()})
 			return
 		}

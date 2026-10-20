@@ -1206,18 +1206,39 @@ func TestOversizedSeenIsTrimmedSoTheStateStillArrives(t *testing.T) {
 		if e.Seen.Items[strings.Repeat("a", 28)+"aa"] != 100 {
 			t.Errorf("highest count was not kept first: %v", e.Seen.Items)
 		}
+		if !e.Seen.Partial {
+			t.Errorf("trimmed seen is not marked partial: %+v", e.Seen)
+		}
 	}
 }
 
 func TestFitDropsUnnameableItemsAndKeepsTheBiggest(t *testing.T) {
 	seen := &Seen{Items: map[string]int{"item#5": 500, "Bad-Name": 400, "dirt": 3, "cobblestone": 70}}
 	got := fit(event{ID: "x", State: "done", Seen: seen})
-	if len(got.Seen.Items) != 2 || got.Seen.Items["dirt"] != 3 || got.Seen.Items["cobblestone"] != 70 {
-		t.Errorf("items = %v", got.Seen.Items)
+	if len(got.Seen.Items) != 2 || got.Seen.Items["dirt"] != 3 || got.Seen.Items["cobblestone"] != 70 || !got.Seen.Partial {
+		t.Errorf("seen = %+v", got.Seen)
 	}
 	b, _ := json.Marshal(fit(event{ID: "x", State: "done", Seen: &Seen{Items: map[string]int{"item#5": 1}}}))
-	if strings.Contains(string(b), "item#") || !strings.Contains(string(b), `"items":{}`) {
+	if strings.Contains(string(b), "item#") || !strings.Contains(string(b), `"items":{}`) || !strings.Contains(string(b), `"partial":true`) {
 		t.Errorf("wire = %s", b)
+	}
+}
+
+func TestFitLeavesACompleteSeenUnmarked(t *testing.T) {
+	for name, items := range map[string]map[string]int{
+		"some":  {"dirt": 3, "cobblestone": 70},
+		"empty": {},
+	} {
+		b, _ := json.Marshal(fit(event{ID: "x", State: "done", Seen: &Seen{Items: items}}))
+		var wire struct {
+			Seen map[string]json.RawMessage `json:"seen"`
+		}
+		if err := json.Unmarshal(b, &wire); err != nil || wire.Seen == nil {
+			t.Fatalf("%s: wire = %s err=%v", name, b, err)
+		}
+		if _, ok := wire.Seen["partial"]; ok {
+			t.Errorf("%s: a complete chest was marked partial: %s", name, b)
+		}
 	}
 }
 

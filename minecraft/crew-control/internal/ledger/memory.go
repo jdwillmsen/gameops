@@ -54,8 +54,12 @@ func (m *Memory) PutPlace(_ context.Context, p Place) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if old, ok := m.places[p.ID]; ok && old.Seeded {
+	old, ok := m.places[p.ID]
+	if ok && old.Seeded {
 		return ErrSeeded
+	}
+	if err := checkAutoID(p, old, ok); err != nil {
+		return err
 	}
 	if p.Kind == KindChest {
 		for _, o := range m.places {
@@ -87,7 +91,7 @@ func (m *Memory) DeletePlace(_ context.Context, id string) error {
 func (m *Memory) Seed(_ context.Context, ps []Place) error {
 	keep := map[string]bool{}
 	for _, p := range ps {
-		if err := Validate(p); err != nil {
+		if err := validSeed(p); err != nil {
 			return err
 		}
 		keep[p.ID] = true
@@ -158,7 +162,7 @@ func (m *Memory) ChestAt(_ context.Context, pos Pos) (Place, bool, error) {
 	return p, ok, nil
 }
 
-func (m *Memory) Observe(_ context.Context, unit string, at time.Time, chest Pos, items map[string]int) error {
+func (m *Memory) Observe(_ context.Context, unit string, at time.Time, chest Pos, items map[string]int, partial bool) error {
 	if !validPos(chest) {
 		return invalid("chest is outside the world")
 	}
@@ -183,9 +187,11 @@ func (m *Memory) Observe(_ context.Context, unit string, at time.Time, chest Pos
 		rows = map[string]Stock{}
 		m.stock[p.ID] = rows
 	}
-	for item := range rows {
-		if _, still := items[item]; !still {
-			items[item] = 0
+	if !partial {
+		for item := range rows {
+			if _, still := items[item]; !still {
+				items[item] = 0
+			}
 		}
 	}
 	for item, n := range items {

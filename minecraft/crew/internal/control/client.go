@@ -37,16 +37,16 @@ const (
 	// re-hands a running item after 30 s of silence.
 	heartbeatEvery = 15 * time.Second
 
-	// Keeps a report under the controller's 1 KiB body cap with room for the
-	// rest of the JSON.
+	// Keeps a report under maxEventBytes with room for the rest of the JSON.
 	maxReasonBytes = 400
 
 	// How many handled stop and cancel_task ids are remembered to recognise a
 	// redelivery.
 	stopMemory = 64
 
-	// The controller reads an event through a body cap this size; one over it
-	// is refused and, being a 4xx, dropped, terminal states included.
+	// Every event stays under this size, which the controller's body cap
+	// exceeds; one over the cap is refused and, being a 4xx, dropped,
+	// terminal states included.
 	maxEventBytes = 1024
 
 	// Far above a real item (a template is about 100 bytes).
@@ -87,6 +87,9 @@ type Seen struct {
 	} `json:"chest"`
 	Items map[string]int `json:"items"`
 	At    time.Time      `json:"at"`
+	// Partial tells the controller items were left out, so one missing from
+	// Items is not gone from the chest.
+	Partial bool `json:"partial,omitempty"`
 }
 
 type workItem struct {
@@ -408,9 +411,9 @@ func (c *Client) seenCommand(id string) bool {
 // the placeholder for an item the table does not know, would be refused.
 var wireItem = regexp.MustCompile(`^[a-z_]{1,32}$`)
 
-// fit makes the encoded event fit the controller's cap. The state matters
-// more than the chest, so items are dropped, lowest count first, and then
-// seen itself.
+// fit makes the encoded event fit maxEventBytes. The state matters more than
+// the chest, so items are dropped, lowest count first, and then seen itself.
+// Seen that lost any item is marked partial.
 func fit(ev event) event {
 	if ev.Seen == nil {
 		return ev
@@ -431,8 +434,11 @@ func fit(ev event) event {
 		}
 		return all[i].name < all[j].name
 	})
+	kinds := len(ev.Seen.Items)
 	seen := *ev.Seen
 	seen.Items = map[string]int{}
+	// Sized with the flag set: clearing it at the end only shrinks the event.
+	seen.Partial = kinds > 0
 	ev.Seen = &seen
 	if !fits(ev) {
 		ev.Seen = nil
@@ -445,6 +451,7 @@ func fit(ev event) event {
 			break
 		}
 	}
+	seen.Partial = len(seen.Items) < kinds
 	return ev
 }
 

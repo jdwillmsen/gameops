@@ -80,7 +80,7 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 		},
 		"seeding drops the stock of a removed place": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 3}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 3}, false))
 			must(t, l.Seed(ctx, nil))
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
 			st, err := l.Stock(ctx, "home-chest")
@@ -143,7 +143,7 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 		},
 		"observe at a known chest records stock": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 12, "oak_log": 3}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 12, "oak_log": 3}, false))
 			st, err := l.Stock(ctx, "home-chest")
 			if err != nil || len(st) != 2 {
 				t.Fatalf("stock %v err=%v", st, err)
@@ -157,7 +157,7 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 			}
 		},
 		"observe at an unknown position creates a chest": func(t *testing.T, l Ledger) {
-			must(t, l.Observe(ctx, "crew-02", t0, Pos{-12, 100, 5}, map[string]int{"coal": 2}))
+			must(t, l.Observe(ctx, "crew-02", t0, Pos{-12, 100, 5}, map[string]int{"coal": 2}, false))
 			p, ok, err := l.Place(ctx, "chest-m12-100-5")
 			if err != nil || !ok {
 				t.Fatalf("place missing: ok=%v err=%v", ok, err)
@@ -175,9 +175,9 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 		},
 		"observe replaces the old items": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 12, "oak_log": 3}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 12, "oak_log": 3}, false))
 			t1 := t0.Add(time.Minute)
-			must(t, l.Observe(ctx, "crew-02", t1, Pos{1, 64, 2}, map[string]int{"oak_log": 1, "coal": 4}))
+			must(t, l.Observe(ctx, "crew-02", t1, Pos{1, 64, 2}, map[string]int{"oak_log": 1, "coal": 4}, false))
 			st, _ := l.Stock(ctx, "home-chest")
 			got := map[string]int{}
 			for _, s := range st {
@@ -190,22 +190,76 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 				t.Errorf("stock %v", got)
 			}
 		},
+		"a partial observation leaves the items it left out": func(t *testing.T, l Ledger) {
+			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"cobblestone": 12, "oak_log": 3}, false))
+			t1 := t0.Add(time.Minute)
+			must(t, l.Observe(ctx, "crew-02", t1, Pos{1, 64, 2}, map[string]int{"oak_log": 1, "coal": 4}, true))
+			st, _ := l.Stock(ctx, "home-chest")
+			got := map[string]Stock{}
+			for _, s := range st {
+				got[s.Item] = s
+			}
+			if len(got) != 3 || got["cobblestone"].Count != 12 || got["oak_log"].Count != 1 || got["coal"].Count != 4 {
+				t.Errorf("stock %v", got)
+			}
+			if c := got["cobblestone"]; !c.SeenAt.Equal(t0) || c.Unit != "crew-01" {
+				t.Errorf("an item the report left out was restamped: %+v", c)
+			}
+		},
+		"auto chest ids are kept for observed chests": func(t *testing.T, l Ledger) {
+			for _, id := range []string{"chest-1-64-2", "chest-m3-64-m4"} {
+				if err := l.PutPlace(ctx, chest(id, 50, 64, 50)); !errors.Is(err, ErrInvalid) {
+					t.Errorf("put %s elsewhere: %v", id, err)
+				}
+				if err := l.Seed(ctx, []Place{chest(id, 50, 64, 50)}); !errors.Is(err, ErrInvalid) {
+					t.Errorf("seed %s: %v", id, err)
+				}
+			}
+			if err := l.Seed(ctx, []Place{chest("chest-1-64-2", 1, 64, 2)}); !errors.Is(err, ErrInvalid) {
+				t.Errorf("seed at its own position: %v", err)
+			}
+			if err := l.PutPlace(ctx, chest("chest-1-64-2", 1, 64, 2)); !errors.Is(err, ErrInvalid) {
+				t.Errorf("an operator created an auto id: %v", err)
+			}
+			must(t, l.PutPlace(ctx, chest("chest-1-64", 50, 64, 50)))
+
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"coal": 2}, false))
+			renamed := chest("chest-1-64-2", 1, 64, 2)
+			renamed.Name = "Coal box"
+			must(t, l.PutPlace(ctx, renamed))
+			if p, _, _ := l.Place(ctx, "chest-1-64-2"); p.Name != "Coal box" {
+				t.Errorf("rename lost: %+v", p)
+			}
+			if err := l.PutPlace(ctx, chest("chest-1-64-2", 9, 64, 9)); !errors.Is(err, ErrInvalid) {
+				t.Errorf("moved an auto chest: %v", err)
+			}
+			if err := l.PutPlace(ctx, area("chest-1-64-2", Pos{1, 64, 2}, Pos{1, 64, 2})); !errors.Is(err, ErrInvalid) {
+				t.Errorf("turned an auto chest into an area: %v", err)
+			}
+			must(t, l.Observe(ctx, "crew-01", t0.Add(time.Minute), Pos{1, 64, 2}, map[string]int{"coal": 5}, false))
+			at, ok, _ := l.ChestAt(ctx, Pos{1, 64, 2})
+			st, _ := l.Stock(ctx, "chest-1-64-2")
+			if !ok || at.ID != "chest-1-64-2" || len(st) != 1 || st[0].Count != 5 {
+				t.Errorf("chest %+v ok=%v stock %+v", at, ok, st)
+			}
+		},
 		"an older observation is ignored": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"coal": 9}))
-			must(t, l.Observe(ctx, "crew-02", t0.Add(-time.Minute), Pos{1, 64, 2}, map[string]int{"coal": 1}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"coal": 9}, false))
+			must(t, l.Observe(ctx, "crew-02", t0.Add(-time.Minute), Pos{1, 64, 2}, map[string]int{"coal": 1}, false))
 			st, _ := l.Stock(ctx, "home-chest")
 			if len(st) != 1 || st[0].Count != 9 || st[0].Unit != "crew-01" {
 				t.Errorf("stock %+v", st)
 			}
 		},
 		"observe drops bad item rows and refuses an impossible position": func(t *testing.T, l Ledger) {
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{3, 64, 3}, map[string]int{"coal": 2, "Bad Name": 1, "iron_ingot": -4}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{3, 64, 3}, map[string]int{"coal": 2, "Bad Name": 1, "iron_ingot": -4}, false))
 			st, _ := l.Stock(ctx, "chest-3-64-3")
 			if len(st) != 1 || st[0].Item != "coal" {
 				t.Errorf("stock %+v", st)
 			}
-			if err := l.Observe(ctx, "crew-01", t0, Pos{9999, 64, 3}, nil); !errors.Is(err, ErrInvalid) {
+			if err := l.Observe(ctx, "crew-01", t0, Pos{9999, 64, 3}, nil, false); !errors.Is(err, ErrInvalid) {
 				t.Errorf("out of world: %v", err)
 			}
 		},
@@ -219,7 +273,7 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 			}
 		},
 		"a seed folds an unnamed chest at its position into the seeded one": func(t *testing.T, l Ledger) {
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"coal": 5}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"coal": 5}, false))
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
 			got, _ := l.Places(ctx)
 			if g := ids(got); len(g) != 1 || g[0] != "home-chest" {
@@ -236,7 +290,7 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 		},
 		"a seed keeps its own stock when it is newer than the unnamed chest's": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
-			must(t, l.Observe(ctx, "crew-01", t0.Add(time.Hour), Pos{1, 64, 2}, map[string]int{"coal": 9}))
+			must(t, l.Observe(ctx, "crew-01", t0.Add(time.Hour), Pos{1, 64, 2}, map[string]int{"coal": 9}, false))
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
 			st, _ := l.Stock(ctx, "home-chest")
 			if len(st) != 1 || st[0].Count != 9 {
@@ -255,9 +309,9 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 		},
 		"a future observation is taken as now": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
-			must(t, l.Observe(ctx, "crew-01", time.Now().Add(time.Hour), Pos{1, 64, 2}, map[string]int{"coal": 9}))
+			must(t, l.Observe(ctx, "crew-01", time.Now().Add(time.Hour), Pos{1, 64, 2}, map[string]int{"coal": 9}, false))
 			time.Sleep(5 * time.Millisecond)
-			must(t, l.Observe(ctx, "crew-02", time.Now(), Pos{1, 64, 2}, map[string]int{"coal": 1}))
+			must(t, l.Observe(ctx, "crew-02", time.Now(), Pos{1, 64, 2}, map[string]int{"coal": 1}, false))
 			st, _ := l.Stock(ctx, "home-chest")
 			if len(st) != 1 || st[0].Count != 1 || st[0].Unit != "crew-02" || st[0].SeenAt.After(time.Now()) {
 				t.Errorf("stock %+v", st)
@@ -400,7 +454,7 @@ func TestPostgresDownIsUnavailable(t *testing.T) {
 		"PutPlace":    l.PutPlace(ctx, chest("mine", 5, 64, 5)),
 		"DeletePlace": l.DeletePlace(ctx, "mine"),
 		"Seed":        l.Seed(ctx, []Place{chest("mine", 5, 64, 5)}),
-		"Observe":     l.Observe(ctx, "crew-01", time.Now(), Pos{1, 64, 2}, map[string]int{"coal": 1}),
+		"Observe":     l.Observe(ctx, "crew-01", time.Now(), Pos{1, 64, 2}, map[string]int{"coal": 1}, false),
 	}
 	for name, err := range calls {
 		if !errors.Is(err, ErrUnavailable) {

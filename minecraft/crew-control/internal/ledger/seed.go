@@ -30,7 +30,7 @@ func checkSeed(ps []Place) ([]Place, error) {
 	seen := map[string]bool{}
 	for i := range ps {
 		ps[i].Seeded = true
-		if err := Validate(ps[i]); err != nil {
+		if err := validSeed(ps[i]); err != nil {
 			return nil, fmt.Errorf("CREW_PLACES[%d]: %w", i, err)
 		}
 		if seen[ps[i].ID] {

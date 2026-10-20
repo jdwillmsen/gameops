@@ -318,8 +318,20 @@ func TestEventSeenReachesTheHook(t *testing.T) {
 		t.Fatalf("status %d, seen %+v", resp.StatusCode, got)
 	}
 	s := got[0]
-	if s.Chest.X != 3 || s.Chest.Y != 64 || s.Chest.Z != -7 || s.Items["oak_log"] != 12 || !s.At.Equal(time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)) {
+	if s.Chest.X != 3 || s.Chest.Y != 64 || s.Chest.Z != -7 || s.Items["oak_log"] != 12 || s.Partial || !s.At.Equal(time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)) {
 		t.Fatalf("%+v", s)
+	}
+}
+
+func TestPartialSeenReachesTheHook(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var got []Seen
+	r.api.OnSeen = func(_ string, s Seen) { got = append(got, s) }
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"done","progress":100,"seen":{"chest":{"x":3,"y":64,"z":-7},"items":{"oak_log":12},"at":"2026-10-20T10:00:00Z","partial":true}}`, it.ID), nil)
+	if resp.StatusCode != 204 || len(got) != 1 || !got[0].Partial || got[0].Items["oak_log"] != 12 {
+		t.Fatalf("status %d, seen %+v", resp.StatusCode, got)
 	}
 }
 
