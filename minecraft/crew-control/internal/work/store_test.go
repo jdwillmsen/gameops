@@ -237,6 +237,144 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatalf("conditional stop changed unrelated work: %+v", recent)
 			}
 		},
+		"EnqueueStep stores the job and step": func(t *testing.T, s Store) {
+			job, step := uuid.New(), uuid.New()
+			it, err := s.EnqueueStep(ctx, "crew-01", tpl, "op", job, step)
+			if err != nil || it.Kind != KindTask || it.State != Queued || it.JobID == nil || *it.JobID != job || *it.StepID != step {
+				t.Fatalf("%+v %v", it, err)
+			}
+			got, _ := s.Recent(ctx, "crew-01", 1)
+			if got[0].JobID == nil || *got[0].JobID != job || *got[0].StepID != step {
+				t.Fatalf("not stored: %+v", got[0])
+			}
+			plain := must(t, s, "crew-01", KindTask, tpl)
+			if plain.JobID != nil || plain.StepID != nil {
+				t.Fatalf("hand-queued work has a job: %+v", plain)
+			}
+			if _, err := s.EnqueueStep(ctx, "crew-01", json.RawMessage(`[]`), "op", job, step); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("invalid body: %v", err)
+			}
+		},
+		"cancel_task commands validate": func(t *testing.T, s Store) {
+			good := json.RawMessage(`{"name":"cancel_task","task":"` + uuid.NewString() + `"}`)
+			if _, err := s.Enqueue(ctx, "crew-01", KindCommand, good, "op"); err != nil {
+				t.Fatalf("good: %v", err)
+			}
+			for _, body := range []string{
+				`{"name":"cancel_task"}`, `{"name":"cancel_task","task":"nope"}`,
+				`{"name":"cancel_task","task":"` + uuid.Nil.String() + `"}`,
+				`{"name":"cancel_task","task":"` + uuid.NewString() + `","x":1}`,
+				`{"name":"stop","task":"` + uuid.NewString() + `"}`,
+			} {
+				if _, err := s.Enqueue(ctx, "crew-01", KindCommand, json.RawMessage(body), "op"); !errors.Is(err, ErrInvalid) {
+					t.Errorf("%s: %v, want ErrInvalid", body, err)
+				}
+			}
+		},
+		"CancelTask cancels a queued task in place": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			b := must(t, s, "crew-01", KindTask, tpl)
+			it, cmd, err := s.CancelTask(ctx, "crew-01", a.ID, "op")
+			if err != nil || cmd != nil || it.State != Cancelled {
+				t.Fatalf("%+v %+v %v", it, cmd, err)
+			}
+			recent, _ := s.Recent(ctx, "crew-01", 5)
+			if len(recent) != 2 || recent[0].ID != b.ID || recent[0].State != Queued {
+				t.Fatalf("%+v", recent)
+			}
+		},
+		"CancelTask on a delivered task queues cancel_task and leaves other work": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			b := must(t, s, "crew-01", KindTask, tpl)
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != a.ID {
+				t.Fatal("setup")
+			}
+			it, cmd, err := s.CancelTask(ctx, "crew-01", a.ID, "op2")
+			if err != nil || cmd == nil || it.State != Delivered || cmd.Kind != KindCommand || cmd.State != Queued || cmd.Operator != "op2" ||
+				!cancelsTask(cmd.Body, a.ID) {
+				t.Fatalf("%+v %+v %v", it, cmd, err)
+			}
+			// Commands go first, so the unit hears about it before more work.
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != cmd.ID {
+				t.Fatalf("cancel_task not delivered before tasks: %+v", got)
+			}
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != b.ID || got.State != Delivered {
+				t.Fatalf("other task disturbed: %+v", got)
+			}
+		},
+		"CancelTask on a running task queues cancel_task": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			s.Next(ctx, "crew-01", "", time.Now())
+			s.Apply(ctx, "crew-01", a.ID, Running, 5, "")
+			it, cmd, err := s.CancelTask(ctx, "crew-01", a.ID, "op")
+			if err != nil || cmd == nil || it.State != Running {
+				t.Fatalf("%+v %+v %v", it, cmd, err)
+			}
+		},
+		"CancelTask returns a finished task unchanged": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			s.Apply(ctx, "crew-01", a.ID, Done, 100, "")
+			it, cmd, err := s.CancelTask(ctx, "crew-01", a.ID, "op")
+			if err != nil || cmd != nil || it.State != Done {
+				t.Fatalf("%+v %+v %v", it, cmd, err)
+			}
+			if recent, _ := s.Recent(ctx, "crew-01", 5); len(recent) != 1 {
+				t.Fatalf("queued something: %+v", recent)
+			}
+		},
+		"CancelTask refusals": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			if _, _, err := s.CancelTask(ctx, "crew-01", uuid.New(), "op"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("unknown: %v", err)
+			}
+			if _, _, err := s.CancelTask(ctx, "crew-02", a.ID, "op"); !errors.Is(err, ErrWrongUnit) {
+				t.Errorf("other unit: %v", err)
+			}
+			c := must(t, s, "crew-01", KindCommand, stop)
+			s.Next(ctx, "crew-01", "command", time.Now())
+			if _, cmd, err := s.CancelTask(ctx, "crew-01", c.ID, "op"); !errors.Is(err, ErrInvalid) || cmd != nil {
+				t.Errorf("delivered command: %v", err)
+			}
+		},
+		"CancelJob cancels only that job's open items": func(t *testing.T, s Store) {
+			job, other := uuid.New(), uuid.New()
+			queued, _ := s.EnqueueStep(ctx, "crew-01", tpl, "op", job, uuid.New())
+			taken, _ := s.EnqueueStep(ctx, "crew-02", tpl, "op", job, uuid.New())
+			finished, _ := s.EnqueueStep(ctx, "crew-02", tpl, "op", job, uuid.New())
+			s.Apply(ctx, "crew-02", finished.ID, Done, 100, "")
+			elsewhere, _ := s.EnqueueStep(ctx, "crew-01", tpl, "op", other, uuid.New())
+			byHand := must(t, s, "crew-01", KindTask, tpl)
+			if got, ok, _, _ := s.Next(ctx, "crew-02", "", time.Now()); !ok || got.ID != taken.ID {
+				t.Fatal("setup")
+			}
+			got, err := s.CancelJob(ctx, job, "op")
+			if err != nil || len(got) != 2 {
+				t.Fatalf("%+v %v", got, err)
+			}
+			states := map[uuid.UUID]string{}
+			for _, it := range got {
+				states[it.ID] = it.State
+			}
+			if states[queued.ID] != Cancelled || states[taken.ID] != Delivered {
+				t.Fatalf("%+v", states)
+			}
+			r1, _ := s.Recent(ctx, "crew-01", 10)
+			for _, it := range r1 {
+				switch it.ID {
+				case byHand.ID, elsewhere.ID:
+					if it.State != Queued {
+						t.Errorf("untouched item changed: %+v", it)
+					}
+				}
+			}
+			r2, _ := s.Recent(ctx, "crew-02", 10)
+			if len(r2) != 3 || r2[0].Kind != KindCommand || !cancelsTask(r2[0].Body, taken.ID) {
+				t.Fatalf("no cancel_task for the taken step: %+v", r2)
+			}
+			if again, err := s.CancelJob(ctx, job, "op"); err != nil || len(again) != 1 {
+				t.Fatalf("second cancel: %+v %v", again, err)
+			}
+		},
 		"recent is newest first and limited": func(t *testing.T, s Store) {
 			var ids []uuid.UUID
 			for range 4 {
@@ -294,4 +432,11 @@ func TestLazyAnnouncesWhenTheStoreIsSet(t *testing.T) {
 	if _, err := l.Recent(ctx, "crew-01", 1); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// cancelsTask compares as JSON: Postgres stores bodies as jsonb and returns
+// them re-spaced.
+func cancelsTask(body json.RawMessage, id uuid.UUID) bool {
+	var c map[string]string
+	return json.Unmarshal(body, &c) == nil && len(c) == 2 && c["name"] == "cancel_task" && c["task"] == id.String()
 }

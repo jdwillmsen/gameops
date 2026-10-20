@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
@@ -279,19 +278,19 @@ func TestCancelItem(t *testing.T) {
 	o := newOpRig(t, NewMemory())
 	queued := must(t, o.store, "crew-01", KindTask, tpl)
 	code, resp := o.post(t, "/v1/work/crew-01/items/"+queued.ID.String()+"/cancel", "", nil)
-	if code != 200 && code != 202 {
+	if code != 200 {
 		t.Fatalf("%d %s", code, resp)
 	}
 	var v map[string]any
 	_ = json.Unmarshal([]byte(resp), &v)
-	if v["state"] != Cancelled || v["note"] != nil {
+	if v["state"] != Cancelled {
 		t.Fatalf("queued cancel: %s", resp)
 	}
 	if got, _ := o.store.Recent(context.Background(), "crew-01", 5); len(got) != 1 {
-		t.Fatalf("a queued cancel must not queue a stop: %+v", got)
+		t.Fatalf("a queued cancel must not queue a command: %+v", got)
 	}
 
-	// A delivered item is the unit's: the only lever is stopping the unit.
+	// A delivered task is the unit's: it is asked to drop that task alone.
 	first := must(t, o.store, "crew-01", KindTask, tpl)
 	second := must(t, o.store, "crew-01", KindTask, tpl)
 	if _, ok, _, _ := o.store.Next(context.Background(), "crew-01", "", o.store.now()); !ok {
@@ -300,22 +299,30 @@ func TestCancelItem(t *testing.T) {
 	code, resp = o.post(t, "/v1/work/crew-01/items/"+first.ID.String()+"/cancel", "", nil)
 	v = nil
 	_ = json.Unmarshal([]byte(resp), &v)
-	if code != 202 || v["id"] != first.ID.String() || v["state"] != Cancelled || v["note"] != "stopped the unit" {
+	if code != 202 || v["id"] != first.ID.String() || v["state"] != Delivered {
 		t.Fatalf("delivered cancel: %d %s", code, resp)
 	}
+	if _, has := v["note"]; has {
+		t.Fatalf("the note field is gone: %s", resp)
+	}
 	items, _ := o.store.Recent(context.Background(), "crew-01", 10)
-	if items[0].Kind != KindCommand || items[0].State != Queued {
-		t.Fatalf("no stop queued: %+v", items[0])
+	if items[0].Kind != KindCommand || items[0].State != Queued || !cancelsTask(items[0].Body, first.ID) {
+		t.Fatalf("no cancel_task queued: %+v", items[0])
 	}
 	for _, it := range items {
-		if it.ID == second.ID && it.State != Cancelled {
-			t.Error("the coarse stop should also cancel the other open item")
+		if it.ID == second.ID && it.State != Queued {
+			t.Error("cancelling one task must leave the unit's other work alone")
 		}
 	}
 
 	// Finished work is reported as it is.
+	if _, err := o.store.Apply(context.Background(), "crew-01", first.ID, Done, 100, ""); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := o.store.Recent(context.Background(), "crew-01", 10)
 	code, resp = o.post(t, "/v1/work/crew-01/items/"+first.ID.String()+"/cancel", "", nil)
-	if code != 200 || strings.Contains(resp, "note") {
+	after, _ := o.store.Recent(context.Background(), "crew-01", 10)
+	if code != 200 || !strings.Contains(resp, `"state":"done"`) || len(after) != len(before) {
 		t.Fatalf("terminal cancel: %d %s", code, resp)
 	}
 
@@ -328,6 +335,17 @@ func TestCancelItem(t *testing.T) {
 	other := must(t, o.store, "crew-02", KindTask, tpl)
 	if code, _ := o.post(t, "/v1/work/crew-01/items/"+other.ID.String()+"/cancel", "", nil); code != 404 {
 		t.Errorf("another unit's item: %d", code)
+	}
+}
+
+func TestCancelDeliveredCommandIsRefused(t *testing.T) {
+	o := newOpRig(t, NewMemory())
+	cmd := must(t, o.store, "crew-01", KindCommand, stop)
+	if _, ok, _, _ := o.store.Next(context.Background(), "crew-01", "", o.store.now()); !ok {
+		t.Fatal("setup")
+	}
+	if code, resp := o.post(t, "/v1/work/crew-01/items/"+cmd.ID.String()+"/cancel", "", nil); code != 400 {
+		t.Fatalf("%d %s", code, resp)
 	}
 }
 
@@ -371,6 +389,9 @@ func (downStore) Enqueue(context.Context, string, string, json.RawMessage, strin
 func (downStore) StopUnit(context.Context, string, string, *uuid.UUID) ([]Item, Item, Item, bool, error) {
 	return nil, Item{}, Item{}, false, ErrUnavailable
 }
+func (downStore) CancelTask(context.Context, string, uuid.UUID, string) (Item, *Item, error) {
+	return Item{}, nil, ErrUnavailable
+}
 func (downStore) Recent(context.Context, string, int) ([]Item, error) {
 	return nil, ErrUnavailable
 }
@@ -391,67 +412,6 @@ func TestStoreDownIs503(t *testing.T) {
 	}
 	if _, err := o.api.Feed(context.Background(), "crew-01"); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("Feed: %v", err)
-	}
-}
-
-// raceStore lets the unit take the item between the lookup and the cancel.
-type raceStore struct{ *Memory }
-
-func (r raceStore) CancelQueued(c context.Context, unit string, id uuid.UUID) (Item, bool, error) {
-	if _, ok, _, _ := r.Memory.Next(c, unit, "", time.Now()); !ok {
-		panic("race setup: nothing to deliver")
-	}
-	return r.Memory.CancelQueued(c, unit, id)
-}
-
-func TestCancelLosingTheDeliveryRaceStopsTheUnit(t *testing.T) {
-	m := NewMemory()
-	o := newOpRig(t, raceStore{m})
-	it := must(t, m, "crew-01", KindTask, tpl)
-	code, resp := o.post(t, "/v1/work/crew-01/items/"+it.ID.String()+"/cancel", "", nil)
-	var v map[string]any
-	_ = json.Unmarshal([]byte(resp), &v)
-	if code != 202 || v["note"] != "stopped the unit" || v["state"] != Cancelled {
-		t.Fatalf("%d %s", code, resp)
-	}
-	items, _ := m.Recent(context.Background(), "crew-01", 5)
-	if len(items) != 2 || items[0].Kind != KindCommand || items[1].State != Cancelled {
-		t.Fatalf("items %+v", items)
-	}
-}
-
-type finishBeforeStop struct {
-	*Memory
-	id uuid.UUID
-}
-
-func (s finishBeforeStop) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) ([]Item, Item, Item, bool, error) {
-	if _, err := s.Memory.Apply(ctx, unit, s.id, Done, 1, ""); err != nil {
-		return nil, Item{}, Item{}, false, err
-	}
-	return s.Memory.StopUnit(ctx, unit, operator, onlyIfOpen)
-}
-
-func TestCancelReportsItemThatFinishedBeforeUnitStop(t *testing.T) {
-	m := NewMemory()
-	first := must(t, m, "crew-01", KindTask, tpl)
-	_, ok, _, err := m.Next(context.Background(), "crew-01", "", time.Now())
-	if err != nil || !ok {
-		t.Fatal("setup: item was not delivered")
-	}
-	second := must(t, m, "crew-01", KindTask, tpl)
-	o := newOpRig(t, finishBeforeStop{Memory: m, id: first.ID})
-	code, resp := o.post(t, "/v1/work/crew-01/items/"+first.ID.String()+"/cancel", "", nil)
-	var got map[string]any
-	if err := json.Unmarshal([]byte(resp), &got); err != nil {
-		t.Fatal(err)
-	}
-	if code != http.StatusOK || got["state"] != Done || got["note"] != nil {
-		t.Fatalf("finished item was mislabeled: %d %s", code, resp)
-	}
-	items, _ := m.Recent(context.Background(), "crew-01", 5)
-	if len(items) != 2 || items[0].ID != second.ID || items[0].State != Queued || items[1].ID != first.ID || items[1].State != Done {
-		t.Fatalf("terminal race had stop side effects: %+v", items)
 	}
 }
 

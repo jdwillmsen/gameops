@@ -21,7 +21,7 @@ const (
 	workTable  = "minecraft.crew_work"
 	eventTable = "minecraft.crew_work_event"
 
-	columns = "id, unit, kind, body, state, progress, reason, operator, created_at, updated_at"
+	columns = "id, unit, kind, body, state, progress, reason, operator, created_at, updated_at, job_id, step_id"
 )
 
 // queryTimeout bounds each store call. A database that hangs rather than
@@ -99,7 +99,7 @@ func (p *Postgres) wrap(err error) error {
 func scan(row pgx.Row) (Item, error) {
 	var it Item
 	err := row.Scan(&it.ID, &it.Unit, &it.Kind, &it.Body, &it.State, &it.Progress,
-		&it.Reason, &it.Operator, &it.Created, &it.Updated)
+		&it.Reason, &it.Operator, &it.Created, &it.Updated, &it.JobID, &it.StepID)
 	return it, err
 }
 
@@ -127,6 +127,14 @@ func addEvent(ctx context.Context, tx pgx.Tx, it Item) error {
 }
 
 func (p *Postgres) Enqueue(ctx context.Context, unit, kind string, body json.RawMessage, operator string) (Item, error) {
+	return p.enqueue(ctx, unit, kind, body, operator, nil, nil)
+}
+
+func (p *Postgres) EnqueueStep(ctx context.Context, unit string, body json.RawMessage, operator string, job, step uuid.UUID) (Item, error) {
+	return p.enqueue(ctx, unit, KindTask, body, operator, &job, &step)
+}
+
+func (p *Postgres) enqueue(ctx context.Context, unit, kind string, body json.RawMessage, operator string, job, step *uuid.UUID) (Item, error) {
 	if err := validateBody(kind, body); err != nil {
 		return Item{}, err
 	}
@@ -134,9 +142,9 @@ func (p *Postgres) Enqueue(ctx context.Context, unit, kind string, body json.Raw
 	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		it, err = scan(tx.QueryRow(ctx,
-			`INSERT INTO `+workTable+` (id, unit, kind, body, state, operator)
-			 VALUES ($1, $2, $3, $4, 'queued', $5) RETURNING `+columns,
-			uuid.New(), unit, kind, []byte(body), operator))
+			`INSERT INTO `+workTable+` (id, unit, kind, body, state, operator, job_id, step_id)
+			 VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7) RETURNING `+columns,
+			uuid.New(), unit, kind, []byte(body), operator, job, step))
 		if err != nil {
 			return err
 		}
@@ -256,6 +264,81 @@ func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) 
 		return addEvent(ctx, tx, it)
 	})
 	return it, cancelled, err
+}
+
+// cancelTx is CancelTask for one locked row.
+func cancelTx(ctx context.Context, tx pgx.Tx, it Item, operator string) (Item, *Item, error) {
+	switch {
+	case terminal(it.State):
+		return it, nil, nil
+	case it.State == Queued:
+		got, err := scan(tx.QueryRow(ctx,
+			`UPDATE `+workTable+` SET state = 'cancelled', reason = 'cancelled by operator', updated_at = now()
+			 WHERE id = $1 RETURNING `+columns, it.ID))
+		if err != nil {
+			return Item{}, nil, err
+		}
+		return got, nil, addEvent(ctx, tx, got)
+	case it.Kind != KindTask:
+		return Item{}, nil, errNotATask
+	}
+	cmd, err := scan(tx.QueryRow(ctx,
+		`INSERT INTO `+workTable+` (id, unit, kind, body, state, operator)
+		 VALUES ($1, $2, 'command', $3, 'queued', $4) RETURNING `+columns,
+		uuid.New(), it.Unit, []byte(cancelTaskBody(it.ID)), operator))
+	if err != nil {
+		return Item{}, nil, err
+	}
+	return it, &cmd, addEvent(ctx, tx, cmd)
+}
+
+func (p *Postgres) CancelTask(ctx context.Context, unit string, id uuid.UUID, operator string) (Item, *Item, error) {
+	var (
+		item Item
+		cmd  *Item
+	)
+	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		it, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+workTable+` WHERE id = $1 FOR UPDATE`, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if it.Unit != unit {
+			return ErrWrongUnit
+		}
+		item, cmd, err = cancelTx(ctx, tx, it, operator)
+		return err
+	})
+	return item, cmd, err
+}
+
+func (p *Postgres) CancelJob(ctx context.Context, job uuid.UUID, operator string) ([]Item, error) {
+	var out []Item
+	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out = nil
+		rows, err := tx.Query(ctx,
+			`SELECT `+columns+` FROM `+workTable+`
+			 WHERE job_id = $1 AND state NOT IN ('done', 'failed', 'cancelled')
+			 ORDER BY created_at, id FOR UPDATE`, job)
+		if err != nil {
+			return err
+		}
+		open, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Item, error) { return scan(r) })
+		if err != nil {
+			return err
+		}
+		for _, it := range open {
+			got, _, err := cancelTx(ctx, tx, it, operator)
+			if err != nil {
+				return err
+			}
+			out = append(out, got)
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (p *Postgres) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) (cancelled []Item, stop Item, target Item, stopped bool, err error) {

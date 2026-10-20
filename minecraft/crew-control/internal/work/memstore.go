@@ -25,6 +25,14 @@ func NewMemory() *Memory {
 }
 
 func (m *Memory) Enqueue(_ context.Context, unit, kind string, body json.RawMessage, operator string) (Item, error) {
+	return m.enqueue(unit, kind, body, operator, nil, nil)
+}
+
+func (m *Memory) EnqueueStep(_ context.Context, unit string, body json.RawMessage, operator string, job, step uuid.UUID) (Item, error) {
+	return m.enqueue(unit, KindTask, body, operator, &job, &step)
+}
+
+func (m *Memory) enqueue(unit, kind string, body json.RawMessage, operator string, job, step *uuid.UUID) (Item, error) {
 	if err := validateBody(kind, body); err != nil {
 		return Item{}, err
 	}
@@ -33,7 +41,7 @@ func (m *Memory) Enqueue(_ context.Context, unit, kind string, body json.RawMess
 	t := m.now()
 	it := &memItem{Item{
 		ID: uuid.New(), Unit: unit, Kind: kind, Body: slices.Clone(body),
-		State: Queued, Operator: operator, Created: t, Updated: t,
+		State: Queued, Operator: operator, Created: t, Updated: t, JobID: job, StepID: step,
 	}}
 	m.items = append(m.items, it)
 	return it.Item, nil
@@ -125,6 +133,59 @@ func (m *Memory) CancelQueued(_ context.Context, unit string, id uuid.UUID) (Ite
 		return it.Item, true, nil
 	}
 	return Item{}, false, ErrNotFound
+}
+
+// cancelLocked is CancelTask for one item; the caller holds m.mu.
+func (m *Memory) cancelLocked(it *memItem, operator string) (Item, *Item, error) {
+	switch {
+	case terminal(it.State):
+		return it.Item, nil, nil
+	case it.State == Queued:
+		it.State, it.Reason, it.Updated = Cancelled, "cancelled by operator", m.now()
+		return it.Item, nil, nil
+	case it.Kind != KindTask:
+		return Item{}, nil, errNotATask
+	}
+	now := m.now()
+	cmd := &memItem{Item{
+		ID: uuid.New(), Unit: it.Unit, Kind: KindCommand, Body: cancelTaskBody(it.ID),
+		State: Queued, Operator: operator, Created: now, Updated: now,
+	}}
+	m.items = append(m.items, cmd)
+	return it.Item, &cmd.Item, nil
+}
+
+func (m *Memory) CancelTask(_ context.Context, unit string, id uuid.UUID, operator string) (Item, *Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, it := range m.items {
+		if it.ID != id {
+			continue
+		}
+		if it.Unit != unit {
+			return Item{}, nil, ErrWrongUnit
+		}
+		return m.cancelLocked(it, operator)
+	}
+	return Item{}, nil, ErrNotFound
+}
+
+func (m *Memory) CancelJob(_ context.Context, job uuid.UUID, operator string) ([]Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Item
+	// The slice header is read once, so commands appended below are not visited.
+	for _, it := range m.items {
+		if it.JobID == nil || *it.JobID != job || terminal(it.State) {
+			continue
+		}
+		got, _, err := m.cancelLocked(it, operator)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got)
+	}
+	return out, nil
 }
 
 func (m *Memory) StopUnit(_ context.Context, unit, operator string, onlyIfOpen *uuid.UUID) ([]Item, Item, Item, bool, error) {
