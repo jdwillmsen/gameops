@@ -94,8 +94,9 @@ type atlasLoader struct {
 	build atlasBuilder
 
 	// retry is how long to wait before building again after a failure or an
-	// incomplete atlas; zero means the default. Jittered, so that twenty units
-	// restarted together do not ask the pack host in the same minute.
+	// incomplete atlas; zero means the default. It doubles with each failure
+	// in a row and is jittered, so that twenty units restarted together do not
+	// ask the pack host in the same minute.
 	retry time.Duration
 	// fellBack is set by the build when it could only serve an older cached
 	// atlas, which is worth another attempt later.
@@ -103,44 +104,69 @@ type atlasLoader struct {
 
 	mu            sync.Mutex
 	running, done bool
+	// version is the latest server version seen, so a pending retry builds
+	// for the server the unit talks to now.
+	version  string
+	failures int
+	pending  *time.Timer
 }
 
-const defaultAtlasRetry = 5 * time.Minute
+const (
+	defaultAtlasRetry = 5 * time.Minute
+	maxAtlasRetry     = time.Hour
+)
 
-func (l *atlasLoader) retryDelay() time.Duration {
+// retryDelay is drawn from [d, 2d) where d doubles per failure, and d stops
+// at half the cap so the jittered delay never exceeds it.
+func (l *atlasLoader) retryDelay(failures int) time.Duration {
 	d := l.retry
 	if d == 0 {
 		d = defaultAtlasRetry
 	}
+	for i := 1; i < failures && d < maxAtlasRetry/2; i++ {
+		d *= 2
+	}
+	d = min(d, maxAtlasRetry/2)
 	return d + rand.N(d)
 }
 
 func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
 	l.mu.Lock()
+	if serverVersion != "" {
+		l.version = serverVersion
+	}
+	serverVersion = l.version
 	if serverVersion == "" || l.running || l.done {
 		l.mu.Unlock()
 		return
+	}
+	if l.pending != nil {
+		l.pending.Stop()
+		l.pending = nil
 	}
 	l.running = true
 	l.mu.Unlock()
 	l.fellBack.Store(false)
 
-	ctx, cancel := context.WithTimeout(ctx, atlasTimeout)
-	defer cancel()
-	a, err := l.build(ctx, serverVersion, l.dir)
+	bctx, cancel := context.WithTimeout(ctx, atlasTimeout)
+	a, err := l.build(bctx, serverVersion, l.dir)
+	cancel()
 	if err == nil {
 		err = l.hub.SetAtlas(a)
 	}
 	complete := err == nil && !l.fellBack.Swap(false)
 	l.mu.Lock()
 	l.running, l.done = false, complete
-	l.mu.Unlock()
-	if !complete {
+	if complete {
+		l.failures = 0
+	} else {
 		// The pack host rate-limits by address and every unit shares one, so a
 		// start that finds the limit spent keeps trying instead of waiting for
 		// the next reconnect.
-		time.AfterFunc(l.retryDelay(), func() { l.load(ctx, serverVersion) })
+		l.failures++
+		l.pending = time.AfterFunc(l.retryDelay(l.failures), func() { l.load(ctx, "") })
 	}
+	l.mu.Unlock()
 	if err != nil {
 		l.log.Warn("camera_atlas_unavailable", logging.Fields{
 			"server_version": serverVersion,
