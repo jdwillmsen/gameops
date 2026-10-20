@@ -57,6 +57,9 @@ type Task struct {
 	Progress int       `json:"progress"`
 	Created  time.Time `json:"created"`
 	Updated  time.Time `json:"updated"`
+	// Seen is the last chest the task's skills closed. It names a chest, so it
+	// stays out of the public record and goes only to the controller.
+	Seen *skill.ChestSeen `json:"-"`
 }
 
 // Reflex is what the unit does on its own: fight or flee when threatened, and
@@ -452,6 +455,11 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	}
 	changed := progress != e.Progress
 	e.Progress = progress
+	if sr, ok := sk.(skill.Seer); ok {
+		if v, ok := sr.Seen(); ok && (e.Seen == nil || e.Seen.At != v.At || e.Seen.Chest != v.Chest) {
+			e.Seen, changed = &v, true
+		}
+	}
 	e.Updated = r.now()
 	if changed {
 		r.notify(e)

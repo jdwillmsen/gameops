@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -37,6 +38,9 @@ type Withdraw struct {
 	slots int
 
 	phase wPhaseState
+
+	seen    ChestSeen
+	hasSeen bool
 }
 
 // wPhaseState holds the mutable state, apart from the fixed request.
@@ -206,10 +210,7 @@ func (w *Withdraw) open(a Actuator, snap belief.Snapshot) outcome {
 	}
 	if open, _, pos := a.Container(); open && pos == w.chest && len(a.ContainerContent()) >= chestSlots {
 		table := a.ItemTable()
-		ph.names = make(map[int32]string, len(table))
-		for n, i := range table {
-			ph.names[i] = n
-		}
+		ph.names = itemNames(table)
 		ph.p = wTake
 		return next
 	}
@@ -352,23 +353,17 @@ func (w *Withdraw) destination(s belief.Snapshot, item string, rejected map[int]
 	return belief.Item{}, 0, false
 }
 
+// Seen is the chest's contents as they stood when the visit finished.
+func (w *Withdraw) Seen() (ChestSeen, bool) { return w.seen, w.hasSeen }
+
 func (w *Withdraw) finish(a Actuator) outcome {
+	items := chestItems(a, w.phase.names)
 	if w.log != nil {
-		items := map[string]int{}
-		for _, s := range a.ContainerContent() {
-			if s.Stack.Count == 0 || s.Stack.NetworkID == 0 {
-				continue
-			}
-			name, ok := w.phase.names[s.Stack.NetworkID]
-			if !ok {
-				name = fmt.Sprintf("item#%d", s.Stack.NetworkID)
-			}
-			items[name] += int(s.Stack.Count)
-		}
 		w.log.Info("chest_contents", map[string]any{"items": items})
 	}
 	if err := a.CloseContainer(); err != nil {
 		return w.failed(a, err)
 	}
+	w.seen, w.hasSeen = ChestSeen{Chest: w.chest, Items: items, At: time.Now()}, true
 	return outcome{st: Done}
 }

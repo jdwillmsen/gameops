@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -38,7 +39,8 @@ const (
 	// rest of the JSON.
 	maxReasonBytes = 400
 
-	// How many handled stop ids are remembered to recognise a redelivery.
+	// How many handled stop and cancel_task ids are remembered to recognise a
+	// redelivery.
 	stopMemory = 64
 
 	// Far above a real item (a template is about 100 bytes).
@@ -65,6 +67,20 @@ type event struct {
 	State    string `json:"state"`
 	Progress int    `json:"progress"`
 	Reason   string `json:"reason,omitempty"`
+	// Seen is optional so an older controller, which ignores unknown fields,
+	// and an older unit, which never sends it, both keep working.
+	Seen *Seen `json:"seen,omitempty"`
+}
+
+// Seen is what a task found in the last chest it closed.
+type Seen struct {
+	Chest struct {
+		X int32 `json:"x"`
+		Y int32 `json:"y"`
+		Z int32 `json:"z"`
+	} `json:"chest"`
+	Items map[string]int `json:"items"`
+	At    time.Time      `json:"at"`
 }
 
 type workItem struct {
@@ -73,6 +89,7 @@ type workItem struct {
 	Template json.RawMessage `json:"template"`
 	Command  *struct {
 		Name string `json:"name"`
+		Task string `json:"task"`
 	} `json:"command"`
 }
 
@@ -95,8 +112,10 @@ type Client struct {
 	pending map[string]event // latest unsent event per id
 	order   []string         // ids in the order they first became pending
 	wake    chan struct{}
-	// stopped is the last stopMemory handled stop ids, oldest first: a
-	// redelivered stop must not cancel work queued after the first one.
+	// stopped is the last stopMemory handled stop and cancel_task ids, oldest
+	// first: a redelivered stop must not cancel work queued after the first
+	// one, and a redelivered cancel_task must not hit a task of the same id
+	// that control has since sent again.
 	stopped []string
 }
 
@@ -193,6 +212,9 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		down, seen = false, true
 		if item != nil {
+			if held != nil && c.cancelsHeld(*item, held.ID) {
+				held = nil
+			}
 			accepted, newStop := c.handle(*item)
 			if newStop {
 				held = nil
@@ -263,10 +285,30 @@ func (c *Client) handle(item workItem) (bool, bool) {
 		return c.submit(item), false
 	case item.Kind == "command" && item.Command != nil && item.Command.Name == "stop":
 		return true, c.stop(item.ID)
+	case item.Kind == "command" && item.Command != nil && item.Command.Name == "cancel_task":
+		c.cancelTask(item.ID, item.Command.Task)
+		return true, false
 	default:
 		c.enqueue(event{ID: item.ID, State: task.Failed, Reason: "unknown work"})
 	}
 	return true, false
+}
+
+// cancelsHeld reports whether the item is a first delivery of a cancel_task
+// for the task the client is holding back, and reports that task cancelled:
+// it was never submitted, so no runner event will.
+func (c *Client) cancelsHeld(item workItem, heldID string) bool {
+	if item.Kind != "command" || item.Command == nil || item.Command.Name != "cancel_task" || item.Command.Task != heldID {
+		return false
+	}
+	c.mu.Lock()
+	redelivered := slices.Contains(c.stopped, item.ID)
+	c.mu.Unlock()
+	if redelivered {
+		return false
+	}
+	c.enqueue(event{ID: heldID, State: task.Cancelled})
+	return true
 }
 
 func (c *Client) submit(item workItem) bool {
@@ -317,7 +359,7 @@ func (c *Client) disown(id string) {
 // stop cancels everything, not only what control sent: the controller asked
 // the unit to stand down.
 func (c *Client) stop(commandID string) bool {
-	if c.seenStop(commandID) {
+	if c.seenCommand(commandID) {
 		c.enqueue(event{ID: commandID, State: task.Done})
 		return false
 	}
@@ -331,8 +373,17 @@ func (c *Client) stop(commandID string) bool {
 	return true
 }
 
-// seenStop records id and reports whether it was already recorded.
-func (c *Client) seenStop(id string) bool {
+// cancelTask cancels one task and always reports the command done: a task
+// that is unknown or already finished is as cancelled as it can be.
+func (c *Client) cancelTask(commandID, id string) {
+	if !c.seenCommand(commandID) {
+		_, _ = c.runner.Cancel(id)
+	}
+	c.enqueue(event{ID: commandID, State: task.Done})
+}
+
+// seenCommand records id and reports whether it was already recorded.
+func (c *Client) seenCommand(id string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, s := range c.stopped {
@@ -348,7 +399,13 @@ func (c *Client) seenStop(id string) bool {
 }
 
 func eventOf(t task.Task) event {
-	return event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason}
+	ev := event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason}
+	if t.Seen != nil {
+		seen := &Seen{Items: t.Seen.Items, At: t.Seen.At}
+		seen.Chest.X, seen.Chest.Y, seen.Chest.Z = t.Seen.Chest.X(), t.Seen.Chest.Y(), t.Seen.Chest.Z()
+		ev.Seen = seen
+	}
+	return ev
 }
 
 // beat re-reports every task control owns that is still running.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -68,6 +69,9 @@ type Deposit struct {
 
 	// Set once the skill has decided to fail but is still draining.
 	drainErr error
+
+	seen    ChestSeen
+	hasSeen bool
 
 	pending  bool
 	reqID    int32
@@ -240,10 +244,7 @@ func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 			return d.failed(a, fmt.Errorf("item %q is not in the server's item table", d.item))
 		}
 		d.itemID = id
-		d.names = make(map[int32]string, len(table))
-		for n, i := range table {
-			d.names[i] = n
-		}
+		d.names = itemNames(table)
 		d.phase = dMove
 		return next
 	}
@@ -370,23 +371,17 @@ func (d *Deposit) slotFor(content []protocol.ItemInstance) (slot, room int, ok b
 	return 0, 0, false
 }
 
+// Seen is the chest's contents as they stood when the deposit finished.
+func (d *Deposit) Seen() (ChestSeen, bool) { return d.seen, d.hasSeen }
+
 func (d *Deposit) finish(a Actuator) outcome {
+	items := chestItems(a, d.names)
 	if d.log != nil {
-		items := map[string]int{}
-		for _, s := range a.ContainerContent() {
-			if s.Stack.Count == 0 || s.Stack.NetworkID == 0 {
-				continue
-			}
-			name, ok := d.names[s.Stack.NetworkID]
-			if !ok {
-				name = fmt.Sprintf("item#%d", s.Stack.NetworkID)
-			}
-			items[name] += int(s.Stack.Count)
-		}
 		d.log.Info("chest_contents", map[string]any{"items": items})
 	}
 	if err := a.CloseContainer(); err != nil {
 		return d.failed(a, err)
 	}
+	d.seen, d.hasSeen = ChestSeen{Chest: d.chest, Items: items, At: time.Now()}, true
 	return outcome{st: Done}
 }

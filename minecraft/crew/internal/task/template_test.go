@@ -292,3 +292,39 @@ func TestGotoExpandsToOneNavigate(t *testing.T) {
 		t.Fatalf("skills = %v, err = %v", skills, err)
 	}
 }
+
+func TestParseInspect(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(`{"template":"inspect","chest":{"x":-500,"y":320,"z":499}}`))
+	if err != nil {
+		t.Fatalf("valid inspect: %v", err)
+	}
+	if tpl.Template != "inspect" || tpl.Chest != (Chest{X: -500, Y: 320, Z: 499}) {
+		t.Fatalf("parsed = %+v", tpl)
+	}
+	cases := map[string]string{
+		"missing chest": `{"template":"inspect"}`,
+		"x low":         `{"template":"inspect","chest":{"x":-501,"y":0,"z":0}}`,
+		"x high":        `{"template":"inspect","chest":{"x":500,"y":0,"z":0}}`,
+		"y low":         `{"template":"inspect","chest":{"x":0,"y":-65,"z":0}}`,
+		"y high":        `{"template":"inspect","chest":{"x":0,"y":321,"z":0}}`,
+		"z low":         `{"template":"inspect","chest":{"x":0,"y":0,"z":-501}}`,
+		"z high":        `{"template":"inspect","chest":{"x":0,"y":0,"z":500}}`,
+		"extra":         `{"template":"inspect","chest":{"x":0,"y":0,"z":0},"item":"oak_log"}`,
+		"extra key":     `{"template":"inspect","chest":{"x":0,"y":0,"z":0,"w":1}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+func TestInspectExpandsToOneInspect(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(`{"template":"inspect","chest":{"x":1,"y":2,"z":3}}`))
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "inspect" {
+		t.Fatalf("skills = %v, err = %v", skills, err)
+	}
+}

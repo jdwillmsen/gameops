@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
@@ -978,5 +980,149 @@ func TestLongReasonFitsTheControllersBodyCap(t *testing.T) {
 	body, _ := json.Marshal(ev[len(ev)-1])
 	if len(body) > 512 {
 		t.Errorf("event body is %d bytes", len(body))
+	}
+}
+
+func cancelTaskItem(id, target string) string {
+	return `{"id":"` + id + `","kind":"command","command":{"name":"cancel_task","task":"` + target + `"}}`
+}
+
+func (s *stubRunner) finishWithSeen(id string, seen *skill.ChestSeen) {
+	s.mu.Lock()
+	var t task.Task
+	for i := range s.tasks {
+		if s.tasks[i].ID == id {
+			s.tasks[i].State, s.tasks[i].Seen = task.Done, seen
+			t = s.tasks[i]
+		}
+	}
+	obs := s.obs
+	s.mu.Unlock()
+	obs(t)
+}
+
+func TestTerminalEventCarriesWhatTheTaskSaw(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	f.work <- taskItem(taskB, gotoBody)
+	waitUntil(t, "both queued", func() bool { return len(r.submitted()) == 2 })
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	r.finishWithSeen(taskA, &skill.ChestSeen{Chest: protocol.BlockPos{3, 64, -7}, Items: map[string]int{"cobblestone": 16, "dirt": 5}, At: at})
+	r.set(taskB, task.Done, 0, "")
+
+	ev := f.waitFor(t, "both done", func(ev []event) bool { return has(ev, taskA, "done") && has(ev, taskB, "done") })
+	for _, e := range ev {
+		switch {
+		case e.ID == taskA && e.State == "done":
+			if e.Seen == nil || e.Seen.Chest.X != 3 || e.Seen.Chest.Y != 64 || e.Seen.Chest.Z != -7 ||
+				e.Seen.Items["cobblestone"] != 16 || e.Seen.Items["dirt"] != 5 || !e.Seen.At.Equal(at) {
+				t.Errorf("seen = %+v", e.Seen)
+			}
+		case e.ID == taskB && e.State == "done":
+			if e.Seen != nil {
+				t.Errorf("a task that saw nothing reported %+v", e.Seen)
+			}
+		}
+	}
+}
+
+func TestSeenWireShapeAndOmission(t *testing.T) {
+	b, _ := json.Marshal(event{ID: "x", State: "done"})
+	if strings.Contains(string(b), "seen") {
+		t.Errorf("empty seen on the wire: %s", b)
+	}
+	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	b, _ = json.Marshal(eventOf(task.Task{ID: "x", State: "done", Seen: &skill.ChestSeen{Chest: protocol.BlockPos{1, 2, 3}, Items: map[string]int{"dirt": 2}, At: at}}))
+	want := `"seen":{"chest":{"x":1,"y":2,"z":3},"items":{"dirt":2},"at":"2026-10-20T12:00:00Z"}`
+	if !strings.Contains(string(b), want) {
+		t.Errorf("wire = %s, want it to contain %s", b, want)
+	}
+}
+
+func TestCancelTaskCancelsOnlyTheNamedTask(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	f.work <- taskItem(taskB, gotoBody)
+	waitUntil(t, "both queued", func() bool { return len(r.submitted()) == 2 })
+	r.set(taskA, task.Running, 0, "")
+	f.work <- cancelTaskItem(commandID, taskA)
+
+	f.waitFor(t, "cancel done", func(ev []event) bool { return has(ev, commandID, "done") && has(ev, taskA, "cancelled") })
+	for _, tk := range r.List() {
+		if tk.ID == taskB && tk.State != task.Queued {
+			t.Errorf("task B is %s, want it left queued", tk.State)
+		}
+	}
+}
+
+func TestCancelTaskForAnUnknownIDStillFinishes(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- cancelTaskItem(commandID, "ffffffff-0009")
+	ev := f.waitFor(t, "cancel done", func(ev []event) bool { return has(ev, commandID, "done") })
+	if len(ev) != 1 {
+		t.Errorf("events = %+v", ev)
+	}
+}
+
+func TestCancelTaskForAFinishedTaskStillFinishes(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "A queued", func() bool { return len(r.submitted()) == 1 })
+	r.set(taskA, task.Done, 0, "")
+	f.work <- cancelTaskItem(commandID, taskA)
+	f.waitFor(t, "cancel done", func(ev []event) bool { return has(ev, commandID, "done") })
+	for _, tk := range r.List() {
+		if tk.ID == taskA && tk.State != task.Done {
+			t.Errorf("a finished task became %s", tk.State)
+		}
+	}
+}
+
+func TestRedeliveredCancelTaskIsANoOp(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "A queued", func() bool { return len(r.submitted()) == 1 })
+	f.work <- cancelTaskItem(commandID, taskA)
+	f.waitFor(t, "first cancel", func(ev []event) bool { return countOf(ev, commandID, "done") == 1 })
+
+	// The runner now reuses nothing, but a task with the same id can only be
+	// running again if control resubmitted it; the redelivery must not touch it.
+	r.mu.Lock()
+	r.tasks[0].State = task.Running
+	r.mu.Unlock()
+	f.work <- cancelTaskItem(commandID, taskA)
+	f.waitFor(t, "second cancel", func(ev []event) bool { return countOf(ev, commandID, "done") == 2 })
+	for _, tk := range r.List() {
+		if tk.ID == taskA && tk.State != task.Running {
+			t.Errorf("redelivered cancel_task moved the task to %s", tk.State)
+		}
+	}
+}
+
+func TestCancelTaskDropsAHeldTask(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{failErr: task.ErrQueueFull}
+	start(t, r, f)
+
+	// The runner refuses the task, so the client holds it back.
+	f.work <- taskItem(taskB, gotoBody)
+	time.Sleep(100 * time.Millisecond)
+	f.work <- cancelTaskItem(commandID, taskB)
+	f.waitFor(t, "cancel done", func(ev []event) bool { return has(ev, commandID, "done") && has(ev, taskB, "cancelled") })
+	r.mu.Lock()
+	r.failErr = nil
+	r.mu.Unlock()
+	time.Sleep(200 * time.Millisecond)
+	if hasSubmit(r, taskB) {
+		t.Error("a cancelled task was submitted after it was held")
 	}
 }

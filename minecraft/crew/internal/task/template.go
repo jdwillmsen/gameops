@@ -24,6 +24,7 @@ const (
 	maxBranches      = 3
 	maxBranchLength  = 32
 	gotoTemplate     = "goto"
+	inspectTemplate  = "inspect"
 	maxHaulItems     = 8
 	maxHaulSources   = 4
 	minQty           = 1
@@ -108,6 +109,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseShaft(body)
 	case gotoTemplate:
 		return parseGoto(body)
+	case inspectTemplate:
+		return parseInspect(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -230,11 +233,31 @@ func parseGoto(body []byte) (Template, error) {
 	}
 	// The message names no coordinate: they are lab locations and must stay
 	// out of logs.
-	c := *raw.To
-	if c.X < gotoMinXZ || c.X > gotoMaxXZ || c.Z < gotoMinXZ || c.Z > gotoMaxXZ || c.Y < gotoMinY || c.Y > gotoMaxY {
+	if !raw.To.inLab() {
 		return Template{}, errors.New("to is outside the allowed area")
 	}
 	return Template{Template: raw.Template, To: raw.To}, nil
+}
+
+func parseInspect(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Chest    *Chest `json:"chest"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Chest == nil {
+		return Template{}, errors.New("chest is required")
+	}
+	if !raw.Chest.inLab() {
+		return Template{}, errors.New("chest is outside the allowed area")
+	}
+	return Template{Template: raw.Template, Chest: *raw.Chest}, nil
+}
+
+func (c Chest) inLab() bool {
+	return c.X >= gotoMinXZ && c.X <= gotoMaxXZ && c.Z >= gotoMinXZ && c.Z <= gotoMaxXZ && c.Y >= gotoMinY && c.Y <= gotoMaxY
 }
 
 func parseHaul(body []byte) (Template, error) {
@@ -304,6 +327,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		}
 		dest := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
 		return []skill.Skill{skill.NewHaul(world, self, sources, dest, t.Items, opts...)}, nil
+	}
+	if t.Template == inspectTemplate {
+		return []skill.Skill{skill.NewInspect(world, self, protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z})}, nil
 	}
 	if t.Template == gotoTemplate && t.To != nil {
 		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
