@@ -56,11 +56,53 @@ func TestPlannerRotatesAndYieldsToOtherWork(t *testing.T) {
 	// A foreign task queued behind the plan's running one cancels the plan's.
 	h.tick(1)
 	other, _ := h.r.Submit(tpl())
+	preempted := p.ours
 	p.Step()
-	if got := stateOf(t, h.r, p.ours); got.State != Cancelled {
+	if got := stateOf(t, h.r, preempted); got.State != Cancelled {
 		t.Errorf("plan task = %+v, want cancelled for the waiting task", got)
 	}
 	if got := stateOf(t, h.r, other.ID); got.State != Queued {
 		t.Errorf("other = %+v", got)
+	}
+
+	// Its own preemption does not pause the plan: once the other work is
+	// done, the rotation picks up at the next poll.
+	h.tick(10)
+	if got := stateOf(t, h.r, other.ID); got.State != Done {
+		t.Fatalf("other = %+v", got)
+	}
+	n := len(h.r.List())
+	p.Step()
+	if l := h.r.List(); len(l) != n+1 || l[n].Template != "gather_and_deposit" {
+		t.Fatalf("after other work: %+v", l)
+	}
+}
+
+func TestPlannerPausesWhenItsTaskIsStopped(t *testing.T) {
+	h := newHarness(t, time.Minute, 0)
+	plan, err := ParsePlan(planJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewPlanner(h.r, plan)
+	p.now = func() time.Time { return h.clock }
+
+	p.Step()
+	h.tick(1)
+	stopped := h.r.List()[0].ID
+	if _, err := h.r.Cancel(stopped); err != nil {
+		t.Fatal(err)
+	}
+	for _, wait := range []time.Duration{0, planPoll, 9 * time.Minute} {
+		h.clock = h.clock.Add(wait)
+		p.Step()
+		if l := h.r.List(); len(l) != 1 {
+			t.Fatalf("resubmitted %v after a stop: %+v", wait, l)
+		}
+	}
+	h.clock = h.clock.Add(time.Minute)
+	p.Step()
+	if l := h.r.List(); len(l) != 2 || l[1].Template != "haul" {
+		t.Fatalf("after the pause: %+v", l)
 	}
 }

@@ -17,6 +17,9 @@ const (
 	// planRetry spaces out a plan whose yard is spent: a failed step is skipped
 	// to the next, but never retried in a tight loop.
 	planRetry = 30 * time.Second
+	// planPause holds the plan off after somebody else cancels one of its
+	// tasks: an operator's stop must stand, not be undone at the next poll.
+	planPause = 10 * time.Minute
 )
 
 // ParsePlan reads WORK_PLAN, a JSON array of task bodies exactly as the task
@@ -96,10 +99,15 @@ func (p *Planner) Step() {
 	if foreign && ourBusy {
 		// Somebody's task is waiting behind ours; theirs wins.
 		_, _ = p.r.Cancel(p.ours)
+		p.ours = ""
 		return
 	}
-	if ourState == Failed {
+	switch ourState {
+	case Failed:
 		p.retry = p.now().Add(planRetry)
+		p.ours = ""
+	case Cancelled:
+		p.retry = p.now().Add(planPause)
 		p.ours = ""
 	}
 	if busy || p.now().Before(p.retry) {
