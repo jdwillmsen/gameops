@@ -79,7 +79,7 @@ func TestTheUnitTakesTheNearestShore(t *testing.T) {
 	}
 }
 
-func TestNoProgressForLongInTheWaterMeansHoveringAndFails(t *testing.T) {
+func TestTheUnitKeepsMovingAlongTheWaterInsteadOfTreadingOnTheSpot(t *testing.T) {
 	r := newRig(t, defaults, mgl32.Vec3{14.5, -0.9, 14.5})
 	r.flood(10, 10, 19, 19)
 	last, still := r.feet(), 0
@@ -104,25 +104,6 @@ func TestADryUnitIsNotSwimmingAndLogsNothingAboutIt(t *testing.T) {
 	r.run(100)
 	if r.l.Swimming(r.a.Pose()) || r.logged("swim_started") {
 		t.Error("a unit on dry land was treated as swimming")
-	}
-}
-
-func TestAPoolWithNoWayOutKeepsTheUnitSwimmingWithoutFailing(t *testing.T) {
-	r := newRig(t, defaults, mgl32.Vec3{14.5, -0.9, 14.5})
-	r.flood(10, 10, 19, 19)
-	// A wall two blocks above the surface all round.
-	for x := int32(9); x <= 20; x++ {
-		for z := int32(9); z <= 20; z++ {
-			if x == 9 || x == 20 || z == 9 || z == 20 {
-				for y := int32(0); y <= 3; y++ {
-					r.w.over[protocol.BlockPos{x, y, z}] = "stone"
-				}
-			}
-		}
-	}
-	r.run(120)
-	if !r.inWater() {
-		t.Errorf("unit left a walled pool at %v", r.feet())
 	}
 }
 

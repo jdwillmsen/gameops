@@ -33,6 +33,11 @@ const (
 	lookAhead = 4
 	// Spacing of the points checked along a straight swim.
 	sampleStep = 0.4
+	// A unit that gets no closer to its shore, and no higher, for this many
+	// ticks is not going to get there, and takes another.
+	stallTicks = 40
+	// The least gain, in blocks, that counts as getting somewhere.
+	progressGain = 0.1
 )
 
 type column struct{ x, z int32 }
@@ -44,6 +49,13 @@ type swimState struct {
 	route   []column
 	water   map[column]bool
 	stuck   bool
+	// goal is the shore the route leads to; bad are the shores given up on.
+	goal        column
+	bad         map[column]bool
+	bestDist    float64
+	bestY       float32
+	progressAt  uint64
+	stuckLogged bool
 }
 
 // Swimming says whether the unit is in water and must get out of it before
@@ -72,6 +84,8 @@ func (l *Life) Swim(ctx context.Context, a skill.Actuator) error {
 		l.planSwim(p)
 	}
 
+	l.checkProgress(p)
+
 	in := act.Input{Yaw: p.Yaw, Pitch: 0, Jump: coastDepth(l.body, p) > holdDepth}
 	if len(st.route) > 0 {
 		in.Yaw, in.Forward = l.heading(p), 1
@@ -91,15 +105,44 @@ func replanInterval(stuck bool) uint64 {
 	return replanEvery
 }
 
+// checkProgress gives up on a shore the unit has not got closer to, or higher
+// towards, for a while, so that it takes another.
+func (l *Life) checkProgress(p act.Pose) {
+	st := &l.swim
+	if len(st.route) == 0 {
+		return
+	}
+	d := math.Hypot(float64(p.Feet.X())-float64(st.goal.x)-0.5, float64(p.Feet.Z())-float64(st.goal.z)-0.5)
+	if d < st.bestDist-progressGain || p.Feet.Y() > st.bestY+progressGain {
+		st.bestDist, st.bestY, st.progressAt = math.Min(d, st.bestDist), max(p.Feet.Y(), st.bestY), l.tick
+		return
+	}
+	if l.tick-st.progressAt < stallTicks {
+		return
+	}
+	if st.bad == nil {
+		st.bad = map[column]bool{}
+	}
+	st.bad[st.goal] = true
+	l.logStuck("stalled", p)
+	l.planSwim(p)
+}
+
+func (l *Life) logStuck(reason string, p act.Pose) {
+	c := cellOf(p.Feet)
+	l.logEvent("swim_stuck", map[string]any{"reason": reason, "ticks": l.tick - l.swim.started, "x": c.X(), "y": c.Y(), "z": c.Z()})
+}
+
 // planSwim searches the water for the nearest cell the unit can stand on.
 func (l *Life) planSwim(p act.Pose) {
 	st := &l.swim
 	st.planAt = l.tick
+	hadRoute, prevGoal := len(st.route) > 0, st.goal
 	st.route, st.water, st.stuck = nil, nil, false
 	start := cellOf(p.Feet)
 	surf, ok := l.surfaceY(start)
 	if !ok {
-		st.stuck = true
+		l.stuck(p)
 		return
 	}
 	from := column{start.X(), start.Z()}
@@ -123,7 +166,7 @@ func (l *Life) planSwim(p act.Pose) {
 				queue = append(queue, next)
 				continue
 			}
-			if _, ok := l.shoreCell(next, surf); ok {
+			if _, ok := l.shoreCell(next, surf); ok && !st.bad[next] {
 				var route []column
 				for at := next; at != from; at = prev[at] {
 					route = append(route, at)
@@ -132,12 +175,25 @@ func (l *Life) planSwim(p act.Pose) {
 					route[i], route[j] = route[j], route[i]
 				}
 				water[next] = true
-				st.route, st.water = route, water
+				if !hadRoute || prevGoal != next {
+					st.bestDist, st.bestY, st.progressAt = math.MaxFloat64, p.Feet.Y()-progressGain, l.tick
+				}
+				st.route, st.water, st.goal = route, water, next
 				return
 			}
 		}
 	}
+	l.stuck(p)
+}
+
+// stuck notes that no shore can be reached, once for each time in the water.
+func (l *Life) stuck(p act.Pose) {
+	st := &l.swim
 	st.stuck = true
+	if !st.stuckLogged {
+		st.stuckLogged = true
+		l.logStuck("no_shore", p)
+	}
 }
 
 // surfaceY is the height of the first cell above the water in the unit's
@@ -172,16 +228,12 @@ func (l *Life) swimmable(c column, surf int32) bool {
 	return known && (path.Passable(name) || path.Water(name))
 }
 
-// shoreCell finds where in a column the unit can stand: level with the surface
-// or a step above it, which the climb out of the water can reach.
+// shoreCell finds where in a column the unit can stand: level with the
+// surface. A bank a block higher is out of the body's reach from the water,
+// which kicks it up only as far as 0.6 over its feet.
 func (l *Life) shoreCell(c column, surf int32) (protocol.BlockPos, bool) {
-	for _, dy := range [...]int32{0, 1} {
-		cell := protocol.BlockPos{c.x, surf + dy, c.z}
-		if safeStand(l.world, cell) {
-			return cell, true
-		}
-	}
-	return protocol.BlockPos{}, false
+	cell := protocol.BlockPos{c.x, surf, c.z}
+	return cell, safeStand(l.world, cell)
 }
 
 // heading is the yaw toward the farthest point of the route that a straight
