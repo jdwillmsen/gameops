@@ -176,6 +176,16 @@ func (p *Postgres) Seed(ctx context.Context, ps []Place) error {
 			return err
 		}
 		for _, pl := range ps {
+			old, err := scanPlace(tx.QueryRow(ctx, `SELECT `+placeColumns+` FROM `+placeTable+` WHERE id = $1 FOR UPDATE`, pl.ID))
+			switch {
+			case errors.Is(err, pgx.ErrNoRows):
+			case err != nil:
+				return err
+			case moved(old, pl):
+				if _, err := tx.Exec(ctx, `DELETE FROM `+stockTable+` WHERE place_id = $1`, pl.ID); err != nil {
+					return err
+				}
+			}
 			if err := upsert(ctx, tx, pl, true); err != nil {
 				return err
 			}
