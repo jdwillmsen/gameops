@@ -494,8 +494,10 @@ stairs, top slabs, doors, trapdoors and snow layers carry their boxes in the
 block name, from the same shape table the unit's pathing uses; past a budget of
 shape variants a block falls back to its default shape.
 If the fetch fails, the camera is offline at first start or the page cannot
-load the atlas, the view stays flat-coloured and the build is retried on the
-next session.
+load the atlas, the view stays flat-coloured. A build that fails, or can only
+serve an older cached atlas, is retried on its own after 5 to 10 minutes; the
+delay doubles with each failure in a row up to an hour, and is jittered so
+units started together do not all ask GitHub's rate-limited API at once.
 
 ### Entities
 
@@ -506,8 +508,9 @@ or box-unfolded UVs, bind poses) and its default texture, under the same size
 and count limits mcmap applies to the models it reads. The textures are
 packed into one sheet. The camera serves `/v1/camera/entities.json` and
 `/v1/camera/entities.png` and announces them with a models frame; the table
-holds a few hundred KB. A cached atlas without them is rebuilt on the next
-start, which downloads the pack again: the entity step adds about 520 files
+holds a few hundred KB. A cached atlas without them, or with an entity table
+from before armour, is served as it is and rebuilt, which downloads the pack
+again: the entity step adds about 520 files
 (definitions, models and only the textures the definitions name, roughly 1.5
 MB) to the several thousand the atlas already reads.
 
