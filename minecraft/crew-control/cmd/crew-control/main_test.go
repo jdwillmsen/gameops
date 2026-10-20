@@ -329,9 +329,17 @@ func TestWorkStreamNeedsARealSession(t *testing.T) {
 	if !expect(signed, "work") {
 		t.Fatal("signed-in stream missed the enqueue")
 	}
-	select {
-	case n := <-anon:
-		t.Fatalf("anonymous stream got %q", n)
-	case <-time.After(300 * time.Millisecond):
+	quiet := time.After(300 * time.Millisecond)
+	for {
+		select {
+		case n := <-anon:
+			// The fleet log is public; task bodies and coordinates are not.
+			if n == "events" || n == "log" {
+				continue
+			}
+			t.Fatalf("anonymous stream got %q", n)
+		case <-quiet:
+			return
+		}
 	}
 }

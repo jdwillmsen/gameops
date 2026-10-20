@@ -28,12 +28,14 @@ type Status struct {
 	Name   string       `json:"name"`
 	Online bool         `json:"online"`
 	Health *float32     `json:"health"`
+	Hunger *float32     `json:"hunger"`
 	Dead   bool         `json:"dead"`
 	Task   *TaskSummary `json:"task"`
 	Seen   time.Time    `json:"seen"`
 }
 
 type TaskSummary struct {
+	ID       string `json:"id"`
 	Template string `json:"template"`
 	State    string `json:"state"`
 	Item     string `json:"item"`
@@ -47,9 +49,17 @@ type stateResponse struct {
 		Dead        bool    `json:"dead"`
 		Health      float32 `json:"health"`
 		HealthKnown bool    `json:"health_known"`
+		Hunger      float32 `json:"hunger"`
+		HungerKnown bool    `json:"hunger_known"`
+
+		Position      [3]float32 `json:"position"`
+		PositionKnown bool       `json:"position_known"`
+		Yaw           float32    `json:"yaw"`
+		Dimension     int32      `json:"dimension"`
 	} `json:"state"`
 	Tasks struct {
 		Current *TaskSummary `json:"current"`
+		Recent  []recentTask `json:"recent"`
 	} `json:"tasks"`
 }
 
@@ -68,6 +78,12 @@ type Poller struct {
 	streams  int
 	workSrc  WorkSource
 	wsubs    map[*workSub]struct{}
+
+	tracks    []track
+	feed      []Event
+	seq       uint64
+	esubs     map[chan Event]struct{}
+	positions []Position
 }
 
 func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Poller {
@@ -82,8 +98,12 @@ func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Polle
 		failures:  make([]int, len(units)),
 		subs:      map[chan []Status]struct{}{},
 		wsubs:     map[*workSub]struct{}{},
+		tracks:    make([]track, len(units)),
+		esubs:     map[chan Event]struct{}{},
+		positions: make([]Position, len(units)),
 	}
 	for i, u := range units {
+		p.positions[i] = Position{ID: u.ID}
 		p.statuses[i] = Status{ID: u.ID, Name: u.Name}
 	}
 	return p
@@ -140,13 +160,25 @@ func (p *Poller) tick(ctx context.Context) {
 				h := res.st.State.Health
 				next.Health = &h
 			}
+			next.Hunger = nil
+			if res.st.State.HungerKnown {
+				h := res.st.State.Hunger
+				next.Hunger = &h
+			}
 			next.Task = res.st.Tasks.Current
+			s := res.st.State
+			p.positions[i] = Position{ID: p.units[i].ID, X: s.Position[0], Y: s.Position[1], Z: s.Position[2], Yaw: s.Yaw, Dim: s.Dimension, Known: s.PositionKnown}
 		} else {
 			p.failures[i]++
 			if p.failures[i] >= offlineAfter {
 				// Stale health or task on an offline unit would read as live.
-				next.Online, next.Health, next.Task, next.Dead = false, nil, nil, false
+				next.Online, next.Health, next.Hunger, next.Task, next.Dead = false, nil, nil, nil, false
+				p.positions[i] = Position{ID: p.units[i].ID}
 			}
+		}
+		// A single failed poll leaves the unit online, so it is not an event.
+		if res.err == nil || !next.Online {
+			p.observeLocked(i, next, res, now)
 		}
 		if !sameShown(p.statuses[i], next) {
 			changed = true
@@ -162,6 +194,9 @@ func (p *Poller) tick(ctx context.Context) {
 // would count as a change.
 func sameShown(a, b Status) bool {
 	if a.Online != b.Online || a.Dead != b.Dead {
+		return false
+	}
+	if (a.Hunger == nil) != (b.Hunger == nil) || (a.Hunger != nil && *a.Hunger != *b.Hunger) {
 		return false
 	}
 	if (a.Health == nil) != (b.Health == nil) || (a.Health != nil && *a.Health != *b.Health) {
@@ -228,5 +263,16 @@ func (p *Poller) publishLocked() {
 		}
 		// Sends happen only under p.mu, so the slot just freed stays free.
 		ch <- snap
+	}
+}
+
+func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
+	o := observation{online: st.Online, dead: st.Dead, health: st.Health, hunger: st.Hunger}
+	if c := st.Task; c != nil {
+		o.curID, o.curTemplate, o.curProgress = c.ID, c.Template, c.Progress
+	}
+	o.recent = res.st.Tasks.Recent
+	for _, e := range p.tracks[i].observe(o, now) {
+		p.appendEventLocked(i, e)
 	}
 }

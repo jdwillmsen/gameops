@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ const (
 	maxStreams         = 64
 	defaultKeepalive   = 15 * time.Second
 	streamWriteTimeout = 5 * time.Second
+	positionEvery      = 2 * time.Second
 )
 
 func (p *Poller) acquireStream() bool {
@@ -62,6 +64,9 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 	updates, cancel := p.Subscribe()
 	defer cancel()
 
+	feedCh, cancelFeed := p.SubscribeEvents()
+	defer cancelFeed()
+
 	var (
 		workSig     <-chan struct{}
 		workPending func() []string
@@ -79,7 +84,16 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 	h.Set("X-Accel-Buffering", "no")
 
 	rc := http.NewResponseController(w)
+	var lastPos []byte
 	if !writeUnits(w, rc, p.Snapshot()) {
+		return
+	}
+	// The backlog goes out after the subscription starts, so an event in
+	// between arrives twice at worst; the console drops repeats by seq.
+	if data, err := json.Marshal(p.Events()); err != nil || !writeEvent(w, rc, "events", data) {
+		return
+	}
+	if signedIn && !p.writePositions(w, rc, &lastPos) {
 		return
 	}
 	if signedIn {
@@ -98,12 +112,31 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 	// stale; a full event on this timer bounds that and keeps the link alive.
 	refresh := time.NewTicker(p.keepalive)
 	defer refresh.Stop()
+	var posTick <-chan time.Time
+	if signedIn {
+		t := time.NewTicker(positionEvery)
+		defer t.Stop()
+		posTick = t.C
+	}
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case snap := <-updates:
 			if !writeUnits(w, rc, snap) {
+				return
+			}
+		case e := <-feedCh:
+			data, err := json.Marshal(e)
+			if err != nil || !writeEvent(w, rc, "log", data) {
+				return
+			}
+		case <-posTick:
+			if !stillSignedIn() {
+				posTick = nil
+				continue
+			}
+			if !p.writePositions(w, rc, &lastPos) {
 				return
 			}
 		case <-workSig:
@@ -155,4 +188,19 @@ func writeEvent(w http.ResponseWriter, rc *http.ResponseController, event string
 		return false
 	}
 	return rc.Flush() == nil
+}
+
+// writePositions sends only when something moved, so an idle fleet costs a
+// signed-in stream nothing. Coordinates are operator-only: the public status
+// has none.
+func (p *Poller) writePositions(w http.ResponseWriter, rc *http.ResponseController, last *[]byte) bool {
+	data, err := json.Marshal(p.Positions())
+	if err != nil {
+		return false
+	}
+	if bytes.Equal(data, *last) {
+		return true
+	}
+	*last = data
+	return writeEvent(w, rc, "positions", data)
 }

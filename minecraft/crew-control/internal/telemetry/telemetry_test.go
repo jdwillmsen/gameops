@@ -113,7 +113,7 @@ func TestPollerMapsState(t *testing.T) {
 	if s.Health == nil || *s.Health != 18.5 || s.Dead {
 		t.Errorf("health/dead = %v %v", s.Health, s.Dead)
 	}
-	want := TaskSummary{Template: "gather_and_deposit", State: "running", Item: "minecraft:log", Qty: 8, Progress: 3}
+	want := TaskSummary{ID: "run", Template: "gather_and_deposit", State: "running", Item: "minecraft:log", Qty: 8, Progress: 3}
 	if s.Task == nil || *s.Task != want {
 		t.Errorf("task = %+v, want %+v", s.Task, want)
 	}
@@ -184,8 +184,12 @@ func events(t *testing.T, srv *httptest.Server) (<-chan string, *http.Response) 
 	out := make(chan string, 16)
 	go func() {
 		sc := bufio.NewScanner(resp.Body)
+		name := ""
 		for sc.Scan() {
-			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+				name = n
+			}
+			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok && name == "units" {
 				out <- d
 			}
 		}
@@ -326,7 +330,7 @@ func workEvents(t *testing.T, url string, hdr http.Header) <-chan string {
 			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
 				name = n
 			}
-			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok && name != "events" && name != "log" && name != "positions" {
 				out <- name + " " + d
 			}
 		}
@@ -466,5 +470,91 @@ func TestHistoryArrivesWhenTheStoreBecomesReady(t *testing.T) {
 	p.PublishAllWork()
 	if got := next(); got != `work {"unit":"crew-01","items":[]}` {
 		t.Fatalf("after ready %q", got)
+	}
+}
+
+func rawStream(t *testing.T, url string, hdr http.Header) <-chan [2]string {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, url+"/v1/units/stream", nil)
+	req.Header = hdr
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	out := make(chan [2]string, 64)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		name := ""
+		for sc.Scan() {
+			if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+				name = n
+			}
+			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+				out <- [2]string{name, d}
+			}
+		}
+		close(out)
+	}()
+	return out
+}
+
+func nextNamed(t *testing.T, ch <-chan [2]string, name string) string {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			if ev[0] == name {
+				return ev[1]
+			}
+		case <-deadline:
+			t.Fatalf("no %q event", name)
+		}
+	}
+}
+
+func TestPositionsReachOnlyAuthenticatedStreams(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := startPoller(t, rosterFor(t, unit.server.URL), 20*time.Millisecond)
+	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(authedByHeader))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	signed := rawStream(t, srv.URL, http.Header{"X-Test-Auth": {"yes"}})
+	anon := rawStream(t, srv.URL, nil)
+	got := nextNamed(t, signed, "positions")
+	if !strings.Contains(got, `"x":12.5`) || !strings.Contains(got, `"known":true`) {
+		t.Errorf("positions = %s", got)
+	}
+	nextNamed(t, anon, "events")
+	deadline := time.After(2*positionEvery + 200*time.Millisecond)
+	for {
+		select {
+		case ev := <-anon:
+			if ev[0] == "positions" || strings.Contains(ev[1], "12.5") {
+				t.Fatalf("anonymous stream got coordinates: %v", ev)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+func TestStreamBacklogAndLiveLog(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := startPoller(t, rosterFor(t, unit.server.URL), 20*time.Millisecond)
+	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })
+	srv := streamServer(t, p)
+	ch := rawStream(t, srv.URL, nil)
+	if got := nextNamed(t, ch, "events"); got != "[]" {
+		t.Fatalf("backlog = %s, want empty array", got)
+	}
+	unit.set(200, stateUnknownNoTask)
+	got := nextNamed(t, ch, "log")
+	if !strings.Contains(got, `"kind":"died"`) && !strings.Contains(got, `"kind":"task_cancelled"`) {
+		t.Errorf("log = %s", got)
 	}
 }
