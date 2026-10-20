@@ -201,7 +201,13 @@ func (n *navigator) replan(p act.Pose) error {
 		plan = []protocol.BlockPos{n.goal}
 	}
 	n.plan, n.idx, n.onWaypt = plan, 0, 0
-	n.from, n.fromY, n.fromX, n.fromZ, n.jumpsFor = cellOf(p.Feet), p.Feet.Y(), p.Feet.X(), p.Feet.Z(), 0
+	// An airborne unit is judged from where it lands, as the plan was, or the
+	// first jump would be measured from mid-air.
+	feet := p.Feet
+	if !p.OnGround {
+		feet[1] = path.Settle(n.world, feet.X(), feet.Y(), feet.Z())
+	}
+	n.from, n.fromY, n.fromX, n.fromZ, n.jumpsFor = cellOf(feet), feet.Y(), feet.X(), feet.Z(), 0
 	n.segStart = mgl32.Vec2{p.Feet.X(), p.Feet.Z()}
 	return nil
 }

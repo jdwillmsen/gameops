@@ -109,6 +109,10 @@ func FindFromPos(b Blocks, x, y, z float32, to protocol.BlockPos, maxNodes int) 
 	return find(v, from, x, y, z, to, maxNodes)
 }
 
+// Settle is the height a unit at (x, y, z) comes to rest at, so a caller that
+// keeps the unit's height beside a plan agrees with where FindFromPos starts.
+func Settle(b Blocks, x, y, z float32) float32 { return newView(b).settle(x, y, z) }
+
 // settle is the height a unit at (x, y, z) comes to rest at: its own, if
 // something holds it there, else the surface it would fall onto.
 func (v *view) settle(x, y, z float32) float32 {
