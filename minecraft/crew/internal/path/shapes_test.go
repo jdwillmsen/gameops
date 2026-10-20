@@ -284,3 +284,16 @@ func TestSettleIsWhereAFallingUnitWillLand(t *testing.T) {
 		}
 	}
 }
+
+func TestLightBlocksAndStructureVoidArePassable(t *testing.T) {
+	for _, n := range []string{"light_block", "light_block_7", "light_block_15", "structure_void"} {
+		if !Passable(n) {
+			t.Errorf("%s is not passable", n)
+		}
+	}
+	w := statedFlat()
+	w.set(3, 2, 3, "light_block_15", nil)
+	if !Standable(w, protocol.BlockPos{3, 1, 3}) {
+		t.Error("a light block over the unit's head makes the cell unstandable")
+	}
+}

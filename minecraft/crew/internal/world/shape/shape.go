@@ -42,7 +42,12 @@ func Empty(name string) bool {
 	switch name {
 	case "air", "cave_air", "void_air", "short_grass", "tall_grass", "fern", "large_fern",
 		"dandelion", "poppy", "torch", "deadbush", "vine", "glow_lichen",
-		"rail", "golden_rail", "detector_rail", "activator_rail":
+		"rail", "golden_rail", "detector_rail", "activator_rail", "structure_void", "light_block":
+		return true
+	}
+	// Light blocks carry their level in the name, and players pass through
+	// them.
+	if strings.HasPrefix(name, "light_block_") {
 		return true
 	}
 	return strings.HasSuffix(name, "_sapling") || strings.HasSuffix(name, "_pressure_plate")
