@@ -132,5 +132,5 @@ Gaps (fetch failed or not covered): RimWorld alerts/colonist bar, Factorio map/t
 Ranks 1-8 and 12 (kiosk), 25 (help overlay) shipped, plus a first cut of 19 (select rows in the roster, stop selected or stop all, with a confirm). Where the build differs from the recommendation:
 
 - The live-tile budget is page-based (Cards, 4, 6, 9, 12, All; `,` and `.` turn pages) rather than promoted on events or by IntersectionObserver. Auto-promotion needs the auto-director (rank 11) and is the next step.
-- The event feed is derived in crew-control from the status poll (no change to the units): died, offline, low health or hunger, task started, done, failed with the unit's reason, and stuck (no progress for 90 s). It keeps the last 200 in memory, so a restart empties it.
+- The event feed is derived in crew-control from the status poll (no change to the units): died, offline, low health or hunger, task started, done, failed with the unit's reason, ended with an unknown outcome when the task has already left the unit's recent list, and stuck (no progress and no movement of more than 3 blocks for 90 s). It keeps the last 200 in memory, so a restart empties it.
 - Positions are only ever sent on signed-in streams; the radar and everything position-bearing is operator-only, filtered on the server.

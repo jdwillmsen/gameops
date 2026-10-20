@@ -263,7 +263,7 @@ export function initOps(host) {
   }
 
   function onEvents(incoming, live) {
-    const r = mergeEvents(feed, incoming);
+    const r = mergeEvents(live ? feed : [], incoming);
     feed = r.feed;
     if (live) {
       for (const e of r.added) {

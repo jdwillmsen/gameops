@@ -111,6 +111,38 @@ func TestStuckIsReportedOnceAndResetsOnProgress(t *testing.T) {
 	}
 }
 
+func TestWalkingIsProgressButShufflingIsNot(t *testing.T) {
+	var tr track
+	now := time.Unix(1000, 0)
+	at := func(x float32) []string {
+		return kinds(tr.observe(observation{online: true, curID: "t", curTemplate: "goto", pos: [3]float32{x, 64, 0}, posKnown: true}, now))
+	}
+	at(0)
+	for x := float32(4); x <= 40; x += 4 {
+		now = now.Add(stuckAfter / 2)
+		if got := at(x); len(got) != 0 {
+			t.Fatalf("walking at x=%v reported %v", x, got)
+		}
+	}
+	now = now.Add(stuckAfter / 2)
+	at(41)
+	now = now.Add(stuckAfter / 2)
+	if got := at(42); !same(got, []string{"stuck"}) {
+		t.Fatalf("shuffling within a few blocks: %v", got)
+	}
+}
+
+func TestFinishedTaskMissingFromRecentHasUnknownOutcome(t *testing.T) {
+	var tr track
+	now := time.Unix(1000, 0)
+	tr.observe(observation{online: true, curID: "t1", curTemplate: "haul"}, now)
+	others := []recentTask{{ID: "q1", State: "queued"}, {ID: "q2", State: "queued"}}
+	es := tr.observe(observation{online: true, curID: "q1", curTemplate: "haul", recent: others}, now.Add(time.Second))
+	if len(es) != 2 || es[0].Kind != "task_ended" || es[0].Level != "info" || es[0].Text != "haul ended, outcome unknown" {
+		t.Fatalf("got %+v", es)
+	}
+}
+
 func TestFeedIsBoundedAndSequenced(t *testing.T) {
 	unit := newFakeUnit(t, stateKnownWithTask)
 	p := NewPoller(rosterFor(t, unit.server.URL), nil, time.Second)

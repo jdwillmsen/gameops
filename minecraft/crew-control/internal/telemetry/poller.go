@@ -271,6 +271,9 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	if c := st.Task; c != nil {
 		o.curID, o.curTemplate, o.curProgress = c.ID, c.Template, c.Progress
 	}
+	if pos := p.positions[i]; pos.Known {
+		o.pos, o.posKnown = [3]float32{pos.X, pos.Y, pos.Z}, true
+	}
 	o.recent = res.st.Tasks.Recent
 	for _, e := range p.tracks[i].observe(o, now) {
 		p.appendEventLocked(i, e)
