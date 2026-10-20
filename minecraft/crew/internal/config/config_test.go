@@ -283,10 +283,9 @@ func TestWorkPlanIsOptional(t *testing.T) {
 		t.Fatalf("default = %q, err %v", cfg.WorkPlan, err)
 	}
 	t.Setenv("JOIN_DELAY_S", "45")
-	t.Setenv("JOIN_DELAY_S", "45")
 	t.Setenv("WORK_PLAN", " [] ")
 	if cfg, err := Load(); err != nil || cfg.WorkPlan != "[]" || cfg.JoinDelayS != 45 {
-		t.Fatalf("set = %q, err %v", cfg.WorkPlan, err)
+		t.Fatalf("set = %q, delay %d, err %v", cfg.WorkPlan, cfg.JoinDelayS, err)
 	}
 }
 

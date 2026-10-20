@@ -22,9 +22,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
-| `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first |
-| `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins
-| `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins
+| `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
+| `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
