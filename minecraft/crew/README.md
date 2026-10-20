@@ -72,11 +72,28 @@ unit pushing on a block edge not more than 0.6 above its feet is kicked up
 0.3 per tick onto it.
 
 In water the unit swims out before it does anything else, even in a fight or a
-task, which resumes afterwards. It finds the nearest shore it can stand on,
-level with the surface or one block above, rises until it would coast to rest
-under the surface and swims along the water to it. A unit left in water that
-has no shore keeps treading water. Logs carry `swim_started` and `swim_ended`
-(with `ticks`), never positions.
+task, which resumes afterwards. It finds the nearest shore it can stand on
+level with the surface (a bank a block higher is out of reach: the body is
+kicked up only 0.6 over its feet, and the lab showed the server does not lift a
+swimming unit onto one either), rises until it would coast to rest under the
+surface and swims along the water to it. A unit that gets no closer to its
+shore for 2 s gives that shore up and takes another. Logs carry
+`swim_started`, `swim_ended` (with `ticks`) and `swim_stuck`, which carries
+`reason` (`no_shore`, or `stalled` for a shore given up), `ticks` and the
+unit's block position `x`, `y`, `z`. With no shore at all the unit keeps
+treading water and `swim_stuck` is logged once.
+
+Known limits:
+
+- Breath is not modelled. A unit that cannot get out drowns on the server;
+  `swim_stuck` is the only sign of it.
+- `flowing_water` is taken as a full block of still water. Flow depth and the
+  push of a current are ignored, so rivers and waterfalls rely on the server's
+  corrections.
+- Waterlogged blocks are not seen as water: they live on the block store's
+  second layer, which it does not read.
+- Entering water from a slow fall can be corrected once; the surface, where
+  the server's rules differ most, is avoided by riding just under it.
 
 ## Eating and rearming
 
