@@ -229,7 +229,9 @@ climbs down and collects the drops that fell.
   the pillar is cleaned up and its blocks return to the inventory. If a
   break fails the unit walks off, which is safe at two blocks high.
 - Collect: the drops rest where the logs were, so the unit visits the
-  columns it cut, standing on the ground there until the pickup lands.
+  columns it cut and stands on the ground while pickup is offered. The wait
+  has a 40-input minimum, extended by the duration of the last finished log
+  break so a slow server has time to deliver the drop.
 - Leaves are only cleared where the unit's own body or jump needs the cell.
   The canopy is never cleared. Logs count as the tree if they are oak logs in
   the task's area within the mine radius, so branches are cut when in reach;
