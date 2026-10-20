@@ -151,7 +151,7 @@ func TestUnknownBlocksAreFullCubesAndPlantsAreEmpty(t *testing.T) {
 	if got := Boxes("water", nil); len(got) != 1 {
 		t.Errorf("water must stay solid, got %v", got)
 	}
-	for _, n := range []string{"air", "short_grass", "oak_sapling", "stone_pressure_plate", "rail"} {
+	for _, n := range []string{"air", "short_grass", "oak_sapling", "stone_pressure_plate", "rail", "light_block", "light_block_0", "light_block_15", "structure_void"} {
 		if Boxes(n, nil) != nil {
 			t.Errorf("%s should have no collision", n)
 		}

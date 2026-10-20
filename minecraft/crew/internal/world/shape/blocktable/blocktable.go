@@ -30,7 +30,7 @@ func solid(name string) bool {
 		"bubble_column", "powder_snow", "wither_rose":
 		return true
 	}
-	return strings.HasPrefix(name, "light_block")
+	return false
 }
 
 type entry struct {
