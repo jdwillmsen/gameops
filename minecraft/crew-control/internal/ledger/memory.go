@@ -69,6 +69,9 @@ func (m *Memory) PutPlace(_ context.Context, p Place) error {
 		}
 	}
 	p.Seeded = false
+	if ok && moved(old, p) {
+		delete(m.stock, p.ID)
+	}
 	m.places[p.ID] = clonePlace(p)
 	return nil
 }

@@ -157,7 +157,7 @@ func (m *Memory) Apply(_ context.Context, unit string, id uuid.UUID, state strin
 	return Item{}, ErrNotFound
 }
 
-func (m *Memory) CancelQueued(_ context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+func (m *Memory) CancelQueued(_ context.Context, unit string, id uuid.UUID, reason string) (Item, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, it := range m.items {
@@ -170,7 +170,7 @@ func (m *Memory) CancelQueued(_ context.Context, unit string, id uuid.UUID) (Ite
 		if it.State != Queued {
 			return it.Item, false, nil
 		}
-		it.State, it.Reason, it.Updated = Cancelled, "cancelled by operator", m.now()
+		it.State, it.Reason, it.Updated = Cancelled, reason, m.now()
 		return it.Item, true, nil
 	}
 	return Item{}, false, ErrNotFound

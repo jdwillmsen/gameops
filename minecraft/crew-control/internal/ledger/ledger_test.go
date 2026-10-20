@@ -88,6 +88,25 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 				t.Fatalf("stock %v err=%v", st, err)
 			}
 		},
+		"editing box or kind drops stock but a rename keeps it": func(t *testing.T, l Ledger) {
+			must(t, l.PutPlace(ctx, chest("mine", 5, 64, 5)))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{5, 64, 5}, map[string]int{"coal": 4}, false))
+			renamed := chest("mine", 5, 64, 5)
+			renamed.Name = "Renamed"
+			must(t, l.PutPlace(ctx, renamed))
+			if st, err := l.Stock(ctx, "mine"); err != nil || len(st) != 1 {
+				t.Fatalf("rename lost stock: %v err=%v", st, err)
+			}
+			must(t, l.PutPlace(ctx, chest("mine", 6, 64, 5)))
+			if st, err := l.Stock(ctx, "mine"); err != nil || len(st) != 0 {
+				t.Fatalf("move kept stock: %v err=%v", st, err)
+			}
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{6, 64, 5}, map[string]int{"coal": 4}, false))
+			must(t, l.PutPlace(ctx, area("mine", Pos{6, 64, 5}, Pos{6, 64, 5})))
+			if st, err := l.Stock(ctx, "mine"); err != nil || len(st) != 0 {
+				t.Fatalf("kind change kept stock: %v err=%v", st, err)
+			}
+		},
 		"a seeded place refuses edit and delete": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
 			if err := l.PutPlace(ctx, chest("home-chest", 9, 64, 9)); !errors.Is(err, ErrSeeded) {
@@ -254,9 +273,9 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 			}
 		},
 		"observe drops bad item rows and refuses an impossible position": func(t *testing.T, l Ledger) {
-			must(t, l.Observe(ctx, "crew-01", t0, Pos{3, 64, 3}, map[string]int{"coal": 2, "Bad Name": 1, "iron_ingot": -4}, false))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{3, 64, 3}, map[string]int{"coal": 2, "Bad Name": 1, "iron_ingot": -4, "music_disc_13": 1, "item#5": 1}, false))
 			st, _ := l.Stock(ctx, "chest-3-64-3")
-			if len(st) != 1 || st[0].Item != "coal" {
+			if len(st) != 2 || st[0].Item != "coal" || st[1].Item != "music_disc_13" {
 				t.Errorf("stock %+v", st)
 			}
 			if err := l.Observe(ctx, "crew-01", t0, Pos{9999, 64, 3}, nil, false); !errors.Is(err, ErrInvalid) {

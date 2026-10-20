@@ -31,7 +31,7 @@ const (
 	maxSeenItems = 27
 )
 
-var seenItemName = regexp.MustCompile(`^[a-z_]{1,32}$`)
+var seenItemName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
 // API serves the routes a unit calls. They are not public: the token is a
 // shared secret and a request that came through the ingress is refused.

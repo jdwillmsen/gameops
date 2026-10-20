@@ -208,10 +208,31 @@ func TestSeenReachesTheLedgerAndTheLogHoldsNoCoordinates(t *testing.T) {
 	if !strings.Contains(out, "stock_observed") || !strings.Contains(out, `"place":"unnamed"`) {
 		t.Errorf("log %q", out)
 	}
-	for _, leak := range []string{"coal", "100", `"x"`} {
-		if strings.Contains(out, leak) {
-			t.Errorf("log leaks %q: %s", leak, out)
+	// Judge parsed fields, not substrings: a timestamp may legitimately hold "100".
+	lines := 0
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("log line is not JSON: %q", line)
 		}
+		lines++
+		for k, v := range rec {
+			switch v := v.(type) {
+			case float64:
+				if v == -12 || v == 100 || v == 5 {
+					t.Errorf("field %q holds a coordinate: %v", k, v)
+				}
+			case string:
+				for _, leak := range []string{"coal", "-12,100,5", "-12 100 5", "m12-100-5", "chest-m12"} {
+					if strings.Contains(v, leak) {
+						t.Errorf("field %q leaks %q: %q", k, leak, v)
+					}
+				}
+			}
+		}
+	}
+	if lines == 0 {
+		t.Error("no log lines captured")
 	}
 }
 

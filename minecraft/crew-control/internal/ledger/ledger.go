@@ -38,7 +38,7 @@ var (
 	ErrUnavailable = errors.New("ledger: store unavailable")
 
 	idRE   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
-	itemRE = regexp.MustCompile(`^[a-z_]{1,32}$`)
+	itemRE = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 	// autoIDRE is the form chestID writes.
 	autoIDRE = regexp.MustCompile(`^chest-(m?[0-9]+)-(m?[0-9]+)-(m?[0-9]+)$`)
 )
@@ -209,4 +209,10 @@ func positionsFree(ps []Place) error {
 		at[p.Box.Min] = p.ID
 	}
 	return nil
+}
+
+// moved reports whether an edit relocates or retypes a place. Stock observed
+// at the old box says nothing about the new one; a rename keeps it.
+func moved(old, edited Place) bool {
+	return old.Box != edited.Box || old.Kind != edited.Kind
 }
