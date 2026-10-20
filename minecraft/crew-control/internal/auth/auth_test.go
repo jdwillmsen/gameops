@@ -653,19 +653,84 @@ func TestFilesAreOwnerOnlyAndAtomic(t *testing.T) {
 		t.Fatalf("temp files left: %v", left)
 	}
 
-	// A write that cannot rename must leave the old file.
-	p := filepath.Join(e.data, "x.json")
+	// A write that cannot create its temp file must leave the same target intact.
+	dir := filepath.Join(e.data, "readonly")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "x.json")
 	if err := writeAtomic(p, []byte("old")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(e.data, "dir"), 0o700); err != nil {
+	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeAtomic(filepath.Join(e.data, "dir"), []byte("new")); err == nil {
-		t.Fatal("renaming over a directory succeeded")
+	defer os.Chmod(dir, 0o700)
+	if err := os.WriteFile(p, []byte("direct"), 0o600); err != nil {
+		t.Fatalf("test setup cannot overwrite target directly: %v", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(p, []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(p, []byte("new")); err == nil {
+		t.Fatal("atomic write succeeded without permission to create a temp file")
 	}
 	if got, _ := os.ReadFile(p); string(got) != "old" {
 		t.Fatalf("old file damaged: %s", got)
+	}
+}
+
+func TestPasskeysUnreadableFileCannotBeOverwritten(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "passkeys.json")
+	p, err := loadPasskeys(path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logged int
+	p.onBroken = func() { logged++ }
+	old := Passkey{ID: []byte("old-credential"), PublicKey: []byte("public"), UserHandle: bytes.Repeat([]byte{1}, 32), Operator: "owner"}
+	if err := p.Add(old); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt := []byte("{ invalid passkey data\n")
+	if err := os.WriteFile(path, corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	newKey := Passkey{ID: []byte("new-credential"), PublicKey: []byte("new-public"), UserHandle: old.UserHandle, Operator: "owner"}
+	if err := p.Add(newKey); err == nil {
+		t.Fatal("Add accepted an unreadable passkeys file")
+	}
+	if _, err := p.Use(old.ID, 1, false, false); err == nil {
+		t.Fatal("Use accepted an unreadable passkeys file")
+	}
+	if p.Active("owner", KeyOf(old.ID)) {
+		t.Fatal("session remained valid while passkeys were unreadable")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, corrupt) {
+		t.Fatalf("corrupt file changed: %q, err=%v", got, err)
+	}
+	if logged != 1 {
+		t.Fatalf("unreadable file logged %d times, want once", logged)
+	}
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Active("owner", KeyOf(old.ID)) {
+		t.Fatal("valid passkey was not restored after the file became readable")
+	}
+	if err := p.Add(newKey); err != nil {
+		t.Fatalf("Add did not recover after valid reload: %v", err)
 	}
 }
 

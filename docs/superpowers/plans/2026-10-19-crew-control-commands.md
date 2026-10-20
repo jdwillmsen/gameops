@@ -257,6 +257,7 @@ type Store interface {
   - `POST /v1/work/{unit}/goto` takes `{"x","y","z"}` and enqueues a `goto` task.
   - `POST /v1/work/{unit}/items/{id}/cancel`: if the item is queued, it is cancelled in the store. If it is delivered or running, a `stop` is enqueued. A per-item cancel command is out of scope; reply with the resulting item.
   - `GET /v1/work/{unit}` → `Recent(50)`, operator only. Anonymous gets 401.
+- Implementation update: stop now uses the atomic `StopUnit` store operation; full units poll with `kinds=command` so stop commands remain deliverable.
 - SSE: `StreamHandler` gets `func(r *http.Request) bool` (authenticated?). On every store change for any unit (`notify`), authenticated streams receive `event: work` with `data: {"unit":"crew-02","items":[…Recent(50)]}`.
 - Store unavailable → 503 `{"error":"queue unavailable"}`.
 

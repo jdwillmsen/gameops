@@ -90,6 +90,11 @@ func New(cfg Config) (*Auth, error) {
 	if err != nil {
 		return nil, err
 	}
+	keys.onBroken = func() {
+		if cfg.Log != nil {
+			cfg.Log.Info("passkeys_unreadable", logging.Fields{})
+		}
+	}
 	invites, err := loadInvites(cfg.InvitesDir, filepath.Join(dir, "invites-used.json"), now)
 	if err != nil {
 		return nil, err
