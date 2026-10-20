@@ -618,7 +618,7 @@ function placeRow(p) {
     const del = el('button', { type: 'button', className: 'danger', textContent: 'Delete' });
     del.addEventListener('click', () => {
       if (!confirm(`Delete ${p.name || p.id}?`)) return;
-      jobsUI.post(del, `/v1/places/${encodeURIComponent(p.id)}/delete`, {}, 'Deleted.');
+      jobsUI.post(del, '/v1/places/delete', { id: p.id }, 'Deleted.');
     });
     li.append(el('div', { className: 'point' }, name, save, del));
   }

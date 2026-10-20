@@ -42,7 +42,7 @@ type API struct {
 	notify func(unit string)
 	now    func() time.Time
 
-	// OnSeen receives what a unit saw, after its report was applied.
+	// OnSeen receives what a unit saw, before its report is applied.
 	// OnTerminal receives an item that carries a job once a report leaves it
 	// finished, including a task cancelled because its cancel_task was
 	// reported done. It is a wake hint only: a repeated report fires it
@@ -263,6 +263,14 @@ func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
 		http.Error(w, "bad event", http.StatusBadRequest)
 		return
 	}
+	// Before Apply, so a tick that sees the final inspect done also sees the
+	// stock it reported. Only the unit's own item counts, and a failed lookup
+	// just skips the hook: Apply reports the real error below.
+	if seen, ok := parseSeen(rep.Seen); ok && a.OnSeen != nil {
+		if own, err := a.store.Get(r.Context(), id); err == nil && own.Unit == unit {
+			a.OnSeen(unit, seen)
+		}
+	}
 	it, err := a.store.Apply(r.Context(), unit, id, rep.State, rep.Progress, rep.Reason)
 	if err != nil {
 		switch {
@@ -274,9 +282,6 @@ func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
 			storeError(w, r, err)
 		}
 		return
-	}
-	if seen, ok := parseSeen(rep.Seen); ok && a.OnSeen != nil {
-		a.OnSeen(unit, seen)
 	}
 	if a.OnTerminal != nil {
 		if it.JobID != nil && terminal(it.State) {

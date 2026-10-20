@@ -61,6 +61,20 @@ type routeRig struct {
 	srv     *httptest.Server
 	changed atomic.Int32
 	up      bool
+	view    ledger.Ledger // what the API sees instead of led, when set
+}
+
+// downLedger is a ledger whose database cannot be reached.
+type downLedger struct{ ledger.Ledger }
+
+func (downLedger) Place(context.Context, string) (ledger.Place, bool, error) {
+	return ledger.Place{}, false, ledger.ErrUnavailable
+}
+func (downLedger) Places(context.Context) ([]ledger.Place, error) {
+	return nil, ledger.ErrUnavailable
+}
+func (downLedger) Stock(context.Context, string) ([]ledger.Stock, error) {
+	return nil, ledger.ErrUnavailable
 }
 
 func newRouteRig(t *testing.T, store func(Store) Store) *routeRig {
@@ -75,6 +89,9 @@ func newRouteRig(t *testing.T, store func(Store) Store) *routeRig {
 	api := NewAPI(func() (ledger.Ledger, *Scheduler) {
 		if !rr.up {
 			return nil, nil
+		}
+		if rr.view != nil {
+			return rr.view, rr.s
 		}
 		return rr.led, rr.s
 	}, func() { rr.changed.Add(1) })
@@ -380,5 +397,34 @@ func TestFeedListsTheLatestJobs(t *testing.T) {
 	down := NewAPI(func() (ledger.Ledger, *Scheduler) { return nil, nil }, nil)
 	if _, err := down.Feed(ctx); err == nil {
 		t.Fatal("a feed without a store should fail so the stream skips it")
+	}
+}
+
+func TestOversizeJobBodyIs413(t *testing.T) {
+	rr := newRouteRig(t, nil)
+	body := `{"kind":"stock","place":"` + strings.Repeat("x", 70000) + `"}`
+	if code, out := rr.do("POST", "/v1/jobs", body, signed); code != 413 {
+		t.Fatalf("oversize: %d %s", code, out)
+	}
+	if code, _ := rr.do("POST", "/v1/jobs", `{"kind":`, signed); code != 400 {
+		t.Fatalf("malformed: %d", code)
+	}
+}
+
+func TestLedgerOutageDuringPlanningIs503AndStoresNoJob(t *testing.T) {
+	rr := newRouteRig(t, nil)
+	rr.view = downLedger{rr.led}
+	if code, out := rr.do("POST", "/v1/jobs", stockBody, signed); code != 503 {
+		t.Fatalf("stock: %d %s", code, out)
+	}
+	if code, out := rr.do("POST", "/v1/jobs", planBody, signed); code != 503 {
+		t.Fatalf("plan: %d %s", code, out)
+	}
+	js, err := rr.jobs.List(context.Background(), 50)
+	if err != nil || len(js) != 0 {
+		t.Fatalf("stored %d jobs, err %v", len(js), err)
+	}
+	if rr.changed.Load() != 0 {
+		t.Fatal("a failed create announced a change")
 	}
 }

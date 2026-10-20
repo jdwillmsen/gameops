@@ -8,11 +8,13 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
@@ -750,6 +752,70 @@ func TestWakeMergesAndRunTicks(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// flakyJobs fails Running while down is set, as a database outage would.
+type flakyJobs struct {
+	Store
+	down  atomic.Bool
+	calls atomic.Int32
+}
+
+func (f *flakyJobs) Running(ctx context.Context) ([]uuid.UUID, error) {
+	f.calls.Add(1)
+	if f.down.Load() {
+		return nil, work.ErrUnavailable
+	}
+	return f.Store.Running(ctx)
+}
+
+func TestRunLogsAnOutageOnceAndItsRecoveryOnce(t *testing.T) {
+	out, err := os.CreateTemp(t.TempDir(), "log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	realOut, realErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = out, out
+	log := logging.New("info")
+	os.Stdout, os.Stderr = realOut, realErr
+
+	f := &flakyJobs{Store: NewMemory()}
+	f.down.Store(true)
+	s := New(Config{Jobs: f, Work: work.NewMemory(), Checks: DefaultChecks(), Log: log, Every: time.Millisecond,
+		Units: func(context.Context) ([]ledger.UnitStatus, error) { return nil, nil }})
+	cctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { s.Run(cctx); close(done) }()
+	waitCalls := func(n int32) {
+		for f.calls.Load() < n {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	waitCalls(20)
+	f.down.Store(false)
+	waitCalls(f.calls.Load() + 20)
+	cancel()
+	<-done
+
+	b, _ := os.ReadFile(out.Name())
+	if n := strings.Count(string(b), "jobs_tick_failed"); n != 1 {
+		t.Errorf("failure logged %d times over 20+ failing ticks:\n%s", n, b)
+	}
+	if n := strings.Count(string(b), "jobs_tick_recovered"); n != 1 {
+		t.Errorf("recovery logged %d times:\n%s", n, b)
+	}
+}
+
+func TestAnIdleTickLeavesTheJobUntouched(t *testing.T) {
+	r := newRig(t, "crew-01")
+	j := r.job(step("a"))
+	r.tick()
+	before := r.get(j.ID)
+	r.clock.t = r.clock.t.Add(time.Minute)
+	r.tick()
+	if after := r.get(j.ID); !after.Updated.Equal(before.Updated) {
+		t.Fatalf("an idle tick moved updated from %v to %v", before.Updated, after.Updated)
+	}
 }
 
 // The same dependency plan over the real stores, so the row locks, the
