@@ -1,6 +1,6 @@
 import { initOps } from '/static/ops.js';
 import { step } from '/static/fleet.js';
-import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody } from '/static/state.js';
+import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
 const statuses = new Map();
 let order = [];
@@ -164,7 +164,6 @@ function connect() {
   es.addEventListener('jobs', ev => {
     jobs = JSON.parse(ev.data).jobs || [];
     renderJobs();
-    if (jobsOpen && tab === 'places') loadPlaces();
   });
   es.onerror = () => {
     if (source !== es) return;
@@ -449,10 +448,13 @@ const ops = initOps({
 function setJobsOpen(open) {
   jobsOpen = open;
   renderJobs();
-  if (open) loadPlaces();
+  if (open && tab === 'places') loadPlaces(true);
 }
 
-async function loadPlaces() {
+// A refresh rebuilds every row, so a timer-driven one waits while an operator
+// is typing in the list; a refresh the operator asked for always runs.
+async function loadPlaces(force = false) {
+  if (!force && $('place-list') && $('place-list').contains(document.activeElement)) return;
   const r = await api('GET', '/v1/places');
   if (r.status === 401) { setOperator(null); return; }
   if (!r.ok) return;
@@ -473,14 +475,14 @@ function buildJobs() {
       if (r.status === 401) { say('You were signed out.'); setOperator(null); return; }
       if (!r.ok) { say((r.data && r.data.error) || `Failed (${r.status}).`); return; }
       say(done);
-      await loadPlaces();
+      await loadPlaces(true);
     } finally { button.disabled = false; }
   };
 
   const tabs = el('nav', { id: 'jobs-tabs' });
   for (const [id, label] of [['jobs', 'Jobs'], ['places', 'Places']]) {
     const b = el('button', { type: 'button', textContent: label, id: `tab-${id}` });
-    b.addEventListener('click', () => { tab = id; renderJobs(); if (id === 'places') loadPlaces(); });
+    b.addEventListener('click', () => { tab = id; say(''); renderJobs(); if (id === 'places') loadPlaces(true); });
     tabs.append(b);
   }
 
@@ -555,7 +557,7 @@ function jobRow(job) {
     if (expanded.has(job.id)) expanded.delete(job.id); else expanded.add(job.id);
     renderJobs();
   });
-  const li = el('li', { className: 'job ' + job.state }, toggle);
+  const li = el('li', { className: 'job ' + knownState(job.state) }, toggle);
   if (jobCancellable(job)) {
     const b = el('button', { type: 'button', textContent: 'Cancel' });
     b.addEventListener('click', () => jobsUI.post(b, `/v1/jobs/${encodeURIComponent(job.id)}/cancel`, {}, 'Cancelled.'));
@@ -563,7 +565,7 @@ function jobRow(job) {
   }
   if (open) {
     li.append(el('ul', { className: 'steps' }, ...(job.steps || []).map(s =>
-      el('li', { className: 'step ' + s.state, textContent: [s.key, s.unit, s.state, s.reason].filter(Boolean).join(' - ') }))));
+      el('li', { className: 'step ' + knownState(s.state), textContent: [s.key, s.unit, s.state, s.reason].filter(Boolean).join(' - ') }))));
   }
   return li;
 }
@@ -626,6 +628,8 @@ function renderPlaces() {
   if (!jobsUI) return;
   jobsUI.placeList.replaceChildren(...(places.length ? places.map(placeRow) : [el('li', { className: 'empty', textContent: 'no places' })]));
 }
+
+setInterval(() => { if (operator && jobsOpen && tab === 'places' && document.visibilityState === 'visible') loadPlaces(); }, 30000);
 
 $('jobs-toggle').addEventListener('click', () => setJobsOpen(!jobsOpen));
 

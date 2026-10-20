@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, signinParams, stockBody, seenAgo, stepCount, placeBody, renameBody, jobTitle } from './state.js';
+import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, signinParams, stockBody, seenAgo, stepCount, placeBody, renameBody, jobTitle, knownState } from './state.js';
 
 const units = [{ id: 'crew-01' }, { id: 'crew-02' }, { id: 'crew-03' }];
 
@@ -171,4 +171,10 @@ test('placeBody and renameBody', () => {
   assert.match(placeBody({ id: 'a', name: 'n', kind: 'room', min: pt }).error, /kind/);
   const p = { id: 'a', name: 'A', kind: 'area', box: { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } }, items: ['oak_log'], seeded: false, stock: [] };
   assert.deepEqual(renameBody(p, ' B '), { id: 'a', name: 'B', kind: 'area', box: p.box, items: ['oak_log'] });
+});
+
+test('knownState passes only known states', () => {
+  assert.equal(knownState('running'), 'running');
+  assert.equal(knownState('x y'), 'unknown');
+  assert.equal(knownState(undefined), 'unknown');
 });
