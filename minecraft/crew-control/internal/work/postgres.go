@@ -24,6 +24,11 @@ const (
 	columns = "id, unit, kind, body, state, progress, reason, operator, created_at, updated_at"
 )
 
+// queryTimeout bounds each store call. A database that hangs rather than
+// refusing connections would otherwise hold the request, and a pool slot,
+// forever instead of answering "unavailable".
+var queryTimeout = 5 * time.Second
+
 // Postgres keeps the queue in the shared database, so work survives a restart
 // of crew-control.
 type Postgres struct {
@@ -100,13 +105,15 @@ func scan(row pgx.Row) (Item, error) {
 
 // inTx commits only if fn succeeds, which is what keeps a state change and
 // its event row from being recorded apart.
-func (p *Postgres) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
+func (p *Postgres) inTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
 		return p.wrap(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := fn(tx); err != nil {
+	if err := fn(ctx, tx); err != nil {
 		return p.wrap(err)
 	}
 	return p.wrap(tx.Commit(ctx))
@@ -124,7 +131,7 @@ func (p *Postgres) Enqueue(ctx context.Context, unit, kind string, body json.Raw
 		return Item{}, err
 	}
 	var it Item
-	err := p.inTx(ctx, func(tx pgx.Tx) error {
+	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		it, err = scan(tx.QueryRow(ctx,
 			`INSERT INTO `+workTable+` (id, unit, kind, body, state, operator)
@@ -144,7 +151,7 @@ func (p *Postgres) Next(ctx context.Context, unit, kinds string, _ time.Time) (I
 		found bool
 		due   time.Duration
 	)
-	err := p.inTx(ctx, func(tx pgx.Tx) error {
+	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// SKIP LOCKED keeps two controller replicas from handing one item to
 		// the same unit twice.
 		var err error
@@ -193,7 +200,7 @@ func (p *Postgres) Apply(ctx context.Context, unit string, id uuid.UUID, state s
 	}
 	progress, reason = cleanReport(progress, reason)
 	var it Item
-	err := p.inTx(ctx, func(tx pgx.Tx) error {
+	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		it, err = scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+workTable+` WHERE id = $1 FOR UPDATE`, id))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -224,7 +231,7 @@ func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) 
 		it        Item
 		cancelled bool
 	)
-	err := p.inTx(ctx, func(tx pgx.Tx) error {
+	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		it, err = scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM `+workTable+` WHERE id = $1 FOR UPDATE`, id))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -256,7 +263,7 @@ func (p *Postgres) StopUnit(ctx context.Context, unit, operator string, onlyIfOp
 	if err := validateBody(KindCommand, body); err != nil {
 		return nil, Item{}, Item{}, false, err
 	}
-	err = p.inTx(ctx, func(tx pgx.Tx) error {
+	err = p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, unit); err != nil {
 			return err
 		}
@@ -316,6 +323,8 @@ func (p *Postgres) StopUnit(ctx context.Context, unit, operator string, onlyIfOp
 }
 
 func (p *Postgres) Recent(ctx context.Context, unit string, n int) ([]Item, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
 	rows, err := p.pool.Query(ctx,
 		`SELECT `+columns+` FROM `+workTable+` WHERE unit = $1 ORDER BY created_at DESC, id DESC LIMIT $2`, unit, n)
 	if err != nil {
@@ -327,6 +336,8 @@ func (p *Postgres) Recent(ctx context.Context, unit string, n int) ([]Item, erro
 
 // Prune relies on the event table's ON DELETE CASCADE to drop the trail.
 func (p *Postgres) Prune(ctx context.Context, before time.Time) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
 	tag, err := p.pool.Exec(ctx, `DELETE FROM `+workTable+` WHERE created_at < $1`, before)
 	return int(tag.RowsAffected()), p.wrap(err)
 }
