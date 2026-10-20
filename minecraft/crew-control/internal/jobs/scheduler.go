@@ -459,3 +459,23 @@ func (s *Scheduler) Cancel(ctx context.Context, id uuid.UUID, operator string) (
 	}
 	return s.cfg.Jobs.Get(ctx, id)
 }
+
+// Store is the job store the scheduler works on, for the routes that list and
+// read jobs.
+func (s *Scheduler) Store() Store { return s.cfg.Jobs }
+
+// FreeUnits lists the units a planner may give more work. A roster that
+// cannot be read yields none: planning only uses the count to size a split.
+func (s *Scheduler) FreeUnits(ctx context.Context) []ledger.UnitStatus {
+	all, err := s.cfg.Units(ctx)
+	if err != nil {
+		return nil
+	}
+	var free []ledger.UnitStatus
+	for _, u := range all {
+		if u.Free() {
+			free = append(free, u)
+		}
+	}
+	return free
+}

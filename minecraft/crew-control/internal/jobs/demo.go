@@ -3,7 +3,6 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 )
@@ -70,7 +69,7 @@ func ParallelDemo(places ledger.Ledger) ([]Step, error) {
 			return ledger.Place{}, err
 		}
 		if !ok {
-			return ledger.Place{}, fmt.Errorf("place %s not found", id)
+			return ledger.Place{}, unplannable("place " + id + " not found")
 		}
 		return p, nil
 	}

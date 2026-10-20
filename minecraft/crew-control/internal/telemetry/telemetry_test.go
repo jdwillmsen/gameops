@@ -558,3 +558,118 @@ func TestStreamBacklogAndLiveLog(t *testing.T) {
 		t.Errorf("log = %s", got)
 	}
 }
+
+func jobsPoller(t *testing.T, authed func(*http.Request) bool) (*Poller, *httptest.Server) {
+	t.Helper()
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
+	p.SetWorkSource(func(_ context.Context, id string) ([]byte, error) {
+		return []byte(`{"unit":"` + id + `","items":[]}`), nil
+	})
+	var n atomic.Int32
+	p.SetJobsSource(func(context.Context) ([]byte, error) {
+		return []byte(fmt.Sprintf(`{"jobs":[],"n":%d}`, n.Add(1))), nil
+	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(authed))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return p, srv
+}
+
+func TestJobsEventsReachOnlyAuthenticatedStreams(t *testing.T) {
+	p, srv := jobsPoller(t, authedByHeader)
+	anon := workEvents(t, srv.URL, http.Header{})
+	authed := workEvents(t, srv.URL, http.Header{"X-Test-Auth": {"yes"}})
+	next := func(ch <-chan string) string {
+		select {
+		case s := <-ch:
+			return s
+		case <-time.After(2 * time.Second):
+			t.Fatal("no event")
+			return ""
+		}
+	}
+	if got := next(authed); !strings.HasPrefix(got, "units ") {
+		t.Fatalf("first %q", got)
+	}
+	if got := next(authed); !strings.HasPrefix(got, "work ") {
+		t.Fatalf("history %q", got)
+	}
+	if got := next(authed); !strings.HasPrefix(got, "jobs ") {
+		t.Fatalf("jobs on open %q", got)
+	}
+	next(anon)
+	p.PublishJobs()
+	if got := next(authed); !strings.HasPrefix(got, "jobs ") {
+		t.Fatalf("after publish %q", got)
+	}
+	select {
+	case got := <-anon:
+		t.Fatalf("anonymous stream got %q", got)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestJobsEventsStopWhenTheSessionLapses(t *testing.T) {
+	var valid atomic.Bool
+	valid.Store(true)
+	p, srv := jobsPoller(t, func(*http.Request) bool { return valid.Load() })
+	ch := workEvents(t, srv.URL, http.Header{})
+	next := func() string {
+		select {
+		case s := <-ch:
+			return s
+		case <-time.After(2 * time.Second):
+			t.Fatal("no event")
+			return ""
+		}
+	}
+	next() // units
+	next() // history
+	next() // jobs
+	valid.Store(false)
+	p.PublishJobs()
+	select {
+	case got := <-ch:
+		t.Fatalf("jobs event after the session lapsed: %q", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+	valid.Store(true)
+	p.PublishJobs()
+	select {
+	case got := <-ch:
+		t.Fatalf("stream resumed jobs events: %q", got)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestJobsPublishesCoalesce(t *testing.T) {
+	p, srv := jobsPoller(t, func(*http.Request) bool { return true })
+	ch := workEvents(t, srv.URL, http.Header{})
+	for i := 0; i < 3; i++ {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatal("no event")
+		}
+	}
+	for i := 0; i < 50; i++ {
+		p.PublishJobs()
+	}
+	time.Sleep(300 * time.Millisecond)
+	got := 0
+	for done := false; !done; {
+		select {
+		case s := <-ch:
+			if strings.HasPrefix(s, "jobs ") {
+				got++
+			}
+		default:
+			done = true
+		}
+	}
+	if got < 1 || got > 3 {
+		t.Fatalf("50 publishes produced %d events", got)
+	}
+}

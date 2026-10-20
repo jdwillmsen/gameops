@@ -84,6 +84,8 @@ type Poller struct {
 	seq       uint64
 	esubs     map[chan Event]struct{}
 	positions []Position
+	jobsSrc   JobsSource
+	jsubs     map[chan struct{}]struct{}
 }
 
 func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Poller {
@@ -101,6 +103,7 @@ func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Polle
 		tracks:    make([]track, len(units)),
 		esubs:     map[chan Event]struct{}{},
 		positions: make([]Position, len(units)),
+		jsubs:     map[chan struct{}]struct{}{},
 	}
 	for i, u := range units {
 		p.positions[i] = Position{ID: u.ID}

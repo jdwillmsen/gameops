@@ -34,7 +34,7 @@ func (p *Poller) releaseStream() {
 
 // StreamHandler serves GET /v1/units/stream as server-sent events. Whether a
 // stream is signed in is decided once, at connect, by authed; only those
-// streams receive work events, which carry task bodies. A nil authed means
+// streams receive work and jobs events, which carry task bodies and places. A nil authed means
 // every stream is anonymous.
 func (p *Poller) StreamHandler(authed func(*http.Request) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -70,11 +70,15 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 	var (
 		workSig     <-chan struct{}
 		workPending func() []string
+		jobsSig     <-chan struct{}
 	)
 	if signedIn {
 		sub, cancelWork := p.subscribeWork()
 		defer cancelWork()
 		workSig, workPending = sub.sig, sub.take
+		sig, cancelJobs := p.subscribeJobs()
+		defer cancelJobs()
+		jobsSig = sig
 	}
 
 	h := w.Header()
@@ -107,6 +111,9 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 				return
 			}
 		}
+	}
+	if stillSignedIn() && !p.writeJobs(w, rc, r) {
+		return
 	}
 	// Events go out only on a visible change, so an idle unit's seen would go
 	// stale; a full event on this timer bounds that and keeps the link alive.
@@ -147,6 +154,10 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 				if !p.writeWork(w, rc, r, u) {
 					return
 				}
+			}
+		case <-jobsSig:
+			if stillSignedIn() && !p.writeJobs(w, rc, r) {
+				return
 			}
 		case <-refresh.C:
 			if !writeUnits(w, rc, p.Snapshot()) {
