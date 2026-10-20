@@ -33,6 +33,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape/blocktable"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -89,6 +91,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The server collides with every block's real shape, not only the families
+	// shape models by hand.
+	shape.Fallback = blocktable.Boxes
 	tracker := belief.New(time.Now)
 	dec := newDecoder(log)
 	hub, beginSession := newCamera(cfg, tracker, dec, log)
