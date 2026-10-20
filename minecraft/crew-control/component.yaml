@@ -5,7 +5,7 @@ depends:
   - minecraft/agent/pkg/
 tasks:
   build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/crew-control/...
-  test: go test -race ./minecraft/crew-control/... && node --test minecraft/crew-control/internal/console/web/state.test.mjs
+  test: go test -race ./minecraft/crew-control/... && node --test minecraft/crew-control/internal/console/web/*.test.mjs
   lint: test -z "$(gofmt -l minecraft/crew-control)" && go vet ./minecraft/crew-control/...
 release:
   tag: crew-control
