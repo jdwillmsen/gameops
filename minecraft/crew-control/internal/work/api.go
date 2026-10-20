@@ -42,11 +42,14 @@ type API struct {
 	notify func(unit string)
 	now    func() time.Time
 
-	// OnSeen receives what a unit saw, after its report was applied. OnTerminal
-	// receives an item that carries a job once a report leaves it finished; a
-	// repeated report of the same end state fires it again, so a listener must
-	// treat it as a wake-up, not a count. Both are set before serving and run
-	// on the request, so they must not block.
+	// OnSeen receives what a unit saw, after its report was applied.
+	// OnTerminal receives an item that carries a job once a report leaves it
+	// finished, including a task cancelled because its cancel_task was
+	// reported done. It is a wake hint only: a repeated report fires it
+	// again, it is not fired for cancels done in place or by CancelJob, and
+	// it is lost if the process dies right after the store write. A consumer
+	// must re-read the store rather than trust what it was handed. Both
+	// hooks are set before serving and run on the request, so must not block.
 	OnSeen     func(unit string, s Seen)
 	OnTerminal func(it Item)
 
@@ -209,14 +212,26 @@ func parseSeen(raw json.RawMessage) (Seen, bool) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return s, false
 	}
-	if decodeStrict(bytes.NewReader(raw), &s) != nil || s.At.IsZero() || len(s.Items) > maxSeenItems {
+	// Pointers so a missing coordinate is told apart from zero: a chest at
+	// the origin is a place, an absent one is not an observation.
+	var w struct {
+		Chest *struct {
+			X, Y, Z *int
+		} `json:"chest"`
+		Items map[string]int `json:"items"`
+		At    time.Time      `json:"at"`
+	}
+	if decodeStrict(bytes.NewReader(raw), &w) != nil || w.At.IsZero() || len(w.Items) > maxSeenItems ||
+		w.Chest == nil || w.Chest.X == nil || w.Chest.Y == nil || w.Chest.Z == nil {
 		return Seen{}, false
 	}
-	for name, n := range s.Items {
+	for name, n := range w.Items {
 		if !seenItemName.MatchString(name) || n < 0 {
 			return Seen{}, false
 		}
 	}
+	s.Chest.X, s.Chest.Y, s.Chest.Z = *w.Chest.X, *w.Chest.Y, *w.Chest.Z
+	s.Items, s.At = w.Items, w.At
 	if s.Items == nil {
 		s.Items = map[string]int{}
 	}
@@ -263,8 +278,16 @@ func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
 	if seen, ok := parseSeen(rep.Seen); ok && a.OnSeen != nil {
 		a.OnSeen(unit, seen)
 	}
-	if it.JobID != nil && terminal(it.State) && a.OnTerminal != nil {
-		a.OnTerminal(it)
+	if a.OnTerminal != nil {
+		if it.JobID != nil && terminal(it.State) {
+			a.OnTerminal(it)
+		}
+		if target, ok := cancelTarget(it); ok && it.State == Done {
+			// Best effort: the wake is only a hint, and the cancel is stored.
+			if t, err := a.store.Get(r.Context(), target); err == nil && t.JobID != nil && t.State == Cancelled {
+				a.OnTerminal(t)
+			}
+		}
 	}
 	a.notify(unit)
 	w.WriteHeader(http.StatusNoContent)

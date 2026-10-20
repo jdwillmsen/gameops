@@ -375,6 +375,61 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatalf("second cancel: %+v %v", again, err)
 			}
 		},
+		"cancel_task done cancels a task the unit no longer holds": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			s.Next(ctx, "crew-01", "", time.Now())
+			_, cmd, err := s.CancelTask(ctx, "crew-01", a.ID, "op")
+			if err != nil || cmd == nil {
+				t.Fatal(err)
+			}
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != cmd.ID {
+				t.Fatal("setup")
+			}
+			if _, err := s.Apply(ctx, "crew-01", cmd.ID, Done, 100, ""); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.Get(ctx, a.ID)
+			if got.State != Cancelled {
+				t.Fatalf("task %s, want cancelled", got.State)
+			}
+			now := age(t, s, a.ID, time.Hour)
+			if again, ok, _, _ := s.Next(ctx, "crew-01", "", now); ok {
+				t.Fatalf("handed out again: %+v", again)
+			}
+		},
+		"cancel_task done leaves a finished task alone": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			s.Apply(ctx, "crew-01", a.ID, Done, 100, "")
+			c := must(t, s, "crew-01", KindCommand, json.RawMessage(`{"name":"cancel_task","task":"`+a.ID.String()+`"}`))
+			s.Next(ctx, "crew-01", "", time.Now())
+			if _, err := s.Apply(ctx, "crew-01", c.ID, Done, 100, ""); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := s.Get(ctx, a.ID); got.State != Done {
+				t.Fatalf("task %s, want done", got.State)
+			}
+		},
+		"an open cancel_task blocks redelivery of its task": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			s.Next(ctx, "crew-01", "", time.Now())
+			_, cmd, _ := s.CancelTask(ctx, "crew-01", a.ID, "op")
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != cmd.ID {
+				t.Fatal("setup")
+			}
+			now := age(t, s, a.ID, time.Hour)
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", now); ok && got.ID == a.ID {
+				t.Fatal("the task was redelivered under a pending cancel")
+			}
+		},
+		"Get finds an item or reports not found": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			if got, err := s.Get(ctx, a.ID); err != nil || got.ID != a.ID {
+				t.Fatalf("%+v %v", got, err)
+			}
+			if _, err := s.Get(ctx, uuid.New()); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("%v", err)
+			}
+		},
 		"recent is newest first and limited": func(t *testing.T, s Store) {
 			var ids []uuid.UUID
 			for range 4 {
