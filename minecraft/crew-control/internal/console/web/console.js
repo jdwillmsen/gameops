@@ -1,6 +1,6 @@
 import { initOps } from '/static/ops.js';
 import { step } from '/static/fleet.js';
-import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel } from '/static/state.js';
+import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody } from '/static/state.js';
 
 const statuses = new Map();
 let order = [];
@@ -119,6 +119,8 @@ function onKey(ev) {
   }
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
+  // Shift+J, because plain j and k step through units.
+  else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else ops.key(ev);
 }
 addEventListener('keydown', onKey);
@@ -159,6 +161,11 @@ function connect() {
     work.set(w.unit, w.items || []);
     if (w.unit === state.unit) renderWork();
   });
+  es.addEventListener('jobs', ev => {
+    jobs = JSON.parse(ev.data).jobs || [];
+    renderJobs();
+    if (jobsOpen && tab === 'places') loadPlaces();
+  });
   es.onerror = () => {
     if (source !== es) return;
     $('link').textContent = 'status offline';
@@ -188,6 +195,12 @@ let operator = null;
 let authAvailable = true;
 let panel = null;
 let panelUnit = '';
+let jobs = [];
+let places = [];
+let jobsOpen = false;
+let jobsUI = null;
+let tab = 'jobs';
+const expanded = new Set();
 
 async function api(method, path, body) {
   const init = { method, headers: {} };
@@ -216,10 +229,15 @@ function setOperator(op) {
     panel = null;
     panelUnit = '';
     $('panel').replaceChildren();
+    jobs = [];
+    places = [];
+    jobsUI = null;
+    jobsOpen = false;
   }
   renderSession();
   renderPanel();
   ops.onOperator();
+  renderJobs();
   if (changed) reconnect();
 }
 
@@ -353,8 +371,7 @@ function buildPanel() {
   const openList = el('ul', { id: 'open-items' });
   const historyList = el('ul', { id: 'history-items' });
 
-  const cancel = (button, id) => act(button, () => send(unitPath(`/items/${encodeURIComponent(id)}/cancel`), {}, d =>
-    d.note || 'Cancelled.'));
+  const cancel = (button, id) => act(button, () => send(unitPath(`/items/${encodeURIComponent(id)}/cancel`), {}, () => 'Cancelled.'));
 
   const title = el('h2', { id: 'panel-title' });
 
@@ -426,6 +443,191 @@ const ops = initOps({
   setView,
   expired: () => setOperator(null),
 });
+
+// ---- jobs and places ----
+
+function setJobsOpen(open) {
+  jobsOpen = open;
+  renderJobs();
+  if (open) loadPlaces();
+}
+
+async function loadPlaces() {
+  const r = await api('GET', '/v1/places');
+  if (r.status === 401) { setOperator(null); return; }
+  if (!r.ok) return;
+  places = r.data || [];
+  renderPlaces();
+  renderStockForm();
+}
+
+function buildJobs() {
+  const msg = el('p', { id: 'jobs-msg', role: 'status' });
+  const say = t => { msg.textContent = t; };
+  // One path for every jobs/places write, so a refusal is worded the same way.
+  const post = async (button, path, body, done) => {
+    button.disabled = true;
+    say('');
+    try {
+      const r = await api('POST', path, body);
+      if (r.status === 401) { say('You were signed out.'); setOperator(null); return; }
+      if (!r.ok) { say((r.data && r.data.error) || `Failed (${r.status}).`); return; }
+      say(done);
+      await loadPlaces();
+    } finally { button.disabled = false; }
+  };
+
+  const tabs = el('nav', { id: 'jobs-tabs' });
+  for (const [id, label] of [['jobs', 'Jobs'], ['places', 'Places']]) {
+    const b = el('button', { type: 'button', textContent: label, id: `tab-${id}` });
+    b.addEventListener('click', () => { tab = id; renderJobs(); if (id === 'places') loadPlaces(); });
+    tabs.append(b);
+  }
+
+  const demo = el('button', { type: 'button', id: 'start-demo', textContent: 'Parallel demo' });
+  demo.addEventListener('click', () => post(demo, '/v1/jobs', PARALLEL_DEMO, 'Started.'));
+
+  const placeSel = el('select', { id: 'stock-place' });
+  placeSel.setAttribute('aria-label', 'Chest');
+  const rows = el('div', { id: 'stock-rows' });
+  const addRow = () => {
+    const item = el('select', {}, ...GATHER_ITEMS.map(v => el('option', { value: v, textContent: v })));
+    item.setAttribute('aria-label', 'Item');
+    const qty = el('input', { type: 'number', step: '1', min: '1', max: '256', value: '32' });
+    qty.setAttribute('aria-label', 'Quantity');
+    const gone = el('button', { type: 'button', textContent: 'x', title: 'Remove' });
+    const row = el('div', { className: 'stock-row' }, item, qty, gone);
+    gone.addEventListener('click', () => row.remove());
+    rows.append(row);
+  };
+  addRow();
+  const more = el('button', { type: 'button', textContent: '+ item' });
+  more.addEventListener('click', addRow);
+  const goal = el('form', { id: 'stock-form', noValidate: true }, el('h3', { textContent: 'Stock goal' }), placeSel, rows, more,
+    el('button', { type: 'submit', textContent: 'Start stock goal' }));
+  goal.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const r = stockBody(placeSel.value, [...rows.children].map(row => ({ item: row.children[0].value, qty: row.children[1].value })));
+    if (r.error) { say(r.error); return; }
+    post(goal.querySelector('[type=submit]'), '/v1/jobs', r.body, 'Started.');
+  });
+
+  const list = el('ul', { id: 'job-list' });
+  const jobsView = el('section', { id: 'jobs-view' }, demo, goal, el('h3', { textContent: 'Jobs' }), list);
+
+  const placeList = el('ul', { id: 'place-list' });
+  const id = el('input', { id: 'new-id', placeholder: 'id' });
+  id.setAttribute('aria-label', 'Place id');
+  const name = el('input', { id: 'new-name', placeholder: 'name' });
+  name.setAttribute('aria-label', 'Place name');
+  const kind = el('select', { id: 'new-kind' }, el('option', { value: 'chest', textContent: 'chest' }), el('option', { value: 'area', textContent: 'area' }));
+  kind.setAttribute('aria-label', 'Kind');
+  const min = pointFields('Position');
+  const max = pointFields('To');
+  const syncKind = () => {
+    max.row.hidden = kind.value !== 'area';
+    min.row.firstChild.textContent = kind.value === 'area' ? 'From' : 'Position';
+  };
+  kind.addEventListener('change', syncKind);
+  syncKind();
+  const create = el('form', { id: 'place-form', noValidate: true }, el('h3', { textContent: 'New place' }), id, name, kind, min.row, max.row,
+    el('button', { type: 'submit', textContent: 'Save place' }));
+  create.addEventListener('submit', ev => {
+    ev.preventDefault();
+    const r = placeBody({ id: id.value, name: name.value, kind: kind.value, min: min.read(), max: max.read() });
+    if (r.error) { say(r.error); return; }
+    post(create.querySelector('[type=submit]'), '/v1/places', r.body, 'Saved.');
+  });
+  const placesView = el('section', { id: 'places-view' }, placeList, create);
+
+  const root = el('div', { id: 'jobs-root' }, el('h2', { textContent: 'Jobs' }), tabs, msg, jobsView, placesView);
+  return { root, tabs, jobsView, placesView, list, placeList, placeSel, rows, post, say };
+}
+
+function jobRow(job) {
+  const { done, total } = stepCount(job);
+  const open = expanded.has(job.id);
+  const head = [jobTitle(job), job.state, `${done}/${total}`];
+  if (job.reason) head.push(job.reason);
+  const toggle = el('button', { type: 'button', className: 'link', textContent: head.join(' - ') });
+  toggle.setAttribute('aria-expanded', String(open));
+  toggle.addEventListener('click', () => {
+    if (expanded.has(job.id)) expanded.delete(job.id); else expanded.add(job.id);
+    renderJobs();
+  });
+  const li = el('li', { className: 'job ' + job.state }, toggle);
+  if (jobCancellable(job)) {
+    const b = el('button', { type: 'button', textContent: 'Cancel' });
+    b.addEventListener('click', () => jobsUI.post(b, `/v1/jobs/${encodeURIComponent(job.id)}/cancel`, {}, 'Cancelled.'));
+    li.append(b);
+  }
+  if (open) {
+    li.append(el('ul', { className: 'steps' }, ...(job.steps || []).map(s =>
+      el('li', { className: 'step ' + s.state, textContent: [s.key, s.unit, s.state, s.reason].filter(Boolean).join(' - ') }))));
+  }
+  return li;
+}
+
+function renderJobs() {
+  const aside = $('jobs');
+  const show = !!operator && jobsOpen;
+  aside.hidden = !show;
+  $('jobs-toggle').hidden = !operator;
+  $('jobs-toggle').setAttribute('aria-pressed', String(show));
+  if (!show) return;
+  if (!jobsUI) {
+    jobsUI = buildJobs();
+    aside.replaceChildren(jobsUI.root);
+    renderStockForm();
+  }
+  jobsUI.jobsView.hidden = tab !== 'jobs';
+  jobsUI.placesView.hidden = tab !== 'places';
+  for (const b of jobsUI.tabs.children) b.setAttribute('aria-pressed', String(b.id === `tab-${tab}`));
+  jobsUI.list.replaceChildren(...(jobs.length ? jobs.map(jobRow) : [el('li', { className: 'empty', textContent: 'no jobs' })]));
+}
+
+function renderStockForm() {
+  if (!jobsUI) return;
+  const sel = jobsUI.placeSel;
+  const keep = sel.value;
+  sel.replaceChildren(...places.filter(p => p.kind === 'chest').map(p => el('option', { value: p.id, textContent: p.name || p.id })));
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+
+function placeRow(p) {
+  const head = el('div', { className: 'place-head' }, el('strong', { textContent: p.name || p.id }),
+    el('span', { className: 'badge', textContent: `${p.kind}${p.seeded ? ' - config' : ''}` }));
+  const li = el('li', { className: 'place' }, head);
+  if (p.stock && p.stock.length) {
+    li.append(el('ul', { className: 'stock' }, ...p.stock.map(s =>
+      el('li', { textContent: `${s.item} x${s.count} - ${seenAgo(s.seen_at)}` }))));
+  } else {
+    li.append(el('div', { className: 'empty', textContent: 'no stock seen' }));
+  }
+  if (!p.seeded) {
+    const name = el('input', { value: p.name || '' });
+    name.setAttribute('aria-label', `Rename ${p.id}`);
+    const save = el('button', { type: 'button', textContent: 'Rename' });
+    save.addEventListener('click', () => {
+      if (!name.value.trim()) { jobsUI.say('name is required'); return; }
+      jobsUI.post(save, '/v1/places', renameBody(p, name.value), 'Renamed.');
+    });
+    const del = el('button', { type: 'button', className: 'danger', textContent: 'Delete' });
+    del.addEventListener('click', () => {
+      if (!confirm(`Delete ${p.name || p.id}?`)) return;
+      jobsUI.post(del, `/v1/places/${encodeURIComponent(p.id)}/delete`, {}, 'Deleted.');
+    });
+    li.append(el('div', { className: 'point' }, name, save, del));
+  }
+  return li;
+}
+
+function renderPlaces() {
+  if (!jobsUI) return;
+  jobsUI.placeList.replaceChildren(...(places.length ? places.map(placeRow) : [el('li', { className: 'empty', textContent: 'no places' })]));
+}
+
+$('jobs-toggle').addEventListener('click', () => setJobsOpen(!jobsOpen));
 
 // The stream does not wait for the session check; the check reconnects it if
 // it finds an operator.

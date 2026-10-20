@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, signinParams } from './state.js';
+import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, signinParams, stockBody, seenAgo, stepCount, placeBody, renameBody, jobTitle } from './state.js';
 
 const units = [{ id: 'crew-01' }, { id: 'crew-02' }, { id: 'crew-03' }];
 
@@ -128,4 +128,47 @@ test('sign-in reads operator and invite from the fragment', () => {
   assert.deepEqual(signinParams('#operator=owner&invite=abc-123'), { invite: 'abc-123', operator: 'owner' });
   assert.deepEqual(signinParams(''), { invite: '', operator: '' });
   assert.deepEqual(signinParams('#invite=a%20b'), { invite: 'a b', operator: '' });
+});
+
+test('stockBody builds the job request and rejects bad rows', () => {
+  assert.deepEqual(stockBody('store', [{ item: 'oak_log', qty: '32' }, { item: 'cobblestone', qty: 32 }]),
+    { body: { kind: 'stock', place: 'store', want: { oak_log: 32, cobblestone: 32 } } });
+  assert.match(stockBody('', [{ item: 'oak_log', qty: '1' }]).error, /chest/);
+  assert.match(stockBody('s', []).error, /add an item/);
+  assert.match(stockBody('s', [{ item: 'dirt', qty: '1' }]).error, /unknown item/);
+  assert.match(stockBody('s', [{ item: 'oak_log', qty: '0' }]).error, /qty/);
+  assert.match(stockBody('s', [{ item: 'oak_log', qty: '257' }]).error, /qty/);
+  assert.match(stockBody('s', [{ item: 'oak_log', qty: '1' }, { item: 'oak_log', qty: '2' }]).error, /twice/);
+});
+
+test('seenAgo reads as relative time', () => {
+  const now = Date.parse('2026-10-20T12:00:00Z');
+  const ago = s => seenAgo(new Date(now - s * 1000).toISOString(), now);
+  assert.equal(ago(2), 'seen just now');
+  assert.equal(ago(30), 'seen 30s ago');
+  assert.equal(ago(180), 'seen 3m ago');
+  assert.equal(ago(7300), 'seen 2h ago');
+  assert.equal(ago(200000), 'seen 2d ago');
+  assert.equal(seenAgo('nope', now), '');
+  assert.equal(seenAgo(new Date(now + 5000).toISOString(), now), 'seen just now');
+});
+
+test('stepCount and jobTitle summarise a job', () => {
+  assert.deepEqual(stepCount({ steps: [{ state: 'done' }, { state: 'running' }] }), { done: 1, total: 2 });
+  assert.deepEqual(stepCount({}), { done: 0, total: 0 });
+  assert.equal(jobTitle({ kind: 'plan', spec: { template: 'parallel-demo' } }), 'parallel-demo');
+  assert.equal(jobTitle({ kind: 'stock', spec: { place: 'store', want: { oak_log: 32 } } }), 'stock store: oak_log x32');
+});
+
+test('placeBody and renameBody', () => {
+  const pt = { x: '1', y: '64', z: '-2' };
+  assert.deepEqual(placeBody({ id: ' c1 ', name: ' Box ', kind: 'chest', min: pt }).body,
+    { id: 'c1', name: 'Box', kind: 'chest', box: { min: { x: 1, y: 64, z: -2 }, max: { x: 1, y: 64, z: -2 } } });
+  assert.deepEqual(placeBody({ id: 'a', name: 'A', kind: 'area', min: pt, max: { x: '5', y: '66', z: '3' } }).body.box.max, { x: 5, y: 66, z: 3 });
+  assert.match(placeBody({ id: '', name: 'n', kind: 'chest', min: pt }).error, /id/);
+  assert.match(placeBody({ id: 'a', name: '', kind: 'chest', min: pt }).error, /name/);
+  assert.match(placeBody({ id: 'a', name: 'n', kind: 'chest', min: { x: 'q', y: '1', z: '1' } }).error, /whole/);
+  assert.match(placeBody({ id: 'a', name: 'n', kind: 'room', min: pt }).error, /kind/);
+  const p = { id: 'a', name: 'A', kind: 'area', box: { min: { x: 0, y: 0, z: 0 }, max: { x: 1, y: 1, z: 1 } }, items: ['oak_log'], seeded: false, stock: [] };
+  assert.deepEqual(renameBody(p, ' B '), { id: 'a', name: 'B', kind: 'area', box: p.box, items: ['oak_log'] });
 });
