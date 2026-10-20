@@ -179,3 +179,9 @@ export function placeBody(form) {
 export const renameBody = (place, name) => ({
   id: place.id, name: String(name).trim(), kind: place.kind, box: place.box, ...(place.items ? { items: place.items } : {}),
 });
+
+const STATES = ['waiting', 'queued', 'running', 'done', 'failed', 'cancelled'];
+
+// States come from the server and end up in a class name, so only known ones
+// are passed through.
+export const knownState = s => (STATES.includes(s) ? s : 'unknown');
