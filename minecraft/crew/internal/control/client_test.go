@@ -1213,9 +1213,9 @@ func TestOversizedSeenIsTrimmedSoTheStateStillArrives(t *testing.T) {
 }
 
 func TestFitDropsUnnameableItemsAndKeepsTheBiggest(t *testing.T) {
-	seen := &Seen{Items: map[string]int{"item#5": 500, "Bad-Name": 400, "dirt": 3, "cobblestone": 70}}
+	seen := &Seen{Items: map[string]int{"item#5": 500, "Bad-Name": 400, "dirt": 3, "cobblestone": 70, "music_disc_13": 1}}
 	got := fit(event{ID: "x", State: "done", Seen: seen})
-	if len(got.Seen.Items) != 2 || got.Seen.Items["dirt"] != 3 || got.Seen.Items["cobblestone"] != 70 || !got.Seen.Partial {
+	if len(got.Seen.Items) != 3 || got.Seen.Items["music_disc_13"] != 1 || got.Seen.Items["dirt"] != 3 || got.Seen.Items["cobblestone"] != 70 || !got.Seen.Partial {
 		t.Errorf("seen = %+v", got.Seen)
 	}
 	b, _ := json.Marshal(fit(event{ID: "x", State: "done", Seen: &Seen{Items: map[string]int{"item#5": 1}}}))

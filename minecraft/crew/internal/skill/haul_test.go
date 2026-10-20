@@ -249,3 +249,38 @@ func TestWithdrawIntoHotbarNeverLandsOffTheHotbar(t *testing.T) {
 		t.Errorf("full=%v, bread left %d, want the bread left behind", s.(*Withdraw).Full(), r.stored(srcA, 340))
 	}
 }
+
+// watched reads a skill's Seen after every step, the way the runner does.
+type watched struct {
+	Skill
+	views []ChestSeen
+}
+
+func (w *watched) Step(ctx context.Context, a Actuator) (Status, error) {
+	st, err := w.Skill.Step(ctx, a)
+	if v, ok := w.Skill.(Seer).Seen(); ok && (len(w.views) == 0 || w.views[len(w.views)-1].At != v.At) {
+		w.views = append(w.views, v)
+	}
+	return st, err
+}
+
+func TestHaulReportsEveryChestItClosedNotOnlyTheDestination(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	r.fillAt(0, srcA, 0, slotStack{idCobblestone, 16, 700})
+	r.fillAt(0, srcB, 0, slotStack{idCobblestone, 16, 701})
+	h := &watched{Skill: NewHaul(w, r.self, []protocol.BlockPos{srcA, srcB}, storage, map[string]int{"cobblestone": 32})}
+	if st, err := r.run(h, 6000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	got := make([]protocol.BlockPos, len(h.views))
+	for i, v := range h.views {
+		got[i] = v.Chest
+	}
+	if want := []protocol.BlockPos{srcA, srcB, storage}; len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("observed chests %v, want %v", got, want)
+	}
+	if first := h.views[0]; first.Items["cobblestone"] != 0 {
+		t.Errorf("source A seen after the haul emptied it still holds %v", first.Items)
+	}
+}
