@@ -432,18 +432,25 @@ Task API or crew-control, so an operator's job starts at once.
 
 ### Test fields
 
-`lab/courses.sh [--confirm-overwrite] <lab> grounds|courses|signs` builds one of two
-fixed test fields on the lab's flat ground (grass at y 63), beside the spawn
-hub at x -61..51, z -519..-323. Each is a 3x3 grid of 40x40 cells with roads
-between, joined to the hub's gates by paths:
+`lab/courses.sh [--confirm-overwrite] <lab> grounds|courses|trees|works|signs`
+builds one of four fixed test fields on the lab's flat ground (grass at y 63)
+around the spawn hub at x -61..51, z -519..-323. Each is a 3x3 grid of 40x40
+cells with roads between, joined to the hub's gates or to the next field by
+paths:
 
 | Field | Box | Cells (north row first, west to east) |
 |---|---|---|
 | `grounds` | x 150..293, z -500..-357 | tree grove (9 woods), ore quarry, liquids and hazards / chests and workstations, beacon plaza with a block gallery, redstone / farm, animal pens, pathfinding course |
 | `courses` | x -294..-151, z -500..-357 | drops 1-4, trenches 1-4, jump steps, gaps / pit, low ceilings, water pool, lava behind glass / slabs, stairs, fences, ladders, doors, thin blocks; pads 1-12 (16x16) and 13-15 (38x38) |
+| `trees` | x -444..-301, z -500..-357 (west of `courses`) | nine fixed oaks, numbered 1-9 by difficulty, natural trees of 16 species, two-by-two giants / dense oak wood, terraces with fixed oaks, mangrove swamp / sapling nursery, lumber yard with deposit chests, huge nether fungi |
+| `works` | x 150..293, z -700..-557 (north of `grounds`) | powered rail loop with a minecart, boat ring with a blue ice lane, fenced arena with armoured dummies / iron doors worked by buttons and levers and a trapdoor hatch, five climbs to a landing (bubble column, ladder, scaffolding, vines, spiral stair) and a magma column down, trench bridges 3/2/1 wide and stepping stones / 30-block surface lanes, clutter, a roofed tunnel maze |
 
 A unit's gather `area` can be one cell: the grove, the quarry and the chest
-rows are the work yards. Pads are blank on purpose; a test may clear one
+rows are the work yards. The fixed oaks in `trees` are the same blocks on
+every rebuild, so a felling test can count logs; oak 1 has a 4-log trunk,
+oak 3 a 12-log trunk that needs a pillar, oak 5 a 2x2 trunk. The other trees
+there are the game's own tree features and grow differently every rebuild,
+and the field clears 48 blocks up because the giants outgrow 32. Pads are blank on purpose; a test may clear one
 (air from y 64 up) and build on it each run. Every number is drawn on its pad.
 
 `cmd/labcourses` generates the commands; the script loads the chunks with
