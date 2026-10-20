@@ -6,12 +6,13 @@
 //
 // usage: labcourses grounds|courses|trees|works|signs
 //
+//	labcourses -o <dir> <field>...
+//
 // Output starts with "# area x0 z0 x1 z1" lines, the ticking areas the
 // commands need loaded, followed by one command per line.
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 )
@@ -30,6 +31,9 @@ var courses = map[string]course{
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-o" {
+		os.Exit(writePlans(os.Args[2:]))
+	}
 	if len(os.Args) != 2 {
 		fmt.Fprintln(os.Stderr, "usage: labcourses grounds|courses|trees|works|signs")
 		os.Exit(2)
@@ -39,16 +43,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "labcourses: unknown field %q (want grounds, courses, trees, works or signs)\n", os.Args[1])
 		os.Exit(2)
 	}
-	var b builder
-	c.build(&b)
-	w := bufio.NewWriter(os.Stdout)
-	for _, a := range c.areas() {
-		fmt.Fprintf(w, "# area %d %d %d %d\n", a.x0, a.z0, a.x1, a.z1)
-	}
-	for _, cmd := range b.cmds {
-		fmt.Fprintln(w, cmd)
-	}
-	if err := w.Flush(); err != nil {
+	if err := render(os.Stdout, c); err != nil {
 		fmt.Fprintln(os.Stderr, "labcourses:", err)
 		os.Exit(1)
 	}

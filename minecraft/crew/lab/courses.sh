@@ -8,9 +8,13 @@
 #            grounds (x 150..293, z -700..-557)
 #   signs    name-tag labels at spawn, the hub's gates and the fields
 #
-# usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|trees|works|signs
+# usage: courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
 #   for the cluster lab's server pod.
+#
+# --plan feeds a prebuilt `labcourses <field>` output instead of running the
+# generator from a checkout, for hosts that have no Go toolchain (the nightly
+# rebuild job, see nightly.sh).
 #
 # A field replaces everything in its box from the floor up, so a k8s: target
 # (a world real players build in) is refused without --confirm-overwrite.
@@ -22,16 +26,26 @@
 set -euo pipefail
 
 confirm=false
-if [[ ${1:-} == --confirm-overwrite ]]; then
-  confirm=true
+prebuilt=
+usage="usage: courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs"
+while [[ ${1:-} == --* ]]; do
+  case $1 in
+    --confirm-overwrite) confirm=true ;;
+    --plan)
+      prebuilt=${2:?$usage}
+      shift
+      ;;
+    *)
+      echo "$usage" >&2
+      exit 2
+      ;;
+  esac
   shift
-fi
+done
 
-usage="usage: courses.sh [--confirm-overwrite] <lab> grounds|courses|trees|works|signs"
 lab=${1:?$usage}
 field=${2:?$usage}
 here=$(cd "$(dirname "$0")" && pwd)
-repo=$(cd "$here/../../.." && pwd)
 
 if [[ $lab == k8s:*/* ]]; then
   if ! $confirm; then
@@ -60,7 +74,11 @@ logged() { server_logs "$started" | grep -F "$1" >/dev/null; }
 
 plan=$(mktemp)
 trap 'rm -f "$plan"' EXIT
-(cd "$repo" && go run ./minecraft/crew/cmd/labcourses "$field") >"$plan"
+if [[ -n $prebuilt ]]; then
+  cp "$prebuilt" "$plan"
+else
+  (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses "$field") >"$plan"
+fi
 
 mapfile -t areas < <(sed -n 's/^# area //p' "$plan")
 started=$(date -u +%Y-%m-%dT%H:%M:%SZ)

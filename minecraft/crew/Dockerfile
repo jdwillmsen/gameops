@@ -10,6 +10,10 @@ RUN go mod download
 COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/crew ./minecraft/crew/cmd/crew
+# The nightly lab rebuild job runs this in an init container to write its
+# plans and scripts into a volume the kubectl container reads: the runtime
+# image has no shell or cp to do it.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/labcourses ./minecraft/crew/cmd/labcourses
 # The runtime image has no shell to create or chown a directory, so the data
 # directory is made here and copied across with its owner.
 RUN mkdir /out/data
@@ -19,6 +23,7 @@ RUN mkdir /out/data
 # distroless/static bundles CA certs and a non-root user without a shell.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/crew /crew
+COPY --from=build /out/labcourses /labcourses
 
 # Redundant at runtime -- the `:nonroot` base already runs as uid 65532 -- but
 # a scanner reading this file cannot resolve a digest-pinned base image's USER,
