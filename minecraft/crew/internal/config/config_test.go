@@ -277,6 +277,19 @@ func TestKitChestIsOffUnlessAPositionIsGiven(t *testing.T) {
 	}
 }
 
+func TestWorkPlanIsOptional(t *testing.T) {
+	setRequired(t)
+	if cfg, err := Load(); err != nil || cfg.WorkPlan != "" {
+		t.Fatalf("default = %q, err %v", cfg.WorkPlan, err)
+	}
+	t.Setenv("JOIN_DELAY_S", "45")
+	t.Setenv("JOIN_DELAY_S", "45")
+	t.Setenv("WORK_PLAN", " [] ")
+	if cfg, err := Load(); err != nil || cfg.WorkPlan != "[]" || cfg.JoinDelayS != 45 {
+		t.Fatalf("set = %q, err %v", cfg.WorkPlan, err)
+	}
+}
+
 func TestKitChestRejectsWhatIsNotAPosition(t *testing.T) {
 	for _, v := range []string{"1,2", "1,2,3,4", "a,b,c", "1,2,99999999999", "~1,2,3"} {
 		setRequired(t)

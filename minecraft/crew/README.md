@@ -22,6 +22,9 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
+| `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first |
+| `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins
+| `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
@@ -400,6 +403,26 @@ The `k8s:<ns>` form port-forwards `deploy/crew-01` to `crew-03` on 18081 to
 forward to answer `/healthz` before sending the token and refuses a local port
 that is already in use. A timeout, error or interrupt cancels every task still
 running. The gatherers get the scene's cleared box as their `area`.
+
+### Twenty units with standing work
+
+The cluster lab runs `crew-01` to `crew-20` at once, each with a `WORK_PLAN`
+(see Configuration) in a 32x32-block plot of its own, so none shares a block or
+a chest with another. The deployment chart derives plot and plan from the
+unit's number and `role`, and a behaviour pack on the server keeps each plot
+supplied once a minute:
+
+| Role | Plan, in rotation |
+|---|---|
+| `miner` | gather 16 cobblestone from the plot's quarry into its chest |
+| `chopper` | fell 8 oak logs from the plot's grove into its chest |
+| `hauler` | move 64 cobblestone from one chest to the other, then back |
+| `shaft` | `mine_shaft` from two entrances in the plot's south strip, into the chest |
+
+Because the pack runs `tp`, a unit that joins or respawns at the hub is sent to
+its plot; it also gives the unit its pickaxe or axe and bread. `JOIN_DELAY_S`
+spaces the first logins. A plan task yields to anything submitted through the
+Task API or crew-control, so an operator's job starts at once.
 
 ### Test fields
 
