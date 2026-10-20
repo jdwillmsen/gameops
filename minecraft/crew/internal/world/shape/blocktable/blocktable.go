@@ -1,6 +1,6 @@
 // Package blocktable gives the collision boxes of the blocks shape does not
-// model itself, from dragonfly's block table: chests, paths, tables, pots,
-// campfires and the rest of the blocks that are not full cubes. A block whose
+// model itself, from dragonfly's block table: chests, paths, tables, pots
+// and the rest of the blocks that are not full cubes. A block whose
 // model needs its neighbours is left to the caller, which treats it as a cube.
 //
 // Importing it registers the dragonfly blocks, so it belongs in the binary and
@@ -27,7 +27,7 @@ func solid(name string) bool {
 	switch name {
 	case "water", "flowing_water", "lava", "flowing_lava", "fire", "soul_fire",
 		"web", "portal", "end_portal", "end_gateway", "sweet_berry_bush", "magma",
-		"bubble_column", "powder_snow", "wither_rose":
+		"bubble_column", "powder_snow", "wither_rose", "campfire", "soul_campfire":
 		return true
 	}
 	return false

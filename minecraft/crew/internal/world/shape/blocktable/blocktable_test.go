@@ -29,7 +29,6 @@ func TestTheTableRestsAUnitWhereTheLabServerDid(t *testing.T) {
 	}{
 		{"chest", 0.95}, {"ender_chest", 0.95}, {"grass_path", 0.9375},
 		{"enchanting_table", 0.75}, {"end_portal_frame", 0.8125},
-		{"campfire", 0.4375}, {"soul_campfire", 0.4375},
 		{"stonecutter_block", 0.5625}, {"honey_block", 1}, {"anvil", 1},
 		{"candle", 0.375}, {"scaffolding", 1}, {"lantern", 0.5},
 		{"decorated_pot", 1}, {"end_rod", 1}, {"iron_chain", 1},
@@ -66,6 +65,16 @@ func TestPlantsAndSignsHaveNoCollision(t *testing.T) {
 		boxes, ok := Boxes(name, nil)
 		if !ok || len(boxes) != 0 {
 			t.Errorf("%s = %v, %v, want no collision", name, boxes, ok)
+		}
+	}
+}
+
+// A lit campfire burns whatever stands on it. Its 0.4375 top, measured on the
+// lab, is under the step height, so as its real shape a unit would walk onto it.
+func TestCampfiresStayCubesSoNoUnitStepsOntoOne(t *testing.T) {
+	for _, name := range []string{"campfire", "soul_campfire"} {
+		if _, ok := Boxes(name, nil); ok {
+			t.Errorf("%s: the table gave a shape, want it left a cube", name)
 		}
 	}
 }
