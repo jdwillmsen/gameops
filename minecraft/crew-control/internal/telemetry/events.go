@@ -11,8 +11,10 @@ const (
 	// A running task whose progress has not moved for this long is reported
 	// once as stuck. Gather and haul steps normally advance within seconds.
 	stuckAfter = 90 * time.Second
-	lowHealth  = 6
-	lowHunger  = 6
+	// Walking this far counts as progress, so long walks are not stuck.
+	movedBlocks = 3
+	lowHealth   = 6
+	lowHunger   = 6
 )
 
 // Event is one line of the fleet log. It carries no coordinates, so the
@@ -23,7 +25,8 @@ type Event struct {
 	Unit string    `json:"unit"`
 	Name string    `json:"name"`
 	// Kind is one of online, offline, died, respawned, task_started,
-	// task_done, task_failed, task_cancelled, stuck, low_health, low_hunger.
+	// task_done, task_failed, task_cancelled, task_ended (outcome unknown),
+	// stuck, low_health, low_hunger.
 	Kind string `json:"kind"`
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
@@ -54,7 +57,10 @@ type track struct {
 	template   string
 	progress   int
 	progressAt time.Time
-	stuck      bool
+	// anchor is where the unit stood when progressAt last moved.
+	anchor      [3]float32
+	anchorKnown bool
+	stuck       bool
 }
 
 type recentTask struct {
@@ -71,6 +77,8 @@ type observation struct {
 	curID       string
 	curTemplate string
 	curProgress int
+	pos         [3]float32
+	posKnown    bool
 	recent      []recentTask
 }
 
@@ -87,6 +95,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	}()
 	if !t.seeded {
 		t.taskID, t.template, t.progress, t.progressAt = o.curID, o.curTemplate, o.curProgress, now
+		t.anchor, t.anchorKnown = o.pos, o.posKnown
 		t.lowHP = o.health != nil && *o.health <= lowHealth
 		t.lowFood = o.hunger != nil && *o.hunger <= lowHunger
 		return nil
@@ -129,18 +138,30 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			add("task_started", "info", "started "+o.curTemplate)
 		}
 		t.taskID, t.template, t.progress, t.progressAt, t.stuck = o.curID, o.curTemplate, o.curProgress, now, false
+		t.anchor, t.anchorKnown = o.pos, o.posKnown
 		return out
 	}
 	if o.curID != "" {
 		switch {
-		case o.curProgress != t.progress:
+		case o.curProgress != t.progress || t.moved(o):
 			t.progress, t.progressAt, t.stuck = o.curProgress, now, false
+			t.anchor, t.anchorKnown = o.pos, o.posKnown
+		case o.posKnown && !t.anchorKnown:
+			t.anchor, t.anchorKnown = o.pos, true
 		case !t.stuck && now.Sub(t.progressAt) >= stuckAfter:
 			t.stuck = true
 			add("stuck", "warn", fmt.Sprintf("%s has not progressed for %ds", t.template, int(now.Sub(t.progressAt).Seconds())))
 		}
 	}
 	return out
+}
+
+func (t *track) moved(o observation) bool {
+	if !o.posKnown || !t.anchorKnown {
+		return false
+	}
+	dx, dy, dz := o.pos[0]-t.anchor[0], o.pos[1]-t.anchor[1], o.pos[2]-t.anchor[2]
+	return dx*dx+dy*dy+dz*dz > movedBlocks*movedBlocks
 }
 
 // finished reads how a task that left "current" ended from the unit's recent
@@ -164,7 +185,7 @@ func finished(id, template string, recent []recentTask, now time.Time) Event {
 			return Event{At: now, Kind: "task_failed", Level: "crit", Text: text}
 		}
 	}
-	return Event{At: now, Kind: "task_cancelled", Level: "info", Text: template + " ended"}
+	return Event{At: now, Kind: "task_ended", Level: "info", Text: template + " ended, outcome unknown"}
 }
 
 // tidy keeps a unit's free-text reason to one short line before it reaches

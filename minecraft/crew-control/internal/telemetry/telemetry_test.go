@@ -554,7 +554,7 @@ func TestStreamBacklogAndLiveLog(t *testing.T) {
 	}
 	unit.set(200, stateUnknownNoTask)
 	got := nextNamed(t, ch, "log")
-	if !strings.Contains(got, `"kind":"died"`) && !strings.Contains(got, `"kind":"task_cancelled"`) {
+	if !strings.Contains(got, `"kind":"died"`) && !strings.Contains(got, `"kind":"task_ended"`) {
 		t.Errorf("log = %s", got)
 	}
 }

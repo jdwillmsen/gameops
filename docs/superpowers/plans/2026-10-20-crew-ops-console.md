@@ -11,7 +11,7 @@ Jira: JDW-130. The owner asked for the crew console to become an operations cons
 ## Server (`crew-control/internal/telemetry`)
 
 1. `Status` gains `hunger`; the task summary gains its id so a finished task can be matched to the unit's recent list.
-2. A per-unit tracker turns poll results into events: online, offline, died, respawned, low health or hunger, task started, done, failed (with reason), cancelled, stuck. The first poll sets a baseline and announces nothing. A ring of 200 is kept.
+2. A per-unit tracker turns poll results into events: online, offline, died, respawned, low health or hunger, task started, done, failed (with reason), cancelled, ended with an unknown outcome (task no longer in the unit's recent list), stuck (no progress and no movement for 90 s). The first poll sets a baseline and announces nothing. A ring of 200 is kept.
 3. The stream sends an `events` backlog on connect and a `log` event per new one to everyone, and `positions` (2 s, only when changed) to signed-in streams only.
 
 ## Console (`crew-control/internal/console/web`)
