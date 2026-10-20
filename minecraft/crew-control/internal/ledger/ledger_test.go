@@ -316,6 +316,41 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 				t.Errorf("stock %+v", st)
 			}
 		},
+		"a seed that moves a place drops its stock, a rename keeps it": func(t *testing.T, l Ledger) {
+			count := func(id string) int {
+				t.Helper()
+				st, err := l.Stock(ctx, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return len(st)
+			}
+			must(t, l.Seed(ctx, []Place{chest("store", 10, 64, 10)}))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{10, 64, 10}, map[string]int{"cobblestone": 20}, false))
+			must(t, l.Seed(ctx, []Place{chest("store", 10, 64, 10)}))
+			renamed := chest("store", 10, 64, 10)
+			renamed.Name = "Main store"
+			must(t, l.Seed(ctx, []Place{renamed}))
+			if n := count("store"); n != 1 {
+				t.Fatalf("unchanged or renamed seed kept %d rows, want 1", n)
+			}
+			must(t, l.Seed(ctx, []Place{chest("store", 20, 64, 20)}))
+			if n := count("store"); n != 0 {
+				t.Errorf("moved seed kept %d rows", n)
+			}
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{20, 64, 20}, map[string]int{"cobblestone": 20}, false))
+			must(t, l.Seed(ctx, []Place{area("store", Pos{20, 64, 20}, Pos{21, 64, 21}, "cobblestone")}))
+			if n := count("store"); n != 0 {
+				t.Errorf("seed that changed kind kept %d rows", n)
+			}
+
+			must(t, l.PutPlace(ctx, chest("outbox", 5, 64, 5)))
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{5, 64, 5}, map[string]int{"oak_log": 8}, false))
+			must(t, l.Seed(ctx, []Place{chest("outbox", 6, 64, 6)}))
+			if n := count("outbox"); n != 0 {
+				t.Errorf("seed taking over an unseeded place at another box kept %d rows", n)
+			}
+		},
 		"two chests never share a position": func(t *testing.T, l Ledger) {
 			must(t, l.PutPlace(ctx, chest("mine", 5, 64, 5)))
 			if err := l.PutPlace(ctx, chest("other", 5, 64, 5)); !errors.Is(err, ErrConflict) {

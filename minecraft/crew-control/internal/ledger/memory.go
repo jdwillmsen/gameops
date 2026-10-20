@@ -112,6 +112,9 @@ func (m *Memory) Seed(_ context.Context, ps []Place) error {
 	}
 	for _, p := range ps {
 		p.Seeded = true
+		if old, ok := m.places[p.ID]; ok && moved(old, p) {
+			delete(m.stock, p.ID)
+		}
 		m.places[p.ID] = clonePlace(p)
 		if p.Kind == KindChest {
 			m.foldLocked(p)
