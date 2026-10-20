@@ -60,6 +60,24 @@ Logs carry only events and types (`defend_started`, `hurt_by`,
 `reason`: `gone` (the mob left range or died), `no_stand_cell` (no standable
 cell near it), `no_path` (the chase failed) or `fight_limit`.
 
+## Water
+
+Water is not solid to the unit's body, but planned paths still never enter or
+cross it. The body follows the server's swimming rules, measured on the lab:
+weak steering (0.02 per tick), a fifth of the speed lost each tick, a sink of
+0.005 per tick, and swim-up of 0.04 per tick while jump is held, which only
+works with more than 0.4 blocks of water over the feet. The surface stands
+8/9 of a block up, so a unit at the top bobs in and out of the water. A
+unit pushing on a block edge not more than 0.6 above its feet is kicked up
+0.3 per tick onto it.
+
+In water the unit swims out before it does anything else, even in a fight or a
+task, which resumes afterwards. It finds the nearest shore it can stand on,
+level with the surface or one block above, rises until it would coast to rest
+under the surface and swims along the water to it. A unit left in water that
+has no shore keeps treading water. Logs carry `swim_started` and `swim_ended`
+(with `ticks`), never positions.
+
 ## Eating and rearming
 
 A unit that died fights barehanded and never heals: on normal difficulty
