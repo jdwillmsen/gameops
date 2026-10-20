@@ -128,7 +128,7 @@ func walk(r *rig, s Skill, maxTicks int) (Status, error) {
 }
 
 // fuzzWorld lays slabs, stairs, fences, carpets, snow and low ceilings on a
-// flat floor at random.
+// flat floor at random, with puddles of water among them.
 func fuzzWorld(rng *rand.Rand) statedWorld {
 	const size = 14
 	w := newStated(size)
@@ -137,7 +137,7 @@ func fuzzWorld(rng *rand.Rand) statedWorld {
 			if rng.Intn(100) >= 22 {
 				continue
 			}
-			switch rng.Intn(8) {
+			switch rng.Intn(9) {
 			case 0:
 				w.put(x, 1, z, "stone_slab", map[string]any{"minecraft:vertical_half": "bottom"})
 			case 1:
@@ -154,6 +154,9 @@ func fuzzWorld(rng *rand.Rand) statedWorld {
 				w.put(x, 3, z, "stone", nil)
 			case 7:
 				w.put(x, 1, z, "stone", nil)
+			case 8:
+				// Water the body would sink through; plans must go round it.
+				w.put(x, 1, z, "water", nil)
 			}
 		}
 	}
