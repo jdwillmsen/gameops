@@ -160,9 +160,11 @@ type rig struct {
 	stallBreaks   bool
 	// slowBreak and slowPickup stand in for a loaded server: inputs it takes
 	// to finish a break, and age a drop must reach before it can be taken.
-	// Zero is a healthy server.
+	// Zero is a healthy server. slowOnly, when set, limits slowBreak to
+	// blocks of that name.
 	slowBreak  int
 	slowPickup int
+	slowOnly   string
 	// openDelay holds the ContainerOpen back this many inputs after the click.
 	openDelay     int
 	openIn        int
@@ -363,7 +365,7 @@ func (r *rig) onInput(p *packet.PlayerAuthInput) {
 					continue
 				}
 				left := 23
-				if r.slowBreak > 0 {
+				if r.slowBreak > 0 && (r.slowOnly == "" || r.world[a.BlockPos] == r.slowOnly) {
 					left = r.slowBreak
 				}
 				r.breaking = &breakSession{pos: a.BlockPos, left: left}
