@@ -1,3 +1,5 @@
+import { initOps } from '/static/ops.js';
+import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel } from '/static/state.js';
 
 const statuses = new Map();
@@ -20,7 +22,15 @@ function sync() {
 
 function renderBar() {
   const units = $('units');
-  units.replaceChildren(...order.map((id, i) => {
+  // Past nine units the roster is the picker; the bar keeps a stepper.
+  if (order.length > 9) {
+    const cur = statuses.get(state.unit);
+    const prev = el('button', { type: 'button', textContent: '<', title: 'Previous unit (k)' });
+    const next = el('button', { type: 'button', textContent: '>', title: 'Next unit (j)' });
+    prev.addEventListener('click', () => pickUnit(step(order, state.unit, -1)));
+    next.addEventListener('click', () => pickUnit(step(order, state.unit, 1)));
+    units.replaceChildren(prev, el('span', { className: 'cur-unit', textContent: cur ? `${order.indexOf(cur.id) + 1}. ${cur.name || cur.id}` : '' }), next);
+  } else units.replaceChildren(...order.map((id, i) => {
     const s = statuses.get(id);
     const b = el('button', { type: 'button', title: `Key ${i + 1}` }, s.name || id, el('span', { className: 'badge ' + (!s.online ? 'offline' : s.dead ? 'dead' : ''), textContent: badge(s) }));
     b.setAttribute('aria-pressed', String(state.unit === id && state.view === 'focus'));
@@ -56,24 +66,7 @@ function renderStage() {
     stage.append(frame);
     return;
   }
-  stage.append(...order.map(id => {
-    const tile = el('div', { className: 'tile' });
-    tile.dataset.unit = id;
-    const cover = el('button', { type: 'button', className: 'cover', title: 'Focus this unit' });
-    cover.addEventListener('click', () => { state.unit = id; state.view = 'focus'; apply(); });
-    tile.append(el('iframe', { src: wallSrc(id), title: id, loading: 'lazy' }), cover, el('div', { className: 'label' }));
-    return tile;
-  }));
-  renderLabels();
-}
-
-function renderLabels() {
-  for (const tile of stage.querySelectorAll('.tile')) {
-    const s = statuses.get(tile.dataset.unit);
-    if (!s) continue;
-    tile.classList.toggle('offline', !s.online);
-    tile.querySelector('.label').textContent = `${s.name || s.id}  ${badge(s)}`;
-  }
+  ops.renderWall(stage);
 }
 
 function apply() {
@@ -81,6 +74,7 @@ function apply() {
   renderBar();
   renderStage();
   renderPanel();
+  ops.onState();
 }
 
 function pickUnit(id) {
@@ -106,14 +100,21 @@ function toggleWall() {
   apply();
 }
 
+function setView(view) {
+  state.view = view;
+  apply();
+}
+
 $('wall-toggle').addEventListener('click', toggleWall);
 
 function onKey(ev) {
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
   if (isTyping(ev.target)) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (/^[1-9]$/.test(ev.key)) pickUnit(order[Number(ev.key) - 1]);
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
+  else ops.key(ev);
 }
 addEventListener('keydown', onKey);
 
@@ -129,8 +130,8 @@ function onUnits(list) {
   }
   if (!statuses.has(state.unit)) state = { ...parse('', order), mode: state.mode, view: state.view };
   renderBar();
-  renderLabels();
   renderPanel();
+  ops.onUnits();
 }
 
 const BACKOFF_MIN = 2000, BACKOFF_MAX = 30000;
@@ -145,6 +146,9 @@ function connect() {
     $('link').textContent = '';
     onUnits(JSON.parse(ev.data));
   });
+  es.addEventListener('events', ev => ops.onEvents(JSON.parse(ev.data) || [], false));
+  es.addEventListener('log', ev => ops.onEvents([JSON.parse(ev.data)], true));
+  es.addEventListener('positions', ev => ops.onPositions(JSON.parse(ev.data) || []));
   es.addEventListener('work', ev => {
     const w = JSON.parse(ev.data);
     work.set(w.unit, w.items || []);
@@ -210,6 +214,7 @@ function setOperator(op) {
   }
   renderSession();
   renderPanel();
+  ops.onOperator();
   if (changed) reconnect();
 }
 
@@ -404,6 +409,18 @@ function renderWork() {
   panel.openList.replaceChildren(...(open.length ? open.map(i => itemRow(i, true)) : [el('li', { className: 'empty', textContent: 'nothing queued' })]));
   panel.historyList.replaceChildren(...(history.length ? history.map(i => itemRow(i, false)) : [el('li', { className: 'empty', textContent: 'no history' })]));
 }
+
+const ops = initOps({
+  statuses,
+  order: () => order,
+  state: () => state,
+  operator: () => operator,
+  api,
+  focus: pickUnit,
+  setMode,
+  setView,
+  expired: () => setOperator(null),
+});
 
 // The stream does not wait for the session check; the check reconnects it if
 // it finds an operator.

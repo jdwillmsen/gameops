@@ -12,13 +12,48 @@
   <nav id="units" aria-label="Units"></nav>
   <nav id="modes" aria-label="Camera mode"></nav>
   <button id="wall-toggle" type="button" title="Toggle wall (w)">Wall</button>
+  <span class="tools">
+    <button id="t-roster" type="button" title="Roster (r)">Roster</button>
+    <button id="t-events" type="button" title="Event feed (e)">Events <span id="dock-unread" hidden></span></button>
+    <button id="t-radar" type="button" title="Radar (m)" hidden>Radar</button>
+    <button id="t-palette" type="button" title="Command palette (Ctrl-K)">Ctrl-K</button>
+    <button id="t-help" type="button" title="Keyboard help (?)">?</button>
+  </span>
   <span id="link" role="status"></span>
   <span id="session"></span>
 </header>
 <div id="content">
-  <main id="stage"></main>
+  <aside id="side" aria-label="Fleet">
+    <div class="scroll"><table id="roster"></table></div>
+    <button id="roster-sel" type="button" class="danger" hidden></button>
+    <section id="radar-box" hidden>
+      <h3>Radar</h3>
+      <canvas id="radar" width="320" height="320"></canvas>
+      <p id="radar-empty">no positions yet</p>
+    </section>
+  </aside>
+  <div id="center">
+    <main id="stage"></main>
+    <div id="pip" hidden></div>
+  </div>
   <aside id="panel" aria-label="Commands" hidden></aside>
 </div>
+<section id="dock" aria-label="Events">
+  <div class="dockbar">
+    <h3>Events</h3>
+    <select id="feed-level" aria-label="Level"><option value="all">all</option><option value="warn">warnings and worse</option><option value="crit">critical</option></select>
+    <label><input type="checkbox" id="feed-unit"> this unit</label>
+  </div>
+  <ul id="feed"></ul>
+</section>
+<footer id="statusbar">
+  <span id="sb-fleet"></span>
+  <span id="sb-alerts"></span>
+  <span id="sb-unit"></span>
+  <span id="sb-seen"></span>
+  <span id="sb-clock"></span>
+</footer>
+<div id="toasts" role="status" aria-live="polite"></div>
 <script type="module" src="/static/console.js"></script>
 </body>
 </html>

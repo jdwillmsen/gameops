@@ -1,6 +1,10 @@
 # crew-control
 
-Public console for the Crew worker units. Anyone can watch: it reverse-proxies
+Public console for the Crew worker units, built as an operations console: a
+roster, an adaptive wall that runs a limited number of live cameras, a fleet
+event feed with toasts, a status bar, picture-in-picture, a command palette
+(Ctrl-K or `:`, `?` lists the keys) and, for operators, a radar and bulk stop.
+Anyone can watch: it reverse-proxies
 an allow-list of each unit's camera routes and never forwards anything else.
 Operators who sign in with a passkey can also queue tasks, stop a unit or send
 it to a point, and see each unit's queue and history. Units pull that work from
@@ -24,7 +28,7 @@ crew-control; it never calls them to command them.
 ## Routes
 
 - `GET /`: the console, one focused unit or a wall of every unit; `GET /static/{file}` its assets; `GET /camera` redirects to `/`
-- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503
+- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, stuck); the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /healthz`
@@ -54,7 +58,8 @@ The `/v1/work/*` routes answer 401 without a session. Every `POST` needs a JSON
 body and `X-Crew-Request: 1`. Stop cancels everything open for the unit and
 reaches it before any queued task; cancelling an item the unit already has
 stops the whole unit (the response note says `stopped the unit`). Signed-in
-streams also get a `work` event per unit; anonymous streams never do.
+streams also get a `work` event per unit; anonymous streams never do. Coordinates follow the same rule: only signed-in
+streams get `positions`, so the radar exists only for operators.
 
 ## Units and the queue
 

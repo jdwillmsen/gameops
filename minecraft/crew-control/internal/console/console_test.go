@@ -109,3 +109,14 @@ func TestOldCameraBookmarkRedirects(t *testing.T) {
 		t.Fatalf("status %d location %q", rec.Code, rec.Header().Get("Location"))
 	}
 }
+
+func TestEveryScriptTheConsoleImportsIsEmbedded(t *testing.T) {
+	for _, f := range []string{"console.js", "state.js", "fleet.js", "ops.js", "console.css"} {
+		if rec := serve(t, "/static/"+f); rec.Code != 200 || rec.Body.Len() == 0 {
+			t.Errorf("/static/%s: status %d, %d bytes", f, rec.Code, rec.Body.Len())
+		}
+	}
+	if rec := serve(t, "/static/fleet.test.mjs"); rec.Code == 200 {
+		t.Error("node test files must stay out of the binary")
+	}
+}
