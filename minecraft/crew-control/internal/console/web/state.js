@@ -111,3 +111,71 @@ export function signinParams(hash) {
 export function isTyping(t) {
   return !!t && (['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName) || t.isContentEditable === true);
 }
+
+// Goal rows are (item, qty) pairs; the server sums nothing, so a repeated item
+// is a typo to surface rather than a total to guess.
+export function stockBody(place, rows) {
+  if (!place) return { error: 'pick a chest' };
+  const want = {};
+  for (const r of rows) {
+    if (!GATHER_ITEMS.includes(r.item)) return { error: 'unknown item' };
+    const qty = whole(r.qty);
+    if (Number.isNaN(qty) || !within(qty, QTY)) return { error: `qty must be ${QTY[0]} to ${QTY[1]}` };
+    if (r.item in want) return { error: `${r.item} is listed twice` };
+    want[r.item] = qty;
+  }
+  if (!Object.keys(want).length) return { error: 'add an item' };
+  return { body: { kind: 'stock', place, want } };
+}
+
+export const PARALLEL_DEMO = { kind: 'plan', template: 'parallel-demo' };
+
+export function seenAgo(iso, now = Date.now()) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  if (s < 10) return 'seen just now';
+  if (s < 60) return `seen ${s}s ago`;
+  if (s < 3600) return `seen ${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `seen ${Math.floor(s / 3600)}h ago`;
+  return `seen ${Math.floor(s / 86400)}d ago`;
+}
+
+export function stepCount(job) {
+  const steps = job.steps || [];
+  return { done: steps.filter(s => s.state === 'done').length, total: steps.length };
+}
+
+export const jobCancellable = job => job.state === 'running';
+
+export function jobTitle(job) {
+  const spec = job.spec || {};
+  if (job.kind === 'plan') return spec.template || 'plan';
+  if (job.kind === 'stock') {
+    return `stock ${spec.place || ''}: ` + Object.entries(spec.want || {}).map(([k, n]) => `${k} x${n}`).join(', ');
+  }
+  return job.kind;
+}
+
+// A place keeps its kind and items on rename, so only the name travels from
+// the form; a new place also needs an id and where it is.
+export function placeBody(form) {
+  const id = String(form.id || '').trim();
+  const name = String(form.name || '').trim();
+  if (!id) return { error: 'id is required' };
+  if (!name) return { error: 'name is required' };
+  const min = readPoint(form.min);
+  if (min.error) return min;
+  let max = min;
+  if (form.kind === 'area') {
+    max = readPoint(form.max);
+    if (max.error) return max;
+  } else if (form.kind !== 'chest') {
+    return { error: 'kind must be chest or area' };
+  }
+  return { body: { id, name, kind: form.kind, box: { min: min.point, max: max.point } } };
+}
+
+export const renameBody = (place, name) => ({
+  id: place.id, name: String(name).trim(), kind: place.kind, box: place.box, ...(place.items ? { items: place.items } : {}),
+});
