@@ -7,7 +7,8 @@ event feed with toasts, a status bar, picture-in-picture, a command palette
 Anyone can watch: it reverse-proxies
 an allow-list of each unit's camera routes and never forwards anything else.
 Operators who sign in with a passkey can also queue tasks, stop a unit or send
-it to a point, and see each unit's queue and history. Units pull that work from
+it to a point, and see each unit's queue and history. Shift-J opens their Jobs
+panel, with a Places tab; plain `j` and `k` step through units. Units pull that work from
 crew-control; it never calls them to command them.
 
 ## Environment

@@ -265,7 +265,7 @@ func (s *Scheduler) Cancel(ctx context.Context, id uuid.UUID, operator string) (
 
 **Files:** `minecraft/crew-control/internal/console/web/{index.html,console.js,console.css,state.js,state.test.mjs}`.
 
-- **Signed-in only:** key `j` toggles a Jobs panel, and the panel has a Places tab.
+- **Signed-in only:** Shift-J toggles a Jobs panel (plain `j` steps to the next unit), and the panel has a Places tab.
 - **Jobs:**
   - Start "Parallel demo".
   - Start "Stock goal": a place select from `/v1/places` (chests only), plus rows of item select (cobblestone, oak_log) and qty input with a "+ item" button.

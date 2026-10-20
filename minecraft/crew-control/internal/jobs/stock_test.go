@@ -252,6 +252,18 @@ func TestPlanStockStaleTargetInspectsFirst(t *testing.T) {
 	}
 }
 
+func TestPlanStockStaleItemInspectsDespiteFreshPartial(t *testing.T) {
+	l, target := stockWorld(t)
+	observe(t, l, target, 30*time.Minute, map[string]int{"cobblestone": 20})
+	if err := l.Observe(context.Background(), "crew-02", time.Now().Add(-time.Minute), target.Box.Min, map[string]int{"oak_log": 3}, true); err != nil {
+		t.Fatal(err)
+	}
+	steps := plan(t, l, map[string]int{"cobblestone": 16}, 3, time.Now().Add(-freshFor))
+	if steps[0].Key != "inspect-target" {
+		t.Fatalf("a stale wanted item planned without a look: %v", keys(steps))
+	}
+}
+
 func TestPlanStockStaleSourceIgnored(t *testing.T) {
 	l, target := stockWorld(t)
 	src := chestPlace("outbox-a", 5)
@@ -332,6 +344,18 @@ func TestCheckStock(t *testing.T) {
 	}
 	if err := ValidateSteps(top); err != nil {
 		t.Fatal(err)
+	}
+
+	// A partial report since the job began does not vouch for an item it
+	// left out.
+	l4, target4 := stockWorld(t)
+	observe(t, l4, target4, 20*time.Minute, map[string]int{"oak_log": 50})
+	if err := l4.Observe(ctx, "crew-02", time.Now().Add(-time.Minute), target4.Box.Min, map[string]int{"cobblestone": 3}, true); err != nil {
+		t.Fatal(err)
+	}
+	ok, short, top, err = checkStock(ctx, l4, spec, since, free(2), time.Now())
+	if err != nil || ok || short != "no fresh count for store" || len(top) != 1 || top[0].Key != "r1-check" {
+		t.Fatalf("partial: %v %q %v %v", ok, short, keys(top), err)
 	}
 
 	l3, target3 := stockWorld(t)
