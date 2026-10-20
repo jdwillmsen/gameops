@@ -323,6 +323,20 @@ func TestEventSeenReachesTheHook(t *testing.T) {
 	}
 }
 
+func TestSeenItemNamesMayCarryDigits(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var got []Seen
+	r.api.OnSeen = func(_ string, s Seen) { got = append(got, s) }
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	for _, name := range []string{"music_disc_13", "item#5"} {
+		r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+			`{"id":%q,"state":"running","progress":10,"seen":{"chest":{"x":3,"y":64,"z":-7},"items":{%q:1},"at":"2026-10-20T10:00:00Z"}}`, it.ID, name), nil)
+	}
+	if len(got) != 1 || got[0].Items["music_disc_13"] != 1 {
+		t.Fatalf("seen %+v, want only the digit-bearing name accepted", got)
+	}
+}
+
 func TestPartialSeenReachesTheHook(t *testing.T) {
 	r := newRig(t, NewMemory())
 	var got []Seen

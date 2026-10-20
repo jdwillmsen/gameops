@@ -44,8 +44,10 @@ type rig struct {
 	s       *Scheduler
 }
 
+// The work store stamps rows with the wall clock, so the rig clock starts there
+// too; a fixed date made redelivery tests depend on the time of day.
 func newRig(t *testing.T, units ...string) *rig {
-	r := &rig{t: t, clock: &clock{t: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}, jobs: NewMemory(), work: work.NewMemory(),
+	r := &rig{t: t, clock: &clock{t: time.Now().UTC()}, jobs: NewMemory(), work: work.NewMemory(),
 		offline: map[string]bool{}, roster: units, checks: DefaultChecks()}
 	r.s = r.scheduler()
 	return r
@@ -378,7 +380,7 @@ func TestCancelledWorkUnderARunningJobIsRetried(t *testing.T) {
 	j := r.job(step("a"))
 	r.tick()
 	it := r.item(r.get(j.ID), "a")
-	if _, ok, err := r.work.CancelQueued(ctx, it.Unit, it.ID); err != nil || !ok {
+	if _, ok, err := r.work.CancelQueued(ctx, it.Unit, it.ID, "cancelled by operator"); err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
 	r.tick()
@@ -558,8 +560,8 @@ func TestStepQueuedOnAUnitThatWentAwayMovesWithoutSpendingAnAttempt(t *testing.T
 	if now.Unit != "crew-02" || now.ID == old.ID || byKey(got, "a").State != StepQueued || byKey(got, "a").Attempts != 1 {
 		t.Fatalf("step = %+v on %s", byKey(got, "a"), now.Unit)
 	}
-	if it, _ := r.work.Get(ctx, old.ID); it.State != work.Cancelled {
-		t.Fatalf("old item is %s", it.State)
+	if it, _ := r.work.Get(ctx, old.ID); it.State != work.Cancelled || it.Reason != "unit offline, reassigned" {
+		t.Fatalf("old item is %s %q", it.State, it.Reason)
 	}
 }
 

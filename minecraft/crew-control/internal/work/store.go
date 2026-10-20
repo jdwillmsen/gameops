@@ -100,8 +100,10 @@ type Store interface {
 	Apply(ctx context.Context, unit string, id uuid.UUID, state string, progress int, reason string) (Item, error)
 	// CancelQueued cancels the item only while it is still queued. It reports
 	// false, with the item as it now is, when the unit already took it or it
-	// finished, so a caller never cancels work a unit may be running.
-	CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error)
+	// finished, so a caller never cancels work a unit may be running. The
+	// reason is recorded on the item, so a release is not read as an operator
+	// cancel.
+	CancelQueued(ctx context.Context, unit string, id uuid.UUID, reason string) (Item, bool, error)
 	StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) (cancelled []Item, stop Item, target Item, stopped bool, err error)
 	// Get returns one item, or ErrNotFound.
 	Get(ctx context.Context, id uuid.UUID) (Item, error)
@@ -254,12 +256,12 @@ func (l *Lazy) Apply(ctx context.Context, unit string, id uuid.UUID, state strin
 	return s.Apply(ctx, unit, id, state, progress, reason)
 }
 
-func (l *Lazy) CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+func (l *Lazy) CancelQueued(ctx context.Context, unit string, id uuid.UUID, reason string) (Item, bool, error) {
 	s, err := l.get()
 	if err != nil {
 		return Item{}, false, err
 	}
-	return s.CancelQueued(ctx, unit, id)
+	return s.CancelQueued(ctx, unit, id, reason)
 }
 
 func (l *Lazy) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) ([]Item, Item, Item, bool, error) {

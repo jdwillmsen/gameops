@@ -199,7 +199,7 @@ func (p *pass) release(st *Step, it work.Item) (bool, error) {
 		if u.ID != it.Unit || (u.Online && !u.Dead) {
 			continue
 		}
-		_, cancelled, err := p.s.cfg.Work.CancelQueued(p.ctx, it.Unit, it.ID)
+		_, cancelled, err := p.s.cfg.Work.CancelQueued(p.ctx, it.Unit, it.ID, "unit offline, reassigned")
 		if err != nil || !cancelled {
 			return false, err
 		}

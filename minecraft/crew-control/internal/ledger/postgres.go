@@ -132,6 +132,11 @@ func (p *Postgres) PutPlace(ctx context.Context, pl Place) error {
 				return ErrConflict
 			}
 		}
+		if exists && moved(old, pl) {
+			if _, err := tx.Exec(ctx, `DELETE FROM `+stockTable+` WHERE place_id = $1`, pl.ID); err != nil {
+				return err
+			}
+		}
 		return upsert(ctx, tx, pl, false)
 	})
 }

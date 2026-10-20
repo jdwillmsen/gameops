@@ -90,23 +90,32 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 		},
 		"CancelQueued cancels only while queued": func(t *testing.T, s Store) {
 			a := must(t, s, "crew-01", KindTask, tpl)
-			got, ok, err := s.CancelQueued(ctx, "crew-01", a.ID)
-			if err != nil || !ok || got.State != Cancelled {
+			got, ok, err := s.CancelQueued(ctx, "crew-01", a.ID, "cancelled by operator")
+			if err != nil || !ok || got.State != Cancelled || got.Reason != "cancelled by operator" {
 				t.Fatalf("queued: %+v ok=%v err=%v", got, ok, err)
 			}
 			b := must(t, s, "crew-01", KindTask, tpl)
 			if it, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || it.ID != b.ID {
 				t.Fatalf("a cancelled item must not be handed out, got %v", it.ID)
 			}
-			got, ok, err = s.CancelQueued(ctx, "crew-01", b.ID)
+			got, ok, err = s.CancelQueued(ctx, "crew-01", b.ID, "x")
 			if err != nil || ok || got.State != Delivered {
 				t.Fatalf("delivered: %+v ok=%v err=%v", got, ok, err)
 			}
-			if _, _, err := s.CancelQueued(ctx, "crew-02", b.ID); !errors.Is(err, ErrWrongUnit) {
+			if _, _, err := s.CancelQueued(ctx, "crew-02", b.ID, "x"); !errors.Is(err, ErrWrongUnit) {
 				t.Fatalf("wrong unit: %v", err)
 			}
-			if _, _, err := s.CancelQueued(ctx, "crew-01", uuid.New()); !errors.Is(err, ErrNotFound) {
+			if _, _, err := s.CancelQueued(ctx, "crew-01", uuid.New(), "x"); !errors.Is(err, ErrNotFound) {
 				t.Fatalf("unknown: %v", err)
+			}
+		},
+		"CancelQueued records the reason it is given": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			if got, ok, err := s.CancelQueued(ctx, "crew-01", a.ID, "unit offline, reassigned"); err != nil || !ok || got.Reason != "unit offline, reassigned" {
+				t.Fatalf("%+v ok=%v err=%v", got, ok, err)
+			}
+			if got, _ := s.Get(ctx, a.ID); got.Reason != "unit offline, reassigned" {
+				t.Fatalf("stored reason %q", got.Reason)
 			}
 		},
 		"units do not see each other's work": func(t *testing.T, s Store) {

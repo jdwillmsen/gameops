@@ -292,7 +292,7 @@ func (p *Postgres) Get(ctx context.Context, id uuid.UUID) (Item, error) {
 	return it, p.wrap(err)
 }
 
-func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error) {
+func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID, reason string) (Item, bool, error) {
 	var (
 		it        Item
 		cancelled bool
@@ -313,8 +313,8 @@ func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) 
 			return nil
 		}
 		it, err = scan(tx.QueryRow(ctx,
-			`UPDATE `+workTable+` SET state = 'cancelled', reason = 'cancelled by operator', updated_at = now()
-			 WHERE id = $1 AND state = 'queued' RETURNING `+columns, id))
+			`UPDATE `+workTable+` SET state = 'cancelled', reason = $2, updated_at = now()
+			 WHERE id = $1 AND state = 'queued' RETURNING `+columns, id, reason))
 		if err != nil {
 			return err
 		}
