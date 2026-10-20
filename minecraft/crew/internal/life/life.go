@@ -88,6 +88,9 @@ type Life struct {
 	rng   *rand.Rand
 	ents  *belief.Entities
 
+	// body is the world as the unit's body meets it, which has water to swim in.
+	body act.Solid
+
 	// mu guards what the read loop writes: the hurt marker and the health the
 	// last attribute update reported.
 	mu         sync.Mutex
@@ -121,6 +124,7 @@ type Life struct {
 	fleeAt    uint64
 
 	idle idleState
+	swim swimState
 	eat  eatState
 	kit  kitState
 	// makeKit replaces the withdraw a visit runs, for tests.
@@ -133,7 +137,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	if cfg.Radius < 1 {
 		cfg.Radius = 1
 	}
-	return &Life{cfg: cfg, world: world, self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
+	return &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
 }
 
 // Spawn starts a session for the unit with the runtime ID. It leaves the
@@ -155,7 +159,7 @@ func (l *Life) Reset() {
 	l.engaged, l.holdUntil, l.target = false, 0, belief.Entity{}
 	l.retreating, l.endReason = 0, ""
 	l.chase, l.flee = nil, nil
-	l.idle = idleState{}
+	l.idle, l.swim = idleState{}, swimState{}
 	l.eat, l.kit = eatState{}, kitState{}
 }
 
