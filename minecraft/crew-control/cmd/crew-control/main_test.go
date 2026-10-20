@@ -3,11 +3,17 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -218,17 +224,43 @@ func TestWorkStreamNeedsARealSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	dataDir := t.TempDir()
+	sessionKey := []byte("0123456789abcdef0123456789abcdef")
+	credentialID := []byte("independent-test-credential")
+	passkeys, err := json.Marshal([]auth.Passkey{{
+		ID: credentialID, PublicKey: []byte("test-public-key"), UserHandle: []byte("test-user-handle"), Operator: "owner",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "session.key"), sessionKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "passkeys.json"), passkeys, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	a, err := auth.New(auth.Config{
-		Origin: "https://crew.example.test", DataDir: t.TempDir(), InvitesDir: t.TempDir(),
+		Origin: "https://crew.example.test", DataDir: dataDir, InvitesDir: t.TempDir(),
 		Operators: `[{"id":"owner","name":"Owner"}]`, Log: logging.New("error"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cookie, err := a.SessionForTest("owner")
+	keyHash := sha256.Sum256(credentialID)
+	now := time.Now()
+	payload, err := json.Marshal(struct {
+		Op  string `json:"op"`
+		Key string `json:"key"`
+		Iat int64  `json:"iat"`
+		Exp int64  `json:"exp"`
+	}{"owner", base64.RawURLEncoding.EncodeToString(keyHash[:16]), now.Unix(), now.Add(12 * time.Hour).Unix()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	body := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, sessionKey)
+	_, _ = mac.Write([]byte(body))
+	cookie := &http.Cookie{Name: auth.SessionCookie, Value: body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))}
 	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
 	h := newHandler(units, poller, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
 		api := work.Routes(mux, work.NewMemory(), units, "unit-token", poller.PublishWork)

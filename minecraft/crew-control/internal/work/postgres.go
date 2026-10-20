@@ -251,9 +251,35 @@ func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) 
 	return it, cancelled, err
 }
 
-func (p *Postgres) CancelOpen(ctx context.Context, unit string) ([]Item, error) {
-	var out []Item
-	err := p.inTx(ctx, func(tx pgx.Tx) error {
+func (p *Postgres) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) (cancelled []Item, stop Item, target Item, stopped bool, err error) {
+	body := json.RawMessage(`{"name":"stop"}`)
+	if err := validateBody(KindCommand, body); err != nil {
+		return nil, Item{}, Item{}, false, err
+	}
+	err = p.inTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, unit); err != nil {
+			return err
+		}
+		if onlyIfOpen != nil {
+			target, err = scan(tx.QueryRow(ctx,
+				`SELECT `+columns+` FROM `+workTable+` WHERE id = $1 AND unit = $2 FOR UPDATE`, *onlyIfOpen, unit))
+			if errors.Is(err, pgx.ErrNoRows) {
+				var exists bool
+				if lookupErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+workTable+` WHERE id = $1)`, *onlyIfOpen).Scan(&exists); lookupErr != nil {
+					return lookupErr
+				}
+				if exists {
+					return ErrWrongUnit
+				}
+				return ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			if terminal(target.State) {
+				return nil
+			}
+		}
 		rows, err := tx.Query(ctx,
 			`UPDATE `+workTable+` SET state = 'cancelled', updated_at = now()
 			 WHERE unit = $1 AND state NOT IN ('done', 'failed', 'cancelled')
@@ -261,18 +287,32 @@ func (p *Postgres) CancelOpen(ctx context.Context, unit string) ([]Item, error) 
 		if err != nil {
 			return err
 		}
-		out, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Item, error) { return scan(r) })
+		cancelled, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Item, error) { return scan(r) })
 		if err != nil {
 			return err
 		}
-		for _, it := range out {
+		for _, it := range cancelled {
 			if err := addEvent(ctx, tx, it); err != nil {
 				return err
 			}
+			if onlyIfOpen != nil && it.ID == *onlyIfOpen {
+				target = it
+			}
 		}
+		stop, err = scan(tx.QueryRow(ctx,
+			`INSERT INTO `+workTable+` (id, unit, kind, body, state, operator)
+			 VALUES ($1, $2, 'command', $3, 'queued', $4) RETURNING `+columns,
+			uuid.New(), unit, []byte(body), operator))
+		if err != nil {
+			return err
+		}
+		if err := addEvent(ctx, tx, stop); err != nil {
+			return err
+		}
+		stopped = true
 		return nil
 	})
-	return out, err
+	return cancelled, stop, target, stopped, err
 }
 
 func (p *Postgres) Recent(ctx context.Context, unit string, n int) ([]Item, error) {

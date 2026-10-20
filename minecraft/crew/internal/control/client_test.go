@@ -149,6 +149,15 @@ func has(ev []event, id, state string) bool {
 	return false
 }
 
+func hasSubmit(r *stubRunner, id string) bool {
+	for _, submitted := range r.submitted() {
+		if submitted == id {
+			return true
+		}
+	}
+	return false
+}
+
 type capLog struct {
 	mu    sync.Mutex
 	lines []string
@@ -474,13 +483,85 @@ func TestClientWaitsForRunnerCapacity(t *testing.T) {
 	}
 }
 
+func TestDeliveredTaskWaitsForCapacityAfterLocalSubmit(t *testing.T) {
+	f := newFakeControl(t)
+	r := &stubRunner{}
+	r.Observe(func(task.Task) {})
+	for i := 0; i < task.MaxQueued-1; i++ {
+		if _, err := r.SubmitAs(fmt.Sprintf("local-%02d", i), task.Template{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := start(t, r, f)
+	waitUntil(t, "control poll to block", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.polls == 1
+	})
+	if _, err := r.SubmitAs("local-last", task.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 20; i++ {
+		f.work <- taskItem(fmt.Sprintf("%08x-0000", i), gotoBody)
+	}
+	waitUntil(t, "delivered item to enter local holding", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.polls == 1 && len(f.work) == 19
+	})
+
+	advance := func() {
+		t.Helper()
+		for _, item := range r.List() {
+			if item.State == task.Queued {
+				r.set(item.ID, task.Running, 0, "")
+				return
+			}
+		}
+		t.Fatal("runner had no queued task to start")
+	}
+	advance()
+	waitUntil(t, "first held task to submit", func() bool { return hasSubmit(r, "00000001-0000") })
+	for i := 2; i <= 20; i++ {
+		advance()
+		id := fmt.Sprintf("%08x-0000", i)
+		waitUntil(t, "next work item to submit", func() bool { return hasSubmit(r, id) })
+	}
+
+	for _, item := range r.List() {
+		if strings.HasPrefix(item.ID, "local-") {
+			continue
+		}
+		r.set(item.ID, task.Running, 1, "")
+		r.set(item.ID, task.Done, 1, "")
+	}
+	events := f.waitFor(t, "all delivered work to finish", func(events []event) bool {
+		done := 0
+		for _, e := range events {
+			if e.State == task.Done {
+				done++
+			}
+		}
+		return done == 20
+	})
+	for _, e := range events {
+		if e.State == task.Failed && e.Reason == task.ErrQueueFull.Error() {
+			t.Fatalf("task %s failed because a local submit filled the runner", e.ID)
+		}
+	}
+	if h.log.count("control_connected") != 1 {
+		t.Fatalf("control connection log count = %d", h.log.count("control_connected"))
+	}
+}
+
 func TestSubmitErrorPostsFailed(t *testing.T) {
-	f, r := newFakeControl(t), &stubRunner{failErr: task.ErrQueueFull}
+	failed := errors.New("runner unavailable")
+	f, r := newFakeControl(t), &stubRunner{failErr: failed}
 	start(t, r, f)
 
 	f.work <- taskItem(taskA, gotoBody)
 	ev := f.waitFor(t, "failed", func(ev []event) bool { return has(ev, taskA, "failed") })
-	if !strings.Contains(ev[0].Reason, task.ErrQueueFull.Error()) {
+	if !strings.Contains(ev[0].Reason, failed.Error()) {
 		t.Errorf("reason = %q", ev[0].Reason)
 	}
 }

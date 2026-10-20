@@ -69,8 +69,7 @@ type Store interface {
 	// false, with the item as it now is, when the unit already took it or it
 	// finished, so a caller never cancels work a unit may be running.
 	CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error)
-	// CancelOpen marks every non-terminal item of unit cancelled.
-	CancelOpen(ctx context.Context, unit string) ([]Item, error)
+	StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) (cancelled []Item, stop Item, target Item, stopped bool, err error)
 	// Recent returns the unit's newest items first.
 	Recent(ctx context.Context, unit string, n int) ([]Item, error)
 	Prune(ctx context.Context, before time.Time) (int, error)
@@ -188,12 +187,12 @@ func (l *Lazy) CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Ite
 	return s.CancelQueued(ctx, unit, id)
 }
 
-func (l *Lazy) CancelOpen(ctx context.Context, unit string) ([]Item, error) {
+func (l *Lazy) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) ([]Item, Item, Item, bool, error) {
 	s, err := l.get()
 	if err != nil {
-		return nil, err
+		return nil, Item{}, Item{}, false, err
 	}
-	return s.CancelOpen(ctx, unit)
+	return s.StopUnit(ctx, unit, operator, onlyIfOpen)
 }
 
 func (l *Lazy) Recent(ctx context.Context, unit string, n int) ([]Item, error) {

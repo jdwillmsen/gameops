@@ -124,17 +124,52 @@ func (m *Memory) CancelQueued(_ context.Context, unit string, id uuid.UUID) (Ite
 	return Item{}, false, ErrNotFound
 }
 
-func (m *Memory) CancelOpen(_ context.Context, unit string) ([]Item, error) {
+func (m *Memory) StopUnit(_ context.Context, unit, operator string, onlyIfOpen *uuid.UUID) ([]Item, Item, Item, bool, error) {
+	commandBody := json.RawMessage(`{"name":"stop"}`)
+	if err := validateBody(KindCommand, commandBody); err != nil {
+		return nil, Item{}, Item{}, false, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var target Item
+	if onlyIfOpen != nil {
+		found := false
+		for _, it := range m.items {
+			if it.ID != *onlyIfOpen {
+				continue
+			}
+			if it.Unit != unit {
+				return nil, Item{}, Item{}, false, ErrWrongUnit
+			}
+			target, found = it.Item, true
+			if terminal(it.State) {
+				return nil, Item{}, target, false, nil
+			}
+			break
+		}
+		if !found {
+			return nil, Item{}, Item{}, false, ErrNotFound
+		}
+	}
 	var out []Item
+	now := m.now()
 	for _, it := range m.items {
 		if it.Unit == unit && !terminal(it.State) {
-			it.State, it.Updated = Cancelled, m.now()
+			it.State, it.Updated = Cancelled, now
 			out = append(out, it.Item)
 		}
 	}
-	return out, nil
+	stop := Item{ID: uuid.New(), Unit: unit, Kind: KindCommand, Body: commandBody, State: Queued, Operator: operator, Created: now, Updated: now}
+	m.items = append(m.items, &memItem{Item: stop})
+	if onlyIfOpen != nil {
+		for _, it := range out {
+			if it.ID == *onlyIfOpen {
+				target = it
+				break
+			}
+		}
+	}
+	return out, stop, target, true, nil
 }
 
 func (m *Memory) Recent(_ context.Context, unit string, n int) ([]Item, error) {
