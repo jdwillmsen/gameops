@@ -368,13 +368,12 @@ type stepResult struct {
 // result is used only if it carries the unit further than the flat move did,
 // which ended at flat.
 func stepOnto(w Solid, start mgl32.Vec3, v mgl32.Vec2, flat mgl32.Vec3) (stepResult, bool) {
-	top, _, _ := moveY(w, start, stepHeight)
-	lift := top - start[1]
+	lift := stepLift(w, start, v)
 	if lift <= skin {
 		return stepResult{}, false
 	}
 	f := start
-	f[1] = top
+	f[1] += lift
 	var out stepResult
 	f[0], out.v[0] = moveX(w, f, v[0])
 	f[2], out.v[1] = moveZ(w, f, v[1])
@@ -385,6 +384,32 @@ func stepOnto(w Solid, start mgl32.Vec3, v mgl32.Vec2, flat mgl32.Vec3) (stepRes
 	f[1], _, _ = moveY(w, f, -lift)
 	out.feet = f
 	return out, true
+}
+
+// stepLift is how far a unit can rise to step along v: the step height, or
+// less if something overhangs where it is going. The server stretches the
+// body towards the move before it measures, so a lintel over the ledge limits
+// the lift though nothing is above the unit where it stands.
+func stepLift(w Solid, f mgl32.Vec3, v mgl32.Vec2) float32 {
+	lo, hi := region(f, 1, stepHeight)
+	for i, a := range [2]int{0, 2} {
+		if v[i] > 0 {
+			hi[a] += v[i]
+		} else {
+			lo[a] += v[i]
+		}
+	}
+	top := f[1] + bodyHeight
+	lift := float32(stepHeight)
+	for _, o := range obstacles(w, lo, hi) {
+		if o.lo[0] >= hi[0]-skin || o.hi[0] <= lo[0]+skin || o.lo[2] >= hi[2]-skin || o.hi[2] <= lo[2]+skin {
+			continue
+		}
+		if o.lo[1] >= top-skin && o.lo[1]-top < lift {
+			lift = o.lo[1] - top
+		}
+	}
+	return lift
 }
 
 func sq(x float32) float32 { return x * x }

@@ -308,3 +308,38 @@ func TestStandingInALadderCellWithoutPressingDoesNotClimb(t *testing.T) {
 		t.Errorf("standing in a ladder cell moved the unit to y=%v", y)
 	}
 }
+
+func TestStepOntoACarpetUnderALintelThatCoversOnlyTheCarpet(t *testing.T) {
+	// A doorway two high: the lintel's underside is 2.0 above the floor, so
+	// the step may rise 0.0625 and no more.
+	w := shaped{
+		{0, 0, 2}: {"white_carpet", nil},
+		{0, 2, 2}: {"stone", nil},
+	}
+	a, _, trail := southward(t, w, 40, false)
+	if z := a.Pose().Feet.Z(); z < 4 {
+		t.Errorf("unit stopped at z=%v, want through the doorway", z)
+	}
+	onMat := false
+	for _, p := range trail {
+		if p.Feet.Z() > 2.2 && p.Feet.Z() < 2.8 {
+			onMat = onMat || p.Feet.Y() == 0.0625
+		}
+	}
+	if !onMat {
+		t.Error("the unit never stood on the doormat")
+	}
+}
+
+func TestStepOntoALedgeIsRefusedWhenTheLintelLeavesNoRoom(t *testing.T) {
+	// A 0.5 step under a lintel 2.0 above the floor leaves 1.5 of headroom,
+	// less than the body.
+	w := shaped{
+		{0, 0, 2}: {"stone_slab", map[string]any{"minecraft:vertical_half": "bottom"}},
+		{0, 2, 2}: {"stone", nil},
+	}
+	a, _, _ := southward(t, w, 40, false)
+	if p := a.Pose(); p.Feet.Z() > 2-0.3+1e-3 || p.Feet.Y() != 0 {
+		t.Errorf("pose = %v, want held back", p.Feet)
+	}
+}
