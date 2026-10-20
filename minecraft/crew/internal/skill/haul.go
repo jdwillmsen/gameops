@@ -54,6 +54,9 @@ type Haul struct {
 	sub       Skill
 	subItem   string
 	subBefore int
+
+	seen    ChestSeen
+	hasSeen bool
 }
 
 // NewHaul moves up to want[item] of each item from the source chests into the
@@ -67,6 +70,9 @@ func NewHaul(world ChestWorld, self func() belief.Snapshot, sources []protocol.B
 }
 
 func (h *Haul) Name() string { return "haul" }
+
+// Seen is the last chest a visit of the haul closed.
+func (h *Haul) Seen() (ChestSeen, bool) { return h.seen, h.hasSeen }
 
 func (h *Haul) Ready(s belief.Snapshot) error {
 	if err := overworld(s); err != nil {
@@ -197,6 +203,11 @@ func (h *Haul) fault(err error) bool {
 func (h *Haul) endSub(st Status, err error) (Status, bool) {
 	sub := h.sub
 	h.sub = nil
+	if sr, ok := sub.(Seer); ok {
+		if v, ok := sr.Seen(); ok {
+			h.seen, h.hasSeen = v, true
+		}
+	}
 	switch s := sub.(type) {
 	case *Withdraw:
 		for _, n := range s.Taken() {

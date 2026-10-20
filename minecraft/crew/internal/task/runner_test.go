@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -500,4 +501,34 @@ func TestObserverOrderHoldsAcrossGoroutines(t *testing.T) {
 	}
 	h.tick(60)
 	check()
+}
+
+// seeing is a skill that has closed a chest after its first step.
+type seeing struct {
+	fakeSkill
+	view skill.ChestSeen
+}
+
+func (s *seeing) Seen() (skill.ChestSeen, bool) { return s.view, s.ran > 0 }
+
+func TestTaskCarriesTheLastChestItsSkillClosed(t *testing.T) {
+	h := newHarness(t, time.Minute, 2)
+	view := skill.ChestSeen{Items: map[string]int{"dirt": 3}, At: time.Unix(5, 0)}
+	sk := &seeing{fakeSkill: fakeSkill{name: "deposit_chest", steps: 1, ticks: true}, view: view}
+	h.r.newSkills = func(Template) ([]skill.Skill, error) { return []skill.Skill{sk}, nil }
+	var got []Task
+	h.r.Observe(func(t Task) { got = append(got, t) })
+	a, _ := h.r.Submit(tpl())
+	h.tick(1)
+	if last := got[len(got)-1]; last.State != Running || last.Seen == nil || last.Seen.Items["dirt"] != 3 {
+		t.Errorf("progress after the chest closed = %+v", last)
+	}
+	h.tick(3)
+	done := stateOf(t, h.r, a.ID)
+	if done.State != Done || done.Seen == nil || done.Seen.Items["dirt"] != 3 {
+		t.Errorf("terminal = %+v", done)
+	}
+	if b, _ := json.Marshal(done); strings.Contains(string(b), "dirt") {
+		t.Errorf("the public record leaks chest contents: %s", b)
+	}
 }
