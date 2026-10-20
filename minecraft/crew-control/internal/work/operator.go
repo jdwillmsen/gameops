@@ -189,27 +189,14 @@ func (a *API) enqueueTask(w http.ResponseWriter, r *http.Request, unit, op strin
 	opJSON(w, http.StatusAccepted, view(it))
 }
 
-// stopUnit cancels everything open, then queues the stop, so the stop itself
-// is not among what was cancelled.
-func (a *API) stopUnit(ctx context.Context, unit, op string) (cancelled []Item, stop Item, err error) {
-	cancelled, err = a.store.CancelOpen(ctx, unit)
-	if err != nil {
-		return nil, Item{}, err
-	}
-	// If this fails after CancelOpen succeeded the caller answers 503, yet the
-	// unit keeps running its current work until the next stop gets through.
-	stop, err = a.store.Enqueue(ctx, unit, KindCommand, json.RawMessage(`{"name":"stop"}`), op)
-	return cancelled, stop, err
-}
-
 func (a *API) stop(w http.ResponseWriter, r *http.Request, unit, op string) {
-	cancelled, stop, err := a.stopUnit(r.Context(), unit, op)
-	if len(cancelled) > 0 || err == nil {
-		a.changed(unit)
-	}
+	cancelled, stop, _, stopped, err := a.store.StopUnit(r.Context(), unit, op, nil)
 	if err != nil {
 		opStoreError(w, r, err)
 		return
+	}
+	if stopped {
+		a.changed(unit)
 	}
 	opJSON(w, http.StatusAccepted, struct {
 		View
@@ -270,37 +257,17 @@ func (a *API) cancelItem(w http.ResponseWriter, r *http.Request, unit, op string
 	// The unit has this item and has no per-item cancel yet, so the only way
 	// to end it is stopping the unit, which also cancels every other open
 	// item. The note tells the operator that happened.
-	open, _, err := a.stopUnit(r.Context(), unit, op)
-	if len(open) > 0 || err == nil {
-		a.changed(unit)
-	}
+	_, _, target, stopped, err := a.store.StopUnit(r.Context(), unit, op, &id)
 	if err != nil {
 		opStoreError(w, r, err)
 		return
 	}
-	stopped := false
-	for _, c := range open {
-		if c.ID == id {
-			it = c
-			stopped = true
-		}
-	}
 	if !stopped {
-		recent, err = a.store.Recent(r.Context(), unit, historyLen)
-		if err != nil {
-			opStoreError(w, r, err)
-			return
-		}
-		for _, c := range recent {
-			if c.ID == id {
-				it = c
-				break
-			}
-		}
-		opJSON(w, http.StatusOK, cancelled{View: view(it)})
+		opJSON(w, http.StatusOK, cancelled{View: view(target)})
 		return
 	}
-	it.State = Cancelled
+	a.changed(unit)
+	it = target
 	opJSON(w, http.StatusAccepted, cancelled{view(it), stoppedNote})
 }
 

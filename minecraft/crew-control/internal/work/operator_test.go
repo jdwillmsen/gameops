@@ -368,7 +368,9 @@ type downStore struct{ Store }
 func (downStore) Enqueue(context.Context, string, string, json.RawMessage, string) (Item, error) {
 	return Item{}, ErrUnavailable
 }
-func (downStore) CancelOpen(context.Context, string) ([]Item, error) { return nil, ErrUnavailable }
+func (downStore) StopUnit(context.Context, string, string, *uuid.UUID) ([]Item, Item, Item, bool, error) {
+	return nil, Item{}, Item{}, false, ErrUnavailable
+}
 func (downStore) Recent(context.Context, string, int) ([]Item, error) {
 	return nil, ErrUnavailable
 }
@@ -418,16 +420,16 @@ func TestCancelLosingTheDeliveryRaceStopsTheUnit(t *testing.T) {
 	}
 }
 
-type finishBeforeCancelOpen struct {
+type finishBeforeStop struct {
 	*Memory
 	id uuid.UUID
 }
 
-func (s finishBeforeCancelOpen) CancelOpen(ctx context.Context, unit string) ([]Item, error) {
+func (s finishBeforeStop) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) ([]Item, Item, Item, bool, error) {
 	if _, err := s.Memory.Apply(ctx, unit, s.id, Done, 1, ""); err != nil {
-		return nil, err
+		return nil, Item{}, Item{}, false, err
 	}
-	return s.Memory.CancelOpen(ctx, unit)
+	return s.Memory.StopUnit(ctx, unit, operator, onlyIfOpen)
 }
 
 func TestCancelReportsItemThatFinishedBeforeUnitStop(t *testing.T) {
@@ -437,7 +439,8 @@ func TestCancelReportsItemThatFinishedBeforeUnitStop(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("setup: item was not delivered")
 	}
-	o := newOpRig(t, finishBeforeCancelOpen{Memory: m, id: first.ID})
+	second := must(t, m, "crew-01", KindTask, tpl)
+	o := newOpRig(t, finishBeforeStop{Memory: m, id: first.ID})
 	code, resp := o.post(t, "/v1/work/crew-01/items/"+first.ID.String()+"/cancel", "", nil)
 	var got map[string]any
 	if err := json.Unmarshal([]byte(resp), &got); err != nil {
@@ -446,22 +449,28 @@ func TestCancelReportsItemThatFinishedBeforeUnitStop(t *testing.T) {
 	if code != http.StatusOK || got["state"] != Done || got["note"] != nil {
 		t.Fatalf("finished item was mislabeled: %d %s", code, resp)
 	}
+	items, _ := m.Recent(context.Background(), "crew-01", 5)
+	if len(items) != 2 || items[0].ID != second.ID || items[0].State != Queued || items[1].ID != first.ID || items[1].State != Done {
+		t.Fatalf("terminal race had stop side effects: %+v", items)
+	}
 }
 
 type stopDown struct{ *Memory }
 
-func (s stopDown) Enqueue(c context.Context, unit, kind string, b json.RawMessage, op string) (Item, error) {
-	if kind == KindCommand {
-		return Item{}, ErrUnavailable
-	}
-	return s.Memory.Enqueue(c, unit, kind, b, op)
+func (s stopDown) StopUnit(context.Context, string, string, *uuid.UUID) ([]Item, Item, Item, bool, error) {
+	return nil, Item{}, Item{}, false, ErrUnavailable
 }
 
 func TestStopAnswers503WhenTheStopCannotBeQueued(t *testing.T) {
 	m := NewMemory()
 	o := newOpRig(t, stopDown{m})
-	must(t, m, "crew-01", KindTask, tpl)
+	first := must(t, m, "crew-01", KindTask, tpl)
+	second := must(t, m, "crew-01", KindTask, tpl)
 	if code, resp := o.post(t, "/v1/work/crew-01/stop", "", nil); code != 503 || !strings.Contains(resp, "queue unavailable") {
 		t.Fatalf("%d %s", code, resp)
+	}
+	items, _ := m.Recent(context.Background(), "crew-01", 5)
+	if len(items) != 2 || items[0].ID != second.ID || items[0].State != Queued || items[1].ID != first.ID || items[1].State != Queued {
+		t.Fatalf("failed stop left partial cancellation: %+v", items)
 	}
 }

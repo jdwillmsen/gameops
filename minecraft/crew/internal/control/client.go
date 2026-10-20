@@ -159,8 +159,18 @@ func (c *Client) Run(ctx context.Context) {
 		b    backoff
 		down bool
 		seen bool
+		held *workItem
 	)
 	for ctx.Err() == nil {
+		if held != nil {
+			if !c.submit(*held) {
+				if !c.sleep(ctx, queueWait) {
+					return
+				}
+				continue
+			}
+			held = nil
+		}
 		queued := 0
 		for _, t := range c.runner.List() {
 			if t.State == task.Queued {
@@ -193,7 +203,9 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		down, seen = false, true
 		if item != nil {
-			c.handle(*item)
+			if !c.handle(*item) {
+				held = item
+			}
 		}
 	}
 }
@@ -232,22 +244,23 @@ func (c *Client) poll(ctx context.Context) (*workItem, error) {
 	return nil, fmt.Errorf("work: status %d", resp.StatusCode)
 }
 
-func (c *Client) handle(item workItem) {
+func (c *Client) handle(item workItem) bool {
 	switch {
 	case item.Kind == "task":
-		c.submit(item)
+		return c.submit(item)
 	case item.Kind == "command" && item.Command != nil && item.Command.Name == "stop":
 		c.stop(item.ID)
 	default:
 		c.enqueue(event{ID: item.ID, State: task.Failed, Reason: "unknown work"})
 	}
+	return true
 }
 
-func (c *Client) submit(item workItem) {
+func (c *Client) submit(item workItem) bool {
 	tpl, err := task.ParseTemplate(item.Template)
 	if err != nil {
 		c.enqueue(event{ID: item.ID, State: task.Failed, Reason: err.Error()})
-		return
+		return true
 	}
 	// Owned before the submit: the runner reports the queued task from inside
 	// SubmitAs, and the observer must already know the id then.
@@ -270,10 +283,16 @@ func (c *Client) submit(item workItem) {
 				c.enqueue(eventOf(t))
 			}
 		}
+		return true
+	case errors.Is(err, task.ErrQueueFull):
+		c.disown(item.ID)
+		return false
 	default:
 		c.disown(item.ID)
 		c.enqueue(event{ID: item.ID, State: task.Failed, Reason: err.Error()})
+		return true
 	}
+	return true
 }
 
 func (c *Client) disown(id string) {

@@ -191,21 +191,36 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				}
 			}
 		},
-		"cancel open": func(t *testing.T, s Store) {
+		"StopUnit cancels open work and queues stop atomically": func(t *testing.T, s Store) {
 			a := must(t, s, "crew-01", KindTask, tpl)
 			b := must(t, s, "crew-01", KindTask, tpl)
 			other := must(t, s, "crew-02", KindTask, tpl)
 			s.Apply(ctx, "crew-01", b.ID, Done, 100, "")
-			got, err := s.CancelOpen(ctx, "crew-01")
-			if err != nil || len(got) != 1 || got[0].ID != a.ID || got[0].State != Cancelled {
-				t.Fatalf("cancelled %+v %v", got, err)
+			got, command, _, stopped, err := s.StopUnit(ctx, "crew-01", "op", nil)
+			if err != nil || !stopped || len(got) != 1 || got[0].ID != a.ID || got[0].State != Cancelled || command.Kind != KindCommand || command.State != Queued {
+				t.Fatalf("cancelled %+v stop %+v stopped=%v err=%v", got, command, stopped, err)
 			}
 			recent, _ := s.Recent(ctx, "crew-02", 5)
 			if len(recent) != 1 || recent[0].ID != other.ID || recent[0].State != Queued {
 				t.Fatalf("other unit touched: %+v", recent)
 			}
-			if _, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); ok {
-				t.Fatal("cancelled item delivered")
+			if got, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); !ok || got.ID != command.ID {
+				t.Fatalf("stop command missing or not prioritized: %+v", got)
+			}
+		},
+		"StopUnit does nothing when its conditional item is terminal": func(t *testing.T, s Store) {
+			done := must(t, s, "crew-01", KindTask, tpl)
+			other := must(t, s, "crew-01", KindTask, tpl)
+			if _, err := s.Apply(ctx, "crew-01", done.ID, Done, 100, ""); err != nil {
+				t.Fatal(err)
+			}
+			items, command, target, stopped, err := s.StopUnit(ctx, "crew-01", "op", &done.ID)
+			if err != nil || stopped || len(items) != 0 || command.ID != uuid.Nil || target.State != Done {
+				t.Fatalf("terminal conditional stop: items=%+v command=%+v target=%+v stopped=%v err=%v", items, command, target, stopped, err)
+			}
+			recent, _ := s.Recent(ctx, "crew-01", 5)
+			if len(recent) != 2 || recent[0].ID != other.ID || recent[0].State != Queued {
+				t.Fatalf("conditional stop changed unrelated work: %+v", recent)
 			}
 		},
 		"recent is newest first and limited": func(t *testing.T, s Store) {
