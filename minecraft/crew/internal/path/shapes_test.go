@@ -266,3 +266,21 @@ func TestAMoveThatSinksIntoAPitAndClimbsOutIsAJump(t *testing.T) {
 		t.Errorf("plan %v needs the jump out of the pit", plan)
 	}
 }
+
+func TestSettleIsWhereAFallingUnitWillLand(t *testing.T) {
+	w := statedFlat()
+	w.set(2, 1, 2, "stone_slab", bottom())
+	for _, c := range []struct {
+		name    string
+		x, y, z float32
+		want    float32
+	}{
+		{"falling onto the floor", 4.5, 3.8, 4.5, 1},
+		{"standing on the floor", 4.5, 1, 4.5, 1},
+		{"falling onto a slab", 2.5, 3.7, 2.5, 1.5},
+	} {
+		if got := Settle(w, c.x, c.y, c.z); got != c.want {
+			t.Errorf("%s: Settle = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
