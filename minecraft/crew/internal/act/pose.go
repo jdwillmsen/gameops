@@ -29,6 +29,21 @@ const (
 	// step even though the position does not move.
 	standingDeltaY = (0 - gravity) * verticalDrag
 
+	// In water the unit accelerates weakly, loses a fifth of its speed each
+	// tick and sinks at a gentle terminal speed.
+	waterAccel  = 0.02
+	waterDrag   = 0.8
+	waterSink   = 0.005
+	swimUpAccel = 0.04
+	climbOutVy  = 0.3
+	// The top layer of water stops this far up its block.
+	surfaceLevel = 8.0 / 9
+	// With less water than this over the feet a held jump gives no swim-up,
+	// which is what lets a unit bob at the surface.
+	swimDepth = 0.4
+	// How far above the feet a block edge may stand for the unit to climb onto it.
+	climbReach = 0.6
+
 	// Shrinks the body box so a unit resting against a face does not count as
 	// overlapping it.
 	skin = 1e-3
@@ -59,6 +74,10 @@ type Shaper interface {
 // Climber is what a Solid offers when it knows which blocks the unit climbs.
 type Climber interface{ Climbable(protocol.BlockPos) bool }
 
+// Liquid is what a Solid also implements when the world has water. Water is
+// never Solid: the body moves through it by the swimming model.
+type Liquid interface{ Liquid(protocol.BlockPos) bool }
+
 // Pose is the unit's predicted state, which the server must agree with.
 type Pose struct {
 	// Feet is the block-aligned position; the packets carry it plus the eye
@@ -68,7 +87,8 @@ type Pose struct {
 	OnGround   bool
 	// Carry is the horizontal velocity (x, z) that survives into the next
 	// tick. On the ground it is already scaled by the carry factor; in the
-	// air it is the last step itself, which the air model drags in turn.
+	// air it is the last step itself, which the air model drags in turn; in
+	// water it is already dragged.
 	Carry mgl32.Vec2
 
 	// The next vertical step; only meaningful while airborne.
@@ -80,12 +100,22 @@ type Pose struct {
 	pushed bool
 }
 
+// Rise is the vertical step the unit makes next tick if nothing changes, which
+// is zero on the ground.
+func (p Pose) Rise() float32 {
+	if p.OnGround {
+		return 0
+	}
+	return p.vy
+}
+
 // stepInfo is what a tick tells the packet about the move it made.
 type stepInfo struct {
 	delta    mgl32.Vec3
 	takeoff  bool
 	airborne bool // began the tick off the ground after a jump
 	landed   bool
+	swimUp   bool // held the swim-up input in water
 }
 
 func forwardDir(yaw float32) mgl32.Vec2 {
@@ -95,6 +125,9 @@ func forwardDir(yaw float32) mgl32.Vec2 {
 
 // advance runs one tick of the movement model against the world.
 func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
+	if depth := WaterDepth(w, p.Feet); depth > 0 {
+		return p.swim(depth, forward, jump, w)
+	}
 	var info stepInfo
 	dir := forwardDir(p.Yaw)
 
@@ -192,6 +225,91 @@ func ladderMotion(dy, next float32, pressing bool) (float32, float32) {
 
 func clamp(x, limit float32) float32 {
 	return float32(math.Max(-float64(limit), math.Min(float64(limit), float64(x))))
+}
+
+// swim runs one tick of the water model: weak steering, heavy drag, a slow
+// sink, and a kick onto any block edge the unit pushes against.
+func (p Pose) swim(depth, forward float32, jump bool, w Solid) (Pose, stepInfo) {
+	var info stepInfo
+	dir := forwardDir(p.Yaw)
+	v := p.Carry.Add(dir.Mul(waterAccel * forward))
+
+	dy := p.vy
+	if p.OnGround {
+		dy = -waterSink
+	}
+	switch {
+	case jump && depth > swimDepth:
+		dy += swimUpAccel
+		info.swimUp = true
+	case jump && p.OnGround:
+		info.takeoff = true
+		dy = jumpVelocity
+	}
+	p.OnGround, p.jumped = false, false
+
+	feet := p.Feet
+	prevY := feet[1]
+	feet[1], dy, info.landed = moveY(w, feet, dy)
+	info.delta[1] = dy
+	moved := feet
+	want := v
+	feet[0], v[0] = moveX(w, feet, v[0])
+	feet[2], v[1] = moveZ(w, feet, v[1])
+	info.delta[0], info.delta[2] = feet[0]-moved[0], feet[2]-moved[2]
+
+	p.vy = dy*waterDrag - waterSink
+	switch {
+	case info.landed:
+		p.OnGround, p.vy = true, -waterSink
+	case (v[0] != want[0] || v[1] != want[1]) &&
+		canClimb(w, feet[0]+want[0]*waterDrag, prevY+p.vy+climbReach, feet[2]+want[1]*waterDrag):
+		p.vy = climbOutVy
+	}
+	p.Carry = v.Mul(waterDrag)
+	p.Feet = feet
+	return p, info
+}
+
+// WaterDepth is how far the surface stands above the unit's feet, or zero when
+// the body is dry. The top layer of a body of water stops short of the block's
+// top. A Solid that is not also a Liquid has no water.
+func WaterDepth(w Solid, f mgl32.Vec3) float32 {
+	l, ok := w.(Liquid)
+	if !ok {
+		return 0
+	}
+	x0, x1 := blockRange(f[0]-halfWidth, f[0]+halfWidth)
+	y0, y1 := blockRange(f[1], f[1]+bodyHeight)
+	z0, z1 := blockRange(f[2]-halfWidth, f[2]+halfWidth)
+	var depth float32
+	for bx := x0; bx <= x1; bx++ {
+		for by := y0; by <= y1; by++ {
+			for bz := z0; bz <= z1; bz++ {
+				if !l.Liquid(protocol.BlockPos{bx, by, bz}) {
+					continue
+				}
+				top := float32(by + 1)
+				if !l.Liquid(protocol.BlockPos{bx, by + 1, bz}) {
+					top = float32(by) + surfaceLevel
+				}
+				depth = max(depth, top-f[1])
+			}
+		}
+	}
+	return depth
+}
+
+// canClimb says whether the body would fit, clear of blocks and water, at a
+// spot a step above the feet and beyond the block the unit pushes on.
+func canClimb(w Solid, x, y, z float32) bool {
+	f := mgl32.Vec3{x, y, z}
+	for _, o := range obstacles(w, f.Sub(bodyLo), f.Add(bodyHi)) {
+		if crosses(o, f, 1) && o.hi[1] > f[1]+skin && o.lo[1] < f[1]+bodyHeight-skin {
+			return false
+		}
+	}
+	return WaterDepth(w, mgl32.Vec3{x, y, z}) == 0
 }
 
 // knock adopts a velocity the server gave the unit, such as knockback. The
