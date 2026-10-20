@@ -97,6 +97,56 @@ function boneGeometry(bone, sheet) {
   return geo;
 }
 
+// Where each box of the standard player layout starts in a 64-wide skin or
+// armour texture; a left limb reuses the right one's, turned over.
+const BODY_UV = {
+  head: { u: 0, v: 0 }, body: { u: 16, v: 16 },
+  rightarm: { u: 40, v: 16 }, leftarm: { u: 40, v: 16, mirror: true },
+  rightleg: { u: 0, v: 16 }, leftleg: { u: 0, v: 16, mirror: true },
+};
+// Which bones each worn piece covers, and how far it stands off the body, in
+// model units. Leggings cover the hips and legs from the second texture, the
+// rest the first.
+const ARMOUR_PARTS = [
+  { head: 1 },
+  { body: 1.01, rightarm: 1, leftarm: 1 },
+  { body: .5, rightleg: .49, leftleg: .49 },
+  { rightleg: 1, leftleg: 1 },
+];
+const ARMOUR_TEXTURES = [
+  [/^leather_/, 'cloth'], [/^chainmail_/, 'chain'], [/^iron_/, 'iron'], [/^golden_/, 'gold'],
+  [/^diamond_/, 'diamond'], [/^netherite_/, 'netherite'], [/^copper_/, 'copper'], [/^turtle_/, 'turtle'],
+];
+// Leather has no colour of its own in the sheet; this is the game's undyed brown.
+const LEATHER = 0xa06540;
+
+// The six face rects of a box laid out from (u, v) in the pack's box order:
+// north, south, east, west, up, down. A mirrored box swaps its sides and turns
+// every face over, which a rect marks by u0 > u1.
+function boxFaces(u, v, w, h, d, mirror) {
+  const n = [u + d, v + d, u + d + w, v + d + h], s = [u + 2 * d + w, v + d, u + 2 * d + 2 * w, v + d + h];
+  let e = [u, v + d, u + d, v + d + h], wst = [u + d + w, v + d, u + 2 * d + w, v + d + h];
+  const up = [u + d, v, u + d + w, v + d], down = [u + d + w, v, u + d + 2 * w, v + d];
+  if (!mirror) return [n, s, e, wst, up, down];
+  [e, wst] = [wst, e];
+  return [n, s, e, wst, up, down].map(r => [r[2], r[1], r[0], r[3]]);
+}
+
+// A skin has its own texture, so the table's rects (which are in sheet
+// pixels, with the player's texture placed somewhere on the sheet) are moved
+// to the texture's own 64-wide grid. A slim skin has three-wide arms.
+function skinBone(b, off, slim) {
+  const arm = /arm|sleeve/i.test(b.n);
+  const cubes = (b.c ?? []).map(c => {
+    const uv = c.uv.map(r => (r[0] || r[1] || r[2] || r[3]) ? [r[0] - off[0], r[1] - off[1], r[2] - off[0], r[3] - off[1]] : r);
+    if (!(slim && arm)) return { ...c, uv };
+    const d = c.sz[2], o = [...c.o];
+    if (/^right/i.test(b.n)) o[0] += 1;
+    return { ...c, o, sz: [3, c.sz[1], d], uv: boxFaces(uv[2][0], uv[2][1] - d, 3, c.sz[1], d, false) };
+  });
+  return { ...b, c: cubes };
+}
+
 // Bones named like a limb swing with ground speed. Each entry is the swing
 // direction: diagonal pairs of a quadruped share one, a biped's arm opposes
 // its own side's leg.
@@ -154,6 +204,11 @@ export function createEntities(scene) {
   let modelsKey = null, modelsLoading = null, modelsAgain = false;
   let itemsLoading = null, itemsFailed = false;
   const boneGeos = new Map(); // table bone -> geometry
+  const skinGeos = new Map(); // table bone -> [wide, slim] geometry on a skin's grid
+  const armourGeos = new Map(); // table bone -> Map("slot|texture", geometry)
+  const skins = new Map(); // entity id -> {slim, tex, key}
+  const worn = new Map(); // entity id -> [helmet, chestplate, leggings, boots]
+  const skinOffsets = new WeakMap(); // model -> where its player texture sits on the sheet
   const materials = new Map();
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   const noseMat = new THREE.MeshLambertMaterial({ color: 0x20140c });
@@ -170,6 +225,56 @@ export function createEntities(scene) {
       materials.set(key, m);
     }
     return m;
+  }
+
+  // The skin's texture lies where the model's first layer has its lowest
+  // rects: the head's side starts at u 0 and its top at v 0.
+  function skinOffset(model) {
+    let off = skinOffsets.get(model);
+    if (!off) {
+      off = [Infinity, Infinity];
+      for (const b of model.d[0].bones) for (const c of b.c ?? []) for (const r of c.uv) {
+        if (!(r[0] || r[1] || r[2] || r[3])) continue;
+        off = [Math.min(off[0], r[0], r[2]), Math.min(off[1], r[1], r[3])];
+      }
+      skinOffsets.set(model, off);
+    }
+    return off;
+  }
+
+  function skinGeometry(b, off, slim) {
+    let pair = skinGeos.get(b);
+    if (!pair) skinGeos.set(b, pair = [undefined, undefined]);
+    const i = slim ? 1 : 0;
+    if (pair[i] === undefined) pair[i] = boneGeometry(skinBone(b, off, slim), { w: 64, h: 64 });
+    return pair[i];
+  }
+
+  // The worn piece's box on one bone: the body part's own box, stood off by
+  // the piece's inflation, with the armour texture laid over it.
+  function armourGeometry(b, slot, texKey, inflate) {
+    const k = `${slot}|${texKey}`;
+    let m = armourGeos.get(b);
+    if (!m) armourGeos.set(b, m = new Map());
+    if (m.has(k)) return m.get(k);
+    const r = table.armor?.[texKey];
+    const base = (b.c ?? []).find(c => !c.i);
+    const spec = BODY_UV[b.n.toLowerCase()];
+    let geo = null;
+    if (r && base && spec) {
+      const scale = (r[2] - r[0]) / 64;
+      const faces = boxFaces(spec.u, spec.v, base.sz[0], base.sz[1], base.sz[2], spec.mirror)
+        .map(f => [r[0] + f[0] * scale, r[1] + f[1] * scale, r[0] + f[2] * scale, r[1] + f[3] * scale]);
+      geo = boneGeometry({ pv: b.pv, c: [{ o: base.o, sz: base.sz, i: inflate, uv: faces }] }, sheet);
+    }
+    m.set(k, geo);
+    return geo;
+  }
+
+  // What a worn item is drawn with: the texture's name stem and its tint.
+  function armourLook(name) {
+    for (const [re, stem] of ARMOUR_TEXTURES) if (re.test(name)) return { stem, tint: stem === 'cloth' ? LEATHER : 0xffffff };
+    return null;
   }
 
   function part(w, h, d, mat, x, y, z) {
@@ -214,7 +319,7 @@ export function createEntities(scene) {
 
   // A model's layers as a bone tree. Table coordinates are the pack's: the
   // group's mirrored z turns the model's north-facing front toward +z.
-  function buildModel(model, look, type) {
+  function buildModel(model, look, type, id) {
     const baby = look.baby;
     let layers = model.d, size = model.s || 1;
     if (baby) {
@@ -224,8 +329,13 @@ export function createEntities(scene) {
     const root = new THREE.Group();
     const scale = size * BLOCK;
     root.scale.set(scale, scale, -scale);
-    const bones = [];
-    for (const layer of layers) {
+    const bones = [], owned = [];
+    const sk = type === 'minecraft:player' ? skins.get(id) : null;
+    const skinMat = sk && new THREE.MeshLambertMaterial({ map: sk.tex, alphaTest: .5, side: THREE.DoubleSide });
+    if (skinMat) owned.push(skinMat);
+    const wearing = worn.get(id);
+    const off = sk ? skinOffset(model) : null;
+    layers.forEach((layer, layerIndex) => {
       const tint = layer.tint ? DYE[look.color & 15] : 0xffffff;
       const byName = new Map();
       for (const b of layer.bones) {
@@ -235,9 +345,23 @@ export function createEntities(scene) {
         const spiderLeg = SPIDER_TYPE.test(type) && SPIDER_LEG.test(b.n) ? SPIDER_POSE[+b.n[3]] : null;
         if (b.r || spiderLeg) g.rotation.copy(packEuler(spiderLeg ?? b.r));
         if (b.bp) bind.rotation.copy(packEuler(b.bp));
-        let geo = boneGeos.get(b);
-        if (geo === undefined) { geo = boneGeometry(b, sheet); boneGeos.set(b, geo); }
-        if (geo) bind.add(new THREE.Mesh(geo, material(tint, layer.glass)));
+        if (skinMat && layerIndex === 0 && !layer.glass) {
+          const sg = skinGeometry(b, off, sk.slim);
+          if (sg) bind.add(new THREE.Mesh(sg, skinMat));
+        } else {
+          let geo = boneGeos.get(b);
+          if (geo === undefined) { geo = boneGeometry(b, sheet); boneGeos.set(b, geo); }
+          if (geo) bind.add(new THREE.Mesh(geo, material(tint, layer.glass)));
+        }
+        if (wearing && layerIndex === 0) {
+          wearing.forEach((item, slot) => {
+            const inflate = ARMOUR_PARTS[slot][b.n.toLowerCase()];
+            const look = inflate && item ? armourLook(item) : null;
+            if (!look) return;
+            const geo = armourGeometry(b, slot, `${look.stem}_${slot === 2 ? 2 : 1}`, inflate);
+            if (geo) bind.add(new THREE.Mesh(geo, material(look.tint, false)));
+          });
+        }
         byName.set(b.n, { b, g });
       }
       for (const { b, g } of byName.values()) {
@@ -258,10 +382,10 @@ export function createEntities(scene) {
           spiderLeg: SPIDER_TYPE.test(type) && SPIDER_LEG.test(name) ? +name[3] : -1,
         });
       }
-    }
+    });
     const group = new THREE.Group();
     group.add(root);
-    return { group, head: null, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned: [] };
+    return { group, head: null, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned };
   }
 
   function itemRect(name) {
@@ -294,7 +418,7 @@ export function createEntities(scene) {
     const look = lookOf(inst.id), key = typeKey(inst.type);
     const model = table?.models[key];
     let built;
-    if (model && modelTex) built = buildModel(model, look, key);
+    if (model && modelTex) built = buildModel(model, look, key, inst.id);
     else if (key === 'minecraft:item' && items && look.item) built = buildItem(look.item);
     else built = buildStandIn(inst.type);
     if (inst.body) { inst.root.remove(inst.body); disposeBody(inst); }
@@ -307,7 +431,8 @@ export function createEntities(scene) {
 
   function stamp(inst) {
     const l = lookOf(inst.id);
-    return [typeKey(inst.type), !!table, !!items, l.baby, l.sheared, l.color, l.item].join('|');
+    const sk = skins.get(inst.id);
+    return [typeKey(inst.type), !!table, !!items, l.baby, l.sheared, l.color, l.item, sk?.key, sk?.slim, worn.get(inst.id)?.join(',')].join('|');
   }
 
   function disposeBody(inst) {
@@ -440,9 +565,12 @@ export function createEntities(scene) {
         try {
           const loaded = await fetchSheet('v1/camera/entities.json', 'v1/camera/entities.png');
           if (loaded.key === modelsKey) { loaded.tex.dispose(); return; }
-          const old = { tex: modelTex, geos: [...boneGeos.values()], mats: [...materials.values()] };
+          const old = {
+            tex: modelTex, mats: [...materials.values()],
+            geos: [...boneGeos.values(), ...[...skinGeos.values()].flat(), ...[...armourGeos.values()].flatMap(m => [...m.values()])],
+          };
           modelsKey = loaded.key; modelTex = loaded.tex; table = loaded.doc; sheet = { w: loaded.doc.width, h: loaded.doc.height };
-          boneGeos.clear(); materials.clear();
+          boneGeos.clear(); skinGeos.clear(); armourGeos.clear(); materials.clear();
           for (const inst of meshes.values()) build(inst);
           old.tex?.dispose();
           for (const g of old.geos) g?.dispose();
@@ -486,6 +614,35 @@ export function createEntities(scene) {
       if (item && !items) this.loadItems();
     },
 
+    // A player's skin, a PNG on the standard layout. The texture is made
+    // before the body is rebuilt, so the default skin shows until it is ready.
+    async setSkin(id, slim, bytes) {
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+      try {
+        const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+        const tex = new THREE.Texture(img);
+        tex.magFilter = tex.minFilter = THREE.NearestFilter;
+        tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+        const old = skins.get(id);
+        skins.set(id, { slim, tex, key: fingerprint(bytes) });
+        const inst = meshes.get(id);
+        if (inst) build(inst);
+        old?.tex.dispose();
+      } catch (e) {
+        console.warn('skin unavailable, drawing the default', e);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    },
+
+    // What an entity wears, helmet first; "" is an empty slot.
+    setArmour(id, slots) {
+      worn.set(id, slots);
+      const inst = meshes.get(id);
+      if (inst && inst.stamp !== stamp(inst)) build(inst);
+    },
+
     setName(id, name) {
       names.set(id, name);
       const inst = meshes.get(id);
@@ -494,6 +651,9 @@ export function createEntities(scene) {
 
     remove(id) {
       names.delete(id); looks.delete(id);
+      // The unit's own body is removed and re-added as the mode changes, and
+      // keeps what it wears.
+      if (id !== -1) { worn.delete(id); skins.get(id)?.tex.dispose(); skins.delete(id); }
       const inst = meshes.get(id);
       if (!inst) return;
       scene.remove(inst.root);
@@ -504,7 +664,9 @@ export function createEntities(scene) {
 
     clear() {
       for (const id of [...meshes.keys()]) this.remove(id);
-      names.clear(); looks.clear();
+      names.clear(); looks.clear(); worn.clear();
+      for (const sk of skins.values()) sk.tex.dispose();
+      skins.clear();
     },
 
     frame(now = performance.now()) {

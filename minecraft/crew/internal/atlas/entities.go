@@ -21,7 +21,7 @@ import (
 
 // entityTableVersion invalidates cached entity sheets when the layout of the
 // table changes.
-const entityTableVersion = 1
+const entityTableVersion = 2
 
 // Bounds on what the entity build reads and produces.
 const (
@@ -47,6 +47,10 @@ type EntityTable struct {
 	Height  int `json:"height"`
 	// Models is keyed by full entity identifier, e.g. "minecraft:cow".
 	Models map[string]EntityModel `json:"models"`
+	// Armor maps a worn-armour texture ("iron_1" for helmet, chestplate and
+	// boots, "iron_2" for leggings) to its rect on the sheet, as u0, v0, u1, v1
+	// in sheet pixels. The pack lays every one out like a 64x32 skin.
+	Armor map[string][4]float32 `json:"armor,omitempty"`
 }
 
 // EntityModel is how to draw one kind of entity. Geometry is in the pack's
@@ -556,6 +560,32 @@ func (eb *entityBuilder) texture(p string) *image.NRGBA {
 	return img
 }
 
+// armorDir holds the textures worn armour is drawn with.
+const armorDir = "textures/models/armor"
+
+// armorTextures adds each worn-armour texture the pack ships to used and
+// returns their paths by name. The baby variants and elytra do not follow the
+// _1/_2 layout the camera draws and are left out.
+func (eb *entityBuilder) armorTextures(used map[string]*image.NRGBA) map[string]string {
+	entries, err := os.ReadDir(filepath.Join(eb.b.dir, filepath.FromSlash(armorDir)))
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		key, ok := strings.CutSuffix(e.Name(), ".png")
+		if !ok || !(strings.HasSuffix(key, "_1") || strings.HasSuffix(key, "_2")) {
+			continue
+		}
+		p := armorDir + "/" + key
+		if img := eb.texture(p); img != nil {
+			used[p] = img
+			out[key] = p
+		}
+	}
+	return out
+}
+
 // solidifyMasks makes pixels with an alpha of 1 to 15 opaque. The pack uses
 // such nearly invisible alphas as a mask for effects the camera does not draw
 // (a sheep's skin is painted at an alpha of 3), and a viewer that took them
@@ -730,6 +760,7 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 			}
 		}
 	}
+	armorPaths := eb.armorTextures(used)
 	width, height, at, err := packTextures(used)
 	if err != nil {
 		return nil, EntityTable{}, err
@@ -751,6 +782,13 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 		return nil, EntityTable{}, err
 	}
 	tbl := EntityTable{Version: entityTableVersion, Width: width, Height: height, Models: models}
+	if len(armorPaths) > 0 {
+		tbl.Armor = make(map[string][4]float32, len(armorPaths))
+		for key, p := range armorPaths {
+			pl := at[p]
+			tbl.Armor[key] = [4]float32{float32(pl.x), float32(pl.y), float32(pl.x + pl.w), float32(pl.y + pl.h)}
+		}
+	}
 	doc, err := json.Marshal(tbl)
 	if err != nil {
 		return nil, EntityTable{}, err
