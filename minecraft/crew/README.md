@@ -532,6 +532,42 @@ LAB=k8s:<ns>/<pod> FIELDS="grounds courses trees works" PLANS=<dir> \
   nightly.sh
 ```
 
+#### Field tests
+
+`lab/fieldtest.sh k8s:<namespace> [case-glob] [timeout-s]` drives idle units
+through the fields and prints one line per case as it finishes, then a summary:
+
+```
+drops-ledge-1 crew-07 pass done,server_pos=-283.5,64.0,-487.5 41
+summary pass=1 fail=0 units=1 seconds=44
+```
+
+It exits 0 only when every selected case passed, 1 otherwise and 2 for bad
+arguments. The cases cover goto onto each ledge, across each trench and up
+each jump step, into the shapes cell and onto pads 1, 7 and 13, plus a
+cobblestone gather in the quarry, an oak gather in the grove and a haul between
+two storage chests. `--list` prints the names; `--units crew-04,crew-05`
+limits the units; `--reset grounds|courses --confirm-overwrite` rebuilds a
+field first (the gather and haul cases deplete stocked chests and fell the
+grove's oaks).
+
+- A unit is used only when nothing is queued or running on it and nobody but
+  this run has touched it for 120 seconds (`FIELDTEST_QUIET_S`), so a load test
+  or a crew-control job keeps its units. Each unit runs one case at a time;
+  tasks the run did not start are never cancelled, and tasks it did start are
+  cancelled on a timeout, an error or Ctrl-C.
+- A unit knows only the terrain near it, so a goto hundreds of blocks away
+  has no path. The script first walks the unit along the roads between cells,
+  in hops of at most 64 blocks, until the target is in reach.
+- A goto is also checked on the server: `querytarget` must place the unit
+  within 2.5 blocks across and 2 up or down of the cell. The task result is
+  all there is for a chest, since the console cannot read one.
+- A new case is one line in `cases_table`: `name|pre|task|expect`, where `pre`
+  is an optional `x y z` to goto first, `task` is `goto x y z` or a template
+  JSON object, and `expect` is `done` or `failed`. `lab/fieldtest.test.sh`
+  checks the table (unique names, valid JSON, coordinates inside a field, area
+  spans) and the argument handling without a cluster.
+
 ### Operator overlay
 
 The page draws a game-style overlay from `/v1/state`, polled once a second:
