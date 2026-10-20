@@ -138,6 +138,19 @@ func (w walled) Solid(p protocol.BlockPos) bool {
 	return w.lake.Solid(p) || (p[0] >= 10 && p[1] <= 5)
 }
 
+func TestACorrectionInWaterTakesTheServersHorizontalDeltaAsTheDraggedCarry(t *testing.T) {
+	// Measured: after a steady swim the server's delta (0.0783) was within
+	// 1.5% of the unit's own post-drag carry (0.0795), and 21% under the step
+	// it had just taken (0.0993). So the delta already includes the drag.
+	a, s := newAct(lake{}, Pose{Feet: mgl32.Vec3{4.5, 1, 4.5}})
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{4.5, 1 + eyeHeight, 4.5},
+		Delta:    mgl32.Vec3{0.0783, -0.0248, 0},
+	})
+	_ = a.Tick(Input{})
+	near(t, "next step x", float64(s.inputs(t)[0].Delta.X()), 0.0783, 1e-5)
+}
+
 func TestACorrectionInWaterTakesTheServersStepAsTheNextOne(t *testing.T) {
 	a, _ := newAct(lake{}, Pose{Feet: mgl32.Vec3{4.5, 0, 4.5}})
 	a.Apply(&packet.CorrectPlayerMovePrediction{
