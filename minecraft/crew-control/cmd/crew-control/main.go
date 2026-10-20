@@ -18,9 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
@@ -84,6 +86,9 @@ func main() {
 	// Set once the backend is ready; until then reports cannot be applied
 	// either, so there is nothing for it to miss.
 	var world atomic.Pointer[ledger.Ledger]
+	// Set with the store; a report that finishes work before then has no job
+	// to wake, and the scheduler's first tick reads the store anyway.
+	var sched atomic.Pointer[jobs.Scheduler]
 	store.OnReady(poller.PublishAllWork)
 	workToken := os.Getenv("WORK_TOKEN")
 	if workToken == "" {
@@ -102,6 +107,7 @@ func main() {
 			api := work.Routes(mux, store, units, workToken, poller.PublishWork)
 			api.MountOperator(mux, operators)
 			api.OnSeen = observeSeen(&world, log)
+			api.OnTerminal = chainWake(api.OnTerminal, &sched)
 			poller.SetWorkSource(api.Feed)
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -117,7 +123,7 @@ func main() {
 
 	storeDone := make(chan struct{})
 	go func() {
-		openStore(ctx, store, &world, places, dsn, os.Getenv("WORK_STORE") == "memory", log)
+		openStore(ctx, store, &world, &sched, poller, places, dsn, os.Getenv("WORK_STORE") == "memory", log)
 		close(storeDone)
 	}()
 
@@ -173,16 +179,18 @@ func postgresDSN() (string, error) {
 // The memory store needs an explicit opt-in: a production deployment that
 // lost its PG_HOST would otherwise run on a queue that vanishes on restart,
 // and nothing would say so. Unconfigured behaves like a database that is down.
-func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], places []ledger.Place, dsn string, memory bool, log *logging.Logger) {
+func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], sched *atomic.Pointer[jobs.Scheduler], poller *telemetry.Poller, places []ledger.Place, dsn string, memory bool, log *logging.Logger) {
 	var (
 		backend work.Store
 		led     ledger.Ledger
+		js      jobs.Store
 	)
 	switch {
 	case dsn == "" && memory:
 		log.Info("work_store_memory", nil)
 		backend = work.NewMemory()
 		led = ledger.NewMemory()
+		js = jobs.NewMemory()
 	case dsn == "":
 		log.Error("work_store_unconfigured", logging.Fields{"effect": "work routes answer 503; set PG_HOST, or WORK_STORE=memory for development"})
 		return
@@ -196,6 +204,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 				log.Info("work_store_ready", nil)
 				backend = pg
 				led = ledger.NewPostgres(pg.Pool())
+				js = jobs.NewPostgres(pg.Pool())
 				break
 			}
 			if ctx.Err() != nil {
@@ -226,6 +235,19 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 	world.Store(&led)
 	store.Set(backend)
 
+	scheduler := jobs.New(jobs.Config{
+		Jobs: js, Work: backend, Checks: jobs.DefaultChecks(), Log: log,
+		Units: func(ctx context.Context) ([]ledger.UnitStatus, error) {
+			return unitStatuses(ctx, poller.Snapshot(), backend)
+		},
+		// Task 7 streams job changes; until then nothing listens.
+		Notify: func(uuid.UUID) {},
+	})
+	sched.Store(scheduler)
+	schedDone := make(chan struct{})
+	go func() { scheduler.Run(ctx); close(schedDone) }()
+	defer func() { <-schedDone }()
+
 	for {
 		n, err := backend.Prune(ctx, time.Now().Add(-pruneAfter))
 		if err != nil {
@@ -242,6 +264,32 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 		case <-time.After(pruneEvery):
 		}
 	}
+}
+
+// chainWake makes a finished job item wake the scheduler after the hook that
+// was already there. The scheduler is a hint only; it re-reads the store.
+func chainWake(prev func(work.Item), sched *atomic.Pointer[jobs.Scheduler]) func(work.Item) {
+	return func(it work.Item) {
+		if prev != nil {
+			prev(it)
+		}
+		if s := sched.Load(); s != nil {
+			s.Wake()
+		}
+	}
+}
+
+// unitStatuses joins telemetry with each unit's unfinished work, in roster order.
+func unitStatuses(ctx context.Context, snap []telemetry.Status, store work.Store) ([]ledger.UnitStatus, error) {
+	open := make(map[string][]work.Item, len(snap))
+	for _, s := range snap {
+		items, err := store.Open(ctx, s.ID)
+		if err != nil {
+			return nil, err
+		}
+		open[s.ID] = items
+	}
+	return ledger.Statuses(snap, open), nil
 }
 
 // observeSeen records what a unit saw. It runs on the report request, so it

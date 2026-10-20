@@ -22,6 +22,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
@@ -142,7 +143,7 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	}
 
 	unconfigured := &work.Lazy{}
-	openStore(context.Background(), unconfigured, &atomic.Pointer[ledger.Ledger]{}, nil, "", false, log) // returns at once
+	openStore(context.Background(), unconfigured, &atomic.Pointer[ledger.Ledger]{}, &atomic.Pointer[jobs.Scheduler]{}, telemetry.NewPoller(roster.Roster{}, &http.Client{}, time.Second), nil, "", false, log) // returns at once
 	if err := enqueue(unconfigured); !errors.Is(err, work.ErrUnavailable) {
 		t.Fatalf("unconfigured store: %v, want ErrUnavailable", err)
 	}
@@ -153,7 +154,10 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	var world atomic.Pointer[ledger.Ledger]
 	seeds := []ledger.Place{{ID: "home-chest", Name: "Home", Kind: ledger.KindChest,
 		Box: ledger.Box{Min: ledger.Pos{X: 1, Y: 64, Z: 2}, Max: ledger.Pos{X: 1, Y: 64, Z: 2}}}}
-	go func() { openStore(ctx, mem, &world, seeds, "", true, log); close(done) }()
+	go func() {
+		openStore(ctx, mem, &world, &atomic.Pointer[jobs.Scheduler]{}, telemetry.NewPoller(roster.Roster{}, &http.Client{}, time.Second), seeds, "", true, log)
+		close(done)
+	}()
 	deadline := time.Now().Add(2 * time.Second)
 	for enqueue(mem) != nil {
 		if time.Now().After(deadline) {
