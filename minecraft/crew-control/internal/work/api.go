@@ -1,6 +1,7 @@
 package work
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,10 +19,19 @@ import (
 )
 
 const (
-	maxWait     = 25 * time.Second
-	minWait     = time.Second
-	maxEventLen = 1 << 10
+	maxWait = 25 * time.Second
+	minWait = time.Second
+	// The cap was 1 KiB for a bare state report. A report can now carry what
+	// a unit saw in a chest, up to 27 item kinds at about 40 bytes each plus
+	// the position and time, which would not fit. Four times the old cap is
+	// room for that and still too small to be a place to park data.
+	maxEventLen = 4 << 10
+
+	// A chest holds 27 stacks, so more kinds than that is not an observation.
+	maxSeenItems = 27
 )
+
+var seenItemName = regexp.MustCompile(`^[a-z_]{1,32}$`)
 
 // API serves the routes a unit calls. They are not public: the token is a
 // shared secret and a request that came through the ingress is refused.
@@ -30,6 +41,14 @@ type API struct {
 	token  [sha256.Size]byte
 	notify func(unit string)
 	now    func() time.Time
+
+	// OnSeen receives what a unit saw, after its report was applied. OnTerminal
+	// receives an item that carries a job once a report leaves it finished; a
+	// repeated report of the same end state fires it again, so a listener must
+	// treat it as a wake-up, not a count. Both are set before serving and run
+	// on the request, so they must not block.
+	OnSeen     func(unit string, s Seen)
+	OnTerminal func(it Item)
 
 	mu    sync.Mutex
 	waits map[string]chan struct{}
@@ -179,6 +198,29 @@ type report struct {
 	State    string `json:"state"`
 	Progress int    `json:"progress"`
 	Reason   string `json:"reason"`
+	// Raw so a malformed observation can be dropped without failing the
+	// state report that carries it.
+	Seen json.RawMessage `json:"seen"`
+}
+
+// parseSeen returns false for anything that is not a well-formed observation.
+func parseSeen(raw json.RawMessage) (Seen, bool) {
+	var s Seen
+	if len(raw) == 0 || string(raw) == "null" {
+		return s, false
+	}
+	if decodeStrict(bytes.NewReader(raw), &s) != nil || s.At.IsZero() || len(s.Items) > maxSeenItems {
+		return Seen{}, false
+	}
+	for name, n := range s.Items {
+		if !seenItemName.MatchString(name) || n < 0 {
+			return Seen{}, false
+		}
+	}
+	if s.Items == nil {
+		s.Items = map[string]int{}
+	}
+	return s, true
 }
 
 func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
@@ -206,7 +248,8 @@ func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
 		http.Error(w, "bad event", http.StatusBadRequest)
 		return
 	}
-	if _, err := a.store.Apply(r.Context(), unit, id, rep.State, rep.Progress, rep.Reason); err != nil {
+	it, err := a.store.Apply(r.Context(), unit, id, rep.State, rep.Progress, rep.Reason)
+	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound), errors.Is(err, ErrWrongUnit):
 			http.NotFound(w, r)
@@ -216,6 +259,12 @@ func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
 			storeError(w, r, err)
 		}
 		return
+	}
+	if seen, ok := parseSeen(rep.Seen); ok && a.OnSeen != nil {
+		a.OnSeen(unit, seen)
+	}
+	if it.JobID != nil && terminal(it.State) && a.OnTerminal != nil {
+		a.OnTerminal(it)
 	}
 	a.notify(unit)
 	w.WriteHeader(http.StatusNoContent)

@@ -21,7 +21,6 @@ const (
 	maxHaulItems = 8
 	maxHaulFrom  = 4
 	maxQty       = 256
-	stoppedNote  = "stopped the unit"
 
 	minXZ, maxXZ = -500, 499
 	minY, maxY   = -64, 320
@@ -204,71 +203,27 @@ func (a *API) stop(w http.ResponseWriter, r *http.Request, unit, op string) {
 	}{view(stop), len(cancelled)})
 }
 
-type cancelled struct {
-	View
-	Note string `json:"note,omitempty"`
-}
-
 func (a *API) cancelItem(w http.ResponseWriter, r *http.Request, unit, op string) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		opError(w, http.StatusNotFound, "no such item")
 		return
 	}
-	recent, err := a.store.Recent(r.Context(), unit, historyLen)
-	if err != nil {
-		opStoreError(w, r, err)
-		return
-	}
-	var it Item
-	found := false
-	for _, c := range recent {
-		if c.ID == id {
-			it, found = c, true
-			break
-		}
-	}
-	if !found {
+	it, cmd, err := a.store.CancelTask(r.Context(), unit, id, op)
+	switch {
+	case errors.Is(err, ErrNotFound), errors.Is(err, ErrWrongUnit):
 		opError(w, http.StatusNotFound, "no such item")
-		return
-	}
-	if terminal(it.State) {
-		opJSON(w, http.StatusOK, cancelled{View: view(it)})
-		return
-	}
-	if it.State == Queued {
-		// Conditional, because the unit may take the item after the lookup.
-		got, ok, err := a.store.CancelQueued(r.Context(), unit, id)
-		if err != nil {
-			opStoreError(w, r, err)
-			return
-		}
-		if ok {
-			a.changed(unit)
-			opJSON(w, http.StatusOK, cancelled{View: view(got)})
-			return
-		}
-		it = got
-		if terminal(it.State) {
-			opJSON(w, http.StatusOK, cancelled{View: view(it)})
-			return
-		}
-	}
-	// The unit has this item and has no per-item cancel yet, so the only way
-	// to end it is stopping the unit, which also cancels every other open
-	// item. The note tells the operator that happened.
-	_, _, target, stopped, err := a.store.StopUnit(r.Context(), unit, op, &id)
-	if err != nil {
+	case err != nil:
 		opStoreError(w, r, err)
-		return
+	case cmd != nil:
+		// The unit still holds the task until it hears the command, so the
+		// item is returned as it is: accepted, not yet cancelled.
+		a.changed(unit)
+		opJSON(w, http.StatusAccepted, view(it))
+	default:
+		a.changed(unit)
+		opJSON(w, http.StatusOK, view(it))
 	}
-	if !stopped {
-		opJSON(w, http.StatusOK, cancelled{View: view(target)})
-		return
-	}
-	a.changed(unit)
-	it = target
-	opJSON(w, http.StatusAccepted, cancelled{view(it), stoppedNote})
 }
 
 func decodeStrict(r io.Reader, v any) error {

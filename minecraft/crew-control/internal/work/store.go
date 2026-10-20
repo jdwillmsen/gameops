@@ -49,10 +49,37 @@ type Item struct {
 	Operator string
 	Created  time.Time
 	Updated  time.Time
+	// JobID and StepID are set on work a job's scheduler queued; work an
+	// operator queued by hand has neither.
+	JobID, StepID *uuid.UUID
+}
+
+// Seen is what a unit found in the last chest it closed. It is an
+// observation, so it carries when the unit looked.
+type Seen struct {
+	Chest struct {
+		X int `json:"x"`
+		Y int `json:"y"`
+		Z int `json:"z"`
+	} `json:"chest"`
+	Items map[string]int `json:"items"`
+	At    time.Time      `json:"at"`
 }
 
 type Store interface {
 	Enqueue(ctx context.Context, unit, kind string, body json.RawMessage, operator string) (Item, error)
+	// EnqueueStep queues a task for a job's step and validates it like Enqueue.
+	EnqueueStep(ctx context.Context, unit string, body json.RawMessage, operator string, job, step uuid.UUID) (Item, error)
+	// CancelTask ends one task without touching the rest of the unit's work.
+	// A queued task is cancelled in place and cmd is nil. A task the unit has
+	// is cancelled by queueing a cancel_task command, in the same transaction
+	// as the lookup so the task cannot finish in between; cmd is that
+	// command and item is still the task as the unit last reported it. A
+	// finished task is returned unchanged.
+	CancelTask(ctx context.Context, unit string, id uuid.UUID, operator string) (item Item, cmd *Item, err error)
+	// CancelJob applies CancelTask to every open item of the job, whichever
+	// unit it is on, and to nothing else.
+	CancelJob(ctx context.Context, job uuid.UUID, operator string) ([]Item, error)
 	// Next returns the oldest command, else the oldest task, that is queued
 	// or delivered, or running without a report, for more than RedeliverAfter
 	// before now, and marks it delivered. A running item that goes quiet means
@@ -90,13 +117,27 @@ func validateBody(kind string, body json.RawMessage) error {
 		}
 	case KindCommand:
 		var c struct {
-			Name string `json:"name"`
+			Name string  `json:"name"`
+			Task *string `json:"task"`
 		}
 		dec := json.NewDecoder(bytes.NewReader(body))
 		dec.DisallowUnknownFields()
-		if dec.Decode(&c) != nil || c.Name != "stop" || dec.More() {
-			return errors.Join(ErrInvalid, errors.New(`command body must be {"name":"stop"}`))
+		if dec.Decode(&c) != nil || dec.More() {
+			return errors.Join(ErrInvalid, errors.New("command body is not a command"))
 		}
+		switch c.Name {
+		case "stop":
+			if c.Task == nil {
+				return nil
+			}
+		case "cancel_task":
+			if c.Task != nil {
+				if id, err := uuid.Parse(*c.Task); err == nil && id != uuid.Nil {
+					return nil
+				}
+			}
+		}
+		return errors.Join(ErrInvalid, errors.New(`command body must be {"name":"stop"} or {"name":"cancel_task","task":"<uuid>"}`))
 	default:
 		return errors.Join(ErrInvalid, errors.New("unknown kind"))
 	}
@@ -163,6 +204,30 @@ func (l *Lazy) Enqueue(ctx context.Context, unit, kind string, body json.RawMess
 	return s.Enqueue(ctx, unit, kind, body, operator)
 }
 
+func (l *Lazy) EnqueueStep(ctx context.Context, unit string, body json.RawMessage, operator string, job, step uuid.UUID) (Item, error) {
+	s, err := l.get()
+	if err != nil {
+		return Item{}, err
+	}
+	return s.EnqueueStep(ctx, unit, body, operator, job, step)
+}
+
+func (l *Lazy) CancelTask(ctx context.Context, unit string, id uuid.UUID, operator string) (Item, *Item, error) {
+	s, err := l.get()
+	if err != nil {
+		return Item{}, nil, err
+	}
+	return s.CancelTask(ctx, unit, id, operator)
+}
+
+func (l *Lazy) CancelJob(ctx context.Context, job uuid.UUID, operator string) ([]Item, error) {
+	s, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return s.CancelJob(ctx, job, operator)
+}
+
 func (l *Lazy) Next(ctx context.Context, unit, kinds string, now time.Time) (Item, bool, time.Duration, error) {
 	s, err := l.get()
 	if err != nil {
@@ -210,3 +275,14 @@ func (l *Lazy) Prune(ctx context.Context, before time.Time) (int, error) {
 	}
 	return s.Prune(ctx, before)
 }
+
+func cancelTaskBody(id uuid.UUID) json.RawMessage {
+	b, _ := json.Marshal(struct {
+		Name string    `json:"name"`
+		Task uuid.UUID `json:"task"`
+	}{"cancel_task", id})
+	return b
+}
+
+// errNotATask: a command a unit already took has no cancel_task to name it.
+var errNotATask = errors.Join(ErrInvalid, errors.New("only a task can be cancelled once a unit has it"))

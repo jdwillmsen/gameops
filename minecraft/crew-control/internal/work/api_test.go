@@ -187,7 +187,7 @@ func TestEventRefusals(t *testing.T) {
 		"bad id":        {"/v1/units/crew-01/events", `{"id":"x","state":"running"}`, 400},
 		"unknown field": {"/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"running","x":1}`, it.ID), 400},
 		"trailing data": {"/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"running"} {}`, it.ID), 400},
-		"too large":     {"/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"failed","reason":%q}`, it.ID, strings.Repeat("a", 2000)), 413},
+		"too large":     {"/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"failed","reason":%q}`, it.ID, strings.Repeat("a", 5000)), 413},
 	} {
 		if resp := r.do(t, "POST", c.path, c.body, nil); resp.StatusCode != c.want {
 			t.Errorf("%s: status %d, want %d", name, resp.StatusCode, c.want)
@@ -303,5 +303,104 @@ func TestDeliveryNotifiesOperators(t *testing.T) {
 	}
 	if got, _ := r.store.Recent(ctx, "crew-01", 1); got[0].State != Delivered {
 		t.Fatalf("state %s, want delivered", got[0].State)
+	}
+}
+
+func TestEventSeenReachesTheHook(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var got []Seen
+	var unit string
+	r.api.OnSeen = func(u string, s Seen) { unit = u; got = append(got, s) }
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"running","progress":10,"seen":{"chest":{"x":3,"y":64,"z":-7},"items":{"oak_log":12,"cobblestone":0},"at":"2026-10-20T10:00:00Z"}}`, it.ID), nil)
+	if resp.StatusCode != 204 || len(got) != 1 || unit != "crew-01" {
+		t.Fatalf("status %d, seen %+v", resp.StatusCode, got)
+	}
+	s := got[0]
+	if s.Chest.X != 3 || s.Chest.Y != 64 || s.Chest.Z != -7 || s.Items["oak_log"] != 12 || !s.At.Equal(time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("%+v", s)
+	}
+}
+
+func TestMalformedSeenIsIgnoredButStateApplies(t *testing.T) {
+	for name, seen := range map[string]string{
+		"wrong type":     `"chest"`,
+		"bad item name":  `{"chest":{"x":1,"y":2,"z":3},"items":{"Oak Log":1},"at":"2026-10-20T10:00:00Z"}`,
+		"negative count": `{"chest":{"x":1,"y":2,"z":3},"items":{"oak_log":-1},"at":"2026-10-20T10:00:00Z"}`,
+		"no time":        `{"chest":{"x":1,"y":2,"z":3},"items":{"oak_log":1}}`,
+		"unknown field":  `{"chest":{"x":1,"y":2,"z":3},"items":{},"at":"2026-10-20T10:00:00Z","x":1}`,
+		"too many kinds": `{"chest":{"x":1,"y":2,"z":3},"items":{` + manyItems(100) + `},"at":"2026-10-20T10:00:00Z"}`,
+		"null":           `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, NewMemory())
+			called := false
+			r.api.OnSeen = func(string, Seen) { called = true }
+			it := must(t, r.store, "crew-01", KindTask, tpl)
+			resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"done","progress":100,"seen":%s}`, it.ID, seen), nil)
+			got, _ := r.store.Recent(ctx, "crew-01", 1)
+			if resp.StatusCode != 204 || got[0].State != Done || called {
+				t.Fatalf("status %d state %s hook called %v", resp.StatusCode, got[0].State, called)
+			}
+		})
+	}
+}
+
+func manyItems(n int) string {
+	var parts []string
+	for i := range n {
+		parts = append(parts, fmt.Sprintf(`"item_%c%c":1`, 'a'+rune(i/26), 'a'+rune(i%26)))
+	}
+	return strings.Join(parts, ",")
+}
+
+func TestSeenFromARefusedEventIsDropped(t *testing.T) {
+	r := newRig(t, NewMemory())
+	called := false
+	r.api.OnSeen = func(string, Seen) { called = true }
+	other := must(t, r.store, "crew-02", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"done","seen":{"chest":{"x":1,"y":2,"z":3},"items":{},"at":"2026-10-20T10:00:00Z"}}`, other.ID), nil)
+	if resp.StatusCode != 404 || called {
+		t.Fatalf("status %d, hook called %v", resp.StatusCode, called)
+	}
+}
+
+func TestEventBodyCapIs4KiB(t *testing.T) {
+	r := newRig(t, NewMemory())
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	pad := func(n int) string {
+		return fmt.Sprintf(`{"id":%q,"state":"running","reason":%q}`, it.ID, strings.Repeat("a", n))
+	}
+	if resp := r.do(t, "POST", "/v1/units/crew-01/events", pad(3000), nil); resp.StatusCode != 204 {
+		t.Fatalf("3 KiB event: %d", resp.StatusCode)
+	}
+	if resp := r.do(t, "POST", "/v1/units/crew-01/events", pad(4097), nil); resp.StatusCode != 413 {
+		t.Fatalf("over 4 KiB: %d", resp.StatusCode)
+	}
+}
+
+func TestOnTerminalFiresForJobItemsOnly(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var fired []Item
+	r.api.OnTerminal = func(it Item) { fired = append(fired, it) }
+	job, step := uuid.New(), uuid.New()
+	stepItem, err := r.store.EnqueueStep(ctx, "crew-01", tpl, "op", job, step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hand := must(t, r.store, "crew-01", KindTask, tpl)
+	post := func(id uuid.UUID, state string) {
+		r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":%q}`, id, state), nil)
+	}
+	post(stepItem.ID, "running")
+	post(hand.ID, "done")
+	if len(fired) != 0 {
+		t.Fatalf("fired early or for hand-queued work: %+v", fired)
+	}
+	post(stepItem.ID, "failed")
+	if len(fired) != 1 || fired[0].ID != stepItem.ID || fired[0].State != Failed || *fired[0].JobID != job || *fired[0].StepID != step {
+		t.Fatalf("%+v", fired)
 	}
 }
