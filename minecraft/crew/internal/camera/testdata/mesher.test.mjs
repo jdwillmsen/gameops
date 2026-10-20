@@ -1,0 +1,131 @@
+// Runs the real mesher worker in a vm and checks which faces it emits. Run by
+// TestMesherFaces with `node --test`; it needs nothing but node.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const src = fs.readFileSync(process.env.MESHER_JS, 'utf8');
+
+const face = { uv: [0, 0, 1, 1] };
+const model = k => ({ model: k, up: face, down: face, side: face, north: face, south: face, east: face, west: face, tint: '' });
+
+// names: material list; ids are 1-based positions. kinds maps a block name to
+// the table's model kind.
+function worker(names, kinds) {
+  const out = [];
+  const sandbox = {
+    postMessage: m => out.push(m), setTimeout, performance,
+    onmessage: null,
+  };
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox);
+  const mats = names.map(n => {
+    const base = n.split('@')[0];
+    return { name: n, alpha: 1, nonCube: !!kinds[base]?.nonCube, rgb: [1, 1, 1] };
+  });
+  const blocks = {};
+  for (const n of names) { const base = n.split('@')[0]; if (kinds[base]) blocks['minecraft:' + base] = model(kinds[base].model); }
+  const send = m => sandbox.onmessage({ data: m });
+  send({ t: 'mats', mats });
+  send({ t: 'atlas', atlas: { table: { blocks }, tiles: {}, tints: {} } });
+  return {
+    set(key, fill) {
+      const cells = new Uint8Array(4096);
+      fill(cells, (x, y, z, id) => { cells[(y << 8) | (z << 4) | x] = id; });
+      send({ t: 'set', key, cells });
+    },
+    async meshes() {
+      await new Promise(r => setTimeout(r, 120));
+      const last = new Map();
+      for (const m of out) if (m.t === 'mesh') last.set(m.key, m.parts);
+      return last;
+    },
+  };
+}
+
+const quads = parts => parts.reduce((n, p) => n + p.i.length / 6, 0);
+const kinds = {
+  stone: { model: 'cube' },
+  grass_path: { model: 'cube' },
+  brown_mushroom_block: { model: 'cube' },
+  oak_leaves: { model: 'cube' },
+  oak_stairs: { model: 'stairs', nonCube: true },
+  stone_slab: { model: 'slab' },
+};
+
+// A solid layer of one block at height y of a chunk.
+const layer = (id, y) => (cells, put) => { for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) put(x, y, z, id); };
+
+test('a whole-cube block the old name list hid is drawn', async () => {
+  const w = worker(['brown_mushroom_block'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  const m = await w.meshes();
+  assert.equal(quads(m.get('0,0,0')), 6);
+});
+
+test('a path block is drawn below the block edge', async () => {
+  const w = worker(['grass_path'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  const parts = (await w.meshes()).get('0,0,0');
+  const maxY = Math.max(...parts.map(p => p.box[4]));
+  assert.ok(Math.abs(maxY - (5 + 15 / 16)) < 1e-6, `top at ${maxY}`);
+});
+
+test('a top slab is drawn in the top half', async () => {
+  const w = worker(['stone_slab@0,8,0,16,16,16'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  const parts = (await w.meshes()).get('0,0,0');
+  assert.equal(Math.min(...parts.map(p => p.box[1])), 5.5);
+  assert.equal(Math.max(...parts.map(p => p.box[4])), 6);
+});
+
+test('a stair variant carries its own boxes', async () => {
+  const w = worker(['oak_stairs@0,0,0,16,8,16;8,8,0,16,16,16'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  const parts = (await w.meshes()).get('0,0,0');
+  // Two boxes: the second sits on the +x half only.
+  assert.equal(Math.max(...parts.map(p => p.box[3])), 6);
+  assert.ok(quads(parts) >= 10);
+});
+
+test('faces toward an unsent all-air sub-chunk in a loaded column are drawn', async () => {
+  const w = worker(['stone'], kinds);
+  w.set('0,0,0', layer(1, 15));
+  const m = await w.meshes();
+  // Top (256) + four sides (16 each); the bottom touches the unknown floor.
+  const tops = m.get('0,0,0').flatMap(p => [...Array(p.p.length / 12).keys()].map(q => p.p[q * 12 + 1])).filter(y => y === 16).length;
+  assert.equal(tops, 256, 'top faces at y=16');
+});
+
+test('a chunk whose neighbouring column is unknown keeps that edge hidden', async () => {
+  const w = worker(['stone'], kinds);
+  w.set('0,0,0', (c, put) => put(15, 5, 5, 1));
+  const m = await w.meshes();
+  // The +x neighbour column is not loaded: its face stays hidden, the others show.
+  assert.equal(quads(m.get('0,0,0')), 5);
+});
+
+test('a neighbouring column that arrives later reveals the edge', async () => {
+  const w = worker(['stone'], kinds);
+  w.set('0,0,0', (c, put) => put(15, 5, 5, 1));
+  await w.meshes();
+  w.set('1,0,0', (c, put) => put(0, 0, 0, 1));
+  const m = await w.meshes();
+  assert.equal(quads(m.get('0,0,0')), 6);
+});
+
+test('leaf blocks keep the faces between them', async () => {
+  const w = worker(['oak_leaves'], kinds);
+  w.set('0,0,0', (c, put) => { put(5, 5, 5, 1); put(6, 5, 5, 1); });
+  const m = await w.meshes();
+  assert.equal(quads(m.get('0,0,0')), 12);
+});
+
+test('stone blocks still cull the face between them', async () => {
+  const w = worker(['stone'], kinds);
+  w.set('0,0,0', (c, put) => { put(5, 5, 5, 1); put(6, 5, 5, 1); });
+  const m = await w.meshes();
+  assert.equal(quads(m.get('0,0,0')), 10);
+});

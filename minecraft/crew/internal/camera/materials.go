@@ -36,13 +36,58 @@ var known = map[string]string{
 
 var translucent = map[string]float32{"water": .6, "flowing_water": .6, "ice": .8}
 
-// Block names that are not full cubes. Drawn as cubes they would bury the
-// scene in solid green, so a page without an atlas leaves them out.
-var nonCube = []string{"grass", "fern", "flower", "sapling", "vine", "dead_bush", "deadbush", "torch",
-	"carpet", "tallgrass", "double_plant", "rail", "button", "sign", "fire", "web", "mushroom", "sweet_berry",
-	"kelp", "seagrass", "litter", "bush", "peony", "lilac", "bluet", "reeds", "bud", "cluster", "lichen", "bubble_column", "pointed", "stairs", "trapdoor", "fence", "wall", "lily", "snow_layer", "tulip", "poppy", "dandelion", "rose", "allium"}
+// notCube reports a block the textured page must not draw as a full cube
+// even where the atlas table says it is one: the table has no model for these
+// and falls back to a cube. A name that merely contains one of these words is
+// not enough; fire_coral_block, brown_mushroom_block and dried_kelp_block are
+// whole cubes and were hidden by a substring match.
+func notCube(name string) bool {
+	if strings.HasSuffix(name, "_block") || name == "budding_amethyst" {
+		return false
+	}
+	switch name {
+	case "grass", "short_grass", "tall_grass", "fern", "large_fern", "double_plant", "tallgrass", "dead_bush", "deadbush",
+		"sapling", "web", "cobweb", "fire", "soul_fire", "campfire", "soul_campfire", "rail", "bush", "firefly_bush",
+		"leaf_litter", "wildflowers", "pink_petals", "torchflower_crop", "golden_dandelion", "flower_pot", "bubble_column",
+		"pointed_dripstone", "snow_layer", "lily_pad", "waterlily", "kelp", "seagrass", "glow_lichen", "sculk_vein",
+		"vine", "twisting_vines", "weeping_vines", "cave_vines", "reeds", "sweet_berry_bush", "torch", "soul_torch",
+		"redstone_torch", "lantern", "soul_lantern", "chain", "lever", "tripwire", "tripwire_hook", "wall_banner",
+		"standing_banner", "ladder", "end_rod", "lightning_rod", "candle", "cake", "brewing_stand", "cauldron",
+		"hopper", "end_portal_frame", "dragon_egg", "flower", "bamboo", "scaffolding", "chorus_flower", "chorus_plant":
+		return true
+	}
+	for _, suffix := range []string{
+		"_button", "_sign", "_rail", "_fan", "_bud", "_cluster", "_vines", "_sapling", "_banner", "_coral",
+		"_stairs", "_trapdoor", "_fence", "_fence_gate", "_carpet", "_pressure_plate", "_candle", "_head", "_skull",
+		"_tulip", "_orchid", "_allium", "_bluet", "_daisy", "_cornflower", "_lily_of_the_valley", "_rose", "_peony",
+		"_lilac", "_dandelion", "_poppy", "_mushroom", "_roots", "_fungus", "_propagule", "_pane", "_bars", "_wall",
+	} {
+		if strings.HasSuffix(name, suffix) {
+			// A wall sign is a sign; a stone wall is a wall. Both hide.
+			return true
+		}
+	}
+	// Corals that stand on their own are plants; the _block suffix returned
+	// above keeps the cubes.
+	return strings.Contains(name, "coral") || strings.Contains(name, "azalea") && !strings.HasSuffix(name, "_leaves") ||
+		strings.HasPrefix(name, "potted_") || strings.HasPrefix(name, "tulip") || strings.HasPrefix(name, "azure_")
+}
 
-var airLike = map[string]bool{"air": true, "cave_air": true, "void_air": true, "unknown": true}
+var airLike = map[string]bool{"air": true, "cave_air": true, "void_air": true, "unknown": true,
+	"barrier": true, "structure_void": true, "light_block": true, "allow": true, "deny": true, "border_block": true}
+
+// variantBudget is how many materials may exist before a block's shape
+// variants stop getting ids of their own. The wire holds 255 ids, and a
+// stair alone has forty states, so past this point a variant is drawn as the
+// block's default shape instead of crowding out whole block types.
+const variantBudget = 190
+
+// splitVariant separates a block name from the shape suffix the decoder adds
+// ("oak_stairs@0,0,0,16,8,16;0,8,8,16,16,16", boxes in sixteenths of a block).
+func splitVariant(full string) (base, boxes string) {
+	base, boxes, _ = strings.Cut(full, "@")
+	return base, boxes
+}
 
 type materialTable struct {
 	mu     sync.Mutex
@@ -58,38 +103,39 @@ func newMaterialTable() *materialTable {
 // material was assigned, so the caller knows to tell viewers.
 func (t *materialTable) id(full string) (id uint8, fresh bool) {
 	name := strings.TrimPrefix(full, "minecraft:")
-	if airLike[name] {
+	base, boxes := splitVariant(name)
+	if airLike[base] || strings.HasPrefix(base, "light_block_") {
 		return 0, false
 	}
-	flat := false
-	for _, s := range nonCube {
-		if strings.Contains(name, s) && name != "grass_block" && name != "snow" {
-			flat = true
-			break
-		}
-	}
+	flat := notCube(base)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if v, ok := t.byName[name]; ok {
 		return v, false
+	}
+	if boxes != "" && len(t.list) >= variantBudget {
+		name = base
+		if v, ok := t.byName[name]; ok {
+			return v, false
+		}
 	}
 	// 255 distinct drawn block names is far more than a lab scene has; the
 	// last slot absorbs overflow instead of growing the wire format.
 	if len(t.list) >= 255 {
 		return 255, false
 	}
-	color, ok := known[name]
+	color, ok := known[base]
 	if !ok {
-		color, ok = family(name)
+		color, ok = family(base)
 	}
 	if !ok {
 		h := fnv.New32a()
-		_, _ = h.Write([]byte(name))
+		_, _ = h.Write([]byte(base))
 		s := h.Sum32()
 		color = "#" + hex2(60+byte(s)%150) + hex2(60+byte(s>>8)%150) + hex2(60+byte(s>>16)%150)
 	}
 	alpha := float32(1)
-	if a, ok := translucent[name]; ok {
+	if a, ok := translucent[base]; ok {
 		alpha = a
 	}
 	id = uint8(len(t.list) + 1)

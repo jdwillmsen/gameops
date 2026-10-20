@@ -107,6 +107,16 @@ func (d *NetworkDecoder) BlockName(networkID uint32) (string, bool) {
 	return name, ok
 }
 
+// RenderName is BlockName with the shape the camera draws appended; see
+// renderName.
+func (d *NetworkDecoder) RenderName(networkID uint32) (string, bool) {
+	name, props, ok := d.BlockState(networkID)
+	if !ok {
+		return "", false
+	}
+	return renderName(name, props), true
+}
+
 // BlockState is BlockName with the block's states. The returned map is shared
 // between calls and must not be changed.
 func (d *NetworkDecoder) BlockState(networkID uint32) (string, map[string]any, bool) {
@@ -137,7 +147,7 @@ func (d *NetworkDecoder) section(sc subchunk.SubChunk) Section {
 	l := &sc.Layers[0]
 	s := Section{Palette: make([]string, len(l.Palette))}
 	for i, hash := range l.Palette {
-		name, ok := d.BlockName(hash)
+		name, ok := d.RenderName(hash)
 		if !ok {
 			name = unmappedBlock
 		}

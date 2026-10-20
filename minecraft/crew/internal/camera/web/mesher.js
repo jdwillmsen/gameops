@@ -6,6 +6,10 @@
 'use strict';
 
 const blocks = new Map(); // "cx,cy,cz" -> Uint8Array(4096)
+// "cx,cz" -> the cy of every sub-chunk loaded in that column. All-air
+// sub-chunks are never sent, so a missing one in a loaded column is air; only
+// a column with nothing loaded is unknown.
+const columns = new Map();
 const dirty = new Set();
 const infoCache = new Map();
 const colorCache = new Map();
@@ -53,7 +57,12 @@ const WHITE = [1, 1, 1];
 // Names the page draws blended. The wire only marks water and ice as
 // translucent; glass blocks arrive as opaque, but drawing them that way would
 // hide everything behind them.
-const BLENDED = /^(water|flowing_water|ice|frosted_ice|glass|[a-z_]+_stained_glass)$/;
+const BLENDED = /^(water|flowing_water|ice|frosted_ice|glass|tinted_glass|glass_pane|[a-z_]+_stained_glass|[a-z_]+_stained_glass_pane)$/;
+// Leaves are alpha-tested, so a hole in one shows what is behind it. Faces
+// between two leaf blocks are therefore kept, or the holes open onto the sky.
+const LEAVES = /_leaves$/;
+// Full-width blocks the table calls cubes but whose top sits below the edge.
+const SUNKEN = { grass_path: 15 / 16, dirt_path: 15 / 16, farmland: 15 / 16 };
 const WATER = /^(water|flowing_water)$/;
 const WATER_TOP = [[0, 0, 0, 1, 14 / 16, 1]];
 // The page converts to linear light but the game multiplies shade and
@@ -77,11 +86,21 @@ function rgb(id) {
 // The atlas arrives after the first frames, so everything that depends on it
 // is looked up lazily and dropped when it changes. Without it every block is
 // a flat colour and the shapes the page cannot draw are skipped.
+function parseBoxes(text) {
+  if (!text) return null;
+  const boxes = text.split(';').map(b => b.split(',').map(v => Number(v) / 16));
+  return boxes.every(b => b.length === 6 && b.every(Number.isFinite)) ? boxes : null;
+}
+
 function info(id) {
   let r = infoCache.get(id);
   if (r) return r;
   const m = mats[id - 1];
-  const blk = (m && atlas && atlas.table.blocks['minecraft:' + m.name]) || null;
+  // A shaped block carries its boxes after an @ in the name; the table knows
+  // it by the part before.
+  const [base, boxText] = m ? m.name.split('@') : ['', ''];
+  const custom = parseBoxes(boxText);
+  const blk = (m && atlas && atlas.table.blocks['minecraft:' + base]) || null;
   let shape = 'cube';
   if (blk) {
     const k = blk.model;
@@ -89,13 +108,17 @@ function info(id) {
     // would draw it as a cube, which is how it hid before textures existed.
     shape = k === 'liquid' ? 'cube' : k === 'none' || (k === 'cube' && m.nonCube) ? 'skip' : k;
   } else if (m && m.nonCube) shape = 'skip';
-  const trans = !!m && (m.alpha < 1 || BLENDED.test(m.name));
+  let boxes = null;
+  if (custom && shape !== 'skip') { shape = 'boxes'; boxes = custom; }
+  else if (shape === 'cube' && base in SUNKEN) { shape = 'boxes'; boxes = [[0, 0, 0, 1, SUNKEN[base], 1]]; }
+  const trans = !!m && (m.alpha < 1 || BLENDED.test(base));
+  const leaves = LEAVES.test(base);
   r = {
-    m, blk, shape, trans, opaque: shape === 'cube' && !trans, water: !!m && WATER.test(m.name),
+    m, blk, shape, boxes, trans, leaves, opaque: shape === 'cube' && !trans && !leaves, water: !!m && WATER.test(base),
     tint: blk && atlas.tints[blk.tint] || null,
     // Water is clear but for its biome colour; the pack's texture alone is too
     // opaque to read as water.
-    alpha: m && WATER.test(m.name) ? .7 : m && m.alpha < 1 ? m.alpha : 1,
+    alpha: m && WATER.test(base) ? .7 : m && m.alpha < 1 ? m.alpha : 1,
   };
   infoCache.set(id, r);
   return r;
@@ -132,6 +155,39 @@ function faceUVW(face, st) {
   return st.map(([s, t]) => [s, 1 - t, layer]);
 }
 
+function isAir(cx, cy, cz) {
+  const col = columns.get(cx + ',' + cz);
+  if (!col) return false;
+  for (const y of col) if (y < cy) return true;
+  return false;
+}
+
+// Keeps columns in step with blocks. True when the column had nothing before.
+function track(key, add) {
+  const [cx, , cz] = key.split(',').map(Number);
+  const cy = Number(key.split(',')[1]);
+  const ck = cx + ',' + cz;
+  let col = columns.get(ck);
+  if (add) {
+    if (!col) columns.set(ck, col = new Set());
+    const first = col.size === 0;
+    col.add(cy);
+    return first;
+  }
+  if (col) { col.delete(cy); if (!col.size) columns.delete(ck); }
+  return false;
+}
+
+// A column that just became known changes what its neighbours' edge faces
+// look into, at every height.
+function markColumnRing(key) {
+  const [cx, , cz] = key.split(',').map(Number);
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const col = columns.get((cx + dx) + ',' + (cz + dz));
+    if (col) for (const y of col) dirty.add((cx + dx) + ',' + y + ',' + (cz + dz));
+  }
+}
+
 // Returns the non-empty buffers as { k, p, c, u, i, box }. k: 0 textured,
 // 1 textured translucent, 2 flat, 3 flat translucent. c is rgba, u is
 // (s, t, layer) per vertex. box is the tight [minx, miny, minz, maxx, maxy,
@@ -142,13 +198,21 @@ function mesh(key) {
   if (!b) return [];
   // The 3x3x3 chunks around this one, so a neighbour lookup is an array read
   // rather than a string-keyed map lookup per face and per occlusion probe.
-  const nb = [];
-  for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
-    nb.push(blocks.get((cx + dx) + ',' + (cy + dy) + ',' + (cz + dz)));
+  const nb = [], gap = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const c = blocks.get((cx + dx) + ',' + (cy + dy) + ',' + (cz + dz));
+    nb.push(c);
+    // A sub-chunk that was never sent inside a column that has others is all
+    // air; hiding the faces that look into it would cut holes in cliffs and
+    // at the top of every full sub-chunk. Below the column's lowest sub-chunk
+    // is the world floor, which stays hidden.
+    gap.push(c || isAir(cx + dx, cy + dy, cz + dz) ? 0 : -1);
+  }
   // Local coordinates run -1..16 for the ring of cells just outside the chunk.
   const at = (x, y, z) => {
-    const c = nb[((y >> 4) + 1) * 9 + ((z >> 4) + 1) * 3 + (x >> 4) + 1];
-    return c ? c[(((y & 15) << 4) | (z & 15)) << 4 | (x & 15)] : -1;
+    const n = ((y >> 4) + 1) * 9 + ((z >> 4) + 1) * 3 + (x >> 4) + 1;
+    const c = nb[n];
+    return c ? c[(((y & 15) << 4) | (z & 15)) << 4 | (x & 15)] : gap[n];
   };
   const solid = (x, y, z) => { const n = at(x, y, z); return n > 0 && info(n).opaque; };
   const buf = [0, 1, 2, 3].map(() => ({ p: [], c: [], u: [], i: [] }));
@@ -173,7 +237,7 @@ function mesh(key) {
           quad(g, q.map(v => [wx + v[0], wy + v[1], wz + v[2]]), col, 1, 1, uv, null, backface);
       continue;
     }
-    let boxes = inf.shape === 'cube' ? FULL : BOXES[inf.shape] || FULL;
+    let boxes = inf.shape === 'cube' ? FULL : inf.boxes || BOXES[inf.shape] || FULL;
     // The surface of a water block with nothing on top sits below the block's
     // edge, as in the game; with water or a solid above it fills the block.
     if (inf.water) {
@@ -181,14 +245,14 @@ function mesh(key) {
       if (above !== id && !(above > 0 && info(above).opaque) && above !== -1) boxes = WATER_TOP;
     }
     // Occlusion is only defined for whole-block faces of opaque cubes.
-    const lit = inf.shape === 'cube' && inf.opaque;
+    const lit = inf.shape === 'cube' && (inf.opaque || inf.leaves);
     for (const box of boxes) {
       for (const f of FACES) {
         const flush = f.d[f.axis] > 0 ? box[f.axis + 3] === 1 : box[f.axis] === 0;
         if (flush) {
           const n = at(x + f.d[0], y + f.d[1], z + f.d[2]);
           if (n === -1) continue;                        // unloaded: hide until it arrives
-          if (n === id && inf.shape === 'cube') continue;
+          if (n === id && inf.shape === 'cube' && !inf.leaves) continue;
           if (n !== 0 && info(n).opaque) continue;       // opaque neighbour
         }
         const pos = [], st = [];
@@ -291,6 +355,7 @@ onmessage = ev => {
       break;
     case 'set':
       blocks.set(m.key, m.cells);
+      if (track(m.key, true)) markColumnRing(m.key);
       markDirty(m.key, true);
       break;
     case 'edit': {
@@ -299,7 +364,7 @@ onmessage = ev => {
       break;
     }
     case 'clear':
-      blocks.clear(); dirty.clear(); epoch = m.epoch;
+      blocks.clear(); columns.clear(); dirty.clear(); epoch = m.epoch;
       break;
     case 'at':
       at = m.at;

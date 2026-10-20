@@ -591,7 +591,15 @@ func (h *Hub) blockEdits(placed []blockPlacement) (edits []blockEdit, fresh bool
 }
 
 func (h *Hub) blockMaterial(netID uint32) (id uint8, fresh bool) {
-	name, ok := h.dec.BlockName(netID)
+	var name string
+	var ok bool
+	if r, shaped := h.dec.(interface {
+		RenderName(uint32) (string, bool)
+	}); shaped {
+		name, ok = r.RenderName(netID)
+	} else {
+		name, ok = h.dec.BlockName(netID)
+	}
 	if !ok {
 		h.unmapped.Add(1)
 		name = unmappedBlock
