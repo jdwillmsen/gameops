@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -80,8 +81,12 @@ func (m *Memory) Lock(_ context.Context, id uuid.UUID, fn func(*Job) error) (boo
 	}
 	defer mj.lock.Unlock()
 	j := mj.snapshot()
+	before := j.clone()
 	if err := fn(&j); err != nil {
 		return true, err
+	}
+	if reflect.DeepEqual(j, before) {
+		return true, nil
 	}
 	j.Updated = m.now()
 	mj.store(j)

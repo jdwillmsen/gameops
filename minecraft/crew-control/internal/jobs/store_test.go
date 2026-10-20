@@ -100,6 +100,23 @@ func storeSuite(t *testing.T, mk func(*testing.T) Store) {
 				t.Fatalf("lock err = %v", err)
 			}
 		},
+		"a lock that changes nothing leaves updated_at alone": func(t *testing.T, s Store) {
+			j, _ := s.Create(ctx, newJob(step("a")))
+			before, _ := s.Get(ctx, j.ID)
+			time.Sleep(20 * time.Millisecond)
+			if ok, err := s.Lock(ctx, j.ID, func(*Job) error { return nil }); err != nil || !ok {
+				t.Fatalf("ok=%v err=%v", ok, err)
+			}
+			after, _ := s.Get(ctx, j.ID)
+			if !after.Updated.Equal(before.Updated) {
+				t.Fatalf("updated moved from %v to %v on an idle pass", before.Updated, after.Updated)
+			}
+			s.Lock(ctx, j.ID, func(j *Job) error { j.Steps[0].Attempts = 1; return nil })
+			changed, _ := s.Get(ctx, j.ID)
+			if byKey(changed, "a").Attempts != 1 {
+				t.Fatalf("a real change was not stored: %+v", changed)
+			}
+		},
 		"lock stores changes, including appended steps": func(t *testing.T, s Store) {
 			j, _ := s.Create(ctx, newJob(step("a")))
 			w := uuid.New()

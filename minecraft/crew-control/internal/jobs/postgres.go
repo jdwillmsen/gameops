@@ -163,25 +163,34 @@ func (p *Postgres) Lock(ctx context.Context, id uuid.UUID, fn func(*Job) error) 
 		if j.Steps, err = loadSteps(ctx, tx, id); err != nil {
 			return err
 		}
-		known := map[uuid.UUID]bool{}
+		// An idle pass changes nothing, and must not bump updated_at or
+		// rewrite rows every tick.
+		before := j.clone()
+		known := map[uuid.UUID]Step{}
 		for _, s := range j.Steps {
-			known[s.ID] = true
+			known[s.ID] = s
 		}
 		if err := fn(&j); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE `+jobTable+` SET state = $2, reason = $3, round = $4, updated_at = now() WHERE id = $1`,
-			id, j.State, j.Reason, j.Round); err != nil {
-			return err
+		if j.State != before.State || j.Reason != before.Reason || j.Round != before.Round {
+			if _, err := tx.Exec(ctx, `UPDATE `+jobTable+` SET state = $2, reason = $3, round = $4, updated_at = now() WHERE id = $1`,
+				id, j.State, j.Reason, j.Round); err != nil {
+				return err
+			}
 		}
 		for _, s := range j.Steps {
-			if !known[s.ID] {
+			old, existing := known[s.ID]
+			if !existing {
 				if s.ID == uuid.Nil {
 					return errors.New("jobs: appended step has no id")
 				}
 				if err := insertStep(ctx, tx, id, s); err != nil {
 					return err
 				}
+				continue
+			}
+			if stepUnchanged(old, s) {
 				continue
 			}
 			if _, err := tx.Exec(ctx, `UPDATE `+stepTable+` SET state = $2, attempts = $3, work_id = $4, reason = $5 WHERE id = $1`,
@@ -192,6 +201,11 @@ func (p *Postgres) Lock(ctx context.Context, id uuid.UUID, fn func(*Job) error) 
 		return nil
 	})
 	return ok, err
+}
+
+func stepUnchanged(a, b Step) bool {
+	sameWork := a.WorkID == b.WorkID || (a.WorkID != nil && b.WorkID != nil && *a.WorkID == *b.WorkID)
+	return a.State == b.State && a.Attempts == b.Attempts && a.Reason == b.Reason && sameWork
 }
 
 func (p *Postgres) Get(ctx context.Context, id uuid.UUID) (Job, error) {

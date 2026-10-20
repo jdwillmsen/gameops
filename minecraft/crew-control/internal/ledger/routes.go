@@ -47,7 +47,7 @@ type placeView struct {
 // still exist and answer 401.
 func (a *API) MountOperator(mux *http.ServeMux, g Gate) {
 	mux.Handle("POST /v1/places", g.Require(http.HandlerFunc(a.put)))
-	mux.Handle("POST /v1/places/{id}/delete", g.Require(http.HandlerFunc(a.remove)))
+	mux.Handle("POST /v1/places/delete", g.Require(http.HandlerFunc(a.remove)))
 	mux.HandleFunc("GET /v1/places", func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := g.Operator(r); !ok {
 			writeError(w, http.StatusUnauthorized, "signed_out")
@@ -157,7 +157,27 @@ func (a *API) remove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := l.DeletePlace(r.Context(), r.PathValue("id")); err != nil {
+	// The id travels in the body: a chest id encodes its coordinates, which
+	// must stay out of URLs and access logs.
+	var req struct {
+		ID string `json:"id"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPlaceBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := l.DeletePlace(r.Context(), req.ID); err != nil {
 		fail(w, r, err)
 		return
 	}

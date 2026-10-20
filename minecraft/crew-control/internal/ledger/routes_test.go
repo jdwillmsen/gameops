@@ -90,7 +90,7 @@ func TestPlaceRoutesNeedASession(t *testing.T) {
 	cases := []struct{ method, path string }{
 		{"GET", "/v1/places"},
 		{"POST", "/v1/places"},
-		{"POST", "/v1/places/store/delete"},
+		{"POST", "/v1/places/delete"},
 	}
 	for _, c := range cases {
 		if code, _ := rg.do(t, c.method, c.path, store, nil); code != 401 && code != 403 {
@@ -143,13 +143,13 @@ func TestPlaceRoutesRoundTrip(t *testing.T) {
 	if p, _, _ := rg.led.Place(ctx, "store"); p.Name != "Depot" {
 		t.Fatalf("not updated: %+v", p)
 	}
-	if code, _ := rg.do(t, "POST", "/v1/places/store/delete", "{}", signed); code != 200 {
+	if code, _ := rg.do(t, "POST", "/v1/places/delete", `{"id":"store"}`, signed); code != 200 {
 		t.Fatalf("delete: %d", code)
 	}
 	if _, ok, _ := rg.led.Place(ctx, "store"); ok {
 		t.Fatal("still there")
 	}
-	if code, _ := rg.do(t, "POST", "/v1/places/store/delete", "{}", signed); code != 404 {
+	if code, _ := rg.do(t, "POST", "/v1/places/delete", `{"id":"store"}`, signed); code != 404 {
 		t.Fatalf("delete twice: %d", code)
 	}
 }
@@ -164,7 +164,7 @@ func TestPlaceRouteErrors(t *testing.T) {
 	if code, body := rg.do(t, "POST", "/v1/places", other, signed); code != 409 {
 		t.Errorf("seeded update: %d %s", code, body)
 	}
-	if code, _ := rg.do(t, "POST", "/v1/places/home/delete", "{}", signed); code != 409 {
+	if code, _ := rg.do(t, "POST", "/v1/places/delete", `{"id":"home"}`, signed); code != 409 {
 		t.Errorf("seeded delete: %d", code)
 	}
 	atHome := strings.NewReplacer(`"x":1`, `"x":9`, `"z":1`, `"z":9`).Replace(store)
@@ -185,9 +185,36 @@ func TestPlaceRouteErrors(t *testing.T) {
 	}
 }
 
+func TestPlaceDeleteRejectsMalformedBodies(t *testing.T) {
+	rg := newRouteRig(t, true)
+	if code, _ := rg.do(t, "POST", "/v1/places", store, signed); code != 200 {
+		t.Fatal("setup")
+	}
+	for name, c := range map[string]struct {
+		body string
+		want int
+	}{
+		"empty":    {"", 400},
+		"not json": {"nope", 400},
+		"unknown":  {`{"id":"store","x":1}`, 400},
+		"trailing": {`{"id":"store"}{"id":"store"}`, 400},
+		"large":    {`{"id":"` + strings.Repeat("x", 9000) + `"}`, 413},
+	} {
+		if code, _ := rg.do(t, "POST", "/v1/places/delete", c.body, signed); code != c.want {
+			t.Errorf("%s: %d, want %d", name, code, c.want)
+		}
+	}
+	if _, ok, _ := rg.led.Place(ctx, "store"); !ok {
+		t.Fatal("a rejected delete removed the place")
+	}
+	if code, _ := rg.do(t, "POST", "/v1/places/store/delete", `{"id":"store"}`, signed); code == 200 {
+		t.Fatal("the old path-carrying route still deletes")
+	}
+}
+
 func TestPlaceRoutesAnswer503WithoutALedger(t *testing.T) {
 	rg := newRouteRig(t, false)
-	for _, c := range []struct{ m, p, b string }{{"GET", "/v1/places", ""}, {"POST", "/v1/places", store}, {"POST", "/v1/places/x/delete", "{}"}} {
+	for _, c := range []struct{ m, p, b string }{{"GET", "/v1/places", ""}, {"POST", "/v1/places", store}, {"POST", "/v1/places/delete", `{"id":"x"}`}} {
 		if code, _ := rg.do(t, c.m, c.p, c.b, signed); code != 503 {
 			t.Errorf("%s %s: %d", c.m, c.p, code)
 		}

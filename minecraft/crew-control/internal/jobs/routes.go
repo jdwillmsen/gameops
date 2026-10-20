@@ -205,6 +205,11 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, op string) {
 	}
 	var req createReq
 	if err := decodeStrict(http.MaxBytesReader(w, r.Body, maxBody), &req); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeError(w, http.StatusRequestEntityTooLarge, "job too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "bad job")
 		return
 	}
@@ -218,7 +223,7 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, op string) {
 			return
 		}
 		j.Spec = mustJSON(map[string]string{"template": planDemo})
-		j.Steps, err = ParallelDemo(l)
+		j.Steps, err = ParallelDemo(r.Context(), l)
 	case KindStock:
 		if req.Template != "" || req.Place == "" {
 			writeError(w, http.StatusBadRequest, "a stock job takes a place and a want")

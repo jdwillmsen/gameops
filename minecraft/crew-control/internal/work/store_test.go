@@ -442,6 +442,25 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatal("the task was redelivered under a pending cancel")
 			}
 		},
+		"a cancel_task that fails makes its task deliverable again": func(t *testing.T, s Store) {
+			a := must(t, s, "crew-01", KindTask, tpl)
+			s.Next(ctx, "crew-01", "", time.Now())
+			_, cmd, _ := s.CancelTask(ctx, "crew-01", a.ID, "op")
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != cmd.ID {
+				t.Fatal("setup")
+			}
+			// An older unit fails the command it does not know.
+			if _, err := s.Apply(ctx, "crew-01", cmd.ID, Failed, 0, "unknown command"); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := s.Get(ctx, a.ID); got.State == Cancelled {
+				t.Fatal("a failed cancel_task cancelled its target")
+			}
+			now := age(t, s, a.ID, time.Hour)
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", now); !ok || got.ID != a.ID {
+				t.Fatalf("the task was not redelivered: %+v %v", got, ok)
+			}
+		},
 		"Get finds an item or reports not found": func(t *testing.T, s Store) {
 			a := must(t, s, "crew-01", KindTask, tpl)
 			if got, err := s.Get(ctx, a.ID); err != nil || got.ID != a.ID {

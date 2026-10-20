@@ -79,7 +79,7 @@ func tmpl(t *testing.T, s Step) map[string]any {
 func TestParallelDemo(t *testing.T) {
 	l := world(t, areaPlace("quarry-1", 0), areaPlace("grove-1", 20),
 		chestPlace("outbox-a", 1), chestPlace("outbox-b", 2), chestPlace("store", 3))
-	steps, err := ParallelDemo(l)
+	steps, err := ParallelDemo(context.Background(), l)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestParallelDemo(t *testing.T) {
 	if h["template"] != "haul" || h["to"].(map[string]any)["x"] != float64(3) || len(h["from"].([]any)) != 2 {
 		t.Fatalf("haul %v", h)
 	}
-	if items := h["items"].(map[string]any); items["cobblestone"] != float64(16) || items["oak_log"] != float64(16) {
+	if items := h["items"].(map[string]any); items["cobblestone"] != float64(16) || items["oak_log"] != float64(8) {
 		t.Fatalf("haul items %v", items)
 	}
 	if c := tmpl(t, check); c["template"] != "inspect" || c["chest"].(map[string]any)["x"] != float64(3) {
@@ -120,7 +120,7 @@ func TestParallelDemo(t *testing.T) {
 
 func TestParallelDemoMissingPlace(t *testing.T) {
 	l := world(t, areaPlace("quarry-1", 0))
-	_, err := ParallelDemo(l)
+	_, err := ParallelDemo(context.Background(), l)
 	if err == nil || err.Error() != "place grove-1 not found" {
 		t.Fatalf("err %v", err)
 	}

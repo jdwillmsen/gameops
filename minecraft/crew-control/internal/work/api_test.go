@@ -323,6 +323,21 @@ func TestEventSeenReachesTheHook(t *testing.T) {
 	}
 }
 
+func TestSeenIsRecordedBeforeTheStateIsApplied(t *testing.T) {
+	r := newRig(t, NewMemory())
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	var stateWhenSeen string
+	r.api.OnSeen = func(string, Seen) {
+		got, _ := r.store.Get(ctx, it.ID)
+		stateWhenSeen = got.State
+	}
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"done","progress":100,"seen":{"chest":{"x":1,"y":2,"z":3},"items":{},"at":"2026-10-20T10:00:00Z"}}`, it.ID), nil)
+	if resp.StatusCode != 204 || stateWhenSeen == "" || stateWhenSeen == Done {
+		t.Fatalf("status %d; the task was already %q when its stock was recorded", resp.StatusCode, stateWhenSeen)
+	}
+}
+
 func TestMalformedSeenIsIgnoredButStateApplies(t *testing.T) {
 	for name, seen := range map[string]string{
 		"wrong type":     `"chest"`,

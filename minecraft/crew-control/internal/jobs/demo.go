@@ -61,8 +61,7 @@ func inspectTemplate(chest ledger.Pos) json.RawMessage {
 
 // ParallelDemo is the built-in plan: three units work at once and the hauler
 // joins their results, which shows the scheduler's fan-out and fan-in.
-func ParallelDemo(places ledger.Ledger) ([]Step, error) {
-	ctx := context.Background()
+func ParallelDemo(ctx context.Context, places ledger.Ledger) ([]Step, error) {
 	need := func(id string) (ledger.Place, error) {
 		p, ok, err := places.Place(ctx, id)
 		if err != nil {
@@ -86,9 +85,9 @@ func ParallelDemo(places ledger.Ledger) ([]Step, error) {
 	}
 	return []Step{
 		{Key: "mine", Unit: "crew-01", Template: gatherTemplate("cobblestone", 16, p.quarry.Box, p.outA.Box.Min)},
-		{Key: "chop", Unit: "crew-02", Template: gatherTemplate("oak_log", 16, p.grove.Box, p.outB.Box.Min)},
+		{Key: "chop", Unit: "crew-02", Template: gatherTemplate("oak_log", 8, p.grove.Box, p.outB.Box.Min)},
 		{Key: "haul", Unit: "crew-03", DependsOn: []string{"mine", "chop"},
-			Template: haulTemplate(map[string]int{"cobblestone": 16, "oak_log": 16},
+			Template: haulTemplate(map[string]int{"cobblestone": 16, "oak_log": 8},
 				[]ledger.Pos{p.outA.Box.Min, p.outB.Box.Min}, p.store.Box.Min)},
 		{Key: "check", DependsOn: []string{"haul"}, Template: inspectTemplate(p.store.Box.Min)},
 	}, nil

@@ -63,9 +63,21 @@ func (s *Scheduler) Wake() {
 func (s *Scheduler) Run(ctx context.Context) {
 	t := time.NewTicker(s.cfg.Every)
 	defer t.Stop()
+	failing := false
 	for {
-		if err := s.Tick(ctx); err != nil && ctx.Err() == nil {
-			s.warn("jobs_tick_failed", nil, err)
+		// Logged on the transition only: an outage would otherwise write a
+		// line every tick for as long as it lasts.
+		switch err := s.Tick(ctx); {
+		case err != nil && ctx.Err() == nil:
+			if !failing {
+				s.warn("jobs_tick_failed", nil, err)
+			}
+			failing = true
+		case err == nil && failing:
+			failing = false
+			if s.cfg.Log != nil {
+				s.cfg.Log.Info("jobs_tick_recovered", logging.Fields{})
+			}
 		}
 		select {
 		case <-ctx.Done():
