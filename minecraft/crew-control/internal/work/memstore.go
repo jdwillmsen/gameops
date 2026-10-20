@@ -79,6 +79,9 @@ func (m *Memory) Next(_ context.Context, unit, kinds string, now time.Time) (Ite
 		default:
 			continue
 		}
+		if it.Kind == KindTask && m.cancelPendingLocked(it) {
+			continue
+		}
 		// Items are in creation order, so the first of a kind is the oldest.
 		if pick == nil || (it.Kind == KindCommand && pick.Kind != KindCommand) {
 			pick = it
@@ -91,6 +94,30 @@ func (m *Memory) Next(_ context.Context, unit, kinds string, now time.Time) (Ite
 	pick.Updated = now
 	m.delivered[pick.ID] = now
 	return pick.Item, true, 0, nil
+}
+
+// cancelPendingLocked reports whether an open cancel_task names the task.
+func (m *Memory) cancelPendingLocked(task *memItem) bool {
+	for _, c := range m.items {
+		if c.Unit != task.Unit || terminal(c.State) {
+			continue
+		}
+		if id, ok := cancelTarget(c.Item); ok && id == task.ID {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Memory) Get(_ context.Context, id uuid.UUID) (Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, it := range m.items {
+		if it.ID == id {
+			return it.Item, nil
+		}
+	}
+	return Item{}, ErrNotFound
 }
 
 func (m *Memory) Apply(_ context.Context, unit string, id uuid.UUID, state string, progress int, reason string) (Item, error) {
@@ -111,6 +138,13 @@ func (m *Memory) Apply(_ context.Context, unit string, id uuid.UUID, state strin
 			return it.Item, nil
 		}
 		it.State, it.Progress, it.Reason, it.Updated = state, progress, reason, m.now()
+		if target, ok := cancelTarget(it.Item); ok && state == Done {
+			for _, t := range m.items {
+				if t.ID == target && t.Unit == unit && !terminal(t.State) {
+					t.State, t.Reason, t.Updated = Cancelled, "cancelled by operator", m.now()
+				}
+			}
+		}
 		return it.Item, nil
 	}
 	return Item{}, ErrNotFound

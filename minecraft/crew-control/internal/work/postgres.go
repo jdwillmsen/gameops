@@ -24,6 +24,13 @@ const (
 	columns = "id, unit, kind, body, state, progress, reason, operator, created_at, updated_at, job_id, step_id"
 )
 
+// cancelPending is true for a task row w that an open cancel_task names. It is
+// kept out of Next so a task the operator ended is not run again just because
+// its unit lost it.
+const cancelPending = `(w.kind = 'task' AND EXISTS (SELECT 1 FROM ` + workTable + ` c
+	WHERE c.unit = w.unit AND c.kind = 'command' AND c.state NOT IN ('done', 'failed', 'cancelled')
+	  AND c.body->>'name' = 'cancel_task' AND c.body->>'task' = w.id::text))`
+
 // queryTimeout bounds each store call. A database that hangs rather than
 // refusing connections would otherwise hold the request, and a pool slot,
 // forever instead of answering "unavailable".
@@ -164,10 +171,11 @@ func (p *Postgres) Next(ctx context.Context, unit, kinds string, _ time.Time) (I
 		// the same unit twice.
 		var err error
 		it, err = scan(tx.QueryRow(ctx,
-			`SELECT `+columns+` FROM `+workTable+`
+			`SELECT `+columns+` FROM `+workTable+` w
 				 WHERE unit = $1 AND ($3 = '' OR kind = 'command') AND (state = 'queued'
 			       OR (state = 'delivered' AND delivered_at <= now() - make_interval(secs => $2))
 			       OR (state = 'running' AND updated_at <= now() - make_interval(secs => $2)))
+			       AND NOT `+cancelPending+`
 			 ORDER BY (kind = 'command') DESC, created_at, id
 			 LIMIT 1 FOR UPDATE SKIP LOCKED`,
 			unit, RedeliverAfter.Seconds(), kinds))
@@ -176,7 +184,9 @@ func (p *Postgres) Next(ctx context.Context, unit, kinds string, _ time.Time) (I
 			if err := tx.QueryRow(ctx,
 				`SELECT extract(epoch FROM min(CASE state WHEN 'delivered' THEN delivered_at ELSE updated_at END)
 				        + make_interval(secs => $2) - now())::float8
-				 FROM `+workTable+` WHERE unit = $1 AND ($3 = '' OR kind = 'command') AND state IN ('delivered', 'running')`,
+				 FROM `+workTable+` w WHERE unit = $1 AND ($3 = '' OR kind = 'command') AND state IN ('delivered', 'running')
+				   AND NOT `+cancelPending+`
+				`,
 				unit, RedeliverAfter.Seconds(), kinds).Scan(&secs); err != nil {
 				return err
 			}
@@ -229,9 +239,34 @@ func (p *Postgres) Apply(ctx context.Context, unit string, id uuid.UUID, state s
 		if err != nil {
 			return err
 		}
-		return addEvent(ctx, tx, it)
+		if err := addEvent(ctx, tx, it); err != nil {
+			return err
+		}
+		if target, ok := cancelTarget(it); ok && state == Done {
+			victim, err := scan(tx.QueryRow(ctx,
+				`UPDATE `+workTable+` SET state = 'cancelled', reason = 'cancelled by operator', updated_at = now()
+				 WHERE id = $1 AND unit = $2 AND state NOT IN ('done', 'failed', 'cancelled') RETURNING `+columns, target, unit))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			return addEvent(ctx, tx, victim)
+		}
+		return nil
 	})
 	return it, err
+}
+
+func (p *Postgres) Get(ctx context.Context, id uuid.UUID) (Item, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	it, err := scan(p.pool.QueryRow(ctx, `SELECT `+columns+` FROM `+workTable+` WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Item{}, ErrNotFound
+	}
+	return it, p.wrap(err)
 }
 
 func (p *Postgres) CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error) {

@@ -90,13 +90,18 @@ type Store interface {
 	// so every timestamp it writes and compares shares one clock.
 	Next(ctx context.Context, unit, kinds string, now time.Time) (it Item, ok bool, redeliverIn time.Duration, err error)
 	// Apply records a unit's report. An item already in a terminal state is
-	// returned unchanged.
+	// returned unchanged. A cancel_task command reported done also cancels
+	// the task it names, if that is still open, in the same step: a unit that
+	// restarted no longer holds the task, so nothing else would end it.
+	// Next never hands out a task while a cancel_task naming it is open.
 	Apply(ctx context.Context, unit string, id uuid.UUID, state string, progress int, reason string) (Item, error)
 	// CancelQueued cancels the item only while it is still queued. It reports
 	// false, with the item as it now is, when the unit already took it or it
 	// finished, so a caller never cancels work a unit may be running.
 	CancelQueued(ctx context.Context, unit string, id uuid.UUID) (Item, bool, error)
 	StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *uuid.UUID) (cancelled []Item, stop Item, target Item, stopped bool, err error)
+	// Get returns one item, or ErrNotFound.
+	Get(ctx context.Context, id uuid.UUID) (Item, error)
 	// Recent returns the unit's newest items first.
 	Recent(ctx context.Context, unit string, n int) ([]Item, error)
 	Prune(ctx context.Context, before time.Time) (int, error)
@@ -260,6 +265,14 @@ func (l *Lazy) StopUnit(ctx context.Context, unit, operator string, onlyIfOpen *
 	return s.StopUnit(ctx, unit, operator, onlyIfOpen)
 }
 
+func (l *Lazy) Get(ctx context.Context, id uuid.UUID) (Item, error) {
+	s, err := l.get()
+	if err != nil {
+		return Item{}, err
+	}
+	return s.Get(ctx, id)
+}
+
 func (l *Lazy) Recent(ctx context.Context, unit string, n int) ([]Item, error) {
 	s, err := l.get()
 	if err != nil {
@@ -274,6 +287,21 @@ func (l *Lazy) Prune(ctx context.Context, before time.Time) (int, error) {
 		return 0, err
 	}
 	return s.Prune(ctx, before)
+}
+
+// cancelTarget returns the task a cancel_task command names.
+func cancelTarget(it Item) (uuid.UUID, bool) {
+	if it.Kind != KindCommand {
+		return uuid.Nil, false
+	}
+	var c struct {
+		Name string    `json:"name"`
+		Task uuid.UUID `json:"task"`
+	}
+	if json.Unmarshal(it.Body, &c) != nil || c.Name != "cancel_task" {
+		return uuid.Nil, false
+	}
+	return c.Task, true
 }
 
 func cancelTaskBody(id uuid.UUID) json.RawMessage {

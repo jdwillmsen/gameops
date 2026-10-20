@@ -404,3 +404,18 @@ func TestOnTerminalFiresForJobItemsOnly(t *testing.T) {
 		t.Fatalf("%+v", fired)
 	}
 }
+
+func TestOnTerminalFiresForATaskCancelledByItsCommand(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var fired []Item
+	r.api.OnTerminal = func(it Item) { fired = append(fired, it) }
+	job := uuid.New()
+	task, _ := r.store.EnqueueStep(ctx, "crew-01", tpl, "op", job, uuid.New())
+	r.store.Next(ctx, "crew-01", "", time.Now())
+	_, cmd, _ := r.store.CancelTask(ctx, "crew-01", task.ID, "op")
+	r.store.Next(ctx, "crew-01", "", time.Now())
+	r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"done"}`, cmd.ID), nil)
+	if len(fired) != 1 || fired[0].ID != task.ID || fired[0].State != Cancelled {
+		t.Fatalf("%+v", fired)
+	}
+}
