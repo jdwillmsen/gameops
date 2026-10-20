@@ -448,7 +448,7 @@ const ops = initOps({
 function setJobsOpen(open) {
   jobsOpen = open;
   renderJobs();
-  if (open && tab === 'places') loadPlaces(true);
+  if (open) loadPlaces(true);
 }
 
 // A refresh rebuilds every row, so a timer-driven one waits while an operator
@@ -458,6 +458,7 @@ async function loadPlaces(force = false) {
   const r = await api('GET', '/v1/places');
   if (r.status === 401) { setOperator(null); return; }
   if (!r.ok) return;
+  if (!force && $('place-list') && $('place-list').contains(document.activeElement)) return;
   places = r.data || [];
   renderPlaces();
   renderStockForm();
@@ -482,7 +483,7 @@ function buildJobs() {
   const tabs = el('nav', { id: 'jobs-tabs' });
   for (const [id, label] of [['jobs', 'Jobs'], ['places', 'Places']]) {
     const b = el('button', { type: 'button', textContent: label, id: `tab-${id}` });
-    b.addEventListener('click', () => { tab = id; say(''); renderJobs(); if (id === 'places') loadPlaces(true); });
+    b.addEventListener('click', () => { tab = id; say(''); renderJobs(); loadPlaces(true); });
     tabs.append(b);
   }
 
