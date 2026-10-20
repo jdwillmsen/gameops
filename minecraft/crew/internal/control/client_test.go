@@ -922,6 +922,8 @@ func TestRedeliveredStopDoesNotDiscardHeldTask(t *testing.T) {
 	}
 	f.work <- taskItem(taskA, gotoBody)
 	waitUntil(t, "task response to be in flight", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
 		return len(f.work) == 0 && f.polls >= 2
 	})
 	if _, err := r.SubmitAs("after-stop-last", task.Template{}); err != nil {
