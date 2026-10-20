@@ -11,7 +11,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
+	"sort"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -42,6 +44,10 @@ const (
 	// How many handled stop and cancel_task ids are remembered to recognise a
 	// redelivery.
 	stopMemory = 64
+
+	// The controller reads an event through a body cap this size; one over it
+	// is refused and, being a 4xx, dropped, terminal states included.
+	maxEventBytes = 1024
 
 	// Far above a real item (a template is about 100 bytes).
 	maxWorkBytes = 64 << 10
@@ -398,6 +404,55 @@ func (c *Client) seenCommand(id string) bool {
 	return false
 }
 
+// wireItem is the controller's rule for an item name; anything else, such as
+// the placeholder for an item the table does not know, would be refused.
+var wireItem = regexp.MustCompile(`^[a-z_]{1,32}$`)
+
+// fit makes the encoded event fit the controller's cap. The state matters
+// more than the chest, so items are dropped, lowest count first, and then
+// seen itself.
+func fit(ev event) event {
+	if ev.Seen == nil {
+		return ev
+	}
+	type kv struct {
+		name string
+		n    int
+	}
+	var all []kv
+	for name, n := range ev.Seen.Items {
+		if wireItem.MatchString(name) {
+			all = append(all, kv{name, n})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].n != all[j].n {
+			return all[i].n > all[j].n
+		}
+		return all[i].name < all[j].name
+	})
+	seen := *ev.Seen
+	seen.Items = map[string]int{}
+	ev.Seen = &seen
+	if !fits(ev) {
+		ev.Seen = nil
+		return ev
+	}
+	for _, it := range all {
+		seen.Items[it.name] = it.n
+		if !fits(ev) {
+			delete(seen.Items, it.name)
+			break
+		}
+	}
+	return ev
+}
+
+func fits(ev event) bool {
+	b, err := json.Marshal(ev)
+	return err == nil && len(b) <= maxEventBytes
+}
+
 func eventOf(t task.Task) event {
 	ev := event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason}
 	if t.Seen != nil {
@@ -462,6 +517,7 @@ func (c *Client) observe(t task.Task) {
 // is now, and an outage must not build a backlog.
 func (c *Client) enqueue(ev event) {
 	ev.Reason = clipReason(ev.Reason)
+	ev = fit(ev)
 	c.mu.Lock()
 	if _, ok := c.pending[ev.ID]; !ok {
 		c.order = append(c.order, ev.ID)
@@ -560,6 +616,12 @@ func (c *Client) post(ctx context.Context, ev event) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode == http.StatusRequestEntityTooLarge && ev.Seen != nil {
+		// A controller with a tighter cap than this unit assumes: the state
+		// is worth more than the chest.
+		ev.Seen = nil
+		return c.post(ctx, ev)
+	}
 	switch {
 	case resp.StatusCode/100 == 2:
 	case resp.StatusCode/100 == 4 && resp.StatusCode != http.StatusUnauthorized &&
