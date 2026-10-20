@@ -93,6 +93,11 @@ func (i *Inspect) Step(ctx context.Context, a Actuator) (Status, error) {
 	}
 	if i.phase == iWalk {
 		if i.walk == nil {
+			// A wrong block fails here, without a trip to it. An unknown one
+			// may only be unloaded, and is judged on arrival.
+			if name, known := i.world.Block(i.chest); known && name != "chest" && name != "trapped_chest" {
+				return i.fail(a, errNotChest)
+			}
 			p := a.Pose()
 			if centre(i.chest).Sub(eyeOf(p.Feet)).Len() <= inspectReach {
 				i.phase = iOpen

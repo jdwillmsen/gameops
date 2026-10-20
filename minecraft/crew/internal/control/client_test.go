@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -53,6 +54,8 @@ type fakeControl struct {
 	eventFail    int // how many event posts to refuse before accepting
 	badAuth      bool
 	rejectID     string // events about this id get a 400
+	refuseSeen   bool   // events carrying seen get a 413
+	bodies       []int  // sizes of the event bodies received
 	conns        int    // connections the server accepted
 	releaseFirst chan struct{}
 	releaseID    string
@@ -149,8 +152,14 @@ func newFakeControl(t *testing.T) *fakeControl {
 			return
 		}
 		var ev event
-		if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
+		raw, _ := io.ReadAll(r.Body)
+		f.bodies = append(f.bodies, len(raw))
+		if err := json.Unmarshal(raw, &ev); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if f.refuseSeen && ev.Seen != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
 		if ev.ID == f.rejectID {
@@ -1124,5 +1133,75 @@ func TestCancelTaskDropsAHeldTask(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if hasSubmit(r, taskB) {
 		t.Error("a cancelled task was submitted after it was held")
+	}
+}
+
+func TestOversizedSeenIsTrimmedSoTheStateStillArrives(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "queued", func() bool { return len(r.submitted()) == 1 })
+	items := map[string]int{"item#12": 9999}
+	for i := 0; i < 27; i++ {
+		items[strings.Repeat("a", 28)+string(rune('a'+i%26))+string(rune('a'+i/26))] = 100 - i
+	}
+	r.mu.Lock()
+	r.tasks[0].State, r.tasks[0].Reason = task.Failed, strings.Repeat("r", 400)
+	r.tasks[0].Seen = &skill.ChestSeen{Chest: protocol.BlockPos{1, 2, 3}, Items: items, At: time.Now()}
+	t0, obs := r.tasks[0], r.obs
+	r.mu.Unlock()
+	obs(t0)
+
+	ev := f.waitFor(t, "failed", func(ev []event) bool { return has(ev, taskA, "failed") })
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, n := range f.bodies {
+		if n > 1024 {
+			t.Errorf("event body of %d bytes exceeds the controller's cap", n)
+		}
+	}
+	for _, e := range ev {
+		if e.Seen == nil {
+			continue
+		}
+		for name := range e.Seen.Items {
+			if strings.HasPrefix(name, "item#") {
+				t.Errorf("unnameable item on the wire: %q", name)
+			}
+		}
+		if e.Seen.Items[strings.Repeat("a", 28)+"aa"] != 100 {
+			t.Errorf("highest count was not kept first: %v", e.Seen.Items)
+		}
+	}
+}
+
+func TestFitDropsUnnameableItemsAndKeepsTheBiggest(t *testing.T) {
+	seen := &Seen{Items: map[string]int{"item#5": 500, "Bad-Name": 400, "dirt": 3, "cobblestone": 70}}
+	got := fit(event{ID: "x", State: "done", Seen: seen})
+	if len(got.Seen.Items) != 2 || got.Seen.Items["dirt"] != 3 || got.Seen.Items["cobblestone"] != 70 {
+		t.Errorf("items = %v", got.Seen.Items)
+	}
+	b, _ := json.Marshal(fit(event{ID: "x", State: "done", Seen: &Seen{Items: map[string]int{"item#5": 1}}}))
+	if strings.Contains(string(b), "item#") || !strings.Contains(string(b), `"items":{}`) {
+		t.Errorf("wire = %s", b)
+	}
+}
+
+func TestTooLargeAnswerRetriesWithoutSeen(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	f.mu.Lock()
+	f.refuseSeen = true
+	f.mu.Unlock()
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "queued", func() bool { return len(r.submitted()) == 1 })
+	r.finishWithSeen(taskA, &skill.ChestSeen{Items: map[string]int{"dirt": 2}, At: time.Now()})
+	ev := f.waitFor(t, "done", func(ev []event) bool { return has(ev, taskA, "done") })
+	for _, e := range ev {
+		if e.ID == taskA && e.Seen != nil {
+			t.Errorf("accepted event still carries seen: %+v", e)
+		}
 	}
 }
