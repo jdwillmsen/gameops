@@ -15,6 +15,8 @@ package camera
 //	names        [10][n uvarint]{id uvarint, len u8, name}...   player name labels
 //	entity data  [11][n uvarint]{id uvarint, flags u8, colour u8, len u8, item}...
 //	models       [12][models version u8]                 entity models can be fetched
+//	skin         [13][id uvarint][flags u8][len uvarint][png]   a player's skin
+//	armour       [14][n uvarint]{id uvarint, 4 x {len u8, item}}...   worn armour
 //
 // Entity data carries what changes how an entity looks and is not part of
 // its pose: flags bit 0 is baby and bit 1 sheared, colour is the dye index
@@ -24,6 +26,15 @@ package camera
 // a frame type skip it. The models frame carries no data either: the page
 // fetches /v1/camera/entities.json and /v1/camera/entities.png, and a page
 // that never gets the frame keeps drawing stand-in boxes.
+//
+// The skin frame carries a PNG in the standard 64-wide player layout (any whole
+// multiple of it; a 64x32 skin has had its left limbs filled in), flags bit 0
+// marks slim arms, and id 0 is the unit's own body, drawn in the third-person
+// modes. The armour frame lists the item names (without namespace, "" for
+// none) in helmet, chestplate, leggings, boots order; it replaces what was
+// known for each id it names. A block's name may end in @ and its boxes in
+// sixteenths of a block, "x0,y0,z0,x1,y1,z1;..." (stairs, top slabs, doors),
+// which the page draws instead of its fixed shape for that kind of block.
 //
 // Material flag bit 0 marks a block that is not a full cube; a page without an
 // atlas has no shape to draw it with and skips it. Version 2 added the flags
@@ -67,6 +78,8 @@ const (
 	frameNames       byte = 10
 	frameEntityData  byte = 11
 	frameModels      byte = 12
+	frameSkin        byte = 13
+	frameArmour      byte = 14
 
 	// Entity data flag bits.
 	entBaby    byte = 1

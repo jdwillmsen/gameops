@@ -681,6 +681,19 @@ function onMessage(ev) {
       // Only the table format this page understands; a newer one is left alone.
       if (u8[1] === 1) ents.loadModels();
       break;
+    case 13: {
+      // Wire id 0 is the unit's own body, which the page keeps as -1.
+      const id = uvarint(), slim = (u8[p++] & 1) !== 0, len = uvarint();
+      if (len > 0 && p + len <= u8.length) ents.setSkin(id || -1, slim, u8.slice(p, p + len));
+      break;
+    }
+    case 14:
+      for (let n = uvarint(); n > 0; n--) {
+        const id = uvarint(), slots = [];
+        for (let i = 0; i < 4; i++) { const len = u8[p++]; slots.push(text(len)); }
+        ents.setArmour(id || -1, slots);
+      }
+      break;
   }
 }
 connect();

@@ -292,7 +292,19 @@ func wanted(p string) bool {
 			return true
 		}
 	}
-	return wantedEntityData(rel)
+	return wantedEntityData(rel) || wantedArmor(rel)
+}
+
+// wantedArmor reports whether rel is a worn-armour texture in the layout the
+// camera draws: "<material>_1.png" for helmet, chestplate and boots,
+// "<material>_2.png" for leggings.
+func wantedArmor(rel string) bool {
+	dir, name := path.Split(rel)
+	if dir != armorDir+"/" {
+		return false
+	}
+	stem, ok := strings.CutSuffix(name, ".png")
+	return ok && (strings.HasSuffix(stem, "_1") || strings.HasSuffix(stem, "_2"))
 }
 
 // wantedEntityData reports whether rel, a path inside the pack, is an entity

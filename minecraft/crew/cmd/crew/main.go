@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -197,6 +198,11 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	if hub != nil {
 		hub.Spawn(gd.EntityRuntimeID)
 		hub.SetItems(gd.Items)
+		// The server never sends a unit its own skin back, and the camera
+		// draws the unit's body in the third-person modes.
+		if px, err := base64.StdEncoding.DecodeString(unitSkin.Data); err == nil {
+			hub.SetOwnSkin(unitSkin.Width, unitSkin.Height, px, false)
+		}
 		defer hub.Reset()
 	}
 	log.Info("spawned", spawnedFields(conn.IdentityData().XUID, cfg.ViewDistance))

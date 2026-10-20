@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -69,6 +70,10 @@ type entity struct {
 	HeadYaw float32
 	Name    string
 	Look    entityLook
+	// UUID ties a player to the skin the server listed for it.
+	UUID  uuid.UUID
+	Skin  *skinInfo
+	Armor armourSlots
 }
 
 // playerEyeHeight is how far above the feet a MovePlayer position sits. The
@@ -100,7 +105,10 @@ type Hub struct {
 	entPNG   []byte
 	entDoc   []byte
 	itemName map[int32]string // item network id -> name without namespace
-	types    []string         // entity type names; the index is the wire type id
+	skins    map[uuid.UUID]*skinInfo
+	ownSkin  *skinInfo
+	ownArmor armourSlots
+	types    []string // entity type names; the index is the wire type id
 	typeIDs  map[string]uint16
 
 	decodeFailures atomic.Uint64
@@ -138,6 +146,7 @@ func New(o Options) *Hub {
 		subs:       map[[3]int32][]byte{},
 		ents:       map[uint64]*entity{},
 		uniqueID:   map[int64]uint64{},
+		skins:      map[uuid.UUID]*skinInfo{},
 		viewers:    map[*Viewer]struct{}{},
 		typeIDs:    map[string]uint16{},
 	}
@@ -192,6 +201,8 @@ func (h *Hub) resetLocked() {
 	h.subs = map[[3]int32][]byte{}
 	h.ents = map[uint64]*entity{}
 	h.uniqueID = map[int64]uint64{}
+	h.skins = map[uuid.UUID]*skinInfo{}
+	h.ownArmor = armourSlots{}
 	for v := range h.viewers {
 		v.restart()
 	}
@@ -243,6 +254,24 @@ func (h *Hub) Attach() (*Viewer, error) {
 	}
 	if len(names) > 0 {
 		v.head = append(v.head, encodeNames(names))
+	}
+	worn := map[uint64]armourSlots{}
+	for _, e := range h.ents {
+		if e.Skin != nil {
+			v.head = append(v.head, encodeSkin(e.ID, *e.Skin))
+		}
+		if !e.Armor.zero() {
+			worn[e.ID] = e.Armor
+		}
+	}
+	if h.ownSkin != nil {
+		v.head = append(v.head, encodeSkin(0, *h.ownSkin))
+	}
+	if !h.ownArmor.zero() {
+		worn[0] = h.ownArmor
+	}
+	if len(worn) > 0 {
+		v.head = append(v.head, encodeArmour(worn))
 	}
 	// Read under the hub lock so a later publishSelf cannot be overwritten by
 	// this older pose.
@@ -317,9 +346,27 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 	case *packet.AddPlayer:
 		h.mu.Lock()
 		h.uniqueID[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
-		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "player", Name: p.Username,
+		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "player", Name: p.Username, UUID: p.UUID, Skin: h.skins[p.UUID],
 			X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw})
 		h.mu.Unlock()
+	case *packet.PlayerList:
+		for _, e := range p.Entries {
+			if e.ActionType == protocol.PlayerListActionAdd {
+				h.setSkin(e.UUID, e.Skin)
+			}
+		}
+	case *packet.PlayerSkin:
+		h.setSkin(p.UUID, p.Skin)
+	case *packet.MobArmourEquipment:
+		h.setArmour(p.EntityRuntimeID, p.Helmet, p.Chestplate, p.Leggings, p.Boots)
+	case *packet.InventoryContent:
+		if p.WindowID == protocol.WindowIDArmour {
+			h.setOwnArmour(p.Content)
+		}
+	case *packet.InventorySlot:
+		if p.WindowID == protocol.WindowIDArmour {
+			h.setOwnArmourSlot(int(p.Slot), p.NewItem)
+		}
 	case *packet.SetActorData:
 		h.setLook(p.EntityRuntimeID, p.EntityMetadata)
 	case *packet.MovePlayer:
@@ -491,6 +538,9 @@ func (h *Hub) setEntityLocked(e *entity) {
 	}
 	if !e.Look.zero() {
 		h.pushOrderedLocked(encodeEntityData(map[uint64]entityLook{e.ID: e.Look}))
+	}
+	if e.Skin != nil {
+		h.pushOrderedLocked(encodeSkin(e.ID, *e.Skin))
 	}
 	h.pushEntityLocked(e)
 }
