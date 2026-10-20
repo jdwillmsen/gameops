@@ -8,8 +8,9 @@ Console and control plane for Crew worker units.
 
 ## What it is
 
-A view-only web console for the Crew units. It reverse-proxies an allow-list of
-each unit's camera routes and exposes nothing else of the units. A static Go
+A web console for the Crew units. Anyone can watch: it reverse-proxies an
+allow-list of each unit's camera routes and exposes nothing else of the units.
+Operators who sign in with a passkey can queue work that the units pull. A static Go
 binary on distroless, running as nonroot, linux/amd64.
 
 ## Pull
@@ -28,7 +29,9 @@ There is no `latest`; deployments pin a version. Tags are `<version>` and
 
 - `CREW_UNITS` is required: a JSON list of `{"id","name","url"}` units.
 - `LISTEN_ADDR` defaults to `0.0.0.0:8080`; `LOG_LEVEL` sets verbosity.
-- The service holds no state and needs no volume.
+- Sign-in, the work queue (Postgres) and the unit token are optional; see the
+  source README for their variables. Sign-in keeps its keys on a volume at
+  `DATA_DIR` (default `/data`).
 
 Source and docs: <https://github.com/jdwillmsen/gameops/tree/main/minecraft/crew-control#readme>
 License: [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/)
