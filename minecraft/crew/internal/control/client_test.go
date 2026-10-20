@@ -43,14 +43,16 @@ type fakeControl struct {
 	srv  *httptest.Server
 	work chan string
 
-	mu        sync.Mutex
-	events    []event
-	polls     int
-	workCode  int // when non-zero, the work endpoint answers this instead
-	eventFail int // how many event posts to refuse before accepting
-	badAuth   bool
-	rejectID  string // events about this id get a 400
-	conns     int    // connections the server accepted
+	mu           sync.Mutex
+	events       []event
+	polls        int
+	commandPolls int
+	workCode     int // when non-zero, the work endpoint answers this instead
+	eventFail    int // how many event posts to refuse before accepting
+	badAuth      bool
+	rejectID     string // events about this id get a 400
+	conns        int    // connections the server accepted
+	releaseFirst chan struct{}
 }
 
 func newFakeControl(t *testing.T) *fakeControl {
@@ -58,21 +60,61 @@ func newFakeControl(t *testing.T) *fakeControl {
 	f := &fakeControl{work: make(chan string, 32)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/units/"+unit+"/work", func(w http.ResponseWriter, r *http.Request) {
+		kinds := r.URL.Query().Get("kinds")
 		f.mu.Lock()
 		f.polls++
+		if kinds == "command" {
+			f.commandPolls++
+		}
 		code := f.workCode
-		if r.Header.Get("Authorization") != "Bearer "+token || r.URL.Query().Get("wait") != "25s" {
+		wait := pollWait
+		if kinds == "command" {
+			wait = commandPollWait
+		}
+		if r.Header.Get("Authorization") != "Bearer "+token || r.URL.Query().Get("wait") != wait || (kinds != "" && kinds != "command") {
 			f.badAuth = true
 		}
+		releaseFirst := f.releaseFirst
 		f.mu.Unlock()
 		if code != 0 {
 			w.WriteHeader(code)
 			return
 		}
-		select {
-		case item := <-f.work:
+		var item string
+		found := false
+		if kinds == "command" {
+			for i, n := 0, len(f.work); i < n; i++ {
+				candidate := <-f.work
+				var parsed struct {
+					Kind string `json:"kind"`
+				}
+				_ = json.Unmarshal([]byte(candidate), &parsed)
+				if parsed.Kind == "command" {
+					item, found = candidate, true
+					break
+				}
+				f.work <- candidate
+			}
+		} else {
+			select {
+			case item = <-f.work:
+				found = true
+			default:
+			}
+		}
+		if found {
+			if releaseFirst != nil {
+				select {
+				case <-releaseFirst:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(item))
+			return
+		}
+		select {
 		case <-time.After(10 * time.Millisecond):
 			w.WriteHeader(http.StatusNoContent)
 		case <-r.Context().Done():
@@ -441,7 +483,7 @@ func TestClientWaitsForRunnerCapacity(t *testing.T) {
 	waitUntil(t, "client to pause polling at capacity", func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.polls == task.MaxQueued && len(f.work) == 4
+		return f.commandPolls > 0 && len(f.work) == 4
 	})
 
 	for i := 0; i < 20; i++ {
@@ -485,6 +527,7 @@ func TestClientWaitsForRunnerCapacity(t *testing.T) {
 
 func TestDeliveredTaskWaitsForCapacityAfterLocalSubmit(t *testing.T) {
 	f := newFakeControl(t)
+	f.releaseFirst = make(chan struct{})
 	r := &stubRunner{}
 	r.Observe(func(task.Task) {})
 	for i := 0; i < task.MaxQueued-1; i++ {
@@ -492,6 +535,7 @@ func TestDeliveredTaskWaitsForCapacityAfterLocalSubmit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	f.work <- taskItem("00000001-0000", gotoBody)
 	h := start(t, r, f)
 	waitUntil(t, "control poll to block", func() bool {
 		f.mu.Lock()
@@ -501,13 +545,14 @@ func TestDeliveredTaskWaitsForCapacityAfterLocalSubmit(t *testing.T) {
 	if _, err := r.SubmitAs("local-last", task.Template{}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 1; i <= 20; i++ {
+	for i := 2; i <= 20; i++ {
 		f.work <- taskItem(fmt.Sprintf("%08x-0000", i), gotoBody)
 	}
+	close(f.releaseFirst)
 	waitUntil(t, "delivered item to enter local holding", func() bool {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		return f.polls == 1 && len(f.work) == 19
+		return f.commandPolls > 0 && len(f.work) == 19
 	})
 
 	advance := func() {
@@ -551,6 +596,47 @@ func TestDeliveredTaskWaitsForCapacityAfterLocalSubmit(t *testing.T) {
 	}
 	if h.log.count("control_connected") != 1 {
 		t.Fatalf("control connection log count = %d", h.log.count("control_connected"))
+	}
+}
+
+func TestStopArrivesWhileRunnerIsFullAndTaskIsHeld(t *testing.T) {
+	f := newFakeControl(t)
+	f.releaseFirst = make(chan struct{})
+	r := &stubRunner{}
+	r.Observe(func(task.Task) {})
+	for i := 0; i < task.MaxQueued; i++ {
+		if _, err := r.SubmitAs(fmt.Sprintf("local-%02d", i), task.Template{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.set("local-00", task.Running, 0, "")
+	f.work <- taskItem(taskA, gotoBody)
+	h := start(t, r, f)
+	waitUntil(t, "initial full poll", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.polls == 1
+	})
+	if _, err := r.SubmitAs("local-last", task.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	f.work <- stopItem(commandID)
+	close(f.releaseFirst)
+	waitUntil(t, "stop to arrive over command-only polling", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.commandPolls == 1 && has(f.events, commandID, task.Done)
+	})
+	if hasSubmit(r, taskA) {
+		t.Fatal("held task was submitted after the stop")
+	}
+	for _, item := range r.List() {
+		if item.State != task.Cancelled {
+			t.Errorf("runner task %s remained %s after stop", item.ID, item.State)
+		}
+	}
+	if h.log.count("control_connected") != 1 {
+		t.Errorf("control connection log count = %d", h.log.count("control_connected"))
 	}
 }
 

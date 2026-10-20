@@ -39,7 +39,7 @@ func (m *Memory) Enqueue(_ context.Context, unit, kind string, body json.RawMess
 	return it.Item, nil
 }
 
-func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool, time.Duration, error) {
+func (m *Memory) Next(_ context.Context, unit, kinds string, now time.Time) (Item, bool, time.Duration, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var (
@@ -48,6 +48,9 @@ func (m *Memory) Next(_ context.Context, unit string, now time.Time) (Item, bool
 	)
 	for _, it := range m.items {
 		if it.Unit != unit {
+			continue
+		}
+		if kinds == "command" && it.Kind != KindCommand {
 			continue
 		}
 		switch it.State {

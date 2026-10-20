@@ -251,7 +251,7 @@ func TestStopCancelsOpenWorkThenQueuesStop(t *testing.T) {
 	a := must(t, o.store, "crew-01", KindTask, tpl)
 	b := must(t, o.store, "crew-01", KindTask, tpl)
 	other := must(t, o.store, "crew-02", KindTask, tpl)
-	if _, ok, _, _ := o.store.Next(context.Background(), "crew-01", o.store.now()); !ok {
+	if _, ok, _, _ := o.store.Next(context.Background(), "crew-01", "", o.store.now()); !ok {
 		t.Fatal("setup")
 	}
 	code, resp := o.post(t, "/v1/work/crew-01/stop", "", nil)
@@ -294,7 +294,7 @@ func TestCancelItem(t *testing.T) {
 	// A delivered item is the unit's: the only lever is stopping the unit.
 	first := must(t, o.store, "crew-01", KindTask, tpl)
 	second := must(t, o.store, "crew-01", KindTask, tpl)
-	if _, ok, _, _ := o.store.Next(context.Background(), "crew-01", o.store.now()); !ok {
+	if _, ok, _, _ := o.store.Next(context.Background(), "crew-01", "", o.store.now()); !ok {
 		t.Fatal("setup")
 	}
 	code, resp = o.post(t, "/v1/work/crew-01/items/"+first.ID.String()+"/cancel", "", nil)
@@ -398,7 +398,7 @@ func TestStoreDownIs503(t *testing.T) {
 type raceStore struct{ *Memory }
 
 func (r raceStore) CancelQueued(c context.Context, unit string, id uuid.UUID) (Item, bool, error) {
-	if _, ok, _, _ := r.Memory.Next(c, unit, time.Now()); !ok {
+	if _, ok, _, _ := r.Memory.Next(c, unit, "", time.Now()); !ok {
 		panic("race setup: nothing to deliver")
 	}
 	return r.Memory.CancelQueued(c, unit, id)
@@ -435,7 +435,7 @@ func (s finishBeforeStop) StopUnit(ctx context.Context, unit, operator string, o
 func TestCancelReportsItemThatFinishedBeforeUnitStop(t *testing.T) {
 	m := NewMemory()
 	first := must(t, m, "crew-01", KindTask, tpl)
-	_, ok, _, err := m.Next(context.Background(), "crew-01", time.Now())
+	_, ok, _, err := m.Next(context.Background(), "crew-01", "", time.Now())
 	if err != nil || !ok {
 		t.Fatal("setup: item was not delivered")
 	}

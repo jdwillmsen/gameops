@@ -62,7 +62,7 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 			c1 := must(t, s, "crew-01", KindCommand, stop)
 			now := time.Now()
 			for i, want := range []uuid.UUID{c1.ID, t1.ID, t2.ID} {
-				it, ok, _, err := s.Next(ctx, "crew-01", now)
+				it, ok, _, err := s.Next(ctx, "crew-01", "", now)
 				if err != nil || !ok || it.ID != want {
 					t.Fatalf("pull %d: got %v ok=%v err=%v, want %v", i, it.ID, ok, err, want)
 				}
@@ -70,8 +70,22 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 					t.Fatalf("state %q, want delivered", it.State)
 				}
 			}
-			if _, ok, _, _ := s.Next(ctx, "crew-01", now); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", "", now); ok {
 				t.Fatal("queue should be drained")
+			}
+		},
+		"command-only poll skips queued tasks": func(t *testing.T, s Store) {
+			task := must(t, s, "crew-01", KindTask, tpl)
+			command := must(t, s, "crew-01", KindCommand, stop)
+			got, ok, _, err := s.Next(ctx, "crew-01", "command", time.Now())
+			if err != nil || !ok || got.ID != command.ID || got.Kind != KindCommand {
+				t.Fatalf("command-only poll: %+v ok=%v err=%v", got, ok, err)
+			}
+			if _, ok, _, err := s.Next(ctx, "crew-01", "command", time.Now()); err != nil || ok {
+				t.Fatalf("command-only poll returned task %s: ok=%v err=%v", task.ID, ok, err)
+			}
+			if got, ok, _, err := s.Next(ctx, "crew-01", "", time.Now()); err != nil || !ok || got.ID != task.ID {
+				t.Fatalf("unfiltered poll did not retain task: %+v ok=%v err=%v", got, ok, err)
 			}
 		},
 		"CancelQueued cancels only while queued": func(t *testing.T, s Store) {
@@ -81,7 +95,7 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatalf("queued: %+v ok=%v err=%v", got, ok, err)
 			}
 			b := must(t, s, "crew-01", KindTask, tpl)
-			if it, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); !ok || it.ID != b.ID {
+			if it, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || it.ID != b.ID {
 				t.Fatalf("a cancelled item must not be handed out, got %v", it.ID)
 			}
 			got, ok, err = s.CancelQueued(ctx, "crew-01", b.ID)
@@ -97,17 +111,17 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 		},
 		"units do not see each other's work": func(t *testing.T, s Store) {
 			must(t, s, "crew-02", KindTask, tpl)
-			if _, ok, _, _ := s.Next(ctx, "crew-03", time.Now()); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-03", "", time.Now()); ok {
 				t.Fatal("crew-03 received crew-02 work")
 			}
 		},
 		"redelivery after 30 seconds": func(t *testing.T, s Store) {
 			it := must(t, s, "crew-01", KindTask, tpl)
-			if _, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); !ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok {
 				t.Fatal("first delivery missing")
 			}
 			now := age(t, s, it.ID, 20*time.Second)
-			_, ok, due, _ := s.Next(ctx, "crew-01", now)
+			_, ok, due, _ := s.Next(ctx, "crew-01", "", now)
 			if ok {
 				t.Fatal("redelivered too early")
 			}
@@ -115,36 +129,36 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatalf("redeliverIn %v, want about 10s", due)
 			}
 			now = age(t, s, it.ID, 31*time.Second)
-			got, ok, _, err := s.Next(ctx, "crew-01", now)
+			got, ok, _, err := s.Next(ctx, "crew-01", "", now)
 			if err != nil || !ok || got.ID != it.ID {
 				t.Fatalf("no redelivery: %v %v %v", got.ID, ok, err)
 			}
 		},
 		"running items are re-handed only after a silence": func(t *testing.T, s Store) {
 			it := must(t, s, "crew-01", KindTask, tpl)
-			s.Next(ctx, "crew-01", time.Now())
+			s.Next(ctx, "crew-01", "", time.Now())
 			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, _, _ := s.Next(ctx, "crew-01", age(t, s, it.ID, 20*time.Second)); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", "", age(t, s, it.ID, 20*time.Second)); ok {
 				t.Fatal("running item came back while its unit was reporting")
 			}
 			// A heartbeat from a live unit restarts the silence.
 			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, _, _ := s.Next(ctx, "crew-01", age(t, s, it.ID, 20*time.Second)); ok {
+			if _, ok, _, _ := s.Next(ctx, "crew-01", "", age(t, s, it.ID, 20*time.Second)); ok {
 				t.Fatal("heartbeat did not keep the item")
 			}
 		},
 		"running item whose unit restarted is handed out again": func(t *testing.T, s Store) {
 			it := must(t, s, "crew-01", KindTask, tpl)
-			s.Next(ctx, "crew-01", time.Now())
+			s.Next(ctx, "crew-01", "", time.Now())
 			if _, err := s.Apply(ctx, "crew-01", it.ID, Running, 40, ""); err != nil {
 				t.Fatal(err)
 			}
 			now := age(t, s, it.ID, 31*time.Second)
-			got, ok, _, err := s.Next(ctx, "crew-01", now)
+			got, ok, _, err := s.Next(ctx, "crew-01", "", now)
 			if err != nil || !ok || got.ID != it.ID || got.State != Delivered {
 				t.Fatalf("restarted unit got %+v %v %v", got, ok, err)
 			}
@@ -204,7 +218,7 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 			if len(recent) != 1 || recent[0].ID != other.ID || recent[0].State != Queued {
 				t.Fatalf("other unit touched: %+v", recent)
 			}
-			if got, ok, _, _ := s.Next(ctx, "crew-01", time.Now()); !ok || got.ID != command.ID {
+			if got, ok, _, _ := s.Next(ctx, "crew-01", "", time.Now()); !ok || got.ID != command.ID {
 				t.Fatalf("stop command missing or not prioritized: %+v", got)
 			}
 		},

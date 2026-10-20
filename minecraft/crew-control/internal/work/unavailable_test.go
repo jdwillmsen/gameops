@@ -23,7 +23,7 @@ func deadPostgres(t *testing.T) *Postgres {
 
 func TestPostgresDownIsUnavailableNotAnError(t *testing.T) {
 	p := deadPostgres(t)
-	if _, _, _, err := p.Next(ctx, "crew-01", time.Time{}); !errors.Is(err, ErrUnavailable) {
+	if _, _, _, err := p.Next(ctx, "crew-01", "", time.Time{}); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("Next: %v", err)
 	}
 	if _, err := p.Apply(ctx, "crew-01", uuid.New(), Running, 0, ""); !errors.Is(err, ErrUnavailable) {

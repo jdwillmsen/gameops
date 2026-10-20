@@ -104,6 +104,17 @@ func parseWait(s string) time.Duration {
 	return max(minWait, min(d, maxWait))
 }
 
+func pollKinds(r *http.Request) (string, bool) {
+	values, ok := r.URL.Query()["kinds"]
+	if !ok {
+		return "", true
+	}
+	if len(values) != 1 || values[0] != "command" {
+		return "", false
+	}
+	return "command", true
+}
+
 type wireItem struct {
 	ID       string          `json:"id"`
 	Kind     string          `json:"kind"`
@@ -112,11 +123,16 @@ type wireItem struct {
 }
 
 func (a *API) poll(w http.ResponseWriter, r *http.Request, unit string) {
+	kinds, ok := pollKinds(r)
+	if !ok {
+		http.Error(w, "bad kinds", http.StatusBadRequest)
+		return
+	}
 	timer := time.NewTimer(parseWait(r.URL.Query().Get("wait")))
 	defer timer.Stop()
 	for {
 		woken := a.waiter(unit)
-		it, ok, due, err := a.store.Next(r.Context(), unit, a.now())
+		it, ok, due, err := a.store.Next(r.Context(), unit, kinds, a.now())
 		if err != nil {
 			storeError(w, r, err)
 			return
