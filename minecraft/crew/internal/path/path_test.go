@@ -156,3 +156,40 @@ func TestWaterIsNotPassable(t *testing.T) {
 		t.Fatal("water cell is standable")
 	}
 }
+
+func TestPlannedPathsAvoidWaterEvenThoughTheBodyMovesThroughIt(t *testing.T) {
+	w := flat(6)
+	for z := int32(0); z < 6; z++ {
+		w[protocol.BlockPos{3, 0, z}] = "water"
+		w[protocol.BlockPos{3, 1, z}] = "water"
+	}
+	if _, err := Find(w, protocol.BlockPos{0, 1, 0}, protocol.BlockPos{5, 1, 0}, 0); !errors.Is(err, ErrNoPath) {
+		t.Fatalf("err = %v, want the stream to block the planner", err)
+	}
+	s := NewSolid(w)
+	for _, y := range []int32{0, 1} {
+		c := protocol.BlockPos{3, y, 2}
+		if s.Solid(c) || !s.Liquid(c) {
+			t.Errorf("water at y=%d: solid %v liquid %v, want a liquid the body passes through", y, s.Solid(c), s.Liquid(c))
+		}
+	}
+	if !s.Solid(protocol.BlockPos{1, 0, 1}) || s.Liquid(protocol.BlockPos{1, 0, 1}) {
+		t.Error("stone must stay solid and dry")
+	}
+}
+
+func TestOnlyWaterIsLiquidToTheBody(t *testing.T) {
+	w := flat(2)
+	w[protocol.BlockPos{1, 1, 1}] = "lava"
+	w[protocol.BlockPos{0, 1, 1}] = "flowing_water"
+	s := NewSolid(w)
+	if !s.Solid(protocol.BlockPos{1, 1, 1}) || s.Liquid(protocol.BlockPos{1, 1, 1}) {
+		t.Error("lava must stay solid to the body")
+	}
+	if s.Solid(protocol.BlockPos{0, 1, 1}) || !s.Liquid(protocol.BlockPos{0, 1, 1}) {
+		t.Error("flowing water must be liquid")
+	}
+	if !s.Solid(protocol.BlockPos{9, 9, 9}) || s.Liquid(protocol.BlockPos{9, 9, 9}) {
+		t.Error("an unknown block must stay solid")
+	}
+}
