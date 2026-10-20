@@ -154,6 +154,49 @@ type pass struct {
 	// err is a problem that stops the pass but keeps what it already did
 	// (a queue that is down after some steps were queued).
 	err error
+
+	status []ledger.UnitStatus
+	loaded bool
+}
+
+// units reads the unit statuses once per pass; assign bumps the copy as it
+// queues so later steps see the load.
+func (p *pass) units() ([]ledger.UnitStatus, error) {
+	if !p.loaded {
+		st, err := p.s.cfg.Units(p.ctx)
+		if err != nil {
+			return nil, err
+		}
+		p.status, p.loaded = st, true
+	}
+	return p.status, nil
+}
+
+// release takes back work still queued on a unit that has gone away so the
+// step can go to another one. It is not a failed attempt. If the unit took
+// the item in the meantime, nothing moves.
+func (p *pass) release(st *Step, it work.Item) (bool, error) {
+	if st.Unit != "" {
+		return false, nil
+	}
+	units, err := p.units()
+	if err != nil {
+		return false, err
+	}
+	for _, u := range units {
+		if u.ID != it.Unit || (u.Online && !u.Dead) {
+			continue
+		}
+		_, cancelled, err := p.s.cfg.Work.CancelQueued(p.ctx, it.Unit, it.ID)
+		if err != nil || !cancelled {
+			return false, err
+		}
+		// WorkID stays so the next pick steers away from this unit.
+		st.State, st.Attempts, p.changed = StepWaiting, st.Attempts-1, true
+		p.s.info("job_step_released", p.j.ID, st.Key)
+		return true, nil
+	}
+	return false, nil
 }
 
 func (p *pass) step(key string) *Step {
@@ -189,7 +232,16 @@ func (p *pass) run() error {
 			it.State, it.Reason = work.Failed, "work cancelled"
 		}
 		switch it.State {
-		case work.Queued, work.Delivered:
+		case work.Queued:
+			moved, err := p.release(st, it)
+			if err != nil {
+				p.err = err
+				return nil
+			}
+			if !moved {
+				p.set(st, StepQueued)
+			}
+		case work.Delivered:
 			p.set(st, StepQueued)
 		case work.Running:
 			p.set(st, StepRunning)
@@ -292,10 +344,6 @@ func (p *pass) done() {
 
 // assign queues each waiting step whose dependencies are done.
 func (p *pass) assign() error {
-	var (
-		units  []ledger.UnitStatus
-		loaded bool
-	)
 	for i := range p.j.Steps {
 		st := &p.j.Steps[i]
 		if st.State != StepWaiting || !p.ready(st) {
@@ -303,13 +351,10 @@ func (p *pass) assign() error {
 		}
 		unit := st.Unit
 		if unit == "" {
-			if !loaded {
-				var err error
-				if units, err = p.s.cfg.Units(p.ctx); err != nil {
-					p.err = err
-					return nil
-				}
-				loaded = true
+			units, err := p.units()
+			if err != nil {
+				p.err = err
+				return nil
 			}
 			unit = p.pick(units, st)
 			if unit == "" {
@@ -328,9 +373,9 @@ func (p *pass) assign() error {
 		st.State, st.WorkID, st.Reason = StepQueued, &it.ID, ""
 		st.Attempts++
 		p.changed = true
-		for k := range units {
-			if units[k].ID == unit {
-				units[k].Queued++
+		for k := range p.status {
+			if p.status[k].ID == unit {
+				p.status[k].Queued++
 			}
 		}
 		p.s.info("job_step_queued", p.j.ID, st.Key)

@@ -144,7 +144,7 @@ func (p *Postgres) Running(ctx context.Context) ([]uuid.UUID, error) {
 func (p *Postgres) Lock(ctx context.Context, id uuid.UUID, fn func(*Job) error) (bool, error) {
 	ok := false
 	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		j, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM `+jobTable+` WHERE id = $1 FOR UPDATE SKIP LOCKED`, id))
+		j, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM `+jobTable+` WHERE id = $1 FOR NO KEY UPDATE SKIP LOCKED`, id))
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Skipped rows and missing rows look alike; tell them apart.
 			var exists bool

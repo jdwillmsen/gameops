@@ -38,6 +38,13 @@ func (m *Memory) enqueue(unit, kind string, body json.RawMessage, operator strin
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if step != nil {
+		for _, o := range m.items {
+			if o.StepID != nil && *o.StepID == *step && !terminal(o.State) {
+				return o.Item, nil
+			}
+		}
+	}
 	t := m.now()
 	it := &memItem{Item{
 		ID: uuid.New(), Unit: unit, Kind: kind, Body: slices.Clone(body),
