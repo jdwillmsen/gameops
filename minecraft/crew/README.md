@@ -155,7 +155,13 @@ full cube per solid block:
 Door and trapdoor thickness, the snow rule and the ladder rates were measured
 on the lab; the other boxes match the block table (a test checks them against
 every state it knows). A block the unit has not been told about, or one that is
-not in `shape`, is a full cube.
+not in `shape`, is a full cube unless the binary's block table knows it: any
+other block takes its boxes from dragonfly's block models (chests are 0.95
+high, a path 0.9375, an enchanting table 0.75, plants and signs have none),
+except liquids and blocks that hurt, and a block whose model needs its
+neighbours stays a cube. Where the table is wrong, `shape` has the height the
+lab measured (soul sand and mud 0.875, a daylight detector 0.375, a trapped
+chest 0.95, the floors of a cauldron, composter and hopper).
 
 A grounded unit that is blocked retries from 0.6 higher and keeps that if it
 carries it further, which is how it steps onto a slab, a stair or a carpet
