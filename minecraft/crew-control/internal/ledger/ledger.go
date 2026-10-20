@@ -32,6 +32,10 @@ var (
 	ErrSeeded   = errors.New("ledger: place comes from configuration")
 	ErrNotFound = errors.New("ledger: no such place")
 	ErrInvalid  = errors.New("ledger: invalid place")
+	// ErrConflict: another chest already occupies the position.
+	ErrConflict = errors.New("ledger: a chest is already there")
+	// ErrUnavailable: the database cannot be reached right now.
+	ErrUnavailable = errors.New("ledger: store unavailable")
 
 	idRE   = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 	itemRE = regexp.MustCompile(`^[a-z_]{1,32}$`)
@@ -74,12 +78,19 @@ type Ledger interface {
 	// DeletePlace removes an unseeded place and its stock.
 	DeletePlace(ctx context.Context, id string) error
 	// Seed upserts ps as seeded and removes seeded places not in ps. It
-	// never touches unseeded places.
+	// never removes unseeded places, but an unseeded chest at a seeded
+	// chest's position is folded into it: its stock moves over if newer,
+	// then it is deleted, so one position never holds two chests.
 	Seed(ctx context.Context, ps []Place) error
 	// Observe replaces the stock of the chest at the position with items,
 	// which is the chest's whole contents, creating an unseeded place if no
 	// chest is known there. An observation older than the stock already held
-	// is ignored: events can arrive out of order.
+	// is ignored: events can arrive out of order. A time in the future is
+	// taken as now, so one bad clock cannot outrank every later report.
+	//
+	// The guard reads the stored rows' times, so a chest observed empty
+	// (which has no rows to carry a time) cannot reject an older report that
+	// arrives later. The schema has no place-level last-seen to hold it.
 	Observe(ctx context.Context, unit string, at time.Time, chest Pos, items map[string]int) error
 	Stock(ctx context.Context, placeID string) ([]Stock, error)
 	ChestAt(ctx context.Context, p Pos) (Place, bool, error)
@@ -160,4 +171,19 @@ func cleanObservation(items map[string]int) map[string]int {
 		}
 	}
 	return out
+}
+
+// positionsFree rejects two chests at one position within a single list.
+func positionsFree(ps []Place) error {
+	at := map[Pos]string{}
+	for _, p := range ps {
+		if p.Kind != KindChest {
+			continue
+		}
+		if other, dup := at[p.Box.Min]; dup {
+			return fmt.Errorf("%w: %s and %s", ErrConflict, other, p.ID)
+		}
+		at[p.Box.Min] = p.ID
+	}
+	return nil
 }

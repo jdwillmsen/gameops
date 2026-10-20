@@ -7,12 +7,14 @@ import (
 	"strings"
 )
 
-// ParseSeed reads the CREW_PLACES value. Unset or blank seeds nothing.
+// ParseSeed reads the CREW_PLACES value. Unset or blank returns nil, which
+// means "do not seed"; an explicit empty list returns a non-nil empty slice,
+// which seeds the empty set and so clears earlier seeded places.
 func ParseSeed(raw string) ([]Place, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
 	}
-	var ps []Place
+	ps := []Place{}
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&ps); err != nil {
@@ -35,6 +37,9 @@ func checkSeed(ps []Place) ([]Place, error) {
 			return nil, fmt.Errorf("CREW_PLACES: duplicate id %q", ps[i].ID)
 		}
 		seen[ps[i].ID] = true
+	}
+	if err := positionsFree(ps); err != nil {
+		return nil, fmt.Errorf("CREW_PLACES: %w", err)
 	}
 	return ps, nil
 }

@@ -56,7 +56,8 @@ func ids(ps []Place) []string {
 }
 
 func suite(t *testing.T, mk func(*testing.T) Ledger) {
-	t0 := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	// Observations are clamped to now, so the base time must be in the past.
+	t0 := time.Now().Add(-time.Hour).Truncate(time.Second)
 	cases := map[string]func(*testing.T, Ledger){
 		"seed upserts and drops seeded rows no longer listed": func(t *testing.T, l Ledger) {
 			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2), area("forest", Pos{0, 64, 0}, Pos{9, 70, 9}, "oak_log")}))
@@ -208,6 +209,60 @@ func suite(t *testing.T, mk func(*testing.T) Ledger) {
 				t.Errorf("out of world: %v", err)
 			}
 		},
+		"an empty seed clears seeded places and keeps unseeded ones": func(t *testing.T, l Ledger) {
+			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
+			must(t, l.PutPlace(ctx, chest("mine", 5, 64, 5)))
+			must(t, l.Seed(ctx, []Place{}))
+			got, _ := l.Places(ctx)
+			if g := ids(got); len(g) != 1 || g[0] != "mine" {
+				t.Fatalf("places %v, want [mine]", g)
+			}
+		},
+		"a seed folds an unnamed chest at its position into the seeded one": func(t *testing.T, l Ledger) {
+			must(t, l.Observe(ctx, "crew-01", t0, Pos{1, 64, 2}, map[string]int{"coal": 5}))
+			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
+			got, _ := l.Places(ctx)
+			if g := ids(got); len(g) != 1 || g[0] != "home-chest" {
+				t.Fatalf("places %v, want [home-chest]", g)
+			}
+			st, _ := l.Stock(ctx, "home-chest")
+			if len(st) != 1 || st[0].Item != "coal" || st[0].Count != 5 {
+				t.Errorf("stock %+v", st)
+			}
+			at, ok, _ := l.ChestAt(ctx, Pos{1, 64, 2})
+			if !ok || at.ID != "home-chest" {
+				t.Errorf("ChestAt %+v", at)
+			}
+		},
+		"a seed keeps its own stock when it is newer than the unnamed chest's": func(t *testing.T, l Ledger) {
+			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
+			must(t, l.Observe(ctx, "crew-01", t0.Add(time.Hour), Pos{1, 64, 2}, map[string]int{"coal": 9}))
+			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
+			st, _ := l.Stock(ctx, "home-chest")
+			if len(st) != 1 || st[0].Count != 9 {
+				t.Errorf("stock %+v", st)
+			}
+		},
+		"two chests never share a position": func(t *testing.T, l Ledger) {
+			must(t, l.PutPlace(ctx, chest("mine", 5, 64, 5)))
+			if err := l.PutPlace(ctx, chest("other", 5, 64, 5)); !errors.Is(err, ErrConflict) {
+				t.Errorf("put: %v", err)
+			}
+			must(t, l.PutPlace(ctx, chest("mine", 5, 64, 5)))
+			if err := l.Seed(ctx, []Place{chest("a-one", 7, 64, 7), chest("b-two", 7, 64, 7)}); !errors.Is(err, ErrConflict) {
+				t.Errorf("seed: %v", err)
+			}
+		},
+		"a future observation is taken as now": func(t *testing.T, l Ledger) {
+			must(t, l.Seed(ctx, []Place{chest("home-chest", 1, 64, 2)}))
+			must(t, l.Observe(ctx, "crew-01", time.Now().Add(time.Hour), Pos{1, 64, 2}, map[string]int{"coal": 9}))
+			time.Sleep(5 * time.Millisecond)
+			must(t, l.Observe(ctx, "crew-02", time.Now(), Pos{1, 64, 2}, map[string]int{"coal": 1}))
+			st, _ := l.Stock(ctx, "home-chest")
+			if len(st) != 1 || st[0].Count != 1 || st[0].Unit != "crew-02" || st[0].SeenAt.After(time.Now()) {
+				t.Errorf("stock %+v", st)
+			}
+		},
 		"stock of an unknown place is empty": func(t *testing.T, l Ledger) {
 			st, err := l.Stock(ctx, "nowhere")
 			if err != nil || len(st) != 0 {
@@ -231,8 +286,14 @@ func TestParseSeed(t *testing.T) {
 	if ps, err := ParseSeed(""); err != nil || len(ps) != 0 {
 		t.Errorf("empty: %v %v", ps, err)
 	}
-	if ps, err := ParseSeed("  \n"); err != nil || len(ps) != 0 {
-		t.Errorf("blank: %v %v", ps, err)
+	if ps, err := ParseSeed(""); ps != nil || err != nil {
+		t.Errorf("unset must be nil, got %v %v", ps, err)
+	}
+	if ps, err := ParseSeed("  \n"); ps != nil || err != nil {
+		t.Errorf("blank must be nil: %v %v", ps, err)
+	}
+	if ps, err := ParseSeed("[]"); ps == nil || err != nil || len(ps) != 0 {
+		t.Errorf("[] must be a non-nil empty list: %#v %v", ps, err)
 	}
 	raw := `[{"id":"home-chest","name":"Home","kind":"chest","box":{"min":{"x":1,"y":64,"z":2},"max":{"x":1,"y":64,"z":2}}},
 	  {"id":"forest","name":"Forest","kind":"area","box":{"min":{"x":0,"y":64,"z":0},"max":{"x":9,"y":70,"z":9}},"items":["oak_log"]}]`
@@ -323,3 +384,30 @@ func TestStatuses(t *testing.T) {
 		t.Errorf("crew-03 %+v", c)
 	}
 }
+
+func TestPostgresDownIsUnavailable(t *testing.T) {
+	pool, err := pgxpool.New(ctx, "postgres://u:p@127.0.0.1:1/db?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	l := NewPostgres(pool)
+	calls := map[string]error{
+		"Places":      second(l.Places(ctx)),
+		"Place":       third(l.Place(ctx, "home-chest")),
+		"ChestAt":     third(l.ChestAt(ctx, Pos{})),
+		"Stock":       second(l.Stock(ctx, "home-chest")),
+		"PutPlace":    l.PutPlace(ctx, chest("mine", 5, 64, 5)),
+		"DeletePlace": l.DeletePlace(ctx, "mine"),
+		"Seed":        l.Seed(ctx, []Place{chest("mine", 5, 64, 5)}),
+		"Observe":     l.Observe(ctx, "crew-01", time.Now(), Pos{1, 64, 2}, map[string]int{"coal": 1}),
+	}
+	for name, err := range calls {
+		if !errors.Is(err, ErrUnavailable) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+func second[T any](_ T, err error) error        { return err }
+func third[T, U any](_ T, _ U, err error) error { return err }

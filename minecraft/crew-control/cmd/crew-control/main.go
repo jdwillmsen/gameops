@@ -213,7 +213,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 			wait = min(wait*2, maxRetryWait)
 		}
 	}
-	if len(places) > 0 {
+	if places != nil {
 		seedCtx, cancel := context.WithTimeout(ctx, connectTimeout)
 		err := led.Seed(seedCtx, places)
 		cancel()
@@ -260,9 +260,10 @@ func observeSeen(world *atomic.Pointer[ledger.Ledger], log *logging.Logger) func
 			log.Warn("stock_observe_failed", logging.Fields{"unit": unit, "error": err.Error()})
 			return
 		}
-		// An unnamed chest's id spells out its coordinates, so it is not logged.
+		// Only a configured place's id is logged: an unnamed chest's id spells
+		// out its coordinates, and an operator-named one is not ours to vouch for.
 		place := "unnamed"
-		if p, ok, err := (*l).ChestAt(ctx, pos); err == nil && ok && !strings.HasPrefix(p.ID, "chest-") {
+		if p, ok, err := (*l).ChestAt(ctx, pos); err == nil && ok && p.Seeded {
 			place = p.ID
 		}
 		log.Info("stock_observed", logging.Fields{"place": place, "unit": unit})
