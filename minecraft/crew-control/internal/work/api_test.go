@@ -293,3 +293,15 @@ func readBody(t *testing.T, resp *http.Response) string {
 	}
 	return strings.TrimSpace(sb.String())
 }
+
+func TestDeliveryNotifiesOperators(t *testing.T) {
+	r := newRig(t, NewMemory())
+	must(t, r.store, "crew-01", KindTask, tpl)
+	readBody(t, r.do(t, "GET", "/v1/units/crew-01/work?wait=1s", "", nil))
+	if r.notified.Load() != "crew-01" {
+		t.Fatal("a delivery did not notify, so live consoles keep showing the item as queued")
+	}
+	if got, _ := r.store.Recent(ctx, "crew-01", 1); got[0].State != Delivered {
+		t.Fatalf("state %s, want delivered", got[0].State)
+	}
+}

@@ -146,6 +146,7 @@ func (a *API) poll(w http.ResponseWriter, r *http.Request, unit string) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(wi)
+			a.notify(unit)
 			return
 		}
 		// An item delivered earlier may fall due again before the wait ends.
