@@ -14,6 +14,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `MC_VIEW_DISTANCE` | `8` | Chunk radius requested (1 to 32) |
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `TASKS_TOKEN` | unset | Bearer token for the task endpoints; unset leaves them out entirely (404) |
+| `CONTROL_URL`, `CONTROL_TOKEN` | unset | crew-control's base URL and its `WORK_TOKEN`; set both or neither. When set, the unit long-polls crew-control for tasks and stop commands and reports their progress. Unset, it takes tasks only from the Task API |
 | `TASK_TIMEOUT_S` | `900` | Longest a task may run before it fails with `timed out` (30 to 3600) |
 | `IDLE_WANDER` | `true` | A unit with no task looks about and takes short walks. `false` leaves it standing, though it still sends an input every tick |
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
@@ -202,7 +203,7 @@ Off unless `TASKS_TOKEN` is set. Every request needs
 - `GET /v1/tasks` lists queued, running and the last 50 finished tasks.
 - `POST /v1/tasks/{id}/cancel` cancels a queued or running task (404 unknown, 409 already finished).
 
-Two templates exist; any other template, item or field is a 400. Each field
+These templates exist; any other template, item or field is a 400. Each field
 is required unless marked optional.
 
 `gather_and_deposit` mines an item and puts it in one chest:
@@ -261,6 +262,13 @@ submitted. A cell is left closed when lava, water, magma, an unloaded block or
 no floor is next to it: the heading is dropped, logged as `mine_hazard`, and the
 unit carries on with the next. A shaft blocked at its first step fails the
 task. Tunnels are not lit.
+
+`goto` walks the unit to within a block and a half of a cell.
+`to` is bounded to the lab's flat square: x and z -500 to 499, y -64 to 320:
+
+```json
+{"template": "goto", "to": {"x": 0, "y": 0, "z": 0}}
+```
 
 Crew runs one task at a time. A session end or death fails the running task
 (`session ended`, `unit died`) and queued tasks wait for the next spawn.

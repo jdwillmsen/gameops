@@ -1,5 +1,6 @@
-// Command crew-control serves the public, view-only console for the Crew
-// units and proxies an allow-list of each unit's camera routes.
+// Command crew-control serves the public console for the Crew units, proxies
+// an allow-list of each unit's camera routes, and queues the work that
+// signed-in operators give the units.
 package main
 
 import (
