@@ -15,7 +15,10 @@ type fakeReflex struct {
 	fightFrom, fightTo int // engaged for ticks in [from, to)
 	tick               int
 	fights, idles      int
-	cancels, resets    int
+	// Swimming for ticks in [swimFrom, swimTo), whatever else is going on.
+	swimFrom, swimTo int
+	swims            int
+	cancels, resets  int
 	// The reflex tends the unit for ticks in [tendFrom, tendTo) of the ticks
 	// it was not engaged on.
 	tendFrom, tendTo int
@@ -34,6 +37,14 @@ func (f *fakeReflex) note(s string) {
 func (f *fakeReflex) Engaged(act.Pose, belief.Snapshot) bool {
 	f.tick++
 	return f.tick >= f.fightFrom && f.tick < f.fightTo
+}
+func (f *fakeReflex) Swimming(act.Pose) bool {
+	return f.tick >= f.swimFrom && f.tick < f.swimTo
+}
+func (f *fakeReflex) Swim(context.Context, skill.Actuator) error {
+	f.swims++
+	f.note("swim")
+	return nil
 }
 func (f *fakeReflex) Fight(context.Context, skill.Actuator, belief.Snapshot) error {
 	f.fights++
@@ -118,6 +129,33 @@ func TestIdleUnitIsTickedEveryStepAndATaskCancelsTheWalk(t *testing.T) {
 	h.tick(10)
 	if sk.ran == 0 {
 		t.Error("the task never ran")
+	}
+}
+
+func TestSwimmingComesBeforeAFightAndTheTaskResumesAfterwards(t *testing.T) {
+	rf := &fakeReflex{fightFrom: 4, fightTo: 12, swimFrom: 6, swimTo: 9}
+	h, sk, timeline := reflexHarness(t, time.Minute, 6, rf)
+	a, _ := h.r.Submit(tpl())
+	h.tick(30)
+	if got := stateOf(t, h.r, a.ID); got.State != "done" {
+		t.Fatalf("task = %+v, timeline = %v", got, *timeline)
+	}
+	// A skill still running when the swim begins is stopped on that tick, which
+	// carries the stop's input instead of a swim.
+	if rf.swims < 2 || rf.swims > 3 {
+		t.Errorf("swims = %d, want the swimming ticks, even though a fight was on", rf.swims)
+	}
+	if sk.resumes == 0 {
+		t.Errorf("resumes = 0, want the interrupted task picked up again, timeline = %v", *timeline)
+	}
+}
+
+func TestEveryTickAsksTheReflexToAdvanceItsClockEvenWhileSwimming(t *testing.T) {
+	rf := &fakeReflex{swimFrom: 1, swimTo: 100}
+	h, _, _ := reflexHarness(t, time.Minute, 6, rf)
+	h.tick(10)
+	if rf.tick != 10 || rf.swims != 10 {
+		t.Errorf("clock = %d, swims = %d, want 10 of each", rf.tick, rf.swims)
 	}
 }
 
