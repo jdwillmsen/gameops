@@ -104,6 +104,8 @@ type Store interface {
 	Get(ctx context.Context, id uuid.UUID) (Item, error)
 	// Recent returns the unit's newest items first.
 	Recent(ctx context.Context, unit string, n int) ([]Item, error)
+	// Open returns the unit's items that are not finished, newest first.
+	Open(ctx context.Context, unit string) ([]Item, error)
 	Prune(ctx context.Context, before time.Time) (int, error)
 }
 
@@ -279,6 +281,14 @@ func (l *Lazy) Recent(ctx context.Context, unit string, n int) ([]Item, error) {
 		return nil, err
 	}
 	return s.Recent(ctx, unit, n)
+}
+
+func (l *Lazy) Open(ctx context.Context, unit string) ([]Item, error) {
+	s, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return s.Open(ctx, unit)
 }
 
 func (l *Lazy) Prune(ctx context.Context, before time.Time) (int, error) {
