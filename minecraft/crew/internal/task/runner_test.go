@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
@@ -510,6 +512,41 @@ type seeing struct {
 }
 
 func (s *seeing) Seen() (skill.ChestSeen, bool) { return s.view, s.ran > 0 }
+
+// roaming closes a different chest on each step while its progress stays put,
+// as a haul does between its sources.
+type roaming struct {
+	fakeSkill
+	n int
+}
+
+func (s *roaming) Progress() int { return 0 }
+func (s *roaming) Seen() (skill.ChestSeen, bool) {
+	return skill.ChestSeen{Chest: protocol.BlockPos{int32(s.n), 1, 1}, At: time.Unix(int64(s.n), 0)}, s.n > 0
+}
+func (s *roaming) Step(ctx context.Context, a skill.Actuator) (skill.Status, error) {
+	s.n++
+	return s.fakeSkill.Step(ctx, a)
+}
+
+func TestEachChestASkillClosesIsObservedEvenWhenProgressStandsStill(t *testing.T) {
+	h := newHarness(t, time.Minute, 2)
+	sk := &roaming{fakeSkill: fakeSkill{name: "haul", steps: 5, ticks: true}}
+	h.r.newSkills = func(Template) ([]skill.Skill, error) { return []skill.Skill{sk}, nil }
+	var got []Task
+	h.r.Observe(func(t Task) { got = append(got, t) })
+	h.r.Submit(tpl())
+	h.tick(4)
+	chests := map[protocol.BlockPos]bool{}
+	for _, tk := range got {
+		if tk.Seen != nil {
+			chests[tk.Seen.Chest] = true
+		}
+	}
+	if len(chests) < 3 {
+		t.Errorf("observer saw %d distinct chests, want one per step", len(chests))
+	}
+}
 
 func TestTaskCarriesTheLastChestItsSkillClosed(t *testing.T) {
 	h := newHarness(t, time.Minute, 2)

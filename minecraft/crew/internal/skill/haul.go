@@ -71,7 +71,8 @@ func NewHaul(world ChestWorld, self func() belief.Snapshot, sources []protocol.B
 
 func (h *Haul) Name() string { return "haul" }
 
-// Seen is the last chest a visit of the haul closed.
+// Seen is the last chest the haul closed. The runner reads it after every
+// step, so each source is reported as it closes and the destination last.
 func (h *Haul) Seen() (ChestSeen, bool) { return h.seen, h.hasSeen }
 
 func (h *Haul) Ready(s belief.Snapshot) error {

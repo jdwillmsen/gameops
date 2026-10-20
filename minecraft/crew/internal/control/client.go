@@ -409,7 +409,7 @@ func (c *Client) seenCommand(id string) bool {
 
 // wireItem is the controller's rule for an item name; anything else, such as
 // the placeholder for an item the table does not know, would be refused.
-var wireItem = regexp.MustCompile(`^[a-z_]{1,32}$`)
+var wireItem = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
 // fit makes the encoded event fit maxEventBytes. The state matters more than
 // the chest, so items are dropped, lowest count first, and then seen itself.
