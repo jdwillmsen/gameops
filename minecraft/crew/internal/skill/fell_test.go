@@ -396,7 +396,7 @@ func TestFellCollectsPillarCutLogsOnALoadedServer(t *testing.T) {
 	w := oak(7)
 	w.fill("air", treeX, 1, treeZ, treeX, 6, treeZ)
 	r := fellRig(t, w, 3)
-	r.slowBreak, r.slowPickup = 150, 300
+	r.slowBreak, r.slowPickup, r.slowOnly = 150, 200, "oak_log"
 	if st, err := r.run(newFell(w, r, 1), 4000); st != Done || err != nil {
 		t.Fatalf("status %v, err %v", st, err)
 	}
