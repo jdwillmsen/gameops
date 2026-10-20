@@ -55,10 +55,13 @@ type Passkeys struct {
 	path string
 	now  func() time.Time
 
-	mu      sync.Mutex
-	stamp   fileStamp
-	byKey   map[string]*Passkey
-	handles map[string][]byte // operator to user handle
+	mu           sync.Mutex
+	stamp        fileStamp
+	broken       error
+	byKey        map[string]*Passkey
+	handles      map[string][]byte // operator to user handle
+	onBroken     func()
+	loggedBroken bool
 }
 
 func loadPasskeys(path string, now func() time.Time) (*Passkeys, error) {
@@ -80,16 +83,19 @@ func (p *Passkeys) stat() fileStamp {
 func (p *Passkeys) reload() error {
 	p.byKey, p.handles = map[string]*Passkey{}, map[string][]byte{}
 	p.stamp = p.stat()
+	p.broken = nil
 	if !p.stamp.ok {
 		return nil
 	}
 	raw, err := os.ReadFile(p.path)
 	if err != nil {
+		p.broken = err
 		return err
 	}
 	var list []Passkey
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return fmt.Errorf("passkeys %s: %w", p.path, err)
+		p.broken = fmt.Errorf("passkeys %s: %w", p.path, err)
+		return p.broken
 	}
 	for i := range list {
 		k := list[i]
@@ -101,16 +107,24 @@ func (p *Passkeys) reload() error {
 
 // sync is called with the lock held. A file that cannot be read leaves the
 // store empty, which signs everyone out rather than trusting stale state.
-func (p *Passkeys) sync() {
+func (p *Passkeys) sync() error {
 	if p.stat() != p.stamp {
-		_ = p.reload()
+		if err := p.reload(); err != nil {
+			if !p.loggedBroken && p.onBroken != nil {
+				p.onBroken()
+			}
+			p.loggedBroken = true
+		} else {
+			p.loggedBroken = false
+		}
 	}
+	return p.broken
 }
 
 func (p *Passkeys) Active(op, key string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sync()
+	_ = p.sync()
 	k, ok := p.byKey[key]
 	return ok && k.Operator == op
 }
@@ -118,7 +132,7 @@ func (p *Passkeys) Active(op, key string) bool {
 func (p *Passkeys) Existing(op string) []Passkey {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sync()
+	_ = p.sync()
 	return p.existing(op)
 }
 
@@ -137,7 +151,7 @@ func (p *Passkeys) existing(op string) []Passkey {
 func (p *Passkeys) UserHandle(op string) []byte {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sync()
+	_ = p.sync()
 	if h, ok := p.handles[op]; ok {
 		return h
 	}
@@ -147,7 +161,9 @@ func (p *Passkeys) UserHandle(op string) []byte {
 func (p *Passkeys) Add(k Passkey) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sync()
+	if err := p.sync(); err != nil {
+		return err
+	}
 	key := KeyOf(k.ID)
 	if _, held := p.byKey[key]; held {
 		return ErrDuplicate
@@ -182,7 +198,7 @@ func (p *Passkeys) Add(k Passkey) error {
 func (p *Passkeys) Lookup(handle, id []byte) (Passkey, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sync()
+	_ = p.sync()
 	k, ok := p.byKey[KeyOf(id)]
 	if !ok || len(handle) == 0 || subtle.ConstantTimeCompare(k.UserHandle, handle) != 1 || !bytes.Equal(k.ID, id) {
 		return Passkey{}, false
@@ -195,7 +211,9 @@ func (p *Passkeys) Lookup(handle, id []byte) (Passkey, bool) {
 func (p *Passkeys) Use(id []byte, signCount uint32, backupEligible, backupState bool) (Passkey, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sync()
+	if err := p.sync(); err != nil {
+		return Passkey{}, err
+	}
 	k, ok := p.byKey[KeyOf(id)]
 	if !ok {
 		return Passkey{}, ErrUnknownKey

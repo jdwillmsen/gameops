@@ -53,6 +53,8 @@ type fakeControl struct {
 	rejectID     string // events about this id get a 400
 	conns        int    // connections the server accepted
 	releaseFirst chan struct{}
+	releaseID    string
+	releaseIDCh  chan struct{}
 }
 
 func newFakeControl(t *testing.T) *fakeControl {
@@ -75,6 +77,7 @@ func newFakeControl(t *testing.T) *fakeControl {
 			f.badAuth = true
 		}
 		releaseFirst := f.releaseFirst
+		releaseID, releaseIDCh := f.releaseID, f.releaseIDCh
 		f.mu.Unlock()
 		if code != 0 {
 			w.WriteHeader(code)
@@ -103,9 +106,21 @@ func newFakeControl(t *testing.T) *fakeControl {
 			}
 		}
 		if found {
-			if releaseFirst != nil {
+			var selected struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal([]byte(item), &selected)
+			release := releaseFirst
+			if releaseID != "" {
+				if selected.ID == releaseID {
+					release = releaseIDCh
+				} else {
+					release = nil
+				}
+			}
+			if release != nil {
 				select {
-				case <-releaseFirst:
+				case <-release:
 				case <-r.Context().Done():
 					return
 				}
@@ -159,6 +174,12 @@ func newFakeControl(t *testing.T) *fakeControl {
 func (f *fakeControl) setWorkCode(c int) {
 	f.mu.Lock()
 	f.workCode = c
+	f.mu.Unlock()
+}
+
+func (f *fakeControl) setRejectID(id string) {
+	f.mu.Lock()
+	f.rejectID = id
 	f.mu.Unlock()
 }
 
@@ -883,6 +904,48 @@ func TestRedeliveredStopLeavesNewerTasksAlone(t *testing.T) {
 			t.Errorf("redelivered stop moved the newer task to %s", tk.State)
 		}
 	}
+}
+
+func TestRedeliveredStopDoesNotDiscardHeldTask(t *testing.T) {
+	f := newFakeControl(t)
+	f.rejectID = commandID
+	f.releaseID = taskA
+	f.releaseIDCh = make(chan struct{})
+	r := &stubRunner{}
+	h := start(t, r, f)
+	f.work <- stopItem(commandID)
+	waitUntil(t, "first stop event to be rejected", func() bool { return h.log.count("control_event_rejected") == 1 })
+	for i := 0; i < task.MaxQueued-1; i++ {
+		if _, err := r.SubmitAs(fmt.Sprintf("after-stop-%02d", i), task.Template{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "task response to be in flight", func() bool {
+		return len(f.work) == 0 && f.polls >= 2
+	})
+	if _, err := r.SubmitAs("after-stop-last", task.Template{}); err != nil {
+		t.Fatal(err)
+	}
+	close(f.releaseIDCh)
+	waitUntil(t, "task to be held locally", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.commandPolls > 0
+	})
+	f.setRejectID("")
+	f.work <- stopItem(commandID)
+	f.waitFor(t, "redelivered stop acknowledgement", func(ev []event) bool { return countOf(ev, commandID, task.Done) == 1 })
+	if hasSubmit(r, taskA) {
+		t.Fatal("held task was submitted before runner capacity became available")
+	}
+	for _, item := range r.List() {
+		if item.State == task.Queued {
+			r.set(item.ID, task.Running, 0, "")
+			break
+		}
+	}
+	waitUntil(t, "held task to submit after capacity is available", func() bool { return hasSubmit(r, taskA) })
 }
 
 func TestRejectedEventDoesNotBlockLaterOnes(t *testing.T) {

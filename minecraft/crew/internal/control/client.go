@@ -193,10 +193,11 @@ func (c *Client) Run(ctx context.Context) {
 		}
 		down, seen = false, true
 		if item != nil {
-			if item.Kind == "command" && item.Command != nil && item.Command.Name == "stop" {
+			accepted, newStop := c.handle(*item)
+			if newStop {
 				held = nil
 			}
-			if !c.handle(*item) {
+			if !accepted {
 				held = item
 			}
 		}
@@ -256,16 +257,16 @@ func (c *Client) poll(ctx context.Context, kinds string) (*workItem, error) {
 	return nil, fmt.Errorf("work: status %d", resp.StatusCode)
 }
 
-func (c *Client) handle(item workItem) bool {
+func (c *Client) handle(item workItem) (bool, bool) {
 	switch {
 	case item.Kind == "task":
-		return c.submit(item)
+		return c.submit(item), false
 	case item.Kind == "command" && item.Command != nil && item.Command.Name == "stop":
-		c.stop(item.ID)
+		return true, c.stop(item.ID)
 	default:
 		c.enqueue(event{ID: item.ID, State: task.Failed, Reason: "unknown work"})
 	}
-	return true
+	return true, false
 }
 
 func (c *Client) submit(item workItem) bool {
@@ -315,10 +316,10 @@ func (c *Client) disown(id string) {
 
 // stop cancels everything, not only what control sent: the controller asked
 // the unit to stand down.
-func (c *Client) stop(commandID string) {
+func (c *Client) stop(commandID string) bool {
 	if c.seenStop(commandID) {
 		c.enqueue(event{ID: commandID, State: task.Done})
-		return
+		return false
 	}
 	for _, t := range c.runner.List() {
 		if t.State == task.Queued || t.State == task.Running {
@@ -327,6 +328,7 @@ func (c *Client) stop(commandID string) {
 		}
 	}
 	c.enqueue(event{ID: commandID, State: task.Done})
+	return true
 }
 
 // seenStop records id and reports whether it was already recorded.
