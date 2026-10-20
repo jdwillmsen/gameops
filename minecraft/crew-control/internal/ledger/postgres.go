@@ -3,10 +3,13 @@ package ledger
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
 )
 
 const (
@@ -28,6 +31,15 @@ var _ Ledger = (*Postgres)(nil)
 
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
 
+// wrap turns a database that cannot be reached into ErrUnavailable, so a
+// caller answers "try again" rather than "broken".
+func wrap(err error) error {
+	if err != nil && !errors.Is(err, ErrUnavailable) && work.IsUnavailable(err) {
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	return err
+}
+
 func scanPlace(row pgx.Row) (Place, error) {
 	var p Place
 	err := row.Scan(&p.ID, &p.Name, &p.Kind,
@@ -41,13 +53,13 @@ func (p *Postgres) inTx(ctx context.Context, fn func(context.Context, pgx.Tx) er
 	defer cancel()
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return wrap(err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	if err := fn(ctx, tx); err != nil {
-		return err
+		return wrap(err)
 	}
-	return tx.Commit(ctx)
+	return wrap(tx.Commit(ctx))
 }
 
 func (p *Postgres) Places(ctx context.Context) ([]Place, error) {
@@ -55,9 +67,10 @@ func (p *Postgres) Places(ctx context.Context) ([]Place, error) {
 	defer cancel()
 	rows, err := p.pool.Query(ctx, `SELECT `+placeColumns+` FROM `+placeTable+` ORDER BY id`)
 	if err != nil {
-		return nil, err
+		return nil, wrap(err)
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Place, error) { return scanPlace(r) })
+	ps, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Place, error) { return scanPlace(r) })
+	return ps, wrap(err)
 }
 
 func (p *Postgres) Place(ctx context.Context, id string) (Place, bool, error) {
@@ -67,7 +80,7 @@ func (p *Postgres) Place(ctx context.Context, id string) (Place, bool, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Place{}, false, nil
 	}
-	return pl, err == nil, err
+	return pl, err == nil, wrap(err)
 }
 
 func items(p Place) []string {
@@ -105,6 +118,17 @@ func (p *Postgres) PutPlace(ctx context.Context, pl Place) error {
 		case seeded:
 			return ErrSeeded
 		}
+		if pl.Kind == KindChest {
+			var taken bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+placeTable+`
+				WHERE kind = 'chest' AND id <> $1 AND min_x = $2 AND min_y = $3 AND min_z = $4)`,
+				pl.ID, pl.Box.Min.X, pl.Box.Min.Y, pl.Box.Min.Z).Scan(&taken); err != nil {
+				return err
+			}
+			if taken {
+				return ErrConflict
+			}
+		}
 		return upsert(ctx, tx, pl, false)
 	})
 }
@@ -135,6 +159,9 @@ func (p *Postgres) Seed(ctx context.Context, ps []Place) error {
 		}
 		keep = append(keep, pl.ID)
 	}
+	if err := positionsFree(ps); err != nil {
+		return err
+	}
 	return p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`DELETE FROM `+placeTable+` WHERE seeded AND NOT (id = ANY($1))`, keep); err != nil {
@@ -144,21 +171,62 @@ func (p *Postgres) Seed(ctx context.Context, ps []Place) error {
 			if err := upsert(ctx, tx, pl, true); err != nil {
 				return err
 			}
+			if pl.Kind == KindChest {
+				if err := fold(ctx, tx, pl); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
+}
+
+// fold merges unseeded chests at a seeded chest's position into it: the
+// stock moves over when it is newer than what the seeded chest holds.
+func fold(ctx context.Context, tx pgx.Tx, seeded Place) error {
+	b := seeded.Box.Min
+	rows, err := tx.Query(ctx, `SELECT id FROM `+placeTable+`
+		WHERE kind = 'chest' AND NOT seeded AND id <> $1 AND min_x = $2 AND min_y = $3 AND min_z = $4`,
+		seeded.ID, b.X, b.Y, b.Z)
+	if err != nil {
+		return err
+	}
+	dups, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	for _, id := range dups {
+		var newer bool
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT max(seen_at) FROM `+stockTable+` WHERE place_id = $1), '-infinity')
+			> COALESCE((SELECT max(seen_at) FROM `+stockTable+` WHERE place_id = $2), '-infinity')`,
+			id, seeded.ID).Scan(&newer); err != nil {
+			return err
+		}
+		if newer {
+			if _, err := tx.Exec(ctx, `DELETE FROM `+stockTable+` WHERE place_id = $1`, seeded.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE `+stockTable+` SET place_id = $2 WHERE place_id = $1`, id, seeded.ID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM `+placeTable+` WHERE id = $1`, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) chestAt(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, pos Pos) (Place, bool, error) {
 	pl, err := scanPlace(q.QueryRow(ctx, `SELECT `+placeColumns+` FROM `+placeTable+`
-		WHERE kind = 'chest' AND min_x = $1 AND min_y = $2 AND min_z = $3 ORDER BY id LIMIT 1`,
+		WHERE kind = 'chest' AND min_x = $1 AND min_y = $2 AND min_z = $3 ORDER BY seeded DESC, id LIMIT 1`,
 		pos.X, pos.Y, pos.Z))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Place{}, false, nil
 	}
-	return pl, err == nil, err
+	return pl, err == nil, wrap(err)
 }
 
 func (p *Postgres) ChestAt(ctx context.Context, pos Pos) (Place, bool, error) {
@@ -172,6 +240,9 @@ func (p *Postgres) Observe(ctx context.Context, unit string, at time.Time, chest
 		return invalid("chest is outside the world")
 	}
 	observed = cleanObservation(observed)
+	if now := time.Now(); at.After(now) {
+		at = now
+	}
 	names := make([]string, 0, len(observed))
 	counts := make([]int32, 0, len(observed))
 	for k, v := range observed {
@@ -195,7 +266,12 @@ func (p *Postgres) Observe(ctx context.Context, unit string, at time.Time, chest
 		}
 		// The place row serialises observations of one chest, so the
 		// newer-than check below cannot race another writer.
-		if _, err := tx.Exec(ctx, `SELECT 1 FROM `+placeTable+` WHERE id = $1 FOR UPDATE`, pl.ID); err != nil {
+		var locked int
+		switch err := tx.QueryRow(ctx, `SELECT 1 FROM `+placeTable+` WHERE id = $1 FOR UPDATE`, pl.ID).Scan(&locked); {
+		case errors.Is(err, pgx.ErrNoRows):
+			// Deleted since the lookup: nothing left to record against.
+			return nil
+		case err != nil:
 			return err
 		}
 		var newer bool
@@ -227,11 +303,12 @@ func (p *Postgres) Stock(ctx context.Context, placeID string) ([]Stock, error) {
 	rows, err := p.pool.Query(ctx,
 		`SELECT item, count, seen_at, unit FROM `+stockTable+` WHERE place_id = $1 ORDER BY item`, placeID)
 	if err != nil {
-		return nil, err
+		return nil, wrap(err)
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Stock, error) {
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Stock, error) {
 		var s Stock
 		err := r.Scan(&s.Item, &s.Count, &s.SeenAt, &s.Unit)
 		return s, err
 	})
+	return out, wrap(err)
 }

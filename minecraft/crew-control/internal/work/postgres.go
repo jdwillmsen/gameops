@@ -75,18 +75,17 @@ func (p *Postgres) Close() {
 	p.pool.Close()
 }
 
-// unavailable reports errors that mean the database cannot be reached right
+// IsUnavailable reports errors that mean the database cannot be reached right
 // now, as opposed to a query it rejected: those are the ones a caller should
 // answer with "try again", not "broken".
-func (p *Postgres) unavailable(err error) bool {
+func IsUnavailable(err error) bool {
 	var (
 		netErr  net.Error
 		connErr *pgconn.ConnectError
 		pgErr   *pgconn.PgError
 	)
 	switch {
-	case p.closed.Load(),
-		errors.Is(err, context.DeadlineExceeded),
+	case errors.Is(err, context.DeadlineExceeded),
 		errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF),
 		errors.As(err, &connErr),
 		errors.As(err, &netErr),
@@ -98,6 +97,8 @@ func (p *Postgres) unavailable(err error) bool {
 	}
 	return false
 }
+
+func (p *Postgres) unavailable(err error) bool { return p.closed.Load() || IsUnavailable(err) }
 
 func (p *Postgres) wrap(err error) error {
 	if err != nil && !errors.Is(err, ErrUnavailable) && p.unavailable(err) {

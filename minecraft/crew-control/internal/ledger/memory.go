@@ -57,6 +57,13 @@ func (m *Memory) PutPlace(_ context.Context, p Place) error {
 	if old, ok := m.places[p.ID]; ok && old.Seeded {
 		return ErrSeeded
 	}
+	if p.Kind == KindChest {
+		for _, o := range m.places {
+			if o.ID != p.ID && o.Kind == KindChest && o.Box.Min == p.Box.Min {
+				return ErrConflict
+			}
+		}
+	}
 	p.Seeded = false
 	m.places[p.ID] = clonePlace(p)
 	return nil
@@ -85,6 +92,9 @@ func (m *Memory) Seed(_ context.Context, ps []Place) error {
 		}
 		keep[p.ID] = true
 	}
+	if err := positionsFree(ps); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, p := range m.places {
@@ -96,14 +106,41 @@ func (m *Memory) Seed(_ context.Context, ps []Place) error {
 	for _, p := range ps {
 		p.Seeded = true
 		m.places[p.ID] = clonePlace(p)
+		if p.Kind == KindChest {
+			m.foldLocked(p)
+		}
 	}
 	return nil
+}
+
+func newest(rows map[string]Stock) (t time.Time) {
+	for _, s := range rows {
+		if s.SeenAt.After(t) {
+			t = s.SeenAt
+		}
+	}
+	return t
+}
+
+// foldLocked merges unseeded chests at a seeded chest's position into it.
+func (m *Memory) foldLocked(seeded Place) {
+	for id, o := range m.places {
+		if id == seeded.ID || o.Seeded || o.Kind != KindChest || o.Box.Min != seeded.Box.Min {
+			continue
+		}
+		if len(m.stock[id]) > 0 && newest(m.stock[id]).After(newest(m.stock[seeded.ID])) {
+			m.stock[seeded.ID] = m.stock[id]
+		}
+		delete(m.places, id)
+		delete(m.stock, id)
+	}
 }
 
 func (m *Memory) chestAt(pos Pos) (Place, bool) {
 	var found *Place
 	for _, p := range m.places {
-		if p.Kind == KindChest && p.Box.Min == pos && (found == nil || p.ID < found.ID) {
+		if p.Kind == KindChest && p.Box.Min == pos &&
+			(found == nil || (p.Seeded && !found.Seeded) || (p.Seeded == found.Seeded && p.ID < found.ID)) {
 			p := p
 			found = &p
 		}
@@ -126,6 +163,9 @@ func (m *Memory) Observe(_ context.Context, unit string, at time.Time, chest Pos
 		return invalid("chest is outside the world")
 	}
 	items = cleanObservation(items)
+	if now := time.Now(); at.After(now) {
+		at = now
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p, ok := m.chestAt(chest)
