@@ -32,6 +32,9 @@ const (
 
 	// MaxAttempts is how many times a step's work may be tried.
 	MaxAttempts = 3
+
+	// DefaultTimeout is how long a job without a deadline may run.
+	DefaultTimeout = 30 * time.Minute
 )
 
 var (
@@ -163,6 +166,9 @@ func prepare(j Job) (Job, error) {
 	j = j.clone()
 	if j.ID == uuid.Nil {
 		j.ID = uuid.New()
+	}
+	if j.Deadline.IsZero() {
+		j.Deadline = time.Now().Add(DefaultTimeout)
 	}
 	if len(j.Spec) == 0 {
 		j.Spec = json.RawMessage(`{}`)

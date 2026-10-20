@@ -255,6 +255,27 @@ func suite(t *testing.T, mk func(*testing.T) Store, age func(*testing.T, Store, 
 				t.Fatalf("invalid body: %v", err)
 			}
 		},
+		"EnqueueStep is idempotent while the step's item is open": func(t *testing.T, s Store) {
+			job, step := uuid.New(), uuid.New()
+			first, err := s.EnqueueStep(ctx, "crew-01", tpl, "op", job, step)
+			if err != nil {
+				t.Fatal(err)
+			}
+			again, err := s.EnqueueStep(ctx, "crew-01", tpl, "op", job, step)
+			if err != nil || again.ID != first.ID {
+				t.Fatalf("second enqueue = %+v %v, want %s", again, err, first.ID)
+			}
+			if got, _ := s.Recent(ctx, "crew-01", 10); len(got) != 1 {
+				t.Fatalf("%d items", len(got))
+			}
+			if _, err := s.Apply(ctx, "crew-01", first.ID, Failed, 0, "x"); err != nil {
+				t.Fatal(err)
+			}
+			next, err := s.EnqueueStep(ctx, "crew-01", tpl, "op", job, step)
+			if err != nil || next.ID == first.ID || next.State != Queued {
+				t.Fatalf("after terminal = %+v %v", next, err)
+			}
+		},
 		"cancel_task commands validate": func(t *testing.T, s Store) {
 			good := json.RawMessage(`{"name":"cancel_task","task":"` + uuid.NewString() + `"}`)
 			if _, err := s.Enqueue(ctx, "crew-01", KindCommand, good, "op"); err != nil {

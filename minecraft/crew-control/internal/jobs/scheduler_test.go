@@ -421,9 +421,14 @@ func TestCancelJobLeavesHandQueuedWork(t *testing.T) {
 	if it, _ := r.work.Get(ctx, hand.ID); it.State != work.Queued {
 		t.Fatalf("hand-queued item is %s", it.State)
 	}
+	// The unit still holds the running task until its cancel_task is applied.
 	if it, _ := r.work.Get(ctx, running.ID); it.State != work.Running {
-		// The unit still holds it until the cancel_task command is applied.
-		t.Logf("running item is %s", it.State)
+		t.Fatalf("running item is %s", it.State)
+	}
+	for _, k := range []string{"a", "b"} {
+		if it := r.item(got, k); it.ID != running.ID && it.State != work.Cancelled {
+			t.Fatalf("queued job item %s is %s", k, it.State)
+		}
 	}
 	cmds := 0
 	for _, it := range openCmds(t, r, "crew-02") {
@@ -483,32 +488,101 @@ func TestANewSchedulerFinishesAHalfRunJob(t *testing.T) {
 	}
 }
 
-func TestRestartDoesNotQueueAStepTwice(t *testing.T) {
-	r := newRig(t, "crew-01", "crew-02")
-	j := r.job(step("a"))
-	r.tick()
-	r.s = r.scheduler()
-	r.tick()
+func (r *rig) itemCount() int {
 	n := 0
 	for _, u := range r.roster {
 		items, _ := r.work.Recent(ctx, u, 10)
 		n += len(items)
 	}
-	if n != 1 {
+	return n
+}
+
+func TestRestartDoesNotQueueAStepTwice(t *testing.T) {
+	r := newRig(t, "crew-01", "crew-02")
+	r.job(step("a"))
+	r.tick()
+	r.s = r.scheduler()
+	r.tick()
+	if n := r.itemCount(); n != 1 {
 		t.Fatalf("%d items for one step", n)
 	}
-	_ = j
+}
+
+// failingCommit runs the pass but loses its commit, as a timeout would.
+type failingCommit struct{ Store }
+
+func (f failingCommit) Lock(ctx context.Context, id uuid.UUID, fn func(*Job) error) (bool, error) {
+	return f.Store.Lock(ctx, id, func(j *Job) error {
+		if err := fn(j); err != nil {
+			return err
+		}
+		return errors.New("commit failed")
+	})
+}
+
+func TestRolledBackPassDoesNotQueueTheStepTwice(t *testing.T) {
+	r := newRig(t, "crew-01", "crew-02")
+	j := r.job(step("a"))
+	r.s.cfg.Jobs = failingCommit{r.jobs}
+	if err := r.s.Tick(ctx); err == nil {
+		t.Fatal("tick did not fail")
+	}
+	if got := r.get(j.ID); byKey(got, "a").State != StepWaiting {
+		t.Fatalf("step = %s", byKey(got, "a").State)
+	}
+	r.s.cfg.Jobs = r.jobs
+	r.tick()
+	if n := r.itemCount(); n != 1 {
+		t.Fatalf("%d items for one step", n)
+	}
+	if got := r.get(j.ID); byKey(got, "a").State != StepQueued || byKey(got, "a").Attempts != 1 {
+		t.Fatalf("step = %+v", byKey(got, "a"))
+	}
+}
+
+func TestStepQueuedOnAUnitThatWentAwayMovesWithoutSpendingAnAttempt(t *testing.T) {
+	r := newRig(t, "crew-01", "crew-02")
+	j := r.job(step("a"))
+	r.tick()
+	got := r.get(j.ID)
+	old := r.item(got, "a")
+	if old.Unit != "crew-01" {
+		t.Fatalf("first on %s", old.Unit)
+	}
+	r.offline["crew-01"] = true
+	r.tick()
+	got = r.get(j.ID)
+	now := r.item(got, "a")
+	if now.Unit != "crew-02" || now.ID == old.ID || byKey(got, "a").State != StepQueued || byKey(got, "a").Attempts != 1 {
+		t.Fatalf("step = %+v on %s", byKey(got, "a"), now.Unit)
+	}
+	if it, _ := r.work.Get(ctx, old.ID); it.State != work.Cancelled {
+		t.Fatalf("old item is %s", it.State)
+	}
+}
+
+func TestDeliveredStepOnAnOfflineUnitIsLeftAlone(t *testing.T) {
+	r := newRig(t, "crew-01", "crew-02")
+	j := r.job(step("a"))
+	r.tick()
+	it := r.item(r.get(j.ID), "a")
+	if _, ok, _, _ := r.work.Next(ctx, it.Unit, "", r.clock.Now()); !ok {
+		t.Fatal("not delivered")
+	}
+	r.offline[it.Unit] = true
+	r.tick()
+	if got := r.item(r.get(j.ID), "a"); got.ID != it.ID || got.State != work.Delivered {
+		t.Fatalf("item = %+v", got)
+	}
 }
 
 func TestWorkThatVanishedCountsAsAFailure(t *testing.T) {
 	r := newRig(t, "crew-01")
 	j := r.job(step("a"))
 	r.tick()
-	it := r.item(r.get(j.ID), "a")
 	if _, err := r.work.Prune(ctx, r.clock.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	_ = it
 	r.tick()
 	if s := byKey(r.get(j.ID), "a"); s.State != StepQueued || s.Attempts != 2 {
 		t.Fatalf("step = %+v", s)

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -175,31 +176,51 @@ func storeSuite(t *testing.T, mk func(*testing.T) Store) {
 		},
 		"concurrent locks grant exactly one": func(t *testing.T, s Store) {
 			j, _ := s.Create(ctx, newJob(step("a")))
+			const callers = 6
 			var (
 				wg      sync.WaitGroup
-				mu      sync.Mutex
-				granted int
+				granted atomic.Int32
+				skipped = make(chan struct{}, callers)
+				hold    = make(chan struct{})
 			)
-			hold := make(chan struct{})
-			for range 6 {
+			for range callers {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					ok, _ := s.Lock(ctx, j.ID, func(*Job) error {
-						mu.Lock()
-						granted++
-						mu.Unlock()
+						granted.Add(1)
 						<-hold
 						return nil
 					})
-					_ = ok
+					if !ok {
+						skipped <- struct{}{}
+					}
 				}()
 			}
-			time.Sleep(300 * time.Millisecond)
+			// Everyone but the holder must come back refused before it lets go.
+			for range callers - 1 {
+				select {
+				case <-skipped:
+				case <-time.After(10 * time.Second):
+					t.Fatal("a caller was not refused")
+				}
+			}
 			close(hold)
 			wg.Wait()
-			if granted != 1 {
-				t.Fatalf("granted = %d", granted)
+			if granted.Load() != 1 {
+				t.Fatalf("granted = %d", granted.Load())
+			}
+		},
+		"a job without a deadline gets the default": func(t *testing.T, s Store) {
+			j := newJob(step("a"))
+			j.Deadline = time.Time{}
+			got, err := s.Create(ctx, j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, _ := s.Get(ctx, got.ID)
+			if d := time.Until(stored.Deadline); d < DefaultTimeout-time.Minute || d > DefaultTimeout+time.Minute {
+				t.Fatalf("deadline in %v", d)
 			}
 		},
 	}

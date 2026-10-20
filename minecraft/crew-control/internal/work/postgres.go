@@ -152,6 +152,25 @@ func (p *Postgres) enqueue(ctx context.Context, unit, kind string, body json.Raw
 	var it Item
 	err := p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
+		if step != nil {
+			// A step is queued once while its item is open: a scheduler pass
+			// that rolled back after this committed asks again. The advisory
+			// lock serializes concurrent askers, since there is no row to lock
+			// yet; a partial unique index on step_id in a later migration
+			// would enforce it in the schema instead.
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, step.String()); err != nil {
+				return err
+			}
+			open, err := scan(tx.QueryRow(ctx,
+				`SELECT `+columns+` FROM `+workTable+` WHERE step_id = $1 AND state NOT IN ('done', 'failed', 'cancelled') ORDER BY created_at LIMIT 1`, *step))
+			if err == nil {
+				it = open
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		it, err = scan(tx.QueryRow(ctx,
 			`INSERT INTO `+workTable+` (id, unit, kind, body, state, operator, job_id, step_id)
 			 VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7) RETURNING `+columns,
