@@ -100,6 +100,9 @@ func LoadAtlas(dir string) (*Atlas, error) {
 	a := &Atlas{png: img, table: t}
 	a.itemPNG, a.items, a.itemsErr = loadItems(dir)
 	a.entPNG, a.entities, a.entitiesErr = loadEntities(dir)
+	// A table from before armour still draws every model, so it is served
+	// while the current one is rebuilt.
+	a.entitiesOld = a.entitiesErr == nil && a.entities.Version < entityTableVersion
 	if a.entitiesErr != nil {
 		_, err := os.Stat(filepath.Join(dir, entFailedFile))
 		a.entitiesFailed = err == nil
@@ -120,7 +123,7 @@ func loadEntities(dir string) ([]byte, EntityTable, error) {
 	if err := json.Unmarshal(doc, &t); err != nil {
 		return nil, EntityTable{}, fmt.Errorf("atlas: decode entities: %w", err)
 	}
-	if t.Version != entityTableVersion {
+	if t.Version < 1 || t.Version > entityTableVersion {
 		return nil, EntityTable{}, fmt.Errorf("atlas: cached entity table version %d, want %d", t.Version, entityTableVersion)
 	}
 	return img, t, nil
@@ -176,7 +179,7 @@ func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts
 	var fallbackTag string
 	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
 		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
-			if a.itemsErr == nil && (a.entitiesErr == nil || a.entitiesFailed) {
+			if a.Complete() {
 				return a, Pack{Tag: tag}, nil
 			}
 			fallback, fallbackTag = a, tag

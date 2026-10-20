@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"math/rand/v2"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sandertv/go-raknet"
@@ -42,12 +44,14 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, dec *camera.NetworkDe
 		Self:       tracker,
 		MaxViewers: cfg.CameraMaxViewers,
 	})
-	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log, build: ensureAtlas(atlas.Fetcher{OnDownload: logAtlasDownload(log)}, func(err error) {
+	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log}
+	atlases.build = ensureAtlas(atlas.Fetcher{OnDownload: logAtlasDownload(log)}, func(err error) {
+		atlases.fellBack.Store(true)
 		log.Warn("camera_atlas_rebuild_failed", logging.Fields{
 			"error": err.Error(),
-			"hint":  "serving the older cached atlas, which lacks the item sheet or the mob models",
+			"hint":  "serving the older cached atlas, which lacks the item sheet, the mob models or the armour",
 		})
-	})}
+	})
 	return hub, func(ctx context.Context, addr string) {
 		version := pingVersion(ctx, addr)
 		dec.BeginSession(version)
@@ -89,8 +93,26 @@ type atlasLoader struct {
 	log   *logging.Logger
 	build atlasBuilder
 
+	// retry is how long to wait before building again after a failure or an
+	// incomplete atlas; zero means the default. Jittered, so that twenty units
+	// restarted together do not ask the pack host in the same minute.
+	retry time.Duration
+	// fellBack is set by the build when it could only serve an older cached
+	// atlas, which is worth another attempt later.
+	fellBack atomic.Bool
+
 	mu            sync.Mutex
 	running, done bool
+}
+
+const defaultAtlasRetry = 5 * time.Minute
+
+func (l *atlasLoader) retryDelay() time.Duration {
+	d := l.retry
+	if d == 0 {
+		d = defaultAtlasRetry
+	}
+	return d + rand.N(d)
 }
 
 func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
@@ -101,6 +123,7 @@ func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
 	}
 	l.running = true
 	l.mu.Unlock()
+	l.fellBack.Store(false)
 
 	ctx, cancel := context.WithTimeout(ctx, atlasTimeout)
 	defer cancel()
@@ -108,9 +131,16 @@ func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
 	if err == nil {
 		err = l.hub.SetAtlas(a)
 	}
+	complete := err == nil && !l.fellBack.Swap(false)
 	l.mu.Lock()
-	l.running, l.done = false, err == nil
+	l.running, l.done = false, complete
 	l.mu.Unlock()
+	if !complete {
+		// The pack host rate-limits by address and every unit shares one, so a
+		// start that finds the limit spent keeps trying instead of waiting for
+		// the next reconnect.
+		time.AfterFunc(l.retryDelay(), func() { l.load(ctx, serverVersion) })
+	}
 	if err != nil {
 		l.log.Warn("camera_atlas_unavailable", logging.Fields{
 			"server_version": serverVersion,

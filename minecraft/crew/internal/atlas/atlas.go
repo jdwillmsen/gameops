@@ -110,9 +110,19 @@ type Atlas struct {
 	// entitiesFailed is set on a loaded entry whose entity build was tried
 	// and failed, so it is not rebuilt for that alone.
 	entitiesFailed bool
+	// entitiesOld is set on a loaded entry whose entity table predates the
+	// current layout: usable, but without what the newer one added.
+	entitiesOld bool
 
 	cmOnce sync.Once
 	cms    map[string]image.Image
+}
+
+// Complete reports whether the atlas holds everything the current build
+// makes. One that does not is still served, and rebuilt when the pack can be
+// fetched.
+func (a *Atlas) Complete() bool {
+	return a.itemsErr == nil && ((a.entitiesErr == nil && !a.entitiesOld) || a.entitiesFailed)
 }
 
 // PNG returns the encoded atlas image.
