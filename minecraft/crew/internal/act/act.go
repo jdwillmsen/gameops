@@ -116,6 +116,11 @@ func (a *Actuator) Tick(in Input) error {
 	if step.airborne {
 		flags.Set(packet.InputFlagJumping)
 	}
+	if step.swimUp {
+		flags.Set(packet.InputFlagJumping)
+		flags.Set(packet.InputFlagJumpDown)
+		flags.Set(packet.InputFlagWantUp)
+	}
 	if next.OnGround {
 		flags.Set(packet.InputFlagVerticalCollision)
 	}
@@ -170,7 +175,12 @@ func (a *Actuator) Apply(pk packet.Packet) {
 			// without a second correction.
 			Carry: mgl32.Vec2{p.Delta.X(), p.Delta.Z()},
 		}
-		if !p.OnGround {
+		switch {
+		case p.OnGround:
+		case WaterDepth(a.solid, a.pose.Feet) > 0:
+			// The swimming model already folds drag and sinking into a step.
+			a.pose.vy = p.Delta.Y()
+		default:
 			a.pose.vy = (p.Delta.Y() - gravity) * verticalDrag
 		}
 	case *packet.SetActorMotion:
