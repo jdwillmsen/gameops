@@ -78,6 +78,8 @@ type Poller struct {
 	streams  int
 	workSrc  WorkSource
 	wsubs    map[*workSub]struct{}
+	// Per-unit shared bytes of the work feed; see feedCache for why.
+	workCaches map[string]*feedCache
 
 	tracks    []track
 	feed      []Event
@@ -85,29 +87,33 @@ type Poller struct {
 	esubs     map[chan Event]struct{}
 	positions []Position
 	jobsSrc   JobsSource
+	// Shared bytes of the jobs feed; see feedCache for why.
+	jobsCache feedCache
 	jsubs     map[chan struct{}]struct{}
 }
 
 func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Poller {
 	units := r.Units()
 	p := &Poller{
-		units:     units,
-		client:    client,
-		every:     every,
-		timeout:   every * 8 / 10,
-		keepalive: defaultKeepalive,
-		statuses:  make([]Status, len(units)),
-		failures:  make([]int, len(units)),
-		subs:      map[chan []Status]struct{}{},
-		wsubs:     map[*workSub]struct{}{},
-		tracks:    make([]track, len(units)),
-		esubs:     map[chan Event]struct{}{},
-		positions: make([]Position, len(units)),
-		jsubs:     map[chan struct{}]struct{}{},
+		units:      units,
+		client:     client,
+		every:      every,
+		timeout:    every * 8 / 10,
+		keepalive:  defaultKeepalive,
+		statuses:   make([]Status, len(units)),
+		failures:   make([]int, len(units)),
+		subs:       map[chan []Status]struct{}{},
+		wsubs:      map[*workSub]struct{}{},
+		tracks:     make([]track, len(units)),
+		esubs:      map[chan Event]struct{}{},
+		positions:  make([]Position, len(units)),
+		jsubs:      map[chan struct{}]struct{}{},
+		workCaches: map[string]*feedCache{},
 	}
 	for i, u := range units {
 		p.positions[i] = Position{ID: u.ID}
 		p.statuses[i] = Status{ID: u.ID, Name: u.Name}
+		p.workCaches[u.ID] = &feedCache{}
 	}
 	return p
 }

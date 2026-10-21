@@ -167,12 +167,21 @@ func (p *Poller) stream(w http.ResponseWriter, r *http.Request, authed func(*htt
 	}
 }
 
-// writeWork skips a unit whose history cannot be read (the store is down)
+// writeWork writes one unit work event, rendered once per change and shared
+// by every signed-in stream: a viewer-heavy fleet costs the store nothing
+// extra. It skips a unit whose history cannot be read (the store is down)
 // rather than ending the stream: the units event does not depend on it.
 func (p *Poller) writeWork(w http.ResponseWriter, rc *http.ResponseController, r *http.Request, unit string) bool {
 	src := p.workSource()
 	if src == nil {
 		return true
+	}
+	if c := p.workFeed(unit); c != nil {
+		data, ok := c.payload(func() ([]byte, error) { return src(r.Context(), unit) })
+		if !ok {
+			return true
+		}
+		return writeEvent(w, rc, "work", data)
 	}
 	data, err := src(r.Context(), unit)
 	if err != nil {

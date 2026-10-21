@@ -22,11 +22,13 @@ func (p *Poller) jobsSource() JobsSource {
 }
 
 // PublishJobs tells every signed-in stream that jobs changed. The payload is
-// rendered when a stream writes, from the store as it is then, so a burst of
-// changes collapses into one event with the latest list.
+// rendered once per change, when a stream writes, and every signed-in stream
+// shares the same bytes, so a burst of changes still collapses into one event
+// with the latest list.
 func (p *Poller) PublishJobs() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.jobsCache.changed()
 	for c := range p.jsubs {
 		select {
 		case c <- struct{}{}:
@@ -47,15 +49,16 @@ func (p *Poller) subscribeJobs() (<-chan struct{}, func()) {
 	}
 }
 
-// writeJobs skips a list that cannot be read (the store is down) rather than
-// ending the stream: the units event does not depend on it.
+// writeJobs writes the bytes rendered once for the current change, like
+// writeWork. It skips a list that cannot be read (the store is down) rather
+// than ending the stream: the units event does not depend on it.
 func (p *Poller) writeJobs(w http.ResponseWriter, rc *http.ResponseController, r *http.Request) bool {
 	src := p.jobsSource()
 	if src == nil {
 		return true
 	}
-	data, err := src(r.Context())
-	if err != nil {
+	data, ok := p.jobsCache.payload(func() ([]byte, error) { return src(r.Context()) })
+	if !ok {
 		return true
 	}
 	return writeEvent(w, rc, "jobs", data)
