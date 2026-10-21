@@ -23,11 +23,18 @@ TICKS=$(getconf CLK_TCK)
 
 pids=() tmp=$(mktemp -d)
 # Only PIDs recorded here are ever signalled; never match processes by name.
-# The wait matters for back-to-back runs: a unit still shutting down keeps its
+# Waiting matters for back-to-back runs: a unit still shutting down keeps its
 # status port, so the next run's unit fails to bind and the old one answers
-# the readiness check.
+# the readiness check. Anything still up after 10 s is killed.
 cleanup() {
   for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
+  for _ in $(seq 50); do
+    alive=0
+    for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && alive=1; done
+    ((alive)) || break
+    sleep 0.2
+  done
+  for p in "${pids[@]}"; do kill -9 "$p" 2>/dev/null || true; done
   wait 2>/dev/null || true
   rm -rf "$tmp"
 }
