@@ -36,6 +36,8 @@ type Observe struct {
 	// tooWide says a candidate could be stood in, but the box was further
 	// from it than the server's view distance reaches.
 	tooWide bool
+	// unreachable is the last planner failure, kept to explain giving up.
+	unreachable error
 
 	blocks    Blocks
 	hasBlocks bool
@@ -96,33 +98,33 @@ func (o *Observe) inRange(feet mgl32.Vec3) bool {
 // chosen when the walk starts, and again when the planner cannot reach the one
 // it chose, because a box the unit cannot get close to is still a box it may
 // read from further away.
+//
+// At most one candidate is planned per step: a box ringed by unreachable cells
+// would otherwise run hundreds of path searches inside a single tick.
 func (o *Observe) walkTo(a Actuator) (Status, error) {
-	var unreachable error
-	for {
-		if o.walk == nil {
-			c, reach, ok := o.vantage()
-			if !ok {
-				switch {
-				case o.tooWide:
-					return Failed, errors.New("the box is too big to read whole")
-				case unreachable != nil:
-					return Failed, fmt.Errorf("cannot reach a spot to read the box from: %w", unreachable)
-				default:
-					return Failed, errors.New("no standing spot near the box to read it from")
-				}
+	if o.walk == nil {
+		c, reach, ok := o.vantage()
+		if !ok {
+			switch {
+			case o.tooWide:
+				return Failed, errors.New("the box is too big to read whole")
+			case o.unreachable != nil:
+				return Failed, fmt.Errorf("cannot reach a spot to read the box from: %w", o.unreachable)
+			default:
+				return Failed, errors.New("no standing spot near the box to read it from")
 			}
-			o.walk = newNavigator(o.world, c, reach)
 		}
-		st, err := o.walk.step(a)
-		switch {
-		case st != Failed:
-			return st, err
-		case !errors.Is(err, path.ErrNoPath):
-			return Failed, fmt.Errorf("walking to the box: %w", err)
-		}
-		unreachable = err
-		o.walk = nil
+		o.walk = newNavigator(o.world, c, reach)
 	}
+	st, err := o.walk.step(a)
+	switch {
+	case st != Failed:
+		return st, err
+	case !errors.Is(err, path.ErrNoPath):
+		return Failed, fmt.Errorf("walking to the box: %w", err)
+	}
+	o.unreachable, o.walk = err, nil
+	return Running, nil
 }
 
 // vantage picks the next cell to read the box from: the first candidate the
