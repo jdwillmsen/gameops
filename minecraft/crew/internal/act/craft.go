@@ -56,6 +56,20 @@ func (a *Actuator) Craft(item string, times int) (int, error) {
 	if times < 1 || times > maxCrafts {
 		return 0, fmt.Errorf("cannot craft %d times", times)
 	}
+	a.mu.Lock()
+	start := a.crafts.shape
+	a.mu.Unlock()
+	accepted := false
+	// Only an accepted shape is kept: a craft that ends without one puts the
+	// starting shape back, or a later craft would skip the shape the server
+	// takes. One task crafts at a time, so nothing else moves it meanwhile.
+	defer func() {
+		if !accepted {
+			a.mu.Lock()
+			a.crafts.shape = start
+			a.mu.Unlock()
+		}
+	}()
 	for {
 		a.mu.Lock()
 		id, made, err := a.craftLocked(item, times)
@@ -67,6 +81,7 @@ func (a *Actuator) Craft(item string, times int) (int, error) {
 		err = a.await(id)
 		a.logCraftShape(shape, err)
 		if err == nil {
+			accepted = true
 			return made, nil
 		}
 		// The request shape the server accepts is not yet known for sure, so

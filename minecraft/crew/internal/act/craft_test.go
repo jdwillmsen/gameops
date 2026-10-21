@@ -357,6 +357,26 @@ func TestCraftMovesToTheNextShapeOnAnInvalidCraft(t *testing.T) {
 	}
 }
 
+func TestCraftKeepsTheStartingShapeWhenNoneIsAccepted(t *testing.T) {
+	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
+	a, s := newCrafter(inv)
+	invalid := uint8(protocol.ItemStackResponseStatusInvalidCraftRequest)
+	statuses := make([]uint8, craftShapes)
+	for i := range statuses {
+		statuses[i] = invalid
+	}
+	defer stopAnswering(startAnswering(a, s, statuses...))
+
+	if _, err := a.Craft("oak_planks", 1); err == nil {
+		t.Fatal("a craft every shape of which was refused succeeded")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.crafts.shape != 0 {
+		t.Errorf("shape = %d, want the starting 0 back", a.crafts.shape)
+	}
+}
+
 func TestCraftScalesOneRequestOverSeveralCrafts(t *testing.T) {
 	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
 	a, s := newCrafter(inv)
