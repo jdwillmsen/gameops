@@ -297,17 +297,6 @@ func TestInteractiveBlocksAreNotSupport(t *testing.T) {
 	}
 }
 
-// stackRequests returns the stack requests the unit sent, in order.
-func stackRequests(s *sink) []*packet.ItemStackRequest {
-	var out []*packet.ItemStackRequest
-	for _, pk := range s.got {
-		if req, ok := pk.(*packet.ItemStackRequest); ok {
-			out = append(out, req)
-		}
-	}
-	return out
-}
-
 // A withdraw's answer is all the server ever says about the unit's own
 // slots, so a placement afterward must find the withdrawn stack: it holds it
 // from the slot the answer named, without another move.

@@ -28,13 +28,16 @@ const (
 	inspectTemplate  = "inspect"
 	observeTemplate  = "observe_blocks"
 	placeTemplate    = "place_block"
+	craftTemplate    = "craft"
 	// maxObserveCells caps a box at what one report can carry.
 	maxObserveCells = 4096
 	maxHaulItems    = 8
 	maxHaulSources  = 4
 	minQty          = 1
 	maxQty          = 256
-	maxAreaSpan     = 64
+	// One craft task asks for at most a stack of the item.
+	maxCraftCount = 64
+	maxAreaSpan   = 64
 	// How far from the unit MineBlock looks for stone.
 	mineRadius = 24
 	// goto is confined to the lab's flat square, so a typo cannot send the
@@ -82,6 +85,10 @@ type Template struct {
 
 // facings maps a heading to its step in x and z: north is toward negative z.
 var facings = map[string][2]int32{"north": {0, -1}, "south": {0, 1}, "east": {1, 0}, "west": {-1, 0}}
+
+// itemName is the shape of a Minecraft identifier, the only item name a
+// template accepts.
+var itemName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
 // Area is an inclusive box, min at most max on every axis.
 type Area struct {
@@ -151,6 +158,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseObserve(body)
 	case placeTemplate:
 		return parsePlace(body)
+	case craftTemplate:
+		return parseCraft(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -348,6 +357,28 @@ func parsePlace(body []byte) (Template, error) {
 	return Template{Template: raw.Template, Block: raw.Block, Item: raw.Item}, nil
 }
 
+// parseCraft reads {"template":"craft","item":"<name>","count":N}. The count
+// lands in Qty, which is the field the task record reports as progress.
+func parseCraft(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Item     string `json:"item"`
+		Count    int    `json:"count"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if !itemName.MatchString(raw.Item) {
+		return Template{}, errors.New("item must be 1 to 32 of a-z, 0-9 or _")
+	}
+	if raw.Count < minQty || raw.Count > maxCraftCount {
+		return Template{}, fmt.Errorf("count must be %d to %d", minQty, maxCraftCount)
+	}
+	// Whether a recipe exists for the item is the server's to say, so the
+	// template only checks the shape of the name.
+	return Template{Template: raw.Template, Item: raw.Item, Qty: raw.Count}, nil
+}
+
 func parseHaul(body []byte) (Template, error) {
 	var raw struct {
 		Template string         `json:"template"`
@@ -423,6 +454,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		return []skill.Skill{skill.NewObserve(world, self,
 			protocol.BlockPos{t.Box.Min.X, t.Box.Min.Y, t.Box.Min.Z},
 			protocol.BlockPos{t.Box.Max.X, t.Box.Max.Y, t.Box.Max.Z})}, nil
+	}
+	if t.Template == craftTemplate {
+		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil
 	}
 	if t.Template == gotoTemplate && t.To != nil {
 		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}

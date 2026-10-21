@@ -9,6 +9,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/craft"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
@@ -33,6 +34,8 @@ type unit struct {
 	life      *life.Life
 	conn      packetWriter
 	items     []protocol.ItemEntry
+	// book indexes the recipes the server sends this session.
+	book *craft.Book
 
 	act           *act.Actuator
 	correctionLog act.CorrectionLogger
@@ -42,13 +45,18 @@ func newUnit(runtimeID uint64, tracker *belief.Tracker, world *blocks.Store, hub
 	if lf != nil {
 		lf.Spawn(runtimeID)
 	}
-	return &unit{runtimeID: runtimeID, tracker: tracker, world: world, hub: hub, runner: runner, life: lf, conn: conn}
+	return &unit{runtimeID: runtimeID, tracker: tracker, world: world, hub: hub, runner: runner, life: lf, conn: conn, book: craft.NewBook()}
 }
 
 func (u *unit) actuator() *act.Actuator { return u.act }
 
 // apply is the read loop's per-packet fan-out.
 func (u *unit) apply(pk packet.Packet) error {
+	// The recipe book is stored whatever else the packet reaches, because
+	// CraftingData can arrive before the actuator exists to read it.
+	if cd, ok := pk.(*packet.CraftingData); ok {
+		u.book.Store(cd, u.items)
+	}
 	u.tracker.Apply(pk)
 	if u.life != nil {
 		u.life.Apply(pk)
@@ -106,6 +114,7 @@ func (u *unit) startActing() error {
 	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker, hub: u.hub}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
 	a.SetCorrectionDiagnostics(u.correctionLog, u.world)
 	a.ItemNames(u.items)
+	a.Crafting(u.book, func() []belief.Item { return u.tracker.Snapshot().Inventory })
 	// Until the loading screen ends, the server drops every action without an
 	// error, so this precedes any task tick.
 	if err := a.EndLoadingScreen(); err != nil {

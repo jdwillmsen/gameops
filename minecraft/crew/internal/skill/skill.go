@@ -47,6 +47,9 @@ type Actuator interface {
 	Withdraw(fromSlot byte, count int, to belief.Item, toSlot int) (int32, error)
 	Response(requestID int32) (status uint8, done bool)
 	CloseContainer() error
+	// Craft makes times crafts of an item and waits for the server's
+	// answer, so it blocks the step for the moment the answer takes.
+	Craft(item string, times int) (int, error)
 }
 
 type Skill interface {

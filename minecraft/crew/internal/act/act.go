@@ -14,6 +14,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/craft"
 )
 
 // metricCorrections counts the times the server overruled the predicted pose.
@@ -93,6 +96,10 @@ type Actuator struct {
 	cont        container
 	nextRequest int32
 	responses   map[int32]uint8
+
+	book   *craft.Book
+	invOf  func() []belief.Item
+	crafts craftState
 }
 
 type CorrectionLogger interface {
@@ -109,7 +116,7 @@ func New(w PacketWriter, runtimeID uint64, start Pose, solid Solid) *Actuator {
 		w: w, runtimeID: runtimeID, solid: solid, pose: start,
 		tick: firstTick, nextRequest: -3, reqItem: map[int32]int32{},
 		responses: map[int32]uint8{}, abandoned: map[int32]bool{},
-		now: time.Now,
+		now: time.Now, crafts: newCraftState(),
 	}
 }
 

@@ -282,8 +282,11 @@ func (a *Actuator) CloseContainer() error {
 type container struct {
 	open   bool
 	window byte
-	pos    protocol.BlockPos
-	slots  []protocol.ItemInstance
+	// kind is the ContainerType the server opened, which tells a workbench
+	// window from a chest's.
+	kind  byte
+	pos   protocol.BlockPos
+	slots []protocol.ItemInstance
 }
 
 // Died forgets the open window and any pending stack responses: death closes
@@ -298,12 +301,13 @@ func (a *Actuator) Died() {
 	a.reqItem = map[int32]int32{}
 	a.abandoned = map[int32]bool{}
 	a.move = 0
+	a.crafts = newCraftState()
 }
 
 func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 	switch p := pk.(type) {
 	case *packet.ContainerOpen:
-		a.cont = container{open: true, window: p.WindowID, pos: p.ContainerPosition}
+		a.cont = container{open: true, window: p.WindowID, kind: p.ContainerType, pos: p.ContainerPosition}
 	case *packet.ContainerClose:
 		if a.cont.open && p.WindowID == a.cont.window {
 			a.cont = container{}
@@ -355,6 +359,7 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 				a.applyWindow0Locked(r, item)
 			}
 		}
+		a.crafts.noteLocked(p)
 	}
 }
 
