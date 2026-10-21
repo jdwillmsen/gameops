@@ -287,9 +287,11 @@ closes it, taking nothing. `chest` has the same bounds as `goto`'s `to`:
 {"template": "inspect", "chest": {"x": 0, "y": 0, "z": 0}}
 ```
 
-`observe_blocks` walks the unit to within eight chunks of a box and reports
-every block in it from its own world view, so a finished build can be checked
-against its plan. `box` corners have the same bounds as `goto`'s `to`, min is
+`observe_blocks` walks the unit to a spot it can stand on with the whole box
+within four chunks, and reports every block in it from its own world view, so a
+finished build can be checked against its plan. Any view distance of 4 or more
+streams the box; one longer than about 128 blocks fails as too big to read
+whole. `box` corners have the same bounds as `goto`'s `to`, min is
 at most max on each axis, and the box holds at most 4096 cells:
 
 ```json
