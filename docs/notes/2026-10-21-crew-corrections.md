@@ -33,10 +33,15 @@ Diagnosis remains inconclusive until the new event is collected in production.
 The one concrete code-level lead is the already documented stair-descent timing
 difference, but treating it as the hub cause would be a guess. A 30-minute log
 pull grouped by support block, feet block, block ahead, and active skill will
-identify which movement situations correlate with corrections:
+identify which movement situations correlate with corrections. Each event
+describes the input the server named in its correction (`tick_found: false`
+means that tick had aged out and the newest pose was used instead). Groups are
+ranked by logged lines; `corrections` adds each line's `suppressed` count, which
+covers the preceding 10 s in possibly different situations, so it is only
+approximate. Non-JSON log lines are skipped:
 
 ```sh
-for n in $(seq -w 1 20); do kubectl -n jdwillmsen-prd logs "deploy/crew-$n" --since=30m; done | jq -s 'map(select(.event == "movement_corrected")) | sort_by([.below, .feet, .ahead, .skill]) | group_by([.below, .feet, .ahead, .skill]) | map({below: .[0].below, feet: .[0].feet, ahead: .[0].ahead, skill: .[0].skill, lines: length, corrections: (length + (map(.suppressed // 0) | add))}) | sort_by(-.corrections)'
+for n in $(seq -w 1 20); do kubectl -n jdwillmsen-prd logs "deploy/crew-$n" --since=30m; done | jq -R 'fromjson? | select(.event == "movement_corrected")' | jq -s 'group_by([.below, .feet, .ahead, .skill]) | map({below: .[0].below, feet: .[0].feet, ahead: .[0].ahead, skill: .[0].skill, lines: length, corrections: (length + (map(.suppressed // 0) | add))}) | sort_by(-.lines)'
 ```
 
 No live-cluster changes were made.

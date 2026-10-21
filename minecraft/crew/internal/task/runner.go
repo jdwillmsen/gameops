@@ -364,7 +364,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	engaged := r.reflex != nil && r.reflex.Engaged(a.Pose(), snap)
 	if x := r.reflex; x != nil && x.Swimming(a.Pose()) {
 		stop := r.preempt(dt)
-		setActuatorSkill(a, "idle")
+		setActuatorSkill(a, "swim")
 		r.mu.Unlock()
 		if stop != nil {
 			stop.Stop(a)
@@ -375,7 +375,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	}
 	if x := r.reflex; engaged {
 		stop := r.preempt(dt)
-		setActuatorSkill(a, "idle")
+		setActuatorSkill(a, "fight")
 		r.mu.Unlock()
 		if stop != nil {
 			// Stop may send the tick's one input; the fight begins next tick.
@@ -388,7 +388,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	}
 	if x := r.reflex; x != nil && x.Tending(snap, r.cur != nil) {
 		stop := r.preempt(dt)
-		setActuatorSkill(a, "idle")
+		setActuatorSkill(a, "tend")
 		r.mu.Unlock()
 		if stop != nil {
 			stop.Stop(a)
