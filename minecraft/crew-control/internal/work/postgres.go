@@ -158,7 +158,9 @@ func (p *Postgres) enqueue(ctx context.Context, unit, kind string, body json.Raw
 			// lock serializes concurrent askers, since there is no row to lock
 			// yet; a partial unique index on step_id in a later migration
 			// would enforce it in the schema instead.
-			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, step.String()); err != nil {
+			// Key space 2: step enqueues never race a StopUnit lock, since
+			// keys 1 and 2 partition the shared 64-bit advisory lock space.
+			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(2, hashtext($1))`, step.String()); err != nil {
 				return err
 			}
 			open, err := scan(tx.QueryRow(ctx,
@@ -405,7 +407,10 @@ func (p *Postgres) StopUnit(ctx context.Context, unit, operator string, onlyIfOp
 		return nil, Item{}, Item{}, false, err
 	}
 	err = p.inTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, unit); err != nil {
+		// Key space 1: a unit stop never contends with a step enqueue whose
+		// text hashed equal, since keys 1 and 2 partition the 64-bit advisory
+		// lock space.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(1, hashtext($1))`, unit); err != nil {
 			return err
 		}
 		if onlyIfOpen != nil {
