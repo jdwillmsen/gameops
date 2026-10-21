@@ -248,8 +248,10 @@ Tasks are strictly ordered and independently shippable with lab-provable done co
 
 ---
 
-## 10. Open questions for the owner
+## 10. Decided (orchestrator's calls, 2026-10-21)
 
-1. **Staging chest vs bot inventory:** Should multi-unit builds place a temporary shared `staging-chest` at the build site to buffer gathered/crafted materials, or should units carry all materials directly in their own 36 inventory slots?
-2. **Deep foundation limit:** If ground drops more than 16 blocks (e.g. over a ravine or cliff), should the planner abort the build immediately, or support suspension pillars (bridging across open air)?
-3. **Leftover tool retention:** After crafting hoes or recovering temporary scaffolding and crafting tables, should units return them to the global `store` chest or retain them in inventory for subsequent jobs?
+The owner approved the design and asked for no further questions on these:
+
+1. **Staging chest.** Multi-unit builds use a shared staging chest at the site. The bots craft and place it like any other block; units do not carry every material themselves. Cost if wrong: one extra chest per build.
+2. **Deep foundations.** If the ground drops more than 16 blocks under the footprint, the planner fails the job before any work with `site too deep`. It does not bridge open air. Cost if wrong: such sites need a later bridging task.
+3. **Leftovers.** After a build, units return hoes, crafting tables and recovered scaffolding to the `store` chest. Cost if wrong: units hold fewer spare tools.
