@@ -673,3 +673,76 @@ func TestJobsPublishesCoalesce(t *testing.T) {
 		t.Fatalf("50 publishes produced %d events", got)
 	}
 }
+
+// TestFeedsRenderOncePerChange proves the work and jobs payloads are rendered
+// once and shared: five signed-in streams make the store's Recent and List
+// (the sources) count one call on connect and one more for the next change,
+// not one call per stream.
+func TestFeedsRenderOncePerChange(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
+	var workCalls, jobsCalls atomic.Int32
+	p.SetWorkSource(func(_ context.Context, id string) ([]byte, error) {
+		workCalls.Add(1)
+		return []byte(`{"unit":"` + id + `","items":[]}`), nil
+	})
+	p.SetJobsSource(func(context.Context) ([]byte, error) {
+		jobsCalls.Add(1)
+		return []byte(`{"jobs":[]}`), nil
+	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(authedByHeader))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	const streams = 5
+	authed := make([]<-chan string, streams)
+	for i := range authed {
+		authed[i] = workEvents(t, srv.URL, http.Header{"X-Test-Auth": {"yes"}})
+	}
+	next := func(ch <-chan string) string {
+		select {
+		case s := <-ch:
+			return s
+		case <-time.After(2 * time.Second):
+			t.Fatal("no event")
+			return ""
+		}
+	}
+	// Each stream draws its snapshot, the one-unit work history and the jobs
+	// list on open; the shared cache means 5 viewers read the store once.
+	for _, ch := range authed {
+		if got := next(ch); !strings.HasPrefix(got, "units ") {
+			t.Fatalf("first event %q", got)
+		}
+		if got := next(ch); !strings.HasPrefix(got, "work ") {
+			t.Fatalf("history event %q", got)
+		}
+		if got := next(ch); !strings.HasPrefix(got, "jobs ") {
+			t.Fatalf("jobs on open %q", got)
+		}
+	}
+	if got := workCalls.Load(); got != 1 {
+		t.Errorf("connect rendered work %d times, want 1", got)
+	}
+	if got := jobsCalls.Load(); got != 1 {
+		t.Errorf("connect rendered jobs %d times, want 1", got)
+	}
+
+	p.PublishWork("crew-01")
+	p.PublishJobs()
+	for _, ch := range authed {
+		if got := next(ch); !strings.HasPrefix(got, "work ") {
+			t.Fatalf("after publish, work %q", got)
+		}
+		if got := next(ch); !strings.HasPrefix(got, "jobs ") {
+			t.Fatalf("after publish, jobs %q", got)
+		}
+	}
+	if got := workCalls.Load(); got != 2 {
+		t.Errorf("one change rendered work %d times, want 2 (connect plus change)", got)
+	}
+	if got := jobsCalls.Load(); got != 2 {
+		t.Errorf("one change rendered jobs %d times, want 2 (connect plus change)", got)
+	}
+}
