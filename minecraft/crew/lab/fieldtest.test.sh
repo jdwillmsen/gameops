@@ -4,7 +4,16 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 fail() { echo "fieldtest.test.sh: $*" >&2; exit 1; }
 
+# shellcheck source=fieldtest.sh
 FIELDTEST_LIB=1 source "$here/fieldtest.sh"
+
+in_field() {
+  local x=$1 z=$2
+  if ((x >= -444 && x <= -301)); then ((z >= -500 && z <= -357))
+  elif ((x >= -294 && x <= -151)); then ((z >= -500 && z <= -357))
+  elif ((x >= 150 && x <= 293)); then ((z >= -700 && z <= -357))
+  else return 1; fi
+}
 
 ((${#case_names[@]} >= 20)) || fail "only ${#case_names[@]} cases"
 declare -A seen
@@ -18,12 +27,10 @@ for n in "${case_names[@]}"; do
   if [[ -n ${case_pre[$n]} ]]; then
     [[ ${case_pre[$n]} =~ ^-?[0-9]+\ -?[0-9]+\ -?[0-9]+$ ]] || fail "$n: pre must be 'x y z'"
   fi
-  # Every coordinate must be inside one of the two fields.
+  # Every coordinate must be inside one of the four fields.
   jq -r '[.. | objects | select(has("x") and has("z")) | "\(.x) \(.z)"] | .[]' <<<"$body" |
     while read -r x z; do
-      if ! { ((x >= -294 && x <= -151)) || ((x >= 150 && x <= 293)); } || ((z < -500 || z > -357)); then
-        fail "$n: $x,$z is outside both fields"
-      fi
+      in_field "$x" "$z" || fail "$n: $x,$z is outside all four fields"
     done
   jq -e 'if .template == "gather_and_deposit" and .area then
            ([.area.max.x - .area.min.x, .area.max.y - .area.min.y, .area.max.z - .area.min.z] | all(. < 64))
@@ -36,10 +43,15 @@ done
 [[ $(select_cases 'pad-*' | wc -l) -eq 3 ]] || fail "pad-* should match 3 cases"
 [[ -z $(select_cases 'nothing-*') ]] || fail "unmatched glob should select nothing"
 
-[[ $(nearest_road_z -300) == -360 && $(nearest_road_z -430) == -452 && $(nearest_road_z -600) == -498 ]] || fail "nearest_road_z"
+[[ $(nearest_road_z grounds -300) == -360 && $(nearest_road_z courses -430) == -452 && $(nearest_road_z trees -600) == -498 ]] || fail "nearest_road_z south"
+[[ $(nearest_road_z works -690) == -698 && $(nearest_road_z works -600) == -606 && $(nearest_road_z works -550) == -560 ]] || fail "nearest_road_z works"
+[[ $(side_of -420 -480) == trees && $(side_of -200 -480) == courses && $(side_of 0 -480) == hub &&
+   $(side_of 220 -480) == grounds && $(side_of 220 -640) == works ]] || fail "side_of"
 [[ -z $(route 220 -470 230 -480) ]] || fail "a destination in reach needs no route"
 [[ $(route 300 -493 -277 -437 | tr '\n' ';') == "300 -498;152 -498;152 -438;-154 -438;-154 -452;-277 -452;" ]] || fail "east to west route: $(route 300 -493 -277 -437 | tr '\n' ';')"
 [[ $(route 0 -400 221 -460 | tr '\n' ';') == "0 -438;152 -438;152 -452;221 -452;" ]] || fail "hub to grounds route"
+[[ $(route -277 -437 -420 -480 | tr '\n' ';') == "-277 -452;-291 -452;-291 -438;-303 -438;-303 -498;-420 -498;" ]] || fail "courses to trees route: $(route -277 -437 -420 -480 | tr '\n' ';')"
+[[ $(route 220 -460 253 -640 | tr '\n' ';') == "220 -452;199 -452;199 -560;199 -652;253 -652;" ]] || fail "grounds to works route: $(route 220 -460 253 -640 | tr '\n' ';')"
 
 script="$here/fieldtest.sh"
 code=0; "$script" --bogus >/dev/null 2>&1 || code=$?
