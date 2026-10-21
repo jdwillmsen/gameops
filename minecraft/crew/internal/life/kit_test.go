@@ -214,6 +214,34 @@ func TestAFailedVisitIsLoggedWithoutPositionsAndBackedOff(t *testing.T) {
 	}
 }
 
+// A visit that gave up waiting for the chest's chunk is a failure like any
+// other: the unit does not go back inside the long back-off.
+func TestAKitChunkThatNeverLoadsBacksOffLikeAnyFailure(t *testing.T) {
+	r, visits := kitRig(t)
+	r.l.makeKit = func(bool, int) skill.Skill {
+		v := &visit{r: r, ticks: 2, failure: skill.ErrChestChunkNotLoaded}
+		*visits = append(*visits, v)
+		return v
+	}
+	r.run(kitSettleTicks + 30)
+	if !r.logged("kit_failed") {
+		t.Fatalf("log = %+v", r.log.lines)
+	}
+	for _, l := range r.log.lines {
+		if l.event == "kit_failed" && l.fields["error"] != skill.ErrChestChunkNotLoaded.Error() {
+			t.Errorf("kit_failed error = %v", l.fields["error"])
+		}
+	}
+	r.run(kitFailBackoff - 100)
+	if len(*visits) != 1 {
+		t.Errorf("retried %d times inside the back-off", len(*visits)-1)
+	}
+	r.run(300)
+	if len(*visits) != 2 {
+		t.Errorf("visits = %d, want a second try after the back-off", len(*visits))
+	}
+}
+
 func TestAFightStopsAVisitAndItResumesLater(t *testing.T) {
 	r, visits := kitRig(t)
 	(*visits) = nil
