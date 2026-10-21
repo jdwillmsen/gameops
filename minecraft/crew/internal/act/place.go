@@ -186,7 +186,7 @@ func (a *Actuator) clickable(p protocol.BlockPos, w BlockWorld) (uint32, bool) {
 // in named variants ("teal_bed", "chipped_anvil"), so the families match by
 // suffix; a plain substring would also take "bedrock".
 func interactive(name string) bool {
-	for _, part := range []string{"chest", "door", "gate", "button", "shulker", "furnace"} {
+	for _, part := range []string{"chest", "door", "gate", "button", "shulker", "furnace", "smoker"} {
 		if strings.Contains(name, part) {
 			return true
 		}
@@ -197,7 +197,10 @@ func interactive(name string) bool {
 	return name == "crafting_table" || name == "barrel" || name == "smoker" ||
 		name == "lever" || name == "bed" || name == "anvil" ||
 		name == "enchanting_table" || name == "hopper" || name == "dropper" ||
-		name == "dispenser" || name == "note_block"
+		name == "dispenser" || name == "note_block" || name == "loom" ||
+		name == "grindstone" || name == "stonecutter_block" || name == "cartography_table" ||
+		name == "smithing_table" || name == "brewing_stand" || name == "beacon" ||
+		name == "lectern" || name == "crafter"
 }
 
 // replaceable names the blocks a placement may overwrite; everything else,
