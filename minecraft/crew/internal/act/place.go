@@ -218,6 +218,17 @@ func (a *Actuator) holdItem(item string) (slot int, held protocol.ItemInstance, 
 		return 0, held, ErrNoItem
 	}
 	if slot, held, ok := a.hotbarHolding(id); ok {
+		// A move still pending once the item is already held, as when a late
+		// answer to an abandoned move landed the stack, has nothing left to
+		// do: its refusal must not be read when the hotbar next runs out.
+		if a.move != 0 {
+			if _, done := a.responses[a.move]; done {
+				delete(a.responses, a.move)
+				a.move = 0
+			} else {
+				a.abandonMove()
+			}
+		}
 		return slot, held, nil
 	}
 	if a.move != 0 {
