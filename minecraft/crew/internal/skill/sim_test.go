@@ -153,6 +153,8 @@ type rig struct {
 	chestAt     protocol.BlockPos
 	window      byte
 	opens       int
+	clicks      int // chest-open clicks the skill sent
+	chestClicks int // chest clicks the server received, ignored ones included
 	requests    int
 	chestClosed bool
 
@@ -165,17 +167,21 @@ type rig struct {
 	slowBreak  int
 	slowPickup int
 	slowOnly   string
-	// openDelay holds the ContainerOpen back this many inputs after the click.
-	openDelay     int
-	openIn        int
-	openFor       protocol.BlockPos
-	staleSlots    map[int]slotStack // chest slots the server has but the content hides
-	failWriteAt   int               // writes fail once this many inputs were sent
-	ignoreOpen    bool
-	dropResponses bool
-	rejectWith    uint8
-	correctAt     int
-	correctBy     mgl32.Vec3
+	// openDelay holds the ContainerOpen back this many inputs after the
+	// first click; re-clicks do not restart it.
+	openDelay   int
+	openIn      int
+	openFor     protocol.BlockPos
+	staleSlots  map[int]slotStack // chest slots the server has but the content hides
+	failWriteAt int               // writes fail once this many inputs were sent
+	ignoreOpen  bool
+	// ignoreFirstOpens swallows the first n chest clicks, as a click sent
+	// right after a join can be swallowed.
+	ignoreFirstOpens int
+	dropResponses    bool
+	rejectWith       uint8
+	correctAt        int
+	correctBy        mgl32.Vec3
 }
 
 // timedFill puts a stack in a chest slot once the unit has sent that many
@@ -256,6 +262,7 @@ func (r *rig) Tick(in act.Input) error {
 }
 
 func (r *rig) OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, hash uint32) error {
+	r.clicks++
 	err := r.Actuator.OpenChest(pos, face, hotbar, held, hash)
 	r.pump()
 	return err
@@ -524,7 +531,7 @@ func (r *rig) pickUp(item int32) {
 
 func (r *rig) onClick(p *packet.InventoryTransaction) {
 	u, ok := p.TransactionData.(*protocol.UseItemTransactionData)
-	if !ok || r.ignoreOpen {
+	if !ok {
 		return
 	}
 	if r.world[u.BlockPosition] != "chest" {
@@ -537,8 +544,18 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 	if centre.Sub(eye).Len() > 6 || u.BlockRuntimeID != hash || hash == 0 {
 		return
 	}
+	r.chestClicks++
+	if r.ignoreOpen {
+		return
+	}
+	if r.chestClicks <= r.ignoreFirstOpens {
+		return
+	}
 	if r.openDelay > 0 {
-		r.openIn, r.openFor = r.openDelay, u.BlockPosition
+		// One late answer, already in flight, is not pushed back by a re-click.
+		if r.openIn == 0 {
+			r.openIn, r.openFor = r.openDelay, u.BlockPosition
+		}
 		return
 	}
 	r.openChestNow(u.BlockPosition)

@@ -23,6 +23,12 @@ const (
 	// rejected and the next is tried, so a wrong guess costs one request per
 	// slot and cannot loop.
 	fullStack = 64
+	// The first open click is not always answered, as for one sent right after
+	// a join while the unit still settles into the world, so it is sent again
+	// every redoOpenTicks ticks until the window opens, up to openClicks in
+	// all before the answer window makes a further click moot.
+	redoOpenTicks = 60
+	openClicks    = 4
 )
 
 // ChestWorld is the block store a deposit needs: blocks to walk and the chest's
@@ -63,6 +69,7 @@ type Deposit struct {
 
 	opened   bool
 	waited   int
+	clicks   int
 	names    map[int32]string
 	itemID   int32
 	rejected map[int]bool
@@ -106,7 +113,7 @@ func (d *Deposit) Ready(s belief.Snapshot) error {
 // is forgotten: what was deposited shows in the inventory, which the amount
 // left is read from.
 func (d *Deposit) Resume() {
-	d.phase, d.nav, d.opened, d.waited = dStart, nil, false, 0
+	d.phase, d.nav, d.opened, d.waited, d.clicks = dStart, nil, false, 0, 0
 	d.pending, d.settling, d.drainErr = false, false, nil
 }
 
@@ -222,22 +229,16 @@ func (d *Deposit) idle(a Actuator) outcome {
 
 func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 	if !d.opened {
-		held := holdable(snap, d.item)
-		hash, known := d.world.BlockHash(d.chest)
-		if !known {
-			return d.failed(a, errors.New("the chest's block is not known"))
-		}
-		p := a.Pose()
-		if err := a.SelectHotbar(held.Slot, held); err != nil {
+		if err := d.clickOn(a, snap); err != nil {
 			return d.failed(a, err)
 		}
-		if err := a.OpenChest(d.chest, faceToward(d.chest, eyeOf(p.Feet)), held.Slot, held, hash); err != nil {
-			return d.failed(a, err)
-		}
-		d.opened, d.waited = true, 0
+		d.opened, d.waited, d.clicks = true, 0, 1
 		return d.idle(a)
 	}
 	if open, _, pos := a.Container(); open && pos == d.chest && len(a.ContainerContent()) >= chestSlots {
+		if d.clicks > 1 && d.log != nil {
+			d.log.Info("chest_open_clicks", map[string]any{"clicks": d.clicks})
+		}
 		table := a.ItemTable()
 		id, ok := table[d.item]
 		if !ok {
@@ -253,7 +254,28 @@ func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 		d.phase, d.waited = dDrain, 0
 		return next
 	}
+	// One click can be swallowed, so the same one is sent again while the
+	// window stays shut.
+	if d.clicks < openClicks && d.waited%redoOpenTicks == 0 {
+		if err := d.clickOn(a, snap); err != nil {
+			return d.failed(a, err)
+		}
+		d.clicks++
+	}
 	return d.idle(a)
+}
+
+func (d *Deposit) clickOn(a Actuator, snap belief.Snapshot) error {
+	held := holdable(snap, d.item)
+	hash, known := d.world.BlockHash(d.chest)
+	if !known {
+		return errors.New("the chest's block is not known")
+	}
+	p := a.Pose()
+	if err := a.SelectHotbar(held.Slot, held); err != nil {
+		return err
+	}
+	return a.OpenChest(d.chest, faceToward(d.chest, eyeOf(p.Feet)), held.Slot, held, hash)
 }
 
 // drain waits a few more ticks for a late ContainerOpen, then fails with the
