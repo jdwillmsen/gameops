@@ -1,4 +1,4 @@
-# Crew: builds (hut, wall, farm plot)
+# Crew: builds (hut, wall, farm plot) and automated crafting
 
 **Status:** proposed
 **Date:** 2026-10-21
@@ -10,19 +10,23 @@
 
 ## Why
 
-Today crew units mine, chop, haul and inspect chests. An operator can ask bots to stock 32 oak logs or dig a shaft, but cannot tell them to construct anything.
+Today crew units mine, chop, haul and inspect chests. An operator can ask bots to stock logs or dig a shaft, but cannot instruct them to construct structures or manufacture components.
 
-Step 4 of the roadmap introduces declarative builds: an operator chooses a blueprint, a target place and an orientation. `crew-control` checks a named supplies chest in the ledger, fetches stocked materials with existing task templates, partitions construction steps across free units, and verifies the finished structure with a new block-reading task.
+Step 4 introduces declarative, end-to-end builds: an operator selects a blueprint, a target place and an orientation. Rather than requiring an operator to pre-stock supplies chests, `crew-control` resolves the dependency tree for all materials and tools. Units autonomously gather raw materials from ledger areas, craft intermediate items (planks, sticks, crafting tables, doors, hoes, scaffolding), prepare uneven terrain by extending foundations down to solid ground, erect the structure using adaptive scaffolding, and verify the completed work with block observation.
 
 ## Owner decisions
 
-- **First builds:** a hut, a wall, and a farm plot.
+- **First builds:** a hut with a fitted door, a battlement wall, and a tilled and planted farm plot.
+- **No operator supplies chest:** builds execute end-to-end from natural ledger sources or existing store stock.
 - **Lab only:** operates exclusively on the lab Bedrock server.
-- **No LLM at runtime:** builds are deterministic, recipe-driven declarative plans.
+- **No LLM at runtime:** planning and crafting are deterministic, recipe-driven systems.
+- **No furnace smelting in early builds:** to avoid furnace container ticking, fuel burn curves, and smelting state machines, glass is dropped from early blueprints. Windows use open embrasures.
 
-## 1. Build template format
+---
 
-A versioned JSON blueprint defines a 3D volume in horizontal layers and a block palette.
+## 1. Blueprints & coordinates
+
+Blueprints are versioned JSON files embedded in `crew-control` via `//go:embed blueprints/*.json`.
 
 ### Schema
 
@@ -31,158 +35,221 @@ A versioned JSON blueprint defines a 3D volume in horizontal layers and a block 
   "version": 1,
   "name": "hut",
   "size": {"x": 5, "y": 4, "z": 5},
-  "palette": {"0": "air", "1": "cobblestone", "2": "oak_log"},
+  "palette": {"0": "air", "1": "cobblestone", "2": "oak_planks", "3": "oak_door"},
   "layers": [
     ["11111", "11111", "11111", "11111", "11111"],
-    ["11011", "10001", "10001", "10001", "11111"],
+    ["11311", "10001", "10001", "10001", "11111"],
     ["11011", "10001", "10001", "10001", "11111"],
     ["22222", "22222", "22222", "22222", "22222"]
   ]
 }
 ```
 
-- `version`: format version (`1`).
-- `name`: slug identifier.
-- `size`: dimensions (`x, y, z`).
-- `palette`: maps single characters to Bedrock block names. Key `"0"` is always `"air"`.
-- `layers`: cross-sections from base to top, rows along `z`, characters along `x`.
-- Blueprints are embedded in `crew-control` via `//go:embed blueprints/*.json`.
+- `palette`: single characters mapped to Bedrock block names (`"0"` is always `"air"`).
+- `layers`: horizontal cross-sections from base (`y = 0`) to roof, rows along `z`, characters along `x`.
 
-### Materials and placement
+### Coordinate mapping & rotation
 
-Crew can gather `cobblestone` and `oak_log`, and dig `dirt`; it cannot craft or smelt. Every build therefore names an operator-stocked `supplies` chest place. The operator puts the listed blocks, plus any required tools/items, in that chest before launch. The planner uses ledger stock and existing chest `inspect`/`haul` templates; it does not infer recipes. Stale stock is inspected and a shortfall rejects the build.
-
-- Hut: `cobblestone` and `oak_log` (the doorway is open; no door item).
-- Wall: `cobblestone` only.
-- Farm plot: `dirt`, `oak_log`, a water bucket, and a hoe. No seeds are required; planting is out of scope. A hoe tills dirt by use, it is not a placed block. Water and till actions are new skills and remain dependencies of the farm build.
-
-### Placement and rotation
-
-The job specifies world origin `(X0, Y0, Z0)` and rotation `R ∈ {0°, 90°, 180°, 270°}` (`north`, `east`, `south`, `west`). Local coordinates `(u, v, w)` map to world `(x, y, z)` with uniform height `y = Y0 + v`:
+The job specifies world origin `(X0, Y0, Z0)` and rotation `R ∈ {0°, 90°, 180°, 270°}` (`north`, `east`, `south`, `west`). Local coordinates `(u, v, w)` map to world `(x, y, z)` with `y = Y0 + v`:
 - `0°`: `x = X0 + u`, `z = Z0 + w`
 - `90°`: `x = X0 + size.z - 1 - w`, `z = Z0 + u`
 - `180°`: `x = X0 + size.x - 1 - u`, `z = Z0 + size.z - 1 - w`
 - `270°`: `x = X0 + w`, `z = Z0 + size.x - 1 - u`
 
-The first blueprints avoid directional block states.
-
 ### Blueprints
 
 1. **Hut (5×5×4):**
    - `y = 0` (Floor): 5×5 solid `cobblestone`.
-   - `y = 1` and `y = 2`: `cobblestone` perimeter walls with a 1×2 doorway; 3×3 hollow interior.
-   - `y = 3` (Roof): 5×5 solid `oak_log`.
-2. **Wall (N×3×1):**
-   - Repeatable 8×3×1 segment:
-     - `y = 0` & `y = 1`: 8×1 solid `cobblestone`.
-     - `y = 2`: alternating `cobblestone` and `air` (`10101011`) for battlements.
-   - Tiled along the target axis for runs of length `N`.
-3. **Farm plot (9×9×1):** `y = 0` is dirt with an `oak_log` border and a central water cell from the supplied bucket. Till the dirt cells with the supplied hoe. No lily pad, slab, crafting, or planting is assumed.
+   - `y = 1`: `cobblestone` walls, 3×3 interior air, `oak_door` at front.
+   - `y = 2`: `cobblestone` walls with open window embrasures; upper door space.
+   - `y = 3` (Roof): 5×5 solid `oak_planks`.
+2. **Wall (N×3×1):** Repeatable 8×3×1 segments: `y = 0` & `1` solid `cobblestone`; `y = 2` alternating `cobblestone` and `air` (`10101011`) for battlements.
+3. **Farm plot (9×9×1):** `y = 0` perimeter `oak_log` border, central water cell `(4, 0, 4)`, and 76 tilled `farmland` blocks planted with `wheat`.
 
-## 2. New unit skills
+---
 
-Building requires three new skills in `minecraft/crew/internal/skill/`.
+## 2. Crafting
+
+Crafting transforms raw harvested materials into tools, crafting stations, intermediate parts, and construction blocks.
+
+### Protocol mechanics (gophertunnel v1.62.0)
+
+All protocol mechanics are verified against vendored `github.com/sandertv/gophertunnel@v1.62.0`:
+
+1. **Recipe network IDs (`packet.CraftingData`):**
+   - At join, the server sends `packet.CraftingData` containing `ShapedRecipes` and `ShapelessRecipes`.
+   - Each recipe contains `RecipeNetworkID uint32`, `Input []ItemDescriptorCount`, `Output []ItemStack`, and `Block string`.
+   - `RecipeNetworkID` is dynamic per server boot; it is never hardcoded. Belief indexes these recipes by output item name and station type.
+2. **Crafting requests (`packet.ItemStackRequest`):**
+   - Modern Bedrock crafting uses `ItemStackRequest`.
+   - The client writes a request containing:
+     - `protocol.AutoCraftRecipeStackRequestAction` (or `protocol.CraftRecipeStackRequestAction`) quoting `RecipeNetworkID` and `NumberOfCrafts`.
+     - `protocol.TakeStackRequestAction` taking crafted items from `ContainerCreatedOutput` (Container ID `60` in `protocol/container.go`) into inventory (`ContainerCombinedHotBarAndInventory`, Container ID `12`).
+   - The actuator awaits `packet.ItemStackResponse` matching the request ID for `StatusOK` (`0`).
+3. **2×2 inventory grid vs 3×3 crafting table:**
+   - **2×2 grid:** Executed directly without opening a container window (`Block == ""`). Produces:
+     - `oak_log` (1) → `oak_planks` (4)
+     - `oak_planks` (2) → `stick` (4)
+     - `oak_planks` (4) → `crafting_table` (1)
+     - `torch`, `wooden_slab`
+   - **3×3 crafting table:** Used when `Block == "crafting_table"` (e.g. doors, hoes, scaffolding).
+     - Unit places `crafting_table` in world.
+     - Unit clicks the table with `UseItemActionClickBlock`, receiving `packet.ContainerOpen` (`ContainerTypeWorkbench` = `1`).
+     - Unit sends `ItemStackRequest` with the 3×3 recipe network ID, takes results from `ContainerCreatedOutput`, and sends `packet.ContainerClose` (`0xff`).
+4. **Existing actuator code:** Builds on `act.Deposit` and `act.Withdraw` in `minecraft/crew/internal/act/container.go`, which already handle `ItemStackRequest` and countdown IDs (`nextRequest -= 2`).
+
+### Dependency planner
+
+Resolves items recursively into a recipe DAG:
+1. **Ledger stock:** For each required item, query ledger `Stock` (`docs/specs/2026-10-20-crew-jobs-and-world-ledger-design.md`). If present in `store` or nearby chests, emit a `haul` or `withdraw` step and skip crafting.
+2. **Recursive resolution:** If stock is missing:
+   - For 3×3 recipes, ensure a `crafting_table` is available in inventory or plan its 2×2 crafting and placement.
+   - Recursively expand each input ingredient into ledger stock, sub-recipes, or natural gather steps (e.g. logs from a grove).
+3. **Batching:** Aggregate common prerequisites (e.g. chop 12 logs in one step to supply door, hoe, and table).
+
+---
+
+## 3. Site preparation: foundations & clearing
+
+Lab terrain is rarely flat. Builds handle slopes, hollows, and debris deterministically.
+
+### Bounded clearing (`clear: true`)
+When enabled, units scan the blueprint volume `[min, max]`, mine non-conforming blocks, collect drops, and deposit them in the staging store.
+
+### Deep foundations
+Builds do not require flat ground:
+1. **Footprint probe:** For every column `(x, z)` in the base layer (`y = 0`), the planner checks the block at `y = -1`.
+2. **Solid ground definition:** `dirt`, `grass_block`, `stone`, `cobblestone`, `sand`, `gravel`, or `bedrock`. If the block at `y = -1` is `air`, `water`, or non-solid foliage, the column requires a foundation.
+3. **Downward extension:**
+   - Units step down each open column, placing foundation blocks (defaulting to the base layer material, e.g. `cobblestone`) from `y = -1` downwards until solid ground is reached.
+   - **Depth limit:** Capped at 16 blocks below `Y0`. If solid ground is not reached within 16 blocks (e.g. over a chasm), the job fails during site prep with `site requires foundations deeper than 16 blocks`.
+4. Foundations are placed in Phase 2 before blueprint layers are erected.
+
+---
+
+## 4. Scaffolding: dirt pillars vs Bedrock scaffolding
+
+Units have a reach of 4 blocks. Higher work requires scaffolding. Units use **both** dirt pillars and Bedrock scaffolding (`minecraft:scaffolding`).
+
+### Selection rules
+
+| Scaffolding | Selection rule | Characteristics |
+|---|---|---|
+| **Bedrock scaffolding** (`minecraft:scaffolding`) | **Selected when:**<br>1. Height exceeds 3 blocks above reach, **AND**<br>2. Work spans horizontal runs (>2 blocks), **AND**<br>3. Bamboo and string are in ledger stock or harvest areas. | • Climbed internally without jumping.<br>• Projects horizontally up to 6 blocks unsupported.<br>• Instant teardown: breaking the single base block collapses the whole tower into drops at the unit's feet. |
+| **Dirt pillars** (`minecraft:dirt`) | **Selected when:**<br>1. Vertical lift is short (1–3 blocks), **OR**<br>2. Enclosed 1×1 spaces/corners, **OR**<br>3. Bamboo or string is unavailable. | • Jump-place loop via `skill.Fell`.<br>• Teardown requires step-by-step downward digging.<br>• Zero crafting prerequisites; dirt is universally available. |
+
+### Material acquisition & fallback
+- Recipe: 6 `bamboo` + 1 `string` → 6 `scaffolding` on a 3×3 table.
+  - `bamboo`: broken by hand in a ledger grove.
+  - `string`: gathered from spider drops in mob areas or cobwebs mined with sword/shears.
+- If bamboo or string sources are absent in the ledger, the planner falls back to dirt pillars for all scaffolding.
+
+---
+
+## 5. Farm plot: tilling, planting & seed logistics
+
+The farm plot is a 9×9 agricultural unit requiring water containment, tool crafting, and seed gathering.
+
+### Seed logistics
+1. Farm plot requires `wheat_seeds`.
+2. If `wheat_seeds` are missing in ledger stock (<76):
+   - Enqueue a `gather_seeds` step targeting a grassland ledger area.
+   - Units break `short_grass` and `tall_grass` blocks (~12% Bedrock seed drop rate) until 76 seeds are collected.
+
+### Tool & water logistics
+- **Hoe:** Planner crafts a `wooden_hoe` (2 sticks + 2 planks on 3×3 table).
+- **Water:** Central block `(4, 0, 4)` is filled from a ledger `water_bucket` (or bucket crafted from iron). A single water block hydrates farmland up to 4 blocks horizontally in all directions.
+
+### Execution
+1. Place perimeter `oak_log` border and hollow center.
+2. Place water at `(4, 0, 4)`.
+3. With `wooden_hoe` selected, click dirt top faces with `UseItemActionClickBlock` to convert dirt to `farmland`.
+4. With `wheat_seeds` selected, click farmland top faces to plant `wheat` at stage 0.
+
+---
+
+## 6. End-to-end build workflows
+
+Builds execute across four sequential phases mapped directly onto existing `crew_job` and `crew_job_step` records. No new database tables or schedulers are added.
+
+1. **Phase 1: Materials & Logistics**
+   - Resolve dependency DAG.
+   - Enqueue gather steps (felling logs, mining stone, harvesting grass for seeds, bamboo/string).
+   - Enqueue crafting steps (2×2 for planks/sticks/tables, 3×3 for tools/doors/scaffolding).
+   - Haul supplies to build staging.
+2. **Phase 2: Site Preparation**
+   - If `clear: true`, clear non-conforming blocks in the bounding box.
+   - Foundation pass: extend foundation blocks down to solid ground for all footprint columns.
+3. **Phase 3: Construction**
+   - Bottom-up layer placement (`y = 0` to `y = size.y - 1`). Steps enforce `depends_on`.
+   - Deploy scaffolding (scaffolding blocks or dirt pillars per §4) when blocks exceed reach.
+   - Install functional components: `oak_door`, till farmland with hoe, plant `wheat_seeds`.
+   - Dismantle scaffolding and collect dropped items.
+4. **Phase 4: Validation**
+   - Dispatch `observe_blocks` across the blueprint bounding box.
+   - Compare observed block IDs with the rotated template.
+
+---
+
+## 7. Unit skills
+
+Skills reside in `minecraft/crew/internal/skill/` and actuators in `minecraft/crew/internal/act/`.
 
 ### `place_block`
+Places held block against an adjacent face using `InventoryTransaction` with `UseItemTransactionData`:
+- `ActionType`: `UseItemActionClickBlock` (0).
+- `BlockPosition`: coordinate of existing supporting block (`against`), not empty target.
+- `BlockFace`: target face (1 for top, 0 for bottom, 2–5 for sides).
+- `ClickedPosition`: relative hit coordinates (e.g. `{0.5, 1.0, 0.5}`).
+- `HotBarSlot`, `Hand`, `HeldItem`: slot and stack instance.
+- `BlockRuntimeID`: runtime hash of clicked block from belief store.
+- `ClientPrediction`: `ClientPredictionSuccess`.
 
-Places an inventory item against an adjacent block face.
+### `craft`
+- `Craft2x2(recipeID uint32, count int)`: writes `AutoCraftRecipeStackRequestAction` and takes result from `ContainerCreatedOutput`.
+- `Craft3x3(tablePos protocol.BlockPos, recipeID uint32, count int)`: opens crafting table window, sends crafting request actions, takes result, closes window.
 
-#### Bedrock protocol mechanics (gophertunnel)
-In vendored gophertunnel v1.62.0, `PlaceOnTop` sends an `InventoryTransaction` with `UseItemTransactionData`. Its existing top-face path sets:
-- `ActionType`: `protocol.UseItemActionClickBlock` (0).
-- `TriggerType`: `protocol.TriggerTypePlayerInput`.
-- `BlockPosition`: coordinate of the adjacent existing block (`against`), **not** the empty target cell.
-- `BlockFace`: `1` for the upper face, as `act.PlaceOnTop` does. The six face values in a general placer still need a lab packet check before implementation.
-- `ClickedPosition`: hit vector on the clicked face (e.g. `{0.5, 1.0, 0.5}` for top).
-- `HotBarSlot`, `Hand` and `HeldItem`: selected slot, main hand and the full `ItemInstance` for that slot (including stack network ID), as `act.instance` supplies.
-- `Position`: player eye position (`feet.Add(Vec3{0, 1.62, 0})`).
-- `BlockRuntimeID`: the clicked block runtime ID from the world store, populated from `UpdateBlock`; the store calls this the network hash. It is not an item ID or block-name hash.
-- `ClientPrediction`: `protocol.ClientPredictionSuccess`.
+### `till_and_plant`
+- `Till`: Targets dirt top face (`BlockFace: 1`) with held hoe.
+- `Plant`: Targets farmland top face (`BlockFace: 1`) with held seeds.
 
-Select the slot and aim before sending. `ClickedPosition` is block-relative; reach and confirmation need skill tests and lab proof.
+### `scaffold_pillar`
+- **Dirt mode:** Jump-place dirt beneath feet; mine downward on teardown.
+- **Scaffolding mode:** Places base scaffolding, climbs internally, projects horizontal outriggers up to 6 blocks; single-block base break collapses structure.
 
-#### Failure modes
-- **Occupied:** destination has an entity or solid block; pause and retry.
-- **Out of reach:** navigate to a valid adjacent stand cell.
-- **No support:** order supporting blocks first.
-- **Wrong item:** fail with `item missing`.
+### `observe_blocks`
+Queries belief store over bounding box `[min, max]`, returning `(x, y, z) -> blockName` and unstreamed chunks.
 
-### `fetch`
+---
 
-Optional multi-item wrapper around existing `withdraw`/`haul`: open chest, withdraw requested stacks, close, and report remaining stock via `seen`.
+## 8. Validation and safety
 
-### `pillar_up` (scaffolding)
+1. **Volume containment:** Bounding box and foundation columns must fit inside declared ledger `area`.
+2. **Tolerance:** Default tolerance is `0.0`. Every non-air block must match blueprint; air spaces must contain no debris or temporary scaffolding.
+3. **One repair attempt:** Defective cells trigger one targeted repair step before failing the job.
 
-For blocks beyond ground reach, reuse the jump/place/land sequence already in `skill.Fell`. Its pose loop checks upward clearance and server block confirmation. A build-specific skill still needs safe teardown and material accounting; prove it in the lab before promising arbitrary heights.
+---
 
-## 3. Planner
+## 9. Delivery tasks
 
-Builds use the existing `plan` job kind and `crew_job_step` templates with dependencies; do not add a parallel `build` kind or step store. Example spec: `{"blueprint": "hut", "place": "build-zone-1", "rotation": 0, "clear": false, "tolerance": 0.0}`.
+Tasks are strictly ordered and independently shippable with lab-provable done conditions. Crafting tasks are placed early.
 
-### 1. Material logistics
-Before construction starts:
-1. Tally the blueprint and tool requirements.
-2. Use ledger `Stock` for the named supplies chest; if stale, enqueue existing `inspect` (which reads chests only).
-3. Reject before work if the chest does not contain the full bill. No gather step can make planks, glass, doors, tools, or farmland.
-4. Use existing `haul`/`withdraw` behavior to stage supplies. A multi-item `fetch` is a convenience only if it reuses those operations.
+| # | Task | Scope | Deliverables | Done when |
+|---|---|---|---|---|
+| **1** | **Unit block placement** | `crew` | Generalize actuator placement to 6 faces; `place_block` skill and task. | Unit places cobblestone against a target face in the lab and confirms `UpdateBlock`. |
+| **2** | **Unit crafting actuator (2×2 & 3×3)** | `crew` | Index `packet.CraftingData`; implement `Craft2x2` and `Craft3x3` via `ItemStackRequest`. | Unit crafts planks in 2×2 grid, places crafting table, and crafts `oak_door` via 3×3 grid. |
+| **3** | **Crafting dependency planner** | `crew-control` | Recursive recipe DAG solver; ledger stock lookup; gather/craft job steps. | Request for `oak_door` gathers logs, crafts planks and table, and produces door with no pre-stocked chest. |
+| **4** | **Block observation** | `crew` & `crew-control` | `observe_blocks` skill over belief store; bounding box comparison in `crew-control`. | Bounded volume query returns block IDs and detects test discrepancies with zero false positives. |
+| **5** | **Foundations & clearing** | `crew` & `crew-control` | Uneven ground detection; downward foundation placement to solid ground; bounded clearing. | Unit builds a 5×1 foundation across a 2-block depression, leveling the base to solid ground. |
+| **6** | **Dual-mode scaffolding** | `crew` | Dirt pillar jump-place/mine-down and Bedrock scaffolding climb/outrigger/collapse skills. | Unit builds a pillar >5 blocks high using dirt when isolated, and scaffolding when materials exist, fully recovering all scaffold blocks. |
+| **7** | **Farm cultivation** | `crew` & `crew-control` | Grass breaking for seed logistics; hoe tilling; seed planting skill. | Unit gathers seeds from grass, crafts wooden hoe, tills 9×9 plot around water, and plants wheat seeds. |
+| **8** | **Single-unit wall & hut** | `crew` & `crew-control` | End-to-end execution of Wall and Hut blueprints from raw materials to validation. | Unit gathers stone/wood, crafts door, extends foundations, builds 5×5 hut, and passes `observe_blocks` validation. |
+| **9** | **Multi-unit builds & console** | `crew-control` & Console | Region partitioning; multi-unit coordination; Jobs panel (`Shift-J`) build triggers. | Two units build a 16-block wall in parallel with no overlapping collisions, reporting live progress via SSE. |
 
-### 2. Step decomposition and scheduling
-The planner divides the blueprint into `crew_job_step` records:
-- Order layers bottom-up; each depends on its supporting layer.
-- Split same-layer regions without overlapping unit work.
-- Encode attachment support in existing `depends_on` step keys.
+---
 
-### 3. Retries
-Use the existing scheduler's three attempts and job-scoped cancellation. Permanent placement or material failures fail the job.
+## 10. Open questions for the owner
 
-## 4. Validation
-
-Silent partial success is an anti-goal. Existing `inspect` only opens chests and reports their contents; it cannot inspect arbitrary blocks. Add a named `observe_blocks` unit task/skill backed by the existing block store. It must request/load the blueprint bounding box, return known block names/states and mark unknown cells explicitly; `crew-control` compares that result with the rotated template. Do not claim the chest `inspect` template validates a structure.
-
-### Inspection pass
-1. After placement, enqueue `observe_blocks` for the blueprint box.
-2. The task obtains block updates for the box through the crew connection and reads the existing block store.
-3. It returns observed names/states and unknown cells in its completion event. The current `inspect` chest task is not used for this check.
-
-### Tolerance check
-`crew-control` compares observed world blocks with the rotated blueprint:
-- Non-air blocks must match expected types; interior air must contain no debris.
-- Default tolerance is zero; any unknown cell fails validation.
-- A nonzero tolerance may allow cosmetic differences, never boundary mismatches.
-- Match marks the plan done; mismatch may add one repair round, then fails.
-
-## 5. Safety
-
-Automated builds must never damage existing structures or wander off-bounds.
-
-1. **Confined to declared `area`:** every build job targets an existing `area` place from the ledger. The rotated blueprint's bounding box must fit entirely within `[place.box.min, place.box.max]`. If any block falls outside, the job is rejected on submission.
-2. Units may break only cells explicitly approved by the build plan, including temporary scaffold.
-3. `clear: false` rejects occupied target or interior-air cells. `clear: true` adds a bounded clearing phase and deposits drops in `store`.
-
-## 6. Console
-
-The Jobs panel (`Shift-J`) gains a "Build" option alongside "Parallel demo" and "Stock goal".
-
-- Controls: blueprint, `area` place, supplies chest, rotation, and clear-site toggle.
-- Selecting an area shows its bounds and orientation on the camera.
-- Existing `jobs` SSE reports layer, workers, placed count, and validation.
-
-## 7. Delivery
-
-Delivery is ordered so each task leaves a working capability and later rows depend only on shipped earlier rows.
-
-| Task | Scope | Deliverables | Done when |
-|---|---|---|---|
-| **1. Unit placement** | `crew` | Generalize the existing top-face actuator path; `place_block` skill and task template. | A unit places supplied cobblestone on a supported target and observes server confirmation. Validate other faces separately before enabling them. |
-| **2. Block observation** | `crew` & `crew-control` | `observe_blocks` task over the existing block store; exact-box validation. | A bounded box returns block names and explicit unknown cells. |
-| **3. Single-unit wall** | `crew` & `crew-control` | Wall blueprint, plan steps, supplies chest withdrawal, block observation check. | Agate builds an 8×3×1 cobblestone wall inside an `area`; `observe_blocks` confirms it. |
-| **4. Scaffolding & clearing** | `crew` | Reuse `Fell` pillar movement in a build skill; bounded clearing with observed drops. | A unit clears only declared cells, builds above reach, and returns/accounts for scaffold material. |
-| **5. Multi-unit planner** | `crew-control` | Region splitting and layer dependencies using existing plan steps and ledger stock. | Two units build a 16-block wall from one declared supplies chest without overlap. |
-| **6. Hut, farm & console** | `crew`, `crew-control` & Console | Supplied-material hut; water-bucket and hoe use tasks for farm; build controls and telemetry. | Operator launches each supported template; block observation verifies blocks and farm task reports tilling separately. |
-
-## 8. Open questions for the owner
-
-1. Should the target area be flat, or should builds extend foundations to solid ground?
-2. Should scaffold use dirt (then mined back) or Bedrock scaffolding?
-3. Should farm plots stop after tilling, or include planting and seed logistics?
-
+1. **Staging chest vs bot inventory:** Should multi-unit builds place a temporary shared `staging-chest` at the build site to buffer gathered/crafted materials, or should units carry all materials directly in their own 36 inventory slots?
+2. **Deep foundation limit:** If ground drops more than 16 blocks (e.g. over a ravine or cliff), should the planner abort the build immediately, or support suspension pillars (bridging across open air)?
+3. **Leftover tool retention:** After crafting hoes or recovering temporary scaffolding and crafting tables, should units return them to the global `store` chest or retain them in inventory for subsequent jobs?
