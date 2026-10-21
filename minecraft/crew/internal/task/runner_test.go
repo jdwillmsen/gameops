@@ -569,3 +569,37 @@ func TestTaskCarriesTheLastChestItsSkillClosed(t *testing.T) {
 		t.Errorf("the public record leaks chest contents: %s", b)
 	}
 }
+
+// A unit that already carries the item must not show that stack as progress:
+// the roster once read 61/16 for a gather of 16.
+func TestGatherProgressCountsOnlyWhatTheTaskGathered(t *testing.T) {
+	held := 45
+	r := NewRunner(func(Template) ([]skill.Skill, error) {
+		return []skill.Skill{&fakeSkill{name: "mine_block", steps: 100}}, nil
+	}, &fakeAct{}, func() belief.Snapshot {
+		return belief.Snapshot{Spawned: true, Inventory: []belief.Item{{Slot: 1, Name: "cobblestone", Count: held}}}
+	}, time.Minute, &captureLog{})
+	tk, err := r.Submit(Template{Template: "gather_and_deposit", Item: "cobblestone", Qty: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.step(context.Background())
+	if got := stateOf(t, r, tk.ID).Progress; got != 0 {
+		t.Fatalf("progress = %d before anything was gathered, want 0", got)
+	}
+	held = 52
+	r.step(context.Background())
+	if got := stateOf(t, r, tk.ID).Progress; got != 7 {
+		t.Errorf("progress = %d, want the 7 gathered", got)
+	}
+	held = 45 + 25
+	r.step(context.Background())
+	if got := stateOf(t, r, tk.ID).Progress; got != 16 {
+		t.Errorf("progress = %d, want it held at the target 16", got)
+	}
+	held = 45
+	r.step(context.Background())
+	if got := stateOf(t, r, tk.ID).Progress; got != 16 {
+		t.Errorf("progress = %d after the deposit emptied the inventory, want 16", got)
+	}
+}
