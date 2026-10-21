@@ -14,8 +14,11 @@ import (
 
 // observeWithin is how far the unit may be from the box it reads, in chunks:
 // inside the server's view distance the box's sub-chunks have been streamed to
-// the unit, so their cells read back instead of unknown.
-const observeWithin = 8
+// the unit, so their cells read back instead of unknown. The view distance is
+// set per deployment (MC_VIEW_DISTANCE), so this is a floor rather than
+// following it: any setting of 4 or more streams the whole box, and a box up
+// to about 128 cells long still reads whole from beside its middle.
+const observeWithin = 4
 
 // observeRange is that distance in blocks.
 const observeRange = observeWithin * 16

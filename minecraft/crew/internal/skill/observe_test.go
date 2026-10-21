@@ -101,7 +101,7 @@ func TestObserveWalksUntilTheBoxIsStreamedIn(t *testing.T) {
 		t.Fatalf("status %v, err %v", st, err)
 	}
 	if r.ticks == before {
-		t.Error("the unit read the box without walking within eight chunks of it")
+		t.Error("the unit read the box without walking within range of it")
 	}
 	b, ok := o.(BlockReporter).Blocks()
 	if !ok || len(b.Palette) != 1 || b.Palette[0] != "air" {
@@ -111,9 +111,9 @@ func TestObserveWalksUntilTheBoxIsStreamedIn(t *testing.T) {
 
 func TestObserveRunLengthsOutlastASingleByte(t *testing.T) {
 	w := simWorld{}
-	w.fill("dirt", 0, 1, 0, 199, 1, 0)
-	r := newRig(t, w, mgl32.Vec3{99.5, 1, 60.5})
-	o := NewObserve(w, r.self, protocol.BlockPos{0, 1, 0}, protocol.BlockPos{199, 1, 0})
+	w.fill("dirt", 0, 1, 0, 64, 2, 0)
+	r := newRig(t, w, mgl32.Vec3{32.5, 1, 30.5})
+	o := NewObserve(w, r.self, protocol.BlockPos{0, 1, 0}, protocol.BlockPos{64, 2, 0})
 	if st, err := r.run(o, 50); st != Done || err != nil {
 		t.Fatalf("status %v, err %v", st, err)
 	}
@@ -121,9 +121,9 @@ func TestObserveRunLengthsOutlastASingleByte(t *testing.T) {
 	if !ok {
 		t.Fatal("the box was never read")
 	}
-	// 200 needs two bytes of uvarint; a coder that stopped at 127 would send
+	// 130 needs two bytes of uvarint; a coder that stopped at 127 would send
 	// two runs and describe the box wrongly.
-	if got := expand(t, b.Cells); len(got) != 1 || got[0] != (pair{200, 0}) {
+	if got := expand(t, b.Cells); len(got) != 1 || got[0] != (pair{130, 0}) {
 		t.Errorf("cells = %v", got)
 	}
 }
@@ -140,7 +140,7 @@ func TestObserveWalksToAStandableSpotWhenTheBoxCentreIsSolid(t *testing.T) {
 		t.Fatalf("status %v, err %v", st, err)
 	}
 	if r.ticks == before {
-		t.Error("the unit read the box without walking within eight chunks of it")
+		t.Error("the unit read the box without walking within range of it")
 	}
 	b, ok := o.(BlockReporter).Blocks()
 	if !ok || len(b.Palette) != 1 || b.Palette[0] != "stone" {
@@ -176,7 +176,7 @@ func TestObserveFailsWhenTheReportCannotTravel(t *testing.T) {
 			}
 		}
 	}
-	r := newRig(t, w, mgl32.Vec3{30.5, 1, 30.5})
+	r := newRig(t, w, mgl32.Vec3{17.5, 1, 8.5})
 	o := NewObserve(w, r.self, protocol.BlockPos{0, 0, 0}, protocol.BlockPos{15, 15, 15})
 	st, err := r.run(o, 50)
 	if st != Failed || err == nil || err.Error() != "observation too large" {
