@@ -31,11 +31,13 @@ func (i Ingredient) Matches(name string) bool {
 }
 
 // Recipe is one recipe from the server's CraftingData. Block is the station
-// the recipe needs: "crafting_table" for a 3x3 recipe, empty for the 2x2
-// player grid, which works anywhere.
+// the server names, which is crafting_table for every crafting recipe;
+// NeedsTable says which of them a player's own 2x2 grid cannot make.
 type Recipe struct {
 	NetworkID uint32
 	Block     string
+	// wide says the recipe spans more than the 2x2 player grid.
+	wide bool
 	// Ingredients are merged by item or tag, in the server's order.
 	Ingredients []Ingredient
 	// OutputCount is how many of the output one craft makes.
@@ -43,7 +45,9 @@ type Recipe struct {
 }
 
 // NeedsTable says whether the recipe only fits a crafting table's 3x3 grid.
-func (r Recipe) NeedsTable() bool { return r.Block == "crafting_table" }
+// Bedrock tags every crafting recipe crafting_table, the 2x2 ones the player
+// grid makes included, so the grid the recipe spans decides it, not Block.
+func (r Recipe) NeedsTable() bool { return r.Block == "crafting_table" && r.wide }
 
 // Book is the server's recipe book, safe to store from the read loop while a
 // skill reads it.
@@ -65,10 +69,10 @@ func (b *Book) Store(pk *packet.CraftingData, items []protocol.ItemEntry) {
 	}
 	indexed := make(map[string][]Recipe)
 	for _, r := range pk.ShapelessRecipes {
-		index(indexed, names, r.RecipeNetworkID, r.Block, r.Input, r.Output)
+		index(indexed, names, r.RecipeNetworkID, r.Block, filled(r.Input) > 4, r.Input, r.Output)
 	}
 	for _, r := range pk.ShapedRecipes {
-		index(indexed, names, r.RecipeNetworkID, r.Block, r.Input, r.Output)
+		index(indexed, names, r.RecipeNetworkID, r.Block, r.Width > 2 || r.Height > 2, r.Input, r.Output)
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -92,7 +96,7 @@ func (b *Book) Recipes(item string) []Recipe {
 // could not work with it: an output the item table does not name cannot be
 // asked for, and an ingredient named only by a MoLang expression cannot be
 // matched against the inventory.
-func index(out map[string][]Recipe, names map[int32]string, id uint32, block string, in []protocol.ItemDescriptorCount, outputs []protocol.ItemStack) {
+func index(out map[string][]Recipe, names map[int32]string, id uint32, block string, wide bool, in []protocol.ItemDescriptorCount, outputs []protocol.ItemStack) {
 	if id == 0 || len(outputs) == 0 {
 		return
 	}
@@ -100,7 +104,7 @@ func index(out map[string][]Recipe, names map[int32]string, id uint32, block str
 	if !ok || name == "" {
 		return
 	}
-	r := Recipe{NetworkID: id, Block: block, OutputCount: int(outputs[0].Count)}
+	r := Recipe{NetworkID: id, Block: block, wide: wide, OutputCount: int(outputs[0].Count)}
 	for _, d := range in {
 		var ing Ingredient
 		switch desc := d.Descriptor.(type) {
@@ -136,6 +140,18 @@ func index(out map[string][]Recipe, names map[int32]string, id uint32, block str
 		return
 	}
 	out[name] = append(out[name], r)
+}
+
+// filled counts a shapeless recipe's ingredient cells, which is what decides
+// whether it fits the player's 2x2 grid.
+func filled(in []protocol.ItemDescriptorCount) int {
+	n := 0
+	for _, d := range in {
+		if _, empty := d.Descriptor.(*protocol.InvalidItemDescriptor); !empty {
+			n += max(int(d.Count), 1)
+		}
+	}
+	return n
 }
 
 func trim(n string) string {
