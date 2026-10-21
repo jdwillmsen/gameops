@@ -296,6 +296,7 @@ func (a *Actuator) Died() {
 	a.cont = container{}
 	a.responses = map[int32]uint8{}
 	a.reqItem = map[int32]int32{}
+	a.abandoned = map[int32]bool{}
 	a.move = 0
 }
 
@@ -340,6 +341,12 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 		// a withdraw — its own-inventory slots are folded into a.inv: no
 		// slot packet follows the requests the unit issues itself.
 		for _, r := range p.Responses {
+			if a.abandoned[r.RequestID] {
+				// The move was given up on before its answer came; the answer
+				// settles nothing and must not touch the inventory.
+				delete(a.abandoned, r.RequestID)
+				continue
+			}
 			a.responses[r.RequestID] = r.Status
 			item := a.reqItem[r.RequestID]
 			delete(a.reqItem, r.RequestID)
