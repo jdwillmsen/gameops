@@ -23,8 +23,8 @@ const radius = Number(arg('radius', '4'));
 const windowS = Number(arg('window', '30'));
 const settleTimeoutS = Number(arg('settle-timeout', '120'));
 const gl = arg('gl', 'swiftshader');
-if (!chrome || ports.length === 0) {
-  console.error('need --chrome and --ports');
+if (!chrome || ports.length === 0 || !(viewers >= 1)) {
+  console.error('need --chrome, --ports and --viewers of at least 1');
   process.exit(2);
 }
 const glArgs = {
@@ -56,6 +56,11 @@ const renderer = await pages[0].evaluate(() => {
   return ext ? c.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null;
 });
 console.error(`renderer: ${renderer}`);
+if (gl === 'gpu' && (!renderer || /swiftshader|llvmpipe/i.test(renderer))) {
+  console.error('--gl gpu but Chrome is not rendering on a GPU');
+  await browser.close();
+  process.exit(1);
+}
 
 const settled = await Promise.all(pages.map((p) =>
   p.waitForFunction(() => window.__stats.settledMs !== null, null, { timeout: settleTimeoutS * 1000 })
