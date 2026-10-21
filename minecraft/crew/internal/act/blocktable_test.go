@@ -59,23 +59,43 @@ func TestStepOffAPathOntoStoneIsOneSixteenthWithNoJump(t *testing.T) {
 	}
 }
 
-// A chest is inset a fortieth from every side and 0.95 high.
-func TestAChestStopsAUnitAtItsInsetFaceAndCanBeStoodOn(t *testing.T) {
+// The server holds a unit 0.875 up on a chest inset a sixteenth from every
+// side. A chest modelled taller and less inset stops a walking unit short of
+// the real face, and a corrected unit on top of one is left unsupported, so
+// the prediction falls through the chest and the server pulls it back.
+func TestAChestStopsAUnitAtItsInsetFace(t *testing.T) {
 	w := shaped{{0, 0, 2}: {"chest", nil}}
 	a, _, _ := southward(t, w, 40, false)
-	// Walked into from the north the unit meets the face at z=2.025.
-	if p := a.Pose(); p.Feet.Z() > 2.025-halfWidth+1e-3 || p.Feet.Z() < 2.025-halfWidth-1e-3 || p.Feet.Y() != 0 {
+	// Walked into from the north the unit meets the face at z=2.0625.
+	near(t, "z", float64(a.Pose().Feet.Z()), 2.0625-halfWidth, 1e-3)
+	if p := a.Pose(); p.Feet.Y() != 0 {
 		t.Errorf("pose %v, want held at the chest's face", p.Feet)
 	}
-	// 0.95 is more than a step, so only a jump gets on top.
+}
+
+func TestAUnitJumpingOntoAChestRestsAtItsTrueHeight(t *testing.T) {
+	w := shaped{{0, 0, 2}: {"chest", nil}}
 	_, _, trail := southward(t, w, 40, true)
-	ontop := false
+	onchest := false
 	for _, p := range trail {
-		if p.OnGround && p.Feet.Y() == 0.95 {
-			ontop = true
+		if p.OnGround && p.Feet.Y() == 0.875 {
+			onchest = true
 		}
 	}
-	if !ontop {
-		t.Error("a jumping unit never stood on the chest")
+	if !onchest {
+		t.Error("a jumping unit never rested at 0.875 on the chest")
+	}
+}
+
+func TestAUnitStandsStillOnAChestWithoutFallingThrough(t *testing.T) {
+	w := shaped{{0, 0, 2}: {"chest", nil}}
+	a, _ := newAct(w, Pose{Feet: mgl32.Vec3{0.5, 0.875, 2.5}})
+	for i := 0; i < 20; i++ {
+		if err := a.Tick(Input{}); err != nil {
+			t.Fatal(err)
+		}
+		if p := a.Pose(); !p.OnGround || p.Feet.Y() != 0.875 {
+			t.Fatalf("tick %d: pose %+v, want standing on the chest at 0.875", i, p)
+		}
 	}
 }

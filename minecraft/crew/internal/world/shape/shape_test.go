@@ -172,7 +172,7 @@ func centreTop(bs []Box) float32 {
 // one dropped on their middle.
 func TestMeasuredPartialBlocksRestAUnitAtTheMeasuredHeight(t *testing.T) {
 	for name, want := range map[string]float32{
-		"trapped_chest": 0.95, "soul_sand": 0.875, "mud": 0.875, "daylight_detector": 0.375,
+		"chest": 0.875, "trapped_chest": 0.875, "ender_chest": 0.875, "soul_sand": 0.875, "mud": 0.875, "daylight_detector": 0.375,
 		"composter": 0.125, "brewing_stand": 0.875, "flower_pot": 0.375, "bell": 0.8125,
 		"sculk_sensor": 0.5, "hopper": 0.6875, "cauldron": 0.3125, "turtle_egg": 0.45,
 		"waterlily": 0.09375, "grindstone": 1,
@@ -205,14 +205,14 @@ func TestWithoutAFallbackAnUnknownBlockIsACubeAndWithOneItAsksIt(t *testing.T) {
 	old := Fallback
 	t.Cleanup(func() { Fallback = old })
 	Fallback = nil
-	if got := Boxes("chest", nil); len(got) != 1 || got[0] != Full() {
-		t.Errorf("chest with no table = %v", got)
+	if got := Boxes("grass_path", nil); len(got) != 1 || got[0] != Full() {
+		t.Errorf("grass_path with no table = %v", got)
 	}
 	Fallback = func(name string, _ map[string]any) ([]Box, bool) {
-		return []Box{{Max: [3]float32{1, 0.5, 1}}}, name == "chest"
+		return []Box{{Max: [3]float32{1, 0.5, 1}}}, name == "grass_path"
 	}
-	if got := Boxes("chest", nil); got[0].Max[1] != 0.5 {
-		t.Errorf("chest = %v, want the table's", got)
+	if got := Boxes("grass_path", nil); got[0].Max[1] != 0.5 {
+		t.Errorf("grass_path = %v, want the table's", got)
 	}
 	if got := Boxes("stone", nil); got[0] != Full() {
 		t.Errorf("stone = %v, want a cube when the table does not know it", got)
