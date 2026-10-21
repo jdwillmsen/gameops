@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/blueprints"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/blueprint"
 )
 
@@ -86,7 +86,9 @@ func TestCoursesFitServerLimits(t *testing.T) {
 func TestBlueprintsFitServerLimits(t *testing.T) {
 	for _, name := range []string{"small_house", "redstone_sample"} {
 		t.Run(name, func(t *testing.T) {
-			bp, err := blueprint.Load(filepath.Join("../../blueprints", name+".json"))
+			// Stamping goes through the embedded copy, the way the
+			// nightly job's image reads it.
+			bp, err := blueprint.LoadFS(blueprints.Files, name+".json")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -318,7 +320,7 @@ func TestRotateStatesFourTurnsIdentity(t *testing.T) {
 // encoding/json decodes numbers as float64, and a state that misses the
 // numeric cases in rotateState would silently keep its old facing.
 func TestBlueprintRotationThroughLoad(t *testing.T) {
-	bp, err := blueprint.Load(filepath.Join("../../blueprints", "small_house.json"))
+	bp, err := blueprint.LoadFS(blueprints.Files, "small_house.json")
 	if err != nil {
 		t.Fatal(err)
 	}
