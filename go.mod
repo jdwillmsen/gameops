@@ -2,7 +2,7 @@ module github.com/jdwillmsen/gameops
 
 go 1.27
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/coder/websocket v1.8.15
