@@ -565,6 +565,34 @@ func TestStepQueuedOnAUnitThatWentAwayMovesWithoutSpendingAnAttempt(t *testing.T
 	}
 }
 
+// A pinned step belongs to its unit: the work stays with the unit that went
+// offline instead of moving to another one.
+func TestStepQueuedOnAnOfflineFixedUnitStaysOnIt(t *testing.T) {
+	r := newRig(t, "crew-01", "crew-02")
+	s := step("a")
+	s.Unit = "crew-01"
+	j := r.job(s)
+	r.offline["crew-01"] = true
+	r.tick()
+	got := r.get(j.ID)
+	old := r.item(got, "a")
+	if old.Unit != "crew-01" {
+		t.Fatalf("queued on %s", old.Unit)
+	}
+	r.tick()
+	got = r.get(j.ID)
+	now := r.item(got, "a")
+	if now.ID != old.ID || now.Unit != "crew-01" {
+		t.Fatalf("step = %+v on %s", byKey(got, "a"), now.Unit)
+	}
+	if st := byKey(got, "a"); st.State != StepQueued || st.Attempts != 1 {
+		t.Fatalf("step = %+v", st)
+	}
+	if it, _ := r.work.Get(ctx, old.ID); it.State != work.Queued {
+		t.Fatalf("work = %s", it.State)
+	}
+}
+
 func TestDeliveredStepOnAnOfflineUnitIsLeftAlone(t *testing.T) {
 	r := newRig(t, "crew-01", "crew-02")
 	j := r.job(step("a"))
