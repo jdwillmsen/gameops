@@ -161,27 +161,34 @@ func (s *craftServer) react(pk packet.Packet) {
 	}
 }
 
-// answer replies to a craft request: the consumed stacks lose their count,
-// the crafted stack appears in the destination with a fresh ID the tracker
-// cannot name, and so stays invisible to belief, exactly as on the server.
+// answer replies to a stack request: a placement names the cell that took
+// the items and the source stack's smaller count, and a craft names the
+// emptied cells of the grid and the stack the result lands in.
 func (s *craftServer) answer(req protocol.ItemStackRequest) {
 	s.answers++
 	var slots []protocol.StackResponseSlotInfo
+	var grid []protocol.StackResponseSlotInfo
 	for _, action := range req.Actions {
 		switch act := action.(type) {
-		case *protocol.ConsumeStackRequestAction:
-			var ref belief.Item
+		case *protocol.PlaceStackRequestAction:
+			// The stack that paid for the cell has that many items less.
 			for _, it := range s.tracker.Snapshot().Inventory {
-				if it.Slot == int(act.Source.Slot) {
-					ref = it
+				if it.Slot != int(act.Source.Slot) {
+					continue
 				}
+				slots = append(slots, protocol.StackResponseSlotInfo{
+					Slot: act.Source.Slot, StackNetworkID: it.StackNetworkID,
+					Count: byte(it.Count - int(act.Count)),
+				})
 			}
-			left := 0
-			if ref.Count > int(act.Count) {
-				left = ref.Count - int(act.Count)
-			}
-			slots = append(slots, protocol.StackResponseSlotInfo{
-				Slot: act.Source.Slot, StackNetworkID: ref.StackNetworkID, Count: byte(left),
+			s.nextID++
+			grid = append(grid, protocol.StackResponseSlotInfo{
+				Slot: act.Destination.Slot, StackNetworkID: s.nextID, Count: act.Count,
+			})
+		case *protocol.ConsumeStackRequestAction:
+			// The cell is empty once the craft has consumed it.
+			grid = append(grid, protocol.StackResponseSlotInfo{
+				Slot: act.Source.Slot, StackNetworkID: act.Source.StackNetworkID, Count: 0,
 			})
 		case *protocol.TakeStackRequestAction:
 			s.nextID++
@@ -192,10 +199,16 @@ func (s *craftServer) answer(req protocol.ItemStackRequest) {
 	}
 	s.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
 		RequestID: req.RequestID,
-		ContainerInfo: []protocol.StackResponseContainerInfo{{
-			Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
-			SlotInfo:  slots,
-		}},
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{
+				Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo:  slots,
+			},
+			{
+				Container: protocol.FullContainerName{ContainerID: protocol.ContainerCraftingInput},
+				SlotInfo:  grid,
+			},
+		},
 	}}})
 }
 
@@ -206,6 +219,34 @@ func (s *craftServer) requests() []protocol.ItemStackRequest {
 	for _, pk := range s.got {
 		if r, ok := pk.(*packet.ItemStackRequest); ok {
 			out = append(out, r.Requests...)
+		}
+	}
+	return out
+}
+
+// placements are the requests that put the ingredients into the grid.
+func placements(reqs []protocol.ItemStackRequest) []protocol.ItemStackRequest {
+	var out []protocol.ItemStackRequest
+	for _, r := range reqs {
+		if len(r.Actions) == 0 {
+			continue
+		}
+		if _, ok := r.Actions[0].(*protocol.PlaceStackRequestAction); ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// craftRequests are the requests that ask the server to make the item.
+func craftRequests(reqs []protocol.ItemStackRequest) []protocol.ItemStackRequest {
+	var out []protocol.ItemStackRequest
+	for _, r := range reqs {
+		if len(r.Actions) == 0 {
+			continue
+		}
+		if _, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction); ok {
+			out = append(out, r)
 		}
 	}
 	return out
@@ -229,11 +270,17 @@ func TestCraftMakesPlanksUntilTheCount(t *testing.T) {
 		t.Errorf("progress = %d, want 8 planks", got)
 	}
 	reqs := s.requests()
-	if len(reqs) != 2 {
-		t.Fatalf("%d craft requests, want 2", len(reqs))
+	// The ingredients go into the grid first, so every craft is two
+	// requests: the placement and the craft itself.
+	if got := len(placements(reqs)); got != 2 {
+		t.Fatalf("%d placements, want 2", got)
 	}
-	for _, r := range reqs {
-		cr, ok := r.Actions[0].(*protocol.AutoCraftRecipeStackRequestAction)
+	made := craftRequests(reqs)
+	if len(made) != 2 {
+		t.Fatalf("%d craft requests, want 2", len(made))
+	}
+	for _, r := range made {
+		cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
 		if !ok || cr.RecipeNetworkID != craftPlanksRecipe {
 			t.Errorf("craft action = %+v", r.Actions[0])
 		}
@@ -268,11 +315,12 @@ func TestCraftUsesACraftingTableWithinReach(t *testing.T) {
 		t.Errorf("progress = %d, want one hoe", got)
 	}
 	reqs := s.requests()
-	if len(reqs) != 1 {
-		t.Fatalf("%d craft requests, want 1", len(reqs))
+	made := craftRequests(reqs)
+	if len(made) != 1 {
+		t.Fatalf("%d craft requests, want 1", len(made))
 	}
-	if cr, ok := reqs[0].Actions[0].(*protocol.AutoCraftRecipeStackRequestAction); !ok || cr.RecipeNetworkID != craftHoeRecipe {
-		t.Errorf("craft action = %+v", reqs[0].Actions[0])
+	if cr, ok := made[0].Actions[0].(*protocol.CraftRecipeStackRequestAction); !ok || cr.RecipeNetworkID != craftHoeRecipe {
+		t.Errorf("craft action = %+v", made[0].Actions[0])
 	}
 	// The skill clicked the table and closed the window it opened.
 	clicked, closed := false, false
