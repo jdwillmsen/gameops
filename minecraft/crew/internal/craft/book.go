@@ -13,10 +13,21 @@ import (
 )
 
 // Ingredient is one item a recipe consumes, by the name belief gives the
-// same item in the inventory.
+// same item in the inventory. A recipe may name a tag instead of an item,
+// which stands for many of the items the inventory holds.
 type Ingredient struct {
 	Name  string
+	Tag   Tag
 	Count int
+}
+
+// Matches says whether the item the inventory holds pays for this
+// ingredient: the named item, or any item the tag covers.
+func (i Ingredient) Matches(name string) bool {
+	if i.Tag != "" {
+		return i.Tag.Matches(name)
+	}
+	return i.Name == name
 }
 
 // Recipe is one recipe from the server's CraftingData. Block is the station
@@ -25,7 +36,7 @@ type Ingredient struct {
 type Recipe struct {
 	NetworkID uint32
 	Block     string
-	// Ingredients are merged by item name, in the server's order.
+	// Ingredients are merged by item or tag, in the server's order.
 	Ingredients []Ingredient
 	// OutputCount is how many of the output one craft makes.
 	OutputCount int
@@ -99,18 +110,19 @@ func index(out map[string][]Recipe, names map[int32]string, id uint32, block str
 		case *protocol.DefaultItemDescriptor:
 			ing = Ingredient{Name: trim(desc.Name), Count: int(d.Count)}
 		case *protocol.ItemTagItemDescriptor:
-			// A tag stands for many items and the inventory holds concrete
-			// names, so a tag ingredient never matches one.
-			ing = Ingredient{Name: trim(desc.Tag), Count: int(d.Count)}
+			// A tag stands for many items and the inventory holds
+			// concrete names, so the tag is kept and the item is matched
+			// against it.
+			ing = Ingredient{Tag: Tag(trim(desc.Tag)), Count: int(d.Count)}
 		default:
 			return
 		}
-		if ing.Count < 1 || ing.Name == "" {
+		if ing.Count < 1 || (ing.Name == "" && ing.Tag == "") {
 			continue
 		}
 		merged := false
 		for i := range r.Ingredients {
-			if r.Ingredients[i].Name == ing.Name {
+			if r.Ingredients[i].Name == ing.Name && r.Ingredients[i].Tag == ing.Tag {
 				r.Ingredients[i].Count += ing.Count
 				merged = true
 				break

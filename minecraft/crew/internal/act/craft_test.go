@@ -97,6 +97,25 @@ func newCrafter(inv []belief.Item) (*Actuator, *sink) {
 	return a, s
 }
 
+// taggedBook holds one recipe whose ingredient is the tag given, so a craft
+// can be tried against a tag the client may or may not know.
+func taggedBook(tag string) *craft.Book {
+	b := craft.NewBook()
+	b.Store(&packet.CraftingData{
+		ClearRecipes: true,
+		ShapelessRecipes: []protocol.ShapelessRecipe{{
+			RecipeID: "stick",
+			Input: []protocol.ItemDescriptorCount{{
+				Descriptor: &protocol.ItemTagItemDescriptor{Tag: tag},
+				Count:      2,
+			}},
+			Output:          []protocol.ItemStack{{ItemType: protocol.ItemType{NetworkID: craftStick}, Count: 4}},
+			RecipeNetworkID: recipeStick,
+		}},
+	}, craftItemEntries)
+	return b
+}
+
 // answering is a fake server that replies to the unit's stack requests from
 // its own goroutine, as the read loop would, so a craft waiting for its
 // answer crosses a real poll cycle. statuses is the queue of answers, one
@@ -217,6 +236,55 @@ func TestCraftPlanksSendsTheRecipeConsumeAndTakeActions(t *testing.T) {
 		take.Destination.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory ||
 		take.Destination.Slot != 0 || take.Destination.StackNetworkID != 0 {
 		t.Errorf("take = %+v, want the created output into the first empty slot", r.Actions[2])
+	}
+}
+
+func TestCraftSticksFromPlanksOfAnyWood(t *testing.T) {
+	// The stick recipe asks for the planks tag, so any planks the unit
+	// holds pay for it.
+	inv := []belief.Item{{Slot: 4, Name: "oak_planks", Count: 8, StackNetworkID: 44}}
+	a, s := newCrafter(inv)
+	defer stopAnswering(startAnswering(a, s))
+
+	made, err := a.Craft("stick", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made != 4 {
+		t.Errorf("made = %d, want 4 sticks", made)
+	}
+	r := craftRequest(t, s, 0)
+	if len(r.Actions) != 3 {
+		t.Fatalf("request = %+v with %d actions", r, len(r.Actions))
+	}
+	cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
+	if !ok || cr.RecipeNetworkID != recipeStick {
+		t.Errorf("craft action = %+v", r.Actions[0])
+	}
+	consume, ok := r.Actions[1].(*protocol.ConsumeStackRequestAction)
+	if !ok || consume.Count != 2 ||
+		consume.Source.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory ||
+		consume.Source.Slot != 4 || consume.Source.StackNetworkID != 44 {
+		t.Errorf("consume = %+v, want two planks from slot 4", r.Actions[1])
+	}
+	take, ok := r.Actions[2].(*protocol.TakeStackRequestAction)
+	if !ok || take.Count != 4 {
+		t.Errorf("take = %+v, want the four sticks", r.Actions[2])
+	}
+}
+
+func TestCraftFailsWhenTheTagIsOneTheClientDoesNotKnow(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	a.ItemNames(craftItemEntries)
+	a.Crafting(taggedBook("minecraft:wool"), func() []belief.Item {
+		return []belief.Item{{Slot: 4, Name: "white_wool", Count: 8, StackNetworkID: 44}}
+	})
+
+	if _, err := a.Craft("stick", 1); !errors.Is(err, ErrMissingIngredients) {
+		t.Fatalf("err = %v, want ErrMissingIngredients", err)
+	}
+	if len(s.got) != 0 {
+		t.Error("a craft the client cannot match still sent a packet")
 	}
 }
 
