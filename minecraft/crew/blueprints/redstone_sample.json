@@ -1,0 +1,239 @@
+{
+  "name": "redstone_sample",
+  "kind": "redstone",
+  "size": {
+    "x": 5,
+    "y": 2,
+    "z": 3
+  },
+  "palette": [
+    {
+      "name": "air"
+    },
+    {
+      "name": "stone"
+    },
+    {
+      "name": "lever",
+      "states": {
+        "lever_direction": "up_east_west",
+        "open_bit": false
+      }
+    },
+    {
+      "name": "unpowered_repeater",
+      "states": {
+        "direction": 3,
+        "repeater_delay": 0
+      }
+    },
+    {
+      "name": "redstone_lamp"
+    },
+    {
+      "name": "redstone_wire"
+    }
+  ],
+  "layers": [
+    "000000111001100",
+    "000000254003300"
+  ],
+  "build_order": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "z": 0
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "z": 1
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "z": 1
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "z": 1
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "z": 1
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "z": 1
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "z": 2
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "z": 2
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "z": 2
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "z": 2
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "z": 2
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "z": 0
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "z": 0
+    },
+    {
+      "x": 2,
+      "y": 1,
+      "z": 0
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "z": 0
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "z": 0
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "z": 1
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "z": 1
+    },
+    {
+      "x": 2,
+      "y": 1,
+      "z": 1
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "z": 1
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "z": 1
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "z": 2
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "z": 2
+    },
+    {
+      "x": 2,
+      "y": 1,
+      "z": 2
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "z": 2
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "z": 2
+    }
+  ],
+  "materials": [
+    {
+      "item": "lever",
+      "count": 1
+    },
+    {
+      "item": "redstone_lamp",
+      "count": 1
+    },
+    {
+      "item": "redstone_wire",
+      "count": 1
+    },
+    {
+      "item": "stone",
+      "count": 5
+    },
+    {
+      "item": "unpowered_repeater",
+      "count": 2
+    }
+  ],
+  "checks": [
+    {
+      "set": {
+        "x": 1,
+        "y": 1,
+        "z": 1
+      },
+      "block": {
+        "name": "lever",
+        "states": {
+          "lever_direction": "up_east_west",
+          "open_bit": true
+        }
+      },
+      "expect": {
+        "x": 3,
+        "y": 1,
+        "z": 1
+      },
+      "expected": {
+        "name": "lit_redstone_lamp"
+      }
+    }
+  ]
+}
