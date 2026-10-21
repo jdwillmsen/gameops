@@ -8,7 +8,7 @@
 #            grounds (x 150..293, z -700..-557)
 #   signs    name-tag labels at spawn, the hub's gates and the fields
 #
-# usage: courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs
+# usage: courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs|blueprint <args...>
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
 #   for the cluster lab's server pod.
 #
@@ -27,7 +27,7 @@ set -euo pipefail
 
 confirm=false
 prebuilt=
-usage="usage: courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs"
+usage="usage: courses.sh [--confirm-overwrite] [--plan <file>] <lab> grounds|courses|trees|works|signs|blueprint <args...>"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;
@@ -45,6 +45,8 @@ done
 
 lab=${1:?$usage}
 field=${2:?$usage}
+shift 2
+generator_args=("$field" "$@")
 here=$(cd "$(dirname "$0")" && pwd)
 
 if [[ $lab == k8s:*/* ]]; then
@@ -77,7 +79,7 @@ trap 'rm -f "$plan"' EXIT
 if [[ -n $prebuilt ]]; then
   cp "$prebuilt" "$plan"
 else
-  (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses "$field") >"$plan"
+  (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses "${generator_args[@]}") >"$plan"
 fi
 
 mapfile -t areas < <(sed -n 's/^# area //p' "$plan")
