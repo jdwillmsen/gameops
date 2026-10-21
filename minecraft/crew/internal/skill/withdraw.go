@@ -59,6 +59,7 @@ type wPhaseState struct {
 	nav     *navigator
 	opened  bool
 	waited  int
+	clicks  int
 	names   map[int32]string
 	taken   map[string]int
 	full    bool
@@ -116,7 +117,7 @@ func (w *Withdraw) Full() bool { return w.phase.full }
 // short and may be taken once more, up to what the inventory has room for.
 func (w *Withdraw) Resume() {
 	ph := &w.phase
-	ph.p, ph.nav, ph.opened, ph.waited = wStart, nil, false, 0
+	ph.p, ph.nav, ph.opened, ph.waited, ph.clicks = wStart, nil, false, 0, 0
 	ph.pending, ph.settling, ph.drain = false, false, nil
 }
 
@@ -215,22 +216,16 @@ func (w *Withdraw) walk(a Actuator) outcome {
 func (w *Withdraw) open(a Actuator, snap belief.Snapshot) outcome {
 	ph := &w.phase
 	if !ph.opened {
-		held := holdable(snap, "")
-		hash, known := w.world.BlockHash(w.chest)
-		if !known {
-			return w.failed(a, errors.New("the chest's block is not known"))
-		}
-		p := a.Pose()
-		if err := a.SelectHotbar(held.Slot, held); err != nil {
+		if err := w.clickOn(a, snap); err != nil {
 			return w.failed(a, err)
 		}
-		if err := a.OpenChest(w.chest, faceToward(w.chest, eyeOf(p.Feet)), held.Slot, held, hash); err != nil {
-			return w.failed(a, err)
-		}
-		ph.opened, ph.waited = true, 0
+		ph.opened, ph.waited, ph.clicks = true, 0, 1
 		return w.idle(a)
 	}
 	if open, _, pos := a.Container(); open && pos == w.chest && len(a.ContainerContent()) >= chestSlots {
+		if ph.clicks > 1 && w.log != nil {
+			w.log.Info("chest_open_clicks", map[string]any{"clicks": ph.clicks})
+		}
 		table := a.ItemTable()
 		ph.names = itemNames(table)
 		ph.p = wTake
@@ -241,7 +236,28 @@ func (w *Withdraw) open(a Actuator, snap belief.Snapshot) outcome {
 		ph.p, ph.waited = wDrain, 0
 		return next
 	}
+	// One click can be swallowed, so the same one is sent again while the
+	// window stays shut.
+	if ph.clicks < openClicks && ph.waited%redoOpenTicks == 0 {
+		if err := w.clickOn(a, snap); err != nil {
+			return w.failed(a, err)
+		}
+		ph.clicks++
+	}
 	return w.idle(a)
+}
+
+func (w *Withdraw) clickOn(a Actuator, snap belief.Snapshot) error {
+	held := holdable(snap, "")
+	hash, known := w.world.BlockHash(w.chest)
+	if !known {
+		return errors.New("the chest's block is not known")
+	}
+	p := a.Pose()
+	if err := a.SelectHotbar(held.Slot, held); err != nil {
+		return err
+	}
+	return a.OpenChest(w.chest, faceToward(w.chest, eyeOf(p.Feet)), held.Slot, held, hash)
 }
 
 // drain waits a few more ticks for a late ContainerOpen so the window is

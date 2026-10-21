@@ -83,8 +83,69 @@ func TestDepositFailsWhenTheChestDoesNotOpen(t *testing.T) {
 	if st != Failed || err == nil || !strings.Contains(err.Error(), "chest did not open") {
 		t.Fatalf("status %v, err %v", st, err)
 	}
+	if r.clicks != openClicks {
+		t.Errorf("clicks = %d, want %d, the first and its re-sends", r.clicks, openClicks)
+	}
 	if r.requests != 0 {
 		t.Error("it deposited into a chest that never opened")
+	}
+}
+
+func TestDepositReSendsAClickTheServerSwallows(t *testing.T) {
+	w := chestWorld()
+	r := depositRig(t, w, 6, 5)
+	r.ignoreFirstOpens = 1
+	log := &capture{}
+	d := NewDepositChest(w, r.self, chestPos, "cobblestone", 16, WithLogger(log))
+	if err := d.Ready(r.self()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := r.run(d, 400)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.clicks != 2 {
+		t.Errorf("clicks = %d, want the first click and its re-send", r.clicks)
+	}
+	if r.chest[0].item != idCobblestone || r.chest[0].count != 16 {
+		t.Errorf("chest slot 0 = %+v", r.chest[0])
+	}
+	if open, _, _ := r.Container(); open || !r.chestClosed {
+		t.Error("the chest was left open")
+	}
+	if len(log.lines) != 2 || log.lines[0].event != "chest_open_clicks" || log.lines[1].event != "chest_contents" {
+		t.Fatalf("log = %+v", log.lines)
+	}
+	clicks, _ := log.lines[0].fields["clicks"].(int)
+	if clicks != 2 {
+		t.Errorf("logged clicks = %v, want 2", log.lines[0].fields)
+	}
+	for k := range log.lines[0].fields {
+		if k != "clicks" {
+			t.Errorf("logged field %q: no coordinates or contents belong here", k)
+		}
+	}
+}
+
+func TestDepositOpensOnTheFirstClick(t *testing.T) {
+	w := chestWorld()
+	r := depositRig(t, w, 6, 5)
+	log := &capture{}
+	d := NewDepositChest(w, r.self, chestPos, "cobblestone", 16, WithLogger(log))
+	if err := d.Ready(r.self()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := r.run(d, 400)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.clicks != 1 {
+		t.Errorf("clicks = %d, want 1", r.clicks)
+	}
+	for _, l := range log.lines {
+		if l.event == "chest_open_clicks" {
+			t.Error("a single-click open was logged as needing re-sends")
+		}
 	}
 }
 
