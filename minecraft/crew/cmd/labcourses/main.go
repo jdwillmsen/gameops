@@ -49,7 +49,7 @@ func main() {
 		for i := 0; i < len(args); i++ {
 			if args[i] == "-o" {
 				if i+1 == len(args) {
-					fail("usage: labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>")
+					usage("usage: labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>")
 				}
 				outDir = args[i+1]
 				i++
@@ -58,7 +58,7 @@ func main() {
 			pos = append(pos, args[i])
 		}
 		if len(pos) != 3 {
-			fail("usage: labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>")
+			usage("usage: labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>")
 		}
 		if outDir == "" {
 			outDir = "minecraft/crew/blueprints"
@@ -87,7 +87,7 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "blueprint" {
 		if len(os.Args) != 5 && len(os.Args) != 6 {
-			fail("usage: labcourses blueprint <name> <x> <z> [rot 0|90|180|270]")
+			usage("usage: labcourses blueprint <name> <x> <z> [rot 0|90|180|270]")
 		}
 		bp, err := blueprint.LoadFS(blueprints.Files, os.Args[2]+".json")
 		if err != nil {
@@ -96,21 +96,21 @@ func main() {
 		warn(bp)
 		x, err := strconv.Atoi(os.Args[3])
 		if err != nil {
-			fail("labcourses: invalid x coordinate")
+			usage("labcourses: invalid x coordinate")
 		}
 		z, err := strconv.Atoi(os.Args[4])
 		if err != nil {
-			fail("labcourses: invalid z coordinate")
+			usage("labcourses: invalid z coordinate")
 		}
 		rot := 0
 		if len(os.Args) == 6 {
 			rot, err = strconv.Atoi(os.Args[5])
 			if err != nil {
-				fail("labcourses: invalid rotation")
+				usage("labcourses: invalid rotation")
 			}
 		}
 		if rot != 0 && rot != 90 && rot != 180 && rot != 270 {
-			fail("labcourses: rotation must be 0, 90, 180 or 270")
+			usage("labcourses: rotation must be 0, 90, 180 or 270")
 		}
 		printBlueprint(bp, x, z, rot)
 		return
@@ -119,13 +119,11 @@ func main() {
 		os.Exit(writePlans(os.Args[2:]))
 	}
 	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: labcourses grounds|courses|trees|works|signs|blueprint <name> <x> <z> [rot]|blueprint-import <file> <name> <kind>|-o <dir> <field>...")
-		os.Exit(2)
+		usage("usage: labcourses grounds|courses|trees|works|signs|blueprint <name> <x> <z> [rot]|blueprint-import [-o <dir>] <file> <name> <kind>|-o <dir> <field>...")
 	}
 	c, ok := courses[os.Args[1]]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "labcourses: unknown field %q (want grounds, courses, trees, works or signs)\n", os.Args[1])
-		os.Exit(2)
+		usage(fmt.Sprintf("labcourses: unknown field %q (want grounds, courses, trees, works or signs)", os.Args[1]))
 	}
 	if err := render(os.Stdout, c); err != nil {
 		fmt.Fprintln(os.Stderr, "labcourses:", err)
@@ -133,7 +131,12 @@ func main() {
 	}
 }
 
-func fail(message string) { fmt.Fprintln(os.Stderr, message); os.Exit(2) }
+// fail reports a runtime failure — load, import, IO — with exit code 1;
+// usage keeps exit code 2 for a malformed command line, so scripts can
+// tell a broken run from a broken invocation.
+func fail(message string) { fmt.Fprintln(os.Stderr, message); os.Exit(1) }
+
+func usage(message string) { fmt.Fprintln(os.Stderr, message); os.Exit(2) }
 
 func warn(bp *blueprint.Blueprint) {
 	for _, w := range bp.Warnings() {
