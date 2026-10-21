@@ -546,10 +546,13 @@ It exits 0 only when every selected case passed, 1 otherwise and 2 for bad
 arguments. The cases cover goto onto each ledge, across each trench and up
 each jump step, into the shapes cell and onto pads 1, 7 and 13, plus a
 cobblestone gather in the quarry, an oak gather in the grove and a haul between
-two storage chests. `--list` prints the names; `--units crew-04,crew-05`
-limits the units; `--reset grounds|courses --confirm-overwrite` rebuilds a
-field first (the gather and haul cases deplete stocked chests and fell the
-grove's oaks).
+two storage chests. In the tree field they fell fixed oaks 1, 2 and 3 (each
+confined to one trunk's box) and the dense wood, depositing into a lumber-yard
+chest; in the works field they cross the 3-, 2- and 1-wide bridges, climb to
+the landing at y 77 and pass through a gates-cell iron door. `--list` prints
+the names; `--units crew-04,crew-05` limits the units; `--reset
+grounds|courses|trees|works --confirm-overwrite` rebuilds a field first (the
+gather and haul cases deplete stocked chests, fell oaks and fell the grove).
 
 - A unit is used only when nothing is queued or running on it and nobody but
   this run has touched it for 120 seconds (`FIELDTEST_QUIET_S`), so a load test

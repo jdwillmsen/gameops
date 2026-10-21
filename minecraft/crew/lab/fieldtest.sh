@@ -3,8 +3,9 @@
 # case. Run it after the fields are built (courses.sh); --reset rebuilds one
 # first.
 #
-# usage: fieldtest.sh [--list] [--units crew-04,crew-05] [--reset grounds|courses
-#                      --confirm-overwrite] k8s:<namespace> [case-glob] [timeout-s]
+# usage: fieldtest.sh [--list] [--units crew-04,crew-05]
+#                      [--reset grounds|courses|trees|works --confirm-overwrite]
+#                      k8s:<namespace> [case-glob] [timeout-s]
 #   case-glob  bash glob over case names, default '*' (for example 'drops-*')
 #   timeout-s  how long each task may run before it is cancelled, default 300
 #   --list     prints the case names matching the glob and exits, touching nothing
@@ -34,8 +35,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 #   expect  done or failed
 # A goto that is expected to be done is also verified on the server. Cells are
 # standing positions: feet y, so one above the block's top surface.
-# Fields: courses at x -294..-151, grounds at x 150..293; cell (i,j) starts at
-# x0+6+46i, z0+6+46j with z0 -500.
+# Fields: trees at x -444..-301, courses at x -294..-151, grounds at x
+# 150..293 and works at z -700..-557; cell (i,j) starts at x0+6+46i,
+# z0+6+46j with z0 -500 for the southern fields and -700 for works.
 cases_table() {
   cat <<'EOF'
 # courses: drops cell (-288,-494)
@@ -71,6 +73,20 @@ pad-13||goto -268 64 -382|done
 gather-cobble-quarry|221 64 -460|{"template":"gather_and_deposit","item":"cobblestone","qty":16,"area":{"min":{"x":210,"y":64,"z":-486},"max":{"x":233,"y":79,"z":-463}},"chest":{"x":160,"y":64,"z":-440}}|done
 gather-oak-grove|153 64 -470|{"template":"gather_and_deposit","item":"oak_log","qty":12,"area":{"min":{"x":156,"y":64,"z":-494},"max":{"x":195,"y":76,"z":-455}},"chest":{"x":164,"y":64,"z":-440}}|done
 haul-storage|158 64 -446|{"template":"haul","items":{"cobblestone":8,"oak_log":8},"from":[{"x":162,"y":64,"z":-444}],"to":{"x":168,"y":64,"z":-440}}|done
+# trees: fixed oaks 1-3 in cell (0,0), each confined to its own trunk, into
+# the lumber yard's first chest; then the dense wood in cell (0,1)
+fell-oak-1|-430 64 -498|{"template":"gather_and_deposit","item":"oak_log","qty":4,"area":{"min":{"x":-435,"y":64,"z":-491},"max":{"x":-425,"y":70,"z":-481}},"chest":{"x":-388,"y":64,"z":-398}}|done
+fell-oak-2|-418 64 -498|{"template":"gather_and_deposit","item":"oak_log","qty":6,"area":{"min":{"x":-423,"y":64,"z":-491},"max":{"x":-413,"y":72,"z":-481}},"chest":{"x":-388,"y":64,"z":-398}}|done
+fell-oak-3|-406 64 -498|{"template":"gather_and_deposit","item":"oak_log","qty":12,"area":{"min":{"x":-411,"y":64,"z":-491},"max":{"x":-401,"y":80,"z":-481}},"chest":{"x":-388,"y":64,"z":-398}}|done
+fell-dense-wood|-420 64 -452|{"template":"gather_and_deposit","item":"oak_log","qty":8,"area":{"min":{"x":-438,"y":64,"z":-448},"max":{"x":-399,"y":76,"z":-409}},"chest":{"x":-388,"y":64,"z":-398}}|done
+# works: bridges cell (2,1), north to south over the 3-, 2- and 1-wide decks
+bridge-3-wide|253 64 -640|goto 253 64 -617|done
+bridge-2-wide|258 64 -640|goto 258 64 -617|done
+bridge-1-wide|263 64 -640|goto 263 64 -617|done
+# works: climbing cell (1,1), the landing at y 76 puts feet at 77
+climb-landing||goto 211 77 -642|done
+# works: gates cell (0,1), north to south through row 0's iron door
+gate-door|161 64 -642|goto 161 64 -638|done
 EOF
 }
 
@@ -122,7 +138,7 @@ die() {
 
 usage_exit() {
   echo "fieldtest.sh: $*" >&2
-  echo "usage: fieldtest.sh [--list] [--units a,b] [--reset grounds|courses --confirm-overwrite] k8s:<namespace> [case-glob] [timeout-s]" >&2
+  echo "usage: fieldtest.sh [--list] [--units a,b] [--reset grounds|courses|trees|works --confirm-overwrite] k8s:<namespace> [case-glob] [timeout-s]" >&2
   exit 2
 }
 
@@ -134,7 +150,7 @@ parse_args() {
       --list) list=true ;;
       --confirm-overwrite) confirm=true ;;
       --reset)
-        (($# >= 2)) || usage_exit "--reset needs grounds or courses"
+        (($# >= 2)) || usage_exit "--reset needs grounds, courses, trees or works"
         reset=$2
         shift
         ;;
@@ -148,8 +164,8 @@ parse_args() {
     esac
     shift
   done
-  if [[ -n $reset && $reset != grounds && $reset != courses ]]; then
-    usage_exit "--reset wants grounds or courses, got '$reset'"
+  if [[ -n $reset && $reset != grounds && $reset != courses && $reset != trees && $reset != works ]]; then
+    usage_exit "--reset wants grounds, courses, trees or works, got '$reset'"
   fi
   if [[ -n $reset ]] && ! $confirm; then
     usage_exit "--reset replaces a field in the shared world; add --confirm-overwrite"
@@ -173,47 +189,162 @@ parse_args() {
   fi
 }
 
-# Road geometry shared by both fields: horizontal roads run between the cell
-# rows, one vertical road along each field's hub side, and the hub's gate lane
-# crosses both at lane_z. Everything on them is clear ground.
-road_zs=(-498 -452 -406 -360)
+# Road geometry of the four fields. The three southern fields share their row
+# spacing; works sits a field further north and has its own rows. Horizontal
+# roads run between the cell rows, each field has a vertical road on its hub
+# side, and everything on them is clear ground.
+south_road_zs=(-498 -452 -406 -360)
+works_road_zs=(-698 -652 -606 -560)
 lane_z=-438
-edge_x() { if [[ $1 == grounds ]]; then echo 152; else echo -154; fi; }
+works_row_z=-560
+
+# A unit's field, from its x and z: works is north of grounds and trees west
+# of courses, so x alone cannot tell the east fields apart.
 side_of() {
-  if (($1 >= 150)); then echo grounds; elif (($1 <= -151)); then echo courses; else echo hub; fi
+  local x=$1 z=$2
+  if ((x >= 150)); then
+    if ((z <= -557)); then echo works; else echo grounds; fi
+  elif ((x <= -295)); then echo trees
+  elif ((x <= -151)); then echo courses
+  else echo hub
+  fi
 }
+
+road_rows() {
+  if [[ $1 == works ]]; then echo "${works_road_zs[*]}"; else echo "${south_road_zs[*]}"; fi
+}
+
 nearest_road_z() {
-  local z=$1 best=${road_zs[0]} r
-  for r in "${road_zs[@]}"; do
+  local field=$1 z=$2 best r
+  local -a rows
+  read -ra rows <<<"$(road_rows "$field")"
+  best=${rows[0]}
+  for r in "${rows[@]}"; do
     if (($(abs $((z - r))) < $(abs $((z - best))))); then best=$r; fi
   done
   echo "$best"
 }
 abs() { echo "${1#-}"; }
 
+# The fields form a chain: trees - courses - hub - grounds - works. A crossing
+# leaves each field on this side's vertical road and enters the next on its
+# own; grounds and works share the x 199 road, where the path north is.
+chain_index() {
+  case $1 in
+    trees) echo 0 ;;
+    courses) echo 1 ;;
+    hub) echo 2 ;;
+    grounds) echo 3 ;;
+    works) echo 4 ;;
+  esac
+}
+
+chain_next() {
+  case $1:$2 in
+    trees:*) echo courses ;;
+    courses:1) echo hub ;;
+    courses:-1) echo trees ;;
+    hub:1) echo grounds ;;
+    hub:-1) echo courses ;;
+    grounds:1) echo works ;;
+    grounds:-1) echo hub ;;
+    works:*) echo grounds ;;
+  esac
+}
+
+# The vertical road a field leaves or enters on, for direction 1 (toward works)
+# or -1 (toward trees).
+port_x() {
+  case $1:$2 in
+    trees:*) echo -303 ;;
+    courses:1) echo -154 ;;
+    courses:-1) echo -291 ;;
+    grounds:1) echo 199 ;;
+    grounds:-1) echo 152 ;;
+    works:*) echo 199 ;;
+  esac
+}
+
+# The row a crossing between two fields runs along.
+cross_z() {
+  case $1:$2 in
+    trees:courses | courses:trees) echo "$lane_z" ;;
+    courses:hub | hub:courses | hub:grounds | grounds:hub) echo "$lane_z" ;;
+    grounds:works | works:grounds) echo "$works_row_z" ;;
+  esac
+}
+
+route_last=""
+emit_point() {
+  [[ $1 == "$route_last" ]] && return 0
+  echo "$1"
+  route_last=$1
+}
+
 # Prints the waypoints "x z" from the unit's position "px pz" to the road
 # point beside the destination "dx dz", one per line. The destination itself
 # is left to the task. A unit only knows the terrain near it and fields are full
 # of solid blocks, so it travels along roads rather than in a straight line.
 route() {
-  local px=$1 pz=$2 dx=$3 dz=$4 ps ds zrp zrd
-  ps=$(side_of "$px")
-  ds=$(side_of "$dx")
-  zrd=$(nearest_road_z "$dz")
-  if [[ $ps == "$ds" && $ps != hub ]] && (($(abs $((px - dx))) <= 64 && $(abs $((pz - dz))) <= 64)); then
+  local px=$1 pz=$2 dx=$3 dz=$4 ps ds dir f next bz ex row zrp zrd
+  route_last=""
+  ps=$(side_of "$px" "$pz")
+  ds=$(side_of "$dx" "$dz")
+  if [[ $ps == "$ds" && $ps != hub ]] &&
+    (($(abs $((px - dx))) <= 64 && $(abs $((pz - dz))) <= 64)); then
     return 0
   fi
-  if [[ $ps == hub ]]; then
-    echo "$px $lane_z"
-  else
-    zrp=$(nearest_road_z "$pz")
-    echo "$px $zrp"
-    echo "$(edge_x "$ps") $zrp"
-    if [[ $ps != "$ds" ]]; then echo "$(edge_x "$ps") $lane_z"; fi
+  if [[ $ps == "$ds" ]]; then
+    if [[ $ps == hub ]]; then
+      emit_point "$px $lane_z"
+      return 0
+    fi
+    zrp=$(nearest_road_z "$ps" "$pz")
+    zrd=$(nearest_road_z "$ps" "$dz")
+    emit_point "$px $zrp"
+    emit_point "$(port_x "$ps" 1) $zrp"
+    emit_point "$(port_x "$ps" 1) $zrd"
+    emit_point "$dx $zrd"
+    return 0
   fi
-  if [[ $ps != "$ds" ]]; then echo "$(edge_x "$ds") $lane_z"; fi
-  echo "$(edge_x "$ds") $zrd"
-  echo "$dx $zrd"
+
+  if (($(chain_index "$ps") < $(chain_index "$ds"))); then dir=1; else dir=-1; fi
+  # Leave the source field: locally out to a road row, along it to the port,
+  # then up or down the port to the crossing.
+  if [[ $ps == hub ]]; then
+    emit_point "$px $lane_z"
+  else
+    zrp=$(nearest_road_z "$ps" "$pz")
+    emit_point "$px $zrp"
+    emit_point "$(port_x "$ps" "$dir") $zrp"
+  fi
+
+  # Cross each field in turn. An intermediate field is crossed on the road row
+  # nearest the destination, so most of the final approach is already behind it.
+  f=$ps
+  while [[ $f != "$ds" ]]; do
+    next=$(chain_next "$f" "$dir")
+    bz=$(cross_z "$f" "$next")
+    if [[ $f != hub ]]; then
+      emit_point "$(port_x "$f" "$dir") $bz"
+    fi
+    if [[ $next != hub ]]; then
+      ex=$(port_x "$next" "$(( -dir ))")
+      emit_point "$ex $bz"
+      if [[ $next != "$ds" ]]; then
+        row=$(nearest_road_z "$next" "$dz")
+        emit_point "$ex $row"
+        emit_point "$(port_x "$next" "$dir") $row"
+      fi
+    fi
+    f=$next
+  done
+
+  if [[ $ds != hub ]]; then
+    zrd=$(nearest_road_z "$ds" "$dz")
+    emit_point "$(port_x "$ds" "$(( -dir ))") $zrd"
+    emit_point "$dx $zrd"
+  fi
 }
 
 # Sourced by the unit test: stop before touching a cluster.
