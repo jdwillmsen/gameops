@@ -571,6 +571,88 @@ gather and haul cases deplete stocked chests, fell oaks and fell the grove).
   checks the table (unique names, valid JSON, coordinates inside a field, area
   spans) and the argument handling without a cluster.
 
+### Crew blueprints
+
+Blueprint JSON lives in `blueprints/<name>.json`. Each file has a `name`, a
+`kind` (`house`, `redstone`, `farm` or `infrastructure`), an `x/y/z` size,
+palette entries containing Bedrock block names and optional `states`, and one
+compact `layers` string per Y level. A layer stores X fastest, then Z; each
+character indexes the palette through
+`0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_`. Layers
+are bottom-up. `build_order` lists every `{x,y,z}` cell in placement order, so
+supporting blocks can precede torches, doors, ladders, redstone and buttons.
+`materials` is checked against the blocks (air is omitted and a two-part door
+counts once). Sizes are limited to 48 blocks per axis and the compact palette
+to 64 entries.
+
+For example, the sample redstone check uses this shape:
+
+```json
+{
+  "name": "redstone_sample",
+  "kind": "redstone",
+  "size": {"x": 5, "y": 2, "z": 3},
+  "palette": [
+    {"name": "air"},
+    {"name": "stone"},
+    {"name": "lever", "states": {"lever_direction": "up_east_west", "open_bit": false}},
+    {"name": "unpowered_repeater", "states": {"direction": 3, "repeater_delay": 0}},
+    {"name": "redstone_lamp"},
+    {"name": "redstone_wire"}
+  ],
+  "layers": ["..."],
+  "build_order": [{"x": 1, "y": 0, "z": 1}],
+  "materials": [{"item": "stone", "count": 5}],
+  "checks": [{
+    "set": {"x": 1, "y": 1, "z": 1},
+    "block": {"name": "lever", "states": {"lever_direction": "up_east_west", "open_bit": true}},
+    "expect": {"x": 3, "y": 1, "z": 1},
+    "expected": {"name": "lit_redstone_lamp"}
+  }]
+}
+```
+
+The abbreviated arrays above are illustrative; the complete checked-in
+blueprints include every layer cell and build-order position. Import a Bedrock
+little-endian `.mcstructure` from the repository root with:
+
+```
+go run ./minecraft/crew/cmd/labcourses blueprint-import house.mcstructure house infrastructure
+```
+
+The importer reads `size`, the first `structure.block_indices` layer and
+`structure.palette.default.block_palette`, then writes the normalized JSON
+under `minecraft/crew/blueprints/`. Stamp a named blueprint at X/Z, optionally
+rotated in quarter turns, using the same guarded lab runner as the fields:
+
+```
+minecraft/crew/lab/courses.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod> blueprint small_house 0 -800 90
+```
+
+Stamp plans include the same `# area` headers as other fields. Rotation
+updates the common Bedrock facing, direction, lever, rail, cardinal and pillar
+axis states.
+
+On the BDS 1.26 lab there is no console-only way to place a working repeater;
+every candidate was tried live and left the lamp unlit while an identical
+lever-wire-lamp control lit:
+
+- `unpowered_repeater` next to a lever switched on, in any orientation;
+- `powered_repeater` placed directly: it reads back as powered but emits
+  nothing (even a freshly re-placed lamp beside it stays dark) and it decays
+  back to `unpowered_repeater` on its own;
+- a block update forced under it (dirt swapped for stone) and a neighbour
+  block placed and removed;
+- a powered wire (signal 15) feeding its input;
+- `structure save` + `structure load` of a lever-on circuit, a load of a
+  lever-off circuit followed by switching the loaded lever on, and `/clone`
+  of the live circuit.
+
+A lever plus adjacent `redstone_wire` does light a lamp, so the redstone
+sample's check follows that proven path while keeping two repeaters as placed
+examples for the day a server update fixes console placement. The validator
+warns whenever a palette contains a repeater.
+
 ### Operator overlay
 
 The page draws a game-style overlay from `/v1/state`, polled once a second:
