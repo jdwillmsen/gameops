@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/blueprint"
 )
 
 // Every command must land in a loaded chunk, stay under the fill limit, and
@@ -80,6 +83,47 @@ func TestCoursesFitServerLimits(t *testing.T) {
 	}
 }
 
+func TestBlueprintsFitServerLimits(t *testing.T) {
+	for _, name := range []string{"small_house", "redstone_sample"} {
+		t.Run(name, func(t *testing.T) {
+			bp, err := blueprint.Load(filepath.Join("../../blueprints", name+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			areas, b := blueprintCommands(bp, 0, -800, 90)
+			if len(areas) > 10 {
+				t.Fatalf("%d ticking areas, server allows 10", len(areas))
+			}
+			for _, a := range areas {
+				if n := ((a.x1 >> 4) - (a.x0 >> 4) + 1) * ((a.z1 >> 4) - (a.z0 >> 4) + 1); n > maxAreaChunks {
+					t.Errorf("area %v covers %d chunks", a, n)
+				}
+			}
+			for _, cmd := range b.cmds {
+				f := strings.Fields(cmd)
+				var x, y, z int
+				if f[0] != "fill" && f[0] != "setblock" && f[0] != "testforblock" {
+					t.Fatalf("unexpected command %q", cmd)
+				}
+				mustScan(t, cmd, f[1:4], &x, &y, &z)
+				if y < -64 || y > 319 {
+					t.Errorf("%s: outside world height", cmd)
+				}
+				loaded := false
+				for _, a := range areas {
+					if x >= a.x0 && x <= a.x1 && z >= a.z0 && z <= a.z1 {
+						loaded = true
+						break
+					}
+				}
+				if !loaded {
+					t.Errorf("%s: outside every ticking area", cmd)
+				}
+			}
+		})
+	}
+}
+
 func mustScan(t *testing.T, cmd string, fields []string, dst ...*int) {
 	t.Helper()
 	for i, s := range fields {
@@ -129,5 +173,119 @@ func TestFillSplitsLargeBoxes(t *testing.T) {
 	}
 	if total != 300*10*300 {
 		t.Errorf("split fills cover %d blocks, want %d", total, 300*10*300)
+	}
+}
+
+func TestRotateStates(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    map[string]any
+		rot      int
+		expected map[string]any
+	}{
+		{
+			name:     "cardinal and minecraft:cardinal",
+			input:    map[string]any{"cardinal_direction": "north", "minecraft:cardinal_direction": "south"},
+			rot:      90,
+			expected: map[string]any{"cardinal_direction": "east", "minecraft:cardinal_direction": "west"},
+		},
+		{
+			name:     "facing direction",
+			input:    map[string]any{"facing_direction": 2}, // north
+			rot:      90,
+			expected: map[string]any{"facing_direction": 5}, // east
+		},
+		{
+			name:     "weirdo direction",
+			input:    map[string]any{"weirdo_direction": 0}, // east
+			rot:      90,
+			expected: map[string]any{"weirdo_direction": 2}, // south
+		},
+		{
+			name:     "weirdo direction 180",
+			input:    map[string]any{"weirdo_direction": 0}, // east
+			rot:      180,
+			expected: map[string]any{"weirdo_direction": 1}, // west
+		},
+		{
+			name:     "lever floor and wall",
+			input:    map[string]any{"lever_direction": "up_north_south"},
+			rot:      90,
+			expected: map[string]any{"lever_direction": "up_east_west"},
+		},
+		{
+			name:     "lever wall 180",
+			input:    map[string]any{"lever_direction": "north"},
+			rot:      180,
+			expected: map[string]any{"lever_direction": "south"},
+		},
+		{
+			name:     "rail flat and curved",
+			input:    map[string]any{"rail_direction": "north_south"},
+			rot:      90,
+			expected: map[string]any{"rail_direction": "east_west"},
+		},
+		{
+			name:     "rail ascending",
+			input:    map[string]any{"rail_direction": "ascending_north"},
+			rot:      90,
+			expected: map[string]any{"rail_direction": "ascending_east"},
+		},
+		{
+			name:     "rail curved 180",
+			input:    map[string]any{"rail_direction": "south_east"},
+			rot:      180,
+			expected: map[string]any{"rail_direction": "north_west"},
+		},
+		{
+			name:     "pillar axis",
+			input:    map[string]any{"pillar_axis": "x"},
+			rot:      90,
+			expected: map[string]any{"pillar_axis": "z"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res := rotateStates(tc.input, tc.rot)
+			for k, want := range tc.expected {
+				if got := res[k]; got != want {
+					t.Errorf("key %q = %v, want %v", k, got, want)
+				}
+			}
+		})
+	}
+}
+
+// Rotation must reach states loaded from disk, not just in-memory maps:
+// encoding/json decodes numbers as float64, and a state that misses the
+// numeric cases in rotateState would silently keep its old facing.
+func TestBlueprintRotationThroughLoad(t *testing.T) {
+	bp, err := blueprint.Load(filepath.Join("../../blueprints", "small_house.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var door map[string]any
+	for _, blk := range bp.Palette {
+		if blk.Name == "wooden_door" && blk.States["upper_block_bit"] == false {
+			door = blk.States
+		}
+	}
+	if door == nil {
+		t.Fatal("small_house has no lower wooden_door palette entry")
+	}
+	rotated := rotateStates(door, 90)
+	if got := rotated["direction"]; got != 1 {
+		t.Fatalf("door direction after 90° = %v (%T), want 1", got, got)
+	}
+	_, out := blueprintCommands(bp, 100, -500, 90)
+	var placed []string
+	for _, cmd := range out.cmds {
+		if strings.Contains(cmd, "wooden_door") {
+			placed = append(placed, cmd)
+		}
+	}
+	if len(placed) != 1 || !strings.Contains(placed[0], `"direction"=1`) {
+		t.Fatalf("stamped door command missing rotated direction: %v", placed)
 	}
 }
