@@ -141,7 +141,7 @@ func TestStoreIndexesRecipesByOutputName(t *testing.T) {
 	}
 }
 
-func TestStoreKeepsTheOutputStackAndTheInputDescriptors(t *testing.T) {
+func TestStoreKeepsTheOutputStackAndTheGrid(t *testing.T) {
 	b := NewBook()
 	b.Store(&packet.CraftingData{
 		ClearRecipes: true,
@@ -166,15 +166,15 @@ func TestStoreKeepsTheOutputStackAndTheInputDescriptors(t *testing.T) {
 		got.Output.BlockRuntimeID != 17 || got.Output.Count != 4 {
 		t.Errorf("planks output = %+v, want the output stack of the recipe", got.Output)
 	}
-	if len(got.Inputs) != 1 {
-		t.Fatalf("planks inputs = %+v, want the one ingredient of the recipe", got.Inputs)
+	if len(got.Cells) != 1 {
+		t.Fatalf("planks cells = %+v, want the one cell of the recipe", got.Cells)
 	}
-	if name, count := descriptorName(got.Inputs[0]); name != "minecraft:oak_log" || count != 1 {
-		t.Errorf("planks input = %+v, want one oak_log", got.Inputs[0])
+	if got.Cells[0].Empty || got.Cells[0].Name != "oak_log" || got.Cells[0].Count != 1 {
+		t.Errorf("planks cell = %+v, want one oak_log", got.Cells[0])
 	}
 }
 
-func TestStoreKeepsOnlyTheFilledCellsOfAGrid(t *testing.T) {
+func TestStoreKeepsTheGridOfAShapedRecipe(t *testing.T) {
 	b := NewBook()
 	b.Store(sampleCraftingData(), itemEntries)
 
@@ -182,28 +182,62 @@ func TestStoreKeepsOnlyTheFilledCellsOfAGrid(t *testing.T) {
 	if len(hoes) != 1 {
 		t.Fatalf("wooden_hoe recipes = %d, want 1", len(hoes))
 	}
-	// The hoe's grid has two empty cells, which are no ingredients.
-	if len(hoes[0].Inputs) != 4 {
-		t.Fatalf("hoe inputs = %+v, want the four filled cells", hoes[0].Inputs)
+	hoe := hoes[0]
+	if hoe.Width != 2 || hoe.Height != 3 {
+		t.Errorf("hoe grid = %dx%d, want 2x3", hoe.Width, hoe.Height)
 	}
-	want := []string{"minecraft:oak_planks", "minecraft:oak_planks", "minecraft:stick", "minecraft:stick"}
-	for i, ing := range hoes[0].Inputs {
-		if name, count := descriptorName(ing); name != want[i] || count != 1 {
-			t.Errorf("hoe input %d = %+v, want one %s", i, ing, want[i])
+	// The grid keeps the cells the recipe leaves empty, or the shape of the
+	// recipe is lost.
+	if len(hoe.Cells) != 6 {
+		t.Fatalf("hoe cells = %+v, want the six cells of the grid", hoe.Cells)
+	}
+	want := []struct {
+		name  string
+		empty bool
+	}{
+		{"oak_planks", false}, {"oak_planks", false},
+		{"", true},
+		{"stick", false},
+		{"", true},
+		{"stick", false},
+	}
+	for i, w := range want {
+		got := hoe.Cells[i]
+		if got.Empty != w.empty || (!w.empty && (got.Name != w.name || got.Count != 1)) {
+			t.Errorf("hoe cell %d = %+v, want %q", i, got, w.name)
 		}
 	}
 }
 
-// descriptorName is the item or tag a recipe ingredient descriptor names,
-// with the count the recipe gave it.
-func descriptorName(d protocol.ItemDescriptorCount) (string, int32) {
-	switch desc := d.Descriptor.(type) {
-	case *protocol.DefaultItemDescriptor:
-		return desc.Name, d.Count
-	case *protocol.ItemTagItemDescriptor:
-		return desc.Tag, d.Count
+func TestStoreGivesAShapelessRecipeACellPerItem(t *testing.T) {
+	b := NewBook()
+	b.Store(&packet.CraftingData{
+		ClearRecipes: true,
+		ShapelessRecipes: []protocol.ShapelessRecipe{{
+			RecipeID: "chest",
+			Input: []protocol.ItemDescriptorCount{
+				named("oak_planks", 3),
+				// A zero-count descriptor pads the list and fills no cell.
+				named("stick", 0),
+			},
+			Output:          []protocol.ItemStack{stack(idCraftingTable, 1)},
+			RecipeNetworkID: idRecipeTable,
+		}},
+	}, itemEntries)
+
+	rs := b.Recipes("crafting_table")
+	if len(rs) != 1 {
+		t.Fatalf("crafting_table recipes = %d, want 1", len(rs))
 	}
-	return "", d.Count
+	cells := rs[0].Cells
+	if len(cells) != 3 {
+		t.Fatalf("cells = %+v, want the three filled cells", cells)
+	}
+	for i, c := range cells {
+		if c.Empty || c.Name != "oak_planks" || c.Count != 1 {
+			t.Errorf("cell %d = %+v, want one oak_planks", i, c)
+		}
+	}
 }
 
 func TestNeedsTableFollowsTheRecipeGrid(t *testing.T) {
@@ -222,8 +256,12 @@ func TestNeedsTableFollowsTheRecipeGrid(t *testing.T) {
 
 func TestZeroCountPaddingDoesNotWidenAShapelessRecipe(t *testing.T) {
 	in := []protocol.ItemDescriptorCount{named("oak_planks", 4), named("stick", 0)}
-	if got := filled(in); got != 4 {
-		t.Errorf("filled = %d, want the 4 real cells", got)
+	cells, ok := shapelessCells(in)
+	if !ok {
+		t.Fatal("the recipe's cells could not be read")
+	}
+	if len(cells) != 4 {
+		t.Errorf("cells = %d, want the 4 real cells", len(cells))
 	}
 }
 

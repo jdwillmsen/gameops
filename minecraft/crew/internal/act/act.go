@@ -87,8 +87,8 @@ type Actuator struct {
 	// moveTick is the tick the move was sent on, so a move the server never
 	// answers can be told from one whose answer is merely late.
 	moveTick uint64
-	// abandoned holds the requests whose move was given up on. A late answer
-	// to one settles nothing and is dropped.
+	// abandoned holds the requests whose answer nobody waits for: a move
+	// that was given up on, and the give-back of a refused craft.
 	abandoned map[int32]bool
 	// reqItem notes, per request still unanswered, the item it moved in
 	// window 0: answers name counts and stack IDs but never items.
