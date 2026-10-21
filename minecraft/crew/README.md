@@ -645,3 +645,22 @@ not isolate. Its units also send about twice the bytes (4 tiles at radius 4:
 5.7 to 7.7 KB/s per unit against 2.7 to 3.4). Crew CPU stays under 2.2% of a
 core. An earlier run on a busy host showed the same ordering. Software GL on
 one host is not a GPU measurement; re-measure on real GPUs.
+
+The same runs on a real GPU: an RTX 5090 passed through to an 8-vCPU VM, Chrome
+in a container rendering through Vulkan (`-g gpu`, renderer checked on every
+run), the same three builds interleaved, three runs per cell, 60 s window. The
+lab had changed since the rows above: view distance 16 and 20 standing units.
+Main on software GL in the same VM is the control.
+
+| Units | Viewers | Radius | 1.10.0 GPU fps | 1.10.1 GPU fps | main GPU fps | main software GL fps (same VM) |
+|---|---|---|---|---|---|---|
+| 1 | 1 | 4 | 60.0, 60.0, 60.0 | 60.0, 60.0, 60.0 | 60.0, 60.0, 60.0 | 13.4, 17.5, 18.2 |
+| 4 | 4 | 4 | 59.9, 60.0, 60.0 | 60.0, 60.0, 60.0 | 60.0, 60.0, 60.0 | 3.3, 4.2, 4.4 |
+| 4 | 4 | 8 | 60.0, 60.0, 60.0 | 60.0, 60.0, 60.0 | 59.9, 59.9, 60.0 | 1.7, 2.4, 2.5 |
+
+On a GPU every build holds Chrome's 60 fps frame cap in every cell, four tiles
+at radius 8 included, so the 30 fps target is met with room to spare and the
+software-GL slowdown of main does not show. 60 is a ceiling, not a measurement
+of headroom; frame work inside the callback stays at 0.5 to 4 ms on all three
+builds. The software control matches the earlier host (about 18, 4.5 and
+2.4 fps), so the slowdown is a cost of software rendering only.
