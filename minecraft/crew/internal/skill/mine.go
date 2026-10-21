@@ -440,14 +440,15 @@ func (m *Mine) dropRest() protocol.BlockPos {
 }
 
 // pickupCell finds the standable cell nearest the drop, within one block of
-// it, or none if the unit is already close enough to collect it.
+// it, or none if the unit is already close enough, in height as well, to
+// collect it.
 func (m *Mine) pickupCell(p act.Pose) (protocol.BlockPos, bool) {
 	rest := m.dropRest()
 	drop := centre(rest)
 	near := func(c mgl32.Vec3) float64 {
 		return math.Hypot(float64(drop.X()-c.X()), float64(drop.Z()-c.Z()))
 	}
-	if near(p.Feet) <= pickupStand+0.5 {
+	if near(p.Feet) <= pickupStand+0.5 && math.Abs(float64(p.Feet.Y())-float64(rest.Y())) <= 1 {
 		return protocol.BlockPos{}, false
 	}
 	best, bestD, found := protocol.BlockPos{}, math.MaxFloat64, false
