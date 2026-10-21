@@ -4,16 +4,16 @@
 #
 # usage: run.sh -b CREW_BIN -c CHROME -w PLAYWRIGHT_DIR -a ATLAS_DIR \
 #          -m UNITS -n VIEWERS [-H LAB_HOST] [-P LAB_PORT] [-p STATUS_BASE_PORT] \
-#          [-u NAME_PREFIX] [-r RADIUS] [-k VIEWER_CAP] [-d WINDOW_SECONDS] -o RESULTS.md
+#          [-u NAME_PREFIX] [-r RADIUS] [-k VIEWER_CAP] [-d WINDOW_SECONDS] [-g swiftshader|gpu] -o RESULTS.md
 set -euo pipefail
 
-HOST=127.0.0.1 LPORT=19132 BASE=18100 PREFIX=load- RADIUS=4 CAP=4 WINDOW=30
-while getopts b:c:w:a:m:n:H:P:p:u:r:k:d:o: o; do
+HOST=127.0.0.1 LPORT=19132 BASE=18100 PREFIX=load- RADIUS=4 CAP=4 WINDOW=30 GL=swiftshader
+while getopts b:c:w:a:m:n:H:P:p:u:r:k:d:g:o: o; do
   case $o in
     b) BIN=$OPTARG;; c) CHROME=$OPTARG;; w) PWDIR=$OPTARG;; a) ATLAS=$OPTARG;;
     m) UNITS=$OPTARG;; n) VIEWERS=$OPTARG;; H) HOST=$OPTARG;; P) LPORT=$OPTARG;;
     p) BASE=$OPTARG;; u) PREFIX=$OPTARG;; r) RADIUS=$OPTARG;; k) CAP=$OPTARG;;
-    d) WINDOW=$OPTARG;; o) OUT=$OPTARG;;
+    d) WINDOW=$OPTARG;; g) GL=$OPTARG;; o) OUT=$OPTARG;;
     *) exit 2;;
   esac
 done
@@ -65,7 +65,7 @@ for i in "${!ports[@]}"; do
 done
 
 node "$HERE/viewers.mjs" --pw-dir "$PWDIR" --chrome "$CHROME" --ports "$portlist" \
-  --viewers "$VIEWERS" --radius "$RADIUS" --window "$WINDOW" >"$tmp/viewers.out" 2>"$tmp/viewers.err" &
+  --viewers "$VIEWERS" --radius "$RADIUS" --window "$WINDOW" --gl "$GL" >"$tmp/viewers.out" 2>"$tmp/viewers.err" &
 vpid=$!
 pids+=("$vpid")
 
@@ -83,6 +83,7 @@ for i in "${!ports[@]}"; do
 done
 
 wait "$vpid"
+grep '^renderer:' "$tmp/viewers.err" >&2 || true
 # Steady phase: the viewers' own window, bracketed by the same SETTLED/exit
 # edges, so crew CPU and bytes cover the span the frame times do.
 c2=() b2=() t2=() rss=0

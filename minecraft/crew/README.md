@@ -564,8 +564,15 @@ markdown file. Crew CPU and RSS come from `/proc`, bytes from
 
 ```
 minecraft/crew/loadtest/run.sh -b <crew binary> -c <chrome> -w <dir holding node_modules/playwright-core> \
-  -a <atlas cache dir> -m <units> -n <viewers> [-r radius] [-k viewer cap] [-d window seconds] -o results.md
+  -a <atlas cache dir> -m <units> -n <viewers> [-r radius] [-k viewer cap] [-d window seconds] \
+  [-g swiftshader|gpu] -o results.md
 ```
+
+`-g gpu` renders on a real GPU through Vulkan instead of software GL; the
+renderer Chrome actually used goes to stderr, since headless Chrome falls back
+to software when it cannot use the GPU. In a container, an NVIDIA GPU needs
+graphics capability as well as compute, e.g. with podman and CDI:
+`--device nvidia.com/gpu=all -e NVIDIA_DRIVER_CAPABILITIES=all`.
 
 Units are named `load-1`, `load-2`, ... (`-u` changes the prefix) on status
 ports from 18100 up (`-p`). The lab must already be running. Crew CPU and
