@@ -203,7 +203,18 @@ func craftRequest(t *testing.T, s *sink, n int) protocol.ItemStackRequest {
 	return reqs[n].Requests[0]
 }
 
-func TestCraftPlanksSendsTheRecipeConsumeAndTakeActions(t *testing.T) {
+// ingredientName is the item or tag a recipe ingredient descriptor names.
+func ingredientName(d protocol.ItemDescriptorCount) string {
+	switch desc := d.Descriptor.(type) {
+	case *protocol.DefaultItemDescriptor:
+		return desc.Name
+	case *protocol.ItemTagItemDescriptor:
+		return desc.Tag
+	}
+	return ""
+}
+
+func TestCraftPlanksSendsTheRecipeBookActions(t *testing.T) {
 	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
 	a, s := newCrafter(inv)
 	defer stopAnswering(startAnswering(a, s))
@@ -216,26 +227,41 @@ func TestCraftPlanksSendsTheRecipeConsumeAndTakeActions(t *testing.T) {
 		t.Errorf("made = %d, want 4 planks", made)
 	}
 	r := craftRequest(t, s, 0)
-	if r.RequestID != -3 || len(r.Actions) != 3 {
+	if r.RequestID != -3 || len(r.Actions) != 4 {
 		t.Fatalf("request = %+v with %d actions", r, len(r.Actions))
 	}
-	cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
-	if !ok || cr.RecipeNetworkID != recipePlanks || cr.NumberOfCrafts != 1 {
-		t.Errorf("craft action = %+v", r.Actions[0])
+	// The shape is the one the vanilla client sends for a recipe book craft:
+	// the auto craft, the results it makes, the consumes and the take.
+	auto, ok := r.Actions[0].(*protocol.AutoCraftRecipeStackRequestAction)
+	if !ok || auto.RecipeNetworkID != recipePlanks || auto.NumberOfCrafts != 1 {
+		t.Fatalf("craft action = %+v", r.Actions[0])
 	}
-	consume, ok := r.Actions[1].(*protocol.ConsumeStackRequestAction)
+	if len(auto.Ingredients) != 1 {
+		t.Fatalf("craft action = %+v, want the recipe's one ingredient", r.Actions[0])
+	}
+	if name := ingredientName(auto.Ingredients[0]); name != "minecraft:oak_log" || auto.Ingredients[0].Count != 1 {
+		t.Errorf("craft ingredient = %+v, want one oak_log", auto.Ingredients[0])
+	}
+	results, ok := r.Actions[1].(*protocol.CraftResultsDeprecatedStackRequestAction)
+	if !ok || results.TimesCrafted != 1 || len(results.ResultItems) != 1 {
+		t.Fatalf("results action = %+v", r.Actions[1])
+	}
+	if got := results.ResultItems[0]; got.Identifier != "minecraft:oak_planks" || got.Count != 4 {
+		t.Errorf("craft result = %+v, want four oak_planks", got)
+	}
+	consume, ok := r.Actions[2].(*protocol.ConsumeStackRequestAction)
 	if !ok || consume.Count != 1 ||
 		consume.Source.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory ||
 		consume.Source.Slot != 3 || consume.Source.StackNetworkID != 41 {
-		t.Errorf("consume = %+v, want one oak_log from slot 3", r.Actions[1])
+		t.Errorf("consume = %+v, want one oak_log from slot 3", r.Actions[2])
 	}
-	take, ok := r.Actions[2].(*protocol.TakeStackRequestAction)
+	take, ok := r.Actions[3].(*protocol.TakeStackRequestAction)
 	if !ok || take.Count != 4 ||
 		take.Source.Container.ContainerID != protocol.ContainerCreatedOutput || take.Source.Slot != createdOutputSlot ||
-		take.Source.StackNetworkID != 0 ||
+		take.Source.StackNetworkID != r.RequestID ||
 		take.Destination.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory ||
 		take.Destination.Slot != 0 || take.Destination.StackNetworkID != 0 {
-		t.Errorf("take = %+v, want the created output into the first empty slot", r.Actions[2])
+		t.Errorf("take = %+v, want the created output into the first empty slot", r.Actions[3])
 	}
 }
 
@@ -254,22 +280,30 @@ func TestCraftSticksFromPlanksOfAnyWood(t *testing.T) {
 		t.Errorf("made = %d, want 4 sticks", made)
 	}
 	r := craftRequest(t, s, 0)
-	if len(r.Actions) != 3 {
+	if len(r.Actions) != 4 {
 		t.Fatalf("request = %+v with %d actions", r, len(r.Actions))
 	}
-	cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
-	if !ok || cr.RecipeNetworkID != recipeStick {
-		t.Errorf("craft action = %+v", r.Actions[0])
+	auto, ok := r.Actions[0].(*protocol.AutoCraftRecipeStackRequestAction)
+	if !ok || auto.RecipeNetworkID != recipeStick {
+		t.Fatalf("craft action = %+v", r.Actions[0])
 	}
-	consume, ok := r.Actions[1].(*protocol.ConsumeStackRequestAction)
+	if len(auto.Ingredients) != 2 {
+		t.Fatalf("craft action = %+v, want the recipe's two planks cells", r.Actions[0])
+	}
+	for _, ing := range auto.Ingredients {
+		if name := ingredientName(ing); name != "minecraft:planks" || ing.Count != 1 {
+			t.Errorf("craft ingredient = %+v, want one planks cell", ing)
+		}
+	}
+	consume, ok := r.Actions[2].(*protocol.ConsumeStackRequestAction)
 	if !ok || consume.Count != 2 ||
 		consume.Source.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory ||
 		consume.Source.Slot != 4 || consume.Source.StackNetworkID != 44 {
-		t.Errorf("consume = %+v, want two planks from slot 4", r.Actions[1])
+		t.Errorf("consume = %+v, want two planks from slot 4", r.Actions[2])
 	}
-	take, ok := r.Actions[2].(*protocol.TakeStackRequestAction)
+	take, ok := r.Actions[3].(*protocol.TakeStackRequestAction)
 	if !ok || take.Count != 4 {
-		t.Errorf("take = %+v, want the four sticks", r.Actions[2])
+		t.Errorf("take = %+v, want the four sticks", r.Actions[3])
 	}
 }
 
@@ -316,17 +350,24 @@ func TestCraftScalesOneRequestOverSeveralCrafts(t *testing.T) {
 		t.Errorf("made = %d, want 8 planks", made)
 	}
 	r := craftRequest(t, s, 0)
-	cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
-	if !ok || cr.NumberOfCrafts != 2 {
+	auto, ok := r.Actions[0].(*protocol.AutoCraftRecipeStackRequestAction)
+	if !ok || auto.NumberOfCrafts != 2 {
 		t.Errorf("craft action = %+v, want two crafts", r.Actions[0])
 	}
-	consume, ok := r.Actions[1].(*protocol.ConsumeStackRequestAction)
-	if !ok || consume.Count != 2 {
-		t.Errorf("consume = %+v, want both logs", r.Actions[1])
+	results, ok := r.Actions[1].(*protocol.CraftResultsDeprecatedStackRequestAction)
+	if !ok || results.TimesCrafted != 2 || len(results.ResultItems) != 1 {
+		t.Fatalf("results action = %+v", r.Actions[1])
 	}
-	take, ok := r.Actions[2].(*protocol.TakeStackRequestAction)
+	if got := results.ResultItems[0]; got.Identifier != "minecraft:oak_planks" || got.Count != 8 {
+		t.Errorf("craft result = %+v, want eight oak_planks", got)
+	}
+	consume, ok := r.Actions[2].(*protocol.ConsumeStackRequestAction)
+	if !ok || consume.Count != 2 {
+		t.Errorf("consume = %+v, want both logs", r.Actions[2])
+	}
+	take, ok := r.Actions[3].(*protocol.TakeStackRequestAction)
 	if !ok || take.Count != 8 {
-		t.Errorf("take = %+v, want both results", r.Actions[2])
+		t.Errorf("take = %+v, want both results", r.Actions[3])
 	}
 }
 
@@ -343,7 +384,7 @@ func TestCraftMergesOntoTheStackItPlacedItself(t *testing.T) {
 	}
 	// The first answer put a stack in slot 0 with an ID only it knew; the
 	// second craft merges onto that stack instead of colliding with it.
-	take := craftRequest(t, s, 1).Actions[2].(*protocol.TakeStackRequestAction)
+	take := craftRequest(t, s, 1).Actions[3].(*protocol.TakeStackRequestAction)
 	if take.Destination.Slot != 0 || take.Destination.StackNetworkID != firstPlacedStackID {
 		t.Errorf("second take = %+v, want slot 0 with the placed stack's ID", take)
 	}
@@ -370,27 +411,38 @@ func TestCraftHoeThroughAnOpenCraftingTable(t *testing.T) {
 		t.Errorf("made = %d, want one hoe", made)
 	}
 	r := craftRequest(t, s, 0)
-	if r.RequestID != -3 || len(r.Actions) != 4 {
+	if r.RequestID != -3 || len(r.Actions) != 5 {
 		t.Fatalf("request = %+v with %d actions", r, len(r.Actions))
 	}
-	cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
-	if !ok || cr.RecipeNetworkID != recipeHoe || cr.NumberOfCrafts != 1 {
-		t.Errorf("craft action = %+v", r.Actions[0])
+	auto, ok := r.Actions[0].(*protocol.AutoCraftRecipeStackRequestAction)
+	if !ok || auto.RecipeNetworkID != recipeHoe || auto.NumberOfCrafts != 1 {
+		t.Fatalf("craft action = %+v", r.Actions[0])
 	}
-	planks, ok := r.Actions[1].(*protocol.ConsumeStackRequestAction)
+	if len(auto.Ingredients) != 4 {
+		t.Errorf("craft action = %+v, want the recipe's four ingredient cells", r.Actions[0])
+	}
+	results, ok := r.Actions[1].(*protocol.CraftResultsDeprecatedStackRequestAction)
+	if !ok || results.TimesCrafted != 1 || len(results.ResultItems) != 1 {
+		t.Fatalf("results action = %+v", r.Actions[1])
+	}
+	if got := results.ResultItems[0]; got.Identifier != "minecraft:wooden_hoe" || got.Count != 1 {
+		t.Errorf("craft result = %+v, want one wooden_hoe", got)
+	}
+	planks, ok := r.Actions[2].(*protocol.ConsumeStackRequestAction)
 	if !ok || planks.Count != 2 || planks.Source.Slot != 1 || planks.Source.StackNetworkID != 42 {
-		t.Errorf("planks consume = %+v", r.Actions[1])
+		t.Errorf("planks consume = %+v", r.Actions[2])
 	}
-	sticks, ok := r.Actions[2].(*protocol.ConsumeStackRequestAction)
+	sticks, ok := r.Actions[3].(*protocol.ConsumeStackRequestAction)
 	if !ok || sticks.Count != 2 || sticks.Source.Slot != 2 || sticks.Source.StackNetworkID != 43 {
-		t.Errorf("stick consume = %+v", r.Actions[2])
+		t.Errorf("stick consume = %+v", r.Actions[3])
 	}
-	take, ok := r.Actions[3].(*protocol.TakeStackRequestAction)
+	take, ok := r.Actions[4].(*protocol.TakeStackRequestAction)
 	if !ok || take.Count != 1 ||
 		take.Source.Container.ContainerID != protocol.ContainerCreatedOutput || take.Source.Slot != createdOutputSlot ||
+		take.Source.StackNetworkID != r.RequestID ||
 		take.Destination.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory ||
 		take.Destination.Slot != 0 || take.Destination.StackNetworkID != 0 {
-		t.Errorf("take = %+v, want the hoe into the first empty slot", r.Actions[3])
+		t.Errorf("take = %+v, want the hoe into the first empty slot", r.Actions[4])
 	}
 }
 
@@ -474,7 +526,7 @@ func TestCraftAvoidsADestinationTheServerRefused(t *testing.T) {
 	if _, err := a.Craft("oak_planks", 1); err != nil {
 		t.Fatalf("second craft after a refused destination: %v", err)
 	}
-	take := craftRequest(t, s, 1).Actions[2].(*protocol.TakeStackRequestAction)
+	take := craftRequest(t, s, 1).Actions[3].(*protocol.TakeStackRequestAction)
 	if take.Destination.Slot != 1 {
 		t.Errorf("second take = %+v, want it to move past the refused slot 0", take)
 	}
