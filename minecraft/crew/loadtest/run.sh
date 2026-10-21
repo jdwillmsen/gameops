@@ -23,7 +23,14 @@ TICKS=$(getconf CLK_TCK)
 
 pids=() tmp=$(mktemp -d)
 # Only PIDs recorded here are ever signalled; never match processes by name.
-cleanup() { for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; rm -rf "$tmp"; }
+# The wait matters for back-to-back runs: a unit still shutting down keeps its
+# status port, so the next run's unit fails to bind and the old one answers
+# the readiness check.
+cleanup() {
+  for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done
+  wait 2>/dev/null || true
+  rm -rf "$tmp"
+}
 trap cleanup EXIT
 
 cpu_ticks() { awk '{print $14+$15}' "/proc/$1/stat"; }
