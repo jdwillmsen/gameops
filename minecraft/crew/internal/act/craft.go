@@ -100,19 +100,34 @@ func (a *Actuator) craftLocked(item string, times int) (int32, int, error) {
 }
 
 // sendCraftLocked writes one request in the order a Bedrock client sends:
-// the recipe, one consume per ingredient stack the inventory pays with, and
-// the take of the created output into the inventory. It returns the request
-// ID to await and how many of the item one craft makes.
+// the recipe book craft, the results it makes, one consume per ingredient
+// stack the inventory pays with, and the take of the created output into the
+// inventory. It returns the request ID to await and how many of the item one
+// craft makes.
 func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Item, times int) (int32, int, error) {
 	made := r.OutputCount * times
 	if made < 1 || made > maxCraftOutput {
 		return 0, 0, fmt.Errorf("craft of %d %s does not fit one stack", made, item)
 	}
+	id := a.nextRequest
 	inventory := protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory}
-	actions := []protocol.StackRequestAction{&protocol.CraftRecipeStackRequestAction{
+	// A craft that pays from the inventory instead of a grid is the recipe
+	// book's craft, which the vanilla client sends as an auto craft with the
+	// recipe's own ingredients and the results it makes.
+	actions := []protocol.StackRequestAction{&protocol.AutoCraftRecipeStackRequestAction{
 		RecipeNetworkID: r.NetworkID,
 		NumberOfCrafts:  byte(times),
+		Ingredients:     r.Inputs,
 	}}
+	actions = append(actions, &protocol.CraftResultsDeprecatedStackRequestAction{
+		ResultItems: []protocol.StackRequestItem{{
+			Identifier:     "minecraft:" + item,
+			MetadataValue:  r.Output.MetadataValue,
+			BlockRuntimeID: r.Output.BlockRuntimeID,
+			Count:          uint16(made),
+		}},
+		TimesCrafted: byte(times),
+	})
 	// A stack can pay for two ingredients when a tag and a name both match
 	// it, so what each slot has already given is tracked.
 	taken := map[int]int{}
@@ -156,14 +171,15 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 	take.Count = byte(made)
 	take.Source = protocol.StackRequestSlotInfo{
 		Container: protocol.FullContainerName{ContainerID: protocol.ContainerCreatedOutput},
-		// The server assigns the created stack its ID only in the answer,
-		// so the request quotes none.
-		Slot: createdOutputSlot,
+		// The created stack has no ID of its own yet, and the request
+		// cannot wait for the answer that would name it, so the vanilla
+		// client quotes the request's own ID for it.
+		Slot:           createdOutputSlot,
+		StackNetworkID: id,
 	}
 	take.Destination = dest
 	actions = append(actions, take)
 
-	id := a.nextRequest
 	if err := a.w.WritePacket(&packet.ItemStackRequest{Requests: []protocol.ItemStackRequest{{
 		RequestID: id,
 		Actions:   actions,

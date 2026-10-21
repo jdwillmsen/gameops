@@ -141,6 +141,71 @@ func TestStoreIndexesRecipesByOutputName(t *testing.T) {
 	}
 }
 
+func TestStoreKeepsTheOutputStackAndTheInputDescriptors(t *testing.T) {
+	b := NewBook()
+	b.Store(&packet.CraftingData{
+		ClearRecipes: true,
+		ShapelessRecipes: []protocol.ShapelessRecipe{{
+			RecipeID: "oak_planks",
+			Input:    []protocol.ItemDescriptorCount{named("oak_log", 1)},
+			Output: []protocol.ItemStack{{
+				ItemType:       protocol.ItemType{NetworkID: idOakPlanks, MetadataValue: 3},
+				BlockRuntimeID: 17,
+				Count:          4,
+			}},
+			RecipeNetworkID: idRecipePlanks,
+		}},
+	}, itemEntries)
+
+	planks := b.Recipes("oak_planks")
+	if len(planks) != 1 {
+		t.Fatalf("oak_planks recipes = %d, want 1", len(planks))
+	}
+	got := planks[0]
+	if got.Output.NetworkID != idOakPlanks || got.Output.MetadataValue != 3 ||
+		got.Output.BlockRuntimeID != 17 || got.Output.Count != 4 {
+		t.Errorf("planks output = %+v, want the output stack of the recipe", got.Output)
+	}
+	if len(got.Inputs) != 1 {
+		t.Fatalf("planks inputs = %+v, want the one ingredient of the recipe", got.Inputs)
+	}
+	if name, count := descriptorName(got.Inputs[0]); name != "minecraft:oak_log" || count != 1 {
+		t.Errorf("planks input = %+v, want one oak_log", got.Inputs[0])
+	}
+}
+
+func TestStoreKeepsOnlyTheFilledCellsOfAGrid(t *testing.T) {
+	b := NewBook()
+	b.Store(sampleCraftingData(), itemEntries)
+
+	hoes := b.Recipes("wooden_hoe")
+	if len(hoes) != 1 {
+		t.Fatalf("wooden_hoe recipes = %d, want 1", len(hoes))
+	}
+	// The hoe's grid has two empty cells, which are no ingredients.
+	if len(hoes[0].Inputs) != 4 {
+		t.Fatalf("hoe inputs = %+v, want the four filled cells", hoes[0].Inputs)
+	}
+	want := []string{"minecraft:oak_planks", "minecraft:oak_planks", "minecraft:stick", "minecraft:stick"}
+	for i, ing := range hoes[0].Inputs {
+		if name, count := descriptorName(ing); name != want[i] || count != 1 {
+			t.Errorf("hoe input %d = %+v, want one %s", i, ing, want[i])
+		}
+	}
+}
+
+// descriptorName is the item or tag a recipe ingredient descriptor names,
+// with the count the recipe gave it.
+func descriptorName(d protocol.ItemDescriptorCount) (string, int32) {
+	switch desc := d.Descriptor.(type) {
+	case *protocol.DefaultItemDescriptor:
+		return desc.Name, d.Count
+	case *protocol.ItemTagItemDescriptor:
+		return desc.Tag, d.Count
+	}
+	return "", d.Count
+}
+
 func TestNeedsTableFollowsTheRecipeGrid(t *testing.T) {
 	b := NewBook()
 	b.Store(sampleCraftingData(), itemEntries)

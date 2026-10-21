@@ -42,6 +42,12 @@ type Recipe struct {
 	Ingredients []Ingredient
 	// OutputCount is how many of the output one craft makes.
 	OutputCount int
+	// Output is the recipe's first output stack, which a craft result quotes
+	// by metadata and block runtime ID.
+	Output protocol.ItemStack
+	// Inputs are the recipe's ingredient descriptors as the server sent them,
+	// without the empty cells of a shaped grid.
+	Inputs []protocol.ItemDescriptorCount
 }
 
 // NeedsTable says whether the recipe only fits a crafting table's 3x3 grid.
@@ -104,7 +110,7 @@ func index(out map[string][]Recipe, names map[int32]string, id uint32, block str
 	if !ok || name == "" {
 		return
 	}
-	r := Recipe{NetworkID: id, Block: block, wide: wide, OutputCount: int(outputs[0].Count)}
+	r := Recipe{NetworkID: id, Block: block, wide: wide, OutputCount: int(outputs[0].Count), Output: outputs[0]}
 	for _, d := range in {
 		var ing Ingredient
 		switch desc := d.Descriptor.(type) {
@@ -124,6 +130,9 @@ func index(out map[string][]Recipe, names map[int32]string, id uint32, block str
 		if ing.Count < 1 || (ing.Name == "" && ing.Tag == "") {
 			continue
 		}
+		// The recipe's own descriptors are kept, because a recipe book
+		// craft quotes them back to the server as they were sent.
+		r.Inputs = append(r.Inputs, d)
 		merged := false
 		for i := range r.Ingredients {
 			if r.Ingredients[i].Name == ing.Name && r.Ingredients[i].Tag == ing.Tag {

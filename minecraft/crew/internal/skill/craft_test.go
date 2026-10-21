@@ -233,7 +233,7 @@ func TestCraftMakesPlanksUntilTheCount(t *testing.T) {
 		t.Fatalf("%d craft requests, want 2", len(reqs))
 	}
 	for _, r := range reqs {
-		cr, ok := r.Actions[0].(*protocol.CraftRecipeStackRequestAction)
+		cr, ok := r.Actions[0].(*protocol.AutoCraftRecipeStackRequestAction)
 		if !ok || cr.RecipeNetworkID != craftPlanksRecipe {
 			t.Errorf("craft action = %+v", r.Actions[0])
 		}
@@ -271,7 +271,7 @@ func TestCraftUsesACraftingTableWithinReach(t *testing.T) {
 	if len(reqs) != 1 {
 		t.Fatalf("%d craft requests, want 1", len(reqs))
 	}
-	if cr, ok := reqs[0].Actions[0].(*protocol.CraftRecipeStackRequestAction); !ok || cr.RecipeNetworkID != craftHoeRecipe {
+	if cr, ok := reqs[0].Actions[0].(*protocol.AutoCraftRecipeStackRequestAction); !ok || cr.RecipeNetworkID != craftHoeRecipe {
 		t.Errorf("craft action = %+v", reqs[0].Actions[0])
 	}
 	// The skill clicked the table and closed the window it opened.
