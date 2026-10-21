@@ -77,8 +77,16 @@ type Actuator struct {
 	itemIDs map[string]int32
 	// inv is the unit's own window-0 inventory, kept from the server's slot
 	// updates so a placement can find the item to hold.
-	inv  [inventorySlots]protocol.ItemInstance
+	inv [inventorySlots]protocol.ItemInstance
+	// move holds the request ID carrying an item to the hotbar, whose answer
+	// the placement waits for; 0 means none is in flight.
 	move int32
+	// moveTick is the tick the move was sent on, so a move the server never
+	// answers can be told from one whose answer is merely late.
+	moveTick uint64
+	// abandoned holds the requests whose move was given up on. A late answer
+	// to one settles nothing and is dropped.
+	abandoned map[int32]bool
 	// reqItem notes, per request still unanswered, the item it moved in
 	// window 0: answers name counts and stack IDs but never items.
 	reqItem     map[int32]int32
@@ -100,7 +108,8 @@ func New(w PacketWriter, runtimeID uint64, start Pose, solid Solid) *Actuator {
 	return &Actuator{
 		w: w, runtimeID: runtimeID, solid: solid, pose: start,
 		tick: firstTick, nextRequest: -3, reqItem: map[int32]int32{},
-		responses: map[int32]uint8{}, now: time.Now,
+		responses: map[int32]uint8{}, abandoned: map[int32]bool{},
+		now: time.Now,
 	}
 }
 

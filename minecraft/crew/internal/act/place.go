@@ -25,6 +25,13 @@ const placeReach = 4.5
 // StatusOccupied past it, which the caller reads as a refusal.
 const stackLimit = 64
 
+// moveWaitTicks is how many ticks a move to the hotbar may wait for its
+// answer before the actuator gives it up and lets a later attempt move the
+// stack again. It is as long as the wait a placing skill allows the server
+// to answer a move, so the actuator gives a move up no earlier than the
+// placement that asked for it stops waiting.
+const moveWaitTicks = 300
+
 var (
 	// ErrOccupied says the target is not air or a block a placement may
 	// overwrite. An unknown target counts: the unit never places into what
@@ -65,9 +72,6 @@ var sideFaces = [...]struct {
 	{[3]int32{-1, 0, 0}, 5, mgl32.Vec3{1, 0.5, 0.5}},
 	{[3]int32{1, 0, 0}, 4, mgl32.Vec3{0, 0.5, 0.5}},
 }
-
-// a.move holds the request ID carrying an item to the hotbar, whose answer
-// the placement waits for; 0 means none is in flight.
 
 // PlaceOnTop places the held block on the upper face of the block at against,
 // which is how a unit pillars up under its own feet. hash is the clicked
@@ -215,16 +219,23 @@ func (a *Actuator) holdItem(item string) (slot int, held protocol.ItemInstance, 
 	}
 	if a.move != 0 {
 		status, done := a.responses[a.move]
-		if !done {
+		switch {
+		case done:
+			delete(a.responses, a.move)
+			a.move = 0
+			if status != StatusOK {
+				return 0, held, fmt.Errorf("server refused the move to the hotbar with status %d", status)
+			}
+			if slot, held, ok := a.hotbarHolding(id); ok {
+				return slot, held, nil
+			}
+		case a.tick-a.moveTick >= moveWaitTicks:
+			// The server never answered the move. Give it up, or no stack
+			// could be pulled from the main inventory for the rest of the
+			// session.
+			a.abandonMove()
+		default:
 			return 0, held, ErrItemMoving
-		}
-		delete(a.responses, a.move)
-		a.move = 0
-		if status != StatusOK {
-			return 0, held, fmt.Errorf("server refused the move to the hotbar with status %d", status)
-		}
-		if slot, held, ok := a.hotbarHolding(id); ok {
-			return slot, held, nil
 		}
 	}
 	for from := hotbarSlots; from < inventorySlots; from++ {
@@ -233,6 +244,15 @@ func (a *Actuator) holdItem(item string) (slot int, held protocol.ItemInstance, 
 		}
 	}
 	return 0, held, ErrNoItem
+}
+
+// abandonMove gives up on a move the server never answered. The request is
+// forgotten, so a late answer to it settles nothing and cannot be read as
+// the answer to the move that replaces it.
+func (a *Actuator) abandonMove() {
+	delete(a.reqItem, a.move)
+	a.abandoned[a.move] = true
+	a.move = 0
 }
 
 // hotbarHolding finds the slot whose stack is the item.
@@ -275,6 +295,7 @@ func (a *Actuator) moveToHotbar(from int, s protocol.ItemInstance) error {
 	a.nextRequest -= 2
 	a.reqItem[req] = s.Stack.NetworkID
 	a.move = req
+	a.moveTick = a.tick
 	return ErrItemMoving
 }
 

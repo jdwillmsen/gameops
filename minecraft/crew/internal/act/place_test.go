@@ -207,6 +207,95 @@ func TestPlaceBlockMovesTheStackToTheHotbarFirst(t *testing.T) {
 	}
 }
 
+// A move the server never answers must not poison the actuator: the wait
+// for the answer is bounded, and the placement after it asks again instead
+// of waiting on an answer that will never come.
+func TestPlaceBlockAbandonsAMoveTheServerNeverAnswers(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	a, s := newPlacer(stoneBelow(target), mgl32.Vec3{1.5, 1, 2.5}, 20, cobbleInstance(16, 9))
+	if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrItemMoving) {
+		t.Fatalf("err = %v, want ErrItemMoving", err)
+	}
+	requests := stackRequests(s)
+	if len(requests) != 1 {
+		t.Fatalf("sent %d stack requests, want 1", len(requests))
+	}
+	first := requests[0].Requests[0].RequestID
+
+	// The server stays silent while the unit keeps ticking.
+	for i := 0; i < moveWaitTicks; i++ {
+		if err := a.Tick(Input{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The wait is over, so the placement gives the move up and asks again.
+	if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrItemMoving) {
+		t.Fatalf("err = %v, want ErrItemMoving", err)
+	}
+	requests = stackRequests(s)
+	if len(requests) != 2 {
+		t.Fatalf("sent %d stack requests, want the abandoned one and a new one", len(requests))
+	}
+	second := requests[1].Requests[0].RequestID
+	if second == first {
+		t.Fatalf("the new move reused the abandoned request %d", first)
+	}
+
+	// An answer to the abandoned move must not settle the new one, and must
+	// not empty the stack it moved either.
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: first,
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo: []protocol.StackResponseSlotInfo{
+					{Slot: 20, Count: 0, StackNetworkID: 9},
+					{Slot: 0, Count: 16, StackNetworkID: 9},
+				}},
+		},
+	}}})
+	if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrItemMoving) {
+		t.Fatalf("err = %v, want ErrItemMoving", err)
+	}
+	if got := a.inv[20]; got.Stack.Count != 16 {
+		t.Errorf("the abandoned answer emptied the stack in the main inventory: %+v", got)
+	}
+	if got := a.inv[0]; got.Stack.Count != 0 {
+		t.Errorf("the abandoned answer landed %+v on the hotbar", got)
+	}
+
+	// The answer to the new move lands the stack, and the item is held.
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: second,
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo: []protocol.StackResponseSlotInfo{
+					{Slot: 20, Count: 0, StackNetworkID: 9},
+					{Slot: 0, Count: 16, StackNetworkID: 9},
+				}},
+		},
+	}}})
+	if err := a.PlaceBlock(target, "cobblestone"); err != nil {
+		t.Fatal(err)
+	}
+	u := s.last(t).(*packet.InventoryTransaction).TransactionData.(*protocol.UseItemTransactionData)
+	if u.HotBarSlot != 0 || u.HeldItem.StackNetworkID != 9 || u.HeldItem.Stack.Count != 16 ||
+		u.HeldItem.Stack.NetworkID != cobblestone {
+		t.Errorf("use = %+v", u)
+	}
+}
+
+// stackRequests returns the stack requests the unit sent, in order.
+func stackRequests(s *sink) []*packet.ItemStackRequest {
+	var out []*packet.ItemStackRequest
+	for _, pk := range s.got {
+		if req, ok := pk.(*packet.ItemStackRequest); ok {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
 // A withdraw's answer is all the server ever says about the unit's own
 // slots, so a placement afterward must find the withdrawn stack: it holds it
 // from the slot the answer named, without another move.
