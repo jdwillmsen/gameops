@@ -74,7 +74,11 @@ type Actuator struct {
 	now                   func() time.Time
 	sent                  [sentHistory]sentTick
 
-	itemIDs     map[string]int32
+	itemIDs map[string]int32
+	// inv is the unit's own window-0 inventory, kept from the server's slot
+	// updates so a placement can find the item to hold.
+	inv         [inventorySlots]protocol.ItemInstance
+	move        pendingMove
 	cont        container
 	nextRequest int32
 	responses   map[int32]uint8

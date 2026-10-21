@@ -61,6 +61,10 @@ func (s *sink) last(t *testing.T) packet.Packet {
 type world struct {
 	floor int32
 	extra map[protocol.BlockPos]bool
+	// names and hash give the blocks a placement can see: which block a
+	// cell holds and the network hash a click must quote.
+	names map[protocol.BlockPos]string
+	hash  uint32
 }
 
 type namedBlocks map[protocol.BlockPos]string
@@ -81,6 +85,15 @@ func (l *correctionLog) Info(event string, fields map[string]any) {
 }
 
 func (w world) Solid(p protocol.BlockPos) bool { return p[1] <= w.floor || w.extra[p] }
+
+func (w world) Block(p protocol.BlockPos) (string, bool) { n, ok := w.names[p]; return n, ok }
+
+func (w world) BlockHash(p protocol.BlockPos) (uint32, bool) {
+	if n, ok := w.names[p]; ok && n != "air" {
+		return w.hash, true
+	}
+	return 0, false
+}
 
 // flat has ground whose top face is y=0, so a unit standing on it has feet at 0.
 func flat() world { return world{floor: -1} }

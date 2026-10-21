@@ -59,6 +59,25 @@ func (c Collider) Liquid(p protocol.BlockPos) bool {
 // Solid reports whether the block has any collision.
 func (c Collider) Solid(p protocol.BlockPos) bool { return len(c.Shape(p)) > 0 }
 
+// Block names the block, for callers of a Solid that need more than
+// collision, such as the block a placement clicks.
+func (c Collider) Block(p protocol.BlockPos) (string, bool) { return c.b.Block(p) }
+
+// Hasher is what a Blocks may also offer: the network hash of a block, as
+// UpdateBlock carried it. A click on the block must quote it back.
+type Hasher interface {
+	BlockHash(protocol.BlockPos) (hash uint32, known bool)
+}
+
+// BlockHash forwards to the store's hash when it has one; a world that
+// names no blocks has none to quote.
+func (c Collider) BlockHash(p protocol.BlockPos) (uint32, bool) {
+	if h, ok := c.b.(Hasher); ok {
+		return h.BlockHash(p)
+	}
+	return 0, false
+}
+
 // Climbable reports whether the unit climbs the block at p.
 func (c Collider) Climbable(p protocol.BlockPos) bool {
 	name, known := c.b.Block(p)
