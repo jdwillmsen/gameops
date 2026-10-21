@@ -342,12 +342,13 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 		// slot packet follows the requests the unit issues itself.
 		for _, r := range p.Responses {
 			if a.abandoned[r.RequestID] {
-				// The move was given up on before its answer came; the answer
-				// settles nothing and must not touch the inventory.
+				// The move was given up on before its answer came. No caller
+				// waits on it any more, but a late success did move the stack,
+				// so the inventory still follows it.
 				delete(a.abandoned, r.RequestID)
-				continue
+			} else {
+				a.responses[r.RequestID] = r.Status
 			}
-			a.responses[r.RequestID] = r.Status
 			item := a.reqItem[r.RequestID]
 			delete(a.reqItem, r.RequestID)
 			if r.Status == StatusOK {
