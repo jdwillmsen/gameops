@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -209,6 +210,39 @@ func TestPlanStockChunkLimits(t *testing.T) {
 		if s.Unit != "" {
 			t.Fatalf("%s pinned to %s", s.Key, s.Unit)
 		}
+	}
+}
+
+func TestChunksSplitStockNeed(t *testing.T) {
+	cases := []struct {
+		need, free, want int
+	}{
+		{1, 0, 1}, {1, 1, 1}, {1, 3, 1},
+		{16, 0, 1}, {16, 1, 1}, {16, 3, 1},
+		{17, 0, 1}, {17, 1, 1}, {17, 3, 2},
+		{64, 0, 1}, {64, 1, 1}, {64, 3, 3},
+		{65, 0, 2}, {65, 1, 2}, {65, 3, 3},
+		{256, 0, 4}, {256, 1, 4}, {256, 3, 4},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("need %d free %d", tc.need, tc.free), func(t *testing.T) {
+			// The planner sizes the split by the free units: one chunk per
+			// unit, each carrying a share of at most perUnit.
+			got := chunks(tc.need, min(tc.free, (tc.need+perUnit-1)/perUnit))
+			sum := 0
+			for _, c := range got {
+				if c <= 0 || c > maxChunk {
+					t.Fatalf("chunk %d in %v", c, got)
+				}
+				sum += c
+			}
+			if sum != tc.need {
+				t.Fatalf("chunks %v sum to %d, want %d", got, sum, tc.need)
+			}
+			if len(got) != tc.want {
+				t.Fatalf("chunks %v: %d of them, want %d", got, len(got), tc.want)
+			}
+		})
 	}
 }
 
