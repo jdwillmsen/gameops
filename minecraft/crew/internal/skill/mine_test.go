@@ -222,3 +222,21 @@ func TestMineBlockToleratesALoadedServer(t *testing.T) {
 		t.Fatalf("status %v, err %v", st, err)
 	}
 }
+
+// A block broken above a hole drops its item down the hole, two cells under
+// the block, where the unit must go to collect it.
+func TestMineBlockCollectsDropsThatFallDownAHole(t *testing.T) {
+	w := flatWorld(20)
+	w.fill("stone", 9, 1, 9, 9, 3, 11)
+	w.fill("air", 9, 1, 9, 9, 2, 11)
+	r := withPickaxe(newRig(t, w, feetAt(4, 1, 10)))
+	area := Area{Min: protocol.BlockPos{9, 3, 9}, Max: protocol.BlockPos{9, 3, 11}}
+	m := NewMineBlockWith(w, r.self, "stone", "cobblestone", "pickaxe", 3, 0, InArea(area))
+	st, err := r.run(m, 1500)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("cobblestone"); got != 3 {
+		t.Errorf("cobblestone = %d, want 3", got)
+	}
+}

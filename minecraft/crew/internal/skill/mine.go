@@ -420,10 +420,30 @@ func (m *Mine) pickupStep(a Actuator, have int, p act.Pose) outcome {
 	return outcome{st: Running}
 }
 
+// maxDropFall bounds the search for where a drop lands; a mined area is a few
+// blocks deep.
+const maxDropFall = 8
+
+// dropRest is the cell a drop from the target comes to rest in. It falls
+// straight down through open cells, so a block mined over a hole drops its item
+// to the bottom of the hole, not into the cell it left.
+func (m *Mine) dropRest() protocol.BlockPos {
+	c := m.target
+	for i := 0; i < maxDropFall; i++ {
+		below := protocol.BlockPos{c.X(), c.Y() - 1, c.Z()}
+		if name, known := m.world.Block(below); !known || !path.Passable(name) {
+			break
+		}
+		c = below
+	}
+	return c
+}
+
 // pickupCell finds the standable cell nearest the drop, within one block of
 // it, or none if the unit is already close enough to collect it.
 func (m *Mine) pickupCell(p act.Pose) (protocol.BlockPos, bool) {
-	drop := centre(m.target)
+	rest := m.dropRest()
+	drop := centre(rest)
 	near := func(c mgl32.Vec3) float64 {
 		return math.Hypot(float64(drop.X()-c.X()), float64(drop.Z()-c.Z()))
 	}
@@ -434,7 +454,7 @@ func (m *Mine) pickupCell(p act.Pose) (protocol.BlockPos, bool) {
 	for dx := int32(-1); dx <= 1; dx++ {
 		for dy := int32(-1); dy <= 1; dy++ {
 			for dz := int32(-1); dz <= 1; dz++ {
-				c := protocol.BlockPos{m.target.X() + dx, m.target.Y() + dy, m.target.Z() + dz}
+				c := protocol.BlockPos{rest.X() + dx, rest.Y() + dy, rest.Z() + dz}
 				if d := near(centre(c)); d <= 1.0+1e-6 && d < bestD && path.Standable(m.world, c) {
 					best, bestD, found = c, d, true
 				}
