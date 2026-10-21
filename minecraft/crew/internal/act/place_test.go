@@ -242,8 +242,8 @@ func TestPlaceBlockAbandonsAMoveTheServerNeverAnswers(t *testing.T) {
 		t.Fatalf("the new move reused the abandoned request %d", first)
 	}
 
-	// An answer to the abandoned move must not settle the new one, and must
-	// not empty the stack it moved either.
+	// A late success to the abandoned move did move the stack, so the
+	// inventory follows it and the item is held from the hotbar.
 	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
 		RequestID: first,
 		ContainerInfo: []protocol.StackResponseContainerInfo{
@@ -254,27 +254,12 @@ func TestPlaceBlockAbandonsAMoveTheServerNeverAnswers(t *testing.T) {
 				}},
 		},
 	}}})
-	if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrItemMoving) {
-		t.Fatalf("err = %v, want ErrItemMoving", err)
+	if got := a.inv[0]; got.Stack.Count != 16 {
+		t.Errorf("the late answer did not land the stack on the hotbar: %+v", got)
 	}
-	if got := a.inv[20]; got.Stack.Count != 16 {
-		t.Errorf("the abandoned answer emptied the stack in the main inventory: %+v", got)
+	if _, ok := a.responses[first]; ok {
+		t.Error("the abandoned request's answer was kept for a caller that no longer waits")
 	}
-	if got := a.inv[0]; got.Stack.Count != 0 {
-		t.Errorf("the abandoned answer landed %+v on the hotbar", got)
-	}
-
-	// The answer to the new move lands the stack, and the item is held.
-	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
-		RequestID: second,
-		ContainerInfo: []protocol.StackResponseContainerInfo{
-			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
-				SlotInfo: []protocol.StackResponseSlotInfo{
-					{Slot: 20, Count: 0, StackNetworkID: 9},
-					{Slot: 0, Count: 16, StackNetworkID: 9},
-				}},
-		},
-	}}})
 	if err := a.PlaceBlock(target, "cobblestone"); err != nil {
 		t.Fatal(err)
 	}

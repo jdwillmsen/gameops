@@ -246,11 +246,10 @@ func (a *Actuator) holdItem(item string) (slot int, held protocol.ItemInstance, 
 	return 0, held, ErrNoItem
 }
 
-// abandonMove gives up on a move the server never answered. The request is
-// forgotten, so a late answer to it settles nothing and cannot be read as
-// the answer to the move that replaces it.
+// abandonMove gives up on a move the server never answered. A late answer to
+// it is never read as the answer to the move that replaces it, though its
+// item stays noted so a late success still lands in the inventory.
 func (a *Actuator) abandonMove() {
-	delete(a.reqItem, a.move)
 	a.abandoned[a.move] = true
 	a.move = 0
 }
