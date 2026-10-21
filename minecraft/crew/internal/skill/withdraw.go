@@ -15,6 +15,11 @@ import (
 
 const inventorySlots = 36
 
+// ErrChestChunkNotLoaded is the failure of a withdraw whose target block is
+// still unknown after waiting out its chance to arrive, as on a cold join
+// where the server has not sent the chunk the chest sits in.
+var ErrChestChunkNotLoaded = errors.New("the chest's chunk is not loaded")
+
 type withdrawPhase int
 
 const (
@@ -162,7 +167,19 @@ func (w *Withdraw) idle(a Actuator) outcome {
 }
 
 func (w *Withdraw) start(a Actuator) outcome {
-	if name, known := w.world.Block(w.chest); !known || (name != "chest" && name != "trapped_chest") {
+	ph := &w.phase
+	name, known := w.world.Block(w.chest)
+	if !known {
+		// An unknown target is usually a chunk that has not arrived yet, as
+		// on a cold join, not a missing chest; it is waited for briefly and
+		// only given up once the wait says the chunk is not coming.
+		if ph.waited++; ph.waited >= waitTicks {
+			return w.failed(a, ErrChestChunkNotLoaded)
+		}
+		return w.idle(a)
+	}
+	ph.waited = 0
+	if name != "chest" && name != "trapped_chest" {
 		return w.failed(a, errors.New("no chest at the target"))
 	}
 	p := a.Pose()

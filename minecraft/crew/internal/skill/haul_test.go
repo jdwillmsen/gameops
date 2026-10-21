@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -247,6 +248,69 @@ func TestWithdrawIntoHotbarNeverLandsOffTheHotbar(t *testing.T) {
 	}
 	if !s.(*Withdraw).Full() || r.stored(srcA, 340) != 64 {
 		t.Errorf("full=%v, bread left %d, want the bread left behind", s.(*Withdraw).Full(), r.stored(srcA, 340))
+	}
+}
+
+func TestWithdrawWaitsForTheChestsChunkToArrive(t *testing.T) {
+	w := haulWorld()
+	delete(w, srcA)
+	r := haulRig(t, w)
+	r.chestFor(srcA)[0] = slotStack{idCobblestone, 16, 700}
+	s := NewWithdrawChest(w, r.self, srcA, map[string]int{"cobblestone": 16})
+	for i := 0; i < 40; i++ {
+		before := r.ticks
+		st, err := s.Step(context.Background(), r)
+		if st != Running || err != nil {
+			t.Fatalf("step %d: gave up on the chest before its chunk arrived: %v %v", i, st, err)
+		}
+		if sent := r.ticks - before; sent != 1 {
+			t.Fatalf("step %d: sent %d inputs, want 1", i, sent)
+		}
+	}
+	w[srcA] = "chest"
+	st, err := r.run(s, 600)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("cobblestone"); got != 16 {
+		t.Errorf("cobblestone = %d, want the chest's whole stack", got)
+	}
+	if open, _, _ := r.Container(); open || !r.chestClosed {
+		t.Error("a chest was left open")
+	}
+	if r.ticks > 300 {
+		t.Errorf("the visit took %d ticks; a chunk two seconds late must not cost the back-off", r.ticks)
+	}
+}
+
+func TestWithdrawFailsALoadedNonChestWithoutWaiting(t *testing.T) {
+	w := haulWorld()
+	w[srcA] = "stone"
+	r := haulRig(t, w)
+	s := NewWithdrawChest(w, r.self, srcA, map[string]int{"cobblestone": 16})
+	st, err := r.run(s, 400)
+	if st != Failed || err == nil || err.Error() != "no chest at the target" {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.ticks > 1 {
+		t.Errorf("spent %d ticks on a block that was loaded all along", r.ticks)
+	}
+}
+
+func TestWithdrawGivesUpWhenTheChestsChunkNeverArrives(t *testing.T) {
+	w := haulWorld()
+	delete(w, srcA)
+	r := haulRig(t, w)
+	s := NewWithdrawChest(w, r.self, srcA, map[string]int{"cobblestone": 16})
+	st, err := r.run(s, waitTicks+100)
+	if st != Failed || !errors.Is(err, ErrChestChunkNotLoaded) {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.ticks < waitTicks-1 || r.ticks > waitTicks {
+		t.Errorf("gave up after %d ticks, want the %d-tick bound held", r.ticks, waitTicks)
+	}
+	if open, _, _ := r.Container(); open || !r.chestClosed {
+		t.Error("a chest was left open")
 	}
 }
 
