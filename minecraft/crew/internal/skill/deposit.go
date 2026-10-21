@@ -250,7 +250,10 @@ func (d *Deposit) open(a Actuator, snap belief.Snapshot) outcome {
 		return next
 	}
 	if d.waited++; d.waited >= answerTicks {
-		d.drainErr = fmt.Errorf("chest did not open within %d ticks", answerTicks)
+		if d.log != nil {
+			d.log.Info("chest_open_clicks", map[string]any{"clicks": d.clicks, "opened": false})
+		}
+		d.drainErr = ErrChestNotOpened
 		d.phase, d.waited = dDrain, 0
 		return next
 	}
