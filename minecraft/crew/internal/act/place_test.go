@@ -7,6 +7,8 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
 func TestPlaceOnTopClicksTheUpperFace(t *testing.T) {
@@ -202,5 +204,65 @@ func TestPlaceBlockMovesTheStackToTheHotbarFirst(t *testing.T) {
 	if u.HotBarSlot != 0 || u.HeldItem.StackNetworkID != 9 || u.HeldItem.Stack.Count != 16 ||
 		u.HeldItem.Stack.NetworkID != cobblestone {
 		t.Errorf("use = %+v", u)
+	}
+}
+
+// A withdraw's answer is all the server ever says about the unit's own
+// slots, so a placement afterward must find the withdrawn stack: it holds it
+// from the slot the answer named, without another move.
+func TestPlaceBlockFindsAStackAWithdrawFilledFrom(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	a, s := newAct(stoneBelow(target), Pose{})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:cobblestone", RuntimeID: cobblestone}})
+	for _, pk := range labPackets(t, "chest_open") {
+		a.Apply(pk)
+	}
+	// The recording carried the inventory of its session; an empty window 0
+	// stands in for the cold inventory the withdraw is to fill.
+	a.Apply(&packet.InventoryContent{WindowID: 0})
+	a.Apply(&packet.InventorySlot{WindowID: 2, Slot: 0, NewItem: cobbleInstance(16, 9)})
+	id, err := a.Withdraw(0, 16, belief.Item{}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: id,
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerLevelEntity},
+				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: 0, Count: 0, StackNetworkID: 0}}},
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: 3, Count: 16, StackNetworkID: 77}}},
+		},
+	}}})
+	if err := a.PlaceBlock(target, "cobblestone"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.got) != 3 {
+		t.Fatalf("sent %d packets, want the withdraw, one selection and one transaction", len(s.got))
+	}
+	me, ok := s.got[1].(*packet.MobEquipment)
+	if !ok || me.HotBarSlot != 3 || me.InventorySlot != 3 || me.NewItem.Stack.NetworkID != cobblestone ||
+		me.NewItem.Stack.Count != 16 || me.NewItem.StackNetworkID != 77 {
+		t.Errorf("equipment = %+v", me)
+	}
+	u := s.last(t).(*packet.InventoryTransaction).TransactionData.(*protocol.UseItemTransactionData)
+	if u.HotBarSlot != 3 || u.HeldItem.Stack.NetworkID != cobblestone ||
+		u.HeldItem.Stack.Count != 16 || u.HeldItem.StackNetworkID != 77 {
+		t.Errorf("use = %+v", u)
+	}
+}
+
+func TestPlaceBlockNeverClicksAnInteractiveSupport(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	w := flat()
+	w.floor = 0
+	w.hash = 4321
+	w.names = map[protocol.BlockPos]string{{1, 0, 2}: "crafting_table", {1, 1, 2}: "air"}
+	a, s := newPlacer(w, mgl32.Vec3{1.5, 1, 2.5}, 2, cobbleInstance(16, 9))
+	if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrNoSupport) {
+		t.Fatalf("err = %v, want ErrNoSupport", err)
+	}
+	if len(s.got) != 0 {
+		t.Errorf("sent %d packets", len(s.got))
 	}
 }
