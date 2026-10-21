@@ -12,7 +12,7 @@
 
 Today crew units mine, chop, haul and inspect chests. An operator can ask bots to stock 32 oak logs or dig a shaft, but cannot tell them to construct anything.
 
-Step 4 of the roadmap introduces declarative builds: an operator chooses a blueprint, a target place and an orientation. `crew-control` checks ledger stock, gathers missing materials with existing jobs, partitions construction steps across free units, and verifies the finished structure against the blueprint.
+Step 4 of the roadmap introduces declarative builds: an operator chooses a blueprint, a target place and an orientation. `crew-control` checks a named supplies chest in the ledger, fetches stocked materials with existing task templates, partitions construction steps across free units, and verifies the finished structure with a new block-reading task.
 
 ## Owner decisions
 
@@ -22,7 +22,7 @@ Step 4 of the roadmap introduces declarative builds: an operator chooses a bluep
 
 ## 1. Build template format
 
-A blueprint is a small, versioned JSON document defining a 3D block volume via horizontal 2D layers and a block palette.
+A versioned JSON blueprint defines a 3D volume in horizontal layers and a block palette.
 
 ### Schema
 
@@ -31,11 +31,11 @@ A blueprint is a small, versioned JSON document defining a 3D block volume via h
   "version": 1,
   "name": "hut",
   "size": {"x": 5, "y": 4, "z": 5},
-  "palette": {"0": "air", "1": "cobblestone", "2": "oak_planks", "3": "oak_door", "4": "glass"},
+  "palette": {"0": "air", "1": "cobblestone", "2": "oak_log"},
   "layers": [
     ["11111", "11111", "11111", "11111", "11111"],
-    ["12221", "20002", "20002", "20002", "12321"],
-    ["12421", "40004", "20002", "40004", "12321"],
+    ["11011", "10001", "10001", "10001", "11111"],
+    ["11011", "10001", "10001", "10001", "11111"],
     ["22222", "22222", "22222", "22222", "22222"]
   ]
 }
@@ -45,8 +45,16 @@ A blueprint is a small, versioned JSON document defining a 3D block volume via h
 - `name`: slug identifier.
 - `size`: dimensions (`x, y, z`).
 - `palette`: maps single characters to Bedrock block names. Key `"0"` is always `"air"`.
-- `layers`: horizontal cross-sections from `y = 0` (base) to `y = size.y - 1` (top), array of strings along `z`, indexed along `x`.
-- **Location:** blueprints are embedded in `crew-control` via `//go:embed blueprints/*.json`. They are immutable and version-controlled with the service.
+- `layers`: cross-sections from base to top, rows along `z`, characters along `x`.
+- Blueprints are embedded in `crew-control` via `//go:embed blueprints/*.json`.
+
+### Materials and placement
+
+Crew can gather `cobblestone` and `oak_log`, and dig `dirt`; it cannot craft or smelt. Every build therefore names an operator-stocked `supplies` chest place. The operator puts the listed blocks, plus any required tools/items, in that chest before launch. The planner uses ledger stock and existing chest `inspect`/`haul` templates; it does not infer recipes. Stale stock is inspected and a shortfall rejects the build.
+
+- Hut: `cobblestone` and `oak_log` (the doorway is open; no door item).
+- Wall: `cobblestone` only.
+- Farm plot: `dirt`, `oak_log`, a water bucket, and a hoe. No seeds are required; planting is out of scope. A hoe tills dirt by use, it is not a placed block. Water and till actions are new skills and remain dependencies of the farm build.
 
 ### Placement and rotation
 
@@ -56,23 +64,20 @@ The job specifies world origin `(X0, Y0, Z0)` and rotation `R ∈ {0°, 90°, 18
 - `180°`: `x = X0 + size.x - 1 - u`, `z = Z0 + size.z - 1 - w`
 - `270°`: `x = X0 + w`, `z = Z0 + size.x - 1 - u`
 
-Directional block states rotate by `R`.
+The first blueprints avoid directional block states.
 
-### The three blueprints
+### Blueprints
 
 1. **Hut (5×5×4):**
    - `y = 0` (Floor): 5×5 solid `cobblestone`.
-   - `y = 1` (Lower walls): `cobblestone` corners, `oak_planks` walls, door opening at `(2, 0)` with lower `oak_door`, 3×3 hollow interior.
-   - `y = 2` (Upper walls): `cobblestone` corners, `oak_planks` walls, `glass` windows at `(0, 2)` and `(4, 2)`, upper `oak_door`.
-   - `y = 3` (Roof): 5×5 solid ceiling of `oak_planks`.
-2. **Wall (N×1×3):**
-   - Repeatable 8×1×3 segment:
+   - `y = 1` and `y = 2`: `cobblestone` perimeter walls with a 1×2 doorway; 3×3 hollow interior.
+   - `y = 3` (Roof): 5×5 solid `oak_log`.
+2. **Wall (N×3×1):**
+   - Repeatable 8×3×1 segment:
      - `y = 0` & `y = 1`: 8×1 solid `cobblestone`.
      - `y = 2`: alternating `cobblestone` and `air` (`10101011`) for battlements.
    - Tiled along the target axis for runs of length `N`.
-3. **Farm plot (9×9×2):**
-   - `y = 0` (Base): central `water` block at `(4, 0, 4)` in a 9×9 dirt basin with an `oak_log` border.
-   - `y = 1` (Farmland): 9×9 `farmland` grid hydrated by the central water block (hydrates up to 4 blocks horizontally in all directions). The water block is capped with a `waterlily` or `slab` to prevent bots falling in.
+3. **Farm plot (9×9×1):** `y = 0` is dirt with an `oak_log` border and a central water cell from the supplied bucket. Till the dirt cells with the supplied hoe. No lily pad, slab, crafting, or planting is assumed.
 
 ## 2. New unit skills
 
@@ -80,116 +85,104 @@ Building requires three new skills in `minecraft/crew/internal/skill/`.
 
 ### `place_block`
 
-Places an inventory item against an adjacent existing block face.
+Places an inventory item against an adjacent block face.
 
 #### Bedrock protocol mechanics (gophertunnel)
-Placing a block sends an `InventoryTransaction` packet with `UseItemTransactionData`:
+In vendored gophertunnel v1.62.0, `PlaceOnTop` sends an `InventoryTransaction` with `UseItemTransactionData`. Its existing top-face path sets:
 - `ActionType`: `protocol.UseItemActionClickBlock` (0).
 - `TriggerType`: `protocol.TriggerTypePlayerInput`.
 - `BlockPosition`: coordinate of the adjacent existing block (`against`), **not** the empty target cell.
-- `BlockFace`: clicked face on `against` (`0` -Y, `1` +Y, `2` -Z, `3` +Z, `4` -X, `5` +X).
+- `BlockFace`: `1` for the upper face, as `act.PlaceOnTop` does. The six face values in a general placer still need a lab packet check before implementation.
 - `ClickedPosition`: hit vector on the clicked face (e.g. `{0.5, 1.0, 0.5}` for top).
-- `HotBarSlot` & `HeldItem`: active slot and item instance matching the item's runtime ID.
+- `HotBarSlot`, `Hand` and `HeldItem`: selected slot, main hand and the full `ItemInstance` for that slot (including stack network ID), as `act.instance` supplies.
 - `Position`: player eye position (`feet.Add(Vec3{0, 1.62, 0})`).
-- `BlockRuntimeID`: runtime hash of the `against` block from `UpdateBlock`.
+- `BlockRuntimeID`: the clicked block runtime ID from the world store, populated from `UpdateBlock`; the store calls this the network hash. It is not an item ID or block-name hash.
 - `ClientPrediction`: `protocol.ClientPredictionSuccess`.
 
-The unit selects the hotbar slot (`SelectHotbar`), aims yaw and pitch (`lookAt`), and checks reach distance (≤ 4.5 blocks).
+Select the slot and aim before sending. `ClickedPosition` is block-relative; reach and confirmation need skill tests and lab proof.
 
 #### Failure modes
-- **Occupied:** destination contains an entity or solid block; pauses and retries.
-- **Out of reach:** eye distance > 4.5 blocks; navigates to an adjacent valid stand cell.
-- **No support:** target cell lacks an adjacent solid face; planner orders dependencies so support is placed first.
-- **Wrong item:** hotbar slot empty or item mismatch; fails with `item missing`.
+- **Occupied:** destination has an entity or solid block; pause and retry.
+- **Out of reach:** navigate to a valid adjacent stand cell.
+- **No support:** order supporting blocks first.
+- **Wrong item:** fail with `item missing`.
 
 ### `fetch`
 
-Multi-item withdrawal extending `withdraw` and `haul`. Given `map[string]int`:
-1. Navigates to the chest place (`navigate`).
-2. Opens container (`OpenChest`).
-3. Executes slot withdrawals (`Withdraw`) into hotbar and inventory.
-4. Closes container (`CloseContainer`).
-5. Attaches a `seen` observation reporting remaining chest stock to the ledger.
+Optional multi-item wrapper around existing `withdraw`/`haul`: open chest, withdraw requested stacks, close, and report remaining stock via `seen`.
 
 ### `pillar_up` (scaffolding)
 
-For placing blocks beyond ground reach (Y ≥ 3 above floor):
-1. Unit walks to the pillar cell and jumps (`Input{Jump: true}`).
-2. At jump apex (clearance ≥ 1.0), calls `PlaceOnTop(feet, slot, "dirt", hash)`.
-3. Unit lands on top at Y+1; repeats to working height.
-4. **Teardown:** once the upper course is placed, the unit mines the dirt blocks under its feet downward with `act.BreakAction`, descending cleanly to ground level.
+For blocks beyond ground reach, reuse the jump/place/land sequence already in `skill.Fell`. Its pose loop checks upward clearance and server block confirmation. A build-specific skill still needs safe teardown and material accounting; prove it in the lab before promising arbitrary heights.
 
 ## 3. Planner
 
-Builds run as a new job kind in `crew-control`: `kind: "build"`, with spec `{"blueprint": "hut", "place": "build-zone-1", "rotation": 0, "clear": false, "tolerance": 0.0}`.
+Builds use the existing `plan` job kind and `crew_job_step` templates with dependencies; do not add a parallel `build` kind or step store. Example spec: `{"blueprint": "hut", "place": "build-zone-1", "rotation": 0, "clear": false, "tolerance": 0.0}`.
 
 ### 1. Material logistics
 Before construction starts:
-1. **Bill of materials (BOM):** tally required items from blueprint palette counts.
-2. **Ledger check:** query `crew_stock` across known chests.
-3. **Gather shortfall:** if stock is insufficient, the planner schedules prerequisite `gather_and_deposit` or `fell` jobs to harvest materials into `store`.
-4. **Fetch staging:** free units receive `fetch` steps to load required items before walking to the site.
+1. Tally the blueprint and tool requirements.
+2. Use ledger `Stock` for the named supplies chest; if stale, enqueue existing `inspect` (which reads chests only).
+3. Reject before work if the chest does not contain the full bill. No gather step can make planks, glass, doors, tools, or farmland.
+4. Use existing `haul`/`withdraw` behavior to stage supplies. A multi-item `fetch` is a convenience only if it reuses those operations.
 
 ### 2. Step decomposition and scheduling
 The planner divides the blueprint into `crew_job_step` records:
-- **Layer ordering:** strictly bottom-up. Layer `y` depends on Layer `y - 1`. A layer's steps become ready only when the supporting layer finishes.
-- **Region partitioning:** within a layer, blocks are divided into spatial sectors assigned to distinct units with a 3-block separation.
-- **Support dependencies:** blocks with attachment requirements (doors, torches) explicitly depend on base blocks in `depends_on`.
+- Order layers bottom-up; each depends on its supporting layer.
+- Split same-layer regions without overlapping unit work.
+- Encode attachment support in existing `depends_on` step keys.
 
 ### 3. Retries
-- Transient errors (e.g. temporary path obstruction) retry up to 3 times with exponential backoff.
-- Permanent failures (unsupported placement, broken prerequisite, or exhausted items) fail the step and the build job, cancelling open work via job-scoped stops.
+Use the existing scheduler's three attempts and job-scoped cancellation. Permanent placement or material failures fail the job.
 
 ## 4. Validation
 
-Silent partial success is an anti-goal. A build is complete only when verified by world observation.
+Silent partial success is an anti-goal. Existing `inspect` only opens chests and reports their contents; it cannot inspect arbitrary blocks. Add a named `observe_blocks` unit task/skill backed by the existing block store. It must request/load the blueprint bounding box, return known block names/states and mark unknown cells explicitly; `crew-control` compares that result with the rotated template. Do not claim the chest `inspect` template validates a structure.
 
 ### Inspection pass
-1. When placement steps complete, the scheduler enqueues an `inspect_build` step.
-2. An assigned unit walks 2–4 inspection waypoints around the structure.
-3. The unit's world store absorbs chunk and block updates for the bounding box.
-4. The unit sends its observed block volume in the task completion event.
+1. After placement, enqueue `observe_blocks` for the blueprint box.
+2. The task obtains block updates for the box through the crew connection and reads the existing block store.
+3. It returns observed names/states and unknown cells in its completion event. The current `inspect` chest task is not used for this check.
 
 ### Tolerance check
 `crew-control` compares observed world blocks with the rotated blueprint:
 - Non-air blocks must match expected types; interior air must contain no debris.
-- `tolerance = 0.0` (default): 100% exact match of all non-air blocks.
-- `tolerance > 0.0`: permits minor cosmetic discrepancies; structural boundaries must be 100%.
-- On match, job marks `done`. On mismatch, the scheduler triggers one repair round; if that fails, job ends `failed`.
+- Default tolerance is zero; any unknown cell fails validation.
+- A nonzero tolerance may allow cosmetic differences, never boundary mismatches.
+- Match marks the plan done; mismatch may add one repair round, then fails.
 
 ## 5. Safety
 
 Automated builds must never damage existing structures or wander off-bounds.
 
 1. **Confined to declared `area`:** every build job targets an existing `area` place from the ledger. The rotated blueprint's bounding box must fit entirely within `[place.box.min, place.box.max]`. If any block falls outside, the job is rejected on submission.
-2. **Protected terrain:** units are strictly prohibited from breaking any block outside the blueprint envelope and temporary scaffolding.
-3. **Site clearance (`clear` flag):**
-   - `clear: false` (default): if any non-air block exists where the blueprint expects placement or interior air, the job aborts before acting with `refused: area not clear`.
-   - `clear: true`: the planner generates a pre-build clearing phase. Units mine obstacles strictly within the blueprint box, deposit drops in `store`, and then begin foundations.
+2. Units may break only cells explicitly approved by the build plan, including temporary scaffold.
+3. `clear: false` rejects occupied target or interior-air cells. `clear: true` adds a bounded clearing phase and deposits drops in `store`.
 
 ## 6. Console
 
 The Jobs panel (`Shift-J`) gains a "Build" option alongside "Parallel demo" and "Stock goal".
 
-- **Controls:** Blueprint dropdown (`Hut`, `Wall`, `Farm plot`), Area picker (ledger places with `kind == "area"`), Rotation selector (`North 0°`, `East 90°`, `South 180°`, `West 270°`), and `Clear site` toggle.
-- **Camera overlay:** selecting an area renders a 3D translucent wireframe bounding box and orientation indicator on the unit camera feed, confirming placement visually before launch.
-- **Telemetry:** SSE `jobs` events report current layer, active workers, placed block counts, and validation status.
+- Controls: blueprint, `area` place, supplies chest, rotation, and clear-site toggle.
+- Selecting an area shows its bounds and orientation on the camera.
+- Existing `jobs` SSE reports layer, workers, placed count, and validation.
 
 ## 7. Delivery
 
-Delivery is organized into five ordered, independently shippable tasks.
+Delivery is ordered so each task leaves a working capability and later rows depend only on shipped earlier rows.
 
 | Task | Scope | Deliverables | Done when |
 |---|---|---|---|
-| **1. Unit `place_block`** | `crew` | Actuator `PlaceBlock` supporting 6 faces; `place_block` skill and task template. | A unit on the lab places a cobblestone block against an existing stone block on command and verifies it in belief. |
-| **2. Single-unit wall** | `crew` & `crew-control` | `fetch` skill; wall blueprint; single-unit build planner. | Agate fetches cobblestone from `store`, builds an 8×1×3 wall in `build-site-1`, and inspect pass confirms 100% match. |
-| **3. Scaffolding & clearing** | `crew` | `pillar_up` skill with teardown; pre-build `clear: true` excavation pass. | A unit clears two obstructing blocks, pillars up to place blocks at Y=3, and tears down the pillar cleanly. |
-| **4. Multi-unit planner** | `crew-control` | Ledger material check and auto-gather; spatial region splitting; layer dependency engine. | Agate and Basalt build a 16-block wall concurrently, fetching materials from different chests without collision. |
-| **5. Hut, Farm & Console** | `crew-control` & Console | Embedded hut and farm plot blueprints; water bucket & hoe placement; Jobs console Build panel. | An operator launches a Hut and Farm Plot from the console; units complete both unattended; both report `done`. |
+| **1. Unit placement** | `crew` | Generalize the existing top-face actuator path; `place_block` skill and task template. | A unit places supplied cobblestone on a supported target and observes server confirmation. Validate other faces separately before enabling them. |
+| **2. Block observation** | `crew` & `crew-control` | `observe_blocks` task over the existing block store; exact-box validation. | A bounded box returns block names and explicit unknown cells. |
+| **3. Single-unit wall** | `crew` & `crew-control` | Wall blueprint, plan steps, supplies chest withdrawal, block observation check. | Agate builds an 8×3×1 cobblestone wall inside an `area`; `observe_blocks` confirms it. |
+| **4. Scaffolding & clearing** | `crew` | Reuse `Fell` pillar movement in a build skill; bounded clearing with observed drops. | A unit clears only declared cells, builds above reach, and returns/accounts for scaffold material. |
+| **5. Multi-unit planner** | `crew-control` | Region splitting and layer dependencies using existing plan steps and ledger stock. | Two units build a 16-block wall from one declared supplies chest without overlap. |
+| **6. Hut, farm & console** | `crew`, `crew-control` & Console | Supplied-material hut; water-bucket and hoe use tasks for farm; build controls and telemetry. | Operator launches each supported template; block observation verifies blocks and farm task reports tilling separately. |
 
 ## 8. Open questions for the owner
 
-1. **Uneven terrain foundations:** should blueprints assume the target area is pre-flattened at `y = 0`, or should the planner automatically dig down slopes and extend cobblestone foundations to solid ground?
-2. **Scaffolding block material:** should units use ordinary dirt pillars (requiring subsequent teardown mining) or Bedrock scaffolding blocks (which collapse on breaking the base block)?
-3. **Farm plot planting:** should the farm plot build complete once water is placed and soil is tilled, or should units also fetch and plant seeds (requiring hoe durability and seed stock logistics)?
+1. Should the target area be flat, or should builds extend foundations to solid ground?
+2. Should scaffold use dirt (then mined back) or Bedrock scaffolding?
+3. Should farm plots stop after tilling, or include planting and seed logistics?
 
