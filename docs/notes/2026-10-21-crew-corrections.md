@@ -2,14 +2,14 @@
 
 ## Finding
 
-The available production logs do not identify why units receive 1–6 movement
+The original production logs did not identify why units receive 1–6 movement
 corrections per minute. I read the last 30 minutes from all 20 `crew-01` through
 `crew-20` deployments in `jdwillmsen-prd`. There were **0 correction events in
 those logs**. This is not evidence of zero corrections: `internal/act/act.go`
 increments `crew_movement_corrections_total` for
-`CorrectPlayerMovePrediction`, but does not log a correction event. The emitted
-skill and life events also do not include the unit's current block types or
-movement state at correction time.
+`CorrectPlayerMovePrediction`, but did not log a correction event. The
+`movement_corrected` event now records quantized movement state and nearby
+block names without absolute coordinates.
 
 ## Evidence by candidate cause
 
@@ -29,9 +29,14 @@ or adding a shape-specific test with an expected Bedrock position yet.
 
 ## Conclusion
 
-Diagnosis is inconclusive. The one concrete code-level lead is the already
-documented stair-descent timing difference, but treating it as the hub cause
-would be a guess. To distinguish these causes, the correction counter needs
-correlated movement evidence (at minimum the active skill, support block
-shape, on-ground/step-up state, and a quantized predicted-versus-server delta)
-collected without logging world coordinates. No live-cluster changes were made.
+Diagnosis remains inconclusive until the new event is collected in production.
+The one concrete code-level lead is the already documented stair-descent timing
+difference, but treating it as the hub cause would be a guess. A 30-minute log
+pull grouped by support block, feet block, block ahead, and active skill will
+identify which movement situations correlate with corrections:
+
+```sh
+for n in $(seq -w 1 20); do kubectl -n jdwillmsen-prd logs "deploy/crew-$n" --since=30m; done | jq -s 'map(select(.event == "movement_corrected")) | sort_by([.below, .feet, .ahead, .skill]) | group_by([.below, .feet, .ahead, .skill]) | map({below: .[0].below, feet: .[0].feet, ahead: .[0].ahead, skill: .[0].skill, lines: length, corrections: (length + (map(.suppressed // 0) | add))}) | sort_by(-.corrections)'
+```
+
+No live-cluster changes were made.

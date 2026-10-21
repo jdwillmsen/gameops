@@ -7,6 +7,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -60,6 +61,23 @@ func (s *sink) last(t *testing.T) packet.Packet {
 type world struct {
 	floor int32
 	extra map[protocol.BlockPos]bool
+}
+
+type namedBlocks map[protocol.BlockPos]string
+
+func (b namedBlocks) Block(p protocol.BlockPos) (string, bool) {
+	n, ok := b[p]
+	return n, ok
+}
+
+type correctionLog struct {
+	events []map[string]any
+}
+
+func (l *correctionLog) Info(event string, fields map[string]any) {
+	if event == "movement_corrected" {
+		l.events = append(l.events, fields)
+	}
 }
 
 func (w world) Solid(p protocol.BlockPos) bool { return p[1] <= w.floor || w.extra[p] }
@@ -322,6 +340,72 @@ func TestCorrectionResetsThePose(t *testing.T) {
 	_ = a.Tick(Input{})
 	d := s.inputs(t)[5].Delta
 	near(t, "carry z", float64(d.Z()), 0.05, 1e-5)
+}
+
+func TestCorrectionLogDescribesPredictedMovementAndNearbyBlocks(t *testing.T) {
+	blocks := namedBlocks{
+		{1, -1, 2}: "stone", {1, 0, 2}: "air", {0, 0, 2}: "oak_planks",
+	}
+	tests := []struct {
+		name  string
+		shift mgl32.Vec3
+		axis  string
+		sign  string
+		dist  float64
+	}{
+		{name: "x positive", shift: mgl32.Vec3{0.5, 0, 0}, axis: "x", sign: "+", dist: 0.5},
+		{name: "y negative", shift: mgl32.Vec3{0, -0.75, 0}, axis: "y", sign: "-", dist: 0.75},
+		{name: "z negative", shift: mgl32.Vec3{0.25, 0.1, -0.5}, axis: "z", sign: "-", dist: 0.57},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := Pose{Feet: mgl32.Vec3{1.5, 0, 2.5}, Yaw: 90, OnGround: true}
+			a, _ := newAct(flat(), start)
+			log := &correctionLog{}
+			a.SetCorrectionDiagnostics(log, blocks)
+			a.SetSkill("mine")
+			when := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+			a.now = func() time.Time { return when }
+			corrected := start.Feet.Add(tt.shift).Add(mgl32.Vec3{0, eyeHeight, 0})
+			a.Apply(&packet.CorrectPlayerMovePrediction{Position: corrected, OnGround: true})
+			if len(log.events) != 1 {
+				t.Fatalf("logged events = %d, want 1", len(log.events))
+			}
+			want := map[string]any{
+				"skill": "mine", "on_ground": true, "step": false,
+				"vy": 0.0, "dist": tt.dist, "axis": tt.axis, "axis_sign": tt.sign,
+				"below": "stone", "feet": "air", "ahead": "oak_planks", "suppressed": uint64(0),
+			}
+			for key, value := range want {
+				if got := log.events[0][key]; got != value {
+					t.Errorf("field %q = %#v, want %#v", key, got, value)
+				}
+			}
+		})
+	}
+}
+
+func TestCorrectionLogRateLimitReportsSuppressedCorrections(t *testing.T) {
+	a, _ := newAct(flat(), Pose{OnGround: true})
+	log := &correctionLog{}
+	a.SetCorrectionDiagnostics(log, nil)
+	when := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	a.now = func() time.Time { return when }
+	correction := &packet.CorrectPlayerMovePrediction{Position: mgl32.Vec3{0, eyeHeight, 0}, OnGround: true}
+	a.Apply(correction)
+	a.Apply(correction)
+	a.Apply(correction)
+	if len(log.events) != 1 {
+		t.Fatalf("logged events before limit expires = %d, want 1", len(log.events))
+	}
+	when = when.Add(10 * time.Second)
+	a.Apply(correction)
+	if len(log.events) != 2 {
+		t.Fatalf("logged events after limit expires = %d, want 2", len(log.events))
+	}
+	if got := log.events[1]["suppressed"]; got != uint64(2) {
+		t.Errorf("suppressed = %#v, want 2", got)
+	}
 }
 
 func TestOwnMovePlayerAdoptsThePositionAndOthersAreIgnored(t *testing.T) {
