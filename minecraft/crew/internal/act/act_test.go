@@ -375,6 +375,7 @@ func TestCorrectionLogDescribesPredictedMovementAndNearbyBlocks(t *testing.T) {
 				"skill": "mine", "on_ground": true, "step": false,
 				"vy": 0.0, "dist": tt.dist, "axis": tt.axis, "axis_sign": tt.sign,
 				"below": "stone", "feet": "air", "ahead": "oak_planks", "suppressed": uint64(0),
+				"tick_found": false,
 			}
 			for key, value := range want {
 				if got := log.events[0][key]; got != value {
@@ -382,6 +383,54 @@ func TestCorrectionLogDescribesPredictedMovementAndNearbyBlocks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCorrectionLogComparesWithTheCorrectedTicksInput(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{0.5, 0, 0.5}, OnGround: true})
+	log := &correctionLog{}
+	a.SetCorrectionDiagnostics(log, nil)
+	a.SetSkill("mine")
+	for i := 0; i < 3; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	a.SetSkill("build")
+	for i := 0; i < 4; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	sent := s.inputs(t)[2]
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: sent.Position.Add(mgl32.Vec3{0, 0.3, 0}),
+		Tick:     sent.Tick,
+		OnGround: true,
+	})
+	if len(log.events) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(log.events))
+	}
+	want := map[string]any{
+		"tick_found": true, "skill": "mine", "dist": 0.3, "axis": "y", "axis_sign": "+",
+	}
+	for key, value := range want {
+		if got := log.events[0][key]; got != value {
+			t.Errorf("field %q = %#v, want %#v", key, got, value)
+		}
+	}
+}
+
+func TestCorrectionLogFallsBackWhenTheTickIsNoLongerHeld(t *testing.T) {
+	a, s := newAct(flat(), Pose{OnGround: true})
+	log := &correctionLog{}
+	a.SetCorrectionDiagnostics(log, nil)
+	for i := 0; i < sentHistory+1; i++ {
+		_ = a.Tick(Input{})
+	}
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{0, eyeHeight, 0},
+		Tick:     s.inputs(t)[0].Tick,
+		OnGround: true,
+	})
+	if got := log.events[0]["tick_found"]; got != false {
+		t.Errorf("tick_found = %#v, want false", got)
 	}
 }
 

@@ -27,6 +27,19 @@ var metricCorrections = promauto.NewCounter(prometheus.CounterOpts{
 // firstTick is arbitrary: the server only needs ticks to rise.
 const firstTick = 100
 
+// sentHistory covers a correction's round trip: the server names the corrected
+// tick, and by then later inputs have already been sent.
+const sentHistory = 64
+
+// sentTick is what one PlayerAuthInput claimed, kept so a correction is
+// compared with the tick it names rather than the newest one.
+type sentTick struct {
+	tick   uint64
+	pose   Pose
+	stepUp bool
+	skill  string
+}
+
 // PacketWriter is the connection's write half.
 type PacketWriter interface{ WritePacket(packet.Packet) error }
 
@@ -59,6 +72,7 @@ type Actuator struct {
 	lastCorrectionLog     time.Time
 	suppressedCorrections uint64
 	now                   func() time.Time
+	sent                  [sentHistory]sentTick
 
 	itemIDs     map[string]int32
 	cont        container
@@ -184,6 +198,7 @@ func (a *Actuator) Tick(in Input) error {
 	}
 	a.pose = next
 	a.lastStepUp = step.stepUp
+	a.sent[a.tick%sentHistory] = sentTick{tick: a.tick, pose: next, stepUp: step.stepUp, skill: a.skill}
 	a.tick++
 	return nil
 }
@@ -244,7 +259,11 @@ func (a *Actuator) logCorrection(p *packet.CorrectPlayerMovePrediction) {
 		a.suppressedCorrections++
 		return
 	}
-	predicted := a.pose.Feet
+	sent, found := a.sent[p.Tick%sentHistory], true
+	if sent.tick != p.Tick || p.Tick < firstTick {
+		sent, found = sentTick{pose: a.pose, stepUp: a.lastStepUp, skill: a.skill}, false
+	}
+	predicted := sent.pose.Feet
 	corrected := p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0})
 	delta := corrected.Sub(predicted)
 	axis, component := "x", delta[0]
@@ -259,11 +278,11 @@ func (a *Actuator) logCorrection(p *packet.CorrectPlayerMovePrediction) {
 	}
 	feet := blockPos(predicted)
 	below := protocol.BlockPos{feet[0], int32(math.Floor(float64(predicted[1]) - 0.01)), feet[2]}
-	dir := forwardDir(a.pose.Yaw)
+	dir := forwardDir(sent.pose.Yaw)
 	ahead := blockPos(mgl32.Vec3{predicted[0] + dir[0], predicted[1], predicted[2] + dir[1]})
 	fields := map[string]any{
-		"skill": skillOrIdle(a.skill), "on_ground": a.pose.OnGround,
-		"step": a.lastStepUp, "vy": round2(a.pose.vy),
+		"skill": skillOrIdle(sent.skill), "on_ground": sent.pose.OnGround,
+		"step": sent.stepUp, "vy": round2(sent.pose.vy), "tick_found": found,
 		"dist": round2(float32(math.Sqrt(float64(delta.Dot(delta))))),
 		"axis": axis, "axis_sign": sign,
 		"below": a.blockName(below), "feet": a.blockName(feet), "ahead": a.blockName(ahead),
