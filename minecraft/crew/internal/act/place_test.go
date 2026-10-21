@@ -268,6 +268,18 @@ func TestPlaceBlockAbandonsAMoveTheServerNeverAnswers(t *testing.T) {
 		u.HeldItem.Stack.NetworkID != cobblestone {
 		t.Errorf("use = %+v", u)
 	}
+
+	// The replacement move had nothing left to move, so the server refuses
+	// it. That refusal must not be read the next time the hotbar runs out.
+	if a.move != 0 {
+		t.Fatalf("the replacement move %d is still pending with the item held", a.move)
+	}
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: second, Status: 1,
+	}}})
+	if _, ok := a.responses[second]; ok {
+		t.Error("the replacement move's refusal was kept for a later placement to read")
+	}
 }
 
 func TestInteractiveBlocksAreNotSupport(t *testing.T) {
