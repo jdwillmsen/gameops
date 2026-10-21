@@ -113,16 +113,22 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 		RecipeNetworkID: r.NetworkID,
 		NumberOfCrafts:  byte(times),
 	}}
+	// A stack can pay for two ingredients when a tag and a name both match
+	// it, so what each slot has already given is tracked.
+	taken := map[int]int{}
 	for _, ing := range r.Ingredients {
 		left := ing.Count * times
 		for _, st := range inv {
 			if left == 0 {
 				break
 			}
-			if st.Name != ing.Name {
+			if !ing.Matches(st.Name) {
 				continue
 			}
-			n := min(left, st.Count)
+			n := min(left, st.Count-taken[st.Slot])
+			if n <= 0 {
+				continue
+			}
 			actions = append(actions, &protocol.ConsumeStackRequestAction{
 				DestroyStackRequestAction: protocol.DestroyStackRequestAction{
 					Count: byte(n),
@@ -133,6 +139,7 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 					},
 				},
 			})
+			taken[st.Slot] += n
 			left -= n
 		}
 		if left > 0 {
@@ -238,7 +245,7 @@ func covered(inv []belief.Item, ingredients []craft.Ingredient, times int) bool 
 	for _, ing := range ingredients {
 		need, have := ing.Count*times, 0
 		for _, st := range inv {
-			if st.Name == ing.Name {
+			if ing.Matches(st.Name) {
 				have += st.Count
 			}
 		}

@@ -117,7 +117,7 @@ func TestStoreIndexesRecipesByOutputName(t *testing.T) {
 		t.Fatalf("stick recipes = %d, want 1", len(sticks))
 	}
 	if got := sticks[0]; got.NetworkID != idRecipeStick || got.OutputCount != 4 ||
-		len(got.Ingredients) != 1 || got.Ingredients[0].Name != "planks" || got.Ingredients[0].Count != 2 {
+		len(got.Ingredients) != 1 || got.Ingredients[0] != (Ingredient{Tag: "planks", Count: 2}) {
 		t.Errorf("stick recipe = %+v, want the planks tag merged to one ingredient of 2", got)
 	}
 
