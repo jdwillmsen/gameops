@@ -328,3 +328,43 @@ func TestInspectExpandsToOneInspect(t *testing.T) {
 		t.Fatalf("skills = %v, err = %v", skills, err)
 	}
 }
+
+func TestParseObserve(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(`{"template":"observe_blocks","box":{"min":{"x":-500,"y":-64,"z":-500},"max":{"x":-485,"y":-49,"z":-485}}}`))
+	if err != nil {
+		t.Fatalf("a 16 by 16 by 16 box is 4096 cells: %v", err)
+	}
+	if tpl.Template != "observe_blocks" || tpl.Box == nil ||
+		tpl.Box.Min != (Chest{X: -500, Y: -64, Z: -500}) || tpl.Box.Max != (Chest{X: -485, Y: -49, Z: -485}) {
+		t.Fatalf("parsed = %+v", tpl)
+	}
+	cases := map[string]string{
+		"missing box":     `{"template":"observe_blocks"}`,
+		"missing max":     `{"template":"observe_blocks","box":{"min":{"x":0,"y":0,"z":0}}}`,
+		"min over max":    `{"template":"observe_blocks","box":{"min":{"x":5,"y":0,"z":0},"max":{"x":4,"y":0,"z":0}}}`,
+		"too many cells":  `{"template":"observe_blocks","box":{"min":{"x":0,"y":64,"z":0},"max":{"x":16,"y":64,"z":240}}}`,
+		"x low":           `{"template":"observe_blocks","box":{"min":{"x":-501,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}}}`,
+		"x high":          `{"template":"observe_blocks","box":{"min":{"x":0,"y":0,"z":0},"max":{"x":500,"y":0,"z":0}}}`,
+		"y low":           `{"template":"observe_blocks","box":{"min":{"x":0,"y":-65,"z":0},"max":{"x":0,"y":0,"z":0}}}`,
+		"y high":          `{"template":"observe_blocks","box":{"min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":321,"z":0}}}`,
+		"z high":          `{"template":"observe_blocks","box":{"min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":500}}}`,
+		"extra":           `{"template":"observe_blocks","box":{"min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}},"item":"oak_log"}`,
+		"extra key":       `{"template":"observe_blocks","box":{"min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0,"w":1}}}`,
+		"area is not box": `{"template":"observe_blocks","area":{"min":{"x":0,"y":0,"z":0},"max":{"x":0,"y":0,"z":0}}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+func TestObserveExpandsToOneObserve(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(`{"template":"observe_blocks","box":{"min":{"x":1,"y":2,"z":3},"max":{"x":4,"y":5,"z":6}}}`))
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "observe_blocks" {
+		t.Fatalf("skills = %v, err = %v", skills, err)
+	}
+}

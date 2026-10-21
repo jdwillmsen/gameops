@@ -25,11 +25,14 @@ const (
 	maxBranchLength  = 32
 	gotoTemplate     = "goto"
 	inspectTemplate  = "inspect"
-	maxHaulItems     = 8
-	maxHaulSources   = 4
-	minQty           = 1
-	maxQty           = 256
-	maxAreaSpan      = 64
+	observeTemplate  = "observe_blocks"
+	// maxObserveCells caps a box at what one report can carry.
+	maxObserveCells = 4096
+	maxHaulItems    = 8
+	maxHaulSources  = 4
+	minQty          = 1
+	maxQty          = 256
+	maxAreaSpan     = 64
 	// How far from the unit MineBlock looks for stone.
 	mineRadius = 24
 	// goto is confined to the lab's flat square, so a typo cannot send the
@@ -55,6 +58,8 @@ type Template struct {
 	Chest    Chest  `json:"chest"`
 	// Area, when set, confines gather_and_deposit to blocks inside the box.
 	Area *Area `json:"area,omitempty"`
+	// Box, when set, is what observe_blocks reads.
+	Box *Box `json:"box,omitempty"`
 
 	Items map[string]int `json:"items,omitempty"`
 	From  []Chest        `json:"from,omitempty"`
@@ -74,6 +79,29 @@ var facings = map[string][2]int32{"north": {0, -1}, "south": {0, 1}, "east": {1,
 type Area struct {
 	Min Chest `json:"min"`
 	Max Chest `json:"max"`
+}
+
+// Box is an inclusive box to observe, min at most max on every axis. It is
+// not Area: an observation may span more than Area's 64 blocks on an axis.
+type Box struct {
+	Min Chest `json:"min"`
+	Max Chest `json:"max"`
+}
+
+// validate accepts only a box whose observation can travel in one report.
+func (b Box) validate() error {
+	// int64 so a span across the int32 range cannot wrap.
+	cells := int64(1)
+	for _, ax := range [][2]int32{{b.Min.X, b.Max.X}, {b.Min.Y, b.Max.Y}, {b.Min.Z, b.Max.Z}} {
+		if ax[0] > ax[1] {
+			return errors.New("box min must not exceed max")
+		}
+		cells *= int64(ax[1]) - int64(ax[0]) + 1
+	}
+	if cells > maxObserveCells {
+		return fmt.Errorf("box must hold at most %d cells", maxObserveCells)
+	}
+	return nil
 }
 
 // decodeStrict rejects unknown fields and anything after the object.
@@ -111,6 +139,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseGoto(body)
 	case inspectTemplate:
 		return parseInspect(body)
+	case observeTemplate:
+		return parseObserve(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -260,6 +290,31 @@ func (c Chest) inLab() bool {
 	return c.X >= gotoMinXZ && c.X <= gotoMaxXZ && c.Z >= gotoMinXZ && c.Z <= gotoMaxXZ && c.Y >= gotoMinY && c.Y <= gotoMaxY
 }
 
+func parseObserve(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Box      *struct {
+			Min *Chest `json:"min"`
+			Max *Chest `json:"max"`
+		} `json:"box"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Box == nil || raw.Box.Min == nil || raw.Box.Max == nil {
+		return Template{}, errors.New("box with min and max is required")
+	}
+	// The message names no coordinate, as goto's does not.
+	if !raw.Box.Min.inLab() || !raw.Box.Max.inLab() {
+		return Template{}, errors.New("box is outside the allowed area")
+	}
+	b := Box{Min: *raw.Box.Min, Max: *raw.Box.Max}
+	if err := b.validate(); err != nil {
+		return Template{}, err
+	}
+	return Template{Template: raw.Template, Box: &b}, nil
+}
+
 func parseHaul(body []byte) (Template, error) {
 	var raw struct {
 		Template string         `json:"template"`
@@ -330,6 +385,11 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	}
 	if t.Template == inspectTemplate {
 		return []skill.Skill{skill.NewInspect(world, self, protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z})}, nil
+	}
+	if t.Template == observeTemplate && t.Box != nil {
+		return []skill.Skill{skill.NewObserve(world, self,
+			protocol.BlockPos{t.Box.Min.X, t.Box.Min.Y, t.Box.Min.Z},
+			protocol.BlockPos{t.Box.Max.X, t.Box.Max.Y, t.Box.Max.Z})}, nil
 	}
 	if t.Template == gotoTemplate && t.To != nil {
 		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}

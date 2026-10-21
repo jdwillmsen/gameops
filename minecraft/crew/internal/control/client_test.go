@@ -56,6 +56,7 @@ type fakeControl struct {
 	badAuth      bool
 	rejectID     string // events about this id get a 400
 	refuseSeen   bool   // events carrying seen get a 413
+	refuseBlocks bool   // events carrying blocks get a 413
 	legacy       bool   // decodes like the deployed controller: unknown fields get a 400
 	bodies       []int  // sizes of the event bodies received
 	conns        int    // connections the server accepted
@@ -175,6 +176,10 @@ func newFakeControl(t *testing.T) *fakeControl {
 			}
 		}
 		if f.refuseSeen && ev.Seen != nil {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			return
+		}
+		if f.refuseBlocks && ev.Blocks != nil {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -1034,6 +1039,20 @@ func (s *stubRunner) finishWithSeen(id string, seen *skill.ChestSeen) {
 	obs(t)
 }
 
+func (s *stubRunner) finishWithBlocks(id, reason string, blocks *skill.Blocks) {
+	s.mu.Lock()
+	var t task.Task
+	for i := range s.tasks {
+		if s.tasks[i].ID == id {
+			s.tasks[i].State, s.tasks[i].Reason, s.tasks[i].Blocks = task.Done, reason, blocks
+			t = s.tasks[i]
+		}
+	}
+	obs := s.obs
+	s.mu.Unlock()
+	obs(t)
+}
+
 func TestTerminalEventCarriesWhatTheTaskSaw(t *testing.T) {
 	f, r := newFakeControl(t), &stubRunner{}
 	start(t, r, f)
@@ -1324,5 +1343,125 @@ func TestStartupDNSTimeoutIsRetriedWithBackoff(t *testing.T) {
 	case <-h.done:
 		t.Fatal("the client stopped instead of retrying")
 	default:
+	}
+}
+
+func TestTerminalEventCarriesBlocksAndStaysSmall(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	start(t, r, f)
+
+	// The unit sends no observation wider than its own budget, and the id
+	// and the clipped reason are at their longest, so this is a terminal
+	// event at its fullest.
+	id := strings.Repeat("d", 64)
+	f.work <- taskItem(id, gotoBody)
+	waitUntil(t, "queued", func() bool { return len(r.submitted()) == 1 })
+	cells := strings.Repeat("A", 384)
+	blocks := &skill.Blocks{Min: skill.Vec{X: 0, Y: 64, Z: 0}, Size: skill.Vec{X: 16, Y: 1, Z: 16}, Palette: []string{"air"}, Cells: cells}
+	if enc, err := json.Marshal(blocks); err != nil || len(enc) > 470 {
+		t.Fatalf("the unit would not send this observation: %d bytes, err %v", len(enc), err)
+	}
+	r.finishWithBlocks(id, strings.Repeat("r", 400), blocks)
+
+	ev := f.waitFor(t, "done", func(ev []event) bool { return has(ev, id, "done") })
+	var last event
+	found := false
+	for _, e := range ev {
+		if e.ID == id && e.State == "done" {
+			last, found = e, true
+		}
+	}
+	if !found || last.Blocks == nil {
+		t.Fatalf("no done event carried blocks: %+v", ev)
+	}
+	if last.Blocks.Cells != cells || last.Blocks.Palette[0] != "air" ||
+		last.Blocks.Min.X != 0 || last.Blocks.Min.Y != 64 || last.Blocks.Min.Z != 0 ||
+		last.Blocks.Size.X != 16 || last.Blocks.Size.Y != 1 || last.Blocks.Size.Z != 16 {
+		t.Errorf("blocks = %+v", last.Blocks)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, n := range f.bodies {
+		if n > 1024 {
+			t.Errorf("event body of %d bytes exceeds the unit's cap", n)
+		}
+	}
+}
+
+func TestBlocksRideOnlyTheTerminalEvent(t *testing.T) {
+	b, _ := json.Marshal(eventOf(task.Task{ID: "x", State: task.Running, Blocks: &skill.Blocks{Cells: "BgA="}}))
+	if strings.Contains(string(b), "blocks") {
+		t.Errorf("a running report carried blocks: %s", b)
+	}
+	blocks := &skill.Blocks{Min: skill.Vec{X: 0, Y: 64, Z: 0}, Size: skill.Vec{X: 3, Y: 1, Z: 2}, Palette: []string{"dirt"}, Cells: "BgA="}
+	b, _ = json.Marshal(eventOf(task.Task{ID: "x", State: task.Done, Blocks: blocks}))
+	want := `"blocks":{"min":{"x":0,"y":64,"z":0},"size":{"x":3,"y":1,"z":2},"palette":["dirt"],"cells":"BgA="}`
+	if !strings.Contains(string(b), want) {
+		t.Errorf("wire = %s, want it to contain %s", b, want)
+	}
+}
+
+func TestTooLargeAnswerRetriesWithoutBlocks(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	f.mu.Lock()
+	f.refuseBlocks = true
+	f.mu.Unlock()
+	start(t, r, f)
+
+	f.work <- taskItem(taskA, gotoBody)
+	waitUntil(t, "queued", func() bool { return len(r.submitted()) == 1 })
+	r.finishWithBlocks(taskA, "", &skill.Blocks{Min: skill.Vec{X: 0, Y: 64, Z: 0}, Size: skill.Vec{X: 3, Y: 1, Z: 2}, Palette: []string{"dirt"}, Cells: "BgA="})
+	ev := f.waitFor(t, "done", func(ev []event) bool { return has(ev, taskA, "done") })
+	for _, e := range ev {
+		if e.ID == taskA && e.Blocks != nil {
+			t.Errorf("accepted event still carries blocks: %+v", e)
+		}
+	}
+}
+
+func TestFitDropsSeenBeforeBlocks(t *testing.T) {
+	items := map[string]int{}
+	for i := 0; i < 27; i++ {
+		items[strings.Repeat("i", 29)+string(rune('a'+i%26))+string(rune('a'+i/26))] = 1
+	}
+	newBlocks := func() *Blocks {
+		blocks := &Blocks{Palette: []string{"air"}, Cells: strings.Repeat("A", 384)}
+		blocks.Min.X, blocks.Min.Y, blocks.Min.Z = 0, 64, 0
+		blocks.Size.X, blocks.Size.Y, blocks.Size.Z = 16, 1, 16
+		return blocks
+	}
+	// Room for some of the chest: seen shrinks and blocks stay.
+	got := fit(event{ID: "x", State: "done", Seen: &Seen{Items: items, At: time.Now()}, Blocks: newBlocks()})
+	if got.Blocks == nil {
+		t.Fatal("the observation was dropped while seen survived")
+	}
+	if got.Seen == nil || !got.Seen.Partial || len(got.Seen.Items) >= len(items) {
+		t.Errorf("seen = %+v, want it shrunk to make room", got.Seen)
+	}
+	if !fits(got) {
+		t.Error("the fitted event still does not fit")
+	}
+	// Room for none of it: seen goes whole before blocks does.
+	got = fit(event{
+		ID: strings.Repeat("d", 64), State: "failed", Reason: strings.Repeat("r", 400),
+		Seen: &Seen{Items: items, At: time.Now()}, Blocks: newBlocks(),
+	})
+	if got.Blocks == nil {
+		t.Fatal("the observation was dropped before the chest")
+	}
+	if got.Seen != nil {
+		t.Errorf("seen survived a report only blocks fit in: %+v", got.Seen)
+	}
+	if !fits(got) {
+		t.Error("the fitted event still does not fit")
+	}
+	// Blocks that cannot fit even without seen go too, after seen has.
+	huge := &Blocks{Cells: strings.Repeat("B", 1100)}
+	got = fit(event{ID: "x", State: "done", Seen: &Seen{Items: map[string]int{"dirt": 3}, At: time.Now()}, Blocks: huge})
+	if got.Blocks != nil {
+		t.Errorf("blocks survived: %+v", got.Blocks)
+	}
+	if !fits(got) {
+		t.Error("the fitted event still does not fit")
 	}
 }
