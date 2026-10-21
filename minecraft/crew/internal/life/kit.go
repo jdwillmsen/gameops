@@ -23,14 +23,15 @@ const (
 	kitFailBackoff  = 3600
 	// A visit that a fight cut short is tried again soon.
 	kitAbortBackoff = 200
-	// A chest whose chunk has not arrived yet is retried this soon, since a
-	// cold join's chunks stream in over seconds and a crowd of units joining
-	// at once can wait longer than one visit's own window.
-	kitChunkBackoff = 100
+	// A chest that is merely early — its chunk has not arrived yet, or its
+	// click answered with no window during the seconds around a join — is
+	// retried this soon: chunks stream in over seconds, and a crowd of units
+	// joining at once can wait longer than one visit's own answer window.
+	kitRetryBackoff = 100
 	// The short retry is allowed this many times in a row before the chest
-	// is left to the failure back-off, so a chunk that never loads cannot
+	// is left to the failure back-off, so a chest that never answers cannot
 	// keep the unit walking back.
-	kitChunkTries = 6
+	kitRetryTries = 6
 	// A visit is a short walk and one chest; one that takes a minute is stuck.
 	kitLimit = 1200
 )
@@ -69,9 +70,10 @@ type kitState struct {
 	startedAt uint64
 	// blockedUntil is the tick before which no visit starts.
 	blockedUntil uint64
-	// chunkTries counts the visits in a row that found the chest's chunk
-	// still not loaded, so the short retry stays bounded.
-	chunkTries int
+	// retryTries counts the visits in a row that met a chest merely early:
+	// a chunk still not loaded, or an open that waited out its window, so
+	// the short retry stays bounded.
+	retryTries int
 }
 
 // lacks says what the unit is missing that the kit holds: a sword or axe, and
@@ -177,22 +179,23 @@ func (l *Life) endKit(err error) {
 	k.visit = nil
 	if err != nil {
 		l.logEvent("kit_failed", map[string]any{"error": err.Error()})
-		chunkLate := errors.Is(err, skill.ErrChestChunkNotLoaded)
-		if chunkLate && k.chunkTries < kitChunkTries {
-			// A chest whose chunk is merely late, as on a cold join, is
-			// tried again within seconds, not the three-minute back-off.
-			k.chunkTries++
-			k.blockedUntil = l.tick + kitChunkBackoff
+		early := errors.Is(err, skill.ErrChestChunkNotLoaded) || errors.Is(err, skill.ErrChestNotOpened)
+		if early && k.retryTries < kitRetryTries {
+			// A chest whose chunk is merely late, or whose open failed while
+			// the unit was still settling in, is tried again within seconds,
+			// not the three-minute back-off.
+			k.retryTries++
+			k.blockedUntil = l.tick + kitRetryBackoff
 			return
 		}
-		if !chunkLate {
-			// A different failure breaks the row of late chunks.
-			k.chunkTries = 0
+		if !early {
+			// A different failure breaks the row of early misses.
+			k.retryTries = 0
 		}
 		k.blockedUntil = l.tick + kitFailBackoff
 		return
 	}
-	k.chunkTries = 0
+	k.retryTries = 0
 	weapon, food := lacks(l.self())
 	if !weapon && !food {
 		l.logEvent("kit_restocked", nil)
