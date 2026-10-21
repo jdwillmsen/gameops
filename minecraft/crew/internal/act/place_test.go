@@ -270,6 +270,21 @@ func TestPlaceBlockAbandonsAMoveTheServerNeverAnswers(t *testing.T) {
 	}
 }
 
+func TestInteractiveBlocksAreNotSupport(t *testing.T) {
+	for _, name := range []string{"lit_smoker", "smoker", "lit_blast_furnace", "loom", "grindstone",
+		"stonecutter_block", "cartography_table", "smithing_table", "brewing_stand", "beacon",
+		"lectern", "crafter", "white_bed", "chipped_anvil"} {
+		if !interactive(name) {
+			t.Errorf("%s is clicked as support, but clicking it opens it", name)
+		}
+	}
+	for _, name := range []string{"stone", "dirt", "oak_planks", "cobblestone"} {
+		if interactive(name) {
+			t.Errorf("%s is refused as support", name)
+		}
+	}
+}
+
 // stackRequests returns the stack requests the unit sent, in order.
 func stackRequests(s *sink) []*packet.ItemStackRequest {
 	var out []*packet.ItemStackRequest
