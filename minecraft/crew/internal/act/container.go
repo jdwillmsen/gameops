@@ -22,6 +22,10 @@ const (
 // hotbarSlots is the number of slots MobEquipment can select.
 const hotbarSlots = 9
 
+// inventorySlots is the main inventory with the hotbar: window 0, slots
+// 0-35.
+const inventorySlots = 36
+
 // closeContainerType is what the client puts in a ContainerClose it initiates.
 const closeContainerType = 0xff
 
@@ -281,12 +285,14 @@ type container struct {
 
 // Died forgets the open window and any pending stack responses: death closes
 // the window on the server without a ContainerClose, and a stale open window
-// would let a later deposit believe a chest it never clicked is open.
+// would let a later deposit believe a chest it never clicked is open. A move
+// to the hotbar in flight dies with the same inventory.
 func (a *Actuator) Died() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cont = container{}
 	a.responses = map[int32]uint8{}
+	a.move = pendingMove{}
 }
 
 func (a *Actuator) applyContainerLocked(pk packet.Packet) {
@@ -298,16 +304,39 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			a.cont = container{}
 		}
 	case *packet.InventoryContent:
-		if a.cont.open && p.WindowID == uint32(a.cont.window) {
+		switch {
+		case p.WindowID == 0:
+			a.inv = [inventorySlots]protocol.ItemInstance{}
+			for i := 0; i < len(p.Content) && i < inventorySlots; i++ {
+				a.inv[i] = p.Content[i]
+			}
+		case a.cont.open && p.WindowID == uint32(a.cont.window):
 			a.cont.slots = append([]protocol.ItemInstance(nil), p.Content...)
 		}
 	case *packet.InventorySlot:
-		if a.cont.open && p.WindowID == uint32(a.cont.window) && int(p.Slot) < len(a.cont.slots) {
+		switch {
+		case p.WindowID == 0 && p.Slot < inventorySlots:
+			a.inv[p.Slot] = p.NewItem
+		case a.cont.open && p.WindowID == uint32(a.cont.window) && int(p.Slot) < len(a.cont.slots):
 			a.cont.slots[p.Slot] = p.NewItem
+		}
+	case *packet.InventoryTransaction:
+		// A pickup arrives as a transaction on window 0, not as a slot
+		// update.
+		if _, normal := p.TransactionData.(*protocol.NormalTransactionData); p.TransactionData != nil && !normal {
+			return
+		}
+		for _, ac := range p.Actions {
+			if w, ok := ac.WindowID.Value(); ac.SourceType == protocol.InventoryActionSourceContainer && ok && w == 0 && ac.InventorySlot < inventorySlots {
+				a.inv[ac.InventorySlot] = ac.NewItem
+			}
 		}
 	case *packet.ItemStackResponse:
 		for _, r := range p.Responses {
 			a.responses[r.RequestID] = r.Status
+			if r.Status == StatusOK && a.move.req != 0 && r.RequestID == a.move.req {
+				a.applyMoveLocked(r)
+			}
 		}
 	}
 }

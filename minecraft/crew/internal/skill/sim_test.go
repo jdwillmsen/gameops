@@ -141,14 +141,17 @@ type rig struct {
 
 	// chest is the chest every test that never names a position talks to;
 	// chests holds the others, so a haul can have several.
-	chest       *[27]slotStack
-	chests      map[protocol.BlockPos]*[27]slotStack
-	opened      *[27]slotStack
-	fills       []timedFill
-	takeStatus  []uint8 // answers to the next withdraws, in order
-	takes       int
-	places      int
-	placed      int // blocks the server accepted on a top face
+	chest      *[27]slotStack
+	chests     map[protocol.BlockPos]*[27]slotStack
+	opened     *[27]slotStack
+	fills      []timedFill
+	takeStatus []uint8 // answers to the next withdraws, in order
+	takes      int
+	places     int
+	placed     int // blocks the server accepted on a top face
+	// placeClicks counts the use-item clicks on a block face, accepted or
+	// not, so a test can see how often a placement was attempted.
+	placeClicks int
 	maxRise     float32
 	chestAt     protocol.BlockPos
 	window      byte
@@ -216,11 +219,12 @@ func newRig(t *testing.T, w simWorld, feet mgl32.Vec3) *rig {
 	return r
 }
 
-// give puts a stack in an inventory slot and tells the tracker.
+// give puts a stack in an inventory slot and tells the tracker and the
+// actuator, which keeps its own view of window 0 for placements.
 func (r *rig) give(slot int, item int32, count int) {
 	r.nextID++
 	r.inv[slot] = slotStack{item, count, r.nextID}
-	r.tracker.Apply(&packet.InventorySlot{WindowID: 0, Slot: uint32(slot), NewItem: instance(r.inv[slot])})
+	r.send(&packet.InventorySlot{WindowID: 0, Slot: uint32(slot), NewItem: instance(r.inv[slot])})
 }
 
 func instance(s slotStack) protocol.ItemInstance {
@@ -270,6 +274,12 @@ func (r *rig) OpenChest(pos protocol.BlockPos, face int32, hotbar int, held beli
 
 func (r *rig) PlaceOnTop(against protocol.BlockPos, hotbar int, held belief.Item, hash uint32) error {
 	err := r.Actuator.PlaceOnTop(against, hotbar, held, hash)
+	r.pump()
+	return err
+}
+
+func (r *rig) PlaceBlock(target protocol.BlockPos, item string) error {
+	err := r.Actuator.PlaceBlock(target, item)
 	r.pump()
 	return err
 }
@@ -565,6 +575,7 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 // real one does: an air or unknown target, a cell the unit's body overlaps, a
 // click out of reach or a held stack that is not the one named.
 func (r *rig) onPlace(u *protocol.UseItemTransactionData) {
+	r.placeClicks++
 	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone"}
 	pose := r.Actuator.Pose()
 	at := protocol.BlockPos{u.BlockPosition.X(), u.BlockPosition.Y() + 1, u.BlockPosition.Z()}
@@ -623,6 +634,11 @@ func (r *rig) onRequest(p *packet.ItemStackRequest) {
 		}
 		pl, ok := req.Actions[0].(*protocol.PlaceStackRequestAction)
 		if !ok {
+			continue
+		}
+		if pl.Source.Container.ContainerID == protocol.ContainerCombinedHotBarAndInventory &&
+			pl.Destination.Container.ContainerID == protocol.ContainerCombinedHotBarAndInventory {
+			r.onMove(req.RequestID, pl)
 			continue
 		}
 		src, dst := &r.inv[pl.Source.Slot], &r.opened[pl.Destination.Slot]
@@ -713,6 +729,45 @@ func (r *rig) onTake(id int32, tk *protocol.TakeStackRequestAction) {
 				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: tk.Source.Slot, Count: byte(src.count), StackNetworkID: src.id}}},
 			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
 				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: tk.Destination.Slot, Count: byte(dst.count), StackNetworkID: dst.id}}},
+		},
+	}}})
+}
+
+// onMove answers the unit rearranging its own inventory, which it does to
+// hold a stack it is about to place. Both slots come back as window-0
+// updates, because belief cannot rebuild an empty slot from the answer alone.
+func (r *rig) onMove(id int32, pl *protocol.PlaceStackRequestAction) {
+	src, dst := &r.inv[pl.Source.Slot], &r.inv[pl.Destination.Slot]
+	n := int(pl.Count)
+	reply := func(status uint8) {
+		r.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{Status: status, RequestID: id}}})
+	}
+	switch {
+	case src.id != pl.Source.StackNetworkID || src.count < n:
+		reply(act.StatusBadSource)
+		return
+	case dst.count > 0 && (dst.item != src.item || dst.count+n > 64):
+		reply(act.StatusOccupied)
+		return
+	}
+	if dst.count == 0 {
+		dst.item, dst.id = src.item, src.id
+	}
+	dst.count += n
+	src.count -= n
+	if src.count == 0 {
+		*src = slotStack{}
+	}
+	r.send(&packet.InventorySlot{WindowID: 0, Slot: uint32(pl.Source.Slot), NewItem: instance(*src)})
+	r.send(&packet.InventorySlot{WindowID: 0, Slot: uint32(pl.Destination.Slot), NewItem: instance(*dst)})
+	r.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: id,
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo: []protocol.StackResponseSlotInfo{
+					{Slot: pl.Source.Slot, Count: byte(src.count), StackNetworkID: src.id},
+					{Slot: pl.Destination.Slot, Count: byte(dst.count), StackNetworkID: dst.id},
+				}},
 		},
 	}}})
 }

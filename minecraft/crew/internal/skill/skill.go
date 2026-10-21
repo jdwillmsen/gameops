@@ -36,6 +36,9 @@ type Actuator interface {
 	UseItem(slot int, held belief.Item) error
 	ReleaseItem(slot int, held belief.Item) error
 	PlaceOnTop(against protocol.BlockPos, hotbar int, held belief.Item, hash uint32) error
+	// PlaceBlock places one of item at the target; it reports ErrItemMoving
+	// while a stack it needs is still travelling to the hotbar.
+	PlaceBlock(target protocol.BlockPos, item string) error
 	OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
 	Container() (open bool, windowID byte, pos protocol.BlockPos)
 	ContainerContent() []protocol.ItemInstance

@@ -325,7 +325,54 @@ func TestInspectExpandsToOneInspect(t *testing.T) {
 	tpl, _ := ParseTemplate([]byte(`{"template":"inspect","chest":{"x":1,"y":2,"z":3}}`))
 	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
 	if err != nil || len(skills) != 1 || skills[0].Name() != "inspect" {
-		t.Fatalf("skills = %v, err = %v", skills, err)
+		t.Fatalf("skills %v, err %v", skills, err)
+	}
+}
+
+const placeBody = `{"template":"place_block","block":{"x":7,"y":1,"z":7},"item":"cobblestone"}`
+
+func TestParsePlaceBlock(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(placeBody))
+	if err != nil {
+		t.Fatalf("valid place_block: %v", err)
+	}
+	if tpl.Template != "place_block" || tpl.Block == nil || *tpl.Block != (Chest{X: 7, Y: 1, Z: 7}) || tpl.Item != "cobblestone" {
+		t.Fatalf("parsed = %+v", tpl)
+	}
+	cases := map[string]string{
+		"missing block":   `{"template":"place_block","item":"cobblestone"}`,
+		"missing item":    `{"template":"place_block","block":{"x":0,"y":0,"z":0}}`,
+		"x low":           `{"template":"place_block","block":{"x":-501,"y":0,"z":0},"item":"cobblestone"}`,
+		"x high":          `{"template":"place_block","block":{"x":500,"y":0,"z":0},"item":"cobblestone"}`,
+		"y low":           `{"template":"place_block","block":{"x":0,"y":-65,"z":0},"item":"cobblestone"}`,
+		"y high":          `{"template":"place_block","block":{"x":0,"y":321,"z":0},"item":"cobblestone"}`,
+		"z low":           `{"template":"place_block","block":{"x":0,"y":0,"z":-501},"item":"cobblestone"}`,
+		"z high":          `{"template":"place_block","block":{"x":0,"y":0,"z":500},"item":"cobblestone"}`,
+		"upper case item": `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":"Cobblestone"}`,
+		"space in item":   `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":"cobble stone"}`,
+		"namespaced item": `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":"minecraft:cobblestone"}`,
+		"empty item":      `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":""}`,
+		"long item":       `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":"` + strings.Repeat("a", 33) + `"}`,
+		"extra field":     `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":"cobblestone","qty":1}`,
+		"extra block key": `{"template":"place_block","block":{"x":0,"y":0,"z":0,"w":1},"item":"cobblestone"}`,
+		"gather field":    `{"template":"place_block","block":{"x":0,"y":0,"z":0},"item":"cobblestone","chest":{"x":0,"y":0,"z":0}}`,
+		"trailing data":   placeBody + `{}`,
+		"not json":        `nope`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+func TestPlaceBlockExpandsToOneSkill(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(placeBody))
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "place_block" {
+		t.Fatalf("skills %v, err %v", skills, err)
 	}
 }
 

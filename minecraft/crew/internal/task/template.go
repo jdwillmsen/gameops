@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -26,6 +27,7 @@ const (
 	gotoTemplate     = "goto"
 	inspectTemplate  = "inspect"
 	observeTemplate  = "observe_blocks"
+	placeTemplate    = "place_block"
 	// maxObserveCells caps a box at what one report can carry.
 	maxObserveCells = 4096
 	maxHaulItems    = 8
@@ -43,6 +45,10 @@ const (
 	gotoWithin = 1.5
 )
 
+// validItemName is the shape of an item place_block may be asked for, the
+// server's item-table names: lower case, digits and underscores.
+var validItemName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
 type Chest struct {
 	X int32 `json:"x"`
 	Y int32 `json:"y"`
@@ -50,12 +56,14 @@ type Chest struct {
 }
 
 // Template is a task request: gather_and_deposit fills Item, Qty and Chest;
-// haul fills Items, From and To.
+// haul fills Items, From and To; place_block fills Block and Item.
 type Template struct {
 	Template string `json:"template"`
 	Item     string `json:"item"`
 	Qty      int    `json:"qty"`
 	Chest    Chest  `json:"chest"`
+	// Block, when set, is the cell place_block fills.
+	Block *Chest `json:"block,omitempty"`
 	// Area, when set, confines gather_and_deposit to blocks inside the box.
 	Area *Area `json:"area,omitempty"`
 	// Box, when set, is what observe_blocks reads.
@@ -141,6 +149,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseInspect(body)
 	case observeTemplate:
 		return parseObserve(body)
+	case placeTemplate:
+		return parsePlace(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -315,6 +325,29 @@ func parseObserve(body []byte) (Template, error) {
 	return Template{Template: raw.Template, Box: &b}, nil
 }
 
+func parsePlace(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Block    *Chest `json:"block"`
+		Item     string `json:"item"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Block == nil {
+		return Template{}, errors.New("block is required")
+	}
+	// The message names no coordinate: they are lab locations and must stay
+	// out of logs.
+	if !raw.Block.inLab() {
+		return Template{}, errors.New("block is outside the allowed area")
+	}
+	if !validItemName.MatchString(raw.Item) {
+		return Template{}, errors.New("item must be 1 to 32 characters of a-z, 0-9 and _")
+	}
+	return Template{Template: raw.Template, Block: raw.Block, Item: raw.Item}, nil
+}
+
 func parseHaul(body []byte) (Template, error) {
 	var raw struct {
 		Template string         `json:"template"`
@@ -394,6 +427,10 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	if t.Template == gotoTemplate && t.To != nil {
 		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
 		return []skill.Skill{skill.NewNavigate(world, self, goal, gotoWithin)}, nil
+	}
+	if t.Template == placeTemplate && t.Block != nil {
+		goal := protocol.BlockPos{t.Block.X, t.Block.Y, t.Block.Z}
+		return []skill.Skill{skill.NewPlaceBlock(world, self, goal, t.Item, opts...)}, nil
 	}
 	src, ok := recipes[t.Item]
 	if t.Template != gatherAndDeposit || !ok {
