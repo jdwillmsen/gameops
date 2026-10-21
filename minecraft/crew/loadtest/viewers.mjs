@@ -2,7 +2,7 @@
 // settle, then reports the page's own frame-cost stats over a fixed window.
 //
 // usage: node viewers.mjs --chrome PATH --ports 18100,18101 --viewers N
-//          --radius R --window SECONDS [--settle-timeout SECONDS]
+//          --radius R --window SECONDS [--settle-timeout SECONDS] [--gl swiftshader|gpu]
 // Prints "SETTLED" when every page has meshed (the caller starts its own
 // measurement window then) and one JSON line at the end.
 import { createRequire } from 'node:module';
@@ -22,15 +22,26 @@ const viewers = Number(arg('viewers', '1'));
 const radius = Number(arg('radius', '4'));
 const windowS = Number(arg('window', '30'));
 const settleTimeoutS = Number(arg('settle-timeout', '120'));
+const gl = arg('gl', 'swiftshader');
 if (!chrome || ports.length === 0) {
   console.error('need --chrome and --ports');
+  process.exit(2);
+}
+const glArgs = {
+  // Software GL, the worst case for a tile and the only option without a GPU.
+  swiftshader: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  // Headless Chrome blocklists most GPUs and falls back to software silently,
+  // so the renderer is reported below to prove which one ran.
+  gpu: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu-rasterization'],
+}[gl];
+if (!glArgs) {
+  console.error(`unknown --gl ${gl}`);
   process.exit(2);
 }
 
 const browser = await chromium.launch({
   executablePath: chrome,
-  // Software GL: the lab host has no GPU, which is the worst case for a tile.
-  args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  args: ['--no-sandbox', ...glArgs],
 });
 const pages = [];
 for (let i = 0; i < viewers; i++) {
@@ -38,6 +49,13 @@ for (let i = 0; i < viewers; i++) {
   await page.goto(`http://127.0.0.1:${ports[i % ports.length]}/camera?r=${radius}`);
   pages.push(page);
 }
+
+const renderer = await pages[0].evaluate(() => {
+  const c = document.createElement('canvas').getContext('webgl2');
+  const ext = c && c.getExtension('WEBGL_debug_renderer_info');
+  return ext ? c.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null;
+});
+console.error(`renderer: ${renderer}`);
 
 const settled = await Promise.all(pages.map((p) =>
   p.waitForFunction(() => window.__stats.settledMs !== null, null, { timeout: settleTimeoutS * 1000 })
