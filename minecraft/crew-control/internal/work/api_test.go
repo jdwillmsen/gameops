@@ -494,6 +494,29 @@ func TestEventBlocksReachTheHook(t *testing.T) {
 	}
 }
 
+func TestAFullPaletteOf256EntriesIsAnObservation(t *testing.T) {
+	// A palette of 256 entries is the widest the index can carry, so the
+	// last entry is the one a unit cannot name without a wrap.
+	r := newRig(t, NewMemory())
+	var got []Blocks
+	r.api.OnBlocks = func(_ string, _ uuid.UUID, b Blocks) { got = append(got, b) }
+	names := make([]string, 256)
+	for i := range names {
+		names[i] = fmt.Sprintf(`"b%03d"`, i)
+	}
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"done","progress":100,"blocks":{"min":{"x":0,"y":64,"z":0},"size":{"x":1,"y":1,"z":1},"palette":[%s],"cells":"%s"}}`,
+		it.ID, strings.Join(names, ","), rle(1, 255)), nil)
+	if resp.StatusCode != 204 || len(got) != 1 {
+		t.Fatalf("status %d, %d observations", resp.StatusCode, len(got))
+	}
+	b := got[0]
+	if len(b.Palette) != 256 || b.Palette[255] != "b255" || b.Cells != rle(1, 255) {
+		t.Fatalf("blocks = %+v", b)
+	}
+}
+
 func TestMalformedBlocksAreIgnoredButStateApplies(t *testing.T) {
 	manyNames := func() string {
 		parts := make([]string, 257)
