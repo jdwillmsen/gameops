@@ -287,6 +287,23 @@ closes it, taking nothing. `chest` has the same bounds as `goto`'s `to`:
 {"template": "inspect", "chest": {"x": 0, "y": 0, "z": 0}}
 ```
 
+`observe_blocks` walks the unit to within eight chunks of a box and reports
+every block in it from its own world view, so a finished build can be checked
+against its plan. `box` corners have the same bounds as `goto`'s `to`, min is
+at most max on each axis, and the box holds at most 4096 cells:
+
+```json
+{"template": "observe_blocks",
+ "box": {"min": {"x": 0, "y": 64, "z": 0}, "max": {"x": 4, "y": 67, "z": 4}}}
+```
+
+Unreadable cells — a sub-chunk the server never sent, or a block the unit's
+table does not name — are reported as `unknown`. The report travels as one
+control event on the task's terminal state: cells are run-length coded against
+a palette of block names, and a box whose report cannot fit fails with
+`observation too large`, so observe one layer or a smaller box instead. The
+observation goes only to the controller, never to the public task record.
+
 Crew runs one task at a time. A session end or death fails the running task
 (`session ended`, `unit died`) and queued tasks wait for the next spawn.
 Bodies are capped at 4096 bytes (413) and at most 16 tasks may wait (429).

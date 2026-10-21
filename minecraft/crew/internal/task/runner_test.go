@@ -603,3 +603,33 @@ func TestGatherProgressCountsOnlyWhatTheTaskGathered(t *testing.T) {
 		t.Errorf("progress = %d after the deposit emptied the inventory, want 16", got)
 	}
 }
+
+// observing is a skill that has read its box after its first step.
+type observing struct {
+	fakeSkill
+	view skill.Blocks
+}
+
+func (s *observing) Blocks() (skill.Blocks, bool) { return s.view, s.ran > 0 }
+
+func TestTaskCarriesWhatItsSkillObserved(t *testing.T) {
+	h := newHarness(t, time.Minute, 2)
+	view := skill.Blocks{Min: skill.Vec{X: 0, Y: 64, Z: 0}, Size: skill.Vec{X: 3, Y: 1, Z: 2}, Palette: []string{"dirt", "air"}, Cells: "BgA="}
+	sk := &observing{fakeSkill: fakeSkill{name: "observe_blocks", steps: 2, ticks: true}, view: view}
+	h.r.newSkills = func(Template) ([]skill.Skill, error) { return []skill.Skill{sk}, nil }
+	var got []Task
+	h.r.Observe(func(t Task) { got = append(got, t) })
+	a, _ := h.r.Submit(tpl())
+	h.tick(1)
+	if last := got[len(got)-1]; last.State != Running || last.Blocks == nil || last.Blocks.Cells != "BgA=" {
+		t.Errorf("after the box was read = %+v", last)
+	}
+	h.tick(3)
+	done := stateOf(t, h.r, a.ID)
+	if done.State != Done || done.Blocks == nil || done.Blocks.Cells != "BgA=" {
+		t.Errorf("terminal = %+v", done)
+	}
+	if b, _ := json.Marshal(done); strings.Contains(string(b), "BgA=") {
+		t.Errorf("the public record leaks the observation: %s", b)
+	}
+}

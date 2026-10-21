@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -60,6 +61,9 @@ type Task struct {
 	// Seen is the last chest the task's skills closed. It names a chest, so it
 	// stays out of the public record and goes only to the controller.
 	Seen *skill.ChestSeen `json:"-"`
+	// Blocks is the box the task's skills last observed. It maps the world,
+	// so it stays out of the public record and goes only to the controller.
+	Blocks *skill.Blocks `json:"-"`
 }
 
 // Reflex is what the unit does on its own: fight or flee when threatened, and
@@ -475,6 +479,11 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 			e.Seen, changed = &v, true
 		}
 	}
+	if br, ok := sk.(skill.BlockReporter); ok {
+		if v, ok := br.Blocks(); ok && (e.Blocks == nil || !sameBlocks(*e.Blocks, v)) {
+			e.Blocks, changed = &v, true
+		}
+	}
 	e.Updated = r.now()
 	if changed {
 		r.notify(e)
@@ -505,6 +514,11 @@ func setActuatorSkill(a skill.Actuator, name string) {
 	if setter, ok := a.(interface{ SetSkill(string) }); ok {
 		setter.SetSkill(name)
 	}
+}
+
+// sameBlocks reports whether two observations say the same thing about a box.
+func sameBlocks(a, b skill.Blocks) bool {
+	return a.Min == b.Min && a.Size == b.Size && a.Cells == b.Cells && slices.Equal(a.Palette, b.Palette)
 }
 
 func have(s belief.Snapshot, item string) int {

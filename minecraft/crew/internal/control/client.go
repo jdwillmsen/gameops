@@ -76,6 +76,10 @@ type event struct {
 	// Seen is optional: a deployed controller rejects unknown fields with a
 	// 400, so post retries without it, and an older unit never sends it.
 	Seen *Seen `json:"seen,omitempty"`
+	// Blocks is optional too, and rides the terminal event only: the
+	// observation is a result, not a progress note. A controller that
+	// refuses it is retried without it, like seen.
+	Blocks *Blocks `json:"blocks,omitempty"`
 }
 
 // Seen is what a task found in the last chest it closed.
@@ -90,6 +94,23 @@ type Seen struct {
 	// Partial tells the controller items were left out, so one missing from
 	// Items is not gone from the chest.
 	Partial bool `json:"partial,omitempty"`
+}
+
+// Blocks is the box of the world a task observed, as the controller reads it.
+type Blocks struct {
+	Min struct {
+		X int32 `json:"x"`
+		Y int32 `json:"y"`
+		Z int32 `json:"z"`
+	} `json:"min"`
+	Size struct {
+		X int32 `json:"x"`
+		Y int32 `json:"y"`
+		Z int32 `json:"z"`
+	} `json:"size"`
+	Palette []string `json:"palette"`
+	// Cells is base64 of (run length uvarint, palette index byte) pairs.
+	Cells string `json:"cells"`
 }
 
 type workItem struct {
@@ -411,10 +432,23 @@ func (c *Client) seenCommand(id string) bool {
 // the placeholder for an item the table does not know, would be refused.
 var wireItem = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
-// fit makes the encoded event fit maxEventBytes. The state matters more than
-// the chest, so items are dropped, lowest count first, and then seen itself.
-// Seen that lost any item is marked partial.
+// fit makes the encoded event fit maxEventBytes. Seen gives way before
+// blocks: the observation is what the task ran for. Blocks go only once seen
+// has shrunk or gone and the state alone still cannot carry them, which the
+// skill's own budget on an observation already rules out.
 func fit(ev event) event {
+	if ev.Seen != nil {
+		ev = fitSeen(ev)
+	}
+	if ev.Blocks != nil && !fits(ev) {
+		ev.Blocks = nil
+	}
+	return ev
+}
+
+// fitSeen fits an event's seen, dropping items, lowest count first, and then
+// seen itself. Seen that lost any item is marked partial.
+func fitSeen(ev event) event {
 	if ev.Seen == nil {
 		return ev
 	}
@@ -466,6 +500,12 @@ func eventOf(t task.Task) event {
 		seen := &Seen{Items: t.Seen.Items, At: t.Seen.At}
 		seen.Chest.X, seen.Chest.Y, seen.Chest.Z = t.Seen.Chest.X(), t.Seen.Chest.Y(), t.Seen.Chest.Z()
 		ev.Seen = seen
+	}
+	if t.Blocks != nil && t.State != task.Running {
+		b := &Blocks{Palette: t.Blocks.Palette, Cells: t.Blocks.Cells}
+		b.Min.X, b.Min.Y, b.Min.Z = t.Blocks.Min.X, t.Blocks.Min.Y, t.Blocks.Min.Z
+		b.Size.X, b.Size.Y, b.Size.Z = t.Blocks.Size.X, t.Blocks.Size.Y, t.Blocks.Size.Z
+		ev.Blocks = b
 	}
 	return ev
 }
@@ -623,11 +663,12 @@ func (c *Client) post(ctx context.Context, ev event) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if (resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest) && ev.Seen != nil {
+	if (resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest) && (ev.Seen != nil || ev.Blocks != nil) {
 		// 413: a controller with a tighter cap than this unit assumes. 400: a
-		// controller that predates seen and rejects unknown fields. Either
-		// way the state is worth more than the chest.
-		ev.Seen = nil
+		// controller that predates seen and blocks, and rejects unknown
+		// fields. Either way the state is worth more than the chest or the
+		// observation, and one retry without them is all it takes.
+		ev.Seen, ev.Blocks = nil, nil
 		return c.post(ctx, ev)
 	}
 	switch {
