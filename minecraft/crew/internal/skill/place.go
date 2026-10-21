@@ -163,7 +163,11 @@ func (p *Place) place(a Actuator) outcome {
 		return next
 	case errors.Is(err, act.ErrItemMoving):
 		// The stack is still travelling to the hotbar; keep the unit
-		// ticking and try again.
+		// ticking and try again until the wait says the answer is not
+		// coming.
+		if p.waited++; p.waited >= answerTicks {
+			return p.failed(fmt.Errorf("no answer to the move within %d ticks", answerTicks))
+		}
 		return p.idle(a)
 	}
 	return p.failed(err)

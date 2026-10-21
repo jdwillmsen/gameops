@@ -77,8 +77,11 @@ type Actuator struct {
 	itemIDs map[string]int32
 	// inv is the unit's own window-0 inventory, kept from the server's slot
 	// updates so a placement can find the item to hold.
-	inv         [inventorySlots]protocol.ItemInstance
-	move        pendingMove
+	inv  [inventorySlots]protocol.ItemInstance
+	move int32
+	// reqItem notes, per request still unanswered, the item it moved in
+	// window 0: answers name counts and stack IDs but never items.
+	reqItem     map[int32]int32
 	cont        container
 	nextRequest int32
 	responses   map[int32]uint8
@@ -96,7 +99,8 @@ type BlockNames interface {
 func New(w PacketWriter, runtimeID uint64, start Pose, solid Solid) *Actuator {
 	return &Actuator{
 		w: w, runtimeID: runtimeID, solid: solid, pose: start,
-		tick: firstTick, nextRequest: -3, responses: map[int32]uint8{}, now: time.Now,
+		tick: firstTick, nextRequest: -3, reqItem: map[int32]int32{},
+		responses: map[int32]uint8{}, now: time.Now,
 	}
 }
 

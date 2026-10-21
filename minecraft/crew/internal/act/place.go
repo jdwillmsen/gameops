@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -65,15 +66,8 @@ var sideFaces = [...]struct {
 	{[3]int32{1, 0, 0}, 4, mgl32.Vec3{0, 0.5, 0.5}},
 }
 
-// pendingMove is the stack request carrying an item to the hotbar, whose
-// answer the placement waits for.
-type pendingMove struct {
-	req      int32
-	from, to int
-	// item is the moved stack's item runtime ID: the answer names counts and
-	// stack IDs but never items.
-	item int32
-}
+// a.move holds the request ID carrying an item to the hotbar, whose answer
+// the placement waits for; 0 means none is in flight.
 
 // PlaceOnTop places the held block on the upper face of the block at against,
 // which is how a unit pillars up under its own feet. hash is the clicked
@@ -148,9 +142,9 @@ func (a *Actuator) useOnBlock(against protocol.BlockPos, face int32, hit mgl32.V
 }
 
 // support finds the block the placement clicks: the one below the target on
-// its top face, else the side neighbour whose face the eye is nearest. A
-// chest is never clicked, because the server would open it instead of
-// placing.
+// its top face, else the side neighbour whose face the eye is nearest. An
+// interactive block is never clicked, because the server would open it
+// instead of placing.
 func (a *Actuator) support(target protocol.BlockPos, eye mgl32.Vec3, w BlockWorld) (against protocol.BlockPos, face int32, hit mgl32.Vec3, hash uint32, ok bool) {
 	below := protocol.BlockPos{target.X(), target.Y() - 1, target.Z()}
 	if h, clickable := a.clickable(below, w); clickable {
@@ -171,13 +165,30 @@ func (a *Actuator) support(target protocol.BlockPos, eye mgl32.Vec3, w BlockWorl
 }
 
 // clickable says the block is known, solid and safe to click, and quotes the
-// hash the server must be given for it.
+// hash the server must be given for it. An interactive block is not
+// clickable: clicking it opens its interface instead of placing.
 func (a *Actuator) clickable(p protocol.BlockPos, w BlockWorld) (uint32, bool) {
 	name, known := w.Block(p)
-	if !known || name == "chest" || name == "trapped_chest" || !a.solid.Solid(p) {
+	if !known || interactive(name) || !a.solid.Solid(p) {
 		return 0, false
 	}
 	return w.BlockHash(p)
+}
+
+// interactive names the blocks the server answers a click on by opening a
+// container or interface instead of placing: chests, the furnace family,
+// doors and gates, buttons and levers, shulker boxes and the craft and
+// storage blocks that take a use before a build does.
+func interactive(name string) bool {
+	for _, part := range []string{"chest", "door", "gate", "button", "shulker", "furnace"} {
+		if strings.Contains(name, part) {
+			return true
+		}
+	}
+	return name == "crafting_table" || name == "barrel" || name == "smoker" ||
+		name == "lever" || name == "bed" || name == "anvil" ||
+		name == "enchanting_table" || name == "hopper" || name == "dropper" ||
+		name == "dispenser" || name == "note_block"
 }
 
 // replaceable names the blocks a placement may overwrite; everything else,
@@ -197,13 +208,13 @@ func (a *Actuator) holdItem(item string) (slot int, held protocol.ItemInstance, 
 	if slot, held, ok := a.hotbarHolding(id); ok {
 		return slot, held, nil
 	}
-	if a.move.req != 0 {
-		status, done := a.responses[a.move.req]
+	if a.move != 0 {
+		status, done := a.responses[a.move]
 		if !done {
 			return 0, held, ErrItemMoving
 		}
-		delete(a.responses, a.move.req)
-		a.move = pendingMove{}
+		delete(a.responses, a.move)
+		a.move = 0
 		if status != StatusOK {
 			return 0, held, fmt.Errorf("server refused the move to the hotbar with status %d", status)
 		}
@@ -257,7 +268,8 @@ func (a *Actuator) moveToHotbar(from int, s protocol.ItemInstance) error {
 	}
 	// The server accepts the negative odd IDs a client counts down through.
 	a.nextRequest -= 2
-	a.move = pendingMove{req: req, from: from, to: to, item: s.Stack.NetworkID}
+	a.reqItem[req] = s.Stack.NetworkID
+	a.move = req
 	return ErrItemMoving
 }
 
@@ -277,32 +289,36 @@ func (a *Actuator) hotbarDest(id int32, n int) (slot int, dst int32, ok bool) {
 	return 0, 0, false
 }
 
-// applyMoveLocked settles the stack request that moved an item to the
-// hotbar. The answer names counts and stack IDs but not items, so the item
-// comes from the request.
-func (a *Actuator) applyMoveLocked(r protocol.ItemStackResponse) {
+// applyWindow0Locked folds an accepted answer's own-inventory slot changes
+// into a.inv. The answer names counts and stack IDs but never items, so a
+// slot that held a stack keeps its item, an emptied one is cleared, and one
+// a take filled gets the item the request carried.
+func (a *Actuator) applyWindow0Locked(r protocol.ItemStackResponse, takenIn int32) {
 	for _, c := range r.ContainerInfo {
 		if c.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory {
 			continue
 		}
 		for _, s := range c.SlotInfo {
-			switch int(s.Slot) {
-			case a.move.from:
-				if s.Count == 0 {
-					a.inv[s.Slot] = protocol.ItemInstance{}
-				} else {
-					a.inv[s.Slot].Stack.Count = uint16(s.Count)
-					a.inv[s.Slot].StackNetworkID = s.StackNetworkID
-				}
-			case a.move.to:
+			if int(s.Slot) >= inventorySlots {
+				continue
+			}
+			cur := a.inv[s.Slot]
+			switch {
+			case s.Count == 0:
+				a.inv[s.Slot] = protocol.ItemInstance{}
+			case cur.Stack.NetworkID != 0 && cur.Stack.Count > 0:
 				a.inv[s.Slot] = protocol.ItemInstance{
 					StackNetworkID: s.StackNetworkID,
-					Stack:          protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: a.move.item}, Count: uint16(s.Count)},
+					Stack:          protocol.ItemStack{ItemType: cur.Stack.ItemType, Count: uint16(s.Count)},
+				}
+			case takenIn != 0:
+				a.inv[s.Slot] = protocol.ItemInstance{
+					StackNetworkID: s.StackNetworkID,
+					Stack:          protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: takenIn}, Count: uint16(s.Count)},
 				}
 			}
 		}
 	}
-	a.move.req = 0
 }
 
 func origin(b protocol.BlockPos) mgl32.Vec3 {

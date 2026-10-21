@@ -249,6 +249,9 @@ func (a *Actuator) Deposit(from belief.Item, count int, toSlot byte) (requestID 
 	}
 	// The server accepts the negative odd IDs a client counts down through.
 	a.nextRequest -= 2
+	if item, ok := a.itemIDs[from.Name]; ok {
+		a.reqItem[id] = item
+	}
 	return id, nil
 }
 
@@ -292,7 +295,8 @@ func (a *Actuator) Died() {
 	defer a.mu.Unlock()
 	a.cont = container{}
 	a.responses = map[int32]uint8{}
-	a.move = pendingMove{}
+	a.reqItem = map[int32]int32{}
+	a.move = 0
 }
 
 func (a *Actuator) applyContainerLocked(pk packet.Packet) {
@@ -332,10 +336,15 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			}
 		}
 	case *packet.ItemStackResponse:
+		// Whichever request an answer settles — a hotbar move, a deposit,
+		// a withdraw — its own-inventory slots are folded into a.inv: no
+		// slot packet follows the requests the unit issues itself.
 		for _, r := range p.Responses {
 			a.responses[r.RequestID] = r.Status
-			if r.Status == StatusOK && a.move.req != 0 && r.RequestID == a.move.req {
-				a.applyMoveLocked(r)
+			item := a.reqItem[r.RequestID]
+			delete(a.reqItem, r.RequestID)
+			if r.Status == StatusOK {
+				a.applyWindow0Locked(r, item)
 			}
 		}
 	}
@@ -386,6 +395,8 @@ func (a *Actuator) Withdraw(fromSlot byte, count int, to belief.Item, toSlot int
 	if err != nil {
 		return 0, err
 	}
+	// The server accepts the negative odd IDs a client counts down through.
 	a.nextRequest -= 2
+	a.reqItem[id] = src.Stack.NetworkID
 	return id, nil
 }
