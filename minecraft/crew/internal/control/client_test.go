@@ -1259,3 +1259,51 @@ func TestTooLargeAnswerRetriesWithoutSeen(t *testing.T) {
 		}
 	}
 }
+
+// dnsDown fails the first n round trips the way a resolver that cannot be
+// reached does, and then lets requests through.
+type dnsDown struct {
+	next http.RoundTripper
+	mu   sync.Mutex
+	left int
+}
+
+func (d *dnsDown) RoundTrip(r *http.Request) (*http.Response, error) {
+	d.mu.Lock()
+	fail := d.left > 0
+	if fail {
+		d.left--
+	}
+	d.mu.Unlock()
+	if fail {
+		return nil, &net.DNSError{Err: "i/o timeout", Name: "crew-control", Server: "10.96.0.10:53", IsTimeout: true}
+	}
+	return d.next.RoundTrip(r)
+}
+
+// A unit that starts while the cluster's DNS cannot resolve crew-control must
+// keep running and retry with a growing delay, then connect once it can.
+func TestStartupDNSTimeoutIsRetriedWithBackoff(t *testing.T) {
+	f, r := newFakeControl(t), &stubRunner{}
+	h := startWith(t, r, f, func(c *Client) { c.http = &http.Client{Transport: &dnsDown{next: http.DefaultTransport, left: 4}} })
+
+	waitUntil(t, "connected after the lookups recover", func() bool { return h.log.count("control_connected") == 1 })
+	got := h.sleeps.got()
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+	if len(got) < len(want) {
+		t.Fatalf("sleeps = %v, want %v before connecting", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("sleeps = %v, want to start %v", got, want)
+		}
+	}
+	if n := h.log.count("control_unreachable"); n != 1 {
+		t.Errorf("control_unreachable logged %d times for one outage, want 1", n)
+	}
+	select {
+	case <-h.done:
+		t.Fatal("the client stopped instead of retrying")
+	default:
+	}
+}
