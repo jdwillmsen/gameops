@@ -118,7 +118,9 @@ chest and takes the best sword it holds and up to `KIT_FOOD` food. This is how
 a unit that died gets its sword and bread back. A chest that cannot make the
 unit whole is logged as `kit_empty` (with what was `missing`, never a
 position) and left alone for three minutes; a failed visit (`kit_failed`) backs
-off the same way. A visit only fills empty hotbar slots, so a tool is never
+off the same way, except one that found the chest's chunk not yet loaded, as
+on a cold join, which is retried after five seconds, up to six times in a row
+before backing off. A visit only fills empty hotbar slots, so a tool is never
 displaced, and a unit whose hotbar is full does not go; a visit that fills
 the hotbar before taking everything it needed logs `kit_no_room` instead of
 `kit_empty`. The task queue waits while a visit is under way.
