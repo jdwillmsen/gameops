@@ -56,16 +56,51 @@ func (a *Actuator) Craft(item string, times int) (int, error) {
 	if times < 1 || times > maxCrafts {
 		return 0, fmt.Errorf("cannot craft %d times", times)
 	}
+	for {
+		a.mu.Lock()
+		id, made, err := a.craftLocked(item, times)
+		shape := a.crafts.shape
+		a.mu.Unlock()
+		if err != nil {
+			return 0, err
+		}
+		err = a.await(id)
+		a.logCraftShape(shape, err)
+		if err == nil {
+			return made, nil
+		}
+		// The request shape the server accepts is not yet known for sure, so
+		// a craft the server calls invalid moves on to the next candidate
+		// shape, and the first one accepted is kept for the session.
+		if !errors.Is(err, errInvalidCraft) || shape+1 >= craftShapes {
+			return 0, err
+		}
+		a.mu.Lock()
+		if a.crafts.shape == shape {
+			a.crafts.shape++
+		}
+		a.mu.Unlock()
+	}
+}
+
+// craftShapes is how many request shapes a craft tries; see sendCraftLocked.
+const craftShapes = 6
+
+// errInvalidCraft marks the server's InvalidCraftRequest answer.
+var errInvalidCraft = errors.New("invalid craft request")
+
+func (a *Actuator) logCraftShape(shape int, err error) {
 	a.mu.Lock()
-	id, made, err := a.craftLocked(item, times)
+	log := a.correctionLogger
 	a.mu.Unlock()
+	if log == nil {
+		return
+	}
+	fields := map[string]any{"shape": shape, "ok": err == nil}
 	if err != nil {
-		return 0, err
+		fields["error"] = err.Error()
 	}
-	if err := a.await(id); err != nil {
-		return 0, err
-	}
-	return made, nil
+	log.Info("craft_shape", fields)
 }
 
 // craftLocked picks and sends the request, or decides the typed error,
@@ -114,20 +149,37 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 	// A craft that pays from the inventory instead of a grid is the recipe
 	// book's craft, which the vanilla client sends as an auto craft with the
 	// recipe's own ingredients and the results it makes.
-	actions := []protocol.StackRequestAction{&protocol.AutoCraftRecipeStackRequestAction{
-		RecipeNetworkID: r.NetworkID,
-		NumberOfCrafts:  byte(times),
-		Ingredients:     r.Inputs,
+	//
+	// Shapes, tried in order until one is accepted:
+	//   0 auto craft, results, consumes, take from slot 50 quoting the request
+	//   1 as 0, consumes naming the hotbar and inventory containers apart
+	//   2 as 0 with a plain craft action instead of the auto one
+	//   3 as 0 with empty results and a take quoting no stack ID
+	//   4 as 0 without the results action
+	//   5 as 0 with the take from created-output slot 0 quoting no stack ID
+	shape := a.crafts.shape
+	var actions []protocol.StackRequestAction
+	if shape == 2 {
+		actions = append(actions, &protocol.CraftRecipeStackRequestAction{RecipeNetworkID: r.NetworkID, NumberOfCrafts: byte(times)})
+	} else {
+		actions = append(actions, &protocol.AutoCraftRecipeStackRequestAction{
+			RecipeNetworkID: r.NetworkID,
+			NumberOfCrafts:  byte(times),
+			Ingredients:     r.Inputs,
+		})
+	}
+	results := []protocol.StackRequestItem{{
+		Identifier:     "minecraft:" + item,
+		MetadataValue:  r.Output.MetadataValue,
+		BlockRuntimeID: r.Output.BlockRuntimeID,
+		Count:          uint16(made),
 	}}
-	actions = append(actions, &protocol.CraftResultsDeprecatedStackRequestAction{
-		ResultItems: []protocol.StackRequestItem{{
-			Identifier:     "minecraft:" + item,
-			MetadataValue:  r.Output.MetadataValue,
-			BlockRuntimeID: r.Output.BlockRuntimeID,
-			Count:          uint16(made),
-		}},
-		TimesCrafted: byte(times),
-	})
+	if shape == 3 {
+		results = nil
+	}
+	if shape != 4 {
+		actions = append(actions, &protocol.CraftResultsDeprecatedStackRequestAction{ResultItems: results, TimesCrafted: byte(times)})
+	}
 	// A stack can pay for two ingredients when a tag and a name both match
 	// it, so what each slot has already given is tracked.
 	taken := map[int]int{}
@@ -148,7 +200,7 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 				DestroyStackRequestAction: protocol.DestroyStackRequestAction{
 					Count: byte(n),
 					Source: protocol.StackRequestSlotInfo{
-						Container:      inventory,
+						Container:      consumeFrom(shape, st.Slot, inventory),
 						Slot:           byte(st.Slot),
 						StackNetworkID: st.StackNetworkID,
 					},
@@ -177,6 +229,12 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 		Slot:           createdOutputSlot,
 		StackNetworkID: id,
 	}
+	switch shape {
+	case 3:
+		take.Source.StackNetworkID = 0
+	case 5:
+		take.Source.Slot, take.Source.StackNetworkID = 0, 0
+	}
 	take.Destination = dest
 	actions = append(actions, take)
 
@@ -196,6 +254,18 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 		a.reqItem[id] = nid
 	}
 	return id, made, nil
+}
+
+// consumeFrom names the container a consume reads from. Shape 1 names the
+// hotbar and the rest of the inventory apart, as some clients do.
+func consumeFrom(shape, slot int, combined protocol.FullContainerName) protocol.FullContainerName {
+	if shape != 1 {
+		return combined
+	}
+	if slot < 9 {
+		return protocol.FullContainerName{ContainerID: protocol.ContainerHotBar}
+	}
+	return protocol.FullContainerName{ContainerID: protocol.ContainerInventory}
 }
 
 // destLocked picks where the crafted items land: onto a stack of the same
@@ -237,6 +307,9 @@ func (a *Actuator) await(id int32) error {
 		delete(a.responses, id)
 		a.mu.Unlock()
 		if done {
+			if status == protocol.ItemStackResponseStatusInvalidCraftRequest {
+				return fmt.Errorf("%w: %w: status %d", ErrRejected, errInvalidCraft, status)
+			}
 			if status != StatusOK {
 				return fmt.Errorf("%w: status %d", ErrRejected, status)
 			}
@@ -299,6 +372,8 @@ type craftState struct {
 	// rejected lists, per item, the destination slots the server refused,
 	// so the next craft tries another.
 	rejected map[string]map[int]bool
+	// shape is the request shape to send; see sendCraftLocked.
+	shape int
 }
 
 func newCraftState() craftState {

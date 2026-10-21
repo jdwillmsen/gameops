@@ -337,6 +337,26 @@ func TestCraftedItemsAreHeldForPlacement(t *testing.T) {
 	}
 }
 
+func TestCraftMovesToTheNextShapeOnAnInvalidCraft(t *testing.T) {
+	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
+	a, s := newCrafter(inv)
+	invalid := uint8(protocol.ItemStackResponseStatusInvalidCraftRequest)
+	defer stopAnswering(startAnswering(a, s, invalid, invalid))
+
+	if _, err := a.Craft("oak_planks", 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(stackRequests(s)); got != 3 {
+		t.Fatalf("sent %d requests, want two refused shapes and the accepted third", got)
+	}
+	if _, ok := craftRequest(t, s, 2).Actions[0].(*protocol.CraftRecipeStackRequestAction); !ok {
+		t.Error("the third request is not shape 2's plain craft action")
+	}
+	if a.crafts.shape != 2 {
+		t.Errorf("shape = %d, want the accepted 2 kept", a.crafts.shape)
+	}
+}
+
 func TestCraftScalesOneRequestOverSeveralCrafts(t *testing.T) {
 	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
 	a, s := newCrafter(inv)
