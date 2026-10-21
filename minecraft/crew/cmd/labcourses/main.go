@@ -3,12 +3,13 @@
 // and pad courses west of it, the tree field beyond the courses, the works
 // field north of the grounds, or the hub's name-tag signs. It also imports
 // Bedrock structures into crew blueprints and prints the commands that
-// stamp a blueprint at a spot and rotation. lab/courses.sh feeds the
-// output to a server.
+// stamp a named blueprint — embedded in the binary, so no checkout is
+// needed — at a spot and rotation. lab/courses.sh feeds the output to a
+// server.
 //
 // usage: labcourses grounds|courses|trees|works|signs
 //
-//	labcourses blueprint-import <file.mcstructure> <name> <kind>
+//	labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>
 //	labcourses blueprint <name> <x> <z> [0|90|180|270]
 //	labcourses -o <dir> <field>...
 //
@@ -23,6 +24,7 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/blueprints"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/blueprint"
 )
 
@@ -41,10 +43,32 @@ var courses = map[string]course{
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "blueprint-import" {
-		if len(os.Args) != 5 {
-			fail("usage: labcourses blueprint-import <file.mcstructure> <name> <kind>")
+		var pos []string
+		outDir := ""
+		args := os.Args[2:]
+		for i := 0; i < len(args); i++ {
+			if args[i] == "-o" {
+				if i+1 == len(args) {
+					fail("usage: labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>")
+				}
+				outDir = args[i+1]
+				i++
+				continue
+			}
+			pos = append(pos, args[i])
 		}
-		bp, err := blueprint.Import(os.Args[2], os.Args[3], os.Args[4])
+		if len(pos) != 3 {
+			fail("usage: labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>")
+		}
+		if outDir == "" {
+			outDir = "minecraft/crew/blueprints"
+			// The default only exists inside a checkout; refuse to sprout
+			// a stray minecraft/ tree from some other directory.
+			if _, err := os.Stat(outDir); err != nil {
+				fail("labcourses: blueprint output directory " + outDir + " does not exist; run from the repository root or pass -o <dir>")
+			}
+		}
+		bp, err := blueprint.Import(pos[0], pos[1], pos[2])
 		if err != nil {
 			fail("labcourses: " + err.Error())
 		}
@@ -53,10 +77,10 @@ func main() {
 		if err != nil {
 			fail("labcourses: " + err.Error())
 		}
-		if err = os.MkdirAll("minecraft/crew/blueprints", 0755); err != nil {
+		if err = os.MkdirAll(outDir, 0755); err != nil {
 			fail("labcourses: " + err.Error())
 		}
-		if err = os.WriteFile(filepath.Join("minecraft/crew/blueprints", bp.Name+".json"), append(data, '\n'), 0644); err != nil {
+		if err = os.WriteFile(filepath.Join(outDir, bp.Name+".json"), append(data, '\n'), 0644); err != nil {
 			fail("labcourses: " + err.Error())
 		}
 		return
@@ -65,7 +89,7 @@ func main() {
 		if len(os.Args) != 5 && len(os.Args) != 6 {
 			fail("usage: labcourses blueprint <name> <x> <z> [rot 0|90|180|270]")
 		}
-		bp, err := blueprint.Load(filepath.Join("minecraft/crew/blueprints", os.Args[2]+".json"))
+		bp, err := blueprint.LoadFS(blueprints.Files, os.Args[2]+".json")
 		if err != nil {
 			fail("labcourses: " + err.Error())
 		}

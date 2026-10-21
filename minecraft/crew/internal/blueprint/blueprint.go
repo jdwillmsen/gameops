@@ -3,6 +3,7 @@ package blueprint
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"sort"
@@ -55,8 +56,22 @@ func Load(path string) (*Blueprint, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(b)
+}
+
+// LoadFS reads a named blueprint from an embedded filesystem, so stamping
+// works in a binary built without a checkout.
+func LoadFS(fsys fs.FS, name string) (*Blueprint, error) {
+	data, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
+}
+
+func Parse(data []byte) (*Blueprint, error) {
 	var bp Blueprint
-	if err := json.Unmarshal(b, &bp); err != nil {
+	if err := json.Unmarshal(data, &bp); err != nil {
 		return nil, err
 	}
 	// encoding/json decodes numbers as float64, but rotation and command
