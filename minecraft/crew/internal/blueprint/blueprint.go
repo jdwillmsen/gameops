@@ -41,7 +41,7 @@ type Blueprint struct {
 	Size       Size       `json:"size"`
 	Palette    []Block    `json:"palette"`
 	Layers     []string   `json:"layers"`
-	BuildOrder []Position `json:"build_order"`
+	BuildOrder []Position `json:"build_order,omitempty"`
 	Materials  []Material `json:"materials"`
 	Checks     []Check    `json:"checks,omitempty"`
 }
@@ -145,20 +145,28 @@ func (b *Blueprint) Validate() error {
 			return fmt.Errorf("materials do not match blocks")
 		}
 	}
-	order := map[Position]int{}
-	lastY := -1
-	for i, p := range b.BuildOrder {
-		if p.X < 0 || p.X >= b.Size.X || p.Y < 0 || p.Y >= b.Size.Y || p.Z < 0 || p.Z >= b.Size.Z {
-			return fmt.Errorf("build_order position %v is outside size", p)
+	order := make(map[Position]int, b.Size.X*b.Size.Y*b.Size.Z)
+	if len(b.BuildOrder) > 0 {
+		// An explicit build_order is an override, so every property of it
+		// is checked here rather than trusted.
+		lastY := -1
+		for i, p := range b.BuildOrder {
+			if p.X < 0 || p.X >= b.Size.X || p.Y < 0 || p.Y >= b.Size.Y || p.Z < 0 || p.Z >= b.Size.Z {
+				return fmt.Errorf("build_order position %v is outside size", p)
+			}
+			if p.Y < lastY {
+				return fmt.Errorf("build_order must place bottom-up layers")
+			}
+			lastY = p.Y
+			order[p] = i
 		}
-		if p.Y < lastY {
-			return fmt.Errorf("build_order must place bottom-up layers")
+		if len(order) != b.Size.X*b.Size.Y*b.Size.Z {
+			return fmt.Errorf("build_order must contain every cell exactly once")
 		}
-		lastY = p.Y
-		order[p] = i
-	}
-	if len(order) != b.Size.X*b.Size.Y*b.Size.Z {
-		return fmt.Errorf("build_order must contain every cell exactly once")
+	} else {
+		for i, p := range b.PlacementOrder() {
+			order[p] = i
+		}
 	}
 	for y, layer := range b.Layers {
 		for z := 0; z < b.Size.Z; z++ {
@@ -166,9 +174,6 @@ func (b *Blueprint) Validate() error {
 				idx := indexAt(layer, z*b.Size.X+x)
 				name := b.Palette[idx].Name
 				pos := Position{x, y, z}
-				if _, ok := order[pos]; !ok {
-					return fmt.Errorf("build_order omits %v", pos)
-				}
 				if needsSupport(name) {
 					support := Position{x, y - 1, z}
 					if y == 0 || order[support] >= order[pos] {
@@ -194,12 +199,58 @@ func (b *Blueprint) Validate() error {
 	return nil
 }
 
+// needsSupport reports whether a block can only exist attached to, sitting
+// on or hanging from another block: both the derived placement order and
+// the support check must place these after their support. sea_lantern is
+// a solid block despite the name, so lanterns match exactly.
 func needsSupport(name string) bool {
 	clean := strings.TrimPrefix(name, "minecraft:")
 	if clean == "redstone_lamp" || clean == "lit_redstone_lamp" || clean == "redstone_block" {
 		return false
 	}
-	return strings.Contains(clean, "torch") || strings.Contains(clean, "door") || clean == "ladder" || clean == "redstone_wire" || strings.Contains(clean, "repeater") || strings.Contains(clean, "comparator") || strings.Contains(clean, "button") || strings.Contains(clean, "lever") || strings.Contains(clean, "rail")
+	if clean == "lantern" || clean == "soul_lantern" || clean == "ladder" || clean == "redstone_wire" {
+		return true
+	}
+	return strings.Contains(clean, "torch") || strings.Contains(clean, "door") ||
+		strings.Contains(clean, "rail") || strings.Contains(clean, "repeater") ||
+		strings.Contains(clean, "comparator") || strings.Contains(clean, "button") ||
+		strings.Contains(clean, "lever") || strings.Contains(clean, "carpet") ||
+		strings.Contains(clean, "sign") || strings.Contains(clean, "vine") ||
+		strings.Contains(clean, "trapdoor") || strings.Contains(clean, "pressure_plate")
+}
+
+// PlacementOrder returns the cells in stamping order. An explicit
+// build_order overrides; otherwise the order is derived layer by layer,
+// bottom-up, with solid blocks before the ones that need a block to attach
+// to, so nothing is stamped before its support exists.
+func (b *Blueprint) PlacementOrder() []Position {
+	if len(b.BuildOrder) > 0 {
+		return b.BuildOrder
+	}
+	order := make([]Position, 0, b.Size.X*b.Size.Y*b.Size.Z)
+	for y := 0; y < b.Size.Y; y++ {
+		var supported []Position
+		for z := 0; z < b.Size.Z; z++ {
+			for x := 0; x < b.Size.X; x++ {
+				pos := Position{x, y, z}
+				if needsSupport(b.blockAt(y, x, z).Name) {
+					supported = append(supported, pos)
+				} else {
+					order = append(order, pos)
+				}
+			}
+		}
+		order = append(order, supported...)
+	}
+	return order
+}
+
+func (b *Blueprint) blockAt(y, x, z int) Block {
+	idx := indexAt(b.Layers[y], z*b.Size.X+x)
+	if idx < 0 || idx >= len(b.Palette) {
+		return Block{}
+	}
+	return b.Palette[idx]
 }
 
 func materials(counts map[string]int) []Material {
