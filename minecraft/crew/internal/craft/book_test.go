@@ -155,6 +155,13 @@ func TestNeedsTableFollowsTheRecipeGrid(t *testing.T) {
 	}
 }
 
+func TestZeroCountPaddingDoesNotWidenAShapelessRecipe(t *testing.T) {
+	in := []protocol.ItemDescriptorCount{named("oak_planks", 4), named("stick", 0)}
+	if got := filled(in); got != 4 {
+		t.Errorf("filled = %d, want the 4 real cells", got)
+	}
+}
+
 func TestStoreSkipsRecipesTheUnitCannotWorkWith(t *testing.T) {
 	b := NewBook()
 	b.Store(&packet.CraftingData{

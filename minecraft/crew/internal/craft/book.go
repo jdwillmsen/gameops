@@ -147,8 +147,9 @@ func index(out map[string][]Recipe, names map[int32]string, id uint32, block str
 func filled(in []protocol.ItemDescriptorCount) int {
 	n := 0
 	for _, d := range in {
-		if _, empty := d.Descriptor.(*protocol.InvalidItemDescriptor); !empty {
-			n += max(int(d.Count), 1)
+		// Zero-count entries pad the list and fill no cell.
+		if _, empty := d.Descriptor.(*protocol.InvalidItemDescriptor); !empty && d.Count > 0 {
+			n += int(d.Count)
 		}
 	}
 	return n
