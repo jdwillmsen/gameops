@@ -1,6 +1,8 @@
 package work
 
 import (
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -458,5 +460,92 @@ func TestOnTerminalFiresForATaskCancelledByItsCommand(t *testing.T) {
 	r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"done"}`, cmd.ID), nil)
 	if len(fired) != 1 || fired[0].ID != task.ID || fired[0].State != Cancelled {
 		t.Fatalf("%+v", fired)
+	}
+}
+
+// rle encodes (run, index) pairs the way a unit does.
+func rle(pairs ...int) string {
+	var b []byte
+	for i := 0; i+1 < len(pairs); i += 2 {
+		b = binary.AppendUvarint(b, uint64(pairs[i]))
+		b = append(b, byte(pairs[i+1]))
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+func TestEventBlocksReachTheHook(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var (
+		gotUnit string
+		gotID   uuid.UUID
+		got     []Blocks
+	)
+	r.api.OnBlocks = func(u string, id uuid.UUID, b Blocks) { gotUnit, gotID, got = u, id, append(got, b) }
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"done","progress":100,"blocks":{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air","cobblestone"],"cells":"BAA="}}`, it.ID), nil)
+	if resp.StatusCode != 204 || len(got) != 1 || gotUnit != "crew-01" || gotID != it.ID {
+		t.Fatalf("status %d, %d observations for %q %s", resp.StatusCode, len(got), gotUnit, gotID)
+	}
+	b := got[0]
+	if b.Min != [3]int32{0, 64, 0} || b.Size != [3]int32{2, 1, 2} ||
+		len(b.Palette) != 2 || b.Palette[1] != "cobblestone" || b.Cells != "BAA=" {
+		t.Fatalf("blocks = %+v", b)
+	}
+}
+
+func TestMalformedBlocksAreIgnoredButStateApplies(t *testing.T) {
+	manyNames := func() string {
+		parts := make([]string, 257)
+		for i := range parts {
+			parts[i] = fmt.Sprintf(`"b%03d"`, i)
+		}
+		return strings.Join(parts, ",")
+	}
+	cases := map[string]string{
+		"wrong type":        `"chest"`,
+		"null":              `null`,
+		"no min":            `{"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"BAA="}`,
+		"no size":           `{"min":{"x":0,"y":64,"z":0},"palette":["air"],"cells":"BAA="}`,
+		"zero axis":         `{"min":{"x":0,"y":64,"z":0},"size":{"x":0,"y":1,"z":2},"palette":["air"],"cells":"BAA="}`,
+		"too many cells":    `{"min":{"x":0,"y":64,"z":0},"size":{"x":4097,"y":1,"z":1},"palette":["air"],"cells":"BAA="}`,
+		"axis over the cap": `{"min":{"x":0,"y":64,"z":0},"size":{"x":2147483647,"y":2147483647,"z":2147483647},"palette":["air"],"cells":"BAA="}`,
+		"empty palette":     `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":[],"cells":"BAA="}`,
+		"palette too wide":  `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":[` + manyNames() + `],"cells":"BAA="}`,
+		"uppercase name":    `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["Oak"],"cells":"BAA="}`,
+		"name too long":     `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["` + strings.Repeat("a", 33) + `"],"cells":"BAA="}`,
+		"cells not base64":  `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"###"}`,
+		"cells short":       `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"` + rle(2, 0) + `"}`,
+		"cells long":        `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"` + rle(5, 0) + `"}`,
+		"index outside":     `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"` + rle(1, 3) + `"}`,
+		"zero run":          `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"` + rle(0, 0) + `"}`,
+		"truncated pair":    `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"` + base64.StdEncoding.EncodeToString([]byte{2}) + `"}`,
+		"no cells at all":   `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":""}`,
+		"unknown field":     `{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"BAA=","w":1}`,
+	}
+	for name, blocks := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, NewMemory())
+			called := false
+			r.api.OnBlocks = func(string, uuid.UUID, Blocks) { called = true }
+			it := must(t, r.store, "crew-01", KindTask, tpl)
+			resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(`{"id":%q,"state":"done","progress":100,"blocks":%s}`, it.ID, blocks), nil)
+			got, _ := r.store.Recent(ctx, "crew-01", 1)
+			if resp.StatusCode != 204 || got[0].State != Done || called {
+				t.Fatalf("status %d state %s hook called %v", resp.StatusCode, got[0].State, called)
+			}
+		})
+	}
+}
+
+func TestBlocksForAnotherUnitsItemAreDropped(t *testing.T) {
+	r := newRig(t, NewMemory())
+	called := false
+	r.api.OnBlocks = func(string, uuid.UUID, Blocks) { called = true }
+	other := must(t, r.store, "crew-02", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events", fmt.Sprintf(
+		`{"id":%q,"state":"done","progress":100,"blocks":{"min":{"x":0,"y":64,"z":0},"size":{"x":2,"y":1,"z":2},"palette":["air"],"cells":"BAA="}}`, other.ID), nil)
+	if resp.StatusCode != 404 || called {
+		t.Fatalf("status %d, hook called %v", resp.StatusCode, called)
 	}
 }
