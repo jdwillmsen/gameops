@@ -3,6 +3,7 @@ package skill
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"strings"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -124,6 +125,39 @@ func TestObserveRunLengthsOutlastASingleByte(t *testing.T) {
 	// two runs and describe the box wrongly.
 	if got := expand(t, b.Cells); len(got) != 1 || got[0] != (pair{200, 0}) {
 		t.Errorf("cells = %v", got)
+	}
+}
+
+func TestObserveWalksToAStandableSpotWhenTheBoxCentreIsSolid(t *testing.T) {
+	w := simWorld{}
+	w.platform(0, 131, -1, 1)
+	// The box is one solid block, so its centre is no cell to stand in.
+	w[protocol.BlockPos{0, 1, 0}] = "stone"
+	r := newRig(t, w, mgl32.Vec3{130.5, 1, 0.5})
+	o := NewObserve(w, r.self, protocol.BlockPos{0, 1, 0}, protocol.BlockPos{0, 1, 0})
+	before := r.ticks
+	if st, err := r.run(o, 600); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.ticks == before {
+		t.Error("the unit read the box without walking within eight chunks of it")
+	}
+	b, ok := o.(BlockReporter).Blocks()
+	if !ok || len(b.Palette) != 1 || b.Palette[0] != "stone" {
+		t.Fatalf("palette = %v, read %v", b.Palette, ok)
+	}
+}
+
+func TestObserveFailsWithAClearErrorWhenNoSpotCanBeStoodIn(t *testing.T) {
+	w := simWorld{}
+	// Stone all around the box, so no cell near it can be stood in.
+	w.fill("stone", 0, 0, 0, 200, 3, 2)
+	w.fill("air", 150, 1, 1, 150, 2, 1)
+	r := newRig(t, w, mgl32.Vec3{150.5, 1, 1.5})
+	o := NewObserve(w, r.self, protocol.BlockPos{0, 1, 0}, protocol.BlockPos{0, 1, 0})
+	st, err := r.run(o, 50)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "standing spot") {
+		t.Fatalf("status %v, err %v", st, err)
 	}
 }
 
