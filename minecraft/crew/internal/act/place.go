@@ -178,12 +178,17 @@ func (a *Actuator) clickable(p protocol.BlockPos, w BlockWorld) (uint32, bool) {
 // interactive names the blocks the server answers a click on by opening a
 // container or interface instead of placing: chests, the furnace family,
 // doors and gates, buttons and levers, shulker boxes and the craft and
-// storage blocks that take a use before a build does.
+// storage blocks that take a use before a build does. Beds and anvils come
+// in named variants ("teal_bed", "chipped_anvil"), so the families match by
+// suffix; a plain substring would also take "bedrock".
 func interactive(name string) bool {
 	for _, part := range []string{"chest", "door", "gate", "button", "shulker", "furnace"} {
 		if strings.Contains(name, part) {
 			return true
 		}
+	}
+	if strings.HasSuffix(name, "_bed") || strings.HasSuffix(name, "_anvil") {
+		return true
 	}
 	return name == "crafting_table" || name == "barrel" || name == "smoker" ||
 		name == "lever" || name == "bed" || name == "anvil" ||

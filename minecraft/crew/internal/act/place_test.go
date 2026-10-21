@@ -254,15 +254,19 @@ func TestPlaceBlockFindsAStackAWithdrawFilledFrom(t *testing.T) {
 
 func TestPlaceBlockNeverClicksAnInteractiveSupport(t *testing.T) {
 	target := protocol.BlockPos{1, 1, 2}
-	w := flat()
-	w.floor = 0
-	w.hash = 4321
-	w.names = map[protocol.BlockPos]string{{1, 0, 2}: "crafting_table", {1, 1, 2}: "air"}
-	a, s := newPlacer(w, mgl32.Vec3{1.5, 1, 2.5}, 2, cobbleInstance(16, 9))
-	if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrNoSupport) {
-		t.Fatalf("err = %v, want ErrNoSupport", err)
-	}
-	if len(s.got) != 0 {
-		t.Errorf("sent %d packets", len(s.got))
+	for _, name := range []string{"crafting_table", "gray_bed", "chipped_anvil", "trapped_chest"} {
+		t.Run(name, func(t *testing.T) {
+			w := flat()
+			w.floor = 0
+			w.hash = 4321
+			w.names = map[protocol.BlockPos]string{{1, 0, 2}: name, {1, 1, 2}: "air"}
+			a, s := newPlacer(w, mgl32.Vec3{1.5, 1, 2.5}, 2, cobbleInstance(16, 9))
+			if err := a.PlaceBlock(target, "cobblestone"); !errors.Is(err, ErrNoSupport) {
+				t.Fatalf("err = %v, want ErrNoSupport", err)
+			}
+			if len(s.got) != 0 {
+				t.Errorf("sent %d packets", len(s.got))
+			}
+		})
 	}
 }
