@@ -57,7 +57,7 @@ func (p *Poller) writeJobs(w http.ResponseWriter, rc *http.ResponseController, r
 	if src == nil {
 		return true
 	}
-	data, ok := p.jobsCache.payload(func() ([]byte, error) { return src(r.Context()) })
+	data, ok := p.jobsCache.payload(r.Context(), src)
 	if !ok {
 		return true
 	}

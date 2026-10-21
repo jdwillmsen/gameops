@@ -731,12 +731,15 @@ func TestFeedsRenderOncePerChange(t *testing.T) {
 
 	p.PublishWork("crew-01")
 	p.PublishJobs()
+	// A stream with both changes pending may write either first.
 	for _, ch := range authed {
-		if got := next(ch); !strings.HasPrefix(got, "work ") {
-			t.Fatalf("after publish, work %q", got)
+		got := map[string]bool{}
+		for range 2 {
+			name, _, _ := strings.Cut(next(ch), " ")
+			got[name] = true
 		}
-		if got := next(ch); !strings.HasPrefix(got, "jobs ") {
-			t.Fatalf("after publish, jobs %q", got)
+		if !got["work"] || !got["jobs"] {
+			t.Fatalf("after publish, events %v, want work and jobs", got)
 		}
 	}
 	if got := workCalls.Load(); got != 2 {
@@ -744,5 +747,52 @@ func TestFeedsRenderOncePerChange(t *testing.T) {
 	}
 	if got := jobsCalls.Load(); got != 2 {
 		t.Errorf("one change rendered jobs %d times, want 2 (connect plus change)", got)
+	}
+}
+
+// TestPublishDoesNotWaitOnARender proves a stalled store cannot hold up the
+// poller: while a stream is stuck rendering both feeds, publishing changes and
+// reading the snapshot still return at once.
+func TestPublishDoesNotWaitOnARender(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, time.Second)
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	block := func(ctx context.Context) ([]byte, error) {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil, errors.New("stalled")
+	}
+	p.SetWorkSource(func(ctx context.Context, _ string) ([]byte, error) { return block(ctx) })
+	p.SetJobsSource(block)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/units/stream", p.StreamHandler(authedByHeader))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	workEvents(t, srv.URL, http.Header{"X-Test-Auth": {"yes"}})
+	t.Cleanup(func() { close(release) })
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the stream never started rendering")
+	}
+	done := make(chan struct{})
+	go func() {
+		p.PublishWork("crew-01")
+		p.PublishJobs()
+		p.Snapshot()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publishing waited on a stalled render")
 	}
 }

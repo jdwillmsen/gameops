@@ -3,11 +3,17 @@ package telemetry
 import (
 	"context"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // WorkSource renders the work event payload of one unit. The poller does not
 // know the queue; main hands it this so only signed-in streams can read it.
 type WorkSource func(ctx context.Context, unit string) ([]byte, error)
+
+// renderTimeout bounds one shared render. It is not tied to any stream's
+// request, since every waiting stream shares its result.
+const renderTimeout = 5 * time.Second
 
 // feedCache shares the bytes of one rendered payload: the first signed-in
 // stream to write a given change renders it from the store, and every other
@@ -15,36 +21,68 @@ type WorkSource func(ctx context.Context, unit string) ([]byte, error)
 // counter, bumped when a change is published; at holds the seq the cached
 // bytes were rendered at. A nil data means the current seq has not been
 // rendered yet, so a stream that opens between changes draws fresh state.
+// No lock is held across a render, so publishing never waits on the store.
 type feedCache struct {
-	mu   sync.Mutex
+	seq    atomic.Uint64
+	mu     sync.Mutex
+	at     uint64
+	data   []byte
+	flight *render
+}
+
+// render is one store read in progress; data and ok are set before done
+// closes.
+type render struct {
 	seq  uint64
-	at   uint64
+	done chan struct{}
 	data []byte
+	ok   bool
 }
 
 // changed counts one change and drops the rendered bytes.
-func (c *feedCache) changed() {
-	c.mu.Lock()
-	c.seq++
-	c.mu.Unlock()
-}
+func (c *feedCache) changed() { c.seq.Add(1) }
 
 // payload returns the bytes for the current seq, rendering them once if
-// another write has not: callers racing miss the cache together but wait out
-// the first render under the lock, so the store is read once per change. An
-// error leaves the cache alone and skips this write, as before.
-func (c *feedCache) payload(src func() ([]byte, error)) ([]byte, bool) {
+// another write has not: callers racing for one seq wait on the first
+// render, bounded by ctx, so the store is read once per change. Bytes are
+// kept only if no change landed mid-render. An error leaves the cache alone
+// and skips this write, as before.
+func (c *feedCache) payload(ctx context.Context, src func(context.Context) ([]byte, error)) ([]byte, bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.data != nil && c.at == c.seq {
-		return c.data, true
+	seq := c.seq.Load()
+	if c.data != nil && c.at == seq {
+		d := c.data
+		c.mu.Unlock()
+		return d, true
 	}
-	d, err := src()
-	if err != nil {
-		return nil, false
+	if f := c.flight; f != nil && f.seq == seq {
+		c.mu.Unlock()
+		select {
+		case <-f.done:
+			return f.data, f.ok
+		case <-ctx.Done():
+			return nil, false
+		}
 	}
-	c.at, c.data = c.seq, d
-	return d, true
+	f := &render{seq: seq, done: make(chan struct{})}
+	c.flight = f
+	c.mu.Unlock()
+
+	rctx, cancel := context.WithTimeout(context.Background(), renderTimeout)
+	d, err := src(rctx)
+	cancel()
+	f.data, f.ok = d, err == nil
+
+	c.mu.Lock()
+	if f.ok && c.seq.Load() == seq {
+		c.at, c.data = seq, d
+	}
+	if c.flight == f {
+		c.flight = nil
+	}
+	c.mu.Unlock()
+	close(f.done)
+	return f.data, f.ok
 }
 
 // workSub collects which units changed since its stream last wrote, so a

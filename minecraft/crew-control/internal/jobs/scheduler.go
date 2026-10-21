@@ -26,7 +26,9 @@ type Config struct {
 	Now    func() time.Time
 	// Notify is called with the id of a job that changed.
 	Notify func(job uuid.UUID)
-	Log    *logging.Logger
+	// NotifyWork is called with a unit whose work the scheduler changed.
+	NotifyWork func(unit string)
+	Log        *logging.Logger
 	// Every is the tick period; zero means two seconds.
 	Every time.Duration
 }
@@ -48,6 +50,9 @@ func New(cfg Config) *Scheduler {
 	}
 	if cfg.Notify == nil {
 		cfg.Notify = func(uuid.UUID) {}
+	}
+	if cfg.NotifyWork == nil {
+		cfg.NotifyWork = func(string) {}
 	}
 	return &Scheduler{cfg: cfg, wake: make(chan struct{}, 1)}
 }
@@ -203,6 +208,7 @@ func (p *pass) release(st *Step, it work.Item) (bool, error) {
 		if err != nil || !cancelled {
 			return false, err
 		}
+		p.s.cfg.NotifyWork(it.Unit)
 		// WorkID stays so the next pick steers away from this unit.
 		st.State, st.Attempts, p.changed = StepWaiting, st.Attempts-1, true
 		p.s.info("job_step_released", p.j.ID, st.Key)
@@ -300,7 +306,7 @@ func (p *pass) set(st *Step, state string) {
 // fail ends the job and cancels its remaining work. The caller's step, if
 // any, keeps its own state.
 func (p *pass) fail(reason, except string) error {
-	if _, err := p.s.cfg.Work.CancelJob(p.ctx, p.j.ID, p.j.Operator); err != nil {
+	if err := p.s.cancelJob(p.ctx, p.j.ID, p.j.Operator); err != nil {
 		return err
 	}
 	for i := range p.j.Steps {
@@ -382,6 +388,7 @@ func (p *pass) assign() error {
 			p.err = err
 			return nil
 		}
+		p.s.cfg.NotifyWork(unit)
 		st.State, st.WorkID, st.Reason = StepQueued, &it.ID, ""
 		st.Attempts++
 		p.changed = true
@@ -448,7 +455,7 @@ func (s *Scheduler) Cancel(ctx context.Context, id uuid.UUID, operator string) (
 		if j.State != JobRunning {
 			return nil
 		}
-		if _, err := s.cfg.Work.CancelJob(ctx, id, operator); err != nil {
+		if err := s.cancelJob(ctx, id, operator); err != nil {
 			return err
 		}
 		for i := range j.Steps {
@@ -470,6 +477,18 @@ func (s *Scheduler) Cancel(ctx context.Context, id uuid.UUID, operator string) (
 		s.cfg.Notify(id)
 	}
 	return s.cfg.Jobs.Get(ctx, id)
+}
+
+// cancelJob cancels a job's open work and reports each unit it touched.
+func (s *Scheduler) cancelJob(ctx context.Context, id uuid.UUID, operator string) error {
+	items, err := s.cfg.Work.CancelJob(ctx, id, operator)
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		s.cfg.NotifyWork(it.Unit)
+	}
+	return nil
 }
 
 // Store is the job store the scheduler works on, for the routes that list and

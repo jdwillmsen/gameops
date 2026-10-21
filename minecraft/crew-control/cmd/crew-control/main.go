@@ -257,7 +257,8 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 	checks[jobs.KindStock] = jobs.StockCheck(led, units, time.Now)
 	scheduler := jobs.New(jobs.Config{
 		Jobs: js, Work: backend, Checks: checks, Log: log, Units: units,
-		Notify: func(uuid.UUID) { poller.PublishJobs() },
+		Notify:     func(uuid.UUID) { poller.PublishJobs() },
+		NotifyWork: poller.PublishWork,
 	})
 	sched.Store(scheduler)
 	// Streams that opened before the store was ready have no job list yet.
