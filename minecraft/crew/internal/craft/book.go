@@ -1,0 +1,135 @@
+// Package craft indexes the recipes the server sends at join, so a unit can
+// pick one by the item it wants to make. Recipe network IDs are assigned per
+// server boot and are only meaningful together with the CraftingData packet
+// they came in, so a session keeps its own book.
+package craft
+
+import (
+	"strings"
+	"sync"
+
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+)
+
+// Ingredient is one item a recipe consumes, by the name belief gives the
+// same item in the inventory.
+type Ingredient struct {
+	Name  string
+	Count int
+}
+
+// Recipe is one recipe from the server's CraftingData. Block is the station
+// the recipe needs: "crafting_table" for a 3x3 recipe, empty for the 2x2
+// player grid, which works anywhere.
+type Recipe struct {
+	NetworkID uint32
+	Block     string
+	// Ingredients are merged by item name, in the server's order.
+	Ingredients []Ingredient
+	// OutputCount is how many of the output one craft makes.
+	OutputCount int
+}
+
+// NeedsTable says whether the recipe only fits a crafting table's 3x3 grid.
+func (r Recipe) NeedsTable() bool { return r.Block == "crafting_table" }
+
+// Book is the server's recipe book, safe to store from the read loop while a
+// skill reads it.
+type Book struct {
+	mu       sync.Mutex
+	byOutput map[string][]Recipe
+}
+
+func NewBook() *Book { return &Book{byOutput: map[string][]Recipe{}} }
+
+// Store indexes the packet's shaped and shapeless recipes by the name of
+// their first output, mapping output network IDs through the server's item
+// table. ClearRecipes replaces the book, as the packet's meaning at join is;
+// without it the recipes merge into what an earlier packet stored.
+func (b *Book) Store(pk *packet.CraftingData, items []protocol.ItemEntry) {
+	names := make(map[int32]string, len(items))
+	for _, e := range items {
+		names[int32(e.RuntimeID)] = trim(e.Name)
+	}
+	indexed := make(map[string][]Recipe)
+	for _, r := range pk.ShapelessRecipes {
+		index(indexed, names, r.RecipeNetworkID, r.Block, r.Input, r.Output)
+	}
+	for _, r := range pk.ShapedRecipes {
+		index(indexed, names, r.RecipeNetworkID, r.Block, r.Input, r.Output)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if pk.ClearRecipes {
+		b.byOutput = indexed
+		return
+	}
+	for item, rs := range indexed {
+		b.byOutput[item] = append(b.byOutput[item], rs...)
+	}
+}
+
+// Recipes returns the recipes whose first output is item, in server order.
+func (b *Book) Recipes(item string) []Recipe {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]Recipe(nil), b.byOutput[item]...)
+}
+
+// index flattens one recipe into the map, or skips it whole when the unit
+// could not work with it: an output the item table does not name cannot be
+// asked for, and an ingredient named only by a MoLang expression cannot be
+// matched against the inventory.
+func index(out map[string][]Recipe, names map[int32]string, id uint32, block string, in []protocol.ItemDescriptorCount, outputs []protocol.ItemStack) {
+	if id == 0 || len(outputs) == 0 {
+		return
+	}
+	name, ok := names[outputs[0].NetworkID]
+	if !ok || name == "" {
+		return
+	}
+	r := Recipe{NetworkID: id, Block: block, OutputCount: int(outputs[0].Count)}
+	for _, d := range in {
+		var ing Ingredient
+		switch desc := d.Descriptor.(type) {
+		case *protocol.InvalidItemDescriptor:
+			// An empty cell of a shaped recipe's grid.
+			continue
+		case *protocol.DefaultItemDescriptor:
+			ing = Ingredient{Name: trim(desc.Name), Count: int(d.Count)}
+		case *protocol.ItemTagItemDescriptor:
+			// A tag stands for many items and the inventory holds concrete
+			// names, so a tag ingredient never matches one.
+			ing = Ingredient{Name: trim(desc.Tag), Count: int(d.Count)}
+		default:
+			return
+		}
+		if ing.Count < 1 || ing.Name == "" {
+			continue
+		}
+		merged := false
+		for i := range r.Ingredients {
+			if r.Ingredients[i].Name == ing.Name {
+				r.Ingredients[i].Count += ing.Count
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			r.Ingredients = append(r.Ingredients, ing)
+		}
+	}
+	if len(r.Ingredients) == 0 {
+		return
+	}
+	out[name] = append(out[name], r)
+}
+
+func trim(n string) string {
+	const prefix = "minecraft:"
+	if len(n) > len(prefix) && strings.HasPrefix(n, prefix) {
+		return n[len(prefix):]
+	}
+	return n
+}
