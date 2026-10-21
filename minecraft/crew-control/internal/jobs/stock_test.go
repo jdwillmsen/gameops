@@ -213,7 +213,7 @@ func TestPlanStockChunkLimits(t *testing.T) {
 	}
 }
 
-func TestChunksSplitStockNeed(t *testing.T) {
+func TestPlanStockSplitsNeedIntoChunks(t *testing.T) {
 	cases := []struct {
 		need, free, want int
 	}{
@@ -226,15 +226,21 @@ func TestChunksSplitStockNeed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("need %d free %d", tc.need, tc.free), func(t *testing.T) {
-			// The planner sizes the split by the free units: one chunk per
-			// unit, each carrying a share of at most perUnit.
-			got := chunks(tc.need, min(tc.free, (tc.need+perUnit-1)/perUnit))
-			sum := 0
-			for _, c := range got {
-				if c <= 0 || c > maxChunk {
-					t.Fatalf("chunk %d in %v", c, got)
+			l, target := stockWorld(t)
+			observe(t, l, target, time.Minute, map[string]int{})
+			steps := plan(t, l, map[string]int{"cobblestone": tc.need}, tc.free, time.Now().Add(-time.Hour))
+			var got []int
+			for _, s := range steps {
+				if strings.HasPrefix(s.Key, "gather-") {
+					got = append(got, int(tmpl(t, s)["qty"].(float64)))
 				}
-				sum += c
+			}
+			sum := 0
+			for _, q := range got {
+				if q < 1 || q > 64 {
+					t.Fatalf("chunk %d in %v", q, got)
+				}
+				sum += q
 			}
 			if sum != tc.need {
 				t.Fatalf("chunks %v sum to %d, want %d", got, sum, tc.need)
