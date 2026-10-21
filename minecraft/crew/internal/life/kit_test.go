@@ -214,18 +214,48 @@ func TestAFailedVisitIsLoggedWithoutPositionsAndBackedOff(t *testing.T) {
 	}
 }
 
-// A visit that gave up waiting for the chest's chunk is a failure like any
-// other: the unit does not go back inside the long back-off.
-func TestAKitChunkThatNeverLoadsBacksOffLikeAnyFailure(t *testing.T) {
+// A chest whose chunk is merely late, as on a cold join, costs the unit
+// seconds, not the back-off: after two waits the unit is rearmed well inside
+// half a minute of joining.
+func TestAUnitRearmsSoonWhileTheKitChestsChunkIsArriving(t *testing.T) {
+	r, visits := kitRig(t)
+	late := 2
+	r.l.makeKit = func(weapon bool, food int) skill.Skill {
+		v := &visit{r: r, weapon: weapon, food: food}
+		if late > 0 {
+			late--
+			// The withdraw itself waits the chunk out before giving up, so
+			// a failing visit burns about as long as the back-off after it.
+			v.ticks, v.failure = 100, skill.ErrChestChunkNotLoaded
+		} else {
+			v.ticks = 40
+			v.stock = func() { r.give(0, idStoneSwrd, 1); r.give(1, idBread, 6) }
+		}
+		*visits = append(*visits, v)
+		return v
+	}
+	if used := r.until(600, func() bool { return r.logged("kit_restocked") }); used >= 600 {
+		t.Fatalf("not rearmed within %d ticks of joining: log %+v", used, r.log.lines)
+	}
+	if len(*visits) != 3 {
+		t.Errorf("visits = %d, want two waits for the chunk then the re-arm", len(*visits))
+	}
+}
+
+// Six waits in a row for a chunk that never arrives are each retried soon;
+// the seventh is a failure like any other and waits the long back-off, so
+// the unit is not kept walking back to a chest that is not coming.
+func TestAKitChunkThatNeverLoadsBacksOffAfterSixShortRetries(t *testing.T) {
 	r, visits := kitRig(t)
 	r.l.makeKit = func(bool, int) skill.Skill {
 		v := &visit{r: r, ticks: 2, failure: skill.ErrChestChunkNotLoaded}
 		*visits = append(*visits, v)
 		return v
 	}
-	r.run(kitSettleTicks + 30)
-	if !r.logged("kit_failed") {
-		t.Fatalf("log = %+v", r.log.lines)
+	// Each short retry costs a three-tick visit plus the short back-off.
+	r.until(kitSettleTicks+7*(kitChunkBackoff+3), func() bool { return len(*visits) >= 7 })
+	if len(*visits) != 7 {
+		t.Fatalf("visits = %d in %d ticks; the short retries must allow six and a seventh", len(*visits), r.ticks)
 	}
 	for _, l := range r.log.lines {
 		if l.event == "kit_failed" && l.fields["error"] != skill.ErrChestChunkNotLoaded.Error() {
@@ -233,12 +263,12 @@ func TestAKitChunkThatNeverLoadsBacksOffLikeAnyFailure(t *testing.T) {
 		}
 	}
 	r.run(kitFailBackoff - 100)
-	if len(*visits) != 1 {
-		t.Errorf("retried %d times inside the back-off", len(*visits)-1)
+	if len(*visits) != 7 {
+		t.Errorf("retried %d times inside the long back-off, want 7 visits", len(*visits))
 	}
 	r.run(300)
-	if len(*visits) != 2 {
-		t.Errorf("visits = %d, want a second try after the back-off", len(*visits))
+	if len(*visits) != 8 {
+		t.Errorf("visits = %d, want an eighth try after the back-off", len(*visits))
 	}
 }
 
