@@ -25,10 +25,13 @@ func rim(thick, top float32) []Box {
 // any other.
 func partial(name string) ([]Box, bool) {
 	switch name {
-	case "trapped_chest":
-		// The block table has no model for it; it rests a unit at 0.95 like a
-		// chest.
-		return []Box{inset(0.025, 0.025, 0.975, 0.975, 0.95)}, true
+	case "chest", "trapped_chest", "ender_chest":
+		// The block table makes a chest 0.95 tall, inset a fortieth. The
+		// server's corrections hold a unit 0.875 up on a chest inset a
+		// sixteenth: against the table's box a prediction stops short of the
+		// real face, and a corrected unit resting at 0.875 is left inside
+		// the box's footprint with no support under it, so it falls through.
+		return []Box{inset(0.0625, 0.0625, 0.9375, 0.9375, 0.875)}, true
 	case "turtle_egg":
 		return []Box{inset(0.1875, 0.1875, 0.8125, 0.8125, 0.45)}, true
 	case "waterlily":
