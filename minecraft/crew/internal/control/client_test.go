@@ -230,6 +230,14 @@ func (f *fakeControl) waitFor(t *testing.T, what string, ok func([]event) bool) 
 	return nil
 }
 
+// pollCounts reports how many work polls the client made, and how many of
+// them asked only for commands.
+func (f *fakeControl) pollCounts() (all, commands int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.polls, f.commandPolls
+}
+
 func has(ev []event, id, state string) bool {
 	for _, e := range ev {
 		if e.ID == id && e.State == state {
@@ -1157,13 +1165,24 @@ func TestCancelTaskDropsAHeldTask(t *testing.T) {
 
 	// The runner refuses the task, so the client holds it back.
 	f.work <- taskItem(taskB, gotoBody)
-	time.Sleep(100 * time.Millisecond)
+	// A client holding a task asks only for commands, so the command poll
+	// says the task is held without waiting for a clock.
+	waitUntil(t, "the task held back", func() bool {
+		_, commands := f.pollCounts()
+		return commands > 0
+	})
 	f.work <- cancelTaskItem(commandID, taskB)
 	f.waitFor(t, "cancel done", func(ev []event) bool { return has(ev, commandID, "done") && has(ev, taskB, "cancelled") })
 	r.mu.Lock()
 	r.failErr = nil
 	r.mu.Unlock()
-	time.Sleep(200 * time.Millisecond)
+	// Two more polls give the client a whole turn to submit the task it
+	// held, which it must not.
+	before, _ := f.pollCounts()
+	waitUntil(t, "the client polled again", func() bool {
+		all, _ := f.pollCounts()
+		return all >= before+2
+	})
 	if hasSubmit(r, taskB) {
 		t.Error("a cancelled task was submitted after it was held")
 	}
