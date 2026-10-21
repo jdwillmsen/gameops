@@ -166,6 +166,12 @@ func (a *Actuator) sendCraftLocked(r craft.Recipe, item string, inv []belief.Ite
 	// The server accepts the negative odd IDs a client counts down through.
 	a.nextRequest -= 2
 	a.crafts.pending[id] = pendingCraft{item: item, destSlot: int(dest.Slot)}
+	// The answer names the destination's count and stack ID but never the
+	// item, so the window-0 record placement reads from learns it here, or a
+	// craft-then-place would not find what it just made.
+	if nid, ok := a.itemIDs[item]; ok {
+		a.reqItem[id] = nid
+	}
 	return id, made, nil
 }
 

@@ -220,6 +220,21 @@ func TestCraftPlanksSendsTheRecipeConsumeAndTakeActions(t *testing.T) {
 	}
 }
 
+func TestCraftedItemsAreHeldForPlacement(t *testing.T) {
+	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
+	a, s := newCrafter(inv)
+	defer stopAnswering(startAnswering(a, s))
+
+	if _, err := a.Craft("oak_planks", 1); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if got := a.inv[0]; got.Stack.NetworkID != a.itemIDs["oak_planks"] || got.Stack.Count != 4 {
+		t.Errorf("slot 0 = %+v, want the 4 crafted planks a placement can hold", got)
+	}
+}
+
 func TestCraftScalesOneRequestOverSeveralCrafts(t *testing.T) {
 	inv := []belief.Item{{Slot: 3, Name: "oak_log", Count: 12, StackNetworkID: 41}}
 	a, s := newCrafter(inv)
