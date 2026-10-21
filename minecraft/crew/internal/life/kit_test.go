@@ -253,12 +253,71 @@ func TestAKitChunkThatNeverLoadsBacksOffAfterSixShortRetries(t *testing.T) {
 		return v
 	}
 	// Each short retry costs a three-tick visit plus the short back-off.
-	r.until(kitSettleTicks+7*(kitChunkBackoff+3), func() bool { return len(*visits) >= 7 })
+	r.until(kitSettleTicks+7*(kitRetryBackoff+3), func() bool { return len(*visits) >= 7 })
 	if len(*visits) != 7 {
 		t.Fatalf("visits = %d in %d ticks; the short retries must allow six and a seventh", len(*visits), r.ticks)
 	}
 	for _, l := range r.log.lines {
 		if l.event == "kit_failed" && l.fields["error"] != skill.ErrChestChunkNotLoaded.Error() {
+			t.Errorf("kit_failed error = %v", l.fields["error"])
+		}
+	}
+	r.run(kitFailBackoff - 100)
+	if len(*visits) != 7 {
+		t.Errorf("retried %d times inside the long back-off, want 7 visits", len(*visits))
+	}
+	r.run(300)
+	if len(*visits) != 8 {
+		t.Errorf("visits = %d, want an eighth try after the back-off", len(*visits))
+	}
+}
+
+// An open that answered with no window, seen in a crew's first minutes when
+// the chest's block is known and in reach, costs the unit seconds too: after
+// two misses the unit is rearmed well inside half a minute of joining.
+func TestAUnitRearmsSoonWhileTheKitChestDoesNotOpen(t *testing.T) {
+	r, visits := kitRig(t)
+	late := 2
+	r.l.makeKit = func(weapon bool, food int) skill.Skill {
+		v := &visit{r: r, weapon: weapon, food: food}
+		if late > 0 {
+			late--
+			// The withdraw waits out its own answer window and its small
+			// drain grace, 310 ticks together, before giving up, so a
+			// failing visit burns about as long as the back-off after it.
+			v.ticks, v.failure = 310, skill.ErrChestNotOpened
+		} else {
+			v.ticks = 40
+			v.stock = func() { r.give(0, idStoneSwrd, 1); r.give(1, idBread, 6) }
+		}
+		*visits = append(*visits, v)
+		return v
+	}
+	if used := r.until(1200, func() bool { return r.logged("kit_restocked") }); used >= 1200 {
+		t.Fatalf("not rearmed within %d ticks of joining: log %+v", used, r.log.lines)
+	}
+	if len(*visits) != 3 {
+		t.Errorf("visits = %d, want two missed opens then the re-arm", len(*visits))
+	}
+}
+
+// Six missed opens in a row are each retried soon; the seventh is a failure
+// like any other and waits the long back-off, so the unit is not kept walking
+// back to a chest that will not answer.
+func TestAKitChestThatNeverOpensBacksOffAfterSixShortRetries(t *testing.T) {
+	r, visits := kitRig(t)
+	r.l.makeKit = func(bool, int) skill.Skill {
+		v := &visit{r: r, ticks: 2, failure: skill.ErrChestNotOpened}
+		*visits = append(*visits, v)
+		return v
+	}
+	// Each short retry costs a three-tick visit plus the short back-off.
+	r.until(kitSettleTicks+7*(kitRetryBackoff+3), func() bool { return len(*visits) >= 7 })
+	if len(*visits) != 7 {
+		t.Fatalf("visits = %d in %d ticks; the short retries must allow six and a seventh", len(*visits), r.ticks)
+	}
+	for _, l := range r.log.lines {
+		if l.event == "kit_failed" && l.fields["error"] != skill.ErrChestNotOpened.Error() {
 			t.Errorf("kit_failed error = %v", l.fields["error"])
 		}
 	}

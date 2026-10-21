@@ -20,6 +20,11 @@ const inventorySlots = 36
 // where the server has not sent the chunk the chest sits in.
 var ErrChestChunkNotLoaded = errors.New("the chest's chunk is not loaded")
 
+// ErrChestNotOpened is the failure of a withdraw whose click on a known,
+// reachable chest brought no ContainerOpen within its answer window, as on a
+// cold join while the unit is still settling into the world.
+var ErrChestNotOpened = fmt.Errorf("chest did not open within %d ticks", answerTicks)
+
 type withdrawPhase int
 
 const (
@@ -232,7 +237,7 @@ func (w *Withdraw) open(a Actuator, snap belief.Snapshot) outcome {
 		return next
 	}
 	if ph.waited++; ph.waited >= answerTicks {
-		ph.drain = fmt.Errorf("chest did not open within %d ticks", answerTicks)
+		ph.drain = ErrChestNotOpened
 		ph.p, ph.waited = wDrain, 0
 		return next
 	}
