@@ -585,11 +585,15 @@ palette entries containing Bedrock block names and optional `states`, and one
 compact `layers` string per Y level. A layer stores X fastest, then Z; each
 character indexes the palette through
 `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_`. Layers
-are bottom-up. `build_order` lists every `{x,y,z}` cell in placement order, so
-supporting blocks can precede torches, doors, ladders, redstone and buttons.
-`materials` is checked against the blocks (air is omitted and a two-part door
-counts once). Sizes are limited to 48 blocks per axis and the compact palette
-to 64 entries.
+are bottom-up. `build_order` is optional: absent, the placement order is
+derived layer by layer bottom-up, solid blocks before blocks that need
+support (torches, lanterns, doors, ladders, redstone_wire, repeaters,
+comparators, levers, buttons, pressure plates, rails, carpets, signs, vines,
+trapdoors), and the validator's support check runs against that derived
+order. An explicit `build_order` overrides it — every `{x,y,z}` cell exactly
+once, bottom-up — and is validated the same way. `materials` is checked
+against the blocks (air is omitted and a two-part door counts once). Sizes
+are limited to 48 blocks per axis and the compact palette to 64 entries.
 
 For example, the sample redstone check uses this shape:
 
@@ -607,7 +611,6 @@ For example, the sample redstone check uses this shape:
     {"name": "redstone_wire"}
   ],
   "layers": ["..."],
-  "build_order": [{"x": 1, "y": 0, "z": 1}],
   "materials": [{"item": "stone", "count": 5}],
   "checks": [{
     "set": {"x": 1, "y": 1, "z": 1},
@@ -619,8 +622,8 @@ For example, the sample redstone check uses this shape:
 ```
 
 The abbreviated arrays above are illustrative; the complete checked-in
-blueprints include every layer cell and build-order position. Import a Bedrock
-little-endian `.mcstructure` from the repository root with:
+blueprints include every layer cell. Import a Bedrock little-endian
+`.mcstructure` from the repository root with:
 
 ```
 go run ./minecraft/crew/cmd/labcourses blueprint-import house.mcstructure house infrastructure
@@ -628,8 +631,14 @@ go run ./minecraft/crew/cmd/labcourses blueprint-import house.mcstructure house 
 
 The importer reads `size`, the first `structure.block_indices` layer and
 `structure.palette.default.block_palette`, then writes the normalized JSON
-under `minecraft/crew/blueprints/`. Stamp a named blueprint at X/Z, optionally
-rotated in quarter turns, using the same guarded lab runner as the fields:
+(no `build_order` — it is derived on load) under `minecraft/crew/blueprints/`
+by default; `-o <dir>` writes elsewhere. The default directory must already
+exist, so running the importer from somewhere else fails clearly instead of
+sprouting a stray `minecraft/` tree. The checked-in blueprints are also
+embedded in the binary through `blueprints/embed.go`, so stamping needs no
+checkout — the nightly job's image ships the binary alone. Stamp a named
+blueprint at X/Z, optionally rotated in quarter turns, using the same guarded
+lab runner as the fields:
 
 ```
 minecraft/crew/lab/courses.sh --confirm-overwrite k8s:<namespace>/<lab-server-pod> blueprint small_house 0 -800 90
@@ -637,7 +646,8 @@ minecraft/crew/lab/courses.sh --confirm-overwrite k8s:<namespace>/<lab-server-po
 
 Stamp plans include the same `# area` headers as other fields. Rotation
 updates the common Bedrock facing, direction, lever, rail, cardinal and pillar
-axis states.
+axis states, in both their string and numeric encodings — Bedrock's
+`rail_direction`, for one, is an int 0-9.
 
 On the BDS 1.26 lab there is no console-only way to place a working repeater;
 every candidate was tried live and left the lamp unlit while an identical
