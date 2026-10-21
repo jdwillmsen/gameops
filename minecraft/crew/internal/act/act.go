@@ -31,8 +31,12 @@ var metricCorrections = promauto.NewCounter(prometheus.CounterOpts{
 const firstTick = 100
 
 // sentHistory covers a correction's round trip: the server names the corrected
-// tick, and by then later inputs have already been sent.
-const sentHistory = 64
+// tick, and by then later inputs have already been sent. Corrections in the
+// wild name inputs several seconds old — repeats of ones already adopted, and
+// answers delayed past a lag spike — so the window outlives the nominal round
+// trip by a wide margin; a lost input is measured against the newest pose,
+// which makes the correction read as a no-op.
+const sentHistory = 256
 
 // sentTick is what one PlayerAuthInput claimed, kept so a correction is
 // compared with the tick it names rather than the newest one.

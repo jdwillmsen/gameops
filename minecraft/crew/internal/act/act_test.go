@@ -447,6 +447,34 @@ func TestCorrectionLogFallsBackWhenTheTickIsNoLongerHeld(t *testing.T) {
 	}
 }
 
+func TestCorrectionLogMeasuresACorrectionAgainstAnInputTheWindowAlreadyLost(t *testing.T) {
+	a, s := newAct(flat(), Pose{OnGround: true})
+	log := &correctionLog{}
+	a.SetCorrectionDiagnostics(log, nil)
+	for i := 0; i < 100; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	// Corrections in the wild name inputs over three seconds old. A window
+	// that has already dropped the named input measures against the newest
+	// pose instead, so the correction reads as a no-op and its real
+	// distance is lost.
+	sent := s.inputs(t)[0]
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: sent.Position,
+		Tick:     sent.Tick,
+		OnGround: true,
+	})
+	if len(log.events) != 1 {
+		t.Fatalf("logged events = %d, want 1", len(log.events))
+	}
+	if got := log.events[0]["tick_found"]; got != true {
+		t.Errorf("tick_found = %#v, want the named input still measured", got)
+	}
+	if got := log.events[0]["dist"]; got != 0.0 {
+		t.Errorf("dist = %#v, want the named input's own position", got)
+	}
+}
+
 func TestCorrectionLogRateLimitReportsSuppressedCorrections(t *testing.T) {
 	a, _ := newAct(flat(), Pose{OnGround: true})
 	log := &correctionLog{}
