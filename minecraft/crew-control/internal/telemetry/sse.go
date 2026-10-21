@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -177,7 +178,7 @@ func (p *Poller) writeWork(w http.ResponseWriter, rc *http.ResponseController, r
 		return true
 	}
 	if c := p.workFeed(unit); c != nil {
-		data, ok := c.payload(func() ([]byte, error) { return src(r.Context(), unit) })
+		data, ok := c.payload(r.Context(), func(ctx context.Context) ([]byte, error) { return src(ctx, unit) })
 		if !ok {
 			return true
 		}

@@ -1,10 +1,13 @@
 package jobs
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
 )
@@ -41,7 +45,9 @@ type rig struct {
 	roster  []string
 	checks  Checks
 	notes   []uuid.UUID
-	s       *Scheduler
+	// notifyWork, when set before scheduler, receives NotifyWork.
+	notifyWork func(unit string)
+	s          *Scheduler
 }
 
 // The work store stamps rows with the wall clock, so the rig clock starts there
@@ -57,8 +63,9 @@ func newRig(t *testing.T, units ...string) *rig {
 func (r *rig) scheduler() *Scheduler {
 	return New(Config{
 		Jobs: r.jobs, Work: r.work, Checks: r.checks, Now: r.clock.Now,
-		Units:  r.units,
-		Notify: func(id uuid.UUID) { r.notes = append(r.notes, id) },
+		Units:      r.units,
+		Notify:     func(id uuid.UUID) { r.notes = append(r.notes, id) },
+		NotifyWork: r.notifyWork,
 	})
 }
 
@@ -905,4 +912,69 @@ func TestPlanOverPostgres(t *testing.T) {
 	if got := r.get(j.ID); got.State != JobDone {
 		t.Fatalf("state = %s (%s)", got.State, r.states(got))
 	}
+}
+
+// TestSchedulerWorkChangesReachLaterStreams proves the work the scheduler
+// queues and cancels is published: a stream opened after a cancel must not be
+// served the feed bytes cached before it, where the item was still open.
+func TestSchedulerWorkChangesReachLaterStreams(t *testing.T) {
+	r := newRig(t, "crew-01")
+	units, err := roster.Parse(`[{"id":"crew-01","name":"Unit1","url":"http://127.0.0.1:1"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := telemetry.NewPoller(units, &http.Client{}, time.Second)
+	p.SetWorkSource(func(ctx context.Context, unit string) ([]byte, error) {
+		items, err := r.work.Open(ctx, unit)
+		if err != nil {
+			return nil, err
+		}
+		ids := []string{}
+		for _, it := range items {
+			ids = append(ids, it.ID.String())
+		}
+		return json.Marshal(ids)
+	})
+	srv := httptest.NewServer(p.StreamHandler(func(*http.Request) bool { return true }))
+	t.Cleanup(srv.Close)
+	r.notifyWork = p.PublishWork
+	r.s = r.scheduler()
+
+	j := r.job(step("a"))
+	r.tick()
+	queued := r.item(r.get(j.ID), "a").ID.String()
+	if got := openingWork(t, srv.URL); !strings.Contains(got, queued) {
+		t.Fatalf("stream after queueing shows %s, want %s", got, queued)
+	}
+	if _, err := r.s.Cancel(ctx, j.ID, "ada"); err != nil {
+		t.Fatal(err)
+	}
+	if got := openingWork(t, srv.URL); strings.Contains(got, queued) {
+		t.Fatalf("stream after cancel still shows cancelled item: %s", got)
+	}
+}
+
+// openingWork opens a stream and returns the data of its first work event.
+func openingWork(t *testing.T, url string) string {
+	t.Helper()
+	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(cctx, http.MethodGet, url, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	sc := bufio.NewScanner(resp.Body)
+	name := ""
+	for sc.Scan() {
+		if n, ok := strings.CutPrefix(sc.Text(), "event: "); ok {
+			name = n
+		}
+		if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok && name == "work" {
+			return d
+		}
+	}
+	t.Fatal("stream ended without a work event")
+	return ""
 }
