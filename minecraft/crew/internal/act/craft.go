@@ -216,6 +216,9 @@ func (a *Actuator) await(id int32) error {
 	for {
 		a.mu.Lock()
 		status, done := a.responses[id]
+		// Nothing else reads a craft's answer, so it is dropped once read
+		// rather than kept for the session.
+		delete(a.responses, id)
 		a.mu.Unlock()
 		if done {
 			if status != StatusOK {
