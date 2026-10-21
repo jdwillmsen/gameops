@@ -148,10 +148,7 @@ func rotateState(key string, v any, n int) any {
 		}
 		return s
 	}
-	if num, ok := v.(int32); ok {
-		v = int(num)
-	}
-	if num, ok := v.(int); ok {
+	if num, ok := asInt(v); ok {
 		switch key {
 		case "facing_direction":
 			cycle := []int{2, 5, 3, 4}
@@ -171,9 +168,37 @@ func rotateState(key string, v any, n int) any {
 				}
 			}
 			return num
+		case "rail_direction":
+			return rotateRailInt(num, n)
 		}
 	}
 	return v
+}
+
+// asInt widens every integer width the NBT and JSON loaders hand out, so
+// no numeric state slips past rotation and keeps its old facing.
+func asInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int8:
+		return int(n), true
+	case int16:
+		return int(n), true
+	case int32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case uint8:
+		return int(n), true
+	case uint16:
+		return int(n), true
+	case uint32:
+		return int(n), true
+	case uint64:
+		return int(n), true
+	}
+	return 0, false
 }
 
 func rotateRail(s string, n int) string {
@@ -199,6 +224,31 @@ func rotateRail(s string, n int) string {
 		}
 	}
 	return s
+}
+
+// rotateRailInt rotates the numeric rail_direction the works field and
+// imported structures use: 0 north-south, 1 east-west, 2-5 ascending
+// east, west, north and south, 6-9 the curves south-east, south-west,
+// north-west and north-east. One turn is clockwise, matching rotate():
+// east (+x) becomes south (+z).
+func rotateRailInt(d, n int) int {
+	switch {
+	case d == 0 || d == 1:
+		if n%2 == 1 {
+			return 1 - d
+		}
+		return d
+	case d >= 2 && d <= 5:
+		asc := []int{2, 5, 3, 4} // ascending east, south, west, north in clockwise order
+		for i, v := range asc {
+			if v == d {
+				return asc[(i+n)%4]
+			}
+		}
+	case d >= 6 && d <= 9:
+		return 6 + (d-6+n)%4
+	}
+	return d
 }
 
 func indexString(arr []string, v string) int {
