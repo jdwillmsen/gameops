@@ -107,6 +107,9 @@ func main() {
 			api := work.Routes(mux, store, units, workToken, poller.PublishWork)
 			api.MountOperator(mux, operators)
 			api.OnSeen = observeSeen(&world, log)
+			// Wired as a no-op: the builds jobs that compare an observation
+			// to a blueprint replace this without touching the routes.
+			api.OnBlocks = func(string, uuid.UUID, work.Blocks) {}
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
 			poller.SetWorkSource(api.Feed)
 			ledger.NewAPI(func() ledger.Ledger {

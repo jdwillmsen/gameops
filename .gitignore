@@ -10,3 +10,5 @@ node_modules
 /minecraft/mcmap/mcmap
 /bridge
 /mcmap
+# A build/ rule in a developer's global gitignore must not hide this package.
+!/minecraft/crew-control/internal/build/
