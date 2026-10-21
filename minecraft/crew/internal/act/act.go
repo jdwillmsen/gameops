@@ -4,7 +4,10 @@
 package act
 
 import (
+	"math"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/prometheus/client_golang/prometheus"
@@ -43,12 +46,19 @@ type Input struct {
 // Actuator is safe to call from a skill goroutine while Apply runs on the
 // read loop.
 type Actuator struct {
-	mu        sync.Mutex
-	w         PacketWriter
-	runtimeID uint64
-	solid     Solid
-	pose      Pose
-	tick      uint64
+	mu                    sync.Mutex
+	w                     PacketWriter
+	runtimeID             uint64
+	solid                 Solid
+	pose                  Pose
+	tick                  uint64
+	lastStepUp            bool
+	skill                 string
+	correctionLogger      CorrectionLogger
+	blockNames            BlockNames
+	lastCorrectionLog     time.Time
+	suppressedCorrections uint64
+	now                   func() time.Time
 
 	itemIDs     map[string]int32
 	cont        container
@@ -56,11 +66,19 @@ type Actuator struct {
 	responses   map[int32]uint8
 }
 
+type CorrectionLogger interface {
+	Info(event string, fields map[string]any)
+}
+
+type BlockNames interface {
+	Block(protocol.BlockPos) (string, bool)
+}
+
 // New starts the unit at pose. Collision queries go to solid.
 func New(w PacketWriter, runtimeID uint64, start Pose, solid Solid) *Actuator {
 	return &Actuator{
 		w: w, runtimeID: runtimeID, solid: solid, pose: start,
-		tick: firstTick, nextRequest: -3, responses: map[int32]uint8{},
+		tick: firstTick, nextRequest: -3, responses: map[int32]uint8{}, now: time.Now,
 	}
 }
 
@@ -87,6 +105,18 @@ func (a *Actuator) Ticks() uint64 {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.tick - firstTick
+}
+
+func (a *Actuator) SetCorrectionDiagnostics(log CorrectionLogger, blocks BlockNames) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.correctionLogger, a.blockNames = log, blocks
+}
+
+func (a *Actuator) SetSkill(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.skill = name
 }
 
 // Tick sends exactly one PlayerAuthInput and advances the pose by it. Call it
@@ -153,6 +183,7 @@ func (a *Actuator) Tick(in Input) error {
 		return err
 	}
 	a.pose = next
+	a.lastStepUp = step.stepUp
 	a.tick++
 	return nil
 }
@@ -166,6 +197,8 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	switch p := pk.(type) {
 	case *packet.CorrectPlayerMovePrediction:
 		metricCorrections.Inc()
+		a.logCorrection(p)
+		a.lastStepUp = false
 		a.pose = Pose{
 			Feet:     p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
 			Pitch:    p.Rotation.X(),
@@ -200,4 +233,67 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	default:
 		a.applyContainerLocked(pk)
 	}
+}
+
+func (a *Actuator) logCorrection(p *packet.CorrectPlayerMovePrediction) {
+	if a.correctionLogger == nil {
+		return
+	}
+	now := a.now()
+	if !a.lastCorrectionLog.IsZero() && now.Sub(a.lastCorrectionLog) < 10*time.Second {
+		a.suppressedCorrections++
+		return
+	}
+	predicted := a.pose.Feet
+	corrected := p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0})
+	delta := corrected.Sub(predicted)
+	axis, component := "x", delta[0]
+	for i, name := range []string{"y", "z"} {
+		if math.Abs(float64(delta[i+1])) > math.Abs(float64(component)) {
+			axis, component = name, delta[i+1]
+		}
+	}
+	sign := "+"
+	if component < 0 {
+		sign = "-"
+	}
+	feet := blockPos(predicted)
+	below := protocol.BlockPos{feet[0], int32(math.Floor(float64(predicted[1]) - 0.01)), feet[2]}
+	dir := forwardDir(a.pose.Yaw)
+	ahead := blockPos(mgl32.Vec3{predicted[0] + dir[0], predicted[1], predicted[2] + dir[1]})
+	fields := map[string]any{
+		"skill": skillOrIdle(a.skill), "on_ground": a.pose.OnGround,
+		"step": a.lastStepUp, "vy": round2(a.pose.vy),
+		"dist": round2(float32(math.Sqrt(float64(delta.Dot(delta))))),
+		"axis": axis, "axis_sign": sign,
+		"below": a.blockName(below), "feet": a.blockName(feet), "ahead": a.blockName(ahead),
+		"suppressed": a.suppressedCorrections,
+	}
+	a.correctionLogger.Info("movement_corrected", fields)
+	a.lastCorrectionLog = now
+	a.suppressedCorrections = 0
+}
+
+func (a *Actuator) blockName(pos protocol.BlockPos) string {
+	if a.blockNames == nil {
+		return "unknown"
+	}
+	name, ok := a.blockNames.Block(pos)
+	if !ok || name == "" {
+		return "unknown"
+	}
+	return strings.TrimPrefix(name, "minecraft:")
+}
+
+func skillOrIdle(name string) string {
+	if name == "" {
+		return "idle"
+	}
+	return name
+}
+
+func round2(v float32) float64 { return math.Round(float64(v)*100) / 100 }
+
+func blockPos(v mgl32.Vec3) protocol.BlockPos {
+	return protocol.BlockPos{int32(math.Floor(float64(v[0]))), int32(math.Floor(float64(v[1]))), int32(math.Floor(float64(v[2])))}
 }

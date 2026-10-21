@@ -34,7 +34,8 @@ type unit struct {
 	conn      packetWriter
 	items     []protocol.ItemEntry
 
-	act *act.Actuator
+	act           *act.Actuator
+	correctionLog act.CorrectionLogger
 }
 
 func newUnit(runtimeID uint64, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, conn packetWriter) *unit {
@@ -103,6 +104,7 @@ func (u *unit) startActing() error {
 		return nil
 	}
 	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker, hub: u.hub}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
+	a.SetCorrectionDiagnostics(u.correctionLog, u.world)
 	a.ItemNames(u.items)
 	// Until the loading screen ends, the server drops every action without an
 	// error, so this precedes any task tick.

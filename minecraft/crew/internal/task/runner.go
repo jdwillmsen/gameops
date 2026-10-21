@@ -364,6 +364,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	engaged := r.reflex != nil && r.reflex.Engaged(a.Pose(), snap)
 	if x := r.reflex; x != nil && x.Swimming(a.Pose()) {
 		stop := r.preempt(dt)
+		setActuatorSkill(a, "idle")
 		r.mu.Unlock()
 		if stop != nil {
 			stop.Stop(a)
@@ -374,6 +375,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	}
 	if x := r.reflex; engaged {
 		stop := r.preempt(dt)
+		setActuatorSkill(a, "idle")
 		r.mu.Unlock()
 		if stop != nil {
 			// Stop may send the tick's one input; the fight begins next tick.
@@ -386,6 +388,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 	}
 	if x := r.reflex; x != nil && x.Tending(snap, r.cur != nil) {
 		stop := r.preempt(dt)
+		setActuatorSkill(a, "idle")
 		r.mu.Unlock()
 		if stop != nil {
 			stop.Stop(a)
@@ -398,6 +401,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		r.cur = r.nextQueued()
 		if r.cur == nil {
 			x := r.reflex
+			setActuatorSkill(a, "idle")
 			r.mu.Unlock()
 			if x != nil {
 				_ = x.Idle(ctx, a)
@@ -421,6 +425,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		return a, before
 	}
 	sk := e.skills[e.idx]
+	setActuatorSkill(a, sk.Name())
 	needReady := !e.ready
 	resume := e.resume
 	r.mu.Unlock()
@@ -484,6 +489,12 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		}
 	}
 	return a, before
+}
+
+func setActuatorSkill(a skill.Actuator, name string) {
+	if setter, ok := a.(interface{ SetSkill(string) }); ok {
+		setter.SetSkill(name)
+	}
 }
 
 func have(s belief.Snapshot, item string) int {

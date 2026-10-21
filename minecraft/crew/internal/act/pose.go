@@ -116,6 +116,7 @@ type stepInfo struct {
 	airborne bool // began the tick off the ground after a jump
 	landed   bool
 	swimUp   bool // held the swim-up input in water
+	stepUp   bool
 }
 
 func forwardDir(yaw float32) mgl32.Vec2 {
@@ -182,6 +183,7 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 			// server reads it as velocity, and a delta carrying the rise is
 			// corrected.
 			feet, v = up.feet, up.v
+			info.stepUp = true
 		}
 	}
 	info.delta[0], info.delta[2] = feet[0]-moved[0], feet[2]-moved[2]

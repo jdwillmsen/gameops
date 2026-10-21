@@ -208,6 +208,7 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	world.Reset()
 	defer world.Reset()
 	u := newUnit(gd.EntityRuntimeID, tracker, world, hub, runner, lf, conn)
+	u.correctionLog = logAdapter{log}
 	u.items = gd.Items
 	defer u.end()
 	beginSession(ctx, addr)
