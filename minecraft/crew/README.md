@@ -141,7 +141,12 @@ seconds; a task submitted sooner runs first, barehanded.
 
 The unit predicts its own movement and sends the result with every input; the
 server accepts it or corrects it, and `crew_movement_corrections_total` counts
-the corrections. The prediction collides with each block's real shape, which
+the corrections. Each correction is also logged as `movement_corrected`, at
+most one line per unit per 10 s with a `suppressed` count, carrying the skill,
+movement state and block names around the feet but no positions; the query
+that groups them is in
+[`docs/notes/2026-10-21-crew-corrections.md`](../../docs/notes/2026-10-21-crew-corrections.md).
+The prediction collides with each block's real shape, which
 comes from the block's name and states (`internal/world/shape`), not from a
 full cube per solid block:
 
