@@ -47,9 +47,9 @@ func stack(id int32, count uint16) protocol.ItemStack {
 }
 
 // sampleCraftingData holds the four recipes the early builds need, written
-// the way the vanilla server sends them: planks and sticks from any grid,
-// the crafting table from the 2x2 one, the hoe only from a crafting table,
-// and the stick's ingredient as the planks item tag.
+// the way the vanilla server sends them: every one tagged crafting_table,
+// planks, sticks and the crafting table fitting the 2x2 grid, the hoe only a
+// crafting table's, and the stick's ingredient as the planks item tag.
 func sampleCraftingData() *packet.CraftingData {
 	empty := protocol.ItemDescriptorCount{Descriptor: &protocol.InvalidItemDescriptor{}}
 	return &packet.CraftingData{
@@ -58,7 +58,7 @@ func sampleCraftingData() *packet.CraftingData {
 			RecipeID:        "oak_planks",
 			Input:           []protocol.ItemDescriptorCount{named("oak_log", 1)},
 			Output:          []protocol.ItemStack{stack(idOakPlanks, 4)},
-			Block:           "",
+			Block:           "crafting_table",
 			RecipeNetworkID: idRecipePlanks,
 		}},
 		ShapedRecipes: []protocol.ShapedRecipe{
@@ -69,7 +69,7 @@ func sampleCraftingData() *packet.CraftingData {
 					{Descriptor: &protocol.ItemTagItemDescriptor{Tag: "minecraft:planks"}, Count: 1},
 				},
 				Output:          []protocol.ItemStack{stack(idStick, 4)},
-				Block:           "",
+				Block:           "crafting_table",
 				RecipeNetworkID: idRecipeStick,
 			},
 			{
@@ -79,7 +79,7 @@ func sampleCraftingData() *packet.CraftingData {
 					named("oak_planks", 1), named("oak_planks", 1),
 				},
 				Output:          []protocol.ItemStack{stack(idCraftingTable, 1)},
-				Block:           "",
+				Block:           "crafting_table",
 				RecipeNetworkID: idRecipeTable,
 			},
 			{
@@ -107,7 +107,7 @@ func TestStoreIndexesRecipesByOutputName(t *testing.T) {
 	if len(planks) != 1 {
 		t.Fatalf("oak_planks recipes = %d, want 1", len(planks))
 	}
-	if got := planks[0]; got.NetworkID != idRecipePlanks || got.Block != "" || got.OutputCount != 4 ||
+	if got := planks[0]; got.NetworkID != idRecipePlanks || got.Block != "crafting_table" || got.OutputCount != 4 ||
 		len(got.Ingredients) != 1 || got.Ingredients[0].Name != "oak_log" || got.Ingredients[0].Count != 1 {
 		t.Errorf("planks recipe = %+v", got)
 	}
@@ -141,7 +141,7 @@ func TestStoreIndexesRecipesByOutputName(t *testing.T) {
 	}
 }
 
-func TestNeedsTableFollowsTheRecipeStation(t *testing.T) {
+func TestNeedsTableFollowsTheRecipeGrid(t *testing.T) {
 	b := NewBook()
 	b.Store(sampleCraftingData(), itemEntries)
 	for item, want := range map[string]bool{"oak_planks": false, "stick": false, "crafting_table": false, "wooden_hoe": true} {
