@@ -58,6 +58,61 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// build_order is optional: without it the order is derived bottom-up with
+// solid blocks first, and the support check runs against that order.
+func TestValidateDerivesBuildOrder(t *testing.T) {
+	b := validBlueprint()
+	b.BuildOrder = nil
+	if err := b.Validate(); err != nil {
+		t.Fatalf("blueprint without build_order should validate: %v", err)
+	}
+	order := b.PlacementOrder()
+	want := []Position{{0, 0, 0}, {1, 0, 0}, {1, 1, 0}, {0, 1, 0}}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("derived order %v, want %v (torch after its support)", order, want)
+	}
+
+	// The support check still fires on the derived order: a torch in the
+	// bottom layer has no support inside the blueprint.
+	bottom := validBlueprint()
+	bottom.BuildOrder = nil
+	bottom.Layers = []string{"10", "00"}
+	if err := bottom.Validate(); err == nil {
+		t.Fatal("torch on the bottom layer should fail the support check")
+	}
+
+	// An explicit build_order overrides the derived order unchanged.
+	explicit := []Position{{1, 1, 0}, {0, 1, 0}, {1, 0, 0}, {0, 0, 0}}
+	b.BuildOrder = explicit
+	if got := b.PlacementOrder(); !reflect.DeepEqual(got, explicit) {
+		t.Fatalf("explicit build_order %v replaced by %v", explicit, got)
+	}
+}
+
+// Blocks that attach, hang, sit or lean on a neighbour must be ordered
+// after it; sea_lantern is solid despite the name.
+func TestNeedsSupportAttachedBlocks(t *testing.T) {
+	attached := []string{
+		"torch", "redstone_torch", "soul_torch",
+		"lantern", "soul_lantern", "oak_pressure_plate",
+		"wooden_door", "iron_door", "ladder", "redstone_wire",
+		"unpowered_repeater", "unpowered_comparator", "lever", "stone_button",
+		"rail", "golden_rail", "moss_carpet", "oak_wall_sign",
+		"vine", "twisting_vines", "oak_trapdoor",
+	}
+	for _, name := range attached {
+		if !needsSupport(name) {
+			t.Errorf("%s should need support", name)
+		}
+	}
+	solid := []string{"sea_lantern", "redstone_lamp", "lit_redstone_lamp", "redstone_block", "stone", "oak_planks", "air"}
+	for _, name := range solid {
+		if needsSupport(name) {
+			t.Errorf("%s should not need support", name)
+		}
+	}
+}
+
 func TestValidatorRepeaterWarning(t *testing.T) {
 	b := validBlueprint()
 	if warns := b.Warnings(); len(warns) != 0 {
@@ -126,6 +181,10 @@ func TestImportLittleEndianRoundTrip(t *testing.T) {
 	}
 	if b.Size != (Size{2, 1, 1}) || b.Layers[0] != "01" || len(b.Materials) != 1 || b.Materials[0] != (Material{"stone", 1}) {
 		t.Fatalf("unexpected imported structure: %#v", b)
+	}
+	// Imported JSON leaves build_order out; the order is derived on load.
+	if len(b.BuildOrder) != 0 {
+		t.Fatalf("import wrote a build_order (%d cells)", len(b.BuildOrder))
 	}
 }
 

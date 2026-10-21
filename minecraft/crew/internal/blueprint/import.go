@@ -117,22 +117,6 @@ func Import(path, name, kind string) (*Blueprint, error) {
 		}
 		b.Layers[y] = string(layer)
 	}
-	for y := 0; y < b.Size.Y; y++ {
-		var normal, supported []Position
-		for z := 0; z < b.Size.Z; z++ {
-			for x := 0; x < b.Size.X; x++ {
-				pos := Position{x, y, z}
-				idx := indexAt(b.Layers[y], z*b.Size.X+x)
-				if needsSupport(b.Palette[idx].Name) {
-					supported = append(supported, pos)
-				} else {
-					normal = append(normal, pos)
-				}
-			}
-		}
-		b.BuildOrder = append(b.BuildOrder, normal...)
-		b.BuildOrder = append(b.BuildOrder, supported...)
-	}
 	b.RebuildMaterials()
 	if err := b.Validate(); err != nil {
 		return nil, err

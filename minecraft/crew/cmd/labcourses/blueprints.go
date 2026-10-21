@@ -33,7 +33,7 @@ func blueprintCommands(bp *blueprint.Blueprint, ox, oz, rotation int) ([]box, bu
 	}
 	area := box{ox, oz, ox + w - 1, oz + d - 1}
 	b.fill(area.x0, ground+1, area.z0, area.x1, ground+bp.Size.Y, area.z1, "air")
-	for _, p := range bp.BuildOrder {
+	for _, p := range bp.PlacementOrder() {
 		idx := strings.IndexByte("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_", bp.Layers[p.Y][p.Z*bp.Size.X+p.X])
 		block := bp.Palette[idx]
 		if block.Name == "air" || block.States["upper_block_bit"] == true {
