@@ -273,9 +273,9 @@ func TestAKitChunkThatNeverLoadsBacksOffAfterSixShortRetries(t *testing.T) {
 }
 
 // An open that answered with no window, seen in a crew's first minutes when
-// the chest's block is known and in reach, costs the unit seconds too: each
-// miss burns a 310-tick visit plus the five-second retry, so after two misses
-// the unit is rearmed in about 860 ticks, around 43 s of joining.
+// the chest's block is known and in reach, costs the unit close to a minute:
+// each miss burns a 310-tick visit plus the five-second retry, so after two
+// misses the unit is rearmed about 960 ticks, around 48 s, after joining.
 func TestAUnitRearmsSoonWhileTheKitChestDoesNotOpen(t *testing.T) {
 	r, visits := kitRig(t)
 	late := 2

@@ -22,7 +22,8 @@ func withdrawSkill(t *testing.T, r *rig, log Logger) *Withdraw {
 func TestWithdrawFailsWhenTheChestDoesNotOpen(t *testing.T) {
 	r := withdrawRig(t)
 	r.ignoreOpen = true
-	wr := withdrawSkill(t, r, nil)
+	log := &capture{}
+	wr := withdrawSkill(t, r, log)
 	st, err := r.run(wr, 400)
 	if st != Failed || err == nil || !errors.Is(err, ErrChestNotOpened) {
 		t.Fatalf("status %v, err %v", st, err)
@@ -32,6 +33,19 @@ func TestWithdrawFailsWhenTheChestDoesNotOpen(t *testing.T) {
 	}
 	if r.clicks != openClicks {
 		t.Errorf("clicks = %d, want %d, the first and its re-sends", r.clicks, openClicks)
+	}
+	if len(log.lines) != 1 || log.lines[0].event != "chest_open_clicks" {
+		t.Fatalf("log = %+v", log.lines)
+	}
+	clicked, _ := log.lines[0].fields["clicks"].(int)
+	opened, _ := log.lines[0].fields["opened"].(bool)
+	if len(log.lines[0].fields) != 2 || clicked != openClicks || opened {
+		t.Errorf("logged fields = %v, want clicks %d with opened false", log.lines[0].fields, openClicks)
+	}
+	for k := range log.lines[0].fields {
+		if k != "clicks" && k != "opened" {
+			t.Errorf("logged field %q: no coordinates belong here", k)
+		}
 	}
 	if open, _, _ := r.Container(); open {
 		t.Error("a chest that never opened was left open")
