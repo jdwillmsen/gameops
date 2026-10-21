@@ -24,7 +24,7 @@ var itemTags = map[Tag]func(name string) bool{
 // woods are the wood types whose slabs the wooden_slabs tag covers.
 var woods = []string{
 	"acacia", "bamboo", "birch", "cherry", "crimson", "dark_oak", "jungle",
-	"mangrove", "oak", "pale_oak", "poplar", "spruce", "warped",
+	"mangrove", "oak", "pale_oak", "spruce", "warped",
 }
 
 // Matches says whether the item is one the tag covers.
