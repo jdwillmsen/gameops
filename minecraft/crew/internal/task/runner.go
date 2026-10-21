@@ -90,7 +90,10 @@ type Reflex interface {
 
 type entry struct {
 	Task
-	item    string
+	item string
+	// base is how much of the item the unit held when the task started, so
+	// progress counts what the task gathered and not the whole stack carried.
+	base    int
 	skills  []skill.Skill
 	idx     int
 	started time.Time
@@ -413,6 +416,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		}
 		r.cur.State = Running
 		r.cur.started = r.now()
+		r.cur.base = have(r.self(), r.cur.item)
 		r.cur.Updated = r.cur.started
 		r.cur.Skill = r.cur.skills[0].Name()
 		r.logEvent("task_started", r.cur)
@@ -454,10 +458,16 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		return a, before
 	}
 	e.ready, e.resume = true, false
-	progress := have(r.self(), e.item)
+	progress := max(have(r.self(), e.item)-e.base, 0)
 	if p, ok := sk.(skill.Progresser); ok {
 		progress = p.Progress()
 	}
+	// Never past the target, and never back: depositing empties the inventory
+	// the count was read from.
+	if e.Qty > 0 {
+		progress = min(progress, e.Qty)
+	}
+	progress = max(progress, e.Progress)
 	changed := progress != e.Progress
 	e.Progress = progress
 	if sr, ok := sk.(skill.Seer); ok {
