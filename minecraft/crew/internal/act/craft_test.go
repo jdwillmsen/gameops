@@ -131,6 +131,8 @@ type answering struct {
 	stop chan struct{}
 
 	statuses []uint8
+	// opened counts the inventory opens already answered.
+	opened int
 	// placed counts the stacks the server named, so every one of them gets
 	// an ID of its own.
 	placed int32
@@ -204,6 +206,18 @@ func (an *answering) serve() {
 		case <-an.stop:
 			return
 		default:
+		}
+		// The inventory screen opens on request, as the server opens it.
+		an.s.mu.Lock()
+		var opens int
+		for _, pk := range an.s.got {
+			if _, ok := pk.(*packet.Interact); ok {
+				opens++
+			}
+		}
+		an.s.mu.Unlock()
+		for ; an.opened < opens; an.opened++ {
+			an.a.Apply(&packet.ContainerOpen{WindowID: 0, ContainerType: 0xff /* ContainerTypeInventory, -1 as a byte */, ContainerEntityUniqueID: -1})
 		}
 		reqs := stackRequests(an.s)
 		for ; answered < len(reqs); answered++ {

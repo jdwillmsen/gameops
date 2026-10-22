@@ -154,6 +154,10 @@ func (s *craftServer) react(pk packet.Packet) {
 				ContainerEntityUniqueID: -1,
 			})
 		}
+	case *packet.Interact:
+		if p.ActionType == packet.InteractActionOpenInventory {
+			s.send(&packet.ContainerOpen{WindowID: 0, ContainerType: 0xff /* ContainerTypeInventory, -1 as a byte */, ContainerEntityUniqueID: -1})
+		}
 	case *packet.ItemStackRequest:
 		for _, req := range p.Requests {
 			s.answer(req)

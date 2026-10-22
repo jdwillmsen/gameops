@@ -52,6 +52,8 @@ const (
 	// itself, and the unit sends no input while it waits, so the whole
 	// craft is bounded.
 	craftDeadline = 10 * time.Second
+	// inventoryOpenIn bounds the wait for the inventory screen to open.
+	inventoryOpenIn = time.Second
 )
 
 // Crafting gives the actuator the session's recipe book and a read of the
@@ -77,14 +79,60 @@ func (a *Actuator) Craft(item string, times int) (int, error) {
 	// The server only accepts a craft whose ingredients already sit in the
 	// crafting grid, so the grid is filled before the recipe is sent.
 	deadline := time.Now().Add(craftDeadline)
+	// The player's 2x2 grid belongs to the inventory screen, which a player
+	// has open while crafting in it, so the unit opens it first and closes
+	// it after.
+	if plan.grid.base == playerGridBase {
+		if opened := a.openInventory(deadline); opened {
+			defer a.CloseContainer()
+		}
+	}
 	filled, err := a.fillGrid(plan, deadline)
 	if err != nil {
 		// Whatever went into the grid before the refusal goes back, so
 		// nothing is stranded there.
 		a.giveBack(plan, filled)
-		return 0, err
+		return 0, fmt.Errorf("filling the crafting grid: %w", err)
 	}
-	return a.sendCraft(plan, filled, deadline)
+	made, err := a.sendCraft(plan, filled, deadline)
+	if err != nil {
+		return 0, fmt.Errorf("crafting from the grid: %w", err)
+	}
+	return made, nil
+}
+
+// openInventory asks the server to open the unit's own inventory screen and
+// waits for the window, reporting whether this call opened it. A window
+// already open is left as it is.
+func (a *Actuator) openInventory(deadline time.Time) bool {
+	a.mu.Lock()
+	if a.cont.open {
+		a.mu.Unlock()
+		return false
+	}
+	err := a.w.WritePacket(&packet.Interact{
+		ActionType:            packet.InteractActionOpenInventory,
+		TargetEntityRuntimeID: a.runtimeID,
+	})
+	a.mu.Unlock()
+	if err != nil {
+		return false
+	}
+	// A server that never opens the screen costs a second, not the craft.
+	until := time.Now().Add(inventoryOpenIn)
+	if deadline.Before(until) {
+		until = deadline
+	}
+	for time.Now().Before(until) {
+		a.mu.Lock()
+		open := a.cont.open
+		a.mu.Unlock()
+		if open {
+			return true
+		}
+		time.Sleep(craftPoll)
+	}
+	return false
 }
 
 // planCraft picks the recipe to make and the grid its cells go in, without
