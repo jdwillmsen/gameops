@@ -106,14 +106,19 @@ func (a *Actuator) Craft(item string, times int) (int, error) {
 // already open is left as it is.
 func (a *Actuator) openInventory(deadline time.Time) bool {
 	a.mu.Lock()
-	if a.cont.open {
+	if a.cont.open && a.cont.kind == inventoryWindow {
 		a.mu.Unlock()
 		return false
 	}
-	err := a.w.WritePacket(&packet.Interact{
-		ActionType:            packet.InteractActionOpenInventory,
-		TargetEntityRuntimeID: a.runtimeID,
-	})
+	if a.cont.open {
+		// Another window, such as a chest, stands in the way of the
+		// inventory screen, and nothing else is using it mid-craft.
+		_ = a.w.WritePacket(&packet.ContainerClose{WindowID: a.cont.window, ContainerType: closeContainerType})
+		a.cont = container{}
+	}
+	// The open-inventory action names no target entity.
+	err := a.w.WritePacket(&packet.Interact{ActionType: packet.InteractActionOpenInventory})
+	a.crafts.lateInventory = false
 	a.mu.Unlock()
 	if err != nil {
 		return false
@@ -132,6 +137,11 @@ func (a *Actuator) openInventory(deadline time.Time) bool {
 		}
 		time.Sleep(craftPoll)
 	}
+	// The screen may still open after the craft gave up waiting; the read
+	// loop closes it then, since nothing else would.
+	a.mu.Lock()
+	a.crafts.lateInventory = true
+	a.mu.Unlock()
 	return false
 }
 
@@ -168,7 +178,7 @@ func (a *Actuator) planCraft(item string, times int) (craftPlan, error) {
 			inv:    inv,
 			times:  times,
 			made:   made,
-			grid:   gridFor(r),
+			grid:   gridFor(r, open),
 		}, nil
 	}
 	if wantsTable {
@@ -182,8 +192,10 @@ func (a *Actuator) planCraft(item string, times int) (craftPlan, error) {
 // gridFor is where a recipe's cells go: a recipe the player's 2x2 grid
 // makes uses that grid, and a wider one only fits a crafting table's 3x3
 // grid, which the caller has to have open.
-func gridFor(r craft.Recipe) grid {
-	if r.NeedsTable() {
+func gridFor(r craft.Recipe, tableOpen bool) grid {
+	// An open table's 3x3 grid makes the 2x2 recipes too, so it is used
+	// whenever it is open rather than leaving it for the inventory screen.
+	if r.NeedsTable() || tableOpen {
 		return grid{base: tableGridBase, width: tableGridWidth}
 	}
 	return grid{base: playerGridBase, width: playerGridWidth}
@@ -595,7 +607,14 @@ type craftState struct {
 	// gridReqs are the requests that filled the grid, whose answers name
 	// the cells the ingredients went to.
 	gridReqs map[int32]bool
+	// lateInventory says a craft stopped waiting for the inventory screen
+	// it asked for, so the screen is closed if it opens after all.
+	lateInventory bool
 }
+
+// inventoryWindow is the ContainerType of the unit's own inventory screen,
+// ContainerTypeInventory's -1 as the packet's byte.
+const inventoryWindow = 0xff
 
 // answerSlots is what an answer named about the stacks it moved.
 type answerSlots struct {

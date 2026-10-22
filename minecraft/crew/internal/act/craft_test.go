@@ -776,3 +776,30 @@ func TestCraftingGridSlotsPinTheValuesToCheckOnTheLab(t *testing.T) {
 		t.Errorf("table grid = %d wide %d, want 32 and 3", tableGridBase, tableGridWidth)
 	}
 }
+
+func TestALateInventoryScreenIsClosedOnArrival(t *testing.T) {
+	a, s := newCrafter(nil)
+	a.mu.Lock()
+	a.crafts.lateInventory = true
+	a.mu.Unlock()
+	a.Apply(&packet.ContainerOpen{WindowID: 0, ContainerType: inventoryWindow, ContainerEntityUniqueID: -1})
+	a.mu.Lock()
+	open := a.cont.open
+	a.mu.Unlock()
+	if open {
+		t.Error("the late inventory screen is tracked as open")
+	}
+	if _, ok := s.last(t).(*packet.ContainerClose); !ok {
+		t.Error("the late inventory screen was not closed")
+	}
+}
+
+func TestAnOpenTableMakesA2x2Recipe(t *testing.T) {
+	r := craft.Recipe{Block: "crafting_table"}
+	if g := gridFor(r, true); g.base != tableGridBase {
+		t.Errorf("grid base = %d with a table open, want the table's %d", g.base, tableGridBase)
+	}
+	if g := gridFor(r, false); g.base != playerGridBase {
+		t.Errorf("grid base = %d with no table, want the player's %d", g.base, playerGridBase)
+	}
+}
