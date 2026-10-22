@@ -307,6 +307,13 @@ func (a *Actuator) Died() {
 func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 	switch p := pk.(type) {
 	case *packet.ContainerOpen:
+		if p.ContainerType == inventoryWindow && a.crafts.lateInventory {
+			// The inventory screen a craft gave up waiting for: closed at once
+			// rather than left tracked as open.
+			a.crafts.lateInventory = false
+			_ = a.w.WritePacket(&packet.ContainerClose{WindowID: p.WindowID, ContainerType: closeContainerType})
+			return
+		}
 		a.cont = container{open: true, window: p.WindowID, kind: p.ContainerType, pos: p.ContainerPosition}
 	case *packet.ContainerClose:
 		if a.cont.open && p.WindowID == a.cont.window {
