@@ -498,6 +498,73 @@ func TestCorrectionLogRateLimitReportsSuppressedCorrections(t *testing.T) {
 	}
 }
 
+func TestACorrectionRepeatingTheSentPositionKeepsTheUnitsVelocity(t *testing.T) {
+	a, s := newAct(flat(), Pose{OnGround: true})
+	for i := 0; i < 3; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	sent := s.inputs(t)[1]
+	// Mid-fall off an edge with momentum, as a unit is when a correction
+	// storm answers every tick of a jump: rebuilding the pose on a
+	// correction that repeats what the unit already sent throws the fall
+	// and the momentum away, and the next input is short.
+	a.pose.OnGround = false
+	a.pose.vy = -0.1552
+	a.pose.Carry = mgl32.Vec2{0.18, 0}
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: sent.Position,
+		Tick:     sent.Tick,
+		OnGround: false,
+	})
+	p := a.Pose()
+	if p.vy != -0.1552 {
+		t.Errorf("vy = %v, want the fall kept", p.vy)
+	}
+	if p.Carry != (mgl32.Vec2{0.18, 0}) {
+		t.Errorf("carry = %v, want the momentum kept", p.Carry)
+	}
+	if p.OnGround {
+		t.Error("a no-move correction grounded the unit")
+	}
+}
+
+func TestACorrectionRepeatingTheSentPositionKeepsAWalkGoing(t *testing.T) {
+	a, s := newAct(flat(), Pose{OnGround: true})
+	for i := 0; i < 5; i++ {
+		_ = a.Tick(Input{Forward: 1})
+	}
+	before := a.Pose()
+	sent := s.inputs(t)[3]
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: sent.Position,
+		Tick:     sent.Tick,
+		OnGround: true,
+	})
+	p := a.Pose()
+	if p.Feet != before.Feet {
+		t.Errorf("feet %v -> %v, want a no-move correction to leave the walk alone", before.Feet, p.Feet)
+	}
+	if p.Carry != before.Carry {
+		t.Errorf("carry %v -> %v, want the walk's momentum kept", before.Carry, p.Carry)
+	}
+}
+
+func TestACorrectionThatMovesTheUnitStillTakesTheServersVelocity(t *testing.T) {
+	a, s := newAct(flat(), Pose{OnGround: true})
+	for i := 0; i < 3; i++ {
+		_ = a.Tick(Input{})
+	}
+	sent := s.inputs(t)[2]
+	a.pose.OnGround = false
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		Position: sent.Position.Add(mgl32.Vec3{0, 0.3, 0}),
+		Delta:    mgl32.Vec3{0, 0.3, 0},
+		Tick:     sent.Tick,
+		OnGround: false,
+	})
+	near(t, "vy", float64(a.Pose().vy), 0.2156, 1e-6)
+}
+
 func TestOwnMovePlayerAdoptsThePositionAndOthersAreIgnored(t *testing.T) {
 	a, _ := newAct(flat(), Pose{})
 	a.Apply(&packet.MovePlayer{EntityRuntimeID: 99, Position: mgl32.Vec3{50, 51.62, 50}})

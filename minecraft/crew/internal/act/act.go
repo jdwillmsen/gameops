@@ -242,8 +242,20 @@ func (a *Actuator) Apply(pk packet.Packet) {
 		metricCorrections.Inc()
 		a.logCorrection(p)
 		a.lastStepUp = false
+		feet := p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0})
+		// A correction repeating the position the unit already sent moves
+		// nothing: the server is correcting the ground flag or the facing.
+		// Rebuilding the pose on one throws away the velocity the unit is
+		// mid-way through — restarting every jump and dragging every walk
+		// — and the short input that follows earns another correction.
+		// Only one that really moves the unit rewrites the motion.
+		sent, known := a.sentInput(p.Tick)
+		if known && sent.pose.Feet == feet || !known && a.pose.Feet == feet {
+			a.pose.Yaw, a.pose.Pitch, a.pose.OnGround = p.Rotation.Y(), p.Rotation.X(), p.OnGround
+			break
+		}
 		a.pose = Pose{
-			Feet:     p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
+			Feet:     feet,
 			Pitch:    p.Rotation.X(),
 			Yaw:      p.Rotation.Y(),
 			OnGround: p.OnGround,
@@ -278,6 +290,13 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	}
 }
 
+// sentInput returns the record of the tick a correction names, and whether
+// that record really belongs to that tick.
+func (a *Actuator) sentInput(tick uint64) (sentTick, bool) {
+	sent := a.sent[tick%sentHistory]
+	return sent, sent.tick == tick && tick >= firstTick
+}
+
 func (a *Actuator) logCorrection(p *packet.CorrectPlayerMovePrediction) {
 	if a.correctionLogger == nil {
 		return
@@ -287,8 +306,8 @@ func (a *Actuator) logCorrection(p *packet.CorrectPlayerMovePrediction) {
 		a.suppressedCorrections++
 		return
 	}
-	sent, found := a.sent[p.Tick%sentHistory], true
-	if sent.tick != p.Tick || p.Tick < firstTick {
+	sent, found := a.sentInput(p.Tick)
+	if !found {
 		sent, found = sentTick{pose: a.pose, stepUp: a.lastStepUp, skill: a.skill}, false
 	}
 	predicted := sent.pose.Feet
