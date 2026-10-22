@@ -83,7 +83,12 @@ func (a *Actuator) Craft(item string, times int) (int, error) {
 	// has open while crafting in it, so the unit opens it first and closes
 	// it after.
 	if plan.grid.base == playerGridBase {
-		if opened := a.openInventory(deadline); opened {
+		opened := a.openInventory(deadline)
+		a.mu.Lock()
+		window, kind := a.cont.window, a.cont.kind
+		a.mu.Unlock()
+		a.craftLog("craft_inventory", map[string]any{"opened": opened, "window": window, "kind": kind})
+		if opened {
 			defer a.CloseContainer()
 		}
 	}
@@ -247,6 +252,15 @@ func (a *Actuator) fillGrid(p craftPlan, deadline time.Time) (gridFill, error) {
 				return filled, err
 			}
 			if err := a.await(id, deadline); err != nil {
+				// Slots and stack IDs only, never item positions in the world.
+				a.mu.Lock()
+				held := a.inv[src.Slot]
+				a.mu.Unlock()
+				a.craftLog("craft_place_refused", map[string]any{
+					"inv_stack": held.StackNetworkID, "inv_count": held.Stack.Count,
+					"src_slot": src.Slot, "src_stack": filled.srcs[src.Slot], "src_count": src.Count,
+					"grid_slot": slot, "count": n, "error": err.Error(),
+				})
 				return filled, err
 			}
 			grid, inv := a.answeredSlots(id)
@@ -610,6 +624,17 @@ type craftState struct {
 	// lateInventory says a craft stopped waiting for the inventory screen
 	// it asked for, so the screen is closed if it opens after all.
 	lateInventory bool
+}
+
+// craftLog writes a diagnostic line about a craft, while what the server
+// accepts is still being learned on the lab.
+func (a *Actuator) craftLog(event string, fields map[string]any) {
+	a.mu.Lock()
+	log := a.correctionLogger
+	a.mu.Unlock()
+	if log != nil {
+		log.Info(event, fields)
+	}
 }
 
 // inventoryWindow is the ContainerType of the unit's own inventory screen,
