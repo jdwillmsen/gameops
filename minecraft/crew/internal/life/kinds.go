@@ -25,6 +25,7 @@ var kinds = map[string]kind{
 	"slime": hostile, "magma_cube": hostile, "phantom": hostile, "silverfish": hostile,
 	"endermite": hostile, "blaze": hostile, "guardian": hostile, "piglin_brute": hostile,
 	"hoglin": hostile, "zoglin": hostile, "breeze": hostile,
+	"warden": hostile, "wither": hostile, "elder_guardian": hostile,
 
 	"enderman": provoked, "zombie_pigman": provoked, "zombified_piglin": provoked,
 	"piglin": provoked, "iron_golem": provoked, "wolf": provoked, "bee": provoked,
