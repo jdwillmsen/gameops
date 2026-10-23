@@ -320,6 +320,110 @@ func TestSquadWipeEndsTheRun(t *testing.T) {
 	}
 }
 
+func warriorName(cmd string) string {
+	name := strings.TrimSuffix(strings.TrimPrefix(cmd, "testfor @e[name="), ",type=player]")
+	return strings.Trim(name, `"`)
+}
+
+func TestRespawnGapDoesNotCountADeath(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	calls := 0
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testfor @e[name=") {
+			calls++
+			if calls >= 2 && calls <= 3 {
+				return found(0), nil
+			}
+			return "Found Vanguard", nil
+		}
+		return s.Exec(cmd)
+	}}
+	book := testBook(wave("One", "zombie", 4, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	result, err := d.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Outcome != OutcomeCleared || result.WarriorDeaths != 0 {
+		t.Errorf("result = %+v, want cleared with no death across the respawn gap", result)
+	}
+}
+
+func TestRepeatDeathsAreCounted(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	calls := 0
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testfor @e[name=") {
+			if warriorName(cmd) != "Vanguard" {
+				return "Found Second", nil
+			}
+			calls++
+			if (calls >= 2 && calls <= 4) || (calls >= 6 && calls <= 8) {
+				return found(0), nil
+			}
+			return "Found Vanguard", nil
+		}
+		return s.Exec(cmd)
+	}}
+	book := testBook(wave("One", "zombie", 2, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Warriors = []string{"Vanguard", "Second"}
+	d.WaveTimeout = 10 * time.Second
+	result, err := d.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Outcome != OutcomeTimeout {
+		t.Errorf("outcome = %q, want timeout", result.Outcome)
+	}
+	if result.WarriorDeaths != 2 {
+		t.Errorf("deaths = %d, want both deaths counted", result.WarriorDeaths)
+	}
+}
+
+func TestWipeNeedsEveryWarriorDownAtOnce(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	calls := map[string]int{}
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testfor @e[name=") {
+			name := warriorName(cmd)
+			calls[name]++
+			switch name {
+			case "Vanguard":
+				if calls[name] >= 2 && calls[name] <= 4 {
+					return found(0), nil
+				}
+			case "Striker":
+				if calls[name] >= 7 && calls[name] <= 9 {
+					return found(0), nil
+				}
+			}
+			return "Found " + name, nil
+		}
+		return s.Exec(cmd)
+	}}
+	book := testBook(wave("One", "zombie", 2, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Warriors = []string{"Vanguard", "Striker"}
+	d.WaveTimeout = 10 * time.Second
+	result, err := d.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Outcome != OutcomeTimeout {
+		t.Errorf("outcome = %q, want timeout; a wipe needs both down together", result.Outcome)
+	}
+	if result.WarriorDeaths != 2 {
+		t.Errorf("deaths = %d, want each warrior's death once", result.WarriorDeaths)
+	}
+}
+
 func TestOneWarriorDownStillRuns(t *testing.T) {
 	clock := newFakeClock()
 	s := newSim()
