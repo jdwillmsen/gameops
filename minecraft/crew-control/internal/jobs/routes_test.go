@@ -301,6 +301,49 @@ func TestCreateStockJobRejections(t *testing.T) {
 	}
 }
 
+func TestCreateCraftJob(t *testing.T) {
+	rr := newRouteRig(t, nil)
+	j := rr.create(`{"kind":"craft","place":"store","want":{"stick":4}}`)
+	if j.Kind != KindCraft || j.State != JobRunning {
+		t.Fatalf("job %+v", j)
+	}
+	var spec CraftSpec
+	if err := json.Unmarshal(j.Spec, &spec); err != nil || spec.Place != "store" || spec.Want["stick"] != 4 {
+		t.Fatalf("spec %s", j.Spec)
+	}
+	// Nothing stocked and the grove next door: the plan starts by felling.
+	if keys := stepKeys(j); strings.Join(keys, ",") != "gather-oak_log-1,withdraw-store,craft-oak_planks,craft-stick,deposit,check" {
+		t.Fatalf("steps %v", keys)
+	}
+}
+
+func TestCreateCraftJobRejections(t *testing.T) {
+	rr := newRouteRig(t, nil)
+	for body, want := range map[string]struct {
+		code int
+		msg  string
+	}{
+		`{"kind":"craft","place":"store","want":{"diamond":1}}`:              {422, `{"error":"no recipe for diamond"}`},
+		`{"kind":"craft","place":"store","want":{"chest":1}}`:                {422, `{"error":"needs a crafting table"}`},
+		`{"kind":"craft","place":"nowhere","want":{"stick":4}}`:              {422, `{"error":"place nowhere not found"}`},
+		`{"kind":"craft","place":"quarry-1","want":{"stick":4}}`:             {422, `{"error":"place quarry-1 is not a chest"}`},
+		`{"kind":"craft","place":"store","want":{"stick":4,"oak_planks":8}}`: {400, ""},
+		`{"kind":"craft","place":"store","want":{}}`:                         {400, ""},
+		`{"kind":"craft","place":"store","want":{"stick":0}}`:                {400, ""},
+		`{"kind":"craft","place":"store","want":{"stick":65}}`:               {400, ""},
+		`{"kind":"craft","want":{"stick":4}}`:                                {400, ""},
+		`{"kind":"craft","place":"store","want":{"stick":4},"template":"x"}`: {400, ""},
+	} {
+		code, out := rr.do("POST", "/v1/jobs", body, signed)
+		if code != want.code || (want.msg != "" && strings.TrimSpace(out) != want.msg) {
+			t.Errorf("%s: %d %s", body, code, out)
+		}
+	}
+	if jobs, _ := rr.jobs.List(ctx, 10); len(jobs) != 0 {
+		t.Fatalf("stored %d rejected jobs", len(jobs))
+	}
+}
+
 func TestListShowsTheNewestFifty(t *testing.T) {
 	rr := newRouteRig(t, nil)
 	for i := 0; i < 52; i++ {

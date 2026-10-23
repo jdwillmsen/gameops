@@ -59,6 +59,30 @@ func inspectTemplate(chest ledger.Pos) json.RawMessage {
 	}{"inspect", pos(chest)})
 }
 
+func withdrawTemplate(items map[string]int, chest ledger.Pos) json.RawMessage {
+	return mustJSON(struct {
+		Template string         `json:"template"`
+		Chest    taskPos        `json:"chest"`
+		Items    map[string]int `json:"items"`
+	}{"withdraw", pos(chest), items})
+}
+
+func depositTemplate(items map[string]int, chest ledger.Pos) json.RawMessage {
+	return mustJSON(struct {
+		Template string         `json:"template"`
+		Chest    taskPos        `json:"chest"`
+		Items    map[string]int `json:"items"`
+	}{"deposit", pos(chest), items})
+}
+
+func craftTemplate(item string, count int) json.RawMessage {
+	return mustJSON(struct {
+		Template string `json:"template"`
+		Item     string `json:"item"`
+		Count    int    `json:"count"`
+	}{"craft", item, count})
+}
+
 // ParallelDemo is the built-in plan: three units work at once and the hauler
 // joins their results, which shows the scheduler's fan-out and fan-in.
 func ParallelDemo(ctx context.Context, places ledger.Ledger) ([]Step, error) {

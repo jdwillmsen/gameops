@@ -232,8 +232,16 @@ func (a *API) create(w http.ResponseWriter, r *http.Request, op string) {
 		spec := StockSpec{Place: req.Place, Want: req.Want}
 		j.Spec = mustJSON(spec)
 		j.Steps, err = PlanStock(r.Context(), l, spec, s.FreeUnits(r.Context()), now.Add(-planSince))
+	case KindCraft:
+		if req.Template != "" || req.Place == "" {
+			writeError(w, http.StatusBadRequest, "a craft job takes a place and a want")
+			return
+		}
+		spec := CraftSpec{Place: req.Place, Want: req.Want}
+		j.Spec = mustJSON(spec)
+		j.Steps, err = PlanCraft(r.Context(), l, spec, s.FreeUnits(r.Context()), now.Add(-planSince))
 	default:
-		writeError(w, http.StatusBadRequest, "kind must be plan or stock")
+		writeError(w, http.StatusBadRequest, "kind must be plan, stock or craft")
 		return
 	}
 	if err != nil {
