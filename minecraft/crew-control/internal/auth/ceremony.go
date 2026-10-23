@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -157,6 +158,9 @@ func (a *Auth) registerOptions(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad_body")
 		return
 	}
+	// Stored invites are trimmed when read, so a pasted one is trimmed here
+	// once, before it is compared, kept on the ceremony and hashed as spent.
+	req.Invite = strings.TrimSpace(req.Invite)
 	if a.invites.Throttled() {
 		fail(w, http.StatusTooManyRequests, "slow_down")
 		return
