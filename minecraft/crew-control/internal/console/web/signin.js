@@ -19,15 +19,40 @@ const dec = s => {
 };
 
 async function post(path, body) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Crew-Request': '1' },
-    body: JSON.stringify(body ?? {}),
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Crew-Request': '1' },
+      body: JSON.stringify(body ?? {}),
+    });
+  } catch (err) {
+    err.network = true;
+    throw err;
+  }
   let data = null;
   try { data = await res.json(); } catch { /* an error page has no body worth showing */ }
-  if (!res.ok) throw new Error(refusal(res.status, data));
+  if (!res.ok) throw Object.assign(new Error(refusal(res.status, data)), { refused: true });
   return data;
+}
+
+// Tags a failure with the step it came from, so the server log can say
+// which step of the ceremony the browser gave up at.
+async function staged(stage, call) {
+  try {
+    return await call();
+  } catch (err) {
+    err.stage = stage;
+    throw err;
+  }
+}
+
+// The server can see a refusal it sent, but not a browser that refused the
+// passkey prompt or a request that never arrived. Only a stage and an error
+// name leave the page, never a message, id or response.
+function report(kind, err) {
+  const error = err.refused ? 'refused' : err.network ? 'network' : err instanceof DOMException ? err.name : 'other';
+  post('/auth/report', { kind, stage: err.stage || 'finish', error }).catch(() => {});
 }
 
 function refusal(status, data) {
@@ -57,7 +82,7 @@ function requestOptions(pk) {
   };
 }
 
-async function guarded(button, work) {
+async function guarded(button, kind, work) {
   button.disabled = true;
   say('');
   try {
@@ -66,27 +91,28 @@ async function guarded(button, work) {
   } catch (err) {
     // The browser's own cancel is a NotAllowedError; its text is not for us.
     say(err.name === 'NotAllowedError' ? 'The passkey prompt was cancelled.' : err.message);
+    report(kind, err);
     button.disabled = false;
   }
 }
 
 async function register() {
-  const { publicKey } = await post('/auth/register/options', { invite, operator });
-  const cred = await navigator.credentials.create({ publicKey: creationOptions(publicKey) });
+  const { publicKey } = await staged('begin', () => post('/auth/register/options', { invite, operator }));
+  const cred = await staged('credential', () => navigator.credentials.create({ publicKey: creationOptions(publicKey) }));
   const r = cred.response;
-  await post('/auth/register/finish', {
+  await staged('finish', () => post('/auth/register/finish', {
     id: cred.id,
     rawId: enc(cred.rawId),
     type: cred.type,
     response: { attestationObject: enc(r.attestationObject), clientDataJSON: enc(r.clientDataJSON) },
-  });
+  }));
 }
 
 async function login() {
-  const { publicKey } = await post('/auth/login/options');
-  const cred = await navigator.credentials.get({ publicKey: requestOptions(publicKey) });
+  const { publicKey } = await staged('begin', () => post('/auth/login/options'));
+  const cred = await staged('credential', () => navigator.credentials.get({ publicKey: requestOptions(publicKey) }));
   const r = cred.response;
-  await post('/auth/login/finish', {
+  await staged('finish', () => post('/auth/login/finish', {
     id: cred.id,
     rawId: enc(cred.rawId),
     type: cred.type,
@@ -96,17 +122,17 @@ async function login() {
       signature: enc(r.signature),
       userHandle: r.userHandle ? enc(r.userHandle) : '',
     },
-  });
+  }));
 }
 
 if (!window.PublicKeyCredential) {
   say('This browser does not support passkeys.');
   $('login').disabled = true;
 } else {
-  $('login').addEventListener('click', () => guarded($('login'), login));
+  $('login').addEventListener('click', () => guarded($('login'), 'login', login));
 }
 if (invite && operator) {
   $('intro').textContent = `Create a passkey for ${operator}.`;
   $('register').hidden = false;
-  $('register').addEventListener('click', () => guarded($('register'), register));
+  $('register').addEventListener('click', () => guarded($('register'), 'register', register));
 }

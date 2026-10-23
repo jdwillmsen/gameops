@@ -203,6 +203,7 @@ func (a *Auth) registerOptions(w http.ResponseWriter, r *http.Request) {
 	// The ceremony's own TTL is the one that counts, on the injected clock.
 	session.Expires = time.Time{}
 	a.start(w, r, &ceremony{kind: kindRegister, op: op.ID, invite: req.Invite, session: *session})
+	a.event("ceremony_started", logging.Fields{"kind": kindRegister, "operator": op.ID})
 	writeJSON(w, http.StatusOK, creation)
 }
 
@@ -296,6 +297,7 @@ func (a *Auth) loginOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	session.Expires = time.Time{}
 	a.start(w, r, &ceremony{kind: kindLogin, session: *session})
+	a.event("ceremony_started", logging.Fields{"kind": kindLogin})
 	writeJSON(w, http.StatusOK, assertion)
 }
 

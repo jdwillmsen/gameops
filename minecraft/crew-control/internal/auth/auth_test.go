@@ -831,3 +831,124 @@ func TestStoreLimitHoldsOnItsOwn(t *testing.T) {
 		t.Fatal("a second handle for one operator was accepted")
 	}
 }
+
+// logs swaps the auth's logger for one whose output the test can read.
+func (e *env) logs() func() string {
+	e.t.Helper()
+	f, err := os.CreateTemp(e.t.TempDir(), "log")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	stdout := os.Stdout
+	os.Stdout = f
+	e.a.log = logging.New("info")
+	os.Stdout = stdout
+	return func() string {
+		raw, _ := os.ReadFile(f.Name())
+		return string(raw)
+	}
+}
+
+func lacks(t *testing.T, log string, secrets ...string) {
+	t.Helper()
+	for _, s := range secrets {
+		if s != "" && strings.Contains(log, s) {
+			t.Errorf("log holds %q:\n%s", s, log)
+		}
+	}
+}
+
+func TestCeremonyStartsAreLoggedWithoutSecrets(t *testing.T) {
+	e := newEnv(t)
+	read := e.logs()
+	c := e.client()
+
+	login := c.post("/auth/login/options", map[string]string{})
+	mustOK(t, login, "login options")
+	lacks(t, read(), challengeOf(t, login), c.cookies[CeremonyCookie].Value)
+	if got := strings.Count(read(), `"event":"ceremony_started"`); got != 1 || !strings.Contains(read(), `"kind":"login"`) {
+		t.Fatalf("login start not logged once:\n%s", read())
+	}
+
+	reg := c.post("/auth/register/options", map[string]string{"operator": "owner", "invite": "owner-code-0001"})
+	mustOK(t, reg, "register options")
+	log := read()
+	if strings.Count(log, `"event":"ceremony_started"`) != 2 || !strings.Contains(log, `"kind":"register"`) || !strings.Contains(log, `"operator":"owner"`) {
+		t.Fatalf("register start not logged:\n%s", log)
+	}
+	lacks(t, log, challengeOf(t, reg), c.cookies[CeremonyCookie].Value, "owner-code-0001", `"challenge"`, `"invite"`)
+
+	// A refused start is not a start.
+	c.post("/auth/register/options", map[string]string{"operator": "owner", "invite": "wrong"})
+	if strings.Count(read(), `"event":"ceremony_started"`) != 2 {
+		t.Fatalf("refused begin logged as a start:\n%s", read())
+	}
+}
+
+func TestClientReportIsLoggedFromAllowListOnly(t *testing.T) {
+	e := newEnv(t)
+	read := e.logs()
+	c := e.client() // signed out, no cookies
+
+	rec := c.post("/auth/report", map[string]string{"kind": "login", "stage": "credential", "error": "NotAllowedError"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("report: %d %s", rec.Code, rec.Body)
+	}
+	if log := read(); !strings.Contains(log, `"event":"client_ceremony_failed"`) || !strings.Contains(log, `"kind":"login"`) ||
+		!strings.Contains(log, `"stage":"credential"`) || !strings.Contains(log, `"error":"NotAllowedError"`) {
+		t.Fatalf("report not logged:\n%s", log)
+	}
+
+	// Free text, a pasted code or a made-up name never reaches the log.
+	for _, junk := range []string{"owner-code-0001", "NotAllowedError\n{\"event\":\"operator_login\"}", "AbcError"} {
+		if rec := c.post("/auth/report", map[string]string{"kind": "register", "stage": "finish", "error": junk}); rec.Code != http.StatusNoContent {
+			t.Fatalf("%q: %d", junk, rec.Code)
+		}
+	}
+	log := read()
+	lacks(t, log, "owner-code-0001", "AbcError", "operator_login")
+	if strings.Count(log, `"error":"other"`) != 3 {
+		t.Fatalf("unlisted errors must be logged as other:\n%s", log)
+	}
+
+	before := strings.Count(read(), "\n")
+	for _, bad := range []map[string]string{
+		{"kind": "login", "stage": "later", "error": "network"},
+		{"kind": "admin", "stage": "begin", "error": "network"},
+		{"stage": "begin", "error": "network"},
+	} {
+		if rec := c.post("/auth/report", bad); rec.Code != http.StatusBadRequest {
+			t.Errorf("%v: %d", bad, rec.Code)
+		}
+	}
+	if strings.Count(read(), "\n") != before {
+		t.Fatalf("refused reports must not be logged:\n%s", read())
+	}
+	if rec := c.do(http.MethodPost, "/auth/report", []byte(`{`), true); rec.Code != http.StatusBadRequest {
+		t.Errorf("malformed body: %d", rec.Code)
+	}
+	if rec := c.do(http.MethodPost, "/auth/report", []byte(`{"kind":"login","stage":"begin","error":"network"}`), false); rec.Code != http.StatusForbidden {
+		t.Errorf("without the request header: %d", rec.Code)
+	}
+}
+
+func TestClientReportsAreThrottledApartFromInvites(t *testing.T) {
+	e := newEnv(t)
+	read := e.logs()
+	report := map[string]string{"kind": "login", "stage": "begin", "error": "network"}
+	var last int
+	for i := 0; i < maxReports+5; i++ {
+		last = e.client().post("/auth/report", report).Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("reports not throttled: %d", last)
+	}
+	if got := strings.Count(read(), `"event":"client_ceremony_failed"`); got != maxReports {
+		t.Fatalf("logged %d reports, want %d", got, maxReports)
+	}
+	mustOK(t, e.client().post("/auth/register/options", map[string]string{"operator": "owner", "invite": "owner-code-0001"}), "invite after report flood")
+	e.clk.advance(reportWindow + time.Second)
+	if rec := e.client().post("/auth/report", report); rec.Code != http.StatusNoContent {
+		t.Fatalf("after window: %d", rec.Code)
+	}
+}
