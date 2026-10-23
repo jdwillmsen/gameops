@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   stateOf, taskKind, duration, sinceLabel, sortRows, filterRows, emptyFilter, isFiltered, summarize,
-  parseParams, formatParams, moveFocus, createBoard, WINDOW,
+  parseParams, formatParams, moveFocus, nextAttention, createBoard, WINDOW,
 } from './overview.js';
 
 const u = (id, extra = {}) => ({ id, name: id, online: true, dead: false, health: 20, hunger: 20, task: null, ...extra });
@@ -118,6 +118,16 @@ test('moveFocus clamps at the ends and survives an unknown or empty list', () =>
   assert.equal(moveFocus(ids, 'zzz', 'ArrowDown'), 'a');
   assert.equal(moveFocus(ids, 'b', 'x'), 'b');
   assert.equal(moveFocus([], 'a', 'ArrowDown'), '');
+});
+
+test('nextAttention goes worst state first, rotates, and flags low stats', () => {
+  const rows = [row('c1'), row('c2', { state: 'offline' }), row('c3', { state: 'dead' }), row('c4', { lowHunger: true }), row('c5', { state: 'stuck' })];
+  assert.equal(nextAttention(rows, 'c1'), 'c3');
+  assert.equal(nextAttention(rows, 'c3'), 'c5');
+  assert.equal(nextAttention(rows, 'c5'), 'c2');
+  assert.equal(nextAttention(rows, 'c2'), 'c4');
+  assert.equal(nextAttention(rows, 'c4'), 'c3');
+  assert.equal(nextAttention([row('c1')], 'c1'), '');
 });
 
 test('board: a state change seen live is exact, one the page opened on is not', () => {
