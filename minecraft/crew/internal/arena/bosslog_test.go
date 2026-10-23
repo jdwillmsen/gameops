@@ -77,6 +77,17 @@ func TestSummarizeGroupsByBossAndEffects(t *testing.T) {
 	}
 }
 
+func TestSummarizeLeavesOutAbortedRuns(t *testing.T) {
+	got := SummarizeBoss([]BossRecord{
+		rec("warden", nil, BossKilled, 100, 4),
+		rec("warden", nil, BossAborted, 3, 0),
+	})
+	want := []BossSummary{{Boss: "warden", Effects: []string{}, Runs: 1, Killed: 1, MedianSeconds: 100, MedianDeaths: 4}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SummarizeBoss = %+v, want only the finished run", got)
+	}
+}
+
 func TestMedianOfAnEvenCountAveragesTheMiddle(t *testing.T) {
 	if m := median([]float64{4, 1, 3, 2}); m != 2.5 {
 		t.Errorf("median = %v, want 2.5", m)

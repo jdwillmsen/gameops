@@ -13,9 +13,11 @@
 // run prints one JSON result line on stdout; progress goes to stderr.
 //
 // boss fights one named mob against the squad --runs times, prints one JSON
-// record per run and appends each to the run log. It exits 2, before touching
-// the server, when any player outside --crew-names is online. --summary reads
-// the log and prints one JSON list of runs and medians per boss and effect set.
+// record per run and appends each to the run log. It exits 2 when any player
+// outside --crew-names is online: before touching the server, or, when one
+// joins mid-fight, after killing the boss and logging the run as
+// aborted_player_online. --summary reads the log and prints one JSON list of
+// runs and medians per boss and effect set.
 package main
 
 import (
@@ -256,11 +258,15 @@ func boss(args []string) {
 	// buffed boss and loaded areas behind.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	_, err = b.Run(ctx)
+	recs, err := b.Run(ctx)
 	var busy *arena.NotAloneError
 	switch {
 	case errors.As(err, &busy):
-		fmt.Fprintln(os.Stderr, "arenadirector: refused: "+err.Error())
+		verb := "refused"
+		if len(recs) > 0 && recs[len(recs)-1].Outcome == arena.BossAborted {
+			verb = "aborted"
+		}
+		fmt.Fprintln(os.Stderr, "arenadirector: "+verb+": "+err.Error())
 		os.Exit(2)
 	case err != nil:
 		fail("arenadirector: " + err.Error())

@@ -2,6 +2,7 @@ package arena
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -16,6 +17,10 @@ const bossDistance = 10
 // bossSeenMisses is how many testfor misses before the boss has ever been
 // found are tolerated; a summon that did not land must not read as a kill.
 const bossSeenMisses = 3
+
+// playerCheckEvery is how often a fight rereads the player list: a player who
+// joins mid-fight must not stand next to a buffed boss for long.
+const playerCheckEvery = 15 * time.Second
 
 var mobPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$`)
 
@@ -151,6 +156,9 @@ func (b *BossTest) summonCommand() string {
 }
 
 // Run checks the server is crew-only, loads the arena, and fights Runs times.
+// The player list is reread once the arena has loaded, before every run and
+// during each fight; a player outside the crew ends the test with a
+// NotAloneError, and a fight cut short that way is recorded as BossAborted.
 // It returns the finished runs even when a later one fails, so a refusal
 // between runs keeps what was already measured. The boss is killed and the
 // areas removed on every exit path.
@@ -171,23 +179,33 @@ func (b *BossTest) Run(ctx context.Context) ([]BossRecord, error) {
 
 	var done []BossRecord
 	for run := 1; run <= runs; run++ {
-		if run > 1 {
-			if err := CheckAlone(b.Console, b.CrewNames); err != nil {
-				return done, err
-			}
+		if err := CheckAlone(b.Console, b.CrewNames); err != nil {
+			return done, err
 		}
 		rec, err := b.fight(ctx, d, run)
-		if err != nil {
+		var busy *NotAloneError
+		if err != nil && !errors.As(err, &busy) {
 			return done, err
 		}
 		done = append(done, rec)
 		if b.Record != nil {
 			if err := b.Record(rec); err != nil {
-				return done, err
+				return done, errors.Join(err, busyErr(busy))
 			}
+		}
+		if busy != nil {
+			return done, busy
 		}
 	}
 	return done, nil
+}
+
+// busyErr keeps a nil *NotAloneError from becoming a non-nil error.
+func busyErr(busy *NotAloneError) error {
+	if busy == nil {
+		return nil
+	}
+	return busy
 }
 
 func (b *BossTest) killBoss() { _, _ = b.Console.Exec(b.killCommand()) }
@@ -205,6 +223,8 @@ func bossDown(reply, name string) bool {
 	return !strings.Contains(reply, "Found "+name) && strings.Contains(reply, "No targets matched")
 }
 
+// fight returns a BossAborted record together with the NotAloneError when a
+// player outside the crew comes online during it.
 func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord, error) {
 	d.lastPlaced = nil
 	b.killBoss()
@@ -237,13 +257,24 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 	}
 
 	var res Result
+	var busy *NotAloneError
 	seen, misses := false, 0
 	outcome := ""
+	checked := b.now()
 	for outcome == "" {
 		if err := ctx.Err(); err != nil {
 			return BossRecord{}, err
 		}
 		b.sleep(b.pollEvery())
+		if b.now().Sub(checked) >= playerCheckEvery {
+			checked = b.now()
+			if err := CheckAlone(b.Console, b.CrewNames); errors.As(err, &busy) {
+				outcome = BossAborted
+				break
+			} else if err != nil {
+				return BossRecord{}, err
+			}
+		}
 		wiped, err := d.checkWarriors(states, &res)
 		if err != nil {
 			return BossRecord{}, err
@@ -286,7 +317,7 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 		rec.Deaths[name] = states[name].deaths
 	}
 	b.logf("arena: run %d: %s after %.1fs, %d deaths", run, outcome, rec.Seconds, res.WarriorDeaths)
-	return rec, nil
+	return rec, busyErr(busy)
 }
 
 func (b *BossTest) pollEvery() time.Duration {

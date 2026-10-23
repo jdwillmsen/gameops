@@ -385,8 +385,8 @@ func TestBossRepeatsRunsAndRechecksThePlayerList(t *testing.T) {
 	if len(*recs) != 3 || (*recs)[0].Run != 1 || (*recs)[2].Run != 3 {
 		t.Fatalf("records = %+v, want runs 1..3", *recs)
 	}
-	if f.Count("list") != 3 || f.Count("tickingarea add") != 1 {
-		t.Errorf("list x%d, ticking add x%d; want a list per run and one area load", f.Count("list"), f.Count("tickingarea add"))
+	if f.Count("list") < 4 || f.Count("tickingarea add") != 1 {
+		t.Errorf("list x%d, ticking add x%d; want a list before loading and per run, and one area load", f.Count("list"), f.Count("tickingarea add"))
 	}
 }
 
@@ -412,6 +412,65 @@ func TestBossStopsBetweenRunsWhenAHumanJoins(t *testing.T) {
 	}
 	if f.Count("tickingarea remove") != 1 {
 		t.Error("the refusal left the area loaded")
+	}
+}
+
+func TestBossRechecksPlayersAfterTheSettleWait(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	clock := newFakeClock()
+	b, recs := newBossTest(f, clock)
+	b.Sleep = func(d time.Duration) {
+		if d == b.Settle {
+			s.list = "There are 2/10 players online:\nRusty, Steve99"
+		}
+		clock.Sleep(d)
+	}
+	_, err := b.Run(context.Background())
+	var busy *NotAloneError
+	if !errors.As(err, &busy) {
+		t.Fatalf("Run error = %v, want a refusal after the settle wait", err)
+	}
+	if f.Count("summon") != 0 || len(*recs) != 0 {
+		t.Errorf("a human who joined while the arena loaded still got a fight:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	if f.Count("tickingarea remove") != 1 {
+		t.Error("the refusal left the area loaded")
+	}
+}
+
+func TestBossAbortsWhenAHumanJoinsMidFight(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 1000
+	f := &FakeConsole{}
+	clock := newFakeClock()
+	var joined time.Time
+	f.Respond = func(cmd string) (string, error) {
+		if s.bossPolls == 3 && joined.IsZero() {
+			s.list = "There are 4/10 players online:\nRusty, Slate, Tinder, Steve99"
+			joined = clock.Now()
+		}
+		return s.Exec(cmd)
+	}
+	b, recs := newBossTest(f, clock)
+	b.Runs = 2
+	got, err := b.Run(context.Background())
+	var busy *NotAloneError
+	if !errors.As(err, &busy) || !reflect.DeepEqual(busy.Names, []string{"Steve99"}) {
+		t.Fatalf("Run error = %v, want an abort naming Steve99", err)
+	}
+	if len(got) != 1 || len(*recs) != 1 || got[0].Outcome != BossAborted {
+		t.Fatalf("records = %+v, want the one aborted run logged", *recs)
+	}
+	if waited := clock.Now().Sub(joined); waited > 25*time.Second {
+		t.Errorf("abort came %v after the join, want within one player check", waited)
+	}
+	if f.Count("summon") != 1 {
+		t.Errorf("summons = %d, want no second run", f.Count("summon"))
+	}
+	last := f.Cmds[len(f.Cmds)-2:]
+	if last[0] != `kill @e[name="W",type=!player]` || last[1] != "tickingarea remove crew-arena-run-0" {
+		t.Errorf("last commands = %q, want the boss kill then the area removal", last)
 	}
 }
 
