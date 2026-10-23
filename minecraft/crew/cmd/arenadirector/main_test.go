@@ -1,6 +1,8 @@
 package main
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,5 +33,42 @@ func TestApplyRallyOverrides(t *testing.T) {
 				t.Errorf("rally_every = %v, want %v", book.RallyEvery.Duration, tt.wantEvery)
 			}
 		})
+	}
+}
+
+func TestPrintSummaryOfAMissingLogIsAnEmptyList(t *testing.T) {
+	var out strings.Builder
+	if err := printSummary(&out, filepath.Join(t.TempDir(), "none.jsonl")); err != nil {
+		t.Fatalf("printSummary: %v", err)
+	}
+	if out.String() != "[]\n" {
+		t.Errorf("summary = %q, want []", out.String())
+	}
+}
+
+func TestPrintSummaryReadsTheLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	for _, seconds := range []float64{100, 200} {
+		err := arena.AppendBossRecord(path, arena.BossRecord{Boss: "warden", Outcome: arena.BossKilled,
+			Seconds: seconds, Deaths: map[string]int{"total": 4}, Run: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out strings.Builder
+	if err := printSummary(&out, path); err != nil {
+		t.Fatalf("printSummary: %v", err)
+	}
+	want := `[{"boss":"warden","effects":[],"runs":2,"killed":2,"median_seconds":150,"median_deaths":4}]` + "\n"
+	if out.String() != want {
+		t.Errorf("summary = %s\nwant %s", out.String(), want)
+	}
+}
+
+func TestDefaultLogPathIsUnderTheStateDirectory(t *testing.T) {
+	t.Setenv("HOME", "/home/crewtest")
+	got, err := defaultLogPath()
+	if err != nil || got != "/home/crewtest/.local/state/arena-runs.jsonl" {
+		t.Errorf("defaultLogPath = %q, %v", got, err)
 	}
 }

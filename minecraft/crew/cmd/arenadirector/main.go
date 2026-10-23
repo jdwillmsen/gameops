@@ -6,17 +6,30 @@
 //
 //	arenadirector reset --lab <lab>
 //	arenadirector status --lab <lab> [--warriors names]
+//	arenadirector boss --lab <lab> --layout <file> --mob <id> [options]
+//	arenadirector boss --summary [--log <path>]
 //
 // <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>.
 // run prints one JSON result line on stdout; progress goes to stderr.
+//
+// boss fights one named mob against the squad --runs times, prints one JSON
+// record per run and appends each to the run log. It exits 2, before touching
+// the server, when any player outside --crew-names is online. --summary reads
+// the log and prints one JSON list of runs and medians per boss and effect set.
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
@@ -35,6 +48,8 @@ func main() {
 		reset(os.Args[2:])
 	case "status":
 		status(os.Args[2:])
+	case "boss":
+		boss(os.Args[2:])
 	default:
 		usage()
 	}
@@ -43,7 +58,8 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false]\n"+
 		"       arenadirector reset --lab <lab>\n"+
-		"       arenadirector status --lab <lab> [--warriors names]")
+		"       arenadirector status --lab <lab> [--warriors names]\n"+
+		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary]")
 	os.Exit(2)
 }
 
@@ -162,6 +178,109 @@ func status(args []string) {
 		fail("arenadirector: " + err.Error())
 	}
 	writeJSON(st)
+}
+
+func boss(args []string) {
+	fs := flag.NewFlagSet("boss", flag.ExitOnError)
+	t := common(fs)
+	layoutPath := fs.String("layout", "", "layout JSON from labcourses arena-layout")
+	mob := fs.String("mob", "", "mob id to summon, e.g. warden")
+	name := fs.String("name", "W", "name given to the boss, which the kill check searches for")
+	effects := fs.String("effects", "", "comma-separated console commands run right after the summon")
+	runs := fs.Int("runs", 1, "number of fights")
+	timeout := fs.Duration("timeout", 5*time.Minute, "limit for one fight")
+	warriors := fs.String("warriors", "Rusty,Slate,Tinder", "comma-separated warrior names")
+	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a test")
+	logPath := fs.String("log", "", "run log (default ~/.local/state/arena-runs.jsonl)")
+	summary := fs.Bool("summary", false, "print runs and medians from the log instead of fighting")
+	poll := fs.Duration("poll", 3*time.Second, "delay between squad and boss checks")
+	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
+	placeWait := fs.Duration("place-wait", 3*time.Second, "wait after placing the squad")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	path := *logPath
+	if path == "" {
+		var err error
+		if path, err = defaultLogPath(); err != nil {
+			fail("arenadirector: " + err.Error())
+		}
+	}
+	if *summary {
+		if err := printSummary(os.Stdout, path); err != nil {
+			fail("arenadirector: " + err.Error())
+		}
+		return
+	}
+	requireLab(*t.lab)
+	if *layoutPath == "" {
+		fail("arenadirector: boss needs --layout")
+	}
+	if *mob == "" {
+		fail("arenadirector: boss needs --mob")
+	}
+	if *runs < 1 {
+		fail("arenadirector: --runs must be at least 1")
+	}
+	layout, err := arena.LoadLayout(*layoutPath)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	console, err := newConsole(*t.lab, *t.compose)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+
+	b := &arena.BossTest{
+		Console:   console,
+		Layout:    layout,
+		Mob:       *mob,
+		Name:      *name,
+		Effects:   arena.SplitEffects(*effects),
+		Runs:      *runs,
+		Timeout:   *timeout,
+		Warriors:  splitNames(*warriors),
+		CrewNames: splitNames(*crew),
+		Poll:      *poll,
+		Settle:    *settle,
+		PlaceWait: *placeWait,
+		Record: func(r arena.BossRecord) error {
+			if err := arena.AppendBossRecord(path, r); err != nil {
+				return err
+			}
+			return json.NewEncoder(os.Stdout).Encode(r)
+		},
+		Out: os.Stderr,
+	}
+	// An interrupt lets the run finish its cleanup instead of leaving a
+	// buffed boss and loaded areas behind.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	_, err = b.Run(ctx)
+	var busy *arena.NotAloneError
+	switch {
+	case errors.As(err, &busy):
+		fmt.Fprintln(os.Stderr, "arenadirector: refused: "+err.Error())
+		os.Exit(2)
+	case err != nil:
+		fail("arenadirector: " + err.Error())
+	}
+}
+
+func defaultLogPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "state", "arena-runs.jsonl"), nil
+}
+
+func printSummary(w io.Writer, path string) error {
+	recs, err := arena.ReadBossRecords(path)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(w).Encode(arena.SummarizeBoss(recs))
 }
 
 func loadBook(path string) (*arena.WaveBook, error) {
