@@ -85,3 +85,37 @@ treat a repeat as a duplicate. Those routes are refused on any request with
 `X-Forwarded-For`, so only cluster traffic reaches them. Rows older than 30
 days are pruned at start and daily. With Postgres unset or down, the work
 routes answer 503 and the view-only console keeps working.
+
+## Chart library
+
+`internal/console/web/charts/` holds the console's chart panels: plain ES modules and SVG, no bundler and no dependency, embedded and served from `/static/charts/{file}` like the rest of the console. `/static/charts/demo.html` is the gallery: every chart on seeded synthetic data, with theme (`?theme=light|dark`), texture (`?texture=1`) and a live 20-chart run (`?live=1`). It doubles as the visual regression fixture; `?eager=1` draws off-screen panels too, for full-page screenshots.
+
+```html
+<link rel="stylesheet" href="/static/charts/charts.css">
+<script type="module">
+import { LineChart, BarChart, StatTile, Heatmap, Gauge, createTimeRange, mountRangeFilter } from '/static/charts/index.js';
+const range = createTimeRange();                 // one range scopes every chart handed it
+range.setDomain(from, to);
+mountRangeFilter(filterRow, range);              // the single filter row above the charts
+const chart = new LineChart(host, { title: 'Latency', range, yFormat: v => `${v} ms` });
+chart.update({ x: [ms, ...], series: [{ key: 'camera', name: 'Camera', values: [12, null, 14] }] });
+</script>
+```
+
+| Component | Data | Notes |
+| --- | --- | --- |
+| `LineChart` | `{ x: [ms], series: [{ key, name, values }] }` | `area`, `stacked`, `zero`, `y: {min,max}`, `tz: 'UTC' \| 'local'`; crosshair and one tooltip for every series; drag to brush a range, double-click or Esc to reset; `Shift`+arrows then `Enter` brushes from the keyboard |
+| `BarChart` | `{ categories: [name], series: [...] }` | one series, grouped or `stacked` (non-negative); `horizontal` (`height: 'auto'` sizes to the rows); hover lifts the mark and the tooltip lists every series |
+| `Sparkline`, `StatTile` | `{ values, labels }`; tile: `{ label, value, delta: {value, label, goodWhenUp}, trend, status }` | trend line in neutral ink with the current period in the accent; delta carries an arrow and a sign |
+| `Heatmap` | `{ rows, cols, values: [[...]] }` | one-hue sequential, or `diverging: true` around zero; scale legend underneath |
+| `Gauge` | `{ value }` | `min`, `max`, `warn`, `crit`, `invert`; fill goes accent, warning, critical, each with an icon and a word |
+
+Every panel has a table view (the **Table** button) and, for two or more series, a legend that toggles series. Arrow keys move through points, bars and cells, and announce the reading in a live region. Series and category names reach the DOM only through `textContent`.
+
+Colour comes from one token set in `charts.css` (`--cc-*` custom properties on `.cc-root`). Dark follows the OS unless an ancestor sets `data-theme="light"`; `data-theme="dark"` forces it, and `setTheme(el, 'auto' | 'light' | 'dark')` does either. `setTexture(el, true)`, print and forced-colours switch filled marks to a 45°/135° hatch so hue is not the only identity channel. The console itself is dark only, so put `data-theme="dark"` on its root when it adopts these panels.
+
+- **Categorical order is fixed.** A series keeps the slot it was first seen in (`createRegistry()`), so filtering never repaints the survivors. Past eight, the tail folds into one grey "Other (n)" series (`otherCombine: 'sum' | 'mean' | 'max'`); a ninth hue is never generated. Pass a registry per dashboard.
+- **The palette is validated, not eyeballed.** `charts/palette-validation.txt` has the dataviz validator's output for both surfaces; `palette.test.mjs` fails when `charts.css` and `palette.js` drift apart. Change a hue only after re-running the validator.
+- **Refresh costs.** Panels redraw through one frame-budgeted queue and skip drawing while off screen. `update()` is cheap to call at 1 Hz per chart; `setLoading(true)` dims a panel while it refetches instead of blanking it.
+
+`node charts/capture.mjs <demo url> <out dir> [--perf=30]` (Playwright; set `PLAYWRIGHT` to its entry module if it is not installed beside the script) writes light and dark screenshots of every section, hover, focus, brush and table states, and the frame-time run. `node --test web/charts/*.test.mjs` covers the scale, geometry, series folding and palette code; the Go test checks the files are embedded and served.
