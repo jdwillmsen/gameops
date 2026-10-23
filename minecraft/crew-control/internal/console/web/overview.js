@@ -212,6 +212,9 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   const stuckTask = new Map();
   const stuckProgress = new Map();
   const stuckAt = new Map();
+  // The newest stuck event handled per unit, so a backlog replayed after a
+  // reconnect cannot bring back a mark that progress already cleared.
+  const stuckSeen = new Map();
   const lastEvent = new Map();
   // Per unit: { state, at, src, floor }. src says where `at` came from: an
   // 'event' from the feed, 'seen' when this page watched the change but no
@@ -275,7 +278,7 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   // Departed units must not keep rows, trails or marks alive.
   function prune(list) {
     const live = new Set(list.map(s => s.id));
-    for (const m of [since, trail, lastEvent, stuckTask, stuckProgress, stuckAt]) {
+    for (const m of [since, trail, lastEvent, stuckTask, stuckProgress, stuckAt, stuckSeen]) {
       for (const id of m.keys()) if (!live.has(id)) m.delete(id);
     }
   }
@@ -310,7 +313,8 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
         const m = lastEvent.get(e.unit) || {};
         if (!m[e.kind] || e.seq >= m[e.kind].seq) m[e.kind] = e;
         lastEvent.set(e.unit, m);
-        if (e.kind === 'stuck' && e.task) {
+        if (e.kind === 'stuck' && e.task && e.seq > (stuckSeen.get(e.unit) ?? -Infinity)) {
+          stuckSeen.set(e.unit, e.seq);
           stuckTask.set(e.unit, e.task);
           stuckProgress.delete(e.unit);
           stuckAt.set(e.unit, e.at);
