@@ -209,7 +209,7 @@ func boss(args []string) {
 		}
 	}
 	if *summary {
-		if err := printSummary(os.Stdout, path); err != nil {
+		if err := printSummary(os.Stdout, os.Stderr, path); err != nil {
 			fail("arenadirector: " + err.Error())
 		}
 		return
@@ -281,10 +281,13 @@ func defaultLogPath() (string, error) {
 	return filepath.Join(home, ".local", "state", "arena-runs.jsonl"), nil
 }
 
-func printSummary(w io.Writer, path string) error {
-	recs, err := arena.ReadBossRecords(path)
+func printSummary(w, warn io.Writer, path string) error {
+	recs, skipped, err := arena.ReadBossRecords(path)
 	if err != nil {
 		return err
+	}
+	if skipped > 0 {
+		fmt.Fprintf(warn, "arenadirector: skipped %d malformed line(s) in %s\n", skipped, path)
 	}
 	return json.NewEncoder(w).Encode(arena.SummarizeBoss(recs))
 }

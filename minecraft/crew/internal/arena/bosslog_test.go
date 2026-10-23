@@ -34,26 +34,41 @@ func TestAppendBossRecordCreatesTheDirectoryAndAppendsLines(t *testing.T) {
 	if lines[0] != want {
 		t.Errorf("first line = %s\nwant %s", lines[0], want)
 	}
-	got, err := ReadBossRecords(path)
-	if err != nil || len(got) != 2 || got[1].Outcome != BossWipe || got[1].Effects[0] != second.Effects[0] {
+	got, skipped, err := ReadBossRecords(path)
+	if err != nil || skipped != 0 || len(got) != 2 || got[1].Outcome != BossWipe || got[1].Effects[0] != second.Effects[0] {
 		t.Errorf("ReadBossRecords = %+v, %v", got, err)
 	}
 }
 
 func TestReadBossRecordsOfAMissingLogIsEmpty(t *testing.T) {
-	got, err := ReadBossRecords(filepath.Join(t.TempDir(), "none.jsonl"))
+	got, _, err := ReadBossRecords(filepath.Join(t.TempDir(), "none.jsonl"))
 	if err != nil || len(got) != 0 {
 		t.Errorf("ReadBossRecords = %v, %v; want empty", got, err)
 	}
 }
 
-func TestReadBossRecordsNamesTheBadLine(t *testing.T) {
+func TestReadBossRecordsSkipsABadLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runs.jsonl")
-	if err := os.WriteFile(path, []byte("{\"boss\":\"warden\"}\nnot json\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{\"boss\":\"warden\"}\nnot json\n{\"boss\":\"ender_dragon\"}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadBossRecords(path); err == nil || !strings.Contains(err.Error(), "line 2") {
-		t.Errorf("ReadBossRecords error = %v, want it to name line 2", err)
+	got, skipped, err := ReadBossRecords(path)
+	if err != nil || skipped != 1 || len(got) != 2 || got[1].Boss != "ender_dragon" {
+		t.Errorf("ReadBossRecords = %+v, %d skipped, %v; want both good lines and one skipped", got, skipped, err)
+	}
+}
+
+func TestAppendBossRecordStartsANewLineAfterATornOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	if err := os.WriteFile(path, []byte(`{"boss":"war`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendBossRecord(path, rec("warden", nil, BossKilled, 100, 4)); err != nil {
+		t.Fatalf("AppendBossRecord: %v", err)
+	}
+	got, skipped, err := ReadBossRecords(path)
+	if err != nil || skipped != 1 || len(got) != 1 || got[0].Outcome != BossKilled {
+		t.Errorf("ReadBossRecords = %+v, %d skipped, %v; want the new record intact", got, skipped, err)
 	}
 }
 
