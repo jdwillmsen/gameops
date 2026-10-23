@@ -70,6 +70,13 @@ type API struct {
 	// instead of riding out its wait.
 	mu    sync.Mutex
 	waits map[string]map[chan struct{}]struct{}
+
+	// The console stream is separate from the unit waits so a slow viewer
+	// can never hold up a squad's poll.
+	streamMu        sync.Mutex
+	streams         int
+	streamEvery     time.Duration
+	streamKeepalive time.Duration
 }
 
 // Routes registers the public reads and, with a token configured, the
@@ -77,7 +84,11 @@ type API struct {
 // than exist to refuse, as the work routes do.
 func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	a := &API{store: st, units: units, token: sha256.Sum256([]byte(token)), now: time.Now,
-		waits: map[string]map[chan struct{}]struct{}{}}
+		waits:       map[string]map[chan struct{}]struct{}{},
+		streamEvery: defaultStreamEvery, streamKeepalive: defaultStreamKeepalive}
+	// Literal reads are public views, as the list and single-squad routes
+	// are; the stream carries only their console-safe subset.
+	mux.HandleFunc("GET /v1/squads/stream", a.streamSquads)
 	mux.HandleFunc("GET /v1/squads", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, listBody{Squads: st.List(), Battalions: st.Battalions()})
 	})
