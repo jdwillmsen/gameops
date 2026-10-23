@@ -106,10 +106,13 @@ type telemetry struct {
 	attributed   bool
 }
 
+// spawn starts a session. What the last one left undrained is kept for the
+// stepping goroutine, which reports it on its reset: a death the connection
+// dropped with would otherwise never be counted.
 func (t *telemetry) spawn() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.selfHurt, t.drop, t.healthSeen, t.died, t.killer = false, 0, false, false, ""
+	t.healthSeen = false
 	clear(t.seenHurts)
 }
 
