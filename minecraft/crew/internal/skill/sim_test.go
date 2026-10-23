@@ -578,10 +578,12 @@ func (r *rig) onPlace(u *protocol.UseItemTransactionData) {
 	r.placeClicks++
 	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone"}
 	pose := r.Actuator.Pose()
-	at := protocol.BlockPos{u.BlockPosition.X(), u.BlockPosition.Y() + 1, u.BlockPosition.Z()}
+	offsets := map[int32][3]int32{0: {0, -1, 0}, 1: {0, 1, 0}, 2: {0, 0, -1}, 3: {0, 0, 1}, 4: {-1, 0, 0}, 5: {1, 0, 0}}
+	off := offsets[u.BlockFace]
+	at := protocol.BlockPos{u.BlockPosition.X() + off[0], u.BlockPosition.Y() + off[1], u.BlockPosition.Z() + off[2]}
 	stack := &r.inv[u.HotBarSlot]
 	name, placeable := blocks[stack.item]
-	if u.BlockFace != 1 || !placeable || stack.count == 0 || u.HeldItem.Stack.NetworkID != stack.item ||
+	if !placeable || stack.count == 0 || u.HeldItem.Stack.NetworkID != stack.item ||
 		r.world[u.BlockPosition] == "" || r.world[u.BlockPosition] == "air" || r.world[at] != "air" {
 		return
 	}

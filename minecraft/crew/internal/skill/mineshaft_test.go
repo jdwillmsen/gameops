@@ -213,16 +213,98 @@ func TestShaftSkipsABranchBesideWater(t *testing.T) {
 	}
 }
 
-func TestShaftRefusesAFloorThatIsNotThere(t *testing.T) {
+func TestShaftBridgesAVoidFirstStep(t *testing.T) {
 	w := mineWorld()
-	w[protocol.BlockPos{12, -2, 10}] = "air"
+	floor := protocol.BlockPos{11, -1, 10}
+	w[floor] = "air"
 	r := shaftRig(t, w)
+	r.give(3, idCobblestone, 4)
 	log := &capture{}
-	if st, _ := r.run(newShaft(t, w, r, shaftSpec(4, 0, 0), log), 4000); st != Done {
-		t.Fatalf("status %v", st)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(3, 0, 0), log), 6000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
 	}
-	if got := hazards(log); len(got) != 1 || got[0] != "void" {
-		t.Errorf("hazards = %v, want one void", got)
+	if w[floor] != "cobblestone" {
+		t.Errorf("the first step's floor is %q, want it bridged", w[floor])
+	}
+	if got := hazards(log); len(got) != 0 {
+		t.Errorf("hazards = %v, want none", got)
+	}
+}
+
+func TestShaftBridgesAVoidMidStairStep(t *testing.T) {
+	w := mineWorld()
+	floor := protocol.BlockPos{12, -2, 10}
+	w[floor] = "air"
+	r := shaftRig(t, w)
+	r.give(3, idCobblestone, 4)
+	log := &capture{}
+	st, err := r.run(newShaft(t, w, r, shaftSpec(4, 0, 0), log), 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if w[floor] != "cobblestone" {
+		t.Errorf("the step's floor is %q, want it bridged", w[floor])
+	}
+	if got := hazards(log); len(got) != 0 {
+		t.Errorf("hazards = %v, want none", got)
+	}
+	if r.Pose().Feet.Y() < 0.9 {
+		t.Error("unit ended at depth")
+	}
+}
+
+func TestShaftWithAVoidFloorAndNoBlocksSaysItIsOutOfBlocks(t *testing.T) {
+	w := mineWorld()
+	w[protocol.BlockPos{11, -1, 10}] = "air"
+	r := shaftRig(t, w)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(3, 0, 0), nil), 4000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "out of blocks") {
+		t.Fatalf("status %v, err %v, want a failure naming the lack of blocks", st, err)
+	}
+}
+
+func TestShaftNeverBridgesWithATool(t *testing.T) {
+	w := mineWorld()
+	w[protocol.BlockPos{11, -1, 10}] = "air"
+	r := shaftRig(t, w)
+	r.give(3, 343, 1)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(3, 0, 0), nil), 4000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "out of blocks") {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.have("wooden_pickaxe") != 1 {
+		t.Error("the pickaxe was spent")
+	}
+}
+
+func TestShaftBridgesAStairFloorThatWentMissingBeforeTheClimbOut(t *testing.T) {
+	w := mineWorld()
+	r := shaftRig(t, w)
+	s := newShaft(t, w, r, shaftSpec(3, 0, 0), nil)
+	ms := s.(*MineShaft)
+	for i := 0; ms.stepsDone < 2; i++ {
+		if i > 6000 {
+			t.Fatal("never got down two steps")
+		}
+		if st, err := s.Step(context.Background(), r); st != Running {
+			t.Fatalf("status %v, err %v on the way down", st, err)
+		}
+	}
+	// A pit two deep under the first step: the unit cannot climb out of it,
+	// so the stair is cut off until the floor is back.
+	floor := protocol.BlockPos{11, -1, 10}
+	w[floor] = "air"
+	w[protocol.BlockPos{11, -2, 10}] = "air"
+	st, err := r.run(s, 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if w[floor] != "cobblestone" {
+		t.Errorf("the floor is %q, want it bridged", w[floor])
+	}
+	if r.Pose().Feet.Y() < 0.9 {
+		t.Error("unit ended at depth")
 	}
 }
 
