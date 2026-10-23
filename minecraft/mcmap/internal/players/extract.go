@@ -1,16 +1,14 @@
 package players
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"time"
 
-	"github.com/df-mc/goleveldb/leveldb/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/playerdata"
 )
 
 var (
@@ -23,20 +21,6 @@ var (
 		Help: "Player scans that could not read the world or ran out of time.",
 	})
 )
-
-// maxPlayers bounds how many records are kept. A server of friends has a
-// few dozen; the key space is the world's, and not this service's to trust.
-const maxPlayers = 512
-
-// recordPrefix is the key of a player's own record; the others that start
-// with player_ are the account-to-record index.
-var recordPrefix = []byte("player_server_")
-
-// Stats is what a scan found.
-type Stats struct {
-	Players int
-	Skipped int
-}
 
 // Extractor reads a freshly mirrored world's player records into a Store.
 type Extractor struct {
@@ -56,7 +40,13 @@ func (e *Extractor) Extract(ctx context.Context, dbDir string, at time.Time) (St
 		ctx, cancel = context.WithTimeout(ctx, e.Timeout)
 		defer cancel()
 	}
-	found, stats, err := e.scan(ctx, dbDir)
+	db, done, err := chunks.OpenView(dbDir, e.WorkDir)
+	if err != nil {
+		metricFailures.Inc()
+		return Stats{}, err
+	}
+	defer done()
+	found, stats, err := playerdata.Read(ctx, db)
 	if err != nil {
 		metricFailures.Inc()
 		return Stats{}, err
@@ -64,42 +54,4 @@ func (e *Extractor) Extract(ctx context.Context, dbDir string, at time.Time) (St
 	e.Store.Set(at, found)
 	metricPlayers.Set(float64(stats.Players))
 	return stats, nil
-}
-
-func (e *Extractor) scan(ctx context.Context, dbDir string) (found map[int64]Record, stats Stats, err error) {
-	// A record the decoder cannot make sense of must cost that record and
-	// not the service.
-	defer func() {
-		if p := recover(); p != nil {
-			found, err = nil, fmt.Errorf("player scan panicked: %v", p)
-		}
-	}()
-	db, done, err := chunks.OpenView(dbDir, e.WorkDir)
-	if err != nil {
-		return nil, Stats{}, err
-	}
-	defer done()
-	found = map[int64]Record{}
-	it := db.NewIterator(util.BytesPrefix(recordPrefix), nil)
-	defer it.Release()
-	for it.Next() {
-		if err := ctx.Err(); err != nil {
-			return nil, Stats{}, err
-		}
-		if !bytes.HasPrefix(it.Key(), recordPrefix) || len(found) >= maxPlayers {
-			stats.Skipped++
-			continue
-		}
-		id, record, err := Decode(it.Value())
-		if err != nil {
-			stats.Skipped++
-			continue
-		}
-		found[id] = record
-	}
-	if err := it.Error(); err != nil {
-		return nil, Stats{}, err
-	}
-	stats.Players = len(found)
-	return found, stats, nil
 }

@@ -1,6 +1,8 @@
 name: mcmap
 kind: service
 language: go
+depends:
+  - minecraft/pkg/
 tasks:
   build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/mcmap/...
   test: go test -race ./minecraft/mcmap/...
