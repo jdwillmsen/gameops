@@ -39,6 +39,8 @@ const (
 	shWalk
 	shReturn
 	shDeposit
+	shBridge
+	shMend
 )
 
 // ShaftSpec is a stair shaft with branch tunnels off its bottom.
@@ -160,6 +162,12 @@ type MineShaft struct {
 
 	deposits []Skill
 	sub      Skill
+	// bridgeAt is the floor cell being filled, and bridgeThen the phase to go
+	// on with once it holds; mendThen is where the stair repair returns to.
+	bridgeAt   protocol.BlockPos
+	bridgeThen shaftPhase
+	mendThen   shaftPhase
+	mendTried  bool
 }
 
 // NewMineShaft refuses a plan that would open a cell outside the area.
@@ -219,6 +227,12 @@ func (m *MineShaft) Resume() {
 		if r, ok := m.sub.(Resumer); ok {
 			r.Resume()
 		}
+	case shBridge:
+		// The placement is asked again from the top: it reads the world, so
+		// a block that did land is not placed twice.
+		m.sub, m.phase = nil, m.bridgeThen
+	case shMend:
+		m.sub = nil
 	}
 }
 
@@ -267,6 +281,10 @@ func (m *MineShaft) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = m.walk(a, m.spec.Entrance, arriveSlack, m.startDeposits, "climbing out")
 		case shDeposit:
 			o = m.deposit(ctx, a)
+		case shBridge:
+			o = m.bridge(ctx, a)
+		case shMend:
+			o = m.mend()
 		}
 		if !o.again {
 			return o.st, o.err
@@ -294,6 +312,12 @@ func (m *MineShaft) walk(a Actuator, to protocol.BlockPos, within float64, then 
 		return next
 	}
 	m.nav = nil
+	if what != "" && !m.mendTried && m.firstVoid() >= 0 {
+		// A stair with a missing floor is what cut the unit off from its goal;
+		// mend it from the side the unit is on, then try again.
+		m.mendTried, m.mendThen, m.phase = true, m.phase, shMend
+		return next
+	}
 	if what != "" {
 		return m.failed(a, fmt.Errorf("%s: %w", what, err))
 	}
@@ -310,7 +334,7 @@ func (m *MineShaft) startSegment(n int) {
 		// Back to the junction first, then out along the branch.
 		m.steps = append([]shaftStep{{from: m.at, stand: m.bottom}}, tunnelSteps(m.bottom, branchDirs(m.spec.Dir)[n-1], m.spec.BranchLength)...)
 	default:
-		m.phase = shReturn
+		m.phase, m.mendThen = shMend, shReturn
 	}
 }
 
@@ -361,7 +385,9 @@ func (m *MineShaft) segment() outcome {
 		}
 	}
 	if len(st.cells) > 0 {
-		if kind := m.floor(st.stand); kind != "" {
+		if kind := m.floor(st.stand); kind == "void" {
+			return m.startBridge(up(st.stand, -1), shSeg)
+		} else if kind != "" {
 			return m.abort(kind)
 		}
 		m.phase = shDig
@@ -580,6 +606,88 @@ func (m *MineShaft) floor(stand protocol.BlockPos) string {
 		return "void"
 	}
 	return ""
+}
+
+// bridgeBlocks are the blocks a unit may spend on a missing floor, best
+// first. Falling blocks are left out: sand would drop out from under the step.
+var bridgeBlocks = []string{"cobblestone", "dirt", "stone", "cobbled_deepslate", "andesite", "diorite", "granite", "netherrack"}
+
+// bridgeBlock picks the block to fill a floor with from the inventory.
+func bridgeBlock(s belief.Snapshot) (string, bool) {
+	for _, name := range bridgeBlocks {
+		if count(s, name) > 0 {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// startBridge fills the floor cell, or, with nothing to fill it with, ends the
+// heading saying so.
+func (m *MineShaft) startBridge(floor protocol.BlockPos, then shaftPhase) outcome {
+	item, ok := bridgeBlock(m.self())
+	if !ok {
+		if then == shSeg {
+			return m.abort("void floor, out of blocks to bridge it")
+		}
+		return outcome{st: Failed, err: errors.New("a stair floor is missing and the unit is out of blocks to bridge it")}
+	}
+	m.bridgeAt, m.bridgeThen, m.phase = floor, then, shBridge
+	m.sub = NewPlaceBlock(m.world, m.self, floor, item, WithLogger(m.log))
+	return next
+}
+
+func (m *MineShaft) bridge(ctx context.Context, a Actuator) outcome {
+	st, err := m.sub.Step(ctx, a)
+	switch st {
+	case Failed:
+		m.sub = nil
+		if m.bridgeThen == shSeg {
+			return m.abort("void floor, bridge failed")
+		}
+		return m.failed(a, fmt.Errorf("bridging a missing stair floor: %w", err))
+	case Done:
+		m.sub, m.phase = nil, m.bridgeThen
+		m.emit("mine_bridge", map[string]any{"step": m.si})
+		return next
+	}
+	return outcome{st: Running}
+}
+
+// firstVoid is the index of the deepest dug stair step whose floor is missing,
+// or -1. The deepest is mended first: it is the one nearest a unit at the
+// bottom, and each mended step makes the next one reachable.
+func (m *MineShaft) firstVoid() int {
+	steps := stairSteps(m.spec)
+	for i := len(steps) - 1; i >= 0; i-- {
+		st := steps[i]
+		if !m.passableAt(st.stand) || !m.passableAt(up(st.stand, 1)) {
+			continue
+		}
+		if m.floor(st.stand) == "void" {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *MineShaft) passableAt(c protocol.BlockPos) bool {
+	name, known := m.world.Block(c)
+	return known && path.Passable(name)
+}
+
+// mend fills the stair's missing floors one at a time, then goes on with
+// whatever the unit was about to do.
+func (m *MineShaft) mend() outcome {
+	i := m.firstVoid()
+	if i < 0 {
+		m.phase = m.mendThen
+		if m.phase == shMend {
+			m.phase = shReturn
+		}
+		return next
+	}
+	return m.startBridge(up(stairSteps(m.spec)[i].stand, -1), shMend)
 }
 
 // hotbarTool finds a tool stack on the hotbar, the only place the server
