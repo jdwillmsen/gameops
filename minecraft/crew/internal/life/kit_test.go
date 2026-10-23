@@ -332,6 +332,81 @@ func TestAKitChestThatNeverOpensBacksOffAfterSixShortRetries(t *testing.T) {
 	}
 }
 
+// A unit whose work yard is hundreds of blocks from the chest cannot walk
+// there: the chunks between are not loaded, the walk outlasts the visit limit,
+// and the failed visit holds up its tasks meanwhile.
+func TestAUnitFarFromTheKitChestDoesNotSetOutForIt(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		chest protocol.BlockPos
+		visit bool
+	}{
+		{"within reach", protocol.BlockPos{20 + kitReach - 10, 0, 20}, true},
+		{"out of reach", protocol.BlockPos{20 + kitReach + 10, 0, 20}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, visits := kitRig(t)
+			r.l.cfg.Kit.Chest = tc.chest
+			r.run(kitSettleTicks + 200)
+			if got := len(*visits) > 0; got != tc.visit {
+				t.Errorf("visited = %v, want %v", got, tc.visit)
+			}
+			if !tc.visit && r.logged("kit_failed") {
+				t.Errorf("a visit that never started failed: %+v", r.log.lines)
+			}
+		})
+	}
+}
+
+// A chest that keeps failing is asked less and less often, so a unit that can
+// never get its kit does not spend its time on visits that cannot end well.
+func TestAKitThatKeepsFailingIsTriedLessOften(t *testing.T) {
+	r, visits := kitRig(t)
+	r.l.makeKit = func(bool, int) skill.Skill {
+		v := &visit{r: r, ticks: 2, failure: errors.New("getting to the chest: no path")}
+		*visits = append(*visits, v)
+		return v
+	}
+	r.until(kitSettleTicks+kitFailBackoff+50, func() bool { return len(*visits) >= 2 })
+	if len(*visits) != 2 {
+		t.Fatalf("visits = %d, want a second try after the first back-off", len(*visits))
+	}
+	r.run(2*kitFailBackoff - 100)
+	if len(*visits) != 2 {
+		t.Errorf("tried a third time after %d ticks, inside the doubled back-off", 2*kitFailBackoff-100)
+	}
+	r.run(300)
+	if len(*visits) != 3 {
+		t.Errorf("visits = %d, want a third try after the doubled back-off", len(*visits))
+	}
+}
+
+// A successful visit forgets the failures before it, so one bad stretch does
+// not leave the unit on the longest back-off for good.
+func TestASuccessfulVisitResetsTheKitBackoff(t *testing.T) {
+	r, visits := kitRig(t)
+	fail := 2
+	r.l.makeKit = func(weapon bool, food int) skill.Skill {
+		v := &visit{r: r, ticks: 2, weapon: weapon, food: food}
+		if fail > 0 {
+			fail--
+			v.failure = errors.New("getting to the chest: no path")
+		} else {
+			v.stock = func() {}
+		}
+		*visits = append(*visits, v)
+		return v
+	}
+	r.until(kitSettleTicks+3*kitFailBackoff+200, func() bool { return len(*visits) >= 3 })
+	if len(*visits) != 3 {
+		t.Fatalf("visits = %d, want the empty visit after two failures", len(*visits))
+	}
+	r.run(20)
+	if r.l.kit.fails != 0 {
+		t.Errorf("fails = %d after a visit that completed, want 0", r.l.kit.fails)
+	}
+}
+
 func TestAFightStopsAVisitAndItResumesLater(t *testing.T) {
 	r, visits := kitRig(t)
 	(*visits) = nil
