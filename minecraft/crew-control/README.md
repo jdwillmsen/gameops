@@ -23,7 +23,7 @@ crew-control; it never calls them to command them.
 | `CREW_INVITES_DIR` | unset | Mounted Secret directory with one file per operator id holding that operator's one-time invite code; missing or empty means nobody can enrol |
 | `DATA_DIR` | `/data` | Persistent volume for `session.key`, `passkeys.json` and `invites-used.json` |
 | `WORK_TOKEN` | unset | Shared bearer token for the unit work routes; unset leaves them out entirely (404) |
-| `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USERNAME`, `PG_PASSWORD` | unset, `5432` | Postgres holding the queue (`minecraft.crew_work`, `minecraft.crew_work_event`), the world ledger (`minecraft.crew_place`, `minecraft.crew_stock`) and jobs (`minecraft.crew_job`, `minecraft.crew_job_step`), over `sslmode=require` |
+| `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USERNAME`, `PG_PASSWORD` | unset, `5432` | Postgres holding the queue (`minecraft.crew_work`, `minecraft.crew_work_event`), the world ledger (`minecraft.crew_place`, `minecraft.crew_stock`), jobs (`minecraft.crew_job`, `minecraft.crew_job_step`) and the unit event history (`minecraft.crew_event`), over `sslmode=require` |
 | `WORK_STORE` | unset | `memory` keeps the queue, ledger and jobs in memory when `PG_HOST` is unset; development only, it is lost on restart |
 | `CREW_PLACES` | unset | JSON list of named chests and areas, `[{"id","name","kind","box":{"min":{x,y,z},"max":{x,y,z}},"items":[]}]`; seeded at start, replacing earlier seeded places but never ones added by hand. `[]` removes every seeded place; unset or blank seeds nothing |
 
@@ -40,6 +40,8 @@ crew-control; it never calls them to command them.
 - `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
 - `POST /v1/jobs`: `{"kind":"plan","template":"parallel-demo"}` or `{"kind":"stock","place":"<id>","want":{"cobblestone":16}}`, 202 with the job, 422 when it cannot be planned; `GET /v1/jobs` (the last 50), `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` (409 while the scheduler holds it)
 - `GET /v1/places`: every place with its stock; `POST /v1/places` (`{"id","name","kind","box"}`, as in `CREW_PLACES`) adds or edits one, `POST /v1/places/delete` (`{"id"}`) removes one; seeded places answer 409. Chests units report get `chest-x-y-z` ids, which a request may only rename, never move or create. Moving a place or changing its kind, by request or by `CREW_PLACES`, drops its stock; a rename keeps it
+- `GET /v1/events?unit=&kind=&severity=&since=&until=&limit=&sort=asc|desc&cursor=<next>`: signed-in; the unit event history, newest first by default, every filter optional and exact, times RFC3339. Pages are keyset (`next` carries an `(at, id)` cursor, never an offset), at most 200 events each. Severity is ok, info, warn or crit; kinds are listed under Event history. Rows carry each unit's position, which is why the route is signed-in only
+- `POST /v1/events/prune` (`{"dry_run":true}` counts what would go and lists the oldest 100, `{}` deletes it): signed-in; the 30-day retention, answering `{"pruned","total","would"}`
 - `GET /v1/units/{id}/work?wait=25s[&kinds=command]`, `POST /v1/units/{id}/events`: unit-facing, `Authorization: Bearer <WORK_TOKEN>`, cluster-only
 
 Any other path, method, unknown unit or unclean path under `/units/` gets 404
@@ -119,3 +121,61 @@ Colour comes from one token set in `charts.css` (`--cc-*` custom properties on `
 - **Refresh costs.** Panels redraw through one frame-budgeted queue and skip drawing while off screen. `update()` is cheap to call at 1 Hz per chart; `setLoading(true)` dims a panel while it refetches instead of blanking it.
 
 `node charts/capture.mjs <demo url> <out dir> [--perf=30]` (Playwright; set `PLAYWRIGHT` to its entry module if it is not installed beside the script) writes light and dark screenshots of every section, hover, focus, brush and table states, and the frame-time run. `node --test web/charts/*.test.mjs` covers the scale, geometry, series folding and palette code; the Go test checks the files are embedded and served.
+
+## Event history
+
+`minecraft.crew_event` is the durable fleet event log: one typed row per event
+with the unit, UTC timestamp (`at`), kind, severity, the task and job it names
+when there is one, the unit's position when known (`x`, `y`, `z`, null when not)
+and a JSON payload. Indexes `(unit, at, id)`, `(kind, at, id)`,
+`(severity, at, id)` and `(at, id)` each serve one console query shape, and
+the trailing `(at, id)` is the keyset pair, so paging and ordering are one
+index walk in either direction with no sort. `kind` is not constrained in the
+schema, so a new one is code in the producer and no migration. The SQL is
+`migrations/V11__minecraft_crew_events.sql`; crew-control does not apply it
+(see `migrations/README.md`). The history lives only in Postgres, nothing is
+written under `DATA_DIR`, and with Postgres down events are dropped, not
+queued: a gap is honest, a backlog that slows the live feed is not.
+
+**Where events come from.** The poller derives them from each unit's status
+poll every second, the same events as the live feed, and the writer stores them
+in batches of up to 64 (one insert, at least once a second). Today that is
+`online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
+`task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
+`low_health`, `low_hunger`. A task event's payload has the feed's `text`, the
+task's `template` and, once finished, `duration_ms`. Task ids that are not
+queue UUIDs (units run their own rotation) go to `payload.task`, not `task_id`.
+
+Not captured yet, because the data does not reach crew-control: a closed
+failure reason code (a unit's reason is free text, in `text`), `kit_failed`,
+`session_error` and other log-only events, and session start and end. Units do
+not post events today, so there is no ingest route; units would have to post
+them for those kinds, and that is follow-up work.
+
+**Idle roll-up.** A hauling unit re-checks its chests every couple of seconds
+and finishes in a fraction of one, which in one measured hour was 78% of all
+task events. Storing each would make the table about 4.6 times larger and every
+throughput chart a chart of no-ops, so they are collapsed per unit:
+
+- A finished task is idle when its kind is `task_done`, its template is in the
+  idle list (only `haul`) and its duration is known and at most 2 s. A failed,
+  cancelled or unknown-outcome task, a slow haul, a haul of unknown duration
+  and every other template keep their own rows.
+- Idle polls from one unit and template become one `idle_rollup` row: `at` is
+  the first poll, the payload has `template`, `count`, `last` and `text`. A
+  roll-up closes on the unit's next real event (so it stays in order), when it
+  is a minute old, or at shutdown. Only a crash loses an open count, at most a
+  minute of it.
+- A `task_started` of an idle-eligible template is held until its finish is
+  known, then dropped with it if the poll was idle, or stored unchanged if not
+  (also stored after 5 s, or when the unit's next task starts, if no finish
+  came).
+
+**Retention.** History is kept for 30 days, pruned at start and daily with the
+work queue, in chunks of 5,000 rows so no statement holds the whole backlog.
+`POST /v1/events/prune` with `{"dry_run":true}` counts the rows a pass would
+delete and lists the oldest 100, without deleting anything.
+
+The Postgres tests run when `CREW_PG_TEST_DSN` is set (they apply the migration
+first and truncate `crew_event`, so point them at a scratch database) and skip
+otherwise; everything else runs without a database.

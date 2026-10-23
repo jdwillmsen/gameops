@@ -22,6 +22,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
@@ -143,7 +144,7 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	}
 
 	unconfigured := &work.Lazy{}
-	openStore(context.Background(), unconfigured, &atomic.Pointer[ledger.Ledger]{}, &atomic.Pointer[jobs.Scheduler]{}, telemetry.NewPoller(roster.Roster{}, &http.Client{}, time.Second), nil, "", false, log) // returns at once
+	openStore(context.Background(), unconfigured, &atomic.Pointer[ledger.Ledger]{}, &atomic.Pointer[jobs.Scheduler]{}, &events.Lazy{}, telemetry.NewPoller(roster.Roster{}, &http.Client{}, time.Second), nil, "", false, log) // returns at once
 	if err := enqueue(unconfigured); !errors.Is(err, work.ErrUnavailable) {
 		t.Fatalf("unconfigured store: %v, want ErrUnavailable", err)
 	}
@@ -155,7 +156,7 @@ func TestUnsetPostgresLeavesWorkRoutesDownUnlessMemoryIsChosen(t *testing.T) {
 	seeds := []ledger.Place{{ID: "home-chest", Name: "Home", Kind: ledger.KindChest,
 		Box: ledger.Box{Min: ledger.Pos{X: 1, Y: 64, Z: 2}, Max: ledger.Pos{X: 1, Y: 64, Z: 2}}}}
 	go func() {
-		openStore(ctx, mem, &world, &atomic.Pointer[jobs.Scheduler]{}, telemetry.NewPoller(roster.Roster{}, &http.Client{}, time.Second), seeds, "", true, log)
+		openStore(ctx, mem, &world, &atomic.Pointer[jobs.Scheduler]{}, &events.Lazy{}, telemetry.NewPoller(roster.Roster{}, &http.Client{}, time.Second), seeds, "", true, log)
 		close(done)
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -417,5 +418,55 @@ func TestWorkStreamNeedsARealSession(t *testing.T) {
 		case <-quiet:
 			return
 		}
+	}
+}
+
+func TestBornEventMapsToHistoryRow(t *testing.T) {
+	at := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	b := telemetry.Born{
+		Event: telemetry.Event{Unit: "crew-01", At: at, Kind: "task_failed", Level: "crit",
+			Text: "failed haul: no path", Task: "11111111-1111-1111-1111-111111111111",
+			Template: "haul", Took: 1500 * time.Millisecond},
+		Pos: telemetry.Position{X: 1.5, Y: 64, Z: -2, Known: true},
+	}
+	e, h := bornEvent(b)
+	if e.Unit != "crew-01" || !e.At.Equal(at) || e.Kind != "task_failed" || e.Severity != "crit" {
+		t.Fatalf("mapped wrong: %+v", e)
+	}
+	if e.TaskID == nil || e.TaskID.String() != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("task: %v", e.TaskID)
+	}
+	if e.Pos == nil || *e.Pos != (events.Pos{X: 1.5, Y: 64, Z: -2}) {
+		t.Fatalf("pos: %+v", e.Pos)
+	}
+	if h.Template != "haul" || h.Took != 1500*time.Millisecond || h.Task != b.Task {
+		t.Fatalf("hint: %+v", h)
+	}
+	// The payload holds the text the feed showed, so history reads like the
+	// live log did, and the duration in a unit a query can compare.
+	var p map[string]json.RawMessage
+	if err := json.Unmarshal(e.Payload, &p); err != nil || string(p["text"]) != `"failed haul: no path"` ||
+		string(p["template"]) != `"haul"` || string(p["duration_ms"]) != `1500` {
+		t.Fatalf("payload: %s (%v)", e.Payload, err)
+	}
+
+	// An id the queue would not recognise stays in the payload rather than
+	// being lost, and an unknown position stores as none.
+	b.Task, b.Pos.Known = "run-local-7", false
+	e, h = bornEvent(b)
+	if e.TaskID != nil || e.Pos != nil {
+		t.Fatalf("unrecognised id or pos stored: %+v", e)
+	}
+	if err := json.Unmarshal(e.Payload, &p); err != nil || string(p["task"]) != `"run-local-7"` {
+		t.Fatalf("payload: %s (%v)", e.Payload, err)
+	}
+	if h.Task != "run-local-7" {
+		t.Fatalf("hint keeps the raw id so a start pairs with its finish: %+v", h)
+	}
+
+	// A text with quotes and control characters stays valid JSON.
+	b.Text = "failed \"x\"\n\t"
+	if e, _ = bornEvent(b); !json.Valid(e.Payload) {
+		t.Fatalf("payload is not JSON: %s", e.Payload)
 	}
 }

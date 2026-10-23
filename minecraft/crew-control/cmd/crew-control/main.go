@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -22,6 +23,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
@@ -89,6 +91,15 @@ func main() {
 	// Set with the store; a report that finishes work before then has no job
 	// to wake, and the scheduler's first tick reads the store anyway.
 	var sched atomic.Pointer[jobs.Scheduler]
+	// The event history is filled from the poller; until the backend is
+	// ready the writer drops what it is handed, like the feed.
+	eventLog := &events.Lazy{}
+	recorder := events.NewWriter(eventLog, log)
+	poller.OnEvents = func(batch []telemetry.Born) {
+		for _, b := range batch {
+			recorder.Add(bornEvent(b))
+		}
+	}
 	store.OnReady(poller.PublishAllWork)
 	workToken := os.Getenv("WORK_TOKEN")
 	if workToken == "" {
@@ -112,6 +123,7 @@ func main() {
 			api.OnBlocks = func(string, uuid.UUID, work.Blocks) {}
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
 			poller.SetWorkSource(api.Feed)
+			events.NewAPI(eventLog).MountOperator(mux, operators)
 			ledger.NewAPI(func() ledger.Ledger {
 				if l := world.Load(); l != nil {
 					return *l
@@ -139,9 +151,12 @@ func main() {
 	pollDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollDone) }()
 
+	recordDone := make(chan struct{})
+	go func() { recorder.Run(ctx); close(recordDone) }()
+
 	storeDone := make(chan struct{})
 	go func() {
-		openStore(ctx, store, &world, &sched, poller, places, dsn, os.Getenv("WORK_STORE") == "memory", log)
+		openStore(ctx, store, &world, &sched, eventLog, poller, places, dsn, os.Getenv("WORK_STORE") == "memory", log)
 		close(storeDone)
 	}()
 
@@ -162,6 +177,7 @@ func main() {
 		log.Warn("shutdown_incomplete", logging.Fields{"error": err.Error()})
 	}
 	<-pollDone
+	<-recordDone
 	<-storeDone
 }
 
@@ -197,7 +213,7 @@ func postgresDSN() (string, error) {
 // The memory store needs an explicit opt-in: a production deployment that
 // lost its PG_HOST would otherwise run on a queue that vanishes on restart,
 // and nothing would say so. Unconfigured behaves like a database that is down.
-func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], sched *atomic.Pointer[jobs.Scheduler], poller *telemetry.Poller, places []ledger.Place, dsn string, memory bool, log *logging.Logger) {
+func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], sched *atomic.Pointer[jobs.Scheduler], eventLog *events.Lazy, poller *telemetry.Poller, places []ledger.Place, dsn string, memory bool, log *logging.Logger) {
 	var (
 		backend work.Store
 		led     ledger.Ledger
@@ -209,6 +225,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 		backend = work.NewMemory()
 		led = ledger.NewMemory()
 		js = jobs.NewMemory()
+		eventLog.Set(events.NewMemory())
 	case dsn == "":
 		log.Error("work_store_unconfigured", logging.Fields{"effect": "work routes answer 503; set PG_HOST, or WORK_STORE=memory for development"})
 		return
@@ -223,6 +240,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 				backend = pg
 				led = ledger.NewPostgres(pg.Pool())
 				js = jobs.NewPostgres(pg.Pool())
+				eventLog.Set(events.NewPostgres(pg.Pool()))
 				break
 			}
 			if ctx.Err() != nil {
@@ -281,6 +299,17 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 		} else {
 			log.Info("work_pruned", logging.Fields{"rows": n})
 		}
+		// History keeps at least a month; the same loop and cadence as the
+		// queue, so one pass a day prunes the whole append-only side of the
+		// database.
+		if rep, err := eventLog.Prune(ctx, time.Now().Add(-events.MinRetention), 0, false); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Warn("event_prune_failed", logging.Fields{"error": err.Error()})
+		} else if rep.Pruned > 0 {
+			log.Info("event_pruned", logging.Fields{"rows": rep.Pruned})
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -300,6 +329,31 @@ func chainWake(prev func(work.Item), sched *atomic.Pointer[jobs.Scheduler]) func
 			s.Wake()
 		}
 	}
+}
+
+// bornEvent maps a polled event onto its history row, and the hint the idle
+// rule reads. The feed's text rides in the payload, with the template and
+// duration where known; a task id the queue would not recognise stays in it
+// too: history keeps what it was told, not only what it can join.
+func bornEvent(b telemetry.Born) (events.Event, events.Hint) {
+	payload := map[string]any{"text": b.Text}
+	if b.Template != "" {
+		payload["template"] = b.Template
+	}
+	if b.Took > 0 {
+		payload["duration_ms"] = b.Took.Milliseconds()
+	}
+	e := events.Event{Unit: b.Unit, At: b.At, Kind: b.Kind, Severity: b.Level}
+	if id, err := uuid.Parse(b.Task); err == nil {
+		e.TaskID = &id
+	} else if b.Task != "" {
+		payload["task"] = b.Task
+	}
+	e.Payload, _ = json.Marshal(payload)
+	if b.Pos.Known {
+		e.Pos = &events.Pos{X: float64(b.Pos.X), Y: float64(b.Pos.Y), Z: float64(b.Pos.Z)}
+	}
+	return e, events.Hint{Task: b.Task, Template: b.Template, Took: b.Took}
 }
 
 // unitStatuses joins telemetry with each unit's unfinished work, in roster order.
