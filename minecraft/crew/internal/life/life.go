@@ -176,6 +176,7 @@ func (l *Life) Spawn(runtimeID uint64) {
 func (l *Life) Reset() {
 	_, d := l.takeHurt(true)
 	l.telemetryTick(d)
+	l.tel.newLife()
 	l.attacker, l.attackerUntil, l.attackerPlayer = 0, 0, false
 	clear(l.ignore)
 	clear(l.fightTicks)
