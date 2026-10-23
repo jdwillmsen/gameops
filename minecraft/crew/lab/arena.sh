@@ -14,6 +14,7 @@
 #        arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>]
 #                            [--timeout <duration>] [--max-live N] [--poll <d>]
 #                            [--rally-after <d>] [--rally-every <d>]
+#                            [--place-squad=false]
 #        arena.sh reset <lab>
 #        arena.sh status <lab> [--warriors <names>]
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
@@ -33,6 +34,11 @@
 # parking at the floor edge outside the warriors' reach. --rally-after 0 turns
 # them off; boss waves only rally when the wave sets `rally: true`.
 #
+# The director also owns the squad's position: before wave one it teleports
+# each --warriors name to a start cell on the floor, and it returns a warrior
+# that respawns or strays off the floor to that cell. --place-squad=false
+# leaves the squad where it is.
+#
 # --plan feeds a prebuilt `labcourses arena` output to build instead of
 # running the generator from a checkout, for hosts that have no Go toolchain.
 #
@@ -45,7 +51,7 @@ set -euo pipefail
 confirm=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
+usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;

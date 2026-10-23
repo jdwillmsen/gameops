@@ -72,6 +72,24 @@ func floorRepairCommands(l Layout) []string {
 
 func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }
 
+// squadOffsets spreads a squad across the centre line at run start. They stay
+// far inside the fighting floor, so no warrior starts in the stands.
+var squadOffsets = []int{0, 3, -3, 6, -6}
+
+// squadStartPoint is the cell a warrior is placed on before wave one and
+// returned to whenever it respawns or strays off the floor.
+func squadStartPoint(l Layout, i int) Point {
+	offset := squadOffsets[i%len(squadOffsets)]
+	return Point{X: l.Center.X + offset, Y: l.GroundY + 1, Z: l.Center.Z - 25}
+}
+
+func squadPlaceCommand(name string, p Point) (string, error) {
+	if err := validateWarriorName(name); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("tp %q %d %d %d", name, p.X, p.Y, p.Z), nil
+}
+
 // rallyOffsets is the ring survivors are pulled to, one round at a time. Every
 // offset is 6-9 blocks out: close enough for the warriors' reach, far enough
 // that twelve piled mobs do not share a cell.
