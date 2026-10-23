@@ -1,0 +1,123 @@
+# Arena wave book. Everything here is console-only (Tier A): the buffs, gear
+# and enchants are the recipes proven live in the arena mob-buffs spike. A
+# tier is applied to a wave mob at spawn; there is no behaviour pack.
+pause: 8s
+max_live: 12
+wave_timeout: 5m
+
+tiers:
+  1:
+    effects:
+      - {id: strength, seconds: 600, amplifier: 0}
+    gear:
+      - {slot: weapon.mainhand, item: stone_sword}
+      - {slot: armor.head, item: leather_helmet}
+      - {slot: armor.chest, item: leather_chestplate}
+      - {slot: armor.legs, item: leather_leggings}
+      - {slot: armor.feet, item: leather_boots}
+    enchant: {id: sharpness, level: 1}
+  2:
+    effects:
+      - {id: strength, seconds: 600, amplifier: 0}
+      - {id: resistance, seconds: 600, amplifier: 1}
+      - {id: health_boost, seconds: 600, amplifier: 2}
+    gear:
+      - {slot: weapon.mainhand, item: iron_sword}
+      - {slot: armor.head, item: iron_helmet}
+      - {slot: armor.chest, item: iron_chestplate}
+      - {slot: armor.legs, item: iron_leggings}
+      - {slot: armor.feet, item: iron_boots}
+    enchant: {id: sharpness, level: 3}
+  3:
+    effects:
+      - {id: strength, seconds: 600, amplifier: 1}
+      - {id: resistance, seconds: 600, amplifier: 2}
+      - {id: health_boost, seconds: 600, amplifier: 4}
+    gear:
+      - {slot: weapon.mainhand, item: diamond_sword}
+      - {slot: armor.head, item: diamond_helmet}
+      - {slot: armor.chest, item: diamond_chestplate}
+      - {slot: armor.legs, item: diamond_leggings}
+      - {slot: armor.feet, item: diamond_boots}
+    enchant: {id: sharpness, level: 5}
+  4:
+    # Regeneration does nothing for undead bodies; the health_boost cap still
+    # applies, so an undead mini-boss keeps its base health.
+    effects:
+      - {id: health_boost, seconds: 600, amplifier: 7}
+      - {id: resistance, seconds: 600, amplifier: 3}
+      - {id: regeneration, seconds: 600, amplifier: 5}
+      - {id: strength, seconds: 600, amplifier: 1}
+    gear:
+      - {slot: weapon.mainhand, item: diamond_sword}
+      - {slot: armor.head, item: diamond_helmet}
+      - {slot: armor.chest, item: diamond_chestplate}
+      - {slot: armor.legs, item: diamond_leggings}
+      - {slot: armor.feet, item: diamond_boots}
+    enchant: {id: sharpness, level: 5}
+  5:
+    effects:
+      - {id: health_boost, seconds: 600, amplifier: 9}
+      - {id: resistance, seconds: 600, amplifier: 4}
+      - {id: regeneration, seconds: 600, amplifier: 7}
+      - {id: absorption, seconds: 600, amplifier: 4}
+      - {id: strength, seconds: 600, amplifier: 2}
+    gear:
+      - {slot: weapon.mainhand, item: diamond_sword}
+      - {slot: armor.head, item: diamond_helmet}
+      - {slot: armor.chest, item: diamond_chestplate}
+      - {slot: armor.legs, item: diamond_leggings}
+      - {slot: armor.feet, item: diamond_boots}
+    enchant: {id: sharpness, level: 5}
+
+# The Gauntlet is the shipped example: eight waves that climb from fodder to
+# a boss. A run's --tier caps the opposition, so a tier-2 run stops after the
+# first three waves and a tier-4 run stops before the boss.
+waves:
+  - name: First Blood
+    mobs:
+      - {mob: zombie, count: 4, tier: 1, pen: 1}
+      - {mob: skeleton, count: 2, tier: 1, pen: 2}
+  - name: Bone Watch
+    mobs:
+      - {mob: skeleton, count: 4, tier: 1, pen: 3}
+      - {mob: husk, count: 3, tier: 1, pen: 4}
+  - name: Veterans
+    mobs:
+      - {mob: zombie, count: 3, tier: 2, pen: 5}
+      - {mob: husk, count: 2, tier: 2, pen: 6}
+      - {mob: skeleton, count: 2, tier: 2, pen: 7}
+  - name: Drowned Crew
+    mobs:
+      - {mob: zombie, count: 4, tier: 3, variant: minecraft:become_drowned, pen: 8}
+      - {mob: stray, count: 2, tier: 3, pen: 9}
+  - name: Charged Line
+    mobs:
+      - {mob: creeper, count: 2, tier: 3, variant: minecraft:charged_creeper, pen: 10}
+      - {mob: vindicator, count: 2, tier: 3, pen: 11}
+  - name: The Captains
+    mobs:
+      - {mob: pillager, count: 1, tier: 4, variant: minecraft:promote_to_patrol_captain, name: Captain, pen: 12}
+      - {mob: ravager, count: 2, tier: 4, pen: 6}
+  - name: Deathless Guard
+    mobs:
+      - {mob: wither_skeleton, count: 2, tier: 4, pen: 5}
+      - {mob: evocation_illager, count: 1, tier: 4, pen: 7}
+      - {mob: pillager, count: 2, tier: 3, pen: 8}
+  - name: The Warden
+    boss: true
+    pause: 0s
+    mobs:
+      - {mob: warden, count: 1, tier: 5, name: The Warden, pen: 0}
+      - {mob: wither_skeleton, count: 2, tier: 4, pen: 12}
+    phases:
+      - at: 0s
+        callout: The Warden rises.
+      - at: 25s
+        callout: The Warden burrows — phase two.
+        commands:
+          - effect give @e[tag=arena_boss] speed 600 1
+      - at: 50s
+        callout: The Warden is enraged.
+        commands:
+          - effect give @e[tag=arena_boss] strength 600 2

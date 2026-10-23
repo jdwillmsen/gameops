@@ -1,0 +1,117 @@
+package arena
+
+import (
+	"strings"
+	"testing"
+)
+
+const minimalWaves = `pause: 2s
+max_live: 6
+wave_timeout: 1m
+tiers:
+  1: {}
+  2: {}
+  3: {}
+  4: {}
+  5: {}
+waves:
+  - name: One
+    mobs:
+      - {mob: zombie, count: 2, tier: 1, pen: 1}
+`
+
+func TestDefaultWavesShipFiveTiersAndTheGauntlet(t *testing.T) {
+	book, err := DefaultWaves()
+	if err != nil {
+		t.Fatalf("DefaultWaves: %v", err)
+	}
+	if len(book.Tiers) != 5 {
+		t.Errorf("%d tiers, want 5", len(book.Tiers))
+	}
+	for tier := 1; tier <= 5; tier++ {
+		if _, ok := book.Tiers[tier]; !ok {
+			t.Errorf("tier %d is missing", tier)
+		}
+	}
+	if len(book.Waves) != 8 {
+		t.Errorf("%d waves, want 8", len(book.Waves))
+	}
+	last := book.Waves[len(book.Waves)-1]
+	if !last.Boss {
+		t.Error("the last Gauntlet wave is not a boss wave")
+	}
+	if last.MaxTier() != 5 {
+		t.Errorf("boss wave tier = %d, want 5", last.MaxTier())
+	}
+	if book.MaxLive != 12 {
+		t.Errorf("max_live = %d, want 12", book.MaxLive)
+	}
+	for i := 1; i < len(book.Waves); i++ {
+		if book.Waves[i].MaxTier() < book.Waves[i-1].MaxTier() {
+			t.Errorf("wave %d (%s) drops below the previous tier", i+1, book.Waves[i].Name)
+		}
+	}
+}
+
+func TestLoadWavesValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"valid", minimalWaves, ""},
+		{"missing tier", strings.Replace(minimalWaves, "  5: {}\n", "", 1), "tier 5 has no recipe"},
+		{"zero count", strings.Replace(minimalWaves, "count: 2", "count: 0", 1), "count must be positive"},
+		{"tier out of range", strings.Replace(minimalWaves, "tier: 1", "tier: 6", 1), "outside 1..5"},
+		{"negative pen", strings.Replace(minimalWaves, "pen: 1", "pen: -1", 1), "pen must not be negative"},
+		{"bad duration", strings.Replace(minimalWaves, "pause: 2s", "pause: soon", 1), "invalid duration"},
+		{"unknown field", strings.Replace(minimalWaves, "  - name: One", "  - name: One\n    bogus: true", 1), "field bogus not found"},
+		{"bad variant", strings.Replace(minimalWaves, "pen: 1}", "variant: become_drowned, pen: 1}", 1), "must start with minecraft:"},
+		{"backwards phases", strings.Replace(minimalWaves, "    mobs:\n", "    phases:\n      - {at: 10s, callout: two}\n      - {at: 5s, callout: one}\n    mobs:\n", 1), "goes backwards"},
+		{"boss without boss mob", strings.Replace(minimalWaves, "  - name: One", "  - name: One\n    boss: true", 1), "has no ravager"},
+		{"bad slot", strings.Replace(minimalWaves, "  1: {}", "  1:\n    gear:\n      - {slot: hotbar, item: stone_sword}", 1), "gear slot"},
+		{"bad amplifier", strings.Replace(minimalWaves, "  1: {}", "  1:\n    effects:\n      - {id: strength, seconds: 600, amplifier: 300}", 1), "amplifier 300"},
+		{"bad sharpness", strings.Replace(minimalWaves, "  1: {}", "  1:\n    enchant: {id: sharpness, level: 9}", 1), "sharpness level 9"},
+		{"no waves", strings.Replace(minimalWaves, "waves:\n  - name: One\n    mobs:\n      - {mob: zombie, count: 2, tier: 1, pen: 1}\n", "waves: []\n", 1), "no waves defined"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadWaves(strings.NewReader(tt.yaml))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("LoadWaves: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("LoadWaves error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUpToCapsByOpposition(t *testing.T) {
+	book, err := DefaultWaves()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct{ tier, waves int }{
+		{0, 8}, {1, 2}, {2, 3}, {3, 5}, {4, 7}, {5, 8},
+	}
+	for _, tt := range tests {
+		if got := len(book.UpTo(tt.tier)); got != tt.waves {
+			t.Errorf("UpTo(%d) = %d waves, want %d", tt.tier, got, tt.waves)
+		}
+	}
+}
+
+func TestWavePauseCanBeExplicitlyZero(t *testing.T) {
+	book, err := LoadWaves(strings.NewReader(strings.Replace(minimalWaves,
+		"  - name: One", "  - name: One\n    pause: 0s", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.Waves[0].Pause == nil || book.Waves[0].Pause.Duration != 0 {
+		t.Errorf("pause = %v, want an explicit zero", book.Waves[0].Pause)
+	}
+}
