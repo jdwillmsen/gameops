@@ -29,14 +29,14 @@ const bodyCentre = 0.9
 // every tick, whatever the unit is doing.
 func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	l.tick++
-	hurt := l.takeHurt()
+	hurt, d := l.takeHurt(l.cfg.Defend)
 	if !l.cfg.Defend {
 		return false
 	}
 	if hurt {
 		l.noteHurt(p)
 	}
-	l.telemetryTick()
+	l.telemetryTick(d)
 	if l.warrior != nil {
 		return l.warriorEngaged(p, s, hurt)
 	}
@@ -202,6 +202,11 @@ func (l *Life) noteHurt(p act.Pose) {
 		return
 	}
 	l.attackerUntil = l.tick + attackerTicks
+	t := &l.tel
+	t.attackerType, t.attackerAt, t.attributed = "player", l.tick, true
+	if !l.attackerPlayer {
+		t.attackerType = name(mob.Type)
+	}
 }
 
 // giveUp stops considering a mob a threat for a while: it cannot be reached,

@@ -169,7 +169,8 @@ func (l *Life) Spawn(runtimeID uint64) {
 // Reset forgets the fight and the walk, as after a death or a lost session. Only
 // the stepping goroutine may call it.
 func (l *Life) Reset() {
-	l.telemetryTick()
+	_, d := l.takeHurt(true)
+	l.telemetryTick(d)
 	l.attacker, l.attackerUntil, l.attackerPlayer = 0, 0, false
 	clear(l.ignore)
 	clear(l.fightTicks)
@@ -221,12 +222,20 @@ func (l *Life) Apply(pk packet.Packet) {
 	}
 }
 
-func (l *Life) takeHurt() bool {
+// takeHurt takes the hurt marker and, when drain is set, the telemetry the
+// read loop gathered, under the one lock Apply holds: a packet landing between
+// the two would be counted with no attribution and attributed with nothing to
+// count.
+func (l *Life) takeHurt(drain bool) (bool, drained) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	h := l.hurt
 	l.hurt = false
-	return h
+	var d drained
+	if drain && l.warrior != nil {
+		d = l.tel.drain()
+	}
+	return h, d
 }
 
 // Cancel drops the idle walk, for a task that is about to take the unit over.
