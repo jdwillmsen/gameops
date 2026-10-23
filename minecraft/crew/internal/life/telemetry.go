@@ -18,7 +18,7 @@ var (
 	})
 	metricHits = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "crew_hits_landed_total",
-		Help: "Swings and shots the target answered with a hurt animation.",
+		Help: "Swings and shots the target answered with a hurt animation or its death; an upper bound when several warriors fight one target.",
 	})
 	metricDamage = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "crew_damage_taken_total",
@@ -39,8 +39,8 @@ const (
 	// Swings waiting for their hurt animation; the oldest are dropped, as a
 	// shot that missed never gets one.
 	maxOpenSwings = 8
-	// Hurt animations of other entities kept for the next tick: a crowd
-	// hurting itself must not grow the set without bound.
+	// Hurt animations and deaths of other entities kept for the next tick: a
+	// crowd hurting itself must not grow the sets without bound.
 	maxSeenHurts = 64
 	// A health drop and a hurt animation of the one blow can arrive a tick
 	// apart; a lone hurt animation is given this long to be joined by a drop.
@@ -90,11 +90,17 @@ type telemetry struct {
 	// killer is what stood nearest when the unit died, or empty.
 	killer    string
 	seenHurts map[uint64]struct{}
+	// Deaths of other entities, the killing blow's only sign for some.
+	seenDeaths map[uint64]struct{}
 
 	total, fight FightStats
 
 	// The rest belongs to the stepping goroutine.
 	open []swing
+	// The last hit matched, so a death a tick after its hurt is not a
+	// second hit for the one blow.
+	lastHit   uint64
+	lastHitAt uint64
 
 	hurtPending bool
 	hurtSince   uint64
@@ -114,6 +120,7 @@ func (t *telemetry) spawn() {
 	defer t.mu.Unlock()
 	t.healthSeen = false
 	clear(t.seenHurts)
+	clear(t.seenDeaths)
 }
 
 // newLife forgets the swings and blows of the life that ended. The clock
@@ -121,6 +128,7 @@ func (t *telemetry) spawn() {
 // look fresh to a death soon after the respawn.
 func (t *telemetry) newLife() {
 	t.open = t.open[:0]
+	t.lastHit, t.lastHitAt = 0, 0
 	t.hurtPending, t.damaged = false, false
 	t.attackerType, t.attackerAt, t.attributed = "", 0, false
 }
@@ -130,21 +138,20 @@ func (t *telemetry) newLife() {
 func (t *telemetry) observe(pk packet.Packet, selfID uint64, dead bool) {
 	switch p := pk.(type) {
 	case *packet.ActorEvent:
-		if p.EventType != packet.ActorEventHurt {
+		if p.EventType != packet.ActorEventHurt && p.EventType != packet.ActorEventDeath {
 			return
 		}
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		switch {
 		case p.EntityRuntimeID == selfID:
-			if !dead {
+			if !dead && p.EventType == packet.ActorEventHurt {
 				t.selfHurt = true
 			}
-		case len(t.seenHurts) < maxSeenHurts:
-			if t.seenHurts == nil {
-				t.seenHurts = map[uint64]struct{}{}
-			}
-			t.seenHurts[p.EntityRuntimeID] = struct{}{}
+		case p.EventType == packet.ActorEventHurt:
+			t.seenHurts = seen(t.seenHurts, p.EntityRuntimeID)
+		default:
+			t.seenDeaths = seen(t.seenDeaths, p.EntityRuntimeID)
 		}
 	case *packet.UpdateAttributes:
 		if p.EntityRuntimeID != selfID {
@@ -164,6 +171,17 @@ func (t *telemetry) observe(pk packet.Packet, selfID uint64, dead bool) {
 	}
 }
 
+// seen adds id to a set kept for the next tick, up to maxSeenHurts.
+func seen(set map[uint64]struct{}, id uint64) map[uint64]struct{} {
+	if set == nil {
+		set = map[uint64]struct{}{}
+	}
+	if len(set) < maxSeenHurts {
+		set[id] = struct{}{}
+	}
+	return set
+}
+
 // markDead notes the unit's death and what stood nearest when it came.
 func (t *telemetry) markDead(killer string) {
 	t.mu.Lock()
@@ -180,6 +198,7 @@ type drained struct {
 	died        bool
 	killer      string
 	hurts       []uint64
+	deaths      []uint64
 }
 
 func (t *telemetry) drain() drained {
@@ -189,7 +208,11 @@ func (t *telemetry) drain() drained {
 	for id := range t.seenHurts {
 		d.hurts = append(d.hurts, id)
 	}
+	for id := range t.seenDeaths {
+		d.deaths = append(d.deaths, id)
+	}
 	clear(t.seenHurts)
+	clear(t.seenDeaths)
 	t.selfHurt, t.drop, t.died, t.killer = false, 0, false, ""
 	return d
 }
@@ -197,7 +220,7 @@ func (t *telemetry) drain() drained {
 // empty says whether there is nothing to report, so a quiet tick returns
 // early.
 func (d drained) empty() bool {
-	return !d.selfHurt && d.drop == 0 && !d.died && len(d.hurts) == 0
+	return !d.selfHurt && d.drop == 0 && !d.died && len(d.hurts) == 0 && len(d.deaths) == 0
 }
 
 // Stats returns the unit's totals and its current or last fight. The second
@@ -272,6 +295,11 @@ func (l *Life) telemetryTick(d drained) {
 	for _, id := range d.hurts {
 		l.matchHit(id)
 	}
+	for _, id := range d.deaths {
+		if t.lastHit != id || l.tick-t.lastHitAt > damageJoin {
+			l.matchHit(id)
+		}
+	}
 	if d.died && d.killer != "" {
 		t.attackerType, t.attackerAt, t.attributed = d.killer, l.tick, true
 	}
@@ -301,8 +329,10 @@ func swingWindow(s swing) uint64 {
 }
 
 // matchHit credits the oldest open swing at id with a hit. A swing is
-// answered by one hurt animation at most, and the target is the one swung at,
-// not whatever the unit's focus has moved on to since.
+// answered by one hurt animation or death at most, and the target is the one
+// swung at, not whatever the unit's focus has moved on to since. The packets
+// name no attacker, so a teammate's blow inside the window counts too: with
+// several warriors on one target the hit count is an upper bound.
 func (l *Life) matchHit(id uint64) {
 	t := &l.tel
 	for i, s := range t.open {
@@ -310,6 +340,7 @@ func (l *Life) matchHit(id uint64) {
 			continue
 		}
 		t.open = append(t.open[:i], t.open[i+1:]...)
+		t.lastHit, t.lastHitAt = id, l.tick
 		t.mu.Lock()
 		t.total.HitsLanded++
 		t.fight.HitsLanded++
