@@ -4,5 +4,5 @@ package lab
 
 import "embed"
 
-//go:embed courses.sh nightly.sh
+//go:embed courses.sh arena.sh nightly.sh
 var Scripts embed.FS

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,7 +24,7 @@ func TestWritePlansMatchesStdoutAndShipsScripts(t *testing.T) {
 	if !bytes.Equal(got, want.Bytes()) {
 		t.Error("signs.plan differs from the generator's output")
 	}
-	for _, name := range []string{"courses.sh", "nightly.sh"} {
+	for _, name := range []string{"courses.sh", "arena.sh", "nightly.sh"} {
 		fi, err := os.Stat(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatal(err)
@@ -41,5 +42,34 @@ func TestWritePlansRejectsUnknownField(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
 		t.Errorf("wrote %d files for a rejected request", len(entries))
+	}
+}
+
+func TestWritePlansShipsArenaLayout(t *testing.T) {
+	dir := t.TempDir()
+	if code := writePlans([]string{dir, "arena"}); code != 0 {
+		t.Fatalf("writePlans exit %d", code)
+	}
+	var want bytes.Buffer
+	if err := render(&want, courses["arena"]); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "arena.plan"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want.Bytes()) {
+		t.Error("arena.plan differs from the generator's output")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "arena.layout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc arenaLayoutDoc
+	if err = json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Pens) != arenaPenCount || len(doc.ArchedGates) != 4 {
+		t.Fatalf("layout has %d pens and %d gates", len(doc.Pens), len(doc.ArchedGates))
 	}
 }

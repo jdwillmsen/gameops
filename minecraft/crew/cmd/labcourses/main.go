@@ -1,14 +1,16 @@
 // Command labcourses prints the console commands that build a crew lab test
 // field: the work-yard grounds east of the spawn hub, the physics, shapes
 // and pad courses west of it, the tree field beyond the courses, the works
-// field north of the grounds, or the hub's name-tag signs. It also imports
-// Bedrock structures into crew blueprints and prints the commands that
-// stamp a named blueprint — embedded in the binary, so no checkout is
-// needed — at a spot and rotation. lab/courses.sh feeds the output to a
-// server.
+// field north of the grounds, the hub's name-tag signs, or the Colosseum
+// arena. It also imports Bedrock structures into crew blueprints and prints
+// the commands that stamp a named blueprint — embedded in the binary, so no
+// checkout is needed — at a spot and rotation. lab/courses.sh and
+// lab/arena.sh feed the output to a server; labcourses arena-layout prints
+// the pen, gate and start coordinates as JSON for the arena director.
 //
-// usage: labcourses grounds|courses|trees|works|signs
+// usage: labcourses grounds|courses|trees|works|signs|arena
 //
+//	labcourses arena-layout
 //	labcourses blueprint-import [-o <dir>] <file.mcstructure> <name> <kind>
 //	labcourses blueprint <name> <x> <z> [0|90|180|270]
 //	labcourses -o <dir> <field>...
@@ -39,6 +41,7 @@ var courses = map[string]course{
 	"trees":   {buildTrees, treesAreas},
 	"works":   {buildWorks, worksAreas},
 	"signs":   {buildSigns, signsAreas},
+	"arena":   {buildArena, arenaAreas},
 }
 
 func main() {
@@ -115,15 +118,26 @@ func main() {
 		printBlueprint(bp, x, z, rot)
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "arena-layout" {
+		if len(os.Args) != 2 {
+			usage("usage: labcourses arena-layout")
+		}
+		data, err := json.MarshalIndent(arenaLayout(), "", "  ")
+		if err != nil {
+			fail("labcourses: " + err.Error())
+		}
+		fmt.Println(string(data))
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "-o" {
 		os.Exit(writePlans(os.Args[2:]))
 	}
 	if len(os.Args) != 2 {
-		usage("usage: labcourses grounds|courses|trees|works|signs|blueprint <name> <x> <z> [rot]|blueprint-import [-o <dir>] <file> <name> <kind>|-o <dir> <field>...")
+		usage("usage: labcourses grounds|courses|trees|works|signs|arena|arena-layout|blueprint <name> <x> <z> [rot]|blueprint-import [-o <dir>] <file> <name> <kind>|-o <dir> <field>...")
 	}
 	c, ok := courses[os.Args[1]]
 	if !ok {
-		usage(fmt.Sprintf("labcourses: unknown field %q (want grounds, courses, trees, works or signs)", os.Args[1]))
+		usage(fmt.Sprintf("labcourses: unknown field %q (want grounds, courses, trees, works, signs or arena)", os.Args[1]))
 	}
 	if err := render(os.Stdout, c); err != nil {
 		fmt.Fprintln(os.Stderr, "labcourses:", err)
