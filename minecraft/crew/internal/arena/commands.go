@@ -52,6 +52,20 @@ func validateWarriorName(name string) error {
 
 func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }
 
+// rallyOffsets is the ring survivors are pulled to, one round at a time. Every
+// offset is 6-9 blocks out: close enough for the warriors' reach, far enough
+// that twelve piled mobs do not share a cell.
+var rallyOffsets = [][2]int{{8, 0}, {-8, 0}, {0, 8}, {0, -8}, {6, 6}, {-6, 6}, {6, -6}, {-6, -6}}
+
+// rallyCommand teleports only the wave's own tagged mobs to the anchor, at a
+// fixed offset that keeps them on the arena floor.
+func rallyCommand(anchor string, dx, dz int) (string, error) {
+	if err := validateWarriorName(anchor); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("execute as @e[tag=%s] at @a[name=%q] run tp @s ~%d ~ ~%d", waveTag, anchor, dx, dz), nil
+}
+
 func penCloseCommand(p Pen) string { return p.Gate.Fill("iron_bars") }
 
 // tickingAreaName scopes the run's areas so a build's crew-arena-* areas are

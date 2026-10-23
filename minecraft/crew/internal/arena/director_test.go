@@ -670,3 +670,198 @@ func TestCountRetriesAnEmptyLogRead(t *testing.T) {
 		t.Errorf("count was not retried")
 	}
 }
+
+// rallySim keeps a wave alive and records when the director teleports it.
+func rallySim(t *testing.T, d *Director, clock *fakeClock, s *sim) (*FakeConsole, []time.Duration, Result) {
+	t.Helper()
+	start := clock.Now()
+	var at []time.Duration
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.Contains(cmd, " run tp ") {
+			at = append(at, clock.Now().Sub(start))
+		}
+		return s.Exec(cmd)
+	}}
+	d.Console = f
+	result, err := d.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return f, at, result
+}
+
+func rallyBook(w Wave) *WaveBook {
+	book := testBook(w)
+	book.RallyAfter = &Duration{20 * time.Second}
+	book.RallyEvery = &Duration{25 * time.Second}
+	return book
+}
+
+func TestRallyStartsAfterRallyAfterAndRepeats(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WaveTimeout = 60 * time.Second
+	var log strings.Builder
+	d.Out = &log
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) != 2 {
+		t.Fatalf("rallies at %v, want two (20s and 45s)", at)
+	}
+	if at[0] != 20*time.Second || at[1] != 45*time.Second {
+		t.Errorf("rally times = %v, want 20s then 45s", at)
+	}
+	if got := result.Rallies; got != 2 {
+		t.Errorf("result rallies = %d, want 2", got)
+	}
+	if !strings.Contains(log.String(), "arena: rally 2 mobs") {
+		t.Errorf("log lacks the rally line:\n%s", log.String())
+	}
+	want := []string{
+		`execute as @e[tag=arena_wave] at @a[name="Vanguard"] run tp @s ~8 ~ ~0`,
+		`execute as @e[tag=arena_wave] at @a[name="Vanguard"] run tp @s ~-8 ~ ~0`,
+	}
+	if got := tpCommands(t, f.Cmds); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("rally commands = %v, want %v", got, want)
+	}
+}
+
+func TestRallyNotIssuedAfterTheWaveClears(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	book := rallyBook(wave("Quick", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{20 * time.Second}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) != 0 {
+		t.Errorf("rallies at %v, want none after the wave cleared", at)
+	}
+	if got := result.Rallies; got != 0 {
+		t.Errorf("result rallies = %d, want 0", got)
+	}
+	if n := len(tpCommands(t, f.Cmds)); n != 0 {
+		t.Errorf("teleports = %d, want 0", n)
+	}
+}
+
+func TestRallySkippedWhenNoWarriorIsAlive(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.warriorOff = map[string]int{"Vanguard": 2}
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{5 * time.Second}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WarriorMisses = 100
+	d.WaveTimeout = 15 * time.Second
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) != 0 {
+		t.Errorf("rallies at %v, want none with the squad down", at)
+	}
+	if result.Rallies != 0 || len(tpCommands(t, f.Cmds)) != 0 {
+		t.Errorf("rallies = %d, teleports = %d, want none", result.Rallies, len(tpCommands(t, f.Cmds)))
+	}
+}
+
+func TestRallyCanBeDisabled(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{0}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WaveTimeout = 10 * time.Second
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) != 0 || result.Rallies != 0 || len(tpCommands(t, f.Cmds)) != 0 {
+		t.Errorf("rallies = %v (%d), teleports = %d, want none", at, result.Rallies, len(tpCommands(t, f.Cmds)))
+	}
+}
+
+func TestBossWaveOnlyRalliesWhenTheBookSaysSo(t *testing.T) {
+	tests := []struct {
+		name  string
+		rally bool
+		want  int
+	}{
+		{"default boss", false, 0},
+		{"boss rally", true, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newFakeClock()
+			s := newSim()
+			s.countStep = 0
+			s.bossPolls = 1000
+			s.warriorUp = map[string]bool{"Vanguard": true}
+			w := Wave{
+				Name: "Boss", Boss: true, Rally: tt.rally,
+				Mobs: []Mob{{Mob: "warden", Count: 1, Tier: 5, Pen: 0}},
+			}
+			book := rallyBook(w)
+			book.RallyAfter = &Duration{5 * time.Second}
+			d := newDirector(nil, book, clock)
+			d.Warriors = []string{"Vanguard"}
+			d.WaveTimeout = 10 * time.Second
+
+			f, at, result := rallySim(t, d, clock, s)
+			if len(at) != tt.want {
+				t.Errorf("rallies at %v, want %d", at, tt.want)
+			}
+			if result.Rallies != tt.want {
+				t.Errorf("result rallies = %d, want %d", result.Rallies, tt.want)
+			}
+			if got := len(tpCommands(t, f.Cmds)); got != tt.want {
+				t.Errorf("teleports = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRallyStaysInsideTheFloor(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{5 * time.Second}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WaveTimeout = 10 * time.Second
+	d.Layout.FloorRadius = 4
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) != 0 || result.Rallies != 0 || len(tpCommands(t, f.Cmds)) != 0 {
+		t.Errorf("rallies at %v (%d), want none outside a 4-block floor", at, result.Rallies)
+	}
+}
+
+// tpCommands returns every teleport and fails the test if one moves anything
+// but the wave tag; a rally must never name another entity selector.
+func tpCommands(t *testing.T, cmds []string) []string {
+	t.Helper()
+	var out []string
+	for _, cmd := range cmds {
+		if !strings.Contains(cmd, " run tp ") {
+			continue
+		}
+		if strings.Count(cmd, "@e[") != 1 || !strings.Contains(cmd, "@e[tag=arena_wave]") {
+			t.Errorf("rally teleports more than the wave tag: %q", cmd)
+		}
+		out = append(out, cmd)
+	}
+	return out
+}

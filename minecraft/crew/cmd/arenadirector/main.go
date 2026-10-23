@@ -41,7 +41,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names]\n"+
+	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d]\n"+
 		"       arenadirector reset --lab <lab>\n"+
 		"       arenadirector status --lab <lab> [--warriors names]")
 	os.Exit(2)
@@ -71,6 +71,8 @@ func run(args []string) {
 	poll := fs.Duration("poll", 2*time.Second, "delay between survivor counts")
 	maxLive := fs.Int("max-live", 0, "live-mob cap (0 uses the wave book)")
 	pause := fs.Duration("pause", 0, "pause between waves (0 uses the wave book)")
+	rallyAfter := fs.Duration("rally-after", -1, "delay from a wave's first spawn before pulling survivors to the squad (-1 uses the wave book, 0 disables)")
+	rallyEvery := fs.Duration("rally-every", -1, "interval between rallies while a wave lives (-1 uses the wave book)")
 	openStart := fs.Bool("open-start-gate", true, "clear the squad start gate before wave one")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -87,6 +89,7 @@ func run(args []string) {
 	if err != nil {
 		fail("arenadirector: " + err.Error())
 	}
+	applyRallyOverrides(book, *rallyAfter, *rallyEvery)
 	layout, err := arena.LoadLayout(*layoutPath)
 	if err != nil {
 		fail("arenadirector: " + err.Error())
@@ -158,6 +161,18 @@ func loadBook(path string) (*arena.WaveBook, error) {
 		return arena.DefaultWaves()
 	}
 	return arena.LoadWaveFile(path)
+}
+
+// applyRallyOverrides mirrors the run flags onto the book. The -1 default
+// means the operator did not pass the flag, so the book's value stands; an
+// explicit 0 disables rallies.
+func applyRallyOverrides(book *arena.WaveBook, after, every time.Duration) {
+	if after >= 0 {
+		book.RallyAfter = &arena.Duration{Duration: after}
+	}
+	if every >= 0 {
+		book.RallyEvery = &arena.Duration{Duration: every}
+	}
 }
 
 func newConsole(lab, compose string) (arena.Console, error) {

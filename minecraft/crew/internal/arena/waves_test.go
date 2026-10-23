@@ -3,6 +3,7 @@ package arena
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 const minimalWaves = `pause: 2s
@@ -75,8 +76,12 @@ func TestLoadWavesValidation(t *testing.T) {
 		{"bad effect id", strings.Replace(minimalWaves, "  1: {}", "  1:\n    effects:\n      - {id: \"strength 1\", seconds: 600}", 1), "lowercase identifier"},
 		{"bad gear item", strings.Replace(minimalWaves, "  1: {}", "  1:\n    gear:\n      - {slot: weapon.mainhand, item: \"stone sword\"}", 1), "lowercase identifier"},
 		{"phase verb", strings.Replace(minimalWaves, "    mobs:\n", "    phases:\n      - {at: 1s, commands: [\"say hello\"]}\n    mobs:\n", 1), `verb "say"`},
+		{"phase teleport", strings.Replace(minimalWaves, "    mobs:\n", "    phases:\n      - {at: 1s, commands: [\"tp @e[tag=arena_wave] @a\"]}\n    mobs:\n", 1), `verb "tp"`},
 		{"phase selector outside the arena", strings.Replace(minimalWaves, "    mobs:\n", "    phases:\n      - {at: 1s, commands: [\"effect give @e[type=zombie] speed 600 1\"]}\n    mobs:\n", 1), "tag=arena_"},
 		{"phase kill without an arena tag", strings.Replace(minimalWaves, "    mobs:\n", "    phases:\n      - {at: 1s, commands: [\"kill @e[type=zombie]\"]}\n    mobs:\n", 1), "tag=arena_"},
+		{"negative rally_after", strings.Replace(minimalWaves, "pause: 2s\n", "pause: 2s\nrally_after: -1s\n", 1), "rally_after must not be negative"},
+		{"negative rally_every", strings.Replace(minimalWaves, "pause: 2s\n", "pause: 2s\nrally_after: 5s\nrally_every: -1s\n", 1), "rally_every must not be negative"},
+		{"zero rally_every with rallies on", strings.Replace(minimalWaves, "pause: 2s\n", "pause: 2s\nrally_after: 5s\nrally_every: 0s\n", 1), "rally_every must be positive"},
 		{"bad slot", strings.Replace(minimalWaves, "  1: {}", "  1:\n    gear:\n      - {slot: hotbar, item: stone_sword}", 1), "gear slot"},
 		{"bad amplifier", strings.Replace(minimalWaves, "  1: {}", "  1:\n    effects:\n      - {id: strength, seconds: 600, amplifier: 300}", 1), "amplifier 300"},
 		{"bad sharpness", strings.Replace(minimalWaves, "  1: {}", "  1:\n    enchant: {id: sharpness, level: 9}", 1), "sharpness level 9"},
@@ -121,5 +126,53 @@ func TestWavePauseCanBeExplicitlyZero(t *testing.T) {
 	}
 	if book.Waves[0].Pause == nil || book.Waves[0].Pause.Duration != 0 {
 		t.Errorf("pause = %v, want an explicit zero", book.Waves[0].Pause)
+	}
+}
+
+func TestWaveBookRallyDefaults(t *testing.T) {
+	book, err := LoadWaves(strings.NewReader(minimalWaves))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.RallyAfter == nil || book.RallyAfter.Duration != 20*time.Second {
+		t.Errorf("rally_after = %v, want the 20s default", book.RallyAfter)
+	}
+	if book.RallyEvery == nil || book.RallyEvery.Duration != 25*time.Second {
+		t.Errorf("rally_every = %v, want the 25s default", book.RallyEvery)
+	}
+}
+
+func TestWaveBookRallyFields(t *testing.T) {
+	doc := strings.Replace(minimalWaves, "pause: 2s\n", "pause: 2s\nrally_after: 0s\nrally_every: 9s\n", 1)
+	doc = strings.Replace(doc, "  - name: One", "  - name: One\n    rally: true", 1)
+	book, err := LoadWaves(strings.NewReader(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.RallyAfter.Duration != 0 {
+		t.Errorf("rally_after = %v, want an explicit zero", book.RallyAfter.Duration)
+	}
+	if book.RallyEvery.Duration != 9*time.Second {
+		t.Errorf("rally_every = %v, want 9s", book.RallyEvery.Duration)
+	}
+	if !book.Waves[0].Rally {
+		t.Error("wave rally flag was not parsed")
+	}
+}
+
+func TestWaveRallyRules(t *testing.T) {
+	tests := []struct {
+		name string
+		wave Wave
+		want bool
+	}{
+		{"ordinary waves rally", Wave{}, true},
+		{"boss waves stay put", Wave{Boss: true}, false},
+		{"boss waves rally on request", Wave{Boss: true, Rally: true}, true},
+	}
+	for _, tt := range tests {
+		if got := tt.wave.rallies(); got != tt.want {
+			t.Errorf("%s: rallies = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }

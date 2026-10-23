@@ -13,6 +13,7 @@
 #        arena.sh layout [--out <file>]
 #        arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>]
 #                            [--timeout <duration>] [--max-live N] [--poll <d>]
+#                            [--rally-after <d>] [--rally-every <d>]
 #        arena.sh reset <lab>
 #        arena.sh status <lab> [--warriors <names>]
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
@@ -21,9 +22,16 @@
 # run drives minecraft/crew/cmd/arenadirector: it opens the squad gate, spawns
 # each wave in its pens, counts survivors and stops on the boss, a squad wipe
 # or a timeout. It prints one JSON result line (duration, waves cleared,
-# warrior deaths). reset kills only the director's tagged mobs; status prints
-# the live wave, boss and warrior counts. A k8s: run needs --confirm-overwrite
-# because it puts buffed mobs into the shared world.
+# warrior deaths, rallies). reset kills only the director's tagged mobs; status
+# prints the live wave, boss and warrior counts. A k8s: run needs
+# --confirm-overwrite because it puts buffed mobs into the shared world.
+#
+# Survivors are rallied (teleported to a ring around the first living warrior)
+# rally_after seconds after a wave's first spawn, then every rally_every while
+# the wave lives; the wave book defaults are 20s and 25s, and each value can be
+# overridden with --rally-after/--rally-every. Rallies keep ranged mobs from
+# parking at the floor edge outside the warriors' reach. --rally-after 0 turns
+# them off; boss waves only rally when the wave sets `rally: true`.
 #
 # --plan feeds a prebuilt `labcourses arena` output to build instead of
 # running the generator from a checkout, for hosts that have no Go toolchain.
@@ -37,7 +45,7 @@ set -euo pipefail
 confirm=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
+usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;

@@ -37,6 +37,8 @@ type WaveBook struct {
 	Pause       Duration     `yaml:"pause"`
 	MaxLive     int          `yaml:"max_live"`
 	WaveTimeout Duration     `yaml:"wave_timeout"`
+	RallyAfter  *Duration    `yaml:"rally_after"`
+	RallyEvery  *Duration    `yaml:"rally_every"`
 	Tiers       map[int]Tier `yaml:"tiers"`
 	Waves       []Wave       `yaml:"waves"`
 }
@@ -69,9 +71,15 @@ type Wave struct {
 	Name   string    `yaml:"name"`
 	Pause  *Duration `yaml:"pause"`
 	Boss   bool      `yaml:"boss"`
+	Rally  bool      `yaml:"rally"`
 	Phases []Phase   `yaml:"phases"`
 	Mobs   []Mob     `yaml:"mobs"`
 }
+
+// rallies reports whether the director may pull this wave's mobs to the squad.
+// Rallies are what stop ranged mobs parking outside the warriors' reach; a
+// boss is only dragged in when the book asks for it, so its fight stays put.
+func (w Wave) rallies() bool { return !w.Boss || w.Rally }
 
 type Mob struct {
 	Mob     string `yaml:"mob"`
@@ -166,6 +174,21 @@ func (b *WaveBook) normalise() error {
 	}
 	if b.WaveTimeout.Duration == 0 {
 		b.WaveTimeout = Duration{5 * time.Minute}
+	}
+	if b.RallyAfter == nil {
+		b.RallyAfter = &Duration{20 * time.Second}
+	}
+	if b.RallyEvery == nil {
+		b.RallyEvery = &Duration{25 * time.Second}
+	}
+	if b.RallyAfter.Duration < 0 {
+		return fmt.Errorf("rally_after must not be negative")
+	}
+	if b.RallyEvery.Duration < 0 {
+		return fmt.Errorf("rally_every must not be negative")
+	}
+	if b.RallyAfter.Duration > 0 && b.RallyEvery.Duration <= 0 {
+		return fmt.Errorf("rally_every must be positive when rallies are on")
 	}
 	if b.MaxLive < 1 {
 		return fmt.Errorf("max_live must be positive, got %d", b.MaxLive)
