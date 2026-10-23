@@ -169,7 +169,7 @@ func (u *unit) end() {
 // lifeConfig maps the settings onto what the unit does on its own. The kit is
 // on only when a chest position is configured.
 func lifeConfig(cfg config.Config, world skill.ChestWorld) life.Config {
-	lc := life.Config{Wander: cfg.IdleWander, Radius: cfg.IdleRadius, Defend: cfg.Defend, Eat: cfg.Eat}
+	lc := life.Config{Wander: cfg.IdleWander, Radius: cfg.IdleRadius, Defend: cfg.Defend, Eat: cfg.Eat, Role: cfg.Role}
 	if c := cfg.KitChest; c != nil {
 		lc.Kit = &life.Kit{Chest: protocol.BlockPos{c[0], c[1], c[2]}, Food: cfg.KitFood, World: world}
 	}

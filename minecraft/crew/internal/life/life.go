@@ -66,6 +66,10 @@ type Config struct {
 	Defend bool
 	// Eat makes the unit eat when hungry and food is on its hotbar.
 	Eat bool
+	// Role opts the unit into the warrior engine when it names a warrior
+	// role — vanguard, striker or ranger. Any other value leaves the
+	// reactive defence in charge.
+	Role string
 	// Kit, when set, is a chest the unit rearms from.
 	Kit *Kit
 }
@@ -76,6 +80,8 @@ const (
 	modeFight mode = iota
 	modeRetreat
 	modeStepBack
+	// modeRegroup is the warrior's heal fallback: walk to the leader.
+	modeRegroup
 )
 
 // Life is driven by the runner once per tick, and fed every packet by the
@@ -127,6 +133,9 @@ type Life struct {
 	swim swimState
 	eat  eatState
 	kit  kitState
+	// warrior drives the squad's fighting when cfg.Role named a role, else
+	// it is nil and the reactive defence decides everything.
+	warrior *warriorState
 	// makeKit replaces the withdraw a visit runs, for tests.
 	makeKit func(weapon bool, food int) skill.Skill
 }
@@ -137,7 +146,11 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	if cfg.Radius < 1 {
 		cfg.Radius = 1
 	}
-	return &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
+	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
+	if role, ok := validRole(cfg.Role); ok {
+		l.warrior = &warriorState{role: role}
+	}
+	return l
 }
 
 // Spawn starts a session for the unit with the runtime ID. It leaves the
@@ -161,6 +174,9 @@ func (l *Life) Reset() {
 	l.chase, l.flee = nil, nil
 	l.idle, l.swim = idleState{}, swimState{}
 	l.eat, l.kit = eatState{}, kitState{}
+	if w := l.warrior; w != nil {
+		w.reset()
+	}
 }
 
 // End drops the session's entities. Like Spawn it is for the read loop.

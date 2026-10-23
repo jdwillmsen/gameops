@@ -42,6 +42,9 @@ type idleState struct {
 // sends one: the server expects an input every tick from a player that is
 // alive, and moves a unit that sends none by knockback it never answers.
 func (l *Life) Idle(ctx context.Context, a skill.Actuator) error {
+	// A fight may have ended with the shield still raised; walking wants
+	// the hand.
+	l.stowShield(a)
 	p := a.Pose()
 	st := &l.idle
 	// A unit that a fight or a retreat moved far off anchors where it is now.

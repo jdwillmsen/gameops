@@ -36,6 +36,9 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	if hurt {
 		l.noteHurt(p)
 	}
+	if l.warrior != nil {
+		return l.warriorEngaged(p, s, hurt)
+	}
 
 	var (
 		best  belief.Entity
@@ -86,6 +89,12 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		}
 	}
 
+	return l.engage(p, best, m)
+}
+
+// engage adopts the target and mode this tick chose, and ends the fight once
+// the target is gone and the grace has run out.
+func (l *Life) engage(p act.Pose, best belief.Entity, m mode) bool {
 	if best.ID != 0 {
 		// A new target outranks an earlier giveUp: the fight no longer ends
 		// because of the mob that was dropped.
@@ -104,7 +113,10 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 			clear(l.fightTicks)
 		}
 		l.fightTicks[best.ID]++
-		if l.fightTicks[best.ID] > fightLimit && !(l.isSuspect(best.ID) && inMeleeReach(p, best)) {
+		// A warrior fights a boss for as long as the boss stands; the limit
+		// is the reactive defence's way out of a going-nowhere fight, and
+		// approach's own give-ups cover an unreachable target.
+		if l.warrior == nil && l.fightTicks[best.ID] > fightLimit && !(l.isSuspect(best.ID) && inMeleeReach(p, best)) {
 			l.giveUp(best.ID, endFightLimit)
 		}
 		return true
@@ -142,6 +154,8 @@ func modeName(m mode) string {
 		return "retreat"
 	case modeStepBack:
 		return "step_back"
+	case modeRegroup:
+		return "regroup"
 	}
 	return "fight"
 }
@@ -203,9 +217,13 @@ func (l *Life) giveUp(id uint64, reason string) {
 }
 
 // Fight sends this tick's input while engaged: it faces the threat, then
-// closes in and strikes, backs away, or stands its ground.
+// closes in and strikes, backs away, or stands its ground. A warrior fights
+// its own fight, on its role's terms.
 func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	l.idle = idleState{}
+	if l.warrior != nil {
+		return l.warriorFight(ctx, a, s)
+	}
 	l.stopEating(a, s)
 	l.stopKit(a)
 	e, ok := l.ents.Get(l.target.ID)
