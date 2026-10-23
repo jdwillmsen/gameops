@@ -32,7 +32,7 @@ crew-control; it never calls them to command them.
 
 ## Routes
 
-- `GET /`: the console, one focused unit or a wall of every unit; `GET /static/{file}` its assets; `GET /camera` redirects to `/`
+- `GET /`: the console, one focused unit, a wall of every unit or the fleet overview (`?view=fleet`); `GET /static/{file}` its assets; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
@@ -172,6 +172,18 @@ treat a repeat as a duplicate. Those routes are refused on any request with
 days are pruned at start and daily. With Postgres unset or down, the work
 routes answer 503 and the view-only console keeps working.
 
+## Fleet overview
+
+`?view=fleet` (the **Fleet** button, or `o`) is a table of every unit for the signed-out public view and for operators alike, fed only by the `/v1/units/stream` events the console already receives. Each row shows state, time in that state, health and hunger bars, the task, and a three-minute health trail; a strip of stat tiles counts online, working, idle, stuck, dead and offline units and the tasks done and failed in the live feed window (the last 200 events the stream holds, so those two are a window, not a total). Signed-in streams add a position column on wide screens. A state never rides on colour alone: each has its own shape and word.
+
+- **States.** `working` and `idle` come from the unit's task; `dead` and `offline` from its status. `stuck` is a working unit whose current task the feed named stuck (no progress for 90 s); it clears when the task or its progress changes, because the feed carries no "unstuck" event.
+- **Time in state** is exact when the console saw the change or the feed backlog dates it; otherwise it is a floor, shown as `>=` the time since the page opened. The trail is a client-side window of one sample per 2 s, since the stream carries no history.
+- **Sort and filter** by state, name, health, hunger, task or time in state (unknown values always last); filter by text, state, task kind and health or hunger at most 6, 10 or 15. Both live in the address (`sort`, `dir`, `q`, `st`, `task`, `hp`, `food`) so a view can be linked.
+- **Keys.** `/` filters; arrows, `j`/`k`, Home, End and PageUp/Down move between rows; Enter or a click focuses the unit's camera; `a` jumps to the next unit that needs a look; Esc clears the filter.
+- **Updates.** Rows are built once and patched in place every 2 s, with fixed column and row sizes so nothing shifts. A sort by a changing value re-orders rows, but not while the pointer is over the table. On a phone each unit is a two-line card and the camera modes, event feed and status bar are hidden to leave room.
+
+Logic lives in `overview.js` (node-tested in `overview.test.mjs`), the DOM in `overview-ui.js`, styles in `overview.css`; the chart library supplies the stat tiles and sparklines.
+
 ## Chart library
 
 `internal/console/web/charts/` holds the console's chart panels: plain ES modules and SVG, no bundler and no dependency, embedded and served from `/static/charts/{file}` like the rest of the console. `/static/charts/demo.html` is the gallery: every chart on seeded synthetic data, with theme (`?theme=light|dark`), texture (`?texture=1`) and a live 20-chart run (`?live=1`). It doubles as the visual regression fixture; `?eager=1` draws off-screen panels too, for full-page screenshots.
@@ -192,7 +204,7 @@ chart.update({ x: [ms, ...], series: [{ key: 'camera', name: 'Camera', values: [
 | --- | --- | --- |
 | `LineChart` | `{ x: [ms], series: [{ key, name, values }] }` | `area`, `stacked`, `zero`, `y: {min,max}`, `tz: 'UTC' \| 'local'`; crosshair and one tooltip for every series; drag to brush a range, double-click or Esc to reset; `Shift`+arrows then `Enter` brushes from the keyboard |
 | `BarChart` | `{ categories: [name], series: [...] }` | one series, grouped or `stacked` (non-negative); `horizontal` (`height: 'auto'` sizes to the rows); hover lifts the mark and the tooltip lists every series |
-| `Sparkline`, `StatTile` | `{ values, labels }`; tile: `{ label, value, delta: {value, label, goodWhenUp}, trend, status }` | trend line in neutral ink with the current period in the accent; delta carries an arrow and a sign |
+| `Sparkline`, `StatTile` | `{ values, labels }`; tile: `{ label, value, delta: {value, label, goodWhenUp}, trend, status }` | trend line in neutral ink with the current period in the accent; delta carries an arrow and a sign; a sparkline also takes `height`, `pad`, `domain: [lo, hi]` to pin the range and `table: false` to skip its screen-reader table |
 | `Heatmap` | `{ rows, cols, values: [[...]] }` | one-hue sequential, or `diverging: true` around zero; scale legend underneath |
 | `Gauge` | `{ value }` | `min`, `max`, `warn`, `crit`, `invert`; fill goes accent, warning, critical, each with an icon and a word |
 
