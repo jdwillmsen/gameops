@@ -158,20 +158,31 @@ export function nextAttention(rows, cur) {
 }
 
 // Moves among the ids on screen. It stops at the ends: a table is not a ring,
-// and wrapping past the last row hides that the list ended.
+// and wrapping past the last row hides that the list ended. From a row that is
+// not on screen (filtered away, say) there is nothing to step from, so forward
+// keys start at the top and backward keys at the bottom.
 export function moveFocus(ids, cur, key, page = 8) {
   if (!ids.length) return '';
+  const last = ids.length - 1;
+  if (key === 'Home') return ids[0];
+  if (key === 'End') return ids[last];
+  const span = Math.max(1, page);
+  const step = { ArrowDown: 1, j: 1, PageDown: span, ArrowUp: -1, k: -1, PageUp: -span }[key];
+  if (step === undefined) return cur;
   const i = ids.indexOf(cur);
-  const to = {
-    ArrowDown: i + 1, j: i + 1,
-    ArrowUp: i - 1, k: i - 1,
-    PageDown: i + page,
-    PageUp: i - page,
-    Home: 0,
-    End: ids.length - 1,
-  }[key];
-  if (to === undefined) return cur;
-  return ids[Math.min(ids.length - 1, Math.max(0, i < 0 ? 0 : to))];
+  if (i < 0) return ids[step > 0 ? 0 : last];
+  return ids[Math.min(last, Math.max(0, i + step))];
+}
+
+// Names the last n samples by how long ago they were taken, from their own
+// timestamps: a throttled tab or a stream outage spaces them unevenly.
+export function trailLabels(times, n, now) {
+  const at = times.slice(-n);
+  return at.map((t, i) => {
+    const s = Math.max(0, Math.round((now - t) / 1000));
+    if (i === at.length - 1 && s * 1000 <= SAMPLE_MS * 1.5) return 'now';
+    return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+  });
 }
 
 // ---- the board: what the stream cannot tell on its own ----
