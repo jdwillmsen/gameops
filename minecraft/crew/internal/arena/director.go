@@ -51,6 +51,7 @@ type Director struct {
 	WaveTimeout   time.Duration
 	RunTimeout    time.Duration
 	Warriors      []string
+	WarriorMisses int
 	OpenStartGate bool
 
 	Out   io.Writer
@@ -109,6 +110,9 @@ func (d *Director) prepare() error {
 	}
 	if d.Poll <= 0 {
 		d.Poll = 2 * time.Second
+	}
+	if d.WarriorMisses <= 0 {
+		d.WarriorMisses = 3
 	}
 	if d.RunTimeout <= 0 {
 		d.RunTimeout = 30 * time.Minute
@@ -201,7 +205,7 @@ func (d *Director) Run() (Result, error) {
 
 // runWave spawns in batches up to the live cap and polls until the wave is
 // empty, the boss falls, the squad is gone or a timeout fires.
-func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.Time, alive map[string]bool, result *Result) (outcome string, cleared bool, err error) {
+func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.Time, alive map[string]*warriorState, result *Result) (outcome string, cleared bool, err error) {
 	pens := map[int]bool{}
 	for _, m := range wave.Mobs {
 		if m.Pen > 0 {
@@ -477,18 +481,26 @@ func (d *Director) validateWaves(waves []Wave) error {
 	return nil
 }
 
+// warriorState is one warrior's standing across polls. A miss is held for a
+// few polls before it counts as a death: Bedrock can drop a target from the
+// selector while it respawns.
+type warriorState struct {
+	up     bool
+	misses int
+}
+
 // warriorBaseline remembers who is standing before the first wave. Deaths are
 // counted from this set, so a name that never appears is a setup error rather
 // than a death.
-func (d *Director) warriorBaseline() (map[string]bool, int, error) {
-	alive := map[string]bool{}
+func (d *Director) warriorBaseline() (map[string]*warriorState, int, error) {
+	states := map[string]*warriorState{}
 	any := false
 	for _, name := range d.Warriors {
 		n, err := d.countCmd(warriorCommand(name), "warrior "+name)
 		if err != nil {
 			return nil, 0, err
 		}
-		alive[name] = n > 0
+		states[name] = &warriorState{up: n > 0}
 		if n > 0 {
 			any = true
 		}
@@ -496,30 +508,41 @@ func (d *Director) warriorBaseline() (map[string]bool, int, error) {
 	if len(d.Warriors) > 0 && !any {
 		return nil, 0, fmt.Errorf("arena: none of the warriors %v are in the world", d.Warriors)
 	}
-	return alive, 0, nil
+	return states, 0, nil
 }
 
-// checkWarriors updates the death count and reports a full wipe.
-func (d *Director) checkWarriors(alive map[string]bool, result *Result) (bool, error) {
-	if len(alive) == 0 {
+// checkWarriors rechecks every warrior on every poll and reports a wipe only
+// when all of them are currently down. A down-and-respawned warrior counts as
+// standing again and later deaths are counted again.
+func (d *Director) checkWarriors(states map[string]*warriorState, result *Result) (bool, error) {
+	if len(states) == 0 {
 		return false, nil
 	}
 	standing := false
-	for name, up := range alive {
-		if !up {
-			continue
-		}
+	for name, st := range states {
 		n, err := d.countCmd(warriorCommand(name), "warrior "+name)
 		if err != nil {
 			return false, err
 		}
-		if n == 0 {
-			alive[name] = false
-			result.WarriorDeaths++
-			d.logf("arena: warrior %s is down", name)
+		if n > 0 {
+			st.up, st.misses = true, 0
+			standing = true
 			continue
 		}
-		standing = true
+		st.misses++
+		if st.misses < d.WarriorMisses {
+			// A short gap may be a respawn; keep a previously standing
+			// warrior standing so it cannot flip the squad to a wipe.
+			if st.up {
+				standing = true
+			}
+			continue
+		}
+		if st.up {
+			result.WarriorDeaths++
+			d.logf("arena: warrior %s is down", name)
+		}
+		st.up = false
 	}
 	return !standing, nil
 }
