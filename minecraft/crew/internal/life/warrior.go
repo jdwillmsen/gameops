@@ -9,11 +9,15 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadmsg"
 )
 
 // Role is a warrior's job in the squad. The names are what crew-control's
 // squad routes carry on the wire, so the unit client maps them one to one.
-type Role string
+// The types below are squadmsg's, aliased: the client, the engine and
+// crew-control's routes all speak the same shapes, so a *squadclient.Client
+// implements the Squad interface as-is.
+type Role = squadmsg.Role
 
 const (
 	// Vanguard holds the front: it takes the focus target head on, keeps
@@ -36,7 +40,7 @@ func validRole(r string) (Role, bool) {
 
 // OrderKind is what the squad has been told to do. The zero value is no
 // order standing, which fights as though focused.
-type OrderKind string
+type OrderKind = squadmsg.OrderKind
 
 const (
 	OrderNone    OrderKind = ""
@@ -50,14 +54,10 @@ const (
 // Order is one standing instruction to the squad, replaced wholesale when a
 // new one arrives. Target names an entity type to prefer, empty for none;
 // Seq is crew-control's, kept for the client that needs to drop stale ones.
-type Order struct {
-	Kind   OrderKind
-	Target string
-	Seq    int64
-}
+type Order = squadmsg.Order
 
 // CalloutKind is why a unit spoke up.
-type CalloutKind string
+type CalloutKind = squadmsg.CalloutKind
 
 const (
 	CalloutLowHealth  CalloutKind = "low_health"
@@ -67,13 +67,11 @@ const (
 
 // Callout is one unit speaking up for the squad's benefit. The unit client
 // fills in who said it and when.
-type Callout struct {
-	Kind CalloutKind
-}
+type Callout = squadmsg.Callout
 
-// Squad is the chain of command the warrior engine fights inside. The squad
-// client implements it; the engine never imports a squad package, so the
-// crew-control wiring can arrive in any order.
+// Squad is the chain of command the warrior engine fights inside. The unit's
+// squad client implements it, so the engine and crew-control's routes meet
+// in squadmsg's types with no adapter between them.
 type Squad interface {
 	// Leader is who the unit anchors on: its id and feet position, or !ok
 	// when the unit has nobody to follow.
