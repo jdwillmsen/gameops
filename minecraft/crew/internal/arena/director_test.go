@@ -1251,6 +1251,47 @@ func TestPositionJumpCountsADeathOnce(t *testing.T) {
 	}
 }
 
+func TestRepairFloorReportsAFillErrorLine(t *testing.T) {
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "fill ") {
+			return "ERROR: Too many blocks in the area (limit is 32768)", nil
+		}
+		return "", nil
+	}}
+	d := &Director{Console: f, Layout: testLayout()}
+	d.Layout.FloorRadius = 45
+	err := d.repairFloor()
+	if err == nil || !strings.Contains(err.Error(), "Too many blocks") {
+		t.Fatalf("repairFloor error = %v, want the fill failure", err)
+	}
+}
+
+func TestRepairFloorAllowsAnEmptyReplace(t *testing.T) {
+	for _, reply := range []string{"0 blocks filled", "No blocks were filled"} {
+		f := &FakeConsole{Respond: func(string) (string, error) { return reply, nil }}
+		d := &Director{Console: f, Layout: testLayout()}
+		d.Layout.FloorRadius = 45
+		if err := d.repairFloor(); err != nil {
+			t.Errorf("repairFloor with %q: %v", reply, err)
+		}
+	}
+}
+
+func TestPrepareRejectsAnOversizedFloorRepair(t *testing.T) {
+	clock := newFakeClock()
+	f := &FakeConsole{}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	d.Layout.FloorRadius = 64
+	err := d.prepare()
+	if err == nil || !strings.Contains(err.Error(), "floor_radius") {
+		t.Fatalf("prepare error = %v, want an oversized floor-radius rejection", err)
+	}
+	d.Layout.FloorRadius = 63
+	if err := d.prepare(); err != nil {
+		t.Fatalf("prepare with floor_radius 63: %v", err)
+	}
+}
+
 func TestMissedRespawnIsNotCountedTwice(t *testing.T) {
 	clock := newFakeClock()
 	s := newSim()

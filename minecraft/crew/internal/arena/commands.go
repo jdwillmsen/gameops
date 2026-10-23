@@ -51,11 +51,12 @@ func validateWarriorName(name string) error {
 	return nil
 }
 
-// floorRepairCommands refill air in the floor's top layers. Charged creepers
-// blast craters the squad and the mobs then fall into, which breaks pathing
-// and leaves survivors out of reach. Two fills keep each under the 32768-block
-// limit; only air is replaced, so nothing standing is touched.
-func floorRepairCommands(l Layout) []string {
+// maxFill is Bedrock's per-command block limit for /fill.
+const maxFill = 32768
+
+// floorRepairBoxes are the halves the floor repair fills; each must stay under
+// maxFill.
+func floorRepairBoxes(l Layout) []Box {
 	r := l.FloorRadius
 	if r <= 0 {
 		return nil
@@ -64,10 +65,27 @@ func floorRepairCommands(l Layout) []string {
 	z0, z1 := l.Center.Z-r, l.Center.Z+r
 	y0, y1 := l.GroundY-3, l.GroundY
 	zm := l.Center.Z
-	return []string{
-		fmt.Sprintf("fill %d %d %d %d %d %d sand replace air", x0, y0, z0, x1, y1, zm),
-		fmt.Sprintf("fill %d %d %d %d %d %d sand replace air", x0, y0, zm+1, x1, y1, z1),
+	return []Box{
+		{X0: x0, Y0: y0, Z0: z0, X1: x1, Y1: y1, Z1: zm},
+		{X0: x0, Y0: y0, Z0: zm + 1, X1: x1, Y1: y1, Z1: z1},
 	}
+}
+
+// floorRepairCommands refill air in the floor's top layers. Charged creepers
+// blast craters the squad and the mobs then fall into, which breaks pathing
+// and leaves survivors out of reach. Two fills keep each under the 32768-block
+// limit; only air is replaced, so nothing standing is touched.
+func floorRepairCommands(l Layout) []string {
+	boxes := floorRepairBoxes(l)
+	if boxes == nil {
+		return nil
+	}
+	cmds := make([]string, 0, len(boxes))
+	for _, b := range boxes {
+		cmds = append(cmds, fmt.Sprintf("fill %d %d %d %d %d %d sand replace air",
+			b.X0, b.Y0, b.Z0, b.X1, b.Y1, b.Z1))
+	}
+	return cmds
 }
 
 func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }
