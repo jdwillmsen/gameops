@@ -171,28 +171,60 @@ func writeAtomic(path string, data []byte) error {
 // removed after the build: on network storage each file costs a round trip,
 // which made a cold build take minutes for a download of seconds. The
 // returned Pack describes the download, so its Dir is always empty.
+//
+// Units may share one cacheDir. Only one of them builds at a time; the others
+// wait for its result and then read it, so the pack is fetched once for all.
 func Ensure(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
+	for {
+		a, pack, err := ensureOnce(ctx, f, serverVersion, cacheDir, opts)
+		if !errors.Is(err, errBuildHeld) {
+			return a, pack, err
+		}
+		if err := waitForBuild(ctx); err != nil {
+			return nil, Pack{}, err
+		}
+	}
+}
+
+func ensureOnce(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
+	a, tag, complete := cachedAtlas(cacheDir, serverVersion, opts)
+	if complete {
+		return a, Pack{Tag: tag}, nil
+	}
+	release, err := lockBuild(cacheDir)
+	if err != nil {
+		return nil, Pack{}, err
+	}
+	defer release()
+	// Another unit may have finished while this one waited for the lock.
+	if a, tag, complete = cachedAtlas(cacheDir, serverVersion, opts); complete {
+		return a, Pack{Tag: tag}, nil
+	}
 	// A cached atlas that lacks only its item sheet or entity models is
 	// rebuilt, but kept to fall back on: losing the fetch should not also
 	// lose the terrain.
-	var fallback *Atlas
-	var fallbackTag string
-	if tag, ok := readIndex(cacheDir)[serverVersion]; ok {
-		if a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir)); err == nil && a.table.TileSize == opts.tileSize() {
-			if a.Complete() {
-				return a, Pack{Tag: tag}, nil
-			}
-			fallback, fallbackTag = a, tag
-		}
-	}
-	a, pack, err := build(ctx, f, serverVersion, cacheDir, opts)
-	if err != nil && fallback != nil {
+	built, pack, err := build(ctx, f, serverVersion, cacheDir, opts)
+	if err != nil && a != nil {
 		if opts.OnFallback != nil {
 			opts.OnFallback(err)
 		}
-		return fallback, Pack{Tag: fallbackTag}, nil
+		return a, Pack{Tag: tag}, nil
 	}
-	return a, pack, err
+	return built, pack, err
+}
+
+// cachedAtlas reads the cache entry for a server version. When complete is
+// false, a non-nil atlas is an entry that is current but unfinished.
+func cachedAtlas(cacheDir, serverVersion string, opts Options) (a *Atlas, tag string, complete bool) {
+	tag, ok := readIndex(cacheDir)[serverVersion]
+	if !ok {
+		return nil, "", false
+	}
+	a, err := LoadAtlas(filepath.Join(cacheDir, tag, atlasSubdir))
+	if err != nil || a.table.TileSize != opts.tileSize() {
+		return nil, "", false
+	}
+	return a, tag, a.Complete()
 }
 
 func build(ctx context.Context, f Fetcher, serverVersion, cacheDir string, opts Options) (*Atlas, Pack, error) {
