@@ -33,6 +33,13 @@ func (r Roster) Units() []Unit {
 	return append([]Unit(nil), r.units...)
 }
 
+// Has reports whether id names a unit on the roster, as the squad routes
+// ask, which only need membership and not the unit itself.
+func (r Roster) Has(id string) bool {
+	_, ok := r.byID[id]
+	return ok
+}
+
 func (r Roster) Get(id string) (Unit, bool) {
 	i, ok := r.byID[id]
 	if !ok {

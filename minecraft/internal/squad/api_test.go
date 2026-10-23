@@ -8,11 +8,17 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 )
 
 const token = "s3cret"
+
+// testUnits is the roster the routes check hellos against: the design's
+// three warrior slots, no more.
+type testUnits map[string]bool
+
+func (u testUnits) Has(id string) bool { return u[id] }
+
+var units = testUnits{"crew-18": true, "crew-19": true, "crew-20": true}
 
 type rig struct {
 	api   *API
@@ -23,13 +29,6 @@ type rig struct {
 
 func newRig(t *testing.T, tokenSet bool) *rig {
 	t.Helper()
-	units, err := roster.Parse(`[
-	  {"id":"crew-18","name":"Cassia","url":"http://crew-18:8080"},
-	  {"id":"crew-19","name":"Liron","url":"http://crew-19:8080"},
-	  {"id":"crew-20","name":"Ferula","url":"http://crew-20:8080"}]`)
-	if err != nil {
-		t.Fatal(err)
-	}
 	r := &rig{store: NewStore(), ops: func() string { return "owner" }}
 	mux := http.NewServeMux()
 	if tokenSet {
