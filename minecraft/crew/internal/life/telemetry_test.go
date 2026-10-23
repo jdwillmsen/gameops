@@ -489,3 +489,17 @@ func TestAHurtAndDeathOfOneBlowAreOneHit(t *testing.T) {
 		}
 	}
 }
+
+func TestADropLongAfterTheHurtAnimationIsStillOneBlow(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.step()
+	r.hurt()
+	r.run(4)
+	r.setHealth(17)
+	r.run(attackEvery + 5)
+	got := r.events("damage_taken")
+	if len(got) != 1 || got[0]["amount"] != 3.0 || got[0]["attacker"] != "zombie" {
+		t.Fatalf("damage_taken = %v, want one blow of 3 from the zombie", got)
+	}
+}

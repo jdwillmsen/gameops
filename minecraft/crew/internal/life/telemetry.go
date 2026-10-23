@@ -42,9 +42,10 @@ const (
 	// Hurt animations and deaths of other entities kept for the next tick: a
 	// crowd hurting itself must not grow the sets without bound.
 	maxSeenHurts = 64
-	// A health drop and a hurt animation of the one blow can arrive a tick
+	// A health drop and a hurt animation of the one blow can arrive ticks
 	// apart; a lone hurt animation is given this long to be joined by a drop.
-	damageJoin = 2
+	// A second blow cannot land sooner, inside the invulnerability frames.
+	damageJoin = attackEvery
 	// An attribution this fresh belongs to the blow being reported.
 	attributionFresh = 2
 
@@ -97,15 +98,17 @@ type telemetry struct {
 
 	// The rest belongs to the stepping goroutine.
 	open []swing
-	// The last hit matched, so a death a tick after its hurt is not a
+	// The last hit matched, so a death soon after its hurt is not a
 	// second hit for the one blow.
 	lastHit   uint64
 	lastHitAt uint64
 
 	hurtPending bool
 	hurtSince   uint64
-	lastDamage  uint64
-	damaged     bool
+	// hurtBy is who the pending hurt was blamed on when it came.
+	hurtBy     string
+	lastDamage uint64
+	damaged    bool
 
 	attackerType string
 	attackerAt   uint64
@@ -354,26 +357,32 @@ func (l *Life) matchHit(id uint64) {
 
 // reportDamage logs the blow the read loop saw. The health drop gives the
 // amount; the hurt animation alone, without a drop soon after it, is a blow
-// the amount of which is not known.
+// the amount of which is not known. A drop that joins a pending hurt is that
+// hurt's blow, blamed as the hurt was: the drop's own attribution is ticks
+// late. A lethal drop is blamed on the killer.
 func (l *Life) reportDamage(d drained) {
 	t := &l.tel
 	switch {
 	case d.drop > 0:
+		by := l.blowAttacker()
+		if t.hurtPending && !d.died {
+			by = t.hurtBy
+		}
 		t.hurtPending = false
 		t.damaged, t.lastDamage = true, l.tick
-		l.damageEvent(float64(d.drop), d)
-	case d.selfHurt && (!t.damaged || l.tick-t.lastDamage > damageJoin):
-		t.hurtPending, t.hurtSince = true, l.tick
+		l.damageEvent(float64(d.drop), d, by)
+	case d.selfHurt && !t.hurtPending && (!t.damaged || l.tick-t.lastDamage > damageJoin):
+		t.hurtPending, t.hurtSince, t.hurtBy = true, l.tick, l.blowAttacker()
 	}
 	if t.hurtPending && l.tick-t.hurtSince >= damageJoin {
 		t.hurtPending = false
-		l.damageEvent(0, d)
+		l.damageEvent(0, d, t.hurtBy)
 	}
 }
 
-func (l *Life) damageEvent(amount float64, d drained) {
+func (l *Life) damageEvent(amount float64, d drained, by string) {
 	t := &l.tel
-	f := map[string]any{"attacker": l.blowAttacker()}
+	f := map[string]any{"attacker": by}
 	if amount > 0 {
 		f["amount"] = round2(amount)
 	}
