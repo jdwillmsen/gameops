@@ -61,6 +61,7 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"KIT_CHEST":        "1,2",
 		"KIT_FOOD":         "0",
 		"CREW_ROLE":        "wizard",
+		"CREW_SQUAD":       "9lives",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -87,6 +88,37 @@ func TestLoadParsesTheWarriorRole(t *testing.T) {
 				t.Errorf("Role = %q, want %q", cfg.Role, role)
 			}
 		})
+	}
+}
+
+// A warrior joins a squad without being told which one: the default is the
+// design's first squad, so three warriors with no CREW_SQUAD still meet.
+func TestLoadDefaultsAWarriorsSquadToAlpha(t *testing.T) {
+	setRequired(t)
+	t.Setenv("CREW_ROLE", "vanguard")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Squad != "alpha" {
+		t.Fatalf("Squad = %q, want the default alpha", cfg.Squad)
+	}
+	t.Setenv("CREW_SQUAD", "bravo_2")
+	if cfg, err = Load(); err != nil || cfg.Squad != "bravo_2" {
+		t.Fatalf("CREW_SQUAD=bravo_2: %q, %v; want it carried through", cfg.Squad, err)
+	}
+	// Without a role there is no squad to join, but a fleet-wide setting is
+	// still read, and still refused when it is not an id the routes take.
+	t.Setenv("CREW_ROLE", "")
+	t.Setenv("CREW_SQUAD", "bravo_2")
+	if cfg, err = Load(); err != nil || cfg.Role != "" || cfg.Squad != "bravo_2" {
+		t.Fatalf("no role: %q %q, %v; want the squad kept but unused", cfg.Role, cfg.Squad, err)
+	}
+	for _, bad := range []string{"Alpha", "9lives", "a b", strings.Repeat("x", 40)} {
+		t.Setenv("CREW_SQUAD", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "CREW_SQUAD") {
+			t.Errorf("CREW_SQUAD=%q: err = %v, want one naming CREW_SQUAD", bad, err)
+		}
 	}
 }
 

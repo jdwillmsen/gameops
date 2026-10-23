@@ -80,6 +80,9 @@ type Config struct {
 	// ranger. Empty leaves the reactive defence in charge; anything else is
 	// refused rather than silently fighting on.
 	Role string
+	// Squad is the id of the squad a warrior joins through crew-control.
+	// A unit without a warrior role never uses it.
+	Squad string
 	// KitChest is the chest a unit without a weapon or food rearms from; nil
 	// leaves the feature off. KitFood is how many food items one visit takes.
 	KitChest *[3]int32
@@ -176,6 +179,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	squad, err := squadSetting(role)
+	if err != nil {
+		return Config{}, err
+	}
 	kitChest, err := positionOptional("KIT_CHEST")
 	if err != nil {
 		return Config{}, err
@@ -216,6 +223,7 @@ func Load() (Config, error) {
 		Defend:     defend,
 		Eat:        eat,
 		Role:       role,
+		Squad:      squad,
 		KitChest:   kitChest,
 		KitFood:    kitFood,
 		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
@@ -236,6 +244,28 @@ func roleSetting() (string, error) {
 		return role, nil
 	}
 	return "", fmt.Errorf("CREW_ROLE=%q: want vanguard, striker or ranger", role)
+}
+
+// squadIDPattern mirrors the id shape the squad routes carry, so a bad
+// CREW_SQUAD is refused here rather than as a hello the server rejects on
+// every beat.
+var squadIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,30}$`)
+
+// squadSetting reads CREW_SQUAD, the id of the squad a warrior joins. The
+// default is alpha. Without a warrior role the value is still shape-checked,
+// so a fleet-wide setting is honest, but never turns a non-warrior unit away.
+func squadSetting(role string) (string, error) {
+	squad := strings.TrimSpace(os.Getenv("CREW_SQUAD"))
+	if squad == "" {
+		if role == "" {
+			return "", nil
+		}
+		return "alpha", nil
+	}
+	if !squadIDPattern.MatchString(squad) {
+		return "", fmt.Errorf("CREW_SQUAD=%q: want a lowercase id like alpha", squad)
+	}
+	return squad, nil
 }
 
 // positionOptional reads "x,y,z" block coordinates. Unset is nil. The error
