@@ -182,3 +182,15 @@ func TestNavigateLeavesTheSideOfAFencePostOrGate(t *testing.T) {
 		near(t, r, goal, 0.8)
 	}
 }
+
+func TestNavigateReachesAGoalThatHangsOverAHole(t *testing.T) {
+	w := flatWorld(12)
+	w.fill("air", 6, 0, 3, 6, 0, 3)
+	w.fill("stone", 6, -1, 3, 6, -1, 3)
+	goal := protocol.BlockPos{6, 1, 3}
+	r := newRig(t, w, feetAt(1, 1, 3))
+	st, err := r.run(NewNavigate(w, r.self, goal, arriveSlack), 300)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
