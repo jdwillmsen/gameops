@@ -11,6 +11,7 @@ const ev = (seq, unit, kind, extra = {}) => ({ seq, at: new Date(1_000_000 + seq
 
 // A row as the board would build it, for the pure functions.
 const row = (id, extra = {}) => ({ id, name: id, index: Number(id.replace(/\D/g, '')) || 1, state: 'idle', since: null, kind: 'none', taskText: 'idle', health: 20, hunger: 20, lowHealth: false, lowHunger: false, pos: null, trail: [], ...extra });
+
 test('stateOf: offline beats dead beats a task; stuck needs a task', () => {
   assert.equal(stateOf(u('a', { online: false, dead: true, task: task() })), 'offline');
   assert.equal(stateOf(u('a', { dead: true, task: task() })), 'dead');
@@ -217,23 +218,6 @@ test('board: the health trail is capped, unknown is a gap, and the fleet trail f
   assert.ok(WINDOW >= 60);
 });
 
-test('board: kinds accumulate and positions come through for known units only', () => {
-  const b = createBoard();
-  b.ingest([u('c1', { task: task() }), u('c2', { task: task({ template: 'haul' }) }), u('c3')], 1000);
-  b.ingest([u('c1'), u('c2', { task: task({ template: 'haul' }) }), u('c3')], 2000);
-  assert.deepEqual(b.kinds(), ['gather', 'haul']);
-  b.positions([{ id: 'c1', x: 10.6, y: 64, z: -3.2, dim: 0, known: true }, { id: 'c2', x: 0, y: 0, z: 0, dim: 0, known: false }]);
-  assert.deepEqual(b.rows().map(r => r.pos), [{ x: 11, y: 64, z: -3, dim: 0 }, null, null]);
-  b.clearPositions();
-  assert.equal(b.rows()[0].pos, null);
-});
-
-test('board: low flags ignore offline and dead units', () => {
-  const b = createBoard();
-  b.ingest([u('c1', { health: 3, hunger: 2 }), u('c2', { dead: true, health: 0 }), u('c3', { online: false, health: 1, hunger: 1 })], 1000);
-  assert.deepEqual(b.rows().map(r => [r.lowHealth, r.lowHunger]), [[true, true], [false, false], [false, false]]);
-});
-
 test('board: samples carry their real time and nothing is sampled while the stream is silent', () => {
   const b = createBoard();
   b.sample(500);
@@ -267,6 +251,23 @@ test('trailLabels name samples by their own age, not by their count', () => {
   // A last sample that is old is not "now".
   assert.deepEqual(trailLabels([0, 2000], 2, 62_000), ['62s ago', '60s ago']);
   assert.deepEqual(trailLabels([], 3, 1000), []);
+});
+
+test('board: kinds accumulate and positions come through for known units only', () => {
+  const b = createBoard();
+  b.ingest([u('c1', { task: task() }), u('c2', { task: task({ template: 'haul' }) }), u('c3')], 1000);
+  b.ingest([u('c1'), u('c2', { task: task({ template: 'haul' }) }), u('c3')], 2000);
+  assert.deepEqual(b.kinds(), ['gather', 'haul']);
+  b.positions([{ id: 'c1', x: 10.6, y: 64, z: -3.2, dim: 0, known: true }, { id: 'c2', x: 0, y: 0, z: 0, dim: 0, known: false }]);
+  assert.deepEqual(b.rows().map(r => r.pos), [{ x: 11, y: 64, z: -3, dim: 0 }, null, null]);
+  b.clearPositions();
+  assert.equal(b.rows()[0].pos, null);
+});
+
+test('board: low flags ignore offline and dead units', () => {
+  const b = createBoard();
+  b.ingest([u('c1', { health: 3, hunger: 2 }), u('c2', { dead: true, health: 0 }), u('c3', { online: false, health: 1, hunger: 1 })], 1000);
+  assert.deepEqual(b.rows().map(r => [r.lowHealth, r.lowHunger]), [[true, true], [false, false], [false, false]]);
 });
 
 test('board: a second death is not dated by the first one when the snapshot comes first', () => {
@@ -341,4 +342,23 @@ test('board: a stuck mark expires when nothing refreshes it', () => {
   // A fresh report starts a fresh hold.
   b.events([ev(1000, 'c1', 'stuck', { task: 't1', level: 'warn' })], true, Date.parse(ev(1000).at));
   assert.equal(b.rows()[0].state, 'stuck');
+});
+
+test('board: units that left the roster lose their history', () => {
+  const b = createBoard();
+  b.events([ev(1, 'c1', 'stuck', { task: 't1', level: 'warn' })], false);
+  b.ingest([u('c1', { task: task() }), u('c2')], 1_001_000);
+  b.sample(1_001_000);
+  assert.equal(b.rows().length, 2);
+  // Same length, different units.
+  b.ingest([u('c3'), u('c4')], 1_003_000);
+  b.sample(1_003_000);
+  assert.deepEqual(b.rows().map(r => r.id), ['c3', 'c4']);
+  assert.deepEqual(b.rows().map(r => r.trail.length), [1, 1]);
+  // c1 is back: nothing of its old stuck mark, since time or trail is left.
+  b.ingest([u('c1', { task: task() })], 1_005_000);
+  const r = b.rows()[0];
+  assert.equal(r.state, 'working');
+  assert.equal(r.since.exact, false);
+  assert.equal(r.trail.length, 0);
 });
