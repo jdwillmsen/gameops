@@ -1,0 +1,25 @@
+/* Page plane behind the gallery, themed the same way as the charts. */
+body.cc-root { margin: 0; background: #f9f9f7; }
+@media (prefers-color-scheme: dark) {
+  body.cc-root:where(:not([data-theme="light"], [data-theme="light"] *)) { background: #0d0d0d; }
+}
+[data-theme="dark"] body.cc-root, body.cc-root[data-theme="dark"] { background: #0d0d0d; }
+main { max-width: 1180px; margin: 0 auto; padding: 20px 20px 48px; }
+.demo-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 8px; }
+h1 { margin: 0 0 4px; font-size: 20px; }
+h2 { margin: 28px 0 10px; font-size: 14px; color: var(--cc-ink-2); font-weight: 600; }
+p { margin: 0; color: var(--cc-ink-2); }
+code { background: color-mix(in oklab, var(--cc-ink) 8%, transparent); padding: 0 4px; border-radius: 3px; }
+.demo-controls { display: flex; gap: 6px; }
+.grid { display: grid; gap: 12px; }
+.grid.cols2 { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+.grid.tiles { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.grid.live { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.grid.live .cc-panel { padding: 8px 10px 6px; }
+.demo-live-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+output { font-variant-numeric: tabular-nums; color: var(--cc-ink-2); }
+.pal { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-start; }
+.pal-group { display: flex; flex-direction: column; gap: 4px; }
+.pal-group > span { color: var(--cc-ink-2); }
+.pal-row { display: flex; gap: 2px; }
+.pal-row i { width: 28px; height: 18px; border-radius: 3px; background: var(--c); }
