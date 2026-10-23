@@ -5,7 +5,7 @@ import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, tas
 const units = [{ id: 'crew-01' }, { id: 'crew-02' }, { id: 'crew-03' }];
 
 test('parse(format(s)) round-trips every unit, mode and view', () => {
-  for (const u of units) for (const mode of MODES) for (const view of ['focus', 'wall']) {
+  for (const u of units) for (const mode of MODES) for (const view of ['focus', 'wall', 'fleet']) {
     const s = { unit: u.id, mode, view };
     assert.deepEqual(parse(format(s), units), s);
   }

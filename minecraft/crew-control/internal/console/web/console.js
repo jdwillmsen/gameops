@@ -1,5 +1,6 @@
 import { initOps } from '/static/ops.js';
 import { initSquads } from '/static/squad.js';
+import { initOverview } from '/static/overview-ui.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -18,7 +19,7 @@ function el(tag, props = {}, ...kids) {
 }
 
 function sync() {
-  history.replaceState(null, '', '?' + format(state));
+  history.replaceState(null, '', '?' + format(state) + overview.query());
 }
 
 function renderBar() {
@@ -45,9 +46,11 @@ function renderBar() {
     return b;
   }));
   $('wall-toggle').setAttribute('aria-pressed', String(state.view === 'wall'));
+  $('fleet-toggle').setAttribute('aria-pressed', String(state.view === 'fleet'));
 }
 
 function renderStage() {
+  overview.unmount();
   // Frames are removed, not hidden, so a camera websocket closes as soon as
   // its tile leaves the screen.
   stage.replaceChildren();
@@ -65,6 +68,10 @@ function renderStage() {
       frame.contentWindow.addEventListener('keydown', onKey);
     });
     stage.append(frame);
+    return;
+  }
+  if (state.view === 'fleet') {
+    overview.mount(stage);
     return;
   }
   ops.renderWall(stage);
@@ -101,17 +108,24 @@ function toggleWall() {
   apply();
 }
 
+function toggleFleet() {
+  state.view = state.view === 'fleet' ? 'focus' : 'fleet';
+  apply();
+}
+
 function setView(view) {
   state.view = view;
   apply();
 }
 
 $('wall-toggle').addEventListener('click', toggleWall);
+$('fleet-toggle').addEventListener('click', toggleFleet);
 
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
   if (isTyping(ev.target)) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (overview.key(ev)) return;
   // 1-9 and 0 reach the first ten units; [ and ] step through all of them.
   if (/^[0-9]$/.test(ev.key)) pickUnit(order[(Number(ev.key) + 9) % 10]);
   else if (ev.key === '[' || ev.key === ']') {
@@ -120,6 +134,7 @@ function onKey(ev) {
   }
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
+  else if (ev.key === 'o') toggleFleet();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
@@ -132,6 +147,7 @@ function onUnits(list) {
   order = list.map(s => s.id);
   statuses.clear();
   for (const s of list) statuses.set(s.id, s);
+  overview.onUnits();
   if (first) {
     state = parse(location.search, order);
     apply();
@@ -156,9 +172,21 @@ function connect() {
     $('link').textContent = '';
     onUnits(JSON.parse(ev.data));
   });
-  es.addEventListener('events', ev => ops.onEvents(JSON.parse(ev.data) || [], false));
-  es.addEventListener('log', ev => ops.onEvents([JSON.parse(ev.data)], true));
-  es.addEventListener('positions', ev => ops.onPositions(JSON.parse(ev.data) || []));
+  es.addEventListener('events', ev => {
+    const list = JSON.parse(ev.data) || [];
+    ops.onEvents(list, false);
+    overview.onEvents(list, false);
+  });
+  es.addEventListener('log', ev => {
+    const e = JSON.parse(ev.data);
+    ops.onEvents([e], true);
+    overview.onEvents([e], true);
+  });
+  es.addEventListener('positions', ev => {
+    const list = JSON.parse(ev.data) || [];
+    ops.onPositions(list);
+    overview.onPositions(list);
+  });
   es.addEventListener('work', ev => {
     const w = JSON.parse(ev.data);
     work.set(w.unit, w.items || []);
@@ -240,6 +268,7 @@ function setOperator(op) {
   renderSession();
   renderPanel();
   ops.onOperator();
+  overview.onOperator();
   renderJobs();
   if (changed) reconnect();
 }
@@ -448,6 +477,15 @@ const ops = initOps({
 });
 
 const squads = initSquads({ statuses, focus: pickUnit });
+
+const overview = initOverview({
+  statuses,
+  order: () => order,
+  state: () => state,
+  operator: () => operator,
+  focus: pickUnit,
+  sync,
+});
 
 function setSquadOpen(open) {
   squadOpen = open;
