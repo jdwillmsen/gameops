@@ -61,7 +61,14 @@ action=${1:?$usage}
 shift || true
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
+caller_pwd=$(pwd)
 go_run() { (cd "$repo" && go run "$@"); }
+
+# go_run changes into the module root, so resolve --waves against the
+# directory the operator typed the path in before that happens.
+absolutise() {
+  if [[ $1 == /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$caller_pwd" "$1"; fi
+}
 
 if [[ $action == layout ]]; then
   if [[ -n $out ]]; then
@@ -91,10 +98,27 @@ if [[ $action != build ]]; then
         echo "arena.sh: $lab is a shared world; a run summons buffed mobs into it. Re-run with --confirm-overwrite to proceed." >&2
         exit 2
       fi
+      run_args=()
+      while (($#)); do
+        case $1 in
+          --waves)
+            run_args+=(--waves "$(absolutise "${2:?$usage}")")
+            shift 2
+            ;;
+          --waves=*)
+            run_args+=("--waves=$(absolutise "${1#--waves=}")")
+            shift
+            ;;
+          *)
+            run_args+=("$1")
+            shift
+            ;;
+        esac
+      done
       layout=$(mktemp)
       trap 'rm -f "$layout"' EXIT
       go_run ./minecraft/crew/cmd/labcourses arena-layout >"$layout"
-      go_run ./minecraft/crew/cmd/arenadirector run --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "$@"
+      go_run ./minecraft/crew/cmd/arenadirector run --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "${run_args[@]}"
       ;;
     reset)
       go_run ./minecraft/crew/cmd/arenadirector reset --lab "$lab" --compose "$here/compose.yaml" "$@"
