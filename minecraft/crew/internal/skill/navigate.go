@@ -60,6 +60,11 @@ type navigator struct {
 }
 
 func newNavigator(world path.Blocks, goal protocol.BlockPos, within float64) *navigator {
+	// A goal hanging over a drop is reached on the floor below it, so arrival
+	// is judged there rather than at a height the unit can never stand at.
+	if world != nil {
+		goal, _ = path.Landing(world, goal)
+	}
 	return &navigator{world: world, goal: goal, within: within}
 }
 

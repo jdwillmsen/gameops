@@ -130,8 +130,12 @@ func find(v *view, from protocol.BlockPos, x, y, z float32, to protocol.BlockPos
 	if from == to {
 		return nil, nil
 	}
+	to, _ = v.landing(to)
 	if _, ok := v.footing(to); !ok {
 		return nil, ErrNoPath
+	}
+	if from == to {
+		return nil, nil
 	}
 	start := &node{pos: from, y: y, x: x, z: z, f: octile(from, to)}
 	nodes := map[protocol.BlockPos]*node{from: start}
@@ -260,6 +264,13 @@ func (v *view) landing(c protocol.BlockPos) (protocol.BlockPos, float32) {
 		return c, g
 	}
 	return c, y
+}
+
+// Landing is the cell a unit asked to stand in c ends up in: c itself, or the
+// floor it would fall to when c hangs over a drop. A cell with nothing to
+// stand on within reach comes back unchanged, with the height it was given.
+func Landing(b Blocks, c protocol.BlockPos) (protocol.BlockPos, float32) {
+	return newView(b).landing(c)
 }
 
 // NeedsJump reports whether the move between two adjacent cells of a plan
