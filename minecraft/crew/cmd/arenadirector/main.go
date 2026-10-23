@@ -1,0 +1,199 @@
+// Command arenadirector drives the Colosseum wave book over a lab server's
+// console. It is lab-only: mobs are buffed and geared with cheats, and the
+// squad is never attacked by the director itself.
+//
+// usage: arenadirector run --lab <lab> --layout <file> [options]
+//
+//	arenadirector reset --lab <lab>
+//	arenadirector status --lab <lab> [--warriors names]
+//
+// <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>.
+// run prints one JSON result line on stdout; progress goes to stderr.
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
+)
+
+const defaultCompose = "minecraft/crew/lab/compose.yaml"
+
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+	}
+	switch os.Args[1] {
+	case "run":
+		run(os.Args[2:])
+	case "reset":
+		reset(os.Args[2:])
+	case "status":
+		status(os.Args[2:])
+	default:
+		usage()
+	}
+}
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names]\n"+
+		"       arenadirector reset --lab <lab>\n"+
+		"       arenadirector status --lab <lab> [--warriors names]")
+	os.Exit(2)
+}
+
+type target struct {
+	lab     *string
+	compose *string
+}
+
+func common(fs *flag.FlagSet) target {
+	return target{
+		lab:     fs.String("lab", "", "lab compose service or k8s:<namespace>/<pod>"),
+		compose: fs.String("compose", defaultCompose, "compose file for a docker lab"),
+	}
+}
+
+func run(args []string) {
+	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	t := common(fs)
+	layoutPath := fs.String("layout", "", "layout JSON from labcourses arena-layout")
+	wavesPath := fs.String("waves", "", "wave book YAML (default embedded Gauntlet)")
+	tier := fs.Int("tier", 5, "highest opposition tier to run (1-5)")
+	warriors := fs.String("warriors", "", "comma-separated warrior names for wipe detection")
+	timeout := fs.Duration("timeout", 30*time.Minute, "whole-run limit")
+	waveTimeout := fs.Duration("wave-timeout", 0, "per-wave limit (0 uses the wave book)")
+	poll := fs.Duration("poll", 2*time.Second, "delay between survivor counts")
+	maxLive := fs.Int("max-live", 0, "live-mob cap (0 uses the wave book)")
+	pause := fs.Duration("pause", 0, "pause between waves (0 uses the wave book)")
+	openStart := fs.Bool("open-start-gate", true, "clear the squad start gate before wave one")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	requireLab(*t.lab)
+	if *layoutPath == "" {
+		fail("arenadirector: run needs --layout")
+	}
+	if *tier < 1 || *tier > 5 {
+		fail("arenadirector: --tier must be 1..5")
+	}
+
+	book, err := loadBook(*wavesPath)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	layout, err := arena.LoadLayout(*layoutPath)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	console, err := newConsole(*t.lab, *t.compose)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+
+	d := &arena.Director{
+		Console:       console,
+		Layout:        layout,
+		Book:          book,
+		Tier:          *tier,
+		MaxLive:       *maxLive,
+		Pause:         *pause,
+		Poll:          *poll,
+		WaveTimeout:   *waveTimeout,
+		RunTimeout:    *timeout,
+		Warriors:      splitNames(*warriors),
+		OpenStartGate: *openStart,
+		Out:           os.Stderr,
+	}
+	result, err := d.Run()
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	writeJSON(result)
+}
+
+func reset(args []string) {
+	fs := flag.NewFlagSet("reset", flag.ExitOnError)
+	t := common(fs)
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	requireLab(*t.lab)
+	console, err := newConsole(*t.lab, *t.compose)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	if err := (&arena.Director{Console: console}).Reset(); err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	fmt.Fprintln(os.Stdout, `{"reset":true}`)
+}
+
+func status(args []string) {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	t := common(fs)
+	warriors := fs.String("warriors", "", "comma-separated warrior names")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	requireLab(*t.lab)
+	console, err := newConsole(*t.lab, *t.compose)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	st, err := (&arena.Director{Console: console, Warriors: splitNames(*warriors)}).Status()
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	writeJSON(st)
+}
+
+func loadBook(path string) (*arena.WaveBook, error) {
+	if path == "" {
+		return arena.DefaultWaves()
+	}
+	return arena.LoadWaveFile(path)
+}
+
+func newConsole(lab, compose string) (arena.Console, error) {
+	if target, ok := strings.CutPrefix(lab, "k8s:"); ok {
+		namespace, pod, ok := strings.Cut(target, "/")
+		if !ok || namespace == "" || pod == "" {
+			return nil, fmt.Errorf("%q is not k8s:<namespace>/<pod>", lab)
+		}
+		return arena.NewKubectlConsole(namespace, pod), nil
+	}
+	return arena.NewDockerConsole(compose, lab), nil
+}
+
+func requireLab(lab string) {
+	if lab == "" {
+		fail("arenadirector: --lab is required")
+	}
+}
+
+func splitNames(list string) []string {
+	var names []string
+	for _, name := range strings.Split(list, ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+func writeJSON(v any) {
+	if err := json.NewEncoder(os.Stdout).Encode(v); err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+}
+
+func fail(message string) {
+	fmt.Fprintln(os.Stderr, message)
+	os.Exit(1)
+}
