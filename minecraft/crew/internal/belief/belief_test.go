@@ -287,3 +287,23 @@ func TestResetAndRespawnForgetTheEffects(t *testing.T) {
 		t.Errorf("after respawn = %+v", s.Effects)
 	}
 }
+
+func TestUniqueIDIsKeptPerSessionAsASignedDecimal(t *testing.T) {
+	tr := spawned(t)
+	if s := tr.Snapshot(); s.UniqueID != "" {
+		t.Errorf("before the game data = %q", s.UniqueID)
+	}
+	tr.SetUniqueID(-4294967290)
+	if s := tr.Snapshot(); s.UniqueID != "-4294967290" {
+		t.Errorf("unique id = %q", s.UniqueID)
+	}
+	tr.Spawn(self, mgl32.Vec3{}, 0, 0, 0)
+	if s := tr.Snapshot(); s.UniqueID != "" {
+		t.Errorf("after respawn = %q, the last session's id was kept", s.UniqueID)
+	}
+	tr.SetUniqueID(7)
+	tr.Reset()
+	if s := tr.Snapshot(); s.UniqueID != "" {
+		t.Errorf("after reset = %q", s.UniqueID)
+	}
+}
