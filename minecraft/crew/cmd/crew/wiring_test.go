@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadmsg"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
@@ -116,7 +118,8 @@ func waitFor(t *testing.T, ok func() bool) {
 
 type nopLog struct{}
 
-func (nopLog) Info(string, map[string]any) {}
+func (nopLog) Info(string, map[string]any)  {}
+func (nopLog) Error(string, map[string]any) {}
 
 func TestTaskRoutesExistOnlyWithAToken(t *testing.T) {
 	tracker := belief.New(time.Now)
@@ -264,5 +267,55 @@ func TestLifeConfigTurnsTheKitOnOnlyWithAChest(t *testing.T) {
 	lc = lifeConfig(config.Config{KitChest: &[3]int32{1, 2, 3}, KitFood: 12}, world)
 	if lc.Kit == nil || lc.Kit.Chest != (protocol.BlockPos{1, 2, 3}) || lc.Kit.Food != 12 || lc.Kit.World == nil {
 		t.Errorf("with a chest: %+v", lc.Kit)
+	}
+}
+
+// Only a warrior with crew-control to reach joins a squad; anything else
+// keeps the reactive defence and no client.
+func TestSquadClientWiresOnlyForAWarriorWithCrewControl(t *testing.T) {
+	tracker := belief.New(time.Now)
+	base, err := url.Parse("http://crew-control:8080/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]config.Config{
+		"neither role nor control": {},
+		"no role":                  {ControlURL: base},
+		"no crew-control":          {Role: "vanguard", Squad: "alpha"},
+	} {
+		if c := newSquadClient(cfg, tracker.Snapshot, nopLog{}); c != nil {
+			t.Errorf("%s: built a squad client", name)
+		}
+	}
+	c := newSquadClient(config.Config{Role: "striker", Squad: "bravo", ControlURL: base, ControlToken: "wt", UnitID: "crew-19"}, tracker.Snapshot, nopLog{})
+	if c == nil {
+		t.Fatal("a warrior with crew-control got no squad client")
+	}
+	// The client is the engine's chain of command, and a fresh one has
+	// nothing to report from it.
+	var chain life.Squad = c
+	if _, _, ok := chain.Leader(); ok {
+		t.Error("a fresh client already names a leader")
+	}
+}
+
+// The wire carries what belief holds: hp, food, the held item and where the
+// unit stands — feet, under the eye position the server reports.
+func TestSquadStatusCarriesBeliefOntoTheWire(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{10, 65.62, -20}, 0, 0, 0)
+	tracker.ItemNames([]protocol.ItemEntry{{Name: "minecraft:diamond_sword", RuntimeID: 303}})
+	tracker.Apply(&packet.InventorySlot{WindowID: 0, Slot: 4, NewItem: protocol.ItemInstance{
+		StackNetworkID: 9, Stack: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: 303}, Count: 1},
+	}})
+	tracker.SetHeld(4)
+	tracker.Apply(&packet.UpdateAttributes{EntityRuntimeID: 7, Attributes: []protocol.Attribute{
+		{AttributeValue: protocol.AttributeValue{Name: "minecraft:health", Value: 17}},
+		{AttributeValue: protocol.AttributeValue{Name: "minecraft:player.hunger", Value: 12.7}},
+	}})
+	got := squadStatus(tracker.Snapshot())
+	want := squadmsg.Status{HP: 17, Food: 12, Weapon: "diamond_sword", Pos: squadmsg.Pos{X: 10, Y: 64, Z: -20}}
+	if got != want {
+		t.Fatalf("status = %+v, want %+v", got, want)
 	}
 }

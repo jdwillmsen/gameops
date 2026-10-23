@@ -13,6 +13,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadclient"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadmsg"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 )
@@ -174,4 +176,44 @@ func lifeConfig(cfg config.Config, world skill.ChestWorld) life.Config {
 		lc.Kit = &life.Kit{Chest: protocol.BlockPos{c[0], c[1], c[2]}, Food: cfg.KitFood, World: world}
 	}
 	return lc
+}
+
+// The warrior engine and the squad client meet in squadmsg's types, so the
+// client is the engine's chain of command with no adapter between them.
+var _ life.Squad = (*squadclient.Client)(nil)
+
+// newSquadClient builds the warrior's seat in its squad over the same
+// crew-control base URL and work token the task client uses. It returns nil
+// for a unit with no warrior role, or a warrior with no crew-control to
+// reach — that one still fights, but leads itself and hears no orders.
+func newSquadClient(cfg config.Config, snapshot func() belief.Snapshot, log squadclient.Logger) *squadclient.Client {
+	if cfg.Role == "" || cfg.ControlURL == nil {
+		return nil
+	}
+	c := squadclient.New(cfg.ControlURL, cfg.UnitID, cfg.Squad, "", squadmsg.Role(cfg.Role), cfg.ControlToken, log)
+	c.SetSource(func() squadmsg.Status { return squadStatus(snapshot()) })
+	return c
+}
+
+// squadStatus reports how the unit is, straight from belief, on the wire the
+// squad routes read. The position is the feet — the leader anchor and the
+// console's "where it stands" both mean the ground, while belief carries the
+// eye position the server reports. Health and hunger read as zero until the
+// server has said, which the store takes for a unit not yet in the world.
+func squadStatus(s belief.Snapshot) squadmsg.Status {
+	weapon := ""
+	if s.HeldKnown {
+		for _, it := range s.Inventory {
+			if it.Slot == s.HeldSlot && it.Count > 0 {
+				weapon = it.Name
+				break
+			}
+		}
+	}
+	return squadmsg.Status{
+		HP:     float64(s.Health),
+		Food:   int(s.Hunger),
+		Weapon: weapon,
+		Pos:    squadmsg.Pos{X: s.Position[0], Y: s.Position[1] - eyeHeight, Z: s.Position[2]},
+	}
 }

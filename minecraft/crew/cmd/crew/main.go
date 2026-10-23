@@ -104,6 +104,14 @@ func main() {
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
 	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
+	// SetSquad must precede the runner's first tick, and the client's
+	// goroutines are the unit's own, so they end with the signal context.
+	if sc := newSquadClient(cfg, tracker.Snapshot, logAdapter{log}); sc != nil {
+		go sc.Run(ctx)
+		lf.SetSquad(sc)
+	} else if cfg.Role != "" {
+		log.Warn("squad_off", logging.Fields{"note": "CREW_ROLE is set but CONTROL_URL is not; the warrior leads itself and hears no orders"})
+	}
 	runner.SetReflex(lf)
 	go runner.Run(ctx)
 	plan, err := task.ParsePlan(cfg.WorkPlan)
