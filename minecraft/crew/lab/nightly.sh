@@ -9,16 +9,28 @@
 #   PLANS  directory holding <field>.plan and courses.sh (labcourses -o)
 #   NON_HUMAN  space- or comma-separated player-name patterns that do not
 #              block a rebuild (crew units and load-test bots, such as load-*)
+#   STALE_AFTER  seconds to wait out a rebuild that holds the crew-course-*
+#                areas before clearing them as stale (default 900: a build
+#                of every field finishes well within it, and the wait plus a
+#                build must fit the job's activeDeadlineSeconds)
+#   RECHECK_S    seconds between re-checks in that wait (default 60; a knob
+#                for the test, which shrinks it)
 #
 # A rebuild replaces everything in a field's box, so it never starts while a
 # human is in the world, or while another rebuild holds its ticking areas.
-# Both are skips, not failures: they exit 0 so a busy night does not page.
+# A human is a skip, not a failure: it exits 0 so a busy night does not page.
+# Held areas are waited out rather than skipped: their holder removes them
+# when it ends, unless its server pod restarted mid-build and killed the trap
+# that would. Such leftovers would otherwise skip every night forever, so
+# past STALE_AFTER they are removed as stale and the rebuild proceeds.
 set -uo pipefail
 
 : "${LAB:?LAB is required}" "${FIELDS:?FIELDS is required}" "${PLANS:?PLANS is required}" "${NON_HUMAN:?NON_HUMAN is required}"
 target=${LAB#k8s:}
 ns=${target%%/*}
 pod=${target#*/}
+stale_after=${STALE_AFTER:-900}
+recheck_s=${RECHECK_S:-60}
 
 emit() { echo "nightly.sh: $*"; }
 
@@ -32,12 +44,14 @@ console() {
   kubectl -n "$ns" logs "$pod" --since=30s 2>/dev/null
 }
 
-# Sets $busy to why the lab must be left alone, or empty if it is free.
+# Sets $busy to why the lab must be left alone, or empty if it is free, and
+# $holders to the crew-course-* area names behind that reason, one per line,
+# so a wait that outlives their builder can clear them by name.
 # Returns 1 when the lab's state cannot be read: an unreadable list is not
 # evidence of an empty server, and the cost of the two mistakes is not equal.
 # Returns 2 when the server is not accepting commands.
 check_free() {
-  busy=
+  busy='' holders=
   local out block name pattern non_humans="${NON_HUMAN//,/ }"
   out=$(console list) || return
   # `grep -a`: the log carries binary bytes, and grep otherwise refuses it.
@@ -64,8 +78,58 @@ check_free() {
   grep -aq 'ticking areas in use' <<<"$out" || return 1
   if grep -aq '^- crew-course-' <<<"$out"; then
     busy="a rebuild already holds ticking areas"
+    holders=$(sed -n 's/^- \(crew-course-[^:]*\):.*/\1/p' <<<"$out")
   fi
   return 0
+}
+
+# check_free as the run wants it: a server that is not accepting commands is
+# a mid-restart pod (the very thing that orphans areas), so it is a skip, and
+# unreadable state is a failure, never permission to build.
+probe() {
+  check_free
+  case $? in
+    0)
+      ;;
+    2)
+      emit "skipped: server is not accepting commands"
+      exit 0
+      ;;
+    *)
+      emit "failed: could not read the server's players or ticking areas before $1"
+      exit 1
+      ;;
+  esac
+}
+
+# Waits out the rebuild behind $holders instead of skipping the night: a
+# live one removes its areas in an EXIT trap, so they vanish when it ends,
+# while one whose server pod restarted mid-build cannot, and its areas stay
+# in the world forever. The wait counts sleeps rather than clock time, so a
+# stubbed sleep makes it instant in the test. Exits the script (skip or
+# failure) if the wait itself meets a blocker; returns once the rebuild can
+# go ahead: the areas are gone, or have been removed as stale.
+wait_out_holders() {
+  local field=$1 waited=0 name
+  emit "waiting out the rebuild that holds ${holders//$'\n'/ } (up to ${stale_after}s)"
+  while :; do
+    sleep "$recheck_s"
+    ((waited += recheck_s))
+    probe "$field"
+    [[ -z $busy ]] && return 0
+    if [[ -z $holders ]]; then
+      emit "skipped $field: $busy"
+      exit 0
+    fi
+    if ((waited >= stale_after)); then
+      emit "removing stale ticking areas: ${holders//$'\n'/ }"
+      for name in $holders; do
+        console tickingarea remove "$name" >/dev/null ||
+          { emit "failed: could not remove stale ticking area $name"; exit 1; }
+      done
+      return 0
+    fi
+  done
 }
 
 if ! kubectl -n "$ns" get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null | grep -q Running; then
@@ -75,21 +139,13 @@ fi
 
 failed=0
 for field in $FIELDS; do
-  check_free
-  case $? in
-    0) ;;
-    2)
-      emit "skipped: server is not accepting commands"
-      exit 0
-      ;;
-    *)
-      emit "failed: could not read the server's players or ticking areas before $field"
-      exit 1
-      ;;
-  esac
-  if [[ -n $busy ]]; then
+  probe "$field"
+  if [[ -n $busy && -z $holders ]]; then
     emit "skipped $field: $busy"
     exit 0
+  fi
+  if [[ -n $holders ]]; then
+    wait_out_holders "$field"
   fi
   emit "rebuilding $field"
   if ! "$PLANS/courses.sh" --confirm-overwrite --plan "$PLANS/$field.plan" "$LAB" "$field"; then
