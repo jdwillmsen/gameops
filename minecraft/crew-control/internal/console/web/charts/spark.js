@@ -28,18 +28,21 @@ export function statusChip(state, label = STATUS_LABEL[state]) {
 }
 
 // A bare trend line: de-emphasis ink with the current period in the accent.
-//   new Sparkline(host, { values, format, labels, current })
+//   new Sparkline(host, { values, format, labels, current, height, pad, domain, table })
+// domain pins the vertical range (a unit's 0-20 health should not stretch a
+// half-point wobble to full height); table: false skips the screen-reader
+// table, for rows that already state the value in text.
 export class Sparkline {
   constructor(host, opts = {}) {
-    this.opts = { format: full, current: 0.25, ...opts };
+    this.opts = { format: full, current: 0.25, height: HEIGHT, pad: PAD, table: true, ...opts };
     this.id = uid();
-    this.svg = s('svg', { class: 'cc-svg cc-spark', height: HEIGHT, focusable: 'false', tabindex: '0', role: 'img' });
+    this.svg = s('svg', { class: 'cc-svg cc-spark', height: this.opts.height, focusable: 'false', tabindex: '0', role: 'img' });
     this.base = s('path', { class: 'cc-spark-base' });
     this.now = s('path', { class: 'cc-spark-now cc-stroke cc-s1' });
     this.dot = s('circle', { r: 4, class: 'cc-dot cc-fill cc-s1' });
     this.cross = s('line', { class: 'cc-cross', visibility: 'hidden' });
     this.hover = s('circle', { r: 4, class: 'cc-dot cc-fill cc-s1', visibility: 'hidden' });
-    this.hit = s('rect', { fill: 'transparent', height: HEIGHT });
+    this.hit = s('rect', { fill: 'transparent', height: this.opts.height });
     this.svg.append(this.cross, this.base, this.now, this.dot, this.hover, this.hit);
     this.sr = h('table', { class: 'cc-sr' });
     this.w = 0;
@@ -76,8 +79,9 @@ export class Sparkline {
     const v = this.values;
     if (!this.w || !v.length) return;
     const w = this.w;
+    const { height, pad } = this.opts;
     this.svg.setAttribute('width', w);
-    this.svg.setAttribute('viewBox', `0 0 ${w} ${HEIGHT}`);
+    this.svg.setAttribute('viewBox', `0 0 ${w} ${height}`);
     this.hit.setAttribute('width', w);
     let lo = Infinity;
     let hi = -Infinity;
@@ -86,8 +90,9 @@ export class Sparkline {
       if (x < lo) lo = x;
       if (x > hi) hi = x;
     }
-    const x = linear(0, Math.max(1, v.length - 1), PAD, w - PAD);
-    const y = linear(lo, hi === lo ? lo + 1 : hi, HEIGHT - PAD, PAD);
+    if (this.opts.domain) [lo, hi] = this.opts.domain;
+    const x = linear(0, Math.max(1, v.length - 1), pad, w - pad);
+    const y = linear(lo, hi === lo ? lo + 1 : hi, height - pad, pad);
     this.x = x;
     this.y = y;
     const xs = v.map((_, i) => x(i));
@@ -97,9 +102,9 @@ export class Sparkline {
     this.now.setAttribute('d', linePath(xs.slice(cut - 1), ys.slice(cut - 1)));
     const last = v.length - 1;
     this.dot.setAttribute('cx', xs[last]);
-    this.dot.setAttribute('cy', ys[last] ?? HEIGHT / 2);
+    this.dot.setAttribute('cy', ys[last] ?? height / 2);
     this.svg.setAttribute('aria-label', `Trend of ${v.length} points, latest ${this.opts.format(v[last])}`);
-    this.sr.replaceChildren(h('caption', { text: 'Trend values' }), ...v.map((q, i) => h('tr', null, h('th', { scope: 'row', text: this.labels[i] }), h('td', { text: this.opts.format(q) }))));
+    if (this.opts.table) this.sr.replaceChildren(h('caption', { text: 'Trend values' }), ...v.map((q, i) => h('tr', null, h('th', { scope: 'row', text: this.labels[i] }), h('td', { text: this.opts.format(q) }))));
   }
 
   at(cx, cy) {
@@ -114,7 +119,7 @@ export class Sparkline {
     this.cross.setAttribute('x1', px);
     this.cross.setAttribute('x2', px);
     this.cross.setAttribute('y1', 0);
-    this.cross.setAttribute('y2', HEIGHT);
+    this.cross.setAttribute('y2', this.opts.height);
     this.cross.setAttribute('visibility', 'visible');
     this.hover.setAttribute('cx', px);
     this.hover.setAttribute('cy', this.y(this.values[i]));
