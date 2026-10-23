@@ -73,9 +73,11 @@ ticks). Its `defend_ended` adds `swings`, `hits`, `damage_taken` and
 `deaths` for the fight. The totals are `crew_swings_total`,
 `crew_hits_landed_total`, `crew_damage_taken_total` and
 `crew_deaths_total{killer}`, and `/v1/state` carries them as `tasks.fight`.
-A hit is the target's hurt animation within a few ticks of a swing, or while
-an arrow flies; the packets name no attacker, so the attacker is the nearest
-mob the unit would blame.
+A hit is the target's hurt animation, or its death, within a few ticks of a
+swing, or while an arrow flies. The packets name no attacker: the attacker is
+the nearest mob the unit would blame, and a teammate's blow in that window
+counts as the unit's own hit, so with several warriors on one target the hit
+count and rate are an upper bound.
 
 ## Squads and warriors
 

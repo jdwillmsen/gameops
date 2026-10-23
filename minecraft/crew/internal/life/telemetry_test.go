@@ -458,3 +458,34 @@ func TestADeathPendingWhenTheSessionDropsIsStillCounted(t *testing.T) {
 		t.Fatalf("warrior_died = %v, want the zombie's kill from the dropped session", got)
 	}
 }
+
+func (r *rig) killEntity(id uint64) {
+	r.l.Apply(&packet.ActorEvent{EntityRuntimeID: id, EventType: packet.ActorEventDeath})
+}
+
+func TestAKillingBlowWithOnlyADeathEventIsAHit(t *testing.T) {
+	r := meleeRig(t)
+	r.killEntity(50)
+	r.step()
+	if got := r.events("hit_landed"); len(got) != 1 || got[0]["target"] != "zombie" {
+		t.Fatalf("hit_landed = %v, want the swing that killed the zombie", got)
+	}
+}
+
+func TestAHurtAndDeathOfOneBlowAreOneHit(t *testing.T) {
+	for _, apart := range []int{0, 1} {
+		r := meleeRig(t)
+		// A second shot in flight at the same zombie, open after the blow.
+		z, _ := r.l.ents.Get(50)
+		r.l.noteSwing(z, true)
+		r.hurtEntity(50)
+		for i := 0; i < apart; i++ {
+			r.step()
+		}
+		r.killEntity(50)
+		r.step()
+		if got := r.events("hit_landed"); len(got) != 1 {
+			t.Fatalf("%d ticks apart: hit_landed = %v, want one for the one blow", apart, got)
+		}
+	}
+}
