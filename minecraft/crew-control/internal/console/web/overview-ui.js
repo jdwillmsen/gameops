@@ -89,6 +89,10 @@ const TILES = [
 export function initOverview(host) {
   const board = createBoard();
   const initial = parseParams(location.search);
+  // User-timing entries are never discarded by the browser, so they are only
+  // written when a perf run asks, not on a wall display left open for days.
+  const perf = new URLSearchParams(location.search).get('perf') === '1';
+  const measure = (name, start) => { if (perf) performance.measure(name, { start, end: performance.now() }); };
   const prefs = { sort: initial.sort, dir: initial.dir, filter: initial.filter };
 
   const root = el('section', { className: 'cc-root ov' });
@@ -285,7 +289,7 @@ export function initOverview(host) {
     }
     if (pending && pending.i < pending.work.length) pump = requestAnimationFrame(paintSlice);
     else pending = null;
-    performance.measure('fleet-paint', { start: t0, end: performance.now() });
+    measure('fleet-paint', t0);
   }
 
   function paintRows(work, now, cur, immediate) {
@@ -402,7 +406,7 @@ export function initOverview(host) {
     clear.hidden = !filteredOn;
     empty.hidden = !(all.length && !shown.length);
     emptyText.textContent = 'No unit matches the filters.';
-    performance.measure('fleet-render', { start: t0, end: performance.now() });
+    measure('fleet-render', t0);
   }
 
   // Moves only rows that are out of place; a list already in order costs no
