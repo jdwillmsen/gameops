@@ -37,7 +37,8 @@
 # --summary prints runs and median seconds and deaths per boss and effect set
 # from the log without fighting. It exits 2 and touches nothing while any
 # player outside the crew is online, which is why a k8s: target needs no
-# --confirm-overwrite here.
+# --confirm-overwrite here; one who joins mid-fight stops it, exit 2, with the
+# boss killed and the run logged as aborted_player_online.
 #
 # Survivors are rallied (teleported to a ring around the first living warrior)
 # rally_after seconds after a wave's first spawn, then every rally_every while

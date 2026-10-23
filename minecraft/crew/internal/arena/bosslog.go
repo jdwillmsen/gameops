@@ -16,6 +16,9 @@ const (
 	BossKilled  = "killed"
 	BossWipe    = "wipe"
 	BossTimeout = "timeout"
+	// BossAborted marks a fight stopped because a player outside the crew
+	// came online; it measured nothing.
+	BossAborted = "aborted_player_online"
 )
 
 // BossRecord is one line of the run log. Deaths holds one count per warrior
@@ -92,7 +95,8 @@ type BossSummary struct {
 }
 
 // SummarizeBoss groups runs by boss and exact effect list, ordered by boss
-// then effects so the output is stable.
+// then effects so the output is stable. Aborted runs are left out: their time
+// and deaths say nothing about the boss.
 func SummarizeBoss(recs []BossRecord) []BossSummary {
 	type group struct {
 		sum     BossSummary
@@ -102,6 +106,9 @@ func SummarizeBoss(recs []BossRecord) []BossSummary {
 	groups := map[string]*group{}
 	var keys []string
 	for _, r := range recs {
+		if r.Outcome == BossAborted {
+			continue
+		}
 		key := r.Boss + "\x00" + strings.Join(r.Effects, "\x00")
 		g := groups[key]
 		if g == nil {
