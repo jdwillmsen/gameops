@@ -6,6 +6,7 @@ package arena
 import (
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -414,15 +415,24 @@ func (d *Director) rally(states map[string]*warriorState, round int) (bool, erro
 	if !ok {
 		return false, nil
 	}
-	dx, dz, ok := d.rallyOffset(round)
-	if !ok {
+	pos, err := d.rallyPosition(anchor)
+	if err != nil {
+		// Never guess an offset: an unread anchor may be at the floor edge.
+		d.logf("arena: rally skipped: cannot read %s position: %v", anchor, err)
 		return false, nil
 	}
-	cmd, err := rallyCommand(anchor, dx, dz)
-	if err != nil {
-		return false, err
+	dest, dx, dz, relative := d.rallyDestination(pos, round)
+	if relative {
+		cmd, err := rallyCommand(anchor, dx, dz)
+		if err != nil {
+			return false, err
+		}
+		if _, err := d.exec(cmd); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
-	if _, err := d.exec(cmd); err != nil {
+	if _, err := d.exec(rallyAbsoluteCommand(dest)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -437,17 +447,68 @@ func (d *Director) rallyAnchor(states map[string]*warriorState) (string, bool) {
 	return "", false
 }
 
-// rallyOffset walks the ring from this round's place. The offset is measured
-// from a living warrior, so the layout can only bound the ring itself; the
-// shipped floor radius (45) admits all of it.
-func (d *Director) rallyOffset(round int) (dx, dz int, ok bool) {
+func (d *Director) rallyPosition(name string) (TargetPosition, error) {
+	cmd, err := rallyQueryCommand(name)
+	if err != nil {
+		return TargetPosition{}, err
+	}
+	out, err := d.exec(cmd)
+	if err != nil {
+		return TargetPosition{}, err
+	}
+	return ParseTargetPosition(out)
+}
+
+// rallyDestination walks the ring from this round's place. An offset is only
+// usable when its destination, measured from the layout centre rather than the
+// anchor, stays inside the floor; otherwise the survivors move towards the
+// centre instead of into the stands.
+func (d *Director) rallyDestination(anchor TargetPosition, round int) (dest TargetPosition, dx, dz int, relative bool) {
 	for i := range rallyOffsets {
 		o := rallyOffsets[(round+i)%len(rallyOffsets)]
-		if d.Layout.FloorRadius <= 0 || o[0]*o[0]+o[1]*o[1] <= d.Layout.FloorRadius*d.Layout.FloorRadius {
-			return o[0], o[1], true
+		p := TargetPosition{X: anchor.X + float64(o[0]), Y: anchor.Y, Z: anchor.Z + float64(o[1])}
+		if d.onFloor(p) {
+			return p, o[0], o[1], true
 		}
 	}
-	return 0, 0, false
+	return d.rallyFallback(anchor), 0, 0, false
+}
+
+func (d *Director) onFloor(p TargetPosition) bool {
+	if d.Layout.FloorRadius <= 0 {
+		return true
+	}
+	safe := float64(d.Layout.FloorRadius - 2)
+	return math.Hypot(p.X-float64(d.Layout.Center.X), p.Z-float64(d.Layout.Center.Z)) <= safe
+}
+
+func (d *Director) rallyFallback(anchor TargetPosition) TargetPosition {
+	cx, cz := float64(d.Layout.Center.X), float64(d.Layout.Center.Z)
+	dx, dz := cx-anchor.X, cz-anchor.Z
+	dist := math.Hypot(dx, dz)
+	x, z := anchor.X, anchor.Z
+	if dist > 0 {
+		x += 6 * dx / dist
+		z += 6 * dz / dist
+	}
+	if d.Layout.FloorRadius > 0 {
+		x, z = clampRadius(x, z, cx, cz, float64(d.Layout.FloorRadius-2))
+	}
+	return TargetPosition{X: x, Y: anchor.Y, Z: z}
+}
+
+// clampRadius keeps a point inside r of the centre. A negative r (a floor too
+// small for any rally) collapses to the centre.
+func clampRadius(x, z, cx, cz, r float64) (float64, float64) {
+	if r < 0 {
+		r = 0
+	}
+	dx, dz := x-cx, z-cz
+	dist := math.Hypot(dx, dz)
+	if dist <= r || dist == 0 {
+		return x, z
+	}
+	return cx + dx/dist*r, cz + dz/dist*r
 }
 
 // addTickingAreas loads the arena's chunks: Bedrock refuses every summon and

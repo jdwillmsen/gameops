@@ -2,6 +2,7 @@ package arena
 
 import (
 	"fmt"
+	"strconv"
 	"unicode"
 )
 
@@ -57,14 +58,31 @@ func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }
 // that twelve piled mobs do not share a cell.
 var rallyOffsets = [][2]int{{8, 0}, {-8, 0}, {0, 8}, {0, -8}, {6, 6}, {-6, 6}, {6, -6}, {-6, -6}}
 
-// rallyCommand teleports only the wave's own tagged mobs to the anchor, at a
-// fixed offset that keeps them on the arena floor.
+// rallyQueryCommand reads where the anchor actually stands; offsets are only
+// safe once they can be measured against the floor centre.
+func rallyQueryCommand(anchor string) (string, error) {
+	if err := validateWarriorName(anchor); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("querytarget @a[name=%q]", anchor), nil
+}
+
+// rallyCommand teleports only the wave's own tagged mobs to a fixed offset from
+// the anchor. The caller has already checked where that offset lands.
 func rallyCommand(anchor string, dx, dz int) (string, error) {
 	if err := validateWarriorName(anchor); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("execute as @e[tag=%s] at @a[name=%q] run tp @s ~%d ~ ~%d", waveTag, anchor, dx, dz), nil
 }
+
+// rallyAbsoluteCommand moves only the wave's own tagged mobs to a checked point.
+func rallyAbsoluteCommand(to TargetPosition) string {
+	return fmt.Sprintf("execute as @e[tag=%s] run tp @s %s %s %s", waveTag,
+		formatCoord(to.X), formatCoord(to.Y), formatCoord(to.Z))
+}
+
+func formatCoord(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
 
 func penCloseCommand(p Pen) string { return p.Gate.Fill("iron_bars") }
 
