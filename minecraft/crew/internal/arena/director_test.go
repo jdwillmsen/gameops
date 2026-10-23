@@ -1080,3 +1080,139 @@ func TestSquadPlacedOnTheFloorBeforeWaveOne(t *testing.T) {
 		}
 	}
 }
+
+func TestRespawnedWarriorReturnsToItsStartCell(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true, "Striker": true}
+	vanguardCalls := 0
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testfor @e[name=") && warriorName(cmd) == "Vanguard" {
+			vanguardCalls++
+			if vanguardCalls == 2 {
+				return found(0), nil
+			}
+			return "Found Vanguard", nil
+		}
+		return s.Exec(cmd)
+	}}
+	book := testBook(wave("One", "zombie", 1, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Layout.GroundY = 64
+	d.Warriors = []string{"Vanguard", "Striker"}
+	d.PlaceSquad = true
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := `tp "Vanguard" 0 65 -785`
+	if got := f.Count(want); got != 2 {
+		t.Errorf("Vanguard placements = %d, want start plus respawn:\n%s", got, strings.Join(f.Cmds, "\n"))
+	}
+	if got := f.Count(`tp "Striker" 3 65 -785`); got != 1 {
+		t.Errorf("Striker placements = %d, want only the start placement", got)
+	}
+}
+
+func TestFarWarriorReturnsToItsStartCell(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
+	f := &FakeConsole{Respond: s.Exec}
+	d := &Director{
+		Console: f, Layout: testLayout(), Warriors: []string{"Vanguard"},
+		PlaceSquad: true, WarriorMisses: 3, Out: &strings.Builder{}, Now: clock.Now,
+	}
+	d.Layout.GroundY = 64
+	d.Layout.FloorRadius = 45
+	states := map[string]*warriorState{"Vanguard": {up: true, live: true}}
+	var result Result
+	if _, err := d.checkWarriors(states, &result); err != nil {
+		t.Fatalf("checkWarriors: %v", err)
+	}
+	if got := f.Count(`tp "Vanguard"`); got != 0 {
+		t.Fatalf("placed a warrior already on the floor %d times", got)
+	}
+	s.place("Vanguard", 0, 65, -400)
+	if _, err := d.checkWarriors(states, &result); err != nil {
+		t.Fatalf("checkWarriors: %v", err)
+	}
+	if got := f.Count(`tp "Vanguard" 0 65 -785`); got != 1 {
+		t.Errorf("stray warrior placements = %d, want 1:\n%s", got, strings.Join(f.Cmds, "\n"))
+	}
+}
+
+func TestPlacedWarriorIsNotReplacedAgainWithinFiveSeconds(t *testing.T) {
+	clock := newFakeClock()
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testfor @e[name=") {
+			return found(1), nil
+		}
+		return "", nil
+	}}
+	d := &Director{
+		Console: f, Layout: testLayout(), Warriors: []string{"Vanguard"},
+		PlaceSquad: true, WarriorMisses: 3, Out: &strings.Builder{}, Now: clock.Now,
+	}
+	d.Layout.GroundY = 64
+	d.Layout.FloorRadius = 45
+	states := map[string]*warriorState{"Vanguard": {up: true, live: true}}
+	var result Result
+	cycle := func() {
+		up := false
+		f.Respond = func(cmd string) (string, error) {
+			if strings.HasPrefix(cmd, "testfor @e[name=") {
+				if up {
+					return found(1), nil
+				}
+				return found(0), nil
+			}
+			return "", nil
+		}
+		if _, err := d.checkWarriors(states, &result); err != nil {
+			t.Fatalf("down poll: %v", err)
+		}
+		up = true
+		if _, err := d.checkWarriors(states, &result); err != nil {
+			t.Fatalf("up poll: %v", err)
+		}
+	}
+	cycle()
+	placed := f.Count(`tp "Vanguard"`)
+	if placed != 1 {
+		t.Fatalf("placements after the first respawn = %d, want 1", placed)
+	}
+	for range 4 {
+		clock.Sleep(time.Second)
+		cycle()
+	}
+	if got := f.Count(`tp "Vanguard"`); got != placed {
+		t.Errorf("placements within five seconds = %d, want %d", got, placed)
+	}
+	clock.Sleep(time.Second)
+	cycle()
+	if got := f.Count(`tp "Vanguard"`); got != placed+1 {
+		t.Errorf("placements after five seconds = %d, want %d", got, placed+1)
+	}
+}
+
+func TestPlaceSquadDisabledLeavesWarriorsAlone(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true, "Striker": true, "Ranger": true}
+	f := &FakeConsole{Respond: s.Exec}
+	book := testBook(wave("One", "zombie", 1, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Warriors = []string{"Vanguard", "Striker", "Ranger"}
+	var log strings.Builder
+	d.Out = &log
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := f.Count(`tp "`); got != 0 {
+		t.Errorf("placements = %d, want none when --place-squad=false:\n%s", got, strings.Join(f.Cmds, "\n"))
+	}
+	if strings.Contains(log.String(), "arena: placed") {
+		t.Errorf("log claims a placement with the feature off:\n%s", log.String())
+	}
+}

@@ -46,6 +46,10 @@ type Director struct {
 	Layout  Layout
 	Book    *WaveBook
 
+	// lastPlaced throttles recovery teleports: a failed respawn detector must
+	// not bounce a warrior every poll.
+	lastPlaced map[string]time.Time
+
 	Tier          int
 	MaxLive       int
 	Pause         time.Duration
@@ -675,15 +679,70 @@ func (d *Director) validateWaves(waves []Wave) error {
 	return nil
 }
 
+// squadReplaceInterval is the least time between recovery teleports for one
+// warrior. The check runs every poll, so without it a position read that keeps
+// failing would bounce the warrior off the floor each time.
+const squadReplaceInterval = 5 * time.Second
+
 func (d *Director) placeWarrior(name string, i int) error {
-	cmd, err := squadPlaceCommand(name, squadStartPoint(d.Layout, i))
+	_, err := d.squadPlace(name, i)
+	return err
+}
+
+func (d *Director) squadPlace(name string, i int) (Point, error) {
+	p := squadStartPoint(d.Layout, i)
+	cmd, err := squadPlaceCommand(name, p)
+	if err != nil {
+		return Point{}, err
+	}
+	if _, err := d.exec(cmd); err != nil {
+		return Point{}, err
+	}
+	d.logf("arena: placed %s", name)
+	return p, nil
+}
+
+// replaceWarrior returns one warrior to its start cell unless it was already
+// returned within squadReplaceInterval. The state's remembered position moves
+// with the teleport so the next poll does not read it as a second stray.
+func (d *Director) replaceWarrior(name string, i int, st *warriorState) error {
+	now := d.now()
+	if last, ok := d.lastPlaced[name]; ok && now.Sub(last) < squadReplaceInterval {
+		return nil
+	}
+	p, err := d.squadPlace(name, i)
 	if err != nil {
 		return err
 	}
-	if _, err := d.exec(cmd); err != nil {
-		return err
+	if d.lastPlaced == nil {
+		d.lastPlaced = map[string]time.Time{}
 	}
-	d.logf("arena: placed %s", name)
+	d.lastPlaced[name] = now
+	st.pos = TargetPosition{X: float64(p.X), Y: float64(p.Y), Z: float64(p.Z)}
+	st.havePos = true
+	return nil
+}
+
+// observeWarrior polls a standing warrior's position. A warrior that just
+// respawned, or that is beyond the floor's rally margin, is walked back to its
+// start cell; the anchor may already be in the hub when the mobs are rallied.
+func (d *Director) observeWarrior(name string, i int, st *warriorState, respawned bool) error {
+	if !d.PlaceSquad {
+		return nil
+	}
+	pos, err := d.rallyPosition(name)
+	if err == nil {
+		st.pos, st.havePos = pos, true
+		if d.Layout.FloorRadius > 0 {
+			dist := math.Hypot(pos.X-float64(d.Layout.Center.X), pos.Z-float64(d.Layout.Center.Z))
+			if dist > float64(d.Layout.FloorRadius+10) {
+				return d.replaceWarrior(name, i, st)
+			}
+		}
+	}
+	if respawned {
+		return d.replaceWarrior(name, i, st)
+	}
 	return nil
 }
 
@@ -691,9 +750,12 @@ func (d *Director) placeWarrior(name string, i int) error {
 // few polls before it counts as a death: Bedrock can drop a target from the
 // selector while it respawns.
 type warriorState struct {
-	up     bool
-	live   bool
-	misses int
+	up       bool
+	live     bool
+	misses   int
+	downSeen bool
+	havePos  bool
+	pos      TargetPosition
 }
 
 // warriorBaseline remembers who is standing before the first wave. Deaths are
@@ -730,7 +792,11 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 		return false, nil
 	}
 	standing := false
-	for name, st := range states {
+	for i, name := range d.Warriors {
+		st := states[name]
+		if st == nil {
+			continue
+		}
 		cmd, err := warriorCommand(name)
 		if err != nil {
 			return false, err
@@ -740,11 +806,16 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 			return false, err
 		}
 		if n > 0 {
-			st.up, st.live, st.misses = true, true, 0
+			respawned := st.downSeen
+			st.up, st.live, st.misses, st.downSeen = true, true, 0, false
 			standing = true
+			if err := d.observeWarrior(name, i, st, respawned); err != nil {
+				return false, err
+			}
 			continue
 		}
 		st.live = false
+		st.downSeen = true
 		st.misses++
 		if st.misses < d.WarriorMisses {
 			// A short gap may be a respawn; keep a previously standing
