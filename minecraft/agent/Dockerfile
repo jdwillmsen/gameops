@@ -22,8 +22,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/joinpro
 # the Xbox Live device-code login. distroless/static bundles CA certs and a
 # non-root user without a shell, which a bare `FROM scratch` cannot offer
 # without vendoring the cert bundle by hand.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/healthprobe ./minecraft/cmd/healthprobe
+
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 COPY --from=build /out/agent /agent
+COPY --from=build /out/healthprobe /healthprobe
 COPY --from=build /out/census /census
 COPY --from=build /out/joinprobe /joinprobe
 
@@ -35,4 +38,5 @@ COPY --from=build /out/joinprobe /joinprobe
 USER nonroot:nonroot
 
 VOLUME ["/data"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["/healthprobe"]
 ENTRYPOINT ["/agent"]
