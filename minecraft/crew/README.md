@@ -522,13 +522,19 @@ init container runs `labcourses -o <dir> grounds courses trees works`, which wri
 kubectl container runs `nightly.sh` from there. `nightly.sh` is the only
 extra logic: for each field it checks `list` and `tickingarea list`, then
 calls `courses.sh --confirm-overwrite --plan <field>.plan`, the same feed as
-a manual run. It skips (exit 0, one log line) while any player outside the
-`NON_HUMAN` name patterns is online or any `crew-course-*` ticking area exists, and exits 1 if
-a field reports errors or the server's state cannot be read.
+a manual run. It skips (exit 0, one log line) while a human is online, and
+waits up to `STALE_AFTER` seconds for another rebuild's `crew-course-*`
+ticking areas to go away before removing them as stale and carrying on. It
+exits 1 if a field reports errors or the server's state cannot be read.
+
+A player is human unless `NON_HUMAN` names them or their latest `Player
+connected:` line in the server log has an empty `xuid`: people sign in with
+an Xbox ID, offline-auth bots such as test bots never do. A player without a
+connect line counts as human, since a rebuild destroys the field under them.
 
 ```
 LAB=k8s:<ns>/<pod> FIELDS="grounds courses trees works" PLANS=<dir> \
-  NON_HUMAN="Agate Basalt load-*" \
+  NON_HUMAN="Agate Basalt load-*" STALE_AFTER=900 \
   nightly.sh
 ```
 
