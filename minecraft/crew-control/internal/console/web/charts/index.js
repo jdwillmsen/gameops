@@ -1,6 +1,7 @@
 export { LineChart } from './line.js';
 export { BarChart } from './bar.js';
 export { Sparkline, StatTile, statusChip } from './spark.js';
+export { Heatmap } from './heatmap.js';
 export { createTimeRange, mountRangeFilter } from './range.js';
 export { createRegistry, defaultRegistry, foldOther } from './series.js';
 export { compact, full } from './scale.js';
