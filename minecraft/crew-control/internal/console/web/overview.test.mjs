@@ -11,7 +11,6 @@ const ev = (seq, unit, kind, extra = {}) => ({ seq, at: new Date(1_000_000 + seq
 
 // A row as the board would build it, for the pure functions.
 const row = (id, extra = {}) => ({ id, name: id, index: Number(id.replace(/\D/g, '')) || 1, state: 'idle', since: null, kind: 'none', taskText: 'idle', health: 20, hunger: 20, lowHealth: false, lowHunger: false, pos: null, trail: [], ...extra });
-
 test('stateOf: offline beats dead beats a task; stuck needs a task', () => {
   assert.equal(stateOf(u('a', { online: false, dead: true, task: task() })), 'offline');
   assert.equal(stateOf(u('a', { dead: true, task: task() })), 'dead');
@@ -118,6 +117,16 @@ test('moveFocus clamps at the ends and survives an unknown or empty list', () =>
   assert.equal(moveFocus(ids, 'zzz', 'ArrowDown'), 'a');
   assert.equal(moveFocus(ids, 'b', 'x'), 'b');
   assert.equal(moveFocus([], 'a', 'ArrowDown'), '');
+});
+
+test('moveFocus from a row that is not on screen: forward keys start at the top, backward at the bottom', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  for (const [key, want] of [['ArrowDown', 'a'], ['j', 'a'], ['PageDown', 'a'], ['Home', 'a'], ['ArrowUp', 'd'], ['k', 'd'], ['PageUp', 'd'], ['End', 'd']]) {
+    assert.equal(moveFocus(ids, 'gone', key, 2), want, key);
+    assert.equal(moveFocus(ids, '', key, 2), want, `${key} from nothing`);
+  }
+  assert.equal(moveFocus(ids, 'gone', 'x'), 'gone');
+  assert.equal(moveFocus(ids, 'b', 'PageDown', 0), 'c', 'a zero page still moves one');
 });
 
 test('nextAttention goes worst state first, rotates, and flags low stats', () => {
