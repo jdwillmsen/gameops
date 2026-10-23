@@ -55,6 +55,10 @@ func chestCount(r *rig, item int32) int {
 	return n
 }
 
+// hauled is every cobblestone the shaft brought up, in the chest and in the
+// reserve the unit keeps.
+func hauled(r *rig) int { return chestCount(r, idCobblestone) + r.have("cobblestone") }
+
 func hazards(log *capture) []string {
 	var kinds []string
 	for _, l := range log.lines {
@@ -92,11 +96,11 @@ func TestShaftDescendsMinesBranchesAndDeposits(t *testing.T) {
 	}
 	// The first steps start in the air above the surface: 1, 2, 3 and 3
 	// stone cells, then 2 branches of 3 two-high cells.
-	if got := chestCount(r, idCobblestone); got != 9+12 {
+	if got := hauled(r); got != 9+12 {
 		t.Errorf("chest cobblestone = %d, want 21", got)
 	}
-	if got := r.have("cobblestone"); got != 0 {
-		t.Errorf("unit still carries %d cobblestone", got)
+	if got := r.have("cobblestone"); got != bridgeReserve {
+		t.Errorf("unit carries %d cobblestone, want the reserve of %d", got, bridgeReserve)
 	}
 	if r.have("wooden_pickaxe") != 1 {
 		t.Error("the pickaxe was deposited")
@@ -129,7 +133,7 @@ func TestShaftWithNoBranchesStillDelivers(t *testing.T) {
 	if st != Done || err != nil {
 		t.Fatalf("status %v, err %v", st, err)
 	}
-	if got := chestCount(r, idCobblestone); got != 6 {
+	if got := hauled(r); got != 6 {
 		t.Errorf("chest cobblestone = %d, want 6", got)
 	}
 }
@@ -152,7 +156,7 @@ func TestShaftStopsBesideLavaAndMinesBranchesFromThere(t *testing.T) {
 		t.Errorf("the cell beside the lava was opened: %q", n)
 	}
 	// Two steps (3 stone cells) and one branch of three two-high cells.
-	if got := chestCount(r, idCobblestone); got != 3+6 {
+	if got := hauled(r); got != 3+6 {
 		t.Errorf("chest cobblestone = %d, want 9", got)
 	}
 	if r.Pose().Feet.Y() < 0.9 {
@@ -208,7 +212,7 @@ func TestShaftSkipsABranchBesideWater(t *testing.T) {
 	}
 	// 9 stair cells; the forward branch 5 two-high cells; the left one only
 	// its first; the right one 5.
-	if got := chestCount(r, idCobblestone); got != 9+10+2+10 {
+	if got := hauled(r); got != 9+10+2+10 {
 		t.Errorf("chest cobblestone = %d, want 31", got)
 	}
 }
@@ -397,13 +401,64 @@ func TestShaftNeverOpensACellOutsideTheArea(t *testing.T) {
 	}
 }
 
-func TestShaftIsNotReadyWithoutAPickaxe(t *testing.T) {
+func TestShaftWaitsForAPickaxeThatIsStillBeingIssued(t *testing.T) {
 	w := mineWorld()
 	r := newRig(t, w, feetAt(3, 1, 3))
 	s := newShaft(t, w, r, shaftSpec(2, 0, 0), nil)
-	if err := s.Ready(r.self()); err == nil || err.Error() != "no pickaxe in inventory" {
-		t.Fatalf("Ready = %v", err)
+	if err := s.Ready(r.self()); err != nil {
+		t.Fatalf("Ready = %v, want a unit to be allowed to wait for its kit", err)
 	}
+	for i := 0; i < 30; i++ {
+		if st, err := s.Step(context.Background(), r); st != Running {
+			t.Fatalf("status %v, err %v while the pickaxe is missing", st, err)
+		}
+	}
+	withPickaxe(r)
+	if st, err := r.run(s, 6000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+func TestShaftFailsWhenThePickaxeNeverComes(t *testing.T) {
+	w := mineWorld()
+	r := newRig(t, w, feetAt(3, 1, 3))
+	st, err := r.run(newShaft(t, w, r, shaftSpec(2, 0, 0), nil), armWait+50)
+	if st != Failed || err == nil || err.Error() != "no pickaxe in inventory" {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+func TestShaftWaitsForTheEntranceToLoad(t *testing.T) {
+	w := mineWorld()
+	r := shaftRig(t, w)
+	known := false
+	gate := gated{simWorld: w, known: &known}
+	s, err := NewMineShaft(gate, r.self, shaftSpec(2, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 30; i++ {
+		if st, err := s.Step(context.Background(), r); st != Running {
+			t.Fatalf("status %v, err %v before the entrance loaded", st, err)
+		}
+	}
+	known = true
+	if st, err := r.run(s, 6000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+// gated hides the entrance column, as a chunk that has not arrived yet.
+type gated struct {
+	simWorld
+	known *bool
+}
+
+func (g gated) Block(p protocol.BlockPos) (string, bool) {
+	if !*g.known && p.X() == shaftEntrance.X() && p.Z() == shaftEntrance.Z() {
+		return "", false
+	}
+	return g.simWorld.Block(p)
 }
 
 // interruptInPlace is a fight that leaves the unit where it was: in a
@@ -436,7 +491,7 @@ func TestShaftResumesAfterAFightAtAnyPoint(t *testing.T) {
 		if st != Done || err != nil {
 			t.Fatalf("interrupted at %d: status %v, err %v", n, st, err)
 		}
-		if got := chestCount(r, idCobblestone); got != 6+8 {
+		if got := hauled(r); got != 6+8 {
 			t.Errorf("interrupted at %d: chest cobblestone = %d, want 14", n, got)
 		}
 		if r.Pose().Feet.Y() < 0.9 {
@@ -456,5 +511,44 @@ func TestShaftDoesNotDigUnderItself(t *testing.T) {
 	// entrance must be there.
 	if n := w[protocol.BlockPos{10, 0, 10}]; n != "stone" {
 		t.Errorf("the floor under the entrance became %q", n)
+	}
+}
+
+func TestShaftKeepsABridgeReserveOutOfTheDeposit(t *testing.T) {
+	w := mineWorld()
+	r := shaftRig(t, w)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(4, 2, 3), nil), 12000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	// 21 cobblestone were mined; 16 stay with the unit for bridging.
+	if got := r.have("cobblestone"); got != bridgeReserve {
+		t.Errorf("unit keeps %d cobblestone, want %d", got, bridgeReserve)
+	}
+	if got := chestCount(r, idCobblestone); got != 21-bridgeReserve {
+		t.Errorf("chest cobblestone = %d, want %d", got, 21-bridgeReserve)
+	}
+}
+
+func TestShaftRestocksBridgeBlocksFromTheChestBeforeStarting(t *testing.T) {
+	w := mineWorld()
+	w[protocol.BlockPos{11, -1, 10}] = "air"
+	r := shaftRig(t, w)
+	r.chest[0] = slotStack{idCobblestone, 40, 900}
+	st, err := r.run(newShaft(t, w, r, shaftSpec(3, 0, 0), nil), 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if w[protocol.BlockPos{11, -1, 10}] != "cobblestone" {
+		t.Error("the void first step was not bridged")
+	}
+}
+
+func TestShaftWithAnEmptyChestStillRunsWhenNothingNeedsBridging(t *testing.T) {
+	w := mineWorld()
+	r := shaftRig(t, w)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(3, 0, 0), nil), 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
 	}
 }

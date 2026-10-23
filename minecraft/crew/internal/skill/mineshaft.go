@@ -25,6 +25,12 @@ const (
 	maxCellBreaks = 12
 	// Taller than any column of falling blocks the unit will reason about.
 	maxFallingChain = 16
+	// Cobblestone a unit keeps back from its deposit, and tops up from the
+	// chest, to bridge a missing floor with.
+	bridgeReserve = 16
+	// How long a unit waits, at the start, for its kit to be issued and the
+	// ground at the entrance to load: both lag a join or a respawn by seconds.
+	armWait = 600
 )
 
 type shaftPhase int
@@ -41,6 +47,8 @@ const (
 	shDeposit
 	shBridge
 	shMend
+	shStock
+	shArm
 )
 
 // ShaftSpec is a stair shaft with branch tunnels off its bottom.
@@ -179,7 +187,7 @@ func NewMineShaft(world ChestWorld, self func() belief.Snapshot, spec ShaftSpec,
 	for _, f := range opts {
 		f(&o)
 	}
-	return &MineShaft{world: world, self: self, spec: spec, log: o.log, at: spec.Entrance}, nil
+	return &MineShaft{world: world, self: self, spec: spec, log: o.log, at: spec.Entrance, phase: shArm}, nil
 }
 
 func (m *MineShaft) Name() string { return "mine_shaft" }
@@ -190,9 +198,6 @@ func (m *MineShaft) Progress() int { return m.dug }
 func (m *MineShaft) Ready(s belief.Snapshot) error {
 	if err := overworld(s); err != nil {
 		return err
-	}
-	if _, ok := hotbarTool(s, "pickaxe"); !ok {
-		return errors.New("no pickaxe in inventory")
 	}
 	return nil
 }
@@ -224,6 +229,12 @@ func (m *MineShaft) Resume() {
 	case shBreak, shSettle, shReach:
 		m.phase = shDig
 	case shDeposit:
+		if r, ok := m.sub.(Resumer); ok {
+			r.Resume()
+		}
+	case shArm:
+		m.waited = 0
+	case shStock:
 		if r, ok := m.sub.(Resumer); ok {
 			r.Resume()
 		}
@@ -263,6 +274,10 @@ func (m *MineShaft) Step(ctx context.Context, a Actuator) (Status, error) {
 	for {
 		var o outcome
 		switch m.phase {
+		case shArm:
+			o = m.arm(a)
+		case shStock:
+			o = m.stock(ctx, a)
 		case shEntrance:
 			o = m.walk(a, m.spec.Entrance, arriveSlack, func() { m.startSegment(0) }, "walking to the entrance")
 		case shSeg:
@@ -506,13 +521,13 @@ func (m *MineShaft) startDeposits() {
 	}
 	var names []string
 	for name, n := range have {
-		if n > m.base[name] {
+		if n > m.keep(name) {
 			names = append(names, name)
 		}
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		m.deposits = append(m.deposits, NewDepositChest(m.world, m.self, m.spec.Chest, name, have[name]-m.base[name], WithLogger(m.log)))
+		m.deposits = append(m.deposits, NewDepositChest(m.world, m.self, m.spec.Chest, name, have[name]-m.keep(name), WithLogger(m.log)))
 	}
 	m.phase = shDeposit
 }
@@ -620,6 +635,63 @@ func bridgeBlock(s belief.Snapshot) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// keep is how many of an item stay with the unit when it deposits: what it
+// started with, and for cobblestone at least the bridging reserve.
+func (m *MineShaft) keep(name string) int {
+	if name == "cobblestone" && m.base[name] < bridgeReserve {
+		return bridgeReserve
+	}
+	return m.base[name]
+}
+
+// arm waits for the pickaxe and the entrance's ground, which arrive a little
+// after a unit joins or respawns, instead of failing the task for it.
+func (m *MineShaft) arm(a Actuator) outcome {
+	_, armed := hotbarTool(m.self(), "pickaxe")
+	_, here := m.world.Block(m.spec.Entrance)
+	_, below := m.world.Block(up(m.spec.Entrance, -1))
+	if armed && here && below {
+		m.waited, m.phase = 0, shStock
+		return next
+	}
+	if m.waited++; m.waited >= armWait {
+		if !armed {
+			return m.failed(a, errors.New("no pickaxe in inventory"))
+		}
+		m.waited, m.phase = 0, shStock
+		return next
+	}
+	p := a.Pose()
+	if err := a.Tick(act.Input{Yaw: p.Yaw, Pitch: p.Pitch}); err != nil {
+		return m.failed(a, err)
+	}
+	return outcome{st: Running}
+}
+
+// stock tops the bridging reserve up from the deposit chest. A chest that is
+// empty or cannot be opened does not stop the shaft: it only matters if a
+// floor turns out to be missing.
+func (m *MineShaft) stock(ctx context.Context, a Actuator) outcome {
+	if m.sub == nil {
+		short := bridgeReserve - count(m.self(), "cobblestone")
+		if short <= 0 {
+			m.phase = shEntrance
+			return next
+		}
+		m.sub = NewWithdrawChest(m.world, m.self, m.spec.Chest, map[string]int{"cobblestone": short}, WithLogger(m.log))
+	}
+	st, err := m.sub.Step(ctx, a)
+	switch st {
+	case Failed:
+		m.emit("mine_restock_failed", map[string]any{"error": fmt.Sprint(err)})
+		fallthrough
+	case Done:
+		m.sub, m.phase = nil, shEntrance
+		return next
+	}
+	return outcome{st: Running}
 }
 
 // startBridge fills the floor cell, or, with nothing to fill it with, ends the
