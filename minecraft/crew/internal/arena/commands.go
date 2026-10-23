@@ -18,6 +18,10 @@ const (
 	// spawnRadius bounds the after-summon tag to the pen or dais the mob was
 	// summoned onto, so a neighbour in another pen is never claimed.
 	spawnRadius = 4
+
+	// variantTagRadius is tighter than spawnRadius: without a type filter the
+	// claim must not reach a mob from a neighbouring pen.
+	variantTagRadius = 2
 )
 
 func countCommand() string { return "testfor " + countSelector }
@@ -78,7 +82,7 @@ type spawn struct {
 func (s spawn) commands(recipe Tier) []string {
 	cmds := []string{
 		s.summonCommand(),
-		tagAtCommand(s.Point, s.Type, markerTag),
+		s.tagCommand(markerTag),
 		"tag @e[tag=" + markerTag + "] add " + waveTag,
 		fmt.Sprintf("tag @e[tag=%s] add %s_t%d", markerTag, waveTag, s.Tier),
 	}
@@ -110,6 +114,17 @@ func (s spawn) summonCommand() string {
 	default:
 		return at + " ~ ~ ~"
 	}
+}
+
+// tagCommand claims the mob just summoned. A spawn event can replace the
+// entity type (become_drowned), so a variant is claimed by position alone;
+// the type filter would miss it and leave the wave uncounted.
+func (s spawn) tagCommand(tag string) string {
+	if s.Variant == "" {
+		return tagAtCommand(s.Point, s.Type, tag)
+	}
+	return fmt.Sprintf("execute positioned %d %d %d run tag @e[type=!player,type=!item,tag=!%s,tag=!%s,c=1,r=%d] add %s",
+		s.Point.X, s.Point.Y, s.Point.Z, tag, waveTag, variantTagRadius, tag)
 }
 
 // tagAtCommand claims the mob just summoned. Wave-tagged mobs are excluded as
