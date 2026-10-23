@@ -24,6 +24,13 @@ func TestOnlineNamesReadsOnlyTheLineAfterTheHeader(t *testing.T) {
 		{"last header wins", "There are 1/10 players online:\nSteve99\nThere are 0/10 players online:\n", nil, true},
 		{"header with the names still unread", "There are 1/10 players online:", nil, false},
 		{"no header", "Found Rusty", nil, false},
+		{"error line between the header and the names", "There are 1/10 players online:\n[2026-10-23 12:00:01:000 ERROR] No targets matched selector\nSteve99", []string{"Steve99"}, true},
+		{"warning line between the header and the names", "There are 2/10 players online:\n[2026-10-23 12:00:01:000 WARN] Slow tick\n[2026-10-23 12:00:01:001 INFO] Rusty, Steve99", []string{"Rusty", "Steve99"}, true},
+		{"names wrapped after a comma", "There are 3/10 players online:\nRusty, Slate,\nSteve99", []string{"Rusty", "Slate", "Steve99"}, true},
+		{"names wrapped inside a name", "There are 3/10 players online:\nRusty, Sla\nte, Steve99", []string{"Rusty", "Slate", "Steve99"}, true},
+		{"fewer names than the count", "There are 2/10 players online:\nRusty", nil, false},
+		{"more names than the count", "There are 1/10 players online:\nRusty, Steve99", nil, false},
+		{"header without a count", "players online:\nRusty", nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -74,6 +81,35 @@ func TestCheckAloneIgnoresAnErrorLineFromAnEarlierCommand(t *testing.T) {
 	f = listConsole("There are 0/10 players online:\n[2026-10-23 12:00:01:000 ERROR] No targets matched selector")
 	if err := CheckAlone(f, DefaultCrewNames); err != nil {
 		t.Fatalf("CheckAlone with an empty list = %v, want pass", err)
+	}
+}
+
+func TestCheckAloneSeesAHumanBehindAnErrorLine(t *testing.T) {
+	f := listConsole("There are 2/10 players online:\n[2026-10-23 12:00:01:000 ERROR] No targets matched selector\nRusty, Steve99")
+	var busy *NotAloneError
+	if err := CheckAlone(f, DefaultCrewNames); !errors.As(err, &busy) || !reflect.DeepEqual(busy.Names, []string{"Steve99"}) {
+		t.Fatalf("CheckAlone = %v, want a refusal naming Steve99", err)
+	}
+}
+
+func TestCheckAloneRefusesALastNameCutByAWrap(t *testing.T) {
+	// The count is already met at the cut, so the fragment is read as a
+	// name; it is not crew, which refuses rather than passes.
+	f := listConsole("There are 2/10 players online:\nRusty, Sla\nte")
+	var busy *NotAloneError
+	if err := CheckAlone(f, DefaultCrewNames); !errors.As(err, &busy) {
+		t.Fatalf("CheckAlone = %v, want a refusal", err)
+	}
+}
+
+func TestCheckAloneFailsClosedWhenTheCountDoesNotMatch(t *testing.T) {
+	f := listConsole("There are 2/10 players online:\nRusty")
+	err := CheckAlone(f, DefaultCrewNames)
+	if err == nil {
+		t.Fatal("CheckAlone passed a list missing one of its two players")
+	}
+	if f.Count("list") != listAttempts {
+		t.Errorf("list sent %d times, want %d rereads before giving up", f.Count("list"), listAttempts)
 	}
 }
 

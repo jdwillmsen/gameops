@@ -2,6 +2,8 @@ package arena
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -23,35 +25,89 @@ func (e *NotAloneError) Error() string {
 // listAttempts bounds how often an unfinished `list` reply is re-read.
 const listAttempts = 3
 
-// OnlineNames reads the names line that follows the last "players online:"
-// header. Only that line is a player list: the log also carries earlier
-// commands' ERROR lines, and one of those landing right after an empty header
-// must not count as a player. complete is false when no header has a line
-// after it yet, which a caller must not read as an empty server.
+var listHeader = regexp.MustCompile(`There are (\d+)/\d+ players online:(.*)$`)
+
+// OnlineNames reads the player list after the last "players online:" header.
+// The header's count decides how many names to read: ERROR and WARN lines from
+// earlier commands are skipped, and a names line the log wrapped is joined
+// back together. complete is false when the names have not all arrived, or
+// when the count is missing or does not match them; a caller must read that
+// as "maybe not alone", never as an empty server.
 func OnlineNames(out string) (names []string, complete bool) {
 	lines := strings.Split(out, "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		_, rest, ok := strings.Cut(lines[i], "players online:")
-		if !ok {
+		if !strings.Contains(lines[i], "players online:") {
 			continue
 		}
-		// Text after the colon on the header line itself is still read as
-		// names, so a server that prints the list inline is not missed.
-		line := strings.TrimSpace(rest)
-		if line == "" {
-			if i+1 >= len(lines) {
-				continue
-			}
-			line = lines[i+1]
+		m := listHeader.FindStringSubmatch(lines[i])
+		if m == nil {
+			return nil, false
 		}
-		return splitPlayers(line), true
+		want, err := strconv.Atoi(m[1])
+		if err != nil {
+			return nil, false
+		}
+		names, status := collectNames(m[2], lines[i+1:], want)
+		switch status {
+		case listComplete:
+			return names, true
+		case listMismatch:
+			return nil, false
+		}
+		// The names after this header have not arrived yet; an earlier
+		// header's late names line may already be complete.
 	}
 	return nil, false
 }
 
-// splitPlayers drops a log prefix and treats an ERROR or WARN line as no
-// players at all.
-func splitPlayers(line string) []string {
+type listStatus int
+
+const (
+	listShort listStatus = iota
+	listComplete
+	listMismatch
+)
+
+// collectNames reads want names starting with the text after the header's
+// colon, so a server that prints the list inline is not missed.
+func collectNames(inline string, rest []string, want int) ([]string, listStatus) {
+	if want == 0 {
+		return nil, listComplete
+	}
+	joined := strings.TrimSpace(inline)
+	check := func() ([]string, listStatus) {
+		names := splitPlayers(joined)
+		switch {
+		case len(names) > want:
+			return nil, listMismatch
+		case len(names) == want && !strings.HasSuffix(joined, ","):
+			return names, listComplete
+		}
+		return nil, listShort
+	}
+	if names, status := check(); status != listShort {
+		return names, status
+	}
+	for _, line := range rest {
+		if strings.Contains(line, "players online:") {
+			break
+		}
+		body, noise := logBody(line)
+		if noise || body == "" {
+			continue
+		}
+		// A wrapped line continues the previous one exactly, which may be
+		// mid-name; a list that does not add up is refused either way.
+		joined += body
+		if names, status := check(); status != listShort {
+			return names, status
+		}
+	}
+	return nil, listShort
+}
+
+// logBody drops a log prefix and reports an ERROR or WARN line as noise.
+func logBody(line string) (body string, noise bool) {
 	line = strings.TrimSpace(line)
 	var prefix string
 	for strings.HasPrefix(line, "[") {
@@ -62,11 +118,12 @@ func splitPlayers(line string) []string {
 		prefix += line[:end+1]
 		line = strings.TrimSpace(line[end+1:])
 	}
-	if strings.Contains(prefix, "ERROR") || strings.Contains(prefix, "WARN") {
-		return nil
-	}
+	return line, strings.Contains(prefix, "ERROR") || strings.Contains(prefix, "WARN")
+}
+
+func splitPlayers(list string) []string {
 	var names []string
-	for _, name := range strings.Split(line, ",") {
+	for _, name := range strings.Split(list, ",") {
 		if name = strings.TrimSpace(name); name != "" {
 			names = append(names, name)
 		}
