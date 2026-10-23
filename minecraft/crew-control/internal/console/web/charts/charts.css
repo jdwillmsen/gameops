@@ -1,0 +1,284 @@
+/* Tokens. Light is the default; dark follows the OS unless an ancestor says
+   data-theme="light", and data-theme="dark" forces it. The two dark blocks must
+   stay identical; palette.test.mjs checks every value against palette.js. */
+.cc-root {
+  color-scheme: light;
+  --cc-surface: #fcfcfb;
+  --cc-ink: #0b0b0b;
+  --cc-ink-2: #52514e;
+  --cc-muted: #898781;
+  --cc-grid: #e1e0d9;
+  --cc-axis: #c3c2b7;
+  --cc-border: rgba(11, 11, 11, 0.1);
+  --cc-good-text: #006300;
+  --cc-series-1: #2a78d6;
+  --cc-series-2: #eb6834;
+  --cc-series-3: #1baf7a;
+  --cc-series-4: #eda100;
+  --cc-series-5: #e87ba4;
+  --cc-series-6: #008300;
+  --cc-series-7: #6250d6;
+  --cc-series-8: #e34948;
+  --cc-seq-1: #cde2fb;
+  --cc-seq-2: #9ec5f4;
+  --cc-seq-3: #6da7ec;
+  --cc-seq-4: #3987e5;
+  --cc-seq-5: #256abf;
+  --cc-seq-6: #184f95;
+  --cc-seq-7: #0d366b;
+  --cc-seq-ink-1: #0b0b0b;
+  --cc-seq-ink-2: #0b0b0b;
+  --cc-seq-ink-3: #0b0b0b;
+  --cc-seq-ink-4: #0b0b0b;
+  --cc-seq-ink-5: #ffffff;
+  --cc-seq-ink-6: #ffffff;
+  --cc-seq-ink-7: #ffffff;
+  --cc-div-neg: #2a78d6;
+  --cc-div-pos: #e34948;
+  --cc-div-mid: #f0efec;
+  --cc-div-ink-1: #0b0b0b;
+  --cc-div-ink-2: #0b0b0b;
+  --cc-div-ink-3: #ffffff;
+  --cc-other: #898781;
+  --cc-status-good: #0ca30c;
+  --cc-status-warning: #fab219;
+  --cc-status-serious: #ec835a;
+  --cc-status-critical: #d03b3b;
+  --cc-ink-on-warning: #0b0b0b;
+  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--cc-ink);
+}
+@media (prefers-color-scheme: dark) {
+  .cc-root:where(:not([data-theme="light"], [data-theme="light"] *)) {
+  color-scheme: dark;
+  --cc-surface: #1a1a19;
+  --cc-ink: #f0efec;
+  --cc-ink-2: #c3c2b7;
+  --cc-grid: #2c2c2a;
+  --cc-axis: #383835;
+  --cc-border: rgba(255, 255, 255, 0.1);
+  --cc-good-text: #0ca30c;
+  --cc-series-1: #3987e5;
+  --cc-series-2: #d95926;
+  --cc-series-3: #199e70;
+  --cc-series-4: #c98500;
+  --cc-series-5: #d55181;
+  --cc-series-6: #008300;
+  --cc-series-7: #9085e9;
+  --cc-series-8: #e66767;
+  --cc-seq-1: #0d366b;
+  --cc-seq-2: #184f95;
+  --cc-seq-3: #256abf;
+  --cc-seq-4: #3987e5;
+  --cc-seq-5: #6da7ec;
+  --cc-seq-6: #9ec5f4;
+  --cc-seq-7: #cde2fb;
+  --cc-seq-ink-1: #ffffff;
+  --cc-seq-ink-2: #ffffff;
+  --cc-seq-ink-3: #ffffff;
+  --cc-seq-ink-4: #0b0b0b;
+  --cc-seq-ink-5: #0b0b0b;
+  --cc-seq-ink-6: #0b0b0b;
+  --cc-seq-ink-7: #0b0b0b;
+  --cc-div-neg: #3987e5;
+  --cc-div-pos: #e66767;
+  --cc-div-mid: #383835;
+  --cc-div-ink-1: #ffffff;
+  --cc-div-ink-2: #ffffff;
+  --cc-div-ink-3: #0b0b0b;
+  }
+}
+[data-theme="dark"] .cc-root,
+.cc-root[data-theme="dark"] {
+  color-scheme: dark;
+  --cc-surface: #1a1a19;
+  --cc-ink: #f0efec;
+  --cc-ink-2: #c3c2b7;
+  --cc-grid: #2c2c2a;
+  --cc-axis: #383835;
+  --cc-border: rgba(255, 255, 255, 0.1);
+  --cc-good-text: #0ca30c;
+  --cc-series-1: #3987e5;
+  --cc-series-2: #d95926;
+  --cc-series-3: #199e70;
+  --cc-series-4: #c98500;
+  --cc-series-5: #d55181;
+  --cc-series-6: #008300;
+  --cc-series-7: #9085e9;
+  --cc-series-8: #e66767;
+  --cc-seq-1: #0d366b;
+  --cc-seq-2: #184f95;
+  --cc-seq-3: #256abf;
+  --cc-seq-4: #3987e5;
+  --cc-seq-5: #6da7ec;
+  --cc-seq-6: #9ec5f4;
+  --cc-seq-7: #cde2fb;
+  --cc-seq-ink-1: #ffffff;
+  --cc-seq-ink-2: #ffffff;
+  --cc-seq-ink-3: #ffffff;
+  --cc-seq-ink-4: #0b0b0b;
+  --cc-seq-ink-5: #0b0b0b;
+  --cc-seq-ink-6: #0b0b0b;
+  --cc-seq-ink-7: #0b0b0b;
+  --cc-div-neg: #3987e5;
+  --cc-div-pos: #e66767;
+  --cc-div-mid: #383835;
+  --cc-div-ink-1: #ffffff;
+  --cc-div-ink-2: #ffffff;
+  --cc-div-ink-3: #0b0b0b;
+}
+
+.cc-s1 { --cc-c: var(--cc-series-1); }
+.cc-s2 { --cc-c: var(--cc-series-2); }
+.cc-s3 { --cc-c: var(--cc-series-3); }
+.cc-s4 { --cc-c: var(--cc-series-4); }
+.cc-s5 { --cc-c: var(--cc-series-5); }
+.cc-s6 { --cc-c: var(--cc-series-6); }
+.cc-s7 { --cc-c: var(--cc-series-7); }
+.cc-s8 { --cc-c: var(--cc-series-8); }
+.cc-other { --cc-c: var(--cc-other); }
+.cc-fill { fill: var(--cc-c); }
+.cc-stroke { stroke: var(--cc-c); }
+
+/* Texture is opt-in (setting, print, forced colours): hue stops carrying
+   identity alone, so marks swap to a 45/135 degree hatch of their own colour. */
+.cc-tx-ink { stroke: color-mix(in oklab, var(--cc-c) 45%, #000); stroke-width: 2; }
+[data-texture="on"] .cc-fill[style*="--cc-tx"] { fill: var(--cc-tx); }
+[data-texture="on"] .cc-sw-rect { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--cc-c) 45%, #000) 0 1.5px, transparent 1.5px 4px); }
+@media print, (forced-colors: active) {
+  .cc-fill[style*="--cc-tx"] { fill: var(--cc-tx); }
+  .cc-sw-rect { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--cc-c) 45%, #000) 0 1.5px, transparent 1.5px 4px); }
+}
+
+/* Panel chrome */
+.cc-panel { background: var(--cc-surface); border: 1px solid var(--cc-border); border-radius: 8px; padding: 12px 14px 10px; margin: 0; min-width: 0; transition: opacity 0.15s; }
+.cc-panel.cc-loading { opacity: 0.55; }
+.cc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+.cc-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--cc-ink); }
+.cc-sub { margin: 1px 0 0; color: var(--cc-ink-2); }
+.cc-plot { position: relative; min-width: 0; }
+.cc-svg { display: block; overflow: visible; max-width: 100%; user-select: none; -webkit-user-select: none; }
+.cc-svg:focus-visible { outline: 2px solid var(--cc-series-1); outline-offset: 2px; border-radius: 4px; }
+.cc-btn { font: inherit; color: var(--cc-ink-2); background: transparent; border: 1px solid var(--cc-border); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.cc-btn:hover { background: color-mix(in oklab, var(--cc-ink) 6%, transparent); }
+.cc-btn[aria-pressed="true"], .cc-btn[aria-expanded="true"] { color: var(--cc-ink); background: color-mix(in oklab, var(--cc-ink) 9%, transparent); }
+.cc-btn:focus-visible, .cc-legend-item:focus-visible { outline: 2px solid var(--cc-series-1); outline-offset: 1px; }
+.cc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; padding: 0; border: 0; }
+
+/* Axes, grid, marks */
+.cc-gridline { stroke: var(--cc-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.cc-baseline { stroke: var(--cc-axis); stroke-width: 1; shape-rendering: crispEdges; }
+.cc-tick { fill: var(--cc-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cc-tick.cc-cat { fill: var(--cc-ink-2); font-variant-numeric: normal; }
+.cc-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.cc-area { fill-opacity: 0.1; stroke: none; }
+.cc-area-stacked { fill-opacity: 0.3; }
+.cc-dot { stroke: var(--cc-surface); stroke-width: 4; paint-order: stroke; }
+.cc-dlabel { fill: var(--cc-ink-2); font-size: 11px; }
+.cc-vlabel { fill: var(--cc-ink-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cc-cross { stroke: var(--cc-axis); stroke-width: 1; shape-rendering: crispEdges; pointer-events: none; }
+.cc-brush { fill: var(--cc-series-1); fill-opacity: 0.12; stroke: var(--cc-series-1); stroke-width: 1; pointer-events: none; }
+.cc-hit { cursor: crosshair; }
+.cc-mark { transition: filter 0.1s; }
+.cc-mark.cc-hot { stroke: var(--cc-ink); stroke-width: 1.5; filter: brightness(1.08); }
+.cc-empty .cc-hit { cursor: default; }
+
+/* Legend */
+.cc-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 8px; }
+.cc-legend[hidden] { display: none; }
+.cc-legend-item { display: inline-flex; align-items: center; gap: 6px; font: inherit; color: var(--cc-ink-2); background: none; border: 0; padding: 2px 0; cursor: pointer; }
+.cc-legend-item[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
+.cc-sw { display: inline-block; flex: none; background-color: var(--cc-c); }
+.cc-sw-line { width: 14px; height: 2px; border-radius: 1px; }
+.cc-sw-rect { width: 10px; height: 10px; border-radius: 2px; }
+
+/* Table view */
+.cc-table { margin-top: 8px; max-height: 240px; overflow: auto; border-top: 1px solid var(--cc-grid); }
+.cc-table[hidden] { display: none; }
+.cc-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.cc-table th, .cc-table td { padding: 3px 8px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--cc-grid); }
+.cc-table thead th { position: sticky; top: 0; background: var(--cc-surface); color: var(--cc-ink-2); font-weight: 600; }
+.cc-table tbody th { font-weight: 400; color: var(--cc-ink-2); }
+.cc-table .cc-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Tooltip: one element, shared by every chart. */
+.cc-tip { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; min-width: 120px; max-width: 280px; padding: 8px 10px; background: var(--cc-surface); color: var(--cc-ink); border: 1px solid var(--cc-axis); border-radius: 6px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); }
+.cc-tip[hidden] { display: none; }
+.cc-tip-title { color: var(--cc-ink-2); margin-bottom: 4px; }
+.cc-tip-row { display: flex; align-items: center; gap: 8px; padding: 1px 4px; margin: 0 -4px; border-radius: 3px; }
+.cc-tip-row.cc-hot { background: color-mix(in oklab, var(--cc-ink) 8%, transparent); }
+.cc-key { flex: none; background: var(--cc-c); }
+.cc-key-line { width: 10px; height: 2px; border-radius: 1px; }
+.cc-key-bar { width: 8px; height: 8px; border-radius: 2px; }
+.cc-tip-value { order: 2; margin-left: auto; padding-left: 12px; font-weight: 600; color: var(--cc-ink); font-variant-numeric: tabular-nums; }
+.cc-tip-name { order: 1; color: var(--cc-ink-2); overflow-wrap: anywhere; }
+.cc-key { order: 0; }
+.cc-tip-foot { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--cc-grid); color: var(--cc-ink-2); }
+
+/* Filter row */
+.cc-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0 10px; }
+.cc-readout { margin-left: 8px; color: var(--cc-ink-2); }
+
+/* Stat tile */
+.cc-tile { background: var(--cc-surface); border: 1px solid var(--cc-border); border-radius: 8px; padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cc-tile-label { color: var(--cc-ink-2); }
+.cc-tile-value { font-size: 28px; line-height: 1.15; font-weight: 600; color: var(--cc-ink); }
+.cc-tile-delta { display: flex; align-items: center; gap: 4px; color: var(--cc-ink-2); }
+.cc-tile-delta[hidden], .cc-tile-status[hidden], .cc-tile-spark[hidden] { display: none; }
+.cc-tile-delta.cc-good .cc-delta-num { color: var(--cc-good-text); }
+.cc-tile-delta.cc-good .cc-icon { color: var(--cc-good-text); }
+.cc-tile-delta.cc-bad .cc-delta-num, .cc-tile-delta.cc-bad .cc-icon { color: var(--cc-status-critical); }
+.cc-delta-num { font-weight: 600; font-variant-numeric: tabular-nums; }
+.cc-tile-spark { margin-top: 6px; min-width: 0; }
+.cc-spark { width: 100%; }
+.cc-spark-base { fill: none; stroke: var(--cc-muted); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.cc-spark-now { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+
+/* Status: always an icon and a word */
+.cc-status { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--cc-ink); }
+.cc-status .cc-icon { flex: none; }
+.cc-status-good .cc-icon { color: var(--cc-status-good); }
+.cc-status-warning .cc-icon { color: var(--cc-status-warning); }
+.cc-status-serious .cc-icon { color: var(--cc-status-serious); }
+.cc-status-critical .cc-icon { color: var(--cc-status-critical); }
+
+/* Gauge */
+.cc-gauge-track, .cc-gauge-fill { fill: none; stroke-width: 12; stroke-linecap: round; }
+.cc-gauge-good { --cc-g: var(--cc-series-1); }
+.cc-gauge-warning { --cc-g: var(--cc-status-warning); }
+.cc-gauge-critical { --cc-g: var(--cc-status-critical); }
+.cc-gauge-fill { stroke: var(--cc-g); }
+.cc-gauge-track { stroke: color-mix(in oklab, var(--cc-g) 20%, var(--cc-surface)); }
+.cc-gauge-tick { stroke: var(--cc-ink-2); stroke-width: 1.5; }
+.cc-gauge-value { fill: var(--cc-ink); font-size: 26px; font-weight: 600; }
+.cc-gauge-status { display: flex; justify-content: center; margin-top: -4px; }
+
+/* Heatmap */
+.cc-cell { transition: filter 0.1s; }
+.cc-cell-empty { fill: color-mix(in oklab, var(--cc-grid) 55%, transparent); }
+.cc-cell.cc-hot { stroke: var(--cc-ink); stroke-width: 1.5; }
+.cc-lv1 { --cc-cell: var(--cc-seq-1); --cc-cell-ink: var(--cc-seq-ink-1); }
+.cc-lv2 { --cc-cell: var(--cc-seq-2); --cc-cell-ink: var(--cc-seq-ink-2); }
+.cc-lv3 { --cc-cell: var(--cc-seq-3); --cc-cell-ink: var(--cc-seq-ink-3); }
+.cc-lv4 { --cc-cell: var(--cc-seq-4); --cc-cell-ink: var(--cc-seq-ink-4); }
+.cc-lv5 { --cc-cell: var(--cc-seq-5); --cc-cell-ink: var(--cc-seq-ink-5); }
+.cc-lv6 { --cc-cell: var(--cc-seq-6); --cc-cell-ink: var(--cc-seq-ink-6); }
+.cc-lv7 { --cc-cell: var(--cc-seq-7); --cc-cell-ink: var(--cc-seq-ink-7); }
+.cc-dv0 { --cc-cell: var(--cc-div-mid); --cc-cell-ink: var(--cc-div-ink-1); }
+.cc-dvn1 { --cc-cell: color-mix(in oklab, var(--cc-div-mid), var(--cc-div-neg) 33%); --cc-cell-ink: var(--cc-div-ink-1); }
+.cc-dvn2 { --cc-cell: color-mix(in oklab, var(--cc-div-mid), var(--cc-div-neg) 66%); --cc-cell-ink: var(--cc-div-ink-2); }
+.cc-dvn3 { --cc-cell: var(--cc-div-neg); --cc-cell-ink: var(--cc-div-ink-3); }
+.cc-dvp0 { --cc-cell: var(--cc-div-mid); --cc-cell-ink: var(--cc-div-ink-1); }
+.cc-dvp1 { --cc-cell: color-mix(in oklab, var(--cc-div-mid), var(--cc-div-pos) 33%); --cc-cell-ink: var(--cc-div-ink-1); }
+.cc-dvp2 { --cc-cell: color-mix(in oklab, var(--cc-div-mid), var(--cc-div-pos) 66%); --cc-cell-ink: var(--cc-div-ink-2); }
+.cc-dvp3 { --cc-cell: var(--cc-div-pos); --cc-cell-ink: var(--cc-div-ink-3); }
+rect[class*="cc-lv"], rect[class*="cc-dv"] { fill: var(--cc-cell); }
+.cc-cell-label { fill: var(--cc-cell-ink); font-size: 11px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.cc-key.cc-lv6, .cc-key.cc-dvp3 { background: var(--cc-cell); }
+.cc-scale { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--cc-ink-2); }
+.cc-scale-bar { display: inline-flex; gap: 2px; }
+.cc-scale-bar i { width: 24px; height: 8px; border-radius: 2px; background: var(--cc-cell); }
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-panel, .cc-mark, .cc-cell { transition: none; }
+}
