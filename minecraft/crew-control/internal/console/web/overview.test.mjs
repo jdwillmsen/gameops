@@ -183,6 +183,20 @@ test('board: a stuck event marks only the task it names, until progress moves', 
   assert.equal(b.rows()[0].state, 'working');
 });
 
+test('board: a replayed backlog cannot bring back a stuck mark that progress cleared', () => {
+  const b = createBoard();
+  const stuck = ev(1, 'c1', 'stuck', { task: 't1', level: 'warn' });
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], 1000);
+  b.events([stuck], true, 1000);
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], 2000);
+  b.ingest([u('c1', { task: task({ progress: 3 }) })], 3000);
+  assert.equal(b.rows()[0].state, 'working');
+  // A reconnect replaces the window with a backlog holding the same event.
+  b.events([stuck], false, 4000);
+  b.ingest([u('c1', { task: task({ progress: 3 }) })], 5000);
+  assert.equal(b.rows()[0].state, 'working');
+});
+
 test('board: a stuck event for another unit or task changes nothing', () => {
   const b = createBoard();
   b.ingest([u('c1', { task: task() }), u('c2', { task: task({ id: 't2' }) })], 1000);
