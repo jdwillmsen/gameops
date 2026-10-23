@@ -6,6 +6,11 @@ export const SAMPLE_MS = 2000;
 // 90 samples at 2 s is a three-minute trail.
 export const WINDOW = 90;
 export const MAX_HEALTH = 20;
+// The poller reports a stuck task once and never says when the unit moves
+// again, and the units snapshot carries no stuck flag to read it from. Past
+// this long without a new report the mark is dropped, so a unit that went on
+// working is not shown as stuck for days.
+export const STUCK_HOLD_MS = 10 * 60_000;
 
 // Worst first, which is also the order a sort by state shows.
 export const STATES = ['dead', 'stuck', 'offline', 'working', 'idle'];
@@ -174,17 +179,6 @@ export function moveFocus(ids, cur, key, page = 8) {
   return ids[Math.min(last, Math.max(0, i + step))];
 }
 
-// Names the last n samples by how long ago they were taken, from their own
-// timestamps: a throttled tab or a stream outage spaces them unevenly.
-export function trailLabels(times, n, now) {
-  const at = times.slice(-n);
-  return at.map((t, i) => {
-    const s = Math.max(0, Math.round((now - t) / 1000));
-    if (i === at.length - 1 && s * 1000 <= SAMPLE_MS * 1.5) return 'now';
-    return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
-  });
-}
-
 // ---- the board: what the stream cannot tell on its own ----
 
 const push = (arr, v, cap) => {
@@ -202,6 +196,12 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   const stuckProgress = new Map();
   const stuckAt = new Map();
   const lastEvent = new Map();
+  // Per unit: { state, at, src, floor }. src says where `at` came from: an
+  // 'event' from the feed, 'seen' when this page watched the change but no
+  // event has confirmed it yet, 'open' when the page opened on the state and
+  // only knows it has lasted at least this long. floor is the earliest an
+  // event may date the entry: the page saw the previous state at that time, so
+  // an older event belongs to an earlier visit to this one.
   const since = new Map();
   const trail = new Map();
   const fleet = { online: [], working: [], idle: [], attention: [] };
@@ -209,27 +209,36 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   let positions = new Map();
 
   // The feed names a stuck task but never says when it moves again, so a stuck
-  // mark holds until the task changes or its progress does.
-  function stuckNow(s) {
+  // mark holds until the task changes, its progress does, or STUCK_HOLD_MS passes.
+  function stuckNow(s, now) {
     const want = stuckTask.get(s.id);
-    if (!want || !s.task || s.task.id !== want) {
+    if (!want) return false;
+    const at = Date.parse(stuckAt.get(s.id));
+    if (!s.task || s.task.id !== want || (!Number.isNaN(at) && now - at >= STUCK_HOLD_MS)) {
       stuckTask.delete(s.id);
       stuckProgress.delete(s.id);
+      stuckAt.delete(s.id);
       return false;
     }
     if (!stuckProgress.has(s.id)) stuckProgress.set(s.id, s.task.progress);
     else if (stuckProgress.get(s.id) !== s.task.progress) {
       stuckTask.delete(s.id);
       stuckProgress.delete(s.id);
+      stuckAt.delete(s.id);
       return false;
     }
     return true;
   }
 
-  // When the feed says the unit entered this state, else null.
-  function enteredAt(s, state) {
+  // When the feed says the unit entered this state, else null. Events dated
+  // before floor are ignored: the stream may deliver a snapshot ahead of its
+  // event, and the newest event of that kind is then an earlier visit.
+  function enteredAt(s, state, floor) {
     const ev = lastEvent.get(s.id) || {};
-    const t = e => (e ? Date.parse(e.at) : NaN);
+    const t = e => {
+      const at = e ? Date.parse(e.at) : NaN;
+      return at >= floor ? at : NaN;
+    };
     let at = NaN;
     if (state === 'offline') at = t(ev.offline);
     else if (state === 'dead') at = t(ev.died);
@@ -248,25 +257,29 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
     ingest(list, now = Date.now()) {
       units = list;
       for (const s of list) {
-        const state = stateOf(s, stuckNow(s));
+        const state = stateOf(s, stuckNow(s, now));
         const k = taskKind(s);
         if (k !== 'none') kinds.add(k);
         const cur = since.get(s.id);
         if (!cur || cur.state !== state) {
-          const at = enteredAt(s, state);
+          const floor = cur ? cur.at : 0;
+          const at = enteredAt(s, state, floor);
           // A change this page watched happen is exact; one it opened on is not.
-          since.set(s.id, { state, at: at ?? now, exact: at !== null || !!cur });
+          // Leaving stuck restarts the clock: the task's start is older than
+          // the stuck spell, so the feed cannot date the working time.
+          const src = at !== null ? 'event' : cur ? 'seen' : 'open';
+          since.set(s.id, { state, at: at ?? now, src, floor });
         }
       }
     },
 
     // live is false for the backlog, which replaces the window.
-    events(incoming, live) {
+    events(incoming, live, now = Date.now()) {
       const r = mergeEvents(live ? feed : [], incoming, feedCap);
       feed = r.feed;
       for (const e of r.added) {
         const m = lastEvent.get(e.unit) || {};
-        m[e.kind] = e;
+        if (!m[e.kind] || e.seq >= m[e.kind].seq) m[e.kind] = e;
         lastEvent.set(e.unit, m);
         if (e.kind === 'stuck' && e.task) {
           stuckTask.set(e.unit, e.task);
@@ -274,14 +287,15 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
           stuckAt.set(e.unit, e.at);
         }
       }
-      // Units that arrived before their backlog get a better start time now.
+      // Units that arrived before their backlog, or ahead of their event, get
+      // a better start time now.
       for (const s of units) {
         const cur = since.get(s.id);
-        if (!cur || cur.exact) continue;
-        const at = enteredAt(s, cur.state);
-        if (at !== null) since.set(s.id, { ...cur, at, exact: true });
+        if (!cur || cur.src === 'event') continue;
+        const at = enteredAt(s, cur.state, cur.floor);
+        if (at !== null) since.set(s.id, { ...cur, at, src: 'event' });
       }
-      if (r.added.some(e => e.kind === 'stuck')) this.ingest(units, Date.now());
+      if (r.added.some(e => e.kind === 'stuck')) this.ingest(units, now);
     },
 
     positions(list) {
@@ -318,7 +332,7 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
           name: s.name || s.id,
           index: index + 1,
           state,
-          since: st ? { at: st.at, exact: st.exact } : null,
+          since: st ? { at: st.at, exact: st.src !== 'open' } : null,
           kind: taskKind(s),
           taskText: taskLine(s),
           health: known(s.health) ? s.health : null,

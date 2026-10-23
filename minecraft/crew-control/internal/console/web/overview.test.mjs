@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   stateOf, taskKind, duration, sinceLabel, sortRows, filterRows, emptyFilter, isFiltered, summarize,
-  parseParams, formatParams, moveFocus, nextAttention, createBoard, WINDOW,
+  parseParams, formatParams, moveFocus, nextAttention, createBoard, WINDOW, STUCK_HOLD_MS,
 } from './overview.js';
 
 const u = (id, extra = {}) => ({ id, name: id, online: true, dead: false, health: 20, hunger: 20, task: null, ...extra });
@@ -169,7 +169,7 @@ test('board: an offline unit takes its time from the offline event', () => {
 test('board: a stuck event marks only the task it names, until progress moves', () => {
   const b = createBoard();
   b.ingest([u('c1', { task: task({ progress: 2 }) })], 1000);
-  b.events([ev(1, 'c1', 'stuck', { task: 't1', level: 'warn' })], true);
+  b.events([ev(1, 'c1', 'stuck', { task: 't1', level: 'warn' })], true, 1000);
   assert.equal(b.rows()[0].state, 'stuck');
   assert.equal(b.rows()[0].since.at, Date.parse(ev(1).at));
   b.ingest([u('c1', { task: task({ progress: 2 }) })], 2000);
@@ -177,7 +177,7 @@ test('board: a stuck event marks only the task it names, until progress moves', 
   b.ingest([u('c1', { task: task({ progress: 3 }) })], 3000);
   assert.equal(b.rows()[0].state, 'working');
   // A new task with a different id was never reported stuck.
-  b.events([ev(2, 'c1', 'stuck', { task: 't1', level: 'warn' })], true);
+  b.events([ev(2, 'c1', 'stuck', { task: 't1', level: 'warn' })], true, 3500);
   b.ingest([u('c1', { task: task({ id: 't2', progress: 0 }) })], 4000);
   assert.equal(b.rows()[0].state, 'working');
 });
@@ -185,7 +185,7 @@ test('board: a stuck event marks only the task it names, until progress moves', 
 test('board: a stuck event for another unit or task changes nothing', () => {
   const b = createBoard();
   b.ingest([u('c1', { task: task() }), u('c2', { task: task({ id: 't2' }) })], 1000);
-  b.events([ev(1, 'c2', 'stuck', { task: 'old', level: 'warn' })], true);
+  b.events([ev(1, 'c2', 'stuck', { task: 'old', level: 'warn' })], true, 1000);
   assert.deepEqual(b.rows().map(r => r.state), ['working', 'working']);
 });
 
@@ -232,4 +232,78 @@ test('board: low flags ignore offline and dead units', () => {
   const b = createBoard();
   b.ingest([u('c1', { health: 3, hunger: 2 }), u('c2', { dead: true, health: 0 }), u('c3', { online: false, health: 1, hunger: 1 })], 1000);
   assert.deepEqual(b.rows().map(r => [r.lowHealth, r.lowHunger]), [[true, true], [false, false], [false, false]]);
+});
+
+test('board: a second death is not dated by the first one when the snapshot comes first', () => {
+  const b = createBoard();
+  // Died at +1s, back at +2s, dead again at +5s. Wall clock is the event time.
+  b.events([ev(1, 'c1', 'died'), ev(2, 'c1', 'respawned')], false);
+  b.ingest([u('c1')], 1_002_000 + 500);
+  assert.equal(b.rows()[0].since.at, Date.parse(ev(2).at));
+  b.ingest([u('c1', { dead: true, health: 0 })], 1_005_100);
+  let r = b.rows()[0];
+  assert.equal(r.state, 'dead');
+  assert.equal(r.since.at, 1_005_100, 'the earlier death is not this one');
+  assert.equal(r.since.exact, true, 'but this page watched it happen');
+  // The event follows the snapshot and corrects the time.
+  b.events([ev(5, 'c1', 'died')], true, 1_005_200);
+  r = b.rows()[0];
+  assert.equal(r.since.at, Date.parse(ev(5).at));
+  assert.equal(r.state, 'dead');
+});
+
+test('board: going offline and finishing a task a second time are dated the same way', () => {
+  const b = createBoard();
+  b.events([ev(1, 'c1', 'offline'), ev(2, 'c1', 'online'), ev(3, 'c2', 'task_done', { task: 't1' })], false);
+  b.ingest([u('c1'), u('c2', { task: task({ id: 't2' }) })], 1_004_000);
+  b.ingest([u('c1', { online: false }), u('c2')], 1_006_100);
+  let r = b.rows();
+  assert.equal(r[0].since.at, 1_006_100, 'not the earlier offline');
+  assert.equal(r[1].since.at, 1_006_100, 'not the earlier task_done');
+  b.events([ev(6, 'c1', 'offline'), ev(6.5, 'c2', 'task_done', { task: 't2' })], true, 1_006_200);
+  r = b.rows();
+  assert.equal(r[0].since.at, Date.parse(ev(6).at));
+  assert.equal(r[1].since.at, Date.parse(ev(6.5).at));
+});
+
+test('board: an open-page floor accepts an older event, because the page missed the start', () => {
+  const b = createBoard();
+  b.ingest([u('c1', { dead: true, health: 0 })], 1_100_000);
+  assert.equal(b.rows()[0].since.exact, false);
+  b.events([ev(1, 'c1', 'died')], false, 1_100_001);
+  assert.deepEqual([b.rows()[0].since.at, b.rows()[0].since.exact], [Date.parse(ev(1).at), true]);
+});
+
+test('board: working time restarts when a unit stops being stuck', () => {
+  const b = createBoard();
+  b.events([ev(1, 'c1', 'task_started', { task: 't1' })], false);
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], 1_001_500);
+  assert.equal(b.rows()[0].since.at, Date.parse(ev(1).at));
+  b.events([ev(2, 'c1', 'stuck', { task: 't1', level: 'warn' })], true, 1_002_500);
+  assert.equal(b.rows()[0].state, 'stuck');
+  b.ingest([u('c1', { task: task({ progress: 3 }) })], 1_600_000);
+  const r = b.rows()[0];
+  assert.equal(r.state, 'working');
+  assert.equal(r.since.at, 1_600_000, 'not the task start, ten stuck minutes ago');
+  // A later event cannot pull it back to the task start either.
+  b.events([ev(3, 'c2', 'online')], true, 1_600_100);
+  assert.equal(b.rows()[0].since.at, 1_600_000);
+});
+
+test('board: a stuck mark expires when nothing refreshes it', () => {
+  const b = createBoard();
+  const stuckAt = Date.parse(ev(1).at);
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], stuckAt);
+  b.events([ev(1, 'c1', 'stuck', { task: 't1', level: 'warn' })], true, stuckAt);
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], stuckAt + STUCK_HOLD_MS - 1);
+  assert.equal(b.rows()[0].state, 'stuck');
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], stuckAt + STUCK_HOLD_MS);
+  assert.equal(b.rows()[0].state, 'working');
+  assert.equal(b.rows()[0].since.at, stuckAt + STUCK_HOLD_MS);
+  // It does not come back by itself.
+  b.ingest([u('c1', { task: task({ progress: 2 }) })], stuckAt + STUCK_HOLD_MS + 1000);
+  assert.equal(b.rows()[0].state, 'working');
+  // A fresh report starts a fresh hold.
+  b.events([ev(1000, 'c1', 'stuck', { task: 't1', level: 'warn' })], true, Date.parse(ev(1000).at));
+  assert.equal(b.rows()[0].state, 'stuck');
 });
