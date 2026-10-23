@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -70,6 +71,10 @@ type rig struct {
 	// listen runs its backoff path.
 	failOrders   bool
 	failCallouts int
+
+	// The last poll's read point, as the client sent it.
+	lastCursor int64
+	lastRev    int64
 }
 
 func newRigServer(t *testing.T) (*rig, *httptest.Server) {
@@ -124,11 +129,21 @@ func (r *rig) setAnswer(a *pollAnswer) {
 	r.mu.Unlock()
 }
 
+// lastQuery returns the cursor and revision the most recent poll carried.
+func (r *rig) lastQuery() (int64, int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastCursor, r.lastRev
+}
+
 func (r *rig) ordersRoute(w http.ResponseWriter, req *http.Request) {
 	r.mu.Lock()
 	fail := r.failOrders
 	a := r.answer
 	r.answer = nil
+	cursor, _ := strconv.ParseInt(req.URL.Query().Get("since"), 10, 64)
+	rev, _ := strconv.ParseInt(req.URL.Query().Get("rev"), 10, 64)
+	r.lastCursor, r.lastRev = cursor, rev
 	r.mu.Unlock()
 	if fail {
 		http.Error(w, "down", http.StatusInternalServerError)
@@ -345,4 +360,37 @@ func TestListenRecoversAfterServerFailure(t *testing.T) {
 		id, _, ok := c.Leader()
 		return ok && id == "crew-07"
 	}, "listen to recover and read the leader")
+}
+
+// The client echoes the leader-line revision it last saw, and an answer
+// with a newer revision — the leader moved, with no message to carry it —
+// is read at once instead of waiting for some future order.
+func TestPollEchoesRevAndReadsLeaderMoves(t *testing.T) {
+	ri, srv := newRigServer(t)
+	c := newTestClient(t, srv.URL, "crew-18", newRecLog())
+	pos1 := squadmsg.Pos{X: 3, Y: 70, Z: -4}
+	ri.setAnswer(&pollAnswer{Cursor: 7, Rev: 3, Leader: &wireLeader{Unit: "crew-07", Pos: &pos1}})
+	runClient(t, c)
+	waitFor(t, func() bool {
+		_, _, ok := c.Leader()
+		return ok
+	}, "first answer applied")
+	// The finished read point rides along on the next poll.
+	waitFor(t, func() bool {
+		cursor, rev := ri.lastQuery()
+		return cursor == 7 && rev == 3
+	}, "cursor and revision echoed")
+
+	// The leader moves and nothing else changes: a newer revision alone
+	// must reach the unit.
+	pos2 := squadmsg.Pos{X: 9, Y: 70, Z: -4}
+	ri.setAnswer(&pollAnswer{Rev: 4, Leader: &wireLeader{Unit: "crew-07", Pos: &pos2}})
+	waitFor(t, func() bool {
+		_, pos, ok := c.Leader()
+		return ok && pos == (mgl32.Vec3{9, 70, -4})
+	}, "the leader's move to reach the client")
+	_, rev := ri.lastQuery()
+	if rev != 4 {
+		t.Errorf("after the move the client echoes rev %d, want 4", rev)
+	}
 }

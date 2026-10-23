@@ -193,6 +193,9 @@ func (a *API) hello(w http.ResponseWriter, r *http.Request) {
 		Battalion:     b.Battalion,
 		BattalionName: b.BattalionName,
 	})
+	// A hello can move the chain of command; the waiters re-read the
+	// answer's revision and keep waiting when nothing changed.
+	a.broadcast(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -219,6 +222,9 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	// claim itself says where it sits after a restart of the store.
 	a.store.Status(statusIn{Unit: b.Unit, Squad: r.PathValue("id"), HP: b.HP,
 		Food: b.Food, Weapon: b.Weapon, Pos: b.Pos})
+	// A report can move the leader or where it stands; the waiters re-read
+	// the answer's revision and keep waiting when nothing changed.
+	a.broadcast(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -288,6 +294,11 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad since", http.StatusBadRequest)
 		return
 	}
+	rev, hasRev, err := parseRev(r.URL.Query().Get("rev"))
+	if err != nil {
+		http.Error(w, "bad rev", http.StatusBadRequest)
+		return
+	}
 	timer := time.NewTimer(parseWait(r.URL.Query().Get("wait")))
 	defer timer.Stop()
 	for {
@@ -298,10 +309,14 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 		}
 		// A first poll (since=0), anything appended past the cursor, or the
 		// standing order riding along answers at once: a joining unit must
-		// see the leader and its orders without waiting this turn out.
-		// The standing order is there for a unit that missed only the
-		// leader's turn.
-		if since == 0 || d.Cursor > since || len(d.Orders) > 0 || len(d.Callouts) > 0 {
+		// see the leader and its orders without waiting this turn out. The
+		// standing order is there for a unit that missed only the leader's
+		// turn. A unit that echoed the revision it last saw also answers
+		// the moment the leader line changed and no message moved the
+		// cursor to say so; without an echoed revision there is no
+		// comparison to make, so the poll keeps its wait.
+		staleRev := hasRev && rev != d.Rev
+		if since == 0 || staleRev || d.Cursor > since || len(d.Orders) > 0 || len(d.Callouts) > 0 {
 			writeJSON(w, http.StatusOK, d)
 			return
 		}
@@ -328,6 +343,20 @@ func parseSince(s string) (int64, error) {
 		return 0, errors.New("since must be a non-negative integer")
 	}
 	return n, nil
+}
+
+// parseRev reads the revision a unit last saw and whether it spoke one;
+// an absent revision is a first poll or an older client, which has no
+// comparison to make and so keeps the pure long-poll wait.
+func parseRev(s string) (int64, bool, error) {
+	if s == "" {
+		return -1, false, nil
+	}
+	n, err := json.Number(s).Int64()
+	if err != nil || n < 0 {
+		return 0, false, errors.New("rev must be a non-negative integer")
+	}
+	return n, true, nil
 }
 
 func parseWait(s string) time.Duration {
