@@ -4,6 +4,11 @@ package squad
 // that passed the ingress exactly as the work routes do. The operator's
 // order route reuses the signed-in operator session instead.
 
+// The package lives at the minecraft tree's shared internal so both sides
+// reach it: crew-control serves it, and crew's offline tests run the real
+// routes against the real engine. It names no crew-control type, so the
+// console hands its roster and its auth in through Units and Gate.
+
 import (
 	"crypto/sha256"
 	"crypto/subtle"
@@ -16,9 +21,6 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
-	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 )
 
 const (
@@ -43,16 +45,23 @@ var (
 	calloutRE = regexp.MustCompile(`^(low_health|need_heal|target_down|boss_phase)$`)
 )
 
-// Gate is the part of auth.Auth the operator route needs; work.API uses the
-// same shape.
+// Gate is the sign-in the operator route needs: it guards the route and
+// names the operator who gave the order. crew-control passes its auth.Auth
+// behind a small adapter; work.API takes the richer shape from it directly.
 type Gate interface {
 	Require(h http.Handler) http.Handler
-	Operator(r *http.Request) (auth.Operator, bool)
+	Operator(r *http.Request) (opID string, ok bool)
+}
+
+// Units is the roster lookup the unit routes need: a hello, a status or a
+// call-out is only taken from a unit the console knows.
+type Units interface {
+	Has(unit string) bool
 }
 
 type API struct {
 	store *Store
-	units roster.Roster
+	units Units
 	token [sha256.Size]byte
 	now   func() time.Time
 
@@ -66,7 +75,7 @@ type API struct {
 // Routes registers the public reads and, with a token configured, the
 // unit-facing writes. With no token the unit routes do not exist rather
 // than exist to refuse, as the work routes do.
-func Routes(mux *http.ServeMux, st *Store, units roster.Roster, token string) *API {
+func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	a := &API{store: st, units: units, token: sha256.Sum256([]byte(token)), now: time.Now,
 		waits: map[string]map[chan struct{}]struct{}{}}
 	mux.HandleFunc("GET /v1/squads", func(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +104,7 @@ func Routes(mux *http.ServeMux, st *Store, units roster.Roster, token string) *A
 func (a *API) MountOperator(mux *http.ServeMux, g Gate) {
 	mux.Handle("POST /v1/squads/{id}/order", g.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		op, _ := g.Operator(r)
-		a.order(w, r, op.ID)
+		a.order(w, r, op)
 	})))
 }
 
@@ -158,7 +167,7 @@ func (a *API) hello(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, &b) {
 		return
 	}
-	if _, ok := a.units.Get(b.Unit); !ok ||
+	if !a.units.Has(b.Unit) ||
 		!squadID.MatchString(r.PathValue("id")) ||
 		!roleRE.MatchString(b.Role) ||
 		utf8.RuneCountInString(b.SquadName) > maxName {
@@ -191,7 +200,7 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, &b) {
 		return
 	}
-	if _, ok := a.units.Get(b.Unit); !ok || b.Food < 0 || b.Food > 20 {
+	if !a.units.Has(b.Unit) || b.Food < 0 || b.Food > 20 {
 		http.Error(w, "bad status", http.StatusBadRequest)
 		return
 	}
@@ -211,7 +220,7 @@ func (a *API) callout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if _, ok := a.units.Get(b.Unit); !ok || !calloutRE.MatchString(b.Kind) {
+	if !a.units.Has(b.Unit) || !calloutRE.MatchString(b.Kind) {
 		http.Error(w, "bad callout", http.StatusBadRequest)
 		return
 	}

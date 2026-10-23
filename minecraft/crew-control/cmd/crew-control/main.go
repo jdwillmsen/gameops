@@ -28,9 +28,9 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
-	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/squad"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
+	"github.com/jdwillmsen/gameops/minecraft/internal/squad"
 )
 
 // Stamped by the Dockerfile at build time.
@@ -127,7 +127,7 @@ func main() {
 			api.OnBlocks = func(string, uuid.UUID, work.Blocks) {}
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
 			squadMount := squad.Routes(mux, squadStore, units, workToken)
-			squadMount.MountOperator(mux, operators)
+			squadMount.MountOperator(mux, squadGate{operators})
 
 			poller.SetWorkSource(api.Feed)
 			events.NewAPI(eventLog).MountOperator(mux, operators)
@@ -186,6 +186,18 @@ func main() {
 	<-pollDone
 	<-recordDone
 	<-storeDone
+}
+
+// squadGate adapts the console's auth to the squad routes' gate, which asks
+// only for the signed-in operator's id: the shared squad package cannot
+// name crew-control's auth types.
+type squadGate struct{ a *auth.Auth }
+
+func (g squadGate) Require(h http.Handler) http.Handler { return g.a.Require(h) }
+
+func (g squadGate) Operator(r *http.Request) (string, bool) {
+	op, ok := g.a.Operator(r)
+	return op.ID, ok
 }
 
 // postgresDSN is empty when PG_HOST is unset. The password is read apart from
