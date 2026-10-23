@@ -1,6 +1,7 @@
 package arena
 
 import (
+	"errors"
 	"bufio"
 	"encoding/json"
 	"fmt"
@@ -47,8 +48,7 @@ func AppendBossRecord(path string, r BossRecord) error {
 		return err
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
-		f.Close()
-		return err
+		return errors.Join(err, f.Close())
 	}
 	return f.Close()
 }
