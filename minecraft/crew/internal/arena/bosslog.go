@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,7 +33,8 @@ type BossRecord struct {
 }
 
 // AppendBossRecord adds the record as one JSON line, creating the log's
-// directory on first use.
+// directory on first use. A log whose last write was cut short gets a newline
+// first, so the new record does not join the torn line.
 func AppendBossRecord(path string, r BossRecord) error {
 	if r.Effects == nil {
 		r.Effects = []string{}
@@ -46,9 +46,16 @@ func AppendBossRecord(path string, r BossRecord) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
+	}
+	torn, err := endsTorn(f)
+	if err != nil {
+		return errors.Join(err, f.Close())
+	}
+	if torn {
+		line = append([]byte{'\n'}, line...)
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return errors.Join(err, f.Close())
@@ -56,32 +63,46 @@ func AppendBossRecord(path string, r BossRecord) error {
 	return f.Close()
 }
 
-// ReadBossRecords loads the whole log. A log that does not exist yet is an
-// empty history, not an error.
-func ReadBossRecords(path string) ([]BossRecord, error) {
+// endsTorn reports whether f is non-empty and does not end in a newline.
+func endsTorn(f *os.File) (bool, error) {
+	st, err := f.Stat()
+	if err != nil || st.Size() == 0 {
+		return false, err
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, st.Size()-1); err != nil {
+		return false, err
+	}
+	return last[0] != '\n', nil
+}
+
+// ReadBossRecords loads the whole log and counts the lines it skipped as
+// malformed: one torn write must not hide every other run. A log that does
+// not exist yet is an empty history, not an error.
+func ReadBossRecords(path string) (recs []BossRecord, skipped int, err error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer f.Close()
-	var recs []BossRecord
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for n := 1; sc.Scan(); n++ {
+	for sc.Scan() {
 		text := strings.TrimSpace(sc.Text())
 		if text == "" {
 			continue
 		}
 		var r BossRecord
 		if err := json.Unmarshal([]byte(text), &r); err != nil {
-			return nil, fmt.Errorf("%s line %d: %w", path, n, err)
+			skipped++
+			continue
 		}
 		recs = append(recs, r)
 	}
-	return recs, sc.Err()
+	return recs, skipped, sc.Err()
 }
 
 // BossSummary is one boss and effect set across its logged runs.

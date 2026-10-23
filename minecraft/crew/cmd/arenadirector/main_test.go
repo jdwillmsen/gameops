@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,7 +40,7 @@ func TestApplyRallyOverrides(t *testing.T) {
 
 func TestPrintSummaryOfAMissingLogIsAnEmptyList(t *testing.T) {
 	var out strings.Builder
-	if err := printSummary(&out, filepath.Join(t.TempDir(), "none.jsonl")); err != nil {
+	if err := printSummary(&out, io.Discard, filepath.Join(t.TempDir(), "none.jsonl")); err != nil {
 		t.Fatalf("printSummary: %v", err)
 	}
 	if out.String() != "[]\n" {
@@ -56,12 +58,26 @@ func TestPrintSummaryReadsTheLog(t *testing.T) {
 		}
 	}
 	var out strings.Builder
-	if err := printSummary(&out, path); err != nil {
+	if err := printSummary(&out, io.Discard, path); err != nil {
 		t.Fatalf("printSummary: %v", err)
 	}
 	want := `[{"boss":"warden","effects":[],"runs":2,"killed":2,"median_seconds":150,"median_deaths":4}]` + "\n"
 	if out.String() != want {
 		t.Errorf("summary = %s\nwant %s", out.String(), want)
+	}
+}
+
+func TestPrintSummaryWarnsAboutSkippedLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runs.jsonl")
+	if err := os.WriteFile(path, []byte("{\"boss\":\"war\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, warn strings.Builder
+	if err := printSummary(&out, &warn, path); err != nil {
+		t.Fatalf("printSummary: %v", err)
+	}
+	if out.String() != "[]\n" || !strings.Contains(warn.String(), "skipped 1 malformed line") {
+		t.Errorf("summary = %q, warning = %q", out.String(), warn.String())
 	}
 }
 
