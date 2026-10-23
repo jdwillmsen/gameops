@@ -30,16 +30,15 @@ tiers:
     enchant: {id: sharpness, level: 3}
   3:
     effects:
-      - {id: strength, seconds: 600, amplifier: 1}
-      - {id: resistance, seconds: 600, amplifier: 2}
+      - {id: resistance, seconds: 600, amplifier: 1}
       - {id: health_boost, seconds: 600, amplifier: 4}
     gear:
-      - {slot: weapon.mainhand, item: diamond_sword}
-      - {slot: armor.head, item: diamond_helmet}
-      - {slot: armor.chest, item: diamond_chestplate}
-      - {slot: armor.legs, item: diamond_leggings}
-      - {slot: armor.feet, item: diamond_boots}
-    enchant: {id: sharpness, level: 5}
+      - {slot: weapon.mainhand, item: iron_sword}
+      - {slot: armor.head, item: iron_helmet}
+      - {slot: armor.chest, item: iron_chestplate}
+      - {slot: armor.legs, item: iron_leggings}
+      - {slot: armor.feet, item: iron_boots}
+    enchant: {id: sharpness, level: 3}
   4:
     # Regeneration does nothing for undead bodies; the health_boost cap still
     # applies, so an undead mini-boss keeps its base health.
@@ -87,9 +86,9 @@ waves:
       - {mob: zombie, count: 3, tier: 2, pen: 5}
       - {mob: husk, count: 2, tier: 2, pen: 6}
       - {mob: skeleton, count: 2, tier: 2, pen: 7}
-  - name: Drowned Crew
+  - name: Diamond Legion
     mobs:
-      - {mob: zombie, count: 4, tier: 3, variant: minecraft:become_drowned, pen: 8}
+      - {mob: zombie, count: 4, tier: 3, pen: 8}
       - {mob: stray, count: 2, tier: 3, pen: 9}
   - name: Charged Line
     mobs:

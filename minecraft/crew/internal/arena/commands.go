@@ -51,6 +51,25 @@ func validateWarriorName(name string) error {
 	return nil
 }
 
+// floorRepairCommands refill air in the floor's top layers. Charged creepers
+// blast craters the squad and the mobs then fall into, which breaks pathing
+// and leaves survivors out of reach. Two fills keep each under the 32768-block
+// limit; only air is replaced, so nothing standing is touched.
+func floorRepairCommands(l Layout) []string {
+	r := l.FloorRadius
+	if r <= 0 {
+		return nil
+	}
+	x0, x1 := l.Center.X-r, l.Center.X+r
+	z0, z1 := l.Center.Z-r, l.Center.Z+r
+	y0, y1 := l.GroundY-3, l.GroundY
+	zm := l.Center.Z
+	return []string{
+		fmt.Sprintf("fill %d %d %d %d %d %d sand replace air", x0, y0, z0, x1, y1, zm),
+		fmt.Sprintf("fill %d %d %d %d %d %d sand replace air", x0, y0, zm+1, x1, y1, z1),
+	}
+}
+
 func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }
 
 // rallyOffsets is the ring survivors are pulled to, one round at a time. Every

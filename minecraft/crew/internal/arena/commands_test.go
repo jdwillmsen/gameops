@@ -31,11 +31,11 @@ func TestTierRecipesMatchTheSpikeLadder(t *testing.T) {
 			"enchant @e[tag=arena_tiered] sharpness 3",
 		}},
 		{3, []string{
-			"effect give @e[tag=arena_tiered] strength 600 1",
-			"effect give @e[tag=arena_tiered] resistance 600 2",
+			"effect give @e[tag=arena_tiered] resistance 600 1",
 			"effect give @e[tag=arena_tiered] health_boost 600 4",
-			"replaceitem entity @e[tag=arena_tiered] slot.armor.chest 0 diamond_chestplate 1",
-			"enchant @e[tag=arena_tiered] sharpness 5",
+			"replaceitem entity @e[tag=arena_tiered] slot.armor.chest 0 iron_chestplate 1",
+			"replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 iron_sword 1",
+			"enchant @e[tag=arena_tiered] sharpness 3",
 		}},
 		{4, []string{
 			"effect give @e[tag=arena_tiered] health_boost 600 7",
@@ -184,4 +184,24 @@ func hasCommand(cmds []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestFloorRepairFillsOnlyAirInTwoBoundedFills(t *testing.T) {
+	l := Layout{Center: Point{X: 0, Z: -760}, GroundY: 63, FloorRadius: 45}
+	cmds := floorRepairCommands(l)
+	if len(cmds) != 2 {
+		t.Fatalf("got %d commands, want 2: %v", len(cmds), cmds)
+	}
+	want := []string{
+		"fill -45 60 -805 45 63 -760 sand replace air",
+		"fill -45 60 -759 45 63 -715 sand replace air",
+	}
+	for i, c := range cmds {
+		if c != want[i] {
+			t.Errorf("command %d = %q, want %q", i, c, want[i])
+		}
+	}
+	if got := floorRepairCommands(Layout{}); got != nil {
+		t.Errorf("a layout without a floor radius gave %v", got)
+	}
 }

@@ -92,6 +92,16 @@ func (d *Director) logf(format string, args ...any) {
 	fmt.Fprintf(out, format+"\n", args...)
 }
 
+// repairFloor patches blast craters; a fill that finds no air is not an error.
+func (d *Director) repairFloor() error {
+	for _, cmd := range floorRepairCommands(d.Layout) {
+		if _, err := d.exec(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *Director) exec(cmd string) (string, error) {
 	return d.Console.Exec(cmd)
 }
@@ -180,6 +190,9 @@ func (d *Director) Run() (Result, error) {
 		return result, err
 	}
 	defer d.cleanupRun()
+	if err := d.repairFloor(); err != nil {
+		return result, err
+	}
 	if err := d.closeAllPens(); err != nil {
 		return result, err
 	}
@@ -230,6 +243,11 @@ func (d *Director) Run() (Result, error) {
 			result.WavesCleared++
 			result.DurationSeconds = d.now().Sub(start).Seconds()
 			d.logf("arena: wave %d cleared (%.1fs)", wi+1, result.DurationSeconds)
+		}
+		if wi < len(waves)-1 {
+			if err := d.repairFloor(); err != nil {
+				return result, err
+			}
 		}
 		if wi < len(waves)-1 {
 			d.sleep(d.pauseAfter(wave))
