@@ -23,6 +23,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/detail"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
@@ -44,6 +45,11 @@ const (
 	pruneEvery     = 24 * time.Hour
 	connectTimeout = 5 * time.Second
 	maxRetryWait   = 30 * time.Second
+
+	// worldReadTimeout bounds one read of the world save behind the unit
+	// detail view; an operator's request waits it out, no longer.
+	worldReadTimeout = 10 * time.Second
+	defaultWorldView = "/tmp/crew-worldview"
 )
 
 func main() {
@@ -85,6 +91,11 @@ func main() {
 		log.Error("config_invalid", logging.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
+	saves, err := saveSource(log)
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": err.Error()})
+		os.Exit(1)
+	}
 	store := &work.Lazy{}
 	// Set once the backend is ready; until then reports cannot be applied
 	// either, so there is nothing for it to miss.
@@ -118,7 +129,7 @@ func main() {
 	defer endStreams()
 	srv := &http.Server{
 		Addr: addr,
-		Handler: newHandler(units, poller, operators.Operator, log, operators.Mount, func(mux *http.ServeMux) {
+		Handler: newHandler(units, poller, saves, operators.Operator, log, operators.Mount, func(mux *http.ServeMux) {
 			api := work.Routes(mux, store, units, workToken, poller.PublishWork)
 			api.MountOperator(mux, operators)
 			api.OnSeen = observeSeen(&world, log)
@@ -198,6 +209,30 @@ func (g squadGate) Require(h http.Handler) http.Handler { return g.a.Require(h) 
 func (g squadGate) Operator(r *http.Request) (string, bool) {
 	op, ok := g.a.Operator(r)
 	return op.ID, ok
+}
+
+// saveSource reads the world save behind the unit detail route. Unset, the
+// route still answers with what the live poll holds and says the save is
+// off; a wrong view directory or interval is a config error, like anywhere
+// else.
+func saveSource(log *logging.Logger) (detail.Source, error) {
+	dir := os.Getenv("CREW_WORLD_DB")
+	if dir == "" {
+		return nil, nil
+	}
+	every := detail.DefaultEvery
+	if v := os.Getenv("CREW_WORLD_EVERY"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < time.Second {
+			return nil, fmt.Errorf("CREW_WORLD_EVERY %q is not a duration of a second or more", v)
+		}
+		every = d
+	}
+	work := os.Getenv("CREW_WORLD_WORK")
+	if work == "" {
+		work = defaultWorldView
+	}
+	return &detail.Save{WorldDir: dir, WorkDir: work, Every: every, Timeout: worldReadTimeout, Log: log}, nil
 }
 
 // postgresDSN is empty when PG_HOST is unset. The password is read apart from
@@ -416,7 +451,7 @@ func observeSeen(world *atomic.Pointer[ledger.Ledger], log *logging.Logger) func
 
 // who reports whether a request carries a valid operator session; it decides
 // once per stream whether work events are sent.
-func newHandler(units roster.Roster, poller *telemetry.Poller, who func(*http.Request) (auth.Operator, bool), log *logging.Logger, mounts ...func(*http.ServeMux)) http.Handler {
+func newHandler(units roster.Roster, poller *telemetry.Poller, saves detail.Source, who func(*http.Request) (auth.Operator, bool), log *logging.Logger, mounts ...func(*http.ServeMux)) http.Handler {
 	mux := http.NewServeMux()
 	for _, m := range mounts {
 		m(mux)
@@ -433,11 +468,28 @@ func newHandler(units roster.Roster, poller *telemetry.Poller, who func(*http.Re
 	// The proxy bypasses the mux, which would answer an unclean path with a
 	// redirect before the proxy could refuse it.
 	unitProxy := proxy.Handler(units, log)
+	// The detail route is crew-control's own, not a unit's, so it is served
+	// here rather than added to the proxy's allow-list, which is public.
+	unitDetail := detail.Handler(units, poller.Live, saves, gateFunc(who))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/units/") {
+			// Only this exact spelling is crew-control's; anything else
+			// under /units/ goes to the proxy, which answers what is not
+			// on its allow-list with 404. No mux is involved, so the
+			// unit's id is taken out of the path here.
+			if strings.HasSuffix(r.URL.Path, "/detail") {
+				r.SetPathValue("id", strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/units/"), "/detail"))
+				unitDetail.ServeHTTP(w, r)
+				return
+			}
 			unitProxy.ServeHTTP(w, r)
 			return
 		}
 		mux.ServeHTTP(w, r)
 	})
 }
+
+// gateFunc adapts the operator check to the detail route's gate.
+type gateFunc func(*http.Request) (auth.Operator, bool)
+
+func (f gateFunc) Operator(r *http.Request) (auth.Operator, bool) { return f(r) }

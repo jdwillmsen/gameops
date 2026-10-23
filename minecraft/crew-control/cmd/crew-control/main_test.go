@@ -41,7 +41,7 @@ func TestServerRefusesUncleanUnitPathsWithoutRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), auth.Disabled().Operator, logging.New("error"))
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), nil, auth.Disabled().Operator, logging.New("error"))
 
 	for _, p := range []string{
 		"/units/crew-01/./camera",
@@ -72,7 +72,7 @@ func TestServerRoutesConsoleAndRemovedList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), auth.Disabled().Operator, logging.New("error"))
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), nil, auth.Disabled().Operator, logging.New("error"))
 	for path, want := range map[string]int{
 		"/":         http.StatusOK,
 		"/healthz":  http.StatusOK,
@@ -125,7 +125,7 @@ func TestPostgresDSNFromEnv(t *testing.T) {
 
 func TestUnitWorkRoutesAreMounted(t *testing.T) {
 	units, _ := roster.Parse(`[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`)
-	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), auth.Disabled().Operator, logging.New("error"),
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), nil, auth.Disabled().Operator, logging.New("error"),
 		func(mux *http.ServeMux) { work.Routes(mux, &work.Lazy{}, units, "tok", nil) })
 	req := httptest.NewRequest(http.MethodGet, "/v1/units/crew-01/work?wait=1s", nil)
 	req.Header.Set("Authorization", "Bearer tok")
@@ -244,7 +244,7 @@ func TestAuthRoutesOnlyWhenConfigured(t *testing.T) {
 	}
 	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
 	status := func(a *auth.Auth) int {
-		h := newHandler(units, poller, a.Operator, logging.New("error"), a.Mount)
+		h := newHandler(units, poller, nil, a.Operator, logging.New("error"), a.Mount)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/me", nil))
 		return rec.Code
@@ -268,7 +268,7 @@ func TestStoreDownKeepsConsoleAndStreamUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := newHandler(units, poller, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
+	h := newHandler(units, poller, nil, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
 		api := work.Routes(mux, &work.Lazy{}, units, "tok", poller.PublishWork)
 		api.MountOperator(mux, a)
 		poller.SetWorkSource(api.Feed)
@@ -339,7 +339,7 @@ func TestWorkStreamNeedsARealSession(t *testing.T) {
 	_, _ = mac.Write([]byte(body))
 	cookie := &http.Cookie{Name: auth.SessionCookie, Value: body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))}
 	poller := telemetry.NewPoller(units, &http.Client{}, time.Second)
-	h := newHandler(units, poller, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
+	h := newHandler(units, poller, nil, a.Operator, logging.New("error"), func(mux *http.ServeMux) {
 		api := work.Routes(mux, work.NewMemory(), units, "unit-token", poller.PublishWork)
 		api.MountOperator(mux, a)
 		poller.SetWorkSource(api.Feed)
@@ -469,4 +469,111 @@ func TestBornEventMapsToHistoryRow(t *testing.T) {
 	if e, _ = bornEvent(b); !json.Valid(e.Payload) {
 		t.Fatalf("payload is not JSON: %s", e.Payload)
 	}
+}
+
+func TestUnitDetailRouteIsServedBeforeTheProxy(t *testing.T) {
+	// If the detail path ever reached the proxy it would be 404d there;
+	// the upstream counts to prove it never got that far.
+	var upstream atomic.Int32
+	unit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream.Add(1)
+		if r.URL.Path == "/camera" {
+			_, _ = fmt.Fprint(w, "unit body")
+		}
+	}))
+	defer unit.Close()
+	units, err := roster.Parse(fmt.Sprintf(`[{"id":"crew-01","name":"Agate","url":%q,"player":"-12"}]`, unit.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dataDir := t.TempDir()
+	sessionKey := []byte("0123456789abcdef0123456789abcdef")
+	credentialID := []byte("independent-test-credential")
+	passkeys, err := json.Marshal([]auth.Passkey{{
+		ID: credentialID, PublicKey: []byte("test-public-key"), UserHandle: []byte("test-user-handle"), Operator: "owner",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "session.key"), sessionKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "passkeys.json"), passkeys, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := auth.New(auth.Config{
+		Origin: "https://crew.example.test", DataDir: dataDir, InvitesDir: t.TempDir(),
+		Operators: `[{"id":"owner","name":"Owner"}]`, Log: logging.New("error"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), nil, a.Operator, logging.New("error"))
+
+	// Signed out the route refuses, and it is crew-control's own 401
+	// rather than the proxy's 404: the ender chest is private.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/units/crew-01/detail", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("signed out: %d, want 401", rec.Code)
+	}
+	if n := upstream.Load(); n != 0 {
+		t.Fatalf("the upstream saw %d requests, want 0", n)
+	}
+
+	cookie := sessionCookie(t, sessionKey, credentialID)
+	req := httptest.NewRequest(http.MethodGet, "/units/crew-01/detail", nil)
+	req.AddCookie(cookie)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("signed in: %d body %q", rec.Code, rec.Body)
+	}
+	var v struct {
+		Save struct {
+			State string `json:"state"`
+		} `json:"save"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+		t.Fatalf("body is not JSON: %q", rec.Body)
+	}
+	if v.Save.State != "off" {
+		t.Errorf("save state = %q, want off with no source configured", v.Save.State)
+	}
+	if n := upstream.Load(); n != 0 {
+		t.Fatalf("the upstream saw %d requests, want 0", n)
+	}
+
+	// A method the route does not have stays the family's 404, and the
+	// proxy's allow-list is unchanged.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/units/crew-01/detail", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("POST detail: %d, want 404", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/units/crew-01/camera", nil))
+	if rec.Code != http.StatusOK || upstream.Load() != 1 {
+		t.Errorf("camera: %d, want the proxy still serving it", rec.Code)
+	}
+}
+
+func sessionCookie(t *testing.T, sessionKey, credentialID []byte) *http.Cookie {
+	t.Helper()
+	keyHash := sha256.Sum256(credentialID)
+	now := time.Now()
+	payload, err := json.Marshal(struct {
+		Op  string `json:"op"`
+		Key string `json:"key"`
+		Iat int64  `json:"iat"`
+		Exp int64  `json:"exp"`
+	}{"owner", base64.RawURLEncoding.EncodeToString(keyHash[:16]), now.Unix(), now.Add(12 * time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, sessionKey)
+	_, _ = mac.Write([]byte(body))
+	return &http.Cookie{Name: auth.SessionCookie, Value: body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))}
 }
