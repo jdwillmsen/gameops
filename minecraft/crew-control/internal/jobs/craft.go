@@ -13,8 +13,7 @@ import (
 
 const (
 	minCraftWant, maxCraftWant = 1, 64
-	// Most of one item a single craft step may leave in the unit's hands;
-	// a bigger run splits into further steps.
+	// Most of one item a single craft step may leave in the unit's hands.
 	maxCraftFill = 64
 )
 
@@ -96,6 +95,14 @@ func PlanCraft(ctx context.Context, l ledger.Ledger, spec CraftSpec, free []ledg
 		// Table placement has no step template yet, so nothing can run
 		// against one.
 		return nil, unplannable("needs a crafting table")
+	}
+	// A craft step names how many of the item the unit holds afterwards, and
+	// the unit caps that at a stack, so a bigger run cannot be split into
+	// steps: each later step would find the earlier one's output and stop.
+	for _, it := range p.order {
+		if made := recipes[it].Makes * p.crafts[it]; made > maxCraftFill {
+			return nil, unplannable(fmt.Sprintf("%d %s is more than one unit crafts at once", made, it))
+		}
 	}
 
 	// Stock the raws can be pulled from: any fresh-stocked chest but the
@@ -183,16 +190,7 @@ func PlanCraft(ctx context.Context, l ledger.Ledger, spec CraftSpec, free []ledg
 		add("withdraw-"+target.ID, withdrawTemplate(gathered, target.Box.Min))
 	}
 	for _, it := range p.order {
-		makes, crafts := recipes[it].Makes, p.crafts[it]
-		fill := max(maxCraftFill/makes, 1)
-		parts := chunks(crafts, (crafts+fill-1)/fill)
-		for i, k := range parts {
-			key := fmt.Sprintf("craft-%s", it)
-			if len(parts) > 1 {
-				key = fmt.Sprintf("craft-%s-%d", it, i+1)
-			}
-			add(key, craftTemplate(it, makes*k))
-		}
+		add("craft-"+it, craftTemplate(it, recipes[it].Makes*p.crafts[it]))
 	}
 	add("deposit", depositTemplate(map[string]int{item: want}, target.Box.Min))
 	add("check", inspectTemplate(target.Box.Min))
