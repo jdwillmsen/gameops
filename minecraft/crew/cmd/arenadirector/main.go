@@ -78,6 +78,12 @@ func run(args []string) {
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
+	if *rallyAfter < -1 {
+		fail("arenadirector: --rally-after must be -1 or non-negative")
+	}
+	if *rallyEvery < -1 {
+		fail("arenadirector: --rally-every must be -1 or non-negative")
+	}
 	requireLab(*t.lab)
 	if *layoutPath == "" {
 		fail("arenadirector: run needs --layout")
