@@ -1,4 +1,5 @@
 import { initOps } from '/static/ops.js';
+import { initSquads } from '/static/squad.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -121,6 +122,7 @@ function onKey(ev) {
   else if (ev.key === 'w') toggleWall();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
+  else if (ev.key === 'S') setSquadOpen(!squadOpen);
   else ops.key(ev);
 }
 addEventListener('keydown', onKey);
@@ -139,6 +141,7 @@ function onUnits(list) {
   renderBar();
   renderPanel();
   ops.onUnits();
+  squads.onUnits();
 }
 
 const BACKOFF_MIN = 2000, BACKOFF_MAX = 30000;
@@ -197,6 +200,7 @@ let panelUnit = '';
 let jobs = [];
 let places = [];
 let jobsOpen = false;
+let squadOpen = false;
 let jobsUI = null;
 let tab = 'jobs';
 const expanded = new Set();
@@ -442,6 +446,15 @@ const ops = initOps({
   setView,
   expired: () => setOperator(null),
 });
+
+const squads = initSquads({ statuses, focus: pickUnit });
+
+function setSquadOpen(open) {
+  squadOpen = open;
+  squads.setOpen(open);
+}
+
+$('squad-toggle').addEventListener('click', () => setSquadOpen(!squadOpen));
 
 // ---- jobs and places ----
 

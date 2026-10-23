@@ -9,7 +9,7 @@ import (
 
 // The explicit list keeps the node test files out of the binary.
 //
-//go:embed web/index.html web/signin.html web/signin.js web/console.js web/state.js web/fleet.js web/ops.js web/console.css web/charts/*.js web/charts/*.css web/charts/demo.html
+//go:embed web/index.html web/signin.html web/signin.js web/console.js web/state.js web/fleet.js web/ops.js web/squad.js web/console.css web/charts/*.js web/charts/*.css web/charts/demo.html
 var assets embed.FS
 
 const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
