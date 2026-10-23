@@ -19,6 +19,9 @@ type Entity struct {
 	// Pos is the feet.
 	Pos    mgl32.Vec3
 	Player bool
+	// HeadYaw is where a mob's head faces, in degrees as a unit's own yaw
+	// is: what it looks at is what it is about to go for.
+	HeadYaw float32
 }
 
 // Entities is who and what is around the unit, built only from packets. Items
@@ -82,7 +85,7 @@ func (e *Entities) Apply(pk packet.Packet) {
 			return
 		}
 		e.unique[p.EntityUniqueID] = p.EntityRuntimeID
-		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position}
+		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}
 	case *packet.AddPlayer:
 		if p.EntityRuntimeID == e.self {
 			return
@@ -96,7 +99,7 @@ func (e *Entities) Apply(pk packet.Packet) {
 		}
 	case *packet.MoveActorAbsolute:
 		if en, ok := e.ents[p.EntityRuntimeID]; ok {
-			en.Pos = p.Position
+			en.Pos, en.HeadYaw = p.Position, p.Rotation[2]
 			e.ents[p.EntityRuntimeID] = en
 		}
 	case *packet.MoveActorDelta:
@@ -112,6 +115,9 @@ func (e *Entities) Apply(pk packet.Packet) {
 		}
 		if v, ok := p.PositionZ.Value(); ok {
 			en.Pos[2] = v
+		}
+		if v, ok := p.RotationYHead.Value(); ok {
+			en.HeadYaw = v
 		}
 		e.ents[p.EntityRuntimeID] = en
 	case *packet.RemoveActor:

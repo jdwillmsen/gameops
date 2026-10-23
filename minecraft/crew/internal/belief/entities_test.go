@@ -67,3 +67,24 @@ func TestEntitiesForgetEverythingOnDimensionChangeAndReset(t *testing.T) {
 		t.Errorf("%d entities after Reset", n)
 	}
 }
+
+func TestEntitiesTrackWhereAMobsHeadFaces(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddActor{EntityUniqueID: -50, EntityRuntimeID: 50, EntityType: "minecraft:warden", HeadYaw: 45})
+	if y := listed(e)[50].HeadYaw; y != 45 {
+		t.Fatalf("spawn head yaw = %v, want 45", y)
+	}
+	e.Apply(&packet.MoveActorAbsolute{EntityRuntimeID: 50, Rotation: mgl32.Vec3{0, 10, 90}})
+	if y := listed(e)[50].HeadYaw; y != 90 {
+		t.Errorf("absolute move head yaw = %v, want the head's 90 rather than the body's 10", y)
+	}
+	e.Apply(&packet.MoveActorDelta{EntityRuntimeID: 50, PositionX: protocol.Option(float32(3))})
+	if y := listed(e)[50].HeadYaw; y != 90 {
+		t.Errorf("a delta without rotation changed the head yaw to %v", y)
+	}
+	e.Apply(&packet.MoveActorDelta{EntityRuntimeID: 50, RotationYHead: protocol.Option(float32(-30))})
+	if y := listed(e)[50].HeadYaw; y != -30 {
+		t.Errorf("delta head yaw = %v, want -30", y)
+	}
+}
