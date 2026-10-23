@@ -58,8 +58,8 @@ tiers:
   5:
     effects:
       - {id: health_boost, seconds: 600, amplifier: 9}
-      - {id: resistance, seconds: 600, amplifier: 4}
-      - {id: regeneration, seconds: 600, amplifier: 7}
+      - {id: resistance, seconds: 600, amplifier: 2}
+      - {id: regeneration, seconds: 600, amplifier: 3}
       - {id: absorption, seconds: 600, amplifier: 4}
       - {id: strength, seconds: 600, amplifier: 2}
     gear:
@@ -106,6 +106,7 @@ waves:
       - {mob: pillager, count: 2, tier: 3, pen: 8}
   - name: The Warden
     boss: true
+    rally: true
     pause: 0s
     mobs:
       - {mob: warden, count: 1, tier: 5, name: The Warden, pen: 0}
