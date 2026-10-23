@@ -188,12 +188,10 @@ func (t *telemetry) drain() drained {
 	return d
 }
 
-// idle says whether there is nothing to drain, so a quiet tick costs one
-// lock and no allocation.
-func (t *telemetry) idle() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return !t.selfHurt && t.drop == 0 && !t.died && len(t.seenHurts) == 0
+// empty says whether there is nothing to report, so a quiet tick returns
+// early.
+func (d drained) empty() bool {
+	return !d.selfHurt && d.drop == 0 && !d.died && len(d.hurts) == 0
 }
 
 // Stats returns the unit's totals and its current or last fight. The second
@@ -252,28 +250,17 @@ func (l *Life) endFields(f map[string]any) map[string]any {
 }
 
 // telemetryTick is the stepping goroutine's half, once a tick: it turns what
-// the read loop saw into log lines and counts. noteHurt has already run this
-// tick, so a fresh attribution is the blow being reported.
-func (l *Life) telemetryTick() {
+// the read loop saw, taken with the hurt marker, into log lines and counts.
+// noteHurt has already run this tick, so a fresh attribution is the blow
+// being reported.
+func (l *Life) telemetryTick(d drained) {
 	if l.warrior == nil {
 		return
 	}
 	t := &l.tel
 	l.pruneSwings()
-	if t.idle() && !t.hurtPending {
+	if d.empty() && !t.hurtPending {
 		return
-	}
-	d := t.drain()
-
-	if l.attackerUntil >= attackerTicks && l.attackerUntil-attackerTicks == l.tick {
-		t.attackerType, t.attackerAt = "player", l.tick
-		if !l.attackerPlayer {
-			t.attackerType = killerUnknown
-			if e, ok := l.ents.Get(l.attacker); ok {
-				t.attackerType = name(e.Type)
-			}
-		}
-		t.attributed = true
 	}
 
 	for _, id := range d.hurts {

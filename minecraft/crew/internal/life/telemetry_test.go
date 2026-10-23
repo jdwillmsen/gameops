@@ -339,3 +339,28 @@ func TestOnlyAWarriorKeepsTelemetry(t *testing.T) {
 		t.Error("a reactive unit reported fight stats")
 	}
 }
+
+func TestAHurtIsTakenWithItsTelemetryInOneStep(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.step()
+	r.hurt()
+	r.setHealth(14)
+	hurt, d := r.l.takeHurt(true)
+	if !hurt || !d.selfHurt || d.drop != 6 {
+		t.Fatalf("takeHurt = %v, %+v, want the hurt and its drop of 6 together", hurt, d)
+	}
+}
+
+func TestAHurtOnAQuietTickIsStillAttributed(t *testing.T) {
+	r := meleeRig(t)
+	// The hurt's telemetry half was drained a tick earlier, so this tick
+	// has nothing else to report.
+	r.l.mu.Lock()
+	r.l.hurt = true
+	r.l.mu.Unlock()
+	r.step()
+	if !r.l.tel.attributed || r.l.tel.attackerType != "zombie" || r.l.tel.attackerAt != r.l.tick {
+		t.Fatalf("attribution = %v %q at %d, want the zombie at tick %d", r.l.tel.attributed, r.l.tel.attackerType, r.l.tel.attackerAt, r.l.tick)
+	}
+}
