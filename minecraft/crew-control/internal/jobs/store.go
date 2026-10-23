@@ -29,6 +29,7 @@ const (
 
 	KindPlan  = "plan"
 	KindStock = "stock"
+	KindCraft = "craft"
 
 	// MaxAttempts is how many times a step's work may be tried.
 	MaxAttempts = 3
@@ -154,7 +155,7 @@ func ValidateSteps(steps []Step) error {
 
 // prepare gives a new job its ids and initial states.
 func prepare(j Job) (Job, error) {
-	if j.Kind != KindPlan && j.Kind != KindStock {
+	if j.Kind != KindPlan && j.Kind != KindStock && j.Kind != KindCraft {
 		return Job{}, invalid("unknown kind")
 	}
 	if err := ValidateSteps(j.Steps); err != nil {

@@ -258,6 +258,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 	}
 	checks := jobs.DefaultChecks()
 	checks[jobs.KindStock] = jobs.StockCheck(led, units, time.Now)
+	checks[jobs.KindCraft] = jobs.CraftCheck(led, units)
 	scheduler := jobs.New(jobs.Config{
 		Jobs: js, Work: backend, Checks: checks, Log: log, Units: units,
 		Notify:     func(uuid.UUID) { poller.PublishJobs() },
