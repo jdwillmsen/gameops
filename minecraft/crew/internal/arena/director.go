@@ -720,24 +720,46 @@ func (d *Director) replaceWarrior(name string, i int, st *warriorState) error {
 	d.lastPlaced[name] = now
 	st.pos = TargetPosition{X: float64(p.X), Y: float64(p.Y), Z: float64(p.Z)}
 	st.havePos = true
+	// An asynchronous console may still report the pre-teleport position for
+	// one poll; that is our own move, not a death.
+	st.ignoreJump = true
 	return nil
 }
 
-// observeWarrior polls a standing warrior's position. A warrior that just
-// respawned, or that is beyond the floor's rally margin, is walked back to its
-// start cell; the anchor may already be in the hub when the mobs are rallied.
-func (d *Director) observeWarrior(name string, i int, st *warriorState, respawned bool) error {
+// observeWarrior polls a standing warrior's position. A jump larger than the
+// floor itself is a respawn at the world spawn, so it counts as a death even
+// when the miss grace hid the down: that is the only signal a quick respawn
+// leaves. A warrior that just respawned, or that is beyond the floor's rally
+// margin, is walked back to its start cell; the anchor may already be in the
+// hub when the mobs are rallied.
+func (d *Director) observeWarrior(name string, i int, st *warriorState, respawned bool, result *Result) error {
+	pos, err := d.rallyPosition(name)
+	readable := err == nil
+	jumped := false
+	if readable {
+		if st.havePos && !st.ignoreJump {
+			moved := math.Hypot(pos.X-st.pos.X, pos.Z-st.pos.Z)
+			jumped = moved > float64(d.Layout.FloorRadius*2)
+		}
+		if jumped && !st.deathCounted {
+			result.WarriorDeaths++
+			d.logf("arena: warrior %s died away from the squad", name)
+		}
+		st.pos, st.havePos = pos, true
+		st.ignoreJump = false
+	}
+	if jumped || respawned {
+		// The death this poll reports is now accounted for; the next down
+		// starts a fresh count.
+		st.deathCounted = false
+	}
 	if !d.PlaceSquad {
 		return nil
 	}
-	pos, err := d.rallyPosition(name)
-	if err == nil {
-		st.pos, st.havePos = pos, true
-		if d.Layout.FloorRadius > 0 {
-			dist := math.Hypot(pos.X-float64(d.Layout.Center.X), pos.Z-float64(d.Layout.Center.Z))
-			if dist > float64(d.Layout.FloorRadius+10) {
-				return d.replaceWarrior(name, i, st)
-			}
+	if readable {
+		dist := math.Hypot(pos.X-float64(d.Layout.Center.X), pos.Z-float64(d.Layout.Center.Z))
+		if jumped || dist > float64(d.Layout.FloorRadius+10) {
+			return d.replaceWarrior(name, i, st)
 		}
 	}
 	if respawned {
@@ -750,12 +772,14 @@ func (d *Director) observeWarrior(name string, i int, st *warriorState, respawne
 // few polls before it counts as a death: Bedrock can drop a target from the
 // selector while it respawns.
 type warriorState struct {
-	up       bool
-	live     bool
-	misses   int
-	downSeen bool
-	havePos  bool
-	pos      TargetPosition
+	up           bool
+	live         bool
+	misses       int
+	downSeen     bool
+	havePos      bool
+	ignoreJump   bool
+	deathCounted bool
+	pos          TargetPosition
 }
 
 // warriorBaseline remembers who is standing before the first wave. Deaths are
@@ -809,7 +833,7 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 			respawned := st.downSeen
 			st.up, st.live, st.misses, st.downSeen = true, true, 0, false
 			standing = true
-			if err := d.observeWarrior(name, i, st, respawned); err != nil {
+			if err := d.observeWarrior(name, i, st, respawned, result); err != nil {
 				return false, err
 			}
 			continue
@@ -827,6 +851,7 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 		}
 		if st.up {
 			result.WarriorDeaths++
+			st.deathCounted = true
 			d.logf("arena: warrior %s is down", name)
 		}
 		st.up = false
