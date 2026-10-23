@@ -86,3 +86,27 @@ func TestOpenRemovesAViewAKilledRunLeft(t *testing.T) {
 		t.Errorf("stale view still there: %v", err)
 	}
 }
+
+// A world on a read-only mount cannot be linked, nor can one on another
+// filesystem, so the read copies; the copy must read the same and leave the
+// scratch empty again.
+func TestOpenCopiesWhereTheWorldCannotBeLinked(t *testing.T) {
+	shm, err := os.MkdirTemp("/dev/shm", "worldview-")
+	if err != nil {
+		t.Skip("no second filesystem to copy across:", err)
+	}
+	defer func() { _ = os.RemoveAll(shm) }()
+	db := world(t, map[string][]byte{"chunk": []byte("v")})
+
+	view, done, err := Open(db, filepath.Join(shm, "work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, err := view.Get([]byte("chunk"), nil); err != nil || string(v) != "v" {
+		t.Errorf("read through the copy = %q, %v", v, err)
+	}
+	done()
+	if left := names(t, filepath.Join(shm, "work")); len(left) != 0 {
+		t.Errorf("the copy was left behind: %v", left)
+	}
+}
