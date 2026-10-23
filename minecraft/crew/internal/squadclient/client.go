@@ -212,10 +212,13 @@ func (c *Client) beat(ctx context.Context) {
 }
 
 // pollAnswer is what one listen reads: the standing order, the leader and
-// its last position, and the deltas past the cursor. Order and Callout
-// types are the shared ones, whose JSON shapes the server mirrors.
+// its last position, and the deltas past the cursor. Rev is the server's
+// revision of the leader line; echoing it earns an answer the moment the
+// chain of command moves, with no message to carry the news. Order and
+// Callout types are the shared ones, whose JSON shapes the server mirrors.
 type pollAnswer struct {
 	Cursor   int64              `json:"cursor"`
+	Rev      int64              `json:"rev"`
 	Leader   *wireLeader        `json:"leader,omitempty"`
 	Order    *squadmsg.Order    `json:"order"`
 	Orders   []squadmsg.Order   `json:"orders"`
@@ -227,19 +230,20 @@ type wireLeader struct {
 	Pos  *squadmsg.Pos `json:"pos,omitempty"`
 }
 
-// listen long-polls and writes the state the engine reads. The cursor is
-// private state of this one loop.
+// listen long-polls and writes the state the engine reads. The cursor and
+// the leader-line revision are private state of this one loop.
 func (c *Client) listen(ctx context.Context) {
 	var (
 		b      backoff
 		up     bool
 		cursor int64
+		rev    int64
 	)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		ans, idle, err := c.poll(ctx, cursor)
+		ans, idle, err := c.poll(ctx, cursor, rev)
 		switch {
 		case err != nil:
 			if ctx.Err() != nil {
@@ -266,6 +270,7 @@ func (c *Client) listen(ctx context.Context) {
 			if ans.Cursor > cursor {
 				cursor = ans.Cursor
 			}
+			rev = ans.Rev
 		}
 		// An answer that carried nothing new came back at once; pace the
 		// next one, so a squad with no messages costs one read per beat
@@ -300,8 +305,10 @@ func (c *Client) apply(ans *pollAnswer) {
 	c.mu.Unlock()
 }
 
-func (c *Client) poll(ctx context.Context, cursor int64) (ans *pollAnswer, idle bool, err error) {
-	q := url.Values{"wait": {pollWait}, "since": {fmt.Sprintf("%d", cursor)}}
+func (c *Client) poll(ctx context.Context, cursor, rev int64) (ans *pollAnswer, idle bool, err error) {
+	q := url.Values{"wait": {pollWait},
+		"since": {fmt.Sprintf("%d", cursor)},
+		"rev":   {fmt.Sprintf("%d", rev)}}
 	ctx, cancel := context.WithTimeout(ctx, pollTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -323,7 +330,7 @@ func (c *Client) poll(ctx context.Context, cursor int64) (ans *pollAnswer, idle 
 		if err := json.NewDecoder(io.LimitReader(resp.Body, maxAnswerByte)).Decode(&a); err != nil {
 			return nil, false, fmt.Errorf("squad orders: %w", err)
 		}
-		return &a, a.Cursor == cursor && len(a.Orders) == 0 && len(a.Callouts) == 0, nil
+		return &a, a.Cursor == cursor && a.Rev == rev && len(a.Orders) == 0 && len(a.Callouts) == 0, nil
 	default:
 		return nil, false, fmt.Errorf("squad orders: status %d", resp.StatusCode)
 	}

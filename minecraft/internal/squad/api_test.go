@@ -2,6 +2,7 @@ package squad
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -298,6 +299,80 @@ func TestOrderRefusesUnknownSquadsAndBadKinds(t *testing.T) {
 		if resp := r.do(t, "POST", "/v1/squads/alpha/order", tt.body, op); resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("%s: status %d", tt.name, resp.StatusCode)
 		}
+	}
+}
+
+// A leader change or a moved leader must reach a unit whose cursor is
+// already current, not only the next order or call-out: the waiting poll
+// answers at once the moment what "who leads and where it stands" says
+// changed.
+func TestLeaderChangeWakesThePoll(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "alpha", "crew-18", "vanguard")
+	r.hello(t, "alpha", "crew-19", "striker")
+	r.do(t, "POST", "/v1/squads/alpha/status",
+		`{"unit":"crew-18","hp":20,"food":20,"weapon":"sword","pos":{"x":1,"y":64,"z":2}}`, nil)
+
+	// Prime the cursor so the polls below have nothing new to read and
+	// would otherwise only ride their wait out.
+	op := map[string]string{"X-Crew-Request": "1"}
+	r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"hold"}`, op)
+	fresh := r.ordersSince(t, "alpha", "0")
+	if fresh.Leader == nil || fresh.Leader.Unit != "crew-18" || fresh.Leader.Pos == nil {
+		t.Fatalf("the primed answer's leader is %+v, want crew-18 placed", fresh.Leader)
+	}
+	rev := fmt.Sprintf("%d", fresh.Rev)
+
+	waitPoll := func(t *testing.T, body chan Delta) Delta {
+		t.Helper()
+		select {
+		case d := <-body:
+			return d
+		case <-time.After(3 * time.Second):
+			t.Fatal("the waited poll never answered")
+			return Delta{}
+		}
+	}
+
+	// The leader moves: a poll older than the move answers at once.
+	moved := make(chan Delta, 1)
+	go func() {
+		resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=10s&since=1&rev="+rev, "", nil)
+		var d Delta
+		if resp.StatusCode == http.StatusOK {
+			if err := json.Unmarshal([]byte(readBody(t, resp)), &d); err != nil {
+				panic(err)
+			}
+		}
+		moved <- d
+	}()
+	time.Sleep(200 * time.Millisecond)
+	r.do(t, "POST", "/v1/squads/alpha/status",
+		`{"unit":"crew-18","hp":20,"food":20,"weapon":"sword","pos":{"x":9,"y":65,"z":3}}`, nil)
+	d := waitPoll(t, moved)
+	if d.Leader == nil || d.Leader.Pos == nil || d.Leader.Pos.X != 9 {
+		t.Errorf("a moved leader did not wake the poll: %+v", d.Leader)
+	}
+	rev = fmt.Sprintf("%d", d.Rev)
+
+	// The leader falls: the next in the chain must reach the waiting unit.
+	promoted := make(chan Delta, 1)
+	go func() {
+		resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=10s&since=1&rev="+rev, "", nil)
+		var d Delta
+		if resp.StatusCode == http.StatusOK {
+			if err := json.Unmarshal([]byte(readBody(t, resp)), &d); err != nil {
+				panic(err)
+			}
+		}
+		promoted <- d
+	}()
+	time.Sleep(200 * time.Millisecond)
+	r.do(t, "POST", "/v1/squads/alpha/status",
+		`{"unit":"crew-18","hp":0,"food":0,"weapon":"sword","pos":{"x":9,"y":65,"z":3}}`, nil)
+	d = waitPoll(t, promoted)
+	if d.Leader == nil || d.Leader.Unit != "crew-19" || len(d.Orders) != 0 {
+		t.Errorf("a leader change did not wake the poll: leader %+v orders %v", d.Leader, d.Orders)
 	}
 }
 

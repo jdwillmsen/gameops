@@ -76,8 +76,9 @@ type position struct {
 	Z float64 `json:"z"`
 }
 
-// squadState is one squad in memory: the claims, the message log, and the
-// cursor that unit polls read deltas against.
+// squadState is one squad in memory: the claims, the message log, the
+// cursor that unit polls read deltas against, and the revision of what a
+// poll names as its leader.
 type squadState struct {
 	id, name  string
 	battalion string
@@ -85,6 +86,18 @@ type squadState struct {
 	seq       int64
 	orders    []orderLog
 	callouts  []logEntry
+	rev       int64
+	lastLead  stateStamp
+}
+
+// stateStamp is what the last read said about the leader: who it is and
+// where it stands. A change in it bumps the squad's rev, so a unit still
+// polling with the old revision gets an answer instead of riding out its
+// wait while the chain of command moves.
+type stateStamp struct {
+	unit   string
+	hasPos bool
+	pos    position
 }
 
 // logEntry is one call-out with its cursor value; orderLog adds what an
@@ -173,7 +186,9 @@ func (st *Store) prune(now time.Time) {
 		}
 		if len(sq.members) == 0 {
 			delete(st.squads, id)
+			continue
 		}
+		st.touchState(sq, now)
 	}
 }
 

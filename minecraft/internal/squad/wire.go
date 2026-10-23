@@ -55,11 +55,16 @@ type View struct {
 }
 
 // Delta is what a unit's poll returns: the new cursor to read against, the
+// revision of what the leader line said when the unit last asked, the
 // standing order, the leader and where it stands, and everything appended
 // since the unit's cursor.
 type Delta struct {
 	// Cursor is the squad's newest seq value.
-	Cursor   int64         `json:"cursor"`
+	Cursor int64 `json:"cursor"`
+	// Rev changes whenever the leader identity or its position does, so a
+	// unit that echoes back the revision it last saw answers at once when
+	// the chain of command moves, even with no new messages.
+	Rev      int64         `json:"rev"`
 	Leader   *LeaderView   `json:"leader,omitempty"`
 	Order    *wireOrder    `json:"order"`
 	Orders   []wireOrder   `json:"orders"`
@@ -236,7 +241,7 @@ func (st *Store) Delta(id string, since int64) (Delta, bool) {
 	if !ok {
 		return Delta{}, false
 	}
-	d := Delta{Cursor: sq.seq}
+	d := Delta{Cursor: sq.seq, Rev: sq.rev}
 	// A cursor older than what is kept would deliver a hole as "nothing
 	// new"; back it up to the oldest kept entry so the resyncing unit gets
 	// every message that still exists, standing order included.
@@ -279,4 +284,22 @@ func (st *Store) leaderView(sq *squadState, now time.Time) *LeaderView {
 	}
 	p := m.pos
 	return &LeaderView{Unit: id, Pos: &p}
+}
+
+// touchState bumps a squad's rev whenever what a poll's leader line says
+// changed: a different leader, or the same one standing elsewhere. Orders
+// and call-outs move the cursor instead. Callers hold the mutex.
+func (st *Store) touchState(sq *squadState, now time.Time) {
+	var s stateStamp
+	if lv := st.leaderView(sq, now); lv != nil {
+		s.unit = lv.Unit
+		if lv.Pos != nil {
+			s.hasPos = true
+			s.pos = *lv.Pos
+		}
+	}
+	if s != sq.lastLead {
+		sq.rev++
+		sq.lastLead = s
+	}
 }
