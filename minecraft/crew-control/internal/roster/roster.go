@@ -15,12 +15,21 @@ const (
 	maxNameLen = 16
 )
 
-var idPattern = regexp.MustCompile(`^crew-[0-9]{2,}$`)
+var (
+	idPattern = regexp.MustCompile(`^crew-[0-9]{2,}$`)
+	// playerPattern is the id the game's save and scripts name a player
+	// by: the player's UniqueID, written as a signed decimal. Both readings
+	// of the 64 bits are accepted, as the map's own lookup does.
+	playerPattern = regexp.MustCompile(`^-?[0-9]{1,20}$`)
+)
 
 // Unit is one worker the console can show.
 type Unit struct {
 	ID, Name string
 	URL      *url.URL
+	// Player is the unit's player id in the world save, set by hand; empty
+	// when the unit's own report of it is to be used.
+	Player string
 }
 
 // Roster keeps units in the order they were configured.
@@ -52,6 +61,9 @@ type rawUnit struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	URL  string `json:"url"`
+	// Player is the unit's id in the world save, and is optional: without
+	// it the id the unit reports for itself is used.
+	Player string `json:"player"`
 }
 
 // Parse reads the CREW_UNITS JSON. The roster is operator-supplied, but the
@@ -82,8 +94,11 @@ func Parse(raw string) (Roster, error) {
 		if err != nil {
 			return Roster{}, fmt.Errorf("unit %s: %w", ru.ID, err)
 		}
+		if ru.Player != "" && !playerPattern.MatchString(ru.Player) {
+			return Roster{}, fmt.Errorf("unit %s player %q must match %s", ru.ID, ru.Player, playerPattern)
+		}
 		r.byID[ru.ID] = len(r.units)
-		r.units = append(r.units, Unit{ID: ru.ID, Name: ru.Name, URL: u})
+		r.units = append(r.units, Unit{ID: ru.ID, Name: ru.Name, URL: u, Player: ru.Player})
 	}
 	return r, nil
 }

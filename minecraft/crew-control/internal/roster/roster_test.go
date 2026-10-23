@@ -74,3 +74,22 @@ func TestParseAcceptsMaxAndMultibyteName(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestParseTakesAUnitsPlayerId(t *testing.T) {
+	r, err := Parse(`[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080","player":"-4294967290"},
+		{"id":"crew-02","name":"Basalt","url":"http://crew-02:8080"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := r.Get("crew-01"); u.Player != "-4294967290" {
+		t.Errorf("player = %q", u.Player)
+	}
+	if u, _ := r.Get("crew-02"); u.Player != "" {
+		t.Errorf("player without one = %q", u.Player)
+	}
+	for _, bad := range []string{"x", "abc", "1e3", "99999999999999999999999"} {
+		if _, err := Parse(fmt.Sprintf(`[{"id":"crew-01","name":"A","url":"http://h:1","player":%q}]`, bad)); err == nil {
+			t.Errorf("player %q was accepted", bad)
+		}
+	}
+}

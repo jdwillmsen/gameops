@@ -24,7 +24,9 @@ const stateKnownWithTask = `{
  "version":"dev","unit":{"id":"crew-01","name":"Ada"},
  "state":{"spawned":true,"dead":false,"dimension":0,"position":[12.5,64.62,-3],"position_known":true,
   "yaw":0,"pitch":0,"health":18.5,"health_known":true,"updated_at":"2026-10-19T10:00:00Z",
-  "held_slot":0,"held_known":true,"inventory":[]},
+  "held_slot":0,"held_known":true,
+  "inventory":[{"slot":0,"name":"cobblestone","count":32,"stack_network_id":1}],
+  "effects":[{"id":1,"name":"speed","amplifier":1,"duration":-1}],"unique_id":"-4294967290"},
  "tasks":{"current":{"id":"run","template":"gather_and_deposit","state":"running","skill":"mine",
   "item":"minecraft:log","qty":8,"progress":3,"created":"2026-10-19T10:00:00Z","updated":"2026-10-19T10:00:01Z"},"recent":[]}}`
 
@@ -794,5 +796,50 @@ func TestPublishDoesNotWaitOnARender(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("publishing waited on a stalled render")
+	}
+}
+
+// What the unit holds is for the operator-only detail view, so the poller
+// keeps it apart from the Status the public stream carries.
+func TestPollerKeepsLiveStateForTheDetailView(t *testing.T) {
+	unit := newFakeUnit(t, stateKnownWithTask)
+	p := startPoller(t, rosterFor(t, unit.server.URL), 20*time.Millisecond)
+
+	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })
+	lv, ok := p.Live("crew-01")
+	if !ok || !lv.Online || lv.Dead {
+		t.Fatalf("live = %+v ok=%v", lv, ok)
+	}
+	if lv.Health == nil || *lv.Health != 18.5 || lv.Hunger != nil {
+		t.Errorf("vitals = %v %v", lv.Health, lv.Hunger)
+	}
+	if len(lv.Inventory) != 1 || lv.Inventory[0] != (LiveItem{Slot: 0, Name: "cobblestone", Count: 32}) {
+		t.Errorf("inventory = %+v", lv.Inventory)
+	}
+	if len(lv.Effects) != 1 || lv.Effects[0] != (LiveEffect{ID: 1, Name: "speed", Amplifier: 1, Duration: -1}) {
+		t.Errorf("effects = %+v", lv.Effects)
+	}
+	if lv.PlayerID != "-4294967290" {
+		t.Errorf("player id = %q", lv.PlayerID)
+	}
+	if lv.At.IsZero() {
+		t.Error("no time on the live state")
+	}
+	if _, ok := p.Live("crew-99"); ok {
+		t.Error("Live found an unknown unit")
+	}
+
+	raw, _ := json.Marshal(p.Snapshot()[0])
+	for _, leak := range []string{"inventory", "effects", "cobblestone", "speed", "4294967290"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("the public status leaks %q: %s", leak, raw)
+		}
+	}
+
+	unit.set(500, stateKnownWithTask)
+	waitFor(t, "offline", func() bool { return !p.Snapshot()[0].Online })
+	lv, _ = p.Live("crew-01")
+	if lv.Online || lv.Health != nil || lv.Inventory != nil || lv.Effects != nil {
+		t.Errorf("an offline unit's live state was kept: %+v", lv)
 	}
 }
