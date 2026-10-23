@@ -157,12 +157,13 @@ func detail(unit roster.Unit, live func(string) (telemetry.Live, bool), saves So
 		out.Save = sourceJSON{State: stateNone}
 	default:
 		record, savedAt, found = saves.Lookup(playerID)
-		_, scanned := saves.Scanned()
+		scannedAt, scanned := saves.Scanned()
 		switch {
 		case found:
 			out.Save = sourceJSON{State: stateKnown, AsOf: &savedAt}
 		case scanned:
-			out.Save = sourceJSON{State: stateNone, AsOf: &savedAt}
+			// A miss has no save time: Lookup returns the zero time then.
+			out.Save = sourceJSON{State: stateNone, AsOf: &scannedAt}
 		default:
 			out.Save = sourceJSON{State: statePending}
 		}
@@ -263,6 +264,10 @@ func writeJSON(w http.ResponseWriter, b body) {
 }
 
 func (b *body) stripBoxes() {
+	// An offline unit's inventory shares its backing array with the cached
+	// save record, which other requests read; clearing it in place would
+	// strip their answers too. The ender chest slots are already copies.
+	b.Inventory = append([]playerdata.Item(nil), b.Inventory...)
 	for i := range b.Inventory {
 		b.Inventory[i].Contents = nil
 	}
