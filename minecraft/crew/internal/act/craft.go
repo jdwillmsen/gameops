@@ -121,8 +121,13 @@ func (a *Actuator) openInventory(deadline time.Time) bool {
 		_ = a.w.WritePacket(&packet.ContainerClose{WindowID: a.cont.window, ContainerType: closeContainerType})
 		a.cont = container{}
 	}
-	// The open-inventory action names no target entity.
-	err := a.w.WritePacket(&packet.Interact{ActionType: packet.InteractActionOpenInventory})
+	// Servers open the inventory only for a request naming the player's own
+	// entity, whatever the packet's documentation says about an empty target:
+	// live, an empty one was never answered with a window.
+	err := a.w.WritePacket(&packet.Interact{
+		ActionType:            packet.InteractActionOpenInventory,
+		TargetEntityRuntimeID: a.runtimeID,
+	})
 	a.crafts.lateInventory = false
 	a.mu.Unlock()
 	if err != nil {
