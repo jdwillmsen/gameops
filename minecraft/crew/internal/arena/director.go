@@ -100,11 +100,36 @@ func (d *Director) logf(format string, args ...any) {
 // repairFloor patches blast craters; a fill that finds no air is not an error.
 func (d *Director) repairFloor() error {
 	for _, cmd := range floorRepairCommands(d.Layout) {
-		if _, err := d.exec(cmd); err != nil {
+		out, err := d.exec(cmd)
+		if err != nil {
 			return err
+		}
+		if line, bad := fillErrorLine(out); bad {
+			return fmt.Errorf("arena: floor repair failed: %s", line)
 		}
 	}
 	return nil
+}
+
+// fillErrorLine reports the first error the console logged for a fill. Bedrock
+// logs a rejected fill as an ERROR line while send-command still exits zero,
+// so the reply is the only place the director can see it. A replace that finds
+// no air is expected after a quiet wave and is reported as "0 blocks filled"
+// or "No blocks were filled", which are not failures.
+func fillErrorLine(out string) (string, bool) {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "ERROR") {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "0 blocks filled") ||
+			strings.Contains(lower, "no blocks were filled") ||
+			strings.Contains(lower, "no blocks filled") {
+			continue
+		}
+		return strings.TrimSpace(line), true
+	}
+	return "", false
 }
 
 func (d *Director) exec(cmd string) (string, error) {
@@ -120,6 +145,12 @@ func (d *Director) prepare() error {
 	}
 	if d.Tier < 0 || d.Tier > 5 {
 		return fmt.Errorf("arena: tier %d is outside 0..5", d.Tier)
+	}
+	for _, b := range floorRepairBoxes(d.Layout) {
+		if n := b.volume(); n > maxFill {
+			return fmt.Errorf("arena: floor_radius %d produces a %d-block fill, over Bedrock's %d-block limit",
+				d.Layout.FloorRadius, n, maxFill)
+		}
 	}
 	if d.MaxLive <= 0 {
 		d.MaxLive = d.Book.MaxLive

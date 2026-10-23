@@ -64,6 +64,18 @@ func (b Box) Fill(block string) string {
 	return fmt.Sprintf("fill %d %d %d %d %d %d %s", b.X0, b.Y0, b.Z0, b.X1, b.Y1, b.Z1, block)
 }
 
+// volume counts the blocks the box covers, inclusive.
+func (b Box) volume() int {
+	return (axisLen(b.X0, b.X1)) * (axisLen(b.Y0, b.Y1)) * (axisLen(b.Z0, b.Z1))
+}
+
+func axisLen(a, b int) int {
+	if a > b {
+		return a - b + 1
+	}
+	return b - a + 1
+}
+
 // Pen is a spawn room and the gate that holds its mobs in.
 type Pen struct {
 	ID    int    `json:"id"`
