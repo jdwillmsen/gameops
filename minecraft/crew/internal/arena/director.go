@@ -142,7 +142,7 @@ func (d *Director) Run() (Result, error) {
 	if err := d.addTickingAreas(); err != nil {
 		return result, err
 	}
-	defer d.removeTickingAreas()
+	defer d.cleanupRun()
 	if err := d.closeAllPens(); err != nil {
 		return result, err
 	}
@@ -275,9 +275,6 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 			// Only trust the miss after a count that found the boss; a summon
 			// that failed must not read as an instant win.
 			if bossSeen && n == 0 {
-				if _, err := d.exec(killWaveCommand()); err != nil {
-					return "", false, err
-				}
 				d.logf("arena: %s is down", wave.Name)
 				return OutcomeBossDown, false, nil
 			}
@@ -288,9 +285,6 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 			return "", false, err
 		}
 		if wiped {
-			if _, err := d.exec(killWaveCommand()); err != nil {
-				return "", false, err
-			}
 			d.logf("arena: squad wiped in %s", wave.Name)
 			return OutcomeWipe, false, nil
 		}
@@ -360,6 +354,9 @@ func (d *Director) pauseAfter(w Wave) time.Duration {
 func (d *Director) addTickingAreas() error {
 	for i, a := range d.Layout.Areas {
 		if _, err := d.exec(tickingAddCommand(i, a)); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				_, _ = d.exec(tickingRemoveCommand(j))
+			}
 			return err
 		}
 	}
@@ -371,6 +368,14 @@ func (d *Director) removeTickingAreas() {
 	for i := range d.Layout.Areas {
 		_, _ = d.exec(tickingRemoveCommand(i))
 	}
+}
+
+// cleanupRun runs on every exit path, including timeout and a mid-wave error,
+// so buffed mobs, open pens and ticking areas never outlive the run.
+func (d *Director) cleanupRun() {
+	_, _ = d.exec(killWaveCommand())
+	_ = d.closeAllPens()
+	d.removeTickingAreas()
 }
 
 func (d *Director) closeAllPens() error {

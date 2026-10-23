@@ -181,8 +181,11 @@ func TestRunClearsWavesAndRecordsTuning(t *testing.T) {
 	if !before(f.Cmds, " run summon ", testLayout().Pens[0].Open) {
 		t.Error("pen 1 opened before its first summon")
 	}
-	if f.Count("kill @e[tag=arena_wave]") != 0 {
-		t.Error("a cleared run killed tagged mobs")
+	if f.Count("kill @e[tag=arena_wave]") != 1 {
+		t.Errorf("wave kills = %d, want one cleanup sweep", f.Count("kill @e[tag=arena_wave]"))
+	}
+	if f.Count("tickingarea remove crew-arena-run-0") != 1 {
+		t.Error("a cleared run left its ticking area behind")
 	}
 }
 
@@ -227,6 +230,16 @@ func TestSummonFailureAbortsAsAnError(t *testing.T) {
 	}
 	if result.WavesCleared != 0 {
 		t.Errorf("waves cleared = %d, want 0", result.WavesCleared)
+	}
+	if s.kills != 1 {
+		t.Errorf("kills = %d, want an error to clean up its mobs", s.kills)
+	}
+	pen := testLayout().Pens[0]
+	if f.Count(penCloseCommand(pen)) != 3 {
+		t.Error("an errored run left its pen open")
+	}
+	if f.Count("tickingarea remove crew-arena-run-0") != 1 {
+		t.Error("an errored run left its ticking area behind")
 	}
 }
 
@@ -471,8 +484,15 @@ func TestRunTimesOut(t *testing.T) {
 			if result.DurationSeconds < 5 {
 				t.Errorf("duration = %.1fs, want at least 5", result.DurationSeconds)
 			}
-			if s.kills != 0 {
-				t.Error("a timeout killed its mobs; the operator cannot inspect the field")
+			if s.kills != 1 {
+				t.Errorf("kills = %d, want a timeout to clean up its mobs", s.kills)
+			}
+			pen := testLayout().Pens[0]
+			if !afterAll(f.Cmds, pen.Open, penCloseCommand(pen)) {
+				t.Error("a timeout left its pen open")
+			}
+			if f.Count("tickingarea remove crew-arena-run-0") != 1 {
+				t.Error("a timeout left its ticking area behind")
 			}
 		})
 	}
@@ -596,6 +616,19 @@ func TestWaveSpawnsRejectAnUnknownPen(t *testing.T) {
 	if _, err := d.Run(); err == nil || !strings.Contains(err.Error(), "unknown pen 99") {
 		t.Fatalf("Run error = %v, want an unknown-pen error", err)
 	}
+}
+
+func afterAll(cmds []string, first, second string) bool {
+	a, b := -1, -1
+	for i, cmd := range cmds {
+		if cmd == first {
+			a = i
+		}
+		if cmd == second {
+			b = i
+		}
+	}
+	return a >= 0 && b >= 0 && b > a
 }
 
 func before(cmds []string, first, second string) bool {
