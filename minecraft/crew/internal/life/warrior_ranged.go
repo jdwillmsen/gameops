@@ -65,6 +65,7 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 			w.drawing, w.drawTicks, w.drawItem = false, 0, belief.Item{}
 			w.lastShot = l.tick
 			w.struck = e.ID
+			l.noteSwing(e, true)
 		}
 		if threat {
 			if !l.rangerCanBackOff(p) {

@@ -36,6 +36,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	if hurt {
 		l.noteHurt(p)
 	}
+	l.telemetryTick()
 	if l.warrior != nil {
 		return l.warriorEngaged(p, s, hurt)
 	}
@@ -104,6 +105,7 @@ func (l *Life) engage(p act.Pose, best belief.Entity, m mode) bool {
 		if !l.engaged {
 			l.engaged, l.engagedAt, l.retreating = true, l.tick, 0
 			l.lastAttack = l.tick - attackEvery
+			l.fightStarted()
 			l.logEvent("defend_started", map[string]any{"entity": name(best.Type), "mode": modeName(m)})
 		}
 		if m == modeRetreat {
@@ -134,7 +136,7 @@ func (l *Life) engage(p act.Pose, best belief.Entity, m mode) bool {
 			reason = endGone
 		}
 		l.endReason = ""
-		l.logEvent("defend_ended", map[string]any{"ticks": l.tick - l.engagedAt, "reason": reason})
+		l.logEvent("defend_ended", l.endFields(map[string]any{"ticks": l.tick - l.engagedAt, "reason": reason}))
 	}
 	return false
 }
@@ -270,7 +272,9 @@ func (l *Life) strike(a skill.Actuator, p act.Pose, e belief.Entity, s belief.Sn
 		l.lastAttack = l.tick
 		// An item the server never listed cannot be quoted; the swing is
 		// skipped rather than failing the whole fight.
-		_ = a.Attack(e.ID, slot, held)
+		if a.Attack(e.ID, slot, held) == nil {
+			l.noteSwing(e, false)
+		}
 	}
 	return nil
 }
