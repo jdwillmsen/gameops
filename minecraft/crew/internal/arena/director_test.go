@@ -124,7 +124,7 @@ func (s *sim) Exec(cmd string) (string, error) {
 		s.boss = false
 		return found(0), nil
 	case strings.HasPrefix(cmd, "testfor @e[name="):
-		name := strings.TrimSuffix(strings.TrimPrefix(cmd, "testfor @e[name="), ",type=player]")
+		name := warriorName(cmd)
 		s.warriorHit[name]++
 		if off := s.warriorOff[name]; off > 0 && s.warriorHit[name] >= off {
 			s.warriorUp[name] = false
@@ -560,7 +560,7 @@ func TestStatusReportsWaveBossAndWarriors(t *testing.T) {
 		case bossCountCommand():
 			return "No targets matched selector", nil
 		}
-		if strings.Contains(cmd, "name=Vanguard") {
+		if strings.Contains(cmd, `name="Vanguard"`) {
 			return "Found Vanguard", nil
 		}
 		return "No targets matched selector", nil

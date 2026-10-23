@@ -496,7 +496,11 @@ func (d *Director) warriorBaseline() (map[string]*warriorState, int, error) {
 	states := map[string]*warriorState{}
 	any := false
 	for _, name := range d.Warriors {
-		n, err := d.countCmd(warriorCommand(name), "warrior "+name)
+		cmd, err := warriorCommand(name)
+		if err != nil {
+			return nil, 0, err
+		}
+		n, err := d.countCmd(cmd, "warrior "+name)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -520,7 +524,11 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 	}
 	standing := false
 	for name, st := range states {
-		n, err := d.countCmd(warriorCommand(name), "warrior "+name)
+		cmd, err := warriorCommand(name)
+		if err != nil {
+			return false, err
+		}
+		n, err := d.countCmd(cmd, "warrior "+name)
 		if err != nil {
 			return false, err
 		}
@@ -575,7 +583,11 @@ func (d *Director) Status() (Status, error) {
 	if len(d.Warriors) > 0 {
 		st.Warriors = map[string]bool{}
 		for _, name := range d.Warriors {
-			up, err := d.countCmd(warriorCommand(name), "warrior "+name)
+			cmd, err := warriorCommand(name)
+			if err != nil {
+				return st, err
+			}
+			up, err := d.countCmd(cmd, "warrior "+name)
 			if err != nil {
 				return st, err
 			}
