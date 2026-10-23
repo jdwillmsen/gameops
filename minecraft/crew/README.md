@@ -20,6 +20,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
+| `CREW_ROLE` | unset | The warrior role the unit fights as: `vanguard`, `striker` or `ranger` (see Squads and warriors); anything else is refused, unset leaves the reactive defence in charge |
+| `CREW_SQUAD` | `alpha` with a role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without a role |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
 | `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
@@ -62,6 +64,31 @@ Logs carry only events and types (`defend_started`, `hurt_by`,
 `defend_ended`), never positions. `defend_ended` carries `ticks` and a
 `reason`: `gone` (the mob left range or died), `no_stand_cell` (no standable
 cell near it), `no_path` (the chase failed) or `fight_limit`.
+
+## Squads and warriors
+
+With `CREW_ROLE` set the unit fights as a warrior of that role — `vanguard`
+(holds the front behind its shield, leads the squad), `striker` (flanks and
+lands critical hits mid-fall) or `ranger` (bows from distance and kites) —
+and never as anything else: players are never targeted. The engine shares
+one focus target across the squad by rule, not by message: every unit
+commits to the lowest-health threat within 12 blocks of the leader, ties
+broken by entity id, and only a creeper about to blast or a player it must
+give way to overrides it. A hurt warrior eats a golden apple behind the
+line, regroups on its leader when pressed, calls out (`low_health`,
+`need_heal`, `target_down`) for the squad's benefit, and an operator's
+standing order (`focus|hold|advance|regroup|retreat`) steers all of them.
+Design: [`docs/crew-squads/docs/specs/2026-10-23-crew-squads-and-arena-design.md`](../../docs/crew-squads/docs/specs/2026-10-23-crew-squads-and-arena-design.md).
+
+`CREW_SQUAD` names the squad the warrior joins, `alpha` by default. Joining
+goes through crew-control over the same `CONTROL_URL` and `CONTROL_TOKEN`
+as the work client (no separate URL exists): the unit hellos its claim,
+reports its `hp`, `food`, held item and feet position from belief every
+couple of seconds, and long-polls the standing order and the leader. The
+chain of command leads through the fittest member — Vanguard, then Striker,
+then Ranger — and a leader that dies or goes silent for 8 s hands over. A
+warrior without `CONTROL_URL` still fights, but leads itself and hears no
+orders, and says so in one `squad_off` log line.
 
 ## Water
 
