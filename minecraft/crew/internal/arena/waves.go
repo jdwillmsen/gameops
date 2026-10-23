@@ -209,6 +209,12 @@ func (b *WaveBook) normalise() error {
 			if m.Mob == "" {
 				return fmt.Errorf("wave %q mob %d has no mob type", w.Name, j+1)
 			}
+			if !validIdentifier(m.Mob) {
+				return fmt.Errorf("wave %q mob %q is not a lowercase identifier", w.Name, m.Mob)
+			}
+			if m.Mob == "player" || m.Mob == "item" {
+				return fmt.Errorf("wave %q mob %q is not a wave mob", w.Name, m.Mob)
+			}
 			if m.Count < 1 {
 				return fmt.Errorf("wave %q mob %q count must be positive", w.Name, m.Mob)
 			}
@@ -224,8 +230,13 @@ func (b *WaveBook) normalise() error {
 			if strings.ContainsAny(m.Name, "\"\n") {
 				return fmt.Errorf("wave %q mob name %q has a quote or newline", w.Name, m.Name)
 			}
-			if m.Variant != "" && !strings.HasPrefix(m.Variant, "minecraft:") {
-				return fmt.Errorf("wave %q mob %q variant %q must start with minecraft:", w.Name, m.Mob, m.Variant)
+			if m.Variant != "" {
+				if !strings.HasPrefix(m.Variant, "minecraft:") {
+					return fmt.Errorf("wave %q mob %q variant %q must start with minecraft:", w.Name, m.Mob, m.Variant)
+				}
+				if !validIdentifier(m.Variant) {
+					return fmt.Errorf("wave %q mob %q variant %q is not a lowercase identifier", w.Name, m.Mob, m.Variant)
+				}
 			}
 			if w.Boss && isBossMob(m.Mob) {
 				boss = true
@@ -243,7 +254,80 @@ func (b *WaveBook) normalise() error {
 			if p.Callout == "" && len(p.Commands) == 0 {
 				return fmt.Errorf("wave %q phase %d has nothing to do", w.Name, j+1)
 			}
+			for _, cmd := range p.Commands {
+				if err := validatePhaseCommand(cmd); err != nil {
+					return fmt.Errorf("wave %q phase %d: %w", w.Name, j+1, err)
+				}
+			}
 		}
+	}
+	return nil
+}
+
+// validIdentifier is the character set of a Bedrock entity, item or effect
+// id, plus the namespace colon. Anything else is a typo that would only show
+// up as a console syntax error mid-run.
+func validIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && r != '_' && r != ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// validatePhaseCommand keeps a timed boss beat to the commands the director
+// already owns, and keeps every selector on the arena's own tags so a phase
+// can never touch a player or another build's entities.
+func validatePhaseCommand(cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
+		return fmt.Errorf("has an empty command")
+	}
+	if strings.ContainsAny(cmd, "\r\n") {
+		return fmt.Errorf("command %q spans lines", cmd)
+	}
+	verb := strings.Fields(cmd)[0]
+	switch verb {
+	case "summon", "effect", "replaceitem", "enchant", "tag", "tickingarea":
+	case "kill":
+		if len(strings.Fields(cmd)) != 2 || !strings.HasPrefix(cmd, "kill ") {
+			return fmt.Errorf("kill takes one arena selector")
+		}
+	default:
+		return fmt.Errorf("command verb %q is not allowed", verb)
+	}
+	if err := validateArenaSelectors(cmd); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateArenaSelectors requires every selector to start with an arena tag.
+// The check is deliberately narrow: phases exist for the boss, not for
+// general world editing.
+func validateArenaSelectors(cmd string) error {
+	const prefix = "@e[tag=arena_"
+	for i := 0; i < len(cmd); i++ {
+		if cmd[i] != '@' {
+			continue
+		}
+		rest := cmd[i:]
+		if !strings.HasPrefix(rest, prefix) {
+			return fmt.Errorf("selector %q is not tag=arena_*", rest)
+		}
+		after := rest[len(prefix):]
+		if after == "" || after[0] == ']' || after[0] == ',' {
+			return fmt.Errorf("selector %q has an empty arena tag", rest)
+		}
+		close := strings.IndexByte(rest, ']')
+		if close < 0 {
+			return fmt.Errorf("selector %q has no closing bracket", rest)
+		}
+		i += close
 	}
 	return nil
 }
@@ -252,6 +336,9 @@ func validateTier(tier int, t Tier) error {
 	for _, e := range t.Effects {
 		if e.ID == "" {
 			return fmt.Errorf("tier %d has an effect without an id", tier)
+		}
+		if !validIdentifier(e.ID) {
+			return fmt.Errorf("tier %d effect %q is not a lowercase identifier", tier, e.ID)
 		}
 		if e.Seconds < 1 || e.Seconds > 1000000 {
 			return fmt.Errorf("tier %d effect %q duration %d is outside 1..1000000", tier, e.ID, e.Seconds)
@@ -267,10 +354,16 @@ func validateTier(tier int, t Tier) error {
 		if g.Item == "" {
 			return fmt.Errorf("tier %d gear slot %q has no item", tier, g.Slot)
 		}
+		if !validIdentifier(g.Item) {
+			return fmt.Errorf("tier %d gear item %q is not a lowercase identifier", tier, g.Item)
+		}
 	}
 	if t.Enchant != nil {
 		if t.Enchant.ID == "" {
 			return fmt.Errorf("tier %d enchant has no id", tier)
+		}
+		if !validIdentifier(t.Enchant.ID) {
+			return fmt.Errorf("tier %d enchant %q is not a lowercase identifier", tier, t.Enchant.ID)
 		}
 		if t.Enchant.ID == "sharpness" && (t.Enchant.Level < 1 || t.Enchant.Level > 5) {
 			return fmt.Errorf("tier %d sharpness level %d is outside 1..5", tier, t.Enchant.Level)
