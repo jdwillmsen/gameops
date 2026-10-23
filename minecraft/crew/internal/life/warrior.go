@@ -101,6 +101,9 @@ const (
 	regroupWithin = 3.0
 	// kiteBackoff is how close a mob may get before a Ranger gives ground.
 	kiteBackoff = 5.0
+	// backStuckTicks is how many backing ticks that moved nowhere mean the
+	// Ranger is against a wall or a body and must melee instead.
+	backStuckTicks = 3
 	// bowDraw is how long a bow is drawn before release: Bedrock's full
 	// charge, which is the only one worth an arrow.
 	bowDraw = 20
@@ -169,6 +172,15 @@ type warriorState struct {
 	drawing   bool
 	drawTicks int
 	lastShot  uint64
+	// backing is the ground a Ranger is giving, with where it last was and
+	// how many of its ticks moved nowhere.
+	backing   bool
+	backX     float32
+	backZ     float32
+	backStuck uint8
+	// meleeLast says the bow was put away after being cornered: stay on the
+	// sword until there is room to shoot again.
+	meleeLast bool
 
 	// walk is the leader-bound regroup, replanned the way a chase is.
 	walk     skill.Skill
@@ -214,6 +226,8 @@ func (w *warriorState) reset() {
 	w.shield = false
 	w.critUntil = 0
 	w.drawing, w.drawTicks = false, 0
+	w.backing, w.backStuck = false, 0
+	w.meleeLast = false
 	w.walk = nil
 	w.struck, w.prevTarget = 0, 0
 	clear(w.arrows)

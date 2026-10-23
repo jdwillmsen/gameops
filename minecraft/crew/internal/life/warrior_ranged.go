@@ -2,6 +2,7 @@ package life
 
 import (
 	"context"
+	"math"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
@@ -43,6 +44,15 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 	}
 	l.lowerShield(a)
 	threat := l.enemyNear(p.Feet, kiteBackoff)
+	if !threat {
+		w.meleeLast = false
+	}
+	if w.meleeLast {
+		// Cornered once already: the sword stays out until there is room
+		// to shoot again, or the unit would step back into the wall every
+		// other tick.
+		return l.warriorMelee(ctx, a, p, e, s)
+	}
 	in := l.face(p, e)
 	switch {
 	case w.drawing:
@@ -55,6 +65,13 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 			w.struck = e.ID
 		}
 		if threat {
+			if !l.rangerCanBackOff(p) {
+				// A drawn bow is worth nothing pressed against a wall:
+				// the last resort is the sword.
+				l.cancelBow(a, bow, s)
+				w.backing, w.meleeLast = false, true
+				return l.warriorMelee(ctx, a, p, e, s)
+			}
 			// A mob in the face does not stop a drawn bow: back off and
 			// let the release happen on the way.
 			in.Forward = -1
@@ -63,9 +80,14 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 	case threat:
 		// Nothing is drawn and something is close: gain ground first; a
 		// new draw waits until there is room to stand and shoot.
+		if !l.rangerCanBackOff(p) {
+			w.backing, w.meleeLast = false, true
+			return l.warriorMelee(ctx, a, p, e, s)
+		}
 		in.Forward = -1
 		return a.Tick(in)
 	case w.lastShot == 0 || l.tick-w.lastShot >= shotEvery:
+		w.backing = false
 		// lastShot zero is the fight's start, not a release at tick 0:
 		// the first draw does not wait out a cadence that never ran.
 		if err := a.SelectHotbar(bow.Slot, bow); err != nil {
@@ -78,5 +100,39 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 		in.StartUsing = true
 		return a.Tick(in)
 	}
+	w.backing = false
 	return a.Tick(in)
+}
+
+// cancelBow lets go of a half-drawn bow without counting it as a shot.
+func (l *Life) cancelBow(a skill.Actuator, bow belief.Item, s belief.Snapshot) {
+	w := l.warrior
+	if !w.drawing {
+		return
+	}
+	_ = a.ReleaseItem(bow.Slot, stackAt(s, bow.Slot, bow.Name))
+	w.drawing, w.drawTicks = false, 0
+}
+
+// rangerCanBackOff says whether giving ground still works: false when a mob is
+// already inside pressRange, where the bow cannot come up in time, or when the
+// last few backing ticks moved nowhere, which is a wall or a body behind.
+func (l *Life) rangerCanBackOff(p act.Pose) bool {
+	w := l.warrior
+	if l.enemyNear(p.Feet, pressRange) {
+		return false
+	}
+	if !w.backing {
+		w.backing, w.backStuck = true, 0
+		w.backX, w.backZ = p.Feet.X(), p.Feet.Z()
+		return true
+	}
+	moved := math.Hypot(float64(p.Feet.X()-w.backX), float64(p.Feet.Z()-w.backZ))
+	w.backX, w.backZ = p.Feet.X(), p.Feet.Z()
+	if moved < 0.05 {
+		w.backStuck++
+	} else {
+		w.backStuck = 0
+	}
+	return w.backStuck < backStuckTicks
 }
