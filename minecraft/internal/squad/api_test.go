@@ -1,6 +1,7 @@
 package squad
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -81,6 +82,37 @@ func (r *rig) do(t *testing.T, method, path, body string, hdr map[string]string)
 	}
 	t.Cleanup(func() { resp.Body.Close() })
 	return resp
+}
+
+// openWaiters counts the channels still parked on the squad's wakeup
+// registry.
+func (r *rig) openWaiters(squad string) int {
+	r.api.mu.Lock()
+	defer r.api.mu.Unlock()
+	return len(r.api.waits[squad])
+}
+
+// waitRigged issues one long request under a fresh cancellable context and
+// leaves it waiting; the returned cancel is the handle the test hangs the
+// wait up with.
+func (r *rig) waitingRequest(t *testing.T, path string) context.CancelFunc {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.srv.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	// Long enough for the handler to reach its wait.
+	time.Sleep(100 * time.Millisecond)
+	return cancel
 }
 
 func readBody(t *testing.T, resp *http.Response) string {
@@ -480,6 +512,68 @@ func TestBroadcastCannotFallPastADeltaRead(t *testing.T) {
 		case <-time.After(3 * time.Second):
 			t.Fatalf("iteration %d: a broadcast between the read and the wait lost the wake", i)
 		}
+	}
+}
+
+// A poll that finished by itself — timed out or cancelled — must leave no
+// channel behind to be closed by the next broadcast of a poll that is long
+// gone.
+func TestFinishedPollsLeaveNoWaiters(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "alpha", "crew-18", "vanguard")
+	// One order to prime the cursor, so a poll since=1 is genuinely fully
+	// read and waits its bound or its caller out.
+	op := map[string]string{"X-Crew-Request": "1"}
+	r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"hold"}`, op)
+
+	// Timed out: the 204 path takes its channel with it.
+	if resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=1s&since=1", "", nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("the fully read poll answered %d", resp.StatusCode)
+	}
+	if n := r.openWaiters("alpha"); n != 0 {
+		t.Errorf("a timed-out poll left %d waiters", n)
+	}
+
+	// Cancelled by the caller: the context path takes its channel too.
+	cancel := r.waitingRequest(t, "/v1/squads/alpha/orders?wait=10s&since=1")
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	if n := r.openWaiters("alpha"); n != 0 {
+		t.Errorf("a cancelled poll left %d waiters", n)
+	}
+
+	// A woken poll leaves nothing either: its channel is gone with it.
+	type got struct {
+		status int
+		kind   string
+	}
+	poll := make(chan got, 1)
+	go func() {
+		resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=10s&since=1", "", nil)
+		kind := ""
+		if resp.StatusCode == http.StatusOK {
+			var d Delta
+			if err := json.Unmarshal([]byte(readBody(t, resp)), &d); err != nil {
+				panic(err)
+			}
+			if d.Order != nil {
+				kind = d.Order.Kind
+			}
+		}
+		poll <- got{resp.StatusCode, kind}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"regroup"}`, op)
+	select {
+	case g := <-poll:
+		if g.status != http.StatusOK || g.kind != "regroup" {
+			t.Errorf("the woken poll answered %d %q", g.status, g.kind)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the woken poll never answered")
+	}
+	if n := r.openWaiters("alpha"); n != 0 {
+		t.Errorf("an answered poll left %d waiters", n)
 	}
 }
 
