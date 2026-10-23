@@ -201,13 +201,20 @@ func TestProxyWebSocketSameOrigin(t *testing.T) {
 	}
 }
 
-func TestProxyForwardsOnlyCameraRadius(t *testing.T) {
+func TestProxyForwardsOnlyCameraRadiusAndWire(t *testing.T) {
 	cases := []struct{ path, wantQuery string }{
 		{"/units/crew-01/v1/camera/ws?r=2", "r=2"},
 		{"/units/crew-01/v1/camera/ws?r=2&x=1", "r=2"},
 		{"/units/crew-01/v1/camera/ws?x=1", ""},
 		{"/units/crew-01/v1/camera/ws?r=abc", ""},
 		{"/units/crew-01/v1/camera/ws?r=1234", ""},
+		{"/units/crew-01/v1/camera/ws?r=2&wire=4", "r=2&wire=4"},
+		{"/units/crew-01/v1/camera/ws?wire=4", "wire=4"},
+		{"/units/crew-01/v1/camera/ws?r=abc&wire=4", "wire=4"},
+		{"/units/crew-01/v1/camera/ws?wire=abc", ""},
+		{"/units/crew-01/v1/camera/ws?wire=123", ""},
+		{"/units/crew-01/v1/camera/ws?wire=4&x=1&y=2", "wire=4"},
+		{"/units/crew-01/v1/camera/stats?wire=4", ""},
 		{"/units/crew-01/v1/camera/stats?r=2", ""},
 		{"/units/crew-01/v1/state?r=2&x=1", ""},
 	}
