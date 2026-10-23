@@ -272,10 +272,19 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
     return Number.isNaN(at) ? null : at;
   }
 
+  // Departed units must not keep rows, trails or marks alive.
+  function prune(list) {
+    const live = new Set(list.map(s => s.id));
+    for (const m of [since, trail, lastEvent, stuckTask, stuckProgress, stuckAt]) {
+      for (const id of m.keys()) if (!live.has(id)) m.delete(id);
+    }
+  }
+
   return {
     ingest(list, now = Date.now()) {
       units = list;
       freshAt = now;
+      prune(list);
       for (const s of list) {
         const state = stateOf(s, stuckNow(s, now));
         const k = taskKind(s);

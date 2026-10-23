@@ -351,15 +351,15 @@ export function initOverview(host) {
     }
     syncSelects();
 
-    if (entries.size !== all.length) {
-      const live = new Set(all.map(r => r.id));
-      for (const [id, e] of entries) {
-        if (live.has(id)) continue;
-        e.spark.destroy();
-        e.row.remove();
-        entries.delete(id);
-        if (roving === id) roving = '';
-      }
+    // By id, not by count: a roster swap of the same size leaves as many old
+    // rows as new units.
+    const live = new Set(all.map(r => r.id));
+    for (const [id, e] of entries) {
+      if (live.has(id)) continue;
+      e.spark.destroy();
+      e.row.remove();
+      entries.delete(id);
+      if (roving === id) roving = '';
     }
     const work = [];
     for (const r of all) {
