@@ -1,6 +1,9 @@
 package arena
 
-import "fmt"
+import (
+	"fmt"
+	"unicode"
+)
 
 const (
 	waveTag   = "arena_wave"
@@ -21,8 +24,26 @@ func countCommand() string { return "testfor " + countSelector }
 
 func bossCountCommand() string { return "testfor " + bossSelector }
 
-func warriorCommand(name string) string {
-	return fmt.Sprintf("testfor @e[name=%s,type=player]", name)
+func warriorCommand(name string) (string, error) {
+	if err := validateWarriorName(name); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("testfor @e[name=%q,type=player]", name), nil
+}
+
+// validateWarriorName keeps the selector argument a quoted literal: an
+// unescaped quote or control character could end the name and inject a
+// selector of its own.
+func validateWarriorName(name string) error {
+	if name == "" {
+		return fmt.Errorf("arena: warrior name is empty")
+	}
+	for _, r := range name {
+		if r == '"' || r == '\\' || unicode.IsControl(r) {
+			return fmt.Errorf("arena: warrior name %q has a quote, backslash or control character", name)
+		}
+	}
+	return nil
 }
 
 func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }

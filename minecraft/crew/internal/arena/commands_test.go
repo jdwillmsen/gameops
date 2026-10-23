@@ -134,6 +134,24 @@ func TestNoEnchantWithoutMainhand(t *testing.T) {
 	}
 }
 
+func TestWarriorCommandQuotesTheName(t *testing.T) {
+	cmd, err := warriorCommand("Vanguard")
+	if err != nil {
+		t.Fatalf("warriorCommand: %v", err)
+	}
+	if want := `testfor @e[name="Vanguard",type=player]`; cmd != want {
+		t.Errorf("warriorCommand = %q, want %q", cmd, want)
+	}
+}
+
+func TestWarriorCommandRejectsSelectorInjection(t *testing.T) {
+	for _, name := range []string{"", `Va"nguard`, "Va\nnguard", `Va\nguard`} {
+		if _, err := warriorCommand(name); err == nil {
+			t.Errorf("warriorCommand(%q) accepted an unsafe name", name)
+		}
+	}
+}
+
 func TestSlotPrefixesAreAcceptedOnce(t *testing.T) {
 	for _, slot := range []string{"weapon.mainhand", "slot.weapon.mainhand"} {
 		recipe := Tier{Gear: []Gear{{Slot: slot, Item: "iron_sword"}}}
