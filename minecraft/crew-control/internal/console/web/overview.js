@@ -6,6 +6,11 @@ export const SAMPLE_MS = 2000;
 // 90 samples at 2 s is a three-minute trail.
 export const WINDOW = 90;
 export const MAX_HEALTH = 20;
+// The stream re-sends the units every 15 s even when nothing changed, so
+// silence for longer than that plus slack means the data is not live.
+export const STALE_MS = 20_000;
+// A gap this wide between two samples is drawn as a break, not a line.
+export const GAP_MS = 3 * SAMPLE_MS;
 // The poller reports a stuck task once and never says when the unit moves
 // again, and the units snapshot carries no stuck flag to read it from. Past
 // this long without a new report the mark is dropped, so a unit that went on
@@ -179,6 +184,17 @@ export function moveFocus(ids, cur, key, page = 8) {
   return ids[Math.min(last, Math.max(0, i + step))];
 }
 
+// Names the last n samples by how long ago they were taken, from their own
+// timestamps: a throttled tab or a stream outage spaces them unevenly.
+export function trailLabels(times, n, now) {
+  const at = times.slice(-n);
+  return at.map((t, i) => {
+    const s = Math.max(0, Math.round((now - t) / 1000));
+    if (i === at.length - 1 && s * 1000 <= SAMPLE_MS * 1.5) return 'now';
+    return s < 90 ? `${s}s ago` : `${Math.round(s / 60)}m ago`;
+  });
+}
+
 // ---- the board: what the stream cannot tell on its own ----
 
 const push = (arr, v, cap) => {
@@ -192,6 +208,7 @@ const push = (arr, v, cap) => {
 export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   let units = [];
   let feed = [];
+  let freshAt = -Infinity;
   const stuckTask = new Map();
   const stuckProgress = new Map();
   const stuckAt = new Map();
@@ -204,6 +221,8 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   // an older event belongs to an earlier visit to this one.
   const since = new Map();
   const trail = new Map();
+  // One timeline for every trail; a unit that joined late holds the tail of it.
+  const times = [];
   const fleet = { online: [], working: [], idle: [], attention: [] };
   const kinds = new Set();
   let positions = new Map();
@@ -256,6 +275,7 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
   return {
     ingest(list, now = Date.now()) {
       units = list;
+      freshAt = now;
       for (const s of list) {
         const state = stateOf(s, stuckNow(s, now));
         const k = taskKind(s);
@@ -306,8 +326,17 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
     },
 
     // One sample per unit, null while a unit reports nothing, so an outage
-    // shows as a gap instead of a flat line.
-    sample() {
+    // shows as a gap instead of a flat line. Nothing is sampled while the
+    // stream is silent: a repeated old value would pass for a live one.
+    sample(now = Date.now()) {
+      if (!units.length || now - freshAt > STALE_MS) return;
+      // The clock jumped or the tab was throttled: break the line between the
+      // samples either side instead of drawing a slope across the hole.
+      if (times.length && now - times[times.length - 1] > GAP_MS) {
+        for (const h of trail.values()) push(h, null, window);
+        for (const k of Object.keys(fleet)) push(fleet[k], null, window);
+        push(times, times[times.length - 1] + SAMPLE_MS, window);
+      }
       const c = { online: 0, working: 0, idle: 0, attention: 0 };
       for (const s of units) {
         const state = since.get(s.id)?.state ?? stateOf(s);
@@ -320,6 +349,7 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
         if (state === 'stuck' || state === 'dead' || state === 'offline') c.attention++;
       }
       for (const k of Object.keys(c)) push(fleet[k], c[k], window);
+      push(times, now, window);
     },
 
     rows() {
@@ -349,6 +379,7 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
       return summarize(this.rows(), feed);
     },
     fleetTrail: k => fleet[k],
+    times: () => times,
     kinds: () => [...kinds].sort(),
     feedSize: () => feed.length,
   };
