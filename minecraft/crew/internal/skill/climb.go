@@ -33,6 +33,7 @@ type climber struct {
 	cell    protocol.BlockPos
 	item    string
 	settled int
+	log     Logger
 }
 
 // step does one tick of the climb. done says a walking path now exists.
@@ -73,6 +74,7 @@ func (c *climber) step(a Actuator) (done bool, err error) {
 			c.grace++
 		default:
 			if c.tries++; c.tries >= placeTries {
+				c.note("climb_place_failed", p)
 				return false, errors.New("the server did not place the block")
 			}
 			c.rising = false
@@ -84,8 +86,10 @@ func (c *climber) step(a Actuator) (done bool, err error) {
 		switch err := a.PlaceBlock(c.cell, c.item); {
 		case err == nil:
 			c.placed = true
+			c.note("climb_place_sent", p)
 		case errors.Is(err, act.ErrItemMoving):
 		default:
+			c.note("climb_place_error", p)
 			return false, err
 		}
 	}
@@ -93,3 +97,16 @@ func (c *climber) step(a Actuator) (done bool, err error) {
 }
 
 func (c *climber) tick(a Actuator, in act.Input) error { return a.Tick(in) }
+
+// note logs where a placement stood, so a block the server never confirms
+// can be told from one that was never sent. Heights only: no coordinates.
+func (c *climber) note(event string, p act.Pose) {
+	if c.log == nil {
+		return
+	}
+	name, known := c.world.Block(c.cell)
+	c.log.Info(event, map[string]any{
+		"built": c.built, "feet_y": p.Feet.Y(), "cell_y_offset": float32(c.cell.Y()) - p.Feet.Y(),
+		"on_ground": p.OnGround, "waited": c.waited, "tries": c.tries, "cell": name, "known": known, "item": c.item,
+	})
+}
