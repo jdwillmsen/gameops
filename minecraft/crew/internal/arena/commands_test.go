@@ -122,6 +122,21 @@ func TestSpawnTagsEveryWaveMob(t *testing.T) {
 	}
 }
 
+// become_drowned turns the zombie into a drowned, so a type=zombie tag never
+// matches; the variant must be claimed by position instead.
+func TestVariantSpawnTagsByPosition(t *testing.T) {
+	s := testSpawn()
+	s.Variant = "minecraft:become_drowned"
+	cmds := s.commands(Tier{})
+	want := "execute positioned 10 65 -760 run tag @e[type=!player,type=!item,tag=!arena_tiered,tag=!arena_wave,c=1,r=2] add arena_tiered"
+	if !hasCommand(cmds, want) {
+		t.Errorf("variant tag command missing:\n%s", strings.Join(cmds, "\n"))
+	}
+	if hasCommand(cmds, "execute positioned 10 65 -760 run tag @e[type=zombie,tag=!arena_tiered,tag=!arena_wave,c=1,r=4] add arena_tiered") {
+		t.Error("a variant summon still filters on the pre-variant entity type")
+	}
+}
+
 // The spike found /enchant only ever touches the mainhand, so an armour-only
 // recipe must not emit one.
 func TestNoEnchantWithoutMainhand(t *testing.T) {
