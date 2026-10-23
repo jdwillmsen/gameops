@@ -454,7 +454,7 @@ func abs32(x int32) int32 {
 	return x
 }
 
-func TestRangerShootsOnTheBowCadenceAndNeverMelees(t *testing.T) {
+func TestRangerShootsOnTheBowCadenceAndStaysOutOfMeleeWithRoom(t *testing.T) {
 	r := newWarrior(t, "ranger", start)
 	r.give(0, 303, 1)
 	r.give(1, 361, 1)   // bow
@@ -526,6 +526,38 @@ func TestRangerWithoutArrowsFallsBackToMelee(t *testing.T) {
 	}
 	if r.out.uses(1) != 0 {
 		t.Error("drew a bow with no arrows to fire")
+	}
+}
+
+func TestCorneredRangerMeleesInsteadOfBackingOffForever(t *testing.T) {
+	wall := func(r *rig) {
+		for z := int32(18); z <= 22; z++ {
+			for y := int32(1); y <= 2; y++ {
+				r.w.over[protocol.BlockPos{19, y, z}] = "stone"
+			}
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		at   mgl32.Vec3
+	}{
+		{name: "a mob at arm's length", at: mgl32.Vec3{21.5, 1, 20.5}},
+		{name: "a mob inside bow range with the wall behind", at: mgl32.Vec3{24.5, 1, 20.5}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newWarrior(t, "ranger", start)
+			r.give(0, 303, 1)
+			r.give(1, 361, 1)   // bow
+			r.give(20, 362, 32) // arrows
+			wall(r)
+			spawnZombie(r, 50, tc.at)
+			for i := 0; i < 80 && len(r.out.attacks()) == 0; i++ {
+				r.step()
+			}
+			if n := len(r.out.attacks()); n == 0 {
+				t.Fatalf("a cornered Ranger never swung at a zombie %.1f blocks away", dist(r.feet(), tc.at))
+			}
+		})
 	}
 }
 
