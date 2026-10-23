@@ -39,13 +39,16 @@ func TestWithdrawFailsWhenTheChestDoesNotOpen(t *testing.T) {
 	}
 	clicked, _ := log.lines[0].fields["clicks"].(int)
 	opened, _ := log.lines[0].fields["opened"].(bool)
-	if len(log.lines[0].fields) != 2 || clicked != openClicks || opened {
+	if len(log.lines[0].fields) != 4 || clicked != openClicks || opened {
 		t.Errorf("logged fields = %v, want clicks %d with opened false", log.lines[0].fields, openClicks)
 	}
 	for k := range log.lines[0].fields {
-		if k != "clicks" && k != "opened" {
+		if k != "clicks" && k != "opened" && k != "dist" && k != "above" {
 			t.Errorf("logged field %q: no coordinates belong here", k)
 		}
+	}
+	if _, ok := log.lines[0].fields["dist"].(float64); !ok {
+		t.Errorf("dist = %#v, want the unit's distance to the chest", log.lines[0].fields["dist"])
 	}
 	if open, _, _ := r.Container(); open {
 		t.Error("a chest that never opened was left open")

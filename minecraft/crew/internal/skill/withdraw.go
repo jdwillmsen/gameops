@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"time"
 
@@ -234,7 +235,11 @@ func (w *Withdraw) open(a Actuator, snap belief.Snapshot) outcome {
 	}
 	if ph.waited++; ph.waited >= answerTicks {
 		if w.log != nil {
-			w.log.Info("chest_open_clicks", map[string]any{"clicks": ph.clicks, "opened": false})
+			// How far the unit stood and what covers the chest, the two
+			// things a server that answers no click can still be blamed on.
+			above, _ := w.world.Block(protocol.BlockPos{w.chest.X(), w.chest.Y() + 1, w.chest.Z()})
+			dist := centre(w.chest).Sub(eyeOf(a.Pose().Feet)).Len()
+			w.log.Info("chest_open_clicks", map[string]any{"clicks": ph.clicks, "opened": false, "dist": math.Round(float64(dist)*10) / 10, "above": above})
 		}
 		ph.drain = ErrChestNotOpened
 		ph.p, ph.waited = wDrain, 0
