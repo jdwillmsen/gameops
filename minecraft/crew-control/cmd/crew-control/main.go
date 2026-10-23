@@ -28,6 +28,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/squad"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
 )
@@ -105,6 +106,9 @@ func main() {
 	if workToken == "" {
 		log.Warn("work_token_unset", logging.Fields{"effect": "unit work routes are not registered"})
 	}
+	// Squad state is in-memory only and rebuilt from units' hellos, so
+	// unlike the work store it is ready the moment the process is.
+	squadStore := squad.NewStore()
 
 	// No WriteTimeout: it would cut the camera websocket and the status
 	// stream, which are long-lived by design.
@@ -122,6 +126,9 @@ func main() {
 			// to a blueprint replace this without touching the routes.
 			api.OnBlocks = func(string, uuid.UUID, work.Blocks) {}
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
+			squadMount := squad.Routes(mux, squadStore, units, workToken)
+			squadMount.MountOperator(mux, operators)
+
 			poller.SetWorkSource(api.Feed)
 			events.NewAPI(eventLog).MountOperator(mux, operators)
 			ledger.NewAPI(func() ledger.Ledger {
