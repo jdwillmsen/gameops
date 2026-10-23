@@ -12,6 +12,7 @@ const minimalLayout = `{
   "ground_y": 63,
   "floor_radius": 45,
   "outer_radius": 70,
+  "areas": [{"x0": 0, "z0": -768, "x1": 15, "z1": -753}],
   "pens": [
     {"id": 1, "angle_deg": 15, "spawn": {"x": 12, "y": 64, "z": -712},
      "gate": {"x0": 18, "y0": 64, "z0": -713, "x1": 18, "y1": 66, "z1": -711},
@@ -47,6 +48,9 @@ func TestLoadLayout(t *testing.T) {
 	if l.StartGate.Open == "" {
 		t.Error("start gate lost its open command")
 	}
+	if len(l.Areas) != 1 || l.Areas[0].X0 != 0 || l.Areas[0].Z1 != -753 {
+		t.Errorf("areas = %+v", l.Areas)
+	}
 	p, ok := l.Pen(1)
 	if !ok || p.Gate.X0 != 18 {
 		t.Errorf("Pen(1) = %+v, %v", p, ok)
@@ -75,6 +79,14 @@ func TestLayoutRejectsBrokenDocuments(t *testing.T) {
 		{"no boss", func(s string) string {
 			return strings.Replace(s, `"boss": {"x": 0, "y": 65, "z": -760}`, `"boss": {"x": 0, "y": 0, "z": -760}`, 1)
 		}, "boss point"},
+		{"area over the chunk limit", func(s string) string {
+			return strings.Replace(s, `"areas": [{"x0": 0, "z0": -768, "x1": 15, "z1": -753}]`,
+				`"areas": [{"x0": 0, "z0": -768, "x1": 159, "z1": -577}]`, 1)
+		}, "chunks"},
+		{"inverted area", func(s string) string {
+			return strings.Replace(s, `"areas": [{"x0": 0, "z0": -768, "x1": 15, "z1": -753}]`,
+				`"areas": [{"x0": 15, "z0": -768, "x1": 0, "z1": -753}]`, 1)
+		}, "inverted"},
 		{"not json", func(string) string { return "{" }, "parse layout"},
 	}
 	for _, tt := range tests {

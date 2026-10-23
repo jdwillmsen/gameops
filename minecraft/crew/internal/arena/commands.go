@@ -29,6 +29,18 @@ func killWaveCommand() string { return "kill @e[tag=" + waveTag + "]" }
 
 func penCloseCommand(p Pen) string { return p.Gate.Fill("iron_bars") }
 
+// tickingAreaName scopes the run's areas so a build's crew-arena-* areas are
+// never removed by a director that did not add them.
+func tickingAreaName(i int) string { return fmt.Sprintf("crew-arena-run-%d", i) }
+
+func tickingAddCommand(i int, a Area) string {
+	return fmt.Sprintf("tickingarea add %d 0 %d %d 0 %d %s", a.X0, a.Z0, a.X1, a.Z1, tickingAreaName(i))
+}
+
+func tickingRemoveCommand(i int) string {
+	return "tickingarea remove " + tickingAreaName(i)
+}
+
 // spawn is one mob of a wave, already placed at its pen or at the dais.
 type spawn struct {
 	Type    string

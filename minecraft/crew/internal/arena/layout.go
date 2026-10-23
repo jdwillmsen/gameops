@@ -6,6 +6,9 @@ import (
 	"os"
 )
 
+// maxAreaChunks is Bedrock's chunk limit for one ticking area.
+const maxAreaChunks = 100
+
 // Layout is the document `labcourses arena-layout` prints: the pen spawn
 // points, the iron-bar gate boxes the director opens, and the squad start gate.
 type Layout struct {
@@ -13,9 +16,31 @@ type Layout struct {
 	GroundY     int       `json:"ground_y"`
 	FloorRadius int       `json:"floor_radius"`
 	OuterRadius int       `json:"outer_radius"`
+	Areas       []Area    `json:"areas"`
 	Pens        []Pen     `json:"pens"`
 	StartGate   StartGate `json:"start_gate"`
 	Boss        Point     `json:"boss"`
+}
+
+// Area is a chunk-aligned column the run must keep loaded.
+type Area struct {
+	X0 int `json:"x0"`
+	Z0 int `json:"z0"`
+	X1 int `json:"x1"`
+	Z1 int `json:"z1"`
+}
+
+// chunks counts the whole chunk columns the area spans.
+func (a Area) chunks() int {
+	x0, x1 := a.X0, a.X1
+	if x0 > x1 {
+		x0, x1 = x1, x0
+	}
+	z0, z1 := a.Z0, a.Z1
+	if z0 > z1 {
+		z0, z1 = z1, z0
+	}
+	return ((x1 >> 4) - (x0 >> 4) + 1) * ((z1 >> 4) - (z0 >> 4) + 1)
 }
 
 type Point struct {
@@ -70,6 +95,14 @@ func LoadLayout(path string) (Layout, error) {
 }
 
 func (l Layout) validate() error {
+	for i, a := range l.Areas {
+		if a.X1 < a.X0 || a.Z1 < a.Z0 {
+			return fmt.Errorf("layout area %d has inverted bounds", i)
+		}
+		if n := a.chunks(); n > maxAreaChunks {
+			return fmt.Errorf("layout area %d spans %d chunks, at most %d load at once", i, n, maxAreaChunks)
+		}
+	}
 	if len(l.Pens) == 0 {
 		return fmt.Errorf("layout has no pens")
 	}

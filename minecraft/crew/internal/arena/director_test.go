@@ -22,6 +22,7 @@ func testLayout() Layout {
 			Open: gate.Fill("air")}
 	}
 	return Layout{
+		Areas:     []Area{{X0: -16, Z0: -800, X1: 31, Z1: -696}},
 		Pens:      []Pen{pen(1, 10), pen(2, 20)},
 		StartGate: StartGate{Name: "squad_start", Gate: Box{-3, 64, -709, 3, 67, -709}, Open: "fill -3 64 -709 3 67 -709 air"},
 		Boss:      Point{X: 0, Y: 65, Z: -760},
@@ -182,6 +183,70 @@ func TestRunClearsWavesAndRecordsTuning(t *testing.T) {
 	}
 	if f.Count("kill @e[tag=arena_wave]") != 0 {
 		t.Error("a cleared run killed tagged mobs")
+	}
+}
+
+func TestRunLoadsTheLayoutAreasBeforeSpawning(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: s.Exec}
+	book := testBook(wave("One", "zombie", 1, 1, 1))
+	d := newDirector(f, book, clock)
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	add := "tickingarea add -16 0 -800 31 0 -696 crew-arena-run-0"
+	if !hasCommand(f.Cmds, add) {
+		t.Fatalf("run did not load its arena area:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	if !before(f.Cmds, add, "execute positioned 10 64 -760 run summon zombie ~ ~ ~") {
+		t.Error("the arena area was loaded after the first summon")
+	}
+	if f.Count("tickingarea remove crew-arena-run-0") != 1 {
+		t.Errorf("area removals = %d, want 1", f.Count("tickingarea remove crew-arena-run-0"))
+	}
+}
+
+func TestSummonFailureAbortsAsAnError(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.Contains(cmd, " run summon ") {
+			return "Unable to summon object", nil
+		}
+		return s.Exec(cmd)
+	}}
+	book := testBook(wave("One", "zombie", 1, 1, 1))
+	d := newDirector(f, book, clock)
+	result, err := d.Run()
+	if err == nil || !strings.Contains(err.Error(), "Unable to summon") {
+		t.Fatalf("Run error = %v, want a summon failure", err)
+	}
+	if result.Outcome != OutcomeError {
+		t.Errorf("outcome = %q, want %q", result.Outcome, OutcomeError)
+	}
+	if result.WavesCleared != 0 {
+		t.Errorf("waves cleared = %d, want 0", result.WavesCleared)
+	}
+}
+
+func TestEmptyBatchAfterSummonAbortsAsAnError(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if cmd == countCommand() {
+			return found(0), nil
+		}
+		return s.Exec(cmd)
+	}}
+	book := testBook(wave("One", "zombie", 1, 1, 1))
+	d := newDirector(f, book, clock)
+	result, err := d.Run()
+	if err == nil || !strings.Contains(err.Error(), "counted none") {
+		t.Fatalf("Run error = %v, want an empty-batch error", err)
+	}
+	if result.Outcome != OutcomeError {
+		t.Errorf("outcome = %q, want %q", result.Outcome, OutcomeError)
 	}
 }
 
