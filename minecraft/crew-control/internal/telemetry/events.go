@@ -31,6 +31,15 @@ type Event struct {
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
 	Text  string `json:"text"`
+	// Task is the work item a task event is about, when there is one. It is
+	// the queue's id, which the history store keys on; the text alone cannot
+	// carry it.
+	Task string `json:"task,omitempty"`
+	// Template and Took describe a task event for the history store only: the
+	// public feed has no use for them. Took is how long the unit's own record
+	// says the task ran, zero when it is not known.
+	Template string        `json:"-"`
+	Took     time.Duration `json:"-"`
 }
 
 // Position is where a unit stands. It is only ever sent to signed-in streams.
@@ -64,9 +73,20 @@ type track struct {
 }
 
 type recentTask struct {
-	ID     string `json:"id"`
-	State  string `json:"state"`
-	Reason string `json:"reason"`
+	ID      string    `json:"id"`
+	State   string    `json:"state"`
+	Reason  string    `json:"reason"`
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
+}
+
+// took is how long a finished task ran: its last update is the moment it
+// reached its final state. Zero when the unit sent no usable times.
+func (r recentTask) took() time.Duration {
+	if r.Created.IsZero() || r.Updated.Before(r.Created) {
+		return 0
+	}
+	return r.Updated.Sub(r.Created)
 }
 
 type observation struct {
@@ -88,6 +108,9 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	var out []Event
 	add := func(kind, level, text string) {
 		out = append(out, Event{At: now, Kind: kind, Level: level, Text: text})
+	}
+	addTask := func(kind, level, text, task, template string) {
+		out = append(out, Event{At: now, Kind: kind, Level: level, Text: text, Task: task, Template: template})
 	}
 	defer func() {
 		t.seeded = true
@@ -135,7 +158,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			out = append(out, finished(t.taskID, t.template, o.recent, now))
 		}
 		if o.curID != "" {
-			add("task_started", "info", "started "+o.curTemplate)
+			addTask("task_started", "info", "started "+o.curTemplate, o.curID, o.curTemplate)
 		}
 		t.taskID, t.template, t.progress, t.progressAt, t.stuck = o.curID, o.curTemplate, o.curProgress, now, false
 		t.anchor, t.anchorKnown = o.pos, o.posKnown
@@ -150,7 +173,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			t.anchor, t.anchorKnown = o.pos, true
 		case !t.stuck && now.Sub(t.progressAt) >= stuckAfter:
 			t.stuck = true
-			add("stuck", "warn", fmt.Sprintf("%s has not progressed for %ds", t.template, int(now.Sub(t.progressAt).Seconds())))
+			addTask("stuck", "warn", fmt.Sprintf("%s has not progressed for %ds", t.template, int(now.Sub(t.progressAt).Seconds())), o.curID, t.template)
 		}
 	}
 	return out
@@ -172,20 +195,24 @@ func finished(id, template string, recent []recentTask, now time.Time) Event {
 		if r.ID != id {
 			continue
 		}
+		ev := Event{At: now, Task: id, Template: template, Took: r.took()}
 		switch r.State {
 		case "done":
-			return Event{At: now, Kind: "task_done", Level: "ok", Text: "finished " + template}
+			ev.Kind, ev.Level, ev.Text = "task_done", "ok", "finished "+template
+			return ev
 		case "cancelled":
-			return Event{At: now, Kind: "task_cancelled", Level: "info", Text: "cancelled " + template}
+			ev.Kind, ev.Level, ev.Text = "task_cancelled", "info", "cancelled "+template
+			return ev
 		default:
 			text := "failed " + template
 			if r.Reason != "" {
 				text += ": " + r.Reason
 			}
-			return Event{At: now, Kind: "task_failed", Level: "crit", Text: text}
+			ev.Kind, ev.Level, ev.Text = "task_failed", "crit", text
+			return ev
 		}
 	}
-	return Event{At: now, Kind: "task_ended", Level: "info", Text: template + " ended, outcome unknown"}
+	return Event{At: now, Kind: "task_ended", Level: "info", Text: template + " ended, outcome unknown", Task: id, Template: template}
 }
 
 // tidy keeps a unit's free-text reason to one short line before it reaches
@@ -226,9 +253,18 @@ func (p *Poller) Positions() []Position {
 	return append([]Position(nil), p.positions...)
 }
 
+// Born is an event as it happened, with where the unit stood at the moment.
+// The position is the event's context, not its content: it goes to the
+// history store, never to the public feed.
+type Born struct {
+	Event
+	Pos Position
+}
+
 // appendEventLocked sends only under p.mu, so the slot freed for a slow
-// reader stays free.
-func (p *Poller) appendEventLocked(i int, e Event) {
+// reader stays free. It returns the event as it was published, with the seq
+// and identity the feed gave it, because that is the form history stores.
+func (p *Poller) appendEventLocked(i int, e Event) Event {
 	p.seq++
 	e.Seq = p.seq
 	e.Unit = p.units[i].ID
@@ -249,4 +285,5 @@ func (p *Poller) appendEventLocked(i int, e Event) {
 			ch <- e
 		}
 	}
+	return e
 }
