@@ -43,6 +43,41 @@ type TaskSummary struct {
 	Progress int    `json:"progress"`
 }
 
+// LiveItem is one non-empty slot of the unit's own inventory, as its state
+// reported it.
+type LiveItem struct {
+	Slot  int    `json:"slot"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// LiveEffect is one status effect on the unit, as its state reported it.
+// Duration is in ticks and negative means it does not expire.
+type LiveEffect struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Amplifier int    `json:"amplifier"`
+	Duration  int    `json:"duration"`
+}
+
+// Live is what a unit's own /v1/state said at the last poll. It answers the
+// operator-only detail view; unlike Status it is never broadcast, because
+// it carries what the unit holds.
+type Live struct {
+	ID     string
+	Online bool
+	Dead   bool
+	// Health and Hunger are nil until the unit reported them.
+	Health, Hunger *float32
+	Inventory      []LiveItem
+	Effects        []LiveEffect
+	// PlayerID is the id the unit reports for its player, which is the one
+	// its record in the world save is filed under; empty until it has one.
+	PlayerID string
+	// At is when the poll that filled this succeeded.
+	At time.Time
+}
+
 // Only the fields the summary needs; crew's own types are internal to crew.
 type stateResponse struct {
 	State struct {
@@ -56,6 +91,10 @@ type stateResponse struct {
 		PositionKnown bool       `json:"position_known"`
 		Yaw           float32    `json:"yaw"`
 		Dimension     int32      `json:"dimension"`
+
+		Inventory []LiveItem   `json:"inventory"`
+		Effects   []LiveEffect `json:"effects"`
+		UniqueID  string       `json:"unique_id"`
 	} `json:"state"`
 	Tasks struct {
 		Current *TaskSummary `json:"current"`
@@ -92,6 +131,7 @@ type Poller struct {
 	// unit's position at that moment, after the tick's state is published.
 	// It runs on the poll loop, so it must not block.
 	OnEvents func([]Born)
+	lives    []Live
 	jobsSrc  JobsSource
 	// Shared bytes of the jobs feed; see feedCache for why.
 	jobsCache feedCache
@@ -113,12 +153,14 @@ func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Polle
 		tracks:     make([]track, len(units)),
 		esubs:      map[chan Event]struct{}{},
 		positions:  make([]Position, len(units)),
+		lives:      make([]Live, len(units)),
 		jsubs:      map[chan struct{}]struct{}{},
 		workCaches: map[string]*feedCache{},
 	}
 	for i, u := range units {
 		p.positions[i] = Position{ID: u.ID}
 		p.statuses[i] = Status{ID: u.ID, Name: u.Name}
+		p.lives[i] = Live{ID: u.ID}
 		p.workCaches[u.ID] = &feedCache{}
 	}
 	return p
@@ -182,12 +224,19 @@ func (p *Poller) tick(ctx context.Context) {
 			next.Task = res.st.Tasks.Current
 			s := res.st.State
 			p.positions[i] = Position{ID: p.units[i].ID, X: s.Position[0], Y: s.Position[1], Z: s.Position[2], Yaw: s.Yaw, Dim: s.Dimension, Known: s.PositionKnown}
+
+			p.lives[i] = Live{
+				ID: p.units[i].ID, Online: true, Dead: s.Dead, At: now,
+				Health: next.Health, Hunger: next.Hunger,
+				Inventory: s.Inventory, Effects: s.Effects, PlayerID: s.UniqueID,
+			}
 		} else {
 			p.failures[i]++
 			if p.failures[i] >= offlineAfter {
 				// Stale health or task on an offline unit would read as live.
 				next.Online, next.Health, next.Hunger, next.Task, next.Dead = false, nil, nil, nil, false
 				p.positions[i] = Position{ID: p.units[i].ID}
+				p.lives[i] = Live{ID: p.units[i].ID}
 			}
 		}
 		// A single failed poll leaves the unit online, so it is not an event.
@@ -256,6 +305,20 @@ func (p *Poller) Snapshot() []Status {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.snapshotLocked()
+}
+
+// Live returns the unit's own state as its last successful poll read it.
+// It is for the operator-only views: unlike Snapshot it carries what the
+// unit holds, so it is never fanned out to the public stream.
+func (p *Poller) Live(id string) (Live, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, u := range p.units {
+		if u.ID == id {
+			return p.lives[i], true
+		}
+	}
+	return Live{}, false
 }
 
 func (p *Poller) snapshotLocked() []Status {
