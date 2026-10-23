@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
@@ -123,6 +125,126 @@ func TestHaulExpandsToOneHaulSkill(t *testing.T) {
 	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
 	if err != nil || len(skills) != 1 || skills[0].Name() != "haul" {
 		t.Fatalf("skills %v, err %v", skills, err)
+	}
+}
+
+// transferBody is the withdraw wire form; the deposit cases swap the name.
+const transferBody = `{"template":"withdraw","chest":{"x":1,"y":2,"z":3},"items":{"oak_log":4,"cobblestone":16}}`
+
+func TestParseTransferTemplates(t *testing.T) {
+	for _, name := range []string{"withdraw", "deposit"} {
+		t.Run(name, func(t *testing.T) {
+			body := strings.Replace(transferBody, `"withdraw"`, `"`+name+`"`, 1)
+			tpl, err := ParseTemplate([]byte(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tpl.Template != name || tpl.Chest != (Chest{X: 1, Y: 2, Z: 3}) ||
+				tpl.Items["oak_log"] != 4 || tpl.Items["cobblestone"] != 16 || tpl.Qty != 20 {
+				t.Errorf("parsed %+v", tpl)
+			}
+			nine := `{"cobblestone":1,"oak_log":1,"a":1,"b":1,"c":1,"d":1,"e":1,"f":1,"g":1}`
+			cases := map[string]string{
+				"missing chest": `{"template":"` + name + `","items":{"oak_log":4}}`,
+				"missing items": `{"template":"` + name + `","chest":{"x":0,"y":0,"z":0}}`,
+				"empty items":   strings.Replace(body, `{"oak_log":4,"cobblestone":16}`, `{}`, 1),
+				"nine items":    strings.Replace(body, `{"oak_log":4,"cobblestone":16}`, nine, 1),
+				"qty zero":      strings.Replace(body, `"oak_log":4`, `"oak_log":0`, 1),
+				"qty 257":       strings.Replace(body, `"oak_log":4`, `"oak_log":257`, 1),
+				"upper case":    strings.Replace(body, `"oak_log"`, `"Oak_Log"`, 1),
+				"spaced":        strings.Replace(body, `"oak_log"`, `"oak log"`, 1),
+				"namespaced":    strings.Replace(body, `"oak_log"`, `"minecraft:oak_log"`, 1),
+				"too long":      strings.Replace(body, `"oak_log"`, `"`+strings.Repeat("a", 33)+`"`, 1),
+				"x low":         strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":-501,"y":2,"z":3`, 1),
+				"x high":        strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":500,"y":2,"z":3`, 1),
+				"y low":         strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":1,"y":-65,"z":3`, 1),
+				"y high":        strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":1,"y":321,"z":3`, 1),
+				"z low":         strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":1,"y":2,"z":-501`, 1),
+				"z high":        strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":1,"y":2,"z":500`, 1),
+				"extra field":   strings.Replace(body, `"template":"`+name+`"`, `"template":"`+name+`","qty":1`, 1),
+				"extra key":     strings.Replace(body, `"x":1,"y":2,"z":3`, `"x":1,"y":2,"z":3,"w":1`, 1),
+				"trailing":      body + `{}`,
+				"not json":      `nope`,
+			}
+			for name, body := range cases {
+				t.Run(name, func(t *testing.T) {
+					if _, err := ParseTemplate([]byte(body)); err == nil {
+						t.Fatal("accepted")
+					}
+				})
+			}
+			for _, ok := range []string{
+				`{"template":"` + name + `","chest":{"x":-500,"y":-64,"z":-500},"items":{"oak_log":1}}`,
+				`{"template":"` + name + `","chest":{"x":499,"y":320,"z":499},"items":{"oak_log":256}}`,
+			} {
+				if _, err := ParseTemplate([]byte(ok)); err != nil {
+					t.Errorf("boundary %s: %v", ok, err)
+				}
+			}
+		})
+	}
+}
+
+// probeWorld answers every block query with air so a chest visit fails at its
+// first step, after naming the position it asked about.
+type probeWorld struct{ asked []protocol.BlockPos }
+
+func (w *probeWorld) Block(p protocol.BlockPos) (string, bool) {
+	w.asked = append(w.asked, p)
+	return "air", true
+}
+func (w *probeWorld) BlockHash(protocol.BlockPos) (uint32, bool) { return 0, false }
+
+// probeAct is just enough actuator for a visit that fails before it clicks.
+type probeAct struct{ skill.Actuator }
+
+func (probeAct) Container() (bool, byte, protocol.BlockPos) { return false, 0, protocol.BlockPos{} }
+
+func TestWithdrawExpandsToOneVisitOfTheChest(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(transferBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &probeWorld{}
+	skills, err := Expand(tpl, w, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "withdraw_chest" {
+		t.Fatalf("skills %v, err %v", skills, err)
+	}
+	st, err := skills[0].Step(context.Background(), probeAct{})
+	if st != skill.Failed || err == nil || err.Error() != "no chest at the target" {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if len(w.asked) != 1 || w.asked[0] != (protocol.BlockPos{1, 2, 3}) {
+		t.Errorf("asked about %v, want the one chest", w.asked)
+	}
+}
+
+func TestDepositExpandsOneVisitPerItem(t *testing.T) {
+	body := strings.Replace(transferBody, `"withdraw"`, `"deposit"`, 1)
+	tpl, err := ParseTemplate([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &probeWorld{}
+	skills, err := Expand(tpl, w, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 2 {
+		t.Fatalf("skills %v, err %v", skills, err)
+	}
+	// Sorted, so the same request always expands the same way.
+	for i, want := range []string{"have 0 cobblestone, need 16", "have 0 oak_log, need 4"} {
+		if skills[i].Name() != "deposit_chest" {
+			t.Errorf("skill %d = %s, want deposit_chest", i, skills[i].Name())
+		}
+		if err := skills[i].Ready(belief.Snapshot{}); err == nil || err.Error() != want {
+			t.Errorf("skill %d Ready = %v, want %q", i, err, want)
+		}
+		st, err := skills[i].Step(context.Background(), probeAct{})
+		if st != skill.Failed || err == nil {
+			t.Fatalf("skill %d: status %v, err %v", i, st, err)
+		}
+	}
+	if len(w.asked) != 2 || w.asked[0] != (protocol.BlockPos{1, 2, 3}) || w.asked[1] != (protocol.BlockPos{1, 2, 3}) {
+		t.Errorf("asked about %v, want the chest twice", w.asked)
 	}
 }
 

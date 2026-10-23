@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -20,6 +21,8 @@ import (
 const (
 	gatherAndDeposit = "gather_and_deposit"
 	haulTemplate     = "haul"
+	withdrawTemplate = "withdraw"
+	depositTemplate  = "deposit"
 	shaftTemplate    = "mine_shaft"
 	maxShaftDepth    = 32
 	maxBranches      = 3
@@ -59,7 +62,8 @@ type Chest struct {
 }
 
 // Template is a task request: gather_and_deposit fills Item, Qty and Chest;
-// haul fills Items, From and To; place_block fills Block and Item.
+// haul fills Items, From and To; withdraw and deposit fill Items and Chest;
+// place_block fills Block and Item.
 type Template struct {
 	Template string `json:"template"`
 	Item     string `json:"item"`
@@ -148,6 +152,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseGather(body)
 	case haulTemplate:
 		return parseHaul(body)
+	case withdrawTemplate, depositTemplate:
+		return parseTransfer(body)
 	case shaftTemplate:
 		return parseShaft(body)
 	case gotoTemplate:
@@ -421,6 +427,43 @@ func parseHaul(body []byte) (Template, error) {
 	return Template{Template: raw.Template, Qty: total, Items: raw.Items, From: raw.From, To: raw.To}, nil
 }
 
+// parseTransfer reads {"template":"withdraw|deposit","chest":{...},"items":{...}},
+// the one-chest counterpart to haul: named items with counts across a single
+// chest instead of several. Items may be any server name, not just the
+// craftable set, so a unit can be sent to fetch a tool.
+func parseTransfer(body []byte) (Template, error) {
+	var raw struct {
+		Template string         `json:"template"`
+		Chest    *Chest         `json:"chest"`
+		Items    map[string]int `json:"items"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Chest == nil {
+		return Template{}, errors.New("chest is required")
+	}
+	// The message names no coordinate: they are lab locations and must stay
+	// out of logs.
+	if !raw.Chest.inLab() {
+		return Template{}, errors.New("chest is outside the allowed area")
+	}
+	if len(raw.Items) < 1 || len(raw.Items) > maxHaulItems {
+		return Template{}, fmt.Errorf("items must list %d to %d items", 1, maxHaulItems)
+	}
+	total := 0
+	for item, qty := range raw.Items {
+		total += qty
+		if !itemName.MatchString(item) {
+			return Template{}, errors.New("item must be 1 to 32 of a-z, 0-9 or _")
+		}
+		if qty < minQty || qty > maxQty {
+			return Template{}, fmt.Errorf("qty must be %d to %d", minQty, maxQty)
+		}
+	}
+	return Template{Template: raw.Template, Chest: *raw.Chest, Items: raw.Items, Qty: total}, nil
+}
+
 // Expand lists the skills a template stands for, in order.
 func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opts ...skill.Option) ([]skill.Skill, error) {
 	if t.Template == shaftTemplate && t.Entrance != nil && t.Area != nil && t.To != nil {
@@ -446,6 +489,25 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		}
 		dest := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
 		return []skill.Skill{skill.NewHaul(world, self, sources, dest, t.Items, opts...)}, nil
+	}
+	if t.Template == withdrawTemplate && len(t.Items) > 0 {
+		chest := protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z}
+		return []skill.Skill{skill.NewWithdrawChest(world, self, chest, t.Items, opts...)}, nil
+	}
+	if t.Template == depositTemplate && len(t.Items) > 0 {
+		chest := protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z}
+		// Sorted so the skill list, and the task record's skill field with it,
+		// is the same for every run of the same request.
+		names := make([]string, 0, len(t.Items))
+		for n := range t.Items {
+			names = append(names, n)
+		}
+		slices.Sort(names)
+		out := make([]skill.Skill, 0, len(names))
+		for _, n := range names {
+			out = append(out, skill.NewDepositChest(world, self, chest, n, t.Items[n], opts...))
+		}
+		return out, nil
 	}
 	if t.Template == inspectTemplate {
 		return []skill.Skill{skill.NewInspect(world, self, protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z})}, nil
