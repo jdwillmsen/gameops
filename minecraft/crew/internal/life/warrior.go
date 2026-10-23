@@ -168,9 +168,11 @@ type warriorState struct {
 	// critUntil bounds the jump under way for a critical hit.
 	critUntil uint64
 
-	// drawing counts a bow draw under way.
+	// drawing counts a bow draw under way, with the bow it was started
+	// with: an interrupted draw is let go with the stack it named.
 	drawing   bool
 	drawTicks int
+	drawItem  belief.Item
 	lastShot  uint64
 	// backing is the ground a Ranger is giving, with where it last was and
 	// how many of its ticks moved nowhere.
@@ -225,7 +227,7 @@ func (w *warriorState) reset() {
 	w.healing, w.lowSpoken = false, false
 	w.shield = false
 	w.critUntil = 0
-	w.drawing, w.drawTicks = false, 0
+	w.drawing, w.drawTicks, w.drawItem = false, 0, belief.Item{}
 	w.backing, w.backStuck = false, 0
 	w.meleeLast = false
 	w.walk = nil
@@ -485,6 +487,7 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	// the walk to the leader: eat where it is safe, walk when it is not.
 	switch l.mode {
 	case modeRetreat, modeStepBack:
+		l.cancelDraw(a)
 		if !ok {
 			return l.still(a)
 		}
@@ -497,12 +500,14 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	}
 
 	if l.mode == modeRegroup {
+		l.cancelDraw(a)
 		return l.regroup(ctx, a, p, s)
 	}
 
 	if !ok {
 		// The grace after a target vanished: stand ready, shield against
 		// what is still coming.
+		l.cancelDraw(a)
 		if l.arrowIncoming(p) {
 			return l.raiseShield(a, p, s)
 		}
@@ -512,6 +517,8 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	if w.role == RoleRanger && l.rangerArmed(s) {
 		return l.rangerShoot(ctx, a, p, e, s)
 	}
+	// A ranger that lost its bow mid-draw takes up the sword cleanly.
+	l.cancelDraw(a)
 	return l.warriorMelee(ctx, a, p, e, s)
 }
 

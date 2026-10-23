@@ -561,6 +561,87 @@ func TestCorneredRangerMeleesInsteadOfBackingOffForever(t *testing.T) {
 	}
 }
 
+// beginDraw steps a Ranger with a bow and arrows until it has one half drawn.
+func (r *rig) beginDraw(t *testing.T) {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		r.step()
+		if w := r.l.warrior; w.drawing && w.drawTicks > 0 && w.drawTicks < bowDraw {
+			return
+		}
+	}
+	t.Fatal("the Ranger never began a draw")
+}
+
+func TestRangerReleasesAHalfDrawnBowWhenTheTargetVanishes(t *testing.T) {
+	r := newWarrior(t, "ranger", start)
+	r.give(1, 361, 1)
+	r.give(20, 362, 32)
+	spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+	r.beginDraw(t)
+	if n := r.out.releases(1); n != 0 {
+		t.Fatalf("%d releases before the draw was half done", n)
+	}
+
+	r.l.Apply(&packet.RemoveActor{EntityUniqueID: 50})
+	r.step()
+	if n := r.out.releases(1); n != 1 {
+		t.Errorf("%d bow releases after the target vanished, want the half draw let go", n)
+	}
+	if w := r.l.warrior; w.drawing || w.drawTicks != 0 {
+		t.Errorf("drawing=%v drawTicks=%d after the target vanished, want a clean bow", w.drawing, w.drawTicks)
+	}
+}
+
+func TestRangerReleasesAHalfDrawnBowWhenTheFightIsInterrupted(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		order Order
+		lead  mgl32.Vec3
+	}{
+		{name: "retreat order", order: Order{Kind: OrderRetreat}, lead: start},
+		{name: "regroup order", order: Order{Kind: OrderRegroup}, lead: mgl32.Vec3{17, 1, 20.5}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			squad := &fakeSquad{leaderID: "crew-18", leader: tc.lead, leaderOK: true}
+			r := newWarrior(t, "ranger", start)
+			r.setSquad(t, squad)
+			r.give(1, 361, 1)
+			r.give(20, 362, 32)
+			spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+			r.beginDraw(t)
+			squad.order = tc.order
+
+			r.step()
+			if n := r.out.releases(1); n != 1 {
+				t.Errorf("%d bow releases when the order interrupted the draw, want it let go", n)
+			}
+			if w := r.l.warrior; w.drawing || w.drawTicks != 0 {
+				t.Errorf("drawing=%v drawTicks=%d after the order, want a clean bow", w.drawing, w.drawTicks)
+			}
+		})
+	}
+}
+
+func TestRangerReleasesAHalfDrawnBowWhenItFallsIntoWater(t *testing.T) {
+	r := newWarrior(t, "ranger", start)
+	r.give(1, 361, 1)
+	r.give(20, 362, 32)
+	spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+	r.beginDraw(t)
+
+	for _, p := range []protocol.BlockPos{{20, 1, 20}, {20, 2, 20}} {
+		r.w.over[p] = "water"
+	}
+	r.step()
+	if n := r.out.releases(1); n != 1 {
+		t.Errorf("%d bow releases on falling into water, want the half draw let go", n)
+	}
+	if w := r.l.warrior; w.drawing || w.drawTicks != 0 {
+		t.Errorf("drawing=%v drawTicks=%d in water, want a clean bow", w.drawing, w.drawTicks)
+	}
+}
+
 func TestHurtWarriorEatsAGoldenAppleBehindTheLine(t *testing.T) {
 	r := newWarrior(t, "striker", start)
 	r.give(0, 303, 1)
