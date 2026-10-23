@@ -136,6 +136,8 @@ type Life struct {
 	// warrior drives the squad's fighting when cfg.Role named a role, else
 	// it is nil and the reactive defence decides everything.
 	warrior *warriorState
+	// tel counts a warrior's swings, hits, damage taken and deaths.
+	tel telemetry
 	// makeKit replaces the withdraw a visit runs, for tests.
 	makeKit func(weapon bool, food int) skill.Skill
 }
@@ -158,6 +160,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 // life; Reset clears that.
 func (l *Life) Spawn(runtimeID uint64) {
 	l.ents.Spawn(runtimeID)
+	l.tel.spawn()
 	l.mu.Lock()
 	l.selfID, l.hurt, l.healthSeen = runtimeID, false, false
 	l.mu.Unlock()
@@ -166,6 +169,7 @@ func (l *Life) Spawn(runtimeID uint64) {
 // Reset forgets the fight and the walk, as after a death or a lost session. Only
 // the stepping goroutine may call it.
 func (l *Life) Reset() {
+	l.telemetryTick()
 	l.attacker, l.attackerUntil, l.attackerPlayer = 0, 0, false
 	clear(l.ignore)
 	clear(l.fightTicks)
@@ -193,6 +197,9 @@ func (l *Life) Apply(pk packet.Packet) {
 	l.ents.Apply(pk)
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.warrior != nil {
+		l.tel.observe(pk, l.selfID)
+	}
 	switch p := pk.(type) {
 	case *packet.ActorEvent:
 		if p.EntityRuntimeID == l.selfID && p.EventType == packet.ActorEventHurt {
