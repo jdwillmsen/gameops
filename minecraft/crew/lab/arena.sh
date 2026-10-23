@@ -33,7 +33,8 @@
 # boss summons one named mob 10 blocks from the squad, fights it --runs times
 # and appends one JSON record per run (outcome killed|wipe|timeout, seconds,
 # deaths per warrior) to the --log JSONL, default ~/.local/state/arena-runs.jsonl.
-# --effects are console commands, comma separated, run right after the summon.
+# --effects are effect, damage or event commands, comma separated, run right
+# after the summon; each must target only the boss, as @e[name=W...].
 # --summary prints runs and median seconds and deaths per boss and effect set
 # from the log without fighting. It exits 2 and touches nothing while any
 # player outside the crew is online, which is why a k8s: target needs no
