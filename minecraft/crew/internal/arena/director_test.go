@@ -1060,6 +1060,7 @@ func TestSquadPlacedOnTheFloorBeforeWaveOne(t *testing.T) {
 	book := testBook(wave("One", "zombie", 1, 1, 1))
 	d := newDirector(f, book, clock)
 	d.Layout.GroundY = 64
+	d.Layout.FloorRadius = 45
 	d.Warriors = []string{"Vanguard", "Striker", "Ranger"}
 	d.PlaceSquad = true
 	if _, err := d.Run(); err != nil {
@@ -1099,6 +1100,7 @@ func TestRespawnedWarriorReturnsToItsStartCell(t *testing.T) {
 	book := testBook(wave("One", "zombie", 1, 1, 1))
 	d := newDirector(f, book, clock)
 	d.Layout.GroundY = 64
+	d.Layout.FloorRadius = 45
 	d.Warriors = []string{"Vanguard", "Striker"}
 	d.PlaceSquad = true
 	if _, err := d.Run(); err != nil {

@@ -241,9 +241,13 @@ func (d *Director) Run() (Result, error) {
 		}
 	}
 	if d.PlaceSquad {
-		for i, name := range d.Warriors {
-			if err := d.placeWarrior(name, i); err != nil {
-				return result, err
+		if d.Layout.FloorRadius <= 0 {
+			d.logf("arena: layout has no floor; skipping squad placement")
+		} else {
+			for i, name := range d.Warriors {
+				if err := d.placeWarrior(name, i); err != nil {
+					return result, err
+				}
 			}
 		}
 	}
@@ -766,9 +770,10 @@ func (d *Director) replaceWarrior(name string, i int, st *warriorState) error {
 func (d *Director) observeWarrior(name string, i int, st *warriorState, respawned bool, result *Result) error {
 	pos, err := d.rallyPosition(name)
 	readable := err == nil
+	hasFloor := d.Layout.FloorRadius > 0
 	jumped := false
 	if readable {
-		if st.havePos && !st.ignoreJump {
+		if hasFloor && st.havePos && !st.ignoreJump {
 			moved := math.Hypot(pos.X-st.pos.X, pos.Z-st.pos.Z)
 			jumped = moved > float64(d.Layout.FloorRadius*2)
 		}
@@ -784,7 +789,9 @@ func (d *Director) observeWarrior(name string, i int, st *warriorState, respawne
 		// starts a fresh count.
 		st.deathCounted = false
 	}
-	if !d.PlaceSquad {
+	// Without a floor there is no start cell to return to, and a jump threshold
+	// of zero would read ordinary movement as a respawn at the world spawn.
+	if !hasFloor || !d.PlaceSquad {
 		return nil
 	}
 	if readable {
