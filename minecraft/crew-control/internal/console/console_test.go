@@ -120,3 +120,55 @@ func TestEveryScriptTheConsoleImportsIsEmbedded(t *testing.T) {
 		t.Error("node test files must stay out of the binary")
 	}
 }
+
+func TestChartLibraryIsServed(t *testing.T) {
+	for path, want := range map[string]string{
+		"/static/charts/index.js":   "javascript",
+		"/static/charts/line.js":    "javascript",
+		"/static/charts/demo.js":    "javascript",
+		"/static/charts/charts.css": "text/css",
+		"/static/charts/demo.css":   "text/css",
+		"/static/charts/demo.html":  "text/html",
+	} {
+		rec := serve(t, path)
+		if rec.Code != 200 || rec.Body.Len() == 0 {
+			t.Fatalf("%s: status %d, %d bytes", path, rec.Code, rec.Body.Len())
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, want) {
+			t.Fatalf("%s: content type %q", path, ct)
+		}
+		if rec.Header().Get("Content-Security-Policy") == "" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("%s: missing security headers", path)
+		}
+	}
+}
+
+func TestChartLibraryEveryImportIsEmbedded(t *testing.T) {
+	index := serve(t, "/static/charts/index.js").Body.String()
+	for _, f := range []string{"line.js", "bar.js", "spark.js", "heatmap.js", "gauge.js", "range.js", "series.js", "scale.js", "geom.js", "panel.js", "tooltip.js", "dom.js", "palette.js", "synth.js"} {
+		if rec := serve(t, "/static/charts/"+f); rec.Code != 200 {
+			t.Errorf("/static/charts/%s: status %d", f, rec.Code)
+		}
+	}
+	if !strings.Contains(index, "./line.js") {
+		t.Fatal("index does not export the line chart")
+	}
+	if rec := serve(t, "/static/charts/palette.test.mjs"); rec.Code == 200 {
+		t.Error("node test files must stay out of the binary")
+	}
+}
+
+func TestChartDemoHasNoInlineScript(t *testing.T) {
+	body := serve(t, "/static/charts/demo.html").Body.String()
+	if strings.Contains(body, "<script>") || strings.Contains(body, "onclick=") {
+		t.Fatal("inline script would break the CSP")
+	}
+}
+
+func TestStaticChartsDoesNotEscape(t *testing.T) {
+	for _, p := range []string{"/static/charts/missing.js", "/static/charts/..%2f..%2fgo.mod", "/static/charts/scale.test.mjs"} {
+		if rec := serve(t, p); rec.Code != 404 {
+			t.Fatalf("%s: status %d", p, rec.Code)
+		}
+	}
+}

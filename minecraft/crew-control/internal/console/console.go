@@ -9,7 +9,7 @@ import (
 
 // The explicit list keeps the node test files out of the binary.
 //
-//go:embed web/index.html web/signin.html web/signin.js web/console.js web/state.js web/fleet.js web/ops.js web/console.css
+//go:embed web/index.html web/signin.html web/signin.js web/console.js web/state.js web/fleet.js web/ops.js web/console.css web/charts/*.js web/charts/*.css web/charts/demo.html
 var assets embed.FS
 
 const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
@@ -37,6 +37,12 @@ func Mount(mux *http.ServeMux) {
 		secure(w)
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = "/" + r.PathValue("file")
+		files.ServeHTTP(w, r2)
+	})
+	mux.HandleFunc("GET /static/charts/{file}", func(w http.ResponseWriter, r *http.Request) {
+		secure(w)
+		r2 := r.Clone(r.Context())
+		r2.URL.Path = "/charts/" + r.PathValue("file")
 		files.ServeHTTP(w, r2)
 	})
 	mux.HandleFunc("GET /camera", func(w http.ResponseWriter, r *http.Request) {
