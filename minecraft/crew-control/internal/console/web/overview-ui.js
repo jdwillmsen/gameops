@@ -3,6 +3,7 @@
 // this file only paints it. Rows are built once and patched in place, so a
 // 2 s update writes the few cells that changed and never rebuilds the list.
 import { Sparkline, StatTile } from './charts/spark.js';
+import { isTyping } from './state.js';
 import {
   SAMPLE_MS, MAX_HEALTH, STATES, STATE_LABEL, SORTS, SORT_LABEL, DEFAULT_DIR, LEVELS,
   createBoard, sortRows, filterRows, emptyFilter, isFiltered, parseParams, formatParams, sinceLabel, moveFocus, nextAttention, trailLabels,
@@ -500,10 +501,13 @@ export function initOverview(host) {
 
   const MOVES = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', 'j', 'k'];
 
-  // Returns true when the key was ours. console.js asks first, so the
-  // console's own j/k/a/digit keys do not pull the operator out of the table.
+  // Returns true when the key was ours. console.js asks first, so while the
+  // fleet is up its own j/k/a/digit/bracket keys do not run, wherever focus
+  // sits (a sort header, a chip, a button): they would pick a unit and leave
+  // the table.
   function key(ev) {
     if (!mounted || document.getElementById('overlay')) return false;
+    if (isTyping(ev.target)) return false;
     if (ev.key === '/') {
       ev.preventDefault();
       q.focus();
@@ -511,13 +515,13 @@ export function initOverview(host) {
       return true;
     }
     const row = ev.target.closest && ev.target.closest('.ov-row');
-    if (!row && ev.target !== document.body) return false;
     const cur = row ? row.dataset.unit : roving;
     if (MOVES.includes(ev.key)) {
       ev.preventDefault();
       focusRow(moveFocus(visibleIds(), cur, ev.key, pageSize()));
       return true;
     }
+    // Enter and Space already mean something on a button.
     if (row && (ev.key === 'Enter' || ev.key === ' ')) {
       ev.preventDefault();
       host.focus(row.dataset.unit);
@@ -532,7 +536,7 @@ export function initOverview(host) {
       clearFilters();
       return true;
     }
-    return false;
+    return /^[0-9[\]]$/.test(ev.key);
   }
 
   // ---- lifecycle ----
