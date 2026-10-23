@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -405,6 +407,79 @@ func TestLeaderChangeWakesThePoll(t *testing.T) {
 	d = waitPoll(t, promoted)
 	if d.Leader == nil || d.Leader.Unit != "crew-19" || len(d.Orders) != 0 {
 		t.Errorf("a leader change did not wake the poll: leader %+v orders %v", d.Leader, d.Orders)
+	}
+}
+
+// gatedStore delays one Delta read past the handler's answer point, so a
+// broadcast can land in the gap between reading the state and waiting.
+type gatedStore struct {
+	*Store
+	mu   sync.Mutex
+	slow bool
+}
+
+func (s *gatedStore) Delta(id string, since int64) (Delta, bool) {
+	s.mu.Lock()
+	slow := s.slow
+	s.slow = false
+	s.mu.Unlock()
+	d, ok := s.Store.Delta(id, since)
+	if slow {
+		// The read point is fixed; hold the handler out of its waiting
+		// step long enough for the broadcast below to find nobody there.
+		time.Sleep(50 * time.Millisecond)
+	}
+	return d, ok
+}
+
+// A broadcast that lands while a poll is between reading the state and
+// registering its waiter must not be lost: the waiter is there before
+// anything is read, so the read-after-wake finds the new message.
+func TestBroadcastCannotFallPastADeltaRead(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "alpha", "crew-18", "vanguard")
+	op := map[string]string{"X-Crew-Request": "1"}
+	r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"hold"}`, op)
+	r.api.store = &gatedStore{Store: r.store}
+
+	for i := 0; i < 5; i++ {
+		since := i + 1
+		g := r.api.store.(*gatedStore)
+		g.mu.Lock()
+		g.slow = true
+		g.mu.Unlock()
+
+		type answer struct {
+			status int
+			kind   string
+		}
+		poll := make(chan answer, 1)
+		go func() {
+			resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=10s&since="+strconv.Itoa(since), "", nil)
+			kind := ""
+			if resp.StatusCode == http.StatusOK {
+				var d Delta
+				if err := json.Unmarshal([]byte(readBody(t, resp)), &d); err != nil {
+					panic(err)
+				}
+				if d.Order != nil {
+					kind = d.Order.Kind
+				}
+			}
+			poll <- answer{resp.StatusCode, kind}
+		}()
+		// Inside the delayed read by now; the order lands while the
+		// handler is still short of its waiter.
+		time.Sleep(10 * time.Millisecond)
+		r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"regroup"}`, op)
+		select {
+		case got := <-poll:
+			if got.status != http.StatusOK || got.kind != "regroup" {
+				t.Errorf("iteration %d: the woken poll answered %d %q", i, got.status, got.kind)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("iteration %d: a broadcast between the read and the wait lost the wake", i)
+		}
 	}
 }
 
