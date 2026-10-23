@@ -86,9 +86,10 @@ type telemetry struct {
 	drop       float32
 	health     float32
 	healthSeen bool
-	dead       bool
 	died       bool
-	seenHurts  map[uint64]struct{}
+	// killer is what stood nearest when the unit died, or empty.
+	killer    string
+	seenHurts map[uint64]struct{}
 
 	total, fight FightStats
 
@@ -108,32 +109,30 @@ type telemetry struct {
 func (t *telemetry) spawn() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.selfHurt, t.drop, t.healthSeen, t.dead, t.died = false, 0, false, false, false
+	t.selfHurt, t.drop, t.healthSeen, t.died, t.killer = false, 0, false, false, ""
 	clear(t.seenHurts)
 }
 
 // observe is the read loop's half: it keeps only counters and flags, and the
-// stepping goroutine reads them back.
-func (t *telemetry) observe(pk packet.Packet, selfID uint64) {
+// stepping goroutine reads them back. A dead unit's own hurts are not blows.
+func (t *telemetry) observe(pk packet.Packet, selfID uint64, dead bool) {
 	switch p := pk.(type) {
 	case *packet.ActorEvent:
-		if p.EventType != packet.ActorEventHurt && p.EventType != packet.ActorEventDeath {
+		if p.EventType != packet.ActorEventHurt {
 			return
 		}
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		switch {
-		case p.EntityRuntimeID == selfID && p.EventType == packet.ActorEventHurt:
-			t.selfHurt = true
 		case p.EntityRuntimeID == selfID:
-			t.markDeadLocked()
-		case p.EventType == packet.ActorEventHurt:
+			if !dead {
+				t.selfHurt = true
+			}
+		case len(t.seenHurts) < maxSeenHurts:
 			if t.seenHurts == nil {
 				t.seenHurts = map[uint64]struct{}{}
 			}
-			if len(t.seenHurts) < maxSeenHurts {
-				t.seenHurts[p.EntityRuntimeID] = struct{}{}
-			}
+			t.seenHurts[p.EntityRuntimeID] = struct{}{}
 		}
 	case *packet.UpdateAttributes:
 		if p.EntityRuntimeID != selfID {
@@ -148,22 +147,16 @@ func (t *telemetry) observe(pk packet.Packet, selfID uint64) {
 				t.drop += t.health - a.Value
 			}
 			t.health, t.healthSeen = a.Value, true
-			switch {
-			case a.Value <= 0:
-				t.markDeadLocked()
-			case t.dead:
-				t.dead = false
-			}
 			t.mu.Unlock()
 		}
 	}
 }
 
-// markDeadLocked notes a death once, however many packets announce it.
-func (t *telemetry) markDeadLocked() {
-	if !t.dead {
-		t.dead, t.died = true, true
-	}
+// markDead notes the unit's death and what stood nearest when it came.
+func (t *telemetry) markDead(killer string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.died, t.killer = true, killer
 }
 
 // drained is what the read loop gathered since the last tick.
@@ -173,18 +166,19 @@ type drained struct {
 	health      float32
 	healthKnown bool
 	died        bool
+	killer      string
 	hurts       []uint64
 }
 
 func (t *telemetry) drain() drained {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	d := drained{selfHurt: t.selfHurt, drop: t.drop, health: t.health, healthKnown: t.healthSeen, died: t.died}
+	d := drained{selfHurt: t.selfHurt, drop: t.drop, health: t.health, healthKnown: t.healthSeen, died: t.died, killer: t.killer}
 	for id := range t.seenHurts {
 		d.hurts = append(d.hurts, id)
 	}
 	clear(t.seenHurts)
-	t.selfHurt, t.drop, t.died = false, 0, false
+	t.selfHurt, t.drop, t.died, t.killer = false, 0, false, ""
 	return d
 }
 
@@ -265,6 +259,9 @@ func (l *Life) telemetryTick(d drained) {
 
 	for _, id := range d.hurts {
 		l.matchHit(id)
+	}
+	if d.died && d.killer != "" {
+		t.attackerType, t.attackerAt, t.attributed = d.killer, l.tick, true
 	}
 	l.reportDamage(d)
 	if d.died {

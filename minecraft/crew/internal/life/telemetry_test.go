@@ -364,3 +364,48 @@ func TestAHurtOnAQuietTickIsStillAttributed(t *testing.T) {
 		t.Fatalf("attribution = %v %q at %d, want the zombie at tick %d", r.l.tel.attributed, r.l.tel.attackerType, r.l.tel.attackerAt, r.l.tick)
 	}
 }
+
+// die is the lethal blow as the read loop sees it, followed by the reset the
+// runner does before any further tick: a dead unit is not stepped.
+func (r *rig) die() {
+	r.hurt()
+	r.setHealth(0)
+	r.l.Reset()
+}
+
+func TestAOneShotKillNamesWhatWasNearWhenHealthReachedZero(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.step()
+	r.hurt()
+	r.setHealth(14)
+	r.step()
+	r.l.Apply(&packet.RemoveActor{EntityUniqueID: 50})
+	r.spawn(60, "minecraft:skeleton", mgl32.Vec3{20.5, 1, 31})
+	r.run(3)
+
+	r.die()
+	got := r.events("warrior_died")
+	if len(got) != 1 || got[0]["killer"] != "skeleton" {
+		t.Fatalf("warrior_died = %v, want the skeleton's arrow, not the zombie's earlier blow", got)
+	}
+	dmg := r.events("damage_taken")
+	if last := dmg[len(dmg)-1]; last["attacker"] != "skeleton" || last["amount"] != 14.0 {
+		t.Fatalf("lethal damage_taken = %v, want 14 from the skeleton", last)
+	}
+}
+
+func TestTheLethalHurtLogsNoHurtByAfterTheRespawn(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.step()
+	r.die()
+	n := len(r.events("hurt_by"))
+	// The blow's own animation, late, while the unit lies dead.
+	r.hurt()
+	r.setHealth(20)
+	r.step()
+	if got := r.events("hurt_by"); len(got) != n {
+		t.Fatalf("hurt_by after the respawn: %v", got[n:])
+	}
+}
