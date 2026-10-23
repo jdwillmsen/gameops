@@ -1,9 +1,9 @@
 package arena
 
 import (
-	"errors"
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
