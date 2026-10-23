@@ -554,12 +554,15 @@ export function initOverview(host) {
       into.append(root);
       mounted = true;
       painted = false;
+      hovering = false;
       document.body.classList.add('view-fleet');
       render(true);
     },
     unmount() {
       if (!mounted) return;
       mounted = false;
+      // A removed table never gets its pointerleave.
+      hovering = false;
       root.remove();
       document.body.classList.remove('view-fleet');
     },
