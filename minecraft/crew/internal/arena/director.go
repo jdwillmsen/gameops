@@ -27,6 +27,7 @@ type Result struct {
 	WavesCleared    int     `json:"waves_cleared"`
 	WavesTotal      int     `json:"waves_total"`
 	WarriorDeaths   int     `json:"warrior_deaths"`
+	Rallies         int     `json:"rallies"`
 	DurationSeconds float64 `json:"duration_s"`
 }
 
@@ -57,6 +58,11 @@ type Director struct {
 	Out   io.Writer
 	Now   func() time.Time
 	Sleep func(time.Duration)
+
+	// Resolved in prepare from the wave book, which keeps an explicit zero
+	// meaningful: zero disables rallies instead of falling back to a default.
+	rallyAfter time.Duration
+	rallyEvery time.Duration
 }
 
 func (d *Director) now() time.Time {
@@ -116,6 +122,22 @@ func (d *Director) prepare() error {
 	}
 	if d.RunTimeout <= 0 {
 		d.RunTimeout = 30 * time.Minute
+	}
+	d.rallyAfter, d.rallyEvery = 20*time.Second, 25*time.Second
+	if d.Book.RallyAfter != nil {
+		d.rallyAfter = d.Book.RallyAfter.Duration
+	}
+	if d.Book.RallyEvery != nil {
+		d.rallyEvery = d.Book.RallyEvery.Duration
+	}
+	if d.rallyAfter < 0 {
+		return fmt.Errorf("arena: rally_after must not be negative")
+	}
+	if d.rallyEvery < 0 {
+		return fmt.Errorf("arena: rally_every must not be negative")
+	}
+	if d.rallyAfter > 0 && d.rallyEvery <= 0 {
+		return fmt.Errorf("arena: rally_every must be positive when rallies are on")
 	}
 	if d.Out == nil {
 		d.Out = io.Discard
@@ -217,6 +239,9 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 	bossSeen := false
 	live := 0
 	spawnedBatch := false
+	waveStarted := false
+	var rallyAt time.Time
+	rallyRound := 0
 	phases := append([]Phase(nil), wave.Phases...)
 	phaseAt := 0
 
@@ -236,6 +261,12 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 			}
 			pending = pending[n:]
 			spawnedBatch = true
+			if !waveStarted {
+				waveStarted = true
+				if d.rallyAfter > 0 && wave.rallies() {
+					rallyAt = d.now().Add(d.rallyAfter)
+				}
+			}
 			if !opened {
 				if err := d.openPens(pens); err != nil {
 					return "", false, err
@@ -306,6 +337,20 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 			return "", true, nil
 		}
 		spawnedBatch = false
+		if !rallyAt.IsZero() && !d.now().Before(rallyAt) {
+			issued, err := d.rally(alive, rallyRound)
+			if err != nil {
+				return "", false, err
+			}
+			if issued {
+				result.Rallies++
+				rallyRound++
+				d.logf("arena: rally %d mobs", live)
+			}
+			// Schedule from now, not from the missed mark, so a slow console
+			// cannot fire a burst of catch-up teleports.
+			rallyAt = d.now().Add(d.rallyEvery)
+		}
 		d.sleep(d.Poll)
 	}
 }
@@ -346,6 +391,49 @@ func (d *Director) pauseAfter(w Wave) time.Duration {
 		return w.Pause.Duration
 	}
 	return d.Pause
+}
+
+// rally anchors on the first warrior the squad list still sees standing, so a
+// dead leader sends the mobs to the next one instead of a corpse.
+func (d *Director) rally(states map[string]*warriorState, round int) (bool, error) {
+	anchor, ok := d.rallyAnchor(states)
+	if !ok {
+		return false, nil
+	}
+	dx, dz, ok := d.rallyOffset(round)
+	if !ok {
+		return false, nil
+	}
+	cmd, err := rallyCommand(anchor, dx, dz)
+	if err != nil {
+		return false, err
+	}
+	if _, err := d.exec(cmd); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (d *Director) rallyAnchor(states map[string]*warriorState) (string, bool) {
+	for _, name := range d.Warriors {
+		if st := states[name]; st != nil && st.live {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// rallyOffset walks the ring from this round's place. The offset is measured
+// from a living warrior, so the layout can only bound the ring itself; the
+// shipped floor radius (45) admits all of it.
+func (d *Director) rallyOffset(round int) (dx, dz int, ok bool) {
+	for i := range rallyOffsets {
+		o := rallyOffsets[(round+i)%len(rallyOffsets)]
+		if d.Layout.FloorRadius <= 0 || o[0]*o[0]+o[1]*o[1] <= d.Layout.FloorRadius*d.Layout.FloorRadius {
+			return o[0], o[1], true
+		}
+	}
+	return 0, 0, false
 }
 
 // addTickingAreas loads the arena's chunks: Bedrock refuses every summon and
@@ -491,6 +579,7 @@ func (d *Director) validateWaves(waves []Wave) error {
 // selector while it respawns.
 type warriorState struct {
 	up     bool
+	live   bool
 	misses int
 }
 
@@ -509,7 +598,7 @@ func (d *Director) warriorBaseline() (map[string]*warriorState, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		states[name] = &warriorState{up: n > 0}
+		states[name] = &warriorState{up: n > 0, live: n > 0}
 		if n > 0 {
 			any = true
 		}
@@ -538,10 +627,11 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 			return false, err
 		}
 		if n > 0 {
-			st.up, st.misses = true, 0
+			st.up, st.live, st.misses = true, true, 0
 			standing = true
 			continue
 		}
+		st.live = false
 		st.misses++
 		if st.misses < d.WarriorMisses {
 			// A short gap may be a respawn; keep a previously standing
