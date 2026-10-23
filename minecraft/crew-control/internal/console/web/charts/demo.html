@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chart library</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./charts.css">
+<link rel="stylesheet" href="./demo.css">
+</head>
+<body class="cc-root">
+<main>
+  <header class="demo-head">
+    <div>
+      <h1>Chart library</h1>
+      <p>Every chart type on seeded synthetic data. Query: <code>?theme=light|dark</code> <code>?texture=1</code> <code>?live=1</code> <code>?eager=1</code></p>
+    </div>
+    <div class="demo-controls" role="group" aria-label="Display">
+      <button type="button" class="cc-btn" data-theme-set="auto">Auto</button>
+      <button type="button" class="cc-btn" data-theme-set="light">Light</button>
+      <button type="button" class="cc-btn" data-theme-set="dark">Dark</button>
+      <button type="button" class="cc-btn" id="texture" aria-pressed="false">Texture</button>
+    </div>
+  </header>
+  <div id="filter"></div>
+  <section aria-labelledby="h-tiles"><h2 id="h-tiles">Stat tiles</h2><div class="grid tiles" id="tiles"></div></section>
+  <section aria-labelledby="h-lines"><h2 id="h-lines">Time series</h2><div class="grid cols2" id="lines"></div></section>
+  <section aria-labelledby="h-bars"><h2 id="h-bars">Bars</h2><div class="grid cols2" id="bars"></div></section>
+  <section aria-labelledby="h-heat"><h2 id="h-heat">Heatmaps</h2><div class="grid cols2" id="heat"></div></section>
+  <section aria-labelledby="h-gauge"><h2 id="h-gauge">Gauges</h2><div class="grid tiles" id="gauges"></div></section>
+  <section aria-labelledby="h-pal"><h2 id="h-pal">Palette</h2><div id="palette"></div></section>
+  <section aria-labelledby="h-live">
+    <h2 id="h-live">Live: 20 charts at 1 Hz</h2>
+    <p class="demo-live-bar"><button type="button" class="cc-btn" id="live-toggle" aria-pressed="false">Start</button> <output id="perf" aria-live="off">stopped</output></p>
+    <div class="grid live" id="live"></div>
+  </section>
+</main>
+<script type="module" src="./demo.js"></script>
+</body>
+</html>
