@@ -20,6 +20,11 @@ const bossDistance = 10
 // found are tolerated; a summon that did not land must not read as a kill.
 const bossSeenMisses = 3
 
+// bossConfirmWait separates the two testfor misses a kill needs. The console
+// cannot tie a log line to the command that caused it, so one miss may be a
+// late line from another command.
+const bossConfirmWait = 2 * time.Second
+
 // playerCheckEvery is how often a fight rereads the player list: a player who
 // joins mid-fight must not stand next to a buffed boss for long.
 const playerCheckEvery = 15 * time.Second
@@ -376,7 +381,14 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 				}
 				continue
 			}
-			outcome = BossKilled
+			b.sleep(bossConfirmWait)
+			again, err := d.exec("testfor " + b.bossSelector())
+			if err != nil {
+				return BossRecord{}, err
+			}
+			if bossDown(again, b.Name) {
+				outcome = BossKilled
+			}
 		}
 		switch {
 		case outcome != "":
