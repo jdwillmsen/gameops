@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
@@ -135,5 +136,57 @@ func TestStateNamesTheUnit(t *testing.T) {
 	}
 	if body.Unit.ID != "crew-02" || body.Unit.Name != "Basalt" || body.Version != "dev" {
 		t.Errorf("body = %+v", body)
+	}
+}
+
+type fightFixed struct {
+	s  life.FightSummary
+	ok bool
+}
+
+func (f fightFixed) Stats() (life.FightSummary, bool) { return f.s, f.ok }
+
+func TestStateCarriesAWarriorsFightCounts(t *testing.T) {
+	fight := fightFixed{ok: true, s: life.FightSummary{
+		Total:   life.FightStats{Swings: 12, HitsLanded: 7, DamageTaken: 9.5, Deaths: 1},
+		Current: life.FightStats{Swings: 4, HitsLanded: 2, DamageTaken: 3},
+	}}
+	rec := get(t, Handler(fixed{}, "dev", Unit{}, nil, WithFight(fight)), "/v1/state")
+	var body struct {
+		Tasks struct {
+			Fight *life.FightSummary `json:"fight"`
+		} `json:"tasks"`
+	}
+	raw := rec.Body.String()
+	if err := json.Unmarshal([]byte(raw), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Tasks.Fight == nil || *body.Tasks.Fight != fight.s {
+		t.Fatalf("fight = %+v, want %+v", body.Tasks.Fight, fight.s)
+	}
+	for _, key := range []string{`"swings":12`, `"hits_landed":7`, `"damage_taken":9.5`, `"deaths":1`} {
+		if !strings.Contains(raw, key) {
+			t.Errorf("body lacks %s: %s", key, raw)
+		}
+	}
+}
+
+func TestStateOmitsFightCountsForAUnitThatKeepsNone(t *testing.T) {
+	for name, h := range map[string]http.Handler{
+		"no source":     Handler(fixed{}, "dev", Unit{}, nil),
+		"not a fighter": Handler(fixed{}, "dev", Unit{}, nil, WithFight(fightFixed{})),
+	} {
+		if body := get(t, h, "/v1/state").Body.String(); strings.Contains(body, `"fight"`) {
+			t.Errorf("%s: body carries fight counts: %s", name, body)
+		}
+	}
+}
+
+func TestMetricsExposeTheFightCounters(t *testing.T) {
+	body := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/metrics").Body.String()
+	for _, name := range []string{"crew_swings_total", "crew_hits_landed_total", "crew_damage_taken_total"} {
+		if !strings.Contains(body, name) {
+			t.Errorf("metrics lack %s", name)
+		}
 	}
 }

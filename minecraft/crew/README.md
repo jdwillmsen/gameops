@@ -65,6 +65,18 @@ Logs carry only events and types (`defend_started`, `hurt_by`,
 `reason`: `gone` (the mob left range or died), `no_stand_cell` (no standable
 cell near it), `no_path` (the chase failed) or `fight_limit`.
 
+A warrior also logs `hit_landed` (the swung-at target's type and the fight's
+running hit count), `damage_taken` (the attacker's type as the unit could
+tell it, the amount from the health attribute when one arrived, and the
+health left) and `warrior_died` (the last attacker and the fight's length in
+ticks). Its `defend_ended` adds `swings`, `hits`, `damage_taken` and
+`deaths` for the fight. The totals are `crew_swings_total`,
+`crew_hits_landed_total`, `crew_damage_taken_total` and
+`crew_deaths_total{killer}`, and `/v1/state` carries them as `tasks.fight`.
+A hit is the target's hurt animation within a few ticks of a swing, or while
+an arrow flies; the packets name no attacker, so the attacker is the nearest
+mob the unit would blame.
+
 ## Squads and warriors
 
 With `CREW_ROLE` set the unit fights as a warrior of that role — `vanguard`
