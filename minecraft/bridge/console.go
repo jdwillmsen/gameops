@@ -148,7 +148,7 @@ func (c *Console) Run(ctx context.Context) {
 			return
 		}
 		if err != nil {
-			c.logger.Warn("console connection lost", "error", err)
+			c.logger.Warn("console connection lost", "error", logSafe(err.Error()))
 		}
 
 		c.mu.Lock()
@@ -322,7 +322,7 @@ func (c *Console) ingestEvents(msg wsMessage) {
 		end := strings.LastIndex(buf, "\n")
 		if end < 0 {
 			if len(buf) > maxResidualLine {
-				c.logger.Warn("dropping oversized partial console line", "stream", msg.Type, "bytes", len(buf))
+				c.logger.Warn("dropping oversized partial console line", "stream", logSafe(msg.Type), "bytes", len(buf))
 				buf = ""
 			}
 			c.residual[msg.Type] = buf
@@ -442,4 +442,10 @@ func writeJSON(ctx context.Context, c *websocket.Conn, v wsMessage) error {
 		return err
 	}
 	return c.Write(ctx, websocket.MessageText, data)
+}
+
+// logSafe strips line breaks from remote-controlled text so it cannot forge
+// extra log records.
+func logSafe(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }
