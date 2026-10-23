@@ -147,8 +147,12 @@ unit whole is logged as `kit_empty` (with what was `missing`, never a
 position) and left alone for three minutes; a failed visit (`kit_failed`) backs
 off the same way, except one that found the chest's chunk not yet loaded, or
 one whose open click was answered with no window, as on a cold join, which are
-retried after five seconds, up to six times in a row before backing off. A
-visit only fills empty hotbar slots, so a tool is never
+retried after five seconds, up to six times in a row before backing off. Each
+further failure in a row doubles the back-off, up to 15 minutes, and a visit
+that completes starts it over. A unit more than 96 blocks from the chest does
+not set out at all: the walk leaves the loaded chunks and outlasts the visit
+limit. A timed-out open logs `chest_open_clicks` with `dist` (blocks from the
+unit to the chest) and `above` (the block over it). A visit only fills empty hotbar slots, so a tool is never
 displaced, and a unit whose hotbar is full does not go; a visit that fills
 the hotbar before taking everything it needed logs `kit_no_room` instead of
 `kit_empty`. The task queue waits while a visit is under way.

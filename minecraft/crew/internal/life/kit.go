@@ -3,6 +3,7 @@ package life
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 
@@ -34,6 +35,13 @@ const (
 	kitRetryTries = 6
 	// A visit is a short walk and one chest; one that takes a minute is stuck.
 	kitLimit = 1200
+	// Farther than this from the chest a unit stays where it is: the walk
+	// leaves the loaded chunks and outlasts the visit limit, so it could only
+	// fail, and the task queue waits for the whole of a failing visit.
+	kitReach = 96
+	// The back-off after a failed visit doubles with each failure in a row, up
+	// to this, so a unit that cannot reach its kit stops spending its time on it.
+	kitMaxBackoff = 18000
 )
 
 // swords is the order a unit prefers them in.
@@ -74,6 +82,8 @@ type kitState struct {
 	// a chunk still not loaded, or an open that waited out its window, so
 	// the short retry stays bounded.
 	retryTries int
+	// fails counts the failed visits in a row, until one completes.
+	fails int
 }
 
 // lacks says what the unit is missing that the kit holds: a sword or axe, and
@@ -125,7 +135,14 @@ func (l *Life) kitWants(s belief.Snapshot, working bool) bool {
 	if !k.needing {
 		k.needing, k.needSince = true, l.tick
 	}
-	return !working && hotbarFree(s) && l.tick >= k.blockedUntil && l.tick-k.needSince >= kitSettleTicks
+	return !working && hotbarFree(s) && l.tick >= k.blockedUntil && l.tick-k.needSince >= kitSettleTicks && l.kitInReach(s)
+}
+
+// kitInReach says whether the chest is near enough to walk to.
+func (l *Life) kitInReach(s belief.Snapshot) bool {
+	chest := l.cfg.Kit.Chest
+	dx, dz := float64(s.Position[0])-float64(chest.X()), float64(s.Position[2])-float64(chest.Z())
+	return math.Hypot(dx, dz) <= kitReach
 }
 
 // tendKit steps the visit to the chest by one tick, starting it first if none is
@@ -192,10 +209,11 @@ func (l *Life) endKit(err error) {
 			// A different failure breaks the row of early misses.
 			k.retryTries = 0
 		}
-		k.blockedUntil = l.tick + kitFailBackoff
+		k.blockedUntil = l.tick + uint64(min(kitFailBackoff<<k.fails, kitMaxBackoff))
+		k.fails = min(k.fails+1, 4)
 		return
 	}
-	k.retryTries = 0
+	k.retryTries, k.fails = 0, 0
 	weapon, food := lacks(l.self())
 	if !weapon && !food {
 		l.logEvent("kit_restocked", nil)
