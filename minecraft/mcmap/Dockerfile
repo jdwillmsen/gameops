@@ -12,8 +12,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/mcmap .
 # but the renderer it downloads at runtime is a native executable that needs
 # glibc and libgcc. That renderer is deliberately not in this image; its
 # licence allows free use but not redistribution.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/healthprobe ./minecraft/cmd/healthprobe
+
 FROM gcr.io/distroless/cc-debian12:nonroot@sha256:9dac0a79194e45a7da0158a9c6da57b217585af0786db3845d1f0ec1a0dd182f
 COPY --from=build /out/mcmap /mcmap
+COPY --from=build /out/healthprobe /healthprobe
 
 # Redundant at runtime -- the `:nonroot` base already runs as uid 65532 -- but
 # a scanner reading this file cannot resolve a digest-pinned base image's USER,
@@ -24,4 +27,5 @@ USER nonroot:nonroot
 # can be rebuilt from the server, but the first render is slow, so it is a
 # volume rather than container-local state.
 VOLUME ["/data"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["/healthprobe"]
 ENTRYPOINT ["/mcmap"]
