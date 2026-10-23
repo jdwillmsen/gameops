@@ -5,7 +5,7 @@
 import { Sparkline, StatTile } from './charts/spark.js';
 import {
   SAMPLE_MS, MAX_HEALTH, STATES, STATE_LABEL, SORTS, SORT_LABEL, DEFAULT_DIR, LEVELS,
-  createBoard, sortRows, filterRows, emptyFilter, isFiltered, parseParams, formatParams, sinceLabel, moveFocus, nextAttention,
+  createBoard, sortRows, filterRows, emptyFilter, isFiltered, parseParams, formatParams, sinceLabel, moveFocus, nextAttention, trailLabels,
 } from './overview.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -62,15 +62,15 @@ const DIM = ['', 'nether', 'end'];
 const CHIP_ORDER = ['working', 'idle', 'stuck', 'dead', 'offline'];
 const LEVEL_LABEL = { 0: 'Any', 6: '6 or less (low)', 10: '10 or less', 15: '15 or less' };
 
-// Trail labels are the same text for every unit, so they are built once per length.
-const labelCache = new Map();
-function trailLabels(n) {
-  let l = labelCache.get(n);
-  if (!l) {
-    l = Array.from({ length: n }, (_, i) => (i === n - 1 ? 'now' : `${Math.round(((n - 1 - i) * SAMPLE_MS) / 1000)}s ago`));
-    labelCache.set(n, l);
-  }
-  return l;
+// Every unit's trail ends on the same samples, so a label set is built once
+// per length for a paint, not once per row.
+function labelsAt(times, now) {
+  const cache = new Map();
+  return n => {
+    let l = cache.get(n);
+    if (!l) cache.set(n, (l = trailLabels(times, n, now)));
+    return l;
+  };
 }
 
 const TILES = [
@@ -275,10 +275,11 @@ export function initOverview(host) {
   function paintSlice() {
     pump = 0;
     const t0 = performance.now();
+    const labels = labelsAt(board.times(), pending ? pending.now : 0);
     while (pending && pending.i < pending.work.length) {
       const [e, r] = pending.work[pending.i++];
       paintRow(e, r, pending.now, pending.cur);
-      e.spark.update(r.trail, trailLabels(r.trail.length));
+      e.spark.update(r.trail, labels(r.trail.length));
       if (performance.now() - t0 > FRAME_BUDGET_MS) break;
     }
     if (pending && pending.i < pending.work.length) pump = requestAnimationFrame(paintSlice);
@@ -290,9 +291,10 @@ export function initOverview(host) {
     cancelAnimationFrame(pump);
     pending = { work, now, cur, i: 0 };
     if (immediate) {
+      const labels = labelsAt(board.times(), now);
       for (const [e, r] of work) {
         paintRow(e, r, now, cur);
-        e.spark.update(r.trail, trailLabels(r.trail.length));
+        e.spark.update(r.trail, labels(r.trail.length));
       }
       pending = null;
       pump = 0;
@@ -315,6 +317,7 @@ export function initOverview(host) {
     const shown = sortRows(filtered, prefs.sort, prefs.dir);
     const shownIds = new Set(shown.map(r => r.id));
     const cur = host.state().unit;
+    const trendLabels = labelsAt(board.times(), now);
     const op = !!host.operator();
     root.classList.toggle('has-pos', op);
 
@@ -335,9 +338,9 @@ export function initOverview(host) {
         t.sig = sig;
         const next = { value };
         if (def.status) Object.assign(next, { status: n > 0 ? def.status[0] : 'good', statusLabel: n > 0 ? def.status[1] : 'None' });
-        if (trend) next.trend = { values: trend, labels: trailLabels(trend.length) };
+        if (trend) next.trend = { values: trend, labels: trendLabels(trend.length) };
         t.tile.update(next);
-      } else if (trend) t.tile.spark.update(trend, trailLabels(trend.length));
+      } else if (trend) t.tile.spark.update(trend, trendLabels(trend.length));
     }
     tilesBox.dataset.since = sum.since;
 

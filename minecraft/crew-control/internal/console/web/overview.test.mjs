@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   stateOf, taskKind, duration, sinceLabel, sortRows, filterRows, emptyFilter, isFiltered, summarize,
-  parseParams, formatParams, moveFocus, nextAttention, createBoard, WINDOW, STUCK_HOLD_MS,
+  parseParams, formatParams, moveFocus, nextAttention, createBoard, trailLabels, WINDOW, SAMPLE_MS, STALE_MS, GAP_MS, STUCK_HOLD_MS,
 } from './overview.js';
 
 const u = (id, extra = {}) => ({ id, name: id, online: true, dead: false, health: 20, hunger: 20, task: null, ...extra });
@@ -205,9 +205,9 @@ test('board: summary counts done and failed from the feed window only', () => {
 test('board: the health trail is capped, unknown is a gap, and the fleet trail follows states', () => {
   const b = createBoard({ window: 3 });
   b.ingest([u('c1', { health: 18 }), u('c2', { task: task() })], 1000);
-  for (let i = 0; i < 5; i++) b.sample();
-  b.ingest([u('c1', { online: false, health: null }), u('c2', { task: task() })], 2000);
-  b.sample();
+  for (let i = 0; i < 5; i++) b.sample(1000 + i * SAMPLE_MS);
+  b.ingest([u('c1', { online: false, health: null }), u('c2', { task: task() })], 11_000);
+  b.sample(11_000);
   const r = b.rows();
   assert.deepEqual(r[0].trail, [18, 18, null]);
   assert.equal(r[1].trail.length, 3);
@@ -232,6 +232,41 @@ test('board: low flags ignore offline and dead units', () => {
   const b = createBoard();
   b.ingest([u('c1', { health: 3, hunger: 2 }), u('c2', { dead: true, health: 0 }), u('c3', { online: false, health: 1, hunger: 1 })], 1000);
   assert.deepEqual(b.rows().map(r => [r.lowHealth, r.lowHunger]), [[true, true], [false, false], [false, false]]);
+});
+
+test('board: samples carry their real time and nothing is sampled while the stream is silent', () => {
+  const b = createBoard();
+  b.sample(500);
+  assert.equal(b.times().length, 0, 'nothing to sample before the first snapshot');
+  b.ingest([u('c1', { health: 10 })], 1000);
+  b.sample(1000);
+  b.sample(3000);
+  // The stream went quiet: ticks keep firing but the data is old.
+  b.sample(3000 + STALE_MS + 1);
+  b.sample(60_000);
+  assert.deepEqual(b.times(), [1000, 3000]);
+  assert.deepEqual(b.rows()[0].trail, [10, 10]);
+  // It comes back: a break marks the hole, then real samples follow.
+  b.ingest([u('c1', { health: 12 })], 100_000);
+  b.sample(100_000);
+  assert.deepEqual(b.rows()[0].trail, [10, 10, null, 12]);
+  assert.deepEqual(b.times(), [1000, 3000, 3000 + SAMPLE_MS, 100_000]);
+  assert.deepEqual(b.fleetTrail('online'), [1, 1, null, 1]);
+  assert.ok(100_000 - 3000 > GAP_MS);
+  // A tick one interval after the last is the ordinary case: no break.
+  b.ingest([u('c1', { health: 12 })], 102_000);
+  b.sample(102_000);
+  assert.deepEqual(b.rows()[0].trail, [10, 10, null, 12, 12]);
+});
+
+test('trailLabels name samples by their own age, not by their count', () => {
+  assert.deepEqual(trailLabels([0, 2000, 4000], 3, 4000), ['4s ago', '2s ago', 'now']);
+  // After a hole the older samples are minutes away, not seconds.
+  assert.deepEqual(trailLabels([0, 60_000, 300_000], 3, 301_000), ['5m ago', '4m ago', '1s ago'].map((x, i) => (i === 2 ? 'now' : x)));
+  assert.deepEqual(trailLabels([0, 2000, 4000], 2, 4000), ['2s ago', 'now']);
+  // A last sample that is old is not "now".
+  assert.deepEqual(trailLabels([0, 2000], 2, 62_000), ['62s ago', '60s ago']);
+  assert.deepEqual(trailLabels([], 3, 1000), []);
 });
 
 test('board: a second death is not dated by the first one when the snapshot comes first', () => {
