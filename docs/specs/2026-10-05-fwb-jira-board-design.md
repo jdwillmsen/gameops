@@ -172,7 +172,8 @@ Recorded as it was done, because two steps did not go as designed.
 4. **Players.** Inviting someone to the site is not enough. A new site
    member could not see or create cards in the space until they were also
    added to its Member role, so each invite is followed by that. Members
-   can create and move cards; only the owner administers the space.
+   can create and move cards; only the owner administers the space. A Free
+   site cannot assign roles, so assign every player before the trial ends.
 
 ## Verification
 
