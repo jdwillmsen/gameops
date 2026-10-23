@@ -324,6 +324,7 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 		wake := a.waiter(id)
 		d, ok := a.store.Delta(id, since)
 		if !ok {
+			a.dropWaiter(id, wake)
 			http.NotFound(w, r)
 			return
 		}
@@ -340,16 +341,19 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 		past := since > d.Cursor
 		staleRev := hasRev && rev != d.Rev
 		if since == 0 || past || staleRev || d.Cursor > since || len(d.Orders) > 0 || len(d.Callouts) > 0 {
+			a.dropWaiter(id, wake)
 			writeJSON(w, http.StatusOK, d)
 			return
 		}
 		select {
 		case <-wake:
 		case <-timer.C:
+			a.dropWaiter(id, wake)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		case <-r.Context().Done():
 			// Shutdown: nobody is left to read an answer.
+			a.dropWaiter(id, wake)
 			return
 		}
 	}
@@ -390,8 +394,10 @@ func parseWait(s string) time.Duration {
 	return max(minWait, min(d, maxWait))
 }
 
-// waiter hands back the channel the next broadcast for that squad closes.
-func (a *API) waiter(squad string) <-chan struct{} {
+// waiter registers a fresh channel the next broadcast for that squad
+// closes. It hands the channel back at registration so the poll can take
+// it out again on the way past.
+func (a *API) waiter(squad string) chan struct{} {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	ch := make(chan struct{})
@@ -402,6 +408,20 @@ func (a *API) waiter(squad string) <-chan struct{} {
 	}
 	g[ch] = struct{}{}
 	return ch
+}
+
+// dropWaiter takes one poll's channel back out: a finished poll leaves
+// nothing behind for a later broadcast to close. A channel a broadcast
+// already closed is only a map entry then, and removing it is harmless.
+func (a *API) dropWaiter(squad string, ch chan struct{}) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if g, ok := a.waits[squad]; ok {
+		delete(g, ch)
+		if len(g) == 0 {
+			delete(a.waits, squad)
+		}
+	}
 }
 
 // broadcast closes every open poll for the squad. The closing of one of
