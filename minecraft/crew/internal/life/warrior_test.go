@@ -1,6 +1,7 @@
 package life
 
 import (
+	"math"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -254,4 +255,201 @@ func TestFocusOrderPrefersTheNamedType(t *testing.T) {
 	if r.l.target.ID != 51 {
 		t.Fatalf("target = %d, want the ordered skeleton 51", r.l.target.ID)
 	}
+}
+
+func TestStrikerLandsCriticalHitsWhileFalling(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1) // diamond sword
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+
+	hits := 0
+	for i := 0; i < 100; i++ {
+		pose := r.a.Pose()
+		before := len(r.out.attacks())
+		if !r.step() {
+			t.Fatalf("tick %d: not engaged", i)
+		}
+		if len(r.out.attacks()) > before {
+			hits++
+			if pose.OnGround || pose.Rise() >= 0 {
+				t.Fatalf("attack %d at tick %d from on-ground or rising: the Striker must swing mid-fall", hits, i)
+			}
+		}
+	}
+	if hits < 4 {
+		t.Fatalf("%d attacks in 100 ticks, want the cadence kept up by crit jumps", hits)
+	}
+}
+
+func TestVanguardSwingsFromTheGroundAndShieldsAgainstShooters(t *testing.T) {
+	r := newWarrior(t, "vanguard", start)
+	r.give(0, 303, 1)
+	r.give(1, 360, 1) // shield
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+	r.spawn(51, "minecraft:skeleton", mgl32.Vec3{28.5, 1, 20.5})
+
+	hits := 0
+	for i := 0; i < 60; i++ {
+		pose := r.a.Pose()
+		before := len(r.out.attacks())
+		r.step()
+		if len(r.out.attacks()) > before {
+			hits++
+			if !pose.OnGround {
+				t.Fatalf("attack %d at tick %d left the ground: the Vanguard plants", hits, i)
+			}
+		}
+	}
+	if hits < 3 {
+		t.Fatalf("%d attacks in 60 ticks, want the ground cadence", hits)
+	}
+	if n := r.out.uses(1); n < 2 {
+		t.Errorf("%d shield raises against a live shooter, want it kept up between swings", n)
+	}
+	if n := r.out.releases(1); n < 2 {
+		t.Errorf("%d shield lowers to swing, want one per swing", n)
+	}
+	if d := dist(r.feet(), start); d > 0.5 {
+		t.Errorf("the Vanguard wandered %.1f blocks holding the front", d)
+	}
+}
+
+func TestShieldRisesAgainstAnIncomingArrowAndLowersToSwing(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1)
+	r.give(1, 360, 1)
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+	r.run(15) // the melee is under way
+
+	// An arrow flies in from the east, closer every tick.
+	arrow := mgl32.Vec3{24.5, 1.5, 20.5}
+	r.spawn(70, "minecraft:arrow", arrow)
+	raised := false
+	for i := 0; i < 12; i++ {
+		arrow = arrow.Sub(mgl32.Vec3{0.35, 0, 0})
+		r.moveTo(70, arrow)
+		r.step()
+		if r.out.uses(1) > 0 {
+			raised = true
+		}
+	}
+	if !raised {
+		t.Fatal("an arrow closing on the unit never raised the shield")
+	}
+	if r.out.startUsingInputs() == 0 {
+		t.Error("the shield raise was not begun as an item use")
+	}
+	// The arrow is gone; the next swing must lower the shield first.
+	arrow = arrow.Sub(mgl32.Vec3{40, 0, 0})
+	r.moveTo(70, arrow)
+	for i := 0; i < 40 && r.out.releases(1) == 0; i++ {
+		r.step()
+	}
+	if n := r.out.releases(1); n == 0 {
+		t.Fatal("the shield never came down to swing")
+	}
+}
+
+func TestMeleeCirclesTheTargetInReach(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1)
+	z := mgl32.Vec3{22.5, 1, 20.5}
+	spawnZombie(r, 50, z)
+
+	swept, prev, have := 0.0, 0.0, false
+	for i := 0; i < 80; i++ {
+		if !r.step() {
+			t.Fatalf("tick %d: not engaged", i)
+		}
+		f := r.feet()
+		d := dist(f, z)
+		if d < 1.2 || d > 3.3 {
+			t.Fatalf("tick %d: %.1f blocks from the target, want the melee band held", i, d)
+		}
+		bearing := math.Atan2(float64(f.Z()-z.Z()), float64(f.X()-z.X())) * 180 / math.Pi
+		if have {
+			delta := bearing - prev
+			for delta > 180 {
+				delta -= 360
+			}
+			for delta < -180 {
+				delta += 360
+			}
+			swept += math.Abs(delta)
+		}
+		prev, have = bearing, true
+	}
+	if swept < 60 {
+		t.Errorf("the unit swept %.0f degrees around the target in 80 ticks, want circling", swept)
+	}
+}
+
+func TestStrikerLeavesTheShootersLineOnTheLeader(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{28.5, 1, 20.5}, leaderOK: true}
+	r := newWarrior(t, "striker", start)
+	r.setSquad(t, squad)
+	r.give(0, 303, 1)
+	r.spawn(51, "minecraft:skeleton", mgl32.Vec3{12.5, 1, 20.5})
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+
+	for i := 0; i < 40; i++ {
+		if !r.step() {
+			t.Fatalf("tick %d: not engaged", i)
+		}
+		if d := lineDistance(r.feet(), mgl32.Vec3{12.5, 1, 20.5}, mgl32.Vec3{28.5, 1, 20.5}); d > lineWidth {
+			return
+		}
+	}
+	t.Fatal("the Striker stayed on the skeleton's line to the leader")
+}
+
+func TestVanguardHoldsTheShootersLineWithItsShield(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{28.5, 1, 20.5}, leaderOK: true}
+	r := newWarrior(t, "vanguard", start)
+	r.setSquad(t, squad)
+	r.give(0, 303, 1)
+	r.give(1, 360, 1)
+	r.spawn(51, "minecraft:skeleton", mgl32.Vec3{12.5, 1, 20.5})
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+
+	for i := 0; i < 40; i++ {
+		r.step()
+		if d := dist(r.feet(), start); d > 0.6 {
+			t.Fatalf("tick %d: the Vanguard left the front by %.1f blocks", i, d)
+		}
+	}
+	if r.out.uses(1) == 0 {
+		t.Error("the Vanguard never raised its shield against the shooter")
+	}
+}
+
+func TestFlankCellStandsWideOfTheFront(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{14.5, 1, 20.5}, leaderOK: true}
+	zombieAt := mgl32.Vec3{26.5, 1, 20.5}
+
+	s := newWarrior(t, "striker", mgl32.Vec3{20.5, 1, 24.5})
+	s.setSquad(t, squad)
+	goal, ok := s.l.flankCell(s.a.Pose(), belief.Entity{ID: 50, Pos: zombieAt})
+	if !ok {
+		t.Fatal("no flank cell on open floor")
+	}
+	if off := goal.Z() - 20; off < 1 {
+		t.Errorf("flank cell %v is on the leader's line on the target, want it to the side", goal)
+	}
+	if dx := abs32(goal.X() - 26); dx > 1 {
+		t.Errorf("flank cell %v strayed %v blocks along the front", goal, dx)
+	}
+
+	v := newWarrior(t, "vanguard", mgl32.Vec3{20.5, 1, 24.5})
+	v.setSquad(t, squad)
+	if _, ok := v.l.flankCell(v.a.Pose(), belief.Entity{ID: 50, Pos: zombieAt}); ok {
+		t.Error("the Vanguard was given a flank cell instead of the front")
+	}
+}
+
+func abs32(x int32) int32 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
