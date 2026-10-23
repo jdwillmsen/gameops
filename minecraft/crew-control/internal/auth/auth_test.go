@@ -209,6 +209,23 @@ func TestInviteRaceSpendsOnce(t *testing.T) {
 	}
 }
 
+func TestPastedInviteWhitespaceIsNotPartOfTheCode(t *testing.T) {
+	for _, pasted := range []string{"owner-code-0001\n", "  owner-code-0001", "\towner-code-0001 \r\n"} {
+		e := newEnv(t)
+		mustOK(t, e.client().enrol(newSoftKey(t), "owner", pasted), fmt.Sprintf("enrol with %q", pasted))
+		// Spent under the trimmed value, so the clean code is now used too.
+		if rec := e.client().post("/auth/register/options", map[string]string{"operator": "owner", "invite": "owner-code-0001"}); rec.Code != http.StatusForbidden {
+			t.Errorf("%q: spent code accepted again: %d", pasted, rec.Code)
+		}
+	}
+	e := newEnv(t)
+	for _, wrong := range []string{" owner-code-0002\n", " \n", "owner code-0001"} {
+		if rec := e.client().post("/auth/register/options", map[string]string{"operator": "owner", "invite": wrong}); rec.Code != http.StatusForbidden {
+			t.Errorf("%q: wrong code accepted: %d", wrong, rec.Code)
+		}
+	}
+}
+
 func TestInviteForAnotherOperatorRefused(t *testing.T) {
 	e := newEnv(t)
 	for _, tc := range []struct{ op, code string }{
