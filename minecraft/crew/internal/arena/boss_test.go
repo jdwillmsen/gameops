@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -257,6 +258,48 @@ func TestBossIsNotKilledByATeleportMiss(t *testing.T) {
 	}
 	if got[0].Outcome != BossTimeout {
 		t.Errorf("outcome = %q, want timeout; a tp miss is not a kill", got[0].Outcome)
+	}
+}
+
+func TestBossOneStaleMissIsNotAKill(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 1000
+	f := &FakeConsole{}
+	f.Respond = func(cmd string) (string, error) {
+		out, err := s.Exec(cmd)
+		if strings.HasSuffix(cmd, "type=!player]") && strings.HasPrefix(cmd, "testfor") && s.bossPolls == 3 {
+			// A late line from another command, read as this reply.
+			return s.missReply, err
+		}
+		return out, err
+	}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Timeout = 30 * time.Second
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got[0].Outcome != BossTimeout {
+		t.Errorf("outcome = %q, want timeout; one stray miss is not a kill", got[0].Outcome)
+	}
+}
+
+func TestBossKillIsConfirmedByASecondTestfor(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	clock := newFakeClock()
+	b, _ := newBossTest(f, clock)
+	var sleeps []time.Duration
+	b.Sleep = func(d time.Duration) { sleeps = append(sleeps, d); clock.Sleep(d) }
+	got, err := b.Run(context.Background())
+	if err != nil || got[0].Outcome != BossKilled {
+		t.Fatalf("Run = %+v, %v; want a kill", got, err)
+	}
+	if s.bossPolls != s.aliveFor+2 {
+		t.Errorf("boss polled %d times, want %d: two misses in a row", s.bossPolls, s.aliveFor+2)
+	}
+	if !slices.Contains(sleeps, bossConfirmWait) {
+		t.Errorf("sleeps = %v, want a %v wait before the confirming testfor", sleeps, bossConfirmWait)
 	}
 }
 
