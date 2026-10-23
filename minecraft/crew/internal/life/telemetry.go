@@ -113,6 +113,15 @@ func (t *telemetry) spawn() {
 	clear(t.seenHurts)
 }
 
+// newLife forgets the swings and blows of the life that ended. The clock
+// stands still while the unit is dead, so an attribution kept would still
+// look fresh to a death soon after the respawn.
+func (t *telemetry) newLife() {
+	t.open = t.open[:0]
+	t.hurtPending, t.damaged = false, false
+	t.attackerType, t.attackerAt, t.attributed = "", 0, false
+}
+
 // observe is the read loop's half: it keeps only counters and flags, and the
 // stepping goroutine reads them back. A dead unit's own hurts are not blows.
 func (t *telemetry) observe(pk packet.Packet, selfID uint64, dead bool) {

@@ -409,3 +409,35 @@ func TestTheLethalHurtLogsNoHurtByAfterTheRespawn(t *testing.T) {
 		t.Fatalf("hurt_by after the respawn: %v", got[n:])
 	}
 }
+
+func TestADeathInTheNextLifeIsNotBlamedOnTheLastOne(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.step()
+	r.hurt()
+	r.setHealth(14)
+	r.step()
+	r.die()
+
+	r.l.Apply(&packet.RemoveActor{EntityUniqueID: 50})
+	r.setHealth(20)
+	r.run(60)
+	r.setHealth(0)
+	r.l.Reset()
+	got := r.events("warrior_died")
+	if len(got) != 2 || got[1]["killer"] != "unknown" {
+		t.Fatalf("warrior_died = %v, want the second death with nothing to blame", got)
+	}
+}
+
+func TestASwingBeforeADeathIsNotAnsweredAfterTheRespawn(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.die()
+	r.setHealth(20)
+	r.hurtEntity(50)
+	r.step()
+	if got := r.events("hit_landed"); len(got) != 0 {
+		t.Fatalf("hit_landed = %v, want none for a swing from the last life", got)
+	}
+}
