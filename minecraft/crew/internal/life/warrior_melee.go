@@ -56,7 +56,7 @@ func (l *Life) warriorMelee(ctx context.Context, a skill.Actuator, p act.Pose, e
 	}
 	// A raised shield walks at a crawl: circling wants the hand free.
 	l.lowerShield(a)
-	return l.circle(a, p, e, s)
+	return l.circle(a, p, e)
 }
 
 // shieldUp says whether this tick is one to hide behind the shield. An arrow
@@ -143,7 +143,7 @@ func shieldAt(s belief.Snapshot) (belief.Item, bool) {
 // shooter's line on the leader left, the leader not crowded, and the world's
 // blocks answered by turning the other way. The Vanguard plants instead —
 // holding the front is its circling.
-func (l *Life) circle(a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
+func (l *Life) circle(a skill.Actuator, p act.Pose, e belief.Entity) error {
 	w := l.warrior
 	if w.role == RoleVanguard {
 		return l.stillFacing(a, p, e)
