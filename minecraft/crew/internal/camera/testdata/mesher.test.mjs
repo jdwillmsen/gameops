@@ -11,7 +11,8 @@ const face = { uv: [0, 0, 1, 1] };
 const model = k => ({ model: k, up: face, down: face, side: face, north: face, south: face, east: face, west: face, tint: '' });
 
 // names: material list; ids are 1-based positions. kinds maps a block name to
-// the table's model kind.
+// the table's model kind. The returned object also defines further materials
+// later, as the server does when a new block shows up.
 function worker(names, kinds) {
   const out = [];
   const sandbox = {
@@ -21,21 +22,24 @@ function worker(names, kinds) {
   sandbox.self = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox);
-  const mats = names.map(n => {
+  const entry = n => {
     const base = n.split('@')[0];
     return { name: n, alpha: 1, nonCube: !!kinds[base]?.nonCube, rgb: [1, 1, 1] };
-  });
+  };
   const blocks = {};
   for (const n of names) { const base = n.split('@')[0]; if (kinds[base]) blocks['minecraft:' + base] = model(kinds[base].model); }
   const send = m => sandbox.onmessage({ data: m });
-  send({ t: 'mats', mats });
+  send({ t: 'mats', replace: true, mats: names.map((n, i) => [i + 1, entry(n)]) });
   send({ t: 'atlas', atlas: { table: { blocks }, tiles: {}, tints: {} } });
   return {
+    define(id, name) { send({ t: 'mats', replace: false, mats: [[id, entry(name)]] }); },
     set(key, fill) {
-      const cells = new Uint8Array(4096);
+      const cells = new Uint16Array(4096);
       fill(cells, (x, y, z, id) => { cells[(y << 8) | (z << 4) | x] = id; });
       send({ t: 'set', key, cells });
     },
+    // How many times the sub-chunk has been meshed so far.
+    meshed(key) { return out.filter(m => m.t === 'mesh' && m.key === key).length; },
     async meshes() {
       await new Promise(r => setTimeout(r, 120));
       const last = new Map();
@@ -138,4 +142,34 @@ test('stone blocks still cull the face between them', async () => {
   w.set('0,0,0', (c, put) => { put(5, 5, 5, 1); put(6, 5, 5, 1); });
   const m = await w.meshes();
   assert.equal(quads(m.get('0,0,0')), 10);
+});
+
+// Ids above 255 must reach the mesher whole: 300 & 255 is 44, which here is a
+// block that draws nothing.
+test('a cell holding an id above 255 is that material, not its low byte', async () => {
+  const names = Array.from({ length: 300 }, (_, i) => 'filler_' + i);
+  names[43] = 'torch';
+  names[299] = 'stone';
+  const w = worker(names, { ...kinds, torch: { model: 'none', nonCube: true } });
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 300));
+  const m = await w.meshes();
+  assert.equal(quads(m.get('0,0,0')), 6);
+});
+
+test('a material for an id no cell uses does not re-mesh anything', async () => {
+  const w = worker(['stone'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  await w.meshes();
+  const before = w.meshed('0,0,0');
+  w.define(2, 'oak_leaves');
+  await w.meshes();
+  assert.equal(w.meshed('0,0,0'), before);
+});
+
+test('a material that arrives after a cell already used its id re-meshes that sub-chunk', async () => {
+  const w = worker(['stone'], { ...kinds, torch: { model: 'none', nonCube: true } });
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 2));
+  assert.equal(quads((await w.meshes()).get('0,0,0')), 6, 'an undefined id is drawn as a placeholder');
+  w.define(2, 'torch');
+  assert.equal(quads((await w.meshes()).get('0,0,0')), 0);
 });

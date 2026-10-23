@@ -5,7 +5,7 @@
 // space, so this file needs no three.js.
 'use strict';
 
-const blocks = new Map(); // "cx,cy,cz" -> Uint8Array(4096)
+const blocks = new Map(); // "cx,cy,cz" -> Uint16Array(4096)
 // "cx,cz" -> the cy of every sub-chunk loaded in that column. All-air
 // sub-chunks are never sent, so a missing one in a loaded column is air; only
 // a column with nothing loaded is unknown.
@@ -14,6 +14,9 @@ const dirty = new Set();
 const infoCache = new Map();
 const colorCache = new Map();
 let mats = [];            // index = id - 1
+// Ids a cell used before the server defined them. A material that arrives for
+// one of these is the only kind that changes what is already meshed.
+const missing = new Set();
 let atlas = null;         // { table, tiles: {"u0,v0,u1,v1": layer}, tints: {kind: [r, g, b]} }
 let epoch = 0;
 let seq = 0;              // last message seq received from the page
@@ -79,7 +82,12 @@ function jitter(x, y, z) {
 }
 function rgb(id) {
   let c = colorCache.get(id);
-  if (!c) { const m = mats[id - 1]; c = m ? m.rgb : [1, 0, 1]; colorCache.set(id, c); }
+  if (!c) {
+    const m = mats[id - 1];
+    if (!m) missing.add(id);
+    c = m ? m.rgb : [1, 0, 1];
+    colorCache.set(id, c);
+  }
   return c;
 }
 
@@ -96,6 +104,7 @@ function info(id) {
   let r = infoCache.get(id);
   if (r) return r;
   const m = mats[id - 1];
+  if (!m) missing.add(id);
   // A shaped block carries its boxes after an @ in the name; the table knows
   // it by the part before.
   const [base, boxText] = m ? m.name.split('@') : ['', ''];
@@ -343,10 +352,21 @@ onmessage = ev => {
   const m = ev.data;
   if (m.seq !== undefined) seq = m.seq;
   switch (m.t) {
-    case 'mats':
-      mats = m.mats; colorCache.clear(); infoCache.clear();
-      for (const k of blocks.keys()) dirty.add(k);
+    case 'mats': {
+      // A replacing message is a new connection's table; otherwise the
+      // entries are new ids, and only a cell that already named one needs
+      // meshing again, so a stream that keeps discovering blocks does not
+      // re-mesh the world each time.
+      let stale = m.replace;
+      if (m.replace) { mats = []; missing.clear(); colorCache.clear(); infoCache.clear(); }
+      for (const [id, entry] of m.mats) {
+        mats[id - 1] = entry;
+        colorCache.delete(id); infoCache.delete(id);
+        if (missing.delete(id)) stale = true;
+      }
+      if (stale) for (const k of blocks.keys()) dirty.add(k);
       break;
+    }
     case 'atlas':
       atlas = m.atlas; infoCache.clear();
       for (const k of blocks.keys()) dirty.add(k);
@@ -365,7 +385,7 @@ onmessage = ev => {
       break;
     }
     case 'clear':
-      blocks.clear(); columns.clear(); dirty.clear(); epoch = m.epoch;
+      blocks.clear(); columns.clear(); dirty.clear(); missing.clear(); epoch = m.epoch;
       break;
     case 'at':
       at = m.at;
