@@ -48,6 +48,7 @@ type Auth struct {
 	wa      *webauthn.WebAuthn
 	now     func() time.Time
 	log     *logging.Logger
+	reports *reportLimit
 
 	cmu sync.Mutex
 	cer map[string]*ceremony
@@ -104,7 +105,7 @@ func New(cfg Config) (*Auth, error) {
 		return nil, err
 	}
 	return &Auth{enabled: true, origin: cfg.Origin, rpID: u.Host, ops: ops, key: key, keys: keys, invites: invites, wa: wa,
-		now: now, log: cfg.Log, cer: map[string]*ceremony{}}, nil
+		now: now, log: cfg.Log, reports: &reportLimit{now: now}, cer: map[string]*ceremony{}}, nil
 }
 
 func lower(s string) string {
@@ -212,6 +213,7 @@ func (a *Auth) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/login/options", a.loginOptions)
 	mux.HandleFunc("POST /auth/login/finish", a.loginFinish)
 	mux.HandleFunc("POST /auth/logout", a.logout)
+	mux.HandleFunc("POST /auth/report", a.report)
 	mux.HandleFunc("GET /auth/me", a.me)
 }
 

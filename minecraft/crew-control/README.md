@@ -35,7 +35,7 @@ crew-control; it never calls them to command them.
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /healthz`
 - `GET /signin`: passkey sign-in; `/signin#operator=<id>&invite=<code>` enrols a passkey. The invite rides in the fragment so it never reaches a log
-- `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`; `GET /auth/me`. Only with sign-in on
+- `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
 - `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
 - `POST /v1/jobs`: `{"kind":"plan","template":"parallel-demo"}` or `{"kind":"stock","place":"<id>","want":{"cobblestone":16}}`, 202 with the job, 422 when it cannot be planned; `GET /v1/jobs` (the last 50), `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` (409 while the scheduler holds it)
@@ -57,6 +57,17 @@ deleting its entry from `passkeys.json`. If that file stops parsing, everyone
 is signed out and enrolment is refused until it parses again; it is never
 overwritten. An invite works once: a new device needs a new code in the
 invites Secret.
+
+Sign-in logs one JSON line per step, never a code, challenge, credential id
+or cookie: `ceremony_started` (`kind` `login` or `register`, plus `operator`
+for a register) when a begin request is answered, then `operator_login` or
+`operator_enrolled`, or a refusal (`login_refused` with a `reason`,
+`invite_refused`, `enrol_failed`, `login_failed`). A failure that never
+reaches the server, such as the browser refusing the passkey prompt, is sent
+by the page to `POST /auth/report` and logged as `client_ceremony_failed`
+with `kind`, `stage` (`begin`, `credential`, `finish`) and `error` (a
+`DOMException` name, `network`, `refused` or `other`). The route needs no
+session, takes only those words, and answers 429 past 20 reports a minute.
 
 The `/v1/work/*`, `/v1/jobs` and `/v1/places` routes answer 401 without a session. Every `POST` needs a JSON
 body and `X-Crew-Request: 1`. Stop cancels everything open for the unit and
