@@ -205,6 +205,9 @@ type warriorState struct {
 
 	// calloutUntil holds back a repeating callout.
 	calloutUntil uint64
+
+	// boss is the fight with a boss, when the target is one.
+	boss bossState
 }
 
 // arrowSample is one arrow in flight, one tick ago.
@@ -233,6 +236,7 @@ func (w *warriorState) reset() {
 	w.walk = nil
 	w.struck, w.prevTarget = 0, 0
 	clear(w.arrows)
+	w.boss = bossState{}
 }
 
 // leader is where the warrior anchors: the leader's feet, or its own when it
@@ -328,6 +332,8 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 		w.lowSpoken = false
 	}
 
+	m = l.bossEngaged(p, s, hurt, best, m)
+
 	switch {
 	case order.Kind == OrderRegroup && leaderOK && horizontal(p.Feet, anchor) > regroupWithin:
 		m = modeRegroup
@@ -364,6 +370,9 @@ func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode
 	}
 	if found {
 		return best, modeFight
+	}
+	if e, ok := l.bossNear(anchor); ok {
+		return e, modeFight
 	}
 	if l.attackerPlayer && l.tick < l.attackerUntil && l.tick < l.stepBackEnd() {
 		if e, ok := l.ents.Get(l.attacker); ok && horizontal(p.Feet, e.Pos) <= attributionRange*2 {
@@ -473,7 +482,7 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	p := a.Pose()
 
 	if l.eat.active && w.healing {
-		if l.enemyNear(p.Feet, healSafe) {
+		if l.mealThreatened(p) {
 			// An enemy closed on the meal: let it go and fight.
 			l.stopEating(a, s)
 			w.healing = false
@@ -514,6 +523,9 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 		return l.still(a)
 	}
 
+	if w.boss.active && e.ID == w.boss.id {
+		return l.bossFight(ctx, a, p, e, s)
+	}
 	if w.role == RoleRanger && l.rangerArmed(s) {
 		return l.rangerShoot(ctx, a, p, e, s)
 	}
