@@ -106,18 +106,26 @@ func guard(r roster.Roster, next http.Handler) http.HandlerFunc {
 	}
 }
 
-var radiusPattern = regexp.MustCompile(`^[0-9]{1,3}$`)
+var (
+	radiusPattern = regexp.MustCompile(`^[0-9]{1,3}$`)
+	wirePattern   = regexp.MustCompile(`^[0-9]{1,2}$`)
+)
 
-// cameraQuery forwards only the view radius, and only to the websocket: it is
-// the one query parameter the camera reads, and anything else a visitor
-// supplies must not reach a unit.
+// cameraQuery forwards only the view radius and the wire version the page
+// asks for, and only to the websocket: they are the query parameters the
+// camera reads, and anything else a visitor supplies must not reach a unit.
+// Without the wire version a unit answers every viewer with its oldest
+// format, however new the page.
 func cameraQuery(in *http.Request) string {
 	if !strings.HasSuffix(in.URL.Path, "/v1/camera/ws") {
 		return ""
 	}
-	r := in.URL.Query().Get("r")
-	if !radiusPattern.MatchString(r) {
-		return ""
+	q := url.Values{}
+	if r := in.URL.Query().Get("r"); radiusPattern.MatchString(r) {
+		q.Set("r", r)
 	}
-	return url.Values{"r": {r}}.Encode()
+	if w := in.URL.Query().Get("wire"); wirePattern.MatchString(w) {
+		q.Set("wire", w)
+	}
+	return q.Encode()
 }

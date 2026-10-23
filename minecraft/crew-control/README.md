@@ -54,8 +54,8 @@ crew-control; it never calls them to command them.
 - `POST /v1/squads/{id}/order` with `{"kind":"focus|hold|advance|regroup|retreat","target"?}`: operator session, as the other command routes
 
 Any other path, method, unknown unit or unclean path under `/units/` gets 404
-without an upstream request. Only the `r` query (1 to 3 digits) is forwarded,
-and only on `ws`.
+without an upstream request. Only the `r` query (1 to 3 digits) and the `wire` query (1 or 2
+digits, the camera format the page asks for) are forwarded, and only on `ws`.
 Cookies, `Authorization` and client `X-Forwarded-*` headers are dropped.
 
 ## Unit detail
