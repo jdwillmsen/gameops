@@ -139,10 +139,24 @@ func (d *Director) prepare() error {
 	if d.rallyAfter > 0 && d.rallyEvery <= 0 {
 		return fmt.Errorf("arena: rally_every must be positive when rallies are on")
 	}
+	if d.rallyAfter > 0 && len(d.Warriors) == 0 && d.selectedWaveRallies() {
+		return fmt.Errorf("arena: rallies are on but no warriors were given")
+	}
 	if d.Out == nil {
 		d.Out = io.Discard
 	}
 	return nil
+}
+
+// selectedWaveRallies reports whether any wave this tier can reach would try to
+// pull its survivors to a warrior.
+func (d *Director) selectedWaveRallies() bool {
+	for _, w := range d.Book.UpTo(d.Tier) {
+		if w.rallies() {
+			return true
+		}
+	}
+	return false
 }
 
 // Run executes the selected waves and returns the tuning record. A wave may
