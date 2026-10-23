@@ -441,3 +441,20 @@ func TestASwingBeforeADeathIsNotAnsweredAfterTheRespawn(t *testing.T) {
 		t.Fatalf("hit_landed = %v, want none for a swing from the last life", got)
 	}
 }
+
+func TestADeathPendingWhenTheSessionDropsIsStillCounted(t *testing.T) {
+	r := meleeRig(t)
+	r.setHealth(20)
+	r.step()
+	r.hurt()
+	r.setHealth(0)
+	// The connection drops and comes back before the stepping goroutine
+	// resets the life.
+	r.l.End()
+	r.l.Spawn(selfID)
+	r.l.Reset()
+	got := r.events("warrior_died")
+	if len(got) != 1 || got[0]["killer"] != "zombie" {
+		t.Fatalf("warrior_died = %v, want the zombie's kill from the dropped session", got)
+	}
+}
