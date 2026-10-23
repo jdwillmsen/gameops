@@ -252,6 +252,22 @@ same item, so tools stay put, and it fails after three attempts in a row that
 move nothing. Its `progress` is the total moved and its `qty` the total asked
 for. The destination must not also be a source and a source may be listed once.
 
+`withdraw` moves items out of one chest into the unit's inventory and `deposit`
+moves them back in, each for an exact count of named items. Unlike haul they
+take any server item name, not just the craftable set, so a unit can be sent to
+fetch a tool:
+
+```json
+{"template": "withdraw", "chest": {"x": 0, "y": 0, "z": 0},
+ "items": {"cobblestone": 16, "oak_log": 16}}
+```
+
+`items` lists 1 to 8 items, each 1 to 256, and `chest` has the same bounds as
+`goto`'s `to`. A withdraw only fills empty inventory slots or onto stacks of the
+same item, so tools stay put, and takes up to each count: a chest short of an
+item ends the visit with what it had. A deposit fails naming the item when the
+inventory holds less than asked.
+
 `mine_shaft` digs a staircase down from an entrance, tunnels branches off its
 bottom, climbs out and deposits everything it gained in one chest. It needs a
 pickaxe on the hotbar and is lab-only by construction:
