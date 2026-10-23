@@ -43,6 +43,10 @@ crew-control; it never calls them to command them.
 - `GET /v1/events?unit=&kind=&severity=&since=&until=&limit=&sort=asc|desc&cursor=<next>`: signed-in; the unit event history, newest first by default, every filter optional and exact, times RFC3339. Pages are keyset (`next` carries an `(at, id)` cursor, never an offset), at most 200 events each. Severity is ok, info, warn or crit; kinds are listed under Event history. Rows carry each unit's position, which is why the route is signed-in only
 - `POST /v1/events/prune` (`{"dry_run":true}` counts what would go and lists the oldest 100, `{}` deletes it): signed-in; the 30-day retention, answering `{"pruned","total","would"}`
 - `GET /v1/units/{id}/work?wait=25s[&kinds=command]`, `POST /v1/units/{id}/events`: unit-facing, `Authorization: Bearer <WORK_TOKEN>`, cluster-only
+- `GET /v1/squads` and `/v1/squads/{id}`: the squads, rebuilt from units' hellos, their members' last status reports and who leads by the chain of command (Vanguard, then Striker, then Ranger; a leader reported dead or silent for over 8 s is replaced), plus any battalions the squads nest in, data only; anonymous and read-only
+- `POST /v1/squads/{id}/hello` with `{"unit","squad_name"?,"role","battalion"?,"battalion_name"?}`, `/status` with `{"unit","hp","food","weapon","pos"}`, `/callout` with `{"unit","kind"}` from `low_health|need_heal|target_down|boss_phase`: unit-facing with the `WORK_TOKEN`, cluster-only; state is in memory only
+- `GET /v1/squads/{id}/orders?since=<seq>&wait=25s`: the standing order, deltas since the cursor (`focus|hold|advance|regroup|retreat`, call-outs with their sender) and the leader's position; long-polls, 204 when nothing changed, same auth as the work routes
+- `POST /v1/squads/{id}/order` with `{"kind":"focus|hold|advance|regroup|retreat","target"?}`: operator session, as the other command routes
 
 Any other path, method, unknown unit or unclean path under `/units/` gets 404
 without an upstream request. Only the `r` query (1 to 3 digits) is forwarded,
