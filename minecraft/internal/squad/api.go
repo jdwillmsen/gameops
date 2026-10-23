@@ -60,7 +60,7 @@ type Units interface {
 }
 
 type API struct {
-	store *Store
+	store squadBackend
 	units Units
 	token [sha256.Size]byte
 	now   func() time.Time
@@ -77,6 +77,21 @@ type API struct {
 	streams         int
 	streamEvery     time.Duration
 	streamKeepalive time.Duration
+}
+
+// squadBackend is the store surface the routes use; the concrete Store
+// satisfies it, and tests may hand a thin wrapper over one to hold a
+// read at a chosen point.
+type squadBackend interface {
+	Hello(Hello)
+	Status(statusIn)
+	Callout(calloutIn, time.Time)
+	Order(orderIn)
+	Has(id string) bool
+	Member(squadID, unit string) bool
+	Delta(id string, since int64) (Delta, bool)
+	consoleSnapshot() consoleList
+	consoleSquad(id string) (consoleSquad, bool)
 }
 
 // Routes registers the public reads and, with a token configured, the
@@ -303,6 +318,10 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 	timer := time.NewTimer(parseWait(r.URL.Query().Get("wait")))
 	defer timer.Stop()
 	for {
+		// The waiter registers before the state is read: a broadcast that
+		// lands in between is caught by the read-after-wake, where a
+		// waiter only registered afterwards would sleep through it.
+		wake := a.waiter(id)
 		d, ok := a.store.Delta(id, since)
 		if !ok {
 			http.NotFound(w, r)
@@ -325,7 +344,7 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		select {
-		case <-a.waiter(id):
+		case <-wake:
 		case <-timer.C:
 			w.WriteHeader(http.StatusNoContent)
 			return
