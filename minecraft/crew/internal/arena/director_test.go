@@ -1,6 +1,9 @@
 package arena
 
 import (
+	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +25,7 @@ func testLayout() Layout {
 			Open: gate.Fill("air")}
 	}
 	return Layout{
+		Center:    Point{X: 0, Y: 65, Z: -760},
 		Areas:     []Area{{X0: -16, Z0: -800, X1: 31, Z1: -696}},
 		Pens:      []Pen{pen(1, 10), pen(2, 20)},
 		StartGate: StartGate{Name: "squad_start", Gate: Box{-3, 64, -709, 3, 67, -709}, Open: "fill -3 64 -709 3 67 -709 air"},
@@ -70,10 +74,27 @@ type sim struct {
 	warriorUp  map[string]bool
 	warriorHit map[string]int
 	warriorOff map[string]int
+	warriorPos map[string]TargetPosition
 }
 
 func newSim() *sim {
-	return &sim{countStep: 1, warriorUp: map[string]bool{}, warriorHit: map[string]int{}, warriorOff: map[string]int{}}
+	return &sim{
+		countStep:  1,
+		warriorUp:  map[string]bool{},
+		warriorHit: map[string]int{},
+		warriorOff: map[string]int{},
+		warriorPos: map[string]TargetPosition{},
+	}
+}
+
+// place puts a warrior at a queried position; a name without one answers the
+// querytarget command with an empty log, as a missed read does.
+func (s *sim) place(name string, x, y, z float64) {
+	s.warriorPos[name] = TargetPosition{X: x, Y: y, Z: z}
+}
+
+func targetJSON(p TargetPosition) string {
+	return fmt.Sprintf(`[{"position":{"x":%g,"y":%g,"z":%g}}]`, p.X, p.Y, p.Z)
 }
 
 func found(n int) string {
@@ -124,6 +145,12 @@ func (s *sim) Exec(cmd string) (string, error) {
 		}
 		s.boss = false
 		return found(0), nil
+	case strings.HasPrefix(cmd, "querytarget @a[name="):
+		p, ok := s.warriorPos[queryName(cmd)]
+		if !ok {
+			return "", nil
+		}
+		return targetJSON(p), nil
 	case strings.HasPrefix(cmd, "testfor @e[name="):
 		name := warriorName(cmd)
 		s.warriorHit[name]++
@@ -703,6 +730,7 @@ func TestRallyStartsAfterRallyAfterAndRepeats(t *testing.T) {
 	s := newSim()
 	s.countStep = 0
 	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
 	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
 	d := newDirector(nil, book, clock)
 	d.Warriors = []string{"Vanguard"}
@@ -826,6 +854,7 @@ func TestBossWaveOnlyRalliesWhenTheBookSaysSo(t *testing.T) {
 			s.countStep = 0
 			s.bossPolls = 1000
 			s.warriorUp = map[string]bool{"Vanguard": true}
+			s.place("Vanguard", 0, 65, -760)
 			w := Wave{
 				Name: "Boss", Boss: true, Rally: tt.rally,
 				Mobs: []Mob{{Mob: "warden", Count: 1, Tier: 5, Pen: 0}},
@@ -850,11 +879,15 @@ func TestBossWaveOnlyRalliesWhenTheBookSaysSo(t *testing.T) {
 	}
 }
 
-func TestRallyStaysInsideTheFloor(t *testing.T) {
+// TestRallyFallbackStaysInsideTheFloor covers an anchor too close to the edge
+// for any fixed offset: the survivors go towards the centre instead, clamped
+// so the teleport cannot land in the stands.
+func TestRallyFallbackStaysInsideTheFloor(t *testing.T) {
 	clock := newFakeClock()
 	s := newSim()
 	s.countStep = 0
 	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 3, 65, -760)
 	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
 	book.RallyAfter = &Duration{5 * time.Second}
 	d := newDirector(nil, book, clock)
@@ -863,9 +896,141 @@ func TestRallyStaysInsideTheFloor(t *testing.T) {
 	d.Layout.FloorRadius = 4
 
 	f, at, result := rallySim(t, d, clock, s)
-	if len(at) != 0 || result.Rallies != 0 || len(tpCommands(t, f.Cmds)) != 0 {
-		t.Errorf("rallies at %v (%d), want none outside a 4-block floor", at, result.Rallies)
+	if len(at) != 1 || result.Rallies != 1 {
+		t.Fatalf("rallies at %v (%d), want the fallback to fire once", at, result.Rallies)
 	}
+	want := "execute as @e[tag=arena_wave] run tp @s -2 65 -760"
+	if got := tpCommands(t, f.Cmds); len(got) != 1 || got[0] != want {
+		t.Errorf("fallback teleport = %v, want %q", got, want)
+	}
+}
+
+func TestRallyDestinationStaysInsideTheFloor(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 40, 65, -760)
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{5 * time.Second}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WaveTimeout = 10 * time.Second
+	d.Layout.FloorRadius = 45
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) == 0 || result.Rallies != len(at) {
+		t.Fatalf("rallies at %v (%d), want at least one", at, result.Rallies)
+	}
+	for _, cmd := range tpCommands(t, f.Cmds) {
+		x, z := tpDestination(t, cmd, 40, -760)
+		if dist := math.Hypot(x, z+760); dist > 43 {
+			t.Errorf("destination %.1f,%.1f is %.1f from the centre, want at most 43: %q", x, z, dist, cmd)
+		}
+	}
+	if got := tpCommands(t, f.Cmds)[0]; got != `execute as @e[tag=arena_wave] at @a[name="Vanguard"] run tp @s ~-8 ~ ~0` {
+		t.Errorf("east-edge rally = %q, want the first offset that fits", got)
+	}
+}
+
+func TestRallyCentreWarriorUsesTheOffsets(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{5 * time.Second}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WaveTimeout = 10 * time.Second
+	d.Layout.FloorRadius = 45
+
+	f, at, result := rallySim(t, d, clock, s)
+	if len(at) != 1 || result.Rallies != 1 {
+		t.Fatalf("rallies at %v (%d), want one", at, result.Rallies)
+	}
+	want := `execute as @e[tag=arena_wave] at @a[name="Vanguard"] run tp @s ~8 ~ ~0`
+	if got := tpCommands(t, f.Cmds); len(got) != 1 || got[0] != want {
+		t.Errorf("centre rally = %v, want %q", got, want)
+	}
+}
+
+func TestRallyUnreadablePositionSkips(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	book.RallyAfter = &Duration{5 * time.Second}
+	d := newDirector(nil, book, clock)
+	d.Warriors = []string{"Vanguard"}
+	d.WaveTimeout = 10 * time.Second
+	d.Layout.FloorRadius = 45
+	var log strings.Builder
+	d.Out = &log
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "querytarget ") {
+			return "", nil
+		}
+		return s.Exec(cmd)
+	}}
+	d.Console = f
+
+	result, err := d.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Rallies != 0 {
+		t.Errorf("result rallies = %d, want 0 when the anchor cannot be read", result.Rallies)
+	}
+	if got := tpCommands(t, f.Cmds); len(got) != 0 {
+		t.Errorf("teleports = %v, want none without an anchor position", got)
+	}
+	if f.Count(`querytarget @a[name="Vanguard"]`) == 0 {
+		t.Error("the director never queried the anchor position")
+	}
+	if !strings.Contains(log.String(), "rally skipped") {
+		t.Errorf("log lacks the skipped-rally line:\n%s", log.String())
+	}
+}
+
+// tpDestination resolves a rally teleport against the anchor's position so a
+// test can check where the mobs actually land.
+func tpDestination(t *testing.T, cmd string, anchorX, anchorZ float64) (float64, float64) {
+	t.Helper()
+	_, rest, ok := strings.Cut(cmd, " tp @s ")
+	if !ok {
+		t.Fatalf("no tp target in %q", cmd)
+	}
+	fields := strings.Fields(rest)
+	if len(fields) != 3 {
+		t.Fatalf("tp target = %q", rest)
+	}
+	coord := func(s string, base float64) float64 {
+		if s == "~" {
+			return base
+		}
+		if rel, ok := strings.CutPrefix(s, "~"); ok {
+			v, err := strconv.ParseFloat(rel, 64)
+			if err != nil {
+				t.Fatalf("coordinate %q: %v", s, err)
+			}
+			return base + v
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			t.Fatalf("coordinate %q: %v", s, err)
+		}
+		return v
+	}
+	return coord(fields[0], anchorX), coord(fields[2], anchorZ)
+}
+
+func queryName(cmd string) string {
+	name := strings.TrimSuffix(strings.TrimPrefix(cmd, "querytarget @a[name="), "]")
+	return strings.Trim(name, `"`)
 }
 
 // tpCommands returns every teleport and fails the test if one moves anything
