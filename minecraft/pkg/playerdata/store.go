@@ -1,4 +1,4 @@
-package players
+package playerdata
 
 import (
 	"math"

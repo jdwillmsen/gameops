@@ -1,4 +1,4 @@
-package players
+package playerdata
 
 import (
 	"errors"
@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
-
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/chunks"
 )
 
 const (
@@ -137,7 +135,7 @@ func Decode(data []byte) (int64, Record, error) {
 		r.GameMode = gameMode(mode)
 	}
 	if d, ok := intOf(m, "DimensionId"); ok {
-		r.Dimension = chunks.Dimension(d).Name()
+		r.Dimension = dimensionName(d)
 	}
 	if pos := list(m["Pos"]); len(pos) == 3 && r.Dimension != "" {
 		x, okX := number(pos[0])
@@ -191,6 +189,20 @@ func gameMode(n int) string {
 	return "default"
 }
 
+// dimensionName is Bedrock's own number for a dimension, named as the map
+// does. The save writes the number; a reader wants a word.
+func dimensionName(d int) string {
+	switch d {
+	case 0:
+		return "overworld"
+	case 1:
+		return "nether"
+	case 2:
+		return "end"
+	}
+	return fmt.Sprintf("dimension-%d", d)
+}
+
 // place reads a block position written as three int tags with a prefix and
 // an axis letter. The game writes the lowest int where there is none.
 func place(m compound, prefix, dimension string) *Place {
@@ -208,7 +220,7 @@ func place(m compound, prefix, dimension string) *Place {
 	if !ok {
 		d = 0
 	}
-	return &Place{x, y, z, chunks.Dimension(d).Name()}
+	return &Place{x, y, z, dimensionName(d)}
 }
 
 // reader reads lists of stacks for one record, and holds how many more

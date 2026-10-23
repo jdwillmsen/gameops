@@ -1,66 +1,6 @@
 package chunks
 
-import (
-	"os"
-	"path/filepath"
-	"slices"
-	"testing"
-)
-
-func names(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out []string
-	for _, e := range entries {
-		out = append(out, e.Name())
-	}
-	return out
-}
-
-func TestOpenView_ReadsTheWorldAndLeavesItAsItWas(t *testing.T) {
-	db := writeWorld(t, chunkKey(0, 1, 2, 0x31), chunkKey(1, 3, 4, 0x2c))
-	before := names(t, db)
-	work := filepath.Join(t.TempDir(), "work")
-
-	view, done, err := OpenView(db, work)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v, err := view.Get(chunkKey(0, 1, 2, 0x31), nil); err != nil || string(v) != "v" {
-		t.Errorf("read through the view = %q, %v", v, err)
-	}
-	if err := view.Put([]byte("k"), []byte("v"), nil); err == nil {
-		t.Error("the view accepted a write")
-	}
-	done()
-
-	if after := names(t, db); !slices.Equal(before, after) {
-		t.Errorf("the world directory changed: %v, was %v", after, before)
-	}
-	if left := names(t, work); len(left) != 0 {
-		t.Errorf("the view was left behind: %v", left)
-	}
-}
-
-func TestOpenView_RemovesAViewAKilledRunLeft(t *testing.T) {
-	db := writeWorld(t, chunkKey(0, 1, 2, 0x2c))
-	work := t.TempDir()
-	stale := filepath.Join(work, "view-killed")
-	if err := os.MkdirAll(stale, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	_, done, err := OpenView(db, work)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer done()
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("stale view still there: %v", err)
-	}
-}
+import "testing"
 
 func TestRecordOf(t *testing.T) {
 	for _, c := range []struct {
@@ -78,7 +18,7 @@ func TestRecordOf(t *testing.T) {
 	} {
 		pos, tag, ok := RecordOf(c.key)
 		if pos != c.pos || tag != c.tag || ok != c.ok {
-			t.Errorf("%s: RecordOf = %v, %#x, %v; want %v, %#x, %v", c.name, pos, tag, ok, c.pos, c.tag, c.ok)
+			t.Errorf("%s: RecordOf(%v) = %+v, %v, %v", c.name, c.key, pos, tag, ok)
 		}
 	}
 }

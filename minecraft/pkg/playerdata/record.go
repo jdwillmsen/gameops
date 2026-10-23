@@ -1,8 +1,8 @@
-// Package players reads what the world save holds about each player: their
-// vitals, what they carry, where they died and sleep. It is read from the
-// mirrored copy of the world once per snapshot and never from the live
-// server, so everything here is as old as the last save.
-package players
+// Package playerdata reads what a Bedrock world's save holds about each
+// player: their vitals, what they carry, where they died and sleep. It is
+// read from a copy of the world and never from the live server, so
+// everything here is as old as the last save.
+package playerdata
 
 // Gauge is an attribute with its ceiling.
 type Gauge struct {

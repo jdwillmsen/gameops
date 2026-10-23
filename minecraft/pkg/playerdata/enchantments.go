@@ -1,4 +1,4 @@
-package players
+package playerdata
 
 // enchantments are the Bedrock enchantments by the number the save writes.
 // The save has no names; an id not listed shows as its number.

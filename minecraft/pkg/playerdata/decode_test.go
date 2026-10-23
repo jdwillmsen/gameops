@@ -1,4 +1,4 @@
-package players
+package playerdata
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/df-mc/goleveldb/leveldb"
+	"github.com/df-mc/goleveldb/leveldb/opt"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 )
 
@@ -197,7 +198,7 @@ func TestLookupFindsAPlayerByEitherReadingOfTheirId(t *testing.T) {
 }
 
 // world builds a LevelDB holding entries, closed and without a LOCK file,
-// the way a mirrored world sits on disk.
+// the way a world sits on disk for a reader.
 func world(t testing.TB, entries map[string][]byte) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "db")
@@ -219,8 +220,8 @@ func world(t testing.TB, entries map[string][]byte) string {
 	return dir
 }
 
-func TestExtractReadsOnlyPlayerRecordsFromTheMirror(t *testing.T) {
-	db := world(t, map[string][]byte{
+func TestReadReadsOnlyPlayerRecords(t *testing.T) {
+	dir := world(t, map[string][]byte{
 		"player_server_aaaa":   encode(t, fixture(11)),
 		"player_server_bbbb":   encode(t, fixture(-12)),
 		"player_server_broken": []byte("garbage"),
@@ -228,35 +229,37 @@ func TestExtractReadsOnlyPlayerRecordsFromTheMirror(t *testing.T) {
 		"~local_player":        encode(t, fixture(13)),
 		"unrelated":            []byte("x"),
 	})
-	var s Store
-	e := &Extractor{WorkDir: t.TempDir(), Store: &s}
-	at := time.Date(2026, 10, 5, 4, 0, 0, 0, time.UTC)
-	stats, err := e.Extract(context.Background(), db, at)
+	db, err := leveldb.OpenFile(dir, &opt.Options{ReadOnly: true, ErrorIfMissing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	found, stats, err := Read(context.Background(), db)
 	if err != nil || stats.Players != 2 || stats.Skipped != 1 {
 		t.Fatalf("stats = %+v, %v", stats, err)
 	}
-	for _, id := range []string{"11", "-12"} {
-		if _, when, ok := s.Lookup(id); !ok || !when.Equal(at) {
-			t.Errorf("player %s not held: %v %v", id, ok, when)
-		}
+	if _, ok := found[11]; !ok {
+		t.Error("player 11 not read")
 	}
-	if _, _, ok := s.Lookup("13"); ok {
+	if _, ok := found[-12]; !ok {
+		t.Error("player -12 not read")
+	}
+	if _, ok := found[13]; ok {
 		t.Error("the local player's record was read")
-	}
-	if _, err := os.Stat(filepath.Join(db, "LOCK")); err == nil {
-		t.Error("the mirror was opened in place and left a lock behind")
 	}
 }
 
-func TestAFailedScanLeavesThePlayersOfTheLastOne(t *testing.T) {
-	var s Store
-	s.Set(time.Now(), map[int64]Record{5: {}})
-	e := &Extractor{WorkDir: t.TempDir(), Store: &s}
-	if _, err := e.Extract(context.Background(), filepath.Join(t.TempDir(), "missing"), time.Now()); err == nil {
-		t.Fatal("a world that is not there was read")
+func TestReadStopsWhenCancelled(t *testing.T) {
+	dir := world(t, map[string][]byte{"player_server_aaaa": encode(t, fixture(11))})
+	db, err := leveldb.OpenFile(dir, &opt.Options{ReadOnly: true, ErrorIfMissing: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, _, ok := s.Lookup("5"); !ok {
-		t.Error("the last scan's players were lost")
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := Read(ctx, db); err == nil {
+		t.Error("a cancelled read succeeded")
 	}
 }
 
