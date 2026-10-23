@@ -294,7 +294,7 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 			case best.ID != 0 && !atLeader && l.retreating < retreatLimit:
 				m = modeRetreat
 			}
-		} else {
+		} else if !l.enemyNear(p.Feet, healSafe) {
 			w.healWant = l.healFood(s).Name != ""
 			if !w.healWant {
 				// Nothing to eat: say so, and keep the old reflex of
@@ -305,6 +305,9 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 				}
 			}
 		}
+		// An enemy between pressRange and healSafe would abort the meal the
+		// tick it started, so healWant stays clear and the unit fights: a
+		// meal that cannot finish is worse than the health it might restore.
 	} else if s.HealthKnown && s.Health > healBelow {
 		w.lowSpoken = false
 	}

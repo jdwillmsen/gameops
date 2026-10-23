@@ -633,6 +633,30 @@ func TestHurtWarriorAbortsTheMealWhenAnEnemyClosesIn(t *testing.T) {
 	}
 }
 
+func TestHurtWarriorFightsWhenAnEnemyIsInsideHealSafeButBeyondPressRange(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1)
+	r.give(3, 363, 2) // golden apples
+	r.setHealth(10)
+	// 2.0 blocks: past pressRange, so the unit wants to eat, but inside
+	// healSafe, so the meal aborts the tick it starts. It must fight instead
+	// of restarting the meal every tick.
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+
+	for i := 0; i < 40 && len(r.out.attacks()) == 0; i++ {
+		r.step()
+	}
+	if n := len(r.out.attacks()); n == 0 {
+		t.Fatalf("no attacks in 40 ticks with a zombie %.1f blocks away", dist(r.feet(), mgl32.Vec3{22.5, 1, 20.5}))
+	}
+	if r.l.warrior.healWant {
+		t.Error("healWant stayed set with an enemy inside healSafe")
+	}
+	if n := r.out.uses(3); n != 0 {
+		t.Errorf("%d apple uses with an enemy inside healSafe, want the fight instead", n)
+	}
+}
+
 func TestNeedHealCalloutWhenThereIsNothingToEat(t *testing.T) {
 	squad := &fakeSquad{leaderID: "crew-18", leader: start, leaderOK: true}
 	r := newWarrior(t, "striker", start)
