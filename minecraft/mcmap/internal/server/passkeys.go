@@ -281,10 +281,10 @@ func (s *Server) handleLogoutAll(w http.ResponseWriter, r *http.Request) {
 // someone else added.
 func (s *Server) revokeEverywhere(xuid string) error {
 	if err := s.Sessions.Revoked.Revoke(xuid, s.Sessions.Now()); err != nil {
-		s.log().Error("map logins not revoked", "xuid", xuid, "error", err.Error())
+		s.log().Error("map logins not revoked", "xuid", logSafe(xuid), "error", logSafe(err.Error()))
 		return err
 	}
-	s.log().Info("map logins revoked", "xuid", xuid)
+	s.log().Info("map logins revoked", "xuid", logSafe(xuid))
 	// Whoever holds the player's Microsoft account could otherwise sign
 	// straight back in; they need a fresh !map in game first.
 	if s.Known != nil {
@@ -305,4 +305,10 @@ func (s *Server) revokeEverywhere(xuid string) error {
 		}
 	}
 	return nil
+}
+
+// logSafe strips line breaks from client-supplied text so it cannot forge
+// extra log records.
+func logSafe(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }

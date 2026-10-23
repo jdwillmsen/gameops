@@ -7,6 +7,7 @@ import (
 	"errors"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -593,9 +594,15 @@ func (r *Runner) finish(e *entry, state, reason string) {
 
 // logEvent writes only identifiers and state: the request holds coordinates.
 func (r *Runner) logEvent(event string, e *entry) {
-	f := map[string]any{"id": e.ID, "template": e.Template, "state": e.State}
+	f := map[string]any{"id": logSafe(e.ID), "template": logSafe(e.Template), "state": e.State}
 	if e.Reason != "" {
-		f["reason"] = e.Reason
+		f["reason"] = logSafe(e.Reason)
 	}
 	r.log.Info(event, f)
+}
+
+// logSafe strips line breaks from request-supplied text so it cannot forge
+// extra log records.
+func logSafe(s string) string {
+	return strings.NewReplacer("\r", "", "\n", "").Replace(s)
 }
