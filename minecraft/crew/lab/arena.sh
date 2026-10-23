@@ -15,6 +15,9 @@
 #                            [--timeout <duration>] [--max-live N] [--poll <d>]
 #                            [--rally-after <d>] [--rally-every <d>]
 #                            [--place-squad=false]
+#        arena.sh boss <lab> --mob <id> [--name W] [--effects "cmd1,cmd2"]
+#                            [--runs N] [--timeout <duration>] [--warriors <names>]
+#                            [--log <path>] [--summary]
 #        arena.sh reset <lab>
 #        arena.sh status <lab> [--warriors <names>]
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
@@ -26,6 +29,15 @@
 # warrior deaths, rallies). reset kills only the director's tagged mobs; status
 # prints the live wave, boss and warrior counts. A k8s: run needs
 # --confirm-overwrite because it puts buffed mobs into the shared world.
+#
+# boss summons one named mob 10 blocks from the squad, fights it --runs times
+# and appends one JSON record per run (outcome killed|wipe|timeout, seconds,
+# deaths per warrior) to the --log JSONL, default ~/.local/state/arena-runs.jsonl.
+# --effects are console commands, comma separated, run right after the summon.
+# --summary prints runs and median seconds and deaths per boss and effect set
+# from the log without fighting. It exits 2 and touches nothing while any
+# player outside the crew is online, which is why a k8s: target needs no
+# --confirm-overwrite here.
 #
 # Survivors are rallied (teleported to a ring around the first living warrior)
 # rally_after seconds after a wave's first spawn, then every rally_every while
@@ -51,7 +63,7 @@ set -euo pipefail
 confirm=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
+usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;
@@ -94,7 +106,7 @@ if [[ $action == layout ]]; then
 fi
 
 case $action in
-  run | reset | status) ;;
+  run | boss | reset | status) ;;
   build) ;;
   *)
     echo "$usage" >&2
@@ -133,6 +145,29 @@ if [[ $action != build ]]; then
       trap 'rm -f "$layout"' EXIT
       go_run ./minecraft/crew/cmd/labcourses arena-layout >"$layout"
       go_run ./minecraft/crew/cmd/arenadirector run --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "${run_args[@]}"
+      ;;
+    boss)
+      boss_args=()
+      while (($#)); do
+        case $1 in
+          --log)
+            boss_args+=(--log "$(absolutise "${2:?$usage}")")
+            shift 2
+            ;;
+          --log=*)
+            boss_args+=("--log=$(absolutise "${1#--log=}")")
+            shift
+            ;;
+          *)
+            boss_args+=("$1")
+            shift
+            ;;
+        esac
+      done
+      layout=$(mktemp)
+      trap 'rm -f "$layout"' EXIT
+      go_run ./minecraft/crew/cmd/labcourses arena-layout >"$layout"
+      go_run ./minecraft/crew/cmd/arenadirector boss --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "${boss_args[@]}"
       ;;
     reset)
       go_run ./minecraft/crew/cmd/arenadirector reset --lab "$lab" --compose "$here/compose.yaml" "$@"

@@ -23,4 +23,11 @@ chmod +x "$tmp/bin/go"
 grep -Fxq -- "$tmp/waves.yaml" "$tmp/calls" ||
   fail "relative --waves was not made absolute against the caller's cwd"
 grep -Fxq -- "run" "$tmp/calls" || fail "the director never ran"
+
+: >"$tmp/calls"
+(cd "$tmp" && CALL_LOG="$tmp/calls" PATH="$tmp/bin:$PATH" "$here/arena.sh" boss k8s:ns/pod --mob warden --log runs/log.jsonl >/dev/null)
+grep -Fxq -- "$tmp/runs/log.jsonl" "$tmp/calls" ||
+  fail "relative --log was not made absolute against the caller's cwd"
+grep -Fxq -- "boss" "$tmp/calls" || fail "boss never reached the director"
+
 echo ok
