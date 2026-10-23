@@ -552,3 +552,36 @@ func TestShaftWithAnEmptyChestStillRunsWhenNothingNeedsBridging(t *testing.T) {
 		t.Fatalf("status %v, err %v", st, err)
 	}
 }
+
+// pitWorld is the mine world with a one-wide pit three deep at (5, -2..0, 5),
+// too deep to walk or jump out of.
+func pitWorld() simWorld {
+	w := mineWorld()
+	w.fill("air", 5, -2, 5, 5, 0, 5)
+	return w
+}
+
+func TestShaftTrappedInAPitPillarsUpWithItsBlocksAndGoesOn(t *testing.T) {
+	w := pitWorld()
+	r := withPickaxe(newRig(t, w, feetAt(5, -2, 5)))
+	r.give(3, idCobblestone, 8)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(2, 0, 0), nil), 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.placed < 2 {
+		t.Errorf("placed %d blocks, want a pillar of at least 2", r.placed)
+	}
+	if r.Pose().Feet.Y() < 0.9 {
+		t.Errorf("unit ended at %v, still down", r.Pose().Feet)
+	}
+}
+
+func TestShaftTrappedInAPitWithNoBlocksFailsSayingSo(t *testing.T) {
+	w := pitWorld()
+	r := withPickaxe(newRig(t, w, feetAt(5, -2, 5)))
+	st, err := r.run(newShaft(t, w, r, shaftSpec(2, 0, 0), nil), 4000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "out of blocks") {
+		t.Fatalf("status %v, err %v, want a failure naming the lack of blocks", st, err)
+	}
+}
