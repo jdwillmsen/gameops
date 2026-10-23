@@ -147,6 +147,16 @@ export function formatParams({ sort, dir, filter }) {
 
 // ---- keyboard ----
 
+export const needsAttention = r => r.state === 'dead' || r.state === 'stuck' || r.state === 'offline' || r.lowHealth || r.lowHunger;
+
+// The next row after cur that needs a look, worst state first; '' when none.
+export function nextAttention(rows, cur) {
+  const bad = sortRows(rows.filter(needsAttention), 'state');
+  if (!bad.length) return '';
+  const i = bad.findIndex(r => r.id === cur);
+  return bad[(i + 1) % bad.length].id;
+}
+
 // Moves among the ids on screen. It stops at the ends: a table is not a ring,
 // and wrapping past the last row hides that the list ended.
 export function moveFocus(ids, cur, key, page = 8) {
