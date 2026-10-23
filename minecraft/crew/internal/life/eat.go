@@ -82,6 +82,9 @@ func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 // Tend sends exactly one input for a tick Tending claimed.
 func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	l.idle = idleState{}
+	// A fight may have ended with the shield still raised; a meal needs the
+	// hand, and its use would keep the shield up.
+	l.stowShield(a)
 	if !l.eat.active && l.kit.visit == nil {
 		if food, ok := l.wantsMeal(s); ok {
 			l.eat = eatState{active: true, slot: food.Slot, food: food, startHunger: s.Hunger, startCount: food.Count, blockedUntil: l.eat.blockedUntil}

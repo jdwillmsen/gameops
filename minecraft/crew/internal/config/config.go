@@ -76,6 +76,10 @@ type Config struct {
 	Defend bool
 	// Eat lets a hungry unit eat food from its hotbar.
 	Eat bool
+	// Role opts the unit into the warrior engine: vanguard, striker or
+	// ranger. Empty leaves the reactive defence in charge; anything else is
+	// refused rather than silently fighting on.
+	Role string
 	// KitChest is the chest a unit without a weapon or food rearms from; nil
 	// leaves the feature off. KitFood is how many food items one visit takes.
 	KitChest *[3]int32
@@ -168,6 +172,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	role, err := roleSetting()
+	if err != nil {
+		return Config{}, err
+	}
 	kitChest, err := positionOptional("KIT_CHEST")
 	if err != nil {
 		return Config{}, err
@@ -207,11 +215,27 @@ func Load() (Config, error) {
 		IdleRadius: idleRadius,
 		Defend:     defend,
 		Eat:        eat,
+		Role:       role,
 		KitChest:   kitChest,
 		KitFood:    kitFood,
 		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
 		JoinDelayS: joinDelay,
 	}, nil
+}
+
+// warriorRoles are the roles a unit may claim, kept in step with the life
+// package's own list: config cannot import life without dragging the whole
+// engine into every binary that reads settings.
+var warriorRoles = map[string]bool{"vanguard": true, "striker": true, "ranger": true}
+
+// roleSetting reads CREW_ROLE: empty for no warrior, one of the warrior
+// roles to fight as one.
+func roleSetting() (string, error) {
+	role := strings.TrimSpace(os.Getenv("CREW_ROLE"))
+	if role == "" || warriorRoles[role] {
+		return role, nil
+	}
+	return "", fmt.Errorf("CREW_ROLE=%q: want vanguard, striker or ranger", role)
 }
 
 // positionOptional reads "x,y,z" block coordinates. Unset is nil. The error

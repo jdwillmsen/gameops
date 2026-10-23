@@ -74,6 +74,8 @@ func (l *Life) Swimming(p act.Pose) bool {
 // Swim sends this tick's one input: toward the nearest shore the unit can step
 // onto, rising from the depths and then riding just under the surface.
 func (l *Life) Swim(ctx context.Context, a skill.Actuator) error {
+	// Water cancels a shield's use anyway; do not leave it hanging.
+	l.stowShield(a)
 	p := a.Pose()
 	st := &l.swim
 	if !st.active {

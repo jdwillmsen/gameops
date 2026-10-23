@@ -29,6 +29,10 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:cooked_beef", RuntimeID: 341},
 	{Name: "minecraft:rotten_flesh", RuntimeID: 342},
 	{Name: "minecraft:stone_sword", RuntimeID: 343},
+	{Name: "minecraft:shield", RuntimeID: 360},
+	{Name: "minecraft:bow", RuntimeID: 361},
+	{Name: "minecraft:arrow", RuntimeID: 362},
+	{Name: "minecraft:golden_apple", RuntimeID: 363},
 }
 
 // world is a known block map: dirt at y=0, air above, bounded by size.
