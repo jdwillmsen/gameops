@@ -49,6 +49,7 @@ const (
 	shMend
 	shStock
 	shArm
+	shClimb
 )
 
 // ShaftSpec is a stair shaft with branch tunnels off its bottom.
@@ -176,6 +177,9 @@ type MineShaft struct {
 	bridgeThen shaftPhase
 	mendThen   shaftPhase
 	mendTried  bool
+	climbs     int
+	climbThen  shaftPhase
+	cl         *climber
 }
 
 // NewMineShaft refuses a plan that would open a cell outside the area.
@@ -234,6 +238,8 @@ func (m *MineShaft) Resume() {
 		}
 	case shArm:
 		m.waited = 0
+	case shClimb:
+		m.cl, m.phase = nil, m.climbThen
 	case shStock:
 		if r, ok := m.sub.(Resumer); ok {
 			r.Resume()
@@ -276,6 +282,8 @@ func (m *MineShaft) Step(ctx context.Context, a Actuator) (Status, error) {
 		switch m.phase {
 		case shArm:
 			o = m.arm(a)
+		case shClimb:
+			o = m.climb(a)
 		case shStock:
 			o = m.stock(ctx, a)
 		case shEntrance:
@@ -331,6 +339,14 @@ func (m *MineShaft) walk(a Actuator, to protocol.BlockPos, within float64, then 
 		// A stair with a missing floor is what cut the unit off from its goal;
 		// mend it from the side the unit is on, then try again.
 		m.mendTried, m.mendThen, m.phase = true, m.phase, shMend
+		return next
+	}
+	if what != "" && m.climbs < 2 {
+		// No walking path and no stair floor to mend: the unit is cut off from
+		// the stair, as after a knockback into a cave beneath it. Build its way up.
+		m.climbs++
+		m.cl = &climber{world: m.world, self: m.self, goal: to}
+		m.climbThen, m.phase = m.phase, shClimb
 		return next
 	}
 	if what != "" {
@@ -670,6 +686,20 @@ func (m *MineShaft) arm(a Actuator) outcome {
 	return outcome{st: Running}
 }
 
+// climb pillars the unit up until a walking path to its goal exists, then
+// goes back to what it was doing.
+func (m *MineShaft) climb(a Actuator) outcome {
+	done, err := m.cl.step(a)
+	switch {
+	case err != nil:
+		return m.failed(a, fmt.Errorf("climbing out of a trap: %w", err))
+	case done:
+		m.cl, m.selected, m.phase = nil, false, m.climbThen
+		return next
+	}
+	return outcome{st: Running}
+}
+
 // stock tops the bridging reserve up from the deposit chest. A chest that is
 // empty or cannot be opened does not stop the shaft: it only matters if a
 // floor turns out to be missing.
@@ -719,7 +749,7 @@ func (m *MineShaft) bridge(ctx context.Context, a Actuator) outcome {
 		}
 		return m.failed(a, fmt.Errorf("bridging a missing stair floor: %w", err))
 	case Done:
-		m.sub, m.phase = nil, m.bridgeThen
+		m.sub, m.phase, m.selected = nil, m.bridgeThen, false
 		m.emit("mine_bridge", map[string]any{"step": m.si})
 		return next
 	}
