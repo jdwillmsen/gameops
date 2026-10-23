@@ -95,6 +95,10 @@ const (
 	// healSafe is how far every enemy must be before a warrior eats with
 	// its guard down.
 	healSafe = 3.0
+	// pressRange is how close a mob has to be to count as pressing a hurt
+	// warrior into falling back: inside the mob's own swing range, not the
+	// warrior's, or no hurt warrior could ever close to fight.
+	pressRange = 1.6
 	// regroupWithin is how close to the leader a hurt warrior regroups.
 	regroupWithin = 3.0
 	// kiteBackoff is how close a mob may get before a Ranger gives ground.
@@ -272,15 +276,19 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 
 	if s.HealthKnown && s.Health <= healBelow {
 		if !w.lowSpoken {
+			// One callout per slump, not per tick, and not rate-limited:
+			// the hold-down belongs to the standing need_heal that may
+			// follow on the same tick.
 			w.lowSpoken = true
-			w.callout(CalloutLowHealth, l.tick)
+			w.speak(CalloutLowHealth)
 		}
-		if l.enemyNear(p.Feet, healSafe) {
+		if l.enemyNear(p.Feet, pressRange) {
+			// Pressed at hurt health — apples or not, the squad should
+			// know. Fall back on the leader; without one run, until
+			// running has been tried and failed, which is when a cornered
+			// unit stands and fights. Already at the leader, nowhere is
+			// safer: the fight is on.
 			w.callout(CalloutNeedHeal, l.tick)
-			// Too hurt to eat standing here. Fall back on the leader;
-			// without one run, until running has been tried and failed,
-			// which is when a cornered unit stands and fights. Already
-			// at the leader, nowhere is safer: the fight is on.
 			atLeader := leaderOK && horizontal(p.Feet, anchor) <= regroupWithin
 			switch {
 			case leaderOK && !atLeader:
