@@ -314,9 +314,12 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 		// turn. A unit that echoed the revision it last saw also answers
 		// the moment the leader line changed and no message moved the
 		// cursor to say so; without an echoed revision there is no
-		// comparison to make, so the poll keeps its wait.
+		// comparison to make, so the poll keeps its wait. A cursor past
+		// the squad's own cursor is a restart of the log under an old
+		// client: the resync read answers at once.
+		past := since > d.Cursor
 		staleRev := hasRev && rev != d.Rev
-		if since == 0 || staleRev || d.Cursor > since || len(d.Orders) > 0 || len(d.Callouts) > 0 {
+		if since == 0 || past || staleRev || d.Cursor > since || len(d.Orders) > 0 || len(d.Callouts) > 0 {
 			writeJSON(w, http.StatusOK, d)
 			return
 		}

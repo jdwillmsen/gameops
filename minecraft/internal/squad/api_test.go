@@ -390,14 +390,13 @@ func TestOrdersLongPoll(t *testing.T) {
 		t.Errorf("the joining unit's first read says the leader is %+v", d.Leader)
 	}
 
-	// A cursor ahead of the squad changes nothing, so the poll rides out
-	// its wait.
-	start := time.Now()
-	if resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=1s&since=1", "", nil); resp.StatusCode != http.StatusNoContent {
-		t.Errorf("a fully read poll answered %d", resp.StatusCode)
-	}
-	if d := time.Since(start); d < 900*time.Millisecond {
-		t.Errorf("the 204 came back after %v, ahead of its wait", d)
+	// A cursor ahead of the squad is a unit that read a log this server no
+	// longer has: crew-control's restart winds seq back to 0 under an old
+	// cursor, so the server answers at once with everything from the
+	// start instead of letting the unit sit on a cursor nothing will ever
+	// pass.
+	if resp := r.do(t, "GET", "/v1/squads/alpha/orders?wait=1s&since=9", "", nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("a poll past the log answered %d, want a resync 200", resp.StatusCode)
 	}
 
 	// Prime the cursor with one order, so the waiting poll is genuinely out
@@ -406,6 +405,12 @@ func TestOrdersLongPoll(t *testing.T) {
 	r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"hold"}`, op)
 	if d := r.ordersSince(t, "alpha", "0"); d.Cursor != 1 || d.Order.Kind != "hold" {
 		t.Fatalf("the priming read is cursor %d order %+v, want seq 1 / hold", d.Cursor, d.Order)
+	}
+	// The same hold rides a resync read: the restarted-log unit gets the
+	// standing order again from seq 0.
+	if d := r.ordersSince(t, "alpha", "9"); d.Cursor != 1 ||
+		d.Order == nil || d.Order.Seq != 1 || len(d.Orders) != 1 {
+		t.Errorf("a past-the-log poll after order seq 1 delivered %+v, want the full log", d)
 	}
 
 	type answer struct {

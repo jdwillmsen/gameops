@@ -241,6 +241,13 @@ func (st *Store) Delta(id string, since int64) (Delta, bool) {
 	if !ok {
 		return Delta{}, false
 	}
+	// A cursor past the squad's own log belongs to a unit that read a log
+	// this server no longer has: a restart of crew-control winds seq back
+	// to 0 while the unit keeps its cursor, and no message would ever
+	// carry new seq past it again. Read it as a fresh resync instead.
+	if since > sq.seq {
+		since = 0
+	}
 	d := Delta{Cursor: sq.seq, Rev: sq.rev}
 	// A cursor older than what is kept would deliver a hole as "nothing
 	// new"; back it up to the oldest kept entry so the resyncing unit gets

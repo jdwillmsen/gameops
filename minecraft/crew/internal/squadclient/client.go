@@ -267,9 +267,11 @@ func (c *Client) listen(ctx context.Context) {
 		}
 		if ans != nil {
 			c.apply(ans)
-			if ans.Cursor > cursor {
-				cursor = ans.Cursor
-			}
+			// The answer is the server's whole truth: a restart of
+			// crew-control winds the squad's seq back to 0, so the cursor
+			// steps down with it rather than polling past every new
+			// message for ever.
+			cursor = ans.Cursor
 			rev = ans.Rev
 		}
 		// An answer that carried nothing new came back at once; pace the
