@@ -159,36 +159,57 @@ func (st *Store) consoleSnapshot() consoleList {
 	sort.Strings(ids)
 	out := make([]consoleSquad, 0, len(ids))
 	for _, id := range ids {
-		sq := st.squads[id]
-		v := st.render(sq, now)
-		cs := consoleSquad{
-			ID:        v.ID,
-			Name:      v.Name,
-			Leader:    v.Leader,
-			Battalion: v.Battalion,
-			Members:   make([]consoleMember, 0, len(v.Members)),
-		}
-		for _, m := range v.Members {
-			cs.Members = append(cs.Members, consoleMember{
-				Unit:   m.Unit,
-				Role:   m.Role,
-				HP:     m.HP,
-				Food:   m.Food,
-				Weapon: m.Weapon,
-				Alive:  m.Alive,
-				At:     m.At,
-			})
-		}
-		if n := len(sq.orders); n > 0 {
-			last := sq.orders[n-1]
-			cs.Order = &consoleOrder{Kind: last.kind, Target: last.target, At: last.at}
-		}
-		from := max(0, len(sq.callouts)-consoleLogDepth)
-		for i := len(sq.callouts) - 1; i >= from; i-- {
-			c := sq.callouts[i]
-			cs.Callouts = append(cs.Callouts, consoleCallout{Kind: c.kind, From: c.from, At: c.at})
-		}
-		out = append(out, cs)
+		out = append(out, st.consoleSquadLocked(st.squads[id], now))
 	}
 	return consoleList{Squads: out, Battalions: st.battalionsLocked()}
+}
+
+// consoleSquad renders one squad in the console-safe shape the public
+// single-squad read serves, redacted exactly as the stream is: no member
+// position and no operator id. ok is false for a squad the store has
+// never heard of.
+func (st *Store) consoleSquad(id string) (consoleSquad, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	now := st.now()
+	st.prune(now)
+	sq, ok := st.squads[id]
+	if !ok {
+		return consoleSquad{}, false
+	}
+	return st.consoleSquadLocked(sq, now), true
+}
+
+// consoleSquadLocked is the redaction of one squad's view. Callers hold
+// the mutex.
+func (st *Store) consoleSquadLocked(sq *squadState, now time.Time) consoleSquad {
+	v := st.render(sq, now)
+	cs := consoleSquad{
+		ID:        v.ID,
+		Name:      v.Name,
+		Leader:    v.Leader,
+		Battalion: v.Battalion,
+		Members:   make([]consoleMember, 0, len(v.Members)),
+	}
+	for _, m := range v.Members {
+		cs.Members = append(cs.Members, consoleMember{
+			Unit:   m.Unit,
+			Role:   m.Role,
+			HP:     m.HP,
+			Food:   m.Food,
+			Weapon: m.Weapon,
+			Alive:  m.Alive,
+			At:     m.At,
+		})
+	}
+	if n := len(sq.orders); n > 0 {
+		last := sq.orders[n-1]
+		cs.Order = &consoleOrder{Kind: last.kind, Target: last.target, At: last.at}
+	}
+	from := max(0, len(sq.callouts)-consoleLogDepth)
+	for i := len(sq.callouts) - 1; i >= from; i-- {
+		c := sq.callouts[i]
+		cs.Callouts = append(cs.Callouts, consoleCallout{Kind: c.kind, From: c.from, At: c.at})
+	}
+	return cs
 }

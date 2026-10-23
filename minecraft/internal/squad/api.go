@@ -86,14 +86,15 @@ func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	a := &API{store: st, units: units, token: sha256.Sum256([]byte(token)), now: time.Now,
 		waits:       map[string]map[chan struct{}]struct{}{},
 		streamEvery: defaultStreamEvery, streamKeepalive: defaultStreamKeepalive}
-	// Literal reads are public views, as the list and single-squad routes
-	// are; the stream carries only their console-safe subset.
+	// Literal reads are public views. They carry the same console-safe
+	// shape as the stream: no member position and no operator id; the
+	// unit-facing poll serves both behind its token.
 	mux.HandleFunc("GET /v1/squads/stream", a.streamSquads)
 	mux.HandleFunc("GET /v1/squads", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, listBody{Squads: st.List(), Battalions: st.Battalions()})
+		writeJSON(w, http.StatusOK, st.consoleSnapshot())
 	})
 	mux.HandleFunc("GET /v1/squads/{id}", func(w http.ResponseWriter, r *http.Request) {
-		v, ok := st.Get(r.PathValue("id"))
+		v, ok := st.consoleSquad(r.PathValue("id"))
 		if !ok {
 			http.NotFound(w, r)
 			return
@@ -393,11 +394,6 @@ func (a *API) broadcast(squad string) {
 		close(ch)
 	}
 	delete(a.waits, squad)
-}
-
-type listBody struct {
-	Squads     []View      `json:"squads"`
-	Battalions []Battalion `json:"battalions"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

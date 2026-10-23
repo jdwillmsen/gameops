@@ -100,6 +100,34 @@ func (r *rig) hello(t *testing.T, squad, unit, role string) {
 	}
 }
 
+// The public reads carry the console-safe shape only: the same redaction
+// the stream serves, so an anonymous viewer learns no member position and
+// no operator id. The unit-facing poll keeps both behind its token.
+func TestPublicReadsAreConsoleSafe(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "alpha", "crew-18", "vanguard")
+	r.do(t, "POST", "/v1/squads/alpha/status",
+		`{"unit":"crew-18","hp":12.5,"food":7,"weapon":"bow","pos":{"x":1.5,"y":64,"z":-760.25}}`, nil)
+	r.do(t, "POST", "/v1/squads/alpha/order", `{"kind":"focus","target":"captain"}`,
+		map[string]string{"X-Crew-Request": "1"})
+
+	body := readBody(t, r.do(t, "GET", "/v1/squads/alpha", "", nil))
+	for _, want := range []string{`"id":"alpha"`, `"leader":"crew-18"`,
+		`"hp":12.5`, `"weapon":"bow"`, `"kind":"focus"`, `"target":"captain"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the single read is missing %s: %s", want, body)
+		}
+	}
+	for _, path := range []string{"/v1/squads", "/v1/squads/alpha"} {
+		got := readBody(t, r.do(t, "GET", path, "", nil))
+		for _, leak := range []string{`"pos"`, `"by"`, `"owner"`, `-760.25`} {
+			if strings.Contains(got, leak) {
+				t.Errorf("%s leaks %s: %s", path, leak, got)
+			}
+		}
+	}
+}
+
 // The reads are public: the console's anonymous viewers see the squad.
 func TestPublicReadsAnswerWithoutAToken(t *testing.T) {
 	r := newRig(t, false)
@@ -188,10 +216,14 @@ func TestStatusUpdateAndValidation(t *testing.T) {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
 	got := readBody(t, r.do(t, "GET", "/v1/squads/alpha", "", nil))
-	for _, want := range []string{`"hp":12.5`, `"food":18`, `"alive":true`, `-760.25`} {
+	for _, want := range []string{`"hp":12.5`, `"food":18`, `"alive":true`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the view %s is missing %s", got, want)
 		}
+	}
+	// The public route is console-safe: a member's position is not on it.
+	if strings.Contains(got, `"pos"`) || strings.Contains(got, `-760.25`) {
+		t.Errorf("the view %s leaks the position", got)
 	}
 	tests := []struct {
 		name, body string
