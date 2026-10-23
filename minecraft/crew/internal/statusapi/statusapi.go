@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
@@ -25,6 +26,20 @@ type Source interface {
 type TaskSource interface {
 	List() []task.Task
 }
+
+// FightSource is the read side of a warrior's fight counts; ok is false for a
+// unit that keeps none.
+type FightSource interface {
+	Stats() (life.FightSummary, bool)
+}
+
+// Option adds an optional part to the state body.
+type Option func(*options)
+
+type options struct{ fight FightSource }
+
+// WithFight reports a warrior's fight counts under the tasks in /v1/state.
+func WithFight(f FightSource) Option { return func(o *options) { o.fight = f } }
 
 // Unit is who the state belongs to: a fixed id and the in-game name.
 type Unit struct {
@@ -43,6 +58,9 @@ type tasksView struct {
 	Current *task.Task `json:"current"`
 	// Recent is newest first and never includes Current.
 	Recent []task.Task `json:"recent"`
+	// Fight is the warrior's swings, hits, damage and deaths; absent for a
+	// unit that keeps none.
+	Fight *life.FightSummary `json:"fight,omitempty"`
 }
 
 func viewTasks(src TaskSource) tasksView {
@@ -64,7 +82,11 @@ func viewTasks(src TaskSource) tasksView {
 }
 
 // Handler serves the status routes. tasks may be nil, which reports no tasks.
-func Handler(src Source, version string, unit Unit, tasks TaskSource) http.Handler {
+func Handler(src Source, version string, unit Unit, tasks TaskSource, opts ...Option) http.Handler {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
@@ -79,7 +101,13 @@ func Handler(src Source, version string, unit Unit, tasks TaskSource) http.Handl
 	})
 	mux.HandleFunc("GET /v1/state", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(stateBody{Version: version, Unit: unit, State: src.Snapshot(), Tasks: viewTasks(tasks)})
+		view := viewTasks(tasks)
+		if o.fight != nil {
+			if s, ok := o.fight.Stats(); ok {
+				view.Fight = &s
+			}
+		}
+		_ = json.NewEncoder(w).Encode(stateBody{Version: version, Unit: unit, State: src.Snapshot(), Tasks: view})
 	})
 	// The process-wide registry: packages register their own metrics at init,
 	// so this stays the one place metrics are exposed.

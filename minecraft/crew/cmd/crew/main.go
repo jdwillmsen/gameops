@@ -125,7 +125,7 @@ func main() {
 	if cfg.ControlURL != nil {
 		go control.New(cfg.ControlURL, cfg.UnitID, cfg.ControlToken, runner, logAdapter{log}).Run(ctx)
 	}
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken, statusapi.WithFight(lf)), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
