@@ -173,8 +173,13 @@ func (st *Store) List() []View {
 func (st *Store) Battalions() []Battalion {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	now := st.now()
-	st.prune(now)
+	st.prune(st.now())
+	return st.battalionsLocked()
+}
+
+// battalionsLocked is the console snapshot's share of Battalions. Callers
+// hold the mutex.
+func (st *Store) battalionsLocked() []Battalion {
 	grouped := map[string][]string{}
 	for _, sq := range st.squads {
 		if sq.battalion == "" {
