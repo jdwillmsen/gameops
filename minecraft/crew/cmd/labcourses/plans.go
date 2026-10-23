@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -52,6 +53,12 @@ func writePlans(args []string) int {
 			fmt.Fprintln(os.Stderr, "labcourses:", err)
 			return 1
 		}
+		if f == "arena" {
+			if err := writeArenaLayout(filepath.Join(dir, "arena.layout.json")); err != nil {
+				fmt.Fprintln(os.Stderr, "labcourses:", err)
+				return 1
+			}
+		}
 	}
 	if err := writeScripts(dir); err != nil {
 		fmt.Fprintln(os.Stderr, "labcourses:", err)
@@ -88,6 +95,16 @@ func writePlan(path string, c course) (err error) {
 		}
 	}()
 	return render(f, c)
+}
+
+// writeArenaLayout ships the director's pen/gate coordinates beside the plan,
+// so a job image with no Go toolchain still has the layout the build used.
+func writeArenaLayout(path string) error {
+	data, err := json.MarshalIndent(arenaLayout(), "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 func fieldNames() []string {

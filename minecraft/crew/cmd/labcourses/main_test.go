@@ -144,6 +144,7 @@ func TestFieldsDoNotOverlap(t *testing.T) {
 		"courses": courseGrid.bounds(),
 		"trees":   treesGrid.bounds(),
 		"works":   worksGrid.bounds(),
+		"arena":   arenaBounds,
 	}
 	square := box{-500, -900, 499, 99}
 	for a, r := range boxes {
