@@ -26,7 +26,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
-| `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. The resource pack it is built from is fetched into `/tmp` and removed after the build |
+| `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. Units can share one directory: the first builds, the rest wait for it. The resource pack it is built from is fetched into `/tmp` and removed after the build |
 
 ## Idle life and defence
 
@@ -705,6 +705,14 @@ load the atlas, the view stays flat-coloured. A build that fails, or can only
 serve an older cached atlas, is retried on its own after 5 to 10 minutes; the
 delay doubles with each failure in a row up to an hour, and is jittered so
 units started together do not all ask GitHub's rate-limited API at once.
+
+Units may share one `CAMERA_ATLAS_DIR` (a ReadWriteMany volume). The atlas
+depends only on the server version, so the first unit to need it takes a
+`.build.lock` directory in the cache, builds, and releases it; the others wait
+and then read the result, and a start that finds the cache filled makes no
+network request. The holder refreshes the lock while it works; one left by a
+crashed unit is taken over after five minutes without a refresh. An unwritable
+cache directory fails at once instead of after the download.
 
 ### Entities
 
