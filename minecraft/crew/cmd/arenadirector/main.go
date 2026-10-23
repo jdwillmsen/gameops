@@ -41,7 +41,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d]\n"+
+	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false]\n"+
 		"       arenadirector reset --lab <lab>\n"+
 		"       arenadirector status --lab <lab> [--warriors names]")
 	os.Exit(2)
@@ -74,6 +74,7 @@ func run(args []string) {
 	rallyAfter := fs.Duration("rally-after", -1, "delay from a wave's first spawn before pulling survivors to the squad (-1 uses the wave book, 0 disables)")
 	rallyEvery := fs.Duration("rally-every", -1, "interval between rallies while a wave lives (-1 uses the wave book)")
 	openStart := fs.Bool("open-start-gate", true, "clear the squad start gate before wave one")
+	placeSquad := fs.Bool("place-squad", true, "teleport the squad to its floor start point and back after a respawn")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -111,6 +112,7 @@ func run(args []string) {
 		RunTimeout:    *timeout,
 		Warriors:      splitNames(*warriors),
 		OpenStartGate: *openStart,
+		PlaceSquad:    *placeSquad,
 		Out:           os.Stderr,
 	}
 	result, err := d.Run()

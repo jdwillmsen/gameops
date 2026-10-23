@@ -1049,3 +1049,34 @@ func tpCommands(t *testing.T, cmds []string) []string {
 	}
 	return out
 }
+
+// TestSquadPlacedOnTheFloorBeforeWaveOne pins the three start cells: spread
+// either side of the centre line, well short of the pens and the gate.
+func TestSquadPlacedOnTheFloorBeforeWaveOne(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true, "Striker": true, "Ranger": true}
+	f := &FakeConsole{Respond: s.Exec}
+	book := testBook(wave("One", "zombie", 1, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Layout.GroundY = 64
+	d.Warriors = []string{"Vanguard", "Striker", "Ranger"}
+	d.PlaceSquad = true
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := []string{
+		`tp "Vanguard" 0 65 -785`,
+		`tp "Striker" 3 65 -785`,
+		`tp "Ranger" -3 65 -785`,
+	}
+	for _, cmd := range want {
+		if !hasCommand(f.Cmds, cmd) {
+			t.Errorf("run did not place the squad: missing %q in\n%s", cmd, strings.Join(f.Cmds, "\n"))
+		}
+		summon := "execute positioned 10 64 -760 run summon zombie ~ ~ ~"
+		if !before(f.Cmds, "tickingarea add", cmd) || !before(f.Cmds, cmd, summon) {
+			t.Errorf("%q did not run between loading the area and the first summon", cmd)
+		}
+	}
+}

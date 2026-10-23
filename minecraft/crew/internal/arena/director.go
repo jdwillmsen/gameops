@@ -55,6 +55,7 @@ type Director struct {
 	Warriors      []string
 	WarriorMisses int
 	OpenStartGate bool
+	PlaceSquad    bool
 
 	Out   io.Writer
 	Now   func() time.Time
@@ -202,6 +203,13 @@ func (d *Director) Run() (Result, error) {
 		}
 		if _, err := d.exec(d.Layout.StartGate.Open); err != nil {
 			return result, err
+		}
+	}
+	if d.PlaceSquad {
+		for i, name := range d.Warriors {
+			if err := d.placeWarrior(name, i); err != nil {
+				return result, err
+			}
 		}
 	}
 	alive, deaths, err := d.warriorBaseline()
@@ -664,6 +672,18 @@ func (d *Director) validateWaves(waves []Wave) error {
 			}
 		}
 	}
+	return nil
+}
+
+func (d *Director) placeWarrior(name string, i int) error {
+	cmd, err := squadPlaceCommand(name, squadStartPoint(d.Layout, i))
+	if err != nil {
+		return err
+	}
+	if _, err := d.exec(cmd); err != nil {
+		return err
+	}
+	d.logf("arena: placed %s", name)
 	return nil
 }
 
