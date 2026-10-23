@@ -696,3 +696,21 @@ func TestWarriorsNeverTargetPlayers(t *testing.T) {
 		})
 	}
 }
+
+func TestACreeperStillBacksAWarriorOff(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 301, 1)
+	c := mgl32.Vec3{22.5, 1, 20.5}
+	r.spawn(80, "minecraft:creeper", c)
+	for i := 0; i < 40; i++ {
+		r.step()
+		c = c.Add(mgl32.Vec3{-0.03, 0, 0})
+		r.moveTo(80, c)
+	}
+	if n := len(r.out.attacks()); n != 0 {
+		t.Fatalf("%d attacks on a creeper", n)
+	}
+	if d := dist(r.feet(), c); d < 3 {
+		t.Errorf("%.1f blocks from the creeper after backing away", d)
+	}
+}

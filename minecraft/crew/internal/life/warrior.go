@@ -117,9 +117,6 @@ const (
 	// orbitMin is how close a circling unit keeps to its target: nearer
 	// than this and the target swings free.
 	orbitMin = 1.5
-	// strafeEvery is how long a circling unit walks one tangent before it
-	// turns back to face the target.
-	strafeEvery = 4
 	// critWindow bounds a jump started for a critical hit: past it the
 	// swing lands on the ground rather than mid-fall.
 	critWindow = 12
@@ -188,8 +185,11 @@ type warriorState struct {
 
 	// arrows holds where the arrows now in flight were last tick, so an
 	// arrow closing on the unit can be told from one leaving it. Kept small
-	// by dropping entries the scan does not refresh.
-	arrows map[uint64]arrowSample
+	// by dropping entries the scan does not refresh. arrowAt and arrowIn
+	// memo the answer for the tick, as several asks come in one.
+	arrows  map[uint64]arrowSample
+	arrowAt uint64
+	arrowIn bool
 
 	// calloutUntil holds back a repeating callout.
 	calloutUntil uint64
@@ -399,8 +399,19 @@ func (l *Life) enemyNear(feet mgl32.Vec3, within float64) bool {
 
 // arrowIncoming says whether an arrow in flight is closing on the unit: the
 // shield raised this tick is the one that meets it. The unit's own arrows
-// leave it, which is what the sample comparison is for.
+// leave it, which is what the sample comparison is for. Several asks come
+// within one tick, and the samples are this tick's already after the first,
+// so the answer is made once and read back.
 func (l *Life) arrowIncoming(p act.Pose) bool {
+	w := l.warrior
+	if w.arrowAt == l.tick {
+		return w.arrowIn
+	}
+	w.arrowAt, w.arrowIn = l.tick, l.scanArrows(p)
+	return w.arrowIn
+}
+
+func (l *Life) scanArrows(p act.Pose) bool {
 	w := l.warrior
 	incoming := false
 	if w.arrows == nil {
