@@ -1,6 +1,9 @@
 package telemetry
 
 import (
+	"context"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -165,5 +168,105 @@ func TestFeedIsBoundedAndSequenced(t *testing.T) {
 	}
 	if len(ch) != cap(ch) {
 		t.Errorf("a slow reader holds %d, want a full buffer of %d", len(ch), cap(ch))
+	}
+}
+
+func TestTaskEventsCarryTheWorkItem(t *testing.T) {
+	var tr track
+	now := time.Unix(1000, 0)
+	tr.observe(observation{online: true, curID: "t1", curTemplate: "haul"}, now)
+	es := tr.observe(observation{online: true, curID: "t2", curTemplate: "goto"}, now.Add(time.Second))
+	if len(es) != 2 || es[0].Kind != "task_ended" || es[0].Task != "t1" ||
+		es[1].Kind != "task_started" || es[1].Task != "t2" {
+		t.Fatalf("change: %+v", es)
+	}
+	// t2 leaves with no verdict in the recent list: the outcome-unknown
+	// event still names it.
+	es = tr.observe(observation{online: true, recent: []recentTask{{ID: "t1", State: "done"}}}, now.Add(2*time.Second))
+	if len(es) != 1 || es[0].Kind != "task_ended" || es[0].Task != "t2" {
+		t.Fatalf("unknown outcome: %+v", es)
+	}
+	es = tr.observe(observation{online: true, curID: "t3", curTemplate: "haul"}, now.Add(3*time.Second))
+	if len(es) != 1 || es[0].Kind != "task_started" || es[0].Task != "t3" {
+		t.Fatalf("start t3: %+v", es)
+	}
+	es = tr.observe(observation{online: true, recent: []recentTask{{ID: "t3", State: "done"}}}, now.Add(4*time.Second))
+	if len(es) != 1 || es[0].Kind != "task_done" || es[0].Task != "t3" {
+		t.Fatalf("done: %+v", es)
+	}
+}
+
+func TestOnEventsReceivesBornEventsWithPositions(t *testing.T) {
+	// The same known position as the state fixture, but a different task, so
+	// one poll produces a task change and with it events.
+	next := strings.Replace(stateKnownWithTask, `"id":"run"`, `"id":"run2"`, 1)
+	unit := newFakeUnit(t, stateKnownWithTask)
+	// OnEvents is set before Run, as main sets it: the poll loop reads the
+	// hook unsynchronised.
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, 20*time.Millisecond)
+	// Buffered, and never read from the poll loop: the sink must not block.
+	got := make(chan []Born, 8)
+	p.OnEvents = func(b []Born) { got <- b }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { p.Run(ctx); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })
+
+	unit.set(http.StatusOK, next)
+	born := readBorn(t, got)
+	if len(born) != 2 {
+		t.Fatalf("born %d, want the ended run and the started run2: %+v", len(born), born)
+	}
+	kinds := born[0].Kind + "," + born[1].Kind
+	if kinds != "task_ended,task_started" {
+		t.Fatalf("kinds %s", kinds)
+	}
+	for _, b := range born {
+		if b.Unit != "crew-01" || b.Name != "Unit1" || b.Task != "run" && b.Task != "run2" {
+			t.Fatalf("identity or task wrong: %+v", b)
+		}
+		if b.Seq == 0 || !b.Pos.Known || b.Pos.X != 12.5 || b.Pos.Y != 64.62 || b.Pos.Z != -3 {
+			t.Fatalf("context wrong: %+v", b)
+		}
+	}
+}
+
+func readBorn(t *testing.T, ch chan []Born) []Born {
+	t.Helper()
+	select {
+	case b := <-ch:
+		return b
+	case <-time.After(3 * time.Second):
+		t.Fatal("no born events arrived")
+		return nil
+	}
+}
+
+func TestFinishedTaskEventsCarryTemplateAndDuration(t *testing.T) {
+	var tr track
+	now := time.Unix(1000, 0)
+	made := time.Unix(990, 0)
+	tr.observe(observation{online: true, curID: "t1", curTemplate: "haul"}, now)
+	done := recentTask{ID: "t1", State: "done", Created: made, Updated: made.Add(200 * time.Millisecond)}
+	es := tr.observe(observation{online: true, recent: []recentTask{done}}, now.Add(time.Second))
+	if len(es) != 1 || es[0].Template != "haul" || es[0].Took != 200*time.Millisecond {
+		t.Fatalf("done: %+v", es)
+	}
+
+	// A unit that sent no usable times leaves the duration unknown rather
+	// than inventing one, so nothing downstream can mistake it for instant.
+	for name, r := range map[string]recentTask{
+		"no times":       {ID: "t2", State: "done"},
+		"clock reversed": {ID: "t2", State: "done", Created: made, Updated: made.Add(-time.Second)},
+	} {
+		tr.observe(observation{online: true, curID: "t2", curTemplate: "goto"}, now.Add(2*time.Second))
+		es = tr.observe(observation{online: true, recent: []recentTask{r}}, now.Add(3*time.Second))
+		if len(es) != 1 || es[0].Took != 0 {
+			t.Fatalf("%s: took %v, want unknown", name, es[0].Took)
+		}
 	}
 }

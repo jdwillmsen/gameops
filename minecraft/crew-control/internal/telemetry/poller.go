@@ -86,7 +86,13 @@ type Poller struct {
 	seq       uint64
 	esubs     map[chan Event]struct{}
 	positions []Position
-	jobsSrc   JobsSource
+	// born is the events of the tick in progress, until OnEvents takes them.
+	born []Born
+	// OnEvents, when set, receives the events born in one tick with each
+	// unit's position at that moment, after the tick's state is published.
+	// It runs on the poll loop, so it must not block.
+	OnEvents func([]Born)
+	jobsSrc  JobsSource
 	// Shared bytes of the jobs feed; see feedCache for why.
 	jobsCache feedCache
 	jsubs     map[chan struct{}]struct{}
@@ -155,7 +161,6 @@ func (p *Poller) tick(ctx context.Context) {
 	now := time.Now()
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	changed := false
 	for i, res := range results {
 		next := p.statuses[i]
@@ -196,6 +201,14 @@ func (p *Poller) tick(ctx context.Context) {
 	}
 	if changed {
 		p.publishLocked()
+	}
+	// History is handed over off the lock: the sink may take longer than a
+	// poll is allowed to.
+	born := p.born
+	p.born = nil
+	p.mu.Unlock()
+	if p.OnEvents != nil && len(born) > 0 {
+		p.OnEvents(born)
 	}
 }
 
@@ -285,6 +298,6 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	}
 	o.recent = res.st.Tasks.Recent
 	for _, e := range p.tracks[i].observe(o, now) {
-		p.appendEventLocked(i, e)
+		p.born = append(p.born, Born{Event: p.appendEventLocked(i, e), Pos: p.positions[i]})
 	}
 }
