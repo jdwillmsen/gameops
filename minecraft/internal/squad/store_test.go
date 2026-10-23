@@ -282,6 +282,26 @@ func TestBattalionsCollectNamedParents(t *testing.T) {
 	}
 }
 
+// The name of a battalion nothing nests under any more is dead weight: the
+// last squad's claim lapses and the name goes with it, instead of a stale
+// parent surviving in the console for ever.
+func TestBattalionNamesGoWhenTheirLastSquadGoes(t *testing.T) {
+	st, cl := newSquadRig()
+	st.Hello(Hello{Unit: "crew-18", Squad: "alpha", Role: roleVanguard,
+		Battalion: "bravo", BattalionName: "Second"})
+	if n := len(st.Battalions()); n != 1 {
+		t.Fatalf("battalions %d, want 1 while the squad lives", n)
+	}
+	cl.after(memberTTL + time.Second)
+	st.Get("alpha") // a prune tick with nobody left to claim anything
+	if n := len(st.Battalions()); n != 0 {
+		t.Errorf("battalions %d, want the empty parent gone", n)
+	}
+	if len(st.bats) != 0 {
+		t.Errorf("the store kept %d battalion names for squads that are gone", len(st.bats))
+	}
+}
+
 func TestDeltaIsDecodableAsItsOwnWire(t *testing.T) {
 	// The unit side reads these shapes without this package, so the real
 	// check is that a delta survives marshalling and reads back named as

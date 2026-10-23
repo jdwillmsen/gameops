@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -33,6 +34,9 @@ const (
 	maxName = 24
 	// A focus target is a mob name; anything longer is not one.
 	maxTarget = 32
+	// Battalion ids, battalion names and held weapons show on the public
+	// stream and the console, so they stay one short printable line.
+	maxLabel = 32
 )
 
 var (
@@ -189,6 +193,21 @@ type helloBody struct {
 	BattalionName string `json:"battalion_name,omitempty"`
 }
 
+// shortPrintable bounds a wire field that shows on the public stream and
+// the console: at most n printable characters, so a claim or a held weapon
+// stays one readable line whatever a lost unit says.
+func shortPrintable(s string, n int) bool {
+	if utf8.RuneCountInString(s) > n {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *API) hello(w http.ResponseWriter, r *http.Request) {
 	var b helloBody
 	if !decodeStrict(w, r, &b) {
@@ -197,7 +216,9 @@ func (a *API) hello(w http.ResponseWriter, r *http.Request) {
 	if !a.units.Has(b.Unit) ||
 		!squadID.MatchString(r.PathValue("id")) ||
 		!roleRE.MatchString(b.Role) ||
-		utf8.RuneCountInString(b.SquadName) > maxName {
+		utf8.RuneCountInString(b.SquadName) > maxName ||
+		!shortPrintable(b.Battalion, maxLabel) ||
+		!shortPrintable(b.BattalionName, maxLabel) {
 		http.Error(w, "bad hello", http.StatusBadRequest)
 		return
 	}
@@ -230,7 +251,8 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, &b) {
 		return
 	}
-	if !a.units.Has(b.Unit) || b.Food < 0 || b.Food > 20 {
+	if !a.units.Has(b.Unit) || b.Food < 0 || b.Food > 20 ||
+		!shortPrintable(b.Weapon, maxLabel) {
 		http.Error(w, "bad status", http.StatusBadRequest)
 		return
 	}
