@@ -1216,3 +1216,72 @@ func TestPlaceSquadDisabledLeavesWarriorsAlone(t *testing.T) {
 		t.Errorf("log claims a placement with the feature off:\n%s", log.String())
 	}
 }
+
+func TestPositionJumpCountsADeathOnce(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
+	f := &FakeConsole{Respond: s.Exec}
+	d := &Director{
+		Console: f, Layout: testLayout(), Warriors: []string{"Vanguard"},
+		WarriorMisses: 3, Out: &strings.Builder{}, Now: clock.Now,
+	}
+	d.Layout.FloorRadius = 45
+	states := map[string]*warriorState{"Vanguard": {up: true, live: true}}
+	var result Result
+	check := func() {
+		t.Helper()
+		if _, err := d.checkWarriors(states, &result); err != nil {
+			t.Fatalf("checkWarriors: %v", err)
+		}
+	}
+	check()
+	if result.WarriorDeaths != 0 {
+		t.Fatalf("deaths on the floor = %d, want 0", result.WarriorDeaths)
+	}
+	s.place("Vanguard", 0, 65, -400)
+	check()
+	if result.WarriorDeaths != 1 {
+		t.Fatalf("deaths after a hub respawn = %d, want 1", result.WarriorDeaths)
+	}
+	check()
+	if result.WarriorDeaths != 1 {
+		t.Errorf("deaths after a second poll at the hub = %d, want 1", result.WarriorDeaths)
+	}
+}
+
+func TestMissedRespawnIsNotCountedTwice(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
+	f := &FakeConsole{Respond: s.Exec}
+	d := &Director{
+		Console: f, Layout: testLayout(), Warriors: []string{"Vanguard"},
+		WarriorMisses: 3, Out: &strings.Builder{}, Now: clock.Now,
+	}
+	d.Layout.FloorRadius = 45
+	states := map[string]*warriorState{"Vanguard": {up: true, live: true}}
+	var result Result
+	if _, err := d.checkWarriors(states, &result); err != nil {
+		t.Fatalf("checkWarriors: %v", err)
+	}
+	s.warriorUp["Vanguard"] = false
+	for range 3 {
+		if _, err := d.checkWarriors(states, &result); err != nil {
+			t.Fatalf("down check: %v", err)
+		}
+	}
+	if result.WarriorDeaths != 1 {
+		t.Fatalf("deaths after the miss grace = %d, want 1", result.WarriorDeaths)
+	}
+	s.warriorUp["Vanguard"] = true
+	s.place("Vanguard", 0, 65, -400)
+	if _, err := d.checkWarriors(states, &result); err != nil {
+		t.Fatalf("respawn check: %v", err)
+	}
+	if result.WarriorDeaths != 1 {
+		t.Errorf("deaths after the hub respawn = %d, want the miss count to stand", result.WarriorDeaths)
+	}
+}
