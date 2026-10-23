@@ -189,10 +189,15 @@ func TestAtlasRoutesAnswer404UntilTheAtlasIsBuilt(t *testing.T) {
 }
 
 // The page is embedded and not type-checked, so a wire bump that forgets it
-// would only show in a browser.
+// would only show in a browser. It must ask for the current version and still
+// read the one a server from before the upgrade answers with.
 func TestPageSpeaksTheCurrentWireVersionAndHandlesTheAtlas(t *testing.T) {
-	want := "u8[1] !== " + strconv.Itoa(int(legacyWireVersion))
-	for _, s := range []string{want, "case " + strconv.Itoa(int(frameAtlas)) + ":"} {
+	want := []string{
+		"u8[1] !== " + strconv.Itoa(int(legacyWireVersion)) + " && u8[1] !== " + strconv.Itoa(int(wireVersion)),
+		"searchParams.set('wire', '" + strconv.Itoa(int(wireVersion)) + "')",
+		"case " + strconv.Itoa(int(frameAtlas)) + ":",
+	}
+	for _, s := range want {
 		if !strings.Contains(string(page), s) {
 			t.Errorf("page does not contain %q", s)
 		}

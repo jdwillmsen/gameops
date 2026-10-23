@@ -292,8 +292,8 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
 });
 
-let mats = [];            // index = id
-const blocks = new Map(); // "cx,cy,cz" -> Uint8Array(4096)
+let mats = [];            // index = id - 1
+const blocks = new Map(); // "cx,cy,cz" -> Uint16Array(4096)
 const meshes = new Map(); // key -> [opaque, translucent]
 const me = { x: 0, y: 70, z: 0, yaw: 0, pitch: 0 };
 window.__dbg = { get entMeshes() { return ents.meshes; }, scene, camera, me, blocks, meshes, get mats() { return mats; }, atlasReady: () => !!atlas };
@@ -556,6 +556,8 @@ function connect() {
   const u = new URL('v1/camera/ws', location.href);
   u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
   u.search = location.search;
+  // Without this the server treats the page as one from before ids were two bytes.
+  u.searchParams.set('wire', '4');
   const ws = wsConn = new WebSocket(u);
   ws.binaryType = 'arraybuffer';
   let opened = false;
@@ -580,9 +582,12 @@ function connect() {
   };
   ws.onmessage = onMessage;
 }
-// Wire format 3: every message is binary, type byte first, little-endian.
-// The layout is documented beside the encoder in wire.go.
+// Wire format 4: every message is binary, type byte first, little-endian.
+// The layout is documented beside the encoder in wire.go. A server that
+// predates 4 answers the hello with 3, whose ids are one byte and whose
+// materials frame replaces the table.
 let entTypes = [];
+let wide = true;
 function onMessage(ev) {
   const buf = ev.data;
   stats.bytes += buf.byteLength;
@@ -594,27 +599,38 @@ function onMessage(ev) {
   const angle = a => { const d = a * 360 / 256; return d > 180 ? d - 360 : d; };
   switch (u8[0]) {
     case 1:
-      if (u8[1] !== 3) { status = 'unsupported wire version ' + u8[1]; wsConn.close(); }
+      if (u8[1] !== 3 && u8[1] !== 4) { status = 'unsupported wire version ' + u8[1]; wsConn.close(); break; }
+      wide = u8[1] >= 4;
+      // Ids belong to one server process, so a new connection starts empty.
+      mats = [];
+      post({ t: 'mats', replace: true, mats: [] });
       break;
     case 2: {
       const n = dv.getUint16(p, true); p += 2;
-      mats = [];
+      // Version 3 sends the whole table each time; 4 sends only new ids.
+      if (!wide) mats = [];
+      const fresh = [];
       for (let i = 0; i < n; i++) {
-        const id = u8[p], alpha = u8[p + 1] / 255, r = u8[p + 2], g = u8[p + 3], b = u8[p + 4], flags = u8[p + 5], len = u8[p + 6];
-        p += 7;
+        let id;
+        if (wide) { id = dv.getUint16(p, true); p += 2; } else id = u8[p++];
+        const alpha = u8[p] / 255, r = u8[p + 1], g = u8[p + 2], b = u8[p + 3], flags = u8[p + 4], len = u8[p + 5];
+        p += 6;
         mats[id - 1] = { name: text(len), alpha, nonCube: (flags & 1) !== 0, rgb: linear('#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('')) };
+        fresh.push([id, mats[id - 1]]);
       }
-      post({ t: 'mats', mats });
+      post({ t: 'mats', replace: !wide, mats: fresh });
       break;
     }
     case 3: {
       const cx = dv.getInt32(1, true), cy = dv.getInt32(5, true), cz = dv.getInt32(9, true);
-      const n = dv.getUint16(13, true), pal = u8.subarray(15, 15 + n);
+      const n = dv.getUint16(13, true), step = wide ? 2 : 1;
+      const pal = new Uint16Array(n);
+      for (let i = 0; i < n; i++) pal[i] = wide ? dv.getUint16(15 + 2 * i, true) : u8[15 + i];
       const w = n <= 1 ? 0 : 32 - Math.clz32(n - 1);
-      const cells = new Uint8Array(4096);
+      const cells = new Uint16Array(4096);
       if (w === 0) cells.fill(pal[0]);
       else {
-        let at = 15 + n, acc = 0, have = 0;
+        let at = 15 + n * step, acc = 0, have = 0;
         const mask = (1 << w) - 1;
         for (let i = 0; i < 4096; i++) {
           while (have < w) { acc |= u8[at++] << have; have += 8; }
@@ -630,8 +646,8 @@ function onMessage(ev) {
     case 4: {
       const x = dv.getInt32(1, true), y = dv.getInt32(5, true), z = dv.getInt32(9, true);
       const key = (x >> 4) + ',' + (y >> 4) + ',' + (z >> 4);
-      const b = blocks.get(key);
-      if (b) { b[((((y & 15) << 4) | (z & 15)) << 4) | (x & 15)] = u8[13]; post({ t: 'edit', key, i: ((((y & 15) << 4) | (z & 15)) << 4) | (x & 15), v: u8[13] }); }
+      const b = blocks.get(key), v = wide ? dv.getUint16(13, true) : u8[13];
+      if (b) { b[((((y & 15) << 4) | (z & 15)) << 4) | (x & 15)] = v; post({ t: 'edit', key, i: ((((y & 15) << 4) | (z & 15)) << 4) | (x & 15), v }); }
       break;
     }
     case 5: {
