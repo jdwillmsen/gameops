@@ -233,7 +233,7 @@ func TestReadReadsOnlyPlayerRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	found, stats, err := Read(context.Background(), db)
 	if err != nil || stats.Players != 2 || stats.Skipped != 1 {
 		t.Fatalf("stats = %+v, %v", stats, err)
@@ -255,7 +255,7 @@ func TestReadStopsWhenCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, _, err := Read(ctx, db); err == nil {

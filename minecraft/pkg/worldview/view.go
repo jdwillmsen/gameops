@@ -26,7 +26,7 @@ func Open(dbDir, workDir string) (*leveldb.DB, func(), error) {
 	}
 	if stale, err := filepath.Glob(filepath.Join(workDir, "view-*")); err == nil {
 		for _, dir := range stale {
-			os.RemoveAll(dir)
+			_ = os.RemoveAll(dir)
 		}
 	}
 	view, err := os.MkdirTemp(workDir, "view-")
@@ -35,7 +35,7 @@ func Open(dbDir, workDir string) (*leveldb.DB, func(), error) {
 	}
 	entries, err := os.ReadDir(dbDir)
 	if err != nil {
-		os.RemoveAll(view)
+		_ = os.RemoveAll(view)
 		return nil, nil, err
 	}
 	for _, e := range entries {
@@ -43,18 +43,18 @@ func Open(dbDir, workDir string) (*leveldb.DB, func(), error) {
 			continue
 		}
 		if err := linkOrCopy(filepath.Join(dbDir, e.Name()), filepath.Join(view, e.Name())); err != nil {
-			os.RemoveAll(view)
+			_ = os.RemoveAll(view)
 			return nil, nil, err
 		}
 	}
 	db, err := leveldb.OpenFile(view, &opt.Options{ReadOnly: true, ErrorIfMissing: true})
 	if err != nil {
-		os.RemoveAll(view)
+		_ = os.RemoveAll(view)
 		return nil, nil, fmt.Errorf("open world: %w", err)
 	}
 	return db, func() {
-		db.Close()
-		os.RemoveAll(view)
+		_ = db.Close()
+		_ = os.RemoveAll(view)
 	}, nil
 }
 
@@ -68,11 +68,14 @@ func linkOrCopy(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(out, in)
-	return err
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
