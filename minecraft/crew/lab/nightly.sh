@@ -8,7 +8,8 @@
 #   FIELDS space-separated fields to rebuild, in order
 #   PLANS  directory holding <field>.plan and courses.sh (labcourses -o)
 #   NON_HUMAN  space- or comma-separated player-name patterns that do not
-#              block a rebuild (crew units and load-test bots, such as load-*)
+#              block a rebuild (an override for bots the xuid check below
+#              cannot tell apart from a person)
 #   STALE_AFTER  seconds to wait out a rebuild that holds the crew-course-*
 #                areas before clearing them as stale (default 900: a build
 #                of every field finishes well within it, and the wait plus a
@@ -18,6 +19,10 @@
 #
 # A rebuild replaces everything in a field's box, so it never starts while a
 # human is in the world, or while another rebuild holds its ticking areas.
+# A player is human unless NON_HUMAN names them or their latest
+# `Player connected: ..., xuid: ...` line in the server log has an empty
+# xuid: people sign in with an Xbox ID, offline-auth bots never do. Without
+# a connect line they count as human, the safe way to be wrong.
 # A human is a skip, not a failure: it exits 0 so a busy night does not page.
 # Held areas are waited out rather than skipped: their holder removes them
 # when it ends, unless its server pod restarted mid-build and killed the trap
@@ -53,6 +58,7 @@ console() {
 check_free() {
   busy='' holders=
   local out block name pattern non_humans="${NON_HUMAN//,/ }"
+  local connected logs_read=false line xuid
   out=$(console list) || return
   # `grep -a`: the log carries binary bytes, and grep otherwise refuses it.
   block=$(grep -a -A1 'players online:' <<<"$out" | tail -n 2 | tr -d '\r')
@@ -67,7 +73,19 @@ check_free() {
           break
         fi
       done
-      if [[ $known != true ]]; then
+      [[ $known == true ]] && continue
+      # Read the whole log at most once per check: only an unnamed player
+      # needs it, and it grows all day.
+      if [[ $logs_read == false ]]; then
+        connected=$(kubectl -n "$ns" logs "$pod" 2>/dev/null |
+          grep -a 'Player connected: ' || true)
+        logs_read=true
+      fi
+      # The last connect line wins: a player can reconnect, and only the
+      # current session says whether they signed in.
+      line=$(grep -aF "Player connected: $name, xuid:" <<<"$connected" | tail -n 1)
+      xuid=${line#*xuid:}
+      if [[ -z $line || $xuid == *[![:space:]]* ]]; then
         busy="player $name is online"
         return 0
       fi
