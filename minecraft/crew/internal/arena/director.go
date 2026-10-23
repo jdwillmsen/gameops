@@ -779,6 +779,7 @@ func (d *Director) observeWarrior(name string, i int, st *warriorState, respawne
 		}
 		if jumped && !st.deathCounted {
 			result.WarriorDeaths++
+			st.deaths++
 			d.logf("arena: warrior %s died away from the squad", name)
 		}
 		st.pos, st.havePos = pos, true
@@ -817,6 +818,7 @@ type warriorState struct {
 	havePos      bool
 	ignoreJump   bool
 	deathCounted bool
+	deaths       int
 	pos          TargetPosition
 }
 
@@ -889,6 +891,7 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 		}
 		if st.up {
 			result.WarriorDeaths++
+			st.deaths++
 			st.deathCounted = true
 			d.logf("arena: warrior %s is down", name)
 		}

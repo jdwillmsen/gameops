@@ -1328,3 +1328,29 @@ func TestMissedRespawnIsNotCountedTwice(t *testing.T) {
 		t.Errorf("deaths after the hub respawn = %d, want the miss count to stand", result.WarriorDeaths)
 	}
 }
+
+func TestWarriorDeathsAreCountedPerName(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.countStep = 0
+	s.warriorUp = map[string]bool{"Vanguard": true, "Striker": true}
+	s.warriorOff = map[string]int{"Vanguard": 2}
+	f := &FakeConsole{Respond: s.Exec}
+	d := newDirector(f, testBook(), clock)
+	d.Warriors = []string{"Vanguard", "Striker"}
+	d.WarriorMisses = 1
+	states := map[string]*warriorState{
+		"Vanguard": {up: true, live: true},
+		"Striker":  {up: true, live: true},
+	}
+	var result Result
+	for range 3 {
+		if _, err := d.checkWarriors(states, &result); err != nil {
+			t.Fatalf("checkWarriors: %v", err)
+		}
+	}
+	if states["Vanguard"].deaths != 1 || states["Striker"].deaths != 0 || result.WarriorDeaths != 1 {
+		t.Errorf("deaths = Vanguard %d, Striker %d, total %d; want 1, 0, 1",
+			states["Vanguard"].deaths, states["Striker"].deaths, result.WarriorDeaths)
+	}
+}
