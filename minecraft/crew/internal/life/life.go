@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"sync"
 
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
@@ -98,12 +99,16 @@ type Life struct {
 	body act.Solid
 
 	// mu guards what the read loop writes: the hurt marker and the health the
-	// last attribute update reported.
+	// last attribute update reported, and the feet the last tick stood on,
+	// where the read loop looks for what dealt a lethal blow.
 	mu         sync.Mutex
 	selfID     uint64
 	hurt       bool
 	health     float32
 	healthSeen bool
+	dead       bool
+	feet       mgl32.Vec3
+	feetKnown  bool
 
 	// The rest belongs to the stepping goroutine.
 	tick uint64
@@ -162,7 +167,7 @@ func (l *Life) Spawn(runtimeID uint64) {
 	l.ents.Spawn(runtimeID)
 	l.tel.spawn()
 	l.mu.Lock()
-	l.selfID, l.hurt, l.healthSeen = runtimeID, false, false
+	l.selfID, l.hurt, l.healthSeen, l.dead, l.feetKnown = runtimeID, false, false, false, false
 	l.mu.Unlock()
 }
 
@@ -199,11 +204,17 @@ func (l *Life) Apply(pk packet.Packet) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.warrior != nil {
-		l.tel.observe(pk, l.selfID)
+		l.tel.observe(pk, l.selfID, l.dead)
 	}
 	switch p := pk.(type) {
 	case *packet.ActorEvent:
-		if p.EntityRuntimeID == l.selfID && p.EventType == packet.ActorEventHurt {
+		if p.EntityRuntimeID != l.selfID {
+			return
+		}
+		switch {
+		case p.EventType == packet.ActorEventDeath:
+			l.diedLocked()
+		case p.EventType == packet.ActorEventHurt && !l.dead:
 			l.hurt = true
 		}
 	case *packet.UpdateAttributes:
@@ -218,8 +229,36 @@ func (l *Life) Apply(pk packet.Packet) {
 				l.hurt = true
 			}
 			l.health, l.healthSeen = a.Value, true
+			switch {
+			case a.Value <= 0:
+				l.diedLocked()
+			case l.dead:
+				l.dead = false
+			}
 		}
 	}
+}
+
+// diedLocked notes a death once, however many packets announce it. A dead
+// unit is not stepped, so the lethal blow is attributed here, from where the
+// unit last stood, before its killer can move off or, as a creeper does,
+// vanish; and its hurt marker is dropped, or the next life would start by
+// blaming whatever stands at the respawn point.
+func (l *Life) diedLocked() {
+	if l.dead {
+		return
+	}
+	l.dead, l.hurt = true, false
+	if l.warrior == nil {
+		return
+	}
+	killer := ""
+	if l.feetKnown {
+		if e, player, ok := l.suspect(act.Pose{Feet: l.feet}); ok {
+			killer = attackerName(e, player)
+		}
+	}
+	l.tel.markDead(killer)
 }
 
 // takeHurt takes the hurt marker and, when drain is set, the telemetry the
@@ -229,6 +268,18 @@ func (l *Life) Apply(pk packet.Packet) {
 func (l *Life) takeHurt(drain bool) (bool, drained) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.takeHurtLocked(drain)
+}
+
+// sense is takeHurt for a tick, which also records where the unit stands.
+func (l *Life) sense(p act.Pose, drain bool) (bool, drained) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.feet, l.feetKnown = p.Feet, true
+	return l.takeHurtLocked(drain)
+}
+
+func (l *Life) takeHurtLocked(drain bool) (bool, drained) {
 	h := l.hurt
 	l.hurt = false
 	var d drained

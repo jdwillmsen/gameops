@@ -29,7 +29,7 @@ const bodyCentre = 0.9
 // every tick, whatever the unit is doing.
 func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	l.tick++
-	hurt, d := l.takeHurt(l.cfg.Defend)
+	hurt, d := l.sense(p, l.cfg.Defend)
 	if !l.cfg.Defend {
 		return false
 	}
@@ -165,12 +165,27 @@ func modeName(m mode) string {
 // stepBackEnd is when a player's blow stops being answered by backing away.
 func (l *Life) stepBackEnd() uint64 { return l.attackerUntil - attackerTicks + stepBackTicks }
 
-// noteHurt finds what most likely hit the unit: a hostile mob close by or, for
-// a shooter, farther off, else a player beside it. A blow from nothing known
+// noteHurt blames what most likely hit the unit. A blow from nothing known
 // (a fall, fire, hunger) leaves the unit's behaviour alone.
 func (l *Life) noteHurt(p act.Pose) {
+	e, player, ok := l.suspect(p)
+	if !ok {
+		return
+	}
+	l.attacker, l.attackerPlayer = e.ID, player
+	who := attackerName(e, player)
+	l.logEvent("hurt_by", map[string]any{"entity": who})
+	l.attackerUntil = l.tick + attackerTicks
+	t := &l.tel
+	t.attackerType, t.attackerAt, t.attributed = who, l.tick, true
+}
+
+// suspect finds what most likely hit a unit standing at p: a hostile mob
+// close by or, for a shooter, farther off, else a player beside it. It reads
+// only the entities, so the read loop may call it too.
+func (l *Life) suspect(p act.Pose) (e belief.Entity, player, ok bool) {
 	var (
-		mob, player         belief.Entity
+		mob, pl             belief.Entity
 		mobD, playerD       = math.MaxFloat64, math.MaxFloat64
 		mobSeen, playerSeen bool
 	)
@@ -179,7 +194,7 @@ func (l *Life) noteHurt(p act.Pose) {
 		switch {
 		case e.Player:
 			if d <= attributionRange && d < playerD {
-				player, playerD, playerSeen = e, d, true
+				pl, playerD, playerSeen = e, d, true
 			}
 		case kindOf(e.Type) != other && (kindOf(e.Type) != provoked || inMeleeReach(p, e)):
 			limit := attributionRange
@@ -193,20 +208,19 @@ func (l *Life) noteHurt(p act.Pose) {
 	})
 	switch {
 	case mobSeen && (!playerSeen || mobD < playerD):
-		l.attacker, l.attackerPlayer = mob.ID, false
-		l.logEvent("hurt_by", map[string]any{"entity": name(mob.Type)})
+		return mob, false, true
 	case playerSeen:
-		l.attacker, l.attackerPlayer = player.ID, true
-		l.logEvent("hurt_by", map[string]any{"entity": "player"})
-	default:
-		return
+		return pl, true, true
 	}
-	l.attackerUntil = l.tick + attackerTicks
-	t := &l.tel
-	t.attackerType, t.attackerAt, t.attributed = "player", l.tick, true
-	if !l.attackerPlayer {
-		t.attackerType = name(mob.Type)
+	return belief.Entity{}, false, false
+}
+
+// attackerName is how logs and metrics name an attacker: its type, or player.
+func attackerName(e belief.Entity, player bool) string {
+	if player {
+		return "player"
 	}
+	return name(e.Type)
 }
 
 // giveUp stops considering a mob a threat for a while: it cannot be reached,
