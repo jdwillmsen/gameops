@@ -21,6 +21,8 @@ func TestValidate(t *testing.T) {
 		mutate func(*Blueprint)
 	}{
 		{"palette bounds", func(b *Blueprint) { b.Layers[0] = "20" }},
+		{"palette entry without name", func(b *Blueprint) { b.Palette[1].Name = "" }},
+		{"layer cell count", func(b *Blueprint) { b.Layers[0] = "0" }},
 		{"materials", func(b *Blueprint) { b.Materials[0].Count++ }},
 		{"air only", func(b *Blueprint) {
 			b.Palette = []Block{{Name: "air"}}
