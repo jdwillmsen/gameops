@@ -380,6 +380,28 @@ indices and moving entities as one batch per 50 ms tick; the byte layout is
 documented in `internal/camera/wire.go`. `/v1/camera/stats` also reports bytes
 sent, sub-chunks sent, viewers dropped for lagging and viewers refused.
 
+### Block ids and wire versions
+
+Every distinct block name a unit streams, a stair or slab shape variant
+included, gets a two-byte id for the life of the process, so no block shares a
+texture with another. Wire version 4 carries those ids; a sub-chunk palette may
+list up to 4096 of them. A materials frame defines only the ids it lists, so
+the table grows by what is new rather than being resent whole (1500 materials
+cost about 45 KB on the wire instead of about 30 MB). The page keeps each
+sub-chunk's cells as 16-bit values, 8 KiB instead of 4 KiB.
+
+The page asks for version 4 with `?wire=4` on the websocket. A page loaded
+before an upgrade asks for nothing and is sent version 3: the server rewrites
+each frame on that connection, ids above 255 all draw as id 255 (the old
+behaviour), and the whole table is rebuilt for each materials frame. A new
+page that reads a hello of 3 (a server that predates 4) decodes one-byte ids.
+Roll the server first: tabs open across the rollout reconnect at version 3
+until reloaded, and nothing breaks in either direction.
+
+The mesher worker is told only the ids that are new and re-meshes a sub-chunk
+only if a cell already named an id that was not yet defined. Frustum culling
+and the worker's message shapes for meshes are unchanged.
+
 ## Lab
 
 `lab/compose.yaml` is a throwaway Bedrock server with cheats on and online
