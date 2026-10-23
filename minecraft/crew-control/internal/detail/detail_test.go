@@ -64,6 +64,10 @@ type fakeSource struct {
 
 func (f *fakeSource) Lookup(id string) (playerdata.Record, time.Time, bool) {
 	f.asked = append(f.asked, id)
+	if !f.found {
+		// The real store has no save time for a record it does not hold.
+		return playerdata.Record{}, time.Time{}, false
+	}
 	return f.record, f.at, f.found
 }
 
@@ -352,6 +356,43 @@ func TestDetailStaysUnderTheCap(t *testing.T) {
 		if contents := it.(map[string]any)["contents"]; contents != nil {
 			t.Fatalf("an answer over the cap kept what a box carries: %v", it)
 		}
+	}
+}
+
+func TestOverCapAnswerLeavesTheCachedRecordIntact(t *testing.T) {
+	rec := fixtureRecord()
+	var heavy []playerdata.Item
+	for i := range 36 {
+		heavy = append(heavy, playerdata.Item{Slot: i, Name: "shulker_box", Count: 1, Contents: make([]playerdata.Item, 64)})
+	}
+	rec.Inventory = heavy
+	saves := &fakeSource{record: rec, at: time.Now().Add(-time.Minute), found: true, scanned: true}
+	h := serve(t, rosterWith(t, "-12"), liveState(false, time.Time{}), saves, gate{signedIn: true})
+	for range 2 {
+		if code, _, _ := detailBody(t, h); code != http.StatusOK {
+			t.Fatalf("status %d", code)
+		}
+	}
+	for i, it := range saves.record.Inventory {
+		if len(it.Contents) != 64 {
+			t.Fatalf("slot %d lost what the box carries in the cached record: %d stacks left", i, len(it.Contents))
+		}
+	}
+}
+
+func TestAMissedLookupReportsTheScanTimeNotAZeroTime(t *testing.T) {
+	scan := time.Now().Add(-time.Minute).UTC().Truncate(time.Second)
+	saves := &fakeSource{at: scan, found: false, scanned: true}
+	h := serve(t, rosterWith(t, "-12"), liveState(false, time.Time{}), saves, gate{signedIn: true})
+	code, got, _ := detailBody(t, h)
+	if code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	save, _ := got["save"].(map[string]any)
+	asOf, _ := save["asOf"].(string)
+	at, err := time.Parse(time.RFC3339, asOf)
+	if save["state"] != stateNone || err != nil || !at.Equal(scan) {
+		t.Fatalf("save = %v, want state none as of the scan %v", save, scan)
 	}
 }
 
