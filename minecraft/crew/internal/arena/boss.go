@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -24,14 +26,24 @@ const playerCheckEvery = 15 * time.Second
 
 var mobPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$`)
 
+// plainName is a boss name that needs no quotes inside a selector.
+var plainName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// effectTarget is the argument index of the target for each command an
+// effect may use; event's first argument must be "entity".
+var effectTarget = map[string]int{"effect": 1, "damage": 1, "event": 2}
+
 // BossTest repeats one boss fight against the squad and reports each run. The
 // director's own placement, rally-free death counting and ticking areas are
-// reused; nothing here targets a player.
+// reused. Besides placing and polling the squad, every command it sends
+// targets only the boss; validate holds Effects to that.
 type BossTest struct {
-	Console   Console
-	Layout    Layout
-	Mob       string
-	Name      string
+	Console Console
+	Layout  Layout
+	Mob     string
+	Name    string
+	// Effects are effect, damage or event commands whose only target is
+	// the boss, as @e[name=<Name>...].
 	Effects   []string
 	Runs      int
 	Timeout   time.Duration
@@ -92,6 +104,11 @@ func (b *BossTest) validate() error {
 	if err := validateWarriorName(b.Name); err != nil {
 		return fmt.Errorf("arena: boss name: %w", err)
 	}
+	// An effect selects the boss by name alone, so a player with that name
+	// would be hit too; only crew can be online, so keep it off their names.
+	if slices.Contains(b.CrewNames, b.Name) || slices.Contains(b.Warriors, b.Name) {
+		return fmt.Errorf("arena: boss name %q is a crew name", b.Name)
+	}
 	if len(b.Warriors) == 0 {
 		return fmt.Errorf("arena: a boss test needs at least one warrior")
 	}
@@ -107,8 +124,74 @@ func (b *BossTest) validate() error {
 		if strings.TrimSpace(e) == "" || strings.ContainsFunc(e, unicode.IsControl) {
 			return fmt.Errorf("arena: effect command %q is empty or has a control character", e)
 		}
+		if err := b.checkEffect(e); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// checkEffect allows only effect, damage and event commands whose sole
+// selector is the boss's. Anything else, execute included, could reach a
+// player or the server itself.
+func (b *BossTest) checkEffect(cmd string) error {
+	args := splitArgs(cmd)
+	at, ok := effectTarget[args[0]]
+	if !ok {
+		return fmt.Errorf("arena: effect %q: only effect, damage and event commands are allowed", cmd)
+	}
+	if args[0] == "event" && (len(args) < 2 || args[1] != "entity") {
+		return fmt.Errorf("arena: effect %q: event must be event entity <boss> <event>", cmd)
+	}
+	if len(args) <= at+1 || !b.isBossSelector(args[at]) || strings.Count(cmd, "@") != 1 {
+		return fmt.Errorf("arena: effect %q must target only the boss, as @e[name=%s]", cmd, b.Name)
+	}
+	return nil
+}
+
+// isBossSelector accepts @e[name=<Name>] with optional filters after the
+// name. Further filters can only narrow the name match.
+func (b *BossTest) isBossSelector(sel string) bool {
+	forms := []string{"name=" + strconv.Quote(b.Name)}
+	if plainName.MatchString(b.Name) {
+		forms = append(forms, "name="+b.Name)
+	}
+	for _, f := range forms {
+		rest, ok := strings.CutPrefix(sel, "@e["+f)
+		if ok && (rest == "]" || strings.HasPrefix(rest, ",") && strings.HasSuffix(rest, "]")) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitArgs splits a command on spaces outside selector brackets and quotes.
+func splitArgs(cmd string) []string {
+	var args []string
+	var cur strings.Builder
+	depth, quoted := 0, false
+	for _, r := range strings.TrimSpace(cmd) {
+		switch {
+		case r == '"':
+			quoted = !quoted
+		case quoted:
+		case r == '[':
+			depth++
+		case r == ']' && depth > 0:
+			depth--
+		case unicode.IsSpace(r) && depth == 0:
+			if cur.Len() > 0 {
+				args = append(args, cur.String())
+				cur.Reset()
+			}
+			continue
+		}
+		cur.WriteRune(r)
+	}
+	if cur.Len() > 0 {
+		args = append(args, cur.String())
+	}
+	return args
 }
 
 func (b *BossTest) director() *Director {

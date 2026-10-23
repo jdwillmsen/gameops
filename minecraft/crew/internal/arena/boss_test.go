@@ -505,6 +505,54 @@ func TestBossRecordFailureStopsTheTest(t *testing.T) {
 	}
 }
 
+func TestBossEffectsMayOnlyTargetTheBoss(t *testing.T) {
+	allowed := []string{
+		`effect @e[name=W] slowness 999 1`,
+		`effect @e[name=W,type=warden] weakness 999 4`,
+		`effect @e[name="W",type=warden] weakness 999 4`,
+		`effect @e[name=W, type=warden] clear`,
+		`damage @e[name=W] 5`,
+		`event entity @e[name=W] minecraft:start_sniffing`,
+	}
+	refused := []string{
+		`stop`,
+		`op Steve99`,
+		`kill @a`,
+		`kill @e[name=W]`,
+		`effect @a weakness 999 4`,
+		`effect @p weakness 999 4`,
+		`effect @s weakness 999 4`,
+		`effect @r weakness 999 4`,
+		`effect @e weakness 999 4`,
+		`effect @e[type=warden] weakness 999 4`,
+		`effect @e[name=WW] weakness 999 4`,
+		`effect @e[type=warden,name=W] weakness 999 4`,
+		`effect Steve99 weakness 999 4`,
+		`effect @e[name=W]`,
+		`execute as @e[name=W] run effect @a weakness 999 4`,
+		`damage @e[name=W] 5 entity_attack entity @a`,
+		`event entity @a minecraft:start_sniffing`,
+		`event @e[name=W] minecraft:start_sniffing`,
+		`tp @e[name=W] 0 64 0`,
+	}
+	for _, cmd := range allowed {
+		f := &FakeConsole{Respond: newBossSim().Exec}
+		b, _ := newBossTest(f, newFakeClock())
+		b.Effects = []string{cmd}
+		if _, err := b.Run(context.Background()); err != nil {
+			t.Errorf("%q refused: %v", cmd, err)
+		}
+	}
+	for _, cmd := range refused {
+		f := &FakeConsole{Respond: newBossSim().Exec}
+		b, _ := newBossTest(f, newFakeClock())
+		b.Effects = []string{cmd}
+		if _, err := b.Run(context.Background()); err == nil || len(f.Cmds) != 0 {
+			t.Errorf("%q accepted: err %v, %d commands sent", cmd, err, len(f.Cmds))
+		}
+	}
+}
+
 func TestBossValidatesItsInputs(t *testing.T) {
 	for name, mutate := range map[string]func(*BossTest){
 		"no warriors":  func(b *BossTest) { b.Warriors = nil },
@@ -513,6 +561,7 @@ func TestBossValidatesItsInputs(t *testing.T) {
 		"empty mob":    func(b *BossTest) { b.Mob = "" },
 		"no timeout":   func(b *BossTest) { b.Timeout = 0 },
 		"empty effect": func(b *BossTest) { b.Effects = []string{" "} },
+		"crew name":    func(b *BossTest) { b.Name = "Probe" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := &FakeConsole{Respond: newBossSim().Exec}
