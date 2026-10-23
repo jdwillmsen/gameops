@@ -4,6 +4,7 @@
 package belief
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -46,6 +47,10 @@ type Snapshot struct {
 	// Effects are what the server has put on the unit and not taken
 	// back; the save holds none of them, so an empty list means none.
 	Effects []Effect `json:"effects"`
+	// UniqueID is the id the world save and the map's live feed know the
+	// unit by, as a signed decimal; a string because a 64-bit number does
+	// not survive a JavaScript reader. Empty until the session has one.
+	UniqueID string `json:"unique_id,omitempty"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -58,6 +63,7 @@ type Tracker struct {
 	inv       [inventorySize]stackRef
 	itemNames map[int32]string
 	effects   map[int32]Effect
+	uniqueID  string
 
 	// opened maps stack IDs seen in the open container's window to their
 	// item; nil until a container opens.
@@ -74,7 +80,17 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	t.inv = [inventorySize]stackRef{}
 	t.opened = nil
 	t.effects = nil
+	t.uniqueID = ""
 	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, Yaw: yaw, Pitch: pitch, UpdatedAt: t.now()}
+}
+
+// SetUniqueID records the id the server gave the unit's player in its game
+// data, which is the one its record in the world save is filed under. It
+// follows Spawn, which forgets the last session's.
+func (t *Tracker) SetUniqueID(id int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.uniqueID = strconv.FormatInt(id, 10)
 }
 
 func (t *Tracker) Apply(pk packet.Packet) {
@@ -173,6 +189,7 @@ func (t *Tracker) Reset() {
 	t.inv = [inventorySize]stackRef{}
 	t.opened = nil
 	t.effects = nil
+	t.uniqueID = ""
 	t.s = Snapshot{UpdatedAt: t.now()}
 }
 
@@ -182,5 +199,6 @@ func (t *Tracker) Snapshot() Snapshot {
 	s := t.s
 	s.Inventory = t.inventoryLocked()
 	s.Effects = t.effectsLocked()
+	s.UniqueID = t.uniqueID
 	return s
 }

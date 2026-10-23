@@ -228,7 +228,9 @@ true the position is the server's placeholder, not a real one. It also carries
 `health`, `hunger`, the 36-slot `inventory`, `held_slot` (only meaningful when
 `held_known`), and `effects`: the status effects the server has put on the
 unit and not taken back, each with `id`, `name`, `amplifier` and `duration`
-in ticks (negative means it does not expire; a logout forgets them all). It
+in ticks (negative means it does not expire; a logout forgets them all), and
+`unique_id`, the signed decimal id the server gave the unit's player, which
+is the one its record in the world save is filed under. It
 also carries a read-only `tasks` object: `current` (the running task or
 null) and `recent` (the last five others, newest first), each with id,
 template, state, skill, item, qty, progress, reason and timestamps. It never
