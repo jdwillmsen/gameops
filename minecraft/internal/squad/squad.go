@@ -172,8 +172,8 @@ func NewStore() *Store {
 	}
 }
 
-// prune drops members whose claim lapsed, then squads left empty. Callers
-// hold the mutex.
+// prune drops members whose claim lapsed, then squads left empty, then
+// battalion names nothing nests under any more. Callers hold the mutex.
 func (st *Store) prune(now time.Time) {
 	for id, sq := range st.squads {
 		for unit, m := range sq.members {
@@ -189,6 +189,20 @@ func (st *Store) prune(now time.Time) {
 			continue
 		}
 		st.touchState(sq, now)
+	}
+	// A battalion's display name came from a hello; with no squad naming
+	// the parent any more the name is dead weight nobody can resurrect
+	// except another hello, which re-records it anyway.
+	claimed := map[string]bool{}
+	for _, sq := range st.squads {
+		if sq.battalion != "" {
+			claimed[sq.battalion] = true
+		}
+	}
+	for id := range st.bats {
+		if !claimed[id] {
+			delete(st.bats, id)
+		}
 	}
 }
 

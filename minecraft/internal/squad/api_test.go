@@ -211,6 +211,11 @@ func TestHelloChecksItsBody(t *testing.T) {
 		{"unknown fields", `{"unit":"crew-19","role":"striker","team":1}`, http.StatusBadRequest},
 		{"not even JSON", `zero`, http.StatusBadRequest},
 		{"empty body", ``, http.StatusBadRequest},
+		{"a battalion one past the line", `{"unit":"crew-19","role":"striker","battalion":"` + strings.Repeat("a", 33) + `"}`, http.StatusBadRequest},
+		{"a battalion past 32 printable characters", `{"unit":"crew-19","role":"striker","battalion":"ab` + "\n" + `cd"}`, http.StatusBadRequest},
+		{"a battalion_name one past the line", `{"unit":"crew-19","role":"striker","battalion_name":"` + strings.Repeat("a", 33) + `"}`, http.StatusBadRequest},
+		{"a battalion_name with a newline", `{"unit":"crew-19","role":"striker","battalion_name":"Sec\nond"}`, http.StatusBadRequest},
+		{"a readable battalion_name with a space", `{"unit":"crew-19","role":"striker","battalion_name":"Second Wing"}`, http.StatusNoContent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -266,6 +271,9 @@ func TestStatusUpdateAndValidation(t *testing.T) {
 		{"unknown unit", `{"unit":"crew-21","hp":1,"food":1,"pos":{"x":0,"y":0,"z":0}}`, http.StatusBadRequest},
 		{"impossible food", `{"unit":"crew-18","hp":1,"food":21,"pos":{"x":0,"y":0,"z":0}}`, http.StatusBadRequest},
 		{"unknown fields", `{"unit":"crew-18","hp":1,"food":1,"pos":{"x":0,"y":0,"z":0},"xp":9}`, http.StatusBadRequest},
+		{"a weapon one past the line", `{"unit":"crew-18","hp":1,"food":1,"weapon":"` + strings.Repeat("w", 33) + `","pos":{"x":0,"y":0,"z":0}}`, http.StatusBadRequest},
+		{"a weapon with a newline", `{"unit":"crew-18","hp":1,"food":1,"weapon":"one\ntwo","pos":{"x":0,"y":0,"z":0}}`, http.StatusBadRequest},
+		{"a weapon with a control byte", `{"unit":"crew-18","hp":1,"food":1,"weapon":"sword` + "\x01" + `tail","pos":{"x":0,"y":0,"z":0}}`, http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		resp := r.do(t, "POST", "/v1/squads/alpha/status", tt.body, nil)
