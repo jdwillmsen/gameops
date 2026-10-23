@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Builds the Colosseum on a lab from the commands labcourses prints, or prints
+# Builds the Colosseum on a lab from the commands labcourses prints, prints
 # the layout JSON the arena director reads (pens, iron-bar gates, arched gates
-# and the squad start gate).
+# and the squad start gate), or runs the director's waves against a lab.
 #
 # The Colosseum is centred x 0, z -760 on the already-lit flat square: a
 # radius-45 fighting floor, twelve mob pens under the stands, three tiers and
@@ -11,11 +11,22 @@
 #
 # usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab>
 #        arena.sh layout [--out <file>]
+#        arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>]
+#                            [--timeout <duration>] [--max-live N] [--poll <d>]
+#        arena.sh reset <lab>
+#        arena.sh status <lab> [--warriors <names>]
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
 #   for the cluster lab's server pod.
 #
-# --plan feeds a prebuilt `labcourses arena` output instead of running the
-# generator from a checkout, for hosts that have no Go toolchain.
+# run drives minecraft/crew/cmd/arenadirector: it opens the squad gate, spawns
+# each wave in its pens, counts survivors and stops on the boss, a squad wipe
+# or a timeout. It prints one JSON result line (duration, waves cleared,
+# warrior deaths). reset kills only the director's tagged mobs; status prints
+# the live wave, boss and warrior counts. A k8s: run needs --confirm-overwrite
+# because it puts buffed mobs into the shared world.
+#
+# --plan feeds a prebuilt `labcourses arena` output to build instead of
+# running the generator from a checkout, for hosts that have no Go toolchain.
 #
 # Thousands of commands go straight to the server's stdin: send-command per
 # line would take an exec each. The server runs about one command per tick
@@ -26,7 +37,7 @@ set -euo pipefail
 confirm=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>]"
+usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;
@@ -49,21 +60,51 @@ done
 action=${1:?$usage}
 shift || true
 here=$(cd "$(dirname "$0")" && pwd)
+repo=$(cd "$here/../../.." && pwd)
+go_run() { (cd "$repo" && go run "$@"); }
 
 if [[ $action == layout ]]; then
   if [[ -n $out ]]; then
-    (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses arena-layout) >"$out"
+    go_run ./minecraft/crew/cmd/labcourses arena-layout >"$out"
   else
-    (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses arena-layout)
+    go_run ./minecraft/crew/cmd/labcourses arena-layout
   fi
   exit 0
 fi
-if [[ $action != build ]]; then
-  echo "$usage" >&2
-  exit 2
-fi
+
+case $action in
+  run | reset | status) ;;
+  build) ;;
+  *)
+    echo "$usage" >&2
+    exit 2
+    ;;
+esac
 
 lab=${1:?$usage}
+shift || true
+
+if [[ $action != build ]]; then
+  case $action in
+    run)
+      if [[ $lab == k8s:*/* && $confirm != true ]]; then
+        echo "arena.sh: $lab is a shared world; a run summons buffed mobs into it. Re-run with --confirm-overwrite to proceed." >&2
+        exit 2
+      fi
+      layout=$(mktemp)
+      trap 'rm -f "$layout"' EXIT
+      go_run ./minecraft/crew/cmd/labcourses arena-layout >"$layout"
+      go_run ./minecraft/crew/cmd/arenadirector run --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "$@"
+      ;;
+    reset)
+      go_run ./minecraft/crew/cmd/arenadirector reset --lab "$lab" --compose "$here/compose.yaml" "$@"
+      ;;
+    status)
+      go_run ./minecraft/crew/cmd/arenadirector status --lab "$lab" --compose "$here/compose.yaml" "$@"
+      ;;
+  esac
+  exit 0
+fi
 
 if [[ $lab == k8s:*/* ]]; then
   if ! $confirm; then
