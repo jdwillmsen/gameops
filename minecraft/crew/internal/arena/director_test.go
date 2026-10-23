@@ -34,6 +34,7 @@ func testBook(waves ...Wave) *WaveBook {
 		Pause:       Duration{2 * time.Second},
 		MaxLive:     12,
 		WaveTimeout: Duration{5 * time.Minute},
+		RallyAfter:  &Duration{0},
 		Tiers: map[int]Tier{
 			1: {
 				Effects: []Effect{{ID: "strength", Seconds: 600, Amplifier: 0}},
@@ -788,6 +789,24 @@ func TestRallyCanBeDisabled(t *testing.T) {
 	f, at, result := rallySim(t, d, clock, s)
 	if len(at) != 0 || result.Rallies != 0 || len(tpCommands(t, f.Cmds)) != 0 {
 		t.Errorf("rallies = %v (%d), teleports = %d, want none", at, result.Rallies, len(tpCommands(t, f.Cmds)))
+	}
+}
+
+func TestRallyRunRequiresWarriors(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: s.Exec}
+	book := rallyBook(wave("Horde", "zombie", 2, 1, 1))
+	d := newDirector(f, book, clock)
+	d.Warriors = nil
+
+	_, err := d.Run()
+	if err == nil || !strings.Contains(err.Error(), "warrior") {
+		t.Fatalf("Run error = %v, want a missing-warrior error", err)
+	}
+	if len(f.Cmds) != 0 {
+		t.Errorf("a rejected run ran %d commands, want none before spawning:\n%s",
+			len(f.Cmds), strings.Join(f.Cmds, "\n"))
 	}
 }
 
