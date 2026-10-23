@@ -537,6 +537,46 @@ func TestBossCancelledRunCleansUp(t *testing.T) {
 	}
 }
 
+func TestBossCancelDuringTheSettleWaitStartsNoFight(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	clock := newFakeClock()
+	b, recs := newBossTest(f, clock)
+	ctx, cancel := context.WithCancel(context.Background())
+	b.Sleep = func(d time.Duration) {
+		if d == b.Settle {
+			cancel()
+		}
+		clock.Sleep(d)
+	}
+	_, err := b.Run(ctx)
+	if !errors.Is(err, context.Canceled) || len(*recs) != 0 {
+		t.Fatalf("Run = %v with %d records, want cancellation and no record", err, len(*recs))
+	}
+	if f.Count("summon") != 0 || f.Count("tp ") != 0 {
+		t.Errorf("a cancelled test still started a fight:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	if f.Count("tickingarea remove") != 1 {
+		t.Error("the cancelled test left the area loaded")
+	}
+}
+
+func TestBossCancelInterruptsTheSettleWait(t *testing.T) {
+	f := &FakeConsole{Respond: newBossSim().Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Now, b.Sleep = nil, nil
+	b.Settle = time.Hour
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := b.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Run error = %v, want the context's", err)
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Errorf("Run took %v; the settle wait ignored the context", waited)
+	}
+}
+
 func TestBossRecordFailureStopsTheTest(t *testing.T) {
 	s := newBossSim()
 	f := &FakeConsole{Respond: s.Exec}

@@ -230,6 +230,23 @@ func (b *BossTest) sleep(d time.Duration) {
 	time.Sleep(d)
 }
 
+// wait sleeps for d unless ctx ends first. An injected Sleep cannot be cut
+// short, so ctx is checked once it returns.
+func (b *BossTest) wait(ctx context.Context, d time.Duration) error {
+	if b.Sleep != nil || d <= 0 {
+		b.sleep(d)
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
 func (b *BossTest) bossSelector() string {
 	return fmt.Sprintf("@e[name=%q,type=!player]", b.Name)
 }
@@ -263,10 +280,15 @@ func (b *BossTest) Run(ctx context.Context) ([]BossRecord, error) {
 		return nil, err
 	}
 	defer d.removeTickingAreas()
-	b.sleep(b.Settle)
+	if err := b.wait(ctx, b.Settle); err != nil {
+		return nil, err
+	}
 
 	var done []BossRecord
 	for run := 1; run <= runs; run++ {
+		if err := ctx.Err(); err != nil {
+			return done, err
+		}
 		if err := CheckAlone(b.Console, b.CrewNames); err != nil {
 			return done, err
 		}
