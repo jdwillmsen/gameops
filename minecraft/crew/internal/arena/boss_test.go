@@ -1,0 +1,470 @@
+package arena
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+func bossLayout() Layout {
+	l := testLayout()
+	l.Center = Point{X: 0, Y: 64, Z: -760}
+	l.GroundY = 64
+	l.FloorRadius = 45
+	return l
+}
+
+// bossSim answers the console for a boss fight: the boss is found for the
+// first aliveFor testfor replies and gone afterwards, and a warrior can be
+// scripted down for a stretch of polls.
+type bossSim struct {
+	list       string
+	aliveFor   int
+	bossPolls  int
+	summon     string
+	downFrom   map[string]int
+	downUntil  map[string]int
+	warriorPos map[string]TargetPosition
+	respawnPos map[string]TargetPosition
+	polls      map[string]int
+	tpReply    string
+	missReply  string
+	summoned   bool
+}
+
+func newBossSim() *bossSim {
+	return &bossSim{
+		list:       "There are 3/10 players online:\nRusty, Slate, Tinder",
+		aliveFor:   2,
+		downFrom:   map[string]int{},
+		downUntil:  map[string]int{},
+		warriorPos: map[string]TargetPosition{},
+		respawnPos: map[string]TargetPosition{},
+		polls:      map[string]int{},
+		missReply:  "[2026-10-23 12:00:00:000 ERROR] No targets matched the selector",
+	}
+}
+
+func (s *bossSim) Exec(cmd string) (string, error) {
+	switch {
+	case cmd == "list":
+		return s.list, nil
+	case strings.HasPrefix(cmd, "summon "):
+		s.summoned = true
+		return s.summon, nil
+	case strings.HasPrefix(cmd, "tp "):
+		return s.tpReply, nil
+	case strings.HasPrefix(cmd, "testfor @e[name=") && strings.HasSuffix(cmd, "type=!player]"):
+		s.bossPolls++
+		if s.bossPolls <= s.aliveFor {
+			return "Found W", nil
+		}
+		return s.missReply, nil
+	case strings.HasPrefix(cmd, "testfor @e[name=") && strings.HasSuffix(cmd, "type=player]"):
+		name := warriorName(cmd)
+		s.polls[name]++
+		if from := s.downFrom[name]; from > 0 && s.polls[name] >= from && s.polls[name] < s.downUntil[name] {
+			return s.missReply, nil
+		}
+		if s.downFrom[name] > 0 && s.downUntil[name] == 0 && s.polls[name] >= s.downFrom[name] {
+			return s.missReply, nil
+		}
+		return "Found " + name, nil
+	case strings.HasPrefix(cmd, "querytarget @a[name="):
+		name := queryName(cmd)
+		p, ok := s.warriorPos[name]
+		if !ok {
+			p = TargetPosition{X: 0, Y: 65, Z: -785}
+		}
+		if after, ok := s.respawnPos[name]; ok && s.polls[name] >= s.downUntil[name] {
+			p = after
+		}
+		return targetJSON(p), nil
+	}
+	return "", nil
+}
+
+func newBossTest(f *FakeConsole, clock *fakeClock) (*BossTest, *[]BossRecord) {
+	var recs []BossRecord
+	return &BossTest{
+		Console:   f,
+		Layout:    bossLayout(),
+		Mob:       "warden",
+		Name:      "W",
+		Runs:      1,
+		Timeout:   5 * time.Minute,
+		Warriors:  []string{"Rusty", "Slate", "Tinder"},
+		CrewNames: DefaultCrewNames,
+		Poll:      5 * time.Second,
+		Settle:    25 * time.Second,
+		Record:    func(r BossRecord) error { recs = append(recs, r); return nil },
+		Now:       clock.Now,
+		Sleep:     clock.Sleep,
+	}, &recs
+}
+
+func TestBossRefusesWhenAHumanIsOnline(t *testing.T) {
+	s := newBossSim()
+	s.list = "There are 2/10 players online:\nRusty, Steve99"
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	_, err := b.Run(context.Background())
+	var busy *NotAloneError
+	if !errors.As(err, &busy) || !reflect.DeepEqual(busy.Names, []string{"Steve99"}) {
+		t.Fatalf("Run error = %v, want a refusal naming Steve99", err)
+	}
+	if f.Count("summon") != 0 || f.Count("tickingarea") != 0 || f.Count("tp ") != 0 || len(*recs) != 0 {
+		t.Errorf("a refused test touched the server:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+}
+
+func TestBossIgnoresAnErrorLineAfterTheHeader(t *testing.T) {
+	s := newBossSim()
+	s.list = "There are 0/10 players online:\n[2026-10-23 12:00:00:000 ERROR] No targets matched the selector"
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	var busy *NotAloneError
+	if _, err := b.Run(context.Background()); errors.As(err, &busy) {
+		t.Fatalf("an ERROR line read as a player: %v", err)
+	}
+}
+
+func TestBossKillIsRecordedFromTheTestforReply(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(got) != 1 || len(*recs) != 1 {
+		t.Fatalf("records = %d returned, %d recorded; want 1 each", len(got), len(*recs))
+	}
+	r := got[0]
+	if r.Outcome != BossKilled || r.Boss != "warden" || r.Run != 1 || r.Seconds < 10 || r.Seconds > 20 {
+		t.Errorf("record = %+v, want a kill of the warden in about three polls", r)
+	}
+	if !reflect.DeepEqual(r.Deaths, map[string]int{"Rusty": 0, "Slate": 0, "Tinder": 0, "total": 0}) {
+		t.Errorf("deaths = %v", r.Deaths)
+	}
+	if r.Effects == nil || len(r.Effects) != 0 {
+		t.Errorf("effects = %#v, want an empty list", r.Effects)
+	}
+}
+
+func TestBossSummonPutsTheNameBeforeTheCoordinates(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !hasCommand(f.Cmds, `summon warden "W" 0 65 -775`) {
+		t.Errorf("no summon 10 blocks past the squad start:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	for _, place := range []string{`tp "Rusty" 0 65 -785`, `tp "Slate" 3 65 -785`, `tp "Tinder" -3 65 -785`} {
+		if !hasCommand(f.Cmds, place) {
+			t.Errorf("squad was not placed with %q", place)
+		}
+	}
+}
+
+func TestBossLoadsTheLayoutAreasAndAlwaysRemovesThem(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	add := "tickingarea add -16 0 -800 31 0 -696 crew-arena-run-0"
+	if !before(f.Cmds, add, `summon warden "W" 0 65 -775`) {
+		t.Errorf("the area was not loaded before the summon:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	if f.Count("tickingarea remove crew-arena-run-0") != 1 {
+		t.Errorf("area removals = %d, want 1", f.Count("tickingarea remove crew-arena-run-0"))
+	}
+	if last := f.Cmds[len(f.Cmds)-1]; last != "tickingarea remove crew-arena-run-0" {
+		t.Errorf("last command = %q, want the area removal after the boss kill", last)
+	}
+	if f.Count(`kill @e[name="W",type=!player]`) < 2 {
+		t.Error("the boss was not killed before the run and again after it")
+	}
+}
+
+func TestBossRunsEffectsAfterTheSummon(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	b.Effects = SplitEffects(`effect @e[name=W,type=warden] weakness 999 4, effect @e[name=W] slowness 999 1`)
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !before(f.Cmds, `summon warden`, `effect @e[name=W,type=warden] weakness 999 4`) ||
+		!hasCommand(f.Cmds, `effect @e[name=W] slowness 999 1`) {
+		t.Errorf("effects not run after the summon:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	if (*recs)[0].Effects[1] != `effect @e[name=W] slowness 999 1` {
+		t.Errorf("recorded effects = %q", (*recs)[0].Effects)
+	}
+}
+
+func TestSplitEffectsKeepsCommasInsideSelectors(t *testing.T) {
+	got := SplitEffects(`effect @e[name=W,type=warden] weakness 9 4,  , kill @e[name=X]`)
+	want := []string{`effect @e[name=W,type=warden] weakness 9 4`, `kill @e[name=X]`}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("SplitEffects = %q, want %q", got, want)
+	}
+	if got := SplitEffects(""); len(got) != 0 {
+		t.Errorf("SplitEffects of nothing = %q", got)
+	}
+}
+
+func TestBossDownNeedsANoTargetsReplyWithoutTheName(t *testing.T) {
+	tests := []struct {
+		name  string
+		reply string
+		down  bool
+	}{
+		{"no targets", "[2026-10-23 12:00:00:000 ERROR] No targets matched the selector", true},
+		{"found", "Found W", false},
+		{"found with a stray miss line", "Found W\nNo targets matched the selector", false},
+		{"silence", "", false},
+		{"unrelated reply", "Teleported Rusty", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bossDown(tt.reply, "W"); got != tt.down {
+				t.Errorf("bossDown(%q) = %v, want %v", tt.reply, got, tt.down)
+			}
+		})
+	}
+}
+
+func TestBossIsNotKilledByATeleportMiss(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 1000
+	s.tpReply = "[2026-10-23 12:00:00:000 ERROR] No targets matched the selector"
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Timeout = 30 * time.Second
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got[0].Outcome != BossTimeout {
+		t.Errorf("outcome = %q, want timeout; a tp miss is not a kill", got[0].Outcome)
+	}
+}
+
+func TestBossTimesOutAndStillCleansUp(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 1000
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Timeout = time.Minute
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got[0].Outcome != BossTimeout || got[0].Seconds < 60 || got[0].Seconds > 70 {
+		t.Errorf("record = %+v, want a timeout at about 60s", got[0])
+	}
+	if f.Count("tickingarea remove") != 1 || f.Count(`kill @e[name="W",type=!player]`) < 2 {
+		t.Error("a timed-out run left the boss or its area behind")
+	}
+}
+
+func TestBossReplacesARespawnedWarrior(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 4
+	s.downFrom["Rusty"], s.downUntil["Rusty"] = 3, 4
+	s.respawnPos["Rusty"] = TargetPosition{X: 0, Y: 80, Z: 0}
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := f.Count(`tp "Rusty" 0 65 -785`); n < 2 {
+		t.Errorf("Rusty was placed %d times, want the respawn returned to its cell", n)
+	}
+	if got[0].Deaths["Rusty"] != 1 || got[0].Deaths["total"] != 1 {
+		t.Errorf("deaths = %v, want one Rusty death", got[0].Deaths)
+	}
+}
+
+func TestBossEndsOnAWipeAfterThreeDownPolls(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 1000
+	for _, n := range []string{"Rusty", "Slate", "Tinder"} {
+		s.downFrom[n] = 3
+	}
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	r := got[0]
+	if r.Outcome != BossWipe || r.Deaths["total"] != 3 || r.Deaths["Slate"] != 1 {
+		t.Errorf("record = %+v, want a wipe with each warrior down once", r)
+	}
+	if s.bossPolls > 8 {
+		t.Errorf("boss polled %d times; the wipe should end the run after three down polls", s.bossPolls)
+	}
+	if f.Count("tickingarea remove") != 1 {
+		t.Error("a wiped run left its area behind")
+	}
+}
+
+func TestBossOneDownPollIsNotAWipe(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 4
+	for _, n := range []string{"Rusty", "Slate", "Tinder"} {
+		s.downFrom[n], s.downUntil[n] = 3, 4
+	}
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	got, err := b.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got[0].Outcome != BossKilled {
+		t.Errorf("outcome = %q, want a single down poll to pass", got[0].Outcome)
+	}
+}
+
+func TestBossSummonFailureIsAnErrorWithCleanup(t *testing.T) {
+	s := newBossSim()
+	s.summon = "Unable to summon object"
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	_, err := b.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Unable to summon") {
+		t.Fatalf("Run error = %v, want the failed summon", err)
+	}
+	if len(*recs) != 0 {
+		t.Errorf("a failed summon was recorded: %+v", *recs)
+	}
+	if f.Count("tickingarea remove") != 1 || f.Count(`kill @e[name="W",type=!player]`) < 2 {
+		t.Error("a failed run left the boss or its area behind")
+	}
+}
+
+func TestBossThatNeverAppearsIsAnErrorNotAKill(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 0
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	_, err := b.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "never found") || len(*recs) != 0 {
+		t.Fatalf("Run = %v with %d records, want an error and no record", err, len(*recs))
+	}
+}
+
+func TestBossRepeatsRunsAndRechecksThePlayerList(t *testing.T) {
+	s := newBossSim()
+	runs := 0
+	f := &FakeConsole{}
+	f.Respond = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "summon ") {
+			runs++
+			s.bossPolls = 0
+		}
+		return s.Exec(cmd)
+	}
+	b, recs := newBossTest(f, newFakeClock())
+	b.Runs = 3
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(*recs) != 3 || (*recs)[0].Run != 1 || (*recs)[2].Run != 3 {
+		t.Fatalf("records = %+v, want runs 1..3", *recs)
+	}
+	if f.Count("list") != 3 || f.Count("tickingarea add") != 1 {
+		t.Errorf("list x%d, ticking add x%d; want a list per run and one area load", f.Count("list"), f.Count("tickingarea add"))
+	}
+}
+
+func TestBossStopsBetweenRunsWhenAHumanJoins(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{}
+	f.Respond = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "summon ") {
+			s.list = "There are 2/10 players online:\nRusty, Steve99"
+			s.bossPolls = 0
+		}
+		return s.Exec(cmd)
+	}
+	b, recs := newBossTest(f, newFakeClock())
+	b.Runs = 3
+	got, err := b.Run(context.Background())
+	var busy *NotAloneError
+	if !errors.As(err, &busy) {
+		t.Fatalf("Run error = %v, want a refusal before run 2", err)
+	}
+	if len(got) != 1 || len(*recs) != 1 {
+		t.Errorf("kept %d records, want the finished first run only", len(got))
+	}
+	if f.Count("tickingarea remove") != 1 {
+		t.Error("the refusal left the area loaded")
+	}
+}
+
+func TestBossCancelledRunCleansUp(t *testing.T) {
+	s := newBossSim()
+	s.aliveFor = 1000
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	ctx, cancel := context.WithCancel(context.Background())
+	b.Sleep = func(d time.Duration) {
+		if f.Count("summon") > 0 {
+			cancel()
+		}
+	}
+	_, err := b.Run(ctx)
+	if !errors.Is(err, context.Canceled) || len(*recs) != 0 {
+		t.Fatalf("Run = %v with %d records, want cancellation and no record", err, len(*recs))
+	}
+	if f.Count("tickingarea remove") != 1 || f.Count(`kill @e[name="W",type=!player]`) < 2 {
+		t.Error("a cancelled run left the boss or its area behind")
+	}
+}
+
+func TestBossRecordFailureStopsTheTest(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Runs = 2
+	b.Record = func(BossRecord) error { return fmt.Errorf("disk full") }
+	if _, err := b.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("Run error = %v, want the log failure", err)
+	}
+}
+
+func TestBossValidatesItsInputs(t *testing.T) {
+	for name, mutate := range map[string]func(*BossTest){
+		"no warriors":  func(b *BossTest) { b.Warriors = nil },
+		"quoted name":  func(b *BossTest) { b.Name = `W"` },
+		"odd mob":      func(b *BossTest) { b.Mob = "warden ~ ~ ~; kill @a" },
+		"empty mob":    func(b *BossTest) { b.Mob = "" },
+		"no timeout":   func(b *BossTest) { b.Timeout = 0 },
+		"empty effect": func(b *BossTest) { b.Effects = []string{" "} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := &FakeConsole{Respond: newBossSim().Exec}
+			b, _ := newBossTest(f, newFakeClock())
+			mutate(b)
+			if _, err := b.Run(context.Background()); err == nil {
+				t.Error("Run accepted bad input")
+			}
+			if len(f.Cmds) != 0 {
+				t.Errorf("bad input still sent %d commands", len(f.Cmds))
+			}
+		})
+	}
+}
