@@ -15,7 +15,7 @@ crew-control; it never calls them to command them.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CREW_UNITS` | required | JSON list `[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`, 1 to 26 units |
+| `CREW_UNITS` | required | JSON list `[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`, 1 to 26 units; an optional `"player"` per unit names its id in the world save when the unit has not reported its own (see [Unit detail](#unit-detail)) |
 | `LISTEN_ADDR` | `0.0.0.0:8080` | Listen address |
 | `LOG_LEVEL` | `info` | Log level |
 | `PUBLIC_ORIGIN` | unset | `https://host`, lower case, no port or path; its host is the WebAuthn RP ID. Unset, or no operators, turns sign-in off |
@@ -26,6 +26,9 @@ crew-control; it never calls them to command them.
 | `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USERNAME`, `PG_PASSWORD` | unset, `5432` | Postgres holding the queue (`minecraft.crew_work`, `minecraft.crew_work_event`), the world ledger (`minecraft.crew_place`, `minecraft.crew_stock`), jobs (`minecraft.crew_job`, `minecraft.crew_job_step`) and the unit event history (`minecraft.crew_event`), over `sslmode=require` |
 | `WORK_STORE` | unset | `memory` keeps the queue, ledger and jobs in memory when `PG_HOST` is unset; development only, it is lost on restart |
 | `CREW_PLACES` | unset | JSON list of named chests and areas, `[{"id","name","kind","box":{"min":{x,y,z},"max":{x,y,z}},"items":[]}]`; seeded at start, replacing earlier seeded places but never ones added by hand. `[]` removes every seeded place; unset or blank seeds nothing |
+| `CREW_WORLD_DB` | unset | The lab world's `db` directory (the LevelDB inside the world folder), read-only behind `GET /units/{id}/detail`. Unset, the route still answers and says the save is `off` |
+| `CREW_WORLD_WORK` | `/tmp/crew-worldview` | Where a read of the world builds its view; writable. On the world's own volume a read links its files, elsewhere (or if the world is mounted read-only) it copies them |
+| `CREW_WORLD_EVERY` | `5s` | Least time between reads of the world save; the detail answer is cached to match |
 
 ## Routes
 
@@ -33,6 +36,7 @@ crew-control; it never calls them to command them.
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
+- `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: private`; see [Unit detail](#unit-detail)
 - `GET /healthz`
 - `GET /signin`: passkey sign-in; `/signin#operator=<id>&invite=<code>` enrols a passkey. The invite rides in the fragment so it never reaches a log
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
@@ -53,6 +57,80 @@ Any other path, method, unknown unit or unclean path under `/units/` gets 404
 without an upstream request. Only the `r` query (1 to 3 digits) is forwarded,
 and only on `ws`.
 Cookies, `Authorization` and client `X-Forwarded-*` headers are dropped.
+
+## Unit detail
+
+`GET /units/{id}/detail` answers one unit's operators with what the world
+save holds of it — armour, experience, and the ender chest, none of which a
+unit reports live — merged with what the once-a-second poll of its
+`/v1/state` heard. The ender chest is private to its owner, so unlike the
+camera and state routes above it this one is **not** on the public
+allow-list: it answers 401 without an operator session and is marked
+`Cache-Control: private`, so no share or cache may ever hold it. The public
+gateway route passes everything under `/units` to crew-control, so that 401
+is the guard, not an absence from the gateway.
+
+A unit's record is found by the id the unit reports for its player in its
+`/v1/state` (`unique_id`, a signed decimal: the id the world save files the
+record under and the map's live feed names the unit by). A `player` field in
+`CREW_UNITS` names the id by hand instead and wins; it is for a unit that has
+not been online since crew-control started. With neither, the unit's `save`
+is `none`, and the whole route says `off` when `CREW_WORLD_DB` is unset: the
+live half still answers either way.
+
+The body says where each half came from — `save` and `live`, each `known`,
+`none`, `pending` or `off` with an `asOf` time (when the save was *read*;
+the record carries no time of its own) — and then the merged view:
+
+- `health`, `hunger` and `inventory` come from the live poll while the unit
+  is online, since a poll is an observation of now and the record is as old
+  as the server's last save; the live inventory keeps what the save knows
+  about a stack it still holds in the same slot (durability, a custom name,
+  enchantments, and what a shulker box carries). Offline, the save's own are
+  shown.
+- `effects` are live only — the save holds none of them.
+- `xp`, `armor`, `mainhand`, `offhand`, `gameMode` and `enderChest` are the
+  save's. `enderChest` is all 27 slots in slot order, `null` where a slot is
+  empty; each item carries `name`, `count`, `slot` and, where it has them,
+  `damage`, `customName` and `enchantments`. The answer stays under 50 KB:
+  past the cap it drops what shulker boxes carry.
+- The save is read at most once every `CREW_WORLD_EVERY`, a failed read
+  included, and held between reads, so a detail view costs the world one
+  read and not one a request. A read happens only when a request asks.
+
+### Reaching the lab world
+
+The lab world is the Bedrock StatefulSet's `/data/worlds/crew-lab/db`, on a
+2 Gi `truenas-iscsi` ReadWriteOnce volume (`datadir-jdwillmsen-crew-lab-prd-minecraft-bedrock-0`)
+the pod is pinned to one node for. crew-control's own volume is a small
+`truenas-nfs` one for its keys, and units reach the lab over the network, so
+none of them can see the save today. The lab has no console-bridge sidecar,
+which is how the map gets the main world's snapshot. A unit cannot answer
+for the chest either: the server sends the ender chest's contents only to a
+client that opens it. The code therefore reads the save from a path behind
+the `detail.Source` interface, and what is missing is deployment wiring:
+
+1. crew-control mounts that Bedrock volume **read-only** and points
+   `CREW_WORLD_DB` at `…/worlds/crew-lab/db`. A ReadWriteOnce volume may be
+   mounted by several pods of one node, so crew-control must be scheduled
+   onto the Bedrock pod's node (a `podAffinity` on its pod, or the same node
+   affinity); it is not pinned today. The db files are owned by uid 1000 and
+   world-readable, and crew-control runs as uid 1000.
+2. `CREW_WORLD_WORK` needs a writable scratch, as the container's root is
+   read-only: an `emptyDir`, not the NFS data volume, which keeps the many
+   small writes of a read off NFS. A read-only mount cannot take hard links,
+   so each read copies the db (26 MB at the time of writing) into the
+   scratch and removes it again; `CREW_WORLD_EVERY` bounds how often.
+3. Optionally `player` ids in `CREW_UNITS`; not needed once the units run a
+   release that reports `unique_id`.
+
+Mounting the volume read-only keeps the world exactly as the server wrote
+it. A read is of the live files, not a save-held snapshot, so it can catch a
+table the server is compacting away; such a read fails, is logged once, and
+the last good records are served until the next. A record that does not
+decode is skipped, as the map's reader skips it. The alternative is a
+console-bridge sidecar on the lab pod, as the main world has; it gives a
+consistent snapshot at the cost of a new component.
 
 ## Operators
 
@@ -76,7 +154,8 @@ with `kind`, `stage` (`begin`, `credential`, `finish`) and `error` (a
 `DOMException` name, `network`, `refused` or `other`). The route needs no
 session, takes only those words, and answers 429 past 20 reports a minute.
 
-The `/v1/work/*`, `/v1/jobs` and `/v1/places` routes answer 401 without a session. Every `POST` needs a JSON
+The `/v1/work/*`, `/v1/jobs` and `/v1/places` routes answer 401 without a session, as does
+`GET /units/{id}/detail` (the ender chest it carries is private to its owner). Every `POST` needs a JSON
 body and `X-Crew-Request: 1`. Stop cancels everything open for the unit and
 reaches it before any queued task; cancelling an item the unit already has
 sends it a `cancel_task` command and answers 202, leaving its other work alone. Signed-in
