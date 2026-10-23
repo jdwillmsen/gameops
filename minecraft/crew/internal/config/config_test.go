@@ -60,6 +60,7 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"EAT":              "yes please",
 		"KIT_CHEST":        "1,2",
 		"KIT_FOOD":         "0",
+		"CREW_ROLE":        "wizard",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -68,6 +69,22 @@ func TestLoadRejectsBadValues(t *testing.T) {
 			_, err := Load()
 			if err == nil || !strings.Contains(err.Error(), name) {
 				t.Fatalf("%s=%s: err = %v, want one naming %s", name, value, err, name)
+			}
+		})
+	}
+}
+
+func TestLoadParsesTheWarriorRole(t *testing.T) {
+	for _, role := range []string{"", "vanguard", "striker", "ranger"} {
+		t.Run("role="+role, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("CREW_ROLE", role)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("CREW_ROLE=%q: %v", role, err)
+			}
+			if cfg.Role != role {
+				t.Errorf("Role = %q, want %q", cfg.Role, role)
 			}
 		})
 	}

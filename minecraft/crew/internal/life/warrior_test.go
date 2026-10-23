@@ -453,3 +453,246 @@ func abs32(x int32) int32 {
 	}
 	return x
 }
+
+func TestRangerShootsOnTheBowCadenceAndNeverMelees(t *testing.T) {
+	r := newWarrior(t, "ranger", start)
+	r.give(0, 303, 1)
+	r.give(1, 361, 1)   // bow
+	r.give(20, 362, 32) // arrows
+	spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+
+	for i := 0; i < 130; i++ {
+		if !r.step() {
+			t.Fatalf("tick %d: not engaged", i)
+		}
+	}
+	draws, shots := r.out.uses(1), r.out.releases(1)
+	if draws < 3 {
+		t.Fatalf("%d bow draws in 130 ticks, want the cadence of one a second and a half", draws)
+	}
+	if shots != draws {
+		t.Fatalf("%d draws but %d releases: a draw was never fired", draws, shots)
+	}
+	if n := len(r.out.attacks()); n != 0 {
+		t.Fatalf("%d melee attacks from a Ranger with arrows and room", n)
+	}
+	if d := dist(r.feet(), mgl32.Vec3{28.5, 1, 20.5}); d < 6 {
+		t.Errorf("the Ranger closed to %.1f blocks with nothing threatening it", d)
+	}
+	if r.out.startUsingInputs() == 0 {
+		t.Error("a bow draw was not begun as an item use")
+	}
+}
+
+func TestRangerGivesGroundWhenAMobClosesInsideKiteRange(t *testing.T) {
+	r := newWarrior(t, "ranger", start)
+	r.give(0, 303, 1)
+	r.give(1, 361, 1)
+	r.give(20, 362, 32)
+	z := mgl32.Vec3{26.5, 1, 20.5}
+	spawnZombie(r, 50, z)
+
+	closedTo := math.MaxFloat64
+	for i := 0; i < 120; i++ {
+		z = z.Sub(mgl32.Vec3{0.1, 0, 0}) // a zombie walking in
+		r.moveTo(50, z)
+		r.step()
+		if d := dist(r.feet(), z); d < closedTo {
+			closedTo = d
+		}
+	}
+	// A walking mob presses all game; kiting holds it off, not out.
+	if closedTo < 3.5 {
+		t.Errorf("the mob closed to %.1f blocks, want the kite to hold it around five", closedTo)
+	}
+	if n := r.out.releases(1); n < 2 {
+		t.Errorf("%d arrows fired while kiting, want the shooting to carry on", n)
+	}
+	if dx := r.feet().X() - start.X(); dx > -1 {
+		t.Errorf("the Ranger held its ground (%.1f along x) instead of giving it", dx)
+	}
+}
+
+func TestRangerWithoutArrowsFallsBackToMelee(t *testing.T) {
+	r := newWarrior(t, "ranger", start)
+	r.give(0, 303, 1)
+	r.give(1, 361, 1) // a bow and no arrows
+	spawnZombie(r, 50, mgl32.Vec3{24.5, 1, 20.5})
+	for i := 0; i < 80 && len(r.out.attacks()) == 0; i++ {
+		r.step()
+	}
+	if len(r.out.attacks()) == 0 {
+		t.Fatal("a Ranger without arrows never swung")
+	}
+	if r.out.uses(1) != 0 {
+		t.Error("drew a bow with no arrows to fire")
+	}
+}
+
+func TestHurtWarriorEatsAGoldenAppleBehindTheLine(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1)
+	r.give(3, 363, 2) // golden apples
+	r.setHealth(10)
+	spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+
+	for i := 0; i < 12; i++ {
+		if !r.step() {
+			t.Fatalf("tick %d: not engaged", i)
+		}
+	}
+	if r.out.uses(3) != 1 {
+		t.Fatalf("%d uses of the apple, want the meal started", r.out.uses(3))
+	}
+	// The server takes a bite; the meal winds down.
+	r.give(3, 363, 0)
+	for i := 0; i < 10 && !r.ate(); i++ {
+		r.step()
+	}
+	if !r.ate() {
+		t.Fatal("the meal never finished")
+	}
+	if d := dist(r.feet(), mgl32.Vec3{28.5, 1, 20.5}); d < 7 {
+		t.Errorf("the unit left cover to fight at %.1f blocks while eating", d)
+	}
+}
+
+// ate says whether a meal completed with an eat log.
+func (r *rig) ate() bool {
+	for _, l := range r.log.lines {
+		if l.event == "eat" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestHurtWarriorRegroupsTowardTheLeaderWhenPressured(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{10.5, 1, 20.5}, leaderOK: true}
+	r := newWarrior(t, "striker", start)
+	r.setSquad(t, squad)
+	r.give(0, 303, 1)
+	r.give(3, 363, 2)
+	r.setHealth(10)
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+
+	arrived, ateUnderPressure, foughtBeforeArrival := false, false, false
+	for i := 0; i < 140; i++ {
+		attacks := len(r.out.attacks())
+		r.step()
+		// The mob stays on the unit's heels all the way: this is a chase.
+		r.moveTo(50, r.feet().Add(mgl32.Vec3{1.2, 0, 0}))
+		atLeader := dist(r.feet(), mgl32.Vec3{10.5, 1, 20.5}) <= regroupWithin+0.5
+		if r.out.uses(3) > 0 && !atLeader {
+			ateUnderPressure = true
+		}
+		if len(r.out.attacks()) > attacks && !atLeader {
+			foughtBeforeArrival = true
+		}
+		if atLeader {
+			arrived = true
+		}
+	}
+	if !arrived {
+		t.Fatalf("the unit never reached the leader: %.1f blocks away", dist(r.feet(), mgl32.Vec3{10.5, 1, 20.5}))
+	}
+	if ateUnderPressure {
+		t.Error("ate while pressed before reaching the leader")
+	}
+	if foughtBeforeArrival {
+		t.Error("turned to fight before reaching the leader")
+	}
+	if !squad.heard(CalloutLowHealth) || !squad.heard(CalloutNeedHeal) {
+		t.Errorf("callouts = %v, want low_health and need_heal", squad.callouts)
+	}
+}
+
+func TestHurtWarriorAbortsTheMealWhenAnEnemyClosesIn(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1)
+	r.give(3, 363, 2)
+	r.setHealth(10)
+	spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+
+	for i := 0; i < 10; i++ {
+		r.step()
+	}
+	if r.out.uses(3) != 1 {
+		t.Fatal("the meal never started")
+	}
+	// The zombie teleports in: the meal is dropped, not finished.
+	r.moveTo(50, mgl32.Vec3{21.5, 1, 20.5})
+	for i := 0; i < 5; i++ {
+		r.step()
+	}
+	if r.ate() {
+		t.Fatal("a meal pressed by an enemy completed")
+	}
+	if r.out.releases(3) == 0 {
+		t.Error("the interrupted meal was not let go")
+	}
+}
+
+func TestNeedHealCalloutWhenThereIsNothingToEat(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: start, leaderOK: true}
+	r := newWarrior(t, "striker", start)
+	r.setSquad(t, squad)
+	r.give(0, 303, 1)
+	r.setHealth(10)
+	spawnZombie(r, 50, mgl32.Vec3{28.5, 1, 20.5})
+	r.run(20)
+	if !squad.heard(CalloutLowHealth) || !squad.heard(CalloutNeedHeal) {
+		t.Fatalf("callouts = %v, want low_health and need_heal with an empty hotbar", squad.callouts)
+	}
+	if n := len(squad.callouts); n > 4 {
+		t.Errorf("%d callouts in 20 ticks, want the hold-down to keep it to a couple", n)
+	}
+	// Nothing to eat, not near death: the fight goes on.
+	for i := 0; i < 100 && len(r.out.attacks()) == 0; i++ {
+		r.step()
+	}
+	if n := len(r.out.attacks()); n == 0 {
+		t.Error("a hungry warrior stopped fighting")
+	}
+}
+
+func TestTargetDownCalloutAfterLandingHits(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: start, leaderOK: true}
+	r := newWarrior(t, "striker", start)
+	r.setSquad(t, squad)
+	r.give(0, 303, 1)
+	spawnZombie(r, 50, mgl32.Vec3{22.5, 1, 20.5})
+	for i := 0; i < 15; i++ {
+		r.step()
+	}
+	if len(r.out.attacks()) == 0 {
+		t.Fatal("never struck the target, so nothing is known about it")
+	}
+	r.l.Apply(&packet.RemoveActor{EntityUniqueID: 50})
+	r.run(5)
+	if !squad.heard(CalloutTargetDown) {
+		t.Fatalf("callouts = %v, want target_down for a struck target that vanished", squad.callouts)
+	}
+}
+
+func TestWarriorsNeverTargetPlayers(t *testing.T) {
+	squad := &fakeSquad{leaderID: "crew-18", leader: start, leaderOK: true}
+	for _, role := range []string{"vanguard", "striker", "ranger"} {
+		t.Run(role, func(t *testing.T) {
+			r := newWarrior(t, role, start)
+			r.setSquad(t, squad)
+			r.give(0, 303, 1)
+			r.give(1, 361, 1)
+			r.give(20, 362, 32)
+			r.player(60, mgl32.Vec3{21.5, 1, 20.5})
+			r.player(61, mgl32.Vec3{20.5, 1, 22})
+			r.run(100)
+			if r.l.target.Player {
+				t.Fatal("a warrior targeted a player")
+			}
+			if n := len(r.out.attacks()); n != 0 {
+				t.Fatalf("%d attacks, some may have landed on players", n)
+			}
+		})
+	}
+}
