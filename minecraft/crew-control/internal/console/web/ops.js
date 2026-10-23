@@ -81,7 +81,8 @@ export function initOps(host) {
 
   function renderRoster() {
     const box = $('roster');
-    if ($('side').hidden) return;
+    // The fleet overview replaces the roster, which would otherwise rebuild unseen every tick.
+    if ($('side').hidden || document.body.classList.contains('view-fleet')) return;
     const rows = sortUnits(list(), prefs.sort, prefs.desc);
     const cols = [['unit', '#'], ['name', 'Unit'], ['health', 'HP'], ['hunger', 'Food'], ['task', 'Task'], ['alerts', '!']];
     const op = host.operator();
@@ -381,6 +382,7 @@ export function initOps(host) {
       items.push({ label: `Focus ${s.name || id}`, keywords: `${id} unit ${i + 1}`, hint: badge(s), run: () => host.focus(id) });
     });
     items.push({ label: 'Show wall', keywords: 'view grid', hint: 'w', run: () => host.setView('wall') });
+    items.push({ label: 'Show fleet overview', keywords: 'view table units list', hint: 'o', run: () => host.setView('fleet') });
     items.push({ label: 'Show focus view', keywords: 'view single', run: () => host.setView('focus') });
     for (const m of MODES) items.push({ label: `Camera: ${m}`, keywords: 'mode view', hint: m === st.mode ? 'current' : '', run: () => host.setMode(m) });
     items.push({ label: 'Next camera mode', hint: 'c', run: () => host.setMode(nextMode(st.mode)) });

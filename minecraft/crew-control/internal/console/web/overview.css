@@ -1,0 +1,172 @@
+/* ---- fleet overview ---- */
+/* Fixed sizes everywhere a tick can change text: tabular figures, a set
+   column track, a set row height. A value changing never moves a neighbour. */
+
+body.view-fleet #side { display: none; }
+body.view-fleet #dock { height: 96px; }
+
+.ov {
+  --ov-row: 28px;
+  --ov-cols: 30px minmax(96px, 1fr) 108px 86px 120px 120px minmax(130px, 1.1fr) minmax(150px, 1.3fr);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #111;
+  font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  color: #ddd;
+  overflow: hidden;
+}
+.ov.has-pos { --ov-cols: 30px minmax(96px, 1fr) 108px 86px 120px 120px minmax(130px, 1.1fr) minmax(150px, 1.3fr) 116px; }
+.ov:not(.has-pos) .ov-h-pos, .ov:not(.has-pos) .ov-c-pos { display: none; }
+
+/* ---- summary strip ---- */
+.ov-tiles { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; flex: none; }
+.ov-tile { min-width: 0; display: flex; }
+.ov-tile > .cc-tile {
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: 'label label' 'value spark' 'status spark';
+  column-gap: 10px;
+  row-gap: 0;
+  align-items: center;
+  padding: 7px 10px 8px;
+  background: #151815;
+  border-color: var(--line);
+}
+.ov-tile .cc-tile-label { grid-area: label; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-tile .cc-tile-value { grid-area: value; font-size: 22px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.ov-tile .cc-tile-status { grid-area: status; font-size: 11px; min-height: 16px; white-space: nowrap; }
+.ov-tile .cc-tile-status[hidden] { display: block; visibility: hidden; }
+.ov-tile .cc-tile-spark { grid-area: spark; margin: 0; align-self: stretch; display: flex; align-items: center; min-width: 0; }
+.ov-tile .cc-tile-spark[hidden] { display: none; }
+.ov-tile .cc-tile-spark .cc-spark { height: 30px; }
+.ov-tile .cc-tile-delta { display: none; }
+
+/* ---- toolbar ---- */
+.ov-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex: none; }
+.ov-bar-top { display: flex; gap: 6px; align-items: center; flex: 0 1 260px; min-width: 0; }
+.ov-bar-top input { flex: 1; min-width: 0; padding: 4px 8px; }
+.ov-bar-top .ov-sortsel, .ov-bar-top .ov-dir, .ov-bar-top .ov-more { display: none; }
+.ov-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ov-fchip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; }
+.ov-fchip .cc-icon { flex: none; }
+.ov-fchip[data-state='working'] .cc-icon { color: var(--cc-status-good); }
+.ov-fchip[data-state='stuck'] .cc-icon { color: var(--cc-status-warning); }
+.ov-fchip[data-state='dead'] .cc-icon { color: var(--cc-status-critical); }
+.ov-fchip[data-state='offline'] .cc-icon { color: var(--cc-status-serious); }
+.ov-count-n { min-width: 1.4em; text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
+.ov-selects { display: flex; gap: 4px; flex-wrap: wrap; }
+.ov-selects select { padding: 3px 4px; }
+/* Fills the rest of the line, right-aligned, so a longer count never moves its box. */
+.ov-bar-end { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex: 1 1 280px; min-width: 0; }
+.ov-count { opacity: .65; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ov-clear { padding: 2px 8px; }
+/* Kept in flow while hidden so showing it does not move the table. */
+.ov-clear[hidden] { display: inline-block; visibility: hidden; }
+
+/* ---- table ---- */
+.ov-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #121412; scrollbar-gutter: stable; }
+.ov-head, .ov-row { display: grid; grid-template-columns: var(--ov-cols); column-gap: 10px; align-items: center; padding: 0 10px; }
+.ov-head { position: sticky; top: 0; z-index: 2; height: var(--ov-row); background: #1b1f1c; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 12px; }
+.ov-h { min-width: 0; white-space: nowrap; opacity: .85; }
+.ov-h button { all: unset; display: inline-flex; gap: 4px; cursor: pointer; padding: 2px 0; }
+.ov-h button:focus-visible { outline: 2px solid #4a7bb0; outline-offset: 2px; border-radius: 2px; }
+.ov-h button:hover { color: #fff; }
+.ov-arrow { display: inline-block; width: 1em; opacity: .8; }
+.ov-row {
+  height: var(--ov-row);
+  border-bottom: 1px solid #1f241f;
+  border-left: 3px solid transparent;
+  padding-left: 7px;
+  cursor: pointer;
+  scroll-margin-top: var(--ov-row);
+  contain: layout style;
+}
+.ov-row[hidden] { display: none; }
+.ov-row:hover { background: #1f261f; }
+.ov-row.cur { background: #1d3050; }
+.ov-row:focus-visible { outline: 2px solid #4a7bb0; outline-offset: -2px; }
+.ov-row[data-state='stuck'] { border-left-color: var(--cc-status-warning); }
+.ov-row[data-state='dead'] { border-left-color: var(--cc-status-critical); }
+.ov-row[data-state='offline'] { border-left-color: var(--cc-status-serious); }
+.ov-row[data-state='offline'] .ov-c-hp, .ov-row[data-state='offline'] .ov-c-food, .ov-row[data-state='offline'] .ov-c-task { opacity: .5; }
+.ov-c { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.ov-c-unit { opacity: .55; }
+.ov-c-name { font-weight: 600; }
+.ov-c-since { opacity: .85; }
+.ov-c-pos { opacity: .8; }
+.ov-chip { font-size: 12px; font-weight: 600; }
+.ov-chip.cc-status-idle .cc-icon { color: var(--cc-muted); }
+.ov-chip span { font-weight: 600; }
+
+.ov-meter { display: flex; align-items: center; gap: 6px; overflow: visible; --ov-c: var(--cc-series-3); }
+.ov-meter.food { --ov-c: var(--cc-series-4); }
+.ov-track { flex: none; width: 52px; height: 6px; border-radius: 3px; background: color-mix(in oklab, var(--ov-c) 22%, var(--cc-surface)); overflow: hidden; }
+.ov-track i { display: block; width: 100%; height: 100%; border-radius: 3px; background: var(--ov-c); transform-origin: left center; }
+.ov-val { min-width: 1.6em; text-align: right; font-variant-numeric: tabular-nums; }
+.ov-low { flex: none; visibility: hidden; color: var(--cc-status-critical); }
+.ov-meter.is-low { --ov-c: var(--cc-status-critical); }
+.ov-meter.is-low .ov-low { visibility: visible; }
+
+.ov-c-task { display: flex; align-items: center; gap: 6px; }
+.ov-ti { flex: none; display: inline-flex; width: 12px; opacity: .8; }
+.ov-tt { overflow: hidden; text-overflow: ellipsis; }
+.ov-c-trend { overflow: visible; }
+.ov-c-trend .cc-spark { height: 22px; }
+
+.ov-empty { margin: 0; padding: 14px; opacity: .8; }
+
+/* The cc tokens are for marks; the console's chrome stays on its own greys. */
+.ov button, .ov input, .ov select { font: inherit; }
+
+/* ---- narrower than a wide desktop: drop the trail and position first ---- */
+@media (max-width: 1100px) {
+  .ov, .ov.has-pos { --ov-cols: 30px minmax(88px, 1fr) 104px 86px 120px 120px minmax(110px, 1.2fr); }
+  .ov-h-trend, .ov-c-trend, .ov-h-pos, .ov-c-pos { display: none; }
+  .ov-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ---- phone: each unit is a two-line card ---- */
+@media (max-width: 720px) {
+  /* Height is the scarce thing on a phone: camera modes mean nothing here and
+     the status bar and event feed repeat the strip and the focus view. */
+  body.view-fleet #modes, body.view-fleet #dock, body.view-fleet #statusbar { display: none; }
+  .ov { --ov-row: 62px; padding: 6px; gap: 6px; }
+  .ov-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+  .ov-tile > .cc-tile { display: block; padding: 4px 6px; }
+  .ov-tile .cc-tile-label { font-size: 10px; }
+  .ov-tile .cc-tile-value { font-size: 18px; }
+  .ov-tile .cc-tile-status, .ov-tile .cc-tile-status[hidden], .ov-tile .cc-tile-spark { display: none; }
+  .ov-window { display: none; }
+  .ov-bar { gap: 6px; }
+  .ov-bar-top { flex: 1 1 100%; }
+  .ov-bar-top .ov-sortsel, .ov-bar-top .ov-dir, .ov-bar-top .ov-more { display: inline-block; }
+  .ov-chips { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 2px; scrollbar-width: none; }
+  .ov-fchip { flex: none; }
+  .ov-selects { display: none; width: 100%; }
+  .ov-selects.open { display: flex; }
+  .ov-selects select { flex: 1; min-width: 0; }
+  .ov-bar-end { flex-basis: 100%; justify-content: space-between; }
+  .ov-count { font-size: 11px; }
+  .ov-head { display: none; }
+  .ov-row {
+    --ov-cols: minmax(0, 0.9fr) minmax(0, 0.95fr) minmax(0, 1.25fr);
+    grid-template-areas: 'name state since' 'hp food task';
+    row-gap: 4px;
+    padding: 4px 8px 4px 6px;
+    scroll-margin-top: 0;
+  }
+  .ov-c-unit { display: none; }
+  .ov-c-name { grid-area: name; }
+  .ov-c-state { grid-area: state; }
+  .ov-c-since { grid-area: since; text-align: right; font-size: 12px; }
+  .ov-c-hp { grid-area: hp; }
+  .ov-c-food { grid-area: food; }
+  .ov-c-task { grid-area: task; font-size: 12px; }
+  .ov-track { width: 28px; }
+  .ov-meter { gap: 4px; }
+}
