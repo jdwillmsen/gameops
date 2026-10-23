@@ -90,7 +90,7 @@ func TestStaticFiles(t *testing.T) {
 }
 
 func TestStaticDoesNotEscapeOrServeTests(t *testing.T) {
-	for _, p := range []string{"/static/../go.mod", "/static/%2e%2e/go.mod", "/static/state.test.mjs", "/static/missing.js"} {
+	for _, p := range []string{"/static/../go.mod", "/static/%2e%2e/go.mod", "/static/state.test.mjs", "/static/squad.test.mjs", "/static/missing.js"} {
 		rec := serve(t, p)
 		// The mux answers an unclean path with a redirect to its cleaned
 		// form; what matters is that following it lands on a 404.
@@ -111,13 +111,15 @@ func TestOldCameraBookmarkRedirects(t *testing.T) {
 }
 
 func TestEveryScriptTheConsoleImportsIsEmbedded(t *testing.T) {
-	for _, f := range []string{"console.js", "state.js", "fleet.js", "ops.js", "console.css"} {
+	for _, f := range []string{"console.js", "state.js", "fleet.js", "ops.js", "squad.js", "console.css"} {
 		if rec := serve(t, "/static/"+f); rec.Code != 200 || rec.Body.Len() == 0 {
 			t.Errorf("/static/%s: status %d, %d bytes", f, rec.Code, rec.Body.Len())
 		}
 	}
-	if rec := serve(t, "/static/fleet.test.mjs"); rec.Code == 200 {
-		t.Error("node test files must stay out of the binary")
+	for _, f := range []string{"fleet.test.mjs", "state.test.mjs", "squad.test.mjs"} {
+		if rec := serve(t, "/static/"+f); rec.Code == 200 {
+			t.Errorf("node test file %s must stay out of the binary", f)
+		}
 	}
 }
 
