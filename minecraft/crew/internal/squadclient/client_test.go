@@ -394,3 +394,31 @@ func TestPollEchoesRevAndReadsLeaderMoves(t *testing.T) {
 		t.Errorf("after the move the client echoes rev %d, want 4", rev)
 	}
 }
+
+// After a restart of crew-control the squad's seq starts over at 0 while
+// the unit still holds a higher cursor: the server answers past-the-log
+// polls with the full log, and the client must step its cursor back down,
+// or it polls past everything for ever and hears no order again.
+func TestCursorResetsWhenTheLogRestarts(t *testing.T) {
+	ri, srv := newRigServer(t)
+	c := newTestClient(t, srv.URL, "crew-18", newRecLog())
+	ri.setAnswer(&pollAnswer{Cursor: 5,
+		Order: &squadmsg.Order{Kind: squadmsg.OrderHold, Seq: 5, By: "owner"}})
+	runClient(t, c)
+	waitFor(t, func() bool { return c.Orders().Kind == squadmsg.OrderHold }, "the pre-restart order")
+	waitFor(t, func() bool {
+		cursor, _ := ri.lastQuery()
+		return cursor == 5
+	}, "the unit to poll past the restarted log")
+
+	// The restart: a lower seq with the new standing order and a delta
+	// behind it.
+	ri.setAnswer(&pollAnswer{Cursor: 2,
+		Order:  &squadmsg.Order{Kind: squadmsg.OrderFocus, Seq: 2, By: "owner"},
+		Orders: []squadmsg.Order{{Kind: squadmsg.OrderRegroup, Seq: 1, By: "owner"}}})
+	waitFor(t, func() bool { return c.Orders().Kind == squadmsg.OrderFocus }, "the restarted log's order")
+	waitFor(t, func() bool {
+		cursor, _ := ri.lastQuery()
+		return cursor == 2
+	}, "the cursor to step back down")
+}
