@@ -43,6 +43,9 @@ type Snapshot struct {
 	HeldKnown bool `json:"held_known"`
 	// Window 0 only, non-empty slots in slot order.
 	Inventory []Item `json:"inventory"`
+	// Effects are what the server has put on the unit and not taken
+	// back; the save holds none of them, so an empty list means none.
+	Effects []Effect `json:"effects"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -54,6 +57,7 @@ type Tracker struct {
 
 	inv       [inventorySize]stackRef
 	itemNames map[int32]string
+	effects   map[int32]Effect
 
 	// opened maps stack IDs seen in the open container's window to their
 	// item; nil until a container opens.
@@ -69,6 +73,7 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	t.self = runtimeID
 	t.inv = [inventorySize]stackRef{}
 	t.opened = nil
+	t.effects = nil
 	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, Yaw: yaw, Pitch: pitch, UpdatedAt: t.now()}
 }
 
@@ -114,6 +119,8 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 		t.s.HeldSlot, t.s.HeldKnown = int(p.SelectedHotBarSlot), true
+	case *packet.MobEffect:
+		t.applyEffectLocked(p)
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 	default:
@@ -165,6 +172,7 @@ func (t *Tracker) Reset() {
 	t.self = 0
 	t.inv = [inventorySize]stackRef{}
 	t.opened = nil
+	t.effects = nil
 	t.s = Snapshot{UpdatedAt: t.now()}
 }
 
@@ -173,5 +181,6 @@ func (t *Tracker) Snapshot() Snapshot {
 	defer t.mu.RUnlock()
 	s := t.s
 	s.Inventory = t.inventoryLocked()
+	s.Effects = t.effectsLocked()
 	return s
 }

@@ -226,7 +226,10 @@ from the prediction, which costs about one small correction per flight.
 well as the server's corrections and teleports. Until `position_known` is
 true the position is the server's placeholder, not a real one. It also carries
 `health`, `hunger`, the 36-slot `inventory`, `held_slot` (only meaningful when
-`held_known`) and a read-only `tasks` object: `current` (the running task or
+`held_known`), and `effects`: the status effects the server has put on the
+unit and not taken back, each with `id`, `name`, `amplifier` and `duration`
+in ticks (negative means it does not expire; a logout forgets them all). It
+also carries a read-only `tasks` object: `current` (the running task or
 null) and `recent` (the last five others, newest first), each with id,
 template, state, skill, item, qty, progress, reason and timestamps. It never
 carries the task token, and the task routes below stay token-guarded.

@@ -229,3 +229,61 @@ func TestSetPoseRecordsTheUnitsOwnMove(t *testing.T) {
 		t.Errorf("snapshot = %+v", s)
 	}
 }
+
+func TestEffectsFollowTheServerPackets(t *testing.T) {
+	tr := spawned(t)
+	if s := tr.Snapshot(); len(s.Effects) != 0 {
+		t.Fatalf("effects before any packet: %+v", s.Effects)
+	}
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectAdd, EffectType: 10, Amplifier: 0, Duration: 400})
+	// An amplifier is the level less one; the packet's is kept as it is.
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectAdd, EffectType: 1, Amplifier: 1, Duration: -1})
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectModify, EffectType: 10, Amplifier: 2, Duration: 200})
+	s := tr.Snapshot()
+	if len(s.Effects) != 2 {
+		t.Fatalf("effects = %+v", s.Effects)
+	}
+	want := []Effect{
+		{ID: 1, Name: "speed", Amplifier: 1, Duration: -1},
+		{ID: 10, Name: "regeneration", Amplifier: 2, Duration: 200},
+	}
+	for i, e := range s.Effects {
+		if e != want[i] {
+			t.Errorf("effect %d = %+v, want %+v", i, e, want[i])
+		}
+	}
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectRemove, EffectType: 10})
+	if s := tr.Snapshot(); len(s.Effects) != 1 || s.Effects[0].ID != 1 {
+		t.Errorf("after removal = %+v", s.Effects)
+	}
+}
+
+func TestAnotherEntitysEffectsAreNotTaken(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self + 1, Operation: packet.MobEffectAdd, EffectType: 19, Amplifier: 0, Duration: 100})
+	if s := tr.Snapshot(); len(s.Effects) != 0 {
+		t.Errorf("another entity's effect was taken: %+v", s.Effects)
+	}
+}
+
+func TestAnEffectTheTableDoesNotKnowKeepsItsId(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectAdd, EffectType: 99, Amplifier: 0, Duration: 5})
+	s := tr.Snapshot()
+	if len(s.Effects) != 1 || s.Effects[0].ID != 99 || s.Effects[0].Name != "" {
+		t.Errorf("unknown effect = %+v", s.Effects)
+	}
+}
+
+func TestResetAndRespawnForgetTheEffects(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectAdd, EffectType: 19, Amplifier: 0, Duration: 100})
+	tr.Reset()
+	if s := tr.Snapshot(); len(s.Effects) != 0 {
+		t.Errorf("after reset = %+v", s.Effects)
+	}
+	tr.Spawn(self, mgl32.Vec3{1, 2, 3}, 10, 20, 0)
+	if s := tr.Snapshot(); len(s.Effects) != 0 {
+		t.Errorf("after respawn = %+v", s.Effects)
+	}
+}
