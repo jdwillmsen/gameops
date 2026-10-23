@@ -199,27 +199,19 @@ func TestPlanCraftFourSticksFromGrove(t *testing.T) {
 	}
 }
 
-func TestPlanCraftCountsAreCappedAtSixtyFour(t *testing.T) {
+func TestPlanCraftRefusesARunBiggerThanAStack(t *testing.T) {
 	l, _ := craftWorld(t)
 	src := chestPlace("outbox-a", 5)
 	if err := l.PutPlace(ctx, src); err != nil {
 		t.Fatal(err)
 	}
 	observe(t, l, src, time.Minute, map[string]int{"oak_log": 64})
-	// Sixty-four tables want 256 planks: 64 crafts, four steps' worth.
-	steps := planCraftAt(t, l, "crafting_table", 64)
-	if got := strings.Join(keys(steps), ","); got != "withdraw-outbox-a,craft-oak_planks-1,craft-oak_planks-2,craft-oak_planks-3,craft-oak_planks-4,craft-crafting_table,deposit,check" {
-		t.Fatalf("keys %s", got)
+	// Sixty-four tables want 256 planks, more than a unit holds as one
+	// craft's result.
+	_, err := PlanCraft(ctx, l, CraftSpec{Place: "store", Want: map[string]int{"crafting_table": 64}}, nil, time.Now().Add(-time.Hour))
+	if !errors.Is(err, ErrUnplannable) {
+		t.Fatalf("err = %v, want unplannable", err)
 	}
-	for _, k := range []string{"craft-oak_planks-1", "craft-oak_planks-2", "craft-oak_planks-3", "craft-oak_planks-4"} {
-		if c := tmpl(t, stepNamed(t, steps, k))["count"].(float64); c != 64 {
-			t.Fatalf("%s count %v", k, c)
-		}
-	}
-	if c := tmpl(t, stepNamed(t, steps, "craft-crafting_table"))["count"].(float64); c != 64 {
-		t.Fatalf("tables %v", c)
-	}
-	chainOf(t, steps)
 }
 
 func TestCheckCraft(t *testing.T) {
