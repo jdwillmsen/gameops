@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -188,7 +189,7 @@ func TestSubChunkReachesViewerAsMaterialsThenPalettisedFrame(t *testing.T) {
 	if cells[0] == 0 || cells[256] != 0 {
 		t.Errorf("stone layer = %d, air above = %d", cells[0], cells[256])
 	}
-	if len(got[1]) > 13+2+2+512 {
+	if len(got[1]) > 13+2+4+512 {
 		t.Errorf("frame is %d bytes; a stone-and-air section needs one index bit per cell", len(got[1]))
 	}
 }
@@ -575,5 +576,90 @@ func TestDroppedItemsAreEntities(t *testing.T) {
 	h.Apply(&packet.RemoveActor{EntityUniqueID: 4}, &sink{})
 	if rm := ofType(mustDrain(t, v), frameRemove); len(rm) != 1 {
 		t.Error("removed item was not announced")
+	}
+}
+
+// namedDecoder names every block id, so a test can place as many distinct
+// blocks as it needs.
+type namedDecoder struct{ fakeDecoder }
+
+func (namedDecoder) BlockName(id uint32) (string, bool) {
+	return "minecraft:block_" + strconv.Itoa(int(id)), true
+}
+
+func placeBlock(h *Hub, x, id int32) {
+	h.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{x * 16, 1, 0}, NewBlockRuntimeID: uint32(id)}, &sink{})
+}
+
+func materialCount(f []byte) int { return int(binary.LittleEndian.Uint16(f[1:])) }
+
+func TestMaterialsAreSentOnceEachAndLateViewersGetTheWholeTable(t *testing.T) {
+	h := New(Options{Decoder: namedDecoder{}, MaxViewers: 3})
+	early := attach(t, h)
+	drain(t, early)
+	placeBlock(h, 0, 5)
+	placeBlock(h, 1, 6)
+	placeBlock(h, 2, 5)
+	got, err := drain(t, early)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mats := ofType(got, frameMaterials)
+	if len(mats) != 2 || materialCount(mats[0]) != 1 || materialCount(mats[1]) != 1 {
+		t.Fatalf("materials frames = %v, want two of one entry each and none for the repeated block", mats)
+	}
+	if id := binary.LittleEndian.Uint16(mats[1][3:]); id != 2 {
+		t.Errorf("second frame defines id %d, want 2", id)
+	}
+
+	late, _ := drain(t, attach(t, h))
+	if mats := ofType(late, frameMaterials); len(mats) != 1 || materialCount(mats[0]) != 2 {
+		t.Errorf("late viewer's head = %v, want one frame of both materials", mats)
+	}
+}
+
+// Past the old byte limit every block still gets its own id, and the viewer is
+// told what each id is.
+func TestBlocksPastTheByteLimitKeepDistinctIdsOnTheWire(t *testing.T) {
+	h := New(Options{Decoder: namedDecoder{}, MaxViewers: 1})
+	v := attach(t, h)
+	drain(t, v)
+	for i := int32(0); i < 300; i++ {
+		placeBlock(h, i, i+1)
+	}
+	got, err := drain(t, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defined := map[uint16]string{}
+	for _, m := range ofType(got, frameMaterials) {
+		p := 3
+		for i := 0; i < materialCount(m); i++ {
+			l := int(m[p+7])
+			defined[binary.LittleEndian.Uint16(m[p:])] = string(m[p+8 : p+8+l])
+			p += 8 + l
+		}
+	}
+	used := map[uint16]bool{}
+	h.mu.Lock()
+	for _, frame := range h.subs {
+		_, _, _, cells, err := decodeSubChunk(frame)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range cells {
+			if c != 0 {
+				used[c] = true
+			}
+		}
+	}
+	h.mu.Unlock()
+	if len(used) != 300 || len(defined) != 300 {
+		t.Fatalf("held chunks use %d ids and the viewer was told %d; want 300 each", len(used), len(defined))
+	}
+	for id := range used {
+		if defined[id] != "block_"+strconv.Itoa(int(id)) {
+			t.Errorf("id %d is defined as %q", id, defined[id])
+		}
 	}
 }

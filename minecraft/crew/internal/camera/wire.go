@@ -1,12 +1,12 @@
 package camera
 
-// Wire format, version 3. Every websocket message from the camera is binary
+// Wire format, version 4. Every websocket message from the camera is binary
 // and starts with a type byte; integers are little-endian.
 //
 //	hello        [1][version u8]                         first message of a connection
-//	materials    [2][n u16]{id u8, alpha u8, r g b u8, flags u8, len u8, name}...
-//	sub-chunk    [3][cx i32][cy i32][cz i32][n u16][palette n x u8][indices]
-//	block        [4][x i32][y i32][z i32][material u8]
+//	materials    [2][n u16]{id u16, alpha u8, r g b u8, flags u8, len u8, name}...
+//	sub-chunk    [3][cx i32][cy i32][cz i32][n u16][palette n x u16][indices]
+//	block        [4][x i32][y i32][z i32][material u16]
 //	tick         [5][flags u8][self 5 x f32 if flags&1][n uvarint][entity]...
 //	remove       [6][n uvarint][id uvarint]...
 //	reset        [7]
@@ -38,11 +38,21 @@ package camera
 //
 // Material flag bit 0 marks a block that is not a full cube; a page without an
 // atlas has no shape to draw it with and skips it. Version 2 added the flags
-// byte; version 3 added the head yaw to entity records. The atlas frame carries no data: the page fetches the PNG and the
-// table from /v1/camera/atlas.png and /v1/camera/atlas.json, and a page that
-// never gets the frame keeps drawing flat colours.
+// byte; version 3 added the head yaw to entity records; version 4 widened
+// material ids from one byte to two, and made a materials frame additive: it
+// defines the ids it lists and leaves the rest as they were, so the server
+// sends only what is new instead of the whole table each time. A page asks for
+// version 4 with ?wire=4 on the websocket; without it the server speaks
+// version 3 (ids above 255 all drawn as id 255, the full table in every
+// materials frame), so a page loaded before an upgrade keeps working until it
+// reloads. A page that reads a hello of 3 is talking to a server that
+// predates version 4 and decodes ids as single bytes.
 //
-// A sub-chunk's palette lists the materials it uses (1 to 256 entries; 0 is
+// The atlas frame carries no data: the page fetches the PNG and the table from
+// /v1/camera/atlas.png and /v1/camera/atlas.json, and a page that never gets
+// the frame keeps drawing flat colours.
+//
+// A sub-chunk's palette lists the materials it uses (1 to 4096 entries; 0 is
 // "not drawn"). Indices are packed LSB-first, bits(n) each, in
 // (y*16+z)*16+x order, with no padding between cells; a palette of one entry
 // has zero index bits. An entity record is
@@ -60,11 +70,15 @@ import (
 	"math"
 	"math/bits"
 	"slices"
+	"sync"
 	"unicode/utf8"
 )
 
 const (
-	wireVersion byte = 3
+	wireVersion byte = 4
+
+	// legacyWireVersion is what a page that does not ask for a version gets.
+	legacyWireVersion byte = 3
 
 	frameHello       byte = 1
 	frameMaterials   byte = 2
@@ -146,12 +160,20 @@ func indexBits(palette int) int {
 	return bits.Len(uint(palette - 1))
 }
 
-func encodeSubChunk(cx, cy, cz int32, c *[subChunkCells]uint8) []byte {
-	var slot [256]int16
-	for i := range slot {
-		slot[i] = -1
+// slotPool holds the id-to-palette-slot scratch table, 128 KiB, so encoding a
+// sub-chunk neither allocates nor clears it: each use puts back only the
+// entries it set.
+var slotPool = sync.Pool{New: func() any {
+	s := new([maxMaterials + 1]int16)
+	for i := range s {
+		s[i] = -1
 	}
-	palette := make([]uint8, 0, 8)
+	return s
+}}
+
+func encodeSubChunk(cx, cy, cz int32, c *[subChunkCells]uint16) []byte {
+	slot := slotPool.Get().(*[maxMaterials + 1]int16)
+	palette := make([]uint16, 0, 8)
 	for _, m := range c {
 		if slot[m] < 0 {
 			slot[m] = int16(len(palette))
@@ -159,30 +181,35 @@ func encodeSubChunk(cx, cy, cz int32, c *[subChunkCells]uint8) []byte {
 		}
 	}
 	w := indexBits(len(palette))
-	f := make([]byte, subHeaderSize+2, subHeaderSize+2+len(palette)+subChunkCells*w/8)
+	f := make([]byte, subHeaderSize+2, subHeaderSize+2+2*len(palette)+subChunkCells*w/8)
 	f[0] = frameSubChunk
 	binary.LittleEndian.PutUint32(f[1:], uint32(cx))
 	binary.LittleEndian.PutUint32(f[5:], uint32(cy))
 	binary.LittleEndian.PutUint32(f[9:], uint32(cz))
 	binary.LittleEndian.PutUint16(f[13:], uint16(len(palette)))
-	f = append(f, palette...)
-	if w == 0 {
-		return f
+	for _, m := range palette {
+		f = binary.LittleEndian.AppendUint16(f, m)
 	}
-	f = append(f, make([]byte, subChunkCells*w/8)...)
-	body := f[len(f)-subChunkCells*w/8:]
-	for i, m := range c {
-		v, at := uint(slot[m]), i*w
-		for b := 0; b < w; b++ {
-			if v>>b&1 != 0 {
-				body[(at+b)>>3] |= 1 << ((at + b) & 7)
+	if w > 0 {
+		f = append(f, make([]byte, subChunkCells*w/8)...)
+		body := f[len(f)-subChunkCells*w/8:]
+		for i, m := range c {
+			v, at := uint(slot[m]), i*w
+			for b := 0; b < w; b++ {
+				if v>>b&1 != 0 {
+					body[(at+b)>>3] |= 1 << ((at + b) & 7)
+				}
 			}
 		}
 	}
+	for _, m := range palette {
+		slot[m] = -1
+	}
+	slotPool.Put(slot)
 	return f
 }
 
-func decodeSubChunk(f []byte) (cx, cy, cz int32, c [subChunkCells]uint8, err error) {
+func decodeSubChunk(f []byte) (cx, cy, cz int32, c [subChunkCells]uint16, err error) {
 	if len(f) < subHeaderSize+2 || f[0] != frameSubChunk {
 		return 0, 0, 0, c, errors.New("camera: not a sub-chunk frame")
 	}
@@ -190,14 +217,14 @@ func decodeSubChunk(f []byte) (cx, cy, cz int32, c [subChunkCells]uint8, err err
 	cy = int32(binary.LittleEndian.Uint32(f[5:]))
 	cz = int32(binary.LittleEndian.Uint32(f[9:]))
 	n := int(binary.LittleEndian.Uint16(f[13:]))
-	if n < 1 || n > 256 {
+	if n < 1 || n > subChunkCells {
 		return 0, 0, 0, c, errors.New("camera: bad palette size")
 	}
 	w := indexBits(n)
-	if len(f) != subHeaderSize+2+n+subChunkCells*w/8 {
+	if len(f) != subHeaderSize+2+2*n+subChunkCells*w/8 {
 		return 0, 0, 0, c, errors.New("camera: bad sub-chunk length")
 	}
-	palette, body := f[subHeaderSize+2:subHeaderSize+2+n], f[subHeaderSize+2+n:]
+	pal, body := f[subHeaderSize+2:subHeaderSize+2+2*n], f[subHeaderSize+2+2*n:]
 	for i := range c {
 		var v int
 		for b := 0; b < w; b++ {
@@ -207,18 +234,18 @@ func decodeSubChunk(f []byte) (cx, cy, cz int32, c [subChunkCells]uint8, err err
 		if v >= n {
 			return 0, 0, 0, c, errors.New("camera: palette index out of range")
 		}
-		c[i] = palette[v]
+		c[i] = binary.LittleEndian.Uint16(pal[2*v:])
 	}
 	return cx, cy, cz, c, nil
 }
 
-func encodeBlock(x, y, z int32, material uint8) []byte {
-	b := make([]byte, 14)
+func encodeBlock(x, y, z int32, material uint16) []byte {
+	b := make([]byte, 15)
 	b[0] = frameBlock
 	binary.LittleEndian.PutUint32(b[1:], uint32(x))
 	binary.LittleEndian.PutUint32(b[5:], uint32(y))
 	binary.LittleEndian.PutUint32(b[9:], uint32(z))
-	b[13] = material
+	binary.LittleEndian.PutUint16(b[13:], material)
 	return b
 }
 
@@ -269,7 +296,8 @@ func encodeMaterials(list []material) []byte {
 		if m.NonCube {
 			flags |= matNonCube
 		}
-		f = append(f, m.ID, uint8(math.Round(float64(m.Alpha)*255)), r, g, b, flags, uint8(len(m.Name)))
+		f = binary.LittleEndian.AppendUint16(f, m.ID)
+		f = append(f, uint8(math.Round(float64(m.Alpha)*255)), r, g, b, flags, uint8(len(m.Name)))
 		f = append(f, m.Name...)
 	}
 	return f

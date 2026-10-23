@@ -9,7 +9,7 @@ import (
 // material is what the browser draws a block as when it has no atlas: a
 // colour per block name, jittered per block in the browser.
 type material struct {
-	ID    uint8   `json:"id"`
+	ID    uint16  `json:"id"`
 	Name  string  `json:"name"`
 	Color string  `json:"color"`
 	Alpha float32 `json:"alpha"`
@@ -76,11 +76,17 @@ func notCube(name string) bool {
 var airLike = map[string]bool{"air": true, "cave_air": true, "void_air": true, "unknown": true,
 	"barrier": true, "structure_void": true, "light_block": true, "allow": true, "deny": true, "border_block": true}
 
+// maxMaterials is the largest id the wire can carry. A sub-chunk holds 4096
+// cells, so a palette never needs more than that many entries, but the table
+// is shared by everything a unit has streamed.
+const maxMaterials = 1<<16 - 1
+
 // variantBudget is how many materials may exist before a block's shape
-// variants stop getting ids of their own. The wire holds 255 ids, and a
-// stair alone has forty states, so past this point a variant is drawn as the
-// block's default shape instead of crowding out whole block types.
-const variantBudget = 190
+// variants stop getting ids of their own. A stair alone has forty states, so
+// without a bound a long session of odd builds could crowd whole block types
+// out of the table; past this point a variant is drawn as the block's default
+// shape instead.
+const variantBudget = maxMaterials * 3 / 4
 
 // splitVariant separates a block name from the shape suffix the decoder adds
 // ("oak_stairs@0,0,0,16,8,16;0,8,8,16,16,16", boxes in sixteenths of a block).
@@ -91,17 +97,17 @@ func splitVariant(full string) (base, boxes string) {
 
 type materialTable struct {
 	mu     sync.Mutex
-	byName map[string]uint8
+	byName map[string]uint16
 	list   []material
 }
 
 func newMaterialTable() *materialTable {
-	return &materialTable{byName: map[string]uint8{}}
+	return &materialTable{byName: map[string]uint16{}}
 }
 
 // id returns 0 for blocks that are not drawn. fresh is true when a new
 // material was assigned, so the caller knows to tell viewers.
-func (t *materialTable) id(full string) (id uint8, fresh bool) {
+func (t *materialTable) id(full string) (id uint16, fresh bool) {
 	name := strings.TrimPrefix(full, "minecraft:")
 	base, boxes := splitVariant(name)
 	if airLike[base] || strings.HasPrefix(base, "light_block_") {
@@ -119,10 +125,10 @@ func (t *materialTable) id(full string) (id uint8, fresh bool) {
 			return v, false
 		}
 	}
-	// 255 distinct drawn block names is far more than a lab scene has; the
-	// last slot absorbs overflow instead of growing the wire format.
-	if len(t.list) >= 255 {
-		return 255, false
+	// Unreachable for a Bedrock world, but a wrong block is worse than a
+	// missing one, so the overflow is left undrawn rather than aliased.
+	if len(t.list) >= maxMaterials {
+		return 0, false
 	}
 	color, ok := known[base]
 	if !ok {
@@ -138,16 +144,23 @@ func (t *materialTable) id(full string) (id uint8, fresh bool) {
 	if a, ok := translucent[base]; ok {
 		alpha = a
 	}
-	id = uint8(len(t.list) + 1)
+	id = uint16(len(t.list) + 1)
 	t.list = append(t.list, material{ID: id, Name: name, Color: color, Alpha: alpha, NonCube: flat})
 	t.byName[name] = id
 	return id, true
 }
 
-func (t *materialTable) all() []material {
+func (t *materialTable) all() []material { return t.from(0) }
+
+// from returns the materials with index n and above, so a viewer that already
+// has the first n is sent only what it lacks.
+func (t *materialTable) from(n int) []material {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]material(nil), t.list...)
+	if n >= len(t.list) {
+		return nil
+	}
+	return append([]material(nil), t.list[n:]...)
 }
 
 func hex2(b byte) string {
