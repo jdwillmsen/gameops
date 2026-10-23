@@ -537,3 +537,13 @@ func TestObserveExpandsToOneObserve(t *testing.T) {
 		t.Fatalf("skills = %v, err = %v", skills, err)
 	}
 }
+
+func TestDecodeErrorsQuoteNoCoordinate(t *testing.T) {
+	_, err := ParseTemplate([]byte(`{"template":"withdraw","chest":{"x":123.5,"y":64,"z":0},"items":{"oak_log":1}}`))
+	if err == nil {
+		t.Fatal("a fractional coordinate was accepted")
+	}
+	if strings.Contains(err.Error(), "123") {
+		t.Errorf("error %q quotes the coordinate", err)
+	}
+}

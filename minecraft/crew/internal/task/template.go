@@ -128,6 +128,12 @@ func decodeStrict(body []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		// A type error quotes the offending value, which for a position is a
+		// lab coordinate, so only the field and the wanted type are kept.
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) {
+			return fmt.Errorf("invalid task: %s must be %s", typeErr.Field, typeErr.Type)
+		}
 		return fmt.Errorf("invalid task: %w", err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
