@@ -198,8 +198,9 @@ func newSquadClient(cfg config.Config, snapshot func() belief.Snapshot, log squa
 // squadStatus reports how the unit is, straight from belief, on the wire the
 // squad routes read. The position is the feet — the leader anchor and the
 // console's "where it stands" both mean the ground, while belief carries the
-// eye position the server reports. Health and hunger read as zero until the
-// server has said, which the store takes for a unit not yet in the world.
+// eye position the server reports. Health unknown is not a dead heart: the
+// store reads a reported zero as dead, so until the server says a number
+// the wire carries a full one, which nothing reads as lost.
 func squadStatus(s belief.Snapshot) squadmsg.Status {
 	weapon := ""
 	if s.HeldKnown {
@@ -210,8 +211,12 @@ func squadStatus(s belief.Snapshot) squadmsg.Status {
 			}
 		}
 	}
+	hp := 20.0
+	if s.HealthKnown {
+		hp = float64(s.Health)
+	}
 	return squadmsg.Status{
-		HP:     float64(s.Health),
+		HP:     hp,
 		Food:   int(s.Hunger),
 		Weapon: weapon,
 		Pos:    squadmsg.Pos{X: s.Position[0], Y: s.Position[1] - eyeHeight, Z: s.Position[2]},

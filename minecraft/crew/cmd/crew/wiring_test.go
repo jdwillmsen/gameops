@@ -299,6 +299,27 @@ func TestSquadClientWiresOnlyForAWarriorWithCrewControl(t *testing.T) {
 	}
 }
 
+// Health unknown is not a dead heart: a straight copy of belief's zero
+// health would read as a reported-death on the squad for a unit the
+// server has not said anything about yet.
+func TestSquadStatusDoesNotWireADeadHeartBeforeHealthIsKnown(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{1, 65.62, 2}, 0, 0, 0)
+	if s := tracker.Snapshot(); s.HealthKnown {
+		t.Fatal("a spawned unit knows its health before any report")
+	}
+	got := squadStatus(tracker.Snapshot())
+	if got.HP <= 0 {
+		t.Fatalf("unknown health wired hp %g, want a value the store reads as alive", got.HP)
+	}
+	tracker.Apply(&packet.UpdateAttributes{EntityRuntimeID: 7, Attributes: []protocol.Attribute{
+		{AttributeValue: protocol.AttributeValue{Name: "minecraft:health", Value: 9}},
+	}})
+	if got := squadStatus(tracker.Snapshot()); got.HP != 9 {
+		t.Fatalf("reported health wired hp %g, want 9", got.HP)
+	}
+}
+
 // The wire carries what belief holds: hp, food, the held item and where the
 // unit stands — feet, under the eye position the server reports.
 func TestSquadStatusCarriesBeliefOntoTheWire(t *testing.T) {
