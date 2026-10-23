@@ -112,6 +112,13 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = conn.CloseNow() }()
 
+	// A page announces the newest wire version it reads. One that says nothing
+	// was loaded before version 4 existed and is sent version 3.
+	var down *v3Downgrader
+	if wv, err := strconv.ParseUint(r.URL.Query().Get("wire"), 10, 8); err != nil || byte(wv) < wireVersion {
+		down = &v3Downgrader{}
+	}
+
 	// The only thing a viewer says is how far it wants to see; the read loop
 	// also keeps control frames answered.
 	conn.SetReadLimit(16)
@@ -136,6 +143,11 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 				_ = conn.Close(websocket.StatusTryAgainLater, "too slow")
 			}
 			return
+		}
+		if down != nil {
+			if m, err = down.convert(m); err != nil {
+				return
+			}
 		}
 		wctx, cancel := context.WithTimeout(ctx, writeTimeout)
 		err = conn.Write(wctx, websocket.MessageBinary, m)

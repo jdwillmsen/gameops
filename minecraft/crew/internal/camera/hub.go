@@ -91,6 +91,7 @@ type Hub struct {
 	startR     int
 	maxRadius  int
 	mats       *materialTable
+	matsSent   int // how many of mats every attached viewer has been sent; under mu
 
 	mu       sync.Mutex
 	runtime  uint64
@@ -645,18 +646,16 @@ type blockPlacement struct {
 	netID uint32
 }
 
-// blockEdits resolves names outside the hub lock; fresh is true if any
-// material is new.
-func (h *Hub) blockEdits(placed []blockPlacement) (edits []blockEdit, fresh bool) {
-	edits = make([]blockEdit, len(placed))
+// blockEdits resolves names outside the hub lock.
+func (h *Hub) blockEdits(placed []blockPlacement) []blockEdit {
+	edits := make([]blockEdit, len(placed))
 	for i, p := range placed {
-		id, f := h.blockMaterial(p.netID)
-		edits[i], fresh = blockEdit{p.pos, id}, fresh || f
+		edits[i] = blockEdit{p.pos, h.blockMaterial(p.netID)}
 	}
-	return edits, fresh
+	return edits
 }
 
-func (h *Hub) blockMaterial(netID uint32) (id uint8, fresh bool) {
+func (h *Hub) blockMaterial(netID uint32) uint16 {
 	var name string
 	var ok bool
 	if r, shaped := h.dec.(interface {
@@ -670,21 +669,22 @@ func (h *Hub) blockMaterial(netID uint32) (id uint8, fresh bool) {
 		h.unmapped.Add(1)
 		name = unmappedBlock
 	}
-	return h.mats.id(name)
+	id, _ := h.mats.id(name)
+	return id
 }
 
 type blockEdit struct {
 	pos protocol.BlockPos
-	id  uint8
+	id  uint16
 }
 
-func (h *Hub) updateBlocks(edits []blockEdit, fresh bool) {
+func (h *Hub) updateBlocks(edits []blockEdit) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.pushMaterialsLocked(fresh)
+	h.pushMaterialsLocked()
 
 	type group struct {
-		cells [subChunkCells]uint8
+		cells [subChunkCells]uint16
 		held  bool
 		n     int
 	}
@@ -709,7 +709,7 @@ func (h *Hub) updateBlocks(edits []blockEdit, fresh bool) {
 		if held && string(old) == string(frame) {
 			continue
 		}
-		if !held && !slices.ContainsFunc(g.cells[:], func(c uint8) bool { return c != 0 }) {
+		if !held && !slices.ContainsFunc(g.cells[:], func(c uint16) bool { return c != 0 }) {
 			continue
 		}
 		h.subs[key] = frame
@@ -729,17 +729,15 @@ func (h *Hub) updateBlocks(edits []blockEdit, fresh bool) {
 // emit converts a section to the wire format, keeps it for later viewers and
 // tells current ones.
 func (h *Hub) emit(cx, cy, cz int32, s Section) {
-	mat := make([]uint8, len(s.Palette))
-	anyFresh, anyBlock := false, false
+	mat := make([]uint16, len(s.Palette))
+	anyBlock := false
 	for i, name := range s.Palette {
-		var fresh bool
 		if name == unmappedBlock {
 			h.unmapped.Add(1)
 		}
-		mat[i], fresh = h.mats.id(name)
-		anyFresh = anyFresh || fresh
+		mat[i], _ = h.mats.id(name)
 	}
-	var cells [subChunkCells]uint8
+	var cells [subChunkCells]uint16
 	for i, c := range s.Cells {
 		if int(c) >= len(mat) {
 			h.decodeFailures.Add(1)
@@ -762,14 +760,20 @@ func (h *Hub) emit(cx, cy, cz int32, s Section) {
 	default:
 		return
 	}
-	h.pushMaterialsLocked(anyFresh)
+	h.pushMaterialsLocked()
 	h.broadcastLocked(func(v *Viewer) bool { return v.noteSub(key, frame, anyBlock) })
 }
 
-func (h *Hub) pushMaterialsLocked(fresh bool) {
-	if fresh {
-		h.pushOrderedLocked(encodeMaterials(h.mats.all()))
+// pushMaterialsLocked sends the materials created since the last push. It
+// compares sizes instead of trusting a caller's fresh flag, so a frame that
+// uses a material another goroutine created is never sent ahead of it.
+func (h *Hub) pushMaterialsLocked() {
+	fresh := h.mats.from(h.matsSent)
+	if len(fresh) == 0 {
+		return
 	}
+	h.matsSent += len(fresh)
+	h.pushOrderedLocked(encodeMaterials(fresh))
 }
 
 func (h *Hub) pushOrderedLocked(m []byte) {

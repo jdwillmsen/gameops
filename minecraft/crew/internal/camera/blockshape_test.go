@@ -1,6 +1,7 @@
 package camera
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -65,7 +66,7 @@ func TestLightBlocksAreNotDrawn(t *testing.T) {
 func TestShapeVariantsFallBackToTheBlockOncePastTheBudget(t *testing.T) {
 	tab := newMaterialTable()
 	for i := 0; i < variantBudget; i++ {
-		tab.id("minecraft:block_" + strings.Repeat("x", i/26) + string(rune('a'+i%26)))
+		tab.id("minecraft:block_" + strconv.Itoa(i))
 	}
 	id, _ := tab.id("minecraft:oak_stairs@0,0,0,16,8,16")
 	for _, m := range tab.all() {
