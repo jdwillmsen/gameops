@@ -345,7 +345,7 @@ func (m *MineShaft) walk(a Actuator, to protocol.BlockPos, within float64, then 
 		// No walking path and no stair floor to mend: the unit is cut off from
 		// the stair, as after a knockback into a cave beneath it. Build its way up.
 		m.climbs++
-		m.cl = &climber{world: m.world, self: m.self, goal: to}
+		m.cl = &climber{world: m.world, self: m.self, goal: to, log: m.log}
 		m.climbThen, m.phase = m.phase, shClimb
 		return next
 	}
