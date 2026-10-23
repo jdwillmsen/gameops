@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -16,6 +17,7 @@ const (
 	OutcomeCleared  = "cleared"
 	OutcomeWipe     = "wipe"
 	OutcomeTimeout  = "timeout"
+	OutcomeError    = "error"
 )
 
 // Result is the one-line tuning record a run prints.
@@ -133,6 +135,10 @@ func (d *Director) Run() (Result, error) {
 	if err := d.validateWaves(waves); err != nil {
 		return result, err
 	}
+	if err := d.addTickingAreas(); err != nil {
+		return result, err
+	}
+	defer d.removeTickingAreas()
 	if err := d.closeAllPens(); err != nil {
 		return result, err
 	}
@@ -168,6 +174,7 @@ func (d *Director) Run() (Result, error) {
 
 		outcome, cleared, err := d.runWave(wave, pending, start, waveStart, alive, &result)
 		if err != nil {
+			result.Outcome = OutcomeError
 			return result, err
 		}
 		if outcome != "" {
@@ -205,6 +212,7 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 	bossSpawned := false
 	bossSeen := false
 	live := 0
+	spawnedBatch := false
 	phases := append([]Phase(nil), wave.Phases...)
 	phaseAt := 0
 
@@ -223,6 +231,7 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 				}
 			}
 			pending = pending[n:]
+			spawnedBatch = true
 			if !opened {
 				if err := d.openPens(pens); err != nil {
 					return "", false, err
@@ -287,11 +296,18 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 			return "", false, err
 		}
 		if live == 0 {
+			// A successful summon that leaves nothing to count means the map
+			// was not loaded or the entity never appeared; reading that as a
+			// clear would skip the rest of the run.
+			if spawnedBatch {
+				return "", false, fmt.Errorf("arena: wave %q summoned mobs but counted none", wave.Name)
+			}
 			if len(pending) > 0 {
 				continue
 			}
 			return "", true, nil
 		}
+		spawnedBatch = false
 		d.sleep(d.Poll)
 	}
 }
@@ -332,6 +348,25 @@ func (d *Director) pauseAfter(w Wave) time.Duration {
 		return w.Pause.Duration
 	}
 	return d.Pause
+}
+
+// addTickingAreas loads the arena's chunks: Bedrock refuses every summon and
+// fill outside a ticking area, and the build script removes its own areas on
+// exit. Failure here aborts before a single mob is spawned.
+func (d *Director) addTickingAreas() error {
+	for i, a := range d.Layout.Areas {
+		if _, err := d.exec(tickingAddCommand(i, a)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// removeTickingAreas is best-effort: cleanup must not mask the run's outcome.
+func (d *Director) removeTickingAreas() {
+	for i := range d.Layout.Areas {
+		_, _ = d.exec(tickingRemoveCommand(i))
+	}
 }
 
 func (d *Director) closeAllPens() error {
@@ -420,8 +455,12 @@ func (d *Director) spawnWaveMob(s spawn) error {
 		return fmt.Errorf("arena: no recipe for tier %d", s.Tier)
 	}
 	for _, cmd := range s.commands(recipe) {
-		if _, err := d.exec(cmd); err != nil {
+		out, err := d.exec(cmd)
+		if err != nil {
 			return err
+		}
+		if strings.Contains(out, "Unable to summon") {
+			return fmt.Errorf("arena: summon %s failed: %s", s.Type, strings.TrimSpace(out))
 		}
 	}
 	return nil
