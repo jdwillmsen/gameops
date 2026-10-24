@@ -88,10 +88,25 @@ type squadState struct {
 	callouts  []logEntry
 	rev       int64
 	lastLead  stateStamp
-	// start is where the squad began its fight, set once from the
-	// leader's first report or by a director, and hasStart says it is.
+	// start is where the squad is to regroup, set only by an explicit post
+	// (an automatic one from a report would go stale as the squad moves), and
+	// hasStart says it is. It lapses after startTTL so a forgotten one cannot
+	// outlive its fight: a wrong start is worse than none, since the engine
+	// then regroups clear of the boss on its own.
 	start    position
 	hasStart bool
+	startAt  time.Time
+}
+
+// startTTL is how long a posted start point stays in the squad's answers.
+const startTTL = 15 * time.Minute
+
+// startPos is the start point while it is still in force.
+func (sq *squadState) startPos(now time.Time) (position, bool) {
+	if !sq.hasStart || now.Sub(sq.startAt) > startTTL {
+		return position{}, false
+	}
+	return sq.start, true
 }
 
 // stateStamp is what the last read said about the leader and the roster:
@@ -290,11 +305,6 @@ func (st *Store) Status(s statusIn) {
 	m.hp, m.food, m.weapon, m.pos = s.HP, s.Food, s.Weapon, s.Pos
 	m.hasHP = true
 	m.heard = now
-	// The first place the leader reports from is where the squad began;
-	// a squad that already has a start keeps it however the leader moves.
-	if !sq.hasStart && st.leaderOf(sq, now) == s.Unit {
-		sq.start, sq.hasStart = m.pos, true
-	}
 }
 
 // SetStart fixes the squad's start point, replacing any earlier one. It
@@ -307,7 +317,7 @@ func (st *Store) SetStart(squadID string, p position) bool {
 	if !ok {
 		return false
 	}
-	sq.start, sq.hasStart = p, true
+	sq.start, sq.hasStart, sq.startAt = p, true, st.now()
 	return true
 }
 

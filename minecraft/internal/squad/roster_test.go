@@ -65,33 +65,38 @@ func TestMemberTurnsStaleAfterTheLeaderGrace(t *testing.T) {
 	}
 }
 
-func TestStartIsTheLeadersFirstPlaceAndStays(t *testing.T) {
+func TestStartComesOnlyFromAnExplicitPostAndLapses(t *testing.T) {
 	st, clk := newSquadRig()
 	clk.hello(st, "crew-18", "alpha", "vanguard")
 	clk.hello(st, "crew-19", "alpha", "striker")
 
-	if d, _ := st.Delta("alpha", 0); d.Start != nil {
-		t.Fatalf("a squad that has not reported has a start %+v", d.Start)
-	}
+	st.Status(statusIn{Unit: "crew-18", Squad: "alpha", HP: 20, Pos: position{X: 10, Y: 64, Z: 20}})
 	st.Status(statusIn{Unit: "crew-19", Squad: "alpha", HP: 20, Pos: position{X: 90, Z: 90}})
 	if d, _ := st.Delta("alpha", 0); d.Start != nil {
-		t.Fatalf("a follower's report set the start %+v", d.Start)
-	}
-	st.Status(statusIn{Unit: "crew-18", Squad: "alpha", HP: 20, Pos: position{X: 10, Y: 64, Z: 20}})
-	st.Status(statusIn{Unit: "crew-18", Squad: "alpha", HP: 20, Pos: position{X: 50, Y: 64, Z: 60}})
-
-	d, _ := st.Delta("alpha", 0)
-	if d.Start == nil || *d.Start != (position{X: 10, Y: 64, Z: 20}) {
-		t.Errorf("start %+v, want where the leader first reported", d.Start)
+		t.Fatalf("a report set the start %+v; only an explicit post may", d.Start)
 	}
 	if !st.SetStart("alpha", position{X: 1, Y: 2, Z: 3}) {
 		t.Fatal("SetStart refused a live squad")
 	}
 	if d, _ := st.Delta("alpha", 0); d.Start == nil || d.Start.X != 1 {
-		t.Errorf("start %+v after SetStart, want the director's", d.Start)
+		t.Errorf("start %+v after SetStart, want the posted one", d.Start)
+	}
+	// A hello must not overwrite a posted start.
+	clk.hello(st, "crew-19", "alpha", "striker")
+	if d, _ := st.Delta("alpha", 0); d.Start == nil || d.Start.X != 1 {
+		t.Errorf("start %+v after a hello, want the posted one kept", d.Start)
 	}
 	if st.SetStart("bravo", position{}) {
 		t.Error("SetStart took a squad that does not exist")
+	}
+	// Keep the squad alive past the lapse with fresh reports, so only the
+	// start expires.
+	for i := 0; i < 16; i++ {
+		clk.after(time.Minute)
+		st.Status(statusIn{Unit: "crew-18", Squad: "alpha", HP: 20, Pos: position{X: 10, Y: 64, Z: 20}})
+	}
+	if d, _ := st.Delta("alpha", 0); d.Start != nil {
+		t.Errorf("a start posted %v ago is still in force: %+v", 16*time.Minute, d.Start)
 	}
 }
 
@@ -138,11 +143,11 @@ func TestPublicReadsCarryNeitherRosterPositionsNorStart(t *testing.T) {
 	r.hello(t, "alpha", "crew-18", "vanguard")
 	r.do(t, "POST", "/v1/squads/alpha/status",
 		`{"unit":"crew-18","hp":12.5,"food":7,"weapon":"bow","pos":{"x":1.5,"y":64,"z":-760.25}}`, nil)
-	r.do(t, "POST", "/v1/squads/alpha/start", `{"pos":{"x":321,"y":64,"z":-654.5}}`, nil)
+	r.do(t, "POST", "/v1/squads/alpha/start", `{"pos":{"x":4711.5,"y":64,"z":-654.5}}`, opHdr)
 
 	for _, path := range []string{"/v1/squads", "/v1/squads/alpha"} {
 		got := readBody(t, r.do(t, "GET", path, "", nil))
-		for _, leak := range []string{`"pos"`, `"start"`, `"fresh"`, `-760.25`, `321`, `-654.5`} {
+		for _, leak := range []string{`"pos"`, `"start"`, `"fresh"`, `-760.25`, `4711.5`, `-654.5`} {
 			if strings.Contains(got, leak) {
 				t.Errorf("%s leaks %s: %s", path, leak, got)
 			}
@@ -151,19 +156,21 @@ func TestPublicReadsCarryNeitherRosterPositionsNorStart(t *testing.T) {
 
 	s := openSquadStream(t, r)
 	got := s.event(t)
-	for _, leak := range []string{`"pos"`, `"start"`, `"fresh"`, `-760.25`, `321`, `-654.5`} {
+	for _, leak := range []string{`"pos"`, `"start"`, `"fresh"`, `-760.25`, `4711.5`, `-654.5`} {
 		if strings.Contains(got, leak) {
 			t.Errorf("the stream leaks %s: %s", leak, got)
 		}
 	}
 
 	d := r.ordersSince(t, "alpha", "0")
-	if len(d.Members) != 1 || d.Members[0].Pos == nil || d.Start == nil || d.Start.X != 321 {
+	if len(d.Members) != 1 || d.Members[0].Pos == nil || d.Start == nil || d.Start.X != 4711.5 {
 		t.Errorf("the unit-facing poll lacks the roster or the start: %+v", d)
 	}
 }
 
-func TestStartRouteIsGuardedAndChecked(t *testing.T) {
+var opHdr = map[string]string{"X-Crew-Request": "1"}
+
+func TestStartRouteIsOperatorGatedAndChecked(t *testing.T) {
 	r := newRig(t, true)
 	r.hello(t, "alpha", "crew-18", "vanguard")
 	body := `{"pos":{"x":1,"y":2,"z":3}}`
@@ -175,30 +182,42 @@ func TestStartRouteIsGuardedAndChecked(t *testing.T) {
 		hdr  map[string]string
 		want int
 	}{
-		{"no bearer", "alpha", body, map[string]string{"Authorization": ""}, http.StatusUnauthorized},
-		{"wrong bearer", "alpha", body, map[string]string{"Authorization": "Bearer nope"}, http.StatusUnauthorized},
-		{"through the ingress", "alpha", body, map[string]string{"X-Forwarded-For": "203.0.113.7"}, http.StatusNotFound},
-		{"unknown squad", "bravo", body, nil, http.StatusNotFound},
-		{"unknown field", "alpha", `{"pos":{"x":1,"y":2,"z":3},"who":"me"}`, nil, http.StatusBadRequest},
-		{"off the world", "alpha", `{"pos":{"x":1e9,"y":2,"z":3}}`, nil, http.StatusBadRequest},
-		{"too big", "alpha", `{"pos":{"x":1,"y":2,"z":3},"pad":"` + strings.Repeat("x", 2<<10) + `"}`, nil, http.StatusRequestEntityTooLarge},
-		{"the shared token", "alpha", body, nil, http.StatusNoContent},
+		{"no operator header", "alpha", body, nil, http.StatusForbidden},
+		{"unit token alone is not enough", "alpha", body, map[string]string{"Authorization": "Bearer " + token}, http.StatusForbidden},
+		{"unknown squad", "bravo", body, opHdr, http.StatusNotFound},
+		{"unknown field", "alpha", `{"pos":{"x":1,"y":2,"z":3},"who":"me"}`, opHdr, http.StatusBadRequest},
+		{"empty body", "alpha", `{}`, opHdr, http.StatusBadRequest},
+		{"empty pos", "alpha", `{"pos":{}}`, opHdr, http.StatusBadRequest},
+		{"partial pos", "alpha", `{"pos":{"x":5}}`, opHdr, http.StatusBadRequest},
+		{"off the world", "alpha", `{"pos":{"x":1e9,"y":2,"z":3}}`, opHdr, http.StatusBadRequest},
+		{"too big", "alpha", `{"pos":{"x":1,"y":2,"z":3},"pad":"` + strings.Repeat("x", 2<<10) + `"}`, opHdr, http.StatusRequestEntityTooLarge},
+		{"a good post", "alpha", body, opHdr, http.StatusNoContent},
 	} {
 		resp := r.do(t, "POST", "/v1/squads/"+tt.path+"/start", tt.body, tt.hdr)
 		if resp.StatusCode != tt.want {
 			t.Errorf("%s: got %d, want %d", tt.name, resp.StatusCode, tt.want)
 		}
 	}
-	if resp := r.do(t, "POST", "/v1/squads/alpha/start", body, nil); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("start: %d", resp.StatusCode)
-	}
 	if d := r.ordersSince(t, "alpha", "0"); d.Start == nil || *d.Start != (position{X: 1, Y: 2, Z: 3}) {
 		t.Errorf("start %+v after a good post", d.Start)
 	}
+	r.ops = func() string { return "" }
+	if resp := r.do(t, "POST", "/v1/squads/alpha/start", body, opHdr); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("signed out: %d, want 401", resp.StatusCode)
+	}
+}
 
-	open := newRig(t, false)
-	if resp := open.do(t, "POST", "/v1/squads/alpha/start", body, nil); resp.StatusCode != http.StatusNotFound {
-		t.Errorf("start without a unit token: %d, want 404", resp.StatusCode)
+func TestStatusRejectsAPositionOutsideTheWorld(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "alpha", "crew-18", "vanguard")
+	for _, pos := range []string{`{"x":1e300,"y":64,"z":0}`, `{"x":0,"y":-1e40,"z":0}`, `{"x":0,"y":64,"z":9e9}`} {
+		resp := r.do(t, "POST", "/v1/squads/alpha/status", `{"unit":"crew-18","hp":20,"food":10,"weapon":"bow","pos":`+pos+`}`, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status with %s: %d, want 400", pos, resp.StatusCode)
+		}
+	}
+	if resp := r.do(t, "POST", "/v1/squads/alpha/status", `{"unit":"crew-18","hp":20,"food":10,"weapon":"bow","pos":{"x":1,"y":64,"z":2}}`, nil); resp.StatusCode != http.StatusNoContent {
+		t.Errorf("a good status: %d", resp.StatusCode)
 	}
 }
 

@@ -41,9 +41,25 @@ func newRig(t *testing.T, tokenSet bool) *rig {
 		r.api = Routes(mux, r.store, units, "")
 	}
 	mux.Handle("POST /v1/squads/{id}/order", gateProbe(r))
+	mux.Handle("POST /v1/squads/{id}/start", startGateProbe(r))
 	r.srv = httptest.NewServer(mux)
 	t.Cleanup(r.srv.Close)
 	return r
+}
+
+// startGateProbe is the same gate in front of the start route.
+func startGateProbe(r *rig) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("X-Crew-Request") != "1" {
+			http.Error(w, `{"error":"bad_request"}`, http.StatusForbidden)
+			return
+		}
+		if r.ops() == "" {
+			http.Error(w, `{"error":"signed_out"}`, http.StatusUnauthorized)
+			return
+		}
+		r.api.start(w, req)
+	})
 }
 
 // gateProbe mimics auth.Auth's Require closely enough to test the handler
