@@ -165,7 +165,8 @@ func TestStrikerJoinsOnlyBehindTheVanguardWithHealthToSpare(t *testing.T) {
 	}{
 		{name: "vanguard on the boss and healthy", health: 20, vanAt: 2, melee: true},
 		{name: "vanguard too far off", health: 20, vanAt: 10, atLeast: 8},
-		{name: "hurt below the commit line", health: 13, vanAt: 2, atLeast: 8},
+		{name: "hurt below the commit line waits out of the boom", health: 13, vanAt: 2, atLeast: wardenBoomRange + 1},
+		{name: "above the fall line but below the commit line", health: 12, vanAt: 2, atLeast: wardenBoomRange + 1},
 		{name: "half health falls back past the darkness", health: 9, vanAt: 2, atLeast: 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

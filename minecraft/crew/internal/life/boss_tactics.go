@@ -177,27 +177,28 @@ func (l *Life) bossGuard(s belief.Snapshot) bool {
 
 // bossStriker waits off the boss and joins the melee only while the
 // Vanguard is on the boss to take its blows and the Striker has health to
-// spare. Hurt past the fall line, it leaves the darkness until healed.
+// spare. Too hurt to join, it waits beyond the boom, which would wear down
+// what it needs to commit; hurt past the fall line, it leaves the darkness
+// until healed.
 func (l *Life) bossStriker(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
 	b := &l.warrior.boss
-	if b.fallen {
+	switch {
+	case b.fallen:
 		return l.bossKeep(a, p, e, s, math.Max(b.prof.darkness+1, b.prof.strikerFar), math.Inf(1))
-	}
-	if l.strikerCleared(p, e, s) {
+	case s.HealthKnown && s.Health <= b.prof.commitAbove:
+		near := math.Max(b.prof.boom+1, b.prof.strikerNear)
+		return l.bossKeep(a, p, e, s, near, near+b.prof.strikerFar-b.prof.strikerNear)
+	case l.strikerCovered(p, e):
 		return l.warriorMelee(ctx, a, p, e, s)
 	}
 	return l.bossKeep(a, p, e, s, b.prof.strikerNear, b.prof.strikerFar)
 }
 
-// strikerCleared says whether the Striker may close on the boss: health
-// above the commit line, and the Vanguard close enough to the boss to be
+// strikerCovered says whether the Vanguard is close enough to the boss to be
 // what it hits. Without a roster the leader stands in for the Vanguard,
 // whom the chain of command puts first.
-func (l *Life) strikerCleared(p act.Pose, e belief.Entity, s belief.Snapshot) bool {
+func (l *Life) strikerCovered(p act.Pose, e belief.Entity) bool {
 	w := l.warrior
-	if s.HealthKnown && s.Health <= w.boss.prof.commitAbove {
-		return false
-	}
 	van, ok := mgl32.Vec3{}, false
 	if r, isRoster := w.squad.(Roster); isRoster {
 		van, ok = r.Member(RoleVanguard)

@@ -27,6 +27,9 @@ type bossProfile struct {
 	// the boss must be for the meal to finish before it arrives.
 	healBelow float32
 	healClear float64
+	// boom is how far the boss hurts through shield and armour, where a
+	// Striker too hurt to join the melee has no business waiting.
+	boom float64
 	// darkness is the radius the boss darkens, zero for none. Only the
 	// Vanguard, whose place is at the boss, stands inside it for long.
 	darkness float64
@@ -56,6 +59,7 @@ var wardenProfile = bossProfile{
 	commitWithin: 6,
 	commitAbove:  0.7 * fullHealth, fallBelow: 0.5 * fullHealth,
 	healBelow: healBelow, healClear: 8,
+	boom:       wardenBoomRange,
 	darkness:   20,
 	meleeEvery: 36, shieldBreak: 100,
 	facingCone:  30,
