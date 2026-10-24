@@ -71,10 +71,12 @@ func (a *Actuator) instance(it belief.Item) (protocol.ItemInstance, error) {
 	if !ok {
 		return protocol.ItemInstance{}, fmt.Errorf("item %q is not in the server's item table", it.Name)
 	}
-	return protocol.ItemInstance{
-		StackNetworkID: it.StackNetworkID,
-		Stack:          protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: id}, Count: uint16(it.Count)},
-	}, nil
+	stack := protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: id}, Count: uint16(it.Count)}
+	if it.Wire != nil && it.Wire.NetworkID == id {
+		stack = *it.Wire
+		stack.Count = uint16(it.Count)
+	}
+	return protocol.ItemInstance{StackNetworkID: it.StackNetworkID, Stack: stack}, nil
 }
 
 // SelectHotbar holds the stack in a hotbar slot. Without the right tool in

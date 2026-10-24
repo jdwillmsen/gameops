@@ -205,3 +205,46 @@ func TestFloorRepairFillsOnlyAirInTwoBoundedFills(t *testing.T) {
 		t.Errorf("a layout without a floor radius gave %v", got)
 	}
 }
+
+func TestKitSpawnKeepsEffectsAndTagsButNotGear(t *testing.T) {
+	s := testSpawn()
+	s.Tier = 5
+	s.Kit = true
+	recipe := Tier{
+		Effects: []Effect{{ID: "resistance", Seconds: 600, Amplifier: 2}},
+		Gear:    []Gear{{Slot: "armor.head", Item: "diamond_helmet"}},
+		Enchant: &Enchant{ID: "sharpness", Level: 5},
+	}
+	cmds := s.commands(recipe)
+	if cmds[0] != "execute positioned 10 65 -760 run function mobs/zombie/t5" {
+		t.Errorf("first command = %q", cmds[0])
+	}
+	for _, want := range []string{
+		"tag @e[tag=arena_tiered] add arena_wave_t5",
+		"effect give @e[tag=arena_tiered] resistance 600 2",
+		"tag @e[tag=arena_tiered] remove arena_tiered",
+	} {
+		if !hasCommand(cmds, want) {
+			t.Errorf("kit spawn lacks %q:\n%s", want, strings.Join(cmds, "\n"))
+		}
+	}
+	if strings.Contains(strings.Join(cmds, "\n"), "replaceitem") || strings.Contains(strings.Join(cmds, "\n"), "enchant ") || strings.Contains(strings.Join(cmds, "\n"), "summon") {
+		t.Errorf("kit spawn regears or summons:\n%s", strings.Join(cmds, "\n"))
+	}
+}
+
+func TestOnlyPlainCatalogMobsFitAKit(t *testing.T) {
+	named, variant, other, high := testSpawn(), testSpawn(), testSpawn(), testSpawn()
+	named.Name = "Warlord"
+	variant.Variant = "minecraft:become_drowned"
+	other.Type = "ravager"
+	high.Tier = 7
+	if !testSpawn().kitFits() {
+		t.Error("a plain zombie should fit a kit")
+	}
+	for _, s := range []spawn{named, variant, other, high} {
+		if s.kitFits() {
+			t.Errorf("%+v should keep the summon", s)
+		}
+	}
+}

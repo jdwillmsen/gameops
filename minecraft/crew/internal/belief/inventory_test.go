@@ -28,6 +28,17 @@ func stack(id int32, count uint16, stackID int32) protocol.ItemInstance {
 	return protocol.ItemInstance{StackNetworkID: stackID, Stack: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: id}, Count: count}}
 }
 
+// withoutWire drops each stack's wire copy, for comparing with stacks built
+// from ID and count alone.
+func withoutWire(items []Item) []Item {
+	out := make([]Item, len(items))
+	for i, it := range items {
+		it.Wire = nil
+		out[i] = it
+	}
+	return out
+}
+
 func withItems(t *testing.T) *Tracker {
 	t.Helper()
 	tr := spawned(t)
@@ -52,7 +63,7 @@ func TestInventoryContentFillsTheSnapshot(t *testing.T) {
 		{Slot: 2, Name: "cobblestone", Count: 41, StackNetworkID: 11},
 		{Slot: 35, Name: "stick", Count: 3, StackNetworkID: 12},
 	}
-	if got := tr.Snapshot().Inventory; !reflect.DeepEqual(got, want) {
+	if got := withoutWire(tr.Snapshot().Inventory); !reflect.DeepEqual(got, want) {
 		t.Errorf("inventory = %+v, want %+v", got, want)
 	}
 }
@@ -75,7 +86,7 @@ func TestInventorySlotReplacesOneSlot(t *testing.T) {
 		{Slot: 0, Name: "cobblestone", Count: 6, StackNetworkID: 3},
 		{Slot: 1, Name: "wooden_pickaxe", Count: 1, StackNetworkID: 2},
 	}
-	if got := tr.Snapshot().Inventory; !reflect.DeepEqual(got, want) {
+	if got := withoutWire(tr.Snapshot().Inventory); !reflect.DeepEqual(got, want) {
 		t.Errorf("inventory = %+v, want %+v", got, want)
 	}
 	tr.Apply(slotPacket(0, 0, protocol.ItemInstance{}))
@@ -284,5 +295,16 @@ func TestPartialWithdrawNamesTheNewStackFromWhatStayed(t *testing.T) {
 	tr.Apply(r)
 	if it, ok := find(tr.Snapshot().Inventory, 4); !ok || it.Name != "cobblestone" || it.Count != 6 || it.StackNetworkID != 9 {
 		t.Errorf("slot 4 = %+v, %v", it, ok)
+	}
+}
+
+func TestStacksKeepTheServersItemData(t *testing.T) {
+	tr := withItems(t)
+	named := stack(woodenPick, 1, 20)
+	named.Stack.NBTData = map[string]any{"display": map[string]any{"Name": "Legendary Miner Pickaxe"}}
+	tr.Apply(slotPacket(0, 4, named))
+	inv := tr.Snapshot().Inventory
+	if len(inv) != 1 || inv[0].Wire == nil || !reflect.DeepEqual(inv[0].Wire.NBTData, named.Stack.NBTData) {
+		t.Fatalf("inventory = %+v, want the pickaxe with its name kept", inv)
 	}
 }
