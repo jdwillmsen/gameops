@@ -487,3 +487,30 @@ func TestARegroupEndsAfterAWhile(t *testing.T) {
 		t.Fatal("the Vanguard parked at the start for good")
 	}
 }
+
+func TestAnUnreachableRegroupPointIsNotReplannedEveryTick(t *testing.T) {
+	home := mgl32.Vec3{10.5, 1, 40.5}
+	r, squad := newBossWarrior(t, "striker", arena.Sub(mgl32.Vec3{10, 0, 0}))
+	// A ring of wall too high to climb round the start.
+	for x := int32(8); x <= 12; x++ {
+		for z := int32(38); z <= 42; z++ {
+			if x != 8 && x != 12 && z != 38 && z != 42 {
+				continue
+			}
+			for y := int32(1); y <= 3; y++ {
+				r.w.over[protocol.BlockPos{x, y, z}] = "stone"
+			}
+		}
+	}
+	squad.down, squad.start, squad.startOK = 2, home, true
+	plans := 0
+	for i := 0; i < 100; i++ {
+		r.step()
+		if r.l.warrior.boss.walkAt == r.l.tick {
+			plans++
+		}
+	}
+	if plans > 5 {
+		t.Fatalf("planned the walk to an unreachable start %d times in 100 ticks", plans)
+	}
+}
