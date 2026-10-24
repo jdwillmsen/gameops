@@ -297,8 +297,7 @@ func (st *Store) Delta(id string, since int64) (Delta, bool) {
 	}
 	d.Leader = st.leaderView(sq, now)
 	d.Members = st.rosterOf(sq, now)
-	if sq.hasStart {
-		p := sq.start
+	if p, ok := sq.startPos(now); ok {
 		d.Start = &p
 	}
 	return d, true
@@ -359,7 +358,8 @@ func (st *Store) leaderView(sq *squadState, now time.Time) *LeaderView {
 // member down or silent or in another block, or a new start point. Orders
 // and call-outs move the cursor instead. Callers hold the mutex.
 func (st *Store) touchState(sq *squadState, now time.Time) {
-	s := stateStamp{roster: st.rosterStamp(sq, now), start: sq.start, hasStart: sq.hasStart}
+	sp, hasStart := sq.startPos(now)
+	s := stateStamp{roster: st.rosterStamp(sq, now), start: sp, hasStart: hasStart}
 	if lv := st.leaderView(sq, now); lv != nil {
 		s.unit = lv.Unit
 		if lv.Pos != nil {

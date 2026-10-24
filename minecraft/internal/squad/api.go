@@ -138,7 +138,6 @@ func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	mux.HandleFunc("POST /v1/squads/{id}/hello", a.guard(a.hello))
 	mux.HandleFunc("POST /v1/squads/{id}/status", a.guard(a.status))
 	mux.HandleFunc("POST /v1/squads/{id}/callout", a.guard(a.callout))
-	mux.HandleFunc("POST /v1/squads/{id}/start", a.guard(a.start))
 	mux.HandleFunc("GET /v1/squads/{id}/orders", a.guard(a.orders))
 	return a
 }
@@ -150,6 +149,9 @@ func (a *API) MountOperator(mux *http.ServeMux, g Gate) {
 		op, _ := g.Operator(r)
 		a.order(w, r, op)
 	})))
+	// Where the squad regroups is an operator's call: a unit token is shared
+	// by every unit, and any of them could otherwise move another squad's.
+	mux.Handle("POST /v1/squads/{id}/start", g.Require(http.HandlerFunc(a.start)))
 }
 
 // guard enforces the shared-token, cluster-only contract of the work
@@ -265,7 +267,8 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.units.Has(b.Unit) || b.Food < 0 || b.Food > 20 ||
-		!shortPrintable(b.Weapon, maxLabel) {
+		!shortPrintable(b.Weapon, maxLabel) ||
+		!validCoord(b.Pos.X) || !validCoord(b.Pos.Y) || !validCoord(b.Pos.Z) {
 		http.Error(w, "bad status", http.StatusBadRequest)
 		return
 	}
@@ -306,10 +309,19 @@ func (a *API) callout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// startBody sets where the squad began its fight: a director or an operator
-// posts it when the leader's first report is not the place to regroup at.
+// startBody sets where the squad regroups. Every coordinate is required, so
+// an empty body cannot silently set the origin.
 type startBody struct {
-	Pos position `json:"pos"`
+	Pos *struct {
+		X *float64 `json:"x"`
+		Y *float64 `json:"y"`
+		Z *float64 `json:"z"`
+	} `json:"pos"`
+}
+
+// validCoord says a coordinate is a number inside the world.
+func validCoord(c float64) bool {
+	return !math.IsNaN(c) && !math.IsInf(c, 0) && math.Abs(c) <= maxCoord
 }
 
 func (a *API) start(w http.ResponseWriter, r *http.Request) {
@@ -317,14 +329,13 @@ func (a *API) start(w http.ResponseWriter, r *http.Request) {
 	if !decodeStrict(w, r, &b) {
 		return
 	}
-	for _, c := range []float64{b.Pos.X, b.Pos.Y, b.Pos.Z} {
-		if math.IsNaN(c) || math.Abs(c) > maxCoord {
-			http.Error(w, "bad start", http.StatusBadRequest)
-			return
-		}
+	if b.Pos == nil || b.Pos.X == nil || b.Pos.Y == nil || b.Pos.Z == nil ||
+		!validCoord(*b.Pos.X) || !validCoord(*b.Pos.Y) || !validCoord(*b.Pos.Z) {
+		http.Error(w, "bad start", http.StatusBadRequest)
+		return
 	}
 	id := r.PathValue("id")
-	if !a.store.SetStart(id, b.Pos) {
+	if !a.store.SetStart(id, position{X: *b.Pos.X, Y: *b.Pos.Y, Z: *b.Pos.Z}) {
 		http.NotFound(w, r)
 		return
 	}
