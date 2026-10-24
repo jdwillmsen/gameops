@@ -38,6 +38,7 @@ crew-control; it never calls them to command them.
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: private`; see [Unit detail](#unit-detail)
 - `GET /healthz`
+- `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
 - `GET /signin`: passkey sign-in; `/signin#operator=<id>&invite=<code>` enrols a passkey. The invite rides in the fragment so it never reaches a log
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
@@ -275,3 +276,67 @@ delete and lists the oldest 100, without deleting anything.
 The Postgres tests run when `CREW_PG_TEST_DSN` is set (they apply the migration
 first and truncate `crew_event`, so point them at a scratch database) and skip
 otherwise; everything else runs without a database.
+
+## Fleet metrics
+
+`GET /metrics` answers in Prometheus text on the same port as everything else,
+and is cluster-only because the public HTTPRoute allow-lists paths and
+`/metrics` is not one (`tools/tests/test-crew-route.sh` in jdw-deployments
+fails if that changes). Under `/units/` the proxy's allow-list answers 404 for
+any metrics path. The registry is the fleet's own, so there are no Go or
+process series, only the ones below.
+
+**These are samples.** Everything comes from the once-a-second poll of each
+unit's `/v1/state`, so a task that starts and ends between two polls is never
+seen. In one measured hour the poller saw a haul about one time in five. A task
+of several seconds, and every failure of one, is counted reliably; quick tasks
+are undercounted. Time-in-state is exact to about one poll per change of state;
+the state gauges are exact as of the last poll. The exact per-task record is
+the units' own.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `crew_fleet_tasks_started_total` | counter | `unit`, `template` | Task starts the poller saw. Includes starts that turned out to be idle polls |
+| `crew_fleet_tasks_finished_total` | counter | `unit`, `template`, `outcome` | Task ends. `done` excludes idle polls, so `rate(done)` is throughput |
+| `crew_fleet_task_failures_total` | counter | `template`, `reason` | Failed tasks by normalised reason |
+| `crew_fleet_task_duration_seconds` | histogram | `template`, `outcome` | How long tasks ran, from the unit's own times; `done` and `failed` only, idle polls left out |
+| `crew_fleet_unit_last_done_timestamp_seconds` | gauge | `unit` | When the unit last finished real work; `time()` minus it is its time without work. Absent until the first |
+| `crew_fleet_unit_deaths_total` | counter | `unit` | Deaths a poll saw |
+| `crew_fleet_unit_stuck_total` | counter | `unit` | Stalls (no progress for 90 s on a running task), once each |
+| `crew_fleet_units` | gauge | `state` | Units per state at the last poll; the five states sum to the roster |
+| `crew_fleet_units_online` | gauge | none | Everything but `offline` |
+| `crew_fleet_unit_state` | gauge | `unit`, `state` | 1 for each unit's current state, 0 otherwise |
+| `crew_fleet_unit_state_seconds_total` | counter | `unit`, `state` | Time each unit has spent in each state |
+
+Label values are closed sets, never a raw string a unit sent:
+
+- `unit`: the roster. Events from any other id are dropped.
+- `state`: `working`, `idle`, `stuck`, `dead`, `offline`. Offline wins, then dead, then stuck, then working, else idle.
+- `outcome`: `done`, `failed`, `cancelled`, `unknown` (the unit's recent list no longer held the verdict), `idle` (a successful finish of an idle-eligible template within 2 s, the rule the history's idle roll-up uses; it is the idle-poll count).
+- `template`: the ten crew templates (`gather_and_deposit`, `haul`, `withdraw`, `deposit`, `mine_shaft`, `goto`, `inspect`, `observe_blocks`, `place_block`, `craft`), else `other`.
+- `reason`: below. A unit's failure text is free text, so it is matched, case-insensitively, against phrases; the first row to match wins, and no match is `other`. A new failure shows up under `other` until a row is added in `internal/metrics/reason.go`.
+
+| `reason` | Matches (phrases) | Seen as |
+| --- | --- | --- |
+| `session` | `session ended` | |
+| `died` | `unit died` | |
+| `no_path` | `no path`, `no walking path`, `no standing spot`, `cannot reach`, `no way down`, `trapped` | `no path`, `getting to the chest: walking to the goal: no path` |
+| `missing_item` | ` in inventory`, `left to deposit`, `, need `, `out of blocks`, `nothing to haul` | `no axe in inventory` |
+| `no_pickup` | `no pickup` | |
+| `no_progress` | `no progress after` | |
+| `container` | `chest`, `crafting table` | `the chest's chunk is not loaded`, `chest did not open within 300 ticks` |
+| `server_rejected` | `server rejected`, `server did not`, `did not confirm` | |
+| `timeout` | `took too long`, `timed out`, `ticks` | `visit took too long` |
+| `action_failed` | `did not break`, `did not land`, `never settled`, `drifted`, `did not come down`, `is blocked at its first step` | |
+| `invalid_task` | `invalid task`, `outside the allowed`, `outside the area`, `unknown template` | |
+| `other` | anything else | |
+
+Series stay bounded by the label sets: with 20 units the worst case is about two
+thousand, and the usual count is a few hundred because a series appears only
+once its event has happened. Per-unit state, death and stall series exist from
+start so that every unit shows up before it does anything.
+
+Not exported, because crew-control cannot see them: kit failures, session
+errors and travel distance. They are in the units' logs only, and need the units
+to emit them (a closed reason code from the unit would also replace the text
+matching above).
