@@ -230,3 +230,23 @@ func TestAnHourOfIdlePollingStaysSmall(t *testing.T) {
 		t.Fatalf("failed %d, polls counted %d", failed, polls)
 	}
 }
+
+func TestIsIdlePollFollowsTheRollupRule(t *testing.T) {
+	for name, c := range map[string]struct {
+		kind, template string
+		took           time.Duration
+		want           bool
+	}{
+		"quick empty haul":      {"task_done", "haul", 300 * time.Millisecond, true},
+		"at the limit":          {"task_done", "haul", IdleMax, true},
+		"a haul that moved":     {"task_done", "haul", IdleMax + time.Millisecond, false},
+		"unknown duration":      {"task_done", "haul", 0, false},
+		"quick goto did work":   {"task_done", "goto", 100 * time.Millisecond, false},
+		"a failed haul is real": {"task_failed", "haul", 100 * time.Millisecond, false},
+		"a cancelled haul":      {"task_cancelled", "haul", 100 * time.Millisecond, false},
+	} {
+		if got := IsIdlePoll(c.kind, c.template, c.took); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
+		}
+	}
+}

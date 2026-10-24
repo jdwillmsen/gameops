@@ -52,6 +52,12 @@ func (h Hint) idleDone(kind string) bool {
 	return kind == "task_done" && h.idleTemplate() && h.Took > 0 && h.Took <= IdleMax
 }
 
+// IsIdlePoll is idleDone for callers that hold the parts rather than a Hint,
+// so a counter of idle polls follows the same rule the history folds on.
+func IsIdlePoll(kind, template string, took time.Duration) bool {
+	return Hint{Template: template, Took: took}.idleDone(kind)
+}
+
 // Collapser turns repeated idle polls into one row per unit and template: the
 // first poll's time as the row's time, the count, and the last poll's time in
 // the payload. Without it a hauling unit would write a start and a finish
