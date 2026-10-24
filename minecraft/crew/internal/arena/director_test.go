@@ -114,7 +114,7 @@ func found(n int) string {
 
 func (s *sim) Exec(cmd string) (string, error) {
 	switch {
-	case strings.Contains(cmd, " run summon "):
+	case strings.Contains(cmd, " run summon "), strings.Contains(cmd, " run function mobs/"):
 		s.summons++
 		s.live++
 		if s.live > s.peak {
@@ -1352,5 +1352,91 @@ func TestWarriorDeathsAreCountedPerName(t *testing.T) {
 	if states["Vanguard"].deaths != 1 || states["Striker"].deaths != 0 || result.WarriorDeaths != 1 {
 		t.Errorf("deaths = Vanguard %d, Striker %d, total %d; want 1, 0, 1",
 			states["Vanguard"].deaths, states["Striker"].deaths, result.WarriorDeaths)
+	}
+}
+
+func TestKitsSpawnCatalogMobsAndSummonTheRest(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: s.Exec}
+	book := testBook(wave("One", "zombie", 1, 1, 1), wave("Two", "ravager", 1, 4, 2))
+	d := newDirector(f, book, clock)
+	d.Kits = true
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, want := range []string{
+		"execute positioned 10 64 -760 run function mobs/zombie/t1",
+		"execute positioned 20 64 -760 run summon ravager ~ ~ ~",
+		"effect give @e[tag=arena_tiered] strength 600 0",
+	} {
+		if !hasCommand(f.Cmds, want) {
+			t.Errorf("run lacks %q:\n%s", want, strings.Join(f.Cmds, "\n"))
+		}
+	}
+	if f.Count("summon zombie") != 0 {
+		t.Error("a catalog zombie was summoned bare")
+	}
+	if f.Count("replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 stone_sword") != 0 || f.Count("enchant @e") != 0 {
+		t.Error("the kit zombie's gear was replaced or enchanted over")
+	}
+}
+
+func TestMissingKitFunctionAbortsAsAnError(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.Contains(cmd, "run function mobs/") {
+			return "Function mobs/zombie/t1 not found.", nil
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	d.Kits = true
+	if _, err := d.Run(); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("Run error = %v, want the missing function", err)
+	}
+}
+
+func TestWarriorKitsHandedOutAfterPlacement(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true, "Ranger": true}
+	f := &FakeConsole{Respond: s.Exec}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	d.Layout.GroundY = 64
+	d.Layout.FloorRadius = 45
+	d.Warriors = []string{"Vanguard", "Ranger"}
+	d.WarriorKits = []string{"vanguard/t5", "ranger/t4"}
+	d.PlaceSquad = true
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for i, want := range []string{
+		`execute as @a[name="Vanguard"] at @s run function kits/vanguard/t5`,
+		`execute as @a[name="Ranger"] at @s run function kits/ranger/t4`,
+	} {
+		if !before(f.Cmds, []string{`tp "Vanguard"`, `tp "Ranger"`}[i], want) ||
+			!before(f.Cmds, want, "execute positioned 10 64 -760 run summon zombie ~ ~ ~") {
+			t.Errorf("%q did not run between placement and the first spawn:\n%s", want, strings.Join(f.Cmds, "\n"))
+		}
+	}
+}
+
+func TestWarriorKitsAreValidated(t *testing.T) {
+	for _, tt := range []struct {
+		warriors, kits []string
+		ok             bool
+	}{
+		{nil, nil, true},
+		{[]string{"A"}, []string{"vanguard/t6"}, true},
+		{[]string{"A", "B"}, []string{"vanguard/t5"}, false},
+		{[]string{"A"}, []string{"vanguard/t7"}, false},
+		{[]string{"A"}, []string{"../x/t1"}, false},
+		{[]string{"A"}, []string{"vanguard/t1 run kill @e"}, false},
+	} {
+		if err := ValidateWarriorKits(tt.warriors, tt.kits); (err == nil) != tt.ok {
+			t.Errorf("ValidateWarriorKits(%v, %v) = %v, want ok=%v", tt.warriors, tt.kits, err, tt.ok)
+		}
 	}
 }
