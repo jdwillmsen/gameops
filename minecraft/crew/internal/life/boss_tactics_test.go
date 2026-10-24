@@ -319,16 +319,29 @@ func TestSurvivorsRegroupAtTheStartWhenTwoAreDown(t *testing.T) {
 }
 
 func TestRegroupFallsBackToWhereTheFightBegan(t *testing.T) {
-	began := arena.Sub(mgl32.Vec3{10, 0, 0})
-	r, squad := newBossWarrior(t, "ranger", began)
-	r.run(80) // backs off to its band
+	began := arena.Sub(mgl32.Vec3{25, 0, 0})
+	r, squad := newBossWarrior(t, "striker", began)
+	r.run(80) // closes to its band
 	if dist(r.feet(), began) < 5 {
-		t.Fatal("the Ranger never left where it began")
+		t.Fatal("the Striker never left where it began")
 	}
 	squad.down = 2
 	r.run(200)
 	if d := dist(r.feet(), began); d > regroupWithin {
 		t.Fatalf("regrouped %.1f blocks from where the fight began", d)
+	}
+}
+
+func TestRegroupWithoutAStartKeepsOutOfTheBoom(t *testing.T) {
+	r, squad := newBossWarrior(t, "striker", arena.Sub(mgl32.Vec3{6, 0, 0}))
+	r.run(20)
+	squad.down = 2
+	r.run(250)
+	if d := dist(r.feet(), arena); d < wardenBoomRange+5-regroupWithin {
+		t.Fatalf("regrouped %.1f blocks from the warden, inside its boom", d)
+	}
+	if dz := math.Abs(float64(r.feet().Z() - arena.Z())); dz > regroupWithin {
+		t.Errorf("regrouped %.1f blocks off the line from the warden to where the fight began", dz)
 	}
 }
 

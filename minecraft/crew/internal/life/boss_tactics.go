@@ -36,6 +36,9 @@ const (
 	// it is planned again: the search is the costly part, and the start
 	// does not move.
 	regroupRetry = 60
+	// rallyMargin is how far past the boom a squad that does not know its
+	// start regroups.
+	rallyMargin = 5
 	// arrowStep is the spacing of the samples along a bow's line.
 	arrowStep = 0.25
 )
@@ -123,6 +126,7 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 		b.regroupUntil, b.rallied = 0, false
 	case b.regroupUntil == 0:
 		b.regroupUntil = l.tick + regroupTicks
+		b.rally = rallyFrom(best.Pos, b.start, p.Feet, prof.boom+rallyMargin)
 	}
 	if down && b.rallied && inMeleeReach(p, best) {
 		// The boss followed the survivor back: there is nowhere further to
@@ -399,7 +403,7 @@ func (l *Life) bowLine(p act.Pose, e belief.Entity) bool {
 func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
 	w := l.warrior
 	b := &w.boss
-	at := b.start
+	at := b.rally
 	if r, ok := w.squad.(Roster); ok {
 		if st, ok := r.Start(); ok {
 			at = st
@@ -435,4 +439,24 @@ func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e 
 	}
 	b.walk = nil
 	return l.stillFacing(a, p, e)
+}
+
+// rallyFrom is where a squad that does not know its start regroups: where
+// the unit began the fight, unless that is within clear of the boss, as
+// it is for one that began at the boss's side. Then it is clear off the
+// boss along the line through where the unit began, or through the unit
+// itself when it began on top of the boss.
+func rallyFrom(boss, began, feet mgl32.Vec3, clear float64) mgl32.Vec3 {
+	if horizontal(began, boss) >= clear {
+		return began
+	}
+	dir := mgl32.Vec2{began.X() - boss.X(), began.Z() - boss.Z()}
+	if dir.Len() < 1e-3 {
+		dir = mgl32.Vec2{feet.X() - boss.X(), feet.Z() - boss.Z()}
+	}
+	if dir.Len() < 1e-3 {
+		dir = mgl32.Vec2{1, 0}
+	}
+	dir = dir.Normalize().Mul(float32(clear))
+	return mgl32.Vec3{boss.X() + dir.X(), began.Y(), boss.Z() + dir.Y()}
 }

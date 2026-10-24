@@ -107,10 +107,9 @@ type bossState struct {
 	active bool
 	prof   bossProfile
 	id     uint64
-	// start is where the unit stood when the fight began, for a squad that
-	// does not know its own start.
-	start      mgl32.Vec3
-	startKnown bool
+	// start is where the unit stood when the fight began, and rally the
+	// regroup point made from it, for a squad that does not know its own.
+	start, rally mgl32.Vec3
 	// regroup says enough of the squad is down to stop trading, and
 	// regroupUntil when that stops, zero while the squad is not down.
 	// rallied says the unit reached the regroup point, where a boss that
