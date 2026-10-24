@@ -374,3 +374,51 @@ func TestNonBossFightsKeepTheirOldShape(t *testing.T) {
 		t.Errorf("%d arrows at a zombie, want the old cadence", r.out.releases(2))
 	}
 }
+
+// pocket walls a Ranger in on three sides, open only towards the warden at
+// +x: it cannot back off and cannot slide.
+func pocket(r *rig, feet mgl32.Vec3) {
+	x, z := int32(feet.X()), int32(feet.Z())
+	for y := int32(1); y <= 2; y++ {
+		for dz := int32(-1); dz <= 1; dz++ {
+			r.w.over[protocol.BlockPos{x - 1, y, z + dz}] = "stone"
+		}
+		for dx := int32(0); dx <= 1; dx++ {
+			r.w.over[protocol.BlockPos{x + dx, y, z - 1}] = "stone"
+			r.w.over[protocol.BlockPos{x + dx, y, z + 1}] = "stone"
+		}
+	}
+}
+
+func TestACorneredRangerStillFightsTheBoss(t *testing.T) {
+	t.Run("shoots from the corner", func(t *testing.T) {
+		feet := arena.Sub(mgl32.Vec3{5, 0, 0})
+		r, _ := newBossWarrior(t, "ranger", feet)
+		pocket(r, feet)
+		r.run(120)
+		if n := r.out.releases(2); n == 0 {
+			t.Fatal("a Ranger that could not back off never loosed an arrow")
+		}
+	})
+	t.Run("swings with the boss at arm's length", func(t *testing.T) {
+		feet := arena.Sub(mgl32.Vec3{2, 0, 0})
+		r, _ := newBossWarrior(t, "ranger", feet)
+		pocket(r, feet)
+		r.run(60)
+		if n := len(r.out.attacks()); n == 0 {
+			t.Fatal("a cornered Ranger never swung at the warden in its face")
+		}
+	})
+	t.Run("swings when the boss in reach goes for it", func(t *testing.T) {
+		r, _ := newBossWarrior(t, "ranger", arena.Sub(mgl32.Vec3{2.5, 0, 0}))
+		faceWarden(r, 90) // towards -x, at the Ranger
+		for i := 0; i < 20; i++ {
+			r.moveTo(90, r.feet().Add(mgl32.Vec3{2.5, 0, 0}))
+			faceWarden(r, 90)
+			r.step()
+		}
+		if n := len(r.out.attacks()); n == 0 {
+			t.Fatal("the Ranger never swung at a warden on its heels")
+		}
+	})
+}

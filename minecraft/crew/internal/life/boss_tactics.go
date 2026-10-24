@@ -25,6 +25,10 @@ const (
 	// slideTicks is how long a unit that could not back off steps sideways
 	// instead, before trying to back off again.
 	slideTicks = 20
+	// cornerTicks is how long a unit that could neither back off nor slide
+	// either way stands and fights where it is: the bow's cadence wait plus
+	// a full draw, so a Ranger gets an arrow off before it tries again.
+	cornerTicks = shotEvery + bowDraw
 	// arrowStep is the spacing of the samples along a bow's line.
 	arrowStep = 0.25
 )
@@ -149,7 +153,7 @@ func (l *Life) bossFight(ctx context.Context, a skill.Actuator, p act.Pose, e be
 		l.cancelDraw(a)
 		return l.bossStriker(ctx, a, p, e, s)
 	}
-	return l.bossRanger(a, p, e, s)
+	return l.bossRanger(ctx, a, p, e, s)
 }
 
 // bossGuard says whether the boss's next blow is due, so the Vanguard holds
@@ -216,12 +220,18 @@ func (l *Life) bossKeep(a skill.Actuator, p act.Pose, e belief.Entity, s belief.
 
 // bossRanger holds the Ranger's band and shoots down a clear line on the
 // bow's cadence. A Ranger without a bow keeps the band all the same: the
-// melee is the Vanguard's.
-func (l *Life) bossRanger(a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
+// melee is the Vanguard's, until the boss is at arm's length and either
+// going for the Ranger or has it cornered, when the sword is the last resort.
+func (l *Life) bossRanger(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
 	w := l.warrior
 	b := &w.boss
 	l.lowerShield(a)
-	in, aimed := l.bandStep(p, e, b.prof.rangerNear, b.prof.rangerFar, l.bossFaces(e, p))
+	faced := l.bossFaces(e, p)
+	in, aimed := l.bandStep(p, e, b.prof.rangerNear, b.prof.rangerFar, faced)
+	if inMeleeReach(p, e) && (faced || l.tick < b.corneredUntil) {
+		l.cancelDraw(a)
+		return l.warriorMelee(ctx, a, p, e, s)
+	}
 	bow := bowAt(s)
 	if !l.rangerArmed(s) {
 		l.cancelDraw(a)
@@ -256,8 +266,9 @@ func (l *Life) bossRanger(a skill.Actuator, p act.Pose, e belief.Entity, s belie
 
 // bandStep is the walk that keeps a unit between near and far off the boss:
 // back off facing it, close in facing it, or stand. A unit the boss faces,
-// or one whose backing off moved nowhere, steps sideways as well. aimed says
-// the input faces the boss.
+// or one whose backing off moved nowhere, steps sideways as well, and one
+// shut in on both sides as well stands facing the boss for a while. aimed
+// says the input faces the boss.
 func (l *Life) bandStep(p act.Pose, e belief.Entity, near, far float64, faced bool) (act.Input, bool) {
 	b := &l.warrior.boss
 	in := l.face(p, e)
@@ -272,14 +283,29 @@ func (l *Life) bandStep(p act.Pose, e belief.Entity, near, far float64, faced bo
 	} else {
 		b.stuck = 0
 	}
+	if b.blocked > 0 && math.Hypot(float64(p.Feet.X()-b.blockX), float64(p.Feet.Z()-b.blockZ)) > 1 {
+		b.blocked = 0
+	}
 	if b.stuck >= backStuckTicks {
 		// A wall or a body: slide along it, and turn the other way when
-		// the slide itself is what stuck.
+		// the slide itself is what stuck. Shut in that way too, the unit
+		// is cornered: flipping on would keep it turned off the boss for
+		// good, with no arrow and no blow, so it stands and fights.
 		b.stuck = 0
-		if l.tick < b.slideUntil {
-			b.strafe = -b.strafe
+		if b.blocked == 0 {
+			b.blockX, b.blockZ = p.Feet.X(), p.Feet.Z()
 		}
-		b.slideUntil = l.tick + slideTicks
+		b.blocked++
+		switch {
+		case b.blocked >= 3:
+			b.blocked, b.slideUntil = 0, 0
+			b.corneredUntil = l.tick + cornerTicks
+		case b.blocked == 2:
+			b.strafe = -b.strafe
+			b.slideUntil = l.tick + slideTicks
+		default:
+			b.slideUntil = l.tick + slideTicks
+		}
 	}
 	if b.strafe == 0 {
 		b.strafe = 1
@@ -294,6 +320,8 @@ func (l *Life) bandStep(p act.Pose, e belief.Entity, near, far float64, faced bo
 	}
 	aimed := true
 	switch {
+	case l.tick < b.corneredUntil:
+		// Cornered: stand where it is, facing the boss.
 	case faced || l.tick < b.slideUntil:
 		to := mgl32.Vec2{e.Pos.X() - p.Feet.X(), e.Pos.Z() - p.Feet.Z()}
 		if to.Len() < 1e-3 {
