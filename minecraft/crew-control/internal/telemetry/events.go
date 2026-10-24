@@ -40,6 +40,9 @@ type Event struct {
 	// says the task ran, zero when it is not known.
 	Template string        `json:"-"`
 	Took     time.Duration `json:"-"`
+	// Reason is the unit's own words for a failed task, untouched. Text carries
+	// it too, but trimmed and behind a prefix; the fleet metrics classify this.
+	Reason string `json:"-"`
 }
 
 // Position is where a unit stands. It is only ever sent to signed-in streams.
@@ -208,7 +211,7 @@ func finished(id, template string, recent []recentTask, now time.Time) Event {
 			if r.Reason != "" {
 				text += ": " + r.Reason
 			}
-			ev.Kind, ev.Level, ev.Text = "task_failed", "crit", text
+			ev.Kind, ev.Level, ev.Text, ev.Reason = "task_failed", "crit", text, r.Reason
 			return ev
 		}
 	}
