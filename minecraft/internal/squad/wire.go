@@ -1,7 +1,10 @@
 package squad
 
 import (
+	"fmt"
+	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -61,14 +64,32 @@ type View struct {
 type Delta struct {
 	// Cursor is the squad's newest seq value.
 	Cursor int64 `json:"cursor"`
-	// Rev changes whenever the leader identity or its position does, so a
-	// unit that echoes back the revision it last saw answers at once when
-	// the chain of command moves, even with no new messages.
-	Rev      int64         `json:"rev"`
-	Leader   *LeaderView   `json:"leader,omitempty"`
-	Order    *wireOrder    `json:"order"`
-	Orders   []wireOrder   `json:"orders"`
-	Callouts []wireCallout `json:"callouts"`
+	// Rev changes whenever the leader identity or its position does, or the
+	// roster or the start point, so a unit that echoes back the revision
+	// it last saw answers at once when the squad moves, even with no new
+	// messages.
+	Rev    int64       `json:"rev"`
+	Leader *LeaderView `json:"leader,omitempty"`
+	// Members and Start let a warrior see the squad beyond its leader: who
+	// is down and where the others stand. Both are unit-facing only; the
+	// public reads carry no position.
+	Members  []RosterMember `json:"members"`
+	Start    *position      `json:"start,omitempty"`
+	Order    *wireOrder     `json:"order"`
+	Orders   []wireOrder    `json:"orders"`
+	Callouts []wireCallout  `json:"callouts"`
+}
+
+// RosterMember is one member as a unit's poll sees it. Pos is absent until
+// the member's first report, and is its last place once it falls silent or
+// dies. Fresh says it spoke within the leader grace, so silence is judged
+// once, here, on the server's clock.
+type RosterMember struct {
+	Unit  string    `json:"unit"`
+	Role  string    `json:"role"`
+	Pos   *position `json:"pos,omitempty"`
+	Alive bool      `json:"alive"`
+	Fresh bool      `json:"fresh"`
 }
 
 // LeaderView names the leader and where it was last seen standing. Pos is
@@ -275,7 +296,47 @@ func (st *Store) Delta(id string, since int64) (Delta, bool) {
 		}
 	}
 	d.Leader = st.leaderView(sq, now)
+	d.Members = st.rosterOf(sq, now)
+	if sq.hasStart {
+		p := sq.start
+		d.Start = &p
+	}
 	return d, true
+}
+
+// rosterOf lists every member for a unit's poll, in chain-of-command order.
+func (st *Store) rosterOf(sq *squadState, now time.Time) []RosterMember {
+	mems := chainOrder(sq)
+	out := make([]RosterMember, 0, len(mems))
+	for _, m := range mems {
+		rm := RosterMember{
+			Unit:  m.unit,
+			Role:  string(m.role),
+			Alive: !m.hasHP || m.hp > 0,
+			Fresh: now.Sub(m.heard) <= leaderGrace,
+		}
+		if m.hasHP {
+			p := m.pos
+			rm.Pos = &p
+		}
+		out = append(out, rm)
+	}
+	return out
+}
+
+// rosterStamp is the roster as far as a poll must hear of it: who is down or
+// silent, and the block each reporting member stands in. A finer position
+// would end every long poll on each beat of a unit standing still-ish.
+func (st *Store) rosterStamp(sq *squadState, now time.Time) string {
+	var b strings.Builder
+	for _, m := range st.rosterOf(sq, now) {
+		fmt.Fprintf(&b, "%s|%t|%t|", m.Unit, m.Alive, m.Fresh)
+		if m.Pos != nil {
+			fmt.Fprintf(&b, "%d,%d,%d", int(math.Floor(m.Pos.X)), int(math.Floor(m.Pos.Y)), int(math.Floor(m.Pos.Z)))
+		}
+		b.WriteByte(';')
+	}
+	return b.String()
 }
 
 // leaderView names the leader and where it stands, for the unit-facing
@@ -293,11 +354,12 @@ func (st *Store) leaderView(sq *squadState, now time.Time) *LeaderView {
 	return &LeaderView{Unit: id, Pos: &p}
 }
 
-// touchState bumps a squad's rev whenever what a poll's leader line says
-// changed: a different leader, or the same one standing elsewhere. Orders
+// touchState bumps a squad's rev whenever what a poll says beyond its
+// messages changed: a different leader, the same one standing elsewhere, a
+// member down or silent or in another block, or a new start point. Orders
 // and call-outs move the cursor instead. Callers hold the mutex.
 func (st *Store) touchState(sq *squadState, now time.Time) {
-	var s stateStamp
+	s := stateStamp{roster: st.rosterStamp(sq, now), start: sq.start, hasStart: sq.hasStart}
 	if lv := st.leaderView(sq, now); lv != nil {
 		s.unit = lv.Unit
 		if lv.Pos != nil {

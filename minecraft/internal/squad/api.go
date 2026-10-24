@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -27,6 +28,13 @@ import (
 const (
 	maxWait = 25 * time.Second
 	minWait = time.Second
+	// A waiting poll re-reads the squad this often even with no event, so
+	// a member falling silent, which makes no request, still reaches the
+	// units within a beat or two of the grace running out.
+	rereadEvery = 2 * time.Second
+	// A start point is a world coordinate; nothing outside the world's
+	// bounds is one.
+	maxCoord = 3e7
 	// A hello, a status or a call-out is a few dozen bytes by contract; the
 	// cap keeps a lost unit from becoming a place to park data.
 	maxBodyLen = 1 << 10
@@ -68,6 +76,8 @@ type API struct {
 	units Units
 	token [sha256.Size]byte
 	now   func() time.Time
+	// reread is the poll's silence re-read beat; tests shorten it.
+	reread time.Duration
 
 	// waits holds, per squad, the channels of open long polls; a new order
 	// or call-out closes them all, so a waiting unit answers at once
@@ -91,6 +101,7 @@ type squadBackend interface {
 	Status(statusIn)
 	Callout(calloutIn, time.Time)
 	Order(orderIn)
+	SetStart(squadID string, p position) bool
 	Has(id string) bool
 	Member(squadID, unit string) bool
 	Delta(id string, since int64) (Delta, bool)
@@ -103,6 +114,7 @@ type squadBackend interface {
 // than exist to refuse, as the work routes do.
 func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	a := &API{store: st, units: units, token: sha256.Sum256([]byte(token)), now: time.Now,
+		reread:      rereadEvery,
 		waits:       map[string]map[chan struct{}]struct{}{},
 		streamEvery: defaultStreamEvery, streamKeepalive: defaultStreamKeepalive}
 	// Literal reads are public views. They carry the same console-safe
@@ -126,6 +138,7 @@ func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	mux.HandleFunc("POST /v1/squads/{id}/hello", a.guard(a.hello))
 	mux.HandleFunc("POST /v1/squads/{id}/status", a.guard(a.status))
 	mux.HandleFunc("POST /v1/squads/{id}/callout", a.guard(a.callout))
+	mux.HandleFunc("POST /v1/squads/{id}/start", a.guard(a.start))
 	mux.HandleFunc("GET /v1/squads/{id}/orders", a.guard(a.orders))
 	return a
 }
@@ -293,6 +306,32 @@ func (a *API) callout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// startBody sets where the squad began its fight: a director or an operator
+// posts it when the leader's first report is not the place to regroup at.
+type startBody struct {
+	Pos position `json:"pos"`
+}
+
+func (a *API) start(w http.ResponseWriter, r *http.Request) {
+	var b startBody
+	if !decodeStrict(w, r, &b) {
+		return
+	}
+	for _, c := range []float64{b.Pos.X, b.Pos.Y, b.Pos.Z} {
+		if math.IsNaN(c) || math.Abs(c) > maxCoord {
+			http.Error(w, "bad start", http.StatusBadRequest)
+			return
+		}
+	}
+	id := r.PathValue("id")
+	if !a.store.SetStart(id, b.Pos) {
+		http.NotFound(w, r)
+		return
+	}
+	a.broadcast(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // orderBody is one operator instruction. Target points a focus order at a
 // named threat; the other kinds carry none.
 type orderBody struct {
@@ -339,6 +378,8 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 	}
 	timer := time.NewTimer(parseWait(r.URL.Query().Get("wait")))
 	defer timer.Stop()
+	beat := time.NewTicker(a.reread)
+	defer beat.Stop()
 	for {
 		// The waiter registers before the state is read: a broadcast that
 		// lands in between is caught by the read-after-wake, where a
@@ -369,6 +410,8 @@ func (a *API) orders(w http.ResponseWriter, r *http.Request) {
 		}
 		select {
 		case <-wake:
+		case <-beat.C:
+			a.dropWaiter(id, wake)
 		case <-timer.C:
 			a.dropWaiter(id, wake)
 			w.WriteHeader(http.StatusNoContent)
