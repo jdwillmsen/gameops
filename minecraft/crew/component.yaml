@@ -3,6 +3,7 @@ kind: service
 language: go
 depends:
   - minecraft/agent/pkg/
+  - minecraft/internal/
 tasks:
   build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/crew/...
   test: go test -race ./minecraft/crew/...
