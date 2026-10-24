@@ -179,8 +179,14 @@ func lifeConfig(cfg config.Config, world skill.ChestWorld) life.Config {
 }
 
 // The warrior engine and the squad client meet in squadmsg's types, so the
-// client is the engine's chain of command with no adapter between them.
-var _ life.Squad = (*squadclient.Client)(nil)
+// client is the engine's chain of command with no adapter between them. The
+// engine finds the roster by asserting it on the Squad it was handed, so the
+// one client must be both; a wrapper around it would silently switch the
+// boss tactics' roster off.
+var (
+	_ life.Squad  = (*squadclient.Client)(nil)
+	_ life.Roster = (*squadclient.Client)(nil)
+)
 
 // newSquadClient builds the warrior's seat in its squad over the same
 // crew-control base URL and work token the task client uses. It returns nil
