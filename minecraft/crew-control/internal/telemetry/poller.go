@@ -133,9 +133,9 @@ type Poller struct {
 	OnEvents func([]Born)
 	// OnPoll, when set, receives every unit's state once per tick, after the
 	// tick's events. Like OnEvents it runs on the poll loop and must not block.
-	OnPoll func(time.Time, []UnitState)
-	lives    []Live
-	jobsSrc  JobsSource
+	OnPoll  func(time.Time, []UnitState)
+	lives   []Live
+	jobsSrc JobsSource
 	// Shared bytes of the jobs feed; see feedCache for why.
 	jobsCache feedCache
 	jsubs     map[chan struct{}]struct{}
