@@ -74,7 +74,7 @@ func TestTransitions(t *testing.T) {
 	step(observation{online: true, health: f32(20), hunger: f32(3), curID: "t2", curTemplate: "gather_and_deposit"})
 	failed := []recentTask{{ID: "t2", State: "failed", Reason: "kit_empty"}}
 	es := tr.observe(observation{online: true, health: f32(20), hunger: f32(3), recent: failed}, now.Add(time.Second))
-	if len(es) != 1 || es[0].Kind != "task_failed" || es[0].Level != "crit" || es[0].Text != "failed gather_and_deposit: kit_empty" {
+	if len(es) != 1 || es[0].Kind != "task_failed" || es[0].Level != "crit" || es[0].Text != "failed gather_and_deposit: kit_empty" || es[0].Reason != "kit_empty" {
 		t.Errorf("failed: %+v", es)
 	}
 	if got := step(observation{}); !same(got, []string{"offline"}) {

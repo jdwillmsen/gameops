@@ -131,6 +131,9 @@ type Poller struct {
 	// unit's position at that moment, after the tick's state is published.
 	// It runs on the poll loop, so it must not block.
 	OnEvents func([]Born)
+	// OnPoll, when set, receives every unit's state once per tick, after the
+	// tick's events. Like OnEvents it runs on the poll loop and must not block.
+	OnPoll func(time.Time, []UnitState)
 	lives    []Live
 	jobsSrc  JobsSource
 	// Shared bytes of the jobs feed; see feedCache for why.
@@ -255,9 +258,13 @@ func (p *Poller) tick(ctx context.Context) {
 	// poll is allowed to.
 	born := p.born
 	p.born = nil
+	states := p.statesLocked()
 	p.mu.Unlock()
 	if p.OnEvents != nil && len(born) > 0 {
 		p.OnEvents(born)
+	}
+	if p.OnPoll != nil {
+		p.OnPoll(now, states)
 	}
 }
 
