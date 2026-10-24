@@ -28,7 +28,7 @@ thresholds on a stone pad inside a ticking area.
 - Edited to 60 with manifest version bumped to 1.0.1 and `world_behavior_packs.json` updated, `reload all`: v4 died at `damage 50`, so it still had the old 40 HP. A version bump does not make reload pick up entity files.
 - `docker restart`: v3 survived `damage 25`, died after `damage 20` more (45 >= 40). Restart applies it.
 - Restart cost on this tiny world: `Starting Server 21:15:59:693` to `Server started 21:16:00:884` (1.2 s); `docker restart` wall 3.5 s. A `summon` right after start failed with `Unable to summon object` (ticking area not loaded yet); it worked when retried about 25 s later. The real lab world and k8s pod start (probes, 30 s `initialDelaySeconds`) will be far slower; players are kicked either way.
-- Consequence: any entity/spawn-rule/loot JSON change needs a restart. Script-only changes can go through `reload all`; a console-driven `/reload` is a live hot-fix path for logic, not data.
+- Consequence: a changed entity JSON needs a restart (tested). Whether spawn-rule or loot JSON changes reload without a restart was not tested and is UNVERIFIED; do not assume a general manifest rule. Script-only changes can go through `reload all`; a console-driven `/reload` is a live hot-fix path for logic, not entity data.
 
 ## 2. Script API
 
