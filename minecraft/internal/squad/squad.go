@@ -88,16 +88,24 @@ type squadState struct {
 	callouts  []logEntry
 	rev       int64
 	lastLead  stateStamp
+	// start is where the squad began its fight, set once from the
+	// leader's first report or by a director, and hasStart says it is.
+	start    position
+	hasStart bool
 }
 
-// stateStamp is what the last read said about the leader: who it is and
-// where it stands. A change in it bumps the squad's rev, so a unit still
-// polling with the old revision gets an answer instead of riding out its
-// wait while the chain of command moves.
+// stateStamp is what the last read said about the leader and the roster:
+// who leads and where it stands, who is down or silent, where the others
+// stand to the block, and the start point. A change in it bumps the squad's
+// rev, so a unit still polling with the old revision gets an answer instead
+// of riding out its wait while the chain of command moves.
 type stateStamp struct {
-	unit   string
-	hasPos bool
-	pos    position
+	unit     string
+	hasPos   bool
+	pos      position
+	roster   string
+	start    position
+	hasStart bool
 }
 
 // logEntry is one call-out with its cursor value; orderLog adds what an
@@ -282,6 +290,25 @@ func (st *Store) Status(s statusIn) {
 	m.hp, m.food, m.weapon, m.pos = s.HP, s.Food, s.Weapon, s.Pos
 	m.hasHP = true
 	m.heard = now
+	// The first place the leader reports from is where the squad began;
+	// a squad that already has a start keeps it however the leader moves.
+	if !sq.hasStart && st.leaderOf(sq, now) == s.Unit {
+		sq.start, sq.hasStart = m.pos, true
+	}
+}
+
+// SetStart fixes the squad's start point, replacing any earlier one. It
+// reports false for a squad the store does not hold.
+func (st *Store) SetStart(squadID string, p position) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.prune(st.now())
+	sq, ok := st.squads[squadID]
+	if !ok {
+		return false
+	}
+	sq.start, sq.hasStart = p, true
+	return true
 }
 
 // Callout records one unit's call-out.
