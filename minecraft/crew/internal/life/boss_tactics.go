@@ -183,8 +183,10 @@ func (l *Life) bossFight(ctx context.Context, a skill.Actuator, p act.Pose, e be
 // bossGuard says whether the boss's next blow is due, so the Vanguard holds
 // its shield rather than swing into it. The cadence runs from the last blow
 // that hurt: a blocked one shows nothing, so the beat is kept rather than
-// reset. Before a first blow there is no beat to keep, and a shield the
-// boss disabled guards nothing.
+// reset. Before a first blow there is no beat to keep, and a first blow a
+// raised shield happened to block shows nothing either, so hitAt stays zero
+// and the guard waits for a blow that lands. A shield the boss disabled
+// guards nothing.
 func (l *Life) bossGuard(s belief.Snapshot) bool {
 	b := &l.warrior.boss
 	every := b.prof.meleeEvery

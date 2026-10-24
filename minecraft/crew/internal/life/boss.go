@@ -51,7 +51,9 @@ const wardenBoomRange = 15.0
 
 // wardenProfile is fitted to the warden's numbers: a 30-point melee every
 // 1.8 s that disables a shield for 5 s, a boom to 15 blocks and darkness to
-// 20, and a follow range of 30.
+// 20, and a follow range of 30. The 1.8 s is the documented cooldown, only
+// roughly so and not measured on the lab; the Vanguard's guard window is
+// timed off it, so a cadence that is off moves the window off the blow.
 var wardenProfile = bossProfile{
 	focusRange: 32,
 	rangerNear: 21, rangerFar: 28,
