@@ -265,6 +265,12 @@ func (l *Life) bossRanger(ctx context.Context, a skill.Actuator, p act.Pose, e b
 		l.cancelDraw(a)
 		return a.Tick(in)
 	}
+	// A held draw keeps the meal from starting, and no line may come for as
+	// long as the boss moves: let the draw go so the next tick can eat.
+	if w.healWant {
+		l.cancelDraw(a)
+		return a.Tick(in)
+	}
 	// A strafe faces along the step, not the boss, so the arrow waits for
 	// the next tick that faces it.
 	shoot := aimed && l.bowLine(p, e)
