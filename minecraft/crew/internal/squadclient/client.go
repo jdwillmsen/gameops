@@ -89,6 +89,8 @@ type Client struct {
 	members  []squadmsg.Member
 	start    squadmsg.Pos
 	hasStart bool
+	// lastOK is when the last poll answered, news or not.
+	lastOK time.Time
 }
 
 // New builds a client for one unit of one squad. role is the part the unit
@@ -267,6 +269,7 @@ func (c *Client) listen(ctx context.Context) {
 			continue
 		}
 		b.reset()
+		c.touch()
 		if !up {
 			c.log.Info("squad_listening", nil)
 			up = true
@@ -289,6 +292,23 @@ func (c *Client) listen(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// rosterStale is how long the roster outlives the last successful poll: a
+// little over a long poll (pollWait), so a quiet squad does not read as lost,
+// but a crew-control outage does not freeze the last known roster for ever.
+const rosterStale = 45 * time.Second
+
+// touch records a successful poll, whether or not it carried news.
+func (c *Client) touch() {
+	c.mu.Lock()
+	c.lastOK = time.Now()
+	c.mu.Unlock()
+}
+
+// rosterLive says the roster is still worth reading. Callers hold c.mu.
+func (c *Client) rosterLive() bool {
+	return !c.lastOK.IsZero() && time.Since(c.lastOK) <= rosterStale
 }
 
 // apply writes one answer into the state the engine reads.
@@ -376,6 +396,9 @@ func (c *Client) Leader() (id string, pos mgl32.Vec3, ok bool) {
 func (c *Client) Member(r squadmsg.Role) (mgl32.Vec3, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if !c.rosterLive() {
+		return mgl32.Vec3{}, false
+	}
 	for _, m := range c.members {
 		if m.Role == r && m.Alive && m.Fresh && m.Pos != nil {
 			return mgl32.Vec3{m.Pos.X, m.Pos.Y, m.Pos.Z}, true
@@ -390,9 +413,14 @@ func (c *Client) Member(r squadmsg.Role) (mgl32.Vec3, bool) {
 func (c *Client) Down() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+	if !c.rosterLive() {
+		return 0
+	}
 	n := 0
 	for _, m := range c.members {
-		if m.Unit != c.unit && (!m.Alive || !m.Fresh) {
+		// A member that has not reported yet (no position) is not down; it
+		// only counts once it has spoken and then fallen silent or died.
+		if m.Unit != c.unit && (!m.Alive || (!m.Fresh && m.Pos != nil)) {
 			n++
 		}
 	}
@@ -404,7 +432,7 @@ func (c *Client) Down() int {
 func (c *Client) Start() (mgl32.Vec3, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if !c.hasStart {
+	if !c.hasStart || !c.rosterLive() {
 		return mgl32.Vec3{}, false
 	}
 	return mgl32.Vec3{c.start.X, c.start.Y, c.start.Z}, true
