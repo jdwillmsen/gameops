@@ -24,18 +24,25 @@ type Item struct {
 	Count int `json:"count"`
 	// StackNetworkID is what a later item request must quote for the stack.
 	StackNetworkID int32 `json:"stack_network_id"`
+	// Wire is the stack exactly as the server last sent it, nil when only
+	// its ID and count are known. A held stack quoted without its data (a
+	// name, enchantments, damage) does not match the server's, which then
+	// hits with a bare fist.
+	Wire *protocol.ItemStack `json:"-"`
 }
 
 type stackRef struct {
 	itemID  int32
 	count   int
 	stackID int32
+	wire    *protocol.ItemStack
 }
 
 func (s stackRef) empty() bool { return s.itemID == 0 || s.count == 0 }
 
 func refOf(it protocol.ItemInstance) stackRef {
-	return stackRef{itemID: it.Stack.NetworkID, count: int(it.Stack.Count), stackID: it.StackNetworkID}
+	wire := it.Stack
+	return stackRef{itemID: it.Stack.NetworkID, count: int(it.Stack.Count), stackID: it.StackNetworkID, wire: &wire}
 }
 
 // ItemNames gives the tracker the server's item table, once per session. Item
@@ -54,7 +61,7 @@ func (t *Tracker) ItemNames(entries []protocol.ItemEntry) {
 func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 	switch p := pk.(type) {
 	case *packet.ContainerOpen:
-		t.window, t.opened = uint32(p.WindowID), map[int32]int32{}
+		t.window, t.opened = uint32(p.WindowID), map[int32]protocol.ItemStack{}
 	case *packet.InventoryContent:
 		if p.WindowID != 0 {
 			if t.opened != nil && p.WindowID == t.window {
@@ -113,12 +120,13 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 						// A withdraw into an empty slot: the response gives
 						// only a stack ID, which a whole stack keeps from the
 						// chest and a split one does not.
-						id, ok := t.opened[s.StackNetworkID]
+						from, ok := t.opened[s.StackNetworkID]
 						if !ok {
-							id, ok = leftBehind()
+							from, ok = leftBehind()
 						}
 						if ok {
-							*cur = stackRef{itemID: id, count: int(s.Count), stackID: s.StackNetworkID}
+							wire := from
+							*cur = stackRef{itemID: from.NetworkID, count: int(s.Count), stackID: s.StackNetworkID, wire: &wire}
 						}
 					}
 				}
@@ -134,25 +142,25 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 // a withdraw's response names the stack by ID alone.
 func (t *Tracker) noteOpened(it protocol.ItemInstance) {
 	if it.StackNetworkID != 0 && it.Stack.NetworkID != 0 {
-		t.opened[it.StackNetworkID] = it.Stack.NetworkID
+		t.opened[it.StackNetworkID] = it.Stack
 	}
 }
 
 // leftInContainer finds the item of a stack that stayed in the container
 // after a partial withdraw: it shares the item with the part that left.
-func (t *Tracker) leftInContainer(r protocol.ItemStackResponse) func() (int32, bool) {
-	return func() (int32, bool) {
+func (t *Tracker) leftInContainer(r protocol.ItemStackResponse) func() (protocol.ItemStack, bool) {
+	return func() (protocol.ItemStack, bool) {
 		for _, c := range r.ContainerInfo {
 			if c.Container.ContainerID != protocol.ContainerLevelEntity {
 				continue
 			}
 			for _, s := range c.SlotInfo {
-				if id, ok := t.opened[s.StackNetworkID]; ok && s.Count > 0 {
-					return id, true
+				if from, ok := t.opened[s.StackNetworkID]; ok && s.Count > 0 {
+					return from, true
 				}
 			}
 		}
-		return 0, false
+		return protocol.ItemStack{}, false
 	}
 }
 
@@ -166,7 +174,7 @@ func (t *Tracker) inventoryLocked() []Item {
 		if !ok {
 			name = fmt.Sprintf("item#%d", s.itemID)
 		}
-		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID})
+		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID, Wire: s.wire})
 	}
 	return out
 }
