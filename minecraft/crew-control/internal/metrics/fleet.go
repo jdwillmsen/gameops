@@ -80,7 +80,7 @@ func New(unitIDs []string) *Fleet {
 	}
 	f.started = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "crew_fleet_tasks_started_total",
-		Help: "Tasks the poller saw start, by unit and template. A sample: a task that began and ended between two polls is never seen, and quick idle-eligible tasks (haul) are seen only about one time in five at a one-second poll. Includes starts that turned out to be idle polls, so started - finished is the in-flight count only for templates that are not idle-eligible.",
+		Help: "Tasks the poller saw start, by unit and template. A sample: a task that began and ended between two polls is never seen, and quick idle-eligible tasks (haul) are seen only about one time in five at a one-second poll. Includes starts that turned out to be idle polls. Do not subtract finished from started to get work in flight: a unit that goes offline and returns mid-task starts the same task again, and a task already running when crew-control starts is never seen to start.",
 	}, []string{"unit", "template"})
 	f.finished = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "crew_fleet_tasks_finished_total",
