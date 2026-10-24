@@ -51,7 +51,8 @@ func TestSurvivorRegroupsAtTheStartWhenCrewControlReportsTwoDown(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()
-			squad.Routes(mux, squad.NewStore(), e2eUnits{"crew-18": true, "crew-19": true, "crew-20": true}, e2eToken)
+			api := squad.Routes(mux, squad.NewStore(), e2eUnits{"crew-18": true, "crew-19": true, "crew-20": true}, e2eToken)
+			api.MountOperator(mux, e2eGate{})
 			srv := httptest.NewServer(mux)
 			base, err := url.Parse(srv.URL)
 			if err != nil {
@@ -79,7 +80,7 @@ func TestSurvivorRegroupsAtTheStartWhenCrewControlReportsTwoDown(t *testing.T) {
 				}
 				squadPost(t, srv.URL, "status", `{"unit":"`+u+`","hp":`+hp+`,"food":20,"weapon":"sword","pos":{"x":30,"y":1,"z":40}}`)
 			}
-			squadPost(t, srv.URL, "start", `{"pos":{"x":10.5,"y":1,"z":40.5}}`)
+			operatorStart(t, srv.URL, `{"pos":{"x":10.5,"y":1,"z":40.5}}`)
 
 			deadline := time.Now().Add(20 * time.Second)
 			for {
@@ -102,5 +103,25 @@ func TestSurvivorRegroupsAtTheStartWhenCrewControlReportsTwoDown(t *testing.T) {
 				t.Error("traded blows on the way back")
 			}
 		})
+	}
+}
+
+// e2eGate lets every operator call through, standing in for the console's
+// sign-in, which the squad package takes as an interface.
+type e2eGate struct{}
+
+func (e2eGate) Require(h http.Handler) http.Handler   { return h }
+func (e2eGate) Operator(*http.Request) (string, bool) { return "owner", true }
+
+// operatorStart posts the squad's start point as an operator would.
+func operatorStart(t *testing.T, base, body string) {
+	t.Helper()
+	resp, err := http.Post(base+"/v1/squads/"+e2eSquad+"/start", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("operator start %s: status %d", body, resp.StatusCode)
 	}
 }
