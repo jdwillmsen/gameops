@@ -4,6 +4,7 @@ language: go
 depends:
   - minecraft/agent/pkg/
   - minecraft/pkg/
+  - minecraft/internal/
 tasks:
   build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/crew-control/...
   test: go test -race ./minecraft/crew-control/... && node --test minecraft/crew-control/internal/console/web/*.test.mjs minecraft/crew-control/internal/console/web/charts/*.test.mjs minecraft/crew-control/internal/console/web/graph/*.test.mjs
