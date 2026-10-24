@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -66,9 +67,9 @@ type Tracker struct {
 	uniqueID  string
 
 	// opened maps stack IDs seen in the open container's window to their
-	// item; nil until a container opens.
+	// stack, data included; nil until a container opens.
 	window uint32
-	opened map[int32]int32
+	opened map[int32]protocol.ItemStack
 }
 
 func New(now func() time.Time) *Tracker { return &Tracker{now: now} }
