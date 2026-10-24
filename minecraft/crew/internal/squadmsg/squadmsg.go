@@ -80,6 +80,17 @@ type Pos struct {
 	Z float32 `json:"z"`
 }
 
+// Member is one unit of the squad as the poll answer lists it. Pos is absent
+// until the unit's first report, and is its last place once it has died or
+// gone quiet. Fresh says it spoke inside the server's leader grace.
+type Member struct {
+	Unit  string `json:"unit"`
+	Role  Role   `json:"role"`
+	Pos   *Pos   `json:"pos,omitempty"`
+	Alive bool   `json:"alive"`
+	Fresh bool   `json:"fresh"`
+}
+
 // Rank orders roles by who leads first: a lower rank outranks a higher
 // number. An unknown role never leads, so it ranks after Ranger.
 func Rank(r Role) int {

@@ -1,11 +1,11 @@
 // Package squadclient carries one unit's side of squad coordination: it
 // joins its squad, reports the status the combat engine gives it, drains
-// the engine's call-outs, and keeps the standing order and the leader's
-// position fresh for the engine to read.
+// the engine's call-outs, and keeps the standing order, the leader's
+// position and the squad's roster fresh for the engine to read.
 //
 // The engine is injected by the agent's wiring and its interface lives
 // there; this package's methods are shaped to satisfy it. Reads (Leader,
-// Orders) may be called from any goroutine; writes happen only on the
+// Orders, Member, Down, Start) may be called from any goroutine; writes happen only on the
 // client's own.
 package squadclient
 
@@ -85,6 +85,10 @@ type Client struct {
 	leaderPos squadmsg.Pos
 	leadKnown bool
 	order     squadmsg.Order
+	// The whole squad and where it started, as the last poll named them.
+	members  []squadmsg.Member
+	start    squadmsg.Pos
+	hasStart bool
 }
 
 // New builds a client for one unit of one squad. role is the part the unit
@@ -220,6 +224,8 @@ type pollAnswer struct {
 	Cursor   int64              `json:"cursor"`
 	Rev      int64              `json:"rev"`
 	Leader   *wireLeader        `json:"leader,omitempty"`
+	Members  []squadmsg.Member  `json:"members"`
+	Start    *squadmsg.Pos      `json:"start,omitempty"`
 	Order    *squadmsg.Order    `json:"order"`
 	Orders   []squadmsg.Order   `json:"orders"`
 	Callouts []squadmsg.Callout `json:"callouts"`
@@ -304,6 +310,13 @@ func (c *Client) apply(ans *pollAnswer) {
 	if ans.Order != nil {
 		c.order = *ans.Order
 	}
+	// Every answer carries the whole roster, so an absent one is a squad
+	// that is gone or a server too old to send it, not a roster to keep.
+	c.members = ans.Members
+	c.hasStart = ans.Start != nil
+	if c.hasStart {
+		c.start = *ans.Start
+	}
 	c.mu.Unlock()
 }
 
@@ -355,6 +368,46 @@ func (c *Client) Leader() (id string, pos mgl32.Vec3, ok bool) {
 		return "", mgl32.Vec3{}, false
 	}
 	return c.leaderID, mgl32.Vec3{c.leaderPos.X, c.leaderPos.Y, c.leaderPos.Z}, true
+}
+
+// Member is where the warrior in a role last reported from. ok is false
+// while it is dead, has been quiet past the server's leader grace, has not
+// reported yet, or no unit in the squad claims the role.
+func (c *Client) Member(r squadmsg.Role) (mgl32.Vec3, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, m := range c.members {
+		if m.Role == r && m.Alive && m.Fresh && m.Pos != nil {
+			return mgl32.Vec3{m.Pos.X, m.Pos.Y, m.Pos.Z}, true
+		}
+	}
+	return mgl32.Vec3{}, false
+}
+
+// Down is how many of the unit's squadmates are dead or quiet past the
+// leader grace. The unit itself is never counted: if its own reports were
+// not getting through it would be the one place that could not know.
+func (c *Client) Down() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	n := 0
+	for _, m := range c.members {
+		if m.Unit != c.unit && (!m.Alive || !m.Fresh) {
+			n++
+		}
+	}
+	return n
+}
+
+// Start is where the squad began its fight. ok is false until crew-control
+// has one.
+func (c *Client) Start() (mgl32.Vec3, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.hasStart {
+		return mgl32.Vec3{}, false
+	}
+	return mgl32.Vec3{c.start.X, c.start.Y, c.start.Z}, true
 }
 
 // Orders returns the standing order, zero while none has arrived.
