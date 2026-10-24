@@ -1,0 +1,22 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:training_dummy_brute",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/training_dummy_brute"
+      },
+      "geometry": {
+        "default": "geometry.gameops.training_dummy_brute"
+      },
+      "render_controllers": ["controller.render.gameops.training_dummy_brute"],
+      "spawn_egg": {
+        "base_color": "#4f6b3a",
+        "overlay_color": "#7a4a22"
+      }
+    }
+  }
+}

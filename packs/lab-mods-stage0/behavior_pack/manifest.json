@@ -1,0 +1,18 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "gameops lab mods stage 0 (behaviour)",
+    "description": "Stage-0 spike: one custom hostile test mob for the crew lab arena",
+    "uuid": "900b5811-de7d-4aea-9a87-7398d78673db",
+    "version": [0, 0, 1],
+    "min_engine_version": [1, 21, 0]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "description": "Entity definitions",
+      "uuid": "40cf3288-abac-4a12-b49b-20c8b46a2d42",
+      "version": [0, 0, 1]
+    }
+  ]
+}
