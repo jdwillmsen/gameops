@@ -25,6 +25,7 @@ func TestReasonTable(t *testing.T) {
 		"visit took too long":                                          ReasonTimeout,
 		"timed out":                                                    ReasonTimeout,
 		"inventory did not show the deposit within 40 ticks":           ReasonTimeout,
+		"sticks unavailable":                                           ReasonOther,
 		"no answer to the move within 40 ticks":                        ReasonTimeout,
 		"the chest's chunk is not loaded":                              ReasonContainer,
 		"chest did not open within 300 ticks":                          ReasonContainer,

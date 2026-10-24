@@ -42,7 +42,7 @@ var reasonRules = []struct {
 	{ReasonNoProgress, []string{"no progress after"}},
 	{ReasonContainer, []string{"chest", "crafting table"}},
 	{ReasonServerRejected, []string{"server rejected", "server did not", "did not confirm"}},
-	{ReasonTimeout, []string{"took too long", "timed out", "ticks"}},
+	{ReasonTimeout, []string{"took too long", "timed out", " ticks"}},
 	{ReasonActionFailed, []string{"did not break", "did not land", "never settled", "drifted", "did not come down", "is blocked at its first step"}},
 	{ReasonInvalidTask, []string{"invalid task", "outside the allowed", "outside the area", "unknown template"}},
 }
