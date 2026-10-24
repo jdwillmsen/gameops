@@ -2,6 +2,7 @@ package squadclient
 
 import (
 	"testing"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -126,5 +127,44 @@ func TestAnAnswerWithoutARosterLeavesNobodyDown(t *testing.T) {
 	}
 	if _, ok := c.Member(squadmsg.RoleVanguard); ok {
 		t.Error("a member before any answer")
+	}
+}
+
+func TestAMemberThatNeverReportedIsNotDown(t *testing.T) {
+	c, feed := rosterClient(t, "crew-18")
+	hello := squadmsg.Member{Unit: "crew-19", Role: squadmsg.RoleStriker, Alive: true, Fresh: false}
+	hello2 := squadmsg.Member{Unit: "crew-20", Role: squadmsg.RoleRanger, Alive: true, Fresh: false}
+	feed(&pollAnswer{Members: []squadmsg.Member{member("crew-18", squadmsg.RoleVanguard, 1, 1, true, true), hello, hello2}})
+	if got := c.Down(); got != 0 {
+		t.Errorf("two members that joined but never reported read as %d down; they must not trigger a regroup", got)
+	}
+	// Once one has spoken and fallen silent it does count.
+	feed(&pollAnswer{Members: []squadmsg.Member{member("crew-18", squadmsg.RoleVanguard, 1, 1, true, true),
+		member("crew-19", squadmsg.RoleStriker, 2, 2, true, false), hello2}})
+	if got := c.Down(); got != 1 {
+		t.Errorf("a member that reported and went quiet reads as %d down, want 1", got)
+	}
+}
+
+func TestTheRosterLapsWhenPollsStopAnswering(t *testing.T) {
+	c, feed := rosterClient(t, "crew-18")
+	feed(&pollAnswer{
+		Members: []squadmsg.Member{member("crew-19", squadmsg.RoleVanguard, 1, 1, false, true), member("crew-20", squadmsg.RoleRanger, 2, 2, false, true)},
+		Start:   &squadmsg.Pos{X: 5, Y: 64, Z: 5},
+	})
+	if c.Down() != 2 {
+		t.Fatalf("setup: Down() = %d, want 2", c.Down())
+	}
+	c.mu.Lock()
+	c.lastOK = time.Now().Add(-2 * rosterStale)
+	c.mu.Unlock()
+	if got := c.Down(); got != 0 {
+		t.Errorf("Down() = %d after the polls went quiet for longer than the roster is good for, want 0", got)
+	}
+	if _, ok := c.Member(squadmsg.RoleVanguard); ok {
+		t.Error("a member is still reported after the roster lapsed")
+	}
+	if _, ok := c.Start(); ok {
+		t.Error("a start point is still reported after the roster lapsed")
 	}
 }
