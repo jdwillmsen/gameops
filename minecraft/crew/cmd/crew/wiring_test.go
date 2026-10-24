@@ -297,6 +297,17 @@ func TestSquadClientWiresOnlyForAWarriorWithCrewControl(t *testing.T) {
 	if _, _, ok := chain.Leader(); ok {
 		t.Error("a fresh client already names a leader")
 	}
+	// The engine looks for the roster on the Squad itself.
+	roster, ok := chain.(life.Roster)
+	if !ok {
+		t.Fatal("the squad the engine is handed is not a roster")
+	}
+	if n := roster.Down(); n != 0 {
+		t.Errorf("a fresh client has %d squadmates down", n)
+	}
+	if _, ok := roster.Start(); ok {
+		t.Error("a fresh client already knows a start")
+	}
 }
 
 // Health unknown is not a dead heart: a straight copy of belief's zero
