@@ -46,7 +46,7 @@ Use the official add-on route (behaviour pack + resource pack + Script API) on t
 - `texturepack-required=true` forces acceptance: a declining client is disconnected (BDS server-properties doc, 2026-10-23 and gophertunnel comment: "behaviour packs never have to be downloaded"). Behaviour packs stay on the server; only resource packs are downloaded, so custom visuals require the resource pack to be accepted.
 - Clients cache downloaded packs by UUID+version. Always bump the manifest version on every change, or clients keep the stale cache.
 - Encryption/signing: Bedrock supports per-pack content keys (AES-256 CFB8, `content.key` plus `contents.json`) so a pack can be encrypted; gophertunnel's `resource` package implements it. This hides assets from casual download but not from a determined client, and it is not needed for a private lab.
-- Our Go bots join as clients: with `texturepack-required` they must complete the pack handshake (gophertunnel does that when `ClientDialer`/`Dialer` handles `ResourcePacksInfo`); bots do not render so they may decline textures, but need `HasScripts`/`HasAddons` handled. This should be proven in the stage-0 spike (a bot joining a server with a required pack) before anything else.
+- Our Go bots join as clients: when `texturepack-required` is true the bot must accept each required pack through `DownloadResourcePack` (returning false for a required pack ends the join); only when it is false may a bot decline packs, and it still needs `HasScripts`/`HasAddons` handled. This should be proven in the stage-0 spike (a bot joining a server with a required pack) before anything else.
 
 ### 2.5 What "custom characters" can mean
 
@@ -71,7 +71,7 @@ Facts from each project's GitHub repo via `gh api`, 2026-10-23.
 
 Notes:
 
-- Endstone is the only option that adds server-side power without giving up the real BDS engine. It also answers the question of control from Go: a plugin can expose a local socket or HTTP endpoint (see section 5). Risk: it trails each BDS release by days to weeks, and it hooks BDS internals like LeviLamina does.
+- Endstone is the only option currently recommended for this lab that adds server-side power without giving up the real BDS engine (LeviLamina also hooks the BDS binary, but its Windows-first tooling suits a Linux/Kubernetes setup less well). It also answers the question of control from Go: a plugin can expose a local socket or HTTP endpoint (see section 5). Risk: it trails each BDS release by days to weeks, and it hooks BDS internals like LeviLamina does.
 - Dragonfly deserves a note because we already speak gophertunnel. It would be the right choice for a clean-room "arena minigame world" with fully scripted mobs, but we would reimplement everything the lab already relies on (vanilla worldgen, existing world data, mob AI, command blocks).
 - The EULA states modified server software cannot be distributed, while mods can be (EULA summary, minecraft.net search result, 2026-10-23). Running Endstone or LeviLamina privately on the lab is not distribution; do not publish prebuilt modified server images.
 
@@ -81,7 +81,7 @@ Options ordered by effort:
 
 1. Bots as players with custom skins (already working): the AI drives a player entity with a generated skin. Custom geometry and animations are available through the skin payload but only the player skeleton's bones can be animated. Good for characters that look different; no new attacks, no boss HUD.
 2. Script API as the AI host: write the boss brain in `@minecraft/server` (state machine on `system.runInterval`). Reasoning stays in-process JavaScript. Limited CPU budget per tick (watch-dog) and no network unless `server-net` (beta, BDS only).
-3. Go AI plus Script API over HTTP: script polls or posts via `@minecraft/server-net` `http.request` to a Go service on the cluster (state in, action out: `entity.applyImpulse`, `triggerEvent`, `runCommand`). Needs `server-net` permission per script UUID. Latency means this suits high-level decisions (phase changes, target choice every 0.5-1 s), not per-tick movement.
+3. Go AI plus Script API over HTTP: script polls or posts via `@minecraft/server-net` `http.request` to a Go service on the cluster (state in, action out: `entity.applyImpulse`, `triggerEvent`, `runCommand`). Needs `server-net` permission per script UUID; set `allowed_uris` under `module_permissions` in that UUID's `permissions.json` to the Go service endpoint, because an unset list is not enforced. Latency means this suits high-level decisions (phase changes, target choice every 0.5-1 s), not per-tick movement.
 4. Go AI over the bot's own client connection: a bot cannot control a non-player entity. It can only command through chat or `/scriptevent` if the bot has operator permission. `/scriptevent <id> <msg>` is received by script via `system.afterEvents.scriptEventReceive` (stable in `@minecraft/server`), which makes it the cleanest one-way bridge from the Go side with no beta API. Limit: bot must be an operator on the lab.
 5. Endstone plugin exposing a socket: only if (3) and (4) prove insufficient.
 
@@ -93,7 +93,7 @@ Value per effort ranking for custom characters and bosses on the lab: (1) add-on
 
 Stages (each stage ships as one PR; a restart kicks players, so batch changes):
 
-- Stage 0, spike (about a day): one custom entity (a small mob with custom geometry from Blockbench, a self-drawn texture, and a simple `minecraft:behavior.melee_attack`) delivered as a resource pack plus behaviour pack through the existing crew-lab mechanism with `FORCE_PACK_COPY=true` and bumped versions. Success criteria: summon it, a retail client sees the custom model, a Go bot joins without disconnecting, and content log (`content-log-file-enabled=true`) is clean. Record the ConfigMap size so we know where the 1 MiB wall is.
+- Stage 0, spike (about a day): one custom entity (a small mob with custom geometry from Blockbench, a self-drawn texture, and a simple `minecraft:behavior.melee_attack` with a target behaviour such as `minecraft:behavior.nearest_attackable_target` and a `minecraft:attack` damage component, without which it never hurts anything) delivered as a resource pack plus behaviour pack through the existing crew-lab mechanism with `FORCE_PACK_COPY=true` and bumped versions. Success criteria: summon it, a retail client sees the custom model, a Go bot joins without disconnecting, and content log (`content-log-file-enabled=true`) is clean. Record the ConfigMap size so we know where the 1 MiB wall is.
 - Stage 1: delivery. Move packs out of the ConfigMap into an OCI image or PVC built by CI from the new repo; set `texturepack-required=true` on the lab; verify cold-join time and cache behaviour with a bumped version. Add the content-log check to the rollout.
 - Stage 2: boss prototype. Dragon-class entity reusing the documented dragon goals plus `minecraft:boss` HUD; two phases via component groups and a script health-threshold event; `/scriptevent` bridge from Go for "enter phase N".
 - Stage 3: characters. Custom NPC entities with dialogue forms (`server-ui`), attachables, particles. Test bot skins with custom geometry on real clients.
@@ -109,7 +109,7 @@ Licensing and EULA (Minecraft Usage Guidelines and EULA, minecraft.net, searched
 
 - Never commit Mojang's all-rights-reserved assets (vanilla textures, models, sounds, the vanilla behaviour/resource pack). The Microsoft docs hold the JSON schema; the MIT licence on `microsoft/minecraft-samples` (checked 2026-10-23) lets us copy sample code, but still keep the copyright notice and treat any Minecraft-branded art in the samples as unlicensed until checked file by file. Use own art, Blockbench from scratch models, or CC0 sources and record provenance.
 - A vanilla-derived entity JSON (copied from the vanilla pack) is Mojang's file; write our own components instead of copying.
-- Guidelines treat a server you host as commercial use only if you charge; a free private lab is within the rules. Mods may be distributed but modified game/server software may not; do not publish an Endstone/LeviLamina-patched server image.
+- Per the Usage Guidelines quoted in `2026-10-23-mods-spike-unverified-facts.md` (section 5, fetched from the official page on 2026-10-23), a free private lab with your own add-ons and skins is within the rules; the same text counts any server shared with others as commercial use, so follow its attribution rules. Mods may be distributed but modified game/server software may not; do not publish an Endstone/LeviLamina-patched server image.
 - Do not tie access to blockchain items or promote unrelated brands with the assets. Not relevant for the lab, listed because the guidelines call them out.
 - Keep the whole thing off FWB. The packs must not be mounted on the public server, and the lab pack list must not leak into FWB's world files.
 

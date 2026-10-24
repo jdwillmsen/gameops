@@ -50,7 +50,7 @@ Feasibility rating: **vanilla full fight (stage 2): low-medium, 3/5 hard**; **bo
 
 - **Stage 0, spectate:** lab ticking area, `mobgriefing false`, summon at arena centre (with the arena at or near 0,0), bots observe via belief tracker; confirm they survive a dragon flyby by staying inside the walls or out of reach. Engineering: none beyond ensuring the director does not engage; log entity tracking of a Y>100 target.
 - **Stage 1, bow-only kill of a nerfed dragon:** option B or C; pack override to ~40-80 HP, wing damage halved, arrow stock by `give`. Engineering: 3-D lead-aim for ranger (and striker with a bow), flying-target selection, retreat from the dragon's circuit, spectacle-safe arena. Gate on measured hits/min.
-- **Stage 2, full fight in a lab End:** option A. Engineering: dimension-change ack and re-anchor, crystal targeting, cloud avoidance, perch melee phase, void safety, repeatable reset (kill, re-summon crystals via the 604-tick respawn, or restore the world).
+- **Stage 2, full fight in a lab End:** option A. Engineering: dimension-change ack and re-anchor, crystal targeting, cloud avoidance, perch melee phase, void safety, repeatable reset (after a kill, place four End crystals around the exit portal to start the respawn sequence and wait out its 604 ticks, which only finishes the sequence and does not recreate crystals by itself; or restore a world snapshot).
 
 ## 4. Risks
 

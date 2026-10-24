@@ -36,7 +36,7 @@ Java vs Bedrock differences: contact anger is +80 on Bedrock and +35 on Java. Be
 
 ## Why the fight goes wrong (reading the lab result)
 - Melee is the killer. Each hit is 30 raw. Full unenchanted diamond armor (20 points, toughness 8) cuts a 30-damage hit by about 50%, so about 15 per hit, and a 20 HP bot dies in 2 hits (about 3.6 s). [INF, Bedrock armor formula]
-- The sonic boom (10, ignores armor) is only about 2 DPS and is never the main killer. It is a free 5 HP per boom on anyone at range. [INF]
+- The sonic boom (10 HP, ignores armor but not Resistance) comes at most every 2 s, so at most about 5 DPS (3 with Resistance II) on whoever is in its 15-block range. It is the dominant damage on anyone who cannot be reached by melee but stands inside that range. [INF]
 - Lab figures: 50 s with melee zeroed means about 10 squad DPS against the 500 HP pool. [INF] The unbuffed 190 s run was mostly bots dying and returning.
 - Warden target choice is "most angry". A melee hit is +100 anger and a projectile only +10, so the striker's sword hits pull aggro off the tank and onto the striker. Expect it to re-target whoever last hit it in melee. [INF from DOC]
 - Shields are weak against it. The first melee hit blocks, then the shield is disabled for 5 s, so a shield stops about one hit in three at a 1.8 s attack cadence. The boom ignores shields entirely. [INF from DOC]
@@ -61,8 +61,11 @@ Java vs Bedrock differences: contact anger is +80 on Bedrock and +35 on Java. Be
   - Diamond only: x0.50
   - plus Protection IV on all four pieces (16 EPF, minus 64%): x0.18 overall (30 -> 5.4 per hit)
   - plus Resistance II (minus 40%): x0.108 (30 -> 3.2 per hit)
-- With Protection IV and Resistance II, 24 HP (20 plus Absorption) survives about 7 melee hits (about 13 s of unbroken contact). Boom adds 10 x 0.6 = 6 with Resistance II.
-- A 100 s fight with all melee on one target with the kit above is about 180 effective HP, spread over 3 bots at about 24 HP each plus regeneration. That is winnable if aggro rotates and bots eat.
+- Budget for a 100 s fight, vanguard holding aggro (inference, to be checked with the telemetry in the boss tests):
+  - Melee on the vanguard: 100 / 1.8 s is about 55 hits at 3.2 each with Protection IV and Resistance II, so about 180 HP.
+  - Sonic boom: 10 x 0.6 = 6 per boom (Resistance applies, armor does not), one per 2 s on whoever is inside 15 blocks, so up to about 300 HP over the fight if the vanguard and striker stay in range the whole time. The ranger at 21-28 blocks takes none.
+  - Supply for the two bots in range: 2 x (20 + 8 Absorption II) = 56 HP, one Totem of Undying for the striker (about one full health bar), plus regular golden apples, each worth a few HP of absorption and regeneration and a 1.6 s eating pause.
+  - Conclusion: the supply is well below roughly 480 HP of incoming damage, so a 100 s fight is not winnable by mitigation alone. It needs a shorter fight (more damage per second), line-of-sight breaks against the boom, and healing between bursts. This agrees with the live baseline: unbuffed kit, median 14 deaths in about 123 s.
 
 ## Recommended kit (all three bots)
 - Diamond armor with Protection IV on all four pieces (Blast Protection IV does nothing against melee or the boom). Unbreaking III and Mending.
