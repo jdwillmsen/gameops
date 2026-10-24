@@ -24,18 +24,25 @@ type Item struct {
 	Count int `json:"count"`
 	// StackNetworkID is what a later item request must quote for the stack.
 	StackNetworkID int32 `json:"stack_network_id"`
+	// Wire is the stack exactly as the server last sent it, nil when only
+	// its ID and count are known. A held stack quoted without its data (a
+	// name, enchantments, damage) does not match the server's, which then
+	// hits with a bare fist.
+	Wire *protocol.ItemStack `json:"-"`
 }
 
 type stackRef struct {
 	itemID  int32
 	count   int
 	stackID int32
+	wire    *protocol.ItemStack
 }
 
 func (s stackRef) empty() bool { return s.itemID == 0 || s.count == 0 }
 
 func refOf(it protocol.ItemInstance) stackRef {
-	return stackRef{itemID: it.Stack.NetworkID, count: int(it.Stack.Count), stackID: it.StackNetworkID}
+	wire := it.Stack
+	return stackRef{itemID: it.Stack.NetworkID, count: int(it.Stack.Count), stackID: it.StackNetworkID, wire: &wire}
 }
 
 // ItemNames gives the tracker the server's item table, once per session. Item
@@ -166,7 +173,7 @@ func (t *Tracker) inventoryLocked() []Item {
 		if !ok {
 			name = fmt.Sprintf("item#%d", s.itemID)
 		}
-		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID})
+		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID, Wire: s.wire})
 	}
 	return out
 }

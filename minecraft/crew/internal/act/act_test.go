@@ -796,3 +796,25 @@ func TestStartUsingRidesOnlyTheInputThatAsksForIt(t *testing.T) {
 		t.Error("the flag stayed on for the next tick")
 	}
 }
+
+func TestAttackQuotesTheHeldStacksData(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{4, 0, 4}})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:netherite_sword", RuntimeID: 300}})
+	sword := beliefItem(0, "netherite_sword", 1, 9)
+	sword.Wire = &protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: 300}, Count: 1,
+		NBTData: map[string]any{"ench": []any{map[string]any{"id": int16(9), "lvl": int16(5)}}}}
+	if err := a.SelectHotbar(0, sword); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Attack(55, 0, sword); err != nil {
+		t.Fatal(err)
+	}
+	eq, ok := s.got[0].(*packet.MobEquipment)
+	if !ok || eq.NewItem.Stack.NBTData == nil {
+		t.Errorf("selected %+v, want the enchanted stack", s.got[0])
+	}
+	tx := s.got[1].(*packet.InventoryTransaction).TransactionData.(*protocol.UseItemOnEntityTransactionData)
+	if tx.HeldItem.Stack.NBTData == nil || tx.HeldItem.Stack.NetworkID != 300 {
+		t.Errorf("held = %+v, want the enchanted stack", tx.HeldItem)
+	}
+}
