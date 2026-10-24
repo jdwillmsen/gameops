@@ -15,3 +15,4 @@ node_modules
 # go build output for the single main package
 /minecraft/crew-control/crew-control
 /minecraft/crew-control/cmd/crew-control/crew-control
+__pycache__/

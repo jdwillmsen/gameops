@@ -30,6 +30,21 @@ python3 -I -m zipfile -c ../../out/lab-mods-stage0.mcaddon behavior_pack resourc
 `out/` is git-ignored. `python3 -m zipfile` is used so no extra tool is
 needed; `zip -r` produces the same layout.
 
+## Checks
+
+From the repo root:
+
+```sh
+tools/check-packs.sh                       # validates every pack under packs/
+python3 -I tools/packs/test_check_packs.py # tests the checker against broken copies
+```
+
+The first checks that JSON parses, manifest UUIDs are unique (and header and
+module UUIDs differ), the resource pack depends on the behaviour pack, entity
+identifiers match between the two packs, the model, render controller and
+texture they reference exist, and the mob cannot target players. It prints the
+total pack size and the base64 size against the 1 MiB ConfigMap limit.
+
 ## Lab rollout (not done yet)
 
 **Rolling this out restarts the lab server and kicks everyone on it. It needs
