@@ -25,6 +25,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
@@ -64,6 +65,51 @@ func TestServerRefusesUncleanUnitPathsWithoutRedirect(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/units/crew-01/camera", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != "unit body" || upstream.Load() != 1 {
 		t.Fatalf("clean path: status %d body %q upstream %d", rec.Code, rec.Body, upstream.Load())
+	}
+}
+
+func TestMetricsAnswerOnTheListenerAndNeverThroughTheProxy(t *testing.T) {
+	var upstream atomic.Int32
+	unit := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstream.Add(1)
+		_, _ = fmt.Fprint(w, "unit body for "+r.URL.Path)
+	}))
+	defer unit.Close()
+	units, err := roster.Parse(fmt.Sprintf(`[{"id":"crew-01","name":"Agate","url":%q}]`, unit.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newHandler(units, telemetry.NewPoller(units, &http.Client{}, time.Second), nil, auth.Disabled().Operator, logging.New("error"),
+		mountMetrics(metrics.New([]string{"crew-01"})))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "crew_fleet_units") {
+		t.Fatalf("/metrics: status %d body %.200q", rec.Code, rec.Body)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/metrics", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /metrics: status %d, want 405", rec.Code)
+	}
+
+	// Under /units/ the proxy answers, and it forwards only its allow-list: a
+	// metrics path must neither reach the unit nor return the fleet's series.
+	for _, p := range []string{
+		"/units/crew-01/metrics",
+		"/units/crew-01/v1/metrics",
+		"/units/metrics",
+		"/units/crew-01/../metrics",
+		"/units/crew-01/metrics/",
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "crew_fleet") {
+			t.Errorf("%s: status %d body %.100q, want a bare 404", p, rec.Code, rec.Body)
+		}
+	}
+	if n := upstream.Load(); n != 0 {
+		t.Fatalf("a metrics path reached the unit %d times", n)
 	}
 }
 

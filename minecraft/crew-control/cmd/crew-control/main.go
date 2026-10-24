@@ -27,6 +27,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
@@ -107,7 +108,14 @@ func main() {
 	// ready the writer drops what it is handed, like the feed.
 	eventLog := &events.Lazy{}
 	recorder := events.NewWriter(eventLog, log)
+	ids := make([]string, 0, len(units.Units()))
+	for _, u := range units.Units() {
+		ids = append(ids, u.ID)
+	}
+	fleet := metrics.New(ids)
+	poller.OnPoll = fleet.ObservePoll
 	poller.OnEvents = func(batch []telemetry.Born) {
+		fleet.Observe(batch)
 		for _, b := range batch {
 			recorder.Add(bornEvent(b))
 		}
@@ -157,7 +165,7 @@ func main() {
 			}, poller.PublishJobs)
 			jobAPI.MountOperator(mux, operators)
 			poller.SetJobsSource(jobAPI.Feed)
-		}),
+		}, mountMetrics(fleet)),
 		ReadHeaderTimeout: 5 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return streamCtx },
 	}
@@ -197,6 +205,14 @@ func main() {
 	<-pollDone
 	<-recordDone
 	<-storeDone
+}
+
+// mountMetrics serves /metrics on the listener the cluster scrapes. It is
+// registered like any other route and so is reachable by anything that can
+// reach the pod; keeping it off the public host is the HTTPRoute's job, which
+// lists paths and does not list this one.
+func mountMetrics(f *metrics.Fleet) func(*http.ServeMux) {
+	return func(mux *http.ServeMux) { mux.Handle("GET /metrics", f.Handler()) }
 }
 
 // squadGate adapts the console's auth to the squad routes' gate, which asks
