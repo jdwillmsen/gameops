@@ -29,6 +29,9 @@ const (
 	// either way stands and fights where it is: the bow's cadence wait plus
 	// a full draw, so a Ranger gets an arrow off before it tries again.
 	cornerTicks = shotEvery + bowDraw
+	// regroupTicks bounds a regroup to 20 s: survivors the boss did not
+	// follow go back to fighting it by role rather than park for good.
+	regroupTicks = 400
 	// arrowStep is the spacing of the samples along a bow's line.
 	arrowStep = 0.25
 )
@@ -73,6 +76,7 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 	if b.id != best.ID {
 		b.id, b.start = best.ID, p.Feet
 		b.hitAt, b.shieldOutUntil = 0, 0
+		b.regroupUntil, b.rallied = 0, false
 	}
 	b.active, b.prof = true, prof
 
@@ -106,10 +110,22 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 		b.fallen = false
 	}
 
-	b.regroup = false
-	if r, ok := w.squad.(Roster); ok && r.Down() >= prof.regroupDown {
-		b.regroup = true
+	down := false
+	if r, ok := w.squad.(Roster); ok {
+		down = r.Down() >= prof.regroupDown
 	}
+	switch {
+	case !down:
+		b.regroupUntil, b.rallied = 0, false
+	case b.regroupUntil == 0:
+		b.regroupUntil = l.tick + regroupTicks
+	}
+	if down && b.rallied && inMeleeReach(p, best) {
+		// The boss followed the survivor back: there is nowhere further to
+		// regroup to, so the regroup is over and the fight is on.
+		b.regroupUntil = min(b.regroupUntil, l.tick)
+	}
+	b.regroup = down && l.tick < b.regroupUntil
 
 	// The meal waits for the boss to be far enough off for it to finish.
 	w.healWant = health <= prof.healBelow && d > prof.healClear &&
@@ -185,7 +201,8 @@ func (l *Life) bossStriker(ctx context.Context, a skill.Actuator, p act.Pose, e 
 	switch {
 	case b.fallen:
 		return l.bossKeep(a, p, e, s, math.Max(b.prof.darkness+1, b.prof.strikerFar), math.Inf(1))
-	case s.HealthKnown && s.Health <= b.prof.commitAbove:
+	case s.HealthKnown && s.Health <= b.prof.commitAbove, b.regroupUntil != 0:
+		// Hurt, or the squad too far down to hold the boss off it.
 		near := math.Max(b.prof.boom+1, b.prof.strikerNear)
 		return l.bossKeep(a, p, e, s, near, near+b.prof.strikerFar-b.prof.strikerNear)
 	case l.strikerCovered(p, e):
@@ -373,7 +390,8 @@ func (l *Life) bowLine(p act.Pose, e belief.Entity) bool {
 }
 
 // bossRegroup walks a survivor back to the squad's start instead of trading
-// blows two-handed, and holds there facing the boss.
+// blows two-handed, and holds there facing the boss, until the boss follows
+// it into reach or the regroup runs out, when bossEngaged ends it.
 func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
 	w := l.warrior
 	b := &w.boss
@@ -384,7 +402,7 @@ func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e 
 		}
 	}
 	if horizontal(p.Feet, at) <= regroupWithin {
-		b.walk = nil
+		b.walk, b.rallied = nil, true
 		if l.shieldUp(p, s) {
 			return l.raiseShield(a, p, s)
 		}

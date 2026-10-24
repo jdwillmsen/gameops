@@ -423,3 +423,67 @@ func TestACorneredRangerStillFightsTheBoss(t *testing.T) {
 		}
 	})
 }
+
+func TestARegroupedUnitFightsABossThatFollowsIt(t *testing.T) {
+	home := mgl32.Vec3{10.5, 1, 40.5}
+	for _, tc := range []struct {
+		role  string
+		melee bool
+	}{
+		{role: "vanguard", melee: true},
+		{role: "striker"},
+	} {
+		t.Run(tc.role, func(t *testing.T) {
+			r, squad := newBossWarrior(t, tc.role, arena.Sub(mgl32.Vec3{10, 0, 0}))
+			squad.down, squad.start, squad.startOK = 2, home, true
+			r.run(200)
+			if d := dist(r.feet(), home); d > regroupWithin {
+				t.Fatalf("never regrouped: %.1f blocks from the start", d)
+			}
+			boss := r.feet().Add(mgl32.Vec3{2, 0, 0})
+			r.moveTo(90, boss)
+			r.run(80)
+			n := len(r.out.attacks())
+			if tc.melee && n == 0 {
+				t.Fatal("the Vanguard never swung at the warden that followed it back")
+			}
+			if !tc.melee {
+				if n != 0 {
+					t.Fatalf("%d attacks from a regrouped Striker", n)
+				}
+				if d := dist(r.feet(), boss); d < meleeReach {
+					t.Fatalf("the Striker stayed %.1f blocks off the warden that followed it", d)
+				}
+			}
+		})
+	}
+}
+
+func TestAUnitAtTheBossStillRegroupsWhenTwoGoDown(t *testing.T) {
+	home := mgl32.Vec3{10.5, 1, 40.5}
+	r, squad := newBossWarrior(t, "striker", arena.Sub(mgl32.Vec3{6, 0, 0}))
+	squad.start, squad.startOK = home, true
+	r.run(30)
+	if len(r.out.attacks()) == 0 {
+		t.Fatal("the Striker never joined the melee")
+	}
+	squad.down = 2
+	r.run(250)
+	if d := dist(r.feet(), home); d > regroupWithin {
+		t.Fatalf("stayed in the melee %.1f blocks from the start", d)
+	}
+}
+
+func TestARegroupEndsAfterAWhile(t *testing.T) {
+	home := mgl32.Vec3{10.5, 1, 40.5}
+	r, squad := newBossWarrior(t, "vanguard", arena.Sub(mgl32.Vec3{10, 0, 0}))
+	squad.down, squad.start, squad.startOK = 2, home, true
+	r.run(380) // short of the regroup's 20 s
+	if d := dist(r.feet(), home); d > regroupWithin || len(r.out.attacks()) != 0 {
+		t.Fatalf("regroup broke early: %.1f blocks from the start, %d attacks", d, len(r.out.attacks()))
+	}
+	r.run(300)
+	if len(r.out.attacks()) == 0 {
+		t.Fatal("the Vanguard parked at the start for good")
+	}
+}

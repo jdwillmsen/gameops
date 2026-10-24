@@ -111,8 +111,13 @@ type bossState struct {
 	// does not know its own start.
 	start      mgl32.Vec3
 	startKnown bool
-	// regroup says enough of the squad is down to stop trading.
-	regroup bool
+	// regroup says enough of the squad is down to stop trading, and
+	// regroupUntil when that stops, zero while the squad is not down.
+	// rallied says the unit reached the regroup point, where a boss that
+	// follows it into reach ends the regroup.
+	regroup      bool
+	regroupUntil uint64
+	rallied      bool
 	// hitAt is when the boss's melee last landed on the unit, and
 	// shieldOutUntil when a shield it hit is usable again.
 	hitAt          uint64
