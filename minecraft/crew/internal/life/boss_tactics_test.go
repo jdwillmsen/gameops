@@ -527,3 +527,27 @@ func TestAnUnreachableRegroupPointIsNotReplannedEveryTick(t *testing.T) {
 		t.Fatalf("planned the walk to an unreachable start %d times in 100 ticks", plans)
 	}
 }
+
+func TestRangerLetsGoOfAHeldDrawToEat(t *testing.T) {
+	r, _ := newBossWarrior(t, "ranger", arena.Sub(mgl32.Vec3{24, 0, 0}))
+	for i := 0; i < 200 && r.out.uses(2) <= r.out.releases(2); i++ {
+		r.step()
+	}
+	if r.out.uses(2) <= r.out.releases(2) {
+		t.Fatal("the Ranger never held a draw to test with")
+	}
+	// A wall now blocks the line, so the held draw has nothing to release at.
+	for z := int32(30); z <= 50; z++ {
+		for y := int32(1); y <= 6; y++ {
+			r.w.over[protocol.BlockPos{30, y, z}] = "stone"
+		}
+	}
+	r.give(3, 363, 2) // golden apples
+	r.setHealth(13)
+	for i := 0; i < 80 && r.out.uses(3) == 0; i++ {
+		r.step()
+	}
+	if r.out.uses(3) == 0 {
+		t.Fatal("the Ranger held its draw instead of eating at 13 health")
+	}
+}
