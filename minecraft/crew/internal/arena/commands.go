@@ -161,14 +161,35 @@ type spawn struct {
 	Tier    int
 	Boss    bool
 	Point   Point
+	// Kit spawns the mob from the lab's kit catalog, already wearing its
+	// tier's enchanted and trimmed gear, instead of summoning it bare.
+	Kit bool
+}
+
+// kitMobs are the mob types the lab's kit catalog dresses (`function
+// mobs/<type>/t<tier>`, tiers 1-6).
+var kitMobs = map[string]bool{
+	"zombie": true, "husk": true, "drowned": true, "skeleton": true,
+	"stray": true, "wither_skeleton": true, "piglin": true,
+}
+
+// kitFits says whether a wave mob can come from the catalog. A spawn event
+// can change the entity and a name has no place in the catalog's structure,
+// so variants and named mobs keep the summon.
+func (s spawn) kitFits() bool {
+	return kitMobs[s.Type] && s.Variant == "" && s.Name == "" && s.Tier >= 1 && s.Tier <= 6
 }
 
 // radiusTags are the tags every wave mob gets. The per-mob marker is added
 // first so effects, gear and the enchant hit exactly that mob; the wave and
 // tier tags then make it visible to the count and to status.
 func (s spawn) commands(recipe Tier) []string {
+	place := s.summonCommand()
+	if s.Kit {
+		place = fmt.Sprintf("execute positioned %d %d %d run function mobs/%s/t%d", s.Point.X, s.Point.Y, s.Point.Z, s.Type, s.Tier)
+	}
 	cmds := []string{
-		s.summonCommand(),
+		place,
 		s.tagCommand(markerTag),
 		"tag @e[tag=" + markerTag + "] add " + waveTag,
 		fmt.Sprintf("tag @e[tag=%s] add %s_t%d", markerTag, waveTag, s.Tier),
@@ -178,6 +199,11 @@ func (s spawn) commands(recipe Tier) []string {
 	}
 	for _, e := range recipe.Effects {
 		cmds = append(cmds, fmt.Sprintf("effect give @e[tag=%s] %s %d %d", markerTag, e.ID, e.Seconds, e.Amplifier))
+	}
+	if s.Kit {
+		// The catalog mob already wears its gear; replaceitem would swap it
+		// for plain items.
+		return append(cmds, "tag @e[tag="+markerTag+"] remove "+markerTag)
 	}
 	for _, g := range recipe.Gear {
 		cmds = append(cmds, fmt.Sprintf("replaceitem entity @e[tag=%s] slot.%s 0 %s 1", markerTag, trimSlot(g.Slot), g.Item))

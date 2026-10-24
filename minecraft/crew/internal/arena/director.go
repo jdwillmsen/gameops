@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +61,11 @@ type Director struct {
 	WarriorMisses int
 	OpenStartGate bool
 	PlaceSquad    bool
+	// Kits spawns every wave mob the lab's kit catalog covers from it.
+	Kits bool
+	// WarriorKits are catalog kits ("vanguard/t5"), one per warrior in
+	// Warriors order, handed out before wave one.
+	WarriorKits []string
 
 	Out   io.Writer
 	Now   func() time.Time
@@ -250,6 +256,9 @@ func (d *Director) Run() (Result, error) {
 				}
 			}
 		}
+	}
+	if err := d.kitWarriors(); err != nil {
+		return result, err
 	}
 	alive, deaths, err := d.warriorBaseline()
 	if err != nil {
@@ -691,14 +700,65 @@ func (d *Director) spawnWaveMob(s spawn) error {
 	if !ok {
 		return fmt.Errorf("arena: no recipe for tier %d", s.Tier)
 	}
+	s.Kit = d.Kits && s.kitFits()
 	for _, cmd := range s.commands(recipe) {
 		out, err := d.exec(cmd)
 		if err != nil {
 			return err
 		}
-		if strings.Contains(out, "Unable to summon") {
-			return fmt.Errorf("arena: summon %s failed: %s", s.Type, strings.TrimSpace(out))
+		if strings.Contains(out, "Unable to summon") || strings.Contains(out, " not found.") {
+			return fmt.Errorf("arena: spawn %s failed: %s", s.Type, strings.TrimSpace(out))
 		}
+	}
+	return nil
+}
+
+// warriorKitPattern is a catalog kit: a role and a tier.
+var warriorKitPattern = regexp.MustCompile(`^[a-z]+/t[1-6]$`)
+
+// ValidateWarriorKits checks kits against the squad before a run starts.
+func ValidateWarriorKits(warriors, kits []string) error {
+	if len(kits) == 0 {
+		return nil
+	}
+	if len(kits) != len(warriors) {
+		return fmt.Errorf("arena: %d warrior kits for %d warriors", len(kits), len(warriors))
+	}
+	for _, k := range kits {
+		if !warriorKitPattern.MatchString(k) {
+			return fmt.Errorf("arena: warrior kit %q is not <role>/t<1-6>", k)
+		}
+	}
+	return nil
+}
+
+// warriorKitGap is the wait after each warrior's kit: a squad keeps close to
+// its leader, and a kit dropped while a neighbour stands on it is picked up
+// by the neighbour. Pickup and the kit's own arranging take about 2 s.
+const warriorKitGap = 3 * time.Second
+
+// kitWarriors hands each warrior its catalog kit where it stands, one at a
+// time; the lab keeps inventories through death, so one kit lasts the run.
+func (d *Director) kitWarriors() error {
+	if err := ValidateWarriorKits(d.Warriors, d.WarriorKits); err != nil {
+		return err
+	}
+	for i, kit := range d.WarriorKits {
+		name := d.Warriors[i]
+		if err := validateWarriorName(name); err != nil {
+			return err
+		}
+		out, err := d.exec(fmt.Sprintf("execute as @a[name=%q] at @s run function kits/%s", name, kit))
+		if err != nil {
+			return err
+		}
+		// A warrior who is not online matches no one, and its kit would
+		// silently never arrive.
+		if strings.Contains(out, " not found.") || strings.Contains(out, "No targets matched") {
+			return fmt.Errorf("arena: kit %s for %s failed: %s", kit, name, strings.TrimSpace(out))
+		}
+		d.logf("arena: kitted %s with %s", name, kit)
+		d.sleep(warriorKitGap)
 	}
 	return nil
 }

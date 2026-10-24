@@ -93,6 +93,8 @@ func run(args []string) {
 	rallyEvery := fs.Duration("rally-every", -1, "interval between rallies while a wave lives (-1 uses the wave book)")
 	openStart := fs.Bool("open-start-gate", true, "clear the squad start gate before wave one")
 	placeSquad := fs.Bool("place-squad", true, "teleport the squad to its floor start point and back after a respawn")
+	kits := fs.Bool("kits", false, "spawn the mob types the lab's kit catalog covers from it, in their tier's enchanted gear")
+	warriorKits := fs.String("warrior-kits", "", "comma-separated catalog kits (vanguard/t5), one per --warriors name, handed out before wave one")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -105,6 +107,9 @@ func run(args []string) {
 	requireLab(*t.lab)
 	if *layoutPath == "" {
 		fail("arenadirector: run needs --layout")
+	}
+	if err := arena.ValidateWarriorKits(splitNames(*warriors), splitNames(*warriorKits)); err != nil {
+		fail("arenadirector: " + err.Error())
 	}
 	if *tier < 1 || *tier > 5 {
 		fail("arenadirector: --tier must be 1..5")
@@ -137,6 +142,8 @@ func run(args []string) {
 		Warriors:      splitNames(*warriors),
 		OpenStartGate: *openStart,
 		PlaceSquad:    *placeSquad,
+		Kits:          *kits,
+		WarriorKits:   splitNames(*warriorKits),
 		Out:           os.Stderr,
 	}
 	result, err := d.Run()
