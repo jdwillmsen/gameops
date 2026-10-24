@@ -119,12 +119,17 @@ type bossState struct {
 	// strafe is the side a unit steps to when faced or blocked, and
 	// slideUntil when a blocked one tries backing off again. stuck counts
 	// the walking ticks, moving says last tick's was one, that moved
-	// nowhere from lastX, lastZ.
-	strafe       int8
-	slideUntil   uint64
-	lastX, lastZ float32
-	moving       bool
-	stuck        uint8
+	// nowhere from lastX, lastZ. blocked counts the stucks that made no
+	// block of ground from blockX, blockZ, where the first one was, and
+	// corneredUntil is when one shut in on every side tries walking again.
+	strafe         int8
+	slideUntil     uint64
+	blocked        uint8
+	blockX, blockZ float32
+	corneredUntil  uint64
+	lastX, lastZ   float32
+	moving         bool
+	stuck          uint8
 	// walk is the regroup to the start, replanned as a chase is.
 	walk     skill.Skill
 	walkGoal [3]int32
