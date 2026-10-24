@@ -32,6 +32,10 @@ const (
 	// regroupTicks bounds a regroup to 20 s: survivors the boss did not
 	// follow go back to fighting it by role rather than park for good.
 	regroupTicks = 400
+	// regroupRetry is how long a walk back that found no way waits before
+	// it is planned again: the search is the costly part, and the start
+	// does not move.
+	regroupRetry = 60
 	// arrowStep is the spacing of the samples along a bow's line.
 	arrowStep = 0.25
 )
@@ -410,17 +414,24 @@ func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e 
 		return l.stillFacing(a, p, e)
 	}
 	l.lowerShield(a)
+	if l.tick < b.walkRetry {
+		return l.stillFacing(a, p, e)
+	}
 	cell := cellOf(at)
 	if b.walk == nil || (l.tick-b.walkAt >= chaseEvery && b.walkGoal != cell) {
 		goal, ok := l.standNear(cell)
 		if !ok {
+			b.walkRetry = l.tick + regroupRetry
 			return l.stillFacing(a, p, e)
 		}
 		b.walk = skill.NewNavigate(l.world, l.self, goal, regroupWithin/2)
 		b.walkGoal, b.walkAt = cell, l.tick
 	}
-	if st, _ := b.walk.Step(ctx, a); st == skill.Running {
+	switch st, _ := b.walk.Step(ctx, a); st {
+	case skill.Running:
 		return nil
+	case skill.Failed:
+		b.walkRetry = l.tick + regroupRetry
 	}
 	b.walk = nil
 	return l.stillFacing(a, p, e)

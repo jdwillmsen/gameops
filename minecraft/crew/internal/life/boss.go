@@ -139,8 +139,10 @@ type bossState struct {
 	lastX, lastZ   float32
 	moving         bool
 	stuck          uint8
-	// walk is the regroup to the start, replanned as a chase is.
-	walk     skill.Skill
-	walkGoal [3]int32
-	walkAt   uint64
+	// walk is the regroup to the start, replanned as a chase is, and
+	// walkRetry when one that found no way is planned again.
+	walk      skill.Skill
+	walkGoal  [3]int32
+	walkAt    uint64
+	walkRetry uint64
 }
