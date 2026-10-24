@@ -58,6 +58,6 @@ Feasibility rating: **vanilla full fight (stage 2): low-medium, 3/5 hard**; **bo
 - **Chunk loading:** dragon leaves small ticking areas in seconds [L]; a ring of areas or a big area is needed; unloaded dragon freezes or becomes unselectable.
 - **Griefing:** with `mobgriefing true` it destroys the Colosseum (non-immune blocks) and drops container contents [V wiki]; set false for the whole lab session, and re-set after. Note `mobgriefing false` also disables other mobs' griefing, including bot-relevant creepers, which is fine.
 - **Players' safety:** lab only, cheats on, never FWB. Keep human players out of the world during tests; `/kill` on Bedrock leaves the dragon animating [V wiki], so use `kill` plus ticking-area removal for cleanup. Dragon egg drops twice on Bedrock (known bug MCPE-51345) [V wiki], harmless.
-- **Unprobed:** body-damage multiplier on Bedrock, cruise altitude, whether the End is reachable on the lab BDS by console, and whether an `ender_dragon` pack override survives the controller.
+- **Unprobed:** body-damage multiplier on Bedrock, cruise altitude, whether the End is reachable on the lab BDS by console, and whether an `ender_dragon` pack override survives the controller (it does for a health override, per the dragon spike; a new `gameops:` identifier reusing the goals is UNVERIFIED).
 
 Sources: minecraft.wiki Ender Dragon and End Crystal pages; gophertunnel `change_dimension.go`; Geyser and PocketMine threads on dimension-change acks; repo `minecraft/crew/internal/{belief,world/blocks}`; `2026-10-23-arena-mob-buffs.md`.

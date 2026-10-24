@@ -80,7 +80,7 @@ Java vs Bedrock differences: contact anger is +80 on Bedrock and +35 on Java. Be
 - Spawn with `minecraft:spawn_emerging` (7 s emerge; invulnerable then) and let it roar before bots engage.
 - To make it hard but beatable: bots get the kit above plus Resistance II; warden stays at its native 30 melee and 10 boom.
 - Optional easing lever if bots still die more than about 3 times: `effect give <warden> slowness 600 1` (about -15% speed) or `weakness` (reduces melee, amplifier tuned by testing). Both are effects, so no restart and no pack override. [INF]
-- Pass criterion to tune against: squad win in 60-100 s with 3 or fewer deaths. If it takes longer than 150 s again, the bots' melee exposure is too high rather than their DPS too low.
+- Pass criterion to tune against: squad win in 60-100 s with 3 or fewer deaths. Judge damage output and deaths separately: record damage dealt, melee exposure and deaths per run before choosing a change. A fight over 150 s can come from low damage output as well as from too much melee exposure, so do not assume either from the duration alone.
 - Darkness (20 blocks, every 6 s) cannot be disabled without a pack override; check bots' sight does not depend on the screen.
 
 ## Open items to verify live
