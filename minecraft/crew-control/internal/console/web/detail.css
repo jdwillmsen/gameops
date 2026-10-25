@@ -91,3 +91,5 @@
   .dt-track { width: 64px; }
   .dt-vitals { gap: 8px 12px; }
 }
+
+.dt-chestcount { font-weight: 400; opacity: .7; font-size: 12px; }

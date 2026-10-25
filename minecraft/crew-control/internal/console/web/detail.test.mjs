@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ageText, freshness, roman, effectLabel, effectTime, enchantLabel, enchantText,
-  durability, slotLabel, slotGrid, inventoryRows, armorRow, nextSlot,
-  iconRect, iconStyle, HOTBAR_SLOTS, MAIN_SLOTS, ARMOR_SLOTS,
+  durability, slotLabel, slotGrid, inventoryRows, armorRow, chestState, nextSlot,
+  iconRect, iconStyle, ENDER_SLOTS, HOTBAR_SLOTS, MAIN_SLOTS, ARMOR_SLOTS,
 } from './detail.js';
 
 const NOW = Date.parse('2026-10-24T12:00:00Z');
@@ -103,6 +103,16 @@ test('armorRow is the four worn slots head to feet', () => {
   assert.deepEqual(armorRow([item(3, { name: 'boots' }), item(1, { name: 'chestplate' })]), [
     null, item(1, { name: 'chestplate' }), null, item(3, { name: 'boots' }),
   ]);
+});
+
+test('chestState counts what is filled and calls an empty chest empty', () => {
+  const empty = chestState(new Array(ENDER_SLOTS).fill(null));
+  assert.deepEqual(empty, { kind: 'empty', filled: 0, total: ENDER_SLOTS, chest: empty.chest });
+  const chest = new Array(ENDER_SLOTS).fill(null);
+  chest[0] = item(0);
+  chest[26] = item(26);
+  assert.equal(chestState(chest).filled, 2);
+  assert.deepEqual(chestState(null), { kind: 'unsaved' });
 });
 
 test('nextSlot walks rows and stops at the ends: a grid is not a ring', () => {

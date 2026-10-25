@@ -108,8 +108,10 @@ The view answers about what it knows, not what it guesses. A small line
 under the unit's name says where the numbers came from — *live* while the
 poll is fresh, *from the save, N min ago* when the answer is stored, and
 otherwise exactly why not (*reading the world save*, *world save not
-connected*, or *this unit's record is not saved yet*). Health, hunger, air
-and experience gauges flag their low half (6 of 20 or less), and an untied effect with a name and
+connected*, or *this unit's record is not saved yet*), echoed per section:
+the ender chest only ever appears from a save, so without one it says so
+instead of showing a blank grid. Health, hunger, air and experience gauges
+flag their low half (6 of 20 or less), and an untied effect with a name and
 Roman level sits beside those the answer could not name. What the unit
 carries is drawn as fixed slot grids — carry inventory and hotbar in server
 slot order, empty slots visibly empty — and every slot names itself to a
