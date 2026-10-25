@@ -77,7 +77,7 @@
 .dt-slot.empty::after { content: ''; position: absolute; inset: 3px; border: 1px dashed #262626; border-radius: 2px; }
 .dt-slot:hover, .dt-slot:focus-visible { border-color: #4a7bb0; outline: none; }
 .dt-icon { position: absolute; inset: 3px; background-repeat: no-repeat; pointer-events: none; }
-.dt-noicon { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 2px; overflow: hidden; font-size: 9px; line-height: 1.1; text-align: center; white-space: pre-line; opacity: .8; pointer-events: none; }
+.dt-noicon { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 1px 1px 7px; overflow: hidden; font-size: 9px; line-height: 1.1; text-align: center; white-space: pre-line; opacity: .8; pointer-events: none; }
 .dt-count { position: absolute; right: 2px; bottom: 1px; font-size: 10px; color: #fff; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 .dt-mark { position: absolute; left: 2px; top: 0; font-size: 9px; pointer-events: none; }
 .dt-mark.ench { color: #b48cff; }
