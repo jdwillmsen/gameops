@@ -258,6 +258,29 @@ func TestEffectsFollowTheServerPackets(t *testing.T) {
 	}
 }
 
+func TestEffectNamesCoverTheBedrockIDsPastSlowFalling(t *testing.T) {
+	want := map[int32]string{
+		27: "slow_falling", 28: "bad_omen", 29: "village_hero", 30: "darkness",
+		31: "trial_omen", 32: "wind_charged", 33: "weaving", 34: "oozing",
+		35: "infested", 36: "raid_omen",
+		// Past the table the number is all a reader gets.
+		37: "",
+	}
+	tr := spawned(t)
+	for id := range want {
+		tr.Apply(&packet.MobEffect{EntityRuntimeID: self, Operation: packet.MobEffectAdd, EffectType: id, Duration: 100})
+	}
+	got := map[int32]string{}
+	for _, e := range tr.Snapshot().Effects {
+		got[int32(e.ID)] = e.Name
+	}
+	for id, name := range want {
+		if got[id] != name {
+			t.Errorf("effect %d named %q, want %q", id, got[id], name)
+		}
+	}
+}
+
 func TestAnotherEntitysEffectsAreNotTaken(t *testing.T) {
 	tr := spawned(t)
 	tr.Apply(&packet.MobEffect{EntityRuntimeID: self + 1, Operation: packet.MobEffectAdd, EffectType: 19, Amplifier: 0, Duration: 100})
