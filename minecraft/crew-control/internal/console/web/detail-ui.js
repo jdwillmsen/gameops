@@ -8,8 +8,8 @@ import {
   chestState, nextSlot, iconStyle, iconRect,
 } from './detail.js';
 
-// A page reads its own answer at most this often; the route is cached for
-// 5 s anyway, so anything shorter only burns the round trip.
+// A page reads its own answer this often; the save behind it is itself read
+// no more than every 5 s, so anything shorter only burns the round trip.
 const POLL_MS = 10_000;
 
 // Hyphenated keys (aria-*, data-*) are not DOM properties, so assigning
@@ -45,7 +45,9 @@ export function initDetail(host) {
     if (!id || !mounted) return;
     const my = ++token;
     const [r, s] = await Promise.all([
-      host.api('GET', unitPath(id, '/detail')),
+      // The answer is private to the session: no-store keeps the browser
+      // from repainting it after sign-out, whatever the server says.
+      host.api('GET', unitPath(id, '/detail'), undefined, { cache: 'no-store' }),
       loadSheet(id),
     ]);
     if (!mounted || my !== token) return;
@@ -353,9 +355,18 @@ export function initDetail(host) {
       root.remove();
     },
     // A session change changes what the route answers, so an open page is
-    // re-read even when nothing else about it changed.
-    onOperator() {
-      if (mounted) load();
+    // re-read even when nothing else about it changed. Signing out clears
+    // the page now: the private answer must not sit on screen until the
+    // next read finds a 401, and a read already in flight must not bring it
+    // back.
+    onOperator(op = host.operator()) {
+      if (!mounted) return;
+      if (!op) {
+        token++;
+        if (unit) paintAuth();
+        return;
+      }
+      load();
     },
   };
 }
