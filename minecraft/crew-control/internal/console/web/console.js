@@ -96,6 +96,7 @@ function renderStage() {
 }
 
 function apply() {
+  if (state.view !== 'jobs') state.job = '';
   sync();
   renderBar();
   renderStage();

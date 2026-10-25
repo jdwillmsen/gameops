@@ -43,6 +43,14 @@ test('parse tolerates an empty roster', () => {
   assert.equal(parse('?unit=x', []).unit, '');
 });
 
+test('format leaves the job out of the address once the view is not the jobs view', () => {
+  const id = '03040506-0010-2020-3030-405060708090';
+  for (const view of ['focus', 'wall', 'fleet', 'detail']) {
+    assert.ok(!format({ unit: 'crew-03', mode: 'first', view, job: id }).includes('job='), view);
+  }
+  assert.ok(format({ unit: 'crew-03', mode: 'first', view: 'jobs', job: id }).includes(`job=${id}`));
+});
+
 test('format encodes ids', () => {
   assert.ok(!format({ unit: 'a&b', mode: 'first', view: 'focus' }).includes('a&b'));
 });
