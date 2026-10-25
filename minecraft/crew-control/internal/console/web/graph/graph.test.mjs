@@ -176,6 +176,23 @@ test('legend: a list whose children are list items', () => {
   assert.equal(all(t.node('a'), n => n.getAttribute('role') === 'listitem').length, 0, 'node chips are not list items');
 });
 
+test('setContent: focus moves into the content only when asked', () => {
+  const t = graph();
+  const make = () => {
+    const dl = doc.createElement('dl');
+    dl.setAttribute('data-autofocus', '');
+    return { dl, box: doc.createElement('div') };
+  };
+  const a = make();
+  a.box.append(a.dl);
+  t.g.setContent(a.box);
+  assert.notEqual(doc.activeElement, a.dl, 'a data refresh does not take focus');
+  const b = make();
+  b.box.append(b.dl);
+  t.g.setContent(b.box, { focus: true });
+  assert.equal(doc.activeElement, b.dl);
+});
+
 test('cycle note: names only the steps on the cycle', () => {
   const t = graph({}, [step('x', [], 'done'), step('a', ['x', 'b']), step('b', ['a']), step('c', ['b'])]);
   assert.match(t.g.note.textContent, /cycle: a, b —/);

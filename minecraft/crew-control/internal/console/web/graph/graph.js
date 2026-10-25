@@ -62,7 +62,9 @@ function chipHtml(c) {
   return el('span', { className: `dg-chip dg-${c.tone}` }, svgIcon(c.icon, c.fill), el('span', { className: 'dg-word', textContent: c.word }));
 }
 
-export function createDagGraph({ label, onSelect = () => {}, onClose = () => {}, onLayout } = {}) {
+// onClose(id) reports whether it closed something: a key press nothing used
+// is left to bubble, so the view's own layers can take it.
+export function createDagGraph({ label, onSelect = () => {}, onClose = () => false, onLayout } = {}) {
   const root = el('section', { className: 'dg cc-root' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', label || 'Node graph');
@@ -205,6 +207,8 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
   }
 
   function renderStructure(nodes, edges) {
+    // Rebuilding the nodes would drop the focus a keyboard user is holding.
+    const focused = [...drawn].find(([, d]) => d.g === document.activeElement);
     graphResult = layoutDag(nodes.map(n => ({ id: n.id })), edges);
     clearAll();
     critEdges = new Set();
@@ -260,6 +264,7 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
     if (graphResult.cycle.length) {
       note.textContent = `steps depend on each other in a cycle: ${graphResult.cycle.join(', ')} — the scheduler would never run them`;
     }
+    if (focused && drawn.has(focused[0])) drawn.get(focused[0]).g.focus({ preventScroll: true });
     // A pan the operator made should survive small structural changes, so
     // refit only while the view has not been personalised.
     if (!view.moved) fit();
@@ -361,9 +366,10 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
       return;
     }
     if (ev.key === 'Escape') {
-      ev.preventDefault();
-      ev.stopPropagation();
-      onClose();
+      if (onClose(id)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
       return;
     }
     let to;
@@ -393,10 +399,12 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
         return item;
       }));
     },
-    setContent: c => {
+    // Focus moves into the new content only when the caller says the change
+    // was the operator's own; a data refresh must never take focus.
+    setContent(c, { focus = false } = {}) {
       side.replaceChildren(...(c ? [c] : []));
       side.hidden = !c;
-      if (c) {
+      if (c && focus) {
         const first = c.querySelector('[data-autofocus]');
         if (first) first.focus();
       }
