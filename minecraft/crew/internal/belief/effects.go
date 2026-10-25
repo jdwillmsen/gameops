@@ -17,8 +17,9 @@ type Effect struct {
 }
 
 // effectNames are the ids the game sends, without the minecraft: prefix.
-// An id the table does not know keeps an empty name; the reader then has
-// the number.
+// The names are Bedrock's own, so the hero effect is village_hero here and
+// not Java's hero_of_the_village. An id the table does not know keeps an
+// empty name; the reader then has the number.
 var effectNames = map[int32]string{
 	1: "speed", 2: "slowness", 3: "haste", 4: "mining_fatigue",
 	5: "strength", 6: "instant_health", 7: "instant_damage",
@@ -28,7 +29,9 @@ var effectNames = map[int32]string{
 	17: "hunger", 18: "weakness", 19: "poison", 20: "wither",
 	21: "health_boost", 22: "absorption", 23: "saturation",
 	24: "levitation", 25: "fatal_poison", 26: "conduit_power",
-	27: "slow_falling",
+	27: "slow_falling", 28: "bad_omen", 29: "village_hero", 30: "darkness",
+	31: "trial_omen", 32: "wind_charged", 33: "weaving", 34: "oozing",
+	35: "infested", 36: "raid_omen",
 }
 
 // applyEffectLocked records what the server did to the unit's own effects.
