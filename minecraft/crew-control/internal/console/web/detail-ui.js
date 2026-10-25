@@ -290,7 +290,8 @@ export function initDetail(host) {
     const { main, hotbar } = inventoryRows(d.inventory || []);
     const saveState = d.save && d.save.state;
     box.append(el('h3', { textContent: 'What the unit carries' }));
-    if (!d.inventory || !main.some(Boolean)) {
+    // Crew units usually carry in the hotbar alone, so both rows decide.
+    if (!main.some(Boolean) && !hotbar.some(Boolean)) {
       box.append(el('p', { className: 'dt-none', textContent: saveState === 'known' ? 'nothing carried' : saveState === 'none' ? "nothing read yet: this unit's record is not saved" : 'nothing carried' }));
       return box;
     }
