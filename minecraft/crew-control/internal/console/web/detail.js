@@ -89,10 +89,11 @@ export function enchantText(it) {
 }
 
 // How much of an item's durability is left, 0 to 1; null for a name the
-// tool table does not price or an undamaged sort.
+// tool table does not price. The answer leaves damage out when it is zero,
+// so a missing damage is a pristine tool.
 export function durability(it) {
   if (!it || !it.maxDamage) return null;
-  return (it.maxDamage - it.damage) / it.maxDamage;
+  return (it.maxDamage - (it.damage || 0)) / it.maxDamage;
 }
 
 const pretty = n => n.replace(/^minecraft:/, '');
@@ -109,7 +110,7 @@ export function slotLabel(it, extra = {}) {
   if (it.count > 1) parts.push(`x${it.count}`);
   const en = enchantText(it);
   if (en) parts.push(en);
-  if (it.maxDamage) parts.push(`${it.maxDamage - it.damage}/${it.maxDamage} durability left`);
+  if (it.maxDamage) parts.push(`${it.maxDamage - (it.damage || 0)}/${it.maxDamage} durability left`);
   if (it.contents) parts.push(`holds ${it.contents.length} stack${it.contents.length === 1 ? '' : 's'}`);
   return place + parts.join(' ');
 }
