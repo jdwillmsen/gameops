@@ -247,3 +247,185 @@ test('signing in again reads the unit afresh', async () => {
   assert.equal(p.calls.length, 2);
   assert.ok(one(p.root(), 'dt-page'));
 });
+
+// ---- a repaint keeps what the operator was doing ----
+
+// A scripted host whose answer a test swaps between polls.
+function scripted(first, opts) {
+  const s = { next: first };
+  const p = page(() => s.next, opts);
+  p.say = a => { s.next = a; };
+  return p;
+}
+
+const filled = grid => grid.filter(s => classesOf(s).includes('filled'));
+const inspectOf = (root, gridCls) => one(one(root, gridCls).parent, 'dt-inspect').textContent;
+
+test('an unchanged answer repaints nothing: the very same nodes stay', async () => {
+  const inv = [item(0, 'iron_sword'), item(9, 'bread')];
+  const p = scripted(ok(payload({ inventory: inv })));
+  await p.mount();
+  const before = ['dt-main', 'dt-hotbar', 'dt-vitals'].map(c => one(p.root(), c));
+  // The poller's own clock moves every read; it is not a change of content.
+  p.say(ok(payload({ inventory: inv, live: { state: 'known', asOf: iso(NOW + 1000) } })));
+  await p.poll();
+  const after = ['dt-main', 'dt-hotbar', 'dt-vitals'].map(c => one(p.root(), c));
+  after.forEach((n, i) => assert.equal(n, before[i], 'section node was kept'));
+});
+
+test('a change in one section leaves the others, and their focus, alone', async () => {
+  const inv = [item(0, 'iron_sword'), item(1, 'bread')];
+  const p = scripted(ok(payload({ inventory: inv })));
+  await p.mount();
+  const hotbar = slotsOf(p.root(), 'dt-hotbar');
+  hotbar[1].focus();
+  const grid = one(p.root(), 'dt-hotbar');
+  p.say(ok(payload({ inventory: inv, health: { current: 9, max: 20 } })));
+  await p.poll();
+  assert.equal(one(p.root(), 'dt-hotbar'), grid, 'the hotbar was not remade for a health change');
+  assert.equal(doc.activeElement, hotbar[1], 'focus is still on the slot');
+  assert.match(byClass(p.root(), 'hp')[0].title, /Health 9 of 20/);
+});
+
+test('a repaint of the focused grid puts focus back on the same slot and says it again', async () => {
+  const inv = [item(0, 'iron_sword'), item(1, 'bread', { count: 3 })];
+  const p = scripted(ok(payload({ inventory: inv })));
+  await p.mount();
+  slotsOf(p.root(), 'dt-hotbar')[1].focus();
+  assert.match(inspectOf(p.root(), 'dt-hotbar'), /bread x3/);
+  const old = slotsOf(p.root(), 'dt-hotbar')[1];
+  // The stack count changes, so the grid is remade.
+  p.say(ok(payload({ inventory: [inv[0], item(1, 'bread', { count: 5 })] })));
+  await p.poll();
+  const now = slotsOf(p.root(), 'dt-hotbar')[1];
+  assert.notEqual(now, old, 'the grid really was remade');
+  assert.equal(doc.activeElement, now, 'focus moved to the same slot of the new grid');
+  assert.match(inspectOf(p.root(), 'dt-hotbar'), /bread x5/);
+  assert.equal(now.tabIndex, 0);
+  assert.equal(slotsOf(p.root(), 'dt-hotbar').filter(s => s.tabIndex === 0).length, 1, 'one tab stop in the grid');
+});
+
+test('an expanded shulker box stays expanded across a repaint', async () => {
+  const box = item(9, 'shulker_box', { contents: [item(0, 'iron_ingot', { count: 64 })] });
+  const p = scripted(ok(payload({ inventory: [box, item(0, 'bread')] })));
+  await p.mount();
+  slotsOf(p.root(), 'dt-main')[0].click();
+  assert.match(inspectOf(p.root(), 'dt-main'), /inside: iron_ingot x64/);
+  p.say(ok(payload({ inventory: [box, item(0, 'bread', { count: 2 }), item(10, 'cobblestone')] })));
+  await p.poll();
+  assert.match(inspectOf(p.root(), 'dt-main'), /inside: iron_ingot x64/, 'still open after the grid was remade');
+  assert.equal(doc.activeElement, slotsOf(p.root(), 'dt-main')[0]);
+});
+
+test('a failed poll keeps the last good view and marks it stale', async () => {
+  const p = scripted(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await p.mount();
+  const page_ = one(p.root(), 'dt-page');
+  p.say({ ok: false, status: 0, data: { error: 'could not reach the server' } });
+  await p.poll();
+  assert.equal(one(p.root(), 'dt-page'), page_, 'the page was not replaced by an error');
+  assert.ok(one(p.root(), 'dt-hotbar'), 'the inventory is still on screen');
+  const stale = one(p.root(), 'dt-stale');
+  assert.equal(stale.hidden, false);
+  assert.match(stale.textContent, /could not refresh/i);
+  p.say({ ok: false, status: 502, data: null });
+  await p.poll();
+  assert.equal(one(p.root(), 'dt-stale').hidden, false, 'a bad gateway is stale too');
+  // The next good read clears the marker.
+  p.say(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await p.poll();
+  assert.equal(one(p.root(), 'dt-stale').hidden, true);
+});
+
+test('with nothing yet drawn, a failed first read offers a retry', async () => {
+  const p = scripted({ ok: false, status: 0, data: { error: 'could not reach the server' } });
+  await p.mount();
+  assert.match(p.root().textContent, /Could not read this unit/);
+  assert.equal(one(p.root(), 'dt-page'), null);
+  p.say(ok(payload()));
+  all(p.root(), n => n.tag === 'button')[0].click();
+  await settle();
+  assert.ok(one(p.root(), 'dt-page'), 'retry paints the page');
+});
+
+test('a later 401 or 404 does replace the page: those are answers, not outages', async () => {
+  const p = scripted(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await p.mount();
+  p.say({ ok: false, status: 401, data: { error: 'signed_out' } });
+  await p.poll();
+  assert.match(p.root().textContent, /Sign in to see a unit's inventory/);
+  assert.ok(!/iron_sword/.test(p.root().textContent));
+  p.say(ok(payload()));
+  await p.poll();
+  p.say({ ok: false, status: 404, data: { error: 'no such unit' } });
+  await p.poll();
+  assert.match(p.root().textContent, /not in the crew roster/);
+});
+
+test('a stale page paints afresh when a unit it had dropped comes back', async () => {
+  // After a 401 the page is gone, so the next good read builds it whole and
+  // not as a patch of nodes that no longer exist.
+  const p = scripted(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await p.mount();
+  p.say({ ok: false, status: 401, data: null });
+  await p.poll();
+  p.say(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await p.poll();
+  assert.equal(filled(slotsOf(p.root(), 'dt-hotbar')).length, 1);
+});
+
+// ---- the item sheet and the clock ----
+
+test('the item sheet is read once per mount and once more for another unit', async () => {
+  const sheet = { items: { 'minecraft:iron_sword': [0, 0, .25, .25] }, placeholder: [.75, .75, 1, 1] };
+  const p = scripted(ok(payload({ inventory: [item(0, 'iron_sword')] })), { sheet });
+  await p.mount();
+  await p.poll();
+  await p.poll();
+  assert.equal(p.calls.length, 3, 'three detail reads');
+  assert.deepEqual(p.fetched, ['/units/crew-03/v1/camera/items.json'], 'one read of the sheet');
+  assert.ok(one(p.root(), 'dt-icon'), 'the sheet is used for the pictures');
+  p.ui.unmount();
+  await p.mount('crew-04');
+  assert.deepEqual(p.fetched.slice(1), ['/units/crew-04/v1/camera/items.json']);
+});
+
+test('without a sheet the page still draws, with text for the pictures', async () => {
+  const p = scripted(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await p.mount();
+  assert.equal(one(p.root(), 'dt-icon'), null);
+  assert.ok(one(p.root(), 'dt-noicon'));
+});
+
+test('the header keeps the save age on a live unit', async () => {
+  const p = scripted(ok(payload()));
+  await p.mount();
+  assert.equal(one(p.root(), 'dt-fresh').textContent, 'live · save 3h ago');
+  assert.ok(classesOf(one(p.root(), 'dt-fresh')).includes('live'));
+  p.say(ok(payload({ live: { state: 'known', asOf: iso(Date.now() - 5 * 60_000) } })));
+  await p.poll();
+  assert.match(one(p.root(), 'dt-fresh').textContent, /^last heard 5 min ago · save 3h ago$/);
+  assert.ok(classesOf(one(p.root(), 'dt-fresh')).includes('stale'));
+});
+
+test('a tab that becomes visible reads at once; a hidden one does not poll', async () => {
+  const p = scripted(ok(payload()));
+  await p.mount();
+  assert.equal(p.calls.length, 1);
+  doc.visibilityState = 'hidden';
+  await p.poll();
+  assert.equal(p.calls.length, 1, 'no read while hidden');
+  doc.visibilityState = 'visible';
+  doc.fire('visibilitychange');
+  await settle();
+  assert.equal(p.calls.length, 2, 'read the moment it came back');
+  doc.visibilityState = 'hidden';
+  doc.fire('visibilitychange');
+  await settle();
+  assert.equal(p.calls.length, 2, 'going hidden reads nothing');
+  p.ui.unmount();
+  doc.visibilityState = 'visible';
+  doc.fire('visibilitychange');
+  await settle();
+  assert.equal(p.calls.length, 2, 'an unmounted page does not listen');
+});
