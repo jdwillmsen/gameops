@@ -65,7 +65,7 @@ func TestConsoleImportGraphIsServed(t *testing.T) {
 		}
 	}
 	walk("/static/console.js")
-	for _, want := range []string{"/static/overview-ui.js", "/static/overview.js", "/static/fleet.js", "/static/charts/spark.js"} {
+	for _, want := range []string{"/static/overview-ui.js", "/static/overview.js", "/static/fleet.js", "/static/charts/spark.js", "/static/graph/jobs-ui.js"} {
 		if !seen[want] {
 			t.Errorf("%s is not reachable from the console", want)
 		}
