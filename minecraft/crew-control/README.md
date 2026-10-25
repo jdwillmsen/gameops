@@ -32,7 +32,7 @@ crew-control; it never calls them to command them.
 
 ## Routes
 
-- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`) or a unit's inventory and ender chest (`?unit=<id>&view=detail`); `GET /static/{file}` its assets; `GET /camera` redirects to `/`
+- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) or the job graph (`?view=jobs&job=<id>`); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
@@ -214,6 +214,39 @@ routes answer 503 and the view-only console keeps working.
 - **Updates.** Rows are built once and patched in place every 2 s, with fixed column and row sizes so nothing shifts. A sort by a changing value re-orders rows, but not while the pointer is over the table. On a phone each unit is a two-line card and the camera modes, event feed and status bar are hidden to leave room.
 
 Logic lives in `overview.js` (node-tested in `overview.test.mjs`), the DOM in `overview-ui.js`, styles in `overview.css`; the chart library supplies the stat tiles and sparklines.
+
+## Job graph
+
+`?view=jobs` (the **Graph** button, or `g`) draws one job as a layered DAG: a
+node per step and an edge from every dependency to the step that waits on it.
+The list beside it holds the newest 20 jobs, running ones first, and a deep
+link to an older job fetches that one
+(`GET /v1/jobs/{id}`) instead of failing. Jobs come from the signed-in `jobs`
+event on `/v1/units/stream`; signed out the view says so and anonymous streams
+never receive the job payload. `?view=jobs&job=<id>` opens a specific job, and
+the address follows the list selection.
+
+- **Layout.** `layout.js` is a pure, library-free layered layout: longest-path
+  layering, barycentre crossing reduction, a weighted longest path for the
+  critical path and Kahn's algorithm to report a dependency cycle. A cycle is
+  drawn on the last layer, named in the toolbar, and never hangs the layout;
+  60 nodes lay out well under the 50 ms budget. Layout runs only when the
+  set of steps or edges changes, so a live `jobs` update patches state in
+  place and never moves a node or the viewport.
+- **State.** Every node carries the step's word, a signature shape and its
+  tone, so state never rides on colour alone. The critical path is a thicker
+  outline and edge. The details panel names the step's unit, task, state, the
+  job's timing, attempts, work item and the failure reason.
+- **Interaction.** Drag or scroll to pan and zoom, **Fit** resets the view,
+  click a node for details. Tab moves between nodes; Right and Left follow an
+  edge to what the step unlocks or waits for, Up and Down step through the
+  same layer, Enter opens the details and Esc closes them. Empty state says
+  "no jobs yet"; signed out it says "Sign in to see jobs."
+
+The graph component is generic (`graph.js` owns the DOM, `layout.js` the
+algorithm); `jobs.js` maps the job/steps shape into it and `jobs-ui.js` owns
+the jobs list, stream updates and deep link. Node tests cover the pure parts
+(`layout.test.mjs`, `jobs.test.mjs`).
 
 ## Chart library
 
