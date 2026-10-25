@@ -89,6 +89,12 @@ test('durability is a fraction of what is left, null without a max', () => {
   assert.equal(durability({ damage: 100, maxDamage: 400 }), 0.75);
   assert.equal(durability({ damage: 0, maxDamage: 271 }), 1);
   assert.equal(durability({}), null);
+  // The answer omits a zero damage, so a pristine tool arrives without one.
+  assert.equal(durability({ maxDamage: 250 }), 1);
+});
+
+test('a pristine tool says all of its durability is left, never NaN', () => {
+  assert.equal(slotLabel(item(0, { name: 'iron_pickaxe', maxDamage: 250 })), 'iron_pickaxe 250/250 durability left');
 });
 
 // The slot label is everything the tooltip tells: a custom name first, the
