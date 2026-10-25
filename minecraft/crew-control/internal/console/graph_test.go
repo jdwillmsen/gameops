@@ -2,8 +2,14 @@ package console
 
 import (
 	"path"
+	"regexp"
 	"strings"
 	"testing"
+)
+
+var (
+	scriptTag = regexp.MustCompile(`(?is)<script\b([^>]*)>(.*?)</script>`)
+	srcAttr   = regexp.MustCompile(`(?i)\bsrc="([^"]+)"`)
 )
 
 func TestJobGraphAssetsAreServed(t *testing.T) {
@@ -14,6 +20,7 @@ func TestJobGraphAssetsAreServed(t *testing.T) {
 		"/static/graph/jobs-ui.js": "javascript",
 		"/static/graph/graph.css":  "text/css",
 		"/static/graph/demo.html":  "text/html",
+		"/static/graph/demo.js":    "javascript",
 	} {
 		rec := serve(t, p)
 		if rec.Code != 200 || rec.Body.Len() == 0 {
@@ -68,5 +75,44 @@ func TestTheJobGraphIsReachableFromTheConsole(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("%s is not reachable from the job graph", want)
 		}
+	}
+}
+
+// The console's CSP allows no inline script, so a demo that carries one is
+// served blank; every script it needs must be a file the console also serves.
+func TestGraphDemoRunsUnderTheConsoleCSP(t *testing.T) {
+	page := serve(t, "/static/graph/demo.html")
+	// With no script-src, inline script falls back to default-src 'self' and
+	// is refused; the test is only meaningful while that holds.
+	if csp := page.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'self'") || strings.Contains(csp, "script-src") {
+		t.Fatalf("csp %q no longer blocks inline script by default", csp)
+	}
+	scripts := scriptTag.FindAllStringSubmatch(page.Body.String(), -1)
+	if len(scripts) == 0 {
+		t.Fatal("the demo loads no script")
+	}
+	for _, s := range scripts {
+		if strings.TrimSpace(s[2]) != "" {
+			t.Errorf("inline script in the demo would be blocked by the CSP: %.60q", s[2])
+			continue
+		}
+		m := srcAttr.FindStringSubmatch(s[1])
+		if m == nil {
+			t.Errorf("script tag without src and without a body: %q", s[1])
+			continue
+		}
+		rec := serve(t, m[1])
+		if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+			t.Errorf("%s: status %d, content type %q", m[1], rec.Code, rec.Header().Get("Content-Type"))
+			continue
+		}
+		for _, imp := range importSpec.FindAllStringSubmatch(rec.Body.String(), -1) {
+			if r := serve(t, imp[1]); r.Code != 200 {
+				t.Errorf("%s imports %s: status %d", m[1], imp[1], r.Code)
+			}
+		}
+	}
+	if strings.Contains(strings.ToLower(page.Body.String()), "onclick=") {
+		t.Error("inline event handlers are blocked by the CSP as well")
 	}
 }
