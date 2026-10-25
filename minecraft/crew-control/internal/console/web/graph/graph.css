@@ -1,0 +1,171 @@
+/* The node graph component and the jobs view around it. Reusable for later
+   graphs: everything above .dg is view-level (jobs list, header); .dg and
+   below is the generic graph component. Colour tokens come from charts.css
+   (.cc-root tokens) so the palette has one source of truth. */
+
+.dg,
+.dg-view { height: 100%; min-height: 0; }
+
+.dg-view { display: flex; flex-direction: column; color: var(--cc-ink); overflow: hidden; }
+.jv { flex: 1; min-height: 0; display: flex; }
+
+.jv-list {
+  width: 300px;
+  flex: none;
+  overflow-y: auto;
+  background: var(--cc-surface);
+  border-right: 1px solid var(--cc-grid);
+}
+.jv-list h2 { margin: 8px 10px 4px; font-size: 13px; opacity: .8; }
+.jv-rows { list-style: none; margin: 0; padding: 2px 0 8px; }
+.jv-row {
+  width: 100%;
+  display: block;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--cc-grid);
+  border-radius: 0;
+  padding: 6px 10px;
+  color: inherit;
+}
+.jv-row:hover { background: var(--cc-grid); }
+.jv-row[aria-pressed="true"] { background: #1d3050; }
+.jv-row-main { display: flex; gap: 8px; align-items: center; }
+.jv-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jv-reason { font-size: 11px; color: var(--cc-status-warning); }
+.jv-progress { flex: none; opacity: .75; font-size: 11px; }
+
+/* Positioning context for the empty overlay and the phone details sheet. */
+.jv-main { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.jv-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--cc-grid);
+  flex: none;
+}
+.jv-title { margin: 0; font-size: 14px; }
+.jv-progress, .jv-timing { font-size: 11px; opacity: .75; }
+.jv-cancel { flex: none; }
+.jv-msg { font-size: 11px; color: var(--cc-status-warning); min-height: 1em; }
+
+/* ---- the generic graph component ---- */
+
+.dg { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.dg-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--cc-grid);
+  flex: none;
+}
+.dg-zooms { display: flex; gap: 4px; flex: none; }
+.dg-zooms button { padding: 1px 8px; }
+
+.dg-legend { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.dg-chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--cc-grid);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.dg-plain { color: var(--cc-muted); }
+.dg-info { color: var(--cc-series-1); }
+.dg-live { color: var(--cc-status-warning); }
+.dg-good { color: var(--cc-good-text); }
+.dg-critical { color: var(--cc-status-critical); }
+.dg-chip .dg-ico { flex: none; }
+
+.dg-note { margin: 0; font-size: 11px; color: var(--cc-status-warning); flex: 1 1 auto; min-width: 12em; }
+.dg-key { font-size: 10px; opacity: .7; white-space: nowrap; }
+
+.dg-body { flex: 1; min-height: 0; display: flex; position: relative; }
+
+.dg-canvas { flex: 1; width: 100%; height: 100%; min-width: 0; }
+.dg-arrow { fill: var(--cc-muted); }
+.dg-edge { fill: none; stroke: var(--cc-axis); stroke-width: 1.4; }
+.dg-edge.dg-crit { stroke: var(--cc-status-warning); stroke-width: 2.4; }
+
+.dg-node { cursor: pointer; }
+.dg-node .dg-box {
+  fill: var(--cc-surface);
+  stroke: var(--cc-axis);
+  stroke-width: 1.2;
+}
+.dg-node[data-tone="plain"] .dg-box { stroke: var(--cc-muted); }
+.dg-node[data-tone="info"] .dg-box { stroke: var(--cc-series-1); }
+.dg-node[data-tone="live"] .dg-box { stroke: var(--cc-status-warning); stroke-width: 1.6; }
+.dg-node[data-tone="good"] .dg-box { stroke: var(--cc-good-text); }
+.dg-node[data-tone="critical"] .dg-box { stroke: var(--cc-status-critical); stroke-width: 1.6; }
+/* The critical path sits above the state colour: bright ink and wider, but the
+   steps still carry their own state word and icon. */
+.dg-node.dg-path .dg-box { stroke: var(--cc-ink); stroke-width: 2; }
+.dg-node.dg-on .dg-box { stroke: var(--cc-series-1); stroke-width: 2.4; }
+.dg-node:focus { outline: 2px solid var(--cc-ink); outline-offset: 2px; }
+.dg-label { fill: var(--cc-ink); font-size: 11px; font-weight: 600; font-family: inherit; }
+.dg-sub { fill: var(--cc-ink-2); font-size: 10px; font-family: inherit; }
+.dg-node foreignObject { overflow: visible; }
+.dg-node foreignObject .dg-chip { font-size: 9px; padding: 0 4px; gap: 3px; border-radius: 7px; }
+
+.dg-side {
+  width: 260px;
+  flex: none;
+  overflow-y: auto;
+  border-left: 1px solid var(--cc-grid);
+  padding: 8px;
+  background: var(--cc-surface);
+}
+.dg-details-bar { display: flex; gap: 8px; align-items: center; }
+.dg-details-bar h3 { margin: 0; font-size: 12px; flex: 1; }
+.dg-details-bar button { flex: none; padding: 0 6px; }
+.dg-details dl {
+  display: grid;
+  grid-template-columns: minmax(5em, auto) 1fr;
+  gap: 3px 10px;
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+.dg-details dt { opacity: .7; }
+.dg-details dd { margin: 0; overflow-wrap: anywhere; }
+
+.dg-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  background: var(--cc-surface);
+  font-size: 13px;
+}
+.dg-empty a { color: var(--cc-series-1); }
+.dg-empty[hidden] { display: none; }
+
+@media (max-width: 720px) {
+  .jv { flex-direction: column; }
+  .jv-list { width: auto; max-height: 42%; border-right: 0; border-bottom: 1px solid var(--cc-grid); }
+  /* Fixed to the viewport, not the stage: the stage is clipped above the
+     Events dock, which would otherwise hide the bottom of the sheet. */
+  .dg-side {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 60vh;
+    width: auto;
+    border-left: 0;
+    border-top: 1px solid var(--cc-grid);
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, .5);
+    z-index: 50;
+  }
+}
