@@ -17,7 +17,9 @@ export function parse(search, units) {
 
 export function format({ unit, mode, view, job }) {
   const q = new URLSearchParams({ unit, mode, view });
-  if (job) q.set('job', job);
+  // The job belongs to the jobs view; the address must not keep naming it
+  // once the operator has left.
+  if (job && view === 'jobs') q.set('job', job);
   return q.toString();
 }
 
