@@ -1,7 +1,10 @@
 export const MODES = ['first', 'third', 'orbit', 'top'];
-export const VIEWS = ['focus', 'wall', 'fleet', 'detail'];
+export const VIEWS = ['focus', 'wall', 'fleet', 'detail', 'jobs'];
 
 const idOf = u => (typeof u === 'string' ? u : u.id);
+
+// A job id is a uuid; anything else is a typo to ignore, not a link to fetch.
+const jobParam = v => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : '');
 
 export function parse(search, units) {
   const q = new URLSearchParams(search);
@@ -9,11 +12,13 @@ export function parse(search, units) {
   const unit = ids.includes(q.get('unit')) ? q.get('unit') : (ids[0] ?? '');
   const mode = MODES.includes(q.get('mode')) ? q.get('mode') : MODES[0];
   const view = VIEWS.includes(q.get('view')) ? q.get('view') : VIEWS[0];
-  return { unit, mode, view };
+  return { unit, mode, view, job: jobParam(q.get('job') || '') };
 }
 
-export function format({ unit, mode, view }) {
-  return new URLSearchParams({ unit, mode, view }).toString();
+export function format({ unit, mode, view, job }) {
+  const q = new URLSearchParams({ unit, mode, view });
+  if (job) q.set('job', job);
+  return q.toString();
 }
 
 export const tileSrc = (id, mode) => `/units/${encodeURIComponent(id)}/camera?mode=${mode}`;
