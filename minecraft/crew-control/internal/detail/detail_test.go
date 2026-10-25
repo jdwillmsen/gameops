@@ -159,6 +159,25 @@ func TestDetailIsForOperatorsOnly(t *testing.T) {
 	}
 }
 
+// A max-age here would let the browser repaint a signed-in answer after
+// sign-out, so every 200 shape must forbid storing it, not only one.
+func TestEveryDetailAnswerForbidsStoring(t *testing.T) {
+	saved := &fakeSource{record: fixtureRecord(), at: time.Now(), found: true, scanned: true}
+	for name, h := range map[string]http.Handler{
+		"live with a save": serve(t, rosterWith(t, "-12"), liveState(true, time.Now()), saved, gate{signedIn: true}),
+		"offline":          serve(t, rosterWith(t, "-12"), liveState(false, time.Time{}), saved, gate{signedIn: true}),
+		"no save source":   serve(t, rosterWith(t, "-12"), liveState(true, time.Now()), nil, gate{signedIn: true}),
+	} {
+		code, _, rec := detailBody(t, h)
+		if code != http.StatusOK {
+			t.Fatalf("%s: status %d", name, code)
+		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("%s: cache-control = %q, want no-store", name, cc)
+		}
+	}
+}
+
 func TestDetailWithoutASourceSaysTheSaveIsOff(t *testing.T) {
 	h := serve(t, rosterWith(t, "-12"), liveState(true, time.Now()), nil, gate{signedIn: true})
 	code, v, _ := detailBody(t, h)
@@ -246,7 +265,7 @@ func TestDetailPrefersTheLivePollWhereItIsFresher(t *testing.T) {
 	if len(v["enderChest"].([]any)) != 27 {
 		t.Errorf("ender chest = %v", v["enderChest"])
 	}
-	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=5" {
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
 		t.Errorf("cache-control = %q", cc)
 	}
 }

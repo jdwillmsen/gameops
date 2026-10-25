@@ -36,7 +36,7 @@ crew-control; it never calls them to command them.
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
-- `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: private`; see [Unit detail](#unit-detail)
+- `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
 - `GET /signin`: passkey sign-in; `/signin#operator=<id>&invite=<code>` enrols a passkey. The invite rides in the fragment so it never reaches a log
@@ -67,7 +67,8 @@ unit reports live — merged with what the once-a-second poll of its
 `/v1/state` heard. The ender chest is private to its owner, so unlike the
 camera and state routes above it this one is **not** on the public
 allow-list: it answers 401 without an operator session and is marked
-`Cache-Control: private`, so no share or cache may ever hold it. The public
+`Cache-Control: no-store`, so neither a share nor the browser's own
+cache may ever hold it (a signed-out tab must not repaint it). The public
 gateway route passes everything under `/units` to crew-control, so that 401
 is the guard, not an absence from the gateway.
 
