@@ -221,32 +221,43 @@ Logic lives in `overview.js` (node-tested in `overview.test.mjs`), the DOM in `o
 node per step and an edge from every dependency to the step that waits on it.
 The list beside it holds the newest 20 jobs, running ones first, and a deep
 link to an older job fetches that one
-(`GET /v1/jobs/{id}`) instead of failing. Jobs come from the signed-in `jobs`
+(`GET /v1/jobs/{id}`): the view shows "loading that job…" meanwhile, "job not
+found" on a 404, and retries with growing waits on a 503 or a dropped
+connection. Jobs come from the signed-in `jobs`
 event on `/v1/units/stream`; signed out the view says so and anonymous streams
 never receive the job payload. `?view=jobs&job=<id>` opens a specific job, and
 the address follows the list selection.
 
 - **Layout.** `layout.js` is a pure, library-free layered layout: longest-path
-  layering, barycentre crossing reduction, a weighted longest path for the
-  critical path and Kahn's algorithm to report a dependency cycle. A cycle is
-  drawn on the last layer, named in the toolbar, and never hangs the layout;
+  layering, barycentre crossing reduction, a critical path and Kahn's
+  algorithm with strongly connected components to report a dependency cycle.
+  The critical path is the longest chain of steps: every step counts one, as
+  no step carries a duration. Only the steps on a cycle are named in the
+  toolbar; they share one column, and steps that merely wait on the cycle are
+  laid out after it like any others. A cycle never hangs the layout;
   60 nodes lay out well under the 50 ms budget. Layout runs only when the
   set of steps or edges changes, so a live `jobs` update patches state in
   place and never moves a node or the viewport.
 - **State.** Every node carries the step's word, a signature shape and its
   tone, so state never rides on colour alone. The critical path is a thicker
-  outline and edge. The details panel names the step's unit, task, state, the
+  outline and edge, and "on critical path" is part of the node's accessible
+  name; the selected node is marked and carries `aria-current`. The details panel names the step's unit, task, state, the
   job's timing, attempts, work item and the failure reason.
 - **Interaction.** Drag or scroll to pan and zoom, **Fit** resets the view,
   click a node for details. Tab moves between nodes; Right and Left follow an
   edge to what the step unlocks or waits for, Up and Down step through the
-  same layer, Enter opens the details and Esc closes them. Empty state says
+  same layer, Enter opens the details and Esc closes them and returns focus to
+  the node. A `jobs` update patches in place: it never moves focus, and the
+  selected node, open details and pan and zoom survive it. Empty state says
   "no jobs yet"; signed out it says "Sign in to see jobs."
 
 The graph component is generic (`graph.js` owns the DOM, `layout.js` the
 algorithm); `jobs.js` maps the job/steps shape into it and `jobs-ui.js` owns
 the jobs list, stream updates and deep link. Node tests cover the pure parts
-(`layout.test.mjs`, `jobs.test.mjs`).
+(`layout.test.mjs`, `jobs.test.mjs`) and, against a small fake DOM
+(`fake-dom.mjs`), the component and the view (`graph.test.mjs`,
+`jobs-ui.test.mjs`). `demo.html` is the standalone component page; its script
+is `demo.js`, as the console's CSP refuses inline script.
 
 ## Chart library
 
