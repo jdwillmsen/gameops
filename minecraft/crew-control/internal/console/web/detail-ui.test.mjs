@@ -200,3 +200,50 @@ test('carry: nothing anywhere is said in words, with no grid', async () => {
   assert.equal(one(p.root(), 'dt-main'), null);
 });
 
+// ---- the private answer is never kept ----
+
+test('the detail read bypasses the browser cache', async () => {
+  const p = page(ok(payload()));
+  await p.mount();
+  assert.equal(p.calls[0].method, 'GET');
+  assert.match(p.calls[0].path, /\/units\/crew-03\/detail$/);
+  assert.equal(p.calls[0].opts && p.calls[0].opts.cache, 'no-store');
+});
+
+test('sign-out clears the page at once, without waiting for a 401', async () => {
+  const p = page(ok(payload({ inventory: [item(0, 'iron_sword')], enderChest: [item(0, 'diamond')].concat(new Array(26).fill(null)) })));
+  await p.mount();
+  assert.ok(/iron_sword/.test(all(p.root(), n => n.getAttribute('aria-label')).map(n => n.getAttribute('aria-label')).join()));
+  p.setOperator(null);
+  p.ui.onOperator(null);
+  const text = p.root().textContent;
+  assert.match(text, /Sign in to see a unit's inventory/);
+  assert.ok(!/Cobalt|iron_sword|diamond|Health/.test(text), `signed-in data is gone: ${text}`);
+  assert.equal(all(p.root(), n => (n.getAttribute('aria-label') || '').includes('iron_sword')).length, 0);
+  assert.equal(p.calls.length, 1, 'no further read was needed to clear it');
+});
+
+test('a read already in flight at sign-out cannot repaint the signed-in answer', async () => {
+  let release;
+  const slow = new Promise(r => { release = r; });
+  const p = page(slow);
+  p.ui.mount(p.into, 'crew-03');
+  await settle();
+  p.setOperator(null);
+  p.ui.onOperator(null);
+  release(ok(payload({ inventory: [item(0, 'iron_sword')] })));
+  await settle();
+  assert.match(p.root().textContent, /Sign in to see a unit's inventory/);
+  assert.equal(one(p.root(), 'dt-page'), null);
+});
+
+test('signing in again reads the unit afresh', async () => {
+  const p = page(ok(payload()));
+  await p.mount();
+  p.ui.onOperator(null);
+  p.setOperator({ id: 'owner' });
+  p.ui.onOperator({ id: 'owner' });
+  await settle();
+  assert.equal(p.calls.length, 2);
+  assert.ok(one(p.root(), 'dt-page'));
+});

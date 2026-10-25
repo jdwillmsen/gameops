@@ -256,8 +256,8 @@ let jobsUI = null;
 let tab = 'jobs';
 const expanded = new Set();
 
-async function api(method, path, body) {
-  const init = { method, headers: {} };
+async function api(method, path, body, extra = {}) {
+  const init = { method, headers: {}, ...extra };
   if (method === 'POST') {
     init.headers = { 'Content-Type': 'application/json', 'X-Crew-Request': '1' };
     init.body = JSON.stringify(body ?? {});
@@ -292,7 +292,7 @@ function setOperator(op) {
   renderPanel();
   ops.onOperator();
   overview.onOperator();
-  detail.onOperator();
+  detail.onOperator(op);
   renderJobs();
   if (changed) reconnect();
 }
