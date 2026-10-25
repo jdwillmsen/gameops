@@ -1,11 +1,12 @@
 // The unit detail page: what the world save and the live poll hold of one
 // unit — vitals, effects, what it carries — read from the detail route.
-// detail.js holds the logic; this file only fetches and paints. The whole
-// page is remade on each read: it answers for its unit as one thing, and
-// nothing here needs to patch in place the way a fleet table does.
+// detail.js holds the logic; this file only fetches and paints. A read that
+// changes nothing repaints nothing, and a section that did change is remade
+// whole with the operator's place in it put back, so a poll never takes
+// focus, an open box or the inspect line away.
 import {
   ARMOR_SLOTS, freshness, effectLabel, effectTime, slotLabel, inventoryRows, armorRow,
-  chestState, nextSlot, iconStyle, iconRect,
+  chestState, nextSlot, iconStyle, iconRect, ageText, durability, contentsText, slotTitle,
 } from './detail.js';
 
 // A page reads its own answer this often; the save behind it is itself read
@@ -36,7 +37,15 @@ export function initDetail(host) {
   let unit = '';
   let token = 0;
   let sheet = null; // { doc, url } or null
+  let sheetRead = null; // the one read of the item sheet this mount makes
   let timer = 0;
+  let view = null; // the page now on screen: { title, fresh, stale, page, nodes, keys }
+  let seenAt = 0; // when the answer on screen was read
+  // Grids on screen, by key, so a repaint can find where focus was; and the
+  // state of each that outlives the nodes: its tab stop, its open box and
+  // the slot its inspect line speaks of.
+  const grids = new Map();
+  const ui = new Map();
 
   // ---- data ----
 
@@ -44,21 +53,27 @@ export function initDetail(host) {
     const id = unit;
     if (!id || !mounted) return;
     const my = ++token;
+    sheetRead ||= loadSheet(id);
     const [r, s] = await Promise.all([
       // The answer is private to the session: no-store keeps the browser
       // from repainting it after sign-out, whatever the server says.
       host.api('GET', unitPath(id, '/detail'), undefined, { cache: 'no-store' }),
-      loadSheet(id),
+      sheetRead,
     ]);
     if (!mounted || my !== token) return;
     sheet = s;
     if (r.status === 401) paintAuth();
     else if (r.status === 404) paintNote('This unit is not in the crew roster.');
-    else if (!r.ok) paintRetry((r.data && r.data.error) || `Failed (${r.status}).`);
-    else paint(r.data);
+    // An outage is not an answer about the unit: what is drawn stays, marked
+    // old, and only a page with nothing drawn yet shows the failure.
+    else if (!r.ok || !r.data) {
+      if (view) markStale();
+      else paintRetry((r.data && r.data.error) || `Failed (${r.status}).`);
+    } else paint(r.data);
   }
 
-  // The item sheet is the camera's atlas for the same unit. A unit whose
+  // The item sheet is the camera's atlas for the same unit, read once per
+  // mount: a unit's sheet does not change under an open page. A unit whose
   // camera has no atlas falls back to text labels; the page does not fail.
   async function loadSheet(id) {
     let doc = null;
@@ -74,37 +89,104 @@ export function initDetail(host) {
 
   // ---- states ----
 
+  // Anything but the page itself ends the page: what was drawn is no longer
+  // true of this session, and nothing of it may be patched into later.
+  function forget() {
+    view = null;
+    grids.clear();
+    ui.clear();
+  }
+
+  function showState(...kids) {
+    forget();
+    root.replaceChildren(...kids);
+  }
+
   function paintNote(text) {
-    root.replaceChildren(el('div', { className: 'dt-state' }, el('h2', { textContent: text })));
+    showState(el('div', { className: 'dt-state' }, el('h2', { textContent: text })));
   }
 
   function paintAuth() {
-    root.replaceChildren(el('div', { className: 'dt-state' },
+    showState(el('div', { className: 'dt-state' },
       el('h2', { textContent: "Sign in to see a unit's inventory" }),
       el('p', {}, 'Unit inventory and the ender chest are operator-only. ', el('a', { href: '/signin', textContent: 'Sign in' }), '.')));
   }
 
   function paintRetry(text) {
-    const box = el('div', { className: 'dt-state' },
+    const retry = el('button', { type: 'button', textContent: 'Try again' });
+    retry.addEventListener('click', load);
+    showState(el('div', { className: 'dt-state' },
       el('h2', { textContent: 'Could not read this unit.' }),
       el('p', { textContent: text }),
-      el('button', { type: 'button', textContent: 'Try again' }));
-    box.lastChild.addEventListener('click', load);
-    root.replaceChildren(box);
+      retry));
   }
 
   // ---- paint ----
 
+  // Each section with what of the answer it is drawn from: a section is
+  // remade only when that changed, so the poller's clock and a neighbour's
+  // numbers never disturb a grid someone is standing in.
+  const SECTIONS = [
+    ['vitals', d => [d.health, d.hunger, d.air, d.xp], vitals],
+    ['chips', d => [d.gameMode, d.dimension, d.online], chips],
+    ['effects', d => d.effects, effects],
+    ['armour', d => [d.armor, d.mainhand, d.offhand], armour],
+    ['carry', d => [d.inventory, d.save && d.save.state], carry],
+    ['chest', d => [d.enderChest, d.save && d.save.state], enderChest],
+  ];
+
   function paint(d) {
-    const fresh = freshness(d, Date.now());
-    const head = el('header', { className: 'dt-head' },
-      el('h2', { text: undefined, textContent: d.name || d.id || unit }),
-      el('p', { className: `dt-fresh ${fresh.kind}`, textContent: fresh.text }));
-    const page = el('div', { className: 'dt-page' }, head);
-    root.replaceChildren(page);
-    for (const sec of [vitals(d), chips(d), effects(d), armour(d), carry(d), enderChest(d)]) {
-      if (sec) page.append(sec);
+    seenAt = Date.now();
+    if (!view) {
+      const title = el('h2');
+      const fresh = el('p');
+      const stale = el('p', { className: 'dt-stale', hidden: true });
+      stale.setAttribute('role', 'status');
+      const page = el('div', { className: 'dt-page' }, el('header', { className: 'dt-head' }, title, fresh, stale));
+      view = { title, fresh, stale, page, nodes: new Map(), keys: new Map() };
+      root.replaceChildren(page);
     }
+    view.title.textContent = d.name || d.id || unit;
+    const fresh = freshness(d, seenAt);
+    view.fresh.className = `dt-fresh ${fresh.kind}`;
+    view.fresh.textContent = fresh.text;
+    view.stale.hidden = true;
+    for (const [id, keyOf, build] of SECTIONS) {
+      const key = JSON.stringify([keyOf(d), Boolean(sheet)]);
+      if (view.keys.get(id) === key) continue;
+      view.keys.set(id, key);
+      const held = heldSlot();
+      const node = build(d);
+      const old = view.nodes.get(id);
+      if (old) old.replaceWith(node);
+      else view.page.append(node);
+      view.nodes.set(id, node);
+      if (held) restoreSlot(held);
+    }
+  }
+
+  function markStale() {
+    const ago = ageText(new Date(seenAt).toISOString());
+    view.stale.textContent = `Stale: could not refresh. This is what was read ${ago}.`;
+    view.stale.hidden = false;
+  }
+
+  // Where focus is among the grids, before a section is remade, and back
+  // there afterwards: a remade grid is new nodes, and a browser drops focus
+  // with the node that held it.
+  function heldSlot() {
+    const active = document.activeElement;
+    if (!active) return null;
+    for (const [key, g] of grids) {
+      const at = g.indexOf(active);
+      if (at >= 0) return { key, at, from: g };
+    }
+    return null;
+  }
+
+  function restoreSlot({ key, at, from }) {
+    const g = grids.get(key);
+    if (g && g !== from) g.focusSlot(at, true);
   }
 
   function vitals(d) {
@@ -158,7 +240,7 @@ export function initDetail(host) {
       className: 'dt-slot' + (item ? ' filled' : ' empty'),
       tabIndex: -1,
       'aria-label': slotLabel(item, opts),
-      title: item ? slotLabel(item) : opts.emptyLabel,
+      title: item ? slotTitle(item) : opts.emptyLabel,
     });
     const icon = item && itemIcon(item);
     if (icon) b.append(icon);
@@ -167,10 +249,10 @@ export function initDetail(host) {
       if (item.count > 1) b.append(el('span', { className: 'dt-count', textContent: String(item.count) }));
       if (item.enchantments && item.enchantments.length) b.append(el('span', { className: 'dt-mark ench', title: 'enchanted', 'aria-hidden': 'true', textContent: '✦' }));
       if (item.contents && item.contents.length) b.append(el('span', { className: 'dt-mark boxl', title: 'shulker box with contents', 'aria-hidden': 'true', textContent: '▣' }));
-      if (item.maxDamage && item.damage < item.maxDamage) {
-        const d = (item.maxDamage - item.damage) / item.maxDamage;
-        const bar = el('i', { className: 'dt-dur' + (d <= .2 ? ' low' : '') });
-        bar.style.setProperty('--f', `${Math.round(d * 100)}%`);
+      const left = durability(item);
+      if (left !== null) {
+        const bar = el('i', { className: 'dt-dur' + (left <= .2 ? ' low' : '') });
+        bar.style.setProperty('--f', `${Math.round(Math.max(0, Math.min(1, left)) * 100)}%`);
         b.append(bar);
       }
     }
@@ -192,38 +274,37 @@ export function initDetail(host) {
 
   // A grid is one tab stop: its slots rove the tabindex and arrows walk
   // it, and the focused slot's story is spelled out beneath for every
-  // pointer, keyboard and screen reader alike.
-  function gridBox(slots, label, cls, emptyLabel) {
+  // pointer, keyboard and screen reader alike. Its place in the page is its
+  // key, so a grid remade by a poll takes up where the last one was left.
+  function gridBox(key, slots, label, cls, emptyLabel) {
     const emptyFor = typeof emptyLabel === 'function' ? i => emptyLabel(i) : i => `${label}: ${emptyLabel}`;
     const cells = slots.map((item, i) => wrapCell(slotCell(item, { emptyLabel: emptyFor(i) })));
     const grid = el('div', { className: `dt-grid ${cls}`, role: 'grid', 'aria-label': label }, ...cells);
     const line = el('p', { className: 'dt-inspect', role: 'status', 'aria-live': 'polite' });
-    // A slot with something inside it says so on the pointer's tooltip and,
-    // expanded, under the grid; expansion is a per-slot toggle, and closes
-    // another slot's expansion, so two boxes never shout at once.
-    const rove = { at: -1 };
-    const expanded = { at: -1 };
+    // What outlives a remade grid: the tab stop, the one box held open and
+    // the slot the line beneath last spoke of. Expansion is a per-slot
+    // toggle and closes another slot's, so two boxes never shout at once.
+    if (!ui.has(key)) ui.set(key, { rove: -1, expanded: -1, said: -1 });
+    const mem = ui.get(key);
     const slotAt = i => (i >= 0 && i < cells.length ? cells[i].firstElementChild : null);
-    const focusSlot = i => {
+    const indexOf = s => cells.findIndex(c => c.firstElementChild === s);
+    const focusSlot = (i, quiet = false) => {
       const s = slotAt(i);
-      if (s) s.focus({ preventScroll: false });
+      if (s) s.focus({ preventScroll: quiet });
     };
-    const insideText = i => {
-      const c = slots[i] && slots[i].contents;
-      if (!c || !c.length) return '';
-      return ' — inside: ' + c.map(s => `${s.name}${s.count > 1 ? ` x${s.count}` : ''}`).join(', ');
-    };
+    const insideText = i => contentsText(slots[i]);
     const describe = at => {
       const s = slotAt(at);
       if (!s) return;
-      line.textContent = s.getAttribute('aria-label') + (expanded.at === at ? insideText(at) : '');
+      mem.said = at;
+      line.textContent = s.getAttribute('aria-label') + (mem.expanded === at ? insideText(at) : '');
     };
     grid.addEventListener('focusin', ev => {
       const s = ev.target && ev.target.closest && ev.target.closest('.dt-slot');
       if (!s) return;
-      if (rove.at >= 0 && slotAt(rove.at)) slotAt(rove.at).tabIndex = -1;
-      const at = cells.findIndex(c => c.firstElementChild === s);
-      rove.at = at;
+      if (slotAt(mem.rove)) slotAt(mem.rove).tabIndex = -1;
+      const at = indexOf(s);
+      mem.rove = at;
       s.tabIndex = 0;
       // The tooltip a pointer gets from title is stated here too, so a
       // focused slot tells its whole story however it was reached.
@@ -232,23 +313,23 @@ export function initDetail(host) {
     grid.addEventListener('click', ev => {
       const s = ev.target && ev.target.closest && ev.target.closest('.dt-slot');
       if (!s) return;
-      const at = cells.findIndex(c => c.firstElementChild === s);
+      const at = indexOf(s);
       // A box slot's click is "open it", not a selection look-alike.
-      if (insideText(at)) expanded.at = expanded.at === at ? -1 : at;
+      if (insideText(at)) mem.expanded = mem.expanded === at ? -1 : at;
       focusSlot(at);
       describe(at);
     });
     grid.addEventListener('keydown', ev => {
       const s = ev.target && ev.target.closest && ev.target.closest('.dt-slot');
       if (!s) return;
-      const at = cells.findIndex(c => c.firstElementChild === s);
+      const at = indexOf(s);
       if (at < 0) return;
       if (ev.key === 'Enter' || ev.key === ' ') {
         // Enter and Space already mean something on a button; on a slot
         // they open a box instead of doing nothing.
         if (!insideText(at)) return;
         ev.preventDefault();
-        expanded.at = expanded.at === at ? -1 : at;
+        mem.expanded = mem.expanded === at ? -1 : at;
         describe(at);
         return;
       }
@@ -259,10 +340,14 @@ export function initDetail(host) {
         describe(next);
       }
     });
-    // The first stop of a fresh grid lands on something filled when the
-    // grid holds anything; an all-empty one starts at its first slot.
-    const first = slots.findIndex(Boolean);
-    if (first >= 0) slotAt(first).tabIndex = 0;
+    // A fresh grid's first stop lands on something filled when the grid
+    // holds anything; an all-empty one starts at its first slot. A remade
+    // grid keeps the stop it had, and a box that has since emptied closes.
+    if (!insideText(mem.expanded)) mem.expanded = -1;
+    if (!slotAt(mem.rove)) mem.rove = Math.max(0, slots.findIndex(Boolean));
+    slotAt(mem.rove).tabIndex = 0;
+    if (mem.said >= 0) describe(mem.said);
+    grids.set(key, { indexOf: s => indexOf(s), focusSlot });
     return { grid, line };
   }
 
@@ -282,7 +367,7 @@ export function initDetail(host) {
     if (d.mainhand) slots.push(d.mainhand);
     if (d.offhand) slots.push(d.offhand);
     if (!slots.some(Boolean)) box.append(el('p', { className: 'dt-none', textContent: 'no armour worn and nothing held' }));
-    else box.append(gridZone(gridBox(slots, 'Armour and held', 'dt-armourgrid',
+    else box.append(gridZone(gridBox('armour', slots, 'Armour and held', 'dt-armourgrid',
       i => (i < ARMOR_SLOTS.length ? `no armour on ${ARMOR_SLOTS[i]}` : i === ARMOR_SLOTS.length ? 'main hand: empty' : 'off hand: empty'))));
     return box;
   }
@@ -297,9 +382,9 @@ export function initDetail(host) {
       box.append(el('p', { className: 'dt-none', textContent: saveState === 'known' ? 'nothing carried' : saveState === 'none' ? "nothing read yet: this unit's record is not saved" : 'nothing carried' }));
       return box;
     }
-    box.append(gridZone(gridBox(main, 'Main inventory', 'dt-main', 'empty')));
+    box.append(gridZone(gridBox('main', main, 'Main inventory', 'dt-main', 'empty')));
     box.append(el('h4', { className: 'dt-sub', textContent: 'Hotbar' }));
-    box.append(gridZone(gridBox(hotbar, 'Hotbar', 'dt-hotbar', 'empty')));
+    box.append(gridZone(gridBox('hotbar', hotbar, 'Hotbar', 'dt-hotbar', 'empty')));
     return box;
   }
 
@@ -325,15 +410,27 @@ export function initDetail(host) {
       box.append(el('p', { className: 'dt-none', textContent: 'the chest is empty — crew units do not use theirs' }));
       return box;
     }
-    box.append(gridZone(gridBox(st.chest, 'Ender chest', 'dt-chest', i => `slot ${i + 1}: empty`)));
+    box.append(gridZone(gridBox('chest', st.chest, 'Ender chest', 'dt-chest', i => `slot ${i + 1}: empty`)));
     return box;
+  }
+
+  // A tab that comes back reads at once instead of waiting out the tick,
+  // since a hidden one skips its polls.
+  function onVisible() {
+    if (mounted && document.visibilityState === 'visible') load();
   }
 
   return {
     mount(into, id) {
       root.remove();
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
       mounted = true;
       unit = id || '';
+      token++;
+      sheet = null;
+      sheetRead = null;
+      forget();
       into.append(root);
       if (!unit) {
         paintNote('No unit is picked.');
@@ -341,17 +438,18 @@ export function initDetail(host) {
       }
       root.replaceChildren(el('p', { className: 'dt-loading', textContent: `Reading ${unit}…` }));
       load();
-      clearInterval(timer);
       timer = setInterval(() => {
         if (document.visibilityState !== 'visible') return;
         load();
       }, POLL_MS);
+      document.addEventListener('visibilitychange', onVisible);
     },
     unmount() {
       if (!mounted) return;
       mounted = false;
       token++;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
       root.remove();
     },
     // A session change changes what the route answers, so an open page is
