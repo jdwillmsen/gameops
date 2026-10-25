@@ -21,7 +21,7 @@ function loadPrefs() {
   try { return { ...d, ...JSON.parse(localStorage.getItem(PREFS) || '{}') }; } catch { return d; }
 }
 
-// host: { statuses, order(), state(), focus(id), setMode(m), setView(v),
+// host: { statuses, order(), state(), focus(id), detail(id), setMode(m), setView(v),
 //         operator(), api(method, path, body) }
 export function initOps(host) {
   const prefs = loadPrefs();
@@ -109,9 +109,17 @@ export function initOps(host) {
         cb.addEventListener('change', () => { if (cb.checked) picked.add(s.id); else picked.delete(s.id); renderRoster(); });
         tr.append(el('td', {}, cb));
       }
+      const nameCell = el('td', { className: 'nm', textContent: s.name || s.id });
+      if (op && host.detail) {
+        // A row click focuses the camera, so the second destination gets its
+        // own explicit affordance rather than a hidden double-click.
+        const b = el('button', { type: 'button', className: 'dt-open', textContent: 'detail', title: `Open detail for ${s.name || s.id}` });
+        b.addEventListener('click', ev => { ev.stopPropagation(); host.detail(s.id); });
+        nameCell.append(' ', b);
+      }
       tr.append(
         el('td', { className: 'num', textContent: String(idx.get(s.id)) }),
-        el('td', { className: 'nm', textContent: s.name || s.id }),
+        nameCell,
         el('td', {}, bar(s.health, 20, 'hp')),
         el('td', {}, bar(s.hunger, 20, 'food')),
         el('td', { className: 'task', textContent: taskLine(s) }),

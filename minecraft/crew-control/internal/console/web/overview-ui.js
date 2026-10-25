@@ -531,6 +531,13 @@ export function initOverview(host) {
       host.focus(row.dataset.unit);
       return true;
     }
+    // The detail page of the row; d is free at the table, and the row you
+    // are about to open is also where the pointer may sit.
+    if (ev.key === 'd' && host.detail) {
+      ev.preventDefault();
+      host.detail(row ? row.dataset.unit : roving);
+      return true;
+    }
     if (ev.key === 'a') {
       const shown = new Set(visibleIds());
       focusRow(nextAttention(board.rows().filter(r => shown.has(r.id)), cur));

@@ -32,7 +32,7 @@ crew-control; it never calls them to command them.
 
 ## Routes
 
-- `GET /`: the console, one focused unit, a wall of every unit or the fleet overview (`?view=fleet`); `GET /static/{file}` its assets; `GET /camera` redirects to `/`
+- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`) or a unit's inventory and ender chest (`?unit=<id>&view=detail`); `GET /static/{file}` its assets; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
@@ -98,6 +98,32 @@ the record carries no time of its own) — and then the merged view:
 - The save is read at most once every `CREW_WORLD_EVERY`, a failed read
   included, and held between reads, so a detail view costs the world one
   read and not one a request. A read happens only when a request asks.
+
+On the console the answer is its own view: the **Detail** bar button, `d`
+while a unit is selected, the `detail` button on any roster row, or a deep
+link such as `?unit=crew-03&view=detail`. Signed out it is a state, never an
+error: *Sign in to see a unit's inventory*, with the link to `/signin`.
+
+The view answers about what it knows, not what it guesses. A small line
+under the unit's name says where the numbers came from — *live* while the
+poll is fresh, *from the save, N min ago* when the answer is stored, and
+otherwise exactly why not (*reading the world save*, *world save not
+connected*, or *this unit's record is not saved yet*). Health, hunger, air
+and experience gauges flag their low half (6 of 20 or less), and an untied effect with a name and
+Roman level sits beside those the answer could not name. What the unit
+carries is drawn as fixed slot grids — carry inventory and hotbar in server
+slot order, empty slots visibly empty — and every slot names itself to a
+screen reader and a focus line under the grid: item name with its own
+custom name in quotes, a stack count beyond one, enchantments (numbered
+when the answer does not name them), what is left of durability, and what a
+shulker box carries. The grids take one tab stop: arrow keys rove slot by
+slot and row by row, and Enter, Space or a click opens a shulker box's
+contents in that same line. The armour strip shows all four worn slots and
+the two held, so a missing piece is a hole with a name under it (`no armour
+on legs`), not a grid that quietly grows shorter. Item faces come from the
+unit's own camera item sheet when it serves one; anything else is a small
+placeholder tile, and counts, enchant and durability marks are text and
+bars rather than colour alone.
 
 ### Reaching the lab world
 

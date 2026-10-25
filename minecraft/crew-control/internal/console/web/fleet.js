@@ -191,6 +191,7 @@ export const KEYS = [
   ['a', 'jump to the next unit with an alert'],
   ['c', 'cycle camera mode'],
   ['w', 'toggle wall'],
+  ['d', 'unit detail: inventory and ender chest (signed in)'],
   ['o', 'fleet overview: all units in one table'],
   ['/', 'fleet overview: filter (elsewhere: command palette)'],
   [', / .', 'wall: previous / next page'],

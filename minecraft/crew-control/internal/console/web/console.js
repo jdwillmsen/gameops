@@ -1,6 +1,7 @@
 import { initOps } from '/static/ops.js';
 import { initSquads } from '/static/squad.js';
 import { initOverview } from '/static/overview-ui.js';
+import { initDetail } from '/static/detail-ui.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -47,10 +48,12 @@ function renderBar() {
   }));
   $('wall-toggle').setAttribute('aria-pressed', String(state.view === 'wall'));
   $('fleet-toggle').setAttribute('aria-pressed', String(state.view === 'fleet'));
+  $('detail-toggle').setAttribute('aria-pressed', String(state.view === 'detail'));
 }
 
 function renderStage() {
   overview.unmount();
+  detail.unmount();
   // Frames are removed, not hidden, so a camera websocket closes as soon as
   // its tile leaves the screen.
   stage.replaceChildren();
@@ -74,6 +77,12 @@ function renderStage() {
     overview.mount(stage);
     return;
   }
+  if (state.view === 'detail') {
+    // The operator question is answered by the page itself: signed-out
+    // visitors see its sign-in state, not a console error.
+    detail.mount(stage, state.unit);
+    return;
+  }
   ops.renderWall(stage);
 }
 
@@ -91,6 +100,13 @@ function pickUnit(id) {
   if (state.unit === id && state.view === 'focus') return;
   state.unit = id;
   state.view = 'focus';
+  apply();
+}
+
+function openDetail(id) {
+  if (!id || !statuses.has(id)) return;
+  state.unit = id;
+  state.view = 'detail';
   apply();
 }
 
@@ -113,6 +129,11 @@ function toggleFleet() {
   apply();
 }
 
+function toggleDetail() {
+  state.view = state.view === 'detail' ? 'focus' : 'detail';
+  apply();
+}
+
 function setView(view) {
   state.view = view;
   apply();
@@ -120,6 +141,7 @@ function setView(view) {
 
 $('wall-toggle').addEventListener('click', toggleWall);
 $('fleet-toggle').addEventListener('click', toggleFleet);
+$('detail-toggle').addEventListener('click', toggleDetail);
 
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
@@ -135,6 +157,7 @@ function onKey(ev) {
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
   else if (ev.key === 'o') toggleFleet();
+  else if (ev.key === 'd') toggleDetail();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
@@ -269,6 +292,7 @@ function setOperator(op) {
   renderPanel();
   ops.onOperator();
   overview.onOperator();
+  detail.onOperator();
   renderJobs();
   if (changed) reconnect();
 }
@@ -471,6 +495,7 @@ const ops = initOps({
   operator: () => operator,
   api,
   focus: pickUnit,
+  detail: openDetail,
   setMode,
   setView,
   expired: () => setOperator(null),
@@ -484,7 +509,15 @@ const overview = initOverview({
   state: () => state,
   operator: () => operator,
   focus: pickUnit,
+  detail: openDetail,
   sync,
+});
+
+const detail = initDetail({
+  statuses,
+  state: () => state,
+  operator: () => operator,
+  api,
 });
 
 function setSquadOpen(open) {
