@@ -9,6 +9,18 @@ import { layout as layoutDag } from './layout.js';
 export const NODE_W = 168, NODE_H = 48, COL_GAP = 56, ROW_GAP = 14, MARGIN = 24;
 const ZOOM_MIN = 0.15, ZOOM_MAX = 3;
 const SUB_MAX = 26;
+// A line-based wheel (Firefox) reports a few lines per notch where a pixel
+// wheel reports about a hundred pixels; one line is taken as 16px so both
+// zoom at a comparable rate.
+const LINE_PX = 16;
+const WHEEL_MAX = 200;
+
+// The wheel's vertical travel in pixels whatever unit the browser reports it
+// in, and bounded so a free-spinning wheel cannot fling the scale to a limit.
+export function wheelPixels(ev, pagePx = 400) {
+  const unit = ev.deltaMode === 1 ? LINE_PX : ev.deltaMode === 2 ? pagePx : 1;
+  return Math.max(-WHEEL_MAX, Math.min(WHEEL_MAX, ev.deltaY * unit));
+}
 
 // SVG text has no ellipsis; keep a long task line from being cut mid-glyph.
 const clip = (s, n = SUB_MAX) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -106,11 +118,19 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
   let dragMoved = false;
 
   svg.addEventListener('pointerdown', ev => {
-    drag = { x: ev.clientX, y: ev.clientY, ox: view.x, oy: view.y, moved: false };
+    // A secondary button opens the context menu, which swallows the release.
+    if (ev.button) return;
+    drag = { x: ev.clientX, y: ev.clientY, ox: view.x, oy: view.y, moved: false, id: ev.pointerId };
     dragMoved = false;
   });
   svg.addEventListener('pointermove', ev => {
     if (!drag) return;
+    // A release outside the svg (or over a menu) is never delivered before
+    // the pointer is captured; no button held means the drag is already over.
+    if (ev.buttons === 0) {
+      endDrag();
+      return;
+    }
     const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
     if (!drag.moved) {
       if (Math.abs(dx) + Math.abs(dy) <= 5) return;
@@ -119,19 +139,23 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
       // Capture only once this is a drag: capturing on pointerdown would
       // retarget the click and a plain node click would never reach the node.
       svg.setPointerCapture(ev.pointerId);
+      drag.captured = true;
     }
     view.x = drag.ox + dx;
     view.y = drag.oy + dy;
     view.moved = true;
     apply();
   });
-  const endDrag = () => { drag = null; };
-  svg.addEventListener('pointerup', endDrag);
-  svg.addEventListener('pointercancel', endDrag);
+  function endDrag() {
+    const was = drag;
+    drag = null;
+    if (was && was.captured && svg.hasPointerCapture && svg.hasPointerCapture(was.id)) svg.releasePointerCapture(was.id);
+  }
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture', 'contextmenu']) svg.addEventListener(type, endDrag);
   svg.addEventListener('wheel', ev => {
     ev.preventDefault();
     const r = svg.getBoundingClientRect();
-    setZoom(view.k * Math.exp(-ev.deltaY * 0.0015), ev.clientX - r.left, ev.clientY - r.top);
+    setZoom(view.k * Math.exp(-wheelPixels(ev, svg.clientHeight || undefined) * 0.0015), ev.clientX - r.left, ev.clientY - r.top);
   }, { passive: false });
 
   function fit() {
@@ -147,7 +171,25 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
     apply();
   }
   fitBtn.addEventListener('click', fit);
-  new ResizeObserver(() => { if (!view.moved) fit(); }).observe(svg);
+  const resizes = new ResizeObserver(() => { if (!view.moved) fit(); });
+
+  // The window loses the pointer when focus leaves the page mid-drag, and no
+  // event reaches the svg then. The owner pairs connect/disconnect with the
+  // graph being on screen, so a hidden graph holds no window listener.
+  let connected = false;
+  function connect() {
+    if (connected) return;
+    connected = true;
+    resizes.observe(svg);
+    window.addEventListener('blur', endDrag);
+  }
+  function disconnect() {
+    if (!connected) return;
+    connected = false;
+    resizes.disconnect();
+    window.removeEventListener('blur', endDrag);
+    endDrag();
+  }
 
   // ---- drawing ----
   let sig = '';
@@ -353,6 +395,7 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
         if (first) first.focus();
       }
     },
+    connect, disconnect,
     open: focusNode,
     clear: () => { if (root.contains(document.activeElement)) document.activeElement.blur(); },
     downstreamOf, upstreamOf, siblingOf,
