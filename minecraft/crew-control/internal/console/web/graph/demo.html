@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Node graph demo</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/charts/charts.css">
+<link rel="stylesheet" href="/static/graph/graph.css">
+<style>
+  body { margin: 0; background: #111; height: 100vh; display: flex; }
+  .demo { flex: 1; min-height: 0; }
+</style>
+</head>
+<body>
+<section id="one" class="demo"></section>
+<script type="module">
+import { createDagGraph } from '/static/graph/graph.js';
+import { stepChip, jobModel } from '/static/graph/jobs.js';
+
+const q = new URLSearchParams(location.search);
+if (q.get('theme') === 'light') document.body.setAttribute('data-theme', 'light');
+const wide = q.get('scenario') === 'wide';
+
+// One state of each kind, fan-out and fan-in, as in a real job. ?scenario=wide
+// stretches to a longer chain and exercises the fit scale.
+const KEYS = wide
+  ? ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']
+  : ['mine', 'chop', 'smelt', 'haul', 'hold', 'check'];
+const STATES = wide
+  ? ['done', 'done', 'done', 'failed', 'running', 'queued', 'waiting', 'cancelled', 'done', 'running', 'queued', 'waiting']
+  : ['done', 'done', 'running', 'queued', 'waiting', 'cancelled'];
+const DEPS = wide
+  ? { b: 'a', c: 'a', d: 'b', e: 'c', f: 'd', g: 'd', h: 'e', i: ['f', 'g'], j: 'h', k: 'i', l: ['j', 'k'] }
+  : { chop: 'mine', smelt: 'mine', haul: ['chop', 'smelt'], hold: 'haul', check: 'haul' };
+const TEMPLATES = {
+  gather: { template: 'gather_and_deposit', item: 'cobblestone', qty: 16 },
+  haul: { template: 'haul', items: { cobblestone: 16 }, from: [{ x: -40, y: 64, z: -380 }], to: { x: 12, y: 64, z: 10 } },
+  inspect: { template: 'inspect', chest: { x: 12, y: 64, z: 10 } },
+  craft: { template: 'craft', item: 'furnace', count: 1 },
+  goto: { template: 'goto', to: { x: 0, y: 64, z: 0 } },
+};
+const FOR = key => ({ a: TEMPLATES.gather, b: TEMPLATES.goto, c: TEMPLATES.goto, d: TEMPLATES.haul, e: TEMPLATES.haul,
+  mine: TEMPLATES.gather, chop: TEMPLATES.gather, smelt: TEMPLATES.craft, haul: TEMPLATES.haul, hold: TEMPLATES.goto, check: TEMPLATES.inspect }[key] || TEMPLATES.goto);
+
+const job = {
+  id: 'demo', kind: 'plan', spec: { template: 'parallel-demo' },
+  state: 'running',
+  created: '2026-10-24T10:00:00Z', updated: new Date().toISOString(), deadline: '2026-10-24T10:30:00Z',
+  steps: KEYS.map((key, i) => ({
+    id: '00000000-0000-0000-0000-000000000000',
+    key, unit: ['mine', 'chop', 'a', 'b'].includes(key) ? `crew-0${KEYS.indexOf(key) + 1}` : '',
+    template: FOR(key), depends_on: DEPS[key] ? [].concat(DEPS[key]) : [],
+    state: STATES[i] || 'waiting',
+    attempts: STATES[i] === 'failed' ? 3 : STATES[i] === 'running' ? 1 : 0,
+    work_id: STATES[i] === 'running' ? '605ab57c-1e39-4d6d-a3d9-950f11111111' : null,
+    reason: STATES[i] === 'failed' ? 'no pickup after 3 breaks' : '',
+  })),
+};
+
+const g = createDagGraph({ label: 'Demo graph', onSelect: id => g.setData(withSelected(id)) });
+function withSelected(id) {
+  const model = jobModel(job);
+  for (const n of model.nodes) n.selected = n.id === id;
+  return model;
+}
+g.setLegend(['waiting', 'queued', 'running', 'done', 'failed', 'cancelled'].map(stepChip));
+g.setData(jobModel(job));
+document.getElementById('one').append(g.root);
+</script>
+</body>
+</html>
