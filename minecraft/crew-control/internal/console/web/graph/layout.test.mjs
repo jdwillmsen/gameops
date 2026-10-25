@@ -47,12 +47,41 @@ test('layout does not hang on a cycle and reports it (child process with a timeo
   assert.equal(result.drawn, 2, 'every node still gets a position');
 });
 
-test('layout: a cycle node is drawn at the end rather than dropped', () => {
+test('layout: a cycle node is drawn rather than dropped', () => {
   const r = layout(nodes(['a', 'b', 'c']), edges([['a', 'b'], ['b', 'c'], ['c', 'a']]));
   const xs = [...r.pos.values()].map(p => p.x);
   assert.equal(r.cycle.length, 3);
-  assert.equal(new Set(xs).size, 1, 'the cycle nodes share the last layer');
+  assert.equal(new Set(xs).size, 1, 'the cycle nodes share one layer');
   assert.deepEqual(r.layers.at(-1).sort(), ['a', 'b', 'c']);
+});
+
+test('layout: only the nodes on a cycle are reported, not what hangs off it', () => {
+  // a -> b -> a is the cycle; c waits on b and d waits on c, so they can never
+  // start but are not part of the loop. e is unrelated.
+  const r = layout(nodes(['a', 'b', 'c', 'd', 'e']),
+    edges([['a', 'b'], ['b', 'a'], ['b', 'c'], ['c', 'd']]));
+  assert.deepEqual([...r.cycle].sort(), ['a', 'b']);
+  assert.deepEqual(r.blocked.sort(), ['c', 'd']);
+});
+
+test('layout: nodes downstream of a cycle are layered after it, in their own columns', () => {
+  const r = layout(nodes(['x', 'a', 'b', 'c', 'd']),
+    edges([['x', 'a'], ['a', 'b'], ['b', 'a'], ['b', 'c'], ['c', 'd']]));
+  const col = id => r.pos.get(id).x;
+  assert.equal(col('x'), 0);
+  assert.equal(col('a'), 1);
+  assert.equal(col('b'), 1, 'the cycle members share a column');
+  assert.equal(col('c'), 2);
+  assert.equal(col('d'), 3);
+  assert.deepEqual(r.criticalIds, ['x'], 'the critical path stays on what can actually run');
+});
+
+test('splitCycles: separates the cycle from the nodes it blocks', () => {
+  const g = buildGraph(nodes(['a', 'b', 'c', 'z']), edges([['a', 'b'], ['b', 'a'], ['b', 'c']]));
+  const split = splitCycles(g);
+  assert.deepEqual(split.order, ['z']);
+  assert.deepEqual(split.cyclic.sort(), ['a', 'b']);
+  assert.deepEqual(split.blocked, ['c']);
 });
 
 test('buildGraph: a self-dependency is dropped as degenerate, not crash food', () => {
