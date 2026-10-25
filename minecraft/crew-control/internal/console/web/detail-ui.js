@@ -5,7 +5,7 @@
 // whole with the operator's place in it put back, so a poll never takes
 // focus, an open box or the inspect line away.
 import {
-  ARMOR_SLOTS, freshness, effectLabel, effectTime, slotLabel, inventoryRows, armorRow,
+  ARMOUR_NAMES, ARMOUR_CAPTIONS, freshness, effectLabel, effectTime, slotLabel, inventoryRows, armourSlots, iconLabel,
   chestState, nextSlot, iconStyle, iconRect, ageText, durability, contentsText, slotTitle,
 } from './detail.js';
 
@@ -14,11 +14,12 @@ import {
 const POLL_MS = 10_000;
 
 // Hyphenated keys (aria-*, data-*) are not DOM properties, so assigning
-// them silently does nothing; they must go through setAttribute.
+// them silently does nothing; they must go through setAttribute. So does
+// role, which not every browser reflects as a property.
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-')) e.setAttribute(k, v);
+    if (k.includes('-') || k === 'role') e.setAttribute(k, v);
     else e[k] = v;
   }
   e.append(...kids);
@@ -240,11 +241,11 @@ export function initDetail(host) {
       className: 'dt-slot' + (item ? ' filled' : ' empty'),
       tabIndex: -1,
       'aria-label': slotLabel(item, opts),
-      title: item ? slotTitle(item) : opts.emptyLabel,
+      title: slotTitle(item, opts),
     });
     const icon = item && itemIcon(item);
     if (icon) b.append(icon);
-    else b.append(el('span', { className: 'dt-noicon', textContent: item ? item.name.replace(/^item_/, '').slice(0, 2) : '' }));
+    else if (item) b.append(el('span', { className: 'dt-noicon', 'aria-hidden': 'true', textContent: iconLabel(item.name) }));
     if (item) {
       if (item.count > 1) b.append(el('span', { className: 'dt-count', textContent: String(item.count) }));
       if (item.enchantments && item.enchantments.length) b.append(el('span', { className: 'dt-mark ench', title: 'enchanted', 'aria-hidden': 'true', textContent: '✦' }));
@@ -276,10 +277,19 @@ export function initDetail(host) {
   // it, and the focused slot's story is spelled out beneath for every
   // pointer, keyboard and screen reader alike. Its place in the page is its
   // key, so a grid remade by a poll takes up where the last one was left.
-  function gridBox(key, slots, label, cls, emptyLabel) {
-    const emptyFor = typeof emptyLabel === 'function' ? i => emptyLabel(i) : i => `${label}: ${emptyLabel}`;
-    const cells = slots.map((item, i) => wrapCell(slotCell(item, { emptyLabel: emptyFor(i) })));
-    const grid = el('div', { className: `dt-grid ${cls}`, role: 'grid', 'aria-label': label }, ...cells);
+  // The slots are a labelled group, not an ARIA grid: they have no rows or
+  // cells to navigate by, only the arrows this file adds, and each slot's
+  // own label. Where a slot has a place of its own, `places` names it and
+  // captions it beneath.
+  function gridBox(key, slots, label, cls, emptyLabel, places = null) {
+    const emptyFor = i => {
+      if (places) return undefined;
+      return typeof emptyLabel === 'function' ? emptyLabel(i) : `${label}: ${emptyLabel}`;
+    };
+    const cells = slots.map((item, i) => wrapCell(
+      slotCell(item, { emptyLabel: emptyFor(i), slotName: places && places.names[i] }),
+      places && places.captions[i]));
+    const grid = el('div', { className: `dt-grid ${cls}`, role: 'group', 'aria-label': label }, ...cells);
     const line = el('p', { className: 'dt-inspect', role: 'status', 'aria-live': 'polite' });
     // What outlives a remade grid: the tab stop, the one box held open and
     // the slot the line beneath last spoke of. Expansion is a per-slot
@@ -351,8 +361,10 @@ export function initDetail(host) {
     return { grid, line };
   }
 
-  function wrapCell(cell) {
-    return el('div', { className: 'dt-cell', role: 'presentation' }, cell);
+  // The slot must stay the cell's first child: the grid finds its slots so.
+  function wrapCell(cell, caption) {
+    if (!caption) return el('div', { className: 'dt-cell' }, cell);
+    return el('div', { className: 'dt-cell cap' }, cell, el('span', { className: 'dt-cap', 'aria-hidden': 'true', textContent: caption }));
   }
 
   function gridZone(parts) {
@@ -363,12 +375,9 @@ export function initDetail(host) {
 
   function armour(d) {
     const box = el('section', { className: 'dt-sec' }, el('h3', { textContent: 'Armour and held' }));
-    const slots = [...armorRow(d.armor || [])];
-    if (d.mainhand) slots.push(d.mainhand);
-    if (d.offhand) slots.push(d.offhand);
+    const slots = armourSlots(d);
     if (!slots.some(Boolean)) box.append(el('p', { className: 'dt-none', textContent: 'no armour worn and nothing held' }));
-    else box.append(gridZone(gridBox('armour', slots, 'Armour and held', 'dt-armourgrid',
-      i => (i < ARMOR_SLOTS.length ? `no armour on ${ARMOR_SLOTS[i]}` : i === ARMOR_SLOTS.length ? 'main hand: empty' : 'off hand: empty'))));
+    else box.append(gridZone(gridBox('armour', slots, 'Armour and held', 'dt-armourgrid', '', { names: ARMOUR_NAMES, captions: ARMOUR_CAPTIONS })));
     return box;
   }
 

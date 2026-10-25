@@ -429,3 +429,77 @@ test('a tab that becomes visible reads at once; a hidden one does not poll', asy
   await settle();
   assert.equal(p.calls.length, 2, 'an unmounted page does not listen');
 });
+
+// ---- armour and held ----
+
+const labelsOf = (root, grid) => slotsOf(root, grid).map(s => s.getAttribute('aria-label'));
+
+test('armour: an off hand with no main hand stays in the off hand cell', async () => {
+  const p = scripted(ok(payload({ armor: [item(0, 'iron_helmet')], offhand: item(0, 'shield') })));
+  await p.mount();
+  const labels = labelsOf(p.root(), 'dt-armourgrid');
+  assert.equal(labels.length, 6, 'four worn, two hands, always');
+  assert.equal(labels[0], 'head: iron_helmet');
+  assert.equal(labels[4], 'main hand: empty', 'the empty main hand is its own empty cell');
+  assert.equal(labels[5], 'off hand: shield');
+  assert.ok(classesOf(slotsOf(p.root(), 'dt-armourgrid')[4]).includes('empty'));
+  assert.ok(classesOf(slotsOf(p.root(), 'dt-armourgrid')[5]).includes('filled'));
+});
+
+test('armour: every cell names its place to the eye and to a screen reader', async () => {
+  const p = scripted(ok(payload({
+    armor: [item(0, 'iron_helmet'), item(1, 'iron_chestplate'), item(3, 'iron_boots')],
+    mainhand: item(0, 'diamond_sword'), offhand: item(0, 'shield'),
+  })));
+  await p.mount();
+  assert.deepEqual(labelsOf(p.root(), 'dt-armourgrid'), [
+    'head: iron_helmet', 'chest: iron_chestplate', 'legs: empty', 'feet: iron_boots',
+    'main hand: diamond_sword', 'off hand: shield',
+  ]);
+  assert.deepEqual(byClass(one(p.root(), 'dt-armourgrid'), 'dt-cap').map(c => c.textContent), ['head', 'chest', 'legs', 'feet', 'main', 'off']);
+  // The hover says the same as the spoken label.
+  assert.equal(slotsOf(p.root(), 'dt-armourgrid')[2].title, 'legs: empty');
+  assert.equal(slotsOf(p.root(), 'dt-armourgrid')[4].title, 'main hand: diamond_sword');
+});
+
+test('armour: nothing worn and nothing held says so in words', async () => {
+  const p = scripted(ok(payload()));
+  await p.mount();
+  assert.equal(one(p.root(), 'dt-armourgrid'), null);
+  assert.match(p.root().textContent, /no armour worn and nothing held/);
+});
+
+// ---- roles and picture stand-ins ----
+
+test('no slot grid claims to be an ARIA grid without rows; each is a labelled group', async () => {
+  const chest = new Array(27).fill(null);
+  chest[3] = item(3, 'diamond');
+  const p = scripted(ok(payload({ inventory: [item(0, 'bread'), item(9, 'oak_log')], mainhand: item(0, 'diamond_sword'), enderChest: chest })));
+  await p.mount();
+  assert.equal(all(p.root(), n => n.getAttribute('role') === 'grid').length, 0);
+  const groups = all(p.root(), n => n.getAttribute('role') === 'group');
+  assert.deepEqual(groups.map(g => g.getAttribute('aria-label')).sort(), ['Armour and held', 'Ender chest', 'Hotbar', 'Main inventory']);
+  // One tab stop per group: a slot each with tabindex 0, the rest roved off.
+  for (const g of groups) assert.equal(byClass(g, 'dt-slot').filter(s => s.tabIndex === 0).length, 1, g.getAttribute('aria-label'));
+});
+
+test('a missing picture is told by words that tell items apart', async () => {
+  const p = scripted(ok(payload({ inventory: [item(0, 'iron_ingot'), item(1, 'iron_pickaxe'), item(2, 'apple'), item(3, 'minecraft:oak_planks')] })));
+  await p.mount();
+  const stubs = slotsOf(p.root(), 'dt-hotbar').slice(0, 4).map(s => one(s, 'dt-noicon'));
+  const texts = stubs.map(n => n.textContent);
+  assert.equal(new Set(texts).size, 4, `all distinct: ${JSON.stringify(texts)}`);
+  assert.deepEqual(texts, ['iron\ningot', 'iron\npickax', 'apple', 'oak\nplanks']);
+  assert.ok(stubs.every(n => n.getAttribute('aria-hidden') === 'true'), 'the label speaks; the stub does not repeat it');
+});
+
+test('an empty slot says which grid and, in the chest, which slot it is', async () => {
+  const chest = new Array(27).fill(null);
+  chest[0] = item(0, 'diamond');
+  const p = scripted(ok(payload({ inventory: [item(0, 'bread')], enderChest: chest })));
+  await p.mount();
+  assert.equal(labelsOf(p.root(), 'dt-hotbar')[3], 'Hotbar: empty');
+  assert.equal(labelsOf(p.root(), 'dt-main')[0], 'Main inventory: empty');
+  assert.equal(labelsOf(p.root(), 'dt-chest')[1], 'slot 2: empty');
+  assert.equal(labelsOf(p.root(), 'dt-chest')[0], 'diamond');
+});
