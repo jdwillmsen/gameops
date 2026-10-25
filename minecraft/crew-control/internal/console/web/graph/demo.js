@@ -52,3 +52,4 @@ function withSelected(id) {
 g.setLegend(['waiting', 'queued', 'running', 'done', 'failed', 'cancelled'].map(stepChip));
 g.setData(jobModel(job));
 document.getElementById('one').append(g.root);
+g.connect();

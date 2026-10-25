@@ -254,10 +254,12 @@ export function initJobGraph(host) {
       if (mounted) return;
       mounted = true;
       stage.replaceChildren(root);
+      comp.connect();
       update();
     },
     unmount() {
       mounted = false;
+      comp.disconnect();
       if (root.parentNode) root.parentNode.removeChild(root);
     },
     onJobs() {
