@@ -5,7 +5,7 @@
 // nothing here needs to patch in place the way a fleet table does.
 import {
   ARMOR_SLOTS, freshness, effectLabel, effectTime, slotLabel, inventoryRows, armorRow,
-  nextSlot, iconStyle, iconRect,
+  chestState, nextSlot, iconStyle, iconRect,
 } from './detail.js';
 
 // A page reads its own answer at most this often; the route is cached for
@@ -100,7 +100,7 @@ export function initDetail(host) {
       el('p', { className: `dt-fresh ${fresh.kind}`, textContent: fresh.text }));
     const page = el('div', { className: 'dt-page' }, head);
     root.replaceChildren(page);
-    for (const sec of [vitals(d), chips(d), effects(d), armour(d), carry(d)]) {
+    for (const sec of [vitals(d), chips(d), effects(d), armour(d), carry(d), enderChest(d)]) {
       if (sec) page.append(sec);
     }
   }
@@ -297,6 +297,32 @@ export function initDetail(host) {
     box.append(gridZone(gridBox(main, 'Main inventory', 'dt-main', 'empty')));
     box.append(el('h4', { className: 'dt-sub', textContent: 'Hotbar' }));
     box.append(gridZone(gridBox(hotbar, 'Hotbar', 'dt-hotbar', 'empty')));
+    return box;
+  }
+
+  // The chest is only ever known from the save: it is private to the unit,
+  // so the live poll says nothing about it. The state of the save is the
+  // state of the section, and an all-empty chest is its own honest note.
+  function enderChest(d) {
+    const box = el('section', { className: 'dt-sec' });
+    const st = chestState(d.enderChest);
+    const h = el('h3', { textContent: 'Ender chest' });
+    if (st.kind === 'filled') h.append(el('span', { className: 'dt-chestcount', textContent: ` ${st.filled} of ${st.total} filled` }));
+    box.append(h);
+    if (st.kind === 'unsaved') {
+      box.append(el('p', { className: 'dt-none', textContent:
+        d.save && d.save.state === 'off'
+          ? 'the ender chest is only known from the world save: world save not connected'
+          : d.save && d.save.state === 'pending'
+            ? 'the ender chest is only known from the world save: reading the world save'
+            : "this unit's record is not saved yet, so its ender chest is not known" }));
+      return box;
+    }
+    if (st.kind === 'empty') {
+      box.append(el('p', { className: 'dt-none', textContent: 'the chest is empty — crew units do not use theirs' }));
+      return box;
+    }
+    box.append(gridZone(gridBox(st.chest, 'Ender chest', 'dt-chest', i => `slot ${i + 1}: empty`)));
     return box;
   }
 

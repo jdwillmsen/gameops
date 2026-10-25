@@ -3,6 +3,7 @@
 
 // The words a slot grid holds per cell; everything an operator learns from a
 // colour elsewhere is spelled here, and a slot answers by its label alone.
+export const ENDER_SLOTS = 27;
 export const HOTBAR_SLOTS = 9;
 export const MAIN_SLOTS = 27;
 export const ARMOR_SLOTS = ['head', 'chest', 'legs', 'feet'];
@@ -114,6 +115,14 @@ export function inventoryRows(items) {
 
 export function armorRow(armor) {
   return slotGrid(armor, ARMOR_SLOTS.length, 0, 4);
+}
+
+// A chest the save never read says nothing: null in the answer means where
+// the page would put one, no grid exists to show.
+export function chestState(chest) {
+  if (chest == null) return { kind: 'unsaved' };
+  const filled = chest.filter(Boolean).length;
+  return { kind: filled ? 'filled' : 'empty', filled, total: chest.length, chest };
 }
 
 // Arrows run over a slot grid as the picture runs: left and right by one
