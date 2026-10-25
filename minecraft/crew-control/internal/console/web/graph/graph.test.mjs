@@ -8,7 +8,7 @@ import { installDom, one, all, classesOf } from './fake-dom.mjs';
 
 const { doc, win, observers } = installDom();
 const { createDagGraph, wheelPixels } = await import('./graph.js');
-const { jobModel } = await import('./jobs.js');
+const { jobModel, stepChip } = await import('./jobs.js');
 
 const step = (key, deps, state = 'waiting', extra = {}) => ({ key, state, depends_on: deps, template: { template: 'mine_shaft' }, ...extra });
 const job = (steps) => ({ id: 'j', kind: 'plan', spec: { template: 'p' }, state: 'running', steps });
@@ -135,4 +135,50 @@ test('connect/disconnect: the window listener and observer follow the graph on a
   assert.equal(win.count('blur'), baseline);
   assert.equal(observers.size, obs);
   assert.equal(t.svg.hasPointerCapture(1), false, 'and a drag in progress is let go');
+});
+
+// ---- what a node says and shows ----
+
+test('node name: state, the critical path in words, and a failure reason', () => {
+  const t = graph({}, [
+    step('a', [], 'done'),
+    step('b', ['a'], 'failed', { reason: 'no pickup after 3 breaks' }),
+    step('lone', [], 'waiting'),
+  ]);
+  const name = id => t.node(id).getAttribute('aria-label');
+  assert.match(name('a'), /^a, .*done, on critical path$/);
+  assert.match(name('b'), /failed, on critical path, no pickup after 3 breaks$/);
+  assert.doesNotMatch(name('lone'), /critical path/, 'a step off the path says nothing of it');
+  assert.ok(classesOf(t.node('a')).includes('dg-path'), 'the thicker outline still marks it');
+});
+
+test('selected: the node is marked visibly and with aria-current, and only that node', () => {
+  const t = graph();
+  const model = jobModel(job([step('a', [], 'done'), step('b', ['a'], 'running'), step('c', ['a'], 'queued')]));
+  for (const n of model.nodes) n.selected = n.id === 'b';
+  t.g.setData(model);
+  assert.equal(t.node('b').getAttribute('aria-current'), 'true');
+  assert.ok(classesOf(t.node('b')).includes('dg-on'));
+  assert.equal(t.node('a').getAttribute('aria-current'), null);
+  assert.ok(!classesOf(t.node('a')).includes('dg-on'));
+  for (const n of model.nodes) n.selected = false;
+  t.g.setData(model);
+  assert.equal(t.node('b').getAttribute('aria-current'), null, 'the mark is removed with the selection');
+});
+
+test('legend: a list whose children are list items', () => {
+  const t = graph();
+  t.g.setLegend(['waiting', 'done'].map(stepChip));
+  const legend = one(t.g.root, 'dg-legend');
+  assert.equal(legend.getAttribute('role'), 'list');
+  assert.equal(legend.children.length, 2);
+  for (const item of legend.children) assert.equal(item.getAttribute('role'), 'listitem');
+  assert.equal(all(t.node('a'), n => n.getAttribute('role') === 'listitem').length, 0, 'node chips are not list items');
+});
+
+test('cycle note: names only the steps on the cycle', () => {
+  const t = graph({}, [step('x', [], 'done'), step('a', ['x', 'b']), step('b', ['a']), step('c', ['b'])]);
+  assert.match(t.g.note.textContent, /cycle: a, b —/);
+  assert.doesNotMatch(t.g.note.textContent, /\bc\b/);
+  assert.equal(t.g.note.hidden, false);
 });

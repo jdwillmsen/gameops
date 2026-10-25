@@ -17,6 +17,12 @@ test('jobModel: one node per step keyed by the step key', () => {
   assert.equal(m.nodes[1].sub, 'craft furnace x1');
 });
 
+test('jobModel: a step carries its failure reason as the node note', () => {
+  const m = jobModel(job({ steps: [{ key: 'mine', state: 'failed', reason: 'no pickup after 3 breaks' }, { key: 'hold', state: 'waiting' }] }));
+  assert.equal(m.nodes[0].note, 'no pickup after 3 breaks');
+  assert.equal(m.nodes[1].note, '');
+});
+
 test('jobModel: a dependency on no listed step is skipped, not drawn', () => {
   const m = jobModel(job({
     steps: [

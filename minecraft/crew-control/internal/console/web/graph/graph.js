@@ -258,7 +258,7 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
     };
     note.hidden = !graphResult.cycle.length;
     if (graphResult.cycle.length) {
-      note.textContent = `steps depend on each other in a cycle: ${graphResult.cycle.join(', ')} — drawn at the end; the scheduler would never run them`;
+      note.textContent = `steps depend on each other in a cycle: ${graphResult.cycle.join(', ')} — the scheduler would never run them`;
     }
     // A pan the operator made should survive small structural changes, so
     // refit only while the view has not been personalised.
@@ -287,8 +287,11 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
     for (const n of nodes) {
       const d = drawn.get(n.id);
       if (!d) continue;
+      const critical = graphResult.critical.has(n.id);
       d.g.classList.toggle('dg-on', !!n.selected);
-      d.g.classList.toggle('dg-path', graphResult.critical.has(n.id));
+      d.g.classList.toggle('dg-path', critical);
+      if (n.selected) d.g.setAttribute('aria-current', 'true');
+      else d.g.removeAttribute('aria-current');
       d.g.setAttribute('data-tone', n.tone || 'plain');
       if (d.label.textContent !== n.label) d.label.textContent = n.label;
       const subText = clip(n.sub || '');
@@ -297,8 +300,8 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
         d.sub.setAttribute('fill-opacity', subText ? '1' : '0');
       }
       patchChip(d.chipHost, n.chip);
-      const name = `${n.label}${n.sub ? `, ${n.sub}` : ''}${n.chip ? `, ${n.chip.word}` : ''}`;
-      const row = `${name}${n.note ? `, ${n.note}` : ''}`;
+      // The thicker outline is a visual cue only; the name says it in words.
+      const row = [n.label, n.sub, n.chip && n.chip.word, critical && 'on critical path', n.note].filter(Boolean).join(', ');
       if (d.g.getAttribute('aria-label') !== row) d.g.setAttribute('aria-label', row);
     }
   }
@@ -338,7 +341,6 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
     if (!graphResult) return null;
     const l = graphResult.layerOf.get(id);
     if (l === undefined) return null;
-    // Cycle nodes sit past the last drawn column; they have no siblings.
     const col = graphResult.layers[l];
     if (!col) return null;
     const at = col.indexOf(id);
@@ -385,7 +387,11 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => {},
     root, side, note,
     setData,
     setLegend(states) {
-      legend.replaceChildren(...states.map(c => chipHtml(c)));
+      legend.replaceChildren(...states.map(c => {
+        const item = chipHtml(c);
+        item.setAttribute('role', 'listitem');
+        return item;
+      }));
     },
     setContent: c => {
       side.replaceChildren(...(c ? [c] : []));

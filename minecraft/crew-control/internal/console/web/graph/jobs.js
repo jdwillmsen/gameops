@@ -70,6 +70,8 @@ const nodeOf = s => {
     sub: taskText(s.template),
     chip,
     tone: chip.tone,
+    // A failed step's reason is what a screen-reader user needs most.
+    note: s.reason || '',
   };
 };
 
