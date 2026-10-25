@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"path"
-	"strconv"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
@@ -47,9 +46,8 @@ const enderChestSlots = 27
 // boxes in the record carry before the answer goes out.
 const maxBody = 50 << 10
 
-// DefaultEvery is both how long an answer may be reused and the least time
-// between reads of the save; a save read more often than the cache would
-// serve nothing the last read has not.
+// DefaultEvery is the least time between reads of the save; a save read more
+// often than this would show nothing the last read has not.
 const DefaultEvery = 5 * time.Second
 
 type sourceJSON struct {
@@ -257,8 +255,10 @@ func writeJSON(w http.ResponseWriter, b body) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	// The ender chest is its owner's, so no share may ever hold the answer.
-	w.Header().Set("Cache-Control", "private, max-age="+strconv.Itoa(int(DefaultEvery.Seconds())))
+	// The answer is for one operator's session and carries the ender chest,
+	// so nothing may keep it: a private max-age would let a browser repaint
+	// it after sign-out, or for the next person at the same browser.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }
