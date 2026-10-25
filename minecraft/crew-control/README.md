@@ -111,9 +111,9 @@ poll is fresh, *from the save, N min ago* when the answer is stored, and
 otherwise exactly why not (*reading the world save*, *world save not
 connected*, or *this unit's record is not saved yet*), echoed per section:
 the ender chest only ever appears from a save, so without one it says so
-instead of showing a blank grid. Health, hunger, air and experience gauges
-flag their low half (6 of 20 or less), and an untied effect with a name and
-Roman level sits beside those the answer could not name. What the unit
+instead of showing a blank grid. The health, hunger and air gauges flag a
+value of 6 or less. An effect shows its name and, above level I, a Roman
+level; an effect the answer could not name shows as `effect <id>`. What the unit
 carries is drawn as fixed slot grids — carry inventory and hotbar in server
 slot order, empty slots visibly empty — and every slot names itself to a
 screen reader and a focus line under the grid: item name with its own
@@ -122,8 +122,9 @@ when the answer does not name them), what is left of durability, and what a
 shulker box carries. The grids take one tab stop: arrow keys rove slot by
 slot and row by row, and Enter, Space or a click opens a shulker box's
 contents in that same line. The armour strip shows all four worn slots and
-the two held, so a missing piece is a hole with a name under it (`no armour
-on legs`), not a grid that quietly grows shorter. Item faces come from the
+the two held, so a missing piece is an empty cell with its place named in a
+caption beneath (head, chest, legs, feet, main, off), not a grid that quietly
+grows shorter. Item faces come from the
 unit's own camera item sheet when it serves one; anything else is a small
 placeholder tile, and counts, enchant and durability marks are text and
 bars rather than colour alone.

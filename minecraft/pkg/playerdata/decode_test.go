@@ -477,3 +477,25 @@ func TestDecodeReadsNoBoxesOutOfWhatIsWornOrHeld(t *testing.T) {
 		t.Errorf("inventory %+v, ender chest %+v", r.Inventory[0].Contents, r.EnderChest[0].Contents)
 	}
 }
+
+func TestDecodeGivesAPristineToolItsMaximum(t *testing.T) {
+	m := fixture(-1)
+	m["Inventory"] = []any{
+		item("minecraft:iron_pickaxe", 1, 0, nil),
+		item("minecraft:iron_axe", 1, 1, c{"Damage": int32(0)}),
+		item("minecraft:cobblestone", 32, 2, nil),
+	}
+	_, r, err := Decode(encode(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Inventory) != 3 {
+		t.Fatalf("inventory = %+v", r.Inventory)
+	}
+	if r.Inventory[0].Damage != 0 || r.Inventory[0].MaxDamage == 0 || r.Inventory[1].MaxDamage == 0 {
+		t.Errorf("pristine tools lack a maximum: %+v %+v", r.Inventory[0], r.Inventory[1])
+	}
+	if r.Inventory[2].MaxDamage != 0 {
+		t.Errorf("a block has a durability: %+v", r.Inventory[2])
+	}
+}

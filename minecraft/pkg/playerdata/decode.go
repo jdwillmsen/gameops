@@ -266,7 +266,9 @@ func (r *reader) items(v any, bySlot, opens bool, depth int) []Item {
 		if depth > 0 {
 			r.spare--
 		}
-		item := Item{Slot: i, Name: clip(name), Count: count}
+		// A pristine tool has no Damage in its save, but its maximum is still
+		// what a reader needs to show it as full.
+		item := Item{Slot: i, Name: clip(name), Count: count, MaxDamage: maxDamage[name]}
 		if bySlot {
 			if s, ok := intOf(it, "Slot"); ok {
 				item.Slot = s
@@ -274,9 +276,6 @@ func (r *reader) items(v any, bySlot, opens bool, depth int) []Item {
 		}
 		if tag, ok := it["tag"].(compound); ok {
 			item.Damage, _ = intOf(tag, "Damage")
-			if item.Damage > 0 {
-				item.MaxDamage = maxDamage[name]
-			}
 			if display, ok := tag["display"].(compound); ok {
 				if custom, ok := display["Name"].(string); ok {
 					item.Custom = clip(custom)

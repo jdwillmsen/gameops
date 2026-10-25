@@ -79,7 +79,8 @@ export function initDetail(host) {
   async function loadSheet(id) {
     let doc = null;
     try {
-      const res = await fetch(unitPath(id, '/v1/camera/items.json'));
+      // Item faces are optional: a camera that never answers must not hold the page back.
+      const res = await fetch(unitPath(id, '/v1/camera/items.json'), { signal: AbortSignal.timeout(4000) });
       if (!res.ok) return null;
       doc = await res.json();
     } catch {
