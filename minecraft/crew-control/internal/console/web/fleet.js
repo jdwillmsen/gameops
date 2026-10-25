@@ -193,6 +193,7 @@ export const KEYS = [
   ['w', 'toggle wall'],
   ['d', 'unit detail: inventory and ender chest (signed in)'],
   ['o', 'fleet overview: all units in one table'],
+  ['g', 'job graph: steps and their dependencies'],
   ['/', 'fleet overview: filter (elsewhere: command palette)'],
   [', / .', 'wall: previous / next page'],
   ['r', 'roster'],

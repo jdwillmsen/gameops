@@ -5,22 +5,38 @@ import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, tas
 const units = [{ id: 'crew-01' }, { id: 'crew-02' }, { id: 'crew-03' }];
 
 test('parse(format(s)) round-trips every unit, mode and view', () => {
-  for (const u of units) for (const mode of MODES) for (const view of ['focus', 'wall', 'fleet']) {
+  for (const u of units) for (const mode of MODES) for (const view of ['focus', 'wall', 'fleet', 'jobs']) {
     const s = { unit: u.id, mode, view };
-    assert.deepEqual(parse(format(s), units), s);
+    assert.deepEqual(parse(format(s), units), { ...s, job: '' });
   }
 });
 
+test('fmt keeps a linked job as its own parameter', () => {
+  const link = { unit: 'crew-03', mode: 'first', view: 'jobs', job: '03040506-0010-2020-3030-405060708090' };
+  // The round trip carries the deep link; format omits it unset.
+  assert.deepEqual(parse(format(link), units), { ...link });
+  assert.deepEqual(parse(format({ unit: 'crew-03', mode: 'first', view: 'jobs' }), units).job, '');
+});
+
 test('empty search gives first unit, first mode, focus view', () => {
-  assert.deepEqual(parse('', units), { unit: 'crew-01', mode: 'first', view: 'focus' });
+  assert.deepEqual(parse('', units), { unit: 'crew-01', mode: 'first', view: 'focus', job: '' });
 });
 
 test('unknown values fall back', () => {
-  assert.deepEqual(parse('?unit=nope&mode=fly&view=grid', units), { unit: 'crew-01', mode: 'first', view: 'focus' });
+  assert.deepEqual(parse('?unit=nope&mode=fly&view=grid', units), { unit: 'crew-01', mode: 'first', view: 'focus', job: '' });
 });
 
 test('known values survive next to unknown ones', () => {
-  assert.deepEqual(parse('?unit=crew-03&mode=bogus', units), { unit: 'crew-03', mode: 'first', view: 'focus' });
+  assert.deepEqual(parse('?unit=crew-03&mode=bogus', units), { unit: 'crew-03', mode: 'first', view: 'focus', job: '' });
+});
+
+test('a job parameter survives only when it reads like a uuid', () => {
+  // A typo, a partial id or junk is dropped rather than fetched along a deep link.
+  for (const junk of ['hello!', '03040506-0010-2020-3030', '--------']) {
+    assert.deepEqual(parse(`?view=jobs&job=${junk}`, units), { unit: 'crew-01', mode: 'first', view: 'jobs', job: '' });
+  }
+  assert.equal(parse('?view=jobs&job=03040506-0010-2020-3030-405060708090', units).job, '03040506-0010-2020-3030-405060708090');
+  assert.equal(parse('?view=jobs&job=03040506-0010-2020-3030-40506070809A', units).job, '03040506-0010-2020-3030-40506070809A');
 });
 
 test('parse tolerates an empty roster', () => {

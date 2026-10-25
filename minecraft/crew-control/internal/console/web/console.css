@@ -162,7 +162,16 @@ kbd { background: #262b27; border: 1px solid #3a423c; border-radius: 3px; paddin
 
 body.kiosk #bar, body.kiosk #side, body.kiosk #dock, body.kiosk #statusbar { display: none; }
 @media (max-width: 900px) { #side { width: 220px; } #roster .task { display: none; } }
-@media (max-width: 720px) { #side { display: none; } #dock { height: 100px; } }
+@media (max-width: 720px) {
+  #side { display: none; }
+  #dock { height: 100px; }
+  /* Unwrapped rows are wider than the phone. That widens the layout
+     viewport, which puts position: fixed panels off screen. */
+  html, body { overflow-x: hidden; }
+  #bar .tools { flex-wrap: wrap; margin-left: 0; min-width: 0; }
+  #statusbar { flex-wrap: wrap; gap: 3px 14px; }
+  #statusbar span:last-child { margin-left: 0; }
+}
 
 /* ---- squad panel ---- */
 #squad { width: 340px; flex: none; overflow-y: auto; padding: 10px; background: #1b1b1b; border-left: 1px solid #333; }
