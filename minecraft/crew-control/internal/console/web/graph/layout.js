@@ -1,5 +1,6 @@
 // Layered DAG layout in plain JS: longest-path layering, barycentre crossing
-// reduction, a weighted critical path and a cycle report. Pure and free of the
+// reduction, a critical path (the longest chain; each step counts one unless a
+// weight is passed) and a cycle report. Pure and free of the
 // DOM, so node tests run it. Callers hand in nodes as {id} and edges as
 // {from, to} (from is the dependency that runs before to); nothing here knows
 // what a job or a step is.
@@ -29,8 +30,11 @@ export function buildGraph(nodes, edges) {
 }
 
 // Kahn's algorithm over a snapshot: it drains a queue and stops once no node
-// has remaining dependencies, so a cycle is reported and can never loop.
-// Returns the acyclic ordering and the ids stuck on a cycle.
+// has remaining dependencies, so a cycle is reported and can never loop. What
+// it cannot drain is a cycle plus everything waiting on one; Tarjan's strongly
+// connected components over that remainder tell the two apart. Returns the
+// acyclic ordering, the ids on a cycle, the ids only blocked behind one, and
+// the remainder's components in dependency order (what layerOf needs).
 export function splitCycles(g) {
   const wait = new Map(g.ids.map(id => [id, g.pred.get(id).length]));
   const queue = g.ids.filter(id => wait.get(id) === 0);
@@ -44,25 +48,70 @@ export function splitCycles(g) {
       if (left === 0) queue.push(next);
     }
   }
-  return { order: queue, cyclic: g.ids.filter(id => !done.has(id)) };
+  const stuck = g.ids.filter(id => !done.has(id));
+  const stuckSet = new Set(stuck);
+  const index = new Map(), low = new Map(), open = new Set();
+  const stack = [];
+  const comps = [];
+  let counter = 0;
+  const visit = id => {
+    index.set(id, counter);
+    low.set(id, counter++);
+    stack.push(id);
+    open.add(id);
+    for (const next of g.succ.get(id)) {
+      if (!stuckSet.has(next)) continue;
+      if (!index.has(next)) {
+        visit(next);
+        low.set(id, Math.min(low.get(id), low.get(next)));
+      } else if (open.has(next)) {
+        low.set(id, Math.min(low.get(id), index.get(next)));
+      }
+    }
+    if (low.get(id) !== index.get(id)) return;
+    const comp = [];
+    let top;
+    do {
+      top = stack.pop();
+      open.delete(top);
+      comp.push(top);
+    } while (top !== id);
+    comps.push(comp.sort((a, b) => g.rank.get(a) - g.rank.get(b)));
+  };
+  for (const id of stuck) if (!index.has(id)) visit(id);
+  // Tarjan emits a component after everything it reaches, so the reverse is
+  // the order dependencies run in.
+  comps.reverse();
+  const onCycle = new Set(comps.filter(c => c.length > 1).flat());
+  return {
+    order: queue,
+    cyclic: stuck.filter(id => onCycle.has(id)),
+    blocked: stuck.filter(id => !onCycle.has(id)),
+    comps,
+  };
 }
 
 // Longest-path layering: layer(n) = 0 without dependencies, else the largest
-// layer of a dependency plus one. Cycle nodes all take the last layer so every
-// node still lands somewhere on the page.
+// layer of a dependency plus one. A cycle cannot be layered node by node, so
+// its members share one layer, placed after everything they wait on; what is
+// blocked behind a cycle continues from there like any other step.
 export function layerOf(g, topo) {
   const layer = new Map();
-  let last = 0;
-  for (const id of topo.order) {
+  const after = (id, own) => {
     let l = 0;
     for (const dep of g.pred.get(id)) {
+      if (own.has(dep)) continue;
       const dl = layer.get(dep) + 1;
       if (dl > l) l = dl;
     }
-    layer.set(id, l);
-    if (l > last) last = l;
+    return l;
+  };
+  for (const id of topo.order) layer.set(id, after(id, new Set()));
+  for (const comp of topo.comps) {
+    const own = new Set(comp);
+    const l = Math.max(...comp.map(id => after(id, own)));
+    for (const id of comp) layer.set(id, l);
   }
-  for (const id of topo.cyclic) layer.set(id, last + 1);
   return { layer };
 }
 
@@ -116,7 +165,7 @@ export function reduceCrossings(g, initial, sweeps = 4) {
   return layers;
 }
 
-// Longest weighted path through the acyclic part. `order` must be the
+// Longest path through the acyclic part, weighted by `weight`. `order` must be the
 // topological order from splitCycles; weight defaults to 1 per node, the
 // gating chain when no durations are known. Deps are rank-sorted, so a strict
 // improvement wins the tie and the choice is stable.
@@ -161,7 +210,7 @@ export function layout(nodes, edges, { weight } = {}) {
     width: layers.length,
     height: layers.reduce((hi, c) => Math.max(hi, c.length), 0),
     critical: new Set(best.ids), criticalIds: best.ids,
-    cycle: topo.cyclic,
+    cycle: topo.cyclic, blocked: topo.blocked,
     graph: g,
   };
 }
