@@ -7,6 +7,15 @@ export const ENDER_SLOTS = 27;
 export const HOTBAR_SLOTS = 9;
 export const MAIN_SLOTS = 27;
 export const ARMOR_SLOTS = ['head', 'chest', 'legs', 'feet'];
+// The armour grid is the four worn slots then both hands, so a cell's place
+// is its name; the captions are the short form drawn under each cell.
+export const HELD_SLOTS = ['main hand', 'off hand'];
+export const ARMOUR_NAMES = [...ARMOR_SLOTS, ...HELD_SLOTS];
+export const ARMOUR_CAPTIONS = [...ARMOR_SLOTS, 'main', 'off'];
+
+// A poll that has not been heard for this long is the poller stalling, not
+// a quiet unit: it reports about once a second.
+export const LIVE_STALE_MS = 30_000;
 
 // An age spoken the way the freshness line uses it: coarse on purpose —
 // a save is minutes old at best, so seconds barely matter past a moment.
@@ -21,23 +30,33 @@ export function ageText(iso, now = Date.now()) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+// How old the save is, spoken; a save whose time cannot be read says so
+// rather than claim it is fresh.
+const saveAge = (save, now) => ageText(save.asOf, now) || 'age unknown';
+
 const SAVE_STATE = {
-  known: (save, now) => {
-    const ago = ageText(save.asOf, now);
-    return { kind: 'save', text: ago === 'just now' || !ago ? 'from the save, just now' : `from the save, ${ago}` };
-  },
+  known: (save, now) => ({ kind: 'save', text: `from the save, ${saveAge(save, now)}` }),
   none: () => ({ kind: 'none', text: "this unit's record is not saved yet" }),
   off: () => ({ kind: 'off', text: 'world save not connected' }),
   pending: () => ({ kind: 'pending', text: 'reading the world save' }),
 };
 
-// One line says where the answer came from: a unit that is online speaks
-// for itself, and only the classes of the words, not their colour, say so.
+// One line says where the answer came from. Vitals, effects and the
+// inventory of an online unit are live, but armour, held items, experience,
+// air, game mode, dimension and the ender chest are only ever the save's, so
+// a known save keeps its age on the line even while the unit is live.
 export function freshness(data, now = Date.now()) {
   if (!data) return { kind: 'unknown', text: '' };
-  if (data.live && data.live.state === 'known') return { kind: 'live', text: 'live' };
-  const f = SAVE_STATE[data.save && data.save.state];
-  return (f || (() => ({ kind: 'unknown', text: 'freshness unknown' })))((data.save || {}), now);
+  const save = data.save || {};
+  if (data.live && data.live.state === 'known') {
+    const heard = Date.parse(data.live.asOf);
+    const stale = Number.isFinite(heard) && now - heard > LIVE_STALE_MS;
+    const parts = [stale ? `last heard ${ageText(data.live.asOf, now)}` : 'live'];
+    if (save.state === 'known') parts.push(`save ${saveAge(save, now)}`);
+    return { kind: stale ? 'stale' : 'live', text: parts.join(' · ') };
+  }
+  const f = SAVE_STATE[save.state];
+  return (f || (() => ({ kind: 'unknown', text: 'freshness unknown' })))(save, now);
 }
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
@@ -79,9 +98,11 @@ export function durability(it) {
 const pretty = n => n.replace(/^minecraft:/, '');
 
 // One slot's whole story as a screen-reader label and tooltip. Every state
-// it can show is a phrase, never a colour.
+// it can show is a phrase, never a colour. A slot with a place of its own
+// (a hand, a piece of armour) leads with it, empty or not.
 export function slotLabel(it, extra = {}) {
-  if (!it) return extra.emptyLabel || 'empty';
+  const place = extra.slotName ? `${extra.slotName}: ` : '';
+  if (!it) return extra.emptyLabel || `${place}empty`;
   const parts = [];
   if (it.customName) parts.push(`"${it.customName}" ${pretty(it.name)}`);
   else parts.push(pretty(it.name));
@@ -90,7 +111,32 @@ export function slotLabel(it, extra = {}) {
   if (en) parts.push(en);
   if (it.maxDamage) parts.push(`${it.maxDamage - it.damage}/${it.maxDamage} durability left`);
   if (it.contents) parts.push(`holds ${it.contents.length} stack${it.contents.length === 1 ? '' : 's'}`);
-  return parts.join(' ');
+  return place + parts.join(' ');
+}
+
+// What a box holds, each stack told in full: a renamed or enchanted stack
+// inside is the reason to open the box. Stacks are split by semicolons since
+// an enchantment list already uses commas.
+export function contentsText(it) {
+  const c = it && it.contents;
+  if (!c || !c.length) return '';
+  return ' — inside: ' + c.map(s => slotLabel(s)).join('; ');
+}
+
+// The hover title is the label with the contents, since a title is not
+// expanded by a click the way the line under the grid is.
+export function slotTitle(it, extra = {}) {
+  return slotLabel(it, extra) + contentsText(it);
+}
+
+// Two short lines that tell one item from another when the sheet has no
+// picture: the first word of the name and the last (iron_pickaxe against
+// iron_ingot), cut to fit a slot. A one-word name is the one line.
+export function iconLabel(name) {
+  const words = pretty(name || '').split('_').filter(Boolean);
+  if (!words.length) return '';
+  if (words.length === 1) return words[0].slice(0, 6);
+  return `${words[0].slice(0, 5)}\n${words[words.length - 1].slice(0, 6)}`;
 }
 
 // The inventory list is slots out of order and missing empties; the grids
@@ -115,6 +161,13 @@ export function inventoryRows(items) {
 
 export function armorRow(armor) {
   return slotGrid(armor, ARMOR_SLOTS.length, 0, 4);
+}
+
+// Six cells, fixed: the four worn, then main hand, then off hand. A hand
+// that holds nothing is a hole in its own place, not a gap the other hand
+// slides into.
+export function armourSlots(d) {
+  return [...armorRow((d && d.armor) || []), (d && d.mainhand) || null, (d && d.offhand) || null];
 }
 
 // A chest the save never read says nothing: null in the answer means where

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ageText, freshness, roman, effectLabel, effectTime, enchantLabel, enchantText,
-  durability, slotLabel, slotGrid, inventoryRows, armorRow, chestState, nextSlot,
-  iconRect, iconStyle, ENDER_SLOTS, HOTBAR_SLOTS, MAIN_SLOTS, ARMOR_SLOTS,
+  durability, slotLabel, contentsText, slotTitle, iconLabel, armourSlots, slotGrid, inventoryRows, armorRow, chestState, nextSlot,
+  iconRect, iconStyle, ENDER_SLOTS, HOTBAR_SLOTS, MAIN_SLOTS, ARMOR_SLOTS, ARMOUR_NAMES, ARMOUR_CAPTIONS, LIVE_STALE_MS,
 } from './detail.js';
 
 const NOW = Date.parse('2026-10-24T12:00:00Z');
@@ -24,16 +24,40 @@ test('ageText coarse-words a save age; a clock a little ahead is still just now'
   assert.equal(ageText('2026-10-24T13:00:00Z', NOW), 'just now');
 });
 
-test('freshness: the live poll wins; the save states are each spelled out', () => {
-  assert.deepEqual(freshness({ live: { state: 'known' }, save: { state: 'known', asOf: ago(4) } }, NOW), { kind: 'live', text: 'live' });
+test('freshness: a live unit keeps its save age; the save states are each spelled out', () => {
+  const live = asOf => ({ state: 'known', asOf });
+  // Armour, held items, xp, air, mode, dimension and the chest are the save's,
+  // so "live" alone would overstate how fresh they are.
+  assert.deepEqual(freshness({ live: live(ago(0, 1)), save: { state: 'known', asOf: ago(3 * 60) } }, NOW), { kind: 'live', text: 'live · save 3h ago' });
+  assert.equal(freshness({ live: live(ago(0, 1)), save: { state: 'known', asOf: ago(0, 3) } }, NOW).text, 'live · save just now');
+  assert.equal(freshness({ live: live(ago(0, 1)), save: { state: 'known', asOf: 'garbled' } }, NOW).text, 'live · save age unknown');
+  // With no save to speak of, the live word stands alone.
+  assert.equal(freshness({ live: live(ago(0, 1)), save: { state: 'off' } }, NOW).text, 'live');
+  assert.equal(freshness({ live: live(ago(0, 1)), save: { state: 'none' } }, NOW).text, 'live');
   assert.equal(freshness({ live: { state: 'none' }, save: { state: 'known', asOf: ago(4) } }, NOW).text, 'from the save, 4 min ago');
-  assert.equal(freshness({ save: { state: 'known', asOf: '' } }, NOW).text, 'from the save, just now');
   assert.equal(freshness({ save: { state: 'none' } }, NOW).text, "this unit's record is not saved yet");
   assert.equal(freshness({ save: { state: 'off' } }, NOW).text, 'world save not connected');
   assert.equal(freshness({ save: { state: 'pending' } }, NOW).text, 'reading the world save');
   assert.equal(freshness(null, NOW).kind, 'unknown');
   // A scanned-but-missing record still says not saved: the scan time is no excuse.
   assert.equal(freshness({ save: { state: 'none', asOf: ago(2) } }, NOW).kind, 'none');
+});
+
+test('freshness: an unreadable save time is not "just now"', () => {
+  assert.equal(freshness({ save: { state: 'known', asOf: '' } }, NOW).text, 'from the save, age unknown');
+  assert.equal(freshness({ save: { state: 'known' } }, NOW).text, 'from the save, age unknown');
+  assert.equal(freshness({ save: { state: 'known', asOf: ago(0, 2) } }, NOW).text, 'from the save, just now');
+});
+
+test('freshness: a stalled poller is marked, not passed off as live', () => {
+  const stalledFor = ms => new Date(NOW - ms).toISOString();
+  const edge = freshness({ live: { state: 'known', asOf: stalledFor(LIVE_STALE_MS) }, save: { state: 'known', asOf: ago(60) } }, NOW);
+  assert.equal(edge.kind, 'live', 'right at the limit is still live');
+  const stale = freshness({ live: { state: 'known', asOf: stalledFor(5 * 60_000) }, save: { state: 'known', asOf: ago(60) } }, NOW);
+  assert.deepEqual(stale, { kind: 'stale', text: 'last heard 5 min ago · save 60 min ago' });
+  assert.equal(freshness({ live: { state: 'known', asOf: stalledFor(5 * 60_000) }, save: { state: 'off' } }, NOW).text, 'last heard 5 min ago');
+  // A live answer with no readable time cannot be called stale.
+  assert.equal(freshness({ live: { state: 'known' }, save: { state: 'off' } }, NOW).kind, 'live');
 });
 
 // ---- naming ----
@@ -80,6 +104,35 @@ test('slotLabel says the whole story; an empty slot is an empty word', () => {
   assert.equal(slotLabel(null, { emptyLabel: empty }), empty);
 });
 
+test('slotLabel leads with the slot name when the place is part of the answer', () => {
+  assert.equal(slotLabel(null, { slotName: 'off hand' }), 'off hand: empty');
+  assert.equal(slotLabel(item(0, { name: 'iron_helmet' }), { slotName: 'head' }), 'head: iron_helmet');
+  assert.equal(slotLabel(item(0, { name: 'iron_helmet' })), 'iron_helmet');
+});
+
+test('a box tells each inner stack in full, in its label for the hover and not only a count', () => {
+  const box = item(0, { name: 'shulker_box', contents: [
+    item(0, { name: 'diamond_sword', customName: 'Sting', enchantments: [{ id: 9, name: 'sharpness', level: 5 }, { id: 1, name: 'unbreaking', level: 3 }] }),
+    item(1, { name: 'iron_ingot', count: 64 }),
+  ] });
+  assert.equal(contentsText(box), ' — inside: "Sting" diamond_sword sharpness V, unbreaking III; iron_ingot x64');
+  assert.equal(slotTitle(box), 'shulker_box holds 2 stacks — inside: "Sting" diamond_sword sharpness V, unbreaking III; iron_ingot x64');
+  assert.equal(slotLabel(box), 'shulker_box holds 2 stacks', 'the spoken label stays short');
+  assert.equal(contentsText(item(0)), '');
+  assert.equal(slotTitle(item(0, { count: 2 })), 'oak_log x2');
+});
+
+// A missing picture falls back to text, and the text must tell iron_ingot from iron_pickaxe.
+test('iconLabel keeps the words that tell items apart', () => {
+  assert.notEqual(iconLabel('iron_ingot'), iconLabel('iron_pickaxe'));
+  assert.equal(iconLabel('minecraft:iron_ingot'), 'iron\ningot');
+  assert.equal(iconLabel('diamond_chestplate'), 'diamo\nchestp');
+  assert.equal(iconLabel('enchanted_golden_apple'), 'encha\napple');
+  assert.equal(iconLabel('apple'), 'apple');
+  assert.equal(iconLabel('netherite'), 'nether');
+  assert.equal(iconLabel(''), '');
+});
+
 // ---- grids ----
 
 test('slotGrid fills the gaps; a slot past the window is dropped', () => {
@@ -103,6 +156,20 @@ test('armorRow is the four worn slots head to feet', () => {
   assert.deepEqual(armorRow([item(3, { name: 'boots' }), item(1, { name: 'chestplate' })]), [
     null, item(1, { name: 'chestplate' }), null, item(3, { name: 'boots' }),
   ]);
+});
+
+test('armourSlots is always six cells; a missing main hand keeps the off hand in its own place', () => {
+  const offOnly = armourSlots({ armor: [item(0, { name: 'helmet' })], offhand: item(0, { name: 'shield' }) });
+  assert.equal(offOnly.length, 6);
+  assert.equal(offOnly[0].name, 'helmet');
+  assert.equal(offOnly[4], null, 'no main hand: the cell stays empty');
+  assert.equal(offOnly[5].name, 'shield');
+  const both = armourSlots({ mainhand: item(0, { name: 'sword' }), offhand: item(0, { name: 'shield' }) });
+  assert.deepEqual([both[4].name, both[5].name], ['sword', 'shield']);
+  assert.deepEqual(armourSlots({}), [null, null, null, null, null, null]);
+  assert.deepEqual(armourSlots(null), [null, null, null, null, null, null]);
+  assert.deepEqual(ARMOUR_NAMES, ['head', 'chest', 'legs', 'feet', 'main hand', 'off hand']);
+  assert.equal(ARMOUR_CAPTIONS.length, ARMOUR_NAMES.length);
 });
 
 test('chestState counts what is filled and calls an empty chest empty', () => {
