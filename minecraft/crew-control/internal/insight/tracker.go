@@ -1,6 +1,7 @@
 package insight
 
 import (
+	"cmp"
 	"slices"
 	"sync"
 	"time"
@@ -83,7 +84,7 @@ func (t *Tracker) List() []Insight {
 	for _, in := range t.live {
 		out = append(out, *in)
 	}
-	slices.SortFunc(out, func(a, b Insight) int { return int(b.ID - a.ID) })
+	slices.SortFunc(out, func(a, b Insight) int { return cmp.Compare(b.ID, a.ID) })
 	for i := len(t.closed) - 1; i >= 0; i-- {
 		out = append(out, t.closed[i])
 	}
