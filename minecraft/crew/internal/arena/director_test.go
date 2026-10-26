@@ -117,6 +117,9 @@ func found(n int) string {
 
 func (s *sim) Exec(cmd string) (string, error) {
 	switch {
+	case strings.HasPrefix(cmd, "testforblock "):
+		f := strings.Fields(cmd)
+		return fmt.Sprintf("Successfully found the block at %s,%s,%s.", f[1], f[2], f[3]), nil
 	case strings.Contains(cmd, " run summon "), strings.Contains(cmd, " run function mobs/"):
 		s.summons++
 		s.live++
@@ -331,6 +334,46 @@ func TestRunIgnoresAnotherBlocksTestforblockFailure(t *testing.T) {
 	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
 	if _, err := d.Run(); err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+}
+
+func TestRunRefusesABlockedCellAboveTheSpawn(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	spawn := testLayout().Pens[0].Spawn
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		switch cmd {
+		case fmt.Sprintf("testforblock %d %d %d air", spawn.X, spawn.Y, spawn.Z):
+			return fmt.Sprintf("Successfully found the block at %d,%d,%d.", spawn.X, spawn.Y, spawn.Z), nil
+		case fmt.Sprintf("testforblock %d %d %d air", spawn.X, spawn.Y+1, spawn.Z):
+			return fmt.Sprintf("The block at %d,%d,%d is Stone Bricks (expected: Air).", spawn.X, spawn.Y+1, spawn.Z), nil
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	if _, err := d.Run(); err == nil || !strings.Contains(err.Error(), "Stone Bricks") {
+		t.Fatalf("Run error = %v, want the blocked upper cell", err)
+	}
+}
+
+func TestSpawnCellCheckRetriesASilentReply(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	spawn := testLayout().Pens[0].Spawn
+	asked := 0
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if cmd == fmt.Sprintf("testforblock %d %d %d air", spawn.X, spawn.Y, spawn.Z) {
+			asked++
+			if asked == 1 {
+				return "", nil
+			}
+			return fmt.Sprintf("The block at %d,%d,%d is Sandstone (expected: Air).", spawn.X, spawn.Y, spawn.Z), nil
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	if _, err := d.Run(); err == nil || !strings.Contains(err.Error(), "Sandstone") {
+		t.Fatalf("Run error = %v, want the retried verdict", err)
 	}
 }
 
