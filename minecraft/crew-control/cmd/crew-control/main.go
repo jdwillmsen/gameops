@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/alerts"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/detail"
@@ -113,9 +114,19 @@ func main() {
 		ids = append(ids, u.ID)
 	}
 	fleet := metrics.New(ids)
-	poller.OnPoll = fleet.ObservePoll
+	alertCfg, err := alerts.ParseConfig(os.Getenv("CREW_ALERTS"))
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": err.Error()})
+		os.Exit(1)
+	}
+	alertEngine := alerts.NewEngine(alertCfg, time.Now())
+	poller.OnPoll = func(now time.Time, states []telemetry.UnitState) {
+		fleet.ObservePoll(now, states)
+		alertEngine.Poll(now, poller.Snapshot(), states)
+	}
 	poller.OnEvents = func(batch []telemetry.Born) {
 		fleet.Observe(batch)
+		alertEngine.Observe(batch)
 		for _, b := range batch {
 			recorder.Add(bornEvent(b))
 		}
@@ -147,6 +158,8 @@ func main() {
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
 			squadMount := squad.Routes(mux, squadStore, units, workToken)
 			squadMount.MountOperator(mux, squadGate{operators})
+
+			alerts.NewAPI(alertEngine).MountOperator(mux, operators)
 
 			poller.SetWorkSource(api.Feed)
 			events.NewAPI(eventLog).MountOperator(mux, operators)
