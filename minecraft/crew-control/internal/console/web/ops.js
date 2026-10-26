@@ -7,6 +7,7 @@ import {
   mergeEvents, filterEvents, isToast, ago, project, nearest, rankItems, KEYS,
 } from '/static/fleet.js';
 import { createFeedView, perFrame, timeText } from '/static/feedview.js';
+import { createGovernor, lowerBudget } from '/static/governor.js';
 
 const $ = id => document.getElementById(id);
 
@@ -32,6 +33,10 @@ export function initOps(host) {
   let unread = 0;
   let positions = [];
   let wallPage = 0;
+  // The budget the frame-rate governor stepped down to; never saved, so the
+  // viewer's own choice comes back on the next load.
+  let eased = 0;
+  const budget = () => eased || prefs.budget;
   let pin = '';
   let kiosk = false;
   const picked = new Set();
@@ -143,16 +148,17 @@ export function initOps(host) {
     stage.replaceChildren();
     stage.className = 'wall';
     const order = host.order();
-    const pg = pageOf(order, prefs.budget, wallPage);
+    const pg = pageOf(order, budget(), wallPage);
     wallPage = pg.page;
 
     const bar = el('div', { className: 'wallbar' }, el('span', { className: 'lbl', textContent: 'Live feeds' }));
     for (const b of budgetsFor(order.length)) {
       const btn = el('button', { type: 'button', textContent: budgetLabel(b), title: b === 0 ? 'Status cards only, no cameras' : `${b} cameras at a time` });
-      btn.setAttribute('aria-pressed', String(prefs.budget === b));
-      btn.addEventListener('click', () => { prefs.budget = b; wallPage = 0; save(); host.setView('wall'); });
+      btn.setAttribute('aria-pressed', String(budget() === b));
+      btn.addEventListener('click', () => { prefs.budget = b; eased = 0; wallPage = 0; save(); host.setView('wall'); });
       bar.append(btn);
     }
+    if (eased) bar.append(el('span', { className: 'pg', textContent: `Reduced to ${eased} live: low frame rate`, title: 'The page could not keep up, pick a budget to try again' }));
     if (pg.pages > 1) {
       const prev = el('button', { type: 'button', textContent: '<', title: 'Previous page (,)' });
       const next = el('button', { type: 'button', textContent: '>', title: 'Next page (.)' });
@@ -176,7 +182,7 @@ export function initOps(host) {
   }
 
   function wallStep(d) {
-    const pg = pageOf(host.order(), prefs.budget, wallPage);
+    const pg = pageOf(host.order(), budget(), wallPage);
     if (pg.pages < 2) return;
     wallPage = (pg.page + d + pg.pages) % pg.pages;
     host.setView('wall');
@@ -406,7 +412,7 @@ export function initOps(host) {
     items.push({ label: 'Previous unit', hint: 'k', run: () => host.focus(step(ord, st.unit, -1)) });
     items.push({ label: 'Jump to next alert', keywords: 'problem', hint: 'a', run: jumpAlert });
     for (const b of budgetsFor(ord.length)) {
-      items.push({ label: b === 0 ? 'Wall: status cards only' : b >= ALL ? 'Wall: all feeds live' : `Wall: ${b} live feeds`, keywords: 'budget cameras', run: () => { prefs.budget = b; wallPage = 0; save(); host.setView('wall'); } });
+      items.push({ label: b === 0 ? 'Wall: status cards only' : b >= ALL ? 'Wall: all feeds live' : `Wall: ${b} live feeds`, keywords: 'budget cameras', run: () => { prefs.budget = b; eased = 0; wallPage = 0; save(); host.setView('wall'); } });
     }
     items.push({ label: 'Toggle roster', hint: 'r', run: () => toggle('side') });
     items.push({ label: 'Toggle event feed', hint: 'e', run: () => toggle('dock') });
@@ -539,6 +545,22 @@ export function initOps(host) {
     drawRadar();
     if (!host.operator()) picked.clear();
   }
+
+  const governor = createGovernor();
+  function watchFrames(t) {
+    requestAnimationFrame(watchFrames);
+    const order = host.order();
+    const pg = host.state().view === 'wall' && document.visibilityState === 'visible' ? pageOf(order, budget(), wallPage) : null;
+    // Only live tiles cost enough to shed, and only the focused wall counts.
+    if (!pg || !pg.live || !governor.frame(t)) { if (!pg || !pg.live) governor.reset(); return; }
+    const next = lowerBudget(budgetsFor(order.length), budget(), ALL);
+    if (!next) return;
+    eased = next;
+    wallPage = 0;
+    governor.reset();
+    host.setView('wall');
+  }
+  requestAnimationFrame(watchFrames);
 
   applyLayout();
   renderFeed();
