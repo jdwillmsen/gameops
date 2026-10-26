@@ -643,3 +643,38 @@ Not exported, because crew-control cannot see them: kit failures, session
 errors and travel distance. They are in the units' logs only, and need the units
 to emit them (a closed reason code from the unit would also replace the text
 matching above).
+
+## Performance budget
+
+The console has to stay above 30 fps with 20 units: every tile live, the roster
+and the event dock open, and the fleet dashboard. `perf/budget.json` holds the
+limits (frame rate, p95 frame time, time to interactive, JS heap, stream bytes
+per second per unit, longest main-thread task); `perf/budget.mjs` enforces
+them and exits 1 when one is broken.
+
+```sh
+PLAYWRIGHT=/path/to/playwright/index.js node minecraft/crew-control/perf/budget.mjs
+# flags: --scenario=wall-all|fleet  --seconds=15  --json=out.json  --cpu-throttle=4
+```
+
+It builds and starts crew-control against 20 simulated units whose state
+changes every poll (about 20 fleet events a second, the worst steady rate),
+opens it in headless Chromium and measures after a 3 s warm-up. The camera
+pages are canvas stand-ins: real cameras are WebGL and depend on the GPU, so
+the run measures what the console itself adds around 20 live frames, not
+camera cost. `--url` points it at a running console instead.
+
+Measured on the devbox (headless Chromium, 15 s window; "before" is the harness on the unfixed event dock):
+
+| | wall, 20 live | fleet dashboard |
+| --- | --- | --- |
+| before: fps / p95 frame / longest task | 53.4 / - / 231 ms | 54.4 / - / 174 ms |
+| after: fps / p95 frame / longest task | 59.8 / 16.8 ms / none over 50 ms | 60 / 16.7 ms / none over 50 ms |
+| heap, time to interactive, stream bytes per unit | 9.8 MB, 125 ms, 383 B/s | 2.3 MB, 97 ms, 384 B/s |
+
+Two fixes came out of it. The event dock rebuilt and re-formatted all 120 rows
+on every event; rows now persist while their event is shown and renders are
+coalesced to one per frame. And when the wall cannot hold 24 fps for 4 s the
+console steps its live-camera budget down (20 to 12 to 9 to 6 to 4) and says
+so in the wall bar; the viewer's own choice is not saved over and returns on
+the next load. Tighten the limits when a fix lands, never loosen them to pass.
