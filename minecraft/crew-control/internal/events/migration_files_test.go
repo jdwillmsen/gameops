@@ -9,7 +9,7 @@ import (
 // Every migration after V11 ships the same way: the ConfigMap entry is the SQL
 // file indented under its key, nothing else.
 func TestLaterConfigMapEntriesAreTheirMigrationsIndented(t *testing.T) {
-	for _, name := range []string{"V12__minecraft_crew_event_analytics", "V13__minecraft_crew_alerts"} {
+	for _, name := range []string{"V12__minecraft_crew_event_analytics", "V13__minecraft_crew_alerts", "V14__minecraft_crew_position"} {
 		sql, err := os.ReadFile("../../migrations/" + name + ".sql")
 		if err != nil {
 			t.Fatal(err)
@@ -34,7 +34,7 @@ func TestLaterConfigMapEntriesAreTheirMigrationsIndented(t *testing.T) {
 
 // Forward-only: a shipped migration may add, never remove or rewrite.
 func TestMigrationsOnlyAdd(t *testing.T) {
-	for _, name := range []string{"V11__minecraft_crew_events", "V12__minecraft_crew_event_analytics", "V13__minecraft_crew_alerts"} {
+	for _, name := range []string{"V11__minecraft_crew_events", "V12__minecraft_crew_event_analytics", "V13__minecraft_crew_alerts", "V14__minecraft_crew_position"} {
 		b, err := os.ReadFile("../../migrations/" + name + ".sql")
 		if err != nil {
 			t.Fatal(err)
