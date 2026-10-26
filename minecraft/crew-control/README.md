@@ -255,6 +255,18 @@ treat a repeat as a duplicate. Those routes are refused on any request with
 days are pruned at start and daily. With Postgres unset or down, the work
 routes answer 503 and the view-only console keeps working.
 
+## Chest browser
+
+Signed-in operators get a **Chests** tab in the Jobs panel (Shift-J). It lists
+every chest in the world ledger from `GET /v1/places` with its position, the
+items last seen inside and when a unit last observed it, refreshed every 10 s
+while the tab is open. The ledger keeps an item total per chest, not slots,
+so each kind of item is one cell with its count. A chest not observed for 10
+minutes is dimmed and marked as possibly changed rather than shown as current;
+a chest no unit has looked inside says so. The units that observed a chest are
+buttons that open that unit. Item faces come from a unit's camera sheet and
+fall back to text.
+
 ## Fleet overview
 
 `?view=fleet` (the **Fleet** button, or `o`) is a table of every unit for the signed-out public view and for operators alike, fed only by the `/v1/units/stream` events the console already receives. Each row shows state, time in that state, health and hunger bars, the task, and a three-minute health trail; a strip of stat tiles counts online, working, idle, stuck, dead and offline units and the tasks done and failed in the live feed window (the events the console holds: the stream's backlog of up to 200, then every live event up to 300, so those two are a window, not a total). Signed-in streams add a position column on wide screens. A state never rides on colour alone: each has its own shape and word.

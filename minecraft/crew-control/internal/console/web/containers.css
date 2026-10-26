@@ -1,0 +1,6 @@
+.ct-card.stale .ct-grid { opacity: .55; }
+.ct-when { font-size: 11px; opacity: .7; }
+.ct-card.stale .ct-when { color: #e0b050; opacity: 1; }
+.ct-grid { display: grid; grid-template-columns: repeat(auto-fill, 36px); gap: 3px; }
+.ct-cell { width: 36px; height: 36px; }
+.ct-units { font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
