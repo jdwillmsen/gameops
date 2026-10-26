@@ -98,3 +98,20 @@ func TestPageCapIsReported(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body)
 	}
 }
+
+func TestAnonymousVariationsThatMeanTheSameQueryShareOneScan(t *testing.T) {
+	st := &countingStore{Store: events.NewMemory()}
+	mux, _ := serve(t, st, false)
+	code(mux, "/v1/units/u/explain?to=2026-10-23T06:30:05Z&from=2026-10-23T06:00:10Z")
+	n := st.queries
+	for _, p := range []string{
+		"?from=2026-10-23T06:00:40Z&to=2026-10-23T06:30:55Z",
+		"?to=2026-10-23T06:30:00Z&from=2026-10-23T06:00:00Z&junk=1",
+		"?junk=2&from=2026-10-23T06:00:59Z&to=2026-10-23T06:30:59Z",
+	} {
+		code(mux, "/v1/units/u/explain"+p)
+	}
+	if st.queries != n {
+		t.Fatalf("queries = %d, want %d", st.queries, n)
+	}
+}
