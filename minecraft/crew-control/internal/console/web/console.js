@@ -4,6 +4,7 @@ import { initAlerts } from '/static/alerts.js';
 import { initOverview } from '/static/overview-ui.js';
 import { initDashboard } from '/static/dash-ui.js';
 import { initHeat } from '/static/heat-ui.js';
+import { initReplay } from '/static/replay-ui.js';
 import { initDetail } from '/static/detail-ui.js';
 import { initContainers } from '/static/containers-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
@@ -63,6 +64,7 @@ function renderBar() {
   $('ledger-toggle').setAttribute('aria-pressed', String(state.view === 'ledger'));
   $('timeline-toggle').setAttribute('aria-pressed', String(state.view === 'timeline'));
   $('heat-toggle').setAttribute('aria-pressed', String(state.view === 'heat'));
+  $('replay-toggle').setAttribute('aria-pressed', String(state.view === 'replay'));
 }
 
 function renderStage() {
@@ -74,6 +76,7 @@ function renderStage() {
   ledgerGraph.unmount();
   timeline.unmount();
   heat.unmount();
+  replay.unmount();
   // Frames are removed, not hidden, so a camera websocket closes as soon as
   // its tile leaves the screen.
   stage.replaceChildren();
@@ -100,6 +103,10 @@ function renderStage() {
   }
   if (state.view === 'heat') {
     heat.mount(stage);
+    return;
+  }
+  if (state.view === 'replay') {
+    replay.mount(stage);
     return;
   }
   if (!state.unit) return;
@@ -212,6 +219,11 @@ function toggleHeat() {
   apply();
 }
 
+function toggleReplay() {
+  state.view = state.view === 'replay' ? (state.unit ? 'focus' : 'fleet') : 'replay';
+  apply();
+}
+
 function toggleJobs() {
   state.view = state.view === 'jobs' ? (state.unit ? 'focus' : 'fleet') : 'jobs';
   apply();
@@ -226,12 +238,13 @@ $('explorer-toggle').addEventListener('click', toggleExplorer);
 $('ledger-toggle').addEventListener('click', toggleLedger);
 $('timeline-toggle').addEventListener('click', toggleTimeline);
 $('heat-toggle').addEventListener('click', toggleHeat);
+$('replay-toggle').addEventListener('click', toggleReplay);
 
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
   if (isTyping(ev.target)) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-  if (overview.key(ev) || dash.key(ev)) return;
+  if (overview.key(ev) || dash.key(ev) || replay.key(ev)) return;
   // 1-9 and 0 reach the first ten units; [ and ] step through all of them.
   if (/^[0-9]$/.test(ev.key)) pickUnit(order[(Number(ev.key) + 9) % 10]);
   else if (ev.key === '[' || ev.key === ']') {
@@ -248,6 +261,7 @@ function onKey(ev) {
   else if (ev.key === 'l') toggleLedger();
   else if (ev.key === 't') toggleTimeline();
   else if (ev.key === 'h') toggleHeat();
+  else if (ev.key === 'y') toggleReplay();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
@@ -398,6 +412,7 @@ function setOperator(op) {
   overview.onOperator();
   detail.onOperator(op);
   heat.onOperator();
+  replay.onOperator();
   jobGraph.onOperator();
   alertsUI.onSession();
   explorer.onOperator();
@@ -654,6 +669,13 @@ const timeline = initTimeline({
 });
 
 const heat = initHeat({
+  statuses,
+  order: () => order,
+  operator: () => operator,
+  api,
+});
+
+const replay = initReplay({
   statuses,
   order: () => order,
   operator: () => operator,

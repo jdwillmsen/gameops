@@ -404,6 +404,7 @@ export function initOps(host) {
     items.push({ label: 'Show dashboard', keywords: 'view panels charts metrics', hint: 'b', run: () => host.setView('dash') });
     items.push({ label: 'Show job graph', keywords: 'view dag steps jobs', hint: 'g', run: () => host.setView('jobs') });
     items.push({ label: 'Show event explorer', keywords: 'view events filter search history log', hint: 'x', run: () => host.setView('events') });
+    items.push({ label: 'Show replay', keywords: 'view history scrub positions past map', hint: 'y', run: () => host.setView('replay') });
     items.push({ label: 'Show timeline', keywords: 'view history swim lanes tasks jobs', hint: 't', run: () => host.setView('timeline') });
     items.push({ label: 'Show focus view', keywords: 'view single', run: () => host.setView('focus') });
     for (const m of MODES) items.push({ label: `Camera: ${m}`, keywords: 'mode view', hint: m === st.mode ? 'current' : '', run: () => host.setMode(m) });

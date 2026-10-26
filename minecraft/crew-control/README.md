@@ -45,6 +45,7 @@ crew-control; it never calls them to command them.
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
 - `GET /v1/heatmap?layer=position|mining|travel&window=15m|1h|6h[&unit=<id>]`: signed-in, `Cache-Control: no-store`, 401 otherwise; see [Heatmaps](#heatmaps)
+- `GET /v1/replay/positions?since=&until=[&unit=<id>][&limit=][&cursor=]`: recorded unit positions, oldest first, keyset-paged; signed-in, `Cache-Control: no-store`, 401 otherwise; see [Replay](#replay)
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
 - `GET /signin`: passkey sign-in; the **I have an invite** section takes an operator and invite code and enrols a passkey. `/signin#operator=<id>&invite=<code>` still works and prefills that form. The invite rides in the fragment so it never reaches a log, and is removed from the address bar on load
@@ -145,6 +146,42 @@ dropped, cells: [[cellX, cellZ, count]...]}` with cell coordinates in cell
 units (block / 4, floored). The map shades cells on one hue in seven
 square-root steps with a legend, outlines the places from the ledger, and
 lists the busiest cells as text.
+
+## Replay
+
+The **Replay** bar button (or `y`) scrubs a past window on the top-down lab
+map: pick the last 10 minutes, hour or 6 hours (optionally ending earlier than
+now), then drag the scrubber or press Play at 1x, 4x or 16x. Units are drawn
+with a short trail; clicking one, or choosing it in the unit list, highlights
+it and limits the event list to it. The events of the window are listed beside
+the map, newest first up to the scrubber, so the list reads like the live feed
+at that moment. Space plays and pauses and the arrow keys step five seconds
+when no control has focus.
+
+Where units stood is operator-only: the view and the route answer 401 without
+a session, and signed out the page requests no positions.
+
+Every two seconds the service reads each online, living unit in the overworld
+and stores a row in `minecraft.crew_position` (migration `V14`) only if the
+unit moved at least a quarter of a block or 30 seconds passed since its last
+row, so a standing fleet costs a row per unit per 30 s rather than per 2 s.
+The console interpolates between rows, and does not interpolate across a gap
+over 90 s: the unit was offline or dead, so it is not drawn until it returns.
+Rows are kept as long as the event history (30 days) and pruned daily with it.
+Positions sit beside the event store, not in `crew_event`, so a row every two
+seconds per moving unit cannot slow the explorer or the analytics. Until the
+table exists, or while the database is away, a bounded in-memory store serves
+(about 40 minutes of a busy fleet) and is lost on restart; the log says so
+once per outage.
+
+`GET /v1/replay/positions` takes `since` and `until` (RFC 3339, required, at
+most 24 h apart), `unit`, `limit` (default 1000, at most 5000) and `cursor`.
+It answers `{samples: [{u, t, x, y, z}...], next}` with `t` in Unix
+milliseconds and coordinates to a hundredth of a block, oldest first;
+`next` is the cursor for the following page and absent at the end. The view
+reads the events of the same window from `GET /v1/events?sort=asc`. It reads
+at most 40 position pages and 25 event pages and says so when a range was
+cut short.
 
 ## Unit detail
 
