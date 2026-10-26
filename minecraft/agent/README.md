@@ -1265,6 +1265,10 @@ chat commands and `@server` questions are unavailable until it is back.
 | `!unpark <actor\|group\|all>` | operator | Remove the override; the actor returns to its default |
 | `!leave [duration]`, `@server leave [duration]` | operator | Park the agent |
 
+`PRESENCE_CONTROLLERS`, a comma list of XUIDs, lets those players run `!park`
+and `!unpark` without being operators. It grants those two commands and
+nothing else, so `!leave` and every other operator command stay closed to them.
+
 A park of the agent from chat, including `!park all`, always comes back by
 itself. It lasts one hour, or the duration given, and it ends early as soon
 as a player joins. The agent says so before it leaves, and says it is back

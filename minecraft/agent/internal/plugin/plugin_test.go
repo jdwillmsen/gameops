@@ -363,6 +363,42 @@ func TestDispatch_PanicIsCheckedAfterPermission(t *testing.T) {
 	}
 }
 
+func TestDispatch_GrantReachesOnlyTheNamedCommandAndPerson(t *testing.T) {
+	ran := 0
+	op := func(name string) Command {
+		return Command{Name: name, Permission: PermissionOperator, Run: func(context.Context, *Context, Invocation) (string, error) {
+			ran++
+			return "ok", nil
+		}}
+	}
+	r := NewRegistry()
+	if err := r.Register(stubPlugin{name: "ops", cmds: []Command{op("park"), op("leave")}}); err != nil {
+		t.Fatal(err)
+	}
+	r.Grant("Park", []string{"100"})
+
+	cases := []struct {
+		name    string
+		command string
+		xuid    string
+		allowed bool
+	}{
+		{"granted person, granted command", "park", "100", true},
+		{"granted person, other command", "leave", "100", false},
+		{"someone else, granted command", "park", "200", false},
+	}
+	for _, c := range cases {
+		ran = 0
+		_, err := r.Dispatch(context.Background(), &Context{}, c.command, Invocation{ActorXUID: c.xuid, ActorPermission: PermissionMember})
+		if c.allowed && (err != nil || ran != 1) {
+			t.Errorf("%s: err = %v, ran = %d, want it to run", c.name, err, ran)
+		}
+		if !c.allowed && (!errors.Is(err, ErrPermissionDenied) || ran != 0) {
+			t.Errorf("%s: err = %v, ran = %d, want denied", c.name, err, ran)
+		}
+	}
+}
+
 // stubAnnounceStore reports whatever a test wired in for Enabled.
 type stubAnnounceStore struct{ enabled bool }
 

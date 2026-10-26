@@ -182,6 +182,10 @@ type Config struct {
 	PresenceTokens []PresenceToken
 	// PresenceSelfID is which of PresenceActors this process is.
 	PresenceSelfID string
+	// PresenceControllers are XUIDs that may run !park and !unpark whatever
+	// their server permission, from PRESENCE_CONTROLLERS. It grants those two
+	// commands only, so a player can switch the bots without being an op.
+	PresenceControllers []string
 
 	// MaxToolRounds caps tool rounds per answer. Load refuses a value the
 	// timeouts cannot honour: (MaxToolRounds + 1) sequential calls must fit
@@ -338,6 +342,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	presenceControllers, err := loadPresenceControllers()
+	if err != nil {
+		return Config{}, err
+	}
 
 	mapURL := stringDefault("MAP_URL", "")
 	mapToken := stringDefault("MAP_TOKEN", "")
@@ -399,6 +407,7 @@ func Load() (Config, error) {
 		PresenceActors:            presenceActors,
 		PresenceTokens:            presenceTokens,
 		PresenceSelfID:            presenceSelf,
+		PresenceControllers:       presenceControllers,
 		LogLevel:                  strings.ToLower(stringDefault("LOG_LEVEL", "info")),
 	}
 	return cfg, nil
