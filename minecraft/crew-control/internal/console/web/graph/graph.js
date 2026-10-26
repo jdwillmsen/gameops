@@ -64,7 +64,11 @@ function chipHtml(c) {
 
 // onClose(id) reports whether it closed something: a key press nothing used
 // is left to bubble, so the view's own layers can take it.
-export function createDagGraph({ label, onSelect = () => {}, onClose = () => false, onLayout } = {}) {
+// critical: false drops the critical-path emphasis for graphs where a longest
+// chain means nothing (the world ledger). A setData() may also carry `place`, a
+// Map of id -> {x, y} in grid units, which replaces the layered positions (the
+// map layout), and per-edge `kind` and `title`, drawn as a class and a tooltip.
+export function createDagGraph({ label, onSelect = () => {}, onClose = () => false, onLayout, critical: showCritical = true } = {}) {
   const root = el('section', { className: 'dg cc-root' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', label || 'Node graph');
@@ -76,7 +80,7 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => fal
   const zoomOut = el('button', { type: 'button', textContent: '−', title: 'Zoom out', 'aria-label': 'Zoom out' });
   const fitBtn = el('button', { type: 'button', textContent: 'Fit', title: 'Fit to screen', 'aria-label': 'Fit graph to screen' });
   const tools = el('div', { className: 'dg-tools' }, el('div', { className: 'dg-zooms' }, zoomOut, zoomIn, fitBtn), legend,
-    el('span', { className: 'dg-key', textContent: 'thicker outline and edge: critical path' }), note);
+    el('span', { className: 'dg-key', textContent: 'thicker outline and edge: critical path', hidden: !showCritical }), note);
 
   // ---- the svg viewport ----
   const svg = sEl('svg', { class: 'dg-canvas', 'aria-label': 'Graph canvas' }, sEl('defs', {},
@@ -206,10 +210,26 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => fal
     edgeEls.length = 0;
   }
 
-  function renderStructure(nodes, edges) {
+  function renderStructure(nodes, edges, place) {
     // Rebuilding the nodes would drop the focus a keyboard user is holding.
     const focused = [...drawn].find(([, d]) => d.g === document.activeElement);
     graphResult = layoutDag(nodes.map(n => ({ id: n.id })), edges);
+    if (place) {
+      let w = 0, h = 0;
+      for (const [id, p] of place) {
+        if (!graphResult.pos.has(id)) continue;
+        graphResult.pos.set(id, p);
+        w = Math.max(w, p.x + 1);
+        h = Math.max(h, p.y + 1);
+      }
+      graphResult.width = w;
+      graphResult.height = h;
+    }
+    if (!showCritical) {
+      graphResult.critical = new Set();
+      graphResult.criticalIds = [];
+    }
+    const edgeInfo = new Map(edges.map(e => [`${e.from}\u0000${e.to}`, e]));
     clearAll();
     critEdges = new Set();
     const ids = graphResult.criticalIds;
@@ -223,11 +243,13 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => fal
         const x1 = MARGIN + a.x * (NODE_W + COL_GAP) + NODE_W, y1 = MARGIN + a.y * (NODE_H + ROW_GAP) + NODE_H / 2;
         const x2 = MARGIN + b.x * (NODE_W + COL_GAP), y2 = MARGIN + b.y * (NODE_H + ROW_GAP) + NODE_H / 2;
         const mid = (x1 + x2) / 2;
+        const info = edgeInfo.get(`${from}\u0000${to}`) || {};
         const path = sEl('path', {
           d: `M${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
-          class: critEdges.has(`${from}\u0000${to}`) ? 'dg-edge dg-crit' : 'dg-edge',
+          class: (critEdges.has(`${from}\u0000${to}`) ? 'dg-edge dg-crit' : 'dg-edge') + (info.kind ? ` dg-k-${info.kind}` : ''),
           'marker-end': 'url(#dg-arrow)',
         });
+        if (info.title) path.append(sEl('title', {}, info.title));
         edgeLayer.append(path);
         edgeEls.push(path);
       }
@@ -322,10 +344,11 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => fal
       view.moved = false;
       sig = '';
     }
-    const nextSig = `${data.nodes.map(n => n.id).join('|')}#${data.edges.map(e => `${e.from}>${e.to}`).join(',')}`;
+    const where = data.place ? [...data.place].map(([id, p]) => `${id}@${p.x},${p.y}`).join('|') : '';
+    const nextSig = `${data.nodes.map(n => n.id).join('|')}#${data.edges.map(e => `${e.from}>${e.to}${e.kind || ''}${e.title || ''}`).join(',')}#${where}`;
     if (nextSig !== sig) {
       sig = nextSig;
-      renderStructure(data.nodes, data.edges);
+      renderStructure(data.nodes, data.edges, data.place);
     }
     renderState(data);
   }
