@@ -12,7 +12,14 @@
   <h1>Crew control</h1>
   <p id="intro">Sign in with your passkey to command the units.</p>
   <button id="login" type="button">Sign in with passkey</button>
-  <button id="register" type="button" hidden>Create passkey</button>
+  <details id="enrol">
+    <summary>I have an invite</summary>
+    <form id="invite-form" autocomplete="off">
+      <label>Operator <input id="operator" name="operator" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
+      <label>Invite code <input id="invite" name="invite" type="password" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
+      <button id="register" type="submit">Create passkey</button>
+    </form>
+  </details>
   <p id="msg" role="status"></p>
   <p><a href="/">Back to the console</a></p>
 </main>

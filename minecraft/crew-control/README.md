@@ -41,7 +41,7 @@ crew-control; it never calls them to command them.
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
-- `GET /signin`: passkey sign-in; `/signin#operator=<id>&invite=<code>` enrols a passkey. The invite rides in the fragment so it never reaches a log
+- `GET /signin`: passkey sign-in; the **I have an invite** section takes an operator and invite code and enrols a passkey. `/signin#operator=<id>&invite=<code>` still works and prefills that form. The invite rides in the fragment so it never reaches a log, and is removed from the address bar on load
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
 - `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
@@ -219,7 +219,12 @@ either signs it out. An operator holds at most 5 passkeys; remove one by
 deleting its entry from `passkeys.json`. If that file stops parsing, everyone
 is signed out and enrolment is refused until it parses again; it is never
 overwritten. An invite works once: a new device needs a new code in the
-invites Secret.
+invites Secret. A refused enrolment answers 403 `invite_used` for the
+operator's real code once spent, and `invite_refused` for everything else
+(wrong, expired or replaced code, another operator's code, unknown
+operator), so a guess learns nothing. The page words them as *already been
+used* and *not valid or has expired*. Invites carry no clock of their own: a
+code lapses when its file is replaced or removed.
 
 Sign-in logs one JSON line per step, never a code, challenge, credential id
 or cookie: `ceremony_started` (`kind` `login` or `register`, plus `operator`
