@@ -21,6 +21,10 @@ crew-control; it never calls them to command them.
 | `PUBLIC_ORIGIN` | unset | `https://host`, lower case, no port or path; its host is the WebAuthn RP ID. Unset, or no operators, turns sign-in off |
 | `CREW_OPERATORS` | unset | JSON list `[{"id":"owner","name":"Owner"}]`, at most 8; ids are slugs `^[a-z][a-z0-9-]{1,15}$` |
 | `CREW_INVITES_DIR` | unset | Mounted Secret directory with one file per operator id holding that operator's one-time invite code; missing or empty means nobody can enrol |
+| `XBOX_LOGIN_ENABLED` | `false` | `true` offers Sign in with Xbox beside the passkey; needs the four rows below. Off, the Xbox routes are 404 and `/auth/methods` says so |
+| `XBOX_CLIENT_ID` | unset | Application (client) ID, a GUID, of the Entra app registration |
+| `XBOX_CLIENT_SECRET_FILE` | unset | Path of the mounted Secret file holding the app's client secret (`XBOX_CLIENT_SECRET` holds it directly for a local run; not both). At least 16 characters, no whitespace |
+| `CREW_XBOX_ACCOUNTS` | unset | JSON list `[{"operator":"owner","xuid":"2535..."}]`, at most 16: which Xbox account (by XUID) is which operator. Every operator id must be in `CREW_OPERATORS`; an empty list with Xbox on stops the start |
 | `DATA_DIR` | `/data` | Persistent volume for `session.key`, `passkeys.json` and `invites-used.json` |
 | `WORK_TOKEN` | unset | Shared bearer token for the unit work routes; unset leaves them out entirely (404) |
 | `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USERNAME`, `PG_PASSWORD` | unset, `5432` | Postgres holding the queue (`minecraft.crew_work`, `minecraft.crew_work_event`), the world ledger (`minecraft.crew_place`, `minecraft.crew_stock`), jobs (`minecraft.crew_job`, `minecraft.crew_job_step`) and the unit event history (`minecraft.crew_event`), over `sslmode=require` |
@@ -42,6 +46,7 @@ crew-control; it never calls them to command them.
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
 - `GET /signin`: passkey sign-in; the **I have an invite** section takes an operator and invite code and enrols a passkey. `/signin#operator=<id>&invite=<code>` still works and prefills that form. The invite rides in the fragment so it never reaches a log, and is removed from the address bar on load
+- `GET /auth/methods`: `{"passkey":true,"xbox":<bool>}`, what the sign-in page offers. `GET /auth/xbox/start` and `GET /auth/xbox/callback`: the Xbox sign-in, only with it on; see [Signing in with Xbox](#signing-in-with-xbox)
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
 - `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
@@ -236,6 +241,54 @@ by the page to `POST /auth/report` and logged as `client_ceremony_failed`
 with `kind`, `stage` (`begin`, `credential`, `finish`) and `error` (a
 `DOMException` name, `network`, `refused` or `other`). The route needs no
 session, takes only those words, and answers 429 past 20 reports a minute.
+
+### Signing in with Xbox
+
+A second way in for the operators, so a lost passkey does not lock anyone out.
+Off unless `XBOX_LOGIN_ENABLED=true`.
+
+1. The sign-in page asks `/auth/methods` and, if Xbox is on, shows **Sign in
+   with Xbox**, a form that goes to `GET /auth/xbox/start`. The server keeps a
+   state and a PKCE verifier in a signed `__Host-crew_xbox` cookie (10 minutes,
+   single use) and redirects to Microsoft's `consumers` sign-in for the
+   `XboxLive.signin` scope.
+2. Microsoft returns the browser to `GET /auth/xbox/callback`. The server checks
+   the cookie, the state and the code agree, redeems the code, and walks
+   Xbox Live to the account's XUID. No refresh token is requested and no
+   Microsoft token is returned, stored or logged.
+3. The XUID must be in `CREW_XBOX_ACCOUNTS`; its operator gets the same
+   `__Host-crew_session` cookie a passkey login does. Any other account is sent
+   back to `/signin` with a sentence and no session. Gamertags are not used for
+   the decision because a player can change theirs.
+
+Removing an account from `CREW_XBOX_ACCOUNTS`, or its operator from
+`CREW_OPERATORS`, ends its sessions at the next request. Refusals redirect to
+`/signin?xbox=<word>` with one word of a closed list (`not_allowed`,
+`cancelled`, `expired`, `state_mismatch`, `replayed`, `bad_request`,
+`microsoft_error`, `exchange_failed`, `no_xbox_profile`, `child_account`,
+`xbox_refused`, `xbox_unavailable`, `bad_identity`, `busy`, `fault`); the page
+turns it into a sentence. Callbacks that reach Microsoft are limited to a burst
+of 10 and one per 6 s for the whole server. The log has `operator_login` with
+`method` `xbox` and the XUID, and `xbox_login_refused` with the `result`, within
+a budget of 20 a minute.
+
+**Setting it up (owner).** The sign-in is built and tested against a fake
+Microsoft; going live needs an Entra app registration, which agents do not
+create or hold secrets for.
+
+- Reuse the map's registration or make a new one (personal Microsoft accounts
+  only). Add the Web redirect URI `https://<PUBLIC_ORIGIN host>/auth/xbox/callback`,
+  written exactly, to it.
+- Put its client secret in a Secret in the crew-control namespace and mount it;
+  set `XBOX_CLIENT_ID`, `XBOX_CLIENT_SECRET_FILE`, `XBOX_LOGIN_ENABLED=true`.
+- Set `CREW_XBOX_ACCOUNTS` in the chart to each operator's XUID.
+- Add `/auth/methods`, `/auth/xbox/start` and `/auth/xbox/callback` to the
+  public HTTPRoute's allow-list (jdw-deployments); the route lists paths.
+- Sign in once with Xbox and confirm it.
+
+As for the map, whether Microsoft consents a personal app to `XboxLive.signin`
+without Xbox partner enrolment was not verified without a real sign-in. If it
+is refused the sign-in fails closed and passkeys are untouched.
 
 The `/v1/work/*`, `/v1/jobs` and `/v1/places` routes answer 401 without a session, as does
 `GET /units/{id}/detail` (the ender chest it carries is private to its owner). Every `POST` needs a JSON
