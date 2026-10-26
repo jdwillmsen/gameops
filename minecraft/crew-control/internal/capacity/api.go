@@ -38,6 +38,13 @@ func (a *API) Mount(mux *http.ServeMux, g anon.Gate) {
 	mux.HandleFunc("GET /v1/capacity", a.get)
 }
 
+func span(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return "24h"
+	}
+	return "1h"
+}
+
 func failReply(status int, msg string) anon.Reply {
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	return anon.Reply{Status: status, Body: b}
@@ -53,7 +60,7 @@ func (a *API) get(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("window"); s != "" {
 		d, err := time.ParseDuration(s)
 		if err != nil || d < minWindow || d > limit {
-			anon.Write(w, failReply(http.StatusBadRequest, "window must be a duration between 1m and "+limit.String()))
+			anon.Write(w, failReply(http.StatusBadRequest, "window must be a duration between 1m and "+span(limit)))
 			return
 		}
 		win = d
@@ -79,13 +86,14 @@ func (a *API) scan(r *http.Request, win time.Duration) (anon.Reply, bool) {
 	var es []unitlog.Event
 	truncated := false
 	for _, kind := range []string{unitlog.KindTaskDone, unitlog.KindTaskFailed} {
-		q := events.Query{Kind: kind, Since: from, Until: to, Limit: pageSize, Asc: true}
+		q := events.Query{Kind: kind, Since: from, Until: to, Limit: pageSize}
+		var got []unitlog.Event
 		for i := 0; ; i++ {
 			page, err := a.store.Query(r.Context(), q)
 			if err != nil {
 				return failReply(http.StatusServiceUnavailable, "event store unavailable"), false
 			}
-			es = append(es, unitlog.FromAll(page.Events)...)
+			got = append(got, unitlog.FromAll(page.Events)...)
 			if page.Next == nil {
 				break
 			}
@@ -95,6 +103,7 @@ func (a *API) scan(r *http.Request, win time.Duration) (anon.Reply, bool) {
 			}
 			q.Cursor = *page.Next
 		}
+		es = append(es, got...)
 	}
 	rep := Compute(from, to, es)
 	rep.Truncated = truncated
