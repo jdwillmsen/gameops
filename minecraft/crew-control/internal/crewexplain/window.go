@@ -85,6 +85,9 @@ func ReadWindow(path string) (Window, error) {
 // fields are errors, not warnings: a field the allow-list does not name could
 // be a position or a name.
 func ParseWindow(b []byte) (Window, error) {
+	if isExported(b) {
+		return parseExported(b)
+	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	var w Window

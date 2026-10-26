@@ -908,7 +908,8 @@ The window file is `{schema_version, redaction_version, window_id, from, to,
 events[]}` with each event limited to `id, unit, at, kind, reason_code,
 cause_ref, template, duration_ms, idle, anchor, task`. Versions other than 1,
 unknown fields, free text in the vocabulary fields and duplicate ids are
-refused.
+refused. The service's own event-window export (`lines[]`) is read as is, with
+the same refusals; its roll-up counts and states are not used by the rules.
 
 Guardrails: window values are JSON-escaped between fixed delimiters and the
 system prompt says they are data; temperature 0 and a JSON-schema response
