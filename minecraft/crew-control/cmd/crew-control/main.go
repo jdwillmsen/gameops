@@ -37,6 +37,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/proxy"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/replay"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/work"
@@ -168,6 +169,9 @@ func main() {
 	streamCtx, endStreams := context.WithCancel(context.Background())
 	defer endStreams()
 	heatmap := heat.New()
+	// Like the event history, replay never goes dark: memory serves until
+	// the database answers.
+	positions := replay.NewFallback(log)
 	srv := &http.Server{
 		Addr: addr,
 		Handler: newHandler(units, poller, saves, operators.Operator, log, operators.Mount, func(mux *http.ServeMux) {
@@ -187,6 +191,7 @@ func main() {
 			events.NewAPI(eventLog).MountOperator(mux, operators)
 			explorer.NewAPI(explorer.StoreSource{Store: eventLog}, explorer.NewMemoryViews(), operators).Mount(mux)
 			heatmap.MountOperator(mux, operators, units.Has)
+			replay.NewAPI(positions).MountOperator(mux, operators, units.Has)
 			explain.NewAPI(eventLog).Mount(mux, operators)
 			export.NewAPI(eventLog, exportAudit(log)).MountOperator(mux, operators)
 			capacity.NewAPI(eventLog).Mount(mux, operators)
@@ -216,6 +221,7 @@ func main() {
 	defer stop()
 
 	go heatmap.Run(ctx, poller, heatEvery(log))
+	go replay.NewRecorder(positions).Run(ctx, poller, replay.DefaultEvery)
 
 	pollDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollDone) }()
@@ -230,6 +236,8 @@ func main() {
 	go func() {
 		openStore(ctx, store, &world, &sched, eventLog, poller, places, dsn, os.Getenv("WORK_STORE") == "memory", log, func(pool *pgxpool.Pool) {
 			go alerts.Persist(ctx, alertEngine, alerts.NewPostgres(pool), log)
+			positions.SetPrimary(replay.NewPostgres(pool))
+			go prunePositions(ctx, positions, log)
 		})
 		close(storeDone)
 	}()
@@ -572,6 +580,26 @@ func newHandler(units roster.Roster, poller *telemetry.Poller, saves detail.Sour
 type gateFunc func(*http.Request) (auth.Operator, bool)
 
 func (f gateFunc) Operator(r *http.Request) (auth.Operator, bool) { return f(r) }
+
+// prunePositions holds replay history to the event history's retention, on the
+// same daily cadence as the other prunes.
+func prunePositions(ctx context.Context, s replay.Store, log *logging.Logger) {
+	for {
+		if n, err := s.Prune(ctx, time.Now().Add(-events.MinRetention)); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Warn("position_prune_failed", logging.Fields{"error": err.Error()})
+		} else if n > 0 {
+			log.Info("position_pruned", logging.Fields{"rows": n})
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(pruneEvery):
+		}
+	}
+}
 
 // heatEvery reads HEAT_SAMPLE; a bad or too-short value falls back to the
 // default rather than stopping the service over a tuning knob.
