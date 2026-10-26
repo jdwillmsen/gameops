@@ -118,3 +118,24 @@ func TestAPIHidesEvidenceFromAnonymous(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadKeepsTheNewestWhenThePageCapBites(t *testing.T) {
+	m := events.NewMemory()
+	now := t0.Add(time.Hour)
+	var evs []events.Event
+	n := pageSize*maxPages + 500
+	for i := 0; i < n; i++ {
+		evs = append(evs, stored("u", now.Add(-lookback+time.Duration(i)*time.Millisecond), "task_done", ""))
+	}
+	_ = m.Append(context.Background(), evs)
+	got, err := NewRunner(m, NewTracker()).load(context.Background(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != pageSize*maxPages {
+		t.Fatalf("len = %d, want the cap %d", len(got), pageSize*maxPages)
+	}
+	if !got[len(got)-1].At.Equal(now.Add(-lookback+time.Duration(n-1)*time.Millisecond)) || got[0].At.After(got[1].At) {
+		t.Fatalf("want the newest event last in oldest-first order, got first %v last %v", got[0].At, got[len(got)-1].At)
+	}
+}
