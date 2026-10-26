@@ -119,7 +119,13 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 			stop()
 		}
 	}()
-	defer func() { _ = srv.Shutdown(context.Background()) }()
+	// Bounded: Shutdown waits up to five seconds for a connection that never
+	// sent a request, which would hold the whole process open on exit.
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
 	// A unit that cannot serve /healthz must not exit as if it had finished,
 	// and the cancel that follows can make a later step fail with a misleading
 	// error, so the status failure decides the exit code.
