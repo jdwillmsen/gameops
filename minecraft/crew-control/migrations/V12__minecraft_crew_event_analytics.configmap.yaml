@@ -1,0 +1,48 @@
+  V12__minecraft_crew_event_analytics.sql: |
+    -- The analytic columns of crew_event: why a task ended, how long it took, which
+    -- session and crew build it ran under, and the earlier event that explains it.
+    --
+    -- They were left out of V11 because the first slice stored only what the live
+    -- feed shows. The explorer and the insight rules filter on them, so they are
+    -- columns rather than payload keys: a filter on a JSONB key would scan, and a
+    -- CHECK catches a writer that invents an outcome.
+    --
+    -- Additive only, and every column is nullable: rows written before this
+    -- migration, and events of kinds these do not describe, leave them null.
+    -- Nothing is rewritten or dropped.
+    --
+    -- cause_ref names another crew_event row but is not a foreign key, for the
+    -- reason task_id is not one: pruning removes old rows, and a link to a pruned
+    -- cause must read as a dangling id, not block the delete.
+    ALTER TABLE minecraft.crew_event
+        ADD COLUMN IF NOT EXISTS reason_code  TEXT,
+        ADD COLUMN IF NOT EXISTS duration_ms  INTEGER,
+        ADD COLUMN IF NOT EXISTS attempt      INTEGER,
+        ADD COLUMN IF NOT EXISTS session_id   TEXT,
+        ADD COLUMN IF NOT EXISTS crew_version TEXT,
+        ADD COLUMN IF NOT EXISTS cause_ref    BIGINT,
+        ADD COLUMN IF NOT EXISTS outcome      TEXT;
+
+    DO
+    $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1
+                           FROM pg_constraint
+                           WHERE conname = 'crew_event_outcome_check'
+                             AND conrelid = 'minecraft.crew_event'::regclass) THEN
+                ALTER TABLE minecraft.crew_event
+                    ADD CONSTRAINT crew_event_outcome_check CHECK (outcome IN ('ok', 'noop', 'failed'));
+            END IF;
+        END
+    $$;
+
+    -- Partial indexes: most rows carry none of these, so an index over every row
+    -- would be mostly nulls. Each ends in (at, id) like V11's, for keyset paging.
+    CREATE INDEX IF NOT EXISTS crew_event_reason_at_idx
+        ON minecraft.crew_event (reason_code, at, id) WHERE reason_code IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS crew_event_outcome_at_idx
+        ON minecraft.crew_event (outcome, at, id) WHERE outcome IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS crew_event_session_at_idx
+        ON minecraft.crew_event (session_id, at, id) WHERE session_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS crew_event_cause_idx
+        ON minecraft.crew_event (cause_ref, at, id) WHERE cause_ref IS NOT NULL;
