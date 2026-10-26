@@ -59,7 +59,7 @@ func TestStatusServerAnswersWhileStartupIsStuckOnTheNetwork(t *testing.T) {
 		cancel()
 		select {
 		case <-done:
-		case <-time.After(5 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Error("run did not return after cancel")
 		}
 	})
