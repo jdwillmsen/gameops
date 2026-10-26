@@ -4,21 +4,27 @@
     "name": "gameops lab mods stage 0 (resources)",
     "description": "Model, texture and render controller for the stage-0 test mob",
     "uuid": "c8b7905a-b5e3-45a6-a10e-488507337eea",
-    "version": [0, 0, 1],
-    "min_engine_version": [1, 21, 0]
+    "version": [
+      0,
+      0,
+      1
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      0
+    ]
   },
   "modules": [
     {
       "type": "resources",
       "description": "Entity client definitions",
       "uuid": "61f537ef-6abb-419b-8373-12023ef0ad60",
-      "version": [0, 0, 1]
-    }
-  ],
-  "dependencies": [
-    {
-      "uuid": "900b5811-de7d-4aea-9a87-7398d78673db",
-      "version": [0, 0, 1]
+      "version": [
+        0,
+        0,
+        1
+      ]
     }
   ]
 }

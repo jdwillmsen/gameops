@@ -52,9 +52,12 @@ def check_version(value, where, rep):
         rep.fail(f"{where}: version must be three non-negative integers, got {value!r}")
 
 
-def check_manifest(path, manifest, rep):
+def check_manifest(path, manifest, module_type, rep):
     """Returns (header uuid, version, all uuids declared in this manifest)."""
+    if manifest.get("format_version") != 2:
+        rep.fail(f"{path}: format_version must be 2")
     header = manifest.get("header") or {}
+    check_version(header.get("min_engine_version"), f"{path} header.min_engine_version", rep)
     uuids = []
     hid = check_uuid(header.get("uuid"), f"{path} header.uuid", rep)
     check_version(header.get("version"), f"{path} header.version", rep)
@@ -66,6 +69,8 @@ def check_manifest(path, manifest, rep):
     for i, mod in enumerate(modules):
         mid = check_uuid(mod.get("uuid"), f"{path} modules[{i}].uuid", rep)
         check_version(mod.get("version"), f"{path} modules[{i}].version", rep)
+        if mod.get("type") != module_type:
+            rep.fail(f"{path}: modules[{i}].type must be {module_type!r}, got {mod.get('type')!r}")
         if mid:
             uuids.append(mid)
     return hid, header.get("version"), uuids
@@ -82,7 +87,11 @@ def read_png_size(path, rep):
     while pos + 8 <= len(data):
         length, tag = struct.unpack(">I4s", data[pos:pos + 8])
         body = data[pos + 8:pos + 8 + length]
-        crc = struct.unpack(">I", data[pos + 8 + length:pos + 12 + length])[0]
+        crc_bytes = data[pos + 8 + length:pos + 12 + length]
+        if len(body) != length or len(crc_bytes) != 4:
+            rep.fail(f"{path}: truncated {tag.decode('ascii', 'replace')} chunk")
+            return None
+        crc = struct.unpack(">I", crc_bytes)[0]
         if zlib.crc32(tag + body) & 0xFFFFFFFF != crc:
             rep.fail(f"{path}: bad CRC in {tag.decode('ascii', 'replace')} chunk")
             return None
@@ -94,16 +103,26 @@ def read_png_size(path, rep):
     return size
 
 
-def entity_filter_items(node):
-    """Yields every filter test dict nested anywhere in a filters tree."""
+def entity_filter_items(node, rep=None, where=""):
+    """Yields the filter tests that must all hold: the root and nested all_of.
+
+    any_of and none_of change what a test means, and a subject other than
+    "other" never matches the candidate, so both are rejected rather than
+    flattened into a passing check.
+    """
     if isinstance(node, dict):
+        for key in ("any_of", "none_of"):
+            if key in node and rep is not None:
+                rep.fail(f"{where}: filters must not use {key}")
         if "test" in node:
+            if node.get("subject", "other") != "other" and rep is not None:
+                rep.fail(f"{where}: filter tests must use subject 'other'")
             yield node
-        for v in node.values():
-            yield from entity_filter_items(v)
+        for item in node.get("all_of", []):
+            yield from entity_filter_items(item, rep, where)
     elif isinstance(node, list):
-        for v in node:
-            yield from entity_filter_items(v)
+        for item in node:
+            yield from entity_filter_items(item, rep, where)
 
 
 def check_behaviour_entity(path, doc, rep):
@@ -122,7 +141,7 @@ def check_behaviour_entity(path, doc, rep):
     if "minecraft:behavior.melee_attack" in comps and "minecraft:attack" not in comps:
         rep.fail(f"{path}: melee_attack without minecraft:attack never hurts anything")
     if target is not None:
-        tests = [t for et in target.get("entity_types", []) for t in entity_filter_items(et.get("filters"))]
+        tests = [t for et in target.get("entity_types", []) for t in entity_filter_items(et.get("filters"), rep, path)]
         fam = [t for t in tests if t.get("test") == "is_family"]
         wants_target = any(t.get("value") == "arena_target" and t.get("operator", "==") in ("==", "equals") for t in fam)
         wants_player = any(t.get("value") == "player" and t.get("operator", "==") in ("==", "equals") for t in fam)
@@ -158,19 +177,19 @@ def check_pack_dir(pack, rep):
     if bp_man not in parsed or rp_man not in parsed:
         return
 
-    bp_hid, bp_ver, bp_uuids = check_manifest(bp_man, parsed[bp_man], rep)
-    rp_hid, _, rp_uuids = check_manifest(rp_man, parsed[rp_man], rep)
+    bp_hid, _, bp_uuids = check_manifest(bp_man, parsed[bp_man], "data", rep)
+    rp_hid, rp_ver, rp_uuids = check_manifest(rp_man, parsed[rp_man], "resources", rep)
     all_uuids = bp_uuids + rp_uuids
     dupes = sorted({u for u in all_uuids if all_uuids.count(u) > 1})
     if dupes:
         rep.fail(f"{pack}: UUIDs reused across headers/modules: {', '.join(dupes)}")
 
-    deps = parsed[rp_man].get("dependencies") or []
-    dep = [d for d in deps if isinstance(d, dict) and str(d.get("uuid", "")).lower() == bp_hid]
+    deps = parsed[bp_man].get("dependencies") or []
+    dep = [d for d in deps if isinstance(d, dict) and str(d.get("uuid", "")).lower() == rp_hid]
     if not dep:
-        rep.fail(f"{rp_man}: must depend on the behaviour pack header UUID {bp_hid}")
-    elif dep[0].get("version") != bp_ver:
-        rep.fail(f"{rp_man}: dependency version {dep[0].get('version')} != behaviour pack version {bp_ver}")
+        rep.fail(f"{bp_man}: must depend on the resource pack header UUID {rp_hid}")
+    elif dep[0].get("version") != rp_ver:
+        rep.fail(f"{bp_man}: dependency version {dep[0].get('version')} != resource pack version {rp_ver}")
 
     bp_ids = set()
     for path, doc in parsed.items():

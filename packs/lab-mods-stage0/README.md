@@ -72,7 +72,7 @@ Steps, in the `jdw-deployments` crew-lab chart (not in this repo):
 ### Version-bump rule
 
 Bump `version` in **both** manifests on every change that ships (header and
-module, plus the resource pack's dependency on the behaviour pack, plus the
+module, plus the behaviour pack's dependency on the resource pack, plus the
 matching entries in the `world_*_packs.json` files). Clients cache resource
 packs by UUID and version, so an unbumped change shows stale models and
 textures.
