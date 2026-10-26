@@ -830,6 +830,49 @@ and the events before it and returns a verdict with the chain, call it from
 `classify`, and add table-test rows for a match, a near miss and a missing
 predecessor.
 
+### Offline draft summaries (`crew-explain`)
+
+`cmd/crew-explain` is an operator tool, not part of the image or the chart. It
+reads an exported event window and asks an OpenAI-compatible model for a draft
+summary, then prints it under an "AI draft, unverified" banner with the model
+id, prompt hash, window id, date and the cited events. The rule-based finding
+(`internal/explain` per unit plus `internal/insight`) is printed first; if the
+draft names a different dominant cause, the output says DISAGREEMENT.
+
+```
+crew-explain window.json                       # local-chat on 127.0.0.1:8000
+crew-explain --format json --out draft.json window.json
+crew-explain --rules-only window.json          # no model at all
+crew-explain eval --runs 3 --log eval.jsonl    # evaluation harness
+```
+
+The model on the GPU VM is reached through an SSH tunnel to loopback, or by
+naming its host once with `--allow-host 192.168.1.50` and `--base-url`. Any
+other host is refused. Exit status is 0 or 1; the reason is on stderr.
+
+The window file is `{schema_version, redaction_version, window_id, from, to,
+events[]}` with each event limited to `id, unit, at, kind, reason_code,
+cause_ref, template, duration_ms, idle, anchor, task`. Versions other than 1,
+unknown fields, free text in the vocabulary fields and duplicate ids are
+refused.
+
+Guardrails: window values are JSON-escaped between fixed delimiters and the
+system prompt says they are data; temperature 0 and a JSON-schema response
+format constrain the reply; code then rejects any draft whose cause is outside
+the closed list, whose evidence ids are not in the window or repeat, whose text
+is over its cap, contains a URL, a command-like word or any markup character.
+A rejected draft is discarded and the tool exits 1. The tool sends no
+credentials, follows no redirects, caps calls and answer size, and writes only
+`--out` and `--log`. Empty and failure-free windows skip the model.
+
+`crew-explain eval` runs 8 golden windows (synthetic reconstructions of the
+failure shapes seen on 2026-10-23, not exports of it) and 3 injection windows
+through the model. Read the report like this: agreement counts a window only if
+every run named the rules' dominant cause; below 5 of 6 it says "model not fit".
+Evidence-id validity must be 100%. An injection case passes when the draft is
+valid and still names the rules' cause. Self-reported confidence is shown but
+proves nothing. A passing run is a sample, never a guarantee.
+
 ### Capacity
 
 `/v1/capacity` reports, per task type, arrivals per minute (completed plus
