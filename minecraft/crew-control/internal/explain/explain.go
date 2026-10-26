@@ -68,6 +68,9 @@ type Result struct {
 	Explained   int       `json:"explained"`
 	Findings    []Finding `json:"findings"`
 	Unexplained Unexplain `json:"unexplained"`
+	// Truncated says the unit's history was longer than one answer reads, so
+	// its newest events are missing from the counts.
+	Truncated bool `json:"truncated"`
 }
 
 // Unexplain is the bucket for failures no rule covers. It is as prominent as

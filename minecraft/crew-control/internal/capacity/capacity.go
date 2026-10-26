@@ -50,6 +50,9 @@ type Report struct {
 	Utilization    float64    `json:"utilization"`
 	NonStationary  bool       `json:"non_stationary"`
 	UnknownLengths int        `json:"unknown_durations"`
+	// Truncated says the window held more events than one answer reads, so
+	// the newest are missing from the counts.
+	Truncated bool `json:"truncated"`
 }
 
 type acc struct {

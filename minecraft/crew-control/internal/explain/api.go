@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/anon"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/unitlog"
 )
@@ -21,24 +22,31 @@ const (
 
 // API serves the explainer. The payload holds event ids and sentences, never
 // a position, so the same answer goes to anonymous and signed-in viewers.
+//
+// Each request scans the event log, so anonymous callers get a one-hour cap
+// and a short shared cache; signed-in operators get the full 24 h, uncached.
 type API struct {
 	store events.Store
 	now   func() time.Time
+	gate  anon.Gate
+	cache *anon.Cache
 }
 
-func NewAPI(s events.Store) *API { return &API{store: s, now: time.Now} }
+func NewAPI(s events.Store) *API {
+	return &API{store: s, now: time.Now, cache: anon.NewCache()}
+}
 
-func (a *API) Mount(mux *http.ServeMux) {
+func (a *API) Mount(mux *http.ServeMux, g anon.Gate) {
+	a.gate = g
 	mux.HandleFunc("GET /v1/units/{id}/explain", a.explain)
 }
 
-func fail(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+func failReply(status int, msg string) anon.Reply {
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	return anon.Reply{Status: status, Body: b}
 }
 
-func (a *API) window(r *http.Request) (from, to time.Time, ok bool) {
+func (a *API) window(r *http.Request, limit time.Duration) (from, to time.Time, ok bool) {
 	to = a.now()
 	if s := r.URL.Query().Get("to"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
@@ -55,33 +63,56 @@ func (a *API) window(r *http.Request) (from, to time.Time, ok bool) {
 		}
 		from = t
 	}
-	return from, to, !from.After(to) && to.Sub(from) <= maxWindow
+	return from, to, !from.After(to) && to.Sub(from) <= limit
 }
 
 func (a *API) explain(w http.ResponseWriter, r *http.Request) {
-	from, to, ok := a.window(r)
+	signed := anon.Signed(a.gate, r)
+	limit := maxWindow
+	if !signed {
+		limit = anon.MaxWindow
+	}
+	from, to, ok := a.window(r, limit)
 	if !ok {
-		fail(w, http.StatusBadRequest, "from and to must be RFC 3339 times, in order, at most 24h apart")
+		anon.Write(w, failReply(http.StatusBadRequest, "from and to must be RFC 3339 times, in order, at most "+limit.String()+" apart"))
 		return
 	}
 	unit := r.PathValue("id")
+	scan := func() (anon.Reply, bool) { return a.scan(r, unit, from, to) }
+	if signed {
+		rep, _ := scan()
+		anon.Write(w, rep)
+		return
+	}
+	anon.Write(w, a.cache.Do(unit+"?"+r.URL.RawQuery, scan))
+}
+
+// scan reads the unit's events and explains them. The second result says the
+// answer may be kept for other callers.
+func (a *API) scan(r *http.Request, unit string, from, to time.Time) (anon.Reply, bool) {
 	q := events.Query{Unit: unit, Since: from.Add(-lookback), Until: to, Limit: pageSize, Asc: true}
 	var es []unitlog.Event
-	for i := 0; i < maxPages; i++ {
+	truncated := false
+	for i := 0; ; i++ {
 		page, err := a.store.Query(r.Context(), q)
 		if err != nil {
-			if r.Context().Err() == nil {
-				fail(w, http.StatusServiceUnavailable, "event store unavailable")
-			}
-			return
+			return failReply(http.StatusServiceUnavailable, "event store unavailable"), false
 		}
 		es = append(es, unitlog.FromAll(page.Events)...)
 		if page.Next == nil {
 			break
 		}
+		if i+1 >= maxPages {
+			truncated = true
+			break
+		}
 		q.Cursor = *page.Next
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(Explain(unit, from, to, es))
+	res := Explain(unit, from, to, es)
+	res.Truncated = truncated
+	b, err := json.Marshal(res)
+	if err != nil {
+		return failReply(http.StatusInternalServerError, "encode failed"), false
+	}
+	return anon.Reply{Status: http.StatusOK, Body: b}, true
 }
