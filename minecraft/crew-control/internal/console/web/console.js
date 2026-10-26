@@ -2,6 +2,7 @@ import { initOps } from '/static/ops.js';
 import { initSquads } from '/static/squad.js';
 import { initAlerts } from '/static/alerts.js';
 import { initOverview } from '/static/overview-ui.js';
+import { initDashboard } from '/static/dash-ui.js';
 import { initDetail } from '/static/detail-ui.js';
 import { initContainers } from '/static/containers-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
@@ -54,6 +55,7 @@ function renderBar() {
   }));
   $('wall-toggle').setAttribute('aria-pressed', String(state.view === 'wall'));
   $('fleet-toggle').setAttribute('aria-pressed', String(state.view === 'fleet'));
+  $('dash-toggle').setAttribute('aria-pressed', String(state.view === 'dash'));
   $('detail-toggle').setAttribute('aria-pressed', String(state.view === 'detail'));
   $('jobgraph-toggle').setAttribute('aria-pressed', String(state.view === 'jobs'));
   $('explorer-toggle').setAttribute('aria-pressed', String(state.view === 'events'));
@@ -63,6 +65,7 @@ function renderBar() {
 
 function renderStage() {
   overview.unmount();
+  dash.unmount();
   detail.unmount();
   jobGraph.unmount();
   explorer.unmount();
@@ -108,6 +111,10 @@ function renderStage() {
   }
   if (state.view === 'fleet') {
     overview.mount(stage);
+    return;
+  }
+  if (state.view === 'dash') {
+    dash.mount(stage);
     return;
   }
   if (state.view === 'detail') {
@@ -163,6 +170,11 @@ function toggleFleet() {
   apply();
 }
 
+function toggleDash() {
+  state.view = state.view === 'dash' ? 'focus' : 'dash';
+  apply();
+}
+
 function toggleDetail() {
   state.view = state.view === 'detail' ? 'focus' : 'detail';
   apply();
@@ -195,6 +207,7 @@ function toggleJobs() {
 
 $('wall-toggle').addEventListener('click', toggleWall);
 $('fleet-toggle').addEventListener('click', toggleFleet);
+$('dash-toggle').addEventListener('click', toggleDash);
 $('detail-toggle').addEventListener('click', toggleDetail);
 $('jobgraph-toggle').addEventListener('click', toggleJobs);
 $('explorer-toggle').addEventListener('click', toggleExplorer);
@@ -205,7 +218,7 @@ function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
   if (isTyping(ev.target)) return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
-  if (overview.key(ev)) return;
+  if (overview.key(ev) || dash.key(ev)) return;
   // 1-9 and 0 reach the first ten units; [ and ] step through all of them.
   if (/^[0-9]$/.test(ev.key)) pickUnit(order[(Number(ev.key) + 9) % 10]);
   else if (ev.key === '[' || ev.key === ']') {
@@ -215,6 +228,7 @@ function onKey(ev) {
   else if (ev.key === 'c') setMode(nextMode(state.mode));
   else if (ev.key === 'w') toggleWall();
   else if (ev.key === 'o') toggleFleet();
+  else if (ev.key === 'b') toggleDash();
   else if (ev.key === 'd') toggleDetail();
   else if (ev.key === 'g') toggleJobs();
   else if (ev.key === 'x') toggleExplorer();
@@ -239,6 +253,7 @@ function onUnits(list) {
   statuses.clear();
   for (const s of list) statuses.set(s.id, s);
   overview.onUnits();
+  dash.onUnits(list);
   if (first) {
     state = parse(location.search, order);
     apply();
@@ -268,12 +283,14 @@ function connect() {
     ops.onEvents(list, false);
     overview.onEvents(list, false);
     explorer.onEvents(list, false);
+    dash.onEvents(list);
   });
   es.addEventListener('log', ev => {
     const e = JSON.parse(ev.data);
     ops.onEvents([e], true);
     overview.onEvents([e], true);
     explorer.onEvents([e], true);
+    dash.onEvents([e]);
   });
   es.addEventListener('positions', ev => {
     const list = JSON.parse(ev.data) || [];
@@ -592,6 +609,8 @@ const overview = initOverview({
   detail: openDetail,
   sync,
 });
+
+const dash = initDashboard();
 
 const detail = initDetail({
   statuses,
