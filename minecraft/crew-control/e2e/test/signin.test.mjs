@@ -143,7 +143,7 @@ test('the invite is single-use', async () => {
     await page.goto(`${ORIGIN}/signin#operator=owner&invite=${encodeURIComponent(invite)}`);
     await page.click('#register');
     await page.waitForFunction(() => document.getElementById('msg').textContent !== '');
-    assert.match(await page.textContent('#msg'), /invite is not valid or was already used/);
+    assert.match(await page.textContent('#msg'), /invite was already used/);
   } finally {
     await context.close();
   }
