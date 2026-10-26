@@ -30,6 +30,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explain"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explorer"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/export"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/heat"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/insight"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
@@ -187,6 +188,7 @@ func main() {
 			explorer.NewAPI(explorer.StoreSource{Store: eventLog}, explorer.NewMemoryViews(), operators).Mount(mux)
 			heatmap.MountOperator(mux, operators, units.Has)
 			explain.NewAPI(eventLog).Mount(mux, operators)
+			export.NewAPI(eventLog, exportAudit(log)).MountOperator(mux, operators)
 			capacity.NewAPI(eventLog).Mount(mux, operators)
 			insight.NewAPI(insights).Mount(mux, operators)
 			ledger.NewAPI(func() ledger.Ledger {
@@ -448,6 +450,15 @@ func chainWake(prev func(work.Item), sched *atomic.Pointer[jobs.Scheduler]) func
 		if s := sched.Load(); s != nil {
 			s.Wake()
 		}
+	}
+}
+
+// exportAudit records each event-window export as one log line: the operator,
+// the window id and bounds, and nothing of the window's content.
+func exportAudit(log *logging.Logger) func(export.Audit) {
+	return func(a export.Audit) {
+		log.Info("event_window_exported", logging.Fields{"operator": a.Operator, "window_id": a.WindowID,
+			"unit": a.Unit, "job": a.Job, "from": a.From.Format(time.RFC3339), "to": a.To.Format(time.RFC3339), "lines": a.Lines})
 	}
 }
 

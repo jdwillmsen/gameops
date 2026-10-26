@@ -582,6 +582,58 @@ so point them at a scratch database; run the packages with `-p 1`, as they share
 it) and skip otherwise; everything else runs without a database. CI runs
 the events and alerts packages against a Postgres service container.
 
+## Event-window export
+
+`GET /v1/export/window?unit=<id>|job=<uuid>&from=<RFC 3339>&to=<RFC 3339>`
+returns one unit's (or one job's) events as a small JSON file an operator can
+hand to an offline tool. Signed-in operators only (401 `signed_out`
+otherwise); it is not on the public route list. `to` defaults to now and
+`from` to an hour before `to`. Events are read oldest first through the same
+store as the explorer.
+
+The answer holds `schema_version`, `redaction_version`, `window_id`, `sha256`
+(of the `lines` array as sent), the bounds, `truncated`, `omitted` and
+`lines`. `window_id` is derived from the scope, bounds and digest, so a draft
+that cites it names exactly what was read; the same request over unchanged
+data gives the same id.
+
+**Allow-list.** A line is the `Line` struct in `internal/export/redact.go` and
+nothing else: `id`, `ts`, `unit`, `kind`, `template`, `state`, `reason_code`,
+`outcome`, `count`, `cause_ref`. `state` is the event's severity (`ok`, `info`,
+`warn`, `crit`). Positions, task and job ids, session ids, durations, versions
+and the whole payload (feed text, `reason_text`) are never copied; the
+payload is read only for `template` and a roll-up's `count`. A new column is
+not exported until it is added to the struct.
+
+**Redaction rules.** Strings are kept only if they have a closed shape
+(`unit` `[a-z0-9_-]{1,24}`, `kind` `[a-z_]{1,32}`, `template`
+`[a-z0-9_]{1,32}`); a bad `template` is dropped from its line, a bad `unit`
+or `kind` leaves the event out and counts it in `omitted`. `reason_code` must
+be in the units' catalogue or becomes `other`. Dropping by shape, not
+scrubbing, means an address, token or sentence cannot get through by
+slipping past a pattern.
+
+**Canary scan.** The final `lines` are scanned before they are sent, and the
+export answers 500 `redaction_failed` instead if anything matches: a
+coordinate-shaped triple, an IPv4 or IPv6 address (parsed, so a timestamp is
+not mistaken for one), a token-shaped string, player or chat text and
+injection phrases, an upper-case environment variable name, or any value with
+whitespace. The tests run it on every output they build and on the
+pod-address case that an earlier prototype leaked.
+
+**Caps.** At most 200 lines and a 1 hour span. Consecutive lines that differ
+only in id and time are merged into one with a `count`; `truncated` is true
+when that merging is what brought the window under the cap. A window still
+over 200 lines after merging, over an hour, or needing more than 5,000 events
+is refused with 422 and `window_too_large` or `window_too_long`, never cut
+short. 200 lines is about 4k tokens, which a local model reads whole; an hour
+is the span a single incident fits in.
+
+**Audit.** Each successful export logs `event_window_exported` with the
+operator id, window id, scope, bounds and line count, and never the content.
+`job=` filters on the event's job id, which no producer sets yet, so it
+answers an empty window until one does.
+
 ## Event explorer
 
 `?view=events` (the **Explorer** button, or `x`) filters, sorts and searches the unit event history, Grafana-Loki style.
