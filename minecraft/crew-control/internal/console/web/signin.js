@@ -142,6 +142,8 @@ $('invite-form').addEventListener('submit', event => {
   }
   guarded($('register'), 'register', () => register(form));
 });
+// Shipped disabled so a submit before this handler exists cannot fall back to a GET that puts the invite in the URL.
+if (window.PublicKeyCredential) $('register').disabled = false;
 if (prefill.invite || prefill.operator) {
   $('operator').value = prefill.operator;
   $('invite').value = prefill.invite;

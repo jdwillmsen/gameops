@@ -66,6 +66,12 @@ func TestSigninOffersTheInviteForm(t *testing.T) {
 	if !strings.Contains(body, `id="invite" name="invite" type="password"`) {
 		t.Fatal("the invite code must not be shown on screen")
 	}
+	if !strings.Contains(body, `id="register" type="submit" disabled`) {
+		t.Fatal("the register button must ship disabled so a pre-script submit cannot put the invite in the URL")
+	}
+	if !strings.Contains(body, `method="post"`) {
+		t.Fatal("the invite form must fall back to POST, never GET")
+	}
 }
 
 func TestSigninHasNoInlineScript(t *testing.T) {
