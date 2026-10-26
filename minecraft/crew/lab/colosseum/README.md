@@ -14,8 +14,10 @@ arena.sh --colosseum --confirm-overwrite run   k8s:<ns>/<pod> --tier 2 --warrior
 z -864..-653, y 36..122 and takes about 30 minutes: the console runs about 20
 commands a second. Before a rebuild save the box as 48-block `structure save`
 tiles so it can be put back.
-`colosseum.py OUT --against=OLD.npy --save=NEW.npy` writes only what differs
-from an earlier `--save`, for patching a built arena in place.
+`colosseum.py OUT --against=OLD.npy --save=NEW.npy` writes only `build.cmds` with
+what differs from an earlier `--save` (matched by material name, so adding a
+material is safe), for patching a built arena in place: feed that file alone,
+not `plan.txt`, and expect a full build to clear and re-dress the armour stands.
 
 ## What is there
 
@@ -25,7 +27,7 @@ from an earlier `--save`, for patching a built arena in place.
 | Stands | four tiers, aisles every fourth bay, lanterns on the aisles |
 | Outer wall | four arcaded storeys and an attic, 80 bays, banners, masts |
 | Gates | four, on the axes; each is a portcullis of iron bars. The north one is the squad's start gate (the director opens it with `fill ... air`). The other three have a double iron door set in the bars and a lever either side of it |
-| Spawn pens | eight, under the stands, each a straight 3 x 3 gate of iron bars the director opens and shuts. The generator refuses to write a build in which a pen could reach the arena with its gate shut |
+| Spawn pens | twelve, under the stands, each a straight 3 x 3 gate of iron bars the director opens and shuts. The generator refuses to write a build in which a pen could reach the arena with its gate shut |
 | Royal box | gold-trimmed canopy over the south stands, a throne, and a fanfare of noteblocks on one button |
 | Wall-top lights | a runway of redstone lamps along the top of the wall, one lever, a repeater every ten cells; the signal ripples round. Four ladders up the inside of the wall reach it |
 | Plaza | paving, lamp posts, four fountains, colonnaded avenues |
