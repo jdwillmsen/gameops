@@ -24,6 +24,8 @@ var b64 = base64.RawURLEncoding
 type session struct {
 	Op  string `json:"op"`
 	Key string `json:"key"`
+	// Via is how the operator signed in; empty is a passkey.
+	Via string `json:"via,omitempty"`
 	Iat int64  `json:"iat"`
 	Exp int64  `json:"exp"`
 }
@@ -52,9 +54,11 @@ func (a *Auth) mac(body string) []byte {
 	return m.Sum(nil)
 }
 
-func (a *Auth) issue(w http.ResponseWriter, op, key string) {
+func (a *Auth) issue(w http.ResponseWriter, op, key string) { a.issueVia(w, op, key, "") }
+
+func (a *Auth) issueVia(w http.ResponseWriter, op, key, via string) {
 	now := a.now()
-	raw, _ := json.Marshal(session{Op: op, Key: key, Iat: now.Unix(), Exp: now.Add(sessionTTL).Unix()})
+	raw, _ := json.Marshal(session{Op: op, Key: key, Via: via, Iat: now.Unix(), Exp: now.Add(sessionTTL).Unix()})
 	body := b64.EncodeToString(raw)
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookie, Value: body + "." + b64.EncodeToString(a.mac(body)), Path: "/",
