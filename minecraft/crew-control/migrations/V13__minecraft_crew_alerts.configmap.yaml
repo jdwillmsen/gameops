@@ -1,0 +1,29 @@
+  V13__minecraft_crew_alerts.sql: |
+    -- Alert state that survives a restart: which alerts are firing, and which are
+    -- acknowledged or muted.
+    --
+    -- The engine keeps this in memory, so a restart used to forget every
+    -- acknowledgement and mute and re-announce whatever was still wrong. One row
+    -- per alert id (rule.unit); the engine's saver rewrites the set whenever it
+    -- changes, and the engine reads it back once at start.
+    --
+    -- No coordinates and no operator identity: the alert already carries neither,
+    -- so the public console may show it.
+    --
+    -- The table is a snapshot of the engine's list, not a history; events carry
+    -- the history. Rows for alerts that left the list are deleted by the saver.
+    CREATE TABLE IF NOT EXISTS minecraft.crew_alert
+    (
+        id          TEXT        NOT NULL PRIMARY KEY,
+        rule        TEXT        NOT NULL,
+        unit        TEXT        NOT NULL,
+        name        TEXT        NOT NULL DEFAULT '',
+        severity    TEXT        NOT NULL CHECK (severity IN ('warn', 'crit')),
+        state       TEXT        NOT NULL CHECK (state IN ('firing', 'resolved')),
+        text        TEXT        NOT NULL DEFAULT '',
+        since       TIMESTAMPTZ NOT NULL,
+        resolved_at TIMESTAMPTZ,
+        acked       BOOLEAN     NOT NULL DEFAULT false,
+        muted_until TIMESTAMPTZ,
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
