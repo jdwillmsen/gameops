@@ -10,7 +10,9 @@ arena.sh --colosseum --confirm-overwrite build k8s:<ns>/<pod>   # clear and rebu
 arena.sh --colosseum --confirm-overwrite run   k8s:<ns>/<pod> --tier 2 --warriors Rusty,Slate,Tinder
 ```
 
-`--centre=X,Z` moves it. The build replaces everything in x -420..-181,
+`--centre=X,Z` moves it, but `arena.sh --colosseum run` and `boss` always hand
+the director `colosseum/layout.json`, which has the default centre: do not run them on an
+arena built elsewhere (regenerate and check in the layout first). The build replaces everything in x -420..-181,
 z -864..-653, y 36..122 and takes about 30 minutes: the console runs about 20
 commands a second. Before a rebuild save the box as 48-block `structure save`
 tiles so it can be put back.
