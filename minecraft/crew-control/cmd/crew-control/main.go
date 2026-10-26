@@ -156,6 +156,7 @@ func main() {
 	// own; cancelling the base context when shutdown starts ends them at once.
 	streamCtx, endStreams := context.WithCancel(context.Background())
 	defer endStreams()
+	heatmap := heat.New()
 	srv := &http.Server{
 		Addr: addr,
 		Handler: newHandler(units, poller, saves, operators.Operator, log, operators.Mount, func(mux *http.ServeMux) {
@@ -197,6 +198,8 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	go heatmap.Run(ctx, poller, heatEvery(log))
 
 	pollDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollDone) }()
@@ -535,3 +538,18 @@ func newHandler(units roster.Roster, poller *telemetry.Poller, saves detail.Sour
 type gateFunc func(*http.Request) (auth.Operator, bool)
 
 func (f gateFunc) Operator(r *http.Request) (auth.Operator, bool) { return f(r) }
+
+// heatEvery reads HEAT_SAMPLE; a bad or too-short value falls back to the
+// default rather than stopping the service over a tuning knob.
+func heatEvery(log *logging.Logger) time.Duration {
+	v := os.Getenv("HEAT_SAMPLE")
+	if v == "" {
+		return heat.DefaultEvery
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < heat.MinEvery {
+		log.Warn("heat_sample_ignored", logging.Fields{"value": v})
+		return heat.DefaultEvery
+	}
+	return d
+}
