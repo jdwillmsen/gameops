@@ -40,6 +40,9 @@ type Hint struct {
 	Task     string
 	Template string
 	Took     time.Duration
+	// ReasonCode is the unit's closed code for a failed task; empty from an
+	// older unit.
+	ReasonCode string
 }
 
 func (h Hint) idleTemplate() bool { return idleTemplates[h.Template] }
@@ -85,6 +88,9 @@ type rollup struct {
 	template    string
 	first, last time.Time
 	count       int
+	// total is the summed run time of the polls, so a roll-up still says how
+	// much of the unit's minute went to checking.
+	total time.Duration
 }
 
 func NewCollapser() *Collapser { return &Collapser{units: map[string]*unitIdle{}} }
@@ -170,6 +176,7 @@ func (u *unitIdle) fold(out []Event, e Event, h Hint) []Event {
 		u.roll = &rollup{unit: e.Unit, template: h.Template, first: e.At}
 	}
 	u.roll.count++
+	u.roll.total += h.Took
 	u.roll.last = e.At
 	return out
 }
@@ -186,6 +193,9 @@ func (u *unitIdle) closeRoll(out []Event) []Event {
 		Template string    `json:"template"`
 		Count    int       `json:"count"`
 		Last     time.Time `json:"last"`
-	}{text, r.template, r.count, r.last})
-	return append(out, Event{Unit: r.unit, At: r.first, Kind: KindIdleRollup, Severity: SevInfo, Payload: payload})
+		TotalMS  int64     `json:"total_ms"`
+	}{text, r.template, r.count, r.last, r.total.Milliseconds()})
+	ms := int(r.total.Milliseconds())
+	return append(out, Event{Unit: r.unit, At: r.first, Kind: KindIdleRollup, Severity: SevInfo, Payload: payload,
+		DurationMS: &ms, Outcome: OutcomeNoop})
 }

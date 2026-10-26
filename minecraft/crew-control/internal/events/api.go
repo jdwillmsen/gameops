@@ -81,10 +81,20 @@ type view struct {
 	Job      *uuid.UUID      `json:"job,omitempty"`
 	Pos      *Pos            `json:"pos,omitempty"`
 	Payload  json.RawMessage `json:"payload"`
+
+	ReasonCode  string `json:"reason_code,omitempty"`
+	DurationMS  *int   `json:"duration_ms,omitempty"`
+	Attempt     *int   `json:"attempt,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	CrewVersion string `json:"crew_version,omitempty"`
+	CauseRef    *int64 `json:"cause_ref,omitempty"`
+	Outcome     string `json:"outcome,omitempty"`
 }
 
 func viewOf(e Event) view {
-	return view{e.ID, e.Unit, e.At, e.Kind, e.Severity, e.TaskID, e.JobID, e.Pos, e.Payload}
+	return view{ID: e.ID, Unit: e.Unit, At: e.At, Kind: e.Kind, Severity: e.Severity, Task: e.TaskID, Job: e.JobID,
+		Pos: e.Pos, Payload: e.Payload, ReasonCode: e.ReasonCode, DurationMS: e.DurationMS, Attempt: e.Attempt,
+		SessionID: e.SessionID, CrewVersion: e.CrewVersion, CauseRef: e.CauseRef, Outcome: e.Outcome}
 }
 
 // parseQuery reads the console's filter, sort and page parameters. Every
@@ -104,6 +114,9 @@ func (a *API) parseQuery(r *http.Request) (Query, error) {
 			return q, errors.New("unknown severity")
 		}
 		q.Severity = s
+	}
+	if err := parseAnalyticFilters(get, &q); err != nil {
+		return q, err
 	}
 	for name, into := range map[string]*time.Time{"since": &q.Since, "until": &q.Until} {
 		if s := get(name); s != "" {
@@ -225,6 +238,8 @@ func opStoreError(w http.ResponseWriter, r *http.Request, err error) {
 	case r.Context().Err() != nil:
 	case errors.Is(err, ErrUnavailable):
 		opError(w, http.StatusServiceUnavailable, "event store unavailable")
+	case errors.Is(err, ErrInvalid):
+		opError(w, http.StatusBadRequest, "filter not supported by the event store")
 	default:
 		opError(w, http.StatusInternalServerError, "event store error")
 	}

@@ -84,6 +84,12 @@ func scan(row pgx.Row) (Event, error) {
 }
 
 func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
+	// The analytic columns are not in the table yet, so a filter on one
+	// cannot be answered; ignoring it would return unfiltered history that
+	// reads as a match.
+	if q.ReasonCode != "" || q.Outcome != "" || q.SessionID != "" || q.CauseRef != 0 {
+		return Page{}, fmt.Errorf("%w: analytic filters need the extended schema", ErrInvalid)
+	}
 	limit := defaultLimit
 	if q.Limit > 0 {
 		limit = min(q.Limit, maxLimit)

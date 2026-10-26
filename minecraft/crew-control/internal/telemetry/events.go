@@ -43,6 +43,9 @@ type Event struct {
 	// Reason is the unit's own words for a failed task, untouched. Text carries
 	// it too, but trimmed and behind a prefix; the fleet metrics classify this.
 	Reason string `json:"-"`
+	// ReasonCode is the unit's closed code for Reason, empty from a unit that
+	// predates it. History keys on it; the public feed does not show it.
+	ReasonCode string `json:"-"`
 }
 
 // Position is where a unit stands. It is only ever sent to signed-in streams.
@@ -76,11 +79,13 @@ type track struct {
 }
 
 type recentTask struct {
-	ID      string    `json:"id"`
-	State   string    `json:"state"`
-	Reason  string    `json:"reason"`
-	Created time.Time `json:"created"`
-	Updated time.Time `json:"updated"`
+	ID     string `json:"id"`
+	State  string `json:"state"`
+	Reason string `json:"reason"`
+	// ReasonCode is absent from an older unit's list.
+	ReasonCode string    `json:"reason_code"`
+	Created    time.Time `json:"created"`
+	Updated    time.Time `json:"updated"`
 }
 
 // took is how long a finished task ran: its last update is the moment it
@@ -211,7 +216,7 @@ func finished(id, template string, recent []recentTask, now time.Time) Event {
 			if r.Reason != "" {
 				text += ": " + r.Reason
 			}
-			ev.Kind, ev.Level, ev.Text, ev.Reason = "task_failed", "crit", text, r.Reason
+			ev.Kind, ev.Level, ev.Text, ev.Reason, ev.ReasonCode = "task_failed", "crit", text, r.Reason, r.ReasonCode
 			return ev
 		}
 	}

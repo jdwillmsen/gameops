@@ -62,6 +62,20 @@ type Event struct {
 	JobID   *uuid.UUID
 	Pos     *Pos
 	Payload json.RawMessage
+
+	// The analytic columns. All are optional: an event from an older unit,
+	// or one of a kind they do not describe, leaves them zero. None holds a
+	// coordinate, so a reader of these is not a reader of positions.
+	ReasonCode  string
+	DurationMS  *int
+	Attempt     *int
+	SessionID   string
+	CrewVersion string
+	// CauseRef is the id of the earlier event on the same unit that most
+	// likely explains this one; see LinkCause.
+	CauseRef *int64
+	// Outcome is ok, noop or failed; see Outcome.
+	Outcome string
 }
 
 var (
@@ -76,8 +90,14 @@ type Query struct {
 	Unit     string
 	Kind     string
 	Severity string
-	Since    time.Time
-	Until    time.Time
+	// ReasonCode, Outcome and SessionID are exact filters on the analytic
+	// columns; CauseRef selects the events one earlier event explains.
+	ReasonCode string
+	Outcome    string
+	SessionID  string
+	CauseRef   int64
+	Since      time.Time
+	Until      time.Time
 	// Limit bounds the page; a store may lower it, never raise it.
 	Limit int
 	// Cursor continues after (At, ID) in the query's own direction.
