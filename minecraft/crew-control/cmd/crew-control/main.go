@@ -75,7 +75,13 @@ func main() {
 		log.Error("config_invalid", logging.Fields{"error": err.Error()})
 		os.Exit(1)
 	}
+	xboxLogin, err := auth.XboxConfigFromEnv(os.Getenv)
+	if err != nil {
+		log.Error("config_invalid", logging.Fields{"error": err.Error()})
+		os.Exit(1)
+	}
 	operators, err := auth.New(auth.Config{
+		Xbox:       xboxLogin,
 		Origin:     os.Getenv("PUBLIC_ORIGIN"),
 		DataDir:    os.Getenv("DATA_DIR"),
 		Operators:  os.Getenv("CREW_OPERATORS"),
@@ -85,6 +91,9 @@ func main() {
 	if err != nil {
 		log.Error("config_invalid", logging.Fields{"error": err.Error()})
 		os.Exit(1)
+	}
+	if xboxLogin.Enabled && !operators.Enabled() {
+		log.Warn("xbox_login_ignored", logging.Fields{"effect": "sign-in is off, so Xbox sign-in is too; set PUBLIC_ORIGIN and CREW_OPERATORS"})
 	}
 	if !operators.Enabled() {
 		log.Warn("auth_disabled", logging.Fields{"effect": "no /auth routes; every command route answers 401; set PUBLIC_ORIGIN and CREW_OPERATORS"})

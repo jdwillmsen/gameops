@@ -33,8 +33,10 @@ type Config struct {
 	// Operators is the CREW_OPERATORS JSON.
 	Operators  string
 	InvitesDir string
-	Now        func() time.Time
-	Log        *logging.Logger
+	// Xbox adds signing in with an Xbox account; the zero value leaves it off.
+	Xbox XboxConfig
+	Now  func() time.Time
+	Log  *logging.Logger
 }
 
 type Auth struct {
@@ -49,6 +51,7 @@ type Auth struct {
 	now     func() time.Time
 	log     *logging.Logger
 	reports *reportLimit
+	xbox    *xboxLogin
 
 	cmu sync.Mutex
 	cer map[string]*ceremony
@@ -104,8 +107,12 @@ func New(cfg Config) (*Auth, error) {
 	if err != nil {
 		return nil, err
 	}
+	login, err := newXboxLogin(cfg.Xbox, cfg.Origin, ops, key, now)
+	if err != nil {
+		return nil, err
+	}
 	return &Auth{enabled: true, origin: cfg.Origin, rpID: u.Host, ops: ops, key: key, keys: keys, invites: invites, wa: wa,
-		now: now, log: cfg.Log, reports: &reportLimit{now: now}, cer: map[string]*ceremony{}}, nil
+		now: now, log: cfg.Log, reports: &reportLimit{now: now}, xbox: login, cer: map[string]*ceremony{}}, nil
 }
 
 func lower(s string) string {
@@ -145,7 +152,13 @@ func (a *Auth) Operator(r *http.Request) (Operator, bool) {
 		return Operator{}, false
 	}
 	op, ok := a.operator(s.Op)
-	if !ok || !a.keys.Active(op.ID, s.Key) {
+	if !ok {
+		return Operator{}, false
+	}
+	if s.Via == viaXbox {
+		return op, a.xbox != nil && a.xbox.active(op.ID, s.Key)
+	}
+	if s.Via != "" || !a.keys.Active(op.ID, s.Key) {
 		return Operator{}, false
 	}
 	return op, true
@@ -215,6 +228,11 @@ func (a *Auth) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/logout", a.logout)
 	mux.HandleFunc("POST /auth/report", a.report)
 	mux.HandleFunc("GET /auth/me", a.me)
+	mux.HandleFunc("GET /auth/methods", a.methods)
+	if a.xbox != nil {
+		mux.HandleFunc("GET /auth/xbox/start", a.xboxStart)
+		mux.HandleFunc("GET "+xboxCallbackPath, a.xboxCallback)
+	}
 }
 
 func (a *Auth) me(w http.ResponseWriter, r *http.Request) {
