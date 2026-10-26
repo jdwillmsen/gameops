@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/alerts"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
@@ -210,7 +211,9 @@ func main() {
 
 	storeDone := make(chan struct{})
 	go func() {
-		openStore(ctx, store, &world, &sched, eventLog, poller, places, dsn, os.Getenv("WORK_STORE") == "memory", log)
+		openStore(ctx, store, &world, &sched, eventLog, poller, places, dsn, os.Getenv("WORK_STORE") == "memory", log, func(pool *pgxpool.Pool) {
+			go alerts.Persist(ctx, alertEngine, alerts.NewPostgres(pool), log)
+		})
 		close(storeDone)
 	}()
 
@@ -311,7 +314,7 @@ func postgresDSN() (string, error) {
 // The memory store needs an explicit opt-in: a production deployment that
 // lost its PG_HOST would otherwise run on a queue that vanishes on restart,
 // and nothing would say so. Unconfigured behaves like a database that is down.
-func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], sched *atomic.Pointer[jobs.Scheduler], eventLog *events.Lazy, poller *telemetry.Poller, places []ledger.Place, dsn string, memory bool, log *logging.Logger) {
+func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledger.Ledger], sched *atomic.Pointer[jobs.Scheduler], eventLog *events.Lazy, poller *telemetry.Poller, places []ledger.Place, dsn string, memory bool, log *logging.Logger, onPool ...func(*pgxpool.Pool)) {
 	var (
 		backend work.Store
 		led     ledger.Ledger
@@ -339,6 +342,9 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 				led = ledger.NewPostgres(pg.Pool())
 				js = jobs.NewPostgres(pg.Pool())
 				eventLog.Connect(events.NewPostgres(pg.Pool()))
+				for _, f := range onPool {
+					f(pg.Pool())
+				}
 				break
 			}
 			if ctx.Err() != nil {
