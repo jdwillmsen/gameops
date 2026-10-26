@@ -543,9 +543,10 @@ work queue, in chunks of 5,000 rows so no statement holds the whole backlog.
 `POST /v1/events/prune` with `{"dry_run":true}` counts the rows a pass would
 delete and lists the oldest 100, without deleting anything.
 
-The Postgres tests run when `CREW_PG_TEST_DSN` is set (they apply V11, V12 and
-V13 first and truncate `crew_event` and `crew_alert`, so point them at a scratch
-database) and skip otherwise; everything else runs without a database. CI runs
+The Postgres tests run when `CREW_PG_TEST_DSN` is set (the events tests apply V11 and V12
+and truncate `crew_event`, the alerts tests apply V13 and truncate `crew_alert`,
+so point them at a scratch database; run the packages with `-p 1`, as they share
+it) and skip otherwise; everything else runs without a database. CI runs
 the events and alerts packages against a Postgres service container.
 
 ## Event explorer
