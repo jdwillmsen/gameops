@@ -107,6 +107,44 @@ func TestParkAllGivesTheAgentAWayBack(t *testing.T) {
 	}
 }
 
+// A player granted !park without operator can switch bots, but neither
+// !park all nor naming the agent may take the agent out of the world.
+func TestNonOperatorCannotReachTheAgent(t *testing.T) {
+	r := newChatRig(t)
+	runAsMember := func(name string, args ...string) string {
+		for _, c := range r.plugin.Commands() {
+			if c.Name == name {
+				reply, err := c.Run(t.Context(), &plugin.Context{}, plugin.Invocation{ActorXUID: "2535400000000001", ActorPermission: plugin.PermissionMember, Args: args})
+				if err != nil {
+					t.Fatalf("!%s %v: %v", name, args, err)
+				}
+				return reply
+			}
+		}
+		t.Fatalf("no command %q", name)
+		return ""
+	}
+
+	if reply := runAsMember("park", "agent"); reply != agentOperatorOnly {
+		t.Errorf("!park agent reply = %q, want the operator-only refusal", reply)
+	}
+	if _, ok := r.store.row("agent"); ok {
+		t.Error("agent parked by a non-operator")
+	}
+
+	runAsMember("park", "all")
+	if _, ok := r.store.row("agent"); ok {
+		t.Error("!park all reached the agent for a non-operator")
+	}
+	if _, ok := r.store.row("afk-bot-1"); !ok {
+		t.Error("!park all did not park the bots")
+	}
+
+	if reply := runAsMember("unpark", "agent"); reply != agentOperatorOnly {
+		t.Errorf("!unpark agent reply = %q, want the operator-only refusal", reply)
+	}
+}
+
 func TestLeaveParksTheAgent(t *testing.T) {
 	r := newChatRig(t)
 	reply := r.run(t, "leave", "30m")
