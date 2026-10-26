@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,12 @@ const (
 	eventTable = "minecraft.crew_event"
 
 	eventColumns = "id, unit, at, kind, severity, task_id, job_id, x, y, z, payload"
+	// analyticColumns exist from the V12 migration on.
+	analyticColumns = ", reason_code, duration_ms, attempt, session_id, crew_version, cause_ref, outcome"
+
+	// A table without the analytic columns is rechecked this often, so
+	// applying the migration takes effect without a restart.
+	extProbeEvery = time.Minute
 )
 
 // A database that hangs rather than refusing connections would otherwise
@@ -26,11 +33,41 @@ var queryTimeout = 5 * time.Second
 
 // Postgres keeps the event stream in the shared database. It borrows the
 // work store's pool, so it neither opens nor closes connections.
-type Postgres struct{ pool *pgxpool.Pool }
+type Postgres struct {
+	pool *pgxpool.Pool
+
+	// The analytic columns arrive with a later migration than the table, and
+	// a deployment can run ahead of it: reading or writing a column that is
+	// not there would fail every append and every query, not just the
+	// analytic ones.
+	extMu      sync.Mutex
+	extKnown   bool
+	extChecked time.Time
+}
 
 var _ Store = (*Postgres)(nil)
 
 func NewPostgres(pool *pgxpool.Pool) *Postgres { return &Postgres{pool: pool} }
+
+// extended reports whether the analytic columns exist. A probe that fails
+// counts as "no": the store then behaves as the first schema did, and the
+// next call after extProbeEvery looks again.
+func (p *Postgres) extended(ctx context.Context) bool {
+	p.extMu.Lock()
+	defer p.extMu.Unlock()
+	if p.extKnown || (!p.extChecked.IsZero() && time.Since(p.extChecked) < extProbeEvery) {
+		return p.extKnown
+	}
+	p.extChecked = time.Now()
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	err := p.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'minecraft' AND table_name = 'crew_event' AND column_name = 'cause_ref')`).Scan(&p.extKnown)
+	if err != nil {
+		p.extKnown = false
+	}
+	return p.extKnown
+}
 
 func wrap(err error) error {
 	if err != nil && !errors.Is(err, work.ErrUnavailable) && work.IsUnavailable(err) {
@@ -43,6 +80,7 @@ func (p *Postgres) Append(ctx context.Context, ev []Event) error {
 	if len(ev) == 0 {
 		return nil
 	}
+	ext := p.extended(ctx)
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	// One insert for the whole batch: the poller hands over a tick's worth
@@ -60,34 +98,65 @@ func (p *Postgres) Append(ctx context.Context, ev []Event) error {
 			// without a place reads back without one however it was written.
 			pos = [3]*float64{&e.Pos.X, &e.Pos.Y, &e.Pos.Z}
 		}
-		rows = append(rows, []any{e.Unit, e.At, e.Kind, e.Severity, e.TaskID, e.JobID,
-			pos[0], pos[1], pos[2], payload})
+		row := []any{e.Unit, e.At, e.Kind, e.Severity, e.TaskID, e.JobID,
+			pos[0], pos[1], pos[2], payload}
+		if ext {
+			row = append(row, nullable(e.ReasonCode), e.DurationMS, e.Attempt, nullable(e.SessionID),
+				nullable(e.CrewVersion), e.CauseRef, nullable(e.Outcome))
+		}
+		rows = append(rows, row)
 	}
-	_, err := p.pool.CopyFrom(ctx, pgx.Identifier{"minecraft", "crew_event"},
-		[]string{"unit", "at", "kind", "severity", "task_id", "job_id", "x", "y", "z", "payload"}, pgx.CopyFromRows(rows))
+	cols := []string{"unit", "at", "kind", "severity", "task_id", "job_id", "x", "y", "z", "payload"}
+	if ext {
+		cols = append(cols, "reason_code", "duration_ms", "attempt", "session_id", "crew_version", "cause_ref", "outcome")
+	}
+	_, err := p.pool.CopyFrom(ctx, pgx.Identifier{"minecraft", "crew_event"}, cols, pgx.CopyFromRows(rows))
 	return wrap(err)
 }
 
-func scan(row pgx.Row) (Event, error) {
+// nullable stores an unset string as NULL, so "no reason" is one value in the
+// column and an exact filter never has to wonder about the empty string.
+func nullable(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func scan(row pgx.Row, ext bool) (Event, error) {
 	var (
-		e   Event
-		x   *float64
-		y   *float64
-		z   *float64
-		err = row.Scan(&e.ID, &e.Unit, &e.At, &e.Kind, &e.Severity, &e.TaskID, &e.JobID,
-			&x, &y, &z, &e.Payload)
+		e               Event
+		x               *float64
+		y               *float64
+		z               *float64
+		dest            = []any{&e.ID, &e.Unit, &e.At, &e.Kind, &e.Severity, &e.TaskID, &e.JobID, &x, &y, &z, &e.Payload}
+		rc, sid, cv, oc *string
 	)
+	if ext {
+		dest = append(dest, &rc, &e.DurationMS, &e.Attempt, &sid, &cv, &e.CauseRef, &oc)
+	}
+	err := row.Scan(dest...)
+	if err == nil && ext {
+		e.ReasonCode, e.SessionID, e.CrewVersion, e.Outcome = deref(rc), deref(sid), deref(cv), deref(oc)
+	}
 	if err == nil && x != nil && y != nil && z != nil {
 		e.Pos = &Pos{X: *x, Y: *y, Z: *z}
 	}
 	return e, err
 }
 
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
-	// The analytic columns are not in the table yet, so a filter on one
-	// cannot be answered; ignoring it would return unfiltered history that
-	// reads as a match.
-	if q.ReasonCode != "" || q.Outcome != "" || q.SessionID != "" || q.CauseRef != 0 {
+	ext := p.extended(ctx)
+	// Without the analytic columns a filter on one cannot be answered;
+	// ignoring it would return unfiltered history that reads as a match.
+	if !ext && (q.ReasonCode != "" || q.Outcome != "" || q.SessionID != "" || q.CauseRef != 0) {
 		return Page{}, fmt.Errorf("%w: analytic filters need the extended schema", ErrInvalid)
 	}
 	limit := defaultLimit
@@ -112,6 +181,18 @@ func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
 	if q.Severity != "" {
 		add("severity = $%d", q.Severity)
 	}
+	if q.ReasonCode != "" {
+		add("reason_code = $%d", q.ReasonCode)
+	}
+	if q.Outcome != "" {
+		add("outcome = $%d", q.Outcome)
+	}
+	if q.SessionID != "" {
+		add("session_id = $%d", q.SessionID)
+	}
+	if q.CauseRef != 0 {
+		add("cause_ref = $%d", q.CauseRef)
+	}
 	if !q.Since.IsZero() {
 		add("at >= $%d", q.Since)
 	}
@@ -128,7 +209,7 @@ func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
 	if q.Asc {
 		ord = "ASC, id ASC"
 	}
-	sql := `SELECT ` + eventColumns + ` FROM ` + eventTable
+	sql := `SELECT ` + columns(ext) + ` FROM ` + eventTable
 	if len(where) > 0 {
 		sql += ` WHERE ` + strings.Join(where, " AND ")
 	}
@@ -140,7 +221,7 @@ func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
 	if err != nil {
 		return Page{}, wrap(err)
 	}
-	events, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Event, error) { return scan(r) })
+	events, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Event, error) { return scan(r, ext) })
 	if err != nil {
 		return Page{}, wrap(err)
 	}
@@ -151,6 +232,13 @@ func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
 		events = events[:limit]
 	}
 	return Page{Events: events, Next: next}, nil
+}
+
+func columns(ext bool) string {
+	if ext {
+		return eventColumns + analyticColumns
+	}
+	return eventColumns
 }
 
 // bound is the strict half-open comparison a keyset cursor walks: after the
@@ -200,6 +288,7 @@ func (p *Postgres) pruneOnce(ctx context.Context, before time.Time) (int, error)
 }
 
 func (p *Postgres) dryRun(ctx context.Context, before time.Time, sample int) (PruneReport, error) {
+	ext := p.extended(ctx)
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	var rep PruneReport
@@ -210,10 +299,10 @@ func (p *Postgres) dryRun(ctx context.Context, before time.Time, sample int) (Pr
 		return rep, nil
 	}
 	rows, err := p.pool.Query(ctx,
-		`SELECT `+eventColumns+` FROM `+eventTable+` WHERE at < $1 ORDER BY at, id LIMIT $2`, before, sample)
+		`SELECT `+columns(ext)+` FROM `+eventTable+` WHERE at < $1 ORDER BY at, id LIMIT $2`, before, sample)
 	if err != nil {
 		return PruneReport{}, wrap(err)
 	}
-	rep.Would, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Event, error) { return scan(r) })
+	rep.Would, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Event, error) { return scan(r, ext) })
 	return rep, wrap(err)
 }

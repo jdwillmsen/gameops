@@ -256,7 +256,11 @@ func pgStore(t *testing.T) *Postgres {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, stmt := range []string{`CREATE SCHEMA IF NOT EXISTS minecraft`, string(sql)} {
+	ext, err := os.ReadFile(analyticsMigrationFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`CREATE SCHEMA IF NOT EXISTS minecraft`, string(sql), string(ext)} {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			t.Fatalf("migration: %v", err)
 		}
