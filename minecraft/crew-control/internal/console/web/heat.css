@@ -1,0 +1,20 @@
+.hm {
+  --hm-bg: #0b100c;
+  --hm-1: #17384d; --hm-2: #1c5576; --hm-3: #1f729f; --hm-4: #2b8fc7;
+  --hm-5: #5cb0e0; --hm-6: #9ccdee; --hm-7: #d6ecfa;
+  height: 100%; overflow: auto; padding: 14px; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 8px; color: #c8d4c8;
+}
+.hm.stale { opacity: .7; }
+.hm h2 { margin: 0; font-size: 18px; }
+.hm h3 { margin: 8px 0 0; font-size: 13px; }
+.hm-sum, .hm-readout { margin: 0; font-size: 12px; opacity: .85; min-height: 1.3em; }
+.hm-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+.hm-bar select { background: #121a14; color: inherit; border: 1px solid #2a3a2c; border-radius: 4px; padding: 3px 6px; }
+.hm-map { width: 100%; max-width: 960px; aspect-ratio: 3 / 2; border: 1px solid #2a3a2c; border-radius: 4px; }
+.hm-legend { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.hm-sw { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; }
+.hm-sw i { display: block; width: 34px; height: 12px; border: 1px solid rgba(255,255,255,.2); }
+.hm-top { margin: 0; padding-left: 20px; font-size: 12px; font-family: ui-monospace, monospace; }
+.hm-state { max-width: 480px; margin: 40px auto; text-align: center; }
+.hm-state a { color: #7fc4ff; }

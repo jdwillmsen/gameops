@@ -33,6 +33,7 @@ crew-control; it never calls them to command them.
 | `CREW_WORLD_DB` | unset | The lab world's `db` directory (the LevelDB inside the world folder), read-only behind `GET /units/{id}/detail`. Unset, the route still answers and says the save is `off` |
 | `CREW_WORLD_WORK` | `/tmp/crew-worldview` | Where a read of the world builds its view; writable. On the world's own volume a read links its files, elsewhere (or if the world is mounted read-only) it copies them |
 | `CREW_ALERTS` | unset | JSON object of alert thresholds, see [Alerts](#alerts); unset keeps the defaults, an unknown key or bad value stops the start |
+| `HEAT_SAMPLE` | `2s` | How often each unit's position is sampled into the heatmap; under `1s` or unparseable falls back to the default |
 | `CREW_WORLD_EVERY` | `5s` | Least time between reads of the world save; the detail answer is cached to match |
 
 ## Routes
@@ -43,6 +44,7 @@ crew-control; it never calls them to command them.
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
+- `GET /v1/heatmap?layer=position|mining|travel&window=15m|1h|6h[&unit=<id>]`: signed-in, `Cache-Control: no-store`, 401 otherwise; see [Heatmaps](#heatmaps)
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
 - `GET /signin`: passkey sign-in; the **I have an invite** section takes an operator and invite code and enrols a passkey. `/signin#operator=<id>&invite=<code>` still works and prefills that form. The invite rides in the fragment so it never reaches a log, and is removed from the address bar on load
@@ -110,6 +112,34 @@ the alert resolves and fires again before it ends.
 An outbound webhook is deliberately not built. The extension point is the
 engine's `Subscribe` signal plus `List`: a pusher watches for alerts whose
 `since` it has not sent and posts them, so it needs no change to the rules.
+
+## Heatmaps
+
+The **Heat** bar button (or `h`) opens a top-down map of the lab with a
+density layer over it, with a layer, a time window (15 m, 1 h, 6 h) and a
+unit (or the whole fleet) to choose. Where units stand is operator-only: the
+view and `GET /v1/heatmap` answer 401 without a session, and signed out the
+page shows a sign-in state and never requests a grid.
+
+Every `HEAT_SAMPLE` the service reads each online, living unit in the
+overworld and folds it into per-minute counters on a 4x4 block grid, kept
+for 6 hours. Memory is bounded by that retention and a cap of 256 cells per
+unit, layer and minute (overflow is counted in `dropped`), not by uptime.
+Nothing is written to disk, so a restart empties the maps.
+
+- **Position**: samples per cell.
+- **Mining**: samples taken while the unit's task is a gathering one. Units
+  do not report individual block breaks, so this is where they spend time
+  gathering, not a count of broken blocks.
+- **Travel**: cells crossed between two consecutive samples under 10 s
+  apart and under 64 blocks apart; teleports, respawns and gaps draw
+  nothing.
+
+The answer is `{cell, layer, window, unit, since, until, samples, max,
+dropped, cells: [[cellX, cellZ, count]...]}` with cell coordinates in cell
+units (block / 4, floored). The map shades cells on one hue in seven
+square-root steps with a legend, outlines the places from the ledger, and
+lists the busiest cells as text.
 
 ## Unit detail
 
