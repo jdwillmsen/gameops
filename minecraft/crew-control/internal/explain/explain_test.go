@@ -149,7 +149,7 @@ func TestAPI(t *testing.T) {
 	a := NewAPI(m)
 	a.now = func() time.Time { return now }
 	mux := http.NewServeMux()
-	a.Mount(mux)
+	a.Mount(mux, nil)
 
 	get := func(path string) (int, Result) {
 		rec := httptest.NewRecorder()

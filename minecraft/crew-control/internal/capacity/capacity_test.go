@@ -112,7 +112,7 @@ func TestAPI(t *testing.T) {
 	a := NewAPI(m)
 	a.now = func() time.Time { return now }
 	mux := http.NewServeMux()
-	a.Mount(mux)
+	a.Mount(mux, nil)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/capacity?window=30m", nil))
@@ -123,7 +123,7 @@ func TestAPI(t *testing.T) {
 	if len(r.Templates) != 1 || !near(r.Templates[0].LambdaPerMin, 1) || !near(r.Utilization, 20.0/60) {
 		t.Fatalf("report = %+v", r)
 	}
-	for _, w := range []string{"nope", "10s", "48h"} {
+	for _, w := range []string{"nope", "10s", "2h", "48h"} {
 		rec = httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/capacity?window="+w, nil))
 		if rec.Code != 400 {

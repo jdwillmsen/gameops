@@ -181,8 +181,8 @@ func main() {
 			events.NewAPI(eventLog).MountOperator(mux, operators)
 			explorer.NewAPI(explorer.StoreSource{Store: eventLog}, explorer.NewMemoryViews(), operators).Mount(mux)
 			heatmap.MountOperator(mux, operators, units.Has)
-			explain.NewAPI(eventLog).Mount(mux)
-			capacity.NewAPI(eventLog).Mount(mux)
+			explain.NewAPI(eventLog).Mount(mux, operators)
+			capacity.NewAPI(eventLog).Mount(mux, operators)
 			insight.NewAPI(insights).Mount(mux, operators)
 			ledger.NewAPI(func() ledger.Ledger {
 				if l := world.Load(); l != nil {
