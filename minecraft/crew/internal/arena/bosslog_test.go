@@ -16,7 +16,7 @@ func rec(boss string, effects []string, outcome string, seconds float64, total i
 func TestAppendBossRecordCreatesTheDirectoryAndAppendsLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "arena-runs.jsonl")
 	first := rec("warden", nil, BossKilled, 189, 5)
-	second := rec("warden", []string{"effect give @e[name=W] weakness 99 4"}, BossWipe, 12.5, 3)
+	second := rec("warden", []string{"effect @e[name=W] weakness 99 4"}, BossWipe, 12.5, 3)
 	for _, r := range []BossRecord{first, second} {
 		if err := AppendBossRecord(path, r); err != nil {
 			t.Fatalf("AppendBossRecord: %v", err)
@@ -73,7 +73,7 @@ func TestAppendBossRecordStartsANewLineAfterATornOne(t *testing.T) {
 }
 
 func TestSummarizeGroupsByBossAndEffects(t *testing.T) {
-	weak := []string{"effect give @e[name=W] weakness 99 4"}
+	weak := []string{"effect @e[name=W] weakness 99 4"}
 	recs := []BossRecord{
 		rec("warden", nil, BossKilled, 189, 5),
 		rec("warden", nil, BossKilled, 100, 10),

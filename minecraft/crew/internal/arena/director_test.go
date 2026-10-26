@@ -545,7 +545,7 @@ func TestBossDownEndsTheRunWithPhases(t *testing.T) {
 			{Mob: "skeleton", Count: 2, Tier: 1, Pen: 1},
 		},
 		Phases: []Phase{
-			{At: Duration{0}, Callout: "The Warden rises.", Commands: []string{"effect give @e[tag=arena_boss] speed 600 1"}},
+			{At: Duration{0}, Callout: "The Warden rises.", Commands: []string{"effect @e[tag=arena_boss] speed 600 1"}},
 			{At: Duration{time.Second}, Callout: "The Warden closes in."},
 		},
 	}
@@ -566,7 +566,7 @@ func TestBossDownEndsTheRunWithPhases(t *testing.T) {
 			t.Errorf("log lacks the phase callout %q:\n%s", callout, log.String())
 		}
 	}
-	if !hasCommand(f.Cmds, "effect give @e[tag=arena_boss] speed 600 1") {
+	if !hasCommand(f.Cmds, "effect @e[tag=arena_boss] speed 600 1") {
 		t.Error("the phase command did not run")
 	}
 	if s.kills != 1 {
@@ -1374,7 +1374,7 @@ func TestKitsSpawnCatalogMobsAndSummonTheRest(t *testing.T) {
 	for _, want := range []string{
 		"execute positioned 10 64 -760 run function mobs/zombie/t1",
 		"execute positioned 20 64 -760 run summon ravager ~ ~ ~",
-		"effect give @e[tag=arena_tiered] strength 600 0",
+		"effect @e[tag=arena_tiered] strength 600 0",
 	} {
 		if !hasCommand(f.Cmds, want) {
 			t.Errorf("run lacks %q:\n%s", want, strings.Join(f.Cmds, "\n"))

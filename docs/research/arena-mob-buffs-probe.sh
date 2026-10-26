@@ -38,7 +38,7 @@ probe 'summon pillager 12 126 12 0 0 minecraft:promote_to_patrol_captain "Captai
 
 echo '== effects (hp proof via damage; baseline zombie dies at 30) =='
 probe 'summon zombie 16 126 16'
-probe 'effect give @e[type=zombie,c=1] resistance 600 4'
+probe 'effect @e[type=zombie,c=1] resistance 600 4'
 probe 'damage @e[type=zombie,c=1] 30'
 probe 'testfor @e[type=zombie]'
 

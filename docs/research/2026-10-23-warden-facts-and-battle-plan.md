@@ -72,14 +72,14 @@ Java vs Bedrock differences: contact anger is +80 on Bedrock and +35 on Java. Be
 - Sword: Sharpness V. Bow: Power V, Infinity (no arrows to lose).
 - Offhand: vanguard keeps the shield. Striker and ranger carry a Totem of Undying instead of a shield (Bedrock totems must be in the offhand, so it is one or the other). [INF]
 - Consumables: enchanted golden apples (Absorption plus Regeneration plus Resistance); regular golden apples when an enchanted one is not available.
-- Director-applied effects (via `effect give`): Resistance II 600 s and Absorption II on all bots before the fight; re-apply Absorption between phases. Vanguard also gets Regeneration I.
+- Director-applied effects (via `effect`): Resistance II 600 s and Absorption II on all bots before the fight; re-apply Absorption between phases. Vanguard also gets Regeneration I.
 - Potions are not needed if the director gives the effects directly.
 
 ## Lab director tier-5 boss recipe (fight hard but winnable)
 - Keep the Warden at 500 HP. Do not add Health Boost, Resistance or Strength: the melee-zeroed test showed 50 s is already a short kill, so the squad is losing to damage intake, not to HP.
 - Spawn with `minecraft:spawn_emerging` (7 s emerge; invulnerable then) and let it roar before bots engage.
 - To make it hard but beatable: bots get the kit above plus Resistance II; warden stays at its native 30 melee and 10 boom.
-- Optional easing lever if bots still die more than about 3 times: `effect give <warden> slowness 600 1` (about -15% speed) or `weakness` (reduces melee, amplifier tuned by testing). Both are effects, so no restart and no pack override. [INF]
+- Optional easing lever if bots still die more than about 3 times: `effect <warden> slowness 600 1` (about -15% speed) or `weakness` (reduces melee, amplifier tuned by testing). Both are effects, so no restart and no pack override. [INF]
 - Pass criterion to tune against: squad win in 60-100 s with 3 or fewer deaths. Judge damage output and deaths separately: record damage dealt, melee exposure and deaths per run before choosing a change. A fight over 150 s can come from low damage output as well as from too much melee exposure, so do not assume either from the duration alone.
 - Darkness (20 blocks, every 6 s) cannot be disabled without a pack override; check bots' sight does not depend on the screen.
 

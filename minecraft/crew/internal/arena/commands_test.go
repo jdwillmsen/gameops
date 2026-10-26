@@ -20,33 +20,33 @@ func TestTierRecipesMatchTheSpikeLadder(t *testing.T) {
 		want []string
 	}{
 		{1, []string{
-			"effect give @e[tag=arena_tiered] strength 600 0",
+			"effect @e[tag=arena_tiered] strength 600 0",
 			"replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 stone_sword 1",
 			"enchant @e[tag=arena_tiered] sharpness 1",
 		}},
 		{2, []string{
-			"effect give @e[tag=arena_tiered] resistance 600 1",
-			"effect give @e[tag=arena_tiered] health_boost 600 2",
+			"effect @e[tag=arena_tiered] resistance 600 1",
+			"effect @e[tag=arena_tiered] health_boost 600 2",
 			"replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 iron_sword 1",
 			"enchant @e[tag=arena_tiered] sharpness 3",
 		}},
 		{3, []string{
-			"effect give @e[tag=arena_tiered] resistance 600 1",
-			"effect give @e[tag=arena_tiered] health_boost 600 4",
+			"effect @e[tag=arena_tiered] resistance 600 1",
+			"effect @e[tag=arena_tiered] health_boost 600 4",
 			"replaceitem entity @e[tag=arena_tiered] slot.armor.chest 0 iron_chestplate 1",
 			"replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 iron_sword 1",
 			"enchant @e[tag=arena_tiered] sharpness 3",
 		}},
 		{4, []string{
-			"effect give @e[tag=arena_tiered] health_boost 600 7",
-			"effect give @e[tag=arena_tiered] resistance 600 3",
-			"effect give @e[tag=arena_tiered] regeneration 600 5",
+			"effect @e[tag=arena_tiered] health_boost 600 7",
+			"effect @e[tag=arena_tiered] resistance 600 3",
+			"effect @e[tag=arena_tiered] regeneration 600 5",
 			"replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 diamond_sword 1",
 			"enchant @e[tag=arena_tiered] sharpness 5",
 		}},
 		{5, []string{
-			"effect give @e[tag=arena_tiered] absorption 600 4",
-			"effect give @e[tag=arena_tiered] strength 600 2",
+			"effect @e[tag=arena_tiered] absorption 600 4",
+			"effect @e[tag=arena_tiered] strength 600 2",
 			"replaceitem entity @e[tag=arena_tiered] slot.armor.head 0 diamond_helmet 1",
 			"enchant @e[tag=arena_tiered] sharpness 5",
 		}},
@@ -221,7 +221,7 @@ func TestKitSpawnKeepsEffectsAndTagsButNotGear(t *testing.T) {
 	}
 	for _, want := range []string{
 		"tag @e[tag=arena_tiered] add arena_wave_t5",
-		"effect give @e[tag=arena_tiered] resistance 600 2",
+		"effect @e[tag=arena_tiered] resistance 600 2",
 		"tag @e[tag=arena_tiered] remove arena_tiered",
 	} {
 		if !hasCommand(cmds, want) {
