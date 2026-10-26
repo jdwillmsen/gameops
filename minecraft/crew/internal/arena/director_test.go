@@ -297,6 +297,43 @@ func TestEmptyBatchAfterSummonAbortsAsAnError(t *testing.T) {
 	}
 }
 
+func TestRunRefusesASpawnCellInsideABlock(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	l := testLayout()
+	spawn := l.Pens[0].Spawn
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testforblock") {
+			return fmt.Sprintf("[ERROR] The block at %d,%d,%d is Sandstone (expected: Air).\n[ERROR] The block at 1,2,3 is Dirt (expected: Air).",
+				spawn.X, spawn.Y, spawn.Z), nil
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	_, err := d.Run()
+	if err == nil || !strings.Contains(err.Error(), "not open air") || !strings.Contains(err.Error(), "Sandstone") {
+		t.Fatalf("Run error = %v, want a blocked spawn cell error", err)
+	}
+	if f.Count("summon") != 0 {
+		t.Error("a run with a blocked spawn cell still summoned mobs")
+	}
+}
+
+func TestRunIgnoresAnotherBlocksTestforblockFailure(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "testforblock") {
+			return "[ERROR] The block at 1,2,3 is Dirt (expected: Air).", nil
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
 func TestTierCapsTheWaves(t *testing.T) {
 	clock := newFakeClock()
 	book := testBook(
