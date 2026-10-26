@@ -81,6 +81,23 @@ func TestRestoreDoesNotOverwriteWhatThePollAlreadySaw(t *testing.T) {
 	}
 }
 
+func TestRestoreAfterThePollKeepsTheSavedAcknowledgement(t *testing.T) {
+	before := died(t)
+	before.Ack("unit_died.a")
+	saved := before.List()
+
+	// The poller's first tick can finish before the store answers.
+	restart := t0.Add(time.Hour)
+	e := NewEngine(Defaults(), restart)
+	e.Poll(restart, []telemetry.Status{st("a", true, f32(20), restart)}, states("a", "dead"))
+	e.Restore(saved, restart.Add(time.Second))
+
+	a := find(e, "unit_died.a")
+	if a == nil || !a.Acked || !a.Since.Equal(t0) {
+		t.Fatalf("acknowledgement lost to a poll that beat the restore: %+v", a)
+	}
+}
+
 func TestRestoredStuckAlertSurvivesTheFirstPoll(t *testing.T) {
 	cfg := Defaults()
 	e := NewEngine(cfg, t0)
