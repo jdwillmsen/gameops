@@ -56,6 +56,18 @@ func TestSigninServesHTMLWithCSP(t *testing.T) {
 	}
 }
 
+func TestSigninOffersTheInviteForm(t *testing.T) {
+	body := serve(t, "/signin").Body.String()
+	for _, want := range []string{`id="invite-form"`, `id="operator"`, `id="invite"`, "I have an invite"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("sign-in page lacks %s", want)
+		}
+	}
+	if !strings.Contains(body, `id="invite" name="invite" type="password"`) {
+		t.Fatal("the invite code must not be shown on screen")
+	}
+}
+
 func TestSigninHasNoInlineScript(t *testing.T) {
 	body := serve(t, "/signin").Body.String() + serve(t, "/").Body.String()
 	if strings.Contains(body, "<script>") || strings.Contains(body, "onclick=") {
@@ -74,6 +86,7 @@ func TestStaticFiles(t *testing.T) {
 		"/static/console.js":  "javascript",
 		"/static/state.js":    "javascript",
 		"/static/signin.js":   "javascript",
+		"/static/enrol.js":    "javascript",
 		"/static/console.css": "text/css",
 	} {
 		rec := serve(t, path)

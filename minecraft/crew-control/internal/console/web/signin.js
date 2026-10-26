@@ -1,8 +1,9 @@
 import { signinParams } from '/static/state.js';
+import { enrolRefusal, readInviteForm } from '/static/enrol.js';
 
 // The invite is a credential: it leaves the address bar and history before
 // anything else runs.
-const { invite, operator } = signinParams(location.hash);
+const prefill = signinParams(location.hash);
 history.replaceState(null, '', location.pathname);
 
 const $ = id => document.getElementById(id);
@@ -57,9 +58,8 @@ function report(kind, err) {
 
 function refusal(status, data) {
   const code = data && data.error;
-  if (code === 'invite_refused') return 'That invite is not valid or was already used.';
-  if (code === 'passkey_limit') return 'This operator already has the maximum number of passkeys.';
-  if (code === 'slow_down' || status === 429) return 'Too many attempts. Wait a moment and try again.';
+  const enrol = enrolRefusal(code, status);
+  if (enrol) return enrol;
   if (code === 'login_refused') return 'That passkey is not recognised.';
   if (code === 'ceremony_expired') return 'That took too long. Try again.';
   return `Sign-in failed (${status}).`;
@@ -83,6 +83,7 @@ function requestOptions(pk) {
 }
 
 async function guarded(button, kind, work) {
+  if (button.disabled) return;
   button.disabled = true;
   say('');
   try {
@@ -96,7 +97,7 @@ async function guarded(button, kind, work) {
   }
 }
 
-async function register() {
+async function register({ operator, invite }) {
   const { publicKey } = await staged('begin', () => post('/auth/register/options', { invite, operator }));
   const cred = await staged('credential', () => navigator.credentials.create({ publicKey: creationOptions(publicKey) }));
   const r = cred.response;
@@ -128,11 +129,22 @@ async function login() {
 if (!window.PublicKeyCredential) {
   say('This browser does not support passkeys.');
   $('login').disabled = true;
+  $('register').disabled = true;
 } else {
   $('login').addEventListener('click', () => guarded($('login'), 'login', login));
 }
-if (invite && operator) {
-  $('intro').textContent = `Create a passkey for ${operator}.`;
-  $('register').hidden = false;
-  $('register').addEventListener('click', () => guarded($('register'), 'register', register));
+$('invite-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const form = readInviteForm($('operator').value, $('invite').value);
+  if (form.error) {
+    say(form.error);
+    return;
+  }
+  guarded($('register'), 'register', () => register(form));
+});
+if (prefill.invite || prefill.operator) {
+  $('operator').value = prefill.operator;
+  $('invite').value = prefill.invite;
+  $('enrol').open = true;
+  $('intro').textContent = prefill.operator ? `Create a passkey for ${prefill.operator}.` : 'Enter your invite to create a passkey.';
 }

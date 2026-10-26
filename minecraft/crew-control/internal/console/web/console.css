@@ -202,3 +202,6 @@ body.kiosk #bar, body.kiosk #side, body.kiosk #dock, body.kiosk #statusbar { dis
 .sq-log time { opacity: .5; flex: none; }
 .sq-log b { flex: none; min-width: 6em; }
 @media (max-width: 720px) { #squad { width: auto; max-height: 50%; border-left: 0; border-top: 1px solid #333; } }
+#enrol summary { cursor: pointer; }
+#invite-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+#invite-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
