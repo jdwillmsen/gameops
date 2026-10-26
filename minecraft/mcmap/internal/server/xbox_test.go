@@ -18,7 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox/xboxtest"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/xbox/xboxtest"
 )
 
 const xboxRedirect = "https://map.example/auth/xbox/callback"

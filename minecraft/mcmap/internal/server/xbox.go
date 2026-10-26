@@ -12,7 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/auth"
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/xbox"
 )
 
 // XboxProvider is Microsoft and Xbox as the callback needs them.

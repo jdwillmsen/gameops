@@ -67,7 +67,7 @@ const Scope = "XboxLive.signin"
 
 type Config struct {
 	ClientID, ClientSecret string
-	// RedirectURI is the registered one: the map's origin and the callback.
+	// RedirectURI is the registered one: the service's origin and its callback.
 	RedirectURI string
 }
 
