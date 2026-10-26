@@ -89,11 +89,12 @@ func TestIndexOnlyAtRoot(t *testing.T) {
 
 func TestStaticFiles(t *testing.T) {
 	for path, want := range map[string]string{
-		"/static/console.js":  "javascript",
-		"/static/state.js":    "javascript",
-		"/static/signin.js":   "javascript",
-		"/static/enrol.js":    "javascript",
-		"/static/console.css": "text/css",
+		"/static/console.js":     "javascript",
+		"/static/state.js":       "javascript",
+		"/static/signin.js":      "javascript",
+		"/static/signin-xbox.js": "javascript",
+		"/static/enrol.js":       "javascript",
+		"/static/console.css":    "text/css",
 	} {
 		rec := serve(t, path)
 		if rec.Code != 200 {
