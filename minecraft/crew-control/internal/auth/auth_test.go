@@ -170,12 +170,12 @@ func TestRegisterWithInviteSignsIn(t *testing.T) {
 			sc = ck
 		}
 	}
-	if sc == nil || !sc.HttpOnly || !sc.Secure || sc.SameSite != http.SameSiteStrictMode || sc.Path != "/" || sc.MaxAge != 12*3600 || sc.Domain != "" {
+	if sc == nil || !sc.HttpOnly || !sc.Secure || sc.SameSite != http.SameSiteStrictMode || sc.Path != "/" || sc.MaxAge != int(sessionTTL.Seconds()) || sc.Domain != "" {
 		t.Fatalf("session cookie: %+v", sc)
 	}
 	me := c.me()
 	mustOK(t, me, "me")
-	if strings.TrimSpace(me.Body.String()) != `{"operator":{"id":"owner","name":"Owner"}}` {
+	if want := fmt.Sprintf(`{"expires":%d,"operator":{"id":"owner","name":"Owner"}}`, e.clk.now().Add(sessionTTL).Unix()); strings.TrimSpace(me.Body.String()) != want {
 		t.Fatalf("me: %s", me.Body)
 	}
 	used, _ := os.ReadFile(filepath.Join(e.data, "invites-used.json"))
@@ -435,10 +435,16 @@ func TestSessionTamperingAndExpiry(t *testing.T) {
 		}
 	}
 
-	e.clk.advance(12*time.Hour - time.Second)
-	mustOK(t, c.me(), "just inside 12h")
+	// A copy, because a call to me this late would renew the original.
+	copyOf := func() *client {
+		cc := e.client()
+		cc.cookies["__Host-crew_session"] = &http.Cookie{Name: "__Host-crew_session", Value: val}
+		return cc
+	}
+	e.clk.advance(sessionTTL - time.Second)
+	mustOK(t, copyOf().me(), "just inside the lifetime")
 	e.clk.advance(2 * time.Second)
-	if c.me().Code != http.StatusUnauthorized {
+	if copyOf().me().Code != http.StatusUnauthorized {
 		t.Fatal("expired session accepted")
 	}
 }

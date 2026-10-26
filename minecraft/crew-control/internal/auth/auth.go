@@ -52,6 +52,7 @@ type Auth struct {
 	log     *logging.Logger
 	reports *reportLimit
 	xbox    *xboxLogin
+	revoked *revocations
 
 	cmu sync.Mutex
 	cer map[string]*ceremony
@@ -112,7 +113,7 @@ func New(cfg Config) (*Auth, error) {
 		return nil, err
 	}
 	return &Auth{enabled: true, origin: cfg.Origin, rpID: u.Host, ops: ops, key: key, keys: keys, invites: invites, wa: wa,
-		now: now, log: cfg.Log, reports: &reportLimit{now: now}, xbox: login, cer: map[string]*ceremony{}}, nil
+		now: now, log: cfg.Log, reports: &reportLimit{now: now}, xbox: login, revoked: loadRevocations(filepath.Join(dir, "signed-out.json"), now), cer: map[string]*ceremony{}}, nil
 }
 
 func lower(s string) string {
@@ -241,13 +242,18 @@ func (a *Auth) me(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusUnauthorized, "signed_out")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]Operator{"operator": op})
+	s, _ := a.verify(r)
+	s = a.renew(w, s)
+	writeJSON(w, http.StatusOK, map[string]any{"operator": op, "expires": s.Exp})
 }
 
 func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 	if !stateChanging(r) {
 		rejectStateChanging(w, r)
 		return
+	}
+	if s, ok := a.verify(r); ok {
+		a.revoked.add(s.Sid, s.Exp)
 	}
 	clearCookie(w, SessionCookie)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

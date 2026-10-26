@@ -14,9 +14,12 @@ import (
 
 const (
 	SessionCookie = "__Host-crew_session"
-	sessionTTL    = 12 * time.Hour
-	keyBytes      = 32
-	clockSkew     = time.Minute
+	// A session lives a week from its last renewal and never past a month
+	// from sign-in, so a device that is used keeps its session and a lost one
+	// stops working without anyone having to notice.
+	sessionTTL = 7 * 24 * time.Hour
+	keyBytes   = 32
+	clockSkew  = time.Minute
 )
 
 var b64 = base64.RawURLEncoding
@@ -28,6 +31,10 @@ type session struct {
 	Via string `json:"via,omitempty"`
 	Iat int64  `json:"iat"`
 	Exp int64  `json:"exp"`
+	// Sid names the sign-in across renewals, so sign-out can end every copy
+	// of the cookie; Start is the sign-in itself, which renewal never moves.
+	Sid   string `json:"sid,omitempty"`
+	Start int64  `json:"start,omitempty"`
 }
 
 // loadSessionKey reads the signing key, making it on first start. A key of
@@ -58,11 +65,17 @@ func (a *Auth) issue(w http.ResponseWriter, op, key string) { a.issueVia(w, op, 
 
 func (a *Auth) issueVia(w http.ResponseWriter, op, key, via string) {
 	now := a.now()
-	raw, _ := json.Marshal(session{Op: op, Key: key, Via: via, Iat: now.Unix(), Exp: now.Add(sessionTTL).Unix()})
+	a.setSession(w, session{Op: op, Key: key, Via: via, Iat: now.Unix(), Exp: now.Add(sessionTTL).Unix(), Sid: b64.EncodeToString(randomBytes(12)), Start: now.Unix()})
+}
+
+func (a *Auth) setSession(w http.ResponseWriter, s session) {
+	now := a.now()
+	ttl := time.Unix(s.Exp, 0).Sub(now)
+	raw, _ := json.Marshal(s)
 	body := b64.EncodeToString(raw)
 	http.SetCookie(w, &http.Cookie{
 		Name: SessionCookie, Value: body + "." + b64.EncodeToString(a.mac(body)), Path: "/",
-		MaxAge: int(sessionTTL.Seconds()), Expires: now.Add(sessionTTL),
+		MaxAge: int(ttl.Seconds()), Expires: time.Unix(s.Exp, 0),
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 }
@@ -97,6 +110,9 @@ func (a *Auth) verify(r *http.Request) (session, bool) {
 	now := a.now()
 	if s.Op == "" || s.Key == "" || !now.Before(time.Unix(s.Exp, 0)) || time.Unix(s.Iat, 0).After(now.Add(clockSkew)) ||
 		time.Unix(s.Exp, 0).Sub(time.Unix(s.Iat, 0)) > sessionTTL {
+		return session{}, false
+	}
+	if !now.Before(time.Unix(s.started(), 0).Add(sessionMax)) || a.revoked.has(s.Sid) {
 		return session{}, false
 	}
 	return s, true
