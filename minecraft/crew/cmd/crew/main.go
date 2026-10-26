@@ -83,15 +83,21 @@ func main() {
 	log = log.With(logging.Fields{"unit": cfg.UnitID})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	code := run(ctx, stop, cfg, openTokenSource, log)
+	stop()
+	os.Exit(code)
+}
 
+// run is the unit's whole life and returns the process exit code. stop ends
+// ctx, for a failure no caller of run could otherwise signal.
+func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open tokenOpener, log *logging.Logger) int {
 	if cfg.Offline {
 		log.Warn("auth_offline", logging.Fields{"note": "no sign-in; only a server with online mode off accepts this unit"})
 	}
-	auth, err := resolveAuth(ctx, cfg, openTokenSource)
+	auth, err := resolveAuth(ctx, cfg, open)
 	if err != nil {
 		log.Error("auth_failed", logging.Fields{"error": err.Error()})
-		os.Exit(1)
+		return 1
 	}
 
 	// The server collides with every block's real shape, not only the families
@@ -118,7 +124,7 @@ func main() {
 	plan, err := task.ParsePlan(cfg.WorkPlan)
 	if err != nil {
 		log.Error("config_invalid", logging.Fields{"error": "WORK_PLAN: " + err.Error()})
-		os.Exit(1)
+		return 1
 	}
 	if plan != nil {
 		go task.NewPlanner(runner, plan).Run(ctx)
@@ -139,7 +145,7 @@ func main() {
 		select {
 		case <-time.After(time.Duration(cfg.JoinDelayS) * time.Second):
 		case <-ctx.Done():
-			return
+			return 0
 		}
 	}
 
@@ -155,6 +161,7 @@ func main() {
 		tracker.Reset,
 		logAdapter{log},
 	)
+	return 0
 }
 
 // logAdapter exists because Go method sets do not unify the named
