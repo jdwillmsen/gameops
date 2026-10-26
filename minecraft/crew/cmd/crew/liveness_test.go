@@ -56,9 +56,16 @@ func TestStatusServerAnswersWhileStartupIsStuckOnTheNetwork(t *testing.T) {
 	done := make(chan int)
 	go func() { done <- run(ctx, cancel, cfg, open, logging.New("")) }()
 	t.Cleanup(func() {
+		start := time.Now()
 		cancel()
 		select {
 		case <-done:
+			// An unbounded Shutdown held run open for five seconds on a
+			// connection that never sent a request; the wait below is only a
+			// hang detector, so the speed of the return is asserted here.
+			if took := time.Since(start); took > 3*time.Second {
+				t.Errorf("run took %v to return after cancel, want well under 5s", took)
+			}
 		case <-time.After(30 * time.Second):
 			t.Error("run did not return after cancel")
 		}
