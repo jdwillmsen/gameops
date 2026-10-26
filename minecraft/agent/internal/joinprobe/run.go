@@ -30,6 +30,12 @@ func probeLoop(ctx context.Context, address string, forceProtocol int32, ticks <
 		case <-ctx.Done():
 			return
 		case <-ticks:
+			// select picks at random when both are ready; a probe started on
+			// a cancelled context can only fail at once, and publishing that
+			// would overwrite the last real observation.
+			if ctx.Err() != nil {
+				return
+			}
 		}
 	}
 }
