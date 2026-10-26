@@ -28,6 +28,7 @@ export function initHeat(host) {
   let grid = null;
   let places = [];
   let canvas = null;
+  let ui = null;
   let readout = null;
   let index = new Map();
   let proj = null;
@@ -48,6 +49,7 @@ export function initHeat(host) {
   function showState(...kids) {
     root.replaceChildren(el('div', { className: 'hm-state' }, ...kids));
     canvas = null;
+    ui = null;
   }
 
   function paintAuth() {
@@ -78,36 +80,52 @@ export function initHeat(host) {
     paint();
   }
 
-  function paint() {
-    const bar = el('div', { className: 'hm-bar' },
-      select('Layer', 'layer', LAYERS.map(l => [l.id, l.label]), sel.layer),
-      select('Window', 'window', WINDOWS.map(w => [w, `last ${w}`]), sel.window),
-      select('Unit', 'unit', [['', 'Whole fleet'], ...host.order().map(id => [id, (host.statuses.get(id) || {}).name || id])], sel.unit));
+  // The controls and canvas are built once and updated in place: replacing
+  // them on every poll would drop keyboard focus and close an open dropdown.
+  function build() {
+    const layerSel = select('Layer', 'layer', LAYERS.map(l => [l.id, l.label]), sel.layer);
+    const windowSel = select('Window', 'window', WINDOWS.map(w => [w, `last ${w}`]), sel.window);
+    const unitSel = select('Unit', 'unit', [['', 'Whole fleet']], sel.unit);
     canvas = el('canvas', { className: 'hm-map', width: 960, height: 640, tabIndex: 0 });
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', `${layerOf(sel.layer).label} density over the lab map. ${summary(grid)}`);
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerleave', () => { readout.textContent = ''; });
     readout = el('p', { className: 'hm-readout', 'aria-live': 'off' });
+    ui = {
+      unitSel, unitKey: '',
+      title: el('h2'), sum: el('p', { className: 'hm-sum' }),
+      bar: el('div', { className: 'hm-bar' }, layerSel, windowSel, unitSel),
+      legend: el('div', { className: 'hm-legend', role: 'group', 'aria-label': 'Legend, samples per cell' }),
+      topHead: el('h3', { textContent: 'Busiest cells' }), list: el('ol', { className: 'hm-top' }),
+    };
+    root.replaceChildren(ui.title, ui.sum, ui.bar, canvas, readout, ui.legend, ui.topHead, ui.list);
+  }
 
-    const steps = legendSteps(grid.max);
-    const legend = el('div', { className: 'hm-legend', role: 'group', 'aria-label': 'Legend, samples per cell' }, el('span', { textContent: 'fewer' }));
-    for (const s of steps) {
+  function paint() {
+    if (!ui || ui.title.parentNode !== root) build();
+    const units = host.order().map(id => [id, (host.statuses.get(id) || {}).name || id]);
+    const key = JSON.stringify(units);
+    if (key !== ui.unitKey) {
+      ui.unitKey = key;
+      ui.unitSel.replaceChildren(...[['', 'Whole fleet'], ...units].map(([v, text]) => el('option', { value: v, textContent: text })));
+      ui.unitSel.value = sel.unit;
+    }
+    ui.title.textContent = `${layerOf(sel.layer).label} heatmap`;
+    ui.sum.textContent = `${layerOf(sel.layer).hint}. ${summary(grid)}`;
+    canvas.setAttribute('aria-label', `${layerOf(sel.layer).label} density over the lab map. ${summary(grid)}`);
+
+    const legend = [el('span', { textContent: 'fewer' })];
+    for (const s of legendSteps(grid.max)) {
       const sw = el('span', { className: 'hm-sw' }, el('i', { textContent: '' }), el('b', { textContent: String(s.from) }));
       sw.firstChild.style.background = `var(--hm-${s.level})`;
-      legend.append(sw);
+      legend.push(sw);
     }
-    legend.append(el('span', { textContent: 'more' }));
+    legend.push(el('span', { textContent: 'more' }));
+    ui.legend.replaceChildren(...legend);
 
-    const list = el('ol', { className: 'hm-top' });
-    for (const [cx, cz, n] of hottest(grid)) {
-      list.append(el('li', { textContent: `x ${cx * grid.cell}..${cx * grid.cell + grid.cell - 1}, z ${cz * grid.cell}..${cz * grid.cell + grid.cell - 1}: ${n}` }));
-    }
-    root.replaceChildren(
-      el('h2', { textContent: `${layerOf(sel.layer).label} heatmap` }),
-      el('p', { className: 'hm-sum', textContent: `${layerOf(sel.layer).hint}. ${summary(grid)}` }),
-      bar, canvas, readout, legend,
-      ...(grid.cells.length ? [el('h3', { textContent: 'Busiest cells' }), list] : []));
+    ui.list.replaceChildren(...hottest(grid).map(([cx, cz, n]) =>
+      el('li', { textContent: `x ${cx * grid.cell}..${cx * grid.cell + grid.cell - 1}, z ${cz * grid.cell}..${cz * grid.cell + grid.cell - 1}: ${n}` })));
+    ui.topHead.hidden = ui.list.hidden = !grid.cells.length;
     draw();
   }
 
@@ -185,6 +203,7 @@ export function initHeat(host) {
     },
     onOperator() {
       if (!mounted) return;
+      token++;
       if (!host.operator()) { grid = null; places = []; paintAuth(); } else load();
     },
   };
