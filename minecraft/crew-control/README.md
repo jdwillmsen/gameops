@@ -49,6 +49,7 @@ crew-control; it never calls them to command them.
 - `GET /v1/places`: every place with its stock; `POST /v1/places` (`{"id","name","kind","box"}`, as in `CREW_PLACES`) adds or edits one, `POST /v1/places/delete` (`{"id"}`) removes one; seeded places answer 409. Chests units report get `chest-x-y-z` ids, which a request may only rename, never move or create. Moving a place or changing its kind, by request or by `CREW_PLACES`, drops its stock; a rename keeps it
 - `GET /v1/events?unit=&kind=&severity=&since=&until=&limit=&sort=asc|desc&cursor=<next>`: signed-in; the unit event history, newest first by default, every filter optional and exact, times RFC3339. Pages are keyset (`next` carries an `(at, id)` cursor, never an offset), at most 200 events each. Severity is ok, info, warn or crit; kinds are listed under Event history. Rows carry each unit's position, which is why the route is signed-in only
 - `POST /v1/events/prune` (`{"dry_run":true}` counts what would go and lists the oldest 100, `{}` deletes it): signed-in; the 30-day retention, answering `{"pruned","total","would"}`
+- `GET /v1/explorer/events`, `GET /v1/explorer/tail`, `GET /v1/explorer/views`, `POST /v1/explorer/views`, `POST /v1/explorer/views/delete`: signed-in; the event explorer (see [Event explorer](#event-explorer))
 - `GET /v1/units/{id}/work?wait=25s[&kinds=command]`, `POST /v1/units/{id}/events`: unit-facing, `Authorization: Bearer <WORK_TOKEN>`, cluster-only
 - `GET /v1/squads` and `/v1/squads/{id}`: the squads, rebuilt from units' hellos, their members' last status reports and who leads by the chain of command (Vanguard, then Striker, then Ranger; a leader reported dead or silent for over 8 s is replaced), plus any battalions the squads nest in, data only; the console-safe shape the stream serves — no member positions and no operator id; anonymous and read-only
 - `GET /v1/squads/stream`: server-sent `squads` snapshots for the console panel, sent on connect, on change and at least every 15 s. The snapshot carries members, the standing order and the last 12 callouts, but no positions and no operator id; anonymous and read-only
@@ -396,6 +397,19 @@ delete and lists the oldest 100, without deleting anything.
 The Postgres tests run when `CREW_PG_TEST_DSN` is set (they apply the migration
 first and truncate `crew_event`, so point them at a scratch database) and skip
 otherwise; everything else runs without a database.
+
+## Event explorer
+
+`?view=events` (the **Explorer** button, or `x`) filters, sorts and searches the unit event history, Grafana-Loki style.
+
+- **Filters** are chips: units, kinds, severities (each with an icon and a word), a task id, free text and a time range (presets, or a custom from/to). Lists are OR within a field and AND across fields. Text is a case-insensitive substring over unit, kind, task id and the payload. Click a column header to sort by time, level, unit or kind; click again to flip. Click a row for its full payload.
+- **Links.** The filter lives in the address as `f.unit`, `f.kind`, `f.severity`, `f.task`, `f.q`, `f.range` (`15m`, `1h`, `6h`, `24h`, `168h`), `f.since`, `f.until`, `f.sort`, `f.dir`, so a copied link opens the same view.
+- **Live tail.** New events appear within about a second, at the top when sorted newest-first. Pause holds them back and counts them; Resume reloads. Under any other sort they are counted, not inserted.
+- **Saved views** are named filter sets, per signed-in operator, up to 50, 60-character names. They are kept in memory, so a restart forgets them. Signed-out viewers get the same filters over the public feed the page already holds (no coordinates, no task ids, no history beyond the feed's last 300) but cannot save views or tail history.
+- `GET /v1/explorer/events?unit=&kind=&severity=&task=&q=&since=&until=&range=&sort=at|unit|kind|severity&dir=asc|desc&limit=&cursor=`: lists take commas. Answers `{events,total,next,head,truncated}`; paging is keyset on the sort key, then `(at, id)`, never an offset. Positions are in the rows, so it is signed-in only.
+- `GET /v1/explorer/tail?<same filters>&after=<head>`: server-sent `events` carrying `{events,head}` for rows stored after `after`; at most 16 clients.
+- The routes read the history through a `Source` interface (`internal/explorer`). The in-memory source scans a snapshot of the store; a store that cannot snapshot is paged, newest first, up to 20,000 events, and the answer says `truncated`. A database-backed source would push the filter into its query.
+- **Performance.** Filtering with six units, three severities and a text search, then sorting 10,000 events takes about 4 ms (`go test -run 10k -v ./internal/explorer`, budget 200 ms); `go test -bench . ./internal/explorer` repeats it.
 
 ## Fleet metrics
 
