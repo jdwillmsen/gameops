@@ -64,11 +64,14 @@ func wave(name string, mob string, count, tier, pen int) Wave {
 
 // sim answers the director's console so a whole run can play out offline.
 type sim struct {
-	live       int
-	peak       int
-	summons    int
-	kills      int
-	bossPolls  int
+	live      int
+	peak      int
+	summons   int
+	kills     int
+	bossPolls int
+	// bossRefill restores bossPolls each time a boss spawns, so several boss
+	// waves in one run each take a few polls to fall.
+	bossRefill int
 	boss       bool
 	countStep  int
 	warriorUp  map[string]bool
@@ -123,6 +126,9 @@ func (s *sim) Exec(cmd string) (string, error) {
 		return "Object successfully summoned", nil
 	case strings.HasPrefix(cmd, "tag @e[tag=arena_tiered] add "+bossTag):
 		s.boss = true
+		if s.bossRefill > 0 {
+			s.bossPolls = s.bossRefill
+		}
 		return "", nil
 	case cmd == killWaveCommand():
 		s.kills++
@@ -1456,5 +1462,32 @@ func TestWarriorKitForAnAbsentWarriorAbortsAsAnError(t *testing.T) {
 	d.WarriorKits = []string{"vanguard/t5"}
 	if _, err := d.Run(); err == nil || !strings.Contains(err.Error(), "No targets") {
 		t.Fatalf("Run error = %v, want the absent warrior", err)
+	}
+}
+
+func TestBossBeforeTheFinaleDoesNotEndTheRun(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.bossRefill = 2
+	s.countStep = 0
+	f := &FakeConsole{Respond: s.Exec}
+	boss := func(name, mob string) Wave {
+		return Wave{
+			Name: name, Boss: true,
+			Mobs: []Mob{{Mob: mob, Count: 1, Tier: 5, Pen: 0}},
+		}
+	}
+	book := testBook(boss("The Warlord", "ravager"), boss("The Warden", "warden"))
+	book.Tiers[5] = Tier{Effects: []Effect{{ID: "resistance", Seconds: 600, Amplifier: 4}}}
+	d := newDirector(f, book, clock)
+	result, err := d.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Outcome != OutcomeBossDown || result.WavesCleared != 2 {
+		t.Errorf("result = %+v, want both bosses cleared", result)
+	}
+	if !hasCommand(f.Cmds, "execute positioned 0 65 -760 run summon warden ~ ~ ~") {
+		t.Error("the finale never spawned after the first boss fell")
 	}
 }

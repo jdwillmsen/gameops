@@ -69,7 +69,7 @@ tiers:
       - {slot: armor.feet, item: diamond_boots}
     enchant: {id: sharpness, level: 5}
 
-# The Gauntlet is the shipped example: eight waves that climb from fodder to
+# The Gauntlet is the shipped example: nine waves that climb from fodder to
 # a boss. A run's --tier caps the opposition, so a tier-2 run stops after the
 # first three waves and a tier-4 run stops before the boss.
 waves:
