@@ -1,0 +1,7 @@
+/* Edge kinds differ by dash pattern as well as meaning, so no line rides on colour alone. */
+.dg-edge.dg-k-stored { stroke-dasharray: none; }
+.dg-edge.dg-k-supplies { stroke-dasharray: 7 4; }
+.dg-edge.dg-k-used { stroke-dasharray: 2 4; stroke-linecap: round; }
+.lv-edges { margin: 0; padding: 4px 10px; font-size: 11px; opacity: .75; }
+.lv-modes { display: inline-flex; gap: 4px; }
+.lv-modes button[aria-pressed="true"] { background: #1d3050; }
