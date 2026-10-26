@@ -91,7 +91,10 @@ export function createDashData() {
 // ---- queries: pure functions over the data and a filter ----
 
 // filter: { unit: '' | id, from, to } with from/to in epoch ms.
-export const inFilter = (e, f) => (!f.unit || e.unit === f.unit) && at(e) >= f.from && at(e) <= f.to;
+// Event times come from the server's clock, so the newest one can read a
+// moment ahead of this page's; a little slack keeps it in the window.
+export const SKEW_MS = 30_000;
+export const inFilter = (e, f) => (!f.unit || e.unit === f.unit) && at(e) >= f.from && at(e) <= f.to + SKEW_MS;
 
 export function pickUnits(list, f) {
   return f.unit ? list.filter(s => s.id === f.unit) : list;

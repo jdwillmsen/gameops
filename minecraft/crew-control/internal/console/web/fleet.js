@@ -195,6 +195,7 @@ export const KEYS = [
   ['o', 'fleet overview: all units in one table'],
   ['g', 'job graph: steps and their dependencies'],
   ['x', 'event explorer: filter, sort, search and tail events'],
+  ['b', 'dashboard: panels and saved layouts'],
   ['/', 'fleet overview: filter (elsewhere: command palette)'],
   [', / .', 'wall: previous / next page'],
   ['r', 'roster'],
