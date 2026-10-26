@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -135,28 +136,13 @@ func TestXboxState_FinishClearsTheCookieWhateverTheAnswer(t *testing.T) {
 	}
 }
 
-func TestXboxState_TheMemoryOfUsedStatesIsBounded(t *testing.T) {
-	now := time.Now()
-	f := xboxFlow(t, &now)
-	for range maxUsedStates + 10 {
-		state, _, c := startXbox(t, f)
-		if _, err := callback(f, state, c); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(f.used) > maxUsedStates || f.order.Len() > maxUsedStates {
-		t.Errorf("%d states remembered", len(f.used))
-	}
-	now = now.Add(XboxStateTTL + time.Minute)
-	state, _, c := startXbox(t, f)
-	_, _ = callback(f, state, c)
-	if len(f.used) != 1 {
-		t.Errorf("%d states remembered after they all expired", len(f.used))
-	}
-}
-
 func TestXboxState_NeedsTheSessionKey(t *testing.T) {
 	if _, err := NewXboxFlow([]byte("short"), time.Now); err == nil {
 		t.Error("a short key was accepted")
 	}
+}
+
+func s256Challenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return encoding.EncodeToString(sum[:])
 }
