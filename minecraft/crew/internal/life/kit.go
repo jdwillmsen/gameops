@@ -10,7 +10,9 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
 const (
@@ -195,7 +197,7 @@ func (l *Life) endKit(err error) {
 	full, _ := k.visit.(interface{ Full() bool })
 	k.visit = nil
 	if err != nil {
-		l.logEvent("kit_failed", map[string]any{"error": err.Error()})
+		l.logEvent("kit_failed", map[string]any{"error": err.Error(), "reason_code": task.KitReasonCode(err), "session_id": sessionid.Current()})
 		early := errors.Is(err, skill.ErrChestChunkNotLoaded) || errors.Is(err, skill.ErrChestNotOpened)
 		if early && k.retryTries < kitRetryTries {
 			// A chest whose chunk is merely late, or whose open failed while

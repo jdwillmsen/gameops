@@ -21,6 +21,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
@@ -1463,5 +1464,38 @@ func TestFitDropsSeenBeforeBlocks(t *testing.T) {
 	}
 	if !fits(got) {
 		t.Error("the fitted event still does not fit")
+	}
+}
+
+func TestReasonCodeAndSessionRideTheReportAndAreDroppedForAnOldController(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		f, r := newFakeControl(t), &stubRunner{}
+		f.legacy = legacy
+		start(t, r, f)
+
+		f.work <- taskItem(taskA, gotoBody)
+		waitUntil(t, "queued", func() bool { return len(r.submitted()) == 1 })
+		r.mu.Lock()
+		r.tasks[0].State, r.tasks[0].Reason, r.tasks[0].ReasonCode = task.Failed, "no axe in inventory", task.ReasonMissingTool
+		t0, obs := r.tasks[0], r.obs
+		r.mu.Unlock()
+		sid := sessionid.Begin()
+		obs(t0)
+
+		ev := f.waitFor(t, "failed", func(ev []event) bool { return has(ev, taskA, "failed") })
+		for _, e := range ev {
+			if e.ID != taskA || e.State != "failed" {
+				continue
+			}
+			if legacy && (e.ReasonCode != "" || e.SessionID != "") {
+				t.Errorf("legacy controller was sent %q %q", e.ReasonCode, e.SessionID)
+			}
+			if !legacy && (e.ReasonCode != task.ReasonMissingTool || e.SessionID != sid) {
+				t.Errorf("reason_code %q session_id %q", e.ReasonCode, e.SessionID)
+			}
+			if e.Reason != "no axe in inventory" {
+				t.Errorf("reason text changed: %q", e.Reason)
+			}
+		}
 	}
 }

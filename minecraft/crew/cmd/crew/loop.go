@@ -4,6 +4,8 @@ import (
 	"context"
 	"math/rand"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 )
 
 // A session lasting at least this long is treated as healthy and resets the
@@ -42,6 +44,7 @@ func runConnectLoop(ctx context.Context, opt loopOptions, connect func(context.C
 		first = false
 
 		started := time.Now()
+		sid := sessionid.Begin()
 		err := connect(ctx)
 		lasted := time.Since(started)
 		onEnd()
@@ -49,9 +52,9 @@ func runConnectLoop(ctx context.Context, opt loopOptions, connect func(context.C
 			return
 		}
 		if err != nil {
-			log.Error("session_error", map[string]any{"error": err.Error(), "session_lasted_ms": lasted.Milliseconds()})
+			log.Error("session_error", map[string]any{"error": err.Error(), "session_lasted_ms": lasted.Milliseconds(), "session_id": sid})
 		} else {
-			log.Info("session_ended", map[string]any{"session_lasted_ms": lasted.Milliseconds()})
+			log.Info("session_ended", map[string]any{"session_lasted_ms": lasted.Milliseconds(), "session_id": sid})
 		}
 		delay = backoff(delay, lasted, opt.minDelay, opt.maxDelay)
 	}

@@ -377,6 +377,35 @@ Crew runs one task at a time. A session end or death fails the running task
 Bodies are capped at 4096 bytes (413) and at most 16 tasks may wait (429).
 Task logs carry the id, template, state and reason, never the request.
 
+**Failure reason codes.** A failed task also carries `reason_code`, a closed
+code for the free-text `reason`, which stays as it was. Numbers inside a
+reason (`status 6`, `after 3 breaks`) do not change the code, so failures group
+and chain without parsing strings. It is on the `task_finished` log line, in the
+task record, and on the report to the controller; a controller that rejects
+unknown fields gets the report again without it. `kit_failed` carries the same
+field. `session_id` (random per connection) is on `task_finished`,
+`kit_failed`, `died`, `respawned`, `session_error` and `session_ended`.
+
+| Code | Meaning | Example reason | Raised by |
+| --- | --- | --- | --- |
+| `missing_tool` | the tool a skill needs is not held | `no axe in inventory` | mining skills |
+| `kit_chunk_not_loaded` | kit chest's chunk not loaded yet | `the chest's chunk is not loaded` | kit visit |
+| `kit_no_path` | no way to the kit chest | `getting to the chest: walking to the goal: no path` | kit visit |
+| `kit_chest_timeout` | chest never opened | `chest did not open within 300 ticks` | kit visit, chest skills |
+| `kit_visit_timeout` | the whole visit overran | `visit took too long` | kit visit |
+| `session_lost` | connection ended mid-task | `session ended`, `wire down` | runner |
+| `deposit_rejected` | server refused a chest transfer | `server rejected the deposit with status 6` | deposit, withdraw |
+| `no_pickup` | breaks yielded no item | `no pickup after 3 breaks` | mining skills |
+| `no_reachable_target` | nowhere to stand within reach | `no standing spot within reach of the chest` | chest, place, observe |
+| `trap_climb_failed` | could not climb out of a trap | `climbing out of a trap: ...` | climb |
+| `inventory_desync` | inventory never showed the transfer | `inventory did not show the deposit within 40 ticks` | deposit, withdraw |
+| `chunk_not_loaded` | target chunk not loaded | `the chest's chunk is not loaded` | chest skills |
+| `no_path` | the pathfinder found no route | `haul gave up after repeated failures: ...: no path` | any walking skill |
+| `other` | anything not listed | `block did not break` | the fallback |
+
+A reason that matches no rule is `other`; the rules are one table in
+`internal/task/reason.go`, checked by a test.
+
 ```
 curl -H "Authorization: Bearer $TASKS_TOKEN" \
   -d '{"template":"gather_and_deposit","item":"oak_log","qty":16,"chest":{"x":-4,"y":100,"z":0}}' \

@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
@@ -80,6 +81,10 @@ type event struct {
 	// observation is a result, not a progress note. A controller that
 	// refuses it is retried without it, like seen.
 	Blocks *Blocks `json:"blocks,omitempty"`
+	// ReasonCode and SessionID are optional like seen: a controller that
+	// rejects unknown fields gets the report again without them.
+	ReasonCode string `json:"reason_code,omitempty"`
+	SessionID  string `json:"session_id,omitempty"`
 }
 
 // Seen is what a task found in the last chest it closed.
@@ -495,7 +500,7 @@ func fits(ev event) bool {
 }
 
 func eventOf(t task.Task) event {
-	ev := event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason}
+	ev := event{ID: t.ID, State: t.State, Progress: t.Progress, Reason: t.Reason, ReasonCode: t.ReasonCode, SessionID: sessionid.Current()}
 	if t.Seen != nil {
 		seen := &Seen{Items: t.Seen.Items, At: t.Seen.At}
 		seen.Chest.X, seen.Chest.Y, seen.Chest.Z = t.Seen.Chest.X(), t.Seen.Chest.Y(), t.Seen.Chest.Z()
@@ -663,12 +668,12 @@ func (c *Client) post(ctx context.Context, ev event) error {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if (resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest) && (ev.Seen != nil || ev.Blocks != nil) {
+	if (resp.StatusCode == http.StatusRequestEntityTooLarge || resp.StatusCode == http.StatusBadRequest) && (ev.Seen != nil || ev.Blocks != nil || ev.ReasonCode != "" || ev.SessionID != "") {
 		// 413: a controller with a tighter cap than this unit assumes. 400: a
 		// controller that predates seen and blocks, and rejects unknown
 		// fields. Either way the state is worth more than the chest or the
 		// observation, and one retry without them is all it takes.
-		ev.Seen, ev.Blocks = nil, nil
+		ev.Seen, ev.Blocks, ev.ReasonCode, ev.SessionID = nil, nil, "", ""
 		return c.post(ctx, ev)
 	}
 	switch {

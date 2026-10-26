@@ -31,6 +31,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/control"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
@@ -263,14 +264,14 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 		if respawner.Dead() {
 			tracker.SetDead(true)
 			u.died()
-			log.Info("died", nil)
+			log.Info("died", logging.Fields{"session_id": sessionid.Current()})
 			continue
 		}
 		// Before the unit counts as alive, so a task never starts from the
 		// pose it died at.
 		u.respawned()
 		tracker.SetDead(false)
-		log.Info("respawned", nil)
+		log.Info("respawned", logging.Fields{"session_id": sessionid.Current()})
 		// The server drops the radius when the player is replaced.
 		if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {
 			return fmt.Errorf("request chunk radius after respawn: %w", err)
