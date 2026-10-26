@@ -116,15 +116,19 @@ func main() {
 	// Set with the store; a report that finishes work before then has no job
 	// to wake, and the scheduler's first tick reads the store anyway.
 	var sched atomic.Pointer[jobs.Scheduler]
-	// The event history is filled from the poller; until the backend is
-	// ready the writer drops what it is handed, like the feed.
+	// The event history is filled from the poller. It never goes dark: until
+	// the database answers, and whenever it stops, a bounded memory store
+	// serves and the metric says so.
+	eventFallback := events.NewFallback(log)
 	eventLog := &events.Lazy{}
+	eventLog.Set(eventFallback)
 	recorder := events.NewWriter(eventLog, log)
 	ids := make([]string, 0, len(units.Units()))
 	for _, u := range units.Units() {
 		ids = append(ids, u.ID)
 	}
 	fleet := metrics.New(ids)
+	fleet.WatchEventStore(eventFallback)
 	alertCfg, err := alerts.ParseConfig(os.Getenv("CREW_ALERTS"))
 	if err != nil {
 		log.Error("config_invalid", logging.Fields{"error": err.Error()})
@@ -324,7 +328,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 		backend = work.NewMemory()
 		led = ledger.NewMemory()
 		js = jobs.NewMemory()
-		eventLog.Set(events.NewMemory())
+		eventLog.Connect(events.NewMemory())
 	case dsn == "":
 		log.Error("work_store_unconfigured", logging.Fields{"effect": "work routes answer 503; set PG_HOST, or WORK_STORE=memory for development"})
 		return
@@ -339,7 +343,7 @@ func openStore(ctx context.Context, store *work.Lazy, world *atomic.Pointer[ledg
 				backend = pg
 				led = ledger.NewPostgres(pg.Pool())
 				js = jobs.NewPostgres(pg.Pool())
-				eventLog.Set(events.NewPostgres(pg.Pool()))
+				eventLog.Connect(events.NewPostgres(pg.Pool()))
 				break
 			}
 			if ctx.Err() != nil {
