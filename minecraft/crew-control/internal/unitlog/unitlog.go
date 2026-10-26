@@ -47,6 +47,49 @@ type Event struct {
 	Anchor string
 }
 
+// reasonCodes mirrors the units' closed failure vocabulary. Anything else a
+// unit sends is reduced to "other" so a free-text reason, which could carry a
+// position, a token or a player name, never reaches a sentence an anonymous
+// caller reads.
+var reasonCodes = map[string]bool{
+	"missing_tool": true, "kit_chunk_not_loaded": true, "kit_no_path": true, "kit_chest_timeout": true,
+	"kit_visit_timeout": true, "session_lost": true, "deposit_rejected": true, "no_pickup": true,
+	"no_reachable_target": true, "trap_climb_failed": true, "inventory_desync": true,
+	"chunk_not_loaded": true, "no_path": true, "other": true,
+}
+
+const (
+	reasonOther = "other"
+	// maxTemplateLen bounds a template name; the real ones are short.
+	maxTemplateLen = 32
+)
+
+func safeReason(r string) string {
+	if r == "" || reasonCodes[r] {
+		return r
+	}
+	return reasonOther
+}
+
+// safeTemplate keeps a task template name only if it looks like one: a short
+// lowercase identifier. Free text and anything with coordinates, separators
+// or spaces becomes "other".
+func safeTemplate(t string) string {
+	if t == "" {
+		return t
+	}
+	if len(t) > maxTemplateLen || t[0] < 'a' || t[0] > 'z' {
+		return reasonOther
+	}
+	for i := 1; i < len(t); i++ {
+		c := t[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return reasonOther
+		}
+	}
+	return t
+}
+
 // payload holds the optional keys a stored event may carry.
 type payload struct {
 	Reason     string `json:"reason_code"`
@@ -64,7 +107,7 @@ func From(e events.Event) Event {
 	_ = json.Unmarshal(e.Payload, &p)
 	return Event{
 		ID: e.ID, Unit: e.Unit, At: e.At, Kind: e.Kind, Task: taskOf(e),
-		Reason: p.Reason, Cause: p.Cause, Template: p.Template,
+		Reason: safeReason(p.Reason), Cause: p.Cause, Template: safeTemplate(p.Template),
 		Duration: time.Duration(p.DurationMS) * time.Millisecond,
 		Idle:     p.Idle, Anchor: p.Anchor,
 	}
