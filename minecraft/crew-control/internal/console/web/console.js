@@ -7,6 +7,7 @@ import { initContainers } from '/static/containers-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
 import { initExplorer } from '/static/explorer-ui.js';
 import { initLedgerGraph } from '/static/graph/ledger-ui.js';
+import { initTimeline } from '/static/timeline-ui.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -57,6 +58,7 @@ function renderBar() {
   $('jobgraph-toggle').setAttribute('aria-pressed', String(state.view === 'jobs'));
   $('explorer-toggle').setAttribute('aria-pressed', String(state.view === 'events'));
   $('ledger-toggle').setAttribute('aria-pressed', String(state.view === 'ledger'));
+  $('timeline-toggle').setAttribute('aria-pressed', String(state.view === 'timeline'));
 }
 
 function renderStage() {
@@ -65,6 +67,7 @@ function renderStage() {
   jobGraph.unmount();
   explorer.unmount();
   ledgerGraph.unmount();
+  timeline.unmount();
   // Frames are removed, not hidden, so a camera websocket closes as soon as
   // its tile leaves the screen.
   stage.replaceChildren();
@@ -83,6 +86,10 @@ function renderStage() {
   }
   if (state.view === 'ledger') {
     ledgerGraph.mount(stage);
+    return;
+  }
+  if (state.view === 'timeline') {
+    timeline.mount(stage);
     return;
   }
   if (!state.unit) return;
@@ -113,7 +120,7 @@ function renderStage() {
 }
 
 function apply() {
-  if (state.view !== 'jobs') state.job = '';
+  if (state.view !== 'jobs' && state.view !== 'timeline') state.job = '';
   sync();
   renderBar();
   renderStage();
@@ -176,6 +183,11 @@ function toggleLedger() {
   apply();
 }
 
+function toggleTimeline() {
+  state.view = state.view === 'timeline' ? (state.unit ? 'focus' : 'fleet') : 'timeline';
+  apply();
+}
+
 function toggleJobs() {
   state.view = state.view === 'jobs' ? (state.unit ? 'focus' : 'fleet') : 'jobs';
   apply();
@@ -187,6 +199,7 @@ $('detail-toggle').addEventListener('click', toggleDetail);
 $('jobgraph-toggle').addEventListener('click', toggleJobs);
 $('explorer-toggle').addEventListener('click', toggleExplorer);
 $('ledger-toggle').addEventListener('click', toggleLedger);
+$('timeline-toggle').addEventListener('click', toggleTimeline);
 
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
@@ -206,6 +219,7 @@ function onKey(ev) {
   else if (ev.key === 'g') toggleJobs();
   else if (ev.key === 'x') toggleExplorer();
   else if (ev.key === 'l') toggleLedger();
+  else if (ev.key === 't') toggleTimeline();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
@@ -214,6 +228,7 @@ function onKey(ev) {
   // has no overlay open; ops still answers the overlay first.
   else if (ev.key === 'Escape' && state.view === 'jobs' && !document.getElementById('overlay') && jobGraph.key(ev)) return;
   else if (ev.key === 'Escape' && state.view === 'ledger' && !document.getElementById('overlay') && ledgerGraph.key(ev)) return;
+  else if (ev.key === 'Escape' && state.view === 'timeline' && !document.getElementById('overlay') && timeline.key(ev)) return;
   else ops.key(ev);
 }
 addEventListener('keydown', onKey);
@@ -274,6 +289,7 @@ function connect() {
     jobs = JSON.parse(ev.data).jobs || [];
     renderJobs();
     jobGraph.onJobs();
+    timeline.onJobs();
   });
   es.onerror = () => {
     if (source !== es) return;
@@ -354,6 +370,7 @@ function setOperator(op) {
   alertsUI.onSession();
   explorer.onOperator();
   ledgerGraph.onOperator();
+  timeline.onOperator();
   renderJobs();
   if (changed) reconnect();
 }
@@ -590,6 +607,16 @@ const explorer = initExplorer({
   operator: () => operator,
   api,
   sync,
+});
+
+const timeline = initTimeline({
+  order: () => order,
+  jobs: () => jobs,
+  operator: () => operator,
+  state: () => state,
+  sync,
+  api,
+  setOperator: next => setOperator(next),
 });
 
 const jobGraph = initJobGraph({

@@ -33,7 +33,7 @@ crew-control; it never calls them to command them.
 
 ## Routes
 
-- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) the job graph (`?view=jobs&job=<id>`) or the world ledger (`?view=ledger`); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
+- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) the job graph (`?view=jobs&job=<id>`) the world ledger (`?view=ledger`) or the timeline (`?view=timeline`, with `&job=<id>` for one job); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) need an operator session
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
@@ -351,6 +351,29 @@ keeps the last good picture on screen.
 
 The hand-off graph and resource-flow Sankey are not built: they need chest
 deposit and withdraw events, which units do not post (see Event history).
+
+## Timeline
+
+Press `t` (or Timeline in the bar) for the operator-only timeline, built from the
+[event history](#event-history) with `GET /v1/events`; signed out it shows a
+sign-in note and asks for nothing, because event details carry positions.
+
+- **Units**: one lane per unit over 1 h, 6 h, 24 h or 7 d ending now. A task is a
+  bar from its start event to its finish, coloured by task template; a failed task
+  has a red edge and an X, a cancelled task or one that ended with an unknown
+  outcome is a dashed outline, idle poll roll-ups are thin grey bars. Deaths
+  (diamond) and stuck warnings (triangle) are markers; offline time is hatched and
+  dead time is dark red. Wheel or the buttons zoom, drag or the arrow keys pan
+  inside the loaded window, and Earlier and Later load the neighbouring one.
+  Hover for a tooltip; click a bar or marker to list its events in the side panel
+  (Esc closes it).
+- **Job**: the steps of one job (pick it, or open `?view=timeline&job=<id>`) in the
+  order they ran, with unit, outcome, start, duration and a mini bar. Only events
+  of the job's own tasks are used, so other work on the same units is left out.
+
+Each unit is read with its own paged query, newest first and capped at 15 pages
+of 200; when a busy unit hits the cap the oldest rows are dropped and the bar says
+so. The window is never loaded all at once.
 
 ## Chart library
 
