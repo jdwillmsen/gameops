@@ -317,11 +317,26 @@ in batches of up to 64 (one insert, at least once a second). Today that is
 task's `template` and, once finished, `duration_ms`. Task ids that are not
 queue UUIDs (units run their own rotation) go to `payload.task`, not `task_id`.
 
-Not captured yet, because the data does not reach crew-control: a closed
-failure reason code (a unit's reason is free text, in `text`), `kit_failed`,
-`session_error` and other log-only events, and session start and end. Units do
-not post events today, so there is no ingest route; units would have to post
-them for those kinds, and that is follow-up work.
+**Analytic fields.** Task events carry, when the unit sent them: `reason_code`
+(the unit's closed code, see the crew README; absent from an older unit),
+`duration_ms`, `outcome` (`ok`, `noop`, `failed`; `noop` is decided by the idle
+rule below, so only roll-ups carry it), `session_id`, `attempt`, `crew_version`
+and `cause_ref`. A failed task gets a `cause_ref` to the latest `kit_failed`,
+`session_error` or `died` on the same unit in the 30 minutes before it, never
+to a later event or another unit. The free `reason` text stays in `text` and is
+never exported to a model; a unit-sent `reason_text` is cut to 120 characters.
+None of these holds a coordinate. `GET /v1/events` also filters on
+`reason_code`, `outcome`, `session_id` and `cause_ref`; a malformed value is a
+400.
+
+Status: the in-memory store and the routes implement all of this. The Postgres
+table does not have the columns yet (that migration ships from the platform
+repo), so the Postgres store writes the old columns only and answers a request
+using the new filters with a 400 rather than ignoring them. The unit's own
+`kit_failed`, `died`, `respawned` and `session_error` are validated by
+`events.FromUnit` (closed kinds and codes, bounded text) but no route accepts
+them yet: units post task reports only, and a unit-authenticated route is
+follow-up work.
 
 **Idle roll-up.** A hauling unit re-checks its chests every couple of seconds
 and finishes in a fraction of one, which in one measured hour was 78% of all
@@ -333,7 +348,8 @@ throughput chart a chart of no-ops, so they are collapsed per unit:
   cancelled or unknown-outcome task, a slow haul, a haul of unknown duration
   and every other template keep their own rows.
 - Idle polls from one unit and template become one `idle_rollup` row: `at` is
-  the first poll, the payload has `template`, `count`, `last` and `text`. A
+  the first poll, the payload has `template`, `count`, `total_ms`, `last` and `text`; the row's
+  `duration_ms` is `total_ms` and its `outcome` is `noop`. A
   roll-up closes on the unit's next real event (so it stays in order), when it
   is a minute old, or at shutdown. Only a crash loses an open count, at most a
   minute of it.

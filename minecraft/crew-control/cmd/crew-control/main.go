@@ -423,7 +423,9 @@ func bornEvent(b telemetry.Born) (events.Event, events.Hint) {
 	if b.Pos.Known {
 		e.Pos = &events.Pos{X: float64(b.Pos.X), Y: float64(b.Pos.Y), Z: float64(b.Pos.Z)}
 	}
-	return e, events.Hint{Task: b.Task, Template: b.Template, Took: b.Took}
+	h := events.Hint{Task: b.Task, Template: b.Template, Took: b.Took, ReasonCode: b.ReasonCode}
+	events.Enrich(&e, h)
+	return e, h
 }
 
 // unitStatuses joins telemetry with each unit's unfinished work, in roster order.

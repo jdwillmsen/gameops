@@ -29,6 +29,9 @@ func (m *Memory) Append(_ context.Context, ev []Event) error {
 	for _, e := range ev {
 		m.nextID++
 		e.ID = m.nextID
+		if e.CauseRef == nil {
+			e.CauseRef = LinkCause(e, m.events)
+		}
 		m.events = append(m.events, e)
 	}
 	return nil
@@ -43,6 +46,18 @@ func (q Query) matches(e Event) bool {
 		return false
 	}
 	if q.Severity != "" && e.Severity != q.Severity {
+		return false
+	}
+	if q.ReasonCode != "" && e.ReasonCode != q.ReasonCode {
+		return false
+	}
+	if q.Outcome != "" && e.Outcome != q.Outcome {
+		return false
+	}
+	if q.SessionID != "" && e.SessionID != q.SessionID {
+		return false
+	}
+	if q.CauseRef != 0 && (e.CauseRef == nil || *e.CauseRef != q.CauseRef) {
 		return false
 	}
 	if !q.Since.IsZero() && e.At.Before(q.Since) {
