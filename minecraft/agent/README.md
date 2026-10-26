@@ -1267,7 +1267,8 @@ chat commands and `@server` questions are unavailable until it is back.
 
 `PRESENCE_CONTROLLERS`, a comma list of XUIDs, lets those players run `!park`
 and `!unpark` without being operators. It grants those two commands and
-nothing else, so `!leave` and every other operator command stay closed to them.
+nothing else: `!leave` and every other operator command stay closed to them,
+and for them `!park all` and `!park agent` leave the agent in the world.
 
 A park of the agent from chat, including `!park all`, always comes back by
 itself. It lasts one hour, or the duration given, and it ends early as soon

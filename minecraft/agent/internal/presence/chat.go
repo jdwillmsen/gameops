@@ -23,6 +23,7 @@ type NameResolver interface {
 
 const (
 	notConfigured     = "Presence control isn't set up on this server."
+	agentOperatorOnly = "Only operators can park or unpark the agent."
 	storeDownRead     = "I can't read presence right now - the database isn't answering."
 	storeDownWrite    = "I couldn't save that - the database isn't answering."
 	storeDownParked   = "I couldn't save that - the database isn't answering, so nothing was parked."
@@ -101,6 +102,9 @@ func (p *ChatPlugin) park(ctx context.Context, pctx *plugin.Context, inv plugin.
 	if !ok {
 		return p.usage("park <target> [duration]"), nil
 	}
+	if actors = botsUnlessOperator(inv, actors); len(actors) == 0 {
+		return agentOperatorOnly, nil
+	}
 	var d time.Duration
 	if len(inv.Args) == 2 {
 		var err error
@@ -109,6 +113,17 @@ func (p *ChatPlugin) park(ctx context.Context, pctx *plugin.Context, inv plugin.
 		}
 	}
 	return p.parkActors(ctx, pctx, actors, d, chatParkReason, inv)
+}
+
+// botsUnlessOperator narrows actors to the bots for anyone below operator. A
+// player granted !park without being an operator may switch bots, but taking
+// the agent out of the world is what !leave guards, and !park all or the
+// agent's own id would otherwise reach it by another door.
+func botsUnlessOperator(inv plugin.Invocation, actors []Actor) []Actor {
+	if inv.ActorPermission >= plugin.PermissionOperator {
+		return actors
+	}
+	return slices.DeleteFunc(slices.Clone(actors), func(a Actor) bool { return a.Kind == KindAgent })
 }
 
 func (p *ChatPlugin) leave(ctx context.Context, pctx *plugin.Context, inv plugin.Invocation) (string, error) {
@@ -140,6 +155,9 @@ func (p *ChatPlugin) unpark(ctx context.Context, _ *plugin.Context, inv plugin.I
 	actors, ok := p.svc.Registry().Resolve(inv.Args[0])
 	if !ok {
 		return p.usage("unpark <target>"), nil
+	}
+	if actors = botsUnlessOperator(inv, actors); len(actors) == 0 {
+		return agentOperatorOnly, nil
 	}
 	views, err := p.svc.Clear(ctx, actors, p.source(inv))
 	if errors.Is(err, ErrUnavailable) {
