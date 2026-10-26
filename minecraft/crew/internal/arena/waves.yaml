@@ -122,3 +122,12 @@ waves:
         callout: The Warlord is enraged.
         commands:
           - effect give @e[tag=arena_boss] strength 600 2
+  - name: The Warden
+    boss: true
+    rally: true
+    pause: 0s
+    mobs:
+      - {mob: warden, count: 1, tier: 5, name: The Warden, pen: 0}
+    phases:
+      - at: 0s
+        callout: The Warden rises from the deep dark.
