@@ -12,3 +12,6 @@ node_modules
 /mcmap
 # A build/ rule in a developer's global gitignore must not hide this package.
 !/minecraft/crew-control/internal/build/
+# go build output for the single main package
+/minecraft/crew-control/crew-control
+/minecraft/crew-control/cmd/crew-control/crew-control
