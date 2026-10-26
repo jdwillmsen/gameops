@@ -89,6 +89,52 @@ test('clicking a bar opens its events', async () => {
   p.ui.unmount();
 });
 
+test('repeated drag steps keep panning and the release does not open the side panel', async () => {
+  const p = page({ answer: history });
+  await p.mount();
+  one(p.stage, 'tl-svg').dispatch('keydown', { key: '+' });
+  one(p.stage, 'tl-svg').dispatch('keydown', { key: '+' });
+  const first = one(p.stage, 'tl-svg');
+  first.dispatch('pointerdown', { clientX: 400 });
+  const ticks = () => byClass(p.stage, 'tl-grid').map(t => t.getAttribute('x1')).join();
+  const before = ticks();
+  first.dispatch('pointermove', { clientX: 330 });
+  const second = one(p.stage, 'tl-svg');
+  assert.notEqual(second, first);
+  const mid = ticks();
+  second.dispatch('pointermove', { clientX: 250 });
+  const third = one(p.stage, 'tl-svg');
+  assert.notEqual(third, second);
+  assert.notEqual(ticks(), mid);
+  assert.notEqual(mid, before);
+  third.dispatch('pointerup', { clientX: 300 });
+  assert.equal(one(p.stage, 'tl-side').hidden, true);
+  p.ui.unmount();
+});
+
+test('arrow keys keep working after a repaint because focus returns to the chart', async () => {
+  const p = page({ answer: history });
+  await p.mount();
+  let svg = one(p.stage, 'tl-svg');
+  svg.focus();
+  svg.dispatch('keydown', { key: '+' });
+  one(p.stage, 'tl-svg').dispatch('keydown', { key: '+' });
+  svg = one(p.stage, 'tl-svg');
+  assert.equal(doc.activeElement, svg);
+  const seen = new Set();
+  for (let i = 0; i < 3; i++) {
+    const e = svg.dispatch('keydown', { key: 'ArrowLeft' });
+    assert.equal(e.defaultPrevented, true);
+    const next = one(p.stage, 'tl-svg');
+    assert.notEqual(next, svg);
+    assert.equal(doc.activeElement, next);
+    svg = next;
+    seen.add(byClass(p.stage, 'tl-grid').map(t => t.getAttribute('x1')).join());
+  }
+  assert.ok(seen.size >= 2);
+  p.ui.unmount();
+});
+
 test('a 401 from the history ends the session instead of drawing', async () => {
   const p = page({ answer: () => ({ ok: false, status: 401, data: { error: 'signed_out' } }) });
   await p.mount();

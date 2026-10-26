@@ -265,56 +265,63 @@ export function initTimeline(host) {
       }
     });
     legendFor([...used], [...markKinds]);
+    const hadFocus = chart && chart.el.parentNode === body && document.activeElement === chart.el;
     body.replaceChildren(root);
-    bindChart(root, x, plot);
+    chart = { el: root, plot };
+    if (hadFocus) root.focus();
   }
 
   // ---- interaction ----
 
-  function bindChart(svgEl, x, plot) {
-    const frac = ev => {
-      const r = svgEl.getBoundingClientRect();
-      return Math.min(1, Math.max(0, (ev.clientX - r.left - GUTTER) / plot));
-    };
-    svgEl.addEventListener('wheel', ev => {
-      ev.preventDefault();
-      zoom(ev.deltaY < 0 ? 0.7 : 1 / 0.7, frac(ev));
-    });
-    let drag = null;
-    svgEl.addEventListener('pointerdown', ev => {
-      drag = { x: ev.clientX, view: view, moved: false };
-    });
-    svgEl.addEventListener('pointermove', ev => {
-      if (drag) {
-        const dx = ev.clientX - drag.x;
-        if (Math.abs(dx) > 3) drag.moved = true;
-        if (drag.moved) {
-          const ms = -(dx / plot) * (drag.view[1] - drag.view[0]);
-          view = panRange(drag.view, ms, fetched.range);
-          paintChart();
-          return;
-        }
-      }
-      showTip(ev);
-    });
-    const end = () => { drag = null; };
-    svgEl.addEventListener('pointerup', ev => {
-      const wasDrag = drag && drag.moved;
-      end();
-      if (!wasDrag) pick(ev.target);
-    });
-    svgEl.addEventListener('pointerleave', () => { end(); tip.hidden = true; });
-    svgEl.addEventListener('keydown', ev => {
-      if (ev.key === '+' || ev.key === '=') zoom(0.5, 0.5);
-      else if (ev.key === '-') zoom(2, 0.5);
-      else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
-        view = panRange(view, (ev.key === 'ArrowLeft' ? -1 : 1) * (view[1] - view[0]) * 0.25, fetched.range);
+  // Listeners sit on the stable body, not the svg: every pan step replaces
+  // the svg, and a drag or focus held on the old one would be lost mid-gesture.
+  let chart = null; // { el, plot } of the svg currently on screen
+  let drag = null;
+  const live = ev => chart && chart.el.parentNode === body && chart.el.contains(ev.target);
+  const frac = ev => {
+    const r = chart.el.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (ev.clientX - r.left - GUTTER) / chart.plot));
+  };
+  body.addEventListener('wheel', ev => {
+    if (!live(ev)) return;
+    ev.preventDefault();
+    zoom(ev.deltaY < 0 ? 0.7 : 1 / 0.7, frac(ev));
+  });
+  body.addEventListener('pointerdown', ev => {
+    if (live(ev)) drag = { x: ev.clientX, view, moved: false };
+  });
+  body.addEventListener('pointermove', ev => {
+    if (!live(ev)) return;
+    if (drag) {
+      const dx = ev.clientX - drag.x;
+      if (Math.abs(dx) > 3) drag.moved = true;
+      if (drag.moved) {
+        const ms = -(dx / chart.plot) * (drag.view[1] - drag.view[0]);
+        view = panRange(drag.view, ms, fetched.range);
+        tip.hidden = true;
         paintChart();
-      } else return;
-      ev.preventDefault();
-      ev.stopPropagation();
-    });
-  }
+        return;
+      }
+    }
+    showTip(ev);
+  });
+  body.addEventListener('pointerup', ev => {
+    const wasDrag = drag && drag.moved;
+    drag = null;
+    if (live(ev) && !wasDrag) pick(ev.target);
+  });
+  body.addEventListener('pointerleave', () => { drag = null; tip.hidden = true; });
+  body.addEventListener('keydown', ev => {
+    if (!live(ev)) return;
+    if (ev.key === '+' || ev.key === '=') zoom(0.5, 0.5);
+    else if (ev.key === '-') zoom(2, 0.5);
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') {
+      view = panRange(view, (ev.key === 'ArrowLeft' ? -1 : 1) * (view[1] - view[0]) * 0.25, fetched.range);
+      paintChart();
+    } else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
 
   const itemOf = node => {
     const i = node && node.getAttribute && node.getAttribute('data-i');
