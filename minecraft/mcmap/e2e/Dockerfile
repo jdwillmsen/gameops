@@ -3,7 +3,7 @@
 # with the libraries it needs, so the two cannot drift: the tag names the
 # version in package.json and the digest is what actually pins it. Moving one
 # means moving both.
-FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
 WORKDIR /opt/mcmap-e2e
 
 # Built from the repo root, like every component's image.
