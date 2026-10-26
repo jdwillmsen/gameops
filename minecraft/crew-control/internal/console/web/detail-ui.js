@@ -8,6 +8,7 @@ import {
   ARMOUR_NAMES, ARMOUR_CAPTIONS, freshness, effectLabel, effectTime, slotLabel, inventoryRows, armourSlots, iconLabel,
   chestState, nextSlot, iconStyle, iconRect, ageText, durability, contentsText, slotTitle,
 } from './detail.js';
+import { createWhyPanel } from './insights-ui.js';
 
 // A page reads its own answer this often; the save behind it is itself read
 // no more than every 5 s, so anything shorter only burns the round trip.
@@ -30,6 +31,7 @@ const unitPath = (id, suffix) => `/units/${encodeURIComponent(id)}${suffix}`;
 
 // host: { statuses, state(), operator(), api(method, path, body) }
 export function initDetail(host) {
+  const why = createWhyPanel();
   const root = el('section', { className: 'dt' });
   root.setAttribute('aria-label', 'Unit detail');
   root.setAttribute('data-theme', 'dark');
@@ -432,6 +434,7 @@ export function initDetail(host) {
 
   return {
     mount(into, id) {
+      why.stop();
       root.remove();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
@@ -442,6 +445,10 @@ export function initDetail(host) {
       sheetRead = null;
       forget();
       into.append(root);
+      if (unit) {
+        into.append(why.el);
+        why.start(unit);
+      }
       if (!unit) {
         paintNote('No unit is picked.');
         return;
@@ -460,6 +467,7 @@ export function initDetail(host) {
       token++;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
+      why.stop();
       root.remove();
     },
     // A session change changes what the route answers, so an open page is
