@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -320,6 +321,20 @@ func TestPostgresQueryPlansUseTheIndexes(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `ANALYZE `+eventTable); err != nil {
 		t.Fatal(err)
 	}
+	// A sampled ANALYZE makes the planner's pick between a bitmap scan plus
+	// sort and an ordered index scan a near coin flip for a unit holding a
+	// twentieth of the table. What is asserted is that the index can serve
+	// the order with no sort, so the alternatives are taken off the table.
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	for _, set := range []string{`SET enable_bitmapscan = off`, `SET enable_seqscan = off`} {
+		if _, err := conn.Exec(ctx, set); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cur := `(now(), 9223372036854775807)`
 	for name, where := range map[string]string{
 		"unit":          `unit = 'crew-07'`,
@@ -330,7 +345,7 @@ func TestPostgresQueryPlansUseTheIndexes(t *testing.T) {
 		"unit paged":    `unit = 'crew-07' AND (at, id) < ` + cur,
 	} {
 		for _, dir := range []string{"DESC", "ASC"} {
-			plan := explain(t, s, `SELECT `+eventColumns+` FROM `+eventTable+` WHERE `+where+
+			plan := explain(t, conn, `SELECT `+eventColumns+` FROM `+eventTable+` WHERE `+where+
 				` ORDER BY at `+dir+`, id `+dir+` LIMIT 1001`)
 			if strings.Contains(plan, "Seq Scan") || strings.Contains(plan, "Sort") {
 				t.Errorf("%s %s: plan scans or sorts:\n%s", name, dir, plan)
@@ -347,9 +362,11 @@ func TestPostgresQueryPlansUseTheIndexes(t *testing.T) {
 	}
 }
 
-func explain(t *testing.T, s *Postgres, query string) string {
+func explain(t *testing.T, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, query string) string {
 	t.Helper()
-	rows, err := s.pool.Query(ctx, `EXPLAIN `+query)
+	rows, err := q.Query(ctx, `EXPLAIN `+query)
 	if err != nil {
 		t.Fatal(err)
 	}
