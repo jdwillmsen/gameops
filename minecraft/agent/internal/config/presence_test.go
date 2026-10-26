@@ -133,3 +133,37 @@ func TestPresenceErrorsNeverCarryATokenValue(t *testing.T) {
 		t.Errorf("error = %v, want a refusal that does not include the token", err)
 	}
 }
+
+func TestPresenceControllers(t *testing.T) {
+	cases := []struct {
+		name, value string
+		want        []string
+		wantErr     string
+	}{
+		{"unset grants nobody", "", nil, ""},
+		{"one xuid", "2535428238413680", []string{"2535428238413680"}, ""},
+		{"list is trimmed", " 1, 2 ", []string{"1", "2"}, ""},
+		{"a gamertag is refused", "tommy1234516", nil, "not an XUID"},
+		{"a duplicate is refused", "1,1", nil, "listed twice"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			clearEnv(t)
+			setRequired(t)
+			t.Setenv("PRESENCE_CONTROLLERS", c.value)
+			cfg, err := Load()
+			if c.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("err = %v, want it to contain %q", err, c.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if strings.Join(cfg.PresenceControllers, ",") != strings.Join(c.want, ",") {
+				t.Errorf("PresenceControllers = %v, want %v", cfg.PresenceControllers, c.want)
+			}
+		})
+	}
+}

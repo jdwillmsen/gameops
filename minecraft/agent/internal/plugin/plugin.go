@@ -397,11 +397,32 @@ type Registry struct {
 	mu       sync.RWMutex
 	plugins  []Plugin
 	commands map[string]Command
+	// grants lets named actors run a command their permission level does not
+	// reach, keyed by command then XUID. It never raises the level itself.
+	grants map[string]map[string]bool
 }
 
 // NewRegistry builds an empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{commands: make(map[string]Command)}
+}
+
+// Grant lets each of xuids run command whatever their permission level. It
+// is for handing one command to one person without making them an operator,
+// and it covers only the command named.
+func (r *Registry) Grant(command string, xuids []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.grants == nil {
+		r.grants = make(map[string]map[string]bool)
+	}
+	key := commandKey(command)
+	if r.grants[key] == nil {
+		r.grants[key] = make(map[string]bool, len(xuids))
+	}
+	for _, x := range xuids {
+		r.grants[key][x] = true
+	}
 }
 
 // commandKey normalises a command name into the form the registry keys on,
@@ -485,12 +506,13 @@ var ErrCommandTimedOut = errors.New("command timed out")
 func (r *Registry) Dispatch(ctx context.Context, pctx *Context, name string, inv Invocation) (reply string, err error) {
 	r.mu.RLock()
 	cmd, ok := r.commands[commandKey(name)]
+	granted := r.grants[commandKey(name)][inv.ActorXUID]
 	r.mu.RUnlock()
 
 	if !ok {
 		return "", ErrUnknownCommand
 	}
-	if inv.ActorPermission < cmd.Permission {
+	if inv.ActorPermission < cmd.Permission && !granted {
 		return "", ErrPermissionDenied
 	}
 

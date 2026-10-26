@@ -274,6 +274,8 @@ func main() {
 	playerStore = withPlayerEvents(playerStore, sources.NewEvents(ctx, deliverer, log))
 
 	registry := plugin.NewRegistry()
+	registry.Grant("park", cfg.PresenceControllers)
+	registry.Grant("unpark", cfg.PresenceControllers)
 	extraPlugins := []plugin.Plugin{presenceRT.plugin}
 	// A nil interface, not a nil *WorldDamage: the drain asks it nothing at
 	// all when there is no map to ask.

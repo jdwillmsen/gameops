@@ -32,6 +32,8 @@ type PresenceToken struct {
 
 // presenceID is the shape of an actor id, a group and a token name. All
 // three are printed into set_by, audit rows and metric labels.
+var xuidShape = regexp.MustCompile(`^[0-9]{1,32}$`)
+
 var presenceID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 // minPresenceToken is short enough for any generated secret and long enough
@@ -61,6 +63,24 @@ func loadPresence() ([]PresenceActor, []PresenceToken, string, error) {
 		return nil, nil, "", err
 	}
 	return actors, tokens, self, nil
+}
+
+// loadPresenceControllers reads PRESENCE_CONTROLLERS, a comma list of XUIDs.
+// A malformed entry is refused rather than skipped: a typo would otherwise
+// leave the person it was meant for without the grant and no sign why.
+func loadPresenceControllers() ([]string, error) {
+	list := commaList("PRESENCE_CONTROLLERS")
+	seen := make(map[string]bool, len(list))
+	for _, x := range list {
+		switch {
+		case !xuidShape.MatchString(x):
+			return nil, fmt.Errorf("PRESENCE_CONTROLLERS: %q is not an XUID (digits only)", x)
+		case seen[x]:
+			return nil, fmt.Errorf("PRESENCE_CONTROLLERS: %s is listed twice", x)
+		}
+		seen[x] = true
+	}
+	return list, nil
 }
 
 // strictJSON decodes name's value into v, leaving v alone when it is unset.
