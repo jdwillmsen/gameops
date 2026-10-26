@@ -3,6 +3,7 @@ import { initSquads } from '/static/squad.js';
 import { initAlerts } from '/static/alerts.js';
 import { initOverview } from '/static/overview-ui.js';
 import { initDetail } from '/static/detail-ui.js';
+import { initContainers } from '/static/containers-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
 import { initExplorer } from '/static/explorer-ui.js';
 import { initLedgerGraph } from '/static/graph/ledger-ui.js';
@@ -608,6 +609,8 @@ const ledgerGraph = initLedgerGraph({
   setOperator: next => setOperator(next),
 });
 
+const containers = initContainers({ pickUnit: id => pickUnit(id) });
+
 function setSquadOpen(open) {
   squadOpen = open;
   squads.setOpen(open);
@@ -653,7 +656,7 @@ function buildJobs() {
   };
 
   const tabs = el('nav', { id: 'jobs-tabs' });
-  for (const [id, label] of [['jobs', 'Jobs'], ['places', 'Places']]) {
+  for (const [id, label] of [['jobs', 'Jobs'], ['places', 'Places'], ['containers', 'Chests']]) {
     const b = el('button', { type: 'button', textContent: label, id: `tab-${id}` });
     b.addEventListener('click', () => { tab = id; say(''); renderJobs(); loadPlaces(true); });
     tabs.append(b);
@@ -715,8 +718,8 @@ function buildJobs() {
   });
   const placesView = el('section', { id: 'places-view' }, placeList, create);
 
-  const root = el('div', { id: 'jobs-root' }, el('h2', { textContent: 'Jobs' }), tabs, msg, jobsView, placesView);
-  return { root, tabs, jobsView, placesView, list, placeList, placeSel, rows, post, say };
+  const root = el('div', { id: 'jobs-root' }, el('h2', { textContent: 'Jobs' }), tabs, msg, jobsView, placesView, containers.root);
+  return { root, tabs, jobsView, placesView, containersView: containers.root, list, placeList, placeSel, rows, post, say };
 }
 
 function jobRow(job) {
@@ -764,6 +767,7 @@ function renderJobs() {
   }
   jobsUI.jobsView.hidden = tab !== 'jobs';
   jobsUI.placesView.hidden = tab !== 'places';
+  jobsUI.containersView.hidden = tab !== 'containers';
   for (const b of jobsUI.tabs.children) b.setAttribute('aria-pressed', String(b.id === `tab-${tab}`));
   jobsUI.list.replaceChildren(...(jobs.length ? jobs.map(jobRow) : [el('li', { className: 'empty', textContent: 'no jobs' })]));
 }
@@ -806,10 +810,11 @@ function placeRow(p) {
 
 function renderPlaces() {
   if (!jobsUI) return;
+  containers.paint(places);
   jobsUI.placeList.replaceChildren(...(places.length ? places.map(placeRow) : [el('li', { className: 'empty', textContent: 'no places' })]));
 }
 
-setInterval(() => { if (operator && jobsOpen && tab === 'places' && document.visibilityState === 'visible') loadPlaces(); }, 30000);
+setInterval(() => { if (operator && jobsOpen && (tab === 'places' || tab === 'containers') && document.visibilityState === 'visible') loadPlaces(); }, 10000);
 
 $('jobs-toggle').addEventListener('click', () => setJobsOpen(!jobsOpen));
 
