@@ -124,11 +124,10 @@ func (d *Director) repairFloor() error {
 // shared with the lab's crew units, whose own block and selector errors land in
 // the same reply window, so any other ERROR line is not the fill's.
 var fillFailures = []string{
-	"cannot place block outside of the world",
+	"outside of the world",
 	"the block couldn't be placed",
 	"too many blocks",
 	"syntax error",
-	"unloaded",
 }
 
 // fillErrorLine reports the first fill failure the console logged. Bedrock
