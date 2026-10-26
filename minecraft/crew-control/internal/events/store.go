@@ -96,8 +96,10 @@ type Query struct {
 	Outcome    string
 	SessionID  string
 	CauseRef   int64
-	Since      time.Time
-	Until      time.Time
+	// JobID selects the events that name one job.
+	JobID *uuid.UUID
+	Since time.Time
+	Until time.Time
 	// Limit bounds the page; a store may lower it, never raise it.
 	Limit int
 	// Cursor continues after (At, ID) in the query's own direction.
