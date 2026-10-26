@@ -58,6 +58,10 @@ func (a *API) get(w http.ResponseWriter, r *http.Request) {
 		}
 		win = d
 	}
+	if !signed {
+		// Whole minutes, so window=61s and window=62s share one cache entry.
+		win = win.Truncate(minWindow)
+	}
 	scan := func() (anon.Reply, bool) { return a.scan(r, win) }
 	if signed {
 		rep, _ := scan()

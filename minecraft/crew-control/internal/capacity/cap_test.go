@@ -98,3 +98,15 @@ func TestPageCapIsReported(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body)
 	}
 }
+
+func TestAnonymousWindowsInTheSameMinuteShareOneScan(t *testing.T) {
+	st := &countingStore{Store: events.NewMemory()}
+	mux, _ := serve(t, st, false)
+	code(mux, "/v1/capacity?window=61s")
+	n := st.queries
+	code(mux, "/v1/capacity?window=62s&junk=1")
+	code(mux, "/v1/capacity?junk=2&window=119s")
+	if st.queries != n {
+		t.Fatalf("queries = %d, want %d", st.queries, n)
+	}
+}

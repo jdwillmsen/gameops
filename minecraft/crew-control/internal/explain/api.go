@@ -78,13 +78,32 @@ func (a *API) explain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	unit := r.PathValue("id")
+	q := r.URL.Query()
+	if !signed {
+		// Whole minutes, so a caller varying a bound by seconds shares one
+		// cache entry instead of forcing a scan per request.
+		if q.Get("from") != "" {
+			from = from.Truncate(time.Minute)
+		}
+		if q.Get("to") != "" {
+			to = to.Truncate(time.Minute)
+		}
+	}
 	scan := func() (anon.Reply, bool) { return a.scan(r, unit, from, to) }
 	if signed {
 		rep, _ := scan()
 		anon.Write(w, rep)
 		return
 	}
-	anon.Write(w, a.cache.Do(unit+"?"+r.URL.RawQuery, scan))
+	fromKey, toKey := "default", "now"
+	if q.Get("from") != "" {
+		fromKey = from.Format(time.RFC3339)
+	}
+	if q.Get("to") != "" {
+		toKey = to.Format(time.RFC3339)
+	}
+	key := unit + "|" + fromKey + "|" + toKey
+	anon.Write(w, a.cache.Do(key, scan))
 }
 
 // scan reads the unit's events and explains them. The second result says the
