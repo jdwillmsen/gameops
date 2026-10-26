@@ -16,7 +16,8 @@ from PIL import Image
 
 vox = np.load(sys.argv[1])
 out = sys.argv[2]
-meta = json.load(open(os.path.join(os.path.dirname(sys.argv[1]), "mats.json")))
+mats_path = next((a.split("=", 1)[1] for a in sys.argv[3:] if a.startswith("--mats=")), os.path.join(os.path.dirname(sys.argv[1]), "mats.json"))
+meta = json.load(open(mats_path))
 mats = meta["mats"]
 os.makedirs(out, exist_ok=True)
 Y0, X0, Z0, CX, CZ = meta["y0"], meta["x0"], meta["z0"], meta["cx"], meta["cz"]

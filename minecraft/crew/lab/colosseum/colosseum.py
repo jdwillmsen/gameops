@@ -967,7 +967,8 @@ def decor_commands():
         for yi, zi, xi in np.argwhere(vox == mid):
             x, y, z = X0 + int(xi), Y0 + int(yi), Z0 + int(zi)
             cmds.append(f"summon armor_stand {x}.5 {y} {z}.5")
-            sel = f"@e[type=armor_stand,x={x}.5,y={y},z={z}.5,r=0.8]"
+            cmds.append(f"tag @e[type=armor_stand,x={x}.5,y={y},z={z}.5,r=0.4] add colo_stand")
+            sel = f"@e[type=armor_stand,tag=colo_stand,x={x}.5,y={y},z={z}.5,r=0.4]"
             for slot, item in zip(("slot.armor.head", "slot.armor.chest", "slot.armor.legs", "slot.armor.feet", "slot.weapon.mainhand"), GEAR[gear]):
                 cmds.append(f"replaceitem entity {sel} {slot} 0 {item} 1")
             vox[yi, zi, xi] = AIR
@@ -1111,7 +1112,7 @@ def compress():
     cmds.sort(key=lambda c: (c[0], c[1]))
     open(os.path.join(OUT, "build.cmds"), "w").write("\n".join(c[2] for c in cmds) + "\n")
     patch = "--against" in OPT
-    decor = [] if patch else [f"kill @e[type=armor_stand,x={X0},y={Y0},z={Z0},dx={W - 1},dy={H - 1},dz={D - 1}]"] + DECOR
+    decor = [] if patch else [f"kill @e[type=armor_stand,tag=colo_stand,x={X0},y={Y0},z={Z0},dx={W - 1},dy={H - 1},dz={D - 1}]"] + DECOR
     open(os.path.join(OUT, "decor.cmds"), "w").write("\n".join(decor) + ("\n" if decor else ""))
     if not patch:
         write_plan()
