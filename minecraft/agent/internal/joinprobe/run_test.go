@@ -2,7 +2,6 @@ package joinprobe
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,40 +12,58 @@ import (
 )
 
 func TestRunProbesImmediatelyAndRepeats(t *testing.T) {
-	var probes atomic.Int32
+	// A buffered channel, not an atomic counter: the arrival of a probe is
+	// both the count and the wake-up, so no poll loop with sleeps is needed.
+	probeArrived := make(chan struct{}, 4)
 	s := newFakeServer(t, samplePong, func(int32) []packet.Packet {
-		probes.Add(1)
+		select {
+		case probeArrived <- struct{}{}:
+		default:
+		}
 		return []packet.Packet{&packet.NetworkSettings{}}
 	})
+
+	// Ticks arrive on our say-so. That makes the moment Run's context ends
+	// relative to the ticks deterministic: cancel with no tick outstanding
+	// and Run cannot run one probe more, publish its failure, and leave that
+	// failure as the last thing recorded — what a wall-clock ticker did, on
+	// machines slow enough for a probe to outlast its interval.
+	ticks := make(chan time.Time)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		Run(ctx, s.addr(), 0, 50*time.Millisecond, logging.New("error"))
+		probeLoop(ctx, s.addr(), 0, ticks, logging.New("error"))
 		close(done)
 	}()
 
 	// The first probe must not wait for the first tick: a process that has
 	// just started and published nothing looks exactly like one that cannot
-	// reach the server.
-	deadline := time.After(3 * time.Second)
-	for probes.Load() < 3 {
-		select {
-		case <-deadline:
-			t.Fatalf("only %d probes in 3s, want the immediate one plus repeats", probes.Load())
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	// reach the server. No tick has gone out yet, so receiving one proves it.
+	waitFor(t, probeArrived, "the first probe")
+
+	ticks <- time.Time{}
+	waitFor(t, probeArrived, "the first repeated probe")
+
+	ticks <- time.Time{}
+	waitFor(t, probeArrived, "the second repeated probe")
 
 	cancel()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run did not return after its context was cancelled")
-	}
+	waitFor(t, done, "Run to return after cancellation")
 
 	if got := testutil.ToFloat64(joinable); got != 1 {
 		t.Errorf("joinable = %v after probing a healthy server, want 1", got)
+	}
+}
+
+// waitFor reports a hang only. Its timeout is far past what a healthy run
+// takes, so it never paces anything — the pacing comes from the ticks.
+func waitFor(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("%s never happened", what)
 	}
 }
