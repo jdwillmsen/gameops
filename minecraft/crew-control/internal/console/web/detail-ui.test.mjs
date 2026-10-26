@@ -148,6 +148,8 @@ function page(answers, { sheet = null } = {}) {
   const fetched = [];
   let operator = { id: 'owner' };
   globalThis.fetch = async url => {
+    // The Why panel reads its own route; this file checks the sheet reads.
+    if (String(url).includes('/explain')) return { ok: false, status: 404 };
     fetched.push(url);
     if (!sheet) return { ok: false, status: 404 };
     return { ok: true, status: 200, json: async () => sheet };

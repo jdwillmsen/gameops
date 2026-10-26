@@ -4,6 +4,7 @@
 // 2 s update writes the few cells that changed and never rebuilds the list.
 import { Sparkline, StatTile } from './charts/spark.js';
 import { isTyping } from './state.js';
+import { createInsightStrip } from './insights-ui.js';
 import {
   SAMPLE_MS, MAX_HEALTH, STATES, STATE_LABEL, SORTS, SORT_LABEL, DEFAULT_DIR, LEVELS,
   createBoard, sortRows, filterRows, emptyFilter, isFiltered, parseParams, formatParams, sinceLabel, moveFocus, nextAttention, trailLabels,
@@ -198,7 +199,8 @@ export function initOverview(host) {
   emptyClear.addEventListener('click', clearFilters);
   empty.append(emptyText, ' ', emptyClear);
 
-  root.append(tilesBox, bar, wrap);
+  const strip = createInsightStrip();
+  root.append(tilesBox, strip.el, bar, wrap);
 
   // ---- rows ----
 
@@ -567,6 +569,7 @@ export function initOverview(host) {
       painted = false;
       hovering = false;
       document.body.classList.add('view-fleet');
+      strip.start();
       render(true);
     },
     unmount() {
@@ -574,6 +577,7 @@ export function initOverview(host) {
       mounted = false;
       // A removed table never gets its pointerleave.
       hovering = false;
+      strip.stop();
       root.remove();
       document.body.classList.remove('view-fleet');
     },
