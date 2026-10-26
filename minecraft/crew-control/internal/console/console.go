@@ -9,7 +9,7 @@ import (
 
 // The explicit list keeps the node test files out of the binary.
 //
-//go:embed web/index.html web/signin.html web/signin.js web/signin-xbox.js web/enrol.js web/console.js web/state.js web/fleet.js web/ops.js web/squad.js web/alerts.js web/timeline.js web/timeline-ui.js web/explorer.js web/explorer-ui.js web/explorer.css web/overview.js web/overview-ui.js web/detail.js web/detail-ui.js web/containers.js web/containers-ui.js web/console.css web/overview.css web/detail.css web/containers.css web/alerts.css web/timeline.css web/charts/*.js web/charts/*.css web/charts/demo.html web/graph/*.js web/graph/*.css web/graph/demo.html
+//go:embed web/index.html web/signin.html web/signin.js web/signin-xbox.js web/enrol.js web/console.js web/state.js web/fleet.js web/ops.js web/feedview.js web/squad.js web/alerts.js web/timeline.js web/timeline-ui.js web/explorer.js web/explorer-ui.js web/explorer.css web/overview.js web/overview-ui.js web/detail.js web/detail-ui.js web/containers.js web/containers-ui.js web/console.css web/overview.css web/detail.css web/containers.css web/alerts.css web/timeline.css web/charts/*.js web/charts/*.css web/charts/demo.html web/graph/*.js web/graph/*.css web/graph/demo.html
 //go:embed web/dash.js web/dash-data.js web/dash-panels.js web/dash-ui.js web/dash.css
 var assets embed.FS
 
