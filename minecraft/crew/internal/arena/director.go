@@ -245,6 +245,9 @@ func (d *Director) Run() (Result, error) {
 	}
 	defer d.cleanupRun()
 	d.sleep(d.Settle)
+	if err := d.checkSpawnCells(waves); err != nil {
+		return result, err
+	}
 	if err := d.repairFloor(); err != nil {
 		return result, err
 	}
@@ -714,6 +717,51 @@ func (d *Director) waveSpawns(w Wave) ([]spawn, error) {
 		}
 	}
 	return out, nil
+}
+
+// checkSpawnCells fails the run before wave one when a spawn point the waves
+// use is not open air. A mob summoned inside a block suffocates within
+// seconds, which otherwise surfaces only as a wave that "counted none"; this
+// happens when the built arena no longer matches the layout.
+func (d *Director) checkSpawnCells(waves []Wave) error {
+	checked := map[Point]bool{}
+	for _, w := range waves {
+		spawns, err := d.waveSpawns(w)
+		if err != nil {
+			return err
+		}
+		for _, sp := range spawns {
+			if checked[sp.Point] {
+				continue
+			}
+			checked[sp.Point] = true
+			for _, dy := range []int{0, 1} {
+				cmd := fmt.Sprintf("testforblock %d %d %d air", sp.Point.X, sp.Point.Y+dy, sp.Point.Z)
+				out, err := d.exec(cmd)
+				if err != nil {
+					return err
+				}
+				at := fmt.Sprintf("%d,%d,%d", sp.Point.X, sp.Point.Y+dy, sp.Point.Z)
+				if line, bad := blockMismatchLine(out, at); bad {
+					return fmt.Errorf("arena: wave %q spawns at %d %d %d but the cell is not open air (%s); rebuild the arena with arena.sh build",
+						w.Name, sp.Point.X, sp.Point.Y, sp.Point.Z, line)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// blockMismatchLine finds the console's testforblock failure for one block in
+// a reply. Any other reply, including an empty one, is not a verdict, and
+// failures of other blocks are another session's.
+func blockMismatchLine(out, at string) (string, bool) {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "The block at "+at+" ") && strings.Contains(line, "(expected:") {
+			return strings.TrimSpace(line), true
+		}
+	}
+	return "", false
 }
 
 func (d *Director) spawnWaveMob(s spawn) error {
