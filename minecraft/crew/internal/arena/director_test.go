@@ -1491,3 +1491,44 @@ func TestBossBeforeTheFinaleDoesNotEndTheRun(t *testing.T) {
 		t.Error("the finale never spawned after the first boss fell")
 	}
 }
+
+func TestFillErrorLineJudgesOnlyFillFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{"fill outside the world", "[ERROR] Cannot place blocks outside of the world", true},
+		{"single block outside the world", "[ERROR] Cannot place block outside of the world", true},
+		{"too many blocks", "[ERROR] Too many blocks in the specified area", true},
+		{"crew unit selector miss", "[ERROR] No targets matched selector", false},
+		{"crew unit block mismatch", "[ERROR] The block at 6,67,-650 is Sticky Piston Arm Collision (expected: Stone Bricks).", false},
+		{"empty replace", "[ERROR] 0 blocks filled", false},
+		{"clean", "[INFO] 12 blocks filled", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, got := fillErrorLine(tt.out); got != tt.want {
+				t.Errorf("fillErrorLine(%q) = %v, want %v", tt.out, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunWaitsForTheChunksBeforeTheFirstFill(t *testing.T) {
+	elapsed := func(settle time.Duration) time.Duration {
+		clock := newFakeClock()
+		s := newSim()
+		f := &FakeConsole{Respond: s.Exec}
+		d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), clock)
+		d.Settle = settle
+		start := clock.Now()
+		if _, err := d.Run(); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		return clock.Now().Sub(start)
+	}
+	if got := elapsed(25*time.Second) - elapsed(0); got < 25*time.Second {
+		t.Errorf("settle added %v, want 25s", got)
+	}
+}
