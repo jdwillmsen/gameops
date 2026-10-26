@@ -28,12 +28,14 @@ crew-control; it never calls them to command them.
 | `CREW_PLACES` | unset | JSON list of named chests and areas, `[{"id","name","kind","box":{"min":{x,y,z},"max":{x,y,z}},"items":[]}]`; seeded at start, replacing earlier seeded places but never ones added by hand. `[]` removes every seeded place; unset or blank seeds nothing |
 | `CREW_WORLD_DB` | unset | The lab world's `db` directory (the LevelDB inside the world folder), read-only behind `GET /units/{id}/detail`. Unset, the route still answers and says the save is `off` |
 | `CREW_WORLD_WORK` | `/tmp/crew-worldview` | Where a read of the world builds its view; writable. On the world's own volume a read links its files, elsewhere (or if the world is mounted read-only) it copies them |
+| `CREW_ALERTS` | unset | JSON object of alert thresholds, see [Alerts](#alerts); unset keeps the defaults, an unknown key or bad value stops the start |
 | `CREW_WORLD_EVERY` | `5s` | Least time between reads of the world save; the detail answer is cached to match |
 
 ## Routes
 
 - `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) or the job graph (`?view=jobs&job=<id>`); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
+- `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) need an operator session
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
@@ -58,6 +60,50 @@ Any other path, method, unknown unit or unclean path under `/units/` gets 404
 without an upstream request. Only the `r` query (1 to 3 digits) and the `wire` query (1 or 2
 digits, the camera format the page asks for) are forwarded, and only on `ws`.
 Cookies, `Authorization` and client `X-Forwarded-*` headers are dropped.
+
+## Alerts
+
+Rules run in crew-control on every poll and raise one alert per (rule, unit),
+so a condition that stays true is one alert, not one per poll. An alert is
+`firing` until its condition clears, then `resolved`, and a resolved alert is
+dropped from the list after 10 minutes. A condition that comes back fires a
+new alert, which needs a new acknowledgement. Alerts are in memory only: a
+restart forgets acknowledgements and mutes, and whatever is still wrong fires
+again on the first poll.
+
+| Rule | Severity | Fires when | Clears when |
+| --- | --- | --- | --- |
+| `unit_died` | crit | the unit is dead | it respawns |
+| `unit_stuck` | warn | the unit has been in the stuck state for `stuck_for` (the poller marks a task stuck after 90 s without progress or movement) | the unit makes progress, finishes or drops the task |
+| `task_failures` | crit | `failures` tasks failed in a row | a task finishes done |
+| `low_food` | warn | hunger is known and at or under `hunger_below` | hunger is above it, or unknown |
+| `unit_silent` | warn | the unit has been unreachable for `silent_for` | the unit answers a poll |
+
+`CREW_ALERTS` sets the thresholds; every key is optional:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `stuck_for` | `0s` | extra time in the stuck state before alerting; `0s` alerts on the poll that flags it |
+| `failures` | `3` | consecutive failed tasks, at least 1 |
+| `hunger_below` | `6` | hunger value, 0 to 20 |
+| `silent_for` | `2m` | unreachable time, at least `1s` |
+| `mute_max` | `24h` | longest single mute, at least `1m` |
+
+Death, a low-food reading and a stuck flag alert on the poll that sees them,
+one second after the unit reports it. A unit that goes quiet is detected by
+failed polls, not by missing events: an idle unit legitimately emits none.
+
+The console shows them behind the **Alerts** bar button (Shift-A) with an
+unread count for firing alerts that are neither acknowledged nor muted, and a
+toast when a new one fires. The panel lists severity, unit, rule, and age,
+and filters by firing/resolved and severity. Anyone can read it; **Ack** and
+**Mute** (15 minutes, 1 hour, 8 hours, or Unmute) need a sign-in. A muted
+alert stays listed but is neither counted nor toasted, and the mute holds if
+the alert resolves and fires again before it ends.
+
+An outbound webhook is deliberately not built. The extension point is the
+engine's `Subscribe` signal plus `List`: a pusher watches for alerts whose
+`since` it has not sent and posts them, so it needs no change to the rules.
 
 ## Unit detail
 
