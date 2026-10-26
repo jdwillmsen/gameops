@@ -736,15 +736,8 @@ func (d *Director) checkSpawnCells(waves []Wave) error {
 			}
 			checked[sp.Point] = true
 			for _, dy := range []int{0, 1} {
-				cmd := fmt.Sprintf("testforblock %d %d %d air", sp.Point.X, sp.Point.Y+dy, sp.Point.Z)
-				out, err := d.exec(cmd)
-				if err != nil {
+				if err := d.checkAirAt(w.Name, sp.Point.X, sp.Point.Y+dy, sp.Point.Z); err != nil {
 					return err
-				}
-				at := fmt.Sprintf("%d,%d,%d", sp.Point.X, sp.Point.Y+dy, sp.Point.Z)
-				if line, bad := blockMismatchLine(out, at); bad {
-					return fmt.Errorf("arena: wave %q spawns at %d %d %d but the cell is not open air (%s); rebuild the arena with arena.sh build",
-						w.Name, sp.Point.X, sp.Point.Y, sp.Point.Z, line)
 				}
 			}
 		}
@@ -752,16 +745,30 @@ func (d *Director) checkSpawnCells(waves []Wave) error {
 	return nil
 }
 
-// blockMismatchLine finds the console's testforblock failure for one block in
-// a reply. Any other reply, including an empty one, is not a verdict, and
-// failures of other blocks are another session's.
-func blockMismatchLine(out, at string) (string, bool) {
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "The block at "+at+" ") && strings.Contains(line, "(expected:") {
-			return strings.TrimSpace(line), true
+// checkAirAt asks the console about one block and retries a reply that had
+// no verdict for it: the console is asynchronous, and a column in a chunk
+// that is still loading answers nothing usable. After the retries the run
+// goes on, since a silent console is not proof of a blocked cell.
+func (d *Director) checkAirAt(wave string, x, y, z int) error {
+	at := fmt.Sprintf("%d,%d,%d", x, y, z)
+	for range 3 {
+		out, err := d.exec(fmt.Sprintf("testforblock %d %d %d air", x, y, z))
+		if err != nil {
+			return err
 		}
+		for _, line := range strings.Split(out, "\n") {
+			switch {
+			case strings.Contains(line, "The block at "+at+" ") && strings.Contains(line, "(expected:"):
+				return fmt.Errorf("arena: wave %q spawns at %d %d %d but the cell is not open air (%s); rebuild the arena with arena.sh build",
+					wave, x, y, z, strings.TrimSpace(line))
+			case strings.Contains(line, "found the block at "+at):
+				return nil
+			}
+		}
+		d.sleep(time.Second)
 	}
-	return "", false
+	d.logf("arena: no answer for the block at %s; spawn cell unchecked", at)
+	return nil
 }
 
 func (d *Director) spawnWaveMob(s spawn) error {
