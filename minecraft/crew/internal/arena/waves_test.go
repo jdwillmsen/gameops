@@ -34,8 +34,8 @@ func TestDefaultWavesShipFiveTiersAndTheGauntlet(t *testing.T) {
 			t.Errorf("tier %d is missing", tier)
 		}
 	}
-	if len(book.Waves) != 8 {
-		t.Errorf("%d waves, want 8", len(book.Waves))
+	if len(book.Waves) != 9 {
+		t.Errorf("%d waves, want 9", len(book.Waves))
 	}
 	last := book.Waves[len(book.Waves)-1]
 	if !last.Boss {
@@ -109,7 +109,7 @@ func TestUpToCapsByOpposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := []struct{ tier, waves int }{
-		{0, 8}, {1, 2}, {2, 3}, {3, 5}, {4, 7}, {5, 8},
+		{0, 9}, {1, 2}, {2, 3}, {3, 5}, {4, 7}, {5, 9},
 	}
 	for _, tt := range tests {
 		if got := len(book.UpTo(tt.tier)); got != tt.waves {
