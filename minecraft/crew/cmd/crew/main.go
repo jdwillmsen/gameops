@@ -94,12 +94,6 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	if cfg.Offline {
 		log.Warn("auth_offline", logging.Fields{"note": "no sign-in; only a server with online mode off accepts this unit"})
 	}
-	auth, err := resolveAuth(ctx, cfg, open)
-	if err != nil {
-		log.Error("auth_failed", logging.Fields{"error": err.Error()})
-		return 1
-	}
-
 	// The server collides with every block's real shape, not only the families
 	// shape models by hand.
 	shape.Fallback = blocktable.Boxes
@@ -111,6 +105,19 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
 	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
+	// Before anything that waits on the network: the liveness probe hits this
+	// server, and a unit whose sign-in or control-plane lookup is slow would
+	// otherwise be restarted before it ever answered. /readyz stays 503 until
+	// the unit is in the world.
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken, statusapi.WithFight(lf)), ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
+			stop()
+		}
+	}()
+	defer func() { _ = srv.Shutdown(context.Background()) }()
+
 	// SetSquad must precede the runner's first tick, and the client's
 	// goroutines are the unit's own, so they end with the signal context.
 	if sc := newSquadClient(cfg, tracker.Snapshot, logAdapter{log}); sc != nil {
@@ -132,14 +139,11 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	if cfg.ControlURL != nil {
 		go control.New(cfg.ControlURL, cfg.UnitID, cfg.ControlToken, runner, logAdapter{log}).Run(ctx)
 	}
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken, statusapi.WithFight(lf)), ReadHeaderTimeout: 5 * time.Second}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("status_api_failed", logging.Fields{"error": err.Error()})
-			stop()
-		}
-	}()
-	defer func() { _ = srv.Shutdown(context.Background()) }()
+	auth, err := resolveAuth(ctx, cfg, open)
+	if err != nil {
+		log.Error("auth_failed", logging.Fields{"error": err.Error()})
+		return 1
+	}
 
 	if cfg.JoinDelayS > 0 {
 		select {
