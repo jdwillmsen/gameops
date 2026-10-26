@@ -156,6 +156,18 @@ func (l *Lazy) Set(s Store) {
 	l.mu.Unlock()
 }
 
+// Connect installs the database store behind a Fallback already in place, or
+// as the whole store when there is none.
+func (l *Lazy) Connect(s Store) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if fb, ok := l.s.(*Fallback); ok {
+		fb.SetPrimary(s)
+		return
+	}
+	l.s = s
+}
+
 func (l *Lazy) get() (Store, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
