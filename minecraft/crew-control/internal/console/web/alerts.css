@@ -1,0 +1,16 @@
+#alerts-unread { background: var(--crit); color: #000; border-radius: 8px; padding: 0 5px; margin-left: 4px; font-size: 11px; }
+#alerts { width: 380px; flex: none; overflow-y: auto; padding: 10px; background: #1b1b1b; border-left: 1px solid #333; }
+#alerts[hidden] { display: none; }
+#alerts h2 { margin: 0 0 6px; font-size: 14px; }
+.al-filter { display: flex; gap: 6px; margin-bottom: 6px; }
+.al-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.al-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 2px; border-bottom: 1px solid #242424; border-left: 3px solid var(--warn); padding-left: 6px; }
+.al-row.crit { border-left-color: var(--crit); }
+.al-row.resolved, .al-row.muted, .al-row.acked { opacity: .6; }
+.al-row.resolved { border-left-color: var(--ok); }
+.al-sev { font-size: 11px; text-transform: uppercase; opacity: .8; }
+.al-unit { background: none; border: 0; padding: 0; font-weight: 600; }
+.al-text { flex: 1 1 100%; font-size: 12px; }
+.al-age, .al-status { font-size: 11px; opacity: .65; }
+.al-act { margin-left: auto; display: flex; gap: 4px; }
+@media (max-width: 720px) { #alerts { width: auto; max-height: 50%; border-left: 0; border-top: 1px solid #333; } }
