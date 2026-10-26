@@ -1,5 +1,6 @@
 import { initOps } from '/static/ops.js';
 import { initSquads } from '/static/squad.js';
+import { initAlerts } from '/static/alerts.js';
 import { initOverview } from '/static/overview-ui.js';
 import { initDetail } from '/static/detail-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
@@ -178,6 +179,7 @@ function onKey(ev) {
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
+  else if (ev.key === 'A') alertsUI.toggle();
   // The jobs view keeps Esc for its own layers, but only when the ops shell
   // has no overlay open; ops still answers the overlay first.
   else if (ev.key === 'Escape' && state.view === 'jobs' && !document.getElementById('overlay') && jobGraph.key(ev)) return;
@@ -316,6 +318,7 @@ function setOperator(op) {
   overview.onOperator();
   detail.onOperator(op);
   jobGraph.onOperator();
+  alertsUI.onSession();
   renderJobs();
   if (changed) reconnect();
 }
@@ -525,6 +528,8 @@ const ops = initOps({
 });
 
 const squads = initSquads({ statuses, focus: pickUnit });
+
+const alertsUI = initAlerts({ operator: () => operator, focus: pickUnit, api, setOperator: next => setOperator(next) });
 
 const overview = initOverview({
   statuses,
