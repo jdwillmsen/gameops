@@ -65,11 +65,52 @@ class CheckPacks(unittest.TestCase):
         self.edit(os.path.join("resource_pack", "manifest.json"), fn)
         self.assertFails("UUIDs reused")
 
-    def test_dependency_must_match_behaviour_header(self):
+    def test_dependency_must_match_resource_header(self):
         def fn(d):
             d["dependencies"][0]["uuid"] = "00000000-0000-4000-8000-000000000000"
+        self.edit(os.path.join("behavior_pack", "manifest.json"), fn)
+        self.assertFails("must depend on the resource pack header UUID")
+
+    def test_wrong_module_type(self):
+        def fn(d):
+            d["modules"][0]["type"] = "resources"
+        self.edit(os.path.join("behavior_pack", "manifest.json"), fn)
+        self.assertFails("must be 'data'")
+
+    def test_missing_min_engine_version(self):
+        def fn(d):
+            del d["header"]["min_engine_version"]
         self.edit(os.path.join("resource_pack", "manifest.json"), fn)
-        self.assertFails("must depend on the behaviour pack header UUID")
+        self.assertFails("min_engine_version")
+
+    def test_wrong_format_version(self):
+        def fn(d):
+            d["format_version"] = 1
+        self.edit(os.path.join("behavior_pack", "manifest.json"), fn)
+        self.assertFails("format_version must be 2")
+
+    def test_truncated_png_is_reported(self):
+        path = os.path.join(self.pack, "resource_pack", "textures", "entity", "training_dummy_brute.png")
+        with open(path, "rb") as f:
+            data = f.read()
+        with open(path, "wb") as f:
+            f.write(data[:45])
+        self.assertFails("truncated")
+
+    def test_any_of_filter_rejected(self):
+        def fn(d):
+            comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
+            f = comp["entity_types"][0]["filters"]
+            comp["entity_types"][0]["filters"] = {"all_of": [{"any_of": f["all_of"]}]}
+        self.edit(BP_ENTITY, fn)
+        self.assertFails("any_of")
+
+    def test_self_subject_rejected(self):
+        def fn(d):
+            comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
+            comp["entity_types"][0]["filters"]["all_of"][0]["subject"] = "self"
+        self.edit(BP_ENTITY, fn)
+        self.assertFails("subject 'other'")
 
     def test_identifier_mismatch(self):
         def fn(d):
