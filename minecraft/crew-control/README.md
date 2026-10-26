@@ -48,7 +48,7 @@ crew-control; it never calls them to command them.
 - `GET /v1/replay/positions?since=&until=[&unit=<id>][&limit=][&cursor=]`: recorded unit positions, oldest first, keyset-paged; signed-in, `Cache-Control: no-store`, 401 otherwise; see [Replay](#replay)
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
-- `GET /signin`: passkey sign-in; the **I have an invite** section takes an operator and invite code and enrols a passkey. `/signin#operator=<id>&invite=<code>` still works and prefills that form. The invite rides in the fragment so it never reaches a log, and is removed from the address bar on load
+- `GET /signin`: passkey sign-in; the **I have an invite** section takes an operator and invite code and enrols a passkey. `/signin#operator=<id>&invite=<code>` still works and prefills that form. The invite rides in the fragment so it never reaches a log, and is removed from the address bar on load. See [Signing in](#signing-in)
 - `GET /auth/methods`: `{"passkey":true,"xbox":<bool>}`, what the sign-in page offers. `GET /auth/xbox/start` and `GET /auth/xbox/callback`: the Xbox sign-in, only with it on; see [Signing in with Xbox](#signing-in-with-xbox)
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
@@ -182,6 +182,49 @@ milliseconds and coordinates to a hundredth of a block, oldest first;
 reads the events of the same window from `GET /v1/events?sort=asc`. It reads
 at most 40 position pages and 25 event pages and says so when a range was
 cut short.
+
+
+## Signing in
+
+The console header always says who is looking: **View only** with a *Sign in*
+link, or the operator's name with *Sign out*. Commands need a signed-in
+operator; everything else stays public.
+
+**Sessions.** A sign-in lasts 7 days from its last renewal and never more than
+30 days in all. `GET /auth/me` renews a session once less than half of it is
+left (the console asks on load, when the tab becomes visible again, and every 5
+minutes), answers `{"operator","expires"}` (`expires` is Unix seconds) and
+401 `signed_out` otherwise. The cookie is persistent, so it survives a reload
+and a browser restart, and is `Secure`, `HttpOnly` and `SameSite=Strict`.
+`POST /auth/logout` clears the cookie and records the session in
+`signed-out.json` under `DATA_DIR`, so a copied cookie stops working too, even
+after a restart. Removing an operator or a passkey still ends their sessions
+at the next request.
+
+**Failures.** Every refusal carries a code (`invite_refused`, `login_refused`,
+`ceremony_expired`, `passkey_limit`, `passkey_refused`, `slow_down`,
+`bad_body`, `bad_request`, `json_required`, `internal`) and the page turns it,
+or the browser's own rejection (`NotAllowedError`, `SecurityError`, ...), into
+a message and a next step: retry, ask the owner for an invite, or reload.
+A login the server refuses is always the same 401 `login_refused`, whatever
+the reason, so a stranger learns nothing; the reason is in the log as
+`login_refused` with a `reason`.
+
+**Log events** (never a challenge, credential id, invite or cookie value):
+`ceremony_started` (`kind`, and `operator` for an enrolment), `operator_enrolled`,
+`operator_login`, `login_refused`, `invite_refused`, `enrol_failed`,
+`login_failed`, and `client_ceremony_failed` (`kind`, `stage` begin, credential
+or finish, and the browser's error name) from the page's `POST /auth/report`,
+which is limited to 20 a minute for the whole server.
+
+**Test it.** `minecraft/crew-control/e2e/local.sh` builds crew-control, starts
+it with a made-up operator and invite, fronts it with a throwaway TLS
+certificate as `https://crew.test` and drives the sign-in page in Chromium
+with a virtual authenticator: view-only, no-passkey message, wrong invite,
+enrol, reload, cookie lifetime, sign-out (including replaying the copied
+cookie) and signing back in. It needs Go, Node, openssl and
+`npx playwright-core install chromium`. CI runs it on pull requests that touch
+this service. It uses no real passkey and no production secret.
 
 ## Unit detail
 

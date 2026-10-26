@@ -1,0 +1,40 @@
+name: crew-control e2e
+
+on:
+  pull_request:
+    paths:
+      - minecraft/crew-control/**
+      - minecraft/agent/pkg/**
+      - minecraft/pkg/**
+      - minecraft/internal/**
+      - .github/workflows/crew-control-e2e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crew-control-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signin:
+    name: crew-control sign-in (browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+      - name: install the browser
+        working-directory: minecraft/crew-control/e2e
+        run: |
+          npm ci --no-fund --no-audit
+          npx playwright-core install --with-deps chromium
+      - name: sign-in test
+        run: minecraft/crew-control/e2e/local.sh
