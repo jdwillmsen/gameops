@@ -32,6 +32,11 @@ func (l *Life) warriorMelee(ctx context.Context, a skill.Actuator, p act.Pose, e
 		return l.warriorApproach(ctx, a, p, e)
 	}
 
+	// A walk left over from before the unit got here is stale: resumed after
+	// the circling below has moved the unit, it would count every replan as
+	// lost progress and give up a mob the unit is standing beside.
+	l.chase = nil
+
 	if l.tick-l.lastAttack >= attackEvery {
 		l.lowerShield(a)
 		if w.role == RoleStriker && p.OnGround && l.tick >= w.critUntil && !l.arrowIncoming(p) {
