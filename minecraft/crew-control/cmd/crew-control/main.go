@@ -24,11 +24,14 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/alerts"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/capacity"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/detail"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explain"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explorer"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/heat"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/insight"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
@@ -155,6 +158,7 @@ func main() {
 	// Squad state is in-memory only and rebuilt from units' hellos, so
 	// unlike the work store it is ready the moment the process is.
 	squadStore := squad.NewStore()
+	insights := insight.NewTracker()
 
 	// No WriteTimeout: it would cut the camera websocket and the status
 	// stream, which are long-lived by design.
@@ -182,6 +186,9 @@ func main() {
 			events.NewAPI(eventLog).MountOperator(mux, operators)
 			explorer.NewAPI(explorer.StoreSource{Store: eventLog}, explorer.NewMemoryViews(), operators).Mount(mux)
 			heatmap.MountOperator(mux, operators, units.Has)
+			explain.NewAPI(eventLog).Mount(mux)
+			capacity.NewAPI(eventLog).Mount(mux)
+			insight.NewAPI(insights).Mount(mux, operators)
 			ledger.NewAPI(func() ledger.Ledger {
 				if l := world.Load(); l != nil {
 					return *l
@@ -210,6 +217,9 @@ func main() {
 
 	pollDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollDone) }()
+
+	insightDone := make(chan struct{})
+	go func() { insight.NewRunner(eventLog, insights).Run(ctx); close(insightDone) }()
 
 	recordDone := make(chan struct{})
 	go func() { recorder.Run(ctx); close(recordDone) }()
@@ -240,6 +250,7 @@ func main() {
 	}
 	<-pollDone
 	<-recordDone
+	<-insightDone
 	<-storeDone
 }
 
