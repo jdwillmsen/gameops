@@ -250,6 +250,23 @@ decode is skipped, as the map's reader skips it. The alternative is a
 console-bridge sidecar on the lab pod, as the main world has; it gives a
 consistent snapshot at the cost of a new component.
 
+### Inventory history
+
+Each poll compares a unit's item totals (summed over slots) with the last
+recorded ones; a difference is stored as one `inventory_changed` event in the
+event store, so it keeps the store's 30-day retention and needs no migration.
+`GET /v1/units/{id}/inventory/changes?days=N` (operator-only, 1 to 30, default
+7) answers the changes newest first and the net per item over the window; the
+unit detail page shows both.
+
+- A unit's first sight after a start is its baseline, so changes made while
+  crew-control was down are not recorded.
+- Changes within 30 s of the last recorded one fold into the next, so a unit
+  mining every poll costs at most two rows a minute.
+- `truncated: true` means the window held more than 5000 changes and the net
+  covers only the newest part.
+
+
 ## Operators
 
 A session is the `__Host-crew_session` cookie, signed with `session.key` and
