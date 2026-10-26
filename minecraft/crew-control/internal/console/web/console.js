@@ -439,7 +439,9 @@ function renderSession() {
     });
     box.replaceChildren(el('span', { className: 'who', textContent: operator.name || operator.id }), out, fail);
   } else if (authAvailable) {
-    box.replaceChildren(el('a', { href: '/signin', textContent: 'Sign in' }));
+    box.replaceChildren(
+      el('span', { className: 'who view-only', textContent: 'View only', title: 'Commands need a signed-in operator' }),
+      el('a', { href: '/signin', textContent: 'Sign in' }));
   } else {
     box.replaceChildren();
   }

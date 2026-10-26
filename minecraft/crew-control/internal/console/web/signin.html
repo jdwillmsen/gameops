@@ -10,7 +10,8 @@
 <body class="signin">
 <main id="card">
   <h1>Crew control</h1>
-  <p id="intro">Sign in with your passkey to command the units.</p>
+  <p id="who" role="status" hidden></p>
+  <p id="intro">Sign in with your passkey to command the units. Without signing in the console is view-only.</p>
   <button id="login" type="button">Sign in with passkey</button>
   <details id="enrol">
     <summary>I have an invite</summary>
@@ -23,7 +24,9 @@
   <form id="login-xbox" action="/auth/xbox/start" method="get" hidden>
     <button type="submit">Sign in with Xbox</button>
   </form>
-  <p id="msg" role="status"></p>
+  <button id="signout" type="button" hidden>Sign out</button>
+  <p id="msg" role="alert"></p>
+  <p id="next"></p>
   <p><a href="/">Back to the console</a></p>
 </main>
 <script type="module" src="/static/signin.js"></script>
