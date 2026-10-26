@@ -1,0 +1,53 @@
+/* ---- event explorer ---- */
+body.view-events #side { display: none; }
+body.view-events #dock { display: none; }
+
+.ex {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #111;
+  color: #ddd;
+  font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  min-height: 0;
+}
+.ex-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: none; }
+.ex input[type=search] { flex: 1 1 220px; min-width: 160px; }
+.ex input, .ex select, .ex button { font: inherit; }
+.ex-sevs { display: inline-flex; gap: 4px; }
+.ex-sev[aria-pressed=true] { outline: 2px solid currentColor; }
+.ex-sev.ok { color: var(--ok); }
+.ex-sev.info { color: var(--info); }
+.ex-sev.warn { color: var(--warn); }
+.ex-sev.crit { color: var(--crit); }
+.ex .ico { display: inline-block; width: 1.3em; text-align: center; }
+.ex-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1 1 auto; }
+.ex-chip { border-radius: 12px; padding: 1px 8px; }
+.ex-live[aria-pressed=true] { outline: 2px solid var(--ok); }
+.ex-count, .ex-note, .ex-hint { color: #9a9; }
+.ex-saved { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.ex-scroll { flex: 1; min-height: 0; overflow: auto; border: 1px solid var(--line); }
+.ex-table { width: 100%; border-collapse: collapse; }
+.ex-table th { position: sticky; top: 0; background: #181c19; text-align: left; border-bottom: 1px solid var(--line); padding: 0; }
+.ex-table th button { width: 100%; text-align: left; background: none; border: 0; color: inherit; padding: 4px 8px; cursor: pointer; }
+.ex-table th:last-child { padding: 4px 8px; }
+.ex-table td { padding: 3px 8px; border-bottom: 1px solid #1d211e; white-space: nowrap; }
+.ex-row { cursor: pointer; }
+.ex-row:focus-visible, .ex-row:hover { background: #1a1f1b; }
+.ex-row.warn .ex-level { color: var(--warn); }
+.ex-row.crit .ex-level { color: var(--crit); }
+.ex-row.info .ex-level { color: var(--info); }
+.ex-row.ok .ex-level { color: var(--ok); }
+.ex-detail { white-space: normal !important; width: 100%; }
+.ex-full pre { margin: 0; padding: 6px 8px; background: #0c0e0c; overflow: auto; }
+.ex-empty { padding: 12px; color: #9a9; }
+.ex-empty.err { color: var(--crit); }
+.ex-more { margin: 8px; }
+
+@media (max-width: 700px) {
+  .ex-table td:nth-child(4) { display: none; }
+  .ex-table th:nth-child(4) { display: none; }
+}

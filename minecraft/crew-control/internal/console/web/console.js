@@ -4,6 +4,7 @@ import { initAlerts } from '/static/alerts.js';
 import { initOverview } from '/static/overview-ui.js';
 import { initDetail } from '/static/detail-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
+import { initExplorer } from '/static/explorer-ui.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -22,7 +23,7 @@ function el(tag, props = {}, ...kids) {
 }
 
 function sync() {
-  history.replaceState(null, '', '?' + format(state) + overview.query());
+  history.replaceState(null, '', '?' + format(state) + overview.query() + explorer.query());
 }
 
 function renderBar() {
@@ -52,12 +53,14 @@ function renderBar() {
   $('fleet-toggle').setAttribute('aria-pressed', String(state.view === 'fleet'));
   $('detail-toggle').setAttribute('aria-pressed', String(state.view === 'detail'));
   $('jobgraph-toggle').setAttribute('aria-pressed', String(state.view === 'jobs'));
+  $('explorer-toggle').setAttribute('aria-pressed', String(state.view === 'events'));
 }
 
 function renderStage() {
   overview.unmount();
   detail.unmount();
   jobGraph.unmount();
+  explorer.unmount();
   // Frames are removed, not hidden, so a camera websocket closes as soon as
   // its tile leaves the screen.
   stage.replaceChildren();
@@ -67,6 +70,11 @@ function renderStage() {
     // The jobs view does not need a roster: it comes from the session and
     // the jobs stream, so it renders without a unit.
     jobGraph.mount(stage);
+    return;
+  }
+  if (state.view === 'events') {
+    // Like jobs, it needs no unit: it reads the history, or the public feed.
+    explorer.mount(stage);
     return;
   }
   if (!state.unit) return;
@@ -150,6 +158,11 @@ function setView(view) {
   apply();
 }
 
+function toggleExplorer() {
+  state.view = state.view === 'events' ? (state.unit ? 'focus' : 'fleet') : 'events';
+  apply();
+}
+
 function toggleJobs() {
   state.view = state.view === 'jobs' ? (state.unit ? 'focus' : 'fleet') : 'jobs';
   apply();
@@ -159,6 +172,7 @@ $('wall-toggle').addEventListener('click', toggleWall);
 $('fleet-toggle').addEventListener('click', toggleFleet);
 $('detail-toggle').addEventListener('click', toggleDetail);
 $('jobgraph-toggle').addEventListener('click', toggleJobs);
+$('explorer-toggle').addEventListener('click', toggleExplorer);
 
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
@@ -176,6 +190,7 @@ function onKey(ev) {
   else if (ev.key === 'o') toggleFleet();
   else if (ev.key === 'd') toggleDetail();
   else if (ev.key === 'g') toggleJobs();
+  else if (ev.key === 'x') toggleExplorer();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
@@ -221,11 +236,13 @@ function connect() {
     const list = JSON.parse(ev.data) || [];
     ops.onEvents(list, false);
     overview.onEvents(list, false);
+    explorer.onEvents(list, false);
   });
   es.addEventListener('log', ev => {
     const e = JSON.parse(ev.data);
     ops.onEvents([e], true);
     overview.onEvents([e], true);
+    explorer.onEvents([e], true);
   });
   es.addEventListener('positions', ev => {
     const list = JSON.parse(ev.data) || [];
@@ -319,6 +336,7 @@ function setOperator(op) {
   detail.onOperator(op);
   jobGraph.onOperator();
   alertsUI.onSession();
+  explorer.onOperator();
   renderJobs();
   if (changed) reconnect();
 }
@@ -546,6 +564,15 @@ const detail = initDetail({
   state: () => state,
   operator: () => operator,
   api,
+});
+
+const explorer = initExplorer({
+  statuses,
+  order: () => order,
+  state: () => state,
+  operator: () => operator,
+  api,
+  sync,
 });
 
 const jobGraph = initJobGraph({
