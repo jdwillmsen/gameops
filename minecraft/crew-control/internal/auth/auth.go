@@ -253,7 +253,9 @@ func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s, ok := a.verify(r); ok {
-		a.revoked.add(s.Sid, s.Exp)
+		// Every renewed copy of this sign-in carries a later Exp, so the
+		// revocation must last to the sign-in's absolute limit.
+		a.revoked.add(s.Sid, time.Unix(s.started(), 0).Add(sessionMax).Unix())
 	}
 	clearCookie(w, SessionCookie)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

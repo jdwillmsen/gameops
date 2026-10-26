@@ -38,15 +38,32 @@ func TestSessionRenewsPastHalfLife(t *testing.T) {
 func TestSessionNeverOutlivesItsMonth(t *testing.T) {
 	e := newEnv(t)
 	c := signedIn(t, e)
-	for i := 0; i < 5; i++ {
-		e.clk.advance(sessionTTL/2 + time.Minute)
-		if c.me().Code != http.StatusOK {
-			break
-		}
+	step := sessionTTL/2 + time.Minute
+	for elapsed := time.Duration(0); elapsed+step < sessionMax; elapsed += step {
+		e.clk.advance(step)
+		mustOK(t, c.me(), "kept alive")
 	}
 	e.clk.advance(sessionMax)
 	if c.me().Code != http.StatusUnauthorized {
-		t.Fatal("a renewed session outlived the absolute limit")
+		t.Fatal("a continuously renewed session outlived the absolute limit")
+	}
+}
+
+func TestLogoutEndsRenewedCopyAfterOldExpiry(t *testing.T) {
+	e := newEnv(t)
+	owner := signedIn(t, e)
+	old := sessionOf(t, owner)
+	e.clk.advance(sessionTTL/2 + time.Hour)
+	copyC := e.client()
+	copyC.cookies["__Host-crew_session"] = &http.Cookie{Name: "__Host-crew_session", Value: old}
+	mustOK(t, copyC.me(), "copy renews")
+	mustOK(t, owner.post("/auth/logout", map[string]string{}), "logout with the older cookie")
+	step := sessionTTL/2 + time.Minute
+	for i := 0; i < 20; i++ {
+		e.clk.advance(step)
+		if copyC.me().Code != http.StatusUnauthorized {
+			t.Fatalf("renewed copy works again %v after sign-out", time.Duration(i+1)*step)
+		}
 	}
 }
 
