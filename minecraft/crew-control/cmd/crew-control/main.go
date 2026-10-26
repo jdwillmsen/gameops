@@ -33,6 +33,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/export"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/heat"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/insight"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/invhistory"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
@@ -140,9 +141,16 @@ func main() {
 		os.Exit(1)
 	}
 	alertEngine := alerts.NewEngine(alertCfg, time.Now())
+	inventory := invhistory.NewTracker()
 	poller.OnPoll = func(now time.Time, states []telemetry.UnitState) {
 		fleet.ObservePoll(now, states)
 		alertEngine.Poll(now, poller.Snapshot(), states)
+		for _, id := range ids {
+			lv, _ := poller.Live(id)
+			if ev, ok := inventory.Observe(now, id, lv.Online, lv.Inventory); ok {
+				recorder.Add(ev, events.Hint{})
+			}
+		}
 	}
 	poller.OnEvents = func(batch []telemetry.Born) {
 		fleet.Observe(batch)
@@ -189,6 +197,7 @@ func main() {
 			heatmap.MountOperator(mux, operators, units.Has)
 			explain.NewAPI(eventLog).Mount(mux, operators)
 			export.NewAPI(eventLog, exportAudit(log)).MountOperator(mux, operators)
+			invhistory.NewAPI(eventLog, units.Has).Mount(mux, operators)
 			capacity.NewAPI(eventLog).Mount(mux, operators)
 			insight.NewAPI(insights).Mount(mux, operators)
 			ledger.NewAPI(func() ledger.Ledger {

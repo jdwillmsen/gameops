@@ -45,6 +45,9 @@ type Hint struct {
 	ReasonCode string
 }
 
+// unrelatedKinds pass through the collapser untouched.
+var unrelatedKinds = map[string]bool{"inventory_changed": true}
+
 func (h Hint) idleTemplate() bool { return idleTemplates[h.Template] }
 
 // idleDone reports whether a finished-task event is an idle poll: the task
@@ -111,6 +114,10 @@ func (c *Collapser) Push(e Event, h Hint) []Event {
 	u := c.unit(e.Unit)
 	var out []Event
 	switch {
+	case unrelatedKinds[e.Kind]:
+		// Not part of any task's story: it must not close the roll-up or
+		// release the held start that the unit's polling is still building.
+		out = append(out, e)
 	case e.Kind == "task_started" && h.idleTemplate():
 		// A second start while one is held means the first never finished in
 		// view; it is real history, not a poll.

@@ -250,3 +250,19 @@ func TestIsIdlePollFollowsTheRollupRule(t *testing.T) {
 		}
 	}
 }
+
+func TestInventoryChangeLeavesAHeldIdleStartAlone(t *testing.T) {
+	c := NewCollapser()
+	e, h := start("crew-01", t0, "t1", "haul")
+	if out := c.Push(e, h); len(out) != 0 {
+		t.Fatalf("start released: %v", kinds(out))
+	}
+	out := c.Push(Event{Unit: "crew-01", At: t0.Add(time.Second), Kind: "inventory_changed", Severity: SevInfo}, Hint{})
+	if got := kinds(out); len(got) != 1 || got[0] != "inventory_changed" {
+		t.Fatalf("out = %v, want only the inventory change", got)
+	}
+	e, h = finish("crew-01", t0.Add(2*time.Second), "task_done", "t1", "haul", time.Second)
+	if out := c.Push(e, h); len(out) != 0 {
+		t.Errorf("the idle pair no longer folds: %v", kinds(out))
+	}
+}
