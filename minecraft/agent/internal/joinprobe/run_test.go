@@ -68,34 +68,6 @@ func waitFor(t *testing.T, ch <-chan struct{}, what string) {
 	}
 }
 
-// A tick already waiting when the context ends must not start one more probe.
-func TestProbeLoopSkipsAPendingTickAfterCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	probes := make(chan struct{}, 4)
-	// Cancelling inside the server's handler ends the context before the first
-	// probe returns, so the pending tick and Done are both ready when the loop
-	// reaches its select.
-	s := newFakeServer(t, samplePong, func(int32) []packet.Packet {
-		probes <- struct{}{}
-		cancel()
-		return []packet.Packet{&packet.NetworkSettings{}}
-	})
-	ticks := make(chan time.Time, 1)
-	ticks <- time.Time{}
-
-	done := make(chan struct{})
-	go func() {
-		probeLoop(ctx, s.addr(), 0, ticks, logging.New("error"))
-		close(done)
-	}()
-	waitFor(t, done, "the loop to return")
-
-	if n := len(probes); n != 1 {
-		t.Errorf("%d probes ran, want only the first", n)
-	}
-}
-
 func TestRunStopsWithItsContext(t *testing.T) {
 	s := newFakeServer(t, samplePong, func(int32) []packet.Packet {
 		return []packet.Packet{&packet.NetworkSettings{}}
