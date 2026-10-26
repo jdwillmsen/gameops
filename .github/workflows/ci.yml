@@ -107,7 +107,7 @@ jobs:
       - name: test against postgres
         env:
           CREW_PG_TEST_DSN: postgres://postgres:ci@localhost:5432/postgres?sslmode=disable
-        run: go test -race -count=1 ./minecraft/crew-control/internal/events/... ./minecraft/crew-control/internal/alerts/...
+        run: go test -p 1 -race -count=1 ./minecraft/crew-control/internal/events/... ./minecraft/crew-control/internal/alerts/...
 
   # The one required check. Its name never changes, however many component
   # jobs a change fans out to; a change touching no component skips them and
