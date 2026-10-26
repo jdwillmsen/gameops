@@ -47,47 +47,30 @@ type Event struct {
 	Anchor string
 }
 
-// reasonCodes mirrors the units' closed failure vocabulary. Anything else a
-// unit sends is reduced to "other" so a free-text reason, which could carry a
-// position, a token or a player name, never reaches a sentence an anonymous
-// caller reads.
-var reasonCodes = map[string]bool{
-	"missing_tool": true, "kit_chunk_not_loaded": true, "kit_no_path": true, "kit_chest_timeout": true,
-	"kit_visit_timeout": true, "session_lost": true, "deposit_rejected": true, "no_pickup": true,
-	"no_reachable_target": true, "trap_climb_failed": true, "inventory_desync": true,
-	"chunk_not_loaded": true, "no_path": true, "other": true,
+const other = "other"
+
+// templates mirrors the units' closed task template list. A name outside it
+// is a unit newer than this controller or free text, and reads as "other" so
+// it cannot carry a player name, position or token into a public sentence.
+var templates = map[string]bool{
+	"gather_and_deposit": true, "haul": true, "withdraw": true, "deposit": true, "mine_shaft": true,
+	"goto": true, "inspect": true, "observe_blocks": true, "place_block": true, "craft": true,
 }
 
-const (
-	reasonOther = "other"
-	// maxTemplateLen bounds a template name; the real ones are short.
-	maxTemplateLen = 32
-)
-
+// safeReason keeps a reason code only if it is in the closed catalogue, so a
+// free-text reason never reaches a sentence an anonymous caller reads.
 func safeReason(r string) string {
-	if r == "" || reasonCodes[r] {
+	if r == "" || events.KnownReasonCode(r) {
 		return r
 	}
-	return reasonOther
+	return other
 }
 
-// safeTemplate keeps a task template name only if it looks like one: a short
-// lowercase identifier. Free text and anything with coordinates, separators
-// or spaces becomes "other".
 func safeTemplate(t string) string {
-	if t == "" {
+	if t == "" || templates[t] {
 		return t
 	}
-	if len(t) > maxTemplateLen || t[0] < 'a' || t[0] > 'z' {
-		return reasonOther
-	}
-	for i := 1; i < len(t); i++ {
-		c := t[i]
-		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
-			return reasonOther
-		}
-	}
-	return t
+	return other
 }
 
 // payload holds the optional keys a stored event may carry. The analytic

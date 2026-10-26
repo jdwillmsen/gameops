@@ -723,9 +723,9 @@ payload otherwise:
 `anchor` (a coordinate-free fingerprint that is equal while a unit has not
 moved). Until units emit them the rules that need them stay quiet or report
 failures as unexplained; they never guess. A `reason_code` outside the units'
-closed vocabulary reads as `other` and a `template` that is not a short
-lowercase identifier reads as `other`, so free text a unit sends never reaches
-a sentence an anonymous caller sees.
+closed vocabulary reads as `other`, and so does a `template` outside the units'
+closed list, so free text a unit sends never reaches a sentence an anonymous
+caller sees.
 
 ### Rule catalogue
 

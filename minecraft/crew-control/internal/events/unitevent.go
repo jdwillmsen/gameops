@@ -29,6 +29,9 @@ var reasonCodes = map[string]bool{
 	"chunk_not_loaded": true, "no_path": true, "other": true,
 }
 
+// KnownReasonCode reports whether code is in the units' closed catalogue.
+func KnownReasonCode(code string) bool { return reasonCodes[code] }
+
 // UnitEvent is a unit's own report of something that happened to it. It has no
 // position field on purpose.
 type UnitEvent struct {
