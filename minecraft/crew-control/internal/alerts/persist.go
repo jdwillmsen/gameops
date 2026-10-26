@@ -24,7 +24,10 @@ const (
 // Restore merges alerts saved by an earlier run into the engine. An alert the
 // engine already holds keeps its own state, because the poll that made it saw
 // the world more recently than the snapshot did; only the operator's
-// acknowledgement and mute carry over, which nothing else can recreate.
+// acknowledgement and mute carry over, which nothing else can recreate. The
+// exception is an alert firing in both: the poll may have run before the
+// store answered and started it afresh, but as far as anything knows the
+// condition never cleared, so the saved Since and acknowledgement stand.
 func (e *Engine) Restore(saved []Alert, now time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -49,7 +52,10 @@ func (e *Engine) Restore(saved []Alert, now time.Time) {
 					e.fails[s.Unit] = e.cfg.Failures
 				}
 			}
-		} else if a.State == StateFiring && s.State == StateFiring && a.Since.Equal(s.Since) {
+		} else if a.State == StateFiring && s.State == StateFiring {
+			if s.Since.Before(a.Since) {
+				a.Since = s.Since
+			}
 			a.Acked = a.Acked || s.Acked
 		}
 		if s.MutedUntil != nil && s.MutedUntil.After(now) {
