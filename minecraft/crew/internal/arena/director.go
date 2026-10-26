@@ -287,6 +287,14 @@ func (d *Director) Run() (Result, error) {
 			result.Outcome = OutcomeError
 			return result, err
 		}
+		if outcome == OutcomeBossDown && wi < len(waves)-1 {
+			// A boss that is not the finale is one more cleared wave; only the
+			// last boss ends the run.
+			result.WavesCleared++
+			d.logf("arena: wave %d cleared (%.1fs)", wi+1, d.now().Sub(start).Seconds())
+			outcome = ""
+			cleared = false
+		}
 		if outcome != "" {
 			if outcome == OutcomeBossDown {
 				result.WavesCleared++
