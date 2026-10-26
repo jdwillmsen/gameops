@@ -13,6 +13,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
@@ -51,7 +52,10 @@ type Task struct {
 	Template string `json:"template"`
 	State    string `json:"state"`
 	Reason   string `json:"reason,omitempty"`
-	Skill    string `json:"skill,omitempty"`
+	// ReasonCode is Reason's closed code, set on failures only. It is
+	// additive: an older controller ignores it, an older unit omits it.
+	ReasonCode string `json:"reason_code,omitempty"`
+	Skill      string `json:"skill,omitempty"`
 	// Item and Qty are what the task gathers; Progress counts toward Qty. A
 	// haul has no single item: its Qty is the total to move.
 	Item     string    `json:"item,omitempty"`
@@ -570,6 +574,10 @@ func (r *Runner) failCurrent(reason string) {
 // finish must be called with mu held.
 func (r *Runner) finish(e *entry, state, reason string) {
 	e.State, e.Reason, e.Updated = state, reason, r.now()
+	e.ReasonCode = ""
+	if state == Failed {
+		e.ReasonCode = ReasonCode(reason)
+	}
 	e.skills = nil
 	if r.cur == e {
 		r.cur = nil
@@ -597,6 +605,12 @@ func (r *Runner) logEvent(event string, e *entry) {
 	f := map[string]any{"id": logSafe(e.ID), "template": logSafe(e.Template), "state": e.State}
 	if e.Reason != "" {
 		f["reason"] = logSafe(e.Reason)
+	}
+	if e.ReasonCode != "" {
+		f["reason_code"] = e.ReasonCode
+	}
+	if id := sessionid.Current(); id != "" {
+		f["session_id"] = id
 	}
 	r.log.Info(event, f)
 }
