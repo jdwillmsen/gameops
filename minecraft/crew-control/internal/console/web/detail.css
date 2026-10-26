@@ -98,3 +98,16 @@
 }
 
 .dt-chestcount { font-weight: 400; opacity: .7; font-size: 12px; }
+
+/* ---- inventory history ---- */
+.dt-hist { border-top: 1px solid #333; padding-top: 8px; }
+.dt-hist summary { cursor: pointer; font-size: 15px; font-weight: 600; }
+.ih-days { display: flex; gap: 6px; margin: 8px 0; }
+.ih-day { background: #222; color: inherit; border: 1px solid #444; border-radius: 3px; padding: 2px 10px; font: inherit; cursor: pointer; }
+.ih-day.on { background: #2f3f55; border-color: #7fb0e8; }
+.ih-sum { margin: 4px 0; opacity: .85; }
+.ih-net, .ih-log { list-style: none; margin: 4px 0 10px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ih-log time { opacity: .65; display: inline-block; min-width: 70px; }
+.ih-delta { display: inline-block; min-width: 44px; font-weight: 600; }
+.ih-delta.gain { color: var(--ok, #6fd08c); }
+.ih-delta.loss { color: var(--crit, #ff5d5d); }
