@@ -5,7 +5,7 @@ import { parse, format, MODES, tileSrc, wallSrc, badge, readPoint, gotoBody, tas
 const units = [{ id: 'crew-01' }, { id: 'crew-02' }, { id: 'crew-03' }];
 
 test('parse(format(s)) round-trips every unit, mode and view', () => {
-  for (const u of units) for (const mode of MODES) for (const view of ['focus', 'wall', 'fleet', 'jobs']) {
+  for (const u of units) for (const mode of MODES) for (const view of ['focus', 'wall', 'fleet', 'jobs', 'timeline']) {
     const s = { unit: u.id, mode, view };
     assert.deepEqual(parse(format(s), units), { ...s, job: '' });
   }
@@ -49,6 +49,7 @@ test('format leaves the job out of the address once the view is not the jobs vie
     assert.ok(!format({ unit: 'crew-03', mode: 'first', view, job: id }).includes('job='), view);
   }
   assert.ok(format({ unit: 'crew-03', mode: 'first', view: 'jobs', job: id }).includes(`job=${id}`));
+  assert.ok(format({ unit: 'crew-03', mode: 'first', view: 'timeline', job: id }).includes(`job=${id}`));
 });
 
 test('format encodes ids', () => {

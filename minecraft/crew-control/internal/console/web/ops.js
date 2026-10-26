@@ -393,6 +393,7 @@ export function initOps(host) {
     items.push({ label: 'Show fleet overview', keywords: 'view table units list', hint: 'o', run: () => host.setView('fleet') });
     items.push({ label: 'Show job graph', keywords: 'view dag steps jobs', hint: 'g', run: () => host.setView('jobs') });
     items.push({ label: 'Show event explorer', keywords: 'view events filter search history log', hint: 'x', run: () => host.setView('events') });
+    items.push({ label: 'Show timeline', keywords: 'view history swim lanes tasks jobs', hint: 't', run: () => host.setView('timeline') });
     items.push({ label: 'Show focus view', keywords: 'view single', run: () => host.setView('focus') });
     for (const m of MODES) items.push({ label: `Camera: ${m}`, keywords: 'mode view', hint: m === st.mode ? 'current' : '', run: () => host.setMode(m) });
     items.push({ label: 'Next camera mode', hint: 'c', run: () => host.setMode(nextMode(st.mode)) });

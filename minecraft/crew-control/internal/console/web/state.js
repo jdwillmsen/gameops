@@ -1,5 +1,5 @@
 export const MODES = ['first', 'third', 'orbit', 'top'];
-export const VIEWS = ['focus', 'wall', 'fleet', 'detail', 'jobs', 'events', 'ledger'];
+export const VIEWS = ['focus', 'wall', 'fleet', 'detail', 'jobs', 'events', 'ledger', 'timeline'];
 
 const idOf = u => (typeof u === 'string' ? u : u.id);
 
@@ -17,9 +17,9 @@ export function parse(search, units) {
 
 export function format({ unit, mode, view, job }) {
   const q = new URLSearchParams({ unit, mode, view });
-  // The job belongs to the jobs view; the address must not keep naming it
-  // once the operator has left.
-  if (job && view === 'jobs') q.set('job', job);
+  // The job belongs to the jobs and timeline views; the address must not keep
+  // naming it once the operator has left.
+  if (job && (view === 'jobs' || view === 'timeline')) q.set('job', job);
   return q.toString();
 }
 
