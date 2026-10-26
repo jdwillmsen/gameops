@@ -171,7 +171,7 @@ func (a *Auth) registerOptions(w http.ResponseWriter, r *http.Request) {
 	if !listed || !a.invites.Valid(op.ID, req.Invite) {
 		a.invites.Failed()
 		a.event("invite_refused", nil)
-		fail(w, http.StatusForbidden, "invite_refused")
+		fail(w, http.StatusForbidden, a.invites.refusal(op.ID, req.Invite))
 		return
 	}
 	existing := a.keys.Existing(op.ID)
@@ -260,7 +260,7 @@ func (a *Auth) registerFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	if !spent {
 		a.event("invite_refused", logging.Fields{"operator": op.ID})
-		fail(w, http.StatusForbidden, "invite_refused")
+		fail(w, http.StatusForbidden, a.invites.refusal(op.ID, cer.invite))
 		return
 	}
 	k := Passkey{
