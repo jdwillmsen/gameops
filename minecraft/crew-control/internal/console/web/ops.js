@@ -6,6 +6,7 @@ import {
   alertsOf, worst, counts, taskLine, sortUnits, step, nextAlerted, gridFor, pageOf, ALL, budgetLabel, budgetsFor,
   mergeEvents, filterEvents, isToast, ago, project, nearest, rankItems, KEYS,
 } from '/static/fleet.js';
+import { createFeedView, perFrame, timeText } from '/static/feedview.js';
 
 const $ = id => document.getElementById(id);
 
@@ -260,16 +261,19 @@ export function initOps(host) {
     const box = $('feed');
     const rows = filterEvents(feed, { unit: feedFilter.unit ? host.state().unit : '', level: prefs.level }).slice(-120);
     const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
-    box.replaceChildren(...(rows.length ? rows.map(e => {
-      const li = el('li', { className: `ev ${e.level}` },
-        el('time', { textContent: new Date(e.at).toLocaleTimeString([], { hour12: false }) }),
-        el('b', { textContent: e.name || e.unit }),
-        el('span', { textContent: e.text }));
-      li.addEventListener('click', () => host.focus(e.unit));
-      return li;
-    }) : [el('li', { className: 'empty', textContent: 'no events yet' })]));
+    if (!feedView.render(rows, () => el('li', { className: 'empty', textContent: 'no events yet' }))) return;
     if (atEnd) box.scrollTop = box.scrollHeight;
   }
+  const feedView = createFeedView($('feed'), e => {
+    const li = el('li', { className: `ev ${e.level}` },
+      el('time', { textContent: timeText(e.at) }),
+      el('b', { textContent: e.name || e.unit }),
+      el('span', { textContent: e.text }));
+    li.addEventListener('click', () => host.focus(e.unit));
+    return li;
+  });
+  // Events arrive in bursts; one render per frame is all anyone can see.
+  const renderFeedSoon = perFrame(() => renderFeed());
 
   function onEvents(incoming, live) {
     const r = mergeEvents(live ? feed : [], incoming);
@@ -281,7 +285,7 @@ export function initOps(host) {
       }
     }
     renderDockHead();
-    renderFeed();
+    renderFeedSoon();
   }
 
   function toast(e) {
