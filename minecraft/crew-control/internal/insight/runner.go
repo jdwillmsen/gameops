@@ -2,6 +2,7 @@ package insight
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
@@ -65,7 +66,9 @@ func (r *Runner) Once(ctx context.Context) {
 }
 
 func (r *Runner) load(ctx context.Context, now time.Time) ([]unitlog.Event, error) {
-	q := events.Query{Since: now.Add(-lookback), Until: now, Limit: pageSize, Asc: true}
+	// Newest first: when the page cap bites it is the oldest history that is
+	// left out, never the present the rules are judging.
+	q := events.Query{Since: now.Add(-lookback), Until: now, Limit: pageSize}
 	var out []unitlog.Event
 	for i := 0; i < maxPages; i++ {
 		page, err := r.Store.Query(ctx, q)
@@ -78,6 +81,7 @@ func (r *Runner) load(ctx context.Context, now time.Time) ([]unitlog.Event, erro
 		}
 		q.Cursor = *page.Next
 	}
+	slices.Reverse(out)
 	return out, nil
 }
 
