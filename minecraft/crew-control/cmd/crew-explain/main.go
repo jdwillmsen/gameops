@@ -118,15 +118,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, now func(
 	code := 0
 	if evalMode {
 		var logw io.Writer
+		var logf *os.File
 		if *logPath != "" {
 			f, err := os.OpenFile(*logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 			if err != nil {
 				return fail(err)
 			}
-			defer f.Close()
-			logw = f
+			logf, logw = f, f
 		}
 		rep, err := crewexplain.Evaluate(ctx, client, crewexplain.EvalOptions{Runs: *runs, Log: logw, Now: now})
+		// A failed close can drop buffered log lines, so it fails the run like a write error.
+		if logf != nil {
+			if cerr := logf.Close(); err == nil {
+				err = cerr
+			}
+		}
 		if err != nil {
 			return fail(err)
 		}
