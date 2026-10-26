@@ -14,10 +14,10 @@
   <button id="login" type="button">Sign in with passkey</button>
   <details id="enrol">
     <summary>I have an invite</summary>
-    <form id="invite-form" autocomplete="off">
+    <form id="invite-form" method="post" action="/signin" autocomplete="off">
       <label>Operator <input id="operator" name="operator" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
-      <label>Invite code <input id="invite" name="invite" type="password" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
-      <button id="register" type="submit">Create passkey</button>
+      <label>Invite code <input id="invite" name="invite" type="password" autocomplete="one-time-code" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
+      <button id="register" type="submit" disabled>Create passkey</button>
     </form>
   </details>
   <p id="msg" role="status"></p>
