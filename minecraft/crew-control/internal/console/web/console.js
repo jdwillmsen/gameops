@@ -5,6 +5,7 @@ import { initOverview } from '/static/overview-ui.js';
 import { initDetail } from '/static/detail-ui.js';
 import { initJobGraph } from '/static/graph/jobs-ui.js';
 import { initExplorer } from '/static/explorer-ui.js';
+import { initLedgerGraph } from '/static/graph/ledger-ui.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -54,6 +55,7 @@ function renderBar() {
   $('detail-toggle').setAttribute('aria-pressed', String(state.view === 'detail'));
   $('jobgraph-toggle').setAttribute('aria-pressed', String(state.view === 'jobs'));
   $('explorer-toggle').setAttribute('aria-pressed', String(state.view === 'events'));
+  $('ledger-toggle').setAttribute('aria-pressed', String(state.view === 'ledger'));
 }
 
 function renderStage() {
@@ -61,6 +63,7 @@ function renderStage() {
   detail.unmount();
   jobGraph.unmount();
   explorer.unmount();
+  ledgerGraph.unmount();
   // Frames are removed, not hidden, so a camera websocket closes as soon as
   // its tile leaves the screen.
   stage.replaceChildren();
@@ -75,6 +78,10 @@ function renderStage() {
   if (state.view === 'events') {
     // Like jobs, it needs no unit: it reads the history, or the public feed.
     explorer.mount(stage);
+    return;
+  }
+  if (state.view === 'ledger') {
+    ledgerGraph.mount(stage);
     return;
   }
   if (!state.unit) return;
@@ -163,6 +170,11 @@ function toggleExplorer() {
   apply();
 }
 
+function toggleLedger() {
+  state.view = state.view === 'ledger' ? (state.unit ? 'focus' : 'fleet') : 'ledger';
+  apply();
+}
+
 function toggleJobs() {
   state.view = state.view === 'jobs' ? (state.unit ? 'focus' : 'fleet') : 'jobs';
   apply();
@@ -173,6 +185,7 @@ $('fleet-toggle').addEventListener('click', toggleFleet);
 $('detail-toggle').addEventListener('click', toggleDetail);
 $('jobgraph-toggle').addEventListener('click', toggleJobs);
 $('explorer-toggle').addEventListener('click', toggleExplorer);
+$('ledger-toggle').addEventListener('click', toggleLedger);
 
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
@@ -191,6 +204,7 @@ function onKey(ev) {
   else if (ev.key === 'd') toggleDetail();
   else if (ev.key === 'g') toggleJobs();
   else if (ev.key === 'x') toggleExplorer();
+  else if (ev.key === 'l') toggleLedger();
   // Shift+J, because plain j and k step through units.
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
@@ -198,6 +212,7 @@ function onKey(ev) {
   // The jobs view keeps Esc for its own layers, but only when the ops shell
   // has no overlay open; ops still answers the overlay first.
   else if (ev.key === 'Escape' && state.view === 'jobs' && !document.getElementById('overlay') && jobGraph.key(ev)) return;
+  else if (ev.key === 'Escape' && state.view === 'ledger' && !document.getElementById('overlay') && ledgerGraph.key(ev)) return;
   else ops.key(ev);
 }
 addEventListener('keydown', onKey);
@@ -337,6 +352,7 @@ function setOperator(op) {
   jobGraph.onOperator();
   alertsUI.onSession();
   explorer.onOperator();
+  ledgerGraph.onOperator();
   renderJobs();
   if (changed) reconnect();
 }
@@ -583,6 +599,12 @@ const jobGraph = initJobGraph({
   api,
   // A sign-out mid-view has to flip the view's own state, not redo the
   // session logic here.
+  setOperator: next => setOperator(next),
+});
+
+const ledgerGraph = initLedgerGraph({
+  operator: () => operator,
+  api,
   setOperator: next => setOperator(next),
 });
 

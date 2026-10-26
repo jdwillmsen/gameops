@@ -14,13 +14,16 @@ var (
 
 func TestJobGraphAssetsAreServed(t *testing.T) {
 	for p, want := range map[string]string{
-		"/static/graph/layout.js":  "javascript",
-		"/static/graph/graph.js":   "javascript",
-		"/static/graph/jobs.js":    "javascript",
-		"/static/graph/jobs-ui.js": "javascript",
-		"/static/graph/graph.css":  "text/css",
-		"/static/graph/demo.html":  "text/html",
-		"/static/graph/demo.js":    "javascript",
+		"/static/graph/layout.js":    "javascript",
+		"/static/graph/graph.js":     "javascript",
+		"/static/graph/jobs.js":      "javascript",
+		"/static/graph/jobs-ui.js":   "javascript",
+		"/static/graph/ledger.js":    "javascript",
+		"/static/graph/ledger-ui.js": "javascript",
+		"/static/graph/ledger.css":   "text/css",
+		"/static/graph/graph.css":    "text/css",
+		"/static/graph/demo.html":    "text/html",
+		"/static/graph/demo.js":      "javascript",
 	} {
 		rec := serve(t, p)
 		if rec.Code != 200 || rec.Body.Len() == 0 {
@@ -42,7 +45,7 @@ func TestJobGraphAssetsAreServed(t *testing.T) {
 
 func TestIndexLoadsTheJobGraph(t *testing.T) {
 	body := serve(t, "/").Body.String()
-	for _, want := range []string{`href="/static/graph/graph.css"`, `id="jobgraph-toggle"`} {
+	for _, want := range []string{`href="/static/graph/graph.css"`, `href="/static/graph/ledger.css"`, `id="jobgraph-toggle"`, `id="ledger-toggle"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("index.html lacks %s", want)
 		}

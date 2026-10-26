@@ -33,7 +33,7 @@ crew-control; it never calls them to command them.
 
 ## Routes
 
-- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) or the job graph (`?view=jobs&job=<id>`); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
+- `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) the job graph (`?view=jobs&job=<id>`) or the world ledger (`?view=ledger`); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) need an operator session
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
@@ -305,6 +305,35 @@ the jobs list, stream updates and deep link. Node tests cover the pure parts
 (`fake-dom.mjs`), the component and the view (`graph.test.mjs`,
 `jobs-ui.test.mjs`). `demo.html` is the standalone component page; its script
 is `demo.js`, as the console's CSP refuses inline script.
+
+## World ledger graph
+
+`?view=ledger` (the **Ledger** button, or `l`) draws the world ledger as a node
+graph on the job graph's canvas. It reads `GET /v1/places` when it opens and
+every 15 s while the tab is visible (**Refresh** asks at once), so it is
+signed-in only, as the places route is: signed out it says "Sign in to see the
+world ledger." and asks for nothing. A 503 says the ledger is unavailable and
+keeps the last good picture on screen.
+
+- **Nodes.** A place (a chest or an area), a resource (an item type found in
+  stock or listed on an area) and a unit (the one that last read a chest).
+- **Edges.** *Stored in* (solid) joins an item to each place that holds it,
+  *supplied by* (dashed) joins an area to the items it lists, *used by*
+  (dotted) joins a chest to the unit that last read it. Hover a line for its
+  meaning; the dash pattern means no line rides on colour alone.
+- **Staleness.** Stock is what a unit last saw, not a live inventory. Each
+  place and resource carries a chip with a word, a shape and the age of its
+  newest reading: *fresh* (up to 2 min), *aging* (up to 10 min), *stale*, or
+  *never seen*. The details panel (click or Enter on a node) lists the
+  last-known contents, when and by which unit each was read, and the place's
+  position.
+- **Layout.** *Auto layout* is the layered layout. *Map layout* places each
+  place at its box centre in world coordinates (east right, south down, one
+  scale on both axes) and nudges chests that would overlap down a row;
+  resources and units, which have no position, stand in columns to the right.
+
+The hand-off graph and resource-flow Sankey are not built: they need chest
+deposit and withdraw events, which units do not post (see Event history).
 
 ## Chart library
 

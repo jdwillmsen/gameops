@@ -1,5 +1,5 @@
 export const MODES = ['first', 'third', 'orbit', 'top'];
-export const VIEWS = ['focus', 'wall', 'fleet', 'detail', 'jobs', 'events'];
+export const VIEWS = ['focus', 'wall', 'fleet', 'detail', 'jobs', 'events', 'ledger'];
 
 const idOf = u => (typeof u === 'string' ? u : u.id);
 
