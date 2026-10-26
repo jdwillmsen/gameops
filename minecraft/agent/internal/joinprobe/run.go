@@ -15,12 +15,21 @@ import (
 func Run(ctx context.Context, address string, forceProtocol int32, interval time.Duration, log *logging.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	probeLoop(ctx, address, forceProtocol, ticker.C, log)
+}
+
+// probeLoop is Run with the tick source passed in rather than built here.
+// The tests need one they drive by hand, because against a wall-clock ticker
+// the probe running last before a cancelled context is an accident of
+// scheduling: whichever lands flips the published gauge, and only a
+// deterministic shutdown can say which.
+func probeLoop(ctx context.Context, address string, forceProtocol int32, ticks <-chan time.Time, log *logging.Logger) {
 	for {
 		once(ctx, address, forceProtocol, log)
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 		}
 	}
 }
