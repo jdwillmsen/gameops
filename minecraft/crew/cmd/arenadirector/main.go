@@ -91,6 +91,7 @@ func run(args []string) {
 	pause := fs.Duration("pause", 0, "pause between waves (0 uses the wave book)")
 	rallyAfter := fs.Duration("rally-after", -1, "delay from a wave's first spawn before pulling survivors to the squad (-1 uses the wave book, 0 disables)")
 	rallyEvery := fs.Duration("rally-every", -1, "interval between rallies while a wave lives (-1 uses the wave book)")
+	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
 	openStart := fs.Bool("open-start-gate", true, "clear the squad start gate before wave one")
 	placeSquad := fs.Bool("place-squad", true, "teleport the squad to its floor start point and back after a respawn")
 	kits := fs.Bool("kits", false, "spawn the mob types the lab's kit catalog covers from it, in their tier's enchanted gear")
@@ -140,6 +141,7 @@ func run(args []string) {
 		WaveTimeout:   *waveTimeout,
 		RunTimeout:    *timeout,
 		Warriors:      splitNames(*warriors),
+		Settle:        *settle,
 		OpenStartGate: *openStart,
 		PlaceSquad:    *placeSquad,
 		Kits:          *kits,

@@ -59,6 +59,9 @@ type Director struct {
 	RunTimeout    time.Duration
 	Warriors      []string
 	WarriorMisses int
+	// Settle is how long the arena's chunks get to load after the ticking
+	// areas are added; the first fill and summon fail while they are not.
+	Settle        time.Duration
 	OpenStartGate bool
 	PlaceSquad    bool
 	// Kits spawns every wave mob the lab's kit catalog covers from it.
@@ -117,7 +120,18 @@ func (d *Director) repairFloor() error {
 	return nil
 }
 
-// fillErrorLine reports the first error the console logged for a fill. Bedrock
+// fillFailures are the errors Bedrock logs for a rejected fill. The console is
+// shared with the lab's crew units, whose own block and selector errors land in
+// the same reply window, so any other ERROR line is not the fill's.
+var fillFailures = []string{
+	"cannot place block outside of the world",
+	"the block couldn't be placed",
+	"too many blocks",
+	"syntax error",
+	"unloaded",
+}
+
+// fillErrorLine reports the first fill failure the console logged. Bedrock
 // logs a rejected fill as an ERROR line while send-command still exits zero,
 // so the reply is the only place the director can see it. A replace that finds
 // no air is expected after a quiet wave and is reported as "0 blocks filled"
@@ -128,12 +142,11 @@ func fillErrorLine(out string) (string, bool) {
 			continue
 		}
 		lower := strings.ToLower(line)
-		if strings.Contains(lower, "0 blocks filled") ||
-			strings.Contains(lower, "no blocks were filled") ||
-			strings.Contains(lower, "no blocks filled") {
-			continue
+		for _, f := range fillFailures {
+			if strings.Contains(lower, f) {
+				return strings.TrimSpace(line), true
+			}
 		}
-		return strings.TrimSpace(line), true
 	}
 	return "", false
 }
@@ -232,6 +245,7 @@ func (d *Director) Run() (Result, error) {
 		return result, err
 	}
 	defer d.cleanupRun()
+	d.sleep(d.Settle)
 	if err := d.repairFloor(); err != nil {
 		return result, err
 	}
