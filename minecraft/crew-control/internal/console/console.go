@@ -13,6 +13,7 @@ import (
 //go:embed web/dash.js web/dash-data.js web/dash-panels.js web/dash-ui.js web/dash.css
 //go:embed web/insights.js web/insights-ui.js web/why.js web/insights.css
 //go:embed web/invhistory.js web/invhistory-ui.js
+//go:embed web/signin-messages.js
 var assets embed.FS
 
 const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"

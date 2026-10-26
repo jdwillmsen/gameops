@@ -1,6 +1,7 @@
 import { signinParams } from '/static/state.js';
 import { enrolRefusal, readInviteForm } from '/static/enrol.js';
 import { resultIn, sentenceFor, xboxOffered } from '/static/signin-xbox.js';
+import { explain } from '/static/signin-messages.js';
 
 // The invite is a credential: it leaves the address bar and history before
 // anything else runs.
@@ -9,7 +10,7 @@ const xboxResult = resultIn(location.search);
 history.replaceState(null, '', location.pathname);
 
 const $ = id => document.getElementById(id);
-const say = text => { $('msg').textContent = text; };
+const say = (text, next = '') => { $('msg').textContent = text; $('next').textContent = next; };
 
 const enc = bytes => {
   let s = '';
@@ -35,7 +36,7 @@ async function post(path, body) {
   }
   let data = null;
   try { data = await res.json(); } catch { /* an error page has no body worth showing */ }
-  if (!res.ok) throw Object.assign(new Error(refusal(res.status, data)), { refused: true });
+  if (!res.ok) throw Object.assign(new Error(`refused ${res.status}`), { refused: true, status: res.status, code: data && data.error });
   return data;
 }
 
@@ -56,15 +57,6 @@ async function staged(stage, call) {
 function report(kind, err) {
   const error = err.refused ? 'refused' : err.network ? 'network' : err instanceof DOMException ? err.name : 'other';
   post('/auth/report', { kind, stage: err.stage || 'finish', error }).catch(() => {});
-}
-
-function refusal(status, data) {
-  const code = data && data.error;
-  const enrol = enrolRefusal(code, status);
-  if (enrol) return enrol;
-  if (code === 'login_refused') return 'That passkey is not recognised.';
-  if (code === 'ceremony_expired') return 'That took too long. Try again.';
-  return `Sign-in failed (${status}).`;
 }
 
 function creationOptions(pk) {
@@ -92,8 +84,8 @@ async function guarded(button, kind, work) {
     await work();
     location.assign('/');
   } catch (err) {
-    // The browser's own cancel is a NotAllowedError; its text is not for us.
-    say(err.name === 'NotAllowedError' ? 'The passkey prompt was cancelled.' : err.message);
+    const m = explain(err, kind);
+    say(m.text, m.next);
     report(kind, err);
     button.disabled = false;
   }
@@ -156,4 +148,32 @@ if (prefill.invite || prefill.operator) {
 // A refused Xbox sign-in comes back here with a word; the address was
 // cleaned above so a reload does not show the sentence again.
 if (xboxResult !== null) say(sentenceFor(xboxResult));
-xboxOffered(async path => (await fetch(path, { cache: 'no-store' })).json()).then(on => { $('login-xbox').hidden = !on; });
+xboxOffered(async path => (await fetch(path, { cache: 'no-store' })).json()).then(on => { $('login-xbox').hidden = !on || !$('signout').hidden; });
+
+// The page says who the viewer is before asking them to sign in, so someone
+// already signed in is not sent round the ceremony again.
+async function showSession() {
+  let res;
+  try { res = await fetch('/auth/me'); } catch { return; }
+  if (!res.ok) return;
+  const { operator: op } = await res.json();
+  $('who').textContent = `Signed in as ${op.name || op.id}.`;
+  $('who').hidden = false;
+  $('intro').textContent = 'You can command the units from the console.';
+  $('login').hidden = true;
+  $('login-xbox').hidden = true;
+  $('enrol').hidden = true;
+  $('signout').hidden = false;
+}
+$('signout').addEventListener('click', async () => {
+  $('signout').disabled = true;
+  try {
+    const res = await fetch('/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Crew-Request': '1' }, body: '{}' });
+    if (!res.ok) throw new Error('refused');
+    location.reload();
+  } catch {
+    say('Sign out failed.', 'Try again; the session stays open until it works.');
+    $('signout').disabled = false;
+  }
+});
+showSession();
