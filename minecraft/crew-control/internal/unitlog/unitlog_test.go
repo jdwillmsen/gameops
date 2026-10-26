@@ -42,3 +42,12 @@ func TestFreeTextNeverSurvivesIntoReasonOrTemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestFromPrefersTheAnalyticColumns(t *testing.T) {
+	cause, ms := int64(7), 2500
+	e := From(events.Event{Kind: KindTaskFailed, ReasonCode: "missing_tool", CauseRef: &cause, DurationMS: &ms,
+		Outcome: events.OutcomeNoop, Payload: []byte(`{"text":"x","task":"not-a-uuid","reason_code":"no_path","cause_ref":1}`)})
+	if e.Reason != "missing_tool" || e.Cause != 7 || e.Duration != 2500*time.Millisecond || !e.Idle || e.Task != "not-a-uuid" {
+		t.Fatalf("event = %+v", e)
+	}
+}

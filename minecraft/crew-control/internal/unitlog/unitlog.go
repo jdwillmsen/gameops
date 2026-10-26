@@ -90,7 +90,9 @@ func safeTemplate(t string) string {
 	return t
 }
 
-// payload holds the optional keys a stored event may carry.
+// payload holds the optional keys a stored event may carry. The analytic
+// columns of a stored row win over the same key here; the payload form is
+// what an older row or a replay fixture has.
 type payload struct {
 	Reason     string `json:"reason_code"`
 	Cause      int64  `json:"cause_ref"`
@@ -98,6 +100,8 @@ type payload struct {
 	DurationMS int64  `json:"duration_ms"`
 	Idle       bool   `json:"idle"`
 	Anchor     string `json:"anchor"`
+	// Task holds an id that is not a UUID, which the row's task_id cannot.
+	Task string `json:"task"`
 }
 
 // From converts a stored event. A payload that is not the expected object is
@@ -105,11 +109,27 @@ type payload struct {
 func From(e events.Event) Event {
 	var p payload
 	_ = json.Unmarshal(e.Payload, &p)
+	reason := p.Reason
+	if e.ReasonCode != "" {
+		reason = e.ReasonCode
+	}
+	cause := p.Cause
+	if e.CauseRef != nil {
+		cause = *e.CauseRef
+	}
+	ms := p.DurationMS
+	if e.DurationMS != nil {
+		ms = int64(*e.DurationMS)
+	}
+	task := taskOf(e)
+	if task == "" {
+		task = p.Task
+	}
 	return Event{
-		ID: e.ID, Unit: e.Unit, At: e.At, Kind: e.Kind, Task: taskOf(e),
-		Reason: safeReason(p.Reason), Cause: p.Cause, Template: safeTemplate(p.Template),
-		Duration: time.Duration(p.DurationMS) * time.Millisecond,
-		Idle:     p.Idle, Anchor: p.Anchor,
+		ID: e.ID, Unit: e.Unit, At: e.At, Kind: e.Kind, Task: task,
+		Reason: safeReason(reason), Cause: cause, Template: safeTemplate(p.Template),
+		Duration: time.Duration(ms) * time.Millisecond,
+		Idle:     p.Idle || e.Outcome == events.OutcomeNoop, Anchor: p.Anchor,
 	}
 }
 
