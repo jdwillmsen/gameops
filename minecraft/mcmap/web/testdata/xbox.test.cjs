@@ -56,7 +56,7 @@ test('a word from the server becomes its sentence and leaves the address', async
 
 test('every word the server writes has a sentence of its own', () => {
   const { sentences, sentenceFor } = env().win.mcmapXbox;
-  const server = fs.readFileSync(path.join(__dirname, '..', '..', 'internal', 'server', 'xbox.go'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', '..', 'internal', 'xbox', 'xbox.go'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', '..', 'internal', 'server', 'xbox.go'), 'utf8') + fs.readFileSync(path.join(__dirname, '..', '..', '..', 'pkg', 'xbox', 'xbox.go'), 'utf8');
   const words = [...server.matchAll(/(?:xbox\w+|Result\w+)\s*=\s*"([a-z_]+)"/g)].map((m) => m[1]).filter((w) => w !== 'ok');
   assert.ok(words.length >= 12, `found only ${words.length} words`);
   for (const w of words) assert.ok(Object.hasOwn(sentences, w), `${w} has no sentence`);

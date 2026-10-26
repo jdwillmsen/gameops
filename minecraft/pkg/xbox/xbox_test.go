@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox"
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox/xboxtest"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/xbox"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/xbox/xboxtest"
 )
 
 const redirect = "https://map.example/auth/xbox/callback"

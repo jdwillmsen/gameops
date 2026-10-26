@@ -16,7 +16,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/xbox"
 )
 
 // Made up, like every credential in the tests.

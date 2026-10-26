@@ -37,8 +37,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/structures"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/trails"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/worker"
-	"github.com/jdwillmsen/gameops/minecraft/mcmap/internal/xbox"
 	"github.com/jdwillmsen/gameops/minecraft/mcmap/web"
+	"github.com/jdwillmsen/gameops/minecraft/pkg/xbox"
 )
 
 // A waiting login is a couple of hundred bytes, so this costs a few megabytes
