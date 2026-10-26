@@ -496,6 +496,37 @@ otherwise; everything else runs without a database.
 - The routes read the history through a `Source` interface (`internal/explorer`). The in-memory source scans a snapshot of the store; a store that cannot snapshot is paged, newest first, up to 20,000 events, and the answer says `truncated`. A database-backed source would push the filter into its query.
 - **Performance.** Filtering with six units, three severities and a text search, then sorting 10,000 events takes about 4 ms (`go test -run 10k -v ./internal/explorer`, budget 200 ms); `go test -bench . ./internal/explorer` repeats it.
 
+## Dashboard
+
+`b` (or the Dashboard button, or `?view=dash`) opens a grid of panels over the
+live fleet. A filter row above the grid holds the one time window (5 m, 15 m,
+1 h, or everything the page has seen) and the unit filter; both apply to every
+panel. Panels read the units stream and the event feed, so they work for
+anyone and show nothing the public console does not already show (no
+coordinates). The browser keeps the history, not the server: a panel's window
+is what this tab has watched since it opened, and the event backlog on
+connect.
+
+Starter panels: fleet health (gauge), task throughput, success rate, units
+with alerts, units by state over time, outcomes per unit, idle time, hunger,
+task durations, unit status, and recent alerts. Every chart has a table view.
+
+**Edit layout** turns on per-panel buttons (move earlier or later, narrower or
+wider on the 12-column grid, shorter or taller, remove) and drag-and-drop;
+**Add panel** inserts any type. The working layout saves itself in this
+browser's `localStorage`; **Save as** names a layout, the layout menu loads
+one, **Reset** restores the default. Layouts are per browser, not per
+operator, and are not synced.
+
+### Panel contract
+
+A panel type in `dash-panels.js` is `{ title, about, size, query, create }`.
+`query({ data, units, filter, now })` is a pure function returning a
+JSON-safe model; `create(host, { height })` builds the chart and returns
+`{ update(model), destroy() }`. The dashboard calls `update` only when the
+model changed. Add a type to `PANELS` and it appears in the Add menu; layouts
+naming a type that no longer exists drop it on load.
+
 ## Fleet metrics
 
 `GET /metrics` answers in Prometheus text on the same port as everything else,
