@@ -75,9 +75,11 @@ Rules run in crew-control on every poll and raise one alert per (rule, unit),
 so a condition that stays true is one alert, not one per poll. An alert is
 `firing` until its condition clears, then `resolved`, and a resolved alert is
 dropped from the list after 10 minutes. A condition that comes back fires a
-new alert, which needs a new acknowledgement. Alerts are in memory only: a
-restart forgets acknowledgements and mutes, and whatever is still wrong fires
-again on the first poll.
+new alert, which needs a new acknowledgement. The list is saved to
+`minecraft.crew_alert` (V13) whenever it changes and read back at start, so a
+restart keeps acknowledgements and mutes. Before V13 is applied, or with
+Postgres down, alerts run from memory alone and a restart forgets them;
+whatever is still wrong fires again on the first poll.
 
 | Rule | Severity | Fires when | Clears when |
 | --- | --- | --- | --- |
@@ -503,9 +505,15 @@ the trailing `(at, id)` is the keyset pair, so paging and ordering are one
 index walk in either direction with no sort. `kind` is not constrained in the
 schema, so a new one is code in the producer and no migration. The SQL is
 `migrations/V11__minecraft_crew_events.sql`; crew-control does not apply it
-(see `migrations/README.md`). The history lives only in Postgres, nothing is
-written under `DATA_DIR`, and with Postgres down events are dropped, not
-queued: a gap is honest, a backlog that slows the live feed is not.
+(see `migrations/README.md`). Nothing is written under `DATA_DIR`.
+
+**When Postgres is away.** Unset, unreachable or without its table, the
+history does not go dark: a memory store (the newest 20,000 events) takes the
+writes and answers queries, `event_store_degraded` is logged once per outage,
+and `crew_event_store_degraded` is 1. When a write succeeds again the held
+events are written back, oldest first. During an outage the console sees only
+what memory holds, and a restart loses it. Queries and appends are cut off
+after 5 s so a hung database cannot hold the writer.
 
 **Where events come from.** The poller derives them from each unit's status
 poll every second, the same events as the live feed, and the writer stores them
@@ -528,10 +536,13 @@ None of these holds a coordinate. `GET /v1/events` also filters on
 `reason_code`, `outcome`, `session_id` and `cause_ref`; a malformed value is a
 400.
 
-Status: the in-memory store and the routes implement all of this. The Postgres
-table does not have the columns yet (that migration ships from the platform
-repo), so the Postgres store writes the old columns only and answers a request
-using the new filters with a 400 rather than ignoring them. The unit's own
+Status: both stores and the routes implement all of this. The columns come
+from `migrations/V12__minecraft_crew_event_analytics.sql`, which ships from the
+platform repo like V11. The Postgres store checks for them (again every
+minute), so a build that runs ahead of the migration writes the V11 columns
+only and answers a request using the new filters with a 400 rather than
+ignoring them. Postgres does not compute `cause_ref` itself: it stores the one
+it is given. The unit's own
 `kit_failed`, `died`, `respawned` and `session_error` are validated by
 `events.FromUnit` (closed kinds and codes, bounded text) but no route accepts
 them yet: units post task reports only, and a unit-authenticated route is
@@ -562,9 +573,10 @@ work queue, in chunks of 5,000 rows so no statement holds the whole backlog.
 `POST /v1/events/prune` with `{"dry_run":true}` counts the rows a pass would
 delete and lists the oldest 100, without deleting anything.
 
-The Postgres tests run when `CREW_PG_TEST_DSN` is set (they apply the migration
-first and truncate `crew_event`, so point them at a scratch database) and skip
-otherwise; everything else runs without a database.
+The Postgres tests run when `CREW_PG_TEST_DSN` is set (they apply V11, V12 and
+V13 first and truncate `crew_event` and `crew_alert`, so point them at a scratch
+database) and skip otherwise; everything else runs without a database. CI runs
+the events and alerts packages against a Postgres service container.
 
 ## Event explorer
 
@@ -640,6 +652,10 @@ the units' own.
 | `crew_fleet_units_online` | gauge | none | Everything but `offline` |
 | `crew_fleet_unit_state` | gauge | `unit`, `state` | 1 for each unit's current state, 0 otherwise |
 | `crew_fleet_unit_state_seconds_total` | counter | `unit`, `state` | Time each unit has spent in each state |
+| `crew_event_store_degraded` | gauge | none | 1 while event history is held in memory because Postgres is unreachable or not yet reached |
+| `crew_event_store_diverted_events_total` | counter | none | Events written to memory instead of Postgres |
+| `crew_event_store_replayed_events_total` | counter | none | Diverted events written back after Postgres returned |
+| `crew_event_store_lost_events_total` | counter | none | Diverted events dropped: past the memory bound, or rejected by the database |
 
 Label values are closed sets, never a raw string a unit sent:
 

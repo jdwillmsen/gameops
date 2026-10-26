@@ -11,6 +11,11 @@ platform repo is where they ship.
 | --- | --- |
 | `V11__minecraft_crew_events.sql` | The plain SQL: what the DB tests apply to a throwaway database. |
 | `V11__minecraft_crew_events.configmap.yaml` | The same SQL as the entry to paste: append it to the end of `data:` in `migrations-configmap.yaml` (after `V10__minecraft_crew_jobs.sql`). |
+| `V12__minecraft_crew_event_analytics.sql`, `.configmap.yaml` | Adds the analytic columns and their partial indexes to `crew_event`. Additive and idempotent. Apply after V11; crew-control keeps working on V11 alone. |
+| `V13__minecraft_crew_alerts.sql`, `.configmap.yaml` | The `crew_alert` snapshot table. Independent of V11 and V12. |
+
+Migrations only add: a test fails on a `DROP`, `DELETE`, `UPDATE`, `RENAME` or
+`ALTER COLUMN`.
 
 A platform PR that adds an entry must keep it byte-identical to the plain file
 apart from the four-space indent; a test here

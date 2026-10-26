@@ -77,17 +77,50 @@ jobs:
           file: ${{ matrix.dir }}/Dockerfile
           push: false
 
+  # The stores that own their schema are tested against a real Postgres, not
+  # only the in-memory twin: the migrations here are applied by the tests, so a
+  # change that breaks SQL, an index or a migration fails before it ships.
+  # Other crew-control stores read tables created by the platform repo, so they
+  # stay out of this job.
+  crew-control-db:
+    needs: plan
+    if: contains(needs.plan.outputs.matrix, 'crew-control')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: test against postgres
+        env:
+          CREW_PG_TEST_DSN: postgres://postgres:ci@localhost:5432/postgres?sslmode=disable
+        run: go test -race -count=1 ./minecraft/crew-control/internal/events/... ./minecraft/crew-control/internal/alerts/...
+
   # The one required check. Its name never changes, however many component
   # jobs a change fans out to; a change touching no component skips them and
   # still passes here.
   ci-ok:
     if: always()
-    needs: [plan, component]
+    needs: [plan, component, crew-control-db]
     runs-on: ubuntu-latest
     steps:
       - env:
           PLAN: ${{ needs.plan.result }}
           COMPONENTS: ${{ needs.component.result }}
+          DB: ${{ needs.crew-control-db.result }}
         run: |
-          echo "plan=$PLAN components=$COMPONENTS"
-          [[ "$PLAN" == success ]] && [[ "$COMPONENTS" == success || "$COMPONENTS" == skipped ]]
+          echo "plan=$PLAN components=$COMPONENTS db=$DB"
+          [[ "$PLAN" == success ]] && [[ "$COMPONENTS" == success || "$COMPONENTS" == skipped ]] && [[ "$DB" == success || "$DB" == skipped ]]
