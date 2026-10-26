@@ -315,7 +315,13 @@ func validatePhaseCommand(cmd string) error {
 	}
 	verb := strings.Fields(cmd)[0]
 	switch verb {
-	case "summon", "effect", "replaceitem", "enchant", "tag", "tickingarea":
+	case "effect":
+		// Bedrock's syntax has no "give"; the console answers a syntax error
+		// that a boss phase would otherwise only show at run time.
+		if f := strings.Fields(cmd); len(f) > 1 && f[1] == "give" {
+			return fmt.Errorf("effect has no give form on Bedrock: %q", cmd)
+		}
+	case "summon", "replaceitem", "enchant", "tag", "tickingarea":
 	case "kill":
 		if len(strings.Fields(cmd)) != 2 || !strings.HasPrefix(cmd, "kill ") {
 			return fmt.Errorf("kill takes one arena selector")

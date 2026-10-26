@@ -117,11 +117,11 @@ waves:
       - at: 25s
         callout: The Warlord rallies his captains — phase two.
         commands:
-          - effect give @e[tag=arena_boss] speed 600 1
+          - effect @e[tag=arena_boss] speed 600 1
       - at: 50s
         callout: The Warlord is enraged.
         commands:
-          - effect give @e[tag=arena_boss] strength 600 2
+          - effect @e[tag=arena_boss] strength 600 2
   - name: The Warden
     boss: true
     rally: true

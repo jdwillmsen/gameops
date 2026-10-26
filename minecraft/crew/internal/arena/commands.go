@@ -198,7 +198,7 @@ func (s spawn) commands(recipe Tier) []string {
 		cmds = append(cmds, "tag @e[tag="+markerTag+"] add "+bossTag)
 	}
 	for _, e := range recipe.Effects {
-		cmds = append(cmds, fmt.Sprintf("effect give @e[tag=%s] %s %d %d", markerTag, e.ID, e.Seconds, e.Amplifier))
+		cmds = append(cmds, fmt.Sprintf("effect @e[tag=%s] %s %d %d", markerTag, e.ID, e.Seconds, e.Amplifier))
 	}
 	if s.Kit {
 		// The catalog mob already wears its gear; replaceitem would swap it
