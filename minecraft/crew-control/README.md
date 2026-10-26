@@ -57,6 +57,9 @@ crew-control; it never calls them to command them.
 - `GET /v1/events?unit=&kind=&severity=&since=&until=&limit=&sort=asc|desc&cursor=<next>`: signed-in; the unit event history, newest first by default, every filter optional and exact, times RFC3339. Pages are keyset (`next` carries an `(at, id)` cursor, never an offset), at most 200 events each. Severity is ok, info, warn or crit; kinds are listed under Event history. Rows carry each unit's position, which is why the route is signed-in only
 - `POST /v1/events/prune` (`{"dry_run":true}` counts what would go and lists the oldest 100, `{}` deletes it): signed-in; the 30-day retention, answering `{"pruned","total","would"}`
 - `GET /v1/explorer/events`, `GET /v1/explorer/tail`, `GET /v1/explorer/views`, `POST /v1/explorer/views`, `POST /v1/explorer/views/delete`: signed-in; the event explorer (see [Event explorer](#event-explorer))
+- `GET /v1/insights`: the rule insights, firing first, each with rule id, unit (or `fleet`), severity, state, first-seen time and a sentence; signed-in sessions also get the evidence event ids. Held in memory, so a restart starts them afresh. See [Insights](#insights-explanations-and-capacity)
+- `GET /v1/units/{id}/explain?from=&to=`: rule-derived causes of the unit's failed tasks in the window (RFC3339, default the last hour, at most 24 h); event ids and sentences only, no positions, so it is not signed-in only
+- `GET /v1/capacity?window=`: Little's-law load per task type over a trailing window (`1m` to `24h`, default `1h`); no positions
 - `GET /v1/units/{id}/work?wait=25s[&kinds=command]`, `POST /v1/units/{id}/events`: unit-facing, `Authorization: Bearer <WORK_TOKEN>`, cluster-only
 - `GET /v1/squads` and `/v1/squads/{id}`: the squads, rebuilt from units' hellos, their members' last status reports and who leads by the chain of command (Vanguard, then Striker, then Ranger; a leader reported dead or silent for over 8 s is replaced), plus any battalions the squads nest in, data only; the console-safe shape the stream serves — no member positions and no operator id; anonymous and read-only
 - `GET /v1/squads/stream`: server-sent `squads` snapshots for the console panel, sent on connect, on change and at least every 15 s. The snapshot carries members, the standing order and the last 12 callouts, but no positions and no operator id; anonymous and read-only
@@ -725,3 +728,67 @@ coalesced to one per frame. And when the wall cannot hold 24 fps for 4 s the
 console steps its live-camera budget down (20 to 12 to 9 to 6 to 4) and says
 so in the wall bar; the viewer's own choice is not saved over and returns on
 the next load. Tighten the limits when a fix lands, never loosen them to pass.
+
+## Insights, explanations and capacity
+
+All of this is fixed rules over the unit event stream: no model is called, the
+same input always gives the same answer, and every finding names the events it
+rests on. The rules read these optional payload keys of a stored event:
+`reason_code`, `cause_ref` (an event id), `template`, `duration_ms`, `idle` and
+`anchor` (a coordinate-free fingerprint that is equal while a unit has not
+moved). Until units emit them the rules that need them stay quiet or report
+failures as unexplained; they never guess.
+
+### Rule catalogue
+
+The engine evaluates every 10 s over the last 45 minutes. One firing insight
+exists per rule and unit; it resolves when the rule stops holding. Thresholds
+are in `insight.DefaultConfig`.
+
+| Rule | Fires when | Why it exists |
+| --- | --- | --- |
+| R1 zero success | 3 or more failures in a row with one reason code and no completed task for 5 minutes | A unit that never succeeds has a zero baseline, so no baseline rule can see it. In the motivating hour four units failed all hour unnoticed |
+| R2 throughput drop | An EWMA chart (lambda 0.2, k 3) on useful completions per minute falls below the unit's own median of the 20 minutes before the last 5. Sigma is 1.4826 x MAD, at least 0.5; fewer than 10 minutes of history gives no verdict | Catches a working unit slowing against itself. Baselines are per unit: a fleet-wide baseline flagged the haulers for being fast |
+| R3 long task | A running task has outlasted its template's `median + 3.5 x sigma`, sigma being MAD / 0.6745 floored at 5% of the median and at 1 s; needs 10 finished runs | The floor matters: a 0.2 s haul with zero MAD would otherwise flag a third of hauls |
+| R4 common mode | At least half the working units raised R2 within 2 minutes and at least 5 `session_error` events fell in that window | A server restart slows everyone at once. It raises one fleet insight and suppresses the per-unit R2s it explains |
+
+Only completed, non-idle tasks count as throughput. Persisting insights in
+Postgres and a thresholds-from-chart-config path are not built yet.
+
+### Why panel and cause classes
+
+The unit detail page and each unit insight row have a Why panel with the
+sentence, the event-id chain and a "Rule-derived" badge showing the rule id.
+Failures no rule covers are listed as unexplained with equal prominence.
+
+| Class | Rule id | Chain |
+| --- | --- | --- |
+| `missing_tool` | `missing_tool.kit_failed`, `missing_tool.died` | the `kit_failed` or `died` event (named by `cause_ref`, else the latest within 30 min), then the failure |
+| `session_lost` | `session_lost.session_error` | a `session_error` named by `cause_ref` or within 60 s before |
+| `geometry_trap` | `no_path.same_anchor` | 3 or more `no_path` failures from one unchanged anchor with no success between; the cause is stated as unknown |
+| `low_hunger`, `low_health` | `vitals.low_hunger`, `vitals.low_health` | a low-vitals event within 2 minutes before the failure |
+
+To add a rule, write a function in `internal/explain` that takes the failure
+and the events before it and returns a verdict with the chain, call it from
+`classify`, and add table-test rows for a match, a near miss and a missing
+predecessor.
+
+### Capacity
+
+`/v1/capacity` reports, per task type, arrivals per minute (completed plus
+failed), mean duration, and `L = lambda x W`, the mean number of busy units.
+Utilization is the sum of L over the units that completed anything in the
+window. Time in failed tasks is shown apart, and idle roll-ups are listed but
+never counted. Little's law needs a steady arrival rate: a type whose first and
+second half of the window differ more than 2x is flagged `non_stationary`, as
+is the report, and the console says the numbers are rough. Tasks with no
+duration are counted in `unknown_durations` and pull the mean toward the
+known ones, so a high share makes the view unreliable.
+
+### Critical path
+
+`jobs.CriticalPath(steps)` returns the longest chain by duration over
+`depends_on`, each step's slack, and flags steps with no known duration (never
+critical). A cycle or unknown dependency is an error; equal chains go to the
+smaller step key. Steps do not store durations yet, so the job API does not
+return `critical` or `slack_s`.
