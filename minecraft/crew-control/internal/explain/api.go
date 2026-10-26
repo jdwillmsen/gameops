@@ -3,6 +3,7 @@ package explain
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/anon"
@@ -41,12 +42,21 @@ func (a *API) Mount(mux *http.ServeMux, g anon.Gate) {
 	mux.HandleFunc("GET /v1/units/{id}/explain", a.explain)
 }
 
+func span(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return "24h"
+	}
+	return "1h"
+}
+
 func failReply(status int, msg string) anon.Reply {
 	b, _ := json.Marshal(map[string]string{"error": msg})
 	return anon.Reply{Status: status, Body: b}
 }
 
-func (a *API) window(r *http.Request, limit time.Duration) (from, to time.Time, ok bool) {
+// window reads from and to. snap rounds explicit bounds down to whole minutes
+// before they are used, so callers varying a bound by seconds share a result.
+func (a *API) window(r *http.Request, limit time.Duration, snap bool) (from, to time.Time, ok bool) {
 	to = a.now()
 	if s := r.URL.Query().Get("to"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
@@ -54,6 +64,9 @@ func (a *API) window(r *http.Request, limit time.Duration) (from, to time.Time, 
 			return from, to, false
 		}
 		to = t
+		if snap {
+			to = to.Truncate(time.Minute)
+		}
 	}
 	from = to.Add(-defaultWindow)
 	if s := r.URL.Query().Get("from"); s != "" {
@@ -62,6 +75,9 @@ func (a *API) window(r *http.Request, limit time.Duration) (from, to time.Time, 
 			return from, to, false
 		}
 		from = t
+		if snap {
+			from = from.Truncate(time.Minute)
+		}
 	}
 	return from, to, !from.After(to) && to.Sub(from) <= limit
 }
@@ -72,23 +88,13 @@ func (a *API) explain(w http.ResponseWriter, r *http.Request) {
 	if !signed {
 		limit = anon.MaxWindow
 	}
-	from, to, ok := a.window(r, limit)
+	from, to, ok := a.window(r, limit, !signed)
 	if !ok {
-		anon.Write(w, failReply(http.StatusBadRequest, "from and to must be RFC 3339 times, in order, at most "+limit.String()+" apart"))
+		anon.Write(w, failReply(http.StatusBadRequest, "from and to must be RFC 3339 times, in order, at most "+span(limit)+" apart"))
 		return
 	}
 	unit := r.PathValue("id")
 	q := r.URL.Query()
-	if !signed {
-		// Whole minutes, so a caller varying a bound by seconds shares one
-		// cache entry instead of forcing a scan per request.
-		if q.Get("from") != "" {
-			from = from.Truncate(time.Minute)
-		}
-		if q.Get("to") != "" {
-			to = to.Truncate(time.Minute)
-		}
-	}
 	scan := func() (anon.Reply, bool) { return a.scan(r, unit, from, to) }
 	if signed {
 		rep, _ := scan()
@@ -109,7 +115,7 @@ func (a *API) explain(w http.ResponseWriter, r *http.Request) {
 // scan reads the unit's events and explains them. The second result says the
 // answer may be kept for other callers.
 func (a *API) scan(r *http.Request, unit string, from, to time.Time) (anon.Reply, bool) {
-	q := events.Query{Unit: unit, Since: from.Add(-lookback), Until: to, Limit: pageSize, Asc: true}
+	q := events.Query{Unit: unit, Since: from.Add(-lookback), Until: to, Limit: pageSize}
 	var es []unitlog.Event
 	truncated := false
 	for i := 0; ; i++ {
@@ -127,6 +133,7 @@ func (a *API) scan(r *http.Request, unit string, from, to time.Time) (anon.Reply
 		}
 		q.Cursor = *page.Next
 	}
+	slices.Reverse(es)
 	res := Explain(unit, from, to, es)
 	res.Truncated = truncated
 	b, err := json.Marshal(res)

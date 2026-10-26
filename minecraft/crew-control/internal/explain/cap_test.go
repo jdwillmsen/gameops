@@ -115,3 +115,17 @@ func TestAnonymousVariationsThatMeanTheSameQueryShareOneScan(t *testing.T) {
 		t.Fatalf("queries = %d, want %d", st.queries, n)
 	}
 }
+
+func TestAnonymousToOnlyKeepsTheHourSpan(t *testing.T) {
+	st := &countingStore{Store: events.NewMemory()}
+	mux, _ := serve(t, st, false)
+	if c := code(mux, "/v1/units/u/explain?from=2026-10-23T06:00:59Z&to=2026-10-23T07:00:58Z"); c != 200 {
+		t.Fatalf("a window that snaps to exactly 1h must pass, got %d", c)
+	}
+	code(mux, "/v1/units/u/explain?to=2026-10-23T06:30:05Z")
+	n := st.queries
+	code(mux, "/v1/units/u/explain?to=2026-10-23T06:30:50Z")
+	if st.queries != n {
+		t.Fatalf("queries = %d, want %d: same snapped window", st.queries, n)
+	}
+}
