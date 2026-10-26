@@ -1,0 +1,13 @@
+{
+  "_why": "Limits the console must stay inside with 20 units. Numbers are set from the measured run in the README with headroom for CI noise; tighten them when a fix lands, never loosen them to make a change pass.",
+  "scenarios": {
+    "wall-all": {
+      "describe": "Wall with every tile live (20), roster and event dock open",
+      "limits": { "liveFeedsMin": 20, "fpsMin": 30, "p95FrameMsMax": 34, "ttiMsMax": 2000, "heapMbMax": 40, "sseBytesPerSecPerUnitMax": 1000, "eventLongTaskMsMax": 50 }
+    },
+    "fleet": {
+      "describe": "Fleet overview dashboard with the event dock open and no cameras",
+      "limits": { "fpsMin": 30, "p95FrameMsMax": 34, "ttiMsMax": 2000, "heapMbMax": 40, "sseBytesPerSecPerUnitMax": 1000, "eventLongTaskMsMax": 50 }
+    }
+  }
+}
