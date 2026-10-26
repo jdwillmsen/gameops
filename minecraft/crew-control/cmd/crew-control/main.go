@@ -27,6 +27,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/detail"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explorer"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/heat"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
@@ -175,6 +176,7 @@ func main() {
 			poller.SetWorkSource(api.Feed)
 			events.NewAPI(eventLog).MountOperator(mux, operators)
 			explorer.NewAPI(explorer.StoreSource{Store: eventLog}, explorer.NewMemoryViews(), operators).Mount(mux)
+			heatmap.MountOperator(mux, operators, units.Has)
 			ledger.NewAPI(func() ledger.Ledger {
 				if l := world.Load(); l != nil {
 					return *l
