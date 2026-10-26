@@ -193,6 +193,9 @@ func (p *Postgres) Query(ctx context.Context, q Query) (Page, error) {
 	if q.CauseRef != 0 {
 		add("cause_ref = $%d", q.CauseRef)
 	}
+	if q.JobID != nil {
+		add("job_id = $%d", *q.JobID)
+	}
 	if !q.Since.IsZero() {
 		add("at >= $%d", q.Since)
 	}

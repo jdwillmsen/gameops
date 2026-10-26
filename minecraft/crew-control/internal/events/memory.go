@@ -60,6 +60,9 @@ func (q Query) matches(e Event) bool {
 	if q.CauseRef != 0 && (e.CauseRef == nil || *e.CauseRef != q.CauseRef) {
 		return false
 	}
+	if q.JobID != nil && (e.JobID == nil || *e.JobID != *q.JobID) {
+		return false
+	}
 	if !q.Since.IsZero() && e.At.Before(q.Since) {
 		return false
 	}
