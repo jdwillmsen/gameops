@@ -1,9 +1,11 @@
 import { signinParams } from '/static/state.js';
 import { enrolRefusal, readInviteForm } from '/static/enrol.js';
+import { resultIn, sentenceFor, xboxOffered } from '/static/signin-xbox.js';
 
 // The invite is a credential: it leaves the address bar and history before
 // anything else runs.
 const prefill = signinParams(location.hash);
+const xboxResult = resultIn(location.search);
 history.replaceState(null, '', location.pathname);
 
 const $ = id => document.getElementById(id);
@@ -150,3 +152,8 @@ if (prefill.invite || prefill.operator) {
   $('enrol').open = true;
   $('intro').textContent = prefill.operator ? `Create a passkey for ${prefill.operator}.` : 'Enter your invite to create a passkey.';
 }
+
+// A refused Xbox sign-in comes back here with a word; the address was
+// cleaned above so a reload does not show the sentence again.
+if (xboxResult !== null) say(sentenceFor(xboxResult));
+xboxOffered(async path => (await fetch(path, { cache: 'no-store' })).json()).then(on => { $('login-xbox').hidden = !on; });
