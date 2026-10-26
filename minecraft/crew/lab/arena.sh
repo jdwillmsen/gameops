@@ -231,9 +231,9 @@ if [[ -n $prebuilt ]]; then
   cp "$prebuilt" "$plan"
 elif $colosseum; then
   gen=$(mktemp -d)
+  trap 'rm -rf "$gen" "$plan"' EXIT
   python3 "$here/colosseum/colosseum.py" "$gen" >/dev/null
   cp "$gen/plan.txt" "$plan"
-  rm -rf "$gen"
 else
   (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses arena) >"$plan"
 fi

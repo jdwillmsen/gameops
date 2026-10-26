@@ -16,13 +16,13 @@ python3 "$here/colosseum.py" "$tmp" >/dev/null || fail "generator failed (a pen 
 diff -q "$tmp/layout.json" "$here/layout.json" >/dev/null ||
   fail "layout.json is stale: cp the generator's layout.json over colosseum/layout.json"
 
-python3 - "$tmp" <<'PY' || fail "build output is out of bounds"
-import json, re, sys
+python3 - "$tmp" "$here/../../" <<'PY' || fail "build output is out of bounds"
+import json, os, re, sys
 
 work = sys.argv[1]
 layout = json.load(open(f"{work}/layout.json"))
 cx, cz = layout["center"]["x"], layout["center"]["z"]
-assert len(layout["pens"]) == 8
+assert len(layout["pens"]) == 12
 for p in layout["pens"]:
     g = p["gate"]
     assert sorted([g["x1"] - g["x0"] + 1, g["z1"] - g["z0"] + 1]) == [1, 3], p["id"]
@@ -37,6 +37,11 @@ for name in ("clear.cmds", "build.cmds"):
         assert cx - 120 <= x0 <= x1 <= cx + 119 and cz - 106 <= z0 <= z1 <= cz + 105 and 36 <= y0 <= y1 <= 122, line
         assert (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1) <= 32768, line
         assert not m.group(7).startswith("__"), line
+
+waves = open(os.path.join(sys.argv[2], "internal/arena/waves.yaml")).read()
+used = {int(n) for n in re.findall(r"pen: (\d+)", waves)}
+have = {p["id"] for p in layout["pens"]}
+assert used - {0} <= have, f"default wave book uses pens the layout lacks: {sorted(used - {0} - have)}"
 
 areas = [l.split() for l in open(f"{work}/plan.txt") if l.startswith("# area")]
 assert len(areas) == 4

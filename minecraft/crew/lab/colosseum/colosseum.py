@@ -319,7 +319,7 @@ def gate_levers():
 gate_levers()
 
 
-PEN_ANGLES = [22.5 + 45 * k for k in range(8)]
+PEN_ANGLES = [15 + 30 * k for k in range(12)]
 PENS = []
 
 
@@ -1053,10 +1053,19 @@ def compress():
     src = vox
     if "--against" in OPT:
         old = np.load(OPT["--against"])
+        names = json.load(open(OPT["--against"] + ".mats"))
+        now = {f"{a} {b}".strip(): v for (a, b), v in MATS.items()}
+        table = np.zeros(len(names) + 1, dtype=np.int16)
+        for i, n in enumerate(names, 1):
+            table[i] = now.get(n, -1)
+        old = table[old]
         changed = vox != old
+        late = np.isin(vox, list(LATE))
+        changed = changed | (dilate(changed) & late)
         src = np.where(changed & (vox == 0), AIR, np.where(changed, vox, 0)).astype(np.int16)
     if "--save" in OPT:
         np.save(OPT["--save"], vox)
+        json.dump([f"{a} {b}".strip() for (a, b) in MATS], open(OPT["--save"] + ".mats", "w"))
     by_id = {v: k for k, v in MATS.items()}
     rects = {}
     for yi in range(H):
@@ -1101,8 +1110,11 @@ def compress():
                 r0 = p = y
     cmds.sort(key=lambda c: (c[0], c[1]))
     open(os.path.join(OUT, "build.cmds"), "w").write("\n".join(c[2] for c in cmds) + "\n")
-    open(os.path.join(OUT, "decor.cmds"), "w").write("\n".join(DECOR) + ("\n" if DECOR else ""))
-    write_plan()
+    patch = "--against" in OPT
+    decor = [] if patch else [f"kill @e[type=armor_stand,x={X0},y={Y0},z={Z0},dx={W - 1},dy={H - 1},dz={D - 1}]"] + DECOR
+    open(os.path.join(OUT, "decor.cmds"), "w").write("\n".join(decor) + ("\n" if decor else ""))
+    if not patch:
+        write_plan()
     return len(cmds)
 
 
@@ -1125,7 +1137,8 @@ def feed():
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     write_layout()
-    write_clear()
+    if "--against" not in OPT:
+        write_clear()
     n = compress()
     json.dump({"mats": [f"{a} {b}".strip() for (a, b) in MATS], "x0": X0, "z0": Z0, "y0": Y0, "cx": CX, "cz": CZ}, open(os.path.join(os.path.dirname(OPT["--save"]) if "--save" in OPT else OUT, "mats.json"), "w"))
     print(f"{n} fill commands, {len(DECOR)} decor commands, {int((vox != 0).sum())} voxels")

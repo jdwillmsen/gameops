@@ -35,12 +35,18 @@ grep -Fxq -- "$tmp/runs/log.jsonl" "$tmp/calls" ||
   fail "relative --log was not made absolute against the caller's cwd"
 grep -Fxq -- "boss" "$tmp/calls" || fail "boss never reached the director"
 
+rm -f "$tmp/calls.layout"
 (cd "$tmp" && CALL_LOG="$tmp/calls" PATH="$tmp/bin:$PATH" "$here/arena.sh" run testlab >/dev/null)
 grep -Fxq '{"layout":true}' "$tmp/calls.layout" || fail "without --colosseum the director must get the labcourses layout"
 
 : >"$tmp/calls"
+rm -f "$tmp/calls.layout"
 (cd "$tmp" && CALL_LOG="$tmp/calls" PATH="$tmp/bin:$PATH" "$here/arena.sh" --colosseum run testlab >/dev/null)
 cmp -s "$tmp/calls.layout" "$here/colosseum/layout.json" || fail "--colosseum must hand the director colosseum/layout.json"
 if grep -Fxq arena-layout "$tmp/calls"; then fail "--colosseum must not ask labcourses for a layout"; fi
+
+"$here/arena.sh" --colosseum layout | cmp -s - "$here/colosseum/layout.json" || fail "--colosseum layout must print colosseum/layout.json"
+"$here/arena.sh" --colosseum --out "$tmp/out.json" layout
+cmp -s "$tmp/out.json" "$here/colosseum/layout.json" || fail "--out must receive the colosseum layout"
 
 echo ok
