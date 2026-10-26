@@ -58,8 +58,8 @@ crew-control; it never calls them to command them.
 - `POST /v1/events/prune` (`{"dry_run":true}` counts what would go and lists the oldest 100, `{}` deletes it): signed-in; the 30-day retention, answering `{"pruned","total","would"}`
 - `GET /v1/explorer/events`, `GET /v1/explorer/tail`, `GET /v1/explorer/views`, `POST /v1/explorer/views`, `POST /v1/explorer/views/delete`: signed-in; the event explorer (see [Event explorer](#event-explorer))
 - `GET /v1/insights`: the rule insights, firing first, each with rule id, unit (or `fleet`), severity, state, first-seen time and a sentence; signed-in sessions also get the evidence event ids. Held in memory, so a restart starts them afresh. See [Insights](#insights-explanations-and-capacity)
-- `GET /v1/units/{id}/explain?from=&to=`: rule-derived causes of the unit's failed tasks in the window (RFC3339, default the last hour, at most 24 h); event ids and sentences only, no positions, so it is not signed-in only
-- `GET /v1/capacity?window=`: Little's-law load per task type over a trailing window (`1m` to `24h`, default `1h`); no positions
+- `GET /v1/units/{id}/explain?from=&to=`: rule-derived causes of the unit's failed tasks in the window (RFC3339, default the last hour); event ids and sentences only, no positions, so it is not signed-in only. Each call scans the event log, so anonymous callers get at most a 1 h window and a 10 s shared cache; signed-in operators get up to 24 h, uncached. `truncated` is true when the history was longer than one answer reads and the newest events are missing
+- `GET /v1/capacity?window=`: Little's-law load per task type over a trailing window (`1m` to `24h`, default `1h`; anonymous callers `1h` at most, with the same 10 s cache and `truncated` flag as explain); no positions
 - `GET /v1/units/{id}/work?wait=25s[&kinds=command]`, `POST /v1/units/{id}/events`: unit-facing, `Authorization: Bearer <WORK_TOKEN>`, cluster-only
 - `GET /v1/squads` and `/v1/squads/{id}`: the squads, rebuilt from units' hellos, their members' last status reports and who leads by the chain of command (Vanguard, then Striker, then Ranger; a leader reported dead or silent for over 8 s is replaced), plus any battalions the squads nest in, data only; the console-safe shape the stream serves — no member positions and no operator id; anonymous and read-only
 - `GET /v1/squads/stream`: server-sent `squads` snapshots for the console panel, sent on connect, on change and at least every 15 s. The snapshot carries members, the standing order and the last 12 callouts, but no positions and no operator id; anonymous and read-only
@@ -737,7 +737,10 @@ rests on. The rules read these optional payload keys of a stored event:
 `reason_code`, `cause_ref` (an event id), `template`, `duration_ms`, `idle` and
 `anchor` (a coordinate-free fingerprint that is equal while a unit has not
 moved). Until units emit them the rules that need them stay quiet or report
-failures as unexplained; they never guess.
+failures as unexplained; they never guess. A `reason_code` outside the units'
+closed vocabulary reads as `other` and a `template` that is not a short
+lowercase identifier reads as `other`, so free text a unit sends never reaches
+a sentence an anonymous caller sees.
 
 ### Rule catalogue
 
