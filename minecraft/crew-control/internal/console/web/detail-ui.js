@@ -9,6 +9,7 @@ import {
   chestState, nextSlot, iconStyle, iconRect, ageText, durability, contentsText, slotTitle,
 } from './detail.js';
 import { createWhyPanel } from './insights-ui.js';
+import { createInventoryHistoryPanel } from './invhistory-ui.js';
 
 // A page reads its own answer this often; the save behind it is itself read
 // no more than every 5 s, so anything shorter only burns the round trip.
@@ -32,6 +33,7 @@ const unitPath = (id, suffix) => `/units/${encodeURIComponent(id)}${suffix}`;
 // host: { statuses, state(), operator(), api(method, path, body) }
 export function initDetail(host) {
   const why = createWhyPanel();
+  const history = createInventoryHistoryPanel();
   const root = el('section', { className: 'dt' });
   root.setAttribute('aria-label', 'Unit detail');
   root.setAttribute('data-theme', 'dark');
@@ -166,6 +168,11 @@ export function initDetail(host) {
       else view.page.append(node);
       view.nodes.set(id, node);
       if (held) restoreSlot(held);
+    }
+    // After the sections, so it closes the page; a repaint keeps its place.
+    if (!view.history) {
+      view.history = true;
+      view.page.append(history.el);
     }
   }
 
@@ -435,6 +442,7 @@ export function initDetail(host) {
   return {
     mount(into, id) {
       why.stop();
+      history.stop();
       root.remove();
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
@@ -447,6 +455,7 @@ export function initDetail(host) {
       into.append(root);
       if (unit) {
         into.append(why.el);
+        history.start(unit);
         why.start(unit);
       }
       if (!unit) {
@@ -468,6 +477,7 @@ export function initDetail(host) {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisible);
       why.stop();
+      history.stop();
       root.remove();
     },
     // A session change changes what the route answers, so an open page is

@@ -143,12 +143,16 @@ function payload(extra = {}) {
 
 // A page against a scripted host. `answers` is read at each request, so a
 // test can change what the next poll hears. Each call is recorded.
-function page(answers, { sheet = null } = {}) {
+function page(answers, { sheet = null, history = null } = {}) {
   const calls = [];
   const fetched = [];
   let operator = { id: 'owner' };
   globalThis.fetch = async url => {
-    // The Why panel reads its own route; this file checks the sheet reads.
+    // The Why and history panels read their own routes; this file checks the sheet reads.
+    if (String(url).includes('/inventory/changes')) {
+      if (history === 401) return { ok: false, status: 401 };
+      return history ? { ok: true, status: 200, json: async () => history } : { ok: false, status: 500 };
+    }
     if (String(url).includes('/explain')) return { ok: false, status: 404 };
     fetched.push(url);
     if (!sheet) return { ok: false, status: 404 };
@@ -504,4 +508,33 @@ test('an empty slot says which grid and, in the chest, which slot it is', async 
   assert.equal(labelsOf(p.root(), 'dt-main')[0], 'Main inventory: empty');
   assert.equal(labelsOf(p.root(), 'dt-chest')[1], 'slot 2: empty');
   assert.equal(labelsOf(p.root(), 'dt-chest')[0], 'diamond');
+});
+
+const HISTORY = {
+  unit: 'crew-03', truncated: false,
+  net: [{ item: 'minecraft:iron_ingot', delta: 4 }, { item: 'minecraft:coal', delta: -2 }],
+  entries: [{ at: iso(NOW - 60_000), changes: [{ item: 'minecraft:iron_ingot', from: 0, to: 4 }, { item: 'minecraft:coal', from: 5, to: 3 }] }],
+};
+
+test('the inventory history shows the net and each change, below the sections', async () => {
+  const p = scripted(ok(payload()), { history: HISTORY });
+  await p.mount();
+  const panel = one(p.root(), 'dt-hist');
+  assert.ok(panel, 'the panel is on the page');
+  const text = panel.textContent;
+  assert.match(text, /iron ingot/);
+  assert.match(text, /\+4/);
+  assert.match(text, /coal −2 \(5 → 3\)/);
+  assert.match(text, /1 change recorded in the last 7 days/);
+  const page = one(p.root(), 'dt-page');
+  assert.equal(page.children[page.children.length - 1], panel, 'the panel closes the page');
+});
+
+test('a signed-out history read says to sign in, and a failed one says it failed', async () => {
+  let p = scripted(ok(payload()), { history: 401 });
+  await p.mount();
+  assert.match(one(p.root(), 'dt-hist').textContent, /Sign in to see what this unit gained and lost/);
+  p = scripted(ok(payload()));
+  await p.mount();
+  assert.match(one(p.root(), 'dt-hist').textContent, /could not be read/);
 });
