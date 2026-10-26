@@ -2,6 +2,7 @@ package auth
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -39,7 +40,12 @@ func loadRevocations(path string, now func() time.Time) *revocations {
 	// A missing or unreadable file starts empty: refusing to start would lock
 	// every operator out over a list that only ever shortens a session.
 	if raw, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(raw, &r.sids)
+		if err := json.Unmarshal(raw, &r.sids); err != nil {
+			log.Printf("auth: signed-out list unreadable, starting empty: %v", err)
+			r.sids = map[string]int64{}
+		}
+	} else if !os.IsNotExist(err) {
+		log.Printf("auth: signed-out list unreadable, starting empty: %v", err)
 	}
 	return r
 }
@@ -74,11 +80,14 @@ func (r *revocations) add(sid string, exp int64) {
 				oldest, at = k, v
 			}
 		}
+		log.Printf("auth: signed-out list full, dropping a live sign-out")
 		delete(r.sids, oldest)
 	}
 	r.sids[sid] = exp
 	if raw, err := json.Marshal(r.sids); err == nil {
-		_ = writeAtomic(r.path, raw)
+		if err := writeAtomic(r.path, raw); err != nil {
+			log.Printf("auth: sign-out not saved, it will not survive a restart: %v", err)
+		}
 	}
 }
 
@@ -98,6 +107,10 @@ func (a *Auth) renew(w http.ResponseWriter, s session) session {
 		return s
 	}
 	s.Iat, s.Exp, s.Start = now.Unix(), exp.Unix(), s.started()
+	// Cookies issued before sessions carried an id could not be signed out.
+	if s.Sid == "" {
+		s.Sid = b64.EncodeToString(randomBytes(12))
+	}
 	a.setSession(w, s)
 	return s
 }
