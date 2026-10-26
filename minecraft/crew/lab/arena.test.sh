@@ -11,6 +11,11 @@ mkdir -p "$tmp/bin" "$tmp/run"
 cat >"$tmp/bin/go" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >>"$CALL_LOG"
+prev=
+for a in "$@"; do
+  if [[ $prev == --layout ]]; then cp "$a" "$CALL_LOG.layout"; fi
+  prev=$a
+done
 if [[ ${2:-} == ./minecraft/crew/cmd/labcourses ]]; then
   echo '{"layout":true}'
 fi
@@ -29,5 +34,13 @@ grep -Fxq -- "run" "$tmp/calls" || fail "the director never ran"
 grep -Fxq -- "$tmp/runs/log.jsonl" "$tmp/calls" ||
   fail "relative --log was not made absolute against the caller's cwd"
 grep -Fxq -- "boss" "$tmp/calls" || fail "boss never reached the director"
+
+(cd "$tmp" && CALL_LOG="$tmp/calls" PATH="$tmp/bin:$PATH" "$here/arena.sh" run testlab >/dev/null)
+grep -Fxq '{"layout":true}' "$tmp/calls.layout" || fail "without --colosseum the director must get the labcourses layout"
+
+: >"$tmp/calls"
+(cd "$tmp" && CALL_LOG="$tmp/calls" PATH="$tmp/bin:$PATH" "$here/arena.sh" --colosseum run testlab >/dev/null)
+cmp -s "$tmp/calls.layout" "$here/colosseum/layout.json" || fail "--colosseum must hand the director colosseum/layout.json"
+if grep -Fxq arena-layout "$tmp/calls"; then fail "--colosseum must not ask labcourses for a layout"; fi
 
 echo ok

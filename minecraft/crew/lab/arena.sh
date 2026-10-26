@@ -9,7 +9,13 @@
 # a rebuilt box, so a k8s: target (a world real players build in) is refused
 # without --confirm-overwrite.
 #
-# usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab>
+# --colosseum selects the larger arena built by colosseum/colosseum.py instead
+# of this one: its layout (colosseum/layout.json) goes to run and boss, and
+# build feeds the generator's plan. It stands at its own site (colosseum/README.md),
+# so the two arenas can both exist; without the flag nothing about this
+# arena changes.
+#
+# usage: arena.sh [--confirm-overwrite] [--colosseum] [--plan <file>] build <lab>
 #        arena.sh layout [--out <file>]
 #        arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>]
 #                            [--timeout <duration>] [--max-live N] [--poll <d>]
@@ -63,12 +69,14 @@
 set -euo pipefail
 
 confirm=false
+colosseum=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
+usage="usage: arena.sh [--confirm-overwrite] [--colosseum] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;
+    --colosseum) colosseum=true ;;
     --plan)
       prebuilt=${2:?$usage}
       shift
@@ -98,11 +106,22 @@ absolutise() {
   if [[ $1 == /* ]]; then printf '%s\n' "$1"; else printf '%s/%s\n' "$caller_pwd" "$1"; fi
 }
 
+colosseum_layout="$here/colosseum/layout.json"
+if $colosseum && [[ ! -f $colosseum_layout ]]; then
+  echo "arena.sh: $colosseum_layout is missing; --colosseum needs a checkout (the job images ship the script without colosseum/)" >&2
+  exit 1
+fi
+
+# arena_layout prints the layout JSON of the selected arena.
+arena_layout() {
+  if $colosseum; then cat "$colosseum_layout"; else go_run ./minecraft/crew/cmd/labcourses arena-layout; fi
+}
+
 if [[ $action == layout ]]; then
   if [[ -n $out ]]; then
-    go_run ./minecraft/crew/cmd/labcourses arena-layout >"$out"
+    arena_layout >"$out"
   else
-    go_run ./minecraft/crew/cmd/labcourses arena-layout
+    arena_layout
   fi
   exit 0
 fi
@@ -145,7 +164,7 @@ if [[ $action != build ]]; then
       done
       layout=$(mktemp)
       trap 'rm -f "$layout"' EXIT
-      go_run ./minecraft/crew/cmd/labcourses arena-layout >"$layout"
+      arena_layout >"$layout"
       go_run ./minecraft/crew/cmd/arenadirector run --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "${run_args[@]}"
       ;;
     boss)
@@ -168,7 +187,7 @@ if [[ $action != build ]]; then
       done
       layout=$(mktemp)
       trap 'rm -f "$layout"' EXIT
-      go_run ./minecraft/crew/cmd/labcourses arena-layout >"$layout"
+      arena_layout >"$layout"
       go_run ./minecraft/crew/cmd/arenadirector boss --lab "$lab" --layout "$layout" --compose "$here/compose.yaml" "${boss_args[@]}"
       ;;
     reset)
@@ -210,6 +229,11 @@ plan=$(mktemp)
 trap 'rm -f "$plan"' EXIT
 if [[ -n $prebuilt ]]; then
   cp "$prebuilt" "$plan"
+elif $colosseum; then
+  gen=$(mktemp -d)
+  python3 "$here/colosseum/colosseum.py" "$gen" >/dev/null
+  cp "$gen/plan.txt" "$plan"
+  rm -rf "$gen"
 else
   (cd "$here/../../.." && go run ./minecraft/crew/cmd/labcourses arena) >"$plan"
 fi
