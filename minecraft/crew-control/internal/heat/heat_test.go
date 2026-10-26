@@ -115,6 +115,23 @@ func TestCellCapBoundsASlice(t *testing.T) {
 	}
 }
 
+func TestDroppedIsScopedToTheQuery(t *testing.T) {
+	s := New()
+	for i := 0; i < maxCellsPerSlice+5; i++ {
+		s.Add("a", t0, float64(i*CellSize), 0, false)
+	}
+	s.Add("b", t0, 0, 0, false)
+	if g := s.Query("b", Position, "15m", t0); g.Dropped != 0 {
+		t.Fatalf("other unit's overflow leaked: %d", g.Dropped)
+	}
+	if g := s.Query("a", Position, "15m", t0.Add(30*time.Minute)); g.Dropped != 0 {
+		t.Fatalf("out-of-window overflow leaked: %d", g.Dropped)
+	}
+	if g := s.Query("", Position, "15m", t0); g.Dropped != 5 {
+		t.Fatalf("fleet dropped %d", g.Dropped)
+	}
+}
+
 type fakeSrc struct {
 	pos []telemetry.Position
 	st  []telemetry.Status

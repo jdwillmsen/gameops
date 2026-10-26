@@ -54,6 +54,9 @@ type slice struct {
 	at      int64 // unix minute
 	counts  map[string]*[3]bucket
 	samples map[string]uint32
+	// Overflow is kept per unit and layer so a query reports only what
+	// fell out of the grid it is answering.
+	dropped map[string]*[3]uint32
 }
 
 type last struct {
@@ -64,10 +67,9 @@ type last struct {
 
 // Store is safe for concurrent use.
 type Store struct {
-	mu      sync.Mutex
-	slices  map[int64]*slice
-	last    map[string]last
-	dropped uint64
+	mu     sync.Mutex
+	slices map[int64]*slice
+	last   map[string]last
 }
 
 func New() *Store {
@@ -96,7 +98,7 @@ func (s *Store) Add(unit string, at time.Time, x, z float64, mining bool) {
 	minute := at.Unix() / 60
 	sl := s.slices[minute]
 	if sl == nil {
-		sl = &slice{at: minute, counts: map[string]*[3]bucket{}, samples: map[string]uint32{}}
+		sl = &slice{at: minute, counts: map[string]*[3]bucket{}, samples: map[string]uint32{}, dropped: map[string]*[3]uint32{}}
 		s.slices[minute] = sl
 		s.pruneLocked(at)
 	}
@@ -106,9 +108,9 @@ func (s *Store) Add(unit string, at time.Time, x, z float64, mining bool) {
 		sl.counts[unit] = b
 	}
 	sl.samples[unit]++
-	s.bump(b, Position, cellOf(x, z))
+	s.bump(sl, unit, b, Position, cellOf(x, z))
 	if mining {
-		s.bump(b, Mining, cellOf(x, z))
+		s.bump(sl, unit, b, Mining, cellOf(x, z))
 	}
 	if p := s.last[unit]; p.present && at.After(p.at) && at.Sub(p.at) <= maxTravelGap {
 		dx, dz := x-p.x, z-p.z
@@ -124,7 +126,7 @@ func (s *Store) Add(unit string, at time.Time, x, z float64, mining bool) {
 					continue
 				}
 				prev = c
-				s.bump(b, Travel, c)
+				s.bump(sl, unit, b, Travel, c)
 			}
 		}
 	}
@@ -139,13 +141,18 @@ func (s *Store) Forget(unit string) {
 	s.mu.Unlock()
 }
 
-func (s *Store) bump(b *[3]bucket, l Layer, c cell) {
+func (s *Store) bump(sl *slice, unit string, b *[3]bucket, l Layer, c cell) {
 	i := layerIdx(l)
 	if b[i] == nil {
 		b[i] = bucket{}
 	}
 	if _, ok := b[i][c]; !ok && len(b[i]) >= maxCellsPerSlice {
-		s.dropped++
+		d := sl.dropped[unit]
+		if d == nil {
+			d = &[3]uint32{}
+			sl.dropped[unit] = d
+		}
+		d[i]++
 		return
 	}
 	b[i][c]++
@@ -186,7 +193,6 @@ func (s *Store) Query(unit string, layer Layer, window string, now time.Time) Gr
 	sum := map[cell]uint32{}
 
 	s.mu.Lock()
-	g.Dropped = s.dropped
 	for k, sl := range s.slices {
 		if k < from || k > to {
 			continue
@@ -196,6 +202,9 @@ func (s *Store) Query(unit string, layer Layer, window string, now time.Time) Gr
 				continue
 			}
 			g.Samples += uint64(sl.samples[u])
+			if d := sl.dropped[u]; d != nil {
+				g.Dropped += uint64(d[idx])
+			}
 			for c, n := range b[idx] {
 				sum[c] += n
 			}
