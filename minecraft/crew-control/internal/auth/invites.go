@@ -55,11 +55,11 @@ func codeHash(code string) string {
 	return hex.EncodeToString(s[:])
 }
 
-// valid reports whether code is the operator's current invite and unspent.
-// It compares digests, so the lengths are equal and the comparison is
+// matches reports whether code is the operator's current invite, spent or
+// not. It compares digests, so the lengths are equal and the comparison is
 // constant time whatever the guess; a missing file compares against zeros
-// so that it costs the same as a wrong code. Called with the lock held.
-func (iv *Invites) valid(op, code string) bool {
+// so that it costs the same as a wrong code.
+func (iv *Invites) matches(op, code string) bool {
 	var want [sha256.Size]byte
 	have := false
 	if iv.dir != "" && operatorID.MatchString(op) {
@@ -71,7 +71,13 @@ func (iv *Invites) valid(op, code string) bool {
 	}
 	got := sha256.Sum256([]byte(code))
 	match := subtle.ConstantTimeCompare(want[:], got[:]) == 1
-	return have && code != "" && match && !iv.used[codeHash(code)]
+	return have && code != "" && match
+}
+
+// valid reports whether code is the operator's current invite and unspent.
+// Called with the lock held.
+func (iv *Invites) valid(op, code string) bool {
+	return iv.matches(op, code) && !iv.used[codeHash(code)]
 }
 
 func (iv *Invites) Valid(op, code string) bool {
