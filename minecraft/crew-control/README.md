@@ -463,9 +463,11 @@ create or hold secrets for.
 - Put its client secret in a Secret in the crew-control namespace and mount it;
   set `XBOX_CLIENT_ID`, `XBOX_CLIENT_SECRET_FILE`, `XBOX_LOGIN_ENABLED=true`.
 - Set `CREW_XBOX_ACCOUNTS` in the chart to each operator's XUID.
-- Add `/auth/methods`, `/auth/xbox/start` and `/auth/xbox/callback` to the
-  public HTTPRoute's allow-list (jdw-deployments); the route lists paths.
+- The public HTTPRoute's `/auth` prefix already forwards the three Xbox paths.
 - Sign in once with Xbox and confirm it.
+
+Exact steps, the Secret command, verification and rollback:
+[the runbook](../../docs/runbooks/crew-xbox-signin.md).
 
 As for the map, whether Microsoft consents a personal app to `XboxLive.signin`
 without Xbox partner enrolment was not verified without a real sign-in. If it
