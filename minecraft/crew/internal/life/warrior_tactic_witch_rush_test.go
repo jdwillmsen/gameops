@@ -33,7 +33,7 @@ func (s *witchRushSpy) Engage(ctx context.Context, f *Fight) (bool, error) {
 // witchNamed is a profile that fights witches with the named variant.
 func witchNamed(name string) tactics.Profile {
 	pr := tactics.NewProfile(name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyWitch: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyWitch: {name}}
 	return pr
 }
 

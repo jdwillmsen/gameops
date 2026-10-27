@@ -21,7 +21,7 @@ const (
 // named tactic and everything else as shipped.
 func againstEnderman(name string) tactics.Profile {
 	pr := tactics.NewProfile("enderman " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyEnderman: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyEnderman: {name}}
 	return pr
 }
 
@@ -426,9 +426,9 @@ func TestAnEndermiteIsFoughtAsTheDefaultFamilyWhateverIsSetForEndermen(t *testin
 	base := replay(t, "striker", scenario, nil)
 	for _, tactic := range []string{lowground, ignoring} {
 		pr := tactics.NewProfile("endermen only")
-		pr.Tactics = map[tactics.Family]string{tactics.FamilyEnderman: tactic}
+		pr.Tactics = map[tactics.Family][]string{tactics.FamilyEnderman: {tactic}}
 		// Another family's tactic, set for the default one, must not run.
-		pr.Tactics[tactics.FamilyDefault] = tactic
+		pr.Tactics[tactics.FamilyDefault] = []string{tactic}
 		got := replay(t, "striker", scenario, func(l *Life) {
 			if err := l.SetProfile(pr); err != nil {
 				t.Fatal(err)

@@ -34,7 +34,7 @@ type pvpRig struct {
 
 func usingPlayerTactic(name string) tactics.Profile {
 	pr := tactics.NewProfile("pvp " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyPlayer: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyPlayer: {name}}
 	return pr
 }
 
@@ -459,7 +459,7 @@ func TestPlayerTacticsDoNotTouchAMobFightEvenWhenNamed(t *testing.T) {
 	base := replay(t, "striker", strikerOnAZombie, func(*Life) {})
 	got := replay(t, "striker", strikerOnAZombie, func(l *Life) {
 		pr := usingPlayerTactic("player/strafe")
-		pr.Tactics[tactics.FamilyZombie] = "player/strafe"
+		pr.Tactics[tactics.FamilyZombie] = []string{"player/strafe"}
 		if err := l.SetProfile(pr); err != nil {
 			t.Fatal(err)
 		}

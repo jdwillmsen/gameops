@@ -16,7 +16,7 @@ const creeperID = 80
 // creeperProfile fights the creeper family with the named tactic.
 func creeperProfile(name string) tactics.Profile {
 	pr := tactics.NewProfile("creeper " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyCreeper: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyCreeper: {name}}
 	return pr
 }
 

@@ -16,7 +16,7 @@ import (
 // tactic and the shipped tuning.
 func usingBruteTactic(name string) tactics.Profile {
 	pr := tactics.NewProfile("tactic " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyBrute: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyBrute: {name}}
 	return pr
 }
 

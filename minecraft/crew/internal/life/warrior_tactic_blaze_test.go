@@ -30,7 +30,7 @@ func armSnowballs(r *rig, slot int, count int) {
 // tactic.
 func usingBlaze(tactic string) tactics.Profile {
 	pr := tactics.NewProfile("blaze " + tactic)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyBlaze: tactic}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyBlaze: {tactic}}
 	return pr
 }
 
