@@ -205,24 +205,47 @@ func (l *Life) bossGuard(s belief.Snapshot) bool {
 	return phase >= every-guardLead || (since >= every && phase < guardTail)
 }
 
-// bossStriker waits off the boss and joins the melee only while the
-// Vanguard is on the boss to take its blows and the Striker has health to
-// spare. Too hurt to join, it waits beyond the boom, which would wear down
-// what it needs to commit; hurt past the fall line, it leaves the darkness
-// until healed.
-func (l *Life) bossStriker(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
+// strikerStance is what the Striker does about the boss this tick.
+type strikerStance uint8
+
+const (
+	// stanceWait is the Striker's own band, for a Striker fit to commit that
+	// has no cover to join under yet.
+	stanceWait strikerStance = iota
+	// stanceMelee joins the melee.
+	stanceMelee
+	// stanceHurt keeps clear of the boom, hurt or with the squad too far
+	// down to hold the boss off it, and stanceFallen leaves the darkness.
+	stanceHurt
+	stanceFallen
+)
+
+// strikerPlan is the Striker's stance and, short of the melee, the band it
+// holds off the boss. It joins the melee only while the Vanguard is on the
+// boss to take its blows and the Striker has health to spare. Too hurt to
+// join, it waits beyond the boom, which would wear down what it needs to
+// commit; hurt past the fall line, it leaves the darkness until healed.
+func (l *Life) strikerPlan(p act.Pose, e belief.Entity, s belief.Snapshot) (strikerStance, float64, float64) {
 	b := &l.warrior.boss
 	switch {
 	case b.fallen:
-		return l.bossKeep(a, p, e, s, math.Max(b.prof.darkness+1, b.prof.strikerFar), math.Inf(1))
+		return stanceFallen, math.Max(b.prof.darkness+1, b.prof.strikerFar), math.Inf(1)
 	case s.HealthKnown && s.Health <= b.prof.commitAbove, b.regroupUntil != 0:
-		// Hurt, or the squad too far down to hold the boss off it.
 		near := math.Max(b.prof.boom+1, b.prof.strikerNear)
-		return l.bossKeep(a, p, e, s, near, near+b.prof.strikerFar-b.prof.strikerNear)
+		return stanceHurt, near, near + b.prof.strikerFar - b.prof.strikerNear
 	case l.strikerCovered(p, e):
+		return stanceMelee, 0, 0
+	}
+	return stanceWait, b.prof.strikerNear, b.prof.strikerFar
+}
+
+// bossStriker waits off the boss and joins the melee as strikerPlan says.
+func (l *Life) bossStriker(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
+	stance, near, far := l.strikerPlan(p, e, s)
+	if stance == stanceMelee {
 		return l.warriorMelee(ctx, a, p, e, s)
 	}
-	return l.bossKeep(a, p, e, s, b.prof.strikerNear, b.prof.strikerFar)
+	return l.bossKeep(a, p, e, s, near, far)
 }
 
 // strikerCovered says whether the Vanguard is close enough to the boss to be
