@@ -216,9 +216,18 @@ func TestPageTogglesDebugOnF3(t *testing.T) {
 	}
 }
 
-// The worker file is embedded and not type-checked, like the page.
+// The worker and the page's modules are embedded and not type-checked, like
+// the page.
 func TestMesherWorkerIsServed(t *testing.T) {
-	const path = "/v1/camera/mesher.js"
+	servedScript(t, "/v1/camera/mesher.js", mesher)
+}
+
+func TestSkyModuleIsServed(t *testing.T) {
+	servedScript(t, "/v1/camera/sky.js", skyJS)
+}
+
+func servedScript(t *testing.T, path string, want []byte) {
+	t.Helper()
 	h, _ := newTestHub(t, 1)
 	srv := httptest.NewServer(Mount(okBase(), h))
 	defer srv.Close()
@@ -228,8 +237,8 @@ func TestMesherWorkerIsServed(t *testing.T) {
 	}
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
-	if res.StatusCode != 200 || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/javascript") || !bytes.Equal(body, mesher) || len(body) == 0 {
-		t.Errorf("mesher.js = %d %q, %d bytes", res.StatusCode, res.Header.Get("Content-Type"), len(body))
+	if res.StatusCode != 200 || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/javascript") || !bytes.Equal(body, want) || len(body) == 0 {
+		t.Errorf("%s = %d %q, %d bytes", path, res.StatusCode, res.Header.Get("Content-Type"), len(body))
 	}
 }
 
