@@ -2,7 +2,6 @@ package arena
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
@@ -163,30 +162,6 @@ func RunScoreOutcome(o string) string {
 }
 
 // MobFamily files a mob id under the opponent family a strategy is learned
-// for. Ids it does not know are the default family.
-func MobFamily(mob string) tactics.Family {
-	id := strings.TrimPrefix(mob, "minecraft:")
-	switch id {
-	case "zombie", "husk", "drowned", "zombie_villager", "zombie_pigman", "zombified_piglin":
-		return tactics.FamilyZombie
-	case "skeleton", "stray", "bogged", "wither_skeleton":
-		return tactics.FamilySkeleton
-	case "creeper":
-		return tactics.FamilyCreeper
-	case "spider", "cave_spider":
-		return tactics.FamilySpider
-	case "blaze":
-		return tactics.FamilyBlaze
-	case "enderman":
-		return tactics.FamilyEnderman
-	case "witch":
-		return tactics.FamilyWitch
-	case "pillager", "vindicator", "evoker", "illusioner", "ravager":
-		return tactics.FamilyIllager
-	case "piglin", "piglin_brute", "hoglin", "zoglin":
-		return tactics.FamilyBrute
-	case "warden", "wither", "ender_dragon", "elder_guardian":
-		return tactics.FamilyBoss
-	}
-	return tactics.FamilyDefault
-}
+// for, the same way the warrior files it in a fight. Ids it does not know are
+// the default family.
+func MobFamily(mob string) tactics.Family { return tactics.FamilyOfType(mob) }

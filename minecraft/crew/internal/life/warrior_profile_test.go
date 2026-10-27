@@ -54,6 +54,39 @@ func TestFamilyOfClassifiesEveryFamily(t *testing.T) {
 	}
 }
 
+// legacyFamilies is the table familyOf and the boss profiles held before the
+// mapping moved to the tactics package. A type the warrior filed then must be
+// filed the same way now.
+var legacyFamilies = map[string]tactics.Family{
+	"zombie": tactics.FamilyZombie, "husk": tactics.FamilyZombie, "drowned": tactics.FamilyZombie,
+	"zombie_villager": tactics.FamilyZombie, "zombie_villager_v2": tactics.FamilyZombie,
+	"zombie_pigman": tactics.FamilyZombie, "zombified_piglin": tactics.FamilyZombie, "phantom": tactics.FamilyZombie,
+	"skeleton": tactics.FamilySkeleton, "stray": tactics.FamilySkeleton,
+	"bogged": tactics.FamilySkeleton, "wither_skeleton": tactics.FamilySkeleton,
+	"creeper": tactics.FamilyCreeper,
+	"spider":  tactics.FamilySpider, "cave_spider": tactics.FamilySpider,
+	"blaze": tactics.FamilyBlaze, "breeze": tactics.FamilyBlaze,
+	"enderman": tactics.FamilyEnderman,
+	"witch":    tactics.FamilyWitch,
+	"pillager": tactics.FamilyIllager, "vindicator": tactics.FamilyIllager,
+	"evoker": tactics.FamilyIllager, "evocation_illager": tactics.FamilyIllager, "vex": tactics.FamilyIllager,
+	"piglin_brute": tactics.FamilyBrute, "ravager": tactics.FamilyBrute,
+	"hoglin": tactics.FamilyBrute, "zoglin": tactics.FamilyBrute, "iron_golem": tactics.FamilyBrute,
+}
+
+func TestFamilyOfKeepsEveryTypeItKnewBefore(t *testing.T) {
+	for typ, want := range legacyFamilies {
+		if got := familyOf(belief.Entity{ID: 1, Type: "minecraft:" + typ}); got != want {
+			t.Errorf("familyOf(%s) = %q, want %q", typ, got, want)
+		}
+	}
+	for typ := range bossProfiles {
+		if got := familyOf(belief.Entity{ID: 1, Type: "minecraft:" + typ}); got != tactics.FamilyBoss {
+			t.Errorf("boss %s files under %q, want boss", typ, got)
+		}
+	}
+}
+
 // The engine's constants and the contract's defaults are two copies of the
 // same numbers; a unit with no profile must fight exactly as it shipped.
 func TestTacticsDefaultsAreTheShippedConstants(t *testing.T) {
