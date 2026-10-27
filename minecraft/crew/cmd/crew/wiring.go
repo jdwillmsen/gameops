@@ -115,6 +115,7 @@ func (u *unit) startActing() error {
 	}
 	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker, hub: u.hub}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
 	a.SetCorrectionDiagnostics(u.correctionLog, u.world)
+	a.SetClipDiagnostics(u.correctionLog)
 	a.ItemNames(u.items)
 	a.Crafting(u.book, func() []belief.Item { return u.tracker.Snapshot().Inventory })
 	// Until the loading screen ends, the server drops every action without an

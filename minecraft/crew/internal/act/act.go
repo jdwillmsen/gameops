@@ -78,8 +78,14 @@ type Actuator struct {
 	blockNames            BlockNames
 	lastCorrectionLog     time.Time
 	suppressedCorrections uint64
-	now                   func() time.Time
-	sent                  [sentHistory]sentTick
+	clipLogger            CorrectionLogger
+	clipLogged            map[string]time.Time
+	clipSuppressed        map[string]uint64
+	// insideBlock is set while the predicted body sits inside a block, so a
+	// stay is one event and not one per tick.
+	insideBlock bool
+	now         func() time.Time
+	sent        [sentHistory]sentTick
 
 	itemIDs map[string]int32
 	// inv is the unit's own window-0 inventory, kept from the server's slot
@@ -226,8 +232,14 @@ func (a *Actuator) Tick(in Input) error {
 	}
 	a.pose = next
 	a.lastStepUp = step.stepUp
-	a.sent[a.tick%sentHistory] = sentTick{tick: a.tick, pose: next, stepUp: step.stepUp, skill: a.skill}
+	record := sentTick{tick: a.tick, pose: next, stepUp: step.stepUp, skill: a.skill}
+	a.sent[a.tick%sentHistory] = record
 	a.tick++
+	depth := overlapDepth(a.solid, next.Feet)
+	if inside := depth > clipDepth; inside && !a.insideBlock {
+		a.noteClip(ClipPredictedInside, depth, record)
+	}
+	a.insideBlock = depth > clipDepth
 	return nil
 }
 
@@ -241,6 +253,7 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	case *packet.CorrectPlayerMovePrediction:
 		metricCorrections.Inc()
 		a.logCorrection(p)
+		a.noteCorrectionClip(p)
 		a.lastStepUp = false
 		feet := p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0})
 		// A correction repeating the position the unit already sent moves
@@ -295,6 +308,20 @@ func (a *Actuator) Apply(pk packet.Packet) {
 func (a *Actuator) sentInput(tick uint64) (sentTick, bool) {
 	sent := a.sent[tick%sentHistory]
 	return sent, sent.tick == tick && tick >= firstTick
+}
+
+// noteCorrectionClip tells a correction of a tick that ran through a block
+// from one of a tick in free space.
+func (a *Actuator) noteCorrectionClip(p *packet.CorrectPlayerMovePrediction) {
+	sent, found := a.sentInput(p.Tick)
+	if !found {
+		sent = sentTick{pose: a.pose, skill: a.skill}
+	}
+	if depth := overlapDepth(a.solid, sent.pose.Feet); depth > clipDepth {
+		a.noteClip(ClipCorrectedInside, depth, sent)
+		return
+	}
+	a.noteClip(ClipCorrectedClear, 0, sent)
 }
 
 func (a *Actuator) logCorrection(p *packet.CorrectPlayerMovePrediction) {
