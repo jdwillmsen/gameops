@@ -1,6 +1,7 @@
 package life
 
 import (
+	"context"
 	"math"
 	"reflect"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
@@ -459,6 +461,123 @@ func TestEvokerAcrossAGapIsNeverChasedIntoTheVoid(t *testing.T) {
 		f := r.feet()
 		if f.X() >= 24 || f.Y() < 1 {
 			t.Fatalf("tick %d: unit at %v, past the edge of the ground", i, f)
+		}
+	}
+}
+
+// mixedPack is a zombie on the lowest id, so the shared focus picks it, with
+// an evoker and a pillager a little further off.
+func mixedPack(r *rig) {
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+	r.spawnIllager(51, "minecraft:evoker", mgl32.Vec3{18.5, 1, 20.5}, 0)
+	r.spawnIllager(52, "minecraft:pillager", mgl32.Vec3{20.5, 1, 22.5}, 0)
+}
+
+func squadFocus(t *testing.T, r *rig) uint64 {
+	t.Helper()
+	r.setSquad(t, &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{20.5, 1, 20.5}, leaderOK: true})
+	anchor, _ := r.l.warrior.leader(r.a.Pose())
+	e, _ := r.l.warriorTarget(r.a.Pose(), anchor)
+	return e.ID
+}
+
+func TestPriorityPullsTheSquadFocusToTheEvokerBesideAZombie(t *testing.T) {
+	base := illagerRig(t, "striker", "")
+	mixedPack(base)
+	if got := squadFocus(t, base); got != 50 {
+		t.Fatalf("control focus = %d, want the zombie 50 on the lowest id", got)
+	}
+
+	r := illagerRig(t, "striker", tacticPriority)
+	mixedPack(r)
+	if got := squadFocus(t, r); got != 51 {
+		t.Errorf("focus = %d, want the evoker 51 first in the kill order", got)
+	}
+	if got := r.untilAttack(120); got != 51 {
+		t.Errorf("the unit hit %d, want the evoker 51 before the zombie", got)
+	}
+}
+
+func TestPriorityFocusFallsToTheNextInTheOrderThenToTheDefault(t *testing.T) {
+	r := illagerRig(t, "striker", tacticPriority)
+	mixedPack(r)
+	r.remove(51)
+	if got := squadFocus(t, r); got != 52 {
+		t.Errorf("focus = %d, want the pillager 52 with the evoker gone", got)
+	}
+	r.remove(52)
+	if got := squadFocus(t, r); got != 50 {
+		t.Errorf("focus = %d, want the lone zombie 50 once no illager is left", got)
+	}
+}
+
+func TestEveryRoleOnAProfileAgreesOnTheMixedPackFocus(t *testing.T) {
+	for _, tactic := range []string{"", tacticPriority, tacticSplit} {
+		focus := map[uint64]string{}
+		for _, role := range []string{"vanguard", "striker", "ranger"} {
+			r := illagerRig(t, role, tactic)
+			mixedPack(r)
+			focus[squadFocus(t, r)] = role
+		}
+		if len(focus) != 1 {
+			t.Errorf("tactic %q: roles split the squad across %v", tactic, focus)
+		}
+	}
+}
+
+func TestSplitLeavesTheMixedPackToTheSharedFocus(t *testing.T) {
+	r := illagerRig(t, "striker", tacticSplit)
+	mixedPack(r)
+	if got := squadFocus(t, r); got != 50 {
+		t.Errorf("focus = %d, want the shared pick 50: split's order is per role and cannot steer the squad", got)
+	}
+}
+
+func TestAStandingOrderForATypeBeatsTheKillOrderPreference(t *testing.T) {
+	r := illagerRig(t, "striker", tacticPriority)
+	mixedPack(r)
+	r.setSquad(t, &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{20.5, 1, 20.5}, leaderOK: true,
+		order: Order{Kind: OrderFocus, Target: "minecraft:zombie"}})
+	anchor, _ := r.l.warrior.leader(r.a.Pose())
+	if e, _ := r.l.warriorTarget(r.a.Pose(), anchor); e.ID != 50 {
+		t.Errorf("focus = %d, want the zombie 50 the order named", e.ID)
+	}
+}
+
+func TestAPreferenceOutsideTheCandidatesIsIgnored(t *testing.T) {
+	withTactics(t, strayPreferrer{})
+	r := newWarrior(t, "striker", start)
+	pr := tactics.NewProfile("stray")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyZombie: {"zombie/stray"}}
+	if err := r.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+	r.spawn(51, "minecraft:zombie", mgl32.Vec3{18.5, 1, 20.5})
+	if got := squadFocus(t, r); got != 50 {
+		t.Errorf("focus = %d, want the default 50 when Prefer names a mob that is no candidate", got)
+	}
+}
+
+type strayPreferrer struct{}
+
+func (strayPreferrer) Name() string           { return "zombie/stray" }
+func (strayPreferrer) Family() tactics.Family { return tactics.FamilyZombie }
+func (strayPreferrer) Engage(context.Context, *Fight) (bool, error) {
+	return false, nil
+}
+func (strayPreferrer) Prefer(*Fight, []belief.Entity) (belief.Entity, bool) {
+	return belief.Entity{ID: 999}, true
+}
+
+func TestAHoldingOrderKeepsTheSharedFocusOverTheKillOrder(t *testing.T) {
+	for _, kind := range []OrderKind{OrderHold, OrderRegroup, OrderRetreat} {
+		r := illagerRig(t, "striker", tacticPriority)
+		mixedPack(r)
+		r.setSquad(t, &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{20.5, 1, 20.5}, leaderOK: true, order: Order{Kind: kind}})
+		anchor, _ := r.l.warrior.leader(r.a.Pose())
+		if e, _ := r.l.warriorTarget(r.a.Pose(), anchor); e.ID != 50 {
+			t.Errorf("%s order: focus = %d, want the shared pick 50", kind, e.ID)
 		}
 	}
 }

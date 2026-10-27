@@ -2,6 +2,8 @@ package life
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 
@@ -42,6 +44,23 @@ type FamilyTactic interface {
 	Name() string
 	Family() tactics.Family
 	Engage(ctx context.Context, f *Fight) (handled bool, err error)
+}
+
+// TargetPreferrer is a FamilyTactic that also knows which of a mixed pack
+// the squad should focus. The shared choice picks by health and id alone, so
+// an evoker standing beside a zombie is only the target by luck of its id;
+// a tactic that fights the evoker better first can name it instead.
+//
+// Prefer is asked for every unit on the profile, and the squad agrees on a
+// focus without a message only if every unit gets the same answer. It must
+// therefore decide from the candidates alone, which are the same mobs in the
+// same id order for every unit, and not from the unit's role, position or
+// state: f carries the unit, its pose, the default pick as Target and the
+// params for its family, but no actuator or snapshot. It reports false to
+// leave the default pick, and a target outside candidates is ignored.
+type TargetPreferrer interface {
+	FamilyTactic
+	Prefer(f *Fight, candidates []belief.Entity) (belief.Entity, bool)
 }
 
 // tacticRegistry is shared by every unit in the process. Tactics register
@@ -115,4 +134,49 @@ func (l *Life) familyTactic(ctx context.Context, a skill.Actuator, p act.Pose, e
 		}
 	}
 	return false, nil
+}
+
+// preferredTarget lets the profile's tactics steer the squad's focus within a
+// mixed pack. Families are asked in name order and each family's tactics in
+// the profile's order, so every unit on a profile asks the same questions of
+// the same candidates. A player in focus, an order naming a target type and
+// an order that holds, regroups or retreats stand: none is a mob preference
+// to override, and the squad is told them all alike.
+func (l *Life) preferredTarget(p act.Pose, q focusQuery, best belief.Entity) (belief.Entity, bool) {
+	if best.Player || q.wantType != "" || l.warrior == nil {
+		return best, false
+	}
+	switch l.warrior.order().Kind {
+	case OrderHold, OrderRegroup, OrderRetreat:
+		return best, false
+	}
+	pr := l.Profile()
+	if len(pr.Tactics) == 0 {
+		return best, false
+	}
+	cands := focusCandidates(l.ents, q)
+	if len(cands) < 2 {
+		return best, false
+	}
+	present := map[tactics.Family]bool{}
+	for _, c := range cands {
+		present[familyOf(c)] = true
+	}
+	for _, fam := range slices.Sorted(maps.Keys(present)) {
+		for _, n := range pr.TacticsFor(fam) {
+			t, ok := tacticNamed(n, fam)
+			if !ok {
+				continue
+			}
+			tp, ok := t.(TargetPreferrer)
+			if !ok {
+				continue
+			}
+			f := &Fight{Life: l, Pose: p, Target: best, Params: pr.For(fam), Family: fam}
+			if e, ok := tp.Prefer(f, cands); ok && slices.ContainsFunc(cands, func(c belief.Entity) bool { return c.ID == e.ID }) {
+				return e, true
+			}
+		}
+	}
+	return best, false
 }

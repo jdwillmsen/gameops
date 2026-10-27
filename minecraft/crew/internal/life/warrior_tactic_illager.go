@@ -40,6 +40,10 @@ const (
 type illagerTactic struct {
 	name string
 	kill func(Role) []string
+	// shared is the kill order when it is the same for every role, which is
+	// what lets it steer the squad's focus: a role-specific order would give
+	// each unit its own answer and the squad would stop agreeing.
+	shared []string
 }
 
 func (t illagerTactic) Name() string         { return t.name }
@@ -60,7 +64,7 @@ var (
 )
 
 func init() {
-	RegisterTactic(illagerTactic{name: "illager/priority", kill: func(Role) []string { return killPriority }})
+	RegisterTactic(illagerTactic{name: "illager/priority", kill: func(Role) []string { return killPriority }, shared: killPriority})
 	RegisterTactic(illagerTactic{name: "illager/split", kill: func(r Role) []string {
 		switch r {
 		case RoleVanguard:
@@ -98,6 +102,21 @@ func (t illagerTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 		target = e
 	}
 	return l.illagerFight(ctx, f, target)
+}
+
+// Prefer names the illager the kill order wants from a mixed pack, so a
+// zombie with a lower id no longer decides who the squad swings at before an
+// evoker. Health is known to nobody, so the lowest id breaks ties inside a
+// type, as the shared choice does.
+func (t illagerTactic) Prefer(_ *Fight, candidates []belief.Entity) (belief.Entity, bool) {
+	for _, want := range t.shared {
+		for _, c := range candidates {
+			if name(c.Type) == want {
+				return c, true
+			}
+		}
+	}
+	return belief.Entity{}, false
 }
 
 // illagerFocus is the squad's focus with the kill order as the preferred

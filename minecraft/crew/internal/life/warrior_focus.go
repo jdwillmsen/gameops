@@ -1,7 +1,9 @@
 package life
 
 import (
+	"cmp"
 	"math"
+	"slices"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -76,19 +78,7 @@ func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 			}
 			return
 		}
-		k := kindOf(e.Type)
-		if k == other || k == flee || (k == provoked && !q.suspect(e.ID)) {
-			return
-		}
-		if math.Abs(float64(e.Pos.Y()-q.anchor.Y())) > threatHeight {
-			return
-		}
-		if horizontal(e.Pos, q.anchor) > q.rangeOf(e) {
-			return
-		}
-		// A mob this unit gave up on stays given up unless it is close
-		// enough to hit anyway, which only this unit can judge.
-		if q.ignore[e.ID] > q.tick && !q.suspect(e.ID) && !inMeleeReachAt(q.self, e.Pos) {
+		if !q.mobThreat(e) {
 			return
 		}
 		hp := float64(fullHealth)
@@ -110,6 +100,38 @@ func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 		return foe, true
 	}
 	return best, best.ID != 0
+}
+
+// mobThreat says whether a mob is one the squad may focus: hostile, or
+// provoked and recently the unit's attacker, never a creeper, within height
+// and range of the anchor.
+func (q focusQuery) mobThreat(e belief.Entity) bool {
+	k := kindOf(e.Type)
+	if k == other || k == flee || (k == provoked && !q.suspect(e.ID)) {
+		return false
+	}
+	if math.Abs(float64(e.Pos.Y()-q.anchor.Y())) > threatHeight {
+		return false
+	}
+	if horizontal(e.Pos, q.anchor) > q.rangeOf(e) {
+		return false
+	}
+	// A mob this unit gave up on stays given up unless it is close enough to
+	// hit anyway, which only this unit can judge.
+	return !(q.ignore[e.ID] > q.tick && !q.suspect(e.ID) && !inMeleeReachAt(q.self, e.Pos))
+}
+
+// focusCandidates are the mobs the shared choice picks among, by id so every
+// unit lists them in the same order.
+func focusCandidates(ents *belief.Entities, q focusQuery) []belief.Entity {
+	var out []belief.Entity
+	ents.Each(func(e belief.Entity) {
+		if !e.Player && q.mobThreat(e) {
+			out = append(out, e)
+		}
+	})
+	slices.SortFunc(out, func(a, b belief.Entity) int { return cmp.Compare(a.ID, b.ID) })
+	return out
 }
 
 // rangeOf is how far from the anchor e is still focused.
