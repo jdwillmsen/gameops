@@ -190,3 +190,15 @@ func TestFromUnitValidatesAndBounds(t *testing.T) {
 		t.Errorf("stale time kept: %v", e.At)
 	}
 }
+
+func TestFromUnitKeepsAMovementClipReasonAndNothingPositional(t *testing.T) {
+	for _, code := range []string{"predicted_inside_block", "corrected_inside_block", "corrected_in_free_space"} {
+		e, err := FromUnit("crew-03", UnitEvent{Kind: "movement_clip", ReasonCode: code}, t0)
+		if err != nil {
+			t.Fatalf("%s: %v", code, err)
+		}
+		if e.ReasonCode != code || e.Severity != SevWarn || e.Pos != nil {
+			t.Errorf("%s stored as %+v", code, e)
+		}
+	}
+}
