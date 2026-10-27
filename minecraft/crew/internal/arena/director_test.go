@@ -1730,3 +1730,95 @@ func lastAfter(cmds []string, a, b string) bool {
 	i, j := indexOf(cmds, a, true), indexOf(cmds, b, true)
 	return i >= 0 && j > i
 }
+
+func TestRespawnedWarriorIsRetagged(t *testing.T) {
+	clock := newFakeClock()
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	s.place("Vanguard", 0, 65, -760)
+	f := &FakeConsole{Respond: s.Exec}
+	d := &Director{
+		Console: f, Layout: testLayout(), Warriors: []string{"Vanguard"},
+		PlaceSquad: true, WarriorMisses: 3, Out: &strings.Builder{}, Now: clock.Now,
+	}
+	d.Layout.GroundY = 64
+	d.Layout.FloorRadius = 45
+	states := map[string]*warriorState{"Vanguard": {up: true, live: true, downSeen: true}}
+	var result Result
+	if _, err := d.checkWarriors(states, &result); err != nil {
+		t.Fatalf("checkWarriors: %v", err)
+	}
+	if got := f.Count(`tag "Vanguard" add arena_warrior`); got != 1 {
+		t.Errorf("re-tags after respawn = %d, want 1:\n%s", got, strings.Join(f.Cmds, "\n"))
+	}
+	states["Vanguard"].downSeen = false
+	if _, err := d.checkWarriors(states, &result); err != nil {
+		t.Fatalf("checkWarriors: %v", err)
+	}
+	if got := f.Count(`tag "Vanguard" add arena_warrior`); got != 1 {
+		t.Errorf("a steady warrior was re-tagged: %d tags", got)
+	}
+}
+
+func TestWarriorsRetaggedAtEachWaveStart(t *testing.T) {
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true}
+	f := &FakeConsole{Respond: s.Exec}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1), wave("Two", "zombie", 1, 1, 2), wave("Three", "zombie", 1, 1, 1)), newFakeClock())
+	d.Warriors = []string{"Vanguard"}
+	if _, err := d.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := f.Count(`tag "Vanguard" add arena_warrior`); got != 3 {
+		t.Errorf("tag adds = %d, want run start plus waves two and three", got)
+	}
+	if got := f.Count(`tag "Vanguard" remove arena_warrior`); got != 1 {
+		t.Errorf("tag removes = %d, want 1", got)
+	}
+}
+
+func TestAlreadyTaggedReplyIsNotAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		resp func(string) (string, error)
+	}{
+		{"reply", func(c string) (string, error) { return "Could not add tag: already has it", nil }},
+		{"error", func(c string) (string, error) { return "", fmt.Errorf("could not add tag, already present") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Director{Console: &FakeConsole{Respond: tc.resp}, Out: &strings.Builder{}}
+			if err := d.retagWarrior("Vanguard"); err != nil {
+				t.Errorf("retagWarrior: %v", err)
+			}
+		})
+	}
+	d := &Director{Console: &FakeConsole{Respond: func(string) (string, error) { return "", fmt.Errorf("console gone") }}, Out: &strings.Builder{}}
+	if err := d.retagWarrior("Vanguard"); err == nil {
+		t.Error("a real console failure was swallowed")
+	}
+}
+
+func TestRetagFailureMidRunStillUntagsEveryone(t *testing.T) {
+	s := newSim()
+	s.warriorUp = map[string]bool{"Vanguard": true, "Striker": true}
+	adds := 0
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, `tag "Striker" add`) {
+			adds++
+			if adds == 2 {
+				return "", fmt.Errorf("console gone")
+			}
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1), wave("Two", "zombie", 1, 1, 2)), newFakeClock())
+	d.Warriors = []string{"Vanguard", "Striker"}
+	if _, err := d.Run(); err == nil {
+		t.Fatal("Run ignored the re-tag failure")
+	}
+	for _, n := range d.Warriors {
+		if f.Count(fmt.Sprintf("tag %q remove arena_warrior", n)) != 1 {
+			t.Errorf("%s left tagged", n)
+		}
+	}
+}
