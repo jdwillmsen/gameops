@@ -194,3 +194,28 @@ func TestStaticChartsDoesNotEscape(t *testing.T) {
 		}
 	}
 }
+
+func TestKitIsServedWithoutItsTests(t *testing.T) {
+	for path, want := range map[string]string{
+		"/static/kit/dom.js":    "javascript",
+		"/static/kit/states.js": "javascript",
+		"/static/kit/panel.js":  "javascript",
+		"/static/kit/kit.css":   "text/css",
+	} {
+		rec := serve(t, path)
+		if rec.Code != 200 || rec.Body.Len() == 0 {
+			t.Fatalf("%s: status %d, %d bytes", path, rec.Code, rec.Body.Len())
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, want) {
+			t.Fatalf("%s: content type %q", path, ct)
+		}
+		if rec.Header().Get("Content-Security-Policy") == "" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("%s: missing security headers", path)
+		}
+	}
+	for _, p := range []string{"/static/kit/kit.test.mjs", "/static/kit/missing.js", "/static/kit/..%2f..%2fgo.mod"} {
+		if rec := serve(t, p); rec.Code != 404 {
+			t.Fatalf("%s: status %d", p, rec.Code)
+		}
+	}
+}
