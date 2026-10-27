@@ -203,6 +203,7 @@ export const KEYS = [
   ['m', 'radar (signed in)'],
   ['Shift-J', 'jobs and places (signed in)'],
   ['Shift-S', 'squad panel'],
+  ['Shift-D', 'auto-director: follow the most interesting unit; choosing a unit yourself pauses it'],
   ['p', 'pin / unpin picture-in-picture'],
   ['f', 'kiosk: hide the chrome'],
   ['Ctrl-K or :', 'command palette'],

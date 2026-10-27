@@ -131,7 +131,7 @@ func TestOldCameraBookmarkRedirects(t *testing.T) {
 }
 
 func TestEveryScriptTheConsoleImportsIsEmbedded(t *testing.T) {
-	for _, f := range []string{"console.js", "state.js", "fleet.js", "ops.js", "squad.js", "console.css", "timeline.js", "timeline-ui.js", "timeline.css"} {
+	for _, f := range []string{"console.js", "state.js", "fleet.js", "ops.js", "squad.js", "console.css", "timeline.js", "timeline-ui.js", "timeline.css", "director.js", "director-ui.js", "director.css"} {
 		if rec := serve(t, "/static/"+f); rec.Code != 200 || rec.Body.Len() == 0 {
 			t.Errorf("/static/%s: status %d, %d bytes", f, rec.Code, rec.Body.Len())
 		}
