@@ -42,8 +42,10 @@ func (p *Palette) Name(id int32) string {
 	return p.names[id]
 }
 
-// IsAir reports whether the block string is air.
-func IsAir(block string) bool { return block == "air" }
+// IsAir reports whether the block string is any of the three air blocks.
+func IsAir(block string) bool {
+	return block == "air" || block == "cave_air" || block == "void_air"
+}
 
 // Normalize reduces a block as written in a command to its canonical string:
 // no namespace, and block states with their spaces removed, so the generator's
@@ -61,6 +63,9 @@ func Normalize(block string) (string, error) {
 	}
 	if states != "" && (!strings.HasPrefix(states, "[") || !strings.HasSuffix(states, "]")) {
 		return "", fmt.Errorf("block %q: unexpected text after the name", block)
+	}
+	if name == "cave_air" || name == "void_air" {
+		name = "air"
 	}
 	if states == "" {
 		return name, nil

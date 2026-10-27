@@ -17,6 +17,9 @@ const maxTickingAreas = 10
 // tileChunks is the ticking-area side in chunks; 10 x 10 is the 100-chunk cap.
 const tileChunks = 10
 
+// tickingAreaPrefix names the areas this tool adds.
+const tickingAreaPrefix = "crew-repair-"
+
 // lateMarkers name blocks that need a neighbour to hold them (attachables,
 // fluids, powered parts). They are placed after every solid block, as the
 // generator does, or the server would pop them off.
@@ -28,6 +31,11 @@ var lateMarkers = []string{
 
 // IsLate reports whether a block must follow the solid ones.
 func IsLate(block string) bool {
+	// Block states can contain marker words ("open_bit", "vine_..."), so
+	// match the name alone.
+	if i := strings.IndexAny(block, " ["); i >= 0 {
+		block = block[:i]
+	}
 	for _, m := range lateMarkers {
 		if strings.Contains(block, m) {
 			return true
@@ -157,7 +165,7 @@ func tickingTiles(rects []Rect) (setup, teardown []string, err error) {
 		return tiles[i].z < tiles[j].z
 	})
 	for i, t := range tiles {
-		name := fmt.Sprintf("crew-repair-%d", i)
+		name := fmt.Sprintf("%s%d", tickingAreaPrefix, i)
 		setup = append(setup, fmt.Sprintf("tickingarea add %d 0 %d %d 0 %d %s",
 			t.x*side, t.z*side, t.x*side+side-1, t.z*side+side-1, name))
 		teardown = append(teardown, "tickingarea remove "+name)
