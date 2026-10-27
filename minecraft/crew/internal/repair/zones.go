@@ -8,7 +8,7 @@ import (
 
 // Build box of the generator, relative to the layout centre. The layout does
 // not carry it (the director never needed it), so it is restated here;
-// footprint_test.go keeps it covering every area and gate the layout names.
+// TestFootprintCoversTheLayout keeps it covering every area and gate the layout names.
 const (
 	footprintHalfX = 120 // x centre-120 .. centre+119
 	footprintHalfZ = 106 // z centre-106 .. centre+105

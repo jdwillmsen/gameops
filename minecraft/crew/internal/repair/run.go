@@ -16,8 +16,14 @@ var ErrFightActive = errors.New("repair: a fight is in progress")
 // DefaultQuiet is how long the arena must show no tagged mob before repair
 // starts. A director run has zero tagged mobs between waves (the wave pause is
 // 8 s by default), so a single empty count proves nothing; this is several
-// pauses long.
+// pauses long. Two samples are still only probabilistic: until the director
+// holds an arena_active marker, a long pause or a late first spawn can slip
+// through, so run the bot only after the director has exited.
 const DefaultQuiet = 30 * time.Second
+
+// DefaultLoadWait is the pause after the ticking areas are added, so their
+// chunks are loaded before the first fill.
+const DefaultLoadWait = 5 * time.Second
 
 // DefaultBatch is the commands sent between fight re-checks.
 const DefaultBatch = 100
@@ -28,19 +34,40 @@ type Options struct {
 	Crew   []string      // player names allowed online; anyone else blocks the run
 	Quiet  time.Duration // zero means DefaultQuiet
 	Batch  int           // zero means DefaultBatch
-	Sleep  func(time.Duration)
+	// LoadWait is the pause after Setup; zero means DefaultLoadWait.
+	LoadWait time.Duration
+	Sleep    func(time.Duration)
 }
 
 // failureMarkers are console replies that mean a command did not do its job.
-var failureMarkers = []string{"cannot place", "outside of the world", "not loaded", "syntax error", "unknown command", "too many ticking"}
+var failureMarkers = []string{"cannot place", "outside of the world", "not loaded", "syntax error", "unknown command", "too many ticking", "already exists"}
 
 // Apply sends the plan through c unless DryRun. It first proves no fight is
 // running and nobody but the crew is online, then re-proves the fight check
 // between batches, stopping with ErrFightActive the moment a tagged mob shows.
-// A dry run still reads the fight state, so it also shows whether a real run
-// would be refused. Teardown always runs after a Setup, even on failure.
+// A dry run returns before any console call, so it does not show whether a
+// real run would be refused. Teardown always runs after a Setup, even on
+// failure; stale crew-repair-N areas are removed before Setup adds them. The
+// server's 10 ticking-area cap is not checked against areas other tools hold:
+// an add that the server rejects aborts the run through failureMarkers.
+// rep.Status and rep.Error say how the run ended.
 func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 	rep.Dry = o.DryRun
+	rep.Status = StatusDryRun
+	if !o.DryRun {
+		rep.Status = StatusRefused
+		defer func() {
+			switch {
+			case err == nil:
+				rep.Status = StatusApplied
+			case rep.Executed > 0:
+				rep.Status = StatusAborted
+			}
+			if err != nil {
+				rep.Error = err.Error()
+			}
+		}()
+	}
 	sleep := o.Sleep
 	if sleep == nil {
 		sleep = time.Sleep
@@ -52,6 +79,10 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 	batch := o.Batch
 	if batch <= 0 {
 		batch = DefaultBatch
+	}
+	loadWait := o.LoadWait
+	if loadWait == 0 {
+		loadWait = DefaultLoadWait
 	}
 	if o.DryRun {
 		return nil
@@ -81,6 +112,11 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 		return nil
 	}
 	if len(p.Setup) > 0 {
+		for _, cmd := range p.Teardown {
+			// A crashed run can leave its areas behind; the reply is
+			// irrelevant because "not found" is the normal case.
+			_, _ = c.Exec(cmd)
+		}
 		defer func() {
 			for _, cmd := range p.Teardown {
 				if terr := sent(cmd); terr != nil && err == nil {
@@ -94,8 +130,14 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 			return err
 		}
 	}
+	if len(p.Setup) > 0 {
+		sleep(loadWait)
+	}
 	for i, cmd := range p.Repairs {
 		if i > 0 && i%batch == 0 {
+			if err = arena.CheckAlone(c, o.Crew); err != nil {
+				return fmt.Errorf("repair: %w", err)
+			}
 			if err = fightClear(c); err != nil {
 				return err
 			}
