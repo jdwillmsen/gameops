@@ -52,6 +52,9 @@ type bridge struct {
 	TeamB       []string
 	DuelKits    []string
 
+	// Damage, when set, fills damage taken on mob scorecards.
+	Damage arena.DamageSource
+
 	// FightTimeout is a hard wall around the whole fight, set-up included.
 	// A fight it cuts short scores as aborted.
 	FightTimeout time.Duration
@@ -206,7 +209,7 @@ func (b *bridge) mob(ctx context.Context, prof tactics.Profile, ts trainer.Scena
 		RunID:    fmt.Sprintf("%s-%d-%s", sc.Name, ts.Seed, ts.Side),
 		Scenario: sc.Name, Family: sc.Family, Opponent: mobSummary(sc),
 		Profile: prof.Name, Side: ts.Side, Seed: ts.Seed, Warriors: b.Warriors,
-	}}
+	}, Damage: b.Damage, Logf: b.logf}
 	started := b.now()
 	fight := &arena.ScenarioFight{
 		Console: b.Console, Layout: b.Layout, Book: b.Book, Scenario: sc, Seed: ts.Seed,
