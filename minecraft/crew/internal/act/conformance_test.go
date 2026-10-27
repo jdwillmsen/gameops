@@ -393,6 +393,19 @@ func scenarios() []scenario {
 		add(scenario{name: "airborne move into a wall", world: blocks{at(0, 0, 1): {"stone", nil}, at(0, 1, 1): {"stone", nil}}, feet: mgl32.Vec3{0.5, 0.2, 0.5}, vy: 0.1, dz: 0.4})
 	}
 
+	// Poses a few millimetres inside a face.
+	{
+		w := blocks{}
+		lay(w, "stone", nil, at(1, 0, 0), at(-1, 0, 0), at(0, 0, 1), at(0, 0, -1), at(0, 2, 0))
+		add(scenario{name: "embedded in a face to the east", world: w, feet: mgl32.Vec3{0.705, 0, 0.5}, ground: true, dx: 0.1, embedded: true})
+		add(scenario{name: "embedded in a face to the west", world: w, feet: mgl32.Vec3{0.295, 0, 0.5}, ground: true, dx: -0.1, embedded: true})
+		add(scenario{name: "embedded in a face to the south", world: w, feet: mgl32.Vec3{0.5, 0, 0.705}, ground: true, dz: 0.1, embedded: true})
+		add(scenario{name: "embedded in a face to the north", world: w, feet: mgl32.Vec3{0.5, 0, 0.295}, ground: true, dz: -0.1, embedded: true})
+		add(scenario{name: "embedded in a ceiling", world: w, feet: mgl32.Vec3{0.5, 0.205, 0.5}, vy: 0.4, embedded: true})
+		add(scenario{name: "embedded in a floor", world: w, feet: mgl32.Vec3{0.5, -0.005, 0.5}, vy: -0.3, embedded: true})
+		add(scenario{name: "embedded in a face and airborne", world: w, feet: mgl32.Vec3{0.705, 1, 0.5}, vy: -0.1, dx: 0.1, embedded: true})
+	}
+
 	// Edges of the supporting block.
 	{
 		w := blocks{}
