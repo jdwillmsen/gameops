@@ -940,6 +940,69 @@ def vault():
 vault()
 
 
+# ---- 5b. secret doors ---------------------------------------------------------------
+# Each axis tunnel hides a closet behind a two-high stone plug. Two sticky
+# pistons hold it shut while powered; a lever on the tunnel wall cuts the power
+# and they pull the plug into a pocket in the wall. One dust cell sits on a
+# block that touches the lower piston and beside the upper one, so both follow
+# the same lever. Lever up (on) is shut.
+SECRETS = []                                   # (x, y, z) of each lever, for the docs
+
+
+def secret_door(axis, sa, sl):
+    a0 = (A0 if axis == "x" else B0) + 10
+    u = (sa, 0) if axis == "x" else (0, sa)
+    v = (0, sl) if axis == "x" else (sl, 0)
+
+    def at(a, l):
+        return CX + u[0] * a + v[0] * l, CZ + u[1] * a + v[1] * l
+
+    def put_at(a, l, y, m):
+        x, z = at(a, l)
+        cell(x, y, z, m)
+
+    def fill_at(a0_, a1_, l0_, l1_, y0_, y1_, m):
+        for a in range(a0_, a1_ + 1):
+            for l in range(l0_, l1_ + 1):
+                for y in range(y0_, y1_ + 1):
+                    put_at(a, l, y, m)
+
+    facing = {(1, 0): 4, (-1, 0): 5, (0, 1): 2, (0, -1): 3}[(-u[0], -u[1])]
+    sticky = mat("sticky_piston", f'["facing_direction"={facing}]', True)
+    # the closet: a shell, then the room
+    fill_at(a0 - 5, a0 + 9, 4, 10, 49, 53, DBRICK)
+    fill_at(a0 - 4, a0 + 1, 5, 9, 50, 52, AIR)
+    fill_at(a0 - 4, a0 + 1, 5, 9, 49, 49, DTILE)
+    fill_at(a0 - 4, a0 + 1, 5, 9, 53, 53, DEEP)
+    put_at(a0 - 3, 9, 50, CHEST)
+    x, z = at(a0 - 3, 9)
+    ROOM_ID[50 - Y0, z - Z0, x - X0] = ROOM_TYPES.index("trophy")
+    for a in (a0 - 3, a0):
+        put_at(a, 7, 52, LANT_H)
+    fill_at(a0 - 1, a0, 9, 9, 50, 50, GILDED)
+    # the plug and its pocket
+    fill_at(a0, a0, 4, 4, 50, 51, SBRICK)
+    fill_at(a0 + 1, a0 + 1, 4, 4, 50, 51, AIR)
+    for y in (50, 51):
+        put_at(a0 + 2, 4, y, sticky)
+    # block under the dust (powers the lower piston), pocket for the upper dust cell
+    put_at(a0 + 2, 5, 50, DBRICK)
+    fill_at(a0 + 2, a0 + 8, 6, 6, 50, 50, DBRICK)
+    fill_at(a0 + 2, a0 + 2, 5, 5, 51, 51, DUST)
+    fill_at(a0 + 2, a0 + 8, 6, 6, 51, 51, DUST)
+    fill_at(a0 + 8, a0 + 8, 5, 5, 50, 50, DBRICK)
+    put_at(a0 + 8, 5, 51, DUST)
+    put_at(a0 + 8, 4, 51, DBRICK)
+    lv = (-v[0], -v[1])
+    face = FACE[lv]
+    put_at(a0 + 8, 3, 51, mat("lever", f'["lever_direction"="{face}","open_bit"=true]', True))
+    SECRETS.append(at(a0 + 8, 3) + (51,))
+
+
+for _axis, _sa, _sl in (("x", 1, 1), ("x", -1, -1), ("z", 1, -1), ("z", -1, 1)):
+    secret_door(_axis, _sa, _sl)
+
+
 # ---- 6. entities and chest contents -------------------------------------------------
 LOOT = {
     "forge": [("iron_ingot", 64), ("gold_ingot", 32), ("coal", 64), ("copper_ingot", 64), ("netherite_scrap", 8), ("anvil", 1)],

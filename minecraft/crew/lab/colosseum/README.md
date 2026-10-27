@@ -43,6 +43,7 @@ Underground, floor y 49:
 | Ring corridor | round the hall, arches in |
 | Sixteen chambers | forge, armoury, gear selection, library, barracks, infirmary, trophy hall, treasury (iron door), operations room, baths, kitchen, shrine, beast cages, cells, storage, lounge. Chests are stocked and armour stands dressed by `decor.cmds` |
 | Four tunnels | from the ring out under the avenues, climbing a stair to the plaza |
+| Secret closets | one off each tunnel, behind a two-high stone plug held shut by two sticky pistons; the lever on the tunnel wall (up = shut) cuts their power and they pull the plug into the wall. Each closet holds a trophy chest |
 
 ## Controls
 
