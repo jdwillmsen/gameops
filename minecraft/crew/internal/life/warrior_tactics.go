@@ -33,8 +33,9 @@ type Fight struct {
 // every fight tick does. Unhandled, it must have sent nothing, and the
 // role's own fight runs. An error is the tick's error either way.
 //
-// A family may have many tactics; a unit's profile names the one it fights
-// that family with, so each is a variant the trainer can compare.
+// A family may have many tactics; a unit's profile lists the ones it fights
+// that family with, in order, so each is a variant the trainer can compare
+// and a tactic that declines hands the tick to the next.
 type FamilyTactic interface {
 	// Name identifies the variant in a profile, e.g. "creeper/backoff". It
 	// is unique across the process.
@@ -92,34 +93,26 @@ func tacticNamed(name string, f tactics.Family) (FamilyTactic, bool) {
 	return t, true
 }
 
-// familyTactic offers the tick to the tactic the unit's profile names for
-// e's family. No name, or one nothing is registered under, leaves the role's
-// own fight to run: the default profile is the untouched warrior.
+// familyTactic offers the tick to the tactics the unit's profile names for
+// e's family, in the order it lists them: the first to take the tick fights
+// it. A name nothing is registered under, or one that fights another family,
+// is skipped. No name left leaves the role's own fight to run: the default
+// profile is the untouched warrior.
 func (l *Life) familyTactic(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) (bool, error) {
 	fam := familyOf(e)
 	pr := l.Profile()
-	t, ok := tacticNamed(pr.TacticFor(fam), fam)
-	if !ok {
-		return false, nil
+	var f *Fight
+	for _, name := range pr.TacticsFor(fam) {
+		t, ok := tacticNamed(name, fam)
+		if !ok {
+			continue
+		}
+		if f == nil {
+			f = &Fight{Life: l, Actuator: a, Pose: p, Target: e, Snapshot: s, Params: l.warrior.p, Family: fam}
+		}
+		if handled, err := t.Engage(ctx, f); handled || err != nil {
+			return handled, err
+		}
 	}
-	handled, err := t.Engage(ctx, &Fight{Life: l, Actuator: a, Pose: p, Target: e, Snapshot: s, Params: l.warrior.p, Family: fam})
-	if err != nil {
-		l.noteTacticError(pr.TacticFor(fam), fam, err)
-	}
-	return handled, err
-}
-
-// tacticErrorEvery is the ticks (50 ms each) between two logs of one tactic's
-// error: the task runner drops the error, so this line is the only trace.
-const tacticErrorEvery = 20 * 60
-
-func (l *Life) noteTacticError(name string, fam tactics.Family, err error) {
-	if last, ok := l.tacticErrAt[name]; ok && l.tick-last < tacticErrorEvery {
-		return
-	}
-	if l.tacticErrAt == nil {
-		l.tacticErrAt = map[string]uint64{}
-	}
-	l.tacticErrAt[name] = l.tick
-	l.logEvent("tactic_error", map[string]any{"tactic": name, "family": string(fam), "error": err.Error()})
+	return false, nil
 }

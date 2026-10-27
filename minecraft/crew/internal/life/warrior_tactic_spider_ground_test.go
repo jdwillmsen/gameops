@@ -12,7 +12,7 @@ import (
 // spiderTacticProfile names the spider family's tactic variant.
 func spiderTacticProfile(name string) tactics.Profile {
 	pr := tactics.NewProfile("spider " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilySpider: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySpider: {name}}
 	return pr
 }
 
@@ -99,5 +99,35 @@ func TestSpiderGroundRefusesToBackIntoLava(t *testing.T) {
 
 	if moved := start.X() - r.feet().X(); moved > 0.2 {
 		t.Errorf("backed %.2f blocks toward lava, want it holding the safe spot", moved)
+	}
+}
+
+func TestSpiderGroundAndSwarmWorkTogetherInOneProfile(t *testing.T) {
+	pr := tactics.NewProfile("both spiders")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySpider: {"spider/ground", "spider/swarm"}}
+
+	wall := newWarrior(t, "vanguard", start)
+	wall.give(0, 303, 1)
+	if err := wall.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	wall.spawn(50, "minecraft:spider", mgl32.Vec3{22.5, 4, 20.5})
+	wall.run(20)
+	if moved := start.X() - wall.feet().X(); moved < 0.5 {
+		t.Errorf("gave %.2f blocks of ground to a spider on the wall, want ground to take it", moved)
+	}
+
+	swarm := newWarrior(t, "vanguard", start)
+	swarm.give(0, 303, 1)
+	if err := swarm.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	swarm.spawn(50, "minecraft:cave_spider", mgl32.Vec3{22.5, 1, 20.5})
+	swarm.run(40)
+	if len(swarm.out.attacks()) == 0 {
+		t.Error("never swung at the cave spider in reach")
+	}
+	if moved := dist(swarm.feet(), start); moved < 0.2 {
+		t.Errorf("moved %.2f blocks against a cave spider, want the swarm orbit", moved)
 	}
 }

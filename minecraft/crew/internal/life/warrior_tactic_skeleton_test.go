@@ -24,7 +24,7 @@ const (
 // named tactic.
 func usingSkeletonTactic(name string) tactics.Profile {
 	pr := tactics.NewProfile("tactic " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilySkeleton: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySkeleton: {name}}
 	return pr
 }
 
@@ -460,7 +460,7 @@ func TestSkeletonTacticsLeaveOtherFamiliesToTheirOwnFight(t *testing.T) {
 	}
 	base := replay(t, "striker", scenario, nil)
 	pr := tactics.NewProfile("skeleton tactics only")
-	pr.Tactics = map[tactics.Family]string{tactics.FamilySkeleton: "skeleton/zigzag"}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySkeleton: {"skeleton/zigzag"}}
 	got := replay(t, "striker", scenario, func(l *Life) {
 		if err := l.SetProfile(pr); err != nil {
 			t.Fatal(err)

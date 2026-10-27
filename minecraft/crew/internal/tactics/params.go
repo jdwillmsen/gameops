@@ -140,10 +140,12 @@ type Profile struct {
 	Parent    string            `json:"parent,omitempty"`
 	Default   Params            `json:"default"`
 	Overrides map[Family]Params `json:"overrides,omitempty"`
-	// Tactics names the registered tactic variant used against a family. A
-	// family absent here, or mapped to "", runs the engine's own fight, so a
-	// profile that sets nothing fights exactly as shipped.
-	Tactics map[Family]string `json:"tactics,omitempty"`
+	// Tactics names, in order, the registered tactic variants tried against a
+	// family: the first that takes the tick fights it, and the rest are the
+	// fall-through. A family absent here, or mapped to nothing, runs the
+	// engine's own fight, so a profile that sets nothing fights exactly as
+	// shipped.
+	Tactics map[Family][]string `json:"tactics,omitempty"`
 }
 
 // NewProfile returns the shipped behaviour.
@@ -159,8 +161,8 @@ func (pr Profile) For(f Family) Params {
 	return pr.Default
 }
 
-// TacticFor is the tactic variant named for a family, or "" for none.
-func (pr Profile) TacticFor(f Family) string {
+// TacticsFor is the ordered tactic variants named for a family, nil for none.
+func (pr Profile) TacticsFor(f Family) []string {
 	return pr.Tactics[f]
 }
 
