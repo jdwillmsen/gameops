@@ -800,10 +800,9 @@ grass, foliage and water, and draws slabs, stairs, cross-plants and torches as
 simple shapes. Faces carry Bedrock-style shading (top brightest, bottom
 darkest) and soft ambient occlusion at corners; water is translucent with its
 surface two sixteenths below the block's edge, and glass and ice are blended. The
-sky is a gradient whose horizon colour is the fog colour, and fog closes at the
+sky follows the world time (below) and its horizon colour is the fog colour, and fog closes at the
 requested radius so the edge of the loaded terrain fades out. The canvas is
-antialiased at up to 2x pixel ratio. Crew does not receive biome data, so tint is sampled for one climate
-everywhere (the plains biome). The page cannot see block states either, so
+antialiased at up to 2x pixel ratio. The page cannot see block states, so
 stairs, top slabs, doors, trapdoors and snow layers carry their boxes in the
 block name, from the same shape table the unit's pathing uses; past a budget of
 shape variants a block falls back to its default shape.
@@ -830,6 +829,46 @@ and then read the result, and a start that finds the cache filled makes no
 network request. The holder refreshes the lock while it works; one left by a
 crashed unit is taken over after five minutes without a refresh. An unwritable
 cache directory fails at once instead of after the download.
+
+### Lighting, sky and biome tint
+
+The server sends blocks, not light, so the page works light out itself. The
+mesher worker computes sky light (full where nothing is above, falling one
+level through leaves and water, shut out by solid blocks) and block light
+(torches, lava, glowstone, lanterns and the other emitters, by name), spreads
+both one level per block, and bakes the result into each mesh as smooth
+per-vertex light. The vertex shader applies the game's light curve, so the
+time of day changes a uniform, never a mesh: night takes up to 11 levels off
+the sky, with a dim blue moonlight floor where the sky is open, and block light
+warms as it dims. A cave is near black but not pure black. The light reaches
+8 blocks past a sub-chunk's edge, so a torch lights its own surroundings
+exactly but a far one is missed across a chunk boundary; stairs and slabs
+shut light out from half a block of volume, and block state is not on the
+wire, so a campfire or lamp counts as lit only when the server names the lit
+form. Entities are dimmed by the time of day only, not by the light where they
+stand. Weather does not darken the sky.
+
+The unit sends the world time (a time frame, from the start-game data, set
+time packets and the day-cycle rule); the page runs it on at 20 ticks a second
+unless the cycle is stopped, and `?time=<ticks>` pins it (tick 0 is sunrise,
+6000 noon, 18000 midnight). The sky has the game's colour curves, a glow at
+sunrise and sunset, square sun and moon, and stars at night. `l` toggles light
+(fully lit when off); the debug box shows the hour.
+
+Biomes come from the chunk payload: the surface biome of each column goes to
+the page with the first sub-chunk replayed in it, and a table gives each
+biome's grass, foliage and water colour (the atlas colour maps sampled at the
+climate in the server's biome definitions) and water opacity (from the pack's
+biome file). Each block averages the biomes within two blocks, so a border
+fades. A server that sends no biome definitions, or a column whose biomes did
+not parse, is tinted as plains. Seen from under water the view is the biome's
+water colour, closing in within 24 blocks.
+
+Cost: the extra work is in the worker (about 2.7 ms against 0.9 ms to mesh a
+typical sub-chunk, so a first view settles later) and one byte pair per vertex.
+The page frame is unchanged: one tile at radius 4 on software GL measured 18.8
+fps with 0.7 ms of frame work, against 17.7 to 18.9 fps for main in the table
+below.
 
 ### Entities
 
