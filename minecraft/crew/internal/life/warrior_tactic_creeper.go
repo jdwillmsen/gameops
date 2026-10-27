@@ -296,14 +296,26 @@ func mateBeyond(l *Life, from, creeper mgl32.Vec3, reach float64) bool {
 // profile keeps the shipped range; one that names a creeper tactic is given
 // the room that tactic needs to finish what it started.
 func (l *Life) creeperWatch(p act.Pose) float64 {
-	t, ok := tacticNamed(l.Profile().TacticFor(tactics.FamilyCreeper), tactics.FamilyCreeper)
-	if !ok {
+	var charged func(belief.Entity) bool
+	named := false
+	for _, n := range l.Profile().TacticsFor(tactics.FamilyCreeper) {
+		t, ok := tacticNamed(n, tactics.FamilyCreeper)
+		if !ok {
+			continue
+		}
+		named = true
+		if ct, ok := t.(*creeperTactic); ok && ct.charged != nil {
+			charged = ct.charged
+			break
+		}
+	}
+	if !named {
 		return creeperRange
 	}
-	if ct, ok := t.(*creeperTactic); ok && ct.charged != nil {
+	if charged != nil {
 		found := false
 		l.ents.Each(func(e belief.Entity) {
-			if !found && !e.Player && kindOf(e.Type) == flee && horizontal(p.Feet, e.Pos) <= chargedWatchRange && ct.charged(e) {
+			if !found && !e.Player && kindOf(e.Type) == flee && horizontal(p.Feet, e.Pos) <= chargedWatchRange && charged(e) {
 				found = true
 			}
 		})

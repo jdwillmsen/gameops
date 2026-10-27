@@ -23,7 +23,7 @@ const (
 // illagerProfile fights the illager family with the named tactic.
 func illagerProfile(tactic string) tactics.Profile {
 	pr := tactics.NewProfile("illager " + tactic)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyIllager: tactic}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyIllager: {tactic}}
 	return pr
 }
 

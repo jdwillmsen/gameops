@@ -1,6 +1,9 @@
 package tactics
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestDefaultsInsideBounds(t *testing.T) {
 	d := Defaults()
@@ -56,14 +59,17 @@ func TestScoreOrdersOutcomes(t *testing.T) {
 	}
 }
 
-func TestTacticForDefaultsToNone(t *testing.T) {
+func TestTacticsForDefaultsToNoneAndKeepsOrder(t *testing.T) {
 	pr := NewProfile("p")
-	if pr.TacticFor(FamilyCreeper) != "" {
+	if len(pr.TacticsFor(FamilyCreeper)) != 0 {
 		t.Error("a new profile selects a tactic")
 	}
-	pr.Tactics = map[Family]string{FamilyCreeper: "creeper/backoff"}
-	if pr.TacticFor(FamilyCreeper) != "creeper/backoff" || pr.TacticFor(FamilyZombie) != "" {
-		t.Error("tactic lookup wrong")
+	pr.Tactics = map[Family][]string{FamilySpider: {"spider/ground", "spider/swarm"}}
+	if got := pr.TacticsFor(FamilySpider); !reflect.DeepEqual(got, []string{"spider/ground", "spider/swarm"}) {
+		t.Errorf("spider tactics = %v, want the listed order", got)
+	}
+	if len(pr.TacticsFor(FamilyZombie)) != 0 {
+		t.Error("a family with no list got tactics")
 	}
 }
 
@@ -73,7 +79,7 @@ func TestABossOverrideAndTacticLoadClampedAndStayWithTheBoss(t *testing.T) {
 		"orbitMin":1.5,"critWindow":12,"meleeShieldTicks":12},
 		"overrides":{"boss":{"focusRange":12,"healBelow":99,"healSafe":3,"pressRange":1.6,"regroupWithin":3,
 		"kiteBackoff":5,"shotEvery":60,"arrowNear":3,"lineWidth":1.2,"orbitMin":1.5,"critWindow":12,"meleeShieldTicks":12}},
-		"tactics":{"boss":"boss/kiteburst"}}`))
+		"tactics":{"boss":["boss/kiteburst"]}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +90,7 @@ func TestABossOverrideAndTacticLoadClampedAndStayWithTheBoss(t *testing.T) {
 	if pr.For(FamilyZombie) != pr.Default {
 		t.Error("a boss override reached the zombie family")
 	}
-	if pr.TacticFor(FamilyBoss) != "boss/kiteburst" || pr.TacticFor(FamilyZombie) != "" {
+	if !reflect.DeepEqual(pr.TacticsFor(FamilyBoss), []string{"boss/kiteburst"}) || len(pr.TacticsFor(FamilyZombie)) != 0 {
 		t.Error("boss tactic lookup wrong")
 	}
 }

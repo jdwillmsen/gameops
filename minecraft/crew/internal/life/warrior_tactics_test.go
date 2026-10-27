@@ -78,7 +78,7 @@ func withTactics(t *testing.T, ts ...FamilyTactic) {
 // tactic.
 func usingTactic(name string) tactics.Profile {
 	pr := tactics.NewProfile("tactic " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyZombie: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyZombie: {name}}
 	return pr
 }
 
@@ -94,7 +94,7 @@ func TestANoOpTacticIsOfferedTheTickAndTheRoleFightRuns(t *testing.T) {
 	tuned := tactics.Defaults()
 	tuned.CritWindow = 8
 	pr.Overrides = map[tactics.Family]tactics.Params{tactics.FamilyZombie: tuned}
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyZombie: "zombie/pass"}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyZombie: {"zombie/pass"}}
 	setPr := func(l *Life) {
 		if err := l.SetProfile(pr); err != nil {
 			t.Fatal(err)
@@ -335,5 +335,98 @@ func TestSwappingTheProfileSwitchesTheTacticMidFight(t *testing.T) {
 	}
 	if len(r.out.attacks()) == 0 {
 		t.Error("the role fight never resumed after the swap")
+	}
+}
+
+func zombieList(names ...string) tactics.Profile {
+	pr := tactics.NewProfile("zombie list")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyZombie: names}
+	return pr
+}
+
+func TestTheFirstTacticToTakeTheTickWinsInListedOrder(t *testing.T) {
+	first := &standTactic{name: "zombie/first", family: tactics.FamilyZombie}
+	second := &standTactic{name: "zombie/second", family: tactics.FamilyZombie}
+	withTactics(t, first, second)
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(zombieList("zombie/second", "zombie/first")); err != nil {
+		t.Fatal(err)
+	}
+	strikerOnAZombie(r)
+	if second.ticks == 0 {
+		t.Fatal("the tactic listed first never took a tick")
+	}
+	if first.ticks != 0 {
+		t.Errorf("the tactic listed second was offered %d ticks the first had taken", first.ticks)
+	}
+}
+
+func TestATacticThatDeclinesFallsThroughToTheNext(t *testing.T) {
+	pass := &passTactic{name: "zombie/pass", family: tactics.FamilyZombie}
+	stand := &standTactic{name: "zombie/stand", family: tactics.FamilyZombie}
+	withTactics(t, pass, stand)
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(zombieList("zombie/pass", "zombie/stand")); err != nil {
+		t.Fatal(err)
+	}
+	strikerOnAZombie(r)
+	if len(pass.seen) == 0 || stand.ticks == 0 {
+		t.Fatalf("offered %d ticks to the decliner and %d taken by the next, want both", len(pass.seen), stand.ticks)
+	}
+	if len(pass.seen) != stand.ticks {
+		t.Errorf("the decliner saw %d ticks and the next took %d, want every tick passed on", len(pass.seen), stand.ticks)
+	}
+	if n := len(r.out.attacks()); n != 0 {
+		t.Errorf("%d attacks while the second tactic held the fight", n)
+	}
+}
+
+func TestAListedTacticThatDeclinesEverywhereLeavesTheRoleFight(t *testing.T) {
+	a := &passTactic{name: "zombie/a", family: tactics.FamilyZombie}
+	b := &passTactic{name: "zombie/b", family: tactics.FamilyZombie}
+	withTactics(t, a, b)
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(zombieList("zombie/a", "zombie/b")); err != nil {
+		t.Fatal(err)
+	}
+	strikerOnAZombie(r)
+	if len(a.seen) == 0 || len(b.seen) == 0 {
+		t.Fatal("not every listed tactic was offered the tick")
+	}
+	if len(r.out.attacks()) == 0 {
+		t.Error("the striker never swung after every listed tactic declined")
+	}
+}
+
+func TestUnknownAndOtherFamilyNamesAreSkippedNotFatal(t *testing.T) {
+	skeleton := &standTactic{name: "skeleton/stand", family: tactics.FamilySkeleton}
+	stand := &standTactic{name: "zombie/stand", family: tactics.FamilyZombie}
+	withTactics(t, skeleton, stand)
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(zombieList("zombie/missing", "skeleton/stand", "zombie/stand")); err != nil {
+		t.Fatal(err)
+	}
+	strikerOnAZombie(r)
+	if skeleton.ticks != 0 {
+		t.Errorf("a skeleton tactic took %d zombie ticks", skeleton.ticks)
+	}
+	if stand.ticks == 0 {
+		t.Error("the valid tactic after the skipped names never took a tick")
+	}
+}
+
+func TestAnEmptyTacticListIsTheRoleFight(t *testing.T) {
+	pass := &passTactic{name: "zombie/pass", family: tactics.FamilyZombie}
+	withTactics(t, pass)
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(zombieList()); err != nil {
+		t.Fatal(err)
+	}
+	strikerOnAZombie(r)
+	if len(pass.seen) != 0 {
+		t.Errorf("an empty list offered %d ticks to a tactic", len(pass.seen))
+	}
+	if len(r.out.attacks()) == 0 {
+		t.Error("the striker never swung with an empty list")
 	}
 }

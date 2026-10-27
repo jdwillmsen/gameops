@@ -64,7 +64,7 @@ func usingKite(fam tactics.Family) tactics.Profile {
 		tactics.FamilyZombie: "zombie/kite", tactics.FamilySpider: "spider/kite", tactics.FamilyBrute: "brute/kite",
 	}[fam]
 	pr := tactics.NewProfile("kite " + name)
-	pr.Tactics = map[tactics.Family]string{fam: name}
+	pr.Tactics = map[tactics.Family][]string{fam: {name}}
 	return pr
 }
 

@@ -13,7 +13,7 @@ import (
 // bossTactic is a profile that fights bosses with the named tactic.
 func bossTactic(name string) *tactics.Profile {
 	pr := tactics.NewProfile("boss " + name)
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyBoss: name}
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyBoss: {name}}
 	return &pr
 }
 
@@ -245,7 +245,7 @@ func TestTheDefaultProfileAndTheStandardTacticNeverKite(t *testing.T) {
 		t.Error("naming the standard tactic changed the fight")
 	}
 	zombieOnly := tactics.NewProfile("kite the zombies")
-	zombieOnly.Tactics = map[tactics.Family]string{tactics.FamilyZombie: bossKiteBurstName}
+	zombieOnly.Tactics = map[tactics.Family][]string{tactics.FamilyZombie: {bossKiteBurstName}}
 	if !reflect.DeepEqual(run(&zombieOnly), base) {
 		t.Error("a boss tactic named for the zombie family changed the boss fight")
 	}
