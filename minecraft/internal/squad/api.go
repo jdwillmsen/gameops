@@ -38,6 +38,11 @@ const (
 	// A hello, a status or a call-out is a few dozen bytes by contract; the
 	// cap keeps a lost unit from becoming a place to park data.
 	maxBodyLen = 1 << 10
+	// A profile is the whole tuning surface — a default set and every
+	// family override — so it is kilobytes where a hello is a line. The
+	// cap keeps the same promise: nothing a unit posts may park data on a
+	// squad.
+	maxProfileLen = 64 << 10
 	// A squad's display name is one line on the console.
 	maxName = 24
 	// A focus target is a mob name; anything longer is not one.
@@ -102,6 +107,8 @@ type squadBackend interface {
 	Callout(calloutIn, time.Time)
 	Order(orderIn)
 	SetStart(squadID string, p position) bool
+	SetProfile(squadID string, p profileWire) bool
+	Profile(squadID string) (profileWire, bool)
 	Has(id string) bool
 	Member(squadID, unit string) bool
 	Delta(id string, since int64) (Delta, bool)
@@ -139,6 +146,8 @@ func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	mux.HandleFunc("POST /v1/squads/{id}/status", a.guard(a.status))
 	mux.HandleFunc("POST /v1/squads/{id}/callout", a.guard(a.callout))
 	mux.HandleFunc("GET /v1/squads/{id}/orders", a.guard(a.orders))
+	mux.HandleFunc("GET /v1/squads/{id}/profile", a.guard(a.getProfile))
+	mux.HandleFunc("PUT /v1/squads/{id}/profile", a.guard(a.putProfile))
 	return a
 }
 
@@ -173,11 +182,11 @@ func (a *API) guard(next func(http.ResponseWriter, *http.Request)) http.HandlerF
 	}
 }
 
-// decodeStrict reads one JSON body of at most maxBodyLen with the field
-// table closed; a second value after the first is not part of any of our
+// decodeStrict reads one JSON body of at most limit with the field table
+// closed; a second value after the first is not part of any of our
 // formats.
-func decodeStrict(w http.ResponseWriter, r *http.Request, v any) bool {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyLen))
+func decodeStrict(w http.ResponseWriter, r *http.Request, limit int64, v any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	dec.DisallowUnknownFields()
 	err := dec.Decode(v)
 	if err == nil {
@@ -225,7 +234,7 @@ func shortPrintable(s string, n int) bool {
 
 func (a *API) hello(w http.ResponseWriter, r *http.Request) {
 	var b helloBody
-	if !decodeStrict(w, r, &b) {
+	if !decodeStrict(w, r, maxBodyLen, &b) {
 		return
 	}
 	if !a.units.Has(b.Unit) ||
@@ -263,7 +272,7 @@ type statusBody struct {
 
 func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	var b statusBody
-	if !decodeStrict(w, r, &b) {
+	if !decodeStrict(w, r, maxBodyLen, &b) {
 		return
 	}
 	if !a.units.Has(b.Unit) || b.Food < 0 || b.Food > 20 ||
@@ -287,7 +296,7 @@ func (a *API) callout(w http.ResponseWriter, r *http.Request) {
 		Unit string `json:"unit"`
 		Kind string `json:"kind"`
 	}
-	if !decodeStrict(w, r, &b) {
+	if !decodeStrict(w, r, maxBodyLen, &b) {
 		return
 	}
 	id := r.PathValue("id")
@@ -326,7 +335,7 @@ func validCoord(c float64) bool {
 
 func (a *API) start(w http.ResponseWriter, r *http.Request) {
 	var b startBody
-	if !decodeStrict(w, r, &b) {
+	if !decodeStrict(w, r, maxBodyLen, &b) {
 		return
 	}
 	if b.Pos == nil || b.Pos.X == nil || b.Pos.Y == nil || b.Pos.Z == nil ||
@@ -352,7 +361,7 @@ type orderBody struct {
 
 func (a *API) order(w http.ResponseWriter, r *http.Request, op string) {
 	var b orderBody
-	if !decodeStrict(w, r, &b) {
+	if !decodeStrict(w, r, maxBodyLen, &b) {
 		return
 	}
 	if !orderRE.MatchString(b.Kind) || utf8.RuneCountInString(b.Target) > maxTarget {
@@ -369,6 +378,52 @@ func (a *API) order(w http.ResponseWriter, r *http.Request, op string) {
 	a.store.Order(orderIn{Squad: id, Kind: b.Kind, Target: b.Target, By: op})
 	a.broadcast(id)
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// getProfile serves the squad's current tactics profile. A squad nobody
+// handed one answers 404: the unit reads that as "fight on the shipped
+// defaults", which is also what a unit with no profile route does.
+func (a *API) getProfile(w http.ResponseWriter, r *http.Request) {
+	p, ok := a.store.Profile(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// putProfile stores a new tactics profile. Only a lab squad takes one:
+// the mark is the squad's id, so a trainer pointed at a production
+// squad is refused here no matter what token it holds. The shape is the
+// mirrored contract; the bounds clamp runs on the unit that loads it.
+func (a *API) putProfile(w http.ResponseWriter, r *http.Request) {
+	var p profileWire
+	if !decodeStrict(w, r, maxProfileLen, &p) {
+		return
+	}
+	if !p.valid() {
+		http.Error(w, "bad profile", http.StatusBadRequest)
+		return
+	}
+	// The same order as a call-out: the body is judged first, then the
+	// squad, then the right to speak on it.
+	id := r.PathValue("id")
+	if !a.store.Has(id) {
+		http.NotFound(w, r)
+		return
+	}
+	if !labSquad(id) {
+		http.Error(w, "not a lab squad", http.StatusForbidden)
+		return
+	}
+	if !a.store.SetProfile(id, p) {
+		http.NotFound(w, r)
+		return
+	}
+	// A stored profile is news for every parked poll: the revision moved,
+	// so the waiters answer and carry the new profileSeq.
+	a.broadcast(id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // orders long-polls the squad's messages: everything appended since the
