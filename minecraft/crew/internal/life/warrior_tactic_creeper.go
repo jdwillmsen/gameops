@@ -70,17 +70,16 @@ const (
 // ranged variant stays out of the fuse's reach altogether and lets a Ranger
 // shoot what is not yet burning.
 //
-// Belief carries a creeper's type and position and nothing else, so the
-// fuse is read from behaviour: a creeper that lights its fuse stops where it
-// stands. A stopped creeper close by is taken for a lit one; the mistake of
-// backing off an idle one costs a few steps, the mistake the other way a
-// blast.
+// The fuse is read from the actor's flags when the server has sent them.
+// Until it has, and for a server that never does, it is read from behaviour:
+// a creeper that lights its fuse stops where it stands. A stopped creeper
+// close by is taken for a lit one; the mistake of backing off an idle one
+// costs a few steps, the mistake the other way a blast.
 type creeperTactic struct {
 	name   string
 	ranged bool
-	// charged says a creeper is charged, which belief cannot tell today. A
-	// nil one means none is: the radius for a charged blast is applied the
-	// moment something can say so.
+	// charged says a creeper is charged when its flags are not known, which
+	// is how a test stands one in. A nil one means none is.
 	charged func(belief.Entity) bool
 
 	units unitScratch[creeperMemory]
@@ -140,16 +139,24 @@ func (c *creeperTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 	m.prune(l)
 	t := m.observe(l.tick, e)
 	d := horizontal(f.Pose.Feet, e.Pos)
-	if d <= igniteWithin && !t.moving && l.tick-t.movedAt >= stillTicks {
+	if !e.FlagsKnown && d <= igniteWithin && !t.moving && l.tick-t.movedAt >= stillTicks {
 		t.litUntil = max(t.litUntil, t.movedAt+fuseTicks+fuseGrace)
 	}
-	lit := l.tick < t.litUntil
-	charged := c.charged != nil && c.charged(e)
+	lit := l.tick < t.litUntil || e.Ignited
+	charged := c.isCharged(e)
 
 	if c.ranged && w.role == RoleRanger && l.rangerArmed(f.Snapshot) {
 		return c.shoot(ctx, f, m, d, lit, charged)
 	}
 	return c.melee(ctx, f, m, t, d, lit, charged)
+}
+
+// isCharged says whether a creeper's blast is the doubled one.
+func (c *creeperTactic) isCharged(e belief.Entity) bool {
+	if e.FlagsKnown {
+		return e.Charged
+	}
+	return c.charged != nil && c.charged(e)
 }
 
 // melee lunges at a creeper that has not lit its fuse and backs out of the
@@ -295,7 +302,7 @@ func mateBeyond(l *Life, from, creeper mgl32.Vec3, reach float64) bool {
 // profile keeps the shipped range; one that names a creeper tactic is given
 // the room that tactic needs to finish what it started.
 func (l *Life) creeperWatch(p act.Pose) float64 {
-	var charged func(belief.Entity) bool
+	var ct *creeperTactic
 	named := false
 	for _, n := range l.Profile().TacticsFor(tactics.FamilyCreeper) {
 		t, ok := tacticNamed(n, tactics.FamilyCreeper)
@@ -303,18 +310,18 @@ func (l *Life) creeperWatch(p act.Pose) float64 {
 			continue
 		}
 		named = true
-		if ct, ok := t.(*creeperTactic); ok && ct.charged != nil {
-			charged = ct.charged
+		if c, ok := t.(*creeperTactic); ok {
+			ct = c
 			break
 		}
 	}
 	if !named {
 		return creeperRange
 	}
-	if charged != nil {
+	if ct != nil {
 		found := false
 		l.ents.Each(func(e belief.Entity) {
-			if !found && !e.Player && kindOf(e.Type) == flee && horizontal(p.Feet, e.Pos) <= chargedWatchRange && charged(e) {
+			if !found && !e.Player && kindOf(e.Type) == flee && horizontal(p.Feet, e.Pos) <= chargedWatchRange && ct.isCharged(e) {
 				found = true
 			}
 		})
