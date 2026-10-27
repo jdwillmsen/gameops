@@ -8,6 +8,7 @@
 //	arenadirector status --lab <lab> [--warriors names]
 //	arenadirector boss --lab <lab> --layout <file> --mob <id> [options]
 //	arenadirector boss --summary [--log <path>]
+//	arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [options]
 //
 // <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>.
 // run prints one JSON result line on stdout; progress goes to stderr.
@@ -22,6 +23,13 @@
 // run and boss take --scorecards <path> to also append one tactics scorecard
 // per fight (the trainer's input) without changing their own output. Damage
 // is not readable from the Bedrock console, so scorecards carry zero damage.
+//
+// duel fights two equal sides of crew warriors against each other on the
+// lab's Colosseum floor for --rounds rounds, swapping the spawn lines every
+// round, and appends one tactics scorecard per side per round to --scores. It
+// prints one JSON line per round, exits 2 on a non-crew player like boss does,
+// and accepts only the crew lab as target. The rounds, per-round time and
+// wall-clock time are all capped.
 package main
 
 import (
@@ -57,6 +65,8 @@ func main() {
 		status(os.Args[2:])
 	case "boss":
 		boss(os.Args[2:])
+	case "duel":
+		duel(os.Args[2:])
 	default:
 		usage()
 	}
@@ -66,7 +76,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n]]\n"+
 		"       arenadirector reset --lab <lab>\n"+
 		"       arenadirector status --lab <lab> [--warriors names]\n"+
-		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n]]")
+		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n]]\n"+
+		"       arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [--kits vanguard/t5,ranger/t5] [--rounds N] [--timeout 2m] [--max-wall 30m] [--red-profile P] [--blue-profile P] [--crew-names names] [--scores <path>] [--stop-file <path>]")
 	os.Exit(2)
 }
 
