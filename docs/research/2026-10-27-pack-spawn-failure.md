@@ -94,9 +94,11 @@ checkable without the live lab:
   (`DownloadResourcePack` returns false). It never renders, so the download is
   pure risk and egress. Verified here: with the pack installed and
   `texturepack-required=true`, 20/20 units still spawn, and BDS 1.26.52.3 does
-  not eject them. This removes the whole pack phase from the unit's login, so
-  whichever pack-related stall the lab hit cannot recur for crew. Retail
-  players still get the pack.
+  not eject them. This removes the pack download from the unit's login. It is a
+  mitigation, not a proven fix: the failure did not reproduce, and decline
+  behaviour was only tested on BDS 1.26.52.3, not on the 1.26.60.x release
+  that `VERSION: LATEST` can now resolve to. Retail players still get the
+  pack.
 - Server side: keep `texturepack-required=false` for the lab so players are not
   forced; ship the add-on only after a crew build with this change is live.
 - Rollout order: (1) release crew with the change, units verified spawning on
@@ -113,4 +115,3 @@ Declining a pack is accepted by BDS 1.26.52.3 here and in the JDW-214 probe. A
 different BDS release could enforce the requirement; the symptom would be an
 immediate disconnect with a pack message, not a hang.
 
-Scratch: `/tmp/probe215` (harness scripts, bots, per-run data).
