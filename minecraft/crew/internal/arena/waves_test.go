@@ -186,7 +186,10 @@ func TestCustomMobValidation(t *testing.T) {
 		wantErr string
 	}{
 		{"namespaced mob", strings.Replace(minimalWaves, "mob: zombie", "mob: "+brute, 1), ""},
-		{"empty namespace", strings.Replace(minimalWaves, "mob: zombie", `mob: ":brute"`, 1), "namespace:name"},
+		{"digits after the first char", strings.Replace(minimalWaves, "mob: zombie", "mob: game2ops:brute_2", 1), ""},
+		{"leading digit in name", strings.Replace(minimalWaves, "mob: zombie", "mob: gameops:2brute", 1), "lowercase identifier"},
+		{"leading digit in namespace", strings.Replace(minimalWaves, "mob: zombie", "mob: 2gameops:brute", 1), "lowercase identifier"},
+		{"empty namespace", strings.Replace(minimalWaves, "mob: zombie", `mob: ":brute"`, 1), "lowercase identifier"},
 		{"empty name", strings.Replace(minimalWaves, "mob: zombie", `mob: "gameops:"`, 1), "namespace:name"},
 		{"two colons", strings.Replace(minimalWaves, "mob: zombie", `mob: "a:b:c"`, 1), "namespace:name"},
 		{"custom variant", strings.Replace(strings.Replace(minimalWaves, "mob: zombie", "mob: "+brute, 1), "pen: 1}", "variant: minecraft:charged_creeper, pen: 1}", 1), "cannot take a spawn-event variant"},

@@ -283,3 +283,25 @@ func TestCustomMobSpawnTagsAndCountsLikeAVanillaOne(t *testing.T) {
 		t.Errorf("countCommand = %q", got)
 	}
 }
+
+func TestVanillaMobStillGearedBesideAPackMob(t *testing.T) {
+	recipe := Tier{
+		Gear:    []Gear{{Slot: "weapon.mainhand", Item: "iron_sword"}},
+		Enchant: &Enchant{ID: "sharpness", Level: 3},
+	}
+	vanilla := testSpawn().commands(recipe)
+	pack := testSpawn()
+	pack.Type = "gameops:training_dummy_brute"
+	packCmds := pack.commands(recipe)
+	for _, want := range []string{
+		"replaceitem entity @e[tag=arena_tiered] slot.weapon.mainhand 0 iron_sword 1",
+		"enchant @e[tag=arena_tiered] sharpness 3",
+	} {
+		if !hasCommand(vanilla, want) {
+			t.Errorf("vanilla mob lacks %q", want)
+		}
+		if hasCommand(packCmds, want) {
+			t.Errorf("pack mob got %q", want)
+		}
+	}
+}
