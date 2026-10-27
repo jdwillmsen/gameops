@@ -297,6 +297,11 @@ func (d *Director) Run() (Result, error) {
 			result.DurationSeconds = d.now().Sub(start).Seconds()
 			return result, nil
 		}
+		if wi > 0 {
+			if err := d.retagWarriors(); err != nil {
+				return result, err
+			}
+		}
 		if err := d.closeWavePens(wave); err != nil {
 			return result, err
 		}
@@ -663,6 +668,33 @@ func (d *Director) tagWarriors() error {
 	return nil
 }
 
+// retagWarrior re-applies the tag to one warrior. Tags may not survive a
+// death, and adding is idempotent: a reply or error saying the target already
+// has the tag, or that nothing was added, is success.
+func (d *Director) retagWarrior(name string) error {
+	cmd, err := warriorTagCommand(name)
+	if err != nil {
+		return err
+	}
+	if _, err := d.exec(cmd); err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "already") || strings.Contains(msg, "could not add") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (d *Director) retagWarriors() error {
+	for _, name := range d.Warriors {
+		if err := d.retagWarrior(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // untagWarriors is best-effort so cleanup cannot mask the run's outcome.
 func (d *Director) untagWarriors() {
 	for _, name := range d.Warriors {
@@ -958,6 +990,9 @@ func (d *Director) observeWarrior(name string, i int, st *warriorState, respawne
 		// The death this poll reports is now accounted for; the next down
 		// starts a fresh count.
 		st.deathCounted = false
+		if err := d.retagWarrior(name); err != nil {
+			return err
+		}
 	}
 	// Without a floor there is no start cell to return to, and a jump threshold
 	// of zero would read ordinary movement as a respawn at the world spawn.
