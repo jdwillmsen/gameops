@@ -63,10 +63,13 @@ func TestNetworkDecoderToleratesATrailer(t *testing.T) {
 func TestNetworkDecoderReadsALegacyChunk(t *testing.T) {
 	stone := stoneHash(t)
 	payload := append(uniform(stone), uniform(unknownHash)...)
-	payload = append(payload, 0x01, 0x00) // biomes, ignored
-	secs, err := NewNetworkDecoder(nil).Chunk(payload, 2)
+	payload = append(payload, 0x01, 0x00) // biomes
+	secs, rest, err := NewNetworkDecoder(nil).Chunk(payload, 2)
 	if err != nil {
 		t.Fatalf("Chunk: %v", err)
+	}
+	if string(rest) != "\x01\x00" {
+		t.Errorf("rest = % x, want the biome bytes", rest)
 	}
 	if len(secs) != 2 || secs[0].Y != -4 || secs[1].Y != -3 {
 		t.Fatalf("sections = %+v", secs)

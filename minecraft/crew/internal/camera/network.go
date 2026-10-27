@@ -82,14 +82,14 @@ func (d *NetworkDecoder) SubChunk(payload []byte) (Section, error) {
 }
 
 // Chunk reads the legacy LevelChunk layout: count sub-chunks back to back,
-// then biomes, which the camera ignores.
-func (d *NetworkDecoder) Chunk(payload []byte, count int) ([]PlacedSection, error) {
+// then biomes, which are left in rest.
+func (d *NetworkDecoder) Chunk(payload []byte, count int) ([]PlacedSection, []byte, error) {
 	var out []PlacedSection
 	rest := payload
 	for i := 0; i < count; i++ {
 		sc, err := subchunk.Decode(rest)
 		if err != nil {
-			return nil, fmt.Errorf("section %d: %w", i, err)
+			return nil, nil, fmt.Errorf("section %d: %w", i, err)
 		}
 		// Each decode reports what followed it as its trailer; that is the
 		// next section.
@@ -99,7 +99,7 @@ func (d *NetworkDecoder) Chunk(payload []byte, count int) ([]PlacedSection, erro
 		}
 		out = append(out, PlacedSection{Y: int32(minSubY + i), Section: d.section(sc)})
 	}
-	return out, nil
+	return out, rest, nil
 }
 
 func (d *NetworkDecoder) BlockName(networkID uint32) (string, bool) {

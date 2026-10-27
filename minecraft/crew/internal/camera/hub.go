@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/atlas"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
-	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/subchunk"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -631,14 +630,12 @@ func (h *Hub) levelChunk(p *packet.LevelChunk) {
 		h.noteBiomes(p.Position, p.RawPayload)
 		return
 	}
-	if rest, err := subchunk.Skip(p.RawPayload, int(p.SubChunkCount)); err == nil {
-		h.noteBiomes(p.Position, rest)
-	}
-	secs, err := h.dec.Chunk(p.RawPayload, int(p.SubChunkCount))
+	secs, rest, err := h.dec.Chunk(p.RawPayload, int(p.SubChunkCount))
 	if err != nil {
 		h.decodeFailures.Add(1)
 		return
 	}
+	h.noteBiomes(p.Position, rest)
 	for _, s := range secs {
 		h.emit(p.Position[0], s.Y, p.Position[1], s.Section)
 	}
