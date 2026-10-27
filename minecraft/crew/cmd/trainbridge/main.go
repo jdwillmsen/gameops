@@ -7,6 +7,10 @@
 //
 //	--profile-dir <dir> --warriors A,B,C [--team-a A,B --team-b C,D --kits ...]"
 //
+// Instead of --profile-dir, --squad-url and --squad lab-<name> hand the
+// profile to the lab squad's route with the token in CONTROL_TOKEN; a duel
+// also needs --squad-b, since a squad has one profile.
+//
 // Mob scenarios come from the arena scenario book and are fought by the
 // warriors; a duel scenario pits --team-a (the candidate) against --team-b
 // (--opponent-profile, default the shipped one) for one round, and the b side
@@ -26,6 +30,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -100,6 +106,9 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	scenarios := fs.String("scenarios", "", "scenario book YAML (default embedded)")
 	control := fs.String("control-dir", defaultControlDir(), "tacticsctl state directory holding the training switch")
 	profileDir := fs.String("profile-dir", "", "directory the lab units read their candidate profile from")
+	squadURL := fs.String("squad-url", "", "crew-control base URL; hands profiles to the lab squad's route instead of --profile-dir (token from CONTROL_TOKEN)")
+	squad := fs.String("squad", "", "lab squad id the units fight in, lab- prefixed; with --squad-url")
+	squadB := fs.String("squad-b", "", "lab squad id of the --team-b units, when it differs from --squad; a duel needs two squads")
 	opponent := fs.String("opponent-profile", "", "profile JSON the duel opponent uses (default the shipped behaviour)")
 	warriors := fs.String("warriors", "Rusty,Slate,Tinder", "comma-separated warriors for mob scenarios")
 	warriorKits := fs.String("warrior-kits", "", "comma-separated catalog kits, one per --warriors name")
@@ -126,8 +135,9 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	if *layoutPath == "" {
 		return nil, errors.New("--layout is required")
 	}
-	if *profileDir == "" {
-		return nil, errors.New("--profile-dir is required")
+	sink, err := newSink(*profileDir, *squadURL, *squad, *squadB, splitNames(*teamA), splitNames(*teamB))
+	if err != nil {
+		return nil, err
 	}
 	if *emit != "all" && *emit != "candidate" {
 		return nil, fmt.Errorf("--emit must be all or candidate, got %q", *emit)
@@ -159,7 +169,7 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	}
 	return &bridge{
 		ControlDir: *control, Lab: *lab, StopFile: *stopFile,
-		Console: console, Layout: layout, Book: book, Sink: FileSink{Dir: *profileDir}, Opponent: opp,
+		Console: console, Layout: layout, Book: book, Sink: sink, Opponent: opp,
 		Warriors: splitNames(*warriors), WarriorKits: splitNames(*warriorKits), Crew: splitNames(*crew),
 		TeamA: splitNames(*teamA), TeamB: splitNames(*teamB), DuelKits: splitNames(*kits),
 		FightTimeout: *fightTimeout, RoundTimeout: *roundTimeout, Poll: *poll, Settle: *settle,
@@ -198,4 +208,45 @@ func splitNames(list string) []string {
 		}
 	}
 	return names
+}
+
+// newSink picks where candidate profiles go: a directory, or the squad route.
+// The token comes from the environment only, so it appears in no argument
+// list, log or message.
+func newSink(profileDir, squadURL, squad, squadB string, teamA, teamB []string) (ProfileSink, error) {
+	if squadURL == "" {
+		if profileDir == "" {
+			return nil, errors.New("--profile-dir or --squad-url is required")
+		}
+		return FileSink{Dir: profileDir}, nil
+	}
+	if profileDir != "" {
+		return nil, errors.New("--profile-dir and --squad-url are alternatives")
+	}
+	base, err := url.Parse(squadURL)
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
+		return nil, errors.New("--squad-url: want an http or https URL with a host")
+	}
+	token := strings.TrimSpace(os.Getenv("CONTROL_TOKEN"))
+	if token == "" {
+		return nil, errors.New("CONTROL_TOKEN is required with --squad-url")
+	}
+	if !strings.HasPrefix(squad, labSquadPrefix) {
+		return nil, fmt.Errorf("--squad: %q is not a lab squad (want a %s prefix)", squad, labSquadPrefix)
+	}
+	sink := SquadSink{Base: base, Default: squad, Token: token, Client: &http.Client{}}
+	if len(teamB) > 0 {
+		if !strings.HasPrefix(squadB, labSquadPrefix) {
+			return nil, fmt.Errorf("--squad-b: %q is not a lab squad (want a %s prefix)", squadB, labSquadPrefix)
+		}
+		// One squad has one profile, so the two teams of a duel cannot share.
+		if len(teamA) > 0 && squadB == squad {
+			return nil, errors.New("--squad-b must differ from --squad for a duel")
+		}
+		sink.Squads = map[string]string{}
+		for _, u := range teamB {
+			sink.Squads[u] = squadB
+		}
+	}
+	return sink, nil
 }
