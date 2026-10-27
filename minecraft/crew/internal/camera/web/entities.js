@@ -192,7 +192,8 @@ async function fetchSheet(jsonUrl, pngUrl) {
 }
 
 export function createEntities(scene) {
-  const lights = [new THREE.AmbientLight(0xffffff, 1.6), new THREE.DirectionalLight(0xffffff, 1.4)];
+  const LIGHT_DAY = [1.6, 1.4];
+  const lights = [new THREE.AmbientLight(0xffffff, LIGHT_DAY[0]), new THREE.DirectionalLight(0xffffff, LIGHT_DAY[1])];
   lights[1].position.set(.4, 1, .6);
   for (const l of lights) scene.add(l);
 
@@ -667,6 +668,13 @@ export function createEntities(scene) {
       names.clear(); looks.clear(); worn.clear();
       for (const sk of skins.values()) sk.tex.dispose();
       skins.clear();
+    },
+
+    // Entities carry no baked light, so the time of day dims them as a whole:
+    // k is 1 at noon and falls towards the night floor.
+    setAmbient(k) {
+      lights[0].intensity = LIGHT_DAY[0] * k;
+      lights[1].intensity = LIGHT_DAY[1] * k;
     },
 
     frame(now = performance.now()) {
