@@ -174,6 +174,22 @@ func TestBossSummonPutsTheNameBeforeTheCoordinates(t *testing.T) {
 	}
 }
 
+func TestBossFightsTheEnderDragonLikeAnyOtherBoss(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, recs := newBossTest(f, newFakeClock())
+	b.Mob = "ender_dragon"
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !hasCommand(f.Cmds, `summon ender_dragon "W" 0 65 -775`) {
+		t.Errorf("no named dragon summoned:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+	if len(*recs) != 1 || (*recs)[0].Boss != "ender_dragon" || (*recs)[0].Outcome != BossKilled {
+		t.Errorf("records = %#v, want one killed ender_dragon run", *recs)
+	}
+}
+
 func TestBossLoadsTheLayoutAreasAndAlwaysRemovesThem(t *testing.T) {
 	s := newBossSim()
 	f := &FakeConsole{Respond: s.Exec}
