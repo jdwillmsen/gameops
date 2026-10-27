@@ -70,6 +70,9 @@ type Director struct {
 	// Warriors order, handed out before wave one.
 	WarriorKits []string
 
+	// Observer, when set, is told about deaths and kills as the run sees them.
+	Observer FightObserver
+
 	Out   io.Writer
 	Now   func() time.Time
 	Sleep func(time.Duration)
@@ -104,6 +107,18 @@ func (d *Director) logf(format string, args ...any) {
 		out = io.Discard
 	}
 	fmt.Fprintf(out, format+"\n", args...)
+}
+
+func (d *Director) noteDeath(name string) {
+	if d.Observer != nil {
+		d.Observer.WarriorDied(name)
+	}
+}
+
+func (d *Director) noteKills(n int) {
+	if d.Observer != nil && n > 0 {
+		d.Observer.MobsKilled(n)
+	}
 }
 
 // repairFloor patches blast craters; a fill that finds no air is not an error.
@@ -289,6 +304,9 @@ func (d *Director) Run() (Result, error) {
 		return result, err
 	}
 	result.WarriorDeaths = deaths
+	if d.Observer != nil {
+		d.Observer.FightStart(start)
+	}
 
 	for wi, wave := range waves {
 		waveStart := d.now()
@@ -370,6 +388,9 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 	rallyRound := 0
 	phases := append([]Phase(nil), wave.Phases...)
 	phaseAt := 0
+	// expected is the live count the next poll should see if nothing died;
+	// the shortfall is the kills since the last poll.
+	expected := 0
 
 	for {
 		if len(pending) > 0 && live < d.MaxLive {
@@ -386,6 +407,7 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 				}
 			}
 			pending = pending[n:]
+			expected += n
 			spawnedBatch = true
 			if !waveStarted {
 				waveStarted = true
@@ -433,6 +455,7 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 			// that failed must not read as an instant win.
 			if bossSeen && n == 0 {
 				d.logf("arena: %s is down", wave.Name)
+				d.noteKills(1)
 				return OutcomeBossDown, false, nil
 			}
 		}
@@ -450,6 +473,8 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 		if err != nil {
 			return "", false, err
 		}
+		d.noteKills(expected - live)
+		expected = live
 		if live == 0 {
 			// A successful summon that leaves nothing to count means the map
 			// was not loaded or the entity never appeared; reading that as a
@@ -986,6 +1011,7 @@ func (d *Director) observeWarrior(name string, i int, st *warriorState, respawne
 		if jumped && !st.deathCounted {
 			result.WarriorDeaths++
 			st.deaths++
+			d.noteDeath(name)
 			d.logf("arena: warrior %s died away from the squad", name)
 		}
 		st.pos, st.havePos = pos, true
@@ -1102,6 +1128,7 @@ func (d *Director) checkWarriors(states map[string]*warriorState, result *Result
 			result.WarriorDeaths++
 			st.deaths++
 			st.deathCounted = true
+			d.noteDeath(name)
 			d.logf("arena: warrior %s is down", name)
 		}
 		st.up = false

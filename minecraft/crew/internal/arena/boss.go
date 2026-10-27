@@ -67,6 +67,10 @@ type BossTest struct {
 	// Record receives each finished run before the next one starts.
 	Record func(BossRecord) error
 
+	// Observer, when set, sees each fight's deaths and kill, and is told when
+	// a fight starts; Record then runs before the next FightStart.
+	Observer FightObserver
+
 	Out   io.Writer
 	Now   func() time.Time
 	Sleep func(time.Duration)
@@ -211,6 +215,7 @@ func (b *BossTest) director() *Director {
 		Warriors:      b.Warriors,
 		WarriorMisses: 3,
 		PlaceSquad:    true,
+		Observer:      b.Observer,
 		Out:           b.Out,
 		Now:           b.Now,
 		Sleep:         b.Sleep,
@@ -369,6 +374,9 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 	}
 
 	startTS := b.now()
+	if b.Observer != nil {
+		b.Observer.FightStart(startTS)
+	}
 	out, err := d.exec(b.summonCommand())
 	if err != nil {
 		return BossRecord{}, err
@@ -426,6 +434,7 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 			}
 			if bossDown(again, b.Name) {
 				outcome = BossKilled
+				d.noteKills(1)
 			}
 		}
 		switch {
