@@ -84,6 +84,7 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 		b.id, b.start = best.ID, p.Feet
 		b.hitAt, b.shieldOutUntil = 0, 0
 		b.regroupUntil, b.rallied = 0, false
+		b.walk, b.walkRetry = nil, 0
 		b.stillAt, b.stillSince = best.Pos, l.tick
 	}
 	b.active, b.prof = true, prof
