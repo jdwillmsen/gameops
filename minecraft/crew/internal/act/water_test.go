@@ -33,7 +33,7 @@ func onBottom() Pose { return Pose{Feet: mgl32.Vec3{4.5, 0, 4.5}, OnGround: true
 func TestHoldingJumpOnThePoolFloorSwimsUpAsTheServerDoes(t *testing.T) {
 	p := onBottom()
 	for tick := 1; tick <= 19; tick++ {
-		p, _ = p.advance(0, true, lake{})
+		p, _ = p.advance(0, true, false, lake{})
 		if want, ok := measuredSwimUp[tick]; ok {
 			near(t, fmt.Sprintf("height after tick %d", tick), float64(p.Feet.Y()), float64(want), 1e-3)
 		}
@@ -44,7 +44,7 @@ func TestIdleInWaterSinksAtMostALittlePerTick(t *testing.T) {
 	p := Pose{Feet: mgl32.Vec3{4.5, 1, 4.5}}
 	for i := 0; i < 300; i++ {
 		before := p.Feet.Y()
-		p, _ = p.advance(0, false, lake{})
+		p, _ = p.advance(0, false, false, lake{})
 		if before-p.Feet.Y() > 0.05 {
 			t.Fatalf("tick %d sank %.3f in one tick", i, before-p.Feet.Y())
 		}
@@ -60,11 +60,11 @@ func TestSwimmingSteersWithTheMeasuredWaterAcceleration(t *testing.T) {
 	p := onBottom()
 	p.Yaw = -90
 	for i := 0; i < 8; i++ {
-		p, _ = p.advance(0, true, lake{})
+		p, _ = p.advance(0, true, false, lake{})
 	}
 	x0 := p.Feet.X()
 	for i := 1; i <= 8; i++ {
-		p, _ = p.advance(1, false, lake{})
+		p, _ = p.advance(1, false, false, lake{})
 		switch i {
 		case 2:
 			near(t, "x after 2 forward ticks", float64(p.Feet.X()-x0), 0.0553, 2e-3)
@@ -79,7 +79,7 @@ func TestWaterIsNotSolidToTheBody(t *testing.T) {
 	p := Pose{Feet: mgl32.Vec3{4.5, 4, 4.5}}
 	deepest := p.Feet.Y()
 	for i := 0; i < 80; i++ {
-		p, _ = p.advance(0, false, lake{})
+		p, _ = p.advance(0, false, false, lake{})
 		deepest = min(deepest, p.Feet.Y())
 	}
 	if deepest != 0 {
@@ -90,8 +90,8 @@ func TestWaterIsNotSolidToTheBody(t *testing.T) {
 func TestSwimUpDoesNothingInShallowWater(t *testing.T) {
 	// Below 0.4 of water over the feet a held jump gives no upward push.
 	shallow := Pose{Feet: mgl32.Vec3{4.5, 1.6, 4.5}}
-	held, _ := shallow.advance(0, true, lake{})
-	idle, _ := shallow.advance(0, false, lake{})
+	held, _ := shallow.advance(0, true, false, lake{})
+	idle, _ := shallow.advance(0, false, false, lake{})
 	if held.Feet != idle.Feet || held.Rise() != idle.Rise() {
 		t.Errorf("held %+v, idle %+v: a jump in shallow water should change nothing", held, idle)
 	}
@@ -112,7 +112,7 @@ func TestSwimUpFlagsAreSentOnlyWhenSwimmingUp(t *testing.T) {
 func TestPushingIntoABlockEdgeLevelWithTheSurfaceClimbsOut(t *testing.T) {
 	p := Pose{Feet: mgl32.Vec3{9.5, 1.5, 4.5}, Yaw: -90}
 	for i := 0; i < 30; i++ {
-		p, _ = p.advance(1, false, lake{})
+		p, _ = p.advance(1, false, false, lake{})
 	}
 	if p.Feet.Y() < 2 || p.Feet.X() < 9.9 {
 		t.Errorf("pose = %+v, want the unit up on the bank", p)
@@ -124,7 +124,7 @@ func TestAWallTooHighToClimbIsNotClimbed(t *testing.T) {
 	w := walled{}
 	p := Pose{Feet: mgl32.Vec3{9.5, 1.5, 4.5}, Yaw: -90}
 	for i := 0; i < 60; i++ {
-		p, _ = p.advance(1, false, w)
+		p, _ = p.advance(1, false, false, w)
 	}
 	if p.Feet.Y() > 2.5 {
 		t.Errorf("feet y = %.2f, want the unit held below a tall wall", p.Feet.Y())
@@ -167,8 +167,8 @@ func TestWalkingOnTheBankIsTheOrdinaryWalk(t *testing.T) {
 	bank := Pose{Feet: mgl32.Vec3{20.5, 2, 4.5}, Yaw: -90, OnGround: true}
 	dry := Pose{Feet: mgl32.Vec3{20.5, 0, 4.5}, Yaw: -90, OnGround: true}
 	for i := 0; i < 10; i++ {
-		bank, _ = bank.advance(1, false, lake{})
-		dry, _ = dry.advance(1, false, flat())
+		bank, _ = bank.advance(1, false, false, lake{})
+		dry, _ = dry.advance(1, false, false, flat())
 	}
 	if bank.Feet.X() != dry.Feet.X() || bank.Feet.Y() != 2 {
 		t.Errorf("bank %+v, dry %+v: a walk away from the water should not know about it", bank, dry)

@@ -440,7 +440,7 @@ func TestCollisionMatchesTheSweptReference(t *testing.T) {
 			if bad, why := penetrates(w, s.feet); bad && !s.embedded {
 				t.Fatalf("scenario starts inside a block: %s", why)
 			}
-			got, _ := start.advance(0, false, w)
+			got, _ := start.advance(0, false, false, w)
 			dy := float64(s.vy)
 			wantFeet, wantGround := refTick(w, s.feet, s.ground, float64(s.dx), dy, float64(s.dz))
 			if s.conservative != "" {
@@ -482,7 +482,7 @@ func TestWalkingNeverEntersABlock(t *testing.T) {
 					w := labWorldFor(s)
 					p := Pose{Feet: s.feet, OnGround: true, Yaw: yaw}
 					for i := 0; i < 50; i++ {
-						p, _ = p.advance(1, jump, w)
+						p, _ = p.advance(1, jump, false, w)
 						if bad, why := penetrates(w, p.Feet); bad {
 							t.Fatalf("tick %d at %v: %s", i, p.Feet, why)
 						}
@@ -554,7 +554,7 @@ func TestRandomWorldsMatchTheReference(t *testing.T) {
 				dy = p.vy
 			}
 			start := p.Feet
-			next, _ := p.advance(fwd, jump, w)
+			next, _ := p.advance(fwd, jump, false, w)
 			want, wantGround := refTick(w, start, standing, float64(v[0]), float64(dy), float64(v[1]))
 
 			if bad, why := penetrates(w, next.Feet); bad {
