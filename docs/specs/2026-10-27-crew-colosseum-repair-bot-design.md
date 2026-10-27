@@ -18,6 +18,7 @@ Fights damage the Colosseum: creepers and boss effects blow holes, mobs and warr
 - **Idempotent.** Every command is an absolute block state, so a second run, or a run on an intact arena, changes nothing. The tests apply the plan to a simulated world twice and re-diff to zero.
 - **Strictly the footprint.** `Footprint(layout)` is the generator build box (centre -120..+119 x, -106..+105 z, y 36..122; the layout does not carry it, so it is restated and tested against the layout's areas and gates). A plan op or repair outside it is an error, not a clip. Ticking areas (`crew-repair-N`, 10 x 10 chunks) are added for the damaged tiles only and removed afterwards, even after a failure.
 - **Dry run.** `Options.DryRun` sends nothing; the report still lists commands, damage by kind (missing, intruder, replaced), by zone (floor, stands-and-wall, plaza, underground, pen-gate-N, start-gate) and the top block changes.
+- **Ticking areas.** Stale `crew-repair-N` areas are removed before the adds, a rejected add (including "already exists") aborts the run, and the bot waits `LoadWait` (5 s) after adding before the first fill. The 10-area server cap is not checked against areas other tools hold; a rejected add aborts. `Report.Status` (`dry_run`, `applied`, `aborted`, `refused`) and `Error` record how a run ended.
 - **Out of scope.** Entities and container contents (armour stands, chests): `decor.cmds` owns them. Bulk loss (a rebuild is cheaper) falls back to `structure load` of the 48-block tiles saved before a build; not implemented.
 
 ## Build permission on the lab
@@ -30,10 +31,10 @@ The director tags its mobs `arena_wave` and `arena_boss` (`arena.FightCommands`)
 
 1. refuses when any non-crew player is online (`arena.CheckAlone`);
 2. counts tagged mobs, waits `Quiet` (default 30 s, several wave pauses, since the count is zero between waves), counts again;
-3. re-counts every `Batch` (100) commands and stops with `ErrFightActive` the moment a tagged mob appears, removing its ticking areas;
+3. re-checks players and tagged mobs every `Batch` (100) commands and stops (`ErrFightActive` for a mob) as soon as either fails, removing its ticking areas;
 4. treats an unreadable reply as a refusal.
 
-Zero tagged mobs does not prove the director is finished (a wave book with long `pause` values, or the first spawn still to come). Procedure: run the bot after `arena.sh run` returns its result line, never concurrently. Phase 2 should have the director hold an `arena_active` marker (a tag on a fixed marker entity) for the whole run, which makes step 2 exact.
+The double sample is probabilistic until an `arena_active` marker exists. Zero tagged mobs does not prove the director is finished (a wave book with long `pause` values, or the first spawn still to come). Procedure: run the bot after `arena.sh run` returns its result line, never concurrently. Phase 2 should have the director hold an `arena_active` marker (a tag on a fixed marker entity) for the whole run, which makes step 2 exact.
 
 ## Open questions
 

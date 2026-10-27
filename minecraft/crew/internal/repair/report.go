@@ -10,6 +10,8 @@ import (
 // beside the director's result line.
 type Report struct {
 	Dry       bool           `json:"dry_run"`
+	Status    string         `json:"status"`
+	Error     string         `json:"error,omitempty"`
 	Scanned   int            `json:"cells_scanned"`
 	Unscanned int            `json:"cells_unscanned"`
 	Damaged   int            `json:"cells_damaged"`
@@ -20,6 +22,16 @@ type Report struct {
 	ByZone    map[string]int `json:"by_zone"`
 	Top       []Change       `json:"top_changes"`
 }
+
+// How a run ended. Refused means nothing was sent; aborted means some commands
+// ran and the arena is partly repaired.
+const (
+	StatusPlanned = "planned" // a report built but not yet applied
+	StatusDryRun  = "dry_run"
+	StatusApplied = "applied"
+	StatusAborted = "aborted"
+	StatusRefused = "refused"
+)
 
 // Change is how many cells found one block where another was planned.
 type Change struct {
@@ -53,11 +65,21 @@ func NewReport(d *Damage, p Plan) Report {
 
 // Write prints the report for a person.
 func (r Report) Write(w io.Writer) {
-	mode := "applied"
-	if r.Dry {
+	mode := r.Status
+	switch r.Status {
+	case StatusDryRun:
 		mode = "dry run, nothing sent"
+	case StatusAborted:
+		mode = "ABORTED, arena partly repaired"
+	case StatusRefused:
+		mode = "REFUSED, nothing sent"
+	case "":
+		mode = StatusPlanned
 	}
 	fmt.Fprintf(w, "repair report (%s)\n", mode)
+	if r.Error != "" {
+		fmt.Fprintf(w, "  error: %s\n", r.Error)
+	}
 	fmt.Fprintf(w, "  scanned %d cells, %d not scanned, %d damaged in %d rectangles\n", r.Scanned, r.Unscanned, r.Damaged, r.Rects)
 	fmt.Fprintf(w, "  commands %d, executed %d\n", r.Commands, r.Executed)
 	for _, k := range sortedKeys(r.ByKind) {

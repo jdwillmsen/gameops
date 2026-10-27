@@ -241,7 +241,7 @@ func TestReportText(t *testing.T) {
 	if err != nil || d.Cells != 1 {
 		t.Fatalf("cells %d err %v", d.Cells, err)
 	}
-	r.Dry = true
+	r.Dry, r.Status = true, StatusDryRun
 	var sb strings.Builder
 	r.Write(&sb)
 	for _, want := range []string{"dry run", "1 damaged", "replaced", "floor", "dirt -> sand"} {
@@ -342,7 +342,7 @@ func TestApplyStopsWhenAFightStartsMidRun(t *testing.T) {
 	if f.Count("fill") != 2 {
 		t.Errorf("sent %d fills, want it to stop at the batch edge after 2", f.Count("fill"))
 	}
-	if f.Count("tickingarea remove") != 1 {
+	if f.Cmds[len(f.Cmds)-1] != samplePlan.Teardown[0] {
 		t.Error("ticking area was not removed after the abort")
 	}
 }
@@ -376,5 +376,129 @@ func TestApplyStopsOnServerRefusal(t *testing.T) {
 	}
 	if f.Count("fill 3") != 0 {
 		t.Error("kept going after the server refused a command")
+	}
+}
+
+func TestStatusReflectsHowTheRunEnded(t *testing.T) {
+	f := &arena.FakeConsole{}
+	idleServer(f)
+	var ok Report
+	if err := Apply(f, samplePlan, &ok, quiet()); err != nil || ok.Status != StatusApplied || ok.Error != "" {
+		t.Fatalf("clean run: err %v status %q error %q", err, ok.Status, ok.Error)
+	}
+
+	var dry Report
+	_ = Apply(&arena.FakeConsole{}, samplePlan, &dry, Options{DryRun: true})
+	if dry.Status != StatusDryRun {
+		t.Errorf("dry status = %q", dry.Status)
+	}
+
+	busy := &arena.FakeConsole{Respond: func(cmd string) (string, error) {
+		if cmd == "list" {
+			return "There are 0/10 players online:\n", nil
+		}
+		return "Found Zombie", nil
+	}}
+	var refused Report
+	_ = Apply(busy, samplePlan, &refused, quiet())
+	if refused.Status != StatusRefused || refused.Error == "" {
+		t.Errorf("refused: status %q error %q", refused.Status, refused.Error)
+	}
+
+	g := &arena.FakeConsole{}
+	idleServer(g)
+	idle := g.Respond
+	g.Respond = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "fill 3") {
+			return "Cannot place blocks outside of the world", nil
+		}
+		return idle(cmd)
+	}
+	var aborted Report
+	_ = Apply(g, samplePlan, &aborted, quiet())
+	if aborted.Status != StatusAborted || aborted.Error == "" {
+		t.Errorf("aborted: status %q error %q", aborted.Status, aborted.Error)
+	}
+	var sb strings.Builder
+	aborted.Write(&sb)
+	if strings.Contains(sb.String(), "(applied)") || !strings.Contains(sb.String(), "ABORTED") || !strings.Contains(sb.String(), "error:") {
+		t.Errorf("aborted report text:\n%s", sb.String())
+	}
+}
+
+func TestApplyRechecksPlayersBetweenBatches(t *testing.T) {
+	f := &arena.FakeConsole{}
+	idleServer(f)
+	idle := f.Respond
+	f.Respond = func(cmd string) (string, error) {
+		if cmd == "list" && f.Count("fill") >= 2 {
+			return "There are 1/10 players online:\nSteve", nil
+		}
+		return idle(cmd)
+	}
+	var r Report
+	err := Apply(f, samplePlan, &r, quiet())
+	if err == nil || errors.Is(err, ErrFightActive) {
+		t.Fatalf("err = %v, want a not-alone refusal", err)
+	}
+	if f.Count("fill") != 2 || f.Count("tickingarea remove crew-repair-0") < 2 {
+		t.Errorf("fills %d, teardown missing: %v", f.Count("fill"), f.Cmds)
+	}
+	if r.Status != StatusAborted {
+		t.Errorf("status = %q", r.Status)
+	}
+}
+
+func TestApplyWaitsForChunksAndClearsStaleAreas(t *testing.T) {
+	f := &arena.FakeConsole{}
+	idleServer(f)
+	var slept []time.Duration
+	var order []string
+	o := quiet()
+	o.LoadWait = 7 * time.Second
+	o.Sleep = func(d time.Duration) {
+		slept = append(slept, d)
+		order = append(order, "sleep")
+	}
+	inner := f.Respond
+	f.Respond = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "tickingarea") || strings.HasPrefix(cmd, "fill") {
+			order = append(order, strings.Fields(cmd)[0]+" "+strings.Fields(cmd)[1])
+		}
+		return inner(cmd)
+	}
+	var r Report
+	if err := Apply(f, samplePlan, &r, o); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"tickingarea remove", "tickingarea add", "sleep", "fill 1"}
+	// order starts after the quiet-period sleep.
+	got := order[1:5]
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order = %v, want prefix %v", order, want)
+		}
+	}
+	if len(slept) != 2 || slept[1] != 7*time.Second {
+		t.Errorf("sleeps = %v, want quiet then the 7s load wait", slept)
+	}
+}
+
+func TestApplyFailsWhenAreaAlreadyExists(t *testing.T) {
+	f := &arena.FakeConsole{}
+	idleServer(f)
+	idle := f.Respond
+	f.Respond = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "tickingarea add") {
+			return "A ticking area with that name already exists", nil
+		}
+		return idle(cmd)
+	}
+	var r Report
+	if err := Apply(f, samplePlan, &r, quiet()); err == nil {
+		t.Fatal("run continued past a rejected ticking area")
+	}
+	if f.Count("fill") != 0 {
+		t.Error("fills sent without loaded chunks")
 	}
 }
