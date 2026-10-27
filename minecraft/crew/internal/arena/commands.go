@@ -29,6 +29,10 @@ func countCommand() string { return "testfor " + countSelector }
 
 func bossCountCommand() string { return "testfor " + bossSelector }
 
+// FightCommands are the testfor commands that count a fight's tagged mobs.
+// Anything other than zero from either means a director run is in progress.
+func FightCommands() []string { return []string{countCommand(), bossCountCommand()} }
+
 func warriorCommand(name string) (string, error) {
 	if err := validateWarriorName(name); err != nil {
 		return "", err
