@@ -149,7 +149,11 @@ export function initOps(host) {
       });
       return tr;
     });
+    const had = box.contains(document.activeElement) ? document.activeElement : null;
+    const keep = had && (had.dataset.sort ? `th[data-sort="${had.dataset.sort}"]` : had.dataset.unit ? `tr[data-unit="${had.dataset.unit}"]` : '');
     box.replaceChildren(el('thead', {}, head), el('tbody', {}, ...body));
+    // Rebuilding drops keyboard focus; put it back on the equivalent header or row.
+    if (keep) box.querySelector(keep)?.focus();
     const sel = $('roster-sel');
     sel.hidden = !op || picked.size === 0;
     sel.textContent = `Stop ${picked.size} selected`;

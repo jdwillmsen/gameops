@@ -611,7 +611,7 @@ so. The window is never loaded all at once.
 
 ## Design principles
 
-The console's rulebook (tokens, the view registry and key table, how to add a view, the accessibility checklist, chart rules) is `docs/ui-design-principles.md`. `web/views.js` is the view registry; `views.test.mjs` fails when a registered view has no toggle key or title, or when `index.html` or the key handler disagree with it. Roster headers and rows are keyboard operable, and every control shows a focus ring from one shared token.
+The console's rulebook (tokens, the view registry and key table, how to add a view, the accessibility checklist, chart rules) is `docs/ui-design-principles.md`. `web/views.js` is the view registry; `views.test.mjs` fails when a registered view has no toggle key or title, or when `index.html` lacks the registered title or key, or `console.js` does not call the registered toggle for its key. Roster headers and rows are keyboard operable, and controls show a focus ring from the shared `--focus` token (chart controls use the chart palette's first series colour instead).
 
 ## Chart library
 
