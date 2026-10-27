@@ -89,3 +89,23 @@ func TestFromReturnsOnlyWhatIsNew(t *testing.T) {
 		t.Errorf("from(3) = %v, want nothing", got)
 	}
 }
+
+func TestNotCubeHidesChainsAndLanternsButNotTheSeaLantern(t *testing.T) {
+	for name, want := range map[string]bool{
+		"iron_chain": true, "copper_chain": true, "copper_lantern": true, "soul_lantern": true,
+		"trip_wire": true, "sea_lantern": false, "chain_command_block": false,
+	} {
+		if got := notCube(name); got != want {
+			t.Errorf("notCube(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestPistonHelpersAreNotDrawn(t *testing.T) {
+	tbl := newMaterialTable()
+	for _, n := range []string{"moving_block", "piston_arm_collision", "sticky_piston_arm_collision"} {
+		if id, _ := tbl.id("minecraft:" + n); id != 0 {
+			t.Errorf("%s drew as material %d", n, id)
+		}
+	}
+}

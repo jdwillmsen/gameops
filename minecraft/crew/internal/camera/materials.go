@@ -42,7 +42,7 @@ var translucent = map[string]float32{"water": .6, "flowing_water": .6, "ice": .8
 // not enough; fire_coral_block, brown_mushroom_block and dried_kelp_block are
 // whole cubes and were hidden by a substring match.
 func notCube(name string) bool {
-	if strings.HasSuffix(name, "_block") || name == "budding_amethyst" {
+	if strings.HasSuffix(name, "_block") || name == "budding_amethyst" || name == "sea_lantern" {
 		return false
 	}
 	switch name {
@@ -52,7 +52,7 @@ func notCube(name string) bool {
 		"pointed_dripstone", "snow_layer", "lily_pad", "waterlily", "kelp", "seagrass", "glow_lichen", "sculk_vein",
 		"vine", "twisting_vines", "weeping_vines", "cave_vines", "reeds", "sweet_berry_bush", "torch", "soul_torch",
 		"redstone_torch", "lantern", "soul_lantern", "chain", "lever", "tripwire", "tripwire_hook", "wall_banner",
-		"standing_banner", "ladder", "end_rod", "lightning_rod", "candle", "cake", "brewing_stand", "cauldron",
+		"standing_banner", "ladder", "trip_wire", "tripWire", "iron_chain", "end_rod", "lightning_rod", "candle", "cake", "brewing_stand", "cauldron",
 		"hopper", "end_portal_frame", "dragon_egg", "flower", "bamboo", "scaffolding", "chorus_flower", "chorus_plant":
 		return true
 	}
@@ -61,6 +61,7 @@ func notCube(name string) bool {
 		"_stairs", "_trapdoor", "_fence", "_fence_gate", "_carpet", "_pressure_plate", "_candle", "_head", "_skull",
 		"_tulip", "_orchid", "_allium", "_bluet", "_daisy", "_cornflower", "_lily_of_the_valley", "_rose", "_peony",
 		"_lilac", "_dandelion", "_poppy", "_mushroom", "_roots", "_fungus", "_propagule", "_pane", "_bars", "_wall",
+		"_chain", "_lantern",
 	} {
 		if strings.HasSuffix(name, suffix) {
 			// A wall sign is a sign; a stone wall is a wall. Both hide.
@@ -74,7 +75,9 @@ func notCube(name string) bool {
 }
 
 var airLike = map[string]bool{"air": true, "cave_air": true, "void_air": true, "unknown": true,
-	"barrier": true, "structure_void": true, "light_block": true, "allow": true, "deny": true, "border_block": true}
+	"barrier": true, "structure_void": true, "light_block": true, "allow": true, "deny": true, "border_block": true,
+	// Piston helpers the game never draws; the arm itself is a block entity.
+	"moving_block": true, "piston_arm_collision": true, "sticky_piston_arm_collision": true, "invisible_bedrock": true}
 
 // maxMaterials is the largest id the wire can carry. A sub-chunk holds 4096
 // cells, so a palette never needs more than that many entries, but the table
