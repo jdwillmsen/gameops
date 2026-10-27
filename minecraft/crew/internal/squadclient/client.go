@@ -1,12 +1,13 @@
 // Package squadclient carries one unit's side of squad coordination: it
 // joins its squad, reports the status the combat engine gives it, drains
-// the engine's call-outs, and keeps the standing order, the leader's
-// position and the squad's roster fresh for the engine to read.
+// the engine's call-outs, keeps the standing order, the leader's
+// position and the squad's roster fresh for the engine to read, and
+// fetches the tactics profile the squad serves, when the engine asks.
 //
 // The engine is injected by the agent's wiring and its interface lives
 // there; this package's methods are shaped to satisfy it. Reads (Leader,
-// Orders, Member, Down, Start) may be called from any goroutine; writes happen only on the
-// client's own.
+// Orders, Member, Down, Start, FetchProfile) may be called from any
+// goroutine; writes happen only on the client's own.
 package squadclient
 
 import (
@@ -24,6 +25,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadmsg"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
 const (
@@ -43,6 +45,14 @@ const (
 	// A call-out that could not be posted stops being news after this
 	// long, and is dropped rather than read out late.
 	maxCalloutAge = 10 * time.Second
+
+	// One fetched profile serves the engine this long, so a caller that
+	// asks every tick costs one read per interval.
+	profileEvery = 30 * time.Second
+	// profileStale is how long the last good profile outlives fetch
+	// failures: a flapping crew-control must not flip a unit's tuning
+	// mid-fight, but a long outage must not freeze it for ever either.
+	profileStale = 5 * time.Minute
 
 	// Far above any real hello, status or call-out.
 	maxPostBytes  = 1 << 10
@@ -76,6 +86,9 @@ type Client struct {
 
 	statusEvery time.Duration
 	helloEvery  time.Duration
+	// The profile's fetch pace and its stale window; tests shorten them.
+	profileEvery time.Duration
+	profileStale time.Duration
 
 	callouts chan squadmsg.Callout
 
@@ -89,8 +102,24 @@ type Client struct {
 	members  []squadmsg.Member
 	start    squadmsg.Pos
 	hasStart bool
+	// profileSeq is the profile revision the last poll named; a unit that
+	// sees it move refetches at once. It lives under mu, written only by
+	// apply, and read before the profile lock is taken, so the two locks
+	// never nest.
+	profileSeq int64
 	// lastOK is when the last poll answered, news or not.
 	lastOK time.Time
+
+	// The squad's tactics profile, fetched on demand. profileMu is its own
+	// lock so a slow fetch cannot stall the poll loop's writes; nothing
+	// takes it while holding mu.
+	profileMu     sync.Mutex
+	profile       tactics.Profile
+	hasProfile    bool
+	profileAt     time.Time // the last answer, hit or miss
+	profileTry    time.Time // the last attempt, answer or error
+	profileFrom   int64     // the stream revision the cached answer speaks for
+	profileTrySeq int64     // the stream revision the last attempt spoke for
 }
 
 // New builds a client for one unit of one squad. role is the part the unit
@@ -102,9 +131,11 @@ func New(base *url.URL, unit, squad, name string, role squadmsg.Role, token stri
 		http:  &http.Client{},
 		sleep: realSleep,
 
-		statusEvery: statusEvery,
-		helloEvery:  helloEvery,
-		callouts:    make(chan squadmsg.Callout, 16),
+		statusEvery:  statusEvery,
+		helloEvery:   helloEvery,
+		profileEvery: profileEvery,
+		profileStale: profileStale,
+		callouts:     make(chan squadmsg.Callout, 16),
 	}
 }
 
@@ -218,19 +249,21 @@ func (c *Client) beat(ctx context.Context) {
 }
 
 // pollAnswer is what one listen reads: the standing order, the leader and
-// its last position, and the deltas past the cursor. Rev is the server's
-// revision of the leader line; echoing it earns an answer the moment the
-// chain of command moves, with no message to carry the news. Order and
-// Callout types are the shared ones, whose JSON shapes the server mirrors.
+// its last position, the deltas past the cursor, and the revision of the
+// squad's tactics profile. Rev is the server's revision of the leader
+// line; echoing it earns an answer the moment the chain of command moves,
+// with no message to carry the news. Order and Callout types are the
+// shared ones, whose JSON shapes the server mirrors.
 type pollAnswer struct {
-	Cursor   int64              `json:"cursor"`
-	Rev      int64              `json:"rev"`
-	Leader   *wireLeader        `json:"leader,omitempty"`
-	Members  []squadmsg.Member  `json:"members"`
-	Start    *squadmsg.Pos      `json:"start,omitempty"`
-	Order    *squadmsg.Order    `json:"order"`
-	Orders   []squadmsg.Order   `json:"orders"`
-	Callouts []squadmsg.Callout `json:"callouts"`
+	Cursor     int64              `json:"cursor"`
+	Rev        int64              `json:"rev"`
+	ProfileSeq int64              `json:"profileSeq"`
+	Leader     *wireLeader        `json:"leader,omitempty"`
+	Members    []squadmsg.Member  `json:"members"`
+	Start      *squadmsg.Pos      `json:"start,omitempty"`
+	Order      *squadmsg.Order    `json:"order"`
+	Orders     []squadmsg.Order   `json:"orders"`
+	Callouts   []squadmsg.Callout `json:"callouts"`
 }
 
 type wireLeader struct {
@@ -337,6 +370,10 @@ func (c *Client) apply(ans *pollAnswer) {
 	if c.hasStart {
 		c.start = *ans.Start
 	}
+	// The profile revision rides every answer, so a stored profile is
+	// heard without the unit asking; FetchProfile compares it with the
+	// revision its cache answers for.
+	c.profileSeq = ans.ProfileSeq
 	c.mu.Unlock()
 }
 
@@ -443,6 +480,88 @@ func (c *Client) Orders() squadmsg.Order {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.order
+}
+
+// FetchProfile returns the squad's current tactics profile. One fetch
+// serves every call inside profileEvery, and a profile revision the poll
+// has moved earns one fetch at once. ok is false while the squad serves
+// none — the engine then fights on the shipped defaults, which is also
+// what a unit with no profile route does. The contract validates the
+// profile on load: a wrong version is an error, and values outside
+// their bounds are clamped where the bounds live. ctx bounds the fetch,
+// so the engine may hand it its own tick's context.
+func (c *Client) FetchProfile(ctx context.Context) (tactics.Profile, bool) {
+	// The stream's revision is read before the profile lock is taken, so
+	// the two locks never nest.
+	seq := c.streamProfileSeq()
+	c.profileMu.Lock()
+	defer c.profileMu.Unlock()
+	// A revision the last attempt did not speak for is news: one fetch
+	// now, whatever the interval says, and never more than one per move.
+	moved := seq != c.profileTrySeq
+	if !moved && seq == c.profileFrom && time.Since(c.profileAt) < c.profileEvery {
+		return c.profile, c.hasProfile
+	}
+	if moved || time.Since(c.profileTry) >= c.profileEvery {
+		c.profileTry, c.profileTrySeq = time.Now(), seq
+		pr, ok, err := c.fetchProfile(ctx)
+		if err == nil {
+			c.profile, c.hasProfile = pr, ok
+			c.profileAt, c.profileFrom = c.profileTry, seq
+			return pr, ok
+		}
+		c.log.Error("squad_profile_failed", map[string]any{"error": err.Error()})
+	}
+	// No fresh answer: the last good one serves inside the stale window,
+	// so a flapping crew-control does not flip a unit's tuning mid-fight.
+	if c.hasProfile && time.Since(c.profileAt) < c.profileStale {
+		return c.profile, true
+	}
+	return tactics.Profile{}, false
+}
+
+// streamProfileSeq is the profile revision the last poll named.
+func (c *Client) streamProfileSeq() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.profileSeq
+}
+
+// fetchProfile reads the profile route once. A 404 is an answer, not an
+// error: the squad serves no profile, and the unit fights on defaults.
+func (c *Client) fetchProfile(ctx context.Context) (tactics.Profile, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, postTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.base.JoinPath("v1", "squads", c.squad, "profile").String(), nil)
+	if err != nil {
+		return tactics.Profile{}, false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return tactics.Profile{}, false, err
+	}
+	defer closeBody(resp)
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return tactics.Profile{}, false, nil
+	case http.StatusOK:
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxAnswerByte))
+		if err != nil {
+			return tactics.Profile{}, false, fmt.Errorf("squad profile: %w", err)
+		}
+		// The load is the unit's end of the contract's validation: the
+		// server checked the version and the shape, and this clamps the
+		// values into their bounds.
+		pr, err := tactics.Parse(body)
+		if err != nil {
+			return tactics.Profile{}, false, fmt.Errorf("squad profile: %w", err)
+		}
+		return pr, true, nil
+	default:
+		return tactics.Profile{}, false, fmt.Errorf("squad profile: status %d", resp.StatusCode)
+	}
 }
 
 // Callout speaks for the engine. The engine names the intent; the client
