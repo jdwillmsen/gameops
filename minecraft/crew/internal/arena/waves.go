@@ -314,16 +314,33 @@ func validateMobID(id string) error {
 }
 
 // validIdentifier is the character set of a Bedrock entity, item or effect
-// id, plus the namespace colon. Anything else is a typo that would only show
+// id, plus the namespace colon. Digits may follow the first character of each
+// namespace or name. Anything else is a typo that would only show
 // up as a console syntax error mid-run.
 func validIdentifier(s string) bool {
 	if s == "" {
 		return false
 	}
+	atStart := true
 	for _, r := range s {
-		if (r < 'a' || r > 'z') && r != '_' && r != ':' {
+		switch {
+		case r >= 'a' && r <= 'z', r == '_':
+		case r == ':':
+			if atStart {
+				return false
+			}
+			atStart = true
+			continue
+		case r >= '0' && r <= '9':
+			// A segment such as gameops2 or brute_2 is a real pack id, but a
+			// leading digit is never one.
+			if atStart {
+				return false
+			}
+		default:
 			return false
 		}
+		atStart = false
 	}
 	return true
 }
