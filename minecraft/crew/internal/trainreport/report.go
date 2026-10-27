@@ -55,6 +55,7 @@ type Compare struct {
 	MeanDiff float64 `json:"meanDiff"`
 	DiffLo   float64 `json:"diffLo"`
 	DiffHi   float64 `json:"diffHi"`
+	T        float64 `json:"t"`
 	P        float64 `json:"p"`
 	Verdict  string  `json:"verdict"`
 }
@@ -117,14 +118,22 @@ func read(r io.Reader) ([]tactics.Scorecard, int, error) {
 	return cards, torn, nil
 }
 
-// Build aggregates scored fights into the per-family rows. Aborted fights
-// carry no signal, mirroring Score() itself.
+// Build aggregates scored fights into the report: rows, the best profile
+// (chosen on scored fights only) and its progress. Aborted fights carry no
+// signal, mirroring Score() itself, so they are dropped upstream of all of
+// it.
 func Build(cards []tactics.Scorecard, opt Options) *Report {
-	rep := &Report{}
 	kept := scoreOnly(cards)
-	rep.FightsRead = len(cards)
-	rep.AbortedSkipped = len(cards) - len(kept)
-	rep.Rows = rows(kept)
+	rep := &Report{
+		FightsRead:     len(cards),
+		AbortedSkipped: len(cards) - len(kept),
+		Rows:           rows(kept),
+	}
+	if len(kept) == 0 {
+		return rep
+	}
+	rep.BestProfile = BestProfile(kept)
+	rep.Progress = ProgressBuckets(kept, rep.BestProfile, opt.BucketMs)
 	return rep
 }
 
