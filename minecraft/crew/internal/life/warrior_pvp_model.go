@@ -6,6 +6,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
 // The functions here are the Bedrock model a player-versus-player fight is
@@ -148,13 +149,22 @@ func fallingCrit(p act.Pose) bool {
 
 // tapForward is the walk input for a strafe tick. The tick of a swing and
 // the next stand still: the unit does not carry its own momentum through the
-// target. The wire input has no sprint flag, so this is the stop half of a
-// W-tap only; the knockback it exists for needs the sprint to be reset too.
+// target, and the sprint it drops there is what the next blow's extra
+// knockback needs started afresh.
 func tapForward(now, lastSwing uint64) float32 {
 	if lastSwing != 0 && now-lastSwing < 2 {
 		return 0
 	}
 	return 1
+}
+
+// sprintFood is the hunger at or below which the game refuses a sprint.
+const sprintFood = 6
+
+// canSprint says whether the unit has the food to sprint. An unknown hunger
+// does not: a sprint the server refuses is a movement it corrects.
+func canSprint(s belief.Snapshot) bool {
+	return s.HungerKnown && s.Hunger > sprintFood
 }
 
 // eatClear is how far an opposing player must stand before a hurt unit eats
