@@ -48,7 +48,7 @@ func TestOnPollGetsEveryUnitsStateEachTick(t *testing.T) {
 	go func() { p.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 
-	want := []UnitState{{"crew-01", StateWorking}, {"crew-02", StateDead}, {"crew-03", StateOffline}}
+	want := []UnitState{{ID: "crew-01", State: StateWorking}, {ID: "crew-02", State: StateDead}, {ID: "crew-03", State: StateOffline}}
 	waitFor(t, "every unit's state", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
@@ -56,10 +56,11 @@ func TestOnPollGetsEveryUnitsStateEachTick(t *testing.T) {
 			return false
 		}
 		for i := range want {
-			if last[i] != want[i] {
+			if last[i].ID != want[i].ID || last[i].State != want[i].State {
 				return false
 			}
 		}
-		return true
+		// The working unit reports health, the offline one reports nothing.
+		return last[0].Health != nil && *last[0].Health == 18.5 && last[2].Health == nil && last[2].Hunger == nil
 	})
 }

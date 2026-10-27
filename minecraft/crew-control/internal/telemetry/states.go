@@ -14,6 +14,9 @@ const (
 type UnitState struct {
 	ID    string
 	State string
+	// Health and Hunger are nil while the unit is offline or has not reported
+	// them, so an absent reading is never exported as zero.
+	Health, Hunger *float32
 }
 
 // stateOf orders the readings by what an operator needs to act on first: a
@@ -37,7 +40,8 @@ func stateOf(s Status, stuck bool) string {
 func (p *Poller) statesLocked() []UnitState {
 	out := make([]UnitState, len(p.units))
 	for i, u := range p.units {
-		out[i] = UnitState{ID: u.ID, State: stateOf(p.statuses[i], p.tracks[i].stuck)}
+		st := p.statuses[i]
+		out[i] = UnitState{ID: u.ID, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger}
 	}
 	return out
 }

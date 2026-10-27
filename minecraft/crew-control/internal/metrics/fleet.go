@@ -66,6 +66,8 @@ type Fleet struct {
 	online     prometheus.Gauge
 	unitState  *prometheus.GaugeVec
 	inState    *prometheus.CounterVec
+	health     *prometheus.GaugeVec
+	hunger     *prometheus.GaugeVec
 
 	mu   sync.Mutex
 	last time.Time
@@ -123,8 +125,16 @@ func New(unitIDs []string) *Fleet {
 		Name: "crew_fleet_unit_state_seconds_total",
 		Help: "Seconds each unit has spent in each state, in poll-interval steps while crew-control ran. Accurate to about one poll per change of state; time crew-control itself was down is not counted.",
 	}, []string{"unit", "state"})
+	f.health = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "crew_fleet_unit_health",
+		Help: "Health points (0 to 20) each unit reported at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero.",
+	}, []string{"unit"})
+	f.hunger = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "crew_fleet_unit_hunger",
+		Help: "Food level (0 to 20) each unit reported at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero.",
+	}, []string{"unit"})
 	f.reg.MustRegister(f.started, f.finished, f.failures, f.duration, f.lastDone,
-		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState)
+		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger)
 
 	for _, s := range States {
 		f.fleetUnits.WithLabelValues(s)
@@ -203,6 +213,8 @@ func (f *Fleet) ObservePoll(now time.Time, states []telemetry.UnitState) {
 			continue
 		}
 		count[u.State]++
+		setOrClear(f.health, u.ID, u.Health)
+		setOrClear(f.hunger, u.ID, u.Hunger)
 		for _, s := range States {
 			v := 0.0
 			if s == u.State {
@@ -218,6 +230,16 @@ func (f *Fleet) ObservePoll(now time.Time, states []telemetry.UnitState) {
 		f.fleetUnits.WithLabelValues(s).Set(float64(count[s]))
 	}
 	f.online.Set(float64(count[telemetry.StateWorking] + count[telemetry.StateIdle] + count[telemetry.StateStuck] + count[telemetry.StateDead]))
+}
+
+// setOrClear drops the series for an unknown reading: Prometheus would
+// otherwise keep serving the last value as if it were current.
+func setOrClear(g *prometheus.GaugeVec, unit string, v *float32) {
+	if v == nil {
+		g.DeleteLabelValues(unit)
+		return
+	}
+	g.WithLabelValues(unit).Set(float64(*v))
 }
 
 func validState(s string) bool {

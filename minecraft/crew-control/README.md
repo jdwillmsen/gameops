@@ -860,6 +860,8 @@ the units' own.
 | `crew_fleet_units_online` | gauge | none | Everything but `offline` |
 | `crew_fleet_unit_state` | gauge | `unit`, `state` | 1 for each unit's current state, 0 otherwise |
 | `crew_fleet_unit_state_seconds_total` | counter | `unit`, `state` | Time each unit has spent in each state |
+| `crew_fleet_unit_health` | gauge | `unit` | Health points (0 to 20) at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero |
+| `crew_fleet_unit_hunger` | gauge | `unit` | Food level (0 to 20) at the last poll, absent on the same terms |
 | `crew_event_store_degraded` | gauge | none | 1 while event history is held in memory because Postgres is unreachable or not yet reached |
 | `crew_event_store_diverted_events_total` | counter | none | Events written to memory instead of Postgres |
 | `crew_event_store_replayed_events_total` | counter | none | Diverted events written back after Postgres returned |
@@ -889,7 +891,7 @@ Label values are closed sets, never a raw string a unit sent:
 | `other` | anything else | |
 
 Series stay bounded by the label sets: with 20 units the worst case is about two
-thousand, and the usual count is a few hundred because a series appears only
+thousand (the two vitals gauges add at most 40), and the usual count is a few hundred because a series appears only
 once its event has happened. Per-unit state, death and stall series exist from
 start so that every unit shows up before it does anything.
 
