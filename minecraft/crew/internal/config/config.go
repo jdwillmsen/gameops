@@ -87,6 +87,10 @@ type Config struct {
 	// Squad is the id of the squad a warrior joins through crew-control.
 	// A unit without a warrior role never uses it.
 	Squad string
+	// TacticsControlDir is the tacticsctl state directory whose training
+	// switch gates a lab unit's tactics profile. Empty, the default, means
+	// the unit never fetches one and fights on the shipped behaviour.
+	TacticsControlDir string
 	// KitChest is the chest a unit without a weapon or food rearms from; nil
 	// leaves the feature off. KitFood is how many food items one visit takes.
 	KitChest *[3]int32
@@ -244,6 +248,9 @@ func Load() (Config, error) {
 		Role:       role,
 		Lab:        lab,
 		Squad:      squad,
+
+		TacticsControlDir: strings.TrimSpace(os.Getenv("TACTICS_CONTROL_DIR")),
+
 		KitChest:   kitChest,
 		KitFood:    kitFood,
 		SkinRole:   strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
