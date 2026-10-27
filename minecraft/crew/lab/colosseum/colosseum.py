@@ -946,7 +946,7 @@ vault()
 # and they pull the plug into a pocket in the wall. One dust cell sits on a
 # block that touches the lower piston and beside the upper one, so both follow
 # the same lever. Lever up (on) is shut.
-SECRETS = []                                   # (x, y, z) of each lever, for the docs
+SECRETS = []                                   # (x, z, y) of each lever, for the docs
 
 
 def secret_door(axis, sa, sl):
@@ -974,7 +974,7 @@ def secret_door(axis, sa, sl):
     fill_at(a0 - 4, a0 + 1, 5, 9, 50, 52, AIR)
     fill_at(a0 - 4, a0 + 1, 5, 9, 49, 49, DTILE)
     fill_at(a0 - 4, a0 + 1, 5, 9, 53, 53, DEEP)
-    put_at(a0 - 3, 9, 50, CHEST)
+    put_at(a0 - 3, 9, 50, mat("chest", f'["minecraft:cardinal_direction"="{FACE[(-v[0], -v[1])]}"]', True))
     x, z = at(a0 - 3, 9)
     ROOM_ID[50 - Y0, z - Z0, x - X0] = ROOM_TYPES.index("trophy")
     for a in (a0 - 3, a0):
