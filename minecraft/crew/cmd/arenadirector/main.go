@@ -18,6 +18,10 @@
 // joins mid-fight, after killing the boss and logging the run as
 // aborted_player_online. --summary reads the log and prints one JSON list of
 // runs and medians per boss and effect set.
+//
+// run and boss take --scorecards <path> to also append one tactics scorecard
+// per fight (the trainer's input) without changing their own output. Damage
+// is not readable from the Bedrock console, so scorecards carry zero damage.
 package main
 
 import (
@@ -35,6 +39,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
 const defaultCompose = "minecraft/crew/lab/compose.yaml"
@@ -58,10 +63,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false]\n"+
+	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n]]\n"+
 		"       arenadirector reset --lab <lab>\n"+
 		"       arenadirector status --lab <lab> [--warriors names]\n"+
-		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary]")
+		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n]]")
 	os.Exit(2)
 }
 
@@ -96,6 +101,8 @@ func run(args []string) {
 	placeSquad := fs.Bool("place-squad", true, "teleport the squad to its floor start point and back after a respawn")
 	kits := fs.Bool("kits", false, "spawn the mob types the lab's kit catalog covers from it, in their tier's enchanted gear")
 	warriorKits := fs.String("warrior-kits", "", "comma-separated catalog kits (vanguard/t5), one per --warriors name, handed out before wave one")
+	family := fs.String("family", string(tactics.FamilyDefault), "opponent family recorded on the scorecard")
+	sf := addScoreFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -148,9 +155,16 @@ func run(args []string) {
 		WarriorKits:   splitNames(*warriorKits),
 		Out:           os.Stderr,
 	}
+	rec := sf.recorder(tactics.ScenarioWave, tactics.Family(*family), fmt.Sprintf("gauntlet-t%d", *tier), d.Warriors, time.Now())
+	if rec != nil {
+		d.Observer = rec
+	}
 	result, err := d.Run()
 	if err != nil {
 		fail("arenadirector: " + err.Error())
+	}
+	if rec != nil {
+		writeScorecard(os.Stderr, *sf.path, runScorecard(rec, result))
 	}
 	writeJSON(result)
 }
@@ -208,6 +222,7 @@ func boss(args []string) {
 	poll := fs.Duration("poll", 3*time.Second, "delay between squad and boss checks")
 	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
 	placeWait := fs.Duration("place-wait", 3*time.Second, "wait after placing the squad")
+	sf := addScoreFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -257,13 +272,22 @@ func boss(args []string) {
 		Poll:      *poll,
 		Settle:    *settle,
 		PlaceWait: *placeWait,
-		Record: func(r arena.BossRecord) error {
-			if err := arena.AppendBossRecord(path, r); err != nil {
-				return err
-			}
-			return json.NewEncoder(os.Stdout).Encode(r)
-		},
-		Out: os.Stderr,
+		Out:       os.Stderr,
+	}
+	rec := sf.recorder(tactics.ScenarioBoss, tactics.FamilyBoss, *mob, b.Warriors, time.Now())
+	baseID := ""
+	if rec != nil {
+		baseID = rec.Meta.RunID
+		b.Observer = rec
+	}
+	b.Record = func(r arena.BossRecord) error {
+		if err := arena.AppendBossRecord(path, r); err != nil {
+			return err
+		}
+		if rec != nil {
+			writeScorecard(os.Stderr, *sf.path, bossScorecard(rec, baseID, *runs, r))
+		}
+		return json.NewEncoder(os.Stdout).Encode(r)
 	}
 	// An interrupt lets the run finish its cleanup instead of leaving a
 	// buffed boss and loaded areas behind.
