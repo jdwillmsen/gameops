@@ -56,6 +56,11 @@ type Input struct {
 	Forward    float32
 	Yaw, Pitch float32
 	Jump       bool
+	// Sprint asks to sprint while moving forward. The model ends it on a
+	// collision, in water and when Forward is not positive, and the packets
+	// follow; the caller stops asking when the unit is too hungry to sprint,
+	// which the model cannot see.
+	Sprint bool
 	// Break rides this tick's input as a block action.
 	Break *BreakAction
 	// StartUsing marks this tick as the one where the unit begins using the
@@ -206,7 +211,7 @@ func (a *Actuator) Tick(in Input) error {
 
 	p := a.pose
 	p.Yaw, p.Pitch = in.Yaw, in.Pitch
-	next, step := p.advance(in.Forward, in.Jump, a.solid)
+	next, step := p.advance(in.Forward, in.Jump, in.Sprint, a.solid)
 
 	flags := protocol.NewInputFlags(packet.InputFlagCount)
 	flags.Set(packet.InputFlagBlockBreakingDelayEnabled)
@@ -215,6 +220,18 @@ func (a *Actuator) Tick(in Input) error {
 		flags.Set(packet.InputFlagUp)
 	case in.Forward < 0:
 		flags.Set(packet.InputFlagDown)
+	}
+	if in.Sprint && in.Forward > 0 {
+		flags.Set(packet.InputFlagSprintDown)
+	}
+	switch {
+	case next.sprinting:
+		flags.Set(packet.InputFlagSprinting)
+		if !p.sprinting {
+			flags.Set(packet.InputFlagStartSprinting)
+		}
+	case p.sprinting:
+		flags.Set(packet.InputFlagStopSprinting)
 	}
 	if step.takeoff {
 		flags.Set(packet.InputFlagJumping)
@@ -312,6 +329,10 @@ func (a *Actuator) Apply(pk packet.Packet) {
 			// Taking the horizontal delta as the carry resumes walking
 			// without a second correction.
 			Carry: mgl32.Vec2{p.Delta.X(), p.Delta.Z()},
+			// The server was told about the sprint and has not changed its
+			// mind; forgetting it would leave a stop unsent.
+			sprinting:  a.pose.sprinting,
+			sprintHalt: a.pose.sprintHalt,
 		}
 		switch {
 		case p.OnGround:
@@ -330,10 +351,12 @@ func (a *Actuator) Apply(pk packet.Packet) {
 			return
 		}
 		a.pose = Pose{
-			Feet:     p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
-			Pitch:    p.Pitch,
-			Yaw:      p.Yaw,
-			OnGround: p.OnGround,
+			Feet:       p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
+			Pitch:      p.Pitch,
+			Yaw:        p.Yaw,
+			OnGround:   p.OnGround,
+			sprinting:  a.pose.sprinting,
+			sprintHalt: a.pose.sprintHalt,
 		}
 	default:
 		a.applyContainerLocked(pk)

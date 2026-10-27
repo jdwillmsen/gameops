@@ -21,6 +21,16 @@ const (
 	airDrag     = 0.91
 	airAccel    = 0.02
 
+	// Sprinting scales the movement attribute by 1.3 (a +30% modifier on the
+	// 0.1 base), which the server applies to both the ground step and the air
+	// control; the airborne 0.02 is the flying speed the same modifier scales.
+	sprintScale = 1.3
+	sprintAccel = walkAccel * sprintScale
+	// A jump taken while sprinting adds a fixed push along the facing on top
+	// of the jump itself, which is what lets a sprint-jump outrun a sprint.
+	sprintJumpBoost = 0.2
+	airSprintAccel  = airAccel * sprintScale
+
 	jumpVelocity = 0.42
 	gravity      = 0.08
 	verticalDrag = 0.98
@@ -103,7 +113,17 @@ type Pose struct {
 	// pushed says the unit walked into something on its last tick, which on
 	// a ladder is what makes it climb.
 	pushed bool
+	// sprinting is what the server has been told: set while the unit sprints,
+	// and dropped by the model when the sprint ends.
+	sprinting bool
+	// sprintHalt latches a sprint the model ended by walking into something,
+	// until the caller lets go of the sprint input: the server does not
+	// resume a sprint broken by a collision while the key is still held.
+	sprintHalt bool
 }
+
+// Sprinting says whether the unit is sprinting as of its last tick.
+func (p Pose) Sprinting() bool { return p.sprinting }
 
 // Rise is the vertical step the unit makes next tick if nothing changes, which
 // is zero on the ground.
@@ -129,13 +149,26 @@ func forwardDir(yaw float32) mgl32.Vec2 {
 	return mgl32.Vec2{float32(-math.Sin(r)), float32(math.Cos(r))}
 }
 
-// advance runs one tick of the movement model against the world.
-func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
+// advance runs one tick of the movement model against the world. A sprint is
+// only honoured moving forward and out of water, and ends when the unit stops
+// or walks into something; the caller picks the hunger floor, which the
+// model cannot see.
+func (p Pose) advance(forward float32, jump, sprint bool, w Solid) (Pose, stepInfo) {
+	if !sprint {
+		p.sprintHalt = false
+	}
 	if depth := WaterDepth(w, p.Feet); depth > 0 {
+		p.sprinting = false
 		return p.swim(depth, forward, jump, w)
 	}
 	var info stepInfo
 	dir := forwardDir(p.Yaw)
+
+	p.sprinting = sprint && forward > 0 && !p.sprintHalt
+	walk, air := float32(walkAccel), float32(airAccel)
+	if p.sprinting {
+		walk, air = sprintAccel, airSprintAccel
+	}
 
 	climbing := onLadder(w, p.Feet)
 	if climbing && forward > 0 && p.pushed {
@@ -146,16 +179,19 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 	dy := float32(0)
 	switch {
 	case p.OnGround:
-		v = p.Carry.Add(dir.Mul(walkAccel * forward))
+		v = p.Carry.Add(dir.Mul(walk * forward))
 		if jump {
 			info.takeoff = true
 			p.OnGround, p.jumped = false, true
 			dy = jumpVelocity
 			p.vy = (dy - gravity) * verticalDrag
+			if p.sprinting {
+				v = v.Add(dir.Mul(sprintJumpBoost))
+			}
 		}
 	default:
 		info.airborne = p.jumped
-		v = p.Carry.Mul(airDrag).Add(dir.Mul(airAccel * forward))
+		v = p.Carry.Mul(airDrag).Add(dir.Mul(air * forward))
 		dy = p.vy
 		p.vy = (dy - gravity) * verticalDrag
 		if climbing {
@@ -193,6 +229,9 @@ func (p Pose) advance(forward float32, jump bool, w Solid) (Pose, stepInfo) {
 	}
 	info.delta[0], info.delta[2] = feet[0]-moved[0], feet[2]-moved[2]
 	p.pushed = forward > 0 && v != wanted
+	if p.sprinting && p.pushed {
+		p.sprinting, p.sprintHalt = false, true
+	}
 
 	if p.OnGround {
 		if !info.landed {
