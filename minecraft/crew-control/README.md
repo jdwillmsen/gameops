@@ -698,7 +698,7 @@ minute), so a build that runs ahead of the migration writes the V11 columns
 only and answers a request using the new filters with a 400 rather than
 ignoring them. Postgres does not compute `cause_ref` itself: it stores the one
 it is given. The unit's own
-`kit_failed`, `died`, `respawned` and `session_error` are validated by
+`kit_failed`, `died`, `respawned`, `session_error` and `movement_clip` are validated by
 `events.FromUnit` (closed kinds and codes, bounded text) but no route accepts
 them yet: units post task reports only, and a unit-authenticated route is
 follow-up work.
