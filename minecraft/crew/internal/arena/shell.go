@@ -97,7 +97,12 @@ func (c *shellConsole) Exec(cmd string) (string, error) {
 		limit = logWait
 	}
 	deadline := c.now().Add(limit)
-	noiseDeadline := c.now().Add(noiseWait)
+	// A fill's own reply is a fill success, so only other commands wait behind
+	// the noise.
+	noiseDeadline := deadline
+	if !strings.HasPrefix(cmd, "fill ") {
+		noiseDeadline = c.now().Add(noiseWait)
+	}
 	for {
 		c.sleep(settle)
 		out, err := c.run(c.logsArgs[0], c.logsArgs[1:])

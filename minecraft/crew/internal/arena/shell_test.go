@@ -163,3 +163,27 @@ func TestShellConsoleReturnsFillNoiseWhenNothingElseComes(t *testing.T) {
 		t.Errorf("output = %q, %v, want the fill reply", out, err)
 	}
 }
+
+func TestShellConsoleDoesNotDelayAFillsOwnReply(t *testing.T) {
+	clock := newFakeClock()
+	logs := ""
+	c := &shellConsole{
+		sendArgs: []string{"send-command"},
+		logsArgs: []string{"logs"},
+		run: func(name string, args []string) ([]byte, error) {
+			if name == "send-command" {
+				logs += "[t] 3 blocks filled\n"
+			}
+			return []byte(logs), nil
+		},
+		now:   clock.Now,
+		sleep: clock.Sleep,
+	}
+	start := clock.Now()
+	if _, err := c.Exec("fill 0 0 0 1 1 1 air"); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if took := clock.Now().Sub(start); took > time.Second {
+		t.Errorf("a fill waited %v for its own reply", took)
+	}
+}
