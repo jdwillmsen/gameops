@@ -109,6 +109,17 @@ test('signed out names the action and links to the sign-in page', () => {
   assert.equal(all(el, n => n.tag === 'a')[0].href, '/signin');
 });
 
+test('retry carries a focus key so focus survives a redraw', () => {
+  const el = stateView('error', { message: 'x', retry: () => {} });
+  assert.equal(button(el, 'Retry').getAttribute(FOCUS_KEY), 'kit-retry');
+});
+
+test('a state missing its required text throws instead of painting undefined', () => {
+  assert.throws(() => stateView('empty'), /needs message/);
+  assert.throws(() => stateView('error', {}), /needs message/);
+  assert.throws(() => stateView('signedOut'), /needs what/);
+});
+
 test('an unknown state throws instead of painting nothing', () => {
   assert.throws(() => stateView('weird'), /unknown state/);
 });
