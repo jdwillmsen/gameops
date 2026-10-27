@@ -240,10 +240,18 @@ func (d *Director) Run() (Result, error) {
 	if err := d.validateWaves(waves); err != nil {
 		return result, err
 	}
+	for _, name := range d.Warriors {
+		if err := validateWarriorName(name); err != nil {
+			return result, err
+		}
+	}
 	if err := d.addTickingAreas(); err != nil {
 		return result, err
 	}
 	defer d.cleanupRun()
+	if err := d.tagWarriors(); err != nil {
+		return result, err
+	}
 	d.sleep(d.Settle)
 	if err := d.checkSpawnCells(waves); err != nil {
 		return result, err
@@ -634,9 +642,34 @@ func (d *Director) removeTickingAreas() {
 // cleanupRun runs on every exit path, including timeout and a mid-wave error,
 // so buffed mobs, open pens and ticking areas never outlive the run.
 func (d *Director) cleanupRun() {
+	d.untagWarriors()
 	_, _ = d.exec(killWaveCommand())
 	_ = d.closeAllPens()
 	d.removeTickingAreas()
+}
+
+// tagWarriors marks the squad as targets for the run. It stops at the first
+// failure; cleanupRun still untags every name, so nothing stays tagged.
+func (d *Director) tagWarriors() error {
+	for _, name := range d.Warriors {
+		cmd, err := warriorTagCommand(name)
+		if err != nil {
+			return err
+		}
+		if _, err := d.exec(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// untagWarriors is best-effort so cleanup cannot mask the run's outcome.
+func (d *Director) untagWarriors() {
+	for _, name := range d.Warriors {
+		if cmd, err := warriorUntagCommand(name); err == nil {
+			_, _ = d.exec(cmd)
+		}
+	}
 }
 
 func (d *Director) closeAllPens() error {

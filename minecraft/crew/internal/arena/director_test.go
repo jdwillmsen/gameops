@@ -1612,3 +1612,121 @@ func TestRunWaitsForTheChunksBeforeTheFirstFill(t *testing.T) {
 		t.Errorf("settle added %v, want 25s", got)
 	}
 }
+
+func warriorRun(t *testing.T, names []string, fail func(string) error) (*FakeConsole, error) {
+	t.Helper()
+	s := newSim()
+	for _, n := range names {
+		s.warriorUp[n] = true
+	}
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if fail != nil {
+			if err := fail(cmd); err != nil {
+				return "", err
+			}
+		}
+		return s.Exec(cmd)
+	}}
+	d := newDirector(f, testBook(wave("One", "zombie", 1, 1, 1)), newFakeClock())
+	d.Warriors = names
+	_, err := d.Run()
+	return f, err
+}
+
+func TestWarriorsTaggedBeforeSpawnAndUntaggedAfter(t *testing.T) {
+	f, err := warriorRun(t, []string{"Vanguard", "Striker"}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, n := range []string{"Vanguard", "Striker"} {
+		add, rem := fmt.Sprintf("tag %q add arena_warrior", n), fmt.Sprintf("tag %q remove arena_warrior", n)
+		if f.Count(add) != 1 || f.Count(rem) != 1 {
+			t.Errorf("%s: %d adds, %d removes, want one each", n, f.Count(add), f.Count(rem))
+		}
+		if !firstBefore(f.Cmds, add, " run summon ") || !lastAfter(f.Cmds, " run summon ", rem) {
+			t.Errorf("%s: tag must precede the first summon and removal follow the run", n)
+		}
+	}
+	if !firstBefore(f.Cmds, "tickingarea add", `tag "Vanguard" add`) {
+		t.Error("tagging ran before the ticking areas loaded")
+	}
+}
+
+func TestWarriorsUntaggedWhenTheRunFails(t *testing.T) {
+	f, err := warriorRun(t, []string{"Vanguard", "Striker"}, func(cmd string) error {
+		if strings.Contains(cmd, " run summon ") {
+			return fmt.Errorf("console gone")
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("Run succeeded despite the summon error")
+	}
+	for _, n := range []string{"Vanguard", "Striker"} {
+		if f.Count(fmt.Sprintf("tag %q remove arena_warrior", n)) != 1 {
+			t.Errorf("%s left tagged after a failed run", n)
+		}
+	}
+}
+
+func TestWarriorTagFailureStillUntagsEveryone(t *testing.T) {
+	f, err := warriorRun(t, []string{"Vanguard", "Striker"}, func(cmd string) error {
+		if strings.HasPrefix(cmd, `tag "Striker" add`) {
+			return fmt.Errorf("boom")
+		}
+		return nil
+	})
+	if err == nil {
+		t.Fatal("Run succeeded despite the tag error")
+	}
+	if f.Count(" run summon ") != 0 {
+		t.Error("mobs spawned after the squad failed to tag")
+	}
+	for _, n := range []string{"Vanguard", "Striker"} {
+		if f.Count(fmt.Sprintf("tag %q remove arena_warrior", n)) != 1 {
+			t.Errorf("%s left tagged", n)
+		}
+	}
+}
+
+func TestWarriorNameWithAQuoteIsRefusedBeforeAnyCommand(t *testing.T) {
+	f, err := warriorRun(t, []string{`Bad"] add x`}, nil)
+	if err == nil {
+		t.Fatal("Run accepted an injecting warrior name")
+	}
+	if len(f.Cmds) != 0 {
+		t.Errorf("commands ran before name validation: %v", f.Cmds)
+	}
+}
+
+func TestNoWarriorsMeansNoTagCommands(t *testing.T) {
+	f, err := warriorRun(t, nil, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if f.Count("arena_warrior") != 0 {
+		t.Error("tag commands ran without warriors")
+	}
+}
+
+func indexOf(cmds []string, sub string, last bool) int {
+	at := -1
+	for i, c := range cmds {
+		if strings.Contains(c, sub) && (last || at < 0) {
+			at = i
+		}
+	}
+	return at
+}
+
+// firstBefore reports whether the first match of a precedes the first of b.
+func firstBefore(cmds []string, a, b string) bool {
+	i, j := indexOf(cmds, a, false), indexOf(cmds, b, false)
+	return i >= 0 && j >= 0 && i < j
+}
+
+// lastAfter reports whether b comes after the last match of a.
+func lastAfter(cmds []string, a, b string) bool {
+	i, j := indexOf(cmds, a, true), indexOf(cmds, b, true)
+	return i >= 0 && j > i
+}

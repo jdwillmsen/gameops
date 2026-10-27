@@ -57,7 +57,9 @@
 # The director also owns the squad's position: before wave one it teleports
 # each --warriors name to a start cell on the floor, and it returns a warrior
 # that respawns or strays off the floor to that cell. --place-squad=false
-# leaves the squad where it is.
+# leaves the squad where it is. It also tags each --warriors name
+# arena_warrior for the run (the add-on pack's brute hunts that tag) and
+# removes the tag on every exit path; worlds without the pack ignore it.
 #
 # --plan feeds a prebuilt `labcourses arena` output to build instead of
 # running the generator from a checkout, for hosts that have no Go toolchain.
