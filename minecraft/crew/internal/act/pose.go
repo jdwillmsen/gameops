@@ -47,6 +47,11 @@ const (
 	// Shrinks the body box so a unit resting against a face does not count as
 	// overlapping it.
 	skin = 1e-3
+	// How far into a box the body may sit and still be held by it. A pose
+	// the server accepted, or a landing rounded by float32, can end a few
+	// millimetres inside a face; moving on through it would clip the unit
+	// into the block, where the server pushes it back out.
+	settle = 0.01
 	// How far below the feet counts as standing on something.
 	supportReach = 0.02
 
@@ -390,9 +395,9 @@ func sweep(w Solid, f mgl32.Vec3, axis int, d float32) (float32, bool) {
 			continue
 		}
 		if d > 0 {
-			// Only boxes ahead of the front face block; one the body already
-			// overlaps is something it is inside, not something it hits.
-			if o.lo[axis] < f[axis]+bodyHi[axis]-skin {
+			// Only boxes ahead of the front face block; one the body is well
+			// inside is something it is leaving, not something it hits.
+			if o.lo[axis] < f[axis]+bodyHi[axis]-settle {
 				continue
 			}
 			if limit := o.lo[axis] - bodyHi[axis]; limit < target {
@@ -400,7 +405,7 @@ func sweep(w Solid, f mgl32.Vec3, axis int, d float32) (float32, bool) {
 			}
 			continue
 		}
-		if o.hi[axis] > f[axis]-bodyLo[axis]+skin {
+		if o.hi[axis] > f[axis]-bodyLo[axis]+settle {
 			continue
 		}
 		if limit := o.hi[axis] + bodyLo[axis]; limit > target {
