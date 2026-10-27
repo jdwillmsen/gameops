@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/liveness"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcdial"
@@ -193,6 +194,11 @@ type logAdapter struct{ l *logging.Logger }
 func (a logAdapter) Info(e string, f map[string]any)  { a.l.Info(e, logging.Fields(f)) }
 func (a logAdapter) Error(e string, f map[string]any) { a.l.Error(e, logging.Fields(f)) }
 
+// declinePack refuses every pack the server offers. Unit login then skips the
+// chunked download and goes straight to the world; the server still lets the
+// unit in when it marks packs required.
+func declinePack(uuid.UUID, string, int, int) bool { return false }
+
 // spawnedFields is the spawn log line. It is a function of its own so a test
 // can hold it to the rule that positions never reach a log.
 func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
@@ -220,6 +226,9 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 		TokenSource:  auth.tokens,
 		IdentityData: auth.identity,
 		Protocol:     proto,
+		// A headless unit never renders, so a world resource pack is dead
+		// weight that the login would otherwise wait on.
+		DownloadResourcePack: declinePack,
 		ClientData: login.ClientData{
 			SkinID:          unitSkin.ID,
 			SkinData:        unitSkin.Data,
