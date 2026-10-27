@@ -5,14 +5,17 @@
 //	[--kind mob|duel|boss|wave] [--gens 20] [--fights 2000] [--budget 2h]
 //	[--max-failures 5] [--evaluator fake|cmd:<command>] [--kill-file <path>]
 //	[--seed N] [--evals 8] [--mu 3] [--lambda 6] [--margin 0.5] [--alpha 0.05]
-//	[--sigma 0.12] [--fight-timeout 5m]
+//	[--sigma 0.12] [--fight-timeout 5m] [--tactics=false]
 //
 // Every run is capped by --gens, --fights, --budget and --max-failures, and
 // stops at once when the kill file exists (default <store>/KILL) or on
 // SIGINT/SIGTERM. The cmd evaluator runs <command> once per fight with
 // {"profile":...,"scenario":...} on stdin and reads one scorecard per stdout
 // line. run prints one JSON result line on stdout and progress on stderr; it
-// exits 1 when the run stopped on repeated evaluator failures.
+// exits 1 when the run stopped on repeated evaluator failures. Unless
+// --tactics=false the loop also learns which of the engine's registered
+// tactics to use against the family, and in what order. Only one trainer may
+// run per family and store; a second exits 2 at once.
 package main
 
 import (
@@ -29,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/trainer"
 )
@@ -71,6 +75,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	margin := fs.Float64("margin", 0.5, "score gain a challenger needs over the champion")
 	alpha := fs.Float64("alpha", 0.05, "significance level of the paired test, per generation")
 	sigma := fs.Float64("sigma", 0.12, "initial mutation size as a fraction of each parameter's range")
+	learnTactics := fs.Bool("tactics", true, "also learn which registered tactics to use against the family")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -93,8 +98,13 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		*killFile = filepath.Join(*storeDir, "KILL")
 	}
 
+	var tacticOptions func(tactics.Family) []string
+	if *learnTactics {
+		tacticOptions = life.TacticNames
+	}
 	res, err := trainer.Run(ctx, trainer.Config{
-		Family: tactics.Family(*family), Scenario: *scenario, Kind: *kind, Store: store, Eval: ev,
+		TacticOptions: tacticOptions,
+		Family:        tactics.Family(*family), Scenario: *scenario, Kind: *kind, Store: store, Eval: ev,
 		MaxGenerations: *gens, MaxFights: *fights, Budget: *budget, MaxFailures: *maxFail,
 		KillFile: *killFile, Seed: *seed, Evals: *evals, Mu: *mu, Lambda: *lambda,
 		Margin: *margin, Alpha: *alpha, Sigma: *sigma,
