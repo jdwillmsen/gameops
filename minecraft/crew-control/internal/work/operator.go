@@ -80,6 +80,10 @@ func (a *API) MountOperator(mux *http.ServeMux, g Gate) {
 			h(w, r, unit, op.ID)
 		}))
 	}
+	mux.Handle("POST /v1/work/bulk", g.Require(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		op, _ := g.Operator(r)
+		a.bulk(w, r, op.ID)
+	})))
 	mux.Handle("POST /v1/work/{unit}/tasks", post(a.queueTask))
 	mux.Handle("POST /v1/work/{unit}/goto", post(a.queueGoto))
 	mux.Handle("POST /v1/work/{unit}/stop", post(a.stop))
@@ -116,15 +120,28 @@ func opError(w http.ResponseWriter, status int, msg string) {
 }
 
 func opStoreError(w http.ResponseWriter, r *http.Request, err error) {
-	switch {
-	case r.Context().Err() != nil:
-	case errors.Is(err, ErrUnavailable):
-		opError(w, http.StatusServiceUnavailable, "queue unavailable")
-	case errors.Is(err, ErrInvalid):
-		opError(w, http.StatusBadRequest, "invalid request")
-	default:
-		opError(w, http.StatusInternalServerError, "queue error")
+	if r.Context().Err() != nil {
+		return
 	}
+	switch {
+	case errors.Is(err, ErrUnavailable):
+		opError(w, http.StatusServiceUnavailable, storeMessage(err))
+	case errors.Is(err, ErrInvalid):
+		opError(w, http.StatusBadRequest, storeMessage(err))
+	default:
+		opError(w, http.StatusInternalServerError, storeMessage(err))
+	}
+}
+
+// storeMessage words a store failure without detail that could leak.
+func storeMessage(err error) string {
+	switch {
+	case errors.Is(err, ErrUnavailable):
+		return "queue unavailable"
+	case errors.Is(err, ErrInvalid):
+		return "invalid request"
+	}
+	return "queue error"
 }
 
 // changed wakes the unit's poll and tells signed-in streams.
