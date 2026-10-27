@@ -254,9 +254,11 @@ func (st *pvpState) strafe(f *Fight, d, lo, hi float64) error {
 	for range 2 {
 		dir := strafeHeading(to, d, st.orbit, lo, hi)
 		if l.stepSafe(p, dir) {
+			fwd := tapForward(l.tick, l.lastAttack)
 			return a.Tick(act.Input{
 				Yaw:     float32(yawOf(dir)),
-				Forward: tapForward(l.tick, l.lastAttack),
+				Forward: fwd,
+				Sprint:  fwd > 0 && canSprint(f.Snapshot),
 			})
 		}
 		st.orbit = -st.orbit

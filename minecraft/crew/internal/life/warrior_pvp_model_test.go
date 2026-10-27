@@ -7,6 +7,7 @@ import (
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
 func TestHitReadyFollowsTheHitWindow(t *testing.T) {
@@ -154,6 +155,18 @@ func TestTapForwardPausesOnTheSwingAndStartsAgainAfter(t *testing.T) {
 	}
 	if got := tapForward(5, 0); got != 1 {
 		t.Errorf("forward before any swing = %v, want 1", got)
+	}
+}
+
+func TestCanSprintNeedsKnownFoodAboveTheGamesFloor(t *testing.T) {
+	for _, c := range []struct {
+		hunger float32
+		known  bool
+		want   bool
+	}{{20, true, true}, {7, true, true}, {6, true, false}, {0, true, false}, {20, false, false}} {
+		if got := canSprint(belief.Snapshot{Hunger: c.hunger, HungerKnown: c.known}); got != c.want {
+			t.Errorf("canSprint(hunger %v, known %v) = %v, want %v", c.hunger, c.known, got, c.want)
+		}
 	}
 }
 
