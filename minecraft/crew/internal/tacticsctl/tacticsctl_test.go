@@ -27,7 +27,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(s.TrustDir, 0o755); err != nil {
+	if err := os.MkdirAll(s.TrustDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(s.TrustDir, "owner.pub"), []byte(hex.EncodeToString(pub)), 0o644); err != nil {
@@ -41,10 +41,18 @@ func (f *fixture) candidate(name, parent string, shot float64) tactics.Profile {
 	pr := tactics.NewProfile(name)
 	pr.Parent = parent
 	pr.Default.ShotEvery = shot
+	pr.Evidence = "zombie/scorecards/" + name + ".jsonl"
 	if err := f.s.AddCandidate(pr); err != nil {
 		f.t.Fatal(err)
 	}
 	return pr
+}
+
+func (f *fixture) lab(name string) {
+	f.t.Helper()
+	if err := f.s.LabSet(name); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 func (f *fixture) approve(pr tactics.Profile) {
@@ -276,10 +284,12 @@ func TestPromoteWithApprovalAndProductionRollback(t *testing.T) {
 	g2 := f.candidate("g2", "g1", 40)
 	g3 := f.candidate("g3", "g2", 45)
 
+	f.lab("g1")
 	f.approve(g1)
 	if err := f.s.Promote("g1"); err != nil {
 		t.Fatal(err)
 	}
+	f.lab("g3")
 	f.approve(g3)
 	if err := f.s.Promote("g3"); err != nil {
 		t.Fatal(err)
@@ -345,6 +355,7 @@ func TestImmutableNames(t *testing.T) {
 	}
 	same := tactics.NewProfile("g1")
 	same.Default.ShotEvery = 35
+	same.Evidence = "zombie/scorecards/g1.jsonl"
 	if err := f.s.AddCandidate(same); err != nil {
 		t.Errorf("re-filing identical g1: %v", err)
 	}
@@ -437,4 +448,149 @@ func TestStrayTempFilesAndTornHistoryAreHarmless(t *testing.T) {
 
 func mustJSON(a Approval) string {
 	return `{"profile":"` + a.Profile + `","hash":"` + a.Hash + `","approver":"` + a.Approver + `","ts":"` + a.TS + `","sig":"` + a.Sig + `"}`
+}
+
+// ready makes a profile fully promotable: lab-run and approved.
+func (f *fixture) ready(name string) {
+	f.t.Helper()
+	f.lab(name)
+	f.approve(f.mustCandidate(name))
+}
+
+func TestPromoteRefusesDefaultTrustDirectory(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	f.s = New(f.s.Root, "")
+	pub, _ := os.ReadFile(filepath.Join(filepath.Dir(f.s.Root), "trust", "owner.pub"))
+	os.MkdirAll(f.s.TrustDir, 0o700)
+	os.WriteFile(filepath.Join(f.s.TrustDir, "owner.pub"), pub, 0o644)
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "explicit trust") {
+		t.Fatalf("promote with the default trust dir = %v", err)
+	}
+	if _, ok, _ := f.s.Pointer(Production); ok {
+		t.Error("refused promote wrote the production pointer")
+	}
+}
+
+func TestPromoteRefusesTrustDirectoryUnderStore(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	inner := filepath.Join(f.s.Root, "keys", "trust")
+	pub, _ := os.ReadFile(filepath.Join(f.s.TrustDir, "owner.pub"))
+	os.MkdirAll(inner, 0o700)
+	os.WriteFile(filepath.Join(inner, "owner.pub"), pub, 0o644)
+	for name, dir := range map[string]string{
+		"nested":      inner,
+		"explicit":    filepath.Join(f.s.Root, "trusted"),
+		"dotdot":      filepath.Join(f.s.Root, "keys", "..", "keys", "trust"),
+		"via-symlink": mustSymlink(t, inner, filepath.Join(t.TempDir(), "link")),
+	} {
+		s := New(f.s.Root, dir)
+		if err := s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "under the store") {
+			t.Errorf("%s: promote with trust dir %s = %v", name, dir, err)
+		}
+	}
+}
+
+func mustSymlink(t *testing.T, target, link string) string {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	return link
+}
+
+func TestPromoteRefusesWritableTrustDirectory(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	for _, mode := range []os.FileMode{0o770, 0o707, 0o777, 0o720} {
+		if err := os.Chmod(f.s.TrustDir, mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "writable by group or others") {
+			t.Errorf("trust dir mode %04o: promote = %v", mode, err)
+		}
+	}
+	// Readable by others is fine: public keys are public.
+	os.Chmod(f.s.TrustDir, 0o755)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Errorf("0755 trust dir refused: %v", err)
+	}
+}
+
+func TestPromoteRefusesWritableTrustedKey(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	if err := os.Chmod(filepath.Join(f.s.TrustDir, "owner.pub"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "writable by group or others") {
+		t.Errorf("promote with a world-writable key = %v", err)
+	}
+}
+
+func TestPromoteRefusesProfileNeverRunInLab(t *testing.T) {
+	f := newFixture(t)
+	g1 := f.candidate("g1", "", 35)
+	f.approve(g1)
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "lab") {
+		t.Fatalf("promote of a profile never lab-set = %v", err)
+	}
+	f.lab("g1")
+	if err := f.s.Promote("g1"); err != nil {
+		t.Fatalf("promote after lab-set: %v", err)
+	}
+}
+
+func TestPromoteRefusesMissingOrBorrowedEvidence(t *testing.T) {
+	f := newFixture(t)
+	for name, evidence := range map[string]string{
+		"none":     "",
+		"absolute": "/etc/passwd",
+		"dotdot":   "../zombie/scorecards/e.jsonl",
+		"other":    "zombie/scorecards/someone-else.jsonl",
+		"suffix":   "zombie/scorecards/x.txt",
+		"flat":     "scorecards.jsonl",
+	} {
+		pr := tactics.NewProfile("e-" + name)
+		pr.Evidence = evidence
+		if err := f.s.AddCandidate(pr); err != nil {
+			t.Fatal(err)
+		}
+		f.lab(pr.Name)
+		f.approve(pr)
+		if err := f.s.Promote(pr.Name); err == nil || !strings.Contains(err.Error(), "evidence") {
+			t.Errorf("%s: promote with evidence %q = %v", name, evidence, err)
+		}
+	}
+}
+
+func TestNoApprovalWithoutThePrivateKey(t *testing.T) {
+	f := newFixture(t)
+	pr := f.candidate("g1", "", 35)
+	f.lab("g1")
+	h, _ := Hash(pr)
+
+	// An agent can write files, but it cannot sign for a trusted approver.
+	_, agentKey, _ := ed25519.GenerateKey(rand.Reader)
+	forged := NewApproval(agentKey, "g1", h, "owner", "2026-10-27T00:00:00Z")
+	if err := f.s.SaveApproval(forged); err == nil {
+		t.Error("SaveApproval accepted a signature from a key that is not the approver's")
+	}
+	unsigned := Approval{Profile: "g1", Hash: h, Approver: "owner", TS: "t"}
+	if err := f.s.SaveApproval(unsigned); err == nil {
+		t.Error("SaveApproval accepted an unsigned approval")
+	}
+	os.MkdirAll(filepath.Dir(f.s.approvalPath(h)), 0o755)
+	os.WriteFile(f.s.approvalPath(h), []byte(mustJSON(forged)), 0o644)
+	if err := f.s.Promote("g1"); err == nil {
+		t.Error("a forged approval file promoted a profile")
+	}
+	if _, ok, _ := f.s.Pointer(Production); ok {
+		t.Error("production pointer written without a valid approval")
+	}
 }

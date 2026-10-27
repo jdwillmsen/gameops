@@ -178,3 +178,22 @@ func TestLockHolderProcess(t *testing.T) {
 	os.Stdout.WriteString("locked\n")
 	os.Stdin.Read(make([]byte, 1))
 }
+
+func TestAppendRecordsEvidenceInTheProfile(t *testing.T) {
+	s := newStore(t)
+	cards := []tactics.Scorecard{{Scenario: "pack", Family: tactics.FamilyZombie, Outcome: tactics.OutcomeWin}}
+	rec, err := s.Append(Record{Profile: tactics.NewProfile("x"), Family: tactics.FamilyZombie}, cards)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Profile.Evidence != "zombie/scorecards/zombie-v000.jsonl" {
+		t.Errorf("evidence = %q", rec.Profile.Evidence)
+	}
+	bare, err := s.Append(Record{Profile: tactics.NewProfile("x"), Family: tactics.FamilySkeleton}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bare.Profile.Evidence != "" {
+		t.Errorf("a record with no fights claims evidence %q", bare.Profile.Evidence)
+	}
+}
