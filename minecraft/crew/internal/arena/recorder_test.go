@@ -57,7 +57,7 @@ func TestRecorderBuildsAScorecardFromEvents(t *testing.T) {
 				t.Errorf("scorecard = %+v\nwant        %+v", got, tt.want)
 			}
 			if got.DamageDealt != 0 || got.DamageTaken != 0 {
-				t.Error("damage is not readable from the console and must stay zero")
+				t.Error("no damage source is set, so damage must stay zero")
 			}
 		})
 	}

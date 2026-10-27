@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"time"
 
@@ -19,10 +20,21 @@ type scoreFlags struct {
 	runID   *string
 	side    *string
 	seed    *int64
+	damage  *arena.DamageSource
 }
 
 func addScoreFlags(fs *flag.FlagSet) scoreFlags {
+	damage := new(arena.DamageSource)
+	fs.Func("status-url", "unit state url with {name} for the warrior, e.g. http://crew-control/units/{name}/v1/state; fills damage taken on the scorecard (off by default)", func(v string) error {
+		src, err := arena.NewHTTPDamage(v)
+		if err != nil {
+			return err
+		}
+		*damage = src
+		return nil
+	})
 	return scoreFlags{
+		damage:  damage,
 		path:    fs.String("scorecards", "", "append one tactics scorecard per fight to this JSONL file (off by default)"),
 		profile: fs.String("profile", "default", "name of the tactics profile the warriors fight with, recorded on the scorecard"),
 		runID:   fs.String("run-id", "", "scorecard run id (default derived from the start time); boss runs add -<run>"),
@@ -40,7 +52,9 @@ func (s scoreFlags) recorder(scenario string, family tactics.Family, opponent st
 	if id == "" {
 		id = scenario + "-" + strconv.FormatInt(now.Unix(), 10)
 	}
-	return &arena.Recorder{Meta: arena.FightMeta{
+	return &arena.Recorder{Damage: *s.damage, Logf: func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "arenadirector: "+format+"\n", args...)
+	}, Meta: arena.FightMeta{
 		RunID:    id,
 		Scenario: scenario,
 		Family:   family,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"io"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,5 +79,23 @@ func TestWriteScorecardAppendsAndOnlyWarnsOnFailure(t *testing.T) {
 	writeScorecard(&warn, dir, tactics.Scorecard{RunID: "b"})
 	if !strings.Contains(warn.String(), "scorecard not recorded") {
 		t.Errorf("warning = %q, want a note that the card was lost", warn.String())
+	}
+}
+
+func TestStatusURLFeedsTheRecorderAndIsOffByDefault(t *testing.T) {
+	if rec := parseScoreFlags(t, "--scorecards", "/tmp/x.jsonl").recorder("wave", tactics.FamilyZombie, "o", nil, start); rec.Damage != nil {
+		t.Errorf("damage source %v without --status-url", rec.Damage)
+	}
+	sf := parseScoreFlags(t, "--scorecards", "/tmp/x.jsonl", "--status-url", "http://crew-control/units/{name}/v1/state")
+	rec := sf.recorder("wave", tactics.FamilyZombie, "o", []string{"Rusty"}, start)
+	if src, ok := rec.Damage.(*arena.HTTPDamage); !ok || src.URL != "http://crew-control/units/{name}/v1/state" {
+		t.Errorf("damage source = %#v", rec.Damage)
+	}
+
+	fs := flag.NewFlagSet("t", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	addScoreFlags(fs)
+	if err := fs.Parse([]string{"--status-url", "http://crew-control/state"}); err == nil {
+		t.Error("a status url without {name} was accepted")
 	}
 }
