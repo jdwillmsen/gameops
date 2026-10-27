@@ -372,6 +372,7 @@ func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode
 		attackerUntil: l.attackerUntil,
 		wantType:      name(l.warrior.order().Target),
 		focusRange:    func(e belief.Entity) float64 { return pr.For(familyOf(e)).FocusRange },
+		player:        l.mayFightPlayer,
 	})
 	// A creeper about to blast is answered first, as the reactive defence
 	// answers it: by leaving.
@@ -411,16 +412,19 @@ func (l *Life) nearestOfKind(p act.Pose, k kind, within float64) (belief.Entity,
 }
 
 // enemyNear says whether anything the unit would fight stands within blocks
-// of it: hostile, a provoked one that hurt it, or a creeper, whose blast
-// is as bad as a bite while eating.
+// of it: hostile, a provoked one that hurt it, a creeper, whose blast
+// is as bad as a bite while eating, or a player the duel policy lets it fight.
 func (l *Life) enemyNear(feet mgl32.Vec3, within float64) bool {
 	found := false
 	l.ents.Each(func(e belief.Entity) {
-		if found || e.Player {
+		if found {
 			return
 		}
-		k := kindOf(e.Type)
-		if k == other || (k == provoked && !l.isSuspect(e.ID)) {
+		if e.Player {
+			if !l.mayFightPlayer(e) {
+				return
+			}
+		} else if k := kindOf(e.Type); k == other || (k == provoked && !l.isSuspect(e.ID)) {
 			return
 		}
 		if math.Abs(float64(e.Pos.Y()-feet.Y())) > threatHeight {

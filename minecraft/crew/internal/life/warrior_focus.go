@@ -38,24 +38,42 @@ type focusQuery struct {
 	// packet carries a mob's health today, so the id tie-break decides
 	// until one does.
 	healthOf func(uint64) (float32, bool)
+	// player says whether a player may be targeted at all; nil is never.
+	player func(belief.Entity) bool
 }
 
 // focusTarget picks the squad's shared target: the lowest-health threat
 // within reach of the leader, ties broken by entity id, so three units
 // looking at the same world swing at the same mob. A threat is a hostile
 // mob, a provoked one that hurt the unit recently, never a player, and
-// creepers stay out of it: no melee focus is worth a blast. It is pure in
-// what matters to the squad: the same entities, anchor and order pick the
-// same target on every unit.
+// creepers stay out of it: no melee focus is worth a blast. A player is
+// focused only when the query's player rule allows it, and then outranks
+// every mob: the nearest one to the choosing unit wins. It is pure in what
+// matters to the squad: the same entities, anchor and order pick the same
+// target on every unit.
 func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 	var (
 		best     belief.Entity
 		bestHp   = math.MaxFloat64
 		bestID   uint64
 		bestWant bool
+
+		foe   belief.Entity
+		foeD  = math.MaxFloat64
+		foeOK bool
 	)
 	ents.Each(func(e belief.Entity) {
 		if e.Player {
+			if q.player == nil || !q.player(e) ||
+				math.Abs(float64(e.Pos.Y()-q.anchor.Y())) > threatHeight ||
+				horizontal(e.Pos, q.anchor) > q.rangeOf(e) ||
+				(q.ignore[e.ID] > q.tick && !inMeleeReachAt(q.self, e.Pos)) {
+				return
+			}
+			d := horizontal(e.Pos, q.self)
+			if !foeOK || d < foeD || (d == foeD && e.ID < foe.ID) {
+				foe, foeD, foeOK = e, d, true
+			}
 			return
 		}
 		k := kindOf(e.Type)
@@ -88,6 +106,9 @@ func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 			best, bestHp, bestID, bestWant = e, hp, e.ID, want
 		}
 	})
+	if foeOK {
+		return foe, true
+	}
 	return best, best.ID != 0
 }
 

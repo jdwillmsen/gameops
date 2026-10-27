@@ -149,6 +149,9 @@ type Life struct {
 	// profile is the warrior's tuning, swapped from outside the stepping
 	// goroutine; nil is the default profile.
 	profile atomic.Pointer[tactics.Profile]
+	// pvp says which players the warrior may fight; nil is none, and is
+	// swapped from outside the stepping goroutine like profile.
+	pvp atomic.Pointer[PvPPolicy]
 	// tel counts a warrior's swings, hits, damage taken and deaths.
 	tel telemetry
 	// makeKit replaces the withdraw a visit runs, for tests.
