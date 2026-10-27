@@ -1,0 +1,148 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
+)
+
+// duelConfig is a parsed `arenadirector duel` command line.
+type duelConfig struct {
+	lab, compose, layout string
+	scores, stopFile     string
+	duel                 arena.Duel
+}
+
+// parseDuel reads the flags and applies every cap before anything touches a
+// server. A target that is not the crew lab fails here.
+func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
+	fs := flag.NewFlagSet("duel", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	t := common(fs)
+	layoutPath := fs.String("layout", "", "layout JSON from labcourses arena-layout")
+	red := fs.String("red", "", "comma-separated warriors on the red side in round 1")
+	blue := fs.String("blue", "", "comma-separated warriors on the blue side in round 1; as many as --red")
+	redProfile := fs.String("red-profile", "default", "profile name the red side's scorecards carry")
+	blueProfile := fs.String("blue-profile", "default", "profile name the blue side's scorecards carry")
+	kits := fs.String("kits", "", "comma-separated catalog kits (vanguard/t5), one per slot, handed to both sides")
+	rounds := fs.Int("rounds", 2, fmt.Sprintf("rounds; the sides swap every round (at most %d)", arena.MaxDuelRounds))
+	timeout := fs.Duration("timeout", 2*time.Minute, fmt.Sprintf("limit for one round (%s..%s)", arena.MinDuelRoundTimeout, arena.MaxDuelRoundTimeout))
+	maxWall := fs.Duration("max-wall", 30*time.Minute, fmt.Sprintf("limit for the whole run (at most %s)", arena.MaxDuelWall))
+	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a duel; duelists must be among them")
+	scores := fs.String("scores", "", "scorecard JSONL to append to (default ~/.local/state/duel-scorecards.jsonl)")
+	stopFile := fs.String("stop-file", "", "end the run when this file exists")
+	runID := fs.String("run-id", "", "run id on every scorecard (default duel-<time>)")
+	spacing := fs.Int("spacing", 12, "distance of each line from the floor centre")
+	poll := fs.Duration("poll", 3*time.Second, "delay between standing checks")
+	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
+	kitGap := fs.Duration("kit-gap", 3*time.Second, "wait after each kit")
+	countdown := fs.Duration("countdown", 5*time.Second, "wait between the last setup step and the start signal")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if err := arena.ValidateLabTarget(*t.lab); err != nil {
+		return nil, err
+	}
+	if *layoutPath == "" {
+		return nil, errors.New("duel needs --layout")
+	}
+	id := *runID
+	if id == "" {
+		id = "duel-" + time.Now().UTC().Format("20060102T150405Z")
+	}
+	path := *scores
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(home, ".local", "state", "duel-scorecards.jsonl")
+	}
+	return &duelConfig{
+		lab: *t.lab, compose: *t.compose, layout: *layoutPath, scores: path, stopFile: *stopFile,
+		duel: arena.Duel{
+			Red: splitNames(*red), Blue: splitNames(*blue),
+			RedProfile: *redProfile, BlueProfile: *blueProfile,
+			Kits: splitNames(*kits), Rounds: *rounds, RoundTimeout: *timeout, MaxWall: *maxWall,
+			CrewNames: splitNames(*crew), RunID: id, Spacing: *spacing,
+			Poll: *poll, Settle: *settle, KitGap: *kitGap, Countdown: *countdown,
+		},
+	}, nil
+}
+
+// fileSink appends each scorecard to a JSONL file.
+type fileSink struct{ path string }
+
+func (s fileSink) Record(c tactics.Scorecard) error {
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := (arena.JSONLSink{W: f}).Record(c); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+func duel(args []string) {
+	cfg, err := parseDuel(args, os.Stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		os.Exit(0)
+	}
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	layout, err := arena.LoadLayout(cfg.layout)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	console, err := newConsole(cfg.lab, cfg.compose)
+	if err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+	d := cfg.duel
+	d.Console, d.Layout = console, layout
+	d.Policy = &arena.ConsolePolicy{Console: console}
+	d.Sink = fileSink{path: cfg.scores}
+	d.Out = os.Stderr
+	if cfg.stopFile != "" {
+		d.Halted = func() bool { _, err := os.Stat(cfg.stopFile); return err == nil }
+	}
+	fmt.Fprintln(os.Stderr, "arenadirector: the units only fight each other once the combat engine implements arena.TargetPolicy; this run tags and scores them")
+
+	// An interrupt lets the round finish its cleanup instead of leaving
+	// units tagged and areas loaded.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	rounds, err := d.Run(ctx)
+	enc := json.NewEncoder(os.Stdout)
+	for _, r := range rounds {
+		if encErr := enc.Encode(r); encErr != nil {
+			fail("arenadirector: " + encErr.Error())
+		}
+	}
+	var busy *arena.NotAloneError
+	switch {
+	case errors.As(err, &busy):
+		fmt.Fprintln(os.Stderr, "arenadirector: refused: "+err.Error())
+		os.Exit(2)
+	case err != nil:
+		fail("arenadirector: " + err.Error())
+	}
+}
