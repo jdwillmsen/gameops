@@ -131,3 +131,77 @@ func TestSpiderGroundAndSwarmWorkTogetherInOneProfile(t *testing.T) {
 		t.Errorf("moved %.2f blocks against a cave spider, want the swarm orbit", moved)
 	}
 }
+
+// groundThenSpy is a unit with spider/ground first and a spy behind it, so
+// every tick ground declines shows up as a tick the spy was offered.
+func groundThenSpy(t *testing.T) (*rig, *passTactic) {
+	t.Helper()
+	spy := &passTactic{name: "spider/spy", family: tactics.FamilySpider}
+	withTactics(t, spiderGround{}, spy)
+	r := newWarrior(t, "striker", start)
+	r.give(0, 303, 1)
+	pr := tactics.NewProfile("ground then spy")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySpider: {"spider/ground", "spider/spy"}}
+	if err := r.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	r.spawn(50, "minecraft:spider", mgl32.Vec3{22.5, 4, 20.5})
+	return r, spy
+}
+
+func TestSpiderGroundHandsBackToTheRoleFightWhenTheSpiderNeverComesDown(t *testing.T) {
+	r, spy := groundThenSpy(t)
+	r.run(spiderWallCap - 5)
+	if len(spy.seen) != 0 {
+		t.Fatalf("ground declined %d ticks inside the cap", len(spy.seen))
+	}
+	r.run(10)
+	if len(spy.seen) == 0 {
+		t.Fatal("ground still held the standoff past the cap")
+	}
+	if f := spy.seen[0]; f.Life.tick < spiderWallCap {
+		t.Errorf("ground gave up at tick %d, before the %d tick cap", f.Life.tick, spiderWallCap)
+	}
+}
+
+func TestSpiderGroundStandoffRestartsAfterTheCooldown(t *testing.T) {
+	r, spy := groundThenSpy(t)
+	r.run(spiderWallCap + 5)
+	if len(spy.seen) == 0 {
+		t.Fatal("the cap never fired")
+	}
+	r.remove(50)
+	r.run(spiderWallCooldown)
+	r.spawn(51, "minecraft:spider", mgl32.Vec3{22.5, 4, 20.5})
+	seen := len(spy.seen)
+	r.run(10)
+	if len(spy.seen) != seen {
+		t.Errorf("ground declined %d ticks after the cooldown, want the standoff back", len(spy.seen)-seen)
+	}
+}
+
+func TestSpiderGroundKeepsTheCooldownAfterTheCap(t *testing.T) {
+	r, spy := groundThenSpy(t)
+	r.run(spiderWallCap + 5)
+	r.remove(50)
+	r.spawn(51, "minecraft:spider", mgl32.Vec3{22.5, 4, 20.5})
+	seen := len(spy.seen)
+	r.run(10)
+	if len(spy.seen) == seen {
+		t.Error("ground took the next wall spider straight after the cap, inside its cooldown")
+	}
+}
+
+func TestSpiderGroundCapRestartsWhenTheSpiderDrops(t *testing.T) {
+	r, spy := groundThenSpy(t)
+	r.run(spiderWallCap - 10)
+	r.moveTo(50, mgl32.Vec3{26.5, 1, 20.5})
+	r.run(5)
+	r.moveTo(50, mgl32.Vec3{22.5, 4, 20.5})
+	r.run(spiderWallCap - 10)
+	for _, f := range spy.seen {
+		if f.Target.Pos.Y() > 2 {
+			t.Fatal("a wall standoff that was broken by a drop still counted toward the cap")
+		}
+	}
+}
