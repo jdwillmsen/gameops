@@ -12,10 +12,14 @@ art and JSON here is our own; nothing is copied from the vanilla packs.
 
 ## Behaviour
 
-The mob only targets entities in the family `arena_target` (and explicitly
-never `player`). It has no `hurt_by_target` goal, so a player hitting it does
-not make it retaliate, and it does not use `minecraft:boss`. To fight it, give
-a target mob the family `arena_target`; with none around it just wanders.
+The mob only targets entities carrying the tag `arena_warrior`
+(`has_tag` filter, no family test). The warriors are bot players, so a family
+filter would have to be `player`, which would also hit every human; a tag
+limits it to what the director marks. Nothing in the pack applies the tag:
+run `tag <warrior name> add arena_warrior` (or tag any mob you want it to
+fight). Verified on BDS 1.26.52.3 that `has_tag` filters work in
+`nearest_attackable_target`. It has no `hurt_by_target` goal, so a player
+hitting it does not make it retaliate, and it does not use `minecraft:boss`.
 
 ## Build the add-on
 
@@ -42,7 +46,7 @@ python3 -I tools/packs/test_check_packs.py # tests the checker against broken co
 The first checks that JSON parses, manifest UUIDs are unique (and header and
 module UUIDs differ), the resource pack depends on the behaviour pack, entity
 identifiers match between the two packs, the model, render controller and
-texture they reference exist, and the mob cannot target players. It prints the
+texture they reference exist, and the mob targets only the `arena_warrior` tag, never the player family. It prints the
 total pack size and the base64 size against the 1 MiB ConfigMap limit.
 
 ## Lab rollout (not done yet)

@@ -101,14 +101,14 @@ class CheckPacks(unittest.TestCase):
         def fn(d):
             comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
             f = comp["entity_types"][0]["filters"]
-            comp["entity_types"][0]["filters"] = {"all_of": [{"any_of": f["all_of"]}]}
+            comp["entity_types"][0]["filters"] = {"any_of": [f]}
         self.edit(BP_ENTITY, fn)
         self.assertFails("any_of")
 
     def test_self_subject_rejected(self):
         def fn(d):
             comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
-            comp["entity_types"][0]["filters"]["all_of"][0]["subject"] = "self"
+            comp["entity_types"][0]["filters"]["subject"] = "self"
         self.edit(BP_ENTITY, fn)
         self.assertFails("subject 'other'")
 
@@ -129,18 +129,18 @@ class CheckPacks(unittest.TestCase):
     def test_player_target_rejected(self):
         def fn(d):
             comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
-            comp["entity_types"][0]["filters"]["all_of"].append(
-                {"test": "is_family", "subject": "other", "value": "player"})
+            comp["entity_types"][0]["filters"] = {"all_of": [
+                {"test": "has_tag", "subject": "other", "value": "arena_warrior"},
+                {"test": "is_family", "subject": "other", "value": "player"}]}
         self.edit(BP_ENTITY, fn)
         self.assertFails("never select family player")
 
-    def test_missing_arena_target_filter(self):
+    def test_missing_warrior_tag_filter(self):
         def fn(d):
             comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
-            comp["entity_types"][0]["filters"]["all_of"] = [
-                {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}]
+            comp["entity_types"][0]["filters"] = {"test": "is_family", "subject": "other", "value": "zombie"}
         self.edit(BP_ENTITY, fn)
-        self.assertFails("arena_target")
+        self.assertFails("has_tag arena_warrior")
 
     def test_melee_without_attack_component(self):
         self.edit(BP_ENTITY, lambda d: d["minecraft:entity"]["components"].pop("minecraft:attack"))
