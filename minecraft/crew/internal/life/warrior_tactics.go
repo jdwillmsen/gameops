@@ -2,6 +2,7 @@ package life
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
@@ -31,7 +32,13 @@ type Fight struct {
 // when it reports handled: it must then have sent exactly one input, as
 // every fight tick does. Unhandled, it must have sent nothing, and the
 // role's own fight runs. An error is the tick's error either way.
+//
+// A family may have many tactics; a unit's profile names the one it fights
+// that family with, so each is a variant the trainer can compare.
 type FamilyTactic interface {
+	// Name identifies the variant in a profile, e.g. "creeper/backoff". It
+	// is unique across the process.
+	Name() string
 	Family() tactics.Family
 	Engage(ctx context.Context, f *Fight) (handled bool, err error)
 }
@@ -41,29 +48,57 @@ type FamilyTactic interface {
 // lock.
 var tacticRegistry = struct {
 	sync.RWMutex
-	by map[tactics.Family]FamilyTactic
-}{by: map[tactics.Family]FamilyTactic{}}
+	by map[string]FamilyTactic
+}{by: map[string]FamilyTactic{}}
 
-// RegisterTactic makes t the tactic for its family, replacing any before
-// it: one family has one tactic in force.
+// RegisterTactic makes t available to profiles under its name. Two tactics
+// sharing a name would make a profile ambiguous, so that is a programming
+// error caught at init rather than a choice between them.
 func RegisterTactic(t FamilyTactic) {
 	tacticRegistry.Lock()
 	defer tacticRegistry.Unlock()
-	tacticRegistry.by[t.Family()] = t
+	if _, dup := tacticRegistry.by[t.Name()]; dup {
+		panic("life: tactic " + t.Name() + " registered twice")
+	}
+	tacticRegistry.by[t.Name()] = t
 }
 
-// tacticFor is the tactic in force for a family.
-func tacticFor(f tactics.Family) (FamilyTactic, bool) {
+// TacticNames lists the tactic variants registered for a family, sorted.
+func TacticNames(f tactics.Family) []string {
 	tacticRegistry.RLock()
 	defer tacticRegistry.RUnlock()
-	t, ok := tacticRegistry.by[f]
-	return t, ok
+	var names []string
+	for n, t := range tacticRegistry.by {
+		if t.Family() == f {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
-// familyTactic offers the tick to the tactic registered for e's family.
+// tacticNamed is the registered tactic with that name, if it fights f. A
+// profile naming another family's tactic must not run it against this one.
+func tacticNamed(name string, f tactics.Family) (FamilyTactic, bool) {
+	if name == "" {
+		return nil, false
+	}
+	tacticRegistry.RLock()
+	defer tacticRegistry.RUnlock()
+	t, ok := tacticRegistry.by[name]
+	if !ok || t.Family() != f {
+		return nil, false
+	}
+	return t, true
+}
+
+// familyTactic offers the tick to the tactic the unit's profile names for
+// e's family. No name, or one nothing is registered under, leaves the role's
+// own fight to run: the default profile is the untouched warrior.
 func (l *Life) familyTactic(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) (bool, error) {
 	fam := familyOf(e)
-	t, ok := tacticFor(fam)
+	pr := l.Profile()
+	t, ok := tacticNamed(pr.TacticFor(fam), fam)
 	if !ok {
 		return false, nil
 	}
