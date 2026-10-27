@@ -127,6 +127,7 @@ func (s *Store) Append(rec Record, cards []tactics.Scorecard) (Record, error) {
 	rec.Profile.Name = fmt.Sprintf("%s-v%03d", rec.Family, rec.Seq)
 	if len(cards) > 0 {
 		rec.ScorecardsPath = filepath.Join(string(rec.Family), "scorecards", rec.Profile.Name+".jsonl")
+		rec.Profile.Evidence = filepath.ToSlash(rec.ScorecardsPath)
 		var buf bytes.Buffer
 		enc := json.NewEncoder(&buf)
 		for _, c := range cards {

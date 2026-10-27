@@ -40,18 +40,25 @@ var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // Store is the on-disk control state. TrustDir holds the approvers' public
 // keys; point it somewhere agents cannot write, or approvals prove nothing.
+// Promote enforces that: see checkTrust.
 type Store struct {
 	Root     string
 	TrustDir string
-	now      func() time.Time
+	// trustDefaulted records that the caller named no trust directory. The
+	// fallback sits inside the state agents write to, so it is good enough to
+	// browse a store but never to promote from.
+	trustDefaulted bool
+	now            func() time.Time
 }
 
-// New returns a Store rooted at dir; trustDir defaults to <dir>/trusted.
+// New returns a Store rooted at dir. An empty trustDir falls back to
+// <dir>/trusted, which Promote refuses to use.
 func New(dir, trustDir string) *Store {
-	if trustDir == "" {
+	defaulted := trustDir == ""
+	if defaulted {
 		trustDir = filepath.Join(dir, "trusted")
 	}
-	return &Store{Root: dir, TrustDir: trustDir, now: time.Now}
+	return &Store{Root: dir, TrustDir: trustDir, trustDefaulted: defaulted, now: time.Now}
 }
 
 // Pointer says which Profile a stage has in force.

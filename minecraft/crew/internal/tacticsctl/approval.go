@@ -56,9 +56,13 @@ func (s *Store) trustedKey(approver string) (ed25519.PublicKey, error) {
 	if !nameRE.MatchString(approver) {
 		return nil, fmt.Errorf("tacticsctl: %q is not a valid approver name", approver)
 	}
-	b, err := os.ReadFile(filepath.Join(s.TrustDir, approver+".pub"))
+	keyPath := filepath.Join(s.TrustDir, approver+".pub")
+	b, err := os.ReadFile(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("tacticsctl: approver %q is not trusted (no public key in %s)", approver, s.TrustDir)
+	}
+	if fi, err := os.Stat(keyPath); err == nil && fi.Mode().Perm()&groupOtherWrite != 0 {
+		return nil, fmt.Errorf("tacticsctl: public key %s is writable by group or others; chmod go-w it", keyPath)
 	}
 	raw, err := hex.DecodeString(strings.TrimSpace(string(b)))
 	if err != nil || len(raw) != ed25519.PublicKeySize {
@@ -95,11 +99,20 @@ func (s *Store) Approval(hash string) (Approval, error) {
 	return a, s.verify(a)
 }
 
-// Promote makes a profile the production Profile. It refuses unless a signed
-// approval from a trusted approver names this profile's exact hash, so editing
-// the profile after approval, or approving a different one, does not pass.
+// Promote makes a profile the production Profile. It refuses unless
+//   - the trust directory is explicit, outside the store and not writable by
+//     group or others;
+//   - the profile has run in the lab, byte for byte;
+//   - the profile names the scorecards that justified it;
+//   - a signed approval from a trusted approver names this profile's exact
+//     hash, so editing the profile after approval, or approving a different
+//     one, does not pass.
+//
 // This is the only command that writes production, besides rollback.
 func (s *Store) Promote(name string) error {
+	if err := s.checkTrust(); err != nil {
+		return err
+	}
 	pr, err := s.read(Candidates, name)
 	if err != nil {
 		if pr, err = s.read(Lab, name); err != nil {
@@ -108,6 +121,12 @@ func (s *Store) Promote(name string) error {
 	}
 	h, err := Hash(pr)
 	if err != nil {
+		return err
+	}
+	if !s.ranBefore(Lab, name, h) {
+		return fmt.Errorf("tacticsctl: %q has not run in the lab; lab-set it first", name)
+	}
+	if err := checkEvidence(pr); err != nil {
 		return err
 	}
 	a, err := s.Approval(h)

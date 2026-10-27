@@ -134,10 +134,13 @@ const (
 )
 
 // Profile is a versioned set of Params: a default plus per-family overrides.
+// Evidence is the trainer-store-relative path of the scorecards that justified
+// the profile; it is hashed with the rest, so an approval covers it.
 type Profile struct {
 	Version   int               `json:"version"`
 	Name      string            `json:"name"`
 	Parent    string            `json:"parent,omitempty"`
+	Evidence  string            `json:"evidence,omitempty"`
 	Default   Params            `json:"default"`
 	Overrides map[Family]Params `json:"overrides,omitempty"`
 	// Tactics names, in order, the registered tactic variants tried against a
