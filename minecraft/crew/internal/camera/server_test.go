@@ -204,6 +204,21 @@ func TestPageSpeaksTheCurrentWireVersionAndHandlesTheAtlas(t *testing.T) {
 	}
 }
 
+// The frame numbers the page switches on are plain digits in embedded
+// script, so a renumbering on the server side would silently break the sky.
+func TestPageHandlesTheSkyFrames(t *testing.T) {
+	for _, s := range []string{
+		"case " + strconv.Itoa(int(frameTime)) + ":",
+		"case " + strconv.Itoa(int(frameBiomeTable)) + ":",
+		"case " + strconv.Itoa(int(frameBiomes)) + ":",
+		"./v1/camera/sky.js",
+	} {
+		if !strings.Contains(string(page), s) {
+			t.Errorf("page does not contain %q", s)
+		}
+	}
+}
+
 // Same reasoning: the only key that hides the debug box exists nowhere the
 // compiler can see.
 func TestPageTogglesDebugOnF3(t *testing.T) {

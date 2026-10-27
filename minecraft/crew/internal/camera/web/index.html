@@ -236,6 +236,7 @@
 // the same technique prismarine-viewer's mesher uses; no code is copied.
 import * as THREE from 'three';
 import { createEntities } from './v1/camera/entities.js';
+import { skyState, createClock, UNDERWATER_FAR, underwaterFog } from './v1/camera/sky.js';
 
 const t0 = performance.now();
 const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0, workMs: 0, workMaxMs: 0, drawn: 0, total: 0, drawnSum: 0, totalSum: 0 };
@@ -246,14 +247,20 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-// Daytime sky: the fog fades distant terrain into the horizon colour, so the
-// edge of the loaded area melts into the sky instead of showing a hard cut.
+// The fog fades distant terrain into the horizon colour, so the edge of the
+// loaded area melts into the sky instead of showing a hard cut. The colours
+// start as noon and follow the world time (updateSky).
 const SKY_HORIZON = new THREE.Color(0xc0d8ff), SKY_ZENITH = new THREE.Color(0x78a7ff);
 renderer.setClearColor(SKY_HORIZON);
 scene.fog = new THREE.Fog(SKY_HORIZON, 40, 64);
 // Shared by every block material and kept in step with scene.fog, which the
 // entity materials read.
-const fogUniforms = { uFogColor: { value: SKY_HORIZON }, uFogNear: { value: 40 }, uFogFar: { value: 64 } };
+// uSkyDark is how many sky light levels the night takes away, uBright the
+// matching 0..1 daylight, and uLight 0 draws everything fully lit.
+const fogUniforms = {
+  uFogColor: { value: SKY_HORIZON }, uFogNear: { value: 40 }, uFogFar: { value: 64 },
+  uSkyDark: { value: 0 }, uBright: { value: 1 }, uLight: { value: 1 },
+};
 let fogFar = 64;
 const camera = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, 0.05, 100);
 // Terrain is only loaded out to the requested radius, so the fog closes
@@ -264,10 +271,20 @@ function setFog(chunks) {
   fogUniforms.uFogNear.value = scene.fog.near = fogFar * .55;
   camera.far = fogFar + 32;
   camera.updateProjectionMatrix();
+  if (underwater) setUnderwaterFog();
+}
+let underwater = false;
+function setUnderwaterFog() {
+  fogUniforms.uFogNear.value = scene.fog.near = 0;
+  fogUniforms.uFogFar.value = scene.fog.far = Math.min(fogFar, UNDERWATER_FAR);
 }
 
 const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), new THREE.ShaderMaterial({
-  uniforms: { uHorizon: { value: SKY_HORIZON }, uZenith: { value: SKY_ZENITH } },
+  uniforms: {
+    uHorizon: { value: SKY_HORIZON }, uZenith: { value: SKY_ZENITH },
+    uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
+    uGlow: { value: new THREE.Vector4() }, uStars: { value: 0 }, uTurn: { value: 0 }, uDisc: { value: 1 },
+  },
   vertexShader: `
     varying vec3 vDir;
     void main() {
@@ -275,11 +292,40 @@ const skyDome = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), new THREE.Sh
       gl_Position = (projectionMatrix * modelViewMatrix * vec4(position, 1.)).xyww;
     }`,
   fragmentShader: `
-    uniform vec3 uHorizon, uZenith;
+    uniform vec3 uHorizon, uZenith, uSunDir, uMoonDir;
+    uniform vec4 uGlow;
+    uniform float uStars, uTurn, uDisc;
     varying vec3 vDir;
+    float hash(vec3 p) {
+      p = fract(p * .3183099 + .1); p *= 17.;
+      return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+    }
+    // The sun and moon are flat squares on the sky, as in the game; the sun
+    // path lies in the x-y plane, so z is the way across it.
+    float square(vec3 d, vec3 c, float size) {
+      float k = dot(d, c);
+      if (k <= 0.) return 0.;
+      vec3 e2 = cross(c, vec3(0., 0., 1.));
+      vec2 p = vec2(d.z, dot(d, e2)) / k;
+      return step(max(abs(p.x), abs(p.y)), size);
+    }
     void main() {
-      float h = normalize(vDir).y;
-      gl_FragColor = vec4(mix(uHorizon, uZenith, pow(clamp(h, 0., 1.), .6)), 1.);
+      vec3 d = normalize(vDir);
+      float h = d.y;
+      vec3 col = mix(uHorizon, uZenith, pow(clamp(h, 0., 1.), .6));
+      vec2 sx = uSunDir.xz;
+      vec2 toward = length(sx) > 1e-3 ? normalize(sx) : vec2(1., 0.);
+      float around = pow(max(dot(normalize(d.xz + 1e-4), toward), 0.), 2.);
+      col = mix(col, uGlow.rgb, uGlow.a * around * (1. - smoothstep(0., .45, h)));
+      float above = smoothstep(-.02, .03, h) * uDisc;
+      float a = uTurn;
+      vec3 r = vec3(d.x * cos(a) + d.y * sin(a), -d.x * sin(a) + d.y * cos(a), d.z);
+      vec3 cell = floor(r * 200.);
+      float star = step(.9965, hash(cell)) * uStars * 2. * smoothstep(0., .08, h);
+      col += vec3(star);
+      col = mix(col, vec3(1., 1., .82), square(d, uSunDir, .16) * above);
+      col = mix(col, vec3(.86, .88, 1.), square(d, uMoonDir, .1) * above * .95);
+      gl_FragColor = vec4(col, 1.);
       #include <colorspace_fragment>
     }`,
   side: THREE.BackSide, depthTest: false, depthWrite: false, fog: false,
@@ -312,6 +358,12 @@ worker.onmessage = ev => {
 const post = (m, transfer) => worker.postMessage({ ...m, seq: ++sent }, transfer || []);
 const meshing = () => ready.length > 0 || queued > 0 || acked !== sent;
 
+// The pack's opacity for plains water, which is what an untinted column gets.
+function defaultWaterAlpha(table) {
+  const a = table.water_alphas || {};
+  return a.plains ?? a['minecraft:plains'] ?? a.default ?? .65;
+}
+
 // Same colour-space conversion the old in-page mesher got from THREE.Color.
 const linear = css => { const c = new THREE.Color(css); return [c.r, c.g, c.b]; };
 
@@ -324,6 +376,7 @@ function adopt(m) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(q.p, 3));
     geo.setAttribute('shade', new THREE.BufferAttribute(q.c, 4));
+    geo.setAttribute('lit', new THREE.BufferAttribute(q.l, 2, true));
     if (q.k < 2) geo.setAttribute('tex', new THREE.BufferAttribute(q.u, 3));
     geo.setIndex(new THREE.BufferAttribute(q.i, 1));
     const o = new THREE.Mesh(geo, blockMaterial(q.k));
@@ -379,11 +432,29 @@ let atlas = null; // { table, tints, tex }; the worker holds its own copy of the
 const BLOCK_VERT = `
   attribute vec4 shade;
   attribute vec3 tex;
+  attribute vec2 lit;
+  uniform float uSkyDark, uBright, uLight;
   varying vec4 vShade;
   varying vec3 vTex;
   varying float vDepth;
+  // The game's light curve: a level's brightness falls off steeply, block light
+  // warms as it dims, and night takes levels off the sky. A small ambient
+  // keeps a cave from going pure black. The result is raised to the working
+  // space the colours are in.
+  vec3 lightmap(vec2 l) {
+    float sky = max(l.x * 15. - uSkyDark, 0.) / 15.;
+    float fs = 1. - sky, fb = 1. - l.y;
+    float bs = (1. - fs) / (fs * 3. + 1.), bb = (1. - fb) / (fb * 3. + 1.);
+    // Moonlight: a night is dim and blue, not black, wherever the sky is open.
+    bs = max(bs, .24 * (1. - uBright) * l.x);
+    vec3 s = vec3(bs) * mix(vec3(.62, .7, 1.), vec3(1.), uBright);
+    vec3 b = vec3(bb, bb * ((bb * .6 + .4) * .6 + .4), bb * (bb * bb * .6 + .4));
+    vec3 c = mix(clamp(s + b, 0., 1.), vec3(.75), .04) / .99;
+    return mix(vec3(1.), pow(c, vec3(2.2)), uLight);
+  }
   void main() {
     vShade = shade;
+    vShade.rgb *= lightmap(lit);
     vTex = tex;
     vec4 mv = modelViewMatrix * vec4(position, 1.);
     vDepth = -mv.z;
@@ -485,7 +556,7 @@ async function loadAtlas() {
     for (const [k, v] of Object.entries(doc.tints)) { tints[k] = new THREE.Color(v); workerTints[k] = [tints[k].r, tints[k].g, tints[k].b]; }
     texturedMaterials = [makeBlockMaterial(tex, doc.table.tile_size, false), makeBlockMaterial(tex, doc.table.tile_size, true)];
     atlas = { table: doc.table, tints, tex };
-    post({ t: 'atlas', atlas: { table: doc.table, tiles, tints: workerTints } });
+    post({ t: 'atlas', atlas: { table: doc.table, tiles, tints: workerTints, waterAlpha: defaultWaterAlpha(doc.table) } });
   } catch (e) {
     // Flat colours are the fallback; nothing else depends on the atlas.
     console.warn('atlas unavailable, drawing flat colours', e);
@@ -669,7 +740,7 @@ function onMessage(ev) {
       break;
     case 7:
       blocks.clear(); ready.length = 0; queued = 0; post({ t: 'clear', epoch: ++epoch }); for (const ms of meshes.values()) for (const o of ms) { scene.remove(o); o.geometry.dispose(); }
-      meshes.clear(); ents.clear();
+      meshes.clear(); ents.clear(); biomeCols.clear();
       break;
     case 8: {
       const n = dv.getUint16(p, true); p += 2;
@@ -701,6 +772,33 @@ function onMessage(ev) {
       // Wire id 0 is the unit's own body, which the page keeps as -1.
       const id = uvarint(), slim = (u8[p++] & 1) !== 0, len = uvarint();
       if (len > 0 && p + len <= u8.length) ents.setSkin(id || -1, slim, u8.slice(p, p + len));
+      break;
+    }
+    case 15:
+      if (!timePinned) clock.set(dv.getInt32(1, true), (u8[5] & 1) !== 0);
+      break;
+    case 16: {
+      const n = dv.getUint16(1, true), table = [];
+      biomeTints = new Map();
+      for (let i = 0; i < n; i++) {
+        const o = 3 + i * 12, rgb = k => { tmp.setRGB(u8[o + k] / 255, u8[o + k + 1] / 255, u8[o + k + 2] / 255, THREE.SRGBColorSpace); return [tmp.r, tmp.g, tmp.b]; };
+        const id = dv.getUint16(o, true), entry = { id, grass: rgb(2), foliage: rgb(5), water: rgb(8), alpha: u8[o + 11] / 255 };
+        table.push(entry); biomeTints.set(id, entry.water);
+      }
+      post({ t: 'biomes', table });
+      break;
+    }
+    case 17: {
+      const cx = dv.getInt32(1, true), cz = dv.getInt32(5, true), n = dv.getUint16(9, true);
+      const ids = new Uint16Array(256);
+      if (n === 1) ids.fill(dv.getUint16(11, true));
+      else if (n > 1) {
+        const pal = new Uint16Array(n);
+        for (let i = 0; i < n; i++) pal[i] = dv.getUint16(11 + 2 * i, true);
+        for (let i = 0; i < 256; i++) ids[i] = pal[u8[11 + 2 * n + i]] ?? 0;
+      }
+      biomeCols.set(cx + ',' + cz, ids);
+      post({ t: 'biome', cx, cz, ids: ids.slice() });
       break;
     }
     case 14:
@@ -739,6 +837,72 @@ function placeCamera(m) {
   camera.lookAt(me.x, me.y, me.z);
 }
 
+// World time. The server says what it is and whether it runs; ?time=<ticks>
+// pins it instead, for comparing the light at a given hour.
+const clock = createClock(() => performance.now());
+const pinned = Number(query.get('time'));
+const timePinned = query.has('time') && Number.isFinite(pinned);
+if (timePinned) clock.set(pinned, true);
+let lighting = true;
+let biomeTints = new Map();  // id -> linear water colour, for the view from under water
+const biomeCols = new Map(); // "cx,cz" -> ids, the same columns the worker holds
+let lastTicks = NaN, sky = skyState(6000);
+const tmp = new THREE.Color();
+const srgb = (c, v) => c.setRGB(v[0], v[1], v[2], THREE.SRGBColorSpace);
+
+function waterAt(x, y, z) {
+  const b = blocks.get((x >> 4) + ',' + (y >> 4) + ',' + (z >> 4));
+  const id = b ? b[((((y & 15) << 4) | (z & 15)) << 4) | (x & 15)] : 0;
+  const name = id && mats[id - 1]?.name;
+  return name === 'water' || name === 'flowing_water';
+}
+function waterColor() {
+  const col = biomeCols.get((Math.floor(me.x) >> 4) + ',' + (Math.floor(me.z) >> 4));
+  const id = col?.[((Math.floor(me.x) & 15) << 4) | (Math.floor(me.z) & 15)];
+  const w = atlas?.tints.water;
+  return biomeTints.get(id) || (w ? [w.r, w.g, w.b] : [.1, .25, .8]);
+}
+
+// Called every frame: cheap unless the time moved enough to change a colour
+// (a tenth of a second of game time) or the camera crossed the water surface.
+function updateSky() {
+  const ticks = clock.ticks();
+  const wet = waterAt(Math.floor(camera.position.x), Math.floor(camera.position.y), Math.floor(camera.position.z));
+  if (Math.abs(ticks - lastTicks) < 2 && wet === underwater) return;
+  lastTicks = ticks;
+  sky = skyState(ticks);
+  fogUniforms.uSkyDark.value = sky.dark;
+  fogUniforms.uBright.value = sky.bright;
+  ents.setAmbient(sky.ambient);
+  const u = skyDome.material.uniforms;
+  srgb(SKY_ZENITH, sky.zenith);
+  srgb(SKY_HORIZON, sky.horizon);
+  u.uSunDir.value.set(...sky.sun); u.uMoonDir.value.set(...sky.moon);
+  u.uGlow.value.set(srgbToLinear(sky.glow[0]), srgbToLinear(sky.glow[1]), srgbToLinear(sky.glow[2]), sky.glow[3]);
+  u.uStars.value = sky.stars; u.uTurn.value = sky.angle * 2 * Math.PI; u.uDisc.value = 1;
+  if (wet !== underwater) {
+    underwater = wet;
+    if (!wet) setFog(radius);
+    else setUnderwaterFog();
+  }
+  if (underwater) {
+    // Everything seen from inside water is the water's colour, dimmed by the light.
+    const c = underwaterFog(waterColor(), sky.bright);
+    tmp.setRGB(c[0], c[1], c[2]);
+    SKY_HORIZON.copy(tmp); SKY_ZENITH.copy(tmp);
+    u.uDisc.value = 0; u.uStars.value = 0; u.uGlow.value.w = 0;
+  }
+  scene.fog.color.copy(SKY_HORIZON);
+  renderer.setClearColor(SKY_HORIZON);
+}
+const srgbToLinear = v => tmp.setRGB(v, v, v, THREE.SRGBColorSpace).r;
+
+addEventListener('keydown', e => {
+  if (e.key !== 'l' || e.ctrlKey || e.metaKey || e.altKey) return;
+  lighting = !lighting;
+  fogUniforms.uLight.value = lighting ? 1 : 0;
+});
+
 let lastAt = 0;
 function frame() {
   const workStart = performance.now();
@@ -747,6 +911,7 @@ function frame() {
   while (ready.length && performance.now() < until) adopt(ready.shift());
   if (performance.now() - lastAt > 200) { lastAt = performance.now(); worker.postMessage({ t: 'at', at: { x: me.x, y: me.y, z: me.z } }); }
   placeCamera(mode);
+  updateSky();
   skyDome.position.copy(camera.position);
   cull();
   ents.frame(performance.now());
@@ -759,7 +924,8 @@ function frame() {
   if (work > stats.workMaxMs) stats.workMaxMs = work;
   if (stats.settledMs === null && blocks.size > 0 && !meshing() && performance.now() - stats.lastBlockAt > 1000) stats.settledMs = stats.lastBlockAt - t0;
   if (stats.firstFrameMs === null && meshes.size > 0) stats.firstFrameMs = performance.now() - t0;
-  hud.textContent = `crew camera  ${status}  mode ${mode}  radius ${radius} (] widens)\ntextures ${atlas ? 'on' : 'off'}  sub-chunks ${blocks.size}  meshes ${stats.drawn}/${stats.total} drawn  entities ${ents.count}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
+  const tod = Math.floor(clock.ticks() % 24000), hh = String(Math.floor(((tod / 1000) + 6) % 24)).padStart(2, '0'), mm = String(Math.floor(tod % 1000 * .06)).padStart(2, '0');
+  hud.textContent = `crew camera  ${status}  mode ${mode}  radius ${radius} (] widens)  light ${lighting ? 'on' : 'off'} (l)  time ${hh}:${mm}${clock.known ? '' : ' (unknown)'}\ntextures ${atlas ? 'on' : 'off'}  sub-chunks ${blocks.size}  meshes ${stats.drawn}/${stats.total} drawn  entities ${ents.count}\nyaw ${me.yaw.toFixed(0)} pitch ${me.pitch.toFixed(0)}\nfirst frame ${stats.firstFrameMs?.toFixed(0) ?? '-'} ms  settled ${stats.settledMs?.toFixed(0) ?? '-'} ms  rx ${(stats.bytes / 1024).toFixed(0)} KiB`;
   requestAnimationFrame(frame);
 }
 frame();
