@@ -57,9 +57,10 @@ var shapeRules = []nameRule{
 			"yellow_flower", "red_flower", "dandelion", "poppy", "cornflower", "allium", "azure_bluet", "blue_orchid",
 			"oxeye_daisy", "lily_of_the_valley", "wither_rose", "torchflower", "pitcher_plant", "rose_bush", "peony",
 			"lilac", "sunflower", "spore_blossom", "waterlily", "glow_lichen", "cobweb", "web", "melon_stem", "pumpkin_stem",
+			"pale_hanging_moss", "small_dripleaf_block",
 		},
-		suffix:   []string{"_sapling", "_tulip", "_roots"},
-		contains: []string{"_flower"},
+		suffix:   []string{"_sapling", "_tulip", "_roots", "_eyeblossom"},
+		contains: []string{"_flower", "cave_vines"},
 		value:    ModelCross,
 	},
 }
@@ -90,6 +91,9 @@ var materialDefaults = map[string]string{
 var blockAliases = map[string]string{
 	"grass":      "grass_block",
 	"grass_path": "dirt_path",
+	// Legacy camel-case names the pack still keys these blocks by.
+	"seaLantern": "sea_lantern",
+	"tripWire":   "trip_wire",
 }
 
 func firstMatch(rules []nameRule, name, def string) string {

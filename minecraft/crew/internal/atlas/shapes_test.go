@@ -20,3 +20,11 @@ func TestModelForStems(t *testing.T) {
 		}
 	}
 }
+
+func TestModelForPlantsTheGameDrawsCrossed(t *testing.T) {
+	for _, name := range []string{"cave_vines_head_with_berries", "cave_vines_body_with_berries", "open_eyeblossom", "closed_eyeblossom", "pale_hanging_moss"} {
+		if got := modelFor(name); got != ModelCross {
+			t.Errorf("modelFor(%q) = %q, want cross", name, got)
+		}
+	}
+}

@@ -807,6 +807,16 @@ everywhere (the plains biome). The page cannot see block states either, so
 stairs, top slabs, doors, trapdoors and snow layers carry their boxes in the
 block name, from the same shape table the unit's pathing uses; past a budget of
 shape variants a block falls back to its default shape.
+A grass block's side is an overlay mask in the pack (opaque fringe, transparent
+dirt), so the build bakes it into a tile of its own with the dirt filled in and
+the fringe coloured for that one climate; drawn raw it was a hole. Chests, beds,
+soul sand, the enchanting table, cacti and a few other blocks the table calls
+cubes are drawn at their real, smaller size, cave vines and eyeblossoms as
+crossed planes, and chains, lanterns, trip wire and the piston helper blocks
+are not drawn as cubes. `docs/research/2026-10-27-crew-camera-fidelity-audit.md`
+lists what still differs from the game. `loadtest/shots.mjs` screenshots a
+unit's camera, optionally with a locally built atlas and mesher served over the
+live scene, for before/after comparisons.
 If the fetch fails, the camera is offline at first start or the page cannot
 load the atlas, the view stays flat-coloured. A build that fails, or can only
 serve an older cached atlas, is retried on its own after 5 to 10 minutes; the

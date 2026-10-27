@@ -53,6 +53,7 @@ const quads = parts => parts.reduce((n, p) => n + p.i.length / 6, 0);
 const kinds = {
   stone: { model: 'cube' },
   grass_path: { model: 'cube' },
+  chest: { model: 'cube' },
   brown_mushroom_block: { model: 'cube' },
   oak_leaves: { model: 'cube' },
   oak_stairs: { model: 'stairs', nonCube: true },
@@ -75,6 +76,16 @@ test('a path block is drawn below the block edge', async () => {
   const parts = (await w.meshes()).get('0,0,0');
   const maxY = Math.max(...parts.map(p => p.box[4]));
   assert.ok(Math.abs(maxY - (5 + 15 / 16)) < 1e-6, `top at ${maxY}`);
+});
+
+test('a chest is drawn inset from the block edge', async () => {
+  const w = worker(['chest'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  const parts = (await w.meshes()).get('0,0,0');
+  const [x0, y0, z0, x1, y1, z1] = [0, 1, 2, 3, 4, 5].map(k => Math.min(...parts.map(p => p.box[k])));
+  const maxes = [3, 4, 5].map(k => Math.max(...parts.map(p => p.box[k])));
+  assert.deepEqual([x0 - 5, y0 - 5, z0 - 5].map(v => Math.round(v * 16)), [1, 0, 1]);
+  assert.deepEqual([maxes[0] - 5, maxes[1] - 5, maxes[2] - 5].map(v => Math.round(v * 16)), [15, 14, 15]);
 });
 
 test('a top slab is drawn in the top half', async () => {

@@ -64,8 +64,22 @@ const BLENDED = /^(water|flowing_water|ice|frosted_ice|glass|tinted_glass|glass_
 // Leaves are alpha-tested, so a hole in one shows what is behind it. Faces
 // between two leaf blocks are therefore kept, or the holes open onto the sky.
 const LEAVES = /_leaves$/;
-// Full-width blocks the table calls cubes but whose top sits below the edge.
-const SUNKEN = { grass_path: 15 / 16, dirt_path: 15 / 16, farmland: 15 / 16 };
+// Blocks the table calls cubes but the game draws smaller: a path or farmland
+// top below the edge, a chest inset from every side, a bed knee-high, redstone
+// dust a decal. Boxes are in sixteenths so they read like the game's models.
+const inset = (x0, y0, z0, x1, y1, z1) => [[x0 / 16, y0 / 16, z0 / 16, x1 / 16, y1 / 16, z1 / 16]];
+const SHAPED = {
+  grass_path: inset(0, 0, 0, 16, 15, 16), dirt_path: inset(0, 0, 0, 16, 15, 16), farmland: inset(0, 0, 0, 16, 15, 16),
+  soul_sand: inset(0, 0, 0, 16, 14, 16),
+  chest: inset(1, 0, 1, 15, 14, 15), trapped_chest: inset(1, 0, 1, 15, 14, 15), ender_chest: inset(1, 0, 1, 15, 14, 15),
+  bed: inset(0, 0, 0, 16, 9, 16),
+  enchanting_table: inset(0, 0, 0, 16, 12, 16),
+  stonecutter_block: inset(0, 0, 0, 16, 9, 16),
+  daylight_detector: inset(0, 0, 0, 16, 6, 16), daylight_detector_inverted: inset(0, 0, 0, 16, 6, 16),
+  sculk_sensor: inset(0, 0, 0, 16, 8, 16), calibrated_sculk_sensor: inset(0, 0, 0, 16, 8, 16),
+  cactus: inset(1, 0, 1, 15, 16, 15), decorated_pot: inset(1, 0, 1, 15, 16, 15),
+  redstone_wire: inset(0, 0, 0, 16, 1, 16),
+};
 const WATER = /^(water|flowing_water)$/;
 const WATER_TOP = [[0, 0, 0, 1, 14 / 16, 1]];
 // The page converts to linear light but the game multiplies shade and
@@ -119,7 +133,7 @@ function info(id) {
   } else if (m && m.nonCube) shape = 'skip';
   let boxes = null;
   if (custom && shape !== 'skip') { shape = 'boxes'; boxes = custom; }
-  else if (shape === 'cube' && base in SUNKEN) { shape = 'boxes'; boxes = [[0, 0, 0, 1, SUNKEN[base], 1]]; }
+  else if (shape === 'cube' && Object.hasOwn(SHAPED, base)) { shape = 'boxes'; boxes = SHAPED[base]; }
   const trans = !!m && (m.alpha < 1 || BLENDED.test(base));
   const leaves = LEAVES.test(base);
   r = {
