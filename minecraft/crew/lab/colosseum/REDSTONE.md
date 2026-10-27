@@ -340,4 +340,7 @@ All entries: **unverified on BDS**.
 | 3x3 rising floor, 9 sticky pistons facing up, one `/fill redstone_block` row beneath | all 9 corners rise to the flush plane and sink again; no desync seen (Design D) |
 | Single sticky piston, power cell behind the body | extends and retracts as expected (Design A building block) |
 
-Still unverified: Designs B and C, observer triggering from `/setblock`, and `/structure load` of a piston in its extended state.
+| Secret closet door (generator `secret_door`): two stacked sticky pistons, one dust cell on a block that touches the lower piston and beside the upper, lever up = shut | built at all four tunnels; lever down opens both plug cells, up closes them again (checked on the +x and +z doors) |
+| Redstone torch as an inverter (support block lever-powered) | works; `torch_facing_direction` names the side the support block is on (`east` for a support to the east) |
+
+Still unverified: Design B, the 1x2 vertical door (C), observer triggering from `/setblock`, and `/structure load` of a piston in its extended state.
