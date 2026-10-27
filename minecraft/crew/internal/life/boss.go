@@ -1,6 +1,8 @@
 package life
 
 import (
+	"math"
+
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
@@ -43,6 +45,12 @@ type bossProfile struct {
 	// regroupDown is how many warriors down sends the rest back to the
 	// start: two trading with a boss lose what three could not hold.
 	regroupDown int
+	// flies says the boss spends the fight off the ground, so its height
+	// does not take it out of the squad's reach to focus.
+	flies bool
+	// perchOnly says the boss can be hurt only while it stands still, and
+	// the squad holds its ground the rest of the time.
+	perchOnly bool
 }
 
 // wardenBoomRange is the sonic boom's horizontal reach, which no shield,
@@ -75,6 +83,29 @@ var bossProfiles = map[string]bossProfile{
 	"warden":         wardenProfile,
 	"wither":         ranged(wardenProfile),
 	"elder_guardian": ranged(wardenProfile),
+	"ender_dragon":   dragonProfile,
+}
+
+// noRegroup is a regroupDown no squad reaches.
+const noRegroup = math.MaxInt
+
+// dragonFocusRange covers the whole End island: the dragon circles far wider
+// than a warden ever strays, and losing it between perches would send the
+// squad off to idle.
+const dragonFocusRange = 128
+
+// dragonProfile is the ender dragon, which only a hit from within about 6.4
+// blocks of its origin hurts and which is worth reaching only while it
+// perches. Every other number is unused: the squad neither keeps a band nor
+// times a shield against it, and a regroup would walk away from the one
+// window there is to hit it.
+var dragonProfile = bossProfile{
+	focusRange:  dragonFocusRange,
+	healBelow:   healBelow,
+	healClear:   8,
+	regroupDown: noRegroup,
+	flies:       true,
+	perchOnly:   true,
 }
 
 func ranged(p bossProfile) bossProfile {
@@ -140,8 +171,14 @@ type bossState struct {
 	lastX, lastZ   float32
 	moving         bool
 	stuck          uint8
-	// walk is the regroup to the start, replanned as a chase is, and
-	// walkRetry when one that found no way is planned again.
+	// stillAt is where the boss last moved to and stillSince the tick it got
+	// there: a perched dragon sends no movement, so standing still is the
+	// only sign of the perch.
+	stillAt    mgl32.Vec3
+	stillSince uint64
+	// walk is the regroup to the start, or a dragon fight's approach to the
+	// perch, replanned as a chase is, and walkRetry when one that found no
+	// way is planned again.
 	walk      skill.Skill
 	walkGoal  [3]int32
 	walkAt    uint64

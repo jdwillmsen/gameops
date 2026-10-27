@@ -34,6 +34,12 @@ var arena = mgl32.Vec3{40.5, 1, 40.5}
 // Vanguard stand at the warden's side.
 func newBossWarrior(t *testing.T, role string, feet mgl32.Vec3) (*rig, *fakeRoster) {
 	t.Helper()
+	return newBossWarriorVs(t, role, feet, "minecraft:warden", arena)
+}
+
+// newBossWarriorVs is newBossWarrior against another boss, at another spot.
+func newBossWarriorVs(t *testing.T, role string, feet mgl32.Vec3, boss string, at mgl32.Vec3) (*rig, *fakeRoster) {
+	t.Helper()
 	r := newWarrior(t, role, feet)
 	r.w.size = 80
 	r.give(0, 303, 1)   // diamond sword
@@ -46,7 +52,7 @@ func newBossWarrior(t *testing.T, role string, feet mgl32.Vec3) (*rig, *fakeRost
 		members:   map[Role]mgl32.Vec3{RoleVanguard: van},
 	}
 	r.l.SetSquad(squad)
-	r.spawn(90, "minecraft:warden", arena)
+	r.spawn(90, boss, at)
 	return r, squad
 }
 

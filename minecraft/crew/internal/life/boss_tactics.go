@@ -57,7 +57,7 @@ func (l *Life) bossNear(anchor mgl32.Vec3) (belief.Entity, bool) {
 		if !ok || l.ignore[e.ID] > l.tick {
 			return
 		}
-		if math.Abs(float64(e.Pos.Y()-anchor.Y())) > threatHeight || horizontal(e.Pos, anchor) > prof.focusRange {
+		if (!prof.flies && math.Abs(float64(e.Pos.Y()-anchor.Y())) > threatHeight) || horizontal(e.Pos, anchor) > prof.focusRange {
 			return
 		}
 		if best.ID == 0 || e.ID < best.ID {
@@ -84,8 +84,12 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 		b.id, b.start = best.ID, p.Feet
 		b.hitAt, b.shieldOutUntil = 0, 0
 		b.regroupUntil, b.rallied = 0, false
+		b.stillAt, b.stillSince = best.Pos, l.tick
 	}
 	b.active, b.prof = true, prof
+	if best.Pos.Sub(b.stillAt).Len() > perchEpsilon {
+		b.stillAt, b.stillSince = best.Pos, l.tick
+	}
 
 	d := horizontal(p.Feet, best.Pos)
 	if hurt && d <= bossReach {
@@ -161,6 +165,9 @@ func (l *Life) mealThreatened(p act.Pose) bool {
 // and the Ranger shoots from outside what the boss reaches.
 func (l *Life) bossFight(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
 	w := l.warrior
+	if w.boss.prof.perchOnly {
+		return l.perchFight(ctx, a, p, e, s)
+	}
 	if w.boss.regroup {
 		l.cancelDraw(a)
 		return l.bossRegroup(ctx, a, p, e, s)
