@@ -72,6 +72,12 @@ type rig struct {
 	failOrders   bool
 	failCallouts int
 
+	// The profile route serves profileJSON when set; nil is a 404, and a
+	// set profileStatus is served instead of either.
+	profileJSON    []byte
+	profileStatus  int
+	profileFetches int
+
 	// The last poll's read point, as the client sent it.
 	lastCursor int64
 	lastRev    int64
@@ -85,6 +91,7 @@ func newRigServer(t *testing.T) (*rig, *httptest.Server) {
 	mux.HandleFunc("POST /v1/squads/{id}/status", ri.recorder("status"))
 	mux.HandleFunc("POST /v1/squads/{id}/callout", ri.recorder("callout"))
 	mux.HandleFunc("GET /v1/squads/{id}/orders", ri.ordersRoute)
+	mux.HandleFunc("GET /v1/squads/{id}/profile", ri.profileRoute)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return ri, srv
