@@ -3,7 +3,6 @@ package life
 import (
 	"context"
 	"math"
-	"sync"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -119,11 +118,10 @@ type kiteState struct {
 	offUntil uint64
 }
 
-var kiteStates sync.Map // *Life -> *kiteState
+var kiteStates unitScratch[kiteState]
 
 func kiteStateOf(l *Life, f *Fight) *kiteState {
-	v, _ := kiteStates.LoadOrStore(l, &kiteState{})
-	st := v.(*kiteState)
+	st := kiteStates.of(l)
 	if st.target != f.Target.ID || st.tick+1 != l.tick {
 		*st = kiteState{target: f.Target.ID}
 	}

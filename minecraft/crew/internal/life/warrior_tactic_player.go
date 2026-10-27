@@ -3,7 +3,6 @@ package life
 import (
 	"context"
 	"math"
-	"sync"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -26,9 +25,6 @@ const (
 	// pvpStrafeStuck is how many strafe ticks that moved nowhere flip the
 	// orbit: a wall or a body is in the way.
 	pvpStrafeStuck = 3
-	// pvpMaxStates caps the per-unit memory. It only holds tactical
-	// ephemera, so overflowing it costs a forgotten cooldown, nothing more.
-	pvpMaxStates = 64
 )
 
 // pvpTactic fights another player: strafe the ring at sword reach, hit from
@@ -63,24 +59,9 @@ type pvpState struct {
 	stuck            uint8
 }
 
-var pvpStates = struct {
-	sync.Mutex
-	by map[*Life]*pvpState
-}{by: map[*Life]*pvpState{}}
+var pvpStates = unitScratch[pvpState]{init: func(st *pvpState) { st.orbit = 1 }}
 
-func pvpStateOf(l *Life) *pvpState {
-	pvpStates.Lock()
-	defer pvpStates.Unlock()
-	if st, ok := pvpStates.by[l]; ok {
-		return st
-	}
-	if len(pvpStates.by) >= pvpMaxStates {
-		clear(pvpStates.by)
-	}
-	st := &pvpState{orbit: 1}
-	pvpStates.by[l] = st
-	return st
-}
+func pvpStateOf(l *Life) *pvpState { return pvpStates.of(l) }
 
 // Engage owns the tick whenever the target is a player the unit may fight;
 // otherwise the role's own fight runs. A standing hold, regroup or retreat

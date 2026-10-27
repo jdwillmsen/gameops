@@ -3,7 +3,6 @@ package life
 import (
 	"context"
 	"math"
-	"sync"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -56,13 +55,6 @@ const (
 	// body occupies most of a cell, so asking for the centre would make the
 	// pillar stand in the brute's path while it jockeys for the last inch.
 	bruteGoalWithin = 0.6
-	// bruteStateCap bounds the per-unit tactic state. Entries are keyed by
-	// unit because the tactic values are shared by every unit in the process.
-	bruteStateCap = 256
-	// bruteStateIdle is how long an unseen unit's state may live before a
-	// prune drops it. Units number in the dozens, so this is only a leak
-	// guard for a process that churns sessions.
-	bruteStateIdle = 2400
 )
 
 // bruteSidestep fights a heavy knockback brute by staying off the line its
@@ -80,7 +72,7 @@ func (t bruteSidestep) Engage(ctx context.Context, f *Fight) (handled bool, err 
 	}
 	l := f.Life
 	p := f.Actuator.Pose()
-	st := bruteStateFor(l, t.Name(), l.tick)
+	st := bruteSidestepStates.of(l)
 	started := st.sample(f.Target, p.Feet, l.tick)
 	if started {
 		st.stepOK = false
@@ -155,7 +147,7 @@ func (t brutePillar) Engage(ctx context.Context, f *Fight) (handled bool, err er
 		// knows better than a retreat into empty ground.
 		return false, nil
 	}
-	st := bruteStateFor(l, t.Name(), l.tick)
+	st := brutePillarStates.of(l)
 	l.cancelDraw(f.Actuator)
 	l.lowerShield(f.Actuator)
 	l.chase = nil
@@ -198,10 +190,8 @@ func bruteEngageable(f *Fight) bool {
 
 // bruteState is what a tactic remembers about one unit between ticks. The
 // tactic values are registered once per process and shared by every unit, so
-// per-unit memory lives here, keyed by unit and tactic name.
+// per-unit memory lives here, one table per tactic.
 type bruteState struct {
-	seen uint64
-
 	targetID   uint64
 	targetPos  mgl32.Vec3
 	sampleTick uint64
@@ -222,57 +212,7 @@ type bruteState struct {
 	moveAt   uint64
 }
 
-type bruteKey struct {
-	life   *Life
-	tactic string
-}
-
-var bruteStates = struct {
-	sync.Mutex
-	by map[bruteKey]*bruteState
-}{by: map[bruteKey]*bruteState{}}
-
-// bruteStateFor returns the unit's memory for a tactic, making room first if
-// a long-lived process has accumulated more units than there can be fighting.
-func bruteStateFor(l *Life, tactic string, tick uint64) *bruteState {
-	bruteStates.Lock()
-	defer bruteStates.Unlock()
-	k := bruteKey{life: l, tactic: tactic}
-	st, ok := bruteStates.by[k]
-	if !ok {
-		if len(bruteStates.by) >= bruteStateCap {
-			brutePruneLocked(tick)
-		}
-		st = &bruteState{}
-		bruteStates.by[k] = st
-	}
-	st.seen = tick
-	return st
-}
-
-func brutePruneLocked(tick uint64) {
-	for k, st := range bruteStates.by {
-		if tick >= st.seen+bruteStateIdle {
-			delete(bruteStates.by, k)
-		}
-	}
-	if len(bruteStates.by) < bruteStateCap {
-		return
-	}
-	var (
-		oldest     bruteKey
-		oldestAt   uint64 = math.MaxUint64
-		haveOldest bool
-	)
-	for k, st := range bruteStates.by {
-		if !haveOldest || st.seen < oldestAt {
-			oldest, oldestAt, haveOldest = k, st.seen, true
-		}
-	}
-	if haveOldest {
-		delete(bruteStates.by, oldest)
-	}
-}
+var bruteSidestepStates, brutePillarStates unitScratch[bruteState]
 
 // sample remembers where the target was last tick and reports whether a new
 // rush has just been detected. The closing speed is measured toward the unit,

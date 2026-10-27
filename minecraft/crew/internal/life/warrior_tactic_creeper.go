@@ -3,8 +3,6 @@ package life
 import (
 	"context"
 	"math"
-	"sync"
-	"weak"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -85,8 +83,7 @@ type creeperTactic struct {
 	// moment something can say so.
 	charged func(belief.Entity) bool
 
-	mu    sync.Mutex
-	units map[weak.Pointer[Life]]*creeperMemory
+	units unitScratch[creeperMemory]
 }
 
 // creeperMemory is what one unit has seen of the creepers around it.
@@ -114,7 +111,9 @@ func init() {
 }
 
 func newCreeperTactic(name string, ranged bool) *creeperTactic {
-	return &creeperTactic{name: name, ranged: ranged, units: map[weak.Pointer[Life]]*creeperMemory{}}
+	return &creeperTactic{name: name, ranged: ranged, units: unitScratch[creeperMemory]{
+		init: func(m *creeperMemory) { m.tracks = map[uint64]*creeperTrack{} },
+	}}
 }
 
 func (c *creeperTactic) Name() string           { return c.name }
@@ -137,7 +136,7 @@ func (c *creeperTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 	}
 
 	e := f.Target
-	m := c.memory(l)
+	m := c.units.of(l)
 	m.prune(l)
 	t := m.observe(l.tick, e)
 	d := horizontal(f.Pose.Feet, e.Pos)
@@ -324,28 +323,6 @@ func (l *Life) creeperWatch(p act.Pose) float64 {
 		}
 	}
 	return watchRange
-}
-
-// memory is the unit's own record. The tactic is shared by every unit in the
-// process, so the record is keyed by the unit, weakly: a unit that is gone
-// must not be kept alive by what was remembered of its creepers.
-func (c *creeperTactic) memory(l *Life) *creeperMemory {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.units) > 16 {
-		for k := range c.units {
-			if k.Value() == nil {
-				delete(c.units, k)
-			}
-		}
-	}
-	k := weak.Make(l)
-	m, ok := c.units[k]
-	if !ok {
-		m = &creeperMemory{tracks: map[uint64]*creeperTrack{}}
-		c.units[k] = m
-	}
-	return m
 }
 
 // prune forgets creepers that have left the world, as one does by blasting.
