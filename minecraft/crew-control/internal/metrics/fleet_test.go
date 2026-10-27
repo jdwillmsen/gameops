@@ -440,3 +440,33 @@ func TestFromAPollerEndToEnd(t *testing.T) {
 	srv.Close()
 	wait("offline", func() bool { return state("offline") })
 }
+
+func TestVitalsGaugesFollowReadingsAndVanishWhenUnknown(t *testing.T) {
+	f := New(roster3)
+	hp, food := float32(14), float32(0)
+	at := time.Unix(1_700_000_000, 0)
+	f.ObservePoll(at, []telemetry.UnitState{
+		{ID: roster3[0], State: "working", Health: &hp, Hunger: &food},
+		{ID: roster3[1], State: "offline"},
+		{ID: "crew-99", State: "idle", Health: &hp},
+	})
+	fam := families(t, f)
+	if got := value(t, f, "crew_fleet_unit_health", map[string]string{"unit": roster3[0]}); got != 14 {
+		t.Fatalf("health = %v, want 14", got)
+	}
+	if find(fam["crew_fleet_unit_hunger"], map[string]string{"unit": roster3[0]}) == nil {
+		t.Fatal("a hunger of zero is a reading and must stay exported")
+	}
+	for _, name := range []string{"crew_fleet_unit_health", "crew_fleet_unit_hunger"} {
+		for _, u := range []string{roster3[1], "crew-99"} {
+			if mf := fam[name]; mf != nil && find(mf, map[string]string{"unit": u}) != nil {
+				t.Fatalf("%s has a series for %s, which reported nothing or is off the roster", name, u)
+			}
+		}
+	}
+
+	f.ObservePoll(at.Add(time.Second), []telemetry.UnitState{{ID: roster3[0], State: "offline"}})
+	if mf := families(t, f)["crew_fleet_unit_health"]; mf != nil && find(mf, map[string]string{"unit": roster3[0]}) != nil {
+		t.Fatal("health still exported after the unit stopped reporting it")
+	}
+}
