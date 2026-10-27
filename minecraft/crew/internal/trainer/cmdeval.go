@@ -20,7 +20,9 @@ const maxCmdOutput = 8 << 20
 // CmdEvaluator fights by running an external command. The command gets
 // {"profile":...,"scenario":...} as JSON on stdin and the scenario in
 // TRAINER_* environment variables, and prints one Scorecard per line on
-// stdout. Argv is split on whitespace and run without a shell.
+// stdout. Only the cards naming the evaluated profile are kept, so a duel
+// command may print the opponent's card too. Argv is split on whitespace and
+// run without a shell.
 type CmdEvaluator struct {
 	Command string
 	Timeout time.Duration // per fight; zero means the run's own limits
@@ -60,7 +62,11 @@ func (e CmdEvaluator) Evaluate(ctx context.Context, p tactics.Profile, s Scenari
 		}
 		return nil, fmt.Errorf("trainer: evaluator %q: %w: %s", argv[0], err, strings.TrimSpace(stderr.String()))
 	}
-	return parseScorecards(io.LimitReader(bytes.NewReader(out), maxCmdOutput))
+	cards, err := parseScorecards(io.LimitReader(bytes.NewReader(out), maxCmdOutput))
+	if err != nil {
+		return nil, err
+	}
+	return ownCards(cards, p.Name), nil
 }
 
 func parseScorecards(r io.Reader) ([]tactics.Scorecard, error) {

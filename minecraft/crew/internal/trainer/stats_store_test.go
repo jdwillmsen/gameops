@@ -119,7 +119,7 @@ func TestCmdEvaluator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cards) != 2 || cards[0].Profile != "p1" || cards[0].Side != "b" || cards[0].Seed != 5 || cards[1].Outcome != tactics.OutcomeLoss {
+	if len(cards) != 1 || cards[0].Profile != "p1" || cards[0].Side != "b" || cards[0].Seed != 5 {
 		t.Errorf("cards = %+v", cards)
 	}
 
@@ -155,7 +155,7 @@ func TestHelperProcess(t *testing.T) {
 		}
 		os.Stdout.WriteString(`{"profile":"` + req.Profile.Name + `","side":"` + os.Getenv("TRAINER_SIDE") +
 			`","seed":` + os.Getenv("TRAINER_SEED") + `,"outcome":"win"}` + "\n\n" +
-			`{"outcome":"loss"}` + "\n")
+			`{"profile":"rival","outcome":"loss"}` + "\n")
 	}
 	os.Exit(0)
 }
