@@ -19,12 +19,12 @@ import (
 // from a fight or towards a target, so the role's own fight (face the body,
 // chase the cell it stood in) both provokes it and loses it.
 //
-// What belief carries of an enderman is its position and head yaw; nothing
-// reads the actor flags that mark it angry. "It is after us" is therefore an
-// inference, never a reading: a blow that just landed, it standing in reach,
-// or its head turned on us. Each inference errs towards the role's own fight,
-// so a wrong guess costs a hit the default would have had too, never a unit
-// standing idle in front of a mob that is killing it. The exact Bedrock
+// "It is after us" is read from the actor's angry flag once the server has
+// sent its flags. Until then, and for a server that never does, it is an
+// inference from its position and head yaw: a blow that just landed, it
+// standing in reach, or its head turned on us. Every path errs towards the
+// role's own fight, so a wrong guess costs a hit the default would have had
+// too, never a unit standing idle in front of a mob that is killing it. The exact Bedrock
 // provocation cone is not documented, so gaze is kept well clear of the head
 // instead of just outside a figure.
 const (
@@ -200,8 +200,10 @@ func enderOthersNear(f *Fight) bool {
 	return found
 }
 
-// enderTargetsUs infers that the target is still after the unit: it is in
-// reach, it landed a blow a moment ago, or its head is on the unit.
+// enderTargetsUs says the target is still after the unit: it is in reach, it
+// landed a blow a moment ago, and then its angry flag when known or else
+// whether its head is on the unit. Reach and a fresh blow outrank a calm
+// flag, which may lag the provocation.
 func enderTargetsUs(f *Fight) bool {
 	l, p, e := f.Life, f.Pose, f.Target
 	if inMeleeReach(p, e) {
@@ -209,6 +211,9 @@ func enderTargetsUs(f *Fight) bool {
 	}
 	if l.attackerUntil >= attackerTicks && l.tick-(l.attackerUntil-attackerTicks) < enderFreshHit {
 		return true
+	}
+	if e.FlagsKnown {
+		return e.Angry
 	}
 	bearing, _ := lookAt(e.Pos, p.Feet)
 	return math.Abs(enderAngleDiff(float64(e.HeadYaw), float64(bearing))) <= enderFaceDeg
