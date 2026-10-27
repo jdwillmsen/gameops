@@ -27,8 +27,8 @@ type fakeDecoder struct {
 }
 
 func (f fakeDecoder) SubChunk([]byte) (Section, error) { return f.section, f.err }
-func (f fakeDecoder) Chunk([]byte, int) ([]PlacedSection, error) {
-	return []PlacedSection{{Y: 2, Section: f.section}}, f.err
+func (f fakeDecoder) Chunk(payload []byte, _ int) ([]PlacedSection, []byte, error) {
+	return []PlacedSection{{Y: 2, Section: f.section}}, payload, f.err
 }
 func (fakeDecoder) BlockName(id uint32) (string, bool) {
 	if id == 1 {

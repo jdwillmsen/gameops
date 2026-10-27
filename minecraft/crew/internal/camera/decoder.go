@@ -20,8 +20,9 @@ type Decoder interface {
 	// SubChunk decodes the payload of one SubChunk packet entry.
 	SubChunk(payload []byte) (Section, error)
 	// Chunk decodes a whole LevelChunk payload (the non-request path); empty
-	// sections are omitted.
-	Chunk(payload []byte, subChunkCount int) ([]PlacedSection, error)
+	// sections are omitted. rest is what follows the sections, which is where
+	// the biomes start; returning it spares the caller decoding them again.
+	Chunk(payload []byte, subChunkCount int) (secs []PlacedSection, rest []byte, err error)
 	// BlockName resolves the block ID of a single-block update. ok is false for
 	// a state the decoder does not know, which the hub draws as a placeholder.
 	BlockName(networkID uint32) (name string, ok bool)
