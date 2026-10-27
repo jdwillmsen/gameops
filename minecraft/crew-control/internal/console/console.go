@@ -14,7 +14,7 @@ import (
 //go:embed web/insights.js web/insights-ui.js web/why.js web/insights.css
 //go:embed web/invhistory.js web/invhistory-ui.js
 //go:embed web/signin-messages.js
-//go:embed web/director.js web/director-ui.js web/director.css
+//go:embed web/director.js web/director-ui.js web/director.css web/bulk.js web/bulk-ui.js web/bulk.css
 var assets embed.FS
 
 const csp = "default-src 'self'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"

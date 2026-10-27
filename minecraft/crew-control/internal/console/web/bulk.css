@@ -1,0 +1,8 @@
+.bk { padding: 12px 14px; }
+.bk h2 { margin: 0 0 6px; font-size: 14px; }
+.bk-who { font-size: 12px; opacity: .8; margin: 0 0 8px; overflow-wrap: anywhere; }
+.bk-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: end; }
+.bk-row[hidden] { display: none; }
+.bk-field { display: flex; flex-direction: column; font-size: 11px; gap: 2px; }
+.bk-summary { font-size: 12px; margin: 4px 0; }
+.bk input { width: auto; border: 1px solid #3a3a3a; border-radius: 4px; padding: 3px 6px; font-size: inherit; }

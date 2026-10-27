@@ -7,6 +7,7 @@ import {
   mergeEvents, filterEvents, isToast, ago, project, nearest, rankItems, KEYS,
 } from '/static/fleet.js';
 import { createFeedView, perFrame, timeText } from '/static/feedview.js';
+import { openBulk } from '/static/bulk-ui.js';
 import { createGovernor, lowerBudget } from '/static/governor.js';
 
 const $ = id => document.getElementById(id);
@@ -138,9 +139,12 @@ export function initOps(host) {
     const sel = $('roster-sel');
     sel.hidden = !op || picked.size === 0;
     sel.textContent = `Stop ${picked.size} selected`;
+    for (const id of ['roster-recall', 'roster-assign']) $(id).hidden = sel.hidden;
   }
 
   $('roster-sel').addEventListener('click', () => stopUnits([...picked]));
+  $('roster-recall').addEventListener('click', () => bulk('recall'));
+  $('roster-assign').addEventListener('click', () => bulk('assign'));
 
   // ---- wall ----
 
@@ -426,6 +430,10 @@ export function initOps(host) {
       const cur = host.statuses.get(st.unit);
       if (cur) items.push({ label: `Stop ${cur.name || cur.id}`, keywords: 'halt cancel operator', hint: 'operator', run: () => stopUnits([st.unit]) });
       if (picked.size) items.push({ label: `Stop ${picked.size} selected units`, keywords: 'halt bulk operator', hint: 'operator', run: () => stopUnits([...picked]) });
+      if (picked.size) {
+        items.push({ label: `Recall ${picked.size} selected units`, keywords: 'bulk walk goto operator', hint: 'operator', run: () => bulk('recall') });
+        items.push({ label: `Assign a task to ${picked.size} selected units`, keywords: 'bulk gather haul operator', hint: 'operator', run: () => bulk('assign') });
+      }
       items.push({ label: 'Stop all units', keywords: 'halt everything emergency operator', hint: 'operator', run: () => stopUnits(ord) });
       items.push({ label: 'Select all in roster', keywords: 'operator', run: () => { ord.forEach(id => picked.add(id)); renderRoster(); } });
       items.push({ label: 'Clear roster selection', keywords: 'operator', run: () => { picked.clear(); renderRoster(); } });
@@ -483,6 +491,24 @@ export function initOps(host) {
   }
 
   // ---- operator actions ----
+
+  function bulk(action) {
+    if (!host.operator() || !picked.size) return;
+    closeOverlay();
+    paletteEl = openBulk({
+      api: host.api,
+      name: id => host.statuses.get(id)?.name || id,
+      expired: () => {
+        toast({ level: 'warn', name: 'Fleet', text: 'you were signed out' });
+        host.expired();
+      },
+      done: r => {
+        toast({ level: r.failed ? 'crit' : 'ok', name: action === 'recall' ? 'Recall' : 'Assign', text: r.text });
+        picked.clear();
+        renderRoster();
+      },
+    }, action, [...picked], closeOverlay);
+  }
 
   async function stopUnits(ids) {
     if (!host.operator() || !ids.length) return;
