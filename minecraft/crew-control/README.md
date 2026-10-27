@@ -609,6 +609,10 @@ Each unit is read with its own paged query, newest first and capped at 15 pages
 of 200; when a busy unit hits the cap the oldest rows are dropped and the bar says
 so. The window is never loaded all at once.
 
+## Design principles
+
+The console's rulebook (tokens, the view registry and key table, how to add a view, the accessibility checklist, chart rules) is `docs/ui-design-principles.md`. `web/views.js` is the view registry; `views.test.mjs` fails when a registered view has no toggle key or title, or when `index.html` or the key handler disagree with it. Roster headers and rows are keyboard operable, and every control shows a focus ring from one shared token.
+
 ## Chart library
 
 `internal/console/web/charts/` holds the console's chart panels: plain ES modules and SVG, no bundler and no dependency, embedded and served from `/static/charts/{file}` like the rest of the console. `/static/charts/demo.html` is the gallery: every chart on seeded synthetic data, with theme (`?theme=light|dark`), texture (`?texture=1`) and a live 20-chart run (`?live=1`). It doubles as the visual regression fixture; `?eager=1` draws off-screen panels too, for full-page screenshots.
