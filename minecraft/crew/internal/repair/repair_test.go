@@ -471,9 +471,9 @@ func TestApplyWaitsForChunksAndClearsStaleAreas(t *testing.T) {
 	if err := Apply(f, samplePlan, &r, o); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"tickingarea remove", "tickingarea add", "sleep", "fill 1"}
+	want := append(strings.Split(strings.Repeat("tickingarea remove,", maxTickingAreas), ",")[:maxTickingAreas], "tickingarea add", "sleep", "fill 1")
 	// order starts after the quiet-period sleep.
-	got := order[1:5]
+	got := order[1 : 1+len(want)]
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("order = %v, want prefix %v", order, want)

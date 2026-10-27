@@ -60,7 +60,7 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 			switch {
 			case err == nil:
 				rep.Status = StatusApplied
-			case rep.Executed > 0:
+			case rep.RepairsRun > 0:
 				rep.Status = StatusAborted
 			}
 			if err != nil {
@@ -112,10 +112,11 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 		return nil
 	}
 	if len(p.Setup) > 0 {
-		for _, cmd := range p.Teardown {
-			// A crashed run can leave its areas behind; the reply is
-			// irrelevant because "not found" is the normal case.
-			_, _ = c.Exec(cmd)
+		// A crashed larger run can leave higher-numbered areas behind that
+		// count against the cap, so sweep every name this tool can have
+		// used; the reply is irrelevant because "not found" is the normal case.
+		for i := 0; i < maxTickingAreas; i++ {
+			_, _ = c.Exec(fmt.Sprintf("tickingarea remove %s%d", tickingAreaPrefix, i))
 		}
 		defer func() {
 			for _, cmd := range p.Teardown {
@@ -145,6 +146,7 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 		if err = sent(cmd); err != nil {
 			return err
 		}
+		rep.RepairsRun++
 	}
 	return nil
 }

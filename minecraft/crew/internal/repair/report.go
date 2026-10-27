@@ -9,18 +9,21 @@ import (
 // Report is the per-run damage summary, JSON-ready so a run can be logged
 // beside the director's result line.
 type Report struct {
-	Dry       bool           `json:"dry_run"`
-	Status    string         `json:"status"`
-	Error     string         `json:"error,omitempty"`
-	Scanned   int            `json:"cells_scanned"`
-	Unscanned int            `json:"cells_unscanned"`
-	Damaged   int            `json:"cells_damaged"`
-	Rects     int            `json:"rectangles"`
-	Commands  int            `json:"commands"`
-	Executed  int            `json:"commands_executed"`
-	ByKind    map[string]int `json:"by_kind"`
-	ByZone    map[string]int `json:"by_zone"`
-	Top       []Change       `json:"top_changes"`
+	Dry       bool   `json:"dry_run"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	Scanned   int    `json:"cells_scanned"`
+	Unscanned int    `json:"cells_unscanned"`
+	Damaged   int    `json:"cells_damaged"`
+	Rects     int    `json:"rectangles"`
+	Commands  int    `json:"commands"`
+	Executed  int    `json:"commands_executed"`
+	// RepairsRun counts only repair commands; Executed also counts setup and
+	// teardown, which change nothing in the arena.
+	RepairsRun int            `json:"repair_commands_executed"`
+	ByKind     map[string]int `json:"by_kind"`
+	ByZone     map[string]int `json:"by_zone"`
+	Top        []Change       `json:"top_changes"`
 }
 
 // How a run ended. Refused means nothing was sent; aborted means some commands
