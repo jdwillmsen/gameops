@@ -194,6 +194,22 @@ most one line per unit per 10 s with a `suppressed` count, carrying the skill,
 movement state and block names around the feet but no positions; the query
 that groups them is in
 [`docs/notes/2026-10-21-crew-corrections.md`](../../docs/notes/2026-10-21-crew-corrections.md).
+**Clipping.** A unit whose predicted body sits more than 2 cm inside a block
+shape, or whose predicted tick the server corrects, is counted in
+`crew_movement_clips_total{reason}` and logged as `movement_clip` (names of the
+blocks at the feet, never positions; one line per reason per 10 s with a
+`suppressed` count). The reason is a closed code:
+
+| Reason | Meaning |
+| --- | --- |
+| `predicted_inside_block` | a tick's predicted body ended inside a block; a stay inside counts once |
+| `corrected_inside_block` | the server corrected a tick whose predicted body was inside a block: the prediction ran through something solid |
+| `corrected_in_free_space` | the server corrected a tick whose body was clear of every block: a shape, speed or entity mismatch, not a clip |
+
+`internal/act/conformance_test.go` holds the collision table, a swept-box
+reference written independently of the sweep, and seeded random worlds; a
+change to the collision code runs against all three.
+
 The prediction collides with each block's real shape, which
 comes from the block's name and states (`internal/world/shape`), not from a
 full cube per solid block:
