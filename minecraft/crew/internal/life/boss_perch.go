@@ -41,7 +41,8 @@ func eyeToOrigin(p act.Pose, e belief.Entity) float64 {
 // perches: every warrior, whatever its role, swings at it from within reach
 // and walks up to it while it sits, and holds its ground facing it
 // otherwise. A bow does nothing to it, and chasing it in flight would only
-// put the unit under its charge.
+// put the unit under its charge. A hold order still keeps the unit where it
+// stands, swinging only at a perch already in reach.
 func (l *Life) perchFight(ctx context.Context, a skill.Actuator, p act.Pose, e belief.Entity, s belief.Snapshot) error {
 	b := &l.warrior.boss
 	l.cancelDraw(a)
@@ -54,6 +55,12 @@ func (l *Life) perchFight(ctx context.Context, a skill.Actuator, p act.Pose, e b
 		b.walk = nil
 		l.chase = nil
 		return l.strike(a, p, e, s)
+	}
+	if l.warrior.hold {
+		// The order is to keep position: a perch out of reach is not
+		// walked to.
+		b.walk = nil
+		return l.stillFacing(a, p, e)
 	}
 	return l.perchApproach(ctx, a, p, e)
 }

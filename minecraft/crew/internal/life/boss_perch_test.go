@@ -167,3 +167,45 @@ func TestAnotherBossIsStillFoughtOnItsRolesTerms(t *testing.T) {
 		t.Error("the Ranger did not shoot a still warden")
 	}
 }
+
+func TestAHeldWarriorDoesNotWalkUpToAPerchedDragon(t *testing.T) {
+	r, squad := newBossWarriorVs(t, "vanguard", arena.Sub(mgl32.Vec3{20, 0, 0}), dragonType, arena)
+	squad.order = Order{Kind: OrderHold}
+	start := r.feet()
+	r.run(perchStill + 100)
+	if moved := r.feet().Sub(start).Len(); moved > 0.05 {
+		t.Errorf("the held warrior walked %.1f blocks toward the perched dragon", moved)
+	}
+	if n := len(r.out.attacks()); n != 0 {
+		t.Errorf("%d swings from a held warrior out of reach", n)
+	}
+}
+
+func TestAHeldWarriorStillSwingsAtAPerchedDragonInReach(t *testing.T) {
+	r, squad := newBossWarriorVs(t, "vanguard", arena.Sub(mgl32.Vec3{4, 0, 0}), dragonType, arena)
+	squad.order = Order{Kind: OrderHold}
+	start := r.feet()
+	r.run(perchStill + 30)
+	if n := len(r.out.attacks()); n < 3 {
+		t.Errorf("%d swings from a held warrior in reach, want the attack cadence", n)
+	}
+	if moved := r.feet().Sub(start).Len(); moved > 0.05 {
+		t.Errorf("the held warrior moved %.1f blocks", moved)
+	}
+}
+
+func TestADragonsPerchRetryDoesNotStallAWardenRegroup(t *testing.T) {
+	home := mgl32.Vec3{10.5, 1, 40.5}
+	r, squad := newBossWarriorVs(t, "striker", arena.Sub(mgl32.Vec3{10, 0, 0}), dragonType, arena)
+	r.run(2)
+	// A perch approach that found no way, waiting to retry.
+	r.l.warrior.boss.walkRetry = r.l.tick + 1000
+
+	squad.down, squad.start, squad.startOK = 2, home, true
+	r.spawn(80, "minecraft:warden", arena)
+	r.moveTo(90, arena.Add(mgl32.Vec3{0, 30, 0}))
+	r.run(250)
+	if d := dist(r.feet(), home); d > regroupWithin {
+		t.Fatalf("regrouped to %.1f blocks off the start, want within %.1f", d, float32(regroupWithin))
+	}
+}
