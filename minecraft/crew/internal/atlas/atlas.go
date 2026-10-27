@@ -90,6 +90,8 @@ type Table struct {
 	Materials map[string]string `json:"materials"`
 	// WaterColors maps a biome name to its water surface colour (#rrggbb).
 	WaterColors map[string]string `json:"water_colors"`
+	// WaterAlphas maps a biome name to how opaque its water surface is, 0 to 1.
+	WaterAlphas map[string]float64 `json:"water_alphas,omitempty"`
 	// Colormaps holds the grass and foliage climate lookup images as PNG bytes.
 	Colormaps map[string][]byte `json:"colormaps,omitempty"`
 	// Unmapped lists texture keys the pack references but could not supply.
@@ -153,12 +155,30 @@ func (t Table) FallbackColor(name string) string {
 // WaterColor returns the water surface colour for a biome, falling back to the
 // pack default.
 func (t Table) WaterColor(biome string) color.NRGBA {
-	for _, key := range []string{biome, "default"} {
+	for _, key := range biomeKeys(biome) {
 		if c, ok := parseHex(t.WaterColors[key]); ok {
 			return c
 		}
 	}
 	return color.NRGBA{0x44, 0xaf, 0xf5, 255}
+}
+
+// DefaultWaterAlpha is the opacity of water in a pack that does not say.
+const DefaultWaterAlpha = 0.65
+
+// WaterAlpha returns how opaque a biome's water surface is.
+func (t Table) WaterAlpha(biome string) float64 {
+	for _, key := range biomeKeys(biome) {
+		if a, ok := t.WaterAlphas[key]; ok && a > 0 && a <= 1 {
+			return a
+		}
+	}
+	return DefaultWaterAlpha
+}
+
+// biomeKeys lists the spellings a pack may key a biome by, then its default.
+func biomeKeys(biome string) []string {
+	return []string{biome, "minecraft:" + biome, "default"}
 }
 
 // TintColor samples the grass or foliage colour map for a climate. Other kinds

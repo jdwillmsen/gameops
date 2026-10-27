@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/atlas"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/subchunk"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -93,24 +95,29 @@ type Hub struct {
 	mats       *materialTable
 	matsSent   int // how many of mats every attached viewer has been sent; under mu
 
-	mu       sync.Mutex
-	runtime  uint64
-	subs     map[[3]int32][]byte // wire frames, replayed to a new viewer
-	ents     map[uint64]*entity
-	uniqueID map[int64]uint64
-	viewers  map[*Viewer]struct{}
-	atlasPNG []byte
-	atlasDoc []byte
-	itemsPNG []byte
-	itemsDoc []byte
-	entPNG   []byte
-	entDoc   []byte
-	itemName map[int32]string // item network id -> name without namespace
-	skins    map[uuid.UUID]*skinInfo
-	ownSkin  *skinInfo
-	ownArmor armourSlots
-	types    []string // entity type names; the index is the wire type id
-	typeIDs  map[string]uint16
+	mu         sync.Mutex
+	runtime    uint64
+	subs       map[[3]int32][]byte // wire frames, replayed to a new viewer
+	ents       map[uint64]*entity
+	uniqueID   map[int64]uint64
+	viewers    map[*Viewer]struct{}
+	atlasObj   *atlas.Atlas
+	atlasPNG   []byte
+	atlasDoc   []byte
+	itemsPNG   []byte
+	itemsDoc   []byte
+	entPNG     []byte
+	entDoc     []byte
+	itemName   map[int32]string // item network id -> name without namespace
+	skins      map[uuid.UUID]*skinInfo
+	ownSkin    *skinInfo
+	ownArmor   armourSlots
+	clock      worldClock
+	biomeDefs  map[uint16]biomeDef
+	biomeTable []byte
+	biomes     map[[2]int32][]byte // wire frames, replayed to a new viewer
+	types      []string            // entity type names; the index is the wire type id
+	typeIDs    map[string]uint16
 
 	decodeFailures atomic.Uint64
 	unmapped       atomic.Uint64
@@ -145,6 +152,7 @@ func New(o Options) *Hub {
 		maxRadius:  o.MaxRadius,
 		mats:       newMaterialTable(),
 		subs:       map[[3]int32][]byte{},
+		biomes:     map[[2]int32][]byte{},
 		ents:       map[uint64]*entity{},
 		uniqueID:   map[int64]uint64{},
 		skins:      map[uuid.UUID]*skinInfo{},
@@ -209,6 +217,7 @@ func (h *Hub) forgetPlayersLocked() {
 
 func (h *Hub) resetLocked() {
 	h.subs = map[[3]int32][]byte{}
+	h.biomes = map[[2]int32][]byte{}
 	h.ents = map[uint64]*entity{}
 	h.uniqueID = map[int64]uint64{}
 	for v := range h.viewers {
@@ -245,6 +254,7 @@ func (h *Hub) Attach() (*Viewer, error) {
 		v.ents[e.ID] = e.record()
 	}
 	v.head = [][]byte{helloFrame(), encodeMaterials(h.mats.all()), encodeEntityTypes(h.types)}
+	v.head = append(v.head, h.skyHeadLocked()...)
 	if h.atlasDoc != nil {
 		v.head = append(v.head, atlasFrame())
 	}
@@ -334,6 +344,12 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 			placed[i] = blockPlacement{b.BlockPos, b.BlockRuntimeID}
 		}
 		h.updateBlocks(h.blockEdits(placed))
+	case *packet.SetTime:
+		h.setTime(p)
+	case *packet.GameRulesChanged:
+		h.gameRules(p.GameRules)
+	case *packet.BiomeDefinitionList:
+		h.biomeDefinitions(p)
 	case *packet.CorrectPlayerMovePrediction:
 		h.publishSelf()
 	case *packet.Respawn:
@@ -607,11 +623,16 @@ func poseOf(s belief.Snapshot) selfPose {
 }
 
 func (h *Hub) levelChunk(p *packet.LevelChunk) {
-	if p.Dimension != 0 {
+	if p.Dimension != 0 || p.CacheEnabled {
+		return // a blob cache crew does not negotiate
+	}
+	if _, requestMode := p.SubChunkLimit.Value(); requestMode {
+		// The blocks come as sub-chunk packets; the payload is only biomes.
+		h.noteBiomes(p.Position, p.RawPayload)
 		return
 	}
-	if _, requestMode := p.SubChunkLimit.Value(); requestMode || p.CacheEnabled {
-		return // a limit of zero, or a blob cache crew does not negotiate
+	if rest, err := subchunk.Skip(p.RawPayload, int(p.SubChunkCount)); err == nil {
+		h.noteBiomes(p.Position, rest)
 	}
 	secs, err := h.dec.Chunk(p.RawPayload, int(p.SubChunkCount))
 	if err != nil {

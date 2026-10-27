@@ -48,14 +48,17 @@ type Viewer struct {
 	pos     [3]float32
 	center  [3]int32
 	sent    map[[3]int32]struct{}
-	pending [][3]int32
-	dirty   bool
+	// biomeSent is the columns whose biomes the viewer has, which ride ahead
+	// of the first sub-chunk it is sent in that column.
+	biomeSent map[[2]int32]struct{}
+	pending   [][3]int32
+	dirty     bool
 }
 
 func newViewer(h *Hub, limit int, tick time.Duration, radius int) *Viewer {
 	return &Viewer{
 		hub: h, limit: limit, tick: tick, radius: radius,
-		ents: map[uint64][]byte{}, sent: map[[3]int32]struct{}{}, wake: make(chan struct{}, 1),
+		ents: map[uint64][]byte{}, sent: map[[3]int32]struct{}{}, biomeSent: map[[2]int32]struct{}{}, wake: make(chan struct{}, 1),
 	}
 }
 
@@ -177,6 +180,15 @@ func (v *Viewer) noteSub(key [3]int32, frame []byte, present bool) (cut bool) {
 	return false
 }
 
+// noteBiomes updates a column's biomes if the viewer has them; otherwise the
+// replay carries the held copy.
+func (v *Viewer) noteBiomes(col [2]int32, frame []byte) (cut bool) {
+	v.mu.Lock()
+	_, have := v.biomeSent[col]
+	v.mu.Unlock()
+	return have && v.push(frame)
+}
+
 // noteEdit forwards a single-block edit if the viewer has that chunk.
 func (v *Viewer) noteEdit(key [3]int32, frame []byte) (cut bool) {
 	v.mu.Lock()
@@ -196,6 +208,7 @@ func (v *Viewer) restart() {
 	}
 	v.fifo, v.ents, v.self = [][]byte{resetFrame()}, map[uint64][]byte{}, nil
 	v.sent, v.pending, v.dirty = map[[3]int32]struct{}{}, nil, false
+	v.biomeSent = map[[2]int32]struct{}{}
 	v.signal()
 }
 
@@ -280,6 +293,17 @@ func (v *Viewer) nextReplay() []byte {
 			return nil
 		}
 		k := v.pending[0]
+		col := [2]int32{k[0], k[2]}
+		if _, got := v.biomeSent[col]; !got {
+			// Marked before the frame is read, like a sub-chunk, so a later
+			// change is queued in order instead of missed.
+			v.biomeSent[col] = struct{}{}
+			v.mu.Unlock()
+			if f := v.hub.heldBiomes(col); f != nil {
+				return f
+			}
+			continue
+		}
 		v.pending = v.pending[1:]
 		if _, have := v.sent[k]; have || !v.wantsLocked(k) {
 			v.mu.Unlock()

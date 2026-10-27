@@ -4,11 +4,13 @@ import (
 	"context"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sandertv/go-raknet"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
@@ -216,4 +218,17 @@ func statusHandler(tracker *belief.Tracker, version string, unit statusapi.Unit,
 		return mux
 	}
 	return camera.Mount(mux, hub)
+}
+
+// dayCycleOn reports the doDaylightCycle rule; the server sends it unless the
+// rule is at its default, so a missing rule means the day runs.
+func dayCycleOn(rules []protocol.GameRule) bool {
+	for _, r := range rules {
+		if strings.EqualFold(r.Name, "dodaylightcycle") {
+			if on, ok := r.Value.(bool); ok {
+				return on
+			}
+		}
+	}
+	return true
 }
