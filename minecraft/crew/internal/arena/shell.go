@@ -100,7 +100,7 @@ func (c *shellConsole) Exec(cmd string) (string, error) {
 	// A fill's own reply is a fill success, so only other commands wait behind
 	// the noise.
 	noiseDeadline := deadline
-	if !strings.HasPrefix(cmd, "fill ") {
+	if !strings.Contains(cmd, "fill ") {
 		noiseDeadline = c.now().Add(noiseWait)
 	}
 	for {
