@@ -32,6 +32,7 @@ func TopBiomes(payload []byte) (ColumnBiomes, error) {
 	r := &reader{b: payload}
 	var top ColumnBiomes
 	var have bool
+	var last storageData
 	for i := 0; i < maxBiomeSections && len(r.b) > 0; i++ {
 		if r.b[0] == 0x7f<<1|1 { // same as the section below
 			r.b = r.b[1:]
@@ -43,19 +44,26 @@ func TopBiomes(payload []byte) (ColumnBiomes, error) {
 		if r.b[0]&1 == 0 { // the border byte: no more storages
 			break
 		}
-		var l Layer
-		if err := readStorage(r, &l); err != nil {
+		s, err := readRawStorage(r)
+		if err != nil {
 			return ColumnBiomes{}, fmt.Errorf("biome section %d: %w", i, err)
 		}
-		for x := 0; x < 16; x++ {
-			for z := 0; z < 16; z++ {
-				top[x<<4|z] = uint16(l.Palette[l.Indices[x<<8|z<<4|15]])
-			}
-		}
+		last = s
 		have = true
 	}
 	if !have {
 		return ColumnBiomes{}, fmt.Errorf("%w: no biome storage", ErrMalformed)
+	}
+	// Only the plane that is kept is unpacked and checked: the other storages
+	// would be thrown away, and there are up to 24 of them a chunk.
+	for x := 0; x < 16; x++ {
+		for z := 0; z < 16; z++ {
+			ix := int(last.index(x<<8 | z<<4 | 15))
+			if ix >= len(last.palette) {
+				return ColumnBiomes{}, fmt.Errorf("%w: biome index %d outside palette of %d", ErrMalformed, ix, len(last.palette))
+			}
+			top[x<<4|z] = uint16(last.palette[ix])
+		}
 	}
 	return top, nil
 }

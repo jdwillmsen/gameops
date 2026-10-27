@@ -51,3 +51,33 @@ func TestTopBiomesRejectsGarbage(t *testing.T) {
 		}
 	}
 }
+
+func TestTopBiomesRejectsAnIndexOutsideTheKeptPalette(t *testing.T) {
+	// 2 bits per cell with a palette of one entry; every word is all ones, so
+	// every index is 3.
+	payload := []byte{2<<1 | 1}
+	for i := 0; i < 256*4; i++ {
+		payload = append(payload, 0xff)
+	}
+	payload = append(payload, 1<<1, 5<<1)
+	if _, err := TopBiomes(payload); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("err %v, want ErrMalformed", err)
+	}
+}
+
+func BenchmarkTopBiomesFullColumn(b *testing.B) {
+	// 24 storages at 4 bits per cell, the worst a vanilla column sends.
+	var payload []byte
+	for s := 0; s < 24; s++ {
+		payload = append(payload, 4<<1|1)
+		payload = append(payload, make([]byte, 512*4)...)
+		payload = append(payload, 2<<1, 1<<1, 4<<1)
+	}
+	payload = append(payload, 0)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := TopBiomes(payload); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

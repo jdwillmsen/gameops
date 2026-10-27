@@ -124,55 +124,87 @@ func Decode(payload []byte) (SubChunk, error) {
 	return sc, nil
 }
 
-func readStorage(r *reader, l *Layer) error {
+// storageData is a paletted storage whose indices are still packed. Biome
+// payloads hold up to 24 of them and only one is read, so unpacking is left to
+// the caller.
+type storageData struct {
+	bits    int
+	words   []byte
+	palette []uint32
+}
+
+// index returns the palette index of cell i. It is only valid for a storage
+// readRawStorage returned, which has sized words for its width.
+func (s *storageData) index(i int) uint16 {
+	if s.bits == 0 {
+		return 0
+	}
+	perWord := 32 / s.bits
+	w := i / perWord
+	word := uint32(s.words[w*4]) | uint32(s.words[w*4+1])<<8 | uint32(s.words[w*4+2])<<16 | uint32(s.words[w*4+3])<<24
+	return uint16(word >> (uint(i%perWord) * uint(s.bits)) & (uint32(1)<<s.bits - 1))
+}
+
+func readRawStorage(r *reader) (storageData, error) {
 	header, err := r.byte()
 	if err != nil {
-		return err
+		return storageData{}, err
 	}
 	if header&1 == 0 {
-		return fmt.Errorf("%w: persistent (NBT) palette is not a network format", ErrMalformed)
+		return storageData{}, fmt.Errorf("%w: persistent (NBT) palette is not a network format", ErrMalformed)
 	}
-	bits := int(header >> 1)
+	s := storageData{bits: int(header >> 1)}
 
-	switch bits {
+	switch s.bits {
 	case 0, 1, 2, 3, 4, 5, 6, 8, 16:
 	default:
-		return fmt.Errorf("%w: unsupported %d bits per block", ErrMalformed, bits)
+		return storageData{}, fmt.Errorf("%w: unsupported %d bits per block", ErrMalformed, s.bits)
 	}
 
-	if bits > 0 {
+	if s.bits > 0 {
 		// Indices are packed into whole 32-bit words without straddling, so
 		// widths that do not divide 32 leave unused bits and need one extra word.
-		perWord := 32 / bits
+		perWord := 32 / s.bits
 		words := (Size + perWord - 1) / perWord
-		raw, err := r.next(words * 4)
-		if err != nil {
-			return err
-		}
-		mask := uint32(1)<<bits - 1
-		for i := range l.Indices {
-			w := i / perWord
-			word := uint32(raw[w*4]) | uint32(raw[w*4+1])<<8 | uint32(raw[w*4+2])<<16 | uint32(raw[w*4+3])<<24
-			l.Indices[i] = uint16(word >> (uint(i%perWord) * uint(bits)) & mask)
+		if s.words, err = r.next(words * 4); err != nil {
+			return storageData{}, err
 		}
 	}
 
 	n := int32(1)
-	if bits > 0 {
+	if s.bits > 0 {
 		if n, err = r.varint32(); err != nil {
-			return err
+			return storageData{}, err
 		}
 	}
 	if n < 1 || n > maxPalette {
-		return fmt.Errorf("%w: palette size %d", ErrMalformed, n)
+		return storageData{}, fmt.Errorf("%w: palette size %d", ErrMalformed, n)
 	}
-	l.Palette = make([]uint32, n)
-	for i := range l.Palette {
+	s.palette = make([]uint32, n)
+	for i := range s.palette {
 		v, err := r.varint32()
 		if err != nil {
-			return err
+			return storageData{}, err
 		}
-		l.Palette[i] = uint32(v)
+		s.palette[i] = uint32(v)
+	}
+	return s, nil
+}
+
+func readStorage(r *reader, l *Layer) error {
+	s, err := readRawStorage(r)
+	if err != nil {
+		return err
+	}
+	l.Palette = s.palette
+	if s.bits > 0 {
+		perWord := 32 / s.bits
+		mask := uint32(1)<<s.bits - 1
+		for i := range l.Indices {
+			w := i / perWord
+			word := uint32(s.words[w*4]) | uint32(s.words[w*4+1])<<8 | uint32(s.words[w*4+2])<<16 | uint32(s.words[w*4+3])<<24
+			l.Indices[i] = uint16(word >> (uint(i%perWord) * uint(s.bits)) & mask)
+		}
 	}
 	for _, ix := range l.Indices {
 		if int(ix) >= len(l.Palette) {
