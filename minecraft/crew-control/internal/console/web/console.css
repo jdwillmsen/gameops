@@ -127,7 +127,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 #feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; font-size: 12px; }
 .ev { display: flex; gap: 8px; padding: 1px 8px; cursor: pointer; }
 .ev:hover { background: #1c211c; }
-.ev time { opacity: .5; flex: none; }
+.ev time { opacity: .6; flex: none; }
 .ev b { flex: none; min-width: 7em; }
 .ev.ok span { color: var(--ok); }
 .ev.warn span { color: var(--warn); }
@@ -196,11 +196,11 @@ body.kiosk #bar, body.kiosk #side, body.kiosk #dock, body.kiosk #statusbar { dis
 .role.ranger { background: #2d4a2d; }
 .sq-member .meter { width: 34px; }
 .sq-food, .sq-weapon { font-size: 11px; opacity: .75; }
-.sq-callout { margin-left: auto; font-size: 11px; opacity: .5; }
+.sq-callout { margin-left: auto; font-size: 11px; opacity: .6; }
 .sq-callout.on { color: var(--warn); opacity: 1; }
 .sq-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
 .sq-log li { display: flex; gap: 8px; }
-.sq-log time { opacity: .5; flex: none; }
+.sq-log time { opacity: .6; flex: none; }
 .sq-log b { flex: none; min-width: 6em; }
 @media (max-width: 720px) { #squad { width: auto; max-height: 50%; border-left: 0; border-top: 1px solid #333; } }
 #enrol summary { cursor: pointer; }
