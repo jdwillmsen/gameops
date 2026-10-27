@@ -363,7 +363,7 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 // to blast the unit or by a player it must give way to.
 func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode) {
 	pr := l.Profile()
-	best, found := focusTarget(l.ents, focusQuery{
+	q := focusQuery{
 		anchor:        anchor,
 		self:          p.Feet,
 		tick:          l.tick,
@@ -373,13 +373,17 @@ func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode
 		wantType:      name(l.warrior.order().Target),
 		focusRange:    func(e belief.Entity) float64 { return pr.For(familyOf(e)).FocusRange },
 		player:        l.mayFightPlayer,
-	})
+	}
+	best, found := focusTarget(l.ents, q)
 	// A creeper about to blast is answered first, as the reactive defence
 	// answers it: by leaving.
 	if e, ok := l.nearestOfKind(p, flee, l.creeperWatch(p)); ok {
 		return e, modeRetreat
 	}
 	if found {
+		if e, ok := l.preferredTarget(p, q, best); ok {
+			best = e
+		}
 		return best, modeFight
 	}
 	if e, ok := l.bossNear(anchor); ok {
