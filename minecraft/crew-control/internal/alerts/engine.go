@@ -64,6 +64,9 @@ type Engine struct {
 	names   map[string]string
 	alerts  map[string]*Alert
 	mutes   map[string]time.Time
+	// ruleMutes silence a whole alert type, including alerts that have not
+	// fired yet. Memory only: a restart lifts them, the safe direction.
+	ruleMutes map[string]time.Time
 	// fails counts consecutive failed tasks per unit, cleared by a success.
 	fails      map[string]int
 	stuckSince map[string]time.Time
@@ -78,6 +81,7 @@ func NewEngine(cfg Config, now time.Time) *Engine {
 		names:      map[string]string{},
 		alerts:     map[string]*Alert{},
 		mutes:      map[string]time.Time{},
+		ruleMutes:  map[string]time.Time{},
 		fails:      map[string]int{},
 		stuckSince: map[string]time.Time{},
 		subs:       map[chan struct{}]struct{}{},
@@ -165,6 +169,9 @@ func (e *Engine) setLocked(rule string, s telemetry.Status, bad bool, sev, text 
 		if until, ok := e.mutes[id]; ok && until.After(now) {
 			na.MutedUntil = &until
 		}
+		if until, ok := e.ruleMutes[rule]; ok && until.After(now) && (na.MutedUntil == nil || until.After(*na.MutedUntil)) {
+			na.MutedUntil = &until
+		}
 		e.alerts[id] = na
 		return true
 	case !bad && a != nil && a.State == StateFiring:
@@ -188,6 +195,12 @@ func (e *Engine) pruneLocked(now time.Time) bool {
 	for id, until := range e.mutes {
 		if !until.After(now) {
 			delete(e.mutes, id)
+		}
+	}
+	for rule, until := range e.ruleMutes {
+		if !until.After(now) {
+			delete(e.ruleMutes, rule)
+			changed = true
 		}
 	}
 	return changed
@@ -253,6 +266,56 @@ func (e *Engine) Mute(id string, d time.Duration, now time.Time) bool {
 	e.version++
 	e.notifyLocked()
 	return true
+}
+
+var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true}
+
+// SnoozeRule mutes every alert of one rule until now+d, now and as they
+// fire; d <= 0 lifts it. It reports false for a rule that does not exist, so
+// the set of keys stays closed.
+func (e *Engine) SnoozeRule(rule string, d time.Duration, now time.Time) bool {
+	if !knownRules[rule] {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if d <= 0 {
+		delete(e.ruleMutes, rule)
+		for id, a := range e.alerts {
+			if a.Rule == rule {
+				delete(e.mutes, id)
+				a.MutedUntil = nil
+			}
+		}
+	} else {
+		if d > e.cfg.MuteMax {
+			d = e.cfg.MuteMax
+		}
+		until := now.Add(d)
+		e.ruleMutes[rule] = until
+		for id, a := range e.alerts {
+			if a.Rule == rule {
+				e.mutes[id] = until
+				a.MutedUntil = &until
+			}
+		}
+	}
+	e.version++
+	e.notifyLocked()
+	return true
+}
+
+// Snoozed returns the rules currently snoozed and when each snooze ends.
+func (e *Engine) Snoozed(now time.Time) map[string]time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := map[string]time.Time{}
+	for rule, until := range e.ruleMutes {
+		if until.After(now) {
+			out[rule] = until
+		}
+	}
+	return out
 }
 
 // Subscribe signals whenever the list changed. The buffer holds one signal:

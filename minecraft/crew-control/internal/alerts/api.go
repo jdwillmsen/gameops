@@ -33,10 +33,11 @@ func NewAPI(e *Engine) *API {
 
 func (a *API) MountOperator(mux *http.ServeMux, g Gate) {
 	mux.HandleFunc("GET /v1/alerts", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"alerts": a.e.List()})
+		writeJSON(w, http.StatusOK, a.payload())
 	})
 	mux.HandleFunc("GET /v1/alerts/stream", a.stream)
 	mux.Handle("POST /v1/alerts/{id}/ack", g.Require(http.HandlerFunc(a.ack)))
+	mux.Handle("POST /v1/alerts/rules/{rule}/mute", g.Require(http.HandlerFunc(a.snooze)))
 	mux.Handle("POST /v1/alerts/{id}/mute", g.Require(http.HandlerFunc(a.mute)))
 }
 
@@ -47,40 +48,68 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// payload is the list plus the snoozed rules; both are free of coordinates
+// and operator ids.
+func (a *API) payload() map[string]any {
+	return map[string]any{"alerts": a.e.List(), "snoozed": a.e.Snoozed(a.now())}
+}
+
 func (a *API) ack(w http.ResponseWriter, r *http.Request) {
 	if !a.e.Ack(r.PathValue("id")) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown_alert"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"alerts": a.e.List()})
+	writeJSON(w, http.StatusOK, a.payload())
 }
 
-// mute takes {"for":"30m"}; "0s" lifts a mute and a missing body mutes for
-// the default period.
-func (a *API) mute(w http.ResponseWriter, r *http.Request) {
+// muteFor reads {"for":"30m"}; "0s" lifts and a missing body means the
+// default period. It writes the refusal itself.
+func muteFor(w http.ResponseWriter, r *http.Request) (time.Duration, bool) {
 	d := defaultMuteFor
-	if r.ContentLength != 0 {
-		var body struct {
-			For string `json:"for"`
+	if r.ContentLength == 0 {
+		return d, true
+	}
+	var body struct {
+		For string `json:"for"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_body"})
+		return 0, false
+	}
+	if body.For != "" {
+		parsed, err := time.ParseDuration(body.For)
+		if err != nil || parsed < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_duration"})
+			return 0, false
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_body"})
-			return
-		}
-		if body.For != "" {
-			parsed, err := time.ParseDuration(body.For)
-			if err != nil || parsed < 0 {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad_duration"})
-				return
-			}
-			d = parsed
-		}
+		d = parsed
+	}
+	return d, true
+}
+
+func (a *API) mute(w http.ResponseWriter, r *http.Request) {
+	d, ok := muteFor(w, r)
+	if !ok {
+		return
 	}
 	if !a.e.Mute(r.PathValue("id"), d, a.now()) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown_alert"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"alerts": a.e.List()})
+	writeJSON(w, http.StatusOK, a.payload())
+}
+
+// snooze mutes one alert type, for the same bounded periods as a mute.
+func (a *API) snooze(w http.ResponseWriter, r *http.Request) {
+	d, ok := muteFor(w, r)
+	if !ok {
+		return
+	}
+	if !a.e.SnoozeRule(r.PathValue("rule"), d, a.now()) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown_rule"})
+		return
+	}
+	writeJSON(w, http.StatusOK, a.payload())
 }
 
 // stream sends the whole list on connect, on every change and on a timer;
@@ -102,7 +131,7 @@ func (a *API) stream(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	rc := http.NewResponseController(w)
 	send := func() bool {
-		data, err := json.Marshal(map[string]any{"alerts": a.e.List()})
+		data, err := json.Marshal(a.payload())
 		if err != nil {
 			return false
 		}
