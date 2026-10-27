@@ -25,9 +25,8 @@ type bossProfile struct {
 	// fallBelow the health it gives up the fight at, until it is back
 	// above commitAbove.
 	commitAbove, fallBelow float32
-	// healBelow is the health a warrior eats at, and healClear how far off
-	// the boss must be for the meal to finish before it arrives.
-	healBelow float32
+	// healClear is how far off the boss must be for a meal to finish before
+	// it arrives. The health a warrior eats at is the profile's HealBelow.
 	healClear float64
 	// boom is how far the boss hurts through shield and armour, where a
 	// Striker too hurt to join the melee has no business waiting.
@@ -68,7 +67,7 @@ var wardenProfile = bossProfile{
 	strikerNear: 8, strikerFar: 12,
 	commitWithin: 6,
 	commitAbove:  0.7 * fullHealth, fallBelow: 0.5 * fullHealth,
-	healBelow: healBelow, healClear: 8,
+	healClear:  8,
 	boom:       wardenBoomRange,
 	darkness:   20,
 	meleeEvery: 36, shieldBreak: 100,
@@ -101,7 +100,6 @@ const dragonFocusRange = 128
 // window there is to hit it.
 var dragonProfile = bossProfile{
 	focusRange:  dragonFocusRange,
-	healBelow:   healBelow,
 	healClear:   8,
 	regroupDown: noRegroup,
 	flies:       true,

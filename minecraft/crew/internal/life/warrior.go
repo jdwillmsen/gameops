@@ -85,8 +85,8 @@ type Squad interface {
 }
 
 // Warrior distances are in blocks and durations in ticks of 50 ms. The
-// tunable ones are what tactics.Defaults carries: the fight reads them from
-// the unit's Profile, and the boss fight still reads them here.
+// tunable ones are what tactics.Defaults carries: every fight, the boss's
+// included, reads them from the unit's Profile.
 const (
 	// focusRange is how far from the leader a warrior still commits to a
 	// target, shared so every unit measuring from the same leader agrees.
