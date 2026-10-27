@@ -68,8 +68,15 @@ type Block struct {
 	Color string `json:"color"`
 }
 
+// The camera has no biome data, so grass is coloured for one climate: temperate
+// and moderately wet, the plains biome.
+const (
+	DefaultTemperature = 0.8
+	DefaultDownfall    = 0.4
+)
+
 // tableVersion invalidates cached builds when the table layout changes.
-const tableVersion = 1
+const tableVersion = 2
 
 // Table is the serialisable lookup the camera loads alongside the atlas PNG.
 type Table struct {

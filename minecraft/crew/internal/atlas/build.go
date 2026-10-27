@@ -144,6 +144,31 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 	}
 	sort.Strings(paths)
 
+	// A grass side is an overlay mask, not a finished face: the fringe is
+	// opaque grey that takes the grass colour and the dirt below it is
+	// transparent, so drawn as it stands the lower part of every exposed grass
+	// side is a hole. Each such tile is baked, in a tile of its own because
+	// other blocks may share the source, with the dirt filled in and the
+	// fringe already coloured for the one climate the camera draws.
+	grassTint := b.grassColour()
+	baked := map[string]string{}
+	for _, r := range mapped {
+		if !grassSide(r.name) {
+			continue
+		}
+		for _, f := range faceNames {
+			e, ok := r.faces[f]
+			if !ok || f == "up" || f == "down" || baked[e.path] != "" || b.images[e.path] == nil {
+				continue
+			}
+			key := bakedPrefix + e.path
+			b.images[key] = bakeTintMask(b.images[e.path], grassTint)
+			baked[e.path] = key
+			paths = append(paths, key)
+		}
+	}
+	sort.Strings(paths)
+
 	cols := int(math.Ceil(math.Sqrt(float64(max(len(paths), 1)))))
 	rows := (len(paths) + cols - 1) / cols
 	rows = max(rows, 1)
@@ -179,9 +204,12 @@ func BuildWithOptions(packDir string, opts Options) (*Atlas, error) {
 			e := r.faces[f]
 			tinted := r.tint != TintNone
 			// Only the top of a grass block takes the biome colour; its sides
-			// carry a separate overlay colour.
-			if r.tint == TintGrass && (r.name == "grass" || r.name == "grass_block") && f != "up" {
+			// are baked above.
+			if r.tint == TintGrass && grassSide(r.name) && f != "up" {
 				tinted = false
+				if key := baked[e.path]; key != "" && f != "down" {
+					return Face{UV: rects[key], Overlay: e.overlay}
+				}
 			}
 			return Face{UV: rects[e.path], Tinted: tinted, Overlay: e.overlay}
 		}
@@ -414,4 +442,31 @@ func readJSON(path string, v any) error {
 		return fmt.Errorf("atlas: parse %s: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+const bakedPrefix = "\x00baked:"
+
+func grassSide(name string) bool { return name == "grass" || name == "grass_block" }
+
+// grassColour is the grass tint at the climate the camera draws everywhere.
+func (b *builder) grassColour() color.NRGBA {
+	var t Table
+	b.loadColormaps(&t)
+	return (&Atlas{table: t}).TintColor(TintGrass, DefaultTemperature, DefaultDownfall)
+}
+
+// bakeTintMask resolves a texture whose alpha says how much of the tint each
+// pixel takes: opaque pixels are fully tinted, transparent ones keep their
+// own colour. The result is fully opaque.
+func bakeTintMask(src *image.NRGBA, tint color.NRGBA) *image.NRGBA {
+	out := image.NewNRGBA(src.Bounds())
+	for i := 0; i < len(src.Pix); i += 4 {
+		a := int(src.Pix[i+3])
+		for k, t := range [3]uint8{tint.R, tint.G, tint.B} {
+			v := int(src.Pix[i+k])
+			out.Pix[i+k] = uint8((v*(255-a) + v*int(t)*a/255 + 127) / 255)
+		}
+		out.Pix[i+3] = 255
+	}
+	return out
 }

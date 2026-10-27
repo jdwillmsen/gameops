@@ -2,6 +2,7 @@ package atlas
 
 import (
 	"bytes"
+	"image"
 	"image/color"
 	"image/png"
 	"slices"
@@ -258,5 +259,34 @@ func TestTintColours(t *testing.T) {
 func TestBuildMissingPack(t *testing.T) {
 	if _, err := Build(t.TempDir()); err == nil {
 		t.Fatal("expected an error for an empty pack directory")
+	}
+}
+
+func TestBakeTintMaskFillsTransparentPixelsAndTintsOpaqueOnes(t *testing.T) {
+	src := image.NewNRGBA(image.Rect(0, 0, 2, 1))
+	src.SetNRGBA(0, 0, color.NRGBA{144, 144, 144, 255}) // fringe
+	src.SetNRGBA(1, 0, color.NRGBA{121, 85, 58, 0})     // dirt under it
+	got := bakeTintMask(src, color.NRGBA{128, 255, 0, 255})
+	if want := (color.NRGBA{72, 144, 0, 255}); got.NRGBAAt(0, 0) != want {
+		t.Errorf("fringe = %v, want %v", got.NRGBAAt(0, 0), want)
+	}
+	if want := (color.NRGBA{121, 85, 58, 255}); got.NRGBAAt(1, 0) != want {
+		t.Errorf("dirt = %v, want %v", got.NRGBAAt(1, 0), want)
+	}
+}
+
+// The grass side shares its source texture with other blocks in some packs,
+// so the baked tile must be a tile of its own.
+func TestBuildBakesGrassSideIntoItsOwnTile(t *testing.T) {
+	a := buildFixture(t)
+	g, dirt := block(t, a, "minecraft:grass"), block(t, a, "minecraft:dirt")
+	if g.Side.UV == dirt.Side.UV {
+		t.Error("grass side must not reuse the dirt tile")
+	}
+	if g.Side.Tinted || g.North.UV != g.Side.UV {
+		t.Errorf("side tinted=%v north=%v side=%v", g.Side.Tinted, g.North.UV, g.Side.UV)
+	}
+	if g.Down.UV != dirt.Down.UV {
+		t.Error("the underside stays the plain dirt tile")
 	}
 }
