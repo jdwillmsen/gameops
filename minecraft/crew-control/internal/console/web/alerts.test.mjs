@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isMuted, isLoud, bellCount, ageText, newlyLoud, visible, ruleLabel } from './alerts.js';
+import { isMuted, isLoud, bellCount, ageText, newlyLoud, visible, ruleLabel, snoozeList, leftText } from './alerts.js';
 
 const now = Date.parse('2026-10-26T12:00:00Z');
 const al = (o = {}) => ({ id: 'unit_died.a', rule: 'unit_died', unit: 'a', severity: 'crit', state: 'firing', since: '2026-10-26T11:59:00Z', acked: false, ...o });
@@ -47,4 +47,17 @@ test('visible filters and puts firing critical first', () => {
 test('unknown rules show their id', () => {
   assert.equal(ruleLabel('unit_died'), 'Unit died');
   assert.equal(ruleLabel('x'), 'x');
+});
+
+test('snoozes list soonest first and drop the ended ones', () => {
+  const s = snoozeList({ low_food: '2026-10-26T13:00:00Z', unit_stuck: '2026-10-26T12:10:00Z', unit_died: '2026-10-26T11:00:00Z' }, now);
+  assert.deepEqual(s.map(x => x.rule), ['unit_stuck', 'low_food']);
+  assert.equal(s[0].label, 'Unit stuck');
+  assert.deepEqual(snoozeList(null, now), []);
+});
+
+test('time left reads in minutes then hours', () => {
+  assert.equal(leftText(30000), '1m left');
+  assert.equal(leftText(10 * 60000), '10m left');
+  assert.equal(leftText(90 * 60000), '1h 30m left');
 });
