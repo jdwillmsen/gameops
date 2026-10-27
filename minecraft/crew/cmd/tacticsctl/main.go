@@ -11,10 +11,19 @@
 //	rollback <lab|production> [--to NAME]
 //	                                 restore the parent, or any ancestor, or "default"
 //	promote <profile> --to production
-//	                                 needs a signed approval naming the exact profile hash
+//	                                 needs a signed approval naming the exact profile hash,
+//	                                 a prior lab-set, a profile that carries its scorecards
+//	                                 evidence path, and an explicit --trust (or
+//	                                 TACTICSCTL_TRUST) directory outside --dir and not
+//	                                 writable by group or others
 //	approve <profile> --by NAME --key FILE
 //	                                 HUMAN ONLY: refuses without a terminal
 //	keygen --name NAME --out DIR     HUMAN ONLY: make an approver key pair
+//
+// The trust directory holds the public keys approvals are checked against, so
+// whoever can write it can approve anything. promote therefore refuses the
+// default <dir>/trusted, a directory under --dir, or one writable by group or
+// others; keep it owned by an account the agents do not run as.
 //
 // Training is disabled unless the kill-switch file says "on": a missing file is
 // disabled, so a fresh or wiped state directory never trains. Only `promote`
@@ -77,7 +86,7 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 func run(args []string, stdin io.Reader, out io.Writer, tty bool) error {
 	global := flag.NewFlagSet("tacticsctl", flag.ContinueOnError)
 	dir := global.String("dir", defaultDir(), "control state directory (env TACTICSCTL_DIR)")
-	trust := global.String("trust", os.Getenv("TACTICSCTL_TRUST"), "directory of approvers' public keys (env TACTICSCTL_TRUST; default <dir>/trusted)")
+	trust := global.String("trust", os.Getenv("TACTICSCTL_TRUST"), "directory of approvers' public keys (env TACTICSCTL_TRUST); promote requires it, outside --dir and closed to group/others")
 	if err := global.Parse(args); err != nil {
 		return err
 	}

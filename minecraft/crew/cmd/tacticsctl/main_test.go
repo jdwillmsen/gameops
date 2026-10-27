@@ -22,7 +22,7 @@ func newEnv(t *testing.T) *env {
 	root := t.TempDir()
 	e := &env{t: t, dir: filepath.Join(root, "state"), trust: filepath.Join(root, "trust"), keys: filepath.Join(root, "keys")}
 	e.do("", false, "keygen", "--name", "owner", "--out", e.keys)
-	if err := os.MkdirAll(e.trust, 0o755); err != nil {
+	if err := os.MkdirAll(e.trust, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	pub, _ := os.ReadFile(filepath.Join(e.keys, "owner.pub"))
@@ -41,6 +41,7 @@ func (e *env) profile(name, parent string) {
 	pr := tactics.NewProfile(name)
 	pr.Parent = parent
 	pr.Default.ShotEvery = 40
+	pr.Evidence = "zombie/scorecards/" + name + ".jsonl"
 	b, _ := json.Marshal(pr)
 	f := filepath.Join(e.t.TempDir(), name+".json")
 	os.WriteFile(f, b, 0o644)
@@ -91,9 +92,14 @@ func TestPromoteFlowRequiresHumanApproval(t *testing.T) {
 	}
 
 	prompt, _ := e.do("", true, args...)
-	h := prompt[strings.Index(prompt, "hash ")+5:][:12]
-	if _, err := e.do(h+"\n", true, args...); err != nil {
+	if _, err := e.do(prompt[strings.Index(prompt, "hash ")+5:][:12]+"\n", true, args...); err != nil {
 		t.Fatalf("approve: %v", err)
+	}
+	if _, err := e.do("", false, "promote", "g1", "--to", "production"); err == nil || !strings.Contains(err.Error(), "lab") {
+		t.Fatalf("promote before lab-set: %v", err)
+	}
+	if _, err := e.do("", false, "lab-set", "g1"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := e.do("", false, "promote", "g1"); err == nil {
 		t.Error("promote without --to production succeeded")
@@ -134,5 +140,38 @@ func TestLabSetRollbackCommands(t *testing.T) {
 	out, _ = e.do("", false, "status", "--json")
 	if !strings.Contains(out, `"live":"g1"`) {
 		t.Errorf("json status = %q", out)
+	}
+}
+
+func TestPromoteNeedsExplicitTrustDirectory(t *testing.T) {
+	e := newEnv(t)
+	e.profile("g1", "")
+	e.do("", false, "lab-set", "g1")
+	prompt, _ := e.do("", true, "approve", "g1", "--by", "owner", "--key", filepath.Join(e.keys, "owner.key"))
+	h := prompt[strings.Index(prompt, "hash ")+5:][:12]
+	if _, err := e.do(h+"\n", true, "approve", "g1", "--by", "owner", "--key", filepath.Join(e.keys, "owner.key")); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("TACTICSCTL_TRUST", "")
+	var out bytes.Buffer
+	err := run([]string{"--dir", e.dir, "promote", "g1", "--to", "production"}, strings.NewReader(""), &out, false)
+	if err == nil || !strings.Contains(err.Error(), "--trust") {
+		t.Fatalf("promote without a trust directory = %v", err)
+	}
+
+	t.Setenv("TACTICSCTL_TRUST", e.trust)
+	if err := run([]string{"--dir", e.dir, "promote", "g1", "--to", "production"}, strings.NewReader(""), &out, false); err != nil {
+		t.Fatalf("promote with TACTICSCTL_TRUST: %v", err)
+	}
+}
+
+func TestPromoteRefusesOpenTrustDirectory(t *testing.T) {
+	e := newEnv(t)
+	e.profile("g1", "")
+	e.do("", false, "lab-set", "g1")
+	os.Chmod(e.trust, 0o777)
+	if _, err := e.do("", false, "promote", "g1", "--to", "production"); err == nil || !strings.Contains(err.Error(), "writable") {
+		t.Errorf("promote with a world-writable trust dir = %v", err)
 	}
 }
