@@ -115,3 +115,26 @@ Declining a pack is accepted by BDS 1.26.52.3 here and in the JDW-214 probe. A
 different BDS release could enforce the requirement; the symptom would be an
 immediate disconnect with a pack message, not a hang.
 
+
+## Addendum (evening 2026-10-27): what the lab itself says
+
+- The lab BDS was 1.26.52.3 at 05:27 and 09:34. The volume's
+  `backup-pre-1.26.60.6` dates from the 17:50 restart, the first time `LATEST`
+  moved it. The `LATEST` drift therefore explains the later "cannot decode
+  StartGame" hang (fixed by the version pin), not the 05:27 failure.
+- Scratch BDS 1.26.52.3 with the live world packs, units at the lab's 50 m CPU
+  limit and a 2 s join stagger: crew 1.53.1 (no decline) 20/20 spawned, and
+  crew 1.50.3 with the exact shipped 0.0.1 tarball 20/20 spawned.
+- One 50 m crew 1.53.1 unit joined the live lab with the 0.0.2 add-on: spawned
+  after 50 s, so a pack download alone does not block the dial there either.
+- Not reproduced, so the pack-download hang (gophertunnel never sends
+  `AllPacksDownloaded` on a failed chunk) stays unproven as the 05:27 cause.
+  The cause-free explanation that fits all data is a slow, load-dependent
+  login in the live lab (50 s with the arena busy) racing the 120 s dial
+  deadline.
+- Settling experiment if it recurs: before reverting, read the unit
+  `session_error` and the pod `ContentLog`, and log `AllPacksDownloaded` timing
+  in the dial.
+- Harness trap: Bedrock rejects usernames containing `.`; a probe named
+  `Cu1.53.11` failed to spawn for every version and looked like a CPU-limit
+  repro until the server log showed no `Player connected`.
