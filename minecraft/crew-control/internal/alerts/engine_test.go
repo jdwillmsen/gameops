@@ -330,12 +330,14 @@ func TestStreamSendsSnapshotThenChange(t *testing.T) {
 			}
 			buf = append(buf, b...)
 		}
-		var v map[string][]Alert
+		var v struct {
+			Alerts []Alert `json:"alerts"`
+		}
 		line := strings.SplitN(string(buf), "data: ", 2)[1]
 		if err := json.Unmarshal([]byte(line), &v); err != nil {
 			t.Fatal(err)
 		}
-		return v
+		return map[string][]Alert{"alerts": v.Alerts}
 	}
 	if got := next(); len(got["alerts"]) != 0 {
 		t.Fatal("expected empty first snapshot")
@@ -343,5 +345,69 @@ func TestStreamSendsSnapshotThenChange(t *testing.T) {
 	fire(e, t0)
 	if got := next(); len(got["alerts"]) != 1 {
 		t.Fatalf("expected the new alert, got %+v", got)
+	}
+}
+
+func TestSnoozeRuleMutesCurrentAndFutureAlertsOfThatRuleOnly(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	s := []telemetry.Status{st("a", true, f32(2), t0), st("b", true, f32(20), t0)}
+	e.Poll(t0, s, states("a", "idle", "b", "dead"))
+	if !e.SnoozeRule(RuleLowFood, time.Hour, t0) {
+		t.Fatal("known rule refused")
+	}
+	if a := find(e, "low_food.a"); a == nil || a.MutedUntil == nil {
+		t.Fatalf("existing alert of the rule not muted: %+v", a)
+	}
+	if b := find(e, "unit_died.b"); b == nil || b.MutedUntil != nil {
+		t.Fatalf("another rule was muted: %+v", b)
+	}
+	// A unit that recovers and then gets hungry again inside the hour stays quiet.
+	e.Poll(t0.Add(time.Minute), []telemetry.Status{st("c", true, f32(1), t0)}, states("c", "idle"))
+	if c := find(e, "low_food.c"); c == nil || c.MutedUntil == nil {
+		t.Fatalf("new alert of a snoozed rule is loud: %+v", c)
+	}
+	if got := e.Snoozed(t0.Add(time.Minute)); len(got) != 1 || got[RuleLowFood].IsZero() {
+		t.Fatalf("snoozed: %v", got)
+	}
+	e.Poll(t0.Add(2*time.Hour), s, states("a", "idle", "b", "dead"))
+	if len(e.Snoozed(t0.Add(2*time.Hour))) != 0 {
+		t.Fatal("snooze outlived its period")
+	}
+}
+
+func TestSnoozeRuleCapsLiftsAndRefusesUnknownRules(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	if e.SnoozeRule("nope", time.Hour, t0) {
+		t.Fatal("unknown rule accepted")
+	}
+	e.SnoozeRule(RuleStuck, 1000*time.Hour, t0)
+	if until := e.Snoozed(t0)[RuleStuck]; until.Sub(t0) != Defaults().MuteMax {
+		t.Fatalf("not capped: %v", until.Sub(t0))
+	}
+	e.SnoozeRule(RuleStuck, 0, t0)
+	if len(e.Snoozed(t0)) != 0 {
+		t.Fatal("not lifted")
+	}
+}
+
+func TestSnoozeRuleRoute(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	fire(e, t0)
+	if c := do(mux(e, false), "POST", "/v1/alerts/rules/unit_died/mute", `{"for":"1h"}`).Code; c != 401 {
+		t.Fatalf("signed out: %d", c)
+	}
+	m := mux(e, true)
+	out := do(m, "POST", "/v1/alerts/rules/unit_died/mute", `{"for":"1h"}`)
+	if out.Code != 200 || !strings.Contains(out.Body.String(), `"snoozed"`) || find(e, "unit_died.a").MutedUntil == nil {
+		t.Fatalf("snooze: %d %s", out.Code, out.Body)
+	}
+	if c := do(m, "POST", "/v1/alerts/rules/nope/mute", `{"for":"1h"}`).Code; c != 404 {
+		t.Fatalf("unknown rule: %d", c)
+	}
+	if c := do(m, "POST", "/v1/alerts/rules/unit_died/mute", `{"for":"x"}`).Code; c != 400 {
+		t.Fatalf("bad duration: %d", c)
+	}
+	if !strings.Contains(do(m, "GET", "/v1/alerts", "").Body.String(), `"snoozed"`) {
+		t.Fatal("list does not report the snooze")
 	}
 }
