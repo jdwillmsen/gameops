@@ -94,13 +94,21 @@ export function initOps(host) {
     const cols = [['unit', '#'], ['name', 'Unit'], ['health', 'HP'], ['hunger', 'Food'], ['task', 'Task'], ['alerts', '!']];
     const op = host.operator();
     const head = el('tr', {}, ...(op ? [el('th')] : []), ...cols.map(([key, label]) => {
-      const th = el('th', { textContent: label + (prefs.sort === key ? (prefs.desc ? ' v' : ' ^') : '') });
+      const th = el('th', { textContent: label + (prefs.sort === key ? (prefs.desc ? ' v' : ' ^') : ''), tabIndex: 0 });
       th.dataset.sort = key;
-      th.addEventListener('click', () => {
+      th.setAttribute('aria-sort', prefs.sort === key ? (prefs.desc ? 'descending' : 'ascending') : 'none');
+      const resort = () => {
         prefs.desc = prefs.sort === key ? !prefs.desc : false;
         prefs.sort = key;
         save();
         renderRoster();
+      };
+      th.addEventListener('click', resort);
+      th.addEventListener('keydown', ev => {
+        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        resort();
       });
       return th;
     }));
@@ -133,6 +141,12 @@ export function initOps(host) {
         el('td', { className: 'al', textContent: al.length ? al.map(a => a.text).join(', ') : '' }),
       );
       tr.addEventListener('click', () => host.focus(s.id));
+      tr.tabIndex = 0;
+      tr.addEventListener('keydown', ev => {
+        if (ev.target !== tr || ev.key !== 'Enter') return;
+        ev.stopPropagation();
+        host.focus(s.id);
+      });
       return tr;
     });
     box.replaceChildren(el('thead', {}, head), el('tbody', {}, ...body));
@@ -176,6 +190,7 @@ export function initOps(host) {
       tile.dataset.unit = id;
       if (pg.live) tile.append(el('iframe', { src: wallSrc(id), title: id }));
       const cover = el('button', { type: 'button', className: 'cover', title: 'Focus this unit' });
+      cover.setAttribute('aria-label', `Focus ${id}`);
       cover.addEventListener('click', () => host.focus(id));
       tile.append(cover, el('div', { className: 'label' }), el('div', { className: 'info' }));
       grid.append(tile);
