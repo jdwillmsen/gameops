@@ -1,0 +1,137 @@
+# Training scenario book: short, repeatable fights for the warrior trainer,
+# one opponent family at a time plus mixed packs for the fallback profile.
+# Tier recipes are not repeated here; each entry's tier applies the wave
+# book's recipe of the same number. Every mob enters on a ring spawn.ring
+# blocks from the arena centre, from the spawn.side compass side; the runner
+# decides how the seed rotates the ring. Everything is console-only (Tier A).
+scenarios:
+  - name: four-zombies
+    family: zombie
+    tier: 1
+    timeout: 90s
+    pass: clear
+    spawn: {ring: 8, side: north}
+    mobs:
+      - {mob: zombie, count: 4}
+  - name: night-swarm
+    family: zombie
+    tier: 2
+    timeout: 2m
+    pass: clear
+    spawn: {ring: 10, side: south}
+    mobs:
+      - {mob: husk, count: 2}
+      - {mob: drowned, count: 2}
+      - {mob: phantom, count: 3}
+  - name: skeleton-line
+    family: skeleton
+    tier: 1
+    timeout: 2m
+    pass: clear
+    spawn: {ring: 14, side: east}
+    mobs:
+      - {mob: skeleton, count: 3}
+  - name: stray-watch
+    family: skeleton
+    tier: 2
+    timeout: 2m
+    pass: clear
+    spawn: {ring: 14, side: west}
+    mobs:
+      - {mob: stray, count: 3}
+  - name: wither-guard
+    family: skeleton
+    tier: 3
+    timeout: 90s
+    pass: clear
+    spawn: {ring: 6, side: north}
+    mobs:
+      - {mob: wither_skeleton, count: 2}
+  - name: creeper-pair
+    family: creeper
+    tier: 1
+    timeout: 60s
+    pass: clear
+    spawn: {ring: 6, side: south}
+    mobs:
+      - {mob: creeper, count: 2}
+  - name: spider-nest
+    family: spider
+    tier: 1
+    timeout: 90s
+    pass: clear
+    spawn: {ring: 8, side: east}
+    mobs:
+      - {mob: cave_spider, count: 3}
+      - {mob: spider, count: 2}
+  - name: blaze-pair
+    family: blaze
+    tier: 2
+    timeout: 2m
+    pass: clear
+    spawn: {ring: 12, side: west}
+    mobs:
+      - {mob: blaze, count: 2}
+  - name: enderman-pair
+    family: enderman
+    tier: 2
+    timeout: 2m
+    pass: clear
+    spawn: {ring: 10, side: north}
+    mobs:
+      - {mob: enderman, count: 2}
+  - name: witch-coven
+    family: witch
+    tier: 2
+    timeout: 2m
+    pass: clear
+    spawn: {ring: 12, side: south}
+    mobs:
+      - {mob: witch, count: 2}
+  - name: pillager-patrol
+    family: illager
+    tier: 3
+    timeout: 3m
+    pass: clear
+    spawn: {ring: 14, side: east}
+    mobs:
+      - {mob: pillager, count: 3}
+      - {mob: vindicator, count: 1}
+  - name: brute-boars
+    family: brute
+    tier: 3
+    timeout: 3m
+    pass: clear
+    spawn: {ring: 8, side: west}
+    mobs:
+      - {mob: piglin_brute, count: 2}
+      - {mob: hoglin, count: 1}
+  - name: ravager-charge
+    family: boss
+    tier: 4
+    timeout: 3m
+    pass: clear
+    spawn: {ring: 10, side: north}
+    mobs:
+      - {mob: ravager, count: 1, name: Breaker}
+  - name: mixed-fodder
+    family: default
+    tier: 1
+    timeout: 90s
+    pass: clear
+    spawn: {ring: 10, side: east}
+    mobs:
+      - {mob: zombie, count: 2}
+      - {mob: skeleton, count: 2}
+      - {mob: creeper, count: 1}
+  - name: mixed-veterans
+    family: default
+    tier: 4
+    timeout: 3m
+    pass: survive
+    spawn: {ring: 12, side: north}
+    mobs:
+      - {mob: zombie, count: 2}
+      - {mob: skeleton, count: 2}
+      - {mob: creeper, count: 1}
+      - {mob: witch, count: 1}
