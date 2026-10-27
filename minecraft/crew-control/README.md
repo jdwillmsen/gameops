@@ -40,7 +40,7 @@ crew-control; it never calls them to command them.
 
 - `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) the job graph (`?view=jobs&job=<id>`) the world ledger (`?view=ledger`) or the timeline (`?view=timeline`, with `&job=<id>` for one job); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
 - `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
-- `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) need an operator session
+- `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) and `POST /v1/alerts/rules/{rule}/mute` (the same body, for a whole alert type) need an operator session
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
@@ -52,6 +52,7 @@ crew-control; it never calls them to command them.
 - `GET /auth/methods`: `{"passkey":true,"xbox":<bool>}`, what the sign-in page offers. `GET /auth/xbox/start` and `GET /auth/xbox/callback`: the Xbox sign-in, only with it on; see [Signing in with Xbox](#signing-in-with-xbox)
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
+- `POST /v1/work/bulk`: operator session and `X-Crew-Request`; recall or assign up to 16 units in one request, see [Bulk recall and assign](#bulk-recall-and-assign)
 - `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
 - `POST /v1/jobs`: `{"kind":"plan","template":"parallel-demo"}` or `{"kind":"stock","place":"<id>","want":{"cobblestone":16}}`, 202 with the job, 422 when it cannot be planned; `GET /v1/jobs` (the last 50), `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` (409 while the scheduler holds it)
 - `GET /v1/places`: every place with its stock; `POST /v1/places` (`{"id","name","kind","box"}`, as in `CREW_PLACES`) adds or edits one, `POST /v1/places/delete` (`{"id"}`) removes one; seeded places answer 409. Chests units report get `chest-x-y-z` ids, which a request may only rename, never move or create. Moving a place or changing its kind, by request or by `CREW_PLACES`, drops its stock; a rename keeps it
@@ -114,6 +115,14 @@ and filters by firing/resolved and severity. Anyone can read it; **Ack** and
 **Mute** (15 minutes, 1 hour, 8 hours, or Unmute) need a sign-in. A muted
 alert stays listed but is neither counted nor toasted, and the mute holds if
 the alert resolves and fires again before it ends.
+
+**Snooze type** (operators) mutes one alert type for 15 minutes, 1 hour or
+8 hours (capped by `mute_max`): every alert of that rule is muted at once and
+so is any that fires inside the period, for any unit. The panel lists the
+active snoozes with the time left and a **Lift** button, and `GET /v1/alerts`
+and the stream carry them as `snoozed` (`{rule: until}`). An unknown rule
+answers 404. A snooze is kept in memory, so a restart lifts it; the per-alert
+mutes it set are saved like any other.
 
 An outbound webhook is deliberately not built. The extension point is the
 engine's `Subscribe` signal plus `List`: a pusher watches for alerts whose
@@ -346,6 +355,46 @@ unit detail page shows both.
 - `truncated: true` means the window held more than 5000 changes and the net
   covers only the newest part.
 
+
+## Auto-director
+
+**Shift-D** (the **Director** bar button, or the palette) follows the most
+interesting unit: the focus view switches to whichever unit has the strongest
+recent trouble, with the reason in the status bar ("Director: Agate died 12s
+ago"). It runs in the browser on the public event feed, so it needs no
+sign-in and sees no coordinates.
+
+- What counts, strongest first: died, stuck, task failed, went offline, hurt
+  (low health while still low), hungry. Nothing else can pull the camera, and
+  the words shown are fixed, never a unit's own text. There is no public
+  combat signal, so "fighting" is not a trigger.
+- Only the last minute counts, fading with age. Trouble that has ended (a
+  respawn, a finished task, coming back online) stops counting.
+- A shot is held for 10 s unless a death happens; a calmer event waits out the
+  hold. With nothing going on the camera stays where it is.
+- Choosing a unit yourself, or any other view, pauses it (dashed outline on the
+  button, "pinned" in the status bar). **Shift-D** resumes, and again turns it
+  off. The choice is not saved.
+
+Logic is in `director.js` (tested), the DOM in `director-ui.js`.
+
+## Bulk recall and assign
+
+Signed-in operators select units with the roster checkboxes and use
+**Recall...** or **Assign...** (or the palette). The dialog states what will
+happen to which units, the send button names the count, and nothing is sent
+before that.
+
+`POST /v1/work/bulk` takes `{"units":[...],"confirm":N,"action":"recall","to":{x,y,z}}`
+or `{"action":"assign","task":{...}}` with a `gather_and_deposit`, `haul` or
+`goto` template as in the task API. Recall stops each unit (cancelling its
+queued work) and then queues a walk to the point; assign queues behind
+existing work. At most 16 units, each listed once and each known; `confirm`
+must equal the number of units. Anything wrong with the request as a whole is
+a 400 or 404 and queues nothing; otherwise the answer is 200 with a verdict per
+unit (`{"unit","ok","id"?,"error"?}`), so one unit failing never hides or
+undoes the others. It needs an operator session and `X-Crew-Request`, answers
+`no-store`, and the destination is never logged.
 
 ## Operators
 
