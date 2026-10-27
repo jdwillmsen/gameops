@@ -42,7 +42,7 @@ func (l *Life) warriorMelee(ctx context.Context, a skill.Actuator, p act.Pose, e
 		if w.role == RoleStriker && p.OnGround && l.tick >= w.critUntil && !l.arrowIncoming(p) {
 			// Jump straight up: the fall gives the critical hit, and
 			// staying over the same cell gives the landing.
-			w.critUntil = l.tick + critWindow
+			w.critUntil = l.tick + ticksOf(w.p.CritWindow)
 			yaw, pitch := lookAt(p.Feet.Add(mgl32.Vec3{0, 1.62, 0}), e.Pos.Add(mgl32.Vec3{0, bodyCentre, 0}))
 			return a.Tick(act.Input{Yaw: yaw, Pitch: pitch, Jump: true})
 		}
@@ -154,7 +154,7 @@ func (l *Life) circle(a skill.Actuator, p act.Pose, e belief.Entity) error {
 		return l.stillFacing(a, p, e)
 	}
 	d := horizontal(p.Feet, e.Pos)
-	if d < orbitMin {
+	if d < w.p.OrbitMin {
 		// Too close: back a step off it, facing it.
 		yaw, pitch := lookAt(p.Feet.Add(mgl32.Vec3{0, 1.62, 0}), e.Pos.Add(mgl32.Vec3{0, bodyCentre, 0}))
 		return a.Tick(act.Input{Yaw: yaw, Pitch: pitch, Forward: -1})
@@ -174,7 +174,7 @@ func (l *Life) circle(a skill.Actuator, p act.Pose, e belief.Entity) error {
 		next := p.Feet.Add(mgl32.Vec3{t.X(), 0, t.Y()})
 		score := 0.0
 		if leaderOK {
-			if _, dist, ok := l.shooterLineAt(next, anchor); ok && dist <= lineWidth {
+			if _, dist, ok := l.shooterLineAt(next, anchor); ok && dist <= w.p.LineWidth {
 				score -= 2
 			}
 			if h := horizontal(next, anchor); h < 1.2 {
