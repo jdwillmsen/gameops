@@ -16,6 +16,7 @@
 <link rel="stylesheet" href="/static/graph/graph.css">
 <link rel="stylesheet" href="/static/alerts.css">
 <link rel="stylesheet" href="/static/director.css">
+<link rel="stylesheet" href="/static/bulk.css">
 <link rel="stylesheet" href="/static/explorer.css">
 <link rel="stylesheet" href="/static/graph/ledger.css">
 <link rel="stylesheet" href="/static/timeline.css">
@@ -53,6 +54,8 @@
   <aside id="side" aria-label="Fleet">
     <div class="scroll"><table id="roster"></table></div>
     <button id="roster-sel" type="button" class="danger" hidden></button>
+    <button id="roster-recall" type="button" title="Recall the selected units to a point (confirmed)" hidden>Recall...</button>
+    <button id="roster-assign" type="button" title="Assign a task to the selected units (confirmed)" hidden>Assign...</button>
     <section id="radar-box" hidden>
       <h3>Radar</h3>
       <canvas id="radar" width="320" height="320"></canvas>

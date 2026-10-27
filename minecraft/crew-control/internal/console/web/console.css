@@ -89,7 +89,7 @@ button.link { text-align: left; background: none; border: 0; padding: 0; }
 .meter.hp i { background: var(--ok); }
 .meter.food i { background: #c9954a; }
 .meter.low i { background: var(--crit); }
-#roster-sel { margin: 6px; }
+#roster-sel, #roster-recall, #roster-assign { margin: 6px 0 6px 6px; }
 #radar-box { border-top: 1px solid var(--line); padding: 8px; }
 #radar-box h3 { margin: 0 0 6px; font-size: 12px; opacity: .7; }
 #radar-box.collapsed canvas, #radar-box.collapsed #radar-empty { display: none; }
