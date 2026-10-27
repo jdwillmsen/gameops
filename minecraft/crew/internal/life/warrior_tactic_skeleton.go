@@ -3,9 +3,6 @@ package life
 import (
 	"context"
 	"math"
-	"runtime"
-	"sync"
-	"weak"
 
 	"github.com/go-gl/mathgl/mgl32"
 
@@ -245,27 +242,6 @@ type skelState struct {
 	yieldUntil uint64
 }
 
-// skelUnits holds the state per unit. A tactic is shared by every unit in the
-// process, so the state cannot live in it; the key is weak so a unit that is
-// gone takes its entry with it.
-var skelUnits = struct {
-	sync.Mutex
-	by map[weak.Pointer[Life]]*skelState
-}{by: map[weak.Pointer[Life]]*skelState{}}
+var skelUnits unitScratch[skelState]
 
-func skelStateOf(l *Life) *skelState {
-	key := weak.Make(l)
-	skelUnits.Lock()
-	defer skelUnits.Unlock()
-	if st, ok := skelUnits.by[key]; ok {
-		return st
-	}
-	st := &skelState{}
-	skelUnits.by[key] = st
-	runtime.AddCleanup(l, func(k weak.Pointer[Life]) {
-		skelUnits.Lock()
-		delete(skelUnits.by, k)
-		skelUnits.Unlock()
-	}, key)
-	return st
-}
+func skelStateOf(l *Life) *skelState { return skelUnits.of(l) }
