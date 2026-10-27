@@ -44,6 +44,11 @@ func AppendBossRecord(path string, r BossRecord) error {
 	if err != nil {
 		return err
 	}
+	return appendJSONLine(path, line)
+}
+
+// appendJSONLine writes one line to a JSONL log, creating its directory.
+func appendJSONLine(path string, line []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -81,6 +86,12 @@ func endsTorn(f *os.File) (bool, error) {
 // malformed: one torn write must not hide every other run. A log that does
 // not exist yet is an empty history, not an error.
 func ReadBossRecords(path string) (recs []BossRecord, skipped int, err error) {
+	return readJSONLines[BossRecord](path)
+}
+
+// readJSONLines decodes every line of a JSONL log into T, counting the lines
+// it could not decode.
+func readJSONLines[T any](path string) (recs []T, skipped int, err error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil, 0, nil
@@ -96,7 +107,7 @@ func ReadBossRecords(path string) (recs []BossRecord, skipped int, err error) {
 		if text == "" {
 			continue
 		}
-		var r BossRecord
+		var r T
 		if err := json.Unmarshal([]byte(text), &r); err != nil {
 			skipped++
 			continue
