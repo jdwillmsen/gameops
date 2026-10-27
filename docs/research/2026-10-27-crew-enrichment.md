@@ -20,7 +20,10 @@ packet, not a spec page.
   coordinates, no item stacks, no player names, no free text. Anything else is
   operator-only, signed-in, `Cache-Control: no-store`.
 
-## What exists today
+## What existed at the baseline (`92699652`)
+
+The health and hunger gauges (item 1) are now implemented in crew-control.
+Dashboard and replay-history integrations remain separate work.
 
 | Surface | What it carries | Where |
 | --- | --- | --- |
@@ -95,7 +98,7 @@ Items 1 to 10 have tickets under JDW-142 (keys in the last section).
   rule `health_falling` (a drop of N over a window, earlier than `low_health`
   at 6); the unit detail sparkline.
 - **Feeds.** The explainer can say "health was 4 for 40 s before it died".
-  The insight engine gets a new input without a new event kind. Replay can
+  Replay can
   colour a trail by health if the position row is later widened.
 - **Cost and risk.** Two gauges per unit, bounded by the roster. Nothing
   leaves the cluster. Cheapest item on the list.
@@ -285,7 +288,7 @@ A second world needs three things before any comparison is honest.
 - **Identity.** `world` on roster entries, events, position rows and every
   metric. Item 3 is the prerequisite for everything else here.
 - **Normalisation.** Raw counts differ by unit count; compare per
-  unit-hour (`done / unit_state_seconds{working,idle}`), and show the unit
+  unit-hour (`done / sum(crew_fleet_unit_state_seconds_total{state=~"working|idle"})`), and show the unit
   count beside every rate.
 - **Context.** A world is not the same task mix, so compare by template
   (`gather_and_deposit` against itself), never overall. Day phase and biome
