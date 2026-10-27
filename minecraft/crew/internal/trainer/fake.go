@@ -22,6 +22,10 @@ type Fake struct {
 	SeedSD   float64 // noise shared by every profile on the same seed
 	NoiseSD  float64 // noise independent per fight
 	SideBias float64 // flat score cost of fighting side b
+	// Tactic, when set, is worth TacticReward score points to a profile that
+	// leads with it for the family.
+	Tactic       string
+	TacticReward float64
 
 	calls atomic.Int64
 }
@@ -72,6 +76,9 @@ func (f *Fake) Evaluate(ctx context.Context, p tactics.Profile, s Scenario) ([]t
 	score := f.Fitness(params) + f.SeedSD*gauss(s.Seed, 0) + f.NoiseSD*gauss(s.Seed, salt)
 	if s.Side == "b" {
 		score -= f.SideBias
+	}
+	if l := tacticList(p, f.Family); f.Tactic != "" && len(l) > 0 && l[0] == f.Tactic {
+		score += f.TacticReward
 	}
 	// A win with no kills or deaths scores exactly 100 - 0.1*damageTaken, so
 	// damage carries the synthetic score through the real Score().

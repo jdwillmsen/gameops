@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/trainer"
 )
 
@@ -77,5 +80,48 @@ func TestFailingCmdEvaluatorExitsOne(t *testing.T) {
 		"--evaluator", "cmd:/nonexistent/evaluator", "--max-failures", "3")
 	if code != 1 || res.StopReason != trainer.StopFailures || res.Fights != 3 {
 		t.Errorf("code %d result %+v", code, res)
+	}
+}
+
+func TestSecondTrainerOnTheSameFamilyIsRefused(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "s")
+	store, err := trainer.NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := store.Lock(tactics.FamilyZombie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	_, code, stderr := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", dir, "--gens", "2")
+	if code != 2 || !strings.Contains(stderr, "already being trained") {
+		t.Errorf("code %d stderr %q, want 2 and a lock refusal", code, stderr)
+	}
+	if _, code, _ := runTrainer(t, "run", "--family", "skeleton", "--scenario", "pack", "--store", dir, "--gens", "1"); code != 0 {
+		t.Errorf("a different family was refused: exit %d", code)
+	}
+}
+
+func TestLearnedTacticsAreRegisteredOnes(t *testing.T) {
+	registered := life.TacticNames(tactics.FamilyZombie)
+	if len(registered) == 0 {
+		t.Skip("the engine registers no zombie tactics")
+	}
+	store := filepath.Join(t.TempDir(), "s")
+	res, code, _ := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store, "--gens", "12")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	for _, name := range res.Champion.Profile.TacticsFor(tactics.FamilyZombie) {
+		if !slices.Contains(registered, name) {
+			t.Errorf("champion uses %q, not one of %v", name, registered)
+		}
+	}
+
+	_, code, _ = runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store, "--gens", "2", "--tactics=false")
+	if code != 0 {
+		t.Errorf("--tactics=false: exit %d", code)
 	}
 }

@@ -55,6 +55,10 @@ type Config struct {
 	Base     tactics.Profile
 	Store    *Store
 	Eval     Evaluator
+	// TacticOptions lists the tactic names that exist for a family. When set,
+	// the loop also learns which tactics to use and in what order, drawing
+	// only from this list; when nil it tunes numbers alone.
+	TacticOptions func(tactics.Family) []string
 
 	MaxGenerations int
 	MaxFights      int
@@ -70,6 +74,7 @@ type Config struct {
 	Alpha    float64 // family-wise one-sided significance level
 	Sigma    float64 // initial mutation size as a fraction of each bound
 	MutateP  float64 // chance each parameter is mutated
+	TacticP  float64 // chance a challenger also gets a tactic change
 	RunID    string
 	Now      func() time.Time
 	Logf     func(format string, args ...any)
@@ -129,6 +134,9 @@ func (c *Config) applyDefaults() {
 	if c.MutateP == 0 {
 		c.MutateP = 0.35
 	}
+	if c.TacticP == 0 {
+		c.TacticP = 0.25
+	}
 	if c.Now == nil {
 		c.Now = time.Now
 	}
@@ -166,6 +174,8 @@ func (c Config) Validate() error {
 		return errors.New("trainer: sigma must be in (0,1]")
 	case c.MutateP <= 0 || c.MutateP > 1:
 		return errors.New("trainer: mutation probability must be in (0,1]")
+	case c.TacticP <= 0 || c.TacticP > 1:
+		return errors.New("trainer: tactic mutation probability must be in (0,1]")
 	case c.Margin < 0:
 		return errors.New("trainer: margin must not be negative")
 	}
@@ -180,8 +190,14 @@ const (
 	shrinkSigma = 0.95
 )
 
+// genome is everything the loop varies for the family being trained.
+type genome struct {
+	params  tactics.Params
+	tactics []string
+}
+
 type candidate struct {
-	params tactics.Params
+	genome
 	scores []float64 // paired with the champion's scores by scenario index
 	idx    []int
 	cards  []tactics.Scorecard
@@ -210,6 +226,11 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 		return Result{}, err
 	}
 	r := &run{Config: cfg, rng: rand.New(rand.NewSource(cfg.Seed)), start: cfg.Now()}
+	if r.TacticOptions != nil {
+		// A name the engine does not know would silently run the default
+		// fight while the record claimed otherwise.
+		setTacticList(&r.Base, r.Family, r.known(tacticList(r.Base, r.Family)))
+	}
 	r.deadline = r.start.Add(cfg.Budget)
 	if r.RunID == "" {
 		r.RunID = fmt.Sprintf("seed%d-%s", cfg.Seed, r.start.UTC().Format("20060102t150405z"))
@@ -243,7 +264,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 
 	res := Result{RunID: r.RunID, Family: r.Family}
 	sigma := r.Sigma
-	pool := []tactics.Params{champ.Params()}
+	pool := []genome{r.genomeOf(champ)}
 	for gen := 1; ; gen++ {
 		if reason := r.checkStop(ctx); reason != "" {
 			res.StopReason = reason
@@ -362,17 +383,105 @@ func (r *run) scenarios(n int) []Scenario {
 	return out
 }
 
-func (r *run) profileFor(name, parent string, p tactics.Params) tactics.Profile {
+func (r *run) profileFor(name, parent string, g genome) tactics.Profile {
 	pr := r.Base
 	pr.Version = tactics.Version
 	pr.Name, pr.Parent = name, parent
-	pr.Overrides = map[tactics.Family]tactics.Params{r.Family: p.Clamp()}
+	pr.Overrides = map[tactics.Family]tactics.Params{r.Family: g.params.Clamp()}
+	setTacticList(&pr, r.Family, g.tactics)
 	pr.Default = pr.Default.Clamp()
 	return pr
 }
 
-func (r *run) mutate(parent tactics.Params, sigma float64) tactics.Params {
-	child := parent
+// genomeOf reads a record's trainable part. With tactic options configured,
+// names no longer registered are dropped so they are never re-emitted.
+func (r *run) genomeOf(rec Record) genome {
+	list := tacticList(rec.Profile, r.Family)
+	if r.TacticOptions != nil {
+		list = r.known(list)
+	}
+	return genome{params: rec.Params(), tactics: list}
+}
+
+// known keeps the entries of list that are registered for the family, in
+// order and without repeats.
+func (r *run) known(list []string) []string {
+	valid := map[string]bool{}
+	for _, n := range r.TacticOptions(r.Family) {
+		valid[n] = true
+	}
+	var out []string
+	for _, n := range list {
+		if valid[n] {
+			valid[n] = false
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+const maxTactics = 4
+
+// mutateTactics changes a tactic list by one step: swap a tactic for another
+// option, add one, drop one, or reorder two. Every name comes from options.
+func (r *run) mutateTactics(cur []string, options []string) []string {
+	used := map[string]bool{}
+	for _, n := range cur {
+		used[n] = true
+	}
+	var unused []string
+	for _, n := range options {
+		if !used[n] {
+			unused = append(unused, n)
+		}
+	}
+	const (
+		opReplace = iota
+		opAdd
+		opDrop
+		opSwap
+	)
+	var ops []int
+	if len(cur) > 0 && len(unused) > 0 {
+		ops = append(ops, opReplace)
+	}
+	if len(cur) < maxTactics && len(unused) > 0 {
+		ops = append(ops, opAdd)
+	}
+	if len(cur) > 0 {
+		ops = append(ops, opDrop)
+	}
+	if len(cur) > 1 {
+		ops = append(ops, opSwap)
+	}
+	if len(ops) == 0 {
+		return cur
+	}
+	next := append([]string(nil), cur...)
+	switch ops[r.rng.Intn(len(ops))] {
+	case opReplace:
+		next[r.rng.Intn(len(next))] = unused[r.rng.Intn(len(unused))]
+	case opAdd:
+		n := unused[r.rng.Intn(len(unused))]
+		at := r.rng.Intn(len(next) + 1)
+		next = append(next[:at], append([]string{n}, next[at:]...)...)
+	case opDrop:
+		at := r.rng.Intn(len(next))
+		next = append(next[:at], next[at+1:]...)
+	case opSwap:
+		i := r.rng.Intn(len(next))
+		j := r.rng.Intn(len(next) - 1)
+		if j >= i {
+			j++
+		}
+		next[i], next[j] = next[j], next[i]
+	}
+	return next
+}
+
+func (r *run) mutate(parent genome, sigma float64) genome {
+	child := parent.params
+	tacs := parent.tactics
 	bounds := tactics.Bounds()
 	names := tactics.Names()
 	changed := false
@@ -390,10 +499,16 @@ func (r *run) mutate(parent tactics.Params, sigma float64) tactics.Params {
 	if !changed {
 		apply(names[r.rng.Intn(len(names))])
 	}
-	return child.Clamp()
+	out := genome{params: child.Clamp(), tactics: tacs}
+	if r.TacticOptions != nil && r.rng.Float64() < r.TacticP {
+		if options := r.TacticOptions(r.Family); len(options) > 0 {
+			out.tactics = r.mutateTactics(r.known(tacs), options)
+		}
+	}
+	return out
 }
 
-func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tactics.Params, sigma float64) (GenStat, Record, float64, []tactics.Params, error) {
+func (r *run) generation(ctx context.Context, gen int, champ Record, pool []genome, sigma float64) (GenStat, Record, float64, []genome, error) {
 	stat := GenStat{Generation: gen, Sigma: sigma, Champion: champ.Profile.Name}
 	// Shrink the field rather than overshoot the fight cap.
 	children := r.Lambda
@@ -408,9 +523,9 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tact
 	cands := make([]*candidate, children)
 	for k := range cands {
 		parent := pool[r.rng.Intn(len(pool))]
-		cands[k] = &candidate{params: r.mutate(parent, sigma)}
+		cands[k] = &candidate{genome: r.mutate(parent, sigma)}
 	}
-	champProfile := r.profileFor(champ.Profile.Name, champ.Profile.Parent, champ.Params())
+	champProfile := r.profileFor(champ.Profile.Name, champ.Profile.Parent, r.genomeOf(champ))
 	var champScores []float64
 	var champCards []tactics.Scorecard
 
@@ -427,7 +542,7 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tact
 		champScores = append(champScores, score)
 		for k, c := range cands {
 			name := fmt.Sprintf("%s-g%03d-c%d", r.Family, gen, k)
-			cards, score, ok, err := r.fight(ctx, r.profileFor(name, champ.Profile.Name, c.params), scn)
+			cards, score, ok, err := r.fight(ctx, r.profileFor(name, champ.Profile.Name, c.genome), scn)
 			if err != nil {
 				return stat, champ, sigma, pool, err
 			}
@@ -462,7 +577,7 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tact
 	}
 	sort.SliceStable(results, func(i, j int) bool { return results[i].test.Mean > results[j].test.Mean })
 
-	next, nextPool := champ, []tactics.Params{champ.Params()}
+	next, nextPool := champ, []genome{r.genomeOf(champ)}
 	if len(results) > 0 {
 		best := results[0]
 		stat.BestGain = best.test.Mean
@@ -474,7 +589,7 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tact
 			if err != nil {
 				return stat, champ, sigma, pool, err
 			}
-			next, nextPool = rec, []tactics.Params{rec.Params()}
+			next, nextPool = rec, []genome{r.genomeOf(rec)}
 			stat.Promoted, stat.Champion = true, rec.Profile.Name
 			results = results[1:]
 		}
@@ -483,7 +598,7 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tact
 				break
 			}
 			if res.test.Mean > 0 {
-				nextPool = append(nextPool, res.c.params)
+				nextPool = append(nextPool, res.c.genome)
 			}
 		}
 	}
@@ -498,7 +613,7 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []tact
 
 func (r *run) promote(gen int, champ Record, c *candidate, champCards []tactics.Scorecard, t pairedTest) (Record, error) {
 	cards := append(append([]tactics.Scorecard{}, champCards...), c.cards...)
-	pr := r.profileFor("", champ.Profile.Name, c.params)
+	pr := r.profileFor("", champ.Profile.Name, c.genome)
 	return r.Store.Append(Record{
 		Profile: pr, Family: r.Family, Generation: gen, RunID: r.RunID,
 		Pairs: t.N, Advantage: t.Mean, P: t.P, CreatedAt: r.stamp(),
