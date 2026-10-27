@@ -149,10 +149,20 @@ test('panel announces through its status region and re-announces a repeat', () =
   const p = createPanel({ title: 'T' });
   const live = byClass(p.el, 'kit-sr')[0];
   assert.equal(live.getAttribute('role'), 'status');
+  // A live region only re-announces when its text changes, so the repeat
+  // must pass through an empty write first.
+  const writes = [];
+  const proto = Object.getPrototypeOf(live);
+  const { get, set } = Object.getOwnPropertyDescriptor(proto, 'textContent');
+  Object.defineProperty(live, 'textContent', {
+    get() { return get.call(this); },
+    set(v) { writes.push(v); set.call(this, v); },
+  });
   p.announce('3 alerts');
   assert.equal(live.textContent, '3 alerts');
   p.announce('3 alerts');
   assert.equal(live.textContent, '3 alerts');
+  assert.deepEqual(writes, ['', '3 alerts', '', '3 alerts']);
 });
 
 test('panel title can change', () => {
