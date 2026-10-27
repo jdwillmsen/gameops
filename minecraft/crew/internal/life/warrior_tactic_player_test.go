@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
@@ -148,6 +149,59 @@ func TestStrafeHoldsTheRingAgainstAPlayerWhoBacksOff(t *testing.T) {
 	}
 	if len(r.out.attacks()) == 0 {
 		t.Error("the unit never swung while keeping up")
+	}
+}
+
+// sprintTicks counts the inputs that carry each sprint flag.
+func (r *pvpRig) sprintTicks() (on, start, stop int) {
+	for _, in := range r.out.inputs() {
+		if in.InputData.Load(packet.InputFlagSprinting) {
+			on++
+		}
+		if in.InputData.Load(packet.InputFlagStartSprinting) {
+			start++
+		}
+		if in.InputData.Load(packet.InputFlagStopSprinting) {
+			stop++
+		}
+	}
+	return on, start, stop
+}
+
+func TestStrafeSprintsBetweenSwingsAndTapsItOffOnEach(t *testing.T) {
+	r := newPvpRig(t, "striker", "player/strafe", mgl32.Vec3{22.9, 1, 20.5})
+	kitSword(r)
+	r.setHunger(20)
+	r.runTicks(100)
+
+	swings := len(r.out.attacks())
+	on, start, stop := r.sprintTicks()
+	if swings < 4 || on == 0 {
+		t.Fatalf("%d swings and %d sprinting ticks in 100 ticks, want both", swings, on)
+	}
+	// Each swing drops the sprint and the tick after the pause starts it
+	// again: that stop and restart is the W-tap.
+	if start < swings-1 || stop < swings-1 {
+		t.Errorf("%d sprint starts and %d stops across %d swings, want one of each per swing", start, stop, swings)
+	}
+}
+
+func TestStrafeDoesNotSprintOnAnEmptyStomachOrUnknownFood(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		known  bool
+		hunger float32
+	}{{"unknown", false, 0}, {"at the floor", true, sprintFood}} {
+		name := c.name
+		r := newPvpRig(t, "striker", "player/strafe", mgl32.Vec3{22.9, 1, 20.5})
+		kitSword(r)
+		if c.known {
+			r.setHunger(c.hunger)
+		}
+		r.runTicks(60)
+		if on, start, stop := r.sprintTicks(); on+start+stop != 0 {
+			t.Errorf("%s: sprint flags on %d ticks (%d starts, %d stops), want none", name, on, start, stop)
+		}
 	}
 }
 
