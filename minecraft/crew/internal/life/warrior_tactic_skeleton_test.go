@@ -18,7 +18,6 @@ const (
 	shieldItem = 360
 	bowItem    = 361
 	arrowItem  = 362
-	shieldSlot = 1
 )
 
 // usingSkeletonTactic is a profile that fights the skeleton family with the
