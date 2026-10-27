@@ -331,17 +331,24 @@ def pens():
         sx = 1 if (math.cos(th) if ax == "x" else math.sin(th)) > 0 else -1
         if ax == "x":
             zc = CZ + int(round(pz))
-            edge = (max if sx > 0 else min)(
-                next(x for x in (range(CX, X1) if sx > 0 else range(CX, X0, -1)) if d2[z - Z0, x - X0] >= 0)
-                for z in (zc - 1, zc, zc + 1))
+            edges = [next(x for x in (range(CX, X1) if sx > 0 else range(CX, X0, -1)) if d2[z - Z0, x - X0] >= 0)
+                     for z in (zc - 1, zc, zc + 1)]
+            edge = (max if sx > 0 else min)(edges)
+            # rows whose own edge is nearer the arena would face a seat; open a path to the sand
+            for z, e in zip((zc - 1, zc, zc + 1), edges):
+                if e != edge:
+                    put(box(e, 64, z, edge - sx, 66, z), AIR)
             gate = (edge, 64, zc - 1, edge, 66, zc + 1)
             room = (edge + sx, 64, zc - 1, edge + 4 * sx, 66, zc + 1)
             spawn = (edge + 2 * sx, 64, zc)
         else:
             xc = CX + int(round(px))
-            edge = (max if sx > 0 else min)(
-                next(z for z in (range(CZ, Z1) if sx > 0 else range(CZ, Z0, -1)) if d2[z - Z0, x - X0] >= 0)
-                for x in (xc - 1, xc, xc + 1))
+            edges = [next(z for z in (range(CZ, Z1) if sx > 0 else range(CZ, Z0, -1)) if d2[z - Z0, x - X0] >= 0)
+                     for x in (xc - 1, xc, xc + 1)]
+            edge = (max if sx > 0 else min)(edges)
+            for x, e in zip((xc - 1, xc, xc + 1), edges):
+                if e != edge:
+                    put(box(x, 64, e, x, 66, edge - sx), AIR)
             gate = (xc - 1, 64, edge, xc + 1, 66, edge)
             room = (xc - 1, 64, edge + sx, xc + 1, 66, edge + 4 * sx)
             spawn = (xc, 64, edge + 2 * sx)
@@ -1102,7 +1109,7 @@ def write_layout():
     leaks = [p["id"] for p in PENS if not sealed(p)]
     if leaks:
         sys.exit(f"pens {leaks} are not sealed: a mob could walk out with the gates shut")
-    area = {"x0": (CX - 64) & ~15, "z0": (CZ - 48) & ~15, "x1": (CX + 63) | 15, "z1": (CZ + 47) | 15}
+    area = {"x0": (CX - 68) & ~15, "z0": (CZ - 68) & ~15, "x1": (CX + 67) | 15, "z1": (CZ + 67) | 15}
     layout = {
         "center": {"x": CX, "y": 64, "z": CZ},
         "ground_y": GROUND,

@@ -48,5 +48,16 @@ assert len(areas) == 4
 for _, _, x0, z0, x1, z1 in areas:
     chunks = ((int(x1) >> 4) - (int(x0) >> 4) + 1) * ((int(z1) >> 4) - (int(z0) >> 4) + 1)
     assert chunks <= 100, chunks
+
+# the director summons and fills only inside these areas
+def inside(x, z):
+    return any(a["x0"] <= x <= a["x1"] and a["z0"] <= z <= a["z1"] for a in layout["areas"])
+for a in layout["areas"]:
+    assert ((a["x1"] >> 4) - (a["x0"] >> 4) + 1) * ((a["z1"] >> 4) - (a["z0"] >> 4) + 1) <= 100
+for p in layout["pens"]:
+    g = p["gate"]
+    assert inside(p["spawn"]["x"], p["spawn"]["z"]) and inside(g["x0"], g["z0"]) and inside(g["x1"], g["z1"]), p["id"]
+g = layout["start_gate"]["gate"]
+assert inside(g["x0"], g["z0"]) and inside(g["x1"], g["z1"]), "start gate"
 PY
 echo ok
