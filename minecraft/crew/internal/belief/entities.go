@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -24,6 +25,34 @@ type Entity struct {
 	// HeadYaw is where a mob's head faces, in degrees as a unit's own yaw
 	// is: what it looks at is what it is about to go for.
 	HeadYaw float32
+	// FlagsKnown is false until the server has sent the actor's flag word,
+	// and the three below say nothing until it is true: a false Ignited
+	// then means "not lit", where before it meant "never told".
+	FlagsKnown bool
+	// Ignited is a creeper's fuse burning.
+	Ignited bool
+	// Charged is a creeper struck by lightning. Bedrock marks that with the
+	// powered flag; the charged flag is read as well since servers differ.
+	Charged bool
+	// Angry is a hostile mob's aggro, such as an enderman that has been
+	// provoked.
+	Angry bool
+}
+
+// withFlags returns e with the flag-derived fields read from md, or e
+// unchanged when md carries no flag word: a SetActorData that only touches
+// other keys must not read as "no longer lit".
+func (e Entity) withFlags(md protocol.EntityMetadata) Entity {
+	v, ok := md[protocol.EntityDataKeyFlags].(int64)
+	if !ok {
+		return e
+	}
+	set := func(i uint8) bool { return v&(1<<int64(i)) != 0 }
+	e.FlagsKnown = true
+	e.Ignited = set(protocol.EntityDataFlagIgnited)
+	e.Charged = set(protocol.EntityDataFlagPowered) || set(protocol.EntityDataFlagCharged)
+	e.Angry = set(protocol.EntityDataFlagAngry)
+	return e
 }
 
 // Entities is who and what is around the unit, built only from packets. Items
@@ -87,13 +116,17 @@ func (e *Entities) Apply(pk packet.Packet) {
 			return
 		}
 		e.unique[p.EntityUniqueID] = p.EntityRuntimeID
-		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}
+		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}.withFlags(p.EntityMetadata)
 	case *packet.AddPlayer:
 		if p.EntityRuntimeID == e.self {
 			return
 		}
 		e.unique[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
 		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: "player", Pos: p.Position, Player: true, Name: p.Username}
+	case *packet.SetActorData:
+		if en, ok := e.ents[p.EntityRuntimeID]; ok {
+			e.ents[p.EntityRuntimeID] = en.withFlags(p.EntityMetadata)
+		}
 	case *packet.MovePlayer:
 		if en, ok := e.ents[p.EntityRuntimeID]; ok {
 			en.Pos = p.Position.Sub(mgl32.Vec3{0, playerEyeHeight, 0})

@@ -99,3 +99,64 @@ func TestEntitiesKeepAPlayersName(t *testing.T) {
 		t.Errorf("names = %q, %q", got[60].Name, got[50].Name)
 	}
 }
+
+func flagWord(bits ...uint8) protocol.EntityMetadata {
+	var v int64
+	for _, b := range bits {
+		v |= 1 << int64(b)
+	}
+	return protocol.EntityMetadata{protocol.EntityDataKeyFlags: v}
+}
+
+func TestEntitiesReadActorFlagsFromAddAndSetActorData(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddActor{EntityUniqueID: -50, EntityRuntimeID: 50, EntityType: "minecraft:creeper",
+		EntityMetadata: flagWord(protocol.EntityDataFlagPowered)})
+	got := listed(e)[50]
+	if !got.FlagsKnown || !got.Charged || got.Ignited || got.Angry {
+		t.Fatalf("after add = %+v, want known and charged only", got)
+	}
+
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 50,
+		EntityMetadata: flagWord(protocol.EntityDataFlagPowered, protocol.EntityDataFlagIgnited)})
+	if got := listed(e)[50]; !got.Ignited || !got.Charged {
+		t.Errorf("after ignite = %+v", got)
+	}
+
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 50, EntityMetadata: flagWord(protocol.EntityDataFlagPowered)})
+	if got := listed(e)[50]; got.Ignited || !got.Charged || !got.FlagsKnown {
+		t.Errorf("a flag word without the bit must clear it, got %+v", got)
+	}
+
+	e.Apply(&packet.AddActor{EntityUniqueID: -51, EntityRuntimeID: 51, EntityType: "minecraft:enderman",
+		EntityMetadata: flagWord(protocol.EntityDataFlagAngry)})
+	e.Apply(&packet.AddActor{EntityUniqueID: -52, EntityRuntimeID: 52, EntityType: "minecraft:creeper",
+		EntityMetadata: flagWord(protocol.EntityDataFlagCharged)})
+	if got := listed(e); !got[51].Angry || !got[52].Charged {
+		t.Errorf("enderman %+v, creeper %+v", got[51], got[52])
+	}
+}
+
+func TestEntitiesLeaveFlagsUnknownWithoutAFlagWord(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddActor{EntityUniqueID: -50, EntityRuntimeID: 50, EntityType: "minecraft:creeper"})
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 50,
+		EntityMetadata: protocol.EntityMetadata{protocol.EntityDataKeyFuseTime: int32(30)}})
+	if got := listed(e)[50]; got.FlagsKnown || got.Ignited || got.Charged || got.Angry {
+		t.Fatalf("entity without a flag word = %+v, want zero flags", got)
+	}
+
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 50, EntityMetadata: flagWord(protocol.EntityDataFlagIgnited)})
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 50,
+		EntityMetadata: protocol.EntityMetadata{protocol.EntityDataKeyFuseTime: int32(10)}})
+	if got := listed(e)[50]; !got.Ignited || !got.FlagsKnown {
+		t.Errorf("a packet without the flag word cleared the flags: %+v", got)
+	}
+
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 999, EntityMetadata: flagWord(protocol.EntityDataFlagIgnited)})
+	if _, ok := e.Get(999); ok {
+		t.Error("SetActorData for an unknown actor must not create one")
+	}
+}
