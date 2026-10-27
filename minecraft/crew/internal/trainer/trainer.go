@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"slices"
 	"sort"
 	"time"
 
@@ -348,6 +349,7 @@ func (r *run) fight(ctx context.Context, p tactics.Profile, s Scenario) ([]tacti
 		r.Logf("evaluator failure %d/%d: %v", r.failures, r.MaxFailures, err)
 		return nil, 0, false, nil
 	}
+	cards = ownCards(cards, p.Name)
 	var sum float64
 	var n int
 	for _, c := range cards {
@@ -364,6 +366,13 @@ func (r *run) fight(ctx context.Context, p tactics.Profile, s Scenario) ([]tacti
 	}
 	r.failures = 0
 	return cards, sum / float64(n), true, nil
+}
+
+// ownCards keeps the scorecards of the profile under test. A duel emits one
+// card per side, and scoring the opponent's mirror card would let a stronger
+// opponent raise the candidate's mean.
+func ownCards(cards []tactics.Scorecard, profile string) []tactics.Scorecard {
+	return slices.DeleteFunc(slices.Clone(cards), func(c tactics.Scorecard) bool { return c.Profile != profile })
 }
 
 func (r *run) scenarios(n int) []Scenario {
