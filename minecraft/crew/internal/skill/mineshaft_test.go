@@ -585,3 +585,17 @@ func TestShaftTrappedInAPitWithNoBlocksFailsSayingSo(t *testing.T) {
 		t.Fatalf("status %v, err %v, want a failure naming the lack of blocks", st, err)
 	}
 }
+
+// A unit sealed in a two-high pocket cannot rise high enough to put a block
+// under its feet, so the jump never leaves the ground.
+func TestShaftTrappedUnderALowRoofSaysItHasNoHeadroom(t *testing.T) {
+	w := pitWorld()
+	w.fill("stone", 5, 0, 5, 5, 0, 5)
+	r := withPickaxe(newRig(t, w, feetAt(5, -2, 5)))
+	r.give(3, idCobblestone, 8)
+	st, err := r.run(newShaft(t, w, r, shaftSpec(2, 0, 0), nil), 4000)
+	t.Logf("status %v err %v placed %d feet %v", st, err, r.placed, r.Pose().Feet)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "no headroom") {
+		t.Fatalf("status %v, err %v, want a failure naming the missing headroom", st, err)
+	}
+}

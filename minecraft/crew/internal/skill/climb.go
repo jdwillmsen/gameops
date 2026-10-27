@@ -16,6 +16,11 @@ const climbMax = 8
 
 var errClimbNoBlocks = errors.New("trapped with no walking path and out of blocks to climb with")
 
+// A jump under a roof two blocks up never rises far enough to put a block under
+// the unit's feet, and a block placed there while it stands in the cell is
+// refused, so more tries would only wait it out.
+var errClimbNoHeadroom = errors.New("no headroom to jump and place a block")
+
 // climber lifts a unit that has no walking path to its goal, as one knocked
 // into a cave under its stair: it jumps, places a block under its feet at the
 // top of the jump and lands on it, until a walking path exists.
@@ -75,6 +80,9 @@ func (c *climber) step(a Actuator) (done bool, err error) {
 		default:
 			if c.tries++; c.tries >= placeTries {
 				c.note("climb_place_failed", p)
+				if c.roofed() {
+					return false, errClimbNoHeadroom
+				}
 				return false, errors.New("the server did not place the block")
 			}
 			c.rising = false
@@ -96,6 +104,13 @@ func (c *climber) step(a Actuator) (done bool, err error) {
 	return false, c.tick(a, idle)
 }
 
+// roofed says whether the cell above the unit's head is known to be solid.
+// An unloaded cell is not a roof: the failure then stays the unexplained one.
+func (c *climber) roofed() bool {
+	name, known := c.world.Block(protocol.BlockPos{c.cell.X(), c.cell.Y() + 2, c.cell.Z()})
+	return known && !path.Passable(name)
+}
+
 func (c *climber) tick(a Actuator, in act.Input) error { return a.Tick(in) }
 
 // note logs where a placement stood, so a block the server never confirms
@@ -105,7 +120,9 @@ func (c *climber) note(event string, p act.Pose) {
 		return
 	}
 	name, known := c.world.Block(c.cell)
+	above, _ := c.world.Block(protocol.BlockPos{c.cell.X(), c.cell.Y() + 2, c.cell.Z()})
 	c.log.Info(event, map[string]any{
+		"above": above,
 		"built": c.built, "feet_y": p.Feet.Y(), "cell_y_offset": float32(c.cell.Y()) - p.Feet.Y(),
 		"on_ground": p.OnGround, "waited": c.waited, "tries": c.tries, "cell": name, "known": known, "item": c.item,
 	})

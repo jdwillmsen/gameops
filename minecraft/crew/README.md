@@ -329,6 +329,12 @@ pickaxe on the hotbar and is lab-only by construction:
  "to": {"x": 0, "y": 0, "z": 0}}
 ```
 
+A unit knocked somewhere with no walking path out jumps and places cobblestone
+under itself, up to 8 blocks. Under a roof two blocks above its feet it cannot
+rise far enough: the climb then fails with `no headroom to jump and place a
+block`, and the `climb_place_failed` event carries the roof's block name as
+`above`. Digging up through the roof is not done yet.
+
 `entrance` is the open ground cell the unit stands in; `facing` is north
 (negative z), south, east or west; `depth` is 1 to 32 steps down, one block per
 block forward. `branches` is 0 to 3 tunnels off the bottom (ahead, left, right)
