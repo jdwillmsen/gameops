@@ -11,8 +11,8 @@ import (
 // a desert or a taiga therefore has the plains colour.
 const (
 	defaultBiome    = "plains"
-	defaultTemp     = 0.8
-	defaultDownfall = 0.4
+	defaultTemp     = atlas.DefaultTemperature
+	defaultDownfall = atlas.DefaultDownfall
 )
 
 // atlasDoc is what the page fetches next to the PNG. The colour maps are
