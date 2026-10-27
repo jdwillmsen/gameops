@@ -209,6 +209,11 @@ func (s spawn) commands(recipe Tier) []string {
 		// for plain items.
 		return append(cmds, "tag @e[tag="+markerTag+"] remove "+markerTag)
 	}
+	if customMob(s.Type) {
+		// A pack mob defines no equipment slots, so replaceitem and enchant
+		// would only answer errors; its tier is effects alone.
+		return append(cmds, "tag @e[tag="+markerTag+"] remove "+markerTag)
+	}
 	for _, g := range recipe.Gear {
 		cmds = append(cmds, fmt.Sprintf("replaceitem entity @e[tag=%s] slot.%s 0 %s 1", markerTag, trimSlot(g.Slot), g.Item))
 	}
