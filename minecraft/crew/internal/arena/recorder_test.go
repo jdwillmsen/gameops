@@ -111,6 +111,39 @@ func TestMobFamily(t *testing.T) {
 	}
 }
 
+// legacyMobFamilies is what MobFamily answered before it shared the warrior's
+// table. Every id it knew keeps its family, except the ravager: the warrior
+// fights it as a brute, and the trainer has to train what is later applied.
+var legacyMobFamilies = map[string]tactics.Family{
+	"zombie": tactics.FamilyZombie, "husk": tactics.FamilyZombie, "drowned": tactics.FamilyZombie,
+	"zombie_villager": tactics.FamilyZombie, "zombie_pigman": tactics.FamilyZombie, "zombified_piglin": tactics.FamilyZombie,
+	"skeleton": tactics.FamilySkeleton, "stray": tactics.FamilySkeleton,
+	"bogged": tactics.FamilySkeleton, "wither_skeleton": tactics.FamilySkeleton,
+	"creeper": tactics.FamilyCreeper,
+	"spider":  tactics.FamilySpider, "cave_spider": tactics.FamilySpider,
+	"blaze":    tactics.FamilyBlaze,
+	"enderman": tactics.FamilyEnderman,
+	"witch":    tactics.FamilyWitch,
+	"pillager": tactics.FamilyIllager, "vindicator": tactics.FamilyIllager,
+	"evoker": tactics.FamilyIllager, "illusioner": tactics.FamilyIllager, "ravager": tactics.FamilyIllager,
+	"piglin": tactics.FamilyBrute, "piglin_brute": tactics.FamilyBrute, "hoglin": tactics.FamilyBrute, "zoglin": tactics.FamilyBrute,
+	"warden": tactics.FamilyBoss, "wither": tactics.FamilyBoss, "ender_dragon": tactics.FamilyBoss, "elder_guardian": tactics.FamilyBoss,
+}
+
+func TestMobFamilyKeepsEveryIdItKnewBeforeExceptTheRavager(t *testing.T) {
+	for mob, was := range legacyMobFamilies {
+		want := was
+		if mob == "ravager" {
+			want = tactics.FamilyBrute
+		}
+		for _, id := range []string{mob, "minecraft:" + mob} {
+			if got := MobFamily(id); got != want {
+				t.Errorf("MobFamily(%q) = %q, want %q", id, got, want)
+			}
+		}
+	}
+}
+
 // bossFights runs a boss test against a scripted sim with a Recorder
 // attached and returns the boss records with the scorecards they produced.
 func bossFights(t *testing.T, s *bossSim, runs int) ([]BossRecord, []tactics.Scorecard) {
