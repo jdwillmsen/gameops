@@ -446,3 +446,16 @@ func TestControlConfigIsBothOrNeither(t *testing.T) {
 		}
 	}
 }
+
+func TestTacticsControlDirDefaultsToOff(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.TacticsControlDir != "" {
+		t.Fatalf("unset: %q, %v; want empty so no unit fetches a profile", cfg.TacticsControlDir, err)
+	}
+	t.Setenv("TACTICS_CONTROL_DIR", " /var/lib/crew-tactics ")
+	cfg, err = Load()
+	if err != nil || cfg.TacticsControlDir != "/var/lib/crew-tactics" {
+		t.Fatalf("set: %q, %v", cfg.TacticsControlDir, err)
+	}
+}
