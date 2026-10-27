@@ -1,0 +1,37 @@
+// Real-browser timing for the three alerts implementations.
+// /spike/bench.html?impl=shipped|kit|preact&n=200
+const q = new URLSearchParams(location.search);
+const impl = q.get('impl');
+const N = Number(q.get('n') || 200);
+const ticks = [];
+const realSetInterval = window.setInterval;
+window.setInterval = fn => { ticks.push(fn); return 0; };
+let stream;
+window.EventSource = class { static CLOSED = 2; constructor() { stream = this; this.l = {}; this.readyState = 1; } addEventListener(t, f) { this.l[t] = f; } close() {} };
+const since = new Date(Date.now() - 60000).toISOString();
+const list = (acked = 0) => Array.from({ length: N }, (_, i) => ({ id: `r.${i}`, rule: 'unit_died', unit: `u${i}`, name: `Unit ${i}`, text: 'died', severity: i % 3 ? 'warn' : 'crit', state: 'firing', since, acked: i < acked }));
+const emit = alerts => stream.l.alerts({ data: JSON.stringify({ alerts, snoozed: {} }) });
+const frame = () => new Promise(r => setTimeout(r, 0));
+const host = { operator: () => true, focus() {}, api: async () => ({ ok: true, status: 200, data: {} }), setOperator() {} };
+const path = { shipped: '../alerts.js', kit: './alerts-kit.js', preact: './alerts-preact.js' }[impl];
+const mod = await import(path);
+const api = mod.initAlerts(host);
+api.setOpen(true);
+let muts = 0;
+const mo = new MutationObserver(r => { muts += r.length; });
+mo.observe(document.getElementById('alerts'), { subtree: true, childList: true, attributes: true, characterData: true });
+const timed = async fn => { const t = performance.now(); fn(); await frame(); return performance.now() - t; };
+const out = { impl, n: N };
+out.firstRenderMs = await timed(() => emit(list()));
+out.nodes = document.querySelectorAll('#alerts *').length;
+muts = 0;
+out.tickMs = (await Promise.all([0]).then(async () => { let s = 0; for (let i = 0; i < 10; i++) s += await timed(() => ticks.forEach(f => f())); return s / 10; }));
+out.tickMutations = muts / 10;
+muts = 0;
+out.oneAckMs = await timed(() => emit(list(1)));
+out.oneAckMutations = muts;
+const selects = [...document.querySelectorAll('#alerts select')];
+out.selects = selects.length;
+out.selectsWithAriaLabel = selects.filter(s => s.getAttribute('aria-label')).length;
+window.__result = out;
+document.title = 'done';
