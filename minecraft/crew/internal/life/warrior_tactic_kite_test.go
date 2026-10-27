@@ -281,8 +281,8 @@ func TestKiteDoesNotBackIntoAWallItCannotLeave(t *testing.T) {
 	if len(r.out.attacks()) == 0 {
 		t.Fatal("a unit with nowhere to back to never swung: the tactic must hand the fight back")
 	}
-	v, ok := kiteStates.Load(r.l)
-	if !ok || v.(*kiteState).offUntil == 0 {
+	st, ok := kiteStates.has(r.l)
+	if !ok || st.offUntil == 0 {
 		t.Error("kiting was not put off after the backoff found no path")
 	}
 }
