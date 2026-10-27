@@ -160,7 +160,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	}
 	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
 	if role, ok := validRole(cfg.Role); ok {
-		l.warrior = &warriorState{role: role}
+		l.warrior = &warriorState{role: role, p: tactics.Defaults()}
 	}
 	return l
 }

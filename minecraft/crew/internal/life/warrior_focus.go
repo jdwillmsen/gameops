@@ -29,6 +29,11 @@ type focusQuery struct {
 	attacker, attackerUntil uint64
 	// wantType is the focus order's preferred entity type, "" for none.
 	wantType string
+	// focusRange is how far from the anchor a threat is still focused, per
+	// threat, so a family's tuning can reach further for what it must. The
+	// squad agrees on a focus only while its units share a profile. nil is
+	// the shipped range for every threat.
+	focusRange func(belief.Entity) float64
 	// healthOf knows a threat's health when something does, else nil: no
 	// packet carries a mob's health today, so the id tie-break decides
 	// until one does.
@@ -60,7 +65,7 @@ func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 		if math.Abs(float64(e.Pos.Y()-q.anchor.Y())) > threatHeight {
 			return
 		}
-		if horizontal(e.Pos, q.anchor) > focusRange {
+		if horizontal(e.Pos, q.anchor) > q.rangeOf(e) {
 			return
 		}
 		// A mob this unit gave up on stays given up unless it is close
@@ -84,6 +89,14 @@ func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 		}
 	})
 	return best, best.ID != 0
+}
+
+// rangeOf is how far from the anchor e is still focused.
+func (q focusQuery) rangeOf(e belief.Entity) float64 {
+	if q.focusRange == nil {
+		return focusRange
+	}
+	return q.focusRange(e)
 }
 
 // suspect says whether id is what hurt the unit recently.
