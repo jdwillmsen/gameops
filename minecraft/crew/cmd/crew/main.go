@@ -254,6 +254,7 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	if hub != nil {
 		hub.Spawn(gd.EntityRuntimeID)
 		hub.SetItems(gd.Items)
+		hub.SetClock(gd.Time, dayCycleOn(gd.GameRules), gd.DayCycleLockTime)
 		// The server never sends a unit its own skin back, and the camera
 		// draws the unit's body in the third-person modes.
 		if px, err := base64.StdEncoding.DecodeString(unitSkin.Data); err == nil {

@@ -17,6 +17,17 @@ package camera
 //	models       [12][models version u8]                 entity models can be fetched
 //	skin         [13][id uvarint][flags u8][len uvarint][png]   a player's skin
 //	armour       [14][n uvarint]{id uvarint, 4 x {len u8, item}}...   worn armour
+//	time         [15][ticks i32][flags u8]                world time; flags bit 0: the clock is stopped
+//	biome table  [16][n u16]{id u16, grass rgb, foliage rgb, water rgb, water alpha u8}...   tints per biome id
+//	biomes       [17][cx i32][cz i32][n u16][palette n x u16][256 indices if n > 1]   a column's biome ids, indexed x*16+z
+//
+// The time frame carries the world time in ticks (24000 to a day, 0 at
+// sunrise); the page runs the clock on from there at 20 ticks a second unless
+// it is stopped, and a new frame corrects any drift. A biome column holds the
+// surface biome of each block column, taken from the highest section the
+// server sent; a biome table frame says what colour that biome tints grass,
+// foliage and water. Both are optional: without them the page tints every
+// column as plains.
 //
 // Entity data carries what changes how an entity looks and is not part of
 // its pose: flags bit 0 is baby and bit 1 sheared, colour is the dye index
@@ -94,6 +105,9 @@ const (
 	frameModels      byte = 12
 	frameSkin        byte = 13
 	frameArmour      byte = 14
+	frameTime        byte = 15
+	frameBiomeTable  byte = 16
+	frameBiomes      byte = 17
 
 	// Entity data flag bits.
 	entBaby    byte = 1

@@ -402,13 +402,20 @@ func average(img *image.NRGBA) color.NRGBA {
 func (b *builder) loadBiomeWater(tbl *Table) {
 	var biomes struct {
 		Biomes map[string]struct {
-			Water string `json:"water_surface_color"`
+			Water string  `json:"water_surface_color"`
+			Alpha float64 `json:"water_surface_transparency"`
 		} `json:"biomes"`
 	}
 	if readJSON(filepath.Join(b.dir, "biomes_client.json"), &biomes) != nil {
 		return
 	}
 	for name, v := range biomes.Biomes {
+		if v.Alpha > 0 && v.Alpha <= 1 {
+			if tbl.WaterAlphas == nil {
+				tbl.WaterAlphas = map[string]float64{}
+			}
+			tbl.WaterAlphas[name] = v.Alpha
+		}
 		if v.Water != "" {
 			if c, ok := parseHex(v.Water); ok {
 				tbl.WaterColors[name] = hex(c)

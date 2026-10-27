@@ -66,7 +66,9 @@ func (h *Hub) SetAtlas(a *atlas.Atlas) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.atlasObj = a
 	h.atlasPNG, h.atlasDoc = a.PNG(), doc
+	h.rebuildBiomeTableLocked()
 	h.itemsPNG, h.itemsDoc = a.ItemPNG(), items
 	if a.ItemsErr() != nil {
 		h.itemsPNG, h.itemsDoc = nil, nil
