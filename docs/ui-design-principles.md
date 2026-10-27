@@ -79,6 +79,10 @@ Every view paints exactly these, in plain sentences, in the stage:
 - [ ] Letter keys are ignored while typing (`isTyping`) and with Ctrl/Cmd/Alt held.
 - [ ] Respects `prefers-reduced-motion`.
 
+## Shared kit
+
+`web/kit/` holds the pieces every view used to rebuild: `h` (element builder; `aria-*`, `data-*`, `role` and `id` become attributes, `text` is `textContent`), `keepFocus` (redraw without losing the focused control, via `data-focus-key`), `stateView` and `errorText` (the four states above), and `createPanel` (title, optional close button, body that is content or a state, live region). New views use it; existing views move over as they are touched (decision and plan: `docs/specs/2026-10-27-console-ui-kit-adr.md`). Kit files are embedded and tested like any other module, import nothing from views, and its stylesheet `kit/kit.css` is linked from `index.html` by the first view that uses a kit component.
+
 ## Chart rules
 
 The README's "Chart library" section is the reference; the rules a new chart must meet:
