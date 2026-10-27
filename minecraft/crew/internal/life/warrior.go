@@ -479,8 +479,8 @@ func (l *Life) scanArrows(p act.Pose) bool {
 }
 
 // warriorFight sends this tick's input on the warrior's terms. The meal under
-// way comes first, then the standing decisions of Engaged, then the role's
-// own fight.
+// way comes first, then the target family's own tactic, then the standing
+// decisions of Engaged, then the role's own fight.
 func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	w := l.warrior
 	w.p = l.paramsFor(l.target)
@@ -502,6 +502,15 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 		}
 	}
 	e, ok := l.ents.Get(l.target.ID)
+
+	// A family's own tactic is offered the tick before any shared decision,
+	// so it may answer a creeper other than by leaving. A meal under way is
+	// finished first: no tactic has to know the eating state machine.
+	if ok {
+		if handled, err := l.familyTactic(ctx, a, p, e, s); handled || err != nil {
+			return err
+		}
+	}
 
 	// What is about to blast the unit outranks a meal, and a meal outranks
 	// the walk to the leader: eat where it is safe, walk when it is not.
