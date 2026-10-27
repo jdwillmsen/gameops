@@ -73,7 +73,7 @@ top view (y level), wall plane X runs along z; walkers go along x
 
 - Closed: piston extended, `B` at `(X,y,Z)`, arm at `(X,y,Z+1)`. Open: piston retracts, sticky pulls `B` into `(X,y,Z+1)`, door cell empty.
 - Build order: `B` and wall; `setblock X y Z+2 sticky_piston ["facing_direction"=3]` and the same at `y+1`; then power on the pistons' sides inside the wall, e.g. `fill X-1 y Z+2 X-1 y+1 Z+2 redstone_block`. A powered piston extends, so the default (powered) state is closed with this wiring; the console opens it by replacing the redstone block with wall (`fill ... stone_bricks`) and closes by `fill ... redstone_block`.
-- The `redstone_block`s here sit in the wall face's thickness, so the outer surface stays the wall material. Use a 3-thick wall; the power block at `X-1` is behind the plane of the face only if the face is `X+1`.
+- The `redstone_block`s sit inside the wall's thickness (use a wall at least 3 thick, with the door plane in the middle) so both faces stay wall material. The sketch's `X-1` column is only a stand-in: pick a face that is not visible, or power from below the floor.
 - Alternative layout from the 1x2 seamless entry in [Piston doors]; compare after the first test.
 - Risks: sticky piston leaving the plug behind (Bedrock "spit") when power is removed in the same tick the piston starts; mitigate with rule 6.
 
@@ -90,7 +90,7 @@ front elevation, 3 rows (y, y+1, y+2); panel cells p1 p2 p3, niche n1 n2 n3 to t
  row y+2 P>   .  .  .  | B  B  B  | <P
 ```
 
-- `P>` at the left end faces +x (4) and pushes the row right to close? No: left pistons push **right** and close; right pistons (facing -x, 5) push **left** and open into the niche. Only one side may be powered at a time.
+- Left pistons (`P>`, facing +x = 4) push the row right and close the panel; right pistons (facing -x = 5) push it left into the niche and open it. Only one side may be powered at a time.
 - Open = power the right pistons; closed = power the left. Console: `fill A_power_col redstone_block` / `fill C_power_col air`, then swap. One `fill` powers the whole column of three if the power column touches each piston base.
 - Row length plus travel is 3 + 3 = 6 blocks, within the 12 limit. A panel 5 wide with a 5-deep niche is 10 blocks, still within it.
 - Both columns being powered at once is a deadlock (neither can extend). The generator should refuse to emit commands that power both.
@@ -136,7 +136,7 @@ Suggested sequence, all console-driven:
 
 1. Close the gates (M2/M3 power swap), `playsound`, a `noteblock` fanfare on the royal-box button (exists).
 2. `camerashake add @a 0.5 3` and `title @a title ...`, `time set`/`weather` if wanted.
-3. Open the boss pen with the matching hatch (M4) while `particle` and `summon lightning_bolt` mark the spot. Lightning on a lightning-rod-less structure sets nothing on fire only if the area is non-flammable; keep sand and stone around it.
+3. Open the boss pen with the matching hatch (M4) while `particle` and `summon lightning_bolt` mark the spot. Lightning can start fires, so keep wood and wool away from the strike point.
 4. Lamp ring (M5) flashes red/white; sculk-style `particle` cloud for atmosphere.
 
 Command names are standard Bedrock; syntax not re-checked for 1.26 here.
