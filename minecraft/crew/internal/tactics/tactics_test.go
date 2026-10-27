@@ -55,3 +55,14 @@ func TestScoreOrdersOutcomes(t *testing.T) {
 		t.Error("aborted fight scored")
 	}
 }
+
+func TestTacticForDefaultsToNone(t *testing.T) {
+	pr := NewProfile("p")
+	if pr.TacticFor(FamilyCreeper) != "" {
+		t.Error("a new profile selects a tactic")
+	}
+	pr.Tactics = map[Family]string{FamilyCreeper: "creeper/backoff"}
+	if pr.TacticFor(FamilyCreeper) != "creeper/backoff" || pr.TacticFor(FamilyZombie) != "" {
+		t.Error("tactic lookup wrong")
+	}
+}
