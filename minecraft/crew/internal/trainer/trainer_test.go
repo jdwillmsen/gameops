@@ -131,6 +131,36 @@ func TestReproducibleWithSeed(t *testing.T) {
 	}
 }
 
+func TestOpponentMirrorCardNeverChangesTheMean(t *testing.T) {
+	r := &run{Config: Config{MaxFights: 1000, MaxFailures: 1000, Now: time.Now, Logf: func(string, ...any) {}}, deadline: time.Now().Add(time.Hour)}
+	own := tactics.Scorecard{Profile: "cand", Outcome: tactics.OutcomeWin, Seconds: 30}
+	mirror := tactics.Scorecard{Profile: "rival", Outcome: tactics.OutcomeLoss, DamageTaken: 400}
+	aborted := tactics.Scorecard{Profile: "rival", Outcome: tactics.OutcomeAborted}
+	meanOf := func(cards ...tactics.Scorecard) float64 {
+		r.Eval = evalFunc(func(context.Context, tactics.Profile, Scenario) ([]tactics.Scorecard, error) { return cards, nil })
+		kept, mean, ok, err := r.fight(context.Background(), tactics.NewProfile("cand"), Scenario{})
+		if err != nil || !ok {
+			t.Fatalf("fight: ok=%v err=%v", ok, err)
+		}
+		for _, c := range kept {
+			if c.Profile != "cand" {
+				t.Errorf("kept a card for %q", c.Profile)
+			}
+		}
+		return mean
+	}
+	alone := meanOf(own)
+	for name, cards := range map[string][]tactics.Scorecard{
+		"mirror after":  {own, mirror},
+		"mirror before": {mirror, own},
+		"aborted rival": {own, aborted, mirror},
+	} {
+		if got := meanOf(cards...); got != alone {
+			t.Errorf("%s: mean %v, want %v", name, got, alone)
+		}
+	}
+}
+
 func TestCapsAreNeverExceeded(t *testing.T) {
 	t.Run("generations", func(t *testing.T) {
 		cfg := baseConfig(t, NewFake(tactics.FamilyZombie))
