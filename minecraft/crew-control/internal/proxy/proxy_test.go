@@ -64,7 +64,7 @@ func newProxy(t *testing.T, unitURL string) *httptest.Server {
 }
 
 func TestProxyAllowList(t *testing.T) {
-	files := []string{"ws", "mesher.js", "entities.js", "entities.png", "entities.json",
+	files := []string{"ws", "mesher.js", "sky.js", "entities.js", "entities.png", "entities.json",
 		"atlas.png", "atlas.json", "items.png", "items.json", "stats"}
 	paths := map[string]string{
 		"/units/crew-01/camera":   "/camera",
