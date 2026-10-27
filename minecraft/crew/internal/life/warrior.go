@@ -10,6 +10,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadmsg"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
 // Role is a warrior's job in the squad. The names are what crew-control's
@@ -83,7 +84,9 @@ type Squad interface {
 	Callout(c Callout)
 }
 
-// Warrior distances are in blocks and durations in ticks of 50 ms.
+// Warrior distances are in blocks and durations in ticks of 50 ms. The
+// tunable ones are what tactics.Defaults carries: the fight reads them from
+// the unit's Profile, and the boss fight still reads them here.
 const (
 	// focusRange is how far from the leader a warrior still commits to a
 	// target, shared so every unit measuring from the same leader agrees.
@@ -134,6 +137,10 @@ const (
 type warriorState struct {
 	role  Role
 	squad Squad
+
+	// p is the tuning this tick's decisions read, resolved for the target
+	// the tick stands on.
+	p tactics.Params
 
 	// hold forbids chasing while the order stands: strike what comes into
 	// reach, keep position otherwise.
@@ -283,16 +290,17 @@ func (w *warriorState) speak(k CalloutKind) {
 func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 	w := l.warrior
 	anchor, leaderOK := w.leader(p)
+	best, m := l.warriorTarget(p, anchor)
+	w.p = l.paramsFor(best)
 	if hurt && l.enemyNear(p.Feet, meleeReach) {
-		w.hurtUntil = l.tick + meleeShieldTicks
+		w.hurtUntil = l.tick + ticksOf(w.p.MeleeShieldTick)
 	}
 
-	best, m := l.warriorTarget(p, anchor)
 	order := w.order()
 	w.hold = order.Kind == OrderHold
 	w.healWant = false
 
-	if s.HealthKnown && s.Health <= healBelow {
+	if s.HealthKnown && float64(s.Health) <= w.p.HealBelow {
 		if !w.lowSpoken {
 			// One callout per slump, not per tick, and not rate-limited:
 			// the hold-down belongs to the standing need_heal that may
@@ -300,21 +308,21 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 			w.lowSpoken = true
 			w.speak(CalloutLowHealth)
 		}
-		if l.enemyNear(p.Feet, pressRange) {
+		if l.enemyNear(p.Feet, w.p.PressRange) {
 			// Pressed at hurt health — apples or not, the squad should
 			// know. Fall back on the leader; without one run, until
 			// running has been tried and failed, which is when a cornered
 			// unit stands and fights. Already at the leader, nowhere is
 			// safer: the fight is on.
 			w.callout(CalloutNeedHeal, l.tick)
-			atLeader := leaderOK && horizontal(p.Feet, anchor) <= regroupWithin
+			atLeader := leaderOK && horizontal(p.Feet, anchor) <= w.p.RegroupWithin
 			switch {
 			case leaderOK && !atLeader:
 				m = modeRegroup
 			case best.ID != 0 && !atLeader && l.retreating < retreatLimit:
 				m = modeRetreat
 			}
-		} else if !l.enemyNear(p.Feet, healSafe) {
+		} else if !l.enemyNear(p.Feet, w.p.HealSafe) {
 			w.healWant = l.healFood(s).Name != ""
 			if !w.healWant {
 				// Nothing to eat: say so, and keep the old reflex of
@@ -328,14 +336,14 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 		// An enemy between pressRange and healSafe would abort the meal the
 		// tick it started, so healWant stays clear and the unit fights: a
 		// meal that cannot finish is worse than the health it might restore.
-	} else if s.HealthKnown && s.Health > healBelow {
+	} else if s.HealthKnown && float64(s.Health) > w.p.HealBelow {
 		w.lowSpoken = false
 	}
 
 	m = l.bossEngaged(p, s, hurt, best, m)
 
 	switch {
-	case order.Kind == OrderRegroup && leaderOK && horizontal(p.Feet, anchor) > regroupWithin:
+	case order.Kind == OrderRegroup && leaderOK && horizontal(p.Feet, anchor) > w.p.RegroupWithin:
 		m = modeRegroup
 	case order.Kind == OrderRetreat && best.ID != 0:
 		m = modeRetreat
@@ -354,6 +362,7 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 // warriorTarget is the squad's shared focus, overridden only by what is about
 // to blast the unit or by a player it must give way to.
 func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode) {
+	pr := l.Profile()
 	best, found := focusTarget(l.ents, focusQuery{
 		anchor:        anchor,
 		self:          p.Feet,
@@ -362,6 +371,7 @@ func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode
 		attacker:      l.attacker,
 		attackerUntil: l.attackerUntil,
 		wantType:      name(l.warrior.order().Target),
+		focusRange:    func(e belief.Entity) float64 { return pr.For(familyOf(e)).FocusRange },
 	})
 	// A creeper about to blast is answered first, as the reactive defence
 	// answers it: by leaving.
@@ -455,7 +465,7 @@ func (l *Life) scanArrows(p act.Pose) bool {
 			return
 		}
 		d := e.Pos.Sub(p.Feet).Len()
-		if d > arrowNear*1.5 {
+		if float64(d) > w.p.ArrowNear*1.5 {
 			return
 		}
 		if a, ok := w.arrows[e.ID]; ok && a.tick == l.tick-1 {
@@ -473,6 +483,7 @@ func (l *Life) scanArrows(p act.Pose) bool {
 // own fight.
 func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	w := l.warrior
+	w.p = l.paramsFor(l.target)
 	l.idle = idleState{}
 	l.stopKit(a)
 	if l.eat.active && !w.healing {
@@ -613,7 +624,7 @@ func (l *Life) regroup(ctx context.Context, a skill.Actuator, p act.Pose, s beli
 		if !ok {
 			return l.still(a)
 		}
-		w.walk = skill.NewNavigate(l.world, l.self, goal, regroupWithin)
+		w.walk = skill.NewNavigate(l.world, l.self, goal, w.p.RegroupWithin)
 		w.walkGoal, w.walkAt = cell, l.tick
 	}
 	st, _ := w.walk.Step(ctx, a)

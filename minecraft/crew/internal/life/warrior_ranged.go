@@ -44,7 +44,7 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 		return l.warriorMelee(ctx, a, p, e, s)
 	}
 	l.lowerShield(a)
-	threat := l.enemyNear(p.Feet, kiteBackoff)
+	threat := l.enemyNear(p.Feet, w.p.KiteBackoff)
 	if !threat {
 		w.meleeLast = false
 	}
@@ -89,7 +89,7 @@ func (l *Life) rangerShoot(ctx context.Context, a skill.Actuator, p act.Pose, e 
 		}
 		in.Forward = -1
 		return a.Tick(in)
-	case w.lastShot == 0 || l.tick-w.lastShot >= shotEvery:
+	case w.lastShot == 0 || l.tick-w.lastShot >= ticksOf(w.p.ShotEvery):
 		w.backing = false
 		// lastShot zero is the fight's start, not a release at tick 0:
 		// the first draw does not wait out a cadence that never ran.
@@ -126,7 +126,7 @@ func (l *Life) cancelDraw(a skill.Actuator) {
 // last few backing ticks moved nowhere, which is a wall or a body behind.
 func (l *Life) rangerCanBackOff(p act.Pose) bool {
 	w := l.warrior
-	if l.enemyNear(p.Feet, pressRange) {
+	if l.enemyNear(p.Feet, w.p.PressRange) {
 		return false
 	}
 	if !w.backing {
