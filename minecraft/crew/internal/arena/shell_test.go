@@ -112,3 +112,54 @@ func TestShellConsoleReportsFailures(t *testing.T) {
 		t.Errorf("Exec error = %v", err)
 	}
 }
+
+func TestShellConsoleWaitsPastFillNoiseForTheReply(t *testing.T) {
+	clock := newFakeClock()
+	logs := "server booted\n"
+	polls := 0
+	c := &shellConsole{
+		sendArgs: []string{"send-command"},
+		logsArgs: []string{"logs"},
+		run: func(name string, args []string) ([]byte, error) {
+			if name == "send-command" {
+				logs += "[t] 3 blocks filled\n[t] 1 blocks filled\n"
+				return nil, nil
+			}
+			polls++
+			if polls == 3 {
+				logs += "[t] Found Rusty\n"
+			}
+			return []byte(logs), nil
+		},
+		now:   clock.Now,
+		sleep: clock.Sleep,
+	}
+	out, err := c.Exec("testfor Rusty")
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if n, err := ParseCount(out); err != nil || n != 1 {
+		t.Errorf("count = %d, %v from %q, want 1", n, err, out)
+	}
+}
+
+func TestShellConsoleReturnsFillNoiseWhenNothingElseComes(t *testing.T) {
+	clock := newFakeClock()
+	logs := ""
+	c := &shellConsole{
+		sendArgs: []string{"send-command"},
+		logsArgs: []string{"logs"},
+		run: func(name string, args []string) ([]byte, error) {
+			if name == "send-command" {
+				logs += "[t] 3 blocks filled\n"
+			}
+			return []byte(logs), nil
+		},
+		now:   clock.Now,
+		sleep: clock.Sleep,
+	}
+	out, err := c.Exec("fill 0 0 0 1 1 1 air")
+	if err != nil || !strings.Contains(out, "3 blocks filled") {
+		t.Errorf("output = %q, %v, want the fill reply", out, err)
+	}
+}

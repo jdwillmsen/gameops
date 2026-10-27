@@ -104,13 +104,29 @@ func (c *shellConsole) Exec(cmd string) (string, error) {
 		}
 		if len(lines) > c.served {
 			fresh := lines[c.served:]
-			c.served = len(lines)
-			return strings.Join(fresh, "\n"), nil
+			if !allFillNoise(fresh) || !c.now().Before(deadline) {
+				c.served = len(lines)
+				return strings.Join(fresh, "\n"), nil
+			}
+			continue
 		}
 		if !c.now().Before(deadline) {
 			return "", nil
 		}
 	}
+}
+
+// allFillNoise says every line is the success reply of a fill. The unit kit's
+// restock fills hundreds of cells a minute, and those lines would otherwise
+// end the wait before the reply to the command that was sent is logged, so a
+// testfor would be read as a reply-less batch of fills.
+func allFillNoise(lines []string) bool {
+	for _, l := range lines {
+		if !strings.Contains(l, " blocks filled") {
+			return false
+		}
+	}
+	return true
 }
 
 func splitLog(text string) []string {
