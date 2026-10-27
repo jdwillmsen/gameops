@@ -375,7 +375,7 @@ func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode
 	})
 	// A creeper about to blast is answered first, as the reactive defence
 	// answers it: by leaving.
-	if e, ok := l.nearestOfKind(p, flee, creeperRange); ok {
+	if e, ok := l.nearestOfKind(p, flee, l.creeperWatch(p)); ok {
 		return e, modeRetreat
 	}
 	if found {
