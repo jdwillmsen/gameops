@@ -76,7 +76,8 @@ type Options struct {
 	BucketMs int64 // width of a progress bucket, 0 = all fights one bucket
 }
 
-// Load reads scorecards from a JSONL path, would-have-been-records and all.
+// Load reads scorecards from a JSONL path and returns them with the number
+// of torn final lines it tolerated.
 func Load(path string) ([]tactics.Scorecard, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -151,7 +152,6 @@ func scoreOnly(cards []tactics.Scorecard) []tactics.Scorecard {
 func rows(cards []tactics.Scorecard) []Row {
 	type key struct{ fam, prof string }
 	type agg struct {
-		key    key
 		n      int
 		wins   int
 		sum    float64
@@ -165,7 +165,7 @@ func rows(cards []tactics.Scorecard) []Row {
 		k := key{fam: string(c.Family), prof: c.Profile}
 		a := byKey[k]
 		if a == nil {
-			a = &agg{key: k}
+			a = &agg{}
 			byKey[k] = a
 			order = append(order, k)
 		}
