@@ -243,3 +243,25 @@ func TestProfileWireMatchesTheContractTags(t *testing.T) {
 		}
 	}
 }
+
+// A trained profile carries its evidence path and tactic variants; the
+// route stores and serves both, where a closed field table would have
+// refused the trainer's own output.
+func TestProfileCarriesEvidenceAndTactics(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "lab-alpha", "crew-18", "vanguard")
+	body := strings.Replace(testProfile, `"overrides"`, `"evidence":"runs/7/cards.jsonl","tactics":{"creeper":["creeper/kite"]},"overrides"`, 1)
+	if resp := r.do(t, "PUT", "/v1/squads/lab-alpha/profile", body, nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("put: %d", resp.StatusCode)
+	}
+	got := readBody(t, r.do(t, "GET", "/v1/squads/lab-alpha/profile", "", nil))
+	for _, want := range []string{`"evidence":"runs/7/cards.jsonl"`, `"tactics":{"creeper":["creeper/kite"]}`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the profile is missing %s: %s", want, got)
+		}
+	}
+	bad := strings.Replace(body, `creeper/kite`, "a\nb", 1)
+	if resp := r.do(t, "PUT", "/v1/squads/lab-alpha/profile", bad, nil); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a tactic name with a newline: %d, want 400", resp.StatusCode)
+	}
+}
