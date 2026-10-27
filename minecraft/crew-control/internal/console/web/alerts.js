@@ -11,6 +11,21 @@ export const RULE_LABELS = {
 
 export const MUTE_CHOICES = [['15m', '15 min'], ['1h', '1 hour'], ['8h', '8 hours']];
 
+export const SNOOZE_CHOICES = [['15m', '15 min'], ['1h', '1 hour'], ['8h', '8 hours']];
+
+// Active type-wide snoozes, soonest to end first, with the time left.
+export function snoozeList(snoozed, now) {
+  return Object.entries(snoozed || {})
+    .map(([rule, until]) => ({ rule, label: ruleLabel(rule), left: Date.parse(until) - now }))
+    .filter(s => s.left > 0)
+    .sort((a, b) => a.left - b.left || a.rule.localeCompare(b.rule));
+}
+
+export function leftText(ms) {
+  const m = Math.ceil(ms / 60000);
+  return m < 60 ? `${m}m left` : `${Math.floor(m / 60)}h ${m % 60}m left`;
+}
+
 export const ruleLabel = rule => RULE_LABELS[rule] || rule;
 
 export function isMuted(a, now) {
@@ -67,6 +82,7 @@ export function initAlerts(host) {
   };
 
   let list = [];
+  let snoozed = {};
   let open = false;
   let source = null;
   let initial = true;
@@ -96,8 +112,37 @@ export function initAlerts(host) {
     const r = await host.api('POST', `/v1/alerts/${encodeURIComponent(a.id)}/${path}`, body);
     if (r.status === 401) host.setOperator(null);
     message = r.ok ? '' : (r.data && r.data.error) || 'request failed';
-    if (r.ok && r.data && r.data.alerts) list = r.data.alerts;
+    take(r);
     render();
+  }
+
+  function take(r) {
+    if (!r.ok || !r.data) return;
+    if (r.data.alerts) list = r.data.alerts;
+    if (r.data.snoozed) snoozed = r.data.snoozed;
+  }
+
+  async function snooze(rule, forText) {
+    const r = await host.api('POST', `/v1/alerts/rules/${encodeURIComponent(rule)}/mute`, { for: forText });
+    if (r.status === 401) host.setOperator(null);
+    message = r.ok ? '' : (r.data && r.data.error) || 'request failed';
+    take(r);
+    render();
+  }
+
+  // Operators only; the server refuses anyone else, this just hides the form.
+  function snoozeBox(now) {
+    const type = el('select', { 'aria-label': 'Alert type to snooze' }, ...Object.entries(RULE_LABELS).map(([v, label]) => el('option', { value: v, textContent: label })));
+    const dur = el('select', { 'aria-label': 'Snooze for' }, ...SNOOZE_CHOICES.map(([v, label]) => el('option', { value: v, textContent: label })));
+    const go = el('button', { type: 'button', textContent: 'Snooze type', title: 'Mute every alert of this type, now and as they fire' });
+    go.addEventListener('click', () => snooze(type.value, dur.value));
+    const active = snoozeList(snoozed, now).map(s => {
+      const lift = el('button', { type: 'button', textContent: 'Lift', title: `Stop snoozing ${s.label}` });
+      lift.setAttribute('aria-label', `Lift snooze on ${s.label}`);
+      lift.addEventListener('click', () => snooze(s.rule, '0s'));
+      return el('li', {}, `${s.label}: ${leftText(s.left)} `, lift);
+    });
+    return el('div', { className: 'al-snooze' }, el('div', { className: 'al-filter' }, type, dur, go), active.length ? el('ul', { className: 'al-snoozed' }, ...active) : '');
   }
 
   function row(a, now) {
@@ -142,6 +187,7 @@ export function initAlerts(host) {
     const out = [el('h2', { textContent: 'Alerts' }), el('div', { className: 'al-filter' }, show, sev)];
     if (message) out.push(el('p', { className: 'session-error', textContent: message }));
     if (!host.operator()) out.push(el('p', { className: 'empty', textContent: 'Sign in to acknowledge or mute.' }));
+    if (host.operator()) out.push(snoozeBox(now));
     out.push(rows.length ? el('ul', { className: 'al-list' }, ...rows.map(a => row(a, now))) : el('p', { className: 'empty', textContent: 'no alerts' }));
     aside.replaceChildren(...out);
   }
@@ -150,7 +196,11 @@ export function initAlerts(host) {
     if (source) return;
     const es = source = new EventSource('/v1/alerts/stream');
     es.addEventListener('alerts', ev => {
-      try { list = (JSON.parse(ev.data) || {}).alerts || []; } catch { return; }
+      try {
+        const data = JSON.parse(ev.data) || {};
+        list = data.alerts || [];
+        snoozed = data.snoozed || {};
+      } catch { return; }
       // The first list is state to catch up on, not news.
       const fresh = newlyLoud(seen, list, Date.now());
       if (!initial) fresh.forEach(toast);
