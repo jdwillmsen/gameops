@@ -25,10 +25,6 @@ const (
 	// slideTicks is how long a unit that could not back off steps sideways
 	// instead, before trying to back off again.
 	slideTicks = 20
-	// cornerTicks is how long a unit that could neither back off nor slide
-	// either way stands and fights where it is: the bow's cadence wait plus
-	// a full draw, so a Ranger gets an arrow off before it tries again.
-	cornerTicks = shotEvery + bowDraw
 	// regroupTicks bounds a regroup to 20 s: survivors the boss did not
 	// follow go back to fighting it by role rather than park for good.
 	regroupTicks = 400
@@ -141,8 +137,8 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 	b.regroup = down && l.tick < b.regroupUntil
 
 	// The meal waits for the boss to be far enough off for it to finish.
-	w.healWant = health <= prof.healBelow && d > prof.healClear &&
-		!l.enemyNear(p.Feet, healSafe) && l.healFood(s).Name != ""
+	w.healWant = float64(health) <= w.p.HealBelow && d > prof.healClear &&
+		!l.enemyNear(p.Feet, w.p.HealSafe) && l.healFood(s).Name != ""
 	return modeFight
 }
 
@@ -150,7 +146,7 @@ func (l *Life) bossEngaged(p act.Pose, s belief.Snapshot, hurt bool, best belief
 // within arm's reach of it or, in a boss fight, the boss inside the meal's
 // clearance.
 func (l *Life) mealThreatened(p act.Pose) bool {
-	if l.enemyNear(p.Feet, healSafe) {
+	if l.enemyNear(p.Feet, l.warrior.p.HealSafe) {
 		return true
 	}
 	b := &l.warrior.boss
@@ -293,7 +289,7 @@ func (l *Life) bossRanger(ctx context.Context, a skill.Actuator, p act.Pose, e b
 			w.lastShot = l.tick
 			w.struck = e.ID
 		}
-	case shoot && (w.lastShot == 0 || l.tick-w.lastShot >= shotEvery):
+	case shoot && (w.lastShot == 0 || l.tick-w.lastShot >= ticksOf(w.p.ShotEvery)):
 		if err := a.SelectHotbar(bow.Slot, bow); err != nil {
 			return err
 		}
@@ -341,7 +337,7 @@ func (l *Life) bandStep(p act.Pose, e belief.Entity, near, far float64, faced bo
 		switch {
 		case b.blocked >= 3:
 			b.blocked, b.slideUntil = 0, 0
-			b.corneredUntil = l.tick + cornerTicks
+			b.corneredUntil = l.tick + l.cornerTicks()
 		case b.blocked == 2:
 			b.strafe = -b.strafe
 			b.slideUntil = l.tick + slideTicks
@@ -380,6 +376,13 @@ func (l *Life) bandStep(p act.Pose, e belief.Entity, near, far float64, faced bo
 	}
 	b.moving = in.Forward != 0
 	return in, aimed
+}
+
+// cornerTicks is how long a unit that could neither back off nor slide
+// either way stands and fights where it is: the bow's cadence wait plus a
+// full draw, so a Ranger gets an arrow off before it tries again.
+func (l *Life) cornerTicks() uint64 {
+	return ticksOf(l.warrior.p.ShotEvery) + bowDraw
 }
 
 // bossFaces says whether the boss's head points at the unit, which is who
@@ -425,7 +428,7 @@ func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e 
 			at = st
 		}
 	}
-	if horizontal(p.Feet, at) <= regroupWithin {
+	if horizontal(p.Feet, at) <= w.p.RegroupWithin {
 		b.walk, b.rallied = nil, true
 		if l.shieldUp(p, s) {
 			return l.raiseShield(a, p, s)
@@ -444,7 +447,7 @@ func (l *Life) bossRegroup(ctx context.Context, a skill.Actuator, p act.Pose, e 
 			b.walkRetry = l.tick + regroupRetry
 			return l.stillFacing(a, p, e)
 		}
-		b.walk = skill.NewNavigate(l.world, l.self, goal, regroupWithin/2)
+		b.walk = skill.NewNavigate(l.world, l.self, goal, w.p.RegroupWithin/2)
 		b.walkGoal, b.walkAt = cell, l.tick
 	}
 	switch st, _ := b.walk.Step(ctx, a); st {
