@@ -37,6 +37,6 @@ test('index.html toggles carry the registered key in their tooltip', () => {
 
 test('console.js handles every registered key', () => {
   for (const r of REGISTRY) {
-    assert.ok(consoleJs.includes(`ev.key === '${r.key}'`), `no handler for ${r.key} (${r.view})`);
+    assert.ok(consoleJs.includes(`ev.key === '${r.key}') ${r.handler}()`), `key ${r.key} does not call ${r.handler} (${r.view})`);
   }
 });
