@@ -344,4 +344,14 @@ All entries: **unverified on BDS**.
 
 The closet door is built extended (shut): the generator places the pistons powered with the plug in front of the empty head slot, which is the opposite of the retracted layout in section 2.1.
 
+## Answers to the open questions (BDS 2026.9.2, lab scratch pad, 2026-10-27)
+
+| Question | Result |
+|---|---|
+| Does a sticky piston pull its block when the power block is replaced by air? | yes, and it pushes again when the block returns |
+| Does a piston extend when placed beside an existing power source? | yes; the closets are built powered and come up shut |
+| Pushable by a piston | iron bars, glass panes, lanterns and redstone lamps move; the trapdoor and wall banner tests did not give a result (the banner would not place, the trapdoor id was wrong) |
+| Does `structure load` keep an extended piston? | no; the loaded piston re-reads its power, so an unpowered copy retracts and pulls its block |
+| Does a lit lamp placed by `setblock` stay lit without power? | no; it reverts to an unlit lamp |
+
 Still unverified: Design B, the 1x2 vertical door (C), observer triggering from `/setblock`, and `/structure load` of a piston in its extended state.
