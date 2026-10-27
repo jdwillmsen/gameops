@@ -6,8 +6,9 @@ the app registration, see the client secret, or run the commands marked
 here cannot lock anyone out.
 
 Prerequisite: the chart plumbing (`crew.control.xbox` in
-`jdw-deployments/charts/crew-lab`) is merged and rolled out, and crew-control
-is at a version that has the Xbox sign-in (1.28.0 or later).
+`jdw-deployments/charts/crew-lab`) is merged and rolled out, and the running
+crew-control image includes the Xbox sign-in (check
+`curl -s https://crew.prd.jdwlabs.com/auth/methods` answers JSON).
 
 ## What the code asks Microsoft for
 
@@ -26,16 +27,14 @@ is at a version that has the Xbox sign-in (1.28.0 or later).
 
 ## 1. Entra app registration (portal, owner)
 
-1. Sign in at <https://entra.microsoft.com> with the account that owns the
-   tenant used for the other registrations. Go to **Entra ID > App
+1. Sign in at <https://entra.microsoft.com> with the account that owns your
+   tenant. Go to **Entra ID > App
    registrations > New registration**.
 2. **Name:** `crew-control-xbox-signin` (any name; players never see it as
    anything but the consent screen title).
 3. **Supported account types:** choose **Personal Microsoft accounts only**.
-   Not "Accounts in any organizational directory ... and personal Microsoft
-   accounts"; the `consumers` endpoint rejects a registration that is not
-   personal-only or multi-tenant-plus-personal, and personal-only is the
-   narrowest.
+   The code signs in through the `consumers` endpoint, so no work or school
+   account is needed.
 4. **Redirect URI:** platform **Web**, value
    `https://crew.prd.jdwlabs.com/auth/xbox/callback`. Click **Register**.
 5. On the **Overview** page copy **Application (client) ID**. It is a GUID and
@@ -159,8 +158,8 @@ without Xbox partner enrolment was never verified without a real sign-in. It
 may refuse. The sign-in fails closed and never creates a session. It presents
 as:
 
-- on Microsoft's page, before you come back: an error such as "invalid scope",
-  `AADSTS70011`, or "this app is not allowed to use this permission"; or
+- on Microsoft's page, before you come back: an `AADSTS` error naming the scope or
+  the app's permission; or
 - a return to `/signin?xbox=microsoft_error` or `exchange_failed`
   ("The Xbox sign-in did not work. Use your passkey."), with a log line
   `xbox_login_refused` whose `detail` holds Microsoft's error word and
