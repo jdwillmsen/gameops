@@ -30,7 +30,7 @@ X0, X1 = CX - 120, CX + 119       # build box
 Z0, Z1 = CZ - 106, CZ + 105
 Y0, Y1 = 36, 122                  # y 63 is the grass; the first air layer is 64
 GROUND = 63
-A0, B0 = 60, 44                   # semi-axes of the sand floor
+A0, B0 = 62, 62                   # semi-axes of the sand floor: a circle
 SEAT_D, GAL_D, WALL_D, PIL_D = 36, 39, 41, 42   # offsets from the floor edge
 PLAZA_D = 58
 NB = 80                           # bays round the outer wall
@@ -331,13 +331,17 @@ def pens():
         sx = 1 if (math.cos(th) if ax == "x" else math.sin(th)) > 0 else -1
         if ax == "x":
             zc = CZ + int(round(pz))
-            edge = next(x for x in (range(CX, X1) if sx > 0 else range(CX, X0, -1)) if d2[zc - Z0, x - X0] >= 0)
+            edge = (max if sx > 0 else min)(
+                next(x for x in (range(CX, X1) if sx > 0 else range(CX, X0, -1)) if d2[z - Z0, x - X0] >= 0)
+                for z in (zc - 1, zc, zc + 1))
             gate = (edge, 64, zc - 1, edge, 66, zc + 1)
             room = (edge + sx, 64, zc - 1, edge + 4 * sx, 66, zc + 1)
             spawn = (edge + 2 * sx, 64, zc)
         else:
             xc = CX + int(round(px))
-            edge = next(z for z in (range(CZ, Z1) if sx > 0 else range(CZ, Z0, -1)) if d2[z - Z0, xc - X0] >= 0)
+            edge = (max if sx > 0 else min)(
+                next(z for z in (range(CZ, Z1) if sx > 0 else range(CZ, Z0, -1)) if d2[z - Z0, x - X0] >= 0)
+                for x in (xc - 1, xc, xc + 1))
             gate = (xc - 1, 64, edge, xc + 1, 66, edge)
             room = (xc - 1, 64, edge + sx, xc + 1, 66, edge + 4 * sx)
             spawn = (xc, 64, edge + 2 * sx)
@@ -596,7 +600,7 @@ def finish_shells():
             put(fl, floor)
     # the hall floor: concentric bands round a gold medallion
     fh = shift(HALL, -1, 0, 0) & ~UNDER
-    e = np.sqrt((xs[None] / 40.0) ** 2 + (zs[None] / 24.0) ** 2)
+    e = np.sqrt((xs[None] / 40.0) ** 2 + (zs[None] / 40.0) ** 2)
     band = np.floor(e * 14).astype(int) % 4
     put(fh, DEEP)
     put(fh & (band == 1), PBBRICK)

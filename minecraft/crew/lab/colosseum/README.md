@@ -25,7 +25,7 @@ not `plan.txt`, and expect a full build to clear and re-dress the armour stands.
 
 | Part | Notes |
 |---|---|
-| Sand floor | 120 x 88 ellipse with ring bands and a gold medallion |
+| Sand floor | 124 across, a circle, with ring bands and a gold medallion |
 | Stands | four tiers, aisles every fourth bay, lanterns on the aisles |
 | Outer wall | four arcaded storeys and an attic, 80 bays, banners, masts |
 | Gates | four, on the axes; each is a portcullis of iron bars. The north one is the squad's start gate (the director opens it with `fill ... air`). The other three have a double iron door set in the bars and a lever either side of it |
@@ -38,7 +38,7 @@ Underground, floor y 49:
 
 | Part | Notes |
 |---|---|
-| Hall of champions | 80 x 48, columns, chandeliers, a centre fountain, a stand of every gear tier on a plinth, four lamp arms with a lever each |
+| Hall of champions | round, 82 across, columns, chandeliers, a centre fountain, a stand of every gear tier on a plinth, four lamp arms with a lever each |
 | Water lifts | four glass tanks with a soul-sand base carry a mob up to an iron hatch in the arena floor; a lever on the pedestal beside each hatch opens it |
 | Ring corridor | round the hall, arches in |
 | Sixteen chambers | forge, armoury, gear selection, library, barracks, infirmary, trophy hall, treasury (iron door), operations room, baths, kitchen, shrine, beast cages, cells, storage, lounge. Chests are stocked and armour stands dressed by `decor.cmds` |
