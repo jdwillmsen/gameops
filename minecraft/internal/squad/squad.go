@@ -96,6 +96,14 @@ type squadState struct {
 	start    position
 	hasStart bool
 	startAt  time.Time
+
+	// profile is the squad's current tactics profile, set only by the
+	// profile route on a lab-marked squad; profileSeq versions it for the
+	// unit polls, and like the store's whole life it is gone when the
+	// squad's last claim lapses — the trainer renews it, as units renew
+	// their claims.
+	profile    *profileWire
+	profileSeq int64
 }
 
 // startTTL is how long a posted start point stays in the squad's answers.

@@ -64,12 +64,15 @@ type View struct {
 type Delta struct {
 	// Cursor is the squad's newest seq value.
 	Cursor int64 `json:"cursor"`
-	// Rev changes whenever the leader identity or its position does, or the
-	// roster or the start point, so a unit that echoes back the revision
-	// it last saw answers at once when the squad moves, even with no new
-	// messages.
-	Rev    int64       `json:"rev"`
-	Leader *LeaderView `json:"leader,omitempty"`
+	// Rev changes whenever the leader identity or its position does, the
+	// roster or the start point, or the squad's tactics profile, so a unit
+	// that echoes back the revision it last saw answers at once when the
+	// squad moves, even with no new messages.
+	Rev int64 `json:"rev"`
+	// ProfileSeq versions the squad's tactics profile: it moves only when
+	// a new one is stored, and a unit that sees it move refetches.
+	ProfileSeq int64       `json:"profileSeq"`
+	Leader     *LeaderView `json:"leader,omitempty"`
 	// Members and Start let a warrior see the squad beyond its leader: who
 	// is down and where the others stand. Both are unit-facing only; the
 	// public reads carry no position.
@@ -269,7 +272,7 @@ func (st *Store) Delta(id string, since int64) (Delta, bool) {
 	if since > sq.seq {
 		since = 0
 	}
-	d := Delta{Cursor: sq.seq, Rev: sq.rev}
+	d := Delta{Cursor: sq.seq, Rev: sq.rev, ProfileSeq: sq.profileSeq}
 	// A cursor older than what is kept would deliver a hole as "nothing
 	// new"; back it up to the oldest kept entry so the resyncing unit gets
 	// every message that still exists, standing order included.
