@@ -19,6 +19,11 @@ const settle = 50 * time.Millisecond
 // costs one second instead of stalling the run.
 const logWait = time.Second
 
+// noiseWait caps the extra wait for a reply behind a run of fill successes:
+// the server drains console commands in order, so a reply can sit behind the
+// director's own fills.
+const noiseWait = 10 * time.Second
+
 type shellConsole struct {
 	sendArgs []string
 	logsArgs []string
@@ -92,6 +97,7 @@ func (c *shellConsole) Exec(cmd string) (string, error) {
 		limit = logWait
 	}
 	deadline := c.now().Add(limit)
+	noiseDeadline := c.now().Add(noiseWait)
 	for {
 		c.sleep(settle)
 		out, err := c.run(c.logsArgs[0], c.logsArgs[1:])
@@ -104,7 +110,7 @@ func (c *shellConsole) Exec(cmd string) (string, error) {
 		}
 		if len(lines) > c.served {
 			fresh := lines[c.served:]
-			if !allFillNoise(fresh) || !c.now().Before(deadline) {
+			if !allFillNoise(fresh) || !c.now().Before(noiseDeadline) {
 				c.served = len(lines)
 				return strings.Join(fresh, "\n"), nil
 			}
