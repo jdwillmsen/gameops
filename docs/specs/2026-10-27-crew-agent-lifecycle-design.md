@@ -2,7 +2,7 @@
 
 **Status:** draft for owner review (architecture decision; the open questions are listed at the end)
 **Date:** 2026-10-27
-**Epic:** filed alongside JDW-142 (Crew Control Plane); tickets in the last section
+**Epic:** JDW-263, sibling of JDW-142 (Crew Control Plane); tickets JDW-264 to JDW-273 in section 13
 **Builds on:** `2026-10-19-crew-console-and-control-design.md` (crew-control, pull-based work),
 `2026-10-19-crew-parallel-units-design.md` (numbers and names),
 `2026-10-23-crew-squads-and-arena-design.md` (roles and squads),
@@ -541,16 +541,16 @@ additive, so an older controller ignores the columns.
 
 | # | Ticket | Repo | Risk | Depends |
 | --- | --- | --- | --- | --- |
-| T1 | Load a hot-reloaded world and unit registry in crew-control | gameops | R2 | — |
-| T2 | Render the registry ConfigMap and `CREW_KIT_REV` from the crew-lab chart | jdw-deployments | R2 | T1 |
-| T3 | Track unit lifecycle state and write `lifecycle` events | gameops | R2 | T1 |
-| T4 | Unit hello, phases and heartbeat; accept unit-sent events | gameops (both) | R2 | T3 |
-| T5 | Add world columns and registry tables (additive migration) | gameops + platform | R3 (apply) | T1 |
-| T6 | Bind unit tokens to a world, then issue per-unit tokens | gameops + deployments | R3 (credentials) | T4 |
-| T7 | Drain, return items, release claims, leave and park | gameops | R2 | T3, T4 |
-| T8 | World selector and lifecycle in fleet, wall, explorer, timeline, detail | gameops | R2 | T3, T5 |
-| T9 | Stand up a second world and onboard a unit to it | deployments | R2 (R3 if quota or network) | T1–T8 |
-| T10 | Retain lifecycle events past the 30-day prune; retired-id tombstones | gameops | R2 | T3 |
+| JDW-264 | Load a hot-reloaded world and unit registry in crew-control | gameops | R2 | — |
+| JDW-265 | Render the registry ConfigMap and `CREW_KIT_REV` from the crew-lab chart | jdw-deployments | R2 | JDW-264 |
+| JDW-266 | Track unit lifecycle state and write `lifecycle` events | gameops | R2 | JDW-264 |
+| JDW-267 | Unit hello, phases and heartbeat; accept unit-sent events | gameops (both) | R2 | JDW-266 |
+| JDW-268 | Add world columns and registry tables (additive migration) | gameops + platform | R3 (apply) | JDW-264 |
+| JDW-269 | Bind unit tokens to a world, then issue per-unit tokens | gameops + deployments | R3 (credentials) | JDW-267 |
+| JDW-270 | Drain, return items, release claims, leave and park | gameops | R2 | JDW-266, JDW-267 |
+| JDW-271 | World selector and lifecycle in fleet, wall, explorer, timeline, detail | gameops | R2 | JDW-266, JDW-268 |
+| JDW-272 | Retain lifecycle events past the 30-day prune; retired-id tombstones | gameops | R2 | JDW-266 |
+| JDW-273 | Stand up a second world and onboard a unit to it | deployments | R2 (R3 if quota or network) | JDW-265, JDW-268, JDW-269, JDW-271 |
 
 ## 14. Open questions for the owner
 
@@ -570,7 +570,7 @@ additive, so an older controller ignores the columns.
    stay in the save), or block retirement?
 6. **History retention**: keep `lifecycle` events forever, a year, or follow
    the 30-day prune?
-7. **Per-unit tokens (T6)** touch credentials, which your ruling keeps at R3.
+7. **Per-unit tokens (JDW-269)** touch credentials, which your ruling keeps at R3.
    Is a world-bound shared token enough for labs, with per-unit tokens only
    before any FWB unit?
 8. **Should a `failed` unit be parked automatically** (leave the world) or
