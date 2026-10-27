@@ -177,3 +177,39 @@ func TestWaveRallyRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomMobValidation(t *testing.T) {
+	const brute = "gameops:training_dummy_brute"
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"namespaced mob", strings.Replace(minimalWaves, "mob: zombie", "mob: "+brute, 1), ""},
+		{"empty namespace", strings.Replace(minimalWaves, "mob: zombie", `mob: ":brute"`, 1), "namespace:name"},
+		{"empty name", strings.Replace(minimalWaves, "mob: zombie", `mob: "gameops:"`, 1), "namespace:name"},
+		{"two colons", strings.Replace(minimalWaves, "mob: zombie", `mob: "a:b:c"`, 1), "namespace:name"},
+		{"custom variant", strings.Replace(strings.Replace(minimalWaves, "mob: zombie", "mob: "+brute, 1), "pen: 1}", "variant: minecraft:charged_creeper, pen: 1}", 1), "cannot take a spawn-event variant"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := LoadWaves(strings.NewReader(tt.yaml))
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("LoadWaves: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("LoadWaves error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCustomBruteWaveBookLoads(t *testing.T) {
+	book, err := LoadWaveFile("../../lab/waves-custom-brute.yaml")
+	if err != nil {
+		t.Fatalf("LoadWaveFile: %v", err)
+	}
+	if len(book.Waves) != 1 || !customMob(book.Waves[0].Mobs[0].Mob) {
+		t.Fatalf("unexpected waves: %+v", book.Waves)
+	}
+}

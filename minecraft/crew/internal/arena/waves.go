@@ -235,6 +235,12 @@ func (b *WaveBook) normalise() error {
 			if !validIdentifier(m.Mob) {
 				return fmt.Errorf("wave %q mob %q is not a lowercase identifier", w.Name, m.Mob)
 			}
+			if err := validateMobID(m.Mob); err != nil {
+				return fmt.Errorf("wave %q: %w", w.Name, err)
+			}
+			if customMob(m.Mob) && m.Variant != "" {
+				return fmt.Errorf("wave %q custom mob %q cannot take a spawn-event variant", w.Name, m.Mob)
+			}
 			if m.Mob == "player" || m.Mob == "item" {
 				return fmt.Errorf("wave %q mob %q is not a wave mob", w.Name, m.Mob)
 			}
@@ -283,6 +289,26 @@ func (b *WaveBook) normalise() error {
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// customMob reports whether a wave mob comes from an add-on pack: it carries a
+// namespace other than minecraft:.
+func customMob(id string) bool {
+	return strings.Contains(id, ":") && !strings.HasPrefix(id, "minecraft:")
+}
+
+// validateMobID accepts a bare vanilla id or one namespace:name pair. The
+// character set alone would let ":x" or "a:b:c" through, which the console
+// rejects only mid-run.
+func validateMobID(id string) error {
+	if strings.Count(id, ":") == 0 {
+		return nil
+	}
+	ns, name, ok := strings.Cut(id, ":")
+	if !ok || ns == "" || name == "" || strings.Contains(name, ":") {
+		return fmt.Errorf("mob %q must be name or namespace:name", id)
 	}
 	return nil
 }

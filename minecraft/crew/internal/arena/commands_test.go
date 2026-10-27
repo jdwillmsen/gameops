@@ -248,3 +248,38 @@ func TestOnlyPlainCatalogMobsFitAKit(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomMobSpawnTagsAndCountsLikeAVanillaOne(t *testing.T) {
+	s := testSpawn()
+	s.Type = "gameops:training_dummy_brute"
+	s.Name = "Sergeant"
+	s.Tier = 2
+	recipe := Tier{
+		Effects: []Effect{{ID: "resistance", Seconds: 600, Amplifier: 1}},
+		Gear:    []Gear{{Slot: "armor.head", Item: "iron_helmet"}, {Slot: "weapon.mainhand", Item: "iron_sword"}},
+		Enchant: &Enchant{ID: "sharpness", Level: 3},
+	}
+	cmds := s.commands(recipe)
+	for _, want := range []string{
+		`execute positioned 10 65 -760 run summon gameops:training_dummy_brute "Sergeant" ~ ~ ~`,
+		"execute positioned 10 65 -760 run tag @e[type=gameops:training_dummy_brute,tag=!arena_tiered,tag=!arena_wave,c=1,r=4] add arena_tiered",
+		"tag @e[tag=arena_tiered] add arena_wave",
+		"tag @e[tag=arena_tiered] add arena_wave_t2",
+		"effect @e[tag=arena_tiered] resistance 600 1",
+		"tag @e[tag=arena_tiered] remove arena_tiered",
+	} {
+		if !hasCommand(cmds, want) {
+			t.Errorf("commands lack %q:\n%s", want, strings.Join(cmds, "\n"))
+		}
+	}
+	joined := strings.Join(cmds, "\n")
+	if strings.Contains(joined, "replaceitem") || strings.Contains(joined, "enchant ") {
+		t.Errorf("a pack mob was geared:\n%s", joined)
+	}
+	if s.kitFits() {
+		t.Error("a pack mob must not come from the vanilla kit catalog")
+	}
+	if got := countCommand(); got != "testfor @e[tag=arena_wave,type=!item]" {
+		t.Errorf("countCommand = %q", got)
+	}
+}
