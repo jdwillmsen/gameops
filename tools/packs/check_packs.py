@@ -143,14 +143,13 @@ def check_behaviour_entity(path, doc, rep):
     if target is not None:
         tests = [t for et in target.get("entity_types", []) for t in entity_filter_items(et.get("filters"), rep, path)]
         fam = [t for t in tests if t.get("test") == "is_family"]
-        wants_target = any(t.get("value") == "arena_target" and t.get("operator", "==") in ("==", "equals") for t in fam)
         wants_player = any(t.get("value") == "player" and t.get("operator", "==") in ("==", "equals") for t in fam)
-        if not wants_target:
-            rep.fail(f"{path}: nearest_attackable_target must filter on family arena_target")
+        tagged = any(t.get("test") == "has_tag" and t.get("value") == "arena_warrior"
+                     and t.get("operator", "==") in ("==", "equals") for t in tests)
         if wants_player:
             rep.fail(f"{path}: nearest_attackable_target must never select family player")
-        if not any(t.get("value") == "player" and t.get("operator") == "!=" for t in fam):
-            rep.fail(f"{path}: nearest_attackable_target must explicitly exclude family player")
+        if not tagged:
+            rep.fail(f"{path}: nearest_attackable_target must filter on has_tag arena_warrior")
     return ident
 
 
