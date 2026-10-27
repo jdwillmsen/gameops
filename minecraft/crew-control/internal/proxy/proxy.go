@@ -21,7 +21,7 @@ import (
 
 var cameraFiles = []string{
 	"ws", "mesher.js", "entities.js", "entities.png", "entities.json",
-	"atlas.png", "atlas.json", "items.png", "items.json", "stats",
+	"atlas.png", "atlas.json", "items.png", "items.json", "sky.js", "stats",
 }
 
 // Handler serves only the allow-listed GET routes under /units/{id}/.
