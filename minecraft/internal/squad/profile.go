@@ -49,25 +49,45 @@ type profileParams struct {
 	MeleeShieldTick float64 `json:"meleeShieldTicks"`
 }
 
+// maxProfileText bounds the free-text lines a profile carries beyond its
+// name: an evidence path and a tactic variant's name are one short line.
+const maxProfileText = 256
+
 // profileWire mirrors tactics.Profile: a version, a name, an optional
-// parent for the lineage, a default set of params and per-family
-// overrides (the family names are the map keys).
+// parent for the lineage and the evidence path behind it, a default set of
+// params, per-family overrides and per-family tactic variants (the family
+// names are the map keys). The server stores and serves Evidence and
+// Tactics untouched; the unit's load checks the names against its
+// registry.
 type profileWire struct {
 	Version   int                      `json:"version"`
 	Name      string                   `json:"name"`
 	Parent    string                   `json:"parent,omitempty"`
+	Evidence  string                   `json:"evidence,omitempty"`
 	Default   profileParams            `json:"default"`
 	Overrides map[string]profileParams `json:"overrides,omitempty"`
+	Tactics   map[string][]string      `json:"tactics,omitempty"`
 }
 
 // valid is the half of the contract's validation this package can run
-// without importing it: the right version, a name and parent that stay
-// one readable line, and finite numbers, which JSON cannot quite promise
+// without importing it: the right version, a name, parent, evidence
+// and tactic names that stay one readable line, and finite numbers, which JSON cannot quite promise
 // on its own. The bounds clamp is the unit's, on load.
 func (p profileWire) valid() bool {
 	if p.Version != contractVersion ||
-		!shortPrintable(p.Name, maxLabel) || !shortPrintable(p.Parent, maxLabel) {
+		!shortPrintable(p.Name, maxLabel) || !shortPrintable(p.Parent, maxLabel) ||
+		!shortPrintable(p.Evidence, maxProfileText) {
 		return false
+	}
+	for fam, names := range p.Tactics {
+		if !shortPrintable(fam, maxLabel) {
+			return false
+		}
+		for _, n := range names {
+			if !shortPrintable(n, maxProfileText) {
+				return false
+			}
+		}
 	}
 	if !finiteParams(p.Default) {
 		return false
