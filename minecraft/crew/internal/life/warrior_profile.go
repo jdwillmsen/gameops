@@ -60,6 +60,8 @@ var families = map[string]tactics.Family{
 	"zombie": tactics.FamilyZombie, "husk": tactics.FamilyZombie, "drowned": tactics.FamilyZombie,
 	"zombie_villager": tactics.FamilyZombie, "zombie_villager_v2": tactics.FamilyZombie,
 	"zombie_pigman": tactics.FamilyZombie, "zombified_piglin": tactics.FamilyZombie,
+	// The scenario book trains a phantom against the zombie tactics.
+	"phantom": tactics.FamilyZombie,
 
 	"skeleton": tactics.FamilySkeleton, "stray": tactics.FamilySkeleton,
 	"bogged": tactics.FamilySkeleton, "wither_skeleton": tactics.FamilySkeleton,

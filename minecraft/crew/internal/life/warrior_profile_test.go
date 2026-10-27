@@ -25,6 +25,7 @@ func TestFamilyOfClassifiesEveryFamily(t *testing.T) {
 		{typ: "minecraft:stray", want: tactics.FamilySkeleton},
 		{typ: "minecraft:bogged", want: tactics.FamilySkeleton},
 		{typ: "minecraft:wither_skeleton", want: tactics.FamilySkeleton},
+		{typ: "minecraft:phantom", want: tactics.FamilyZombie},
 		{typ: "minecraft:creeper", want: tactics.FamilyCreeper},
 		{typ: "minecraft:spider", want: tactics.FamilySpider},
 		{typ: "minecraft:cave_spider", want: tactics.FamilySpider},
