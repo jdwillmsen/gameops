@@ -11,6 +11,10 @@ const (
 	markerTag = "arena_tiered"
 	bossTag   = "arena_boss"
 
+	// warriorTag marks the squad for pack mobs that only hunt tagged targets.
+	// A world without the pack ignores it.
+	warriorTag = "arena_warrior"
+
 	// Items never inherit tags, but the negation keeps a drop that happens to
 	// carry one out of the survivor count.
 	countSelector = "@e[tag=" + waveTag + ",type=!item]"
@@ -53,6 +57,20 @@ func validateWarriorName(name string) error {
 		}
 	}
 	return nil
+}
+
+func warriorTagCommand(name string) (string, error) {
+	if err := validateWarriorName(name); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("tag %q add %s", name, warriorTag), nil
+}
+
+func warriorUntagCommand(name string) (string, error) {
+	if err := validateWarriorName(name); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("tag %q remove %s", name, warriorTag), nil
 }
 
 // maxFill is Bedrock's per-command block limit for /fill.
