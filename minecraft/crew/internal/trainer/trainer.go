@@ -219,6 +219,12 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Budget)
 	defer cancel()
 
+	release, err := r.Store.Lock(r.Family)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+
 	champ, ok, err := r.Store.Champion(r.Family)
 	if err != nil {
 		return Result{}, err
