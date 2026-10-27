@@ -11,6 +11,7 @@ import { initJobGraph } from '/static/graph/jobs-ui.js';
 import { initExplorer } from '/static/explorer-ui.js';
 import { initLedgerGraph } from '/static/graph/ledger-ui.js';
 import { initTimeline } from '/static/timeline-ui.js';
+import { initDirector } from '/static/director-ui.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -140,7 +141,12 @@ function renderStage() {
   ops.renderWall(stage);
 }
 
+// Set while the director moves the camera, so that is not read as the viewer
+// taking over.
+let directing = false;
+
 function apply() {
+  if (!directing) director.manual();
   if (state.view !== 'jobs' && state.view !== 'timeline') state.job = '';
   sync();
   renderBar();
@@ -266,6 +272,7 @@ function onKey(ev) {
   else if (ev.key === 'J' && operator) setJobsOpen(!jobsOpen);
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
   else if (ev.key === 'A') alertsUI.toggle();
+  else if (ev.key === 'D') director.toggle();
   // The jobs view keeps Esc for its own layers, but only when the ops shell
   // has no overlay open; ops still answers the overlay first.
   else if (ev.key === 'Escape' && state.view === 'jobs' && !document.getElementById('overlay') && jobGraph.key(ev)) return;
@@ -308,6 +315,7 @@ function connect() {
   });
   es.addEventListener('events', ev => {
     const list = JSON.parse(ev.data) || [];
+    director.onEvents(list, false);
     ops.onEvents(list, false);
     overview.onEvents(list, false);
     explorer.onEvents(list, false);
@@ -315,6 +323,7 @@ function connect() {
   });
   es.addEventListener('log', ev => {
     const e = JSON.parse(ev.data);
+    director.onEvents([e], true);
     ops.onEvents([e], true);
     overview.onEvents([e], true);
     explorer.onEvents([e], true);
@@ -625,7 +634,18 @@ const ops = initOps({
   detail: openDetail,
   setMode,
   setView,
+  director: () => director.toggle(),
   expired: () => setOperator(null),
+});
+
+const director = initDirector({
+  statuses,
+  order: () => order,
+  state: () => state,
+  follow(id) {
+    directing = true;
+    try { pickUnit(id); } finally { directing = false; }
+  },
 });
 
 const squads = initSquads({ statuses, focus: pickUnit });

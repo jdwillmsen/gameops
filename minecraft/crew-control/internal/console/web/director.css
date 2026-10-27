@@ -1,0 +1,4 @@
+/* Not colour alone: a paused director has a dashed outline. */
+#director-toggle[data-state=paused] { outline: 1px dashed currentColor; outline-offset: -3px; }
+#sb-director { opacity: .85; }
+#sb-director:empty { display: none; }

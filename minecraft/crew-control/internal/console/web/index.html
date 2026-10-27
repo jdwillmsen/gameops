@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="/static/replay.css">
 <link rel="stylesheet" href="/static/graph/graph.css">
 <link rel="stylesheet" href="/static/alerts.css">
+<link rel="stylesheet" href="/static/director.css">
 <link rel="stylesheet" href="/static/explorer.css">
 <link rel="stylesheet" href="/static/graph/ledger.css">
 <link rel="stylesheet" href="/static/timeline.css">
@@ -34,6 +35,7 @@
   <button id="ledger-toggle" type="button" title="World ledger (l)">Ledger</button>
   <button id="timeline-toggle" type="button" title="Timeline (t)">Timeline</button>
   <button id="replay-toggle" type="button" title="Replay (y)">Replay</button>
+  <button id="director-toggle" type="button" title="Auto-director: follow the most interesting unit (Shift-D)" aria-pressed="false">Director</button>
   <span class="tools">
     <button id="t-roster" type="button" title="Roster (r)">Roster</button>
     <button id="t-events" type="button" title="Event feed (e)">Events <span id="dock-unread" hidden></span></button>
@@ -78,6 +80,7 @@
   <span id="sb-fleet"></span>
   <span id="sb-alerts"></span>
   <span id="sb-unit"></span>
+  <span id="sb-director"></span>
   <span id="sb-seen"></span>
   <span id="sb-clock"></span>
 </footer>

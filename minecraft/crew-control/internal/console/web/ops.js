@@ -406,6 +406,7 @@ export function initOps(host) {
     items.push({ label: 'Show event explorer', keywords: 'view events filter search history log', hint: 'x', run: () => host.setView('events') });
     items.push({ label: 'Show replay', keywords: 'view history scrub positions past map', hint: 'y', run: () => host.setView('replay') });
     items.push({ label: 'Show timeline', keywords: 'view history swim lanes tasks jobs', hint: 't', run: () => host.setView('timeline') });
+    items.push({ label: 'Auto-director: toggle', keywords: 'follow camera interesting', hint: 'Shift-D', run: () => host.director() });
     items.push({ label: 'Show focus view', keywords: 'view single', run: () => host.setView('focus') });
     for (const m of MODES) items.push({ label: `Camera: ${m}`, keywords: 'mode view', hint: m === st.mode ? 'current' : '', run: () => host.setMode(m) });
     items.push({ label: 'Next camera mode', hint: 'c', run: () => host.setMode(nextMode(st.mode)) });
