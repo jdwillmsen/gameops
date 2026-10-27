@@ -1,6 +1,7 @@
 package arena
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -34,15 +35,21 @@ type FightMeta struct {
 // Recorder turns the events of one fight at a time into a scorecard. It is
 // reused across the runs of a boss test: FightStart resets it.
 //
-// DamageDealt and DamageTaken stay zero. The console reports neither, and
-// health is not exposed by querytarget, so the trainer's score rests on
-// outcome, time, kills and deaths until a damage source exists.
+// DamageDealt stays zero: no unit measures it yet. DamageTaken is filled from
+// Damage when one is set, and stays zero otherwise or when a reading fails, so
+// the trainer's score then rests on outcome, time, kills and deaths alone. The
+// console reports no health, which is why units are asked instead.
 type Recorder struct {
 	Meta FightMeta
+	// Damage supplies each warrior's lifetime damage taken; nil means none.
+	Damage DamageSource
+	// Logf, when set, hears why a damage reading was skipped.
+	Logf func(format string, args ...any)
 
 	start  time.Time
 	kills  int
 	deaths map[string]int
+	before map[string]float64
 }
 
 // FightStart begins a fight, forgetting any events of an unfinished one.
@@ -50,6 +57,38 @@ func (r *Recorder) FightStart(at time.Time) {
 	r.start = at
 	r.kills = 0
 	r.deaths = map[string]int{}
+	r.before = r.damageTotals()
+}
+
+// damageTotals reads the warriors' totals, or nil when it cannot.
+func (r *Recorder) damageTotals() map[string]float64 {
+	if r.Damage == nil || len(r.Meta.Warriors) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), damageReadTimeout)
+	defer cancel()
+	totals, err := r.Damage.Taken(ctx, r.Meta.Warriors)
+	if err != nil && r.Logf != nil {
+		r.Logf("damage reading incomplete: %v", err)
+	}
+	return totals
+}
+
+// damageTaken is what the warriors lost since FightStart. A unit missing from
+// either reading is left out, and one whose total fell restarted mid-fight, so
+// its loss is unknown rather than negative.
+func (r *Recorder) damageTaken() float64 {
+	if len(r.before) == 0 {
+		return 0
+	}
+	after := r.damageTotals()
+	var sum float64
+	for name, was := range r.before {
+		if now, ok := after[name]; ok && now > was {
+			sum += now - was
+		}
+	}
+	return sum
 }
 
 func (r *Recorder) WarriorDied(name string) {
@@ -80,18 +119,19 @@ func (r *Recorder) Finish(outcome string, seconds float64) tactics.Scorecard {
 		ts = r.start.UTC().Format(time.RFC3339)
 	}
 	return tactics.Scorecard{
-		TS:       ts,
-		RunID:    r.Meta.RunID,
-		Scenario: r.Meta.Scenario,
-		Family:   r.Meta.Family,
-		Opponent: r.Meta.Opponent,
-		Profile:  r.Meta.Profile,
-		Side:     r.Meta.Side,
-		Outcome:  outcome,
-		Seconds:  seconds,
-		Kills:    r.kills,
-		Deaths:   deaths,
-		Seed:     r.Meta.Seed,
+		TS:          ts,
+		RunID:       r.Meta.RunID,
+		Scenario:    r.Meta.Scenario,
+		Family:      r.Meta.Family,
+		Opponent:    r.Meta.Opponent,
+		Profile:     r.Meta.Profile,
+		Side:        r.Meta.Side,
+		Outcome:     outcome,
+		Seconds:     seconds,
+		Kills:       r.kills,
+		Deaths:      deaths,
+		DamageTaken: r.damageTaken(),
+		Seed:        r.Meta.Seed,
 	}
 }
 

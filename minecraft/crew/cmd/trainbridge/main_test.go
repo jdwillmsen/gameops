@@ -39,6 +39,7 @@ func TestExitCodes(t *testing.T) {
 		{"training off is refused", []string{"--lab", "crew-lab", "--layout", layoutFile, "--profile-dir", prof, "--control-dir", t.TempDir()}, requestJSON(t), 2},
 		{"no lab", base, requestJSON(t), 2},
 		{"garbled request", append([]string{"--lab", "crew-lab"}, base...), "{nope", 2},
+		{"status url without a name", append([]string{"--lab", "crew-lab", "--status-url", "http://crew/state"}, base...), requestJSON(t), 2},
 		{"bad emit", append([]string{"--lab", "crew-lab", "--emit", "some"}, base...), requestJSON(t), 2},
 	}
 	for _, tc := range cases {

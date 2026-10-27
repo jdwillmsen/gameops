@@ -16,6 +16,10 @@
 // (--opponent-profile, default the shipped one) for one round, and the b side
 // of a mirrored pair starts the candidate on the other spawn line.
 //
+// With --status-url (a unit state endpoint with {name} for the warrior) mob
+// scorecards carry the squad's damage taken, read from the units before and
+// after the fight; without it they carry zero.
+//
 // It refuses (exit 2, no cards) unless training is enabled in the tacticsctl
 // control directory and the target is the crew lab, and it re-checks the kill
 // switch while fighting. A fight that the stop file, the kill switch or the
@@ -125,6 +129,15 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	countdown := fs.Duration("countdown", 5*time.Second, "duel wait between the last set-up step and the start")
 	kitGap := fs.Duration("kit-gap", 3*time.Second, "duel wait after each kit")
 	spacing := fs.Int("spacing", 12, "duel distance of each line from the floor centre")
+	var damage arena.DamageSource
+	fs.Func("status-url", "unit state url with {name} for the warrior, e.g. http://crew-control/units/{name}/v1/state; fills damage taken on mob scorecards (off by default)", func(v string) error {
+		src, err := arena.NewHTTPDamage(v)
+		if err != nil {
+			return err
+		}
+		damage = src
+		return nil
+	})
 	emit := fs.String("emit", "all", "duel cards to print: all, or candidate for the candidate's alone")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -174,7 +187,7 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 		TeamA: splitNames(*teamA), TeamB: splitNames(*teamB), DuelKits: splitNames(*kits),
 		FightTimeout: *fightTimeout, RoundTimeout: *roundTimeout, Poll: *poll, Settle: *settle,
 		PlaceWait: *placeWait, Countdown: *countdown, KitGap: *kitGap, Spacing: *spacing,
-		Emit: *emit, Out: errOut,
+		Emit: *emit, Out: errOut, Damage: damage,
 	}, nil
 }
 

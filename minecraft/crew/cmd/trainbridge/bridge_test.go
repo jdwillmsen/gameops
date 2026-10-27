@@ -219,6 +219,36 @@ func TestMobScenarioScores(t *testing.T) {
 	}
 }
 
+// growing reports 5 more damage per warrior at every reading.
+type growing struct{ reads int }
+
+func (g *growing) Taken(_ context.Context, units []string) (map[string]float64, error) {
+	g.reads++
+	out := map[string]float64{}
+	for _, u := range units {
+		out[u] = float64(5 * g.reads)
+	}
+	return out, nil
+}
+
+func TestMobScorecardCarriesTheSquadsDamageTaken(t *testing.T) {
+	r := newRig(t)
+	r.b.Damage = &growing{}
+	cards, err := r.b.Run(context.Background(), mobRequest("a"))
+	if err != nil {
+		t.Fatalf("Run: %v\n%s", err, r.out)
+	}
+	if want := 5.0 * float64(len(r.b.Warriors)); cards[0].DamageTaken != want {
+		t.Errorf("DamageTaken = %v, want %v", cards[0].DamageTaken, want)
+	}
+
+	plain := newRig(t)
+	cards, _ = plain.b.Run(context.Background(), mobRequest("a"))
+	if cards[0].DamageTaken != 0 {
+		t.Errorf("DamageTaken = %v without a source, want 0", cards[0].DamageTaken)
+	}
+}
+
 func TestMobSideBMeetsTheMobsFromTheFarSide(t *testing.T) {
 	spawnX := func(side string) string {
 		r := newRig(t)

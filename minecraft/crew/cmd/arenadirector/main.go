@@ -21,8 +21,10 @@
 // runs and medians per boss and effect set.
 //
 // run and boss take --scorecards <path> to also append one tactics scorecard
-// per fight (the trainer's input) without changing their own output. Damage
-// is not readable from the Bedrock console, so scorecards carry zero damage.
+// per fight (the trainer's input) without changing their own output. The
+// Bedrock console reports no damage, so scorecards carry zero damage taken
+// unless --status-url gives the units' state endpoint, with {name} for the
+// warrior, and the fight's difference of totals is read from there.
 //
 // duel fights two equal sides of crew warriors against each other on the
 // lab's Colosseum floor for --rounds rounds, swapping the spawn lines every
@@ -73,10 +75,10 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n]]\n"+
+	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
 		"       arenadirector reset --lab <lab>\n"+
 		"       arenadirector status --lab <lab> [--warriors names]\n"+
-		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n]]\n"+
+		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
 		"       arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [--kits vanguard/t5,ranger/t5] [--rounds N] [--timeout 2m] [--max-wall 30m] [--red-profile P] [--blue-profile P] [--crew-names names] [--scores <path>] [--stop-file <path>]")
 	os.Exit(2)
 }
