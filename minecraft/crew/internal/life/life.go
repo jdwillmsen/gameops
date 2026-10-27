@@ -7,6 +7,7 @@ package life
 import (
 	"math/rand"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -15,6 +16,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
 // Distances are in blocks and durations in ticks of 50 ms.
@@ -141,6 +143,9 @@ type Life struct {
 	// warrior drives the squad's fighting when cfg.Role named a role, else
 	// it is nil and the reactive defence decides everything.
 	warrior *warriorState
+	// profile is the warrior's tuning, swapped from outside the stepping
+	// goroutine; nil is the default profile.
+	profile atomic.Pointer[tactics.Profile]
 	// tel counts a warrior's swings, hits, damage taken and deaths.
 	tel telemetry
 	// makeKit replaces the withdraw a visit runs, for tests.
