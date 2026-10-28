@@ -32,6 +32,8 @@ const stackLimit = 64
 // placement that asked for it stops waiting.
 const moveWaitTicks = 300
 
+var errNoBlockWorld = errors.New("the solid names no blocks")
+
 var (
 	// ErrOccupied says the target is not air or a block a placement may
 	// overwrite. An unknown target counts: the unit never places into what
@@ -100,7 +102,7 @@ func (a *Actuator) PlaceBlock(target protocol.BlockPos, item string) error {
 	defer a.mu.Unlock()
 	w, ok := a.solid.(BlockWorld)
 	if !ok {
-		return errors.New("the solid names no blocks")
+		return errNoBlockWorld
 	}
 	if name, known := w.Block(target); !known || !replaceable(name) {
 		return ErrOccupied
