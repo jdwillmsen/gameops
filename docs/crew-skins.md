@@ -15,7 +15,9 @@ role always give the same skin.
 Armour covers an outfit but not a face or hands, so each unit also has marks
 of its own that stay visible under armour: a wristband in its accent colour,
 gloves on about half of them (warriors keep their gauntlets), and one of six
-face marks (freckles, scar, war paint, heavy brows, beauty mark, clean).
+face marks (freckles, scar, war paint, heavy brows, beauty mark, clean). A
+beard or a full helm covers the face mark, so for choppers and the
+vanguard/striker warriors the wristband is the visible mark.
 
 The role comes from `CREW_UNIT_ROLE` (warriors use `CREW_ROLE`). An unset or
 unknown role keeps the plain name-coloured skin.
