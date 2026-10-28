@@ -11,9 +11,11 @@ import (
 )
 
 // focusQuery carries what the shared target choice is a function of. The
-// anchor, the tick, the ignore map and the attacker all come from state
-// every unit in the squad sees the same way, so the same query picks the
-// same target on every unit without a message passing between them.
+// anchor and the entities are the same for every unit in the squad, so units
+// that also share the unit-local inputs (self, ignore, attacker, order) pick
+// the same target without a message passing between them. Those inputs are
+// per unit, though: a unit that gave up on a mob, or was hit by one, may
+// choose differently from its squad-mates.
 type focusQuery struct {
 	// anchor is the leader's feet: a threat is focused within focusRange of
 	// the leader, not of whichever unit is choosing.
@@ -50,9 +52,11 @@ type focusQuery struct {
 // mob, a provoked one that hurt the unit recently, never a player, and
 // creepers stay out of it: no melee focus is worth a blast. A player is
 // focused only when the query's player rule allows it, and then outranks
-// every mob: the nearest one to the choosing unit wins. It is pure in what
-// matters to the squad: the same entities, anchor and order pick the same
-// target on every unit.
+// every mob: the nearest one to the choosing unit wins, so two units may
+// name different players. Among mobs it is a function of the entities, the
+// anchor, the order and the unit's own ignore and suspect state, so units
+// looking at the same mobs with the same such state swing at the same one;
+// the pick is not guaranteed identical across units.
 func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 	var (
 		best     belief.Entity

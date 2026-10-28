@@ -290,8 +290,9 @@ func (w *warriorState) speak(k CalloutKind) {
 func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 	w := l.warrior
 	anchor, leaderOK := w.leader(p)
-	best, m := l.warriorTarget(p, anchor)
-	w.p = l.paramsFor(best)
+	pr := l.Profile()
+	best, m := l.warriorTarget(pr, p, anchor)
+	w.p = paramsFor(pr, best)
 	if hurt && l.enemyNear(p.Feet, meleeReach) {
 		w.hurtUntil = l.tick + ticksOf(w.p.MeleeShieldTick)
 	}
@@ -361,8 +362,7 @@ func (l *Life) warriorEngaged(p act.Pose, s belief.Snapshot, hurt bool) bool {
 
 // warriorTarget is the squad's shared focus, overridden only by what is about
 // to blast the unit or by a player it must give way to.
-func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode) {
-	pr := l.Profile()
+func (l *Life) warriorTarget(pr tactics.Profile, p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode) {
 	q := focusQuery{
 		anchor:        anchor,
 		self:          p.Feet,
@@ -377,11 +377,11 @@ func (l *Life) warriorTarget(p act.Pose, anchor mgl32.Vec3) (belief.Entity, mode
 	best, found := focusTarget(l.ents, q)
 	// A creeper about to blast is answered first, as the reactive defence
 	// answers it: by leaving.
-	if e, ok := l.nearestOfKind(p, flee, l.creeperWatch(p)); ok {
+	if e, ok := l.nearestOfKind(p, flee, l.creeperWatch(pr, p)); ok {
 		return e, modeRetreat
 	}
 	if found {
-		if e, ok := l.preferredTarget(p, q, best); ok {
+		if e, ok := l.preferredTarget(pr, p, q, best); ok {
 			best = e
 		}
 		return best, modeFight
@@ -491,7 +491,8 @@ func (l *Life) scanArrows(p act.Pose) bool {
 // decisions of Engaged, then the role's own fight.
 func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snapshot) error {
 	w := l.warrior
-	w.p = l.paramsFor(l.target)
+	pr := l.Profile()
+	w.p = paramsFor(pr, l.target)
 	l.idle = idleState{}
 	l.stopKit(a)
 	if l.eat.active && !w.healing {
@@ -515,7 +516,7 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	// so it may answer a creeper other than by leaving. A meal under way is
 	// finished first: no tactic has to know the eating state machine.
 	if ok {
-		if handled, err := l.familyTactic(ctx, a, p, e, s); handled || err != nil {
+		if handled, err := l.familyTactic(ctx, pr, a, p, e, s); handled || err != nil {
 			return err
 		}
 	}

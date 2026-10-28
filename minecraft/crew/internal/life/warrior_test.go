@@ -851,3 +851,35 @@ func TestACreeperStillBacksAWarriorOff(t *testing.T) {
 		t.Errorf("%.1f blocks from the creeper after backing away", d)
 	}
 }
+
+func TestFocusIsNotGuaranteedIdenticalAcrossUnits(t *testing.T) {
+	ents := belief.NewEntities()
+	ents.Apply(addActor(50, "minecraft:zombie", mgl32.Vec3{26, 1, 20}))
+	ents.Apply(addActor(51, "minecraft:zombie", mgl32.Vec3{27, 1, 20}))
+	ents.Apply(addPlayer(61, mgl32.Vec3{14, 1, 20}))
+	ents.Apply(addPlayer(62, mgl32.Vec3{27, 1, 24}))
+
+	far := mgl32.Vec3{40, 1, 20}
+	shared := focusQuery{anchor: start, tick: 5}
+	fresh, gaveUp := shared, shared
+	fresh.self, gaveUp.self = far, far
+	gaveUp.ignore = map[uint64]uint64{50: 100}
+
+	a, _ := focusTarget(ents, fresh)
+	b, _ := focusTarget(ents, gaveUp)
+	if a.ID != 50 || b.ID != 51 {
+		t.Errorf("fresh unit chose %d and the unit that gave up on 50 chose %d, want 50 and 51", a.ID, b.ID)
+	}
+
+	pvp := func(q focusQuery) focusQuery {
+		q.player = func(belief.Entity) bool { return true }
+		return q
+	}
+	west, east := pvp(shared), pvp(shared)
+	west.self, east.self = mgl32.Vec3{12, 1, 20}, mgl32.Vec3{27, 1, 22}
+	w, _ := focusTarget(ents, west)
+	e, _ := focusTarget(ents, east)
+	if w.ID != 61 || e.ID != 62 {
+		t.Errorf("units at either end chose players %d and %d, want each to take the nearest: 61 and 62", w.ID, e.ID)
+	}
+}

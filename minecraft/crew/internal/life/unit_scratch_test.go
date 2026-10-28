@@ -81,3 +81,54 @@ func TestUnitScratchDoesNotKeepAGoneUnitAlive(t *testing.T) {
 	}
 	t.Error("the entry of a collected unit was never dropped")
 }
+
+func TestUnitScratchFullTableForgetsOnlyTheOldestLiveUnit(t *testing.T) {
+	var s unitScratch[int]
+	keep := make([]*Life, 0, unitScratchCap+1)
+	for i := range unitScratchCap {
+		l := &Life{}
+		keep = append(keep, l)
+		*s.of(l) = i + 1
+	}
+	extra := &Life{}
+	keep = append(keep, extra)
+	s.of(extra)
+
+	if _, ok := s.has(keep[0]); ok {
+		t.Error("the oldest unit kept its entry past the cap")
+	}
+	for i := 1; i < unitScratchCap; i++ {
+		if v, ok := s.has(keep[i]); !ok || *v != i+1 {
+			t.Fatalf("live unit %d lost its state when the table filled", i)
+		}
+	}
+	s.mu.Lock()
+	n := len(s.by)
+	s.mu.Unlock()
+	if n != unitScratchCap {
+		t.Errorf("%d entries held, want exactly %d", n, unitScratchCap)
+	}
+	runtime.KeepAlive(keep)
+}
+
+func TestUnitScratchRegistersOneCleanupPerUnit(t *testing.T) {
+	var s unitScratch[int]
+	keep := make([]*Life, 0, unitScratchCap+1)
+	for range unitScratchCap + 1 {
+		l := &Life{}
+		keep = append(keep, l)
+		s.of(l)
+	}
+	for range 5 {
+		s.of(keep[0])
+		s.of(keep[1])
+		s.of(keep[2])
+	}
+	s.mu.Lock()
+	n := len(s.cleaned)
+	s.mu.Unlock()
+	if n != len(keep) {
+		t.Errorf("%d cleanups tracked for %d units", n, len(keep))
+	}
+	runtime.KeepAlive(keep)
+}

@@ -180,3 +180,54 @@ func TestInputsWithoutSprintAreByteForByteWhatTheyWereBeforeSprinting(t *testing
 		t.Errorf("packet digest = %s, want %s", got, want)
 	}
 }
+
+func TestSprintStartsAgainAfterTheServerMovesTheUnit(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pk   func(runtimeID uint64) packet.Packet
+	}{
+		{"teleport", func(id uint64) packet.Packet {
+			return &packet.MovePlayer{EntityRuntimeID: id, Position: mgl32.Vec3{10, 1.62, 10}, OnGround: true}
+		}},
+		{"respawn", func(uint64) packet.Packet { return &packet.Respawn{State: packet.RespawnStateReadyToSpawn} }},
+		{"dimension change", func(uint64) packet.Packet { return &packet.ChangeDimension{Dimension: 1} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{0.5, 0, 0.5}, OnGround: true})
+			a.runtimeID = 7
+			for range 3 {
+				if err := a.Tick(Input{Forward: 1, Sprint: true}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s.inputs(t)
+			a.Apply(tc.pk(7))
+			if err := a.Tick(Input{Forward: 1, Sprint: true}); err != nil {
+				t.Fatal(err)
+			}
+			ins := s.inputs(t)
+			if _, on, start, _ := sprintFlags(ins[len(ins)-1]); !on || !start {
+				t.Errorf("first tick after the move: sprinting=%v start=%v, want a fresh start", on, start)
+			}
+		})
+	}
+}
+
+func TestAMoveByAnotherPlayerLeavesTheSprintAlone(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{0.5, 0, 0.5}, OnGround: true})
+	a.runtimeID = 7
+	for range 3 {
+		if err := a.Tick(Input{Forward: 1, Sprint: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.inputs(t)
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 99, Position: mgl32.Vec3{10, 1.62, 10}})
+	if err := a.Tick(Input{Forward: 1, Sprint: true}); err != nil {
+		t.Fatal(err)
+	}
+	ins := s.inputs(t)
+	if _, _, start, _ := sprintFlags(ins[len(ins)-1]); start {
+		t.Error("another player's move restarted this unit's sprint")
+	}
+}

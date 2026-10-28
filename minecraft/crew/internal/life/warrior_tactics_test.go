@@ -430,3 +430,42 @@ func TestAnEmptyTacticListIsTheRoleFight(t *testing.T) {
 		t.Error("the striker never swung with an empty list")
 	}
 }
+
+// swapTactic replaces the unit's profile from inside a tick and declines.
+type swapTactic struct {
+	name   string
+	family tactics.Family
+	to     tactics.Profile
+}
+
+func (t *swapTactic) Name() string           { return t.name }
+func (t *swapTactic) Family() tactics.Family { return t.family }
+
+func (t *swapTactic) Engage(_ context.Context, f *Fight) (bool, error) {
+	return false, f.Life.SetProfile(t.to)
+}
+
+func TestAProfileSwappedMidTickDoesNotSplitThePhase(t *testing.T) {
+	later := tactics.NewProfile("later")
+	swap := &swapTactic{name: "zombie/swap", family: tactics.FamilyZombie, to: later}
+	pass := &passTactic{name: "zombie/pass", family: tactics.FamilyZombie}
+	withTactics(t, swap, pass)
+
+	r := newWarrior(t, "striker", start)
+	pr := tactics.NewProfile("earlier")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilyZombie: {"zombie/swap", "zombie/pass"}}
+	if err := r.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	strikerOnAZombie(r)
+
+	if len(pass.seen) == 0 {
+		t.Fatal("the tactic behind the swap was never offered the tick")
+	}
+	if got := pass.seen[0].Profile.Name; got != "earlier" {
+		t.Errorf("the phase read profile %q after the swap, want the one it began with", got)
+	}
+	if got := r.l.Profile().Name; got != "later" {
+		t.Errorf("unit profile = %q, want the swap to have landed", got)
+	}
+}

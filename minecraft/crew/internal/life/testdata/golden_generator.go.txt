@@ -1,0 +1,174 @@
+// Regenerates default_profile_golden.json. Not part of the build: copy it as
+// internal/life/golden_gen_test.go into a checkout of the engine before
+// warrior profiles existed (git worktree add --detach /tmp/golden 63c742e1),
+// paste in the current fightScenarios and bossScenarios if they changed, then
+//
+//	GOLDEN_OUT=/tmp/out.json go test ./internal/life -run TestWriteGolden
+//
+// and copy /tmp/out.json over the golden. The digests must come from the old
+// engine: a golden made by the current one proves nothing.
+package life
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"sort"
+	"testing"
+
+	"github.com/go-gl/mathgl/mgl32"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+)
+
+var fightScenarios = map[string]func(r *rig){
+	"ranger kiting a walking zombie": func(r *rig) {
+		r.give(0, 303, 1)
+		r.give(1, 361, 1)
+		r.give(20, 362, 32)
+		z := mgl32.Vec3{26.5, 1, 20.5}
+		r.spawn(50, "minecraft:zombie", z)
+		for i := 0; i < 120; i++ {
+			z = z.Sub(mgl32.Vec3{0.1, 0, 0})
+			r.moveTo(50, z)
+			r.step()
+		}
+	},
+	"striker on a zombie under a skeleton's line, arrows and blows": func(r *rig) {
+		r.setSquad(r.t, &fakeSquad{leaderID: "lead", leader: mgl32.Vec3{12.5, 1, 20.5}, leaderOK: true})
+		r.give(0, 303, 1)
+		r.give(2, 360, 1)
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+		r.spawn(51, "minecraft:skeleton", mgl32.Vec3{28.5, 1, 20.5})
+		r.spawn(70, "minecraft:arrow", mgl32.Vec3{30, 30, 30})
+		var arrow mgl32.Vec3
+		for i := 0; i < 160; i++ {
+			if i%60 == 0 {
+				r.hurt()
+			}
+			// An arrow loosed at the unit every second or so, from far
+			// enough out that how near counts as near decides when the
+			// shield meets it.
+			if i%25 == 0 {
+				arrow = r.feet().Add(mgl32.Vec3{7, 1, 0})
+			}
+			arrow = arrow.Sub(mgl32.Vec3{0.5, 0, 0})
+			r.moveTo(70, arrow)
+			r.step()
+		}
+	},
+	"a zombie walking in from beyond focus range": func(r *rig) {
+		r.give(0, 303, 1)
+		z := mgl32.Vec3{36.5, 1, 20.5}
+		r.spawn(50, "minecraft:zombie", z)
+		for i := 0; i < 80; i++ {
+			z = z.Sub(mgl32.Vec3{0.05, 0, 0})
+			r.moveTo(50, z)
+			r.step()
+		}
+	},
+	"hurt with a zombie just out of arm's reach": func(r *rig) {
+		r.give(0, 303, 1)
+		r.give(3, 363, 2)
+		r.setHealth(10)
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{24, 1, 20.5})
+		r.run(30)
+	},
+	"hurt striker pressed, then eating, then regrouping": func(r *rig) {
+		squad := &fakeSquad{leaderID: "lead", leader: mgl32.Vec3{10.5, 1, 20.5}, leaderOK: true}
+		r.setSquad(r.t, squad)
+		r.give(0, 303, 1)
+		r.give(3, 363, 2)
+		r.setHealth(10)
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+		for i := 0; i < 80; i++ {
+			r.step()
+			r.moveTo(50, r.feet().Add(mgl32.Vec3{1.2, 0, 0}))
+		}
+		squad.order = Order{Kind: OrderRegroup}
+		r.moveTo(50, mgl32.Vec3{30.5, 1, 30.5})
+		r.run(60)
+	},
+}
+
+var bossScenarios = map[string]struct {
+	role string
+	from float32
+	run  func(*rig, *fakeRoster)
+}{
+	"ranger shooting from its band": {role: "ranger", from: 24, run: func(r *rig, _ *fakeRoster) { r.run(130) }},
+	"hurt striker eating off the boss": {role: "striker", from: 10, run: func(r *rig, _ *fakeRoster) {
+		r.give(3, 363, 2)
+		r.setHealth(16)
+		r.run(60)
+	}},
+	"striker regrouping to the start": {role: "striker", from: 10, run: func(r *rig, squad *fakeRoster) {
+		squad.down, squad.start, squad.startOK = 2, mgl32.Vec3{10.5, 1, 40.5}, true
+		r.run(250)
+	}},
+	"vanguard holding the melee": {role: "vanguard", from: 2, run: func(r *rig, _ *fakeRoster) { r.run(100) }},
+}
+
+func replay(t *testing.T, role string, scenario func(*rig), set func(*Life)) []any {
+	t.Helper()
+	r := newWarrior(t, role, start)
+	if set != nil {
+		set(r.l)
+	}
+	scenario(r)
+	got := make([]any, len(r.out.got))
+	for i, pk := range r.out.got {
+		got[i] = pk
+	}
+	return got
+}
+
+// goldenReplayBoss is replayBoss without a profile, which the old engine lacks.
+func goldenReplayBoss(t *testing.T, name string) []any {
+	t.Helper()
+	sc := bossScenarios[name]
+	r, squad := newBossWarrior(t, sc.role, arena.Sub(mgl32.Vec3{sc.from, 0, 0}))
+	sc.run(r, squad)
+	got := make([]any, len(r.out.got))
+	for i, pk := range r.out.got {
+		got[i] = pk
+	}
+	return got
+}
+
+func packetDigest(t *testing.T, pks []any) string {
+	t.Helper()
+	h := sha256.New()
+	for _, p := range pks {
+		pk := p.(packet.Packet)
+		var buf bytes.Buffer
+		pk.Marshal(protocol.NewWriter(&buf, 0))
+		h.Write([]byte{byte(pk.ID())})
+		h.Write(buf.Bytes())
+		h.Write([]byte{0xff})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func TestWriteGolden(t *testing.T) {
+	out := map[string]string{}
+	var names []string
+	for n := range fightScenarios {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		for _, role := range []string{"vanguard", "striker", "ranger"} {
+			out["fight/"+n+"/"+role] = packetDigest(t, replay(t, role, fightScenarios[n], nil))
+		}
+	}
+	for n := range bossScenarios {
+		out["boss/"+n] = packetDigest(t, goldenReplayBoss(t, n))
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	if err := os.WriteFile(os.Getenv("GOLDEN_OUT"), append(b, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

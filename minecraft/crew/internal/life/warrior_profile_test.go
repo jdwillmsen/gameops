@@ -2,6 +2,7 @@ package life
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -109,7 +110,7 @@ func TestParamsForResolvesTheTargetsFamily(t *testing.T) {
 	zombie := belief.Entity{ID: 50, Type: "minecraft:zombie"}
 	skeleton := belief.Entity{ID: 51, Type: "minecraft:skeleton"}
 
-	if got := l.paramsFor(zombie); got != tactics.Defaults() {
+	if got := paramsFor(l.Profile(), zombie); got != tactics.Defaults() {
 		t.Fatalf("no profile set: params %+v, want the defaults", got)
 	}
 
@@ -120,13 +121,13 @@ func TestParamsForResolvesTheTargetsFamily(t *testing.T) {
 	if err := l.SetProfile(pr); err != nil {
 		t.Fatal(err)
 	}
-	if got := l.paramsFor(zombie).KiteBackoff; got != 8 {
+	if got := paramsFor(l.Profile(), zombie).KiteBackoff; got != 8 {
 		t.Errorf("zombie kiteBackoff = %v, want the override's 8", got)
 	}
-	if got := l.paramsFor(skeleton).KiteBackoff; got != kiteBackoff {
+	if got := paramsFor(l.Profile(), skeleton).KiteBackoff; got != kiteBackoff {
 		t.Errorf("skeleton kiteBackoff = %v, want the default %v", got, float64(kiteBackoff))
 	}
-	if got := l.paramsFor(belief.Entity{}); got != pr.Default {
+	if got := paramsFor(l.Profile(), belief.Entity{}); got != pr.Default {
 		t.Errorf("no target: params %+v, want the profile default", got)
 	}
 }
@@ -143,14 +144,14 @@ func TestSetProfileClampsCopiesAndRefusesAnUnreadableProfile(t *testing.T) {
 	if err := l.SetProfile(pr); err != nil {
 		t.Fatal(err)
 	}
-	if got := l.paramsFor(zombie).ShotEvery; got != tactics.Bounds()["shotEvery"].Min {
+	if got := paramsFor(l.Profile(), zombie).ShotEvery; got != tactics.Bounds()["shotEvery"].Min {
 		t.Errorf("shotEvery 0 loaded as %v, want it clamped to the bound", got)
 	}
 	if overrides[tactics.FamilyZombie].ShotEvery != 0 {
 		t.Error("SetProfile wrote to the caller's overrides")
 	}
 	overrides[tactics.FamilyZombie] = tactics.Defaults()
-	if got := l.paramsFor(zombie).ShotEvery; got == shotEvery {
+	if got := paramsFor(l.Profile(), zombie).ShotEvery; got == shotEvery {
 		t.Error("a later write to the caller's map reached the profile in force")
 	}
 
@@ -410,4 +411,47 @@ func TestAProfileSwappedMidFightTakesHoldOnTheNextTick(t *testing.T) {
 	if !r.step() {
 		t.Error("the swap ended the fight")
 	}
+}
+
+func TestSetProfileKeepsItsOwnTacticLists(t *testing.T) {
+	l := New(Config{Role: "ranger"}, nil, nil, nil, nil)
+	list := []string{"spider/ground", "spider/swarm"}
+	pr := tactics.NewProfile("lab")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySpider: list}
+	if err := l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+
+	list[0] = "changed"
+	pr.Tactics[tactics.FamilySpider] = nil
+	pr.Tactics[tactics.FamilyZombie] = []string{"zombie/x"}
+	got := l.Profile().TacticsFor(tactics.FamilySpider)
+	if !reflect.DeepEqual(got, []string{"spider/ground", "spider/swarm"}) {
+		t.Errorf("spider tactics = %v, want the pushed list untouched by later caller writes", got)
+	}
+	if len(l.Profile().TacticsFor(tactics.FamilyZombie)) != 0 {
+		t.Error("a family the caller added afterwards reached the profile in force")
+	}
+}
+
+func TestCallerWritesToItsTacticsDoNotRaceTheStepper(t *testing.T) {
+	l := New(Config{Role: "ranger"}, nil, nil, nil, nil)
+	pr := tactics.NewProfile("lab")
+	pr.Tactics = map[tactics.Family][]string{tactics.FamilySpider: {"a", "b"}}
+	if err := l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 1000 {
+			_ = slices.Clone(l.Profile().TacticsFor(tactics.FamilySpider))
+		}
+	}()
+	for range 1000 {
+		pr.Tactics[tactics.FamilySpider][0] = "x"
+		pr.Tactics[tactics.Family("f")] = []string{"y"}
+	}
+	<-done
 }
