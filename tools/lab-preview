@@ -7,7 +7,7 @@ NAME=${LAB_PREVIEW_NAME:-lab-preview}
 IMAGE=${LAB_PREVIEW_IMAGE:-itzg/minecraft-bedrock-server:2026.10.2}
 # Default matches what the add-on was verified on; the prd lab runs 1.26.60.6.
 VERSION=${LAB_PREVIEW_VERSION:-1.26.52.3}
-HOST_PORT=${LAB_PREVIEW_PORT:-19144}
+HOST_PORT=${LAB_PREVIEW_PORT:-19146}
 LEVEL=preview
 SINCE=1970-01-01T00:00:00Z
 ROOT=/tmp/lab-preview/$NAME
@@ -49,9 +49,11 @@ stage() {
 }
 
 wait_started() {
-  local i
+  local i out
   for ((i = 0; i < 90; i++)); do
-    logs_since | grep -q 'Server started' && return 0
+    # Captured first: grep -q exiting early gives docker logs SIGPIPE under pipefail.
+    out=$(logs_since)
+    [[ $out == *'Server started'* ]] && return 0
     sleep 1
   done
   die "no 'Server started' within 90s; see: lab-preview logs"
