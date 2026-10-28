@@ -28,7 +28,7 @@ func TestExitCodes(t *testing.T) {
 	ctl := t.TempDir()
 	os.WriteFile(filepath.Join(ctl, tacticsctl.TrainingFile), []byte("on"), 0o644)
 	prof := t.TempDir()
-	base := []string{"--layout", layoutFile, "--profile-dir", prof, "--control-dir", ctl}
+	base := []string{"--layout", layoutFile, "--dry-run", "--profile-dir", prof, "--control-dir", ctl}
 	cases := []struct {
 		name  string
 		args  []string
@@ -36,11 +36,15 @@ func TestExitCodes(t *testing.T) {
 		want  int
 	}{
 		{"real world is refused", append([]string{"--lab", "fwb-minecraft"}, base...), requestJSON(t), 2},
-		{"training off is refused", []string{"--lab", "crew-lab", "--layout", layoutFile, "--profile-dir", prof, "--control-dir", t.TempDir()}, requestJSON(t), 2},
+		{"training off is refused", []string{"--lab", "crew-lab", "--layout", layoutFile, "--dry-run", "--profile-dir", prof, "--control-dir", t.TempDir()}, requestJSON(t), 2},
 		{"no lab", base, requestJSON(t), 2},
 		{"garbled request", append([]string{"--lab", "crew-lab"}, base...), "{nope", 2},
 		{"status url without a name", append([]string{"--lab", "crew-lab", "--status-url", "http://crew/state"}, base...), requestJSON(t), 2},
+		{"an FWB compose file", append([]string{"--lab", "crew-lab", "--compose", "fwb/compose.yaml"}, base...), requestJSON(t), 2},
 		{"bad emit", append([]string{"--lab", "crew-lab", "--emit", "some"}, base...), requestJSON(t), 2},
+		{"a profile dir without a dry run", []string{"--lab", "crew-lab", "--layout", layoutFile, "--profile-dir", prof, "--control-dir", ctl}, requestJSON(t), 2},
+		{"no sink at all", []string{"--lab", "crew-lab", "--layout", layoutFile, "--control-dir", ctl}, requestJSON(t), 2},
+		{"a dry run still scores nothing", append([]string{"--lab", "crew-lab"}, base...), requestJSON(t), 2},
 	}
 	for _, tc := range cases {
 		var out, errOut bytes.Buffer

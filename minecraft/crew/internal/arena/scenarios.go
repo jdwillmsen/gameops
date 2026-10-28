@@ -53,7 +53,7 @@ var scenarioFamilies = map[tactics.Family]map[string]bool{
 	tactics.FamilyDefault: nil,
 	tactics.FamilyZombie: {
 		"zombie": true, "husk": true, "drowned": true,
-		"zombie_villager": true, "phantom": true,
+		"zombie_villager": true, "phantom": true, "zombified_piglin": true,
 	},
 	tactics.FamilySkeleton: {"skeleton": true, "stray": true, "wither_skeleton": true},
 	tactics.FamilyCreeper:  {"creeper": true},
@@ -65,9 +65,24 @@ var scenarioFamilies = map[tactics.Family]map[string]bool{
 		"pillager": true, "vindicator": true,
 		"evocation_illager": true, "vex": true,
 	},
-	tactics.FamilyBrute: {"piglin_brute": true, "hoglin": true, "zombified_piglin": true},
-	// The boss family admits exactly the mobs the arena treats as bosses.
-	tactics.FamilyBoss: bossMobs,
+	tactics.FamilyBrute: {
+		"piglin_brute": true, "hoglin": true,
+		"ravager": true, "iron_golem": true,
+	},
+	// The boss family admits the arena's boss mobs the warrior also fights
+	// as a boss; a ravager or iron golem is a boss wave's headliner but a
+	// brute to the warrior, so a scenario of one trains the brute family.
+	tactics.FamilyBoss: bossFamilyMobs(),
+}
+
+func bossFamilyMobs() map[string]bool {
+	out := map[string]bool{}
+	for mob := range bossMobs {
+		if tactics.FamilyOfType(mob) == tactics.FamilyBoss {
+			out[mob] = true
+		}
+	}
+	return out
 }
 
 // Scenario is one short training fight: a small mob set from one opponent
@@ -213,8 +228,10 @@ func validateScenario(s *Scenario, tiers map[int]Tier) error {
 		if allowed != nil && !allowed[m.Mob] {
 			return fmt.Errorf("scenario %q: mob %q does not belong to family %q", s.Name, m.Mob, s.Family)
 		}
-		if strings.ContainsAny(m.Name, "\"\n") {
-			return fmt.Errorf("scenario %q mob %q name has a quote or newline", s.Name, m.Mob)
+		if m.Name != "" {
+			if err := validateWarriorName(m.Name); err != nil {
+				return fmt.Errorf("scenario %q mob %q name: %w", s.Name, m.Mob, err)
+			}
 		}
 		if m.Variant != "" {
 			if !strings.HasPrefix(m.Variant, "minecraft:") {
@@ -240,6 +257,9 @@ func (b *ScenarioBook) Scenario(name string) (Scenario, bool) {
 	}
 	return Scenario{}, false
 }
+
+// MobCount is the number of mobs the scenario summons.
+func (s Scenario) MobCount() int { return s.total() }
 
 // total counts the mobs the scenario summons.
 func (s Scenario) total() int {
@@ -284,9 +304,10 @@ func (b *ScenarioBook) Expand(l Layout, s Scenario, seed int64) ([]string, error
 			z := float64(l.Center.Z) + float64(s.Spawn.Ring)*math.Sin(angle)
 			sp := spawn{
 				Type: m.Mob, Name: m.Name, Variant: m.Variant, Tier: s.Tier,
-				// A boss-family scenario's headliner is watched through the
-				// boss tag, the same way a boss wave's is.
-				Boss:  s.Family == tactics.FamilyBoss && isBossMob(m.Mob),
+				// A boss wave's headliner is watched through the boss tag
+				// whichever family the warrior fights it as; a mixed pack
+				// never has one.
+				Boss:  s.Family != tactics.FamilyDefault && isBossMob(m.Mob),
 				Point: Point{X: int(math.Round(x)), Y: l.GroundY + 1, Z: int(math.Round(z))},
 			}
 			cmds = append(cmds, sp.commands(recipe)...)

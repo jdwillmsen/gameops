@@ -32,12 +32,27 @@ type fakeSink struct {
 	pushed  map[string]string
 	cleared [][]string
 	err     error
+	// lostPut makes Push land and then fail, the way a lost PUT response does.
+	lostPut bool
+	squads  []string
+	// confirmErr fails every Confirm; confirmed records each call's profile name.
+	confirmErr error
+	confirmed  []string
+}
+
+func (f *fakeSink) LabSquads([]string) ([]string, error) { return f.squads, nil }
+
+func (f *fakeSink) Confirm(_ context.Context, _ []string, p tactics.Profile) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.confirmed = append(f.confirmed, p.Name)
+	return f.confirmErr
 }
 
 func (f *fakeSink) Push(_ context.Context, units []string, p tactics.Profile) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.err != nil {
+	if f.err != nil && !f.lostPut {
 		return f.err
 	}
 	if f.pushed == nil {
@@ -46,7 +61,7 @@ func (f *fakeSink) Push(_ context.Context, units []string, p tactics.Profile) er
 	for _, u := range units {
 		f.pushed[u] = p.Name
 	}
-	return nil
+	return f.err
 }
 
 func (f *fakeSink) Clear(_ context.Context, units []string) error {
@@ -65,7 +80,8 @@ func testLayout() arena.Layout {
 
 // sim answers the lab console. Mobs appear when the first summon arrives and
 // are all gone mobsGoneAfter later; a negative value keeps them forever.
-// Duelists named in dieAfter read as missing that long after the go tag.
+// Duelists named in dieAfter respawn at the world spawn that long after the go
+// tag, or read as missing from the world when gone is set.
 type sim struct {
 	clk           *clock
 	mobs          int
@@ -74,6 +90,7 @@ type sim struct {
 	spawned       bool
 	wipeAfter     time.Duration
 	dieAfter      map[string]time.Duration
+	gone          bool
 	goAt          time.Time
 	armed         bool
 	cmds          []string
@@ -86,10 +103,11 @@ func (s *sim) mobsLive() int {
 	return s.mobs
 }
 
+func (s *sim) wiped() bool {
+	return s.wipeAfter > 0 && s.spawned && s.clk.Now().Sub(s.spawnedAt) >= s.wipeAfter
+}
+
 func (s *sim) down(name string) bool {
-	if s.wipeAfter > 0 && s.spawned && s.clk.Now().Sub(s.spawnedAt) >= s.wipeAfter {
-		return true
-	}
 	after, ok := s.dieAfter[name]
 	return ok && s.armed && s.clk.Now().Sub(s.goAt) >= after
 }
@@ -109,10 +127,16 @@ func (s *sim) Exec(cmd string) (string, error) {
 		return found(s.mobsLive(), "Zombie"), nil
 	case strings.HasPrefix(cmd, "testfor @e[name="):
 		name := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(cmd, "testfor @e[name="), ",type=player]"), `"`)
-		if s.down(name) {
+		if s.wiped() || (s.down(name) && s.gone) {
 			return "ERROR: No targets matched selector", nil
 		}
 		return "Found " + name, nil
+	case strings.HasPrefix(cmd, "querytarget @a[name="):
+		name := strings.Trim(strings.TrimSuffix(strings.TrimPrefix(cmd, "querytarget @a[name="), "]"), `"`)
+		if s.down(name) {
+			return `[{"position":{"x":0,"y":64,"z":-400}}]`, nil
+		}
+		return `[{"position":{"x":0,"y":65,"z":-760}}]`, nil
 	case strings.HasPrefix(cmd, "querytarget"):
 		return `[{"position":{"x":0,"y":65,"z":-760}}]`, nil
 	}
@@ -159,8 +183,9 @@ func newRig(t *testing.T) *rig {
 			Console: &arena.FakeConsole{Respond: s.Exec}, Layout: testLayout(), Book: book, Sink: sink,
 			Warriors: []string{"Rusty", "Slate", "Tinder"}, Crew: arena.DefaultCrewNames,
 			TeamA: []string{"Rusty", "Slate"}, TeamB: []string{"Tinder", "Agate"},
+			Duelists:     []string{"Rusty", "Slate", "Tinder", "Agate"},
 			FightTimeout: time.Hour, RoundTimeout: time.Minute, Poll: 5 * time.Second,
-			Settle: 25 * time.Second, PlaceWait: 3 * time.Second, Countdown: 5 * time.Second,
+			Settle: 25 * time.Second, ApplyWait: 6 * time.Second, PlaceWait: 3 * time.Second, Countdown: 5 * time.Second,
 			KitGap: 3 * time.Second, Spacing: 12, Emit: "all",
 			Out: out, Now: clk.Now, Sleep: clk.Sleep,
 		},
@@ -555,5 +580,176 @@ func TestSinkFailureIsAFaultNotAScore(t *testing.T) {
 	cards, err := r.b.Run(context.Background(), mobRequest("a"))
 	if err == nil || errors.As(err, new(refusal)) || len(cards) != 0 {
 		t.Errorf("cards %v err %v, want a plain fault and no cards", cards, err)
+	}
+}
+
+func TestPushIsWithdrawnEvenWhenItsAnswerWasLost(t *testing.T) {
+	for name, req := range map[string]request{"mob": mobRequest("a"), "duel": duelRequest("a")} {
+		r := newRig(t)
+		r.sink.err, r.sink.lostPut = fmt.Errorf("connection reset"), true
+		if _, err := r.b.Run(context.Background(), req); err == nil {
+			t.Fatalf("%s: a failed push was not a fault", name)
+		}
+		if len(r.sink.pushed) == 0 {
+			t.Fatalf("%s: the stub did not record the landed push", name)
+		}
+		if len(r.sink.cleared) == 0 {
+			t.Errorf("%s: the profile that may have landed was never withdrawn", name)
+		}
+	}
+}
+
+func TestProfileIsReadBackBeforeAndAfterTheApplyWait(t *testing.T) {
+	r := newRig(t)
+	started := r.clk.Now()
+	cards, err := r.b.Run(context.Background(), mobRequest("a"))
+	if err != nil || len(cards) != 1 || cards[0].Outcome == tactics.OutcomeAborted {
+		t.Fatalf("cards %+v err %v", cards, err)
+	}
+	if want := []string{"cand-1", "cand-1"}; !slices.Equal(r.sink.confirmed, want) {
+		t.Errorf("confirmed %v, want two reads %v", r.sink.confirmed, want)
+	}
+	if r.clk.Now().Sub(started) < r.b.ApplyWait {
+		t.Error("the second read did not wait for the units to settle")
+	}
+}
+
+func TestUnconfirmedProfileIsNeverScored(t *testing.T) {
+	for name, req := range map[string]request{"mob": mobRequest("a"), "duel": duelRequest("a")} {
+		r := newRig(t)
+		r.sink.confirmErr = fmt.Errorf("squad serves profile %q", "default")
+		cards, err := r.b.Run(context.Background(), req)
+		if err == nil || errors.As(err, new(refusal)) {
+			t.Errorf("%s: err = %v, want a plain fault", name, err)
+		}
+		if len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted {
+			t.Errorf("%s: cards = %+v, want one aborted card", name, cards)
+		}
+		if r.sim.spawned {
+			t.Errorf("%s: the fight started on an unconfirmed profile", name)
+		}
+		if len(r.sink.cleared) == 0 {
+			t.Errorf("%s: the units were not released", name)
+		}
+	}
+}
+
+func TestDuelConfirmsBothTeamsProfiles(t *testing.T) {
+	r := newRig(t)
+	if _, err := r.b.Run(context.Background(), duelRequest("a")); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"cand-1", "default", "cand-1", "default"}; !slices.Equal(r.sink.confirmed, want) {
+		t.Errorf("confirmed %v, want %v", r.sink.confirmed, want)
+	}
+}
+
+func TestRunsSerialiseOnEachLabSquad(t *testing.T) {
+	r := newRig(t)
+	r.sink.squads = []string{"lab-bravo", "lab-alpha"}
+	other, err := lockSquads(context.Background(), r.b.ControlDir, []string{"lab-bravo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	_, err = r.b.Run(ctx, mobRequest("a"))
+	if err == nil || !strings.Contains(err.Error(), "lab-bravo") || errors.As(err, new(refusal)) {
+		t.Fatalf("err = %v, want a fault naming the held squad", err)
+	}
+	if len(r.sink.pushed) != 0 || r.sim.spawned {
+		t.Error("a run that never got the squad pushed a profile or fought")
+	}
+
+	other()
+	cards, err := r.b.Run(context.Background(), mobRequest("a"))
+	if err != nil || len(cards) != 1 {
+		t.Fatalf("after the holder left: cards %v err %v", cards, err)
+	}
+	for _, sq := range r.sink.squads {
+		if _, err := os.Stat(filepath.Join(r.b.ControlDir, "squad-"+sq+".lock")); err != nil {
+			t.Errorf("no lock file for %s: %v", sq, err)
+		}
+	}
+}
+
+func TestSquadLockWaitsForTheHolder(t *testing.T) {
+	dir := t.TempDir()
+	held, err := lockSquads(context.Background(), dir, []string{"lab-alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+	go func() {
+		release, err := lockSquads(context.Background(), dir, []string{"lab-alpha", "lab-alpha"})
+		if err == nil {
+			release()
+		}
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		t.Fatalf("second run got the squad while it was held: %v", err)
+	case <-time.After(2 * lockPoll):
+	}
+	held()
+	if err := <-got; err != nil {
+		t.Errorf("second run after release: %v", err)
+	}
+}
+
+func TestSquadLockRefusesAnIDThatIsNotALabName(t *testing.T) {
+	for _, sq := range []string{"lab-/../fwb", "alpha", "../lab-a", ""} {
+		if _, err := lockSquads(context.Background(), t.TempDir(), []string{sq}); err == nil {
+			t.Errorf("squad %q was locked", sq)
+		}
+	}
+}
+
+func TestDryRunWritesTheCandidateAndRefusesToScore(t *testing.T) {
+	r := newRig(t)
+	dir := t.TempDir()
+	r.b.Sink, r.b.DryRun = FileSink{Dir: dir}, true
+	cards, err := r.b.Run(context.Background(), mobRequest("a"))
+	if !errors.As(err, new(refusal)) || len(cards) != 0 {
+		t.Fatalf("cards %v err %v, want a refusal and no cards", cards, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Rusty.json")); err != nil {
+		t.Errorf("the dry run wrote no profile: %v", err)
+	}
+	if len(r.sim.cmds) != 0 {
+		t.Errorf("a dry run touched the lab: %v", r.sim.cmds)
+	}
+}
+
+func TestDuelistWhoLeftTheWorldIsAnAbortedRoundNotALoss(t *testing.T) {
+	r := newRig(t)
+	r.sim.gone = true
+	r.sim.dieAfter = map[string]time.Duration{"Rusty": 10 * time.Second}
+	cards, err := r.b.Run(context.Background(), duelRequest("a"))
+	if !errors.Is(err, arena.ErrDuelistGone) || errors.As(err, new(refusal)) {
+		t.Fatalf("err = %v, want a plain ErrDuelistGone fault", err)
+	}
+	if len(cards) == 0 {
+		t.Fatal("no cards")
+	}
+	for _, c := range cards {
+		if c.Outcome != tactics.OutcomeAborted {
+			t.Errorf("card = %+v, want aborted: a disconnect is no loss", c)
+		}
+	}
+}
+
+func TestDuelOnlyPutsAllowListedUnitsThrough(t *testing.T) {
+	r := newRig(t)
+	r.b.Duelists = []string{"Rusty", "Slate", "Tinder"}
+	_, err := r.b.Run(context.Background(), duelRequest("a"))
+	if err == nil || !strings.Contains(err.Error(), "Agate") {
+		t.Fatalf("err = %v, want Agate refused though crew may be online", err)
+	}
+	for _, c := range r.sim.cmds {
+		if strings.HasPrefix(c, "clear ") || strings.HasPrefix(c, "tp ") {
+			t.Errorf("the server was touched: %s", c)
+		}
 	}
 }

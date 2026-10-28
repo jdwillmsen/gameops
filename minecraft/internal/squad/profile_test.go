@@ -265,3 +265,62 @@ func TestProfileCarriesEvidenceAndTactics(t *testing.T) {
 		t.Errorf("a tactic name with a newline: %d, want 400", resp.StatusCode)
 	}
 }
+
+// A path-valued id that merely starts with the lab prefix is not a lab
+// squad: the store and the route both refuse it, so a hello cannot park
+// "lab-/../fwb" in the table and then take a profile.
+func TestLabSquadIsTheWholeShapeOfTheID(t *testing.T) {
+	for _, id := range []string{"lab-alpha", "lab-a-1", "lab-0"} {
+		if !labSquad(id) {
+			t.Errorf("%q is not a lab squad", id)
+		}
+	}
+	for _, id := range []string{"lab-", "lab-/../fwb", "lab-a/b", "lab-A", "lab-a b", "lab-a\n", "alpha", "xlab-a", "lab-" + strings.Repeat("a", 80)} {
+		if labSquad(id) {
+			t.Errorf("%q passes as a lab squad", id)
+		}
+	}
+	st := NewStore()
+	st.Hello(Hello{Unit: "crew-18", Squad: "lab-/../fwb", Role: roleVanguard})
+	if st.SetProfile("lab-/../fwb", profileWire{Version: contractVersion, Name: "x"}) {
+		t.Error("the store took a profile for a path-valued id")
+	}
+}
+
+func TestProfilePUTRefusesAPathValuedSquadID(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "lab-alpha", "crew-18", "vanguard")
+	resp := r.do(t, "PUT", "/v1/squads/lab-%2F..%2Ffwb/profile", testProfile, nil)
+	if resp.StatusCode < 400 {
+		t.Errorf("a path-valued squad id took a profile: %d", resp.StatusCode)
+	}
+}
+
+func TestProfilePUTChecksFamiliesAndTacticLists(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "lab-alpha", "crew-18", "vanguard")
+	many := `"` + strings.Repeat(`spider/ground","`, maxFamilyTactics) + `spider/swarm"`
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"every known family", `{"version":1,"name":"x","default":{},"overrides":{"zombie":{},"player":{"kiteBackoff":3}},"tactics":{"spider":["spider/ground","spider/swarm"],"player":["player/axe-shield"],"boss":[]}}`, http.StatusNoContent},
+		{"an unknown override family", `{"version":1,"name":"x","default":{},"overrides":{"dragon":{}}}`, http.StatusBadRequest},
+		{"an unknown tactics family", `{"version":1,"name":"x","default":{},"tactics":{"dragon":["a/b"]}}`, http.StatusBadRequest},
+		{"a path as a family", `{"version":1,"name":"x","default":{},"tactics":{"../x":["a/b"]}}`, http.StatusBadRequest},
+		{"too long a list", `{"version":1,"name":"x","default":{},"tactics":{"spider":[` + many + `]}}`, http.StatusBadRequest},
+		{"a tactic name with a newline", `{"version":1,"name":"x","default":{},"tactics":{"spider":["a\nb"]}}`, http.StatusBadRequest},
+		{"an empty tactic name", `{"version":1,"name":"x","default":{},"tactics":{"spider":[""]}}`, http.StatusBadRequest},
+		{"a shouted tactic name", `{"version":1,"name":"x","default":{},"tactics":{"spider":["Spider Ground"]}}`, http.StatusBadRequest},
+		{"a list where a string was wanted", `{"version":1,"name":"x","default":{},"tactics":{"spider":"spider/ground"}}`, http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := r.do(t, "PUT", "/v1/squads/lab-alpha/profile", tt.body, nil)
+			if resp.StatusCode != tt.want {
+				t.Errorf("status %d, want %d", resp.StatusCode, tt.want)
+			}
+		})
+	}
+}

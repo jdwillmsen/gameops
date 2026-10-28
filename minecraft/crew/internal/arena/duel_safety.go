@@ -2,6 +2,7 @@ package arena
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -34,4 +35,36 @@ func ValidateLabTarget(lab string) error {
 		return fmt.Errorf("arena: pod %q is not a crew lab pod; duels run on the crew lab only", m[2])
 	}
 	return nil
+}
+
+// DefaultDuelists are the crew warriors a duel may put through its clears and
+// teleports unless the operator names others.
+var DefaultDuelists = []string{"Rusty", "Slate", "Tinder"}
+
+// ValidateComposeFile refuses a compose file that is plainly not the crew
+// lab's: the lab target is only as safe as the file the console drives, so
+// one that names FWB in its file or directory name is as wrong as a lab
+// service that does.
+func ValidateComposeFile(path string) error {
+	if path == "" {
+		return fmt.Errorf("arena: --compose is required for a compose lab")
+	}
+	for _, part := range []string{filepath.Base(path), filepath.Base(filepath.Dir(path))} {
+		if strings.Contains(strings.ToLower(part), "fwb") {
+			return fmt.Errorf("arena: compose file %q names FWB; this tool runs on the crew lab only", path)
+		}
+	}
+	return nil
+}
+
+// ValidateLabConsole applies the lab rules to both halves of a console
+// target: the lab, and for a compose lab the compose file it runs from.
+func ValidateLabConsole(lab, compose string) error {
+	if err := ValidateLabTarget(lab); err != nil {
+		return err
+	}
+	if strings.HasPrefix(lab, "k8s:") {
+		return nil
+	}
+	return ValidateComposeFile(compose)
 }

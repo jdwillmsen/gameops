@@ -29,10 +29,18 @@ type FightMeta struct {
 	// Warriors are listed in Deaths even with zero deaths, so two fights of
 	// the same squad have the same keys.
 	Warriors []string
+	// Spawned is how many mobs the fight summoned, when that is known; zero
+	// means unknown. Kills never exceed it.
+	Spawned int
 }
 
 // Recorder turns the events of one fight at a time into a scorecard. It is
 // reused across the runs of a boss test: FightStart resets it.
+//
+// Kills are inferred from the fall in the live-mob count, so they are an upper
+// bound: a mob that despawns, wanders off the counted area or never spawned
+// reads as a kill. Meta.Spawned caps the total where the summoned count is
+// known; where it is not, treat Kills as approximate.
 //
 // DamageDealt stays zero: no unit measures it yet. DamageTaken is filled from
 // Damage when one is set, and stays zero otherwise or when a reading fails, so
@@ -127,11 +135,18 @@ func (r *Recorder) Finish(outcome string, seconds float64) tactics.Scorecard {
 		Side:        r.Meta.Side,
 		Outcome:     outcome,
 		Seconds:     seconds,
-		Kills:       r.kills,
+		Kills:       r.cappedKills(),
 		Deaths:      deaths,
 		DamageTaken: r.damageTaken(),
 		Seed:        r.Meta.Seed,
 	}
+}
+
+func (r *Recorder) cappedKills() int {
+	if r.Meta.Spawned > 0 {
+		return min(r.kills, r.Meta.Spawned)
+	}
+	return r.kills
 }
 
 // BossScoreOutcome maps a boss-test outcome onto the scorecard's.

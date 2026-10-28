@@ -96,6 +96,39 @@ func TestDefaultScenariosValidateAndTrainEveryTier(t *testing.T) {
 	}
 }
 
+// A scenario trains the family the warrior will fight its headliner as, or
+// the trained profile would never apply to the mob it was trained against.
+func TestScenarioFamilyIsTheFamilyOfItsHeadlinerMob(t *testing.T) {
+	book, err := DefaultScenarios()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range book.Scenarios {
+		if s.Family == tactics.FamilyDefault {
+			continue
+		}
+		for _, m := range s.Mobs {
+			if got := tactics.FamilyOfType(m.Mob); got != s.Family {
+				t.Errorf("scenario %q trains family %q but mob %q is fought as %q", s.Name, s.Family, m.Mob, got)
+			}
+		}
+	}
+	s, _ := book.Scenario("ravager-charge")
+	if s.Family != tactics.FamilyBrute {
+		t.Errorf("ravager-charge family = %q, want brute", s.Family)
+	}
+}
+
+func TestScenarioFamilyMobSetsAgreeWithTheWarriorsFamilyTable(t *testing.T) {
+	for fam, mobs := range scenarioFamilies {
+		for mob := range mobs {
+			if got := tactics.FamilyOfType(mob); got != fam {
+				t.Errorf("family %q admits %q, which the warrior fights as %q", fam, mob, got)
+			}
+		}
+	}
+}
+
 func TestDefaultScenariosCoverEveryFamily(t *testing.T) {
 	book, err := DefaultScenarios()
 	if err != nil {
@@ -150,7 +183,11 @@ func TestLoadScenariosValidation(t *testing.T) {
 		{"variant without the namespace",
 			strings.Replace(minimalScenarios, "count: 2}", "count: 2, variant: become_drowned}", 1), testTiers, "must start with minecraft:"},
 		{"name with a quote",
-			strings.Replace(minimalScenarios, "count: 2}", `count: 2, name: 'ba"d'}`, 1), testTiers, "quote or newline"},
+			strings.Replace(minimalScenarios, "count: 2}", `count: 2, name: 'ba"d'}`, 1), testTiers, "quote, backslash or control"},
+		{"name with a backslash",
+			strings.Replace(minimalScenarios, "count: 2}", `count: 2, name: 'a\b'}`, 1), testTiers, "quote, backslash or control"},
+		{"name with a selector tail",
+			strings.Replace(minimalScenarios, "count: 2}", `count: 2, name: "x\u0007y"}`, 1), testTiers, "quote, backslash or control"},
 		{"unknown field", strings.Replace(minimalScenarios, "  - name: one", "  - name: one\n    bogus: true", 1), testTiers, "field bogus not found"},
 	}
 	for _, tt := range tests {

@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +42,9 @@ func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
 	rounds := fs.Int("rounds", 2, fmt.Sprintf("rounds; the sides swap every round (at most %d)", arena.MaxDuelRounds))
 	timeout := fs.Duration("timeout", 2*time.Minute, fmt.Sprintf("limit for one round (%s..%s)", arena.MinDuelRoundTimeout, arena.MaxDuelRoundTimeout))
 	maxWall := fs.Duration("max-wall", 30*time.Minute, fmt.Sprintf("limit for the whole run (at most %s)", arena.MaxDuelWall))
-	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a duel; duelists must be among them")
+	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a duel; says nothing about who may duel")
+	allow := fs.String("duelists-allow", strings.Join(arena.DefaultDuelists, ","), "units that may duel; a duel clears their inventories and moves them")
+	roster := fs.String("duelists-roster", "", "optional file of unit names, one per line; the lines starting with crew-lab join --duelists-allow")
 	scores := fs.String("scores", "", "scorecard JSONL to append to (default ~/.local/state/duel-scorecards.jsonl)")
 	stopFile := fs.String("stop-file", "", "end the run when this file exists")
 	runID := fs.String("run-id", "", "run id on every scorecard (default duel-<time>)")
@@ -52,11 +56,15 @@ func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
-	if err := arena.ValidateLabTarget(*t.lab); err != nil {
+	if err := arena.ValidateLabConsole(*t.lab, *t.compose); err != nil {
 		return nil, err
 	}
 	if *layoutPath == "" {
 		return nil, errors.New("duel needs --layout")
+	}
+	duelists, err := duelistList(*allow, *roster)
+	if err != nil {
+		return nil, err
 	}
 	id := *runID
 	if id == "" {
@@ -76,10 +84,39 @@ func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
 			Red: splitNames(*red), Blue: splitNames(*blue),
 			RedProfile: *redProfile, BlueProfile: *blueProfile,
 			Kits: splitNames(*kits), Rounds: *rounds, RoundTimeout: *timeout, MaxWall: *maxWall,
-			CrewNames: splitNames(*crew), RunID: id, Spacing: *spacing,
+			CrewNames: splitNames(*crew), Duelists: duelists, RunID: id, Spacing: *spacing,
 			Poll: *poll, Settle: *settle, KitGap: *kitGap, Countdown: *countdown,
 		},
 	}, nil
+}
+
+// labRosterName is the shape of a roster line that may add a duelist.
+var labRosterName = regexp.MustCompile(`^crew-lab[A-Za-z0-9_.-]*$`)
+
+// duelistList is who may duel: the --duelists-allow names, plus the roster
+// file's crew-lab names when the file is given and present. It is never built
+// from --crew-names, which lets extra players stay online but must not make
+// them fair game for a clear and a teleport.
+func duelistList(allow, rosterPath string) ([]string, error) {
+	names := splitNames(allow)
+	if rosterPath != "" {
+		raw, err := os.ReadFile(rosterPath)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			return nil, err
+		default:
+			for _, line := range strings.Split(string(raw), "\n") {
+				if line = strings.TrimSpace(line); labRosterName.MatchString(line) && !slices.Contains(names, line) {
+					names = append(names, line)
+				}
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil, errors.New("duel needs at least one unit in --duelists-allow")
+	}
+	return names, nil
 }
 
 // fileSink appends each scorecard to a JSONL file.
