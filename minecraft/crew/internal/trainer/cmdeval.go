@@ -18,8 +18,10 @@ import (
 const maxCmdOutput = 8 << 20
 
 // waitDelay bounds how long Wait lingers for output pipes after the command
-// exited or was killed. A variable so tests need not wait the full two seconds.
-var waitDelay = 2 * time.Second
+// exited, and is also how long a cancelled evaluator gets between SIGTERM and
+// SIGKILL: the bridge needs that time to withdraw profiles and clear the arena.
+// A variable so tests need not wait the full fifteen seconds.
+var waitDelay = 15 * time.Second
 
 // errOutputTooLarge ends a fight whose evaluator prints more than the cap.
 var errOutputTooLarge = errors.New("trainer: evaluator output exceeds the cap")
@@ -27,7 +29,9 @@ var errOutputTooLarge = errors.New("trainer: evaluator output exceeds the cap")
 // CmdEvaluator fights by running an external command. The command gets
 // {"profile":...,"scenario":...} as JSON on stdin and the scenario in
 // TRAINER_* environment variables, and prints one Scorecard per line on
-// stdout. Only the cards naming the evaluated profile are kept, so a duel
+// stdout. A timeout or cancellation sends the command's process group SIGTERM,
+// then SIGKILL after waitDelay, and TRAINER_DEADLINE (RFC 3339) tells it when
+// that SIGTERM will come, so it can finish and clean up first. Only the cards naming the evaluated profile are kept, so a duel
 // command may print the opponent's card too. Argv is split on whitespace and
 // run without a shell.
 type CmdEvaluator struct {
@@ -60,17 +64,22 @@ func (e CmdEvaluator) Evaluate(ctx context.Context, p tactics.Profile, s Scenari
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	confine(cmd)
+	finish := confine(cmd, waitDelay)
 	cmd.WaitDelay = waitDelay
 	cmd.Stdin = bytes.NewReader(in)
-	cmd.Env = append(append(cmd.Environ(), e.Env...),
+	env := append(append(cmd.Environ(), e.Env...),
 		"TRAINER_SCENARIO="+s.Name, "TRAINER_KIND="+s.Kind, "TRAINER_FAMILY="+string(s.Family),
 		"TRAINER_SIDE="+s.Side, fmt.Sprintf("TRAINER_SEED=%d", s.Seed), "TRAINER_PROFILE="+p.Name)
+	if deadline, ok := ctx.Deadline(); ok {
+		env = append(env, "TRAINER_DEADLINE="+deadline.UTC().Format(time.RFC3339))
+	}
+	cmd.Env = env
 	var stderr bytes.Buffer
 	cmd.Stderr = &limitedBuffer{buf: &stderr, max: 2048}
 	out := &cappedWriter{max: maxCmdOutput, onOverflow: stop}
 	cmd.Stdout = out
 	err = cmd.Run()
+	finish()
 	// Whatever the command left behind must not outlive the fight.
 	_ = killGroup(cmd)
 	if out.overflowed {

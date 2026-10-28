@@ -111,3 +111,64 @@ exec yes '{"profile":"p1","outcome":"win"}'
 	}
 	gone(t, pidFile)
 }
+
+func TestCmdEvaluatorTermsTheGroupSoItCanCleanUp(t *testing.T) {
+	shortWaitDelay(t)
+	marks := t.TempDir()
+	script, pidFile := writeScript(t, strings.ReplaceAll(`trap 'echo term > MARKS/term; echo "$TRAINER_DEADLINE" > MARKS/deadline; echo cleaned > MARKS/cleanup; exit 0' TERM
+sleep 60 &
+echo $! > PIDFILE
+echo "$TRAINER_DEADLINE" > MARKS/deadline-at-start
+wait
+`, "MARKS", marks))
+	start := time.Now()
+	_, err := CmdEvaluator{Command: script, Timeout: time.Second}.Evaluate(context.Background(), tactics.NewProfile("p1"), cmdScenario)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timed-out evaluator = %v, want the deadline error", err)
+	}
+	for _, f := range []string{"term", "cleanup"} {
+		if _, err := os.Stat(filepath.Join(marks, f)); err != nil {
+			t.Errorf("the evaluator never saw SIGTERM and ran its cleanup: missing %s", f)
+		}
+	}
+	raw, _ := os.ReadFile(filepath.Join(marks, "deadline-at-start"))
+	deadline, err := time.Parse(time.RFC3339, strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("TRAINER_DEADLINE = %q: %v", raw, err)
+	}
+	if want := start.Add(time.Second); deadline.After(want.Add(time.Second)) || deadline.Before(want.Add(-2*time.Second)) {
+		t.Errorf("TRAINER_DEADLINE = %v, want about %v", deadline, want)
+	}
+	gone(t, pidFile)
+}
+
+func TestCmdEvaluatorKillsAGroupThatIgnoresSIGTERM(t *testing.T) {
+	shortWaitDelay(t)
+	script, pidFile := writeScript(t, `trap '' TERM
+sh -c 'trap "" TERM; sleep 60' &
+echo $! > PIDFILE
+while :; do sleep 1; done
+`)
+	start := time.Now()
+	_, err := CmdEvaluator{Command: script, Timeout: 300 * time.Millisecond}.Evaluate(context.Background(), tactics.NewProfile("p1"), cmdScenario)
+	if err == nil {
+		t.Fatal("an evaluator that ignores SIGTERM was not stopped")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("hostile evaluator held the fight for %v", d)
+	}
+	gone(t, pidFile)
+}
+
+func TestCmdEvaluatorWithoutADeadlineSetsNone(t *testing.T) {
+	marks := t.TempDir()
+	script, _ := writeScript(t, strings.ReplaceAll(`echo "${TRAINER_DEADLINE-unset}" > MARKS/deadline
+echo '{"profile":"p1","outcome":"win"}'
+`, "MARKS", marks))
+	if _, err := (CmdEvaluator{Command: script}).Evaluate(context.Background(), tactics.NewProfile("p1"), cmdScenario); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(marks, "deadline")); strings.TrimSpace(string(raw)) != "unset" {
+		t.Errorf("TRAINER_DEADLINE = %q with no timeout", raw)
+	}
+}

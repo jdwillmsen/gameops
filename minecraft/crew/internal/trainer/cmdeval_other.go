@@ -2,9 +2,12 @@
 
 package trainer
 
-import "os/exec"
+import (
+	"os/exec"
+	"time"
+)
 
-func confine(*exec.Cmd) {}
+func confine(*exec.Cmd, time.Duration) (done func()) { return func() {} }
 
 func killGroup(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
