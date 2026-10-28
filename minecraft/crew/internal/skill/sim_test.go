@@ -195,6 +195,10 @@ type rig struct {
 	rejectWith uint8
 	correctAt  int
 	correctBy  mgl32.Vec3
+	// onWrite sees each packet the unit writes and, returning true, keeps it
+	// from the rig's own server: a server that answers from its own goroutine
+	// (creative takes) hooks in here.
+	onWrite func(packet.Packet) bool
 }
 
 // timedFill puts a stack in a chest slot once the unit has sent that many
@@ -264,6 +268,9 @@ func (r *rig) have(name string) int {
 func (r *rig) WritePacket(pk packet.Packet) error {
 	if r.failWriteAt > 0 && r.ticks >= r.failWriteAt {
 		return errWire
+	}
+	if r.onWrite != nil && r.onWrite(pk) {
+		return nil
 	}
 	r.pending = append(r.pending, pk)
 	return nil
