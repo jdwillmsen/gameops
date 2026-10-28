@@ -617,6 +617,9 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 func (r *rig) onPlace(u *protocol.UseItemTransactionData) {
 	r.placeClicks++
 	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone", idOakPlanks: "oak_planks", idGlass: "glass", idTorch: "torch"}
+	for name, id := range extraBlocks {
+		blocks[id] = name
+	}
 	pose := r.Actuator.Pose()
 	offsets := map[int32][3]int32{0: {0, -1, 0}, 1: {0, 1, 0}, 2: {0, 0, -1}, 3: {0, 0, 1}, 4: {-1, 0, 0}, 5: {1, 0, 0}}
 	off := offsets[u.BlockFace]
