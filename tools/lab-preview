@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Throwaway Bedrock server for judging a draft add-on from a LAN client,
+# without restarting the shared lab.
+set -euo pipefail
+
+NAME=${LAB_PREVIEW_NAME:-lab-preview}
+IMAGE=${LAB_PREVIEW_IMAGE:-itzg/minecraft-bedrock-server:2026.10.2}
+# Default matches what the add-on was verified on; the prd lab runs 1.26.60.6.
+VERSION=${LAB_PREVIEW_VERSION:-1.26.52.3}
+HOST_PORT=${LAB_PREVIEW_PORT:-19144}
+LEVEL=preview
+SINCE=1970-01-01T00:00:00Z
+ROOT=/tmp/lab-preview/$NAME
+DATA=$ROOT/data
+STAGE_PY=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lab-preview-stage.py
+
+usage() {
+  cat <<USAGE
+usage: lab-preview <command>
+  up <worktree|packs-dir>  start the server with */behavior_pack and */resource_pack staged
+  sync                     re-stage the same packs and restart
+  logs [docker-logs args]  show server logs
+  cmd <console command>    run a console command (e.g. cmd summon gameops:werewolf)
+  down                     remove the container and staged data
+note: with nobody online, load a chunk first: cmd tickingarea add 0 -60 0 16 -60 16 t
+env: LAB_PREVIEW_VERSION (default $VERSION; prd lab: 1.26.60.6), LAB_PREVIEW_PORT (default $HOST_PORT)
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit 1; }
+
+running() { docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null | grep -q true; }
+
+resolve_packs() {
+  local dir=$1
+  [[ -d $dir/packs ]] && dir=$dir/packs
+  [[ -d $dir ]] || die "not a directory: $1"
+  readlink -f "$dir"
+}
+
+stage() {
+  local packs=$1 minor
+  # BDS ignores a pack whose version component exceeds 65535.
+  minor=$(($(date +%s) % 65536))
+  mkdir -p "$DATA/worlds/$LEVEL"
+  python3 -I "$STAGE_PY" "$packs" "$DATA/worlds/$LEVEL" "$minor"
+  # The container user differs from ours and must write into the world.
+  chmod -R a+rwX "$ROOT"
+}
+
+wait_started() {
+  local i
+  for ((i = 0; i < 90; i++)); do
+    logs_since | grep -q 'Server started' && return 0
+    sleep 1
+  done
+  die "no 'Server started' within 90s; see: lab-preview logs"
+}
+
+# Logs since the last (re)start only, so a fixed problem stops being reported.
+logs_since() { docker logs --since "$SINCE" "$NAME" 2>&1; }
+
+report() {
+  local errs
+  errs=$( { logs_since; cat "$DATA"/logs/*.txt 2>/dev/null || true; } |
+    grep -iE 'was not found|\[(Scripting|Behavior|Resource).*(error|warn)|pack.*(error|invalid|failed)|manifest.*error' | sort -u || true)
+  if [[ -n $errs ]]; then
+    echo "pack problems:"
+    echo "$errs"
+  else
+    echo "pack problems: none"
+  fi
+  logs_since | grep 'Pack Stack' || true
+  echo "join: $(hostname -I | awk '{print $1}'):$HOST_PORT (Bedrock, LAN, version $VERSION)"
+}
+
+restart_and_wait() {
+  SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  docker restart "$NAME" >/dev/null
+  wait_started
+}
+
+cmd_up() {
+  [[ $# -eq 1 ]] || die "usage: lab-preview up <worktree|packs-dir>"
+  local packs
+  packs=$(resolve_packs "$1")
+  docker inspect "$NAME" >/dev/null 2>&1 && die "$NAME already exists; run: lab-preview sync  or  lab-preview down"
+  stage "$packs"
+  echo "$packs" >"$ROOT/packs-dir"
+  SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  docker run -d --name "$NAME" -p "0.0.0.0:$HOST_PORT:19132/udp" \
+    -e EULA=TRUE -e "VERSION=$VERSION" -e "LEVEL_NAME=$LEVEL" -e LEVEL_TYPE=FLAT \
+    -e ONLINE_MODE=false -e ALLOW_LIST=false -e ALLOW_CHEATS=true -e GAMEMODE=creative \
+    -e TRANSPORT=raknet -e SERVER_PORT=19132 -e CONTENT_LOG_FILE_ENABLED=true \
+    -v "$DATA:/data" "$IMAGE" >/dev/null
+  wait_started
+  # The first boot creates the world and ignores the staged pack lists, so
+  # restage and restart once to get the packs applied.
+  stage "$packs" >/dev/null
+  restart_and_wait
+  echo "up: $NAME"
+  report
+}
+
+cmd_sync() {
+  [[ -f $ROOT/packs-dir ]] || die "nothing to sync; run: lab-preview up <packs-dir>"
+  stage "$(cat "$ROOT/packs-dir")"
+  restart_and_wait
+  echo "synced: $NAME"
+  report
+}
+
+cmd_cmd() {
+  [[ $# -ge 1 ]] || die "usage: lab-preview cmd <console command>"
+  running || die "$NAME is not running"
+  local pid
+  pid=$(docker top "$NAME" -eo pid,args | awk '/bedrock_server/ {print $1; exit}')
+  [[ -n $pid ]] || die "bedrock_server process not found in $NAME"
+  # The image's send-command helper cannot find the process here, so write to
+  # the server's stdin through the host's /proc.
+  echo "$*" | sudo -n tee "/proc/$pid/fd/0" >/dev/null
+  echo "sent: $*"
+}
+
+cmd_down() {
+  if docker inspect "$NAME" >/dev/null 2>&1; then
+    docker rm -f "$NAME" >/dev/null
+    echo "removed container $NAME"
+  else
+    echo "no container $NAME"
+  fi
+  if [[ -d $ROOT ]]; then
+    # Files written by the container belong to another uid.
+    rm -rf "$ROOT" 2>/dev/null || sudo -n rm -rf "$ROOT"
+    echo "removed $ROOT"
+  else
+    echo "no staged dir $ROOT"
+  fi
+}
+
+case ${1:-} in
+  up) shift; cmd_up "$@" ;;
+  sync) cmd_sync ;;
+  logs) shift; docker logs "$@" "$NAME" 2>&1 | tail -n "${LAB_PREVIEW_TAIL:-60}" ;;
+  cmd) shift; cmd_cmd "$@" ;;
+  down) cmd_down ;;
+  -h | --help | help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac
