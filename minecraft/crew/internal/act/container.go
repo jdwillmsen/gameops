@@ -304,6 +304,8 @@ func (a *Actuator) Died() {
 	a.abandoned = map[int32]bool{}
 	a.replacing = map[int32]int{}
 	a.takes = map[int32]creativeTake{}
+	a.takenItem = [hotbarSlots]int32{}
+	a.slotUse = [hotbarSlots]uint64{}
 	a.move = 0
 	a.crafts = newCraftState()
 }

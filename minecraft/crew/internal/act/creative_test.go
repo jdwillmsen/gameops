@@ -601,3 +601,20 @@ func TestAnAbandonedTakeThatNeverGetsAnswerIsForgottenAfterTheHorizon(t *testing
 		t.Errorf("%d entries left for the request nobody answered", n)
 	}
 }
+
+func TestDeathForgetsWhichSlotsTheUnitTook(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	a.Died()
+	// After the respawn the server hands back a hotbar of the same items,
+	// which the unit has no claim on.
+	for i := uint32(0); i < hotbarSlots; i++ {
+		held := protocol.ItemInstance{StackNetworkID: int32(200 + i), Stack: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: creativeOakStair}, Count: 64}}
+		a.Apply(&packet.InventorySlot{WindowID: 0, Slot: i, NewItem: held})
+	}
+	if err := a.TakeCreative("stone"); !errors.Is(err, ErrHotbarFull) {
+		t.Fatalf("err = %v, want ErrHotbarFull: no slot is the unit's own after a death", err)
+	}
+}
