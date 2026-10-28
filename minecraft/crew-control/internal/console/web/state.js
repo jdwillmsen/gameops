@@ -99,6 +99,8 @@ export function describeItem(it) {
   if (b.template === 'gather_and_deposit') return `gather ${b.item} x${b.qty}`;
   if (b.template === 'haul') return 'haul ' + Object.entries(b.items || {}).map(([k, n]) => `${k} x${n}`).join(', ');
   if (b.template === 'goto' && b.to) return `go to ${b.to.x} ${b.to.y} ${b.to.z}`;
+  if (b.template === 'repair_build') return `repair ${b.plan || 'build'}${b.dry_run ? ' (dry run)' : ''}`;
+  if (b.template === 'build_blueprint') return `build ${b.blueprint || 'blueprint'}${b.dry_run ? ' (dry run)' : ''}`;
   return b.template || 'task';
 }
 
