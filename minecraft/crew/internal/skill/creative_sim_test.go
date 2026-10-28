@@ -3,13 +3,29 @@ package skill
 import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 )
 
 const creativeWindow byte = 9
 
 // creativeIDs are the creative-inventory IDs of the items the rig's server
 // can place; they differ from the item IDs, as on the wire.
-var creativeIDs = map[int32]uint32{idDirt: 700, idCobblestone: 701}
+var creativeIDs = map[int32]uint32{idDirt: 700, idCobblestone: 701, idOakPlanks: 702, idGlass: 703}
+
+// extraBlocks are placeable block items beyond the nine a hotbar holds, for
+// a task that needs more block types than slots.
+var extraBlocks = map[string]int32{
+	"stone": 30, "sand": 31, "brick_block": 32, "white_wool": 33, "gold_block": 34,
+	"iron_block": 35, "diamond_block": 36, "emerald_block": 37, "lapis_block": 38, "obsidian": 39,
+}
+
+func init() {
+	for name, id := range extraBlocks {
+		itemTable = append(itemTable, protocol.ItemEntry{Name: "minecraft:" + name, RuntimeID: int16(id)})
+		creativeIDs[id] = uint32(800 + id)
+	}
+}
 
 // goCreative puts the unit in creative mode on a server that opens the
 // inventory screen and answers creative takes. The answers come from a
@@ -34,7 +50,8 @@ func (r *rig) goCreative() {
 			in <- p
 			return true
 		case *packet.ItemStackRequest:
-			if _, ok := p.Requests[0].Actions[0].(*protocol.CraftCreativeStackRequestAction); ok {
+			switch p.Requests[0].Actions[0].(type) {
+			case *protocol.CraftCreativeStackRequestAction, *protocol.DestroyStackRequestAction:
 				in <- p
 				return true
 			}
@@ -50,8 +67,19 @@ func (r *rig) goCreative() {
 				r.Actuator.Apply(&packet.ContainerOpen{WindowID: creativeWindow, ContainerType: 0xff, ContainerEntityUniqueID: -1})
 			case *packet.ItemStackRequest:
 				req := p.Requests[0]
-				craft := req.Actions[0].(*protocol.CraftCreativeStackRequestAction)
-				take := req.Actions[1].(*protocol.TakeStackRequestAction)
+				actions := req.Actions
+				// A take onto an occupied slot is only accepted in the request
+				// that destroys the stack there, as on the lab.
+				if d, ok := actions[0].(*protocol.DestroyStackRequestAction); ok {
+					r.inv[d.Source.Slot] = slotStack{}
+					actions = actions[1:]
+				}
+				craft := actions[0].(*protocol.CraftCreativeStackRequestAction)
+				take := actions[1].(*protocol.TakeStackRequestAction)
+				if r.inv[take.Destination.Slot].count > 0 {
+					r.Actuator.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: req.RequestID, Status: act.StatusOccupied}}})
+					continue
+				}
 				for item, cid := range creativeIDs {
 					if cid == craft.CreativeItemNetworkID {
 						stackID++

@@ -246,8 +246,6 @@ func (r *Repair) triage(a Actuator) outcome {
 	}
 
 	items := a.ItemTable()
-	var types []string
-	seen := map[string]bool{}
 	cells := 0
 	for _, rc := range repair.OrderRects(d.Rects) {
 		n := boxCells(rc.Box)
@@ -257,10 +255,6 @@ func (r *Repair) triage(a Actuator) outcome {
 				r.noItem += n
 				continue
 			}
-			if !seen[item] {
-				seen[item] = true
-				types = append(types, item)
-			}
 		}
 		cells += n
 		r.work = append(r.work, rc)
@@ -268,37 +262,8 @@ func (r *Repair) triage(a Actuator) outcome {
 	if cells > maxRepairCells {
 		return outcome{st: Failed, err: fmt.Errorf("repair needs %d cells changed, more than a unit walks in one task (%d); use arenarepair for this damage", cells, maxRepairCells)}
 	}
-	if free, held := r.hotbar(); len(types) > free {
-		need := 0
-		for _, t := range types {
-			if !held[t] {
-				need++
-			}
-		}
-		if need > free {
-			return outcome{st: Failed, err: fmt.Errorf("repair needs %d block types and the hotbar has room for %d; narrow the area or use arenarepair", need, free)}
-		}
-	}
 	r.phase = rpCell
 	return next
-}
-
-// hotbar is how many hotbar slots are empty and which items the hotbar holds.
-func (r *Repair) hotbar() (free int, held map[string]bool) { return hotbarRoom(r.self()) }
-
-// hotbarRoom counts the empty hotbar slots and names the items held there. A
-// creative take fills a slot that nothing empties again, so a task needing
-// more block types than there are free slots must be refused before it starts.
-func hotbarRoom(s belief.Snapshot) (free int, held map[string]bool) {
-	held = map[string]bool{}
-	used := 0
-	for _, it := range s.Inventory {
-		if it.Slot >= 0 && it.Slot < hotbarSlots {
-			used++
-			held[it.Name] = true
-		}
-	}
-	return hotbarSlots - used, held
 }
 
 // cell moves to the next cell that still differs from the plan and decides

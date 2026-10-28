@@ -266,20 +266,23 @@ func TestBuildStampsTheSmallHouse(t *testing.T) {
 	}
 }
 
-func TestBuildFailsUpFrontWhenTheBlocksOutnumberTheHotbar(t *testing.T) {
+func TestBuildPlacesMoreBlockTypesThanTheHotbarHolds(t *testing.T) {
 	w := flatWorld(14)
-	r := creativeRig(t, w, 1, 1, 1)
-	names := []string{"dirt", "cobblestone", "oak_log", "gravel", "coal", "oak_planks", "glass", "wooden_pickaxe", "iron_axe", "wooden_sword"}
+	r := newRig(t, w, feetAt(1, 1, 1))
+	r.goCreative()
+	names := []string{"dirt", "cobblestone", "oak_planks", "glass", "stone", "sand", "brick_block", "white_wool", "gold_block", "iron_block", "diamond_block", "emerald_block"}
 	var cells []BuildCell
 	for i, n := range names {
-		cells = append(cells, BuildCell{Pos: protocol.BlockPos{int32(5 + i%5), 1, int32(5 + i/5)}, Block: n})
+		cells = append(cells, BuildCell{Pos: protocol.BlockPos{int32(5 + i%6), 1, int32(5 + i/6)}, Block: n})
 	}
 	b := NewBuild(w, r.self, BuildSpec{Cells: cells})
-	st, err := r.run(b, 4000)
-	if st != Failed || err == nil || !strings.Contains(err.Error(), "hotbar") {
+	st, err := r.run(b, 6000)
+	if st != Done || err != nil {
 		t.Fatalf("status %v, err %v", st, err)
 	}
-	if len(w) != len(flatWorld(14)) {
-		t.Error("the stamp started before it failed")
+	for _, c := range cells {
+		if got, _ := w.Block(c.Pos); got != c.Block {
+			t.Errorf("%v is %q, want %q", c.Pos, got, c.Block)
+		}
 	}
 }

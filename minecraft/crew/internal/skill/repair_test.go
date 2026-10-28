@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -134,18 +135,24 @@ func TestRepairRefusesDamageTooBigToWalk(t *testing.T) {
 	}
 }
 
-func TestRepairRefusesMoreBlockTypesThanTheHotbarHolds(t *testing.T) {
+func TestRepairPlacesMoreBlockTypesThanTheHotbarHolds(t *testing.T) {
 	w := flatWorld(12)
 	r := newRig(t, w, feetAt(1, 1, 2))
 	r.goCreative()
+	items := []string{"dirt", "cobblestone", "oak_planks", "glass", "stone", "sand", "brick_block", "white_wool", "gold_block", "iron_block", "diamond_block", "emerald_block"}
 	var plan []string
-	for i, item := range []string{"dirt", "cobblestone", "oak_log", "gravel", "coal", "iron_axe", "wooden_sword", "iron_sword", "bread", "cooked_beef"} {
-		plan = append(plan, "setblock "+string(rune('0'+i))+" 1 8 "+item)
+	for i, item := range items {
+		plan = append(plan, "setblock "+strconv.Itoa(i%6+2)+" 1 "+strconv.Itoa(8+i/6)+" "+item)
 	}
-	spec := RepairSpec{Plan: planOf(t, strings.Join(plan, "\n")), Area: areaOf(0, 1, 8, 9, 1, 8)}
-	st, err := r.run(NewRepair(stateWorld{w}, r.self, spec), 10)
-	if st != Failed || err == nil || !strings.Contains(err.Error(), "hotbar") {
+	spec := RepairSpec{Plan: planOf(t, strings.Join(plan, "\n")), Area: areaOf(0, 1, 8, 9, 1, 9)}
+	st, err := r.run(NewRepair(stateWorld{w}, r.self, spec), 6000)
+	if st != Done || err != nil {
 		t.Fatalf("status %v, err %v", st, err)
+	}
+	for i, item := range items {
+		if got, _ := w.Block(protocol.BlockPos{int32(i%6 + 2), 1, int32(8 + i/6)}); got != item {
+			t.Errorf("block %d is %q, want %q", i, got, item)
+		}
 	}
 }
 
