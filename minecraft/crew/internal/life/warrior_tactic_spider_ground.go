@@ -2,8 +2,6 @@ package life
 
 import (
 	"context"
-	"math"
-
 	"github.com/go-gl/mathgl/mgl32"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
@@ -16,8 +14,8 @@ const (
 	// off the floor. Half a block clears a slab step and a walking spider's
 	// bob without calling either a climb.
 	spiderClimbLift = 0.5
-	// spiderStepAhead is the one-cell lookahead both spider walks check: a
-	// step onto ground the planner cannot stand on is refused before it is
+	// spiderStepAhead is the lookahead both spider walks sweep: a step over
+	// or onto ground the planner cannot stand on is refused before it is
 	// taken, which keeps a standoff out of lava, the void and water.
 	spiderStepAhead = 1.5
 	// spiderWallCap is how many ticks the standoff may last against a spider
@@ -76,6 +74,8 @@ func (spiderGround) Engage(_ context.Context, f *Fight) (bool, error) {
 		return false, nil
 	}
 	st.last = f.Life.tick
+	// The standoff is melee by design, so a half-drawn bow is let go.
+	f.Life.cancelDraw(f.Actuator)
 	if inMeleeReach(f.Pose, f.Target) {
 		// Dropping or mid-leap: this is the hit the standoff waited for.
 		f.Life.lowerShield(f.Actuator)
@@ -91,15 +91,11 @@ func (spiderGround) Engage(_ context.Context, f *Fight) (bool, error) {
 	return true, f.Actuator.Tick(act.Input{Yaw: yaw, Pitch: pitch, Forward: -1})
 }
 
-// spiderCanBackOff says whether the cell a step away from the spider is
+// spiderCanBackOff says whether the step away from the spider stays on
 // ground the unit may stand on. The ground tactic opens distance only over
-// floor the pathing layer accepts.
+// floor the pathing layer accepts, every cell of the way.
 func (l *Life) spiderCanBackOff(p act.Pose, e belief.Entity) bool {
-	dir := away(p, e)
-	x := int32(math.Floor(float64(p.Feet.X() + dir.X()*spiderStepAhead)))
-	z := int32(math.Floor(float64(p.Feet.Z() + dir.Y()*spiderStepAhead)))
-	_, ok := cellAt(l.world, x, z, cellOf(p.Feet).Y())
-	return ok
+	return sweepClear(l.world, p.Feet, away(p, e), spiderStepAhead)
 }
 
 func init() { RegisterTactic(spiderGround{}) }

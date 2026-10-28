@@ -398,3 +398,55 @@ func TestACreeperThatNeverClosesIsLeftToTheRoleAfterAWhile(t *testing.T) {
 		t.Errorf("the unit still stood its ground %.2f blocks from where it started, after waiting out the patience", d)
 	}
 }
+
+func TestCreeperBackoffLetsGoOfAHalfDrawnBowToLunge(t *testing.T) {
+	withTactics(t, newCreeperTactic("creeper/backoff", false), newCreeperTactic("creeper/ranged", true))
+	r := newWarrior(t, "ranger", start)
+	if err := r.l.SetProfile(creeperProfile("creeper/ranged")); err != nil {
+		t.Fatal(err)
+	}
+	r.give(0, 301, 1)
+	r.give(1, 361, 1)
+	r.give(9, 362, 16)
+	r.setHealth(20)
+	r.spawn(creeperID, "minecraft:creeper", mgl32.Vec3{25, 1, 20.5})
+	r.beginDraw(t)
+
+	if err := r.l.SetProfile(creeperProfile("creeper/backoff")); err != nil {
+		t.Fatal(err)
+	}
+	r.step()
+	if r.l.warrior.drawing {
+		t.Error("still drawing after the lunge tactic took the tick")
+	}
+	if r.out.releases(1) == 0 {
+		t.Error("the half-drawn bow was never released")
+	}
+}
+
+func TestAnEnemyPlayerBeyondTheCreeperDoesNotStopTheBlow(t *testing.T) {
+	r := creeperRig(t, "striker", "creeper/backoff", nil)
+	pol := newPvP("rival", "friend")
+	pol.out["friend"] = true
+	pol.live = true
+	r.l.SetPvPPolicy(pol)
+	r.playerNamed(61, "rival", mgl32.Vec3{26.0, 1, 20.5})
+	f := newFuse(r, mgl32.Vec3{24.4, 1, 20.5}, 0.1)
+	f.run(14)
+	if swings(r) == 0 {
+		t.Fatal("an enemy player behind the creeper kept the unit from hitting it")
+	}
+}
+
+func TestAPlayerOnTheUnitsSideStillStopsTheBlowWithAPolicyLive(t *testing.T) {
+	r := creeperRig(t, "striker", "creeper/backoff", nil)
+	pol := newPvP("rival")
+	pol.live = true
+	r.l.SetPvPPolicy(pol)
+	r.playerNamed(61, "friend", mgl32.Vec3{26.0, 1, 20.5})
+	f := newFuse(r, mgl32.Vec3{24.4, 1, 20.5}, 0.1)
+	f.run(30)
+	if n := swings(r); n != 0 {
+		t.Fatalf("%d blows with a friendly player behind the creeper", n)
+	}
+}

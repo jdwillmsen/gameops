@@ -279,3 +279,43 @@ func TestTheDefaultProfileNeverHandsTheWitchTacticsTheTick(t *testing.T) {
 		t.Errorf("registering the witch tactics changed the default fight: %d packets, want %d", len(got), len(base))
 	}
 }
+
+func TestWitchRushLetsAHurtUnitStartItsMeal(t *testing.T) {
+	withTactics(t, &witchRush{}, &witchMilk{})
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(witchNamed("witch/rush")); err != nil {
+		t.Fatal(err)
+	}
+	r.give(0, 303, 1)
+	r.give(3, 363, 2)
+	r.setHealth(8)
+	// Far enough that the role heals and the rush would otherwise be marching.
+	r.spawn(80, "minecraft:witch", mgl32.Vec3{29.5, 1, 20.5})
+	r.run(15)
+
+	if r.out.uses(3) == 0 {
+		t.Error("never started the meal a hurt unit wanted")
+	}
+}
+
+func TestWitchRushDoesNotMarchOverAOneBlockWaterStrip(t *testing.T) {
+	withTactics(t, &witchRush{}, &witchMilk{})
+	r := newWarrior(t, "striker", mgl32.Vec3{20.8, 1, 20.5})
+	if err := r.l.SetProfile(witchNamed("witch/rush")); err != nil {
+		t.Fatal(err)
+	}
+	r.give(0, 303, 1)
+	r.waterStripX(21)
+	r.spawn(80, "minecraft:witch", mgl32.Vec3{30.5, 1, 20.5})
+	for i := 0; i < 40; i++ {
+		r.step()
+		if f := r.feet(); (f.X() >= 21 && f.X() < 22) || f.Y() != 1 || r.inWater() {
+			t.Fatalf("tick %d: feet at %v, marched into the water strip", i, f)
+		}
+	}
+}
+
+func TestWitchRushLetsGoOfAHalfDrawnBow(t *testing.T) {
+	withTactics(t, &witchRush{}, &witchMilk{})
+	letsGoOfTheBow(t, "minecraft:witch", mgl32.Vec3{28.5, 1, 20.5}, witchNamed("witch/rush"), func(*rig) {})
+}
