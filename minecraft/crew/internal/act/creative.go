@@ -87,6 +87,13 @@ func (a *Actuator) TakeCreative(item string) error {
 		a.mu.Unlock()
 		return ErrScreenNotOpen
 	}
+	// The lock was released while the screen opened, and a slot update may
+	// have landed meanwhile: plan again so the destroy quotes what is there.
+	creativeID, itemID, slot, evict, err = a.planTakeLocked(item)
+	if err != nil {
+		a.mu.Unlock()
+		return err
+	}
 	req := a.nextRequest
 	// The server only takes the created output named by the request that
 	// made it.
