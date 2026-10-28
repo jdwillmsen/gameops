@@ -252,7 +252,12 @@ func execute(ctx context.Context, cmd string, o options, stdout, stderr io.Write
 		return printReport(stdout, rep, o, p.Repairs)
 	}
 	crew := splitNames(o.crew)
-	ao := repair.Options{DryRun: !o.execute, Crew: crew, Quiet: o.quiet, LoadWait: o.loadWait}
+	ao := repair.Options{DryRun: !o.execute, Crew: crew, Quiet: o.quiet, LoadWait: o.loadWait, Stop: ctx.Err, Sleep: func(d time.Duration) {
+		select {
+		case <-ctx.Done():
+		case <-time.After(d):
+		}
+	}}
 	if !o.execute {
 		fmt.Fprintln(stderr, "arenarepair: dry run; pass --execute to send the repair")
 	}

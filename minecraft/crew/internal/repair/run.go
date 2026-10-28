@@ -37,6 +37,9 @@ type Options struct {
 	// LoadWait is the pause after Setup; zero means DefaultLoadWait.
 	LoadWait time.Duration
 	Sleep    func(time.Duration)
+	// Stop, when set, is polled between waits and commands; a non-nil result
+	// ends the run cleanly so Teardown still happens.
+	Stop func() error
 }
 
 // failureMarkers are console replies that mean a command did not do its job.
@@ -87,6 +90,12 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 	if o.DryRun {
 		return nil
 	}
+	stopped := func() error {
+		if o.Stop == nil {
+			return nil
+		}
+		return o.Stop()
+	}
 	if err = arena.CheckAlone(c, o.Crew); err != nil {
 		return fmt.Errorf("repair: %w", err)
 	}
@@ -94,6 +103,9 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 		return err
 	}
 	sleep(quiet)
+	if err = stopped(); err != nil {
+		return err
+	}
 	if err = fightClear(c); err != nil {
 		return err
 	}
@@ -135,6 +147,9 @@ func Apply(c arena.Console, p Plan, rep *Report, o Options) (err error) {
 		sleep(loadWait)
 	}
 	for i, cmd := range p.Repairs {
+		if err = stopped(); err != nil {
+			return err
+		}
 		if i > 0 && i%batch == 0 {
 			if err = arena.CheckAlone(c, o.Crew); err != nil {
 				return fmt.Errorf("repair: %w", err)

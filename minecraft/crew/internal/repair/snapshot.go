@@ -63,9 +63,8 @@ func (s Snapshotter) Fetch(ctx context.Context, dest string) (snap Snapshot, err
 	if now == nil {
 		now = time.Now
 	}
-	if _, err = s.Console.Exec("save hold"); err != nil {
-		return Snapshot{}, fmt.Errorf("repair: save hold: %w", err)
-	}
+	_, holdErr := s.Console.Exec("save hold")
+	// A failed hold may still have reached the server, so resume either way.
 	defer func() {
 		out, rerr := s.Console.Exec("save resume")
 		if rerr == nil && strings.Contains(strings.ToLower(out), "unknown command") {
@@ -75,6 +74,9 @@ func (s Snapshotter) Fetch(ctx context.Context, dest string) (snap Snapshot, err
 			err = errors.Join(err, fmt.Errorf("repair: save resume failed, saving may still be held: %w", rerr))
 		}
 	}()
+	if holdErr != nil {
+		return Snapshot{}, fmt.Errorf("repair: save hold: %w", holdErr)
+	}
 	var lengths map[string]int64
 	for i := 0; i < holdTries && lengths == nil; i++ {
 		if err = ctx.Err(); err != nil {

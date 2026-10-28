@@ -1,6 +1,7 @@
 package repair
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -143,5 +144,29 @@ func TestSetupFailureIsRefusedNotAborted(t *testing.T) {
 	}
 	if r.Status == StatusAborted || r.RepairsRun != 0 {
 		t.Errorf("status %q after %d repairs; no repair ran so the arena is untouched", r.Status, r.RepairsRun)
+	}
+}
+
+func TestStopEndsRunButStillTearsDown(t *testing.T) {
+	f := &arena.FakeConsole{}
+	idleServer(f)
+	o := quiet()
+	calls := 0
+	o.Stop = func() error {
+		if calls++; calls > 1 {
+			return errors.New("interrupted")
+		}
+		return nil
+	}
+	var r Report
+	if err := Apply(f, samplePlan, &r, o); err == nil {
+		t.Fatal("expected the stop error")
+	}
+	if r.RepairsRun != 0 {
+		t.Errorf("%d repairs ran after stop", r.RepairsRun)
+	}
+	last := f.Cmds[len(f.Cmds)-1]
+	if len(samplePlan.Teardown) > 0 && last != samplePlan.Teardown[len(samplePlan.Teardown)-1] {
+		t.Errorf("last command %q, want teardown", last)
 	}
 }
