@@ -1,0 +1,30 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:werewolf",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/werewolf"
+      },
+      "geometry": {
+        "default": "geometry.gameops.werewolf"
+      },
+      "animations": {
+        "walk": "animation.gameops.werewolf.walk",
+        "attack": "animation.gameops.werewolf.attack",
+        "look": "animation.gameops.werewolf.look"
+      },
+      "scripts": {
+        "animate": ["walk", "attack", "look"]
+      },
+      "render_controllers": ["controller.render.gameops.werewolf"],
+      "spawn_egg": {
+        "base_color": "#3a3330",
+        "overlay_color": "#d9382a"
+      }
+    }
+  }
+}

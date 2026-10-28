@@ -8,12 +8,12 @@ art and JSON here is our own; nothing is copied from the vanilla packs.
 |---|---|
 | `behavior_pack/` | Manifest and the entity definition (health 40, `minecraft:attack` 4, melee goal, target goal) |
 | `resource_pack/` | Manifest (depends on the behaviour pack header UUID), client entity, box model, render controller, 64x64 texture, lang file |
-| `assets-src/make_texture.py`, `make_colossus_texture.py` | Paint the textures; not shipped in the packs |
+| `assets-src/make_texture.py`, `make_werewolf_texture.py` | Paint the textures; not shipped in the packs |
 
-`gameops:colossus` is the second mob: a 3x3-block, 600 health, 18 damage,
-knockback-immune, fire-immune brute with a 128x128 model and walk, attack and
-look animations. It follows the same targeting rule as the brute (only the
-`arena_warrior` tag, never players), so a player must tag themselves to fight it.
+`gameops:werewolf` is the second mob: a hunched 3x3-block wolf-man with 500
+health, 20 damage, speed 0.38, a leap attack, knockback and fire immunity, a
+128x128 model and walk, attack, look and tail animations. It follows the same
+targeting rule as the brute (only the `arena_warrior` tag, never players), so a player must tag themselves to fight it.
 
 ## Behaviour
 

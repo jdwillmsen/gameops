@@ -1,4 +1,4 @@
 entity.gameops:training_dummy_brute.name=Training Dummy Brute
 item.spawn_egg.entity.gameops:training_dummy_brute.name=Training Dummy Brute Spawn Egg
-entity.gameops:colossus.name=Colossus
-item.spawn_egg.entity.gameops:colossus.name=Colossus Spawn Egg
+entity.gameops:werewolf.name=Werewolf
+item.spawn_egg.entity.gameops:werewolf.name=Werewolf Spawn Egg
