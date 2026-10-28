@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Paints the colossus texture from scratch (own art, no vanilla pixels).
+"""Paints the werewolf texture from scratch (own art, no vanilla pixels).
 
-Run as: python3 -I make_colossus_texture.py <output.png>
+Run as: python3 -I make_werewolf_texture.py <output.png>
 The face rectangles follow the box-UV unfolding of the cubes in
-colossus.geo.json; change a cube's uv there and the matching CUBES entry here
+werewolf.geo.json; change a cube's uv there and the matching CUBES entry here
 together.
 """
 import struct
@@ -12,24 +12,29 @@ import zlib
 
 W = H = 128
 
-STONE = (74, 76, 88)
-STONE_SHADE = (54, 56, 66)
-OBSIDIAN = (34, 30, 44)
-OBSIDIAN_SHADE = (24, 20, 32)
-LAVA = (232, 101, 26)
-LAVA_HOT = (255, 190, 70)
-HORN = (214, 206, 184)
+FUR = (92, 78, 66)
+FUR_SHADE = (66, 56, 48)
+DARK = (44, 38, 34)
+DARK_SHADE = (32, 28, 26)
+BELLY = (132, 116, 98)
+CLAW = (226, 222, 208)
+EYE = (230, 40, 30)
+NOSE = (16, 12, 12)
 
 # name: (u, v, width, height, depth, base colour, shade colour)
 CUBES = {
-    "head": (0, 0, 16, 12, 14, STONE, STONE_SHADE),
-    "horn_right": (64, 0, 3, 8, 3, HORN, STONE_SHADE),
-    "horn_left": (76, 0, 3, 8, 3, HORN, STONE_SHADE),
-    "body": (0, 32, 32, 18, 18, OBSIDIAN, OBSIDIAN_SHADE),
-    "right_arm": (0, 72, 10, 28, 10, STONE, STONE_SHADE),
-    "left_arm": (40, 72, 10, 28, 10, STONE, STONE_SHADE),
-    "right_leg": (80, 72, 12, 16, 12, OBSIDIAN_SHADE, OBSIDIAN),
-    "left_leg": (0, 100, 12, 16, 12, OBSIDIAN_SHADE, OBSIDIAN),
+    "head": (0, 0, 14, 12, 14, FUR, FUR_SHADE),
+    "snout": (60, 0, 8, 6, 10, FUR, FUR_SHADE),
+    "ear_right": (100, 0, 4, 6, 2, DARK, DARK_SHADE),
+    "ear_left": (100, 10, 4, 6, 2, DARK, DARK_SHADE),
+    "body": (0, 32, 28, 22, 16, FUR, FUR_SHADE),
+    "right_arm": (0, 72, 10, 34, 10, FUR_SHADE, FUR),
+    "left_arm": (40, 72, 10, 34, 10, FUR_SHADE, FUR),
+    "claw_right": (0, 116, 10, 4, 2, CLAW, FUR_SHADE),
+    "claw_left": (24, 116, 10, 4, 2, CLAW, FUR_SHADE),
+    "right_leg": (88, 32, 10, 18, 10, DARK, DARK_SHADE),
+    "left_leg": (88, 60, 10, 18, 10, DARK, DARK_SHADE),
+    "tail": (96, 104, 6, 18, 6, FUR, DARK),
 }
 
 
@@ -60,28 +65,26 @@ def main(out):
                     colour = shade if speckle(x, y) == 0 or name in ("bottom", "back") else base
                     px[y][x] = colour + (255,)
 
-    # Lava veins down the chest, the knuckles and between the plates.
+    # Pale belly patch and darker mane across the chest front.
     bx, by, bw, bh = faces(*CUBES["body"][:5])["front"]
-    for y in range(by, by + bh):
+    for y in range(by + 4, by + bh):
+        for x in range(bx + 8, bx + bw - 8):
+            px[y][x] = (BELLY if speckle(x, y) else FUR_SHADE) + (255,)
+    for y in range(by, by + 5):
         for x in range(bx, bx + bw):
-            local_x, local_y = x - bx, y - by
-            if local_x in (15, 16) or (local_y in (5, 12) and 4 < local_x < 28 and speckle(x, y) != 0):
-                px[y][x] = (LAVA_HOT if speckle(x, y) == 2 else LAVA) + (255,)
-    for arm in ("right_arm", "left_arm"):
-        ax, ay, aw, ah = faces(*CUBES[arm][:5])["front"]
-        for y in range(ay + ah - 5, ay + ah):
-            for x in range(ax, ax + aw):
-                px[y][x] = (LAVA if speckle(x, y) else LAVA_HOT) + (255,)
+            px[y][x] = (DARK if speckle(x, y) else DARK_SHADE) + (255,)
 
+    # Red eyes and a dark nose; teeth on the snout front.
     hx, hy, _, _ = faces(*CUBES["head"][:5])["front"]
-    for ex in (3, 10):
+    for ex in (2, 9):
         for dx in range(3):
-            for dy in range(2):
-                px[hy + 4 + dy][hx + ex + dx] = LAVA_HOT + (255,)
-    for mx in range(4, 12):
-        px[hy + 9][hx + mx] = (14, 10, 16, 255)
-    for mx in (5, 7, 9, 11):
-        px[hy + 10][hx + mx] = HORN + (255,)
+            px[hy + 3][hx + ex + dx] = EYE + (255,)
+            px[hy + 4][hx + ex + dx] = EYE + (255,)
+    sx, sy, sw, sh = faces(*CUBES["snout"][:5])["front"]
+    for x in range(sx + 2, sx + sw - 2):
+        px[sy][x] = NOSE + (255,)
+    for x in range(sx, sx + sw, 2):
+        px[sy + sh - 1][x] = CLAW + (255,)
 
     raw = b"".join(b"\x00" + bytes(c for p in row for c in p) for row in px)
 
@@ -101,5 +104,5 @@ def main(out):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        sys.exit("usage: make_colossus_texture.py <output.png>")
+        sys.exit("usage: make_werewolf_texture.py <output.png>")
     main(sys.argv[1])
