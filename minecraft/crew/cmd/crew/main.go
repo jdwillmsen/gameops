@@ -106,6 +106,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	runner := task.NewRunner(func(t task.Template) ([]skill.Skill, error) {
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
+	runner.SetRole(string(cfg.Role))
 	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
 	// Before anything that waits on the network: the liveness probe hits this
 	// server, and a unit whose sign-in or control-plane lookup is slow would

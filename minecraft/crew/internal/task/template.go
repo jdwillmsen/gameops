@@ -76,6 +76,13 @@ type Template struct {
 	// Box, when set, is what observe_blocks reads.
 	Box *Box `json:"box,omitempty"`
 
+	// Blueprint, At, Rotation and DryRun are build_blueprint's request: At
+	// is the minimum corner of the stamp.
+	Blueprint string `json:"blueprint,omitempty"`
+	At        *Chest `json:"at,omitempty"`
+	Rotation  int    `json:"rotation,omitempty"`
+	DryRun    bool   `json:"dry_run,omitempty"`
+
 	Items map[string]int `json:"items,omitempty"`
 	From  []Chest        `json:"from,omitempty"`
 	To    *Chest         `json:"to,omitempty"`
@@ -172,6 +179,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parsePlace(body)
 	case craftTemplate:
 		return parseCraft(body)
+	case buildTemplate:
+		return parseBuild(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -522,6 +531,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		return []skill.Skill{skill.NewObserve(world, self,
 			protocol.BlockPos{t.Box.Min.X, t.Box.Min.Y, t.Box.Min.Z},
 			protocol.BlockPos{t.Box.Max.X, t.Box.Max.Y, t.Box.Max.Z})}, nil
+	}
+	if t.Template == buildTemplate && t.At != nil {
+		return expandBuild(t, world, self, opts)
 	}
 	if t.Template == craftTemplate {
 		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil

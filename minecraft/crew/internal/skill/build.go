@@ -77,7 +77,7 @@ type StateWorld interface {
 // set on the top face of the one below it. Anything else (stair facing, door
 // hinge, repeater direction) comes from the unit's look and cannot be asked
 // for by item name.
-var clickStates = map[string]any{"torch_facing_direction": "top", "pillar_axis": "y"}
+var clickStates = map[string]any{"torch_facing_direction": "top"}
 
 type buildStage int
 

@@ -55,6 +55,8 @@ func Routes(mux *http.ServeMux, r *Runner, token string) {
 		switch {
 		case errors.Is(err, ErrQueueFull):
 			http.Error(w, err.Error(), http.StatusTooManyRequests)
+		case errors.Is(err, ErrWrongRole):
+			http.Error(w, err.Error(), http.StatusConflict)
 		case err != nil:
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:

@@ -69,6 +69,9 @@ type Task struct {
 	// Blocks is the box the task's skills last observed. It maps the world,
 	// so it stays out of the public record and goes only to the controller.
 	Blocks *skill.Blocks `json:"-"`
+	// Build is what a build_blueprint task has stamped so far, or with a dry
+	// run would stamp. It names blocks and counts, never cells.
+	Build *skill.BuildReport `json:"build,omitempty"`
 }
 
 // Reflex is what the unit does on its own: fight or flee when threatened, and
@@ -120,6 +123,7 @@ type Runner struct {
 	self      func() belief.Snapshot
 	timeout   time.Duration
 	log       skill.Logger
+	role      string
 	now       func() time.Time
 
 	mu      sync.Mutex
@@ -221,6 +225,12 @@ func (r *Runner) SubmitAs(id string, t Template) (Task, error) {
 }
 
 func (r *Runner) submit(id string, t Template) (Task, error) {
+	r.mu.Lock()
+	err := r.admits(t)
+	r.mu.Unlock()
+	if err != nil {
+		return Task{}, err
+	}
 	skills, err := r.newSkills(t)
 	if err != nil {
 		return Task{}, err
@@ -488,6 +498,9 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		if v, ok := br.Blocks(); ok && (e.Blocks == nil || !sameBlocks(*e.Blocks, v)) {
 			e.Blocks, changed = &v, true
 		}
+	}
+	if noteBuild(e, sk) {
+		changed = true
 	}
 	e.Updated = r.now()
 	if changed {
