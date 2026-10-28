@@ -60,7 +60,7 @@ total pack size and the base64 size against the 1 MiB ConfigMap limit.
 join from a LAN client and judge a draft without touching the shared lab:
 
 ```sh
-tools/lab-preview up <worktree-or-packs-dir>   # join the printed address (default 192.168.1.56:19144)
+tools/lab-preview up <worktree-or-packs-dir>   # join the printed address (default 192.168.1.56:19146)
 tools/lab-preview cmd tickingarea add 0 -60 0 16 -60 16 t   # nobody online: load a chunk first
 tools/lab-preview cmd summon gameops:werewolf 8 -59 8
 tools/lab-preview sync                         # re-stage after an edit and restart
@@ -71,7 +71,7 @@ Staged copies get versions `99.<n>.0` so the client never reuses a cached
 pack; the git tree is not touched. `LAB_PREVIEW_VERSION` picks the server
 version (default 1.26.52.3, the one this pack was verified on; the prd lab runs
 1.26.60.6, so preview on that before a rollout). `LAB_PREVIEW_PORT` moves the
-host port if 19144 is taken.
+host port if 19146 is taken.
 
 ## Lab rollout (not done yet)
 

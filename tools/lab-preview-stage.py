@@ -18,7 +18,8 @@ def rewrite_manifest(manifest, version):
     """
     out = json.loads(json.dumps(manifest))
     out["header"]["version"] = list(version)
-    for entry in out.get("modules", []) + out.get("dependencies", []):
+    # Script-API dependencies carry a string version and no uuid; leave them.
+    for entry in out.get("modules", []) + [d for d in out.get("dependencies", []) if "uuid" in d]:
         entry["version"] = list(version)
     return out
 
