@@ -60,6 +60,14 @@ jobs:
         uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
+      # The Colosseum plan embedded in crew must match its Python generator;
+      # without numpy that test skips, and a generator change merges unnoticed.
+      - if: matrix.dir == 'minecraft/crew'
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - if: matrix.dir == 'minecraft/crew'
+        run: python3 -m pip install numpy
       - name: lint
         if: matrix.lint != ''
         run: ${{ matrix.lint }}
