@@ -174,3 +174,12 @@ func TestCostPrefersTopClickOverSneak(t *testing.T) {
 		t.Fatalf("costs %v %v %v", top.Cost(), side.Cost(), sneak.Cost())
 	}
 }
+
+func TestFlagsEqualTheirIntegerForm(t *testing.T) {
+	if !SameValue(true, int32(1)) || !SameValue(false, uint8(0)) || SameValue(true, int32(0)) {
+		t.Error("a flag and its byte must compare by value")
+	}
+	if Key(map[string]any{"open_bit": false}, nil) != Key(map[string]any{"open_bit": int32(0)}, nil) {
+		t.Error("keys differ for the same flag")
+	}
+}

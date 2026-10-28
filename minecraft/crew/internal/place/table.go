@@ -36,6 +36,9 @@ type Recipe struct {
 	Pitch int `json:"pitch"`
 	// Sneak says the unit is sneaking for the click.
 	Sneak bool `json:"sneak,omitempty"`
+	// Soil is the block the support must be when it is not the default
+	// (stone or dirt): sand for a cactus, farmland for a carrot.
+	Soil string `json:"soil,omitempty"`
 }
 
 // Cost orders recipes by how much a unit has to do: the support it must
@@ -84,6 +87,8 @@ func centred(r Recipe) bool {
 type Entry struct {
 	State  map[string]any `json:"state"`
 	Recipe Recipe         `json:"recipe"`
+	// Item is the item to hold when it differs from the block's Item.
+	Item string `json:"item,omitempty"`
 }
 
 // Block is everything calibration learned about one block.
@@ -95,8 +100,19 @@ type Block struct {
 	// Unreachable lists the states the server's vocabulary has for the block
 	// that no click in the matrix gave. Derived keys are left out.
 	Unreachable []map[string]any `json:"unreachable,omitempty"`
-	// Derived names the state keys that follow the neighbours, not the click.
+	// NotSeen lists the states the calibration did not get to try: the
+	// block's sweep was cut at the click cap, so they are unknown, not
+	// proven unreachable.
+	NotSeen []map[string]any `json:"not_seen,omitempty"`
+	// Truncated says the sweep was cut at the click cap; see NotSeen.
+	Truncated bool `json:"truncated,omitempty"`
+	// Derived names the state keys that follow the neighbours or the other
+	// half of the block, not the click.
 	Derived []string `json:"derived,omitempty"`
+	// Mixed names state keys that also follow neighbours but took more than
+	// one value across clicks on the same face, so they are not derived: a
+	// matcher must compare them.
+	Mixed []string `json:"mixed,omitempty"`
 	// Inferred says the sweep was taken from a sibling block with the same
 	// responses and confirmed on a sample, not run in full.
 	Inferred bool `json:"inferred,omitempty"`
@@ -125,6 +141,14 @@ type Header struct {
 	NotCovered    []string `json:"not_covered,omitempty"`
 	// Unplaceable lists items no click in the matrix placed as a block.
 	Unplaceable []string `json:"unplaceable,omitempty"`
+	// FamilyGaps lists blocks whose reachable states still differ from the
+	// majority of their family after the gap check re-ran them in full, each
+	// with the difference. Such a block is "unreachable" with evidence, not
+	// by a dropped click.
+	FamilyGaps []string `json:"family_gaps,omitempty"`
+	// UnmappedItems names the items whose placement produced a block hash the
+	// vocabulary has no name for.
+	UnmappedItems []string `json:"unmapped_items,omitempty"`
 	// Unmapped counts block hashes the server answered that the vocabulary
 	// has no name for.
 	Unmapped int `json:"unmapped,omitempty"`
@@ -240,7 +264,12 @@ func SameValue(a, b any) bool {
 func norm(v any) string {
 	switch x := v.(type) {
 	case bool:
-		return "b:" + strconv.FormatBool(x)
+		// Bedrock stores a flag as a byte; the registry types the same flag
+		// as a bool on one block and an integer on its sibling.
+		if x {
+			return "i:1"
+		}
+		return "i:0"
 	case string:
 		return "s:" + x
 	case float32:

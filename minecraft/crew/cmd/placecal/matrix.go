@@ -124,7 +124,10 @@ func (c click) key() string {
 	return fmt.Sprintf("%s/%s/%d/%d/%t/%t", c.Face, c.Hit, c.Yaw, c.Pitch, c.Sneak, c.Lane)
 }
 
-func (c click) recipe() place.Recipe {
+func (c click) recipe() place.Recipe { return c.recipeOn("") }
+
+// recipeOn is the recipe with the soil the support had to be.
+func (c click) recipeOn(soil string) place.Recipe {
 	return place.Recipe{
 		Support: c.Face.opposite().String(),
 		Face:    c.Face.String(),
@@ -132,6 +135,7 @@ func (c click) recipe() place.Recipe {
 		Yaw:     c.Yaw,
 		Pitch:   c.Pitch,
 		Sneak:   c.Sneak,
+		Soil:    soil,
 	}
 }
 
