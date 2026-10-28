@@ -440,6 +440,7 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 	rec := BossRecord{
 		TS:      startTS.UTC().Format(time.RFC3339),
 		Boss:    b.Mob,
+		Event:   b.Event,
 		Effects: append([]string{}, b.Effects...),
 		Outcome: outcome,
 		Seconds: roundTenth(b.now().Sub(startTS).Seconds()),

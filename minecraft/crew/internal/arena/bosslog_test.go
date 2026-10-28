@@ -117,3 +117,13 @@ func TestSummarizeOfNothingIsAnEmptyList(t *testing.T) {
 		t.Errorf("SummarizeBoss(nil) = %#v, want a non-nil empty list", got)
 	}
 }
+
+func TestSummarizeBossKeepsSpawnEventsApart(t *testing.T) {
+	got := SummarizeBoss([]BossRecord{
+		{Boss: "gameops:ground_dragon", Event: "gameops:hp_150", Outcome: BossKilled, Seconds: 30, Deaths: map[string]int{"total": 0}},
+		{Boss: "gameops:ground_dragon", Event: "gameops:hp_500", Outcome: BossKilled, Seconds: 90, Deaths: map[string]int{"total": 2}},
+	})
+	if len(got) != 2 || got[0].Event != "gameops:hp_150" || got[1].Event != "gameops:hp_500" {
+		t.Fatalf("SummarizeBoss = %+v, want one group per spawn event", got)
+	}
+}
