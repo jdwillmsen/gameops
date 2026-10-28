@@ -80,6 +80,11 @@ trainer run --family zombie --scenario <name> --store <store> \
     --squad-url http://<crew-control> --squad lab-alpha --warriors A,B,C"
 ```
 
+The trainer hands the evaluator its own `--control-dir` as `TACTICSCTL_DIR` and
+its kill file (default `<store>/KILL`) as `TRAINER_STOP_FILE`; the bridge uses
+them as the defaults of `--control-dir` and `--stop-file`, so either one stops
+a fight in progress. An explicit flag in the evaluator command wins.
+
 When a fight times out or the trainer is cancelled, the evaluator's whole process
 group gets SIGTERM, and SIGKILL 15 s later if it is still there. The trainer
 tells the evaluator when that SIGTERM will come in `TRAINER_DEADLINE` (RFC 3339);
