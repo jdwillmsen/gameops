@@ -80,6 +80,13 @@ trainer run --family zombie --scenario <name> --store <store> \
     --squad-url http://<crew-control> --squad lab-alpha --warriors A,B,C"
 ```
 
+When a fight times out or the trainer is cancelled, the evaluator's whole process
+group gets SIGTERM, and SIGKILL 15 s later if it is still there. The trainer
+tells the evaluator when that SIGTERM will come in `TRAINER_DEADLINE` (RFC 3339);
+the bridge ends its fight 15 s before it (or half the time left, if less) so
+the profile is withdrawn and the arena cleared on a fresh context first, and a
+SIGTERM that arrives anyway runs the same cleanup.
+
 The trainer refuses an evaluator command whose `--lab`, `--squad` or `--squad-b`
 is not the crew lab: the target must contain the token `crew-lab`, or be a
 `lab-` squad id.
