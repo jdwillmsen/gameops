@@ -139,8 +139,11 @@ Blockbench's Bedrock entity format (`.geo.json`, PNG, `.animation.json`).
 - One pack per theme. The existing `lab-mods-stage0` holds the arena mobs.
   The owner said to put the animals "in the current add-on"; the
   conventions say a pack is one theme, so a new folder in the same add-on
-  family, `lab-mods-wildlife`, is the intended reading. **Needs the owner's
-  confirmation.**
+  family, `lab-mods-wildlife`, is the intended reading. **Confirmed by the
+  owner (2026-10-28).** The owner also confirmed that wild rivals may hurt
+  tamed pets, and asked for the delivery and testing approach to be chosen
+  for scale: a `lab-packs` image with a generic installer, and layered
+  tests (checker, generators, `node --test`, preview smoke and scale run).
 - The chart ships packs as a ConfigMap of about 780 KB raw, and the README
   says to move textured packs to an image or volume built by CI before the
   second themed pack lands. This is that second pack. Six small PNGs and
