@@ -481,12 +481,17 @@ func (d *Director) runWave(wave Wave, pending []spawn, runStart, waveStart time.
 	}
 }
 
+// countTries is how many reads a count may take. Another session flooding the
+// console can queue a reply behind tens of seconds of its own commands, and a
+// run of half an hour should not end over one late reply.
+const countTries = 8
+
 // countCmd retries a count whose reply had not reached the log yet. The
 // console is asynchronous, so one read can be empty even though the testfor
 // ran; the next read carries its result and the parse succeeds.
 func (d *Director) countCmd(cmd, what string) (int, error) {
 	var lastErr error
-	for range 3 {
+	for range countTries {
 		out, err := d.exec(cmd)
 		if err != nil {
 			return 0, err
