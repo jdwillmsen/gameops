@@ -265,3 +265,21 @@ func TestBuildStampsTheSmallHouse(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildFailsUpFrontWhenTheBlocksOutnumberTheHotbar(t *testing.T) {
+	w := flatWorld(14)
+	r := creativeRig(t, w, 1, 1, 1)
+	names := []string{"dirt", "cobblestone", "oak_log", "gravel", "coal", "oak_planks", "glass", "wooden_pickaxe", "iron_axe", "wooden_sword"}
+	var cells []BuildCell
+	for i, n := range names {
+		cells = append(cells, BuildCell{Pos: protocol.BlockPos{int32(5 + i%5), 1, int32(5 + i/5)}, Block: n})
+	}
+	b := NewBuild(w, r.self, BuildSpec{Cells: cells})
+	st, err := r.run(b, 4000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "hotbar") {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if len(w) != len(flatWorld(14)) {
+		t.Error("the stamp started before it failed")
+	}
+}

@@ -284,10 +284,15 @@ func (r *Repair) triage(a Actuator) outcome {
 }
 
 // hotbar is how many hotbar slots are empty and which items the hotbar holds.
-func (r *Repair) hotbar() (free int, held map[string]bool) {
+func (r *Repair) hotbar() (free int, held map[string]bool) { return hotbarRoom(r.self()) }
+
+// hotbarRoom counts the empty hotbar slots and names the items held there. A
+// creative take fills a slot that nothing empties again, so a task needing
+// more block types than there are free slots must be refused before it starts.
+func hotbarRoom(s belief.Snapshot) (free int, held map[string]bool) {
 	held = map[string]bool{}
 	used := 0
-	for _, it := range r.self().Inventory {
+	for _, it := range s.Inventory {
 		if it.Slot >= 0 && it.Slot < hotbarSlots {
 			used++
 			held[it.Name] = true
