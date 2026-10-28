@@ -68,18 +68,32 @@ func (r *rig) goCreative() {
 			case *packet.ItemStackRequest:
 				req := p.Requests[0]
 				actions := req.Actions
-				// A take onto an occupied slot is only accepted in the request
-				// that destroys the stack there, as on the lab.
+				var destroy *protocol.DestroyStackRequestAction
 				if d, ok := actions[0].(*protocol.DestroyStackRequestAction); ok {
-					r.inv[d.Source.Slot] = slotStack{}
-					actions = actions[1:]
+					destroy, actions = d, actions[1:]
 				}
 				craft := actions[0].(*protocol.CraftCreativeStackRequestAction)
 				take := actions[1].(*protocol.TakeStackRequestAction)
-				if r.inv[take.Destination.Slot].count > 0 {
-					r.Actuator.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: req.RequestID, Status: act.StatusOccupied}}})
+				refuse := func(status uint8) {
+					r.Actuator.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: req.RequestID, Status: status}}})
+				}
+				// As on the lab: a take onto an occupied slot is only accepted
+				// in the request that destroys exactly the stack there, and a
+				// refused request changes nothing.
+				held := r.inv[take.Destination.Slot]
+				if destroy != nil {
+					if destroy.Source.Slot != take.Destination.Slot || held.count == 0 ||
+						destroy.Source.StackNetworkID != held.id || int(destroy.Count) != held.count {
+						refuse(act.StatusBadSource)
+						continue
+					}
+					held = slotStack{}
+				}
+				if held.count > 0 {
+					refuse(act.StatusOccupied)
 					continue
 				}
+				r.inv[take.Destination.Slot] = slotStack{}
 				for item, cid := range creativeIDs {
 					if cid == craft.CreativeItemNetworkID {
 						stackID++

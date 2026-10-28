@@ -286,3 +286,25 @@ func TestBuildPlacesMoreBlockTypesThanTheHotbarHolds(t *testing.T) {
 		}
 	}
 }
+
+// Twelve block types cycled over thirty-six cells: every take after the ninth
+// replaces a slot, and a slot may be replaced again before its type returns.
+func TestBuildPlacesEveryCellOfARotationOverTwelveBlockTypes(t *testing.T) {
+	w := flatWorld(14)
+	r := newRig(t, w, feetAt(1, 1, 1))
+	r.goCreative()
+	names := []string{"dirt", "cobblestone", "oak_planks", "glass", "stone", "sand", "brick_block", "white_wool", "gold_block", "iron_block", "diamond_block", "emerald_block"}
+	var cells []BuildCell
+	for i := 0; i < 36; i++ {
+		cells = append(cells, BuildCell{Pos: protocol.BlockPos{int32(3 + i%9), 1, int32(5 + i/9)}, Block: names[i%12]})
+	}
+	st, err := r.run(NewBuild(w, r.self, BuildSpec{Cells: cells}), 12000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	for _, c := range cells {
+		if got, _ := w.Block(c.Pos); got != c.Block {
+			t.Errorf("%v is %q, want %q", c.Pos, got, c.Block)
+		}
+	}
+}
