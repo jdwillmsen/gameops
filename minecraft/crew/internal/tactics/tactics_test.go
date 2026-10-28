@@ -2,6 +2,7 @@ package tactics
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -26,6 +27,28 @@ func TestSetClampsAndRejectsUnknown(t *testing.T) {
 	}
 	if p.Set("nope", 1) {
 		t.Error("unknown parameter accepted")
+	}
+}
+
+func TestSetIgnoresNonFiniteValues(t *testing.T) {
+	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		p := Defaults()
+		p.ShotEvery = 41
+		if p.Set("shotEvery", v) {
+			t.Errorf("Set accepted %v", v)
+		}
+		if p.ShotEvery != 41 {
+			t.Errorf("shotEvery = %v after Set(%v), want the previous 41", p.ShotEvery, v)
+		}
+	}
+	p := Defaults()
+	if !p.Set("shotEvery", 40) || p.ShotEvery != 40 {
+		t.Errorf("a finite value was refused: %v", p.ShotEvery)
+	}
+	nan := Defaults()
+	nan.HealSafe = math.NaN()
+	if got := nan.Clamp().HealSafe; got != Defaults().HealSafe {
+		t.Errorf("Clamp left %v for a NaN, want the default", got)
 	}
 }
 
