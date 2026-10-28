@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
 // A placement walks to the target, puts the block there and reads the
@@ -68,5 +70,16 @@ func TestPlaceBlockGivesUpWhenTheMoveIsUnanswered(t *testing.T) {
 	}
 	if name, _ := w[target]; name != "air" {
 		t.Errorf("target holds %q", name)
+	}
+}
+
+func TestPlaceBlockReadyNeedsTheItemOnlyOutsideCreative(t *testing.T) {
+	w := flatWorld(12)
+	p := NewPlaceBlock(w, nil, protocol.BlockPos{7, 1, 7}, "cobblestone")
+	if err := p.Ready(belief.Snapshot{}); err == nil || !strings.Contains(err.Error(), "no cobblestone in inventory") {
+		t.Errorf("survival, empty inventory: err = %v", err)
+	}
+	if err := p.Ready(belief.Snapshot{Creative: true}); err != nil {
+		t.Errorf("creative, empty inventory: err = %v", err)
 	}
 }

@@ -90,8 +90,12 @@ func (a *Actuator) PlaceOnTop(against protocol.BlockPos, hotbar int, held belief
 // below it on its top face or, when that is not a known solid, the side face
 // nearest the eye. It selects a hotbar slot holding the item, first moving a
 // stack there from the main inventory; while that request travels it reports
-// ErrItemMoving and the caller tries again.
+// ErrItemMoving and the caller tries again. A creative unit holding none of
+// the item takes it from the creative inventory first.
 func (a *Actuator) PlaceBlock(target protocol.BlockPos, item string) error {
+	if err := a.stockCreative(item); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	w, ok := a.solid.(BlockWorld)
@@ -125,6 +129,28 @@ func (a *Actuator) PlaceBlock(target protocol.BlockPos, item string) error {
 		return err
 	}
 	return a.useOnBlock(against, face, hit, slot, held, hash)
+}
+
+// stockCreative takes the item first when a creative unit holds none of it.
+func (a *Actuator) stockCreative(item string) error {
+	a.mu.Lock()
+	if !a.creativeLocked() {
+		a.mu.Unlock()
+		return nil
+	}
+	id, known := a.itemIDs[item]
+	if !known {
+		a.mu.Unlock()
+		return nil
+	}
+	for _, s := range a.inv {
+		if s.Stack.NetworkID == id && s.Stack.Count > 0 {
+			a.mu.Unlock()
+			return nil
+		}
+	}
+	a.mu.Unlock()
+	return a.TakeCreative(item)
 }
 
 // useOnBlock sends the click on a block face that places the held stack.
