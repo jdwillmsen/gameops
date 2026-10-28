@@ -196,6 +196,8 @@ body.kiosk #bar, body.kiosk #side, body.kiosk #dock, body.kiosk #statusbar { dis
 .role.vanguard { background: #2d4a6b; }
 .role.striker { background: #5a2d2d; }
 .role.ranger { background: #2d4a2d; }
+.role.mender { background: #2d4a4a; }
+.role.builder { background: #5a4a2d; }
 .sq-member .meter { width: 34px; }
 .sq-food, .sq-weapon { font-size: 11px; opacity: .75; }
 .sq-callout { margin-left: auto; font-size: 11px; opacity: .6; }

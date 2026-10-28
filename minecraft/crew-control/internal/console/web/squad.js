@@ -1,7 +1,7 @@
 // The squad panel is a view: it shows the public snapshot and can open a
 // member's camera. Orders are issued from the operator panel, never here.
 
-const ROLE_LABELS = { vanguard: 'Vanguard', striker: 'Striker', ranger: 'Ranger' };
+const ROLE_LABELS = { vanguard: 'Vanguard', striker: 'Striker', ranger: 'Ranger', mender: 'Mender', builder: 'Builder' };
 
 export const roleLabel = role => ROLE_LABELS[role] || role || 'member';
 
