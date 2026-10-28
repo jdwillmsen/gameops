@@ -10,16 +10,18 @@ from pathlib import Path
 KINDS = (("behavior_pack", "behavior_packs"), ("resource_pack", "resource_packs"))
 
 
-def rewrite_manifest(manifest, version):
-    """Return a copy with header, module and dependency versions replaced.
+def rewrite_manifest(manifest, version, staged=None):
+    """Return a copy with header, module and staged-dependency versions replaced.
 
     A fixed high major plus a time-derived minor makes every stage look new to
     clients, which cache packs by uuid and version.
     """
     out = json.loads(json.dumps(manifest))
     out["header"]["version"] = list(version)
-    # Script-API dependencies carry a string version and no uuid; leave them.
-    for entry in out.get("modules", []) + [d for d in out.get("dependencies", []) if "uuid" in d]:
+    # Only dependencies on packs staged together are renamed; script-API ones
+    # (string version, no uuid) and external packs keep their real version.
+    deps = [d for d in out.get("dependencies", []) if "uuid" in d and (staged is None or d["uuid"] in staged)]
+    for entry in out.get("modules", []) + deps:
         entry["version"] = list(version)
     return out
 
@@ -31,10 +33,18 @@ def pack_list(manifests):
 def stage(packs_dir, world_dir, version):
     packs_dir, world_dir = Path(packs_dir), Path(world_dir)
     found = {}
-    for src_name, dst_name in KINDS:
+    sources = {dst: sorted(packs_dir.glob(f"*/{src}")) for src, dst in KINDS}
+    if not any(sources.values()):
+        raise SystemExit(f"no behavior_pack or resource_pack folders under {packs_dir}")
+    staged = {
+        json.loads((src / "manifest.json").read_text())["header"]["uuid"]
+        for srcs in sources.values()
+        for src in srcs
+    }
+    for _, dst_name in KINDS:
         found[dst_name] = []
-        for src in sorted(packs_dir.glob(f"*/{src_name}")):
-            manifest = rewrite_manifest(json.loads((src / "manifest.json").read_text()), version)
+        for src in sources[dst_name]:
+            manifest = rewrite_manifest(json.loads((src / "manifest.json").read_text()), version, staged)
             dst = world_dir / dst_name / src.parent.name
             if dst.exists():
                 shutil.rmtree(dst)
