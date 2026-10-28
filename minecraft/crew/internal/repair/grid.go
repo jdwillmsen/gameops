@@ -125,3 +125,6 @@ func contains(outer, inner Box) bool {
 		inner.Y0 >= outer.Y0 && inner.Y1 <= outer.Y1 &&
 		inner.Z0 >= outer.Z0 && inner.Z1 <= outer.Z1
 }
+
+// InsideBox reports whether inner lies wholly within outer.
+func InsideBox(outer, inner Box) bool { return contains(outer, inner) }

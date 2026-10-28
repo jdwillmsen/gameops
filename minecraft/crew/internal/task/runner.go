@@ -517,7 +517,7 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		e.idx++
 		e.ready = false
 		if e.idx == len(e.skills) {
-			r.finish(e, Done, "")
+			r.finish(e, Done, resultOf(sk))
 			return a, before
 		}
 		e.Skill = e.skills[e.idx].Name()
@@ -526,6 +526,17 @@ func (r *Runner) work(ctx context.Context) (skill.Actuator, uint64) {
 		}
 	}
 	return a, before
+}
+
+// resultOf is the text a finished skill leaves on its task, such as a repair
+// report.
+func resultOf(sk skill.Skill) string {
+	if rp, ok := sk.(skill.Reporter); ok {
+		if text, ok := rp.Report(); ok {
+			return text
+		}
+	}
+	return ""
 }
 
 func setActuatorSkill(a skill.Actuator, name string) {

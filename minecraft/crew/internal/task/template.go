@@ -76,8 +76,8 @@ type Template struct {
 	// Box, when set, is what observe_blocks reads.
 	Box *Box `json:"box,omitempty"`
 
-	// Blueprint, At, Rotation and DryRun are build_blueprint's request: At
-	// is the minimum corner of the stamp.
+	// Blueprint, At and Rotation are build_blueprint's request: At is the
+	// minimum corner of the stamp. DryRun is also repair_build's.
 	Blueprint string `json:"blueprint,omitempty"`
 	At        *Chest `json:"at,omitempty"`
 	Rotation  int    `json:"rotation,omitempty"`
@@ -92,6 +92,9 @@ type Template struct {
 	Depth        int    `json:"depth,omitempty"`
 	Branches     int    `json:"branches,omitempty"`
 	BranchLength int    `json:"branch_length,omitempty"`
+
+	// Plan is repair_build's; its area is Area, and it shares DryRun.
+	Plan string `json:"plan,omitempty"`
 }
 
 // facings maps a heading to its step in x and z: north is toward negative z.
@@ -181,6 +184,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseCraft(body)
 	case buildTemplate:
 		return parseBuild(body)
+	case repairTemplate:
+		return parseRepair(body)
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -534,6 +539,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	}
 	if t.Template == buildTemplate && t.At != nil {
 		return expandBuild(t, world, self, opts)
+	}
+	if t.Template == repairTemplate {
+		return expandRepair(t, world, self, opts...)
 	}
 	if t.Template == craftTemplate {
 		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil
