@@ -41,10 +41,13 @@ type options struct{ fight FightSource }
 // WithFight reports a warrior's fight counts under the tasks in /v1/state.
 func WithFight(f FightSource) Option { return func(o *options) { o.fight = f } }
 
-// Unit is who the state belongs to: a fixed id and the in-game name.
+// Unit is who the state belongs to: a fixed id and the in-game name. Role is
+// the unit's CREW_ROLE, empty when it has none. It rides here, not on the
+// squad hello, because builder roles never join a squad.
 type Unit struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	Role string `json:"role,omitempty"`
 }
 
 type stateBody struct {

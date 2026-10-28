@@ -7,6 +7,7 @@ import {
   mergeEvents, filterEvents, isToast, ago, project, nearest, rankItems, KEYS,
 } from '/static/fleet.js';
 import { createFeedView, perFrame, timeText } from '/static/feedview.js';
+import { statusRole } from '/static/squad.js';
 import { openBulk } from '/static/bulk-ui.js';
 import { createGovernor, lowerBudget } from '/static/governor.js';
 
@@ -17,6 +18,9 @@ function el(tag, props = {}, ...kids) {
   e.append(...kids);
   return e;
 }
+
+const roleSuffix = s => (statusRole(s) ? ` (${statusRole(s)})` : '');
+const roleChip = s => (statusRole(s) ? [' ', el('span', { className: 'role ' + s.role, textContent: statusRole(s) })] : []);
 
 const PREFS = 'crew-console-prefs';
 function loadPrefs() {
@@ -231,11 +235,11 @@ export function initOps(host) {
       tile.classList.toggle('offline', !s.online);
       tile.classList.toggle('crit', worst(al) === 'crit');
       tile.classList.toggle('warn', worst(al) === 'warn');
-      tile.querySelector('.label').textContent = `${s.name || s.id}  ${badge(s)}`;
+      tile.querySelector('.label').textContent = `${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
       const info = tile.querySelector('.info');
       if (tile.classList.contains('card')) {
         info.replaceChildren(
-          el('div', { className: 'big', textContent: s.name || s.id }),
+          el('div', { className: 'big', textContent: s.name || s.id }, ...roleChip(s)),
           el('div', {}, bar(s.health, 20, 'hp'), bar(s.hunger, 20, 'food')),
           el('div', { className: 'task', textContent: taskLine(s) }),
           el('div', { className: 'al', textContent: al.map(a => a.text).join(', ') }),
@@ -263,7 +267,7 @@ export function initOps(host) {
       close.addEventListener('click', () => { pin = ''; renderPip(); });
       box.replaceChildren(el('iframe', { src: wallSrc(pin), title: 'pinned ' + pin }), swap, el('div', { className: 'label' }), close);
     }
-    box.querySelector('.label').textContent = `pin ${s.name || s.id}  ${badge(s)}`;
+    box.querySelector('.label').textContent = `pin ${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
     box.classList.toggle('crit', worst(alertsOf(s)) === 'crit');
   }
 

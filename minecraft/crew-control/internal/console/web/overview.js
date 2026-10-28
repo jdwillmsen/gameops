@@ -373,6 +373,7 @@ export function createBoard({ window = WINDOW, feedCap = FEED_CAP } = {}) {
         return {
           id: s.id,
           name: s.name || s.id,
+          role: s.role || '',
           index: index + 1,
           state,
           since: st ? { at: st.at, exact: st.src !== 'open' } : null,

@@ -15,6 +15,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadclient"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadmsg"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 )
@@ -201,6 +202,13 @@ var (
 
 // warriorRole is the role the life engine fights as. A builder role gives
 // it nothing, so the unit keeps the reactive defence.
+// unitInfo is who the status API says this process is. The role goes out for
+// every role, builder ones included, because the status API is the one path
+// crew-control already reads from each unit.
+func unitInfo(cfg config.Config) statusapi.Unit {
+	return statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username, Role: string(cfg.Role)}
+}
+
 func warriorRole(r config.Role) string {
 	if r.IsWarrior() {
 		return string(r)

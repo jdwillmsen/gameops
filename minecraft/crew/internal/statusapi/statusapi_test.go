@@ -139,6 +139,17 @@ func TestStateNamesTheUnit(t *testing.T) {
 	}
 }
 
+func TestStateCarriesTheUnitsRoleOnlyWhenItHasOne(t *testing.T) {
+	with := get(t, Handler(fixed{}, "dev", Unit{ID: "crew-04", Name: "Dusty", Role: "mender"}, nil), "/v1/state").Body.String()
+	if !strings.Contains(with, `"unit":{"id":"crew-04","name":"Dusty","role":"mender"}`) {
+		t.Errorf("body = %s", with)
+	}
+	without := get(t, Handler(fixed{}, "dev", Unit{ID: "crew-04", Name: "Dusty"}, nil), "/v1/state").Body.String()
+	if strings.Contains(without, `"role"`) {
+		t.Errorf("a unit with no role reported one: %s", without)
+	}
+}
+
 type fightFixed struct {
 	s  life.FightSummary
 	ok bool

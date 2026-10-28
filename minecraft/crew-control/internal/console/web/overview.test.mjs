@@ -151,6 +151,12 @@ test('board: a state change seen live is exact, one the page opened on is not', 
   assert.deepEqual([rows[1].state, rows[1].since.exact, rows[1].since.at], ['working', false, 10_000]);
 });
 
+test('board: rows carry the role a unit reports and an empty one otherwise', () => {
+  const b = createBoard();
+  b.ingest([u('c1', { role: 'mender' }), u('c2')], 10_000);
+  assert.deepEqual(b.rows().map(r => r.role), ['mender', '']);
+});
+
 test('board: the backlog arriving after the first snapshot fixes the start time', () => {
   const b = createBoard();
   b.ingest([u('c1', { task: task() })], 500_000);

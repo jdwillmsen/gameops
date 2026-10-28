@@ -4,6 +4,7 @@
 // 2 s update writes the few cells that changed and never rebuilds the list.
 import { Sparkline, StatTile } from './charts/spark.js';
 import { isTyping } from './state.js';
+import { statusRole } from './squad.js';
 import { createInsightStrip } from './insights-ui.js';
 import {
   SAMPLE_MS, MAX_HEALTH, STATES, STATE_LABEL, SORTS, SORT_LABEL, DEFAULT_DIR, LEVELS,
@@ -256,7 +257,10 @@ export function initOverview(host) {
 
   function paintRow(e, r, now, cur) {
     put(e, 'num', r.index, v => { e.num.textContent = String(v); });
-    put(e, 'name', r.name, v => { e.name.textContent = v; });
+    put(e, 'name', `${r.name}|${r.role}`, () => {
+      const tag = statusRole({ role: r.role });
+      e.name.replaceChildren(r.name, ...(tag ? [' ', el('span', { className: 'role ' + r.role, textContent: tag })] : []));
+    });
     // A focused row is read by its label, so it carries the whole story.
     put(e, 'label', `${r.name}, ${STATE_LABEL[r.state].toLowerCase()}, health ${r.health === null ? 'unknown' : `${Math.round(r.health)} of ${MAX_HEALTH}`}, hunger ${r.hunger === null ? 'unknown' : `${Math.round(r.hunger)} of ${MAX_HEALTH}`}, ${r.taskText}`, v => e.row.setAttribute('aria-label', v));
     put(e, 'state', r.state, v => { e.chipHost.replaceChildren(stateChip(v)); e.row.dataset.state = v; });

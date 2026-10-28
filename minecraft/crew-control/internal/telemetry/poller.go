@@ -24,8 +24,11 @@ const (
 // Status is what the console shows per unit. Position is left out on purpose:
 // the public view carries no coordinates.
 type Status struct {
-	ID     string       `json:"id"`
-	Name   string       `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Role is the unit's claimed job as its own state reported it, one of
+	// roles; empty when it has none or reported something else.
+	Role   string       `json:"role,omitempty"`
 	Online bool         `json:"online"`
 	Health *float32     `json:"health"`
 	Hunger *float32     `json:"hunger"`
@@ -78,8 +81,16 @@ type Live struct {
 	At time.Time
 }
 
+// roles is the closed set a unit may report. The state body is the unit's own
+// word, and Status goes to every viewer of the public console, so anything
+// outside the set is dropped rather than shown.
+var roles = map[string]bool{"vanguard": true, "striker": true, "ranger": true, "mender": true, "builder": true}
+
 // Only the fields the summary needs; crew's own types are internal to crew.
 type stateResponse struct {
+	Unit struct {
+		Role string `json:"role"`
+	} `json:"unit"`
 	State struct {
 		Dead        bool    `json:"dead"`
 		Health      float32 `json:"health"`
@@ -213,6 +224,10 @@ func (p *Poller) tick(ctx context.Context) {
 			p.failures[i] = 0
 			next.Online = true
 			next.Seen = now
+			next.Role = ""
+			if roles[res.st.Unit.Role] {
+				next.Role = res.st.Unit.Role
+			}
 			next.Dead = res.st.State.Dead
 			next.Health = nil
 			if res.st.State.HealthKnown {
@@ -271,7 +286,7 @@ func (p *Poller) tick(ctx context.Context) {
 // Seen moves every tick, so it is left out of the comparison or every poll
 // would count as a change.
 func sameShown(a, b Status) bool {
-	if a.Online != b.Online || a.Dead != b.Dead {
+	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role {
 		return false
 	}
 	if (a.Hunger == nil) != (b.Hunger == nil) || (a.Hunger != nil && *a.Hunger != *b.Hunger) {
