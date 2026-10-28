@@ -29,7 +29,9 @@ func lockSquads(ctx context.Context, dir string, squads []string) (release func(
 	var held []*os.File
 	release = func() {
 		for _, f := range held {
-			f.Close()
+			if err := f.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "trainbridge: closing %s: %v\n", f.Name(), err)
+			}
 		}
 	}
 	for _, sq := range squads {
