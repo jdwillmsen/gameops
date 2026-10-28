@@ -680,7 +680,7 @@ def feat(i, w, y0, y1, items, pitch=2):
     if isinstance(items, (int, np.integer)):
         put(mk, int(items))
         return
-    lat = q16 + 60.0
+    lat = (uu if w == "sides" else q16) + 60.0
     k = np.floor(lat / pitch).astype(int) % len(items)
     on = (lat % pitch) < 1.0
     for j, m in enumerate(items):
@@ -700,74 +700,161 @@ def finish_room(i, floor=None, wall=None, ceil=None):
         put(ce & (Yw <= GROUND - 1), ceil)
 
 
-def lights(i, y=57, cycle=(0, 1, 2)):
-    mk = room(i) & (Yw == y) & (np.abs(uu - 2.5) < 0.6) | room(i) & (Yw == y) & (np.abs(uu - 6.0) < 0.6)
-    mk &= (np.abs((q16 + 60.0) % 5.0 - 2.0) < 0.6)
-    put(mk, LANT_H)
+BLACKSTONE = mat("blackstone"); PRISMB = mat("prismarine_bricks")
+LITBLAST = mat("lit_blast_furnace"); LITFURN = mat("lit_furnace"); LITSMOKE = mat("lit_smoker")
+LANT_S = mat("soul_lantern", '["hanging"=false]', True); LANT_SH = mat("soul_lantern", '["hanging"=true]', True)
+CAULDW = mat("cauldron", '["fill_level"=6,"cauldron_liquid"="water"]', True)
+
+
+def dress(i, floor, base, frieze, trim, cove, rib, border=None, niche=(LANT, 0), hang=LANT_H, post=LANT, lamp="hang"):
+    """The architecture every chamber shares, in its own materials: a chequered
+    floor, a wainscot and frieze on the walls, a stepped cove with ribs across
+    the ceiling, pilasters, lit wall niches and a lamp post in each corner.
+    Props are placed first; everything here goes only into cells they left empty.
+    """
+    m = room(i)
+    L = np.floor(q16 + 60.0).astype(int)
+    rim = np.minimum(np.minimum(hw16 - np.abs(q16) - 1.0, uu), 8.5 - uu)   # 0 against a wall
+    side = hw16 - np.abs(q16) - 1.0
+    A = m & ((vox == AIR) | (vox == LANT_H))
+    # floor
+    fl = shift(m, -1, 0, 0) & ~UNDER
+    tile = (L + np.floor(uu).astype(int)) % 2
+    put(fl & (tile == 0), floor[0])
+    put(fl & (tile == 1), floor[1])
+    if border:
+        put(fl & (rim < 1.0), border)
+    # walls: wainscot, frieze, cornice
+    sh = dilate(m) & ~UNDER
+    put(sh & ybetween(50, 51), base)
+    put(sh & (Yw == 56), frieze)
+    put(sh & (Yw == 57), trim)
+    # lit niches, only where nothing stands in front and no other space is within two cells
+    near = dilate(dilate(UNDER & ~m))
+    seen = dilate(m & (vox == AIR))
+    wall = sh & ybetween(52, 53) & ~near & seen
+    on_side = (side < 0.05) & (uu > 1.0) & (uu < 7.6) & ((np.abs(uu - 2.5) < 0.6) | (np.abs(uu - 6.0) < 0.6))
+    on_back = (uu >= 8.45) & (np.abs(q16) < hw16 - 3.0) & (np.abs((q16 + 60.0) % 5.0 - 2.5) < 0.6)
+    nich = wall & (on_side | on_back)
+    put(nich & (Yw == 52), niche[0] or AIR)
+    put(nich & (Yw == 53), niche[1] or AIR)
+    put(shift(nich & (Yw == 52), 2, 0, 0), trim)
+    put(shift(nich & (Yw == 52), -1, 0, 0), trim)
+    # stepped cove and ribs
+    put(A & (((Yw == 57) & (rim < 3.0)) | ((Yw == 56) & (rim < 2.0)) | ((Yw == 55) & (rim < 1.0))), cove)
+    put(A & (Yw == 57) & (rim >= 3.0) & ((L % 4 == 0) | (np.abs(uu - 4.2) < 0.55)), rib)
+    # pilasters: five clear cells from the floor, between the niches
+    a = (vox == AIR) & m
+    col = a & shift(a, -1, 0, 0) & shift(a, -2, 0, 0) & shift(a, -3, 0, 0) & shift(a, -4, 0, 0)
+    pil = col & (Yw == 50) & (rim < 1.0) & (uu > 1.5) & (
+        ((side < 0.99) & (np.abs(uu - 4.2) < 0.55)) |
+        ((uu > 7.45) & (np.abs(((q16 + 60.0) % 5.0)) < 0.6) & (np.abs(q16) < hw16 - 3.0)))
+    for dy in range(5):
+        put(shift(pil, dy, 0, 0), rib)
+    # a lamp post in every corner
+    c3 = a & shift(a, -1, 0, 0) & shift(a, -2, 0, 0)
+    corner = c3 & (Yw == 50) & (side < 0.99) & ((uu < 1.0) | (uu > 7.45)) & (np.abs(q16) > 3.0)
+    put(corner, rib)
+    put(shift(corner, 1, 0, 0), rib)
+    put(shift(corner, 2, 0, 0), post)
+    # chandeliers on chains from the ribs, low enough to reach the floor
+    spot = A & shift(A, 1, 0, 0) & shift(A, 2, 0, 0) & (Yw == 56) & (rim >= 2.0) & (L % 4 == 0) & (
+        (np.abs(uu - 2.5) < 0.6) | (np.abs(uu - 4.2) < 0.55) | (np.abs(uu - 6.0) < 0.6))
+    put(spot, CHAIN)
+    put(shift(spot, -1, 0, 0), CHAIN)
+    put(shift(spot, -2, 0, 0), SEALAMP if lamp == "sea" else hang)
 
 
 def furnish_rooms():
-    # --- 0 forge
+    # --- 0 forge: a glowing grate hearth under a hood, no lava
     finish_room(0, PBLACK, NBRICK, DBRICK)
-    feat(0, "back", 50, 50, [BLAST, ANVIL, SMITH, BLAST, GRIND, ANVIL], 2)
-    feat(0, "back", 51, 51, [CHAIN, 0, CAULD, 0], 2)
-    feat(0, "sides", 50, 50, [MAGMA, NETHERRACK, MAGMA], 3)
-    feat(0, "centre", 50, 51, [IRONB], 1)
-    feat(0, "centre", 52, 52, [CAMP], 1)
+    feat(0, "back", 50, 50, [LITBLAST, ANVIL, LITFURN, GRIND, LITBLAST, SMITH], 2)
+    feat(0, "back", 51, 51, [CAULD, 0, CAULD, 0, CAULD, 0], 2)
+    feat(0, "sides", 50, 50, [LITSMOKE, 0, ANVIL, 0], 2)
     feat(0, "mid", 50, 50, [CHEST, 0, 0, 0], 3)
-    lights(0)
-    # --- 1 armoury
+    dress(0, (PBLACK, BLACKSTONE), PBBRICK, REDNB, PBBRICK, NBRICK, REDNB, border=REDNB)
+    hearth = room(0) & (np.abs(uu - 4.2) < 1.1) & (np.abs(q16) < 1.6) & (Yw == 50)
+    kerb = room(0) & (np.abs(uu - 4.2) < 2.1) & (np.abs(q16) < 2.6) & (Yw == 50) & ~hearth
+    put(shift(hearth, -1, 0, 0), SHROOM)
+    put(hearth, BARS)
+    put(kerb, REDNB)
+    put(shift(hearth, -2, 0, 0), BLACKSTONE)
+    hood = room(0) & (np.abs(uu - 4.2) < 2.1) & (np.abs(q16) < 2.6)
+    put(hood & (Yw == 57), REDNB)
+    put(hood & (Yw == 56) & ((np.abs(uu - 4.2) >= 1.1) | (np.abs(q16) >= 1.6)), NBRICK)
+    put(hood & (Yw == 56) & (np.abs(uu - 4.2) < 0.55) & (np.abs(q16) < 0.55), CHAIN)
+    put(hood & (Yw == 55) & (np.abs(uu - 4.2) < 0.55) & (np.abs(q16) < 0.55), CAULD)
+    # --- 1 armoury: racks of bars over the weapon benches, stands in the aisles
     finish_room(1, DEEP, DBRICK, CDEEP)
     feat(1, "back", 50, 50, [CHEST, ANVIL, CHEST, GRIND, CHEST, SMITH], 2)
     feat(1, "back", 51, 51, [STAND["netherite"], 0, STAND["diamond"], 0], 2)
+    feat(1, "back", 54, 54, [BARS, BARS, IRONB, BARS], 1)
     feat(1, "sides", 50, 50, [STAND["iron"], 0, 0, STAND["copper"], 0, 0], 3)
+    feat(1, "sides", 53, 53, [BARS], 1)
     feat(1, "mid", 50, 50, [DARKPL, DARKPL, DARKPL], 1)
     feat(1, "mid", 51, 51, [CANDLE, 0, 0], 3)
-    lights(1)
+    dress(1, (DEEP, DBRICK), DTILE, IRONB, CDEEP, DBRICK, CDEEP, border=IRONB)
     # --- 2 gear selection: one stand and a chest for each tier
     finish_room(2, DBRICK, TUFFB, CDEEP)
     feat(2, "back", 50, 50, [STAND["leather"], 0, STAND["copper"], 0, STAND["iron"], 0, STAND["diamond"], 0, STAND["netherite"], 0, STAND["gold"], 0], 1)
     feat(2, "sides", 50, 50, [CHEST, 0, 0], 3)
     feat(2, "mid", 50, 50, [PBBRICK], 2)
     feat(2, "mid", 51, 51, [STAND["netherite"], 0, 0, 0], 4)
-    lights(2)
-    # --- 3 enchanting library
+    feat(2, "centre", 50, 50, [LECT], 1)
+    dress(2, (DBRICK, TUFFB), PBBRICK, GOLD, CDEEP, TUFFB, CDEEP, border=GOLD)
+    # --- 3 enchanting library: shelved walls, free-standing stacks, reading tables
     finish_room(3, DARKPL, DARKPL, DARKPL)
     feat(3, "sides", 50, 53, BOOKS)
     feat(3, "back", 50, 54, BOOKS)
     feat(3, "centre", 50, 50, [ENCH], 1)
     feat(3, "mid", 50, 50, [LECT, 0, 0, 0], 3)
     feat(3, "mid", 51, 51, [CANDLE, 0, 0, 0], 3)
-    lights(3)
-    # --- 4 barracks: wool bunks along both sides
+    L3 = np.floor(q16 + 60.0).astype(int)
+    stack = room(3) & ((np.abs(uu - 2.0) < 0.55) | (np.abs(uu - 6.4) < 0.55)) & (np.abs(q16) < hw16 - 3.0) & (L3 % 5 > 2)
+    put(stack & ybetween(50, 52), BOOKS)
+    put(stack & (Yw == 53) & (L3 % 5 == 4), CANDLE)
+    dress(3, (DARKPL, SPRPL), DARKLOG, BOOKS, DARKLOG, DARKPL, DARKLOG, border=DARKLOG)
+    # --- 4 barracks: two-tier bunks with posts, footlockers at the back
     finish_room(4, SPRPL, SPRPL, DARKPL)
-    feat(4, "sides", 50, 50, [REDWOOL, REDWOOL, WHITEWOOL], 1)
-    feat(4, "sides", 51, 51, [REDCARP, REDCARP, 0], 1)
-    feat(4, "sides", 52, 52, [WHITEWOOL, WHITEWOOL, REDWOOL], 1)
+    feat(4, "sides", 50, 50, [REDWOOL, REDWOOL, DARKLOG], 1)
+    feat(4, "sides", 51, 51, [0, 0, DARKLOG], 1)
+    feat(4, "sides", 52, 52, [WHITEWOOL, WHITEWOOL, DARKLOG], 1)
+    feat(4, "sides", 53, 53, [REDCARP, REDCARP, DARKLOG], 1)
+    feat(4, "sides", 54, 54, [0, 0, DARKLOG], 1)
     feat(4, "back", 50, 50, [BARREL, CHEST, BARREL, 0], 2)
     feat(4, "mid", 50, 50, [DARKPL, 0, 0], 3)
-    lights(4)
-    # --- 5 infirmary
+    feat(4, "mid", 51, 51, [CANDLE, 0, 0], 3)
+    dress(4, (SPRPL, DARKPL), DARKLOG, REDWOOL, DARKLOG, SPRPL, DARKLOG, border=DARKLOG)
+    # --- 5 infirmary: white tile, a red cross in the floor, curtained cots
     finish_room(5, QUARTZ, QUARTZ, QUARTZ)
-    feat(5, "sides", 50, 50, [WHITEWOOL], 1)
-    feat(5, "sides", 51, 51, [WHITECARP, WHITECARP, 0], 1)
+    feat(5, "sides", 50, 50, [WHITEWOOL, WHITEWOOL, GLASSP], 1)
+    feat(5, "sides", 51, 51, [REDCARP, REDCARP, GLASSP], 1)
+    feat(5, "sides", 52, 52, [0, 0, GLASSP], 1)
     feat(5, "back", 50, 50, [BREW, CAULD, BREW, CHEST], 2)
-    feat(5, "mid", 50, 50, [REDCARP, REDCARP, REDCARP, REDCARP], 1)
-    lights(5)
-    # --- 6 trophy hall: gold pedestals under glass
+    feat(5, "mid", 50, 50, [DIORITE, DIORITE, 0, 0], 1)
+    feat(5, "mid", 51, 51, [WHITECARP, WHITECARP, 0, 0], 1)
+    dress(5, (QUARTZ, CALCITE), DIORITE, REDWOOL, QPIL, QUARTZ, QPIL, border=DIORITE, niche=(SEALAMP, 0), lamp="sea", post=CANDLE)
+    cross = shift(room(5), -1, 0, 0) & ~UNDER & (((np.abs(q16) < 0.6) & (np.abs(uu - 4.2) < 2.3)) | ((np.abs(q16) < 2.3) & (np.abs(uu - 4.2) < 0.6)))
+    put(cross, REDWOOL)
+    # --- 6 trophy hall: lit cases on pedestals, red hangings between pillars
     finish_room(6, GILDED, CHISEL, QUARTZ)
-    feat(6, "mid", 50, 51, [GOLD, DIAMOND, EMERALD, LAPIS], 3)
-    feat(6, "mid", 52, 52, [GLASS], 3)
+    feat(6, "mid", 50, 50, [CHISEL], 1)
+    feat(6, "mid", 51, 51, [GOLD, DIAMOND, EMERALD, LAPIS], 3)
+    feat(6, "mid", 52, 53, [GLASS, 0, 0, 0], 3)
     feat(6, "sides", 50, 50, [QPIL, 0, 0], 3)
     feat(6, "sides", 51, 54, [REDWOOL, 0, 0], 3)
     feat(6, "back", 50, 50, [CHEST, 0, 0, 0], 4)
-    lights(6)
+    dress(6, (GILDED, QUARTZ), CHISEL, GOLD, QPIL, QUARTZ, QPIL, border=GOLD)
+    put(room(6) & (np.abs(q16) < 1.1) & (Yw == 50) & (uu > 1.5), REDCARP)
     # --- 7 treasury, behind an iron door
     finish_room(7, GOLD, DEEP, CHISEL)
     feat(7, "back", 50, 50, [GOLD, DIAMOND, GOLD, EMERALD], 1)
     feat(7, "back", 51, 51, [CHEST, GOLD, CHEST, 0], 2)
+    feat(7, "back", 52, 52, [0, GOLD, 0, 0], 2)
     feat(7, "sides", 50, 50, [GOLD, CHEST], 2)
-    lights(7)
+    feat(7, "sides", 51, 51, [0, GOLD], 2)
+    feat(7, "centre", 50, 50, [DIAMOND], 1)
+    dress(7, (GOLD, GILDED), GILDED, GOLD, CHISEL, DEEP, GOLD, border=DIAMOND)
     # --- 8 operations room
     finish_room(8, DEEP, PBBRICK, DBRICK)
     lever = mat("lever", '["lever_direction"="up_east_west","open_bit"=false]', True)
@@ -779,55 +866,83 @@ def furnish_rooms():
         put(end, lever)
     feat(8, "mid", 50, 50, [CARTO, LECT, 0, 0], 3)
     feat(8, "sides", 50, 50, [FLETCH, 0, 0], 3)
-    lights(8)
-    # --- 9 baths
-    finish_room(9, QUARTZ, QUARTZ, CHISEL)
-    feat(9, "all", 49, 49, 0)
-    pool = room(9) & (np.abs(uu - 4.2) < 2.8) & (np.abs(q16) < hw16 - 3.5) & (Yw == 50)
-    put(pool, WATER)
-    put(room(9) & (np.abs(uu - 4.2) >= 2.8) & (np.abs(uu - 4.2) < 3.8) & (np.abs(q16) < hw16 - 2.5) & (Yw == 50), QUARTZ)
-    feat(9, "sides", 50, 50, [QPIL, 0, 0], 3)
-    feat(9, "sides", 51, 53, [QPIL, 0, 0], 3)
-    lights(9)
+    dress(8, (DEEP, PBBRICK), PBBRICK, LAPIS, CDEEP, DBRICK, CDEEP, border=LAPIS)
+    # --- 9 baths: a sunken pool, wall basins, prismarine and white tile
+    finish_room(9, QUARTZ, QUARTZ, QUARTZ)
+    feat(9, "back", 50, 50, [CAULDW, 0, QPIL, 0], 2)
+    feat(9, "sides", 50, 50, [CAULDW, 0, 0, 0, 0, 0], 2)
+    dress(9, (QUARTZ, CALCITE), PRISMB, PRISMB, QPIL, QUARTZ, QPIL, border=PRISMB, niche=(SEALAMP, 0), lamp="sea", post=CANDLE)
+    pool = room(9) & (np.abs(uu - 4.2) < 2.2) & (np.abs(q16) < hw16 - 4.5) & (Yw == 50)
+    pool_b = shift(pool, -1, 0, 0) | shift(pool, -2, 0, 0)
+    lining = dilate(pool_b) & ~pool_b & ~UNDER & (Yw <= 48)
+    put(lining, PRISMB)
+    put(shift(pool, -3, 0, 0), PRISMB)
+    put(pool_b, WATER)
+    put(shift(dilate(pool) & ~pool & room(9), -1, 0, 0) & ~pool_b & ~UNDER & (Yw == 49), CHISEL)
     # --- 10 kitchen and mess
     finish_room(10, SBRICK, SBRICK, DARKPL)
     feat(10, "back", 50, 50, [SMOKER, FURN, BLAST, COMP, BARREL], 2)
+    feat(10, "back", 51, 51, [CHAIN, 0, CHAIN, 0, 0], 2)
     feat(10, "mid", 50, 50, [DARKPL, DARKPL, DARKPL, 0], 1)
-    feat(10, "mid", 51, 51, [mat("cake", "", True), 0, 0, 0], 4)
-    feat(10, "sides", 50, 50, [HAY, 0, BARREL], 3)
-    lights(10)
-    # --- 11 shrine
+    feat(10, "mid", 51, 51, [mat("cake", "", True), CANDLE, 0, 0], 4)
+    feat(10, "sides", 50, 50, [HAY, 0, BARREL, 0], 2)
+    dress(10, (TERRA, SBRICK), TERRA, DARKPL, DARKLOG, SBRICK, DARKLOG, border=DARKPL)
+    # --- 11 shrine: obsidian and gold round a stepped altar under soul light
     finish_room(11, OBSID, CRYING, CHISEL)
     feat(11, "back", 50, 52, [GOLD, 0, 0], 3)
     feat(11, "centre", 50, 50, [GOLD], 1)
     feat(11, "centre", 51, 51, [CANDLE], 1)
     feat(11, "sides", 50, 50, [CANDLE, 0, 0, 0], 2)
-    put(room(11) & (Yw == 57) & (np.abs(uu - 4.2) < 0.6) & (np.abs(q16) < 0.6), mat("soul_lantern", '["hanging"=true]', True))
-    # --- 12 beast cages
+    dress(11, (OBSID, CRYING), OBSID, GOLD, CHISEL, OBSID, CRYING, border=GOLD, niche=(LANT_S, 0), hang=LANT_SH, post=LANT_S)
+    step = room(11) & (uu >= 6.4) & (np.abs(q16) < 3.5) & (Yw == 50)
+    put(step, CHISEL)
+    put(step & (uu >= 7.4) & (np.abs(q16) < 2.0), GOLD)
+    put(room(11) & (uu >= 7.4) & (np.abs(q16) < 0.6) & (Yw == 51), CANDLE)
+    put(room(11) & (Yw == 57) & (np.abs(uu - 4.2) < 0.6) & (np.abs(q16) < 0.6), LANT_SH)
+    # --- 12 beast cages: bar-fronted stalls with straw and bones
     finish_room(12, DBRICK, DBRICK, DEEP)
-    feat(12, "sides", 50, 52, [BARS, BARS, 0], 1)
-    feat(12, "mid", 50, 50, [HAY, HAY, 0], 1)
-    feat(12, "back", 50, 50, [BONE, 0, COBWEB], 2)
-    lights(12)
-    # --- 13 cells
+    dc = np.floor(uu).astype(int) % 3
+    zone = room(12) & (np.abs(q16) >= hw16 - 2.2) & (uu >= 1.0) & (uu < 8.0)
+    face = room(12) & (np.abs(q16) >= hw16 - 3.2) & (np.abs(q16) < hw16 - 2.2) & (uu >= 1.0) & (uu < 8.0)
+    put(face & ybetween(50, 53) & (dc != 1), BARS)
+    put(face & (Yw == 54), DBRICK)
+    put(zone & (dc == 0) & ybetween(50, 53), BARS)
+    put(zone & (dc == 2) & (Yw == 50) & (np.abs(q16) >= hw16 - 1.2), HAY)
+    put(zone & (dc == 1) & (Yw == 50) & (np.abs(q16) >= hw16 - 1.2), BONE)
+    put(zone & (dc == 2) & (Yw == 53) & (np.abs(q16) >= hw16 - 1.2), COBWEB)
+    feat(12, "back", 50, 50, [BONE, 0, HAY, 0], 2)
+    feat(12, "mid", 50, 50, [HAY, 0, 0, 0], 4)
+    dress(12, (DBRICK, DTILE), DEEP, BONE, DEEP, DEEP, DBRICK, border=DEEP)
+    # --- 13 cells: a bar-fronted row of cells, each with a cot and a pail
     finish_room(13, SBRICK, SBRICK, SBRICK)
-    feat(13, "mid", 50, 52, [BARS, BARS, BARS, 0], 1)
-    feat(13, "back", 50, 50, [HAY, 0, HAY], 3)
-    feat(13, "sides", 50, 50, [0, HAY, 0], 3)
-    lights(13)
-    # --- 14 storage
+    L13 = np.floor(q16 + 60.0).astype(int)
+    row = room(13) & (np.abs(uu - 4.2) < 0.55) & ybetween(50, 53)
+    put(row & (L13 % 4 != 2), BARS)
+    put(room(13) & (uu > 4.8) & (L13 % 4 == 0) & ybetween(50, 53), BARS)
+    put(room(13) & (uu >= 7.2) & (L13 % 4 == 1) & (Yw == 50), HAY)
+    put(room(13) & (uu >= 7.2) & (L13 % 4 == 1) & (Yw == 51), WHITECARP)
+    put(room(13) & (uu >= 7.2) & (L13 % 4 == 3) & (Yw == 50), BARREL)
+    feat(13, "front", 50, 50, [BARREL, 0, 0, 0], 3)
+    dress(13, (SBRICK, ANDES), ANDES, SBRICK, ANDES, SBRICK, ANDES, border=ANDES)
+    # --- 14 storage: shelved bays of barrels and crates
     finish_room(14, DBRICK, DBRICK, DEEP)
     feat(14, "back", 50, 51, [BARREL, CHEST, BARREL], 1)
-    feat(14, "sides", 50, 51, [BARREL, BARREL, CHEST, 0], 1)
+    feat(14, "sides", 50, 50, [BARREL, CHEST, BARREL, BARREL], 1)
+    feat(14, "sides", 51, 51, [BARREL, 0, BARREL, 0], 1)
+    feat(14, "sides", 52, 52, [DARKPL], 1)
+    feat(14, "sides", 53, 53, [BARREL, BARREL, CHEST, 0], 1)
     feat(14, "mid", 50, 50, [HAY, 0, BARREL, 0], 2)
-    lights(14)
-    # --- 15 gladiators' lounge
+    dress(14, (DBRICK, DTILE), DARKLOG, DARKPL, DARKLOG, DBRICK, DARKLOG, border=DARKLOG)
+    # --- 15 gladiators' lounge: parquet, a bar at the back, low tables
     finish_room(15, DARKPL, SPRPL, DARKPL)
     feat(15, "mid", 50, 50, [BARREL, 0, 0], 3)
     feat(15, "mid", 51, 51, [CANDLE, 0, 0], 3)
     feat(15, "sides", 50, 50, [REDCARP, REDCARP, REDCARP], 1)
-    feat(15, "back", 50, 50, [BARREL, CHEST, JUKE, 0], 2)
-    lights(15)
+    feat(15, "back", 50, 50, [DARKPL, DARKPL, JUKE, DARKPL], 1)
+    feat(15, "back", 51, 51, [BARREL, 0, 0, BARREL], 2)
+    feat(15, "back", 52, 52, [0, CHEST, 0, 0], 2)
+    dress(15, (DARKPL, SPRPL), DARKPL, REDWOOL, DARKLOG, DARKPL, DARKLOG, border=DARKLOG)
+    put(room(15) & (np.abs(q16) < 1.1) & (Yw == 50) & (uu > 1.5) & (uu < 7.2), REDCARP)
 
 
 furnish_rooms()
