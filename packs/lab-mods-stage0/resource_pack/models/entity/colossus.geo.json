@@ -1,0 +1,54 @@
+{
+  "format_version": "1.12.0",
+  "minecraft:geometry": [
+    {
+      "description": {
+        "identifier": "geometry.gameops.colossus",
+        "texture_width": 128,
+        "texture_height": 128,
+        "visible_bounds_width": 5,
+        "visible_bounds_height": 4,
+        "visible_bounds_offset": [0, 1.5, 0]
+      },
+      "bones": [
+        {
+          "name": "body",
+          "pivot": [0, 16, 0],
+          "cubes": [{ "origin": [-16, 16, -9], "size": [32, 18, 18], "uv": [0, 32] }]
+        },
+        {
+          "name": "head",
+          "parent": "body",
+          "pivot": [0, 34, 0],
+          "cubes": [
+            { "origin": [-8, 34, -7], "size": [16, 12, 14], "uv": [0, 0] },
+            { "origin": [-10, 43, -2], "size": [3, 8, 3], "uv": [64, 0] },
+            { "origin": [7, 43, -2], "size": [3, 8, 3], "uv": [76, 0] }
+          ]
+        },
+        {
+          "name": "right_arm",
+          "parent": "body",
+          "pivot": [-21, 32, 0],
+          "cubes": [{ "origin": [-26, 6, -5], "size": [10, 28, 10], "uv": [0, 72] }]
+        },
+        {
+          "name": "left_arm",
+          "parent": "body",
+          "pivot": [21, 32, 0],
+          "cubes": [{ "origin": [16, 6, -5], "size": [10, 28, 10], "uv": [40, 72] }]
+        },
+        {
+          "name": "right_leg",
+          "pivot": [-8, 16, 0],
+          "cubes": [{ "origin": [-14, 0, -6], "size": [12, 16, 12], "uv": [80, 72] }]
+        },
+        {
+          "name": "left_leg",
+          "pivot": [8, 16, 0],
+          "cubes": [{ "origin": [2, 0, -6], "size": [12, 16, 12], "uv": [0, 100] }]
+        }
+      ]
+    }
+  ]
+}
