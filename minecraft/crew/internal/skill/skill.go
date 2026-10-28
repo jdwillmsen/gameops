@@ -95,6 +95,7 @@ type options struct {
 	log    Logger
 	groups []group
 	hotbar bool
+	guard  *Guard
 }
 
 // group is a budget of n items to take from any of names, best first.
