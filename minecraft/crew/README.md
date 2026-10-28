@@ -20,8 +20,9 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
-| `CREW_ROLE` | unset | The warrior role the unit fights as: `vanguard`, `striker` or `ranger` (see Squads and warriors); anything else is refused, unset leaves the reactive defence in charge |
-| `CREW_SQUAD` | `alpha` with a role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without a role |
+| `CREW_ROLE` | unset | The unit's role: a warrior (`vanguard`, `striker`, `ranger`; see Squads and warriors) or a builder (`mender`, `builder`; see Mender and builder roles); anything else is refused, unset leaves the reactive defence in charge |
+| `CREW_LAB` | `false` | Must be `true` for a `mender` or `builder`, which refuse to start without it; the lab chart or compose sets it, the live server's never does |
+| `CREW_SQUAD` | `alpha` with a warrior role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without one |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
 | `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
@@ -103,6 +104,16 @@ chain of command leads through the fittest member — Vanguard, then Striker,
 then Ranger — and a leader that dies or goes silent for 8 s hands over. A
 warrior without `CONTROL_URL` still fights, but leads itself and hears no
 orders, and says so in one `squad_off` log line.
+
+## Mender and builder roles
+
+`mender` and `builder` are not warriors: they take no warrior engine, say no
+squad hello and ignore `CREW_SQUAD`, and for now live the ordinary idle,
+defence and eating life. They work in creative mode, which is applied from
+the lab console, not by the unit, so they are lab-only: with either role the
+unit refuses to start unless `CREW_LAB=true`. The lab's chart or compose sets
+it; the live server's never does. Nothing is probed on the network, the
+variable is the whole guard.
 
 ## Water
 
