@@ -181,6 +181,74 @@ func (pr Profile) Validate() (Profile, error) {
 	return pr, nil
 }
 
+// UnmarshalJSON starts from the shipped values so a field the document does
+// not name keeps its default instead of decoding to zero and being clamped to
+// its floor. Each override is read on top of the profile's own default, so an
+// override that names one knob changes only that knob. Tactics accepts the
+// older one-name string for a family as well as the list.
+func (pr *Profile) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Version   int                        `json:"version"`
+		Name      string                     `json:"name"`
+		Parent    string                     `json:"parent"`
+		Evidence  string                     `json:"evidence"`
+		Default   json.RawMessage            `json:"default"`
+		Overrides map[Family]json.RawMessage `json:"overrides"`
+		Tactics   map[Family]tacticNames     `json:"tactics"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	out := Profile{Version: raw.Version, Name: raw.Name, Parent: raw.Parent, Evidence: raw.Evidence, Default: Defaults()}
+	if len(raw.Default) > 0 {
+		if err := json.Unmarshal(raw.Default, &out.Default); err != nil {
+			return fmt.Errorf("tactics: default: %w", err)
+		}
+	}
+	if len(raw.Overrides) > 0 {
+		out.Overrides = make(map[Family]Params, len(raw.Overrides))
+		for f, msg := range raw.Overrides {
+			o := out.Default
+			if len(msg) > 0 {
+				if err := json.Unmarshal(msg, &o); err != nil {
+					return fmt.Errorf("tactics: override %q: %w", f, err)
+				}
+			}
+			out.Overrides[f] = o
+		}
+	}
+	if len(raw.Tactics) > 0 {
+		out.Tactics = make(map[Family][]string, len(raw.Tactics))
+		for f, names := range raw.Tactics {
+			out.Tactics[f] = names
+		}
+	}
+	*pr = out
+	return nil
+}
+
+// tacticNames reads a family's tactics as a list or as the single name an
+// earlier profile format stored; an empty name means none.
+type tacticNames []string
+
+func (t *tacticNames) UnmarshalJSON(b []byte) error {
+	var one string
+	if err := json.Unmarshal(b, &one); err == nil {
+		if one == "" {
+			*t = nil
+		} else {
+			*t = tacticNames{one}
+		}
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return fmt.Errorf("tactics: a family's tactics must be a name or a list of names: %w", err)
+	}
+	*t = many
+	return nil
+}
+
 // Parse decodes and validates a profile.
 func Parse(b []byte) (Profile, error) {
 	pr := Profile{Default: Defaults()}

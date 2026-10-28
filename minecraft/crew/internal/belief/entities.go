@@ -33,6 +33,8 @@ type Entity struct {
 	Ignited bool
 	// Charged is a creeper struck by lightning. Bedrock marks that with the
 	// powered flag; the charged flag is read as well since servers differ.
+	// The two bits are OR-ed on purpose: either one means a stronger blast
+	// to stay out of, and a false alarm only costs some extra distance.
 	Charged bool
 	// Angry is a hostile mob's aggro, such as an enderman that has been
 	// provoked.

@@ -350,14 +350,17 @@ func (a *Actuator) Apply(pk packet.Packet) {
 		if p.EntityRuntimeID != a.runtimeID {
 			return
 		}
+		// A server-side move is a teleport or a respawn, and the server's
+		// sprint ends with it; keeping ours would hold back the start that
+		// a still-held sprint needs.
 		a.pose = Pose{
-			Feet:       p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
-			Pitch:      p.Pitch,
-			Yaw:        p.Yaw,
-			OnGround:   p.OnGround,
-			sprinting:  a.pose.sprinting,
-			sprintHalt: a.pose.sprintHalt,
+			Feet:     p.Position.Sub(mgl32.Vec3{0, eyeHeight, 0}),
+			Pitch:    p.Pitch,
+			Yaw:      p.Yaw,
+			OnGround: p.OnGround,
 		}
+	case *packet.Respawn, *packet.ChangeDimension:
+		a.pose.sprinting, a.pose.sprintHalt = false, false
 	default:
 		a.applyContainerLocked(pk)
 	}

@@ -1,0 +1,21 @@
+{
+  "boss/hurt striker eating off the boss": "4cf32c2fc9eb4b2ffaa6663c5eb06ac793b9e43d527e93f614eedc8711f68278",
+  "boss/ranger shooting from its band": "ad79ccbb96061d7c715796e2a5fe2a422b15d2793f2c0693bb397552f190feac",
+  "boss/striker regrouping to the start": "b813b888e77c58d0894724216f87b5fdcd6cdc26c631bf36d049803dd5813026",
+  "boss/vanguard holding the melee": "776b9ccab30336805c7bdf13c46db5678a5338be10df6171934958a2f7fbf3cb",
+  "fight/a zombie walking in from beyond focus range/ranger": "2ac308a9e53f6c435ce679f1d9e051747f207961b6d61022861e0963c7d05505",
+  "fight/a zombie walking in from beyond focus range/striker": "2ac308a9e53f6c435ce679f1d9e051747f207961b6d61022861e0963c7d05505",
+  "fight/a zombie walking in from beyond focus range/vanguard": "2ac308a9e53f6c435ce679f1d9e051747f207961b6d61022861e0963c7d05505",
+  "fight/hurt striker pressed, then eating, then regrouping/ranger": "2f21f7ad312d98f9cadd2f457321dea27b6d8b65dc30ed1260296b34fac6e47a",
+  "fight/hurt striker pressed, then eating, then regrouping/striker": "5eb2fde2591358c9df49353ff661be2dfbcb1505c7ccc3aa8f206bcb2d127ed9",
+  "fight/hurt striker pressed, then eating, then regrouping/vanguard": "91742d9624c7b91daa1024a2a9255f5216006778213554d437418b0f1b892256",
+  "fight/hurt with a zombie just out of arm's reach/ranger": "02f5487a51a36047932d46f7e0d9424ef9c717570b080e3fda5565605e316f04",
+  "fight/hurt with a zombie just out of arm's reach/striker": "02f5487a51a36047932d46f7e0d9424ef9c717570b080e3fda5565605e316f04",
+  "fight/hurt with a zombie just out of arm's reach/vanguard": "02f5487a51a36047932d46f7e0d9424ef9c717570b080e3fda5565605e316f04",
+  "fight/ranger kiting a walking zombie/ranger": "2325305f47c4954dee1d93b48edce01f0ff1eb825ab8edb311f86900eb8aaa87",
+  "fight/ranger kiting a walking zombie/striker": "b4d1e19ffc90c2beab5e404b1bdbdc6080969bfda07ed2d9c544dfcabee9ae7e",
+  "fight/ranger kiting a walking zombie/vanguard": "6324466abe2cb0d74197c6cd404ceb9cbcd3e0626df13bcd538ea58922b6b659",
+  "fight/striker on a zombie under a skeleton's line, arrows and blows/ranger": "e65e9199b0e642e17e7a7fc13a25af344ed64d644db2149251ae2f761986117c",
+  "fight/striker on a zombie under a skeleton's line, arrows and blows/striker": "a9968a047d16b1cf34b6c5195068e855d04edec305c6214dfc3eb4368ddee6d0",
+  "fight/striker on a zombie under a skeleton's line, arrows and blows/vanguard": "55fff46994c54de2126a3d4dcd43ee623698ba79a30c4d8fce49b265057d1d00"
+}

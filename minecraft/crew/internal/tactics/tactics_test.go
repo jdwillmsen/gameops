@@ -1,7 +1,9 @@
 package tactics
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +94,65 @@ func TestABossOverrideAndTacticLoadClampedAndStayWithTheBoss(t *testing.T) {
 	}
 	if !reflect.DeepEqual(pr.TacticsFor(FamilyBoss), []string{"boss/kiteburst"}) || len(pr.TacticsFor(FamilyZombie)) != 0 {
 		t.Error("boss tactic lookup wrong")
+	}
+}
+
+func TestParseKeepsShippedValuesForAbsentFields(t *testing.T) {
+	pr, err := Parse([]byte(`{"version":1,"name":"x","tactics":{"creeper":["creeper/backoff"]}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Default != Defaults() {
+		t.Errorf("default = %+v, want the shipped values", pr.Default)
+	}
+	pr, err = Parse([]byte(`{"version":1,"name":"x","default":{"shotEvery":40}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Defaults()
+	want.ShotEvery = 40
+	if pr.Default != want {
+		t.Errorf("default = %+v, want only shotEvery changed", pr.Default)
+	}
+}
+
+func TestParseOverrideChangesOnlyTheNamedKnob(t *testing.T) {
+	pr, err := Parse([]byte(`{"version":1,"name":"x","default":{"focusRange":9},"overrides":{"creeper":{"kiteBackoff":8}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := pr.Default
+	want.KiteBackoff = 8
+	if got := pr.For(FamilyCreeper); got != want {
+		t.Errorf("creeper = %+v, want the profile default with kiteBackoff 8", got)
+	}
+	if pr.For(FamilyCreeper).FocusRange != 9 {
+		t.Error("override lost the profile's own default")
+	}
+}
+
+func TestParseAcceptsTheOldStringTacticAndTheList(t *testing.T) {
+	pr, err := Parse([]byte(`{"version":1,"name":"x","tactics":{"creeper":"creeper/backoff","spider":["spider/ground","spider/swarm"],"zombie":""}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pr.TacticsFor(FamilyCreeper); !reflect.DeepEqual(got, []string{"creeper/backoff"}) {
+		t.Errorf("creeper = %v", got)
+	}
+	if got := pr.TacticsFor(FamilySpider); !reflect.DeepEqual(got, []string{"spider/ground", "spider/swarm"}) {
+		t.Errorf("spider = %v", got)
+	}
+	if len(pr.TacticsFor(FamilyZombie)) != 0 {
+		t.Error("an empty name became a tactic")
+	}
+	if _, err := Parse([]byte(`{"version":1,"name":"x","tactics":{"creeper":7}}`)); err == nil {
+		t.Error("a number accepted as a tactic")
+	}
+	out, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"creeper":["creeper/backoff"]`) {
+		t.Errorf("marshalled %s, want arrays", out)
 	}
 }
