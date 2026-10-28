@@ -12,6 +12,11 @@ role always give the same skin.
 | shaft | white helmet, orange hi-vis jacket with reflective bands |
 | warrior | iron plate; tabard red (vanguard), purple (striker), green hooded (ranger) |
 
+Armour covers an outfit but not a face or hands, so each unit also has marks
+of its own that stay visible under armour: a wristband in its accent colour,
+gloves on about half of them (warriors keep their gauntlets), and one of six
+face marks (freckles, scar, war paint, heavy brows, beauty mark, clean).
+
 The role comes from `CREW_UNIT_ROLE` (warriors use `CREW_ROLE`). An unset or
 unknown role keeps the plain name-coloured skin.
 

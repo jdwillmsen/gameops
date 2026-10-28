@@ -38,7 +38,9 @@ func ForPersona(name string, p Persona) Skin {
 
 	px := make([]byte, Width*Height*4)
 	body(px, look)
+	paintFaceMark(px, look)
 	paint(px, look)
+	paintHandMarks(px, look, key)
 
 	return Skin{
 		ID:     fmt.Sprintf("%x-%s", sum[:8], key),
@@ -61,6 +63,11 @@ func outfitKey(p Persona) string {
 // look is the block of a unit's appearance that belongs to the individual.
 type look struct {
 	skin, hair, accent rgba
+	// mark picks the face mark, and glove whether the hands are gloved;
+	// both come from the name, and both stay visible under armour, which
+	// covers the outfit but not the face or the hands.
+	mark  int
+	glove bool
 }
 
 var skinTones = []rgba{
@@ -80,6 +87,8 @@ func lookFrom(sum [32]byte) look {
 		// A small hue spread keeps units of one role recognisably a team
 		// without making them clones.
 		accent: hsv(float64(sum[4])/255*360, 0.55, 0.8),
+		mark:   int(sum[5]) % faceMarks,
+		glove:  sum[6]&1 == 1,
 	}
 }
 
@@ -290,4 +299,46 @@ func paintWarrior(px []byte, l look, tabard rgba, hood bool) {
 	head.paintFront(px, iron, 0, 3, 8, 5)
 	head.paintFront(px, rgba{18, 18, 22, 255}, 1, 4, 6, 1)
 	head.paintFront(px, tabard, 3, 0, 2, 3)
+}
+
+const faceMarks = 6
+
+// paintFaceMark gives each unit something on its face that no one else of its
+// role has. It is painted before the outfit so a beard or visor covers it
+// rather than the other way round.
+func paintFaceMark(px []byte, l look) {
+	shade := darken(l.skin, 0.8)
+	switch l.mark {
+	case 0: // freckles
+		for _, d := range [][2]int{{1, 5}, {2, 6}, {5, 5}, {6, 6}} {
+			head.paintFront(px, shade, d[0], d[1], 1, 1)
+		}
+	case 1: // scar across the left cheek
+		for i := range 3 {
+			head.paintFront(px, rgba{190, 90, 90, 255}, 1, 3+i, 1, 1)
+		}
+	case 2: // war paint under the eyes, in the unit's accent colour
+		head.paintFront(px, l.accent, 1, 5, 2, 1)
+		head.paintFront(px, l.accent, 5, 5, 2, 1)
+	case 3: // heavy brows
+		head.paintFront(px, darken(l.hair, 0.8), 1, 3, 2, 1)
+		head.paintFront(px, darken(l.hair, 0.8), 5, 3, 2, 1)
+	case 4: // beauty mark and cheek blush
+		head.paintFront(px, shade, 6, 6, 1, 1)
+		head.paintFront(px, rgba{225, 140, 130, 255}, 1, 5, 1, 1)
+	}
+	// 5: a clean face.
+}
+
+// paintHandMarks runs after the outfit. A unit wears a wristband in its accent
+// colour, and half of them gloves in a darker shade of it. Warriors keep their
+// iron gauntlets and take only the band.
+func paintHandMarks(px []byte, l look, key string) {
+	arms := []block{rightArm, rightSlv, leftArm, leftSlv}
+	for _, p := range arms {
+		fill(px, p.x, p.y+p.d+p.h-3, 2*(p.w+p.d), 1, l.accent)
+		if l.glove && !strings.HasPrefix(key, "warrior") {
+			fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, darken(l.accent, 0.55))
+		}
+	}
 }
