@@ -1,7 +1,6 @@
 # One-wave book for the stage-0 add-on pack mob gameops:training_dummy_brute.
-# PREREQUISITE: not meaningful yet. The brute only targets family arena_target
-# (never players) in the stage-0 pack, so until the pack revision that lets it
-# target warriors is live it will not fight and the wave will only time out.
+# The brute only targets entities tagged arena_warrior (never players), which
+# arena.sh applies to the warriors for the run, so it fights them.
 # Then run it on a lab with packs/lab-mods-stage0 loaded:
 #   arena.sh run <lab> --waves lab/waves-custom-brute.yaml
 # A pack mob has no equipment slots, so each tier is effects only.
