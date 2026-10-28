@@ -96,6 +96,11 @@ func LoadLayout(path string) (Layout, error) {
 	if err != nil {
 		return Layout{}, err
 	}
+	return ParseLayout(data)
+}
+
+// ParseLayout reads layout JSON that is already in memory.
+func ParseLayout(data []byte) (Layout, error) {
 	var l Layout
 	if err := json.Unmarshal(data, &l); err != nil {
 		return Layout{}, fmt.Errorf("parse layout: %w", err)
