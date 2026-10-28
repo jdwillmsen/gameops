@@ -339,7 +339,7 @@ func createNew(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
-		f.Close()
+		err = errors.Join(err, f.Close())
 		os.Remove(path)
 		return err
 	}

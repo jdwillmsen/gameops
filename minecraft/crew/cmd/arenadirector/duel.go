@@ -131,8 +131,7 @@ func (s fileSink) Record(c tactics.Scorecard) error {
 		return err
 	}
 	if err := (arena.JSONLSink{W: f}).Record(c); err != nil {
-		f.Close()
-		return err
+		return errors.Join(err, f.Close())
 	}
 	return f.Close()
 }
