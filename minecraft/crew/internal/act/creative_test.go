@@ -497,3 +497,27 @@ func TestPlaceBlockTakesCreativelyWhenTheItemOnlySitsInTheBackpack(t *testing.T)
 		t.Errorf("click held %+v, want the stairs", u.HeldItem)
 	}
 }
+func TestTakeCreativeRechecksTheSlotAfterTheScreenOpens(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	// The oldest taken stone is slot 0; before the request goes out the
+	// server swaps in a stack the unit did not take.
+	foreign := cobbleInstance(3, 99)
+	srv.onOpen = func() {
+		a.Apply(&packet.InventorySlot{WindowID: 0, Slot: 0, NewItem: foreign})
+		srv.onOpen = nil
+	}
+	if err := a.TakeCreative("oak_stairs"); err != nil {
+		t.Fatal(err)
+	}
+	reqs := stackRequests(s)
+	d := destroyOf(t, reqs[len(reqs)-1].Requests[0])
+	if d.Source.Slot != 2 {
+		t.Errorf("destroyed slot %d, want 2: slot 0 no longer holds a stack the unit took", d.Source.Slot)
+	}
+	if got := a.inv[0]; got.StackNetworkID != 99 {
+		t.Errorf("slot 0 = %+v, want the foreign stack untouched", got)
+	}
+}
