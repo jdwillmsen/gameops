@@ -63,3 +63,18 @@ need a player, so crew units cannot work them; the director uses `fill`.
   block below it, so attachables and fluids are placed after every solid block.
   Stairs ascend toward the direction `ASC` maps; set `COLO_FLIP_STAIRS=1` if a
   build shows them reversed.
+
+## Repairing damage
+
+`cmd/arenarepair` restores only what a fight changed (design: `docs/specs/2026-10-27-crew-colosseum-repair-bot-design.md`). It reads the world database, never the console, so scanning writes nothing. Run it from the repo root after `arena.sh run` has returned.
+
+```
+go run ./minecraft/crew/cmd/arenarepair plan  --lab k8s:<ns>/<pod>                 # damage report, nothing sent
+go run ./minecraft/crew/cmd/arenarepair plan  --lab k8s:<ns>/<pod> --commands      # plus the fills it would send
+go run ./minecraft/crew/cmd/arenarepair apply --lab k8s:<ns>/<pod>                 # still a dry run
+go run ./minecraft/crew/cmd/arenarepair apply --lab k8s:<ns>/<pod> --execute       # sends the repair
+go run ./minecraft/crew/cmd/arenarepair snapshot --lab k8s:<ns>/<pod> --out DIR    # keep a copy of the db
+go run ./minecraft/crew/cmd/arenarepair plan  --world DIR                          # re-plan from a copy
+```
+
+`--lab` must be the crew lab pod (or the compose service `lab`); any other target needs `--confirm-lab <same target>`. It runs `save hold`, waits for `save query` to list the file lengths, tars `/data/worlds/crew-lab/db` out of the container, cuts each file to its listed length and runs `save resume` (also on Ctrl-C). `--keep`/`--out` directories get their `db/` replaced. `apply --execute` accepts only `--lab` as the source and prints how old the copy is. The desired state comes from running `colosseum.py` (or `--plan-dir` pointing at a generator output). `--scan FILE` reads a hand-made scan of fill/setblock lines instead. `apply --execute` refuses while tagged mobs live or a non-crew player is online. Not compared: chest contents, signs, entities, water in a second layer. Levers, doors and buttons in a different position are ignored.
