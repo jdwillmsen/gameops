@@ -330,3 +330,45 @@ func TestUniqueIDIsKeptPerSessionAsASignedDecimal(t *testing.T) {
 		t.Errorf("after reset = %q", s.UniqueID)
 	}
 }
+
+func TestCreativeFollowsOwnGameTypeUpdates(t *testing.T) {
+	tr := spawned(t)
+	tr.SetUniqueID(-4294967295)
+	if tr.Snapshot().Creative || tr.Creative() {
+		t.Fatal("creative before any announcement")
+	}
+	tr.Apply(&packet.UpdatePlayerGameType{GameType: 1, PlayerUniqueID: -4294967295, Tick: 40})
+	if !tr.Snapshot().Creative || !tr.Creative() {
+		t.Error("own creative update not recorded")
+	}
+	tr.Apply(&packet.UpdatePlayerGameType{GameType: 0, PlayerUniqueID: -4294967295})
+	if tr.Snapshot().Creative {
+		t.Error("survival update did not clear creative")
+	}
+}
+
+func TestCreativeIgnoresOtherPlayersAndSetPlayerGameType(t *testing.T) {
+	tr := spawned(t)
+	tr.SetUniqueID(-4294967295)
+	tr.Apply(&packet.UpdatePlayerGameType{GameType: 1, PlayerUniqueID: -4294967294})
+	tr.Apply(&packet.SetPlayerGameType{GameType: 1})
+	if tr.Snapshot().Creative {
+		t.Error("creative set by a packet that is not about the unit")
+	}
+}
+
+func TestCreativeIsForgottenOnSpawnAndReset(t *testing.T) {
+	tr := spawned(t)
+	tr.SetUniqueID(9)
+	tr.Apply(&packet.UpdatePlayerGameType{GameType: 1, PlayerUniqueID: 9})
+	tr.Spawn(self, mgl32.Vec3{}, 0, 0, 0)
+	if tr.Snapshot().Creative {
+		t.Error("creative survived a new spawn")
+	}
+	tr.SetUniqueID(9)
+	tr.Apply(&packet.UpdatePlayerGameType{GameType: 1, PlayerUniqueID: 9})
+	tr.Reset()
+	if tr.Snapshot().Creative {
+		t.Error("creative survived a reset")
+	}
+}
