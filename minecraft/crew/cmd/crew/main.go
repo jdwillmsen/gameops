@@ -332,8 +332,8 @@ func unitSkinFor(cfg config.Config, log *logging.Logger) skin.Skin {
 		return custom
 	}
 	persona := skin.Persona{Role: cfg.SkinRole}
-	if cfg.Role != "" {
-		persona = skin.Persona{Role: "warrior", SquadRole: cfg.Role}
+	if cfg.Role.IsWarrior() {
+		persona = skin.Persona{Role: "warrior", SquadRole: string(cfg.Role)}
 	}
 	return skin.ForPersona(cfg.Username, persona)
 }
