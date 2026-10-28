@@ -1822,3 +1822,19 @@ func TestRetagFailureMidRunStillUntagsEveryone(t *testing.T) {
 		}
 	}
 }
+
+func TestCountCmdOutlastsALateReply(t *testing.T) {
+	reads := 0
+	f := &FakeConsole{Respond: func(string) (string, error) {
+		reads++
+		if reads < 6 {
+			return "[t] 2 blocks filled", nil
+		}
+		return "[t] Found Rusty", nil
+	}}
+	d := newDirector(f, &WaveBook{}, newFakeClock())
+	n, err := d.countCmd("testfor Rusty", "warrior Rusty")
+	if err != nil || n != 1 {
+		t.Fatalf("count = %d, %v after %d reads, want 1", n, err, reads)
+	}
+}
