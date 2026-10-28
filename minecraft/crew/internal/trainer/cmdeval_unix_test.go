@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -170,5 +171,66 @@ echo '{"profile":"p1","outcome":"win"}'
 	}
 	if raw, _ := os.ReadFile(filepath.Join(marks, "deadline")); strings.TrimSpace(string(raw)) != "unset" {
 		t.Errorf("TRAINER_DEADLINE = %q with no timeout", raw)
+	}
+}
+
+// recordSignals wraps sendSignal and returns the signals sent so far.
+func recordSignals(t *testing.T) func() []syscall.Signal {
+	t.Helper()
+	var (
+		mu   sync.Mutex
+		sent []syscall.Signal
+	)
+	old := sendSignal
+	sendSignal = func(pid int, sig syscall.Signal) error {
+		mu.Lock()
+		sent = append(sent, sig)
+		mu.Unlock()
+		return old(pid, sig)
+	}
+	t.Cleanup(func() { sendSignal = old })
+	return func() []syscall.Signal {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]syscall.Signal(nil), sent...)
+	}
+}
+
+func TestCmdEvaluatorSignalsNothingAfterANormalExit(t *testing.T) {
+	sent := recordSignals(t)
+	script, _ := writeScript(t, `echo '{"profile":"p1","outcome":"win"}'
+`)
+	if _, err := (CmdEvaluator{Command: script, Timeout: time.Minute}).Evaluate(context.Background(), tactics.NewProfile("p1"), cmdScenario); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := sent(); len(got) != 0 {
+		t.Errorf("signals after a normal exit: %v", got)
+	}
+
+	failing, _ := writeScript(t, "exit 3\n")
+	if _, err := (CmdEvaluator{Command: failing, Timeout: time.Minute}).Evaluate(context.Background(), tactics.NewProfile("p1"), cmdScenario); err == nil {
+		t.Fatal("a failing evaluator succeeded")
+	}
+	if got := sent(); len(got) != 0 {
+		t.Errorf("signals after the evaluator exited on its own: %v", got)
+	}
+}
+
+func TestCmdEvaluatorTimeoutSignalsTermBeforeKill(t *testing.T) {
+	shortWaitDelay(t)
+	sent := recordSignals(t)
+	script, pidFile := writeScript(t, `sleep 60 &
+echo $! > PIDFILE
+wait
+`)
+	_, err := CmdEvaluator{Command: script, Timeout: 200 * time.Millisecond}.Evaluate(context.Background(), tactics.NewProfile("p1"), cmdScenario)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	gone(t, pidFile)
+	got := sent()
+	if len(got) == 0 || got[0] != syscall.SIGTERM {
+		t.Errorf("signals = %v, want SIGTERM first", got)
 	}
 }

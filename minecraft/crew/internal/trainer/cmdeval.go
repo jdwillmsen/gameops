@@ -80,16 +80,20 @@ func (e CmdEvaluator) Evaluate(ctx context.Context, p tactics.Profile, s Scenari
 	cmd.Stdout = out
 	err = cmd.Run()
 	finish()
-	// Whatever the command left behind must not outlive the fight.
-	_ = killGroup(cmd)
 	if out.overflowed {
+		_ = killGroup(cmd)
 		return nil, errOutputTooLarge
 	}
 	if err != nil {
+		// Only when the fight was cut short or a pipe is still held is the group
+		// known to hold stragglers; a command that simply exited is not signalled
+		// again, since its group id may have been reused by then.
 		if ctx.Err() != nil {
+			_ = killGroup(cmd)
 			return nil, ctx.Err()
 		}
 		if errors.Is(err, exec.ErrWaitDelay) {
+			_ = killGroup(cmd)
 			return nil, fmt.Errorf("trainer: evaluator %q left a process holding its output open", argv[0])
 		}
 		return nil, fmt.Errorf("trainer: evaluator %q: %w: %s", argv[0], err, strings.TrimSpace(stderr.String()))
