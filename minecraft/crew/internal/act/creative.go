@@ -191,7 +191,7 @@ func (a *Actuator) touchSlot(slot int) {
 
 // planTakeLocked resolves what a take names: the creative ID to quote, the
 // item's runtime ID and the hotbar slot to take it into. With no empty slot it
-// picks the least recently used one holding an item an earlier creative take
+// picks the least recently used one still holding a stack an earlier creative take
 // put there, and evict says that stack must be destroyed first. A slot holding
 // the requested item is never picked, and neither is one filled any other way:
 // those are the unit's own tools and food.
@@ -214,8 +214,8 @@ func (a *Actuator) planTakeLocked(item string) (creativeID uint32, itemID int32,
 	}
 	best := -1
 	for s := 0; s < hotbarSlots; s++ {
-		held := a.inv[s].Stack.NetworkID
-		if held == itemID || a.takenItem[s] != held {
+		held := a.inv[s]
+		if held.Stack.NetworkID == itemID || a.takenStack[s] == 0 || a.takenStack[s] != held.StackNetworkID {
 			continue
 		}
 		if best < 0 || a.slotUse[s] < a.slotUse[best] {
