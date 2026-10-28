@@ -23,9 +23,15 @@ func TestPersonaSkinsAreValidAndOpaque(t *testing.T) {
 		if err != nil || len(raw) != Width*Height*4 {
 			t.Fatalf("%+v: bad buffer (%d bytes, %v)", p, len(raw), err)
 		}
-		for i := 3; i < len(raw); i += 4 {
-			if raw[i] != 255 {
-				t.Fatalf("%+v: pixel %d has alpha %d", p, i/4, raw[i])
+		// Only the base layers must be solid; the overlays are transparent
+		// unless an outfit puts something on them.
+		for _, b := range []block{head, torso, rightArm, leftArm, rightLeg, leftLeg} {
+			for y := b.y + b.d; y < b.y+b.d+b.h; y++ {
+				for x := b.x; x < b.x+2*(b.w+b.d); x++ {
+					if a := raw[(y*Width+x)*4+3]; a != 255 {
+						t.Fatalf("%+v: base pixel (%d,%d) has alpha %d", p, x, y, a)
+					}
+				}
 			}
 		}
 	}
@@ -143,6 +149,22 @@ func TestUnitsOfARoleDifferOnFaceAndHands(t *testing.T) {
 		}
 		if len(seen) != len(names) {
 			t.Errorf("%+v: only %d distinct face/hand looks across %d units", p, len(seen), len(names))
+		}
+	}
+}
+
+// The game draws the overlay layers over the base ones, so a solid hat layer
+// would hide the eyes: the head's front must not be covered by the hat layer
+// unless the outfit has a helm there.
+func TestFaceIsNotHiddenByTheHatLayer(t *testing.T) {
+	for _, p := range allPersonas {
+		raw, _ := base64.StdEncoding.DecodeString(ForPersona("Agate", p).Data)
+		// Hat-layer front, eye row.
+		for x := 41; x < 47; x++ {
+			if raw[(12*Width+x)*4+3] == 255 {
+				t.Errorf("%+v: hat layer is opaque over the eyes at x=%d", p, x)
+				break
+			}
 		}
 	}
 }
