@@ -114,15 +114,15 @@ type Life struct {
 
 	// The rest belongs to the stepping goroutine.
 	tick uint64
-	// tacticErrAt is the tick each tactic's error was last logged at, so a
-	// tactic that fails every tick says so once a minute and not 1200 times.
-	tacticErrAt map[string]uint64
 
 	attacker       uint64
 	attackerUntil  uint64
 	attackerPlayer bool
 	ignore         map[uint64]uint64
 	fightTicks     map[uint64]int
+	// tacticErrAt is the tick each tactic's error was last logged at, so a
+	// tactic that fails every tick says so once a minute and not 1200 times.
+	tacticErrAt map[string]uint64
 
 	engaged    bool
 	engagedAt  uint64
