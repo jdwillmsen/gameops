@@ -5,7 +5,6 @@ import (
 	"math"
 
 	"github.com/go-gl/mathgl/mgl32"
-	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
@@ -29,6 +28,9 @@ import (
 const (
 	witchZigTicks = 6
 	witchZigYaw   = math.Pi / 4
+	// witchStepAhead is how far along a leg the march is checked before it
+	// is walked.
+	witchStepAhead = 1.25
 )
 
 type witchRush struct{}
@@ -41,8 +43,9 @@ func (*witchRush) Family() tactics.Family { return tactics.FamilyWitch }
 func (t *witchRush) Engage(_ context.Context, f *Fight) (bool, error) {
 	l := f.Life
 	// The hold order and the modes the shared decisions have already taken
-	// outrank the rush; the role's own fight carries them.
-	if l.mode != modeFight || l.warrior.hold {
+	// outrank the rush; the role's own fight carries them, and so does a
+	// meal the unit wants or has started.
+	if w := l.warrior; w == nil || l.mode != modeFight || w.hold || w.healWant || w.healing {
 		return false, nil
 	}
 	p := f.Pose
@@ -58,17 +61,20 @@ func (t *witchRush) Engage(_ context.Context, f *Fight) (bool, error) {
 	}
 	to := mgl32.Vec2{e.Pos.X() - p.Feet.X(), e.Pos.Z() - p.Feet.Z()}
 	if to.Len() < 1e-3 {
+		l.cancelDraw(f.Actuator)
 		return true, l.stillFacing(f.Actuator, p, e)
 	}
 	direct := to.Normalize()
 	leg := witchLeg(direct, witchSideOf(l.tick))
 	switch {
 	case witchStepClears(f, leg):
+		l.cancelDraw(f.Actuator)
 		l.lowerShield(f.Actuator)
 		return true, f.Actuator.Tick(act.Input{Yaw: float32(yawOf(leg)), Forward: 1})
 	case witchStepClears(f, direct):
 		// The leg's lane is blocked: close straight for this leg's span,
 		// and the next leg takes the other lane.
+		l.cancelDraw(f.Actuator)
 		l.lowerShield(f.Actuator)
 		return true, f.Actuator.Tick(act.Input{Yaw: float32(yawOf(direct)), Forward: 1})
 	}
@@ -82,6 +88,7 @@ func (t *witchRush) Engage(_ context.Context, f *Fight) (bool, error) {
 // it drinks the hurt away.
 func (t *witchRush) swing(f *Fight) error {
 	l := f.Life
+	l.cancelDraw(f.Actuator)
 	l.lowerShield(f.Actuator)
 	return l.strike(f.Actuator, f.Pose, f.Target, f.Snapshot)
 }
@@ -107,19 +114,11 @@ func witchLeg(direct mgl32.Vec2, side int8) mgl32.Vec2 {
 }
 
 // witchStepClears asks whether one step of the raw march — which bypasses
-// the pathfinding skill — stays on ground that layer would have walked: the
-// cell the step lands in, on the level of the feet or one step down, must
-// sit on a safe floor, so water, lava and ledges are never entered. The
-// probe is a stride and a bit past the feet so it sees the cell the leg
-// enters, not the one the unit is still inside.
+// the pathfinding skill — stays on ground that layer would have walked: every
+// cell the step crosses, on the level of the feet or one step down, must sit
+// on a safe floor, so water, lava and ledges are never entered, however
+// narrow. The sweep runs a stride and a bit past the feet so it sees the
+// cell the leg enters, not the one the unit is still inside.
 func witchStepClears(f *Fight, dir mgl32.Vec2) bool {
-	w := f.Life.world
-	feet := f.Pose.Feet
-	x := int32(math.Floor(float64(feet.X() + dir.X()*1.25)))
-	z := int32(math.Floor(float64(feet.Z() + dir.Y()*1.25)))
-	y := int32(math.Floor(float64(feet.Y()) + 0.01))
-	if safeStand(w, protocol.BlockPos{x, y, z}) {
-		return true
-	}
-	return safeStand(w, protocol.BlockPos{x, y - 1, z})
+	return sweepClear(f.Life.world, f.Pose.Feet, dir, witchStepAhead)
 }

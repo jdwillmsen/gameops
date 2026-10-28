@@ -177,6 +177,7 @@ func (c *creeperTactic) melee(ctx context.Context, f *Fight, m *creeperMemory, t
 		} else if m.holdTicks++; m.holdTicks > waitPatience {
 			return false, nil
 		}
+		l.cancelDraw(a)
 		return true, l.stillFacing(a, f.Pose, e)
 	}
 	m.holdTicks = 0
@@ -185,6 +186,8 @@ func (c *creeperTactic) melee(ctx context.Context, f *Fight, m *creeperMemory, t
 		// draws it after the unit and away from whoever stands behind it.
 		return c.retreat(ctx, f, d, charged)
 	}
+	// The lunge is a melee blow, so a half-drawn bow is let go.
+	l.cancelDraw(a)
 	if !inMeleeReach(f.Pose, e) {
 		l.lowerShield(a)
 		return true, l.approach(ctx, a, f.Pose, e)
@@ -280,12 +283,13 @@ func (c *creeperTactic) safeReach(charged bool) float64 {
 
 // mateBeyond says whether anyone besides the unit stands within reach of the
 // creeper on the far side of it, where a blow from from would knock it. The
-// entities are players and bots alike: neither is to be blasted.
+// entities are players and bots alike: neither is to be blasted. A player
+// the PvP policy lets the unit fight is no one to protect.
 func mateBeyond(l *Life, from, creeper mgl32.Vec3, reach float64) bool {
 	ux, uz := creeper.X()-from.X(), creeper.Z()-from.Z()
 	found := false
 	l.ents.Each(func(e belief.Entity) {
-		if found || !e.Player {
+		if found || !e.Player || l.mayFightPlayer(e) {
 			return
 		}
 		if math.Abs(float64(e.Pos.Y()-creeper.Y())) > threatHeight || horizontal(e.Pos, creeper) > reach {

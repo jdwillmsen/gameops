@@ -3,12 +3,16 @@ package life
 import (
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
@@ -339,4 +343,62 @@ func TestTheBlazeTacticsNeverRunUnderTheDefaultProfile(t *testing.T) {
 	if !reflect.DeepEqual(got, base) {
 		t.Errorf("registering the blaze tactics changed the default fight: %d packets vs %d", len(got), len(base))
 	}
+}
+
+// throwSpy is an actuator that only counts what a throw sends.
+type throwSpy struct {
+	skill.Actuator
+	uses int
+}
+
+func (s *throwSpy) Tick(act.Input) error                { return nil }
+func (s *throwSpy) SelectHotbar(int, belief.Item) error { return nil }
+func (s *throwSpy) UseItem(int, belief.Item) error      { s.uses++; return nil }
+
+func TestBlazeSnowballKeepsEachUnitsCadenceUnderConcurrentUnits(t *testing.T) {
+	tac := &blazeSnowTactic{}
+	snow := belief.Item{Slot: 2, Name: snowballName, Count: 10}
+	snap := belief.Snapshot{HeldKnown: true, HeldSlot: 2}
+	var wg sync.WaitGroup
+	for range 8 {
+		l := &Life{}
+		spy := &throwSpy{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for tick := range uint64(100) {
+				l.tick = tick
+				if err := tac.throw(l, spy, snap, snow, act.Input{}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+			if want := 100 / snowEvery; spy.uses != want {
+				t.Errorf("%d throws in 100 ticks, want %d", spy.uses, want)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestBlazeSnowballDoesNotBackOverAOneBlockWaterStrip(t *testing.T) {
+	r := newWarrior(t, "striker", mgl32.Vec3{20.8, 1, 20.5})
+	mustProfile(t, r, usingBlaze("blaze/snowball"))
+	r.give(0, 303, 1)
+	armSnowballs(r, 2, 10)
+	r.waterStripX(21)
+	r.spawn(50, "minecraft:blaze", mgl32.Vec3{18.5, 1, 20.5})
+	for i := 0; i < 30; i++ {
+		r.step()
+		if f := r.feet(); f.X() >= 21 || f.Y() != 1 {
+			t.Fatalf("tick %d: feet at %v, backed into the water strip", i, f)
+		}
+	}
+	if n := r.out.uses(2); n == 0 {
+		t.Error("never threw while holding the line")
+	}
+}
+
+func TestBlazeShieldLetsGoOfAHalfDrawnBow(t *testing.T) {
+	letsGoOfTheBow(t, "minecraft:blaze", mgl32.Vec3{28.5, 1, 20.5}, usingBlaze("blaze/shield"), func(*rig) {})
 }

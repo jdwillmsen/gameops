@@ -205,3 +205,63 @@ func TestSpiderGroundCapRestartsWhenTheSpiderDrops(t *testing.T) {
 		}
 	}
 }
+
+// waterStripX is a one-block-wide strip of water running north to south at
+// x, long enough that no way round it is within a fight's reach.
+func (r *rig) waterStripX(x int32) {
+	for z := int32(5); z <= 40; z++ {
+		r.w.over[protocol.BlockPos{x, 0, z}] = "water"
+	}
+}
+
+// waterStripZ is the same strip running east to west at z.
+func (r *rig) waterStripZ(z int32) {
+	for x := int32(5); x <= 40; x++ {
+		r.w.over[protocol.BlockPos{x, 0, z}] = "water"
+	}
+}
+
+func TestSpiderGroundDoesNotBackOverAOneBlockWaterStrip(t *testing.T) {
+	r := newWarrior(t, "striker", mgl32.Vec3{20.8, 1, 20.5})
+	r.give(0, 303, 1)
+	if err := r.l.SetProfile(spiderTacticProfile("spider/ground")); err != nil {
+		t.Fatal(err)
+	}
+	r.waterStripX(21)
+	// On the wall to the west: backing off from it runs east, over the strip.
+	r.spawn(50, "minecraft:spider", mgl32.Vec3{18.5, 4, 20.5})
+	for i := 0; i < 30; i++ {
+		r.step()
+		if f := r.feet(); f.X() >= 21 || f.Y() != 1 {
+			t.Fatalf("tick %d: feet at %v, stepped into the water strip", i, f)
+		}
+	}
+}
+
+// letsGoOfTheBow starts a Ranger's draw against a mob at a distance, then
+// puts the profile on and gives the fight the mob's new place: the tactic
+// that takes the tick must let the half-drawn bow go.
+func letsGoOfTheBow(t *testing.T, mob string, at mgl32.Vec3, pr tactics.Profile, then func(*rig)) {
+	t.Helper()
+	r := newWarrior(t, "ranger", start)
+	r.give(1, 361, 1)
+	r.give(20, 362, 32)
+	r.spawn(50, mob, at)
+	r.beginDraw(t)
+	if err := r.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	then(r)
+	r.step()
+	if w := r.l.warrior; w.drawing {
+		t.Error("still drawing after the tactic took the tick")
+	}
+	if n := r.out.releases(1); n == 0 {
+		t.Error("the half-drawn bow was never released")
+	}
+}
+
+func TestSpiderGroundLetsGoOfAHalfDrawnBow(t *testing.T) {
+	letsGoOfTheBow(t, "minecraft:spider", mgl32.Vec3{28.5, 1, 20.5}, spiderTacticProfile("spider/ground"),
+		func(r *rig) { r.moveTo(50, mgl32.Vec3{22.5, 4, 20.5}) })
+}

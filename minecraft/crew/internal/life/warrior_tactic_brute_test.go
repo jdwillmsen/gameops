@@ -248,3 +248,24 @@ func TestTheDefaultProfileNeverPicksABruteTactic(t *testing.T) {
 		})
 	}
 }
+
+func TestBruteSidestepLetsGoOfAHalfDrawnBow(t *testing.T) {
+	withTactics(t, bruteSidestep{}, brutePillar{})
+	letsGoOfTheBow(t, "minecraft:hoglin", mgl32.Vec3{28.5, 1, 20.5}, usingBruteTactic("brute/sidestep"), func(*rig) {})
+}
+
+func TestBruteMateIsNeverAnEnemyPlayer(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	pol := newPvP("rival")
+	pol.live = true
+	r.l.SetPvPPolicy(pol)
+	r.playerNamed(60, "rival", mgl32.Vec3{18.5, 1, 20.5})
+	if _, ok := r.l.bruteMate(r.a.Pose(), 12); ok {
+		t.Fatal("an enemy player counted as a mate to pass the brute to")
+	}
+	r.playerNamed(61, "friend", mgl32.Vec3{16.5, 1, 20.5})
+	got, ok := r.l.bruteMate(r.a.Pose(), 12)
+	if !ok || got.X() != 16.5 {
+		t.Errorf("mate = %v, %v, want the friendly player at 16.5", got, ok)
+	}
+}

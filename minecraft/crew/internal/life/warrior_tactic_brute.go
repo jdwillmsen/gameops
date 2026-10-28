@@ -312,8 +312,9 @@ func bruteWalk(ctx context.Context, f *Fight, st *bruteState, goal protocol.Bloc
 }
 
 // bruteMate is the nearest squad-mate the unit can pass a brute to: a player
-// entity inside focus range, else the leader, whose position the unit knows
-// even when no entity packet carries it.
+// entity inside focus range that the PvP policy does not make an enemy, else
+// the leader, whose position the unit knows even when no entity packet
+// carries it.
 func (l *Life) bruteMate(p act.Pose, within float64) (mgl32.Vec3, bool) {
 	var (
 		best  mgl32.Vec3
@@ -323,7 +324,7 @@ func (l *Life) bruteMate(p act.Pose, within float64) (mgl32.Vec3, bool) {
 	l.ents.Each(func(e belief.Entity) {
 		// The unit's own player entity is in the tracker too; it cannot
 		// take a hit for itself.
-		if !e.Player || e.ID == l.selfID {
+		if !e.Player || e.ID == l.selfID || l.mayFightPlayer(e) {
 			return
 		}
 		d := horizontal(p.Feet, e.Pos)
