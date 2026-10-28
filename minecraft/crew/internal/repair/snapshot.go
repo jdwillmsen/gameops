@@ -217,10 +217,10 @@ func extractDB(r io.Reader, dest string) error {
 			continue
 		}
 		dir, name := path.Split(path.Clean(h.Name))
-		if h.Typeflag != tar.TypeReg || dir != "db/" || name == "" || name == "." || name == ".." {
+		if h.Typeflag != tar.TypeReg || dir != "db/" || name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
 			return fmt.Errorf("repair: unexpected entry %q in world tar", h.Name)
 		}
-		f, err := os.OpenFile(filepath.Join(db, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		f, err := os.OpenFile(filepath.Join(db, filepath.Base(name)), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
 			return err
 		}
