@@ -36,6 +36,7 @@ var kinds = map[string]kind{
 	// the arena, so an idle unit must not go and hit one: provoked fights
 	// them once one has hurt the unit and not before.
 	"gameops:werewolf": provoked, "gameops:training_dummy_brute": provoked,
+	"gameops:ground_dragon": provoked,
 
 	"creeper": flee,
 }
