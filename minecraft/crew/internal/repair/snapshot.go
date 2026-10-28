@@ -110,6 +110,9 @@ func (s Snapshotter) Fetch(ctx context.Context, dest string) (snap Snapshot, err
 		<-done
 		return Snapshot{}, err
 	}
+	// tar.Reader stops at the end-of-archive marker; the writer still has the
+	// trailer blocks to send and blocks on the pipe until they are drained.
+	_, _ = io.Copy(io.Discard, pr)
 	if err = <-done; err != nil {
 		return Snapshot{}, fmt.Errorf("repair: copy world: %w", err)
 	}
