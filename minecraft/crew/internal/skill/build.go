@@ -223,12 +223,32 @@ func (b *Build) planCells(a Actuator) outcome {
 		}
 	}
 	b.rep.ToPlace = len(b.queue)
+	if err := b.checkHotbar(); err != nil {
+		return outcome{st: Failed, err: err}
+	}
 	if b.spec.DryRun {
 		return b.finish()
 	}
 	b.rep.ToPlace = 0
 	b.stage = bsPick
 	return next
+}
+
+// checkHotbar refuses a stamp whose block types will not all fit on the
+// hotbar: a creative take fills a slot for the rest of the session, so failing
+// halfway would leave a part-built structure.
+func (b *Build) checkHotbar() error {
+	free, held := hotbarRoom(b.self())
+	need := map[string]bool{}
+	for _, i := range b.queue {
+		if blk := b.spec.Cells[i].Block; !held[blk] {
+			need[blk] = true
+		}
+	}
+	if len(need) > free {
+		return fmt.Errorf("the stamp needs %d more block types and the hotbar has room for %d", len(need), free)
+	}
+	return nil
 }
 
 func bump(m *map[string]int, k string) {
