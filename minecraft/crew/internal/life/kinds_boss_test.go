@@ -17,6 +17,7 @@ func TestKindOfNamespaces(t *testing.T) {
 	}{
 		{"gameops:werewolf", provoked},
 		{"gameops:training_dummy_brute", provoked},
+		{"gameops:ground_dragon", provoked},
 		{"zombie", hostile},
 		{"minecraft:zombie", hostile},
 		{"minecraft:iron_golem", provoked},
