@@ -17,6 +17,13 @@ import (
 
 const maxCmdOutput = 8 << 20
 
+// waitDelay bounds how long Wait lingers for output pipes after the command
+// exited or was killed. A variable so tests need not wait the full two seconds.
+var waitDelay = 2 * time.Second
+
+// errOutputTooLarge ends a fight whose evaluator prints more than the cap.
+var errOutputTooLarge = errors.New("trainer: evaluator output exceeds the cap")
+
 // CmdEvaluator fights by running an external command. The command gets
 // {"profile":...,"scenario":...} as JSON on stdin and the scenario in
 // TRAINER_* environment variables, and prints one Scorecard per line on
@@ -48,21 +55,37 @@ func (e CmdEvaluator) Evaluate(ctx context.Context, p tactics.Profile, s Scenari
 	if err != nil {
 		return nil, err
 	}
+	// Cancelled when the output passes the cap, so a flood ends the fight at
+	// once instead of waiting for the evaluator to stop on its own.
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	confine(cmd)
+	cmd.WaitDelay = waitDelay
 	cmd.Stdin = bytes.NewReader(in)
 	cmd.Env = append(append(cmd.Environ(), e.Env...),
 		"TRAINER_SCENARIO="+s.Name, "TRAINER_KIND="+s.Kind, "TRAINER_FAMILY="+string(s.Family),
 		"TRAINER_SIDE="+s.Side, fmt.Sprintf("TRAINER_SEED=%d", s.Seed), "TRAINER_PROFILE="+p.Name)
 	var stderr bytes.Buffer
 	cmd.Stderr = &limitedBuffer{buf: &stderr, max: 2048}
-	out, err := cmd.Output()
+	out := &cappedWriter{max: maxCmdOutput, onOverflow: stop}
+	cmd.Stdout = out
+	err = cmd.Run()
+	// Whatever the command left behind must not outlive the fight.
+	_ = killGroup(cmd)
+	if out.overflowed {
+		return nil, errOutputTooLarge
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		if errors.Is(err, exec.ErrWaitDelay) {
+			return nil, fmt.Errorf("trainer: evaluator %q left a process holding its output open", argv[0])
+		}
 		return nil, fmt.Errorf("trainer: evaluator %q: %w: %s", argv[0], err, strings.TrimSpace(stderr.String()))
 	}
-	cards, err := parseScorecards(io.LimitReader(bytes.NewReader(out), maxCmdOutput))
+	cards, err := parseScorecards(bytes.NewReader(out.buf.Bytes()))
 	if err != nil {
 		return nil, err
 	}
@@ -97,4 +120,24 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 		l.buf.Write(p[:min(room, len(p))])
 	}
 	return len(p), nil
+}
+
+// cappedWriter keeps at most max bytes and reports the first byte past it, so
+// the cap holds while the output is read and not after it is all in memory.
+type cappedWriter struct {
+	buf        bytes.Buffer
+	max        int
+	overflowed bool
+	onOverflow func()
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	if w.buf.Len()+len(p) > w.max {
+		if !w.overflowed {
+			w.overflowed = true
+			w.onOverflow()
+		}
+		return 0, errOutputTooLarge
+	}
+	return w.buf.Write(p)
 }

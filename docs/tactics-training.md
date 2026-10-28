@@ -43,14 +43,19 @@ State directory: `$TACTICSCTL_DIR`, default `~/.local/state/crew-tactics`. All
 commands below take `--dir` to override it.
 
 ```sh
-tacticsctl training on     # enable: writes "on" to <dir>/training
-tacticsctl training off    # disable, same as: tacticsctl kill on
+tacticsctl training on     # enable: HUMAN ONLY, needs a terminal; writes "on" to <dir>/training
+tacticsctl training off    # disable, same as: tacticsctl kill on; works from anywhere
 tacticsctl status          # training state, lab/production live profiles
 ```
 
+Enabling training (`training on`, `kill off`), `keygen` and `approve` refuse
+unless stdin is a real terminal (a TTY ioctl, so `< /dev/null` does not count).
+Disabling never needs one.
+
 **Kill switch: `<dir>/training`.** Training runs only while that file holds
 exactly `on`. Missing, empty, unreadable or anything else is off. Turning it off
-stops the trainer and the bridge at the next check, and every lab unit puts the
+stops the trainer and the bridge at the next check (the trainer asks before
+every fight and exits 3; `--control-dir`, default the directory tacticsctl uses), and every lab unit puts the
 default profile back within one poll (5 s) without asking the server. Prefer
 `training off` to deleting the file, so the file records a human decision.
 
@@ -63,6 +68,10 @@ trainer run --family zombie --scenario <name> --store <store> \
   --evaluator "cmd:trainbridge --lab crew-lab --layout <layout.json> \
     --squad-url http://<crew-control> --squad lab-alpha --warriors A,B,C"
 ```
+
+The trainer refuses an evaluator command whose `--lab`, `--squad` or `--squad-b`
+is not the crew lab: the target must contain the token `crew-lab`, or be a
+`lab-` squad id.
 
 A duel scenario needs two squads (`--squad-b lab-bravo` for the `--team-b`
 units), because a squad has one profile. The bridge puts the shipped default
@@ -82,12 +91,38 @@ needs a human:
    `tacticsctl approve <profile> --by <name> --key <private-key-file>`.
    The approval names the profile's exact hash. `approve` and `keygen` refuse
    without a terminal. **Agents never approve, hold an approver key or write the
-   trust directory.**
-4. `tacticsctl --trust <trust-dir> promote <profile> --to production`. The trust
-   directory (approvers' public keys) must be outside the state directory and
-   closed to group and others; a promote with the default location refuses.
-5. Roll back with `tacticsctl rollback production` (to the parent), or
-   `--to default`.
+   trust directory.** The key file must be a regular file owned by the caller
+   with mode 600.
+4. `tacticsctl --trust /etc/crew-tactics-trust --store <trainer-store> promote <profile> --to production`.
+   Promote refuses unless the trust directory passes the checks below. With
+   `--store` (or `TRAINER_STORE`) the profile's scorecards file must exist in
+   the trainer store; without it only the path's shape is checked, and the
+   command prints a note saying so.
+5. An approval is **single-use**: a successful promote moves it to
+   `<dir>/approvals/used/`. Promoting the same profile again, for example after
+   a rollback, needs a fresh `approve`.
+6. Roll back with `tacticsctl rollback production` (to the parent), or
+   `--to default`. Production only returns to a profile it already ran.
+
+### Trust directory: one-time human setup
+
+Approvals are only worth something if agents cannot swap the public keys that
+verify them, so promote refuses unless the trust directory, **every directory
+above it** and each approver's `.pub` file are owned by root and not writable
+by group or others (symlinks are resolved first, and the key is read from the
+path that was checked). The directory must also be outside the state directory.
+A human sets it up once, outside any agent session:
+
+```sh
+tacticsctl keygen --name owner --out ~/.config/crew-tactics-keys   # private key stays here, mode 600
+sudo install -d -o root -m 0755 /etc/crew-tactics-trust
+sudo install -m 0644 ~/.config/crew-tactics-keys/owner.pub /etc/crew-tactics-trust/owner.pub
+export TACTICSCTL_TRUST=/etc/crew-tactics-trust
+```
+
+Approver names are lowercase letters, digits and `-`. `keygen` never overwrites
+an existing key. There is deliberately no flag or environment variable that
+relaxes the root-ownership check.
 
 Promotion is an R3 change: it needs the owner's approval. The lab squad route
 never carries a production profile, and a production unit never fetches one from

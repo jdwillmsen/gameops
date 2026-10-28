@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
@@ -43,7 +44,11 @@ var nameRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 //	<dir>/<family>/scorecards/name.jsonl  the evidence per promotion
 //
 // History is append-only, so a rollback only moves the champion pointer.
-type Store struct{ dir string }
+type Store struct {
+	dir  string
+	mu   sync.Mutex
+	held map[tactics.Family]int // families whose training lock this Store holds
+}
 
 // NewStore opens (and creates) a store directory.
 func NewStore(dir string) (*Store, error) {
@@ -108,10 +113,18 @@ func (s *Store) History(f tactics.Family) ([]Record, error) {
 	return out, nil
 }
 
-// Append promotes rec to champion. It assigns the next sequence number and
-// name, writes the evidence first and the champion pointer last, so a crash
-// leaves the previous champion intact.
-func (s *Store) Append(rec Record, cards []tactics.Scorecard) (Record, error) {
+// Append promotes rec to champion under the family's training lock. It
+// assigns the next sequence number and name, writes the evidence first and the
+// champion pointer last, so a crash leaves the previous champion intact.
+func (s *Store) Append(rec Record, cards []tactics.Scorecard) (out Record, err error) {
+	err = s.withLock(rec.Family, func() error {
+		out, err = s.appendLocked(rec, cards)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) appendLocked(rec Record, cards []tactics.Scorecard) (Record, error) {
 	fd, err := s.familyDir(rec.Family)
 	if err != nil {
 		return Record{}, err
@@ -150,8 +163,17 @@ func (s *Store) Append(rec Record, cards []tactics.Scorecard) (Record, error) {
 	return rec, atomicWrite(filepath.Join(fd, "champion.json"), b)
 }
 
-// Rollback makes the named historical champion current again.
-func (s *Store) Rollback(f tactics.Family, name string) (Record, error) {
+// Rollback makes the named historical champion current again, under the
+// family's training lock.
+func (s *Store) Rollback(f tactics.Family, name string) (out Record, err error) {
+	err = s.withLock(f, func() error {
+		out, err = s.rollbackLocked(f, name)
+		return err
+	})
+	return out, err
+}
+
+func (s *Store) rollbackLocked(f tactics.Family, name string) (Record, error) {
 	hist, err := s.History(f)
 	if err != nil {
 		return Record{}, err

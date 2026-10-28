@@ -21,7 +21,7 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	root := t.TempDir()
 	e := &env{t: t, dir: filepath.Join(root, "state"), trust: filepath.Join(root, "trust"), keys: filepath.Join(root, "keys")}
-	e.do("", false, "keygen", "--name", "owner", "--out", e.keys)
+	e.do("", true, "keygen", "--name", "owner", "--out", e.keys)
 	if err := os.MkdirAll(e.trust, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +60,13 @@ func TestStatusStartsDisabledAndDefault(t *testing.T) {
 
 func TestKillSwitchNaming(t *testing.T) {
 	e := newEnv(t)
-	if out, _ := e.do("", false, "kill", "off"); !strings.Contains(out, "enabled") {
+	if out, _ := e.do("", true, "kill", "off"); !strings.Contains(out, "enabled") {
 		t.Errorf("kill off = %q, want training enabled", out)
 	}
 	if out, _ := e.do("", false, "kill", "on"); !strings.Contains(out, "disabled") {
 		t.Errorf("kill on = %q, want training disabled", out)
 	}
-	if out, _ := e.do("", false, "training", "on"); !strings.Contains(out, "enabled") {
+	if out, _ := e.do("", true, "training", "on"); !strings.Contains(out, "enabled") {
 		t.Errorf("training on = %q", out)
 	}
 	if _, err := e.do("", false, "kill", "maybe"); err == nil {
@@ -95,7 +95,9 @@ func TestPromoteFlowRequiresHumanApproval(t *testing.T) {
 	if _, err := e.do(prompt[strings.Index(prompt, "hash ")+5:][:12]+"\n", true, args...); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if _, err := e.do("", false, "promote", "g1", "--to", "production"); err == nil || !strings.Contains(err.Error(), "lab") {
+	if _, err := e.do("", false, "promote", "g1", "--to", "production"); err == nil {
+		t.Fatal("promote before lab-set succeeded")
+	} else if os.Getuid() == 0 && !strings.Contains(err.Error(), "lab") {
 		t.Fatalf("promote before lab-set: %v", err)
 	}
 	if _, err := e.do("", false, "lab-set", "g1"); err != nil {
@@ -104,7 +106,16 @@ func TestPromoteFlowRequiresHumanApproval(t *testing.T) {
 	if _, err := e.do("", false, "promote", "g1"); err == nil {
 		t.Error("promote without --to production succeeded")
 	}
-	if _, err := e.do("", false, "promote", "g1", "--to", "production"); err != nil {
+	_, err := e.do("", false, "promote", "g1", "--to", "production")
+	if os.Getuid() != 0 {
+		// A test cannot chown its trust directory to root, so the refusal
+		// is the most the real binary can show here.
+		if err == nil || !strings.Contains(err.Error(), "not owned by root") {
+			t.Fatalf("promote with a trust dir the agent account owns = %v", err)
+		}
+		return
+	}
+	if err != nil {
 		t.Fatalf("promote after approval: %v", err)
 	}
 	out, _ := e.do("", false, "status")
@@ -161,8 +172,9 @@ func TestPromoteNeedsExplicitTrustDirectory(t *testing.T) {
 	}
 
 	t.Setenv("TACTICSCTL_TRUST", e.trust)
-	if err := run([]string{"--dir", e.dir, "promote", "g1", "--to", "production"}, strings.NewReader(""), &out, false); err != nil {
-		t.Fatalf("promote with TACTICSCTL_TRUST: %v", err)
+	err = run([]string{"--dir", e.dir, "promote", "g1", "--to", "production"}, strings.NewReader(""), &out, false)
+	if os.Getuid() != 0 && (err == nil || strings.Contains(err.Error(), "--trust")) {
+		t.Fatalf("promote with TACTICSCTL_TRUST should reach the ownership check, got %v", err)
 	}
 }
 
@@ -173,5 +185,81 @@ func TestPromoteRefusesOpenTrustDirectory(t *testing.T) {
 	os.Chmod(e.trust, 0o777)
 	if _, err := e.do("", false, "promote", "g1", "--to", "production"); err == nil || !strings.Contains(err.Error(), "writable") {
 		t.Errorf("promote with a world-writable trust dir = %v", err)
+	}
+}
+
+func TestHumanOnlyCommandsNeedATerminal(t *testing.T) {
+	e := newEnv(t)
+	for name, args := range map[string][]string{
+		"training on": {"training", "on"},
+		"kill off":    {"kill", "off"},
+		"keygen":      {"keygen", "--name", "other", "--out", filepath.Join(t.TempDir(), "k")},
+	} {
+		if _, err := e.do("", false, args...); err == nil || !strings.Contains(err.Error(), "human-run") {
+			t.Errorf("%s without a terminal = %v", name, err)
+		}
+	}
+	if trainingOn(t, e) {
+		t.Error("a refused command still enabled training")
+	}
+	// Turning training off never needs a human.
+	e.do("", true, "training", "on")
+	for _, args := range [][]string{{"training", "off"}, {"kill", "on"}} {
+		e.do("", true, "training", "on")
+		if out, err := e.do("", false, args...); err != nil || !strings.Contains(out, "disabled") {
+			t.Errorf("%v without a terminal = %q, %v", args, out, err)
+		}
+	}
+}
+
+func trainingOn(t *testing.T, e *env) bool {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(e.dir, "training"))
+	return err == nil && strings.TrimSpace(string(b)) == "on"
+}
+
+func TestKeygenRefusesToOverwriteAndBadNames(t *testing.T) {
+	e := newEnv(t)
+	before, _ := os.ReadFile(filepath.Join(e.keys, "owner.key"))
+	if _, err := e.do("", true, "keygen", "--name", "owner", "--out", e.keys); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("second keygen = %v", err)
+	}
+	after, _ := os.ReadFile(filepath.Join(e.keys, "owner.key"))
+	if !bytes.Equal(before, after) {
+		t.Error("keygen overwrote an existing private key")
+	}
+	for _, name := range []string{"../evil", "Owner", "a b", "x.y", "a/b", "under_score"} {
+		if _, err := e.do("", true, "keygen", "--name", name, "--out", e.keys); err == nil {
+			t.Errorf("keygen accepted name %q", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(e.keys), "evil.key")); err == nil {
+		t.Error("a traversing name wrote outside --out")
+	}
+}
+
+func TestKeygenDoesNotFollowASymlinkedKeyPath(t *testing.T) {
+	e := newEnv(t)
+	victim := filepath.Join(t.TempDir(), "victim")
+	os.WriteFile(victim, []byte("precious"), 0o600)
+	os.Symlink(victim, filepath.Join(e.keys, "link.key"))
+	if _, err := e.do("", true, "keygen", "--name", "link", "--out", e.keys); err == nil {
+		t.Error("keygen wrote through a symlink")
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "precious" {
+		t.Errorf("symlink target overwritten: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(e.keys, "link.pub")); err == nil {
+		t.Error("a half-made key pair was left behind")
+	}
+}
+
+func TestApproveRefusesSymlinkedKey(t *testing.T) {
+	e := newEnv(t)
+	e.profile("g1", "")
+	link := filepath.Join(t.TempDir(), "key")
+	os.Symlink(filepath.Join(e.keys, "owner.key"), link)
+	if _, err := e.do("x\n", true, "approve", "g1", "--by", "owner", "--key", link); err == nil {
+		t.Error("approve read its private key through a symlink")
 	}
 }
