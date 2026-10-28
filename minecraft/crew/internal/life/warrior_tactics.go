@@ -134,11 +134,30 @@ func (l *Life) familyTactic(ctx context.Context, pr tactics.Profile, a skill.Act
 		if f == nil {
 			f = &Fight{Life: l, Actuator: a, Pose: p, Target: e, Snapshot: s, Params: l.warrior.p, Family: fam, Profile: pr}
 		}
-		if handled, err := t.Engage(ctx, f); handled || err != nil {
+		handled, err := t.Engage(ctx, f)
+		if err != nil {
+			l.noteTacticError(name, fam, err)
+		}
+		if handled || err != nil {
 			return handled, err
 		}
 	}
 	return false, nil
+}
+
+// tacticErrorEvery is the ticks (50 ms each) between two logs of one tactic's
+// error: the task runner drops the error, so this line is the only trace.
+const tacticErrorEvery = 20 * 60
+
+func (l *Life) noteTacticError(name string, fam tactics.Family, err error) {
+	if last, ok := l.tacticErrAt[name]; ok && l.tick-last < tacticErrorEvery {
+		return
+	}
+	if l.tacticErrAt == nil {
+		l.tacticErrAt = map[string]uint64{}
+	}
+	l.tacticErrAt[name] = l.tick
+	l.logEvent("tactic_error", map[string]any{"tactic": name, "family": string(fam), "error": err.Error()})
 }
 
 // preferredTarget lets the profile's tactics steer the squad's focus within a
