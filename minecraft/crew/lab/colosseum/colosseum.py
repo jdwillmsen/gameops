@@ -319,6 +319,131 @@ def gate_levers():
 gate_levers()
 
 
+GATE_DOORS = [v for (n, _), v in MATS.items() if n == "iron_door"]
+SIDE = {(1, 0): "east", (-1, 0): "west", (0, 1): "south", (0, -1): "north"}
+CHASE_R = 61            # radius the floor lamp ring hugs; no cell may pass CHASE_MAX, the sand's edge
+CHASE_MAX = 61.4
+CHASE_EVERY = 4         # lamps lit together before the next repeater
+CHASE_DELAY = 2         # repeater_delay: 2 is six game ticks a step
+
+
+def gate_lighting():
+    """One lever per gate lights an arc of floor lamps in a chase and opens its doors.
+
+    Each arc is dust over lamps hugging the rim, fed where the gate's levers meet
+    the floor and run both ways, with a repeater every few lamps pointing away from
+    the gate so the light travels outward step by step. The doors are powered by
+    a dust line over the gate, which a lever on either pier reaches. The start
+    gate is a portcullis the director raises with a fill: its lever only lights.
+    """
+    anchors = []                                    # (x, z, name) of the dust cell under a gate lever
+    feeds = {}                                      # name -> every such cell of the gate, dust cells a lever powers
+    for axis, sign, pier in LEVERS_AT:
+        step = (sign, 0) if axis == "x" else (0, sign)
+        lat = zs[None] if axis == "x" else xs[None]
+        along = xs[None] if axis == "x" else zs[None]
+        (_, zi, xi), = np.argwhere(pier & (REL == 1) & (lat == 3))
+        name = f"{axis}{sign:+d}"
+        anchors.append((X0 + int(xi) - step[0], Z0 + int(zi) - step[1], name))
+        (_, zj, xj), = np.argwhere(pier & (REL == 1) & (lat == -4))
+        feeds[name] = [anchors[-1][:2], (X0 + int(xj) - step[0], Z0 + int(zj) - step[1])]
+        # a lever powers only the block it hangs on, so each pier's block above that one becomes
+        # dust, which joins a line over the rows between the piers. The line runs on the lintel
+        # blocks over the doors and on a block one lower elsewhere, and climbs between them.
+        for l in (3, -4):
+            (_, zi, xi), = np.argwhere(pier & (REL == 2) & (lat == l))
+            cell(X0 + int(xi), GROUND + 3, Z0 + int(zi), DUST)
+        line = []
+        for l in range(-3, 3):
+            m = (lat == l) & (REL == 2) & (dd >= 0) & (dd < 1.5) & (vox == BARS) & (along * sign > 0)
+            (_, zi, xi), = np.argwhere(m)
+            x, z = X0 + int(xi), Z0 + int(zi)
+            door = int(vox[GROUND + 1 - Y0, zi, xi]) in GATE_DOORS
+            if line and (x, z) != line[-1][:2] and (x != line[-1][0] if axis == "x" else z != line[-1][1]):
+                px_, pz_, _ = line[-1]
+                near = [(px_, z), (x, pz_)] if axis == "x" else [(x, pz_), (px_, z)]
+                line.append(min(near, key=lambda c: (c[0] if axis == "x" else c[1]) * sign) + (True,))
+            line.append((x, z, door))
+        for x, z, high in line:
+            cell(x, GROUND + (3 if high else 2), z, CUT)
+            cell(x, GROUND + (4 if high else 3), z, DUST)
+    # the start gate has no doors; its lever stands on the stone beside the portcullis
+    x0, y0, z0, x1, y1, z1 = START_GATE
+    sx, sz = x0 - 1, z1
+    assert vox[GROUND + 2 - Y0, sz - Z0, sx - X0] == CUT, "start gate lever has no support"
+    cell(sx, GROUND + 2, sz + 1, mat("lever", '["lever_direction"="south","open_bit"=false]', True))
+    anchors.append((sx, sz + 1, "start"))
+    feeds["start"] = [(sx, sz + 1)]
+
+    def pos(c):
+        return math.atan2(c[1] - CZ, c[0] - CX)
+
+    order = sorted(anchors, key=pos)
+    arcs = {}
+    for k, (ax, az, name) in enumerate(order):
+        span = {}
+        for s, other in ((1, order[(k + 1) % len(order)]), (-1, order[k - 1])):
+            gap = (pos(other) - pos(order[k])) * s % (2 * math.pi)
+            span[s] = gap / 2 - math.radians(2.5)
+        path = {}
+        for s in (1, -1):
+            cur, out = (ax, az), []
+            while True:
+                best = None
+                for dx, dz in ((2, 0), (-2, 0), (0, 2), (0, -2)):
+                    n = (cur[0] + dx, cur[1] + dz)
+                    adv = ((pos(n) - pos(cur) + math.pi) % (2 * math.pi) - math.pi) * s
+                    mid = ((cur[0] + n[0]) // 2, (cur[1] + n[1]) // 2)
+                    if adv <= 0 or max(math.hypot(n[0] - CX, n[1] - CZ), math.hypot(mid[0] - CX, mid[1] - CZ)) > CHASE_MAX:
+                        continue
+                    key = abs(math.hypot(n[0] - CX, n[1] - CZ) - CHASE_R)
+                    if best is None or key < best[0]:
+                        best = (key, n)
+                n = best[1]
+                if ((pos(n) - pos(order[k]) + math.pi) % (2 * math.pi) - math.pi) * s > span[s]:
+                    break
+                out += [((cur[0] + n[0]) // 2, (cur[1] + n[1]) // 2), n]
+                cur = n
+            path[s] = out
+        arcs[name] = path[-1][::-1] + [(ax, az)] + path[1]
+        anchor_i = len(path[-1])
+        cells = arcs[name]
+        rep = {}
+        fed = [cells.index(f) for f in feeds[name]]
+        for s in (1, -1):
+            since = 0
+            for j in range(1, len(path[s]) + 1):
+                i = anchor_i + s * j
+                since += 1
+                if min(fed) - 3 <= i <= max(fed) + 3 or i + 1 >= len(cells) or i < 1:
+                    continue
+                prev, here, nxt = cells[i - 1], cells[i], cells[i + 1]
+                if since >= CHASE_EVERY and (prev[0] == nxt[0] or prev[1] == nxt[1]):
+                    since = 0
+                    src = cells[i - s]
+                    rep[i] = SIDE[(src[0] - here[0], src[1] - here[1])]
+        # dust carries fifteen blocks: from either lever to the first repeater, and between repeaters
+        marks = sorted(rep)
+        for s in (1, -1):
+            beyond = [i for i in marks if (i - anchor_i) * s > 0]
+            first = min(beyond, key=lambda i: abs(i - anchor_i))
+            assert max(abs(first - f) for f in fed) <= 13, (name, "first repeater too far from a lever")
+        for side in ([i for i in marks if i < anchor_i], [i for i in marks if i > anchor_i]):
+            assert all(q - p <= 12 for p, q in zip(side, side[1:])), (name, side)
+        assert marks[0] <= 13 and len(cells) - marks[-1] <= 13, (name, marks)
+        for i, (x, z) in enumerate(cells):
+            assert vox[GROUND + 1 - Y0, z - Z0, x - X0] in (0, AIR), (name, x, z)
+            if i in rep:
+                cell(x, GROUND + 1, z, mat("unpowered_repeater", f'["minecraft:cardinal_direction"="{rep[i]}","repeater_delay"={CHASE_DELAY}]', True))
+            else:
+                cell(x, GROUND, z, REDLAMP)
+                cell(x, GROUND + 1, z, DUST)
+    flat = [(c, n) for n, cs in arcs.items() for c in cs]
+    for (a, na) in flat:
+        for (b, nb) in flat:
+            assert na == nb or max(abs(a[0] - b[0]), abs(a[1] - b[1])) >= 3, (na, nb, a, b)
+
+
 PEN_ANGLES = [15 + 30 * k for k in range(12)]
 PENS = []
 
@@ -1140,6 +1265,9 @@ for _axis, _s, *_kinds in GALLERIES:
         _u = (_s, 0) if _axis == "x" else (0, _s)
         _v = (0, _t) if _axis == "x" else (_t, 0)
         closet((CX + 2 * _v[0], CZ + 2 * _v[1]), _u, _v, A0 + 22, dy=14, skin=SANDST, kind=_kind)
+
+
+gate_lighting()
 
 
 # ---- 6. entities and chest contents -------------------------------------------------
