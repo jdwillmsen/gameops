@@ -31,7 +31,10 @@ type fakeSink struct {
 	mu      sync.Mutex
 	pushed  map[string]string
 	cleared [][]string
-	err     error
+	// clearCtxErr is the context error Clear saw, to show a withdrawal does
+	// not run on the fight's finished context.
+	clearCtxErr error
+	err         error
 	// lostPut makes Push land and then fail, the way a lost PUT response does.
 	lostPut bool
 	squads  []string
@@ -64,9 +67,10 @@ func (f *fakeSink) Push(_ context.Context, units []string, p tactics.Profile) er
 	return f.err
 }
 
-func (f *fakeSink) Clear(_ context.Context, units []string) error {
+func (f *fakeSink) Clear(ctx context.Context, units []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.clearCtxErr = ctx.Err()
 	f.cleared = append(f.cleared, units)
 	return nil
 }
@@ -751,5 +755,87 @@ func TestDuelOnlyPutsAllowListedUnitsThrough(t *testing.T) {
 		if strings.HasPrefix(c, "clear ") || strings.HasPrefix(c, "tp ") {
 			t.Errorf("the server was touched: %s", c)
 		}
+	}
+}
+
+func TestFightWallEndsBeforeTheTrainerDeadline(t *testing.T) {
+	now := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		timeout  time.Duration
+		deadline time.Duration
+		want     time.Duration
+	}{
+		{"no deadline keeps the timeout", 10 * time.Minute, 0, 10 * time.Minute},
+		{"a deadline beyond the timeout leaves it", 10 * time.Second, 5 * time.Minute, 10 * time.Second},
+		{"a nearer deadline wins, minus the reserve", 10 * time.Minute, 5 * time.Minute, 5*time.Minute - cleanupReserve},
+		{"under twice the reserve left, half is kept for cleanup", 10 * time.Minute, 20 * time.Second, 10 * time.Second},
+		{"a deadline already past expires at once", 10 * time.Minute, -time.Minute, time.Nanosecond},
+	}
+	for _, tc := range cases {
+		b := &bridge{FightTimeout: tc.timeout, Now: func() time.Time { return now }}
+		if tc.deadline != 0 {
+			b.Deadline = now.Add(tc.deadline)
+		}
+		if got := b.fightWall(); got != tc.want {
+			t.Errorf("%s: wall = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPastTrainerDeadlineAbortsAndStillCleansUp(t *testing.T) {
+	r := newRig(t)
+	r.sim.mobsGoneAfter = -1
+	r.b.Now = time.Now
+	r.b.Sleep = func(time.Duration) { time.Sleep(time.Millisecond) }
+	r.b.Deadline = time.Now().Add(-time.Second)
+	cards, err := r.b.Run(context.Background(), mobRequest("a"))
+	if err != nil {
+		t.Fatalf("Run: %v, a deadline cut is not a fault", err)
+	}
+	if len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted {
+		t.Fatalf("cards = %+v, want one aborted card", cards)
+	}
+	if len(r.sink.cleared) != 1 {
+		t.Errorf("the profile was not withdrawn: %v", r.sink.cleared)
+	}
+}
+
+func TestSIGTERMStyleCancellationStillWithdrawsOnAFreshContext(t *testing.T) {
+	r := newRig(t)
+	r.sim.mobsGoneAfter = -1
+	r.b.Now = time.Now
+	ctx, cancel := context.WithCancel(context.Background())
+	r.b.Sleep = func(time.Duration) {
+		if r.sim.spawned {
+			cancel()
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cards, err := r.b.Run(ctx, mobRequest("a"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted {
+		t.Fatalf("cards = %+v, want one aborted card", cards)
+	}
+	if len(r.sink.cleared) != 1 || r.sink.clearCtxErr != nil {
+		t.Errorf("withdrawal after the cancel: cleared %v, ctx err %v", r.sink.cleared, r.sink.clearCtxErr)
+	}
+	if n := (&arena.FakeConsole{Cmds: r.sim.cmds}).Count("kill @e[tag=arena_wave]"); n < 2 {
+		t.Errorf("mobs killed %d times, want a clean-up after the cancel", n)
+	}
+}
+
+func TestDeadlineFromEnv(t *testing.T) {
+	if d, err := deadlineFromEnv(""); err != nil || !d.IsZero() {
+		t.Errorf("empty = %v, %v", d, err)
+	}
+	want := time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)
+	if d, err := deadlineFromEnv("2026-10-28T12:00:00Z"); err != nil || !d.Equal(want) {
+		t.Errorf("valid = %v, %v", d, err)
+	}
+	if _, err := deadlineFromEnv("soon"); err == nil {
+		t.Error("a malformed deadline was ignored")
 	}
 }

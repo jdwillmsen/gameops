@@ -71,6 +71,10 @@ type bridge struct {
 	// FightTimeout is a hard wall around the whole fight, set-up included.
 	// A fight it cuts short scores as aborted.
 	FightTimeout time.Duration
+	// Deadline, when set, is when the trainer will send this process SIGTERM.
+	// The fight ends cleanupReserve before it, so the profile is withdrawn and
+	// the arena cleared while the process still has its full time to do so.
+	Deadline     time.Time
 	RoundTimeout time.Duration
 	Poll         time.Duration
 	Settle       time.Duration
@@ -85,6 +89,32 @@ type bridge struct {
 	Out   io.Writer
 	Now   func() time.Time
 	Sleep func(time.Duration)
+
+	// wall is FightTimeout after the Deadline clamp; set by Run.
+	wall time.Duration
+}
+
+// cleanupReserve is how long before the trainer's deadline a fight must be
+// over: release is bounded at 10 s and the arena cleanup runs through the
+// console after it.
+const cleanupReserve = 15 * time.Second
+
+// fightWall is the longest the fight may run: the configured timeout, cut so
+// it ends cleanupReserve (or, with less than twice that left, half the
+// remaining time) before the trainer's deadline.
+func (b *bridge) fightWall() time.Duration {
+	wall := b.FightTimeout
+	if b.Deadline.IsZero() {
+		return wall
+	}
+	remaining := b.Deadline.Sub(b.now())
+	room := remaining - min(cleanupReserve, remaining/2)
+	if wall <= 0 || room < wall {
+		wall = room
+	}
+	// A deadline already past still yields a positive wall, so the context
+	// expires at once and the run scores as aborted instead of running free.
+	return max(wall, time.Nanosecond)
 }
 
 func (b *bridge) now() time.Time {
@@ -144,9 +174,9 @@ func (b *bridge) Run(ctx context.Context, req request) ([]tactics.Scorecard, err
 	if err := classify(arena.CheckAlone(b.Console, b.Crew)); err != nil {
 		return nil, err
 	}
-	if b.FightTimeout > 0 {
+	if b.wall = b.fightWall(); b.wall > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, b.FightTimeout)
+		ctx, cancel = context.WithTimeout(ctx, b.wall)
 		defer cancel()
 	}
 	switch req.Scenario.Kind {
@@ -376,7 +406,7 @@ func (b *bridge) duel(ctx context.Context, cand tactics.Profile, ts trainer.Scen
 	d := &arena.Duel{
 		Console: b.Console, Layout: b.Layout, Red: red, Blue: blue,
 		RedProfile: redProfile, BlueProfile: blueProfile, Kits: b.DuelKits,
-		Rounds: 1, RoundTimeout: b.RoundTimeout, MaxWall: min(max(b.FightTimeout, time.Second), arena.MaxDuelWall),
+		Rounds: 1, RoundTimeout: b.RoundTimeout, MaxWall: min(max(b.wall, time.Second), arena.MaxDuelWall),
 		CrewNames: b.Crew, Duelists: b.Duelists, Policy: &arena.ConsolePolicy{Console: b.Console}, Sink: got,
 		RunID:   fmt.Sprintf("duel-%d-%s", ts.Seed, ts.Side),
 		Spacing: b.Spacing, Poll: b.Poll, Settle: b.Settle, KitGap: b.KitGap, Countdown: b.Countdown,

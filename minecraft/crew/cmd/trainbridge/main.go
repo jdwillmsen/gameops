@@ -35,6 +35,11 @@
 // switch while fighting. A fight that the stop file, the kill switch or the
 // per-fight timeout ends prints aborted cards and exits 0; a fault prints
 // them and exits 1. The profile is withdrawn from the units on every exit.
+//
+// The trainer sets TRAINER_DEADLINE (RFC 3339), the moment it will SIGTERM this
+// process. The fight is cut to end before it, with time left to withdraw the
+// profile and clear the arena on a fresh context; a SIGTERM that arrives
+// anyway runs the same cleanup.
 package main
 
 import (
@@ -196,7 +201,12 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 			return nil, fmt.Errorf("opponent profile: %w", err)
 		}
 	}
+	deadline, err := deadlineFromEnv(os.Getenv("TRAINER_DEADLINE"))
+	if err != nil {
+		return nil, err
+	}
 	return &bridge{
+		Deadline:   deadline,
 		ControlDir: *control, Lab: *lab, StopFile: *stopFile,
 		Console: console, Layout: layout, Book: book, Sink: sink, Opponent: opp,
 		Warriors: splitNames(*warriors), WarriorKits: splitNames(*warriorKits), Crew: splitNames(*crew),
@@ -207,6 +217,19 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 		PlaceWait: *placeWait, Countdown: *countdown, KitGap: *kitGap, Spacing: *spacing,
 		Emit: *emit, Out: errOut, Damage: damage,
 	}, nil
+}
+
+// deadlineFromEnv reads the trainer's TRAINER_DEADLINE. A malformed value is an
+// error, not a missing one: ignoring it would drop the clamp it exists for.
+func deadlineFromEnv(v string) (time.Time, error) {
+	if v == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("TRAINER_DEADLINE: want an RFC 3339 time: %w", err)
+	}
+	return t, nil
 }
 
 func loadBook(path string) (*arena.ScenarioBook, error) {
