@@ -28,6 +28,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
@@ -103,11 +104,12 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	dec := newDecoder(log)
 	hub, beginSession := newCamera(cfg, tracker, dec, log)
 	world := blocks.New(dec, storedSubChunks(cfg.ViewDistance))
+	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
+	guard := skill.Guard{Each: lf.EachEntity, Threat: life.Threat, Crew: arena.DefaultCrewNames}
 	runner := task.NewRunner(func(t task.Template) ([]skill.Skill, error) {
-		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}))
+		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}), skill.WithGuard(guard))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
 	runner.SetRole(string(cfg.Role))
-	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
 	// Before anything that waits on the network: the liveness probe hits this
 	// server, and a unit whose sign-in or control-plane lookup is slow would
 	// otherwise be restarted before it ever answered. /readyz stays 503 until

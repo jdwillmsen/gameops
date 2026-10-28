@@ -29,7 +29,7 @@ var ErrWrongRole = errors.New("this unit's role does not take this task")
 var blueprintName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 
 // SetRole tells the runner the unit's role, which decides the templates it
-// takes: build_blueprint only on a builder.
+// takes: build_blueprint only on a builder, repair_build only on a mender.
 func (r *Runner) SetRole(role string) {
 	r.mu.Lock()
 	r.role = role
@@ -38,8 +38,15 @@ func (r *Runner) SetRole(role string) {
 
 // admits must be called with mu held.
 func (r *Runner) admits(t Template) error {
-	if t.Template == buildTemplate && r.role != builderRole {
-		return ErrWrongRole
+	switch t.Template {
+	case buildTemplate:
+		if r.role != builderRole {
+			return ErrWrongRole
+		}
+	case repairTemplate:
+		if r.role != menderRole {
+			return ErrWrongRole
+		}
 	}
 	return nil
 }
