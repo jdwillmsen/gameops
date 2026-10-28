@@ -70,6 +70,11 @@ type creativeServer struct {
 	// stacksTo, when set, is the most the item stacks to; a bigger take is
 	// refused.
 	stacksTo byte
+	// destroyBeforeRefusing makes a refusal for the stack size keep the
+	// destroy it came with, as a server that applies actions in order and
+	// does not roll back; a later request quoting that stack is rejected.
+	destroyBeforeRefusing bool
+	gone                  map[int32]bool
 }
 
 func serveCreative(a *Actuator, s *sink, creative bool) *creativeServer {
@@ -126,12 +131,20 @@ func (cs *creativeServer) judge(r protocol.ItemStackRequest) protocol.ItemStackR
 		destroy = d
 	}
 	slot := cs.a.inv[take.Destination.Slot]
+	if cs.gone == nil {
+		cs.gone = map[int32]bool{}
+	}
 	switch {
+	case destroy != nil && cs.gone[destroy.Source.StackNetworkID]:
+		resp.Status = StatusRejectedForTest
 	case !cs.screen:
 		resp.Status = StatusInvalidCraft
 	case !cs.creative:
 		resp.Status = StatusNotCreative
 	case cs.stacksTo != 0 && take.Count > cs.stacksTo:
+		if destroy != nil && cs.destroyBeforeRefusing {
+			cs.gone[destroy.Source.StackNetworkID] = true
+		}
 		resp.Status = StatusBadAmount
 	case take.Source.StackNetworkID != r.RequestID || take.Source.Slot != 50:
 		resp.Status = StatusBadSource
@@ -663,5 +676,101 @@ func TestTakeCreativeStepsDownTheStackForAnItemThatStacksToSixteen(t *testing.T)
 	}
 	if len(counts) != 2 || counts[0] != 64 || counts[1] != 16 {
 		t.Errorf("asked for %v, want 64 then 16", counts)
+	}
+}
+
+// StatusRejectedForTest is what the fake answers to a destroy of a stack that
+// is already gone.
+const StatusRejectedForTest uint8 = 3
+
+func requestCounts(s *sink) (counts []byte, destroys []int32) {
+	for _, p := range stackRequests(s) {
+		r := p.Requests[0]
+		counts = append(counts, r.Actions[len(r.Actions)-1].(*protocol.TakeStackRequestAction).Count)
+		if d, ok := r.Actions[0].(*protocol.DestroyStackRequestAction); ok {
+			destroys = append(destroys, d.Source.StackNetworkID)
+		}
+	}
+	return counts, destroys
+}
+
+func TestTakeCreativeStepsDownToOneOnAFullHotbarWithEviction(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	srv.stacksTo = 1
+	before := len(stackRequests(s))
+	if err := a.TakeCreative("oak_stairs"); err != nil {
+		t.Fatal(err)
+	}
+	counts, _ := requestCounts(s)
+	counts = counts[before:]
+	if len(counts) != 3 || counts[0] != 64 || counts[1] != 16 || counts[2] != 1 {
+		t.Fatalf("asked for %v, want 64, 16, 1", counts)
+	}
+	reqs := stackRequests(s)[before:]
+	for i, p := range reqs {
+		destroyOf(t, p.Requests[0])
+		if i > 0 && destroyOf(t, p.Requests[0]).Source.Slot == destroyOf(t, reqs[i-1].Requests[0]).Source.Slot {
+			t.Errorf("request %d evicts the slot the refused one did", i)
+		}
+	}
+	last := reqs[2].Requests[0].Actions[2].(*protocol.TakeStackRequestAction)
+	if got := a.inv[last.Destination.Slot]; got.Stack.NetworkID != creativeOakStair || got.Stack.Count != 1 {
+		t.Errorf("slot %d = %+v, want one stairs", last.Destination.Slot, got)
+	}
+}
+
+func TestTakeCreativeRetryNeverQuotesAStackTheRefusedAttemptDestroyed(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	srv.stacksTo = 1
+	srv.destroyBeforeRefusing = true
+	if err := a.TakeCreative("oak_stairs"); err != nil {
+		t.Fatalf("take after a destroy the server kept: %v", err)
+	}
+	_, destroys := requestCounts(s)
+	if len(destroys) != 3 {
+		t.Fatalf("destroys %v, want one per attempt", destroys)
+	}
+	seen := map[int32]bool{}
+	for _, id := range destroys {
+		if seen[id] {
+			t.Errorf("stack %d quoted twice: %v", id, destroys)
+		}
+		seen[id] = true
+	}
+}
+
+func TestTakeCreativeRetriesTheOnlyTakenSlotWithoutADestroy(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	for i := uint32(0); i < 8; i++ {
+		a.Apply(&packet.InventorySlot{WindowID: 0, Slot: i, NewItem: cobbleInstance(1, int32(i)+1)})
+	}
+	if err := a.TakeCreative("stone"); err != nil {
+		t.Fatal(err)
+	}
+	srv.stacksTo = 1
+	srv.destroyBeforeRefusing = true
+	before := len(stackRequests(s))
+	// The slot the stone sits in is the only evictable one. Its destroy is
+	// kept by the refused first attempt, so the retries must not quote it
+	// again; the fake then sees an occupied slot, which the client believes
+	// full, so the take ends as the server says.
+	err := a.TakeCreative("oak_stairs")
+	counts, _ := requestCounts(s)
+	if len(counts) != before+3 {
+		t.Fatalf("sent %d requests (err %v), want the whole ladder", len(counts)-before, err)
+	}
+	reqs := stackRequests(s)[before:]
+	for i, p := range reqs[1:] {
+		if _, ok := p.Requests[0].Actions[0].(*protocol.DestroyStackRequestAction); ok {
+			t.Errorf("retry %d quotes a destroy again", i+1)
+		}
 	}
 }
