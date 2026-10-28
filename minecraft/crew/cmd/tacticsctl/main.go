@@ -20,8 +20,10 @@
 //	                                 by the promotion it signs off. With --store (or
 //	                                 TRAINER_STORE) the evidence file must exist there;
 //	                                 without it only its path is checked, and promote says so
-//	approve <profile> --by NAME --key FILE
-//	                                 HUMAN ONLY: refuses unless stdin is a real terminal
+//	approve <profile> --by NAME --key FILE [--valid-for D]
+//	                                 HUMAN ONLY: refuses unless stdin is a real terminal.
+//	                                 The signature covers the hash production runs now
+//	                                 and an expiry (default 24h), and promote checks both
 //	keygen --name NAME --out DIR     HUMAN ONLY: make an approver key pair; run it off the
 //	                                 devbox, because agents share this account
 //
@@ -64,6 +66,10 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 )
+
+// defaultApprovalTTL is long enough to approve, then promote in a working day,
+// and short enough that a forgotten approval does not linger.
+const defaultApprovalTTL = 24 * time.Hour
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout, isTerminal(os.Stdin)); err != nil {
@@ -229,9 +235,13 @@ func status(s *tacticsctl.Store, out io.Writer, asJSON bool) error {
 func approve(s *tacticsctl.Store, fs *flag.FlagSet, args []string, stdin io.Reader, out io.Writer, tty bool) error {
 	by := fs.String("by", "", "approver name (its public key must be trusted)")
 	keyFile := fs.String("key", "", "approver's private key file")
+	validFor := fs.Duration("valid-for", defaultApprovalTTL, "how long the approval stays usable")
 	pos, err := parse(fs, args)
 	if err != nil || len(pos) != 1 || *by == "" || *keyFile == "" {
-		return errors.New("usage: approve <profile> --by NAME --key FILE")
+		return errors.New("usage: approve <profile> --by NAME --key FILE [--valid-for DURATION]")
+	}
+	if *validFor <= 0 {
+		return errors.New("--valid-for must be positive")
 	}
 	if !tty {
 		return errors.New("approve is human-run only: it needs an interactive terminal on stdin")
@@ -248,12 +258,17 @@ func approve(s *tacticsctl.Store, fs *flag.FlagSet, args []string, stdin io.Read
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "approve profile %s (parent %q)\nhash %s\ntype the first 12 characters of the hash to approve: ", pr.Name, pr.Parent, h)
+	prev, err := s.ProductionHash()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "approve profile %s (parent %q), replacing production %s, valid for %s\nhash %s\ntype the first 12 characters of the hash to approve: ", pr.Name, pr.Parent, prev, *validFor, h)
 	line, _ := bufio.NewReader(stdin).ReadString('\n')
 	if strings.TrimSpace(line) != h[:12] {
 		return errors.New("confirmation did not match; nothing approved")
 	}
-	a := tacticsctl.NewApproval(priv, pr.Name, h, *by, time.Now().UTC().Format(time.RFC3339))
+	now := time.Now().UTC()
+	a := tacticsctl.NewApproval(priv, pr.Name, h, *by, now.Format(time.RFC3339), prev, now.Add(*validFor).Format(time.RFC3339))
 	if err := s.SaveApproval(a); err != nil {
 		return err
 	}
