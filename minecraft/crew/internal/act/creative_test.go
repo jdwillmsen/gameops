@@ -545,14 +545,14 @@ func TestALateAnswerToATimedOutTakeIsRecordedAndEvictable(t *testing.T) {
 	}}})
 
 	a.mu.Lock()
-	got, taken, used := a.inv[slot], a.takenItem[slot], a.slotUse[slot]
+	got, taken, used := a.inv[slot], a.takenStack[slot], a.slotUse[slot]
 	leaks := len(a.reqItem) + len(a.replacing) + len(a.abandoned) + len(a.takes)
 	a.mu.Unlock()
 	if got.Stack.NetworkID != creativeOakStair || got.StackNetworkID != lateStackID {
 		t.Errorf("slot %d = %+v, want the late stairs stack", slot, got)
 	}
-	if taken != creativeOakStair || used == 0 {
-		t.Errorf("slot %d recorded as item %d used at %d, want the stairs and a use time", slot, taken, used)
+	if taken != lateStackID || used == 0 {
+		t.Errorf("slot %d recorded as stack %d used at %d, want stack %d and a use time", slot, taken, used, lateStackID)
 	}
 	if leaks != 0 {
 		t.Errorf("%d bookkeeping entries left for an answered request", leaks)
@@ -616,5 +616,25 @@ func TestDeathForgetsWhichSlotsTheUnitTook(t *testing.T) {
 	}
 	if err := a.TakeCreative("stone"); !errors.Is(err, ErrHotbarFull) {
 		t.Fatalf("err = %v, want ErrHotbarFull: no slot is the unit's own after a death", err)
+	}
+}
+
+func TestTakeCreativeNeverReplacesAForeignStackOfATakenItemType(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	// The server hands back the same item types in every slot, but they are
+	// other stacks than the ones the unit took.
+	for i := uint32(0); i < hotbarSlots; i++ {
+		id := creativeStone
+		if i%2 == 1 {
+			id = creativeOakStair
+		}
+		stack := protocol.ItemInstance{StackNetworkID: int32(300 + i), Stack: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: id}, Count: 64}}
+		a.Apply(&packet.InventorySlot{WindowID: 0, Slot: i, NewItem: stack})
+	}
+	if err := a.TakeCreative("oak_stairs"); !errors.Is(err, ErrHotbarFull) {
+		t.Fatalf("err = %v, want ErrHotbarFull: no stack here is one the unit took", err)
 	}
 }

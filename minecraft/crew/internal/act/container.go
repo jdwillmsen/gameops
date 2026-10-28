@@ -304,7 +304,7 @@ func (a *Actuator) Died() {
 	a.abandoned = map[int32]bool{}
 	a.replacing = map[int32]int{}
 	a.takes = map[int32]creativeTake{}
-	a.takenItem = [hotbarSlots]int32{}
+	a.takenStack = [hotbarSlots]int32{}
 	a.slotUse = [hotbarSlots]uint64{}
 	a.move = 0
 	a.crafts = newCraftState()
@@ -382,7 +382,9 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			if tk, ok := a.takes[r.RequestID]; ok {
 				delete(a.takes, r.RequestID)
 				if r.Status == StatusOK {
-					a.takenItem[tk.slot] = tk.item
+					if cur := a.inv[tk.slot]; cur.Stack.NetworkID == tk.item && cur.Stack.Count > 0 {
+						a.takenStack[tk.slot] = cur.StackNetworkID
+					}
 					a.touchSlot(tk.slot)
 				}
 			}

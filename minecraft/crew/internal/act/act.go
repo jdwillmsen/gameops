@@ -116,10 +116,12 @@ type Actuator struct {
 	// creativeIDs maps an item's runtime ID to the ID a creative-inventory
 	// request must quote, which is a different number.
 	creativeIDs map[int32]uint32
-	// takenItem is, per hotbar slot, the item a creative take put there, and
-	// zero for a slot it did not fill. It only counts while the slot still
-	// holds that item.
-	takenItem [hotbarSlots]int32
+	// takenStack is, per hotbar slot, the stack ID of the stack a creative
+	// take put there, and zero for a slot it did not fill. It only counts
+	// while the slot still holds that stack: the server keeps a stack's ID
+	// through placements and inventory refreshes and gives a new one on any
+	// change of the stack.
+	takenStack [hotbarSlots]int32
 	// slotUse is, per hotbar slot, when the unit last took or held its item,
 	// on a counter that only ever rises; the least recent is replaced first.
 	slotUse  [hotbarSlots]uint64
