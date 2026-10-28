@@ -62,12 +62,18 @@ func Override(dir, name string) (s Skin, found bool, err error) {
 // editing the file changes the ID and clients that cache by ID fetch the new
 // look instead of showing the old one.
 func FromPNG(b []byte) (Skin, error) {
-	img, err := png.Decode(bytes.NewReader(b))
+	// The size is checked from the header first: Decode allocates from the
+	// declared dimensions, so a tiny file can otherwise demand gigabytes.
+	cfg, err := png.DecodeConfig(bytes.NewReader(b))
 	if err != nil {
 		return Skin{}, fmt.Errorf("not a PNG: %w", err)
 	}
-	if bnd := img.Bounds(); bnd.Dx() != Width || bnd.Dy() != Height {
-		return Skin{}, fmt.Errorf("is %dx%d, want %dx%d", bnd.Dx(), bnd.Dy(), Width, Height)
+	if cfg.Width != Width || cfg.Height != Height {
+		return Skin{}, fmt.Errorf("is %dx%d, want %dx%d", cfg.Width, cfg.Height, Width, Height)
+	}
+	img, err := png.Decode(bytes.NewReader(b))
+	if err != nil {
+		return Skin{}, fmt.Errorf("not a PNG: %w", err)
 	}
 	rgba := image.NewNRGBA(image.Rect(0, 0, Width, Height))
 	draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
