@@ -83,11 +83,12 @@ func (p Params) Get(name string) (float64, bool) {
 	return *f, true
 }
 
-// Set writes the named parameter, clamped to its bound. NaN is refused: it
-// compares false against every bound and would be stored as is.
+// Set writes the named parameter, clamped to its bound. NaN and infinities are
+// refused and leave the previous value: clamping would turn an Inf into a
+// bound the proposer never chose, and NaN compares false against every bound.
 func (p *Params) Set(name string, v float64) bool {
 	f, ok := p.fields()[name]
-	if !ok || math.IsNaN(v) {
+	if !ok || math.IsNaN(v) || math.IsInf(v, 0) {
 		return false
 	}
 	b := Bounds()[name]
@@ -251,21 +252,9 @@ func (t *tacticNames) UnmarshalJSON(b []byte) error {
 
 // Parse decodes and validates a profile.
 func Parse(b []byte) (Profile, error) {
-	pr := Profile{Default: Defaults()}
+	var pr Profile
 	if err := json.Unmarshal(b, &pr); err != nil {
 		return pr, err
 	}
 	return pr.Validate()
-}
-
-// UnmarshalJSON starts from the shipped values, so a field the document omits
-// keeps its default instead of becoming 0 and clamping up to the lower bound.
-func (p *Params) UnmarshalJSON(b []byte) error {
-	type raw Params
-	r := raw(Defaults())
-	if err := json.Unmarshal(b, &r); err != nil {
-		return err
-	}
-	*p = Params(r)
-	return nil
 }
