@@ -202,6 +202,7 @@ def check_pack_dir(pack, rep):
     for path, doc in parsed.items():
         rel = os.path.relpath(path, rp)
         if rel.startswith("models" + os.sep):
+            check_geometry_uv(path, doc, rep)
             for g in doc.get("minecraft:geometry", []):
                 geometries.add(g.get("description", {}).get("identifier"))
         elif rel.startswith("render_controllers" + os.sep):
@@ -233,6 +234,32 @@ def check_pack_dir(pack, rep):
             size = read_png_size(path, rep)
             if size and (size[0] > 1024 or size[1] > 1024):
                 rep.fail(f"{path}: texture is {size[0]}x{size[1]}, over the 1024 budget for this stage")
+
+
+def check_geometry_uv(path, doc, rep):
+    """Box-UV rectangles (width 2d+2w, height d+h) must lie inside the texture and not overlap."""
+    for geo in doc.get("minecraft:geometry", []):
+        desc = geo.get("description") or {}
+        name = desc.get("identifier")
+        tw, th = desc.get("texture_width"), desc.get("texture_height")
+        if not isinstance(tw, int) or not isinstance(th, int):
+            rep.fail(f"{path}: {name} needs integer texture_width and texture_height")
+            continue
+        rects = []
+        for bone in geo.get("bones", []):
+            for i, cube in enumerate(bone.get("cubes", [])):
+                uv = cube.get("uv")
+                if not isinstance(uv, list):
+                    continue
+                w, h, d = cube["size"]
+                rects.append((f"{bone.get('name')}[{i}]", uv[0], uv[1], uv[0] + 2 * d + 2 * w, uv[1] + d + h))
+        for label, x0, y0, x1, y1 in rects:
+            if x0 < 0 or y0 < 0 or x1 > tw or y1 > th:
+                rep.fail(f"{path}: {name} {label} uv rect ({x0},{y0})-({x1},{y1}) leaves the {tw}x{th} texture")
+        for i, a in enumerate(rects):
+            for b in rects[i + 1:]:
+                if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4]:
+                    rep.fail(f"{path}: {name} uv rects of {a[0]} and {b[0]} overlap")
 
 
 def pack_size(pack):

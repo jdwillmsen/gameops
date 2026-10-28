@@ -122,6 +122,19 @@ class CheckPacks(unittest.TestCase):
         os.remove(os.path.join(self.pack, "resource_pack", "textures", "entity", "training_dummy_brute.png"))
         self.assertFails("does not exist")
 
+    def test_uv_overlap_rejected(self):
+        def fn(d):
+            bones = d["minecraft:geometry"][0]["bones"]
+            bones[1]["cubes"][0]["uv"] = list(bones[0]["cubes"][0]["uv"])
+        self.edit(os.path.join("resource_pack", "models", "entity", "ground_dragon.geo.json"), fn)
+        self.assertFails("overlap")
+
+    def test_uv_outside_texture_rejected(self):
+        def fn(d):
+            d["minecraft:geometry"][0]["bones"][0]["cubes"][0]["uv"] = [250, 250]
+        self.edit(os.path.join("resource_pack", "models", "entity", "ground_dragon.geo.json"), fn)
+        self.assertFails("leaves the 256x256 texture")
+
     def test_boss_component_rejected(self):
         self.edit(BP_ENTITY, lambda d: d["minecraft:entity"]["components"].update({"minecraft:boss": {}}))
         self.assertFails("minecraft:boss")
