@@ -4,11 +4,16 @@
 //
 // usage: arenadirector run --lab <lab> --layout <file> [options]
 //
-//	arenadirector reset --lab <lab>
+//	arenadirector reset --lab <lab> [--crew-names names]
 //	arenadirector status --lab <lab> [--warriors names]
 //	arenadirector boss --lab <lab> --layout <file> --mob <id> [options]
 //	arenadirector boss --summary [--log <path>]
 //	arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [options]
+//
+// Every command that touches the server (run, boss, reset, duel) takes only
+// the crew lab: --lab and --compose pass arena.ValidateLabConsole, and each of
+// them except status first checks that no player outside --crew-names is
+// online.
 //
 // <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>.
 // run prints one JSON result line on stdout; progress goes to stderr.
@@ -31,7 +36,11 @@
 // round, and appends one tactics scorecard per side per round to --scores. It
 // prints one JSON line per round, exits 2 on a non-crew player like boss does,
 // and accepts only the crew lab as target. The rounds, per-round time and
-// wall-clock time are all capped.
+// wall-clock time are all capped. A duel clears inventories and teleports, so
+// only the units in --duelists-allow (default Rusty,Slate,Tinder, plus the
+// crew-lab names in --duelists-roster) may duel, whoever --crew-names lets
+// stay online. A duelist that leaves the world aborts the round instead of
+// losing it.
 package main
 
 import (
@@ -75,11 +84,11 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
-		"       arenadirector reset --lab <lab>\n"+
+	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--crew-names names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
+		"       arenadirector reset --lab <lab> [--crew-names names]\n"+
 		"       arenadirector status --lab <lab> [--warriors names]\n"+
 		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
-		"       arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [--kits vanguard/t5,ranger/t5] [--rounds N] [--timeout 2m] [--max-wall 30m] [--red-profile P] [--blue-profile P] [--crew-names names] [--scores <path>] [--stop-file <path>]")
+		"       arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [--kits vanguard/t5,ranger/t5] [--rounds N] [--timeout 2m] [--max-wall 30m] [--red-profile P] [--blue-profile P] [--crew-names names] [--duelists-allow names] [--duelists-roster <file>] [--scores <path>] [--stop-file <path>]")
 	os.Exit(2)
 }
 
@@ -115,6 +124,7 @@ func run(args []string) {
 	kits := fs.Bool("kits", false, "spawn the mob types the lab's kit catalog covers from it, in their tier's enchanted gear")
 	warriorKits := fs.String("warrior-kits", "", "comma-separated catalog kits (vanguard/t5), one per --warriors name, handed out before wave one")
 	family := fs.String("family", string(tactics.FamilyDefault), "opponent family recorded on the scorecard")
+	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a run")
 	sf := addScoreFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
@@ -125,7 +135,7 @@ func run(args []string) {
 	if *rallyEvery < -1 {
 		fail("arenadirector: --rally-every must be -1 or non-negative")
 	}
-	requireLab(*t.lab)
+	requireLab(*t.lab, *t.compose)
 	if *layoutPath == "" {
 		fail("arenadirector: run needs --layout")
 	}
@@ -149,6 +159,7 @@ func run(args []string) {
 	if err != nil {
 		fail("arenadirector: " + err.Error())
 	}
+	requireAlone(console, *crew)
 
 	d := &arena.Director{
 		Console:       console,
@@ -185,14 +196,16 @@ func run(args []string) {
 func reset(args []string) {
 	fs := flag.NewFlagSet("reset", flag.ExitOnError)
 	t := common(fs)
+	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a reset")
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	requireLab(*t.lab)
+	requireLab(*t.lab, *t.compose)
 	console, err := newConsole(*t.lab, *t.compose)
 	if err != nil {
 		fail("arenadirector: " + err.Error())
 	}
+	requireAlone(console, *crew)
 	if err := (&arena.Director{Console: console}).Reset(); err != nil {
 		fail("arenadirector: " + err.Error())
 	}
@@ -206,7 +219,7 @@ func status(args []string) {
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	requireLab(*t.lab)
+	requireLab(*t.lab, *t.compose)
 	console, err := newConsole(*t.lab, *t.compose)
 	if err != nil {
 		fail("arenadirector: " + err.Error())
@@ -252,7 +265,7 @@ func boss(args []string) {
 		}
 		return
 	}
-	requireLab(*t.lab)
+	requireLab(*t.lab, *t.compose)
 	if *layoutPath == "" {
 		fail("arenadirector: boss needs --layout")
 	}
@@ -291,6 +304,7 @@ func boss(args []string) {
 	baseID := ""
 	if rec != nil {
 		baseID = rec.Meta.RunID
+		rec.Meta.Spawned = 1
 		b.Observer = rec
 	}
 	b.Record = func(r arena.BossRecord) error {
@@ -359,7 +373,10 @@ func applyRallyOverrides(book *arena.WaveBook, after, every time.Duration) {
 	}
 }
 
-func newConsole(lab, compose string) (arena.Console, error) {
+// newConsole is a variable so tests can put a fake lab behind a command.
+var newConsole = realConsole
+
+func realConsole(lab, compose string) (arena.Console, error) {
 	if target, ok := strings.CutPrefix(lab, "k8s:"); ok {
 		namespace, pod, ok := strings.Cut(target, "/")
 		if !ok || namespace == "" || pod == "" {
@@ -370,9 +387,27 @@ func newConsole(lab, compose string) (arena.Console, error) {
 	return arena.NewDockerConsole(compose, lab), nil
 }
 
-func requireLab(lab string) {
-	if lab == "" {
-		fail("arenadirector: --lab is required")
+// requireLab refuses anything but the crew lab, both the service or pod
+// named by --lab and the compose file a docker lab runs from.
+func requireLab(lab, compose string) {
+	if err := arena.ValidateLabConsole(lab, compose); err != nil {
+		fail("arenadirector: " + err.Error())
+	}
+}
+
+// requireAlone is the pre-flight of a command that changes the lab: it exits
+// 2 before touching anything when a player outside the crew is online, the
+// same refusal duel and boss give.
+func requireAlone(console arena.Console, crew string) {
+	err := arena.CheckAlone(console, splitNames(crew))
+	var busy *arena.NotAloneError
+	switch {
+	case err == nil:
+	case errors.As(err, &busy):
+		fmt.Fprintln(os.Stderr, "arenadirector: refused: "+err.Error())
+		exit(2)
+	default:
+		fail("arenadirector: " + err.Error())
 	}
 }
 
@@ -392,7 +427,10 @@ func writeJSON(v any) {
 	}
 }
 
+// exit is os.Exit, replaceable so tests can see the code a command ends with.
+var exit = os.Exit
+
 func fail(message string) {
 	fmt.Fprintln(os.Stderr, message)
-	os.Exit(1)
+	exit(1)
 }

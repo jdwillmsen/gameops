@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/internal/squad"
 )
@@ -20,8 +22,10 @@ const testToken = "s3cret-token-value"
 // squadServer is the stub of the squad service's profile route: it records
 // each PUT and answers with a set status.
 type squadServer struct {
-	mu     sync.Mutex
-	puts   map[string][]tactics.Profile
+	mu   sync.Mutex
+	puts map[string][]tactics.Profile
+	// served, when set for a squad, is what GET answers instead of the last PUT.
+	served map[string]tactics.Profile
 	auths  []string
 	status int
 }
@@ -42,6 +46,20 @@ func newSquadServer(t *testing.T) (*squadServer, *url.URL) {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /v1/squads/{id}/profile", func(w http.ResponseWriter, r *http.Request) {
+		ss.mu.Lock()
+		defer ss.mu.Unlock()
+		id := r.PathValue("id")
+		if p, ok := ss.served[id]; ok {
+			_ = json.NewEncoder(w).Encode(p)
+			return
+		}
+		if len(ss.puts[id]) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(ss.puts[id][len(ss.puts[id])-1])
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -95,9 +113,42 @@ func TestSquadSinkSplitsATeamsAcrossSquads(t *testing.T) {
 	}
 }
 
+func TestSquadSinkConfirmNeedsTheSquadToServeExactlyThePushedProfile(t *testing.T) {
+	ss, base := newSquadServer(t)
+	s := SquadSink{Base: base, Default: "lab-alpha", Squads: map[string]string{"Cinder": "lab-bravo"}, Token: testToken}
+	cand := candidate("cand")
+	units := []string{"Rusty", "Cinder"}
+
+	if err := s.Confirm(context.Background(), units, cand); err == nil {
+		t.Error("confirmed with nothing served")
+	}
+	if err := s.Push(context.Background(), units, cand); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Confirm(context.Background(), units, cand); err != nil {
+		t.Errorf("a squad serving the pushed profile: %v", err)
+	}
+
+	other := candidate("cand")
+	other.Default.KiteBackoff = 8
+	ss.served = map[string]tactics.Profile{"lab-bravo": other}
+	err := s.Confirm(context.Background(), units, cand)
+	if err == nil || !strings.Contains(err.Error(), "lab-bravo") {
+		t.Errorf("a squad serving a different profile under the same name: err = %v", err)
+	}
+
+	ss.served = map[string]tactics.Profile{"lab-bravo": tactics.NewProfile("default")}
+	if err := s.Confirm(context.Background(), units, cand); err == nil {
+		t.Error("confirmed while a squad serves the default")
+	}
+	if strings.Contains(fmt.Sprint(err), testToken) {
+		t.Error("the error carries the token")
+	}
+}
+
 func TestSquadSinkRefusesANonLabSquadWithoutARequest(t *testing.T) {
 	ss, base := newSquadServer(t)
-	for _, sq := range []string{"alpha", "alpha-lab-1", ""} {
+	for _, sq := range []string{"alpha", "alpha-lab-1", "", "lab-/../fwb", "lab-a/b", "lab-", "lab-A", "lab-a\n"} {
 		s := SquadSink{Base: base, Default: sq, Token: testToken}
 		if err := s.Push(context.Background(), []string{"Rusty"}, tactics.NewProfile("p")); err == nil {
 			t.Errorf("squad %q: Push succeeded", sq)
@@ -132,7 +183,7 @@ func TestSquadSinkErrorsNeverCarryTheToken(t *testing.T) {
 
 func TestNewSinkNeedsALabSquadAndATokenFromTheEnvironment(t *testing.T) {
 	t.Setenv("CONTROL_TOKEN", "")
-	if _, err := newSink("", "http://crew-control:8080", "lab-alpha", "", nil, nil); err == nil {
+	if _, err := newSink("", false, "http://crew-control:8080", "lab-alpha", "", nil, nil); err == nil {
 		t.Error("no token was accepted")
 	}
 	t.Setenv("CONTROL_TOKEN", testToken)
@@ -142,9 +193,11 @@ func TestNewSinkNeedsALabSquadAndATokenFromTheEnvironment(t *testing.T) {
 		teamA, teamB            []string
 		wantErr                 bool
 	}{
-		{"files", t.TempDir(), "", "", "", nil, nil, false},
+		{"files without a dry run", t.TempDir(), "", "", "", nil, nil, true},
 		{"neither", "", "", "", "", nil, nil, true},
-		{"both", t.TempDir(), "http://c:1", "lab-alpha", "", nil, nil, true},
+		{"profile dir with the route", t.TempDir(), "http://c:1", "lab-alpha", "", nil, nil, true},
+		{"path-valued squad", "", "http://c:1", "lab-/../fwb", "", nil, nil, true},
+		{"upper-case squad", "", "http://c:1", "lab-Alpha", "", nil, nil, true},
 		{"squad route", "", "http://c:1", "lab-alpha", "", nil, nil, false},
 		{"production squad", "", "http://c:1", "alpha", "", nil, nil, true},
 		{"bad url", "", "ftp://c", "lab-alpha", "", nil, nil, true},
@@ -153,10 +206,25 @@ func TestNewSinkNeedsALabSquadAndATokenFromTheEnvironment(t *testing.T) {
 		{"duel b not lab", "", "http://c:1", "lab-alpha", "bravo", []string{"A"}, []string{"B"}, true},
 	}
 	for _, tc := range cases {
-		_, err := newSink(tc.dir, tc.url, tc.squad, tc.squadB, tc.teamA, tc.teamB)
+		_, err := newSink(tc.dir, false, tc.url, tc.squad, tc.squadB, tc.teamA, tc.teamB)
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: err = %v, wantErr %v", tc.name, err, tc.wantErr)
 		}
+	}
+}
+
+func TestNewSinkDryRunIsTheOnlyWayToTheFileSink(t *testing.T) {
+	t.Setenv("CONTROL_TOKEN", testToken)
+	if sink, err := newSink(t.TempDir(), true, "", "", "", nil, nil); err != nil {
+		t.Errorf("dry run with a directory: %v", err)
+	} else if _, ok := sink.(FileSink); !ok {
+		t.Errorf("dry run sink = %T, want the file sink", sink)
+	}
+	if _, err := newSink("", true, "", "", "", nil, nil); err == nil {
+		t.Error("dry run with nowhere to write was accepted")
+	}
+	if _, err := newSink(t.TempDir(), true, "http://c:1", "lab-alpha", "", nil, nil); err == nil {
+		t.Error("dry run together with the squad route was accepted")
 	}
 }
 
@@ -202,7 +270,43 @@ func TestSquadSinkAgainstTheRealRoutes(t *testing.T) {
 		t.Fatalf("read back %+v, %v from %s", got, err, raw)
 	}
 
+	if err := s.Confirm(context.Background(), []string{"crew-18"}, pr); err != nil {
+		t.Errorf("the real route's copy does not hash like the pushed profile: %v", err)
+	}
+
 	if err := s.Clear(context.Background(), []string{"crew-18"}); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.Confirm(context.Background(), []string{"crew-18"}, pr); err == nil {
+		t.Error("confirmed the trained profile after it was cleared")
+	}
+}
+
+// Every family the contract names must pass the squad service's door, or a
+// profile that overrides it would be refused at the PUT.
+func TestSquadServiceAcceptsEveryContractFamily(t *testing.T) {
+	mux := http.NewServeMux()
+	squad.Routes(mux, squad.NewStore(), e2eUnits{"crew-18": true}, testToken)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	base, _ := url.Parse(srv.URL)
+	hello, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/squads/lab-alpha/hello", strings.NewReader(`{"unit":"crew-18","role":"striker"}`))
+	hello.Header.Set("Authorization", "Bearer "+testToken)
+	if resp, err := http.DefaultClient.Do(hello); err != nil || resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("hello: %v %v", resp, err)
+	}
+
+	pr := tactics.NewProfile("every-family")
+	pr.Overrides = map[tactics.Family]tactics.Params{}
+	pr.Tactics = map[tactics.Family][]string{}
+	for _, f := range []tactics.Family{tactics.FamilyDefault, tactics.FamilyZombie, tactics.FamilySkeleton,
+		tactics.FamilyCreeper, tactics.FamilySpider, tactics.FamilyBlaze, tactics.FamilyEnderman,
+		tactics.FamilyWitch, tactics.FamilyIllager, tactics.FamilyBrute, tactics.FamilyBoss, tactics.FamilyPlayer} {
+		pr.Overrides[f] = tactics.Defaults()
+		pr.Tactics[f] = life.TacticNames(f)
+	}
+	s := SquadSink{Base: base, Default: "lab-alpha", Token: testToken}
+	if err := s.Push(context.Background(), []string{"crew-18"}, pr); err != nil {
+		t.Fatalf("a profile naming every family and registered tactic was refused: %v", err)
 	}
 }

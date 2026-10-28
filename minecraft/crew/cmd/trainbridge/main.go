@@ -5,11 +5,21 @@
 //
 // usage: trainer run ... --evaluator "cmd:trainbridge --lab <lab> --layout <file>
 //
-//	--profile-dir <dir> --warriors A,B,C [--team-a A,B --team-b C,D --kits ...]"
+//	--squad-url <crew-control> --squad lab-<name> --warriors A,B,C
+//	[--team-a A,B --team-b C,D --squad-b lab-<name> --kits ...]"
 //
-// Instead of --profile-dir, --squad-url and --squad lab-<name> hand the
-// profile to the lab squad's route with the token in CONTROL_TOKEN; a duel
-// also needs --squad-b, since a squad has one profile.
+// --squad-url and --squad hand the profile to the lab squad's route with the
+// token in CONTROL_TOKEN; a duel also needs --squad-b, since a squad has one
+// profile. The bridge locks each squad in the control directory for the
+// whole fight, reads the profile back and fights only when the squad serves
+// exactly the pushed one.
+//
+// --dry-run with --profile-dir writes the candidate as files and stops; no
+// unit reads those files, so it never fights and never scores.
+//
+// A duel clears inventories and teleports, so only the units in
+// --duelists-allow (default Rusty,Slate,Tinder) may be on either team; --crew-names
+// only says who may be online. A duelist that leaves the world aborts the round.
 //
 // Mob scenarios come from the arena scenario book and are fought by the
 // warriors; a duel scenario pits --team-a (the candidate) against --team-b
@@ -109,14 +119,16 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	layoutPath := fs.String("layout", "", "layout JSON from labcourses arena-layout")
 	scenarios := fs.String("scenarios", "", "scenario book YAML (default embedded)")
 	control := fs.String("control-dir", defaultControlDir(), "tacticsctl state directory holding the training switch")
-	profileDir := fs.String("profile-dir", "", "directory the lab units read their candidate profile from")
-	squadURL := fs.String("squad-url", "", "crew-control base URL; hands profiles to the lab squad's route instead of --profile-dir (token from CONTROL_TOKEN)")
+	profileDir := fs.String("profile-dir", "", "directory a --dry-run writes the candidate profile into; no unit reads it")
+	dryRun := fs.Bool("dry-run", false, "write the candidate to --profile-dir and stop: nothing is fought or scored")
+	squadURL := fs.String("squad-url", "", "crew-control base URL; hands profiles to the lab squad's route (token from CONTROL_TOKEN)")
 	squad := fs.String("squad", "", "lab squad id the units fight in, lab- prefixed; with --squad-url")
 	squadB := fs.String("squad-b", "", "lab squad id of the --team-b units, when it differs from --squad; a duel needs two squads")
 	opponent := fs.String("opponent-profile", "", "profile JSON the duel opponent uses (default the shipped behaviour)")
 	warriors := fs.String("warriors", "Rusty,Slate,Tinder", "comma-separated warriors for mob scenarios")
 	warriorKits := fs.String("warrior-kits", "", "comma-separated catalog kits, one per --warriors name")
 	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a fight")
+	duelists := fs.String("duelists-allow", strings.Join(arena.DefaultDuelists, ","), "units a duel may clear and teleport; says nothing about who may be online")
 	teamA := fs.String("team-a", "", "duel team that fights with the candidate profile")
 	teamB := fs.String("team-b", "", "duel team that fights with the opponent profile; as many as --team-a")
 	kits := fs.String("kits", "", "comma-separated catalog kits for a duel, one per slot, handed to both teams")
@@ -124,6 +136,7 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	fightTimeout := fs.Duration("fight-timeout", 10*time.Minute, "hard limit for one fight, set-up included")
 	roundTimeout := fs.Duration("round-timeout", 2*time.Minute, "limit for the duel round itself")
 	poll := fs.Duration("poll", 3*time.Second, "delay between standing checks")
+	applyWait := fs.Duration("apply-wait", 6*time.Second, "wait between the two reads that confirm the squad serves the pushed profile; at least one unit poll")
 	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
 	placeWait := fs.Duration("place-wait", 3*time.Second, "wait after placing the squad")
 	countdown := fs.Duration("countdown", 5*time.Second, "duel wait between the last set-up step and the start")
@@ -148,7 +161,7 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	if *layoutPath == "" {
 		return nil, errors.New("--layout is required")
 	}
-	sink, err := newSink(*profileDir, *squadURL, *squad, *squadB, splitNames(*teamA), splitNames(*teamB))
+	sink, err := newSink(*profileDir, *dryRun, *squadURL, *squad, *squadB, splitNames(*teamA), splitNames(*teamB))
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +177,9 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	}
 	book, err := loadBook(*scenarios)
 	if err != nil {
+		return nil, err
+	}
+	if err := arena.ValidateLabConsole(*lab, *compose); err != nil {
 		return nil, err
 	}
 	console, err := newConsole(*lab, *compose)
@@ -184,8 +200,10 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 		ControlDir: *control, Lab: *lab, StopFile: *stopFile,
 		Console: console, Layout: layout, Book: book, Sink: sink, Opponent: opp,
 		Warriors: splitNames(*warriors), WarriorKits: splitNames(*warriorKits), Crew: splitNames(*crew),
-		TeamA: splitNames(*teamA), TeamB: splitNames(*teamB), DuelKits: splitNames(*kits),
+		Duelists: splitNames(*duelists),
+		TeamA:    splitNames(*teamA), TeamB: splitNames(*teamB), DuelKits: splitNames(*kits),
 		FightTimeout: *fightTimeout, RoundTimeout: *roundTimeout, Poll: *poll, Settle: *settle,
+		DryRun: *dryRun, ApplyWait: *applyWait,
 		PlaceWait: *placeWait, Countdown: *countdown, KitGap: *kitGap, Spacing: *spacing,
 		Emit: *emit, Out: errOut, Damage: damage,
 	}, nil
@@ -223,18 +241,21 @@ func splitNames(list string) []string {
 	return names
 }
 
-// newSink picks where candidate profiles go: a directory, or the squad route.
-// The token comes from the environment only, so it appears in no argument
-// list, log or message.
-func newSink(profileDir, squadURL, squad, squadB string, teamA, teamB []string) (ProfileSink, error) {
-	if squadURL == "" {
-		if profileDir == "" {
-			return nil, errors.New("--profile-dir or --squad-url is required")
+// newSink picks where candidate profiles go: the squad route, or for a dry
+// run a directory. The token comes from the environment only, so it appears
+// in no argument list, log or message.
+func newSink(profileDir string, dryRun bool, squadURL, squad, squadB string, teamA, teamB []string) (ProfileSink, error) {
+	if dryRun {
+		if profileDir == "" || squadURL != "" {
+			return nil, errors.New("--dry-run takes --profile-dir and no --squad-url")
 		}
 		return FileSink{Dir: profileDir}, nil
 	}
 	if profileDir != "" {
-		return nil, errors.New("--profile-dir and --squad-url are alternatives")
+		return nil, errors.New("--profile-dir is only for --dry-run; no unit reads it")
+	}
+	if squadURL == "" {
+		return nil, errors.New("--squad-url is required")
 	}
 	base, err := url.Parse(squadURL)
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
@@ -244,13 +265,13 @@ func newSink(profileDir, squadURL, squad, squadB string, teamA, teamB []string) 
 	if token == "" {
 		return nil, errors.New("CONTROL_TOKEN is required with --squad-url")
 	}
-	if !strings.HasPrefix(squad, labSquadPrefix) {
-		return nil, fmt.Errorf("--squad: %q is not a lab squad (want a %s prefix)", squad, labSquadPrefix)
+	if !labSquadID.MatchString(squad) {
+		return nil, fmt.Errorf("--squad: %q is not a lab squad (want %s followed by a-z, 0-9, -)", squad, labSquadPrefix)
 	}
 	sink := SquadSink{Base: base, Default: squad, Token: token, Client: &http.Client{}}
 	if len(teamB) > 0 {
-		if !strings.HasPrefix(squadB, labSquadPrefix) {
-			return nil, fmt.Errorf("--squad-b: %q is not a lab squad (want a %s prefix)", squadB, labSquadPrefix)
+		if !labSquadID.MatchString(squadB) {
+			return nil, fmt.Errorf("--squad-b: %q is not a lab squad (want %s followed by a-z, 0-9, -)", squadB, labSquadPrefix)
 		}
 		// One squad has one profile, so the two teams of a duel cannot share.
 		if len(teamA) > 0 && squadB == squad {

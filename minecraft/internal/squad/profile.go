@@ -12,7 +12,7 @@ package squad
 
 import (
 	"math"
-	"strings"
+	"regexp"
 )
 
 // labPrefix marks a lab squad. No flag exists for a squad to carry one:
@@ -24,9 +24,14 @@ import (
 // The lab world is crew-lab; its squads are named the same way.
 const labPrefix = "lab-"
 
+// labSquadID is the whole shape of a lab squad id. A prefix check alone
+// lets a path-valued route parameter such as "lab-/../fwb" through, and
+// the id ends up in URLs and file names on the trainer's side.
+var labSquadID = regexp.MustCompile(`^` + labPrefix + `[a-z0-9-]+$`)
+
 // labSquad says the id marks the squad as one the lab runs, the only
 // kind that may carry a tactics profile.
-func labSquad(id string) bool { return strings.HasPrefix(id, labPrefix) }
+func labSquad(id string) bool { return len(id) <= maxLabel*2 && labSquadID.MatchString(id) }
 
 // contractVersion mirrors tactics.Version: a profile the engine cannot
 // read is refused at the door instead of stored for every unit to
@@ -49,6 +54,24 @@ type profileParams struct {
 	MeleeShieldTick float64 `json:"meleeShieldTicks"`
 }
 
+// knownFamilies mirrors the tactics.Family constants: the only keys an
+// override or a tactic list may carry. A family renamed or added in the
+// contract must change here too; the crew module's route test walks the
+// contract's families through this door to catch the drift.
+var knownFamilies = map[string]bool{
+	"default": true, "zombie": true, "skeleton": true, "creeper": true,
+	"spider": true, "blaze": true, "enderman": true, "witch": true,
+	"illager": true, "brute": true, "boss": true, "player": true,
+}
+
+// maxFamilyTactics bounds one family's ordered tactic list: the engine
+// has a handful of variants per family, and a longer list only costs
+// every unit a longer walk each tick.
+const maxFamilyTactics = 8
+
+// tacticName is the shape of a registered tactic: family/variant.
+var tacticName = regexp.MustCompile(`^[a-z0-9][a-z0-9/_-]{0,63}$`)
+
 // maxProfileText bounds the free-text lines a profile carries beyond its
 // name: an evidence path and a tactic variant's name are one short line.
 const maxProfileText = 256
@@ -70,8 +93,9 @@ type profileWire struct {
 }
 
 // valid is the half of the contract's validation this package can run
-// without importing it: the right version, a name, parent, evidence
-// and tactic names that stay one readable line, and finite numbers, which JSON cannot quite promise
+// without importing it: the right version, a name, parent and evidence
+// that stay one readable line, known family keys, bounded tactic lists of
+// well-formed names, and finite numbers, which JSON cannot quite promise
 // on its own. The bounds clamp is the unit's, on load.
 func (p profileWire) valid() bool {
 	if p.Version != contractVersion ||
@@ -79,12 +103,15 @@ func (p profileWire) valid() bool {
 		!shortPrintable(p.Evidence, maxProfileText) {
 		return false
 	}
+	if len(p.Overrides) > len(knownFamilies) || len(p.Tactics) > len(knownFamilies) {
+		return false
+	}
 	for fam, names := range p.Tactics {
-		if !shortPrintable(fam, maxLabel) {
+		if !knownFamilies[fam] || len(names) > maxFamilyTactics {
 			return false
 		}
 		for _, n := range names {
-			if !shortPrintable(n, maxProfileText) {
+			if !tacticName.MatchString(n) {
 				return false
 			}
 		}
@@ -92,8 +119,8 @@ func (p profileWire) valid() bool {
 	if !finiteParams(p.Default) {
 		return false
 	}
-	for _, o := range p.Overrides {
-		if !finiteParams(o) {
+	for fam, o := range p.Overrides {
+		if !knownFamilies[fam] || !finiteParams(o) {
 			return false
 		}
 	}

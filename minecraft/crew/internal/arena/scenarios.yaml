@@ -107,13 +107,21 @@ scenarios:
       - {mob: piglin_brute, count: 2}
       - {mob: hoglin, count: 1}
   - name: ravager-charge
-    family: boss
+    family: brute
     tier: 4
     timeout: 3m
     pass: clear
     spawn: {ring: 10, side: north}
     mobs:
       - {mob: ravager, count: 1, name: Breaker}
+  - name: warden-trial
+    family: boss
+    tier: 4
+    timeout: 2m
+    pass: survive
+    spawn: {ring: 12, side: south}
+    mobs:
+      - {mob: warden, count: 1, name: Sentinel}
   - name: mixed-fodder
     family: default
     tier: 1

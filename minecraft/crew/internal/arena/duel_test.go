@@ -18,8 +18,8 @@ import (
 var hubPos = TargetPosition{X: 0, Y: 64, Z: -400}
 
 // duelSim answers the console for a duel. A duelist goes down a scripted time
-// after the start signal of its round; with respawn set it reappears at the
-// world spawn instead of reading as missing.
+// after the start signal of its round; with respawn set (the default) it
+// reappears at the world spawn, and without it the unit reads as missing.
 type duelSim struct {
 	clock   *fakeClock
 	round   int
@@ -35,8 +35,11 @@ type duelSim struct {
 func newDuelSim(clock *fakeClock) *duelSim {
 	return &duelSim{
 		clock: clock,
-		dieAt: map[int]map[string]time.Duration{},
-		list:  "There are 4/10 players online:\nRusty, Slate, Tinder, Agate",
+		// A real death shows as a respawn at the world spawn; a unit that
+		// reads as missing has left the world.
+		respawn: true,
+		dieAt:   map[int]map[string]time.Duration{},
+		list:    "There are 4/10 players online:\nRusty, Slate, Tinder, Agate",
 	}
 }
 
@@ -105,7 +108,8 @@ func newDuelRig() *duelRig {
 			RedProfile: "alpha", BlueProfile: "beta",
 			Kits:   []string{"vanguard/t5", "ranger/t5"},
 			Rounds: 2, RoundTimeout: time.Minute, MaxWall: 30 * time.Minute,
-			CrewNames: DefaultCrewNames, Policy: policy, Sink: sink, RunID: "run-1",
+			CrewNames: DefaultCrewNames, Duelists: []string{"Rusty", "Slate", "Tinder", "Agate"},
+			Policy: policy, Sink: sink, RunID: "run-1",
 			Spacing: 12, Poll: 5 * time.Second, Settle: 25 * time.Second,
 			KitGap: 3 * time.Second, Countdown: 5 * time.Second,
 			Out: out, Now: clock.Now, Sleep: clock.Sleep,
@@ -332,6 +336,42 @@ func TestDuelAShortGapIsNotADeath(t *testing.T) {
 	}
 }
 
+func TestDuelMissingDuelistAbortsTheRoundInsteadOfScoringALoss(t *testing.T) {
+	r := newDuelRig()
+	r.d.Rounds = 1
+	r.s.respawn = false
+	r.s.die(1, "Tinder", 10*time.Second)
+	rounds, err := r.d.Run(context.Background())
+	if !errors.Is(err, ErrDuelistGone) || !strings.Contains(err.Error(), "Tinder") {
+		t.Fatalf("err = %v, want ErrDuelistGone naming the unit", err)
+	}
+	if len(rounds) != 1 || rounds[0].Outcome != DuelAborted || rounds[0].Winner != "" {
+		t.Fatalf("rounds = %+v, want one aborted round", rounds)
+	}
+	if len(r.sink.Cards) != 2 {
+		t.Fatalf("cards = %d, want one per side", len(r.sink.Cards))
+	}
+	for _, c := range r.sink.Cards {
+		if c.Outcome != tactics.OutcomeAborted || c.TotalDeaths() != 0 {
+			t.Errorf("card = %+v, want aborted with no death on it", c)
+		}
+	}
+	if slices.Contains(r.policy.Out, "Tinder") {
+		t.Error("the vanished duelist was reported as eliminated")
+	}
+}
+
+func TestDuelOnlyAllowListedUnitsMayDuelWhateverIsOnline(t *testing.T) {
+	r := newDuelRig()
+	r.d.Duelists = []string{"Rusty", "Slate", "Tinder"}
+	if _, err := r.d.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "Agate") {
+		t.Fatalf("err = %v, want Agate refused: crew may be online without being fair game", err)
+	}
+	if r.f.Count("tp ") != 0 || r.f.Count("clear ") != 0 {
+		t.Error("the server was touched before the refusal")
+	}
+}
+
 func TestDuelARespawnedDuelistStaysOut(t *testing.T) {
 	r := newDuelRig()
 	r.d.Rounds = 1
@@ -423,7 +463,7 @@ func TestDuelWallClockCapStopsBetweenRounds(t *testing.T) {
 		r.s.die(round, "Rusty", 5*time.Second)
 		r.s.die(round, "Slate", 5*time.Second)
 	}
-	r.d.MaxWall = 5 * time.Minute
+	r.d.MaxWall = 90 * time.Second
 	rounds, err := r.d.Run(context.Background())
 	if !errors.Is(err, ErrDuelWallClock) || len(rounds) == 0 || len(rounds) >= 10 {
 		t.Errorf("%d rounds, err %v: want the cap to cut a long run short", len(rounds), err)
@@ -503,15 +543,17 @@ func TestDuelValidation(t *testing.T) {
 			d.Blue = []string{"Gravel", "Hazel", "Ingot", "Jasper", "Kettle", "Loam"}
 			d.Kits = nil
 		},
-		"a name twice":     func(d *Duel) { d.Blue = []string{"Rusty", "Agate"} },
-		"not a crew unit":  func(d *Duel) { d.Blue = []string{"Steve99", "Agate"} },
-		"a quote in name":  func(d *Duel) { d.CrewNames = append(d.CrewNames, `a"b`); d.Blue = []string{`a"b`, "Agate"} },
-		"no policy":        func(d *Duel) { d.Policy = nil },
-		"no sink":          func(d *Duel) { d.Sink = nil },
-		"no console":       func(d *Duel) { d.Console = nil },
-		"spacing too thin": func(d *Duel) { d.Spacing = 2 },
-		"spacing too wide": func(d *Duel) { d.Spacing = 60 },
-		"no floor":         func(d *Duel) { d.Layout.FloorRadius = 0 },
+		"a name twice":      func(d *Duel) { d.Blue = []string{"Rusty", "Agate"} },
+		"not a crew unit":   func(d *Duel) { d.Blue = []string{"Steve99", "Agate"} },
+		"crew, not allowed": func(d *Duel) { d.Blue = []string{"Basalt", "Agate"} },
+		"no allow list":     func(d *Duel) { d.Duelists = nil },
+		"a quote in name":   func(d *Duel) { d.Duelists = append(d.Duelists, `a"b`); d.Blue = []string{`a"b`, "Agate"} },
+		"no policy":         func(d *Duel) { d.Policy = nil },
+		"no sink":           func(d *Duel) { d.Sink = nil },
+		"no console":        func(d *Duel) { d.Console = nil },
+		"spacing too thin":  func(d *Duel) { d.Spacing = 2 },
+		"spacing too wide":  func(d *Duel) { d.Spacing = 60 },
+		"no floor":          func(d *Duel) { d.Layout.FloorRadius = 0 },
 	}
 	for name, mutate := range cases {
 		r := newDuelRig()
@@ -629,5 +671,27 @@ func TestDuelFitsTheColosseumLayout(t *testing.T) {
 				t.Errorf("spawn %+v is not on the floor (ground %d)", p, layout.GroundY)
 			}
 		}
+	}
+}
+
+func TestValidateComposeFile(t *testing.T) {
+	for _, ok := range []string{"minecraft/crew/lab/compose.yaml", "/home/u/worktrees/o/r/feat/x/minecraft/crew/lab/compose.yaml"} {
+		if err := ValidateComposeFile(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "fwb/compose.yaml", "/srv/FWB-minecraft/docker-compose.yml", "compose-fwb.yaml"} {
+		if err := ValidateComposeFile(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if err := ValidateLabConsole("crew-lab", "fwb/compose.yaml"); err == nil {
+		t.Error("a compose lab on an FWB compose file was accepted")
+	}
+	if err := ValidateLabConsole("k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0", ""); err != nil {
+		t.Errorf("a k8s lab needs no compose file: %v", err)
+	}
+	if err := ValidateLabConsole("minecraft-fwb", "minecraft/crew/lab/compose.yaml"); err == nil {
+		t.Error("an FWB lab was accepted")
 	}
 }

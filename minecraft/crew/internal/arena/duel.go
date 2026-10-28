@@ -46,6 +46,11 @@ const (
 var (
 	ErrDuelHalted    = errors.New("arena: duel stopped by the kill switch")
 	ErrDuelWallClock = errors.New("arena: duel hit its wall-clock cap")
+	// ErrDuelistGone ends a round whose duelist vanished from the world for
+	// several polls. A death is seen as a respawn far from the floor, so a
+	// unit that is simply not there has disconnected, and scoring that as a
+	// loss would teach the trainer a profile that lost to a network fault.
+	ErrDuelistGone = errors.New("arena: a duelist left the world")
 )
 
 // DuelRound is the one-line result of a round. Winner is the spawn side that
@@ -73,9 +78,9 @@ type DuelRound struct {
 // from the last round skews the next. With no Kits, units fight in whatever
 // they carry and parity is the operator's job.
 //
-// Only crew units may duel, and only the duelists are touched: teleported,
-// cleared, kitted, tagged. A non-crew player online refuses the run, exactly
-// as a boss test does.
+// Only the allow-listed units may duel, and only the duelists are touched:
+// teleported, cleared, kitted, tagged. A non-crew player online refuses the
+// run, exactly as a boss test does.
 type Duel struct {
 	Console Console
 	Layout  Layout
@@ -89,9 +94,12 @@ type Duel struct {
 	// MaxWall caps the whole run, rounds and setup together.
 	MaxWall time.Duration
 
-	// CrewNames are the players allowed online, and the only names a duelist
-	// may have.
+	// CrewNames are the players allowed online. They are not the duelists:
+	// a duel clears inventories and teleports, so who may be put through it
+	// is a separate, narrower list that is never derived from this one.
 	CrewNames []string
+	// Duelists are the only names a side may hold.
+	Duelists []string
 
 	Policy TargetPolicy
 	Sink   ScoreSink
@@ -195,8 +203,8 @@ func (d *Duel) validate() error {
 			return fmt.Errorf("arena: %q is on both sides or listed twice", n)
 		}
 		seen[n] = true
-		if !slices.Contains(d.CrewNames, n) {
-			return fmt.Errorf("arena: %q is not a crew unit; only crew may duel", n)
+		if !slices.Contains(d.Duelists, n) {
+			return fmt.Errorf("arena: %q is not an allowed duelist; a duel clears inventories and moves players", n)
 		}
 	}
 	if err := ValidateWarriorKits(d.Red, d.Kits); err != nil {
@@ -436,7 +444,8 @@ func (d *Duel) teamOf(names []string) string {
 }
 
 // duelUnit is one duelist's standing. Death is final for the round: a unit
-// that respawns at the world spawn does not rejoin.
+// that respawns at the world spawn does not rejoin. misses counts the polls
+// in a row the unit was not in the world at all.
 type duelUnit struct{ misses int }
 
 // observe polls every living duelist once and latches the dead.
@@ -461,7 +470,7 @@ func (d *Duel) observe(h *Director, units map[string]*duelUnit, sides ...*duelSi
 					s.dead[n] = true
 				}
 			} else if u.misses++; u.misses >= duelDeathMisses {
-				s.dead[n] = true
+				return fmt.Errorf("%w: %s", ErrDuelistGone, n)
 			}
 			if s.dead[n] {
 				d.logf("arena: duelist %s (%s) is out", n, s.side)
