@@ -142,7 +142,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	if sc := newSquadClient(cfg, tracker.Snapshot, logAdapter{log}); sc != nil {
 		go sc.Run(ctx)
 		lf.SetSquad(sc)
-	} else if cfg.Role != "" {
+	} else if cfg.Role.IsWarrior() {
 		log.Warn("squad_off", logging.Fields{"note": "CREW_ROLE is set but CONTROL_URL is not; the warrior leads itself and hears no orders"})
 	}
 	runner.SetReflex(lf)

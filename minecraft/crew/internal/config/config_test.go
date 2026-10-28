@@ -84,10 +84,74 @@ func TestLoadParsesTheWarriorRole(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CREW_ROLE=%q: %v", role, err)
 			}
-			if cfg.Role != role {
+			if string(cfg.Role) != role {
 				t.Errorf("Role = %q, want %q", cfg.Role, role)
 			}
+			if cfg.Role.IsWarrior() != (role != "") || cfg.Role.IsBuilder() {
+				t.Errorf("Role %q: IsWarrior=%v IsBuilder=%v", role, cfg.Role.IsWarrior(), cfg.Role.IsBuilder())
+			}
 		})
+	}
+}
+
+// A builder role is a different kind of unit, not a fifth warrior: it never
+// takes the warrior path or a squad, whatever CREW_SQUAD says.
+func TestLoadParsesTheBuilderRoles(t *testing.T) {
+	for _, role := range []string{"mender", "builder"} {
+		t.Run(role, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("CREW_ROLE", role)
+			t.Setenv("CREW_LAB", "true")
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("CREW_ROLE=%q: %v", role, err)
+			}
+			if string(cfg.Role) != role || !cfg.Role.IsBuilder() || cfg.Role.IsWarrior() {
+				t.Errorf("Role %q: IsBuilder=%v IsWarrior=%v", cfg.Role, cfg.Role.IsBuilder(), cfg.Role.IsWarrior())
+			}
+			if cfg.Squad != "" {
+				t.Errorf("Squad = %q, want none for a builder", cfg.Squad)
+			}
+			if !cfg.Lab {
+				t.Error("Lab = false, want true")
+			}
+		})
+	}
+}
+
+func TestLoadRefusesABuilderOffTheLab(t *testing.T) {
+	for _, lab := range []string{"", "false", "yes"} {
+		t.Run("lab="+lab, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("CREW_ROLE", "mender")
+			t.Setenv("CREW_LAB", lab)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "CREW_LAB") {
+				t.Fatalf("err = %v, want one naming CREW_LAB", err)
+			}
+		})
+	}
+}
+
+func TestLoadLetsAWarriorRunOffTheLab(t *testing.T) {
+	setRequired(t)
+	t.Setenv("CREW_ROLE", "ranger")
+	if cfg, err := Load(); err != nil || cfg.Lab {
+		t.Fatalf("Load = Lab %v, %v; want a warrior unaffected by CREW_LAB", cfg.Lab, err)
+	}
+}
+
+func TestLoadNamesAllFiveRolesWhenRefusing(t *testing.T) {
+	setRequired(t)
+	t.Setenv("CREW_ROLE", "wizard")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	for _, r := range []string{"vanguard", "striker", "ranger", "mender", "builder"} {
+		if !strings.Contains(err.Error(), r) {
+			t.Errorf("err = %q, want it to name %s", err, r)
+		}
 	}
 }
 

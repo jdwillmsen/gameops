@@ -172,7 +172,7 @@ func (u *unit) end() {
 // lifeConfig maps the settings onto what the unit does on its own. The kit is
 // on only when a chest position is configured.
 func lifeConfig(cfg config.Config, world skill.ChestWorld) life.Config {
-	lc := life.Config{Wander: cfg.IdleWander, Radius: cfg.IdleRadius, Defend: cfg.Defend, Eat: cfg.Eat, Role: cfg.Role}
+	lc := life.Config{Wander: cfg.IdleWander, Radius: cfg.IdleRadius, Defend: cfg.Defend, Eat: cfg.Eat, Role: warriorRole(cfg.Role)}
 	if c := cfg.KitChest; c != nil {
 		lc.Kit = &life.Kit{Chest: protocol.BlockPos{c[0], c[1], c[2]}, Food: cfg.KitFood, World: world}
 	}
@@ -189,12 +189,21 @@ var (
 	_ life.Roster = (*squadclient.Client)(nil)
 )
 
+// warriorRole is the role the life engine fights as. A builder role gives
+// it nothing, so the unit keeps the reactive defence.
+func warriorRole(r config.Role) string {
+	if r.IsWarrior() {
+		return string(r)
+	}
+	return ""
+}
+
 // newSquadClient builds the warrior's seat in its squad over the same
 // crew-control base URL and work token the task client uses. It returns nil
 // for a unit with no warrior role, or a warrior with no crew-control to
 // reach — that one still fights, but leads itself and hears no orders.
 func newSquadClient(cfg config.Config, snapshot func() belief.Snapshot, log squadclient.Logger) *squadclient.Client {
-	if cfg.Role == "" || cfg.ControlURL == nil {
+	if !cfg.Role.IsWarrior() || cfg.ControlURL == nil {
 		return nil
 	}
 	c := squadclient.New(cfg.ControlURL, cfg.UnitID, cfg.Squad, "", squadmsg.Role(cfg.Role), cfg.ControlToken, log)

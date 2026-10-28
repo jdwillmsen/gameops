@@ -351,3 +351,20 @@ func TestSquadStatusCarriesBeliefOntoTheWire(t *testing.T) {
 		t.Fatalf("status = %+v, want %+v", got, want)
 	}
 }
+
+// A builder role must not reach the warrior path: no life role, no squad seat.
+func TestBuilderRolesStayOffTheWarriorPath(t *testing.T) {
+	base, _ := url.Parse("http://crew-control.invalid")
+	for _, role := range []config.Role{"mender", "builder"} {
+		if got := warriorRole(role); got != "" {
+			t.Errorf("warriorRole(%q) = %q, want none", role, got)
+		}
+		cfg := config.Config{Role: role, Lab: true, ControlURL: base, UnitID: "crew-20"}
+		if c := newSquadClient(cfg, func() belief.Snapshot { return belief.Snapshot{} }, nopLog{}); c != nil {
+			t.Errorf("%s got a squad client", role)
+		}
+	}
+	if got := warriorRole("ranger"); got != "ranger" {
+		t.Errorf("warriorRole(ranger) = %q", got)
+	}
+}
