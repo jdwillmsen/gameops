@@ -110,6 +110,12 @@ type Actuator struct {
 	book   *craft.Book
 	invOf  func() []belief.Item
 	crafts craftState
+
+	// creative reads whether the unit is in creative mode; nil means never.
+	creative func() bool
+	// creativeIDs maps an item's runtime ID to the ID a creative-inventory
+	// request must quote, which is a different number.
+	creativeIDs map[int32]uint32
 }
 
 type CorrectionLogger interface {
