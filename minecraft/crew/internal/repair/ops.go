@@ -75,6 +75,19 @@ func Paint(g *Grid, pal *Palette, ops []Op) {
 	}
 }
 
+// ClipOps keeps the part of each op inside box, in order. A later op still
+// overrides an earlier one, so painting the clipped ops over box gives the
+// same cells as painting the whole plan.
+func ClipOps(ops []Op, box Box) []Op {
+	var out []Op
+	for _, op := range ops {
+		if c, ok := intersect(box, op.Box); ok {
+			out = append(out, Op{Box: c, Block: op.Block})
+		}
+	}
+	return out
+}
+
 // Reader returns what is in the world for a box. Cells it cannot vouch for
 // stay Unknown and are counted as unscanned, never repaired.
 type Reader interface {
