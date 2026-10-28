@@ -1,0 +1,49 @@
+package place
+
+import "testing"
+
+// These read the checked-in table, so a regenerated one that loses the
+// basics fails here before a planner trusts it.
+func TestDefaultTableLoadsAndKnowsStairs(t *testing.T) {
+	tb, err := Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tb.Header.ServerVersion == "" || len(tb.Blocks) < 100 {
+		t.Fatalf("header %+v, %d blocks", tb.Header, len(tb.Blocks))
+	}
+	up, ok := Lookup("oak_stairs", map[string]any{"upside_down_bit": true, "weirdo_direction": 0})
+	if !ok {
+		t.Fatal("no recipe for an upside-down stair")
+	}
+	down, ok := Lookup("minecraft:oak_stairs", map[string]any{"upside_down_bit": false, "weirdo_direction": 0})
+	if !ok {
+		t.Fatal("no recipe for an upright stair")
+	}
+	if up.Face == down.Face && up.Hit == down.Hit && up.Pitch == down.Pitch {
+		t.Errorf("upright and upside-down stairs got the same click: %+v", up)
+	}
+	if _, ok := Lookup("oak_stairs", map[string]any{"minecraft:corner": "inner_left"}); !ok {
+		t.Error("a corner state is derived and must not block a lookup")
+	}
+}
+
+func TestDefaultTableListsWallConnectionsAsDerived(t *testing.T) {
+	d := Derived("cobblestone_wall")
+	want := map[string]bool{"wall_post_bit": true, "wall_connection_type_east": true}
+	for _, k := range d {
+		delete(want, k)
+	}
+	if len(want) != 0 {
+		t.Errorf("derived = %v, missing %v", d, want)
+	}
+}
+
+func TestDefaultTableReportsAnUnplaceableStateAsMissing(t *testing.T) {
+	if _, ok := Lookup("oak_stairs", map[string]any{"weirdo_direction": 9}); ok {
+		t.Error("a stair facing 9 does not exist")
+	}
+	if _, ok := Lookup("no_such_block", nil); ok {
+		t.Error("an unknown block has no recipe")
+	}
+}
