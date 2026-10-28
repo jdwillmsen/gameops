@@ -98,18 +98,13 @@ func lookFrom(sum [32]byte) look {
 type block struct{ x, y, w, h, d int }
 
 var (
-	head      = block{0, 0, 8, 8, 8}
-	hat       = block{32, 0, 8, 8, 8}
-	torso     = block{16, 16, 8, 12, 4}
-	jacket    = block{16, 32, 8, 12, 4}
-	rightArm  = block{40, 16, 4, 12, 4}
-	rightSlv  = block{40, 32, 4, 12, 4}
-	leftArm   = block{32, 48, 4, 12, 4}
-	leftSlv   = block{48, 48, 4, 12, 4}
-	rightLeg  = block{0, 16, 4, 12, 4}
-	rightPant = block{0, 32, 4, 12, 4}
-	leftLeg   = block{16, 48, 4, 12, 4}
-	leftPant  = block{0, 48, 4, 12, 4}
+	head     = block{0, 0, 8, 8, 8}
+	hat      = block{32, 0, 8, 8, 8}
+	torso    = block{16, 16, 8, 12, 4}
+	rightArm = block{40, 16, 4, 12, 4}
+	leftArm  = block{32, 48, 4, 12, 4}
+	rightLeg = block{0, 16, 4, 12, 4}
+	leftLeg  = block{16, 48, 4, 12, 4}
 )
 
 func (p block) front() (x, y, w, h int) { return p.x + p.d, p.y + p.d, p.w, p.h }
@@ -128,12 +123,12 @@ func (p block) paintBack(px []byte, c rgba, dx, dy, w, h int) {
 }
 
 // body draws the unclothed figure: skin everywhere, hair, face. Outfits are
-// painted over it. The overlay layers are painted solid rather than left
-// transparent, so a skin never has holes where an outfit does not cover.
+// painted over it. Only the base layers are painted: the game draws the
+// overlay layers (hat, jacket, sleeves, trousers) on top of them, so a solid
+// overlay would hide the face and every outfit detail. The one deliberate
+// overlay is a helmet or cap on the hat layer.
 func body(px []byte, l look) {
-	// The UV sheet has unused gaps; fill them so no pixel is transparent.
-	fill(px, 0, 0, Width, Height, l.skin)
-	for _, p := range []block{head, hat, torso, jacket, rightArm, rightSlv, leftArm, leftSlv, rightLeg, rightPant, leftLeg, leftPant} {
+	for _, p := range []block{head, torso, rightArm, leftArm, rightLeg, leftLeg} {
 		p.paint(px, l.skin)
 	}
 	// Hair: the crown and a fringe on the front, the whole back of the head.
@@ -152,13 +147,13 @@ func body(px []byte, l look) {
 }
 
 func outfit(px []byte, shirt, trousers, shoes rgba) {
-	for _, p := range []block{torso, jacket, rightArm, rightSlv, leftArm, leftSlv} {
+	for _, p := range []block{torso, rightArm, leftArm} {
 		p.paint(px, shirt)
 	}
-	for _, p := range []block{rightLeg, rightPant, leftLeg, leftPant} {
+	for _, p := range []block{rightLeg, leftLeg} {
 		p.paint(px, trousers)
 	}
-	for _, p := range []block{rightLeg, rightPant, leftLeg, leftPant} {
+	for _, p := range []block{rightLeg, leftLeg} {
 		fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, shoes)
 	}
 }
@@ -166,7 +161,7 @@ func outfit(px []byte, shirt, trousers, shoes rgba) {
 // hands repaints the bottom of each arm in the given colour once an outfit has
 // covered the sleeves, so the hands read as bare skin (or gloves).
 func hands(px []byte, c rgba) {
-	for _, p := range []block{rightArm, rightSlv, leftArm, leftSlv} {
+	for _, p := range []block{rightArm, leftArm} {
 		fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, c)
 	}
 }
@@ -215,7 +210,7 @@ func paintChopper(px []byte, l look) {
 	flannel := darken(l.accent, 0.9)
 	dark := darken(l.accent, 0.5)
 	outfit(px, flannel, rgba{90, 65, 40, 255}, rgba{50, 35, 25, 255})
-	for _, p := range []block{torso, jacket, rightArm, rightSlv, leftArm, leftSlv} {
+	for _, p := range []block{torso, rightArm, leftArm} {
 		for dy := 0; dy < p.d+p.h; dy++ {
 			for dx := 0; dx < 2*(p.w+p.d); dx++ {
 				if (dx/2+dy/2)%2 == 0 {
@@ -264,11 +259,11 @@ func paintShaft(px []byte, l look) {
 	helmet(px, rgba{235, 235, 235, 255}, rgba{190, 190, 190, 255})
 	head.paintFront(px, rgba{255, 240, 120, 255}, 3, 0, 2, 2)
 	silver := rgba{215, 220, 225, 255}
-	for _, p := range []block{torso, jacket} {
+	for _, p := range []block{torso} {
 		fill(px, p.x, p.y+p.d+3, 2*(p.w+p.d), 1, silver)
 		fill(px, p.x, p.y+p.d+8, 2*(p.w+p.d), 1, silver)
 	}
-	for _, p := range []block{rightArm, rightSlv, leftArm, leftSlv} {
+	for _, p := range []block{rightArm, leftArm} {
 		fill(px, p.x, p.y+p.d+8, 2*(p.w+p.d), 1, silver)
 	}
 	torso.paintFront(px, l.accent, 5, 1, 2, 2)
@@ -281,7 +276,7 @@ func paintWarrior(px []byte, l look, tabard rgba, hood bool) {
 	iron := rgba{170, 172, 180, 255}
 	outfit(px, iron, darken(iron, 0.7), rgba{60, 60, 66, 255})
 	hands(px, rgba{70, 70, 78, 255})
-	for _, p := range []block{rightArm, rightSlv, leftArm, leftSlv} {
+	for _, p := range []block{rightArm, leftArm} {
 		fill(px, p.x, p.y+p.d, 2*(p.w+p.d), 3, darken(iron, 0.85))
 		fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, rgba{70, 70, 78, 255})
 	}
@@ -338,7 +333,7 @@ func paintFaceMark(px []byte, l look) {
 // colour, and half of them gloves in a darker shade of it. Warriors keep their
 // iron gauntlets and take only the band.
 func paintHandMarks(px []byte, l look, key string) {
-	arms := []block{rightArm, rightSlv, leftArm, leftSlv}
+	arms := []block{rightArm, leftArm}
 	for _, p := range arms {
 		fill(px, p.x, p.y+p.d+p.h-3, 2*(p.w+p.d), 1, l.accent)
 		if l.glove && !strings.HasPrefix(key, "warrior") {
