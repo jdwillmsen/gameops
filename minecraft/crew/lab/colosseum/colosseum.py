@@ -960,17 +960,14 @@ vault()
 SECRETS = []                                   # (x, z, y) of each lever, for the docs
 
 
-def secret_door(axis, sa, sl):
-    a0 = (A0 if axis == "x" else B0) + 10
-    u = (sa, 0) if axis == "x" else (0, sa)
-    v = (0, sl) if axis == "x" else (sl, 0)
-
+def closet(origin, u, v, a0, dy=0, skin=None, kind="trophy", **_):
+    """A room behind a sliding plug, in a frame of along `a` (u) and lateral `l` (v)."""
     def at(a, l):
-        return CX + u[0] * a + v[0] * l, CZ + u[1] * a + v[1] * l
+        return origin[0] + u[0] * a + v[0] * l, origin[1] + u[1] * a + v[1] * l
 
     def put_at(a, l, y, m):
         x, z = at(a, l)
-        cell(x, y, z, m)
+        cell(x, y + dy, z, m)
 
     def fill_at(a0_, a1_, l0_, l1_, y0_, y1_, m):
         for a in range(a0_, a1_ + 1):
@@ -980,19 +977,20 @@ def secret_door(axis, sa, sl):
 
     facing = {(1, 0): 4, (-1, 0): 5, (0, 1): 2, (0, -1): 3}[(-u[0], -u[1])]
     sticky = mat("sticky_piston", f'["facing_direction"={facing}]', True)
-    # the closet: a shell, then the room
     fill_at(a0 - 5, a0 + 9, 4, 10, 49, 53, DBRICK)
+    if skin is not None:
+        fill_at(a0 - 5, a0 + 9, 4, 4, 49, 53, skin)
     fill_at(a0 - 4, a0 + 1, 5, 9, 50, 52, AIR)
     fill_at(a0 - 4, a0 + 1, 5, 9, 49, 49, DTILE)
     fill_at(a0 - 4, a0 + 1, 5, 9, 53, 53, DEEP)
     put_at(a0 - 3, 9, 50, mat("chest", f'["minecraft:cardinal_direction"="{FACE[(-v[0], -v[1])]}"]', True))
     x, z = at(a0 - 3, 9)
-    ROOM_ID[50 - Y0, z - Z0, x - X0] = ROOM_TYPES.index("trophy")
+    ROOM_ID[50 + dy - Y0, z - Z0, x - X0] = ROOM_TYPES.index(kind)
     for a in (a0 - 3, a0):
         put_at(a, 7, 52, LANT_H)
     fill_at(a0 - 1, a0, 9, 9, 50, 50, GILDED)
     # the plug and its pocket
-    fill_at(a0, a0, 4, 4, 50, 51, SBRICK)
+    fill_at(a0, a0, 4, 4, 50, 51, skin if skin is not None else SBRICK)
     fill_at(a0 + 1, a0 + 1, 4, 4, 50, 51, AIR)
     for y in (50, 51):
         put_at(a0 + 2, 4, y, sticky)
@@ -1003,15 +1001,30 @@ def secret_door(axis, sa, sl):
     fill_at(a0 + 2, a0 + 8, 6, 6, 51, 51, DUST)
     fill_at(a0 + 8, a0 + 8, 5, 5, 50, 50, DBRICK)
     put_at(a0 + 8, 5, 51, DUST)
-    put_at(a0 + 8, 4, 51, DBRICK)
-    lv = (-v[0], -v[1])
-    face = FACE[lv]
-    put_at(a0 + 8, 3, 51, mat("lever", f'["lever_direction"="{face}","open_bit"=true]', True))
-    SECRETS.append(at(a0 + 8, 3) + (51,))
+    put_at(a0 + 8, 4, 51, skin if skin is not None else DBRICK)
+    put_at(a0 + 8, 3, 51, mat("lever", f'["lever_direction"="{FACE[(-v[0], -v[1])]}","open_bit"=true]', True))
+    SECRETS.append(at(a0 + 8, 3) + (51 + dy,))
+
+
+def secret_door(axis, sa, sl):
+    a0 = (A0 if axis == "x" else B0) + 10
+    u = (sa, 0) if axis == "x" else (0, sa)
+    v = (0, sl) if axis == "x" else (sl, 0)
+    closet((CX, CZ), u, v, a0)
 
 
 for _axis, _sa, _sl in (("x", 1, 1), ("x", -1, -1), ("z", 1, -1), ("z", -1, 1)):
     secret_door(_axis, _sa, _sl)
+
+
+# side galleries: a sandstone panel in each gate tunnel's wall slides along the tunnel
+GALLERIES = (("x", 1, "armoury", "infirmary"), ("x", -1, "gear", "library"),
+             ("z", 1, "barracks", "storage"), ("z", -1, "lounge", "trophy"))
+for _axis, _s, *_kinds in GALLERIES:
+    for _t, _kind in zip((1, -1), _kinds):
+        _u = (_s, 0) if _axis == "x" else (0, _s)
+        _v = (0, _t) if _axis == "x" else (_t, 0)
+        closet((CX + 2 * _v[0], CZ + 2 * _v[1]), _u, _v, A0 + 22, dy=14, skin=SANDST, kind=_kind)
 
 
 # ---- 6. entities and chest contents -------------------------------------------------

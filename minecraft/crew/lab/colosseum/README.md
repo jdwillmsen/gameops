@@ -44,6 +44,7 @@ Underground, floor y 49:
 | Sixteen chambers | forge, armoury, gear selection, library, barracks, infirmary, trophy hall, treasury (iron door), operations room, baths, kitchen, shrine, beast cages, cells, storage, lounge. Chests are stocked and armour stands dressed by `decor.cmds` |
 | Four tunnels | from the ring out under the avenues, climbing a stair to the plaza |
 | Secret closets | one off each tunnel, behind a two-high stone plug held shut by two sticky pistons; the lever on the tunnel wall (up = shut) cuts their power and they pull the plug into the wall. Each closet holds a trophy chest |
+| Side galleries | eight, two off each gate tunnel under the stands (y 64-66). A sandstone panel in the tunnel wall, indistinguishable from the wall, slides along it when the lever eight blocks down the tunnel is flipped (same piston door as the closets). Each holds a chest: armoury, infirmary, gear, library, barracks, storage, lounge, trophy |
 
 ## Controls
 
