@@ -38,6 +38,9 @@ type unit struct {
 	items     []protocol.ItemEntry
 	// book indexes the recipes the server sends this session.
 	book *craft.Book
+	// creative is the creative inventory the server sent. It arrives at
+	// login, possibly before the actuator exists to read it.
+	creative *packet.CreativeContent
 
 	act           *act.Actuator
 	correctionLog act.CorrectionLogger
@@ -58,6 +61,9 @@ func (u *unit) apply(pk packet.Packet) error {
 	// CraftingData can arrive before the actuator exists to read it.
 	if cd, ok := pk.(*packet.CraftingData); ok {
 		u.book.Store(cd, u.items)
+	}
+	if cc, ok := pk.(*packet.CreativeContent); ok {
+		u.creative = cc
 	}
 	u.tracker.Apply(pk)
 	if u.life != nil {
@@ -118,6 +124,10 @@ func (u *unit) startActing() error {
 	a.SetClipDiagnostics(u.correctionLog)
 	a.ItemNames(u.items)
 	a.Crafting(u.book, func() []belief.Item { return u.tracker.Snapshot().Inventory })
+	a.SetCreative(u.tracker.Creative)
+	if u.creative != nil {
+		a.Apply(u.creative)
+	}
 	// Until the loading screen ends, the server drops every action without an
 	// error, so this precedes any task tick.
 	if err := a.EndLoadingScreen(); err != nil {

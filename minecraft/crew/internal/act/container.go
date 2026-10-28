@@ -317,6 +317,8 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			return
 		}
 		a.cont = container{open: true, window: p.WindowID, kind: p.ContainerType, pos: p.ContainerPosition}
+	case *packet.CreativeContent:
+		a.storeCreativeLocked(p)
 	case *packet.ContainerClose:
 		if a.cont.open && p.WindowID == a.cont.window {
 			a.cont = container{}

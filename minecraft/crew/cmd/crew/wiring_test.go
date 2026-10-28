@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
@@ -366,5 +368,35 @@ func TestBuilderRolesStayOffTheWarriorPath(t *testing.T) {
 	}
 	if got := warriorRole("ranger"); got != "ranger" {
 		t.Errorf("warriorRole(ranger) = %q", got)
+	}
+}
+
+func TestCreativeInventorySentBeforeTheActuatorReachesIt(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)
+	tracker.SetUniqueID(5)
+	runner := task.NewRunner(nil, nil, tracker.Snapshot, time.Minute, nopLog{})
+	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, nil, &recordingConn{})
+	u.items = []protocol.ItemEntry{{Name: "minecraft:stone", RuntimeID: 1}, {Name: "minecraft:dirt", RuntimeID: 3}}
+	_ = u.apply(&packet.CreativeContent{Items: []protocol.CreativeItem{
+		{CreativeItemNetworkID: 604, Item: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: 1}, Count: 1}},
+	}})
+	_ = u.apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{0, 101.62, 0}})
+	_ = u.apply(&packet.UpdatePlayerGameType{GameType: 1, PlayerUniqueID: 5})
+	if u.actuator() == nil {
+		t.Fatal("the actuator never started")
+	}
+	// A full hotbar ends a take after it found the item, so the error tells
+	// the table was read without the take waiting on a server.
+	var slots []protocol.ItemInstance
+	for i := 0; i < 9; i++ {
+		slots = append(slots, protocol.ItemInstance{StackNetworkID: int32(i + 1), Stack: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: 3}, Count: 1}})
+	}
+	_ = u.apply(&packet.InventoryContent{WindowID: 0, Content: slots})
+	if err := u.actuator().TakeCreative("dirt"); !errors.Is(err, act.ErrNoCreativeItem) {
+		t.Errorf("dirt: err = %v, want ErrNoCreativeItem", err)
+	}
+	if err := u.actuator().TakeCreative("stone"); !errors.Is(err, act.ErrHotbarFull) {
+		t.Errorf("stone: err = %v, want ErrHotbarFull: the table or the mode never reached the actuator", err)
 	}
 }

@@ -507,6 +507,21 @@ func (a *Actuator) destLocked(item string, inv []belief.Item, made int) (protoco
 // loop has to be able to deliver it. The craft's deadline bounds the whole
 // craft, so the unit does not sit without input for too long.
 func (a *Actuator) await(id int32, deadline time.Time) error {
+	status, err := a.awaitStatus(id, deadline)
+	if err != nil {
+		a.mu.Lock()
+		delete(a.crafts.pending, id)
+		a.mu.Unlock()
+		return err
+	}
+	if status != StatusOK {
+		return fmt.Errorf("%w: status %d", ErrRejected, status)
+	}
+	return nil
+}
+
+// awaitStatus is await for callers that read the refusal's status themselves.
+func (a *Actuator) awaitStatus(id int32, deadline time.Time) (uint8, error) {
 	start := time.Now()
 	limit := deadline
 	if one := start.Add(craftAnswerIn); one.Before(limit) {
@@ -520,16 +535,10 @@ func (a *Actuator) await(id int32, deadline time.Time) error {
 		delete(a.responses, id)
 		a.mu.Unlock()
 		if done {
-			if status != StatusOK {
-				return fmt.Errorf("%w: status %d", ErrRejected, status)
-			}
-			return nil
+			return status, nil
 		}
 		if time.Now().After(limit) {
-			a.mu.Lock()
-			delete(a.crafts.pending, id)
-			a.mu.Unlock()
-			return fmt.Errorf("no answer to the stack request within %v", limit.Sub(start))
+			return 0, fmt.Errorf("no answer to the stack request within %v", limit.Sub(start))
 		}
 		time.Sleep(craftPoll)
 	}
