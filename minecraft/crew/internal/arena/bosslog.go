@@ -25,6 +25,7 @@ const (
 type BossRecord struct {
 	TS      string         `json:"ts"`
 	Boss    string         `json:"boss"`
+	Event   string         `json:"event,omitempty"`
 	Effects []string       `json:"effects"`
 	Outcome string         `json:"outcome"`
 	Seconds float64        `json:"seconds"`
@@ -108,6 +109,7 @@ func ReadBossRecords(path string) (recs []BossRecord, skipped int, err error) {
 // BossSummary is one boss and effect set across its logged runs.
 type BossSummary struct {
 	Boss          string   `json:"boss"`
+	Event         string   `json:"event,omitempty"`
 	Effects       []string `json:"effects"`
 	Runs          int      `json:"runs"`
 	Killed        int      `json:"killed"`
@@ -115,7 +117,7 @@ type BossSummary struct {
 	MedianDeaths  float64  `json:"median_deaths"`
 }
 
-// SummarizeBoss groups runs by boss and exact effect list, ordered by boss
+// SummarizeBoss groups runs by boss, spawn event and exact effect list, ordered by boss
 // then effects so the output is stable. Aborted runs are left out: their time
 // and deaths say nothing about the boss.
 func SummarizeBoss(recs []BossRecord) []BossSummary {
@@ -130,11 +132,11 @@ func SummarizeBoss(recs []BossRecord) []BossSummary {
 		if r.Outcome == BossAborted {
 			continue
 		}
-		key := r.Boss + "\x00" + strings.Join(r.Effects, "\x00")
+		key := r.Boss + "\x00" + r.Event + "\x00" + strings.Join(r.Effects, "\x00")
 		g := groups[key]
 		if g == nil {
 			effects := append([]string{}, r.Effects...)
-			g = &group{sum: BossSummary{Boss: r.Boss, Effects: effects}}
+			g = &group{sum: BossSummary{Boss: r.Boss, Event: r.Event, Effects: effects}}
 			groups[key] = g
 			keys = append(keys, key)
 		}
