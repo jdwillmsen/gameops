@@ -53,6 +53,9 @@ type unit struct {
 	brk      *act.BreakAction
 	err      error
 	ended    chan struct{}
+	// tap, when set, sees every packet the read loop gets; probes use it to
+	// catch item drops and similar events that are not blocks.
+	tap func(packet.Packet)
 }
 
 type lookIntent struct {
@@ -136,6 +139,12 @@ func (u *unit) readLoop() {
 			return
 		}
 		_, _ = respawner.Handle(pk, u.conn)
+		u.mu.Lock()
+		tap := u.tap
+		u.mu.Unlock()
+		if tap != nil {
+			tap(pk)
+		}
 		if cc, ok := pk.(*packet.CreativeContent); ok {
 			u.mu.Lock()
 			u.creative = cc
