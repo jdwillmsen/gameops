@@ -229,7 +229,7 @@ func (a *Actuator) Tick(in Input) error {
 	if in.StartUsing {
 		pk.InputData.Set(packet.InputFlagStartUsingItem)
 	}
-	if in.Break != nil {
+	if in.Break != nil && !a.skipsBreak(in.Break) {
 		pk.InputData.Set(packet.InputFlagPerformBlockActions)
 		pk.BlockActions = protocol.Option([]protocol.PlayerBlockAction{in.Break.action()})
 	}
@@ -247,6 +247,13 @@ func (a *Actuator) Tick(in Input) error {
 	}
 	a.insideBlock = depth > clipDepth
 	return nil
+}
+
+// skipsBreak says a creative unit must not send the follow-ups of a break:
+// the block goes the moment the break starts, so there is nothing left to
+// continue or abort.
+func (a *Actuator) skipsBreak(b *BreakAction) bool {
+	return b.Phase != BreakStart && a.creative != nil && a.creative()
 }
 
 // Apply feeds server packets in. It adopts the server's position when it
