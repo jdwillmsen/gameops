@@ -76,10 +76,14 @@ type Config struct {
 	Defend bool
 	// Eat lets a hungry unit eat food from its hotbar.
 	Eat bool
-	// Role opts the unit into the warrior engine: vanguard, striker or
-	// ranger. Empty leaves the reactive defence in charge; anything else is
-	// refused rather than silently fighting on.
-	Role string
+	// Role is the unit's job. A warrior role (vanguard, striker, ranger)
+	// opts into the warrior engine and a squad; a builder role (mender,
+	// builder) does neither. Empty leaves the reactive defence in charge;
+	// anything else is refused rather than silently fighting on.
+	Role Role
+	// Lab says the unit is on the crew lab, which a builder role requires:
+	// builders work in creative mode and must never run on the live server.
+	Lab bool
 	// Squad is the id of the squad a warrior joins through crew-control.
 	// A unit without a warrior role never uses it.
 	Squad string
@@ -187,6 +191,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	lab, err := boolDefault("CREW_LAB", false)
+	if err != nil {
+		return Config{}, err
+	}
+	if role.IsBuilder() && !lab {
+		return Config{}, fmt.Errorf("CREW_ROLE=%s: needs CREW_LAB=true, builder roles run only on the crew lab", role)
+	}
 	squad, err := squadSetting(role)
 	if err != nil {
 		return Config{}, err
@@ -231,6 +242,7 @@ func Load() (Config, error) {
 		Defend:     defend,
 		Eat:        eat,
 		Role:       role,
+		Lab:        lab,
 		Squad:      squad,
 		KitChest:   kitChest,
 		KitFood:    kitFood,
@@ -241,19 +253,29 @@ func Load() (Config, error) {
 	}, nil
 }
 
-// warriorRoles are the roles a unit may claim, kept in step with the life
-// package's own list: config cannot import life without dragging the whole
-// engine into every binary that reads settings.
-var warriorRoles = map[string]bool{"vanguard": true, "striker": true, "ranger": true}
+// Role is a unit's job. Warrior and builder roles are separate kinds: only a
+// warrior takes the fighting engine and a squad.
+type Role string
 
-// roleSetting reads CREW_ROLE: empty for no warrior, one of the warrior
-// roles to fight as one.
-func roleSetting() (string, error) {
-	role := strings.TrimSpace(os.Getenv("CREW_ROLE"))
-	if role == "" || warriorRoles[role] {
+// warriorRoles are kept in step with the life engine's, which this package
+// does not import so as not to pull the engine into every binary that reads
+// settings.
+var warriorRoles = map[Role]bool{"vanguard": true, "striker": true, "ranger": true}
+
+var builderRoles = map[Role]bool{"mender": true, "builder": true}
+
+func (r Role) IsWarrior() bool { return warriorRoles[r] }
+
+func (r Role) IsBuilder() bool { return builderRoles[r] }
+
+// roleSetting reads CREW_ROLE: empty for no role, else a warrior or builder
+// role.
+func roleSetting() (Role, error) {
+	role := Role(strings.TrimSpace(os.Getenv("CREW_ROLE")))
+	if role == "" || role.IsWarrior() || role.IsBuilder() {
 		return role, nil
 	}
-	return "", fmt.Errorf("CREW_ROLE=%q: want vanguard, striker or ranger", role)
+	return "", fmt.Errorf("CREW_ROLE=%q: want vanguard, striker, ranger, mender or builder", role)
 }
 
 // squadIDPattern mirrors the id shape the squad routes carry, so a bad
@@ -264,10 +286,10 @@ var squadIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,30}$`)
 // squadSetting reads CREW_SQUAD, the id of the squad a warrior joins. The
 // default is alpha. Without a warrior role the value is still shape-checked,
 // so a fleet-wide setting is honest, but never turns a non-warrior unit away.
-func squadSetting(role string) (string, error) {
+func squadSetting(role Role) (string, error) {
 	squad := strings.TrimSpace(os.Getenv("CREW_SQUAD"))
 	if squad == "" {
-		if role == "" {
+		if !role.IsWarrior() {
 			return "", nil
 		}
 		return "alpha", nil
