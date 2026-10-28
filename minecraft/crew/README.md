@@ -410,6 +410,37 @@ a palette of block names, and a box whose report cannot fit fails with
 `observation too large`, so observe one layer or a smaller box instead. The
 observation goes only to the controller, never to the public task record.
 
+`build_blueprint` stamps an embedded blueprint (see Crew blueprints) the way a
+builder would: it walks within reach of each cell in build order, breaks a wrong
+block, and places the right one from the creative inventory. Only a unit whose
+`CREW_ROLE` is `builder` takes it; any other gets 409. The unit must be in
+creative mode, or the task fails (a `dry_run` needs no mode):
+
+```json
+{"template": "build_blueprint", "blueprint": "small_house",
+ "at": {"x": 0, "y": 64, "z": 0}, "rotation": 90, "dry_run": false}
+```
+
+`blueprint` is a file name in `blueprints/` without `.json`. `at` is the
+minimum corner of the footprint after rotation. `rotation` is 0, 90, 180 or 270
+clockwise and optional, as is `dry_run`. Both corners of the footprint must lie
+inside `goto`'s bounds and no axis may exceed 64 blocks. A cell that already
+holds its block is left alone, so running a stamp again places nothing. Air
+cells are not cleared. `qty` is the blocks to stamp and `progress` those the
+world shows right.
+
+Placement takes its facing from where the unit clicks, so a block whose states
+cannot be asked for by item name (stairs, doors, repeaters, wall torches) is
+never placed: it is left out and counted under `skipped_state` in the task
+record's `build`, by block name. The exceptions are blocks a click on the top
+face decides: a standing torch is placed only where the
+world can read the state back, and is broken again if it came out otherwise.
+A block with no item of its own name is counted under `skipped_item`. `build`
+also holds `total`, `placed`, `already_correct`, `cleared` and, for a `dry_run`,
+`to_place`; it names blocks and counts, never cells. The report is on the task
+record only, not in crew-control's events. A cell with no solid neighbour yet is
+tried again after the others, then fails the task naming only the block.
+
 Crew runs one task at a time. A session end or death fails the running task
 (`session ended`, `unit died`) and queued tasks wait for the next spawn.
 Bodies are capped at 4096 bytes (413) and at most 16 tasks may wait (429).
