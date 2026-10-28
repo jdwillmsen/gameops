@@ -88,6 +88,14 @@ type Config struct {
 	KitChest *[3]int32
 	KitFood  int
 
+	// SkinRole is the unit's job (miner, chopper, ...), which picks its
+	// outfit. A warrior's outfit follows Role instead. Empty or unknown gives
+	// the plain name-coloured skin.
+	SkinRole string
+	// SkinDir holds hand-painted skins as <name>.png; a file there replaces
+	// the generated outfit on the unit's next join. Empty turns it off.
+	SkinDir string
+
 	// WorkPlan is the unit's standing work, a JSON array of task bodies run in
 	// rotation whenever it has nothing else; empty leaves it idle. Validated by
 	// the task package, which owns the templates.
@@ -226,6 +234,8 @@ func Load() (Config, error) {
 		Squad:      squad,
 		KitChest:   kitChest,
 		KitFood:    kitFood,
+		SkinRole:   strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
+		SkinDir:    strings.TrimSpace(os.Getenv("SKIN_DIR")),
 		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
 		JoinDelayS: joinDelay,
 	}, nil

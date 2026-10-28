@@ -206,9 +206,7 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 }
 
 func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
-	// A headless client uploads no skin of its own, and without one the unit
-	// joins as a black silhouette under a fresh skin ID every connect.
-	unitSkin := skin.For(cfg.Username)
+	unitSkin := unitSkinFor(cfg, log)
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 
 	// The server upgrades itself on restart; announcing the server's own
@@ -316,4 +314,23 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 			return fmt.Errorf("request chunk radius after respawn: %w", err)
 		}
 	}
+}
+
+// unitSkinFor picks what the unit wears. A headless client uploads no skin of
+// its own, and without one it joins as a black silhouette under a fresh skin
+// ID every connect. A hand-painted file wins, then the role's outfit; a bad
+// file is logged and skipped so a typo cannot keep a unit out of the world.
+func unitSkinFor(cfg config.Config, log *logging.Logger) skin.Skin {
+	custom, found, err := skin.Override(cfg.SkinDir, cfg.Username)
+	if err != nil {
+		log.Error("skin_override_invalid", logging.Fields{"error": err.Error()})
+	}
+	if found {
+		return custom
+	}
+	persona := skin.Persona{Role: cfg.SkinRole}
+	if cfg.Role != "" {
+		persona = skin.Persona{Role: "warrior", SquadRole: cfg.Role}
+	}
+	return skin.ForPersona(cfg.Username, persona)
 }
