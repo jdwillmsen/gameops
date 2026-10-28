@@ -48,6 +48,8 @@ func (spiderSwarm) Engage(_ context.Context, f *Fight) (bool, error) {
 		// The approach belongs to the role; the orbit is for contact.
 		return false, nil
 	}
+	// The orbit is melee by design, so a half-drawn bow is let go.
+	f.Life.cancelDraw(f.Actuator)
 	f.Life.lowerShield(f.Actuator)
 	if f.Life.tick-f.Life.lastAttack >= attackEvery {
 		return true, f.Life.strike(f.Actuator, p, e, f.Snapshot)
@@ -101,13 +103,12 @@ func (l *Life) spiderSwarmOrbit(a skill.Actuator, p act.Pose, e belief.Entity, m
 }
 
 // spiderCanOrbit says whether a tangent heading still has floor the planner
-// accepts, so a circling swarm keeps out of lava, water and the void.
+// accepts along the whole step, so a circling swarm keeps out of lava, water
+// and the void.
 func (l *Life) spiderCanOrbit(p act.Pose, yaw float32) bool {
 	r := float64(yaw) * math.Pi / 180
-	x := int32(math.Floor(float64(p.Feet.X()) - math.Sin(r)*spiderStepAhead))
-	z := int32(math.Floor(float64(p.Feet.Z()) + math.Cos(r)*spiderStepAhead))
-	_, ok := cellAt(l.world, x, z, cellOf(p.Feet).Y())
-	return ok
+	dir := mgl32.Vec2{float32(-math.Sin(r)), float32(math.Cos(r))}
+	return sweepClear(l.world, p.Feet, dir, spiderStepAhead)
 }
 
 func init() { RegisterTactic(spiderSwarm{}) }

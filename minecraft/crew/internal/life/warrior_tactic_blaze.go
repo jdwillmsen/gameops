@@ -37,10 +37,9 @@ const (
 	// before the unit closes again: the hysteresis keeps the fight from
 	// flipping between a step forward and a step back at one boundary.
 	snowBandGap = 3.0
-	// snowUnits bounds the per-unit throw cadence table. Tactics are
-	// process-wide singletons, so the table is per unit; a lab reload that
-	// outgrows it starts the table over, which only costs one early throw.
-	snowUnits = 64
+	// blazeBackStep is how far behind the unit the give-ground walk is
+	// swept for safe floor, a stride and a bit so the cell it enters is seen.
+	blazeBackStep = 1.5
 
 	snowballName = "snowball"
 	fireballName = "small_fireball"
@@ -200,6 +199,9 @@ func (t *blazeShieldTactic) Engage(ctx context.Context, f *Fight) (bool, error) 
 	}
 	l, p, e, s := f.Life, f.Pose, f.Target, f.Snapshot
 	a := f.Actuator
+	// The fight is shield and sword from here, so a half-drawn bow is let
+	// go.
+	l.cancelDraw(a)
 
 	// The volley outranks everything the ground could ask: a blocked volley
 	// saves the whole burst, and the burn it would have lit never starts.
@@ -234,9 +236,15 @@ func (t *blazeShieldTactic) Engage(ctx context.Context, f *Fight) (bool, error) 
 // snowball stack on the hotbar: without one it declines, and the role's own
 // fight runs.
 type blazeSnowTactic struct {
-	// lastThrow is the tick each unit last threw at, keyed by the unit's
-	// life.
-	lastThrow map[*Life]uint64
+	// throws is each unit's throw cadence. The tactic is one value shared
+	// by every unit, each stepping on its own goroutine.
+	throws unitScratch[snowThrow]
+}
+
+// snowThrow is when a unit last threw; thrown tells tick 0 from never.
+type snowThrow struct {
+	at     uint64
+	thrown bool
 }
 
 func (t *blazeSnowTactic) Name() string           { return "blaze/snowball" }
@@ -270,7 +278,7 @@ func (t *blazeSnowTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 		// The blaze pressed in: give ground facing it, throwing on the way
 		// while the ground lasts; against a wall, stand and throw.
 		in := l.face(p, e)
-		if l.rangerCanBackOff(p) {
+		if l.rangerCanBackOff(p) && sweepClear(l.world, p.Feet, away(p, e), blazeBackStep) {
 			in.Forward = -1
 		}
 		return true, t.throw(l, a, s, snow, in)
@@ -298,16 +306,11 @@ func snowballAt(s belief.Snapshot) (belief.Item, bool) {
 // snowball fly: the input's rotation lands before the throw's transaction,
 // so the projectile leaves along where the unit has just turned to look.
 func (t *blazeSnowTactic) throw(l *Life, a skill.Actuator, s belief.Snapshot, snow belief.Item, in act.Input) error {
-	if t.lastThrow == nil {
-		t.lastThrow = map[*Life]uint64{}
-	}
-	if len(t.lastThrow) >= snowUnits {
-		clear(t.lastThrow)
-	}
-	if at, seen := t.lastThrow[l]; seen && l.tick-at < snowEvery {
+	st := t.throws.of(l)
+	if st.thrown && l.tick-st.at < snowEvery {
 		return a.Tick(in)
 	}
-	t.lastThrow[l] = l.tick
+	st.at, st.thrown = l.tick, true
 	if !s.HeldKnown || s.HeldSlot != snow.Slot {
 		if err := a.SelectHotbar(snow.Slot, snow); err != nil {
 			return err
