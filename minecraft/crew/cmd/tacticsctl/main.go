@@ -1,12 +1,13 @@
 // Command tacticsctl is the human control surface over warrior Profiles.
 //
-// usage: tacticsctl [--dir D] [--trust T] <command>
+// usage: tacticsctl [--dir D] [--trust T] [--store S] <command>
 //
 //	status [--json]                  what is live per stage, with parent chain
 //	list                             candidate profiles
 //	add <file>                       file a profile as a candidate
-//	training on|off                  enable or disable training
-//	kill on|off                      the kill switch: "on" disables training
+//	training on|off                  enable (HUMAN ONLY: needs a terminal) or disable training
+//	kill on|off                      the kill switch: "on" disables training, "off" enables
+//	                                 it and needs a terminal
 //	lab-set <profile>                make a candidate the lab's profile
 //	rollback <lab|production> [--to NAME]
 //	                                 restore the parent, or any ancestor, or "default"
@@ -14,16 +15,26 @@
 //	                                 needs a signed approval naming the exact profile hash,
 //	                                 a prior lab-set, a profile that carries its scorecards
 //	                                 evidence path, and an explicit --trust (or
-//	                                 TACTICSCTL_TRUST) directory outside --dir and not
-//	                                 writable by group or others
+//	                                 TACTICSCTL_TRUST) directory outside --dir that root
+//	                                 owns and nobody else can write. Each approval is spent
+//	                                 by the promotion it signs off. With --store (or
+//	                                 TRAINER_STORE) the evidence file must exist there;
+//	                                 without it only its path is checked, and promote says so
 //	approve <profile> --by NAME --key FILE
-//	                                 HUMAN ONLY: refuses without a terminal
+//	                                 HUMAN ONLY: refuses unless stdin is a real terminal
 //	keygen --name NAME --out DIR     HUMAN ONLY: make an approver key pair
 //
 // The trust directory holds the public keys approvals are checked against, so
 // whoever can write it can approve anything. promote therefore refuses the
-// default <dir>/trusted, a directory under --dir, or one writable by group or
-// others; keep it owned by an account the agents do not run as.
+// default <dir>/trusted, a directory under --dir, and any directory (or parent,
+// or key file) that root does not own or that group or others can write. One-time
+// setup, by a human:
+//
+//	sudo install -d -o root -m 0755 /etc/crew-tactics-trust
+//	sudo install -m 0644 owner.pub /etc/crew-tactics-trust/owner.pub
+//
+// and then run with TACTICSCTL_TRUST=/etc/crew-tactics-trust. Each approval
+// is single-use.
 //
 // Training is disabled unless the kill-switch file says "on": a missing file is
 // disabled, so a fresh or wiped state directory never trains. Only `promote`
@@ -42,6 +53,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -50,22 +62,10 @@ import (
 )
 
 func main() {
-	tty := false
-	if fi, err := os.Stdin.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if err := run(os.Args[1:], os.Stdin, os.Stdout, tty); err != nil {
+	if err := run(os.Args[1:], os.Stdin, os.Stdout, isTerminal(os.Stdin)); err != nil {
 		fmt.Fprintln(os.Stderr, "tacticsctl:", strings.TrimPrefix(err.Error(), "tacticsctl: "))
 		os.Exit(1)
 	}
-}
-
-func defaultDir() string {
-	if d := os.Getenv("TACTICSCTL_DIR"); d != "" {
-		return d
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "crew-tactics")
 }
 
 // parse lets flags follow positional arguments, as in `promote g7 --to production`.
@@ -85,8 +85,9 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 
 func run(args []string, stdin io.Reader, out io.Writer, tty bool) error {
 	global := flag.NewFlagSet("tacticsctl", flag.ContinueOnError)
-	dir := global.String("dir", defaultDir(), "control state directory (env TACTICSCTL_DIR)")
+	dir := global.String("dir", tacticsctl.DefaultDir(), "control state directory (env TACTICSCTL_DIR)")
 	trust := global.String("trust", os.Getenv("TACTICSCTL_TRUST"), "directory of approvers' public keys (env TACTICSCTL_TRUST); promote requires it, outside --dir and closed to group/others")
+	evidence := global.String("store", os.Getenv("TRAINER_STORE"), "trainer store directory (env TRAINER_STORE); promote checks the evidence file exists there")
 	if err := global.Parse(args); err != nil {
 		return err
 	}
@@ -95,6 +96,7 @@ func run(args []string, stdin io.Reader, out io.Writer, tty bool) error {
 		return errors.New("a command is required: status, list, add, training, kill, lab-set, rollback, promote, approve, keygen")
 	}
 	s := tacticsctl.New(*dir, *trust)
+	s.EvidenceStore = *evidence
 	cmd, rest := rest[0], rest[1:]
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	switch cmd {
@@ -143,6 +145,11 @@ func run(args []string, stdin io.Reader, out io.Writer, tty bool) error {
 		if cmd == "kill" {
 			enable = !enable
 		}
+		// Switching training off must always work, even from a script or an
+		// agent; only switching it on is a human decision.
+		if enable && !tty {
+			return errors.New("enabling training is human-run only: it needs an interactive terminal on stdin")
+		}
 		if err := s.SetTraining(enable); err != nil {
 			return err
 		}
@@ -176,6 +183,9 @@ func run(args []string, stdin io.Reader, out io.Writer, tty bool) error {
 		if err != nil || len(pos) != 1 || *to != "production" {
 			return errors.New("usage: promote <profile> --to production")
 		}
+		if s.EvidenceStore == "" {
+			fmt.Fprintln(out, "note: no --store or TRAINER_STORE, so the evidence file's existence is not checked")
+		}
 		if err := s.Promote(pos[0]); err != nil {
 			return err
 		}
@@ -184,7 +194,7 @@ func run(args []string, stdin io.Reader, out io.Writer, tty bool) error {
 	case "approve":
 		return approve(s, fs, rest, stdin, out, tty)
 	case "keygen":
-		return keygen(fs, rest, out)
+		return keygen(fs, rest, out, tty)
 	}
 	return fmt.Errorf("unknown command %q", cmd)
 }
@@ -248,14 +258,12 @@ func approve(s *tacticsctl.Store, fs *flag.FlagSet, args []string, stdin io.Read
 }
 
 func readKey(path string) (ed25519.PrivateKey, error) {
-	fi, err := os.Stat(path)
+	f, err := tacticsctl.OpenPrivate(path)
 	if err != nil {
 		return nil, err
 	}
-	if fi.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("%s is readable by others; chmod 600 it", path)
-	}
-	b, err := os.ReadFile(path)
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, 1024))
 	if err != nil {
 		return nil, err
 	}
@@ -266,11 +274,19 @@ func readKey(path string) (ed25519.PrivateKey, error) {
 	return ed25519.PrivateKey(raw), nil
 }
 
-func keygen(fs *flag.FlagSet, args []string, out io.Writer) error {
+var approverNameRE = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+func keygen(fs *flag.FlagSet, args []string, out io.Writer, tty bool) error {
 	name := fs.String("name", "", "approver name")
 	outDir := fs.String("out", "", "directory to write <name>.key (0600) and <name>.pub")
 	if _, err := parse(fs, args); err != nil || *name == "" || *outDir == "" {
 		return errors.New("usage: keygen --name NAME --out DIR")
+	}
+	if !tty {
+		return errors.New("keygen is human-run only: it needs an interactive terminal on stdin")
+	}
+	if !approverNameRE.MatchString(*name) {
+		return fmt.Errorf("approver name %q must match %s", *name, approverNameRE)
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -280,13 +296,36 @@ func keygen(fs *flag.FlagSet, args []string, out io.Writer) error {
 		return err
 	}
 	keyPath := filepath.Join(*outDir, *name+".key")
-	if err := os.WriteFile(keyPath, []byte(hex.EncodeToString(priv)+"\n"), 0o600); err != nil {
-		return err
-	}
 	pubPath := filepath.Join(*outDir, *name+".pub")
-	if err := os.WriteFile(pubPath, []byte(hex.EncodeToString(pub)+"\n"), 0o644); err != nil {
+	if err := createNew(keyPath, []byte(hex.EncodeToString(priv)+"\n"), 0o600); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "wrote %s (keep private) and %s (copy into the trust directory)\n", keyPath, pubPath)
+	if err := createNew(pubPath, []byte(hex.EncodeToString(pub)+"\n"), 0o644); err != nil {
+		os.Remove(keyPath)
+		return err
+	}
+	fmt.Fprintf(out, "wrote %s (keep private) and %s (a human installs it into the root-owned trust directory)\n", keyPath, pubPath)
+	return nil
+}
+
+// createNew writes a file that must not exist yet, so an existing approver
+// key is never replaced and a planted symlink is never followed.
+func createNew(path string, data []byte, perm os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("%s already exists; refusing to overwrite it", path)
+		}
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(path)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
 	return nil
 }

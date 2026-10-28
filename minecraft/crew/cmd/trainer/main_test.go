@@ -12,11 +12,27 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/trainer"
 )
 
+// switchDir makes a control directory whose training switch says value.
+func switchDir(t *testing.T, value string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if value != "" {
+		if err := os.WriteFile(filepath.Join(dir, tacticsctl.TrainingFile), []byte(value), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// runTrainer runs with training switched on unless the test names its own
+// --control-dir.
 func runTrainer(t *testing.T, args ...string) (trainer.Result, int, string) {
 	t.Helper()
+	t.Setenv("TACTICSCTL_DIR", switchDir(t, "on\n"))
 	var out, errb bytes.Buffer
 	code := realMain(context.Background(), args, &out, &errb)
 	var res trainer.Result
@@ -123,5 +139,66 @@ func TestLearnedTacticsAreRegisteredOnes(t *testing.T) {
 	_, code, _ = runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store, "--gens", "2", "--tactics=false")
 	if code != 0 {
 		t.Errorf("--tactics=false: exit %d", code)
+	}
+}
+
+func TestTrainingSwitchGatesTheRun(t *testing.T) {
+	for name, value := range map[string]string{"missing": "", "off": "off\n", "garbled": "ON please\n", "empty": "\n"} {
+		store := filepath.Join(t.TempDir(), "s")
+		res, code, stderr := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store,
+			"--control-dir", switchDir(t, value))
+		if code != 3 || res.StopReason != trainer.StopDisabled || res.Fights != 0 {
+			t.Errorf("%s: code %d result %+v", name, code, res)
+		}
+		if !strings.Contains(stderr, "training switch") {
+			t.Errorf("%s: stderr %q does not say why", name, stderr)
+		}
+		if _, err := os.Stat(filepath.Join(store, "zombie", "champion.json")); err == nil {
+			t.Errorf("%s: a disabled run wrote a champion", name)
+		}
+	}
+	store := filepath.Join(t.TempDir(), "s")
+	res, code, _ := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store,
+		"--control-dir", switchDir(t, "on\n"), "--gens", "2")
+	if code != 0 || res.StopReason != trainer.StopGenerations {
+		t.Errorf("switch on: code %d result %+v", code, res)
+	}
+}
+
+func TestSwitchTurnedOffMidRunStopsIt(t *testing.T) {
+	dir := switchDir(t, "on\n")
+	store := filepath.Join(t.TempDir(), "s")
+	script := filepath.Join(t.TempDir(), "eval.sh")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf 'off\\n' > " + filepath.Join(dir, tacticsctl.TrainingFile) +
+		"\necho '{\"profile\":\"'$TRAINER_PROFILE'\",\"outcome\":\"win\",\"seconds\":30}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, code, _ := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store,
+		"--control-dir", dir, "--evaluator", "cmd:"+script)
+	if code != 3 || res.StopReason != trainer.StopDisabled || res.Fights != 1 {
+		t.Errorf("code %d result %+v, want disabled after the first fight", code, res)
+	}
+}
+
+func TestEvaluatorTargetMustBeTheLab(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "s")
+	for _, cmd := range []string{
+		"trainbridge --lab fwb-minecraft",
+		"trainbridge --lab k8s:minecraft/fwb-0",
+		"trainbridge --lab=prod",
+		"trainbridge --lab k8s:lab/fwbmc-0",
+		"trainbridge --lab crew-lab --squad alpha",
+		"trainbridge --lab crew-lab --squad lab-alpha --squad-b prod",
+		"trainbridge -lab",
+	} {
+		_, code, stderr := runTrainer(t, "run", "--family", "zombie", "--scenario", "x", "--store", store, "--evaluator", "cmd:"+cmd)
+		if code != 2 {
+			t.Errorf("%q: exit %d (%s), want a refusal before any fight", cmd, code, stderr)
+		}
+	}
+	if _, code, _ := runTrainer(t, "run", "--family", "zombie", "--scenario", "x", "--store", store, "--max-failures", "1",
+		"--evaluator", "cmd:/nonexistent/trainbridge --lab crew-lab --squad lab-alpha --squad-b lab-bravo"); code != 1 {
+		t.Errorf("a lab target was refused: exit %d, want 1 (evaluator failed to run)", code)
 	}
 }

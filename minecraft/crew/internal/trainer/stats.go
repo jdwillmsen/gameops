@@ -33,9 +33,12 @@ func newPairedTest(diffs []float64) pairedTest {
 	}
 	t.SD = math.Sqrt(ss / float64(n-1))
 	if t.SD == 0 {
-		// Identical differences: either a certain gain or a certain tie.
+		// The t statistic is undefined without variance, and zero variance is
+		// no proof of certainty: n identical gains are what a deterministic
+		// scorer shows. The sign test is what remains: n gains in a row
+		// happen with probability 0.5^n if nothing changed.
 		if t.Mean > 0 {
-			t.T, t.P = math.Inf(1), 0
+			t.T, t.P = math.Inf(1), math.Pow(0.5, float64(n))
 		}
 		return t
 	}

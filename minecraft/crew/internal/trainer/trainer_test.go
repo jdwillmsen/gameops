@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 )
 
 func newStore(t *testing.T) *Store {
@@ -24,9 +25,20 @@ func newStore(t *testing.T) *Store {
 	return s
 }
 
+// trainingOn makes a control directory whose switch says "on".
+func trainingOn(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, tacticsctl.TrainingFile), []byte("on\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func baseConfig(t *testing.T, ev Evaluator) Config {
 	return Config{
-		Family: tactics.FamilyZombie, Scenario: "pack", Store: newStore(t), Eval: ev,
+		ControlDir: trainingOn(t),
+		Family:     tactics.FamilyZombie, Scenario: "pack", Store: newStore(t), Eval: ev,
 		MaxGenerations: 1000, MaxFights: 1_000_000, Budget: time.Hour, MaxFailures: 1000, Seed: 7,
 	}
 }
@@ -132,7 +144,7 @@ func TestReproducibleWithSeed(t *testing.T) {
 }
 
 func TestOpponentMirrorCardNeverChangesTheMean(t *testing.T) {
-	r := &run{Config: Config{MaxFights: 1000, MaxFailures: 1000, Now: time.Now, Logf: func(string, ...any) {}}, deadline: time.Now().Add(time.Hour)}
+	r := &run{Config: Config{ControlDir: trainingOn(t), MaxFights: 1000, MaxFailures: 1000, Now: time.Now, Logf: func(string, ...any) {}}, deadline: time.Now().Add(time.Hour)}
 	own := tactics.Scorecard{Profile: "cand", Outcome: tactics.OutcomeWin, Seconds: 30}
 	mirror := tactics.Scorecard{Profile: "rival", Outcome: tactics.OutcomeLoss, DamageTaken: 400}
 	aborted := tactics.Scorecard{Profile: "rival", Outcome: tactics.OutcomeAborted}

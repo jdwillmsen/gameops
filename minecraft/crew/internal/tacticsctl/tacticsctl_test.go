@@ -21,7 +21,13 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	asTrustOwner(t)
 	root := t.TempDir()
+	// A permissive umask would leave the temp root group-writable, which the
+	// trust check rightly refuses above the trust directory.
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	s := New(filepath.Join(root, "state"), filepath.Join(root, "trust"))
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -34,6 +40,15 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	return &fixture{t: t, s: s, priv: priv}
+}
+
+// asTrustOwner makes the test's own account the one that may own a trust
+// directory, because a test cannot chown anything to root.
+func asTrustOwner(t *testing.T) {
+	t.Helper()
+	old := trustOwnerUID
+	trustOwnerUID = uint32(os.Getuid())
+	t.Cleanup(func() { trustOwnerUID = old })
 }
 
 func (f *fixture) candidate(name, parent string, shot float64) tactics.Profile {
@@ -102,13 +117,14 @@ func TestKillSwitchSendsLabUnitsToDefault(t *testing.T) {
 }
 
 func TestLabOnly(t *testing.T) {
-	for _, ok := range []string{"lab", "crew-lab", "k8s:minecraft-lab/crew-lab-0", "LAB"} {
+	for _, ok := range []string{"crew-lab", "k8s:minecraft-lab/crew-lab-0", "CREW-LAB", "lab-alpha", "k8s:crew/crew-lab-0", "compose-crew-lab"} {
 		if err := LabOnly(ok); err != nil {
 			t.Errorf("LabOnly(%q) = %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"", "fwb", "prd", "prod", "production", "k8s:minecraft/fwb-0", "k8s:minecraft-prd/bedrock-0",
-		"fwb-lab", "lab-prod", "labrador", "bedrock", "k8s:lab/fwb-0"} {
+		"fwb-lab", "lab-prod", "labrador", "bedrock", "k8s:lab/fwb-0", "k8s:lab/fwbmc-0", "lab", "LAB", "k8s:lab/anything-0",
+		"crew-labx", "acrew-lab", "crewlab", "crew-lab-prod", "fwbmc-crew-lab", "lab-alpha/../fwb", "lab-", "lab_x"} {
 		err := LabOnly(bad)
 		if !errors.Is(err, ErrNotLab) {
 			t.Errorf("LabOnly(%q) = %v, want ErrNotLab", bad, err)
@@ -592,5 +608,209 @@ func TestNoApprovalWithoutThePrivateKey(t *testing.T) {
 	}
 	if _, ok, _ := f.s.Pointer(Production); ok {
 		t.Error("production pointer written without a valid approval")
+	}
+}
+
+func TestPromoteRefusesTrustDirectoryNotOwnedByRoot(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	trustOwnerUID = 0
+	if os.Getuid() == 0 {
+		t.Skip("the test account is root, so its own directory is trusted")
+	}
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "not owned by root") {
+		t.Fatalf("promote with a trust dir owned by an agent account = %v", err)
+	}
+	if _, ok, _ := f.s.Pointer(Production); ok {
+		t.Error("refused promote wrote the production pointer")
+	}
+}
+
+func TestPromoteRefusesWritableParentOfTrustDirectory(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	parent := filepath.Join(filepath.Dir(f.s.Root), "shared")
+	if err := os.Mkdir(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trust := filepath.Join(parent, "trust")
+	if err := os.Rename(f.s.TrustDir, trust); err != nil {
+		t.Fatal(err)
+	}
+	f.s.TrustDir = trust
+	if err := f.s.Promote("g1"); err != nil {
+		t.Fatalf("closed parent refused: %v", err)
+	}
+	if err := os.Chmod(parent, 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "above the trust directory") {
+		t.Errorf("promote with a group-writable parent = %v", err)
+	}
+}
+
+func TestTrustChecksTheResolvedPathNotTheLink(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	link := mustSymlink(t, f.s.TrustDir, filepath.Join(t.TempDir(), "link"))
+	if err := os.Chmod(f.s.TrustDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	s := New(f.s.Root, link)
+	if err := s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "writable by group or others") {
+		t.Errorf("promote through a link to an open directory = %v", err)
+	}
+}
+
+func TestTrustedKeyMustNotBeASymlink(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.ready("g1")
+	real := filepath.Join(t.TempDir(), "owner.pub")
+	pub, _ := os.ReadFile(filepath.Join(f.s.TrustDir, "owner.pub"))
+	os.WriteFile(real, pub, 0o644)
+	os.Remove(filepath.Join(f.s.TrustDir, "owner.pub"))
+	mustSymlink(t, real, filepath.Join(f.s.TrustDir, "owner.pub"))
+	if err := f.s.Promote("g1"); err == nil {
+		t.Error("an approver key that is a symlink was trusted")
+	}
+}
+
+func TestPointRestoresLiveWhenHistoryCannotBeWritten(t *testing.T) {
+	f := newFixture(t)
+	f.candidate("g1", "", 35)
+	f.candidate("g2", "g1", 40)
+	f.lab("g1")
+	hist := filepath.Join(f.s.Root, "lab", historyFile)
+	if err := os.Remove(hist); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(hist, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.LabSet("g2"); err == nil {
+		t.Fatal("lab-set succeeded although history could not be written")
+	}
+	if p, _, _ := f.s.Pointer(Lab); p.Name != "g1" {
+		t.Errorf("lab pointer = %q after a failed history write, want g1", p.Name)
+	}
+
+	// First ever set: no pointer to restore, so none may remain.
+	g := newFixture(t)
+	g.candidate("g1", "", 35)
+	if err := os.MkdirAll(filepath.Join(g.s.Root, "lab", historyFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.s.LabSet("g1"); err == nil {
+		t.Fatal("first lab-set succeeded although history could not be written")
+	}
+	if _, ok, _ := g.s.Pointer(Lab); ok {
+		t.Error("lab pointer left behind with no history entry")
+	}
+}
+
+func TestApprovalIsSingleUse(t *testing.T) {
+	f := newFixture(t)
+	g1 := f.candidate("g1", "", 35)
+	f.lab("g1")
+	f.approve(g1)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Fatal(err)
+	}
+	h, _ := Hash(g1)
+	if _, err := os.Stat(f.s.approvalPath(h)); err == nil {
+		t.Error("promote left its approval in place")
+	}
+	if used, _ := filepath.Glob(filepath.Join(f.s.Root, "approvals", "used", h+"-*.json")); len(used) != 1 {
+		t.Errorf("spent approvals = %v, want one", used)
+	}
+
+	if err := f.s.Rollback(Production, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "no approval") {
+		t.Fatalf("re-promote after rollback without a new approval = %v", err)
+	}
+	if p, _, _ := f.s.Pointer(Production); p.Name != DefaultName {
+		t.Errorf("production = %q after a refused re-promote, want default", p.Name)
+	}
+
+	f.approve(g1)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Errorf("promote with a fresh approval: %v", err)
+	}
+}
+
+func TestSpentApprovalCannotBeReplayedFromUsed(t *testing.T) {
+	f := newFixture(t)
+	g1 := f.candidate("g1", "", 35)
+	f.lab("g1")
+	f.approve(g1)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Fatal(err)
+	}
+	f.s.Rollback(Production, "")
+	h, _ := Hash(g1)
+	used, _ := filepath.Glob(filepath.Join(f.s.Root, "approvals", "used", h+"-*.json"))
+	if len(used) != 1 {
+		t.Fatalf("spent approvals = %v", used)
+	}
+	// Only approvals/<hash>.json counts; the used directory is a record.
+	if err := f.s.Promote("g1"); err == nil {
+		t.Error("a spent approval still promoted")
+	}
+}
+
+func TestPromoteChecksEvidenceFileWhenStoreIsKnown(t *testing.T) {
+	f := newFixture(t)
+	pr := f.candidate("g1", "", 35)
+	f.lab("g1")
+	f.approve(pr)
+
+	store := t.TempDir()
+	f.s.EvidenceStore = store
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("promote with the evidence file missing = %v", err)
+	}
+	ev := filepath.Join(store, "zombie", "scorecards", "g1.jsonl")
+	os.MkdirAll(filepath.Dir(ev), 0o755)
+	os.WriteFile(ev, nil, 0o644)
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("promote with an empty evidence file = %v", err)
+	}
+	os.Remove(ev)
+	os.Symlink("/etc/hostname", ev)
+	if err := f.s.Promote("g1"); err == nil {
+		t.Fatal("promote with a symlinked evidence file")
+	}
+	os.Remove(ev)
+	os.WriteFile(ev, []byte("{}\n"), 0o644)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Fatalf("promote with the evidence in place: %v", err)
+	}
+}
+
+func TestPromoteWithoutEvidenceStoreOnlyChecksThePath(t *testing.T) {
+	f := newFixture(t)
+	pr := f.candidate("g1", "", 35)
+	f.lab("g1")
+	f.approve(pr)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Errorf("fallback without a store: %v", err)
+	}
+}
+
+func TestDefaultDirFollowsTheEnvironmentThenHome(t *testing.T) {
+	t.Setenv("TACTICSCTL_DIR", "/srv/tactics")
+	if got := DefaultDir(); got != "/srv/tactics" {
+		t.Errorf("DefaultDir with env = %q", got)
+	}
+	t.Setenv("TACTICSCTL_DIR", "")
+	t.Setenv("HOME", "/home/someone")
+	if got := DefaultDir(); got != "/home/someone/.local/state/crew-tactics" {
+		t.Errorf("DefaultDir without env = %q", got)
 	}
 }
