@@ -24,6 +24,11 @@ services:
       # same reason, and retail clients still join it, despite the server's
       # startup error claiming NetherNet is the only supported transport.
       TRANSPORT: "raknet"
+      # Not set by default. A single lab run joined cleanly at 6, where about
+      # half the joins at the image's default of 32 ended in a first-join
+      # burst past the client's 16 MiB batch limit. Enable it for a mender or
+      # builder trial, where a unit that drops that way wastes the run.
+      # VIEW_DISTANCE: "6"
       # Ops are granted from the console with `send-command op <gamertag>`,
       # so no gamertag needs to be committed here.
     # Loopback only: with online mode and the allow list off, anyone who can
@@ -107,8 +112,34 @@ services:
     volumes:
       - crew-03-data:/data
 
+  # A mender or builder unit, off by default. It needs CREW_LAB=true or it
+  # refuses to start, and the lab console must put it in creative after every
+  # join: lab/creative.sh lab Dusty. To enable, uncomment this service, its
+  # volume below, and export TASKS_TOKEN as for the others.
+  #
+  # crew-04:
+  #   build:
+  #     context: ../../..
+  #     dockerfile: minecraft/crew/Dockerfile
+  #   depends_on: [lab]
+  #   environment:
+  #     MC_HOST: lab
+  #     MC_PORT: "19132"
+  #     MC_OFFLINE: "true"
+  #     CREW_ID: crew-04
+  #     MC_USERNAME: Dusty
+  #     CREW_ROLE: mender
+  #     CREW_LAB: "true"
+  #     STATUS_ADDR: 0.0.0.0:8080
+  #     TASKS_TOKEN: ${TASKS_TOKEN:-}
+  #   ports:
+  #     - "127.0.0.1:8084:8080"
+  #   volumes:
+  #     - crew-04-data:/data
+
 volumes:
   lab-world:
   crew-01-data:
   crew-02-data:
   crew-03-data:
+  # crew-04-data:
