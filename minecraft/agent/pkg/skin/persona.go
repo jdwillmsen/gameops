@@ -293,6 +293,8 @@ func paintWarrior(px []byte, l look, tabard rgba, hood bool) {
 		head.paintFront(px, rgba{255, 255, 255, 255}, 5, 4, 2, 1)
 		head.paintFront(px, rgba{20, 20, 28, 255}, 2, 4, 1, 1)
 		head.paintFront(px, rgba{20, 20, 28, 255}, 5, 4, 1, 1)
+		// The hood redraws the face, so its mark goes on afterwards.
+		paintFaceMark(px, l)
 		return
 	}
 	helmet(px, iron, darken(iron, 0.7))
@@ -313,9 +315,9 @@ func paintFaceMark(px []byte, l look) {
 		for _, d := range [][2]int{{1, 5}, {2, 6}, {5, 5}, {6, 6}} {
 			head.paintFront(px, shade, d[0], d[1], 1, 1)
 		}
-	case 1: // scar across the left cheek
+	case 1: // scar down the left cheek, below the eye
 		for i := range 3 {
-			head.paintFront(px, rgba{190, 90, 90, 255}, 1, 3+i, 1, 1)
+			head.paintFront(px, rgba{190, 90, 90, 255}, 1, 5+i, 1, 1)
 		}
 	case 2: // war paint under the eyes, in the unit's accent colour
 		head.paintFront(px, l.accent, 1, 5, 2, 1)
