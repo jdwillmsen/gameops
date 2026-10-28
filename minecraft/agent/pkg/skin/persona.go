@@ -174,7 +174,9 @@ func helmet(px []byte, c, band rgba) {
 		fill(px, x, 8, 8, 3, c)
 		fill(px, 32+x, 8, 8, 3, c)
 	}
-	fill(px, 8, 10, 8, 1, band)
+	// The band goes on the hat layer too: the game draws that layer over the
+	// base one, so anything painted only underneath the helm is hidden.
+	fill(px, 40, 10, 8, 1, band)
 }
 
 var outfits = map[string]func(px []byte, l look){
@@ -197,7 +199,7 @@ func paintMiner(px []byte, l look) {
 	outfit(px, rgba{110, 112, 120, 255}, rgba{60, 55, 70, 255}, rgba{40, 35, 35, 255})
 	hands(px, l.skin)
 	helmet(px, rgba{245, 195, 40, 255}, darken(rgba{245, 195, 40, 255}, 0.7))
-	head.paintFront(px, rgba{255, 250, 200, 255}, 3, 0, 2, 1)
+	hat.paintFront(px, rgba{255, 250, 200, 255}, 3, 0, 2, 1)
 	fill(px, 20, 27, 8, 1, rgba{110, 70, 35, 255})
 	torso.paintFront(px, rgba{110, 70, 35, 255}, 0, 9, 8, 1)
 	torso.paintFront(px, l.accent, 2, 3, 2, 2)
@@ -257,7 +259,7 @@ func paintShaft(px []byte, l look) {
 	outfit(px, orange, rgba{55, 60, 75, 255}, rgba{35, 35, 40, 255})
 	hands(px, l.skin)
 	helmet(px, rgba{235, 235, 235, 255}, rgba{190, 190, 190, 255})
-	head.paintFront(px, rgba{255, 240, 120, 255}, 3, 0, 2, 2)
+	hat.paintFront(px, rgba{255, 240, 120, 255}, 3, 0, 2, 2)
 	silver := rgba{215, 220, 225, 255}
 	for _, p := range []block{torso} {
 		fill(px, p.x, p.y+p.d+3, 2*(p.w+p.d), 1, silver)
@@ -297,7 +299,7 @@ func paintWarrior(px []byte, l look, tabard rgba, hood bool) {
 	helmet(px, iron, darken(iron, 0.7))
 	head.paintFront(px, iron, 0, 3, 8, 5)
 	head.paintFront(px, rgba{18, 18, 22, 255}, 1, 4, 6, 1)
-	head.paintFront(px, tabard, 3, 0, 2, 3)
+	hat.paintFront(px, tabard, 3, 0, 2, 3)
 }
 
 const faceMarks = 6
@@ -373,5 +375,5 @@ func paintBuilder(px []byte, l look) {
 		fill(px, x, 8, 8, 2, cap)
 		fill(px, 32+x, 8, 8, 2, cap)
 	}
-	head.paintFront(px, rgba{50, 90, 170, 255}, 0, 1, 8, 1)
+	hat.paintFront(px, rgba{50, 90, 170, 255}, 0, 1, 8, 1)
 }

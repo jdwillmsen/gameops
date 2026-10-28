@@ -168,3 +168,24 @@ func TestFaceIsNotHiddenByTheHatLayer(t *testing.T) {
 		}
 	}
 }
+
+// Details on a cap or helm must sit on the hat layer, which the game draws over
+// the base head: painted only underneath they vanish.
+func TestHelmDetailsAreOnTheHatLayer(t *testing.T) {
+	for _, p := range []Persona{
+		{Role: "miner"}, {Role: "shaft"}, {Role: "mender"}, {Role: "builder"},
+		{Role: "warrior", SquadRole: "vanguard"}, {Role: "warrior", SquadRole: "ranger"},
+	} {
+		raw, _ := base64.StdEncoding.DecodeString(ForPersona("Agate", p).Data)
+		seen := map[[3]byte]bool{}
+		for y := 8; y < 11; y++ { // hat-layer front, brow rows
+			for x := 40; x < 48; x++ {
+				i := (y*Width + x) * 4
+				seen[[3]byte{raw[i], raw[i+1], raw[i+2]}] = true
+			}
+		}
+		if len(seen) < 2 {
+			t.Errorf("%+v: the hat layer front is one flat colour, so lamp, band and crest are hidden", p)
+		}
+	}
+}
