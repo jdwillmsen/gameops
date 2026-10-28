@@ -127,29 +127,46 @@ func skinPixels(s skin.Skin) (*image.NRGBA, error) {
 	return n, nil
 }
 
-// figure draws the front (or back) of a skin as the game stands the model up,
-// each overlay layer drawn over its base.
+// figure draws the front (or back) of a skin as the game stands the model up:
+// each overlay layer (hat, jacket, sleeves, trousers) is drawn over its base
+// wherever it is not transparent.
 func figure(dst, sk *image.NRGBA, ox, oy int, back bool) {
-	cut := func(sx, sy, w, h, dx, dy int) {
+	cut := func(sx, sy, w, h, dx, dy int, over bool) {
 		for y := 0; y < h; y++ {
 			for x := 0; x < w; x++ {
-				dst.SetNRGBA(ox+dx+x, oy+dy+y, sk.NRGBAAt(sx+x, sy+y))
+				c := sk.NRGBAAt(sx+x, sy+y)
+				if over && c.A == 0 {
+					continue
+				}
+				dst.SetNRGBA(ox+dx+x, oy+dy+y, c)
 			}
 		}
 	}
 	if !back {
-		cut(8, 8, 8, 8, 4, 0)
-		cut(20, 20, 8, 12, 4, 8)
-		cut(44, 20, 4, 12, 0, 8)
-		cut(36, 52, 4, 12, 12, 8)
-		cut(4, 20, 4, 12, 4, 20)
-		cut(20, 52, 4, 12, 8, 20)
+		cut(8, 8, 8, 8, 4, 0, false)
+		cut(20, 20, 8, 12, 4, 8, false)
+		cut(44, 20, 4, 12, 0, 8, false)
+		cut(36, 52, 4, 12, 12, 8, false)
+		cut(4, 20, 4, 12, 4, 20, false)
+		cut(20, 52, 4, 12, 8, 20, false)
+		cut(40, 8, 8, 8, 4, 0, true)
+		cut(20, 36, 8, 12, 4, 8, true)
+		cut(44, 36, 4, 12, 0, 8, true)
+		cut(52, 52, 4, 12, 12, 8, true)
+		cut(4, 36, 4, 12, 4, 20, true)
+		cut(4, 52, 4, 12, 8, 20, true)
 		return
 	}
-	cut(24, 8, 8, 8, 4, 0)
-	cut(32, 20, 8, 12, 4, 8)
-	cut(52, 20, 4, 12, 12, 8)
-	cut(44, 52, 4, 12, 0, 8)
-	cut(12, 20, 4, 12, 8, 20)
-	cut(28, 52, 4, 12, 4, 20)
+	cut(24, 8, 8, 8, 4, 0, false)
+	cut(32, 20, 8, 12, 4, 8, false)
+	cut(52, 20, 4, 12, 12, 8, false)
+	cut(44, 52, 4, 12, 0, 8, false)
+	cut(12, 20, 4, 12, 8, 20, false)
+	cut(28, 52, 4, 12, 4, 20, false)
+	cut(56, 8, 8, 8, 4, 0, true)
+	cut(32, 36, 8, 12, 4, 8, true)
+	cut(52, 36, 4, 12, 12, 8, true)
+	cut(60, 52, 4, 12, 0, 8, true)
+	cut(12, 36, 4, 12, 8, 20, true)
+	cut(12, 52, 4, 12, 4, 20, true)
 }
