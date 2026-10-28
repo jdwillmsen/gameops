@@ -461,7 +461,7 @@ changes; a real run leads with what it repaired and ends with what is still
 wrong. Cells the unit has no chunk for are never touched. Blocks with no item,
 and blocks that are right except for a state a click cannot set (a stair's
 facing), are left and counted. A task fails, naming `arenarepair`, when the
-damage is over 1000 cells or needs more block types than the nine hotbar slots,
+damage is over 1000 cells,
 and while a hostile mob or a player outside the crew names is within 32 blocks.
 The mender must start within walking distance, on loaded chunks.
 
@@ -614,6 +614,14 @@ crew lab need `--confirm-lab`, and FWB is refused. The unit itself must have
 a commented `crew-04` example (not run by default) and a commented
 `VIEW_DISTANCE: "6"`: at the image's default of 32 about half of one spike's
 joins were closed by a first-join burst over the client's 16 MiB batch limit.
+
+A creative take goes into an empty hotbar slot. With none empty it replaces
+the least recently used slot that an earlier take filled, destroying that stack
+in the same request, so a task may use more block types than the hotbar has
+slots; the unit's own tools and food are never replaced. A hotbar full of
+anything else fails the take with `no empty hotbar slot for the item`. Block
+types are taken as the work reaches them, so a task that alternates among more
+than nine types pays a take each time one comes round again.
 
 ### Gather-and-deposit scene
 

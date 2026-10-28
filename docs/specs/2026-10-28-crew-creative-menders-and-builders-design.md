@@ -100,7 +100,7 @@ Gates that were observed:
 
 Survival with the screen shut also returns 7, so 28 is only reachable with the screen open; the executor should read 28 as "not in creative" and 7 as "screen not open".
 
-Stock is unlimited: three placements from one 64 stack left the stack at 64 (server `InventoryContent` after each). Not tried: tools or other max-stack-1 items, merging onto an occupied slot, a full hotbar.
+Stock is unlimited: three placements from one 64 stack left the stack at 64 (server `InventoryContent` after each). Not tried: tools or other max-stack-1 items. Occupied slots and a full hotbar: see the addendum below.
 
 ### (c) Placing with the existing path
 
@@ -129,6 +129,25 @@ Stock is unlimited: three placements from one 64 stack left the stack at 64 (ser
 | break input to `UpdateBlock` | 60 to 105 ms |
 
 A mender's cost per block is therefore about one round trip each way plus its walking, and one take per block type. Sustained throughput of a place-and-break loop was not measured, so the walk-or-fill threshold stays a tuning call for phase 2.
+
+### Addendum (2026-10-28, JDW-294): putting a different item into an occupied hotbar slot
+
+Same lab image, gophertunnel v1.63.0, a hotbar of nine different creative takes, screen open, unit in creative. Each variant used iron_block as the new item and one slot per variant; success was judged by the server's own `InventoryContent` after a later placement, not by the status alone.
+
+| Request (same shape as the empty-slot take unless stated) | Status | Slot afterwards |
+|-----------|--------|-----------------|
+| CraftCreative + Take, destination = occupied slot quoting its current `StackNetworkID` | 1 (`Occupied`) | unchanged |
+| same, destination quoting `StackNetworkID` 0 | 50 | unchanged |
+| CraftCreative + **Place**, destination = occupied slot quoting its stack ID | 1 | unchanged |
+| `DestroyStackRequestAction{Count: 64, Source: occupied slot + its stack ID}`, then CraftCreative + Take to that slot, one request | 0 | iron_block, new stack ID |
+| CraftCreative, Destroy, Take in one request | 0 | iron_block |
+| `DropStackRequestAction` in place of Destroy, one request | 0 | iron_block |
+| Destroy alone, then CraftCreative + Take into the emptied slot, two requests | 0 and 0 | iron_block |
+| Drop alone, then take, two requests | 0 and 0 | iron_block |
+
+So the owner's hypothesis holds, but not as a bare overwrite: the server refuses a take onto a filled slot, and accepts it when the same request destroys the stack there first. A destroy or drop alone is accepted too and leaves the slot empty (answer `Count: 0, StackNetworkID: 0`). The destination quotes stack ID 0 either way; only the destroy's source quotes the old stack ID, and a destroy quoting it with the real count worked. The server's `InventoryContent` after the next placements listed iron_block x64 in every replaced slot and the original items in the untouched ones, and placing from a replaced slot put an iron block in the world. `TakeCreative` now sends Destroy, CraftCreative, Take.
+
+Live check: a `builder` unit on a lab stamped a 12-block-type blueprint (24 cells) with the `build_blueprint` task; all 24 cells showed the right block. Dropping a destroyed stack in the same request did not spawn a visible item in the spike, but it was not looked for; Destroy is the one used.
 
 ### Other gotchas met
 
