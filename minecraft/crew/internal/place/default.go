@@ -17,17 +17,35 @@ var (
 	defaultErr   error
 )
 
-// Default is the table built for the newest server version checked in.
+// loadDefault builds the default table; tests replace it to inject a bad
+// embedded blob.
+var loadDefault = func() (*Table, error) {
+	names, err := Versions()
+	if err != nil || len(names) == 0 {
+		return nil, fmt.Errorf("place: no embedded table: %v", err)
+	}
+	return Load(names[len(names)-1])
+}
+
+// Default is the table built for the newest server version checked in. When
+// it cannot be loaded the table is empty, never nil, and the error says why;
+// Err reports the same error to callers of the package-level helpers.
 func Default() (*Table, error) {
 	defaultOnce.Do(func() {
-		names, err := Versions()
-		if err != nil || len(names) == 0 {
-			defaultErr = fmt.Errorf("place: no embedded table: %v", err)
-			return
+		defaultTable, defaultErr = loadDefault()
+		if defaultErr != nil || defaultTable == nil {
+			defaultTable = &Table{}
 		}
-		defaultTable, defaultErr = Load(names[len(names)-1])
 	})
 	return defaultTable, defaultErr
+}
+
+// Err is the error loading the embedded default table, nil when it loaded.
+// Lookup and Derived answer as if the block were unknown when it did not, so
+// a caller that must tell a broken table from an unreachable state checks Err.
+func Err() error {
+	_, err := Default()
+	return err
 }
 
 // Versions lists the server versions an embedded table exists for, oldest
