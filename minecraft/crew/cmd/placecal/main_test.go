@@ -1,13 +1,29 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
+const labCompose = "services:\n  lab:\n    environment:\n      ONLINE_MODE: \"false\"\n"
+
 func goodConfig() config {
-	return config{lab: "lab", addr: "127.0.0.1:19397", compose: "/tmp/x.yaml", units: "PlcA,PlcB", maxDuration: time.Minute, maxPlacements: 10, floorY: 100}
+	return config{lab: "lab", addr: "127.0.0.1:19397", compose: writeCompose(nil, labCompose), units: "PlcA,PlcB", maxDuration: time.Minute, maxPlacements: 10, floorY: 100}
+}
+
+func writeCompose(_ *testing.T, body string) string {
+	dir, err := os.MkdirTemp("", "placecal")
+	if err != nil {
+		panic(err)
+	}
+	p := filepath.Join(dir, "compose.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		panic(err)
+	}
+	return p
 }
 
 func TestValidateAcceptsTheCrewLab(t *testing.T) {
@@ -30,6 +46,16 @@ func TestValidateRefuses(t *testing.T) {
 		"no units":           func(c *config) { c.units = " , " },
 		"forever":            func(c *config) { c.maxDuration = 100 * time.Hour },
 		"no lab":             func(c *config) { c.lab = "" },
+		"colosseum origin":   func(c *config) { c.originX, c.originZ = -300, -758 },
+		"huge origin":        func(c *config) { c.originX = 1 << 30 },
+		"path version":       func(c *config) { c.serverVersion = "../1.2" },
+		"missing compose":    func(c *config) { c.compose = "/nonexistent/compose.yaml" },
+		"online compose": func(c *config) {
+			c.compose = writeCompose(nil, "services:\n  lab:\n    environment:\n      ONLINE_MODE: \"true\"\n")
+		},
+		"other service name": func(c *config) {
+			c.compose = writeCompose(nil, "services:\n  mc:\n    environment:\n      ONLINE_MODE: \"false\"\n")
+		},
 	}
 	for name, mutate := range cases {
 		c := goodConfig()
@@ -43,6 +69,7 @@ func TestValidateRefuses(t *testing.T) {
 func TestValidateAllowsAConfirmedLabService(t *testing.T) {
 	c := goodConfig()
 	c.lab, c.confirmLab = "minecraft", "minecraft"
+	c.compose = writeCompose(nil, strings.Replace(labCompose, "lab:", "minecraft:", 1))
 	if _, err := validate(c); err != nil {
 		t.Fatal(err)
 	}
