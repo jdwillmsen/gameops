@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -20,8 +19,6 @@ const (
 	// confirmTicks is the window the server has to show the placed block:
 	// about two seconds at its tick rate, generous for a loaded lab server.
 	confirmTicks = 40
-	// placeSpan bounds the stand-cell search around the target.
-	placeSpan = 4
 )
 
 type placePhase int
@@ -43,7 +40,7 @@ type Place struct {
 	log    Logger
 
 	phase   placePhase
-	nav     *navigator
+	ap      approach
 	waited  int
 	retried bool
 	placed  bool
@@ -55,7 +52,7 @@ func NewPlaceBlock(world path.Blocks, self func() belief.Snapshot, target protoc
 	for _, f := range opts {
 		f(&o)
 	}
-	return &Place{world: world, self: self, target: target, item: item, log: o.log}
+	return &Place{world: world, self: self, target: target, item: item, log: o.log, ap: approach{world: world, target: target}}
 }
 
 func (p *Place) Name() string { return "place_block" }
@@ -110,61 +107,15 @@ func (p *Place) failed(err error) outcome {
 
 // walk brings the eye within reach of the target.
 func (p *Place) walk(a Actuator) outcome {
-	pose := a.Pose()
-	if centre(p.target).Sub(eyeOf(pose.Feet)).Len() <= placeReach-arriveSlack {
+	arrived, st, err := p.ap.step(a)
+	switch {
+	case arrived:
 		p.phase = plPlace
 		return next
+	case st == Failed:
+		return p.failed(err)
 	}
-	if p.nav == nil {
-		stand, ok := p.standCell(pose)
-		if !ok {
-			return p.failed(errors.New("no standing spot within reach of the target"))
-		}
-		p.nav = newNavigator(p.world, stand, arriveSlack)
-	}
-	st, err := p.nav.step(a)
-	switch st {
-	case Running:
-		return outcome{st: Running}
-	case Done:
-		p.phase = plPlace
-		return next
-	}
-	return p.failed(fmt.Errorf("getting to the target: %w", err))
-}
-
-// standCell picks the standable cell within reach of the target, nearest the
-// unit. A cell whose feet or head would be in the target is not one: the
-// server refuses a placement into the unit's own body.
-func (p *Place) standCell(pose act.Pose) (protocol.BlockPos, bool) {
-	return standNear(p.world, p.target, pose, 0)
-}
-
-// standNear is standCell for any target. Cells closer than apart to the
-// target's column, horizontally, are left out, for a caller that must not
-// end up with its body touching the target.
-func standNear(world path.Blocks, t protocol.BlockPos, pose act.Pose, apart float32) (protocol.BlockPos, bool) {
-	best, bestD, found := protocol.BlockPos{}, float32(1e30), false
-	for dx := int32(-placeSpan); dx <= placeSpan; dx++ {
-		for dy := int32(-placeSpan); dy <= placeSpan; dy++ {
-			for dz := int32(-placeSpan); dz <= placeSpan; dz++ {
-				c := protocol.BlockPos{t.X() + dx, t.Y() + dy, t.Z() + dz}
-				if c.X() == t.X() && c.Z() == t.Z() && (c.Y() == t.Y() || c.Y()+1 == t.Y()) {
-					continue
-				}
-				if centre(t).Sub(standEye(c)).Len() > placeReach-arriveSlack || !path.Standable(world, c) {
-					continue
-				}
-				if apart > 0 && math.Hypot(float64(dx), float64(dz)) < float64(apart) {
-					continue
-				}
-				if d := centre(c).Sub(pose.Feet).LenSqr(); d < bestD {
-					best, bestD, found = c, d, true
-				}
-			}
-		}
-	}
-	return best, found
+	return outcome{st: Running}
 }
 
 func (p *Place) place(a Actuator) outcome {
