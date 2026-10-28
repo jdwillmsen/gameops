@@ -61,11 +61,15 @@ type config struct {
 	maxPlacements                                                                       int64
 	maxItems                                                                            int
 	floorY, originX, originZ                                                            int
-	skipDerived                                                                         bool
+	probe, probeOut                                                                     string
+	force                                                                               bool
+	skipDerived, verify, noInfer                                                        bool
+	placeWait                                                                           time.Duration
+	missRetries                                                                         int
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
@@ -91,9 +95,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.IntVar(&c.floorY, "floor-y", 220, "height of the platforms' stone floor")
 	fs.IntVar(&c.originX, "origin-x", 1000, "x of the first platform")
 	fs.IntVar(&c.originZ, "origin-z", 1000, "z of the platforms")
+	fs.BoolVar(&c.force, "force", false, "replace an existing table that holds more blocks than this run's")
 	fs.BoolVar(&c.skipDerived, "skip-derived", false, "skip the neighbour pass")
+	fs.BoolVar(&c.verify, "verify", false, "gap check: with --merge-into, run again (in full, no inference) the items whose blocks disagree with their family and the not-covered ones, then record what still disagrees")
+	fs.BoolVar(&c.noInfer, "no-infer", false, "run every item's sweep in full instead of inferring from a sibling")
+	fs.DurationVar(&c.placeWait, "place-wait", placeWait, "how long a click may take to show a block before it counts as a no-op")
+	fs.IntVar(&c.missRetries, "miss-retries", missRetries, "how many more times a click that placed nothing is sent")
+	fs.StringVar(&c.probe, "probe", "", "run kept experiments instead of a calibration: a comma list of "+probeUsage()+", or all")
+	fs.StringVar(&c.probeOut, "probe-out", "", "file the probe report (markdown) is also written to")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	placeWait, missRetries = c.placeWait, c.missRetries
+	if c.verify {
+		c.noInfer = true
 	}
 	names, err := validate(c)
 	if err != nil {
@@ -110,6 +125,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "placecal: "+err.Error())
 		return 2
+	}
+	if c.probe != "" {
+		if _, err := probeNames(c.probe); err != nil {
+			fmt.Fprintln(stderr, "placecal: "+err.Error())
+			return 2
+		}
+		if err := executeProbe(ctx, c, names, &safeConsole{c: console}, stdout); err != nil {
+			fmt.Fprintln(stderr, "placecal: "+err.Error())
+			return 1
+		}
+		return 0
 	}
 	partial, err := execute(ctx, c, names, &safeConsole{c: console}, stdout)
 	switch {
@@ -163,8 +189,17 @@ func validate(c config) ([]string, error) {
 		return nil, fmt.Errorf("--max-duration must be above 0 and at most %s", maxDurationLimit)
 	case c.maxPlacements < 1:
 		return nil, errors.New("--max-placements must be at least 1")
-	case c.floorY < 5 || c.floorY > 300:
-		return nil, errors.New("--floor-y must be between 5 and 300")
+	}
+	if err := checkOrigin(c.originX, c.originZ, c.floorY, len(names)); err != nil {
+		return nil, err
+	}
+	if c.serverVersion != "" {
+		if err := checkVersion(c.serverVersion); err != nil {
+			return nil, err
+		}
+	}
+	if err := checkCompose(c.compose, c.lab); err != nil {
+		return nil, err
 	}
 	return names, nil
 }
@@ -245,6 +280,24 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 	vocab, nStates, vocabSource := loadVocabulary()
 	say("vocabulary: %d blocks, %d states (%s)", len(vocab), nStates, vocabSource)
 
+	if c.verify {
+		if c.mergeInto == "" {
+			return false, errors.New("--verify needs --merge-into, the table to check")
+		}
+		redo, gaps, err := verifyItems(c.mergeInto)
+		if err != nil {
+			return false, err
+		}
+		say("gap check: %d block(s) disagree with their family; %d item(s) to run again", len(gaps), len(redo))
+		for _, g := range gaps {
+			say("  gap %s", g)
+		}
+		if len(redo) == 0 {
+			return false, nil
+		}
+		c.only = strings.Join(redo, ",")
+	}
+
 	pong, err := raknet.PingContext(ctx, c.addr)
 	if err != nil {
 		return false, fmt.Errorf("ping %s: %w", c.addr, err)
@@ -255,6 +308,9 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 	}
 	if c.serverVersion == "" {
 		c.serverVersion = ad.Version
+	}
+	if err := checkVersion(c.serverVersion); err != nil {
+		return false, err
 	}
 	say("server version %s, protocol %d", c.serverVersion, ad.Protocol)
 
@@ -288,26 +344,55 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 	say("%d unit(s) joined", len(units))
 
 	r := &calRun{cfg: c, vocab: vocab, con: con, budget: c.maxPlacements, families: map[string]*family{}, derivedBy: map[string]map[string]bool{}}
-	var areas []string
+	// Whatever happened, the lab keeps none of our areas, platforms, marker
+	// or gamerule changes. Cleanup is best effort and reports what it missed.
+	var (
+		areas   []string
+		built   []bay
+		marked  []bay
+		saved   map[string]string
+		cleanCt = context.WithoutCancel(runCtx)
+	)
 	defer func() {
-		// Whatever happened, the lab keeps no area of ours.
+		for _, b := range marked {
+			if err := clearMarker(cleanCt, con, b); err != nil {
+				say("cleanup: marker: %v", err)
+			}
+		}
+		for _, b := range built {
+			if err := clearBay(cleanCt, con, b); err != nil {
+				say("cleanup: bay at %d,%d,%d: %v", b.ox, b.f, b.oz, err)
+			}
+		}
+		if saved != nil {
+			if err := restoreGamerules(con, saved); err != nil {
+				say("cleanup: gamerules: %v", err)
+			}
+		}
 		for _, a := range areas {
 			_, _ = con.Exec("tickingarea remove " + a)
 		}
 	}()
-	for _, cmd := range []string{"gamerule domobspawning false", "gamerule dodaylightcycle false", "gamerule dotiledrops false", "gamerule doweathercycle false"} {
-		if _, err := con.Exec(cmd); err != nil {
-			return false, err
-		}
+	removeStaleAreas(con)
+	if saved, err = readGamerules(con); err != nil {
+		saved = nil
+		return false, err
+	}
+	if err := freezeGamerules(con); err != nil {
+		return false, err
 	}
 	var workers []*worker
 	for i, u := range units {
-		b := bay{ox: int32(c.originX + 24*i), f: int32(c.floorY), oz: int32(c.originZ)}
-		area := fmt.Sprintf("pcal%d", i)
-		if _, err := con.Exec(fmt.Sprintf("tickingarea add circle %d %d %d 2 %s", b.ox, b.f, b.oz, area)); err != nil {
+		b := bayAt(c.originX, c.floorY, c.originZ, i)
+		area := areaName(i)
+		areas = append(areas, area)
+		if err := addArea(con, b, area); err != nil {
 			return false, err
 		}
-		areas = append(areas, area)
+		if err := checkBayEmpty(runCtx, con, b); err != nil {
+			return false, err
+		}
+		built = append(built, b)
 		w := &worker{r: r, u: u, bay: b, log: func(f string, a ...any) { say(u.name+": "+f, a...) }}
 		if err := con.retry(runCtx, fmt.Sprintf("fill %d %d %d %d %d %d stone", b.ox+bayWest, b.f, b.oz+bayNorth, b.ox+bayEast, b.f, b.oz+baySouth), "blocks filled"); err != nil {
 			return false, err
@@ -335,6 +420,13 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 			return ok && h != airHash && u.tracker.Creative()
 		}) {
 			return false, fmt.Errorf("%s: platform not loaded or not creative", u.name)
+		}
+		marked = append(marked, b)
+		if err := checkMarker(runCtx, con, u, b); err != nil {
+			return false, err
+		}
+		if err := clearMarker(runCtx, con, b); err != nil {
+			return false, err
 		}
 		workers = append(workers, w)
 		say("%s ready at its platform", u.name)
@@ -365,12 +457,21 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 		skipped  = map[string]string{}
 		doneN    int
 		wg       sync.WaitGroup
+		panicMu  sync.Mutex
+		panics   []string
 	)
 	for _, w := range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer w.restore(context.WithoutCancel(runCtx))
+			defer func() {
+				if p := recover(); p != nil {
+					panicMu.Lock()
+					panics = append(panics, fmt.Sprintf("%s: panic: %v", w.u.name, p))
+					panicMu.Unlock()
+				}
+			}()
 			for it := range queue {
 				if runCtx.Err() != nil {
 					return
@@ -401,6 +502,9 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 		}()
 	}
 	wg.Wait()
+	for _, p := range panics {
+		say("worker stopped: %s", p)
+	}
 	say("calibration stopped after %s: %d items done, %d clicks", time.Since(start).Round(time.Second), doneN, r.placed.Load())
 
 	var results []*itemResult
@@ -414,6 +518,9 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 			reason := skipped[it.name]
 			if reason == "" {
 				reason = "not reached"
+				if len(panics) > 0 {
+					reason = "not reached: " + strings.Join(panics, "; ")
+				}
 			}
 			notCovered = append(notCovered, it.name+": "+reason)
 		}
@@ -440,19 +547,24 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 		sum.blocks, sum.reachable, sum.unreachable, sum.derived, sum.inferred = tableCounts(t)
 		sum.unplaceable = hdr.Unplaceable
 	}
+	if c.verify {
+		gaps := gapCheck(t)
+		t.Header.FamilyGaps = nil
+		for _, g := range gaps {
+			t.Header.FamilyGaps = append(t.Header.FamilyGaps, g.String())
+		}
+		t.Header.Matrix.Notes = append(t.Header.Matrix.Notes, fmt.Sprintf(
+			"Gap check: blocks whose reachable states differ from their family's majority were run again in full (no inference), place wait %s, %d miss retries; %d still differ (family_gaps).",
+			placeWait, missRetries, len(gaps)))
+		say("after the re-run %d block(s) still differ from their family", len(gaps))
+	}
 	path := filepath.Join(c.out, c.serverVersion+".json.gz")
-	if err := os.MkdirAll(c.out, 0o755); err != nil {
-		return false, err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return false, err
-	}
-	if err := t.Write(f); err != nil {
-		f.Close()
-		return false, err
-	}
-	if err := f.Close(); err != nil {
+	if err := writeTableAtomic(path, t, c.force); err != nil {
+		if errors.Is(err, errShrinks) {
+			if werr := writeTableAtomic(path+".rejected", t, true); werr == nil {
+				say("kept this run's table as %s.rejected", path)
+			}
+		}
 		return false, err
 	}
 	say("wrote %s", path)
@@ -462,6 +574,39 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 		say("PARTIAL: %d item(s) not covered", len(notCovered))
 	}
 	return hdr.Partial, nil
+}
+
+// verifyItems reads the table and names the items to run again: those of the
+// blocks that disagree with their family and those it never covered.
+func verifyItems(path string) ([]string, []gap, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	t, err := place.Read(f)
+	if err != nil {
+		return nil, nil, err
+	}
+	gaps := gapCheck(t)
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range append(gapItems(gaps), notCoveredItems(t.Header.NotCovered)...) {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out, gaps, nil
+}
+
+func notCoveredItems(entries []string) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, itemOf(e))
+	}
+	return out
 }
 
 // itemList turns the creative inventory into the items to calibrate.
