@@ -206,3 +206,23 @@ func TestFetchClearsAnEarlierCopy(t *testing.T) {
 		t.Error("a file of the earlier copy survived")
 	}
 }
+
+func TestFetchDrainsTarPaddingAfterTheArchive(t *testing.T) {
+	s := snapshotter(t, readyConsole(), map[string]string{"db/CURRENT": "MANIFEST-1\n", "db/000001.ldb": "x"})
+	s.Start = func(_ context.Context, _ []string, w io.Writer) error {
+		tarOf(t, map[string]string{"db/CURRENT": "MANIFEST-1\n", "db/000001.ldb": "x"}, w)
+		// GNU tar pads to a 10 KiB record; the reader never asks for it.
+		_, err := w.Write(make([]byte, 10240))
+		return err
+	}
+	errc := make(chan error, 1)
+	go func() { _, err := s.Fetch(context.Background(), t.TempDir()); errc <- err }()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Fetch blocked on the unread tar padding")
+	}
+}
