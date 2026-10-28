@@ -10,8 +10,6 @@ VERSION=${LAB_PREVIEW_VERSION:-1.26.52.3}
 HOST_PORT=${LAB_PREVIEW_PORT:-19146}
 LEVEL=preview
 SINCE=1970-01-01T00:00:00Z
-ROOT=/tmp/lab-preview/$NAME
-DATA=$ROOT/data
 STAGE_PY=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lab-preview-stage.py
 
 usage() {
@@ -28,6 +26,12 @@ USAGE
 }
 
 die() { echo "error: $*" >&2; exit 1; }
+
+# NAME becomes a path that `down` deletes, so it must not escape /tmp/lab-preview.
+[[ $NAME =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && $NAME != *..* ]] ||
+  die "LAB_PREVIEW_NAME must be a plain name (letters, digits, _ . -)"
+ROOT=/tmp/lab-preview/$NAME
+DATA=$ROOT/data
 
 running() { docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null | grep -q true; }
 
@@ -87,6 +91,8 @@ cmd_up() {
   local packs
   packs=$(resolve_packs "$1")
   docker inspect "$NAME" >/dev/null 2>&1 && die "$NAME already exists; run: lab-preview sync  or  lab-preview down"
+  # A failed up must not leave a staged dir or a created container behind.
+  trap 'docker rm -f "$NAME" >/dev/null 2>&1; rm -rf "$ROOT" 2>/dev/null || sudo -n rm -rf "$ROOT"' EXIT
   stage "$packs"
   echo "$packs" >"$ROOT/packs-dir"
   SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -100,6 +106,7 @@ cmd_up() {
   # restage and restart once to get the packs applied.
   stage "$packs" >/dev/null
   restart_and_wait
+  trap - EXIT
   echo "up: $NAME"
   report
 }
