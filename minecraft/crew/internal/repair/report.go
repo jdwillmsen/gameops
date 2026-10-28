@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Report is the per-run damage summary, JSON-ready so a run can be logged
@@ -110,4 +112,58 @@ func sortedKeys(m map[string]int) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Summary is the report on one line of at most max bytes, worst first: the
+// kinds and zones with the most damaged cells lead and the top changes follow.
+// Detail goes first when the line is too long, so the totals always survive.
+// It names no coordinate.
+func (r Report) Summary(max int) string {
+	head := fmt.Sprintf("%d of %d scanned cells damaged in %d rectangles, %d not scanned",
+		r.Damaged, r.Scanned, r.Rects, r.Unscanned)
+	kinds := ranked(r.ByKind)
+	zones := ranked(r.ByZone)
+	tops := make([]string, len(r.Top))
+	for i, c := range r.Top {
+		tops[i] = fmt.Sprintf("%d %s", c.Cells, c.Change)
+	}
+	for nTop := len(tops); ; nTop-- {
+		for nZone := len(zones); nZone >= 0; nZone-- {
+			s := head
+			if len(kinds) > 0 {
+				s += "; " + strings.Join(kinds, ", ")
+			}
+			if nZone > 0 {
+				s += "; zones " + strings.Join(zones[:nZone], ", ")
+			}
+			if nTop > 0 {
+				s += "; top " + strings.Join(tops[:nTop], ", ")
+			}
+			if len(s) <= max || (nTop == 0 && nZone == 0) {
+				return clipTo(s, max)
+			}
+		}
+	}
+}
+
+// ranked lists "name count" by count, largest first.
+func ranked(m map[string]int) []string {
+	keys := sortedKeys(m)
+	sort.SliceStable(keys, func(i, j int) bool { return m[keys[i]] > m[keys[j]] })
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = fmt.Sprintf("%s %d", k, m[k])
+	}
+	return out
+}
+
+func clipTo(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
