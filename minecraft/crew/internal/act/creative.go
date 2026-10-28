@@ -78,7 +78,7 @@ func (a *Actuator) storeCreativeLocked(p *packet.CreativeContent) {
 func (a *Actuator) TakeCreative(item string) error {
 	a.mu.Lock()
 	a.forgetStaleTakesLocked()
-	creativeID, itemID, slot, evict, err := a.planTakeLocked(item)
+	_, _, _, _, err := a.planTakeLocked(item)
 	a.mu.Unlock()
 	if err != nil {
 		return err
@@ -94,7 +94,7 @@ func (a *Actuator) TakeCreative(item string) error {
 	}
 	// The lock was released while the screen opened, and a slot update may
 	// have landed meanwhile: plan again so the destroy quotes what is there.
-	creativeID, itemID, slot, evict, err = a.planTakeLocked(item)
+	creativeID, itemID, slot, evict, err := a.planTakeLocked(item)
 	if err != nil {
 		a.mu.Unlock()
 		return err
