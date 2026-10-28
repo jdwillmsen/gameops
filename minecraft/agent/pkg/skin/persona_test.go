@@ -118,3 +118,31 @@ func TestFromPNGRefusesWrongSizeBeforeDecoding(t *testing.T) {
 		t.Error("a 32x32 PNG was accepted")
 	}
 }
+
+// Units of one role must differ where armour cannot hide it: the face and the
+// hands.
+func TestUnitsOfARoleDifferOnFaceAndHands(t *testing.T) {
+	sig := func(s Skin) string {
+		raw, _ := base64.StdEncoding.DecodeString(s.Data)
+		var b []byte
+		for y := 8; y < 16; y++ { // face front
+			b = append(b, raw[(y*Width+8)*4:(y*Width+16)*4]...)
+		}
+		for _, p := range []block{rightArm, leftArm} { // forearms and hands
+			for y := p.y + p.d + p.h - 3; y < p.y+p.d+p.h; y++ {
+				b = append(b, raw[(y*Width+p.x)*4:(y*Width+p.x+2*(p.w+p.d))*4]...)
+			}
+		}
+		return string(b)
+	}
+	names := []string{"Agate", "Dusty", "Hazel", "Loam", "Pebble", "Basalt", "Ember", "Ingot"}
+	for _, p := range allPersonas {
+		seen := map[string]bool{}
+		for _, n := range names {
+			seen[sig(ForPersona(n, p))] = true
+		}
+		if len(seen) != len(names) {
+			t.Errorf("%+v: only %d distinct face/hand looks across %d units", p, len(seen), len(names))
+		}
+	}
+}
