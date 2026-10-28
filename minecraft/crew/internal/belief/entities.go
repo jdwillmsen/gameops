@@ -19,6 +19,8 @@ type Entity struct {
 	// Pos is the feet.
 	Pos    mgl32.Vec3
 	Player bool
+	// Name is a player's username, empty for anything else.
+	Name string
 	// HeadYaw is where a mob's head faces, in degrees as a unit's own yaw
 	// is: what it looks at is what it is about to go for.
 	HeadYaw float32
@@ -91,7 +93,7 @@ func (e *Entities) Apply(pk packet.Packet) {
 			return
 		}
 		e.unique[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
-		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: "player", Pos: p.Position, Player: true}
+		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: "player", Pos: p.Position, Player: true, Name: p.Username}
 	case *packet.MovePlayer:
 		if en, ok := e.ents[p.EntityRuntimeID]; ok {
 			en.Pos = p.Position.Sub(mgl32.Vec3{0, playerEyeHeight, 0})

@@ -88,3 +88,14 @@ func TestEntitiesTrackWhereAMobsHeadFaces(t *testing.T) {
 		t.Errorf("delta head yaw = %v, want -30", y)
 	}
 }
+
+func TestEntitiesKeepAPlayersName(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddPlayer{EntityRuntimeID: 60, Username: "Rusty"})
+	e.Apply(&packet.AddActor{EntityRuntimeID: 50, EntityType: "minecraft:zombie"})
+	got := listed(e)
+	if got[60].Name != "Rusty" || got[50].Name != "" {
+		t.Errorf("names = %q, %q", got[60].Name, got[50].Name)
+	}
+}
