@@ -30,6 +30,10 @@
 // scorecards carry the squad's damage taken, read from the units before and
 // after the fight; without it they carry zero.
 //
+// The trainer sets TACTICSCTL_DIR (the control directory, read by --control-dir's
+// default) and TRAINER_STOP_FILE (--stop-file's default), so its kill file and
+// training switch stop a fight in progress; an explicit flag overrides each.
+//
 // It refuses (exit 2, no cards) unless training is enabled in the tacticsctl
 // control directory and the target is the crew lab, and it re-checks the kill
 // switch while fighting. A fight that the stop file, the kill switch or the
@@ -137,7 +141,7 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	teamA := fs.String("team-a", "", "duel team that fights with the candidate profile")
 	teamB := fs.String("team-b", "", "duel team that fights with the opponent profile; as many as --team-a")
 	kits := fs.String("kits", "", "comma-separated catalog kits for a duel, one per slot, handed to both teams")
-	stopFile := fs.String("stop-file", "", "end the fight when this file exists")
+	stopFile := fs.String("stop-file", os.Getenv("TRAINER_STOP_FILE"), "end the fight when this file exists (env TRAINER_STOP_FILE, which the trainer sets)")
 	fightTimeout := fs.Duration("fight-timeout", 10*time.Minute, "hard limit for one fight, set-up included")
 	roundTimeout := fs.Duration("round-timeout", 2*time.Minute, "limit for the duel round itself")
 	poll := fs.Duration("poll", 3*time.Second, "delay between standing checks")
