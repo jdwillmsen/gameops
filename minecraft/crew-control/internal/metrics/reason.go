@@ -44,7 +44,7 @@ var reasonRules = []struct {
 	{ReasonServerRejected, []string{"server rejected", "server did not", "did not confirm"}},
 	{ReasonTimeout, []string{"took too long", "timed out", " ticks"}},
 	{ReasonActionFailed, []string{"did not break", "did not land", "never settled", "drifted", "did not come down", "is blocked at its first step"}},
-	{ReasonInvalidTask, []string{"invalid task", "outside the allowed", "outside the area", "unknown template"}},
+	{ReasonInvalidTask, []string{"invalid task", "outside the allowed", "outside the area", "unknown template", "not in creative mode", "more than a unit walks", "hotbar has room"}},
 }
 
 // maxReasonText bounds the text matched: a unit's reason is its own words,
@@ -77,6 +77,7 @@ const TemplateOther = "other"
 var Templates = []string{
 	"gather_and_deposit", "haul", "withdraw", "deposit", "mine_shaft",
 	"goto", "inspect", "observe_blocks", "place_block", "craft",
+	"repair_build", "build_blueprint",
 }
 
 // Template maps a reported template onto the closed set.
