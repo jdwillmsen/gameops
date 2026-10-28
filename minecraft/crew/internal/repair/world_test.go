@@ -182,13 +182,13 @@ func TestWorldReaderRejectsWhatItCannotRead(t *testing.T) {
 func TestCanonicalToleratesDynamicState(t *testing.T) {
 	r := NewWorldReader(nil, ops(t, `setblock 0 40 0 lever ["lever_direction"="up_east_west","open_bit"=false]`+"\n"+
 		`setblock 0 41 0 unpowered_repeater ["minecraft:cardinal_direction"="west","repeater_delay"=0]`))
-	if got := r.canonical("minecraft:lever", map[string]string{"lever_direction": `"up_east_west"`, "open_bit": "true"}); got != `lever ["lever_direction"="up_east_west","open_bit"=false]` {
+	if got := r.match.Canonical("minecraft:lever", map[string]string{"lever_direction": `"up_east_west"`, "open_bit": "true"}); got != `lever ["lever_direction"="up_east_west","open_bit"=false]` {
 		t.Errorf("a toggled lever is not damage, got %q", got)
 	}
-	if got := r.canonical("powered_repeater", map[string]string{"minecraft:cardinal_direction": `"west"`, "repeater_delay": "0"}); got != `unpowered_repeater ["minecraft:cardinal_direction"="west","repeater_delay"=0]` {
+	if got := r.match.Canonical("powered_repeater", map[string]string{"minecraft:cardinal_direction": `"west"`, "repeater_delay": "0"}); got != `unpowered_repeater ["minecraft:cardinal_direction"="west","repeater_delay"=0]` {
 		t.Errorf("a powered repeater is its unpowered plan, got %q", got)
 	}
-	if got := r.canonical("lever", map[string]string{"lever_direction": `"north"`, "open_bit": "false"}); got != `lever ["lever_direction"="north","open_bit"=false]` {
+	if got := r.match.Canonical("lever", map[string]string{"lever_direction": `"north"`, "open_bit": "false"}); got != `lever ["lever_direction"="north","open_bit"=false]` {
 		t.Errorf("a lever facing the wrong way must differ from the plan, got %q", got)
 	}
 }

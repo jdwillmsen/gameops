@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/df-mc/goleveldb/leveldb"
 	"github.com/df-mc/goleveldb/leveldb/opt"
@@ -23,23 +20,6 @@ const (
 	cellsPerSubChunk = 4096
 )
 
-// ignoredStates are block states that change while the arena is used and are
-// not damage: a pressed button, a toggled door or lever, a redstone signal.
-// A plan that names one is not held to it.
-var ignoredStates = map[string]bool{
-	"open_bit": true, "button_pressed_bit": true, "redstone_signal": true,
-	"powered_bit": true, "output_lit_bit": true, "output_subtract_bit": true,
-}
-
-// aliases fold the lit or powered twin of a block into the block the plan
-// names, so the lamp ring in mid-ripple is not reported as replaced.
-var aliases = map[string]string{
-	"lit_redstone_lamp": "redstone_lamp", "powered_repeater": "unpowered_repeater",
-	"powered_comparator": "unpowered_comparator", "lit_furnace": "furnace", "lit_blast_furnace": "blast_furnace",
-	"lit_smoker": "smoker", "lit_redstone_ore": "redstone_ore",
-	"bubble_column": "water", "iron_chain": "chain",
-}
-
 // WorldReader serves blocks from a copy of a Bedrock world's LevelDB. It reads
 // the first (solid) block layer of every sub-chunk, so water held in a second
 // layer is not seen; the plan's water is placed by fill and lives in the first.
@@ -47,14 +27,9 @@ var aliases = map[string]string{
 // A cell in a chunk that was never generated is Unknown. A chunk that exists
 // but lacks a sub-chunk is air, which is how the game stores it.
 type WorldReader struct {
-	db       *leveldb.DB
-	variants map[string][]variant // block name -> the plan's spellings of it
-	closer   func() error
-}
-
-type variant struct {
-	text   string
-	states map[string]string
+	db     *leveldb.DB
+	match  *Matcher
+	closer func() error
 }
 
 // OpenWorld opens the LevelDB directory read-only. plan supplies the spellings
@@ -71,22 +46,7 @@ func OpenWorld(dir string, plan []Op) (*WorldReader, error) {
 
 // NewWorldReader reads from an already open database.
 func NewWorldReader(db *leveldb.DB, plan []Op) *WorldReader {
-	r := &WorldReader{db: db, variants: map[string][]variant{}}
-	seen := map[string]bool{}
-	for _, op := range plan {
-		if seen[op.Block] {
-			continue
-		}
-		seen[op.Block] = true
-		name, states := splitBlock(op.Block)
-		r.variants[name] = append(r.variants[name], variant{text: op.Block, states: states})
-	}
-	for _, vs := range r.variants {
-		// The most specific spelling wins, so a plain `chest` never shadows a
-		// plan that also names the chest's facing.
-		sort.SliceStable(vs, func(i, j int) bool { return len(vs[i].states) > len(vs[j].states) })
-	}
-	return r
+	return &WorldReader{db: db, match: NewMatcher(plan)}
 }
 
 func (r *WorldReader) Close() error {
@@ -228,7 +188,7 @@ func (r *WorldReader) decodeSubChunk(raw []byte, pal *Palette) ([]int32, error) 
 		if name == "" {
 			return nil, fmt.Errorf("palette entry %d has no name", i)
 		}
-		ids[i] = pal.ID(r.canonical(name, renderStates(states)))
+		ids[i] = pal.ID(r.match.Canonical(name, RenderStates(states)))
 	}
 	out := make([]int32, cellsPerSubChunk)
 	for i, k := range idx {
@@ -238,99 +198,4 @@ func (r *WorldReader) decodeSubChunk(raw []byte, pal *Palette) ([]int32, error) 
 		out[i] = ids[k]
 	}
 	return out, nil
-}
-
-func renderStates(m map[string]any) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		switch t := v.(type) {
-		case uint8:
-			out[k] = strconv.FormatBool(t != 0)
-		case int8:
-			out[k] = strconv.FormatBool(t != 0)
-		case string:
-			out[k] = strconv.Quote(t)
-		default:
-			out[k] = fmt.Sprint(t)
-		}
-	}
-	return out
-}
-
-// canonical names a scanned block the way the plan would: the plan's own
-// spelling when one of them is a subset of the scan, otherwise the full
-// sorted states, which will not equal any planned block.
-func (r *WorldReader) canonical(name string, states map[string]string) string {
-	name = strings.TrimPrefix(name, "minecraft:")
-	if a, ok := aliases[name]; ok {
-		name = a
-	}
-	for _, v := range r.variants[name] {
-		match := true
-		for k, want := range v.states {
-			if ignoredStates[k] {
-				continue
-			}
-			if got, ok := states[k]; !ok || got != want {
-				match = false
-				break
-			}
-		}
-		if match {
-			return v.text
-		}
-	}
-	if len(states) == 0 {
-		return name
-	}
-	keys := make([]string, 0, len(states))
-	for k := range states {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		parts[i] = strconv.Quote(k) + "=" + states[k]
-	}
-	return name + " [" + strings.Join(parts, ",") + "]"
-}
-
-// splitBlock separates a normalised block string into its name and states.
-func splitBlock(block string) (string, map[string]string) {
-	name, rest, ok := strings.Cut(block, " [")
-	if !ok {
-		return block, nil
-	}
-	rest = strings.TrimSuffix(rest, "]")
-	states := map[string]string{}
-	var key, val strings.Builder
-	inQuote, inVal := false, false
-	flush := func() {
-		if key.Len() > 0 {
-			k, _ := strconv.Unquote(key.String())
-			states[k] = val.String()
-		}
-		key.Reset()
-		val.Reset()
-		inVal = false
-	}
-	for _, c := range rest {
-		switch {
-		case c == '"':
-			inQuote = !inQuote
-		case c == '=' && !inQuote && !inVal:
-			inVal = true
-			continue
-		case c == ',' && !inQuote:
-			flush()
-			continue
-		}
-		if inVal {
-			val.WriteRune(c)
-		} else {
-			key.WriteRune(c)
-		}
-	}
-	flush()
-	return name, states
 }
