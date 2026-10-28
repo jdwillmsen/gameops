@@ -131,7 +131,9 @@ func (a *Actuator) PlaceBlock(target protocol.BlockPos, item string) error {
 	return a.useOnBlock(against, face, hit, slot, held, hash)
 }
 
-// stockCreative takes the item first when a creative unit holds none of it.
+// stockCreative takes the item first when a creative unit holds none of it on
+// the hotbar. A stack in the backpack does not count: moving it up needs a
+// free slot, which a hotbar of taken stacks lacks, and a take makes room.
 func (a *Actuator) stockCreative(item string) error {
 	a.mu.Lock()
 	if !a.creativeLocked() {
@@ -143,7 +145,7 @@ func (a *Actuator) stockCreative(item string) error {
 		a.mu.Unlock()
 		return nil
 	}
-	for _, s := range a.inv {
+	for _, s := range a.inv[:hotbarSlots] {
 		if s.Stack.NetworkID == id && s.Stack.Count > 0 {
 			a.mu.Unlock()
 			return nil

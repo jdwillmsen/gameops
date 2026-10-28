@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/go-gl/mathgl/mgl32"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,9 +57,12 @@ type creativeServer struct {
 	stop     chan struct{}
 	done     sync.WaitGroup
 	// silent withholds every answer.
-	silent bool
+	silent atomic.Bool
 	// screen is whether the inventory screen is open on the server.
 	screen bool
+	// onOpen runs as the screen opens, to change the inventory between a
+	// take's plan and its request.
+	onOpen func()
 	// taken counts the accepted takes, so each stack gets its own ID.
 	taken int32
 }
@@ -92,12 +96,15 @@ func (cs *creativeServer) serve() {
 			switch p := pk.(type) {
 			case *packet.Interact:
 				cs.screen = true
+				if cs.onOpen != nil {
+					cs.onOpen()
+				}
 				cs.a.Apply(&packet.ContainerOpen{WindowID: creativeWindow, ContainerType: 0xff, ContainerEntityUniqueID: -1})
 			case *packet.ContainerClose:
 				cs.screen = false
 				cs.a.Apply(&packet.ContainerClose{WindowID: p.WindowID, ContainerType: 247})
 			case *packet.ItemStackRequest:
-				if !cs.silent {
+				if !cs.silent.Load() {
 					cs.a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{cs.judge(p.Requests[0])}})
 				}
 			}
@@ -269,7 +276,7 @@ func TestTakeCreativeNamesEachFailure(t *testing.T) {
 func TestTakeCreativeGivesUpOnASilentServer(t *testing.T) {
 	a, s := newCreativeAct(true)
 	srv := serveCreative(a, s, true)
-	srv.silent = true
+	srv.silent.Store(true)
 	defer srv.close()
 	start := time.Now()
 	err := a.TakeCreative("stone")
@@ -458,5 +465,35 @@ func TestTakeCreativeForgetsASlotThatNoLongerHoldsWhatItTook(t *testing.T) {
 	}
 	if err := a.TakeCreative("oak_stairs"); !errors.Is(err, ErrHotbarFull) {
 		t.Fatalf("err = %v, want ErrHotbarFull once the server replaced every taken stack", err)
+	}
+}
+
+func TestPlaceBlockTakesCreativelyWhenTheItemOnlySitsInTheBackpack(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	a, s := newCreativeAct(true)
+	a.solid = stoneBelow(target)
+	a.pose = Pose{Feet: mgl32.Vec3{1.5, 1, 2.5}, OnGround: true}
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	for i := 0; i < hotbarSlots; i++ {
+		if err := a.TakeCreative("stone"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stairs := protocol.ItemInstance{StackNetworkID: 90, Stack: protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: creativeOakStair}, Count: 5}}
+	a.Apply(&packet.InventorySlot{WindowID: 0, Slot: 20, NewItem: stairs})
+
+	if err := a.PlaceBlock(target, "oak_stairs"); err != nil {
+		t.Fatalf("place with the stairs only in the backpack: %v", err)
+	}
+	s.mu.Lock()
+	last := s.got[len(s.got)-1]
+	s.mu.Unlock()
+	tx, ok := last.(*packet.InventoryTransaction)
+	if !ok {
+		t.Fatalf("last packet is %T, want the placement click", last)
+	}
+	if u := tx.TransactionData.(*protocol.UseItemTransactionData); u.HeldItem.Stack.NetworkID != creativeOakStair {
+		t.Errorf("click held %+v, want the stairs", u.HeldItem)
 	}
 }
