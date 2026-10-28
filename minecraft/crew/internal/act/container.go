@@ -303,6 +303,7 @@ func (a *Actuator) Died() {
 	a.reqItem = map[int32]int32{}
 	a.abandoned = map[int32]bool{}
 	a.replacing = map[int32]int{}
+	a.takes = map[int32]creativeTake{}
 	a.move = 0
 	a.crafts = newCraftState()
 }
@@ -375,6 +376,13 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			}
 			if r.Status == StatusOK {
 				a.applyWindow0Locked(r, item)
+			}
+			if tk, ok := a.takes[r.RequestID]; ok {
+				delete(a.takes, r.RequestID)
+				if r.Status == StatusOK {
+					a.takenItem[tk.slot] = tk.item
+					a.touchSlot(tk.slot)
+				}
 			}
 		}
 		a.crafts.noteLocked(p)
