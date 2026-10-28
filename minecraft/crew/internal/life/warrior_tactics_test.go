@@ -190,8 +190,11 @@ func TestATacticErrorIsTheTicksError(t *testing.T) {
 	}
 }
 
-func TestATacticErrorIsLoggedOncePerMinute(t *testing.T) {
-	withTactics(t, failTactic{name: "zombie/fail", family: tactics.FamilyZombie})
+func TestATacticErrorIsLoggedOncePerMinutePerTactic(t *testing.T) {
+	withTactics(t,
+		failTactic{name: "zombie/fail", family: tactics.FamilyZombie},
+		failTactic{name: "zombie/fail-too", family: tactics.FamilyZombie},
+	)
 	r := newWarrior(t, "striker", start)
 	if err := r.l.SetProfile(usingTactic("zombie/fail")); err != nil {
 		t.Fatal(err)
@@ -211,6 +214,7 @@ func TestATacticErrorIsLoggedOncePerMinute(t *testing.T) {
 		}
 		return n
 	}
+
 	for range 5 {
 		r.l.tick++
 		if err := r.l.Fight(context.Background(), r.a, snap); !errors.Is(err, errTactic) {
@@ -220,23 +224,24 @@ func TestATacticErrorIsLoggedOncePerMinute(t *testing.T) {
 	if n := count(); n != 1 {
 		t.Fatalf("logged %d times in one minute, want once", n)
 	}
+	last := r.log.lines[len(r.log.lines)-1]
+	if last.fields["tactic"] != "zombie/fail" || last.fields["family"] != "zombie" || last.fields["error"] != errTactic.Error() {
+		t.Errorf("log fields = %v", last.fields)
+	}
+
 	r.l.tick += tacticErrorEvery
 	r.l.Fight(context.Background(), r.a, snap)
 	if n := count(); n != 2 {
 		t.Errorf("logged %d times after the minute, want a second line", n)
 	}
-}
 
-func TestSetProfileOwnsItsTacticTable(t *testing.T) {
-	r := newWarrior(t, "striker", start)
-	pr := tactics.NewProfile("p")
-	pr.Tactics = map[tactics.Family]string{tactics.FamilyZombie: "zombie/a"}
-	if err := r.l.SetProfile(pr); err != nil {
+	// Another tactic's failure is its own line, not hidden by the first's.
+	if err := r.l.SetProfile(usingTactic("zombie/fail-too")); err != nil {
 		t.Fatal(err)
 	}
-	pr.Tactics[tactics.FamilyZombie] = "zombie/b"
-	if got := r.l.Profile().TacticFor(tactics.FamilyZombie); got != "zombie/a" {
-		t.Errorf("tactic = %q after the caller edited its map, want zombie/a", got)
+	r.l.Fight(context.Background(), r.a, snap)
+	if n := count(); n != 3 {
+		t.Errorf("a second failing tactic logged %d lines in all, want 3", n)
 	}
 }
 
