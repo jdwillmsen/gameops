@@ -10,9 +10,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-// Approval is the owner's signed sign-off for one exact profile hash. Nothing
+// NoProduction is the signed previous hash of an approval made while production
+// runs the shipped default.
+const NoProduction = "none"
+
+// Approval is the owner's signed sign-off for one exact profile hash, valid
+// only until Expires and only while production's live profile still has the
+// hash in Prev (or runs the default, for NoProduction). Nothing
 // in this package creates one on its own: NewApproval needs the approver's
 // private key, which only the `tacticsctl approve` command (run by a human at
 // a terminal) is given. Promote only ever reads approvals.
@@ -21,19 +28,37 @@ type Approval struct {
 	Hash     string `json:"hash"`
 	Approver string `json:"approver"`
 	TS       string `json:"ts"`
+	Prev     string `json:"prev"`
+	Expires  string `json:"expires"`
 	Sig      string `json:"sig"`
 }
 
-func approvalMessage(hash, approver, ts string) []byte {
-	return []byte("tacticsctl-approval-v1\n" + hash + "\n" + approver + "\n" + ts)
+// approvalMessage covers every field Promote relies on, Profile included: the
+// name is what a reader sees, so it must not be swappable after signing.
+func approvalMessage(profile, hash, approver, ts, prev, expires string) []byte {
+	return []byte("tacticsctl-approval-v2\n" + profile + "\n" + hash + "\n" + approver + "\n" + ts + "\n" + prev + "\n" + expires)
 }
 
-// NewApproval signs an approval of pr by approver.
-func NewApproval(priv ed25519.PrivateKey, pr string, hash, approver, ts string) Approval {
+// NewApproval signs an approval of pr by approver. prev is the hash production
+// runs now (NoProduction for the default) and expires an RFC 3339 deadline.
+func NewApproval(priv ed25519.PrivateKey, pr string, hash, approver, ts, prev, expires string) Approval {
 	return Approval{
-		Profile: pr, Hash: hash, Approver: approver, TS: ts,
-		Sig: hex.EncodeToString(ed25519.Sign(priv, approvalMessage(hash, approver, ts))),
+		Profile: pr, Hash: hash, Approver: approver, TS: ts, Prev: prev, Expires: expires,
+		Sig: hex.EncodeToString(ed25519.Sign(priv, approvalMessage(pr, hash, approver, ts, prev, expires))),
 	}
+}
+
+// ProductionHash is what an approval's Prev must equal: the hash of the profile
+// production runs, or NoProduction when it runs the default.
+func (s *Store) ProductionHash() (string, error) {
+	p, ok, err := s.Pointer(Production)
+	if err != nil {
+		return "", err
+	}
+	if !ok || p.Name == DefaultName || p.Hash == "" {
+		return NoProduction, nil
+	}
+	return p.Hash, nil
 }
 
 func (s *Store) approvalPath(hash string) string {
@@ -109,7 +134,7 @@ func (s *Store) verify(a Approval, strict bool) error {
 		return err
 	}
 	sig, err := hex.DecodeString(a.Sig)
-	if err != nil || !ed25519.Verify(pub, approvalMessage(a.Hash, a.Approver, a.TS), sig) {
+	if err != nil || !ed25519.Verify(pub, approvalMessage(a.Profile, a.Hash, a.Approver, a.TS, a.Prev, a.Expires), sig) {
 		return errors.New("tacticsctl: approval signature does not verify")
 	}
 	return nil
@@ -139,7 +164,10 @@ func (s *Store) Approval(hash string) (Approval, error) {
 //   - the profile names the scorecards that justified it;
 //   - a signed approval from a trusted approver names this profile's exact
 //     hash, so editing the profile after approval, or approving a different
-//     one, does not pass. The approval is spent by the promotion.
+//     one, does not pass. The approval is spent by the promotion;
+//   - that approval has not expired and names, as the profile production runs
+//     now, the one production really runs, so an approval made for one state
+//     cannot be applied to another.
 //
 // This is the only command that writes production, besides rollback.
 func (s *Store) Promote(name string) error {
@@ -169,6 +197,9 @@ func (s *Store) Promote(name string) error {
 	if a.Profile != pr.Name {
 		return fmt.Errorf("tacticsctl: approval %s is for %q, not %q", h, a.Profile, pr.Name)
 	}
+	if err := s.checkFresh(a); err != nil {
+		return err
+	}
 	// Spent before production changes, and not given back if a later step
 	// fails: an approval that might still be usable after the profile went
 	// live is worse than asking the human to approve again.
@@ -179,6 +210,52 @@ func (s *Store) Promote(name string) error {
 		return err
 	}
 	return s.point(Production, "promote", name, h)
+}
+
+// checkFresh refuses an approval that has expired, has no deadline, or was
+// made for a different production state. A used approval copied back into
+// place after a rollback is stopped by the spent-signature check, and by this
+// one whenever production no longer runs what it did when approved.
+func (s *Store) checkFresh(a Approval) error {
+	exp, err := time.Parse(time.RFC3339, a.Expires)
+	if err != nil {
+		return fmt.Errorf("tacticsctl: approval for %q has no valid expiry; approve it again", a.Profile)
+	}
+	if !s.now().Before(exp) {
+		return fmt.Errorf("tacticsctl: approval for %q expired at %s; approve it again", a.Profile, a.Expires)
+	}
+	if a.Prev == "" {
+		return fmt.Errorf("tacticsctl: approval for %q does not name the production profile it replaces; approve it again", a.Profile)
+	}
+	cur, err := s.ProductionHash()
+	if err != nil {
+		return err
+	}
+	if a.Prev != cur {
+		return fmt.Errorf("tacticsctl: approval for %q was made while production ran %s, but it runs %s now; approve it again", a.Profile, a.Prev, cur)
+	}
+	if s.spent(a) {
+		return fmt.Errorf("tacticsctl: approval for %q was already used; approve it again", a.Profile)
+	}
+	return nil
+}
+
+// spent reports whether an identical signature sits in approvals/used. The
+// previous-hash check cannot tell production before a promotion from production
+// after a rollback to the same profile, so a spent signature is refused here.
+func (s *Store) spent(a Approval) bool {
+	files, _ := filepath.Glob(filepath.Join(s.Root, "approvals", "used", a.Hash+"-*.json"))
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var u Approval
+		if json.Unmarshal(b, &u) == nil && u.Sig == a.Sig {
+			return true
+		}
+	}
+	return false
 }
 
 // consumeApproval moves the approval for hash out of the live approvals, so it

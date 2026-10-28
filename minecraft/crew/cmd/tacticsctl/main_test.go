@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
@@ -275,5 +276,35 @@ func TestApproveRefusesSymlinkedKey(t *testing.T) {
 	os.Symlink(filepath.Join(e.keys, "owner.key"), link)
 	if _, err := e.do("x\n", true, "approve", "g1", "--by", "owner", "--key", link); err == nil {
 		t.Error("approve read its private key through a symlink")
+	}
+}
+
+func TestApproveSignsPreviousHashAndExpiry(t *testing.T) {
+	e := newEnv(t)
+	e.profile("g1", "")
+	args := []string{"approve", "g1", "--by", "owner", "--key", filepath.Join(e.keys, "owner.key"), "--valid-for", "2h"}
+	prompt, _ := e.do("", true, args...)
+	if !strings.Contains(prompt, "replacing production none") {
+		t.Errorf("prompt does not say what is replaced: %q", prompt)
+	}
+	if _, err := e.do(prompt[strings.Index(prompt, "hash ")+5:][:12]+"\n", true, args...); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(filepath.Join(e.dir, "approvals", "*.json"))
+	if len(files) != 1 {
+		t.Fatalf("approvals = %v", files)
+	}
+	b, _ := os.ReadFile(files[0])
+	var a struct{ Prev, Expires, TS string }
+	if err := json.Unmarshal(b, &a); err != nil {
+		t.Fatal(err)
+	}
+	ts, err1 := time.Parse(time.RFC3339, a.TS)
+	exp, err2 := time.Parse(time.RFC3339, a.Expires)
+	if a.Prev != "none" || err1 != nil || err2 != nil || exp.Sub(ts) != 2*time.Hour {
+		t.Errorf("approval = %+v", a)
+	}
+	if _, err := e.do("x\n", true, "approve", "g1", "--by", "owner", "--key", filepath.Join(e.keys, "owner.key"), "--valid-for", "0s"); err == nil {
+		t.Error("a zero lifetime was accepted")
 	}
 }

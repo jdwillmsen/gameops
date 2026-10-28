@@ -1,6 +1,7 @@
 package tacticsctl
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
@@ -9,14 +10,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
 
 type fixture struct {
-	t    *testing.T
-	s    *Store
-	priv ed25519.PrivateKey
+	t     *testing.T
+	s     *Store
+	priv  ed25519.PrivateKey
+	signs int
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -72,10 +75,27 @@ func (f *fixture) lab(name string) {
 
 func (f *fixture) approve(pr tactics.Profile) {
 	f.t.Helper()
-	h, _ := Hash(pr)
-	if err := f.s.SaveApproval(NewApproval(f.priv, pr.Name, h, "owner", "2026-10-27T00:00:00Z")); err != nil {
+	if err := f.s.SaveApproval(f.sign(pr, "owner")); err != nil {
 		f.t.Fatal(err)
 	}
+}
+
+const farFuture = "2099-01-01T00:00:00Z"
+
+// sign makes the approval a human would make now: for production as it stands,
+// valid far into the future.
+func (f *fixture) sign(pr tactics.Profile, by string) Approval {
+	f.t.Helper()
+	h, _ := Hash(pr)
+	prev, err := f.s.ProductionHash()
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	// A fresh approval differs from an earlier one in its timestamp, as a human's
+	// does, so it is not mistaken for a spent signature.
+	f.signs++
+	ts := time.Date(2026, 10, 27, 0, 0, f.signs, 0, time.UTC).Format(time.RFC3339)
+	return NewApproval(f.priv, pr.Name, h, by, ts, prev, farFuture)
 }
 
 func TestTrainingDisabledByDefault(t *testing.T) {
@@ -251,7 +271,7 @@ func TestPromoteRefusesWrongHash(t *testing.T) {
 	stale := tactics.NewProfile("g1")
 	stale.Default.ShotEvery = 99
 	sh, _ := Hash(stale)
-	a := NewApproval(f.priv, "g1", sh, "owner", "t")
+	a := NewApproval(f.priv, "g1", sh, "owner", "t", NoProduction, farFuture)
 	b, _ := Hash(f.mustCandidate("g1"))
 	os.MkdirAll(filepath.Join(f.s.Root, "approvals"), 0o755)
 	data := strings.Replace(mustJSON(a), sh, b, 1)
@@ -275,10 +295,10 @@ func TestPromoteRefusesUntrustedOrForgedApprover(t *testing.T) {
 	h, _ := Hash(pr)
 
 	_, evil, _ := ed25519.GenerateKey(rand.Reader)
-	if err := f.s.SaveApproval(NewApproval(evil, "g1", h, "owner", "t")); err == nil {
+	if err := f.s.SaveApproval(NewApproval(evil, "g1", h, "owner", "t", NoProduction, farFuture)); err == nil {
 		t.Error("approval signed by a key that is not the trusted one was saved")
 	}
-	if err := f.s.SaveApproval(NewApproval(evil, "g1", h, "intruder", "t")); err == nil {
+	if err := f.s.SaveApproval(NewApproval(evil, "g1", h, "intruder", "t", NoProduction, farFuture)); err == nil {
 		t.Error("approval from an unregistered approver was saved")
 	}
 	if err := f.s.Promote("g1"); err == nil {
@@ -286,7 +306,7 @@ func TestPromoteRefusesUntrustedOrForgedApprover(t *testing.T) {
 	}
 
 	// Even a forged file dropped straight into approvals/ is rejected.
-	bad := NewApproval(evil, "g1", h, "owner", "t")
+	bad := NewApproval(evil, "g1", h, "owner", "t", NoProduction, farFuture)
 	os.MkdirAll(filepath.Dir(f.s.approvalPath(h)), 0o755)
 	os.WriteFile(f.s.approvalPath(h), []byte(mustJSON(bad)), 0o644)
 	if err := f.s.Promote("g1"); err == nil {
@@ -338,7 +358,7 @@ func TestPromoteRequiresApprovalNamingTheProfile(t *testing.T) {
 	f := newFixture(t)
 	pr := f.candidate("g1", "", 35)
 	h, _ := Hash(pr)
-	if err := f.s.SaveApproval(NewApproval(f.priv, "something-else", h, "owner", "t")); err != nil {
+	if err := f.s.SaveApproval(NewApproval(f.priv, "something-else", h, "owner", "t", NoProduction, farFuture)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.s.Promote("g1"); err == nil {
@@ -593,7 +613,7 @@ func TestNoApprovalWithoutThePrivateKey(t *testing.T) {
 
 	// An agent can write files, but it cannot sign for a trusted approver.
 	_, agentKey, _ := ed25519.GenerateKey(rand.Reader)
-	forged := NewApproval(agentKey, "g1", h, "owner", "2026-10-27T00:00:00Z")
+	forged := NewApproval(agentKey, "g1", h, "owner", "2026-10-27T00:00:00Z", NoProduction, farFuture)
 	if err := f.s.SaveApproval(forged); err == nil {
 		t.Error("SaveApproval accepted a signature from a key that is not the approver's")
 	}
@@ -812,5 +832,129 @@ func TestDefaultDirFollowsTheEnvironmentThenHome(t *testing.T) {
 	t.Setenv("HOME", "/home/someone")
 	if got := DefaultDir(); got != "/home/someone/.local/state/crew-tactics" {
 		t.Errorf("DefaultDir without env = %q", got)
+	}
+}
+
+func TestPromoteRefusesExpiredOrUndatedApproval(t *testing.T) {
+	f := newFixture(t)
+	g1 := f.candidate("g1", "", 35)
+	f.lab("g1")
+	h, _ := Hash(g1)
+	save := func(a Approval) {
+		t.Helper()
+		if err := f.s.SaveApproval(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	save(NewApproval(f.priv, "g1", h, "owner", "2026-10-27T00:00:00Z", NoProduction, "2026-10-27T01:00:00Z"))
+	f.s.now = func() time.Time { return time.Date(2026, 10, 27, 1, 0, 0, 0, time.UTC) }
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Errorf("approval at its deadline = %v, want expired", err)
+	}
+
+	save(NewApproval(f.priv, "g1", h, "owner", "2026-10-27T00:00:00Z", NoProduction, ""))
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "expiry") {
+		t.Errorf("approval with no expiry = %v", err)
+	}
+	save(NewApproval(f.priv, "g1", h, "owner", "2026-10-27T00:00:00Z", "", farFuture))
+	if err := f.s.Promote("g1"); err == nil || !strings.Contains(err.Error(), "does not name") {
+		t.Errorf("approval with no previous hash = %v", err)
+	}
+	if _, ok, _ := f.s.Pointer(Production); ok {
+		t.Error("a refused approval still moved production")
+	}
+
+	f.s.now = func() time.Time { return time.Date(2026, 10, 27, 0, 59, 59, 0, time.UTC) }
+	save(NewApproval(f.priv, "g1", h, "owner", "2026-10-27T00:00:00Z", NoProduction, "2026-10-27T01:00:00Z"))
+	if err := f.s.Promote("g1"); err != nil {
+		t.Errorf("approval one second before its deadline: %v", err)
+	}
+}
+
+func TestApprovalIsBoundToTheProductionItReplaces(t *testing.T) {
+	f := newFixture(t)
+	g1 := f.candidate("g1", "", 35)
+	g2 := f.candidate("g2", "g1", 40)
+	f.lab("g1")
+	f.lab("g2")
+
+	// Approved while production ran the default, then g1 went live first.
+	f.approve(g2)
+	f.approve(g1)
+	if err := f.s.Promote("g1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Promote("g2"); err == nil || !strings.Contains(err.Error(), "production ran none") {
+		t.Fatalf("approval made for the default applied over g1 = %v", err)
+	}
+
+	f.approve(g2)
+	if err := f.s.Promote("g2"); err != nil {
+		t.Errorf("approval made for the production it replaces: %v", err)
+	}
+}
+
+func TestSignedFieldsCannotBeEdited(t *testing.T) {
+	f := newFixture(t)
+	g1 := f.candidate("g1", "", 35)
+	f.lab("g1")
+	h, _ := Hash(g1)
+	a := NewApproval(f.priv, "g1", h, "owner", "2026-10-27T00:00:00Z", NoProduction, "2000-01-01T00:00:00Z")
+	a.Expires = farFuture
+	os.MkdirAll(filepath.Dir(f.s.approvalPath(h)), 0o755)
+	os.WriteFile(f.s.approvalPath(h), []byte(mustJSON(a)), 0o644)
+	if err := f.s.Promote("g1"); err == nil {
+		t.Error("an approval with an extended expiry promoted a profile")
+	}
+	a = NewApproval(f.priv, "g1", h, "owner", "2026-10-27T00:00:00Z", "deadbeef", farFuture)
+	a.Prev = NoProduction
+	os.WriteFile(f.s.approvalPath(h), []byte(mustJSON(a)), 0o644)
+	if err := f.s.Promote("g1"); err == nil {
+		t.Error("an approval with an edited previous hash promoted a profile")
+	}
+}
+
+func TestUsedApprovalCopiedBackFailsAfterRollback(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		to   string
+	}{{"to default", "default"}, {"to the previous profile", "g1"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			g1 := f.candidate("g1", "", 35)
+			g2 := f.candidate("g2", "g1", 40)
+			f.lab("g2")
+			f.lab("g1")
+			f.approve(g1)
+			if err := f.s.Promote("g1"); err != nil {
+				t.Fatal(err)
+			}
+			f.approve(g2)
+			h2, _ := Hash(g2)
+			live, _ := os.ReadFile(f.s.approvalPath(h2))
+			if err := f.s.Promote("g2"); err != nil {
+				t.Fatal(err)
+			}
+			used, _ := filepath.Glob(filepath.Join(f.s.Root, "approvals", "used", h2+"-*.json"))
+			if len(used) != 1 {
+				t.Fatalf("spent approvals = %v", used)
+			}
+			if err := f.s.Rollback(Production, tc.to); err != nil {
+				t.Fatal(err)
+			}
+
+			copied, _ := os.ReadFile(used[0])
+			if !bytes.Equal(copied, live) {
+				t.Fatal("the used file is not the approval that was spent")
+			}
+			os.WriteFile(f.s.approvalPath(h2), copied, 0o644)
+			if err := f.s.Promote("g2"); err == nil {
+				t.Error("a used approval copied back promoted again after a rollback")
+			}
+			if p, _, _ := f.s.Pointer(Production); p.Name != tc.to {
+				t.Errorf("production = %q after the refused replay, want %q", p.Name, tc.to)
+			}
+		})
 	}
 }

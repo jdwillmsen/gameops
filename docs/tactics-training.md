@@ -135,18 +135,25 @@ needs a human:
    been the lab's profile before it can be promoted.
 3. **The owner approves it with their own key**, at a terminal:
    `tacticsctl approve <profile> --by <name> --key <private-key-file>`.
-   The approval names the profile's exact hash. `approve` and `keygen` refuse
-   without a terminal. The key file must be a regular file owned by the caller
+   The approval signs the profile's exact hash, the hash production runs now
+   (or `none` for the default) and an expiry (`--valid-for`, default 24 h).
+   `approve` and `keygen` refuse without a terminal. The key file must be a regular file owned by the caller
    with mode 600.
 4. `tacticsctl --trust /etc/crew-tactics-trust --store <trainer-store> promote <profile> --to production`.
    Promote refuses unless the trust directory passes the checks below. With
    `--store` (or `TRAINER_STORE`) the profile's scorecards file must exist in
    the trainer store; without it only the path's shape is checked, and the
    command prints a note saying so.
-5. An approval is **single-use**: a successful promote moves it to
-   `<dir>/approvals/used/`. Promoting the same profile again, for example after
-   a rollback, needs a fresh `approve`.
-6. Roll back with `tacticsctl rollback production` (to the parent), or
+5. `promote` refuses an approval that has expired, has no expiry or previous
+   hash, or whose previous hash is not what production's `LIVE` pointer holds
+   now, so an approval cannot be applied over a production state the owner did
+   not see.
+6. An approval is **single-use**: a successful promote moves it to
+   `<dir>/approvals/used/`, kept as a record. A used file copied back is refused
+   by the previous-hash check once production has moved, and by a spent-signature
+   check where it has not (a rollback to the profile that was live before looks
+   the same by hash). Promoting the same profile again needs a fresh `approve`.
+7. Roll back with `tacticsctl rollback production` (to the parent), or
    `--to default`. Production only returns to a profile it already ran.
 
 ### Where the approver key lives
