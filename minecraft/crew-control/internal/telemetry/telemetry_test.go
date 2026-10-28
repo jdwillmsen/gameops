@@ -103,6 +103,33 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+func withRole(body, role string) string {
+	return strings.Replace(body, `"unit":{"id":"crew-01","name":"Ada"}`, fmt.Sprintf(`"unit":{"id":"crew-01","name":"Ada","role":%q}`, role), 1)
+}
+
+func TestPollerReportsAClosedSetOfRoles(t *testing.T) {
+	unit := newFakeUnit(t, withRole(stateKnownWithTask, "mender"))
+	p := startPoller(t, rosterFor(t, unit.server.URL), 20*time.Millisecond)
+	waitFor(t, "mender", func() bool { return p.Snapshot()[0].Role == "mender" })
+
+	unit.set(200, withRole(stateKnownWithTask, "builder"))
+	waitFor(t, "builder", func() bool { return p.Snapshot()[0].Role == "builder" })
+
+	for _, bad := range []string{"<b>admin</b>", "medic", "Mender"} {
+		unit.set(200, withRole(stateKnownWithTask, bad))
+		waitFor(t, "role dropped: "+bad, func() bool { return p.Snapshot()[0].Role == "" })
+	}
+	unit.set(200, stateKnownWithTask)
+	waitFor(t, "a unit with no role", func() bool { return p.Snapshot()[0].Role == "" && p.Snapshot()[0].Online })
+}
+
+func TestStatusJSONOmitsAnEmptyRole(t *testing.T) {
+	b, err := json.Marshal(Status{ID: "crew-01"})
+	if err != nil || strings.Contains(string(b), "role") {
+		t.Errorf("status = %s, %v", b, err)
+	}
+}
+
 func TestPollerMapsState(t *testing.T) {
 	unit := newFakeUnit(t, stateKnownWithTask)
 	p := startPoller(t, rosterFor(t, unit.server.URL), 20*time.Millisecond)

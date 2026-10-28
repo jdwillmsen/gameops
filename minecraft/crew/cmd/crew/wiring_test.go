@@ -371,6 +371,15 @@ func TestBuilderRolesStayOffTheWarriorPath(t *testing.T) {
 	}
 }
 
+func TestStatusReportsEveryRole(t *testing.T) {
+	for _, role := range []config.Role{"", "ranger", "mender", "builder"} {
+		got := unitInfo(config.Config{UnitID: "crew-20", Username: "Tinder", Role: role})
+		if got.ID != "crew-20" || got.Name != "Tinder" || got.Role != string(role) {
+			t.Errorf("role %q: unit = %+v", role, got)
+		}
+	}
+}
+
 func TestCreativeInventorySentBeforeTheActuatorReachesIt(t *testing.T) {
 	tracker := belief.New(time.Now)
 	tracker.Spawn(7, mgl32.Vec3{}, 0, 0, 0)

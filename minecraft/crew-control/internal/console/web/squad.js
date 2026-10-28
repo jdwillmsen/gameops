@@ -5,6 +5,10 @@ const ROLE_LABELS = { vanguard: 'Vanguard', striker: 'Striker', ranger: 'Ranger'
 
 export const roleLabel = role => ROLE_LABELS[role] || role || 'member';
 
+// The role a unit's own status reports, or '' for a unit with none, so a tile
+// or row shows a badge only when there is something to say.
+export const statusRole = s => (s && ROLE_LABELS[s.role] ? roleLabel(s.role) : '');
+
 // The server sends callouts newest first, which is also the order the panel
 // logs them in.
 export function lastCallout(callouts, unit) {

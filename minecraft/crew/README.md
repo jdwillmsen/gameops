@@ -115,6 +115,11 @@ unit refuses to start unless `CREW_LAB=true`. The lab's chart or compose sets
 it; the live server's never does. Nothing is probed on the network, the
 variable is the whole guard.
 
+The role reaches crew-control and the console through the status API, not a
+squad hello (the squad API refuses builder roles): `/v1/state` carries
+`unit.role`, and crew-control's poller keeps it only if it is one of
+`vanguard`, `striker`, `ranger`, `mender` or `builder`.
+
 ## Water
 
 Water is not solid to the unit's body, but planned paths still never enter or

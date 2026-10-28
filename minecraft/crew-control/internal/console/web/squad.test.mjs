@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { roleLabel, lastCallout, orderLine } from './squad.js';
+import { roleLabel, statusRole, lastCallout, orderLine } from './squad.js';
 
 test('role badges are the claimed roles', () => {
   assert.equal(roleLabel('vanguard'), 'Vanguard');
@@ -35,4 +35,13 @@ test('the order line names the kind and target', () => {
   assert.equal(orderLine(null), 'no order');
   assert.equal(orderLine({ kind: 'hold' }), 'hold');
   assert.equal(orderLine({ kind: 'focus', target: 'captain' }), 'focus captain');
+});
+
+test('a unit status shows a badge only for a role it knows', () => {
+  assert.equal(statusRole({ role: 'mender' }), 'Mender');
+  assert.equal(statusRole({ role: 'builder' }), 'Builder');
+  assert.equal(statusRole({ role: 'ranger' }), 'Ranger');
+  assert.equal(statusRole({ role: '<b>x</b>' }), '');
+  assert.equal(statusRole({}), '');
+  assert.equal(statusRole(undefined), '');
 });

@@ -111,7 +111,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	// server, and a unit whose sign-in or control-plane lookup is slow would
 	// otherwise be restarted before it ever answered. /readyz stays 503 until
 	// the unit is in the world.
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, statusapi.Unit{ID: cfg.UnitID, Name: cfg.Username}, hub, runner, cfg.TasksToken, statusapi.WithFight(lf)), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusapi.WithFight(lf)), ReadHeaderTimeout: 5 * time.Second}
 	var statusFailed atomic.Bool
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
