@@ -41,3 +41,35 @@ func (a *Actuator) ClickBlock(against protocol.BlockPos, face int32, hit mgl32.V
 	}
 	return a.useOnBlock(against, face, hit, slot, held, hash)
 }
+
+// ClickAir holds item and uses it on nothing, as a client does when the
+// crosshair is on air or a liquid; the server picks the target from the look
+// the unit's inputs carry. A bucket places or takes liquid this way.
+func (a *Actuator) ClickAir(item string) error {
+	if err := a.stockCreative(item); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	slot, held, err := a.holdItem(item)
+	if err != nil {
+		return err
+	}
+	if err := a.w.WritePacket(&packet.MobEquipment{
+		EntityRuntimeID: a.runtimeID,
+		NewItem:         held,
+		InventorySlot:   byte(slot),
+		HotBarSlot:      byte(slot),
+	}); err != nil {
+		return err
+	}
+	return a.w.WritePacket(&packet.InventoryTransaction{TransactionData: &protocol.UseItemTransactionData{
+		ActionType:       protocol.UseItemActionClickAir,
+		TriggerType:      protocol.TriggerTypePlayerInput,
+		HotBarSlot:       int32(slot),
+		Hand:             protocol.HandSlotMainHand,
+		HeldItem:         held,
+		Position:         a.pose.Feet.Add(mgl32.Vec3{0, eyeHeight, 0}),
+		ClientPrediction: protocol.ClientPredictionSuccess,
+	}})
+}
