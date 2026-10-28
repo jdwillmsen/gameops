@@ -70,6 +70,7 @@ func export(args []string) error {
 
 var roster = []skin.Persona{
 	{Role: "miner"}, {Role: "chopper"}, {Role: "hauler"}, {Role: "shaft"},
+	{Role: "mender"}, {Role: "builder"},
 	{Role: "warrior", SquadRole: "vanguard"}, {Role: "warrior", SquadRole: "striker"}, {Role: "warrior", SquadRole: "ranger"},
 }
 

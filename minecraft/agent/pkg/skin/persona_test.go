@@ -12,7 +12,7 @@ import (
 
 var allPersonas = []Persona{
 	{Role: "miner"}, {Role: "chopper"}, {Role: "hauler"}, {Role: "shaft"},
-	{Role: "warrior"}, {Role: "warrior", SquadRole: "vanguard"},
+	{Role: "mender"}, {Role: "builder"}, {Role: "warrior"}, {Role: "warrior", SquadRole: "vanguard"},
 	{Role: "warrior", SquadRole: "striker"}, {Role: "warrior", SquadRole: "ranger"},
 }
 

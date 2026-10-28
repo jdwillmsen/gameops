@@ -10,6 +10,8 @@ role always give the same skin.
 | chopper | plaid flannel in the unit's accent colour, beard |
 | hauler | flat cap, tan vest over blue shirt, pack on the back |
 | shaft | white helmet, orange hi-vis jacket with reflective bands |
+| mender | white coat with a green cross, white cap with a green band |
+| builder | white striped cap, tan work apron over an accent-colour shirt, tool belt |
 | warrior | iron plate; tabard red (vanguard), purple (striker), green hooded (ranger) |
 
 Armour covers an outfit but not a face or hands, so each unit also has marks
