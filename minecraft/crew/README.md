@@ -441,6 +441,30 @@ also holds `total`, `placed`, `already_correct`, `cleared` and, for a `dry_run`,
 record only, not in crew-control's events. A cell with no solid neighbour yet is
 tried again after the others, then fails the task naming only the block.
 
+
+`repair_build` is for a `mender` unit in creative mode (any other role gets
+409). It diffs an area of the larger Colosseum against the generator's plan
+from the blocks the unit has loaded, then restores it: it breaks what should be
+air and places the planned block, in the console planner's order. `area` is an
+inclusive box, at most 64 blocks on each axis, wholly inside the Colosseum's
+build box (the lab square `goto` uses stops short of it, so that box is the
+bound); `plan` is `colosseum`; `dry_run` is optional and only reports:
+
+```json
+{"template": "repair_build", "plan": "colosseum", "dry_run": true,
+ "area": {"min": {"x": -320, "y": 60, "z": -770}, "max": {"x": -300, "y": 70, "z": -750}}}
+```
+
+The result is one line on the finished task's `reason`: damaged cells by kind
+(`missing`, `intruder`, `replaced`) and by zone, worst first, then the top
+changes; a real run leads with what it repaired and ends with what is still
+wrong. Cells the unit has no chunk for are never touched. Blocks with no item,
+and blocks that are right except for a state a click cannot set (a stair's
+facing), are left and counted. A task fails, naming `arenarepair`, when the
+damage is over 1000 cells or needs more block types than the nine hotbar slots,
+and while a hostile mob or a player outside the crew names is within 32 blocks.
+The mender must start within walking distance, on loaded chunks.
+
 Crew runs one task at a time. A session end or death fails the running task
 (`session ended`, `unit died`) and queued tasks wait for the next spawn.
 Bodies are capped at 4096 bytes (413) and at most 16 tasks may wait (429).
