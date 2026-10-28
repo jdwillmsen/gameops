@@ -2,3 +2,5 @@ entity.gameops:training_dummy_brute.name=Training Dummy Brute
 item.spawn_egg.entity.gameops:training_dummy_brute.name=Training Dummy Brute Spawn Egg
 entity.gameops:werewolf.name=Werewolf
 item.spawn_egg.entity.gameops:werewolf.name=Werewolf Spawn Egg
+entity.gameops:ground_dragon.name=Ground Dragon
+item.spawn_egg.entity.gameops:ground_dragon.name=Ground Dragon Spawn Egg

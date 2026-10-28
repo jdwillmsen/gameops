@@ -8,7 +8,7 @@ moves). `tools/check-packs.sh` validates every folder.
 
 | Folder | Mobs | Pack version | Notes |
 |---|---|---|---|
-| `lab-mods-stage0` | `gameops:training_dummy_brute`, `gameops:werewolf` | 0.0.3 | First add-on; arena opponents |
+| `lab-mods-stage0` | `gameops:training_dummy_brute`, `gameops:werewolf`, `gameops:ground_dragon` | 0.0.4 | First add-on; arena opponents and the ground dragon boss |
 
 Keep this table current when a pack is added, split or versioned.
 

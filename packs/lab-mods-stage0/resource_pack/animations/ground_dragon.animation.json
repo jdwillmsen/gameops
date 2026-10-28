@@ -1,0 +1,181 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.gameops.ground_dragon.walk": {
+      "loop": true,
+      "bones": {
+        "front_right_leg": {
+          "rotation": [
+            "math.cos(query.modified_distance_moved * 18.0) * 40 * query.modified_move_speed",
+            0,
+            0
+          ]
+        },
+        "hind_left_leg": {
+          "rotation": [
+            "math.cos(query.modified_distance_moved * 18.0) * 40 * query.modified_move_speed",
+            0,
+            0
+          ]
+        },
+        "front_left_leg": {
+          "rotation": [
+            "math.cos(query.modified_distance_moved * 18.0) * -40 * query.modified_move_speed",
+            0,
+            0
+          ]
+        },
+        "hind_right_leg": {
+          "rotation": [
+            "math.cos(query.modified_distance_moved * 18.0) * -40 * query.modified_move_speed",
+            0,
+            0
+          ]
+        },
+        "body": {
+          "rotation": [
+            0,
+            "math.cos(query.modified_distance_moved * 18.0) * 3.0 * query.modified_move_speed",
+            0
+          ]
+        },
+        "tail1": {
+          "rotation": [
+            0,
+            "math.cos(query.modified_distance_moved * 18.0 - 25) * 5 * query.modified_move_speed",
+            0
+          ]
+        },
+        "tail2": {
+          "rotation": [
+            0,
+            "math.cos(query.modified_distance_moved * 18.0 - 50) * 6 * query.modified_move_speed",
+            0
+          ]
+        },
+        "tail3": {
+          "rotation": [
+            0,
+            "math.cos(query.modified_distance_moved * 18.0 - 75) * 7 * query.modified_move_speed",
+            0
+          ]
+        },
+        "tail4": {
+          "rotation": [
+            0,
+            "math.cos(query.modified_distance_moved * 18.0 - 100) * 8 * query.modified_move_speed",
+            0
+          ]
+        },
+        "tail5": {
+          "rotation": [
+            0,
+            "math.cos(query.modified_distance_moved * 18.0 - 125) * 9 * query.modified_move_speed",
+            0
+          ]
+        }
+      }
+    },
+    "animation.gameops.ground_dragon.attack": {
+      "loop": true,
+      "bones": {
+        "neck": {
+          "rotation": [
+            "20.0 * math.sin(variable.attack_time * 180.0)",
+            0,
+            0
+          ]
+        },
+        "head": {
+          "rotation": [
+            "-15.0 * math.sin(variable.attack_time * 180.0)",
+            0,
+            0
+          ]
+        },
+        "jaw": {
+          "rotation": [
+            "45.0 * math.sin(variable.attack_time * 180.0)",
+            0,
+            0
+          ]
+        },
+        "tail1": {
+          "rotation": [
+            0,
+            "25.0 * math.sin(variable.attack_time * 180.0)",
+            0
+          ]
+        },
+        "tail3": {
+          "rotation": [
+            0,
+            "-30.0 * math.sin(variable.attack_time * 180.0)",
+            0
+          ]
+        }
+      }
+    },
+    "animation.gameops.ground_dragon.look": {
+      "loop": true,
+      "bones": {
+        "head": {
+          "rotation": [
+            "math.clamp(query.target_x_rotation, -30.0, 30.0)",
+            "math.clamp(query.target_y_rotation, -60.0, 60.0)",
+            0
+          ]
+        },
+        "wing_right": {
+          "rotation": [
+            0,
+            0,
+            "math.sin(query.life_time * 90.0) * 3.0"
+          ]
+        },
+        "wing_left": {
+          "rotation": [
+            0,
+            0,
+            "math.sin(query.life_time * 90.0) * -3.0"
+          ]
+        },
+        "tail1": {
+          "rotation": [
+            0,
+            "math.sin(query.life_time * 120.0 - 30) * 7",
+            0
+          ]
+        },
+        "tail2": {
+          "rotation": [
+            0,
+            "math.sin(query.life_time * 120.0 - 60) * 9",
+            0
+          ]
+        },
+        "tail3": {
+          "rotation": [
+            0,
+            "math.sin(query.life_time * 120.0 - 90) * 11",
+            0
+          ]
+        },
+        "tail4": {
+          "rotation": [
+            0,
+            "math.sin(query.life_time * 120.0 - 120) * 13",
+            0
+          ]
+        },
+        "tail5": {
+          "rotation": [
+            0,
+            "math.sin(query.life_time * 120.0 - 150) * 15",
+            0
+          ]
+        }
+      }
+    }
+  }
+}
