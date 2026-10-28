@@ -44,6 +44,10 @@ var nameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 type Store struct {
 	Root     string
 	TrustDir string
+	// EvidenceStore is the trainer store that holds the scorecards a promoted
+	// profile names. When set, Promote requires the named file to exist; when
+	// empty it can only check the path's shape.
+	EvidenceStore string
 	// trustDefaulted records that the caller named no trust directory. The
 	// fallback sits inside the state agents write to, so it is good enough to
 	// browse a store but never to promote from.
@@ -219,23 +223,47 @@ func (s *Store) copyLineage(st Stage, pr tactics.Profile) error {
 	}
 }
 
+// point makes name the stage's live profile and records it in HISTORY. LIVE is
+// written first and put back if the history line cannot be written, so a
+// failure leaves neither a pointer that history does not explain nor a history
+// entry (which gates promotion and rollback) for a profile that never ran.
 func (s *Store) point(st Stage, action, name, hash string) error {
 	p := Pointer{Name: name, Hash: hash, Since: s.ts()}
 	b, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(s.stageDir(st), livePointer), append(b, '\n'), 0o644); err != nil {
+	livePath := filepath.Join(s.stageDir(st), livePointer)
+	prev, prevErr := os.ReadFile(livePath)
+	if err := writeAtomic(livePath, append(b, '\n'), 0o644); err != nil {
 		return err
 	}
 	line, _ := json.Marshal(historyEntry{TS: p.Since, Action: action, Name: name, Hash: hash})
+	if err := s.appendHistory(st, append(line, '\n')); err != nil {
+		var restore error
+		if prevErr == nil {
+			restore = writeAtomic(livePath, prev, 0o644)
+		} else {
+			restore = os.Remove(livePath)
+		}
+		if restore != nil {
+			return fmt.Errorf("tacticsctl: history write failed (%w) and the %s pointer could not be restored: %v", err, st, restore)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) appendHistory(st Stage, line []byte) error {
 	f, err := os.OpenFile(filepath.Join(s.stageDir(st), historyFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(append(line, '\n'))
-	return err
+	if _, err := f.Write(line); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (s *Store) history(st Stage) []historyEntry {

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 )
@@ -30,7 +31,7 @@ func (s *Store) Lock(f tactics.Family) (release func(), err error) {
 		return nil, err
 	}
 	path := filepath.Join(fd, "lock")
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|noFollow, 0o644)
 	if err != nil {
 		return nil, err
 	}
@@ -49,10 +50,40 @@ func (s *Store) Lock(f tactics.Family) (release func(), err error) {
 	if err := file.Truncate(0); err == nil {
 		file.WriteAt([]byte(strconv.Itoa(os.Getpid())+"\n"), 0)
 	}
+	s.mu.Lock()
+	if s.held == nil {
+		s.held = map[tactics.Family]int{}
+	}
+	s.held[f]++
+	s.mu.Unlock()
+	var once sync.Once
 	return func() {
-		// Closing drops the flock; the file stays so the next holder reuses it.
-		file.Close()
+		once.Do(func() {
+			s.mu.Lock()
+			s.held[f]--
+			s.mu.Unlock()
+			// Closing drops the flock; the file stays so the next holder reuses it.
+			file.Close()
+		})
 	}, nil
+}
+
+// withLock runs fn under the family's training lock. A caller that already
+// holds it through Lock (Run does, for the whole run) just proceeds; anyone
+// else takes it for the duration of fn and fails with ErrLocked if another
+// trainer has it, so a stray writer cannot interleave with a live run.
+func (s *Store) withLock(f tactics.Family, fn func() error) error {
+	s.mu.Lock()
+	mine := s.held[f] > 0
+	s.mu.Unlock()
+	if !mine {
+		release, err := s.Lock(f)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	return fn()
 }
 
 func holderPID(file *os.File) string {

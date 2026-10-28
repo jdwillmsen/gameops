@@ -29,8 +29,8 @@ func TestPairedTest(t *testing.T) {
 	if p := newPairedTest([]float64{5, -6, 4, -5, 1, -2}); p.P < 0.2 {
 		t.Errorf("noise p = %v", p.P)
 	}
-	if p := newPairedTest([]float64{3, 3, 3}); p.P != 0 {
-		t.Errorf("constant gain p = %v", p.P)
+	if p := newPairedTest([]float64{3, 3, 3}); p.P != 0.125 {
+		t.Errorf("constant gain p = %v, want the sign-test bound 0.5^3 and never 0", p.P)
 	}
 	if p := newPairedTest([]float64{0, 0, 0}); p.P != 1 {
 		t.Errorf("constant tie p = %v", p.P)

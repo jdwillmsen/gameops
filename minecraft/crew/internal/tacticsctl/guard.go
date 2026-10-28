@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -17,6 +18,16 @@ import (
 // empty, unreadable or garbled file means disabled, so a wiped volume or a
 // half-written file can never start a trainer by accident.
 const TrainingFile = "training"
+
+// DefaultDir is the control state directory every tool falls back to, so the
+// trainer and tacticsctl agree on where the switch lives without being told.
+func DefaultDir() string {
+	if d := os.Getenv("TACTICSCTL_DIR"); d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state", "crew-tactics")
+}
 
 // TrainingEnabled is the one question trainers and lab units ask before every
 // run and every fight.
@@ -37,24 +48,32 @@ var forbidden = map[string]bool{
 	"fwb": true, "prd": true, "prod": true, "production": true, "live": true,
 }
 
-// LabOnly accepts a lab target (a compose service or k8s:<namespace>/<pod>)
-// only when one of its words is "lab" and none names a real-player server.
-// The allowlist is the rule; the forbidden list only catches names like
-// "fwb-lab" that would otherwise slip through it.
+var (
+	// crewLabToken is the lab's own name as a whole token, so "crew-lab-0"
+	// counts and "crew-labx" or "acrew-lab" do not.
+	crewLabToken = regexp.MustCompile(`(^|[^a-z0-9])crew-lab([^a-z0-9]|$)`)
+	labSquadID   = regexp.MustCompile(`^lab-[a-z0-9-]+$`)
+)
+
+// LabOnly accepts a target only when it is positively the crew lab: it
+// carries the token "crew-lab" (a compose service, or the pod of a
+// k8s:<namespace>/<pod>), or it is a lab squad id, "lab-" and a name. A bare
+// word "lab" is not enough, because any namespace can be called that. The
+// allowlist is the rule; the forbidden list only catches names like
+// "crew-lab-prod" that would otherwise slip through it.
 func LabOnly(target string) error {
-	words := strings.FieldsFunc(strings.ToLower(target), func(r rune) bool {
+	lower := strings.ToLower(target)
+	if strings.Contains(lower, "fwb") {
+		return fmt.Errorf("%w: %q names a real-player server", ErrNotLab, target)
+	}
+	for _, w := range strings.FieldsFunc(lower, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	isLab := false
-	for _, w := range words {
+	}) {
 		if forbidden[w] {
 			return fmt.Errorf("%w: %q names a real-player server", ErrNotLab, target)
 		}
-		if w == "lab" {
-			isLab = true
-		}
 	}
-	if !isLab {
+	if !crewLabToken.MatchString(lower) && !labSquadID.MatchString(lower) {
 		return fmt.Errorf("%w: %q", ErrNotLab, target)
 	}
 	return nil

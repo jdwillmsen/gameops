@@ -3,7 +3,8 @@
 // Evaluator, so the loop is testable offline and the same code drives the lab.
 //
 // Every loop here is capped (generations, fights, wall clock, consecutive
-// evaluator failures) and stops on a kill switch (a flag file or a context).
+// evaluator failures) and stops on a kill switch (a flag file, the tacticsctl
+// training switch or a context).
 package trainer
 
 import (
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 )
 
 // Scenario is one fight to score. Seed is shared by the champion and every
@@ -45,7 +47,13 @@ const (
 	StopFailures    = "failures"
 	StopKilled      = "killed"
 	StopCancelled   = "cancelled"
+	// StopDisabled means the training switch is off or missing.
+	StopDisabled = "disabled"
 )
+
+// minPairsFloor is the fewest paired fights a promotion may rest on. With
+// fewer, a lucky streak is indistinguishable from an improvement.
+const minPairsFloor = 5
 
 // Config is the whole run. The four caps are mandatory: Validate rejects a
 // config that leaves any of them unset, so no loop can be uncapped.
@@ -66,6 +74,13 @@ type Config struct {
 	Budget         time.Duration
 	MaxFailures    int
 	KillFile       string
+	// ControlDir is the tacticsctl state directory. Training runs only while
+	// its switch file says "on"; a missing file stops the run, so a wiped
+	// volume can never start one.
+	ControlDir string
+	// MinPairs is the fewest paired fights a promotion may rest on; zero
+	// means minPairsFloor, and nothing below it is accepted.
+	MinPairs int
 
 	Seed     int64
 	Mu       int     // parents kept per generation
@@ -113,6 +128,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Base.Name == "" {
 		c.Base = tactics.NewProfile("base")
+	}
+	if c.MinPairs == 0 {
+		c.MinPairs = minPairsFloor
 	}
 	if c.Mu == 0 {
 		c.Mu = 3
@@ -165,6 +183,10 @@ func (c Config) Validate() error {
 		return errors.New("trainer: wall-clock budget must be positive")
 	case c.MaxFailures <= 0:
 		return errors.New("trainer: max consecutive failures must be positive")
+	case c.ControlDir == "":
+		return errors.New("trainer: a control directory is required for the training switch")
+	case c.MinPairs < minPairsFloor:
+		return fmt.Errorf("trainer: a promotion needs at least %d paired fights", minPairsFloor)
 	case c.Mu < 1 || c.Lambda < 1:
 		return errors.New("trainer: mu and lambda must be at least 1")
 	case c.Evals < 2:
@@ -241,6 +263,9 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, cfg.Budget)
 	defer cancel()
 
+	if !tacticsctl.TrainingEnabled(r.ControlDir) {
+		return Result{RunID: r.RunID, Family: r.Family, StopReason: StopDisabled}, nil
+	}
 	release, err := r.Store.Lock(r.Family)
 	if err != nil {
 		return Result{}, err
@@ -318,6 +343,9 @@ func (r *run) checkStop(ctx context.Context) string {
 			return StopKilled
 		}
 	}
+	if !tacticsctl.TrainingEnabled(r.ControlDir) {
+		return StopDisabled
+	}
 	switch {
 	case ctx.Err() != nil && !r.Now().Before(r.deadline):
 		return StopBudget
@@ -342,7 +370,7 @@ func (r *run) fight(ctx context.Context, p tactics.Profile, s Scenario) ([]tacti
 	r.fights++
 	cards, err := r.Eval.Evaluate(ctx, p, s)
 	if err != nil {
-		if reason := r.checkStop(ctx); reason == StopCancelled || reason == StopBudget || reason == StopKilled {
+		if reason := r.checkStop(ctx); reason == StopCancelled || reason == StopBudget || reason == StopKilled || reason == StopDisabled {
 			return nil, 0, false, stopErr{reason}
 		}
 		r.failures++
@@ -575,7 +603,7 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []geno
 		for j, s := range c.scores {
 			diffs[j] = s - champScores[c.idx[j]]
 		}
-		if len(diffs) < 2 {
+		if len(diffs) < r.MinPairs {
 			continue
 		}
 		t := newPairedTest(diffs)
@@ -594,6 +622,9 @@ func (r *run) generation(ctx context.Context, gen int, champ Record, pool []geno
 		// challengers would otherwise promote luck.
 		alpha := r.Alpha / float64(children)
 		if best.test.Mean > r.Margin && best.test.P < alpha {
+			if !tacticsctl.TrainingEnabled(r.ControlDir) {
+				return stat, champ, sigma, pool, stopErr{StopDisabled}
+			}
 			rec, err := r.promote(gen, champ, best.c, champCards, best.test)
 			if err != nil {
 				return stat, champ, sigma, pool, err

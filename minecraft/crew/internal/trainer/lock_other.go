@@ -9,6 +9,8 @@ import (
 
 var errWouldBlock = errors.New("lock held")
 
+const noFollow = 0
+
 // Training is lab tooling that runs on the Linux devbox; refusing here is
 // safer than training without the lock.
 func flockExclusive(*os.File) error {

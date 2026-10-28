@@ -10,6 +10,10 @@ import (
 
 var errWouldBlock = errors.New("lock held")
 
+// noFollow stops the lock file from being a planted symlink to a file the
+// trainer would then truncate.
+const noFollow = syscall.O_NOFOLLOW
+
 func flockExclusive(f *os.File) error {
 	for {
 		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
