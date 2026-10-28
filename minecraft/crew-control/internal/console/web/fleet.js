@@ -42,7 +42,7 @@ export function taskLine(s) {
   if (!s.online) return '-';
   if (!s.task) return 'idle';
   const t = s.task;
-  const what = t.template.replace('gather_and_deposit', 'gather');
+  const what = t.template.replace('gather_and_deposit', 'gather').replace('repair_build', 'repair').replace('build_blueprint', 'build');
   return t.qty ? `${what} ${t.progress}/${t.qty}` : what;
 }
 

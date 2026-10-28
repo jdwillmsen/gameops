@@ -24,6 +24,8 @@ test('taskLine', () => {
   assert.equal(taskLine(u('a', { online: false })), '-');
   assert.equal(taskLine(u('a', { task: { template: 'gather_and_deposit', progress: 3, qty: 8 } })), 'gather 3/8');
   assert.equal(taskLine(u('a', { task: { template: 'goto', progress: 0, qty: 0 } })), 'goto');
+  assert.equal(taskLine(u('a', { task: { template: 'repair_build', progress: 0, qty: 0 } })), 'repair');
+  assert.equal(taskLine(u('a', { task: { template: 'build_blueprint', progress: 12, qty: 80 } })), 'build 12/80');
 });
 
 test('sortUnits is stable, unknown numbers sort last, desc reverses', () => {

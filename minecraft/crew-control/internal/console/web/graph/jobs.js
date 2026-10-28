@@ -58,6 +58,8 @@ export function taskText(t) {
   }
   if (kind === 'inspect') return `inspect${point(t.chest)}`;
   if (kind === 'mine_shaft') return 'dig a shaft';
+  if (kind === 'repair_build') return `repair ${t.plan}${t.dry_run ? ' (dry run)' : ''}`;
+  if (kind === 'build_blueprint') return `build ${t.blueprint}${t.dry_run ? ' (dry run)' : ''}`;
   if (kind === 'craft') return `craft ${t.item} x${t.count}`;
   return kind;
 }

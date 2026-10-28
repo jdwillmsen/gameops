@@ -133,6 +133,8 @@ test('describeItem', () => {
   assert.equal(describeItem({ kind: 'task', body: { template: 'gather_and_deposit', item: 'oak_log', qty: 8 } }), 'gather oak_log x8');
   assert.equal(describeItem({ kind: 'task', body: { template: 'haul', items: { cobblestone: 64 } } }), 'haul cobblestone x64');
   assert.equal(describeItem({ kind: 'task', body: { template: 'goto', to: { x: 1, y: 2, z: 3 } } }), 'go to 1 2 3');
+  assert.equal(describeItem({ kind: 'task', body: { template: 'repair_build', plan: 'colosseum', dry_run: true } }), 'repair colosseum (dry run)');
+  assert.equal(describeItem({ kind: 'task', body: { template: 'build_blueprint', blueprint: 'small_house' } }), 'build small_house');
   assert.equal(describeItem({ kind: 'command', body: { name: 'stop' } }), 'stop');
   assert.equal(describeItem({ kind: 'task', body: null }), 'task');
 });

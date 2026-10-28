@@ -41,6 +41,8 @@ test('jobModel: a job without steps answers empty columns, not a crash', () => {
 });
 
 test('taskText: the known templates get a readable line, anything else its own word', () => {
+  assert.equal(taskText({ template: 'repair_build', plan: 'colosseum', dry_run: true }), 'repair colosseum (dry run)');
+  assert.equal(taskText({ template: 'build_blueprint', blueprint: 'small_house' }), 'build small_house');
   assert.equal(taskText({ template: 'gather_and_deposit', item: 'oak_log', qty: 16 }), 'gather oak_log x16');
   assert.equal(taskText({ template: 'haul', items: { oak_log: 8, coal: 2 } }), 'haul oak_log x8, coal x2');
   assert.equal(taskText({ template: 'inspect', chest: { x: 1, y: 2, z: 3 } }), 'inspect 1 2 3');
