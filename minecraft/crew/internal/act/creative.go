@@ -27,6 +27,10 @@ const creativeTakeDeadline = 5 * time.Second
 // unlimited, so a take is needed once per block type, not once per block.
 const creativeStack = 64
 
+// abandonHorizon is how long the books on a take nobody got an answer to are
+// kept: an answer later than this is not coming.
+const abandonHorizon = time.Minute
+
 var (
 	// ErrNotCreative says the unit is not in creative mode, as known to the
 	// client or as the server answered.
@@ -73,6 +77,7 @@ func (a *Actuator) storeCreativeLocked(p *packet.CreativeContent) {
 // unit's own inventory screen open.
 func (a *Actuator) TakeCreative(item string) error {
 	a.mu.Lock()
+	a.forgetStaleTakesLocked()
 	creativeID, itemID, slot, evict, err := a.planTakeLocked(item)
 	a.mu.Unlock()
 	if err != nil {
@@ -140,6 +145,7 @@ func (a *Actuator) TakeCreative(item string) error {
 	a.nextRequest -= 2
 	// The answer never names the item.
 	a.reqItem[req] = itemID
+	a.takes[req] = creativeTake{slot: slot, item: itemID, at: a.now()}
 	a.mu.Unlock()
 
 	status, err := a.awaitStatus(req, deadline)
@@ -152,10 +158,6 @@ func (a *Actuator) TakeCreative(item string) error {
 	}
 	switch status {
 	case StatusOK:
-		a.mu.Lock()
-		a.takenItem[slot] = itemID
-		a.touchSlot(slot)
-		a.mu.Unlock()
 		a.craftLog("creative_take", map[string]any{"item": item})
 		return nil
 	case StatusInvalidCraft:
@@ -166,6 +168,19 @@ func (a *Actuator) TakeCreative(item string) error {
 		return fmt.Errorf("%w: status %d", ErrBadSource, status)
 	}
 	return fmt.Errorf("%w: status %d", ErrRejected, status)
+}
+
+// forgetStaleTakesLocked drops the books on takes that went unanswered past
+// the horizon, which would otherwise stay until the unit died.
+func (a *Actuator) forgetStaleTakesLocked() {
+	for req, tk := range a.takes {
+		if a.now().Sub(tk.at) > abandonHorizon {
+			delete(a.takes, req)
+			delete(a.reqItem, req)
+			delete(a.replacing, req)
+			delete(a.abandoned, req)
+		}
+	}
 }
 
 // touchSlot notes that the unit just took or held the item in a hotbar slot.

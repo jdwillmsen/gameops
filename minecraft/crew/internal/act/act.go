@@ -128,6 +128,16 @@ type Actuator struct {
 	// slot: the answer names no items, so the slot must be cleared before the
 	// answer fills it with the new one.
 	replacing map[int32]int
+	// takes holds the creative takes awaiting an answer, so the answer, even
+	// a late one nobody waits for, records the slot as the unit's own.
+	takes map[int32]creativeTake
+}
+
+// creativeTake is a creative take in flight.
+type creativeTake struct {
+	slot int
+	item int32
+	at   time.Time
 }
 
 type CorrectionLogger interface {
@@ -143,7 +153,7 @@ func New(w PacketWriter, runtimeID uint64, start Pose, solid Solid) *Actuator {
 	return &Actuator{
 		w: w, runtimeID: runtimeID, solid: solid, pose: start,
 		tick: firstTick, nextRequest: -3, reqItem: map[int32]int32{},
-		responses: map[int32]uint8{}, abandoned: map[int32]bool{}, replacing: map[int32]int{},
+		responses: map[int32]uint8{}, abandoned: map[int32]bool{}, replacing: map[int32]int{}, takes: map[int32]creativeTake{},
 		now: time.Now, crafts: newCraftState(),
 	}
 }

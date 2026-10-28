@@ -521,3 +521,83 @@ func TestTakeCreativeRechecksTheSlotAfterTheScreenOpens(t *testing.T) {
 		t.Errorf("slot 0 = %+v, want the foreign stack untouched", got)
 	}
 }
+func TestALateAnswerToATimedOutTakeIsRecordedAndEvictable(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	srv.silent.Store(true)
+	if err := a.TakeCreative("oak_stairs"); err == nil {
+		t.Fatal("take answered by a silent server")
+	}
+	reqs := stackRequests(s)
+	r := reqs[len(reqs)-1].Requests[0]
+	d := destroyOf(t, r)
+	slot := int(d.Source.Slot)
+
+	const lateStackID = 777
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: r.RequestID,
+		ContainerInfo: []protocol.StackResponseContainerInfo{{
+			Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+			SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: byte(slot), HotbarSlot: byte(slot), Count: creativeStack, StackNetworkID: lateStackID}},
+		}},
+	}}})
+
+	a.mu.Lock()
+	got, taken, used := a.inv[slot], a.takenItem[slot], a.slotUse[slot]
+	leaks := len(a.reqItem) + len(a.replacing) + len(a.abandoned) + len(a.takes)
+	a.mu.Unlock()
+	if got.Stack.NetworkID != creativeOakStair || got.StackNetworkID != lateStackID {
+		t.Errorf("slot %d = %+v, want the late stairs stack", slot, got)
+	}
+	if taken != creativeOakStair || used == 0 {
+		t.Errorf("slot %d recorded as item %d used at %d, want the stairs and a use time", slot, taken, used)
+	}
+	if leaks != 0 {
+		t.Errorf("%d bookkeeping entries left for an answered request", leaks)
+	}
+
+	// Evictable: the next take may replace it, quoting the late stack's ID.
+	srv.silent.Store(false)
+	for i := 0; i < hotbarSlots; i++ {
+		a.mu.Lock()
+		a.slotUse[i] = uint64(100 + i)
+		a.mu.Unlock()
+	}
+	a.mu.Lock()
+	a.slotUse[slot] = 1
+	a.mu.Unlock()
+	if err := a.TakeCreative("stone"); err != nil {
+		t.Fatal(err)
+	}
+	reqs = stackRequests(s)
+	if d := destroyOf(t, reqs[len(reqs)-1].Requests[0]); int(d.Source.Slot) != slot || d.Source.StackNetworkID != lateStackID {
+		t.Errorf("destroy = %+v, want slot %d quoting stack %d", d.Source, slot, lateStackID)
+	}
+}
+
+func TestAnAbandonedTakeThatNeverGetsAnswerIsForgottenAfterTheHorizon(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	srv.silent.Store(true)
+	if err := a.TakeCreative("stone"); err == nil {
+		t.Fatal("take answered by a silent server")
+	}
+	a.mu.Lock()
+	for req, tk := range a.takes {
+		tk.at = tk.at.Add(-2 * abandonHorizon)
+		a.takes[req] = tk
+	}
+	a.mu.Unlock()
+	srv.silent.Store(false)
+	if err := a.TakeCreative("stone"); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n := len(a.reqItem) + len(a.abandoned) + len(a.takes) + len(a.replacing); n != 0 {
+		t.Errorf("%d entries left for the request nobody answered", n)
+	}
+}
