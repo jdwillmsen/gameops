@@ -335,3 +335,22 @@ func TestDirectorRunProducesScorecards(t *testing.T) {
 		})
 	}
 }
+
+func TestRecorderCapsKillsAtTheSpawnedCount(t *testing.T) {
+	meta := recMeta
+	meta.Spawned = 3
+	r := &Recorder{Meta: meta}
+	r.FightStart(time.Now())
+	r.MobsKilled(2)
+	r.MobsKilled(4)
+	if got := r.Finish(tactics.OutcomeWin, 10).Kills; got != 3 {
+		t.Errorf("kills = %d, want the 3 mobs that were spawned", got)
+	}
+
+	r = &Recorder{Meta: recMeta}
+	r.FightStart(time.Now())
+	r.MobsKilled(9)
+	if got := r.Finish(tactics.OutcomeWin, 10).Kills; got != 9 {
+		t.Errorf("kills with an unknown spawn count = %d, want the inferred 9", got)
+	}
+}

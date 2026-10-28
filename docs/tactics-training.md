@@ -74,9 +74,38 @@ is not the crew lab: the target must contain the token `crew-lab`, or be a
 `lab-` squad id.
 
 A duel scenario needs two squads (`--squad-b lab-bravo` for the `--team-b`
-units), because a squad has one profile. The bridge puts the shipped default
-back on every exit path. `--profile-dir <dir>` remains as the file-based
-alternative to `--squad-url`.
+units), because a squad has one profile. A lab squad id is `lab-` followed by
+lowercase letters, digits and dashes; anything else is refused before a request
+is made, and crew-control applies the same rule.
+
+The bridge treats a squad as a single-user resource:
+
+- It takes an exclusive lock on `<control-dir>/squad-<id>.lock` for the whole
+  fight and waits for another run's lock until its own fight timeout. Two
+  trainers on one squad would otherwise overwrite each other's candidate and
+  score the wrong profile.
+- After the `PUT` it reads the profile back and requires the squad to serve
+  exactly the pushed profile (same hash). It waits `--apply-wait` (default 6 s,
+  one unit poll) and reads again. A unit that failed a fetch holds its old
+  profile for up to 30 s, and the unit exposes no applied-profile signal, so
+  this confirms what the route serves, not what the unit runs; leave the squad
+  idle between runs. If either read differs the bridge fights nothing, prints
+  one aborted card and exits 1.
+- It puts the shipped default back on every exit path, including a `PUT` whose
+  answer was lost.
+
+`--profile-dir <dir>` is not an evaluation path: no unit reads files from it.
+It exists only behind `--dry-run`, which writes the candidate as
+`<dir>/<unit>.json`, prints what it wrote, fights nothing, prints no scorecards
+and exits 2. Without `--dry-run`, `--profile-dir` is refused.
+
+A duel clears inventories and teleports, so only the units in
+`--duelists-allow` (default `Rusty,Slate,Tinder`) may be on either team;
+`--crew-names` only says who may be online and never widens that list. A
+duelist that disappears from the world for three polls aborts the round (an
+aborted card and exit 1), since a disconnect says nothing about the profile. The
+shipped scenario book trains a ravager under `brute`, the family the warrior
+fights it as, and the boss family through `warden-trial`.
 
 ## Promotion to production
 

@@ -48,12 +48,25 @@ type bridge struct {
 	Warriors    []string
 	WarriorKits []string
 	Crew        []string
-	TeamA       []string
-	TeamB       []string
-	DuelKits    []string
+	// Duelists are the units a duel may clear and teleport; it is separate
+	// from Crew, who may merely be online.
+	Duelists []string
+	TeamA    []string
+	TeamB    []string
+	DuelKits []string
 
 	// Damage, when set, fills damage taken on mob scorecards.
 	Damage arena.DamageSource
+
+	// DryRun writes the candidate to the sink and stops: it never fights and
+	// never scores, since the file sink has no consumer.
+	DryRun bool
+
+	// ApplyWait is how long the units get to take a pushed profile before it
+	// is read back a second time. A unit fetches on a poll, and one failed
+	// fetch holds it on its old profile for far longer than that, so the
+	// wait is for the squad route's answer to settle, not a promise.
+	ApplyWait time.Duration
 
 	// FightTimeout is a hard wall around the whole fight, set-up included.
 	// A fight it cuts short scores as aborted.
@@ -125,6 +138,9 @@ func (b *bridge) Run(ctx context.Context, req request) ([]tactics.Scorecard, err
 		return nil, refusal{err}
 	}
 	// Checked before the profile is pushed, so a refused run changes nothing.
+	if b.DryRun {
+		return nil, b.dryRun(ctx, prof, req)
+	}
 	if err := classify(arena.CheckAlone(b.Console, b.Crew)); err != nil {
 		return nil, err
 	}
@@ -159,6 +175,79 @@ func classify(err error) error {
 		return refusal{err}
 	}
 	return err
+}
+
+// dryRun shows what a run would hand the units and refuses to score: the
+// file sink is not read by any unit, so a fight against it would measure the
+// shipped behaviour as the candidate.
+func (b *bridge) dryRun(ctx context.Context, prof tactics.Profile, req request) error {
+	units := slices.Concat(b.Warriors, b.TeamA, b.TeamB)
+	slices.Sort(units)
+	units = slices.Compact(units)
+	if err := b.Sink.Push(ctx, units, prof); err != nil {
+		return err
+	}
+	b.logf("dry run: profile %q written for %s; nothing was fought", prof.Name, strings.Join(units, ","))
+	return refusal{errors.New("dry run: nothing was fought and no scorecards exist")}
+}
+
+// wait sleeps through the injected clock, or for real, and ends early with
+// the context.
+func (b *bridge) wait(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	if b.Sleep != nil {
+		b.Sleep(d)
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// handoff is one profile and the units that must be served exactly it.
+type handoff struct {
+	units   []string
+	profile tactics.Profile
+}
+
+// confirm reads every handoff back from the sink, waits for the units to
+// settle on it and reads again; a fight is scored only when both reads show
+// the squad serving exactly the pushed profile.
+func (b *bridge) confirm(ctx context.Context, hs []handoff) error {
+	check := func() error {
+		for _, h := range hs {
+			if err := b.Sink.Confirm(ctx, h.units, h.profile); err != nil {
+				return fmt.Errorf("profile not confirmed: %w", err)
+			}
+		}
+		return nil
+	}
+	if err := check(); err != nil {
+		return err
+	}
+	if err := b.wait(ctx, b.ApplyWait); err != nil {
+		return err
+	}
+	return check()
+}
+
+// lock holds the lab squads of the units for the whole fight.
+func (b *bridge) lock(ctx context.Context, units []string) (func(), error) {
+	squads, err := b.Sink.LabSquads(units)
+	if err != nil {
+		return nil, refusal{err}
+	}
+	if len(squads) == 0 {
+		return func() {}, nil
+	}
+	return lockSquads(ctx, b.ControlDir, squads)
 }
 
 // release puts the units back on the default Profile. It outlives the fight's
@@ -200,17 +289,28 @@ func (b *bridge) mob(ctx context.Context, prof tactics.Profile, ts trainer.Scena
 		// The b side of a mirrored pair meets the mobs from the far side.
 		sc.Spawn.Side = oppositeSide(sc.Spawn.Side)
 	}
-	if err := b.Sink.Push(ctx, b.Warriors, prof); err != nil {
-		return nil, err
-	}
-	defer b.release(b.Warriors)
-
 	rec := &arena.Recorder{Meta: arena.FightMeta{
 		RunID:    fmt.Sprintf("%s-%d-%s", sc.Name, ts.Seed, ts.Side),
 		Scenario: sc.Name, Family: sc.Family, Opponent: mobSummary(sc),
 		Profile: prof.Name, Side: ts.Side, Seed: ts.Seed, Warriors: b.Warriors,
+		Spawned: sc.MobCount(),
 	}, Damage: b.Damage, Logf: b.logf}
+	unlock, err := b.lock(ctx, b.Warriors)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	// Registered before the push: a PUT whose answer was lost may still have
+	// landed, and the withdrawal must cover it.
+	defer b.release(b.Warriors)
+	if err := b.Sink.Push(ctx, b.Warriors, prof); err != nil {
+		return nil, err
+	}
 	started := b.now()
+	if err := b.confirm(ctx, []handoff{{b.Warriors, prof}}); err != nil {
+		b.logf("fight %s not started: %v", sc.Name, err)
+		return []tactics.Scorecard{rec.Finish(tactics.OutcomeAborted, b.now().Sub(started).Seconds())}, classify(err)
+	}
 	fight := &arena.ScenarioFight{
 		Console: b.Console, Layout: b.Layout, Book: b.Book, Scenario: sc, Seed: ts.Seed,
 		Warriors: b.Warriors, WarriorKits: b.WarriorKits, CrewNames: b.Crew,
@@ -247,6 +347,11 @@ func (b *bridge) duel(ctx context.Context, cand tactics.Profile, ts trainer.Scen
 		red, blue, redProfile, blueProfile = b.TeamB, b.TeamA, opp.Name, cand.Name
 	}
 	all := append(slices.Clone(b.TeamA), b.TeamB...)
+	unlock, err := b.lock(ctx, all)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	defer b.release(all)
 	if err := b.Sink.Push(ctx, b.TeamA, cand); err != nil {
 		return nil, err
@@ -254,19 +359,30 @@ func (b *bridge) duel(ctx context.Context, cand tactics.Profile, ts trainer.Scen
 	if err := b.Sink.Push(ctx, b.TeamB, opp); err != nil {
 		return nil, err
 	}
+	started := b.now()
+	aborted := func() tactics.Scorecard {
+		return tactics.Scorecard{
+			TS: started.UTC().Format(time.RFC3339), RunID: "duel-" + fmt.Sprint(ts.Seed), Scenario: tactics.ScenarioDuel,
+			Family: tactics.FamilyPlayer, Opponent: opp.Name, Profile: cand.Name, Side: ts.Side, Seed: ts.Seed,
+			Outcome: tactics.OutcomeAborted, Seconds: b.now().Sub(started).Seconds(), Deaths: map[string]int{},
+		}
+	}
+	if err := b.confirm(ctx, []handoff{{b.TeamA, cand}, {b.TeamB, opp}}); err != nil {
+		b.logf("duel not started: %v", err)
+		return []tactics.Scorecard{aborted()}, classify(err)
+	}
 
 	got := &collector{}
 	d := &arena.Duel{
 		Console: b.Console, Layout: b.Layout, Red: red, Blue: blue,
 		RedProfile: redProfile, BlueProfile: blueProfile, Kits: b.DuelKits,
 		Rounds: 1, RoundTimeout: b.RoundTimeout, MaxWall: min(max(b.FightTimeout, time.Second), arena.MaxDuelWall),
-		CrewNames: b.Crew, Policy: &arena.ConsolePolicy{Console: b.Console}, Sink: got,
+		CrewNames: b.Crew, Duelists: b.Duelists, Policy: &arena.ConsolePolicy{Console: b.Console}, Sink: got,
 		RunID:   fmt.Sprintf("duel-%d-%s", ts.Seed, ts.Side),
 		Spacing: b.Spacing, Poll: b.Poll, Settle: b.Settle, KitGap: b.KitGap, Countdown: b.Countdown,
 		Halted: b.stopped, Out: b.Out, Now: b.Now, Sleep: b.Sleep,
 	}
-	started := b.now()
-	_, err := d.Run(ctx)
+	_, err = d.Run(ctx)
 	cards := got.cards
 	if err != nil {
 		b.logf("duel ended early: %v", err)
@@ -275,11 +391,7 @@ func (b *bridge) duel(ctx context.Context, cand tactics.Profile, ts trainer.Scen
 		if err == nil {
 			err = errors.New("duel produced no scorecards")
 		}
-		cards = []tactics.Scorecard{{
-			TS: started.UTC().Format(time.RFC3339), RunID: "duel-" + fmt.Sprint(ts.Seed), Scenario: tactics.ScenarioDuel,
-			Family: tactics.FamilyPlayer, Opponent: opp.Name, Profile: cand.Name, Side: ts.Side,
-			Outcome: tactics.OutcomeAborted, Seconds: b.now().Sub(started).Seconds(), Deaths: map[string]int{},
-		}}
+		cards = []tactics.Scorecard{aborted()}
 	}
 	for i := range cards {
 		cards[i].Seed = ts.Seed
