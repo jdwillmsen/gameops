@@ -527,9 +527,10 @@ func TestBossAbortsWhenAHumanJoinsMidFight(t *testing.T) {
 	if f.Count("summon") != 1 {
 		t.Errorf("summons = %d, want no second run", f.Count("summon"))
 	}
-	last := f.Cmds[len(f.Cmds)-2:]
-	if last[0] != `kill @e[name="W",type=!player]` || last[1] != "tickingarea remove crew-arena-run-0" {
-		t.Errorf("last commands = %q, want the boss kill then the area removal", last)
+	// The three untags sit between the kill and the area removal.
+	tail := f.Cmds[len(f.Cmds)-5:]
+	if tail[0] != `kill @e[name="W",type=!player]` || tail[4] != "tickingarea remove crew-arena-run-0" {
+		t.Errorf("last commands = %q, want the boss kill, the untags, then the area removal", tail)
 	}
 }
 
@@ -673,5 +674,45 @@ func TestBossValidatesItsInputs(t *testing.T) {
 				t.Errorf("bad input still sent %d commands", len(f.Cmds))
 			}
 		})
+	}
+}
+
+func TestBossSummonWithAnEventPutsTheNameLast(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Mob = "gameops:ground_dragon"
+	b.Event = "gameops:hp_500"
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !hasCommand(f.Cmds, `summon gameops:ground_dragon 0 65 -775 0 0 gameops:hp_500 "W"`) {
+		t.Errorf("no event summon with the name after the rotations:\n%s", strings.Join(f.Cmds, "\n"))
+	}
+}
+
+func TestBossRejectsAnEventThatIsNotAnId(t *testing.T) {
+	f := &FakeConsole{}
+	b, _ := newBossTest(f, newFakeClock())
+	b.Event = "x; kill @a"
+	if _, err := b.Run(context.Background()); err == nil {
+		t.Fatal("a malformed spawn event was accepted")
+	}
+}
+
+func TestBossTagsTheSquadForPackBossesAndUntagsOnExit(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, w := range []string{"Rusty", "Slate", "Tinder"} {
+		if !hasCommand(f.Cmds, fmt.Sprintf("tag %q add arena_warrior", w)) {
+			t.Errorf("%s was not tagged", w)
+		}
+		if !hasCommand(f.Cmds, fmt.Sprintf("tag %q remove arena_warrior", w)) {
+			t.Errorf("%s was not untagged on exit", w)
+		}
 	}
 }
