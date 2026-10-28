@@ -8,12 +8,23 @@ art and JSON here is our own; nothing is copied from the vanilla packs.
 |---|---|
 | `behavior_pack/` | Manifest and the entity definition (health 40, `minecraft:attack` 4, melee goal, target goal) |
 | `resource_pack/` | Manifest (depends on the behaviour pack header UUID), client entity, box model, render controller, 64x64 texture, lang file |
-| `assets-src/make_texture.py`, `make_werewolf_texture.py` | Paint the textures; not shipped in the packs |
+| `assets-src/make_texture.py`, `make_werewolf_texture.py`, `make_ground_dragon_texture.py` | Paint the textures; not shipped in the packs |
 
 `gameops:werewolf` is the second mob: a hunched 3x3-block wolf-man with 500
 health, 20 damage, speed 0.38, a leap attack, knockback and fire immunity, a
 128x128 model and walk, attack, look and tail animations. It follows the same
 targeting rule as the brute (only the `arena_warrior` tag, never players), so a player must tag themselves to fight it.
+
+`gameops:ground_dragon` is the arena boss: a ground-bound dragon (the vanilla
+Ender Dragon flies off on hard-coded AI). Hitbox 4x3, 256x256 model with a
+folded-wing pair and a five-segment swaying tail, knockback resistance 1,
+fire immune, persistent (never despawns), nameable. Health is 300 by default
+and set at summon by event: `summon gameops:ground_dragon "W" x y z
+gameops:hp_500` (`gameops:hp_150`, `hp_300`, `hp_500`, `hp_1000`). Attacks: a
+bite (reach x2), a tail-swipe area knockback limited to the `arena_warrior`
+tag, and a dodgeable small fireball. Same targeting rule as the others
+(`arena_warrior` tag only, so the director must tag warriors for the run);
+players are deliberately not targeted.
 
 ## Behaviour
 

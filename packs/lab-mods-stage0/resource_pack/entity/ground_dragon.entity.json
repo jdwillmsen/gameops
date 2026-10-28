@@ -1,0 +1,36 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:ground_dragon",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/ground_dragon"
+      },
+      "geometry": {
+        "default": "geometry.gameops.ground_dragon"
+      },
+      "animations": {
+        "walk": "animation.gameops.ground_dragon.walk",
+        "attack": "animation.gameops.ground_dragon.attack",
+        "look": "animation.gameops.ground_dragon.look"
+      },
+      "scripts": {
+        "animate": [
+          "walk",
+          "attack",
+          "look"
+        ]
+      },
+      "render_controllers": [
+        "controller.render.gameops.ground_dragon"
+      ],
+      "spawn_egg": {
+        "base_color": "#345c3e",
+        "overlay_color": "#ffb020"
+      }
+    }
+  }
+}
