@@ -3,6 +3,7 @@ package act
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -84,21 +85,33 @@ func (a *Actuator) storeCreativeLocked(p *packet.CreativeContent) {
 // unit's own inventory screen open.
 func (a *Actuator) TakeCreative(item string) error {
 	var err error
+	// A refused request may or may not have applied its destroy first, and
+	// the refusal does not say. The slot it evicted is therefore not quoted
+	// again: the retry goes to another slot, or to this one without a destroy
+	// when there is none.
+	var unsure uint16
 	for _, n := range creativeStacks {
-		if err = a.takeCreative(item, n); !errors.Is(err, ErrBadAmount) {
+		var evicted int
+		if evicted, err = a.takeCreative(item, n, unsure); !errors.Is(err, ErrBadAmount) {
 			return err
+		}
+		if evicted >= 0 {
+			unsure |= 1 << evicted
 		}
 	}
 	return err
 }
 
-func (a *Actuator) takeCreative(item string, count byte) error {
+// takeCreative makes one request for count items, never planning into a slot
+// of the avoid set unless nothing else will do (it then takes without a destroy).
+// evicted is the slot the request destroyed a stack in, or -1.
+func (a *Actuator) takeCreative(item string, count byte, avoid uint16) (evicted int, err error) {
 	a.mu.Lock()
 	a.forgetStaleTakesLocked()
-	_, _, _, _, err := a.planTakeLocked(item)
+	_, _, _, _, err = a.planTakeAvoidingLocked(item, avoid)
 	a.mu.Unlock()
 	if err != nil {
-		return err
+		return -1, err
 	}
 	deadline := time.Now().Add(creativeTakeDeadline)
 	if a.openInventory(deadline) {
@@ -107,14 +120,14 @@ func (a *Actuator) takeCreative(item string, count byte) error {
 	a.mu.Lock()
 	if !a.cont.open || a.cont.kind != inventoryWindow {
 		a.mu.Unlock()
-		return ErrScreenNotOpen
+		return -1, ErrScreenNotOpen
 	}
 	// The lock was released while the screen opened, and a slot update may
 	// have landed meanwhile: plan again so the destroy quotes what is there.
-	creativeID, itemID, slot, evict, err := a.planTakeLocked(item)
+	creativeID, itemID, slot, evict, err := a.planTakeAvoidingLocked(item, avoid)
 	if err != nil {
 		a.mu.Unlock()
-		return err
+		return -1, err
 	}
 	req := a.nextRequest
 	// The server only takes the created output named by the request that
@@ -153,9 +166,11 @@ func (a *Actuator) takeCreative(item string, count byte) error {
 	}}})
 	if err != nil {
 		a.mu.Unlock()
-		return err
+		return -1, err
 	}
+	evicted = -1
 	if evict {
+		evicted = slot
 		a.replacing[req] = slot
 	}
 	// The server accepts the negative odd IDs a client counts down through.
@@ -171,22 +186,22 @@ func (a *Actuator) takeCreative(item string, count byte) error {
 		a.mu.Lock()
 		a.abandoned[req] = true
 		a.mu.Unlock()
-		return err
+		return evicted, err
 	}
 	switch status {
 	case StatusOK:
 		a.craftLog("creative_take", map[string]any{"item": item})
-		return nil
+		return evicted, nil
 	case StatusInvalidCraft:
-		return fmt.Errorf("%w: status %d", ErrScreenNotOpen, status)
+		return evicted, fmt.Errorf("%w: status %d", ErrScreenNotOpen, status)
 	case StatusNotCreative:
-		return fmt.Errorf("%w: status %d", ErrNotCreative, status)
+		return evicted, fmt.Errorf("%w: status %d", ErrNotCreative, status)
 	case StatusBadAmount:
-		return fmt.Errorf("%w: status %d", ErrBadAmount, status)
+		return evicted, fmt.Errorf("%w: status %d", ErrBadAmount, status)
 	case StatusBadSource:
-		return fmt.Errorf("%w: status %d", ErrBadSource, status)
+		return evicted, fmt.Errorf("%w: status %d", ErrBadSource, status)
 	}
-	return fmt.Errorf("%w: status %d", ErrRejected, status)
+	return evicted, fmt.Errorf("%w: status %d", ErrRejected, status)
 }
 
 // forgetStaleTakesLocked drops the books on takes that went unanswered past
@@ -215,6 +230,13 @@ func (a *Actuator) touchSlot(slot int) {
 // the requested item is never picked, and neither is one filled any other way:
 // those are the unit's own tools and food.
 func (a *Actuator) planTakeLocked(item string) (creativeID uint32, itemID int32, slot int, evict bool, err error) {
+	return a.planTakeAvoidingLocked(item, 0)
+}
+
+// planTakeAvoidingLocked is planTakeLocked that leaves the slots of the avoid
+// set alone, their content being unknown; with no other slot it takes into
+// the lowest of them without a destroy.
+func (a *Actuator) planTakeAvoidingLocked(item string, avoid uint16) (creativeID uint32, itemID int32, slot int, evict bool, err error) {
 	if !a.creativeLocked() {
 		return 0, 0, 0, false, ErrNotCreative
 	}
@@ -227,19 +249,22 @@ func (a *Actuator) planTakeLocked(item string) (creativeID uint32, itemID int32,
 		return 0, 0, 0, false, fmt.Errorf("%w: %q", ErrNoCreativeItem, item)
 	}
 	for slot = 0; slot < hotbarSlots; slot++ {
-		if a.inv[slot].Stack.Count == 0 {
+		if avoid&(1<<slot) == 0 && a.inv[slot].Stack.Count == 0 {
 			return creativeID, itemID, slot, false, nil
 		}
 	}
 	best := -1
 	for s := 0; s < hotbarSlots; s++ {
 		held := a.inv[s]
-		if held.Stack.NetworkID == itemID || a.takenStack[s] == 0 || a.takenStack[s] != held.StackNetworkID {
+		if avoid&(1<<s) != 0 || held.Stack.NetworkID == itemID || a.takenStack[s] == 0 || a.takenStack[s] != held.StackNetworkID {
 			continue
 		}
 		if best < 0 || a.slotUse[s] < a.slotUse[best] {
 			best = s
 		}
+	}
+	if best < 0 && avoid != 0 {
+		return creativeID, itemID, bits.TrailingZeros16(avoid), false, nil
 	}
 	if best < 0 {
 		return 0, 0, 0, false, ErrHotbarFull
