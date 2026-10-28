@@ -1,7 +1,10 @@
 package skin
 
 import (
+	"bytes"
 	"encoding/base64"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,5 +105,16 @@ func TestOverrideRefusesBadInput(t *testing.T) {
 	}
 	if _, _, err := Override(dir, "Bad"); err == nil {
 		t.Error("garbage file was accepted")
+	}
+}
+
+func TestFromPNGRefusesWrongSizeBeforeDecoding(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 32, 32))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FromPNG(buf.Bytes()); err == nil {
+		t.Error("a 32x32 PNG was accepted")
 	}
 }
