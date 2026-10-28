@@ -301,10 +301,10 @@ func mateBeyond(l *Life, from, creeper mgl32.Vec3, reach float64) bool {
 // creeperWatch is how far a creeper is still the target. The default
 // profile keeps the shipped range; one that names a creeper tactic is given
 // the room that tactic needs to finish what it started.
-func (l *Life) creeperWatch(p act.Pose) float64 {
+func (l *Life) creeperWatch(pr tactics.Profile, p act.Pose) float64 {
 	var ct *creeperTactic
 	named := false
-	for _, n := range l.Profile().TacticsFor(tactics.FamilyCreeper) {
+	for _, n := range pr.TacticsFor(tactics.FamilyCreeper) {
 		t, ok := tacticNamed(n, tactics.FamilyCreeper)
 		if !ok {
 			continue

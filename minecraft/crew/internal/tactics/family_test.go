@@ -27,3 +27,9 @@ func TestEveryFamilyTableEntryIsAKnownFamily(t *testing.T) {
 		}
 	}
 }
+
+func TestAWitherSkeletonIsFiledWithTheSkeletonsOnPurpose(t *testing.T) {
+	if got := FamilyOfType("minecraft:wither_skeleton"); got != FamilySkeleton {
+		t.Errorf("wither_skeleton files under %q, want the skeleton family the tactics and scenarios expect", got)
+	}
+}

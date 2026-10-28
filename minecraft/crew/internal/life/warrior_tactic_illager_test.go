@@ -477,7 +477,7 @@ func squadFocus(t *testing.T, r *rig) uint64 {
 	t.Helper()
 	r.setSquad(t, &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{20.5, 1, 20.5}, leaderOK: true})
 	anchor, _ := r.l.warrior.leader(r.a.Pose())
-	e, _ := r.l.warriorTarget(r.a.Pose(), anchor)
+	e, _ := r.l.warriorTarget(r.l.Profile(), r.a.Pose(), anchor)
 	return e.ID
 }
 
@@ -539,7 +539,7 @@ func TestAStandingOrderForATypeBeatsTheKillOrderPreference(t *testing.T) {
 	r.setSquad(t, &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{20.5, 1, 20.5}, leaderOK: true,
 		order: Order{Kind: OrderFocus, Target: "minecraft:zombie"}})
 	anchor, _ := r.l.warrior.leader(r.a.Pose())
-	if e, _ := r.l.warriorTarget(r.a.Pose(), anchor); e.ID != 50 {
+	if e, _ := r.l.warriorTarget(r.l.Profile(), r.a.Pose(), anchor); e.ID != 50 {
 		t.Errorf("focus = %d, want the zombie 50 the order named", e.ID)
 	}
 }
@@ -576,7 +576,7 @@ func TestAHoldingOrderKeepsTheSharedFocusOverTheKillOrder(t *testing.T) {
 		mixedPack(r)
 		r.setSquad(t, &fakeSquad{leaderID: "crew-18", leader: mgl32.Vec3{20.5, 1, 20.5}, leaderOK: true, order: Order{Kind: kind}})
 		anchor, _ := r.l.warrior.leader(r.a.Pose())
-		if e, _ := r.l.warriorTarget(r.a.Pose(), anchor); e.ID != 50 {
+		if e, _ := r.l.warriorTarget(r.l.Profile(), r.a.Pose(), anchor); e.ID != 50 {
 			t.Errorf("%s order: focus = %d, want the shared pick 50", kind, e.ID)
 		}
 	}

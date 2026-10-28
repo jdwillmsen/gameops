@@ -95,7 +95,7 @@ func (t illagerTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 	}
 	target := f.Target
 	if o.Target == "" {
-		e, ok := l.illagerFocus(f.Pose, t.kill(w.role))
+		e, ok := l.illagerFocus(f.Profile, f.Pose, t.kill(w.role))
 		if !ok {
 			return false, nil
 		}
@@ -122,8 +122,7 @@ func (t illagerTactic) Prefer(_ *Fight, candidates []belief.Entity) (belief.Enti
 // illagerFocus is the squad's focus with the kill order as the preferred
 // type: the first type in the order that stands in focus range is the
 // target, and the usual health and id tie-break picks among its kind.
-func (l *Life) illagerFocus(p act.Pose, order []string) (belief.Entity, bool) {
-	pr := l.Profile()
+func (l *Life) illagerFocus(pr tactics.Profile, p act.Pose, order []string) (belief.Entity, bool) {
 	anchor, _ := l.warrior.leader(p)
 	q := focusQuery{
 		anchor:        anchor,

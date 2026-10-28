@@ -15,6 +15,9 @@ var families = map[string]Family{
 	"phantom": FamilyZombie,
 
 	"skeleton": FamilySkeleton, "stray": FamilySkeleton,
+	// A wither skeleton is melee, but it stays here on purpose: the skeleton
+	// tactics tell the bow carriers from it themselves, and the scenario
+	// book trains it with the family.
 	"bogged": FamilySkeleton, "wither_skeleton": FamilySkeleton,
 
 	"creeper": FamilyCreeper,

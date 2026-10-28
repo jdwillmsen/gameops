@@ -3,6 +3,7 @@ package life
 import (
 	"maps"
 	"math"
+	"slices"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
@@ -19,9 +20,15 @@ var defaultProfile = tactics.NewProfile("default")
 func (l *Life) SetProfile(pr tactics.Profile) error {
 	// Validate clamps the overrides in place: the caller's map is not ours
 	// to write, and keeping our own copy stops later writes to it racing the
-	// stepping goroutine. The tactic table is copied for the same reason.
+	// stepping goroutine. The tactic lists are copied for the same reason.
 	pr.Overrides = maps.Clone(pr.Overrides)
-	pr.Tactics = maps.Clone(pr.Tactics)
+	if pr.Tactics != nil {
+		own := make(map[tactics.Family][]string, len(pr.Tactics))
+		for f, names := range pr.Tactics {
+			own[f] = slices.Clone(names)
+		}
+		pr.Tactics = own
+	}
 	pr, err := pr.Validate()
 	if err != nil {
 		return err
@@ -39,9 +46,9 @@ func (l *Life) Profile() tactics.Profile {
 }
 
 // paramsFor is the tuning the fight against e reads; with no target it is
-// the profile's default.
-func (l *Life) paramsFor(e belief.Entity) tactics.Params {
-	pr := l.Profile()
+// the profile's default. The profile is passed in so one phase of a tick reads
+// one profile even if SetProfile lands in the middle of it.
+func paramsFor(pr tactics.Profile, e belief.Entity) tactics.Params {
 	if e.ID == 0 {
 		return pr.Default
 	}

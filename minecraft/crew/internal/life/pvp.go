@@ -1,6 +1,10 @@
 package life
 
-import "github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+import (
+	"reflect"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+)
 
 // PvPPolicy decides which players a warrior may fight. It is per unit: the
 // policy already knows who the unit is, so the engine only names the player.
@@ -16,11 +20,24 @@ type PvPPolicy interface {
 // SetPvPPolicy installs the policy, or removes it with nil, after which the
 // warrior is back to mob-only targeting.
 func (l *Life) SetPvPPolicy(p PvPPolicy) {
-	if p == nil {
+	if isNil(p) {
 		l.pvp.Store(nil)
 		return
 	}
 	l.pvp.Store(&p)
+}
+
+// isNil is true for nil and for a nil pointer (or map, func, slice) held in
+// the interface, which compares non-nil and would panic when called.
+func isNil(p PvPPolicy) bool {
+	if p == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(p); v.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Func, reflect.Slice, reflect.Chan, reflect.Interface:
+		return v.IsNil()
+	}
+	return false
 }
 
 // mayFightPlayer says whether e is a player the policy lets this unit fight.

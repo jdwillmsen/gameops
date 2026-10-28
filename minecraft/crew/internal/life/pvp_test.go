@@ -192,3 +192,23 @@ func TestFocusIgnoresPlayersWithoutARule(t *testing.T) {
 		t.Fatal("focused a player with no player rule")
 	}
 }
+
+func TestATypedNilPvPPolicyIsTheSameAsNone(t *testing.T) {
+	var typed *fakePvP
+	var m PvPPolicy = typed
+	if m == nil {
+		t.Fatal("a typed nil compares nil: the test proves nothing")
+	}
+	r := armedWarrior(t, newPvP("rival"))
+	r.l.SetPvPPolicy(typed)
+	if r.l.pvp.Load() != nil {
+		t.Error("a typed-nil policy was stored")
+	}
+	rival := belief.Entity{ID: 62, Player: true, Name: "rival"}
+	if r.l.mayFightPlayer(rival) {
+		t.Error("a player is fightable with the policy removed")
+	}
+	r.playerNamed(62, "rival", mgl32.Vec3{21.2, 1, 20.5})
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{23.5, 1, 20.5})
+	r.run(20)
+}
