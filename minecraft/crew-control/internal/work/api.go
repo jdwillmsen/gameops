@@ -56,6 +56,9 @@ type API struct {
 	OnSeen     func(unit string, s Seen)
 	OnBlocks   func(unit string, id uuid.UUID, b Blocks)
 	OnTerminal func(it Item)
+	// Role reports the role a unit last claimed, or "" when it has not
+	// reported a known one. Nil reads every unit as unknown.
+	Role func(unit string) string
 
 	mu    sync.Mutex
 	waits map[string]chan struct{}
