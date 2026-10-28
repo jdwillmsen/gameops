@@ -1,6 +1,10 @@
 package place
 
-import "testing"
+import (
+	"errors"
+	"sync"
+	"testing"
+)
 
 // These read the checked-in table, so a regenerated one that loses the
 // basics fails here before a planner trusts it.
@@ -45,5 +49,33 @@ func TestDefaultTableReportsAnUnplaceableStateAsMissing(t *testing.T) {
 	}
 	if _, ok := Lookup("no_such_block", nil); ok {
 		t.Error("an unknown block has no recipe")
+	}
+}
+
+func TestErrReportsALoadFailureInsteadOfLookingUnreachable(t *testing.T) {
+	if err := Err(); err != nil {
+		t.Fatalf("embedded table: %v", err)
+	}
+	oldLoad := loadDefault
+	t.Cleanup(func() {
+		loadDefault = oldLoad
+		defaultOnce, defaultTable, defaultErr = sync.Once{}, nil, nil
+	})
+	boom := errors.New("corrupt blob")
+	loadDefault = func() (*Table, error) { return nil, boom }
+	defaultOnce, defaultTable, defaultErr = sync.Once{}, nil, nil
+
+	if err := Err(); !errors.Is(err, boom) {
+		t.Fatalf("Err = %v, want the load error", err)
+	}
+	tb, err := Default()
+	if tb == nil || err == nil {
+		t.Fatalf("Default = %v, %v, want an empty table and the error", tb, err)
+	}
+	if _, ok := Lookup("oak_stairs", nil); ok {
+		t.Error("lookup succeeded on a failed table")
+	}
+	if Derived("oak_stairs") != nil {
+		t.Error("derived on a failed table")
 	}
 }

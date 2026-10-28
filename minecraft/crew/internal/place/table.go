@@ -22,7 +22,7 @@ const FormatVersion = 1
 // the one clicked; the block lands in the cell the clicked face points at.
 type Recipe struct {
 	// Support is where the clicked block lies relative to the placed cell:
-	// below, above, north, south, east or west.
+	// bottom, top, north, south, east or west.
 	Support string `json:"support"`
 	// Face is the face of the support that is clicked, named like Support
 	// seen from the support: top, bottom, north, south, east or west.
@@ -145,6 +145,11 @@ func Read(r io.Reader) (*Table, error) {
 	defer zr.Close()
 	var t Table
 	if err := json.NewDecoder(zr).Decode(&t); err != nil {
+		return nil, fmt.Errorf("place table: %w", err)
+	}
+	// The decoder stops at the end of the JSON value, before the gzip
+	// trailer; reading on to EOF is what checks the CRC and length.
+	if _, err := io.Copy(io.Discard, zr); err != nil {
 		return nil, fmt.Errorf("place table: %w", err)
 	}
 	if t.Header.Format != FormatVersion {

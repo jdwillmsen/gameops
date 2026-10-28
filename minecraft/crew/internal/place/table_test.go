@@ -14,14 +14,29 @@ func synthetic() *Table {
 				Item:    "minecraft:oak_stairs",
 				Derived: []string{"shape"},
 				States: []Entry{
-					{State: map[string]any{"facing": "north", "upside_down_bit": false}, Recipe: Recipe{Support: "below", Face: "top", Hit: [3]float32{0.5, 1, 0.5}, Yaw: 180}},
-					{State: map[string]any{"facing": "north", "upside_down_bit": true}, Recipe: Recipe{Support: "below", Face: "top", Hit: [3]float32{0.5, 1, 0.5}, Yaw: 180, Pitch: -60}},
+					{State: map[string]any{"facing": "north", "upside_down_bit": false}, Recipe: Recipe{Support: "bottom", Face: "top", Hit: [3]float32{0.5, 1, 0.5}, Yaw: 180}},
+					{State: map[string]any{"facing": "north", "upside_down_bit": true}, Recipe: Recipe{Support: "bottom", Face: "top", Hit: [3]float32{0.5, 1, 0.5}, Yaw: 180, Pitch: -60}},
 					{State: map[string]any{"facing": "north", "upside_down_bit": true}, Recipe: Recipe{Support: "east", Face: "west", Hit: [3]float32{0, 0.75, 0.5}, Yaw: 180}},
-					{State: map[string]any{"facing": 2, "upside_down_bit": true}, Recipe: Recipe{Support: "above", Face: "bottom", Hit: [3]float32{0.5, 0, 0.5}, Yaw: 180}},
+					{State: map[string]any{"facing": 2, "upside_down_bit": true}, Recipe: Recipe{Support: "top", Face: "bottom", Hit: [3]float32{0.5, 0, 0.5}, Yaw: 180}},
 				},
 				Unreachable: []map[string]any{{"facing": "up"}},
 			},
 		},
+	}
+}
+
+func TestReadRejectsACorruptGzipTrailer(t *testing.T) {
+	var buf bytes.Buffer
+	if err := synthetic().Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("intact table: %v", err)
+	}
+	bad := buf.Bytes()
+	bad[len(bad)-8] ^= 0xff // first CRC byte of the trailer
+	if _, err := Read(bytes.NewReader(bad)); err == nil {
+		t.Error("a table with a bad CRC read fine")
 	}
 }
 
