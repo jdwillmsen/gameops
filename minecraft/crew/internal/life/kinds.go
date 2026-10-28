@@ -31,6 +31,12 @@ var kinds = map[string]kind{
 	"piglin": provoked, "iron_golem": provoked, "wolf": provoked, "bee": provoked,
 	"polar_bear": provoked, "llama": provoked, "panda": provoked, "goat": provoked,
 
+	// Pack mobs keep their namespace, which name() leaves alone, so they
+	// cannot collide with a vanilla key. They only attack units tagged for
+	// the arena, so an idle unit must not go and hit one: provoked fights
+	// them once one has hurt the unit and not before.
+	"gameops:werewolf": provoked, "gameops:training_dummy_brute": provoked,
+
 	"creeper": flee,
 }
 
@@ -42,6 +48,8 @@ var shooters = map[string]bool{
 	"drowned": true,
 }
 
+// name is the key an entity type is looked up by: vanilla ids lose their
+// namespace, every other namespace stays part of the key.
 func name(entityType string) string { return strings.TrimPrefix(entityType, "minecraft:") }
 
 func kindOf(entityType string) kind { return kinds[name(entityType)] }
