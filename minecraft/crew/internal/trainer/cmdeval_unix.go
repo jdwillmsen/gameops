@@ -50,15 +50,21 @@ func confine(cmd *exec.Cmd, grace time.Duration) (done func()) {
 	}
 }
 
+// sendSignal is syscall.Kill; tests wrap it to see which signals go out.
+var sendSignal = syscall.Kill
+
 func signalGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := sendSignal(-cmd.Process.Pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return err
 	}
 	return nil
 }
 
-// killGroup kills everything the evaluator started, also after it exited.
+// killGroup kills what is left of the evaluator's group once the command has
+// been waited for. Callers use it only when the group is known to be live or
+// was just signalled (a cancel, an output flood, a pipe held open): after a
+// normal exit the group id may already belong to someone else.
 func killGroup(cmd *exec.Cmd) error { return signalGroup(cmd, syscall.SIGKILL) }
