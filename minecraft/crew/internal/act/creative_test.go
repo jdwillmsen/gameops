@@ -20,6 +20,8 @@ const (
 	creativeWindow   byte   = 3
 	// takenStackID is the small per-session ID the server gives a taken stack.
 	takenStackID int32 = 4
+	// creativeStack is the size the first take asks for.
+	creativeStack = 64
 )
 
 // creativeContent is the table as the server sends it at login: a variant of
@@ -65,6 +67,9 @@ type creativeServer struct {
 	onOpen func()
 	// taken counts the accepted takes, so each stack gets its own ID.
 	taken int32
+	// stacksTo, when set, is the most the item stacks to; a bigger take is
+	// refused.
+	stacksTo byte
 }
 
 func serveCreative(a *Actuator, s *sink, creative bool) *creativeServer {
@@ -126,6 +131,8 @@ func (cs *creativeServer) judge(r protocol.ItemStackRequest) protocol.ItemStackR
 		resp.Status = StatusInvalidCraft
 	case !cs.creative:
 		resp.Status = StatusNotCreative
+	case cs.stacksTo != 0 && take.Count > cs.stacksTo:
+		resp.Status = StatusBadAmount
 	case take.Source.StackNetworkID != r.RequestID || take.Source.Slot != 50:
 		resp.Status = StatusBadSource
 	case slot.Stack.Count > 0 && (destroy == nil || destroy.Source.Slot != take.Destination.Slot || destroy.Source.StackNetworkID != slot.StackNetworkID):
@@ -173,7 +180,7 @@ func TestTakeCreativeAsksForTheNamedItemIntoAnEmptyHotbarSlot(t *testing.T) {
 	if take.Destination.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory || take.Destination.Slot != 1 || take.Destination.StackNetworkID != 0 {
 		t.Errorf("destination = %+v, want the first empty hotbar slot (1)", take.Destination)
 	}
-	if got := a.inv[1]; got.Stack.NetworkID != creativeStone || got.Stack.Count != creativeStack || got.StackNetworkID != takenStackID+1 {
+	if got := a.inv[1]; got.Stack.NetworkID != creativeStone || got.Stack.Count != uint16(creativeStacks[0]) || got.StackNetworkID != takenStackID+1 {
 		t.Errorf("inventory slot 1 = %+v, want the taken stack", got)
 	}
 }
@@ -636,5 +643,25 @@ func TestTakeCreativeNeverReplacesAForeignStackOfATakenItemType(t *testing.T) {
 	}
 	if err := a.TakeCreative("oak_stairs"); !errors.Is(err, ErrHotbarFull) {
 		t.Fatalf("err = %v, want ErrHotbarFull: no stack here is one the unit took", err)
+	}
+}
+
+func TestTakeCreativeStepsDownTheStackForAnItemThatStacksToSixteen(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	srv.stacksTo = 16
+	defer srv.close()
+	if err := a.TakeCreative("stone"); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.inv[0]; got.Stack.Count != 16 {
+		t.Errorf("slot 0 = %+v, want a stack of 16", got)
+	}
+	var counts []byte
+	for _, p := range stackRequests(s) {
+		counts = append(counts, p.Requests[0].Actions[1].(*protocol.TakeStackRequestAction).Count)
+	}
+	if len(counts) != 2 || counts[0] != 64 || counts[1] != 16 {
+		t.Errorf("asked for %v, want 64 then 16", counts)
 	}
 }

@@ -17,15 +17,20 @@ const (
 	// StatusNotCreative is what the server says to a creative request from a
 	// unit that is not in creative mode.
 	StatusNotCreative uint8 = 28
+	// StatusBadAmount is what the server says to a take of more than the
+	// item stacks to: signs, banners and eggs stack to 16, tools to 1.
+	StatusBadAmount uint8 = 51
 )
 
 // creativeTakeDeadline bounds a take from opening the screen to its answer;
 // the unit sends no input meanwhile, as in a craft.
 const creativeTakeDeadline = 5 * time.Second
 
-// creativeStack is the size of the stack a take asks for. Creative stock is
-// unlimited, so a take is needed once per block type, not once per block.
-const creativeStack = 64
+// creativeStacks are the sizes a take asks for, largest first. Creative stock
+// is unlimited, so a take is needed once per block type, not once per block;
+// an item that does not stack to 64 is refused the first size and given the
+// next.
+var creativeStacks = []byte{64, 16, 1}
 
 // abandonHorizon is how long the books on a take nobody got an answer to are
 // kept: an answer later than this is not coming.
@@ -43,6 +48,8 @@ var (
 	// ErrHotbarFull says no hotbar slot is empty to take the item into, and
 	// none holds a creative take that may be replaced.
 	ErrHotbarFull = errors.New("no empty hotbar slot for the item")
+	// ErrBadAmount says the server refused the size of the stack asked for.
+	ErrBadAmount = errors.New("the server refused the stack size")
 	// ErrBadSource says the server did not recognise the created output the
 	// take named.
 	ErrBadSource = errors.New("the server refused the creative output as a source")
@@ -76,6 +83,16 @@ func (a *Actuator) storeCreativeLocked(p *packet.CreativeContent) {
 // for the round trips it takes. The server only honours the request with the
 // unit's own inventory screen open.
 func (a *Actuator) TakeCreative(item string) error {
+	var err error
+	for _, n := range creativeStacks {
+		if err = a.takeCreative(item, n); !errors.Is(err, ErrBadAmount) {
+			return err
+		}
+	}
+	return err
+}
+
+func (a *Actuator) takeCreative(item string, count byte) error {
 	a.mu.Lock()
 	a.forgetStaleTakesLocked()
 	_, _, _, _, err := a.planTakeLocked(item)
@@ -103,7 +120,7 @@ func (a *Actuator) TakeCreative(item string) error {
 	// The server only takes the created output named by the request that
 	// made it.
 	take := &protocol.TakeStackRequestAction{}
-	take.Count = creativeStack
+	take.Count = count
 	take.Source = protocol.StackRequestSlotInfo{
 		Container:      protocol.FullContainerName{ContainerID: protocol.ContainerCreatedOutput},
 		Slot:           createdOutputSlot,
@@ -164,6 +181,8 @@ func (a *Actuator) TakeCreative(item string) error {
 		return fmt.Errorf("%w: status %d", ErrScreenNotOpen, status)
 	case StatusNotCreative:
 		return fmt.Errorf("%w: status %d", ErrNotCreative, status)
+	case StatusBadAmount:
+		return fmt.Errorf("%w: status %d", ErrBadAmount, status)
 	case StatusBadSource:
 		return fmt.Errorf("%w: status %d", ErrBadSource, status)
 	}
