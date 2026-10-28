@@ -2,6 +2,7 @@ package act
 
 import (
 	"errors"
+	"github.com/go-gl/mathgl/mgl32"
 	"sync"
 	"testing"
 	"time"
@@ -275,5 +276,61 @@ func TestCreativeTableIsTakenFromTheLoginPacket(t *testing.T) {
 	}
 	if got := a.creativeIDs[creativeStone]; got != creativeStoneCID {
 		t.Errorf("stone = %d, want the first entry %d", got, creativeStoneCID)
+	}
+}
+
+func TestPlaceBlockTakesTheItemFirstWhenCreative(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	a, s := newCreativeAct(true)
+	a.solid = stoneBelow(target)
+	a.pose = Pose{Feet: mgl32.Vec3{1.5, 1, 2.5}, OnGround: true}
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+
+	if err := a.PlaceBlock(target, "stone"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(stackRequests(s)); got != 1 {
+		t.Fatalf("sent %d item requests, want one take", got)
+	}
+	s.mu.Lock()
+	last := s.got[len(s.got)-1]
+	s.mu.Unlock()
+	tx, ok := last.(*packet.InventoryTransaction)
+	if !ok {
+		t.Fatalf("last packet is %T, want the placement click", last)
+	}
+	if u := tx.TransactionData.(*protocol.UseItemTransactionData); u.HotBarSlot != 0 || u.HeldItem.Stack.NetworkID != creativeStone {
+		t.Errorf("click = %+v, want the taken stone in hotbar slot 0", u)
+	}
+
+	if err := a.PlaceBlock(target, "stone"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(stackRequests(s)); got != 1 {
+		t.Errorf("a second placement took again: %d requests", got)
+	}
+}
+
+func TestPlaceBlockInSurvivalNeverTakes(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	a, s := newCreativeAct(false)
+	a.solid = stoneBelow(target)
+	a.pose = Pose{Feet: mgl32.Vec3{1.5, 1, 2.5}, OnGround: true}
+	if err := a.PlaceBlock(target, "stone"); !errors.Is(err, ErrNoItem) {
+		t.Fatalf("err = %v, want ErrNoItem", err)
+	}
+	if len(s.got) != 0 {
+		t.Errorf("sent %d packets", len(s.got))
+	}
+}
+
+func TestPlaceBlockFailsClearlyForAnItemWithoutACreativeEntry(t *testing.T) {
+	target := protocol.BlockPos{1, 1, 2}
+	a, _ := newCreativeAct(true)
+	a.solid = stoneBelow(target)
+	a.pose = Pose{Feet: mgl32.Vec3{1.5, 1, 2.5}, OnGround: true}
+	if err := a.PlaceBlock(target, "dirt"); !errors.Is(err, ErrNoCreativeItem) {
+		t.Fatalf("err = %v, want ErrNoCreativeItem", err)
 	}
 }

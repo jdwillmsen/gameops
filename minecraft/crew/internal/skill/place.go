@@ -63,7 +63,9 @@ func (p *Place) Ready(s belief.Snapshot) error {
 	if err := overworld(s); err != nil {
 		return err
 	}
-	if count(s, p.item) < 1 {
+	// A creative unit takes what it places; the actuator fails the step when
+	// the creative inventory has no such item.
+	if !s.Creative && count(s, p.item) < 1 {
 		return fmt.Errorf("no %s in inventory", p.item)
 	}
 	return nil
