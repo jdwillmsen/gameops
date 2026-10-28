@@ -125,7 +125,7 @@
         "priority": 3,
         "speed_multiplier": 1.0,
         "track_target": true,
-        "reach_multiplier": 2.0
+        "reach_multiplier": 1.25
       },
       "minecraft:behavior.ranged_attack": {
         "priority": 4,
