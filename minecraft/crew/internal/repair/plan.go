@@ -58,11 +58,11 @@ func (p Plan) Commands() []string {
 	return append(out, p.Teardown...)
 }
 
-// BuildPlan orders rects and writes their commands. Order: first the blocks
+// OrderRects sorts rects into the order they must be applied: first the blocks
 // that must go (planned air, so debris and intruders are cleared before
 // anything is set), then solids bottom-up so each rests on what is below, then
-// the late blocks bottom-up. Every command is checked against the footprint.
-func BuildPlan(rects []Rect, footprint Box) (Plan, error) {
+// the late blocks bottom-up. The input is left alone.
+func OrderRects(rects []Rect) []Rect {
 	stage := func(r Rect) int {
 		switch {
 		case IsAir(r.Block):
@@ -80,6 +80,13 @@ func BuildPlan(rects []Rect, footprint Box) (Plan, error) {
 		}
 		return rectLess(rs[i], rs[j])
 	})
+	return rs
+}
+
+// BuildPlan orders rects and writes their commands in OrderRects order. Every
+// command is checked against the footprint.
+func BuildPlan(rects []Rect, footprint Box) (Plan, error) {
+	rs := OrderRects(rects)
 	var p Plan
 	for _, r := range rs {
 		if !contains(footprint, r.Box) {
