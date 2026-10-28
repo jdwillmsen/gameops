@@ -53,7 +53,7 @@ crew-control; it never calls them to command them.
 - `POST /auth/register/options`, `/auth/register/finish`, `/auth/login/options`, `/auth/login/finish`, `/auth/logout`, `/auth/report`; `GET /auth/me`. Only with sign-in on
 - `GET /v1/work/{unit}`: the unit's last 50 items, newest first
 - `POST /v1/work/bulk`: operator session and `X-Crew-Request`; recall or assign up to 16 units in one request, see [Bulk recall and assign](#bulk-recall-and-assign)
-- `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul` or `goto` template, as in the crew Task API), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
+- `POST /v1/work/{unit}/tasks` (a `gather_and_deposit`, `haul`, `goto`, `repair_build` or `build_blueprint` template, as in the crew Task API; the last two only for a unit whose reported role is `mender` or `builder` respectively, else 409, and a unit that has reported no role is let through), `/goto` (`{"x","y","z"}`, x and z −500..499, y −64..320), `/stop`, `/items/{id}/cancel`
 - `POST /v1/jobs`: `{"kind":"plan","template":"parallel-demo"}` or `{"kind":"stock","place":"<id>","want":{"cobblestone":16}}`, 202 with the job, 422 when it cannot be planned; `GET /v1/jobs` (the last 50), `GET /v1/jobs/{id}`, `POST /v1/jobs/{id}/cancel` (409 while the scheduler holds it)
 - `GET /v1/places`: every place with its stock; `POST /v1/places` (`{"id","name","kind","box"}`, as in `CREW_PLACES`) adds or edits one, `POST /v1/places/delete` (`{"id"}`) removes one; seeded places answer 409. Chests units report get `chest-x-y-z` ids, which a request may only rename, never move or create. Moving a place or changing its kind, by request or by `CREW_PLACES`, drops its stock; a rename keeps it
 - `GET /v1/events?unit=&kind=&severity=&since=&until=&limit=&sort=asc|desc&cursor=<next>`: signed-in; the unit event history, newest first by default, every filter optional and exact, times RFC3339. Pages are keyset (`next` carries an `(at, id)` cursor, never an offset), at most 200 events each. Severity is ok, info, warn or crit; kinds are listed under Event history. Rows carry each unit's position, which is why the route is signed-in only
@@ -387,7 +387,9 @@ before that.
 
 `POST /v1/work/bulk` takes `{"units":[...],"confirm":N,"action":"recall","to":{x,y,z}}`
 or `{"action":"assign","task":{...}}` with a `gather_and_deposit`, `haul` or
-`goto` template as in the task API. Recall stops each unit (cancelling its
+`goto`, `repair_build` or `build_blueprint` template as in the task API. A
+unit whose reported role is known and does not take the template is refused in
+its own verdict and nothing is queued for it. Recall stops each unit (cancelling its
 queued work) and then queues a walk to the point; assign queues behind
 existing work. At most 16 units, each listed once and each known; `confirm`
 must equal the number of units. Anything wrong with the request as a whole is
@@ -395,6 +397,24 @@ a 400 or 404 and queues nothing; otherwise the answer is 200 with a verdict per
 unit (`{"unit","ok","id"?,"error"?}`), so one unit failing never hides or
 undoes the others. It needs an operator session and `X-Crew-Request`, answers
 `no-store`, and the destination is never logged.
+
+## Repair and build tasks
+
+`repair_build` (a `mender`) and `build_blueprint` (a `builder`) are the two
+bounded templates the work queue checks by shape only; the unit validates them
+in full and reports a bad task failed with its reason. The queue refuses an
+unknown field, a repair `plan` other than `colosseum`, an `area` that is
+missing a corner, inverted or over 64 blocks on an axis, a `blueprint` name
+outside `[a-z0-9_]{1,32}`, a `rotation` other than 0, 90, 180 or 270, and an
+`at` outside the same bounds as `goto`. A repair area is not held to that
+square: the Colosseum lies beyond it, so the unit's own check of the arena's
+footprint is the bound. Error messages never echo a coordinate.
+
+The unit's repair triage line arrives as the finished task's `reason`, and a
+stamp's `build` report stays on the unit's own task record; the controller
+forwards neither beyond what its events already carry. The role comes from the
+last status poll (`unit.role`), so a unit that has not yet been polled reads as
+unknown and is allowed.
 
 ## Operators
 
@@ -872,7 +892,7 @@ Label values are closed sets, never a raw string a unit sent:
 - `unit`: the roster. Events from any other id are dropped.
 - `state`: `working`, `idle`, `stuck`, `dead`, `offline`. Offline wins, then dead, then stuck, then working, else idle.
 - `outcome`: `done`, `failed`, `cancelled`, `unknown` (the unit's recent list no longer held the verdict), `idle` (a successful finish of an idle-eligible template within 2 s, the rule the history's idle roll-up uses; it is the idle-poll count).
-- `template`: the ten crew templates (`gather_and_deposit`, `haul`, `withdraw`, `deposit`, `mine_shaft`, `goto`, `inspect`, `observe_blocks`, `place_block`, `craft`), else `other`.
+- `template`: the twelve crew templates (`gather_and_deposit`, `haul`, `withdraw`, `deposit`, `mine_shaft`, `goto`, `inspect`, `observe_blocks`, `place_block`, `craft`, `repair_build`, `build_blueprint`), else `other`.
 - `reason`: below. A unit's failure text is free text, so it is matched, case-insensitively, against phrases; the first row to match wins, and no match is `other`. A new failure shows up under `other` until a row is added in `internal/metrics/reason.go`.
 
 | `reason` | Matches (phrases) | Seen as |
@@ -887,7 +907,7 @@ Label values are closed sets, never a raw string a unit sent:
 | `server_rejected` | `server rejected`, `server did not`, `did not confirm` | |
 | `timeout` | `took too long`, `timed out`, `ticks` | `visit took too long` |
 | `action_failed` | `did not break`, `did not land`, `never settled`, `drifted`, `did not come down`, `is blocked at its first step` | |
-| `invalid_task` | `invalid task`, `outside the allowed`, `outside the area`, `unknown template` | |
+| `invalid_task` | `invalid task`, `outside the allowed`, `outside the area`, `unknown template`, `not in creative mode`, `more than a unit walks`, `hotbar has room` | |
 | `other` | anything else | |
 
 Series stay bounded by the label sets: with 20 units the worst case is about two
