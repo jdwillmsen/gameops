@@ -275,3 +275,33 @@ func TestStateCarriesTheBlocksStatesWhenTheNameTableHasThem(t *testing.T) {
 		t.Error("a block in an unreceived sub-chunk must be unknown")
 	}
 }
+
+// A column's SubChunkLimit stops at its highest non-empty section; the server
+// sends nothing above it, and a builder stamping on open ground works there.
+func TestSectionsAboveTheAnnouncedLimitAreAir(t *testing.T) {
+	s := New(names, 8)
+	w := &sink{}
+	s.Apply(&packet.LevelChunk{Position: protocol.ChunkPos{0, 0}, SubChunkLimit: protocol.Option(int32(8))}, w)
+
+	if name, known := s.Block(protocol.BlockPos{3, 64, 3}); !known || name != "air" {
+		t.Errorf("above the limit = %q known=%v, want air", name, known)
+	}
+	if h, known := s.BlockHash(protocol.BlockPos{3, 200, 3}); !known || h != airHash {
+		t.Errorf("hash above the limit = %d known=%v", h, known)
+	}
+	if _, known := s.Block(protocol.BlockPos{3, 10, 3}); known {
+		t.Error("a section inside the limit that was never received must stay unknown")
+	}
+	if _, known := s.Block(protocol.BlockPos{40, 64, 3}); known {
+		t.Error("another column was never announced")
+	}
+
+	s.Apply(&packet.UpdateBlock{Position: protocol.BlockPos{3, 64, 3}, NewBlockRuntimeID: stoneHash}, w)
+	if name, known := s.Block(protocol.BlockPos{3, 64, 3}); !known || name != "stone" {
+		t.Errorf("a block placed above the limit = %q known=%v, want stone", name, known)
+	}
+	s.Reset()
+	if _, known := s.Block(protocol.BlockPos{3, 64, 3}); known {
+		t.Error("a reset must forget the announced columns")
+	}
+}

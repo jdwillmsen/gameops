@@ -45,6 +45,10 @@ type Store struct {
 
 	mu   sync.RWMutex
 	subs map[[3]int32]section
+	// tops is the highest section index the server announced per column. The
+	// server sends nothing above a column's highest non-empty section, so those
+	// sections are air without ever arriving.
+	tops map[[2]int32]int32
 	// anchor is the chunk eviction measures from: the centre the server
 	// publishes chunks around once it has said so, the latest LevelChunk
 	// until then.
@@ -54,7 +58,7 @@ type Store struct {
 }
 
 func New(names Names, maxSubChunks int) *Store {
-	return &Store{names: names, limit: maxSubChunks, subs: map[[3]int32]section{}}
+	return &Store{names: names, limit: maxSubChunks, subs: map[[3]int32]section{}, tops: map[[2]int32]int32{}}
 }
 
 // Apply feeds the store a packet the session read. Only LevelChunk writes.
@@ -70,6 +74,9 @@ func (s *Store) Apply(pk packet.Packet, w PacketWriter) {
 		}
 		s.mu.Unlock()
 		if req := SubChunkRequest(p); req != nil {
+			s.mu.Lock()
+			s.tops[[2]int32{p.Position[0], p.Position[1]}] = int32(req.Offsets[len(req.Offsets)-1][1])
+			s.mu.Unlock()
 			_ = w.WritePacket(req)
 		}
 	case *packet.NetworkChunkPublisherUpdate:
@@ -100,6 +107,7 @@ func (s *Store) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.subs = map[[3]int32]section{}
+	s.tops = map[[2]int32]int32{}
 	s.anchored, s.published = false, false
 }
 
@@ -119,7 +127,7 @@ func (s *Store) State(pos protocol.BlockPos) (name string, props map[string]any,
 
 func (s *Store) lookup(pos protocol.BlockPos, withState bool) (name string, props map[string]any, known bool) {
 	s.mu.RLock()
-	sec, held := s.subs[[3]int32{pos.X() >> 4, pos.Y() >> 4, pos.Z() >> 4}]
+	sec, held := s.sectionLocked(pos)
 	var hash uint32
 	if held && sec.hashes != nil {
 		hash = sec.hashes[index(pos.X()&15, pos.Y()&15, pos.Z()&15)]
@@ -144,12 +152,25 @@ func (s *Store) lookup(pos protocol.BlockPos, withState bool) (name string, prop
 	return strings.TrimPrefix(n, "minecraft:"), props, true
 }
 
+// sectionLocked returns the section holding pos. One above its column's
+// announced top is an all-air section even though it never arrived.
+func (s *Store) sectionLocked(pos protocol.BlockPos) (section, bool) {
+	cx, sy, cz := pos.X()>>4, pos.Y()>>4, pos.Z()>>4
+	if sec, held := s.subs[[3]int32{cx, sy, cz}]; held {
+		return sec, true
+	}
+	if top, ok := s.tops[[2]int32{cx, cz}]; ok && sy > top && sy <= maxY>>4 {
+		return section{}, true
+	}
+	return section{}, false
+}
+
 // BlockHash returns the network hash of the block at pos. A server compares the
 // hash a click quotes with its own, so a skill that clicks a block needs it.
 func (s *Store) BlockHash(pos protocol.BlockPos) (hash uint32, known bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	sec, held := s.subs[[3]int32{pos.X() >> 4, pos.Y() >> 4, pos.Z() >> 4}]
+	sec, held := s.sectionLocked(pos)
 	switch {
 	case !held:
 		return 0, false
@@ -229,7 +250,7 @@ func (s *Store) set(pos protocol.BlockPos, hash uint32) {
 	key := [3]int32{pos.X() >> 4, pos.Y() >> 4, pos.Z() >> 4}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sec, held := s.subs[key]
+	sec, held := s.sectionLocked(pos)
 	if !held {
 		return
 	}
