@@ -55,6 +55,7 @@ const other = "other"
 var templates = map[string]bool{
 	"gather_and_deposit": true, "haul": true, "withdraw": true, "deposit": true, "mine_shaft": true,
 	"goto": true, "inspect": true, "observe_blocks": true, "place_block": true, "craft": true,
+	"repair_build": true, "build_blueprint": true,
 }
 
 // safeReason keeps a reason code only if it is in the closed catalogue, so a

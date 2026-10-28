@@ -33,6 +33,8 @@ func TestFreeTextNeverSurvivesIntoReasonOrTemplate(t *testing.T) {
 		{`{"reason_code":"no path at 12,64,-300","template":"haul"}`, "other", "haul"},
 		{`{"reason_code":"Steve died","template":"Steve"}`, "other", "other"},
 		{`{"template":"steve"}`, "", "other"},
+		{`{"template":"repair_build"}`, "", "repair_build"},
+		{`{"template":"build_blueprint"}`, "", "build_blueprint"},
 		{`{"reason_code":"session_lost","template":"gather at 1 2 3"}`, "session_lost", "other"},
 		{`{"template":"a_token_ghp_0123456789abcdefghijklmnopqrstuvwxyz0123"}`, "", "other"},
 		{`{}`, "", ""},

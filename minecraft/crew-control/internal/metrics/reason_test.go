@@ -36,13 +36,16 @@ func TestReasonTable(t *testing.T) {
 		"no progress after 3 replans":                                  ReasonNoProgress,
 		"server rejected the deposit with status 4":                    ReasonServerRejected,
 		"the server did not place the block":                           ReasonServerRejected,
-		"block did not break":                                          ReasonActionFailed,
-		"jump did not land":                                            ReasonActionFailed,
-		"invalid task: qty must be 1 to 256":                           ReasonInvalidTask,
-		"session ended":                                                ReasonSession,
-		"unit died":                                                    ReasonDied,
-		"skill failed":                                                 ReasonOther,
-		"":                                                             ReasonOther,
+		"the unit is not in creative mode":                             ReasonInvalidTask,
+		"repair needs 2000 cells changed, more than a unit walks in one task (1000); use arenarepair for this damage": ReasonInvalidTask,
+		"repair needs 12 block types and the hotbar has room for 9; narrow the area or use arenarepair":               ReasonInvalidTask,
+		"block did not break":                ReasonActionFailed,
+		"jump did not land":                  ReasonActionFailed,
+		"invalid task: qty must be 1 to 256": ReasonInvalidTask,
+		"session ended":                      ReasonSession,
+		"unit died":                          ReasonDied,
+		"skill failed":                       ReasonOther,
+		"":                                   ReasonOther,
 	} {
 		if got := Reason(text); got != want {
 			t.Errorf("Reason(%q) = %q, want %q", text, got, want)
@@ -76,6 +79,9 @@ func TestReasonIsAlwaysInTheClosedSet(t *testing.T) {
 func TestTemplateIsClosed(t *testing.T) {
 	if Template("haul") != "haul" || Template("gather_and_deposit") != "gather_and_deposit" {
 		t.Fatal("known templates must pass through")
+	}
+	if Template("repair_build") != "repair_build" || Template("build_blueprint") != "build_blueprint" {
+		t.Fatal("the mender and builder templates must pass through")
 	}
 	for _, s := range []string{"", "HAUL", "haul ", "build_castle", strings.Repeat("a", 1000)} {
 		if got := Template(s); got != TemplateOther {
