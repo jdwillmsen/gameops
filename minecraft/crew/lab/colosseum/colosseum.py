@@ -917,7 +917,7 @@ def furnish_rooms():
     finish_room(13, SBRICK, SBRICK, SBRICK)
     L13 = np.floor(q16 + 60.0).astype(int)
     row = room(13) & (np.abs(uu - 4.2) < 0.55) & ybetween(50, 53)
-    put(row & (L13 % 4 != 2), BARS)
+    put(row & (L13 % 4 < 2), BARS)
     put(room(13) & (uu > 4.8) & (L13 % 4 == 0) & ybetween(50, 53), BARS)
     put(room(13) & (uu >= 7.2) & (L13 % 4 == 1) & (Yw == 50), HAY)
     put(room(13) & (uu >= 7.2) & (L13 % 4 == 1) & (Yw == 51), WHITECARP)
