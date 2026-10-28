@@ -21,7 +21,7 @@
 #                            [--timeout <duration>] [--max-live N] [--poll <d>]
 #                            [--rally-after <d>] [--rally-every <d>]
 #                            [--place-squad=false]
-#        arena.sh boss <lab> --mob <id> [--name W] [--effects "cmd1,cmd2"]
+#        arena.sh boss <lab> --mob <id> [--name W] [--event <spawn event>] [--effects "cmd1,cmd2"]
 #                            [--runs N] [--timeout <duration>] [--warriors <names>]
 #                            [--log <path>] [--summary]
 #        arena.sh reset <lab>
@@ -74,7 +74,7 @@ confirm=false
 colosseum=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--colosseum] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
+usage="usage: arena.sh [--confirm-overwrite] [--colosseum] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--event <spawn event>] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;

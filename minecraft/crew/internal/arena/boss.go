@@ -47,6 +47,8 @@ type BossTest struct {
 	Layout  Layout
 	Mob     string
 	Name    string
+	// Event is an optional spawn event, such as a pack boss's hit-point group.
+	Event string
 	// Effects are effect, damage or event commands whose only target is
 	// the boss, as @e[name=<Name>...].
 	Effects   []string
@@ -105,6 +107,9 @@ func (b *BossTest) validate() error {
 	}
 	if !mobPattern.MatchString(b.Mob) {
 		return fmt.Errorf("arena: %q is not a mob id", b.Mob)
+	}
+	if b.Event != "" && !mobPattern.MatchString(b.Event) {
+		return fmt.Errorf("arena: %q is not a spawn event", b.Event)
 	}
 	if err := validateWarriorName(b.Name); err != nil {
 		return fmt.Errorf("arena: boss name: %w", err)
@@ -255,6 +260,11 @@ func (b *BossTest) killCommand() string { return "kill " + b.bossSelector() }
 
 func (b *BossTest) summonCommand() string {
 	p := squadStartPoint(b.Layout, 0)
+	if b.Event != "" {
+		// With a spawn event the name moves after the rotations; the plain
+		// form below is a syntax error here.
+		return fmt.Sprintf("summon %s %d %d %d 0 0 %s %q", b.Mob, p.X, p.Y, p.Z+bossDistance, b.Event, b.Name)
+	}
 	// Bedrock reads the name before the coordinates; the other order summons
 	// an unnamed mob that the kill check can never find.
 	return fmt.Sprintf("summon %s %q %d %d %d", b.Mob, b.Name, p.X, p.Y, p.Z+bossDistance)
@@ -280,6 +290,12 @@ func (b *BossTest) Run(ctx context.Context) ([]BossRecord, error) {
 		return nil, err
 	}
 	defer d.removeTickingAreas()
+	// A pack boss hunts only tagged targets; untag on every exit so a failed
+	// run never leaves the squad marked.
+	defer d.untagWarriors()
+	if err := d.tagWarriors(); err != nil {
+		return nil, err
+	}
 	if err := b.wait(ctx, b.Settle); err != nil {
 		return nil, err
 	}

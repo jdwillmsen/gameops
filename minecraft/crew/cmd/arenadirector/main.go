@@ -197,6 +197,7 @@ func boss(args []string) {
 	layoutPath := fs.String("layout", "", "layout JSON from labcourses arena-layout")
 	mob := fs.String("mob", "", "mob id to summon, e.g. warden")
 	name := fs.String("name", "W", "name given to the boss, which the kill check searches for")
+	event := fs.String("event", "", "spawn event run on summon, e.g. gameops:hp_500 for the ground dragon")
 	effects := fs.String("effects", "", "comma-separated effect, damage or event commands run right after the summon; each must target only @e[name=<name>...]")
 	runs := fs.Int("runs", 1, "number of fights")
 	timeout := fs.Duration("timeout", 5*time.Minute, "limit for one fight")
@@ -247,6 +248,7 @@ func boss(args []string) {
 		Layout:    layout,
 		Mob:       *mob,
 		Name:      *name,
+		Event:     *event,
 		Effects:   arena.SplitEffects(*effects),
 		Runs:      *runs,
 		Timeout:   *timeout,
