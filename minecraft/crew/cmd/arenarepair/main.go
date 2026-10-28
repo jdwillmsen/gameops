@@ -318,22 +318,9 @@ func fetchWorld(ctx context.Context, o options, c arena.Console, d deps, stderr 
 	return snap, nil
 }
 
-// knownLab is the one cluster lab this tool trusts without being told: the
-// crew lab's server pod. Any other target needs --confirm-lab with the same
-// value, so a mistyped pod (the FWB server, say) cannot be saved-held or
-// repaired by accident. A local compose service is a lab by construction but
-// still has to be confirmed unless it is the compose file's own `lab` service.
-const knownLab = "k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0"
+const knownLab = arena.KnownLab
 
-func checkLab(o options) error {
-	if o.lab == "" {
-		return nil
-	}
-	if o.lab == knownLab || (!strings.HasPrefix(o.lab, "k8s:") && o.lab == "lab") || o.confirmLab == o.lab {
-		return nil
-	}
-	return fmt.Errorf("--lab %q is not the crew lab (%s); if it really is a lab, repeat it as --confirm-lab %q", o.lab, knownLab, o.lab)
-}
+func checkLab(o options) error { return arena.CheckLab(o.lab, o.confirmLab) }
 
 // dbDir accepts the db directory itself or the world directory above it.
 func dbDir(dir string) (string, error) {
@@ -385,16 +372,7 @@ func printReport(w io.Writer, rep repair.Report, o options, cmds []string) error
 	return nil
 }
 
-func newConsole(lab, compose string) (arena.Console, error) {
-	if target, ok := strings.CutPrefix(lab, "k8s:"); ok {
-		ns, pod, ok := strings.Cut(target, "/")
-		if !ok || ns == "" || pod == "" {
-			return nil, fmt.Errorf("%q is not k8s:<namespace>/<pod>", lab)
-		}
-		return arena.NewKubectlConsole(ns, pod), nil
-	}
-	return arena.NewDockerConsole(compose, lab), nil
-}
+func newConsole(lab, compose string) (arena.Console, error) { return arena.NewLabConsole(lab, compose) }
 
 func newSnapshotter(c arena.Console, lab, compose, worldPath string) repair.Snapshotter {
 	tar := []string{"tar", "-C", worldPath, "-cf", "-", "db"}

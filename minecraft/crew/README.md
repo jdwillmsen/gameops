@@ -544,6 +544,22 @@ curl -s localhost:8081/readyz
 A unit's number (`CREW_ID`, `crew-NN`) is fixed and its name (`MC_USERNAME`,
 16 characters at most) is what players see. They are never renamed or reused.
 
+### Creative for menders and builders
+
+`mender` and `builder` units work in creative, and only the server console can
+set that: `lab/creative.sh <lab> Dusty[,Name...]` runs `gamemode creative` for
+each named unit that is online, and again whenever one rejoins, because an
+offline lab unit is a fresh survival player on every login. It polls the
+console's `list` every 3 s and always stops: `--max-duration` (default 30m,
+at most 12h), `--max-commands` (default 100) or Ctrl-C; `--once` makes one
+pass and exits 3 if a named unit was not online. A rejoin faster than the poll
+is missed, so poll no slower than a unit's reconnect. Targets other than the
+crew lab need `--confirm-lab`, and FWB is refused. The unit itself must have
+`CREW_LAB=true` and `CREW_ROLE=mender` or `builder`. `lab/compose.yaml` has
+a commented `crew-04` example (not run by default) and a commented
+`VIEW_DISTANCE: "6"`: at the image's default of 32 about half of one spike's
+joins were closed by a first-join burst over the client's 16 MiB batch limit.
+
 ### Gather-and-deposit scene
 
 `lab/scene.sh <lab> [unit]` builds a stone-free platform, a quarry
