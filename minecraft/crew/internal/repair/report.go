@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"time"
 )
 
 // Report is the per-run damage summary, JSON-ready so a run can be logged
@@ -24,6 +25,9 @@ type Report struct {
 	ByKind     map[string]int `json:"by_kind"`
 	ByZone     map[string]int `json:"by_zone"`
 	Top        []Change       `json:"top_changes"`
+	// ScanAt is when the world copy the scan read was finished; zero when the
+	// scan came from a file.
+	ScanAt time.Time `json:"scan_at,omitempty"`
 }
 
 // How a run ended. Refused means nothing was sent; aborted means some commands
@@ -82,6 +86,9 @@ func (r Report) Write(w io.Writer) {
 	fmt.Fprintf(w, "repair report (%s)\n", mode)
 	if r.Error != "" {
 		fmt.Fprintf(w, "  error: %s\n", r.Error)
+	}
+	if !r.ScanAt.IsZero() {
+		fmt.Fprintf(w, "  world copy taken %s (%s ago)\n", r.ScanAt.Format(time.RFC3339), time.Since(r.ScanAt).Round(time.Second))
 	}
 	fmt.Fprintf(w, "  scanned %d cells, %d not scanned, %d damaged in %d rectangles\n", r.Scanned, r.Unscanned, r.Damaged, r.Rects)
 	fmt.Fprintf(w, "  commands %d, executed %d\n", r.Commands, r.Executed)

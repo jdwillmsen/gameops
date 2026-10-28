@@ -1,6 +1,6 @@
 # Colosseum repair bot
 
-**Status:** phase 1 (library only), draft for review
+**Status:** phase 2 (CLI and world-db scan) built; phase 1 library merged
 **Date:** 2026-10-27
 **Ticket:** JDW-247
 **Builds on:** [crew squads and arena](2026-10-23-crew-squads-and-arena-design.md), `lab/colosseum/` (generator, `layout.json`), `internal/arena`
@@ -25,6 +25,18 @@ Fights damage the Colosseum: creepers and boss effects blow holes, mobs and warr
 
 Repair commands go through the same `arena.Console` the director uses (`send-command` in the lab container), which runs as the server console: no player op, no gamemode, no cheats flag. The bot needs no in-game permission and no new credential, only the kubectl or docker access `arena.sh` already uses. Lab only; `Apply` is never pointed at FWB. A later mender unit that reads blocks as a client still sends its writes through this console path, so the unit needs no operator rights either.
 
+## Phase 2: scan source and CLI
+
+Decided: read the world's LevelDB, not the console and not `structure save`.
+
+- **Console scan is out.** The box is about 4.4M cells and the console runs about 20 commands a second: `testforblock` per cell would take over 60 hours.
+- **`structure save` is not needed.** A disk-saved structure is kept by the server inside the world database, not as a loose `.mcstructure` under `/data/worlds/crew-lab` (the only `.mcstructure` files on disk are the vanilla behaviour pack's). Decoding it would mean reading that same LevelDB, so the chunks are read directly and nothing is written to the world.
+- **What ships.** `repair.Snapshotter` runs the server's backup protocol: `save hold` (flushes pending chunk writes), `save query` until it reports the files ready and lists each file's valid length, a tar of `/data/worlds/crew-lab/db` streamed out of the container, every copied file cut back to its listed length (a listed file that is missing or short fails the copy), and `save resume` (always, even after a failed copy or a SIGINT/SIGTERM, which also cancels the poll and the tar; a resume failure is joined to the error that caused the stop). A `--keep` or `--out` directory has its `db/` replaced first. `repair.WorldReader` opens the copy read-only with goleveldb and decodes version 8/9 sub-chunks (first layer: bit-packed indexes plus an NBT palette). The db is about 26 MB and a full footprint pass takes under a second, so the `Reader` is local and cheap.
+- **Matching.** A scanned block carries every state; the plan names only some. A scanned block is spelled as the plan spells it when the plan's states are a subset, so `lantern ["hanging"=true]` matches. Lit, powered and flowing twins (`lit_redstone_lamp`, `powered_repeater`, `bubble_column`, `iron_chain`; `flowing_water` and `flowing_lava` are deliberately not folded, since the plan's fountains are still `water` and a flowing block there is real damage) fold into the planned name, and `open_bit`, pressed buttons and redstone signal strength are ignored, so a toggled door or a rippling lamp ring is not damage. A block that differs in any other state (a stair facing the wrong way) is "replaced".
+- **Cells.** A chunk never generated is `Unknown` (unscanned). A generated chunk with no slice at a height is air.
+- **CLI.** `cmd/arenarepair`: `plan` (report only), `apply` (dry run unless `--execute`; fight, player and ticking-area guards from phase 1), `snapshot` (just fetch the db). It refuses any layout not centred -300,-758. `--lab` must be the crew lab pod (`k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0`) or the compose service `lab`; anything else needs `--confirm-lab` repeating the same target, so the FWB server cannot be save-held or repaired by a typo. `apply --execute` takes `--lab` as its only source (a `--world` or `--scan` copy may be stale, so they are for `plan` and dry runs) and prints the age of the copy it repaired from.
+- **Limits.** The scan is only as fresh as the flush: take it with `--lab` (which holds saving) or from a copy taken after `save hold`. Block entities (chest contents, sign text), the second (water-log) layer, entities and the dimensions other than the overworld are not compared. A lever or button left in the wrong position is not restored. Extended pistons (the secret-closet plugs) show as intruders and `replaced` until the lever is flipped back.
+
 ## Not repairing during a fight
 
 The director tags its mobs `arena_wave` and `arena_boss` (`arena.FightCommands`). `Apply`:
@@ -38,7 +50,6 @@ The double sample is probabilistic until an `arena_active` marker exists. Zero t
 
 ## Open questions
 
-- Scan source for phase 2: mender unit's loaded chunks (range-limited, so several passes) versus `structure save` tiles decoded offline.
 - Should the director publish `arena_active`? It is a small change to `internal/arena`, which another thread is working near.
 - Gate state: a pen gate left open is damage by this diff (the plan says iron bars). Confirm that is wanted before a wave run is over, or the bot would close gates mid-run (the fight guard prevents it).
 - Is the `IsLate` heuristic acceptable, or should the generator emit a stage per fill?
@@ -48,5 +59,5 @@ The double sample is probabilistic until an `arena_active` marker exists. Zero t
 | # | Output |
 |---|--------|
 | 1 | `internal/repair`: parse, diff, plan, report, guarded apply; unit tests (this change) |
-| 2 | Reader over a mender unit's world view; `repair` command in `cmd/` and `arena.sh repair`; mender role in the crew roster; `arena_active` marker |
+| 2 | World-db reader and snapshotter, `cmd/arenarepair` (this change). Still open: `arena.sh repair`, a mender role, the `arena_active` marker |
 | 3 | Live trial on the lab after a boss run, with the owner watching |
