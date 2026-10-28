@@ -18,9 +18,6 @@ import (
 )
 
 const (
-	// placeWait is how long a click may take to show a block before it is
-	// called a no-op. A placement is answered in 80 to 125 ms.
-	placeWait = 350 * time.Millisecond
 	// settle lets the second half of a bed or door and neighbour updates
 	// arrive before the cells are read.
 	settle = 60 * time.Millisecond
@@ -52,6 +49,11 @@ type itemResult struct {
 	trials    int
 	// unplaced says no click placed a block.
 	unplaced bool
+	// unmapped says a click placed a block the vocabulary does not know.
+	unmapped bool
+	// soil is the block the lane floor was changed to for the item to
+	// place; empty for the default dirt.
+	soil string
 }
 
 type seen struct {
@@ -70,6 +72,9 @@ func newItemResult(name string) *itemResult {
 }
 
 func (r *itemResult) add(c click, o outcome) {
+	if o.Unmapped {
+		r.unmapped = true
+	}
 	if !o.Placed || o.Unmapped {
 		return
 	}
@@ -134,8 +139,13 @@ type worker struct {
 	retryMisses bool
 }
 
+// placeWait is how long a click may take to show a block before it is called
+// a no-op. A placement is answered in 80 to 125 ms; a loaded server needs
+// more, which --place-wait sets.
+var placeWait = 350 * time.Millisecond
+
 // missRetries is how many more times a click that placed nothing is sent.
-const missRetries = 2
+var missRetries = 2
 
 // trial places item with the click, reads what appeared at the target, and
 // puts the bay back.
@@ -168,7 +178,7 @@ func (w *worker) trial(ctx context.Context, name string, c click) (outcome, erro
 		}
 		if w.u.waitFor(ctx, placeWait, func() bool { return !w.u.isAir(target) }) {
 			time.Sleep(settle)
-			o = w.u.read(target)
+			o = w.withSecondHalf(w.u.read(target), target)
 			if o.Unmapped {
 				w.log("%s placed a block the vocabulary does not know (%s)", name, o.Name)
 			}
@@ -254,7 +264,27 @@ func (w *worker) firstPass(ctx context.Context, name string, hasBlock bool, ir *
 			return nil, c0, false, err
 		}
 		if !res[c.key()].Placed {
-			return res, c0, false, nil
+			// Cactus, carrots and the like need sand, farmland or the like
+			// under them; offer each soil in turn before calling the item
+			// unplaceable.
+			if !hasBlock {
+				return res, c0, false, nil
+			}
+			for _, soil := range altSoils {
+				if err := w.setSoil(ctx, soil); err != nil {
+					return nil, c0, false, err
+				}
+				if err := run(c); err != nil {
+					return nil, c0, false, err
+				}
+				if res[c.key()].Placed {
+					ir.soil = soil
+					break
+				}
+			}
+			if ir.soil == "" {
+				return res, c0, false, nil
+			}
 		}
 		c0, ok = c, true
 	}
@@ -286,9 +316,70 @@ func (w *worker) firstPass(ctx context.Context, name string, hasBlock bool, ir *
 	return res, c0, true, nil
 }
 
+// altSoils are the floors tried under an item the dirt lane did not take.
+var altSoils = []string{"sand", "farmland", "end_stone", "soul_sand", "grass_block"}
+
+// setSoil changes the block under the lane cell.
+func (w *worker) setSoil(ctx context.Context, soil string) error {
+	p := floorUnder(w.bay.lane())
+	out, err := w.r.con.Exec(fmt.Sprintf("setblock %d %d %d %s", p.X(), p.Y(), p.Z(), soil))
+	if err != nil {
+		return fmt.Errorf("soil %s: %w (%s)", soil, err, strings.TrimSpace(out))
+	}
+	time.Sleep(150 * time.Millisecond)
+	return ctx.Err()
+}
+
+func (w *worker) resetSoil(ctx context.Context) { _ = w.setSoil(ctx, "dirt") }
+
+// withSecondHalf folds in what the other cell of a two-cell block says. A
+// door's hinge is stored on the upper half; the clicked cell is the lower.
+func (w *worker) withSecondHalf(o outcome, cell protocol.BlockPos) outcome {
+	if !o.Placed || o.Unmapped {
+		return o
+	}
+	if _, door := o.Props["door_hinge_bit"]; !door {
+		return o
+	}
+	if _, upper := o.Props["upper_block_bit"]; !upper {
+		return o
+	}
+	up := w.u.read(protocol.BlockPos{cell.X(), cell.Y() + 1, cell.Z()})
+	if !up.Placed || up.Unmapped {
+		return o
+	}
+	merged := make(map[string]any, len(o.Props))
+	for k, v := range o.Props {
+		merged[k] = v
+	}
+	if v, ok := up.Props["door_hinge_bit"]; ok {
+		merged["door_hinge_bit"] = v
+	}
+	o.Props = merged
+	return o
+}
+
+// byConstruction names the state keys present in props that the placement of
+// the other half decides, not the click: a door's upper half, a bed's head
+// and whether anyone sleeps in it.
+func byConstruction(props map[string]any) []string {
+	var out []string
+	for _, k := range []string{"head_piece_bit", "occupied_bit", "upper_block_bit"} {
+		if _, ok := props[k]; ok {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
 // calibrate runs one item to completion.
 func (w *worker) calibrate(ctx context.Context, it item) (*itemResult, error) {
 	ir := newItemResult(it.name)
+	defer func() {
+		if ir.soil != "" {
+			w.resetSoil(context.WithoutCancel(ctx))
+		}
+	}()
 	w.retryMisses = false
 	if err := w.stockHotbar(ctx); err != nil {
 		return nil, err
@@ -313,6 +404,12 @@ func (w *worker) calibrate(ctx context.Context, it item) (*itemResult, error) {
 	if err := w.sweep(ctx, it.name, o0.Name, sig, clicks, res, ir); err != nil {
 		return nil, err
 	}
+	for _, k := range byConstruction(o0.Props) {
+		if ir.derived[o0.Name] == nil {
+			ir.derived[o0.Name] = map[string]bool{}
+		}
+		ir.derived[o0.Name][k] = true
+	}
 	if c0.Face == fTop && !w.r.cfg.skipDerived {
 		w.r.mu.Lock()
 		keys, known := w.r.derivedBy[sig]
@@ -333,7 +430,12 @@ func (w *worker) calibrate(ctx context.Context, it item) (*itemResult, error) {
 			w.r.mu.Unlock()
 		}
 		if len(keys) > 0 {
-			ir.derived[o0.Name] = keys
+			if ir.derived[o0.Name] == nil {
+				ir.derived[o0.Name] = map[string]bool{}
+			}
+			for k := range keys {
+				ir.derived[o0.Name][k] = true
+			}
 		}
 	}
 	return ir, nil
@@ -348,7 +450,7 @@ func (w *worker) sweep(ctx context.Context, name, block, sig string, clicks []cl
 	for k, o := range first {
 		results[k] = o
 	}
-	if fam != nil && sameGrid(fam.grid, clicks) {
+	if fam != nil && !w.r.cfg.noInfer && sameGrid(fam.grid, clicks) {
 		agree := true
 		for _, c := range sample(clicks, verifyN) {
 			if _, have := results[c.key()]; !have {
@@ -433,6 +535,15 @@ func (w *worker) neighbours(ctx context.Context, name string, c0 click, base out
 			configs = append(configs, []cell{{fNorth, name, y}}, []cell{{fSouth, name, y}}, []cell{{fNorth, name, y}, {fSouth, name, 360 - y}})
 		}
 	}
+	// The baseline is the same click on the same floor and read the same way,
+	// with nothing around: comparing it with the first-pass read (beside a
+	// stone fixture, after 60 ms) would call every slow-settling key derived.
+	if b, err := w.placeAt(ctx, name, c0, lane); err != nil {
+		return nil, err
+	} else if b.Placed && !b.Unmapped {
+		base = b
+	}
+	w.restore(context.WithoutCancel(ctx))
 	keys := map[string]bool{}
 	for _, cfg := range configs {
 		for _, n := range cfg {
@@ -481,12 +592,16 @@ func (w *worker) placeAt(ctx context.Context, name string, c click, cell protoco
 	if err := w.r.spend(); err != nil {
 		return outcome{}, err
 	}
+	// A neighbour bed's head or a door's upper half can land in the cell.
+	if !w.u.isAir(cell) && !w.u.breakAt(ctx, cell) {
+		return outcome{}, nil
+	}
 	w.u.setLook(ctx, c)
 	if err := w.click(ctx, floorUnder(cell), c.Face, hitVec(c.Face, c.Hit), name); err != nil {
 		return outcome{}, fmt.Errorf("click: %w", err)
 	}
 	if w.u.waitFor(ctx, placeWait, func() bool { return !w.u.isAir(cell) }) {
-		return w.stableRead(ctx, cell, 250*time.Millisecond), nil
+		return w.withSecondHalf(w.stableRead(ctx, cell, 250*time.Millisecond), cell), nil
 	}
 	return outcome{}, nil
 }
