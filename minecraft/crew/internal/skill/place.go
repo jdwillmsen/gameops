@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -136,7 +137,13 @@ func (p *Place) walk(a Actuator) outcome {
 // unit. A cell whose feet or head would be in the target is not one: the
 // server refuses a placement into the unit's own body.
 func (p *Place) standCell(pose act.Pose) (protocol.BlockPos, bool) {
-	t := p.target
+	return standNear(p.world, p.target, pose, 0)
+}
+
+// standNear is standCell for any target. Cells closer than apart to the
+// target's column, horizontally, are left out, for a caller that must not
+// end up with its body touching the target.
+func standNear(world path.Blocks, t protocol.BlockPos, pose act.Pose, apart float32) (protocol.BlockPos, bool) {
 	best, bestD, found := protocol.BlockPos{}, float32(1e30), false
 	for dx := int32(-placeSpan); dx <= placeSpan; dx++ {
 		for dy := int32(-placeSpan); dy <= placeSpan; dy++ {
@@ -145,7 +152,10 @@ func (p *Place) standCell(pose act.Pose) (protocol.BlockPos, bool) {
 				if c.X() == t.X() && c.Z() == t.Z() && (c.Y() == t.Y() || c.Y()+1 == t.Y()) {
 					continue
 				}
-				if centre(t).Sub(standEye(c)).Len() > placeReach-arriveSlack || !path.Standable(p.world, c) {
+				if centre(t).Sub(standEye(c)).Len() > placeReach-arriveSlack || !path.Standable(world, c) {
+					continue
+				}
+				if apart > 0 && math.Hypot(float64(dx), float64(dz)) < float64(apart) {
 					continue
 				}
 				if d := centre(c).Sub(pose.Feet).LenSqr(); d < bestD {
