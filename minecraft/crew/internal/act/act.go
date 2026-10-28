@@ -61,6 +61,8 @@ type Input struct {
 	// StartUsing marks this tick as the one where the unit begins using the
 	// held item, as eating does. Send it once, after UseItem.
 	StartUsing bool
+	// Sneak holds the sneak key down for this tick.
+	Sneak bool
 }
 
 // Actuator is safe to call from a skill goroutine while Apply runs on the
@@ -84,8 +86,11 @@ type Actuator struct {
 	// insideBlock is set while the predicted body sits inside a block, so a
 	// stay is one event and not one per tick.
 	insideBlock bool
-	now         func() time.Time
-	sent        [sentHistory]sentTick
+	// sneaking is what the last input told the server, so a change goes out
+	// as a start or a stop and not as a held key every tick.
+	sneaking bool
+	now      func() time.Time
+	sent     [sentHistory]sentTick
 
 	itemIDs map[string]int32
 	// inv is the unit's own window-0 inventory, kept from the server's slot
@@ -253,6 +258,16 @@ func (a *Actuator) Tick(in Input) error {
 	if in.StartUsing {
 		pk.InputData.Set(packet.InputFlagStartUsingItem)
 	}
+	if in.Sneak {
+		pk.InputData.Set(packet.InputFlagSneaking)
+		pk.InputData.Set(packet.InputFlagSneakDown)
+	}
+	switch {
+	case in.Sneak && !a.sneaking:
+		pk.InputData.Set(packet.InputFlagStartSneaking)
+	case !in.Sneak && a.sneaking:
+		pk.InputData.Set(packet.InputFlagStopSneaking)
+	}
 	if in.Break != nil && !a.skipsBreak(in.Break) {
 		pk.InputData.Set(packet.InputFlagPerformBlockActions)
 		pk.BlockActions = protocol.Option([]protocol.PlayerBlockAction{in.Break.action()})
@@ -261,6 +276,7 @@ func (a *Actuator) Tick(in Input) error {
 		return err
 	}
 	a.pose = next
+	a.sneaking = in.Sneak
 	a.lastStepUp = step.stepUp
 	record := sentTick{tick: a.tick, pose: next, stepUp: step.stepUp, skill: a.skill}
 	a.sent[a.tick%sentHistory] = record
