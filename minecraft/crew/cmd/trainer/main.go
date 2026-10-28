@@ -12,7 +12,9 @@
 // stops at once when the kill file exists (default <store>/KILL) or on
 // SIGINT/SIGTERM. It also asks the tacticsctl training switch before every
 // fight (--control-dir, default the directory tacticsctl uses): a switch that
-// is off or missing stops the run, and the command exits 3. The cmd evaluator runs <command> once per fight with
+// is off or missing stops the run, and the command exits 3. The cmd evaluator
+// gets the same switch and kill file as TACTICSCTL_DIR and TRAINER_STOP_FILE,
+// and runs <command> once per fight with
 // {"profile":...,"scenario":...} on stdin and reads one scorecard per stdout
 // line; a --lab, --squad or --squad-b in the command must name the crew lab,
 // or the run is refused. run prints one JSON result line on stdout and progress on stderr; it
@@ -92,16 +94,19 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if *family == "" || *scenario == "" || *storeDir == "" {
 		return fail(errors.New("run needs --family, --scenario and --store"))
 	}
-	ev, err := newEvaluator(*evaluator, tactics.Family(*family), *fightTimeout)
+	if *killFile == "" {
+		*killFile = filepath.Join(*storeDir, "KILL")
+	}
+	// The evaluator watches the same switch and stop file as this run, so a
+	// kill reaches a fight in progress and not only the next one.
+	evalEnv := []string{"TACTICSCTL_DIR=" + *controlDir, "TRAINER_STOP_FILE=" + *killFile}
+	ev, err := newEvaluator(*evaluator, tactics.Family(*family), *fightTimeout, evalEnv)
 	if err != nil {
 		return fail(err)
 	}
 	store, err := trainer.NewStore(*storeDir)
 	if err != nil {
 		return fail(err)
-	}
-	if *killFile == "" {
-		*killFile = filepath.Join(*storeDir, "KILL")
 	}
 
 	var tacticOptions func(tactics.Family) []string
@@ -132,7 +137,7 @@ func runCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func newEvaluator(spec string, family tactics.Family, fightTimeout time.Duration) (trainer.Evaluator, error) {
+func newEvaluator(spec string, family tactics.Family, fightTimeout time.Duration, env []string) (trainer.Evaluator, error) {
 	switch {
 	case spec == "fake":
 		return trainer.NewFake(family), nil
@@ -140,7 +145,7 @@ func newEvaluator(spec string, family tactics.Family, fightTimeout time.Duration
 		if err := checkLabTargets(spec[4:]); err != nil {
 			return nil, err
 		}
-		return trainer.CmdEvaluator{Command: spec[4:], Timeout: fightTimeout}, nil
+		return trainer.CmdEvaluator{Command: spec[4:], Timeout: fightTimeout, Env: env}, nil
 	}
 	return nil, fmt.Errorf("--evaluator must be fake or cmd:<command>, got %q", spec)
 }

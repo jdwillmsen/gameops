@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,5 +93,36 @@ func TestFileSinkRefusesPathTricks(t *testing.T) {
 		if err := s.Push(context.Background(), []string{name}, candidate("c")); err == nil {
 			t.Errorf("unit %q was accepted", name)
 		}
+	}
+}
+
+func TestTrainerEnvironmentSetsControlDirAndStopFile(t *testing.T) {
+	ctl, stop := t.TempDir(), filepath.Join(t.TempDir(), "KILL")
+	t.Setenv("TACTICSCTL_DIR", ctl)
+	t.Setenv("TRAINER_STOP_FILE", stop)
+	base := []string{"--lab", "crew-lab", "--layout", layoutFile, "--dry-run", "--profile-dir", t.TempDir()}
+	b, err := parse(base, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.ControlDir != ctl || b.StopFile != stop {
+		t.Errorf("control dir %q, stop file %q; want %q, %q", b.ControlDir, b.StopFile, ctl, stop)
+	}
+	flagged, err := parse(append(base, "--control-dir", "/x", "--stop-file", "/y"), io.Discard)
+	if err != nil || flagged.ControlDir != "/x" || flagged.StopFile != "/y" {
+		t.Errorf("explicit flags did not win: %+v, %v", flagged, err)
+	}
+	os.WriteFile(filepath.Join(ctl, tacticsctl.TrainingFile), []byte("on\n"), 0o644)
+	if b.stopped() {
+		t.Error("stopped before the stop file exists and with training enabled")
+	}
+	os.WriteFile(stop, nil, 0o644)
+	if !b.stopped() {
+		t.Error("the trainer's stop file does not stop a running fight")
+	}
+	os.Remove(stop)
+	os.WriteFile(filepath.Join(ctl, tacticsctl.TrainingFile), []byte("off\n"), 0o644)
+	if !b.stopped() {
+		t.Error("the trainer's control dir switch does not stop a running fight")
 	}
 }

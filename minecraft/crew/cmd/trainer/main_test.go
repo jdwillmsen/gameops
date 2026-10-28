@@ -202,3 +202,33 @@ func TestEvaluatorTargetMustBeTheLab(t *testing.T) {
 		t.Errorf("a lab target was refused: exit %d, want 1 (evaluator failed to run)", code)
 	}
 }
+
+func TestEvaluatorGetsTheRunsSwitchAndKillFile(t *testing.T) {
+	dir := switchDir(t, "on\n")
+	store := filepath.Join(t.TempDir(), "s")
+	seen := filepath.Join(t.TempDir(), "env")
+	script := filepath.Join(t.TempDir(), "eval.sh")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n%s\\n' \"$TACTICSCTL_DIR\" \"$TRAINER_STOP_FILE\" > " + seen +
+		"\necho '{\"profile\":\"'$TRAINER_PROFILE'\",\"outcome\":\"win\",\"seconds\":30}'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, code, stderr := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store,
+		"--control-dir", dir, "--gens", "1", "--evaluator", "cmd:"+script); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	got, _ := os.ReadFile(seen)
+	if want := dir + "\n" + filepath.Join(store, "KILL") + "\n"; string(got) != want {
+		t.Errorf("evaluator saw %q, want %q", got, want)
+	}
+
+	custom := filepath.Join(t.TempDir(), "STOP")
+	if _, code, stderr := runTrainer(t, "run", "--family", "zombie", "--scenario", "pack", "--store", store,
+		"--control-dir", dir, "--gens", "1", "--kill-file", custom, "--evaluator", "cmd:"+script); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	got, _ = os.ReadFile(seen)
+	if want := dir + "\n" + custom + "\n"; string(got) != want {
+		t.Errorf("evaluator saw %q with --kill-file, want %q", got, want)
+	}
+}
