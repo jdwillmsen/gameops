@@ -84,6 +84,11 @@ func (a *API) bulk(w http.ResponseWriter, r *http.Request, op string) {
 		fail := func(err error) {
 			res.Error = storeMessage(err)
 		}
+		if err := a.checkRole(u, task); err != nil {
+			res.Error = err.Error()
+			results = append(results, res)
+			continue
+		}
 		if stopFirst {
 			if _, _, _, _, err := a.store.StopUnit(r.Context(), u, op, nil); err != nil {
 				fail(err)

@@ -186,6 +186,7 @@ func main() {
 			api := work.Routes(mux, store, units, workToken, poller.PublishWork)
 			api.MountOperator(mux, operators)
 			api.OnSeen = observeSeen(&world, log)
+			api.Role = unitRole(poller)
 			// Wired as a no-op: the builds jobs that compare an observation
 			// to a blueprint replace this without touching the routes.
 			api.OnBlocks = func(string, uuid.UUID, work.Blocks) {}
@@ -623,4 +624,17 @@ func heatEvery(log *logging.Logger) time.Duration {
 		return heat.DefaultEvery
 	}
 	return d
+}
+
+// unitRole reads a unit's role from the last status poll; empty when the
+// unit is unknown or reported none.
+func unitRole(p *telemetry.Poller) func(string) string {
+	return func(id string) string {
+		for _, s := range p.Snapshot() {
+			if s.ID == id {
+				return s.Role
+			}
+		}
+		return ""
+	}
 }

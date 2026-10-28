@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,6 +25,24 @@ const (
 
 	minXZ, maxXZ = -500, 499
 	minY, maxY   = -64, 320
+
+	// maxRepairSpan is the widest repair box on any axis.
+	maxRepairSpan = 64
+	// worldEdge bounds a repair area's x and z. The Colosseum lies beyond the
+	// lab square goto uses, and the unit checks the arena's own footprint, so
+	// this only keeps absurd values out of the queue.
+	worldEdge = 30_000_000
+)
+
+const (
+	repairRole = "mender"
+	buildRole  = "builder"
+)
+
+var (
+	blueprintName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
+	errWrongRole = errors.New("this unit's role does not take this task")
 )
 
 // Gate is the part of auth.Auth the operator routes need.
@@ -196,6 +215,10 @@ func (a *API) enqueueTask(w http.ResponseWriter, r *http.Request, unit, op strin
 		opError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := a.checkRole(unit, body); err != nil {
+		opError(w, http.StatusConflict, err.Error())
+		return
+	}
 	it, err := a.store.Enqueue(r.Context(), unit, KindTask, body, op)
 	if err != nil {
 		opStoreError(w, r, err)
@@ -276,6 +299,30 @@ var gatherItems = map[string]bool{"cobblestone": true, "oak_log": true}
 func checkQty(q int) error {
 	if q < 1 || q > maxQty {
 		return fmt.Errorf("qty must be 1 to %d", maxQty)
+	}
+	return nil
+}
+
+// checkRole refuses a role-bound template for a unit whose reported role is
+// known and is another one. A unit that has reported no role is let through:
+// the unit enforces its own role and fails the task with its reason.
+func (a *API) checkRole(unit string, body []byte) error {
+	var head struct {
+		Template string `json:"template"`
+	}
+	_ = json.Unmarshal(body, &head)
+	want := ""
+	switch head.Template {
+	case "repair_build":
+		want = repairRole
+	case "build_blueprint":
+		want = buildRole
+	}
+	if want == "" || a.Role == nil {
+		return nil
+	}
+	if got := a.Role(unit); got != "" && got != want {
+		return errWrongRole
 	}
 	return nil
 }
@@ -366,6 +413,67 @@ func validateTemplate(body []byte) error {
 			}
 		}
 		return t.To.check()
+	case "repair_build":
+		var t struct {
+			Template string `json:"template"`
+			Plan     string `json:"plan"`
+			Area     *struct {
+				Min *point `json:"min"`
+				Max *point `json:"max"`
+			} `json:"area"`
+			DryRun bool `json:"dry_run"`
+		}
+		if err := strict(&t); err != nil {
+			return err
+		}
+		if t.Plan != "colosseum" {
+			return errors.New("plan must be colosseum")
+		}
+		if t.Area == nil {
+			return errors.New("area with min and max is required")
+		}
+		return checkRepairArea(t.Area.Min, t.Area.Max)
+	case "build_blueprint":
+		var t struct {
+			Template  string `json:"template"`
+			Blueprint string `json:"blueprint"`
+			At        *point `json:"at"`
+			Rotation  int    `json:"rotation"`
+			DryRun    bool   `json:"dry_run"`
+		}
+		if err := strict(&t); err != nil {
+			return err
+		}
+		if !blueprintName.MatchString(t.Blueprint) {
+			return errors.New("unknown blueprint")
+		}
+		if t.Rotation != 0 && t.Rotation != 90 && t.Rotation != 180 && t.Rotation != 270 {
+			return errors.New("rotation must be 0, 90, 180 or 270")
+		}
+		return t.At.check()
 	}
 	return errors.New("unknown template")
+}
+
+func checkRepairArea(min, max *point) error {
+	if min == nil || max == nil || min.X == nil || min.Y == nil || min.Z == nil || max.X == nil || max.Y == nil || max.Z == nil {
+		return errors.New("area with min and max is required")
+	}
+	for _, ax := range [][2]int{{*min.X, *max.X}, {*min.Y, *max.Y}, {*min.Z, *max.Z}} {
+		if ax[0] > ax[1] {
+			return errors.New("area min must not exceed max")
+		}
+		if ax[1]-ax[0]+1 > maxRepairSpan {
+			return fmt.Errorf("area must span at most %d blocks on each axis", maxRepairSpan)
+		}
+	}
+	for _, ax := range [][2]int{{*min.X, *max.X}, {*min.Z, *max.Z}} {
+		if ax[0] < -worldEdge || ax[1] > worldEdge {
+			return errors.New("a position is outside the allowed area")
+		}
+	}
+	if *min.Y < minY || *max.Y > maxY {
+		return errors.New("a position is outside the allowed area")
+	}
+	return nil
 }
