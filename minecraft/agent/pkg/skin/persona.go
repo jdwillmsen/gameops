@@ -187,6 +187,8 @@ var outfits = map[string]func(px []byte, l look){
 	"chopper": paintChopper,
 	"hauler":  paintHauler,
 	"shaft":   paintShaft,
+	"mender":  paintMender,
+	"builder": paintBuilder,
 
 	"warrior-vanguard": func(px []byte, l look) { paintWarrior(px, l, rgba{200, 50, 40, 255}, false) },
 	"warrior-striker":  func(px []byte, l look) { paintWarrior(px, l, rgba{130, 60, 190, 255}, false) },
@@ -343,4 +345,38 @@ func paintHandMarks(px []byte, l look, key string) {
 			fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, darken(l.accent, 0.55))
 		}
 	}
+}
+
+// Mender: a white coat with a green cross over the chest, a white cap with a
+// green band, and pale trousers, so the healer reads at a glance.
+func paintMender(px []byte, l look) {
+	white := rgba{238, 240, 242, 255}
+	green := rgba{60, 170, 90, 255}
+	outfit(px, white, rgba{200, 205, 210, 255}, rgba{120, 125, 130, 255})
+	hands(px, l.skin)
+	torso.paintFront(px, green, 3, 2, 2, 6)
+	torso.paintFront(px, green, 1, 4, 6, 2)
+	torso.paintBack(px, l.accent, 2, 2, 4, 4)
+	helmet(px, white, green)
+}
+
+// Builder: a blue-and-white striped cap, a tan work apron over a checked
+// shirt in the unit's accent colour, and a tool belt with a hammer.
+func paintBuilder(px []byte, l look) {
+	shirt := darken(l.accent, 0.85)
+	outfit(px, shirt, rgba{70, 85, 120, 255}, rgba{55, 45, 35, 255})
+	hands(px, l.skin)
+	apron := rgba{185, 150, 100, 255}
+	torso.paintFront(px, apron, 1, 3, 6, 9)
+	torso.paintFront(px, rgba{120, 85, 50, 255}, 0, 8, 8, 1)
+	torso.paintFront(px, rgba{150, 150, 160, 255}, 5, 5, 2, 2)
+	torso.paintBack(px, darken(shirt, 0.7), 1, 1, 6, 10)
+	cap := rgba{240, 240, 240, 255}
+	fill(px, 8, 0, 8, 8, cap)
+	fill(px, 40, 0, 8, 8, cap)
+	for _, x := range []int{0, 8, 16, 24} {
+		fill(px, x, 8, 8, 2, cap)
+		fill(px, 32+x, 8, 8, 2, cap)
+	}
+	head.paintFront(px, rgba{50, 90, 170, 255}, 0, 1, 8, 1)
 }
