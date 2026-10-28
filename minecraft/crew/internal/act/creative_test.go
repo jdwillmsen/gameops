@@ -59,6 +59,8 @@ type creativeServer struct {
 	silent bool
 	// screen is whether the inventory screen is open on the server.
 	screen bool
+	// taken counts the accepted takes, so each stack gets its own ID.
+	taken int32
 }
 
 func serveCreative(a *Actuator, s *sink, creative bool) *creativeServer {
@@ -106,7 +108,12 @@ func (cs *creativeServer) serve() {
 
 func (cs *creativeServer) judge(r protocol.ItemStackRequest) protocol.ItemStackResponse {
 	resp := protocol.ItemStackResponse{RequestID: r.RequestID}
-	take := r.Actions[1].(*protocol.TakeStackRequestAction)
+	take := r.Actions[len(r.Actions)-1].(*protocol.TakeStackRequestAction)
+	var destroy *protocol.DestroyStackRequestAction
+	if d, ok := r.Actions[0].(*protocol.DestroyStackRequestAction); ok {
+		destroy = d
+	}
+	slot := cs.a.inv[take.Destination.Slot]
 	switch {
 	case !cs.screen:
 		resp.Status = StatusInvalidCraft
@@ -114,10 +121,15 @@ func (cs *creativeServer) judge(r protocol.ItemStackRequest) protocol.ItemStackR
 		resp.Status = StatusNotCreative
 	case take.Source.StackNetworkID != r.RequestID || take.Source.Slot != 50:
 		resp.Status = StatusBadSource
+	case slot.Stack.Count > 0 && (destroy == nil || destroy.Source.Slot != take.Destination.Slot || destroy.Source.StackNetworkID != slot.StackNetworkID):
+		// The lab refuses a take onto an occupied slot, whatever stack ID the
+		// destination quotes, unless the same request destroys that stack.
+		resp.Status = StatusOccupied
 	default:
+		cs.taken++
 		resp.ContainerInfo = []protocol.StackResponseContainerInfo{{
 			Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
-			SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: take.Destination.Slot, HotbarSlot: take.Destination.Slot, Count: take.Count, StackNetworkID: takenStackID}},
+			SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: take.Destination.Slot, HotbarSlot: take.Destination.Slot, Count: take.Count, StackNetworkID: takenStackID + cs.taken}},
 		}}
 	}
 	return resp
@@ -154,7 +166,7 @@ func TestTakeCreativeAsksForTheNamedItemIntoAnEmptyHotbarSlot(t *testing.T) {
 	if take.Destination.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory || take.Destination.Slot != 1 || take.Destination.StackNetworkID != 0 {
 		t.Errorf("destination = %+v, want the first empty hotbar slot (1)", take.Destination)
 	}
-	if got := a.inv[1]; got.Stack.NetworkID != creativeStone || got.Stack.Count != creativeStack || got.StackNetworkID != takenStackID {
+	if got := a.inv[1]; got.Stack.NetworkID != creativeStone || got.Stack.Count != creativeStack || got.StackNetworkID != takenStackID+1 {
 		t.Errorf("inventory slot 1 = %+v, want the taken stack", got)
 	}
 }
@@ -217,7 +229,7 @@ func TestTakeCreativeNamesEachFailure(t *testing.T) {
 			t.Fatalf("err = %v, want ErrNoCreativeItem for a name outside the item table", err)
 		}
 	})
-	t.Run("hotbar full", func(t *testing.T) {
+	t.Run("hotbar full of items the unit did not take", func(t *testing.T) {
 		a, s := newCreativeAct(true)
 		for i := uint32(0); i < 9; i++ {
 			a.Apply(&packet.InventorySlot{WindowID: 0, Slot: i, NewItem: cobbleInstance(1, int32(i)+1)})
@@ -332,5 +344,119 @@ func TestPlaceBlockFailsClearlyForAnItemWithoutACreativeEntry(t *testing.T) {
 	a.pose = Pose{Feet: mgl32.Vec3{1.5, 1, 2.5}, OnGround: true}
 	if err := a.PlaceBlock(target, "dirt"); !errors.Is(err, ErrNoCreativeItem) {
 		t.Fatalf("err = %v, want ErrNoCreativeItem", err)
+	}
+}
+
+// fillHotbar takes stone and stairs alternately into the nine slots, stone in
+// the even ones.
+func fillHotbar(t *testing.T, a *Actuator) {
+	t.Helper()
+	for i := 0; i < hotbarSlots; i++ {
+		item := "stone"
+		if i%2 == 1 {
+			item = "oak_stairs"
+		}
+		if err := a.TakeCreative(item); err != nil {
+			t.Fatalf("take %d (%s): %v", i, item, err)
+		}
+	}
+}
+
+func destroyOf(t *testing.T, r protocol.ItemStackRequest) *protocol.DestroyStackRequestAction {
+	t.Helper()
+	if len(r.Actions) != 3 {
+		t.Fatalf("actions = %+v, want destroy, craft, take", r.Actions)
+	}
+	d, ok := r.Actions[0].(*protocol.DestroyStackRequestAction)
+	if !ok {
+		t.Fatalf("first action is %T, want a destroy of the slot being replaced", r.Actions[0])
+	}
+	return d
+}
+
+func TestTakeCreativeReplacesTheLeastRecentlyUsedTakenSlotOnAFullHotbar(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+
+	// Slot 0 is the oldest take, but the unit just used it.
+	a.mu.Lock()
+	_, _, ok := a.hotbarHolding(creativeStone)
+	a.holdItem("stone")
+	a.mu.Unlock()
+	if !ok {
+		t.Fatal("stone is not on the hotbar")
+	}
+	before := len(stackRequests(s))
+	if err := a.TakeCreative("oak_stairs"); err != nil {
+		t.Fatalf("take on a full hotbar: %v", err)
+	}
+	reqs := stackRequests(s)
+	if len(reqs) != before+1 {
+		t.Fatalf("sent %d requests, want one more", len(reqs)-before)
+	}
+	r := reqs[len(reqs)-1].Requests[0]
+	d := destroyOf(t, r)
+	if d.Source.Slot != 2 || d.Source.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory {
+		t.Errorf("destroyed %+v, want hotbar slot 2: slot 0 was used last and stairs are the item asked for", d.Source)
+	}
+	if d.Count != creativeStack || d.Source.StackNetworkID == 0 {
+		t.Errorf("destroy = %+v, want the whole stack quoting its stack ID", d)
+	}
+	take := r.Actions[2].(*protocol.TakeStackRequestAction)
+	if take.Destination.Slot != 2 || take.Destination.StackNetworkID != 0 {
+		t.Errorf("destination = %+v, want the freed slot 2", take.Destination)
+	}
+	if got := a.inv[2]; got.Stack.NetworkID != creativeOakStair || got.Stack.Count != creativeStack || got.StackNetworkID != takenStackID+10 {
+		t.Errorf("slot 2 = %+v, want the new stairs stack", got)
+	}
+	// Slot 2 now holds stairs, so the next stone must replace the oldest
+	// remaining stairs slot and never the stone being asked for.
+	if err := a.TakeCreative("stone"); err != nil {
+		t.Fatal(err)
+	}
+	reqs = stackRequests(s)
+	if d := destroyOf(t, reqs[len(reqs)-1].Requests[0]); d.Source.Slot != 1 {
+		t.Errorf("destroyed slot %d, want 1, the oldest stairs slot", d.Source.Slot)
+	}
+}
+
+func TestTakeCreativeNeverReplacesAnItemItDidNotTake(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	for i := uint32(0); i < 8; i++ {
+		a.Apply(&packet.InventorySlot{WindowID: 0, Slot: i, NewItem: cobbleInstance(1, int32(i)+1)})
+	}
+	if err := a.TakeCreative("stone"); err != nil {
+		t.Fatal(err)
+	}
+	// The hotbar is full: eight foreign stacks and one taken stone, which is
+	// the item asked for.
+	if err := a.TakeCreative("stone"); !errors.Is(err, ErrHotbarFull) {
+		t.Fatalf("err = %v, want ErrHotbarFull: the only taken stack is the requested item", err)
+	}
+	if err := a.TakeCreative("oak_stairs"); err != nil {
+		t.Fatalf("stairs onto the taken stone slot: %v", err)
+	}
+	if got := a.inv[8]; got.Stack.NetworkID != creativeOakStair {
+		t.Errorf("slot 8 = %+v, want the stairs", got)
+	}
+	if got := a.inv[0]; got.Stack.NetworkID == creativeOakStair {
+		t.Error("a foreign stack was replaced")
+	}
+}
+
+func TestTakeCreativeForgetsASlotThatNoLongerHoldsWhatItTook(t *testing.T) {
+	a, s := newCreativeAct(true)
+	srv := serveCreative(a, s, true)
+	defer srv.close()
+	fillHotbar(t, a)
+	for i := uint32(0); i < 9; i++ {
+		a.Apply(&packet.InventorySlot{WindowID: 0, Slot: i, NewItem: cobbleInstance(1, int32(i)+50)})
+	}
+	if err := a.TakeCreative("oak_stairs"); !errors.Is(err, ErrHotbarFull) {
+		t.Fatalf("err = %v, want ErrHotbarFull once the server replaced every taken stack", err)
 	}
 }

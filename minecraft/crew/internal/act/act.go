@@ -116,6 +116,18 @@ type Actuator struct {
 	// creativeIDs maps an item's runtime ID to the ID a creative-inventory
 	// request must quote, which is a different number.
 	creativeIDs map[int32]uint32
+	// takenItem is, per hotbar slot, the item a creative take put there, and
+	// zero for a slot it did not fill. It only counts while the slot still
+	// holds that item.
+	takenItem [hotbarSlots]int32
+	// slotUse is, per hotbar slot, when the unit last took or held its item,
+	// on a counter that only ever rises; the least recent is replaced first.
+	slotUse  [hotbarSlots]uint64
+	useClock uint64
+	// replacing maps a creative request that destroys a hotbar stack to that
+	// slot: the answer names no items, so the slot must be cleared before the
+	// answer fills it with the new one.
+	replacing map[int32]int
 }
 
 type CorrectionLogger interface {
@@ -131,7 +143,7 @@ func New(w PacketWriter, runtimeID uint64, start Pose, solid Solid) *Actuator {
 	return &Actuator{
 		w: w, runtimeID: runtimeID, solid: solid, pose: start,
 		tick: firstTick, nextRequest: -3, reqItem: map[int32]int32{},
-		responses: map[int32]uint8{}, abandoned: map[int32]bool{},
+		responses: map[int32]uint8{}, abandoned: map[int32]bool{}, replacing: map[int32]int{},
 		now: time.Now, crafts: newCraftState(),
 	}
 }
