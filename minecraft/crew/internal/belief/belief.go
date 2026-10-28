@@ -13,6 +13,9 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
+// gameTypeCreative is the game type UpdatePlayerGameType announces for creative.
+const gameTypeCreative = 1
+
 const (
 	healthAttribute = "minecraft:health"
 	hungerAttribute = "minecraft:player.hunger"
@@ -52,6 +55,9 @@ type Snapshot struct {
 	// unit by, as a signed decimal; a string because a 64-bit number does
 	// not survive a JavaScript reader. Empty until the session has one.
 	UniqueID string `json:"unique_id,omitempty"`
+	// Creative says the server put the unit in creative mode. StartGame never
+	// says so, so it stays false until the change is announced.
+	Creative bool `json:"creative"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -138,6 +144,12 @@ func (t *Tracker) Apply(pk packet.Packet) {
 		t.s.HeldSlot, t.s.HeldKnown = int(p.SelectedHotBarSlot), true
 	case *packet.MobEffect:
 		t.applyEffectLocked(p)
+	case *packet.UpdatePlayerGameType:
+		// Broadcast for every player, so only the unit's own id counts.
+		if t.uniqueID == "" || strconv.FormatInt(p.PlayerUniqueID, 10) != t.uniqueID {
+			return
+		}
+		t.s.Creative = p.GameType == gameTypeCreative
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 	default:
@@ -192,6 +204,14 @@ func (t *Tracker) Reset() {
 	t.effects = nil
 	t.uniqueID = ""
 	t.s = Snapshot{UpdatedAt: t.now()}
+}
+
+// Creative says the unit is in creative mode, without the cost of a snapshot;
+// the actuator asks on every tick.
+func (t *Tracker) Creative() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.s.Creative
 }
 
 func (t *Tracker) Snapshot() Snapshot {
