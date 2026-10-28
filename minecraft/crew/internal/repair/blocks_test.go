@@ -94,3 +94,24 @@ func TestOrderRectsClearsFirstAndLeavesLateBlocksLast(t *testing.T) {
 		t.Error("OrderRects reordered its input")
 	}
 }
+
+func TestSummaryLeadsWithTheWorstAndFitsItsBudget(t *testing.T) {
+	r := Report{
+		Scanned: 1000, Unscanned: 7, Damaged: 60, Rects: 5,
+		ByKind: map[string]int{KindMissing: 10, KindIntruder: 40, KindReplaced: 10},
+		ByZone: map[string]int{"floor": 5, "plaza": 55},
+		Top:    []Change{{"air -> sand", 50}, {"sand -> air", 10}},
+	}
+	got := r.Summary(400)
+	want := "60 of 1000 scanned cells damaged in 5 rectangles, 7 not scanned; intruder 40, missing 10, replaced 10; zones plaza 55, floor 5; top 50 air -> sand, 10 sand -> air"
+	if got != want {
+		t.Errorf("summary\n got %q\nwant %q", got, want)
+	}
+	short := r.Summary(100)
+	if len(short) > 100 || short[:20] != want[:20] {
+		t.Errorf("short summary %q (%d bytes)", short, len(short))
+	}
+	if tiny := r.Summary(10); len(tiny) > 10 {
+		t.Errorf("tiny summary is %d bytes", len(tiny))
+	}
+}
