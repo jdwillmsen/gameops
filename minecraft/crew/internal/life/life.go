@@ -190,6 +190,10 @@ func (l *Life) Reset() {
 	}
 }
 
+// EachEntity calls f for every entity the unit has been told about, quickly
+// and without calling back into Life.
+func (l *Life) EachEntity(f func(belief.Entity)) { l.ents.Each(f) }
+
 // End drops the session's entities. Like Spawn it is for the read loop.
 func (l *Life) End() {
 	l.ents.Reset()

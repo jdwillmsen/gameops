@@ -53,3 +53,10 @@ var shooters = map[string]bool{
 func name(entityType string) string { return strings.TrimPrefix(entityType, "minecraft:") }
 
 func kindOf(entityType string) kind { return kinds[name(entityType)] }
+
+// Threat reports whether a mob of this type is one to stop work for: it
+// attacks on sight or is not worth standing near.
+func Threat(entityType string) bool {
+	k := kindOf(entityType)
+	return k == hostile || k == flee
+}
