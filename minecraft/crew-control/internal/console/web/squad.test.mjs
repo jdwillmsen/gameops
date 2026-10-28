@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { roleLabel, lastCallout, orderLine } from './squad.js';
 
-test('role badges are the three claimed roles', () => {
+test('role badges are the claimed roles', () => {
   assert.equal(roleLabel('vanguard'), 'Vanguard');
   assert.equal(roleLabel('striker'), 'Striker');
   assert.equal(roleLabel('ranger'), 'Ranger');
+  assert.equal(roleLabel('mender'), 'Mender');
+  assert.equal(roleLabel('builder'), 'Builder');
 });
 
 test('an unknown or missing role still renders', () => {
