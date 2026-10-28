@@ -52,6 +52,17 @@ Enabling training (`training on`, `kill off`), `keygen` and `approve` refuse
 unless stdin is a real terminal (a TTY ioctl, so `< /dev/null` does not count).
 Disabling never needs one.
 
+**What the switch guarantees.** Agents run as the same uid as the owner, with
+passwordless `sudo` and the docker group, so nothing here is a permission
+boundary. The terminal checks on `training on` and `approve` are **accident
+guards**: they stop a script or an agent from enabling training by mistake, not
+from a hostile agent that writes the file directly. The switch's **off
+direction is reliable and fail-safe**: a missing, empty, unreadable or garbled
+file is off, and any actor can only push the state toward off by deleting or
+corrupting it. The **on direction is advisory** against a hostile agent. Lab
+safety therefore rests on the lab-only target checks and on the owner watching
+the lab, not on the switch.
+
 **Kill switch: `<dir>/training`.** Training runs only while that file holds
 exactly `on`. Missing, empty, unreadable or anything else is off. Turning it off
 stops the trainer and the bridge at the next check (the trainer asks before
@@ -109,6 +120,12 @@ fights it as, and the boss family through `warden-trial`.
 
 ## Promotion to production
 
+**Nothing consumes the production stage today.** No production unit fetches a
+profile, and no deployment reads `<dir>/production`. Production safety is
+therefore that production never reads it, plus the owner's GitHub R3 review of
+any `deployments` change that would start to. `promote` and `rollback
+production` only move a pointer in this store; they change no running unit.
+
 Only `promote` and `rollback production` write production, and a promotion
 needs a human:
 
@@ -116,11 +133,10 @@ needs a human:
    carries its scorecard evidence path.
 2. `tacticsctl lab-set <profile>` records it as the lab's profile; it must have
    been the lab's profile before it can be promoted.
-3. **A human approves it with their own key**, at a terminal:
+3. **The owner approves it with their own key**, at a terminal:
    `tacticsctl approve <profile> --by <name> --key <private-key-file>`.
    The approval names the profile's exact hash. `approve` and `keygen` refuse
-   without a terminal. **Agents never approve, hold an approver key or write the
-   trust directory.** The key file must be a regular file owned by the caller
+   without a terminal. The key file must be a regular file owned by the caller
    with mode 600.
 4. `tacticsctl --trust /etc/crew-tactics-trust --store <trainer-store> promote <profile> --to production`.
    Promote refuses unless the trust directory passes the checks below. With
@@ -133,19 +149,37 @@ needs a human:
 6. Roll back with `tacticsctl rollback production` (to the parent), or
    `--to default`. Production only returns to a profile it already ran.
 
-### Trust directory: one-time human setup
+### Where the approver key lives
 
-Approvals are only worth something if agents cannot swap the public keys that
-verify them, so promote refuses unless the trust directory, **every directory
-above it** and each approver's `.pub` file are owned by root and not writable
-by group or others (symlinks are resolved first, and the key is read from the
-path that was checked). The directory must also be outside the state directory.
-A human sets it up once, outside any agent session:
+An approval proves something only if the private key was **generated and used
+off this box**: on the owner's laptop, or as an `ed25519-sk` / FIDO hardware
+key. A key under `~/.config/...` on the devbox is readable by every agent that
+shares the owner's uid, and an agent can sign with it exactly as the owner can.
+Do not generate or keep an approver key here. Until the key lives elsewhere, an
+approval on this box is a record of intent, not evidence that a human agreed,
+and **nothing may claim that agents cannot approve**.
+
+`tacticsctl keygen --name <name> --out <dir>` makes a pair; it takes no default
+output path and prints a reminder to run it off the devbox. Only the `.pub`
+file belongs on this box.
+
+### Trust directory: defence in depth, not a boundary
+
+Promote refuses unless the trust directory, **every directory above it** and
+each approver's `.pub` file are owned by root and not writable by group or
+others (symlinks are resolved first, and the key is read from the path that was
+checked). The directory must also be outside the state directory. This stops an
+accidental or sloppy write from swapping a public key. It is **not a boundary
+here**: an agent with `sudo` can change root-owned files, so it protects nothing
+against a hostile one. The real protection is the off-box private key above and
+the owner's R3 review of any change that makes production read a profile.
+
+One-time setup, by a human, outside any agent session. Generate the key pair on
+the owner's laptop, copy only `owner.pub` to the devbox, then:
 
 ```sh
-tacticsctl keygen --name owner --out ~/.config/crew-tactics-keys   # private key stays here, mode 600
 sudo install -d -o root -m 0755 /etc/crew-tactics-trust
-sudo install -m 0644 ~/.config/crew-tactics-keys/owner.pub /etc/crew-tactics-trust/owner.pub
+sudo install -m 0644 owner.pub /etc/crew-tactics-trust/owner.pub
 export TACTICSCTL_TRUST=/etc/crew-tactics-trust
 ```
 

@@ -22,13 +22,16 @@
 //	                                 without it only its path is checked, and promote says so
 //	approve <profile> --by NAME --key FILE
 //	                                 HUMAN ONLY: refuses unless stdin is a real terminal
-//	keygen --name NAME --out DIR     HUMAN ONLY: make an approver key pair
+//	keygen --name NAME --out DIR     HUMAN ONLY: make an approver key pair; run it off the
+//	                                 devbox, because agents share this account
 //
 // The trust directory holds the public keys approvals are checked against, so
 // whoever can write it can approve anything. promote therefore refuses the
 // default <dir>/trusted, a directory under --dir, and any directory (or parent,
-// or key file) that root does not own or that group or others can write. One-time
-// setup, by a human:
+// or key file) that root does not own or that group or others can write. That
+// check is defence in depth, not a boundary: agents on the devbox run as the
+// owner's uid with passwordless sudo, so only a private key that never touched
+// this box makes an approval mean anything. One-time setup, by a human:
 //
 //	sudo install -d -o root -m 0755 /etc/crew-tactics-trust
 //	sudo install -m 0644 owner.pub /etc/crew-tactics-trust/owner.pub
@@ -37,8 +40,9 @@
 // is single-use.
 //
 // Training is disabled unless the kill-switch file says "on": a missing file is
-// disabled, so a fresh or wiped state directory never trains. Only `promote`
-// and `rollback production` write production; nothing else can.
+// disabled, so a fresh or wiped state directory never trains. The terminal
+// checks on enabling are accident guards; only the off direction is reliable.
+// Only `promote` and `rollback production` write production; nothing else can.
 package main
 
 import (
@@ -288,6 +292,7 @@ func keygen(fs *flag.FlagSet, args []string, out io.Writer, tty bool) error {
 	if !approverNameRE.MatchString(*name) {
 		return fmt.Errorf("approver name %q must match %s", *name, approverNameRE)
 	}
+	fmt.Fprintln(out, "warning: generate approver keys off the devbox (your laptop, or an ed25519-sk/FIDO key); a key made here is readable by the agents that share this account")
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -304,7 +309,7 @@ func keygen(fs *flag.FlagSet, args []string, out io.Writer, tty bool) error {
 		os.Remove(keyPath)
 		return err
 	}
-	fmt.Fprintf(out, "wrote %s (keep private) and %s (a human installs it into the root-owned trust directory)\n", keyPath, pubPath)
+	fmt.Fprintf(out, "wrote %s (keep private) and %s (a human installs it into the trust directory)\n", keyPath, pubPath)
 	return nil
 }
 

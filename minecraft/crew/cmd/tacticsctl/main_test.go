@@ -218,6 +218,20 @@ func trainingOn(t *testing.T, e *env) bool {
 	return err == nil && strings.TrimSpace(string(b)) == "on"
 }
 
+func TestKeygenWarnsToGenerateOffTheDevbox(t *testing.T) {
+	e := newEnv(t)
+	out, err := e.do("", true, "keygen", "--name", "second", "--out", e.keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "warning: generate approver keys off the devbox") {
+		t.Errorf("keygen output lacks the off-devbox warning: %q", out)
+	}
+	if _, err := e.do("", true, "keygen", "--name", "third"); err == nil {
+		t.Error("keygen without --out picked a default path")
+	}
+}
+
 func TestKeygenRefusesToOverwriteAndBadNames(t *testing.T) {
 	e := newEnv(t)
 	before, _ := os.ReadFile(filepath.Join(e.keys, "owner.key"))
