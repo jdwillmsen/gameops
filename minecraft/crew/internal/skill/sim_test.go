@@ -24,6 +24,9 @@ const (
 	idWoodenPick  = 312
 	idGravel      = 6
 	idCoal        = 7
+	idOakPlanks   = 20
+	idGlass       = 21
+	idTorch       = 22
 	chestHash     = 3162850062
 	blockHash     = 777
 )
@@ -34,6 +37,9 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:oak_log", RuntimeID: idOakLog},
 	{Name: "minecraft:gravel", RuntimeID: idGravel},
 	{Name: "minecraft:coal", RuntimeID: idCoal},
+	{Name: "minecraft:oak_planks", RuntimeID: idOakPlanks},
+	{Name: "minecraft:glass", RuntimeID: idGlass},
+	{Name: "minecraft:torch", RuntimeID: idTorch},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: idWoodenPick},
 	{Name: "minecraft:iron_axe", RuntimeID: idAxe},
 	{Name: "minecraft:wooden_sword", RuntimeID: 300},
@@ -182,9 +188,13 @@ type rig struct {
 	// right after a join can be swallowed.
 	ignoreFirstOpens int
 	dropResponses    bool
-	rejectWith       uint8
-	correctAt        int
-	correctBy        mgl32.Vec3
+	// creative stands in for a creative unit's take from the creative
+	// inventory, which the actuator tests cover on the wire: a placement of
+	// an item the hotbar lacks first finds a stack of it there.
+	creative   bool
+	rejectWith uint8
+	correctAt  int
+	correctBy  mgl32.Vec3
 }
 
 // timedFill puts a stack in a chest slot once the unit has sent that many
@@ -279,9 +289,32 @@ func (r *rig) PlaceOnTop(against protocol.BlockPos, hotbar int, held belief.Item
 }
 
 func (r *rig) PlaceBlock(target protocol.BlockPos, item string) error {
+	if r.creative {
+		r.stock(item)
+	}
 	err := r.Actuator.PlaceBlock(target, item)
 	r.pump()
 	return err
+}
+
+func (r *rig) stock(item string) {
+	var id int32
+	for _, e := range itemTable {
+		if e.Name == "minecraft:"+item {
+			id = int32(e.RuntimeID)
+		}
+	}
+	for _, s := range r.inv[:9] {
+		if s.item == id && s.count > 0 {
+			return
+		}
+	}
+	for i := range r.inv[:9] {
+		if r.inv[i].count == 0 {
+			r.give(i, id, 64)
+			return
+		}
+	}
 }
 
 func (r *rig) Deposit(from belief.Item, count int, to byte) (int32, error) {
@@ -576,7 +609,7 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 // click out of reach or a held stack that is not the one named.
 func (r *rig) onPlace(u *protocol.UseItemTransactionData) {
 	r.placeClicks++
-	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone"}
+	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone", idOakPlanks: "oak_planks", idGlass: "glass", idTorch: "torch"}
 	pose := r.Actuator.Pose()
 	offsets := map[int32][3]int32{0: {0, -1, 0}, 1: {0, 1, 0}, 2: {0, 0, -1}, 3: {0, 0, 1}, 4: {-1, 0, 0}, 5: {1, 0, 0}}
 	off := offsets[u.BlockFace]
