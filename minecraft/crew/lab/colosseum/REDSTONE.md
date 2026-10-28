@@ -341,6 +341,8 @@ All entries: **unverified on BDS**.
 | Single sticky piston, power cell behind the body | extends and retracts as expected (Design A building block) |
 | Secret closet door (generator `secret_door`): two stacked sticky pistons, one dust cell on a block that touches the lower piston and beside the upper, lever up = shut | built at all four tunnels; lever down opens both plug cells, up closes them again (checked on the +x and +z doors) |
 | Redstone torch as an inverter (support block lever-powered) | works; `torch_facing_direction` names the side the support block is on (`east` for a support to the east) |
+| Iron door under a block with dust on top (dust beside the door does not open it) | opens; closes when the dust unpowers |
+| Lever feeding a floor ring of dust over `redstone_lamp`, repeater (delay 2) every 4 lamps | lamps light in a chase outward, all off again when the lever drops (generator `gate_lighting`) |
 
 The closet door is built extended (shut): the generator places the pistons powered with the plug in front of the empty head slot, which is the opposite of the retracted layout in section 2.1.
 
