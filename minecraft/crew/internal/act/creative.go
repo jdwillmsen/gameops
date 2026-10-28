@@ -36,7 +36,8 @@ var (
 	ErrScreenNotOpen = errors.New("the inventory screen is not open")
 	// ErrNoCreativeItem says the creative inventory has no entry for the item.
 	ErrNoCreativeItem = errors.New("the item is not in the creative inventory")
-	// ErrHotbarFull says no hotbar slot is empty to take the item into.
+	// ErrHotbarFull says no hotbar slot is empty to take the item into, and
+	// none holds a creative take that may be replaced.
 	ErrHotbarFull = errors.New("no empty hotbar slot for the item")
 	// ErrBadSource says the server did not recognise the created output the
 	// take named.
@@ -66,12 +67,13 @@ func (a *Actuator) storeCreativeLocked(p *packet.CreativeContent) {
 }
 
 // TakeCreative puts a stack of the item from the creative inventory into an
-// empty hotbar slot and waits for the server's answer, so it blocks the step
+// empty hotbar slot, or over the least recently used slot of an earlier take
+// when none is empty, and waits for the server's answer, so it blocks the step
 // for the round trips it takes. The server only honours the request with the
 // unit's own inventory screen open.
 func (a *Actuator) TakeCreative(item string) error {
 	a.mu.Lock()
-	creativeID, itemID, slot, err := a.planTakeLocked(item)
+	creativeID, itemID, slot, evict, err := a.planTakeLocked(item)
 	a.mu.Unlock()
 	if err != nil {
 		return err
@@ -99,16 +101,33 @@ func (a *Actuator) TakeCreative(item string) error {
 		Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
 		Slot:      byte(slot),
 	}
+	actions := []protocol.StackRequestAction{
+		&protocol.CraftCreativeStackRequestAction{CreativeItemNetworkID: creativeID, NumberOfCrafts: 1},
+		take,
+	}
+	if evict {
+		// The server refuses a take onto an occupied slot, but accepts it in
+		// the same request that destroys the stack there.
+		held := a.inv[slot]
+		destroy := &protocol.DestroyStackRequestAction{}
+		destroy.Count = byte(held.Stack.Count)
+		destroy.Source = protocol.StackRequestSlotInfo{
+			Container:      protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+			Slot:           byte(slot),
+			StackNetworkID: held.StackNetworkID,
+		}
+		actions = append([]protocol.StackRequestAction{destroy}, actions...)
+	}
 	err = a.w.WritePacket(&packet.ItemStackRequest{Requests: []protocol.ItemStackRequest{{
 		RequestID: req,
-		Actions: []protocol.StackRequestAction{
-			&protocol.CraftCreativeStackRequestAction{CreativeItemNetworkID: creativeID, NumberOfCrafts: 1},
-			take,
-		},
+		Actions:   actions,
 	}}})
 	if err != nil {
 		a.mu.Unlock()
 		return err
+	}
+	if evict {
+		a.replacing[req] = slot
 	}
 	// The server accepts the negative odd IDs a client counts down through.
 	a.nextRequest -= 2
@@ -126,6 +145,10 @@ func (a *Actuator) TakeCreative(item string) error {
 	}
 	switch status {
 	case StatusOK:
+		a.mu.Lock()
+		a.takenItem[slot] = itemID
+		a.touchSlot(slot)
+		a.mu.Unlock()
 		a.craftLog("creative_take", map[string]any{"item": item})
 		return nil
 	case StatusInvalidCraft:
@@ -138,24 +161,47 @@ func (a *Actuator) TakeCreative(item string) error {
 	return fmt.Errorf("%w: status %d", ErrRejected, status)
 }
 
+// touchSlot notes that the unit just took or held the item in a hotbar slot.
+func (a *Actuator) touchSlot(slot int) {
+	a.useClock++
+	a.slotUse[slot] = a.useClock
+}
+
 // planTakeLocked resolves what a take names: the creative ID to quote, the
-// item's runtime ID and the empty hotbar slot to take it into.
-func (a *Actuator) planTakeLocked(item string) (creativeID uint32, itemID int32, slot int, err error) {
+// item's runtime ID and the hotbar slot to take it into. With no empty slot it
+// picks the least recently used one holding an item an earlier creative take
+// put there, and evict says that stack must be destroyed first. A slot holding
+// the requested item is never picked, and neither is one filled any other way:
+// those are the unit's own tools and food.
+func (a *Actuator) planTakeLocked(item string) (creativeID uint32, itemID int32, slot int, evict bool, err error) {
 	if !a.creativeLocked() {
-		return 0, 0, 0, ErrNotCreative
+		return 0, 0, 0, false, ErrNotCreative
 	}
 	itemID, known := a.itemIDs[item]
 	if !known {
-		return 0, 0, 0, fmt.Errorf("%w: %q is not in the server's item table", ErrNoCreativeItem, item)
+		return 0, 0, 0, false, fmt.Errorf("%w: %q is not in the server's item table", ErrNoCreativeItem, item)
 	}
 	creativeID, known = a.creativeIDs[itemID]
 	if !known {
-		return 0, 0, 0, fmt.Errorf("%w: %q", ErrNoCreativeItem, item)
+		return 0, 0, 0, false, fmt.Errorf("%w: %q", ErrNoCreativeItem, item)
 	}
 	for slot = 0; slot < hotbarSlots; slot++ {
 		if a.inv[slot].Stack.Count == 0 {
-			return creativeID, itemID, slot, nil
+			return creativeID, itemID, slot, false, nil
 		}
 	}
-	return 0, 0, 0, ErrHotbarFull
+	best := -1
+	for s := 0; s < hotbarSlots; s++ {
+		held := a.inv[s].Stack.NetworkID
+		if held == itemID || a.takenItem[s] != held {
+			continue
+		}
+		if best < 0 || a.slotUse[s] < a.slotUse[best] {
+			best = s
+		}
+	}
+	if best < 0 {
+		return 0, 0, 0, false, ErrHotbarFull
+	}
+	return creativeID, itemID, best, true, nil
 }

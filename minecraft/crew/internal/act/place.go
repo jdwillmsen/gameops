@@ -244,6 +244,7 @@ func (a *Actuator) holdItem(item string) (slot int, held protocol.ItemInstance, 
 		return 0, held, ErrNoItem
 	}
 	if slot, held, ok := a.hotbarHolding(id); ok {
+		a.touchSlot(slot)
 		// A move still pending once the item is already held, as when a late
 		// answer to an abandoned move landed the stack, has nothing left to
 		// do: its refusal must not be read when the hotbar next runs out.

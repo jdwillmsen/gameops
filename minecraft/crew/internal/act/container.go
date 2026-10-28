@@ -302,6 +302,7 @@ func (a *Actuator) Died() {
 	a.responses = map[int32]uint8{}
 	a.reqItem = map[int32]int32{}
 	a.abandoned = map[int32]bool{}
+	a.replacing = map[int32]int{}
 	a.move = 0
 	a.crafts = newCraftState()
 }
@@ -366,6 +367,12 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			}
 			item := a.reqItem[r.RequestID]
 			delete(a.reqItem, r.RequestID)
+			if slot, ok := a.replacing[r.RequestID]; ok {
+				delete(a.replacing, r.RequestID)
+				if r.Status == StatusOK {
+					a.inv[slot] = protocol.ItemInstance{}
+				}
+			}
 			if r.Status == StatusOK {
 				a.applyWindow0Locked(r, item)
 			}
