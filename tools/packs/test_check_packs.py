@@ -167,8 +167,8 @@ class CheckPacks(unittest.TestCase):
         def base(d):
             comps = d["minecraft:entity"]["components"]
             comps["minecraft:type_family"] = {"family": ["gameops_wildlife"]}
-            comps["minecraft:behavior.nearest_attackable_target"]["entity_types"][0]["filters"] = {
-                "test": "is_family", "subject": "other", "value": "zombie"}
+            comps["minecraft:behavior.nearest_attackable_target"] = {"priority": 1, "entity_types": [
+                {"filters": {"test": "is_family", "subject": "other", "value": "zombie"}}]}
             comps["minecraft:tameable"] = {"probability": 0.33, "tame_items": "bone"}
             comps["minecraft:behavior.stay_while_sitting"] = {"priority": 3}
             comps["minecraft:persistent"] = {}
@@ -209,7 +209,7 @@ class CheckPacks(unittest.TestCase):
                     c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
                         {"filters": {"test": "is_family", "subject": "other", "value": "zombie"}}]}
                 self.make_wildlife(fn)
-                self.assertFails(f"{goal} must filter is_family != player")
+                self.assertFails(f"{goal} entity_types entry 0 must exclude family player")
 
     def test_wildlife_entity_needs_wildlife_family(self):
         self.make_wildlife(lambda c: c.update({"minecraft:type_family": {"family": ["gameops_brute"]}}))
@@ -232,6 +232,66 @@ class CheckPacks(unittest.TestCase):
         with open(os.path.join(self.pack, "policy.txt"), "w") as f:
             f.write("bogus\n")
         self.assertFails("unknown policy")
+
+    def test_wildlife_equals_sign_operator_is_a_positive_match(self):
+        def fn(c):
+            c["minecraft:behavior.nearest_attackable_target"]["entity_types"] = [
+                {"filters": {"test": "is_family", "subject": "other", "operator": "=", "value": "player"}}]
+        self.make_wildlife(fn)
+        self.assertFails("nearest_attackable_target must never select family player")
+
+    def test_wildlife_player_test_under_any_of_or_none_of_rejected(self):
+        player = {"test": "is_family", "subject": "other", "value": "player"}
+        for key in ("any_of", "none_of"):
+            with self.subTest(key=key):
+                def fn(c, key=key):
+                    c["minecraft:behavior.nearest_attackable_target"]["entity_types"] = [
+                        {"filters": {key: [player]}}]
+                self.make_wildlife(fn)
+                self.assertFails(f"filters must not use {key}")
+
+    def test_wildlife_owner_goal_mixed_entries_rejected(self):
+        no_player = {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}
+        for goal in ("owner_hurt_by_target", "owner_hit_target", "nearest_attackable_target"):
+            with self.subTest(goal=goal):
+                def fn(c, goal=goal):
+                    c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
+                        {"filters": no_player}, {"max_dist": 8}]}
+                self.make_wildlife(fn)
+                self.assertFails(f"{goal} entity_types entry 1 must exclude family player")
+
+    def test_wildlife_filterless_target_rejected(self):
+        def fn(c):
+            c["minecraft:behavior.nearest_attackable_target"]["entity_types"] = [{"max_dist": 16}]
+        self.make_wildlife(fn)
+        self.assertFails("nearest_attackable_target entity_types entry 0 must exclude family player")
+
+    def test_wildlife_target_without_entity_types_rejected(self):
+        for goal in ("nearest_attackable_target", "owner_hit_target"):
+            with self.subTest(goal=goal):
+                self.make_wildlife(lambda c, goal=goal: c.update({"minecraft:behavior." + goal: {"priority": 1}}))
+                self.assertFails(f"{goal} needs entity_types")
+
+    def test_explicit_arena_policy_behaves_as_default(self):
+        with open(os.path.join(self.pack, "policy.txt"), "w") as f:
+            f.write("arena\n")
+        self.assertEqual(self.errors(), [])
+        self.edit(BP_ENTITY, lambda d: d["minecraft:entity"]["components"].update(
+            {"minecraft:behavior.hurt_by_target": {}}))
+        self.assertFails("hurt_by_target")
+
+    def test_default_walk_skips_only_policy_only_folders(self):
+        base = os.path.join(self.tmp, "packs")
+        os.makedirs(os.path.join(base, "policy-only"))
+        with open(os.path.join(base, "policy-only", "policy.txt"), "w") as f:
+            f.write("wildlife\n")
+        shutil.copytree(PACK, os.path.join(base, "good"))
+        self.assertEqual([os.path.basename(p) for p in check_packs.default_packs(base)], ["good"])
+        os.rename(os.path.join(base, "good", "behavior_pack"), os.path.join(base, "good", "behaviour_pack"))
+        self.assertEqual([os.path.basename(p) for p in check_packs.default_packs(base)], ["good"])
+        rep = check_packs.Report()
+        check_packs.check_pack_dir(os.path.join(base, "good"), rep)
+        self.assertTrue(rep.errors)
 
 
 if __name__ == "__main__":
