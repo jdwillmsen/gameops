@@ -206,12 +206,13 @@ func (h *Hub) Spawn(runtimeID uint64) {
 func (h *Hub) Reset() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	// Not in Spawn: the server announces rain once, around the join, and the
-	// event may land before Spawn runs.
-	h.setWeatherLocked(weather{})
 	h.runtime = 0
 	h.forgetPlayersLocked()
 	h.resetLocked()
+	// Not in Spawn: the server announces rain once, around the join, and the
+	// event may land before Spawn runs. After the reset, because a viewer's
+	// restart discards whatever was queued for it before.
+	h.setWeatherLocked(weather{})
 }
 
 // forgetPlayersLocked drops what the server sends once per session, not again
