@@ -20,6 +20,31 @@ LEAP = {"priority": 3, "must_be_on_ground": True, "yd": 0.45, "target_dist": 0.5
 SITTING_PROPERTY = "gameops:sitting"
 
 
+def family_test(family: str) -> dict:
+    return {"test": "is_family", "subject": "other", "operator": "==", "value": family}
+
+
+# A name tag marks a pet-in-waiting or a keepsake, so wild predators leave it alone.
+NOT_NAMED = {"test": "has_nametag", "subject": "other", "operator": "==", "value": False}
+# Format 1.21 predates the is_tamed filter, so the component test stands in for it.
+NOT_TAMED = {"test": "has_component", "subject": "other", "operator": "!=", "value": "minecraft:is_tamed"}
+
+
+def targeting(s: Species, tamed: bool) -> dict:
+    """Prey and rivals as separate OR'd entries; each names a non-player family, so none can select a player."""
+    entries = []
+    if not tamed:
+        entries += [{"filters": {"all_of": [family_test(f), NOT_NAMED]}, "max_dist": 16} for f in s.prey]
+    for f in s.rivals:
+        tests = [family_test(f)] + ([NOT_TAMED] if tamed else [])
+        entries.append({"filters": {"all_of": tests}, "max_dist": 16})
+    if not entries:
+        return {}
+    return {"minecraft:behavior.nearest_attackable_target": {
+        "priority": 2, "must_see": True, "reselect_targets": True, "within_radius": 16,
+        "entity_types": entries}}
+
+
 def ability_groups(s: Species) -> tuple[dict, dict]:
     """Speed groups and events for the ability phases main.js fires; ready is explicit so the base value returns."""
     speeds = {"ready": s.speed, "active": s.active_speed, "tired": s.tired_speed}
@@ -54,6 +79,7 @@ def entity_json(s: Species) -> dict:
             }],
         },
     }
+    wild.update(targeting(s, tamed=False))
     if s.pounce:
         wild["minecraft:behavior.leap_at_target"] = LEAP
     tamed = {
@@ -75,6 +101,7 @@ def entity_json(s: Species) -> dict:
         "minecraft:behavior.owner_hit_target": {
             "priority": 2, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
     }
+    active.update(targeting(s, tamed=True))
     if s.pounce:
         active["minecraft:behavior.leap_at_target"] = LEAP
     sitting = {
