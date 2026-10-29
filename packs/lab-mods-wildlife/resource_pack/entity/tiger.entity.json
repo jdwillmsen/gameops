@@ -22,7 +22,13 @@
       "scripts": {
         "animate": [
           "walk",
-          "idle"
+          "idle",
+          {
+            "sit": "query.is_sitting"
+          },
+          {
+            "attack": "variable.attack_time > 0"
+          }
         ]
       },
       "render_controllers": [

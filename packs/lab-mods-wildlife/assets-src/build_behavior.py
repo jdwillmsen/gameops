@@ -12,8 +12,23 @@ def event(add=(), remove=()):
     return out
 
 
+MELEE = {"priority": 4, "speed_multiplier": 1.2, "track_target": True}
+
+
+def ability_groups(s: Species) -> tuple[dict, dict]:
+    """Speed groups and events for the ability phases main.js fires; ready is explicit so the base value returns."""
+    speeds = {"ready": s.speed, "active": s.active_speed, "tired": s.tired_speed}
+    groups = {f"gameops:ability_{p}": {"minecraft:movement": {"value": v}} for p, v in speeds.items()}
+    events = {}
+    for phase in speeds:
+        others = [f"gameops:ability_{o}" for o in speeds if o != phase]
+        events[f"gameops:ability_{phase}"] = event(add=[f"gameops:ability_{phase}"], remove=others)
+    return groups, events
+
+
 def entity_json(s: Species) -> dict:
     wild = {
+        "minecraft:behavior.melee_attack": MELEE,
         "minecraft:tameable": {
             "probability": 0.33,
             "tame_items": [s.tame_item],
@@ -41,6 +56,10 @@ def entity_json(s: Species) -> dict:
             "sit_event": {"event": "gameops:on_sit", "target": "self"},
             "stand_event": {"event": "gameops:on_stand", "target": "self"},
         },
+    }
+    # Everything that moves or fights lives apart from the sitting group, so on_sit can take it away.
+    active = {
+        "minecraft:behavior.melee_attack": MELEE,
         "minecraft:behavior.follow_owner": {
             "priority": 6, "speed_multiplier": 1.0, "start_distance": 10, "stop_distance": 2},
         # Each OR'd entry carries its own player exclusion; an owner's attacker may be a player.
@@ -50,10 +69,15 @@ def entity_json(s: Species) -> dict:
             "priority": 2, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
     }
     sitting = {
-        # Priority 1 outranks following and attacking, which is what makes a sitting pet stay put.
+        # on_sit also removes the active goals; priority 1 keeps lower-priority wandering from moving it.
         "minecraft:behavior.stay_while_sitting": {"priority": 1},
     }
-    groups = {"gameops:wild": wild, "gameops:tamed": tamed, "gameops:sitting": sitting}
+    groups = {"gameops:wild": wild, "gameops:tamed": tamed, "gameops:tamed_active": active,
+              "gameops:sitting": sitting}
+    ability_events = {}
+    if s.active_speed:
+        ability_group_defs, ability_events = ability_groups(s)
+        groups.update(ability_group_defs)
 
     spawn = [{"add": {"component_groups": ["gameops:wild"]}}]
     if s.variants:
@@ -87,17 +111,17 @@ def entity_json(s: Species) -> dict:
                 "minecraft:pushable": {"is_pushable": True, "is_pushable_by_piston": True},
                 "minecraft:nameable": {},
                 "minecraft:behavior.float": {"priority": 0},
-                "minecraft:behavior.melee_attack": {
-                    "priority": 4, "speed_multiplier": 1.2, "track_target": True},
                 "minecraft:behavior.random_stroll": {"priority": 7, "speed_multiplier": 0.8},
                 "minecraft:behavior.look_at_player": {"priority": 8},
                 "minecraft:behavior.random_look_around": {"priority": 9},
             },
             "events": {
                 "minecraft:entity_spawned": {"sequence": spawn},
-                "gameops:on_tamed": event(add=["gameops:tamed"], remove=["gameops:wild"]),
-                "gameops:on_sit": event(add=["gameops:sitting"]),
-                "gameops:on_stand": event(remove=["gameops:sitting"]),
+                "gameops:on_tamed": event(add=["gameops:tamed", "gameops:tamed_active"],
+                                          remove=["gameops:wild"]),
+                "gameops:on_sit": event(add=["gameops:sitting"], remove=["gameops:tamed_active"]),
+                "gameops:on_stand": event(add=["gameops:tamed_active"], remove=["gameops:sitting"]),
+                **ability_events,
             },
         },
     }

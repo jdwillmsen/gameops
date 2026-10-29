@@ -9,6 +9,11 @@
     },
     "component_groups": {
       "gameops:wild": {
+        "minecraft:behavior.melee_attack": {
+          "priority": 4,
+          "speed_multiplier": 1.2,
+          "track_target": true
+        },
         "minecraft:tameable": {
           "probability": 0.33,
           "tame_items": [
@@ -58,6 +63,13 @@
             "event": "gameops:on_stand",
             "target": "self"
           }
+        }
+      },
+      "gameops:tamed_active": {
+        "minecraft:behavior.melee_attack": {
+          "priority": 4,
+          "speed_multiplier": 1.2,
+          "track_target": true
         },
         "minecraft:behavior.follow_owner": {
           "priority": 6,
@@ -97,6 +109,21 @@
       "gameops:sitting": {
         "minecraft:behavior.stay_while_sitting": {
           "priority": 1
+        }
+      },
+      "gameops:ability_ready": {
+        "minecraft:movement": {
+          "value": 0.28
+        }
+      },
+      "gameops:ability_active": {
+        "minecraft:movement": {
+          "value": 0.4
+        }
+      },
+      "gameops:ability_tired": {
+        "minecraft:movement": {
+          "value": 0.18
         }
       },
       "gameops:variant_orange": {
@@ -149,11 +176,6 @@
       "minecraft:behavior.float": {
         "priority": 0
       },
-      "minecraft:behavior.melee_attack": {
-        "priority": 4,
-        "speed_multiplier": 1.2,
-        "track_target": true
-      },
       "minecraft:behavior.random_stroll": {
         "priority": 7,
         "speed_multiplier": 0.8
@@ -200,7 +222,8 @@
       "gameops:on_tamed": {
         "add": {
           "component_groups": [
-            "gameops:tamed"
+            "gameops:tamed",
+            "gameops:tamed_active"
           ]
         },
         "remove": {
@@ -214,12 +237,61 @@
           "component_groups": [
             "gameops:sitting"
           ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:tamed_active"
+          ]
         }
       },
       "gameops:on_stand": {
+        "add": {
+          "component_groups": [
+            "gameops:tamed_active"
+          ]
+        },
         "remove": {
           "component_groups": [
             "gameops:sitting"
+          ]
+        }
+      },
+      "gameops:ability_ready": {
+        "add": {
+          "component_groups": [
+            "gameops:ability_ready"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:ability_active",
+            "gameops:ability_tired"
+          ]
+        }
+      },
+      "gameops:ability_active": {
+        "add": {
+          "component_groups": [
+            "gameops:ability_active"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:ability_ready",
+            "gameops:ability_tired"
+          ]
+        }
+      },
+      "gameops:ability_tired": {
+        "add": {
+          "component_groups": [
+            "gameops:ability_tired"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:ability_ready",
+            "gameops:ability_active"
           ]
         }
       }

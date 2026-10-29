@@ -14,7 +14,7 @@ import build_textures  # noqa: E402
 from species import SPECIES, Species  # noqa: E402
 
 PACK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATED = ("tiger",)
+GENERATED = ("tiger", "cheetah")
 
 
 def dump(doc) -> bytes:
@@ -31,8 +31,12 @@ def client_entity(s: Species) -> dict:
                 "materials": {"default": "entity_alphatest"},
                 "textures": textures,
                 "geometry": {"default": f"geometry.gameops.{s.id}"},
-                "animations": {n: f"animation.gameops.cat.{n}" for n in ("walk", "sit", "idle", "attack")},
-                "scripts": {"animate": ["walk", "idle"]},
+                "animations": {n: build_models.ANIMATION_PREFIX + n for n in build_models.ANIMATION_NAMES},
+                "scripts": {"animate": [
+                    "walk", "idle",
+                    {"sit": "query.is_sitting"},
+                    {"attack": "variable.attack_time > 0"},
+                ]},
                 "render_controllers": [f"controller.render.gameops.{s.id}"],
                 "spawn_egg": {"base_color": s.egg[0], "overlay_color": s.egg[1]},
             },

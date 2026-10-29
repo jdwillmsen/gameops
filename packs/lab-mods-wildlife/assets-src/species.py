@@ -16,11 +16,15 @@ class Species:
     rig: str
     box: tuple[float, float]
     egg: tuple[str, str]
+    # Movement while the ability is active and while the animal is recovering; 0 where it has none.
+    active_speed: float = 0.0
+    tired_speed: float = 0.0
 
 
-def _s(id, health, damage, speed, tame_item, prey, rivals, variants, ability, rig, box, egg):
+def _s(id, health, damage, speed, tame_item, prey, rivals, variants, ability, rig, box, egg,
+       active_speed=0.0, tired_speed=0.0):
     return Species(id, f"gameops_{id}", health, damage, speed, tame_item, prey, rivals, variants, ability, rig,
-                   box, egg)
+                   box, egg, active_speed, tired_speed)
 
 
 SMALL = ("rabbit", "chicken")
@@ -28,9 +32,9 @@ LIVESTOCK = ("sheep", "pig", "cow")
 
 SPECIES = {s.id: s for s in (
     _s("tiger", 60, 8, 0.28, "beef", LIVESTOCK, (), ("orange", "white"), "charge", "cat",
-       (1.0, 1.2), ("#d9822b", "#2a2018")),
+       (1.0, 1.2), ("#d9822b", "#2a2018"), active_speed=0.40, tired_speed=0.18),
     _s("cheetah", 30, 5, 0.45, "rabbit", SMALL, ("gameops_hyena",), (), "sprint", "cat",
-       (0.8, 0.9), ("#d9b25a", "#3a2a18")),
+       (0.8, 0.9), ("#d9b25a", "#3a2a18"), active_speed=0.60, tired_speed=0.20),
     _s("lion", 50, 7, 0.30, "mutton", LIVESTOCK, ("gameops_hyena",), ("male", "female"), "roar", "cat",
        (1.0, 1.2), ("#c9a05a", "#6a4220")),
     _s("black_leopard", 40, 6, 0.32, "chicken", SMALL, ("gameops_hyena",), (), "ambush", "cat",
