@@ -48,7 +48,8 @@ def render_controller(s: Species) -> dict:
     ctl = {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}]}
     if s.id == "lion":
         # The female shares the male's geometry, so her mane bone is hidden rather than absent.
-        ctl["part_visibility"] = [{"*": True}, {"mane": f"query.variant == {s.variants.index('male')}"}]
+        male = f"query.variant == {s.variants.index('male')}"
+        ctl["part_visibility"] = [{"*": True}, {"mane": male}, {"mane_chest": male}]
     if s.variants:
         ctl["arrays"] = {"textures": {"Array.skins": [f"Texture.{v}" for v in s.variants]}}
         ctl["textures"] = ["Array.skins[query.variant]"]

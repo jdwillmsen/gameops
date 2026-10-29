@@ -14,6 +14,9 @@
         },
         {
           "mane": "query.variant == 0"
+        },
+        {
+          "mane_chest": "query.variant == 0"
         }
       ],
       "arrays": {

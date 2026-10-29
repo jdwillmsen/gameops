@@ -106,7 +106,7 @@ class Generators(unittest.TestCase):
         for sid in CATS:
             geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
             self.assertEqual(geo["description"]["identifier"], f"geometry.gameops.{sid}")
-            expected = list(cat_rig.BONES) + (["mane"] if sid == "lion" else [])
+            expected = list(cat_rig.BONES) + (["mane", "mane_chest"] if sid == "lion" else [])
             self.assertEqual([b["name"] for b in geo["bones"]], expected)
             self.assertEqual(geo["description"]["texture_width"], 128)
             client = json.loads(self.load(f"resource_pack/entity/{sid}.entity.json"))
@@ -223,22 +223,41 @@ class Generators(unittest.TestCase):
 
     def test_lion_female_has_no_mane(self):
         bones = self.geo_bones("lion")
-        self.assertGreaterEqual(len(bones["mane"]["cubes"]), 2)
-        self.assertEqual(bones["mane"]["parent"], "body")
+        self.assertEqual(len(bones["mane"]["cubes"]), 4)
+        self.assertEqual(bones["mane"]["parent"], "head")
+        self.assertEqual(bones["mane_chest"]["parent"], "body")
+        self.assertGreaterEqual(len(bones["mane_chest"]["cubes"]), 2)
         ctl = json.loads(self.load("resource_pack/render_controllers/lion.render_controllers.json"))
         rc = ctl["render_controllers"]["controller.render.gameops.lion"]
         male = SPECIES["lion"].variants.index("male")
         self.assertEqual(SPECIES["lion"].variants.index("female"), 1 - male)
         self.assertIn({"*": True}, rc["part_visibility"])
-        self.assertIn({"mane": f"query.variant == {male}"}, rc["part_visibility"])
+        for part in ("mane", "mane_chest"):
+            self.assertIn({part: f"query.variant == {male}"}, rc["part_visibility"])
         for sid in CATS:
             if sid != "lion":
                 self.assertNotIn("mane", self.geo_bones(sid))
+                self.assertNotIn("mane_chest", self.geo_bones(sid))
         ent = self.committed_entity("lion")
         for v in ("male", "female"):
             self.assertIn(f"gameops:variant_{v}", ent["component_groups"])
         spawn = ent["events"]["minecraft:entity_spawned"]["sequence"]
         self.assertEqual(len(spawn[1]["randomize"]), 2)
+
+    def test_lion_mane_frames_the_head_and_leaves_the_face_clear(self):
+        bones = self.geo_bones("lion")
+        head = bones["head"]["cubes"][0]
+        hx0, hx1 = head["origin"][0], head["origin"][0] + head["size"][0]
+        front = head["origin"][2]
+        sides = [c for c in bones["mane"]["cubes"] if c["origin"][0] + c["size"][0] <= hx0 + 0.01
+                 or c["origin"][0] >= hx1 - 0.01]
+        self.assertEqual(len(sides), 2)
+        for c in bones["mane"]["cubes"]:
+            self.assertGreater(c["origin"][2], front, "mane must not cover the face")
+        top = max(c["origin"][1] + c["size"][1] for c in bones["mane"]["cubes"])
+        self.assertGreater(top, head["origin"][1] + head["size"][1])
+        bib = min(bones["mane_chest"]["cubes"], key=lambda c: c["origin"][2])
+        self.assertLess(bib["origin"][2], bones["body"]["cubes"][0]["origin"][2])
 
     def test_lion_mane_is_painted_differently_from_the_coat(self):
         male = build_textures.paint(SPECIES["lion"], "male")

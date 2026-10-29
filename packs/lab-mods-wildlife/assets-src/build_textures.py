@@ -254,12 +254,17 @@ def speckle(p: Px, seed: int, one_in=11) -> bool:
 
 
 def mane_strand(p: Px, pal: dict):
-    """Vertical hair strands of uneven length: golden tips over a dark brown base, darker at the roots."""
-    n = noise(p.col, face_hash(p))
-    length = 2 + (n >> 4) % (p.rows - 1)
-    if p.row < length and n % 3 == 0:
+    """Two overlapping layers of vertical strands of uneven length over a brown base, dark at the roots."""
+    h = face_hash(p)
+    gold = noise(p.col, h)
+    deep = noise(p.col, h + 7)
+    if p.row < 2:
+        return pal["mane_dark"] if gold % 4 else pal["mane"]
+    if gold % 3 == 0 and p.row < 2 + (gold >> 4) % max(1, p.rows - 2):
         return pal["mane_hi"]
-    return pal["mane_dark"] if p.row >= p.rows - 2 or n % 7 == 0 else pal["mane"]
+    if deep % 4 == 0 and p.row < 2 + (deep >> 5) % max(1, p.rows - 2):
+        return pal["mane_dark"]
+    return pal["mane"]
 
 
 def lion(p: Px, pal: dict):
