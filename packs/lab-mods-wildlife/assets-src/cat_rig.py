@@ -24,13 +24,16 @@ class CatParams:
     tail_len: int
     tail_w: int
     tail_droop: int = 0   # degrees the tail hangs below level
+    head_rise: int = 0    # how far the top of the head stands above the back line
+    muzzle: tuple = (0.5, 0.4, 0.4)   # width, height, depth as fractions of the head
     scale: float = 1.0
 
 
 # Tiger: big, heavy and broad. Cheetah: slender, long-legged, small head, long tail, deep chest.
 PARAMS = {
     "tiger": CatParams(body_w=12, body_h=11, body_len=22, chest_len=11, tuck=0, leg_len=9, leg_w=5,
-                       head_w=10, head_h=9, head_d=8, tail_len=18, tail_w=3, tail_droop=25),
+                       head_w=10, head_h=10, head_d=8, tail_len=18, tail_w=3, tail_droop=25,
+                       head_rise=2, muzzle=(0.5, 0.4, 0.5)),
     "cheetah": CatParams(body_w=6, body_h=7, body_len=20, chest_len=10, tuck=2, leg_len=8, leg_w=3,
                          head_w=5, head_h=5, head_d=5, tail_len=20, tail_w=2, tail_droop=12),
 }
@@ -52,7 +55,7 @@ def _sc(p: CatParams) -> CatParams:
         return max(1, round(v * p.scale))
     return CatParams(i(p.body_w), i(p.body_h), i(p.body_len), i(p.chest_len), round(p.tuck * p.scale),
                      i(p.leg_len), i(p.leg_w), i(p.head_w), i(p.head_h), i(p.head_d), i(p.tail_len),
-                     i(p.tail_w), p.tail_droop, 1.0)
+                     i(p.tail_w), p.tail_droop, p.head_rise, p.muzzle, 1.0)
 
 
 def pivots(p: CatParams) -> dict:
@@ -62,7 +65,7 @@ def pivots(p: CatParams) -> dict:
     return {
         # Front of the body, so a sitting pitch drops the hindquarters and keeps the shoulders.
         "body": [0, p.leg_len + p.body_h / 2, -half + 3],
-        "head": [0, top - p.head_h / 2 + 1, -half + 1],
+        "head": [0, top + p.head_rise - p.head_h / 2, -half + 1],
         "tail": [0, top - p.tail_w, half - 1],
         "front_left_leg": [p.body_w / 2 - p.leg_w / 2, p.leg_len, -half + p.leg_w / 2],
         "front_right_leg": [-(p.body_w / 2 - p.leg_w / 2), p.leg_len, -half + p.leg_w / 2],
@@ -86,9 +89,11 @@ def _shapes(p: CatParams):
     pv = pivots(p)["head"]
     hw, hh, hd = p.head_w, p.head_h, p.head_d
     out.append(("head", "head", (-hw / 2, pv[1] - hh / 2, pv[2] - hd + 1), (hw, hh, hd)))
-    mw, mh, md = max(2, round(hw * 0.5)), max(2, round(hh * 0.4)), max(2, round(hd * 0.4))
-    out.append(("head", "muzzle", (-mw / 2, pv[1] - hh / 2, pv[2] - hd + 1 - md), (mw, mh, md)))
-    ew = max(2, round(hw * 0.25))
+    mw, mh, md = (max(2, round(hw * p.muzzle[0])), max(2, round(hh * p.muzzle[1])),
+                  max(2, round(hd * p.muzzle[2])))
+    # The muzzle starts inside the front of the head and sticks out of it.
+    out.append(("head", "muzzle", (-mw / 2, pv[1] - hh / 2 + 1, pv[2] - hd + 2 - md), (mw, mh, md)))
+    ew = max(2, round(hw * 0.3))
     ear_y = pv[1] + hh / 2
     ear_z = pv[2] - 2
     out.append(("head", "ear_right", (-hw / 2, ear_y, ear_z), (ew, ew, 1)))

@@ -5,6 +5,7 @@
 import filecmp
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -158,6 +159,15 @@ class Generators(unittest.TestCase):
                 self.assertIn(e, events)
             self.assertEqual(sorted(ent["events"]["gameops:ability_active"]["add"]["component_groups"]),
                              ["gameops:ability_active"])
+
+    def test_every_sprint_phase_has_an_ability_event(self):
+        with open(os.path.join(PACK, "behavior_pack/scripts/abilities.js"), encoding="utf-8") as f:
+            phases = set(re.findall(r'phase: "(\w+)"', f.read()))
+        self.assertEqual(phases, {"ready", "active", "tired"})
+        for sid in ("tiger", "cheetah"):
+            events = self.committed_entity(sid)["events"]
+            for phase in phases:
+                self.assertIn(f"gameops:ability_{phase}", events, sid)
 
     def test_cheetah_eats_rabbit_and_tiger_beef(self):
         self.assertEqual(SPECIES["cheetah"].tame_item, "rabbit")
