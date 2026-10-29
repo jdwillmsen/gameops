@@ -196,6 +196,21 @@ func runTar(ctx context.Context, args []string, stdout io.Writer) error {
 	return nil
 }
 
+// dbEntryName returns the file name of a db/<file> tar entry. Only regular
+// files directly under db/ are accepted, so a symlink, an absolute or
+// climbing path, or a nested name is refused rather than followed.
+func dbEntryName(h *tar.Header) (string, error) {
+	bad := fmt.Errorf("repair: unexpected entry %q in world tar", h.Name)
+	if h.Typeflag != tar.TypeReg || path.IsAbs(h.Name) || filepath.IsAbs(h.Name) {
+		return "", bad
+	}
+	dir, name := path.Split(path.Clean(h.Name))
+	if dir != "db/" || name == "" || name == "." || strings.ContainsAny(name, `/\`) {
+		return "", bad
+	}
+	return name, nil
+}
+
 // extractDB unpacks a tar of db/<file> entries into dest/db, first emptying
 // any db/ left there by an earlier copy so files of two snapshots never mix.
 // Anything else in the tar, a path that climbs out or a nested name, is
@@ -221,11 +236,18 @@ func extractDB(r io.Reader, dest string) error {
 		if h.Typeflag == tar.TypeDir {
 			continue
 		}
-		dir, name := path.Split(path.Clean(h.Name))
-		if h.Typeflag != tar.TypeReg || dir != "db/" || name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		name, err := dbEntryName(h)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(name, "..") {
 			return fmt.Errorf("repair: unexpected entry %q in world tar", h.Name)
 		}
-		f, err := os.OpenFile(filepath.Join(db, filepath.Base(name)), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		target := filepath.Join(db, name)
+		if rel, err := filepath.Rel(db, target); err != nil || rel != name {
+			return fmt.Errorf("repair: unexpected entry %q in world tar", h.Name)
+		}
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
 			return err
 		}

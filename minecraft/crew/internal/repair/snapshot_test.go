@@ -2,6 +2,7 @@ package repair
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -224,5 +225,37 @@ func TestFetchDrainsTarPaddingAfterTheArchive(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Fetch blocked on the unread tar padding")
+	}
+}
+
+func TestExtractDBRefusesUnsafeEntries(t *testing.T) {
+	cases := []tar.Header{
+		{Name: "/etc/evil", Typeflag: tar.TypeReg},
+		{Name: "/db/evil", Typeflag: tar.TypeReg},
+		{Name: "db/../../evil", Typeflag: tar.TypeReg},
+		{Name: `db\..\evil`, Typeflag: tar.TypeReg},
+		{Name: "db/link", Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"},
+		{Name: "db/hard", Typeflag: tar.TypeLink, Linkname: "db/other"},
+	}
+	for _, h := range cases {
+		var buf bytes.Buffer
+		tw := tar.NewWriter(&buf)
+		if err := tw.WriteHeader(&h); err != nil {
+			t.Fatal(err)
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		parent := t.TempDir()
+		dest := filepath.Join(parent, "dest")
+		if err := os.Mkdir(dest, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := extractDB(&buf, dest); err == nil {
+			t.Errorf("%q (type %c) was accepted", h.Name, h.Typeflag)
+		}
+		if _, err := os.Lstat(filepath.Join(parent, "evil")); err == nil {
+			t.Errorf("%q escaped the destination", h.Name)
+		}
 	}
 }
