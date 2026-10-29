@@ -1,6 +1,9 @@
 package tactics
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestDefaultsInsideBounds(t *testing.T) {
 	d := Defaults()
@@ -64,5 +67,33 @@ func TestTacticForDefaultsToNone(t *testing.T) {
 	pr.Tactics = map[Family]string{FamilyCreeper: "creeper/backoff"}
 	if pr.TacticFor(FamilyCreeper) != "creeper/backoff" || pr.TacticFor(FamilyZombie) != "" {
 		t.Error("tactic lookup wrong")
+	}
+}
+
+func TestSetRefusesNaNAndKeepsTheField(t *testing.T) {
+	p := Defaults()
+	if p.Set("shotEvery", math.NaN()) {
+		t.Error("NaN accepted")
+	}
+	if p.ShotEvery != Defaults().ShotEvery {
+		t.Errorf("shotEvery = %v after a refused NaN, want it unchanged", p.ShotEvery)
+	}
+}
+
+func TestParseKeepsDefaultsForOmittedFields(t *testing.T) {
+	d := Defaults()
+	pr, err := Parse([]byte(`{"version":1,"name":"x","default":{"healSafe":5},"overrides":{"creeper":{"kiteBackoff":7}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.Default.HealSafe != 5 || pr.Default.FocusRange != d.FocusRange || pr.Default.ShotEvery != d.ShotEvery {
+		t.Errorf("default = %+v, want only healSafe changed", pr.Default)
+	}
+	if o := pr.Overrides[FamilyCreeper]; o.KiteBackoff != 7 || o.ShotEvery != d.ShotEvery {
+		t.Errorf("override = %+v, want only kiteBackoff changed", o)
+	}
+	pr, err = Parse([]byte(`{"version":1,"name":"bare"}`))
+	if err != nil || pr.Default != d {
+		t.Errorf("profile without a default = %+v, err %v, want the shipped defaults", pr.Default, err)
 	}
 }
