@@ -1,6 +1,6 @@
 # Placing any block correctly
 
-**Status:** phase 0 done (findings below), phases 1 on
+**Status:** phases 0 and 0b done (findings below), phase 1 on
 **Date:** 2026-10-28
 **Builds on:** [creative menders and builders](2026-10-28-crew-creative-menders-and-builders-design.md) (`Build`, `Repair`, `act.PlaceBlock`, `internal/blueprint`, `internal/repair`)
 
@@ -156,6 +156,8 @@ The per-block lists are in the table (`unreachable`).
 
 ### Doubts
 
+Phase 0b answered all of these but the registry-version and inference ones; see *Phase 0b findings* below.
+
 - **Residual holes from dropped clicks:** 11 of 97 stair blocks and 12 of 100 slab blocks lack states their siblings have (for example `bamboo_mosaic_stairs`, `granite_stairs`, `cherry_slab`). The table says "unreachable" for them; it should say "unknown". Next step: after a run, compare each block to its family signature and re-run the ones that disagree. Treat `unreachable` as "not seen", never as proof.
 - **56 `waxed_*` copper items** were cut by the 15 minute cap of the last pass and keep their results from the earlier pass, made before the drop-retry fix.
 - **Door hinge** never came out true, neither from hit position nor from a stone beside the door, and the neighbour pass's copies of the door beside it did not flag it either. Java-style hinge rules may need a door in a particular position; untested.
@@ -167,3 +169,90 @@ The per-block lists are in the table (`unreachable`).
 - **The registry is one version behind**: the `redstone` item placed a block whose hash is not in dragonfly v0.11.5.
 - **Inference** copies a sibling's sweep after 8 matching clicks; a rare family member with a different rule would pass if the sample missed it.
 - The table is a snapshot of one server version; the conformance run (phase 5) is what keeps it honest.
+
+## Phase 0b findings (2026-10-28)
+
+Phase 0b made "unreachable" mean "tried in full and never seen", answered the Phase 0 doubts by experiment, and measured the world rules Phase 2 depends on. Everything below was observed on throwaway local labs (compose projects `jdw297b`, `jdw297b2`, `jdw297b3`, server 1.26.60.6, offline, view distance 6), torn down with `down -v`. The probes are kept: `placecal --probe hinge,pistons,yaws,plates,beds,gravity,support,twopart,multicount,liquids,waterlog,neighbours,occupied` (or `all`) reruns them and prints the same report.
+
+### What changed in the table and the tool
+
+- **Gap check** (`--verify`): each block is compared with the majority of its family (same last name word and same state property names: stairs, slabs, doors, trapdoors, logs, plates, signs, ...). Blocks that disagree, and sibling-inferred blocks in a split family, are run again in full (no inference, reply wait 1.5 s instead of 350 ms, 5 retries, 3 to 4 units instead of 6). The 56 `waxed_*` copper items were run in that pass. What still disagrees is written to the header (`family_gaps`) with the reason.
+- **Second halves are read.** A door's hinge is stored on the upper half; calibration now reads it. A door's `upper_block_bit`, a bed's `head_piece_bit` and `occupied_bit` and a plate's `redstone_signal` are derived by construction (the other half, or something standing on it), never unreachable.
+- **Not seen is not unreachable.** A sweep cut at the 360 click cap lists its remaining states as `not_seen` and marks the block `truncated`; `unreachable` is only for blocks swept in full. Items no click placed are retried over sand, farmland, end stone, soul sand and grass (`soil` in the recipe) before they count as unplaceable. Items whose placement hit a hash the vocabulary lacks are listed (`unmapped_items`).
+- **Sixteen-way rotation**: blocks with `ground_sign_direction` are also tried at 16 yaws (0, 23, 45, 68, ... 338).
+- **Stand position** is part of a recipe (`stand`: `above` or `below`) for blocks that face up or down.
+- **Derived keys** are measured like against like: the same click on the same floor, read the same way, with and without neighbours. A "derived" key that still changes when only the look changes is `mixed`, not derived.
+- Builds are deterministic (ties between equal-cost clicks are ordered by the click's text, then item).
+
+### Numbers
+
+| | Phase 0 | Phase 0b |
+|---|---|---|
+| Blocks in the table | 1,088 | 1,098 |
+| States reachable by a click | 2,916 | 3,264 (14 of them stand-position recipes taken from the probes) |
+| States unreachable (tried in full, never seen) | 8,996 | 8,773 |
+| States not seen (sweep cut at the cap) | not recorded | 1 (`twisting_vines`) |
+| Blocks with derived keys | 165 | 190 |
+| Blocks inferred from a sibling | 557 | 431, none of them in a split family |
+| Items not covered (`not_covered`) | 56 `waxed_*` | 0 |
+| Family disagreements after the re-run | 44 blocks + the stair/slab holes | 2, explained (below) |
+| Items no click placed | 337 | 330 (7 plants placed once given sand, farmland, end stone or soul sand) |
+| Table size | 57 KB | 61 KB |
+
+Timings: gap check 7 min 6 s (95 items, 3 units, 3,049 clicks); re-run of the derived, door, bed, plate, sign and unplaceable items with the fixed tool 18 min 6 s (566 items, 5 units, 8,341 clicks); gap items and waxed copper in full, no inference, 5 to 6 min (95 items, 3 units); second gap pass about 4 min; signs at 16 yaws about 7 min; probes 6 to 8 min each group on three labs at the same time. Total wall clock about 55 minutes of the 100 allowed.
+
+### The doubts, answered
+
+- **Door hinge.** It is stored on the **upper** half of the door and follows the neighbours, not the click: 140 placements (4 yaws x 7 neighbour setups x 5 hit points on the top face) gave `door_hinge_bit` true in 30, always and only when a solid block, or another door, stood on the matching side (door facing west, from yaw 0: stone on -x, or a door on +x; yaw 90: stone on -z; yaw 180: stone on +x, door on -x; yaw 270: stone on +z). Hit point never mattered. So hinge is derived: a planner reaches it by placing the neighbour first.
+- **Piston, sticky piston, dropper, dispenser, barrel, observer, crafter up/down.** Pitch never matters (0, -60, +-89, +-90 all gave the same). Standing position does, as the old Java rule: with the unit within one cell horizontally and its eye at least three cells above the placed cell the block faces up (piston, dropper, dispenser, barrel `facing_direction` 1; observer `down`; crafter `up_north`); with the placed cell above the unit's eye it faces down (`facing_direction` 0; observer `up`; crafter `down_north`). Otherwise it faces the horizontal side from yaw. Hoppers ignore all of it (`facing_direction` 0 in every setup). Recipes now carry `stand`. Only yaw 0 was run for the vertical stands; the crafter's other orientations are not mapped.
+- **Sixteen-way rotation.** Standing signs and banners reach all 16 `ground_sign_direction` values with yaw in 22.5 degree steps (rounded to whole degrees): yaw 0 gives 8, yaw 180 gives 0, yaw 79 to 101 give 12, and each 22.5 degrees is one step. Skulls and heads have no rotation state at all (`facing_direction` 1 whatever the yaw; the rotation lives in the block entity), so they are out of reach for state matching. A hanging sign is not placed from the floor top (it needs a ceiling).
+- **Pressure plate `redstone_signal`** is real, not placement noise: 0 untouched for 2.5 s, 1 while the unit stood on the plate, 0 again after it stepped off. Derived (by standing entities); the matcher should ignore it.
+- **Bed `head_piece_bit`** is 0 on the clicked cell (the foot) and 1 on the head cell, which the same click places one cell away in the facing direction: `direction` 0, 1, 2, 3 puts the head at +z, -x, -z, +x, from yaws 0, 90, 180, 270 with the unit standing opposite. Derived by construction, not a read artifact. `occupied_bit` is 0 (it follows a sleeper).
+- **Stairs/slabs/trapdoors short of states**: after the full re-run the family gaps were dropped clicks, as suspected; the `family_gaps` that remain are listed under *Remaining holes*.
+
+### World rules for Phase 2
+
+All times are from the server's clock or the probe's click, so they are good to about 100 ms; "the unit" is a joined client.
+
+**Gravity** (sand, red sand, gravel, white concrete powder, anvil, dragon egg)
+- Placed over air they fall: the placed cell was empty about 0.5 s after the click and the block was in the landing cell (5 blocks down) at about 1.0 to 1.15 s. Dragon eggs fall too. Placed on a one-block scaffold they stay; when the scaffold is broken the block drops one cell and is in the scaffold's cell about 1.5 s later.
+- **The unit's block store never sees it.** The cell the block left stays "sand" and the landing cell stays "air" in the unit's own view for at least 8 s (no UpdateBlock for the fall); only the server's own `testforblock` shows the truth. A planner cannot verify gravity cells from the world model; it must avoid creating them (support first, bottom-up) and re-read the area after a chunk refresh.
+- Concrete powder placed beside a water source turned into concrete within 0.8 s.
+- No item drops were seen from any of these landing.
+
+**Support loss** (tile drops on; the support was broken by the unit)
+- These popped off as one item each, the dependent block gone about 150 ms after the break (the support cell itself about 70 to 100 ms after): torch (top or side), redstone wire (drops `redstone`), rail, carpet, stone pressure plate, standing sign and wall sign (drop `oak_sign`), ladder, hanging lantern (support broken above it), lever, stone button, repeater, sapling (on dirt), flower pot. A door dropped one door item: the lower half was gone at +145 ms and the upper at +203 ms.
+- A **snow layer and a candle stay** when the block under them is broken (nothing changed in 2.5 s). A bed could not be tested this way: it is not placed unless both halves have a block under them.
+
+**Two-part blocks**
+- A door is one click: lower and upper both appear. With the upper cell occupied (stone or glass) **nothing is placed**. A bed is one click: foot on the clicked cell, head one cell on in the facing direction; with the head cell occupied by stone nothing is placed, and with no block under the head cell nothing is placed (needs a solid cell below both halves).
+- Tall grass, large fern, sunflower, rose bush, peony, lilac and pitcher plant are one click from a grass block: both halves appear; with the upper cell occupied nothing is placed. The `double_plant` item name does not exist.
+- A second slab clicked on a bottom slab's top face makes `oak_double_slab`; clicked on the north face of the bottom slab at the low hit it places a new bottom slab in the cell beside, at the high hit a top slab beside. A birch slab on an oak slab does not merge: it goes in the cell above. (Clicking the slab's own half merges only through the top face of a bottom slab.)
+
+**Multi-count** (clicking the same cell again, no sneak, the clicked block's top or side face)
+- Candles (`candles` 0 to 3), sea pickles (`cluster_count` 0 to 3), turtle eggs (`turtle_egg_count` one to four) and snow layers (`height` 0 to 7; six clicks gave 0 to 5) all increment on each click of the existing block's face. The fifth candle spills into the next cell. Sneaking does not change candles, pickles or snow; with sneak a turtle egg stays at one egg. Leaf litter's `growth` also increments; pink petals and wildflowers placed nothing on the platform floor.
+
+**Liquids**
+- A water or lava bucket works with the same use-item-on-block action as any block (`ClickBlock`, `ClientPrediction` success, face of the block clicked): the source appears in the cell the face points at, as `water[liquid_depth=0]` / `lava[liquid_depth=0]`, at the first click about 150 ms and about 1 s when the take of the bucket from the creative inventory is first. A use-item "click air" with the look pointing at the cell did nothing. There was no flow in the closed pit used.
+- Water or lava onto a cell holding a plain replaceable (short grass, a snow layer, a torch, the other liquid) replaces it; onto a stone block, a slab or a fence nothing happens. Lava onto water gives lava, water onto lava gives water (no obsidian or cobblestone in the source-onto-source case).
+
+**Waterlogging**
+- Observable only partially: the unit's store reads layer 0 only. Slabs, stairs, fences, panes, trapdoors, doors, chests, signs, levers, rails, carpets, stone and sea pickles can be placed into a water source cell, and the cell then reads the block; breaking it leaves air, not water, so the water was displaced (no second layer visible). Torches, candles, ladders and redstone wire cannot be placed in water (the cell still reads water).
+
+**Neighbour-derived shapes with neighbours above and below**
+- Fences, glass panes and iron bars: the four `connection_*` bits follow only horizontal neighbours; a block above or below (stone, or the same block) changes nothing, and placing one on top of or under another gives the same bits. Walls: `wall_connection_type_*` is `tall` toward a side neighbour when a block sits above the wall, `short` without it; `wall_post_bit` stays 1 in every case tried. Stairs were not tried with neighbours above or below.
+
+**Occupied target cells**
+- Placing a block into a cell holding water, lava, short grass, a snow layer (1 or 3), fire, a vine, a dead bush or seagrass **replaces it**; into torch, carpet, slab, candle or redstone wire it **does nothing** (the item is not placed and the old block stays).
+
+### Remaining holes
+
+- **Four plants and 326 non-block items still place nothing**: cactus, sugar cane, kelp and cocoa beans are refused on every soil the lane offered (cause not found; cocoa needs a log side and kelp water, which the lane lacks). The rest are food, tools, dyes, sherds and the like. They are listed in the header, not called unreachable.
+- **Hanging signs**: 8 of 384 states per wood are reached; the rest need a ceiling with chain support, attachment between two blocks or a wall side, which the lane and fixtures do not offer. They are `unreachable` only relative to this geometry.
+- **Stand recipes** (`above`, `below`) were observed at yaw 0 for one setup each; the horizontal facings in those setups were not mapped, and the crafter's other orientations are not. They were added to the table by hand from the probe report, not by the matrix, and the header says so.
+- **Door hinge, wall height and stair corners** need a neighbour, and **candle, pickle, egg and snow counts and double slabs** a repeated click, not a different single click. The table marks the first group derived and the second unreachable-by-one-click; it cannot say "this state needs a neighbour on the left", so Phase 2 reads that rule from this document.
+- **The unit's world model is blind to falling blocks and to a second water layer**, so Phase 2 cannot verify gravity cells or waterlogging from belief; it needs a chunk refresh or server-side reads.
+- **Two family disagreements are kept, on purpose**: `bamboo_block` and `stripped_bamboo_block` reach three axes while the quartz and purpur blocks of their name group reach one; the one-axis blocks were run in full too. `twisting_vines` is cut by the click cap (1 state not seen).
+- **Still sibling-inferred**: 431 blocks copy a family sweep after 8 agreeing clicks. The gap check re-runs those that sit in a split family; a rare member with its own rule in a unanimous family would still pass.
+- **Registry one version behind**: redstone wire and fire read as unmapped hashes (listed as `unmapped_items`: `redstone`).
+- Not probed: stairs with neighbours above or below, reach distance, doors on a slab or stairs, the item drops of landing gravity blocks onto a replaceable cell, liquid flow, observing waterlogging through the item drops.

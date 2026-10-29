@@ -1,6 +1,6 @@
 # Bedrock block placement quirks
 
-Date: 2026-10-28. Written for the JDW-297 placement planner (a bot that clicks a face of a support block with a held item and must end with an exact block state). Research only; nothing here was run on a server.
+Date: 2026-10-28. Written for the JDW-297 placement planner (a bot that clicks a face of a support block with a held item and must end with an exact block state). Research only when written; the section "Verified on a lab (phase 0b)" at the end marks what the placement calibration and probes later measured on a local server 1.26.60.6.
 
 **Java-vs-Bedrock sensitive:** state names and encodings (everywhere), rail shape on placement, chest pairing, bed/door/sea-pickle support, snow (falls, layers into plants), fence/pane/wall/stair connection storage, waterlogging (layer system, not a state), leaves flags, reach distance.
 
@@ -150,7 +150,7 @@ Effect on a placer: the placer must control its own yaw/pitch (or the clicked fa
 - `minecraft:placement_filter` as in section 2 [18].
 - Design note from the 2026-10-27 colosseum research: its prior claims (repeater `cardinal_direction` names input side, piston values 2=+z, 3=-z, 4=+x, 5=-x) were not retested [14]; this note's sources agree on piston values by number (2 south, 3 north, 4 east, 5 west) [22] but repeater wording conflicts in direction naming, see open questions.
 
-## Open questions to confirm by live calibration
+## Open questions to confirm by live calibration (answered below, see "Verified on a lab")
 
 1. Repeater `cardinal_direction`: wiki says "opposite the direction the player faces"; the colosseum note says it names the input side. Which sign convention, in placement-time terms?
 2. Does repeated clicking on the same candle, sea pickle, turtle egg or snow layer increment, and does sneaking change that?
@@ -162,6 +162,22 @@ Effect on a placer: the placer must control its own yaw/pitch (or the clicked fa
 8. Are redstone dust, rail, torch, carpet, pressure plate, sapling, sugar cane, cactus, kelp, banner, bell, chain, lantern, amethyst cluster, glow lichen, chorus, tripwire, iron bars support rules what the placer assumes? None were sourced.
 9. Server-side reach and line-of-sight checks for a bot client.
 10. Falling-block timing: how many ticks before a gravity block settles and a state can be trusted.
+
+## Verified on a lab (phase 0b)
+
+Measured on a throwaway local Bedrock server 1.26.60.6 with `placecal` and `placecal --probe` (details and the lab's block states in the design doc's *Phase 0b findings*). "Verified" below means seen on that server; "wiki wrong" means the page above said otherwise; items not listed stay unverified.
+
+- Q1 repeater: `cardinal_direction` is the side opposite the unit's look (yaw 0 faces south, the repeater reads `north`). Verified. Delay is not set by a placement click (phase 4).
+- Q2 multi-count: clicking the existing candle, sea pickle, turtle egg or snow layer increments it; candles and pickles reach 4, eggs four, snow six clicks gave `height` 0 to 5. The click may be on the top or a side face. Sneaking changes nothing except that a sneaking click leaves a turtle egg at one egg. A fifth candle spills into the next cell. Verified.
+- Q3 connections: fence, pane, bars, wall and stair-corner states do read back through the server on 1.26.60. Verified. A block above or below does not change fence, pane or bar bits; for a wall it makes the side connection `tall` where a side neighbour exists.
+- Q4 thresholds: `vertical_half` follows the face and, on a side face, the hit height (0.25 bottom, 0.75 top); trapdoor `direction` follows yaw, `pillar_axis` the clicked face. Verified in phase 0.
+- Q5 sneak: reaches the server (a crafting table accepts a block only to a sneaking click). Verified in phase 0.
+- Q6 double plants: tall grass, large fern, sunflower, rose bush, peony, lilac and pitcher plant place both halves from one click and place nothing when the upper cell is occupied. Verified. The upper half's `upper_block_bit` is true.
+- Q7 bucket: placed with the ordinary use-item-on-block (click-block) action, giving a source (`liquid_depth` 0) in the cell the clicked face points at; click-air did nothing. It replaces short grass, snow layers, torches and the other liquid, and nothing happens against stone, slabs and fences. Source onto source gives the bucket's liquid, not obsidian. Verified.
+- Q8 support: torches, redstone wire, rails, carpets, pressure plates, signs, ladders, hanging lanterns, levers, buttons, repeaters, saplings, flower pots and doors pop off as items about 150 ms after the support breaks; snow layers and candles stay. Verified. A bed needs a block under both halves to be placed at all.
+- Q9 reach: a creative unit placed from about 4.5 cells away without a line of sight (into a pit behind walls). The server's reach limit was not probed.
+- Q10 falling blocks: placed over air they leave the cell about 0.5 s after the click and land about 1.0 to 1.15 s after it; on a scaffold that is then broken they drop a cell in about 1.5 s. The unit's block store never receives the movement. Verified.
+- Wiki wrong or silent: door hinge is on the **upper** half; piston-like blocks face up or down by where the unit stands, not by pitch; skull rotation is not a state; walls keep `wall_post_bit` 1 in every case tried; a bed placed into water is refused while slabs, stairs, fences, doors, chests, signs, levers, rails and carpets are accepted.
 
 ## References
 
