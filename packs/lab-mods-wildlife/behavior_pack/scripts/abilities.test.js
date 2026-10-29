@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   sprintPhase, packDamageMultiplier, isNight, inRoarRange, pruneStale,
-  auraDue, auraRecipients, auraAmplifier, nightOnly,
+  auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize,
 } from "./abilities.js";
 
 test("sprintPhase goes ready to active to tired to ready", () => {
@@ -115,4 +115,37 @@ test("self target returns the source once, whatever the range", () => {
   assert.deepEqual(ids(got), ["l1"]);
   const both = auraRecipients(lion, [lion], { ...ROAR, targets: ["owner", "pets", "self"] });
   assert.deepEqual(ids(both), ["l1"]);
+});
+
+test("packStrengthAmplifier maps pack size to no effect, Strength I or Strength II", () => {
+  assert.equal(packStrengthAmplifier(0), null);
+  assert.equal(packStrengthAmplifier(1), null);
+  assert.equal(packStrengthAmplifier(2), 0);
+  assert.equal(packStrengthAmplifier(3), 0);
+  assert.equal(packStrengthAmplifier(4), 1);
+  assert.equal(packStrengthAmplifier(9), 1);
+});
+
+test("an amplifier function may return null to skip the effect", () => {
+  assert.equal(auraAmplifier({ amplifier: (c) => packStrengthAmplifier(c.packSize) }, { packSize: 1 }), null);
+  assert.equal(auraAmplifier({ amplifier: (c) => packStrengthAmplifier(c.packSize) }, { packSize: 4 }), 1);
+});
+
+const GUARD = { interval: 20, range: 6, targets: ["owner"], amplifier: 0 };
+const bear = { id: "b1", pos: { x: 0, y: 64, z: 0 }, owner: "p1", tamed: true, sitting: false, type: "wildlife" };
+
+test("bear guard reaches only its owner within 6 blocks", () => {
+  const near = { ...owner, pos: { x: 6, y: 64, z: 0 } };
+  const far = { ...owner, pos: { x: 6.1, y: 64, z: 0 } };
+  const friend = { ...pet, sitting: false, pos: { x: 1, y: 64, z: 0 } };
+  assert.deepEqual(ids(auraRecipients(bear, [near, stranger, friend, wild], GUARD)), ["p1"]);
+  assert.deepEqual(auraRecipients(bear, [far], GUARD), []);
+});
+
+test("packSize counts the source and tamed hyenas within range, not wild, far or itself twice", () => {
+  const h = (id, x, tamed = true) => ({ id, pos: { x, y: 64, z: 0 }, tamed, sitting: false, type: "wildlife" });
+  const self = h("h1", 0);
+  const all = [self, h("h2", 8), h("h3", 8.1), h("h4", 2, false), h("h5", -3)];
+  assert.equal(packSize(self, all, 8), 3);
+  assert.equal(packSize(self, [self], 8), 1);
 });
