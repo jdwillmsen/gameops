@@ -21,7 +21,7 @@ import (
 
 // entityTableVersion invalidates cached entity sheets when the layout of the
 // table changes.
-const entityTableVersion = 2
+const entityTableVersion = 3
 
 // Bounds on what the entity build reads and produces.
 const (
@@ -51,7 +51,18 @@ type EntityTable struct {
 	// boots, "iron_2" for leggings) to its rect on the sheet, as u0, v0, u1, v1
 	// in sheet pixels. The pack lays every one out like a 64x32 skin.
 	Armor map[string][4]float32 `json:"armor,omitempty"`
+	// Trims maps an armour trim pattern ("coast") and its leggings variant
+	// ("coast_leggings") to its rect on the sheet, a 64x32 grey picture whose
+	// shades pick a colour of the trim material's palette.
+	Trims map[string][4]float32 `json:"trims,omitempty"`
+	// TrimPalettes maps a trim material ("quartz", "iron_darker") to its eight
+	// colours, lightest first.
+	TrimPalettes map[string][][3]uint8 `json:"trim_palettes,omitempty"`
 }
+
+// ShieldModel is the key of the shield in Models. A shield is held, not an
+// entity, so it is named so as never to collide with an entity identifier.
+const ShieldModel = "attachable:shield"
 
 // EntityModel is how to draw one kind of entity. Geometry is in the pack's
 // model units (1/16 block), facing north (-Z), y up.
@@ -586,6 +597,64 @@ func (eb *entityBuilder) armorTextures(used map[string]*image.NRGBA) map[string]
 	return out
 }
 
+// trimDir holds the armour trim pictures and, below it, the palettes.
+const trimDir = "textures/trims"
+
+// maxTrims bounds the trim pictures read; the game has about forty.
+const maxTrims = 128
+
+// trimTextures adds each trim picture to used and returns their paths by key.
+func (eb *entityBuilder) trimTextures(used map[string]*image.NRGBA) map[string]string {
+	entries, err := os.ReadDir(filepath.Join(eb.b.dir, filepath.FromSlash(trimDir)))
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		key, ok := strings.CutSuffix(e.Name(), ".png")
+		if !ok || e.IsDir() || len(out) >= maxTrims {
+			continue
+		}
+		p := trimDir + "/" + key
+		if img := eb.texture(p); img != nil && img.Bounds().Dx() == 64 && img.Bounds().Dy() == 32 {
+			used[p] = img
+			out[key] = p
+		}
+	}
+	return out
+}
+
+// trimPalettes reads the eight-colour strips the trim materials colour the
+// pictures with.
+func (eb *entityBuilder) trimPalettes() map[string][][3]uint8 {
+	dir := filepath.Join(eb.b.dir, filepath.FromSlash(trimDir), "color_palettes")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	out := map[string][][3]uint8{}
+	for _, e := range entries {
+		key, ok := strings.CutSuffix(e.Name(), ".png")
+		if !ok || e.IsDir() || len(out) >= maxTrims {
+			continue
+		}
+		img := eb.b.loadImage(trimDir + "/color_palettes/" + key)
+		if img == nil || img.Bounds().Dx() != 8 || img.Bounds().Dy() != 1 {
+			continue
+		}
+		pal := make([][3]uint8, 8)
+		for x := range pal {
+			c := img.NRGBAAt(img.Bounds().Min.X+x, img.Bounds().Min.Y)
+			pal[x] = [3]uint8{c.R, c.G, c.B}
+		}
+		out[key] = pal
+	}
+	return out
+}
+
+// shieldTexture is the shield's picture in the pack.
+const shieldTexture = "textures/entity/shield"
+
 // solidifyMasks makes pixels with an alpha of 1 to 15 opaque. The pack uses
 // such nearly invisible alphas as a mask for effects the camera does not draw
 // (a sheep's skin is painted at an alpha of 3), and a viewer that took them
@@ -751,6 +820,9 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 	if len(models) == 0 {
 		return nil, EntityTable{}, errors.New("atlas: no entity has both a model and a texture")
 	}
+	if l, ok := eb.layer("geometry.shield", shieldTexture, false); ok {
+		models[ShieldModel] = EntityModel{Height: 1.4, Default: []Layer{l}}
+	}
 
 	used := map[string]*image.NRGBA{}
 	for _, m := range models {
@@ -761,6 +833,7 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 		}
 	}
 	armorPaths := eb.armorTextures(used)
+	trimPaths := eb.trimTextures(used)
 	width, height, at, err := packTextures(used)
 	if err != nil {
 		return nil, EntityTable{}, err
@@ -788,6 +861,14 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 			pl := at[p]
 			tbl.Armor[key] = [4]float32{float32(pl.x), float32(pl.y), float32(pl.x + pl.w), float32(pl.y + pl.h)}
 		}
+	}
+	if len(trimPaths) > 0 {
+		tbl.Trims = make(map[string][4]float32, len(trimPaths))
+		for key, p := range trimPaths {
+			pl := at[p]
+			tbl.Trims[key] = [4]float32{float32(pl.x), float32(pl.y), float32(pl.x + pl.w), float32(pl.y + pl.h)}
+		}
+		tbl.TrimPalettes = eb.trimPalettes()
 	}
 	doc, err := json.Marshal(tbl)
 	if err != nil {

@@ -217,7 +217,7 @@ func TestFetchDownloadsOnlyWhatBuildReadsAndCaches(t *testing.T) {
 
 func TestFetchKeepsOldFullPackCache(t *testing.T) {
 	cache := t.TempDir()
-	for _, d := range []string{"textures/entity", "entity", "textures/models/armor"} {
+	for _, d := range []string{"textures/entity", "entity", "textures/models/armor", "textures/trims"} {
 		if err := os.MkdirAll(filepath.Join(cache, testTag, "resource_pack", filepath.FromSlash(d)), 0o755); err != nil {
 			t.Fatal(err)
 		}

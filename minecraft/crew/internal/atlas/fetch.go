@@ -34,7 +34,7 @@ const (
 	// cacheLayout is written into the complete mark. It is raised when the
 	// fetch starts reading more, so that a directory filled by an older
 	// version is fetched again and not taken as complete.
-	cacheLayout = "3"
+	cacheLayout = "4"
 	indexFile   = "index.json"
 
 	defaultBackoff        = 2 * time.Second
@@ -132,7 +132,7 @@ func cached(cacheDir, tag string) bool {
 	if string(b) == cacheLayout {
 		return true
 	}
-	for _, d := range []string{"entity", "textures/entity", armorDir} {
+	for _, d := range []string{"entity", "textures/entity", armorDir, trimDir} {
 		if _, err := os.Stat(filepath.Join(packDir(cacheDir, tag), filepath.FromSlash(d))); err != nil {
 			return false
 		}
@@ -292,7 +292,14 @@ func wanted(p string) bool {
 			return true
 		}
 	}
-	return wantedEntityData(rel) || wantedArmor(rel)
+	return wantedEntityData(rel) || wantedArmor(rel) || wantedTrim(rel) || rel == shieldTexture+".png"
+}
+
+// wantedTrim reports whether rel is a trim picture or a trim palette; the
+// pack's texture sets and lighting maps beside them are not read.
+func wantedTrim(rel string) bool {
+	dir, name := path.Split(rel)
+	return (dir == trimDir+"/" || dir == trimDir+"/color_palettes/") && strings.HasSuffix(name, ".png")
 }
 
 // wantedArmor reports whether rel is a worn-armour texture in the layout the
