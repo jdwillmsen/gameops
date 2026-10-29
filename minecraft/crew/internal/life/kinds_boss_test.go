@@ -80,3 +80,17 @@ func TestGroundDragonProfileBandsAreOrdered(t *testing.T) {
 		t.Errorf("the dragon has no boom, darkness or timed melee: %+v", p)
 	}
 }
+
+func TestWildlifeKindsAreProvoked(t *testing.T) {
+	for _, id := range []string{
+		"gameops:tiger", "gameops:cheetah", "gameops:lion",
+		"gameops:black_leopard", "gameops:brown_bear", "gameops:hyena",
+	} {
+		if kindOf(id) != provoked {
+			t.Errorf("%s: kind %v, want provoked", id, kindOf(id))
+		}
+		if Threat(id) {
+			t.Errorf("%s: Threat true, want false for a neutral mob", id)
+		}
+	}
+}
