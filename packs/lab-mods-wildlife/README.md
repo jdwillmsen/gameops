@@ -27,3 +27,5 @@ saved in a world depend on them.
 
 - `gameops:tame` tames the nearest `gameops:` animal within 64 blocks to the player who runs it.
 - `gameops:perf` logs one `gameops:perf mean_tick_ms=... ticks=200` line after 200 ticks.
+- `gameops:census` logs one `gameops:census tiger=<n> cheetah=<n> lion=<n> black_leopard=<n> brown_bear=<n> hyena=<n>` line counting loaded animals of each type in all three dimensions; it works from the server console.
+- At startup the script logs `gameops:wildlife script loaded`; `tools/lab-preview-smoke.sh` looks for it.

@@ -1,7 +1,7 @@
 import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server";
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
-  packStrengthAmplifier, packSize,
+  packStrengthAmplifier, packSize, formatCensus, CENSUS_SPECIES,
 } from "./abilities.js";
 
 const SPRINT = {
@@ -28,6 +28,8 @@ const AURAS = {
 for (const [type, spec] of Object.entries(AURAS)) {
   if (!EffectTypes.get(spec.effect)) console.warn(`gameops:aura unknown effect ${spec.effect} for ${type}`);
 }
+// Lets a headless smoke test tell "script never loaded" from "script loaded, nothing to do".
+console.warn("gameops:wildlife script loaded");
 const SITTING_PROPERTY = "gameops:sitting";
 const DIMENSIONS = ["overworld", "nether", "the_end"];
 const STEP = 5;
@@ -143,6 +145,15 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
   if (event.id === "gameops:tame") {
     if (event.sourceType !== ScriptEventSource.Entity || event.sourceEntity?.typeId !== "minecraft:player") return;
     event.sourceEntity.sendMessage(tameNearest(event.sourceEntity) ? "Tamed." : "No wildlife nearby to tame.");
+  } else if (event.id === "gameops:census") {
+    const counts = {};
+    for (const dimId of DIMENSIONS) {
+      for (const species of CENSUS_SPECIES) {
+        const type = `gameops:${species}`;
+        counts[type] = (counts[type] ?? 0) + world.getDimension(dimId).getEntities({ type }).length;
+      }
+    }
+    console.warn(formatCensus(counts));
   } else if (event.id === "gameops:perf") {
     const start = system.currentTick;
     const t0 = Date.now();
