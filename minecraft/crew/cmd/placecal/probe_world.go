@@ -33,10 +33,8 @@ func executeProbe(ctx context.Context, c config, names []string, con *safeConsol
 	}
 
 	b := bayAt(c.originX, c.floorY, c.originZ, 0)
-	// The platform and its resets reach further than the bay that validate
-	// checked.
-	if x1, x2, z1, z2 := b.ox-10, b.ox+10, b.oz-10, b.oz+10; x2 >= colosseumX1 && x1 <= colosseumX2 && z2 >= colosseumZ1 && z1 <= colosseumZ2 {
-		return fmt.Errorf("probe platform (x %d..%d, z %d..%d) intersects the Colosseum; pick another origin", x1, x2, z1, z2)
+	if err := checkProbeOrigin(b); err != nil {
+		return err
 	}
 	var (
 		saved  map[string]string
@@ -50,7 +48,7 @@ func executeProbe(ctx context.Context, c config, names []string, con *safeConsol
 			_ = clearMarker(clean, con, b)
 		}
 		if built {
-			_, _ = con.Exec(fmt.Sprintf("fill %d %d %d %d %d %d air", b.ox-10, b.f, b.oz-10, b.ox+10, b.f+13, b.oz+10))
+			_, _ = con.Exec(fmt.Sprintf("fill %d %d %d %d %d %d air", b.ox-probeRadius, b.f, b.oz-probeRadius, b.ox+probeRadius, b.f+probeHeight, b.oz+probeRadius))
 		}
 		if saved != nil {
 			if err := restoreGamerules(con, saved); err != nil {
@@ -73,8 +71,11 @@ func executeProbe(ctx context.Context, c config, names []string, con *safeConsol
 	if err := checkBayEmpty(runCtx, con, b); err != nil {
 		return err
 	}
+	if err := checkProbeEmpty(runCtx, con, b); err != nil {
+		return err
+	}
 	built = true
-	if err := con.retry(runCtx, fmt.Sprintf("fill %d %d %d %d %d %d stone", b.ox-10, b.f, b.oz-10, b.ox+10, b.f, b.oz+10), "blocks filled"); err != nil {
+	if err := con.retry(runCtx, fmt.Sprintf("fill %d %d %d %d %d %d stone", b.ox-probeRadius, b.f, b.oz-probeRadius, b.ox+probeRadius, b.f, b.oz+probeRadius), "blocks filled"); err != nil {
 		return err
 	}
 	if _, err := con.Exec(fmt.Sprintf("tp %q %.1f %d %.1f", u.name, float32(b.ox)+0.5, b.f+1, float32(b.oz)+4.5)); err != nil {
