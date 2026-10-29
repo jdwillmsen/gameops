@@ -27,3 +27,13 @@ export function inRoarRange(a, b, range) {
   const dz = a.z - b.z;
   return dx * dx + dy * dy + dz * dz <= range * range;
 }
+
+// Entities in unloaded chunks vanish from scans; keeping their state for a
+// grace period lets them resume instead of restarting, while bounding the map.
+export function pruneStale(states, tick, graceTicks) {
+  const kept = new Map();
+  for (const [id, state] of states) {
+    if (tick - state.lastSeen <= graceTicks) kept.set(id, state);
+  }
+  return kept;
+}
