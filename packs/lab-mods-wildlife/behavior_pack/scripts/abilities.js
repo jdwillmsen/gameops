@@ -28,6 +28,36 @@ export function inRoarRange(a, b, range) {
   return dx * dx + dy * dy + dz * dz <= range * range;
 }
 
+export function nightOnly(ctx) {
+  return isNight(ctx.timeOfDay);
+}
+
+// A blocked when-condition keeps the schedule, so the aura fires as soon as it opens.
+export function auraDue(state, tick, spec, ctx = {}) {
+  if (tick < state.nextAt) return { due: false, next: state };
+  if (spec.when && !spec.when(ctx)) return { due: false, next: state };
+  return { due: true, next: { nextAt: tick + spec.interval } };
+}
+
+export function auraAmplifier(spec, ctx) {
+  const a = spec.amplifier ?? 0;
+  return typeof a === "function" ? a(ctx) : a;
+}
+
+// source and candidates are plain {id, pos, owner, tamed, sitting, type: "player" | "wildlife"}.
+export function auraRecipients(source, candidates, spec) {
+  if (!source.tamed || source.sitting) return [];
+  const out = new Map();
+  if (spec.targets.includes("self")) out.set(source.id, source);
+  for (const c of candidates) {
+    if (c.id === source.id || !inRoarRange(source.pos, c.pos, spec.range)) continue;
+    const owner = c.type === "player" && c.id === source.owner && spec.targets.includes("owner");
+    const pet = c.type === "wildlife" && c.tamed && spec.targets.includes("pets");
+    if (owner || pet) out.set(c.id, c);
+  }
+  return [...out.values()];
+}
+
 // Entities in unloaded chunks vanish from scans; keeping their state for a
 // grace period lets them resume instead of restarting, while bounding the map.
 export function pruneStale(states, tick, graceTicks) {
