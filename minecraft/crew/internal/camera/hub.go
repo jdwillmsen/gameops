@@ -75,6 +75,8 @@ type entity struct {
 	UUID  uuid.UUID
 	Skin  *skinInfo
 	Armor armourSlots
+	Mods  armourMods
+	Hands handSlots
 }
 
 // playerEyeHeight is how far above the feet a MovePlayer position sits. The
@@ -111,6 +113,7 @@ type Hub struct {
 	skins      map[uuid.UUID]*skinInfo
 	ownSkin    *skinInfo
 	ownArmor   armourSlots
+	own        ownEquip
 	clock      worldClock
 	weather    weather
 	biomeDefs  map[uint16]biomeDef
@@ -216,6 +219,7 @@ func (h *Hub) Reset() {
 func (h *Hub) forgetPlayersLocked() {
 	h.skins = map[uuid.UUID]*skinInfo{}
 	h.ownArmor = armourSlots{}
+	h.own = ownEquip{}
 }
 
 func (h *Hub) resetLocked() {
@@ -232,6 +236,7 @@ func (h *Hub) resetLocked() {
 	if !h.ownArmor.zero() {
 		h.pushOrderedLocked(encodeArmour(map[uint64]armourSlots{0: h.ownArmor}))
 	}
+	h.pushOwnEquipLocked()
 }
 
 // Full reports whether Attach would refuse a viewer right now. It attaches
@@ -283,7 +288,15 @@ func (h *Hub) Attach() (*Viewer, error) {
 		v.head = append(v.head, encodeNames(names))
 	}
 	worn := map[uint64]armourSlots{}
+	mods := map[uint64]armourMods{}
+	held := map[uint64]handSlots{}
 	for _, e := range h.ents {
+		if !e.Mods.zero() {
+			mods[e.ID] = e.Mods
+		}
+		if !e.Hands.zero() {
+			held[e.ID] = e.Hands
+		}
 		if e.Skin != nil {
 			v.head = append(v.head, encodeSkin(e.ID, *e.Skin))
 		}
@@ -299,6 +312,18 @@ func (h *Hub) Attach() (*Viewer, error) {
 	}
 	if len(worn) > 0 {
 		v.head = append(v.head, encodeArmour(worn))
+	}
+	if !h.own.mods.zero() {
+		mods[0] = h.own.mods
+	}
+	if len(mods) > 0 {
+		v.head = append(v.head, encodeArmourExtra(mods))
+	}
+	if !h.own.hands.zero() {
+		held[0] = h.own.hands
+	}
+	if len(held) > 0 {
+		v.head = append(v.head, encodeEquipment(held))
 	}
 	// Read under the hub lock so a later publishSelf cannot be overwritten by
 	// this older pose.
@@ -401,13 +426,26 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		h.setSkin(p.UUID, p.Skin)
 	case *packet.MobArmourEquipment:
 		h.setArmour(p.EntityRuntimeID, p.Helmet, p.Chestplate, p.Leggings, p.Boots)
+		h.setArmourMods(p.EntityRuntimeID, [4]protocol.ItemInstance{p.Helmet, p.Chestplate, p.Leggings, p.Boots})
+	case *packet.MobEquipment:
+		h.setHeld(p.EntityRuntimeID, p.WindowID, p.HotBarSlot, p.NewItem)
+	case *packet.PlayerHotBar:
+		if p.WindowID == protocol.WindowIDInventory && p.SelectHotBarSlot {
+			h.SetOwnHeld(int(p.SelectedHotBarSlot))
+		}
 	case *packet.InventoryContent:
 		if p.WindowID == protocol.WindowIDArmour {
 			h.setOwnArmour(p.Content)
+			h.setOwnMods(p.Content)
+		} else if p.WindowID < 256 {
+			h.setOwnInventory(byte(p.WindowID), p.Content)
 		}
 	case *packet.InventorySlot:
 		if p.WindowID == protocol.WindowIDArmour {
 			h.setOwnArmourSlot(int(p.Slot), p.NewItem)
+			h.setOwnModSlot(int(p.Slot), p.NewItem)
+		} else if p.WindowID < 256 {
+			h.setOwnInventorySlot(byte(p.WindowID), int(p.Slot), p.NewItem)
 		}
 	case *packet.SetActorData:
 		h.setLook(p.EntityRuntimeID, p.EntityMetadata)

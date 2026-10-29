@@ -1,6 +1,7 @@
 // Entity drawing for the camera page: the pack's mob models once their table
 // has loaded, stand-in boxes before that and for types the table lacks.
 import * as THREE from 'three';
+import { holdPose, iconName, recolorTrim, trimKey, trimPaletteName } from './equip.js';
 
 const RAD = Math.PI / 180;
 const BLOCK = 1 / 16; // model units per block
@@ -209,6 +210,14 @@ export function createEntities(scene) {
   const armourGeos = new Map(); // table bone -> Map("slot|texture", geometry)
   const skins = new Map(); // entity id -> {slim, tex, key}
   const worn = new Map(); // entity id -> [helmet, chestplate, leggings, boots]
+  const mods = new Map(); // entity id -> 4 x {glint, pattern, material}, as worn
+  const held = new Map(); // entity id -> [main hand, off hand], each {name, glint}
+  const glintTime = { value: 0 }; // one clock for every glinting material
+  const trimGeos = new Map(); // table bone -> Map("slot|pattern") -> geometry
+  const trimLooks = new Map(); // "pattern|palette|legs" -> {tex, mat}
+  const iconGeos = new Map(); // item name -> held icon geometry
+  const heldMats = {}; // shared materials of held items, over the item sheet
+  let shieldGeos = null;
   const skinOffsets = new WeakMap(); // model -> where its player texture sits on the sheet
   const materials = new Map();
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -251,25 +260,89 @@ export function createEntities(scene) {
     return pair[i];
   }
 
-  // The worn piece's box on one bone: the body part's own box, stood off by
-  // the piece's inflation, with the armour texture laid over it.
+  // One bone's box with a worn layer's picture laid over it: the body part's
+  // own box stood off by `inflate`, its faces taken from rect r of a texture
+  // that lays its parts out like a 64-wide skin.
+  function pieceGeometry(b, r, inflate, dims) {
+    const base = (b.c ?? []).find(c => !c.i);
+    const spec = BODY_UV[b.n.toLowerCase()];
+    if (!r || !base || !spec) return null;
+    const scale = (r[2] - r[0]) / 64;
+    const faces = boxFaces(spec.u, spec.v, base.sz[0], base.sz[1], base.sz[2], spec.mirror)
+      .map(f => [r[0] + f[0] * scale, r[1] + f[1] * scale, r[0] + f[2] * scale, r[1] + f[3] * scale]);
+    return boneGeometry({ pv: b.pv, c: [{ o: base.o, sz: base.sz, i: inflate, uv: faces }] }, dims);
+  }
+
+  // The worn piece's box on one bone, with the armour texture laid over it.
   function armourGeometry(b, slot, texKey, inflate) {
     const k = `${slot}|${texKey}`;
     let m = armourGeos.get(b);
     if (!m) armourGeos.set(b, m = new Map());
-    if (m.has(k)) return m.get(k);
-    const r = table.armor?.[texKey];
-    const base = (b.c ?? []).find(c => !c.i);
-    const spec = BODY_UV[b.n.toLowerCase()];
-    let geo = null;
-    if (r && base && spec) {
-      const scale = (r[2] - r[0]) / 64;
-      const faces = boxFaces(spec.u, spec.v, base.sz[0], base.sz[1], base.sz[2], spec.mirror)
-        .map(f => [r[0] + f[0] * scale, r[1] + f[1] * scale, r[0] + f[2] * scale, r[1] + f[3] * scale]);
-      geo = boneGeometry({ pv: b.pv, c: [{ o: base.o, sz: base.sz, i: inflate, uv: faces }] }, sheet);
+    if (!m.has(k)) m.set(k, pieceGeometry(b, table.armor?.[texKey], inflate, sheet));
+    return m.get(k);
+  }
+
+  // A trim stands a hair off the armour so the two never fight for the pixel.
+  function trimGeometry(b, slot, pattern, inflate) {
+    const k = `${slot}|${pattern}`;
+    let m = trimGeos.get(b);
+    if (!m) trimGeos.set(b, m = new Map());
+    if (!m.has(k)) m.set(k, pieceGeometry(b, [0, 0, 64, 32], inflate + .1, { w: 64, h: 32 }));
+    return m.get(k);
+  }
+
+  // The trim picture recoloured to its material, made once per combination
+  // from the sheet's grey original; null when the pack has no such trim.
+  function trimLook(pattern, material, legs, armourName) {
+    const palName = trimPaletteName(armourName, material);
+    const key = `${pattern}|${palName}|${legs}`;
+    if (trimLooks.has(key)) return trimLooks.get(key);
+    const r = table?.trims?.[trimKey(pattern, legs)], pal = table?.trim_palettes?.[palName] ?? table?.trim_palettes?.[material];
+    let look = null;
+    if (r && pal && modelTex?.image) {
+      const c = document.createElement('canvas');
+      c.width = 64; c.height = 32;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(modelTex.image, r[0], r[1], 64, 32, 0, 0, 64, 32);
+      const px = ctx.getImageData(0, 0, 64, 32);
+      recolorTrim(px.data, pal);
+      ctx.putImageData(px, 0, 0);
+      const tex = new THREE.CanvasTexture(c);
+      tex.magFilter = tex.minFilter = THREE.NearestFilter;
+      tex.generateMipmaps = false; tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace;
+      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: .5, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+      look = { tex, mat };
     }
-    m.set(k, geo);
-    return geo;
+    trimLooks.set(key, look);
+    return look;
+  }
+
+  // The enchantment shimmer: purple bands that drift across whatever the
+  // overlay covers. It reads only the picture's alpha, so it follows the
+  // shape of the item, and it is computed from the position on the model, so
+  // one material serves every glinting item that shares a picture. Its colour
+  // is written as it is, not converted, so it adds to the lit picture in the
+  // same encoded space and stays a faint wash.
+  function glintMaterial(map, key, side) {
+    let m = materials.get(key);
+    if (!m) {
+      m = new THREE.ShaderMaterial({
+        uniforms: { map: { value: map }, time: glintTime },
+        vertexShader: `varying vec2 vUv; varying vec3 vP;
+          void main() { vUv = uv; vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: `uniform sampler2D map; uniform float time; varying vec2 vUv; varying vec3 vP;
+          void main() {
+            if (texture2D(map, vUv).a < .5) discard;
+            float a = (vP.x * .7 + vP.y + vP.z * .7) * .11, b = (vP.z * .9 - vP.x * .5 + vP.y * .4) * .17;
+            float g = smoothstep(.55, 1., sin(a * 6.2832 + time * 1.1) * .5 + .5) * .6 + smoothstep(.6, 1., sin(b * 6.2832 - time * .8) * .5 + .5) * .4;
+            gl_FragColor = vec4(vec3(.5, .25, 1.) * (.05 + g * .4), 1.);
+          }`,
+        blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, side,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, toneMapped: false,
+      });
+      materials.set(key, m);
+    }
+    return m;
   }
 
   // What a worn item is drawn with: the texture's name stem and its tint.
@@ -334,7 +407,7 @@ export function createEntities(scene) {
     const sk = type === 'minecraft:player' ? skins.get(id) : null;
     const skinMat = sk && new THREE.MeshLambertMaterial({ map: sk.tex, alphaTest: .5, side: THREE.DoubleSide });
     if (skinMat) owned.push(skinMat);
-    const wearing = worn.get(id);
+    const wearing = worn.get(id), wmods = mods.get(id), hands = held.get(id);
     const off = sk ? skinOffset(model) : null;
     layers.forEach((layer, layerIndex) => {
       const tint = layer.tint ? DYE[look.color & 15] : 0xffffff;
@@ -360,7 +433,15 @@ export function createEntities(scene) {
             const look = inflate && item ? armourLook(item) : null;
             if (!look) return;
             const geo = armourGeometry(b, slot, `${look.stem}_${slot === 2 ? 2 : 1}`, inflate);
-            if (geo) bind.add(new THREE.Mesh(geo, material(look.tint, false)));
+            if (!geo) return;
+            bind.add(new THREE.Mesh(geo, material(look.tint, false)));
+            const mod = wmods?.[slot];
+            if (mod?.pattern && mod.material) {
+              const tl = trimLook(mod.pattern, mod.material, slot === 2, item);
+              const tg = tl && trimGeometry(b, slot, mod.pattern, inflate);
+              if (tg) bind.add(new THREE.Mesh(tg, tl.mat));
+            }
+            if (mod?.glint) bind.add(new THREE.Mesh(geo, glintMaterial(modelTex, 'glint', THREE.FrontSide)));
           });
         }
         byName.set(b.n, { b, g });
@@ -375,6 +456,10 @@ export function createEntities(scene) {
           root.add(g);
         }
         const name = b.n.toLowerCase();
+        if (layerIndex === 0 && hands) {
+          const hand = name === 'rightitem' ? hands[0] : name === 'leftitem' ? hands[1] : null;
+          if (hand?.name) holdItem(g, hand);
+        }
         // Yaw then pitch, as the stand-ins turn, so a head never rolls.
         if (name === 'head') g.rotation.reorder('YXZ');
         bones.push({
@@ -389,8 +474,66 @@ export function createEntities(scene) {
     return { group, head: null, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned };
   }
 
+  // The icon of a held item as a flat plane in model units, its picture taken
+  // from the item sheet. Built once per item and shared by everyone holding it.
+  function iconGeometry(name) {
+    let geo = iconGeos.get(name);
+    if (!geo) {
+      const r = itemRect(name), size = holdPose(name).size;
+      geo = new THREE.PlaneGeometry(size, size);
+      const uv = geo.getAttribute('uv');
+      uv.setXY(0, r[0], r[1]); uv.setXY(1, r[2], r[1]); uv.setXY(2, r[0], r[3]); uv.setXY(3, r[2], r[3]);
+      iconGeos.set(name, geo);
+    }
+    return geo;
+  }
+
+  // The shield: the pack's own model and texture when the table has them,
+  // otherwise a plain board of the same size.
+  function shieldParts() {
+    const layer = table?.models?.['attachable:shield']?.d?.[0];
+    if (layer) {
+      shieldGeos ??= layer.bones.map(b => boneGeometry(b, sheet)).filter(Boolean);
+      return { geos: shieldGeos, mat: material(0xffffff, false), glint: glintMaterial(modelTex, 'glint', THREE.FrontSide), at: [0, -9.5, 0] };
+    }
+    heldMats.board ??= new THREE.MeshLambertMaterial({ color: 0x8a6a40 });
+    return { box: true, mat: heldMats.board, at: [0, 3, -3.5] };
+  }
+
+  // Puts what a hand holds on its item bone. The bone's frame is the model's:
+  // units of 1/16 block with z mirrored, so tools sit in a holder that undoes
+  // the mirror and are then placed forward and up from the grip.
+  function holdItem(g, item) {
+    if (item.name === 'shield') {
+      const s = shieldParts(), grp = new THREE.Group();
+      grp.position.set(...s.at);
+      if (s.box) grp.add(part(12, 22, 1, s.mat, 0, 0, 0));
+      else for (const geo of s.geos) {
+        grp.add(new THREE.Mesh(geo, s.mat));
+        if (item.glint) grp.add(new THREE.Mesh(geo, s.glint));
+      }
+      g.add(grp);
+      return;
+    }
+    if (!items) return;
+    heldMats.icon ??= new THREE.MeshLambertMaterial({ map: items.tex, alphaTest: .5, side: THREE.DoubleSide });
+    const pose = holdPose(item.name), geo = iconGeometry(item.name);
+    const holder = new THREE.Group(), icon = new THREE.Mesh(geo, heldMats.icon);
+    holder.scale.set(1, 1, -1);
+    icon.rotation.y = -Math.PI / 2;
+    icon.position.set(0, pose.up, pose.forward);
+    holder.add(icon);
+    if (item.glint) {
+      const shimmer = new THREE.Mesh(geo, glintMaterial(items.tex, 'glint-item', THREE.DoubleSide));
+      shimmer.rotation.copy(icon.rotation); shimmer.position.copy(icon.position);
+      holder.add(shimmer);
+    }
+    g.add(holder);
+  }
+
   function itemRect(name) {
-    return items.doc.items['minecraft:' + name] ?? items.doc.placeholder;
+    const key = iconName(name, n => 'minecraft:' + n in items.doc.items);
+    return items.doc.items['minecraft:' + key] ?? items.doc.placeholder;
   }
 
   // A flat icon rather than a model: the item sheet has one picture per item
@@ -430,10 +573,13 @@ export function createEntities(scene) {
     if (inst.label) inst.label.position.y = built.height + .4;
   }
 
+  const modsKey = id => mods.get(id)?.map(m => `${+m.glint}${m.pattern}.${m.material}`).join(',');
+  const handsKey = id => held.get(id)?.map(h => `${h.name}${+h.glint}`).join(',');
+
   function stamp(inst) {
     const l = lookOf(inst.id);
     const sk = skins.get(inst.id);
-    return [typeKey(inst.type), !!table, !!items, l.baby, l.sheared, l.color, l.item, sk?.key, sk?.slim, worn.get(inst.id)?.join(',')].join('|');
+    return [typeKey(inst.type), !!table, !!items, l.baby, l.sheared, l.color, l.item, sk?.key, sk?.slim, worn.get(inst.id)?.join(','), modsKey(inst.id), handsKey(inst.id)].join('|');
   }
 
   function disposeBody(inst) {
@@ -568,14 +714,17 @@ export function createEntities(scene) {
           if (loaded.key === modelsKey) { loaded.tex.dispose(); return; }
           const old = {
             tex: modelTex, mats: [...materials.values()],
-            geos: [...boneGeos.values(), ...[...skinGeos.values()].flat(), ...[...armourGeos.values()].flatMap(m => [...m.values()])],
+            geos: [...boneGeos.values(), ...[...skinGeos.values()].flat(), ...[...armourGeos.values()].flatMap(m => [...m.values()]),
+            ...[...trimGeos.values()].flatMap(m => [...m.values()]), ...(shieldGeos ?? [])],
+            trims: [...trimLooks.values()],
           };
           modelsKey = loaded.key; modelTex = loaded.tex; table = loaded.doc; sheet = { w: loaded.doc.width, h: loaded.doc.height };
-          boneGeos.clear(); skinGeos.clear(); armourGeos.clear(); materials.clear();
+          boneGeos.clear(); skinGeos.clear(); armourGeos.clear(); trimGeos.clear(); trimLooks.clear(); materials.clear(); shieldGeos = null;
           for (const inst of meshes.values()) build(inst);
           old.tex?.dispose();
           for (const g of old.geos) g?.dispose();
           for (const m of old.mats) m.dispose();
+          for (const t of old.trims) if (t) { t.tex.dispose(); t.mat.dispose(); }
           itemsFailed = false;
         } catch (e) {
           console.warn('entity models unavailable, drawing stand-ins', e);
@@ -644,6 +793,21 @@ export function createEntities(scene) {
       if (inst && inst.stamp !== stamp(inst)) build(inst);
     },
 
+    // The enchantment and trim of each worn piece, helmet first.
+    setArmourMods(id, slots) {
+      mods.set(id, slots);
+      const inst = meshes.get(id);
+      if (inst && inst.stamp !== stamp(inst)) build(inst);
+    },
+
+    // What an entity holds, main hand then off hand.
+    setHeld(id, hands) {
+      held.set(id, hands);
+      if (!items && hands.some(h => h.name && h.name !== 'shield')) this.loadItems();
+      const inst = meshes.get(id);
+      if (inst && inst.stamp !== stamp(inst)) build(inst);
+    },
+
     setName(id, name) {
       names.set(id, name);
       const inst = meshes.get(id);
@@ -654,7 +818,7 @@ export function createEntities(scene) {
       names.delete(id); looks.delete(id);
       // The unit's own body is removed and re-added as the mode changes, and
       // keeps what it wears.
-      if (id !== -1) { worn.delete(id); skins.get(id)?.tex.dispose(); skins.delete(id); }
+      if (id !== -1) { worn.delete(id); mods.delete(id); held.delete(id); skins.get(id)?.tex.dispose(); skins.delete(id); }
       const inst = meshes.get(id);
       if (!inst) return;
       scene.remove(inst.root);
@@ -665,7 +829,7 @@ export function createEntities(scene) {
 
     clear() {
       for (const id of [...meshes.keys()]) this.remove(id);
-      names.clear(); looks.clear(); worn.clear();
+      names.clear(); looks.clear(); worn.clear(); mods.clear(); held.clear();
       for (const sk of skins.values()) sk.tex.dispose();
       skins.clear();
     },
@@ -678,6 +842,7 @@ export function createEntities(scene) {
     },
 
     frame(now = performance.now()) {
+      glintTime.value = now / 1000;
       for (const inst of meshes.values()) {
         if (!inst.cur) continue;
         animate(inst, now, Math.min((now - (inst.lastFrame ?? now)) / 1000, .1));

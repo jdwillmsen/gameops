@@ -25,6 +25,9 @@ var entitiesJS []byte
 //go:embed web/sky.js
 var skyJS []byte
 
+//go:embed web/equip.js
+var equipJS []byte
+
 // A browser that stops reading must not pin a goroutine and a socket forever.
 const writeTimeout = 5 * time.Second
 
@@ -56,6 +59,12 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(skyJS)
+	})
+	mux.HandleFunc("GET /v1/camera/equip.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(equipJS)
 	})
 	mux.HandleFunc("GET /v1/camera/entities.png", func(w http.ResponseWriter, _ *http.Request) {
 		serveSheet(w, h.modelData, "image/png", func(png, _ []byte) []byte { return png })
