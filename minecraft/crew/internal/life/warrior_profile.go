@@ -19,8 +19,9 @@ var defaultProfile = tactics.NewProfile("default")
 func (l *Life) SetProfile(pr tactics.Profile) error {
 	// Validate clamps the overrides in place: the caller's map is not ours
 	// to write, and keeping our own copy stops later writes to it racing the
-	// stepping goroutine.
+	// stepping goroutine. The tactic table is copied for the same reason.
 	pr.Overrides = maps.Clone(pr.Overrides)
+	pr.Tactics = maps.Clone(pr.Tactics)
 	pr, err := pr.Validate()
 	if err != nil {
 		return err
