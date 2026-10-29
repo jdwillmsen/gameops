@@ -42,7 +42,7 @@ var kinds = map[string]kind{
 	// while it had just hurt this unit, so a squad whose leader had strayed
 	// never committed to it.
 	"gameops:ground_dragon": hostile,
-	"gameops:tiger": provoked, "gameops:cheetah": provoked, "gameops:lion": provoked,
+	"gameops:tiger":         provoked, "gameops:cheetah": provoked, "gameops:lion": provoked,
 	"gameops:black_leopard": provoked, "gameops:brown_bear": provoked, "gameops:hyena": provoked,
 
 	"creeper": flee,
