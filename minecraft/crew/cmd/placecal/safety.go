@@ -188,10 +188,53 @@ func sampleCells(b bay) []protocol.BlockPos {
 	return cells
 }
 
+// The probe platform: a stone floor and a cleanup that reach probeRadius
+// cells around the origin and probeHeight above the floor, well past the
+// bay.
+const (
+	probeRadius = 10
+	probeHeight = 13
+)
+
+// checkProbeOrigin refuses an origin whose probe platform reaches the
+// Colosseum.
+func checkProbeOrigin(b bay) error {
+	x1, x2, z1, z2 := b.ox-probeRadius, b.ox+probeRadius, b.oz-probeRadius, b.oz+probeRadius
+	if x2 >= colosseumX1 && x1 <= colosseumX2 && z2 >= colosseumZ1 && z1 <= colosseumZ2 {
+		return fmt.Errorf("probe platform (x %d..%d, z %d..%d) intersects the Colosseum (x %d..%d, z %d..%d); pick another origin",
+			x1, x2, z1, z2, colosseumX1, colosseumX2, colosseumZ1, colosseumZ2)
+	}
+	return nil
+}
+
+// probeSampleCells are cells spread across the whole platform volume, at
+// the floor row, just above it, mid-height and at the cleanup's top.
+func probeSampleCells(b bay) []protocol.BlockPos {
+	var cells []protocol.BlockPos
+	for _, y := range []int32{0, 1, probeHeight / 2, probeHeight} {
+		for x := int32(-probeRadius); x <= probeRadius; x += probeRadius / 2 {
+			for z := int32(-probeRadius); z <= probeRadius; z += probeRadius / 2 {
+				cells = append(cells, b.pos(x, y, z))
+			}
+		}
+	}
+	return cells
+}
+
+// checkProbeEmpty fails when a cell sampled across the probe platform holds
+// a block, so the platform's fills cannot destroy lab blocks outside the bay.
+func checkProbeEmpty(ctx context.Context, con *safeConsole, b bay) error {
+	return checkCellsEmpty(ctx, con, b, probeSampleCells(b))
+}
+
 // checkBayEmpty fails when a sampled cell holds a block. A cell whose chunk
 // has not loaded yet is asked again.
 func checkBayEmpty(ctx context.Context, con *safeConsole, b bay) error {
-	for _, p := range sampleCells(b) {
+	return checkCellsEmpty(ctx, con, b, sampleCells(b))
+}
+
+func checkCellsEmpty(ctx context.Context, con *safeConsole, b bay, cells []protocol.BlockPos) error {
+	for _, p := range cells {
 		cmd := fmt.Sprintf("testforblock %d %d %d air", p.X(), p.Y(), p.Z())
 		var last string
 		ok := false

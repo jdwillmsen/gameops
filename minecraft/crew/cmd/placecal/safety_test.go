@@ -238,3 +238,44 @@ func TestWriteTableAtomic(t *testing.T) {
 		t.Fatalf("temp files left: %v", ents)
 	}
 }
+
+func TestCheckProbeOriginRefusesTheWholePlatform(t *testing.T) {
+	// The bay at this origin clears the Colosseum, the +-10 platform does not.
+	edge := int32(colosseumX2 + probeRadius)
+	if err := checkProbeOrigin(bay{ox: edge, f: 64, oz: -700}); err == nil || !strings.Contains(err.Error(), "Colosseum") {
+		t.Errorf("platform touching the Colosseum: %v", err)
+	}
+	if err := checkProbeOrigin(bay{ox: edge + 1, f: 64, oz: -700}); err != nil {
+		t.Errorf("platform one cell clear: %v", err)
+	}
+	if err := checkProbeOrigin(bay{ox: -300, f: 64, oz: colosseumZ2 + probeRadius}); err == nil {
+		t.Error("z edge accepted")
+	}
+	if err := checkProbeOrigin(bay{ox: 0, f: 64, oz: 0}); err != nil {
+		t.Errorf("far origin: %v", err)
+	}
+}
+
+func TestCheckProbeEmptyReachesTheWholePlatform(t *testing.T) {
+	b := bay{ox: 1000, f: 220, oz: 1000}
+	con := &fakeCon{reply: func(string) (string, error) { return "Successfully found the block", nil }}
+	if err := checkProbeEmpty(context.Background(), &safeConsole{c: con}, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"testforblock 990 220 990 air", "testforblock 1010 233 1010 air", "testforblock 990 221 1010 air",
+	} {
+		if !con.has(want) {
+			t.Errorf("never sampled %q", want)
+		}
+	}
+	busy := &safeConsole{c: &fakeCon{reply: func(c string) (string, error) {
+		if strings.Contains(c, "testforblock 1010 220 990 ") {
+			return "The block is Stone (expected: Air)", nil
+		}
+		return "Successfully found the block", nil
+	}}}
+	if err := checkProbeEmpty(context.Background(), busy, b); err == nil || !strings.Contains(err.Error(), "not empty") {
+		t.Errorf("a block at the platform's corner passed: %v", err)
+	}
+}
