@@ -199,6 +199,11 @@ func (h *Hub) Spawn(runtimeID uint64) {
 	h.runtime = runtimeID
 	h.forgetPlayersLocked()
 	h.resetLocked()
+	// The server may announce rain before Spawn, and a viewer's restart drops
+	// what was queued for it.
+	if h.weather != (weather{}) {
+		h.pushOrderedLocked(encodeWeather(h.weather))
+	}
 }
 
 // Reset is called when a session ends, so a viewer never mistakes the last
