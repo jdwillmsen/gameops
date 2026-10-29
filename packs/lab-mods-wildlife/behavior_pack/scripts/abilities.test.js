@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   sprintPhase, packDamageMultiplier, isNight, inRoarRange, pruneStale,
-  auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize,
+  auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize, formatCensus,
 } from "./abilities.js";
 
 test("sprintPhase goes ready to active to tired to ready", () => {
@@ -155,4 +155,11 @@ test("packSize ignores sitting hyenas, which do not fight", () => {
   const standing = h("h1", 0, false);
   assert.equal(packSize(standing, [standing, h("h2", 1, true), h("h3", 2, true)], 8), 1);
   assert.equal(packSize(standing, [standing, h("h2", 1, true), h("h3", 2, false)], 8), 2);
+});
+
+test("formatCensus lists the six species in a fixed order, missing ones as zero", () => {
+  assert.equal(
+    formatCensus({ "gameops:tiger": 3, "gameops:hyena": 2 }),
+    "gameops:census tiger=3 cheetah=0 lion=0 black_leopard=0 brown_bear=0 hyena=2",
+  );
 });

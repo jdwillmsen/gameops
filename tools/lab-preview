@@ -100,6 +100,7 @@ cmd_up() {
     -e EULA=TRUE -e "VERSION=$VERSION" -e "LEVEL_NAME=$LEVEL" -e LEVEL_TYPE=FLAT \
     -e ONLINE_MODE=false -e ALLOW_LIST=false -e ALLOW_CHEATS=true -e GAMEMODE=creative \
     -e TRANSPORT=raknet -e SERVER_PORT=19132 -e CONTENT_LOG_FILE_ENABLED=true \
+    -e CONTENT_LOG_CONSOLE_OUTPUT_ENABLED=true \
     -v "$DATA:/data" "$IMAGE" >/dev/null
   wait_started
   # The first boot creates the world and ignores the staged pack lists, so

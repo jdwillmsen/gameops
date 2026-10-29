@@ -88,3 +88,10 @@ export function pruneStale(states, tick, graceTicks) {
   }
   return kept;
 }
+
+export const CENSUS_SPECIES = ["tiger", "cheetah", "lion", "black_leopard", "brown_bear", "hyena"];
+
+// Fixed species order so a smoke test can parse the line without caring which types exist in the world.
+export function formatCensus(counts) {
+  return `gameops:census ${CENSUS_SPECIES.map((s) => `${s}=${counts[`gameops:${s}`] ?? 0}`).join(" ")}`;
+}
