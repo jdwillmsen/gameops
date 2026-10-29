@@ -17,6 +17,27 @@ export function packDamageMultiplier(nearbyPets, cfg) {
   return Math.min(cfg.max, 1 + cfg.perPet * (nearbyPets - 1));
 }
 
+// Strength I from two hyenas, II from four: the multiplier tops out at 1.75 so a bigger pack is no stronger.
+const PACK = { perPet: 0.25, max: 1.75 };
+const STRENGTH_I = 1.25;
+const STRENGTH_II = 1.75;
+
+// Returns null when the pack is too small for any effect; the aura skips a null amplifier.
+export function packStrengthAmplifier(size) {
+  const m = packDamageMultiplier(size, PACK);
+  if (m >= STRENGTH_II) return 1;
+  return m >= STRENGTH_I ? 0 : null;
+}
+
+// Tamed hyenas within range of the source, the source included.
+export function packSize(source, candidates, range) {
+  let n = 1;
+  for (const c of candidates) {
+    if (c.id !== source.id && c.tamed && inRoarRange(source.pos, c.pos, range)) n++;
+  }
+  return n;
+}
+
 export function isNight(timeOfDay) {
   return timeOfDay >= 13000 && timeOfDay <= 23000;
 }

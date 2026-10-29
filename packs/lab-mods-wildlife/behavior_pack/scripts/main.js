@@ -1,6 +1,7 @@
 import { world, system, ScriptEventSource } from "@minecraft/server";
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
+  packStrengthAmplifier, packSize,
 } from "./abilities.js";
 
 const SPRINT = {
@@ -14,6 +15,13 @@ const AURAS = {
   },
   "gameops:black_leopard": {
     interval: 40, range: 0, effect: "strength", amplifier: 0, duration: 100, targets: ["self"], when: nightOnly,
+  },
+  "gameops:brown_bear": {
+    interval: 20, range: 6, effect: "resistance", amplifier: 0, duration: 60, targets: ["owner"],
+  },
+  "gameops:hyena": {
+    interval: 40, range: 0, effect: "strength", amplifier: (ctx) => packStrengthAmplifier(ctx.packSize),
+    duration: 100, targets: ["self"], pack: { family: "gameops_hyena", range: 8 },
   },
 };
 const SITTING_PROPERTY = "gameops:sitting";
@@ -63,12 +71,16 @@ function wildlifeData(entity) {
   };
 }
 
+function nearbyWildlife(source, range, family = "gameops_wildlife") {
+  return source.dimension
+    .getEntities({ location: source.location, maxDistance: range, families: [family] })
+    .map(wildlifeData);
+}
+
 function nearbyData(source, range) {
-  const where = { location: source.location, maxDistance: range };
-  const players = source.dimension.getPlayers(where)
+  const players = source.dimension.getPlayers({ location: source.location, maxDistance: range })
     .map((p) => ({ id: p.id, pos: p.location, type: "player", ref: p }));
-  const animals = source.dimension.getEntities({ ...where, families: ["gameops_wildlife"] }).map(wildlifeData);
-  return [...players, ...animals];
+  return [...players, ...nearbyWildlife(source, range)];
 }
 
 function applyAura(entity, spec) {
@@ -79,8 +91,11 @@ function applyAura(entity, spec) {
   const { due, next } = auraDue(prev, ctx.tick, spec, ctx);
   auraState.set(entity.id, { ...next, lastSeen: ctx.tick });
   if (!due) return;
+  if (spec.pack) ctx.packSize = packSize(data, nearbyWildlife(entity, spec.pack.range, spec.pack.family), spec.pack.range);
+  const amplifier = auraAmplifier(spec, ctx);
+  if (amplifier == null) return;
   const candidates = spec.range > 0 ? nearbyData(entity, spec.range) : [];
-  const options = { amplifier: auraAmplifier(spec, ctx), showParticles: false };
+  const options = { amplifier, showParticles: false };
   for (const r of auraRecipients(data, candidates, spec)) {
     try {
       r.ref.addEffect(spec.effect, spec.duration, options);
