@@ -7,7 +7,8 @@ from dataclasses import dataclass, replace
 
 TEXTURE = 128
 BONES = ("body", "head", "tail", "front_left_leg", "front_right_leg", "back_left_leg", "back_right_leg")
-MANE = "mane"
+MANE = "mane"   # frames the head and turns with it
+MANE_BODY = "mane_chest"   # the bib and shoulder cape, which stay with the body
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,7 @@ def _sc(p: CatParams) -> CatParams:
 
 
 def bone_names(p: CatParams) -> tuple:
-    return BONES + ((MANE,) if p.mane else ())
+    return BONES + ((MANE, MANE_BODY) if p.mane else ())
 
 
 def pivots(p: CatParams) -> dict:
@@ -122,9 +123,14 @@ def _shapes(p: CatParams):
                     (p.tail_w + 1, p.tail_w + 1, p.tuft)))
 
     if p.mane:
-        # The ruff frames the back of the head; the shoulder cape sits over the front of the chest.
-        out.append((MANE, "mane_ruff", (-(hw + 4) / 2, pv[1] - hh / 2 - 2, pv[2] - 1), (hw + 4, hh + 4, 4)))
-        out.append((MANE, "mane_cape", (-(bw + 2) / 2, p.leg_len + 1, -half + 3), (bw + 2, p.body_h + 1, 6)))
+        # The face and muzzle stay clear of the front: the side ruffs start behind the cheeks.
+        hx, hy, hz = hw / 2, pv[1] - hh / 2, pv[2]
+        out.append((MANE, "mane_side_right", (-hx - 3, hy - 2, hz - 4), (3, hh + 3, 6)))
+        out.append((MANE, "mane_side_left", (hx, hy - 2, hz - 4), (3, hh + 3, 6)))
+        out.append((MANE, "mane_top", (-hx - 1, hy + hh, hz - 1), (hw + 2, 3, 4)))
+        out.append((MANE, "mane_back", (-hx - 4, hy - 3, hz + 1), (hw + 8, hh + 5, 3)))
+        out.append((MANE_BODY, "mane_cape", (-(bw + 2) / 2, top - 1, -half + 4), (bw + 2, 3, 6)))
+        out.append((MANE_BODY, "mane_bib", (-(bw - 2) / 2, p.leg_len + 1, -half - 2), (bw - 2, p.body_h - 5, 4)))
 
     for bone in BONES[3:]:
         cx, _, cz = pivots(p)[bone]
@@ -157,11 +163,14 @@ def build(params: CatParams, identifier: str = "geometry.gameops.cat") -> dict:
     bones = []
     parts = layout(params)
     pv[MANE] = pv["head"]
+    pv[MANE_BODY] = pv["body"]
     for bone in bone_names(p):
         entry = {"name": bone, "pivot": pv[bone]}
         # Head, tail, mane and rear legs ride on the body so a sitting pitch carries them down with it.
-        if bone in ("head", "tail", "back_left_leg", "back_right_leg", MANE):
+        if bone in ("head", "tail", "back_left_leg", "back_right_leg", MANE_BODY):
             entry["parent"] = "body"
+        if bone == MANE:
+            entry["parent"] = "head"
         if bone == "tail" and p.tail_droop:
             entry["rotation"] = [-p.tail_droop, 0, 0]
         entry["cubes"] = [{"origin": list(c.origin), "size": list(c.size), "uv": list(c.uv)}
