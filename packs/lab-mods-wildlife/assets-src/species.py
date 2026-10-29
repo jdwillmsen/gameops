@@ -21,12 +21,14 @@ class Species:
     tired_speed: float = 0.0
     # Leaps at its target instead of only walking up to it.
     pounce: bool = False
+    # (variant, health) for variants that are tougher than the base value.
+    variant_health: tuple = ()
 
 
 def _s(id, health, damage, speed, tame_item, prey, rivals, variants, ability, rig, box, egg,
-       active_speed=0.0, tired_speed=0.0, pounce=False):
+       active_speed=0.0, tired_speed=0.0, pounce=False, variant_health=()):
     return Species(id, f"gameops_{id}", health, damage, speed, tame_item, prey, rivals, variants, ability, rig,
-                   box, egg, active_speed, tired_speed, pounce)
+                   box, egg, active_speed, tired_speed, pounce, variant_health)
 
 
 SMALL = ("rabbit", "chicken")
@@ -45,5 +47,5 @@ SPECIES = {s.id: s for s in (
        (1.4, 1.5), ("#5a3a22", "#a07a50")),
     _s("hyena", 30, 7, 0.32, "rotten_flesh", (),
        ("gameops_lion", "gameops_cheetah", "gameops_black_leopard"), ("regular", "alpha"), "pack", "hyena",
-       (0.9, 1.0), ("#b59a62", "#3a2e1a")),
+       (0.9, 1.0), ("#b59a62", "#3a2e1a"), variant_health=(("alpha", 40),)),
 )}

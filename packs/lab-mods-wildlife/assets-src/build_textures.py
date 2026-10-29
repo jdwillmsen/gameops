@@ -3,10 +3,11 @@ import zlib
 from dataclasses import dataclass
 from functools import lru_cache
 
-import cat_rig
+import build_models
+import rig_common
 from species import Species
 
-SIZE = cat_rig.TEXTURE
+SIZE = rig_common.TEXTURE
 
 # Per species and variant: base coat, markings, underside, nose, eye.
 COLOURS = {
@@ -26,6 +27,18 @@ COLOURS = {
     # shade: the rosette outline; mark: the paler rosette centre.
     ("black_leopard", "default"): {"base": (44, 42, 48), "shade": (22, 21, 25), "mark": (58, 54, 60),
                                    "belly": (66, 62, 66), "nose": (86, 66, 70), "eye": (176, 196, 46)},
+    # fur_hi/fur_dark: lighter and darker strands over the base coat; muzzle: the paler snout.
+    ("brown_bear", "default"): {"base": (104, 68, 40), "fur_hi": (136, 94, 58), "fur_dark": (72, 46, 28),
+                                "belly": (88, 58, 36), "muzzle": (166, 128, 88), "mark": (56, 36, 22),
+                                "nose": (22, 16, 14), "eye": (30, 20, 14)},
+    # mark: spots, ridge stripes, muzzle and ear tips; ridge: of 6 ridge pixels, how many are dark;
+    # spot_cell/spot_r2: spacing and squared radius of the flank spots.
+    ("hyena", "regular"): {"base": (176, 156, 106), "shade": (160, 140, 94), "belly": (212, 196, 150),
+                           "mark": (66, 52, 36), "nose": (20, 16, 14), "eye": (60, 44, 24),
+                           "ridge": 3, "spot_cell": (6, 5), "spot_r2": 3},
+    ("hyena", "alpha"): {"base": (150, 134, 98), "shade": (134, 120, 86), "belly": (190, 176, 136),
+                         "mark": (44, 34, 24), "nose": (14, 10, 10), "eye": (90, 56, 20),
+                         "ridge": 5, "spot_cell": (7, 6), "spot_r2": 6},
 }
 
 
@@ -76,7 +89,7 @@ class Px:
         return self.face == "bottom"
 
 
-def faces(part: cat_rig.Part):
+def faces(part: rig_common.Part):
     """Yield (face, px, py, cols, rows, point(col,row)) following the box-UV unfolding."""
     u, v = part.uv
     ox, oy, oz = part.origin
@@ -336,14 +349,108 @@ def black_leopard(p: Px, pal: dict):
     return pal["shade"] if r == "ring" else (pal["mark"] if r == "centre" else base)
 
 
-SKINS = {"tiger": tiger, "cheetah": cheetah, "lion": lion, "black_leopard": black_leopard}
+def fur_layers(p: Px, pal: dict, seed=0):
+    """Vertical strands of uneven length in three browns; two hashes overlap so strands cross."""
+    h = face_hash(p) + seed
+    a = noise(p.col, h)
+    b = noise(p.col, h + 7)
+    if a % 3 == 0 and (p.row + (a >> 12)) % 7 < 2 + (a >> 6) % 3:
+        return pal["fur_hi"]
+    if b % 3 == 0 and (p.row + (b >> 12)) % 6 < 2 + (b >> 6) % 3:
+        return pal["fur_dark"]
+    return pal["base"]
+
+
+def brown_bear(p: Px, pal: dict):
+    feat = face_features(p, pal)
+    if feat:
+        # The shared brow mark is too heavy for a bear's small eyes.
+        return pal["fur_dark"] if feat == pal["mark"] else feat
+    if p.part == "muzzle":
+        return pal["muzzle"] if p.face != "top" else fur_layers(p, pal, 3)
+    if p.part.startswith("ear"):
+        return pal["muzzle"] if p.face == "front" else pal["fur_dark"]
+    if p.part == "tail":
+        return fur_layers(p, pal, 5)
+    if p.part.endswith("leg"):
+        if p.under or p.y < 2.0:
+            return pal["mark"]
+        return pal["fur_dark"] if p.y < 4.5 and speckle(p, 1, 3) else fur_layers(p, pal, 9)
+    if p.part == "head":
+        if p.face == "front" and p.up < 0.3:
+            return pal["muzzle"]
+        return fur_layers(p, pal, 1)
+    if p.under:
+        return pal["belly"]
+    if p.part == "hump" and p.face == "top":
+        return pal["fur_hi"] if speckle(p, 2, 4) else fur_layers(p, pal, 2)
+    return fur_layers(p, pal, 4)
+
+
+def blob(p: Px, pal: dict, seed: int) -> bool:
+    """Irregular dark spots: a jittered centre and radius per cell, ragged on the edge."""
+    cw, ch = pal["spot_cell"]
+    gx, gy = p.col // cw, p.row // ch
+    n = noise(gx, gy, face_hash(p) + seed)
+    if n % 100 >= 72:
+        return False
+    cx = gx * cw + 2 + (n >> 8) % max(1, cw - 4)
+    cy = gy * ch + 2 + (n >> 12) % max(1, ch - 4)
+    r2 = pal["spot_r2"] + (n >> 16) % 2
+    dx, dy = p.col - cx, p.row - cy
+    d = dx * dx + dy * dy
+    if d > r2:
+        return False
+    return d < r2 - 1 or noise(dx, dy, n & 0xFFFF) % 3 != 0
+
+
+def hyena(p: Px, pal: dict):
+    feat = face_features(p, pal)
+    if feat:
+        return feat
+    base, mark, belly = pal["base"], pal["mark"], pal["belly"]
+    if p.part == "ridge":
+        # Dark stripes across the ridge at uneven spacing; the alpha's ridge is nearly solid.
+        z = int(p.z // 1) if p.face in ("top", "right", "left") else p.col
+        return mark if noise(z, 5) % 6 < pal["ridge"] else base
+    if p.part == "muzzle":
+        return belly if p.under else mark
+    if p.part.startswith("ear"):
+        return mark if p.face == "back" or p.up > 0.45 else base
+    if p.part == "tail":
+        rear = p.z - p.origin[2]
+        return mark if rear > p.size[2] - 3 or noise(int(rear // 2), 4) % 3 == 0 else base
+    if p.part.endswith("leg"):
+        if p.y < 1.5:
+            return mark
+        inner = p.face in ("right", "left") and abs(p.x) < abs(p.origin[0] + p.size[0] / 2)
+        if p.under or inner:
+            return belly
+        return mark if blob(p, pal, 3) else base
+    if p.part == "head":
+        if p.face == "front":
+            return belly if p.up < 0.3 else (mark if p.up > 0.8 and speckle(p, 6, 2) else base)
+        if p.under or p.up < 0.25:
+            return belly
+        return mark if speckle(p, 7, 9) else base
+    if p.under or p.up < 0.28 or (p.face == "front" and p.up < 0.5):
+        return belly
+    if p.face == "top":
+        return mark if blob(p, pal, 1) else (pal["shade"] if speckle(p, 2, 8) else base)
+    if p.face in ("front", "back"):
+        return pal["shade"] if speckle(p, 3, 8) else base
+    return mark if blob(p, pal, 2) else (pal["shade"] if speckle(p, 4, 9) else base)
+
+
+SKINS = {"tiger": tiger, "cheetah": cheetah, "lion": lion, "black_leopard": black_leopard,
+         "brown_bear": brown_bear, "hyena": hyena}
 
 
 def paint(s: Species, variant: str) -> bytes:
     pal = COLOURS[(s.id, variant)]
     skin = SKINS[s.id]
     pixels = bytearray(SIZE * SIZE * 4)
-    for part in cat_rig.layout(cat_rig.PARAMS[s.id]):
+    for part in build_models.rig_layout(s):
         for face, fx, fy, cols, rows, point in faces(part):
             for row in range(rows):
                 for col in range(cols):

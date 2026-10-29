@@ -1,0 +1,262 @@
+{
+  "format_version": "1.21.0",
+  "minecraft:entity": {
+    "description": {
+      "identifier": "gameops:hyena",
+      "is_spawnable": true,
+      "is_summonable": true,
+      "is_experimental": false,
+      "properties": {
+        "gameops:sitting": {
+          "type": "bool",
+          "default": false
+        }
+      }
+    },
+    "component_groups": {
+      "gameops:wild": {
+        "minecraft:behavior.melee_attack": {
+          "priority": 4,
+          "speed_multiplier": 1.2,
+          "track_target": true
+        },
+        "minecraft:tameable": {
+          "probability": 0.33,
+          "tame_items": [
+            "rotten_flesh"
+          ],
+          "tame_event": {
+            "event": "gameops:on_tamed",
+            "target": "self"
+          }
+        },
+        "minecraft:behavior.avoid_mob_type": {
+          "priority": 3,
+          "entity_types": [
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "value": "player"
+                  },
+                  {
+                    "test": "has_equipment",
+                    "subject": "other",
+                    "domain": "hand",
+                    "operator": "not",
+                    "value": "rotten_flesh"
+                  }
+                ]
+              },
+              "max_dist": 6,
+              "walk_speed_multiplier": 1.0,
+              "sprint_speed_multiplier": 1.3
+            }
+          ]
+        }
+      },
+      "gameops:tamed": {
+        "minecraft:is_tamed": {},
+        "minecraft:persistent": {},
+        "minecraft:sittable": {
+          "sit_event": {
+            "event": "gameops:on_sit",
+            "target": "self"
+          },
+          "stand_event": {
+            "event": "gameops:on_stand",
+            "target": "self"
+          }
+        }
+      },
+      "gameops:tamed_active": {
+        "minecraft:behavior.melee_attack": {
+          "priority": 4,
+          "speed_multiplier": 1.2,
+          "track_target": true
+        },
+        "minecraft:behavior.follow_owner": {
+          "priority": 6,
+          "speed_multiplier": 1.0,
+          "start_distance": 10,
+          "stop_distance": 2
+        },
+        "minecraft:behavior.owner_hurt_by_target": {
+          "priority": 1,
+          "entity_types": [
+            {
+              "filters": {
+                "test": "is_family",
+                "subject": "other",
+                "operator": "!=",
+                "value": "player"
+              },
+              "max_dist": 16
+            }
+          ]
+        },
+        "minecraft:behavior.owner_hit_target": {
+          "priority": 2,
+          "entity_types": [
+            {
+              "filters": {
+                "test": "is_family",
+                "subject": "other",
+                "operator": "!=",
+                "value": "player"
+              },
+              "max_dist": 16
+            }
+          ]
+        }
+      },
+      "gameops:sitting": {
+        "minecraft:behavior.stay_while_sitting": {
+          "priority": 1
+        }
+      },
+      "gameops:variant_regular": {
+        "minecraft:variant": {
+          "value": 0
+        }
+      },
+      "gameops:variant_alpha": {
+        "minecraft:variant": {
+          "value": 1
+        },
+        "minecraft:health": {
+          "value": 40,
+          "max": 40
+        }
+      }
+    },
+    "components": {
+      "minecraft:type_family": {
+        "family": [
+          "gameops_hyena",
+          "gameops_wildlife"
+        ]
+      },
+      "minecraft:collision_box": {
+        "width": 0.9,
+        "height": 1.0
+      },
+      "minecraft:health": {
+        "value": 30,
+        "max": 30
+      },
+      "minecraft:attack": {
+        "damage": 7
+      },
+      "minecraft:follow_range": {
+        "value": 24
+      },
+      "minecraft:movement": {
+        "value": 0.32
+      },
+      "minecraft:movement.basic": {},
+      "minecraft:navigation.walk": {
+        "can_path_over_water": false,
+        "avoid_water": true
+      },
+      "minecraft:jump.static": {},
+      "minecraft:physics": {},
+      "minecraft:pushable": {
+        "is_pushable": true,
+        "is_pushable_by_piston": true
+      },
+      "minecraft:nameable": {},
+      "minecraft:behavior.float": {
+        "priority": 0
+      },
+      "minecraft:behavior.random_stroll": {
+        "priority": 7,
+        "speed_multiplier": 0.8
+      },
+      "minecraft:behavior.look_at_player": {
+        "priority": 8
+      },
+      "minecraft:behavior.random_look_around": {
+        "priority": 9
+      }
+    },
+    "events": {
+      "minecraft:entity_spawned": {
+        "sequence": [
+          {
+            "add": {
+              "component_groups": [
+                "gameops:wild"
+              ]
+            }
+          },
+          {
+            "randomize": [
+              {
+                "weight": 1,
+                "add": {
+                  "component_groups": [
+                    "gameops:variant_regular"
+                  ]
+                }
+              },
+              {
+                "weight": 1,
+                "add": {
+                  "component_groups": [
+                    "gameops:variant_alpha"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gameops:on_tamed": {
+        "add": {
+          "component_groups": [
+            "gameops:tamed",
+            "gameops:tamed_active"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:wild"
+          ]
+        }
+      },
+      "gameops:on_sit": {
+        "set_property": {
+          "gameops:sitting": true
+        },
+        "add": {
+          "component_groups": [
+            "gameops:sitting"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:tamed_active"
+          ]
+        }
+      },
+      "gameops:on_stand": {
+        "set_property": {
+          "gameops:sitting": false
+        },
+        "add": {
+          "component_groups": [
+            "gameops:tamed_active"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:sitting"
+          ]
+        }
+      }
+    }
+  }
+}

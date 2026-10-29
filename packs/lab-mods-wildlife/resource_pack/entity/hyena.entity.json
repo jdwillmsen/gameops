@@ -1,0 +1,43 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:hyena",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "regular": "textures/entity/hyena_regular",
+        "alpha": "textures/entity/hyena_alpha"
+      },
+      "geometry": {
+        "default": "geometry.gameops.hyena"
+      },
+      "animations": {
+        "walk": "animation.gameops.cat.walk",
+        "sit": "animation.gameops.cat.sit",
+        "idle": "animation.gameops.cat.idle",
+        "attack": "animation.gameops.cat.attack"
+      },
+      "scripts": {
+        "animate": [
+          "walk",
+          "idle",
+          {
+            "sit": "query.is_sitting"
+          },
+          {
+            "attack": "variable.attack_time > 0"
+          }
+        ]
+      },
+      "render_controllers": [
+        "controller.render.gameops.hyena"
+      ],
+      "spawn_egg": {
+        "base_color": "#b59a62",
+        "overlay_color": "#3a2e1a"
+      }
+    }
+  }
+}
