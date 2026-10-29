@@ -61,6 +61,10 @@ const kinds = {
   oak_leaves: { model: 'cube' },
   oak_stairs: { model: 'stairs', nonCube: true },
   stone_slab: { model: 'slab' },
+  // The table calls fire a cube; the server marks it as not one.
+  fire: { model: 'cube', nonCube: true },
+  soul_fire: { model: 'cube', nonCube: true },
+  campfire: { model: 'cube', nonCube: true },
 };
 
 // A solid layer of one block at height y of a chunk.
@@ -306,3 +310,24 @@ function topColourAny(m) {
   const p = m.get('0,0,0').find(q => q.k === 1);
   return p.c[3];
 }
+
+test('fire is drawn as crossed full-bright flame planes, not a cube or nothing', async () => {
+  for (const name of ['fire', 'soul_fire']) {
+    const w = worker([name], kinds);
+    w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+    const parts = (await w.meshes()).get('0,0,0');
+    assert.equal(quads(parts), 4, `${name}: two planes, both sides`);
+    for (const p of parts) {
+      assert.ok(p.l.every(v => v === 255), `${name} is full bright`);
+      for (let i = 0; i < p.p.length; i += 3) {
+        assert.ok(p.p[i] >= 5 && p.p[i] <= 6 && p.p[i + 1] >= 5 && p.p[i + 1] <= 6 && p.p[i + 2] >= 5 && p.p[i + 2] <= 6);
+      }
+    }
+  }
+});
+
+test('a campfire stays hidden rather than drawn as a cube', async () => {
+  const w = worker(['campfire'], kinds);
+  w.set('0,0,0', (c, put) => put(5, 5, 5, 1));
+  assert.equal(quads((await w.meshes()).get('0,0,0') || []), 0);
+});

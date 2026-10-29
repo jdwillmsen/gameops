@@ -88,6 +88,7 @@ const SHAPED = {
   cactus: inset(1, 0, 1, 15, 16, 15), decorated_pot: inset(1, 0, 1, 15, 16, 15),
   redstone_wire: inset(0, 0, 0, 16, 1, 16),
 };
+const FIRE = /^(soul_)?fire$/;
 const WATER = /^(water|flowing_water)$/;
 const WATER_TOP = [[0, 0, 0, 1, 14 / 16, 1]];
 // The page converts to linear light but the game multiplies shade and
@@ -161,6 +162,9 @@ function info(id) {
     // A name the flat list marks as non-cube stays hidden when the table
     // would draw it as a cube, which is how it hid before textures existed.
     shape = k === 'liquid' ? 'cube' : k === 'none' || (k === 'cube' && m.nonCube) ? 'skip' : k;
+    // The table has no model for fire and calls it a cube, which the flat-list
+    // rule above hides; the flames are drawn as crossed planes instead.
+    if (FIRE.test(base)) shape = 'cross';
   } else if (m && m.nonCube) shape = 'skip';
   let boxes = null;
   if (custom && shape !== 'skip') { shape = 'boxes'; boxes = custom; }
@@ -170,7 +174,7 @@ function info(id) {
   const opaque = shape === 'cube' && !trans && !leaves;
   const water = !!m && WATER.test(base);
   r = {
-    m, blk, shape, boxes, trans, leaves, opaque, water,
+    m, blk, shape, boxes, trans, leaves, opaque, water, fire: !!blk && FIRE.test(base),
     tint: blk && atlas.tints[blk.tint] || null,
     tintKind: blk && blk.tint || '',
     // Water is clear but for its biome colour; the pack's texture alone is too
@@ -442,6 +446,7 @@ function faceLight(x, y, z, f) {
   return LT;
 }
 const CELL_LT = new Array(8);
+const FULL_LT = new Array(8).fill(255);
 function cellLight(x, y, z) {
   const i = LI(x, y, z);
   for (let k = 0; k < 4; k++) { CELL_LT[2 * k] = lightSky[i] * 17; CELL_LT[2 * k + 1] = lightBlk[i] * 17; }
@@ -522,7 +527,8 @@ function mesh(key) {
     if (inf.shape === 'cross') {
       // The pack names a double plant's lower half under down; side holds an
       // unrelated flower texture for it.
-      const face = inf.blk.down, col = faceColor(inf, face, wx, wz), lt = cellLight(x, y, z);
+      // Flames glow whatever light the cell has; fire_0 is the pack's first frame.
+      const face = inf.fire ? inf.blk.side : inf.blk.down, col = faceColor(inf, face, wx, wz), lt = inf.fire ? FULL_LT : cellLight(x, y, z);
       const uv = faceUVW(face, [[0, 0], [1, 0], [1, 1], [0, 1]]);
       for (const q of [[[0,0,0],[1,0,1],[1,1,1],[0,1,0]], [[1,0,0],[0,0,1],[0,1,1],[1,1,0]]])
         for (const backface of [false, true])
