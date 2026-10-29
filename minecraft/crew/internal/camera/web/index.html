@@ -742,6 +742,7 @@ function onMessage(ev) {
     case 7:
       blocks.clear(); ready.length = 0; queued = 0; post({ t: 'clear', epoch: ++epoch }); for (const ms of meshes.values()) for (const o of ms) { scene.remove(o); o.geometry.dispose(); }
       meshes.clear(); ents.clear(); biomeCols.clear();
+      if (!weatherPinned) rainLevel = thunderLevel = 0;
       break;
     case 8: {
       const n = dv.getUint16(p, true); p += 2;
@@ -776,7 +777,7 @@ function onMessage(ev) {
       break;
     }
     case 20:
-      rainLevel = u8[1] / 255; thunderLevel = u8[2] / 255;
+      if (!weatherPinned) { rainLevel = u8[1] / 255; thunderLevel = u8[2] / 255; }
       break;
     case 15:
       if (!timePinned) clock.set(dv.getInt32(1, true), (u8[5] & 1) !== 0);

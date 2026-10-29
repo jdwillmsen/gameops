@@ -71,3 +71,18 @@ func TestWeatherFrameIsIgnoredByTheV3Downgrade(t *testing.T) {
 		t.Fatalf("convert = % x, %v; want the frame unchanged", g, err)
 	}
 }
+
+func TestWeatherClearReachesAViewerAlreadyConnectedAtReset(t *testing.T) {
+	h, _ := newLocatedHub(t, 1)
+	v, _ := h.Attach()
+	h.SetWeather(.5, 0)
+	h.Reset()
+	ms, _ := drain(t, v)
+	f := ofType(ms, frameWeather)
+	if len(f) == 0 {
+		t.Fatal("a connected viewer was never told the rain stopped")
+	}
+	if r, th := levels(t, f[len(f)-1]); r != 0 || th != 0 {
+		t.Fatalf("last weather rain %d thunder %d, want clear", r, th)
+	}
+}

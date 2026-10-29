@@ -5,9 +5,9 @@
 function reader(u8, p) {
   return {
     get p() { return p; },
-    u8: () => u8[p++],
-    uvarint() { let v = 0, shift = 1; for (;;) { const b = u8[p++]; v += (b & 127) * shift; if (b < 128) return v; shift *= 128; } },
-    text() { const n = u8[p++]; const s = new TextDecoder().decode(u8.subarray(p, p + n)); p += n; return s; },
+    u8: () => { if (p >= u8.length) throw new RangeError('short frame'); return u8[p++]; },
+    uvarint() { let v = 0, shift = 1; for (;;) { if (p >= u8.length) throw new RangeError('short frame'); const b = u8[p++]; v += (b & 127) * shift; if (b < 128) return v; shift *= 128; } },
+    text() { if (p >= u8.length) throw new RangeError('short frame'); const n = u8[p++]; const s = new TextDecoder().decode(u8.subarray(p, p + n)); p += n; return s; },
   };
 }
 
