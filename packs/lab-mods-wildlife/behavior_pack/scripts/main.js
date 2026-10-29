@@ -1,4 +1,4 @@
-import { world, system, ScriptEventSource } from "@minecraft/server";
+import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server";
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
   packStrengthAmplifier, packSize,
@@ -24,6 +24,10 @@ const AURAS = {
     duration: 100, targets: ["self"], pack: { family: "gameops_hyena", range: 8 },
   },
 };
+// An unknown effect id only throws inside addEffect, where failures are swallowed; surface it once at load.
+for (const [type, spec] of Object.entries(AURAS)) {
+  if (!EffectTypes.get(spec.effect)) console.warn(`gameops:aura unknown effect ${spec.effect} for ${type}`);
+}
 const SITTING_PROPERTY = "gameops:sitting";
 const DIMENSIONS = ["overworld", "nether", "the_end"];
 const STEP = 5;

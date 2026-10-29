@@ -149,3 +149,10 @@ test("packSize counts the source and tamed hyenas within range, not wild, far or
   assert.equal(packSize(self, all, 8), 3);
   assert.equal(packSize(self, [self], 8), 1);
 });
+
+test("packSize ignores sitting hyenas, which do not fight", () => {
+  const h = (id, x, sitting) => ({ id, pos: { x, y: 64, z: 0 }, tamed: true, sitting, type: "wildlife" });
+  const standing = h("h1", 0, false);
+  assert.equal(packSize(standing, [standing, h("h2", 1, true), h("h3", 2, true)], 8), 1);
+  assert.equal(packSize(standing, [standing, h("h2", 1, true), h("h3", 2, false)], 8), 2);
+});
