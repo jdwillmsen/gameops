@@ -12,22 +12,47 @@ const maxSkins = 256
 // setSkin keeps a player's listed skin and shows it on that player if they are
 // in view. A skin the camera cannot draw leaves the model's default.
 func (h *Hub) setSkin(id uuid.UUID, s protocol.Skin) {
-	info, ok := skinOf(s)
-	if !ok {
+	info, reason := decodeSkin(s)
+	metricSkins.WithLabelValues(reason).Inc()
+	if info.png == nil {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, known := h.skins[id]; !known && len(h.skins) >= maxSkins {
+	if _, known := h.skins[id]; !known && len(h.skins) >= maxSkins && !h.evictUnseenSkinLocked() {
+		// Everyone remembered is in view: the newcomer is still drawn below.
+		metricSkins.WithLabelValues(skinCapDropped).Inc()
+		h.showSkinLocked(id, &info)
 		return
 	}
 	h.skins[id] = &info
+	h.showSkinLocked(id, &info)
+}
+
+func (h *Hub) showSkinLocked(id uuid.UUID, info *skinInfo) {
 	for _, e := range h.ents {
 		if e.UUID == id {
-			e.Skin = &info
-			h.pushOrderedLocked(encodeSkin(e.ID, info))
+			e.Skin = info
+			h.pushOrderedLocked(encodeSkin(e.ID, *info))
 		}
 	}
+}
+
+// evictUnseenSkinLocked frees one slot by forgetting a skin whose player is
+// not in view, who would be re-listed before they next appear.
+func (h *Hub) evictUnseenSkinLocked() bool {
+	inView := make(map[uuid.UUID]bool, len(h.ents))
+	for _, e := range h.ents {
+		inView[e.UUID] = true
+	}
+	for id := range h.skins {
+		if !inView[id] {
+			delete(h.skins, id)
+			metricSkins.WithLabelValues(skinCapEvicted).Inc()
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Hub) forgetSkin(id uuid.UUID) {

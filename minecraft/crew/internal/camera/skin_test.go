@@ -228,3 +228,61 @@ func TestArmourOfAnEntityNotInViewIsIgnored(t *testing.T) {
 		t.Errorf("armour = %v", got)
 	}
 }
+
+func TestSkinReasonsAndSlimDetection(t *testing.T) {
+	opaque := func(w, h int) []byte { return pixels(w, h) }
+	patch := func(g string) []byte { return []byte(`{"geometry":{"default":"` + g + `"}}`) }
+	for name, c := range map[string]struct {
+		s      protocol.Skin
+		reason string
+		slim   bool
+	}{
+		"wide":             {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: opaque(64, 64), SkinResourcePatch: patch("geometry.humanoid.custom"), ArmSize: protocol.ArmSizeWide}, skinAccepted, false},
+		"slim by patch":    {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: opaque(64, 64), SkinResourcePatch: patch("geometry.humanoid.customSlim"), ArmSize: protocol.ArmSizeWide}, skinAccepted, true},
+		"named wide wins":  {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: opaque(64, 64), SkinResourcePatch: patch("geometry.humanoid.custom"), ArmSize: protocol.ArmSizeSlim}, skinAccepted, false},
+		"slim by arm size": {protocol.Skin{SkinImageWidth: 128, SkinImageHeight: 128, SkinData: opaque(128, 128), SkinResourcePatch: []byte(`{}`), ArmSize: protocol.ArmSizeSlim}, skinAccepted, true},
+		"custom geometry":  {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: opaque(64, 64), SkinResourcePatch: patch("geometry.cow")}, skinAcceptedCustom, false},
+		"persona":          {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: opaque(64, 64), PersonaSkin: true}, skinAcceptedPersona, false},
+		"persona blank":    {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: make([]byte, 64*64*4), PersonaSkin: true}, skinTransparent, false},
+		"no data":          {protocol.Skin{PersonaSkin: true}, skinNoData, false},
+		"odd size":         {protocol.Skin{SkinImageWidth: 100, SkinImageHeight: 100, SkinData: opaque(100, 100)}, skinBadSize, false},
+		"short":            {protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: make([]byte, 10)}, skinBadLength, false},
+	} {
+		info, reason := decodeSkin(c.s)
+		if reason != c.reason || (info.png != nil && info.slim != c.slim) {
+			t.Errorf("%s: reason %q slim %v, want %q %v", name, reason, info.slim, c.reason, c.slim)
+		}
+	}
+}
+
+func TestSkinsAtTheCapStillShowOnPlayersInView(t *testing.T) {
+	h, _ := newTestHub(t, 1)
+	live := attach(t, h)
+	mustDrain(t, live)
+	sk := protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: pixels(64, 64)}
+	for i := 0; i < maxSkins; i++ {
+		h.setSkin(uuid.New(), sk)
+	}
+	// A newcomer in view evicts a skin of someone out of view.
+	id := uuid.New()
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Alex", UUID: id}, &sink{})
+	h.setSkin(id, sk)
+	if got := skinFrames(mustDrain(t, live)); got[8].png == nil {
+		t.Fatalf("skins = %v", got)
+	}
+	if len(h.skins) != maxSkins || h.skins[id] == nil {
+		t.Errorf("remembered %d, has newcomer %v", len(h.skins), h.skins[id] != nil)
+	}
+	// With everyone remembered in view, a further player is shown unremembered.
+	h.mu.Lock()
+	for i := range h.skins {
+		h.ents[uint64(1000+len(h.ents))] = &entity{ID: uint64(1000 + len(h.ents)), UUID: i}
+	}
+	h.mu.Unlock()
+	late := uuid.New()
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 9, Username: "Bo", UUID: late}, &sink{})
+	h.setSkin(late, sk)
+	if got := skinFrames(mustDrain(t, live)); got[9].png == nil {
+		t.Errorf("player past the cap got no skin: %v", got)
+	}
+}
