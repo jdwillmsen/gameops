@@ -26,7 +26,7 @@ def family_test(family: str) -> dict:
 
 # A name tag marks a pet-in-waiting or a keepsake, so wild predators leave it alone.
 NOT_NAMED = {"test": "has_nametag", "subject": "other", "operator": "==", "value": False}
-# Format 1.21 predates the is_tamed filter, so the component test stands in for it.
+# has_component with != is the form known to work at this format version.
 NOT_TAMED = {"test": "has_component", "subject": "other", "operator": "!=", "value": "minecraft:is_tamed"}
 
 
