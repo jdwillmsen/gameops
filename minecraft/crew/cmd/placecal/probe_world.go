@@ -33,6 +33,11 @@ func executeProbe(ctx context.Context, c config, names []string, con *safeConsol
 	}
 
 	b := bayAt(c.originX, c.floorY, c.originZ, 0)
+	// The platform and its resets reach further than the bay that validate
+	// checked.
+	if x1, x2, z1, z2 := b.ox-10, b.ox+10, b.oz-10, b.oz+10; x2 >= colosseumX1 && x1 <= colosseumX2 && z2 >= colosseumZ1 && z1 <= colosseumZ2 {
+		return fmt.Errorf("probe platform (x %d..%d, z %d..%d) intersects the Colosseum; pick another origin", x1, x2, z1, z2)
+	}
 	var (
 		saved  map[string]string
 		marked bool
