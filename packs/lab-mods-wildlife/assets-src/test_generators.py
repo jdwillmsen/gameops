@@ -221,6 +221,74 @@ class Generators(unittest.TestCase):
                         f = entry["filters"]
                         self.assertEqual((f["test"], f["operator"], f["value"]), ("is_family", "!=", "player"))
 
+    def goal_entries(self, sid, group):
+        ent = build_behavior.entity_json(SPECIES[sid])["minecraft:entity"]
+        goal = ent["component_groups"][group].get("minecraft:behavior.nearest_attackable_target")
+        return goal["entity_types"] if goal else []
+
+    @staticmethod
+    def families(entries):
+        out = []
+        for e in entries:
+            out += [t["value"] for t in e["filters"]["all_of"] if t["test"] == "is_family"]
+        return sorted(out)
+
+    def test_cheetah_hunts_rabbit_and_chicken_only(self):
+        self.assertEqual(self.families(self.goal_entries("cheetah", "gameops:wild")),
+                         ["chicken", "gameops_hyena", "rabbit"])
+
+    def test_lion_and_hyena_are_rivals_both_ways(self):
+        self.assertIn("gameops_hyena", self.families(self.goal_entries("lion", "gameops:wild")))
+        for cat in ("lion", "cheetah", "black_leopard"):
+            self.assertIn(f"gameops_{cat}", self.families(self.goal_entries("hyena", "gameops:wild")))
+            self.assertIn(f"gameops_{cat}", self.families(self.goal_entries("hyena", "gameops:tamed_active")))
+
+    def test_named_animals_are_excluded(self):
+        nametag = {"test": "has_nametag", "subject": "other", "operator": "==", "value": False}
+        for s in SPECIES.values():
+            for e in self.goal_entries(s.id, "gameops:wild"):
+                fam = [t["value"] for t in e["filters"]["all_of"] if t["test"] == "is_family"]
+                if fam[0] in s.prey:
+                    self.assertIn(nametag, e["filters"]["all_of"], f"{s.id} {fam}")
+
+    def test_no_species_targets_player(self):
+        for s in SPECIES.values():
+            ent = build_behavior.entity_json(s)["minecraft:entity"]
+            allowed = set(s.prey) | set(s.rivals)
+            for comps in [ent["components"], *ent["component_groups"].values()]:
+                goal = comps.get("minecraft:behavior.nearest_attackable_target")
+                for e in (goal or {}).get("entity_types", []):
+                    tests = [e["filters"]] if "test" in e["filters"] else e["filters"]["all_of"]
+                    fams = [t["value"] for t in tests if t["test"] == "is_family" and t["operator"] in ("==", "equals")]
+                    excl = any(t["test"] == "is_family" and t["operator"] == "!=" and t["value"] == "player"
+                               for t in tests)
+                    self.assertTrue(excl or (fams and set(fams) <= allowed), f"{s.id} {e}")
+                    self.assertNotIn("player", fams, s.id)
+
+    def test_tamed_pets_only_target_wild_rivals_not_prey(self):
+        not_tamed = {"test": "has_component", "subject": "other", "operator": "!=", "value": "minecraft:is_tamed"}
+        for s in SPECIES.values():
+            entries = self.goal_entries(s.id, "gameops:tamed_active")
+            self.assertEqual(self.families(entries), sorted(s.rivals), s.id)
+            for e in entries:
+                self.assertIn(not_tamed, e["filters"]["all_of"], s.id)
+        self.assertEqual(self.goal_entries("brown_bear", "gameops:tamed_active"), [])
+
+    def test_sitting_pet_has_no_targeting(self):
+        goal = "minecraft:behavior.nearest_attackable_target"
+        for s in SPECIES.values():
+            ent = build_behavior.entity_json(s)["minecraft:entity"]
+            self.assertNotIn(goal, ent["components"], s.id)
+            self.assertNotIn(goal, ent["component_groups"]["gameops:sitting"], s.id)
+            self.assertNotIn(goal, ent["component_groups"]["gameops:tamed"], s.id)
+            self.assertEqual(ent["events"]["gameops:on_sit"]["remove"]["component_groups"],
+                             ["gameops:tamed_active"], s.id)
+
+    def test_bear_has_no_targeting_goals(self):
+        ent = build_behavior.entity_json(SPECIES["brown_bear"])["minecraft:entity"]
+        for comps in [ent["components"], *ent["component_groups"].values()]:
+            self.assertNotIn("minecraft:behavior.nearest_attackable_target", comps)
+
     def geo_bones(self, sid):
         geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
         return {b["name"]: b for b in geo["bones"]}

@@ -55,6 +55,84 @@
               "sprint_speed_multiplier": 1.3
             }
           ]
+        },
+        "minecraft:behavior.nearest_attackable_target": {
+          "priority": 2,
+          "must_see": true,
+          "reselect_targets": true,
+          "within_radius": 16,
+          "entity_types": [
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": "sheep"
+                  },
+                  {
+                    "test": "has_nametag",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": false
+                  }
+                ]
+              },
+              "max_dist": 16
+            },
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": "pig"
+                  },
+                  {
+                    "test": "has_nametag",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": false
+                  }
+                ]
+              },
+              "max_dist": 16
+            },
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": "cow"
+                  },
+                  {
+                    "test": "has_nametag",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": false
+                  }
+                ]
+              },
+              "max_dist": 16
+            },
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": "gameops_hyena"
+                  }
+                ]
+              },
+              "max_dist": 16
+            }
+          ]
         }
       },
       "gameops:tamed": {
@@ -106,6 +184,33 @@
                 "subject": "other",
                 "operator": "!=",
                 "value": "player"
+              },
+              "max_dist": 16
+            }
+          ]
+        },
+        "minecraft:behavior.nearest_attackable_target": {
+          "priority": 2,
+          "must_see": true,
+          "reselect_targets": true,
+          "within_radius": 16,
+          "entity_types": [
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "operator": "==",
+                    "value": "gameops_hyena"
+                  },
+                  {
+                    "test": "has_component",
+                    "subject": "other",
+                    "operator": "!=",
+                    "value": "minecraft:is_tamed"
+                  }
+                ]
               },
               "max_dist": 16
             }
