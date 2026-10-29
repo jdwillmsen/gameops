@@ -29,11 +29,11 @@ export function packStrengthAmplifier(size) {
   return m >= STRENGTH_I ? 0 : null;
 }
 
-// Tamed hyenas within range of the source, the source included.
+// Standing tamed hyenas within range of the source, the source included; a sitting pet does not fight.
 export function packSize(source, candidates, range) {
   let n = 1;
   for (const c of candidates) {
-    if (c.id !== source.id && c.tamed && inRoarRange(source.pos, c.pos, range)) n++;
+    if (c.id !== source.id && c.tamed && !c.sitting && inRoarRange(source.pos, c.pos, range)) n++;
   }
   return n;
 }
