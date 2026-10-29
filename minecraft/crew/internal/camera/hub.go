@@ -388,6 +388,10 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 			}
 		}
 	case *packet.PlayerSkin:
+		if !p.Skin.OverrideAppearance {
+			// Counted, not honoured: servers differ on setting it.
+			metricSkins.WithLabelValues(skinNoOverride).Inc()
+		}
 		h.setSkin(p.UUID, p.Skin)
 	case *packet.MobArmourEquipment:
 		h.setArmour(p.EntityRuntimeID, p.Helmet, p.Chestplate, p.Leggings, p.Boots)

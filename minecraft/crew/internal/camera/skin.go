@@ -3,17 +3,22 @@ package camera
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"image"
 	"image/png"
 	"slices"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 )
 
-// A skin on the wire is a PNG in the 64-wide player layout, at any whole
-// multiple of it. Persona pieces and custom geometry are not drawn: a skin
-// that does not fit the standard layout is left to the default model.
+// A skin on the wire is an RGBA image in the 64-wide player layout, at any
+// whole multiple of it. Persona pieces arrive as separate assets the server
+// does not composite for us, and custom geometry has its own UVs: neither is
+// drawn, and a skin that does not fit the standard layout is left to the
+// default model.
 const (
 	skinBase    = 64
 	maxSkinSide = 512
@@ -27,16 +32,103 @@ type skinInfo struct {
 	slim bool
 }
 
+// Why a skin was or was not drawn, as counted by crew_camera_skins_total.
+const (
+	skinAccepted        = "accepted"
+	skinAcceptedCustom  = "accepted_custom_geometry"
+	skinAcceptedPersona = "accepted_persona"
+	skinNoData          = "rejected_no_data"
+	skinBadSize         = "rejected_bad_size"
+	skinBadLength       = "rejected_bad_length"
+	skinTransparent     = "rejected_transparent"
+	skinEncodeFailed    = "rejected_encode"
+	skinCapEvicted      = "cap_evicted"
+	skinCapDropped      = "cap_dropped"
+	skinNoOverride      = "update_without_override"
+)
+
+var metricSkins = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "crew_camera_skins_total",
+	Help: "Skins the camera received from the server, by whether and why they were drawn.",
+}, []string{"result"})
+
 // skinOf converts a skin as the server sends it. ok is false for one that is
 // missing, the wrong size or not in the standard layout, which draws with the
 // model's default texture.
 func skinOf(s protocol.Skin) (skinInfo, bool) {
-	return skinFromRGBA(int(s.SkinImageWidth), int(s.SkinImageHeight), s.SkinData, strings.Contains(string(s.SkinResourcePatch), "customSlim"))
+	info, _ := decodeSkin(s)
+	return info, info.png != nil
+}
+
+// decodeSkin is skinOf with the reason: an accepted* result, or a rejected_*.
+// Accepted skins with custom geometry or persona flags are still drawn on the
+// standard model, since most keep the standard UV layout in their base image.
+func decodeSkin(s protocol.Skin) (skinInfo, string) {
+	info, reason := convertSkin(int(s.SkinImageWidth), int(s.SkinImageHeight), s.SkinData, skinIsSlim(s))
+	if info.png == nil {
+		return skinInfo{}, reason
+	}
+	switch {
+	case s.PersonaSkin:
+		reason = skinAcceptedPersona
+	case !standardGeometry(s.SkinResourcePatch):
+		reason = skinAcceptedCustom
+	}
+	return info, reason
+}
+
+// geometryName is the default geometry the resource patch names, or "".
+func geometryName(patch []byte) string {
+	var p struct {
+		Geometry struct {
+			Default string `json:"default"`
+		} `json:"geometry"`
+	}
+	if json.Unmarshal(patch, &p) != nil {
+		return ""
+	}
+	return p.Geometry.Default
+}
+
+// standardGeometry is true when the patch names no geometry or one of the
+// stock humanoid models, whose UV layout the camera model matches.
+func standardGeometry(patch []byte) bool {
+	n := geometryName(patch)
+	return n == "" || n == "geometry.humanoid" || strings.HasPrefix(n, "geometry.humanoid.custom")
+}
+
+// skinIsSlim prefers the geometry the patch names, which is what the client
+// draws. Only a patch that names nothing falls back to the arm size field,
+// whose zero value is slim and so cannot overrule a named wide model.
+func skinIsSlim(s protocol.Skin) bool {
+	switch n := geometryName(s.SkinResourcePatch); {
+	case strings.Contains(n, "customSlim"):
+		return true
+	case n != "":
+		return false
+	case bytes.Contains(s.SkinResourcePatch, []byte("customSlim")):
+		return true
+	}
+	return s.ArmSize == protocol.ArmSizeSlim && len(s.SkinResourcePatch) > 0
 }
 
 func skinFromRGBA(w, h int, rgba []byte, slim bool) (skinInfo, bool) {
-	if w < skinBase || w > maxSkinSide || w%skinBase != 0 || (h != w && h != w/2) || len(rgba) != w*h*4 {
-		return skinInfo{}, false
+	info, _ := convertSkin(w, h, rgba, slim)
+	return info, info.png != nil
+}
+
+func convertSkin(w, h int, rgba []byte, slim bool) (skinInfo, string) {
+	switch {
+	case len(rgba) == 0:
+		return skinInfo{}, skinNoData
+	case w < skinBase || w > maxSkinSide || w%skinBase != 0 || (h != w && h != w/2):
+		return skinInfo{}, skinBadSize
+	case len(rgba) != w*h*4:
+		return skinInfo{}, skinBadLength
+	case fullyTransparent(rgba):
+		// A persona's own image is a blank placeholder; drawing it would make
+		// the player invisible instead of default-skinned.
+		return skinInfo{}, skinTransparent
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, w, w))
 	copy(img.Pix, rgba)
@@ -45,9 +137,18 @@ func skinFromRGBA(w, h int, rgba []byte, slim bool) (skinInfo, bool) {
 	}
 	var b bytes.Buffer
 	if err := png.Encode(&b, img); err != nil {
-		return skinInfo{}, false
+		return skinInfo{}, skinEncodeFailed
 	}
-	return skinInfo{png: b.Bytes(), slim: slim}, true
+	return skinInfo{png: b.Bytes(), slim: slim}, skinAccepted
+}
+
+func fullyTransparent(rgba []byte) bool {
+	for i := 3; i < len(rgba); i += 4 {
+		if rgba[i] != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // legacyLimbs fills the left arm and leg of a skin that only has the right
