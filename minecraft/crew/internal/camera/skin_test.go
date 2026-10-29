@@ -286,3 +286,23 @@ func TestSkinsAtTheCapStillShowOnPlayersInView(t *testing.T) {
 		t.Errorf("player past the cap got no skin: %v", got)
 	}
 }
+
+func TestRejectedSkinUpdateReturnsThePlayerToTheDefault(t *testing.T) {
+	h, _ := newTestHub(t, 2)
+	live := attach(t, h)
+	mustDrain(t, live)
+	id := uuid.New()
+	h.Apply(&packet.PlayerList{Entries: []protocol.PlayerListEntry{
+		{ActionType: protocol.PlayerListActionAdd, UUID: id, Skin: protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: pixels(64, 64)}},
+	}}, &sink{})
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Alex", UUID: id}, &sink{})
+	mustDrain(t, live)
+	h.Apply(&packet.PlayerSkin{UUID: id, Skin: protocol.Skin{SkinImageWidth: 64, SkinImageHeight: 64, SkinData: make([]byte, 64*64*4)}}, &sink{})
+	got := skinFrames(mustDrain(t, live))
+	if f, ok := got[8]; !ok || len(f.png) != 0 {
+		t.Fatalf("frames after a rejected update = %v, want an empty skin for entity 8", got)
+	}
+	if late := skinFrames(mustDrain(t, attach(t, h))); len(late) != 0 {
+		t.Errorf("late viewer was given %v", late)
+	}
+}

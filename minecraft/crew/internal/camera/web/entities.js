@@ -743,7 +743,7 @@ export function createEntities(scene) {
         try {
           const loaded = await fetchSheet('v1/camera/items.json', 'v1/camera/items.png');
           items = { doc: loaded.doc, tex: loaded.tex };
-          for (const inst of meshes.values()) if (inst.type === 'minecraft:item') build(inst);
+          for (const inst of meshes.values()) if (inst.stamp !== stamp(inst)) build(inst);
         } catch {
           // Remembered, so every look update does not repeat the request; a
           // later models frame clears it.
@@ -766,6 +766,14 @@ export function createEntities(scene) {
 
     // A player's skin, a PNG on the standard layout. The texture is made
     // before the body is rebuilt, so the default skin shows until it is ready.
+    clearSkin(id) {
+      const old = skins.get(id);
+      if (!old) return;
+      skins.delete(id);
+      const inst = meshes.get(id);
+      if (inst) build(inst);
+      old.tex.dispose();
+    },
     async setSkin(id, slim, bytes) {
       const url = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
       try {

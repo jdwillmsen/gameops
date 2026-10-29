@@ -14,11 +14,20 @@ const maxSkins = 256
 func (h *Hub) setSkin(id uuid.UUID, s protocol.Skin) {
 	info, reason := decodeSkin(s)
 	metricSkins.WithLabelValues(reason).Inc()
-	if info.png == nil {
-		return
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if info.png == nil {
+		// An update the camera cannot draw must not leave the player's old
+		// skin on show; an empty skin frame sends viewers back to the default.
+		delete(h.skins, id)
+		for _, e := range h.ents {
+			if e.UUID == id && e.Skin != nil {
+				e.Skin = nil
+				h.pushOrderedLocked(encodeSkin(e.ID, skinInfo{}))
+			}
+		}
+		return
+	}
 	if _, known := h.skins[id]; !known && len(h.skins) >= maxSkins && !h.evictUnseenSkinLocked() {
 		// Everyone remembered is in view: the newcomer is still drawn below.
 		metricSkins.WithLabelValues(skinCapDropped).Inc()
