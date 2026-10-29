@@ -59,6 +59,14 @@ class CheckPacks(unittest.TestCase):
         self.edit(os.path.join("behavior_pack", "manifest.json"), fn)
         self.assertFails("UUIDs reused")
 
+    def test_behaviour_pack_may_carry_a_script_module_but_resource_pack_may_not(self):
+        script = {"type": "script", "language": "javascript", "entry": "scripts/main.js",
+                  "uuid": "00000000-0000-4000-8000-000000000001", "version": [0, 0, 1]}
+        self.edit(os.path.join("behavior_pack", "manifest.json"), lambda d: d["modules"].append(dict(script)))
+        self.assertEqual(self.errors(), [])
+        self.edit(os.path.join("resource_pack", "manifest.json"), lambda d: d["modules"].append(dict(script)))
+        self.assertFails("modules[1].type must be 'resources'")
+
     def test_uuid_shared_between_packs(self):
         def fn(d):
             d["header"]["uuid"] = "40cf3288-abac-4a12-b49b-20c8b46a2d42"

@@ -1,0 +1,18 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "gameops lab wildlife (resources)",
+    "description": "Models, textures and animations for the crew lab wildlife",
+    "uuid": "ec11bec6-1562-4557-8500-4f10d260b6f8",
+    "version": [0, 0, 1],
+    "min_engine_version": [1, 21, 0]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "description": "Entity client definitions",
+      "uuid": "2e83ae7c-dbad-4845-a877-7dd232ed9c3c",
+      "version": [0, 0, 1]
+    }
+  ]
+}

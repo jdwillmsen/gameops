@@ -69,7 +69,8 @@ def check_manifest(path, manifest, module_type, rep):
     for i, mod in enumerate(modules):
         mid = check_uuid(mod.get("uuid"), f"{path} modules[{i}].uuid", rep)
         check_version(mod.get("version"), f"{path} modules[{i}].version", rep)
-        if mod.get("type") != module_type:
+        allowed = (module_type, "script") if module_type == "data" else (module_type,)
+        if mod.get("type") not in allowed:
             rep.fail(f"{path}: modules[{i}].type must be {module_type!r}, got {mod.get('type')!r}")
         if mid:
             uuids.append(mid)

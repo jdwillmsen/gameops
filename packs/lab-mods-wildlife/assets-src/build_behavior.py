@@ -1,0 +1,103 @@
+from species import Species
+
+NOT_PLAYER = {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}
+
+
+def event(add=(), remove=()):
+    out = {}
+    if add:
+        out["add"] = {"component_groups": list(add)}
+    if remove:
+        out["remove"] = {"component_groups": list(remove)}
+    return out
+
+
+def entity_json(s: Species) -> dict:
+    wild = {
+        "minecraft:tameable": {
+            "probability": 0.33,
+            "tame_items": [s.tame_item],
+            "tame_event": {"event": "gameops:on_tamed", "target": "self"},
+        },
+        # Only a player holding the taming food is not a threat, so food is the way to approach.
+        "minecraft:behavior.avoid_mob_type": {
+            "priority": 3,
+            "entity_types": [{
+                "filters": {"all_of": [
+                    {"test": "is_family", "subject": "other", "value": "player"},
+                    {"test": "has_equipment", "subject": "other", "domain": "hand", "operator": "not",
+                     "value": s.tame_item},
+                ]},
+                "max_dist": 6,
+                "walk_speed_multiplier": 1.0,
+                "sprint_speed_multiplier": 1.3,
+            }],
+        },
+    }
+    tamed = {
+        "minecraft:is_tamed": {},
+        "minecraft:persistent": {},
+        "minecraft:sittable": {
+            "sit_event": {"event": "gameops:on_sit", "target": "self"},
+            "stand_event": {"event": "gameops:on_stand", "target": "self"},
+        },
+        "minecraft:behavior.follow_owner": {
+            "priority": 6, "speed_multiplier": 1.0, "start_distance": 10, "stop_distance": 2},
+        # Each OR'd entry carries its own player exclusion; an owner's attacker may be a player.
+        "minecraft:behavior.owner_hurt_by_target": {
+            "priority": 1, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
+        "minecraft:behavior.owner_hit_target": {
+            "priority": 2, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
+    }
+    sitting = {
+        # Priority 1 outranks following and attacking, which is what makes a sitting pet stay put.
+        "minecraft:behavior.stay_while_sitting": {"priority": 1},
+    }
+    groups = {"gameops:wild": wild, "gameops:tamed": tamed, "gameops:sitting": sitting}
+
+    spawn = [{"add": {"component_groups": ["gameops:wild"]}}]
+    if s.variants:
+        for i, name in enumerate(s.variants):
+            groups[f"gameops:variant_{name}"] = {"minecraft:variant": {"value": i}}
+        spawn.append({"randomize": [
+            {"weight": 1, "add": {"component_groups": [f"gameops:variant_{name}"]}} for name in s.variants]})
+
+    w, h = s.box
+    return {
+        "format_version": "1.21.0",
+        "minecraft:entity": {
+            "description": {
+                "identifier": f"gameops:{s.id}",
+                "is_spawnable": True,
+                "is_summonable": True,
+                "is_experimental": False,
+            },
+            "component_groups": groups,
+            "components": {
+                "minecraft:type_family": {"family": [s.family, "gameops_wildlife"]},
+                "minecraft:collision_box": {"width": w, "height": h},
+                "minecraft:health": {"value": s.health, "max": s.health},
+                "minecraft:attack": {"damage": s.damage},
+                "minecraft:follow_range": {"value": 24},
+                "minecraft:movement": {"value": s.speed},
+                "minecraft:movement.basic": {},
+                "minecraft:navigation.walk": {"can_path_over_water": False, "avoid_water": True},
+                "minecraft:jump.static": {},
+                "minecraft:physics": {},
+                "minecraft:pushable": {"is_pushable": True, "is_pushable_by_piston": True},
+                "minecraft:nameable": {},
+                "minecraft:behavior.float": {"priority": 0},
+                "minecraft:behavior.melee_attack": {
+                    "priority": 4, "speed_multiplier": 1.2, "track_target": True},
+                "minecraft:behavior.random_stroll": {"priority": 7, "speed_multiplier": 0.8},
+                "minecraft:behavior.look_at_player": {"priority": 8},
+                "minecraft:behavior.random_look_around": {"priority": 9},
+            },
+            "events": {
+                "minecraft:entity_spawned": {"sequence": spawn},
+                "gameops:on_tamed": event(add=["gameops:tamed"], remove=["gameops:wild"]),
+                "gameops:on_sit": event(add=["gameops:sitting"]),
+                "gameops:on_stand": event(remove=["gameops:sitting"]),
+            },
+        },
+    }
