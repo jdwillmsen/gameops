@@ -152,3 +152,14 @@ func TestPlainArmourSendsNoDetail(t *testing.T) {
 		t.Errorf("mods = %v", got)
 	}
 }
+
+func TestAPlayerAlreadyHoldingSomethingIsDrawnHoldingIt(t *testing.T) {
+	h, _ := newTestHub(t, 4)
+	h.SetItems([]protocol.ItemEntry{{Name: "minecraft:iron_sword", RuntimeID: 1}})
+	live := attach(t, h)
+	mustDrain(t, live)
+	h.Apply(&packet.AddPlayer{EntityRuntimeID: 8, Username: "Basalt", HeldItem: item(1)}, &sink{})
+	if got := equipmentFrames(mustDrain(t, live)); got[8][0].Name != "iron_sword" {
+		t.Fatalf("hands = %v", got)
+	}
+}

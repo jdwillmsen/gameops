@@ -409,6 +409,14 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		h.uniqueID[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
 		h.setEntityLocked(&entity{ID: p.EntityRuntimeID, Type: "player", Name: p.Username, UUID: p.UUID, Skin: h.skins[p.UUID],
 			X: p.Position[0], Y: p.Position[1], Z: p.Position[2], Yaw: p.Yaw, Pitch: p.Pitch, HeadYaw: p.HeadYaw})
+		// A server need not send equipment again for what a player already
+		// holds when they come into view.
+		if e, ok := h.ents[p.EntityRuntimeID]; ok {
+			if item := h.handItemLocked(p.HeldItem); e.Hands[0] != item {
+				e.Hands[0] = item
+				h.pushOrderedLocked(encodeEquipment(map[uint64]handSlots{e.ID: e.Hands}))
+			}
+		}
 		h.mu.Unlock()
 	case *packet.PlayerList:
 		for _, e := range p.Entries {
