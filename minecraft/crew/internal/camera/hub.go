@@ -112,6 +112,7 @@ type Hub struct {
 	ownSkin    *skinInfo
 	ownArmor   armourSlots
 	clock      worldClock
+	weather    weather
 	biomeDefs  map[uint16]biomeDef
 	biomeTable []byte
 	biomes     map[[2]int32][]byte // wire frames, replayed to a new viewer
@@ -202,6 +203,9 @@ func (h *Hub) Spawn(runtimeID uint64) {
 func (h *Hub) Reset() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Not in Spawn: the server announces rain once, around the join, and the
+	// event may land before Spawn runs.
+	h.setWeatherLocked(weather{})
 	h.runtime = 0
 	h.forgetPlayersLocked()
 	h.resetLocked()
@@ -345,6 +349,8 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		h.updateBlocks(h.blockEdits(placed))
 	case *packet.SetTime:
 		h.setTime(p)
+	case *packet.LevelEvent:
+		h.levelEvent(p)
 	case *packet.GameRulesChanged:
 		h.gameRules(p.GameRules)
 	case *packet.BiomeDefinitionList:

@@ -56,3 +56,5 @@ func encodeBiomes(cx, cz int32, b *subchunk.ColumnBiomes) []byte {
 	}
 	return f
 }
+
+func encodeWeather(w weather) []byte { return []byte{frameWeather, w.rain, w.thunder} }

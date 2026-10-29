@@ -236,7 +236,7 @@
 // the same technique prismarine-viewer's mesher uses; no code is copied.
 import * as THREE from 'three';
 import { createEntities } from './v1/camera/entities.js';
-import { skyState, createClock, UNDERWATER_FAR, underwaterFog } from './v1/camera/sky.js';
+import { skyState, createClock, createRain, UNDERWATER_FAR, underwaterFog } from './v1/camera/sky.js';
 
 const t0 = performance.now();
 const stats = window.__stats = { firstFrameMs: null, frames: 0, bytes: 0, wsOpenMs: null, settledMs: null, lastBlockAt: 0, workMs: 0, workMaxMs: 0, drawn: 0, total: 0, drawnSum: 0, totalSum: 0 };
@@ -774,6 +774,9 @@ function onMessage(ev) {
       if (len > 0 && p + len <= u8.length) ents.setSkin(id || -1, slim, u8.slice(p, p + len));
       break;
     }
+    case 20:
+      rainLevel = u8[1] / 255; thunderLevel = u8[2] / 255;
+      break;
     case 15:
       if (!timePinned) clock.set(dv.getInt32(1, true), (u8[5] & 1) !== 0);
       break;
@@ -846,7 +849,30 @@ if (timePinned) clock.set(pinned, true);
 let lighting = true;
 let biomeTints = new Map();  // id -> linear water colour, for the view from under water
 const biomeCols = new Map(); // "cx,cz" -> ids, the same columns the worker holds
+let rainLevel = 0, thunderLevel = 0, shownRain = -1, shownThunder = -1;
 let lastTicks = NaN, sky = skyState(6000);
+
+// Rain streaks: one LineSegments over a recycled buffer, drawn only while it
+// rains. ?rain=<0..1>&thunder=<0..1> pins the weather like ?time pins the clock.
+const weatherPinned = query.has('rain') || query.has('thunder');
+if (weatherPinned) { rainLevel = Number(query.get('rain')) || 0; thunderLevel = Number(query.get('thunder')) || 0; }
+const rain = createRain();
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rain.positions, 3).setUsage(THREE.DynamicDrawUsage));
+const rainLines = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({
+  color: 0xb4c4e0, transparent: true, opacity: .45, depthWrite: false, fog: false,
+}));
+rainLines.frustumCulled = false;
+rainLines.visible = false;
+scene.add(rainLines);
+function updateRain(now) {
+  const n = underwater ? 0 : rain.count(Math.max(rainLevel, thunderLevel * .6));
+  rainLines.visible = n > 0;
+  if (!n) return;
+  rain.fill(n, camera.position.x, camera.position.y, camera.position.z, now / 1000);
+  rainGeo.attributes.position.needsUpdate = true;
+  rainGeo.setDrawRange(0, n * 2);
+}
 const tmp = new THREE.Color();
 const srgb = (c, v) => c.setRGB(v[0], v[1], v[2], THREE.SRGBColorSpace);
 
@@ -868,9 +894,9 @@ function waterColor() {
 function updateSky() {
   const ticks = clock.ticks();
   const wet = waterAt(Math.floor(camera.position.x), Math.floor(camera.position.y), Math.floor(camera.position.z));
-  if (Math.abs(ticks - lastTicks) < 2 && wet === underwater) return;
-  lastTicks = ticks;
-  sky = skyState(ticks);
+  if (Math.abs(ticks - lastTicks) < 2 && wet === underwater && rainLevel === shownRain && thunderLevel === shownThunder) return;
+  lastTicks = ticks; shownRain = rainLevel; shownThunder = thunderLevel;
+  sky = skyState(ticks, rainLevel, thunderLevel);
   fogUniforms.uSkyDark.value = sky.dark;
   fogUniforms.uBright.value = sky.bright;
   ents.setAmbient(sky.ambient);
@@ -879,12 +905,17 @@ function updateSky() {
   srgb(SKY_HORIZON, sky.horizon);
   u.uSunDir.value.set(...sky.sun); u.uMoonDir.value.set(...sky.moon);
   u.uGlow.value.set(srgbToLinear(sky.glow[0]), srgbToLinear(sky.glow[1]), srgbToLinear(sky.glow[2]), sky.glow[3]);
-  u.uStars.value = sky.stars; u.uTurn.value = sky.angle * 2 * Math.PI; u.uDisc.value = 1;
+  u.uStars.value = sky.stars; u.uTurn.value = sky.angle * 2 * Math.PI; u.uDisc.value = sky.disc;
   if (wet !== underwater) {
     underwater = wet;
     if (!wet) setFog(radius);
     else setUnderwaterFog();
   }
+  if (!underwater && sky.wet > 0) {
+    // Rain closes the fog in; setFog restores the clear-weather distance.
+    fogUniforms.uFogFar.value = scene.fog.far = fogFar * (1 - .4 * sky.wet);
+    fogUniforms.uFogNear.value = scene.fog.near = fogUniforms.uFogFar.value * .4;
+  } else if (!underwater && fogUniforms.uFogFar.value !== fogFar) setFog(radius);
   if (underwater) {
     // Everything seen from inside water is the water's colour, dimmed by the light.
     const c = underwaterFog(waterColor(), sky.bright);
@@ -915,6 +946,7 @@ function frame() {
   skyDome.position.copy(camera.position);
   cull();
   ents.frame(performance.now());
+  updateRain(performance.now());
   renderer.render(scene, camera);
   stats.frames++;
   // Time spent in this callback, not the gap between frames: the gap is pinned

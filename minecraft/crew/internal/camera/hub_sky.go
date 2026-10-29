@@ -155,5 +155,8 @@ func (h *Hub) skyHeadLocked() [][]byte {
 	if h.biomeTable != nil {
 		out = append(out, h.biomeTable)
 	}
+	if h.weather != (weather{}) {
+		out = append(out, encodeWeather(h.weather))
+	}
 	return out
 }

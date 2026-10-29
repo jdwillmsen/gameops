@@ -21,7 +21,7 @@ export function celestialAngle(ticks) {
   return d + (e - d) / 3;
 }
 
-export function skyState(ticks) {
+export function skyState(ticks, rain = 0, thunder = 0) {
   const a = celestialAngle(ticks), turn = a * 2 * Math.PI;
   const c = Math.cos(turn);
   const bright = clamp01(c * 2 + .5);
@@ -36,18 +36,40 @@ export function skyState(ticks) {
   }
   // x grows to the east: the sun rises there and sets in the west.
   const sun = [-Math.sin(turn), c, 0];
+  const w = weatherSky(rain, thunder);
+  const toGrey = (col, k) => {
+    const grey = (col[0] * .3 + col[1] * .59 + col[2] * .11) * k;
+    return col.map(v => v + (grey - v) * w.grey);
+  };
   return {
     angle: a,
-    bright,
-    dark: (1 - bright) * MAX_SKY_DARK,
-    zenith: BASE_ZENITH.map(v => v * bright),
-    horizon: BASE_FOG.map((v, i) => v * fogK[i]),
-    glow,
+    bright: bright * w.light,
+    dark: Math.min(MAX_SKY_DARK, (1 - bright) * MAX_SKY_DARK + w.darken),
+    zenith: toGrey(BASE_ZENITH.map(v => v * bright), w.sky),
+    horizon: toGrey(BASE_FOG.map((v, i) => v * fogK[i]), w.sky),
+    glow: [glow[0], glow[1], glow[2], glow[3] * (1 - w.grey)],
     sun,
     moon: sun.map(v => -v),
-    stars: stars * stars * .5,
+    stars: stars * stars * .5 * (1 - w.grey),
+    // How strongly the sun and moon discs show through cloud.
+    disc: 1 - w.grey,
     // How strongly entities, which carry no baked light, are lit.
-    ambient: .3 + .7 * bright,
+    ambient: (.3 + .7 * bright) * w.light,
+    wet: w.wet,
+  };
+}
+
+// How rain (0..1) and thunder (0..1) change the sky: the colours drain to a
+// darker grey, the discs and stars are hidden, and sky light drops a few levels.
+export function weatherSky(rain, thunder) {
+  const r = clamp01(rain), t = clamp01(thunder);
+  const wet = Math.max(r, t);
+  return {
+    wet,
+    grey: wet * .8,
+    sky: 1 - .35 * r - .3 * t,
+    light: 1 - .3 * r - .3 * t,
+    darken: 2 * r + 2 * t,
   };
 }
 
@@ -73,4 +95,43 @@ export const UNDERWATER_FAR = 24;
 export function underwaterFog(water, bright) {
   const k = .35 + .65 * bright;
   return water.map(v => v * k);
+}
+
+// Rain is a fixed pool of streaks laid out once; each frame only rewrites the
+// vertex buffer. A streak's column is a fixed point of a lattice around the
+// camera, so it stays put in the world as the camera moves, and it falls by
+// wrapping through a box of RAIN_H blocks.
+export const RAIN_MAX = 600;
+export const RAIN_W = 28;
+export const RAIN_H = 20;
+export const RAIN_SPEED = 22;
+export const RAIN_LEN = 1.4;
+const RAIN_SLANT = .12;
+
+export function createRain(max = RAIN_MAX) {
+  const ox = new Float32Array(max), oy = new Float32Array(max), oz = new Float32Array(max), v = new Float32Array(max);
+  // A fixed generator so the layout does not depend on page load.
+  let s = 12345;
+  const rnd = () => (s = (s * 1664525 + 1013904223) >>> 0) / 4294967296;
+  for (let i = 0; i < max; i++) { ox[i] = rnd() * RAIN_W; oz[i] = rnd() * RAIN_W; oy[i] = rnd() * RAIN_H; v[i] = .8 + rnd() * .4; }
+  const wrap = (x, size) => ((x % size) + size) % size;
+  return {
+    max,
+    positions: new Float32Array(max * 6),
+    // How many streaks a rain level draws.
+    count(level) { return Math.round(max * clamp01(level)); },
+    // Writes n streaks around (cx, cy, cz) at time t seconds; two vertices each.
+    fill(n, cx, cy, cz, t) {
+      const p = this.positions;
+      for (let i = 0; i < n; i++) {
+        const x = cx + wrap(ox[i] - cx, RAIN_W) - RAIN_W / 2;
+        const z = cz + wrap(oz[i] - cz, RAIN_W) - RAIN_W / 2;
+        const y = cy + RAIN_H * .35 - wrap(oy[i] - cy + RAIN_SPEED * v[i] * t, RAIN_H);
+        const o = i * 6;
+        p[o] = x; p[o + 1] = y; p[o + 2] = z;
+        p[o + 3] = x - RAIN_SLANT * RAIN_LEN; p[o + 4] = y - RAIN_LEN; p[o + 5] = z;
+      }
+      return n;
+    },
+  };
 }

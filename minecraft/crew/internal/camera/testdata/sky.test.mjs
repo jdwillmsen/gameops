@@ -63,3 +63,43 @@ test('underwater light darkens the water colour but never to black', () => {
   assert.deepEqual(day, [.2, .4, 1]);
   assert.ok(night[2] > .3 && night[2] < 1);
 });
+
+test('rain greys and dims the sky, hides the discs, and thunder goes further', () => {
+  const clear = sky.skyState(6000), rain = sky.skyState(6000, 1, 0), storm = sky.skyState(6000, 1, 1);
+  assert.deepEqual(sky.skyState(6000, 0, 0), clear);
+  assert.equal(clear.disc, 1);
+  assert.ok(rain.disc < .3, `disc ${rain.disc}`);
+  const spread = c => Math.max(...c) - Math.min(...c);
+  assert.ok(spread(rain.zenith) < spread(clear.zenith) / 3, 'rain sky is nearly grey');
+  assert.ok(rain.zenith[2] < clear.zenith[2]);
+  assert.ok(storm.zenith[2] < rain.zenith[2], 'a storm is darker than rain');
+  assert.ok(storm.dark > rain.dark && rain.dark > clear.dark);
+  assert.ok(storm.dark <= sky.MAX_SKY_DARK);
+  assert.ok(storm.ambient < rain.ambient && rain.ambient < clear.ambient);
+  assert.equal(sky.skyState(18000, 1, 1).dark, sky.MAX_SKY_DARK);
+  assert.ok(sky.skyState(18000, 1, 0).stars < sky.skyState(18000).stars / 3);
+});
+
+test('the rain pool wraps around the camera and never writes outside its buffer', () => {
+  const r = sky.createRain(100);
+  assert.equal(r.count(0), 0);
+  assert.equal(r.count(.5), 50);
+  assert.equal(r.count(2), 100);
+  for (const cam of [[0, 70, 0], [-1234.5, 12, 98765.25]]) {
+    for (const t of [0, 1.7, 1000]) {
+      const n = r.fill(r.count(1), cam[0], cam[1], cam[2], t);
+      for (let i = 0; i < n; i++) {
+        const o = i * 6, p = r.positions;
+        assert.ok(Math.abs(p[o] - cam[0]) <= sky.RAIN_W / 2 + 1e-3, `x ${p[o]}`);
+        assert.ok(Math.abs(p[o + 2] - cam[2]) <= sky.RAIN_W / 2 + 1e-3, `z ${p[o + 2]}`);
+        assert.ok(p[o + 1] <= cam[1] + sky.RAIN_H * .35 + 1e-3 && p[o + 1] >= cam[1] - sky.RAIN_H * .65 - sky.RAIN_LEN - 1e-3, `y ${p[o + 1]}`);
+        assert.ok(p[o + 1] - p[o + 4] > 1, 'a streak has length');
+      }
+    }
+  }
+  const a = r.positions.slice(0, 6); r.fill(1, 0, 70, 0, 0); const y0 = r.positions[1];
+  r.fill(1, 0, 70, 0, .05);
+  assert.ok(r.positions[1] < y0 || y0 - r.positions[1] > sky.RAIN_H / 2, 'streaks fall');
+  assert.equal(r.positions.length, 600);
+  void a;
+});
