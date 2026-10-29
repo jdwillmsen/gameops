@@ -20,6 +20,7 @@ package camera
 //	time         [15][ticks i32][flags u8]                world time; flags bit 0: the clock is stopped
 //	biome table  [16][n u16]{id u16, grass rgb, foliage rgb, water rgb, water alpha u8}...   tints per biome id
 //	biomes       [17][cx i32][cz i32][n u16][palette n x u16][256 indices if n > 1]   a column's biome ids, indexed x*16+z
+//	weather      [20][rain u8][thunder u8]               rain and thunder levels, 0 (none) to 255 (full)
 //
 // The time frame carries the world time in ticks (24000 to a day, 0 at
 // sunrise); the page runs the clock on from there at 20 ticks a second unless
@@ -108,6 +109,7 @@ const (
 	frameTime        byte = 15
 	frameBiomeTable  byte = 16
 	frameBiomes      byte = 17
+	frameWeather     byte = 20
 
 	// Entity data flag bits.
 	entBaby    byte = 1
