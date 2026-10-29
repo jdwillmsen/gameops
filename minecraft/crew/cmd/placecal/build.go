@@ -266,7 +266,14 @@ func mergeTables(base, later *place.Table, asked map[string]bool, vocab vocabula
 	sort.Strings(left)
 	base.Header.NotCovered = left
 	base.Header.Partial = len(left) > 0
-	base.Header.Unplaceable = union(base.Header.Unplaceable, later.Header.Unplaceable)
+	// An item the later run was asked for and placed is no longer unplaceable.
+	var stillUnplaced []string
+	for _, n := range base.Header.Unplaceable {
+		if !asked[n] {
+			stillUnplaced = append(stillUnplaced, n)
+		}
+	}
+	base.Header.Unplaceable = union(stillUnplaced, later.Header.Unplaceable)
 	base.Header.UnmappedItems = union(base.Header.UnmappedItems, later.Header.UnmappedItems)
 	// The count is of distinct hashes a run saw; the runs overlap, so the
 	// larger one is the better floor, not their sum.

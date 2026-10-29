@@ -39,6 +39,12 @@ type Recipe struct {
 	// Soil is the block the support must be when it is not the default
 	// (stone or dirt): sand for a cactus, farmland for a carrot.
 	Soil string `json:"soil,omitempty"`
+	// Stand says where the unit must be for the click, when the facing
+	// follows its position, not its look: "above" is an eye at least three
+	// cells over the placed cell and within one cell of it horizontally,
+	// "below" is a placed cell higher than the eye, within one cell
+	// horizontally. Empty means anywhere in reach.
+	Stand string `json:"stand,omitempty"`
 }
 
 // Cost orders recipes by how much a unit has to do: the support it must
@@ -57,6 +63,9 @@ func (r Recipe) Cost() float64 {
 		c++
 	}
 	if r.Sneak {
+		c += 2
+	}
+	if r.Stand != "" {
 		c += 2
 	}
 	if r.Pitch != 0 {

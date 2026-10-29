@@ -267,7 +267,7 @@ func (w *worker) firstPass(ctx context.Context, name string, hasBlock bool, ir *
 			// Cactus, carrots and the like need sand, farmland or the like
 			// under them; offer each soil in turn before calling the item
 			// unplaceable.
-			if !hasBlock {
+			if !hasBlock && !soilItem(name) {
 				return res, c0, false, nil
 			}
 			for _, soil := range altSoils {
@@ -316,6 +316,40 @@ func (w *worker) firstPass(ctx context.Context, name string, hasBlock bool, ir *
 	return res, c0, true, nil
 }
 
+// sixteenWay names the state key of blocks that turn in 16 steps of 22.5
+// degrees; the 90 degree yaws of the matrix reach only four of them.
+const sixteenWay = "ground_sign_direction"
+
+// rotations tries the yaws between the matrix's, for a block that turns in 16
+// steps, around the baseline click.
+func (w *worker) rotations(ctx context.Context, name, block string, c0 click, ir *itemResult) error {
+	if !w.r.vocab.has(block, sixteenWay) {
+		return nil
+	}
+	for _, y := range sixteenYaws() {
+		c := c0
+		c.Yaw = y
+		o, err := w.trial(ctx, name, c)
+		if err != nil {
+			return err
+		}
+		ir.trials++
+		ir.add(c, o)
+	}
+	return nil
+}
+
+// soilItem says an item is a plant the creative inventory lists without a
+// block form, which only grows on sand, farmland and the like.
+func soilItem(name string) bool {
+	for _, part := range []string{"cactus", "carrot", "potato", "beetroot", "wheat", "melon_seeds", "pumpkin_seeds", "torchflower_seeds", "pitcher_pod", "sugar_cane", "kelp", "nether_wart", "chorus", "cocoa", "sweet_berries"} {
+		if strings.Contains(name, part) {
+			return true
+		}
+	}
+	return false
+}
+
 // altSoils are the floors tried under an item the dirt lane did not take.
 var altSoils = []string{"sand", "farmland", "end_stone", "soul_sand", "grass_block"}
 
@@ -362,8 +396,13 @@ func (w *worker) withSecondHalf(o outcome, cell protocol.BlockPos) outcome {
 // byConstruction names the state keys present in props that the placement of
 // the other half decides, not the click: a door's upper half, a bed's head
 // and whether anyone sleeps in it.
-func byConstruction(props map[string]any) []string {
+func byConstruction(block string, props map[string]any) []string {
 	var out []string
+	// A plate's signal follows whatever stands on it (the unit's own feet
+	// read 1, nothing reads 0), never the click.
+	if _, ok := props["redstone_signal"]; ok && strings.HasSuffix(block, "pressure_plate") {
+		out = append(out, "redstone_signal")
+	}
 	for _, k := range []string{"head_piece_bit", "occupied_bit", "upper_block_bit"} {
 		if _, ok := props[k]; ok {
 			out = append(out, k)
@@ -404,7 +443,10 @@ func (w *worker) calibrate(ctx context.Context, it item) (*itemResult, error) {
 	if err := w.sweep(ctx, it.name, o0.Name, sig, clicks, res, ir); err != nil {
 		return nil, err
 	}
-	for _, k := range byConstruction(o0.Props) {
+	if err := w.rotations(ctx, it.name, o0.Name, c0, ir); err != nil {
+		return nil, err
+	}
+	for _, k := range byConstruction(o0.Name, o0.Props) {
 		if ir.derived[o0.Name] == nil {
 			ir.derived[o0.Name] = map[string]bool{}
 		}

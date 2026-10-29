@@ -18,9 +18,15 @@ type gap struct {
 	have, want  int
 	missing     []string // state keys the family reaches and this block does not
 	extra       []string // state keys only this block reaches
+	// inferredInSplit says the block matches the majority but was copied
+	// from a sibling in a family whose members do not all agree.
+	inferredInSplit bool
 }
 
 func (g gap) String() string {
+	if g.inferredInSplit {
+		return fmt.Sprintf("%s: matches the family majority (%d states) but was inferred from a sibling in a split family", g.block, g.have)
+	}
 	s := fmt.Sprintf("%s: %d reachable states, family has %d", g.block, g.have, g.want)
 	if len(g.missing) > 0 {
 		s += "; missing " + sample3(g.missing)
@@ -127,6 +133,11 @@ func gapCheck(t *place.Table) []gap {
 		for _, n := range names {
 			have := reachableKeys(t.Blocks[n])
 			if setSig(have) == best {
+				// A sibling-inferred block in a family that is split could
+				// have copied the wrong half of it; it must be run in full.
+				if len(votes) > 1 && t.Blocks[n].Inferred {
+					out = append(out, gap{block: n, item: t.Blocks[n].Item, have: len(have), want: len(want), inferredInSplit: true})
+				}
 				continue
 			}
 			g := gap{block: n, item: t.Blocks[n].Item, have: len(have), want: len(want)}

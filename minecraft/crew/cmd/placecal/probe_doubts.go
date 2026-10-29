@@ -46,11 +46,11 @@ func probeHinge(p *prober) {
 		{"none", func() {}},
 		{"stone+x", stone(1, 0)}, {"stone-x", stone(-1, 0)}, {"stone+z", stone(0, 1)}, {"stone-z", stone(0, -1)},
 		{"door+x", func() {
-			_ = p.putTop("oak_door", p.cell(1, 1, 0), hMid, click{})
+			_ = p.putTop("wooden_door", p.cell(1, 1, 0), hMid, click{})
 			p.waitBlock(p.cell(1, 1, 0), time.Second)
 		}},
 		{"door-x", func() {
-			_ = p.putTop("oak_door", p.cell(-1, 1, 0), hMid, click{})
+			_ = p.putTop("wooden_door", p.cell(-1, 1, 0), hMid, click{})
 			p.waitBlock(p.cell(-1, 1, 0), time.Second)
 		}},
 	}
@@ -65,7 +65,7 @@ func probeHinge(p *prober) {
 				p.u.waitFor(p.ctx, time.Second, func() bool { return p.u.isAir(lower) })
 				p.stand(0.5, 1, 4.5, yaw, 0)
 				n.set()
-				_ = p.putTop("oak_door", lower, h, click{Yaw: yaw})
+				_ = p.putTop("wooden_door", lower, h, click{Yaw: yaw})
 				if !p.waitBlock(lower, 700*time.Millisecond) {
 					row = append(row, h+"=none")
 					continue
@@ -130,7 +130,7 @@ func probePistons(p *prober) {
 				target := sc.prep()
 				p.stand(sc.stand[0], sc.stand[1], sc.stand[2], 0, pitch)
 				_ = p.put(item, protocol.BlockPos{target.X(), target.Y() - 1, target.Z()}, fTop, hitVec(fTop, hMid), click{Pitch: pitch})
-				if !p.waitBlock(target, 700*time.Millisecond) {
+				if !p.waitBlock(target, 1800*time.Millisecond) {
 					parts = append(parts, fmt.Sprintf("pitch %d: none", pitch))
 					continue
 				}
@@ -162,7 +162,7 @@ func probeYaws(p *prober) {
 	p.rep.head("Finer yaw steps (11.25 degree sweep)")
 	cell := p.cell(0, 1, 0)
 	p.stand(0.5, 1, 4.5, 0, 0)
-	for _, item := range []string{"oak_sign", "oak_hanging_sign", "white_banner", "skeleton_skull", "creeper_head", "player_head"} {
+	for _, item := range []string{"oak_sign", "oak_hanging_sign", "banner", "skeleton_skull", "creeper_head", "player_head"} {
 		byVal := map[string][]int{}
 		name := ""
 		for _, yaw := range roundYaws() {
@@ -205,7 +205,7 @@ func probeYaws(p *prober) {
 func probePlates(p *prober) {
 	p.rep.head("Pressure plate redstone_signal")
 	cell := p.cell(0, 1, 0)
-	for _, item := range []string{"stone_pressure_plate", "oak_pressure_plate", "light_weighted_pressure_plate", "heavy_weighted_pressure_plate", "polished_blackstone_pressure_plate"} {
+	for _, item := range []string{"stone_pressure_plate", "wooden_pressure_plate", "light_weighted_pressure_plate", "heavy_weighted_pressure_plate", "polished_blackstone_pressure_plate"} {
 		p.reset()
 		p.stand(0.5, 1, 5.5, 0, 0)
 		_ = p.putTop(item, cell, hMid, click{})
@@ -244,7 +244,7 @@ func probeBeds(p *prober) {
 		p.reset()
 		// Stand so the head side is away from the unit; place on the cell.
 		p.stand(0.5-float32(d.dx)*4, 1, 0.5-float32(d.dz)*4, d.yaw, 0)
-		_ = p.putTop("red_bed", foot, hMid, click{Yaw: d.yaw})
+		_ = p.putTop("bed", foot, hMid, click{Yaw: d.yaw})
 		if !p.waitBlock(foot, 700*time.Millisecond) {
 			p.rep.say("- %s: placed nothing", d.name)
 			continue
