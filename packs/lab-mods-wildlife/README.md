@@ -17,3 +17,10 @@ fails if the committed files differ from a fresh run.
 Component groups `gameops:wild`, `gameops:tamed`, `gameops:sitting` and events
 `gameops:on_tamed`, `gameops:on_sit`, `gameops:on_stand` are stable: tamed pets
 saved in a world depend on them.
+
+## Test hooks
+
+`/scriptevent` ids for lab testing, not gameplay:
+
+- `gameops:tame` tames the nearest `gameops:` animal within 64 blocks to the player who runs it.
+- `gameops:perf` logs one `gameops:perf mean_tick_ms=... ticks=200` line after 200 ticks.
