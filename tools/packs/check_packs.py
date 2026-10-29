@@ -131,12 +131,29 @@ PLAYER_TARGET_GOALS = ("nearest_attackable_target", "owner_hurt_by_target", "own
 OWNER_GOALS = ("owner_hurt_by_target", "owner_hit_target")
 
 
-def goal_filter_tests(goal, rep, where):
-    return [t for et in goal.get("entity_types", []) for t in entity_filter_items(et.get("filters"), rep, where)]
+NEGATIVE_OPERATORS = ("!=", "not")
+# Entries in entity_types are OR'd, so each one must be safe on its own.
+PLAYER_SAFE_GOALS = ("nearest_attackable_target",) + OWNER_GOALS
 
 
-def is_player_family(test, ops):
-    return test.get("test") == "is_family" and test.get("value") == "player" and test.get("operator", "==") in ops
+def is_player_family(test, positive=True):
+    if test.get("test") != "is_family" or test.get("value") != "player":
+        return False
+    negative = test.get("operator", "==") in NEGATIVE_OPERATORS
+    return negative != positive
+
+
+def excludes_player(tests, strict):
+    """strict: only an explicit is_family != player counts (owner goals); else a non-player family does too."""
+    for t in tests:
+        if t.get("test") != "is_family":
+            continue
+        negative = t.get("operator", "==") in NEGATIVE_OPERATORS
+        if negative and t.get("value") == "player":
+            return True
+        if not strict and not negative and t.get("value") != "player":
+            return True
+    return False
 
 
 def check_wildlife_entity(path, comps, rep):
@@ -146,11 +163,16 @@ def check_wildlife_entity(path, comps, rep):
         goal = comps.get("minecraft:behavior." + name)
         if goal is None:
             continue
-        tests = goal_filter_tests(goal, rep, path)
-        if any(is_player_family(t, ("==", "equals")) for t in tests):
-            rep.fail(f"{path}: {name} must never select family player")
-        if name in OWNER_GOALS and not any(is_player_family(t, ("!=", "not")) for t in tests):
-            rep.fail(f"{path}: {name} must filter is_family != player")
+        entries = goal.get("entity_types")
+        if not entries and name in PLAYER_SAFE_GOALS:
+            rep.fail(f"{path}: {name} needs entity_types that exclude family player")
+        for i, et in enumerate(entries or []):
+            tests = list(entity_filter_items(et.get("filters"), rep, path))
+            if any(is_player_family(t) for t in tests):
+                rep.fail(f"{path}: {name} must never select family player")
+            elif name in PLAYER_SAFE_GOALS and not excludes_player(tests, name in OWNER_GOALS):
+                rep.fail(f"{path}: {name} entity_types entry {i} must exclude family player "
+                         f"(is_family != player) or name a non-player family")
     families = (comps.get("minecraft:type_family") or {}).get("family") or []
     if WILDLIFE_FAMILY not in families:
         rep.fail(f"{path}: entity must be in family {WILDLIFE_FAMILY}")
@@ -316,13 +338,20 @@ def pack_size(pack):
     return total
 
 
+def default_packs(base):
+    """Every folder under base, except one holding only policy.txt (a pack still being scaffolded).
+
+    Any other folder is kept so a typo'd directory name fails instead of vanishing.
+    """
+    return [os.path.join(base, n) for n in sorted(os.listdir(base))
+            if os.path.isdir(os.path.join(base, n)) and os.listdir(os.path.join(base, n)) != ["policy.txt"]]
+
+
 def main(argv):
     if argv:
         packs = argv
     else:
-        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "packs")
-        packs = [os.path.join(base, n) for n in sorted(os.listdir(base))
-                 if os.path.isdir(os.path.join(base, n, "behavior_pack")) or os.path.isdir(os.path.join(base, n, "resource_pack"))]
+        packs = default_packs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "packs"))
     if not packs:
         print("no packs found")
         return 1
