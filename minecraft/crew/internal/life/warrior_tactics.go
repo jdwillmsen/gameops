@@ -102,5 +102,24 @@ func (l *Life) familyTactic(ctx context.Context, a skill.Actuator, p act.Pose, e
 	if !ok {
 		return false, nil
 	}
-	return t.Engage(ctx, &Fight{Life: l, Actuator: a, Pose: p, Target: e, Snapshot: s, Params: l.warrior.p, Family: fam})
+	handled, err := t.Engage(ctx, &Fight{Life: l, Actuator: a, Pose: p, Target: e, Snapshot: s, Params: l.warrior.p, Family: fam})
+	if err != nil {
+		l.noteTacticError(pr.TacticFor(fam), fam, err)
+	}
+	return handled, err
+}
+
+// tacticErrorEvery is the ticks (50 ms each) between two logs of one tactic's
+// error: the task runner drops the error, so this line is the only trace.
+const tacticErrorEvery = 20 * 60
+
+func (l *Life) noteTacticError(name string, fam tactics.Family, err error) {
+	if last, ok := l.tacticErrAt[name]; ok && l.tick-last < tacticErrorEvery {
+		return
+	}
+	if l.tacticErrAt == nil {
+		l.tacticErrAt = map[string]uint64{}
+	}
+	l.tacticErrAt[name] = l.tick
+	l.logEvent("tactic_error", map[string]any{"tactic": name, "family": string(fam), "error": err.Error()})
 }
