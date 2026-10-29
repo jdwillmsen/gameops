@@ -190,6 +190,56 @@ func TestATacticErrorIsTheTicksError(t *testing.T) {
 	}
 }
 
+func TestATacticErrorIsLoggedOncePerMinute(t *testing.T) {
+	withTactics(t, failTactic{name: "zombie/fail", family: tactics.FamilyZombie})
+	r := newWarrior(t, "striker", start)
+	if err := r.l.SetProfile(usingTactic("zombie/fail")); err != nil {
+		t.Fatal(err)
+	}
+	r.give(0, 303, 1)
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+	snap := r.tracker.Snapshot()
+	if !r.l.Engaged(r.a.Pose(), snap) {
+		t.Fatal("not engaged with a zombie in reach")
+	}
+	count := func() int {
+		n := 0
+		for _, ln := range r.log.lines {
+			if ln.event == "tactic_error" {
+				n++
+			}
+		}
+		return n
+	}
+	for range 5 {
+		r.l.tick++
+		if err := r.l.Fight(context.Background(), r.a, snap); !errors.Is(err, errTactic) {
+			t.Fatalf("Fight = %v, want the tactic's error unchanged", err)
+		}
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("logged %d times in one minute, want once", n)
+	}
+	r.l.tick += tacticErrorEvery
+	r.l.Fight(context.Background(), r.a, snap)
+	if n := count(); n != 2 {
+		t.Errorf("logged %d times after the minute, want a second line", n)
+	}
+}
+
+func TestSetProfileOwnsItsTacticTable(t *testing.T) {
+	r := newWarrior(t, "striker", start)
+	pr := tactics.NewProfile("p")
+	pr.Tactics = map[tactics.Family]string{tactics.FamilyZombie: "zombie/a"}
+	if err := r.l.SetProfile(pr); err != nil {
+		t.Fatal(err)
+	}
+	pr.Tactics[tactics.FamilyZombie] = "zombie/b"
+	if got := r.l.Profile().TacticFor(tactics.FamilyZombie); got != "zombie/a" {
+		t.Errorf("tactic = %q after the caller edited its map, want zombie/a", got)
+	}
+}
+
 func TestTacticNamesListsAFamilysVariantsSorted(t *testing.T) {
 	withTactics(t,
 		&passTactic{name: "zombie/b", family: tactics.FamilyZombie},
