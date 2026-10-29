@@ -2,3 +2,7 @@ entity.gameops:tiger.name=Tiger
 item.spawn_egg.entity.gameops:tiger.name=Tiger Spawn Egg
 entity.gameops:cheetah.name=Cheetah
 item.spawn_egg.entity.gameops:cheetah.name=Cheetah Spawn Egg
+entity.gameops:lion.name=Lion
+item.spawn_egg.entity.gameops:lion.name=Lion Spawn Egg
+entity.gameops:black_leopard.name=Black Leopard
+item.spawn_egg.entity.gameops:black_leopard.name=Black Leopard Spawn Egg

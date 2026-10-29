@@ -1,0 +1,43 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:lion",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "male": "textures/entity/lion_male",
+        "female": "textures/entity/lion_female"
+      },
+      "geometry": {
+        "default": "geometry.gameops.lion"
+      },
+      "animations": {
+        "walk": "animation.gameops.cat.walk",
+        "sit": "animation.gameops.cat.sit",
+        "idle": "animation.gameops.cat.idle",
+        "attack": "animation.gameops.cat.attack"
+      },
+      "scripts": {
+        "animate": [
+          "walk",
+          "idle",
+          {
+            "sit": "query.is_sitting"
+          },
+          {
+            "attack": "variable.attack_time > 0"
+          }
+        ]
+      },
+      "render_controllers": [
+        "controller.render.gameops.lion"
+      ],
+      "spawn_egg": {
+        "base_color": "#c9a05a",
+        "overlay_color": "#6a4220"
+      }
+    }
+  }
+}

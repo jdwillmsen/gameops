@@ -5,7 +5,13 @@
       "identifier": "gameops:cheetah",
       "is_spawnable": true,
       "is_summonable": true,
-      "is_experimental": false
+      "is_experimental": false,
+      "properties": {
+        "gameops:sitting": {
+          "type": "bool",
+          "default": false
+        }
+      }
     },
     "component_groups": {
       "gameops:wild": {
@@ -203,6 +209,9 @@
         }
       },
       "gameops:on_sit": {
+        "set_property": {
+          "gameops:sitting": true
+        },
         "add": {
           "component_groups": [
             "gameops:sitting"
@@ -215,6 +224,9 @@
         }
       },
       "gameops:on_stand": {
+        "set_property": {
+          "gameops:sitting": false
+        },
         "add": {
           "component_groups": [
             "gameops:tamed_active"

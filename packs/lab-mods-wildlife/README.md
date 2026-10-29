@@ -11,7 +11,7 @@ fails if the committed files differ from a fresh run.
 |---|---|
 | `assets-src/species.py` | The species table: stats, taming food, prey, rivals, variants, ability |
 | `assets-src/build_behavior.py` | Entity JSON from a species |
-| `assets-src/cat_rig.py` | Shared cat skeleton and per-species proportions (tiger, cheetah) |
+| `assets-src/cat_rig.py` | Shared cat skeleton and per-species proportions (tiger, cheetah, lion, black leopard) |
 | `assets-src/build_models.py`, `build_textures.py` | Geometry, animations and PNG textures  |
 | `assets-src/generate.py` | Writes everything into the pack |
 
