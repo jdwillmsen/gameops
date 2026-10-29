@@ -79,3 +79,27 @@ func TestErrReportsALoadFailureInsteadOfLookingUnreachable(t *testing.T) {
 		t.Error("derived on a failed table")
 	}
 }
+
+func TestDefaultTableKnowsStandPositionsDoorHalvesAndSixteenSigns(t *testing.T) {
+	r, ok := Lookup("piston", map[string]any{"facing_direction": 1})
+	if !ok || r.Stand != "above" {
+		t.Errorf("piston facing up = %+v, %v", r, ok)
+	}
+	if r, ok := Lookup("piston", map[string]any{"facing_direction": 0}); !ok || r.Stand != "below" {
+		t.Errorf("piston facing down = %+v, %v", r, ok)
+	}
+	// The upper half and the hinge follow the other half and the neighbours.
+	if _, ok := Lookup("wooden_door", map[string]any{"upper_block_bit": true, "door_hinge_bit": true, "open_bit": false}); !ok {
+		t.Error("a door's upper half and hinge are derived and must not block a lookup")
+	}
+	seen := map[int]bool{}
+	tb, _ := Default()
+	for _, e := range tb.Blocks["standing_sign"].States {
+		if v, ok := e.State["ground_sign_direction"].(float64); ok {
+			seen[int(v)] = true
+		}
+	}
+	if len(seen) != 16 {
+		t.Errorf("standing sign reaches %d of 16 rotations", len(seen))
+	}
+}
