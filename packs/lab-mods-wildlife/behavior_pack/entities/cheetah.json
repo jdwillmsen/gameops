@@ -1,0 +1,270 @@
+{
+  "format_version": "1.21.0",
+  "minecraft:entity": {
+    "description": {
+      "identifier": "gameops:cheetah",
+      "is_spawnable": true,
+      "is_summonable": true,
+      "is_experimental": false
+    },
+    "component_groups": {
+      "gameops:wild": {
+        "minecraft:behavior.melee_attack": {
+          "priority": 4,
+          "speed_multiplier": 1.2,
+          "track_target": true
+        },
+        "minecraft:tameable": {
+          "probability": 0.33,
+          "tame_items": [
+            "rabbit"
+          ],
+          "tame_event": {
+            "event": "gameops:on_tamed",
+            "target": "self"
+          }
+        },
+        "minecraft:behavior.avoid_mob_type": {
+          "priority": 3,
+          "entity_types": [
+            {
+              "filters": {
+                "all_of": [
+                  {
+                    "test": "is_family",
+                    "subject": "other",
+                    "value": "player"
+                  },
+                  {
+                    "test": "has_equipment",
+                    "subject": "other",
+                    "domain": "hand",
+                    "operator": "not",
+                    "value": "rabbit"
+                  }
+                ]
+              },
+              "max_dist": 6,
+              "walk_speed_multiplier": 1.0,
+              "sprint_speed_multiplier": 1.3
+            }
+          ]
+        }
+      },
+      "gameops:tamed": {
+        "minecraft:is_tamed": {},
+        "minecraft:persistent": {},
+        "minecraft:sittable": {
+          "sit_event": {
+            "event": "gameops:on_sit",
+            "target": "self"
+          },
+          "stand_event": {
+            "event": "gameops:on_stand",
+            "target": "self"
+          }
+        }
+      },
+      "gameops:tamed_active": {
+        "minecraft:behavior.melee_attack": {
+          "priority": 4,
+          "speed_multiplier": 1.2,
+          "track_target": true
+        },
+        "minecraft:behavior.follow_owner": {
+          "priority": 6,
+          "speed_multiplier": 1.0,
+          "start_distance": 10,
+          "stop_distance": 2
+        },
+        "minecraft:behavior.owner_hurt_by_target": {
+          "priority": 1,
+          "entity_types": [
+            {
+              "filters": {
+                "test": "is_family",
+                "subject": "other",
+                "operator": "!=",
+                "value": "player"
+              },
+              "max_dist": 16
+            }
+          ]
+        },
+        "minecraft:behavior.owner_hit_target": {
+          "priority": 2,
+          "entity_types": [
+            {
+              "filters": {
+                "test": "is_family",
+                "subject": "other",
+                "operator": "!=",
+                "value": "player"
+              },
+              "max_dist": 16
+            }
+          ]
+        }
+      },
+      "gameops:sitting": {
+        "minecraft:behavior.stay_while_sitting": {
+          "priority": 1
+        }
+      },
+      "gameops:ability_ready": {
+        "minecraft:movement": {
+          "value": 0.45
+        }
+      },
+      "gameops:ability_active": {
+        "minecraft:movement": {
+          "value": 0.6
+        }
+      },
+      "gameops:ability_tired": {
+        "minecraft:movement": {
+          "value": 0.2
+        }
+      }
+    },
+    "components": {
+      "minecraft:type_family": {
+        "family": [
+          "gameops_cheetah",
+          "gameops_wildlife"
+        ]
+      },
+      "minecraft:collision_box": {
+        "width": 0.8,
+        "height": 0.9
+      },
+      "minecraft:health": {
+        "value": 30,
+        "max": 30
+      },
+      "minecraft:attack": {
+        "damage": 5
+      },
+      "minecraft:follow_range": {
+        "value": 24
+      },
+      "minecraft:movement": {
+        "value": 0.45
+      },
+      "minecraft:movement.basic": {},
+      "minecraft:navigation.walk": {
+        "can_path_over_water": false,
+        "avoid_water": true
+      },
+      "minecraft:jump.static": {},
+      "minecraft:physics": {},
+      "minecraft:pushable": {
+        "is_pushable": true,
+        "is_pushable_by_piston": true
+      },
+      "minecraft:nameable": {},
+      "minecraft:behavior.float": {
+        "priority": 0
+      },
+      "minecraft:behavior.random_stroll": {
+        "priority": 7,
+        "speed_multiplier": 0.8
+      },
+      "minecraft:behavior.look_at_player": {
+        "priority": 8
+      },
+      "minecraft:behavior.random_look_around": {
+        "priority": 9
+      }
+    },
+    "events": {
+      "minecraft:entity_spawned": {
+        "sequence": [
+          {
+            "add": {
+              "component_groups": [
+                "gameops:wild"
+              ]
+            }
+          }
+        ]
+      },
+      "gameops:on_tamed": {
+        "add": {
+          "component_groups": [
+            "gameops:tamed",
+            "gameops:tamed_active"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:wild"
+          ]
+        }
+      },
+      "gameops:on_sit": {
+        "add": {
+          "component_groups": [
+            "gameops:sitting"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:tamed_active"
+          ]
+        }
+      },
+      "gameops:on_stand": {
+        "add": {
+          "component_groups": [
+            "gameops:tamed_active"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:sitting"
+          ]
+        }
+      },
+      "gameops:ability_ready": {
+        "add": {
+          "component_groups": [
+            "gameops:ability_ready"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:ability_active",
+            "gameops:ability_tired"
+          ]
+        }
+      },
+      "gameops:ability_active": {
+        "add": {
+          "component_groups": [
+            "gameops:ability_active"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:ability_ready",
+            "gameops:ability_tired"
+          ]
+        }
+      },
+      "gameops:ability_tired": {
+        "add": {
+          "component_groups": [
+            "gameops:ability_tired"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:ability_ready",
+            "gameops:ability_active"
+          ]
+        }
+      }
+    }
+  }
+}

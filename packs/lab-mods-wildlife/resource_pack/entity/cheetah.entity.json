@@ -1,0 +1,42 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:cheetah",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/cheetah"
+      },
+      "geometry": {
+        "default": "geometry.gameops.cheetah"
+      },
+      "animations": {
+        "walk": "animation.gameops.cat.walk",
+        "sit": "animation.gameops.cat.sit",
+        "idle": "animation.gameops.cat.idle",
+        "attack": "animation.gameops.cat.attack"
+      },
+      "scripts": {
+        "animate": [
+          "walk",
+          "idle",
+          {
+            "sit": "query.is_sitting"
+          },
+          {
+            "attack": "variable.attack_time > 0"
+          }
+        ]
+      },
+      "render_controllers": [
+        "controller.render.gameops.cheetah"
+      ],
+      "spawn_egg": {
+        "base_color": "#d9b25a",
+        "overlay_color": "#3a2a18"
+      }
+    }
+  }
+}

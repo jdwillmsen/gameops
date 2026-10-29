@@ -1,36 +1,46 @@
+import cat_rig
 from species import Species
 
-TEXTURE = 64
+# One list for the animation file, the client entity files and their tests.
+ANIMATION_NAMES = ("walk", "sit", "idle", "attack")
+ANIMATION_PREFIX = "animation.gameops.cat."
+
+SWING = "math.cos(query.modified_distance_moved * 24.0) * {amp} * query.modified_move_speed"
+LUNGE = "math.sin(variable.attack_time * 180.0)"
 
 
 def geometry(s: Species) -> dict:
-    # Stub model: one box per animal until the cat rig replaces it. 22 x 10 x 10 unfolds to 64 x 32.
-    return {
-        "format_version": "1.12.0",
-        "minecraft:geometry": [{
-            "description": {
-                "identifier": f"geometry.gameops.{s.id}",
-                "texture_width": TEXTURE,
-                "texture_height": TEXTURE,
-                "visible_bounds_width": 3,
-                "visible_bounds_height": 2,
-                "visible_bounds_offset": [0, 0.75, 0],
-            },
-            "bones": [{
-                "name": "body",
-                "pivot": [0, 8, 0],
-                "cubes": [{"origin": [-5, 4, -11], "size": [10, 10, 22], "uv": [0, 0]}],
-            }],
-        }],
-    }
+    return cat_rig.build(cat_rig.PARAMS[s.id], f"geometry.gameops.{s.id}")
 
 
 def animations() -> dict:
-    # Stub: poses are filled in with the rig; the names are what entities already reference.
+    bones = {
+        "walk": {
+            "front_left_leg": {"rotation": [SWING.format(amp="40.0"), 0, 0]},
+            "back_right_leg": {"rotation": [SWING.format(amp="40.0"), 0, 0]},
+            "front_right_leg": {"rotation": [SWING.format(amp="-40.0"), 0, 0]},
+            "back_left_leg": {"rotation": [SWING.format(amp="-40.0"), 0, 0]},
+            "tail": {"rotation": [0, "math.cos(query.modified_distance_moved * 12.0) * 8.0", 0]},
+        },
+        # Pitching the body about its front drops the hindquarters; the head levels out again and the
+        # hind legs fold forward under the haunches.
+        "sit": {
+            "body": {"rotation": [-20, 0, 0]},
+            "head": {"rotation": [20, 0, 0]},
+            "back_left_leg": {"rotation": [-75, 0, 0]},
+            "back_right_leg": {"rotation": [-75, 0, 0]},
+            "tail": {"rotation": [-15, 0, 0]},
+        },
+        "idle": {
+            "tail": {"rotation": [0, "math.sin(query.life_time * 120.0) * 14.0", 0]},
+            "head": {"rotation": ["math.clamp(query.target_x_rotation, -30.0, 30.0)",
+                                  "math.clamp(query.target_y_rotation, -60.0, 60.0)", 0]},
+        },
+        "attack": {
+            "head": {"rotation": [f"30.0 * {LUNGE}", 0, 0], "position": [0, 0, f"-3.0 * {LUNGE}"]},
+        },
+    }
     return {
         "format_version": "1.8.0",
-        "animations": {
-            f"animation.gameops.cat.{name}": {"loop": True, "bones": {}}
-            for name in ("walk", "sit", "idle", "attack")
-        },
+        "animations": {ANIMATION_PREFIX + n: {"loop": True, "bones": bones[n]} for n in ANIMATION_NAMES},
     }
