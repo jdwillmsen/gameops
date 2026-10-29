@@ -1,5 +1,5 @@
 import { world, system, ScriptEventSource } from "@minecraft/server";
-import { sprintPhase } from "./abilities.js";
+import { sprintPhase, pruneStale } from "./abilities.js";
 
 const SPRINT = {
   "gameops:cheetah": { activeTicks: 160, tiredTicks: 160 },
@@ -9,7 +9,9 @@ const DIMENSIONS = ["overworld", "nether", "the_end"];
 const STEP = 5;
 const TAME_SEARCH_RADIUS = 64;
 
-const sprintState = new Map();
+const STATE_GRACE_TICKS = 6000;
+
+let sprintState = new Map();
 
 function setPhase(entity, phase) {
   try {
@@ -21,22 +23,18 @@ function setPhase(entity, phase) {
 
 system.runInterval(() => {
   const tick = system.currentTick;
-  const seen = new Set();
   for (const dimId of DIMENSIONS) {
     for (const [type, cfg] of Object.entries(SPRINT)) {
       for (const entity of world.getDimension(dimId).getEntities({ type })) {
         if (!entity.isValid) continue;
-        seen.add(entity.id);
         const prev = sprintState.get(entity.id);
         const next = sprintPhase(prev ?? { phase: "ready", until: 0 }, tick, cfg);
-        sprintState.set(entity.id, next);
+        sprintState.set(entity.id, { ...next, lastSeen: tick });
         if (!prev || next.phase !== prev.phase) setPhase(entity, next.phase);
       }
     }
   }
-  for (const key of sprintState.keys()) {
-    if (!seen.has(key)) sprintState.delete(key);
-  }
+  sprintState = pruneStale(sprintState, tick, STATE_GRACE_TICKS);
 }, STEP);
 
 function tameNearest(player) {

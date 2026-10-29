@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sprintPhase, packDamageMultiplier, isNight, inRoarRange } from "./abilities.js";
+import { sprintPhase, packDamageMultiplier, isNight, inRoarRange, pruneStale } from "./abilities.js";
 
 test("sprintPhase goes ready to active to tired to ready", () => {
   const cfg = { activeTicks: 160, tiredTicks: 160 };
@@ -35,4 +35,15 @@ test("inRoarRange is inclusive at the boundary", () => {
   assert.equal(inRoarRange(o, { x: 3, y: 4, z: 0 }, 5), true);
   assert.equal(inRoarRange(o, { x: 3, y: 4, z: 1 }, 5), false);
   assert.equal(inRoarRange(o, { x: 0, y: 0, z: 2 }, 5), true);
+});
+
+test("pruneStale keeps states seen within the grace period and drops older ones", () => {
+  const states = new Map([
+    ["fresh", { phase: "active", until: 10, lastSeen: 5000 }],
+    ["edge", { phase: "tired", until: 10, lastSeen: 4000 }],
+    ["old", { phase: "ready", until: 0, lastSeen: 3999 }],
+  ]);
+  const kept = pruneStale(states, 10000, 6000);
+  assert.deepEqual([...kept.keys()], ["fresh", "edge"]);
+  assert.equal(states.size, 3);
 });
