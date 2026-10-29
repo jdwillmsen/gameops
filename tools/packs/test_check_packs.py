@@ -219,6 +219,30 @@ class CheckPacks(unittest.TestCase):
                 self.make_wildlife(fn)
                 self.assertFails(f"{goal} entity_types entry 0 must exclude family player")
 
+    def test_wildlife_goals_are_checked_in_every_group(self):
+        unsafe = {"minecraft:behavior.nearest_attackable_target": {"priority": 1, "entity_types": [
+            {"filters": {"all_of": [{"test": "is_family", "subject": "other", "value": "player"}]}}]}}
+        filterless = {"minecraft:behavior.nearest_attackable_target": {"priority": 1, "entity_types": [{}]}}
+        safe = {"minecraft:behavior.nearest_attackable_target": {"priority": 1, "entity_types": [
+            {"filters": {"all_of": [{"test": "is_family", "subject": "other", "value": "zombie"}]}}]}}
+        for bad in (unsafe, filterless):
+            for order in (("wild", "tamed_active"), ("tamed_active", "wild")):
+                with self.subTest(bad=list(bad.values())[0]["entity_types"][0], order=order):
+                    self.make_wildlife()
+
+                    def fn(d, bad=bad, order=order):
+                        d["minecraft:entity"]["component_groups"] = {order[0]: bad, order[1]: safe}
+                    self.edit(BP_ENTITY, fn)
+                    self.assertFails(f"(group {order[0]})")
+
+    def test_wildlife_unsafe_goal_in_base_components_fails_beside_safe_groups(self):
+        self.make_wildlife(lambda c: c.update({"minecraft:behavior.nearest_attackable_target": {
+            "priority": 1, "entity_types": [{}]}}))
+        safe = {"minecraft:behavior.nearest_attackable_target": {"priority": 1, "entity_types": [
+            {"filters": {"test": "is_family", "subject": "other", "value": "zombie"}}]}}
+        self.edit(BP_ENTITY, lambda d: d["minecraft:entity"].update({"component_groups": {"wild": safe}}))
+        self.assertFails("must exclude family player")
+
     def test_wildlife_entity_needs_wildlife_family(self):
         self.make_wildlife(lambda c: c.update({"minecraft:type_family": {"family": ["gameops_brute"]}}))
         self.assertFails("gameops_wildlife")

@@ -157,7 +157,7 @@ def excludes_player(tests, strict):
     return False
 
 
-def check_wildlife_entity(path, comps, rep):
+def check_wildlife_goals(path, comps, rep):
     if "minecraft:behavior.hurt_by_target" in comps:
         rep.fail(f"{path}: hurt_by_target would let the mob retaliate against players")
     for name in PLAYER_TARGET_GOALS:
@@ -174,6 +174,9 @@ def check_wildlife_entity(path, comps, rep):
             elif name in PLAYER_SAFE_GOALS and not excludes_player(tests, name in OWNER_GOALS):
                 rep.fail(f"{path}: {name} entity_types entry {i} must exclude family player "
                          f"(is_family != player) or name a non-player family")
+
+
+def check_wildlife_entity(path, comps, rep):
     families = (comps.get("minecraft:type_family") or {}).get("family") or []
     if WILDLIFE_FAMILY not in families:
         rep.fail(f"{path}: entity must be in family {WILDLIFE_FAMILY}")
@@ -194,6 +197,10 @@ def check_behaviour_entity(path, doc, rep, policy="arena"):
     if "minecraft:boss" in comps:
         rep.fail(f"{path}: minecraft:boss must not be used")
     if policy == "wildlife":
+        # Goals are checked per block: merging groups would let a later group hide an earlier one's goal.
+        check_wildlife_goals(path, ent.get("components") or {}, rep)
+        for name, group in (ent.get("component_groups") or {}).items():
+            check_wildlife_goals(f"{path} (group {name})", group, rep)
         check_wildlife_entity(path, comps, rep)
         return ident
     if "minecraft:behavior.hurt_by_target" in comps:

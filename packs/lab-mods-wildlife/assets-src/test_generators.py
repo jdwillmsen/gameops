@@ -284,6 +284,17 @@ class Generators(unittest.TestCase):
             self.assertEqual(ent["events"]["gameops:on_sit"]["remove"]["component_groups"],
                              ["gameops:tamed_active"], s.id)
 
+    def test_wild_targets_are_exactly_prey_and_rivals(self):
+        for s in SPECIES.values():
+            self.assertEqual(self.families(self.goal_entries(s.id, "gameops:wild")),
+                             sorted(s.prey + s.rivals), s.id)
+
+    def test_taming_swaps_wild_for_tamed_groups(self):
+        for s in SPECIES.values():
+            ev = build_behavior.entity_json(s)["minecraft:entity"]["events"]["gameops:on_tamed"]
+            self.assertEqual(ev["remove"]["component_groups"], ["gameops:wild"], s.id)
+            self.assertEqual(ev["add"]["component_groups"], ["gameops:tamed", "gameops:tamed_active"], s.id)
+
     def test_bear_has_no_targeting_goals(self):
         ent = build_behavior.entity_json(SPECIES["brown_bear"])["minecraft:entity"]
         for comps in [ent["components"], *ent["component_groups"].values()]:
