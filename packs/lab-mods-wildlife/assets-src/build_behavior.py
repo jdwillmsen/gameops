@@ -92,6 +92,9 @@ def entity_json(s: Species) -> dict:
     if s.variants:
         for i, name in enumerate(s.variants):
             groups[f"gameops:variant_{name}"] = {"minecraft:variant": {"value": i}}
+            hp = dict(s.variant_health).get(name)
+            if hp:
+                groups[f"gameops:variant_{name}"]["minecraft:health"] = {"value": hp, "max": hp}
         spawn.append({"randomize": [
             {"weight": 1, "add": {"component_groups": [f"gameops:variant_{name}"]}} for name in s.variants]})
 

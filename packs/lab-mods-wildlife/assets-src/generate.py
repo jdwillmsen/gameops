@@ -14,7 +14,7 @@ import build_textures  # noqa: E402
 from species import SPECIES, Species  # noqa: E402
 
 PACK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATED = ("tiger", "cheetah", "lion", "black_leopard")
+GENERATED = ("tiger", "cheetah", "lion", "black_leopard", "brown_bear", "hyena")
 
 
 def dump(doc) -> bytes:

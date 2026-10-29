@@ -16,7 +16,9 @@ sys.path.insert(0, HERE)
 import build_behavior  # noqa: E402
 import build_models  # noqa: E402
 import build_textures  # noqa: E402
+import bear_rig  # noqa: E402
 import cat_rig  # noqa: E402
+import hyena_rig  # noqa: E402
 import generate  # noqa: E402
 from species import SPECIES  # noqa: E402
 
@@ -28,6 +30,8 @@ ACTIVE_GOALS = tuple("minecraft:behavior." + g for g in (
 CATS = ("tiger", "cheetah", "lion", "black_leopard")
 CAT_TEXTURES = (("tiger", "orange"), ("tiger", "white"), ("cheetah", "default"), ("lion", "male"),
                 ("lion", "female"), ("black_leopard", "default"))
+OWN_RIGS = {"brown_bear": ("geometry.gameops.brown_bear", bear_rig), "hyena": ("geometry.gameops.hyena", hyena_rig)}
+OWN_TEXTURES = (("brown_bear", "default"), ("hyena", "regular"), ("hyena", "alpha"))
 EVENTS = ("gameops:on_tamed", "gameops:on_sit", "gameops:on_stand")
 
 
@@ -133,7 +137,7 @@ class Generators(unittest.TestCase):
             self.assertEqual(sorted(client["description"]["animations"].values()), sorted(anims))
 
     def test_textures_are_deterministic_128_png(self):
-        for sid, variant in CAT_TEXTURES:
+        for sid, variant in CAT_TEXTURES + OWN_TEXTURES:
             a = build_textures.paint(SPECIES[sid], variant)
             self.assertEqual(a, build_textures.paint(SPECIES[sid], variant))
             self.assertEqual(a[:8], b"\x89PNG\r\n\x1a\n")
@@ -310,6 +314,89 @@ class Generators(unittest.TestCase):
             self.assertEqual(ent["components"]["minecraft:health"]["max"], hp)
             self.assertEqual(ent["components"]["minecraft:attack"]["damage"], dmg)
             self.assertNotIn("gameops:ability_active", ent["component_groups"])
+
+    def test_bear_and_hyena_have_their_own_rigs(self):
+        names = {}
+        for sid, (ident, _) in OWN_RIGS.items():
+            geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
+            self.assertEqual(geo["description"]["identifier"], ident)
+            bones = {b["name"]: b for b in geo["bones"]}
+            for need in ("body", "head", "tail", "front_left_leg", "front_right_leg", "back_left_leg", "back_right_leg"):
+                self.assertIn(need, bones, sid)
+            cubes = sorted((tuple(c["size"]), tuple(c["origin"])) for b in geo["bones"] for c in b["cubes"])
+            names[sid] = cubes
+            for cat in CATS:
+                cat_geo = self.geo_bones(cat)
+                cat_cubes = sorted((tuple(c["size"]), tuple(c["origin"])) for b in cat_geo.values() for c in b["cubes"])
+                self.assertNotEqual(cubes, cat_cubes, f"{sid} is the {cat} model")
+            client = json.loads(self.load(f"resource_pack/entity/{sid}.entity.json"))["minecraft:client_entity"]
+            self.assertEqual(client["description"]["geometry"]["default"], ident)
+        self.assertNotEqual(names["brown_bear"], names["hyena"])
+
+    def test_bear_has_a_shoulder_hump_above_the_back(self):
+        bones = self.geo_bones("brown_bear")
+        cubes = bones["body"]["cubes"]
+        back = max(c["origin"][1] + c["size"][1] for c in cubes if c["size"][1] > 4)
+        hump = [c for c in cubes if c["size"][1] <= 4 and c["origin"][1] >= back - 0.01]
+        self.assertEqual(len(hump), 1)
+        self.assertLess(hump[0]["origin"][2] + hump[0]["size"][2] / 2, 0, "hump sits over the shoulders")
+        self.assertLessEqual(max(c["size"][0] for c in bones["head"]["cubes"]), 9)
+        legs = bones["front_left_leg"]["cubes"][0]["size"]
+        self.assertGreaterEqual(legs[0], 5)
+        self.assertLessEqual(legs[1], 10)
+
+    def test_hyena_back_slopes_down_to_the_hips(self):
+        bones = self.geo_bones("hyena")
+        by_z = sorted((c for c in bones["body"]["cubes"] if c["size"][0] > 3), key=lambda c: c["origin"][2])
+        front, rear = by_z[0], by_z[-1]
+        self.assertGreater(front["origin"][1] + front["size"][1], rear["origin"][1] + rear["size"][1])
+        self.assertLess(bones["back_left_leg"]["cubes"][0]["size"][1], bones["front_left_leg"]["cubes"][0]["size"][1])
+        head = bones["head"]["cubes"][0]
+        ears = [c for c in bones["head"]["cubes"] if c["size"][2] == 1]
+        self.assertEqual(len(ears), 2)
+        self.assertGreaterEqual(ears[0]["size"][0], 3)
+        self.assertGreater(head["size"][0], bones["tail"]["cubes"][0]["size"][0] * 2)
+
+    def test_bear_and_hyena_textures_differ_from_cats_and_variants(self):
+        bear = build_textures.paint(SPECIES["brown_bear"], "default")
+        regular = build_textures.paint(SPECIES["hyena"], "regular")
+        alpha = build_textures.paint(SPECIES["hyena"], "alpha")
+        self.assertEqual(len({bear, regular, alpha}), 3)
+        for s_id, v in CAT_TEXTURES:
+            self.assertNotEqual(build_textures.paint(SPECIES[s_id], v), bear)
+
+    def test_bear_taming_food_stats_and_no_variants(self):
+        ent = self.committed_entity("brown_bear")
+        tame = ent["component_groups"]["gameops:wild"]["minecraft:tameable"]
+        self.assertEqual(tame["tame_items"], ["salmon"])
+        self.assertEqual(ent["components"]["minecraft:health"]["max"], 80)
+        self.assertEqual(ent["components"]["minecraft:attack"]["damage"], 9)
+        self.assertEqual(ent["components"]["minecraft:movement"]["value"], 0.25)
+        self.assertEqual(SPECIES["brown_bear"].variants, ())
+        self.assertNotIn("randomize", json.dumps(ent["events"]["minecraft:entity_spawned"]))
+
+    def test_hyena_alpha_has_more_health(self):
+        ent = self.committed_entity("hyena")
+        self.assertEqual(ent["component_groups"]["gameops:wild"]["minecraft:tameable"]["tame_items"], ["rotten_flesh"])
+        self.assertEqual(ent["components"]["minecraft:health"]["max"], 30)
+        self.assertEqual(ent["components"]["minecraft:attack"]["damage"], 7)
+        self.assertEqual(ent["components"]["minecraft:movement"]["value"], 0.32)
+        alpha = ent["component_groups"]["gameops:variant_alpha"]
+        self.assertEqual(alpha["minecraft:health"], {"value": 40, "max": 40})
+        self.assertEqual(alpha["minecraft:variant"]["value"], 1)
+        self.assertNotIn("minecraft:health", ent["component_groups"]["gameops:variant_regular"])
+        self.assertEqual(len(ent["events"]["minecraft:entity_spawned"]["sequence"][1]["randomize"]), 2)
+
+    def test_bear_gives_owner_resistance(self):
+        with open(os.path.join(PACK, "behavior_pack/scripts/main.js"), encoding="utf-8") as f:
+            main = f.read()
+        bear = re.search(r'"gameops:brown_bear": \{(.*?)\n  \},', main, re.S).group(1)
+        for part in ('interval: 20', 'range: 6', 'effect: "resistance"', 'amplifier: 0', 'duration: 60',
+                     'targets: ["owner"]'):
+            self.assertIn(part, bear)
+        hyena = re.search(r'"gameops:hyena": \{(.*?)\n  \},', main, re.S).group(1)
+        for part in ('interval: 40', 'effect: "strength"', 'targets: ["self"]', 'range: 8'):
+            self.assertIn(part, hyena)
 
     def test_sitting_is_readable_from_script(self):
         for s in SPECIES.values():

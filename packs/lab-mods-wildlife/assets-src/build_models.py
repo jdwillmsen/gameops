@@ -1,6 +1,9 @@
+import bear_rig
 import cat_rig
+import hyena_rig
 from species import Species
 
+# Every rig keeps the cat bone names, so one animation set serves all species.
 # One list for the animation file, the client entity files and their tests.
 ANIMATION_NAMES = ("walk", "sit", "idle", "attack")
 ANIMATION_PREFIX = "animation.gameops.cat."
@@ -9,8 +12,17 @@ SWING = "math.cos(query.modified_distance_moved * 24.0) * {amp} * query.modified
 LUNGE = "math.sin(variable.attack_time * 180.0)"
 
 
+RIGS = {"cat": cat_rig, "bear": bear_rig, "hyena": hyena_rig}
+
+
+def rig_layout(s: Species) -> list:
+    rig = RIGS[s.rig]
+    return rig.layout(rig.PARAMS[s.id])
+
+
 def geometry(s: Species) -> dict:
-    return cat_rig.build(cat_rig.PARAMS[s.id], f"geometry.gameops.{s.id}")
+    rig = RIGS[s.rig]
+    return rig.build(rig.PARAMS[s.id], f"geometry.gameops.{s.id}")
 
 
 def animations() -> dict:

@@ -5,7 +5,7 @@ integer so each cube's box-UV rectangle sits on the pixel grid.
 """
 from dataclasses import dataclass, replace
 
-TEXTURE = 128
+from rig_common import TEXTURE, Part, pack  # noqa: F401
 BONES = ("body", "head", "tail", "front_left_leg", "front_right_leg", "back_left_leg", "back_right_leg")
 MANE = "mane"   # frames the head and turns with it
 MANE_BODY = "mane_chest"   # the bib and shoulder cape, which stay with the body
@@ -48,15 +48,6 @@ PARAMS = {
     "cheetah": CatParams(body_w=6, body_h=7, body_len=20, chest_len=10, tuck=2, leg_len=8, leg_w=3,
                          head_w=5, head_h=5, head_d=5, tail_len=20, tail_w=2, tail_droop=12),
 }
-
-
-@dataclass(frozen=True)
-class Part:
-    bone: str
-    name: str
-    origin: tuple
-    size: tuple
-    uv: tuple
 
 
 def _sc(p: CatParams) -> CatParams:
@@ -139,22 +130,7 @@ def _shapes(p: CatParams):
 
 
 def layout(params: CatParams) -> list:
-    """Cubes with box-UV origins packed into rows of the texture, tallest first."""
-    shapes = _shapes(params)
-    rects = [(2 * d + 2 * w, d + h) for _, _, _, (w, h, d) in shapes]
-    order = sorted(range(len(shapes)), key=lambda i: (-rects[i][1], i))
-    uvs = {}
-    x = y = row_h = 0
-    for i in order:
-        rw, rh = rects[i]
-        if x + rw > TEXTURE:
-            x, y, row_h = 0, y + row_h, 0
-        uvs[i] = (x, y)
-        x += rw
-        row_h = max(row_h, rh)
-    if y + row_h > TEXTURE:
-        raise ValueError("cat parts do not fit the texture")
-    return [Part(b, n, o, sz, uvs[i]) for i, (b, n, o, sz) in enumerate(_shapes(params))]
+    return pack(_shapes(params), "cat parts")
 
 
 def build(params: CatParams, identifier: str = "geometry.gameops.cat") -> dict:

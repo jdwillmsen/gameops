@@ -6,3 +6,7 @@ entity.gameops:lion.name=Lion
 item.spawn_egg.entity.gameops:lion.name=Lion Spawn Egg
 entity.gameops:black_leopard.name=Black Leopard
 item.spawn_egg.entity.gameops:black_leopard.name=Black Leopard Spawn Egg
+entity.gameops:brown_bear.name=Brown Bear
+item.spawn_egg.entity.gameops:brown_bear.name=Brown Bear Spawn Egg
+entity.gameops:hyena.name=Hyena
+item.spawn_egg.entity.gameops:hyena.name=Hyena Spawn Egg

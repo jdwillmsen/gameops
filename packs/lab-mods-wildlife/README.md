@@ -10,6 +10,8 @@ fails if the committed files differ from a fresh run.
 | Path | What |
 |---|---|
 | `assets-src/species.py` | The species table: stats, taming food, prey, rivals, variants, ability |
+| `assets-src/bear_rig.py`, `hyena_rig.py` | Own skeletons for the brown bear (shoulder hump) and hyena (sloped back); same bone names so the shared animations apply |
+| `assets-src/rig_common.py` | UV packing and geometry document shared by all rigs |
 | `assets-src/build_behavior.py` | Entity JSON from a species |
 | `assets-src/cat_rig.py` | Shared cat skeleton and per-species proportions (tiger, cheetah, lion, black leopard) |
 | `assets-src/build_models.py`, `build_textures.py` | Geometry, animations and PNG textures  |
