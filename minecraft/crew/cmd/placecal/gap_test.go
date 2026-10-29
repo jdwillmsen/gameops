@@ -45,3 +45,15 @@ func TestGapCheckLeavesSmallAndSplitFamiliesAlone(t *testing.T) {
 		t.Errorf("a three-way split was judged: %v", g)
 	}
 }
+
+func TestGapCheckFlagsInferredBlocksOfASplitFamily(t *testing.T) {
+	inferred := stairBlock("a_stairs", 0, 1)
+	inferred.Inferred = true
+	tab := &place.Table{Blocks: map[string]*place.Block{
+		"a_stairs": inferred, "b_stairs": stairBlock("b_stairs", 0, 1), "c_stairs": stairBlock("c_stairs", 0, 1), "d_stairs": stairBlock("d_stairs", 0),
+	}}
+	gaps := gapCheck(tab)
+	if len(gaps) != 2 || gaps[0].block != "a_stairs" || !gaps[0].inferredInSplit || gaps[1].block != "d_stairs" {
+		t.Fatalf("gaps = %+v", gaps)
+	}
+}

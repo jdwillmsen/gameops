@@ -536,6 +536,7 @@ func execute(ctx context.Context, c config, names []string, con *safeConsole, ou
 		Partial:       len(notCovered) > 0,
 		NotCovered:    notCovered,
 		Unplaceable:   sum.unplaceable,
+		UnmappedItems: sum.unmappedItems,
 		Unmapped:      unmappedCount(),
 	}
 	t := &place.Table{Header: hdr, Blocks: blocks}
@@ -661,7 +662,8 @@ func matrixHeader(control string) place.Matrix {
 		"Full pass: every combination of the inputs that changed a state, cheapest first, capped at 360 clicks.",
 		"A family (same first-pass responses) is inferred from a sibling's sweep after 8 sampled clicks agree.",
 		"Yaw 0 faces south, 90 west, 180 north, 270 east. Pitch is negative looking up. Hit is a fraction of the support block along x (east), y (up), z (south).",
-		"The unit stands at a fixed spot south of the platform; position-derived facing is not varied.",
+		"The unit stands at a fixed spot south of the platform; position-derived facing (pistons, droppers and the like face up or down by where the unit stands, see the design doc's phase 0b findings) is not varied.",
+		"Blocks with ground_sign_direction (standing and hanging signs) are also tried at the 16 yaws 0, 23, 45, 68, ... 338 (22.5 degree steps).",
 		"Neighbour pass: the block placed on bare floor with stone or itself on one or four horizontal sides; neighbours above and below are not varied.",
 		"Sneak control (a crafting table as the support): " + control,
 		fmt.Sprintf("Pitches tried in the run that wrote this header: %v.", pitches),

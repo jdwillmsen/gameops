@@ -181,3 +181,15 @@ func TestMergeTablesMergesStatesAndChecksTheMatrix(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestMergeTablesDropsAnItemTheLaterRunPlaced(t *testing.T) {
+	base := &place.Table{Header: place.Header{ServerVersion: "1", Unplaceable: []string{"cactus", "apple"}}}
+	later := &place.Table{Header: place.Header{ServerVersion: "1"}, Blocks: map[string]*place.Block{"cactus": {Item: "minecraft:cactus"}}}
+	got, err := mergeTables(base, later, map[string]bool{"cactus": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Header.Unplaceable) != 1 || got.Header.Unplaceable[0] != "apple" {
+		t.Errorf("unplaceable = %v", got.Header.Unplaceable)
+	}
+}

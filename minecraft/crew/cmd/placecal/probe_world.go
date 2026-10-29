@@ -147,8 +147,17 @@ func probeGravity(p *prober) {
 		p.stand(1.5, 1, 1.5, 0, 0)
 		t0 := time.Now()
 		_ = p.put(item, p.cell(0, 6, 0), fEast, hitVec(fEast, hMid), click{})
+		leftAt, landedAt := p.serverTimeline(t0, item, p.cell(1, 6, 0), p.cell(1, 1, 0), 4*time.Second)
 		ev := p.watch(t0, 3500*time.Millisecond, p.cell(1, 6, 0), p.cell(1, 4, 0), p.cell(1, 2, 0), p.cell(1, 1, 0))
-		p.rep.say("- %s placed into air beside a block 6 up: %s; item drops: %s", item, joinLines(ev), joinLines(p.dropsSince(t0)))
+		// The server's own view settles what the unit's store may have missed.
+		srv := p.exec("testforblock %d %d %d air", p.ox+1, p.f+6, p.oz)
+		p.rep.say("    server polls (about 200 ms apart): left the placed cell by %s, present in the landing cell by %s", leftAt, landedAt)
+		land := p.exec("testforblock %d %d %d %s", p.ox+1, p.f+1, p.oz, item)
+		p.rep.say("- %s placed into air beside a block 6 up: %s; item drops: %s; server says of the placed cell: %s; of the landing cell (1,1,0) holding %s: %s", item, joinLines(ev), joinLines(p.dropsSince(t0)), srv, item, land)
+		if item == "sand" {
+			late := p.watch(t0, 8*time.Second, p.cell(1, 6, 0), p.cell(1, 1, 0))
+			p.rep.say("    unit's own view over the next 8 s: %s", joinLines(late))
+		}
 
 		// On a one-block scaffold, scaffold removed afterwards.
 		p.reset()
@@ -161,7 +170,10 @@ func probeGravity(p *prober) {
 		t0 = time.Now()
 		go p.u.breakAt(p.ctx, p.cell(3, 1, 0))
 		ev = p.watch(t0, 3000*time.Millisecond, p.cell(3, 1, 0), p.cell(3, 2, 0))
-		p.rep.say("- %s on a scaffold (placed=%v, 700ms later %s); scaffold broken: %s; drops: %s", item, placed, held, joinLines(ev), joinLines(p.dropsSince(t0)))
+		time.Sleep(1200 * time.Millisecond)
+		left := p.exec("testforblock %d %d %d air", p.ox+3, p.f+2, p.oz)
+		below := p.exec("testforblock %d %d %d %s", p.ox+3, p.f+1, p.oz, item)
+		p.rep.say("- %s on a scaffold (placed=%v, 700ms later %s); scaffold broken: %s; drops: %s; 1.5 s later the server says the placed cell is air: %s; the scaffold cell holds %s: %s", item, placed, held, joinLines(ev), joinLines(p.dropsSince(t0)), serverVerdict(left), item, serverVerdict(below))
 	}
 	// Concrete powder beside water turns to concrete.
 	p.reset()
@@ -175,6 +187,35 @@ func probeGravity(p *prober) {
 	p.reset()
 }
 
+// serverVerdict boils a testforblock reply down to found or not.
+func serverVerdict(reply string) string {
+	if strings.Contains(reply, "Successfully found") {
+		return "yes"
+	}
+	return "no"
+}
+
+// serverTimeline polls the server console, not the unit's store, for when
+// the block has left from and when it shows in to.
+func (p *prober) serverTimeline(t0 time.Time, block string, from, to protocol.BlockPos, d time.Duration) (left, landed string) {
+	left, landed = "not within "+d.String(), "not within "+d.String()
+	has := func(c protocol.BlockPos) bool {
+		return strings.Contains(p.exec("testforblock %d %d %d %s", c.X(), c.Y(), c.Z(), block), "Successfully found")
+	}
+	end := time.Now().Add(d)
+	fromGone, toThere := false, false
+	for time.Now().Before(end) && p.ctx.Err() == nil && !(fromGone && toThere) {
+		at := fmt.Sprintf("+%dms", time.Since(t0).Milliseconds())
+		if !fromGone && !has(from) {
+			fromGone, left = true, at
+		}
+		if !toThere && has(to) {
+			toThere, landed = true, at
+		}
+	}
+	return left, landed
+}
+
 // ---- support loss ----------------------------------------------------------
 
 func probeSupport(p *prober) {
@@ -184,12 +225,12 @@ func probeSupport(p *prober) {
 		{"torch on top", "torch", "top", "stone"}, {"torch on a side", "torch", "side", "stone"},
 		{"redstone wire", "redstone", "top", "stone"}, {"rail", "rail", "top", "stone"},
 		{"carpet", "white_carpet", "top", "stone"}, {"pressure plate", "stone_pressure_plate", "top", "stone"},
-		{"oak door (lower half's support)", "oak_door", "top", "stone"}, {"standing sign", "oak_sign", "top", "stone"},
+		{"oak door (lower half's support)", "wooden_door", "top", "stone"}, {"standing sign", "oak_sign", "top", "stone"},
 		{"wall sign", "oak_sign", "side", "stone"}, {"ladder", "ladder", "side", "stone"},
 		{"lantern hanging below a block", "lantern", "hang", "stone"}, {"lever on top", "lever", "top", "stone"},
 		{"stone button on a side", "stone_button", "side", "stone"}, {"repeater", "repeater", "top", "stone"},
 		{"sapling on dirt", "oak_sapling", "top", "dirt"}, {"snow layer", "snow_layer", "top", "stone"},
-		{"candle", "candle", "top", "stone"}, {"white bed (foot support)", "white_bed", "top", "stone"},
+		{"candle", "candle", "top", "stone"}, {"white bed (foot support)", "bed", "top", "stone"},
 		{"flower pot", "flower_pot", "top", "stone"},
 	}
 	for _, c := range cases {
@@ -237,19 +278,19 @@ func probeTwoPart(p *prober) {
 	// Doors.
 	p.reset()
 	p.stand(0.5, 1, 4.5, 0, 0)
-	_ = p.putTop("oak_door", lo, hMid, click{})
+	_ = p.putTop("wooden_door", lo, hMid, click{})
 	p.waitBlock(lo, time.Second)
 	time.Sleep(300 * time.Millisecond)
 	p.rep.say("- door, one click on free floor: %s", both(lo, up))
 	p.reset()
 	p.set(up, "stone")
-	_ = p.putTop("oak_door", lo, hMid, click{})
+	_ = p.putTop("wooden_door", lo, hMid, click{})
 	p.waitBlock(lo, 700*time.Millisecond)
 	time.Sleep(300 * time.Millisecond)
 	p.rep.say("- door, upper cell holds stone: lower %s, upper %s", p.get(lo), p.get(up))
 	p.reset()
 	p.set(up, "glass")
-	_ = p.putTop("oak_door", lo, hMid, click{})
+	_ = p.putTop("wooden_door", lo, hMid, click{})
 	p.waitBlock(lo, 700*time.Millisecond)
 	time.Sleep(300 * time.Millisecond)
 	p.rep.say("- door, upper cell holds glass: lower %s, upper %s", p.get(lo), p.get(up))
@@ -268,7 +309,7 @@ func probeTwoPart(p *prober) {
 			p.set(p.cell(0, 1, 0), "stone")
 			foot = p.cell(0, 2, 0)
 		}
-		_ = p.put("red_bed", protocol.BlockPos{foot.X(), foot.Y() - 1, foot.Z()}, fTop, hitVec(fTop, hMid), click{Yaw: 0})
+		_ = p.put("bed", protocol.BlockPos{foot.X(), foot.Y() - 1, foot.Z()}, fTop, hitVec(fTop, hMid), click{Yaw: 0})
 		p.waitBlock(foot, 800*time.Millisecond)
 		time.Sleep(300 * time.Millisecond)
 		var cells []string
@@ -434,7 +475,7 @@ func probeLiquids(p *prober) {
 	for _, o := range []occ{
 		{"a stone block (target cell occupied)", "stone"}, {"short grass", "short_grass"}, {"a snow layer", "snow_layer"},
 		{"a torch", "torch"}, {"a water source (lava onto water)", "water"}, {"a lava source (water onto lava)", "lava"},
-		{"a slab", "stone_slab"}, {"a fence", "oak_fence"},
+		{"a slab", "oak_slab"}, {"a fence", "oak_fence"},
 	} {
 		for _, bucket := range []string{"water_bucket", "lava_bucket"} {
 			if o.setup == "water" && bucket == "water_bucket" || o.setup == "lava" && bucket == "lava_bucket" {
@@ -458,7 +499,7 @@ func probeLiquids(p *prober) {
 func probeWaterlog(p *prober) {
 	p.rep.head("Waterlogging (a water source in a closed pit, item placed into it, then broken)")
 	pit := p.cell(0, 1, 0)
-	for _, item := range []string{"oak_slab", "oak_stairs", "oak_fence", "lantern", "chest", "oak_sign", "torch", "candle", "sea_pickle", "oak_trapdoor", "ladder", "oak_door", "glass_pane", "stone", "white_carpet", "redstone", "rail", "lever", "iron_bars", "cobblestone_wall", "oak_button", "stone_pressure_plate", "repeater", "white_bed"} {
+	for _, item := range []string{"oak_slab", "oak_stairs", "oak_fence", "lantern", "chest", "oak_sign", "torch", "candle", "sea_pickle", "trapdoor", "ladder", "wooden_door", "glass_pane", "stone", "white_carpet", "redstone", "rail", "lever", "iron_bars", "cobblestone_wall", "wooden_button", "stone_pressure_plate", "repeater", "bed"} {
 		p.reset()
 		p.pit()
 		p.set(pit, "water")
@@ -547,7 +588,7 @@ func probeOccupied(p *prober) {
 		{"water source", "water"}, {"lava source", "lava"}, {"short grass", "short_grass"}, {"tall grass lower half", "tall_grass"},
 		{"snow layer (1)", "snow_layer"}, {"snow layer (3)", `snow_layer ["height"=2]`}, {"fire", "fire"}, {"vine", "vine"},
 		{"dead bush", "deadbush"}, {"seagrass", "seagrass"}, {"torch", "torch"}, {"redstone wire", "redstone_wire"}, {"carpet", "white_carpet"},
-		{"stone slab", "stone_slab"}, {"candle", "candle"}, {"air (control)", "air"}, {"stone", "stone"},
+		{"stone slab", "oak_slab"}, {"candle", "candle"}, {"air (control)", "air"}, {"stone", "stone"},
 	} {
 		for _, item := range []string{"stone", "oak_planks"} {
 			if item == "oak_planks" && o.block != "water" && o.block != "short_grass" {

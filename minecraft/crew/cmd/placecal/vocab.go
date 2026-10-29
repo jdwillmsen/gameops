@@ -68,3 +68,13 @@ func (v vocabulary) project(name string, skip map[string]bool) []map[string]any 
 	sort.Slice(out, func(i, j int) bool { return place.Key(out[i], nil) < place.Key(out[j], nil) })
 	return out
 }
+
+// has says some state of the block has the key.
+func (v vocabulary) has(name, key string) bool {
+	for _, st := range v[name] {
+		if _, ok := st[key]; ok {
+			return true
+		}
+	}
+	return false
+}
