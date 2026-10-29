@@ -1,0 +1,21 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "animation.gameops.cat.walk": {
+      "loop": true,
+      "bones": {}
+    },
+    "animation.gameops.cat.sit": {
+      "loop": true,
+      "bones": {}
+    },
+    "animation.gameops.cat.idle": {
+      "loop": true,
+      "bones": {}
+    },
+    "animation.gameops.cat.attack": {
+      "loop": true,
+      "bones": {}
+    }
+  }
+}
