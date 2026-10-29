@@ -159,6 +159,80 @@ class CheckPacks(unittest.TestCase):
         self.edit(BP_ENTITY, lambda d: d["minecraft:entity"]["components"].pop("minecraft:attack"))
         self.assertFails("never hurts anything")
 
+    def make_wildlife(self, fn=None):
+        with open(os.path.join(self.pack, "policy.txt"), "w") as f:
+            f.write("wildlife\n")
+        no_player = {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}
+
+        def base(d):
+            comps = d["minecraft:entity"]["components"]
+            comps["minecraft:type_family"] = {"family": ["gameops_wildlife"]}
+            comps["minecraft:behavior.nearest_attackable_target"]["entity_types"][0]["filters"] = {
+                "test": "is_family", "subject": "other", "value": "zombie"}
+            comps["minecraft:tameable"] = {"probability": 0.33, "tame_items": "bone"}
+            comps["minecraft:behavior.stay_while_sitting"] = {"priority": 3}
+            comps["minecraft:persistent"] = {}
+            for goal in ("owner_hurt_by_target", "owner_hit_target"):
+                comps["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [{"filters": no_player}]}
+            if fn:
+                fn(comps)
+        self.edit(BP_ENTITY, base)
+        for other in ("ground_dragon.json", "werewolf.json"):
+            # fixtures keep only the brute; the copied arena entities are not under test
+            for rel in (os.path.join("behavior_pack", "entities", other),
+                        os.path.join("resource_pack", "entity", other.replace(".json", ".entity.json"))):
+                if os.path.exists(os.path.join(self.pack, rel)):
+                    os.remove(os.path.join(self.pack, rel))
+
+    def test_wildlife_baseline_is_clean(self):
+        self.make_wildlife()
+        self.assertEqual(self.errors(), [])
+
+    def test_wildlife_policy_rejects_hurt_by_target(self):
+        self.make_wildlife(lambda c: c.update({"minecraft:behavior.hurt_by_target": {"priority": 1}}))
+        self.assertFails("hurt_by_target")
+
+    def test_wildlife_policy_rejects_player_family_target(self):
+        player = {"test": "is_family", "subject": "other", "value": "player"}
+        for goal in ("nearest_attackable_target", "owner_hurt_by_target", "owner_hit_target", "melee_attack"):
+            with self.subTest(goal=goal):
+                def fn(c, goal=goal):
+                    c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
+                        {"filters": {"all_of": [player]}}]}
+                self.make_wildlife(fn)
+                self.assertFails(f"{goal} must never select family player")
+
+    def test_wildlife_owner_goal_needs_player_exclusion(self):
+        for goal in ("owner_hurt_by_target", "owner_hit_target"):
+            with self.subTest(goal=goal):
+                def fn(c, goal=goal):
+                    c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
+                        {"filters": {"test": "is_family", "subject": "other", "value": "zombie"}}]}
+                self.make_wildlife(fn)
+                self.assertFails(f"{goal} must filter is_family != player")
+
+    def test_wildlife_entity_needs_wildlife_family(self):
+        self.make_wildlife(lambda c: c.update({"minecraft:type_family": {"family": ["gameops_brute"]}}))
+        self.assertFails("gameops_wildlife")
+
+    def test_tameable_needs_stay_while_sitting_and_persistent(self):
+        for comp in ("minecraft:behavior.stay_while_sitting", "minecraft:persistent"):
+            with self.subTest(comp=comp):
+                self.make_wildlife(lambda c, comp=comp: c.pop(comp))
+                self.assertFails(comp)
+
+    def test_arena_pack_still_requires_warrior_tag(self):
+        def fn(d):
+            comp = d["minecraft:entity"]["components"]["minecraft:behavior.nearest_attackable_target"]
+            comp["entity_types"][0]["filters"] = {"test": "is_family", "subject": "other", "value": "zombie"}
+        self.edit(BP_ENTITY, fn)
+        self.assertFails("has_tag arena_warrior")
+
+    def test_unknown_policy_rejected(self):
+        with open(os.path.join(self.pack, "policy.txt"), "w") as f:
+            f.write("bogus\n")
+        self.assertFails("unknown policy")
+
 
 if __name__ == "__main__":
     unittest.main()
