@@ -236,6 +236,7 @@
 // the same technique prismarine-viewer's mesher uses; no code is copied.
 import * as THREE from 'three';
 import { createEntities } from './v1/camera/entities.js';
+import { decodeEquipment, decodeArmourExtra } from './v1/camera/equip.js';
 import { skyState, createClock, createRain, UNDERWATER_FAR, underwaterFog } from './v1/camera/sky.js';
 
 const t0 = performance.now();
@@ -810,6 +811,12 @@ function onMessage(ev) {
         for (let i = 0; i < 4; i++) { const len = u8[p++]; slots.push(text(len)); }
         ents.setArmour(id || -1, slots);
       }
+      break;
+    case 21:
+      for (const [id, hands] of decodeEquipment(u8)) ents.setHeld(id || -1, hands);
+      break;
+    case 22:
+      for (const [id, slots] of decodeArmourExtra(u8)) ents.setArmourMods(id || -1, slots);
       break;
   }
 }

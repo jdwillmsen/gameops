@@ -102,6 +102,9 @@ func (h heldRecorder) WritePacket(pk packet.Packet) error {
 	case *packet.MobEquipment:
 		if m.EntityRuntimeID == h.runtimeID {
 			h.tracker.SetHeld(int(m.HotBarSlot))
+			if h.hub != nil {
+				h.hub.SetOwnHeld(int(m.HotBarSlot))
+			}
 		}
 	case *packet.PlayerAuthInput:
 		h.tracker.SetPose(m.Position, m.Yaw, m.Pitch)
